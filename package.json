@@ -1,0 +1,64 @@
+{
+  "name": "echoes",
+  "version": "1.0.0",
+  "description": "Echoes Desktop Application",
+  "main": "./out/main/index.js",
+  "author": "Antigravity",
+  "scripts": {
+    "format": "prettier --write .",
+    "lint": "eslint . --ext js,jsx,cjs,mjs,ts,tsx --fix",
+    "start": "electron-vite preview",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "build:win": "electron-vite build && electron-builder --win",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:linux": "electron-vite build && electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.echoes.studio",
+    "productName": "Echoes Studio",
+    "directories": {
+      "output": "dist",
+      "buildResources": "electron-app/build"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "NCMconverter.exe",
+        "to": "NCMconverter.exe"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "electron-app/build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.0",
+    "@electron-toolkit/utils": "^3.0.0",
+    "discord-rpc": "^4.0.1",
+    "jsmediatags": "^3.9.5",
+    "lucide-react": "^0.475.0",
+    "music-metadata": "^11.12.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@electron-toolkit/eslint-config-prettier": "^2.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react": "^7.37.4",
+    "prettier": "^3.4.2",
+    "vite": "^5.4.14"
+  }
+}
