@@ -92,9 +92,11 @@ dist
 # Comment in the public line in if your project uses Gatsby and not Next.js
 # public
 
-# vuepress build output
-.nuxt
-dist
+# vuepress build output (dist / .nuxt already listed above)
+
+# Local / runtime
+crash-reports/
+downloads/
 
 # Serverless directories
 .serverless/

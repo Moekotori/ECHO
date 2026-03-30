@@ -1,0 +1,88 @@
+/**
+ * Design tokens — load after index.css :root palette (see main.jsx).
+ * Theme/runtime sets --accent-*, --glass-*, --text-*, --border-radius-* from App.jsx.
+ *
+ * Typography / brand: one display webfont (Outfit) in index.css; “Inter” preset in
+ * themeColors maps to system-ui to avoid a second web download. Use tabular-nums for metrics.
+ */
+
+:root {
+  /* Single source for the old pink→blue motif (use instead of repeating linear-gradient) */
+  --gradient-accent: linear-gradient(
+    135deg,
+    var(--accent-pink),
+    var(--accent-blue)
+  );
+  --gradient-accent-soft: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent-pink) 28%, transparent),
+    color-mix(in srgb, var(--accent-blue) 28%, transparent)
+  );
+
+  /* Motion */
+  --motion-fast: 150ms;
+  --motion-normal: 220ms;
+  --motion-slow: 360ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Typography scale (pair with existing rem scaling in App) */
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+
+  /* Numeric / technical rows: tabular figures without loading a second webfont */
+  --font-numeric: var(--font-family-main);
+
+  /* Surfaces & chrome */
+  --surface-elevated: rgba(255, 255, 255, 0.45);
+  --border-subtle: var(--glass-border);
+  --shadow-panel: 0 8px 28px 0 var(--shadow-color);
+
+  /* Focus — keyboard / a11y */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: color-mix(in srgb, var(--accent-pink) 70%, var(--text-main) 15%);
+}
+
+/* Keyboard focus: prefer over mouse-only outline */
+:where(
+    button,
+    [role="button"],
+    summary,
+    .btn,
+    .toggle-btn,
+    .ui-btn,
+    .import-btn,
+    .list-filter-chip,
+    input[type="range"]
+  ):focus {
+  outline: none;
+}
+
+:where(
+    button,
+    [role="button"],
+    summary,
+    .btn,
+    .toggle-btn,
+    .ui-btn,
+    .import-btn,
+    .list-filter-chip
+  ):focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+input[type="range"]:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 4px;
+}
+
+select:focus-visible,
+textarea:focus-visible,
+input:not([type="range"]):focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
