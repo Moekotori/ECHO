@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Echoes Studio"
+    "title": "ECHO"
   },
   "nav": {
     "back": "戻る"
@@ -17,7 +17,35 @@
     "removeFromPlaylist": "プレイリストから削除",
     "backToPlaylists": "一覧に戻る",
     "dismiss": "閉じる",
-    "addToPlaylistDialog": "プレイリストに追加"
+    "addToPlaylistDialog": "プレイリストに追加",
+    "trackContextMenu": "曲の操作"
+  },
+  "like": {
+    "like": "お気に入り",
+    "unlike": "お気に入り解除",
+    "filterOnly": "お気に入り",
+    "filterOnlyTitle": "お気に入りのみ表示"
+  },
+  "contextMenu": {
+    "addToPlaylist": "プレイリストに追加…",
+    "playNext": "次に再生",
+    "removeFromUpNext": "次に再生キューから削除",
+    "removeFromQueue": "再生キューから削除",
+    "removeFromPlaylist": "このプレイリストから削除",
+    "showInFolder": "フォルダーで表示",
+    "copyPath": "ファイルパスをコピー",
+    "openWithDefaultApp": "既定のアプリで開く",
+    "copyTrackLine": "曲名とアーティストをコピー",
+    "copyTrackImage": "曲カード画像をコピー",
+    "saveTrackImage": "曲カード画像を保存",
+    "actionFailed": "操作に失敗しました：{{detail}}"
+  },
+  "queue": {
+    "alreadyInUpNext": "この曲はすでに「次に再生」に入っています。",
+    "dropHint": "曲をここにドラッグすると次に再生へ追加できます",
+    "playbackOn": "キューON",
+    "playbackOff": "キューOFF",
+    "playbackToggleTitle": "次に再生キュー優先再生の切り替え"
   },
   "dropOverlay": {
     "title": "ドロップで音楽を追加",
@@ -27,7 +55,10 @@
     "lyricsSettings": "歌詞設定",
     "studioDownloader": "ダウンローダー",
     "mvSettings": "MV 設定",
-    "castReceiver": "キャスト受信 (DLNA)"
+    "castReceiver": "キャスト受信 (DLNA)",
+    "listenTogether": "一緒に聴く",
+    "plugins": "プラグイン",
+    "audioSettings": "オーディオ設定"
   },
   "import": {
     "folder": "フォルダを読み込む",
@@ -40,7 +71,8 @@
   "listMode": {
     "songs": "曲",
     "albums": "アルバム",
-    "playlists": "プレイリスト"
+    "playlists": "プレイリスト",
+    "queue": "キュー"
   },
   "albumFilter": {
     "label": "アルバム: {{name}}",
@@ -49,9 +81,11 @@
   "empty": {
     "noTracks": "曲がありません。",
     "importFolder": "フォルダを読み込んで開始してください。",
+    "queueEmpty": "次に再生キューは空です。",
     "noPlaylists": "プレイリストがありません。新規作成するか JSON を読み込んでください。",
     "playlistEmpty": "このプレイリストは空です。「曲」タブの (+) から追加するか、「検索結果から追加」を使ってください。",
-    "noSearchMatch": "検索に一致する曲がありません。"
+    "noSearchMatch": "検索に一致する曲がありません。",
+    "noLikedInView": "この一覧にお気に入りの曲がありません。"
   },
   "playlists": {
     "yourPlaylists": "マイプレイリスト",
@@ -99,6 +133,8 @@
     "exportButton": "レンダリングして書き出し (.wav)",
     "exportWavSuccess": "書き出しに成功しました。",
     "exportWavFailed": "書き出しに失敗しました: {{message}}",
+    "copyCardImage": "カード画像をコピー",
+    "saveCardImage": "カード画像を保存",
     "selectTrack": "曲を選択",
     "nightcoreMode": "Nightcore モード",
     "ellipsis": "…"
@@ -125,14 +161,44 @@
     "spectrumDesc": "メインプレーヤーに周波数解析を表示します。",
     "miniWaveTitle": "ミニ波形バー",
     "miniWaveDesc": "曲情報の下に小型スペクトラムを表示します。",
-    "eqMasterTitle": "マスター EQ（10 バンド）",
+    "visualizerExclusiveHint": "いずれもアプリ内のオーディオ解析に依存します。排他（WASAPI）出力モードでは正しく表示されない場合があります。",
+    "eqMasterTitle": "マスター EQ（16 バンド）",
     "eqMasterDesc": "高精度な周波数調整で高音質出力を実現します。",
+    "outputBufferTitle": "オーディオ出力バッファ",
+    "outputBufferDesc": "メインプロセス経由のネイティブ再生に適用。安定はバッファを大きくして途切れを減らし遅延はやや増加。低遅延はその逆です。",
+    "outputBuffer": {
+      "low": "低遅延",
+      "balanced": "バランス",
+      "stable": "安定"
+    },
     "lyricsShadowTitle": "歌詞パネルの影",
     "lyricsShadowDesc": "没入型背景がオンのとき、歌詞パネルのすりガラス／影枠を残すか選べます。オフで全面透明にもできます。",
     "integrations": "連携",
     "discordTitle": "Discord Rich Presence",
     "discordDesc": "Discord プロフィールに再生中の曲と再生速度を表示します。",
     "eqSection": "Hi-Fi 精密 EQ",
+    "eqEngineHintHifi": "HiFi エンジン：EQ とプリアンプはメインプロセスで PCM に適用されてから出力されます。",
+    "eqEngineHintStandard": "標準エンジン：EQ はアプリ内の Web Audio 経由。HiFi では同等のカーブをネイティブ PCM に適用します。",
+    "audioTitle": "オーディオ設定",
+    "outputDevice": "出力デバイス",
+    "systemDefault": "システムデフォルト",
+    "exclusiveMode": "WASAPI 排他モード",
+    "exclusiveDesc": "Windows ミキサーをバイパスして Bit-Perfect 出力を実現します。ソースのサンプルレート（192 kHz 等）が維持されます。有効中は他のアプリは無音になります。",
+    "exclusiveWaiting": "排他モードは次のトラック開始時に適用されます。",
+    "bufferProfile": "バッファ設定",
+    "bufferHint": "排他モードでノイズやドロップアウトが発生する場合は、バッファを増やしてください。",
+    "bufferProfiles": {
+      "low": "低遅延",
+      "balanced": "バランス",
+      "stable": "安定"
+    },
+    "dsdMode": "DSD 再生",
+    "dsdToPcm": "PCM 変換",
+    "dsdPcm": "PCM 変換",
+    "dsdPcmDesc": "汎用",
+    "dsdDopDesc": "近日公開",
+    "dsdHint": "DSD ファイルはハイレゾ PCM に変換して再生されます。DoP（DSD over PCM）は対応 DAC 向けに将来のアップデートで追加予定です。",
+    "audioDrawerEqBlurb": "音量・デバイス・排他・バッファはネイティブ出力に影響します。パラメトリック EQ は設定と同期し、HiFi ではメインプロセスの PCM に適用されます。",
     "reset": "リセット",
     "custom": "カスタム",
     "aesthetics": "外観とテーマ",
@@ -144,13 +210,17 @@
     "downloadDirDesc": "最高画質のメディアはここに保存されます。",
     "notSet": "未設定",
     "setFolder": "フォルダを指定",
+    "autoSaveLibraryTitle": "メディアライブラリを自動保存",
+    "autoSaveLibraryDesc": "曲リスト・お気に入り・カスタムプレイリストを自動保存します。オフの場合は今回起動中のみ有効です。",
     "plImportTitle": "プレイリスト取り込み用フォルダ",
     "plImportDesc": "リンク取り込みで保存したファイルの場所です。未設定の場合は上のダウンロード先を使います。",
     "sameAsDownload": "（ダウンロード先と同じ）",
     "chooseFolder": "フォルダを選ぶ",
     "useDownloadFolder": "ダウンロード先を使う",
     "about": "について",
-    "aboutBody": "Echoes Studio は高性能な Nightcore オーディオエンジンです。信号処理はすべて Web Audio API 上で 32 ビット浮動小数点で行われます。",
+    "aboutBody": "ECHO は高性能な Nightcore オーディオエンジンです。信号処理はすべて Web Audio API 上で 32 ビット浮動小数点で行われます。",
+    "versionText": "Version {{version}}",
+    "poweredBy": "Powered by Moekotori",
     "devSection": "開発者",
     "devConsoleTitle": "デベロッパーツール（コンソール）",
     "devConsoleDesc": "切り離した Chromium の DevTools を開きます。もう一度で閉じます。",
@@ -159,6 +229,9 @@
     "devOpenFailed": "DevTools を開けません: {{message}}",
     "devReloadFailed": "再読み込みできません: {{message}}",
     "devUserDataFailed": "ユーザーデータフォルダを開けません: {{message}}",
+  "devModeTitle": "開発者モード",
+  "devModeDesc": "有効にすると開発者機能を表示し、無効時は機能を隠します。",
+  "devModeDisabledHint": "開発者機能は現在非表示です。開発者モードを有効にすると表示されます。",
     "devStartupTitle": "起動時にコンソールを開く",
     "devStartupDesc": "起動後に自動で DevTools を開きます（次回起動から）。",
     "devReloadTitle": "ウィンドウを再読み込み",
@@ -229,6 +302,7 @@
     "glassColorDesc": "パネルのすりガラス色味"
   },
   "themePreset": {
+    "darkmode": "ダークモード",
     "sakura": "サクラブロッサム",
     "midnight": "ミッドナイトエコー",
     "matcha": "抹茶ラテ",
@@ -247,7 +321,25 @@
     "Vocal": "ボーカル",
     "Electronic": "エレクトロニック",
     "Pop": "ポップ",
-    "Rock": "ロック"
+    "Rock": "ロック",
+    "Classical": "クラシック",
+    "Hi-Res Air": "ハイレゾ・エア"
+  },
+  "eqPlot": {
+    "scrollQ": "スクロールで Q",
+    "filterType": "タイプ",
+    "qLabel": "Q",
+    "types": {
+      "peaking": "ピーキング",
+      "lowshelf": "ローシェルフ",
+      "highshelf": "ハイシェルフ",
+      "lowpass": "ローパス",
+      "highpass": "ハイパス",
+      "notch": "ノッチ",
+      "allpass": "オールパス"
+    },
+    "shelfQHint": "シェルフでは Q が膝の立ち上がりに効き、大きすぎるとエンジンごとに差が出やすいです。",
+    "gainExtremeHint": "±12 dB を大きく超えるブーストは歪みやすくなります。"
   },
   "youtubeHint": {
     "body": "YouTube MV の準備が間に合いませんでした（ログインや確認ページの可能性）。設定 → アプリ内で YouTube にログインしてから、この MV を再読み込みしてください。",
@@ -291,7 +383,22 @@
     "downloading": "ダウンロード中…",
     "downloadProgress": "ダウンロード {{current}}/{{total}} · {{track}}",
     "bulkProgress": "{{message}}{{pct}}",
-    "linkMetaLine": "{{name}} · {{total}} 曲"
+    "linkMetaLine": "{{name}} · {{total}} 曲",
+    "neteaseCookiePlaceholder": "NetEase の Cookie（MUSIC_U など）を貼り付けてログイン",
+    "neteaseLogin": "NetEase にログイン",
+    "neteaseOneClick": "ワンクリックでログイン取得",
+    "neteaseOpening": "ログインページを開いています…",
+    "neteaseOpenLoginFailed": "NetEase ログインウィンドウを開けませんでした",
+    "neteaseFeatureNeedRestart": "Electron 開発アプリを再起動してから、ワンクリックログインを再試行してください（main/preload 未更新）",
+    "neteaseLogout": "ログアウト",
+    "neteaseLoggedIn": "NetEase アカウントでログイン済み（Cookie 保存済み）",
+    "neteaseNotLoggedIn": "NetEase 未ログイン（一部楽曲は低音質/不完全版の可能性）",
+    "qualityGroupLabel": "ダウンロード音質",
+    "qualityAuto": "音質: 自動（利用可能な最高）",
+    "qualityLossless": "ロスレス（FLAC 優先）",
+    "qualityHigh": "音質: 高（320k 優先）",
+    "qualityMedium": "音質: 中（192k 優先）",
+    "qualityLow": "音質: 低（帯域節約）"
   },
   "drawer": {
     "lyricsTitle": "歌詞",
@@ -301,19 +408,78 @@
     "mvTitle": "MV 設定",
     "mvAria": "MV 設定",
     "castTitle": "キャスト受信",
-    "castAria": "キャスト受信"
+    "castAria": "キャスト受信",
+    "listenTogetherTitle": "一緒に聴く",
+    "listenTogetherAria": "一緒に聴く"
+  },
+  "listenTogether": {
+    "connection": "サーバー接続",
+    "tokenOptional": "アクセストークン（任意）",
+    "name": "表示名",
+    "connectionState": "接続状態",
+    "room": "ルーム",
+    "createRoom": "ルーム作成",
+    "joinRoom": "ルーム参加",
+    "leaveRoom": "ルーム退出",
+    "roomCode": "ルームコード",
+    "copyInvite": "招待情報をコピー",
+    "copyJoinKey": "クイック参加キーをコピー",
+    "inviteText": "一緒に聴く招待情報",
+    "copied": "クリップボードにコピーしました",
+    "keyCopied": "クイック参加キーをコピーしました",
+    "joinKey": "クイック参加キーを貼り付け",
+    "useJoinKey": "入力して参加",
+    "invalidJoinKey": "参加キーが無効です",
+    "keyApplied": "参加キー情報を適用しました",
+    "roomAccessKey": "ルームアクセスキー（ロック時必須）",
+    "lockByKey": "キー所持メンバーのみ参加可",
+    "roomLocked": "ルームがロックされています。正しいキーが必要です",
+    "shareAudio": "音声共有",
+    "audioUrl": "オンライン音声 URL",
+    "publishUrl": "URL を公開",
+    "publishLocal": "ローカルファイルをアップロード",
+    "resyncNow": "再同期",
+    "resynced": "再同期を要求しました",
+    "followMode": "フォローモード",
+    "memberReadonlyHint": "再生はホストが制御し、メンバーは読み取り専用で追従します",
+    "syncOffset": "追従遅延オフセット",
+    "autoResync": "自動再同期",
+    "autoResyncEvery": "再同期間隔",
+    "forceSeekThreshold": "強制シーク閾値",
+    "qualityOriginal": "音質: オリジナル",
+    "qualityCompressed": "音質: 省帯域（実験）",
+    "transferHost": "ホストを移譲",
+    "syncCover": "ジャケット画像を同期",
+    "syncLyrics": "歌詞を同期",
+    "syncMvHeavy": "MV リンクを同期（負荷高）"
   },
   "lyricsDrawer": {
     "displayStyle": "表示とスタイル",
     "romaji": "ローマ字",
     "translation": "翻訳",
+    "wordHighlight": "単語ごとハイライト",
+  "wordLeadMs": "ハイライト先行量",
+  "wordLeadMsHint": "正の値で少し早め、負の値で少し遅らせます。",
+  "wordFillRatio": "行の完了率",
+  "wordFillRatioHint": "次の行が始まる前に、どれだけ早く 100% に到達するか。",
     "mainLineSize": "本欄のサイズ",
+    "fontColor": "歌詞の色",
+    "fontColorHint": "歌詞画面の文字色を上書きします。クリアするとテーマ既定に戻ります。",
+    "reset": "リセット",
+    "layerMain": "メイン",
+    "layerKaraoke": "カラオケ強調",
+    "layerRomaji": "ローマ字",
+    "layerTranslation": "翻訳",
+    "stateActive": "現在",
+    "stateNormal": "通常",
+    "statePast": "過去",
     "hideLyrics": "スクロール歌詞を隠す",
     "hideLyricsHint": "曲情報と横の MV はそのまま。歌詞リストだけ非表示にします。",
     "source": "ソース",
     "statusPrefix": "歌詞ステータス:",
     "statusLoading": "読み込み中…",
     "statusMatched": "一致",
+  "statusDegraded": "一致（単語ハイライトは通常表示に降格）",
     "statusNone": "不一致",
     "statusDash": "—",
     "selectSource": "ソースを選択",
@@ -332,7 +498,10 @@
     "chooseFile": "ファイルを選ぶ",
     "editPlain": "プレーンテキストで編集",
     "pastePlaceholder": "LRC またはプレーンテキストの歌詞を貼り付け…",
-    "applyLyrics": "歌詞を適用"
+    "applyLyrics": "歌詞を適用",
+    "linkPlaceholder": "曲リンクを貼り付け（NetEase / QQ / Kugou / Kuwo）…",
+    "fetchFromLink": "リンクから歌詞を取得",
+    "linkHint": "NetEase は曲 ID で直接取得、他サービスはベストエフォートで照合します。"
   },
   "mvDrawer": {
     "urlError": "URL を認識できません。YouTube または Bilibili の動画リンクを貼り付けてください。",
@@ -357,6 +526,7 @@
     "exitImmersiveLyrics": "歌詞ビューを閉じる",
     "mvAsBg": "MV をアプリ背景にする",
     "bgOpacity": "背景の不透明度",
+    "bgBlur": "背景のぼかし",
     "qualityUltra": "ウルトラ (4K)",
     "qualityHighFps": "高フレーム 60fps (1080P)",
     "qualityHigh": "高 (1080p)",
@@ -371,7 +541,7 @@
   "castDrawer": {
     "introBefore": "同じ Wi‑Fi 上で、このコンピューター上の ",
     "introAfter": " に音楽を送信できます。キャスト開始時にローカル再生は一時停止します。",
-    "appsDlna": "アプリと DLNA: Echoes は標準の UPnP AV (DLNA MediaRenderer) です。DLNA 経由で TV / スピーカーに再生可能な HTTP(S) ストリームを送れるアプリなら通常接続できます。QQ 音楽など Android / iOS アプリは DLNA に対応している場合があります。Spotify デスクトップは通常 Spotify Connect や Bluetooth を使い DLNA ではありません。",
+    "appsDlna": "アプリと DLNA: ECHO は標準の UPnP AV (DLNA MediaRenderer) です。DLNA 経由で TV / スピーカーに再生可能な HTTP(S) ストリームを送れるアプリなら通常接続できます。QQ 音楽など Android / iOS アプリは DLNA に対応している場合があります。Spotify デスクトップは通常 Spotify Connect や Bluetooth を使い DLNA ではありません。",
     "netease": "NetEase クラウドミュージック: 設定で「DLNA 機器に接続」をオンにし、再生画面のデバイス／キャストからこの端末（上記と同じ名前）を選んでください。表示されない場合は、下の LAN IP が端末と同じサブネットか確認してください。環境変数 ECHOES_DLNA_IP にこの PC の Wi‑Fi IPv4 を指定し、Windows ファイアウォールと UDP 1900 も確認してください。",
     "deviceNameLabel": "デバイス表示名 (DLNA)",
     "working": "処理中…",
@@ -381,5 +551,18 @@
     "state": "状態",
     "uri": "URI",
     "dlnaError": "DLNA: {{error}}"
+  },
+  "plugins": {
+    "title": "プラグイン",
+    "install": "インストール",
+    "openDir": "フォルダを開く",
+    "empty": "プラグインがインストールされていません。プラグインフォルダをディレクトリに配置するか、インストールをクリックしてください。",
+    "enable": "有効化",
+    "disable": "無効化",
+    "uninstall": "アンインストール",
+    "backToList": "戻る",
+    "permissions": "権限",
+    "noPermissions": "特別な権限は不要です",
+    "confirmUninstall": "プラグイン「{{name}}」をアンインストールしますか？この操作は元に戻せません。"
   }
 }

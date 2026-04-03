@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Download,
   FolderHeart,
@@ -7,8 +7,8 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
-  CloudDownload,
-} from "lucide-react";
+  CloudDownload
+} from 'lucide-react'
 
 export default function DownloaderView({
   config,
@@ -17,129 +17,197 @@ export default function DownloaderView({
   userPlaylists = [],
   setUserPlaylists,
   setPlaylist,
-  setSelectedUserPlaylistId,
+  setSelectedUserPlaylistId
 }) {
-  const { t, i18n } = useTranslation();
-  const [url, setUrl] = useState("");
-  const [metadata, setMetadata] = useState(null);
-  const [isLoadingMeta, setIsLoadingMeta] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState("idle");
-  const [errorMsg, setErrorMsg] = useState("");
-  const [linkImportUrl, setLinkImportUrl] = useState("");
-  const [linkImportTarget, setLinkImportTarget] = useState("new");
-  const [linkImporting, setLinkImporting] = useState(false);
-  const [linkImportStatus, setLinkImportStatus] = useState("");
+  const { t, i18n } = useTranslation()
+  const [url, setUrl] = useState('')
+  const [metadata, setMetadata] = useState(null)
+  const [isLoadingMeta, setIsLoadingMeta] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [status, setStatus] = useState('idle')
+  const [errorMsg, setErrorMsg] = useState('')
+  const [linkImportUrl, setLinkImportUrl] = useState('')
+  const [linkImportTarget, setLinkImportTarget] = useState('new')
+  const [linkImporting, setLinkImporting] = useState(false)
+  const [linkImportStatus, setLinkImportStatus] = useState('')
+  const [neteaseCookieInput, setNeteaseCookieInput] = useState('')
+  const [neteaseCookieSaved, setNeteaseCookieSaved] = useState('')
+  const [audioQualityPreset, setAudioQualityPreset] = useState('auto')
+  const [isNeteaseSigningIn, setIsNeteaseSigningIn] = useState(false)
+  const downloaderPrefsHydratedRef = useRef(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const hydrate = async () => {
+      try {
+        const savedCookie = localStorage.getItem('echoes.neteaseCookie') || ''
+        const savedQuality = localStorage.getItem('echoes.downloaderAudioQuality') || 'auto'
+        if (!cancelled) {
+          setNeteaseCookieSaved(savedCookie)
+          setAudioQualityPreset(savedQuality)
+        }
+      } catch (_) {}
+      try {
+        const prefs = await window.api?.appStateGet?.('downloaderSettings')
+        if (
+          !cancelled &&
+          prefs &&
+          typeof prefs === 'object' &&
+          (typeof prefs.neteaseCookie === 'string' || typeof prefs.audioQualityPreset === 'string')
+        ) {
+          if (typeof prefs.neteaseCookie === 'string') setNeteaseCookieSaved(prefs.neteaseCookie)
+          if (typeof prefs.audioQualityPreset === 'string')
+            setAudioQualityPreset(prefs.audioQualityPreset || 'auto')
+        }
+      } catch (_) {}
+      if (!cancelled) downloaderPrefsHydratedRef.current = true
+    }
+    hydrate()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!downloaderPrefsHydratedRef.current || !window.api?.appStateSet) return
+    void window.api.appStateSet('downloaderSettings', {
+      neteaseCookie: neteaseCookieSaved || '',
+      audioQualityPreset: audioQualityPreset || 'auto'
+    })
+  }, [neteaseCookieSaved, audioQualityPreset])
+
+  const applyNeteaseCookie = useCallback((cookie) => {
+    const next = String(cookie || '').trim()
+    setNeteaseCookieSaved(next)
+    if (!next) return
+    try {
+      localStorage.setItem('echoes.neteaseCookie', next)
+    } catch (_) {}
+  }, [])
+
+  const refreshNeteaseCookieFromSession = useCallback(async () => {
+    if (!window.api?.getNeteaseCookie) return
+    try {
+      const out = await window.api.getNeteaseCookie()
+      if (out?.ok && out?.cookie) {
+        applyNeteaseCookie(out.cookie)
+      }
+    } catch (_) {}
+  }, [applyNeteaseCookie])
+
+  useEffect(() => {
+    if (!window.api?.onSignInStatusChanged) return
+    const unsub = window.api.onSignInStatusChanged(() => {
+      void refreshNeteaseCookieFromSession()
+    })
+    return () => {
+      if (typeof unsub === 'function') unsub()
+    }
+  }, [refreshNeteaseCookieFromSession])
 
   const handleLinkPlaylistImport = useCallback(async () => {
-    if (!window.api?.playlistLink?.importPlaylist) return;
-    const playlistSaveDir = (
-      config.playlistImportFolder ||
-      config.downloadFolder ||
-      ""
-    ).trim();
+    if (!window.api?.playlistLink?.importPlaylist) return
+    const playlistSaveDir = (config.playlistImportFolder || config.downloadFolder || '').trim()
     if (!playlistSaveDir) {
-      alert(t("downloader.folderRequired"));
-      return;
+      alert(t('downloader.folderRequired'))
+      return
     }
-    const raw = linkImportUrl.trim();
-    if (!raw) return;
-    setLinkImporting(true);
-    setLinkImportStatus(t("downloader.connecting"));
-    const tFn = i18n.getFixedT(i18n.language);
+    const raw = linkImportUrl.trim()
+    if (!raw) return
+    setLinkImporting(true)
+    setLinkImportStatus(t('downloader.connecting'))
+    const tFn = i18n.getFixedT(i18n.language)
     const unsub = window.api.playlistLink.onImportProgress((p) => {
-      if (p.phase === "meta") {
+      if (p.phase === 'meta') {
         setLinkImportStatus(
-          tFn("downloader.linkMetaLine", {
+          tFn('downloader.linkMetaLine', {
             name: p.playlistName,
-            total: p.total,
-          }),
-        );
-      } else if (p.phase === "download") {
+            total: p.total
+          })
+        )
+      } else if (p.phase === 'download') {
         setLinkImportStatus(
-          tFn("downloader.downloadProgress", {
+          tFn('downloader.downloadProgress', {
             current: p.current,
             total: p.total,
-            track: p.trackName || "",
-          }),
-        );
-      } else if (p.phase === "bulk") {
+            track: p.trackName || ''
+          })
+        )
+      } else if (p.phase === 'bulk') {
         const pct =
-          p.progress != null && Number.isFinite(p.progress)
-            ? ` ${Math.round(p.progress)}%`
-            : "";
+          p.progress != null && Number.isFinite(p.progress) ? ` ${Math.round(p.progress)}%` : ''
         setLinkImportStatus(
-          tFn("downloader.bulkProgress", {
-            message: p.message || tFn("downloader.downloading"),
-            pct,
-          }),
-        );
+          tFn('downloader.bulkProgress', {
+            message: p.message || tFn('downloader.downloading'),
+            pct
+          })
+        )
       }
-    });
+    })
     try {
       const r = await window.api.playlistLink.importPlaylist({
         playlistInput: raw,
-        downloadFolder: playlistSaveDir,
-      });
+        downloadFolder: playlistSaveDir
+      })
       const newItems = (r.added || []).map(({ path, trackTitle }) => ({
-        name: path.split(/[/\\]/).pop() || trackTitle || "track",
+        name: path.split(/[/\\]/).pop() || trackTitle || 'track',
         path,
-        type: "local",
-      }));
+        type: 'local'
+      }))
       if (newItems.length > 0 && setPlaylist) {
         setPlaylist((prev) => {
-          const seen = new Set(prev.map((x) => x.path));
-          const next = [...prev];
+          const seen = new Set(prev.map((x) => x.path))
+          const next = [...prev]
           for (const track of newItems) {
             if (!seen.has(track.path)) {
-              seen.add(track.path);
-              next.push(track);
+              seen.add(track.path)
+              next.push(track)
             }
           }
-          return next;
-        });
-        const paths = newItems.map((x) => x.path);
+          return next
+        })
+        const paths = newItems.map((x) => x.path)
         if (setUserPlaylists && setSelectedUserPlaylistId) {
-          if (linkImportTarget === "new") {
-            const id = crypto.randomUUID();
-            const plName = r.playlistName || "Imported";
-            setUserPlaylists((prev) => [...prev, { id, name: plName, paths }]);
-            setSelectedUserPlaylistId(id);
+          if (linkImportTarget === 'new') {
+            const id = crypto.randomUUID()
+            const plName = r.playlistName || 'Imported'
+            setUserPlaylists((prev) => [...prev, { id, name: plName, paths }])
+            setSelectedUserPlaylistId(id)
           } else {
             setUserPlaylists((prev) =>
               prev.map((p) =>
                 p.id === linkImportTarget
                   ? { ...p, paths: [...new Set([...p.paths, ...paths])] }
-                  : p,
-              ),
-            );
-            setSelectedUserPlaylistId(linkImportTarget);
+                  : p
+              )
+            )
+            setSelectedUserPlaylistId(linkImportTarget)
           }
         }
       }
-      const failN = (r.failed || []).length;
-      const okN = (r.added || []).length;
+      const failN = (r.failed || []).length
+      const okN = (r.added || []).length
       if (failN > 0) {
-        const first = r.failed[0];
+        const first = r.failed[0]
         alert(
-          t("downloader.importPartial", {
+          t('downloader.importPartial', {
             ok: okN,
             fail: failN,
             name: first.name,
-            error: first.error,
-          }),
-        );
+            error: first.error
+          })
+        )
       } else if (okN === 0) {
-        alert(t("downloader.importNone"));
+        alert(t('downloader.importNone'))
       }
-      setLinkImportUrl("");
+      setLinkImportUrl('')
     } catch (e) {
-      alert(e.message || String(e));
+      alert(e.message || String(e))
     } finally {
-      unsub();
-      setLinkImporting(false);
-      setLinkImportStatus("");
+      unsub()
+      setLinkImporting(false)
+      setLinkImportStatus('')
     }
   }, [
     config.playlistImportFolder,
@@ -150,82 +218,174 @@ export default function DownloaderView({
     setUserPlaylists,
     setSelectedUserPlaylistId,
     t,
-    i18n,
-  ]);
+    i18n
+  ])
 
   useEffect(() => {
     const unsubscribe = window.api.media.onProgress((data) => {
-      setProgress(data.progress);
-    });
+      setProgress(data.progress)
+    })
     return () => {
-      if (typeof unsubscribe === "function") unsubscribe();
-    };
-  }, []);
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
+  }, [])
 
   const handleFetchMetadata = async () => {
-    if (!url.trim()) return;
-    setIsLoadingMeta(true);
-    setStatus("loading_meta");
-    setErrorMsg("");
-    setMetadata(null);
+    if (!url.trim()) return
+    setIsLoadingMeta(true)
+    setStatus('loading_meta')
+    setErrorMsg('')
+    setMetadata(null)
     try {
-      const meta = await window.api.media.getMetadata(url);
-      setMetadata(meta);
-      setStatus("ready");
+      const meta = await window.api.media.getMetadata(url)
+      setMetadata(meta)
+      setStatus('ready')
     } catch (err) {
-      console.error(err);
-      setErrorMsg(err.message || t("downloader.metaFailed"));
-      setStatus("error");
+      console.error(err)
+      setErrorMsg(err.message || t('downloader.metaFailed'))
+      setStatus('error')
     } finally {
-      setIsLoadingMeta(false);
+      setIsLoadingMeta(false)
     }
-  };
+  }
 
   const handleDownload = async () => {
-    if (!url || !config.downloadFolder) return;
-    setIsDownloading(true);
-    setStatus("downloading");
-    setProgress(0);
-    setErrorMsg("");
+    if (!url || !config.downloadFolder) return
+    setIsDownloading(true)
+    setStatus('downloading')
+    setProgress(0)
+    setErrorMsg('')
 
-    const filesBefore = await window.api
-      .readDirectoryHandler(config.downloadFolder)
-      .catch(() => []);
+    const filesBefore = await window.api.readDirectoryHandler(config.downloadFolder).catch(() => [])
 
     try {
-      await window.api.media.downloadAudio(url, config.downloadFolder);
-      setStatus("success");
+      await window.api.media.downloadAudio(url, config.downloadFolder, {
+        audioQualityPreset,
+        neteaseCookie: neteaseCookieSaved
+      })
+      setStatus('success')
 
       const filesAfter = await window.api
         .readDirectoryHandler(config.downloadFolder)
-        .catch(() => []);
-      const newFiles = filesAfter.filter(
-        (fa) => !filesBefore.find((fb) => fb.path === fa.path),
-      );
+        .catch(() => [])
+      const newFiles = filesAfter.filter((fa) => !filesBefore.find((fb) => fb.path === fa.path))
 
       if (newFiles.length > 0 && onSuccess) {
         onSuccess({
           path: newFiles[0].path,
-          mvOriginUrl: url.trim(),
-        });
+          mvOriginUrl: url.trim()
+        })
       }
     } catch (err) {
-      console.error(err);
-      setErrorMsg(err.message || t("downloader.downloadFailed"));
-      setStatus("error");
+      console.error(err)
+      setErrorMsg(err.message || t('downloader.downloadFailed'))
+      setStatus('error')
     } finally {
-      setIsDownloading(false);
+      setIsDownloading(false)
     }
-  };
+  }
 
   return (
     <div className="md-root">
+      <section className="md-section">
+        <div className="md-input-row md-netease-login-row">
+          <input
+            type="text"
+            className="md-input"
+            placeholder={t('downloader.neteaseCookiePlaceholder')}
+            value={neteaseCookieInput}
+            onChange={(e) => setNeteaseCookieInput(e.target.value)}
+            disabled={isDownloading}
+          />
+          <button
+            type="button"
+            className="md-btn-parse"
+            disabled={!neteaseCookieInput.trim() || isDownloading}
+            onClick={() => {
+              const next = neteaseCookieInput.trim()
+              setNeteaseCookieSaved(next)
+              setNeteaseCookieInput('')
+              try {
+                localStorage.setItem('echoes.neteaseCookie', next)
+              } catch (_) {}
+            }}
+          >
+            {t('downloader.neteaseLogin')}
+          </button>
+          <button
+            type="button"
+            className="md-btn-secondary md-btn-netease-oneclick"
+            disabled={isDownloading || isNeteaseSigningIn}
+            onClick={async () => {
+              try {
+                if (!window.api?.openNeteaseSignInWindow || !window.api?.getNeteaseCookie) {
+                  throw new Error(t('downloader.neteaseFeatureNeedRestart'))
+                }
+                setIsNeteaseSigningIn(true)
+                const r = await window.api.openNeteaseSignInWindow()
+                if (!r?.ok) throw new Error(r?.error || 'open_failed')
+                await refreshNeteaseCookieFromSession()
+              } catch (e) {
+                setErrorMsg(e?.message || t('downloader.neteaseOpenLoginFailed'))
+                setStatus('error')
+              } finally {
+                setIsNeteaseSigningIn(false)
+              }
+            }}
+          >
+            {isNeteaseSigningIn ? t('downloader.neteaseOpening') : t('downloader.neteaseOneClick')}
+          </button>
+        </div>
+        <p className="md-netease-status">
+          {neteaseCookieSaved
+            ? t('downloader.neteaseLoggedIn')
+            : t('downloader.neteaseNotLoggedIn')}
+        </p>
+        <div className="md-quality-row">
+          <div className="md-quality-group" role="group" aria-label={t('downloader.qualityGroupLabel')}>
+            {['auto', 'lossless', 'high', 'medium', 'low'].map((key) => (
+              <button
+                key={key}
+                type="button"
+                className={`md-quality-btn ${audioQualityPreset === key ? 'active' : ''}`}
+                onClick={() => {
+                  setAudioQualityPreset(key)
+                  try {
+                    localStorage.setItem('echoes.downloaderAudioQuality', key)
+                  } catch (_) {}
+                }}
+                disabled={isDownloading}
+              >
+                {t(`downloader.quality${key.charAt(0).toUpperCase()}${key.slice(1)}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+        {neteaseCookieSaved ? (
+          <div className="md-logout-row">
+            <button
+              type="button"
+              className="md-btn-secondary"
+              disabled={isDownloading}
+              onClick={() => {
+                setNeteaseCookieSaved('')
+                try {
+                  localStorage.removeItem('echoes.neteaseCookie')
+                } catch (_) {}
+              }}
+            >
+              {t('downloader.neteaseLogout')}
+            </button>
+          </div>
+        ) : null}
+      </section>
+
       <section className="md-section">
         <div className="md-input-row">
           <input
             type="text"
             className="md-input"
-            placeholder={t("downloader.placeholderUrl")}
+            placeholder={t('downloader.placeholderUrl')}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
@@ -235,11 +395,7 @@ export default function DownloaderView({
             onClick={handleFetchMetadata}
             disabled={!url || isLoadingMeta || isDownloading}
           >
-            {isLoadingMeta ? (
-              <Loader2 size={24} className="spin" />
-            ) : (
-              t("downloader.parseLink")
-            )}
+            {isLoadingMeta ? <Loader2 size={24} className="spin" /> : t('downloader.parseLink')}
           </button>
         </div>
       </section>
@@ -255,32 +411,26 @@ export default function DownloaderView({
           </div>
           <div className="md-meta-body">
             <div className="md-badge-row">
-              <span className="md-badge md-badge-pink">
-                {t("downloader.badgeHiRes")}
-              </span>
-              <span className="md-badge md-badge-mint">
-                {t("downloader.badgeMeta")}
-              </span>
+              <span className="md-badge md-badge-pink">{t('downloader.badgeHiRes')}</span>
+              <span className="md-badge md-badge-mint">{t('downloader.badgeMeta')}</span>
             </div>
             <h2 className="md-title">{metadata.title}</h2>
-            <p className="md-artist">
-              {metadata.artist || t("common.unknownArtist")}
-            </p>
+            <p className="md-artist">{metadata.artist || t('common.unknownArtist')}</p>
           </div>
         </section>
       )}
 
-      {status === "error" && (
+      {status === 'error' && (
         <div className="md-alert md-alert-error" role="alert">
           <AlertCircle size={20} />
           <span>{errorMsg}</span>
         </div>
       )}
 
-      {status === "success" && (
+      {status === 'success' && (
         <div className="md-alert md-alert-success" role="status">
           <CheckCircle2 size={24} />
-          <span>{t("downloader.downloadComplete")}</span>
+          <span>{t('downloader.downloadComplete')}</span>
         </div>
       )}
 
@@ -288,18 +438,18 @@ export default function DownloaderView({
         {!config.downloadFolder ? (
           <div className="md-folder-card">
             <FolderHeart size={48} className="md-folder-icon" />
-            <h3 className="md-folder-title">{t("downloader.noDirTitle")}</h3>
-            <p className="md-folder-hint">{t("downloader.noDirHint")}</p>
+            <h3 className="md-folder-title">{t('downloader.noDirTitle')}</h3>
+            <p className="md-folder-hint">{t('downloader.noDirHint')}</p>
             <button
               type="button"
               className="md-btn-secondary"
               onClick={async () => {
-                const folders = await window.api.openDirectoryHandler();
+                const folders = await window.api.openDirectoryHandler()
                 if (folders && folders.length > 0)
-                  setConfig((p) => ({ ...p, downloadFolder: folders[0] }));
+                  setConfig((p) => ({ ...p, downloadFolder: folders[0] }))
               }}
             >
-              {t("downloader.setDownloadFolder")}
+              {t('downloader.setDownloadFolder')}
             </button>
           </div>
         ) : (
@@ -307,16 +457,11 @@ export default function DownloaderView({
             {isDownloading && (
               <div className="md-progress-block">
                 <div className="md-progress-labels">
-                  <span>{t("downloader.downloadingStream")}</span>
-                  <span className="md-progress-pct">
-                    {progress.toFixed(1)}%
-                  </span>
+                  <span>{t('downloader.downloadingStream')}</span>
+                  <span className="md-progress-pct">{progress.toFixed(1)}%</span>
                 </div>
                 <div className="md-progress-track">
-                  <div
-                    className="md-progress-fill"
-                    style={{ width: `${progress}%` }}
-                  />
+                  <div className="md-progress-fill" style={{ width: `${progress}%` }} />
                 </div>
               </div>
             )}
@@ -324,22 +469,17 @@ export default function DownloaderView({
             <button
               type="button"
               className={
-                status === "ready" && !isDownloading
-                  ? "md-btn-download md-btn-download--ready"
-                  : "md-btn-download"
+                status === 'ready' && !isDownloading
+                  ? 'md-btn-download md-btn-download--ready'
+                  : 'md-btn-download'
               }
               onClick={handleDownload}
               disabled={
-                (status !== "ready" &&
-                  status !== "success" &&
-                  status !== "error") ||
-                isDownloading
+                (status !== 'ready' && status !== 'success' && status !== 'error') || isDownloading
               }
             >
               <Download size={24} />
-              {isDownloading
-                ? t("downloader.extracting")
-                : t("downloader.startExtraction")}
+              {isDownloading ? t('downloader.extracting') : t('downloader.startExtraction')}
             </button>
           </div>
         )}
@@ -349,25 +489,23 @@ export default function DownloaderView({
         <div className="playlist-link-panel no-drag">
           <div className="playlist-link-heading">
             <CloudDownload size={16} aria-hidden />
-            <span>{t("downloader.addFromLink")}</span>
+            <span>{t('downloader.addFromLink')}</span>
           </div>
           <p className="playlist-link-hint">
-            {t("downloader.linkHintBefore")}
-            <code className="playlist-link-code">
-              {t("downloader.linkHintCode")}
-            </code>
-            {t("downloader.linkHintAfter")}
+            {t('downloader.linkHintBefore')}
+            <code className="playlist-link-code">{t('downloader.linkHintCode')}</code>
+            {t('downloader.linkHintAfter')}
           </p>
           <div className="playlist-link-row">
             <input
               type="text"
               className="playlist-link-input"
-              placeholder={t("downloader.linkPlaceholder")}
+              placeholder={t('downloader.linkPlaceholder')}
               value={linkImportUrl}
               onChange={(e) => setLinkImportUrl(e.target.value)}
               disabled={linkImporting}
               onKeyDown={(e) => {
-                if (e.key === "Enter") handleLinkPlaylistImport();
+                if (e.key === 'Enter') handleLinkPlaylistImport()
               }}
             />
             <select
@@ -376,10 +514,10 @@ export default function DownloaderView({
               onChange={(e) => setLinkImportTarget(e.target.value)}
               disabled={linkImporting}
             >
-              <option value="new">{t("downloader.optNewPl")}</option>
+              <option value="new">{t('downloader.optNewPl')}</option>
               {userPlaylists.map((pl) => (
                 <option key={pl.id} value={pl.id}>
-                  {t("downloader.optMerge", { name: pl.name })}
+                  {t('downloader.optMerge', { name: pl.name })}
                 </option>
               ))}
             </select>
@@ -389,14 +527,12 @@ export default function DownloaderView({
               disabled={linkImporting || !linkImportUrl.trim()}
               onClick={handleLinkPlaylistImport}
             >
-              {linkImporting ? t("downloader.adding") : t("downloader.add")}
+              {linkImporting ? t('downloader.adding') : t('downloader.add')}
             </button>
           </div>
-          {linkImportStatus ? (
-            <p className="playlist-link-status">{linkImportStatus}</p>
-          ) : null}
+          {linkImportStatus ? <p className="playlist-link-status">{linkImportStatus}</p> : null}
         </div>
       </section>
     </div>
-  );
+  )
 }

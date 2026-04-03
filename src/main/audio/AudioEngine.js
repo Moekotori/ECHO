@@ -1,104 +1,143 @@
-import { getDevices, AudioIO, SampleFormatFloat32 } from "naudiodon";
-import ffmpeg from "fluent-ffmpeg";
-import ffmpegPath from "ffmpeg-static";
-import { Transform } from "stream";
+import { getDevices, AudioIO, SampleFormatFloat32 } from 'naudiodon'
+import ffmpeg from 'fluent-ffmpeg'
+import { Transform } from 'stream'
+import { NativeAudioBridge, isNativeBridgeAvailable, listNativeDevices } from './NativeAudioBridge.js'
+import { createEqFloatProcessor } from './eqFloatProcessor.js'
+import { getResolvedFfmpegStaticPath } from '../utils/resolveFfmpegStaticPath.js'
 
-// Set FFmpeg path
-ffmpeg.setFfmpegPath(ffmpegPath);
+const resolvedFfmpeg = getResolvedFfmpegStaticPath()
+ffmpeg.setFfmpegPath(resolvedFfmpeg)
 
-/** DLNA/SOAP 里 URL 常带 &amp;，必须还原否则 FFmpeg 请求错误地址 */
 function normalizeStreamUri(uri) {
-  if (!uri || typeof uri !== "string") return uri;
-  let s = uri.trim();
-  if (!/^https?:\/\//i.test(s)) return s;
-  return s.replace(/&amp;/gi, "&");
+  if (!uri || typeof uri !== 'string') return uri
+  let s = uri.trim()
+  if (!/^https?:\/\//i.test(s)) return s
+  return s.replace(/&amp;/gi, '&')
 }
 
 const NETEASE_UA =
-  "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36 NeteaseMusic/9.0.0";
+  'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36 NeteaseMusic/9.0.0'
 const NETEASE_HEADERS =
-  "Referer: https://music.163.com/\r\nOrigin: https://music.163.com\r\n";
+  'Referer: https://music.163.com/\r\nOrigin: https://music.163.com\r\n'
 
 function isNeteaseStreamUrl(uri) {
-  return /music\.163\.com|126\.net|netease|interface\.music\.163/i.test(uri);
+  return /music\.163\.com|126\.net|netease|interface\.music\.163/i.test(uri)
 }
 
 /**
- * 核心音频处理器：负责缓冲区对齐、音量控制和进度计算
+ * AudioProcessor — volume + safe buffer copy + byte-count progress (legacy path only).
+ *
+ * In native-bridge mode the byte-count progress is ignored; position comes from
+ * the output-side frame counter reported by the child process.
  */
 class AudioProcessor extends Transform {
   constructor(options) {
-    super(options);
-    this.engine = options.engine;
-    this.targetSampleRate = options.targetSampleRate;
-    this.channels = options.channels;
-    this.playbackRate = options.playbackRate;
-    this.startTime = options.startTime;
-    this.bytesWritten = 0;
+    super(options)
+    this.engine = options.engine
+    this.targetSampleRate = options.targetSampleRate
+    this.channels = options.channels
+    this.playbackRate = options.playbackRate
+    this.startTime = options.startTime
+    this.bytesWritten = 0
   }
 
   _transform(chunk, encoding, callback) {
-    if (!this.engine.isPlaying) return callback();
+    if (!this.engine.isPlaying) return callback()
 
-    // ====== [ROOT CAUSE FIX] Buffer 内存池污染修复 ======
-    // 问题: Buffer.alloc 从 Node.js 共享内存池分配
-    //       alignedBuffer.buffer 是整个池的 ArrayBuffer（可能是 8KB 甚至更大）
-    //       new Float32Array(alignedBuffer.buffer) 会对整个池做 Float32 操作
-    //       → 污染其他 Buffer 的数据 → naudiodon C++ fillBuffer 读到错误内存 → 崩溃
-    // 修复: 使用独立的 new ArrayBuffer(n)，byteOffset 保证为 0
-    const ab = new ArrayBuffer(chunk.byteLength);
+    const ab = new ArrayBuffer(chunk.byteLength)
+    const srcFloat32 = new Float32Array(chunk.buffer, chunk.byteOffset, chunk.byteLength / 4)
+    const dstFloat32 = new Float32Array(ab)
+    dstFloat32.set(srcFloat32)
 
-    // 正确读取 chunk 数据（考虑 chunk 自身的 byteOffset）
-    const srcFloat32 = new Float32Array(
-      chunk.buffer,
-      chunk.byteOffset,
-      chunk.byteLength / 4,
-    );
-    const dstFloat32 = new Float32Array(ab);
-    dstFloat32.set(srcFloat32); // 安全拷贝到独立内存
+    if (this.engine._bridge && this.engine._eqProcessor) {
+      try {
+        this.engine._eqProcessor.processInterleaved(dstFloat32)
+      } catch (e) {
+        /* ignore single-frame EQ errors */
+      }
+    }
 
-    // 应用音量增益（在独立内存上操作，不影响任何外部数据）
-    const vol = this.engine.volume;
+    const vol = this.engine.volume
     for (let i = 0; i < dstFloat32.length; i++) {
-      dstFloat32[i] *= vol;
+      dstFloat32[i] *= vol
     }
 
-    // 推送：Buffer.from(ab) 的 byteOffset = 0，naudiodon C++ 层安全读取
-    // [SAFETY CHECK] 确保输出流仍然有效且可写
-    if (this.engine.audioOutput && this.engine.isPlaying) {
-      this.push(Buffer.from(ab));
+    if (this.engine._outputSink && this.engine.isPlaying) {
+      this.push(Buffer.from(ab))
     }
 
-    this.bytesWritten += chunk.byteLength;
-    const secondsProcessed =
-      (this.bytesWritten / (this.targetSampleRate * this.channels * 4)) *
-      this.playbackRate;
-    this.engine.playbackTime = Math.max(0, this.startTime + secondsProcessed);
+    this.bytesWritten += chunk.byteLength
 
-    callback();
+    // Legacy path: update playbackTime from decoded bytes (input side).
+    // When native bridge is active this is overridden by output-side position.
+    if (!this.engine._bridge) {
+      const secondsProcessed =
+        (this.bytesWritten / (this.targetSampleRate * this.channels * 4)) * this.playbackRate
+      this.engine.playbackTime = Math.max(0, this.startTime + secondsProcessed)
+    }
+
+    callback()
   }
 }
 
 export class AudioEngine {
   constructor() {
-    this.audioOutput = null;
-    this.activeDevice = null;
-    this.isPlaying = false;
-    this.ffmpegProcess = null;
-    this.playbackTime = 0;
-    this.volume = 1.0;
-    this.playbackRate = 1.0;
-    this.currentFilePath = null;
-    this.processor = null;
+    this._outputSink = null    // naudiodon AudioIO OR bridge writable
+    this._bridge = null        // NativeAudioBridge instance (null = legacy mode)
+    this.activeDevice = null
+    this.activeDeviceIndex = -1
+    this.isPlaying = false
+    this.ffmpegProcess = null
+    this.playbackTime = 0
+    this.volume = 1.0
+    this.playbackRate = 1.0
+    this.currentFilePath = null
+    this.processor = null
+    this.exclusiveMode = false
+    this.eqConfig = null
+    /** HiFi path: PCM EQ + preamp (mirrors renderer Web Audio chain). */
+    this._eqProcessor = null
+    this.bufferProfile = 'balanced'
+    /** Track the sample rates and format info for status reporting */
+    this._fileSampleRate = 0
+    this._outputSampleRate = 0
+    this._fileCodec = ''
+    this._fileBitsPerSample = 0
+    this._fileIsDSD = false
+    this._fileDsdRate = 0
+    this._onTrackEnded = null
+    this._useNativeBridge = isNativeBridgeAvailable()
+
+    if (this._useNativeBridge) {
+      console.log('[AudioEngine] Native bridge available — HiFi mode enabled')
+    } else {
+      console.log('[AudioEngine] Native bridge not found — using naudiodon fallback')
+    }
   }
 
-  getMediaInfo(uri) {
-    return this._getFileInfo(uri);
-  }
+  onTrackEnded(fn) { this._onTrackEnded = fn }
+
+  getMediaInfo(uri) { return this._getFileInfo(uri) }
 
   getDevices() {
+    if (this._useNativeBridge) {
+      try {
+        const nativeDevices = listNativeDevices()
+        if (nativeDevices.length > 0) {
+          return nativeDevices.map((d) => ({
+            id: d.index,
+            name: d.name,
+            hostApi: 'WASAPI',
+            sampleRate: 0,
+            maxChannels: 0
+          }))
+        }
+      } catch (e) {
+        console.warn('[AudioEngine] native device list failed, fallback:', e?.message)
+      }
+    }
     try {
-      const devices = getDevices();
+      const devices = getDevices()
       return devices
         .filter((d) => d.maxOutputChannels > 0)
         .map((d) => ({
@@ -106,251 +145,377 @@ export class AudioEngine {
           name: d.name,
           hostApi: d.hostApi,
           sampleRate: d.defaultSampleRate || 44100,
-          maxChannels: d.maxOutputChannels,
-        }));
-    } catch (e) {
-      return [];
+          maxChannels: d.maxOutputChannels
+        }))
+    } catch {
+      return []
     }
   }
 
   async setDevice(deviceId) {
-    const devices = getDevices();
-    const device = devices.find((d) => d.id === deviceId);
-    if (device) {
-      this.activeDevice = device;
-      console.log(`[AudioEngine] Active device set: ${device.name}`);
-      return { success: true, device: this.activeDevice };
+    if (this._useNativeBridge) {
+      const idx = typeof deviceId === 'number' ? deviceId : parseInt(deviceId, 10)
+      if (isNaN(idx) || idx < 0) return { success: false, error: 'Invalid device index' }
+      const wasPlaying = this.isPlaying
+      const pos = this.playbackTime
+      const file = this.currentFilePath
+      const rate = this.playbackRate
+
+      this.activeDeviceIndex = idx
+      this.activeDevice = { id: idx, name: `Device #${idx}`, sampleRate: 0 }
+      console.log(`[AudioEngine] Native device set: index ${idx}`)
+
+      if (wasPlaying && file) {
+        await this._releaseResources()
+        this.play(file, pos, rate)
+      }
+      return { success: true, device: this.activeDevice }
     }
-    return { success: false, error: "Device not found" };
+
+    const devices = getDevices()
+    const device = devices.find((d) => d.id === deviceId)
+    if (device) {
+      this.activeDevice = device
+      this.activeDeviceIndex = -1
+      console.log(`[AudioEngine] Active device set: ${device.name}`)
+      return { success: true, device: this.activeDevice }
+    }
+    return { success: false, error: 'Device not found' }
+  }
+
+  setExclusive(exclusive) {
+    this.exclusiveMode = !!exclusive
+    console.log(`[AudioEngine] Exclusive mode: ${this.exclusiveMode}`)
+  }
+
+  setOutputBufferProfile(profile) {
+    this.bufferProfile = profile || 'balanced'
+  }
+
+  setEqConfig(eqConfig) {
+    this.eqConfig = eqConfig
+    if (this._eqProcessor) {
+      try {
+        this._eqProcessor.update(eqConfig)
+      } catch (e) {
+        console.warn('[AudioEngine] EQ update failed:', e?.message)
+      }
+    }
   }
 
   async play(filePath, startTime = 0, playbackRate = 1.0) {
-    // [STABILITY IMPROVEMENT] 不再直接丢弃请求，而是等待之前的操作完成
-    // 这样可以确保快速操作时的最后一次请求一定会被执行
     while (this._playLocked) {
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, 20))
     }
-    this._playLocked = true;
+    this._playLocked = true
 
     try {
-      await this._releaseResources();
+      await this._releaseResources()
 
-      if (/^https?:\/\//i.test(filePath)) {
-        filePath = normalizeStreamUri(filePath);
+      if (/^https?:\/\//i.test(filePath)) filePath = normalizeStreamUri(filePath)
+      this.currentFilePath = filePath
+      this.playbackRate = playbackRate
+      this.playbackTime = startTime
+
+      const info = await this._getFileInfo(filePath)
+      const fileSampleRate = info.sampleRate || 44100
+      const channels = Math.max(1, Math.min(2, info.channels || 2))
+
+      this._fileCodec = info.codec || 'unknown'
+      this._fileBitsPerSample = info.bitsPerSample || 16
+      this._fileIsDSD = !!info.isDSD
+      this._fileDsdRate = info.isDSD ? fileSampleRate : 0
+
+      let targetSampleRate
+      if (info.isDSD) {
+        // DSD -> PCM: convert at a high-res rate preserving maximum fidelity
+        // DSD64 (2.8 MHz) -> 176.4 kHz, DSD128 (5.6 MHz) -> 352.8 kHz
+        const dsdPcmRate = Math.min(352800, Math.max(176400, Math.round(fileSampleRate / 16)))
+        targetSampleRate = this.exclusiveMode && this._useNativeBridge
+          ? dsdPcmRate
+          : 44100
+        console.log(`[AudioEngine] DSD detected: native=${fileSampleRate}Hz → PCM ${dsdPcmRate}Hz`)
+      } else if (this.exclusiveMode && this._useNativeBridge) {
+        targetSampleRate = fileSampleRate
+      } else if (this.activeDevice && this.activeDevice.sampleRate > 0) {
+        targetSampleRate = this.activeDevice.sampleRate
+      } else {
+        targetSampleRate = 44100
       }
-      this.currentFilePath = filePath;
-      this.playbackRate = playbackRate;
-      this.playbackTime = startTime;
 
-      const info = await this._getFileInfo(filePath);
-      const fileSampleRate = info.sampleRate || 44100;
-      const channels = Math.max(1, Math.min(2, info.channels || 2));
-      const targetSampleRate =
-        this.activeDevice && this.activeDevice.sampleRate > 0
-          ? this.activeDevice.sampleRate
-          : 44100;
+      this._fileSampleRate = fileSampleRate
+      this._outputSampleRate = targetSampleRate
 
       console.log(
-        `[AudioEngine] Play: ${filePath} | src=${fileSampleRate}Hz → out=${targetSampleRate}Hz | rate=${playbackRate}`,
-      );
+        `[AudioEngine] Play: ${filePath} | ${info.codec} ${info.bitsPerSample}bit | src=${fileSampleRate}Hz → out=${targetSampleRate}Hz | rate=${playbackRate} | bridge=${this._useNativeBridge} | exclusive=${this.exclusiveMode}${info.isDSD ? ' | DSD' : ''}`
+      )
 
-      try {
-        this.audioOutput = new AudioIO({
-          outOptions: {
-            channelCount: channels,
-            sampleFormat: SampleFormatFloat32,
+      /* ── output backend ── */
+      if (this._useNativeBridge) {
+        const bridge = new NativeAudioBridge()
+        try {
+          await bridge.start({
             sampleRate: targetSampleRate,
-            deviceId: this.activeDevice ? this.activeDevice.id : -1,
-            closeOnError: false,
-          },
-        });
-      } catch (e) {
-        console.error("[AudioEngine] PortAudio Error:", e.message);
-        return { success: false, error: e.message };
+            channels,
+            deviceIndex: this.activeDeviceIndex,
+            exclusive: this.exclusiveMode,
+            volume: this.volume,
+            startTime,
+            playbackRate
+          })
+        } catch (e) {
+          console.warn('[AudioEngine] Native bridge start failed, falling back:', e?.message)
+          bridge.stop()
+          return this._playLegacy(filePath, startTime, playbackRate, channels, fileSampleRate, targetSampleRate)
+        }
+
+        bridge.onEnded(() => {
+          if (this.isPlaying && this.currentFilePath === filePath) {
+            this.isPlaying = false
+            if (this._onTrackEnded) this._onTrackEnded()
+          }
+        })
+
+        bridge.onError((err) => {
+          console.error('[AudioEngine] Bridge error:', err?.message)
+          if (err?.message === 'exclusive_denied') {
+            console.warn('[AudioEngine] Exclusive denied, retrying shared mode...')
+            this.exclusiveMode = false
+            this.play(filePath, this.playbackTime, playbackRate)
+          }
+        })
+
+        this._bridge = bridge
+        this._outputSink = bridge.writable
+        this._eqProcessor = createEqFloatProcessor(this.eqConfig, targetSampleRate, channels)
+      } else {
+        return this._playLegacy(filePath, startTime, playbackRate, channels, fileSampleRate, targetSampleRate)
       }
 
-      // [96kHz FIX] 三段式滤镜链
-      // Step 1: 将源文件（任意采样率）干净地重采样到目标设备采样率
-      // Step 2: 在目标率上用 asetrate 做 Nightcore 变速变调（避免对高采样率直接操作）
-      // Step 3: 将 asetrate 改变的采样率显式拉回 targetSampleRate 作为输出
-      const filters = [];
-      if (playbackRate !== 1.0) {
-        const ncSampleRateOnTarget = Math.round(
-          targetSampleRate * playbackRate,
-        );
-        filters.push(`aresample=${targetSampleRate}`); // Step 1: 纯净降采样
-        filters.push(`asetrate=${ncSampleRateOnTarget}`); // Step 2: Nightcore 变调
-        filters.push(`aresample=${targetSampleRate}`); // Step 3: 回到输出率
-      } else if (fileSampleRate !== targetSampleRate) {
-        filters.push(`aresample=${targetSampleRate}`); // 仅需重采样（如 96kHz→44.1kHz）
-      }
+      /* ── FFmpeg decode ── */
+      this._setupFFmpeg(filePath, startTime, playbackRate, channels, fileSampleRate, targetSampleRate)
 
       this.processor = new AudioProcessor({
         engine: this,
         targetSampleRate,
         channels,
         playbackRate,
-        startTime,
-      });
+        startTime
+      })
 
-      this.ffmpegProcess = ffmpeg(filePath)
-        .seekInput(startTime)
-        .format("f32le")
-        .audioChannels(channels)
-        .audioFrequency(targetSampleRate);
+      this.ffmpegProcess.pipe(this.processor)
+      this.processor.pipe(this._outputSink)
 
-      if (/^https?:\/\//i.test(filePath)) {
-        const opts = [];
-        if (isNeteaseStreamUrl(filePath)) {
-          opts.push("-user_agent", NETEASE_UA, "-headers", NETEASE_HEADERS);
-        } else {
-          opts.push("-user_agent", "EchoesStudio/1.0");
-        }
-        // 勿使用 -tls_verify：多数 ffmpeg-static 未编译该选项；http:// 流也不需要 TLS
-        this.ffmpegProcess.inputOptions(opts);
-      }
-
-      if (filters.length > 0) {
-        this.ffmpegProcess.audioFilters(filters);
-      }
-
-      this.ffmpegProcess.on("error", (err) => {
-        if (!err.message.includes("SIGKILL"))
-          console.error("[FFmpeg] Error:", err.message);
-      });
-
-      this.ffmpegProcess.pipe(this.processor);
-      this.processor.pipe(this.audioOutput);
-
-      this.audioOutput.start();
-      this.isPlaying = true;
-
-      return { success: true };
+      this.isPlaying = true
+      return { success: true }
     } finally {
-      this._playLocked = false;
+      this._playLocked = false
     }
   }
 
-  setVolume(vol) {
-    this.volume = vol;
+  /**
+   * Legacy playback path using naudiodon (PortAudio).
+   */
+  _playLegacy(filePath, startTime, playbackRate, channels, fileSampleRate, targetSampleRate) {
+    try {
+      const ao = new AudioIO({
+        outOptions: {
+          channelCount: channels,
+          sampleFormat: SampleFormatFloat32,
+          sampleRate: targetSampleRate,
+          deviceId: this.activeDevice ? this.activeDevice.id : -1,
+          closeOnError: false
+        }
+      })
+      this._outputSink = ao
+      this._bridge = null
+    } catch (e) {
+      console.error('[AudioEngine] PortAudio Error:', e.message)
+      return { success: false, error: e.message }
+    }
+
+    this._eqProcessor = null
+
+    this._setupFFmpeg(filePath, startTime, playbackRate, channels, fileSampleRate, targetSampleRate)
+
+    this.processor = new AudioProcessor({
+      engine: this,
+      targetSampleRate,
+      channels,
+      playbackRate,
+      startTime
+    })
+
+    this.ffmpegProcess.pipe(this.processor)
+    this.processor.pipe(this._outputSink)
+
+    this._outputSink.start()
+    this.isPlaying = true
+    return { success: true }
   }
 
-  getVolume() {
-    return this.volume;
+  /**
+   * Set up the FFmpeg decode process (shared by both paths).
+   */
+  _setupFFmpeg(filePath, startTime, playbackRate, channels, fileSampleRate, targetSampleRate) {
+    const filters = []
+    if (playbackRate !== 1.0) {
+      const ncRate = Math.round(targetSampleRate * playbackRate)
+      filters.push(`aresample=${targetSampleRate}`)
+      filters.push(`asetrate=${ncRate}`)
+      filters.push(`aresample=${targetSampleRate}`)
+    } else if (fileSampleRate !== targetSampleRate) {
+      filters.push(`aresample=${targetSampleRate}`)
+    }
+
+    this.ffmpegProcess = ffmpeg(filePath)
+      .seekInput(startTime)
+      .format('f32le')
+      .audioChannels(channels)
+      .audioFrequency(targetSampleRate)
+
+    if (/^https?:\/\//i.test(filePath)) {
+      const opts = isNeteaseStreamUrl(filePath)
+        ? ['-user_agent', NETEASE_UA, '-headers', NETEASE_HEADERS]
+        : ['-user_agent', 'EchoesStudio/1.0']
+      this.ffmpegProcess.inputOptions(opts)
+    }
+
+    if (filters.length > 0) this.ffmpegProcess.audioFilters(filters)
+
+    this.ffmpegProcess.on('error', (err) => {
+      if (!err.message.includes('SIGKILL')) console.error('[FFmpeg] Error:', err.message)
+    })
   }
+
+  setVolume(vol) { this.volume = vol }
+  getVolume() { return this.volume }
 
   async setPlaybackRate(rate) {
     if (this.currentFilePath && Math.abs(this.playbackRate - rate) > 0.01) {
-      return this.play(this.currentFilePath, this.playbackTime, rate);
+      return this.play(this.currentFilePath, this.playbackTime, rate)
     }
   }
 
-  // 这里的 pause 不再只是暂停流，而是停止资源，这是保证独占模式下稳定性的关键
   async pause() {
     if (this.isPlaying) {
-      console.log(`[AudioEngine] Pausing at ${this.playbackTime}`);
-      this.isPlaying = false;
-      await this._releaseResources();
+      if (this._bridge) {
+        this.playbackTime = this._bridge.getPosition()
+      }
+      console.log(`[AudioEngine] Pausing at ${this.playbackTime}`)
+      this.isPlaying = false
+      await this._releaseResources()
     }
   }
 
   resume() {
     if (!this.isPlaying && this.currentFilePath) {
-      console.log(`[AudioEngine] Resuming from ${this.playbackTime}`);
-      this.play(this.currentFilePath, this.playbackTime, this.playbackRate);
+      console.log(`[AudioEngine] Resuming from ${this.playbackTime}`)
+      this.play(this.currentFilePath, this.playbackTime, this.playbackRate)
     }
   }
 
   async stop() {
-    this.isPlaying = false;
-    await this._releaseResources();
-    this.currentFilePath = null;
-    this.playbackTime = 0;
+    this.isPlaying = false
+    await this._releaseResources()
+    this.currentFilePath = null
+    this.playbackTime = 0
   }
 
-  /**
-   * 资源回收：安全停止背景进程和音频通道
-   * 采用严格的异步序列：Unpipe -> Kill FFmpeg -> Wait -> Stop AudioIO
-   */
   async _releaseResources() {
-    // 1. 立即停止管道传输
     if (this.processor) {
       try {
-        if (this.audioOutput) this.processor.unpipe(this.audioOutput);
-        this.processor.destroy();
-      } catch (_) {}
-      this.processor = null;
+        if (this._outputSink) this.processor.unpipe(this._outputSink)
+        this.processor.destroy()
+      } catch { /* ignore */ }
+      this.processor = null
     }
 
-    // 2. 杀掉解码进程
     if (this.ffmpegProcess) {
-      try {
-        this.ffmpegProcess.kill("SIGKILL");
-      } catch (_) {}
-      this.ffmpegProcess = null;
+      try { this.ffmpegProcess.kill('SIGKILL') } catch { /* ignore */ }
+      this.ffmpegProcess = null
     }
 
-    // 3. 给 PortAudio 线程一个短暂的缓冲时间来刷新最后的缓冲区
-    // 这是解决 N-API status 10 (invalid arg) 的关键，防止在写入中途强制关闭句柄
-    // 3. 给 PortAudio 线程一个短暂的缓冲时间来刷新最后的缓冲区
-    // 这是解决 N-API status 10 (invalid arg) 的关键，防止在写入中途强制关闭句柄
-    if (this.audioOutput) {
-      const ao = this.audioOutput;
-      this.audioOutput = null; // 先解除引用防止新数据进入
+    /* ── native bridge cleanup ── */
+    if (this._bridge) {
+      this._bridge.stop()
+      this._bridge = null
+      this._outputSink = null
+      this._eqProcessor = null
+      return
+    }
 
-      // 先 unpipe 确保没有新数据流向 ao
+    /* ── legacy naudiodon cleanup ── */
+    if (this._outputSink) {
+      const ao = this._outputSink
+      this._outputSink = null
+
       if (this.processor) {
-        try {
-          this.processor.unpipe(ao);
-        } catch (_) {}
+        try { this.processor.unpipe(ao) } catch { /* ignore */ }
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 50)); // 短暂等待确保最后的数据写入正在处理中
+      await new Promise((resolve) => setTimeout(resolve, 50))
 
       try {
-        console.log("[AudioEngine] Quitting AudioIO...");
-        // naudiodon 的正确释放方法是 .quit()，它是异步并返回 promise 的
-        await ao.quit();
-        console.log("[AudioEngine] AudioIO quit successfully.");
+        console.log('[AudioEngine] Quitting AudioIO...')
+        await ao.quit()
+        console.log('[AudioEngine] AudioIO quit successfully.')
       } catch (e) {
-        console.warn(`[AudioEngine] AudioIO quit failed/ignored: ${e.message}`);
+        console.warn(`[AudioEngine] AudioIO quit failed/ignored: ${e.message}`)
       }
     }
   }
 
   getStatus() {
+    let currentTime = this.playbackTime
+    if (this._bridge && this._bridge.isReady) {
+      currentTime = this._bridge.getPosition()
+      this.playbackTime = currentTime
+    }
+    const deviceInfo = this._bridge?.deviceInfo
+    const outSR = deviceInfo?.sampleRate || this._outputSampleRate || 0
+    const srcSR = this._fileSampleRate
     return {
       isPlaying: this.isPlaying,
-      currentTime: this.playbackTime,
+      currentTime,
       filePath: this.currentFilePath,
       playbackRate: this.playbackRate,
-    };
+      exclusive: this.exclusiveMode,
+      exclusiveConfirmed: !!(deviceInfo && deviceInfo.exclusive === true),
+      nativeBridge: this._useNativeBridge,
+      fileSampleRate: srcSR,
+      outputSampleRate: outSR,
+      codec: this._fileCodec,
+      bitsPerSample: this._fileBitsPerSample,
+      isDSD: this._fileIsDSD,
+      dsdRate: this._fileDsdRate,
+      bitPerfect: srcSR > 0 && outSR > 0 && srcSR === outSR && !this._fileIsDSD,
+      useEQ: !!(this.eqConfig && this.eqConfig.useEQ)
+    }
   }
 
-  _getFileInfo(filePath) {
-    const uri = /^https?:\/\//i.test(filePath)
-      ? normalizeStreamUri(filePath)
-      : filePath;
-    return new Promise((resolve) => {
-      const netease = isNeteaseStreamUrl(uri);
-      const probeOpts = netease
-        ? ["-user_agent", NETEASE_UA, "-headers", NETEASE_HEADERS]
-        : [];
-      const cb = (err, metadata) => {
-        if (err || !metadata || !metadata.streams) {
-          resolve({ sampleRate: 44100, channels: 2 });
-          return;
-        }
-        const stream = metadata.streams.find((s) => s.codec_type === "audio");
-        resolve({
-          sampleRate: stream ? parseInt(stream.sample_rate) : 44100,
-          channels: stream ? stream.channels || 2 : 2,
-        });
-      };
-      if (probeOpts.length) ffmpeg.ffprobe(uri, probeOpts, cb);
-      else ffmpeg.ffprobe(uri, cb);
-    });
+  async _getFileInfo(filePath) {
+    if (/^https?:\/\//i.test(filePath)) {
+      return { sampleRate: 44100, channels: 2, bitsPerSample: 16, codec: 'stream', lossless: false, isDSD: false }
+    }
+    try {
+      const { parseFile } = await import('music-metadata')
+      const meta = await parseFile(filePath, { duration: false })
+      const codecName = (meta.format.codec || meta.format.container || '').toLowerCase()
+      const isDSD = /dsd/.test(codecName) || /\.(dsf|dff)$/i.test(filePath)
+      return {
+        sampleRate: meta.format.sampleRate || 44100,
+        channels: meta.format.numberOfChannels || 2,
+        bitsPerSample: meta.format.bitsPerSample || (isDSD ? 1 : 16),
+        codec: meta.format.container || 'unknown',
+        lossless: !!meta.format.lossless || isDSD,
+        isDSD
+      }
+    } catch (e) {
+      console.warn('[AudioEngine] _getFileInfo failed, using defaults:', e?.message)
+      return { sampleRate: 44100, channels: 2, bitsPerSample: 16, codec: 'unknown', lossless: false, isDSD: false }
+    }
   }
 }
 
-export const audioEngine = new AudioEngine();
+export const audioEngine = new AudioEngine()

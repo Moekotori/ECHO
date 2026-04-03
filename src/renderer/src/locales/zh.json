@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Echoes Studio"
+    "title": "ECHO"
   },
   "nav": {
     "back": "返回"
@@ -17,7 +17,35 @@
     "removeFromPlaylist": "从歌单移除",
     "backToPlaylists": "返回歌单列表",
     "dismiss": "关闭提示",
-    "addToPlaylistDialog": "添加到歌单"
+    "addToPlaylistDialog": "添加到歌单",
+    "trackContextMenu": "曲目操作"
+  },
+  "like": {
+    "like": "喜欢",
+    "unlike": "取消喜欢",
+    "filterOnly": "喜欢的",
+    "filterOnlyTitle": "仅显示已喜欢的曲目"
+  },
+  "contextMenu": {
+    "addToPlaylist": "加入歌单…",
+    "playNext": "下一首播放",
+    "removeFromUpNext": "从下一首队列移除",
+    "removeFromQueue": "从播放列表移除",
+    "removeFromPlaylist": "从当前歌单移除",
+    "showInFolder": "在文件夹中显示",
+    "copyPath": "复制文件路径",
+    "openWithDefaultApp": "使用系统默认应用打开",
+    "copyTrackLine": "复制歌名与艺术家",
+    "copyTrackImage": "复制歌曲卡片图片",
+    "saveTrackImage": "保存歌曲卡片图片",
+    "actionFailed": "操作失败：{{detail}}"
+  },
+  "queue": {
+    "alreadyInUpNext": "该曲目已在“下一首”队列中。",
+    "dropHint": "将歌曲拖到这里可加入下一首队列",
+    "playbackOn": "队列开",
+    "playbackOff": "队列关",
+    "playbackToggleTitle": "切换是否按下一首队列优先播放"
   },
   "dropOverlay": {
     "title": "拖放以添加音乐",
@@ -27,7 +55,10 @@
     "lyricsSettings": "歌词设置",
     "studioDownloader": "媒体下载",
     "mvSettings": "MV 设置",
-    "castReceiver": "接收投屏 (DLNA)"
+    "castReceiver": "接收投屏 (DLNA)",
+    "listenTogether": "一起听歌",
+    "plugins": "插件",
+    "audioSettings": "音频设置"
   },
   "import": {
     "folder": "导入文件夹",
@@ -40,7 +71,8 @@
   "listMode": {
     "songs": "歌曲",
     "albums": "专辑",
-    "playlists": "歌单"
+    "playlists": "歌单",
+    "queue": "队列"
   },
   "albumFilter": {
     "label": "专辑：{{name}}",
@@ -49,9 +81,11 @@
   "empty": {
     "noTracks": "还没有曲目。",
     "importFolder": "导入文件夹即可开始！",
+    "queueEmpty": "下一首队列为空。",
     "noPlaylists": "还没有歌单。新建一个或导入 JSON 文件。",
     "playlistEmpty": "此歌单为空。请在「歌曲」标签用 (+) 添加曲目，或使用「从搜索结果添加」。",
-    "noSearchMatch": "没有符合搜索条件的曲目。"
+    "noSearchMatch": "没有符合搜索条件的曲目。",
+    "noLikedInView": "当前列表下没有已喜欢的曲目。"
   },
   "playlists": {
     "yourPlaylists": "我的歌单",
@@ -99,6 +133,8 @@
     "exportButton": "渲染并导出音频 (.wav)",
     "exportWavSuccess": "导出成功！",
     "exportWavFailed": "导出失败：{{message}}",
+    "copyCardImage": "复制卡片图片",
+    "saveCardImage": "保存卡片图片",
     "selectTrack": "请选择曲目",
     "nightcoreMode": "Nightcore 模式",
     "ellipsis": "…"
@@ -125,14 +161,44 @@
     "spectrumDesc": "在主播放器上显示音频频谱分析。",
     "miniWaveTitle": "迷你波形条",
     "miniWaveDesc": "在曲目信息下方显示小型频谱波形。",
-    "eqMasterTitle": "主均衡器（10 段）",
+    "visualizerExclusiveHint": "以上两项依赖应用内音频分析，在独占（WASAPI）输出模式下可能无法正常显示。",
+    "eqMasterTitle": "主均衡器（16 段）",
     "eqMasterDesc": "精确调节各频段，获得高保真输出。",
+    "outputBufferTitle": "音频输出缓冲",
+    "outputBufferDesc": "仅影响通过本机驱动的播放路径。稳定档增大缓冲可减少断音，略增延迟；低延迟档相反。",
+    "outputBuffer": {
+      "low": "低延迟",
+      "balanced": "平衡",
+      "stable": "稳定"
+    },
     "lyricsShadowTitle": "歌词面板阴影",
     "lyricsShadowDesc": "沉浸式背景开启时，控制歌词面板是否保留磨砂/阴影边框；可关闭以获得完全透明效果。",
     "integrations": "三方集成",
     "discordTitle": "Discord 状态展示",
     "discordDesc": "在 Discord 个人资料上显示当前曲目与播放倍速。",
     "eqSection": "参数化EQ",
+    "eqEngineHintHifi": "HiFi 引擎：均衡器与前级在主进程对 PCM 处理后再输出，听感与此处设置一致。",
+    "eqEngineHintStandard": "标准引擎：均衡器走本机 Web Audio；HiFi 模式则对原生 PCM 套用相同曲线。",
+    "audioTitle": "音频设置",
+    "outputDevice": "输出设备",
+    "systemDefault": "系统默认",
+    "exclusiveMode": "WASAPI 独占模式",
+    "exclusiveDesc": "绕过 Windows 混音器，实现 Bit-Perfect 输出。源文件采样率将被保留（如 192 kHz）。启用后其他应用将静音。",
+    "exclusiveWaiting": "独占模式将在下一首曲目开始时生效。",
+    "bufferProfile": "缓冲区配置",
+    "bufferHint": "若独占模式下出现爆音或卡顿，请尝试提高缓冲区大小。",
+    "bufferProfiles": {
+      "low": "低延迟",
+      "balanced": "平衡",
+      "stable": "稳定"
+    },
+    "dsdMode": "DSD 播放",
+    "dsdToPcm": "PCM 转换",
+    "dsdPcm": "PCM 转换",
+    "dsdPcmDesc": "通用",
+    "dsdDopDesc": "即将推出",
+    "dsdHint": "DSD 文件会被转换为高分辨率 PCM 进行播放。DoP（DSD over PCM）将在后续版本中支持兼容 DAC。",
+    "audioDrawerEqBlurb": "音量、设备、独占与缓冲区影响原生输出。参量 EQ 与设置页同步；HiFi 下在主进程对 PCM 生效。",
     "reset": "重置",
     "custom": "自定义",
     "aesthetics": "外观与主题",
@@ -144,13 +210,17 @@
     "downloadDirDesc": "最高画质媒体将保存到此路径。",
     "notSet": "未设置",
     "setFolder": "选择文件夹",
+    "autoSaveLibraryTitle": "自动保存媒体库",
+    "autoSaveLibraryDesc": "自动保存歌曲列表、收藏与自定义歌单。关闭后仅本次运行有效。",
     "plImportTitle": "歌单链接导入目录",
     "plImportDesc": "通过链接导入保存的音频放在这里。未设置时使用上方的默认下载目录。",
     "sameAsDownload": "（与下载目录相同）",
     "chooseFolder": "选择目录",
     "useDownloadFolder": "使用下载目录",
     "about": "关于",
-    "aboutBody": "Echoes Studio 是高性能 Nightcore 音频引擎。全部信号处理在 Web Audio API 中以 32 位浮点精度完成，力求无损音质。",
+    "aboutBody": "ECHO 是高性能 Nightcore 音频引擎。全部信号处理在 Web Audio API 中以 32 位浮点精度完成，力求无损音质。",
+    "versionText": "Version {{version}}",
+    "poweredBy": "Powered by Moekotori",
     "devSection": "开发者",
     "devConsoleTitle": "开发者工具（控制台）",
     "devConsoleDesc": "打开或关闭独立窗口的 Chromium 控制台；再点一次可关闭。",
@@ -159,6 +229,9 @@
     "devOpenFailed": "无法打开开发者工具：{{message}}",
     "devReloadFailed": "无法重新加载：{{message}}",
     "devUserDataFailed": "无法打开用户数据目录：{{message}}",
+  "devModeTitle": "开发者模式",
+  "devModeDesc": "开启后显示调试与开发者功能；关闭时这些功能将隐藏。",
+  "devModeDisabledHint": "开发者功能当前已隐藏，开启“开发者模式”后显示。",
     "devStartupTitle": "启动时打开控制台",
     "devStartupDesc": "应用启动后自动打开开发者工具（下次启动生效）。",
     "devReloadTitle": "重新加载窗口",
@@ -170,9 +243,9 @@
     "devUserDataDesc": "打开 Electron 用户数据目录（配置、缓存等，进阶）。",
     "devOpenFolder": "在资源管理器中打开",
     "dangerZone": "危险操作",
-    "resetAllTitle": "重置全部设置",
-    "resetAllDesc": "将界面、均衡器与主题等全部恢复为出厂默认。",
-    "resetAllButton": "重置全部",
+    "resetAllTitle": "恢复默认设置",
+    "resetAllDesc": "将界面、常规与主题等全部恢复为出厂默认状态。",
+    "resetAllButton": "恢复默认",
     "resetConfirm": "确定将所有设置恢复为出厂默认？主题、均衡器与外观将全部清除。",
     "themeCustomBadge": "自定义",
     "gradientMode": "模式",
@@ -229,6 +302,7 @@
     "glassColorDesc": "面板磨砂着色"
   },
   "themePreset": {
+    "darkmode": "深色模式",
     "sakura": "樱粉",
     "midnight": "午夜回响",
     "matcha": "抹茶拿铁",
@@ -247,7 +321,25 @@
     "Vocal": "人声",
     "Electronic": "电子",
     "Pop": "流行",
-    "Rock": "摇滚"
+    "Rock": "摇滚",
+    "Classical": "古典",
+    "Hi-Res Air": "高解析空气感"
+  },
+  "eqPlot": {
+    "scrollQ": "滚轮调 Q",
+    "filterType": "类型",
+    "qLabel": "Q",
+    "types": {
+      "peaking": "峰化",
+      "lowshelf": "低搁架",
+      "highshelf": "高搁架",
+      "lowpass": "低通",
+      "highpass": "高通",
+      "notch": "陷波",
+      "allpass": "全通"
+    },
+    "shelfQHint": "搁架滤波：Q 主要影响转折尖锐度，过大在部分浏览器上可能听感异常。",
+    "gainExtremeHint": "±24 dB 极大提升易失真。"
   },
   "youtubeHint": {
     "body": "YouTube MV 未能及时就绪（多为需登录或验证页）。请尝试：设置 → 应用内登录 YouTube，然后重新加载此 MV。",
@@ -291,7 +383,22 @@
     "downloading": "下载中…",
     "downloadProgress": "下载 {{current}}/{{total}} · {{track}}",
     "bulkProgress": "{{message}}{{pct}}",
-    "linkMetaLine": "{{name}} · 共 {{total}} 首"
+    "linkMetaLine": "{{name}} · 共 {{total}} 首",
+    "neteaseCookiePlaceholder": "粘贴网易云 Cookie（MUSIC_U 等）后点击登录",
+    "neteaseLogin": "登录网易云",
+    "neteaseOneClick": "一键登录获取",
+    "neteaseOpening": "正在打开登录页…",
+    "neteaseOpenLoginFailed": "无法打开网易云登录窗口",
+    "neteaseFeatureNeedRestart": "请重启开发中的 Electron 应用后再试一键登录（主进程/预加载未更新）",
+    "neteaseLogout": "退出登录",
+    "neteaseLoggedIn": "网易云账号已登录（Cookie 已保存）",
+    "neteaseNotLoggedIn": "未登录网易云账号（部分歌曲可能仅低音质/非完整版）",
+    "qualityGroupLabel": "下载音质选择",
+    "qualityAuto": "音质：自动（最高可用）",
+    "qualityLossless": "无损（优先 FLAC）",
+    "qualityHigh": "音质：高（优先 320k）",
+    "qualityMedium": "音质：中（优先 192k）",
+    "qualityLow": "音质：低（节省流量）"
   },
   "drawer": {
     "lyricsTitle": "歌词",
@@ -301,19 +408,78 @@
     "mvTitle": "MV 设置",
     "mvAria": "MV 设置",
     "castTitle": "接收投屏",
-    "castAria": "接收投屏"
+    "castAria": "接收投屏",
+    "listenTogetherTitle": "一起听歌",
+    "listenTogetherAria": "一起听歌"
+  },
+  "listenTogether": {
+    "connection": "服务器连接",
+    "tokenOptional": "访问令牌（可选）",
+    "name": "你的昵称",
+    "connectionState": "连接状态",
+    "room": "房间",
+    "createRoom": "创建房间",
+    "joinRoom": "加入房间",
+    "leaveRoom": "离开房间",
+    "roomCode": "输入房间码",
+    "copyInvite": "复制入房信息",
+    "copyJoinKey": "复制快速加入 Key",
+    "inviteText": "一起听歌入房信息",
+    "copied": "已复制到剪贴板",
+    "keyCopied": "已复制快速加入 Key",
+    "joinKey": "输入快速加入 Key",
+    "useJoinKey": "一键填充并加入",
+    "invalidJoinKey": "加入 Key 无效",
+    "keyApplied": "已应用 Key 信息",
+    "roomAccessKey": "房间访问密钥（锁房时必填）",
+    "lockByKey": "仅允许持有 Key 的成员加入",
+    "roomLocked": "房间已锁定，请输入正确 Key",
+    "shareAudio": "共享音频",
+    "audioUrl": "输入在线音频直链 URL",
+    "publishUrl": "发布直链",
+    "publishLocal": "上传本地文件",
+    "resyncNow": "重新同步",
+    "resynced": "已尝试重新同步",
+    "followMode": "跟随模式",
+    "memberReadonlyHint": "当前房主控制播放，成员为只读跟随",
+    "syncOffset": "跟播延迟偏移",
+    "autoResync": "自动重同步",
+    "autoResyncEvery": "重同步间隔",
+    "forceSeekThreshold": "强制校时阈值",
+    "qualityOriginal": "音质策略：原始",
+    "qualityCompressed": "音质策略：节流压缩（实验）",
+    "transferHost": "转移房主",
+    "syncCover": "同步歌曲封面",
+    "syncLyrics": "同步歌词",
+    "syncMvHeavy": "同步 MV 链接（更吃性能）"
   },
   "lyricsDrawer": {
     "displayStyle": "显示与样式",
     "romaji": "罗马字",
     "translation": "翻译",
+    "wordHighlight": "逐字高亮",
+  "wordLeadMs": "逐字提前量",
+  "wordLeadMsHint": "正值会让高亮更早，负值会让高亮更晚。",
+  "wordFillRatio": "单行完成比例",
+  "wordFillRatioHint": "控制一行在下一句开始前多早完成 100% 高亮。",
     "mainLineSize": "主歌词字号",
+    "fontColor": "歌词颜色",
+    "fontColorHint": "仅影响歌词界面文字颜色；清空将使用主题默认。",
+    "reset": "重置",
+    "layerMain": "主行",
+    "layerKaraoke": "逐字高亮",
+    "layerRomaji": "罗马音",
+    "layerTranslation": "翻译",
+    "stateActive": "当前",
+    "stateNormal": "普通",
+    "statePast": "已过",
     "hideLyrics": "隐藏滚动歌词",
     "hideLyricsHint": "仍保留标题区与侧栏 MV；仅隐藏中间歌词列表。",
     "source": "来源",
     "statusPrefix": "歌词状态：",
     "statusLoading": "加载中…",
     "statusMatched": "已匹配",
+  "statusDegraded": "已匹配（逐字已降级）",
     "statusNone": "无匹配",
     "statusDash": "—",
     "selectSource": "选择来源",
@@ -332,7 +498,10 @@
     "chooseFile": "选择文件",
     "editPlain": "纯文本编辑",
     "pastePlaceholder": "粘贴 LRC 或纯文本歌词…",
-    "applyLyrics": "应用歌词"
+    "applyLyrics": "应用歌词",
+    "linkPlaceholder": "粘贴歌曲链接（网易云 / QQ / 酷狗 / 酷我）…",
+    "fetchFromLink": "从链接获取歌词",
+    "linkHint": "网易云链接支持按歌曲 ID 直取歌词；其他平台链接会尝试通用匹配。"
   },
   "mvDrawer": {
     "urlError": "无法识别的链接。请粘贴 YouTube 或 Bilibili 视频地址。",
@@ -357,6 +526,7 @@
     "exitImmersiveLyrics": "返回播放页",
     "mvAsBg": "将 MV 作为应用背景",
     "bgOpacity": "背景不透明度",
+    "bgBlur": "背景模糊",
     "qualityUltra": "超高 (4K)",
     "qualityHighFps": "高帧率 60fps (1080P)",
     "qualityHigh": "高 (1080p)",
@@ -371,7 +541,7 @@
   "castDrawer": {
     "introBefore": "在同一 Wi‑Fi 下，可将音乐投送到 ",
     "introAfter": "。开始投屏时本地播放会暂停。",
-    "appsDlna": "应用与 DLNA：Echoes 为标准 UPnP AV（DLNA MediaRenderer）。能向电视/音箱通过 DLNA 推送可播放 HTTP(S) 流的 App 通常可连接；设备名与元数据因 App 而异。QQ 音乐等 Android/iOS 应用支持 DLNA，请查看各 App 说明。Spotify 桌面版通常使用 Spotify Connect 或系统蓝牙/扬声器，而非 DLNA；若某版本提供 DLNA 或第三方桥接，可尝试在设备列表中选择本机。",
+    "appsDlna": "应用与 DLNA：ECHO 为标准 UPnP AV（DLNA MediaRenderer）。能向电视/音箱通过 DLNA 推送可播放 HTTP(S) 流的 App 通常可连接；设备名与元数据因 App 而异。QQ 音乐等 Android/iOS 应用支持 DLNA，请查看各 App 说明。Spotify 桌面版通常使用 Spotify Connect 或系统蓝牙/扬声器，而非 DLNA；若某版本提供 DLNA 或第三方桥接，可尝试在设备列表中选择本机。",
     "netease": "网易云音乐：在设置中开启「连接 DLNA 设备」；播放页打开设备/投屏并选择本设备（名称同上）。若看不到：请确认下方局域网 IP 与手机同网段（错误网卡或 VPN 很常见）；可将环境变量 ECHOES_DLNA_IP 设为本机 Wi‑Fi IPv4，并检查 Windows 防火墙与本应用及 UDP 1900。若无法播放，可能是链接加密 — 请在官方 App 内投屏并保持更新。",
     "deviceNameLabel": "设备显示名称（DLNA）",
     "working": "处理中…",
@@ -381,5 +551,18 @@
     "state": "状态",
     "uri": "URI",
     "dlnaError": "DLNA：{{error}}"
+  },
+  "plugins": {
+    "title": "插件",
+    "install": "安装",
+    "openDir": "打开文件夹",
+    "empty": "暂无已安装插件。将插件文件夹放入插件目录或点击安装。",
+    "enable": "启用",
+    "disable": "禁用",
+    "uninstall": "卸载",
+    "backToList": "返回",
+    "permissions": "权限",
+    "noPermissions": "不需要特殊权限",
+    "confirmUninstall": "确定卸载插件「{{name}}」？此操作不可撤销。"
   }
 }

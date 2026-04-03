@@ -117,3 +117,11 @@ downloads/
 out/
 release/
 .vite/
+
+# 打包与备份忽略文件
+release*/
+crash-reports/
+*.zip
+win-unpacked/
+ECHO*.exe
+

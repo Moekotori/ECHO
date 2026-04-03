@@ -1,60 +1,47 @@
-import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
-import {
-  X,
-  ToggleLeft,
-  ToggleRight,
-  Link,
-  Play,
-  Minus,
-  Plus,
-} from "lucide-react";
-import { extractVideoId } from "../utils/mvUrlParse";
+import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import { X, ToggleLeft, ToggleRight, Link, Play, Minus, Plus } from 'lucide-react'
+import { extractVideoId } from '../utils/mvUrlParse'
 
 const QUALITY_LABELS = {
-  tiny: "144p",
-  small: "240p",
-  medium: "360p",
-  large: "480p",
-  hd720: "720p",
-  hd1080: "1080p",
-  hd1440: "1440p",
-  hd2160: "4K",
-  highres: "4K+",
-};
+  tiny: '144p',
+  small: '240p',
+  medium: '360p',
+  large: '480p',
+  hd720: '720p',
+  hd1080: '1080p',
+  hd1440: '1440p',
+  hd2160: '4K',
+  highres: '4K+'
+}
 
-function getMvQualityPresentation(
-  mvId,
-  mvPlaybackQuality,
-  biliDirectStream,
-  t,
-) {
-  if (!mvPlaybackQuality) return null;
-  const label = QUALITY_LABELS[mvPlaybackQuality] || mvPlaybackQuality;
-  if (mvId?.source === "bilibili") {
+function getMvQualityPresentation(mvId, mvPlaybackQuality, biliDirectStream, t) {
+  if (!mvPlaybackQuality) return null
+  const label = QUALITY_LABELS[mvPlaybackQuality] || mvPlaybackQuality
+  if (mvId?.source === 'bilibili') {
     if (biliDirectStream?.ok) {
       return {
         badge: label,
         inline: label,
-        hint: t("mvDrawer.hintBiliDirect", {
-          format: biliDirectStream.format?.toUpperCase() || "DASH",
+        hint: t('mvDrawer.hintBiliDirect', {
+          format: biliDirectStream.format?.toUpperCase() || 'DASH'
         }),
-        pillClass: "mv-drawer-quality-live",
-      };
+        pillClass: 'mv-drawer-quality-live'
+      }
     }
     return {
       badge: `~${label}`,
       inline: `~${label}`,
-      hint: t("mvDrawer.hintBiliEmbed"),
-      pillClass: "mv-drawer-quality-estimate",
-    };
+      hint: t('mvDrawer.hintBiliEmbed'),
+      pillClass: 'mv-drawer-quality-estimate'
+    }
   }
   return {
     badge: label,
     inline: label,
-    hint: t("mvDrawer.hintYoutube"),
-    pillClass: "mv-drawer-quality-live",
-  };
+    hint: t('mvDrawer.hintYoutube'),
+    pillClass: 'mv-drawer-quality-live'
+  }
 }
 
 export default function MvSettingsDrawer({
@@ -69,79 +56,74 @@ export default function MvSettingsDrawer({
   setMvId,
   mvPlaybackQuality,
   biliDirectStream,
-  onRestartPlayback,
+  onRestartPlayback
 }) {
-  const { t } = useTranslation();
-  const [customUrl, setCustomUrl] = useState("");
-  const [urlError, setUrlError] = useState("");
+  const { t } = useTranslation()
+  const [customUrl, setCustomUrl] = useState('')
+  const [urlError, setUrlError] = useState('')
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) return
     const onKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
 
   useEffect(() => {
     if (!open) {
-      setUrlError("");
+      setUrlError('')
     }
-  }, [open]);
+  }, [open])
 
   const handleCustomMv = useCallback(() => {
-    setUrlError("");
-    const result = extractVideoId(customUrl);
+    setUrlError('')
+    const result = extractVideoId(customUrl)
     if (!result) {
-      setUrlError(t("mvDrawer.urlError"));
-      return;
+      setUrlError(t('mvDrawer.urlError'))
+      return
     }
-    setMvId({ id: result.id, source: result.source });
-    setCustomUrl("");
-    if (onRestartPlayback) onRestartPlayback();
-  }, [customUrl, setMvId, onRestartPlayback, t]);
+    setMvId({ id: result.id, source: result.source })
+    setCustomUrl('')
+    if (onRestartPlayback) onRestartPlayback()
+  }, [customUrl, setMvId, onRestartPlayback, t])
 
   const selectStyle = {
-    padding: "8px 12px",
-    borderRadius: "8px",
-    border: "1px solid var(--glass-border)",
-    background: "rgba(255,255,255,0.08)",
-    color: "var(--text-main)",
-    outline: "none",
-    width: "100%",
-    maxWidth: 220,
-  };
+    padding: '8px 12px',
+    borderRadius: '8px',
+    border: '1px solid var(--glass-border)',
+    background: 'rgba(255,255,255,0.08)',
+    color: 'var(--text-main)',
+    outline: 'none',
+    width: '100%',
+    maxWidth: 220
+  }
 
-  const qualityPres = getMvQualityPresentation(
-    mvId,
-    mvPlaybackQuality,
-    biliDirectStream,
-    t,
-  );
+  const qualityPres = getMvQualityPresentation(mvId, mvPlaybackQuality, biliDirectStream, t)
 
-  const mvOffsetMs = config.mvOffsetMs ?? 0;
+  const mvOffsetMs = config.mvOffsetMs ?? 0
 
   return (
     <>
       <div
-        className={`lyrics-drawer-backdrop ${open ? "lyrics-drawer-backdrop--open" : ""}`}
+        className={`lyrics-drawer-backdrop ${open ? 'lyrics-drawer-backdrop--open' : ''}`}
         onClick={onClose}
         aria-hidden={!open}
       />
       <aside
-        className={`lyrics-drawer-panel ${open ? "lyrics-drawer-panel--open" : ""}`}
+        className={`lyrics-drawer-panel ${open ? 'lyrics-drawer-panel--open' : ''}`}
         role="dialog"
-        aria-label={t("drawer.mvAria")}
+        aria-label={t('drawer.mvAria')}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="lyrics-drawer-header">
-          <h2 className="lyrics-drawer-title">{t("drawer.mvTitle")}</h2>
+          <h2 className="lyrics-drawer-title">{t('drawer.mvTitle')}</h2>
           <button
             type="button"
             className="lyrics-drawer-close"
             onClick={onClose}
-            aria-label={t("aria.close")}
+            aria-label={t('aria.close')}
           >
             <X size={20} />
           </button>
@@ -152,21 +134,21 @@ export default function MvSettingsDrawer({
           <section className="mv-drawer-section">
             <h3 className="mv-drawer-section-title">
               <Link size={16} />
-              {t("mvDrawer.customMv")}
+              {t('mvDrawer.customMv')}
             </h3>
-            <p className="mv-drawer-hint">{t("mvDrawer.customHint")}</p>
+            <p className="mv-drawer-hint">{t('mvDrawer.customHint')}</p>
             <div className="mv-drawer-url-row">
               <input
                 type="text"
                 className="mv-drawer-url-input"
-                placeholder={t("mvDrawer.urlPlaceholder")}
+                placeholder={t('mvDrawer.urlPlaceholder')}
                 value={customUrl}
                 onChange={(e) => {
-                  setCustomUrl(e.target.value);
-                  setUrlError("");
+                  setCustomUrl(e.target.value)
+                  setUrlError('')
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleCustomMv();
+                  if (e.key === 'Enter') handleCustomMv()
                 }}
               />
               <button
@@ -181,22 +163,18 @@ export default function MvSettingsDrawer({
             {urlError && <p className="mv-drawer-url-error">{urlError}</p>}
             {mvId && (
               <div
-                className={`mv-drawer-now-playing-box ${qualityPres ? "mv-drawer-now-playing-box--stack" : ""}`}
+                className={`mv-drawer-now-playing-box ${qualityPres ? 'mv-drawer-now-playing-box--stack' : ''}`}
               >
                 <p className="mv-drawer-now-playing">
-                  {t("mvDrawer.nowPlaying", {
+                  {t('mvDrawer.nowPlaying', {
                     source: mvId.source,
-                    id: mvId.id,
+                    id: mvId.id
                   })}
                 </p>
                 {qualityPres && (
                   <>
-                    <span className="mv-drawer-quality-badge">
-                      {qualityPres.badge}
-                    </span>
-                    <span className="mv-drawer-quality-hint">
-                      {qualityPres.hint}
-                    </span>
+                    <span className="mv-drawer-quality-badge">{qualityPres.badge}</span>
+                    <span className="mv-drawer-quality-hint">{qualityPres.hint}</span>
                   </>
                 )}
               </div>
@@ -205,45 +183,33 @@ export default function MvSettingsDrawer({
 
           {/* Playback */}
           <section className="mv-drawer-section">
-            <h3 className="mv-drawer-section-title">
-              {t("mvDrawer.playback")}
-            </h3>
+            <h3 className="mv-drawer-section-title">{t('mvDrawer.playback')}</h3>
 
             <div className="mv-drawer-row">
               <div className="mv-drawer-row-info">
-                <span className="mv-drawer-label">
-                  {t("mvDrawer.enableMv")}
-                </span>
+                <span className="mv-drawer-label">{t('mvDrawer.enableMv')}</span>
               </div>
               <button
-                className={`toggle-btn ${config.enableMV ? "active" : ""}`}
+                className={`toggle-btn ${config.enableMV ? 'active' : ''}`}
                 onClick={() => {
                   setConfig((prev) => ({
                     ...prev,
-                    enableMV: !prev.enableMV,
-                  }));
-                  if (config.enableMV && !config.mvAsBackground) setMvId(null);
+                    enableMV: !prev.enableMV
+                  }))
+                  if (config.enableMV && !config.mvAsBackground) setMvId(null)
                 }}
               >
-                {config.enableMV ? (
-                  <ToggleRight size={28} />
-                ) : (
-                  <ToggleLeft size={28} />
-                )}
+                {config.enableMV ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
               </button>
             </div>
 
             <div className="mv-drawer-row">
               <div className="mv-drawer-row-info">
-                <span className="mv-drawer-label">
-                  {t("mvDrawer.mvSource")}
-                </span>
+                <span className="mv-drawer-label">{t('mvDrawer.mvSource')}</span>
               </div>
               <select
-                value={config.mvSource || "youtube"}
-                onChange={(e) =>
-                  setConfig((prev) => ({ ...prev, mvSource: e.target.value }))
-                }
+                value={config.mvSource || 'bilibili'}
+                onChange={(e) => setConfig((prev) => ({ ...prev, mvSource: e.target.value }))}
                 style={selectStyle}
               >
                 <option value="youtube">YouTube</option>
@@ -254,51 +220,39 @@ export default function MvSettingsDrawer({
             <div className="mv-drawer-row">
               <div className="mv-drawer-row-info">
                 <span className="mv-drawer-label">
-                  {t("mvDrawer.videoQuality")}
+                  {t('mvDrawer.videoQuality')}
                   {qualityPres && (
-                    <span className={qualityPres.pillClass}>
-                      {qualityPres.inline}
-                    </span>
+                    <span className={qualityPres.pillClass}>{qualityPres.inline}</span>
                   )}
                 </span>
               </div>
               <select
-                value={config.mvQuality || "high"}
-                onChange={(e) =>
-                  setConfig((prev) => ({ ...prev, mvQuality: e.target.value }))
-                }
+                value={config.mvQuality || 'high'}
+                onChange={(e) => setConfig((prev) => ({ ...prev, mvQuality: e.target.value }))}
                 style={selectStyle}
               >
-                <option value="ultra">{t("mvDrawer.qualityUltra")}</option>
-                <option value="highfps">{t("mvDrawer.qualityHighFps")}</option>
-                <option value="high">{t("mvDrawer.qualityHigh")}</option>
-                <option value="medium">{t("mvDrawer.qualityMedium")}</option>
-                <option value="low">{t("mvDrawer.qualityLow")}</option>
+                <option value="ultra">{t('mvDrawer.qualityUltra')}</option>
+                <option value="highfps">{t('mvDrawer.qualityHighFps')}</option>
+                <option value="high">{t('mvDrawer.qualityHigh')}</option>
+                <option value="medium">{t('mvDrawer.qualityMedium')}</option>
+                <option value="low">{t('mvDrawer.qualityLow')}</option>
               </select>
             </div>
 
             <div className="mv-drawer-row">
               <div className="mv-drawer-row-info">
-                <span className="mv-drawer-label">{t("mvDrawer.muteMv")}</span>
+                <span className="mv-drawer-label">{t('mvDrawer.muteMv')}</span>
               </div>
               <button
-                className={`toggle-btn ${config.mvMuted ? "active" : ""}`}
-                onClick={() =>
-                  setConfig((prev) => ({ ...prev, mvMuted: !prev.mvMuted }))
-                }
+                className={`toggle-btn ${config.mvMuted ? 'active' : ''}`}
+                onClick={() => setConfig((prev) => ({ ...prev, mvMuted: !prev.mvMuted }))}
               >
-                {config.mvMuted ? (
-                  <ToggleRight size={28} />
-                ) : (
-                  <ToggleLeft size={28} />
-                )}
+                {config.mvMuted ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
               </button>
             </div>
 
             <div className="lyrics-drawer-offset" style={{ marginTop: 8 }}>
-              <span className="lyrics-drawer-label">
-                {t("mvDrawer.mvSyncOffset")}
-              </span>
+              <span className="lyrics-drawer-label">{t('mvDrawer.mvSyncOffset')}</span>
               <div className="lyrics-drawer-offset-controls">
                 <button
                   type="button"
@@ -306,15 +260,15 @@ export default function MvSettingsDrawer({
                   onClick={() =>
                     setConfig((p) => ({
                       ...p,
-                      mvOffsetMs: (p.mvOffsetMs ?? 0) - 50,
+                      mvOffsetMs: (p.mvOffsetMs ?? 0) - 50
                     }))
                   }
-                  aria-label={t("lyricsDrawer.decrease50")}
+                  aria-label={t('lyricsDrawer.decrease50')}
                 >
                   <Minus size={18} />
                 </button>
                 <span className="lyrics-drawer-offset-value">
-                  {mvOffsetMs > 0 ? "+" : ""}
+                  {mvOffsetMs > 0 ? '+' : ''}
                   {mvOffsetMs} ms
                 </span>
                 <button
@@ -323,29 +277,27 @@ export default function MvSettingsDrawer({
                   onClick={() =>
                     setConfig((p) => ({
                       ...p,
-                      mvOffsetMs: (p.mvOffsetMs ?? 0) + 50,
+                      mvOffsetMs: (p.mvOffsetMs ?? 0) + 50
                     }))
                   }
-                  aria-label={t("lyricsDrawer.increase50")}
+                  aria-label={t('lyricsDrawer.increase50')}
                 >
                   <Plus size={18} />
                 </button>
               </div>
-              <p className="lyrics-drawer-hint">{t("mvDrawer.mvSyncOffsetHint")}</p>
+              <p className="lyrics-drawer-hint">{t('mvDrawer.mvSyncOffsetHint')}</p>
             </div>
 
             <div className="mv-drawer-row">
               <div className="mv-drawer-row-info">
-                <span className="mv-drawer-label">
-                  {t("mvDrawer.autoFallback")}
-                </span>
+                <span className="mv-drawer-label">{t('mvDrawer.autoFallback')}</span>
               </div>
               <button
-                className={`toggle-btn ${config.autoFallbackToBilibili ? "active" : ""}`}
+                className={`toggle-btn ${config.autoFallbackToBilibili ? 'active' : ''}`}
                 onClick={() =>
                   setConfig((prev) => ({
                     ...prev,
-                    autoFallbackToBilibili: !prev.autoFallbackToBilibili,
+                    autoFallbackToBilibili: !prev.autoFallbackToBilibili
                   }))
                 }
               >
@@ -360,43 +312,35 @@ export default function MvSettingsDrawer({
 
           {/* Immersive Background */}
           <section className="mv-drawer-section">
-            <h3 className="mv-drawer-section-title">
-              {t("mvDrawer.immersive")}
-            </h3>
+            <h3 className="mv-drawer-section-title">{t('mvDrawer.immersive')}</h3>
 
             <div className="mv-drawer-row">
               <div className="mv-drawer-row-info">
-                <span className="mv-drawer-label">{t("mvDrawer.mvAsBg")}</span>
+                <span className="mv-drawer-label">{t('mvDrawer.mvAsBg')}</span>
               </div>
               <button
-                className={`toggle-btn ${config.mvAsBackground ? "active" : ""}`}
+                className={`toggle-btn ${config.mvAsBackground ? 'active' : ''}`}
                 onClick={() => {
                   setConfig((prev) => ({
                     ...prev,
-                    mvAsBackground: !prev.mvAsBackground,
-                  }));
-                  if (config.mvAsBackground && !config.enableMV) setMvId(null);
+                    mvAsBackground: !prev.mvAsBackground
+                  }))
+                  if (config.mvAsBackground && !config.enableMV) setMvId(null)
                 }}
               >
-                {config.mvAsBackground ? (
-                  <ToggleRight size={28} />
-                ) : (
-                  <ToggleLeft size={28} />
-                )}
+                {config.mvAsBackground ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
               </button>
             </div>
 
             {config.mvAsBackground && (
               <div className="mv-drawer-row">
                 <div className="mv-drawer-row-info">
-                  <span className="mv-drawer-label">
-                    {t("mvDrawer.bgOpacity")}
-                  </span>
+                  <span className="mv-drawer-label">{t('mvDrawer.bgOpacity')}</span>
                   <span className="mv-drawer-value">
                     {Math.round(
                       (config.mvBackgroundOpacity !== undefined
                         ? config.mvBackgroundOpacity
-                        : 0.8) * 100,
+                        : 0.8) * 100
                     )}
                     %
                   </span>
@@ -407,14 +351,37 @@ export default function MvSettingsDrawer({
                   max={1}
                   step={0.05}
                   value={
-                    config.mvBackgroundOpacity !== undefined
-                      ? config.mvBackgroundOpacity
-                      : 0.8
+                    config.mvBackgroundOpacity !== undefined ? config.mvBackgroundOpacity : 0.8
                   }
                   onChange={(e) =>
                     setConfig((prev) => ({
                       ...prev,
-                      mvBackgroundOpacity: parseFloat(e.target.value),
+                      mvBackgroundOpacity: parseFloat(e.target.value)
+                    }))
+                  }
+                  style={{ flex: 1, maxWidth: 180 }}
+                />
+              </div>
+            )}
+
+            {config.mvAsBackground && (
+              <div className="mv-drawer-row">
+                <div className="mv-drawer-row-info">
+                  <span className="mv-drawer-label">{t('mvDrawer.bgBlur')}</span>
+                  <span className="mv-drawer-value">
+                    {Math.round(config.mvBackgroundBlur !== undefined ? config.mvBackgroundBlur : 0)}px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={30}
+                  step={1}
+                  value={config.mvBackgroundBlur !== undefined ? config.mvBackgroundBlur : 0}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      mvBackgroundBlur: parseInt(e.target.value, 10)
                     }))
                   }
                   style={{ flex: 1, maxWidth: 180 }}
@@ -426,17 +393,15 @@ export default function MvSettingsDrawer({
               <>
                 <div className="mv-drawer-row">
                   <div className="mv-drawer-row-info">
-                    <span className="mv-drawer-label">
-                      {t("mvDrawer.hideImmersiveChrome")}
-                    </span>
+                    <span className="mv-drawer-label">{t('mvDrawer.hideImmersiveChrome')}</span>
                   </div>
                   <button
                     type="button"
-                    className={`toggle-btn ${config.mvHideImmersiveChrome ? "active" : ""}`}
+                    className={`toggle-btn ${config.mvHideImmersiveChrome ? 'active' : ''}`}
                     onClick={() =>
                       setConfig((prev) => ({
                         ...prev,
-                        mvHideImmersiveChrome: !prev.mvHideImmersiveChrome,
+                        mvHideImmersiveChrome: !prev.mvHideImmersiveChrome
                       }))
                     }
                   >
@@ -447,40 +412,28 @@ export default function MvSettingsDrawer({
                     )}
                   </button>
                 </div>
-                <p className="lyrics-drawer-hint">
-                  {t("mvDrawer.hideImmersiveChromeHint")}
-                </p>
+                <p className="lyrics-drawer-hint">{t('mvDrawer.hideImmersiveChromeHint')}</p>
               </>
             )}
           </section>
 
           {/* Account */}
           <section className="mv-drawer-section">
-            <h3 className="mv-drawer-section-title">{t("mvDrawer.account")}</h3>
+            <h3 className="mv-drawer-section-title">{t('mvDrawer.account')}</h3>
 
             <div className="mv-drawer-row">
               <div className="mv-drawer-row-info">
                 <span className="mv-drawer-label">
                   YouTube
                   {signInStatus.youtube ? (
-                    <span className="signin-badge signed-in">
-                      {t("mvDrawer.signedIn")}
-                    </span>
+                    <span className="signin-badge signed-in">{t('mvDrawer.signedIn')}</span>
                   ) : (
-                    <span className="signin-badge not-signed">
-                      {t("mvDrawer.notSignedIn")}
-                    </span>
+                    <span className="signin-badge not-signed">{t('mvDrawer.notSignedIn')}</span>
                   )}
                 </span>
               </div>
-              <button
-                type="button"
-                className="mv-drawer-action-btn"
-                onClick={onYoutubeSignIn}
-              >
-                {signInStatus.youtube
-                  ? t("mvDrawer.reSignIn")
-                  : t("mvDrawer.signIn")}
+              <button type="button" className="mv-drawer-action-btn" onClick={onYoutubeSignIn}>
+                {signInStatus.youtube ? t('mvDrawer.reSignIn') : t('mvDrawer.signIn')}
               </button>
             </div>
 
@@ -489,29 +442,19 @@ export default function MvSettingsDrawer({
                 <span className="mv-drawer-label">
                   Bilibili
                   {signInStatus.bilibili ? (
-                    <span className="signin-badge signed-in">
-                      {t("mvDrawer.signedIn")}
-                    </span>
+                    <span className="signin-badge signed-in">{t('mvDrawer.signedIn')}</span>
                   ) : (
-                    <span className="signin-badge not-signed">
-                      {t("mvDrawer.notSignedIn")}
-                    </span>
+                    <span className="signin-badge not-signed">{t('mvDrawer.notSignedIn')}</span>
                   )}
                 </span>
               </div>
-              <button
-                type="button"
-                className="mv-drawer-action-btn"
-                onClick={onBilibiliSignIn}
-              >
-                {signInStatus.bilibili
-                  ? t("mvDrawer.reSignIn")
-                  : t("mvDrawer.signIn")}
+              <button type="button" className="mv-drawer-action-btn" onClick={onBilibiliSignIn}>
+                {signInStatus.bilibili ? t('mvDrawer.reSignIn') : t('mvDrawer.signIn')}
               </button>
             </div>
           </section>
         </div>
       </aside>
     </>
-  );
+  )
 }

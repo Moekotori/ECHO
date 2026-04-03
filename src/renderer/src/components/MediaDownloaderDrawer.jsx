@@ -1,7 +1,7 @@
-import { useEffect } from "react";
-import { useTranslation } from "react-i18next";
-import { X } from "lucide-react";
-import DownloaderView from "../DownloaderView";
+import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { X } from 'lucide-react'
+import DownloaderView from '../DownloaderView'
 
 export default function MediaDownloaderDrawer({
   open,
@@ -12,40 +12,38 @@ export default function MediaDownloaderDrawer({
   userPlaylists,
   setUserPlaylists,
   setPlaylist,
-  setSelectedUserPlaylistId,
+  setSelectedUserPlaylistId
 }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation()
   useEffect(() => {
-    if (!open) return;
+    if (!open) return
     const onKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
 
   return (
     <>
       <div
-        className={`lyrics-drawer-backdrop ${open ? "lyrics-drawer-backdrop--open" : ""}`}
+        className={`lyrics-drawer-backdrop ${open ? 'lyrics-drawer-backdrop--open' : ''}`}
         onClick={onClose}
         aria-hidden={!open}
       />
       <aside
-        className={`lyrics-drawer-panel ${open ? "lyrics-drawer-panel--open" : ""}`}
+        className={`lyrics-drawer-panel ${open ? 'lyrics-drawer-panel--open' : ''}`}
         role="dialog"
-        aria-label={t("drawer.mediaDownloaderAria")}
+        aria-label={t('drawer.mediaDownloaderAria')}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="lyrics-drawer-header">
-          <h2 className="lyrics-drawer-title">
-            {t("drawer.mediaDownloaderTitle")}
-          </h2>
+          <h2 className="lyrics-drawer-title">{t('drawer.mediaDownloaderTitle')}</h2>
           <button
             type="button"
             className="lyrics-drawer-close"
             onClick={onClose}
-            aria-label={t("aria.close")}
+            aria-label={t('aria.close')}
           >
             <X size={20} />
           </button>
@@ -63,5 +61,5 @@ export default function MediaDownloaderDrawer({
         </div>
       </aside>
     </>
-  );
+  )
 }

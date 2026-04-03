@@ -4,32 +4,29 @@ module.exports = {
   env: {
     browser: true,
     es2022: true,
-    node: true,
+    node: true
   },
   extends: [
-    "eslint:recommended",
-    "plugin:react/recommended",
-    "plugin:react/jsx-runtime",
-    "@electron-toolkit/eslint-config-prettier",
+    'eslint:recommended',
+    'plugin:react/recommended',
+    'plugin:react/jsx-runtime',
+    '@electron-toolkit/eslint-config-prettier'
   ],
   parserOptions: {
-    ecmaVersion: "latest",
-    sourceType: "module",
-    ecmaFeatures: { jsx: true },
+    ecmaVersion: 'latest',
+    sourceType: 'module',
+    ecmaFeatures: { jsx: true }
   },
   settings: {
-    react: { version: "detect" },
+    react: { version: 'detect' }
   },
-  plugins: ["react"],
-  ignorePatterns: ["out/**", "dist/**", "node_modules/**"],
+  plugins: ['react'],
+  ignorePatterns: ['out/**', 'dist/**', 'node_modules/**'],
   rules: {
-    "react/prop-types": "off",
-    "react/react-in-jsx-scope": "off",
-    "no-unused-vars": [
-      "warn",
-      { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
-    ],
-    "no-empty": "warn",
-    "no-useless-escape": "warn",
-  },
-};
+    'react/prop-types': 'off',
+    'react/react-in-jsx-scope': 'off',
+    'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+    'no-empty': 'warn',
+    'no-useless-escape': 'warn'
+  }
+}

@@ -7,6 +7,24 @@
  */
 
 :root {
+  /* Spacing scale (4pt baseline) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Unified radius scale */
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  /* Control heights */
+  --control-h-sm: 32px;
+  --control-h-md: 40px;
+  --control-h-lg: 64px;
+
   /* Single source for the old pink→blue motif (use instead of repeating linear-gradient) */
   --gradient-accent: linear-gradient(
     135deg,
@@ -23,7 +41,7 @@
   --motion-fast: 150ms;
   --motion-normal: 220ms;
   --motion-slow: 360ms;
-  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
 
   /* Typography scale (pair with existing rem scaling in App) */
   --text-xs: 11px;
@@ -35,10 +53,17 @@
   /* Numeric / technical rows: tabular figures without loading a second webfont */
   --font-numeric: var(--font-family-main);
 
-  /* Surfaces & chrome */
+  /* Surfaces & chrome — light default; App.jsx sets --surface-elevated for dark themes */
   --surface-elevated: rgba(255, 255, 255, 0.45);
   --border-subtle: var(--glass-border);
   --shadow-panel: 0 8px 28px 0 var(--shadow-color);
+
+  /* Overlay / translucent white scale — use instead of raw rgba(255,255,255,N) */
+  --overlay-subtle: rgba(255, 255, 255, 0.04);
+  --overlay-light: rgba(255, 255, 255, 0.08);
+  --overlay-medium: rgba(255, 255, 255, 0.14);
+  --overlay-strong: rgba(255, 255, 255, 0.22);
+  --overlay-solid: rgba(255, 255, 255, 0.42);
 
   /* Focus — keyboard / a11y */
   --focus-ring-width: 2px;
