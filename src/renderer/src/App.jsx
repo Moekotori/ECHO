@@ -5071,9 +5071,9 @@ export default function App() {
             )}
 
             <div
-              className={`lyrics-and-mv-wrapper${config.lyricsHidden ? ' lyrics-and-mv-wrapper--lyrics-hidden' : ''}`}
+              className={`lyrics-and-mv-wrapper${config.lyricsHidden || (lyrics.length > 0 && lyrics.filter(l => l.text.trim()).every(l => l.text.match(/纯音乐|instrumental|.*欣赏.*|.*enjoy.*/i))) ? ' lyrics-and-mv-wrapper--lyrics-hidden' : ''}`}
             >
-              {!config.lyricsHidden && (
+              {!(config.lyricsHidden || (lyrics.length > 0 && lyrics.filter(l => l.text.trim()).every(l => l.text.match(/纯音乐|instrumental|.*欣赏.*|.*enjoy.*/i)))) && (
                 <div className="lyrics-scroll-area" ref={scrollAreaRef}>
                   {lyrics.length > 0 ? (
                     lyrics.map((line, idx) => (
