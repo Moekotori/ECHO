@@ -477,7 +477,7 @@ export default function DownloaderView({
             {searchResults.map((s) => (
               <div
                 key={s.id}
-                className="flex items-center p-3 rounded-lg bg-[var(--surface-color)] hover:bg-[var(--surface-hover-color)] transition-colors cursor-pointer border border-transparent hover:border-[var(--accent-color)] group"
+                className="flex items-center p-2.5 rounded-xl bg-[var(--surface-color)] hover:bg-[var(--surface-hover-color)] transition-all cursor-pointer border border-transparent hover:border-[var(--accent-color)] hover:shadow-md group gap-3"
                 onClick={() => {
                   setUrl(`https://music.163.com/song?id=${s.id}`)
                   setSearchResults([])
@@ -487,14 +487,21 @@ export default function DownloaderView({
                   }, 100)
                 }}
               >
-                <div className="flex flex-col flex-1 truncate pr-4">
-                  <span className="font-semibold text-[var(--text-primary)] truncate">{s.name}</span>
-                  <span className="text-xs text-[var(--text-secondary)] truncate mt-1">
-                    {s.artists} - {s.album} {(s.alia||[]).length ? `(${s.alia.join(' ')})` : ''}
+                {s.cover ? (
+                  <img src={`${s.cover}?param=80y80`} alt="" loading="lazy" className="w-11 h-11 rounded-lg object-cover shadow-sm shrink-0 bg-black/10" />
+                ) : (
+                  <div className="w-11 h-11 rounded-lg flex justify-center items-center shrink-0 bg-black/5 dark:bg-white/5 text-[var(--text-secondary)]">
+                    <Music size={20} />
+                  </div>
+                )}
+                <div className="flex flex-col flex-1 min-w-0 pr-2">
+                  <span className="text-[13px] font-bold text-[var(--text-primary)] truncate">{s.name}</span>
+                  <span className="text-[11px] text-[var(--text-secondary)] truncate mt-0.5">
+                    {s.artists} • {s.album} {(s.alia||[]).length ? `(${s.alia.join(' / ')})` : ''}
                   </span>
                 </div>
-                <div className="text-xs font-semibold text-[var(--accent-color)] shrink-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Download size={14} className="mr-1" />
+                <div className="text-[12px] font-bold text-white bg-[var(--accent-color)] hover:bg-[var(--accent-hover-color)] px-3 py-1.5 rounded-full shrink-0 flex items-center transition-all opacity-0 group-hover:opacity-100 shadow-sm mr-1 shadow-[var(--accent-color)]/30">
+                  <Download size={14} className="mr-1 stroke-[2.5]" />
                   下载
                 </div>
               </div>

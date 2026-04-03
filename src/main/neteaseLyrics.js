@@ -20,7 +20,7 @@ export async function searchNeteaseSongs(keywords) {
   const ncm = getNcmApi()
   const base = ncmRequestOptions()
   try {
-    const res = await ncm.search({
+    const res = await ncm.cloudsearch({
       keywords: keywords.trim(),
       limit: 30,
       type: 1,
@@ -33,6 +33,7 @@ export async function searchNeteaseSongs(keywords) {
       name: s.name,
       artists: (s.ar || s.artists || []).map((a) => a.name).join(' / '),
       album: s.al?.name || s.album?.name || '',
+      cover: s.al?.picUrl || s.album?.picUrl || null,
       duration: s.dt || 0,
       fee: s.fee || 0,
       alia: [].concat(s.alia || []).concat(s.alias || [])
