@@ -190,6 +190,7 @@ export default function App() {
   const [playbackRate, setPlaybackRate] = useState(1.0)
   const [volume, setVolume] = useState(1.0)
   const [useNativeEngine, setUseNativeEngine] = useState(false)
+  const [isAudioExclusive, setIsAudioExclusive] = useState(false)
   const useNativeEngineRef = useRef(false)
   const nativePlayJustCalledRef = useRef(false)
   /** Avoid duplicate native playAudio for the same track (React Strict Mode double-invokes effects). */
@@ -1074,8 +1075,14 @@ export default function App() {
   // Hi-Fi Native Audio Status Listener
   useEffect(() => {
     if (!window.api?.onAudioStatus) return
+    let lastExclusive = false
     return window.api.onAudioStatus((status) => {
-      if (!status || !status.nativeBridge) return
+      if (!status) return
+      if (status.exclusive !== lastExclusive) {
+        lastExclusive = !!status.exclusive
+        setIsAudioExclusive(!!status.exclusive)
+      }
+      if (!status.nativeBridge) return
       if (isSeekingRef.current) return
 
       if (status.filePath === playlist[currentIndex]?.path) {
@@ -2528,6 +2535,32 @@ export default function App() {
     if (biliAudioRef.current) biliAudioRef.current.playbackRate = playbackRate
   }, [playbackRate, mvId, biliDirectStream])
 
+  // Bilibili direct video: WASAPI Exclusive Hardware Stutter Fix
+  useEffect(() => {
+    if (!isAudioExclusive || !biliDirectStream || !mvId || mvId.source !== 'bilibili') return
+    let ctx = null
+    const tmr = setTimeout(() => {
+      const refs = [biliVideoRef.current, biliBackgroundVideoRef.current].filter(Boolean)
+      if (!refs.length) return
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext
+        ctx = new AudioContext()
+        ctx.suspend()
+        refs.forEach(el => {
+          ctx.createMediaElementSource(el) // Bypasses Chromium audio sync waiting for locked WASAPI endpoint
+        })
+        console.log('[Fix] WebAudio WASAPI exclusive playback stutter fix applied to Bilibili video')
+      } catch (err) {
+        console.warn('Failed to apply exclusive mode stutter fix', err)
+      }
+    }, 50)
+
+    return () => {
+      clearTimeout(tmr)
+      if (ctx) ctx.close().catch(()=>{})
+    }
+  }, [isAudioExclusive, biliDirectStream, mvId, isBackground])
+
   const postToAllMvIframes = useCallback((msg, target = '*') => {
     ;[ytIframeRef, ytBackgroundIframeRef].forEach((ref) => {
       if (ref.current?.contentWindow) {
@@ -3934,10 +3967,11 @@ export default function App() {
 
     if (mvObj.source === 'bilibili') {
       if (biliDirectStream?.videoUrl) {
-        const videoMuted = biliDirectStream.format === 'dash' || config.mvMuted
+        const videoMuted = biliDirectStream.format === 'dash' || config.mvMuted || isAudioExclusive
         return (
           <>
             <video
+              key={`bili_direct_v_${isAudioExclusive ? 'exc' : 'shared'}`}
               ref={isBackground ? biliBackgroundVideoRef : biliVideoRef}
               src={biliDirectStream.videoUrl}
               autoPlay
@@ -3962,7 +3996,7 @@ export default function App() {
                 setBiliDirectStream(null)
               }}
             />
-            {biliDirectStream.format === 'dash' && biliDirectStream.audioUrl && !config.mvMuted && (
+            {biliDirectStream.format === 'dash' && biliDirectStream.audioUrl && !config.mvMuted && !isAudioExclusive && (
               <audio
                 ref={biliAudioRef}
                 src={biliDirectStream.audioUrl}
@@ -3982,7 +4016,7 @@ export default function App() {
       return (
         <iframe
           ref={isBackground ? ytBackgroundIframeRef : ytIframeRef}
-          src={`https://player.bilibili.com/player.html?bvid=${mvObj.id}&autoplay=1&muted=${config.mvMuted ? 1 : 0}&high_quality=${qualitySetting === 'low' ? 0 : 1}&quality=${biliQuality}&danmaku=0`}
+          src={`https://player.bilibili.com/player.html?bvid=${mvObj.id}&autoplay=1&muted=${config.mvMuted || isAudioExclusive ? 1 : 0}&high_quality=${qualitySetting === 'low' ? 0 : 1}&quality=${biliQuality}&danmaku=0`}
           frameBorder="0"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen
@@ -4005,7 +4039,7 @@ export default function App() {
     return (
       <iframe
         ref={isBackground ? ytBackgroundIframeRef : ytIframeRef}
-        src={`${ytHost}/embed/${mvObj.id}?autoplay=1&mute=${config.mvMuted ? 1 : 0}&controls=0&disablekb=1&fs=0&loop=1&playlist=${mvObj.id}&modestbranding=1&enablejsapi=1&playsinline=1&rel=0&vq=${ytVq}&origin=${ytOrigin}&widgetid=${isBackground ? 2 : 1}`}
+        src={`${ytHost}/embed/${mvObj.id}?autoplay=1&mute=${config.mvMuted || isAudioExclusive ? 1 : 0}&controls=0&disablekb=1&fs=0&loop=1&playlist=${mvObj.id}&modestbranding=1&enablejsapi=1&playsinline=1&rel=0&vq=${ytVq}&origin=${ytOrigin}&widgetid=${isBackground ? 2 : 1}`}
         frameBorder="0"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
         allowFullScreen
