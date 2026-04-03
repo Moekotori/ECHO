@@ -58,7 +58,11 @@ contextBridge.exposeInMainWorld('api', {
   setDiscordActivity: (activity) => ipcRenderer.send('discord:setActivity', activity),
   clearDiscordActivity: () => ipcRenderer.send('discord:clearActivity'),
   toggleDiscordRPC: (enabled) => ipcRenderer.send('discord:toggle', enabled),
+  neteaseSearch: (keywords) => ipcRenderer.invoke('netease:search', keywords),
+  
   media: {
+    fetchNeteaseLrcText: (params) => ipcRenderer.invoke('netease:fetchLrcText', params),
+    writeFile: (filePath, text) => ipcRenderer.invoke('media:writeFile', filePath, text),
     getMetadata: (url) => ipcRenderer.invoke('media:getMetadata', url),
     downloadAudio: (url, folder, options) => ipcRenderer.invoke('media:download', url, folder, options),
     onProgress: (callback) => {

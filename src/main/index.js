@@ -32,7 +32,10 @@ import { initCrashReporter, logError, getCrashDir } from './CrashReporter'
 import MediaDownloader from './MediaDownloader'
 import { importPlaylistFromLink } from './playlistLinkImport.js'
 import { convertLinesToRomaji } from './romajiKuroshiro.js'
-import { fetchNeteaseLrcText } from './neteaseLyrics.js'
+import {
+  fetchNeteaseLrcText,
+  searchNeteaseSongs
+} from './neteaseLyrics.js'
 import { getMediaDurationSeconds } from './utils/ffmpegProbeDuration.js'
 import { getDialogStrings } from './dialogLocale.js'
 import PluginManager from './plugins/PluginManager.js'
@@ -851,6 +854,20 @@ app.whenReady().then(async () => {
   })
 
   // Media Download IPC
+  ipcMain.handle('netease:search', async (event, keywords) => {
+    return await searchNeteaseSongs(keywords)
+  })
+
+  ipcMain.handle('netease:fetchLrcText', async (event, params) => {
+    return await fetchNeteaseLrcText(params)
+  })
+
+  ipcMain.handle('media:writeFile', async (event, filePath, text) => {
+    const fs = require('fs')
+    fs.writeFileSync(filePath, text, 'utf8')
+    return true
+  })
+
   ipcMain.handle('media:getMetadata', async (event, url) => {
     return await MediaDownloader.getMetadata(url)
   })

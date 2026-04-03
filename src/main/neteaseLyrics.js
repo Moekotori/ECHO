@@ -15,6 +15,34 @@ function ncmRequestOptions() {
   return opts
 }
 
+export async function searchNeteaseSongs(keywords) {
+  if (!keywords || !keywords.trim()) return []
+  const ncm = getNcmApi()
+  const base = ncmRequestOptions()
+  try {
+    const res = await ncm.search({
+      keywords: keywords.trim(),
+      limit: 30,
+      type: 1,
+      ...base
+    })
+    const songs = res?.body?.result?.songs
+    if (!Array.isArray(songs)) return []
+    return songs.map((s) => ({
+      id: s.id,
+      name: s.name,
+      artists: (s.ar || s.artists || []).map((a) => a.name).join(' / '),
+      album: s.al?.name || s.album?.name || '',
+      duration: s.dt || 0,
+      fee: s.fee || 0,
+      alia: [].concat(s.alia || []).concat(s.alias || [])
+    }))
+  } catch (e) {
+    console.error('[neteaseLyrics] search error:', e)
+    return []
+  }
+}
+
 /**
  * 根据关键词在网易云搜索并拉取 LRC 文本（与歌单导入共用 Cookie/代理）
  * @param {{ keywords?: string, durationSec?: number, songId?: string|number }} params
@@ -80,7 +108,30 @@ export async function fetchNeteaseLrcText(params) {
       // Check if any keyword token appears in the song name + artist
       const kwTokens = keywords.split(/\s+/).filter(Boolean)
       for (const tok of kwTokens) {
-        if (allText.includes(normalize(tok))) score += 5
+        const normTok = normalize(tok)
+        if (!normTok) continue
+        if (artistNames.includes(normTok)) score += 40 // Artist match is extremely important
+        else if (songName.includes(normTok)) score += 15
+        else if (allText.includes(normTok)) score += 10
+      }
+
+      // Prefer original songs over covers/inst/english versions if possible
+      const lowerName = (s.name || '').toLowerCase()
+      const aliases = [].concat(s.alia || []).concat(s.alias || [])
+      const searchStr = lowerName + ' ' + aliases.join(' ').toLowerCase()
+      const lowerKw = keywords.toLowerCase()
+
+      if (!lowerKw.includes('cover') && !lowerKw.includes('翻唱')) {
+        if (searchStr.includes('cover') || searchStr.includes('翻唱')) score -= 60
+      }
+      if (!lowerKw.includes('english') && !lowerKw.includes('eng')) {
+        if (searchStr.includes('english') || searchStr.includes('eng ver') || searchStr.includes('english ver')) score -= 80
+      }
+      if (!lowerKw.includes('inst') && !lowerKw.includes('伴奏')) {
+        if (searchStr.includes('inst') || searchStr.includes('karaoke') || searchStr.includes('instrumental') || searchStr.includes('伴奏') || searchStr.includes('off vocal')) score -= 60
+      }
+      if (!lowerKw.includes('live')) {
+        if (searchStr.includes('live')) score -= 20
       }
 
       // Duration proximity bonus

@@ -35,6 +35,8 @@ export default function DownloaderView({
   const [neteaseCookieSaved, setNeteaseCookieSaved] = useState('')
   const [audioQualityPreset, setAudioQualityPreset] = useState('auto')
   const [isNeteaseSigningIn, setIsNeteaseSigningIn] = useState(false)
+  const [searchResults, setSearchResults] = useState([])
+  const [isSearching, setIsSearching] = useState(false)
   const downloaderPrefsHydratedRef = useRef(false)
 
   useEffect(() => {
@@ -231,11 +233,19 @@ export default function DownloaderView({
   }, [])
 
   const handleFetchMetadata = async () => {
-    if (!url.trim()) return
+    const rawUrl = url.trim()
+    if (!rawUrl) return
+    if (!/^https?:\/\//i.test(rawUrl)) {
+      // Treat as name search
+      handleSearch(rawUrl)
+      return
+    }
+
     setIsLoadingMeta(true)
     setStatus('loading_meta')
     setErrorMsg('')
     setMetadata(null)
+    setSearchResults([])
     try {
       const meta = await window.api.media.getMetadata(url)
       setMetadata(meta)
@@ -246,6 +256,25 @@ export default function DownloaderView({
       setStatus('error')
     } finally {
       setIsLoadingMeta(false)
+    }
+  }
+
+  const handleSearch = async (keywords) => {
+    setIsSearching(true)
+    setStatus('searching')
+    setErrorMsg('')
+    setMetadata(null)
+    setSearchResults([])
+    try {
+      const res = await window.api.neteaseSearch(keywords)
+      setSearchResults(res || [])
+      setStatus('search_ok')
+    } catch (err) {
+      console.error(err)
+      setErrorMsg(err.message || 'Search failed')
+      setStatus('error')
+    } finally {
+      setIsSearching(false)
     }
   }
 
@@ -270,11 +299,35 @@ export default function DownloaderView({
         .catch(() => [])
       const newFiles = filesAfter.filter((fa) => !filesBefore.find((fb) => fb.path === fa.path))
 
-      if (newFiles.length > 0 && onSuccess) {
-        onSuccess({
-          path: newFiles[0].path,
-          mvOriginUrl: url.trim()
-        })
+      if (newFiles.length > 0) {
+        const filePath = newFiles[0].path
+        let hasLyrics = false
+
+        // Fetch lyrics automatically if downloading a netease song id match
+        const mId = url.match(/song\?id=(\d+)/) || url.match(/song\/(\d+)/i)
+        const neteaseIdMatches = !!mId
+        if (neteaseIdMatches) {
+          try {
+            console.log('[DownloaderView] Fetching matched lyrics for netease song id', mId[1])
+            const lrcText = await window.api.media.fetchNeteaseLrcText({ songId: mId[1] }).catch(() => null)
+            if (lrcText) {
+              const lrcPath = filePath.replace(/\.[^/.]+$/, '.lrc')
+              await window.api.media.writeFile(lrcPath, lrcText).catch(() => null)
+              console.log('[DownloaderView] Saved LRC:', lrcPath)
+              hasLyrics = true
+            }
+          } catch(err) {
+            console.error('[DownloaderView] failed to dl lyrics:', err)
+          }
+        }
+
+        if (onSuccess) {
+          onSuccess({
+            path: filePath,
+            mvOriginUrl: url.trim(),
+            hasLyrics
+          })
+        }
       }
     } catch (err) {
       console.error(err)
@@ -393,12 +446,62 @@ export default function DownloaderView({
             type="button"
             className="md-btn-parse"
             onClick={handleFetchMetadata}
-            disabled={!url || isLoadingMeta || isDownloading}
+            disabled={!url || isLoadingMeta || isDownloading || isSearching}
           >
-            {isLoadingMeta ? <Loader2 size={24} className="spin" /> : t('downloader.parseLink')}
+            {isLoadingMeta || isSearching ? <Loader2 size={24} className="spin" /> : t('downloader.parseLink', '解析/搜索')}
           </button>
         </div>
       </section>
+
+      {status === 'searching' && (
+        <section className="md-section">
+          <div className="flex items-center justify-center p-4 text-[var(--text-secondary)]">
+            <Loader2 size={24} className="spin mr-2" />
+            <span>搜索中...</span>
+          </div>
+        </section>
+      )}
+
+      {status === 'search_ok' && searchResults.length === 0 && (
+        <section className="md-section">
+          <div className="p-4 text-center text-[var(--text-secondary)] text-sm">
+            {t('downloader.neteaseSearchNoResults', '未找到相关歌曲')}
+          </div>
+        </section>
+      )}
+
+      {status === 'search_ok' && searchResults.length > 0 && (
+        <section className="md-section">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">{t('downloader.neteaseSearchResults', '搜索结果 (网易云)')}</h3>
+          <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-1">
+            {searchResults.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center p-3 rounded-lg bg-[var(--surface-color)] hover:bg-[var(--surface-hover-color)] transition-colors cursor-pointer border border-transparent hover:border-[var(--accent-color)] group"
+                onClick={() => {
+                  setUrl(`https://music.163.com/song?id=${s.id}`)
+                  setSearchResults([])
+                  setStatus('idle')
+                  setTimeout(() => {
+                    handleFetchMetadata()
+                  }, 100)
+                }}
+              >
+                <div className="flex flex-col flex-1 truncate pr-4">
+                  <span className="font-semibold text-[var(--text-primary)] truncate">{s.name}</span>
+                  <span className="text-xs text-[var(--text-secondary)] truncate mt-1">
+                    {s.artists} - {s.album} {(s.alia||[]).length ? `(${s.alia.join(' ')})` : ''}
+                  </span>
+                </div>
+                <div className="text-xs font-semibold text-[var(--accent-color)] shrink-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Download size={14} className="mr-1" />
+                  下载
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {metadata && (
         <section className="md-section md-meta-section">
