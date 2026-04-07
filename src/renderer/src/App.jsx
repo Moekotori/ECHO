@@ -4148,8 +4148,6 @@ export default function App() {
     lyrics: [],
     activeLyricIndex: -1,
     romajiDisplayLines: [],
-    lyricKaraokeProgressList: [],
-    lyricTimelineValid: false,
     displayMainTitle: ''
   })
   useEffect(() => {
@@ -4157,21 +4155,18 @@ export default function App() {
       lyrics,
       activeLyricIndex,
       romajiDisplayLines,
-      lyricKaraokeProgressList,
-      lyricTimelineValid,
       displayMainTitle
     }
-  }, [
-    lyrics,
-    activeLyricIndex,
-    romajiDisplayLines,
-    lyricKaraokeProgressList,
-    lyricTimelineValid,
-    displayMainTitle
-  ])
+  }, [lyrics, activeLyricIndex, romajiDisplayLines, displayMainTitle])
 
+  /** Pulled by main process setInterval (not throttled when ECHO is minimized). */
   useEffect(() => {
     if (!config.desktopLyricsEnabled) {
+      try {
+        delete window.__getDesktopLyricsPayload
+      } catch {
+        /* ignore */
+      }
       ;(async () => {
         try {
           if (window.api?.closeLyricsDesktop) await window.api.closeLyricsDesktop()
@@ -4182,45 +4177,34 @@ export default function App() {
       return undefined
     }
 
-    let raf = 0
-
-    const tick = () => {
-      if (!configRef.current.desktopLyricsEnabled) return
-      if (!window.api?.syncLyricsDesktop) return
+    window.__getDesktopLyricsPayload = () => {
       try {
-        const payload = buildDesktopLyricsPayload(
+        return buildDesktopLyricsPayload(
           configRef.current,
           desktopLyricsSyncRef.current,
           i18n.t('lyrics.none')
         )
-        window.api.syncLyricsDesktop(payload)
       } catch (e) {
-        console.error('[desktop lyrics sync]', e)
+        console.error('[desktop lyrics] payload', e)
+        return null
       }
-    }
-
-    const loop = () => {
-      raf = requestAnimationFrame(loop)
-      tick()
     }
 
     ;(async () => {
       try {
-        if (!window.api?.syncLyricsDesktop) return
         if (window.api?.openLyricsDesktop) await window.api.openLyricsDesktop()
-        if (!configRef.current.desktopLyricsEnabled) return
-        tick()
-        // rAF ~60fps + one-way IPC send (no invoke) — smooth karaoke. Main window uses backgroundThrottling: false.
-        raf = requestAnimationFrame(loop)
       } catch (e) {
-        console.error('[desktop lyrics sync]', e)
+        console.error('[desktop lyrics open]', e)
       }
     })()
 
     return () => {
-      cancelAnimationFrame(raf)
+      try {
+        delete window.__getDesktopLyricsPayload
+      } catch {
+        /* ignore */
+      }
     }
-    // Only (re)start loop when toggling feature; options are read from configRef each frame.
   }, [config.desktopLyricsEnabled])
 
   return (

@@ -1,10 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 const DEFAULT_COLORS = {
   text: '#fff8f5',
   secondary: '#ffc8b8',
-  karaoke: '#ffffff',
   glow: '#ff8866',
   romaji: '#e8d0c8'
 }
@@ -26,6 +25,53 @@ function makeGlow(hex, extraDark = true) {
   return layers.join(', ')
 }
 
+/** Injected once: line enter animation for desktop lyrics (prev / current / next). */
+const LYRICS_DESKTOP_STYLE_ID = 'lyrics-desktop-line-anim'
+
+function injectLyricsDesktopLineStyles() {
+  if (typeof document === 'undefined' || document.getElementById(LYRICS_DESKTOP_STYLE_ID)) return
+  const s = document.createElement('style')
+  s.id = LYRICS_DESKTOP_STYLE_ID
+  s.textContent = `
+@keyframes lyrics-desk-line-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, var(--lyrics-desk-dy, 10px), 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+.lyrics-desk-line {
+  animation: lyrics-desk-line-enter var(--lyrics-desk-dur, 0.34s) cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--lyrics-desk-delay, 0s);
+}
+.lyrics-desk-line--secondary {
+  --lyrics-desk-dy: 7px;
+  --lyrics-desk-dur: 0.26s;
+}
+.lyrics-desk-line--current {
+  --lyrics-desk-dy: 11px;
+  --lyrics-desk-dur: 0.38s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lyrics-desk-line {
+    animation: none !important;
+  }
+}
+`
+  document.head.appendChild(s)
+}
+
+/** Avoid aggressive mid-word breaks; overflow-wrap only for very long unspaced tokens. */
+const DESKTOP_LYRIC_TEXT = {
+  textAlign: 'center',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'normal',
+  overflowWrap: 'break-word'
+}
+
 function normalizePayload(p) {
   const c = p?.colors && typeof p.colors === 'object' ? p.colors : {}
   return {
@@ -38,34 +84,15 @@ function normalizePayload(p) {
     showPrev: p?.showPrev !== false,
     showNext: p?.showNext !== false,
     showRomaji: p?.showRomaji === true,
-    wordHighlight: p?.wordHighlight !== false,
-    lyricTimelineValid: p?.lyricTimelineValid === true,
-    karaokeProgress:
-      typeof p?.karaokeProgress === 'number' && Number.isFinite(p.karaokeProgress)
-        ? Math.min(1, Math.max(0, p.karaokeProgress))
-        : 0,
     title: typeof p?.title === 'string' ? p.title : '',
     fontPx: typeof p?.fontPx === 'number' && p.fontPx > 8 ? p.fontPx : 26,
     colors: {
       text: typeof c.text === 'string' && c.text ? c.text : DEFAULT_COLORS.text,
       secondary: typeof c.secondary === 'string' && c.secondary ? c.secondary : DEFAULT_COLORS.secondary,
-      karaoke: typeof c.karaoke === 'string' && c.karaoke ? c.karaoke : DEFAULT_COLORS.karaoke,
       glow: typeof c.glow === 'string' && c.glow ? c.glow : DEFAULT_COLORS.glow,
       romaji: typeof c.romaji === 'string' && c.romaji ? c.romaji : DEFAULT_COLORS.romaji
     }
   }
-}
-
-/** All fields that affect React layout; omit karaokeProgress so progress-only IPC does not re-render. */
-function contentKey(d) {
-  const { karaokeProgress: _k, ...rest } = d
-  return JSON.stringify(rest)
-}
-
-function applyKaraokeWidth(el, progress) {
-  if (!el) return
-  const pct = Math.min(100, Math.max(0, progress * 100))
-  el.style.width = `${pct}%`
 }
 
 /**
@@ -83,17 +110,10 @@ export default function LyricsDesktop() {
     showPrev: true,
     showNext: true,
     showRomaji: false,
-    wordHighlight: false,
-    lyricTimelineValid: false,
-    karaokeProgress: 0,
     title: '',
     fontPx: 26,
     colors: { ...DEFAULT_COLORS }
   }))
-
-  const latestRef = useRef(data)
-  const lastKeyRef = useRef('')
-  const karaokeHlRef = useRef(null)
 
   useEffect(() => {
     const onKey = (e) => {
@@ -101,6 +121,14 @@ export default function LyricsDesktop() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    injectLyricsDesktopLineStyles()
+    return () => {
+      const el = document.getElementById(LYRICS_DESKTOP_STYLE_ID)
+      if (el) el.remove()
+    }
   }, [])
 
   useEffect(() => {
@@ -113,7 +141,7 @@ export default function LyricsDesktop() {
     document.body.style.overflow = 'hidden'
     const root = document.getElementById('root')
     if (root) {
-      root.style.minHeight = '100%'
+      root.style.minHeight = 'min-content'
       root.style.margin = '0'
       root.style.background = transparent
     }
@@ -122,30 +150,11 @@ export default function LyricsDesktop() {
   useEffect(() => {
     if (!window.api?.onLyricsDesktopData) return undefined
     const unsub = window.api.onLyricsDesktopData((p) => {
-      const n = normalizePayload(p)
-      latestRef.current = n
-
-      const key = contentKey(n)
-      const karaokeOn = n.wordHighlight && n.lyricTimelineValid && n.current.length > 0
-      if (karaokeOn) {
-        applyKaraokeWidth(karaokeHlRef.current, n.karaokeProgress)
-      }
-
-      if (key !== lastKeyRef.current) {
-        lastKeyRef.current = key
-        setData(n)
-      }
+      setData(normalizePayload(p))
     })
     void window.api?.notifyLyricsDesktopReady?.()
     return unsub
   }, [])
-
-  useLayoutEffect(() => {
-    const n = latestRef.current
-    if (n.wordHighlight && n.lyricTimelineValid && n.current) {
-      applyKaraokeWidth(karaokeHlRef.current, n.karaokeProgress)
-    }
-  }, [data])
 
   const {
     prev,
@@ -157,8 +166,6 @@ export default function LyricsDesktop() {
     showPrev,
     showNext,
     showRomaji,
-    wordHighlight,
-    lyricTimelineValid,
     title,
     fontPx,
     colors
@@ -167,25 +174,28 @@ export default function LyricsDesktop() {
   const glowPrimary = useMemo(() => makeGlow(colors.glow), [colors.glow])
   const glowSecondary = useMemo(() => makeGlow(colors.secondary, true), [colors.secondary])
 
-  const useKaraoke = wordHighlight && lyricTimelineValid && current.length > 0
-
-  const renderLine = (text, rom, { size, weight, opacity, marginBottom, isSecondary }) => {
+  const renderLine = (text, rom, { size, weight, opacity, marginBottom, isSecondary, animDelaySec = 0 }) => {
     if (!text) return null
     const glow = isSecondary ? glowSecondary : glowPrimary
     const color = isSecondary ? colors.secondary : colors.text
     return (
-      <div style={{ marginBottom: marginBottom ?? 0 }}>
+      <div
+        key={text}
+        className={`lyrics-desk-line${isSecondary ? ' lyrics-desk-line--secondary' : ''}`}
+        style={{
+          marginBottom: marginBottom ?? 0,
+          ...(animDelaySec > 0 ? { ['--lyrics-desk-delay']: `${animDelaySec}s` } : null)
+        }}
+      >
         <div
           style={{
+            ...DESKTOP_LYRIC_TEXT,
             color,
             textShadow: glow,
             fontSize: size,
             fontWeight: weight,
             opacity,
-            lineHeight: 1.35,
-            textAlign: 'center',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word'
+            lineHeight: 1.35
           }}
         >
           {text}
@@ -210,132 +220,45 @@ export default function LyricsDesktop() {
     )
   }
 
-  const renderCurrent = () => {
-    const glow = glowPrimary
-    const mb = next && showNext ? 6 : showRomaji && currentRomaji ? 4 : 0
-
-    const romajiBlock =
-      showRomaji && currentRomaji ? (
-        <div
-          style={{
-            color: colors.romaji,
-            textShadow: glowSecondary,
-            fontSize: Math.max(11, fontPx * 0.42),
-            fontWeight: 600,
-            marginTop: 6,
-            lineHeight: 1.3,
-            textAlign: 'center'
-          }}
-        >
-          {currentRomaji}
-        </div>
-      ) : null
-
-    if (!useKaraoke) {
-      return (
-        <div style={{ marginBottom: mb }}>
-          <div
-            style={{
-              color: colors.text,
-              textShadow: glow,
-              fontSize: fontPx,
-              fontWeight: 700,
-              lineHeight: 1.35,
-              textAlign: 'center',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word'
-            }}
-          >
-            {current || '—'}
-          </div>
-          {romajiBlock}
-        </div>
-      )
-    }
-
-    return (
-      <div style={{ marginBottom: mb, width: '100%', textAlign: 'center' }}>
-        <span
-          style={{
-            position: 'relative',
-            display: 'inline-block',
-            maxWidth: '100%',
-            verticalAlign: 'top'
-          }}
-        >
-          <span
-            style={{
-              display: 'block',
-              color: colors.text,
-              textShadow: glow,
-              fontSize: fontPx,
-              fontWeight: 700,
-              lineHeight: 1.35,
-              whiteSpace: 'nowrap'
-            }}
-          >
-            {current}
-          </span>
-          <span
-            ref={karaokeHlRef}
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              overflow: 'hidden',
-              whiteSpace: 'nowrap',
-              width: '0%',
-              maxWidth: '100%',
-              display: 'block',
-              color: colors.karaoke,
-              textShadow: glow,
-              fontSize: fontPx,
-              fontWeight: 700,
-              lineHeight: 1.35,
-              pointerEvents: 'none',
-              textAlign: 'left',
-              willChange: 'width',
-              transform: 'translateZ(0)'
-            }}
-          >
-            {current}
-          </span>
-        </span>
-        {romajiBlock}
-      </div>
-    )
-  }
+  const mb = next && showNext ? 6 : showRomaji && currentRomaji ? 4 : 0
 
   return (
     <div
       role="presentation"
+      data-lyrics-hit
       onContextMenu={(e) => {
         e.preventDefault()
         void window.api?.dismissLyricsDesktop?.()
       }}
       title={title ? `${title} — ${t('lyrics.desktopLyricsChromeHint')}` : t('lyrics.desktopLyricsChromeHint')}
       style={{
-        minHeight: '100vh',
+        minHeight: '100%',
         width: '100%',
         margin: 0,
         boxSizing: 'border-box',
         background: 'transparent',
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'center',
         alignItems: 'center',
-        padding: '12px 20px 16px',
+        justifyContent: 'center',
+        padding: 0,
         WebkitUserSelect: 'none',
         userSelect: 'none',
         overflow: 'hidden',
+        pointerEvents: 'auto',
         WebkitAppRegion: 'drag',
         cursor: 'grab'
       }}
     >
       <div
         style={{
+          boxSizing: 'border-box',
+          width: '100%',
+          maxWidth: '100%',
           textAlign: 'center',
-          maxWidth: 'min(96vw, 920px)'
+          padding: '4px 12px',
+          background: 'transparent',
+          borderRadius: 12
         }}
       >
         {showPrev && prev
@@ -344,17 +267,54 @@ export default function LyricsDesktop() {
               weight: 600,
               opacity: 0.58,
               marginBottom: 6,
-              isSecondary: true
+              isSecondary: true,
+              animDelaySec: 0
             })
           : null}
-        {renderCurrent()}
+        <div
+          key={current || '__empty__'}
+          className="lyrics-desk-line lyrics-desk-line--current"
+          style={{
+            marginBottom: mb,
+            ['--lyrics-desk-delay']: '0.04s'
+          }}
+        >
+          <div
+            style={{
+              ...DESKTOP_LYRIC_TEXT,
+              color: colors.text,
+              textShadow: glowPrimary,
+              fontSize: fontPx,
+              fontWeight: 700,
+              lineHeight: 1.35
+            }}
+          >
+            {current || '—'}
+          </div>
+          {showRomaji && currentRomaji ? (
+            <div
+              style={{
+                color: colors.romaji,
+                textShadow: glowSecondary,
+                fontSize: Math.max(11, fontPx * 0.42),
+                fontWeight: 600,
+                marginTop: 6,
+                lineHeight: 1.3,
+                textAlign: 'center'
+              }}
+            >
+              {currentRomaji}
+            </div>
+          ) : null}
+        </div>
         {showNext && next
           ? renderLine(next, nextRomaji, {
               size: Math.max(13, fontPx * 0.48),
               weight: 600,
               opacity: 0.75,
               marginBottom: 0,
-              isSecondary: true
+              isSecondary: true,
+              animDelaySec: 0.08
             })
           : null}
       </div>

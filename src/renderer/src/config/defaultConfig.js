@@ -118,12 +118,9 @@ export const DEFAULT_CONFIG = {
   desktopLyricsShowNext: true,
   /** Desktop overlay: show romaji line(s) when available */
   desktopLyricsShowRomaji: false,
-  /** Desktop overlay: word-by-word (karaoke-style) fill on current line when LRC timing is valid */
-  desktopLyricsWordHighlight: true,
   /** Hex colors for desktop floating lyrics (see Lyrics settings) */
   desktopLyricsColorText: '#fff8f5',
   desktopLyricsColorSecondary: '#ffc8b8',
-  desktopLyricsColorKaraoke: '#ffffff',
   desktopLyricsColorGlow: '#ff8866',
   desktopLyricsColorRomaji: '#e8d0c8',
   preamp: 0,

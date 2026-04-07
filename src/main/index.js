@@ -50,6 +50,40 @@ let mainWindow = null
 let lyricsDesktopWindow = null
 /** Last payload so the child window can request a resend after it subscribes to IPC */
 let lyricsDesktopLastPayload = {}
+/** Main-process timer pulls lyrics from the main renderer — not throttled when the main window is minimized */
+let lyricsDesktopMainSyncTimer = null
+
+function stopLyricsDesktopMainSyncTimer() {
+  if (lyricsDesktopMainSyncTimer) {
+    clearInterval(lyricsDesktopMainSyncTimer)
+    lyricsDesktopMainSyncTimer = null
+  }
+}
+
+function lyricsDesktopPullFromMainRenderer() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (!lyricsDesktopWindow || lyricsDesktopWindow.isDestroyed()) return
+  mainWindow.webContents
+    .executeJavaScript(
+      `(function(){try{return typeof window.__getDesktopLyricsPayload==='function'?window.__getDesktopLyricsPayload():null}catch(e){return null}})()`,
+      true
+    )
+    .then((payload) => {
+      if (!payload || typeof payload !== 'object') return
+      lyricsDesktopLastPayload = payload
+      if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
+        lyricsDesktopWindow.webContents.send('lyrics-desktop:data', payload)
+      }
+    })
+    .catch(() => {})
+}
+
+function startLyricsDesktopMainSyncTimer() {
+  stopLyricsDesktopMainSyncTimer()
+  lyricsDesktopMainSyncTimer = setInterval(() => {
+    lyricsDesktopPullFromMainRenderer()
+  }, 50)
+}
 
 function broadcastCastStatus() {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -249,6 +283,7 @@ async function createWindow() {
 
   mainWindow.on('close', () => {
     try {
+      stopLyricsDesktopMainSyncTimer()
       if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
         lyricsDesktopWindow.destroy()
         lyricsDesktopWindow = null
@@ -1309,13 +1344,15 @@ app.whenReady().then(async () => {
     try {
       if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
         lyricsDesktopWindow.focus()
+        startLyricsDesktopMainSyncTimer()
+        lyricsDesktopPullFromMainRenderer()
         return { ok: true }
       }
       lyricsDesktopWindow = new BrowserWindow({
-        width: 960,
-        height: 220,
-        minWidth: 320,
-        minHeight: 88,
+        width: 680,
+        height: 132,
+        minWidth: 400,
+        minHeight: 64,
         show: false,
         frame: false,
         transparent: true,
@@ -1336,6 +1373,7 @@ app.whenReady().then(async () => {
         if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) lyricsDesktopWindow.show()
       })
       lyricsDesktopWindow.on('closed', () => {
+        stopLyricsDesktopMainSyncTimer()
         lyricsDesktopWindow = null
       })
       let loadUrl
@@ -1353,6 +1391,8 @@ app.whenReady().then(async () => {
       if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed() && !lyricsDesktopWindow.isVisible()) {
         lyricsDesktopWindow.show()
       }
+      startLyricsDesktopMainSyncTimer()
+      lyricsDesktopPullFromMainRenderer()
       return { ok: true }
     } catch (e) {
       console.error('[lyricsDesktop] open failed:', e)
@@ -1362,6 +1402,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('lyricsDesktop:close', async () => {
     try {
+      stopLyricsDesktopMainSyncTimer()
       if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
         lyricsDesktopWindow.close()
       }
@@ -1375,6 +1416,7 @@ app.whenReady().then(async () => {
   /** User dismissed the floating overlay (Escape / right-click): close + uncheck in main UI */
   ipcMain.handle('lyricsDesktop:dismiss', async () => {
     try {
+      stopLyricsDesktopMainSyncTimer()
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('lyrics-desktop:uncheck')
       }
@@ -1385,18 +1427,6 @@ app.whenReady().then(async () => {
       return { ok: true }
     } catch (e) {
       return { ok: false, error: e?.message || String(e) }
-    }
-  })
-
-  /** Main renderer pushes at high rate — use send, not invoke, to avoid IPC backlog/jank */
-  ipcMain.on('lyricsDesktop:syncPush', (event, payload) => {
-    if (mainWindow && !mainWindow.isDestroyed() && event.sender !== mainWindow.webContents) {
-      return
-    }
-    const p = payload && typeof payload === 'object' ? payload : {}
-    lyricsDesktopLastPayload = p
-    if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
-      lyricsDesktopWindow.webContents.send('lyrics-desktop:data', p)
     }
   })
 

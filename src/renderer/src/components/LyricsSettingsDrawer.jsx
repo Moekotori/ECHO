@@ -622,26 +622,6 @@ export default function LyricsSettingsDrawer({
                   <span className="lyrics-drawer-switch-thumb" />
                 </button>
               </div>
-              <div className="lyrics-drawer-row">
-                <span className="lyrics-drawer-label">{t('lyrics.desktopWordHighlight')}</span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={config.desktopLyricsWordHighlight !== false}
-                  className={`lyrics-drawer-switch ${config.desktopLyricsWordHighlight !== false ? 'on' : ''}`}
-                  onClick={() =>
-                    setConfig((p) => ({
-                      ...p,
-                      desktopLyricsWordHighlight: p.desktopLyricsWordHighlight === false ? true : false
-                    }))
-                  }
-                >
-                  <span className="lyrics-drawer-switch-thumb" />
-                </button>
-              </div>
-              <p className="lyrics-drawer-hint" style={{ marginTop: 0, marginBottom: 0 }}>
-                {t('lyrics.desktopWordHighlightHint')}
-              </p>
             </div>
 
             <div className="lyrics-drawer-color-grid" style={{ marginTop: 12 }}>
@@ -679,23 +659,6 @@ export default function LyricsSettingsDrawer({
                       value={config.desktopLyricsColorSecondary || '#ffc8b8'}
                       onChange={(e) =>
                         setConfig((p) => ({ ...p, desktopLyricsColorSecondary: e.target.value }))
-                      }
-                    />
-                  </label>
-                </div>
-                <div className="lyrics-color-inline-row">
-                  <div className="lyrics-color-inline-label">{t('lyrics.desktopColorKaraoke')}</div>
-                  <div
-                    className="lyrics-color-inline-swatch"
-                    style={{ background: config.desktopLyricsColorKaraoke || '#ffffff' }}
-                  />
-                  <label className="lyrics-color-picker">
-                    <input
-                      type="color"
-                      aria-label={t('lyrics.desktopColorKaraoke')}
-                      value={config.desktopLyricsColorKaraoke || '#ffffff'}
-                      onChange={(e) =>
-                        setConfig((p) => ({ ...p, desktopLyricsColorKaraoke: e.target.value }))
                       }
                     />
                   </label>

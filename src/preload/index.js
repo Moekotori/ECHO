@@ -99,8 +99,6 @@ contextBridge.exposeInMainWorld('api', {
   closeLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:close'),
   /** Close overlay and uncheck “desktop lyrics” in the main window (Escape / right-click). */
   dismissLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:dismiss'),
-  /** Fire-and-forget (no invoke round-trip) — keeps karaoke progress smooth at ~60fps */
-  syncLyricsDesktop: (payload) => ipcRenderer.send('lyricsDesktop:syncPush', payload),
   notifyLyricsDesktopReady: () => ipcRenderer.invoke('lyricsDesktop:ready'),
   onLyricsDesktopData: (callback) => {
     const ch = 'lyrics-desktop:data'

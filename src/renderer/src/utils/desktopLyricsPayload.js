@@ -1,12 +1,10 @@
 /**
- * Build IPC payload for the transparent desktop lyrics window.
+ * Build payload for the transparent desktop lyrics window (main process pulls via executeJavaScript).
  */
 export function buildDesktopLyricsPayload(cfg, d, noneText) {
   const lines = Array.isArray(d.lyrics) ? d.lyrics : []
   const idx = typeof d.activeLyricIndex === 'number' ? d.activeLyricIndex : -1
   const romajiLines = Array.isArray(d.romajiDisplayLines) ? d.romajiDisplayLines : []
-  const kList = Array.isArray(d.lyricKaraokeProgressList) ? d.lyricKaraokeProgressList : []
-  const timelineOk = !!d.lyricTimelineValid
 
   let prev = ''
   let current = ''
@@ -35,16 +33,9 @@ export function buildDesktopLyricsPayload(cfg, d, noneText) {
   const showNext = cfg.desktopLyricsShowNext !== false
   const showRomaji = cfg.desktopLyricsShowRomaji === true
 
-  const wordHl =
-    cfg.desktopLyricsWordHighlight !== false && timelineOk
-
-  const karaokeProgress =
-    idx >= 0 && idx < kList.length && Number.isFinite(kList[idx]) ? kList[idx] : 0
-
   const colors = {
     text: cfg.desktopLyricsColorText || '#fff8f5',
     secondary: cfg.desktopLyricsColorSecondary || '#ffc8b8',
-    karaoke: cfg.desktopLyricsColorKaraoke || '#ffffff',
     glow: cfg.desktopLyricsColorGlow || '#ff8866',
     romaji: cfg.desktopLyricsColorRomaji || '#e8d0c8'
   }
@@ -59,9 +50,6 @@ export function buildDesktopLyricsPayload(cfg, d, noneText) {
     showPrev,
     showNext,
     showRomaji,
-    wordHighlight: wordHl,
-    lyricTimelineValid: timelineOk,
-    karaokeProgress,
     title: d.displayMainTitle || '',
     fontPx: typeof cfg.desktopLyricsFontPx === 'number' ? cfg.desktopLyricsFontPx : 26,
     colors
