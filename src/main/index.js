@@ -22,6 +22,7 @@ if (process.platform === 'win32') {
 app.commandLine.appendSwitch('disable-features', 'ThirdPartyStoragePartitioning')
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import fs from 'fs'
+import { autoUpdater } from 'electron-updater'
 import { execFile } from 'child_process'
 import DiscordRPC from 'discord-rpc'
 import axios from 'axios'
@@ -264,6 +265,39 @@ async function stopRendererHttpServer() {
   })
   rendererHttpServer = null
   rendererServerUrl = null
+}
+
+function initUpdater() {
+  if (is.dev) return // 不在开发环境自动更新
+  
+  autoUpdater.autoDownload = true // 发现新版后自动在后台下载
+  autoUpdater.autoInstallOnAppQuit = true // 关闭时自动安装
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('[Updater] 发现新版本:', info.version)
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('[Updater] 新版本已下载完毕:', info.version)
+    // 弹窗提示用户
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '发现新版本',
+      message: `ECHO ${info.version} 已经下载完毕，是否立即重启并安装更新？`,
+      buttons: ['重启并安装', '稍后安装']
+    }).then((res) => {
+      if (res.response === 0) {
+        autoUpdater.quitAndInstall(false, true)
+      }
+    })
+  })
+
+  autoUpdater.on('error', (err) => {
+    console.error('[Updater] 更新发生错误:', err)
+  })
+
+  // 静默检查更新
+  autoUpdater.checkForUpdatesAndNotify().catch(e => console.error('[Updater] 检查更新失败', e))
 }
 
 async function createWindow() {
@@ -564,6 +598,8 @@ app.whenReady().then(async () => {
 
   app.userAgentFallback = standardUA
   session.defaultSession.setUserAgent(standardUA)
+
+  initUpdater()
 
   // 修正 Sec-CH-UA Client Hints + B 站视�??CDN Referer 注入
   session.defaultSession.webRequest.onBeforeSendHeaders(
