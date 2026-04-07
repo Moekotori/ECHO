@@ -268,23 +268,41 @@ async function stopRendererHttpServer() {
 }
 
 function initUpdater() {
-  if (is.dev) return // 不在开发环境自动更新
-  
-  autoUpdater.autoDownload = true // 发现新版后自动在后台下载
-  autoUpdater.autoInstallOnAppQuit = true // 关闭时自动安装
+  if (is.dev) return // 涓嶅湪寮€鍙戠幆澧冭嚜鍔ㄦ洿鏂?
+
+  const sendUpdaterEvent = (event, data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('updater-event', { event, ...data })
+    }
+  }
+
+  autoUpdater.autoDownload = true // 鍙戠幇鏂扮増鍚庤嚜鍔ㄥ湪鍚庡彴涓嬭浇
+  autoUpdater.autoInstallOnAppQuit = true // 鍏抽棴鏃惰嚜鍔ㄥ畨瑁?
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('[Updater] Checking for updates')
+    sendUpdaterEvent('checking')
+  })
 
   autoUpdater.on('update-available', (info) => {
-    console.log('[Updater] 发现新版本:', info.version)
+    console.log('[Updater] 鍙戠幇鏂扮増鏈?', info.version)
+    sendUpdaterEvent('update-available', { version: info.version })
+  })
+
+  autoUpdater.on('update-not-available', (info) => {
+    console.log('[Updater] Update not available')
+    sendUpdaterEvent('update-not-available')
   })
 
   autoUpdater.on('update-downloaded', (info) => {
-    console.log('[Updater] 新版本已下载完毕:', info.version)
-    // 弹窗提示用户
+    console.log('[Updater] 鏂扮増鏈凡涓嬭浇瀹屾瘯:', info.version)
+    sendUpdaterEvent('update-downloaded', { version: info.version })
+    // 寮圭獥鎻愮ず鐢ㄦ埛
     dialog.showMessageBox(mainWindow, {
       type: 'info',
-      title: '发现新版本',
-      message: `ECHO ${info.version} 已经下载完毕，是否立即重启并安装更新？`,
-      buttons: ['重启并安装', '稍后安装']
+      title: '鍙戠幇鏂扮増鏈?',
+      message: `ECHO ${info.version} 宸茬粡涓嬭浇瀹屾瘯锛屾槸鍚︾珛鍗抽噸鍚苟瀹夎鏇存柊锛?`,
+      buttons: ['閲嶅惎骞跺畨瑁?', '绋嶅悗瀹夎']
     }).then((res) => {
       if (res.response === 0) {
         autoUpdater.quitAndInstall(false, true)
@@ -293,11 +311,12 @@ function initUpdater() {
   })
 
   autoUpdater.on('error', (err) => {
-    console.error('[Updater] 更新发生错误:', err)
+    console.error('[Updater] 鏇存柊鍙戠敓閿欒:', err)
+    sendUpdaterEvent('error', { message: err.message })
   })
 
-  // 静默检查更新
-  autoUpdater.checkForUpdatesAndNotify().catch(e => console.error('[Updater] 检查更新失败', e))
+  // 闈欓粯妫€鏌ユ洿鏂?
+  autoUpdater.checkForUpdatesAndNotify().catch(e => console.error('[Updater] 妫€鏌ユ洿鏂板け璐?', e))
 }
 
 async function createWindow() {
@@ -655,6 +674,16 @@ app.whenReady().then(async () => {
       return app.getVersion()
     } catch {
       return '0.0.0'
+    }
+  })
+
+  ipcMain.handle('app:checkForUpdates', async () => {
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      return { success: true, info: result?.updateInfo }
+    } catch (e) {
+      console.error('[Updater] 手动检查更新失败:', e)
+      return { success: false, error: e.message }
     }
   })
 

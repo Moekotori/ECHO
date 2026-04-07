@@ -172,6 +172,10 @@ const AlbumSidebarCard = memo(function AlbumSidebarCard({ album, isSelected, onP
 
 export default function App() {
   const { t } = useTranslation()
+  const [appVersion, setAppVersion] = useState('')
+  const [updateStatus, setUpdateStatus] = useState(null)
+  const [isUpdating, setIsUpdating] = useState(false)
+
   const [playlist, setPlaylist] = useState(() => {
     try {
       const saved = localStorage.getItem('nc_playlist')
@@ -215,6 +219,24 @@ export default function App() {
   useEffect(() => {
     isSeekingRef.current = isSeeking
   }, [isSeeking])
+
+  useEffect(() => {
+    if (window.api?.getAppVersion) {
+      window.api.getAppVersion().then((v) => {
+        if (v) setAppVersion(v)
+      }).catch(console.error)
+    }
+
+    if (window.api?.onUpdaterEvent) {
+      return window.api.onUpdaterEvent((msg) => {
+        setUpdateStatus(msg)
+        if (msg.event === 'update-downloaded' || msg.event === 'error' || msg.event === 'update-not-available') {
+          setIsUpdating(false)
+        }
+      })
+    }
+  }, [])
+
   const seekTimerRef = useRef(null)
   const [isPresetOpen, setIsPresetOpen] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
@@ -7028,9 +7050,35 @@ export default function App() {
               <p style={{ opacity: 0.6, fontSize: '14px', lineHeight: 1.6 }}>
                 {t('settings.aboutBody')}
               </p>
-              <p className="settings-version-text">
-                {t('settings.versionText', { version: '1.1.2' })}
-              </p>
+              <div className="settings-version-text" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {t('settings.versionText', { version: appVersion || '1.1.2' })}
+                <button 
+                  className="control-btn" 
+                  disabled={isUpdating} 
+                  onClick={() => {
+                    setIsUpdating(true)
+                    setUpdateStatus({ event: 'checking' })
+                    window.api?.checkForUpdates?.()
+                  }}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border)',
+                    cursor: isUpdating ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {isUpdating ? t('settings.checkingForUpdates', 'Checking...') : t('settings.checkUpdates', 'Check for Updates')}
+                </button>
+              </div>
+              {updateStatus && updateStatus.event !== 'checking' && (
+                <p style={{ fontSize: '12px', opacity: 0.8, marginTop: '4px' }}>
+                  {updateStatus.event === 'update-available' ? t('settings.updateAvailable', 'Update available, downloading...') :
+                   updateStatus.event === 'update-not-available' ? t('settings.updateNotAvailable', 'You are on the latest version.') :
+                   updateStatus.event === 'error' ? t('settings.updateError', 'Error checking for updates.') : ''}
+                </p>
+              )}
               <p className="settings-version-text">{t('settings.poweredBy')}</p>
               <div className="setting-row" style={{ marginTop: 8 }}>
                 <div className="setting-info">

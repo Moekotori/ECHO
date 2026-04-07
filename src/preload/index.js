@@ -8,6 +8,12 @@ if (!process.contextIsolated) {
 // Expose IPC methods to the renderer via window.api
 contextBridge.exposeInMainWorld('api', {
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
+  checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+  onUpdaterEvent: (callback) => {
+    const handler = (_, msg) => callback(msg)
+    ipcRenderer.on('updater-message', handler)
+    return () => ipcRenderer.removeListener('updater-message', handler)
+  },
   appStateGet: (key) => ipcRenderer.invoke('appState:get', key),
   appStateSet: (key, value) => ipcRenderer.invoke('appState:set', key, value),
   openDirectoryHandler: () => ipcRenderer.invoke('dialog:openDirectory'),
