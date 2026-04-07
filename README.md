@@ -1,166 +1,183 @@
-Here is a beautified and modernized version of your README. I've upgraded the visual hierarchy, unified the badge styles (using the clean `flat-square` look), added a Table of Contents for better navigation, and incorporated tasteful emojis to make the feature list pop while maintaining a professional, high-fidelity aesthetic.
-
-I've also added a placeholder for a hero banner image at the top, which is highly recommended for desktop applications to show off the UI right away.
-
------
-
-````markdown
 <div align="center">
 
-<img src="https://via.placeholder.com/800x400/1a1a2e/ffffff?text=ECHO+Music+Player" alt="ECHO Banner" width="100%" style="border-radius: 8px; margin-bottom: 20px;">
+<h1>ECHO</h1>
 
-# 🎵 ECHO
+<p>A modern, feature-rich desktop music player built with Electron and React.</p>
 
-*A modern, feature-rich desktop music player built with Electron and React.*
-
-<p align="center">
+<p>
   <a href="https://github.com/Moekotori/Echoes/releases/latest">
-    <img src="https://img.shields.io/github/v/release/Moekotori/Echoes?label=release&color=blue&style=flat-square" alt="Latest Release">
+    <img src="https://img.shields.io/github/v/release/Moekotori/Echoes?label=release&color=blue" alt="Latest Release">
   </a>
   <a href="https://github.com/Moekotori/Echoes/releases">
-    <img src="https://img.shields.io/github/downloads/Moekotori/Echoes/total?color=brightgreen&style=flat-square" alt="Downloads">
+    <img src="https://img.shields.io/github/downloads/Moekotori/Echoes/total?color=brightgreen" alt="Downloads">
   </a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
-  <img src="https://img.shields.io/badge/electron-31.x-47848f?style=flat-square&logo=electron&logoColor=white" alt="Electron">
-  <img src="https://img.shields.io/badge/react-18-61dafb?style=flat-square&logo=react&logoColor=black" alt="React">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/electron-31.x-47848f" alt="Electron">
+  <img src="https://img.shields.io/badge/react-18-61dafb" alt="React">
 </p>
 
-[**Download Latest Release**](https://github.com/Moekotori/Echoes/releases/latest) • 
-[Getting Started](#-getting-started) • 
-[Plugin Development](#-plugin-development) • 
-[Contributing](#-contributing)
+<p>
+  <a href="https://github.com/Moekotori/Echoes/releases/latest">
+    <strong>Download latest release</strong>
+  </a>
+  &nbsp;&middot;&nbsp;
+  <a href="docs/plugin-development.md">Plugin Development</a>
+  &nbsp;&middot;&nbsp;
+  <a href="#getting-started">Getting Started</a>
+</p>
 
 </div>
 
 ---
 
-## 📖 Overview
-
-**ECHO** is a cross-platform desktop music player designed for audiophiles and developers alike. Focused on uncompromising audio quality, deep extensibility, and a meticulously clean listening experience, it features a native audio pipeline for high-fidelity playback. Whether you're customizing the UI, watching synchronized music videos, or building your own plugins, ECHO adapts to your rhythm.
+---
 
 ---
 
-## ✨ Feature Highlights
+## Overview
+
+ECHO is a cross-platform desktop music player focused on audio quality, extensibility, and a clean listening experience. It provides a native audio pipeline for high-fidelity local playback, an integrated lyrics system, MV playback via YouTube and Bilibili, and a plugin architecture for extending core functionality.
+
+---
+
+## Feature Highlights
 
 <table>
   <tr>
     <td valign="top" width="50%">
-      <h3>🎧 HiFi Audio Engine</h3>
-      <p>Out-of-process native audio host (<code>echo-audio-host</code>) for low-latency, high-fidelity playback. Features <b>WASAPI Exclusive Mode</b> for bit-perfect output on Windows, and real-time Parametric EQ with pre-amp controls.</p>
+      <b>HiFi Audio Engine</b><br>
+      Out-of-process native audio host (<code>echo-audio-host</code>) for low-latency, high-fidelity playback. WASAPI Exclusive Mode for bit-perfect output on Windows. Parametric EQ with pre-amp, applied in real time.
     </td>
     <td valign="top" width="50%">
-      <h3>🎤 Synchronized Lyrics</h3>
-      <p>Line-by-line and word-level karaoke highlights for LRC files. Includes NetEase auto-fetch, manual search, Japanese romaji conversion via Kuroshiro, and a floating desktop overlay.</p>
+      <b>Synchronized Lyrics</b><br>
+      Line-by-line and word-level karaoke highlight for LRC files. NetEase lyrics auto-fetch and manual candidate search. Japanese romaji conversion via Kuroshiro. Floating desktop overlay window.
     </td>
   </tr>
   <tr>
     <td valign="top">
-      <h3>📺 Music Video Integration</h3>
-      <p>Automatically match and play YouTube or Bilibili MVs alongside your audio. Features quality selection, direct stream support, and an immersive full-screen MV-as-background mode.</p>
+      <b>Music Video</b><br>
+      Auto-match and play YouTube or Bilibili MV alongside playback. Quality selection, direct stream support, and full-screen MV-as-background mode.
     </td>
     <td valign="top">
-      <h3>🤝 Listen Together</h3>
-      <p>Host room-based synchronized co-listening sessions via a self-hosted WebSocket server (optional token auth included). Plus, cast seamlessly to network renderers via DLNA.</p>
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>📥 Media Management</h3>
-      <p>Download audio directly from YouTube, Bilibili, and SoundCloud. Import NetEase playlists with automatic metadata tagging and cover art writing.</p>
-    </td>
-    <td valign="top">
-      <h3>🧩 Plugin Ecosystem</h3>
-      <p>First-class extensibility via a sandboxed API. Build plugins to contribute new music sources, lyrics providers, UI panels, and custom behaviors.</p>
+      <b>Listen Together</b><br>
+      Room-based synchronized co-listening via a self-hosted WebSocket server. Optional token authentication. DLNA cast to network renderers.
     </td>
   </tr>
   <tr>
     <td valign="top">
-      <h3>🎨 Advanced Theming</h3>
-      <p>Fully customizable CSS variable-based theme engine. Create, edit, import, export, and audit your themes using built-in developer tools.</p>
+      <b>Media Download</b><br>
+      Download audio from YouTube, Bilibili, and SoundCloud. NetEase playlist import. Metadata and cover art written automatically.
     </td>
     <td valign="top">
-      <h3>🔄 Seamless Updates</h3>
-      <p>GitHub Releases-based OTA updates via <code>electron-updater</code>. Enjoy background downloads with non-intrusive restart prompts.</p>
+      <b>Plugin System</b><br>
+      First-class extensibility via a sandboxed plugin API. Plugins can contribute music sources, lyrics providers, UI panels, and more.
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>Theming</b><br>
+      Full CSS variable-based theme engine with an in-app editor. Import, export, and audit themes via built-in tooling.
+    </td>
+    <td valign="top">
+      <b>Auto-Update</b><br>
+      GitHub Releases-based OTA updates via <code>electron-updater</code>. Background download with a restart prompt. Manual check available in Settings.
     </td>
   </tr>
 </table>
 
-### 🧰 Additional Capabilities
-- **Smart Library:** Drag-and-drop folder scanning, album view with cover art grouping, and custom queue management.
-- **Playback Control:** Pitch-preserving playback rate control and gapless audio output device switching.
-- **Tools & Integrations:** Bundled NCM format converter, Discord Rich Presence, and share-card image export.
-- **Global:** Full i18n support featuring English, Simplified Chinese, and Japanese.
+---
+
+## Additional Features
+
+- Local library management with drag-and-drop folder scanning
+- Album view with cover art grouping
+- User playlists, liked tracks, and queue management
+- Playback rate control with pitch preservation
+- Audio output device switching without interruption
+- NCM format conversion via bundled converter
+- Discord Rich Presence integration
+- Share card image export
+- Crash reporter with in-app log viewer
+- English, Simplified Chinese, and Japanese UI (i18n)
 
 ---
 
-## 💻 Requirements
+---
 
-| Dependency | Required Version |
-|:---|:---|
-| **Node.js** | `>= 18` |
-| **npm** | `>= 9` |
-| **Electron** | `31.x` *(managed by devDependencies)* |
+## Requirements
 
-> 💡 **Note:** Windows is the primary development and test target. macOS and Linux builds are supported but not continuously validated.
+| Dependency | Version |
+|---|---|
+| Node.js | >= 18 |
+| npm | >= 9 |
+| Electron | 31.x (managed by devDependencies) |
+
+> Windows is the primary development and test target. macOS and Linux builds are supported but not continuously validated.
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Clone the repository
+
 ```bash
-git clone [https://github.com/Moekotori/Echoes.git](https://github.com/Moekotori/Echoes.git)
+git clone https://github.com/Moekotori/Echoes.git
 cd Echoes
-````
+```
 
-### 2\. Install dependencies
-
-Native modules (`naudiodon`) are compiled automatically via `electron-builder install-app-deps` in the `postinstall` hook.
+### 2. Install dependencies
 
 ```bash
 npm install
 ```
 
-### 3\. Start the development server
+Native modules (`naudiodon`) are compiled automatically via `electron-builder install-app-deps` in the `postinstall` hook.
 
-This launches the Electron app with hot-reload via `electron-vite`.
+### 3. Start the development server
 
 ```bash
 npm run dev
 ```
 
------
+This launches the Electron app with hot-reload via `electron-vite`.
 
-## 🛠️ Building the Application
+---
 
-**Windows**
+## Building
+
+### Windows
 
 ```bash
 npm run build:win
 ```
 
-*Produces a distributable NSIS installer under `dist/`.*
+Produces a distributable NSIS installer under `dist/`.
 
-**Windows (Release / OTA Ready)**
+### Windows (Release with auto-update artifacts)
 
 ```bash
 npm run build:win:release
 ```
 
-*Outputs to `release/`, including the `.blockmap` and `latest.yml` required by `electron-updater`.*
+Outputs to `release/` including the `.blockmap` and `latest.yml` required by `electron-updater`.
 
-**macOS & Linux**
+### macOS
 
 ```bash
 npm run build:mac
+```
+
+### Linux
+
+```bash
 npm run build:linux
 ```
 
------
+---
 
-## 📡 Listen Together Server
+## Listen Together Server
 
-Enable synchronized co-listening sessions by running the optional WebSocket server:
+The optional server enables synchronized co-listening sessions.
 
 ```bash
 cd server/listen-together
@@ -168,81 +185,62 @@ npm install
 PORT=8787 npm start
 ```
 
-*For production deployment (Nginx reverse proxy + PM2), please refer to the [Zero-to-Hero Deployment Guide](https://www.google.com/search?q=server/listen-together/DEPLOY_FROM_ZERO_ZH.md).*
+For production deployment with Nginx reverse proxy and PM2, see [`server/listen-together/DEPLOY_FROM_ZERO_ZH.md`](server/listen-together/DEPLOY_FROM_ZERO_ZH.md).
 
------
+---
 
-## 🔌 Plugin Development
+## Plugin Development
 
-ECHO is built to be customized. Plugins are located in the user's plugin directory and loaded dynamically at startup.
+Plugins are placed in the user's plugin directory and loaded at startup. Each plugin is a folder containing a `plugin.json` manifest and optional `main.js` (Node.js sandbox), `renderer.js`, and `styles.css` files.
 
-A standard plugin folder contains:
+For the full API reference and manifest specification, see [`docs/plugin-development.md`](docs/plugin-development.md).
 
-  - `plugin.json` (Manifest)
-  - `main.js` *(Optional Node.js sandbox)*
-  - `renderer.js` *(Optional UI injection)*
-  - `styles.css` *(Optional styling)*
+Example plugins are provided in [`examples/`](examples/).
 
-📚 Read the full API reference and manifest specification in [`docs/plugin-development.md`](https://www.google.com/search?q=docs/plugin-development.md).  
-💡 Check out boilerplate and examples in the [`examples/`](https://www.google.com/search?q=examples/) directory.
+---
 
------
-
-## 📂 Project Structure
-
-```text
-Echoes/
-├── src/
-│   ├── main/          # Electron main process (IPC, audio engine, plugins)
-│   │   ├── audio/     # Native audio bridge and AudioEngine wrapper
-│   │   ├── cast/      # DLNA renderer
-│   │   └── plugins/   # Plugin manager, sandbox, storage
-│   ├── preload/       # Context bridge exposing APIs to renderer
-│   └── renderer/      # React frontend
-│       └── src/
-│           ├── components/ # Reusable UI components
-│           ├── locales/    # i18n translation files (en, zh, ja)
-│           ├── styles/     # Global styles and theme variables
-│           └── App.jsx     # Root application component
-├── server/
-│   └── listen-together/    # WebSocket-based co-listening server
-├── scripts/           # Build and maintenance scripts
-├── docs/              # Developer documentation
-└── examples/          # Example plugins
-```
-
------
-
-## 🤝 Contributing
-
-Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-1.  Fork the Project
-2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3.  Adhere to code styles (`npm run lint` and `npm run format`)
-4.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-5.  Push to the Branch (`git push origin feature/AmazingFeature`)
-6.  Open a Pull Request
-
------
-
-## 🙏 Acknowledgements
-
-ECHO stands on the shoulders of giants. A huge thank you to the maintainers of these amazing open-source projects:
-
-  - [Electron](https://www.electronjs.org/) & [electron-vite](https://electron-vite.org/)
-  - [React](https://react.dev/)
-  - [naudiodon](https://github.com/Streampunk/naudiodon)
-  - [Kuroshiro](https://kuroshiro.org/)
-  - [music-metadata](https://github.com/borewit/music-metadata)
-  - [yt-dlp](https://github.com/yt-dlp/yt-dlp) & [FFmpeg](https://ffmpeg.org/)
-  - [lucide-react](https://lucide.dev/)
-
-<!-- end list -->
+## Project Structure
 
 ```
-
-***
-
-Would you like me to help you draft the `docs/plugin-development.md` file next, or perhaps create a custom badge set for your plugins?
+src/
+  main/           # Electron main process (IPC, audio engine, plugins, cast)
+    audio/        # Native audio bridge and AudioEngine wrapper
+    cast/         # DLNA renderer
+    plugins/      # Plugin manager, sandbox, storage
+  preload/        # Context bridge exposing APIs to renderer
+  renderer/
+    src/
+      components/ # Reusable UI components
+      locales/    # i18n translation files (en, zh, ja)
+      styles/     # Global styles and theme variables
+      App.jsx     # Root application component
+server/
+  listen-together/  # WebSocket-based co-listening server
+scripts/            # Build and maintenance scripts
+docs/               # Developer documentation
+examples/           # Example plugins
 ```
+
+---
+
+## Contributing
+
+1. Fork the repository and create a feature branch.
+2. Follow the existing code style (`npm run lint` and `npm run format`).
+3. Open a pull request with a clear description of the change.
+
+---
+
+## Acknowledgements
+
+ECHO uses the following open-source projects:
+
+- [Electron](https://www.electronjs.org/)
+- [React](https://react.dev/)
+- [electron-vite](https://electron-vite.org/)
+- [naudiodon](https://github.com/Streampunk/naudiodon)
+- [Kuroshiro](https://kuroshiro.org/)
+- [music-metadata](https://github.com/borewit/music-metadata)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+- [FFmpeg](https://ffmpeg.org/)
+- [lucide-react](https://lucide.dev/)
