@@ -125,6 +125,8 @@
     "coverAlt": "ジャケット",
     "desktopLyrics": "デスクトップ歌詞",
     "desktopLyricsEnable": "デスクトップ歌詞を有効にする",
+    "desktopLyricsSyncTheme": "テーマカラーと同期",
+    "desktopLyricsAlwaysOnTop": "歌詞を他のウィンドウより常に手前に表示",
     "desktopLyricsHint": "背景のない透明のフローティング歌詞（輪郭のみ）。有効で最前面に同期表示。ドラッグで移動、右クリックで閉じます。先に歌詞を読み込んでください。",
     "desktopLyricsChromeHint": "ドラッグで移動 · 右クリックまたは Esc で閉じる",
     "desktopShowPrev": "前の行を表示",

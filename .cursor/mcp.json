@@ -3,33 +3,33 @@
     "qtwx-mcp-1": {
       "command": "node",
       "args": [
-        "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/5764dae66a60a737ffd6880f1756171e/QingTian.qingtian-v2/runtime/mcp-server/index.mjs"
+        "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/044ff6fe86d2314fd9e2c3cced26ac6a/QingTian.qingtian-v2/runtime/mcp-server/index.mjs"
       ],
       "env": {
         "QINGTIAN_SESSION": "1",
-        "QINGTIAN_QUEUE_ROOT": "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/5764dae66a60a737ffd6880f1756171e/QingTian.qingtian-v2/runtime/messages",
+        "QINGTIAN_QUEUE_ROOT": "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/044ff6fe86d2314fd9e2c3cced26ac6a/QingTian.qingtian-v2/runtime/messages",
         "QINGTIAN_RUNTIME_STAMP": "5958aa1e1d1c"
       }
     },
     "qtwx-mcp-2": {
       "command": "node",
       "args": [
-        "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/5764dae66a60a737ffd6880f1756171e/QingTian.qingtian-v2/runtime/mcp-server/index.mjs"
+        "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/044ff6fe86d2314fd9e2c3cced26ac6a/QingTian.qingtian-v2/runtime/mcp-server/index.mjs"
       ],
       "env": {
         "QINGTIAN_SESSION": "2",
-        "QINGTIAN_QUEUE_ROOT": "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/5764dae66a60a737ffd6880f1756171e/QingTian.qingtian-v2/runtime/messages",
+        "QINGTIAN_QUEUE_ROOT": "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/044ff6fe86d2314fd9e2c3cced26ac6a/QingTian.qingtian-v2/runtime/messages",
         "QINGTIAN_RUNTIME_STAMP": "5958aa1e1d1c"
       }
     },
     "qtwx-mcp-3": {
       "command": "node",
       "args": [
-        "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/5764dae66a60a737ffd6880f1756171e/QingTian.qingtian-v2/runtime/mcp-server/index.mjs"
+        "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/044ff6fe86d2314fd9e2c3cced26ac6a/QingTian.qingtian-v2/runtime/mcp-server/index.mjs"
       ],
       "env": {
         "QINGTIAN_SESSION": "3",
-        "QINGTIAN_QUEUE_ROOT": "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/5764dae66a60a737ffd6880f1756171e/QingTian.qingtian-v2/runtime/messages",
+        "QINGTIAN_QUEUE_ROOT": "c:/Users/Moe/AppData/Roaming/Cursor/User/workspaceStorage/044ff6fe86d2314fd9e2c3cced26ac6a/QingTian.qingtian-v2/runtime/messages",
         "QINGTIAN_RUNTIME_STAMP": "5958aa1e1d1c"
       }
     }

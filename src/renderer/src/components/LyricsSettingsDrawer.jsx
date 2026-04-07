@@ -546,6 +546,38 @@ export default function LyricsSettingsDrawer({
                 <span className="lyrics-drawer-switch-thumb" />
               </button>
             </div>
+            <div className="lyrics-drawer-row" style={{ marginTop: 8 }}>
+              <span className="lyrics-drawer-label">{t('lyrics.desktopLyricsAlwaysOnTop')}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={config.desktopLyricsAlwaysOnTop !== false}
+                className={`lyrics-drawer-switch ${config.desktopLyricsAlwaysOnTop !== false ? 'on' : ''}`}
+                onClick={() => {
+                  const newVal = config.desktopLyricsAlwaysOnTop === false ? true : false
+                  setConfig((p) => ({ ...p, desktopLyricsAlwaysOnTop: newVal }))
+                  if (window.api?.setLyricsDesktopAlwaysOnTop) {
+                    window.api.setLyricsDesktopAlwaysOnTop(newVal)
+                  }
+                }}
+              >
+                <span className="lyrics-drawer-switch-thumb" />
+              </button>
+            </div>
+            <div className="lyrics-drawer-row" style={{ marginTop: 8 }}>
+              <span className="lyrics-drawer-label">{t('lyrics.desktopLyricsSyncTheme')}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!!config.desktopLyricsSyncTheme}
+                className={`lyrics-drawer-switch ${config.desktopLyricsSyncTheme ? 'on' : ''}`}
+                onClick={() =>
+                  setConfig((p) => ({ ...p, desktopLyricsSyncTheme: !p.desktopLyricsSyncTheme }))
+                }
+              >
+                <span className="lyrics-drawer-switch-thumb" />
+              </button>
+            </div>
             <div className="lyrics-drawer-slider-block" style={{ marginTop: 12 }}>
               <div className="lyrics-drawer-label-row">
                 <span className="lyrics-drawer-label">{t('lyricsDrawer.desktopFontSize')}</span>

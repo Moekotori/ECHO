@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
       locale
     }),
   openFileHandler: (locale) => ipcRenderer.invoke('dialog:openFile', { locale }),
+  openVstPluginHandler: (locale) => ipcRenderer.invoke('dialog:openVstPlugin', { locale }),
   openImageHandler: (locale) => ipcRenderer.invoke('dialog:openImage', { locale }),
   openThemeJsonHandler: (locale) => ipcRenderer.invoke('dialog:openThemeJson', { locale }),
   saveThemeJsonHandler: (text, defaultName, locale) =>
@@ -95,8 +96,12 @@ contextBridge.exposeInMainWorld('api', {
   resumeAudio: () => ipcRenderer.invoke('audio:resume'),
   stopAudio: () => ipcRenderer.invoke('audio:stop'),
   setAudioVolume: (vol) => ipcRenderer.invoke('audio:setVolume', vol),
+  loadVstPlugin: (path) => ipcRenderer.invoke('audio:loadVst', path),
+  disableVstPlugin: () => ipcRenderer.invoke('audio:disableVst'),
+  showVstPluginUI: () => ipcRenderer.invoke('audio:showVstUI'),
   openLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:open'),
   closeLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:close'),
+  setLyricsDesktopAlwaysOnTop: (isAlwaysOnTop) => ipcRenderer.invoke('lyricsDesktop:setAlwaysOnTop', isAlwaysOnTop),
   /** Close overlay and uncheck “desktop lyrics” in the main window (Escape / right-click). */
   dismissLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:dismiss'),
   notifyLyricsDesktopReady: () => ipcRenderer.invoke('lyricsDesktop:ready'),

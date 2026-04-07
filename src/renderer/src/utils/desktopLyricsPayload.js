@@ -1,3 +1,6 @@
+import { PRESET_THEMES } from './color'
+import { normalizeThemeColors } from './themeColors'
+
 /**
  * Build payload for the transparent desktop lyrics window (main process pulls via executeJavaScript).
  */
@@ -33,11 +36,26 @@ export function buildDesktopLyricsPayload(cfg, d, noneText) {
   const showNext = cfg.desktopLyricsShowNext !== false
   const showRomaji = cfg.desktopLyricsShowRomaji === true
 
-  const colors = {
-    text: cfg.desktopLyricsColorText || '#fff8f5',
-    secondary: cfg.desktopLyricsColorSecondary || '#ffc8b8',
-    glow: cfg.desktopLyricsColorGlow || '#ff8866',
-    romaji: cfg.desktopLyricsColorRomaji || '#e8d0c8'
+  let colors
+  if (cfg.desktopLyricsSyncTheme) {
+    const themeColors =
+      cfg.theme === 'custom' && cfg.customColors
+        ? normalizeThemeColors(cfg.customColors)
+        : PRESET_THEMES[cfg.theme]?.colors || PRESET_THEMES.minimal.colors
+
+    colors = {
+      text: '#ffffff',
+      secondary: '#d1d5db',
+      glow: themeColors.accent1 || '#60a5fa',
+      romaji: '#d1d5db'
+    }
+  } else {
+    colors = {
+      text: cfg.desktopLyricsColorText || '#fff8f5',
+      secondary: cfg.desktopLyricsColorSecondary || '#ffc8b8',
+      glow: cfg.desktopLyricsColorGlow || '#ff8866',
+      romaji: cfg.desktopLyricsColorRomaji || '#e8d0c8'
+    }
   }
 
   return {

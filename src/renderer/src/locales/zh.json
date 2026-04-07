@@ -125,6 +125,8 @@
     "coverAlt": "封面",
     "desktopLyrics": "桌面歌词",
     "desktopLyricsEnable": "启用桌面悬浮歌词",
+    "desktopLyricsSyncTheme": "同步主题颜色",
+    "desktopLyricsAlwaysOnTop": "开启后歌词置顶不会被其他窗口遮挡",
     "desktopLyricsHint": "透明悬浮歌词（无背景条，类似网易云桌面歌词）。勾选后自动打开并同步；拖动歌词区域移动窗口，右键关闭。需先为本曲加载歌词。",
     "desktopLyricsChromeHint": "拖动移动 · 右键或 Esc 关闭",
     "desktopShowPrev": "显示上一句",

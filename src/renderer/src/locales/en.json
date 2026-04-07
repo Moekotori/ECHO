@@ -125,6 +125,8 @@
     "coverAlt": "Cover Art",
     "desktopLyrics": "Desktop lyrics",
     "desktopLyricsEnable": "Enable floating desktop lyrics",
+    "desktopLyricsSyncTheme": "Sync with theme colors",
+    "desktopLyricsAlwaysOnTop": "Keep lyrics always on top of other windows",
     "desktopLyricsHint": "Transparent floating lyrics (text with outline only, no bar). When enabled, opens on top and syncs. Drag the lyrics to move; right-click to close. Load lyrics for the track first.",
     "desktopLyricsChromeHint": "Drag to move · Right-click or Esc to close",
     "desktopShowPrev": "Show previous line",

@@ -109,7 +109,8 @@ const APP_STATE_KEYS = new Set([
   'playMode',
   'queuePlaybackEnabled',
   'downloaderSettings',
-  'ltSettings'
+  'ltSettings',
+  'lyricsDesktopBounds'
 ])
 
 function readAppStateJson() {
@@ -261,8 +262,10 @@ async function stopRendererHttpServer() {
 
 async function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 1560,
+    height: 900,
+    minWidth: 760,
+    minHeight: 500,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
@@ -285,6 +288,12 @@ async function createWindow() {
     try {
       stopLyricsDesktopMainSyncTimer()
       if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
+        try {
+          const bounds = lyricsDesktopWindow.getBounds()
+          const state = readAppStateJson()
+          state.lyricsDesktopBounds = bounds
+          writeAppStateJson(state)
+        } catch (e) {}
         lyricsDesktopWindow.destroy()
         lyricsDesktopWindow = null
       }
@@ -711,6 +720,16 @@ app.whenReady().then(async () => {
         path: f
       }))
     }
+  })
+
+  // IPC: Show open VST plugin dialog (.dll)
+  ipcMain.handle('dialog:openVstPlugin', async (_, opts) => {
+    const loc = dialogLocaleFromOpts(opts)
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: loc === 'zh' ? 'VST2 插件' : 'VST2 Plugin', extensions: ['dll'] }]
+    })
+    return { canceled, filePaths }
   })
 
   // IPC: Show open lyrics file dialog (.lrc / .lrcx)
@@ -1340,6 +1359,30 @@ app.whenReady().then(async () => {
     audioEngine.setVolume(vol)
   })
 
+  ipcMain.handle('audio:loadVst', async (_, path) => {
+    audioEngine.loadVstPlugin(path)
+  })
+
+  ipcMain.handle('audio:disableVst', async () => {
+    audioEngine.disableVstPlugin()
+  })
+
+  ipcMain.handle('audio:showVstUI', async () => {
+    audioEngine.showVstPluginUI()
+  })
+
+  // Start polling playback status
+  let lastAudioStatus = null
+  setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const status = audioEngine.getStatus()
+    if (lastAudioStatus && lastAudioStatus.playing !== status.playing) {
+      // Playing state changed, notify renderer
+      mainWindow.webContents.send('audio:status-update', status)
+    }
+    lastAudioStatus = status
+  }, 200)
+
   ipcMain.handle('lyricsDesktop:open', async () => {
     try {
       if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
@@ -1348,16 +1391,23 @@ app.whenReady().then(async () => {
         lyricsDesktopPullFromMainRenderer()
         return { ok: true }
       }
+
+      const globalState = readAppStateJson()
+      const savedBounds = globalState.lyricsDesktopBounds || { width: 680, height: 132 }
+      const alwaysOnTop = globalState.config?.desktopLyricsAlwaysOnTop !== false
+
       lyricsDesktopWindow = new BrowserWindow({
-        width: 680,
-        height: 132,
+        width: savedBounds.width,
+        height: savedBounds.height,
+        x: savedBounds.x,
+        y: savedBounds.y,
         minWidth: 400,
         minHeight: 64,
         show: false,
         frame: false,
         transparent: true,
         hasShadow: false,
-        alwaysOnTop: true,
+        alwaysOnTop: alwaysOnTop,
         autoHideMenuBar: true,
         backgroundThrottling: false,
         webPreferences: {
@@ -1367,10 +1417,28 @@ app.whenReady().then(async () => {
           webSecurity: false
         }
       })
+
+      if (alwaysOnTop) {
+        lyricsDesktopWindow.setAlwaysOnTop(true, 'screen-saver')
+        lyricsDesktopWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+      }
+
       // Must attach before loadURL: ready-to-show often fires before loadURL's promise resolves,
       // so registering after await loadURL leaves the window invisible forever (show: false).
       lyricsDesktopWindow.once('ready-to-show', () => {
         if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) lyricsDesktopWindow.show()
+      })
+      lyricsDesktopWindow.on('close', () => {
+        try {
+          if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
+            const bounds = lyricsDesktopWindow.getBounds()
+            const state = readAppStateJson()
+            state.lyricsDesktopBounds = bounds
+            writeAppStateJson(state)
+          }
+        } catch {
+          // ignore
+        }
       })
       lyricsDesktopWindow.on('closed', () => {
         stopLyricsDesktopMainSyncTimer()
@@ -1407,6 +1475,23 @@ app.whenReady().then(async () => {
         lyricsDesktopWindow.close()
       }
       lyricsDesktopWindow = null
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  ipcMain.handle('lyricsDesktop:setAlwaysOnTop', async (_, isAlwaysOnTop) => {
+    try {
+      if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
+        if (isAlwaysOnTop) {
+          lyricsDesktopWindow.setAlwaysOnTop(true, 'screen-saver')
+          lyricsDesktopWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+        } else {
+          lyricsDesktopWindow.setAlwaysOnTop(false)
+          lyricsDesktopWindow.setVisibleOnAllWorkspaces(false)
+        }
+      }
       return { ok: true }
     } catch (e) {
       return { ok: false, error: e?.message || String(e) }

@@ -37,7 +37,8 @@ function codecLabel(codec) {
 }
 
 export default function AudioSettingsDrawer({ open, onClose, audioDevices }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const loc = i18n.language.startsWith('zh') ? 'zh' : 'en'
   const [activeDeviceId, setActiveDeviceId] = useState('')
   const [isExclusive, setIsExclusive] = useState(false)
   const [bufferProfile, setBufferProfile] = useState('balanced')
@@ -354,6 +355,55 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices }) {
               </p>
             </div>
           )}
+
+          {/* VST UI (Beta) */}
+          <div className="lyrics-drawer-section">
+            <div className="audio-drawer-section-header">
+              <Zap size={16} style={{ color: '#fbbf24' }} />
+              <span className="audio-drawer-section-label">
+                {loc === 'zh' ? 'VST 音效接管 (测试版)' : 'VST Plugins (Beta)'}
+              </span>
+            </div>
+            
+            <div className="audio-drawer-chip-row" style={{ marginTop: '0.75rem' }}>
+              <button
+                type="button"
+                className="list-filter-chip audio-drawer-chip-col"
+                onClick={async () => {
+                  const res = await window.api.openVstPluginHandler(loc)
+                  if (!res.canceled && res.filePaths && res.filePaths.length > 0) {
+                    await window.api.loadVstPlugin(res.filePaths[0])
+                  }
+                }}
+              >
+                <span className="audio-drawer-chip-label">{loc === 'zh' ? '加载插件' : 'Load .dll'}</span>
+                <span className="audio-drawer-chip-sub">{loc === 'zh' ? '选择本地 VST2 插件' : 'Select Plugin'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="list-filter-chip audio-drawer-chip-col"
+                onClick={() => window.api.showVstPluginUI()}
+              >
+                 <span className="audio-drawer-chip-label">{loc === 'zh' ? '显示界面' : 'Show UI'}</span>
+                 <span className="audio-drawer-chip-sub">{loc === 'zh' ? '打开高级面板' : 'Open GUI'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="list-filter-chip audio-drawer-chip-col"
+                onClick={() => window.api.disableVstPlugin()}
+              >
+                 <span className="audio-drawer-chip-label">{loc === 'zh' ? '关闭特效' : 'Disable'}</span>
+                 <span className="audio-drawer-chip-sub">{loc === 'zh' ? '恢复默认音质' : 'Restore Default'}</span>
+              </button>
+            </div>
+            <p className="audio-drawer-footnote" style={{ marginTop: '0.75rem', opacity: 0.8 }}>
+              {loc === 'zh' 
+                ? '加载第三方 VST2 插件 (64位 .dll) 将通过原生引擎接管输出，提供专业级听觉体验。若无声音或报错可点击“关闭特效”一键重置。' 
+                : 'Loading a 64-bit VST2 (.dll) plugin will take over the audio output for enhanced playback. Click "Disable" to reset.'}
+            </p>
+          </div>
 
           <p className="audio-drawer-footnote">
             {t('settings.audioDrawerEqBlurb')}

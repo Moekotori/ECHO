@@ -4,6 +4,7 @@ import { Transform } from 'stream'
 import { NativeAudioBridge, isNativeBridgeAvailable, listNativeDevices } from './NativeAudioBridge.js'
 import { createEqFloatProcessor } from './eqFloatProcessor.js'
 import { getResolvedFfmpegStaticPath } from '../utils/resolveFfmpegStaticPath.js'
+import { VstBridge } from './VstBridge.js'
 
 const resolvedFfmpeg = getResolvedFfmpegStaticPath()
 ffmpeg.setFfmpegPath(resolvedFfmpeg)
@@ -107,6 +108,7 @@ export class AudioEngine {
     this._fileDsdRate = 0
     this._onTrackEnded = null
     this._useNativeBridge = isNativeBridgeAvailable()
+    this.vstBridge = new VstBridge()
 
     if (this._useNativeBridge) {
       console.log('[AudioEngine] Native bridge available — HiFi mode enabled')
@@ -200,6 +202,31 @@ export class AudioEngine {
       } catch (e) {
         console.warn('[AudioEngine] EQ update failed:', e?.message)
       }
+    }
+  }
+
+  loadVstPlugin(pluginPath) {
+    if (this.vstBridge) {
+      this.vstBridge.loadPlugin(pluginPath)
+      // Restart playback if currently playing
+      if (this.isPlaying && this.currentFilePath) {
+        this.play(this.currentFilePath, this.playbackTime, this.playbackRate)
+      }
+    }
+  }
+
+  disableVstPlugin() {
+    if (this.vstBridge) {
+      this.vstBridge.disable()
+      if (this.isPlaying && this.currentFilePath) {
+        this.play(this.currentFilePath, this.playbackTime, this.playbackRate)
+      }
+    }
+  }
+
+  showVstPluginUI() {
+    if (this.vstBridge) {
+      this.vstBridge.showPluginUI()
     }
   }
 
@@ -304,7 +331,13 @@ export class AudioEngine {
       })
 
       this.ffmpegProcess.pipe(this.processor)
-      this.processor.pipe(this._outputSink)
+      
+      // 【绝对安全隔离】：Native 核心管道同样加锁，仅开启时使用 vstBridge
+      if (this.vstBridge && this.vstBridge.enabled) {
+        this.vstBridge.pipe(this.processor, this._outputSink, targetSampleRate, channels)
+      } else {
+        this.processor.pipe(this._outputSink)
+      }
 
       this.isPlaying = true
       return { success: true }
@@ -347,7 +380,13 @@ export class AudioEngine {
     })
 
     this.ffmpegProcess.pipe(this.processor)
-    this.processor.pipe(this._outputSink)
+    
+    // 【绝对安全隔离】：如果用户没开 VST，这里走的回退分支与以前的代码 100% 一致！不影响任何正常用户
+    if (this.vstBridge && this.vstBridge.enabled) {
+      this.vstBridge.pipe(this.processor, this._outputSink, targetSampleRate, channels)
+    } else {
+      this.processor.pipe(this._outputSink)
+    }
 
     this._outputSink.start()
     this.isPlaying = true

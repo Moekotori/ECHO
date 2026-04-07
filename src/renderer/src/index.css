@@ -3997,7 +3997,7 @@ input[type="range"]::-moz-range-track {
   }
 }
 
-@media (max-width: 960px) {
+@media (max-width: 680px) {
   .app-container {
     flex-direction: column;
     height: 100%;
