@@ -532,18 +532,25 @@ export default function LyricsSettingsDrawer({
           <section className="lyrics-drawer-section">
             <h3 className="lyrics-drawer-section-title">{t('lyrics.desktopLyrics')}</h3>
             <p className="lyrics-drawer-hint">{t('lyrics.desktopLyricsHint')}</p>
-            <label className="lyrics-drawer-offset" style={{ alignItems: 'center', gap: 10 }}>
-              <input
-                type="checkbox"
-                checked={!!config.desktopLyricsEnabled}
-                onChange={(e) =>
-                  setConfig((p) => ({ ...p, desktopLyricsEnabled: e.target.checked }))
+            <div className="lyrics-drawer-row" style={{ marginTop: 8 }}>
+              <span className="lyrics-drawer-label">{t('lyrics.desktopLyricsEnable')}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!!config.desktopLyricsEnabled}
+                className={`lyrics-drawer-switch ${config.desktopLyricsEnabled ? 'on' : ''}`}
+                onClick={() =>
+                  setConfig((p) => ({ ...p, desktopLyricsEnabled: !p.desktopLyricsEnabled }))
                 }
-              />
-              <span>{t('lyrics.desktopLyricsEnable')}</span>
-            </label>
-            <div className="lyrics-drawer-offset-controls" style={{ marginTop: 10 }}>
-              <span className="lyrics-drawer-label">{t('lyricsDrawer.desktopFontSize')}</span>
+              >
+                <span className="lyrics-drawer-switch-thumb" />
+              </button>
+            </div>
+            <div className="lyrics-drawer-slider-block" style={{ marginTop: 12 }}>
+              <div className="lyrics-drawer-label-row">
+                <span className="lyrics-drawer-label">{t('lyricsDrawer.desktopFontSize')}</span>
+                <span className="lyrics-drawer-value">{config.desktopLyricsFontPx ?? 26}px</span>
+              </div>
               <input
                 type="range"
                 min={14}
@@ -556,9 +563,180 @@ export default function LyricsSettingsDrawer({
                     desktopLyricsFontPx: Number(e.target.value)
                   }))
                 }
+                className="lyrics-drawer-range"
               />
-              <span>{config.desktopLyricsFontPx ?? 26}px</span>
             </div>
+
+            <div
+              className="lyrics-drawer-desktop-options"
+              style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}
+            >
+              <div className="lyrics-drawer-row">
+                <span className="lyrics-drawer-label">{t('lyrics.desktopShowPrev')}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.desktopLyricsShowPrev !== false}
+                  className={`lyrics-drawer-switch ${config.desktopLyricsShowPrev !== false ? 'on' : ''}`}
+                  onClick={() =>
+                    setConfig((p) => ({
+                      ...p,
+                      desktopLyricsShowPrev: p.desktopLyricsShowPrev === false ? true : false
+                    }))
+                  }
+                >
+                  <span className="lyrics-drawer-switch-thumb" />
+                </button>
+              </div>
+              <div className="lyrics-drawer-row">
+                <span className="lyrics-drawer-label">{t('lyrics.desktopShowNext')}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.desktopLyricsShowNext !== false}
+                  className={`lyrics-drawer-switch ${config.desktopLyricsShowNext !== false ? 'on' : ''}`}
+                  onClick={() =>
+                    setConfig((p) => ({
+                      ...p,
+                      desktopLyricsShowNext: p.desktopLyricsShowNext === false ? true : false
+                    }))
+                  }
+                >
+                  <span className="lyrics-drawer-switch-thumb" />
+                </button>
+              </div>
+              <div className="lyrics-drawer-row">
+                <span className="lyrics-drawer-label">{t('lyrics.desktopShowRomaji')}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.desktopLyricsShowRomaji === true}
+                  className={`lyrics-drawer-switch ${config.desktopLyricsShowRomaji === true ? 'on' : ''}`}
+                  onClick={() =>
+                    setConfig((p) => ({
+                      ...p,
+                      desktopLyricsShowRomaji: !p.desktopLyricsShowRomaji
+                    }))
+                  }
+                >
+                  <span className="lyrics-drawer-switch-thumb" />
+                </button>
+              </div>
+              <div className="lyrics-drawer-row">
+                <span className="lyrics-drawer-label">{t('lyrics.desktopWordHighlight')}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.desktopLyricsWordHighlight !== false}
+                  className={`lyrics-drawer-switch ${config.desktopLyricsWordHighlight !== false ? 'on' : ''}`}
+                  onClick={() =>
+                    setConfig((p) => ({
+                      ...p,
+                      desktopLyricsWordHighlight: p.desktopLyricsWordHighlight === false ? true : false
+                    }))
+                  }
+                >
+                  <span className="lyrics-drawer-switch-thumb" />
+                </button>
+              </div>
+              <p className="lyrics-drawer-hint" style={{ marginTop: 0, marginBottom: 0 }}>
+                {t('lyrics.desktopWordHighlightHint')}
+              </p>
+            </div>
+
+            <div className="lyrics-drawer-color-grid" style={{ marginTop: 12 }}>
+              <div className="lyrics-drawer-label-row">
+                <span className="lyrics-drawer-label">{t('lyrics.desktopColorsSection')}</span>
+              </div>
+              <div className="lyrics-color-inline">
+                <div className="lyrics-color-inline-row">
+                  <div className="lyrics-color-inline-label">{t('lyrics.desktopColorText')}</div>
+                  <div
+                    className="lyrics-color-inline-swatch"
+                    style={{ background: config.desktopLyricsColorText || '#fff8f5' }}
+                  />
+                  <label className="lyrics-color-picker">
+                    <input
+                      type="color"
+                      aria-label={t('lyrics.desktopColorText')}
+                      value={config.desktopLyricsColorText || '#fff8f5'}
+                      onChange={(e) =>
+                        setConfig((p) => ({ ...p, desktopLyricsColorText: e.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="lyrics-color-inline-row">
+                  <div className="lyrics-color-inline-label">{t('lyrics.desktopColorSecondary')}</div>
+                  <div
+                    className="lyrics-color-inline-swatch"
+                    style={{ background: config.desktopLyricsColorSecondary || '#ffc8b8' }}
+                  />
+                  <label className="lyrics-color-picker">
+                    <input
+                      type="color"
+                      aria-label={t('lyrics.desktopColorSecondary')}
+                      value={config.desktopLyricsColorSecondary || '#ffc8b8'}
+                      onChange={(e) =>
+                        setConfig((p) => ({ ...p, desktopLyricsColorSecondary: e.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="lyrics-color-inline-row">
+                  <div className="lyrics-color-inline-label">{t('lyrics.desktopColorKaraoke')}</div>
+                  <div
+                    className="lyrics-color-inline-swatch"
+                    style={{ background: config.desktopLyricsColorKaraoke || '#ffffff' }}
+                  />
+                  <label className="lyrics-color-picker">
+                    <input
+                      type="color"
+                      aria-label={t('lyrics.desktopColorKaraoke')}
+                      value={config.desktopLyricsColorKaraoke || '#ffffff'}
+                      onChange={(e) =>
+                        setConfig((p) => ({ ...p, desktopLyricsColorKaraoke: e.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="lyrics-color-inline-row">
+                  <div className="lyrics-color-inline-label">{t('lyrics.desktopColorGlow')}</div>
+                  <div
+                    className="lyrics-color-inline-swatch"
+                    style={{ background: config.desktopLyricsColorGlow || '#ff8866' }}
+                  />
+                  <label className="lyrics-color-picker">
+                    <input
+                      type="color"
+                      aria-label={t('lyrics.desktopColorGlow')}
+                      value={config.desktopLyricsColorGlow || '#ff8866'}
+                      onChange={(e) =>
+                        setConfig((p) => ({ ...p, desktopLyricsColorGlow: e.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="lyrics-color-inline-row">
+                  <div className="lyrics-color-inline-label">{t('lyrics.desktopColorRomaji')}</div>
+                  <div
+                    className="lyrics-color-inline-swatch"
+                    style={{ background: config.desktopLyricsColorRomaji || '#e8d0c8' }}
+                  />
+                  <label className="lyrics-color-picker">
+                    <input
+                      type="color"
+                      aria-label={t('lyrics.desktopColorRomaji')}
+                      value={config.desktopLyricsColorRomaji || '#e8d0c8'}
+                      onChange={(e) =>
+                        setConfig((p) => ({ ...p, desktopLyricsColorRomaji: e.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
               <button
                 type="button"

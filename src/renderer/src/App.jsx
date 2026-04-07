@@ -75,7 +75,9 @@ import {
   setLyricsOverrideForPath,
   clearLyricsOverrideForPath
 } from './utils/lyricsOverrideStorage'
+import { getMvOverrideForPath, setMvOverrideForPath } from './utils/trackMemoryStorage'
 import { extractVideoId } from './utils/mvUrlParse'
+import { buildDesktopLyricsPayload } from './utils/desktopLyricsPayload'
 import { PRESET_THEMES, hexToRgbStr, hexToRgbaString, generateRandomPalette } from './utils/color'
 import {
   getUiFontStack,
@@ -411,6 +413,13 @@ export default function App() {
   useEffect(() => {
     configRef.current = config
   }, [config])
+
+  useEffect(() => {
+    if (!window.api?.onLyricsDesktopUncheck) return undefined
+    return window.api.onLyricsDesktopUncheck(() => {
+      setConfig((p) => ({ ...p, desktopLyricsEnabled: false }))
+    })
+  }, [setConfig])
 
   const likedSet = useMemo(() => new Set(likedPaths), [likedPaths])
   const upNextPathSet = useMemo(
@@ -1406,6 +1415,10 @@ export default function App() {
       setLyrics(parsed)
       setLyricsMatchStatus('matched')
       setActiveLyricIndex(-1)
+      const path = playlistRef.current[currentIndexRef.current]?.path
+      if (path && typeof raw === 'string' && raw.trim()) {
+        setLyricsOverrideForPath(path, raw)
+      }
     }
   }, [])
 
@@ -1538,6 +1551,8 @@ export default function App() {
         if (rows.length > 0) {
           setLyrics(rows)
           setLyricsMatchStatus('matched')
+          const p = playlistRef.current[currentIndexRef.current]?.path
+          if (p) setLyricsOverrideForPath(p, res.lrc)
           return true
         }
       }
@@ -1559,6 +1574,9 @@ export default function App() {
     if (rows.length > 0) {
       setLyrics(rows)
       setLyricsMatchStatus('matched')
+      if (currentTrack?.path && raw?.trim()) {
+        setLyricsOverrideForPath(currentTrack.path, raw)
+      }
       return true
     }
     return false
@@ -1606,6 +1624,14 @@ export default function App() {
           }
         }
 
+        if (!foundId) {
+          const persistedMv = getMvOverrideForPath(filePath)
+          if (persistedMv?.id && persistedMv?.source) {
+            foundId = persistedMv.id
+            mvSource = persistedMv.source
+          }
+        }
+
         if (!foundId && title) {
           const cleanedTitle = cleanTitleForSearch(title)
           const mvQuery =
@@ -1645,6 +1671,7 @@ export default function App() {
 
         if (foundId) {
           setMvId({ id: foundId, source: mvSource })
+          setMvOverrideForPath(filePath, { id: foundId, source: mvSource })
         }
       } catch (e) {
         console.error('MV search error', e)
@@ -1713,6 +1740,9 @@ export default function App() {
           if (parsed.length > 0) {
             setLyrics(parsed)
             setLyricsMatchStatus('matched')
+            if (raw && String(raw).trim()) {
+              setLyricsOverrideForPath(filePath, raw)
+            }
             return true
           }
           return false
@@ -1833,6 +1863,7 @@ export default function App() {
                 console.log(`[Lyrics NetEase] matched with "${k}" (${parsed.length} lines)`)
                 setLyrics(parsed)
                 setLyricsMatchStatus('matched')
+                setLyricsOverrideForPath(filePath, res.lrc)
                 return true
               }
             }
@@ -2473,7 +2504,7 @@ export default function App() {
       clearTimeout(tmr)
       if (ctx) ctx.close().catch(()=>{})
     }
-  }, [isAudioExclusive, biliDirectStream, mvId, isBackground])
+  }, [isAudioExclusive, biliDirectStream, mvId])
 
   const postToAllMvIframes = useCallback((msg, target = '*') => {
     ;[ytIframeRef, ytBackgroundIframeRef].forEach((ref) => {
@@ -4113,44 +4144,84 @@ export default function App() {
     []
   )
 
+  const desktopLyricsSyncRef = useRef({
+    lyrics: [],
+    activeLyricIndex: -1,
+    romajiDisplayLines: [],
+    lyricKaraokeProgressList: [],
+    lyricTimelineValid: false,
+    displayMainTitle: ''
+  })
   useEffect(() => {
-    try {
-      if (!config.desktopLyricsEnabled) {
-        if (window.api?.closeLyricsDesktop) void window.api.closeLyricsDesktop()
-        return
-      }
-      if (!window.api?.syncLyricsDesktop) return
-      const none = i18n.t('lyrics.none')
-      const lines = Array.isArray(lyrics) ? lyrics : []
-      const idx =
-        typeof activeLyricIndex === 'number' && activeLyricIndex >= 0 ? activeLyricIndex : -1
-      let prev = ''
-      let current = ''
-      let next = ''
-      if (idx >= 0 && idx < lines.length) {
-        current = (lines[idx]?.text || '').trim()
-        if (idx > 0) prev = (lines[idx - 1]?.text || '').trim()
-        if (idx < lines.length - 1) next = (lines[idx + 1]?.text || '').trim()
-      } else if (lines.length > 0) {
-        current = (lines[0]?.text || '').trim() || none
-      }
-      void window.api.syncLyricsDesktop({
-        prev,
-        current: current || none,
-        next,
-        title: displayMainTitle || '',
-        fontPx: config.desktopLyricsFontPx ?? 26
-      })
-    } catch (e) {
-      console.error('[desktop lyrics sync]', e)
+    desktopLyricsSyncRef.current = {
+      lyrics,
+      activeLyricIndex,
+      romajiDisplayLines,
+      lyricKaraokeProgressList,
+      lyricTimelineValid,
+      displayMainTitle
     }
   }, [
-    config.desktopLyricsEnabled,
-    config.desktopLyricsFontPx,
     lyrics,
     activeLyricIndex,
+    romajiDisplayLines,
+    lyricKaraokeProgressList,
+    lyricTimelineValid,
     displayMainTitle
   ])
+
+  useEffect(() => {
+    if (!config.desktopLyricsEnabled) {
+      ;(async () => {
+        try {
+          if (window.api?.closeLyricsDesktop) await window.api.closeLyricsDesktop()
+        } catch (e) {
+          console.error('[desktop lyrics close]', e)
+        }
+      })()
+      return undefined
+    }
+
+    let raf = 0
+
+    const tick = () => {
+      if (!configRef.current.desktopLyricsEnabled) return
+      if (!window.api?.syncLyricsDesktop) return
+      try {
+        const payload = buildDesktopLyricsPayload(
+          configRef.current,
+          desktopLyricsSyncRef.current,
+          i18n.t('lyrics.none')
+        )
+        window.api.syncLyricsDesktop(payload)
+      } catch (e) {
+        console.error('[desktop lyrics sync]', e)
+      }
+    }
+
+    const loop = () => {
+      raf = requestAnimationFrame(loop)
+      tick()
+    }
+
+    ;(async () => {
+      try {
+        if (!window.api?.syncLyricsDesktop) return
+        if (window.api?.openLyricsDesktop) await window.api.openLyricsDesktop()
+        if (!configRef.current.desktopLyricsEnabled) return
+        tick()
+        // rAF ~60fps + one-way IPC send (no invoke) — smooth karaoke. Main window uses backgroundThrottling: false.
+        raf = requestAnimationFrame(loop)
+      } catch (e) {
+        console.error('[desktop lyrics sync]', e)
+      }
+    })()
+
+    return () => {
+      cancelAnimationFrame(raf)
+    }
+    // Only (re)start loop when toggling feature; options are read from configRef each frame.
+  }, [config.desktopLyricsEnabled])
 
   return (
     <div
@@ -7224,6 +7295,10 @@ export default function App() {
         setMvId={setMvId}
         mvPlaybackQuality={mvPlaybackQuality}
         biliDirectStream={biliDirectStream}
+        onPersistMvOverride={(mv) => {
+          const p = playlist[currentIndex]?.path
+          if (p && mv?.id && mv?.source) setMvOverrideForPath(p, mv)
+        }}
         onRestartPlayback={() => {
           setCurrentTime(0)
           syncYTVideo(0)

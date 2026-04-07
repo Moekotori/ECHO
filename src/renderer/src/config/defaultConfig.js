@@ -113,6 +113,19 @@ export const DEFAULT_CONFIG = {
   desktopLyricsEnabled: false,
   /** Base font size (px) for desktop lyrics window */
   desktopLyricsFontPx: 26,
+  /** Desktop overlay: show previous / next line */
+  desktopLyricsShowPrev: true,
+  desktopLyricsShowNext: true,
+  /** Desktop overlay: show romaji line(s) when available */
+  desktopLyricsShowRomaji: false,
+  /** Desktop overlay: word-by-word (karaoke-style) fill on current line when LRC timing is valid */
+  desktopLyricsWordHighlight: true,
+  /** Hex colors for desktop floating lyrics (see Lyrics settings) */
+  desktopLyricsColorText: '#fff8f5',
+  desktopLyricsColorSecondary: '#ffc8b8',
+  desktopLyricsColorKaraoke: '#ffffff',
+  desktopLyricsColorGlow: '#ff8866',
+  desktopLyricsColorRomaji: '#e8d0c8',
   preamp: 0,
   activePreset: 'Custom',
   enableDiscordRPC: true,

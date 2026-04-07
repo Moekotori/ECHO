@@ -56,6 +56,7 @@ export default function MvSettingsDrawer({
   setMvId,
   mvPlaybackQuality,
   biliDirectStream,
+  onPersistMvOverride,
   onRestartPlayback
 }) {
   const { t } = useTranslation()
@@ -84,10 +85,12 @@ export default function MvSettingsDrawer({
       setUrlError(t('mvDrawer.urlError'))
       return
     }
-    setMvId({ id: result.id, source: result.source })
+    const next = { id: result.id, source: result.source }
+    setMvId(next)
+    if (onPersistMvOverride) onPersistMvOverride(next)
     setCustomUrl('')
     if (onRestartPlayback) onRestartPlayback()
-  }, [customUrl, setMvId, onRestartPlayback, t])
+  }, [customUrl, setMvId, onPersistMvOverride, onRestartPlayback, t])
 
   const selectStyle = {
     padding: '8px 12px',

@@ -4735,6 +4735,23 @@ input[type="range"]::-moz-range-track {
   gap: var(--drawer-gap-2);
 }
 
+/* Checkbox + label in one row (offset block defaults to column) */
+.lyrics-drawer-checkbox-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.lyrics-drawer-checkbox-row input[type='checkbox'] {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+}
+
 .lyrics-drawer-offset-controls {
   display: flex;
   align-items: center;

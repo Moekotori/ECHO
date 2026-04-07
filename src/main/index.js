@@ -48,6 +48,8 @@ function dialogLocaleFromOpts(opts) {
 let mainWindow = null
 /** Floating lyrics panel (renderer `?mode=lyrics-desktop`) */
 let lyricsDesktopWindow = null
+/** Last payload so the child window can request a resend after it subscribes to IPC */
+let lyricsDesktopLastPayload = {}
 
 function broadcastCastStatus() {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -230,6 +232,8 @@ async function createWindow() {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
+    // Keep timers/rAF running when minimized so desktop lyrics IPC sync does not stall.
+    backgroundThrottling: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -1308,22 +1312,31 @@ app.whenReady().then(async () => {
         return { ok: true }
       }
       lyricsDesktopWindow = new BrowserWindow({
-        width: 900,
-        height: 148,
-        minWidth: 360,
-        minHeight: 72,
+        width: 960,
+        height: 220,
+        minWidth: 320,
+        minHeight: 88,
         show: false,
         frame: false,
-        transparent: false,
-        backgroundColor: '#0b1220',
+        transparent: true,
+        hasShadow: false,
         alwaysOnTop: true,
         autoHideMenuBar: true,
+        backgroundThrottling: false,
         webPreferences: {
           preload: join(__dirname, '../preload/index.js'),
           contextIsolation: true,
           sandbox: false,
           webSecurity: false
         }
+      })
+      // Must attach before loadURL: ready-to-show often fires before loadURL's promise resolves,
+      // so registering after await loadURL leaves the window invisible forever (show: false).
+      lyricsDesktopWindow.once('ready-to-show', () => {
+        if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) lyricsDesktopWindow.show()
+      })
+      lyricsDesktopWindow.on('closed', () => {
+        lyricsDesktopWindow = null
       })
       let loadUrl
       if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -1337,12 +1350,9 @@ app.whenReady().then(async () => {
         loadUrl = u.toString()
       }
       await lyricsDesktopWindow.loadURL(loadUrl)
-      lyricsDesktopWindow.once('ready-to-show', () => {
-        if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) lyricsDesktopWindow.show()
-      })
-      lyricsDesktopWindow.on('closed', () => {
-        lyricsDesktopWindow = null
-      })
+      if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed() && !lyricsDesktopWindow.isVisible()) {
+        lyricsDesktopWindow.show()
+      }
       return { ok: true }
     } catch (e) {
       console.error('[lyricsDesktop] open failed:', e)
@@ -1362,9 +1372,37 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('lyricsDesktop:sync', async (_, payload) => {
+  /** User dismissed the floating overlay (Escape / right-click): close + uncheck in main UI */
+  ipcMain.handle('lyricsDesktop:dismiss', async () => {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('lyrics-desktop:uncheck')
+      }
+      if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
+        lyricsDesktopWindow.close()
+      }
+      lyricsDesktopWindow = null
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  /** Main renderer pushes at high rate — use send, not invoke, to avoid IPC backlog/jank */
+  ipcMain.on('lyricsDesktop:syncPush', (event, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed() && event.sender !== mainWindow.webContents) {
+      return
+    }
+    const p = payload && typeof payload === 'object' ? payload : {}
+    lyricsDesktopLastPayload = p
     if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
-      lyricsDesktopWindow.webContents.send('lyrics-desktop:data', payload && typeof payload === 'object' ? payload : {})
+      lyricsDesktopWindow.webContents.send('lyrics-desktop:data', p)
+    }
+  })
+
+  ipcMain.handle('lyricsDesktop:ready', async () => {
+    if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
+      lyricsDesktopWindow.webContents.send('lyrics-desktop:data', lyricsDesktopLastPayload)
     }
     return { ok: true }
   })

@@ -17,16 +17,9 @@ const lyricsDesktopFallback = (
     style={{
       minHeight: '100vh',
       margin: 0,
-      background: '#0b1220',
-      color: '#cbd5e1',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontFamily: 'system-ui, sans-serif'
+      background: 'transparent'
     }}
-  >
-    Loading…
-  </div>
+  />
 )
 
 ReactDOM.createRoot(document.getElementById('root')).render(
