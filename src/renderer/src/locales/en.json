@@ -118,7 +118,16 @@
     "none": "No lyrics found",
     "searchingMv": "Searching MV...",
     "fetchAgain": "Fetch lyrics again",
-    "coverAlt": "Cover Art"
+    "pickManual": "Pick from search results…",
+    "pickTitle": "Choose lyrics",
+    "pickLoading": "Loading candidates…",
+    "pickEmpty": "No candidates found. Try a different track or source.",
+    "coverAlt": "Cover Art",
+    "desktopLyrics": "Desktop lyrics",
+    "desktopLyricsEnable": "Enable floating desktop lyrics",
+    "desktopLyricsHint": "Floating always-on-top window (Windows). Requires lyrics to be loaded.",
+    "desktopOpen": "Open desktop window",
+    "desktopClose": "Close desktop window"
   },
   "tech": {
     "stereo": "STEREO",
@@ -463,6 +472,7 @@
   "wordFillRatio": "Line fill ratio",
   "wordFillRatioHint": "How early a line reaches 100% before the next line starts.",
     "mainLineSize": "Main line size",
+    "desktopFontSize": "Desktop window font size",
     "fontColor": "Lyrics color",
     "fontColorHint": "Overrides lyric text color in the lyrics view. Clear to use theme defaults.",
     "reset": "Reset",

@@ -209,9 +209,12 @@ int main(int argc, char** argv) {
         }
     }
 
-    /* ── ring buffer (2 seconds) ── */
+    /* ── ring buffer (~0.4s): smaller queue so volume/EQ changes in the Node
+     * pipeline are heard sooner; 2s caused multi-second perceived lag. ── */
     ma_format format = ma_format_f32;
-    if (ma_pcm_rb_init(format, channels, sampleRate * 2, NULL, NULL, &g_rb) != MA_SUCCESS) {
+    ma_uint32 rbFrames = (ma_uint32)((double)sampleRate * 0.4);
+    if (rbFrames < sampleRate / 5) rbFrames = sampleRate / 5; /* min ~200ms */
+    if (ma_pcm_rb_init(format, channels, rbFrames, NULL, NULL, &g_rb) != MA_SUCCESS) {
         fprintf(stderr, "[echo-audio-host] Failed to initialize ring buffer\n");
         return -1;
     }

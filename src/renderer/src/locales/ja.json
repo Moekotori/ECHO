@@ -118,7 +118,16 @@
     "none": "歌詞が見つかりません",
     "searchingMv": "MV を検索中…",
     "fetchAgain": "歌詞を再取得",
-    "coverAlt": "ジャケット"
+    "pickManual": "検索結果から選ぶ…",
+    "pickTitle": "歌詞を選択",
+    "pickLoading": "候補を読み込み中…",
+    "pickEmpty": "候補がありません。曲やソースを変えて再試行してください。",
+    "coverAlt": "ジャケット",
+    "desktopLyrics": "デスクトップ歌詞",
+    "desktopLyricsEnable": "デスクトップ歌詞を有効にする",
+    "desktopLyricsHint": "常に手前に表示（Windows）。歌詞が読み込まれている必要があります。",
+    "desktopOpen": "デスクトップを開く",
+    "desktopClose": "デスクトップを閉じる"
   },
   "tech": {
     "stereo": "ステレオ",
@@ -463,6 +472,7 @@
   "wordFillRatio": "行の完了率",
   "wordFillRatioHint": "次の行が始まる前に、どれだけ早く 100% に到達するか。",
     "mainLineSize": "本欄のサイズ",
+    "desktopFontSize": "デスクトップ歌詞のサイズ",
     "fontColor": "歌詞の色",
     "fontColorHint": "歌詞画面の文字色を上書きします。クリアするとテーマ既定に戻ります。",
     "reset": "リセット",

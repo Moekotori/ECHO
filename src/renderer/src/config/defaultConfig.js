@@ -109,6 +109,10 @@ export const DEFAULT_CONFIG = {
   lyricsOffsetMs: 0,
   /** 歌词页隐藏滚动歌词（仍保留标题区与侧栏 MV / 沉浸式背景） */
   lyricsHidden: false,
+  /** Floating always-on-top lyrics window (see Lyrics settings) */
+  desktopLyricsEnabled: false,
+  /** Base font size (px) for desktop lyrics window */
+  desktopLyricsFontPx: 26,
   preamp: 0,
   activePreset: 'Custom',
   enableDiscordRPC: true,

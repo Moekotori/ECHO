@@ -95,6 +95,15 @@ contextBridge.exposeInMainWorld('api', {
   resumeAudio: () => ipcRenderer.invoke('audio:resume'),
   stopAudio: () => ipcRenderer.invoke('audio:stop'),
   setAudioVolume: (vol) => ipcRenderer.invoke('audio:setVolume', vol),
+  openLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:open'),
+  closeLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:close'),
+  syncLyricsDesktop: (payload) => ipcRenderer.invoke('lyricsDesktop:sync', payload),
+  onLyricsDesktopData: (callback) => {
+    const ch = 'lyrics-desktop:data'
+    const handler = (_, data) => callback(data)
+    ipcRenderer.on(ch, handler)
+    return () => ipcRenderer.removeListener(ch, handler)
+  },
   clearAudioStatusListeners: () => ipcRenderer.removeAllListeners('audio:status-update'),
   onAudioStatus: (callback) => {
     const channel = 'audio:status-update'

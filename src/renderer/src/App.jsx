@@ -66,8 +66,15 @@ import MvSettingsDrawer from './components/MvSettingsDrawer'
 import AudioSettingsDrawer from './components/AudioSettingsDrawer'
 import CastReceiveDrawer from './components/CastReceiveDrawer'
 import ListenTogetherDrawer from './components/ListenTogetherDrawer'
+import LyricsCandidatePicker from './components/LyricsCandidatePicker'
 import { UiButton } from './components/ui'
 import { parseAnyLyrics } from './utils/lyricsParse'
+import { pickLyricsFromLrcLibResult, rankLrcLibCandidates } from './utils/lyricsCandidateRank'
+import {
+  getLyricsOverrideForPath,
+  setLyricsOverrideForPath,
+  clearLyricsOverrideForPath
+} from './utils/lyricsOverrideStorage'
 import { extractVideoId } from './utils/mvUrlParse'
 import { PRESET_THEMES, hexToRgbStr, hexToRgbaString, generateRandomPalette } from './utils/color'
 import {
@@ -243,6 +250,9 @@ export default function App() {
   const [lyrics, setLyrics] = useState([])
   const [activeLyricIndex, setActiveLyricIndex] = useState(-1)
   const [lyricsDrawerOpen, setLyricsDrawerOpen] = useState(false)
+  const [lyricsCandidateOpen, setLyricsCandidateOpen] = useState(false)
+  const [lyricsCandidateLoading, setLyricsCandidateLoading] = useState(false)
+  const [lyricsCandidateItems, setLyricsCandidateItems] = useState([])
   const [downloaderDrawerOpen, setDownloaderDrawerOpen] = useState(false)
   const [mvDrawerOpen, setMvDrawerOpen] = useState(false)
   const [castDrawerOpen, setCastDrawerOpen] = useState(false)
@@ -892,15 +902,13 @@ export default function App() {
     }
   }, [playbackRate])
 
-  // Update volume
+  // Update volume — HTML audio / gain node (no IPC)
   useEffect(() => {
     if (useNativeEngineRef.current) {
       // Native mode: HTML audio at full volume so Web Audio analyser gets data,
       // but mute the final gain node so no sound comes from the Web Audio pipeline.
-      // Actual audio output comes from the native engine.
       if (audioRef.current) audioRef.current.volume = 1
       if (gainNode.current) gainNode.current.gain.value = 0
-      window.api?.setAudioVolume?.(volume)
     } else {
       if (audioRef.current) {
         audioRef.current.volume = volume
@@ -908,6 +916,19 @@ export default function App() {
       if (gainNode.current) gainNode.current.gain.value = 1
     }
   }, [volume, useNativeEngine])
+
+  // Native engine volume via main process (rAF while dragging to reduce IPC flood)
+  useEffect(() => {
+    if (!useNativeEngineRef.current || !window.api?.setAudioVolume) return
+    if (!isVolumeDragging) {
+      window.api.setAudioVolume(volume)
+      return
+    }
+    const id = requestAnimationFrame(() => {
+      window.api.setAudioVolume(volume)
+    })
+    return () => cancelAnimationFrame(id)
+  }, [volume, useNativeEngine, isVolumeDragging])
 
   // Keep main-process HiFi EQ in sync (PCM DSP on native bridge path)
   useEffect(() => {
@@ -1349,6 +1370,7 @@ export default function App() {
   const retryFetchLyrics = async () => {
     const track = playlist[currentIndex]
     if (!track) return
+    clearLyricsOverrideForPath(track.path)
     const metaTitle = metadata.title || (track ? stripExtension(track.name) : '')
     const metaArtist = metadata.artist || track?.info?.artist || ''
     const cleaned = cleanTitleForSearch(metaTitle)
@@ -1403,224 +1425,105 @@ export default function App() {
     applyLyricsFromText(text)
   }, [applyLyricsFromText])
 
-  const normalizeLyricCompareText = (raw = '') =>
-    cleanTitleForSearch(String(raw || ''))
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim()
-
-  const tokenizeLyricCompareText = (raw = '') => {
-    const norm = normalizeLyricCompareText(raw)
-    const wordTokens = norm.split(' ').map((x) => x.trim()).filter(Boolean)
-    // For CJK-heavy text, also extract individual CJK characters as tokens.
-    // This dramatically improves matching for Japanese/Chinese titles where
-    // a single "word" token might be the entire title.
-    const cjkChars = norm.replace(/[a-z0-9\s]/gi, '').split('').filter(Boolean)
-    if (cjkChars.length >= 2) {
-      // Also add bigrams for CJK (pairs of adjacent characters)
-      const bigrams = []
-      for (let i = 0; i < cjkChars.length - 1; i++) {
-        bigrams.push(cjkChars[i] + cjkChars[i + 1])
-      }
-      return [...new Set([...wordTokens, ...cjkChars, ...bigrams])]
-    }
-    return wordTokens
-  }
-
-  const compareLyricTextSimilarity = (aRaw = '', bRaw = '') => {
-    const a = normalizeLyricCompareText(aRaw)
-    const b = normalizeLyricCompareText(bRaw)
-    if (!a || !b) return 0
-    if (a === b) return 1
-
-    const aTokens = new Set(tokenizeLyricCompareText(a))
-    const bTokens = new Set(tokenizeLyricCompareText(b))
-    if (aTokens.size === 0 || bTokens.size === 0) return 0
-
-    let common = 0
-    for (const t of aTokens) {
-      if (bTokens.has(t)) common += 1
-    }
-    // Use Sørensen–Dice coefficient instead of Jaccard for better sensitivity
-    const totalSize = aTokens.size + bTokens.size
-    let score = (2 * common) / totalSize
-
-    if (a.includes(b) || b.includes(a)) {
-      const minLen = Math.min(a.length, b.length)
-      const maxLen = Math.max(a.length, b.length)
-      const containBoost = Math.min(0.96, (minLen / Math.max(1, maxLen)) * 0.9 + 0.05)
-      score = Math.max(score, containBoost)
-    }
-
-    // Character-level Levenshtein ratio for short strings (< 12 chars)
-    if (a.length < 12 && b.length < 12) {
-      const maxLen = Math.max(a.length, b.length)
-      let dist = 0
-      const m = a.length, n = b.length
-      const dp = Array.from({ length: m + 1 }, (_, i) => {
-        const row = new Array(n + 1)
-        row[0] = i
-        return row
-      })
-      for (let j = 0; j <= n; j++) dp[0][j] = j
-      for (let i = 1; i <= m; i++) {
-        for (let j = 1; j <= n; j++) {
-          dp[i][j] = a[i - 1] === b[j - 1]
-            ? dp[i - 1][j - 1]
-            : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
-        }
-      }
-      dist = dp[m][n]
-      const editRatio = 1 - dist / maxLen
-      score = Math.max(score, editRatio)
-    }
-
-    return Math.min(1, Math.max(0, score))
-  }
-
-  const pickLyricsFromLrcLibResult = (payload, audioDuration, options = {}) => {
-    if (!payload) return ''
-
-    const candidates = Array.isArray(payload) ? payload : [payload]
-    const expectedTitles = [...new Set((options.titleCandidates || []).map(normalizeLyricCompareText))]
-      .filter(Boolean)
-      .slice(0, 8)
-    const expandArtistCandidates = (arr) => {
-      const out = []
-      for (const raw of arr || []) {
-        const s = String(raw || '').trim()
-        if (!s) continue
-        out.push(s)
-        // Split common separators / collabs.
-        s.split(/[,/&+]| feat\.?| ft\.?| x /i)
-          .map((x) => String(x || '').trim())
-          .filter(Boolean)
-          .forEach((x) => out.push(x))
-      }
-      return out
-    }
-    const expectedArtists = [...new Set(expandArtistCandidates(options.artistCandidates).map(normalizeLyricCompareText))]
-      .filter(Boolean)
-      .slice(0, 12)
-
-    const scoreSyncedTimingFit = (lyricsText) => {
-      const hasAudioDur = Number.isFinite(audioDuration) && audioDuration > 0
-      if (!hasAudioDur) return 0
-      const rows = parseAnyLyrics(lyricsText)
-      if (!rows || rows.length < 3) return 0
-      const firstT = Number(rows[0]?.time)
-      const lastT = Number(rows[rows.length - 1]?.time)
-      if (!Number.isFinite(firstT) || !Number.isFinite(lastT)) return 0
-
-      let fit = 0
-      const endDiff = Math.abs(lastT - audioDuration)
-      // Strong bonus if end timestamp is close to track duration.
-      if (endDiff <= 6) fit += 14
-      else if (endDiff <= 12) fit += 10
-      else if (endDiff <= 24) fit += 5
-      else if (endDiff >= 90) fit -= 8
-
-      // Penalize clearly wrong timelines (e.g., lyric starts very late or ends too early).
-      if (firstT > 18) fit -= 6
-      if (lastT < audioDuration * 0.45) fit -= 10
-      if (lastT > audioDuration + 40) fit -= 6
-
-      return fit
-    }
-
-    const scored = candidates
-      .map((item) => {
-        const synced = item?.syncedLyrics?.trim() || ''
-        const plain = item?.plainLyrics?.trim() || item?.lyrics?.trim() || ''
-        const chosenLyrics = synced || plain
-        if (!chosenLyrics) return null
-
-        const candTitle =
-          item?.trackName || item?.track_name || item?.title || item?.name || item?.song || ''
-        const candArtist =
-          item?.artistName || item?.artist_name || item?.artist || item?.artists || ''
-
-        const titleSim =
-          expectedTitles.length > 0
-            ? Math.max(...expectedTitles.map((t) => compareLyricTextSimilarity(candTitle, t)))
-            : 0
-        const artistSim =
-          expectedArtists.length > 0
-            ? Math.max(...expectedArtists.map((a) => compareLyricTextSimilarity(candArtist, a)))
-            : 0
-
-        const dur = Number(item?.duration)
-        const hasDur = Number.isFinite(dur) && dur > 0
-        const hasAudioDur = Number.isFinite(audioDuration) && audioDuration > 0
-        const diff = hasDur && hasAudioDur ? Math.abs(dur - audioDuration) : Number.POSITIVE_INFINITY
-
-        let score = 0
-        score += synced ? 26 : 10
-
-        if (hasDur && hasAudioDur) {
-          const durationScore = Math.max(0, 1 - Math.min(diff, 90) / 90)
-          score += durationScore * 35
-          if (diff > 140) score -= 12
-        }
-
-        const expectedTitleLen = expectedTitles.length > 0 ? expectedTitles[0].length : 0
-        const isShortTitle = expectedTitleLen > 0 && expectedTitleLen <= 4
-
-        if (expectedTitles.length > 0) {
-          score += titleSim * (isShortTitle ? 16 : 28)
-          if (titleSim < 0.08) score -= 8
-        }
-
-        if (expectedArtists.length > 0) {
-          score += artistSim * (isShortTitle ? 30 : 16)
-          if (artistSim < 0.08) score -= 6
-          // For short titles (e.g. “再生”), artist must match reasonably well.
-          if (isShortTitle && artistSim < 0.34) score -= 18
-        }
-
-        if (synced && (titleSim > 0.65 || artistSim > 0.65)) score += 8
-        if (!synced && titleSim < 0.2 && artistSim < 0.2) score -= 10
-        // Synced timeline fit is a powerful disambiguator for same-title covers.
-        if (synced) score += scoreSyncedTimingFit(chosenLyrics)
-
-        return { item, chosenLyrics, synced: !!synced, diff, titleSim, artistSim, score }
-      })
-      .filter(Boolean)
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score
-        if (b.synced !== a.synced) return b.synced ? 1 : -1
-        return a.diff - b.diff
-      })
-
-    const best = scored[0]
-    if (best) {
-      console.log(
-        `[Lyrics] Best candidate: score=${best.score.toFixed(2)}, titleSim=${best.titleSim.toFixed(2)}, artistSim=${best.artistSim.toFixed(2)}, diff=${Number.isFinite(best.diff) ? best.diff.toFixed(1) : 'n/a'}s`
-      )
-      // Confidence gate: reject results that are almost certainly wrong.
-      // A good match typically scores 40+; below 18 means neither title
-      // nor artist matched well AND duration didn't help.
-      const MIN_CONFIDENCE = 18
-      if (best.score < MIN_CONFIDENCE) {
-        console.log(`[Lyrics] Rejected: score ${best.score.toFixed(2)} < threshold ${MIN_CONFIDENCE}`)
-        return ''
-      }
-      // Extra guard: if title similarity is very low AND artist similarity
-      // is also low, the result is likely wrong even if duration matched.
-      if (best.titleSim < 0.15 && best.artistSim < 0.15) {
-        console.log(`[Lyrics] Rejected: titleSim=${best.titleSim.toFixed(2)} & artistSim=${best.artistSim.toFixed(2)} both too low`)
-        return ''
-      }
-      return best.chosenLyrics
-    }
-
-    return ''
-  }
-
   const requestLrcLib = async (url) => {
     const response = await fetch(url)
     if (!response.ok) return null
     return response.json()
+  }
+
+  const openLyricsCandidatePicker = async () => {
+    const track = playlist[currentIndex]
+    if (!track) return
+    const metaTitle = metadata.title || stripExtension(track.name) || ''
+    const metaArtist = metadata.artist || track?.info?.artist || ''
+    const title = (cleanTitleForSearch(metaTitle) || metaTitle || '').trim()
+    if (!title) return
+    setLyricsCandidateLoading(true)
+    setLyricsCandidateOpen(true)
+    setLyricsCandidateItems([])
+    try {
+      const titleVariants = buildLyricTitleVariants(title)
+      if (titleVariants.length === 0) return
+      const globalParenHints = extractParenArtistHints(title)
+      const coverArtistRaw = (metaArtist || '').trim()
+      const coverArtistClean = cleanArtistForLyrics(coverArtistRaw)
+      const audioDur = audioRef.current?.duration || duration || 0
+      const rankOpts = {
+        titleCandidates: titleVariants,
+        artistCandidates: [...globalParenHints, coverArtistClean, coverArtistRaw].filter(Boolean)
+      }
+      const q = `${titleVariants[0]} ${coverArtistClean || coverArtistRaw}`.trim()
+      const data = await requestLrcLib(
+        `https://lrclib.net/api/search?q=${encodeURIComponent(q)}`
+      )
+      const ranked = rankLrcLibCandidates(data, audioDur, rankOpts)
+      const lrItems = ranked.slice(0, 30).map((r, i) => {
+        const tn = r.item?.trackName || r.item?.track_name || ''
+        const an = r.item?.artistName || r.item?.artist_name || ''
+        return {
+          key: `lrclib-${i}-${tn}`,
+          source: 'lrclib',
+          title: tn || '—',
+          subtitle: an || '—',
+          badge: `LRCLIB · ${r.score.toFixed(0)}`,
+          raw: r.chosenLyrics
+        }
+      })
+      let neItems = []
+      if (window.api?.neteaseSearch) {
+        try {
+          const songs = await window.api.neteaseSearch(q)
+          neItems = (songs || []).slice(0, 25).map((s) => ({
+            key: `ne-${s.id}`,
+            source: 'netease',
+            title: s.name || '—',
+            subtitle: s.artists || '—',
+            badge:
+              typeof s.duration === 'number' && s.duration > 0
+                ? `NetEase · ${(s.duration / 1000).toFixed(0)}s`
+                : 'NetEase',
+            songId: s.id
+          }))
+        } catch (e) {
+          console.warn('[lyrics] neteaseSearch', e)
+        }
+      }
+      setLyricsCandidateItems([...lrItems, ...neItems])
+    } finally {
+      setLyricsCandidateLoading(false)
+    }
+  }
+
+  const handleLyricsCandidatePick = async (row) => {
+    const track = playlist[currentIndex]
+    if (!track) return
+    setLyricsCandidateOpen(false)
+    try {
+      if (row.source === 'lrclib' && row.raw) {
+        const parsed = parseAnyLyrics(row.raw)
+        if (parsed.length > 0) {
+          setLyrics(parsed)
+          setLyricsMatchStatus('matched')
+          setActiveLyricIndex(-1)
+          setLyricsOverrideForPath(track.path, row.raw)
+        }
+        return
+      }
+      if (row.source === 'netease' && row.songId && window.api?.fetchNeteaseLyrics) {
+        const res = await window.api.fetchNeteaseLyrics({ songId: row.songId })
+        if (res?.ok && res.lrc) {
+          const parsed = parseAnyLyrics(res.lrc)
+          if (parsed.length > 0) {
+            setLyrics(parsed)
+            setLyricsMatchStatus('matched')
+            setActiveLyricIndex(-1)
+            setLyricsOverrideForPath(track.path, res.lrc)
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[lyrics] candidate pick', e)
+    }
   }
 
   const tryApplyLyricsBySourceLink = async (rawLink) => {
@@ -1770,6 +1673,17 @@ export default function App() {
       const embeddedParsed = parseAnyLyrics(hints.embeddedLyrics)
       if (embeddedParsed.length > 0) {
         setLyrics(embeddedParsed)
+        setLyricsMatchStatus('matched')
+        return
+      }
+    }
+
+    // 1.6 Saved manual pick for this file (after local/embedded)
+    const savedOverride = getLyricsOverrideForPath(filePath)
+    if (savedOverride?.raw) {
+      const parsedOv = parseAnyLyrics(savedOverride.raw)
+      if (parsedOv.length > 0) {
+        setLyrics(parsedOv)
         setLyricsMatchStatus('matched')
         return
       }
@@ -4199,6 +4113,45 @@ export default function App() {
     []
   )
 
+  useEffect(() => {
+    try {
+      if (!config.desktopLyricsEnabled) {
+        if (window.api?.closeLyricsDesktop) void window.api.closeLyricsDesktop()
+        return
+      }
+      if (!window.api?.syncLyricsDesktop) return
+      const none = i18n.t('lyrics.none')
+      const lines = Array.isArray(lyrics) ? lyrics : []
+      const idx =
+        typeof activeLyricIndex === 'number' && activeLyricIndex >= 0 ? activeLyricIndex : -1
+      let prev = ''
+      let current = ''
+      let next = ''
+      if (idx >= 0 && idx < lines.length) {
+        current = (lines[idx]?.text || '').trim()
+        if (idx > 0) prev = (lines[idx - 1]?.text || '').trim()
+        if (idx < lines.length - 1) next = (lines[idx + 1]?.text || '').trim()
+      } else if (lines.length > 0) {
+        current = (lines[0]?.text || '').trim() || none
+      }
+      void window.api.syncLyricsDesktop({
+        prev,
+        current: current || none,
+        next,
+        title: displayMainTitle || '',
+        fontPx: config.desktopLyricsFontPx ?? 26
+      })
+    } catch (e) {
+      console.error('[desktop lyrics sync]', e)
+    }
+  }, [
+    config.desktopLyricsEnabled,
+    config.desktopLyricsFontPx,
+    lyrics,
+    activeLyricIndex,
+    displayMainTitle
+  ])
+
   return (
     <div
       className="app-container"
@@ -5176,7 +5129,7 @@ export default function App() {
                           }}
                         >
                           <div>{t('lyrics.none')}</div>
-                          <div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
                             <button
                               className="retry-lyrics-btn"
                               onClick={() => retryFetchLyrics()}
@@ -5190,6 +5143,20 @@ export default function App() {
                               }}
                             >
                               {t('lyrics.fetchAgain')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openLyricsCandidatePicker()}
+                              style={{
+                                padding: '6px 10px',
+                                borderRadius: 6,
+                                border: '1px solid rgba(255,255,255,0.25)',
+                                background: 'rgba(255,255,255,0.08)',
+                                color: 'inherit',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {t('lyrics.pickManual')}
                             </button>
                           </div>
                         </div>
@@ -7173,6 +7140,13 @@ export default function App() {
         </div>
       )}
 
+      <LyricsCandidatePicker
+        open={lyricsCandidateOpen}
+        loading={lyricsCandidateLoading}
+        items={lyricsCandidateItems}
+        onClose={() => setLyricsCandidateOpen(false)}
+        onPick={handleLyricsCandidatePick}
+      />
       <LyricsSettingsDrawer
         open={lyricsDrawerOpen}
         onClose={() => setLyricsDrawerOpen(false)}

@@ -530,6 +530,55 @@ export default function LyricsSettingsDrawer({
           </section>
 
           <section className="lyrics-drawer-section">
+            <h3 className="lyrics-drawer-section-title">{t('lyrics.desktopLyrics')}</h3>
+            <p className="lyrics-drawer-hint">{t('lyrics.desktopLyricsHint')}</p>
+            <label className="lyrics-drawer-offset" style={{ alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={!!config.desktopLyricsEnabled}
+                onChange={(e) =>
+                  setConfig((p) => ({ ...p, desktopLyricsEnabled: e.target.checked }))
+                }
+              />
+              <span>{t('lyrics.desktopLyricsEnable')}</span>
+            </label>
+            <div className="lyrics-drawer-offset-controls" style={{ marginTop: 10 }}>
+              <span className="lyrics-drawer-label">{t('lyricsDrawer.desktopFontSize')}</span>
+              <input
+                type="range"
+                min={14}
+                max={40}
+                step={1}
+                value={config.desktopLyricsFontPx ?? 26}
+                onChange={(e) =>
+                  setConfig((p) => ({
+                    ...p,
+                    desktopLyricsFontPx: Number(e.target.value)
+                  }))
+                }
+              />
+              <span>{config.desktopLyricsFontPx ?? 26}px</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+              <button
+                type="button"
+                className="lyrics-drawer-primary-btn"
+                onClick={() => window.api?.openLyricsDesktop?.()}
+              >
+                {t('lyrics.desktopOpen')}
+              </button>
+              <button
+                type="button"
+                className="lyrics-drawer-primary-btn"
+                style={{ opacity: 0.85 }}
+                onClick={() => window.api?.closeLyricsDesktop?.()}
+              >
+                {t('lyrics.desktopClose')}
+              </button>
+            </div>
+          </section>
+
+          <section className="lyrics-drawer-section">
             <h3 className="lyrics-drawer-section-title">{t('lyricsDrawer.localSync')}</h3>
             <div className="lyrics-drawer-offset">
               <span className="lyrics-drawer-label">{t('lyricsDrawer.timingOffset')}</span>

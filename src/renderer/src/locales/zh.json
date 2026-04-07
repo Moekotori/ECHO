@@ -118,7 +118,16 @@
     "none": "暂无歌词",
     "searchingMv": "正在搜索 MV…",
     "fetchAgain": "重新获取歌词",
-    "coverAlt": "封面"
+    "pickManual": "从搜索结果选择…",
+    "pickTitle": "选择歌词",
+    "pickLoading": "正在加载候选…",
+    "pickEmpty": "没有可用候选，请换一首歌或来源后再试。",
+    "coverAlt": "封面",
+    "desktopLyrics": "桌面歌词",
+    "desktopLyricsEnable": "启用桌面悬浮歌词",
+    "desktopLyricsHint": "置顶悬浮窗口（Windows）。需先加载歌词。",
+    "desktopOpen": "打开桌面窗口",
+    "desktopClose": "关闭桌面窗口"
   },
   "tech": {
     "stereo": "立体声",
@@ -469,6 +478,7 @@
   "wordFillRatio": "单行完成比例",
   "wordFillRatioHint": "控制一行在下一句开始前多早完成 100% 高亮。",
     "mainLineSize": "主歌词字号",
+    "desktopFontSize": "桌面歌词字号",
     "fontColor": "歌词颜色",
     "fontColorHint": "仅影响歌词界面文字颜色；清空将使用主题默认。",
     "reset": "重置",

@@ -124,7 +124,7 @@ export class NativeAudioBridge {
    * Spawn the child process.
    * Resolves once the first `{"ready":true}` JSON line arrives.
    */
-  start({ sampleRate = 44100, channels = 2, deviceIndex = -1, deviceName, exclusive = false, volume = 1.0, startTime = 0, playbackRate = 1.0 }) {
+  start({ sampleRate = 44100, channels = 2, deviceIndex = -1, deviceName, exclusive = false, volume: _vol = 1.0, startTime = 0, playbackRate = 1.0 }) {
     return new Promise((resolve, reject) => {
       const bin = resolveHostBinary()
       if (!bin) return reject(new Error('echo-audio-host binary not found'))
@@ -140,7 +140,9 @@ export class NativeAudioBridge {
       if (deviceIndex >= 0) args.push('-device-index', String(deviceIndex))
       else if (deviceName) args.push('-device', deviceName)
       if (exclusive) args.push('-exclusive')
-      if (Math.abs(volume - 1.0) > 0.001) args.push('-vol', String(volume))
+      // Volume is applied only in the main-process AudioProcessor (JS) so live
+      // slider changes stay consistent. Do not pass -vol here — C++ g_volume
+      // would double-apply with already-scaled PCM and stay stale until restart.
 
       console.log(`[NativeAudioBridge] spawn: ${bin} ${args.join(' ')}`)
 
