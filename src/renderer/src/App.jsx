@@ -1688,7 +1688,18 @@ export default function App() {
       }
     }
 
-    // 1. Try local LRC
+    // 1. Saved manual pick for this file (Highest Priority)
+    const savedOverride = getLyricsOverrideForPath(filePath)
+    if (savedOverride?.raw) {
+      const parsedOv = parseAnyLyrics(savedOverride.raw)
+      if (parsedOv.length > 0) {
+        setLyrics(parsedOv)
+        setLyricsMatchStatus('matched')
+        return
+      }
+    }
+
+    // 2. Try local LRC
     try {
       const localLrc = await window.api.readLyricsHandler(filePath)
       if (localLrc) {
@@ -1708,17 +1719,6 @@ export default function App() {
       const embeddedParsed = parseAnyLyrics(hints.embeddedLyrics)
       if (embeddedParsed.length > 0) {
         setLyrics(embeddedParsed)
-        setLyricsMatchStatus('matched')
-        return
-      }
-    }
-
-    // 1.6 Saved manual pick for this file (after local/embedded)
-    const savedOverride = getLyricsOverrideForPath(filePath)
-    if (savedOverride?.raw) {
-      const parsedOv = parseAnyLyrics(savedOverride.raw)
-      if (parsedOv.length > 0) {
-        setLyrics(parsedOv)
         setLyricsMatchStatus('matched')
         return
       }
