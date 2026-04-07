@@ -7210,6 +7210,7 @@ export default function App() {
         lyricsMatchStatus={lyricsMatchStatus}
         lyricTimelineValid={lyricTimelineValid}
         onRefreshLyrics={retryFetchLyrics}
+        onOpenManualSearch={openLyricsCandidatePicker}
         onFetchLyricsFromLink={fetchLyricsFromSourceLink}
         onApplyLyricsText={applyLyricsFromText}
         onNativeLyricsFilePick={pickLyricsFileNative}

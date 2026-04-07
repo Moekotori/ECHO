@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { X, RefreshCw, Minus, Plus, Upload } from 'lucide-react'
+import { X, RefreshCw, Minus, Plus, Upload, Search } from 'lucide-react'
 
 export default function LyricsSettingsDrawer({
   open,
@@ -10,6 +10,7 @@ export default function LyricsSettingsDrawer({
   lyricsMatchStatus,
   lyricTimelineValid,
   onRefreshLyrics,
+  onOpenManualSearch,
   onFetchLyricsFromLink,
   onApplyLyricsText,
   onNativeLyricsFilePick
@@ -504,6 +505,15 @@ export default function LyricsSettingsDrawer({
             >
               <RefreshCw size={16} />
               {t('lyricsDrawer.refresh')}
+            </button>
+            <button
+              type="button"
+              className="lyrics-drawer-refresh"
+              onClick={() => onOpenManualSearch?.()}
+              title={t('lyricsDrawer.manualSearch')}
+            >
+              <Search size={16} />
+              {t('lyricsDrawer.manualSearch')}
             </button>
             <div className="lyrics-drawer-textarea-block">
               <input

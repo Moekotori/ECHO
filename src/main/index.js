@@ -170,7 +170,13 @@ const SUPPORTED_AUDIO_EXTS = new Set([
   '.aac',
   '.ncm',
   '.dsf',
-  '.dff'
+  '.dff',
+  '.opus',
+  '.webm',
+  '.wma',
+  '.alac',
+  '.aiff',
+  '.m4b'
 ])
 
 /**
@@ -708,7 +714,23 @@ app.whenReady().then(async () => {
       filters: [
         {
           name: d.filterAudio,
-          extensions: ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'ncm', 'dsf', 'dff']
+          extensions: [
+            'mp3',
+            'wav',
+            'flac',
+            'ogg',
+            'm4a',
+            'aac',
+            'ncm',
+            'dsf',
+            'dff',
+            'opus',
+            'webm',
+            'wma',
+            'alac',
+            'aiff',
+            'm4b'
+          ]
         }
       ]
     })
