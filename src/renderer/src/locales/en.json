@@ -518,6 +518,7 @@
     "decrease50": "Decrease by 50 ms",
     "increase50": "Increase by 50 ms",
     "offsetHint": "Positive values delay the highlight slightly vs. audio.",
+    "manualSearch": "Manual search",
     "dropzone": "Drop or choose a local .lrc / .lrcx file",
     "chooseFile": "Choose file",
     "editPlain": "Edit as plain text",

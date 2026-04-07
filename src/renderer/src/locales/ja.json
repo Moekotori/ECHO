@@ -518,6 +518,7 @@
     "decrease50": "50 ms 短く",
     "increase50": "50 ms 長く",
     "offsetHint": "正の値はハイライトを音声よりわずかに遅らせます。",
+    "manualSearch": "手動検索",
     "dropzone": "ローカルの .lrc / .lrcx をドロップまたは選択",
     "chooseFile": "ファイルを選ぶ",
     "editPlain": "プレーンテキストで編集",

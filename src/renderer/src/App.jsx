@@ -1444,28 +1444,32 @@ export default function App() {
     return response.json()
   }
 
-  const openLyricsCandidatePicker = async () => {
+  const searchLyricsCandidates = async (customQuery) => {
     const track = playlist[currentIndex]
     if (!track) return
     const metaTitle = metadata.title || stripExtension(track.name) || ''
     const metaArtist = metadata.artist || track?.info?.artist || ''
     const title = (cleanTitleForSearch(metaTitle) || metaTitle || '').trim()
-    if (!title) return
+    if (!title && !customQuery) return
+    
     setLyricsCandidateLoading(true)
     setLyricsCandidateOpen(true)
     setLyricsCandidateItems([])
     try {
       const titleVariants = buildLyricTitleVariants(title)
-      if (titleVariants.length === 0) return
+      if (titleVariants.length === 0 && !customQuery) return
+      
       const globalParenHints = extractParenArtistHints(title)
       const coverArtistRaw = (metaArtist || '').trim()
       const coverArtistClean = cleanArtistForLyrics(coverArtistRaw)
       const audioDur = audioRef.current?.duration || duration || 0
+      
       const rankOpts = {
-        titleCandidates: titleVariants,
-        artistCandidates: [...globalParenHints, coverArtistClean, coverArtistRaw].filter(Boolean)
+        titleCandidates: customQuery ? [customQuery] : titleVariants,
+        artistCandidates: customQuery ? [] : [...globalParenHints, coverArtistClean, coverArtistRaw].filter(Boolean)
       }
-      const q = `${titleVariants[0]} ${coverArtistClean || coverArtistRaw}`.trim()
+      const q = customQuery || `${titleVariants[0]} ${coverArtistClean || coverArtistRaw}`.trim()
+      
       const data = await requestLrcLib(
         `https://lrclib.net/api/search?q=${encodeURIComponent(q)}`
       )
@@ -1505,6 +1509,10 @@ export default function App() {
     } finally {
       setLyricsCandidateLoading(false)
     }
+  }
+
+  const openLyricsCandidatePicker = () => {
+    searchLyricsCandidates()
   }
 
   const handleLyricsCandidatePick = async (row) => {
@@ -7201,6 +7209,7 @@ export default function App() {
         items={lyricsCandidateItems}
         onClose={() => setLyricsCandidateOpen(false)}
         onPick={handleLyricsCandidatePick}
+        onSearch={searchLyricsCandidates}
       />
       <LyricsSettingsDrawer
         open={lyricsDrawerOpen}

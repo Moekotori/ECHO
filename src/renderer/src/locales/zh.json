@@ -524,6 +524,7 @@
     "decrease50": "减少 50 毫秒",
     "increase50": "增加 50 毫秒",
     "offsetHint": "正值会让高亮略晚于实际音频。",
+    "manualSearch": "手动搜索歌词",
     "dropzone": "拖放或选择本地 .lrc / .lrcx 文件",
     "chooseFile": "选择文件",
     "editPlain": "纯文本编辑",
