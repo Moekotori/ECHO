@@ -2,7 +2,7 @@
 
 <h1>ECHO</h1>
 
-<p>A modern, feature-rich desktop music player built with Electron and React.</p>
+<p>基于 Electron 与 React 构建的现代化、功能丰富的桌面音乐播放器。</p>
 
 <p>
   <a href="https://github.com/Moekotori/Echoes/releases/latest">
@@ -18,132 +18,193 @@
 
 <p>
   <a href="https://github.com/Moekotori/Echoes/releases/latest">
-    <strong>Download latest release</strong>
+    <strong>下载最新版本</strong>
   </a>
   &nbsp;&middot;&nbsp;
-  <a href="docs/plugin-development.md">Plugin Development</a>
+  <a href="docs/plugin-development.md">插件开发</a>
   &nbsp;&middot;&nbsp;
-  <a href="#getting-started">Getting Started</a>
+  <a href="#%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B">快速开始</a>
 </p>
+
+<pre>
+╭────────────────────────────────────────────────────────╮
+│  ECHO / 回声播放器                                      │
+│  「把本地音乐，调成你喜欢的样子。」                      │
+│                                                        │
+│  HiFi · 歌词同步 · MV · 一起听 · 插件 · 主题             │
+╰────────────────────────────────────────────────────────╯
+</pre>
 
 </div>
 
 ---
 
----
+## 目录
+
+- [概览](#%E6%A6%82%E8%A7%88)
+- [展示](#%E5%B1%95%E7%A4%BA)
+- [核心亮点](#%E6%A0%B8%E5%BF%83%E4%BA%AE%E7%82%B9)
+- [更多功能](#%E6%9B%B4%E5%A4%9A%E5%8A%9F%E8%83%BD)
+- [环境要求](#%E7%8E%AF%E5%A2%83%E8%A6%81%E6%B1%82)
+- [快速开始](#%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B)
+- [构建打包](#%E6%9E%84%E5%BB%BA%E6%89%93%E5%8C%85)
+- [一起听（Listen Together）服务器](#%E4%B8%80%E8%B5%B7%E5%90%AClisten-together%E6%9C%8D%E5%8A%A1%E5%99%A8)
+- [插件开发](#%E6%8F%92%E4%BB%B6%E5%BC%80%E5%8F%91)
+- [项目结构](#%E9%A1%B9%E7%9B%AE%E7%BB%93%E6%9E%84)
+- [常见问题](#%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98)
+- [路线图](#%E8%B7%AF%E7%BA%BF%E5%9B%BE)
+- [参与贡献](#%E5%8F%82%E4%B8%8E%E8%B4%A1%E7%8C%AE)
+- [致谢](#%E8%87%B4%E8%B0%A2)
 
 ---
 
-## Overview
+## 概览
 
-ECHO is a cross-platform desktop music player focused on audio quality, extensibility, and a clean listening experience. It provides a native audio pipeline for high-fidelity local playback, an integrated lyrics system, MV playback via YouTube and Bilibili, and a plugin architecture for extending core functionality.
+ECHO 是一款跨平台桌面音乐播放器，强调音质、可扩展性与干净的聆听体验。它提供原生音频管线以实现高保真本地播放，内置歌词系统，支持通过 YouTube 与 Bilibili 播放 MV，并提供插件架构用于扩展核心能力。
 
 ---
 
-## Feature Highlights
+## 展示
+
+> 你可以把这里替换成真实截图/动图，让 README 首页更“有画面”。
+
+<div align="center">
+  <p><b>主界面 / 歌词 / MV / 主题</b></p>
+  <p>
+    <img src="docs/assets/screenshot-1.png" alt="Screenshot 1" width="49%">
+    <img src="docs/assets/screenshot-2.png" alt="Screenshot 2" width="49%">
+  </p>
+  <p>
+    <img src="docs/assets/screenshot-3.png" alt="Screenshot 3" width="49%">
+    <img src="docs/assets/screenshot-4.png" alt="Screenshot 4" width="49%">
+  </p>
+</div>
+
+---
+
+## 核心亮点
+
+<details>
+  <summary><b>能力面板（点我展开）</b></summary>
+  <br>
+  <table>
+    <tr>
+      <td><b>类型</b></td>
+      <td>桌面音乐播放器（Electron）</td>
+    </tr>
+    <tr>
+      <td><b>主属性</b></td>
+      <td>音质 / 可扩展 / 沉浸式歌词</td>
+    </tr>
+    <tr>
+      <td><b>特性</b></td>
+      <td>HiFi 引擎、MV、一起听、插件、主题、自动更新</td>
+    </tr>
+  </table>
+</details>
+
+<br>
 
 <table>
   <tr>
     <td valign="top" width="50%">
-      <b>HiFi Audio Engine</b><br>
-      Out-of-process native audio host (<code>echo-audio-host</code>) for low-latency, high-fidelity playback. WASAPI Exclusive Mode for bit-perfect output on Windows. Parametric EQ with pre-amp, applied in real time.
+      <b>HiFi 音频引擎</b><br>
+      通过独立进程的原生音频宿主（<code>echo-audio-host</code>）实现低延迟、高保真播放。Windows 支持 WASAPI 独占模式以获得比特完美输出。带前级（Pre-amp）的参数均衡器实时生效。
     </td>
     <td valign="top" width="50%">
-      <b>Synchronized Lyrics</b><br>
-      Line-by-line and word-level karaoke highlight for LRC files. NetEase lyrics auto-fetch and manual candidate search. Japanese romaji conversion via Kuroshiro. Floating desktop overlay window.
+      <b>同步歌词</b><br>
+      支持 LRC 逐行与逐词（卡拉 OK）高亮。支持网易云歌词自动获取与手动候选搜索。通过 Kuroshiro 进行日语罗马音转换。提供桌面悬浮歌词窗口。
     </td>
   </tr>
   <tr>
     <td valign="top">
-      <b>Music Video</b><br>
-      Auto-match and play YouTube or Bilibili MV alongside playback. Quality selection, direct stream support, and full-screen MV-as-background mode.
+      <b>MV 播放</b><br>
+      播放音乐时可自动匹配并播放 YouTube 或 Bilibili MV。支持清晰度选择、直链播放与全屏“MV 作为背景”模式。
     </td>
     <td valign="top">
-      <b>Listen Together</b><br>
-      Room-based synchronized co-listening via a self-hosted WebSocket server. Optional token authentication. DLNA cast to network renderers.
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <b>Media Download</b><br>
-      Download audio from YouTube, Bilibili, and SoundCloud. NetEase playlist import. Metadata and cover art written automatically.
-    </td>
-    <td valign="top">
-      <b>Plugin System</b><br>
-      First-class extensibility via a sandboxed plugin API. Plugins can contribute music sources, lyrics providers, UI panels, and more.
+      <b>一起听</b><br>
+      基于自托管 WebSocket 服务器的房间同步听歌。可选 Token 鉴权。支持 DLNA 投放到局域网渲染设备。
     </td>
   </tr>
   <tr>
     <td valign="top">
-      <b>Theming</b><br>
-      Full CSS variable-based theme engine with an in-app editor. Import, export, and audit themes via built-in tooling.
+      <b>媒体下载</b><br>
+      支持从 YouTube、Bilibili、SoundCloud 下载音频。支持导入网易云歌单。自动写入元数据与封面。
     </td>
     <td valign="top">
-      <b>Auto-Update</b><br>
-      GitHub Releases-based OTA updates via <code>electron-updater</code>. Background download with a restart prompt. Manual check available in Settings.
+      <b>插件系统</b><br>
+      通过沙箱化插件 API 提供一等扩展能力。插件可提供音乐源、歌词提供方、UI 面板等扩展。
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>主题</b><br>
+      基于 CSS 变量的完整主题引擎，内置主题编辑器。支持主题导入/导出/审计等工具链。
+    </td>
+    <td valign="top">
+      <b>自动更新</b><br>
+      基于 GitHub Releases，使用 <code>electron-updater</code> 实现 OTA 更新。后台下载并提示重启；也可在设置中手动检查更新。
     </td>
   </tr>
 </table>
 
 ---
 
-## Additional Features
+## 更多功能
 
-- Local library management with drag-and-drop folder scanning
-- Album view with cover art grouping
-- User playlists, liked tracks, and queue management
-- Playback rate control with pitch preservation
-- Audio output device switching without interruption
-- NCM format conversion via bundled converter
-- Discord Rich Presence integration
-- Share card image export
-- Crash reporter with in-app log viewer
-- English, Simplified Chinese, and Japanese UI (i18n)
-
----
+- 支持拖拽文件夹扫描的本地曲库管理
+- 按封面聚合的专辑视图
+- 用户歌单、喜欢、播放队列管理
+- 变速播放并保持音高
+- 不中断切换音频输出设备
+- 内置转换器支持 NCM 格式转换
+- Discord Rich Presence 集成
+- 分享卡片图片导出
+- 崩溃上报与应用内日志查看器
+- 英文 / 简体中文 / 日文 UI（i18n）
 
 ---
 
-## Requirements
+## 环境要求
 
-| Dependency | Version |
-|---|---|
-| Node.js | >= 18 |
-| npm | >= 9 |
-| Electron | 31.x (managed by devDependencies) |
+| Dependency | Version                           |
+| ---------- | --------------------------------- |
+| Node.js    | >= 18                             |
+| npm        | >= 9                              |
+| Electron   | 31.x (managed by devDependencies) |
 
-> Windows is the primary development and test target. macOS and Linux builds are supported but not continuously validated.
+> Windows 是主要的开发与测试平台。macOS 与 Linux 也支持构建，但不会持续进行回归验证。
 
 ---
 
-## Getting Started
+## 快速开始
 
-### 1. Clone the repository
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/Moekotori/Echoes.git
 cd Echoes
 ```
 
-### 2. Install dependencies
+### 2. 安装依赖
 
 ```bash
 npm install
 ```
 
-Native modules (`naudiodon`) are compiled automatically via `electron-builder install-app-deps` in the `postinstall` hook.
+原生模块（`naudiodon`）会在 `postinstall` 钩子中通过 `electron-builder install-app-deps` 自动编译。
 
-### 3. Start the development server
+### 3. 启动开发环境
 
 ```bash
 npm run dev
 ```
 
-This launches the Electron app with hot-reload via `electron-vite`.
+该命令会通过 `electron-vite` 启动 Electron 应用并启用热重载。
 
 ---
 
-## Building
+## 构建打包
 
 ### Windows
 
@@ -151,15 +212,15 @@ This launches the Electron app with hot-reload via `electron-vite`.
 npm run build:win
 ```
 
-Produces a distributable NSIS installer under `dist/`.
+将在 `dist/` 下生成可分发的 NSIS 安装包。
 
-### Windows (Release with auto-update artifacts)
+### Windows（包含自动更新产物的 Release）
 
 ```bash
 npm run build:win:release
 ```
 
-Outputs to `release/` including the `.blockmap` and `latest.yml` required by `electron-updater`.
+输出到 `release/`，包含 `electron-updater` 所需的 `.blockmap` 与 `latest.yml`。
 
 ### macOS
 
@@ -175,9 +236,9 @@ npm run build:linux
 
 ---
 
-## Listen Together Server
+## 一起听（Listen Together）服务器
 
-The optional server enables synchronized co-listening sessions.
+可选服务器用于提供同步听歌房间能力。
 
 ```bash
 cd server/listen-together
@@ -185,21 +246,21 @@ npm install
 PORT=8787 npm start
 ```
 
-For production deployment with Nginx reverse proxy and PM2, see [`server/listen-together/DEPLOY_FROM_ZERO_ZH.md`](server/listen-together/DEPLOY_FROM_ZERO_ZH.md).
+生产环境（Nginx 反代 + PM2）部署请参考 [`server/listen-together/DEPLOY_FROM_ZERO_ZH.md`](server/listen-together/DEPLOY_FROM_ZERO_ZH.md)。
 
 ---
 
-## Plugin Development
+## 插件开发
 
-Plugins are placed in the user's plugin directory and loaded at startup. Each plugin is a folder containing a `plugin.json` manifest and optional `main.js` (Node.js sandbox), `renderer.js`, and `styles.css` files.
+插件放置于用户的插件目录，并在启动时加载。每个插件是一个文件夹，包含 `plugin.json` 清单文件，以及可选的 `main.js`（Node.js 沙箱）、`renderer.js`、`styles.css` 等文件。
 
-For the full API reference and manifest specification, see [`docs/plugin-development.md`](docs/plugin-development.md).
+完整 API 参考与清单规范请见 [`docs/plugin-development.md`](docs/plugin-development.md)。
 
-Example plugins are provided in [`examples/`](examples/).
+示例插件位于 [`examples/`](examples/)。
 
 ---
 
-## Project Structure
+## 项目结构
 
 ```
 src/
@@ -223,17 +284,47 @@ examples/           # Example plugins
 
 ---
 
-## Contributing
+## 参与贡献
 
-1. Fork the repository and create a feature branch.
-2. Follow the existing code style (`npm run lint` and `npm run format`).
-3. Open a pull request with a clear description of the change.
+1. Fork 本仓库并创建功能分支。
+2. 遵循现有代码风格（`npm run lint` 与 `npm run format`）。
+3. 提交 Pull Request，并清晰描述改动内容与动机。
 
 ---
 
-## Acknowledgements
+## 常见问题
 
-ECHO uses the following open-source projects:
+**Q: 为什么强调 “HiFi / WASAPI 独占”？**
+
+A: 目标是尽可能绕开系统混音带来的重采样与音量干预，在 Windows 上以更“干净”的链路输出（具体是否能做到比特完美取决于你的设备与设置）。
+
+**Q: 歌词从哪里来？支持卡拉 OK 逐词吗？**
+
+A: 支持 LRC 逐行与逐词（卡拉 OK）高亮；支持网易云歌词自动获取与候选搜索；也支持本地 LRC。
+
+**Q: “一起听”需要什么？**
+
+A: 需要你自建 WebSocket 服务器（见下方“一起听服务器”），然后在客户端里加入房间即可同步。
+
+**Q: 插件能做什么？**
+
+A: 可以扩展音乐源、歌词提供方、UI 面板等（见「插件开发」文档）。
+
+---
+
+## 路线图
+
+> 这是一个用于 README 展示的基础模板：你可以把“计划/进行中/已完成”改成符合项目节奏的内容。
+
+- [ ] 完善截图与演示动图（替换 `docs/assets/screenshot-*.png`）
+- [ ] 补充用户向文档：常用设置、音频输出建议、歌词匹配技巧
+- [ ] 扩充插件示例与开发指引（更完整的模板/脚手架）
+
+---
+
+## 致谢
+
+ECHO 使用了以下开源项目：
 
 - [Electron](https://www.electronjs.org/)
 - [React](https://react.dev/)
