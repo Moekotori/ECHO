@@ -15,21 +15,28 @@ export function buildDesktopLyricsPayload(cfg, d, noneText) {
   let prevRomaji = ''
   let currentRomaji = ''
   let nextRomaji = ''
+  let prevTranslation = ''
+  let currentTranslation = ''
+  let nextTranslation = ''
 
   if (idx >= 0 && idx < lines.length) {
     const line = lines[idx]
     current = (line?.text || '').trim()
     currentRomaji = `${line?.romaji || romajiLines[idx] || ''}`.trim()
+    currentTranslation = `${line?.translation || ''}`.trim()
     if (idx > 0) {
       prev = (lines[idx - 1]?.text || '').trim()
       prevRomaji = `${lines[idx - 1]?.romaji || romajiLines[idx - 1] || ''}`.trim()
+      prevTranslation = `${lines[idx - 1]?.translation || ''}`.trim()
     }
     if (idx < lines.length - 1) {
       next = (lines[idx + 1]?.text || '').trim()
       nextRomaji = `${lines[idx + 1]?.romaji || romajiLines[idx + 1] || ''}`.trim()
+      nextTranslation = `${lines[idx + 1]?.translation || ''}`.trim()
     }
   } else if (lines.length > 0) {
     current = (lines[0]?.text || '').trim() || noneText
+    currentTranslation = `${lines[0]?.translation || ''}`.trim()
   }
 
   // Detect "no lyrics" state: the only entry is the noneText placeholder
@@ -41,6 +48,8 @@ export function buildDesktopLyricsPayload(cfg, d, noneText) {
   const showPrev = cfg.desktopLyricsShowPrev !== false
   const showNext = cfg.desktopLyricsShowNext !== false
   const showRomaji = cfg.desktopLyricsShowRomaji === true
+  const showTranslation = cfg.desktopLyricsShowTranslation === true
+  const locked = cfg.desktopLyricsLocked === true
 
   let colors
   if (cfg.desktopLyricsSyncTheme) {
@@ -53,7 +62,7 @@ export function buildDesktopLyricsPayload(cfg, d, noneText) {
       text: '#ffffff',
       secondary: '#d1d5db',
       glow: themeColors.accent1 || '#60a5fa',
-      romaji: '#d1d5db'
+      romaji: '#f0f0f0'
     }
   } else {
     colors = {
@@ -71,9 +80,14 @@ export function buildDesktopLyricsPayload(cfg, d, noneText) {
     prevRomaji: showPrev && showRomaji ? prevRomaji : '',
     nextRomaji: showNext && showRomaji ? nextRomaji : '',
     currentRomaji: showRomaji ? currentRomaji : '',
+    prevTranslation: showPrev && showTranslation ? prevTranslation : '',
+    nextTranslation: showNext && showTranslation ? nextTranslation : '',
+    currentTranslation: showTranslation ? currentTranslation : '',
     showPrev,
     showNext,
     showRomaji,
+    showTranslation,
+    locked,
     noLyrics,
     title: d.displayMainTitle || '',
     fontPx: typeof cfg.desktopLyricsFontPx === 'number' ? cfg.desktopLyricsFontPx : 26,

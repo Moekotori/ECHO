@@ -111,6 +111,7 @@ contextBridge.exposeInMainWorld('api', {
   openLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:open'),
   closeLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:close'),
   setLyricsDesktopAlwaysOnTop: (isAlwaysOnTop) => ipcRenderer.invoke('lyricsDesktop:setAlwaysOnTop', isAlwaysOnTop),
+  setLyricsDesktopLocked: (isLocked) => ipcRenderer.invoke('lyricsDesktop:setLocked', isLocked),
   /** Close overlay and uncheck “desktop lyrics” in the main window (Escape / right-click). */
   dismissLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:dismiss'),
   notifyLyricsDesktopReady: () => ipcRenderer.invoke('lyricsDesktop:ready'),

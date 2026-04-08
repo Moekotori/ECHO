@@ -14,12 +14,17 @@ export function getLyricsOverrideForPath(filePath) {
   }
 }
 
-export function setLyricsOverrideForPath(filePath, rawLrcText) {
+export function setLyricsOverrideForPath(filePath, rawLrcText, meta = {}) {
   if (!filePath || typeof filePath !== 'string') return
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     const map = raw ? JSON.parse(raw) : {}
-    map[filePath] = { raw: rawLrcText, savedAt: Date.now() }
+    map[filePath] = {
+      raw: rawLrcText,
+      savedAt: Date.now(),
+      source: typeof meta.source === 'string' ? meta.source : '',
+      origin: typeof meta.origin === 'string' ? meta.origin : ''
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
   } catch {
     /* ignore quota */

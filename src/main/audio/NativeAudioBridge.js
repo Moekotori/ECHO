@@ -4,6 +4,7 @@ import { existsSync } from 'fs'
 import { app } from 'electron'
 import { Writable } from 'stream'
 import readline from 'readline'
+import { logLine } from '../utils/logLine.js'
 
 /**
  * Resolve the path to the echo-audio-host binary.
@@ -144,7 +145,7 @@ export class NativeAudioBridge {
       // slider changes stay consistent. Do not pass -vol here — C++ g_volume
       // would double-apply with already-scaled PCM and stay stale until restart.
 
-      console.log(`[NativeAudioBridge] spawn: ${bin} ${args.join(' ')}`)
+      logLine(`[NativeAudioBridge] spawn: ${bin} ${args.join(' ')}`)
 
       this._proc = spawn(bin, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -176,6 +177,7 @@ export class NativeAudioBridge {
             this._framesConsumed = msg.pos
           }
           if (msg.event === 'ended') {
+            if (this._stopRequested) return
             this._ended = true
             if (this._onEnded) this._onEnded()
           }
@@ -185,7 +187,7 @@ export class NativeAudioBridge {
       // Capture stderr for logging
       const stderrRL = readline.createInterface({ input: this._proc.stderr })
       stderrRL.on('line', (line) => {
-        console.log(`[echo-audio-host] ${line}`)
+        logLine(`[echo-audio-host] ${line}`)
       })
 
       this._proc.on('error', (err) => {
@@ -195,7 +197,7 @@ export class NativeAudioBridge {
       })
 
       this._proc.on('exit', (code, signal) => {
-        console.log(`[NativeAudioBridge] exited code=${code} signal=${signal}`)
+        logLine(`[NativeAudioBridge] exited code=${code} signal=${signal}`)
         this._ready = false
         if (code === -2) {
           // Exclusive mode denied

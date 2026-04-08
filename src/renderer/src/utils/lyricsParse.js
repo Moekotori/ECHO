@@ -1,4 +1,4 @@
-/** Heuristic: same-timestamp LRC lines → main / 罗马音 / 中文翻译 */
+/** Heuristic: same-timestamp LRC lines -> main / romaji / translation. */
 function classifyLine(t) {
   const s = (t || '').trim()
   if (!s) return 'skip'
@@ -11,36 +11,82 @@ function classifyLine(t) {
   return 'main'
 }
 
+function assignGroupedLines(uniqueTexts) {
+  const mainText = uniqueTexts[0]
+  const row = { text: mainText }
+  const leftovers = []
+
+  for (const extra of uniqueTexts.slice(1)) {
+    const kind = classifyLine(extra)
+    if (kind === 'romaji' && !row.romaji) row.romaji = extra
+    else if (kind === 'translation' && !row.translation) row.translation = extra
+    else leftovers.push(extra)
+  }
+
+  if (!row.translation && row.romaji && leftovers.length > 0) {
+    row.translation = leftovers.shift()
+  }
+
+  if (!row.romaji && !row.translation) {
+    if (leftovers.length >= 2) {
+      row.romaji = leftovers.shift()
+      row.translation = leftovers.shift()
+    } else if (leftovers.length === 1) {
+      const fallback = leftovers[0]
+      const kind = classifyLine(fallback)
+      if (kind === 'translation') row.translation = fallback
+      else if (kind === 'romaji') row.romaji = fallback
+    }
+  }
+
+  return row
+}
+
 export function parseLRC(lrcString) {
   const lines = lrcString.split('\n')
-  const timeReg = /\[(\d{2}):(\d{2})(\.|\:)(\d{2,3})\]/
+  const timeReg = /\[(\d{2}):(\d{2})(\.|\:)(\d{2,3})\]/g
   const raw = []
 
   for (const line of lines) {
-    const match = timeReg.exec(line)
-    if (!match) continue
-    const minutes = parseInt(match[1], 10)
-    const seconds = parseInt(match[2], 10)
-    const ms = parseInt(match[4], 10)
-    const time = minutes * 60 + seconds + ms / (match[4].length === 3 ? 1000 : 100)
+    const matches = [...line.matchAll(timeReg)]
+    if (matches.length === 0) continue
     const text = line.replace(timeReg, '').trim()
-    if (text) raw.push({ time, text })
+    if (!text) continue
+
+    for (const match of matches) {
+      const minutes = parseInt(match[1], 10)
+      const seconds = parseInt(match[2], 10)
+      const ms = parseInt(match[4], 10)
+      const timeMs =
+        (minutes * 60 + seconds) * 1000 +
+        (match[4].length === 3 ? ms : ms * 10)
+      raw.push({ timeMs, text })
+    }
   }
 
-  raw.sort((a, b) => a.time - b.time || 0)
+  raw.sort((a, b) => a.timeMs - b.timeMs || 0)
+
+  const grouped = new Map()
+  for (const row of raw) {
+    const bucket = grouped.get(row.timeMs)
+    if (bucket) bucket.push(row.text)
+    else grouped.set(row.timeMs, [row.text])
+  }
 
   const out = []
-  for (const row of raw) {
-    const last = out[out.length - 1]
-    if (last && last.time === row.time) {
-      const kind = classifyLine(row.text)
-      if (kind === 'romaji' && !last.romaji) last.romaji = row.text
-      else if (kind === 'translation' && !last.translation) last.translation = row.text
-      else if (!last.romaji) last.romaji = row.text
-      else if (!last.translation) last.translation = row.text
-    } else {
-      out.push({ time: row.time, text: row.text })
+  for (const [timeMs, texts] of grouped) {
+    const uniqueTexts = []
+    const seen = new Set()
+    for (const text of texts) {
+      const trimmed = (text || '').trim()
+      if (!trimmed || seen.has(trimmed)) continue
+      seen.add(trimmed)
+      uniqueTexts.push(trimmed)
     }
+    if (uniqueTexts.length === 0) continue
+
+    const row = assignGroupedLines(uniqueTexts)
+    out.push({ time: timeMs / 1000, ...row })
   }
 
   return out

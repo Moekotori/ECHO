@@ -1,4 +1,4 @@
-import {
+﻿import {
   app,
   shell,
   BrowserWindow,
@@ -17,9 +17,12 @@ if (process.platform === 'win32') {
   try { _execSyncUtf('chcp 65001', { stdio: 'ignore' }) } catch { /* best-effort */ }
 }
 
-// YouTube 内嵌 MV：主界面来自 localhost / 本地 file，embed 为跨�??iframe。Chromium 默认按「顶级站�??× 嵌入源」做
-// 存储分区，导致在「应用内登录」子窗口（同一会话）里写入�??youtube.com Cookie 无法被该 iframe 读取�??// 仍会提示「请登录 / 机器人验证」。须�??app ready 之前关闭第三方存储分区。（合规桌面应用常见做法，非绕过验证逻辑。）
+// YouTube 内嵌 MV：主界面来自 localhost / 本地 file，embed 为跨域 iframe。Chromium 默认按「顶级站点 × 嵌入源」做
+// 存储分区，导致在「应用内登录」子窗口（同一会话）里写入的 youtube.com Cookie 无法被该 iframe 读取，
+// 仍会提示「请登录 / 机器人验证」。须在 app ready 之前关闭第三方存储分区。（合规桌面应用常见做法，非绕过验证逻辑。）
 app.commandLine.appendSwitch('disable-features', 'ThirdPartyStoragePartitioning')
+// 去掉 Chromium 对外暴露的"自动化控制"特征标志，防止 Google 登录页识别 Electron 为不受信任的嵌入式浏览器。
+app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import fs from 'fs'
 import { autoUpdater } from 'electron-updater'
@@ -59,6 +62,15 @@ function stopLyricsDesktopMainSyncTimer() {
   if (lyricsDesktopMainSyncTimer) {
     clearInterval(lyricsDesktopMainSyncTimer)
     lyricsDesktopMainSyncTimer = null
+  }
+}
+
+function applyLyricsDesktopLockState(isLocked) {
+  if (!lyricsDesktopWindow || lyricsDesktopWindow.isDestroyed()) return
+  if (isLocked) {
+    lyricsDesktopWindow.setIgnoreMouseEvents(true, { forward: true })
+  } else {
+    lyricsDesktopWindow.setIgnoreMouseEvents(false)
   }
 }
 
@@ -136,6 +148,32 @@ function writeAppStateJson(nextState) {
     console.warn('[appState] write failed:', e?.message || e)
     return false
   }
+}
+
+function resolveAppIconPath() {
+  const candidates = [
+    resolve(app.getAppPath(), 'website', 'icon.png'),
+    resolve(app.getAppPath(), '..', 'website', 'icon.png'),
+    resolve(__dirname, '..', '..', 'website', 'icon.png'),
+    resolve(process.cwd(), 'website', 'icon.png')
+  ]
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate
+    } catch {
+      // ignore and try next path
+    }
+  }
+
+  return ''
+}
+
+function createAppWindowIcon() {
+  const iconPath = resolveAppIconPath()
+  if (!iconPath) return undefined
+  const icon = nativeImage.createFromPath(iconPath)
+  return icon.isEmpty() ? undefined : icon
 }
 
 /** Override with env `ECHOES_SOUNDCLOUD_PROXY` (no trailing slash), e.g. https://your-proxy.example.com */
@@ -274,16 +312,16 @@ async function stopRendererHttpServer() {
 }
 
 function initUpdater() {
-  if (is.dev) return // 涓嶅湪寮€鍙戠幆澧冭嚜鍔ㄦ洿鏂?
+  if (is.dev) return // 不在开发环境自动更新
 
   const sendUpdaterEvent = (event, data) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('updater-event', { event, ...data })
+      mainWindow.webContents.send('updater-message', { event, ...data })
     }
   }
 
-  autoUpdater.autoDownload = true // 鍙戠幇鏂扮増鍚庤嚜鍔ㄥ湪鍚庡彴涓嬭浇
-  autoUpdater.autoInstallOnAppQuit = true // 鍏抽棴鏃惰嚜鍔ㄥ畨瑁?
+  autoUpdater.autoDownload = true // 发现新版后自动在后台下载
+  autoUpdater.autoInstallOnAppQuit = true // 关闭时自动安装
 
   autoUpdater.on('checking-for-update', () => {
     console.log('[Updater] Checking for updates')
@@ -291,24 +329,27 @@ function initUpdater() {
   })
 
   autoUpdater.on('update-available', (info) => {
-    console.log('[Updater] 鍙戠幇鏂扮増鏈?', info.version)
+    console.log('[Updater] 发现新版本:', info.version)
     sendUpdaterEvent('update-available', { version: info.version })
   })
 
-  autoUpdater.on('update-not-available', (info) => {
+  autoUpdater.on('update-not-available', () => {
     console.log('[Updater] Update not available')
     sendUpdaterEvent('update-not-available')
   })
 
+  autoUpdater.on('download-progress', (prog) => {
+    sendUpdaterEvent('download-progress', { percent: Math.round(prog.percent || 0) })
+  })
+
   autoUpdater.on('update-downloaded', (info) => {
-    console.log('[Updater] 鏂扮増鏈凡涓嬭浇瀹屾瘯:', info.version)
+    console.log('[Updater] 新版本已下载完毕:', info.version)
     sendUpdaterEvent('update-downloaded', { version: info.version })
-    // 寮圭獥鎻愮ず鐢ㄦ埛
     dialog.showMessageBox(mainWindow, {
       type: 'info',
-      title: '鍙戠幇鏂扮増鏈?',
-      message: `ECHO ${info.version} 宸茬粡涓嬭浇瀹屾瘯锛屾槸鍚︾珛鍗抽噸鍚苟瀹夎鏇存柊锛?`,
-      buttons: ['閲嶅惎骞跺畨瑁?', '绋嶅悗瀹夎']
+      title: '发现新版本',
+      message: `ECHO ${info.version} 已经下载完毕，是否立刻重启并安装更新？`,
+      buttons: ['重启并安装', '稍后安装']
     }).then((res) => {
       if (res.response === 0) {
         autoUpdater.quitAndInstall(false, true)
@@ -317,23 +358,25 @@ function initUpdater() {
   })
 
   autoUpdater.on('error', (err) => {
-    console.error('[Updater] 鏇存柊鍙戠敓閿欒:', err)
+    console.error('[Updater] 更新发生错误:', err)
     sendUpdaterEvent('error', { message: err.message })
   })
 
-  // 闈欓粯妫€鏌ユ洿鏂?
-  autoUpdater.checkForUpdatesAndNotify().catch(e => console.error('[Updater] 妫€鏌ユ洿鏂板け璐?', e))
+  // 静默检查更新
+  autoUpdater.checkForUpdatesAndNotify().catch(e => console.error('[Updater] 检查更新失败:', e))
 }
 
 async function createWindow() {
+  const appWindowIcon = createAppWindowIcon()
   mainWindow = new BrowserWindow({
-    width: 1560,
-    height: 900,
+    width: 1800,
+    height: 980,
     minWidth: 760,
     minHeight: 500,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
+    ...(appWindowIcon ? { icon: appWindowIcon } : {}),
     // Keep timers/rAF running when minimized so desktop lyrics IPC sync does not stall.
     backgroundThrottling: false,
     webPreferences: {
@@ -684,11 +727,23 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('app:checkForUpdates', async () => {
+    // dev 模式下 electron-updater 会静默跳过，不触发任何事件，UI 会永久卡在 Checking
+    // 直接回复 update-not-available 让界面恢复
+    if (is.dev) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('updater-message', { event: 'update-not-available' })
+      }
+      return { success: true, dev: true }
+    }
     try {
       const result = await autoUpdater.checkForUpdates()
       return { success: true, info: result?.updateInfo }
     } catch (e) {
       console.error('[Updater] 手动检查更新失败:', e)
+      // 出错时也推送事件，防止 UI 卡住
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('updater-message', { event: 'error', message: e.message })
+      }
       return { success: false, error: e.message }
     }
   })
@@ -1512,6 +1567,8 @@ app.whenReady().then(async () => {
       const globalState = readAppStateJson()
       const savedBounds = globalState.lyricsDesktopBounds || { width: 680, height: 132 }
       const alwaysOnTop = globalState.config?.desktopLyricsAlwaysOnTop !== false
+      const locked = globalState.config?.desktopLyricsLocked === true
+      const appWindowIcon = createAppWindowIcon()
 
       lyricsDesktopWindow = new BrowserWindow({
         width: savedBounds.width,
@@ -1526,6 +1583,7 @@ app.whenReady().then(async () => {
         hasShadow: false,
         alwaysOnTop: alwaysOnTop,
         autoHideMenuBar: true,
+        ...(appWindowIcon ? { icon: appWindowIcon } : {}),
         backgroundThrottling: false,
         webPreferences: {
           preload: join(__dirname, '../preload/index.js'),
@@ -1534,6 +1592,8 @@ app.whenReady().then(async () => {
           webSecurity: false
         }
       })
+
+      applyLyricsDesktopLockState(locked)
 
       if (alwaysOnTop) {
         lyricsDesktopWindow.setAlwaysOnTop(true, 'screen-saver')
@@ -1609,6 +1669,15 @@ app.whenReady().then(async () => {
           lyricsDesktopWindow.setVisibleOnAllWorkspaces(false)
         }
       }
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  ipcMain.handle('lyricsDesktop:setLocked', async (_, isLocked) => {
+    try {
+      applyLyricsDesktopLockState(!!isLocked)
       return { ok: true }
     } catch (e) {
       return { ok: false, error: e?.message || String(e) }
@@ -1714,6 +1783,23 @@ app.whenReady().then(async () => {
     Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
     if(!window.chrome)window.chrome={};
     if(!window.chrome.runtime)window.chrome.runtime={connect:function(){},sendMessage:function(){}};
+    if(!window.chrome.app)window.chrome.app={
+      InstallState:{DISABLED:'disabled',INSTALLED:'installed',NOT_INSTALLED:'not_installed'},
+      RunningState:{CANNOT_RUN:'cannot_run',READY_TO_RUN:'ready_to_run',RUNNING:'running'},
+      getDetails:function(){return null},
+      getIsInstalled:function(){return false},
+      isInstalled:false,
+      installState:function(cb){cb('not_installed')},
+      runningState:function(){return 'cannot_run'}
+    };
+    if(!window.chrome.csi)window.chrome.csi=function(){return{onloadT:Date.now(),pageT:3,startE:0,tran:15}};
+    if(!window.chrome.loadTimes)window.chrome.loadTimes=function(){return{
+      commitLoadTime:Date.now()/1e3-1,firstPaintAfterLoadTime:0,firstPaintTime:Date.now()/1e3-0.5,
+      finishDocumentLoadTime:Date.now()/1e3-0.3,finishLoadTime:Date.now()/1e3-0.2,
+      navigationType:'Other',npnNegotiatedProtocol:'h2',requestTime:Date.now()/1e3-2,
+      startLoadTime:Date.now()/1e3-2,wasAlternateProtocolAvailable:false,wasFetchedViaSpdy:true,
+      wasNpnNegotiated:true
+    }};
     Object.defineProperty(navigator,'plugins',{get:()=>{
       const p=[
         {name:'Chrome PDF Plugin',filename:'internal-pdf-viewer',description:'Portable Document Format',length:1,item:()=>null,namedItem:()=>null},
@@ -1737,6 +1823,7 @@ app.whenReady().then(async () => {
 
   function createSignInWindow(url, onClosed) {
     const sharedSession = mainWindow.webContents.session
+    const appWindowIcon = createAppWindowIcon()
     const win = new BrowserWindow({
       parent: mainWindow,
       width: 960,
@@ -1745,6 +1832,7 @@ app.whenReady().then(async () => {
       minHeight: 400,
       show: false,
       autoHideMenuBar: true,
+      ...(appWindowIcon ? { icon: appWindowIcon } : {}),
       webPreferences: {
         session: sharedSession,
         contextIsolation: true,

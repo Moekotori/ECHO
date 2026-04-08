@@ -15,6 +15,62 @@ function ncmRequestOptions() {
   return opts
 }
 
+const TIME_TAG_REG = /\[(\d{2}):(\d{2})(\.|\:)(\d{2,3})\]/g
+
+function parseTimedLyric(raw) {
+  const rows = []
+  const byTime = new Map()
+
+  for (const line of String(raw || '').split(/\r?\n/)) {
+    const matches = [...line.matchAll(TIME_TAG_REG)]
+    if (matches.length === 0) continue
+
+    const text = line.replace(TIME_TAG_REG, '').trim()
+    if (!text) continue
+
+    const tagText = matches.map((m) => m[0]).join('')
+    const primary = matches[0]
+    const primaryMs =
+      (Number(primary[1]) * 60 + Number(primary[2])) * 1000 +
+      (primary[4].length === 3 ? Number(primary[4]) : Number(primary[4]) * 10)
+
+    rows.push({ timeMs: primaryMs, tagText, text })
+
+    for (const match of matches) {
+      const ms =
+        (Number(match[1]) * 60 + Number(match[2])) * 1000 +
+        (match[4].length === 3 ? Number(match[4]) : Number(match[4]) * 10)
+      if (!byTime.has(ms)) byTime.set(ms, text)
+    }
+  }
+
+  return { rows, byTime }
+}
+
+function mergeTimedLyrics(mainLyrics, romajiLyrics, translatedLyrics) {
+  const main = parseTimedLyric(mainLyrics)
+  if (main.rows.length === 0) return ''
+
+  const romaji = parseTimedLyric(romajiLyrics).byTime
+  const translation = parseTimedLyric(translatedLyrics).byTime
+  const merged = []
+
+  for (const row of main.rows) {
+    merged.push(`${row.tagText}${row.text}`)
+
+    const seen = new Set([row.text])
+    const extras = [romaji.get(row.timeMs), translation.get(row.timeMs)]
+    for (const extra of extras) {
+      const text = String(extra || '').trim()
+      if (!text || seen.has(text)) continue
+      merged.push(`${row.tagText}${text}`)
+      seen.add(text)
+    }
+  }
+
+  return merged.join('\n')
+}
+
 export async function searchNeteaseSongs(keywords) {
   if (!keywords || !keywords.trim()) return []
   const ncm = getNcmApi()
@@ -167,7 +223,13 @@ export async function fetchNeteaseLrcText(params) {
   }
 
   const lrc = lyricRes?.body?.lrc?.lyric?.trim()
-  if (lrc) return lrc
+  const tlyric = lyricRes?.body?.tlyric?.lyric?.trim()
+  const romalrc = lyricRes?.body?.romalrc?.lyric?.trim()
+
+  if (lrc) {
+    const merged = mergeTimedLyrics(lrc, romalrc, tlyric)
+    return merged || lrc
+  }
 
   return null
 }

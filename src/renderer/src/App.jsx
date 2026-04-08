@@ -58,7 +58,8 @@ import {
   Copy,
   AppWindow,
   Blocks,
-  Headphones
+  Headphones,
+  History
 } from 'lucide-react'
 import LyricsSettingsDrawer from './components/LyricsSettingsDrawer'
 import MediaDownloaderDrawer from './components/MediaDownloaderDrawer'
@@ -115,6 +116,43 @@ function localPathToAudioSrc(filePath) {
 }
 
 const MENU_ANIM_MS = 160
+const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/Moekotori/Echoes/releases?per_page=6'
+const GITHUB_RELEASES_PAGE_URL = 'https://github.com/Moekotori/Echoes/releases'
+const MAX_PLAYBACK_HISTORY = 40
+const STORED_VOLUME_KEY = 'nc_volume'
+
+function normalizeReleaseVersion(value) {
+  return String(value || '').trim().replace(/^v/i, '')
+}
+
+function buildReleasePreviewLines(body) {
+  return String(body || '')
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/^#{1,6}\s*/, '')
+        .trim()
+    )
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
+function clampVolume(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return 1
+  return Math.min(1, Math.max(0, num))
+}
+
+function readStoredVolume() {
+  try {
+    const saved = localStorage.getItem(STORED_VOLUME_KEY)
+    if (saved == null) return 1
+    return clampVolume(saved)
+  } catch {
+    return 1
+  }
+}
 
 function isLocalAudioFilePath(p) {
   if (!p || typeof p !== 'string') return false
@@ -175,6 +213,10 @@ export default function App() {
   const [appVersion, setAppVersion] = useState('')
   const [updateStatus, setUpdateStatus] = useState(null)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [releaseNotes, setReleaseNotes] = useState([])
+  const [releaseNotesLoading, setReleaseNotesLoading] = useState(false)
+  const [releaseNotesError, setReleaseNotesError] = useState('')
+  const [releaseNotesOpen, setReleaseNotesOpen] = useState(false)
 
   const [playlist, setPlaylist] = useState(() => {
     try {
@@ -187,6 +229,7 @@ export default function App() {
     }
   })
   const [upNextQueue, setUpNextQueue] = useState([])
+  const [playbackHistory, setPlaybackHistory] = useState([])
   const [queuePlaybackEnabled, setQueuePlaybackEnabled] = useState(() => {
     const saved = localStorage.getItem('nc_queue_playback_enabled')
     if (saved == null) return true
@@ -201,7 +244,7 @@ export default function App() {
   const [coverUrl, setCoverUrl] = useState(null)
 
   const [playbackRate, setPlaybackRate] = useState(1.0)
-  const [volume, setVolume] = useState(1.0)
+  const [volume, setVolume] = useState(() => readStoredVolume())
   const [useNativeEngine, setUseNativeEngine] = useState(false)
   const [isAudioExclusive, setIsAudioExclusive] = useState(false)
   const useNativeEngineRef = useRef(false)
@@ -209,6 +252,8 @@ export default function App() {
   /** Avoid duplicate native playAudio for the same track (React Strict Mode double-invokes effects). */
   const nativePlayDedupeRef = useRef({ path: '', index: -1, t: 0 })
   const [isProgressDragging, setIsProgressDragging] = useState(false)
+  const isProgressDraggingRef = useRef(false)
+  const progressSeekValueRef = useRef(0)
   const [isSpeedDragging, setIsSpeedDragging] = useState(false)
   const [isVolumeDragging, setIsVolumeDragging] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -230,6 +275,9 @@ export default function App() {
     if (window.api?.onUpdaterEvent) {
       return window.api.onUpdaterEvent((msg) => {
         setUpdateStatus(msg)
+        if (msg.event === 'update-available' || msg.event === 'update-downloaded') {
+          setReleaseNotesOpen(true)
+        }
         if (msg.event === 'update-downloaded' || msg.event === 'error' || msg.event === 'update-not-available') {
           setIsUpdating(false)
         }
@@ -283,6 +331,7 @@ export default function App() {
   const [listenTogetherDrawerOpen, setListenTogetherDrawerOpen] = useState(false)
   const [pluginDrawerOpen, setPluginDrawerOpen] = useState(false)
   const [audioSettingsDrawerOpen, setAudioSettingsDrawerOpen] = useState(false)
+  const [historyMenuOpen, setHistoryMenuOpen] = useState(false)
   const [listenTogetherRoomState, setListenTogetherRoomState] = useState(null)
   const [castRemoteActive, setCastRemoteActive] = useState(false)
   const [castDlnaListening, setCastDlnaListening] = useState(false)
@@ -290,6 +339,11 @@ export default function App() {
   const [lastCastStatus, setLastCastStatus] = useState(null)
   const [mvPlaybackQuality, setMvPlaybackQuality] = useState(null)
   const [lyricsMatchStatus, setLyricsMatchStatus] = useState('idle')
+  const [lyricsSourceStatus, setLyricsSourceStatus] = useState({
+    kind: 'idle',
+    detail: '',
+    origin: ''
+  })
   /** 与 lyrics 等长：主行罗马音（LRC 自带或 Kuroshiro 生成） */
   // Romaji display removed from UI for simplicity; keep state empty.
   const [romajiDisplayLines, setRomajiDisplayLines] = useState([])
@@ -339,6 +393,10 @@ export default function App() {
   const playlistRef = useRef(playlist)
   const currentIndexRef = useRef(currentIndex)
   const upNextQueueRef = useRef(upNextQueue)
+  const playbackHistoryRef = useRef(playbackHistory)
+  const historyNavigationRef = useRef(false)
+  const lastHistoryTrackedPathRef = useRef('')
+  const releaseNotesFetchedRef = useRef(false)
   const [newPlaylistName, setNewPlaylistName] = useState('')
   const [quickNewPlaylistName, setQuickNewPlaylistName] = useState('')
   const [selectedAlbum, setSelectedAlbum] = useState('all')
@@ -451,6 +509,69 @@ export default function App() {
     configRef.current = config
   }, [config])
 
+  const loadReleaseNotes = useCallback(async (force = false) => {
+    if (releaseNotesLoading) return
+    if (releaseNotesFetchedRef.current && !force) return
+
+    setReleaseNotesLoading(true)
+    setReleaseNotesError('')
+
+    try {
+      const response = await fetch(GITHUB_RELEASES_API_URL, {
+        headers: {
+          Accept: 'application/vnd.github+json'
+        }
+      })
+      if (!response.ok) {
+        throw new Error(`github_${response.status}`)
+      }
+      const data = await response.json()
+      const releases = Array.isArray(data)
+        ? data
+            .filter((item) => item && item.draft !== true)
+            .map((item) => ({
+              version: normalizeReleaseVersion(item.tag_name || item.name || ''),
+              title: item.name || item.tag_name || 'Release',
+              url: item.html_url || GITHUB_RELEASES_PAGE_URL,
+              publishedAt: item.published_at || '',
+              publishedLabel: item.published_at
+                ? new Date(item.published_at).toLocaleDateString()
+                : '',
+              previewLines: buildReleasePreviewLines(item.body)
+            }))
+            .filter((item) => item.version || item.title)
+        : []
+      setReleaseNotes(releases)
+      releaseNotesFetchedRef.current = true
+    } catch (e) {
+      setReleaseNotesError(e?.message || 'release_notes_unavailable')
+    } finally {
+      setReleaseNotesLoading(false)
+    }
+  }, [releaseNotesLoading])
+
+  const openExternalLink = useCallback((url) => {
+    const target = String(url || '').trim()
+    if (!target) return
+    if (window.api?.openExternal) {
+      void window.api.openExternal(target)
+      return
+    }
+    window.open(target, '_blank', 'noopener,noreferrer')
+  }, [])
+
+  useEffect(() => {
+    if ((view === 'settings' || releaseNotesOpen) && !releaseNotesFetchedRef.current) {
+      void loadReleaseNotes()
+    }
+  }, [view, releaseNotesOpen, loadReleaseNotes])
+
+  useEffect(() => {
+    if (updateStatus?.event === 'update-available' || updateStatus?.event === 'update-downloaded') {
+      void loadReleaseNotes()
+    }
+  }, [updateStatus, loadReleaseNotes])
+
   useEffect(() => {
     if (!window.api?.onLyricsDesktopUncheck) return undefined
     return window.api.onLyricsDesktopUncheck(() => {
@@ -482,6 +603,33 @@ export default function App() {
   useEffect(() => {
     upNextQueueRef.current = upNextQueue
   }, [upNextQueue])
+
+  useEffect(() => {
+    playbackHistoryRef.current = playbackHistory
+  }, [playbackHistory])
+
+  useEffect(() => {
+    const currentPath = playlist[currentIndex]?.path || ''
+    const previousPath = lastHistoryTrackedPathRef.current
+
+    if (!currentPath) {
+      lastHistoryTrackedPathRef.current = ''
+      return
+    }
+
+    lastHistoryTrackedPathRef.current = currentPath
+    if (!previousPath || previousPath === currentPath) return
+
+    if (historyNavigationRef.current) {
+      historyNavigationRef.current = false
+      return
+    }
+
+    setPlaybackHistory((prev) => {
+      const next = [...prev, previousPath]
+      return next.slice(-MAX_PLAYBACK_HISTORY)
+    })
+  }, [currentIndex, playlist])
 
   const toggleLike = useCallback((path) => {
     if (!path) return
@@ -515,6 +663,11 @@ export default function App() {
     else newCi = ci
     setPlaylist(next)
     setUpNextQueue((prev) => prev.filter((item) => item?.path !== path))
+    setPlaybackHistory((prev) => {
+      const nextHistory = prev.filter((itemPath) => itemPath !== path)
+      playbackHistoryRef.current = nextHistory
+      return nextHistory
+    })
     setCurrentIndex(newCi)
     if (next.length === 0) setIsPlaying(false)
   }, [])
@@ -637,6 +790,8 @@ export default function App() {
     if (confirm(t('settings.resetConfirm'))) {
       setConfig(DEFAULT_CONFIG)
       localStorage.removeItem('nc_config')
+      localStorage.removeItem(STORED_VOLUME_KEY)
+      setVolume(1)
     }
   }
 
@@ -893,6 +1048,24 @@ export default function App() {
     void window.api.setAudioOutputBufferProfile(p)
   }, [config.audioOutputBufferProfile])
 
+  useEffect(() => {
+    if (!window.api?.setAudioExclusive) return
+    void window.api.setAudioExclusive(config.audioExclusive === true)
+  }, [config.audioExclusive])
+
+  useEffect(() => {
+    if (!window.api?.setAudioDevice) return
+    const savedDeviceId = config.audioDeviceId
+    if (savedDeviceId == null || savedDeviceId === '') {
+      void window.api.setAudioDevice('')
+      return
+    }
+    if (!Array.isArray(audioDevices) || audioDevices.length === 0) return
+    const matched = audioDevices.find((device) => String(device?.id) === String(savedDeviceId))
+    if (!matched) return
+    void window.api.setAudioDevice(matched.id)
+  }, [config.audioDeviceId, audioDevices])
+
   // Persist playlist and mode
   useEffect(() => {
     try {
@@ -922,6 +1095,10 @@ export default function App() {
       void window.api.appStateSet('playMode', playMode)
     }
   }, [playMode, config.autoSaveLibrary])
+
+  useEffect(() => {
+    localStorage.setItem(STORED_VOLUME_KEY, String(clampVolume(volume)))
+  }, [volume])
 
   useEffect(() => {
     try {
@@ -1017,6 +1194,67 @@ export default function App() {
     })
   }, [config.useEQ, config.preamp, config.eqBands])
 
+  const handleTrackEndedAdvance = useCallback(() => {
+    if (playlist.length === 0) return
+
+    if (queuePlaybackEnabled) {
+      const queueSnapshot = upNextQueueRef.current
+      if (queueSnapshot.length > 0) {
+        let nextPath = null
+        const remaining = []
+        for (const item of queueSnapshot) {
+          const path = item?.path
+          if (typeof path !== 'string' || !path) continue
+          const exists = playlistRef.current.some((track) => track.path === path)
+          if (!exists) continue
+          if (!nextPath) nextPath = path
+          else remaining.push({ path })
+        }
+        if (nextPath) {
+          const nextIdx = playlistRef.current.findIndex((track) => track.path === nextPath)
+          setUpNextQueue(remaining)
+          if (nextIdx !== -1) {
+            setCurrentIndex(nextIdx)
+            setIsPlaying(true)
+            return
+          }
+        }
+      }
+    }
+
+    if (playMode === 'single') {
+      setCurrentTime(0)
+
+      if (useNativeEngineRef.current && window.api?.playAudio) {
+        const trackPath = playlistRef.current[currentIndexRef.current]?.path
+        if (trackPath) {
+          window.api.playAudio(trackPath, 0, playbackRateRef.current).catch(console.error)
+          setIsPlaying(true)
+          return
+        }
+      }
+
+      const audio = audioRef.current
+      if (audio) {
+        audio.currentTime = 0
+        audio.play().catch(console.error)
+        setIsPlaying(true)
+        return
+      }
+    }
+
+    if (playMode === 'shuffle') {
+      let nextIdx = Math.floor(Math.random() * playlist.length)
+      if (nextIdx === currentIndex && playlist.length > 1) {
+        nextIdx = (nextIdx + 1) % playlist.length
+      }
+      setCurrentIndex(nextIdx)
+    } else {
+      setCurrentIndex((prev) => (prev + 1) % playlist.length)
+    }
+    setIsPlaying(true)
+  }, [playlist, queuePlaybackEnabled, playMode, currentIndex])
+
   // Audio setup
   useEffect(() => {
     const audio = audioRef.current
@@ -1054,14 +1292,7 @@ export default function App() {
     }
     const onEnded = () => {
       if (useNativeEngineRef.current) return
-      const shouldUseQueue = queuePlaybackEnabled && upNextQueueRef.current.length > 0
-      if (playMode === 'single' && !shouldUseQueue) {
-        const audio = audioRef.current
-        audio.currentTime = 0
-        audio.play().catch(console.error)
-      } else {
-        handleNext()
-      }
+      handleTrackEndedAdvance()
     }
 
     audio.addEventListener('loadeddata', setAudioData)
@@ -1073,7 +1304,7 @@ export default function App() {
       audio.removeEventListener('timeupdate', updateTime)
       audio.removeEventListener('ended', onEnded)
     }
-  }, [playlist, currentIndex, playMode, queuePlaybackEnabled])
+  }, [playlist, currentIndex, handleTrackEndedAdvance])
   // Play track logic
   useEffect(() => {
     if (currentIndex >= 0 && playlist[currentIndex]) {
@@ -1179,6 +1410,11 @@ export default function App() {
       if (status.exclusive !== lastExclusive) {
         lastExclusive = !!status.exclusive
         setIsAudioExclusive(!!status.exclusive)
+        setConfig((prev) =>
+          prev.audioExclusive === !!status.exclusive
+            ? prev
+            : { ...prev, audioExclusive: !!status.exclusive }
+        )
       }
       if (!status.nativeBridge) return
       if (isSeekingRef.current) return
@@ -1245,6 +1481,9 @@ export default function App() {
 
   const lyricsRef = useRef([])
   const scrollAreaRef = useRef(null)
+  const sidebarPlaylistRef = useRef(null)
+  const previousSidebarSearchQueryRef = useRef(searchQuery)
+  const previousSidebarCurrentIndexRef = useRef(currentIndex)
 
   useEffect(() => {
     lyricsRef.current = lyrics
@@ -1468,6 +1707,7 @@ export default function App() {
     setLyrics([])
     setActiveLyricIndex(-1)
     setLyricsMatchStatus('loading')
+    setLyricsSourceStatus({ kind: 'loading', detail: '', origin: '' })
     try {
       if (await tryApplyLyricsBySourceLink(link)) return
     } catch (e) {
@@ -1475,17 +1715,26 @@ export default function App() {
     }
     setLyrics([{ time: 0, text: i18n.t('lyrics.none') }])
     setLyricsMatchStatus('none')
+    setLyricsSourceStatus({ kind: 'none', detail: '', origin: '' })
   }
 
-  const applyLyricsFromText = useCallback((raw) => {
+  const applyLyricsFromText = useCallback((raw, sourceMeta = {}) => {
     const parsed = parseAnyLyrics(raw)
     if (parsed.length > 0) {
       setLyrics(parsed)
       setLyricsMatchStatus('matched')
       setActiveLyricIndex(-1)
+      setLyricsSourceStatus({
+        kind: 'manual',
+        detail: '',
+        origin: typeof sourceMeta.origin === 'string' ? sourceMeta.origin : ''
+      })
       const path = playlistRef.current[currentIndexRef.current]?.path
       if (path && typeof raw === 'string' && raw.trim()) {
-        setLyricsOverrideForPath(path, raw)
+        setLyricsOverrideForPath(path, raw, {
+          source: 'manual',
+          origin: typeof sourceMeta.origin === 'string' ? sourceMeta.origin : ''
+        })
       }
     }
   }, [])
@@ -1503,7 +1752,7 @@ export default function App() {
     else if (buf?.data && Array.isArray(buf.data)) u8 = new Uint8Array(buf.data)
     else u8 = new Uint8Array(buf)
     const text = new TextDecoder('utf-8').decode(u8)
-    applyLyricsFromText(text)
+    applyLyricsFromText(text, { origin: 'local' })
   }, [applyLyricsFromText])
 
   const requestLrcLib = async (url) => {
@@ -1586,7 +1835,6 @@ export default function App() {
   const handleLyricsCandidatePick = async (row) => {
     const track = playlist[currentIndex]
     if (!track) return
-    setLyricsCandidateOpen(false)
     try {
       if (row.source === 'lrclib' && row.raw) {
         const parsed = parseAnyLyrics(row.raw)
@@ -1594,7 +1842,11 @@ export default function App() {
           setLyrics(parsed)
           setLyricsMatchStatus('matched')
           setActiveLyricIndex(-1)
-          setLyricsOverrideForPath(track.path, row.raw)
+          setLyricsSourceStatus({ kind: 'manual', detail: '', origin: 'lrclib' })
+          setLyricsOverrideForPath(track.path, row.raw, {
+            source: 'manual',
+            origin: 'lrclib'
+          })
         }
         return
       }
@@ -1606,7 +1858,11 @@ export default function App() {
             setLyrics(parsed)
             setLyricsMatchStatus('matched')
             setActiveLyricIndex(-1)
-            setLyricsOverrideForPath(track.path, res.lrc)
+            setLyricsSourceStatus({ kind: 'manual', detail: '', origin: 'netease' })
+            setLyricsOverrideForPath(track.path, res.lrc, {
+              source: 'manual',
+              origin: 'netease'
+            })
           }
         }
       }
@@ -1627,8 +1883,15 @@ export default function App() {
         if (rows.length > 0) {
           setLyrics(rows)
           setLyricsMatchStatus('matched')
+          setActiveLyricIndex(-1)
+          setLyricsSourceStatus({ kind: 'link', detail: '', origin: 'netease' })
           const p = playlistRef.current[currentIndexRef.current]?.path
-          if (p) setLyricsOverrideForPath(p, res.lrc)
+          if (p) {
+            setLyricsOverrideForPath(p, res.lrc, {
+              source: 'link',
+              origin: 'netease'
+            })
+          }
           return true
         }
       }
@@ -1650,8 +1913,13 @@ export default function App() {
     if (rows.length > 0) {
       setLyrics(rows)
       setLyricsMatchStatus('matched')
+      setActiveLyricIndex(-1)
+      setLyricsSourceStatus({ kind: 'link', detail: '', origin: 'lrclib' })
       if (currentTrack?.path && raw?.trim()) {
-        setLyricsOverrideForPath(currentTrack.path, raw)
+        setLyricsOverrideForPath(currentTrack.path, raw, {
+          source: 'link',
+          origin: 'lrclib'
+        })
       }
       return true
     }
@@ -1662,6 +1930,7 @@ export default function App() {
     setLyrics([])
     setActiveLyricIndex(-1)
     setLyricsMatchStatus('loading')
+    setLyricsSourceStatus({ kind: 'loading', detail: '', origin: '' })
 
     // MV Search
     if (
@@ -1763,6 +2032,11 @@ export default function App() {
       if (parsedOv.length > 0) {
         setLyrics(parsedOv)
         setLyricsMatchStatus('matched')
+        setLyricsSourceStatus({
+          kind: 'cache',
+          detail: savedOverride.source || 'manual',
+          origin: savedOverride.origin || ''
+        })
         return
       }
     }
@@ -1775,6 +2049,7 @@ export default function App() {
         if (parsed.length > 0) {
           setLyrics(parsed)
           setLyricsMatchStatus('matched')
+          setLyricsSourceStatus({ kind: 'local', detail: '', origin: '' })
           return
         }
       }
@@ -1788,6 +2063,7 @@ export default function App() {
       if (embeddedParsed.length > 0) {
         setLyrics(embeddedParsed)
         setLyricsMatchStatus('matched')
+        setLyricsSourceStatus({ kind: 'embedded', detail: '', origin: '' })
         return
       }
     }
@@ -1816,8 +2092,12 @@ export default function App() {
           if (parsed.length > 0) {
             setLyrics(parsed)
             setLyricsMatchStatus('matched')
+            setLyricsSourceStatus({ kind: 'lrclib', detail: '', origin: '' })
             if (raw && String(raw).trim()) {
-              setLyricsOverrideForPath(filePath, raw)
+              setLyricsOverrideForPath(filePath, raw, {
+                source: 'lrclib',
+                origin: ''
+              })
             }
             return true
           }
@@ -1939,7 +2219,11 @@ export default function App() {
                 console.log(`[Lyrics NetEase] matched with "${k}" (${parsed.length} lines)`)
                 setLyrics(parsed)
                 setLyricsMatchStatus('matched')
-                setLyricsOverrideForPath(filePath, res.lrc)
+                setLyricsSourceStatus({ kind: 'netease', detail: '', origin: '' })
+                setLyricsOverrideForPath(filePath, res.lrc, {
+                  source: 'netease',
+                  origin: ''
+                })
                 return true
               }
             }
@@ -1964,6 +2248,7 @@ export default function App() {
 
     setLyrics([{ time: 0, text: i18n.t('lyrics.none') }])
     setLyricsMatchStatus('none')
+    setLyricsSourceStatus({ kind: 'none', detail: '', origin: '' })
   }
 
   const detectBPM = (buffer) => {
@@ -2238,11 +2523,15 @@ export default function App() {
     if (useNativeEngineRef.current) window.api?.stopAudio?.()
     setPlaylist([])
     setUpNextQueue([])
+    playbackHistoryRef.current = []
+    setPlaybackHistory([])
     setCurrentIndex(-1)
     setIsPlaying(false)
     setDuration(0)
     setCurrentTime(0)
     setCoverUrl(null)
+    setLyricsSourceStatus({ kind: 'idle', detail: '', origin: '' })
+    lastHistoryTrackedPathRef.current = ''
     if (audioRef.current) audioRef.current.src = ''
   }
 
@@ -2322,14 +2611,63 @@ export default function App() {
     }
   }, [playlist, queuePlaybackEnabled, playMode, currentIndex])
 
-  // Native bridge: track ended → play next
+  const jumpToPlaybackHistory = useCallback((targetHistoryIndex) => {
+    const historySnapshot = playbackHistoryRef.current
+    if (!Array.isArray(historySnapshot) || historySnapshot.length === 0) return false
+
+    const boundedIndex = Math.max(
+      0,
+      Math.min(Number.isFinite(targetHistoryIndex) ? targetHistoryIndex : historySnapshot.length - 1, historySnapshot.length - 1)
+    )
+
+    for (let idx = boundedIndex; idx >= 0; idx -= 1) {
+      const candidatePath = historySnapshot[idx]
+      const nextIdx = playlistRef.current.findIndex((track) => track.path === candidatePath)
+      if (nextIdx === -1) continue
+
+      const nextHistory = historySnapshot.slice(0, idx)
+      historyNavigationRef.current = true
+      playbackHistoryRef.current = nextHistory
+      setPlaybackHistory(nextHistory)
+      setCurrentIndex(nextIdx)
+      setIsPlaying(true)
+      return true
+    }
+
+    playbackHistoryRef.current = []
+    setPlaybackHistory([])
+    return false
+  }, [])
+
+  const goBackInPlaybackHistory = useCallback(() => {
+    return jumpToPlaybackHistory(playbackHistoryRef.current.length - 1)
+  }, [jumpToPlaybackHistory])
+
+  const clearPlaybackHistory = useCallback(() => {
+    playbackHistoryRef.current = []
+    setPlaybackHistory([])
+  }, [])
+
+  const handleHistoryMenuBack = useCallback(() => {
+    goBackInPlaybackHistory()
+  }, [goBackInPlaybackHistory])
+
+  const handleHistoryMenuJump = useCallback((historyIndex) => {
+    jumpToPlaybackHistory(historyIndex)
+  }, [jumpToPlaybackHistory])
+
+  const handleHistoryMenuClear = useCallback(() => {
+    clearPlaybackHistory()
+  }, [clearPlaybackHistory])
+
+  // Native bridge: track ended → advance using the same rules as HTML audio
   useEffect(() => {
     if (window.api?.onAudioTrackEnded) {
       return window.api.onAudioTrackEnded(() => {
-        handleNext()
+        handleTrackEndedAdvance()
       })
     }
-  }, [handleNext])
+  }, [handleTrackEndedAdvance])
 
   const getNextTrack = useCallback(() => {
     if (playlist.length === 0) return null
@@ -2346,7 +2684,7 @@ export default function App() {
     }
     if (playMode === 'shuffle') {
       return null // Cannot reliably predict next track in shuffle
-    } else if (playMode === 'repeat-one') {
+    } else if (playMode === 'single') {
       return playlist[currentIndex]
     } else {
       return playlist[(currentIndex + 1) % playlist.length]
@@ -2708,16 +3046,78 @@ export default function App() {
   const handleSeek = (e) => {
     if (lastCastStatus?.dlnaEnabled && lastCastStatus?.currentUri) return
     const val = parseFloat(e.target.value)
+    if (!Number.isFinite(val)) return
+
+    progressSeekValueRef.current = val
     setCurrentTime(val)
     syncYTVideo(val)
-    const trackPath = playlist[currentIndex]?.path
-    if (useNativeEngineRef.current && window.api?.playAudio && trackPath) {
-      audioRef.current.currentTime = val
-      window.api.playAudio(trackPath, val, playbackRateRef.current).catch(console.error)
-    } else {
-      audioRef.current.currentTime = val
+
+    if (!isProgressDraggingRef.current) {
+      const trackPath = playlist[currentIndex]?.path
+      if (seekTimerRef.current) clearTimeout(seekTimerRef.current)
+      if (useNativeEngineRef.current && window.api?.playAudio && trackPath) {
+        if (audioRef.current) audioRef.current.currentTime = val
+        window.api.playAudio(trackPath, val, playbackRateRef.current).catch(console.error)
+        seekTimerRef.current = setTimeout(() => setIsSeeking(false), 350)
+      } else if (audioRef.current) {
+        audioRef.current.currentTime = val
+        seekTimerRef.current = setTimeout(() => setIsSeeking(false), 120)
+      }
     }
   }
+
+  const commitProgressSeek = useCallback((overrideValue) => {
+    if (!isProgressDraggingRef.current && !Number.isFinite(overrideValue)) return
+
+    isProgressDraggingRef.current = false
+    setIsProgressDragging(false)
+
+    if (lastCastStatus?.dlnaEnabled && lastCastStatus?.currentUri) {
+      setIsSeeking(false)
+      return
+    }
+
+    const val = Number.isFinite(overrideValue) ? overrideValue : progressSeekValueRef.current
+    if (!Number.isFinite(val)) {
+      setIsSeeking(false)
+      return
+    }
+
+    setCurrentTime(val)
+    syncYTVideo(val)
+
+    const trackPath = playlist[currentIndex]?.path
+    if (seekTimerRef.current) clearTimeout(seekTimerRef.current)
+
+    if (useNativeEngineRef.current && window.api?.playAudio && trackPath) {
+      if (audioRef.current) audioRef.current.currentTime = val
+      window.api.playAudio(trackPath, val, playbackRateRef.current).catch(console.error)
+      seekTimerRef.current = setTimeout(() => setIsSeeking(false), 350)
+    } else if (audioRef.current) {
+      audioRef.current.currentTime = val
+      seekTimerRef.current = setTimeout(() => setIsSeeking(false), 120)
+    } else {
+      setIsSeeking(false)
+    }
+  }, [currentIndex, lastCastStatus?.currentUri, lastCastStatus?.dlnaEnabled, playlist, syncYTVideo])
+
+  useEffect(() => {
+    if (!isProgressDragging) return undefined
+
+    const finishSeek = () => {
+      commitProgressSeek()
+    }
+
+    window.addEventListener('mouseup', finishSeek)
+    window.addEventListener('touchend', finishSeek)
+    window.addEventListener('touchcancel', finishSeek)
+
+    return () => {
+      window.removeEventListener('mouseup', finishSeek)
+      window.removeEventListener('touchend', finishSeek)
+      window.removeEventListener('touchcancel', finishSeek)
+    }
+  }, [isProgressDragging, commitProgressSeek])
 
   useEffect(() => {
     if (!mvId) return
@@ -3229,6 +3629,46 @@ export default function App() {
     return { tone: 'idle', text: t('lyricsDrawer.statusDash') }
   }, [lyricsMatchStatus, lyricTimelineValid, config.lyricsWordHighlight, t])
 
+  const lyricsSourceUi = useMemo(() => {
+    const labelMap = {
+      idle: t('lyricsDrawer.sourceStateIdle', '—'),
+      loading: t('lyricsDrawer.sourceStateLoading', 'Loading'),
+      none: t('lyricsDrawer.sourceStateNone', 'No lyrics'),
+      local: t('lyricsDrawer.sourceStateLocal', 'Local file'),
+      embedded: t('lyricsDrawer.sourceStateEmbedded', 'Embedded tags'),
+      lrclib: t('lyricsDrawer.sourceStateLrclib', 'LRCLIB'),
+      netease: t('lyricsDrawer.sourceStateNetease', 'NetEase'),
+      manual: t('lyricsDrawer.sourceStateManual', 'Manual'),
+      link: t('lyricsDrawer.sourceStateLink', 'Song link'),
+      cache: t('lyricsDrawer.sourceStateCache', 'Cache')
+    }
+    const detail = lyricsSourceStatus?.detail ? labelMap[lyricsSourceStatus.detail] || lyricsSourceStatus.detail : ''
+    const origin = lyricsSourceStatus?.origin ? labelMap[lyricsSourceStatus.origin] || lyricsSourceStatus.origin : ''
+
+    let text = labelMap[lyricsSourceStatus?.kind] || labelMap.idle
+    if (lyricsSourceStatus?.kind === 'cache' && detail) {
+      text = `${labelMap.cache} · ${detail}${origin && origin !== detail ? ` · ${origin}` : ''}`
+    } else if ((lyricsSourceStatus?.kind === 'manual' || lyricsSourceStatus?.kind === 'link') && origin) {
+      text = `${text} · ${origin}`
+    }
+
+    return text
+  }, [lyricsSourceStatus, t])
+
+  const preferredReleaseVersion = useMemo(
+    () => normalizeReleaseVersion(updateStatus?.version || appVersion),
+    [updateStatus, appVersion]
+  )
+
+  const visibleReleaseNotes = useMemo(() => {
+    if (!Array.isArray(releaseNotes) || releaseNotes.length === 0) return []
+    const preferred = preferredReleaseVersion
+      ? releaseNotes.find((item) => normalizeReleaseVersion(item.version) === preferredReleaseVersion)
+      : null
+    if (!preferred) return releaseNotes.slice(0, 3)
+    return [preferred, ...releaseNotes.filter((item) => item !== preferred).slice(0, 2)]
+  }, [releaseNotes, preferredReleaseVersion])
+
 
   const customThemeColorFields = useMemo(
     () => [
@@ -3494,6 +3934,19 @@ export default function App() {
     return upNextQueue.map((item) => pathToTrack.get(item?.path)).filter(Boolean)
   }, [upNextQueue, parsedPlaylist])
 
+  const playbackHistoryEntries = useMemo(() => {
+    if (playbackHistory.length === 0) return []
+    const pathToTrack = new Map(parsedPlaylist.map((track) => [track.path, track]))
+    return playbackHistory
+      .map((path, historyIndex) => ({
+        path,
+        historyIndex,
+        track: pathToTrack.get(path)
+      }))
+      .filter((item) => item.track)
+      .reverse()
+  }, [playbackHistory, parsedPlaylist])
+
   const tracksForSidebarList = useMemo(() => {
     if (listMode === 'playlists' && selectedUserPlaylistId) {
       return playlistDetailFiltered
@@ -3510,6 +3963,46 @@ export default function App() {
     }
     return tracksForSidebarList.filter((t) => likedSet.has(t.path))
   }, [tracksForSidebarList, showLikedOnly, listMode, selectedUserPlaylistId, likedSet])
+
+  useEffect(() => {
+    const previousSearchQuery = previousSidebarSearchQueryRef.current
+    const previousCurrentIndex = previousSidebarCurrentIndexRef.current
+
+    previousSidebarSearchQueryRef.current = searchQuery
+    previousSidebarCurrentIndexRef.current = currentIndex
+
+    const playlistElement = sidebarPlaylistRef.current
+    if (!playlistElement || currentIndex < 0) return
+
+    const activeElement = playlistElement.querySelector('.track-item.active')
+    if (!activeElement) return
+
+    const searchWasCleared =
+      previousSearchQuery.trim().length > 0 && searchQuery.trim().length === 0
+    const currentTrackChanged = previousCurrentIndex !== currentIndex
+
+    const playlistRect = playlistElement.getBoundingClientRect()
+    const activeRect = activeElement.getBoundingClientRect()
+    const activeOutsideViewport =
+      activeRect.top < playlistRect.top || activeRect.bottom > playlistRect.bottom
+
+    if (!searchWasCleared && !currentTrackChanged && !activeOutsideViewport) return
+
+    const behavior = searchWasCleared ? 'auto' : 'smooth'
+    const frameId = window.requestAnimationFrame(() => {
+      activeElement.scrollIntoView({ behavior, block: 'center' })
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
+  }, [
+    currentIndex,
+    searchQuery,
+    listMode,
+    selectedFolder,
+    selectedUserPlaylistId,
+    showLikedOnly,
+    tracksForSidebarListFiltered
+  ])
 
   const handleQueueDragOver = useCallback(
     (e) => {
@@ -3824,6 +4317,17 @@ export default function App() {
       window.removeEventListener('keydown', onKey)
     }
   }, [folderSortOpen])
+
+  useEffect(() => {
+    if (!historyMenuOpen) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setHistoryMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [historyMenuOpen])
 
   const deleteUserPlaylist = useCallback(
     (id) => {
@@ -4362,6 +4866,9 @@ export default function App() {
     ;(async () => {
       try {
         if (window.api?.openLyricsDesktop) await window.api.openLyricsDesktop()
+        if (window.api?.setLyricsDesktopLocked) {
+          await window.api.setLyricsDesktopLocked(configRef.current.desktopLyricsLocked === true)
+        }
       } catch (e) {
         console.error('[desktop lyrics open]', e)
       }
@@ -4375,6 +4882,13 @@ export default function App() {
       }
     }
   }, [config.desktopLyricsEnabled])
+
+  useEffect(() => {
+    if (!config.desktopLyricsEnabled || !window.api?.setLyricsDesktopLocked) return
+    window.api.setLyricsDesktopLocked(config.desktopLyricsLocked === true).catch((e) => {
+      console.error('[desktop lyrics lock]', e)
+    })
+  }, [config.desktopLyricsEnabled, config.desktopLyricsLocked])
 
   return (
     <div
@@ -4469,6 +4983,33 @@ export default function App() {
             title={t('titlebar.lyricsSettings')}
           >
             <ListMusic size={18} />
+          </button>
+          <button
+            className="no-drag"
+            type="button"
+            aria-expanded={historyMenuOpen}
+            aria-haspopup="dialog"
+            onClick={() => setHistoryMenuOpen((open) => !open)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: historyMenuOpen ? 'var(--accent-pink)' : 'inherit',
+              cursor: 'pointer',
+              padding: '6px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.color = 'var(--accent-pink)'
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.color = historyMenuOpen ? 'var(--accent-pink)' : 'inherit'
+            }}
+            title={t('player.playbackHistory', 'Playback history')}
+          >
+            <History size={18} />
           </button>
           <button
             className="no-drag"
@@ -4891,6 +5432,7 @@ export default function App() {
 
           <div
             className={`playlist${listMode === 'album' ? ' playlist-album-mode' : ''}${listMode === 'folders' ? ' playlist-album-mode' : ''}${listMode === 'playlists' && selectedUserPlaylistId ? ' playlist--pl-detail' : ''}`}
+            ref={sidebarPlaylistRef}
           >
             {playlist.length === 0 && listMode !== 'playlists' && (
               <div className="app-empty-state app-empty-state--minimal">
@@ -5189,6 +5731,8 @@ export default function App() {
                     <div
                       key={`${track.path}-${track.originalIdx}`}
                       className={`track-item${track.originalIdx === currentIndex ? ' active' : ''}${listMode === 'playlists' && selectedUserPlaylistId ? ' track-item--in-pl' : ''}`}
+                      data-track-index={track.originalIdx}
+                      data-track-path={track.path}
                       draggable
                       onDragStart={(e) => {
                         e.dataTransfer.effectAllowed = 'copy'
@@ -5585,22 +6129,19 @@ export default function App() {
                 value={displayProgressTime}
                 onChange={handleSeek}
                 onMouseDown={() => {
+                  progressSeekValueRef.current = displayProgressTime
+                  isProgressDraggingRef.current = true
                   setIsSeeking(true)
                   setIsProgressDragging(true)
                 }}
-                onMouseUp={() => {
-                  setIsSeeking(false)
-                  setIsProgressDragging(false)
-                }}
-                onMouseLeave={() => setIsProgressDragging(false)}
+                onMouseUp={(e) => commitProgressSeek(parseFloat(e.currentTarget.value))}
                 onTouchStart={() => {
+                  progressSeekValueRef.current = displayProgressTime
+                  isProgressDraggingRef.current = true
                   setIsSeeking(true)
                   setIsProgressDragging(true)
                 }}
-                onTouchEnd={() => {
-                  setIsSeeking(false)
-                  setIsProgressDragging(false)
-                }}
+                onTouchEnd={(e) => commitProgressSeek(parseFloat(e.currentTarget.value))}
                 disabled={dlnaUiOn}
                 style={{
                   padding: 0,
@@ -7278,12 +7819,199 @@ export default function App() {
                 </button>
               </div>
               {updateStatus && updateStatus.event !== 'checking' && (
-                <p style={{ fontSize: '12px', opacity: 0.8, marginTop: '4px' }}>
-                  {updateStatus.event === 'update-available' ? t('settings.updateAvailable', 'Update available, downloading...') :
-                   updateStatus.event === 'update-not-available' ? t('settings.updateNotAvailable', 'You are on the latest version.') :
-                   updateStatus.event === 'error' ? t('settings.updateError', 'Error checking for updates.') : ''}
-                </p>
+                <div style={{ marginTop: '6px' }}>
+                  {(updateStatus.event === 'download-progress') && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <p style={{ fontSize: '12px', opacity: 0.8, margin: 0 }}>
+                        {t('settings.downloading', 'Downloading update...')} {updateStatus.percent ?? 0}%
+                      </p>
+                      <div style={{
+                        width: '260px',
+                        height: '4px',
+                        borderRadius: '2px',
+                        background: 'var(--color-border)',
+                        overflow: 'hidden'
+                      }}>
+                        <div style={{
+                          height: '100%',
+                          width: `${updateStatus.percent ?? 0}%`,
+                          background: 'var(--color-accent, #3b82f6)',
+                          borderRadius: '2px',
+                          transition: 'width 0.3s ease'
+                        }} />
+                      </div>
+                    </div>
+                  )}
+                  {updateStatus.event !== 'download-progress' && (
+                    <p style={{ fontSize: '12px', opacity: 0.8, margin: 0 }}>
+                      {updateStatus.event === 'update-available' ? t('settings.updateAvailable', 'Update available, downloading...') :
+                       updateStatus.event === 'update-not-available' ? t('settings.updateNotAvailable', 'You are on the latest version.') :
+                       updateStatus.event === 'update-downloaded' ? t('settings.updateDownloaded', `v${updateStatus.version} downloaded, will install on exit.`) :
+                       updateStatus.event === 'error' ? t('settings.updateError', 'Error checking for updates.') : ''}
+                    </p>
+                  )}
+                </div>
               )}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: 12 }}>
+                <button
+                  className="control-btn"
+                  onClick={() => {
+                    const nextOpen = !releaseNotesOpen
+                    setReleaseNotesOpen(nextOpen)
+                    if (nextOpen) {
+                      void loadReleaseNotes()
+                    }
+                  }}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {t('settings.viewChangelog', 'View changelog')}
+                </button>
+                <button
+                  className="control-btn"
+                  disabled={releaseNotesLoading}
+                  onClick={() => {
+                    setReleaseNotesOpen(true)
+                    void loadReleaseNotes(true)
+                  }}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border)',
+                    cursor: releaseNotesLoading ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {t('settings.refreshChangelog', 'Refresh changelog')}
+                </button>
+                <button
+                  className="control-btn"
+                  onClick={() => openExternalLink(GITHUB_RELEASES_PAGE_URL)}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {t('settings.openReleasesPage', 'Open releases page')}
+                </button>
+              </div>
+              {releaseNotesOpen ? (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 14,
+                    borderRadius: 12,
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg-secondary)'
+                  }}
+                >
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                      {preferredReleaseVersion
+                        ? t('settings.releaseNotesForVersion', {
+                            version: `v${preferredReleaseVersion}`
+                          })
+                        : t('settings.releaseNotesLatest', 'Latest release notes')}
+                    </div>
+                    <div style={{ opacity: 0.7, fontSize: '12px' }}>
+                      {t(
+                        'settings.releaseNotesHint',
+                        'Recent fixes and changes are pulled from GitHub Releases.'
+                      )}
+                    </div>
+                  </div>
+                  {releaseNotesLoading ? (
+                    <p style={{ margin: 0, opacity: 0.8 }}>
+                      {t('settings.releaseNotesLoading', 'Loading changelog...')}
+                    </p>
+                  ) : releaseNotesError ? (
+                    <p style={{ margin: 0, opacity: 0.8 }}>
+                      {t(
+                        'settings.releaseNotesUnavailable',
+                        'Release notes are temporarily unavailable.'
+                      )}{' '}
+                      ({releaseNotesError})
+                    </p>
+                  ) : visibleReleaseNotes.length === 0 ? (
+                    <p style={{ margin: 0, opacity: 0.8 }}>
+                      {t(
+                        'settings.releaseNotesUnavailable',
+                        'Release notes are temporarily unavailable.'
+                      )}
+                    </p>
+                  ) : (
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {visibleReleaseNotes.map((release) => {
+                        const isPreferred =
+                          preferredReleaseVersion &&
+                          normalizeReleaseVersion(release.version) === preferredReleaseVersion
+                        return (
+                          <div
+                            key={`${release.version}-${release.url}`}
+                            style={{
+                              padding: 12,
+                              borderRadius: 10,
+                              border: `1px solid ${isPreferred ? 'var(--color-accent, #3b82f6)' : 'var(--color-border)'}`,
+                              background: 'var(--color-bg-primary)'
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                justifyContent: 'space-between',
+                                gap: 12
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontWeight: 600 }}>
+                                  {release.title || `v${release.version || '?'}`}
+                                </div>
+                                <div style={{ opacity: 0.7, fontSize: '12px', marginTop: 2 }}>
+                                  {release.publishedLabel || `v${release.version || '?'}`}
+                                </div>
+                              </div>
+                              <button
+                                className="control-btn"
+                                onClick={() => openExternalLink(release.url)}
+                                style={{
+                                  padding: '4px 10px',
+                                  fontSize: '12px',
+                                  borderRadius: '4px',
+                                  background: 'var(--color-bg-secondary)',
+                                  border: '1px solid var(--color-border)',
+                                  cursor: 'pointer',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                {t('settings.openFullRelease', 'Open release')}
+                              </button>
+                            </div>
+                            {Array.isArray(release.previewLines) && release.previewLines.length > 0 ? (
+                              <ul style={{ margin: '10px 0 0 18px', padding: 0, lineHeight: 1.5 }}>
+                                {release.previewLines.slice(0, 4).map((line, index) => (
+                                  <li key={`${release.version}-preview-${index}`}>{line}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
               <p className="settings-version-text">{t('settings.poweredBy')}</p>
               <div className="setting-row" style={{ marginTop: 8 }}>
                 <div className="setting-info">
@@ -7471,12 +8199,151 @@ export default function App() {
         setConfig={setConfig}
         lyricsMatchStatus={lyricsMatchStatus}
         lyricTimelineValid={lyricTimelineValid}
+        lyricsSourceUi={lyricsSourceUi}
         onRefreshLyrics={retryFetchLyrics}
         onOpenManualSearch={openLyricsCandidatePicker}
         onFetchLyricsFromLink={fetchLyricsFromSourceLink}
         onApplyLyricsText={applyLyricsFromText}
         onNativeLyricsFilePick={pickLyricsFileNative}
       />
+      <>
+        <div
+          className={`lyrics-drawer-backdrop ${historyMenuOpen ? 'lyrics-drawer-backdrop--open' : ''}`}
+          onClick={() => setHistoryMenuOpen(false)}
+          aria-hidden={!historyMenuOpen}
+        />
+        <aside
+          className={`lyrics-drawer-panel playback-history-drawer-panel ${historyMenuOpen ? 'lyrics-drawer-panel--open' : ''}`}
+          role="dialog"
+          aria-label={t('player.playbackHistory', 'Playback history')}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="lyrics-drawer-header">
+            <h2 className="lyrics-drawer-title">
+              <History size={18} />
+              {t('player.playbackHistory', 'Playback history')}
+            </h2>
+            <button
+              type="button"
+              className="lyrics-drawer-close"
+              onClick={() => setHistoryMenuOpen(false)}
+              aria-label={t('aria.close')}
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <div className="lyrics-drawer-body playback-history-drawer-body">
+            <section className="lyrics-drawer-section playback-history-drawer-hero">
+              <div className="playback-history-drawer-hero-main">
+                <span className="playback-history-drawer-kicker">
+                  {t('player.playbackHistory', 'Playback history')}
+                </span>
+                <strong className="playback-history-drawer-count">
+                  {playbackHistoryEntries.length > 0
+                    ? t('player.historyCountLabel', {
+                        count: playbackHistoryEntries.length,
+                        defaultValue: `${playbackHistoryEntries.length} tracks in this session`
+                      })
+                    : t('empty.historyEmpty', 'No playback history yet.')}
+                </strong>
+                <p className="playback-history-drawer-copy">
+                  {playbackHistoryEntries.length > 0
+                    ? t(
+                        'player.historyDrawerHint',
+                        'Use this column to jump back through what you listened to.'
+                      )
+                    : playbackHistory.length > 0
+                      ? t(
+                          'player.historyMissingHint',
+                          'Saved history exists, but those tracks are no longer available in the current playlist.'
+                        )
+                      : t(
+                          'player.historyDrawerEmptyHint',
+                          'Once you switch songs, your recent path will appear here.'
+                        )}
+                </p>
+              </div>
+              <div className="playback-history-drawer-actions">
+                <button
+                  type="button"
+                  className="playback-history-drawer-action playback-history-drawer-action--primary"
+                  onClick={handleHistoryMenuBack}
+                  disabled={playbackHistory.length === 0}
+                >
+                  <SkipBack size={15} />
+                  <span>{t('player.backHistory', 'Back through history')}</span>
+                </button>
+                <button
+                  type="button"
+                  className="playback-history-drawer-action playback-history-drawer-action--secondary"
+                  onClick={handleHistoryMenuClear}
+                  disabled={playbackHistory.length === 0}
+                >
+                  <Trash2 size={15} />
+                  <span>{t('player.clearHistory', 'Clear')}</span>
+                </button>
+              </div>
+            </section>
+
+            <section className="lyrics-drawer-section">
+              <div className="audio-drawer-section-header">
+                <History size={16} />
+                <span className="audio-drawer-section-label">
+                  {t('player.recentTracks', 'Recent tracks')}
+                </span>
+              </div>
+              {playbackHistoryEntries.length === 0 ? (
+                <div className="playback-history-drawer-empty">
+                  {playbackHistory.length > 0
+                    ? t(
+                        'player.historyMissingHint',
+                        'Saved history exists, but those tracks are no longer available in the current playlist.'
+                      )
+                    : t('empty.historyEmpty', 'No playback history yet.')}
+                </div>
+              ) : (
+                <div className="playback-history-drawer-list">
+                  {playbackHistoryEntries.map((entry, entryIndex) => {
+                    const track = entry.track
+                    if (!track) return null
+                    const displayArtist =
+                      track.info.artist === 'Unknown Artist'
+                        ? albumArtistByName[track.info.album] || track.info.artist
+                        : track.info.artist
+                    const displayAlbum =
+                      track.info.album && track.info.album !== 'Unknown Album'
+                        ? track.info.album
+                        : t('track.unknownAlbum', 'Unknown Album')
+                    return (
+                      <button
+                        key={`${entry.path}-history-drawer-${entry.historyIndex}`}
+                        type="button"
+                        className="playback-history-drawer-item"
+                        onClick={() => handleHistoryMenuJump(entry.historyIndex)}
+                        title={`${track.info.title} - ${displayArtist}`}
+                      >
+                        <div className="playback-history-drawer-item-top">
+                          <span className="playback-history-drawer-item-order">
+                            {entryIndex === 0
+                              ? t('player.historyMostRecent', 'Most recent')
+                              : t('player.historyOrderLabel', {
+                                  index: entryIndex + 1,
+                                  defaultValue: `#${entryIndex + 1}`
+                                })}
+                          </span>
+                          <span className="playback-history-drawer-item-album">{displayAlbum}</span>
+                        </div>
+                        <span className="playback-history-drawer-item-title">{track.info.title}</span>
+                        <span className="playback-history-drawer-item-subtitle">{displayArtist}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+        </aside>
+      </>
       <MediaDownloaderDrawer
         open={downloaderDrawerOpen}
         onClose={() => setDownloaderDrawerOpen(false)}
@@ -7528,6 +8395,8 @@ export default function App() {
         open={audioSettingsDrawerOpen}
         onClose={() => setAudioSettingsDrawerOpen(false)}
         audioDevices={audioDevices}
+        config={config}
+        setConfig={setConfig}
       />
       <CastReceiveDrawer open={castDrawerOpen} onClose={() => setCastDrawerOpen(false)} />
       <MvSettingsDrawer

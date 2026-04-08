@@ -57,6 +57,8 @@ export const DEFAULT_CONFIG = {
    * 主进程 naudiodon 输出缓冲：low 低延迟 / balanced 默认 / stable 减卡顿
    */
   audioOutputBufferProfile: 'balanced',
+  audioDeviceId: '',
+  audioExclusive: false,
   visualizerStyle: 'bars',
   showDiscordRPC: true,
   enableMV: false,
@@ -113,11 +115,15 @@ export const DEFAULT_CONFIG = {
   desktopLyricsEnabled: false,
   /** Base font size (px) for desktop lyrics window */
   desktopLyricsFontPx: 26,
+  /** Desktop overlay: lock position and let mouse clicks pass through */
+  desktopLyricsLocked: false,
   /** Desktop overlay: show previous / next line */
   desktopLyricsShowPrev: true,
   desktopLyricsShowNext: true,
   /** Desktop overlay: show romaji line(s) when available */
   desktopLyricsShowRomaji: false,
+  /** Desktop overlay: show translation line(s) when available */
+  desktopLyricsShowTranslation: false,
   /** Hex colors for desktop floating lyrics (see Lyrics settings) */
   desktopLyricsColorText: '#fff8f5',
   desktopLyricsColorSecondary: '#ffc8b8',

@@ -1,9 +1,9 @@
 {
   "name": "echoes",
-  "version": "1.1.5",
+  "version": "1.1.7",
   "description": "ECHO desktop application",
   "main": "./out/main/index.js",
-  "author": "Antigravity",
+  "author": "Moekotori",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint . --ext js,jsx,cjs,mjs,ts,tsx --fix",
@@ -20,8 +20,9 @@
     "build:audio-host": "node scripts/build-audio-host.mjs"
   },
   "build": {
-    "appid": "com.echoes.studio",
+    "appId": "com.echoes.studio",
     "productName": "ECHO",
+    "icon": "website/icon.png",
     "publish": [
       {
         "provider": "github",
@@ -53,7 +54,8 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "electron-app/build/icon.ico"
+      "icon": "website/icon.png",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,

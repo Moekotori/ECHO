@@ -36,13 +36,13 @@ function codecLabel(codec) {
   return upper
 }
 
-export default function AudioSettingsDrawer({ open, onClose, audioDevices }) {
+export default function AudioSettingsDrawer({ open, onClose, audioDevices, config, setConfig }) {
   const { t, i18n } = useTranslation()
   const loc = i18n.language.startsWith('zh') ? 'zh' : 'en'
-  const [activeDeviceId, setActiveDeviceId] = useState('')
-  const [isExclusive, setIsExclusive] = useState(false)
-  const [bufferProfile, setBufferProfile] = useState('balanced')
   const [engineInfo, setEngineInfo] = useState(null)
+  const activeDeviceId = config?.audioDeviceId ?? ''
+  const isExclusive = config?.audioExclusive === true
+  const bufferProfile = config?.audioOutputBufferProfile || 'balanced'
 
   useEffect(() => {
     if (!open) return
@@ -77,27 +77,26 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
-  const handleDeviceChange = useCallback(async (id) => {
-    setActiveDeviceId(id)
-    if (window.api?.setAudioDevice) {
-      await window.api.setAudioDevice(id)
-    }
-  }, [])
+  const handleDeviceChange = useCallback((id) => {
+    setConfig((prev) => ({
+      ...prev,
+      audioDeviceId: id ?? ''
+    }))
+  }, [setConfig])
 
-  const handleExclusiveSwitch = useCallback(async () => {
-    const val = !isExclusive
-    setIsExclusive(val)
-    if (window.api?.setAudioExclusive) {
-      await window.api.setAudioExclusive(val)
-    }
-  }, [isExclusive])
+  const handleExclusiveSwitch = useCallback(() => {
+    setConfig((prev) => ({
+      ...prev,
+      audioExclusive: !(prev.audioExclusive === true)
+    }))
+  }, [setConfig])
 
-  const handleBufferProfileChange = useCallback(async (prof) => {
-    setBufferProfile(prof)
-    if (window.api?.setAudioOutputBufferProfile) {
-      await window.api.setAudioOutputBufferProfile(prof)
-    }
-  }, [])
+  const handleBufferProfileChange = useCallback((prof) => {
+    setConfig((prev) => ({
+      ...prev,
+      audioOutputBufferProfile: prof
+    }))
+  }, [setConfig])
 
   const bufferOptions = [
     { key: 'low', label: t('settings.bufferProfiles.low', 'Low Latency'), sub: '256 frames' },

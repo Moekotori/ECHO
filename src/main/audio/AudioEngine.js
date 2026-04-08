@@ -4,6 +4,7 @@ import { Transform } from 'stream'
 import { NativeAudioBridge, isNativeBridgeAvailable, listNativeDevices } from './NativeAudioBridge.js'
 import { createEqFloatProcessor } from './eqFloatProcessor.js'
 import { getResolvedFfmpegStaticPath } from '../utils/resolveFfmpegStaticPath.js'
+import { logLine } from '../utils/logLine.js'
 import { VstBridge } from './VstBridge.js'
 
 const resolvedFfmpeg = getResolvedFfmpegStaticPath()
@@ -23,6 +24,16 @@ const NETEASE_HEADERS =
 
 function isNeteaseStreamUrl(uri) {
   return /music\.163\.com|126\.net|netease|interface\.music\.163/i.test(uri)
+}
+
+function escapeUnicodeForLog(value) {
+  return String(value || '')
+}
+
+function formatPathForLog(filePath) {
+  const fullPath = String(filePath || '')
+  const fileName = fullPath.split(/[/\\]/).filter(Boolean).pop() || fullPath
+  return `file=${escapeUnicodeForLog(fileName)} | path=${escapeUnicodeForLog(fullPath)}`
 }
 
 /**
@@ -155,6 +166,24 @@ export class AudioEngine {
   }
 
   async setDevice(deviceId) {
+    if (deviceId == null || deviceId === '') {
+      const wasPlaying = this.isPlaying
+      const pos = this.playbackTime
+      const file = this.currentFilePath
+      const rate = this.playbackRate
+
+      this.activeDevice = null
+      this.activeDeviceIndex = -1
+      console.log('[AudioEngine] Active device reset to system default')
+
+      if (this._useNativeBridge && wasPlaying && file) {
+        await this._releaseResources()
+        this.play(file, pos, rate)
+      }
+
+      return { success: true, device: null }
+    }
+
     if (this._useNativeBridge) {
       const idx = typeof deviceId === 'number' ? deviceId : parseInt(deviceId, 10)
       if (isNaN(idx) || idx < 0) return { success: false, error: 'Invalid device index' }
@@ -261,7 +290,7 @@ export class AudioEngine {
         targetSampleRate = this.exclusiveMode && this._useNativeBridge
           ? dsdPcmRate
           : 44100
-        console.log(`[AudioEngine] DSD detected: native=${fileSampleRate}Hz → PCM ${dsdPcmRate}Hz`)
+        logLine(`[AudioEngine] DSD detected: native=${fileSampleRate}Hz -> PCM ${dsdPcmRate}Hz`)
       } else if (this.exclusiveMode && this._useNativeBridge) {
         targetSampleRate = fileSampleRate
       } else if (this.activeDevice && this.activeDevice.sampleRate > 0) {
@@ -272,10 +301,11 @@ export class AudioEngine {
 
       this._fileSampleRate = fileSampleRate
       this._outputSampleRate = targetSampleRate
-
-      console.log(
-        `[AudioEngine] Play: ${filePath} | ${info.codec} ${info.bitsPerSample}bit | src=${fileSampleRate}Hz → out=${targetSampleRate}Hz | rate=${playbackRate} | bridge=${this._useNativeBridge} | exclusive=${this.exclusiveMode}${info.isDSD ? ' | DSD' : ''}`
-      )
+      const playLogText =
+        `[AudioEngine] Play: ${formatPathForLog(filePath)} | ${info.codec} ${info.bitsPerSample}bit | ` +
+        `src=${fileSampleRate}Hz -> out=${targetSampleRate}Hz | rate=${playbackRate} | ` +
+        `bridge=${this._useNativeBridge} | exclusive=${this.exclusiveMode}${info.isDSD ? ' | DSD' : ''}`
+      logLine(playLogText)
 
       /* ── output backend ── */
       if (this._useNativeBridge) {
@@ -297,7 +327,7 @@ export class AudioEngine {
         }
 
         bridge.onEnded(() => {
-          if (this.isPlaying && this.currentFilePath === filePath) {
+          if (this._bridge === bridge && this.isPlaying && this.currentFilePath === filePath) {
             this.isPlaying = false
             if (this._onTrackEnded) this._onTrackEnded()
           }

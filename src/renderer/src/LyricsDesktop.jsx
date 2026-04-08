@@ -81,9 +81,14 @@ function normalizePayload(p) {
     prevRomaji: typeof p?.prevRomaji === 'string' ? p.prevRomaji : '',
     currentRomaji: typeof p?.currentRomaji === 'string' ? p.currentRomaji : '',
     nextRomaji: typeof p?.nextRomaji === 'string' ? p.nextRomaji : '',
+    prevTranslation: typeof p?.prevTranslation === 'string' ? p.prevTranslation : '',
+    currentTranslation: typeof p?.currentTranslation === 'string' ? p.currentTranslation : '',
+    nextTranslation: typeof p?.nextTranslation === 'string' ? p.nextTranslation : '',
     showPrev: p?.showPrev !== false,
     showNext: p?.showNext !== false,
     showRomaji: p?.showRomaji === true,
+    showTranslation: p?.showTranslation === true,
+    locked: p?.locked === true,
     noLyrics: p?.noLyrics === true,
     title: typeof p?.title === 'string' ? p.title : '',
     fontPx: typeof p?.fontPx === 'number' && p.fontPx > 8 ? p.fontPx : 26,
@@ -108,9 +113,14 @@ export default function LyricsDesktop() {
     prevRomaji: '',
     currentRomaji: '',
     nextRomaji: '',
+    prevTranslation: '',
+    currentTranslation: '',
+    nextTranslation: '',
     showPrev: true,
     showNext: true,
     showRomaji: false,
+    showTranslation: false,
+    locked: false,
     noLyrics: false,
     title: '',
     fontPx: 26,
@@ -165,9 +175,14 @@ export default function LyricsDesktop() {
     prevRomaji,
     currentRomaji,
     nextRomaji,
+    prevTranslation,
+    currentTranslation,
+    nextTranslation,
     showPrev,
     showNext,
     showRomaji,
+    showTranslation,
+    locked,
     noLyrics,
     title,
     fontPx,
@@ -176,8 +191,17 @@ export default function LyricsDesktop() {
 
   const glowPrimary = useMemo(() => makeGlow(colors.glow), [colors.glow])
   const glowSecondary = useMemo(() => makeGlow(colors.secondary, true), [colors.secondary])
+  const glowRomaji = useMemo(() => {
+    const { r, g, b } = hexToRgb(colors.romaji)
+    return [
+      `0 0 1px rgba(${r},${g},${b},0.85)`,
+      `0 0 4px rgba(${r},${g},${b},0.4)`,
+      `0 1px 8px rgba(0,0,0,0.65)`,
+      `0 0 2px rgba(0,0,0,0.9)`
+    ].join(', ')
+  }, [colors.romaji])
 
-  const renderLine = (text, rom, { size, weight, opacity, marginBottom, isSecondary, animDelaySec = 0 }) => {
+  const renderLine = (text, rom, translation, { size, weight, opacity, marginBottom, isSecondary, animDelaySec = 0 }) => {
     if (!text) return null
     const glow = isSecondary ? glowSecondary : glowPrimary
     const color = isSecondary ? colors.secondary : colors.text
@@ -207,7 +231,7 @@ export default function LyricsDesktop() {
           <div
             style={{
               color: colors.romaji,
-              textShadow: glowSecondary,
+              textShadow: glowRomaji,
               fontSize: Math.max(11, size * 0.42),
               fontWeight: 600,
               opacity: opacity * 0.92,
@@ -219,11 +243,28 @@ export default function LyricsDesktop() {
             {rom}
           </div>
         ) : null}
+        {showTranslation && translation ? (
+          <div
+            style={{
+              color: colors.secondary,
+              textShadow: glowSecondary,
+              fontSize: Math.max(11, size * 0.38),
+              fontWeight: 600,
+              opacity: opacity * 0.9,
+              marginTop: showRomaji && rom ? 3 : 4,
+              lineHeight: 1.3,
+              textAlign: 'center'
+            }}
+          >
+            {translation}
+          </div>
+        ) : null}
       </div>
     )
   }
 
-  const mb = next && showNext ? 6 : showRomaji && currentRomaji ? 4 : 0
+  const currentHasExtra = (showRomaji && currentRomaji) || (showTranslation && currentTranslation)
+  const mb = next && showNext ? 6 : currentHasExtra ? 4 : 0
 
   return (
     <div
@@ -235,7 +276,7 @@ export default function LyricsDesktop() {
       }}
       title={title ? `${title} — ${t('lyrics.desktopLyricsChromeHint')}` : t('lyrics.desktopLyricsChromeHint')}
       style={{
-        minHeight: '100%',
+        height: '100%',
         width: '100%',
         margin: 0,
         boxSizing: 'border-box',
@@ -243,14 +284,14 @@ export default function LyricsDesktop() {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
-        padding: 0,
+        justifyContent: 'flex-end',
+        padding: '0 0 8px',
         WebkitUserSelect: 'none',
         userSelect: 'none',
         overflow: 'hidden',
-        pointerEvents: 'auto',
-        WebkitAppRegion: 'drag',
-        cursor: 'grab'
+        pointerEvents: locked ? 'none' : 'auto',
+        WebkitAppRegion: locked ? 'no-drag' : 'drag',
+        cursor: locked ? 'default' : 'grab'
       }}
     >
       <div
@@ -259,7 +300,7 @@ export default function LyricsDesktop() {
           width: '100%',
           maxWidth: '100%',
           textAlign: 'center',
-          padding: '4px 12px',
+          padding: '0 12px',
           background: 'transparent',
           borderRadius: 12,
           opacity: noLyrics ? 0 : 1,
@@ -268,7 +309,7 @@ export default function LyricsDesktop() {
         }}
       >
         {showPrev && prev
-          ? renderLine(prev, prevRomaji, {
+          ? renderLine(prev, prevRomaji, prevTranslation, {
               size: Math.max(12, fontPx * 0.4),
               weight: 600,
               opacity: 0.58,
@@ -301,7 +342,7 @@ export default function LyricsDesktop() {
             <div
               style={{
                 color: colors.romaji,
-                textShadow: glowSecondary,
+                textShadow: glowRomaji,
                 fontSize: Math.max(11, fontPx * 0.42),
                 fontWeight: 600,
                 marginTop: 6,
@@ -312,9 +353,24 @@ export default function LyricsDesktop() {
               {currentRomaji}
             </div>
           ) : null}
+          {showTranslation && currentTranslation ? (
+            <div
+              style={{
+                color: colors.secondary,
+                textShadow: glowSecondary,
+                fontSize: Math.max(11, fontPx * 0.38),
+                fontWeight: 600,
+                marginTop: showRomaji && currentRomaji ? 4 : 6,
+                lineHeight: 1.3,
+                textAlign: 'center'
+              }}
+            >
+              {currentTranslation}
+            </div>
+          ) : null}
         </div>
         {showNext && next
-          ? renderLine(next, nextRomaji, {
+          ? renderLine(next, nextRomaji, nextTranslation, {
               size: Math.max(13, fontPx * 0.48),
               weight: 600,
               opacity: 0.75,

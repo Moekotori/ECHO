@@ -5155,6 +5155,191 @@ input[type="range"]::-moz-range-track {
   background: rgba(255, 255, 255, 0.26);
 }
 
+/* ========== Playback History Drawer ========== */
+
+.playback-history-drawer-panel {
+  width: min(520px, 96vw);
+}
+
+.playback-history-drawer-body {
+  gap: var(--drawer-gap-4);
+}
+
+.playback-history-drawer-hero {
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent-pink) 20%, var(--overlay-light));
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-pink) 10%, transparent),
+    color-mix(in srgb, var(--accent-blue) 8%, transparent));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.playback-history-drawer-hero-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.playback-history-drawer-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.playback-history-drawer-count {
+  font-size: 22px;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.playback-history-drawer-copy {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.playback-history-drawer-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.playback-history-drawer-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--overlay-light);
+  color: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.playback-history-drawer-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.playback-history-drawer-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.playback-history-drawer-action--primary {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent-pink) 16%, transparent),
+    color-mix(in srgb, var(--accent-blue) 12%, transparent));
+  border-color: color-mix(in srgb, var(--accent-pink) 32%, transparent);
+}
+
+.playback-history-drawer-action--primary:hover:not(:disabled) {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent-pink) 22%, transparent),
+    color-mix(in srgb, var(--accent-blue) 16%, transparent));
+}
+
+.playback-history-drawer-action--secondary {
+  background: var(--overlay-subtle);
+}
+
+.playback-history-drawer-action--secondary:hover:not(:disabled) {
+  background: var(--overlay-light);
+}
+
+.playback-history-drawer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.playback-history-drawer-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--overlay-light);
+  background: var(--overlay-subtle);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.playback-history-drawer-item:hover {
+  transform: translateY(-1px);
+  background: var(--overlay-light);
+  border-color: color-mix(in srgb, var(--accent-pink) 22%, var(--overlay-light));
+}
+
+.playback-history-drawer-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.playback-history-drawer-item-order,
+.playback-history-drawer-item-album {
+  min-width: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.52);
+}
+
+.playback-history-drawer-item-order {
+  font-weight: 700;
+}
+
+.playback-history-drawer-item-album {
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playback-history-drawer-item-title,
+.playback-history-drawer-item-subtitle {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playback-history-drawer-item-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.playback-history-drawer-item-subtitle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.playback-history-drawer-empty {
+  padding: 28px 18px;
+  border-radius: 16px;
+  border: 1px dashed var(--overlay-light);
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.62);
+  text-align: center;
+  line-height: 1.7;
+  font-size: 13px;
+}
+
 /* Listen Together visual polish */
 .listen-together-section {
   padding: var(--drawer-gap-3);
