@@ -1,6 +1,8 @@
 import { spawn } from 'child_process'
 import { join } from 'path'
 import fs from 'fs'
+import https from 'https'
+import http from 'http'
 import { getResolvedFfmpegStaticPath } from './utils/resolveFfmpegStaticPath.js'
 import youtubedl from 'youtube-dl-exec'
 
@@ -198,6 +200,65 @@ export default class MediaDownloader {
         }
         resolve(resolved)
       })
+    })
+  }
+
+  /**
+   * 从直接 HTTP(S) URL 下载音频文件并保存到指定目录。
+   * 自动跟随重定向，报告进度。
+   * @param {string} url         直接下载链接
+   * @param {string} targetFolder  保存目录
+   * @param {string} filename     文件名（含扩展名，如 artist - title.mp3）
+   * @param {object} eventSender  Electron webContents（可选，用于上报进度）
+   * @returns {Promise<string>}   下载后的完整文件路径
+   */
+  static downloadFromUrl(url, targetFolder, filename, eventSender) {
+    return new Promise((resolve, reject) => {
+      const outPath = join(targetFolder, filename)
+      const file = fs.createWriteStream(outPath)
+
+      const doRequest = (reqUrl, redirectCount = 0) => {
+        if (redirectCount > 5) {
+          file.close()
+          try { fs.unlinkSync(outPath) } catch (_) {}
+          return reject(new Error('Too many redirects'))
+        }
+        const mod = reqUrl.startsWith('https') ? https : http
+        mod.get(reqUrl, (res) => {
+          // Follow redirects
+          if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+            return doRequest(res.headers.location, redirectCount + 1)
+          }
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            file.close()
+            try { fs.unlinkSync(outPath) } catch (_) {}
+            return reject(new Error(`HTTP ${res.statusCode}`))
+          }
+          const total = parseInt(res.headers['content-length'], 10)
+          let downloaded = 0
+          res.on('data', (chunk) => {
+            downloaded += chunk.length
+            file.write(chunk)
+            if (total && eventSender) {
+              const progress = Math.min(100, (downloaded / total) * 100)
+              eventSender.send('media:download-progress', { url: reqUrl, progress })
+            }
+          })
+          res.on('end', () => {
+            file.end(() => resolve(outPath))
+          })
+          res.on('error', (e) => {
+            file.close()
+            try { fs.unlinkSync(outPath) } catch (_) {}
+            reject(e)
+          })
+        }).on('error', (e) => {
+          file.close()
+          try { fs.unlinkSync(outPath) } catch (_) {}
+          reject(e)
+        })
+      }
+      doRequest(url)
     })
   }
 }

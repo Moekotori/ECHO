@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('api', {
   openLyricsFileHandler: (locale) => ipcRenderer.invoke('dialog:openLyricsFile', { locale }),
   openFontFileHandler: (locale) => ipcRenderer.invoke('dialog:openFontFile', { locale }),
   getAudioFilesFromPaths: (paths) => ipcRenderer.invoke('file:getFilesFromPaths', paths),
+  rescanFolders: (payload) => ipcRenderer.invoke('file:rescanFolders', payload),
   readLyricsHandler: (audioPath) => ipcRenderer.invoke('file:readLyrics', audioPath),
   toRomajiBatch: (texts) => ipcRenderer.invoke('lyrics:toRomajiBatch', texts),
   fetchNeteaseLyrics: (payload) => ipcRenderer.invoke('lyrics:neteaseFetch', payload),
@@ -66,12 +67,14 @@ contextBridge.exposeInMainWorld('api', {
   clearDiscordActivity: () => ipcRenderer.send('discord:clearActivity'),
   toggleDiscordRPC: (enabled) => ipcRenderer.send('discord:toggle', enabled),
   neteaseSearch: (keywords) => ipcRenderer.invoke('netease:search', keywords),
+  getNeteaseSongUrl: (songId, level) => ipcRenderer.invoke('netease:getSongUrl', songId, level),
   
   media: {
     fetchNeteaseLrcText: (params) => ipcRenderer.invoke('netease:fetchLrcText', params),
     writeFile: (filePath, text) => ipcRenderer.invoke('media:writeFile', filePath, text),
     getMetadata: (url) => ipcRenderer.invoke('media:getMetadata', url),
     downloadAudio: (url, folder, options) => ipcRenderer.invoke('media:download', url, folder, options),
+    downloadFromUrl: (opts) => ipcRenderer.invoke('media:downloadFromUrl', opts),
     onProgress: (callback) => {
       const channel = 'media:download-progress'
       const handler = (_, data) => callback(data)

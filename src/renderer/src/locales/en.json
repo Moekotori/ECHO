@@ -72,11 +72,23 @@
     "songs": "Songs",
     "albums": "Albums",
     "playlists": "Playlists",
+    "folders": "Folders",
     "queue": "Queue"
   },
   "albumFilter": {
     "label": "Album: {{name}}",
     "clear": "Clear"
+  },
+  "folderFilter": {
+    "label": "Folder: {{name}}",
+    "clear": "Clear"
+  },
+  "folders": {
+    "heading": "Folders",
+    "tracks": "tracks",
+    "sortName": "Name",
+    "sortDateAsc": "Oldest",
+    "sortDateDesc": "Newest"
   },
   "empty": {
     "noTracks": "No tracks yet.",
@@ -421,7 +433,11 @@
     "qualityLossless": "Lossless (prefer FLAC)",
     "qualityHigh": "Quality: High (prefer 320k)",
     "qualityMedium": "Quality: Medium (prefer 192k)",
-    "qualityLow": "Quality: Low (save bandwidth)"
+    "qualityLow": "Quality: Low (save bandwidth)",
+    "use1musicLabel": "Download from 1music (direct link, faster & more stable)",
+    "directUrlFailed": "Failed to get direct URL; sign in or track may be unavailable",
+    "downloadBtn": "Download",
+    "searchDownloading": "Downloading…"
   },
   "drawer": {
     "lyricsTitle": "Lyrics",

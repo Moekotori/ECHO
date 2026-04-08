@@ -72,11 +72,23 @@
     "songs": "歌曲",
     "albums": "专辑",
     "playlists": "歌单",
+    "folders": "文件夹",
     "queue": "队列"
   },
   "albumFilter": {
     "label": "专辑：{{name}}",
     "clear": "清除"
+  },
+  "folderFilter": {
+    "label": "文件夹：{{name}}",
+    "clear": "清除"
+  },
+  "folders": {
+    "heading": "文件夹",
+    "tracks": "首曲目",
+    "sortName": "名称",
+    "sortDateAsc": "最早添加",
+    "sortDateDesc": "最新添加"
   },
   "empty": {
     "noTracks": "还没有曲目。",
@@ -427,7 +439,11 @@
     "qualityLossless": "无损（优先 FLAC）",
     "qualityHigh": "音质：高（优先 320k）",
     "qualityMedium": "音质：中（优先 192k）",
-    "qualityLow": "音质：低（节省流量）"
+    "qualityLow": "音质：低（节省流量）",
+    "use1musicLabel": "从 1music 下载（直链模式，更快更稳定）",
+    "directUrlFailed": "无法获取歌曲直链，可能需要登录或该歌曲不可用",
+    "downloadBtn": "下载",
+    "searchDownloading": "正在下载…"
   },
   "drawer": {
     "lyricsTitle": "歌词",

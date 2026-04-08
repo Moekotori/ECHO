@@ -84,6 +84,7 @@ function normalizePayload(p) {
     showPrev: p?.showPrev !== false,
     showNext: p?.showNext !== false,
     showRomaji: p?.showRomaji === true,
+    noLyrics: p?.noLyrics === true,
     title: typeof p?.title === 'string' ? p.title : '',
     fontPx: typeof p?.fontPx === 'number' && p.fontPx > 8 ? p.fontPx : 26,
     colors: {
@@ -110,6 +111,7 @@ export default function LyricsDesktop() {
     showPrev: true,
     showNext: true,
     showRomaji: false,
+    noLyrics: false,
     title: '',
     fontPx: 26,
     colors: { ...DEFAULT_COLORS }
@@ -166,6 +168,7 @@ export default function LyricsDesktop() {
     showPrev,
     showNext,
     showRomaji,
+    noLyrics,
     title,
     fontPx,
     colors
@@ -258,7 +261,10 @@ export default function LyricsDesktop() {
           textAlign: 'center',
           padding: '4px 12px',
           background: 'transparent',
-          borderRadius: 12
+          borderRadius: 12,
+          opacity: noLyrics ? 0 : 1,
+          pointerEvents: noLyrics ? 'none' : undefined,
+          transition: 'opacity 0.3s ease'
         }}
       >
         {showPrev && prev

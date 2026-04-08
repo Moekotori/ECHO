@@ -32,6 +32,12 @@ export function buildDesktopLyricsPayload(cfg, d, noneText) {
     current = (lines[0]?.text || '').trim() || noneText
   }
 
+  // Detect "no lyrics" state: the only entry is the noneText placeholder
+  const noLyrics =
+    (!current || current === noneText) &&
+    !prev &&
+    !next
+
   const showPrev = cfg.desktopLyricsShowPrev !== false
   const showNext = cfg.desktopLyricsShowNext !== false
   const showRomaji = cfg.desktopLyricsShowRomaji === true
@@ -68,6 +74,7 @@ export function buildDesktopLyricsPayload(cfg, d, noneText) {
     showPrev,
     showNext,
     showRomaji,
+    noLyrics,
     title: d.displayMainTitle || '',
     fontPx: typeof cfg.desktopLyricsFontPx === 'number' ? cfg.desktopLyricsFontPx : 26,
     colors

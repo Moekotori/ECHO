@@ -171,3 +171,35 @@ export async function fetchNeteaseLrcText(params) {
 
   return null
 }
+
+/**
+ * 获取网易云歌曲直接下载 URL（通过 NCM API song_url_v1）。
+ * @param {number|string} songId  网易云歌曲 ID
+ * @param {string} [level]        音质等级：standard / higher / exhigh / lossless / hires
+ * @returns {Promise<{url:string, type:string, size:number, br:number}|null>}
+ */
+export async function getNeteaseSongDirectUrl(songId, level) {
+  const id = typeof songId === 'number' ? songId : Number(songId)
+  if (!id || !Number.isFinite(id)) return null
+
+  const ncm = getNcmApi()
+  const base = ncmRequestOptions()
+  const qualityLevel = level || 'exhigh'
+
+  try {
+    const res = await ncm.song_url_v1({ id, level: qualityLevel, ...base })
+    const data = res?.body?.data
+    if (!Array.isArray(data) || data.length === 0) return null
+    const entry = data[0]
+    if (!entry?.url) return null
+    return {
+      url: entry.url,
+      type: entry.type || 'mp3',
+      size: entry.size || 0,
+      br: entry.br || 0
+    }
+  } catch (e) {
+    console.error('[neteaseLyrics] getSongDirectUrl error:', e?.message || e)
+    return null
+  }
+}

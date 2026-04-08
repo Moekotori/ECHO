@@ -342,6 +342,21 @@ export default function App() {
   const [newPlaylistName, setNewPlaylistName] = useState('')
   const [quickNewPlaylistName, setQuickNewPlaylistName] = useState('')
   const [selectedAlbum, setSelectedAlbum] = useState('all')
+  const [selectedFolder, setSelectedFolder] = useState('all')
+  const [folderSortMode, setFolderSortMode] = useState('default') // 'default' | 'dateAsc' | 'dateDesc'
+  const [folderSortOpen, setFolderSortOpen] = useState(false)
+  const folderSortRef = useRef(null)
+  const [importedFolders, setImportedFolders] = useState(() => {
+    try {
+      const s = localStorage.getItem('nc_imported_folders')
+      if (!s) return []
+      const p = JSON.parse(s)
+      return Array.isArray(p) ? p : []
+    } catch {
+      return []
+    }
+  })
+  const importedFoldersHydratedRef = useRef(false)
   const [trackMetaMap, setTrackMetaMap] = useState({})
   const [technicalInfo, setTechnicalInfo] = useState({
     sampleRate: null,
@@ -922,6 +937,37 @@ export default function App() {
       void window.api.appStateSet('userPlaylists', userPlaylists)
     }
   }, [userPlaylists, config.autoSaveLibrary])
+
+  // Persist imported folders
+  useEffect(() => {
+    try {
+      localStorage.setItem('nc_imported_folders', JSON.stringify(importedFolders))
+    } catch {}
+    if (importedFoldersHydratedRef.current && window.api?.appStateSet) {
+      void window.api.appStateSet('importedFolders', importedFolders)
+    }
+  }, [importedFolders])
+
+  // Auto-rescan imported folders on startup to discover new files
+  useEffect(() => {
+    if (!importedFolders.length || !window.api?.rescanFolders) return
+    let cancelled = false
+    const doRescan = async () => {
+      try {
+        const existingPaths = playlist.map((t) => t.path)
+        const newFiles = await window.api.rescanFolders({ folders: importedFolders, existingPaths })
+        if (!cancelled && newFiles && newFiles.length > 0) {
+          setPlaylist((prev) => [...prev, ...newFiles])
+        }
+      } catch (e) {
+        console.error('Folder rescan failed:', e)
+      }
+    }
+    doRescan()
+    return () => { cancelled = true }
+    // Only run once on mount when playlist is hydrated
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Update playback speed whenever it changes
   useEffect(() => {
@@ -2143,10 +2189,17 @@ export default function App() {
   const handleImport = async () => {
     const folders = await window.api.openDirectoryHandler()
     if (folders && folders.length > 0) {
-      const audioFiles = await window.api.readDirectoryHandler(folders[0])
+      const folderPath = folders[0]
+      const audioFiles = await window.api.readDirectoryHandler(folderPath)
       if (audioFiles.length > 0) {
         await processFiles(audioFiles)
       }
+      // Save folder path for auto-rescan
+      setImportedFolders((prev) => {
+        const normalized = folderPath.replace(/[\\/]+$/, '')
+        if (prev.some((f) => f.toLowerCase() === normalized.toLowerCase())) return prev
+        return [...prev, normalized]
+      })
     }
   }
 
@@ -3347,17 +3400,67 @@ export default function App() {
 
   const albumGroups = listMode === 'album' ? albumBuckets : []
 
+  /* Folder grouping – extract parent folder from track path */
+  const folderBuckets = useMemo(() => {
+    const groups = queryFilteredPlaylist.reduce((acc, track) => {
+      const parts = (track.path || '').replace(/\\/g, '/').split('/')
+      const folderPath = parts.length > 1 ? parts.slice(0, -1).join('/') : '/'
+      const folderName = parts.length > 1 ? parts[parts.length - 2] : '/'
+      if (!acc.has(folderPath)) acc.set(folderPath, { name: folderName, folderPath, tracks: [] })
+      acc.get(folderPath).tracks.push(track)
+      return acc
+    }, new Map())
+
+    const buckets = Array.from(groups.values())
+    if (folderSortMode === 'dateAsc') {
+      buckets.sort((a, b) => {
+        const aTime = Math.min(...a.tracks.map((t) => t.birthtimeMs || Infinity))
+        const bTime = Math.min(...b.tracks.map((t) => t.birthtimeMs || Infinity))
+        return aTime - bTime
+      })
+    } else if (folderSortMode === 'dateDesc') {
+      buckets.sort((a, b) => {
+        const aTime = Math.min(...a.tracks.map((t) => t.birthtimeMs || Infinity))
+        const bTime = Math.min(...b.tracks.map((t) => t.birthtimeMs || Infinity))
+        return bTime - aTime
+      })
+    } else {
+      buckets.sort((a, b) => a.name.localeCompare(b.name))
+    }
+    return buckets
+  }, [queryFilteredPlaylist, folderSortMode])
+
+  const folderNamesSet = useMemo(() => {
+    const s = new Set()
+    for (const b of folderBuckets) s.add(b.folderPath)
+    return s
+  }, [folderBuckets])
+
+  const folderGroups = listMode === 'folders' ? folderBuckets : []
+
   const filteredPlaylist = useMemo(() => {
+    if (listMode === 'folders' && selectedFolder !== 'all') {
+      return queryFilteredPlaylist.filter((track) => {
+        const parts = (track.path || '').replace(/\\/g, '/').split('/')
+        const fp = parts.length > 1 ? parts.slice(0, -1).join('/') : '/'
+        return fp === selectedFolder
+      })
+    }
     if (selectedAlbum === 'all') return queryFilteredPlaylist
     return queryFilteredPlaylist
       .filter((track) => track.info.album === selectedAlbum)
       .sort(compareTrackOrder)
-  }, [queryFilteredPlaylist, selectedAlbum])
+  }, [queryFilteredPlaylist, selectedAlbum, selectedFolder, listMode])
 
   useEffect(() => {
     if (selectedAlbum === 'all') return
     if (!albumNamesSet.has(selectedAlbum)) setSelectedAlbum('all')
   }, [albumNamesSet, selectedAlbum])
+
+  useEffect(() => {
+    if (selectedFolder === 'all') return
+    if (!folderNamesSet.has(selectedFolder)) setSelectedFolder('all')
+  }, [folderNamesSet, selectedFolder])
 
   const selectedUserPlaylist = useMemo(
     () => userPlaylists.find((p) => p.id === selectedUserPlaylistId) || null,
@@ -3401,7 +3504,7 @@ export default function App() {
   const tracksForSidebarListFiltered = useMemo(() => {
     if (
       !showLikedOnly ||
-      (listMode !== 'songs' && !(listMode === 'playlists' && selectedUserPlaylistId))
+      (listMode !== 'songs' && listMode !== 'folders' && !(listMode === 'playlists' && selectedUserPlaylistId))
     ) {
       return tracksForSidebarList
     }
@@ -3448,6 +3551,16 @@ export default function App() {
       }))
       .filter((album) => album.tracks.length > 0)
   }, [albumGroups, showLikedOnly, listMode, likedSet])
+
+  const folderGroupsFiltered = useMemo(() => {
+    if (!showLikedOnly || listMode !== 'folders') return folderGroups
+    return folderGroups
+      .map((folder) => ({
+        ...folder,
+        tracks: folder.tracks.filter((t) => likedSet.has(t.path))
+      }))
+      .filter((folder) => folder.tracks.length > 0)
+  }, [folderGroups, showLikedOnly, listMode, likedSet])
 
   const forceCloseTrackContextMenu = useCallback(() => {
     if (ctxMenuCloseTimerRef.current) {
@@ -3506,6 +3619,14 @@ export default function App() {
       handleListMode('songs')
     },
     [handleListMode]
+  )
+
+  const handlePickFolderFromSidebar = useCallback(
+    (folder) => {
+      setSelectedFolder(folder.folderPath)
+      setListMode('folders')
+    },
+    []
   )
 
   const addPathToUserPlaylist = useCallback(
@@ -3685,6 +3806,24 @@ export default function App() {
       window.removeEventListener('keydown', onKey)
     }
   }, [playlistLibraryMoreOpen])
+
+  useEffect(() => {
+    if (!folderSortOpen) return
+    const onDocMouseDown = (e) => {
+      if (folderSortRef.current && !folderSortRef.current.contains(e.target)) {
+        setFolderSortOpen(false)
+      }
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') setFolderSortOpen(false)
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [folderSortOpen])
 
   const deleteUserPlaylist = useCallback(
     (id) => {
@@ -4664,16 +4803,21 @@ export default function App() {
             </button>
             <button
               type="button"
-              className={`list-filter-chip ${showLikedOnly ? 'active' : ''}`}
+              className={`list-filter-chip ${listMode === 'folders' ? 'active' : ''}`}
+              onClick={() => handleListMode('folders')}
+            >
+              {t('listMode.folders')}
+            </button>
+            <button
+              type="button"
+              className={`list-filter-chip list-filter-chip--icon-only ${showLikedOnly ? 'active' : ''}`}
               onClick={() => setShowLikedOnly((v) => !v)}
               title={t('like.filterOnlyTitle')}
             >
               <Heart
                 size={13}
                 strokeWidth={1.5}
-                style={{ verticalAlign: 'middle', marginRight: 4 }}
               />
-              {t('like.filterOnly')}
             </button>
           </div>
           <div
@@ -4738,8 +4882,15 @@ export default function App() {
             </div>
           )}
 
+          {selectedFolder !== 'all' && listMode === 'folders' && (
+            <div className="album-filter-pill no-drag">
+              <span>{t('folderFilter.label', { name: selectedFolder.split('/').pop() })}</span>
+              <button onClick={() => setSelectedFolder('all')}>{t('folderFilter.clear')}</button>
+            </div>
+          )}
+
           <div
-            className={`playlist${listMode === 'album' ? ' playlist-album-mode' : ''}${listMode === 'playlists' && selectedUserPlaylistId ? ' playlist--pl-detail' : ''}`}
+            className={`playlist${listMode === 'album' ? ' playlist-album-mode' : ''}${listMode === 'folders' ? ' playlist-album-mode' : ''}${listMode === 'playlists' && selectedUserPlaylistId ? ' playlist--pl-detail' : ''}`}
           >
             {playlist.length === 0 && listMode !== 'playlists' && (
               <div className="app-empty-state app-empty-state--minimal">
@@ -4892,6 +5043,60 @@ export default function App() {
               </div>
             )}
 
+            {playlist.length > 0 && listMode === 'folders' && selectedFolder === 'all' && (
+              <div className="folder-browser no-drag">
+                <div className="folder-browser-header">
+                  <span className="folder-browser-title">{t('folders.heading')}</span>
+                  <span className="folder-browser-count">({folderGroupsFiltered.length})</span>
+                  <div className="folder-sort-wrap" ref={folderSortRef}>
+                    <button
+                      type="button"
+                      className="folder-sort-trigger"
+                      onClick={() => setFolderSortOpen((v) => !v)}
+                      aria-expanded={folderSortOpen}
+                    >
+                      {folderSortMode === 'dateAsc' ? t('folders.sortDateAsc') : folderSortMode === 'dateDesc' ? t('folders.sortDateDesc') : t('folders.sortName')}
+                      <ChevronDown size={12} style={{ marginLeft: 2, opacity: 0.6 }} />
+                    </button>
+                    {folderSortOpen && (
+                      <div className="folder-sort-menu" role="menu">
+                        {[
+                          { key: 'default', label: t('folders.sortName') },
+                          { key: 'dateAsc', label: t('folders.sortDateAsc') },
+                          { key: 'dateDesc', label: t('folders.sortDateDesc') }
+                        ].map((opt) => (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            role="menuitem"
+                            className={`folder-sort-menu-item${folderSortMode === opt.key ? ' active' : ''}`}
+                            onClick={() => { setFolderSortMode(opt.key); setFolderSortOpen(false) }}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="folder-list">
+                  {folderGroupsFiltered.map((folder) => (
+                    <button
+                      key={folder.folderPath}
+                      type="button"
+                      className={`folder-list-item${selectedFolder === folder.folderPath ? ' active' : ''}`}
+                      onClick={() => handlePickFolderFromSidebar(folder)}
+                      title={folder.folderPath}
+                    >
+                      <FolderOpen size={15} className="folder-list-icon" />
+                      <span className="folder-list-name">{folder.name}</span>
+                      <span className="folder-list-count">{folder.tracks.length}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {listMode === 'playlists' && selectedUserPlaylistId && selectedUserPlaylist && (
               <div className="user-playlist-detail no-drag">
                 <div className="user-playlist-detail-head">
@@ -4960,7 +5165,7 @@ export default function App() {
               </div>
             )}
 
-            {(listMode === 'songs' || (listMode === 'playlists' && selectedUserPlaylistId)) && (
+            {(listMode === 'songs' || (listMode === 'folders' && selectedFolder !== 'all') || (listMode === 'playlists' && selectedUserPlaylistId)) && (
               <>
                 {tracksForSidebarListFiltered.length === 0 && (
                   <div className="app-empty-state app-empty-state--minimal sidebar-empty-hint">
@@ -5017,7 +5222,7 @@ export default function App() {
                           · {track.info.album}
                         </div>
                       </div>
-                      {(listMode === 'songs' ||
+                      {(listMode === 'songs' || listMode === 'folders' ||
                         (listMode === 'playlists' && selectedUserPlaylistId)) && (
                         <div className="track-add-pl-wrap">
                           <button
@@ -5036,7 +5241,7 @@ export default function App() {
                               strokeWidth={liked ? 1.5 : 1.5}
                             />
                           </button>
-                          {listMode === 'songs' && (
+                          {(listMode === 'songs' || listMode === 'folders') && (
                             <button
                               type="button"
                               className={`track-add-pl-btn ${addToPlaylistMenu?.originalIdx === track.originalIdx ? 'active' : ''}`}

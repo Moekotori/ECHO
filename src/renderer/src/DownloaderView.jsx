@@ -37,6 +37,10 @@ export default function DownloaderView({
   const [isNeteaseSigningIn, setIsNeteaseSigningIn] = useState(false)
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
+  const [use1music, setUse1music] = useState(() => {
+    try { return localStorage.getItem('echoes.use1music') === '1' } catch { return false }
+  })
+  const [downloadingSongId, setDownloadingSongId] = useState(null)
   const downloaderPrefsHydratedRef = useRef(false)
 
   useEffect(() => {
@@ -78,6 +82,10 @@ export default function DownloaderView({
       audioQualityPreset: audioQualityPreset || 'auto'
     })
   }, [neteaseCookieSaved, audioQualityPreset])
+
+  useEffect(() => {
+    try { localStorage.setItem('echoes.use1music', use1music ? '1' : '0') } catch (_) {}
+  }, [use1music])
 
   const applyNeteaseCookie = useCallback((cookie) => {
     const next = String(cookie || '').trim()
@@ -338,6 +346,86 @@ export default function DownloaderView({
     }
   }
 
+  /**
+   * 搜索结果点击后直接下载：
+   * - use1music ON  → 通过 NCM API song_url 获取直接链接并下载（1music 模式）
+   * - use1music OFF → 走 yt-dlp 流程（网易云模式，原有行为）
+   */
+  const handleSearchResultDownload = async (song) => {
+    if (!config.downloadFolder) {
+      setErrorMsg(t('downloader.noDirHint'))
+      setStatus('error')
+      return
+    }
+    setDownloadingSongId(song.id)
+    setIsDownloading(true)
+    setProgress(0)
+    setErrorMsg('')
+    setStatus('downloading')
+
+    const sanitize = (s) => String(s || '').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim()
+    const safeName = sanitize(song.artists ? `${song.artists} - ${song.name}` : song.name) || `nm_${song.id}`
+
+    try {
+      let filePath
+      if (use1music) {
+        // ── 1music 模式：NCM API 直接下载 ──
+        const qualityMap = { lossless: 'lossless', high: 'exhigh', medium: 'higher', low: 'standard', auto: 'exhigh' }
+        const level = qualityMap[audioQualityPreset] || 'exhigh'
+        const urlInfo = await window.api.getNeteaseSongUrl(song.id, level)
+        if (!urlInfo?.url) throw new Error(t('downloader.directUrlFailed'))
+
+        const ext = urlInfo.type || 'mp3'
+        const filename = `${safeName}.${ext}`
+        filePath = await window.api.media.downloadFromUrl({
+          url: urlInfo.url,
+          targetFolder: config.downloadFolder,
+          filename
+        })
+      } else {
+        // ── 网易云模式：yt-dlp ──
+        const neteaseUrl = `https://music.163.com/song?id=${song.id}`
+        const filesBefore = await window.api.readDirectoryHandler(config.downloadFolder).catch(() => [])
+        await window.api.media.downloadAudio(neteaseUrl, config.downloadFolder, {
+          audioQualityPreset,
+          neteaseCookie: neteaseCookieSaved
+        })
+        const filesAfter = await window.api.readDirectoryHandler(config.downloadFolder).catch(() => [])
+        const newFiles = filesAfter.filter((fa) => !filesBefore.find((fb) => fb.path === fa.path))
+        filePath = newFiles.length > 0 ? newFiles[0].path : null
+      }
+
+      // 自动获取歌词
+      let hasLyrics = false
+      if (filePath) {
+        try {
+          const lrcText = await window.api.media.fetchNeteaseLrcText({ songId: song.id }).catch(() => null)
+          if (lrcText) {
+            const lrcPath = filePath.replace(/\.[^/.]+$/, '.lrc')
+            await window.api.media.writeFile(lrcPath, lrcText).catch(() => null)
+            hasLyrics = true
+          }
+        } catch (_) {}
+      }
+
+      setStatus('success')
+      if (filePath && onSuccess) {
+        onSuccess({
+          path: filePath,
+          mvOriginUrl: `https://music.163.com/song?id=${song.id}`,
+          hasLyrics
+        })
+      }
+    } catch (err) {
+      console.error('[DownloaderView] search result download error:', err)
+      setErrorMsg(err.message || t('downloader.downloadFailed'))
+      setStatus('error')
+    } finally {
+      setIsDownloading(false)
+      setDownloadingSongId(null)
+    }
+  }
+
   return (
     <div className="md-root">
       <section className="md-section">
@@ -414,6 +502,27 @@ export default function DownloaderView({
             ))}
           </div>
         </div>
+        <div className="md-1music-toggle-row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={use1music}
+            className={`lyrics-drawer-switch ${use1music ? 'on' : ''}`}
+            onClick={() => setUse1music((v) => !v)}
+            disabled={isDownloading}
+            style={{ flexShrink: 0 }}
+          >
+            <span className="lyrics-drawer-switch-thumb" />
+          </button>
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)', userSelect: 'none' }}>
+            {t('downloader.use1musicLabel')}
+          </span>
+          {use1music && (
+            <span style={{ fontSize: 11, color: 'var(--accent-color)', fontWeight: 600, marginLeft: 'auto' }}>
+              1music
+            </span>
+          )}
+        </div>
         {neteaseCookieSaved ? (
           <div className="md-logout-row">
             <button
@@ -441,6 +550,7 @@ export default function DownloaderView({
             placeholder={t('downloader.placeholderUrl')}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && url.trim()) handleFetchMetadata() }}
           />
           <button
             type="button"
@@ -455,8 +565,8 @@ export default function DownloaderView({
 
       {status === 'searching' && (
         <section className="md-section">
-          <div className="flex items-center justify-center p-4 text-[var(--text-secondary)]">
-            <Loader2 size={24} className="spin mr-2" />
+          <div className="md-search-status">
+            <Loader2 size={22} className="spin" />
             <span>搜索中...</span>
           </div>
         </section>
@@ -464,7 +574,7 @@ export default function DownloaderView({
 
       {status === 'search_ok' && searchResults.length === 0 && (
         <section className="md-section">
-          <div className="p-4 text-center text-[var(--text-secondary)] text-sm">
+          <div className="md-search-status">
             {t('downloader.neteaseSearchNoResults', '未找到相关歌曲')}
           </div>
         </section>
@@ -472,40 +582,53 @@ export default function DownloaderView({
 
       {status === 'search_ok' && searchResults.length > 0 && (
         <section className="md-section">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">{t('downloader.neteaseSearchResults', '搜索结果 (网易云)')}</h3>
-          <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-1">
-            {searchResults.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center p-2.5 rounded-xl bg-[var(--surface-color)] hover:bg-[var(--surface-hover-color)] transition-all cursor-pointer border border-transparent hover:border-[var(--accent-color)] hover:shadow-md group gap-3"
-                onClick={() => {
-                  setUrl(`https://music.163.com/song?id=${s.id}`)
-                  setSearchResults([])
-                  setStatus('idle')
-                  setTimeout(() => {
-                    handleFetchMetadata()
-                  }, 100)
-                }}
-              >
-                {s.cover ? (
-                  <img src={`${s.cover}?param=80y80`} alt="" loading="lazy" className="w-11 h-11 rounded-lg object-cover shadow-sm shrink-0 bg-black/10" />
-                ) : (
-                  <div className="w-11 h-11 rounded-lg flex justify-center items-center shrink-0 bg-black/5 dark:bg-white/5 text-[var(--text-secondary)]">
-                    <Music size={20} />
+          <h3 className="md-search-heading">
+            {t('downloader.neteaseSearchResults', '搜索结果')}
+            {use1music && <span className="md-search-via">via 1music</span>}
+          </h3>
+          <div className="md-search-list">
+            {searchResults.map((s) => {
+              const isBusy = downloadingSongId === s.id
+              return (
+                <div
+                  key={s.id}
+                  className={`md-search-item${(isDownloading && !isBusy) ? ' md-search-item--disabled' : ''}`}
+                  onClick={() => {
+                    if (isDownloading) return
+                    handleSearchResultDownload(s)
+                  }}
+                >
+                  {s.cover ? (
+                    <img src={`${s.cover}?param=80y80`} alt="" loading="lazy" className="md-search-cover" />
+                  ) : (
+                    <div className="md-search-cover-placeholder">
+                      <Music size={20} />
+                    </div>
+                  )}
+                  <div className="md-search-info">
+                    <span className="md-search-name">{s.name}</span>
+                    <span className="md-search-sub">
+                      {s.artists} · {s.album} {(s.alia||[]).length ? `(${s.alia.join(' / ')})` : ''}
+                    </span>
+                    {isBusy && (
+                      <div className="md-search-progress">
+                        <div className="md-search-progress-fill" style={{ width: `${progress}%` }} />
+                      </div>
+                    )}
                   </div>
-                )}
-                <div className="flex flex-col flex-1 min-w-0 pr-2">
-                  <span className="text-[13px] font-bold text-[var(--text-primary)] truncate">{s.name}</span>
-                  <span className="text-[11px] text-[var(--text-secondary)] truncate mt-0.5">
-                    {s.artists} • {s.album} {(s.alia||[]).length ? `(${s.alia.join(' / ')})` : ''}
-                  </span>
+                  <div className={`md-search-dl-btn${isBusy ? ' md-search-dl-btn--busy' : ''}`}>
+                    {isBusy ? (
+                      <Loader2 size={14} className="spin" />
+                    ) : (
+                      <>
+                        <Download size={14} />
+                        {t('downloader.downloadBtn', '下载')}
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="text-[12px] font-bold text-white bg-[var(--accent-color)] hover:bg-[var(--accent-hover-color)] px-3 py-1.5 rounded-full shrink-0 flex items-center transition-all opacity-0 group-hover:opacity-100 shadow-sm mr-1 shadow-[var(--accent-color)]/30">
-                  <Download size={14} className="mr-1 stroke-[2.5]" />
-                  下载
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </section>
       )}

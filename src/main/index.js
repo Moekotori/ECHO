@@ -35,7 +35,8 @@ import { importPlaylistFromLink } from './playlistLinkImport.js'
 import { convertLinesToRomaji } from './romajiKuroshiro.js'
 import {
   fetchNeteaseLrcText,
-  searchNeteaseSongs
+  searchNeteaseSongs,
+  getNeteaseSongDirectUrl
 } from './neteaseLyrics.js'
 import { getMediaDurationSeconds } from './utils/ffmpegProbeDuration.js'
 import { getDialogStrings } from './dialogLocale.js'
@@ -195,7 +196,12 @@ function collectAudioFilesRecursive(entryPath, out) {
     } else {
       const ext = extname(entryPath).toLowerCase()
       if (SUPPORTED_AUDIO_EXTS.has(ext)) {
-        out.push({ name: basename(entryPath), path: entryPath })
+        out.push({
+          name: basename(entryPath),
+          path: entryPath,
+          folder: dirname(entryPath),
+          birthtimeMs: stats.birthtimeMs || stats.ctimeMs || 0
+        })
       }
     }
   } catch (e) {
@@ -942,6 +948,20 @@ app.whenReady().then(async () => {
     return result
   })
 
+  // IPC: Batch get file stats (birthtimeMs) for existing tracks that lack it
+  ipcMain.handle('file:batchStats', async (_, paths) => {
+    const out = {}
+    for (const p of paths) {
+      try {
+        const s = fs.statSync(p)
+        out[p] = { birthtimeMs: s.birthtimeMs || s.ctimeMs || 0 }
+      } catch {
+        out[p] = { birthtimeMs: 0 }
+      }
+    }
+    return out
+  })
+
   // IPC: Read file as buffer (for jsmediatags or general binary reading)
   ipcMain.handle('file:readBuffer', async (_, filePath) => {
     try {
@@ -1032,6 +1052,16 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('media:download', async (event, url, folder, options = {}) => {
     return await MediaDownloader.downloadAudio(url, folder, event.sender, options)
+  })
+
+  ipcMain.handle('netease:getSongUrl', async (_, songId, level) => {
+    return await getNeteaseSongDirectUrl(songId, level)
+  })
+
+  ipcMain.handle('media:downloadFromUrl', async (event, opts) => {
+    const { url, targetFolder, filename } = opts || {}
+    if (!url || !targetFolder || !filename) throw new Error('Missing required parameters')
+    return await MediaDownloader.downloadFromUrl(url, targetFolder, filename, event.sender)
   })
 
   ipcMain.handle('playlistLink:importPlaylist', async (event, payload) => {

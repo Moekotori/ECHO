@@ -72,11 +72,23 @@
     "songs": "曲",
     "albums": "アルバム",
     "playlists": "プレイリスト",
+    "folders": "フォルダ",
     "queue": "キュー"
   },
   "albumFilter": {
     "label": "アルバム: {{name}}",
     "clear": "解除"
+  },
+  "folderFilter": {
+    "label": "フォルダ: {{name}}",
+    "clear": "解除"
+  },
+  "folders": {
+    "heading": "フォルダ",
+    "tracks": "曲",
+    "sortName": "名前",
+    "sortDateAsc": "古い順",
+    "sortDateDesc": "新しい順"
   },
   "empty": {
     "noTracks": "曲がありません。",
@@ -421,7 +433,11 @@
     "qualityLossless": "ロスレス（FLAC 優先）",
     "qualityHigh": "音質: 高（320k 優先）",
     "qualityMedium": "音質: 中（192k 優先）",
-    "qualityLow": "音質: 低（帯域節約）"
+    "qualityLow": "音質: 低（帯域節約）",
+    "use1musicLabel": "1music からダウンロード（直リンク・高速・安定）",
+    "directUrlFailed": "直リンク取得に失敗しました。ログインまたはトラック利用不可の可能性",
+    "downloadBtn": "ダウンロード",
+    "searchDownloading": "ダウンロード中…"
   },
   "drawer": {
     "lyricsTitle": "歌詞",
