@@ -1,0 +1,90 @@
+/* styles.css — 二次元可爱风格 */
+:root{
+  --bg-filter: rgba(255,255,255,0.06);
+  --accent:#ff7ab6;
+  --accent-2:#7c6bff;
+  --muted: rgba(0,0,0,0.55);
+  --glass: rgba(255,255,255,0.12);
+  --radius:18px;
+  --container:1100px;
+  font-family: 'Outfit', system-ui, -apple-system, 'PingFang SC','Microsoft YaHei', sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;color:#222;background:linear-gradient(180deg,#fff0f6 0%, #fff7fb 100%);overflow-x:hidden}
+
+.site-bg{position:fixed;inset:0;background:url('bg.jpg') center/cover no-repeat;filter:blur(6px) saturate(1.05);opacity:0.95;z-index:-1}
+.container{max-width:var(--container);margin:0 auto;padding:28px}
+.topbar{-webkit-backdrop-filter: blur(6px);backdrop-filter: blur(6px);background: linear-gradient(90deg, rgba(255,255,255,0.6), rgba(255,255,255,0.55));border-bottom:1px solid rgba(255,255,255,0.6)}
+.topbar .container{display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;gap:12px;align-items:center}
+.brand .logo{width:56px;height:56px;border-radius:14px;box-shadow:0 6px 20px rgba(124,107,255,0.12)}
+.brand h1{margin:0;font-size:20px;letter-spacing:0.6px}
+.brand .tag{margin:0;font-size:12px;color:var(--muted)}
+
+.nav a{margin-left:14px;color:#333;text-decoration:none;font-weight:600}
+.nav .btn{padding:8px 12px;border-radius:10px}
+.btn.ghost{border:1px solid rgba(0,0,0,0.06);background:transparent}
+
+.hero{padding:56px 0}
+.hero-inner{display:flex;gap:28px;align-items:center}
+.hero-left{flex:1}
+.hero-right{width:460px}
+.hero h2{font-size:34px;margin:0;color:#2b2140}
+.lead{color:#4b3f52;margin:14px 0 18px;font-size:16px}
+
+.btn{display:inline-block;text-decoration:none;color:#fff;background:var(--accent);padding:10px 16px;border-radius:14px;font-weight:700;box-shadow:0 8px 30px rgba(255,122,182,0.12)}
+.btn.outline{background:transparent;color:var(--accent);border:2px solid rgba(255,122,182,0.12);box-shadow:none}
+.btn.primary{background:linear-gradient(90deg,var(--accent), var(--accent-2))}
+.cta-row{display:flex;gap:12px;margin-top:8px}
+.hero-features{display:flex;gap:12px;margin-top:18px;color:var(--muted);font-weight:600}
+
+.mockup{border-radius:22px;padding:8px;background:linear-gradient(180deg,#fff,rgba(255,255,255,0.85));box-shadow:0 12px 40px rgba(124,107,255,0.08)}
+.mockup img{display:block;width:100%;height:auto;border-radius:12px}
+
+.section{padding:46px 0}
+.section.soft{background:linear-gradient(180deg, rgba(124,107,255,0.02), transparent)}
+.section-title{font-size:22px;margin:6px 0 18px;color:#2b2140}
+
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px}
+.feature-card{background:rgba(255,255,255,0.7);border-radius:14px;padding:18px;box-shadow:0 8px 24px rgba(0,0,0,0.05)}
+.feature-card .icon{font-size:20px}
+.feature-card h4{margin:8px 0}
+.feature-card p{color:var(--muted);margin:0}
+
+.screens-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.screens-grid img{width:100%;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,0.06)}
+
+.faq details{background:rgba(255,255,255,0.7);border-radius:12px;padding:12px 16px;margin-bottom:10px}
+.faq summary{cursor:pointer;font-weight:700}
+.faq p{margin:8px 0;color:var(--muted)}
+
+.releases{display:flex;flex-direction:column;gap:10px}
+.release{background:linear-gradient(180deg,#fff,rgba(255,255,255,0.9));padding:12px;border-radius:10px;border:1px solid rgba(0,0,0,0.04)}
+.release h5{margin:0;font-size:14px}
+.release .meta{font-size:12px;color:var(--muted);margin-top:6px}
+.release p{margin:8px 0;color:#42364a}
+
+.site-footer{padding:18px 0;border-top:1px solid rgba(0,0,0,0.04);background:transparent}
+.foot-inner{display:flex;justify-content:space-between;align-items:center}
+.foot-links a{margin-left:12px;color:var(--muted);text-decoration:none}
+
+.changelog-more{margin-top:12px}
+
+/* small screens */
+@media (max-width:900px){
+  .hero-inner{flex-direction:column}
+  .hero-right{width:92%}
+  .screens-grid{grid-template-columns:repeat(1,1fr)}
+  .nav{display:none}
+}
+
+/* helper */
+.muted{color:var(--muted)}
+.code{font-family:monospace;background:#fff;padding:4px 6px;border-radius:6px}
+
+/* small UI niceties */
+.details-ghost{opacity:0.9}
+
+/* accessibility focus */
+a:focus, button:focus{outline:3px solid rgba(124,107,255,0.22);outline-offset:2px}

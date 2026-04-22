@@ -1,0 +1,113 @@
+/**
+ * Design tokens — load after index.css :root palette (see main.jsx).
+ * Theme/runtime sets --accent-*, --glass-*, --text-*, --border-radius-* from App.jsx.
+ *
+ * Typography / brand: one display webfont (Outfit) in index.css; “Inter” preset in
+ * themeColors maps to system-ui to avoid a second web download. Use tabular-nums for metrics.
+ */
+
+:root {
+  /* Spacing scale (4pt baseline) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Unified radius scale */
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  /* Control heights */
+  --control-h-sm: 32px;
+  --control-h-md: 40px;
+  --control-h-lg: 64px;
+
+  /* Single source for the old pink→blue motif (use instead of repeating linear-gradient) */
+  --gradient-accent: linear-gradient(
+    135deg,
+    var(--accent-pink),
+    var(--accent-blue)
+  );
+  --gradient-accent-soft: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent-pink) 28%, transparent),
+    color-mix(in srgb, var(--accent-blue) 28%, transparent)
+  );
+
+  /* Motion */
+  --motion-fast: 150ms;
+  --motion-normal: 220ms;
+  --motion-slow: 360ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Typography scale (pair with existing rem scaling in App) */
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+
+  /* Numeric / technical rows: tabular figures without loading a second webfont */
+  --font-numeric: var(--font-family-main);
+
+  /* Surfaces & chrome — light default; App.jsx sets --surface-elevated for dark themes */
+  --surface-elevated: rgba(255, 255, 255, 0.45);
+  --border-subtle: var(--glass-border);
+  --shadow-panel: 0 8px 28px 0 var(--shadow-color);
+
+  /* Overlay / translucent white scale — use instead of raw rgba(255,255,255,N) */
+  --overlay-subtle: rgba(255, 255, 255, 0.04);
+  --overlay-light: rgba(255, 255, 255, 0.08);
+  --overlay-medium: rgba(255, 255, 255, 0.14);
+  --overlay-strong: rgba(255, 255, 255, 0.22);
+  --overlay-solid: rgba(255, 255, 255, 0.42);
+
+  /* Focus — keyboard / a11y */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: color-mix(in srgb, var(--accent-pink) 70%, var(--text-main) 15%);
+}
+
+/* Keyboard focus: prefer over mouse-only outline */
+:where(
+    button,
+    [role="button"],
+    summary,
+    .btn,
+    .toggle-btn,
+    .ui-btn,
+    .import-btn,
+    .list-filter-chip,
+    input[type="range"]
+  ):focus {
+  outline: none;
+}
+
+:where(
+    button,
+    [role="button"],
+    summary,
+    .btn,
+    .toggle-btn,
+    .ui-btn,
+    .import-btn,
+    .list-filter-chip
+  ):focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+input[type="range"]:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 4px;
+}
+
+select:focus-visible,
+textarea:focus-visible,
+input:not([type="range"]):focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}

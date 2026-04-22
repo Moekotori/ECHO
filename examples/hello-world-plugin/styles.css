@@ -1,0 +1,37 @@
+.hello-plugin-panel {
+  padding: 12px 14px;
+  border-radius: var(--border-radius-sm, 8px);
+  background: rgba(255, 255, 255, 0.04);
+  margin-top: 8px;
+}
+
+.hello-plugin-panel h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.hello-plugin-panel p {
+  font-size: 13px;
+  opacity: 0.7;
+  margin: 0 0 10px;
+}
+
+.hello-plugin-btn {
+  padding: 6px 14px;
+  border-radius: var(--border-radius-sm, 8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+
+.hello-plugin-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.hello-plugin-settings {
+  padding: 12px 0;
+}

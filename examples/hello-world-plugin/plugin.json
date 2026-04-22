@@ -1,0 +1,23 @@
+{
+  "id": "hello-world",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "description": "A minimal example plugin demonstrating the ECHO plugin API",
+  "author": "ECHO Team",
+  "license": "MIT",
+  "echoVersion": ">=1.0.0",
+  "renderer": "renderer.js",
+  "styles": "styles.css",
+  "permissions": ["storage"],
+  "contributes": {
+    "uiSlots": ["sidebar", "settingsPanel"],
+    "settings": [
+      {
+        "id": "greeting",
+        "type": "string",
+        "default": "Hello from plugin!",
+        "label": "Greeting message"
+      }
+    ]
+  }
+}

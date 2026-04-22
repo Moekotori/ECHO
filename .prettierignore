@@ -1,0 +1,9 @@
+﻿node_modules
+out
+dist
+release
+coverage
+.vite
+*.min.js
+package-lock.json
+pnpm-lock.yaml

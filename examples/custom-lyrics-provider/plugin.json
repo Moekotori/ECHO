@@ -1,0 +1,22 @@
+{
+  "id": "custom-lyrics",
+  "name": "Custom Lyrics Provider",
+  "version": "1.0.0",
+  "description": "Example plugin: registers a custom lyrics provider via the plugin API",
+  "author": "ECHO Team",
+  "license": "MIT",
+  "echoVersion": ">=1.0.0",
+  "main": "main.js",
+  "permissions": ["network"],
+  "contributes": {
+    "lyricsProvider": true,
+    "settings": [
+      {
+        "id": "apiEndpoint",
+        "type": "string",
+        "default": "https://api.example.com/lyrics",
+        "label": "Lyrics API endpoint"
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "osu-beatmap-search",
+  "name": "osu! Beatmap Search",
+  "version": "1.0.0",
+  "description": "Adds an osu! search button beside the lyrics button and opens the official osu! beatmap search for the current track.",
+  "author": "Codex for ECHO",
+  "license": "MIT",
+  "echoVersion": ">=1.0.0",
+  "renderer": "renderer.js",
+  "styles": "styles.css",
+  "permissions": [],
+  "contributes": {
+    "uiSlots": ["playerTransportExtras"]
+  }
+}
