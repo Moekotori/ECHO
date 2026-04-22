@@ -17,14 +17,16 @@ function resolveHostBinary() {
     join(process.resourcesPath || '', exe),
     join(app.getAppPath(), '..', exe),
     join(app.getAppPath(), '..', '..', 'electron-app', 'build', exe),
-    join(app.getAppPath(), 'electron-app', 'build', exe),
+    join(app.getAppPath(), 'electron-app', 'build', exe)
   ]
 
   // Also check relative to the working directory (dev mode)
   try {
     const cwd = process.cwd()
     candidates.push(join(cwd, 'electron-app', 'build', exe))
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   for (const p of candidates) {
     if (existsSync(p)) return p
@@ -73,8 +75,12 @@ class BridgeWritable extends Writable {
     super()
     this._target = childStdin
     this._closed = false
-    childStdin.on('error', () => { this._closed = true })
-    childStdin.on('close', () => { this._closed = true })
+    childStdin.on('error', () => {
+      this._closed = true
+    })
+    childStdin.on('close', () => {
+      this._closed = true
+    })
   }
   _write(chunk, encoding, callback) {
     if (this._closed || !this._target.writable) return callback()
@@ -125,7 +131,16 @@ export class NativeAudioBridge {
    * Spawn the child process.
    * Resolves once the first `{"ready":true}` JSON line arrives.
    */
-  start({ sampleRate = 44100, channels = 2, deviceIndex = -1, deviceName, exclusive = false, volume: _vol = 1.0, startTime = 0, playbackRate = 1.0 }) {
+  start({
+    sampleRate = 44100,
+    channels = 2,
+    deviceIndex = -1,
+    deviceName,
+    exclusive = false,
+    volume: _vol = 1.0,
+    startTime = 0,
+    playbackRate = 1.0
+  }) {
     return new Promise((resolve, reject) => {
       const bin = resolveHostBinary()
       if (!bin) return reject(new Error('echo-audio-host binary not found'))
@@ -181,7 +196,9 @@ export class NativeAudioBridge {
             this._ended = true
             if (this._onEnded) this._onEnded()
           }
-        } catch { /* non-JSON line, ignore */ }
+        } catch {
+          /* non-JSON line, ignore */
+        }
       })
 
       // Capture stderr for logging
@@ -197,7 +214,6 @@ export class NativeAudioBridge {
       })
 
       this._proc.on('exit', (code, signal) => {
-        logLine(`[NativeAudioBridge] exited code=${code} signal=${signal}`)
         this._ready = false
         if (code === -2) {
           // Exclusive mode denied
@@ -206,6 +222,9 @@ export class NativeAudioBridge {
         }
         const intentional = this._stopRequested
         this._stopRequested = false
+        if (!intentional) {
+          logLine(`[NativeAudioBridge] exited code=${code} signal=${signal}`)
+        }
         if (intentional || this._ended) return
         if (code === 0) return
         // code=null means signal exit (e.g. SIGKILL); only report if not our stop()
@@ -234,12 +253,22 @@ export class NativeAudioBridge {
     return this._startTime + (this._framesConsumed / this._sampleRate) * this._playbackRate
   }
 
-  get isReady() { return this._ready }
-  get isEnded() { return this._ended }
-  get deviceInfo() { return this._deviceInfo }
+  get isReady() {
+    return this._ready
+  }
+  get isEnded() {
+    return this._ended
+  }
+  get deviceInfo() {
+    return this._deviceInfo
+  }
 
-  onEnded(fn) { this._onEnded = fn }
-  onError(fn) { this._onError = fn }
+  onEnded(fn) {
+    this._onEnded = fn
+  }
+  onError(fn) {
+    this._onError = fn
+  }
 
   /**
    * Stop the child process and clean up.
@@ -251,12 +280,24 @@ export class NativeAudioBridge {
     }
     this._stopRequested = true
     if (this._writable) {
-      try { this._writable.destroy() } catch { /* ignore */ }
+      try {
+        this._writable.destroy()
+      } catch {
+        /* ignore */
+      }
       this._writable = null
     }
     if (this._proc) {
-      try { this._proc.stdin.destroy() } catch { /* ignore */ }
-      try { this._proc.kill('SIGKILL') } catch { /* ignore */ }
+      try {
+        this._proc.stdin.destroy()
+      } catch {
+        /* ignore */
+      }
+      try {
+        this._proc.kill('SIGKILL')
+      } catch {
+        /* ignore */
+      }
       this._proc = null
     }
     this._ready = false

@@ -57,9 +57,7 @@ export function parseLRC(lrcString) {
       const minutes = parseInt(match[1], 10)
       const seconds = parseInt(match[2], 10)
       const ms = parseInt(match[4], 10)
-      const timeMs =
-        (minutes * 60 + seconds) * 1000 +
-        (match[4].length === 3 ? ms : ms * 10)
+      const timeMs = (minutes * 60 + seconds) * 1000 + (match[4].length === 3 ? ms : ms * 10)
       raw.push({ timeMs, text })
     }
   }

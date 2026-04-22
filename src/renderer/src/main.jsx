@@ -10,7 +10,8 @@ import './styles/tokens.css'
 const LyricsDesktop = lazy(() => import('./LyricsDesktop'))
 
 const desktopMode =
-  typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mode') === 'lyrics-desktop'
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('mode') === 'lyrics-desktop'
 
 const lyricsDesktopFallback = (
   <div

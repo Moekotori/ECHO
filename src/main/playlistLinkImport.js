@@ -20,6 +20,33 @@ function ytDlpExtraFromEnv() {
     : []
 }
 
+function sanitizeFolderName(name) {
+  const cleaned = String(name || '')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '')
+  return cleaned || 'Imported playlist'
+}
+
+function ensurePlaylistFolder(baseDir, folderName) {
+  const resolved = join(baseDir, sanitizeFolderName(folderName))
+  fs.mkdirSync(resolved, { recursive: true })
+  return resolved
+}
+
+function deriveFolderNameFromInput(input) {
+  const raw = String(input || '').trim()
+  if (!raw) return 'Imported playlist'
+  try {
+    const parsed = new URL(raw)
+    const lastPath = parsed.pathname.split('/').filter(Boolean).pop()
+    return sanitizeFolderName(lastPath || parsed.hostname || 'Imported playlist')
+  } catch {
+    return sanitizeFolderName(raw)
+  }
+}
+
 /**
  * 是否为网易云歌单链接（走专用 API + 逐首下载）
  */
@@ -81,9 +108,27 @@ function extractEntries(json) {
   return []
 }
 
+function isPlaylistLike(json) {
+  return !!(
+    json &&
+    typeof json === 'object' &&
+    (json._type === 'playlist' || (Array.isArray(json.entries) && json.entries.length > 0))
+  )
+}
+
 function entryPlaybackUrl(entry) {
   if (!entry || typeof entry !== 'object') return null
-  return entry.url || entry.webpage_url || null
+  if (typeof entry.webpage_url === 'string' && entry.webpage_url.trim()) return entry.webpage_url
+  if (typeof entry.original_url === 'string' && entry.original_url.trim()) return entry.original_url
+  if (typeof entry.url === 'string' && /^https?:\/\//i.test(entry.url.trim())) return entry.url
+  return null
+}
+
+function buildTrackFilename(entry, fallbackTitle, fallbackIndex) {
+  const title = String(fallbackTitle || entry?.title || entry?.track || '').trim()
+  const artist = String(entry?.artist || entry?.uploader || entry?.channel || '').trim()
+  if (artist && title) return `${artist} - ${title}`
+  return title || `track_${fallbackIndex}`
 }
 
 /**
@@ -91,6 +136,7 @@ function entryPlaybackUrl(entry) {
  */
 async function importByYtDlpEntryLoop(url, folder, eventSender, metaJson) {
   const entries = extractEntries(metaJson)
+  const playlistLike = isPlaylistLike(metaJson)
   const playlistName =
     metaJson.title || metaJson.playlist || metaJson.playlist_title || 'Imported playlist'
   const total = entries.length
@@ -111,7 +157,10 @@ async function importByYtDlpEntryLoop(url, folder, eventSender, metaJson) {
 
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i]
-    const trackUrl = entryPlaybackUrl(e)
+    const playlistItem =
+      Number.isFinite(e?.playlist_index) && e.playlist_index > 0 ? e.playlist_index : i + 1
+    const trackUrl = playlistLike ? url : entryPlaybackUrl(e) || url
+    const sourceUrl = entryPlaybackUrl(e) || trackUrl
     const trackName = e.title || e.track || `Track ${i + 1}`
 
     if (!trackUrl) {
@@ -130,15 +179,28 @@ async function importByYtDlpEntryLoop(url, folder, eventSender, metaJson) {
     })
 
     const basename = `lk_${i}_${e.id != null ? e.id : i}`
+    const perTrackArgs = playlistLike
+      ? [...extraArgs, '--yes-playlist', '--playlist-items', String(playlistItem)]
+      : extraArgs
     try {
-      const filePath = await MediaDownloader.downloadAudioWithBasename(
+      const downloadedPath = await MediaDownloader.downloadAudioWithBasename(
         trackUrl,
         folder,
         basename,
         eventSender,
-        { extraArgs }
+        { extraArgs: perTrackArgs }
       )
-      added.push({ path: filePath, trackTitle: trackName })
+      const filePath = MediaDownloader.renameDownloadedMedia(
+        downloadedPath,
+        buildTrackFilename(e, trackName, i + 1)
+      )
+      const item = { path: filePath, trackTitle: trackName, sourceUrl }
+      added.push(item)
+      eventSender.send('playlist-link:import-progress', {
+        phase: 'added',
+        playlistName,
+        ...item
+      })
     } catch (err) {
       failed.push({
         name: trackName,
@@ -214,10 +276,18 @@ async function importByYtDlpBulk(url, folder, eventSender, hintName) {
       for (const name of after) {
         if (before.has(name)) continue
         if (!isAudioFilename(name)) continue
-        next.push({
+        const item = {
           path: join(folder, name),
           trackTitle: name
-        })
+        }
+        next.push(item)
+        if (eventSender) {
+          eventSender.send('playlist-link:import-progress', {
+            phase: 'added',
+            playlistName: hintName || 'Imported playlist',
+            ...item
+          })
+        }
       }
       if (next.length > 0) {
         resolve(next)
@@ -241,7 +311,13 @@ async function importByYtDlpBulk(url, folder, eventSender, hintName) {
 /**
  * 从用户粘贴的链接导入歌单：网易云走专用逻辑，其余交给 yt-dlp（含 Spotify / SoundCloud / Tidal 等，取决于 yt-dlp 与网络环境）。
  */
-export async function importPlaylistFromLink(rawInput, downloadFolder, eventSender) {
+export async function importPlaylistFromLink(
+  rawInput,
+  downloadFolder,
+  eventSender,
+  preferredFolderName = null,
+  options = {}
+) {
   if (!downloadFolder || !fs.existsSync(downloadFolder)) {
     throw new Error('Invalid save folder; choose a valid directory in Settings.')
   }
@@ -252,7 +328,7 @@ export async function importPlaylistFromLink(rawInput, downloadFolder, eventSend
   }
 
   if (looksLikeNetEasePlaylistInput(trimmed) && parseNeteasePlaylistId(trimmed)) {
-    return importNeteasePlaylist(trimmed, downloadFolder, eventSender)
+    return importNeteasePlaylist(trimmed, downloadFolder, eventSender, preferredFolderName, options)
   }
 
   const normalized = trimmed.includes('://') ? trimmed : `https://${trimmed}`
@@ -261,19 +337,27 @@ export async function importPlaylistFromLink(rawInput, downloadFolder, eventSend
   try {
     metaJson = await runYtDlpDumpJson(normalized)
   } catch {
-    return importByYtDlpBulk(normalized, downloadFolder, eventSender, null)
+    const fallbackFolder = ensurePlaylistFolder(
+      downloadFolder,
+      preferredFolderName || deriveFolderNameFromInput(normalized)
+    )
+    return importByYtDlpBulk(normalized, fallbackFolder, eventSender, preferredFolderName || null)
   }
 
   const entries = extractEntries(metaJson)
   const playlistName = metaJson.title || metaJson.playlist || metaJson.playlist_title || null
+  const targetFolder = ensurePlaylistFolder(
+    downloadFolder,
+    preferredFolderName || playlistName || deriveFolderNameFromInput(normalized)
+  )
 
   if (entries.length === 0) {
-    return importByYtDlpBulk(normalized, downloadFolder, eventSender, playlistName)
+    return importByYtDlpBulk(normalized, targetFolder, eventSender, playlistName)
   }
 
   try {
-    return await importByYtDlpEntryLoop(normalized, downloadFolder, eventSender, metaJson)
+    return await importByYtDlpEntryLoop(normalized, targetFolder, eventSender, metaJson)
   } catch {
-    return importByYtDlpBulk(normalized, downloadFolder, eventSender, playlistName)
+    return importByYtDlpBulk(normalized, targetFolder, eventSender, playlistName)
   }
 }

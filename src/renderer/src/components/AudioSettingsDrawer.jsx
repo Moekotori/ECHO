@@ -77,12 +77,15 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
-  const handleDeviceChange = useCallback((id) => {
-    setConfig((prev) => ({
-      ...prev,
-      audioDeviceId: id ?? ''
-    }))
-  }, [setConfig])
+  const handleDeviceChange = useCallback(
+    (id) => {
+      setConfig((prev) => ({
+        ...prev,
+        audioDeviceId: id ?? ''
+      }))
+    },
+    [setConfig]
+  )
 
   const handleExclusiveSwitch = useCallback(() => {
     setConfig((prev) => ({
@@ -91,16 +94,23 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
     }))
   }, [setConfig])
 
-  const handleBufferProfileChange = useCallback((prof) => {
-    setConfig((prev) => ({
-      ...prev,
-      audioOutputBufferProfile: prof
-    }))
-  }, [setConfig])
+  const handleBufferProfileChange = useCallback(
+    (prof) => {
+      setConfig((prev) => ({
+        ...prev,
+        audioOutputBufferProfile: prof
+      }))
+    },
+    [setConfig]
+  )
 
   const bufferOptions = [
     { key: 'low', label: t('settings.bufferProfiles.low', 'Low Latency'), sub: '256 frames' },
-    { key: 'balanced', label: t('settings.bufferProfiles.balanced', 'Balanced'), sub: '512 frames' },
+    {
+      key: 'balanced',
+      label: t('settings.bufferProfiles.balanced', 'Balanced'),
+      sub: '512 frames'
+    },
     { key: 'stable', label: t('settings.bufferProfiles.stable', 'Stable'), sub: '1024 frames' }
   ]
 
@@ -323,10 +333,7 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
                 </span>
               </div>
               <div className="audio-drawer-chip-row">
-                <button
-                  type="button"
-                  className="list-filter-chip audio-drawer-chip-col active"
-                >
+                <button type="button" className="list-filter-chip audio-drawer-chip-col active">
                   <span className="audio-drawer-chip-label">
                     {t('settings.dsdPcm', 'PCM Conversion')}
                   </span>
@@ -363,7 +370,7 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
                 {loc === 'zh' ? 'VST 音效接管 (测试版)' : 'VST Plugins (Beta)'}
               </span>
             </div>
-            
+
             <div className="audio-drawer-chip-row" style={{ marginTop: '0.75rem' }}>
               <button
                 type="button"
@@ -375,8 +382,12 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
                   }
                 }}
               >
-                <span className="audio-drawer-chip-label">{loc === 'zh' ? '加载插件' : 'Load .dll'}</span>
-                <span className="audio-drawer-chip-sub">{loc === 'zh' ? '选择本地 VST2 插件' : 'Select Plugin'}</span>
+                <span className="audio-drawer-chip-label">
+                  {loc === 'zh' ? '加载插件' : 'Load .dll'}
+                </span>
+                <span className="audio-drawer-chip-sub">
+                  {loc === 'zh' ? '选择本地 VST2 插件' : 'Select Plugin'}
+                </span>
               </button>
 
               <button
@@ -384,8 +395,12 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
                 className="list-filter-chip audio-drawer-chip-col"
                 onClick={() => window.api.showVstPluginUI()}
               >
-                 <span className="audio-drawer-chip-label">{loc === 'zh' ? '显示界面' : 'Show UI'}</span>
-                 <span className="audio-drawer-chip-sub">{loc === 'zh' ? '打开高级面板' : 'Open GUI'}</span>
+                <span className="audio-drawer-chip-label">
+                  {loc === 'zh' ? '显示界面' : 'Show UI'}
+                </span>
+                <span className="audio-drawer-chip-sub">
+                  {loc === 'zh' ? '打开高级面板' : 'Open GUI'}
+                </span>
               </button>
 
               <button
@@ -393,20 +408,22 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
                 className="list-filter-chip audio-drawer-chip-col"
                 onClick={() => window.api.disableVstPlugin()}
               >
-                 <span className="audio-drawer-chip-label">{loc === 'zh' ? '关闭特效' : 'Disable'}</span>
-                 <span className="audio-drawer-chip-sub">{loc === 'zh' ? '恢复默认音质' : 'Restore Default'}</span>
+                <span className="audio-drawer-chip-label">
+                  {loc === 'zh' ? '关闭特效' : 'Disable'}
+                </span>
+                <span className="audio-drawer-chip-sub">
+                  {loc === 'zh' ? '恢复默认音质' : 'Restore Default'}
+                </span>
               </button>
             </div>
             <p className="audio-drawer-footnote" style={{ marginTop: '0.75rem', opacity: 0.8 }}>
-              {loc === 'zh' 
-                ? '加载第三方 VST2 插件 (64位 .dll) 将通过原生引擎接管输出，提供专业级听觉体验。若无声音或报错可点击“关闭特效”一键重置。' 
+              {loc === 'zh'
+                ? '加载第三方 VST2 插件 (64位 .dll) 将通过原生引擎接管输出，提供专业级听觉体验。若无声音或报错可点击“关闭特效”一键重置。'
                 : 'Loading a 64-bit VST2 (.dll) plugin will take over the audio output for enhanced playback. Click "Disable" to reset.'}
             </p>
           </div>
 
-          <p className="audio-drawer-footnote">
-            {t('settings.audioDrawerEqBlurb')}
-          </p>
+          <p className="audio-drawer-footnote">{t('settings.audioDrawerEqBlurb')}</p>
         </div>
       </div>
     </>

@@ -1,43 +1,59 @@
-// script.js — fetch GitHub releases and render changelog
-// Note: GitHub API supports CORS for public repos; if you encounter CORS errors, consider using a simple proxy.
+// Fetch GitHub releases and render a small changelog feed.
 
-const owner = 'your-github-username'; // TODO: replace
-const repo = 'ECHO'; // TODO: replace with actual repo name if different
-const releasesEl = document.getElementById('releases');
+const owner = 'Moekotori'
+const repo = 'Echoes'
+const releasesEl = document.getElementById('releases')
 
-async function fetchReleases(){
-  try{
-    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases`);
-    if(!res.ok) throw new Error('GitHub API error '+res.status);
-    const data = await res.json();
-    renderReleases(data);
-  }catch(err){
-    console.error(err);
-    releasesEl.innerHTML = `<div class="release"><h5>无法获取更新日志</h5><p class="muted">${err.message}</p></div>`;
+function renderMessage(title, detail = '') {
+  if (!releasesEl) return
+  releasesEl.innerHTML = `<div class="release"><h5>${title}</h5>${
+    detail ? `<p class="muted">${detail}</p>` : ''
+  }</div>`
+}
+
+async function fetchReleases() {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases`)
+    if (!res.ok) throw new Error(`GitHub API error ${res.status}`)
+    const data = await res.json()
+    renderReleases(data)
+  } catch (err) {
+    console.error('[website releases]', err)
+    renderMessage('Unable to load release notes', err.message || String(err))
   }
 }
 
-function renderReleases(list){
-  if(!list || list.length===0){
-    releasesEl.innerHTML = `<div class="release"><h5>暂无版本发布</h5></div>`;return;
+function renderReleases(list) {
+  if (!releasesEl) return
+  if (!Array.isArray(list) || list.length === 0) {
+    renderMessage('No releases published yet')
+    return
   }
-  releasesEl.innerHTML = '';
-  list.slice(0,6).forEach(r=>{
-    const div = document.createElement('div');
-    div.className = 'release';
-    div.innerHTML = `<h5>${r.name || r.tag_name}</h5>
-      <div class="meta">${new Date(r.published_at).toLocaleString()}</div>
-      <p>${(r.body || '').split('\n').slice(0,5).join('\n').replace(/\n/g,'<br>')}</p>
-      <div><a class="btn outline" href="${r.html_url}" target="_blank">查看完整发布</a>
-      ${r.assets && r.assets[0] ? `<a class="btn" style="margin-left:8px" href="${r.assets[0].browser_download_url}">下载 ${r.assets[0].name}</a>` : ''}
-      </div>`;
-    releasesEl.appendChild(div);
+
+  releasesEl.innerHTML = ''
+  list.slice(0, 6).forEach((release) => {
+    const div = document.createElement('div')
+    div.className = 'release'
+    div.innerHTML = `<h5>${release.name || release.tag_name}</h5>
+      <div class="meta">${new Date(release.published_at).toLocaleString()}</div>
+      <p>${(release.body || '')
+        .split('\n')
+        .slice(0, 5)
+        .join('\n')
+        .replace(/\n/g, '<br>')}</p>
+      <div>
+        <a class="btn outline" href="${release.html_url}" target="_blank" rel="noreferrer">View full release</a>
+        ${
+          release.assets && release.assets[0]
+            ? `<a class="btn" style="margin-left:8px" href="${release.assets[0].browser_download_url}">Download ${release.assets[0].name}</a>`
+            : ''
+        }
+      </div>`
+    releasesEl.appendChild(div)
   })
 }
 
-// Initialize
-fetchReleases();
+fetchReleases()
 
-// Footer year
-const yearEl = document.getElementById('year');
-if(yearEl) yearEl.textContent = new Date().getFullYear();
+const yearEl = document.getElementById('year')
+if (yearEl) yearEl.textContent = new Date().getFullYear()

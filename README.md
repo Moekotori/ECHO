@@ -175,6 +175,24 @@ npm run build:linux
 
 ---
 
+## Testing
+
+Run the lightweight unit regression suite:
+
+```bash
+npm run test:unit
+```
+
+Before a release build, run:
+
+```bash
+npm run verify:release
+```
+
+See [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) for the full release gate and smoke flow.
+
+---
+
 ## Listen Together Server
 
 The optional server enables synchronized co-listening sessions.

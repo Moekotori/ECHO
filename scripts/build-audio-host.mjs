@@ -52,7 +52,7 @@ console.log(`[build-audio-host] Compiling: ${cmd}`)
 try {
   execSync(cmd, { cwd: ROOT, stdio: 'inherit' })
   console.log(`[build-audio-host] Success: ${OUT}`)
-  
+
   console.log(`[build-audio-host] Compiling VST Worker: ${vstCmd}`)
   execSync(vstCmd, { cwd: ROOT, stdio: 'inherit' })
   console.log(`[build-audio-host] Success: ${VST_OUT}`)

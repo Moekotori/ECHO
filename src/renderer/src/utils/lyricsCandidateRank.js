@@ -220,7 +220,9 @@ export function rankLrcLibCandidates(payload, audioDuration, options = {}) {
   if (!payload) return []
 
   const candidates = Array.isArray(payload) ? payload : [payload]
-  const expectedTitles = [...new Set((options.titleCandidates || []).map(normalizeLyricCompareText))]
+  const expectedTitles = [
+    ...new Set((options.titleCandidates || []).map(normalizeLyricCompareText))
+  ]
     .filter(Boolean)
     .slice(0, 8)
 
@@ -238,7 +240,9 @@ export function rankLrcLibCandidates(payload, audioDuration, options = {}) {
     return out
   }
 
-  const expectedArtists = [...new Set(expandArtistCandidates(options.artistCandidates).map(normalizeLyricCompareText))]
+  const expectedArtists = [
+    ...new Set(expandArtistCandidates(options.artistCandidates).map(normalizeLyricCompareText))
+  ]
     .filter(Boolean)
     .slice(0, 12)
 

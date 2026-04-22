@@ -4,7 +4,10 @@ import pluginEventBus from './PluginEventBus'
  * Build the `echo` API object passed to a renderer-side plugin's `activate(echo)`.
  * Each plugin gets its own scoped instance.
  */
-export function buildRendererPluginAPI(pluginId, { slotRegistry, musicSourceRegistry, lyricsProviderRegistry }) {
+export function buildRendererPluginAPI(
+  pluginId,
+  { slotRegistry, musicSourceRegistry, lyricsProviderRegistry }
+) {
   const storage = createRendererStorage(pluginId)
 
   return {
@@ -95,7 +98,9 @@ function createRendererStorage(pluginId) {
         if (k.startsWith(prefix)) {
           try {
             result[k.slice(prefix.length)] = JSON.parse(localStorage.getItem(k))
-          } catch { /* skip */ }
+          } catch {
+            /* skip */
+          }
         }
       }
       return result

@@ -46,3 +46,33 @@ export function clearMvOverrideForPath(filePath) {
     /* ignore */
   }
 }
+
+export function remapMvOverrides(pathMap = {}, removedPaths = []) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return
+    const map = JSON.parse(raw)
+    let changed = false
+
+    for (const [fromPath, toPath] of Object.entries(pathMap || {})) {
+      if (!fromPath || !toPath || fromPath === toPath || !map[fromPath]) continue
+      if (!map[toPath]) {
+        map[toPath] = map[fromPath]
+      }
+      delete map[fromPath]
+      changed = true
+    }
+
+    for (const removedPath of removedPaths || []) {
+      if (!removedPath || !map[removedPath]) continue
+      delete map[removedPath]
+      changed = true
+    }
+
+    if (changed) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
+    }
+  } catch {
+    /* ignore */
+  }
+}

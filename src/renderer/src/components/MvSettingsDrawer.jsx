@@ -335,7 +335,25 @@ export default function MvSettingsDrawer({
               </button>
             </div>
 
-            {config.mvAsBackground && (
+            <div className="mv-drawer-row">
+              <div className="mv-drawer-row-info">
+                <span className="mv-drawer-label">{t('mvDrawer.mvAsBgMain')}</span>
+              </div>
+              <button
+                className={`toggle-btn ${config.mvAsBackgroundMain ? 'active' : ''}`}
+                onClick={() => {
+                  setConfig((prev) => ({
+                    ...prev,
+                    mvAsBackgroundMain: !prev.mvAsBackgroundMain
+                  }))
+                  if (config.mvAsBackgroundMain && !config.enableMV) setMvId(null)
+                }}
+              >
+                {config.mvAsBackgroundMain ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+              </button>
+            </div>
+
+            {(config.mvAsBackground || config.mvAsBackgroundMain) && (
               <div className="mv-drawer-row">
                 <div className="mv-drawer-row-info">
                   <span className="mv-drawer-label">{t('mvDrawer.bgOpacity')}</span>
@@ -367,12 +385,15 @@ export default function MvSettingsDrawer({
               </div>
             )}
 
-            {config.mvAsBackground && (
+            {(config.mvAsBackground || config.mvAsBackgroundMain) && (
               <div className="mv-drawer-row">
                 <div className="mv-drawer-row-info">
                   <span className="mv-drawer-label">{t('mvDrawer.bgBlur')}</span>
                   <span className="mv-drawer-value">
-                    {Math.round(config.mvBackgroundBlur !== undefined ? config.mvBackgroundBlur : 0)}px
+                    {Math.round(
+                      config.mvBackgroundBlur !== undefined ? config.mvBackgroundBlur : 0
+                    )}
+                    px
                   </span>
                 </div>
                 <input

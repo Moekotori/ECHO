@@ -33,7 +33,9 @@ export default class RendererErrorBoundary extends React.Component {
           }}
         >
           <h1 style={{ color: '#fff', fontSize: 18, marginTop: 0 }}>Interface failed to load</h1>
-          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginTop: 12 }}>{msg}</pre>
+          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginTop: 12 }}>
+            {msg}
+          </pre>
           <p style={{ color: '#94a3b8', marginTop: 16 }}>
             Open DevTools (if available) for the full stack trace, or restart the app.
           </p>

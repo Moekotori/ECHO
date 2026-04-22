@@ -33,12 +33,23 @@ export default function DownloaderView({
   const [linkImportStatus, setLinkImportStatus] = useState('')
   const [neteaseCookieInput, setNeteaseCookieInput] = useState('')
   const [neteaseCookieSaved, setNeteaseCookieSaved] = useState('')
+  const [neteaseAuth, setNeteaseAuth] = useState({
+    checking: true,
+    valid: false,
+    signedIn: false,
+    isVip: false,
+    error: ''
+  })
   const [audioQualityPreset, setAudioQualityPreset] = useState('auto')
   const [isNeteaseSigningIn, setIsNeteaseSigningIn] = useState(false)
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
   const [use1music, setUse1music] = useState(() => {
-    try { return localStorage.getItem('echoes.use1music') === '1' } catch { return false }
+    try {
+      return localStorage.getItem('echoes.use1music') === '1'
+    } catch {
+      return false
+    }
   })
   const [downloadingSongId, setDownloadingSongId] = useState(null)
   const downloaderPrefsHydratedRef = useRef(false)
@@ -84,27 +95,75 @@ export default function DownloaderView({
   }, [neteaseCookieSaved, audioQualityPreset])
 
   useEffect(() => {
-    try { localStorage.setItem('echoes.use1music', use1music ? '1' : '0') } catch (_) {}
+    try {
+      localStorage.setItem('echoes.use1music', use1music ? '1' : '0')
+    } catch (_) {}
   }, [use1music])
 
   const applyNeteaseCookie = useCallback((cookie) => {
     const next = String(cookie || '').trim()
     setNeteaseCookieSaved(next)
-    if (!next) return
     try {
-      localStorage.setItem('echoes.neteaseCookie', next)
+      if (next) localStorage.setItem('echoes.neteaseCookie', next)
+      else localStorage.removeItem('echoes.neteaseCookie')
     } catch (_) {}
   }, [])
 
-  const refreshNeteaseCookieFromSession = useCallback(async () => {
-    if (!window.api?.getNeteaseCookie) return
-    try {
-      const out = await window.api.getNeteaseCookie()
-      if (out?.ok && out?.cookie) {
-        applyNeteaseCookie(out.cookie)
+  const refreshNeteaseCookieFromSession = useCallback(
+    async (preferredCookie = '') => {
+      if (!window.api?.getNeteaseCookie) return
+      setNeteaseAuth((prev) => ({ ...prev, checking: true, error: '' }))
+      try {
+        const out = await window.api.getNeteaseCookie(preferredCookie || neteaseCookieSaved)
+        if (out?.ok && out?.valid && out?.cookie) {
+          applyNeteaseCookie(out.cookie)
+        } else if (out?.checked) {
+          applyNeteaseCookie('')
+        }
+        setNeteaseAuth({
+          checking: false,
+          valid: out?.valid === true,
+          signedIn: out?.signedIn === true,
+          isVip: out?.isVip === true,
+          error: out?.error || ''
+        })
+      } catch (_) {
+      } finally {
+        setNeteaseAuth((prev) => ({ ...prev, checking: false }))
       }
-    } catch (_) {}
-  }, [applyNeteaseCookie])
+    },
+    [applyNeteaseCookie, neteaseCookieSaved]
+  )
+
+  const ensureUsableNeteaseCookie = useCallback(async () => {
+    if (!window.api?.getNeteaseCookie) return ''
+    try {
+      const out = await window.api.getNeteaseCookie(neteaseCookieSaved)
+      setNeteaseAuth({
+        checking: false,
+        valid: out?.valid === true,
+        signedIn: out?.signedIn === true,
+        isVip: out?.isVip === true,
+        error: out?.error || ''
+      })
+      if (out?.ok && out?.valid && out?.cookie) {
+        if (out.cookie !== neteaseCookieSaved) applyNeteaseCookie(out.cookie)
+        return out.cookie
+      }
+      if (out?.checked) {
+        applyNeteaseCookie('')
+      }
+    } catch (error) {
+      setNeteaseAuth({
+        checking: false,
+        valid: false,
+        signedIn: false,
+        isVip: false,
+        error: error?.message || String(error)
+      })
+    }
+    return ''
+  }, [applyNeteaseCookie, neteaseCookieSaved])
 
   useEffect(() => {
     if (!window.api?.onSignInStatusChanged) return
@@ -116,6 +175,11 @@ export default function DownloaderView({
     }
   }, [refreshNeteaseCookieFromSession])
 
+  useEffect(() => {
+    if (!downloaderPrefsHydratedRef.current) return
+    void refreshNeteaseCookieFromSession(neteaseCookieSaved)
+  }, [neteaseCookieSaved, refreshNeteaseCookieFromSession])
+
   const handleLinkPlaylistImport = useCallback(async () => {
     if (!window.api?.playlistLink?.importPlaylist) return
     const playlistSaveDir = (config.playlistImportFolder || config.downloadFolder || '').trim()
@@ -125,11 +189,66 @@ export default function DownloaderView({
     }
     const raw = linkImportUrl.trim()
     if (!raw) return
+    const usableNeteaseCookie = await ensureUsableNeteaseCookie()
     setLinkImporting(true)
     setLinkImportStatus(t('downloader.connecting'))
     const tFn = i18n.getFixedT(i18n.language)
+    const streamedPathSet = new Set()
+    let createdPlaylistId = null
+    let createdPlaylistName = ''
+    const ensurePlaylistTarget = (playlistName) => {
+      if (!setUserPlaylists || !setSelectedUserPlaylistId) return null
+      if (linkImportTarget !== 'new') {
+        setSelectedUserPlaylistId(linkImportTarget)
+        return linkImportTarget
+      }
+      if (createdPlaylistId) {
+        if (playlistName && playlistName !== createdPlaylistName) {
+          createdPlaylistName = playlistName
+          setUserPlaylists((prev) =>
+            prev.map((pl) => (pl.id === createdPlaylistId ? { ...pl, name: playlistName } : pl))
+          )
+        }
+        return createdPlaylistId
+      }
+      createdPlaylistId = crypto.randomUUID()
+      createdPlaylistName = playlistName || 'Imported'
+      setUserPlaylists((prev) => [
+        ...prev,
+        { id: createdPlaylistId, name: createdPlaylistName, paths: [] }
+      ])
+      setSelectedUserPlaylistId(createdPlaylistId)
+      return createdPlaylistId
+    }
+    const appendImportedItems = (items) => {
+      const normalizedItems = (items || []).filter((item) => item?.path)
+      if (normalizedItems.length === 0) return
+      if (setPlaylist) {
+        setPlaylist((prev) => {
+          const seen = new Set(prev.map((x) => x.path))
+          const next = [...prev]
+          for (const track of normalizedItems) {
+            if (!seen.has(track.path)) {
+              seen.add(track.path)
+              next.push(track)
+            }
+          }
+          return next
+        })
+      }
+      const targetId = linkImportTarget === 'new' ? createdPlaylistId : linkImportTarget
+      if (targetId && setUserPlaylists) {
+        const paths = normalizedItems.map((x) => x.path)
+        setUserPlaylists((prev) =>
+          prev.map((p) =>
+            p.id === targetId ? { ...p, paths: [...new Set([...p.paths, ...paths])] } : p
+          )
+        )
+      }
+    }
     const unsub = window.api.playlistLink.onImportProgress((p) => {
       if (p.phase === 'meta') {
+        ensurePlaylistTarget(p.playlistName || 'Imported')
         setLinkImportStatus(
           tFn('downloader.linkMetaLine', {
             name: p.playlistName,
@@ -153,48 +272,41 @@ export default function DownloaderView({
             pct
           })
         )
+      } else if (p.phase === 'added' && p.path) {
+        streamedPathSet.add(p.path)
+        ensurePlaylistTarget(p.playlistName || createdPlaylistName || 'Imported')
+        appendImportedItems([
+          {
+            name: p.path.split(/[/\\]/).pop() || p.trackTitle || 'track',
+            path: p.path,
+            type: 'local',
+            ...(p.sourceUrl ? { sourceUrl: p.sourceUrl, mvOriginUrl: p.sourceUrl } : {})
+          }
+        ])
       }
     })
     try {
+      const preferredFolderName =
+        linkImportTarget === 'new'
+          ? null
+          : userPlaylists.find((pl) => pl.id === linkImportTarget)?.name || null
       const r = await window.api.playlistLink.importPlaylist({
         playlistInput: raw,
-        downloadFolder: playlistSaveDir
+        downloadFolder: playlistSaveDir,
+        preferredFolderName,
+        neteaseCookie: usableNeteaseCookie
       })
-      const newItems = (r.added || []).map(({ path, trackTitle }) => ({
-        name: path.split(/[/\\]/).pop() || trackTitle || 'track',
-        path,
-        type: 'local'
-      }))
-      if (newItems.length > 0 && setPlaylist) {
-        setPlaylist((prev) => {
-          const seen = new Set(prev.map((x) => x.path))
-          const next = [...prev]
-          for (const track of newItems) {
-            if (!seen.has(track.path)) {
-              seen.add(track.path)
-              next.push(track)
-            }
-          }
-          return next
-        })
-        const paths = newItems.map((x) => x.path)
-        if (setUserPlaylists && setSelectedUserPlaylistId) {
-          if (linkImportTarget === 'new') {
-            const id = crypto.randomUUID()
-            const plName = r.playlistName || 'Imported'
-            setUserPlaylists((prev) => [...prev, { id, name: plName, paths }])
-            setSelectedUserPlaylistId(id)
-          } else {
-            setUserPlaylists((prev) =>
-              prev.map((p) =>
-                p.id === linkImportTarget
-                  ? { ...p, paths: [...new Set([...p.paths, ...paths])] }
-                  : p
-              )
-            )
-            setSelectedUserPlaylistId(linkImportTarget)
-          }
-        }
+      const newItems = (r.added || [])
+        .filter(({ path }) => path && !streamedPathSet.has(path))
+        .map(({ path, trackTitle, sourceUrl }) => ({
+          name: path.split(/[/\\]/).pop() || trackTitle || 'track',
+          path,
+          type: 'local',
+          ...(sourceUrl ? { sourceUrl, mvOriginUrl: sourceUrl } : {})
+        }))
+      if (r.playlistName) ensurePlaylistTarget(r.playlistName)
+      if (newItems.length > 0) {
+        appendImportedItems(newItems)
       }
       const failN = (r.failed || []).length
       const okN = (r.added || []).length
@@ -228,7 +340,8 @@ export default function DownloaderView({
     setUserPlaylists,
     setSelectedUserPlaylistId,
     t,
-    i18n
+    i18n,
+    ensureUsableNeteaseCookie
   ])
 
   useEffect(() => {
@@ -274,7 +387,8 @@ export default function DownloaderView({
     setMetadata(null)
     setSearchResults([])
     try {
-      const res = await window.api.neteaseSearch(keywords)
+      const usableNeteaseCookie = await ensureUsableNeteaseCookie()
+      const res = await window.api.neteaseSearch(keywords, usableNeteaseCookie)
       setSearchResults(res || [])
       setStatus('search_ok')
     } catch (err) {
@@ -288,6 +402,7 @@ export default function DownloaderView({
 
   const handleDownload = async () => {
     if (!url || !config.downloadFolder) return
+    const usableNeteaseCookie = await ensureUsableNeteaseCookie()
     setIsDownloading(true)
     setStatus('downloading')
     setProgress(0)
@@ -298,7 +413,7 @@ export default function DownloaderView({
     try {
       await window.api.media.downloadAudio(url, config.downloadFolder, {
         audioQualityPreset,
-        neteaseCookie: neteaseCookieSaved
+        neteaseCookie: usableNeteaseCookie
       })
       setStatus('success')
 
@@ -308,32 +423,37 @@ export default function DownloaderView({
       const newFiles = filesAfter.filter((fa) => !filesBefore.find((fb) => fb.path === fa.path))
 
       if (newFiles.length > 0) {
-        const filePath = newFiles[0].path
+        const mId = url.match(/song\?id=(\d+)/) || url.match(/song\/(\d+)/i)
+        const neteaseIdMatches = !!mId && newFiles.length === 1
         let hasLyrics = false
 
-        // Fetch lyrics automatically if downloading a netease song id match
-        const mId = url.match(/song\?id=(\d+)/) || url.match(/song\/(\d+)/i)
-        const neteaseIdMatches = !!mId
+        // Only apply matched NetEase lyrics when we know this download maps to a single file.
         if (neteaseIdMatches) {
+          const filePath = newFiles[0].path
           try {
             console.log('[DownloaderView] Fetching matched lyrics for netease song id', mId[1])
-            const lrcText = await window.api.media.fetchNeteaseLrcText({ songId: mId[1] }).catch(() => null)
+            const lrcText = await window.api.media
+              .fetchNeteaseLrcText({ songId: mId[1], cookie: usableNeteaseCookie })
+              .catch(() => null)
             if (lrcText) {
               const lrcPath = filePath.replace(/\.[^/.]+$/, '.lrc')
               await window.api.media.writeFile(lrcPath, lrcText).catch(() => null)
               console.log('[DownloaderView] Saved LRC:', lrcPath)
               hasLyrics = true
             }
-          } catch(err) {
+          } catch (err) {
             console.error('[DownloaderView] failed to dl lyrics:', err)
           }
         }
 
         if (onSuccess) {
-          onSuccess({
-            path: filePath,
-            mvOriginUrl: url.trim(),
-            hasLyrics
+          newFiles.forEach((file, index) => {
+            onSuccess({
+              path: file.path,
+              sourceUrl: url.trim(),
+              mvOriginUrl: url.trim(),
+              hasLyrics: hasLyrics && index === 0
+            })
           })
         }
       }
@@ -363,16 +483,27 @@ export default function DownloaderView({
     setErrorMsg('')
     setStatus('downloading')
 
-    const sanitize = (s) => String(s || '').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim()
-    const safeName = sanitize(song.artists ? `${song.artists} - ${song.name}` : song.name) || `nm_${song.id}`
+    const sanitize = (s) =>
+      String(s || '')
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+        .trim()
+    const safeName =
+      sanitize(song.artists ? `${song.artists} - ${song.name}` : song.name) || `nm_${song.id}`
+    const usableNeteaseCookie = await ensureUsableNeteaseCookie()
 
     try {
       let filePath
       if (use1music) {
         // ── 1music 模式：NCM API 直接下载 ──
-        const qualityMap = { lossless: 'lossless', high: 'exhigh', medium: 'higher', low: 'standard', auto: 'exhigh' }
+        const qualityMap = {
+          lossless: 'lossless',
+          high: 'exhigh',
+          medium: 'higher',
+          low: 'standard',
+          auto: 'exhigh'
+        }
         const level = qualityMap[audioQualityPreset] || 'exhigh'
-        const urlInfo = await window.api.getNeteaseSongUrl(song.id, level)
+        const urlInfo = await window.api.getNeteaseSongUrl(song.id, level, usableNeteaseCookie)
         if (!urlInfo?.url) throw new Error(t('downloader.directUrlFailed'))
 
         const ext = urlInfo.type || 'mp3'
@@ -385,12 +516,16 @@ export default function DownloaderView({
       } else {
         // ── 网易云模式：yt-dlp ──
         const neteaseUrl = `https://music.163.com/song?id=${song.id}`
-        const filesBefore = await window.api.readDirectoryHandler(config.downloadFolder).catch(() => [])
+        const filesBefore = await window.api
+          .readDirectoryHandler(config.downloadFolder)
+          .catch(() => [])
         await window.api.media.downloadAudio(neteaseUrl, config.downloadFolder, {
           audioQualityPreset,
-          neteaseCookie: neteaseCookieSaved
+          neteaseCookie: usableNeteaseCookie
         })
-        const filesAfter = await window.api.readDirectoryHandler(config.downloadFolder).catch(() => [])
+        const filesAfter = await window.api
+          .readDirectoryHandler(config.downloadFolder)
+          .catch(() => [])
         const newFiles = filesAfter.filter((fa) => !filesBefore.find((fb) => fb.path === fa.path))
         filePath = newFiles.length > 0 ? newFiles[0].path : null
       }
@@ -399,7 +534,9 @@ export default function DownloaderView({
       let hasLyrics = false
       if (filePath) {
         try {
-          const lrcText = await window.api.media.fetchNeteaseLrcText({ songId: song.id }).catch(() => null)
+          const lrcText = await window.api.media
+            .fetchNeteaseLrcText({ songId: song.id, cookie: usableNeteaseCookie })
+            .catch(() => null)
           if (lrcText) {
             const lrcPath = filePath.replace(/\.[^/.]+$/, '.lrc')
             await window.api.media.writeFile(lrcPath, lrcText).catch(() => null)
@@ -412,6 +549,7 @@ export default function DownloaderView({
       if (filePath && onSuccess) {
         onSuccess({
           path: filePath,
+          sourceUrl: `https://music.163.com/song?id=${song.id}`,
           mvOriginUrl: `https://music.163.com/song?id=${song.id}`,
           hasLyrics
         })
@@ -442,13 +580,11 @@ export default function DownloaderView({
             type="button"
             className="md-btn-parse"
             disabled={!neteaseCookieInput.trim() || isDownloading}
-            onClick={() => {
+            onClick={async () => {
               const next = neteaseCookieInput.trim()
-              setNeteaseCookieSaved(next)
+              applyNeteaseCookie(next)
               setNeteaseCookieInput('')
-              try {
-                localStorage.setItem('echoes.neteaseCookie', next)
-              } catch (_) {}
+              await refreshNeteaseCookieFromSession(next)
             }}
           >
             {t('downloader.neteaseLogin')}
@@ -478,12 +614,22 @@ export default function DownloaderView({
           </button>
         </div>
         <p className="md-netease-status">
-          {neteaseCookieSaved
-            ? t('downloader.neteaseLoggedIn')
-            : t('downloader.neteaseNotLoggedIn')}
+          {neteaseAuth.checking
+            ? t('downloader.neteaseChecking')
+            : neteaseAuth.valid
+              ? neteaseAuth.isVip
+                ? t('downloader.neteaseLoggedInVip')
+                : t('downloader.neteaseLoggedIn')
+              : neteaseCookieSaved
+                ? t('downloader.neteaseCookieExpired')
+                : t('downloader.neteaseNotLoggedIn')}
         </p>
         <div className="md-quality-row">
-          <div className="md-quality-group" role="group" aria-label={t('downloader.qualityGroupLabel')}>
+          <div
+            className="md-quality-group"
+            role="group"
+            aria-label={t('downloader.qualityGroupLabel')}
+          >
             {['auto', 'lossless', 'high', 'medium', 'low'].map((key) => (
               <button
                 key={key}
@@ -502,7 +648,10 @@ export default function DownloaderView({
             ))}
           </div>
         </div>
-        <div className="md-1music-toggle-row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+        <div
+          className="md-1music-toggle-row"
+          style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}
+        >
           <button
             type="button"
             role="switch"
@@ -518,7 +667,14 @@ export default function DownloaderView({
             {t('downloader.use1musicLabel')}
           </span>
           {use1music && (
-            <span style={{ fontSize: 11, color: 'var(--accent-color)', fontWeight: 600, marginLeft: 'auto' }}>
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--accent-color)',
+                fontWeight: 600,
+                marginLeft: 'auto'
+              }}
+            >
               1music
             </span>
           )}
@@ -530,10 +686,14 @@ export default function DownloaderView({
               className="md-btn-secondary"
               disabled={isDownloading}
               onClick={() => {
-                setNeteaseCookieSaved('')
-                try {
-                  localStorage.removeItem('echoes.neteaseCookie')
-                } catch (_) {}
+                applyNeteaseCookie('')
+                setNeteaseAuth({
+                  checking: false,
+                  valid: false,
+                  signedIn: false,
+                  isVip: false,
+                  error: ''
+                })
               }}
             >
               {t('downloader.neteaseLogout')}
@@ -550,7 +710,9 @@ export default function DownloaderView({
             placeholder={t('downloader.placeholderUrl')}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && url.trim()) handleFetchMetadata() }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && url.trim()) handleFetchMetadata()
+            }}
           />
           <button
             type="button"
@@ -558,7 +720,11 @@ export default function DownloaderView({
             onClick={handleFetchMetadata}
             disabled={!url || isLoadingMeta || isDownloading || isSearching}
           >
-            {isLoadingMeta || isSearching ? <Loader2 size={24} className="spin" /> : t('downloader.parseLink', '解析/搜索')}
+            {isLoadingMeta || isSearching ? (
+              <Loader2 size={24} className="spin" />
+            ) : (
+              t('downloader.parseLink', '解析/搜索')
+            )}
           </button>
         </div>
       </section>
@@ -592,14 +758,19 @@ export default function DownloaderView({
               return (
                 <div
                   key={s.id}
-                  className={`md-search-item${(isDownloading && !isBusy) ? ' md-search-item--disabled' : ''}`}
+                  className={`md-search-item${isDownloading && !isBusy ? ' md-search-item--disabled' : ''}`}
                   onClick={() => {
                     if (isDownloading) return
                     handleSearchResultDownload(s)
                   }}
                 >
                   {s.cover ? (
-                    <img src={`${s.cover}?param=80y80`} alt="" loading="lazy" className="md-search-cover" />
+                    <img
+                      src={`${s.cover}?param=80y80`}
+                      alt=""
+                      loading="lazy"
+                      className="md-search-cover"
+                    />
                   ) : (
                     <div className="md-search-cover-placeholder">
                       <Music size={20} />
@@ -608,11 +779,15 @@ export default function DownloaderView({
                   <div className="md-search-info">
                     <span className="md-search-name">{s.name}</span>
                     <span className="md-search-sub">
-                      {s.artists} · {s.album} {(s.alia||[]).length ? `(${s.alia.join(' / ')})` : ''}
+                      {s.artists} · {s.album}{' '}
+                      {(s.alia || []).length ? `(${s.alia.join(' / ')})` : ''}
                     </span>
                     {isBusy && (
                       <div className="md-search-progress">
-                        <div className="md-search-progress-fill" style={{ width: `${progress}%` }} />
+                        <div
+                          className="md-search-progress-fill"
+                          style={{ width: `${progress}%` }}
+                        />
                       </div>
                     )}
                   </div>

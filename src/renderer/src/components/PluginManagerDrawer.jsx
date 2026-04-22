@@ -28,7 +28,9 @@ export default function PluginManagerDrawer({ open, onClose }) {
     try {
       const result = await window.api.plugin.list()
       setList(result)
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [])
 
   useEffect(() => {
@@ -100,7 +102,9 @@ export default function PluginManagerDrawer({ open, onClose }) {
   const handleOpenDir = async () => {
     try {
       await window.api.plugin.openPluginsDir()
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   const detail = detailId ? list.find((p) => p.id === detailId) : null
@@ -119,7 +123,10 @@ export default function PluginManagerDrawer({ open, onClose }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="lyrics-drawer-header">
-          <h2 className="lyrics-drawer-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h2
+            className="lyrics-drawer-title"
+            style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+          >
             <Blocks size={20} />
             {t('plugins.title')}
           </h2>
@@ -135,11 +142,18 @@ export default function PluginManagerDrawer({ open, onClose }) {
 
         <div className="lyrics-drawer-body md-drawer-body" style={{ maxWidth: 480 }}>
           {error && (
-            <div style={{
-              display: 'flex', gap: 8, alignItems: 'center',
-              padding: '10px 12px', borderRadius: 'var(--border-radius-sm)',
-              background: 'rgba(255,80,80,0.12)', fontSize: 13, marginBottom: 12
-            }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                alignItems: 'center',
+                padding: '10px 12px',
+                borderRadius: 'var(--border-radius-sm)',
+                background: 'rgba(255,80,80,0.12)',
+                fontSize: 13,
+                marginBottom: 12
+              }}
+            >
               <AlertCircle size={16} style={{ flexShrink: 0 }} />
               <span>{error}</span>
             </div>
@@ -167,10 +181,14 @@ export default function PluginManagerDrawer({ open, onClose }) {
               </div>
 
               {list.length === 0 ? (
-                <div style={{
-                  textAlign: 'center', padding: '40px 16px',
-                  opacity: 0.5, fontSize: 14
-                }}>
+                <div
+                  style={{
+                    textAlign: 'center',
+                    padding: '40px 16px',
+                    opacity: 0.5,
+                    fontSize: 14
+                  }}
+                >
                   {t('plugins.empty')}
                 </div>
               ) : (
@@ -196,16 +214,27 @@ export default function PluginManagerDrawer({ open, onClose }) {
                       }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{
-                          fontWeight: 600, fontSize: 14,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                        }}>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            fontSize: 14,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
                           {plugin.name}
                         </div>
-                        <div style={{
-                          fontSize: 12, opacity: 0.6, marginTop: 2,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                        }}>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            opacity: 0.6,
+                            marginTop: 2,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
                           v{plugin.version}
                           {plugin.author ? ` · ${plugin.author}` : ''}
                         </div>
@@ -213,8 +242,12 @@ export default function PluginManagerDrawer({ open, onClose }) {
                       <button
                         type="button"
                         style={{
-                          background: 'none', border: 'none', color: 'inherit',
-                          cursor: 'pointer', padding: 4, display: 'flex',
+                          background: 'none',
+                          border: 'none',
+                          color: 'inherit',
+                          cursor: 'pointer',
+                          padding: 4,
+                          display: 'flex',
                           opacity: busy === plugin.id ? 0.4 : 1
                         }}
                         disabled={busy === plugin.id}
@@ -241,18 +274,24 @@ export default function PluginManagerDrawer({ open, onClose }) {
               <button
                 type="button"
                 style={{
-                  background: 'none', border: 'none', color: 'inherit',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center',
-                  gap: 4, padding: '4px 0', marginBottom: 16, fontSize: 13, opacity: 0.7
+                  background: 'none',
+                  border: 'none',
+                  color: 'inherit',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 0',
+                  marginBottom: 16,
+                  fontSize: 13,
+                  opacity: 0.7
                 }}
                 onClick={() => setDetailId(null)}
               >
                 <ChevronLeft size={16} /> {t('plugins.backToList')}
               </button>
 
-              <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>
-                {detail.name}
-              </h3>
+              <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>{detail.name}</h3>
               <div style={{ fontSize: 13, opacity: 0.6, marginBottom: 16 }}>
                 v{detail.version}
                 {detail.author ? ` · ${detail.author}` : ''}
@@ -265,10 +304,16 @@ export default function PluginManagerDrawer({ open, onClose }) {
               )}
 
               <div className="glass-panel" style={{ padding: '12px 14px', marginBottom: 16 }}>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  fontSize: 13, fontWeight: 600, marginBottom: 8
-                }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    marginBottom: 8
+                  }}
+                >
                   <Shield size={14} /> {t('plugins.permissions')}
                 </div>
                 {detail.permissions && detail.permissions.length > 0 ? (
@@ -309,9 +354,13 @@ export default function PluginManagerDrawer({ open, onClose }) {
                   onClick={() => handleToggle(detail.id, detail.enabled)}
                 >
                   {detail.enabled ? (
-                    <><ToggleRight size={16} /> {t('plugins.disable')}</>
+                    <>
+                      <ToggleRight size={16} /> {t('plugins.disable')}
+                    </>
                   ) : (
-                    <><ToggleLeft size={16} /> {t('plugins.enable')}</>
+                    <>
+                      <ToggleLeft size={16} /> {t('plugins.enable')}
+                    </>
                   )}
                 </button>
                 <button

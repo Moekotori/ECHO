@@ -40,10 +40,7 @@ export function buildDesktopLyricsPayload(cfg, d, noneText) {
   }
 
   // Detect "no lyrics" state: the only entry is the noneText placeholder
-  const noLyrics =
-    (!current || current === noneText) &&
-    !prev &&
-    !next
+  const noLyrics = (!current || current === noneText) && !prev && !next
 
   const showPrev = cfg.desktopLyricsShowPrev !== false
   const showNext = cfg.desktopLyricsShowNext !== false

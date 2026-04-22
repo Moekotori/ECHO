@@ -7,6 +7,7 @@ export function AlbumCoverLink({
   title,
   className = '',
   stopPropagation = false,
+  onContextMenu,
   children
 }) {
   const displayAlbum = (album || 'Unknown Album').trim()
@@ -29,6 +30,7 @@ export function AlbumCoverLink({
       className={`album-cover-link ${className}`.trim()}
       title={displayQuery ? `View album details: ${displayQuery}` : 'View album details'}
       onClick={openAlbumPage}
+      onContextMenu={onContextMenu}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           openAlbumPage(e)

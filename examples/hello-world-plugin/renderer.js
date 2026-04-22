@@ -21,7 +21,9 @@ function HelloSidebarPanel() {
       {
         type: 'button',
         className: 'hello-plugin-btn',
-        onClick: function () { setCount(count + 1) }
+        onClick: function () {
+          setCount(count + 1)
+        }
       },
       'Greetings sent: ' + count
     )
@@ -33,7 +35,9 @@ function HelloSettingsPanel() {
   return React.createElement(
     'div',
     { className: 'hello-plugin-settings' },
-    React.createElement('p', { style: { opacity: 0.7, fontSize: 13 } },
+    React.createElement(
+      'p',
+      { style: { opacity: 0.7, fontSize: 13 } },
       'The Hello World plugin is active. This section was injected into settings by the plugin system.'
     )
   )

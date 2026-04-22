@@ -14,7 +14,11 @@ import { execSync as _execSyncUtf } from 'child_process'
 
 // Fix Windows console encoding so CJK characters in logs aren't garbled
 if (process.platform === 'win32') {
-  try { _execSyncUtf('chcp 65001', { stdio: 'ignore' }) } catch { /* best-effort */ }
+  try {
+    _execSyncUtf('chcp 65001', { stdio: 'ignore' })
+  } catch {
+    /* best-effort */
+  }
 }
 
 // YouTube 内嵌 MV：主界面来自 localhost / 本地 file，embed 为跨域 iframe。Chromium 默认按「顶级站点 × 嵌入源」做
@@ -35,15 +39,24 @@ import { DlnaMediaRenderer } from './cast/DlnaMediaRenderer.js'
 import { initCrashReporter, logError, getCrashDir } from './CrashReporter'
 import MediaDownloader from './MediaDownloader'
 import { importPlaylistFromLink } from './playlistLinkImport.js'
+import { importSharedPlaylists } from './playlistShareImport.js'
 import { convertLinesToRomaji } from './romajiKuroshiro.js'
+import {
+  collectAudioFilesRecursive,
+  createLibraryWatchManager,
+  rescanImportedFolders
+} from './utils/libraryWatcher.js'
 import {
   fetchNeteaseLrcText,
   searchNeteaseSongs,
   getNeteaseSongDirectUrl
 } from './neteaseLyrics.js'
+import { getNeteaseCookieFromSession, validateNeteaseCookie } from './neteaseAuth.js'
 import { getMediaDurationSeconds } from './utils/ffmpegProbeDuration.js'
+import { getResolvedFfmpegStaticPath } from './utils/resolveFfmpegStaticPath.js'
 import { getDialogStrings } from './dialogLocale.js'
 import PluginManager from './plugins/PluginManager.js'
+import { buildUpdaterEventDedupeKey, shouldReuseUpdaterState } from '../shared/updaterState.mjs'
 
 function dialogLocaleFromOpts(opts) {
   const loc = opts && typeof opts === 'object' && opts.locale
@@ -114,18 +127,33 @@ let bilibiliSignInWindow = null
 let neteaseSignInWindow = null
 let rendererHttpServer = null
 let rendererServerUrl = null
+let libraryWatchManager = null
 const APP_STATE_FILE = 'echoes-app-state.json'
+const APP_STATE_WRITE_DEBOUNCE_MS = 1000
 const APP_STATE_KEYS = new Set([
   'playlist',
   'userPlaylists',
+  'userSmartCollections',
+  'displayMetadataOverrides',
   'config',
   'likedPaths',
+  'trackStats',
   'playMode',
   'queuePlaybackEnabled',
+  'playbackHistory',
+  'volume',
+  'importedFolders',
   'downloaderSettings',
   'ltSettings',
-  'lyricsDesktopBounds'
+  'lyricsDesktopBounds',
+  'playbackSession'
 ])
+let appStateCache = {}
+let appStateWriteTimer = null
+let updaterCheckPromise = null
+let updaterCurrentEvent = null
+let updaterLastEventKey = ''
+let updaterListenersBound = false
 
 function readAppStateJson() {
   try {
@@ -147,6 +175,116 @@ function writeAppStateJson(nextState) {
   } catch (e) {
     console.warn('[appState] write failed:', e?.message || e)
     return false
+  }
+}
+
+function ensureAppStateCache() {
+  if (!appStateCache || typeof appStateCache !== 'object') {
+    appStateCache = readAppStateJson()
+  }
+  return appStateCache
+}
+
+function loadAppStateCache() {
+  appStateCache = readAppStateJson()
+  return appStateCache
+}
+
+function clearAppStateWriteTimer() {
+  if (appStateWriteTimer) {
+    clearTimeout(appStateWriteTimer)
+    appStateWriteTimer = null
+  }
+}
+
+function flushAppStateCacheSync() {
+  clearAppStateWriteTimer()
+  return writeAppStateJson(ensureAppStateCache())
+}
+
+function scheduleAppStateFlush() {
+  clearAppStateWriteTimer()
+  appStateWriteTimer = setTimeout(() => {
+    appStateWriteTimer = null
+    flushAppStateCacheSync()
+  }, APP_STATE_WRITE_DEBOUNCE_MS)
+}
+
+function cloneAppStateSnapshot() {
+  const state = ensureAppStateCache()
+  try {
+    return JSON.parse(JSON.stringify(state))
+  } catch {
+    return { ...state }
+  }
+}
+
+function getSavedNeteaseCookieFromAppState() {
+  try {
+    const state = ensureAppStateCache()
+    const cookie = state?.downloaderSettings?.neteaseCookie
+    return typeof cookie === 'string' ? cookie.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+async function getMainWindowSession() {
+  if (mainWindow?.webContents?.session) return mainWindow.webContents.session
+  return session.defaultSession
+}
+
+async function resolveNeteaseAuthState(preferredCookie = '') {
+  const candidates = []
+  const pushCandidate = (cookie, source) => {
+    const trimmed = String(cookie || '').trim()
+    if (!trimmed) return
+    if (candidates.some((item) => item.cookie === trimmed)) return
+    candidates.push({ cookie: trimmed, source })
+  }
+
+  const ses = await getMainWindowSession()
+  pushCandidate(await getNeteaseCookieFromSession(ses), 'session')
+  pushCandidate(preferredCookie, 'preferred')
+  pushCandidate(getSavedNeteaseCookieFromAppState(), 'appState')
+  pushCandidate(process.env.ECHOES_NETEASE_COOKIE?.trim(), 'env')
+
+  let lastChecked = null
+  for (const candidate of candidates) {
+    const checked = await validateNeteaseCookie(candidate.cookie)
+    lastChecked = { ...checked, source: candidate.source }
+    if (checked.valid) {
+      return {
+        ok: true,
+        checked: true,
+        valid: true,
+        signedIn: true,
+        cookie: candidate.cookie,
+        source: candidate.source,
+        hasMusicU: checked.hasMusicU,
+        hasMusicA: checked.hasMusicA,
+        account: checked.account,
+        profile: checked.profile,
+        vipType: checked.vipType || 0,
+        isVip: checked.isVip === true
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    checked: Boolean(lastChecked?.checked),
+    valid: false,
+    signedIn: false,
+    cookie: '',
+    source: lastChecked?.source || '',
+    hasMusicU: Boolean(lastChecked?.hasMusicU),
+    hasMusicA: Boolean(lastChecked?.hasMusicA),
+    account: null,
+    profile: null,
+    vipType: 0,
+    isVip: false,
+    error: lastChecked?.checked === false ? lastChecked?.error || '' : ''
   }
 }
 
@@ -199,52 +337,6 @@ const MIME_TYPES = {
 
 function getMimeType(filePath) {
   return MIME_TYPES[extname(filePath).toLowerCase()] || 'application/octet-stream'
-}
-
-const SUPPORTED_AUDIO_EXTS = new Set([
-  '.mp3',
-  '.wav',
-  '.flac',
-  '.ogg',
-  '.m4a',
-  '.aac',
-  '.ncm',
-  '.dsf',
-  '.dff',
-  '.opus',
-  '.webm',
-  '.wma',
-  '.alac',
-  '.aiff',
-  '.m4b'
-])
-
-/**
- * 递归收集目录下（或单个音频文件）的受支持音频，顺序为目录遍历顺序�?
- * @param {string} entryPath
- * @param {{ name: string, path: string }[]} out
- */
-function collectAudioFilesRecursive(entryPath, out) {
-  try {
-    const stats = fs.statSync(entryPath)
-    if (stats.isDirectory()) {
-      for (const name of fs.readdirSync(entryPath)) {
-        collectAudioFilesRecursive(join(entryPath, name), out)
-      }
-    } else {
-      const ext = extname(entryPath).toLowerCase()
-      if (SUPPORTED_AUDIO_EXTS.has(ext)) {
-        out.push({
-          name: basename(entryPath),
-          path: entryPath,
-          folder: dirname(entryPath),
-          birthtimeMs: stats.birthtimeMs || stats.ctimeMs || 0
-        })
-      }
-    }
-  } catch (e) {
-    console.error(`[collectAudioFilesRecursive] ${entryPath}:`, e?.message || e)
-  }
 }
 
 async function startRendererHttpServer() {
@@ -314,63 +406,131 @@ async function stopRendererHttpServer() {
 function initUpdater() {
   if (is.dev) return // 不在开发环境自动更新
 
-  const sendUpdaterEvent = (event, data) => {
+  const sendUpdaterEvent = (event, data = {}) => {
+    const payload = { event, ...data }
+    const dedupeKey = buildUpdaterEventDedupeKey(event, data)
+    if (dedupeKey === updaterLastEventKey) return
+    updaterLastEventKey = dedupeKey
+    updaterCurrentEvent = payload
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('updater-message', { event, ...data })
+      mainWindow.webContents.send('updater-message', payload)
     }
+  }
+
+  const finishCheck = () => {
+    updaterCheckPromise = null
+  }
+
+  const runUpdateCheck = async (source = 'manual') => {
+    if (updaterCheckPromise) {
+      console.log(`[UpdaterState] Reusing in-flight check for source=${source}`)
+      if (source === 'manual' && updaterCurrentEvent?.event) {
+        sendUpdaterEvent(updaterCurrentEvent.event, updaterCurrentEvent)
+      }
+      return updaterCheckPromise
+    }
+
+    if (shouldReuseUpdaterState(updaterCurrentEvent)) {
+      console.log(
+        `[UpdaterState] Reusing existing state=${updaterCurrentEvent?.event || 'unknown'}`
+      )
+      if (source === 'manual') {
+        sendUpdaterEvent(updaterCurrentEvent.event, updaterCurrentEvent)
+      }
+      return { success: true, skipped: true, state: updaterCurrentEvent }
+    }
+
+    updaterCheckPromise = autoUpdater
+      .checkForUpdates()
+      .then((result) => ({ success: true, info: result?.updateInfo }))
+      .catch((e) => {
+        console.error('[Updater] 检查更新失败:', e)
+        sendUpdaterEvent('error', { message: e?.message || String(e) })
+        return { success: false, error: e?.message || String(e) }
+      })
+      .finally(() => {
+        finishCheck()
+      })
+
+    return updaterCheckPromise
   }
 
   autoUpdater.autoDownload = true // 发现新版后自动在后台下载
   autoUpdater.autoInstallOnAppQuit = true // 关闭时自动安装
 
-  autoUpdater.on('checking-for-update', () => {
-    console.log('[Updater] Checking for updates')
-    sendUpdaterEvent('checking')
-  })
+  if (!updaterListenersBound) {
+    updaterListenersBound = true
 
-  autoUpdater.on('update-available', (info) => {
-    console.log('[Updater] 发现新版本:', info.version)
-    sendUpdaterEvent('update-available', { version: info.version })
-  })
-
-  autoUpdater.on('update-not-available', () => {
-    console.log('[Updater] Update not available')
-    sendUpdaterEvent('update-not-available')
-  })
-
-  autoUpdater.on('download-progress', (prog) => {
-    sendUpdaterEvent('download-progress', { percent: Math.round(prog.percent || 0) })
-  })
-
-  autoUpdater.on('update-downloaded', (info) => {
-    console.log('[Updater] 新版本已下载完毕:', info.version)
-    sendUpdaterEvent('update-downloaded', { version: info.version })
-    dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: '发现新版本',
-      message: `ECHO ${info.version} 已经下载完毕，是否立刻重启并安装更新？`,
-      buttons: ['重启并安装', '稍后安装']
-    }).then((res) => {
-      if (res.response === 0) {
-        autoUpdater.quitAndInstall(false, true)
-      }
+    autoUpdater.on('checking-for-update', () => {
+      console.log('[Updater] Checking for updates')
+      sendUpdaterEvent('checking')
     })
+
+    autoUpdater.on('update-available', (info) => {
+      console.log('[Updater] 发现新版本:', info.version)
+      sendUpdaterEvent('update-available', { version: info.version })
+    })
+
+    autoUpdater.on('update-not-available', () => {
+      console.log('[Updater] Update not available')
+      sendUpdaterEvent('update-not-available')
+    })
+
+    autoUpdater.on('download-progress', (prog) => {
+      sendUpdaterEvent('download-progress', { percent: Math.round(prog.percent || 0) })
+    })
+
+    autoUpdater.on('update-downloaded', (info) => {
+      console.log('[Updater] 新版本已下载完毕:', info.version)
+      sendUpdaterEvent('update-downloaded', { version: info.version })
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      dialog
+        .showMessageBox(mainWindow, {
+          type: 'info',
+          title: '发现新版本',
+          message: `ECHO ${info.version} 已经下载完毕，是否立刻重启并安装更新？`,
+          buttons: ['重启并安装', '稍后安装']
+        })
+        .then((res) => {
+          if (res.response === 0) {
+            autoUpdater.quitAndInstall(false, true)
+          }
+        })
+    })
+
+    autoUpdater.on('error', (err) => {
+      console.error('[Updater] 更新发生错误:', err)
+      sendUpdaterEvent('error', { message: err?.message || String(err) })
+    })
+  }
+
+  ipcMain.handle('app:checkForUpdates', async () => {
+    if (is.dev) {
+      sendUpdaterEvent('update-not-available')
+      return { success: true, dev: true }
+    }
+    return runUpdateCheck('manual')
   })
 
-  autoUpdater.on('error', (err) => {
-    console.error('[Updater] 更新发生错误:', err)
-    sendUpdaterEvent('error', { message: err.message })
+  ipcMain.handle('app:installUpdate', async () => {
+    if (is.dev) return { success: true, dev: true }
+    try {
+      autoUpdater.quitAndInstall(false, true)
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e?.message || String(e) }
+    }
   })
 
-  // 静默检查更新
-  autoUpdater.checkForUpdatesAndNotify().catch(e => console.error('[Updater] 检查更新失败:', e))
+  // 启动后静默检查一次
+  void runUpdateCheck('startup')
 }
 
 async function createWindow() {
   const appWindowIcon = createAppWindowIcon()
   mainWindow = new BrowserWindow({
-    width: 1800,
-    height: 980,
+    width: 1600,
+    height: 960,
     minWidth: 760,
     minHeight: 500,
     show: false,
@@ -390,6 +550,12 @@ async function createWindow() {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+  })
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (updaterCurrentEvent) {
+      mainWindow.webContents.send('updater-message', updaterCurrentEvent)
+    }
   })
 
   mainWindow.on('close', () => {
@@ -659,6 +825,7 @@ function initDiscordRPC() {
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.echoes.studio')
+  loadAppStateCache()
 
   const chromeVersion = process.versions.chrome || '126.0.0.0'
   const chromeMajor = chromeVersion.split('.')[0]
@@ -726,40 +893,24 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('app:checkForUpdates', async () => {
-    // dev 模式下 electron-updater 会静默跳过，不触发任何事件，UI 会永久卡在 Checking
-    // 直接回复 update-not-available 让界面恢复
-    if (is.dev) {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('updater-message', { event: 'update-not-available' })
-      }
-      return { success: true, dev: true }
-    }
-    try {
-      const result = await autoUpdater.checkForUpdates()
-      return { success: true, info: result?.updateInfo }
-    } catch (e) {
-      console.error('[Updater] 手动检查更新失败:', e)
-      // 出错时也推送事件，防止 UI 卡住
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('updater-message', { event: 'error', message: e.message })
-      }
-      return { success: false, error: e.message }
-    }
-  })
-
   ipcMain.handle('appState:get', async (_, key) => {
     if (!APP_STATE_KEYS.has(key)) return null
-    const state = readAppStateJson()
+    const state = ensureAppStateCache()
     return state[key] ?? null
+  })
+
+  ipcMain.handle('appState:getSnapshot', async () => cloneAppStateSnapshot())
+
+  ipcMain.on('appState:getSnapshotSync', (event) => {
+    event.returnValue = cloneAppStateSnapshot()
   })
 
   ipcMain.handle('appState:set', async (_, key, value) => {
     if (!APP_STATE_KEYS.has(key)) return { ok: false, error: 'invalid_key' }
-    const state = readAppStateJson()
+    const state = ensureAppStateCache()
     state[key] = value
-    const ok = writeAppStateJson(state)
-    return ok ? { ok: true } : { ok: false, error: 'write_failed' }
+    scheduleAppStateFlush()
+    return { ok: true }
   })
 
   ipcMain.handle('shell:openExternal', async (_, url) => {
@@ -855,7 +1006,8 @@ app.whenReady().then(async () => {
             'wma',
             'alac',
             'aiff',
-            'm4b'
+            'm4b',
+            'caf'
           ]
         }
       ]
@@ -1003,6 +1155,42 @@ app.whenReady().then(async () => {
     return result
   })
 
+  ipcMain.handle('file:rescanFolders', async (_, payload) => {
+    try {
+      return rescanImportedFolders(payload?.folders, payload?.existingPaths)
+    } catch (e) {
+      console.error('[file:rescanFolders]', e)
+      return []
+    }
+  })
+
+  ipcMain.handle('library:watchFolders', async (_, payload) => {
+    try {
+      if (!libraryWatchManager) {
+        libraryWatchManager = createLibraryWatchManager({
+          onChange: (diff) => {
+            if (!mainWindow || mainWindow.isDestroyed()) return
+            mainWindow.webContents.send('library:folders-changed', diff)
+          }
+        })
+      }
+      return libraryWatchManager.start(payload?.folders)
+    } catch (e) {
+      console.error('[library:watchFolders]', e)
+      return { ok: false, error: String(e?.message || e) }
+    }
+  })
+
+  ipcMain.handle('library:stopWatchingFolders', async () => {
+    try {
+      if (!libraryWatchManager) return { ok: true }
+      return libraryWatchManager.stop()
+    } catch (e) {
+      console.error('[library:stopWatchingFolders]', e)
+      return { ok: false, error: String(e?.message || e) }
+    }
+  })
+
   // IPC: Batch get file stats (birthtimeMs) for existing tracks that lack it
   ipcMain.handle('file:batchStats', async (_, paths) => {
     const out = {}
@@ -1017,11 +1205,27 @@ app.whenReady().then(async () => {
     return out
   })
 
+  ipcMain.handle('file:batchExists', async (_, paths) => {
+    const out = {}
+    for (const p of Array.isArray(paths) ? paths : []) {
+      out[p] = typeof p === 'string' && p ? fs.existsSync(p) : false
+    }
+    return out
+  })
+
   // IPC: Read file as buffer (for jsmediatags or general binary reading)
   ipcMain.handle('file:readBuffer', async (_, filePath) => {
     try {
       const buffer = fs.readFileSync(filePath)
       return buffer
+    } catch (e) {
+      return null
+    }
+  })
+
+  ipcMain.handle('file:readText', async (_, filePath) => {
+    try {
+      return fs.readFileSync(filePath, 'utf8')
     } catch (e) {
       return null
     }
@@ -1039,7 +1243,11 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('lyrics:neteaseFetch', async (_, payload) => {
     try {
-      const lrc = await fetchNeteaseLrcText(payload || {})
+      const auth = await resolveNeteaseAuthState(payload?.cookie || '')
+      const lrc = await fetchNeteaseLrcText({
+        ...(payload || {}),
+        cookie: auth.valid ? auth.cookie : ''
+      })
       return { ok: !!lrc, lrc: lrc || '' }
     } catch (e) {
       console.warn('[lyrics:neteaseFetch]', e?.message || e)
@@ -1087,12 +1295,17 @@ app.whenReady().then(async () => {
   })
 
   // Media Download IPC
-  ipcMain.handle('netease:search', async (event, keywords) => {
-    return await searchNeteaseSongs(keywords)
+  ipcMain.handle('netease:search', async (event, keywords, preferredCookie = '') => {
+    const auth = await resolveNeteaseAuthState(preferredCookie)
+    return await searchNeteaseSongs(keywords, { cookie: auth.valid ? auth.cookie : '' })
   })
 
   ipcMain.handle('netease:fetchLrcText', async (event, params) => {
-    return await fetchNeteaseLrcText(params)
+    const auth = await resolveNeteaseAuthState(params?.cookie || '')
+    return await fetchNeteaseLrcText({
+      ...(params || {}),
+      cookie: auth.valid ? auth.cookie : ''
+    })
   })
 
   ipcMain.handle('media:writeFile', async (event, filePath, text) => {
@@ -1106,11 +1319,18 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('media:download', async (event, url, folder, options = {}) => {
-    return await MediaDownloader.downloadAudio(url, folder, event.sender, options)
+    const auth = await resolveNeteaseAuthState(options?.neteaseCookie || '')
+    return await MediaDownloader.downloadAudio(url, folder, event.sender, {
+      ...(options || {}),
+      neteaseCookie: auth.valid ? auth.cookie : ''
+    })
   })
 
-  ipcMain.handle('netease:getSongUrl', async (_, songId, level) => {
-    return await getNeteaseSongDirectUrl(songId, level)
+  ipcMain.handle('netease:getSongUrl', async (_, songId, level, preferredCookie = '') => {
+    const auth = await resolveNeteaseAuthState(preferredCookie)
+    return await getNeteaseSongDirectUrl(songId, level, {
+      cookie: auth.valid ? auth.cookie : ''
+    })
   })
 
   ipcMain.handle('media:downloadFromUrl', async (event, opts) => {
@@ -1120,8 +1340,23 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('playlistLink:importPlaylist', async (event, payload) => {
-    const { playlistInput, downloadFolder } = payload || {}
-    return await importPlaylistFromLink(playlistInput, downloadFolder, event.sender)
+    const { playlistInput, downloadFolder, preferredFolderName, neteaseCookie } = payload || {}
+    const auth = await resolveNeteaseAuthState(neteaseCookie || '')
+    return await importPlaylistFromLink(
+      playlistInput,
+      downloadFolder,
+      event.sender,
+      preferredFolderName,
+      { cookie: auth.valid ? auth.cookie : '' }
+    )
+  })
+
+  ipcMain.handle('playlistShare:import', async (event, payload) => {
+    const { playlists, downloadFolder, neteaseCookie } = payload || {}
+    const auth = await resolveNeteaseAuthState(neteaseCookie || '')
+    return await importSharedPlaylists(playlists, downloadFolder, event.sender, {
+      cookie: auth.valid ? auth.cookie : ''
+    })
   })
 
   // IPC: Search MV
@@ -1389,10 +1624,15 @@ app.whenReady().then(async () => {
     }
   }
 
-  // IPC: Get Extended Audio Metadata (Sample rate, bitrate, format, cover)
-  ipcMain.handle('file:getExtendedMetadata', async (_, filePath) => {
+  function normalizeEmbeddedText(text) {
+    return String(text || '')
+      .replace(/\u0000/g, '')
+      .replace(/\r\n/g, '\n')
+      .trim()
+  }
+
+  async function buildExtendedMetadataResponse(filePath) {
     try {
-      // Use dynamic import for pure-ESM music-metadata in CJS main process
       const { parseFile, selectCover } = await import('music-metadata')
       const metadata = await parseFile(filePath)
       let cover = null
@@ -1407,10 +1647,12 @@ app.whenReady().then(async () => {
 
       const picture = selectCover(metadata.common.picture)
       if (picture) {
-        // picture.format is already a MIME type like 'image/jpeg'
         const mime = picture.format.includes('/') ? picture.format : `image/${picture.format}`
         cover = `data:${mime};base64,${Buffer.from(picture.data).toString('base64')}`
       }
+
+      const codecLabel = resolveAudioCodecLabel(metadata, filePath)
+      const embeddedLyrics = extractEmbeddedLyricsText(metadata)
 
       return {
         success: true,
@@ -1418,10 +1660,11 @@ app.whenReady().then(async () => {
           sampleRate: metadata.format.sampleRate,
           bitrate: metadata.format.bitrate,
           channels: metadata.format.numberOfChannels,
-          codec: metadata.format.container, // e.g., 'FLAC', 'MPEG'
+          codec: codecLabel,
           duration: durationSec,
           lossless:
             metadata.format.lossless ||
+            /^(alac|flac|wav|aiff|ape)$/i.test(codecLabel) ||
             metadata.format.container?.toLowerCase() === 'flac' ||
             metadata.format.container?.toLowerCase() === 'wav'
         },
@@ -1432,21 +1675,335 @@ app.whenReady().then(async () => {
           albumArtist: metadata.common.albumartist || metadata.common.albumArtist || null,
           trackNo: metadata.common.track?.no ?? null,
           discNo: metadata.common.disk?.no ?? null,
-          lyrics:
-            Array.isArray(metadata.common.lyrics) && metadata.common.lyrics.length > 0
-              ? metadata.common.lyrics.join('\n')
-              : null,
-          cover: cover
+          lyrics: embeddedLyrics || null,
+          cover
         }
       }
     } catch (e) {
       const msg = e?.message || String(e)
       const isKnownParseNoise =
-        e?.name === 'FieldDecodingError' || /FourCC|invalid characters|Tokenizer/i.test(msg)
+        e?.name === 'FieldDecodingError' ||
+        /FourCC|invalid characters|Tokenizer|Failed to determine|End-Of-Stream|Unexpected end/i.test(
+          msg
+        )
       if (!isKnownParseNoise) {
         console.error('getExtendedMetadata error:', msg)
       }
       return getExtendedMetadataFallback(filePath)
+    }
+  }
+
+  function normalizeMetadataText(value) {
+    return typeof value === 'string' ? value.trim() : ''
+  }
+
+  function normalizeMetadataNumber(value) {
+    if (value === null || value === undefined || value === '') return ''
+    const parsed = Number.parseInt(String(value), 10)
+    return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : ''
+  }
+
+  function runFfmpegCommand(args) {
+    return new Promise((resolve, reject) => {
+      const ffmpegPath = getResolvedFfmpegStaticPath()
+      if (!ffmpegPath) {
+        reject(new Error('FFmpeg executable not found'))
+        return
+      }
+
+      execFile(ffmpegPath, args, { windowsHide: true, maxBuffer: 1024 * 1024 * 32 }, (error) => {
+        if (error) reject(error)
+        else resolve()
+      })
+    })
+  }
+
+  function replaceFileWithBackup(targetPath, tempPath) {
+    const backupPath = resolve(
+      dirname(targetPath),
+      `.${basename(targetPath)}.echo-backup-${process.pid}-${Date.now()}${extname(targetPath)}`
+    )
+
+    fs.renameSync(targetPath, backupPath)
+    try {
+      fs.renameSync(tempPath, targetPath)
+      fs.rmSync(backupPath, { force: true })
+    } catch (error) {
+      try {
+        if (fs.existsSync(backupPath) && !fs.existsSync(targetPath)) {
+          fs.renameSync(backupPath, targetPath)
+        }
+      } catch {
+        /* best effort restore */
+      }
+      throw error
+    }
+  }
+
+  async function writeExtendedMetadata(payload) {
+    const filePath = typeof payload?.path === 'string' ? payload.path.trim() : ''
+    if (!filePath) throw new Error('Missing audio file path')
+    if (!fs.existsSync(filePath)) throw new Error('Audio file not found')
+
+    const coverPath = typeof payload?.coverPath === 'string' ? payload.coverPath.trim() : ''
+    if (coverPath && !fs.existsSync(coverPath)) throw new Error('Selected cover image was not found')
+
+    const title = normalizeMetadataText(payload?.title)
+    const artist = normalizeMetadataText(payload?.artist)
+    const album = normalizeMetadataText(payload?.album)
+    const albumArtist = normalizeMetadataText(payload?.albumArtist)
+    const trackNo = normalizeMetadataNumber(payload?.trackNo)
+    const discNo = normalizeMetadataNumber(payload?.discNo)
+
+    const extension = extname(filePath)
+    const tempPath = resolve(
+      dirname(filePath),
+      `.${basename(filePath)}.echo-tags-${process.pid}-${Date.now()}${extension}`
+    )
+    const args = ['-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-i', filePath]
+
+    if (coverPath) {
+      args.push('-i', coverPath)
+      args.push('-map', '0:a?', '-map', '0:s?', '-map', '0:d?', '-map', '1:v:0')
+    } else {
+      args.push('-map', '0')
+    }
+
+    args.push('-c', 'copy')
+    if (coverPath) {
+      args.push('-c:v', 'mjpeg', '-disposition:v:0', 'attached_pic')
+      if (/\.mp3$/i.test(filePath)) {
+        args.push('-id3v2_version', '3')
+      }
+      args.push('-metadata:s:v', 'title=Album cover', '-metadata:s:v', 'comment=Cover (front)')
+    }
+
+    args.push(
+      '-metadata',
+      `title=${title}`,
+      '-metadata',
+      `artist=${artist}`,
+      '-metadata',
+      `album=${album}`,
+      '-metadata',
+      `album_artist=${albumArtist}`,
+      '-metadata',
+      `track=${trackNo}`,
+      '-metadata',
+      `disc=${discNo}`,
+      tempPath
+    )
+
+    try {
+      await runFfmpegCommand(args)
+      replaceFileWithBackup(filePath, tempPath)
+      return await buildExtendedMetadataResponse(filePath)
+    } catch (error) {
+      try {
+        if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true })
+      } catch {
+        /* ignore temp cleanup errors */
+      }
+      throw error
+    }
+  }
+
+  function createTemporaryRenamePath(filePath, index) {
+    const dir = dirname(filePath)
+    const ext = extname(filePath)
+    let candidate = resolve(
+      dir,
+      `.echo-rename-${process.pid}-${Date.now()}-${index}${ext || '.tmp'}`
+    )
+    let attempt = 1
+    while (fs.existsSync(candidate)) {
+      candidate = resolve(
+        dir,
+        `.echo-rename-${process.pid}-${Date.now()}-${index}-${attempt}${ext || '.tmp'}`
+      )
+      attempt += 1
+    }
+    return candidate
+  }
+
+  function normalizeRenameItems(payload) {
+    return Array.isArray(payload)
+      ? payload.filter(
+          (item) =>
+            item &&
+            typeof item.from === 'string' &&
+            item.from.trim() &&
+            typeof item.to === 'string' &&
+            item.to.trim()
+        )
+      : []
+  }
+
+  async function batchRenameFiles(payload) {
+    const items = normalizeRenameItems(payload)
+      .map((item) => ({ from: item.from.trim(), to: item.to.trim() }))
+      .filter((item) => item.from !== item.to)
+
+    if (!items.length) return { success: true, renamed: [] }
+
+    const sourceSet = new Set(items.map((item) => item.from.toLowerCase()))
+    const targetSet = new Set()
+    for (const item of items) {
+      if (!fs.existsSync(item.from)) {
+        throw new Error(`File not found: ${item.from}`)
+      }
+      if (dirname(item.from).toLowerCase() !== dirname(item.to).toLowerCase()) {
+        throw new Error('Renaming across folders is not supported')
+      }
+      const targetKey = item.to.toLowerCase()
+      if (targetSet.has(targetKey)) {
+        throw new Error(`Duplicate target name: ${item.to}`)
+      }
+      targetSet.add(targetKey)
+      if (fs.existsSync(item.to) && !sourceSet.has(targetKey)) {
+        throw new Error(`Target file already exists: ${item.to}`)
+      }
+    }
+
+    const staged = []
+    const finalized = []
+    try {
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index]
+        const tempPath = createTemporaryRenamePath(item.from, index)
+        fs.renameSync(item.from, tempPath)
+        staged.push({ ...item, tempPath })
+      }
+
+      for (const item of staged) {
+        fs.renameSync(item.tempPath, item.to)
+        finalized.push(item)
+      }
+
+      return {
+        success: true,
+        renamed: finalized.map(({ from, to }) => ({ from, to }))
+      }
+    } catch (error) {
+      for (let index = finalized.length - 1; index >= 0; index -= 1) {
+        const item = finalized[index]
+        try {
+          if (fs.existsSync(item.to)) fs.renameSync(item.to, item.tempPath)
+        } catch {
+          /* best effort rollback */
+        }
+      }
+      for (let index = staged.length - 1; index >= 0; index -= 1) {
+        const item = staged[index]
+        try {
+          if (fs.existsSync(item.tempPath) && !fs.existsSync(item.from)) {
+            fs.renameSync(item.tempPath, item.from)
+          }
+        } catch {
+          /* best effort rollback */
+        }
+      }
+      throw error
+    }
+  }
+
+  function decodeEmbeddedTextValue(value) {
+    if (value == null) return ''
+    if (typeof value === 'string') return normalizeEmbeddedText(value)
+
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => decodeEmbeddedTextValue(item))
+        .filter(Boolean)
+        .join('\n')
+        .trim()
+    }
+
+    if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+      const buffer = Buffer.from(value)
+      const candidates = [
+        buffer.toString('utf8'),
+        buffer.toString('utf16le'),
+        buffer.toString('latin1')
+      ]
+      for (const candidate of candidates) {
+        const normalized = normalizeEmbeddedText(candidate)
+        if (normalized) return normalized
+      }
+      return ''
+    }
+
+    if (typeof value === 'object') {
+      return (
+        decodeEmbeddedTextValue(value.text) ||
+        decodeEmbeddedTextValue(value.value) ||
+        decodeEmbeddedTextValue(value.data) ||
+        decodeEmbeddedTextValue(value.description)
+      )
+    }
+
+    return ''
+  }
+
+  function extractEmbeddedLyricsText(metadata) {
+    const commonLyrics = decodeEmbeddedTextValue(metadata?.common?.lyrics)
+    if (commonLyrics) return commonLyrics
+
+    const lyricTagIds = new Set(['\u00a9lyr', 'lyrics', 'uslt', 'sylt', 'wm/lyrics'])
+    for (const nativeTags of Object.values(metadata?.native || {})) {
+      for (const tag of Array.isArray(nativeTags) ? nativeTags : []) {
+        const tagId = String(tag?.id || '')
+          .trim()
+          .toLowerCase()
+        if (!tagId) continue
+        if (!lyricTagIds.has(tagId) && !tagId.endsWith(':lyrics')) continue
+
+        const text = decodeEmbeddedTextValue(tag?.value)
+        if (text) return text
+      }
+    }
+
+    return ''
+  }
+
+  function resolveAudioCodecLabel(metadata, filePath) {
+    const explicitCodec = String(metadata?.format?.codec || '').trim()
+    const codecProfile = String(metadata?.format?.codecProfile || '').trim()
+    const container = String(metadata?.format?.container || '').trim()
+    const extUpper = extname(filePath).replace(/^\./, '').toUpperCase()
+
+    if (/alac/i.test(explicitCodec) || /alac/i.test(codecProfile) || /\.alac$/i.test(filePath)) {
+      return 'ALAC'
+    }
+
+    return explicitCodec || container || extUpper || 'unknown'
+  }
+
+  // IPC: Get Extended Audio Metadata (Sample rate, bitrate, format, cover)
+  ipcMain.handle('file:getExtendedMetadata', async (_, filePath) => {
+    return await buildExtendedMetadataResponse(filePath)
+  })
+
+  ipcMain.handle('file:updateExtendedMetadata', async (_, payload) => {
+    try {
+      return await writeExtendedMetadata(payload)
+    } catch (error) {
+      return {
+        success: false,
+        error: error?.message || String(error)
+      }
+    }
+  })
+
+  ipcMain.handle('file:batchRenameFiles', async (_, payload) => {
+    try {
+      return await batchRenameFiles(payload)
+    } catch (error) {
+      return {
+        success: false,
+        error: error?.message || String(error),
+        renamed: []
+      }
     }
   })
 
@@ -1507,9 +2064,12 @@ app.whenReady().then(async () => {
     audioEngine.setEqConfig(eqConfig)
   })
 
-  ipcMain.handle('audio:play', async (_, filePath, startTime, playbackRate, sourceSampleRateHint) => {
-    return audioEngine.play(filePath, startTime, playbackRate, sourceSampleRateHint)
-  })
+  ipcMain.handle(
+    'audio:play',
+    async (_, filePath, startTime, playbackRate, sourceSampleRateHint) => {
+      return audioEngine.play(filePath, startTime, playbackRate, sourceSampleRateHint)
+    }
+  )
 
   ipcMain.handle('audio:setPlaybackRate', async (_, rate) => {
     return audioEngine.setPlaybackRate(rate)
@@ -1633,7 +2193,11 @@ app.whenReady().then(async () => {
         loadUrl = u.toString()
       }
       await lyricsDesktopWindow.loadURL(loadUrl)
-      if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed() && !lyricsDesktopWindow.isVisible()) {
+      if (
+        lyricsDesktopWindow &&
+        !lyricsDesktopWindow.isDestroyed() &&
+        !lyricsDesktopWindow.isVisible()
+      ) {
         lyricsDesktopWindow.show()
       }
       startLyricsDesktopMainSyncTimer()
@@ -1910,39 +2474,20 @@ app.whenReady().then(async () => {
     return { ok: true }
   })
 
-  ipcMain.handle('netease:getCookie', async () => {
-    const ses = session.defaultSession
-    const cookieList = await ses.cookies.get({ domain: '.music.163.com' })
-    const map = new Map()
-    for (const c of cookieList) {
-      map.set(c.name, c.value)
-    }
-    const names = ['MUSIC_U', 'MUSIC_A', '__csrf', 'NMTID']
-    const cookie = names
-      .map((name) => {
-        const value = map.get(name)
-        return value ? `${name}=${value}` : ''
-      })
-      .filter(Boolean)
-      .join('; ')
-    return {
-      ok: true,
-      signedIn: Boolean(map.get('MUSIC_U') || map.get('MUSIC_A')),
-      cookie,
-      hasMusicU: Boolean(map.get('MUSIC_U'))
-    }
+  ipcMain.handle('netease:getCookie', async (_, preferredCookie = '') => {
+    return await resolveNeteaseAuthState(preferredCookie)
   })
 
   ipcMain.handle('signin:checkStatus', async () => {
-    const ses = session.defaultSession
+    const ses = await getMainWindowSession()
     const ytCookies = await ses.cookies.get({ domain: '.youtube.com' })
     const ytSignedIn = ytCookies.some(
       (c) => c.name === 'SID' || c.name === 'SSID' || c.name === 'LOGIN_INFO'
     )
     const biliCookies = await ses.cookies.get({ domain: '.bilibili.com' })
     const biliSignedIn = biliCookies.some((c) => c.name === 'DedeUserID' || c.name === 'SESSDATA')
-    const neteaseCookies = await ses.cookies.get({ domain: '.music.163.com' })
-    const neteaseSignedIn = neteaseCookies.some((c) => c.name === 'MUSIC_U' || c.name === 'MUSIC_A')
+    const neteaseAuth = await resolveNeteaseAuthState()
+    const neteaseSignedIn = neteaseAuth.valid === true
     return { youtube: ytSignedIn, bilibili: biliSignedIn, netease: neteaseSignedIn }
   })
 
@@ -2073,8 +2618,14 @@ app.on('before-quit', () => {
   discordRpcQuitting = true
   clearRpcRetryTimer()
   void disposeDiscordRpc()
+  flushAppStateCacheSync()
   stopRendererHttpServer().catch(() => {})
   dlnaRenderer.stop().catch(() => {})
+  libraryWatchManager?.stop()
+})
+
+app.on('will-quit', () => {
+  flushAppStateCacheSync()
 })
 
 app.on('window-all-closed', () => {

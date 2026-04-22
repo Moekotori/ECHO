@@ -1,22 +1,13 @@
 import { createRequire } from 'module'
 import fs from 'fs'
+import { join } from 'path'
 import MediaDownloader from './MediaDownloader.js'
+import { buildNcmRequestOptions, buildNeteaseHeaderArgs } from './neteaseAuth.js'
 
 const require = createRequire(import.meta.url)
 
-/** 懒加载 CJS 包，避免影响未使用网易云导入时的启动 */
 function getNcmApi() {
   return require('@neteasecloudmusicapienhanced/api')
-}
-
-/** 与 NeteaseCloudMusicApiEnhanced 一致的请求参数（Cookie / 代理） */
-function ncmRequestOptions() {
-  const opts = {}
-  const cookie = process.env.ECHOES_NETEASE_COOKIE?.trim()
-  if (cookie) opts.cookie = cookie
-  const proxy = process.env.ECHOES_NETEASE_PROXY?.trim()
-  if (proxy) opts.proxy = proxy
-  return opts
 }
 
 function formatNcmError(err) {
@@ -27,9 +18,6 @@ function formatNcmError(err) {
   return 'NetEase Cloud Music API request failed'
 }
 
-/**
- * Parse NetEase playlist numeric id from paste/input (URLs or plain digits).
- */
 export function parseNeteasePlaylistId(input) {
   if (input == null) return null
   const s = String(input).trim()
@@ -38,26 +26,26 @@ export function parseNeteasePlaylistId(input) {
   try {
     const normalized = s.includes('://') ? s : `https://${s}`
     const u = new URL(normalized)
-    let id = u.searchParams.get('id')
-    if (id && /^\d+$/.test(id)) return id
+    const directId = u.searchParams.get('id')
+    if (directId && /^\d+$/.test(directId)) return directId
     const pathMatch = u.pathname.match(/\/playlist\/(\d+)/)
     if (pathMatch) return pathMatch[1]
     if (u.hash) {
       const hashQuery = u.hash.includes('?') ? u.hash.slice(u.hash.indexOf('?') + 1) : ''
       const q = new URLSearchParams(hashQuery)
-      const hid = q.get('id')
-      if (hid && /^\d+$/.test(hid)) return hid
+      const hashId = q.get('id')
+      if (hashId && /^\d+$/.test(hashId)) return hashId
     }
-  } catch (_) {
-    /* fall through */
+  } catch {
+    // fall through
   }
   const m = /[?&]id=(\d+)/.exec(s)
   return m ? m[1] : null
 }
 
-export async function fetchNeteasePlaylistMeta(playlistId) {
+export async function fetchNeteasePlaylistMeta(playlistId, opts = {}) {
   const ncm = getNcmApi()
-  const base = ncmRequestOptions()
+  const base = buildNcmRequestOptions(opts.cookie)
 
   let detail
   try {
@@ -69,14 +57,14 @@ export async function fetchNeteasePlaylistMeta(playlistId) {
     throw new Error(formatNcmError(err))
   }
 
-  const pl = detail.body?.playlist
-  if (!pl) {
+  const playlist = detail.body?.playlist
+  if (!playlist) {
     throw new Error(
-      'Playlist not found or inaccessible (private or removed; try ECHOES_NETEASE_COOKIE).'
+      'Playlist not found or inaccessible (private or removed; try signing in to NetEase again).'
     )
   }
 
-  const name = pl.name || 'NetEase Playlist'
+  const name = playlist.name || 'NetEase Playlist'
 
   let songs = []
   try {
@@ -88,17 +76,17 @@ export async function fetchNeteasePlaylistMeta(playlistId) {
     })
     songs = all.body?.songs || []
   } catch (err) {
-    songs = pl.tracks || []
+    songs = playlist.tracks || []
     if (songs.length === 0) {
       throw new Error(formatNcmError(err))
     }
   }
 
-  const tracks = songs.map((t) => ({
-    id: t.id,
-    name: (t.name && String(t.name).trim()) || 'Unknown',
-    artists: (t.ar || [])
-      .map((a) => a.name)
+  const tracks = songs.map((track) => ({
+    id: track.id,
+    name: (track.name && String(track.name).trim()) || 'Unknown',
+    artists: (track.ar || [])
+      .map((artist) => artist.name)
       .filter(Boolean)
       .join(', ')
   }))
@@ -114,10 +102,35 @@ function ytDlpExtraArgs() {
   return [...geo, ...fromEnv]
 }
 
-/**
- * 拉取歌单元数据并用 yt-dlp 逐首下载到本地（需网络环境可访问网易云音源，海外用户可能需要代理）。
- */
-export async function importNeteasePlaylist(playlistInput, downloadFolder, eventSender) {
+function sanitizeFolderName(name) {
+  const cleaned = String(name || '')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '')
+  return cleaned || 'Imported playlist'
+}
+
+function ensurePlaylistFolder(baseDir, folderName) {
+  const resolved = join(baseDir, sanitizeFolderName(folderName))
+  fs.mkdirSync(resolved, { recursive: true })
+  return resolved
+}
+
+function buildTrackFilename(track) {
+  const title = String(track?.name || '').trim()
+  const artists = String(track?.artists || '').trim()
+  if (artists && title) return `${artists} - ${title}`
+  return title || `nm_${track?.id || 'track'}`
+}
+
+export async function importNeteasePlaylist(
+  playlistInput,
+  downloadFolder,
+  eventSender,
+  preferredFolderName = null,
+  opts = {}
+) {
   const playlistId = parseNeteasePlaylistId(playlistInput)
   if (!playlistId) {
     throw new Error('Invalid playlist URL or ID')
@@ -126,7 +139,8 @@ export async function importNeteasePlaylist(playlistInput, downloadFolder, event
     throw new Error('Invalid save folder; choose a valid directory in Settings.')
   }
 
-  const meta = await fetchNeteasePlaylistMeta(playlistId)
+  const meta = await fetchNeteasePlaylistMeta(playlistId, opts)
+  const targetFolder = ensurePlaylistFolder(downloadFolder, preferredFolderName || meta.name)
   const total = meta.tracks.length
 
   eventSender.send('playlist-link:import-progress', {
@@ -139,40 +153,50 @@ export async function importNeteasePlaylist(playlistInput, downloadFolder, event
     return { playlistName: meta.name, added: [], failed: [] }
   }
 
-  const extraArgs = ytDlpExtraArgs()
+  const extraArgs = [...buildNeteaseHeaderArgs(opts.cookie), ...ytDlpExtraArgs()]
   const added = []
   const failed = []
 
   for (let i = 0; i < meta.tracks.length; i++) {
-    const t = meta.tracks[i]
-    const songUrl = `https://music.163.com/song?id=${t.id}`
+    const track = meta.tracks[i]
+    const songUrl = `https://music.163.com/song?id=${track.id}`
 
     eventSender.send('playlist-link:import-progress', {
       phase: 'download',
       current: i + 1,
       total,
-      trackName: t.name,
-      artists: t.artists
+      trackName: track.name,
+      artists: track.artists
     })
 
-    const basename = `nm_${t.id}`
+    const basename = `nm_${track.id}`
     try {
-      const filePath = await MediaDownloader.downloadAudioWithBasename(
+      const downloadedPath = await MediaDownloader.downloadAudioWithBasename(
         songUrl,
-        downloadFolder,
+        targetFolder,
         basename,
         eventSender,
         { extraArgs }
       )
-      added.push({ path: filePath, trackTitle: t.name })
-    } catch (e) {
+      const filePath = MediaDownloader.renameDownloadedMedia(
+        downloadedPath,
+        buildTrackFilename(track)
+      )
+      const item = { path: filePath, trackTitle: track.name, sourceUrl: songUrl }
+      added.push(item)
+      eventSender.send('playlist-link:import-progress', {
+        phase: 'added',
+        playlistName: meta.name,
+        ...item
+      })
+    } catch (error) {
       failed.push({
-        name: t.name,
-        error: e.message || String(e)
+        name: track.name,
+        error: error.message || String(error)
       })
     }
 
-    await new Promise((r) => setTimeout(r, 250))
+    await new Promise((resolve) => setTimeout(resolve, 250))
   }
 
   return {

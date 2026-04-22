@@ -94,7 +94,8 @@ function normalizePayload(p) {
     fontPx: typeof p?.fontPx === 'number' && p.fontPx > 8 ? p.fontPx : 26,
     colors: {
       text: typeof c.text === 'string' && c.text ? c.text : DEFAULT_COLORS.text,
-      secondary: typeof c.secondary === 'string' && c.secondary ? c.secondary : DEFAULT_COLORS.secondary,
+      secondary:
+        typeof c.secondary === 'string' && c.secondary ? c.secondary : DEFAULT_COLORS.secondary,
       glow: typeof c.glow === 'string' && c.glow ? c.glow : DEFAULT_COLORS.glow,
       romaji: typeof c.romaji === 'string' && c.romaji ? c.romaji : DEFAULT_COLORS.romaji
     }
@@ -201,7 +202,12 @@ export default function LyricsDesktop() {
     ].join(', ')
   }, [colors.romaji])
 
-  const renderLine = (text, rom, translation, { size, weight, opacity, marginBottom, isSecondary, animDelaySec = 0 }) => {
+  const renderLine = (
+    text,
+    rom,
+    translation,
+    { size, weight, opacity, marginBottom, isSecondary, animDelaySec = 0 }
+  ) => {
     if (!text) return null
     const glow = isSecondary ? glowSecondary : glowPrimary
     const color = isSecondary ? colors.secondary : colors.text
@@ -274,7 +280,11 @@ export default function LyricsDesktop() {
         e.preventDefault()
         void window.api?.dismissLyricsDesktop?.()
       }}
-      title={title ? `${title} — ${t('lyrics.desktopLyricsChromeHint')}` : t('lyrics.desktopLyricsChromeHint')}
+      title={
+        title
+          ? `${title} — ${t('lyrics.desktopLyricsChromeHint')}`
+          : t('lyrics.desktopLyricsChromeHint')
+      }
       style={{
         height: '100%',
         width: '100%',

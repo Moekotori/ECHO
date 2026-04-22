@@ -15,11 +15,14 @@ export class VstBridge {
 
     // 预期的自定义 C++ 原生程序的路径 (我们会把它编译到 build/ 文件夹里)
     const isDev = !app.isPackaged
-    const resourcesPath = isDev 
-      ? join(app.getAppPath(), 'electron-app', 'build') 
+    const resourcesPath = isDev
+      ? join(app.getAppPath(), 'electron-app', 'build')
       : process.resourcesPath
 
-    this.vstHostExe = join(resourcesPath, process.platform === 'win32' ? 'vst-worker.exe' : 'vst-worker')
+    this.vstHostExe = join(
+      resourcesPath,
+      process.platform === 'win32' ? 'vst-worker.exe' : 'vst-worker'
+    )
   }
 
   /**
@@ -40,15 +43,22 @@ export class VstBridge {
 
     // 启动现成的 VST 黑盒程序
     // (这里的参数取决于你最终下载的那个开源黑盒的文档)
-    this.vstProcess = spawn(this.vstHostExe, [
-      '--plugin', this.currentPluginPath,
-      '--sample-rate', sampleRate.toString(),
-      '--channels', '2',
-      '--raw-pcm' // 告诉黑盒我们用裸的 PCM 数据流
-    ], {
-      // 关键：把标准输出和输入暴露出来，错误输出打印到主进程
-      stdio: ['pipe', 'pipe', 'inherit']
-    })
+    this.vstProcess = spawn(
+      this.vstHostExe,
+      [
+        '--plugin',
+        this.currentPluginPath,
+        '--sample-rate',
+        sampleRate.toString(),
+        '--channels',
+        '2',
+        '--raw-pcm' // 告诉黑盒我们用裸的 PCM 数据流
+      ],
+      {
+        // 关键：把标准输出和输入暴露出来，错误输出打印到主进程
+        stdio: ['pipe', 'pipe', 'inherit']
+      }
+    )
 
     // 1. 把 FFmpeg 解码的声音“喂”给 VST 黑盒
     sourceStream.pipe(this.vstProcess.stdin)

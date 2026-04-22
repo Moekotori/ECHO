@@ -5,14 +5,7 @@ import { X, Search } from 'lucide-react'
 /**
  * Manual LRCLIB ranked rows + NetEase search rows; user picks one row.
  */
-export default function LyricsCandidatePicker({
-  open,
-  loading,
-  items,
-  onClose,
-  onPick,
-  onSearch
-}) {
+export default function LyricsCandidatePicker({ open, loading, items, onClose, onPick, onSearch }) {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
 
@@ -102,52 +95,52 @@ export default function LyricsCandidatePicker({
             <X size={20} />
           </button>
         </div>
-        
-        <form 
+
+        <form
           onSubmit={handleSearch}
           style={{
-             display: 'flex',
-             alignItems: 'center',
-             gap: 8,
-             padding: '12px 14px',
-             borderBottom: '1px solid rgba(255,255,255,0.08)'
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '12px 14px',
+            borderBottom: '1px solid rgba(255,255,255,0.08)'
           }}
         >
-           <input 
-             type="text" 
-             value={query}
-             onChange={(e) => setQuery(e.target.value)}
-             placeholder={t('lyrics.searchPlaceholder', 'Title / Artist')}
-             style={{
-               flex: 1,
-               background: 'rgba(255,255,255,0.1)',
-               border: '1px solid rgba(255,255,255,0.15)',
-               color: '#fff',
-               padding: '8px 12px',
-               borderRadius: 6,
-               outline: 'none',
-               fontSize: 13
-             }}
-           />
-           <button 
-             type="submit"
-             disabled={loading || !query.trim()}
-             style={{
-               display: 'flex',
-               alignItems: 'center',
-               justifyContent: 'center',
-               background: 'rgba(255,255,255,0.15)',
-               border: 'none',
-               color: '#fff',
-               padding: '8px',
-               borderRadius: 6,
-               cursor: (loading || !query.trim()) ? 'not-allowed' : 'pointer',
-               opacity: (loading || !query.trim()) ? 0.5 : 1
-             }}
-             aria-label={t('lyricsDrawer.manualSearch', 'Search')}
-           >
-             <Search size={16} />
-           </button>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('lyrics.searchPlaceholder', 'Title / Artist')}
+            style={{
+              flex: 1,
+              background: 'rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: '#fff',
+              padding: '8px 12px',
+              borderRadius: 6,
+              outline: 'none',
+              fontSize: 13
+            }}
+          />
+          <button
+            type="submit"
+            disabled={loading || !query.trim()}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(255,255,255,0.15)',
+              border: 'none',
+              color: '#fff',
+              padding: '8px',
+              borderRadius: 6,
+              cursor: loading || !query.trim() ? 'not-allowed' : 'pointer',
+              opacity: loading || !query.trim() ? 0.5 : 1
+            }}
+            aria-label={t('lyricsDrawer.manualSearch', 'Search')}
+          >
+            <Search size={16} />
+          </button>
         </form>
 
         <div style={{ padding: '8px 12px 14px', overflowY: 'auto', flex: 1 }}>
@@ -156,7 +149,16 @@ export default function LyricsCandidatePicker({
           ) : items.length === 0 ? (
             <p style={{ opacity: 0.75, margin: '12px 0' }}>{t('lyrics.pickEmpty')}</p>
           ) : (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <ul
+              style={{
+                listStyle: 'none',
+                margin: 0,
+                padding: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6
+              }}
+            >
               {items.map((row) => (
                 <li key={row.key}>
                   <button

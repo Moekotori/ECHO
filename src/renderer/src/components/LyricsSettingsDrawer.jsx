@@ -286,6 +286,23 @@ export default function LyricsSettingsDrawer({
                 <span className="lyrics-drawer-switch-thumb" />
               </button>
             </div>
+            <div className="lyrics-drawer-row">
+              <span className="lyrics-drawer-label">{t('lyricsDrawer.blurEffect', '沉浸歌词景深动效')}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={config.lyricsBlurEffect === true}
+                className={`lyrics-drawer-switch ${config.lyricsBlurEffect === true ? 'on' : ''}`}
+                onClick={() =>
+                  setConfig((p) => ({
+                    ...p,
+                    lyricsBlurEffect: !p.lyricsBlurEffect
+                  }))
+                }
+              >
+                <span className="lyrics-drawer-switch-thumb" />
+              </button>
+            </div>
             <div className="lyrics-drawer-slider-block">
               <div className="lyrics-drawer-label-row">
                 <span className="lyrics-drawer-label">{t('lyricsDrawer.mainLineSize')}</span>
