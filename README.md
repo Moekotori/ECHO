@@ -1,28 +1,32 @@
 <div align="center">
-  <img src="website/echo-logo.png" width="680" alt="ECHO">
+  <img src="website/echo-logo.png" width="700" alt="ECHO">
 
-  <h3>ECHO · 你的 HiFi 桌面音乐播放器</h3>
+  <h3>ECHO · 面向桌面发烧友的 HiFi 音乐播放器</h3>
 
-  <p>Electron + React 构建 · 原生音频引擎 · 沉浸式歌词 · 插件扩展</p>
+  <p>
+    Electron + React 构建 · 原生音频链路 · 沉浸式歌词 · MV 联动 · 插件扩展
+  </p>
 
   <p>
     <a href="https://github.com/Moekotori/ECHO/releases/latest">
-      <img src="https://img.shields.io/github/v/release/Moekotori/ECHO?style=flat-square&label=latest&color=e8a0b4" alt="Latest Release">
+      <img src="https://img.shields.io/github/v/release/Moekotori/ECHO?style=flat-square&label=Latest%20Release&color=cc8b65" alt="Latest Release">
     </a>
     <a href="https://github.com/Moekotori/ECHO/releases">
-      <img src="https://img.shields.io/github/downloads/Moekotori/ECHO/total?style=flat-square&color=b8d4e8" alt="Downloads">
+      <img src="https://img.shields.io/github/downloads/Moekotori/ECHO/total?style=flat-square&color=6f9db6" alt="Downloads">
     </a>
-    <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-flat-square&color=e8e0b4" alt="Platform">
-    <img src="https://img.shields.io/badge/Electron-31.x-47848f?style=flat-square" alt="Electron">
-    <img src="https://img.shields.io/badge/React-18-61dafb?style=flat-square" alt="React">
+    <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-flat-square&color=9aab89" alt="Platform">
+    <img src="https://img.shields.io/badge/Electron-31.x-546f82?style=flat-square" alt="Electron">
+    <img src="https://img.shields.io/badge/React-18-5ba7c8?style=flat-square" alt="React">
   </p>
 
   <p>
     <a href="https://github.com/Moekotori/ECHO/releases/latest"><strong>⬇ 下载最新版本</strong></a>
     &nbsp;·&nbsp;
-    <a href="docs/plugin-development.md">插件开发</a>
-    &nbsp;·&nbsp;
     <a href="#-快速开始">快速开始</a>
+    &nbsp;·&nbsp;
+    <a href="#-功能总览">功能总览</a>
+    &nbsp;·&nbsp;
+    <a href="#-插件开发">插件开发</a>
     &nbsp;·&nbsp;
     <a href="#-listen-together-服务端">联机听歌</a>
   </p>
@@ -30,11 +34,11 @@
 
 ---
 
-ECHO 是一款以桌面 HiFi 播放体验为核心的跨平台音乐播放器，使用 Electron + React 构建，并围绕本地音乐库、原生音频输出、沉浸式歌词、MV 联动、插件扩展和同步播放做了较深的桌面能力整合。
+ECHO 是一款以桌面 HiFi 播放体验为核心的跨平台音乐播放器。它不是把“能播歌”这件事做得刚刚够用，而是把本地音乐库、原生音频输出、歌词呈现、MV 联动、媒体下载和可扩展能力都认真打磨成一套完整的桌面工作流。
 
-项目目标不是做一个“能播歌”的通用播放器，而是做一个更偏发烧友与桌面重度用户场景的音乐工作台：更好的本地库体验、更直接的音频链路控制、更完整的歌词与媒体信息展示，以及更强的可扩展性。
+如果你在意播放链路、设备切换、歌词细节、桌面沉浸感，或者希望在播放器之上继续做插件与定制化开发，ECHO 想成为一个更有想法的起点。
 
-## 截图预览
+## 🖼 截图预览
 
 <div align="center">
   <img src="./website/1.png" width="800" alt="ECHO 主界面">
@@ -46,16 +50,16 @@ ECHO 是一款以桌面 HiFi 播放体验为核心的跨平台音乐播放器，
 
 ---
 
-## ✨ 核心特性
+## ✨ 功能总览
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h4>🎵 HiFi 音频引擎</h4>
+      <h4>🎛 HiFi 音频引擎</h4>
       原生音频宿主 <code>echo-audio-host</code> 独立运行，支持 Windows WASAPI 独占模式与 ASIO 设备接入，提供更直接的设备控制链路。内置 16 段参数均衡器与 Preamp，并支持变速播放、交叉淡入淡出、睡眠定时器等播放控制。
     </td>
     <td width="50%" valign="top">
-      <h4>🎤 沉浸式歌词体验</h4>
+      <h4>🫧 沉浸式歌词体验</h4>
       支持逐行与逐字高亮歌词，自动从 NetEase / LRCLIB 获取歌词，支持翻译、日语罗马音转换，以及可悬浮的桌面歌词窗口。
     </td>
   </tr>
@@ -65,13 +69,13 @@ ECHO 是一款以桌面 HiFi 播放体验为核心的跨平台音乐播放器，
       播放时可匹配 YouTube / Bilibili MV，支持全屏背景展示、画质切换、偏移校准，并在失败时自动回退，保证主播放流程稳定。
     </td>
     <td valign="top">
-      <h4>👥 Listen Together + DLNA</h4>
+      <h4>🫂 Listen Together + DLNA</h4>
       内置 Listen Together WebSocket 服务端示例，支持房间同步播放与鉴权接入，同时支持 DLNA 投流到局域网设备。
     </td>
   </tr>
   <tr>
     <td valign="top">
-      <h4>⬇ 媒体下载与导入</h4>
+      <h4>📥 媒体下载与导入</h4>
       支持下载 YouTube、Bilibili、SoundCloud 媒体资源，自动写入元数据与封面，并支持网易云歌单导入与 NCM 转换相关能力。
     </td>
     <td valign="top">
@@ -81,16 +85,16 @@ ECHO 是一款以桌面 HiFi 播放体验为核心的跨平台音乐播放器，
   </tr>
 </table>
 
-### 更多特性一览
+### 🪄 特性速览
 
-| 分类 | 内容 |
+| 模块 | 能力 |
 | --- | --- |
-| **曲库** | 本地音乐库、歌单、播放队列、用户收藏 |
-| **音频** | WASAPI / ASIO、均衡器、Preamp、交叉淡入淡出、变速播放 |
-| **歌词** | 逐行 / 逐字高亮、翻译、罗马音、桌面歌词 |
-| **媒体** | MV 联动、封面与元数据写入、媒体下载、歌单导入 |
-| **扩展** | 插件系统、主题系统、示例插件 |
-| **集成** | Listen Together、DLNA、桌面化工作流 |
+| **音乐库** | 本地音乐库、歌单、播放队列、收藏管理 |
+| **播放链路** | WASAPI / ASIO、均衡器、Preamp、交叉淡入淡出、变速播放 |
+| **歌词系统** | 逐行 / 逐字高亮、翻译、罗马音、桌面歌词 |
+| **媒体能力** | MV 联动、封面与元数据写入、媒体下载、歌单导入 |
+| **扩展机制** | 插件系统、主题系统、示例插件 |
+| **桌面集成** | Listen Together、DLNA、桌面化工作流 |
 
 ---
 
@@ -98,8 +102,8 @@ ECHO 是一款以桌面 HiFi 播放体验为核心的跨平台音乐播放器，
 
 - 面向本地音乐收藏用户，而不只是在线播放场景
 - 强调 Windows 下的高质量音频输出与设备切换能力
-- 提供桌面歌词、MV、下载、歌单导入、DLNA、Listen Together 等完整桌面功能
-- 内置插件系统与主题能力，便于二次开发和个性化扩展
+- 提供歌词、MV、下载、歌单导入、DLNA、同步播放等完整桌面体验
+- 内置插件系统与主题能力，适合作为可继续演化的播放器项目基础
 
 ---
 
@@ -118,7 +122,7 @@ ECHO 是一款以桌面 HiFi 播放体验为核心的跨平台音乐播放器，
 
 ---
 
-## 📁 目录结构
+## 🗂 项目结构
 
 ```text
 src/
@@ -149,17 +153,17 @@ website/                官网静态资源
 
 ## 🚀 快速开始
 
-| 依赖 | 版本建议 |
+| 依赖 | 建议版本 |
 | --- | --- |
 | Node.js | `>= 18`，推荐 `20 LTS` |
 | npm | `>= 9` |
 | 操作系统 | 开发建议 Windows，构建脚本兼容 macOS / Linux |
 
-说明：
+提示：
 
-- 仓库根目录包含 `.npmrc`，适合中国大陆网络环境
+- 仓库根目录包含 `.npmrc`，更适合中国大陆网络环境
 - 安装依赖时会在 `postinstall` 阶段自动处理原生模块依赖
-- 若修改了原生音频相关部分，建议额外执行一次 `npm run build:audio-host`
+- 如果修改了音频宿主相关内容，建议额外执行一次 `npm run build:audio-host`
 
 ```bash
 git clone https://github.com/Moekotori/ECHO.git
@@ -304,7 +308,7 @@ npm run test:unit
 
 ---
 
-## Special Thanks
+## 💛 Special Thanks
 
 ECHO 建立在这些优秀项目之上：
 
