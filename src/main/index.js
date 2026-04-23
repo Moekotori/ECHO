@@ -7,7 +7,10 @@
   session,
   net,
   clipboard,
-  nativeImage
+  nativeImage,
+  Tray,
+  Menu,
+  globalShortcut
 } from 'electron'
 import { createRequire } from 'module'
 import { join, basename, dirname, extname, resolve, sep } from 'path'
@@ -37,6 +40,7 @@ import DiscordRPC from 'discord-rpc'
 import axios from 'axios'
 import http from 'http'
 import { audioEngine } from './audio/AudioEngine'
+import { listAsioDevices } from './audio/NativeAudioBridge.js'
 import { DlnaMediaRenderer } from './cast/DlnaMediaRenderer.js'
 import { initCrashReporter, logError, getCrashDir } from './CrashReporter'
 import MediaDownloader from './MediaDownloader'
@@ -76,6 +80,12 @@ function dialogLocaleFromOpts(opts) {
 }
 
 let mainWindow = null
+let tray = null
+let isQuitting = false
+let trayPlaybackState = {
+  isPlaying: false,
+  trackTitle: ''
+}
 /** Floating lyrics panel (renderer `?mode=lyrics-desktop`) */
 let lyricsDesktopWindow = null
 /** Last payload so the child window can request a resend after it subscribes to IPC */
@@ -122,6 +132,224 @@ function startLyricsDesktopMainSyncTimer() {
   lyricsDesktopMainSyncTimer = setInterval(() => {
     lyricsDesktopPullFromMainRenderer()
   }, 50)
+}
+
+function cleanupLyricsDesktopWindow() {
+  try {
+    stopLyricsDesktopMainSyncTimer()
+    if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
+      try {
+        const bounds = lyricsDesktopWindow.getBounds()
+        const state = readAppStateJson()
+        state.lyricsDesktopBounds = bounds
+        writeAppStateJson(state)
+      } catch {
+        /* ignore */
+      }
+      lyricsDesktopWindow.destroy()
+    }
+  } catch {
+    /* ignore */
+  } finally {
+    lyricsDesktopWindow = null
+  }
+}
+
+function getTrayTrackTitle(status) {
+  const filePath = status?.filePath
+  if (typeof filePath !== 'string' || !filePath) return ''
+
+  try {
+    if (/^https?:\/\//i.test(filePath)) {
+      const url = new URL(filePath)
+      const name = basename(decodeURIComponent(url.pathname || ''))
+      return name ? name.replace(new RegExp(`${extname(name)}$`), '') : ''
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const name = basename(filePath)
+  return name ? name.replace(new RegExp(`${extname(name)}$`), '') : ''
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function hideMainWindowToTray() {
+  if (!mainWindow || mainWindow.isDestroyed()) return { ok: false }
+  mainWindow.hide()
+  return { ok: true }
+}
+
+function toggleMainWindowVisibility() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isVisible()) {
+    mainWindow.hide()
+    return
+  }
+  showMainWindow()
+}
+
+function sendPlayerCommand(command) {
+  if (!mainWindow || mainWindow.isDestroyed()) return { ok: false }
+  mainWindow.webContents.send('player:cmd', command)
+  return { ok: true }
+}
+
+function registerGlobalMediaShortcuts() {
+  const shortcutSpecs = [
+    {
+      accelerator: 'MediaPlayPause',
+      handler: () => {
+        const status = audioEngine.getStatus()
+        if (status?.isPlaying) audioEngine.pause()
+        else audioEngine.resume()
+      }
+    },
+    {
+      accelerator: 'MediaNextTrack',
+      handler: () => {
+        sendPlayerCommand('next')
+      }
+    },
+    {
+      accelerator: 'MediaPreviousTrack',
+      handler: () => {
+        sendPlayerCommand('prev')
+      }
+    },
+    {
+      accelerator: 'MediaStop',
+      handler: () => {
+        audioEngine.stop()
+      }
+    }
+  ]
+
+  for (const { accelerator, handler } of shortcutSpecs) {
+    try {
+      const registered = globalShortcut.register(accelerator, handler)
+      if (!registered) {
+        console.warn(`[Shortcut] Failed to register ${accelerator}`)
+      }
+    } catch (error) {
+      console.warn(`[Shortcut] Failed to register ${accelerator}:`, error?.message || error)
+    }
+  }
+}
+
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
+    {
+      label: trayPlaybackState.trackTitle || 'ECHO',
+      enabled: false
+    },
+    { type: 'separator' },
+    {
+      label: trayPlaybackState.isPlaying ? '暂停' : '播放',
+      click: () => {
+        if (trayPlaybackState.isPlaying) audioEngine.pause()
+        else audioEngine.resume()
+      }
+    },
+    {
+      label: '上一首',
+      click: () => {
+        sendPlayerCommand('prev')
+      }
+    },
+    {
+      label: '下一首',
+      click: () => {
+        sendPlayerCommand('next')
+      }
+    },
+    { type: 'separator' },
+    {
+      label: '显示窗口',
+      click: () => {
+        showMainWindow()
+      }
+    },
+    {
+      label: '退出',
+      click: () => {
+        app.quit()
+      }
+    }
+  ])
+}
+
+function refreshTrayMenu(status) {
+  let shouldUpdateMenu = false
+
+  if (status && typeof status === 'object') {
+    const nextState = {
+      isPlaying: !!status.isPlaying,
+      trackTitle: getTrayTrackTitle(status)
+    }
+    shouldUpdateMenu =
+      nextState.isPlaying !== trayPlaybackState.isPlaying ||
+      nextState.trackTitle !== trayPlaybackState.trackTitle
+    trayPlaybackState = nextState
+  }
+
+  if (!tray || tray.isDestroyed()) return
+  if (status && !shouldUpdateMenu) return
+  tray.setContextMenu(buildTrayMenu())
+}
+
+function createTrayIcon() {
+  const candidatePaths = [join(__dirname, '..', '..', 'website', 'icon.png'), resolveAppIconPath()]
+
+  for (const candidate of candidatePaths) {
+    if (!candidate) continue
+    const icon = nativeImage.createFromPath(candidate)
+    if (!icon.isEmpty()) return icon
+  }
+
+  return undefined
+}
+
+function createTray() {
+  if (tray && !tray.isDestroyed()) {
+    refreshTrayMenu(audioEngine.getStatus())
+    return tray
+  }
+
+  const trayIcon = createTrayIcon()
+  if (!trayIcon) return null
+
+  tray = new Tray(trayIcon)
+  tray.setToolTip('ECHO')
+  refreshTrayMenu(audioEngine.getStatus())
+
+  tray.on('click', () => {
+    toggleMainWindowVisibility()
+  })
+  tray.on('right-click', () => {
+    refreshTrayMenu(audioEngine.getStatus())
+    tray?.popUpContextMenu(buildTrayMenu())
+  })
+
+  return tray
+}
+
+function destroyTray() {
+  if (!tray || tray.isDestroyed()) return
+  tray.destroy()
+  tray = null
+}
+
+function broadcastAudioStatus(status) {
+  refreshTrayMenu(status)
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('audio:status-update', status)
 }
 
 function broadcastCastStatus() {
@@ -302,6 +530,7 @@ async function resolveNeteaseAuthState(preferredCookie = '') {
 
 function resolveAppIconPath() {
   const candidates = [
+    join(__dirname, '..', '..', 'website', 'icon.png'),
     resolve(app.getAppPath(), 'website', 'icon.png'),
     resolve(app.getAppPath(), '..', 'website', 'icon.png'),
     resolve(__dirname, '..', '..', 'website', 'icon.png'),
@@ -570,22 +799,13 @@ async function createWindow() {
     }
   })
 
-  mainWindow.on('close', () => {
-    try {
-      stopLyricsDesktopMainSyncTimer()
-      if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
-        try {
-          const bounds = lyricsDesktopWindow.getBounds()
-          const state = readAppStateJson()
-          state.lyricsDesktopBounds = bounds
-          writeAppStateJson(state)
-        } catch (e) {}
-        lyricsDesktopWindow.destroy()
-        lyricsDesktopWindow = null
-      }
-    } catch {
-      /* ignore */
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault()
+      hideMainWindowToTray()
+      return
     }
+    cleanupLyricsDesktopWindow()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -599,6 +819,8 @@ async function createWindow() {
     const localUrl = await startRendererHttpServer()
     mainWindow.loadURL(localUrl)
   }
+
+  createTray()
 }
 
 // Discord RPC Setup
@@ -1540,6 +1762,10 @@ app.whenReady().then(async () => {
     app.quit()
   })
 
+  ipcMain.handle('window:hide-to-tray', async () => {
+    return hideMainWindowToTray()
+  })
+
   // IPC: Maximize App
   ipcMain.on('window:maximize', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -1553,6 +1779,14 @@ app.whenReady().then(async () => {
   ipcMain.on('window:minimize', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     if (win) win.minimize()
+  })
+
+  ipcMain.handle('player:next', async () => {
+    return sendPlayerCommand('next')
+  })
+
+  ipcMain.handle('player:prev', async () => {
+    return sendPlayerCommand('prev')
   })
 
   // IPC: Download from SoundCloud using Third-Party Proxy
@@ -2119,8 +2353,21 @@ app.whenReady().then(async () => {
     return audioEngine.getDevices()
   })
 
+  ipcMain.handle('audio:getAsioDevices', () => {
+    try {
+      return listAsioDevices()
+    } catch {
+      return []
+    }
+  })
+
   ipcMain.handle('audio:setDevice', async (_, deviceId) => {
     return audioEngine.setDevice(deviceId)
+  })
+
+  ipcMain.handle('audio:setAsio', (_, enabled) => {
+    audioEngine.setAsio(enabled)
+    return { ok: true }
   })
 
   ipcMain.handle('audio:setExclusive', async (_, exclusive) => {
@@ -2154,6 +2401,22 @@ app.whenReady().then(async () => {
     audioEngine.resume()
   })
 
+  ipcMain.handle('audio:startFadeOut', async (_, durationMs) => {
+    return await new Promise((resolve) => {
+      audioEngine.startFadeOut(durationMs, () => resolve(true))
+    })
+  })
+
+  ipcMain.handle('audio:startFadeIn', async (_, durationMs) => {
+    audioEngine.startFadeIn(durationMs)
+    return true
+  })
+
+  ipcMain.handle('audio:cancelFade', async () => {
+    audioEngine.cancelFade()
+    return true
+  })
+
   ipcMain.handle('audio:stop', async () => {
     audioEngine.stop()
   })
@@ -2179,9 +2442,13 @@ app.whenReady().then(async () => {
   setInterval(() => {
     if (!mainWindow || mainWindow.isDestroyed()) return
     const status = audioEngine.getStatus()
-    if (lastAudioStatus && lastAudioStatus.playing !== status.playing) {
+    if (
+      !lastAudioStatus ||
+      lastAudioStatus.isPlaying !== status.isPlaying ||
+      lastAudioStatus.filePath !== status.filePath
+    ) {
       // Playing state changed, notify renderer
-      mainWindow.webContents.send('audio:status-update', status)
+      broadcastAudioStatus(status)
     }
     lastAudioStatus = status
   }, 200)
@@ -2664,12 +2931,11 @@ app.whenReady().then(async () => {
 
   // 定时推送播放状态到渲染进程 (200ms 间隔)
   setInterval(() => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('audio:status-update', audioEngine.getStatus())
-    }
+    broadcastAudioStatus(audioEngine.getStatus())
   }, 200)
 
   await createWindow()
+  registerGlobalMediaShortcuts()
   pluginManager.setMainWindow(mainWindow)
   pluginManager.loadAll().catch((e) => {
     console.error('[PluginManager] loadAll failed:', e?.message || e)
@@ -2686,6 +2952,8 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  isQuitting = true
+  destroyTray()
   discordRpcQuitting = true
   clearRpcRetryTimer()
   void disposeDiscordRpc()
@@ -2696,6 +2964,7 @@ app.on('before-quit', () => {
 })
 
 app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
   flushAppStateCacheSync()
 })
 

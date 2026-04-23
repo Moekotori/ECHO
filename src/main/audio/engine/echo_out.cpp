@@ -17,14 +17,47 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdint.h>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <io.h>
 #include <fcntl.h>
 #include <mmdeviceapi.h>
-#include <functiondiscoverykeys_devpkey.h>
 #include <propidl.h>
+#ifdef __MINGW32__
+#include <propkeydef.h>
+#include <initguid.h>
+DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0, 14);
+#else
+#include <functiondiscoverykeys_devpkey.h>
+#endif
+#ifdef MA_ENABLE_ASIO
+#include "asio.h"
+#include "asiodrivers.h"
+extern AsioDrivers* asioDrivers;
+bool loadAsioDriver(char* name);
+#define MAX_ASIO_INPUT_CHANNELS 8
+#define MAX_ASIO_OUTPUT_CHANNELS 8
+#define MAX_ASIO_TOTAL_CHANNELS (MAX_ASIO_INPUT_CHANNELS + MAX_ASIO_OUTPUT_CHANNELS)
+typedef struct asio_runtime {
+    ASIODriverInfo driverInfo;
+    ASIOCallbacks callbacks;
+    ASIOBufferInfo bufferInfos[MAX_ASIO_TOTAL_CHANNELS];
+    ASIOChannelInfo channelInfos[MAX_ASIO_TOTAL_CHANNELS];
+    long inputChannelCount;
+    long outputChannelCount;
+    long totalChannelCount;
+    long outputChannelOffset;
+    long bufferSize;
+    ASIOSampleRate sampleRate;
+    ASIOBool postOutput;
+    ma_uint32 streamChannels;
+    float* scratch;
+    HWND sysRefWindow;
+} asio_runtime;
+static asio_runtime g_asio;
+#endif
 #else
 #include <time.h>
 static void portable_sleep_ms(int ms) {
@@ -66,6 +99,10 @@ static void get_wasapi_device_friendly_name_utf8(const ma_device_id* deviceId, c
     IMMDevice* device = NULL;
     IPropertyStore* props = NULL;
     PROPVARIANT value;
+    const PROPERTYKEY friendlyNameKey = {
+        {0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}},
+        14
+    };
 
     if (out == NULL || out_len <= 0) return;
     out[0] = '\0';
@@ -84,7 +121,7 @@ static void get_wasapi_device_friendly_name_utf8(const ma_device_id* deviceId, c
 
     if (enumerator->GetDevice(deviceId->wasapi, &device) != S_OK) goto done;
     if (device->OpenPropertyStore(STGM_READ, &props) != S_OK) goto done;
-    if (props->GetValue(PKEY_Device_FriendlyName, &value) != S_OK) goto done;
+    if (props->GetValue(friendlyNameKey, &value) != S_OK) goto done;
     if (value.vt != VT_LPWSTR || value.pwszVal == NULL) goto done;
 
     wide_to_utf8(value.pwszVal, out, out_len);
@@ -247,6 +284,58 @@ static int collect_unique_playback_devices(ma_context* context, listed_device** 
     return 0;
 }
 
+static int collect_unique_playback_devices_by_name(ma_context* context, listed_device** outDevices, ma_uint32* outCount) {
+    ma_device_info* playbackInfos = NULL;
+    ma_uint32 playbackCount = 0;
+    listed_device* devices = NULL;
+    ma_uint32 uniqueCount = 0;
+
+    if (outDevices == NULL || outCount == NULL) return -1;
+    *outDevices = NULL;
+    *outCount = 0;
+
+    if (ma_context_get_devices(context, &playbackInfos, &playbackCount, NULL, NULL) != MA_SUCCESS) {
+        return -1;
+    }
+
+    devices = (listed_device*)calloc((size_t)(playbackCount > 0 ? playbackCount : 1), sizeof(listed_device));
+    if (devices == NULL) {
+        return -1;
+    }
+
+    for (ma_uint32 i = 0; i < playbackCount; ++i) {
+        char utf8Name[512];
+        ma_uint32 highestSampleRate = get_highest_sample_rate(&playbackInfos[i]);
+        ma_uint32 existingIndex = (ma_uint32)-1;
+
+        device_name_to_utf8(playbackInfos[i].name, utf8Name, (int)sizeof(utf8Name));
+        if (utf8Name[0] == '\0') continue;
+
+        for (ma_uint32 j = 0; j < uniqueCount; ++j) {
+            if (strcmp(devices[j].name, utf8Name) == 0) {
+                existingIndex = j;
+                break;
+            }
+        }
+
+        if (existingIndex != (ma_uint32)-1) {
+            if (highestSampleRate > devices[existingIndex].highestSampleRate) {
+                devices[existingIndex].highestSampleRate = highestSampleRate;
+            }
+            continue;
+        }
+
+        devices[uniqueCount].id = playbackInfos[i].id;
+        devices[uniqueCount].highestSampleRate = highestSampleRate;
+        snprintf(devices[uniqueCount].name, sizeof(devices[uniqueCount].name), "%s", utf8Name);
+        uniqueCount += 1;
+    }
+
+    *outDevices = devices;
+    *outCount = uniqueCount;
+    return 0;
+}
+
 static int contains_icase(const char* haystack, const char* needle) {
     if (haystack == NULL || needle == NULL) return 0;
     size_t hLen = strlen(haystack);
@@ -273,6 +362,486 @@ static void sleep_ms(int ms) {
     portable_sleep_ms(ms);
 #endif
 }
+
+#ifdef _WIN32
+#ifdef MA_ENABLE_ASIO
+static int collect_asio_playback_devices(listed_device** outDevices, ma_uint32* outCount) {
+    const long maxDrivers = 64;
+    char nameStorage[64][512];
+    char* names[64];
+    listed_device* devices = NULL;
+    ma_uint32 uniqueCount = 0;
+    AsioDrivers drivers;
+
+    if (outDevices == NULL || outCount == NULL) return -1;
+    *outDevices = NULL;
+    *outCount = 0;
+
+    for (long i = 0; i < maxDrivers; ++i) names[i] = nameStorage[i];
+
+    long count = drivers.getDriverNames(names, maxDrivers);
+    if (count <= 0) return 0;
+
+    devices = (listed_device*)calloc((size_t)count, sizeof(listed_device));
+    if (devices == NULL) return -1;
+
+    for (long i = 0; i < count; ++i) {
+        char utf8Name[512];
+        ma_uint32 existingIndex = (ma_uint32)-1;
+
+        device_name_to_utf8(names[i], utf8Name, (int)sizeof(utf8Name));
+        if (utf8Name[0] == '\0') continue;
+
+        for (ma_uint32 j = 0; j < uniqueCount; ++j) {
+            if (strcmp(devices[j].name, utf8Name) == 0) {
+                existingIndex = j;
+                break;
+            }
+        }
+        if (existingIndex != (ma_uint32)-1) continue;
+
+        snprintf(devices[uniqueCount].name, sizeof(devices[uniqueCount].name), "%s", utf8Name);
+        uniqueCount += 1;
+    }
+
+    *outDevices = devices;
+    *outCount = uniqueCount;
+    return 0;
+}
+
+static long clamp_long(long value, long minValue, long maxValue) {
+    if (value < minValue) return minValue;
+    if (value > maxValue) return maxValue;
+    return value;
+}
+
+static float clamp_float_sample(float sample) {
+    if (sample < -1.0f) return -1.0f;
+    if (sample > 1.0f) return 1.0f;
+    return sample;
+}
+
+static void write_u24_le(unsigned char* dst, int32_t value) {
+    dst[0] = (unsigned char)(value & 0xFF);
+    dst[1] = (unsigned char)((value >> 8) & 0xFF);
+    dst[2] = (unsigned char)((value >> 16) & 0xFF);
+}
+
+static void write_u24_be(unsigned char* dst, int32_t value) {
+    dst[0] = (unsigned char)((value >> 16) & 0xFF);
+    dst[1] = (unsigned char)((value >> 8) & 0xFF);
+    dst[2] = (unsigned char)(value & 0xFF);
+}
+
+static void write_u16_be(unsigned char* dst, uint16_t value) {
+    dst[0] = (unsigned char)((value >> 8) & 0xFF);
+    dst[1] = (unsigned char)(value & 0xFF);
+}
+
+static void write_u32_le(unsigned char* dst, uint32_t value) {
+    dst[0] = (unsigned char)(value & 0xFF);
+    dst[1] = (unsigned char)((value >> 8) & 0xFF);
+    dst[2] = (unsigned char)((value >> 16) & 0xFF);
+    dst[3] = (unsigned char)((value >> 24) & 0xFF);
+}
+
+static void write_u32_be(unsigned char* dst, uint32_t value) {
+    dst[0] = (unsigned char)((value >> 24) & 0xFF);
+    dst[1] = (unsigned char)((value >> 16) & 0xFF);
+    dst[2] = (unsigned char)((value >> 8) & 0xFF);
+    dst[3] = (unsigned char)(value & 0xFF);
+}
+
+static int asio_sample_type_supported(ASIOSampleType type) {
+    switch (type) {
+        case ASIOSTInt16LSB:
+        case ASIOSTInt24LSB:
+        case ASIOSTInt32LSB:
+        case ASIOSTFloat32LSB:
+        case ASIOSTFloat64LSB:
+        case ASIOSTInt32LSB16:
+        case ASIOSTInt32LSB18:
+        case ASIOSTInt32LSB20:
+        case ASIOSTInt32LSB24:
+        case ASIOSTInt16MSB:
+        case ASIOSTInt24MSB:
+        case ASIOSTInt32MSB:
+        case ASIOSTFloat32MSB:
+        case ASIOSTFloat64MSB:
+        case ASIOSTInt32MSB16:
+        case ASIOSTInt32MSB18:
+        case ASIOSTInt32MSB20:
+        case ASIOSTInt32MSB24:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static ASIOSampleRate asio_sample_rate_from_double(double value) {
+    ASIOSampleRate rate;
+    memset(&rate, 0, sizeof(rate));
+    memcpy(&rate, &value, sizeof(double) < sizeof(rate) ? sizeof(double) : sizeof(rate));
+    return rate;
+}
+
+static double asio_sample_rate_to_double(ASIOSampleRate rate) {
+    double value = 0.0;
+    memcpy(&value, &rate, sizeof(double) < sizeof(rate) ? sizeof(double) : sizeof(rate));
+    return value;
+}
+
+static LRESULT CALLBACK asio_host_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+static HWND create_asio_host_window(void) {
+    static const wchar_t* kClassName = L"EchoAudioHostAsioWindow";
+    static int classRegistered = 0;
+    HINSTANCE instance = GetModuleHandle(NULL);
+
+    if (!classRegistered) {
+        WNDCLASSW wc;
+        memset(&wc, 0, sizeof(wc));
+        wc.lpfnWndProc = asio_host_wndproc;
+        wc.hInstance = instance;
+        wc.lpszClassName = kClassName;
+        if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            return NULL;
+        }
+        classRegistered = 1;
+    }
+
+    return CreateWindowExW(
+        0,
+        kClassName,
+        L"Echo Audio Host ASIO",
+        WS_OVERLAPPED,
+        0, 0, 0, 0,
+        NULL,
+        NULL,
+        instance,
+        NULL
+    );
+}
+
+static void write_asio_sample(void* buffer, ASIOSampleType type, long frameIndex, float sample) {
+    float clamped = clamp_float_sample(sample);
+    int32_t s16 = (int32_t)(clamped * 32767.0f);
+    int32_t s24 = (int32_t)(clamped * 8388607.0f);
+    int32_t s32 = (int32_t)(clamped * 2147483647.0f);
+    unsigned char* bytes = (unsigned char*)buffer;
+
+    switch (type) {
+        case ASIOSTInt16LSB:
+            ((int16_t*)buffer)[frameIndex] = (int16_t)s16;
+            break;
+        case ASIOSTInt16MSB:
+            write_u16_be(bytes + frameIndex * 2, (uint16_t)(int16_t)s16);
+            break;
+        case ASIOSTInt24LSB:
+            write_u24_le(bytes + frameIndex * 3, s24);
+            break;
+        case ASIOSTInt24MSB:
+            write_u24_be(bytes + frameIndex * 3, s24);
+            break;
+        case ASIOSTInt32LSB:
+        case ASIOSTInt32LSB16:
+        case ASIOSTInt32LSB18:
+        case ASIOSTInt32LSB20:
+        case ASIOSTInt32LSB24:
+            ((int32_t*)buffer)[frameIndex] = s32;
+            break;
+        case ASIOSTInt32MSB:
+        case ASIOSTInt32MSB16:
+        case ASIOSTInt32MSB18:
+        case ASIOSTInt32MSB20:
+        case ASIOSTInt32MSB24:
+            write_u32_be(bytes + frameIndex * 4, (uint32_t)s32);
+            break;
+        case ASIOSTFloat32LSB:
+            ((float*)buffer)[frameIndex] = clamped;
+            break;
+        case ASIOSTFloat32MSB: {
+            union { float f; uint32_t u; } cvt;
+            cvt.f = clamped;
+            write_u32_be(bytes + frameIndex * 4, cvt.u);
+            break;
+        }
+        case ASIOSTFloat64LSB:
+            ((double*)buffer)[frameIndex] = (double)clamped;
+            break;
+        case ASIOSTFloat64MSB: {
+            union { double d; uint64_t u; } cvt;
+            unsigned char* out = bytes + frameIndex * 8;
+            cvt.d = (double)clamped;
+            out[0] = (unsigned char)((cvt.u >> 56) & 0xFF);
+            out[1] = (unsigned char)((cvt.u >> 48) & 0xFF);
+            out[2] = (unsigned char)((cvt.u >> 40) & 0xFF);
+            out[3] = (unsigned char)((cvt.u >> 32) & 0xFF);
+            out[4] = (unsigned char)((cvt.u >> 24) & 0xFF);
+            out[5] = (unsigned char)((cvt.u >> 16) & 0xFF);
+            out[6] = (unsigned char)((cvt.u >> 8) & 0xFF);
+            out[7] = (unsigned char)(cvt.u & 0xFF);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+static void render_asio_output(long bufferIndex) {
+    long frames = g_asio.bufferSize;
+    ma_uint32 streamChannels = g_asio.streamChannels;
+    ma_uint32 framesToRead = (ma_uint32)frames;
+    void* pBuffer = NULL;
+    ma_uint32 framesRead = 0;
+
+    memset(g_asio.scratch, 0, (size_t)frames * streamChannels * sizeof(float));
+
+    if (ma_pcm_rb_acquire_read(&g_rb, &framesToRead, &pBuffer) == MA_SUCCESS && framesToRead > 0) {
+        memcpy(g_asio.scratch, pBuffer, (size_t)framesToRead * streamChannels * sizeof(float));
+        ma_pcm_rb_commit_read(&g_rb, framesToRead);
+        framesRead = framesToRead;
+        g_framesConsumed += framesRead;
+    }
+
+    for (long ch = 0; ch < g_asio.outputChannelCount; ++ch) {
+        long asioIndex = g_asio.outputChannelOffset + ch;
+        void* output = g_asio.bufferInfos[asioIndex].buffers[bufferIndex];
+        ASIOSampleType type = g_asio.channelInfos[asioIndex].type;
+        for (long frame = 0; frame < frames; ++frame) {
+            float sample = 0.0f;
+            if ((ma_uint32)frame < framesRead) {
+                ma_uint32 srcCh = streamChannels == 1 ? 0 : (ma_uint32)clamp_long(ch, 0, (long)streamChannels - 1);
+                sample = g_asio.scratch[frame * streamChannels + srcCh];
+            }
+            write_asio_sample(output, type, frame, sample);
+        }
+    }
+
+    if (g_asio.postOutput) ASIOOutputReady();
+}
+
+static void asio_buffer_switch(long index, ASIOBool processNow) {
+    (void)processNow;
+    render_asio_output(index);
+}
+
+static ASIOTime* asio_buffer_switch_time_info(ASIOTime* params, long index, ASIOBool processNow) {
+    (void)params;
+    (void)processNow;
+    render_asio_output(index);
+    return params;
+}
+
+static void asio_sample_rate_changed(ASIOSampleRate sRate) {
+    g_asio.sampleRate = sRate;
+}
+
+static long asio_messages(long selector, long value, void* message, double* opt) {
+    (void)value;
+    (void)message;
+    (void)opt;
+    switch (selector) {
+        case kAsioSelectorSupported:
+            if (value == kAsioResetRequest ||
+                value == kAsioEngineVersion ||
+                value == kAsioResyncRequest ||
+                value == kAsioLatenciesChanged ||
+                value == kAsioSupportsTimeInfo ||
+                value == kAsioSupportsTimeCode ||
+                value == kAsioSupportsInputMonitor) {
+                return 1L;
+            }
+            return 0L;
+        case kAsioResetRequest:
+            return 1L;
+        case kAsioResyncRequest:
+            return 1L;
+        case kAsioLatenciesChanged:
+            return 1L;
+        case kAsioEngineVersion:
+            return 2L;
+        case kAsioSupportsTimeInfo:
+            return 1L;
+        case kAsioSupportsTimeCode:
+            return 0L;
+        default:
+            return 0L;
+    }
+}
+
+static int init_asio_runtime(const char* targetDeviceName, int targetDeviceIndex, ma_uint32 sampleRate, ma_uint32 channels, ma_uint32* outSampleRate, ma_uint32* outChannels) {
+    listed_device* devices = NULL;
+    ma_uint32 deviceCount = 0;
+    const char* selectedName = NULL;
+
+    if (collect_asio_playback_devices(&devices, &deviceCount) != 0 || deviceCount == 0) {
+        free(devices);
+        return -1;
+    }
+
+    if (targetDeviceIndex >= 0) {
+        if ((ma_uint32)targetDeviceIndex < deviceCount) selectedName = devices[targetDeviceIndex].name;
+    } else if (targetDeviceName != NULL) {
+        for (ma_uint32 i = 0; i < deviceCount; ++i) {
+            if (contains_icase(devices[i].name, targetDeviceName) ||
+                contains_icase(targetDeviceName, devices[i].name) ||
+                strcmp(devices[i].name, targetDeviceName) == 0) {
+                selectedName = devices[i].name;
+                break;
+            }
+        }
+    } else {
+        selectedName = devices[0].name;
+    }
+
+    if (selectedName == NULL) {
+        free(devices);
+        return -1;
+    }
+
+    memset(&g_asio, 0, sizeof(g_asio));
+    g_asio.driverInfo.asioVersion = 2;
+    g_asio.sysRefWindow = create_asio_host_window();
+    g_asio.driverInfo.sysRef = g_asio.sysRefWindow != NULL ? g_asio.sysRefWindow : GetDesktopWindow();
+    g_asio.streamChannels = channels;
+
+    if (!loadAsioDriver((char*)selectedName)) {
+        fprintf(stderr, "[echo-audio-host] ASIO loadDriver failed: %s\n", selectedName);
+        free(devices);
+        return -1;
+    }
+
+    if (ASIOInit(&g_asio.driverInfo) != ASE_OK) {
+        fprintf(stderr, "[echo-audio-host] ASIOInit failed: %s | error=%s\n",
+                selectedName,
+                g_asio.driverInfo.errorMessage[0] != '\0' ? g_asio.driverInfo.errorMessage : "(none)");
+        free(devices);
+        ASIOExit();
+        return -1;
+    }
+
+    long inputChannels = 0;
+    long outputChannels = 0;
+    long minSize = 0;
+    long maxSize = 0;
+    long preferredSize = 0;
+    long granularity = 0;
+
+    if (ASIOGetChannels(&inputChannels, &outputChannels) != ASE_OK || outputChannels <= 0) {
+        fprintf(stderr, "[echo-audio-host] ASIOGetChannels failed: %s\n", selectedName);
+        free(devices);
+        ASIOExit();
+        return -1;
+    }
+    if (ASIOGetBufferSize(&minSize, &maxSize, &preferredSize, &granularity) != ASE_OK || preferredSize <= 0) {
+        fprintf(stderr, "[echo-audio-host] ASIOGetBufferSize failed: %s\n", selectedName);
+        free(devices);
+        ASIOExit();
+        return -1;
+    }
+
+    ASIOSampleRate requestedRate = asio_sample_rate_from_double((double)sampleRate);
+    g_asio.sampleRate = requestedRate;
+
+    g_asio.postOutput = ASIOOutputReady() == ASE_OK ? ASIOTrue : ASIOFalse;
+    g_asio.inputChannelCount = inputChannels < MAX_ASIO_INPUT_CHANNELS ? inputChannels : MAX_ASIO_INPUT_CHANNELS;
+    g_asio.outputChannelCount = outputChannels < MAX_ASIO_OUTPUT_CHANNELS ? outputChannels : MAX_ASIO_OUTPUT_CHANNELS;
+    if (channels < (ma_uint32)g_asio.outputChannelCount) g_asio.outputChannelCount = (long)channels;
+    if (g_asio.outputChannelCount <= 0) {
+        fprintf(stderr, "[echo-audio-host] ASIO has no usable output channels: %s\n", selectedName);
+        free(devices);
+        ASIOExit();
+        return -1;
+    }
+    g_asio.outputChannelOffset = g_asio.inputChannelCount;
+    g_asio.totalChannelCount = g_asio.inputChannelCount + g_asio.outputChannelCount;
+    g_asio.bufferSize = preferredSize;
+    g_asio.scratch = (float*)calloc((size_t)g_asio.bufferSize * g_asio.streamChannels, sizeof(float));
+    if (g_asio.scratch == NULL) {
+        fprintf(stderr, "[echo-audio-host] ASIO scratch alloc failed: %s\n", selectedName);
+        free(devices);
+        ASIOExit();
+        return -1;
+    }
+
+    memset(&g_asio.callbacks, 0, sizeof(g_asio.callbacks));
+    g_asio.callbacks.bufferSwitch = asio_buffer_switch;
+    g_asio.callbacks.sampleRateDidChange = asio_sample_rate_changed;
+    g_asio.callbacks.asioMessage = asio_messages;
+    g_asio.callbacks.bufferSwitchTimeInfo = asio_buffer_switch_time_info;
+
+    for (long i = 0; i < g_asio.inputChannelCount; ++i) {
+        g_asio.bufferInfos[i].isInput = ASIOTrue;
+        g_asio.bufferInfos[i].channelNum = i;
+        g_asio.bufferInfos[i].buffers[0] = NULL;
+        g_asio.bufferInfos[i].buffers[1] = NULL;
+    }
+
+    for (long i = 0; i < g_asio.outputChannelCount; ++i) {
+        long asioIndex = g_asio.outputChannelOffset + i;
+        g_asio.bufferInfos[asioIndex].isInput = ASIOFalse;
+        g_asio.bufferInfos[asioIndex].channelNum = i;
+        g_asio.bufferInfos[asioIndex].buffers[0] = NULL;
+        g_asio.bufferInfos[asioIndex].buffers[1] = NULL;
+    }
+
+    ASIOError createResult = ASIOCreateBuffers(g_asio.bufferInfos, g_asio.totalChannelCount, g_asio.bufferSize, &g_asio.callbacks);
+    if (createResult != ASE_OK) {
+        fprintf(stderr, "[echo-audio-host] ASIOCreateBuffers failed: %s | inputs=%ld outputs=%ld total=%ld buffer=%ld err=%ld\n",
+                selectedName, g_asio.inputChannelCount, g_asio.outputChannelCount, g_asio.totalChannelCount, g_asio.bufferSize, (long)createResult);
+        free(g_asio.scratch);
+        g_asio.scratch = NULL;
+        free(devices);
+        ASIOExit();
+        return -1;
+    }
+
+    for (long i = 0; i < g_asio.totalChannelCount; ++i) {
+        g_asio.channelInfos[i].channel = g_asio.bufferInfos[i].channelNum;
+        g_asio.channelInfos[i].isInput = g_asio.bufferInfos[i].isInput;
+        if (ASIOGetChannelInfo(&g_asio.channelInfos[i]) != ASE_OK) {
+            fprintf(stderr, "[echo-audio-host] ASIOGetChannelInfo failed: %s | ch=%ld isInput=%ld\n", selectedName, i, (long)g_asio.channelInfos[i].isInput);
+            ASIODisposeBuffers();
+            free(g_asio.scratch);
+            g_asio.scratch = NULL;
+            free(devices);
+            ASIOExit();
+            return -1;
+        }
+        if (!g_asio.channelInfos[i].isInput && !asio_sample_type_supported(g_asio.channelInfos[i].type)) {
+            fprintf(stderr, "[echo-audio-host] Unsupported ASIO sample type: %s | ch=%ld type=%ld\n",
+                    selectedName, i, (long)g_asio.channelInfos[i].type);
+            ASIODisposeBuffers();
+            free(g_asio.scratch);
+            g_asio.scratch = NULL;
+            free(devices);
+            ASIOExit();
+            return -1;
+        }
+    }
+
+    if (outSampleRate != NULL) *outSampleRate = (ma_uint32)(asio_sample_rate_to_double(g_asio.sampleRate) + 0.5);
+    if (outChannels != NULL) *outChannels = (ma_uint32)g_asio.outputChannelCount;
+    free(devices);
+    return 0;
+}
+
+static void uninit_asio_runtime(void) {
+    ASIOStop();
+    ASIODisposeBuffers();
+    ASIOExit();
+    if (g_asio.sysRefWindow != NULL) {
+        DestroyWindow(g_asio.sysRefWindow);
+        g_asio.sysRefWindow = NULL;
+    }
+    free(g_asio.scratch);
+    memset(&g_asio, 0, sizeof(g_asio));
+}
+#endif
+#endif
 
 /* ── realtime audio callback ── */
 
@@ -323,8 +892,42 @@ int main(int argc, char** argv) {
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
+    int listDevices = 0;
+    int useAsio = 0;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-list") == 0) listDevices = 1;
+        else if (strcmp(argv[i], "-asio") == 0) useAsio = 1;
+    }
+
     /* -list: enumerate devices and exit */
-    if (argc > 1 && strcmp(argv[1], "-list") == 0) {
+    if (listDevices) {
+#ifdef _WIN32
+#ifdef MA_ENABLE_ASIO
+        if (useAsio) {
+            listed_device* devices = NULL;
+            ma_uint32 deviceCount = 0;
+            if (collect_asio_playback_devices(&devices, &deviceCount) == 0) {
+                for (ma_uint32 i = 0; i < deviceCount; i++) {
+                    fprintf(stdout, "%u\t[ASIO] %s\n", i, devices[i].name);
+                }
+                fflush(stdout);
+                free(devices);
+            }
+            return 0;
+        }
+#else
+        if (useAsio) {
+            fprintf(stderr, "[echo-audio-host] ASIO support is not enabled in this build\n");
+            return -3;
+        }
+#endif
+#else
+        if (useAsio) {
+            fprintf(stderr, "[echo-audio-host] ASIO is only supported on Windows builds\n");
+            return -3;
+        }
+#endif
         ma_context context;
 #ifdef _WIN32
         ma_backend backends[] = { ma_backend_wasapi };
@@ -360,28 +963,51 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "-sr") == 0 && i + 1 < argc)           sampleRate = atoi(argv[++i]);
         else if (strcmp(argv[i], "-ch") == 0 && i + 1 < argc)      channels = atoi(argv[++i]);
         else if (strcmp(argv[i], "-exclusive") == 0)                exclusive = MA_TRUE;
+        else if (strcmp(argv[i], "-asio") == 0)                     useAsio = 1;
         else if (strcmp(argv[i], "-device") == 0 && i + 1 < argc)  targetDeviceName = argv[++i];
         else if (strcmp(argv[i], "-device-index") == 0 && i + 1 < argc) targetDeviceIndex = atoi(argv[++i]);
         else if (strcmp(argv[i], "-vol") == 0 && i + 1 < argc)     g_volume = (float)atof(argv[++i]);
     }
 
     /* ── init context (WASAPI on Windows) ── */
+    ma_uint32 actualSampleRate = sampleRate;
+    ma_uint32 actualChannels = channels;
     ma_context context;
+    ma_device device;
+    ma_device_id deviceId;
+    ma_device_id* pDeviceId = NULL;
+    memset(&context, 0, sizeof(context));
+    memset(&device, 0, sizeof(device));
+
+    if (!useAsio) {
 #ifdef _WIN32
-    ma_backend backends[] = { ma_backend_wasapi };
-    if (ma_context_init(backends, 1, NULL, &context) != MA_SUCCESS) {
+        ma_backend backends[] = { ma_backend_wasapi };
+        if (ma_context_init(backends, 1, NULL, &context) != MA_SUCCESS) {
 #else
-    if (ma_context_init(NULL, 0, NULL, &context) != MA_SUCCESS) {
+        if (ma_context_init(NULL, 0, NULL, &context) != MA_SUCCESS) {
 #endif
-        fprintf(stderr, "[echo-audio-host] Failed to initialize context\n");
-        return -1;
+            fprintf(stderr, "[echo-audio-host] Failed to initialize context\n");
+            return -1;
+        }
     }
 
     /* ── resolve device ── */
-    ma_device_id deviceId;
-    ma_device_id* pDeviceId = NULL;
-
-    if (targetDeviceIndex >= 0) {
+    if (useAsio) {
+#ifdef _WIN32
+#ifdef MA_ENABLE_ASIO
+        if (init_asio_runtime(targetDeviceName, targetDeviceIndex, sampleRate, channels, &actualSampleRate, &actualChannels) != 0) {
+            fprintf(stderr, "[echo-audio-host] Failed to initialize ASIO output device\n");
+            return -3;
+        }
+#else
+        fprintf(stderr, "[echo-audio-host] ASIO support is not enabled in this build\n");
+        return -3;
+#endif
+#else
+        fprintf(stderr, "[echo-audio-host] ASIO is only supported on Windows builds\n");
+        return -3;
+#endif
+    } else if (targetDeviceIndex >= 0) {
         listed_device* devices = NULL;
         ma_uint32 deviceCount = 0;
         if (collect_unique_playback_devices(&context, &devices, &deviceCount) == 0) {
@@ -421,12 +1047,23 @@ int main(int argc, char** argv) {
     /* ── ring buffer (~0.4s): smaller queue so volume/EQ changes in the Node
      * pipeline are heard sooner; 2s caused multi-second perceived lag. ── */
     ma_format format = ma_format_f32;
-    ma_uint32 rbFrames = (ma_uint32)((double)sampleRate * 0.4);
-    if (rbFrames < sampleRate / 5) rbFrames = sampleRate / 5; /* min ~200ms */
+    ma_uint32 rbFrames = (ma_uint32)((double)actualSampleRate * 0.4);
+    if (rbFrames < actualSampleRate / 5) rbFrames = actualSampleRate / 5; /* min ~200ms */
     if (ma_pcm_rb_init(format, channels, rbFrames, NULL, NULL, &g_rb) != MA_SUCCESS) {
         fprintf(stderr, "[echo-audio-host] Failed to initialize ring buffer\n");
+        if (useAsio) {
+#ifdef _WIN32
+#ifdef MA_ENABLE_ASIO
+            uninit_asio_runtime();
+#endif
+#endif
+        } else {
+            ma_context_uninit(&context);
+        }
         return -1;
     }
+
+    if (!useAsio) {
 
     /* ── device config ── */
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
@@ -437,20 +1074,19 @@ int main(int argc, char** argv) {
     config.dataCallback       = data_callback;
     config.periodSizeInFrames = sampleRate / 100; /* 10 ms target latency */
 
-    if (exclusive) {
+    if (!useAsio && exclusive) {
         config.playback.shareMode = ma_share_mode_exclusive;
         fprintf(stderr, "[echo-audio-host] Requesting EXCLUSIVE mode...\n");
     }
 
-    ma_device device;
     if (ma_device_init(&context, &config, &device) != MA_SUCCESS) {
         fprintf(stderr, "[echo-audio-host] Failed to initialize output device\n");
         ma_pcm_rb_uninit(&g_rb);
         ma_context_uninit(&context);
-        return -1;
+        return useAsio ? -3 : -1;
     }
 
-    if (exclusive && device.playback.shareMode != ma_share_mode_exclusive) {
+    if (!useAsio && exclusive && device.playback.shareMode != ma_share_mode_exclusive) {
         fprintf(stderr, "[echo-audio-host] Exclusive mode NOT acquired. Aborting.\n");
         ma_device_uninit(&device);
         ma_pcm_rb_uninit(&g_rb);
@@ -461,14 +1097,36 @@ int main(int argc, char** argv) {
     fprintf(stderr, "[echo-audio-host] Ready: sr=%d ch=%d exclusive=%s\n",
             device.sampleRate, device.playback.channels,
             device.playback.shareMode == ma_share_mode_exclusive ? "YES" : "NO");
+        actualSampleRate = device.sampleRate;
+        actualChannels = device.playback.channels;
+    } else {
+        fprintf(stderr, "[echo-audio-host] Ready: sr=%d ch=%d exclusive=NO asio=YES\n",
+                actualSampleRate, actualChannels);
+    }
 
     /* report actual device parameters as the first JSON line */
-    fprintf(stdout, "{\"ready\":true,\"sampleRate\":%d,\"channels\":%d,\"exclusive\":%s}\n",
-            device.sampleRate, device.playback.channels,
-            device.playback.shareMode == ma_share_mode_exclusive ? "true" : "false");
+    if (useAsio) {
+        fprintf(stdout, "{\"ready\":true,\"sampleRate\":%d,\"channels\":%d,\"exclusive\":false,\"asio\":true}\n",
+                actualSampleRate, actualChannels);
+    } else {
+        fprintf(stdout, "{\"ready\":true,\"sampleRate\":%d,\"channels\":%d,\"exclusive\":%s}\n",
+                device.sampleRate, device.playback.channels,
+                device.playback.shareMode == ma_share_mode_exclusive ? "true" : "false");
+    }
     fflush(stdout);
 
-    if (ma_device_start(&device) != MA_SUCCESS) {
+    if (useAsio) {
+#ifdef _WIN32
+#ifdef MA_ENABLE_ASIO
+        if (ASIOStart() != ASE_OK) {
+            fprintf(stderr, "[echo-audio-host] Failed to start ASIO device\n");
+            ma_pcm_rb_uninit(&g_rb);
+            uninit_asio_runtime();
+            return -3;
+        }
+#endif
+#endif
+    } else if (ma_device_start(&device) != MA_SUCCESS) {
         fprintf(stderr, "[echo-audio-host] Failed to start device\n");
         ma_device_uninit(&device);
         ma_pcm_rb_uninit(&g_rb);
@@ -542,8 +1200,16 @@ int main(int argc, char** argv) {
     fflush(stdout);
 
     /* ── cleanup ── */
-    ma_device_uninit(&device);
-    ma_context_uninit(&context);
+    if (useAsio) {
+#ifdef _WIN32
+#ifdef MA_ENABLE_ASIO
+        uninit_asio_runtime();
+#endif
+#endif
+    } else {
+        ma_device_uninit(&device);
+        ma_context_uninit(&context);
+    }
     ma_pcm_rb_uninit(&g_rb);
     free(chunk);
 

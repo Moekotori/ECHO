@@ -81,12 +81,14 @@ contextBridge.exposeInMainWorld('api', {
     }
   },
   closeAppHandler: () => ipcRenderer.send('window:close'),
+  hideToTrayHandler: () => ipcRenderer.invoke('window:hide-to-tray'),
   maximizeAppHandler: () => ipcRenderer.send('window:maximize'),
   minimizeAppHandler: () => ipcRenderer.send('window:minimize'),
   downloadSoundCloud: (url, downloadPath) =>
     ipcRenderer.invoke('soundcloud:download', url, downloadPath),
   getExtendedMetadataHandler: (path) => ipcRenderer.invoke('file:getExtendedMetadata', path),
-  updateExtendedMetadataHandler: (payload) => ipcRenderer.invoke('file:updateExtendedMetadata', payload),
+  updateExtendedMetadataHandler: (payload) =>
+    ipcRenderer.invoke('file:updateExtendedMetadata', payload),
   batchRenameFilesHandler: (payload) => ipcRenderer.invoke('file:batchRenameFiles', payload),
   setDiscordActivity: (activity) => ipcRenderer.send('discord:setActivity', activity),
   clearDiscordActivity: () => ipcRenderer.send('discord:clearActivity'),
@@ -132,7 +134,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   // === Native Audio Engine ===
   getAudioDevices: () => ipcRenderer.invoke('audio:getDevices'),
+  getAsioDevices: () => ipcRenderer.invoke('audio:getAsioDevices'),
   setAudioDevice: (id) => ipcRenderer.invoke('audio:setDevice', id),
+  setAsioMode: (enabled) => ipcRenderer.invoke('audio:setAsio', enabled),
   setAudioExclusive: (exclusive) => ipcRenderer.invoke('audio:setExclusive', exclusive),
   setAudioOutputBufferProfile: (profile) =>
     ipcRenderer.invoke('audio:setOutputBufferProfile', profile),
@@ -142,6 +146,9 @@ contextBridge.exposeInMainWorld('api', {
   setAudioPlaybackRate: (rate) => ipcRenderer.invoke('audio:setPlaybackRate', rate),
   pauseAudio: () => ipcRenderer.invoke('audio:pause'),
   resumeAudio: () => ipcRenderer.invoke('audio:resume'),
+  audioStartFadeOut: (ms) => ipcRenderer.invoke('audio:startFadeOut', ms),
+  audioStartFadeIn: (ms) => ipcRenderer.invoke('audio:startFadeIn', ms),
+  audioCancelFade: () => ipcRenderer.invoke('audio:cancelFade'),
   stopAudio: () => ipcRenderer.invoke('audio:stop'),
   setAudioVolume: (vol) => ipcRenderer.invoke('audio:setVolume', vol),
   loadVstPlugin: (path) => ipcRenderer.invoke('audio:loadVst', path),
@@ -177,6 +184,12 @@ contextBridge.exposeInMainWorld('api', {
   onAudioTrackEnded: (callback) => {
     const channel = 'audio:track-ended'
     const handler = () => callback()
+    ipcRenderer.on(channel, handler)
+    return () => ipcRenderer.removeListener(channel, handler)
+  },
+  onPlayerCmd: (cb) => {
+    const channel = 'player:cmd'
+    const handler = (_, cmd) => cb(cmd)
     ipcRenderer.on(channel, handler)
     return () => ipcRenderer.removeListener(channel, handler)
   },

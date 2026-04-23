@@ -66,6 +66,27 @@ export function listNativeDevices() {
   }
 }
 
+export function listAsioDevices() {
+  const bin = resolveHostBinary()
+  if (!bin) return []
+  try {
+    const out = execFileSync(bin, ['-list', '-asio'], { timeout: 5000, encoding: 'utf-8' })
+    return out
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const tab = line.indexOf('\t')
+        if (tab < 0) return null
+        return { index: parseInt(line.slice(0, tab), 10), name: line.slice(tab + 1) }
+      })
+      .filter(Boolean)
+  } catch (e) {
+    console.error('[NativeAudioBridge] listAsioDevices failed:', e?.message || e)
+    return []
+  }
+}
+
 /**
  * A writable stream adapter that forwards data to the child process stdin.
  * When the child process is gone the writes are silently dropped.
@@ -172,6 +193,7 @@ export class NativeAudioBridge {
     channels = 2,
     deviceIndex = -1,
     deviceName,
+    asio = false,
     exclusive = false,
     volume: _vol = 1.0,
     startTime = 0,
@@ -191,7 +213,8 @@ export class NativeAudioBridge {
       const args = ['-sr', String(sampleRate), '-ch', String(channels)]
       if (deviceIndex >= 0) args.push('-device-index', String(deviceIndex))
       else if (deviceName) args.push('-device', deviceName)
-      if (exclusive) args.push('-exclusive')
+      if (asio) args.push('-asio')
+      if (exclusive && !asio) args.push('-exclusive')
       // Volume is applied only in the main-process AudioProcessor (JS) so live
       // slider changes stay consistent. Do not pass -vol here — C++ g_volume
       // would double-apply with already-scaled PCM and stay stale until restart.
@@ -250,6 +273,7 @@ export class NativeAudioBridge {
       })
 
       this._proc.on('exit', (code, signal) => {
+        const wasReady = this._ready
         this._ready = false
         if (code === -2) {
           // Exclusive mode denied
@@ -260,6 +284,15 @@ export class NativeAudioBridge {
         this._stopRequested = false
         if (!intentional) {
           logLine(`[NativeAudioBridge] exited code=${code} signal=${signal}`)
+        }
+        if (!wasReady && !intentional && code !== 0) {
+          if (this._readyTimer) {
+            clearTimeout(this._readyTimer)
+            this._readyTimer = null
+          }
+          const errMsg = code != null ? `exit_code_${code}` : `exit_signal_${signal || '?'}`
+          reject(new Error(errMsg))
+          return
         }
         if (intentional || this._ended) return
         if (code === 0) return

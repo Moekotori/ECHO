@@ -40,6 +40,9 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
   const { t, i18n } = useTranslation()
   const loc = i18n.language.startsWith('zh') ? 'zh' : 'en'
   const [engineInfo, setEngineInfo] = useState(null)
+  const [asioDevices, setAsioDevices] = useState([])
+  const [asioDeviceId, setAsioDeviceId] = useState(null)
+  const [asioMode, setAsioMode] = useState(false)
   const activeDeviceId = config?.audioDeviceId ?? ''
   const isExclusive = config?.audioExclusive === true
   const bufferProfile = config?.audioOutputBufferProfile || 'balanced'
@@ -52,6 +55,7 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
           nativeBridge: !!status.nativeBridge,
           exclusive: !!status.exclusive,
           exclusiveConfirmed: !!status.exclusiveConfirmed,
+          asio: !!status.asio,
           fileSampleRate: status.fileSampleRate || 0,
           outputSampleRate: status.outputSampleRate || 0,
           codec: status.codec || '',
@@ -70,6 +74,24 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
 
   useEffect(() => {
     if (!open) return
+    if (!window.api?.getAsioDevices) return
+    window.api.getAsioDevices().then((devices) => {
+      setAsioDevices(Array.isArray(devices) ? devices : [])
+    })
+  }, [open])
+
+  useEffect(() => {
+    if (engineInfo?.asio) setAsioMode(true)
+  }, [engineInfo?.asio])
+
+  useEffect(() => {
+    if (engineInfo?.asio === false) {
+      setAsioMode((prev) => (prev && asioDeviceId != null ? prev : false))
+    }
+  }, [engineInfo?.asio, asioDeviceId])
+
+  useEffect(() => {
+    if (!open) return
     const onKey = (e) => {
       if (e.key === 'Escape') onClose()
     }
@@ -78,7 +100,15 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
   }, [open, onClose])
 
   const handleDeviceChange = useCallback(
-    (id) => {
+    async (id) => {
+      if (window.api?.setAsioMode) {
+        await window.api.setAsioMode(false)
+      }
+      if (window.api?.setAudioDevice) {
+        await window.api.setAudioDevice(id ?? '')
+      }
+      setAsioMode(false)
+      setAsioDeviceId(null)
       setConfig((prev) => ({
         ...prev,
         audioDeviceId: id ?? ''
@@ -86,6 +116,17 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
     },
     [setConfig]
   )
+
+  const handleAsioDeviceChange = useCallback(async (id) => {
+    if (window.api?.setAsioMode) {
+      await window.api.setAsioMode(true)
+    }
+    if (window.api?.setAudioDevice) {
+      await window.api.setAudioDevice(id)
+    }
+    setAsioMode(true)
+    setAsioDeviceId(id)
+  }, [])
 
   const handleExclusiveSwitch = useCallback(() => {
     setConfig((prev) => ({
@@ -123,6 +164,8 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
   const dsdTag = isDSD ? dsdLabel(engineInfo?.dsdRate) : null
   const bitPerfect = engineInfo?.bitPerfect
   const useEQ = engineInfo?.useEQ
+  const hasAsioDevices = asioDevices.length > 0
+  const isAsioSelected = asioMode || engineInfo?.asio
 
   const signalNodes = []
   if (codec || isDSD) {
@@ -216,10 +259,10 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
             <div className="audio-drawer-device-list">
               <button
                 type="button"
-                className={`audio-drawer-device-btn ${!activeDeviceId ? 'active' : ''}`}
+                className={`audio-drawer-device-btn ${!isAsioSelected && !activeDeviceId ? 'active' : ''}`}
                 onClick={() => handleDeviceChange('')}
               >
-                {!activeDeviceId ? (
+                {!isAsioSelected && !activeDeviceId ? (
                   <CheckCircle2 size={15} className="audio-drawer-device-icon" />
                 ) : (
                   <Radio size={15} className="audio-drawer-device-icon" />
@@ -230,7 +273,7 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
               </button>
 
               {audioDevices?.map((d) => {
-                const isActive = String(activeDeviceId) === String(d.id)
+                const isActive = !isAsioSelected && String(activeDeviceId) === String(d.id)
                 return (
                   <button
                     key={d.id}
@@ -253,6 +296,38 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
             </div>
           </div>
 
+          {hasAsioDevices && (
+            <div className="lyrics-drawer-section">
+              <div className="audio-drawer-section-header">
+                <Zap size={16} style={{ color: 'var(--accent-mint)' }} />
+                <span className="audio-drawer-section-label">ASIO {t('settings.outputDevice', 'Output Device')}</span>
+              </div>
+
+              <div className="audio-drawer-device-list">
+                {asioDevices.map((d) => {
+                  const isActive = isAsioSelected && String(asioDeviceId) === String(d.index)
+                  const displayName = String(d.name || '').replace(/^\[ASIO\]\s*/i, '')
+                  return (
+                    <button
+                      key={`asio-${d.index}`}
+                      type="button"
+                      className={`audio-drawer-device-btn audio-drawer-device-btn--asio ${isActive ? 'active active-asio' : ''}`}
+                      onClick={() => handleAsioDeviceChange(d.index)}
+                    >
+                      {isActive ? (
+                        <CheckCircle2 size={15} className="audio-drawer-device-icon" />
+                      ) : (
+                        <Radio size={15} className="audio-drawer-device-icon" />
+                      )}
+                      <span className="audio-drawer-device-name">{displayName || d.name}</span>
+                      <span className="audio-drawer-tag audio-drawer-tag--asio">ASIO</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Exclusive Mode */}
           <div className="lyrics-drawer-section">
             <div className="audio-drawer-exclusive-row">
@@ -269,18 +344,21 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
               <button
                 type="button"
                 role="switch"
-                aria-checked={isExclusive}
-                className={`lyrics-drawer-switch ${isExclusive ? 'on' : ''}`}
+                aria-checked={isAsioSelected ? false : isExclusive}
+                className={`lyrics-drawer-switch ${!isAsioSelected && isExclusive ? 'on' : ''}`}
                 onClick={handleExclusiveSwitch}
+                disabled={isAsioSelected}
               >
                 <span className="lyrics-drawer-switch-thumb" />
               </button>
             </div>
             <p className="audio-drawer-hint">
-              {t(
-                'settings.exclusiveDesc',
-                'Bypasses Windows audio mixer for bit-perfect output. Source sample rate is preserved (e.g. 192 kHz). Other apps will be muted while active.'
-              )}
+              {isAsioSelected
+                ? 'ASIO mode ignores WASAPI exclusive settings.'
+                : t(
+                    'settings.exclusiveDesc',
+                    'Bypasses Windows audio mixer for bit-perfect output. Source sample rate is preserved (e.g. 192 kHz). Other apps will be muted while active.'
+                  )}
             </p>
             {engineInfo?.exclusive && !engineInfo?.exclusiveConfirmed && (
               <p className="audio-drawer-hint audio-drawer-hint--warn">

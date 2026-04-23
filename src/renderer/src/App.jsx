@@ -31,6 +31,8 @@ import {
   Mic2,
   ChevronLeft,
   Search,
+  Globe,
+  Link,
   Settings,
   ToggleLeft,
   ToggleRight,
@@ -309,6 +311,28 @@ function normalizeConfigState(raw) {
   } else {
     merged.uiLocale = normalizeUiLocale(merged.uiLocale)
   }
+  if (merged.closeButtonBehavior !== 'quit' && merged.closeButtonBehavior !== 'tray') {
+    merged.closeButtonBehavior = DEFAULT_CONFIG.closeButtonBehavior
+  }
+  if (!['time', 'track'].includes(merged.sleepTimerMode)) {
+    merged.sleepTimerMode = DEFAULT_CONFIG.sleepTimerMode
+  }
+  if (typeof merged.crossfadeEnabled !== 'boolean') {
+    merged.crossfadeEnabled = DEFAULT_CONFIG.crossfadeEnabled
+  }
+  if (
+    !Number.isFinite(merged.crossfadeDuration) ||
+    merged.crossfadeDuration < 1 ||
+    merged.crossfadeDuration > 12
+  ) {
+    merged.crossfadeDuration = DEFAULT_CONFIG.crossfadeDuration
+  }
+  if (![5, 10, 15, 30, 45, 60, 90].includes(merged.sleepTimerMinutes)) {
+    merged.sleepTimerMinutes = DEFAULT_CONFIG.sleepTimerMinutes
+  }
+  if (typeof merged.sleepTimerEnabled !== 'boolean') {
+    merged.sleepTimerEnabled = DEFAULT_CONFIG.sleepTimerEnabled
+  }
   if (oldRev < appRev) {
     merged.configRevision = appRev
   }
@@ -342,6 +366,189 @@ function normalizeConfigState(raw) {
     }
   }
   return merged
+}
+
+const SLEEP_TIMER_MINUTE_OPTIONS = [5, 10, 15, 30, 45, 60, 90]
+/* const SETTINGS_SECTION_KEYWORDS = {
+  language: ['language', 'locale', '语言', 'en', 'zh', 'ja', '言語'],
+  engine: [
+    'visualizer',
+    'spectrum',
+    'waveform',
+    'eq',
+    'equalizer',
+    'buffer',
+    'crossfade',
+    'sleep',
+    'timer',
+    'asio',
+    'exclusive',
+    'audio',
+    '均衡',
+    '音频',
+    '淡入淡出',
+    '睡眠',
+    '定时',
+    'イコライザー',
+    'クロスフェード'
+  ],
+  integrations: ['discord', 'rpc', 'presence', '集成', '整合', '連携'],
+  eq: ['eq', 'equalizer', 'parametric', 'preamp', 'band', '均衡器', '参量', 'イコライザー'],
+  aesthetics: [
+    'theme',
+    'color',
+    'background',
+    'blur',
+    'font',
+    'radius',
+    'opacity',
+    'gradient',
+    '主题',
+    '颜色',
+    '背景',
+    '字体',
+    '模糊',
+    'テーマ',
+    'フォント'
+  ],
+  media: [
+    'download',
+    'library',
+    'playlist',
+    'folder',
+    'import',
+    'cleanup',
+    '下载',
+    '媒体库',
+    '歌单',
+    '导入',
+    '清理',
+    'ダウンロード',
+    'ライブラリ',
+    'プレイリスト'
+  ],
+  about: [
+    'about',
+    'version',
+    'update',
+    'release',
+    'changelog',
+    'developer',
+    'devtools',
+    '关于',
+    '版本',
+    '更新',
+    '开发',
+    'バージョン',
+    'アップデート',
+    '開発'
+  ],
+  danger: ['reset', 'danger', 'clear', '重置', '危险', 'リセット']
+}
+
+*/
+const SETTINGS_SECTION_KEYWORDS = {
+  language: ['language', 'locale', '\u8bed\u8a00', 'en', 'zh', 'ja', '\u8a00\u8a9e'],
+  engine: [
+    'visualizer',
+    'spectrum',
+    'waveform',
+    'eq',
+    'equalizer',
+    'buffer',
+    'crossfade',
+    'sleep',
+    'timer',
+    'asio',
+    'exclusive',
+    'audio',
+    '\u5747\u8861',
+    '\u97f3\u9891',
+    '\u6de1\u5165\u6de1\u51fa',
+    '\u7761\u7720',
+    '\u5b9a\u65f6',
+    '\u30a4\u30b3\u30e9\u30a4\u30b6\u30fc',
+    '\u30af\u30ed\u30b9\u30d5\u30a7\u30fc\u30c9'
+  ],
+  integrations: ['discord', 'rpc', 'presence', '\u96c6\u6210', '\u6574\u5408', '\u9023\u643a'],
+  eq: [
+    'eq',
+    'equalizer',
+    'parametric',
+    'preamp',
+    'band',
+    '\u5747\u8861\u5668',
+    '\u53c2\u91cf',
+    '\u30a4\u30b3\u30e9\u30a4\u30b6\u30fc'
+  ],
+  aesthetics: [
+    'theme',
+    'color',
+    'background',
+    'blur',
+    'font',
+    'radius',
+    'opacity',
+    'gradient',
+    '\u4e3b\u9898',
+    '\u989c\u8272',
+    '\u80cc\u666f',
+    '\u5b57\u4f53',
+    '\u6a21\u7cca',
+    '\u30c6\u30fc\u30de',
+    '\u30d5\u30a9\u30f3\u30c8'
+  ],
+  media: [
+    'download',
+    'library',
+    'playlist',
+    'folder',
+    'import',
+    'cleanup',
+    '\u4e0b\u8f7d',
+    '\u5a92\u4f53\u5e93',
+    '\u6b4c\u5355',
+    '\u5bfc\u5165',
+    '\u6e05\u7406',
+    '\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9',
+    '\u30e9\u30a4\u30d6\u30e9\u30ea',
+    '\u30d7\u30ec\u30a4\u30ea\u30b9\u30c8'
+  ],
+  about: [
+    'about',
+    'version',
+    'update',
+    'release',
+    'changelog',
+    'developer',
+    'devtools',
+    '\u5173\u4e8e',
+    '\u7248\u672c',
+    '\u66f4\u65b0',
+    '\u5f00\u53d1',
+    '\u30d0\u30fc\u30b8\u30e7\u30f3',
+    '\u30a2\u30c3\u30d7\u30c7\u30fc\u30c8',
+    '\u958b\u767a'
+  ],
+  danger: ['reset', 'danger', 'clear', '\u91cd\u7f6e', '\u5371\u9669', '\u30ea\u30bb\u30c3\u30c8']
+}
+
+function formatSleepTimerRemaining(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+function matchesSettingsSection(query, keywords) {
+  const normalized = String(query || '')
+    .trim()
+    .toLowerCase()
+  if (!normalized) return true
+  return (keywords || []).some((keyword) => {
+    const text = String(keyword || '').toLowerCase()
+    return text.includes(normalized) || normalized.includes(text)
+  })
 }
 
 function normalizeWatchedTrack(track) {
@@ -704,7 +911,15 @@ export default function App() {
 
   const [currentIndex, setCurrentIndex] = useState(-1)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [sleepTimerActive, setSleepTimerActive] = useState(false)
+  const [sleepTimerEndMs, setSleepTimerEndMs] = useState(null)
+  const [sleepTimerNowMs, setSleepTimerNowMs] = useState(Date.now())
   const [coverUrl, setCoverUrl] = useState(null)
+  const crossfadeStateRef = useRef({
+    active: false,
+    sourcePath: '',
+    pendingFadeIn: false
+  })
 
   const [playbackRate, setPlaybackRate] = useState(1.0)
   const [volume, setVolume] = useState(() => readStoredVolume())
@@ -987,16 +1202,201 @@ export default function App() {
 
   // Hi-Fi & Navigation States
   const [view, setView] = useState('player') // 'player', 'lyrics', 'settings'
+  const [settingsQuery, setSettingsQuery] = useState('')
+  const [activeSettingsSection, setActiveSettingsSection] = useState('language')
   const [config, setConfig] = useState(() => {
     const saved = getInitialAppStateValue('config')
     if (saved && typeof saved === 'object') return normalizeConfigState(saved)
     return normalizeConfigState(readStoredJson('nc_config'))
   })
+  const settingsSearchInputRef = useRef(null)
+  const settingsContentRef = useRef(null)
 
   const configRef = useRef(config)
   useEffect(() => {
     configRef.current = config
   }, [config])
+
+  const settingsSectionVisibility = useMemo(() => {
+    return {
+      language: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.language),
+      engine: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.engine),
+      integrations: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.integrations),
+      eq: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.eq),
+      aesthetics: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.aesthetics),
+      media: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.media),
+      about: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.about),
+      danger: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.danger)
+    }
+  }, [settingsQuery])
+  const settingsHasResults = Object.values(settingsSectionVisibility).some(Boolean)
+  const settingsNavItems = useMemo(
+    () => [
+      {
+        key: 'language',
+        icon: Globe,
+        label: t('settings.nav.language'),
+        id: 'settings-sec-language'
+      },
+      { key: 'engine', icon: Zap, label: t('settings.nav.engine'), id: 'settings-sec-engine' },
+      {
+        key: 'integrations',
+        icon: Link,
+        label: t('settings.nav.integrations'),
+        id: 'settings-sec-integrations'
+      },
+      { key: 'eq', icon: Sliders, label: t('settings.nav.eq'), id: 'settings-sec-eq' },
+      {
+        key: 'aesthetics',
+        icon: Palette,
+        label: t('settings.nav.aesthetics'),
+        id: 'settings-sec-aesthetics'
+      },
+      {
+        key: 'downloader',
+        icon: Download,
+        label: t('settings.nav.downloader'),
+        id: 'settings-sec-downloader'
+      },
+      { key: 'about', icon: Info, label: t('settings.nav.about'), id: 'settings-sec-about' },
+      { key: 'danger', icon: Trash2, label: t('settings.nav.danger'), id: 'settings-sec-danger' }
+    ],
+    [t]
+  )
+
+  const handleSettingsNavClick = useCallback((sectionKey, sectionId) => {
+    setActiveSettingsSection(sectionKey)
+    setSettingsQuery('')
+    const scrollToSection = () => {
+      document
+        .getElementById(sectionId)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    if (settingsQuery.trim()) {
+      setTimeout(scrollToSection, 0)
+      return
+    }
+    scrollToSection()
+  }, [settingsQuery])
+
+  useEffect(() => {
+    if (view !== 'settings') return
+    setSettingsQuery('')
+    setActiveSettingsSection('language')
+    const focusTimer = setTimeout(() => {
+      settingsSearchInputRef.current?.focus()
+    }, 0)
+    return () => clearTimeout(focusTimer)
+  }, [view])
+
+  useEffect(() => {
+    if (view !== 'settings' || settingsQuery.trim()) return
+    const root = settingsContentRef.current
+    if (!root || typeof IntersectionObserver === 'undefined') return
+    const sectionElements = settingsNavItems
+      .map((item) => document.getElementById(item.id))
+      .filter(Boolean)
+    if (sectionElements.length === 0) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntries = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)
+        if (visibleEntries.length === 0) return
+        const sectionKey = visibleEntries[0].target.getAttribute('data-settings-section')
+        if (sectionKey) setActiveSettingsSection(sectionKey)
+      },
+      {
+        root,
+        threshold: 0.3
+      }
+    )
+    sectionElements.forEach((element) => observer.observe(element))
+    return () => observer.disconnect()
+  }, [settingsNavItems, settingsQuery, view])
+
+  useEffect(() => {
+    if (config.sleepTimerEnabled !== true) return
+    setConfig((prev) => ({ ...prev, sleepTimerEnabled: false }))
+  }, [])
+
+  const stopPlaybackForSleepTimer = useCallback(() => {
+    setIsPlaying(false)
+    if (window.api?.pauseAudio) {
+      void window.api.pauseAudio().catch(() => {})
+    }
+  }, [])
+
+  const cancelSleepTimer = useCallback(() => {
+    setSleepTimerActive(false)
+    setSleepTimerEndMs(null)
+    setConfig((prev) =>
+      prev.sleepTimerEnabled === false ? prev : { ...prev, sleepTimerEnabled: false }
+    )
+  }, [])
+
+  const startSleepTimer = useCallback(() => {
+    setSleepTimerActive(true)
+    setConfig((prev) =>
+      prev.sleepTimerEnabled === true ? prev : { ...prev, sleepTimerEnabled: true }
+    )
+    if (config.sleepTimerMode === 'time') {
+      setSleepTimerEndMs(Date.now() + Number(config.sleepTimerMinutes || 30) * 60 * 1000)
+    } else {
+      setSleepTimerEndMs(null)
+    }
+  }, [config.sleepTimerMinutes, config.sleepTimerMode])
+
+  const sleepTimerRemainingMs =
+    sleepTimerActive && config.sleepTimerMode === 'time' && sleepTimerEndMs
+      ? Math.max(0, sleepTimerEndMs - sleepTimerNowMs)
+      : 0
+
+  const resetCrossfadeState = useCallback(() => {
+    crossfadeStateRef.current = {
+      active: false,
+      sourcePath: '',
+      pendingFadeIn: false
+    }
+  }, [])
+
+  const cancelCrossfade = useCallback(() => {
+    resetCrossfadeState()
+    if (window.api?.audioCancelFade) {
+      void window.api.audioCancelFade().catch(() => {})
+    }
+  }, [resetCrossfadeState])
+
+  useEffect(() => {
+    if (!sleepTimerActive || config.sleepTimerMode !== 'time' || !sleepTimerEndMs) return undefined
+
+    setSleepTimerNowMs(Date.now())
+    const timer = setInterval(() => {
+      const now = Date.now()
+      setSleepTimerNowMs(now)
+      if (now >= sleepTimerEndMs) {
+        stopPlaybackForSleepTimer()
+        cancelSleepTimer()
+      }
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [
+    cancelSleepTimer,
+    config.sleepTimerMode,
+    sleepTimerActive,
+    sleepTimerEndMs,
+    stopPlaybackForSleepTimer
+  ])
+
+  useEffect(() => {
+    if (!sleepTimerActive) return
+    if (config.sleepTimerMode === 'time') {
+      setSleepTimerEndMs(Date.now() + Number(config.sleepTimerMinutes || 30) * 60 * 1000)
+      return
+    }
+    setSleepTimerEndMs(null)
+  }, [config.sleepTimerMinutes, config.sleepTimerMode, sleepTimerActive])
 
   const loadReleaseNotes = useCallback(
     async (force = false) => {
@@ -2307,13 +2707,11 @@ export default function App() {
 
       if (useNativeEngineRef.current && window.api?.playAudio) {
         const trackPath = playlistRef.current[currentIndexRef.current]?.path
-        if (trackPath && playlistRef.current.some((track) => track.path === trackPath)) {
+        if (trackPath) {
           window.api.playAudio(trackPath, 0, playbackRateRef.current).catch(console.error)
           setIsPlaying(true)
           return
         }
-        setIsPlaying(false)
-        return
       }
 
       const audio = audioRef.current
@@ -3534,7 +3932,6 @@ export default function App() {
   }
 
   const loadTrackData = async (filePath, trackHints = {}) => {
-    if (!filePath) return
     setCoverUrl(null)
     setMetadata({
       title: '',
@@ -3630,20 +4027,10 @@ export default function App() {
 
       // 2. BPM Detection (Keep as is, but use less memory)
       const arrayBuffer = await window.api.readBufferHandler(filePath)
-      if (arrayBuffer?.success === false && arrayBuffer?.error === 'file_not_found') {
-        return
-      }
       if (arrayBuffer) {
         try {
           const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-          const view =
-            arrayBuffer instanceof ArrayBuffer
-              ? new Uint8Array(arrayBuffer)
-              : ArrayBuffer.isView(arrayBuffer)
-                ? arrayBuffer
-                : null
-          if (!view) return
-          const slice = view.slice(0, 1024 * 1024 * 10)
+          const slice = arrayBuffer.slice(0, 1024 * 1024 * 10)
           const decodedBuffer = await audioCtx.decodeAudioData(slice.buffer || slice)
           const detectedBpm = detectBPM(decodedBuffer)
           setTechnicalInfo((prev) => ({ ...prev, originalBpm: detectedBpm }))
@@ -3652,14 +4039,6 @@ export default function App() {
         }
       }
     } catch (e) {
-      if (
-        e?.message?.includes('file_not_found') ||
-        e?.message?.includes('ENOENT') ||
-        e?.error === 'file_not_found'
-      ) {
-        // file deleted; silently skip
-        return
-      }
       console.error('Track data extraction error:', e)
     }
   }
@@ -4174,6 +4553,7 @@ export default function App() {
   }
 
   const handleClearPlaylist = () => {
+    cancelCrossfade()
     if (useNativeEngineRef.current) window.api?.stopAudio?.()
     setPlaylist([])
     setActivePlaybackContext(createPlaybackContext('library', 'library', []))
@@ -4230,7 +4610,10 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [togglePlay])
 
-  const handleNext = useCallback(() => {
+  const handleNext = useCallback((options = {}) => {
+    if (!options.preserveFade) {
+      cancelCrossfade()
+    }
     if (playlist.length > 0) {
       if (queuePlaybackEnabled) {
         const queueSnapshot = upNextQueueRef.current
@@ -4267,7 +4650,7 @@ export default function App() {
       }
       setIsPlaying(true)
     }
-  }, [playlist, queuePlaybackEnabled, playMode, currentIndex])
+  }, [cancelCrossfade, playlist, queuePlaybackEnabled, playMode, currentIndex])
 
   const jumpToPlaybackHistory = useCallback((targetHistoryIndex) => {
     const historySnapshot = playbackHistoryRef.current
@@ -4323,10 +4706,21 @@ export default function App() {
   useEffect(() => {
     if (window.api?.onAudioTrackEnded) {
       return window.api.onAudioTrackEnded(() => {
+        if (sleepTimerActive && config.sleepTimerMode === 'track') {
+          stopPlaybackForSleepTimer()
+          cancelSleepTimer()
+          return
+        }
         handleTrackEndedAdvance()
       })
     }
-  }, [handleTrackEndedAdvance])
+  }, [
+    cancelSleepTimer,
+    config.sleepTimerMode,
+    handleTrackEndedAdvance,
+    sleepTimerActive,
+    stopPlaybackForSleepTimer
+  ])
 
   const getNextTrack = useCallback(() => {
     if (playlist.length === 0) return null
@@ -4356,7 +4750,10 @@ export default function App() {
 
   const nextTrack = getNextTrack()
 
-  const handlePrev = () => {
+  const handlePrev = useCallback((options = {}) => {
+    if (!options.preserveFade) {
+      cancelCrossfade()
+    }
     const { currentPath, currentSeqIndex, paths } = getPlaybackSequenceSnapshot()
     if (paths.length === 0) return
 
@@ -4376,7 +4773,75 @@ export default function App() {
       setCurrentIndex(prevIdx)
     }
     setIsPlaying(true)
-  }
+  }, [cancelCrossfade, playMode, getPlaybackSequenceSnapshot])
+
+  useEffect(() => {
+    if (!window.api?.onPlayerCmd) return undefined
+    return window.api.onPlayerCmd((cmd) => {
+      if (cmd === 'next') {
+        handleNext()
+        return
+      }
+      if (cmd === 'prev') {
+        handlePrev()
+      }
+    })
+  }, [handleNext, handlePrev])
+
+  useEffect(() => {
+    if (config.crossfadeEnabled || !crossfadeStateRef.current.active) return
+    cancelCrossfade()
+  }, [cancelCrossfade, config.crossfadeEnabled])
+
+  useEffect(() => {
+    if (!useNativeEngineRef.current || !window.api?.audioStartFadeOut || !window.api?.audioStartFadeIn)
+      return
+    if (!config.crossfadeEnabled || !isPlaying || playlist.length < 2) return
+    const currentTrackPath = playlist[currentIndex]?.path || ''
+    if (!currentTrackPath || crossfadeStateRef.current.active) return
+    if (!(duration > 0) || !(currentTime >= 0)) return
+
+    const remainingSec = duration - currentTime
+    if (remainingSec > config.crossfadeDuration || remainingSec < 0) return
+
+    crossfadeStateRef.current = {
+      active: true,
+      sourcePath: currentTrackPath,
+      pendingFadeIn: true
+    }
+
+    const fadeMs = Math.max(1000, Number(config.crossfadeDuration || 3) * 1000)
+    void window.api.audioStartFadeOut(fadeMs).catch(() => {})
+    // Do NOT call handleNext() here — let the track end naturally.
+    // The audio stream is single-instance; calling play() for the next track
+    // immediately kills the current stream and the fade-out never plays through.
+    // Instead, track-ended fires when the audio finishes (now at ~0 volume),
+    // handleTrackEndedAdvance() runs normally, and the second useEffect below
+    // picks up pendingFadeIn and calls audioStartFadeIn on the new track.
+  }, [
+    config.crossfadeDuration,
+    config.crossfadeEnabled,
+    currentIndex,
+    currentTime,
+    duration,
+    isPlaying,
+    playlist
+  ])
+
+  useEffect(() => {
+    if (!useNativeEngineRef.current || !window.api?.audioStartFadeIn) return
+    const state = crossfadeStateRef.current
+    if (!state.pendingFadeIn) return
+
+    const currentTrackPath = playlist[currentIndex]?.path || ''
+    if (!currentTrackPath || currentTrackPath === state.sourcePath) return
+
+    state.pendingFadeIn = false
+    state.active = false
+
+    const fadeMs = Math.max(1000, Number(config.crossfadeDuration || 3) * 1000)
+    void window.api.audioStartFadeIn(fadeMs).catch(() => {})
+  }, [config.crossfadeDuration, currentIndex, playlist])
 
   const formatTime = (time) => {
     if (isNaN(time)) return '0:00'
@@ -4620,7 +5085,6 @@ export default function App() {
   }, [config.mvQuality, postToAllMvIframes])
 
   const biliSeekDebounceRef = useRef(null)
-  const lastSeekTimeRef = useRef(0)
 
   const syncYTVideo = (time) => {
     const audioT = Number(time) || 0
@@ -4681,8 +5145,6 @@ export default function App() {
     if (!isPlaying || !mvId) return
     const biliEmbedOnly = mvId.source === 'bilibili' && !biliDirectStream?.videoUrl
     if (mvId.source !== 'youtube' && !biliEmbedOnly) return
-    // 直连模式已有独立 sync，不需要这里
-    if (mvId.source === 'bilibili' && biliDirectStream?.videoUrl) return
     const id = window.setInterval(() => {
       if (isSeekingRef.current) return
       const audio = audioRef.current
@@ -4695,21 +5157,25 @@ export default function App() {
   /** Bilibili 直连 HTML5 video：偏差超过阈值再对齐，避免每帧 seek */
   useEffect(() => {
     if (!isPlaying || !mvId || mvId.source !== 'bilibili' || !biliDirectStream?.videoUrl) return
-    const id = window.setInterval(() => {
-      if (isSeekingRef.current) return
-      const audio = audioRef.current
-      const v = biliVideoRef.current
-      if (!audio || !v) return
-      const base = useNativeEngineRef.current ? nativePositionRef.current : audio.currentTime
-      const target = Math.max(0, (base || 0) + (configRef.current.mvOffsetMs ?? 0) / 1000)
-      if (Math.abs(v.currentTime - target) > 0.5) {
-        if (Date.now() - lastSeekTimeRef.current < 500) return
-        lastSeekTimeRef.current = Date.now()
-        v.currentTime = target
-        if (biliAudioRef.current) biliAudioRef.current.currentTime = target
+    let raf = 0
+    const driftThresholdSec = 0.35
+    const tick = () => {
+      if (!isSeekingRef.current) {
+        const audio = audioRef.current
+        const v = biliVideoRef.current || biliBackgroundVideoRef.current
+        if (audio && v) {
+          const audioTime = useNativeEngineRef.current ? audio.currentTime || 0 : audio.currentTime
+          const target = Math.max(0, audioTime + (configRef.current.mvOffsetMs ?? 0) / 1000)
+          if (Math.abs(v.currentTime - target) > driftThresholdSec) {
+            v.currentTime = target
+            if (biliAudioRef.current) biliAudioRef.current.currentTime = target
+          }
+        }
       }
-    }, 150)
-    return () => clearInterval(id)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
   }, [isPlaying, mvId?.id, mvId?.source, biliDirectStream?.videoUrl])
 
   const handleSeek = (e) => {
@@ -5469,8 +5935,6 @@ export default function App() {
       await Promise.all(
         pending.map(async (track) => {
           try {
-            if (cancelled) return
-            if (!playlistRef.current?.some((item) => item?.path === track.path)) return
             const data = await window.api.getExtendedMetadataHandler(track.path)
             if (data?.success) {
               const common = data.common || {}
@@ -5486,7 +5950,6 @@ export default function App() {
                 duration: technical.duration || null
               }
             } else {
-              if (data?.error === 'file_not_found') return
               loaded[track.path] = {
                 title: null,
                 artist: null,
@@ -5499,13 +5962,6 @@ export default function App() {
               }
             }
           } catch (error) {
-            if (
-              error?.message?.includes('file_not_found') ||
-              error?.message?.includes('ENOENT') ||
-              error?.error === 'file_not_found'
-            ) {
-              return
-            }
             loaded[track.path] = {
               title: null,
               artist: null,
@@ -7273,11 +7729,7 @@ export default function App() {
 
     const accent = activeAccentHex
 
-    let frameCount = 0
     const render = () => {
-      animationRef.current = requestAnimationFrame(render)
-      frameCount++
-      if (frameCount % 2 !== 0) return // ~30fps
       if (!canvasRef.current || !analyserNode.current) return
       const canvas = canvasRef.current
       const ctx = canvas.getContext('2d')
@@ -7310,7 +7762,7 @@ export default function App() {
         x += barWidth + 1
       }
 
-      // animation scheduled at top
+      animationRef.current = requestAnimationFrame(render)
     }
 
     render()
@@ -8052,7 +8504,13 @@ export default function App() {
           </button>
           <button
             className="no-drag"
-            onClick={() => window.api.closeAppHandler()}
+            onClick={async () => {
+              if (config.closeButtonBehavior === 'tray' && window.api?.hideToTrayHandler) {
+                await window.api.hideToTrayHandler()
+                return
+              }
+              window.api.closeAppHandler()
+            }}
             style={{
               background: 'none',
               border: 'none',
@@ -9781,9 +10239,115 @@ export default function App() {
               <ChevronLeft size={32} />
             </button>
             <h1>{t('settings.pageTitle')}</h1>
+            <div
+              style={{
+                position: 'relative',
+                width: '100%',
+                maxWidth: 520,
+                marginTop: 12
+              }}
+            >
+              <Search
+                size={16}
+                style={{
+                  position: 'absolute',
+                  left: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-soft)',
+                  pointerEvents: 'none'
+                }}
+              />
+              <input
+                ref={settingsSearchInputRef}
+                type="text"
+                value={settingsQuery}
+                onChange={(e) => setSettingsQuery(e.target.value)}
+                placeholder={t('settings.searchPlaceholder')}
+                style={{
+                  width: '100%',
+                  padding: '10px 40px 10px 36px',
+                  borderRadius: 12,
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg-secondary)',
+                  color: 'inherit',
+                  outline: 'none'
+                }}
+              />
+              {settingsQuery ? (
+                <button
+                  type="button"
+                  onClick={() => setSettingsQuery('')}
+                  aria-label={t('aria.close')}
+                  style={{
+                    position: 'absolute',
+                    right: 8,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 28,
+                    height: 28,
+                    border: 'none',
+                    borderRadius: 999,
+                    background: 'transparent',
+                    color: 'var(--text-soft)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              ) : null}
+            </div>
           </div>
 
-          <div className="settings-content">
+          <div className="settings-body">
+            <nav className="settings-nav" aria-label={t('settings.pageTitle')}>
+              {settingsNavItems.map((item) => {
+                const Icon = item.icon
+                const isActive = activeSettingsSection === item.key
+                const isDanger = item.key === 'danger'
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`settings-nav-item ${isActive ? 'active' : ''}`}
+                    onClick={() => handleSettingsNavClick(item.key, item.id)}
+                    style={{
+                      color: isDanger ? '#ff4d4f' : undefined,
+                      borderLeftColor: isActive
+                        ? isDanger
+                          ? '#ff4d4f'
+                          : 'var(--accent-pink)'
+                        : 'transparent'
+                    }}
+                  >
+                    <Icon size={16} />
+                    <span>{item.label}</span>
+                  </button>
+                )
+              })}
+            </nav>
+
+            <div className="settings-content" ref={settingsContentRef}>
+              {!settingsHasResults ? (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    opacity: 0.5,
+                    fontSize: 14,
+                    padding: '24px 0'
+                  }}
+                >
+                  {t('settings.searchNoResults')}
+                </div>
+              ) : null}
+            <div
+              id="settings-sec-language"
+              data-settings-section="language"
+              style={{ display: settingsSectionVisibility.language ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title">
                 <MessageSquare size={20} />
@@ -9816,7 +10380,13 @@ export default function App() {
                 </div>
               </div>
             </section>
+            </div>
 
+            <div
+              id="settings-sec-engine"
+              data-settings-section="engine"
+              style={{ display: settingsSectionVisibility.engine ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title">
                 <Zap size={20} />
@@ -9899,6 +10469,63 @@ export default function App() {
                 </button>
               </div>
 
+              <div className="setting-row">
+                <div className="setting-info">
+                  <h3>{t('settings.crossfadeTitle')}</h3>
+                  <p>{t('settings.crossfadeDesc')}</p>
+                </div>
+                <button
+                  className={`toggle-btn ${config.crossfadeEnabled ? 'active' : ''}`}
+                  onClick={() =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      crossfadeEnabled: !prev.crossfadeEnabled
+                    }))
+                  }
+                >
+                  {config.crossfadeEnabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+                </button>
+              </div>
+
+              {config.crossfadeEnabled ? (
+                <div className="setting-row" style={{ borderTop: 'none', paddingTop: 8 }}>
+                  <div className="setting-info">
+                    <h3>{t('settings.crossfadeDurationTitle')}</h3>
+                    <p>{t('settings.crossfadeDurationDesc')}</p>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      minWidth: 260,
+                      justifyContent: 'flex-end'
+                    }}
+                  >
+                    <span style={{ fontSize: 12, color: 'var(--text-soft)' }}>
+                      {t('settings.crossfadeSeconds', { count: config.crossfadeDuration })}
+                    </span>
+                    <input
+                      type="range"
+                      min={1}
+                      max={12}
+                      step={1}
+                      value={config.crossfadeDuration}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          crossfadeDuration: Math.max(
+                            1,
+                            Math.min(12, Number.parseInt(e.target.value, 10) || 1)
+                          )
+                        }))
+                      }
+                      style={{ width: 160 }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
               {config.mvAsBackground && (
                 <>
                   <div
@@ -9979,7 +10606,13 @@ export default function App() {
                 </>
               )}
             </section>
+            </div>
 
+            <div
+              id="settings-sec-integrations"
+              data-settings-section="integrations"
+              style={{ display: settingsSectionVisibility.integrations ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title">
                 <Zap size={20} />
@@ -10002,8 +10635,88 @@ export default function App() {
                   {config.enableDiscordRPC ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
                 </button>
               </div>
+              <div className="setting-row">
+                <div className="setting-info">
+                  <h3>{t('settings.sleepTimerTitle')}</h3>
+                  <p>{t('settings.sleepTimerDesc')}</p>
+                  {sleepTimerActive ? (
+                    <p style={{ marginTop: 8, fontSize: 12, color: 'var(--text-soft)' }}>
+                      {config.sleepTimerMode === 'time'
+                        ? t('settings.sleepTimerRemaining', {
+                            time: formatSleepTimerRemaining(sleepTimerRemainingMs)
+                          })
+                        : t('settings.sleepTimerArmedTrack')}
+                    </p>
+                  ) : null}
+                </div>
+                <div
+                  className="settings-chip-row no-drag"
+                  style={{
+                    justifyContent: 'flex-end',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 8
+                  }}
+                >
+                  {['time', 'track'].map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`list-filter-chip ${config.sleepTimerMode === mode ? 'active' : ''}`}
+                      onClick={() =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          sleepTimerMode: mode
+                        }))
+                      }
+                    >
+                      {mode === 'time'
+                        ? t('settings.sleepTimerModeTime')
+                        : t('settings.sleepTimerModeTrack')}
+                    </button>
+                  ))}
+                  {config.sleepTimerMode === 'time'
+                    ? SLEEP_TIMER_MINUTE_OPTIONS.map((minutes) => (
+                        <button
+                          key={minutes}
+                          type="button"
+                          className={`list-filter-chip ${config.sleepTimerMinutes === minutes ? 'active' : ''}`}
+                          onClick={() =>
+                            setConfig((prev) => ({
+                              ...prev,
+                              sleepTimerMinutes: minutes
+                            }))
+                          }
+                        >
+                          {t('settings.sleepTimerMinutes', { count: minutes })}
+                        </button>
+                      ))
+                    : null}
+                  <UiButton
+                    variant={sleepTimerActive ? 'ghost' : 'secondary'}
+                    size="sm"
+                    onClick={() => {
+                      if (sleepTimerActive) {
+                        cancelSleepTimer()
+                        return
+                      }
+                      startSleepTimer()
+                    }}
+                  >
+                    {sleepTimerActive
+                      ? t('settings.sleepTimerCancel')
+                      : t('settings.sleepTimerStart')}
+                  </UiButton>
+                </div>
+              </div>
             </section>
+            </div>
 
+            <div
+              id="settings-sec-eq"
+              data-settings-section="eq"
+              style={{ display: settingsSectionVisibility.eq ? '' : 'none' }}
+            >
             <section className={`settings-section eq-section ${!config.useEQ ? 'disabled' : ''}`}>
               <div
                 className="section-title"
@@ -10126,7 +10839,13 @@ export default function App() {
                 }}
               />
             </section>
+            </div>
 
+            <div
+              id="settings-sec-aesthetics"
+              data-settings-section="aesthetics"
+              style={{ display: settingsSectionVisibility.aesthetics ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div
                 className="section-title"
@@ -11261,7 +11980,13 @@ export default function App() {
                 </div>
               </div>
             </section>
+            </div>
 
+            <div
+              id="settings-sec-downloader"
+              data-settings-section="downloader"
+              style={{ display: settingsSectionVisibility.media ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title">
                 <Download size={20} />
@@ -11322,6 +12047,31 @@ export default function App() {
                     <ToggleLeft size={32} />
                   )}
                 </button>
+              </div>
+              <div className="setting-row">
+                <div className="setting-info">
+                  <h3>{t('settings.closeButtonBehaviorTitle')}</h3>
+                  <p>{t('settings.closeButtonBehaviorDesc')}</p>
+                </div>
+                <div className="settings-chip-row no-drag">
+                  {['tray', 'quit'].map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`list-filter-chip ${config.closeButtonBehavior === mode ? 'active' : ''}`}
+                      onClick={() =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          closeButtonBehavior: mode
+                        }))
+                      }
+                    >
+                      {mode === 'tray'
+                        ? t('settings.closeButtonBehaviorTray')
+                        : t('settings.closeButtonBehaviorQuit')}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="setting-row">
                 <div className="setting-info">
@@ -11462,7 +12212,13 @@ export default function App() {
                 </div>
               ) : null}
             </section>
+            </div>
 
+            <div
+              id="settings-sec-about"
+              data-settings-section="about"
+              style={{ display: settingsSectionVisibility.about ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title">
                 <Info size={20} />
@@ -11858,7 +12614,13 @@ export default function App() {
             </section>
 
             <PluginSlot name="settingsPanel" />
+            </div>
 
+            <div
+              id="settings-sec-danger"
+              data-settings-section="danger"
+              style={{ display: settingsSectionVisibility.danger ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title" style={{ color: '#ff4d4f' }}>
                 <Trash2 size={20} aria-hidden />
@@ -11883,7 +12645,9 @@ export default function App() {
                 </UiButton>
               </div>
             </section>
+            </div>
           </div>
+        </div>
         </div>
       )}
 
@@ -12281,306 +13045,6 @@ export default function App() {
               position: 'fixed',
               ...(() => {
                 const mw = 220
-                const mh = 400
-                let left = trackContextMenu.clientX
-                let top = trackContextMenu.clientY
-                const iw = typeof window !== 'undefined' ? window.innerWidth : 800
-                const ih = typeof window !== 'undefined' ? window.innerHeight : 600
-                if (left + mw > iw - 8) left = iw - mw - 8
-                if (top + mh > ih - 8) top = ih - mh - 8
-                return { left: Math.max(8, left), top: Math.max(8, top) }
-              })(),
-              zIndex: 20052
-            }}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            {(() => {
-              const tr = trackContextMenu.track
-              const path = tr.path
-              const rowLiked = likedSet.has(path)
-              const inUpNext = upNextPathSet.has(path)
-              const localPath = isLocalAudioFilePath(path)
-              const displayArtistCtx =
-                tr.info.artist === 'Unknown Artist'
-                  ? albumArtistByName[tr.info.album] || tr.info.artist
-                  : tr.info.artist
-              const trackLine = `${tr.info.title} — ${displayArtistCtx}`
-              const copyToClipboard = async (text) => {
-                try {
-                  if (window.api?.writeClipboardText) {
-                    const r = await window.api.writeClipboardText(text)
-                    if (r && r.ok === false && r.error)
-                      alert(t('contextMenu.actionFailed', { detail: r.error }))
-                  } else if (navigator.clipboard?.writeText) {
-                    await navigator.clipboard.writeText(text)
-                  } else {
-                    alert(t('contextMenu.actionFailed', { detail: 'clipboard_unavailable' }))
-                  }
-                } catch (err) {
-                  alert(t('contextMenu.actionFailed', { detail: err?.message || String(err) }))
-                }
-              }
-              return (
-                <>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="track-ctx-item"
-                    onClick={() => {
-                      toggleLike(path)
-                      closeTrackContextMenuAnimated()
-                    }}
-                  >
-                    <Heart size={14} aria-hidden /> {rowLiked ? t('like.unlike') : t('like.like')}
-                  </button>
-                  {(listMode === 'songs' ||
-                    listMode === 'album' ||
-                    (listMode === 'playlists' &&
-                      (selectedUserPlaylistId || selectedSmartCollectionId))) && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="track-ctx-item"
-                      onClick={() => {
-                        openAddToPlaylistAtPoint(
-                          trackContextMenu.clientX,
-                          trackContextMenu.clientY,
-                          tr
-                        )
-                      }}
-                    >
-                      <ListPlus size={14} aria-hidden /> {t('contextMenu.addToPlaylist')}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="track-ctx-item"
-                    onClick={() => {
-                      const result = enqueueUpNextTrack(tr)
-                      if (!result.ok && result.reason === 'duplicate') return
-                      closeTrackContextMenuAnimated()
-                    }}
-                    disabled={inUpNext}
-                  >
-                    <SkipForward size={14} aria-hidden /> {t('contextMenu.playNext')}
-                  </button>
-                  {inUpNext && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="track-ctx-item track-ctx-item--danger"
-                      onClick={() => {
-                        removeFromUpNextQueue(path)
-                        closeTrackContextMenuAnimated()
-                      }}
-                    >
-                      <Minus size={14} aria-hidden /> {t('contextMenu.removeFromUpNext')}
-                    </button>
-                  )}
-                  {listMode === 'songs' && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="track-ctx-item track-ctx-item--danger"
-                      onClick={() => {
-                        removeTrackFromMainPlaylist(path)
-                        closeTrackContextMenuAnimated()
-                      }}
-                    >
-                      <Trash2 size={14} aria-hidden /> {t('contextMenu.removeFromQueue')}
-                    </button>
-                  )}
-                  {listMode === 'playlists' && selectedUserPlaylistId && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="track-ctx-item track-ctx-item--danger"
-                      onClick={() => {
-                        removePathFromUserPlaylist(selectedUserPlaylistId, path)
-                        closeTrackContextMenuAnimated()
-                      }}
-                    >
-                      <Minus size={14} aria-hidden /> {t('contextMenu.removeFromPlaylist')}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="track-ctx-item"
-                    onClick={() => {
-                      openMetadataEditorForTrack(tr)
-                      closeTrackContextMenuAnimated()
-                    }}
-                    disabled={!localPath}
-                  >
-                    <Pencil size={14} aria-hidden /> {t('contextMenu.editMetadata', 'Edit tags')}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="track-ctx-item"
-                    onClick={async () => {
-                      await copyToClipboard(trackLine)
-                      closeTrackContextMenuAnimated()
-                    }}
-                  >
-                    <Copy size={14} aria-hidden /> {t('contextMenu.copyTrackLine')}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="track-ctx-item"
-                    onClick={async () => {
-                      await handleCopyTrackCardImage(tr)
-                      closeTrackContextMenuAnimated()
-                    }}
-                    disabled={isCardActionBusy}
-                  >
-                    <Copy size={14} aria-hidden /> {t('contextMenu.copyTrackImage')}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="track-ctx-item"
-                    onClick={async () => {
-                      await handleSaveTrackCardImage(tr)
-                      closeTrackContextMenuAnimated()
-                    }}
-                    disabled={isCardActionBusy}
-                  >
-                    <Image size={14} aria-hidden /> {t('contextMenu.saveTrackImage')}
-                  </button>
-                  {localPath && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="track-ctx-item"
-                      onClick={async () => {
-                        await copyToClipboard(path)
-                        closeTrackContextMenuAnimated()
-                      }}
-                    >
-                      <Copy size={14} aria-hidden /> {t('contextMenu.copyPath')}
-                    </button>
-                  )}
-                  {localPath && window.api?.openPath && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="track-ctx-item"
-                      onClick={async () => {
-                        try {
-                          const r = await window.api.openPath(path)
-                          if (r && r.ok === false && r.error)
-                            alert(t('contextMenu.actionFailed', { detail: r.error }))
-                        } catch (err) {
-                          alert(
-                            t('contextMenu.actionFailed', { detail: err?.message || String(err) })
-                          )
-                        }
-                        closeTrackContextMenuAnimated()
-                      }}
-                    >
-                      <AppWindow size={14} aria-hidden /> {t('contextMenu.openWithDefaultApp')}
-                    </button>
-                  )}
-                  {localPath && window.api?.showItemInFolder && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="track-ctx-item"
-                      onClick={async () => {
-                        try {
-                          const r = await window.api.showItemInFolder(path)
-                          if (r && r.ok === false && r.error)
-                            alert(t('contextMenu.actionFailed', { detail: r.error }))
-                        } catch (err) {
-                          alert(
-                            t('contextMenu.actionFailed', { detail: err?.message || String(err) })
-                          )
-                        }
-                        closeTrackContextMenuAnimated()
-                      }}
-                    >
-                      <FolderOpen size={14} aria-hidden /> {t('contextMenu.showInFolder')}
-                    </button>
-                  )}
-                </>
-              )
-            })()}
-          </div>,
-          document.body
-        )}
-      {coverContextMenu &&
-        createPortal(
-          <div
-            ref={coverContextMenuRef}
-            className={`track-ctx-menu-portal${coverCtxVisualOpen ? ' track-ctx-menu-portal--open' : ''}`}
-            role="menu"
-            aria-label={t('aria.coverContextMenu', 'Cover actions')}
-            style={{
-              position: 'fixed',
-              ...(() => {
-                const mw = 220
-                const mh = 140
-                let left = coverContextMenu.clientX
-                let top = coverContextMenu.clientY
-                const iw = typeof window !== 'undefined' ? window.innerWidth : 800
-                const ih = typeof window !== 'undefined' ? window.innerHeight : 600
-                if (left + mw > iw - 8) left = iw - mw - 8
-                if (top + mh > ih - 8) top = ih - mh - 8
-                return { left: Math.max(8, left), top: Math.max(8, top) }
-              })(),
-              zIndex: 20052
-            }}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            {(() => {
-              const tr = coverContextMenu.track
-              return (
-                <>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="track-ctx-item"
-                    onClick={async () => {
-                      await handleCopyTrackCardImage(tr)
-                      closeCoverContextMenuAnimated()
-                    }}
-                    disabled={isCardActionBusy || !tr}
-                  >
-                    <Copy size={14} aria-hidden /> {t('contextMenu.copyTrackImage')}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="track-ctx-item"
-                    onClick={async () => {
-                      await handleSaveTrackCardImage(tr)
-                      closeCoverContextMenuAnimated()
-                    }}
-                    disabled={isCardActionBusy || !tr}
-                  >
-                    <Image size={14} aria-hidden /> {t('contextMenu.saveTrackImage')}
-                  </button>
-                </>
-              )
-            })()}
-          </div>,
-          document.body
-        )}
-      {groupContextMenu &&
-        createPortal(
-          <div
-            ref={groupContextMenuRef}
-            className={`track-ctx-menu-portal${groupCtxVisualOpen ? ' track-ctx-menu-portal--open' : ''}`}
-            role="menu"
-            aria-label={t('aria.groupContextMenu', 'Album or folder actions')}
-            style={{
-              position: 'fixed',
-              ...(() => {
-                const mw = 220
                 const mh = 220
                 let left = groupContextMenu.clientX
                 let top = groupContextMenu.clientY
@@ -12744,3 +13208,4 @@ export default function App() {
     </div>
   )
 }
+            

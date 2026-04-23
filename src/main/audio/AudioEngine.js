@@ -109,6 +109,7 @@ export class AudioEngine {
     this.currentFilePath = null
     this.processor = null
     this.exclusiveMode = false
+    this._asioMode = false
     this.eqConfig = null
     /** HiFi path: PCM EQ + preamp (mirrors renderer Web Audio chain). */
     this._eqProcessor = null
@@ -121,6 +122,7 @@ export class AudioEngine {
     this._fileIsDSD = false
     this._fileDsdRate = 0
     this._onTrackEnded = null
+    this._fadeInterval = null
     this._useNativeBridge = isNativeBridgeAvailable()
     this.vstBridge = new VstBridge()
 
@@ -226,6 +228,15 @@ export class AudioEngine {
     console.log(`[AudioEngine] Exclusive mode: ${this.exclusiveMode}`)
   }
 
+  setAsio(enabled) {
+    this._asioMode = !!enabled
+    console.log(`[AudioEngine] ASIO mode: ${this._asioMode}`)
+  }
+
+  getAsioMode() {
+    return this._asioMode
+  }
+
   setOutputBufferProfile(profile) {
     this.bufferProfile = profile || 'balanced'
   }
@@ -294,9 +305,10 @@ export class AudioEngine {
         // DSD -> PCM: convert at a high-res rate preserving maximum fidelity
         // DSD64 (2.8 MHz) -> 176.4 kHz, DSD128 (5.6 MHz) -> 352.8 kHz
         const dsdPcmRate = Math.min(352800, Math.max(176400, Math.round(fileSampleRate / 16)))
-        targetSampleRate = this.exclusiveMode && this._useNativeBridge ? dsdPcmRate : 44100
+        targetSampleRate =
+          (this.exclusiveMode || this._asioMode) && this._useNativeBridge ? dsdPcmRate : 44100
         logLine(`[AudioEngine] DSD detected: native=${fileSampleRate}Hz -> PCM ${dsdPcmRate}Hz`)
-      } else if (this.exclusiveMode && this._useNativeBridge) {
+      } else if ((this.exclusiveMode || this._asioMode) && this._useNativeBridge) {
         targetSampleRate = fileSampleRate
       } else if (this.activeDevice && this.activeDevice.sampleRate > 0) {
         targetSampleRate = this.activeDevice.sampleRate
@@ -309,7 +321,7 @@ export class AudioEngine {
       const playLogText =
         `[AudioEngine] Play: ${formatPathForLog(filePath)} | ${info.codec} ${info.bitsPerSample}bit | ` +
         `src=${fileSampleRate}Hz -> out=${targetSampleRate}Hz | rate=${playbackRate} | ` +
-        `bridge=${this._useNativeBridge} | exclusive=${this.exclusiveMode}${info.isDSD ? ' | DSD' : ''}`
+        `bridge=${this._useNativeBridge} | exclusive=${this.exclusiveMode} | asio=${this._asioMode}${info.isDSD ? ' | DSD' : ''}`
       logLine(playLogText)
 
       /* ── output backend ── */
@@ -320,14 +332,18 @@ export class AudioEngine {
             sampleRate: targetSampleRate,
             channels,
             deviceIndex: this.activeDeviceIndex,
-            exclusive: this.exclusiveMode,
+            asio: this._asioMode,
+            exclusive: this._asioMode ? false : this.exclusiveMode,
             volume: this.volume,
             startTime,
             playbackRate
           })
         } catch (e) {
-          console.warn('[AudioEngine] Native bridge start failed, falling back:', e?.message)
+          console.warn('[AudioEngine] Native bridge start failed:', e?.message)
           bridge.stop()
+          if (this._asioMode) {
+            return { success: false, error: e?.message || 'asio_start_failed' }
+          }
           return this._playLegacy(
             filePath,
             startTime,
@@ -490,6 +506,55 @@ export class AudioEngine {
     return this.volume
   }
 
+  startFadeOut(durationMs, onComplete) {
+    this._clearFadeInterval()
+    const totalMs = Math.max(0, Number(durationMs) || 0)
+    const startVolume = Math.max(0, Number(this.volume) || 0)
+    if (totalMs <= 0) {
+      this.volume = 0
+      if (typeof onComplete === 'function') onComplete()
+      return
+    }
+
+    const startAt = Date.now()
+    this._fadeInterval = setInterval(() => {
+      const elapsed = Date.now() - startAt
+      const progress = Math.min(1, elapsed / totalMs)
+      this.volume = Math.max(0, startVolume * (1 - progress))
+      if (progress >= 1) {
+        this._clearFadeInterval()
+        this.volume = 0
+        if (typeof onComplete === 'function') onComplete()
+      }
+    }, 50)
+  }
+
+  startFadeIn(durationMs) {
+    this._clearFadeInterval()
+    const totalMs = Math.max(0, Number(durationMs) || 0)
+    if (totalMs <= 0) {
+      this.volume = 1.0
+      return
+    }
+
+    this.volume = 0
+    const startAt = Date.now()
+    this._fadeInterval = setInterval(() => {
+      const elapsed = Date.now() - startAt
+      const progress = Math.min(1, elapsed / totalMs)
+      this.volume = Math.min(1, progress)
+      if (progress >= 1) {
+        this._clearFadeInterval()
+        this.volume = 1.0
+      }
+    }, 50)
+  }
+
+  cancelFade() {
+    this._clearFadeInterval()
+    this.volume = 1.0
+  }
+
   async setPlaybackRate(rate) {
     if (this.currentFilePath && Math.abs(this.playbackRate - rate) > 0.01) {
       return this.play(this.currentFilePath, this.playbackTime, rate)
@@ -498,6 +563,7 @@ export class AudioEngine {
 
   async pause() {
     if (this.isPlaying) {
+      this.cancelFade()
       if (this._bridge) {
         this.playbackTime = this._bridge.getPosition()
       }
@@ -515,10 +581,17 @@ export class AudioEngine {
   }
 
   async stop() {
+    this.cancelFade()
     this.isPlaying = false
     await this._releaseResources()
     this.currentFilePath = null
     this.playbackTime = 0
+  }
+
+  _clearFadeInterval() {
+    if (!this._fadeInterval) return
+    clearInterval(this._fadeInterval)
+    this._fadeInterval = null
   }
 
   async _releaseResources() {
@@ -589,8 +662,9 @@ export class AudioEngine {
       currentTime,
       filePath: this.currentFilePath,
       playbackRate: this.playbackRate,
-      exclusive: this.exclusiveMode,
-      exclusiveConfirmed: !!(deviceInfo && deviceInfo.exclusive === true),
+      exclusive: this._asioMode ? false : this.exclusiveMode,
+      exclusiveConfirmed: !!(!this._asioMode && deviceInfo && deviceInfo.exclusive === true),
+      asio: this._asioMode,
       nativeBridge: this._useNativeBridge,
       fileSampleRate: srcSR,
       outputSampleRate: outSR,
@@ -614,12 +688,19 @@ export class AudioEngine {
         isDSD: false
       }
     }
+    // Cache to avoid re-parsing the same file on every play() call.
+    // DSD files (dsf/dff) are especially slow to parse — caching eliminates
+    // the stutter on second+ play of the same track.
+    if (!this._fileInfoCache) this._fileInfoCache = new Map()
+    const cached = this._fileInfoCache.get(filePath)
+    if (cached) return cached
+
     try {
       const { parseFile } = await import('music-metadata')
       const meta = await parseFile(filePath, { duration: false })
       const codecName = (meta.format.codec || meta.format.container || '').toLowerCase()
       const isDSD = /dsd/.test(codecName) || /\.(dsf|dff)$/i.test(filePath)
-      return {
+      const result = {
         sampleRate: meta.format.sampleRate || 44100,
         channels: meta.format.numberOfChannels || 2,
         bitsPerSample: meta.format.bitsPerSample || (isDSD ? 1 : 16),
@@ -627,6 +708,8 @@ export class AudioEngine {
         lossless: !!meta.format.lossless || isDSD,
         isDSD
       }
+      this._fileInfoCache.set(filePath, result)
+      return result
     } catch (e) {
       console.warn('[AudioEngine] _getFileInfo failed, using defaults:', e?.message)
       return {
