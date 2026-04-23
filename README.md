@@ -1,61 +1,38 @@
 <div align="center">
   <img src="website/echo-logo.png" width="680" alt="ECHO">
+
+  <h3>ECHO · 你的 HiFi 桌面音乐播放器</h3>
+
+  <p>Electron + React 构建 · 原生音频引擎 · 沉浸式歌词 · 插件扩展</p>
+
+  <p>
+    <a href="https://github.com/Moekotori/ECHO/releases/latest">
+      <img src="https://img.shields.io/github/v/release/Moekotori/ECHO?style=flat-square&label=latest&color=e8a0b4" alt="Latest Release">
+    </a>
+    <a href="https://github.com/Moekotori/ECHO/releases">
+      <img src="https://img.shields.io/github/downloads/Moekotori/ECHO/total?style=flat-square&color=b8d4e8" alt="Downloads">
+    </a>
+    <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-flat-square&color=e8e0b4" alt="Platform">
+    <img src="https://img.shields.io/badge/Electron-31.x-47848f?style=flat-square" alt="Electron">
+    <img src="https://img.shields.io/badge/React-18-61dafb?style=flat-square" alt="React">
+  </p>
+
+  <p>
+    <a href="https://github.com/Moekotori/ECHO/releases/latest"><strong>⬇ 下载最新版本</strong></a>
+    &nbsp;·&nbsp;
+    <a href="docs/plugin-development.md">插件开发</a>
+    &nbsp;·&nbsp;
+    <a href="#-快速开始">快速开始</a>
+    &nbsp;·&nbsp;
+    <a href="#-listen-together-服务端">联机听歌</a>
+  </p>
 </div>
 
-# ECHO
+---
 
 ECHO 是一款以桌面 HiFi 播放体验为核心的跨平台音乐播放器，使用 Electron + React 构建，并围绕本地音乐库、原生音频输出、沉浸式歌词、MV 联动、插件扩展和同步播放做了较深的桌面能力整合。
 
 项目目标不是做一个“能播歌”的通用播放器，而是做一个更偏发烧友与桌面重度用户场景的音乐工作台：更好的本地库体验、更直接的音频链路控制、更完整的歌词与媒体信息展示，以及更强的可扩展性。
-
-## 项目定位
-
-- 面向本地音乐收藏用户，而不只是在线播放场景
-- 强调 Windows 下的高质量音频输出与设备切换能力
-- 提供桌面歌词、MV、下载、歌单导入、DLNA、Listen Together 等完整桌面功能
-- 内置插件系统与主题能力，便于二次开发和个性化扩展
-
-## 核心能力
-
-### 1. 音频与播放链路
-
-- 原生音频宿主 `echo-audio-host` 独立运行，减少 Electron 主进程直接承担底层音频细节
-- 支持 Windows WASAPI 独占模式与 ASIO 设备接入
-- 提供 16 段参数均衡器与 Preamp
-- 支持变速播放、交叉淡入淡出、睡眠定时器等播放控制
-- 支持 FLAC、DSD、MP3、AAC 等常见音频格式
-
-### 2. 歌词与沉浸式桌面体验
-
-- 支持逐行歌词与逐字高亮效果
-- 自动从 NetEase / LRCLIB 获取歌词
-- 支持歌词翻译、日语罗马音转换
-- 提供可悬浮的桌面歌词窗口
-
-### 3. MV 与媒体联动
-
-- 可在播放时匹配 YouTube / Bilibili MV
-- 支持全屏背景展示、画质切换、偏移校准
-- 在失败时自动回退，保证主播放流程稳定
-
-### 4. 媒体下载与导入
-
-- 支持下载 YouTube、Bilibili、SoundCloud 媒体资源
-- 自动写入元数据与封面
-- 支持网易云歌单导入
-- 内置 NCM 转换相关能力
-
-### 5. 联机与投放
-
-- 内置 Listen Together WebSocket 服务端示例
-- 支持房间同步播放与鉴权接入
-- 支持 DLNA 投流到局域网设备
-
-### 6. 扩展能力
-
-- 提供插件清单、主进程入口、渲染进程入口与样式扩展
-- 支持扩展音乐源、歌词源、UI 面板与侧边栏
-- 提供主题变量体系与主题审计脚本
 
 ## 截图预览
 
@@ -67,7 +44,66 @@ ECHO 是一款以桌面 HiFi 播放体验为核心的跨平台音乐播放器，
   <img src="./website/3.png" width="800" alt="ECHO MV 模式">
 </div>
 
-## 技术栈
+---
+
+## ✨ 核心特性
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h4>🎵 HiFi 音频引擎</h4>
+      原生音频宿主 <code>echo-audio-host</code> 独立运行，支持 Windows WASAPI 独占模式与 ASIO 设备接入，提供更直接的设备控制链路。内置 16 段参数均衡器与 Preamp，并支持变速播放、交叉淡入淡出、睡眠定时器等播放控制。
+    </td>
+    <td width="50%" valign="top">
+      <h4>🎤 沉浸式歌词体验</h4>
+      支持逐行与逐字高亮歌词，自动从 NetEase / LRCLIB 获取歌词，支持翻译、日语罗马音转换，以及可悬浮的桌面歌词窗口。
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h4>🎬 MV 联动</h4>
+      播放时可匹配 YouTube / Bilibili MV，支持全屏背景展示、画质切换、偏移校准，并在失败时自动回退，保证主播放流程稳定。
+    </td>
+    <td valign="top">
+      <h4>👥 Listen Together + DLNA</h4>
+      内置 Listen Together WebSocket 服务端示例，支持房间同步播放与鉴权接入，同时支持 DLNA 投流到局域网设备。
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h4>⬇ 媒体下载与导入</h4>
+      支持下载 YouTube、Bilibili、SoundCloud 媒体资源，自动写入元数据与封面，并支持网易云歌单导入与 NCM 转换相关能力。
+    </td>
+    <td valign="top">
+      <h4>🧩 插件与主题系统</h4>
+      提供插件清单、主进程入口、渲染进程入口与样式扩展，支持扩展音乐源、歌词源、UI 面板与侧边栏，并配有主题变量体系和主题审计脚本。
+    </td>
+  </tr>
+</table>
+
+### 更多特性一览
+
+| 分类 | 内容 |
+| --- | --- |
+| **曲库** | 本地音乐库、歌单、播放队列、用户收藏 |
+| **音频** | WASAPI / ASIO、均衡器、Preamp、交叉淡入淡出、变速播放 |
+| **歌词** | 逐行 / 逐字高亮、翻译、罗马音、桌面歌词 |
+| **媒体** | MV 联动、封面与元数据写入、媒体下载、歌单导入 |
+| **扩展** | 插件系统、主题系统、示例插件 |
+| **集成** | Listen Together、DLNA、桌面化工作流 |
+
+---
+
+## 🧭 项目定位
+
+- 面向本地音乐收藏用户，而不只是在线播放场景
+- 强调 Windows 下的高质量音频输出与设备切换能力
+- 提供桌面歌词、MV、下载、歌单导入、DLNA、Listen Together 等完整桌面功能
+- 内置插件系统与主题能力，便于二次开发和个性化扩展
+
+---
+
+## 🛠 技术栈
 
 - Electron 31
 - React 18
@@ -80,7 +116,9 @@ ECHO 是一款以桌面 HiFi 播放体验为核心的跨平台音乐播放器，
 - ffmpeg / youtube-dl-exec
 - naudiodon
 
-## 目录结构
+---
+
+## 📁 目录结构
 
 ```text
 src/
@@ -107,12 +145,14 @@ scripts/                构建、审计、发布辅助脚本
 website/                官网静态资源
 ```
 
-## 环境要求
+---
+
+## 🚀 快速开始
 
 | 依赖 | 版本建议 |
 | --- | --- |
-| Node.js | >= 18，推荐 20 LTS |
-| npm | >= 9 |
+| Node.js | `>= 18`，推荐 `20 LTS` |
+| npm | `>= 9` |
 | 操作系统 | 开发建议 Windows，构建脚本兼容 macOS / Linux |
 
 说明：
@@ -120,8 +160,6 @@ website/                官网静态资源
 - 仓库根目录包含 `.npmrc`，适合中国大陆网络环境
 - 安装依赖时会在 `postinstall` 阶段自动处理原生模块依赖
 - 若修改了原生音频相关部分，建议额外执行一次 `npm run build:audio-host`
-
-## 快速开始
 
 ```bash
 git clone https://github.com/Moekotori/ECHO.git
@@ -132,7 +170,9 @@ npm run dev
 
 开发模式启动后会运行 Electron + Vite 热更新环境。
 
-## 常用命令
+---
+
+## 📦 常用命令
 
 ```bash
 npm run dev                # 本地开发
@@ -149,7 +189,9 @@ npm run build:audio-host   # 重建原生音频宿主
 
 正式发布前，建议完整走一遍 [docs/RELEASE_CHECKLIST.md](./docs/RELEASE_CHECKLIST.md)。
 
-## 构建与发布
+---
+
+## 🏗 构建与发布
 
 项目使用 `electron-builder` 进行桌面应用打包。
 
@@ -160,7 +202,9 @@ npm run build:audio-host   # 重建原生音频宿主
 
 与发布相关的关键配置位于 [package.json](./package.json) 的 `build` 字段中。
 
-## Listen Together 服务端
+---
+
+## 🎧 Listen Together 服务端
 
 仓库内提供了轻量的 WebSocket 服务端实现，适合本地测试或自托管部署：
 
@@ -174,7 +218,9 @@ npm start
 
 - [server/listen-together/DEPLOY_FROM_ZERO_ZH.md](./server/listen-together/DEPLOY_FROM_ZERO_ZH.md)
 
-## 插件开发
+---
+
+## 🧩 插件开发
 
 ECHO 的插件目录通常至少包含一个 `plugin.json` 清单文件，可按需增加主进程入口、渲染层入口与样式文件。
 
@@ -199,9 +245,11 @@ my-plugin/
 - [examples/](./examples/)
 - [plugin development/](./plugin%20development/)
 
-## 测试与质量保障
+---
 
-当前仓库已经包含一部分 Node 原生测试，命令如下：
+## ✅ 测试与质量保障
+
+当前仓库已经包含一部分 Node 原生测试：
 
 ```bash
 npm run test:unit
@@ -214,7 +262,9 @@ npm run test:unit
 
 如果你提交了播放器链路、歌词解析、主题系统或发布流程相关修改，建议至少补一轮本地验证。
 
-## 适合贡献的方向
+---
+
+## 🤝 参与贡献
 
 欢迎继续完善以下方向：
 
@@ -232,7 +282,9 @@ npm run test:unit
 3. 如涉及样式或主题，运行 `npm run theme:audit`。
 4. 在 PR 中说明变更内容、动机和验证方式。
 
-## 常见问题
+---
+
+## ❓ 常见问题
 
 ### 为什么强调 WASAPI 独占 / ASIO？
 
@@ -250,7 +302,9 @@ npm run test:unit
 
 项目已经具备完整的桌面应用结构与发布脚本，但如果你要长期维护公开发行版本，仍建议补充更系统的测试、CI 和发布审查流程。
 
-## 致谢
+---
+
+## Special Thanks
 
 ECHO 建立在这些优秀项目之上：
 
@@ -266,4 +320,6 @@ ECHO 建立在这些优秀项目之上：
 
 ---
 
-由 [Moekotori](https://github.com/Moekotori) 持续构建与打磨。
+<div align="center">
+  <sub>Made with ♪ by <a href="https://github.com/Moekotori">Moekotori</a></sub>
+</div>
