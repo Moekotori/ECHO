@@ -1,5 +1,4 @@
 <div align="center">
-
 <img src="echo-logo.png" width="680" alt="ECHO">
 
 <h3>ECHO · 你的 HiFi 桌面音乐播放器</h3>
@@ -18,7 +17,6 @@
   <img src="https://img.shields.io/badge/React-18-61dafb?style=flat-square" alt="React">
 </p>
 
-
 <p>
   <a href="https://github.com/Moekotori/Echoes/releases/latest"><strong>⬇ 下载最新版本</strong></a>
   &nbsp;·&nbsp;
@@ -28,7 +26,6 @@
   &nbsp;·&nbsp;
   <a href="#-listen-together-服务端">联机听歌</a>
 </p>
-
 </div>
 
 ---
@@ -42,7 +39,6 @@
 <br><br>
 <img src="./website/3.png" width="800" alt="ECHO MV 模式">
 </div>
-
 
 ---
 
@@ -81,26 +77,25 @@
   </tr>
 </table>
 
-
 ### 更多特性一览
 
-| 分类         | 内容                                                       |
-| ------------ | ---------------------------------------------------------- |
-| **曲库**     | 本地文件夹拖拽扫描、专辑视图、用户歌单、喜欢列表、播放队列 |
-| **音频**     | 变速播放保持音高、交叉淡入淡出、睡眠定时器、实时频谱可视化 |
-| **音频格式** | FLAC / DSD / MP3 / AAC 等主流格式，DSD 自动转换播放        |
-| **系统集成** | Discord Rich Presence、系统托盘与媒体键、分享卡片图导出    |
-| **界面**     | 英 / 简中 / 日语三语 UI，自定义背景 / 字体 / 圆角 / 模糊   |
-| **稳定性**   | 崩溃上报、应用内日志查看、OTA 自动更新（GitHub Releases）  |
+| 分类 | 内容 |
+|------|------|
+| **曲库** | 本地文件夹拖拽扫描、专辑视图、用户歌单、喜欢列表、播放队列 |
+| **音频** | 变速播放保持音高、交叉淡入淡出、睡眠定时器、实时频谱可视化 |
+| **音频格式** | FLAC / DSD / MP3 / AAC 等主流格式，DSD 自动转换播放 |
+| **系统集成** | Discord Rich Presence、系统托盘与媒体键、分享卡片图导出 |
+| **界面** | 英 / 简中 / 日语三语 UI，自定义背景 / 字体 / 圆角 / 模糊 |
+| **稳定性** | 崩溃上报、应用内日志查看、OTA 自动更新（GitHub Releases）|
 
 ---
 
 ## 🛠 环境要求
 
-| 依赖     | 版本                                          |
-| -------- | --------------------------------------------- |
-| Node.js  | `>= 18`（推荐 20 LTS）                        |
-| npm      | `>= 9`                                        |
+| 依赖 | 版本 |
+|------|------|
+| Node.js | `>= 18`（推荐 20 LTS）|
+| npm | `>= 9` |
 | 操作系统 | 开发建议 Windows，提供 macOS / Linux 构建脚本 |
 
 > `.npmrc` 已配置镜像源，适合中国大陆网络环境。原生模块会在 `postinstall` 时自动编译。
@@ -233,24 +228,20 @@ scripts/                  # 构建 & 发布脚本
 目标是绕开系统混音器的重采样与音量干预，在 Windows 上以更干净的链路输出音频。是否真正比特完美取决于你的设备与驱动设置。
 </details>
 
-
 <details>
 <summary><b>歌词支持卡拉 OK 逐字高亮吗？</b></summary>
 支持。可以显示逐行 LRC 或逐字高亮（类 Apple Music 效果），同时支持翻译与日语罗马音。
 </details>
-
 
 <details>
 <summary><b>"一起听"需要什么条件？</b></summary>
 需要你或朋友自建 WebSocket 服务端（见上方说明），然后在客户端加入同一房间即可实时同步播放。
 </details>
 
-
 <details>
 <summary><b>插件能做什么？</b></summary>
 可以扩展音乐源、歌词源、UI 面板、侧边栏等，也可以通过主进程插件访问本地文件系统或调用外部 API。
 </details>
-
 
 ---
 
@@ -265,4 +256,3 @@ ECHO 建立在这些优秀的开源项目之上：
 <div align="center">
 <sub>Made with ♪ by <a href="https://github.com/Moekotori">Moekotori</a></sub>
 </div>
-

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { X, RefreshCw, Minus, Plus, Upload } from 'lucide-react'
+import { X, RefreshCw, Minus, Plus, Upload, Search } from 'lucide-react'
 
 export default function LyricsSettingsDrawer({
   open,
@@ -9,7 +9,9 @@ export default function LyricsSettingsDrawer({
   setConfig,
   lyricsMatchStatus,
   lyricTimelineValid,
+  lyricsSourceUi,
   onRefreshLyrics,
+  onOpenManualSearch,
   onFetchLyricsFromLink,
   onApplyLyricsText,
   onNativeLyricsFilePick
@@ -284,6 +286,23 @@ export default function LyricsSettingsDrawer({
                 <span className="lyrics-drawer-switch-thumb" />
               </button>
             </div>
+            <div className="lyrics-drawer-row">
+              <span className="lyrics-drawer-label">{t('lyricsDrawer.blurEffect', '沉浸歌词景深动效')}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={config.lyricsBlurEffect === true}
+                className={`lyrics-drawer-switch ${config.lyricsBlurEffect === true ? 'on' : ''}`}
+                onClick={() =>
+                  setConfig((p) => ({
+                    ...p,
+                    lyricsBlurEffect: !p.lyricsBlurEffect
+                  }))
+                }
+              >
+                <span className="lyrics-drawer-switch-thumb" />
+              </button>
+            </div>
             <div className="lyrics-drawer-slider-block">
               <div className="lyrics-drawer-label-row">
                 <span className="lyrics-drawer-label">{t('lyricsDrawer.mainLineSize')}</span>
@@ -468,6 +487,12 @@ export default function LyricsSettingsDrawer({
                 {t('lyricsDrawer.statusPrefix')} {statusLabel}
               </span>
             </div>
+            <div className="lyrics-drawer-status" style={{ marginTop: 8 }}>
+              <span>
+                {t('lyricsDrawer.currentSourcePrefix', 'Current source:')}{' '}
+                {lyricsSourceUi || t('lyricsDrawer.sourceStateIdle', '--')}
+              </span>
+            </div>
             <div className="lyrics-drawer-dropdown-wrap" ref={dropdownWrapRef}>
               <button
                 type="button"
@@ -504,6 +529,15 @@ export default function LyricsSettingsDrawer({
             >
               <RefreshCw size={16} />
               {t('lyricsDrawer.refresh')}
+            </button>
+            <button
+              type="button"
+              className="lyrics-drawer-refresh"
+              onClick={() => onOpenManualSearch?.()}
+              title={t('lyricsDrawer.manualSearch')}
+            >
+              <Search size={16} />
+              {t('lyricsDrawer.manualSearch')}
             </button>
             <div className="lyrics-drawer-textarea-block">
               <input
@@ -558,6 +592,24 @@ export default function LyricsSettingsDrawer({
                   setConfig((p) => ({ ...p, desktopLyricsAlwaysOnTop: newVal }))
                   if (window.api?.setLyricsDesktopAlwaysOnTop) {
                     window.api.setLyricsDesktopAlwaysOnTop(newVal)
+                  }
+                }}
+              >
+                <span className="lyrics-drawer-switch-thumb" />
+              </button>
+            </div>
+            <div className="lyrics-drawer-row" style={{ marginTop: 8 }}>
+              <span className="lyrics-drawer-label">{t('lyrics.desktopLyricsLock')}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={config.desktopLyricsLocked === true}
+                className={`lyrics-drawer-switch ${config.desktopLyricsLocked === true ? 'on' : ''}`}
+                onClick={() => {
+                  const newVal = config.desktopLyricsLocked !== true
+                  setConfig((p) => ({ ...p, desktopLyricsLocked: newVal }))
+                  if (window.api?.setLyricsDesktopLocked) {
+                    window.api.setLyricsDesktopLocked(newVal)
                   }
                 }}
               >
@@ -648,6 +700,23 @@ export default function LyricsSettingsDrawer({
                     setConfig((p) => ({
                       ...p,
                       desktopLyricsShowRomaji: !p.desktopLyricsShowRomaji
+                    }))
+                  }
+                >
+                  <span className="lyrics-drawer-switch-thumb" />
+                </button>
+              </div>
+              <div className="lyrics-drawer-row">
+                <span className="lyrics-drawer-label">{t('lyrics.desktopShowTranslation')}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.desktopLyricsShowTranslation === true}
+                  className={`lyrics-drawer-switch ${config.desktopLyricsShowTranslation === true ? 'on' : ''}`}
+                  onClick={() =>
+                    setConfig((p) => ({
+                      ...p,
+                      desktopLyricsShowTranslation: !p.desktopLyricsShowTranslation
                     }))
                   }
                 >

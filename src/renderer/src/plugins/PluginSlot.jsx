@@ -19,14 +19,17 @@ class PluginErrorBoundary extends Component {
   render() {
     if (this.state.error) {
       return (
-        <div className="plugin-slot-error" style={{
-          padding: '8px 12px',
-          borderRadius: '8px',
-          background: 'rgba(255,70,70,0.12)',
-          color: '#ff8888',
-          fontSize: '12px',
-          margin: '4px 0'
-        }}>
+        <div
+          className="plugin-slot-error"
+          style={{
+            padding: '8px 12px',
+            borderRadius: '8px',
+            background: 'rgba(255,70,70,0.12)',
+            color: '#ff8888',
+            fontSize: '12px',
+            margin: '4px 0'
+          }}
+        >
           Plugin "{this.props.pluginId}" error
         </div>
       )
@@ -47,10 +50,7 @@ export default function PluginSlot({ name, context, style, className }) {
   if (!entries || entries.length === 0) return null
 
   return (
-    <div
-      className={`plugin-slot plugin-slot--${name} ${className || ''}`}
-      style={style}
-    >
+    <div className={`plugin-slot plugin-slot--${name} ${className || ''}`} style={style}>
       {entries.map((entry) => {
         const Comp = entry.component
         if (!Comp) return null

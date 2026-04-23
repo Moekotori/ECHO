@@ -1,28 +1,185 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    
-    <!-- SEO & OGP -->
-    <title>ECHO - 纯粹的本地音乐播放器</title>
-    <meta name="description" content="一款桌面音乐播放器。HiFi 引擎（原生输出）、WASAPI 独占、输出设备选择、EQ、歌词与 MV，以及可扩展插件。" />
-    
-    <meta property="og:title" content="ECHO - 纯粹的本地音乐播放器" />
-    <meta property="og:description" content="让你的本地音乐更好听、更顺手。专为发烧友打造的播放体验。" />
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://echo-music.com" /> 
-    <meta property="og:image" content="/images/3.png" />
-    
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="ECHO - 纯粹的本地音乐播放器" />
-    <meta name="twitter:description" content="让你的本地音乐更好听、更顺手。专为发烧友打造的播放体验。" />
-    <meta name="twitter:image" content="/images/3.png" />
-    
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ECHO — 本地音乐工作站</title>
+  <link rel="icon" href="icon.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <meta name="description" content="ECHO — 一款注重音质和可扩展性的桌面音乐播放器。HiFi音频引擎、歌词系统、MV、插件、下载工具。" />
+  <meta name="theme-color" content="#ffd6e8" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="site-bg"></div>
+  
+  <!-- Floating decorative elements -->
+  <div class="decoration-layer">
+    <div class="float-bubble float-1">🎵</div>
+    <div class="float-bubble float-2">🌸</div>
+    <div class="float-bubble float-3">✨</div>
+    <div class="float-bubble float-4">🎧</div>
+    <div class="float-bubble float-5">💫</div>
+    <div class="float-bubble float-6">🎶</div>
+  </div>
+
+  <header class="topbar">
+    <div class="container">
+      <div class="brand">
+        <img src="icon.png" alt="ECHO" class="logo" />
+        <div>
+          <h1>ECHO</h1>
+          <p class="tag">让本地音乐更好听 · 可扩展 · HiFi</p>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a href="#features">特色</a>
+        <a href="#screenshots">预览</a>
+        <a href="#faq">常见问题</a>
+        <a href="#changelog">更新日志</a>
+        <a class="btn ghost" href="https://github.com/Moekotori/Echoes" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-inner">
+        <div class="hero-left">
+          <h2>可爱 · 专业 · 高音质</h2>
+          <p class="lead">ECHO 是一款以「听感优先」为目标的桌面音乐播放器，提供原生音频管线、歌词和 MV 整合、插件扩展以及媒体下载工具。</p>
+
+          <div class="cta-row">
+            <a class="btn primary" href="http://156.233.234.26:8888/down/rpFBjzF6KuZD.exe">立即下载 Windows 版</a>
+            <a class="btn outline" href="https://github.com/Moekotori/Echoes" target="_blank" rel="noopener">在 GitHub 查看源码</a>
+          </div>
+
+          <div class="hero-features">
+            <div>🌸 HiFi 原生输出</div>
+            <div>📜 同步歌词 / ロマ字</div>
+            <div>🎛️ 可定制 EQ 与插件</div>
+          </div>
+        </div>
+
+        <div class="hero-right">
+          <div class="mockup">
+            <img src="1.png" alt="ECHO preview 1" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <div class="container">
+        <h3 class="section-title">软件特色</h3>
+        <div class="features-grid">
+          <article class="feature-card">
+            <div class="icon">🎧</div>
+            <h4>高保真音频引擎</h4>
+            <p>独立音频进程，支持更低延迟与更少重采样的原生输出，兼容常见设备与声卡驱动。</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="icon">✍️</div>
+            <h4>智能歌词</h4>
+            <p>支持 NetEase 自动抓取、逐行/逐字高亮与日文罗马音（Kuroshiro）。桌面浮动歌词窗口也支持主题同步。</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="icon">📺</div>
+            <h4>MV 播放整合</h4>
+            <p>自动匹配 YouTube / Bilibili MV，内嵌播放并可全屏背景显示。</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="icon">🔌</div>
+            <h4>插件与扩展</h4>
+            <p>支持插件架构，可扩展歌词提供、界面面板、外部服务集成等。</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="icon">⬇️</div>
+            <h4>媒体下载工具</h4>
+            <p>内置下载与转换支持（YouTube/Bilibili/NetEase），并提供直接链接模式以提升稳定性。</p>
+          </article>
+
+          <article class="feature-card">
+            <div class="icon">🎨</div>
+            <h4>主题与可读性</h4>
+            <p>多主题与高对比度设计；可调字体大小与歌词样式，保证可读性。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="screenshots" class="section soft">
+      <div class="container">
+        <h3 class="section-title">界面预览</h3>
+        <div class="screens-grid">
+          <img src="1.png" alt="preview 1" loading="lazy" />
+          <img src="2.png" alt="preview 2" loading="lazy" />
+          <img src="3.png" alt="preview 3" loading="lazy" />
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="section">
+      <div class="container">
+        <h3 class="section-title">常见问题（FAQ）</h3>
+        <div class="faq">
+          <details>
+            <summary>支持哪些系统？</summary>
+            <p>当前主要提供 Windows 安装包（NSIS）。macOS / Linux 版本尚需在对应平台构建与测试。</p>
+          </details>
+
+          <details>
+            <summary>如何检查更新？</summary>
+            <p>应用支持 GitHub Releases 的自动更新（electron-updater），也可以在设置中手动检查更新。</p>
+          </details>
+
+          <details>
+            <summary>下载的安装包如何校验？</summary>
+            <p>下载页会提供 SHA256 校验码，可在 PowerShell 执行 <code>Get-FileHash "ECHO Setup.exe" -Algorithm SHA256</code> 对比。</p>
+          </details>
+
+          <details>
+            <summary>出现播放/音频问题怎么办？</summary>
+            <p>尝试切换输出设备或关闭独占模式；更新声卡驱动并重启应用，若仍异常请上传日志至仓库 Issues。</p>
+          </details>
+
+          <details>
+            <summary>如何贡献或反馈 bug？</summary>
+            <p>欢迎在 GitHub 仓库提交 Issue 或 PR： <a href="https://github.com/Moekotori/Echoes" target="_blank" rel="noopener">https://github.com/Moekotori/Echoes</a></p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section id="changelog" class="section soft">
+      <div class="container">
+        <h3 class="section-title">更新日志</h3>
+        <div id="releases" class="releases">
+          <p class="muted">正在从 GitHub 拉取最新 Release……</p>
+        </div>
+        <div class="changelog-more">
+          <a href="https://github.com/Moekotori/Echoes/releases" class="btn outline" target="_blank" rel="noopener">在 GitHub 上查看全部更新</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container foot-inner">
+      <div>© <span id="year"></span> ECHO — <small>Powered by Moekotori</small></div>
+      <div class="foot-links">
+        <a href="http://156.233.234.26:8888/down/rpFBjzF6KuZD.exe">立即下载</a>
+        <a href="https://github.com/Moekotori/Echoes" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
 </html>

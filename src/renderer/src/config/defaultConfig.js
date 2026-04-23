@@ -50,13 +50,20 @@ export const DEFAULT_CONFIG = {
   /** UI language: en | zh | ja */
   uiLocale: 'en',
   showVisualizer: false,
-  showMiniWaveform: false,
+  showMiniWaveform: true,
   useEQ: true,
   eqBands: DEFAULT_EQ_BANDS.map((b) => ({ ...b })),
   /**
    * 主进程 naudiodon 输出缓冲：low 低延迟 / balanced 默认 / stable 减卡顿
    */
   audioOutputBufferProfile: 'balanced',
+  audioDeviceId: '',
+  audioExclusive: false,
+  crossfadeEnabled: true,
+  crossfadeDuration: 3,
+  sleepTimerEnabled: false,
+  sleepTimerMinutes: 30,
+  sleepTimerMode: 'time',
   visualizerStyle: 'bars',
   showDiscordRPC: true,
   enableMV: false,
@@ -68,13 +75,19 @@ export const DEFAULT_CONFIG = {
   /** 用户选择的本地字体文件路径（.ttf / .otf / .woff / .woff2）；与 uiFontFamily === "custom" 一起使用 */
   uiCustomFontPath: null,
   uiBaseFontSize: 15,
+  /** Main player album cover size in px */
+  playerCoverSize: 360,
   uiRadiusScale: 1,
   uiShadowIntensity: 1,
   uiSaturation: 1,
   uiAccentBackgroundGlow: false,
   theme: 'minimal',
   customColors: { ...PRESET_THEMES.minimal.colors },
+  themeDynamicCoverColor: false,
+  themeCoverAsBackground: false,
   mvAsBackground: false,
+  /** Use MV as background on the main (non-lyrics) player view */
+  mvAsBackgroundMain: false,
   /** 沉浸式 MV 作背景时隐藏左上角歌曲信息与底部播放条（仍可用 Esc 或左上角箭头退出歌词页） */
   mvHideImmersiveChrome: false,
   mvBackgroundOpacity: 0.8,
@@ -92,6 +105,10 @@ export const DEFAULT_CONFIG = {
   lyricsShowTranslation: true,
   /** 歌词主行逐字高亮（类 Apple Music 卡拉 OK） */
   lyricsWordHighlight: false,
+  /** 沉浸式流体背景叠加 */
+  lyricsFluidBackground: true,
+  /** 歌词非活动行景深模糊效果 */
+  lyricsBlurEffect: false,
   /** 逐字高亮前置补偿（毫秒，正值更早） */
   lyricsWordLeadMs: 100,
   /** 单行逐字填充完成比例（相对到下一句起点），建议 0.8~0.95 */
@@ -113,11 +130,15 @@ export const DEFAULT_CONFIG = {
   desktopLyricsEnabled: false,
   /** Base font size (px) for desktop lyrics window */
   desktopLyricsFontPx: 26,
+  /** Desktop overlay: lock position and let mouse clicks pass through */
+  desktopLyricsLocked: false,
   /** Desktop overlay: show previous / next line */
   desktopLyricsShowPrev: true,
   desktopLyricsShowNext: true,
   /** Desktop overlay: show romaji line(s) when available */
   desktopLyricsShowRomaji: false,
+  /** Desktop overlay: show translation line(s) when available */
+  desktopLyricsShowTranslation: false,
   /** Hex colors for desktop floating lyrics (see Lyrics settings) */
   desktopLyricsColorText: '#fff8f5',
   desktopLyricsColorSecondary: '#ffc8b8',

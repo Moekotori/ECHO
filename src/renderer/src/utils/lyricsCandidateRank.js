@@ -4,6 +4,90 @@
 
 import { parseAnyLyrics } from './lyricsParse'
 
+const TIME_TAG_REG = /\[(\d{2}):(\d{2})(\.|\:)(\d{2,3})\]/g
+
+function readLyricText(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function parseTimedLyric(raw) {
+  const rows = []
+  const byTime = new Map()
+
+  for (const line of String(raw || '').split(/\r?\n/)) {
+    const matches = [...line.matchAll(TIME_TAG_REG)]
+    if (matches.length === 0) continue
+
+    const text = line.replace(TIME_TAG_REG, '').trim()
+    if (!text) continue
+
+    const tagText = matches.map((m) => m[0]).join('')
+    const first = matches[0]
+    const timeMs =
+      (Number(first[1]) * 60 + Number(first[2])) * 1000 +
+      (first[4].length === 3 ? Number(first[4]) : Number(first[4]) * 10)
+
+    rows.push({ timeMs, tagText, text })
+
+    for (const match of matches) {
+      const ms =
+        (Number(match[1]) * 60 + Number(match[2])) * 1000 +
+        (match[4].length === 3 ? Number(match[4]) : Number(match[4]) * 10)
+      if (!byTime.has(ms)) byTime.set(ms, text)
+    }
+  }
+
+  return { rows, byTime }
+}
+
+function mergeTimedLyrics(mainLyrics, romajiLyrics, translatedLyrics) {
+  const main = parseTimedLyric(mainLyrics)
+  if (main.rows.length === 0) return mainLyrics || ''
+
+  const romaji = parseTimedLyric(romajiLyrics).byTime
+  const translation = parseTimedLyric(translatedLyrics).byTime
+  const merged = []
+
+  for (const row of main.rows) {
+    merged.push(`${row.tagText}${row.text}`)
+    const seen = new Set([row.text])
+    const extras = [romaji.get(row.timeMs), translation.get(row.timeMs)]
+    for (const extra of extras) {
+      const text = String(extra || '').trim()
+      if (!text || seen.has(text)) continue
+      merged.push(`${row.tagText}${text}`)
+      seen.add(text)
+    }
+  }
+
+  return merged.join('\n')
+}
+
+function buildCandidateLyricsText(item) {
+  const synced = readLyricText(item?.syncedLyrics, item?.synced_lyrics)
+  const plain = readLyricText(item?.plainLyrics, item?.plain_lyrics, item?.lyrics)
+  const base = synced || plain
+  if (!base) return ''
+
+  const romaji = readLyricText(
+    item?.romajiLyrics,
+    item?.romaji_lyrics,
+    item?.romanizedLyrics,
+    item?.romanized_lyrics
+  )
+  const translation = readLyricText(
+    item?.translatedLyrics,
+    item?.translated_lyrics,
+    item?.translationLyrics,
+    item?.translation_lyrics
+  )
+
+  return mergeTimedLyrics(base, romaji, translation)
+}
+
 function stripTitleNoise(rawTitle = '') {
   if (!rawTitle) return ''
   let s = rawTitle
@@ -136,7 +220,9 @@ export function rankLrcLibCandidates(payload, audioDuration, options = {}) {
   if (!payload) return []
 
   const candidates = Array.isArray(payload) ? payload : [payload]
-  const expectedTitles = [...new Set((options.titleCandidates || []).map(normalizeLyricCompareText))]
+  const expectedTitles = [
+    ...new Set((options.titleCandidates || []).map(normalizeLyricCompareText))
+  ]
     .filter(Boolean)
     .slice(0, 8)
 
@@ -154,15 +240,16 @@ export function rankLrcLibCandidates(payload, audioDuration, options = {}) {
     return out
   }
 
-  const expectedArtists = [...new Set(expandArtistCandidates(options.artistCandidates).map(normalizeLyricCompareText))]
+  const expectedArtists = [
+    ...new Set(expandArtistCandidates(options.artistCandidates).map(normalizeLyricCompareText))
+  ]
     .filter(Boolean)
     .slice(0, 12)
 
   const scored = candidates
     .map((item) => {
-      const synced = item?.syncedLyrics?.trim() || ''
-      const plain = item?.plainLyrics?.trim() || item?.lyrics?.trim() || ''
-      const chosenLyrics = synced || plain
+      const synced = readLyricText(item?.syncedLyrics, item?.synced_lyrics)
+      const chosenLyrics = buildCandidateLyricsText(item)
       if (!chosenLyrics) return null
 
       const candTitle =

@@ -5,7 +5,8 @@ import React, {
   useCallback,
   useMemo,
   memo,
-  startTransition
+  startTransition,
+  useDeferredValue
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -30,6 +31,8 @@ import {
   Mic2,
   ChevronLeft,
   Search,
+  Globe,
+  Link,
   Settings,
   ToggleLeft,
   ToggleRight,
@@ -42,6 +45,7 @@ import {
   Wand2,
   CheckCircle2,
   ChevronDown,
+  Check,
   Minus,
   ListMusic,
   ListPlus,
@@ -58,7 +62,8 @@ import {
   Copy,
   AppWindow,
   Blocks,
-  Headphones
+  Headphones,
+  History
 } from 'lucide-react'
 import LyricsSettingsDrawer from './components/LyricsSettingsDrawer'
 import MediaDownloaderDrawer from './components/MediaDownloaderDrawer'
@@ -67,15 +72,21 @@ import AudioSettingsDrawer from './components/AudioSettingsDrawer'
 import CastReceiveDrawer from './components/CastReceiveDrawer'
 import ListenTogetherDrawer from './components/ListenTogetherDrawer'
 import LyricsCandidatePicker from './components/LyricsCandidatePicker'
+import MetadataEditorDrawer from './components/MetadataEditorDrawer'
 import { UiButton } from './components/ui'
 import { parseAnyLyrics } from './utils/lyricsParse'
 import { pickLyricsFromLrcLibResult, rankLrcLibCandidates } from './utils/lyricsCandidateRank'
 import {
   getLyricsOverrideForPath,
   setLyricsOverrideForPath,
-  clearLyricsOverrideForPath
+  clearLyricsOverrideForPath,
+  remapLyricsOverrides
 } from './utils/lyricsOverrideStorage'
-import { getMvOverrideForPath, setMvOverrideForPath } from './utils/trackMemoryStorage'
+import {
+  getMvOverrideForPath,
+  setMvOverrideForPath,
+  remapMvOverrides
+} from './utils/trackMemoryStorage'
 import { extractVideoId } from './utils/mvUrlParse'
 import { buildDesktopLyricsPayload } from './utils/desktopLyricsPayload'
 import { PRESET_THEMES, hexToRgbStr, hexToRgbaString, generateRandomPalette } from './utils/color'
@@ -93,18 +104,40 @@ import {
   parseArtistTitleFromName
 } from './utils/trackUtils'
 import { ArtistLink } from './components/ArtistLink'
-import { AlbumCoverLink } from './components/AlbumCoverLink'
 import { MiniWaveform } from './components/MiniWaveform'
 import { EqPlot } from './components/EqPlot'
 import { EQ_PRESETS } from './constants/eq'
 import { DEFAULT_CONFIG, migrateEqBandsTo16 } from './config/defaultConfig'
-import { normalizeImportedPlaylists, buildPlaylistsExportPayload } from './utils/userPlaylists'
+import {
+  normalizeImportedPlaylists,
+  buildPlaylistsExportPayload,
+  extractDownloadablePlaylists
+} from './utils/userPlaylists'
+import {
+  createEmptySmartCollectionRules,
+  normalizeSmartCollectionRules,
+  normalizeUserSmartCollections,
+  hasActiveSmartCollectionRules,
+  matchTrackAgainstSmartCollection
+} from './utils/smartCollections'
 import { inferUiLocaleFromNavigator, normalizeUiLocale, bcp47ForUiLocale } from './utils/uiLocale'
 import { clampBiquadQ } from './utils/eqBiquad'
 import { copySongCardImage, saveSongCardImage } from './utils/songCardImage'
 import { parseLyricsSourceLink } from './utils/lyricsLink'
 import PluginSlot from './plugins/PluginSlot'
 import PluginManagerDrawer from './components/PluginManagerDrawer'
+import { extractAverageHexFromSrc, generatePaletteFromHex } from './utils/color'
+import {
+  containsLegacyPlaybackHistoryEntries,
+  createPlaybackContext,
+  dedupePathList,
+  normalizePlaybackContext,
+  normalizePlaybackHistory,
+  normalizePlaybackHistoryEntry,
+  normalizePlaybackSession,
+  pickInitialPersistedValue,
+  remapPlaybackHistoryEntries
+} from '../../shared/playbackPersistence.mjs'
 
 /** `<audio src>` 必须用编码后的 file: URL；路径里的 `#`、`%`、Unicode 等手写 `file://` 会失效 */
 function localPathToAudioSrc(filePath) {
@@ -115,6 +148,93 @@ function localPathToAudioSrc(filePath) {
 }
 
 const MENU_ANIM_MS = 160
+const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/Moekotori/Echoes/releases?per_page=6'
+const GITHUB_RELEASES_PAGE_URL = 'https://github.com/Moekotori/Echoes/releases'
+const MAX_PLAYBACK_HISTORY = 40
+const STORED_VOLUME_KEY = 'nc_volume'
+const SIDEBAR_LIST_OVERSCAN = 10
+const SIDEBAR_ROW_HEIGHT = 64
+const SIDEBAR_DETAIL_ROW_HEIGHT = 60
+const ALBUM_GRID_DEFAULT_ROW_HEIGHT = 68
+const ALBUM_GRID_DEFAULT_GAP = 10
+const RENDERER_PERSIST_DEBOUNCE_MS = 600
+const PLAYBACK_SESSION_LOCAL_KEY = 'nc_playback_session'
+const USER_SMART_COLLECTIONS_LOCAL_KEY = 'nc_user_smart_collections'
+const DISPLAY_METADATA_OVERRIDES_LOCAL_KEY = 'nc_display_metadata_overrides'
+
+function getInitialAppStateValue(key) {
+  try {
+    if (typeof window === 'undefined' || !window.api?.getInitialAppStateValue) return null
+    return window.api.getInitialAppStateValue(key)
+  } catch {
+    return null
+  }
+}
+
+function readStoredJson(localKey) {
+  try {
+    const raw = localStorage.getItem(localKey)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function normalizeDisplayMetadataOverrides(value) {
+  if (!value || typeof value !== 'object') return {}
+  const next = {}
+  for (const [path, item] of Object.entries(value)) {
+    if (typeof path !== 'string' || !path || !item || typeof item !== 'object') continue
+    const normalizedItem = {}
+    for (const key of ['title', 'artist', 'album', 'albumArtist', 'cover', 'coverPath']) {
+      if (typeof item[key] === 'string') normalizedItem[key] = item[key]
+    }
+    for (const key of ['trackNo', 'discNo']) {
+      const raw = item[key]
+      const parsed = Number.parseInt(String(raw ?? ''), 10)
+      if (Number.isFinite(parsed) && parsed > 0) normalizedItem[key] = parsed
+    }
+    if (Object.keys(normalizedItem).length > 0) next[path] = normalizedItem
+  }
+  return next
+}
+
+function normalizeReleaseVersion(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^v/i, '')
+}
+
+function buildReleasePreviewLines(body) {
+  return String(body || '')
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/^#{1,6}\s*/, '')
+        .trim()
+    )
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
+function clampVolume(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return 1
+  return Math.min(1, Math.max(0, num))
+}
+
+function readStoredVolume() {
+  try {
+    const saved = getInitialAppStateValue('volume')
+    if (typeof saved === 'number' && Number.isFinite(saved)) return clampVolume(saved)
+    const localSaved = localStorage.getItem(STORED_VOLUME_KEY)
+    if (localSaved == null) return 1
+    return clampVolume(localSaved)
+  } catch {
+    return 1
+  }
+}
 
 function isLocalAudioFilePath(p) {
   if (!p || typeof p !== 'string') return false
@@ -127,25 +247,593 @@ function isLocalAudioFilePath(p) {
   return false
 }
 
-const AlbumSidebarCard = memo(function AlbumSidebarCard({ album, isSelected, onPickAlbum }) {
+function fileNameFromPath(filePath = '') {
+  return (
+    String(filePath || '')
+      .split(/[/\\]/)
+      .pop() || String(filePath || '')
+  )
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function buildPlaybackHistoryEntry(track, trackMetaMap, playedAt = Date.now()) {
+  if (!track?.path) return null
+  const info = parseTrackInfo(track, trackMetaMap?.[track.path])
+  return {
+    path: track.path,
+    title: info?.title || stripExtension(track.name || fileNameFromPath(track.path)),
+    artist:
+      info?.artist && info.artist !== 'Unknown Artist'
+        ? info.artist
+        : track?.info?.artist && track.info.artist !== 'Unknown Artist'
+          ? track.info.artist
+          : '',
+    album:
+      info?.album && info.album !== 'Unknown Album'
+        ? info.album
+        : track?.info?.album && track.info.album !== 'Unknown Album'
+          ? track.info.album
+          : '',
+    playedAt
+  }
+}
+
+function normalizeConfigState(raw) {
+  const source = raw && typeof raw === 'object' ? raw : null
+  if (!source) {
+    return { ...DEFAULT_CONFIG, uiLocale: inferUiLocaleFromNavigator() }
+  }
+
+  const oldRev = source.configRevision ?? 0
+  const appRev = DEFAULT_CONFIG.configRevision ?? 1
+  const merged = {
+    ...DEFAULT_CONFIG,
+    ...source,
+    customColors: normalizeThemeColors({
+      ...DEFAULT_CONFIG.customColors,
+      ...(source.customColors || {})
+    })
+  }
+  if (!Object.prototype.hasOwnProperty.call(source, 'lyricsShowRomaji')) {
+    merged.lyricsShowRomaji = DEFAULT_CONFIG.lyricsShowRomaji
+  }
+  if (!Object.prototype.hasOwnProperty.call(source, 'lyricsShowTranslation')) {
+    merged.lyricsShowTranslation = DEFAULT_CONFIG.lyricsShowTranslation
+  }
+  if (!Object.prototype.hasOwnProperty.call(source, 'lyricsWordHighlight')) {
+    merged.lyricsWordHighlight = DEFAULT_CONFIG.lyricsWordHighlight
+  }
+  if (!Object.prototype.hasOwnProperty.call(source, 'uiLocale')) {
+    merged.uiLocale = inferUiLocaleFromNavigator()
+  } else {
+    merged.uiLocale = normalizeUiLocale(merged.uiLocale)
+  }
+  if (merged.closeButtonBehavior !== 'quit' && merged.closeButtonBehavior !== 'tray') {
+    merged.closeButtonBehavior = DEFAULT_CONFIG.closeButtonBehavior
+  }
+  if (!['time', 'track'].includes(merged.sleepTimerMode)) {
+    merged.sleepTimerMode = DEFAULT_CONFIG.sleepTimerMode
+  }
+  if (typeof merged.crossfadeEnabled !== 'boolean') {
+    merged.crossfadeEnabled = DEFAULT_CONFIG.crossfadeEnabled
+  }
+  if (
+    !Number.isFinite(merged.crossfadeDuration) ||
+    merged.crossfadeDuration < 1 ||
+    merged.crossfadeDuration > 12
+  ) {
+    merged.crossfadeDuration = DEFAULT_CONFIG.crossfadeDuration
+  }
+  if (![5, 10, 15, 30, 45, 60, 90].includes(merged.sleepTimerMinutes)) {
+    merged.sleepTimerMinutes = DEFAULT_CONFIG.sleepTimerMinutes
+  }
+  if (typeof merged.sleepTimerEnabled !== 'boolean') {
+    merged.sleepTimerEnabled = DEFAULT_CONFIG.sleepTimerEnabled
+  }
+  if (oldRev < appRev) {
+    merged.configRevision = appRev
+  }
+  if (oldRev < appRev && Array.isArray(source.eqBands) && source.eqBands.length === 10) {
+    merged.eqBands = migrateEqBandsTo16(source.eqBands)
+  }
+  if (!['low', 'balanced', 'stable'].includes(merged.audioOutputBufferProfile)) {
+    merged.audioOutputBufferProfile = 'balanced'
+  }
+  if (
+    merged.theme !== 'custom' &&
+    !Object.prototype.hasOwnProperty.call(PRESET_THEMES, merged.theme)
+  ) {
+    merged.theme = 'minimal'
+    merged.customColors = normalizeThemeColors(PRESET_THEMES.minimal.colors)
+  }
+  if (oldRev < 4) {
+    const legacy = merged.lyricsFontColor
+    if (!merged.lyricsColor && typeof legacy === 'string' && legacy.trim()) {
+      const hex = legacy.trim()
+      merged.lyricsColor = {
+        version: 1,
+        layers: {
+          main: {
+            active: { hex, a: 1 },
+            normal: { hex, a: 0.82 },
+            past: { hex, a: 0.6 }
+          }
+        }
+      }
+    }
+  }
+  return merged
+}
+
+const SLEEP_TIMER_MINUTE_OPTIONS = [5, 10, 15, 30, 45, 60, 90]
+/* const SETTINGS_SECTION_KEYWORDS = {
+  language: ['language', 'locale', '语言', 'en', 'zh', 'ja', '言語'],
+  engine: [
+    'visualizer',
+    'spectrum',
+    'waveform',
+    'eq',
+    'equalizer',
+    'buffer',
+    'crossfade',
+    'sleep',
+    'timer',
+    'asio',
+    'exclusive',
+    'audio',
+    '均衡',
+    '音频',
+    '淡入淡出',
+    '睡眠',
+    '定时',
+    'イコライザー',
+    'クロスフェード'
+  ],
+  integrations: ['discord', 'rpc', 'presence', '集成', '整合', '連携'],
+  eq: ['eq', 'equalizer', 'parametric', 'preamp', 'band', '均衡器', '参量', 'イコライザー'],
+  aesthetics: [
+    'theme',
+    'color',
+    'background',
+    'blur',
+    'font',
+    'radius',
+    'opacity',
+    'gradient',
+    '主题',
+    '颜色',
+    '背景',
+    '字体',
+    '模糊',
+    'テーマ',
+    'フォント'
+  ],
+  media: [
+    'download',
+    'library',
+    'playlist',
+    'folder',
+    'import',
+    'cleanup',
+    '下载',
+    '媒体库',
+    '歌单',
+    '导入',
+    '清理',
+    'ダウンロード',
+    'ライブラリ',
+    'プレイリスト'
+  ],
+  about: [
+    'about',
+    'version',
+    'update',
+    'release',
+    'changelog',
+    'developer',
+    'devtools',
+    '关于',
+    '版本',
+    '更新',
+    '开发',
+    'バージョン',
+    'アップデート',
+    '開発'
+  ],
+  danger: ['reset', 'danger', 'clear', '重置', '危险', 'リセット']
+}
+
+*/
+const SETTINGS_SECTION_KEYWORDS = {
+  language: ['language', 'locale', '\u8bed\u8a00', 'en', 'zh', 'ja', '\u8a00\u8a9e'],
+  engine: [
+    'visualizer',
+    'spectrum',
+    'waveform',
+    'eq',
+    'equalizer',
+    'buffer',
+    'crossfade',
+    'sleep',
+    'timer',
+    'asio',
+    'exclusive',
+    'audio',
+    '\u5747\u8861',
+    '\u97f3\u9891',
+    '\u6de1\u5165\u6de1\u51fa',
+    '\u7761\u7720',
+    '\u5b9a\u65f6',
+    '\u30a4\u30b3\u30e9\u30a4\u30b6\u30fc',
+    '\u30af\u30ed\u30b9\u30d5\u30a7\u30fc\u30c9'
+  ],
+  integrations: ['discord', 'rpc', 'presence', '\u96c6\u6210', '\u6574\u5408', '\u9023\u643a'],
+  eq: [
+    'eq',
+    'equalizer',
+    'parametric',
+    'preamp',
+    'band',
+    '\u5747\u8861\u5668',
+    '\u53c2\u91cf',
+    '\u30a4\u30b3\u30e9\u30a4\u30b6\u30fc'
+  ],
+  aesthetics: [
+    'theme',
+    'color',
+    'background',
+    'blur',
+    'font',
+    'radius',
+    'opacity',
+    'gradient',
+    '\u4e3b\u9898',
+    '\u989c\u8272',
+    '\u80cc\u666f',
+    '\u5b57\u4f53',
+    '\u6a21\u7cca',
+    '\u30c6\u30fc\u30de',
+    '\u30d5\u30a9\u30f3\u30c8'
+  ],
+  media: [
+    'download',
+    'library',
+    'playlist',
+    'folder',
+    'import',
+    'cleanup',
+    '\u4e0b\u8f7d',
+    '\u5a92\u4f53\u5e93',
+    '\u6b4c\u5355',
+    '\u5bfc\u5165',
+    '\u6e05\u7406',
+    '\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9',
+    '\u30e9\u30a4\u30d6\u30e9\u30ea',
+    '\u30d7\u30ec\u30a4\u30ea\u30b9\u30c8'
+  ],
+  about: [
+    'about',
+    'version',
+    'update',
+    'release',
+    'changelog',
+    'developer',
+    'devtools',
+    '\u5173\u4e8e',
+    '\u7248\u672c',
+    '\u66f4\u65b0',
+    '\u5f00\u53d1',
+    '\u30d0\u30fc\u30b8\u30e7\u30f3',
+    '\u30a2\u30c3\u30d7\u30c7\u30fc\u30c8',
+    '\u958b\u767a'
+  ],
+  danger: ['reset', 'danger', 'clear', '\u91cd\u7f6e', '\u5371\u9669', '\u30ea\u30bb\u30c3\u30c8']
+}
+
+function formatSleepTimerRemaining(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+function matchesSettingsSection(query, keywords) {
+  const normalized = String(query || '')
+    .trim()
+    .toLowerCase()
+  if (!normalized) return true
+  return (keywords || []).some((keyword) => {
+    const text = String(keyword || '').toLowerCase()
+    return text.includes(normalized) || normalized.includes(text)
+  })
+}
+
+function normalizeWatchedTrack(track) {
+  if (!track?.path) return null
+  return {
+    name: track.name || fileNameFromPath(track.path),
+    path: track.path,
+    folder: track.folder,
+    birthtimeMs: track.birthtimeMs || 0,
+    mtimeMs: track.mtimeMs || 0,
+    sizeBytes: track.sizeBytes || 0
+  }
+}
+
+function remapPathList(paths, pathMap, removedSet) {
+  const seen = new Set()
+  const next = []
+  for (const path of Array.isArray(paths) ? paths : []) {
+    if (typeof path !== 'string' || !path) continue
+    const mappedPath = pathMap[path] || path
+    if (!mappedPath || removedSet.has(mappedPath) || seen.has(mappedPath)) continue
+    seen.add(mappedPath)
+    next.push(mappedPath)
+  }
+  return next
+}
+
+function remapQueueItems(items, pathMap, removedSet) {
+  const seen = new Set()
+  const next = []
+  for (const item of Array.isArray(items) ? items : []) {
+    const path = item?.path
+    if (typeof path !== 'string' || !path) continue
+    const mappedPath = pathMap[path] || path
+    if (!mappedPath || removedSet.has(mappedPath) || seen.has(mappedPath)) continue
+    seen.add(mappedPath)
+    next.push({ path: mappedPath })
+  }
+  return next
+}
+
+function remapTrackMetaEntries(metaMap, pathMap, removedSet) {
+  const next = {}
+  for (const [path, value] of Object.entries(metaMap || {})) {
+    const mappedPath = pathMap[path] || path
+    if (!mappedPath || removedSet.has(mappedPath)) continue
+    if (!Object.prototype.hasOwnProperty.call(next, mappedPath)) {
+      next[mappedPath] = value
+    }
+  }
+  return next
+}
+
+function remapTrackStatsEntries(statsMap, pathMap, removedSet) {
+  const next = {}
+  for (const [path, value] of Object.entries(statsMap || {})) {
+    const mappedPath = pathMap[path] || path
+    if (!mappedPath || removedSet.has(mappedPath)) continue
+    if (!Object.prototype.hasOwnProperty.call(next, mappedPath)) {
+      next[mappedPath] = value
+    }
+  }
+  return next
+}
+
+function withUpdatedTrackPath(track, nextPath) {
+  if (!track?.path || !nextPath || track.path === nextPath) return track
+  return {
+    ...track,
+    path: nextPath,
+    name: fileNameFromPath(nextPath)
+  }
+}
+
+function isTrackInsideImportedFolders(trackPath, folders) {
+  if (!trackPath || !Array.isArray(folders) || !folders.length) return false
+  const normalizedPath = String(trackPath).replace(/\\/g, '/').toLowerCase()
+  return folders.some((folder) => {
+    const normalizedFolder = String(folder || '')
+      .replace(/[\\/]+$/, '')
+      .replace(/\\/g, '/')
+      .toLowerCase()
+    if (!normalizedFolder) return false
+    return normalizedPath === normalizedFolder || normalizedPath.startsWith(`${normalizedFolder}/`)
+  })
+}
+
+function buildLibraryTrackFingerprint(track) {
+  if (!track) return ''
+  if (track.birthtimeMs) return `birth:${track.birthtimeMs}`
+  if (track.sizeBytes || track.mtimeMs) return `stat:${track.sizeBytes || 0}:${track.mtimeMs || 0}`
+  return ''
+}
+
+function diffImportedFolderSnapshot(previousTracks, currentTracks) {
+  const previousByPath = new Map((previousTracks || []).map((track) => [track.path, track]))
+  const currentByPath = new Map((currentTracks || []).map((track) => [track.path, track]))
+  const removedEntries = []
+  const addedEntries = []
+
+  for (const [path, track] of previousByPath) {
+    if (!currentByPath.has(path)) removedEntries.push(track)
+  }
+  for (const [path, track] of currentByPath) {
+    if (!previousByPath.has(path)) addedEntries.push(track)
+  }
+
+  const removedByFingerprint = new Map()
+  const addedByFingerprint = new Map()
+  const pushFingerprint = (map, track) => {
+    const key = buildLibraryTrackFingerprint(track)
+    if (!key) return
+    const group = map.get(key)
+    if (group) group.push(track)
+    else map.set(key, [track])
+  }
+
+  removedEntries.forEach((track) => pushFingerprint(removedByFingerprint, track))
+  addedEntries.forEach((track) => pushFingerprint(addedByFingerprint, track))
+
+  const renamed = []
+  for (const [fingerprint, removedGroup] of removedByFingerprint) {
+    const addedGroup = addedByFingerprint.get(fingerprint)
+    if (!addedGroup || removedGroup.length !== 1 || addedGroup.length !== 1) continue
+    renamed.push({
+      from: removedGroup[0].path,
+      to: addedGroup[0].path,
+      entry: addedGroup[0]
+    })
+  }
+
+  const renamedFromSet = new Set(renamed.map((item) => item.from))
+  const renamedToSet = new Set(renamed.map((item) => item.to))
+  return {
+    renamed,
+    removedPaths: removedEntries
+      .filter((track) => !renamedFromSet.has(track.path))
+      .map((track) => track.path),
+    added: addedEntries.filter((track) => !renamedToSet.has(track.path))
+  }
+}
+
+function collectReferencedLibraryPaths({
+  playlist = [],
+  userPlaylists = [],
+  likedPaths = [],
+  playbackHistory = [],
+  trackStats = {}
+}) {
+  const seen = new Set()
+  const next = []
+  const pushPath = (path) => {
+    if (typeof path !== 'string' || !path || seen.has(path)) return
+    seen.add(path)
+    next.push(path)
+  }
+
+  for (const track of playlist) pushPath(track?.path)
+  for (const playlistItem of userPlaylists) {
+    for (const path of playlistItem?.paths || []) pushPath(path)
+  }
+  for (const path of likedPaths) pushPath(path)
+  for (const entry of playbackHistory) pushPath(entry?.path)
+  for (const path of Object.keys(trackStats || {})) pushPath(path)
+  return next
+}
+
+function normalizeTrackStatsMap(raw) {
+  if (!raw || typeof raw !== 'object') return {}
+  const next = {}
+  for (const [path, value] of Object.entries(raw)) {
+    if (typeof path !== 'string' || !path || !value || typeof value !== 'object') continue
+    const playCount = Number(value.playCount)
+    const lastPlayedAt = Number(value.lastPlayedAt)
+    next[path] = {
+      playCount: Number.isFinite(playCount) && playCount > 0 ? Math.floor(playCount) : 0,
+      lastPlayedAt: Number.isFinite(lastPlayedAt) && lastPlayedAt > 0 ? lastPlayedAt : 0
+    }
+  }
+  return next
+}
+
+function createSmartCollectionDraft(source = null) {
+  const rules = normalizeSmartCollectionRules(source?.rules)
+  return {
+    name: source?.name || '',
+    matchMode: rules.matchMode,
+    likedOnly: rules.likedOnly,
+    minPlayCount: rules.minPlayCount ? String(rules.minPlayCount) : '',
+    playedWithinDays: rules.playedWithinDays ? String(rules.playedWithinDays) : '',
+    addedWithinDays: rules.addedWithinDays ? String(rules.addedWithinDays) : '',
+    titleIncludes: rules.titleIncludes || '',
+    artistIncludes: rules.artistIncludes || '',
+    albumIncludes: rules.albumIncludes || ''
+  }
+}
+
+function normalizeSmartCollectionDraft(draft) {
+  const source = draft && typeof draft === 'object' ? draft : {}
+  return {
+    name: String(source.name || '').trim(),
+    rules: normalizeSmartCollectionRules({
+      matchMode: source.matchMode,
+      likedOnly: source.likedOnly === true,
+      minPlayCount: source.minPlayCount,
+      playedWithinDays: source.playedWithinDays,
+      addedWithinDays: source.addedWithinDays,
+      titleIncludes: source.titleIncludes,
+      artistIncludes: source.artistIncludes,
+      albumIncludes: source.albumIncludes
+    })
+  }
+}
+
+function createSmartCollectionTemplateDraft(templateKey) {
+  switch (templateKey) {
+    case 'recent-added':
+      return createSmartCollectionDraft({
+        name: 'Recently added',
+        rules: { addedWithinDays: 14, matchMode: 'all' }
+      })
+    case 'recently-played':
+      return createSmartCollectionDraft({
+        name: 'Recently played a lot',
+        rules: { playedWithinDays: 30, minPlayCount: 3, matchMode: 'all' }
+      })
+    case 'liked':
+      return createSmartCollectionDraft({
+        name: 'My likes',
+        rules: { likedOnly: true, matchMode: 'all' }
+      })
+    default:
+      return createSmartCollectionDraft({ rules: createEmptySmartCollectionRules() })
+  }
+}
+
+function createUniqueSmartCollectionName(baseName, existingCollections = []) {
+  const normalizedBase = String(baseName || '').trim() || 'Smart collection'
+  const existingNames = new Set(
+    (existingCollections || []).map((item) =>
+      String(item?.name || '')
+        .trim()
+        .toLowerCase()
+    )
+  )
+  if (!existingNames.has(normalizedBase.toLowerCase())) return normalizedBase
+  let nextIndex = 2
+  while (existingNames.has(`${normalizedBase} ${nextIndex}`.toLowerCase())) {
+    nextIndex += 1
+  }
+  return `${normalizedBase} ${nextIndex}`
+}
+
+const AlbumSidebarCard = memo(function AlbumSidebarCard({
+  album,
+  isSelected,
+  onPickAlbum,
+  onContextMenu
+}) {
   const { t } = useTranslation()
+  const [coverFailed, setCoverFailed] = useState(false)
+
+  useEffect(() => {
+    setCoverFailed(false)
+  }, [album.cover])
+
   return (
     <button
       type="button"
       className={`album-card ${isSelected ? 'active' : ''}`}
       onClick={() => onPickAlbum(album)}
+      onContextMenu={onContextMenu ? (e) => onContextMenu(e, album) : undefined}
       title={t('albumCard.title', {
         name: album.name,
         count: album.tracks.length
       })}
     >
-      {album.cover ? (
+      {album.cover && !coverFailed ? (
         <img
           src={album.cover}
           alt={album.name}
           className="album-cover-image"
-          loading="lazy"
+          loading={String(album.cover).startsWith('data:') ? 'eager' : 'lazy'}
           decoding="async"
+          onError={() => setCoverFailed(true)}
         />
       ) : (
         <div className="album-cover-fallback">
@@ -160,6 +848,7 @@ const AlbumSidebarCard = memo(function AlbumSidebarCard({ album, isSelected, onP
               artist={album.artist}
               className="artist-link-subtle album-subtitle-artist-link"
               stopPropagation
+              noLink
             />
           </span>
           <span className="album-subtitle-sep">·</span>
@@ -172,32 +861,68 @@ const AlbumSidebarCard = memo(function AlbumSidebarCard({ album, isSelected, onP
 
 export default function App() {
   const { t } = useTranslation()
+  const [appVersion, setAppVersion] = useState('')
+  const [dynamicCoverTheme, setDynamicCoverTheme] = useState(null)
+  const [updateStatus, setUpdateStatus] = useState(null)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [releaseNotes, setReleaseNotes] = useState([])
+  const [releaseNotesLoading, setReleaseNotesLoading] = useState(false)
+  const [releaseNotesError, setReleaseNotesError] = useState('')
+  const [releaseNotesOpen, setReleaseNotesOpen] = useState(false)
+
   const [playlist, setPlaylist] = useState(() => {
-    try {
-      const saved = localStorage.getItem('nc_playlist')
-      if (!saved) return []
-      const parsed = JSON.parse(saved)
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('playlist'),
+      localValue: readStoredJson('nc_playlist'),
+      normalize: (value) => (Array.isArray(value) ? value : undefined),
+      fallback: []
+    })
   })
   const [upNextQueue, setUpNextQueue] = useState([])
+  const [playbackHistory, setPlaybackHistory] = useState(() => {
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('playbackHistory'),
+      localValue: readStoredJson('nc_playback_history'),
+      normalize: (value) =>
+        Array.isArray(value) ? normalizePlaybackHistory(value, MAX_PLAYBACK_HISTORY) : undefined,
+      fallback: []
+    })
+  })
   const [queuePlaybackEnabled, setQueuePlaybackEnabled] = useState(() => {
-    const saved = localStorage.getItem('nc_queue_playback_enabled')
-    if (saved == null) return true
-    return saved !== '0'
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('queuePlaybackEnabled'),
+      localValue: localStorage.getItem('nc_queue_playback_enabled'),
+      normalize: (value) => {
+        if (typeof value === 'boolean') return value
+        if (value == null) return undefined
+        return value !== '0'
+      },
+      fallback: true
+    })
   })
   const [playMode, setPlayMode] = useState(() => {
-    return localStorage.getItem('nc_playmode') || 'loop'
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('playMode'),
+      localValue: localStorage.getItem('nc_playmode'),
+      normalize: (value) => (typeof value === 'string' && value ? value : undefined),
+      fallback: 'loop'
+    })
   })
 
   const [currentIndex, setCurrentIndex] = useState(-1)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [sleepTimerActive, setSleepTimerActive] = useState(false)
+  const [sleepTimerEndMs, setSleepTimerEndMs] = useState(null)
+  const [sleepTimerNowMs, setSleepTimerNowMs] = useState(Date.now())
   const [coverUrl, setCoverUrl] = useState(null)
+  const crossfadeStateRef = useRef({
+    active: false,
+    sourcePath: '',
+    pendingFadeIn: false
+  })
 
   const [playbackRate, setPlaybackRate] = useState(1.0)
-  const [volume, setVolume] = useState(1.0)
+  const [volume, setVolume] = useState(() => readStoredVolume())
   const [useNativeEngine, setUseNativeEngine] = useState(false)
   const [isAudioExclusive, setIsAudioExclusive] = useState(false)
   const useNativeEngineRef = useRef(false)
@@ -205,6 +930,8 @@ export default function App() {
   /** Avoid duplicate native playAudio for the same track (React Strict Mode double-invokes effects). */
   const nativePlayDedupeRef = useRef({ path: '', index: -1, t: 0 })
   const [isProgressDragging, setIsProgressDragging] = useState(false)
+  const isProgressDraggingRef = useRef(false)
+  const progressSeekValueRef = useRef(0)
   const [isSpeedDragging, setIsSpeedDragging] = useState(false)
   const [isVolumeDragging, setIsVolumeDragging] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -215,6 +942,35 @@ export default function App() {
   useEffect(() => {
     isSeekingRef.current = isSeeking
   }, [isSeeking])
+
+  useEffect(() => {
+    if (window.api?.getAppVersion) {
+      window.api
+        .getAppVersion()
+        .then((v) => {
+          if (v) setAppVersion(v)
+        })
+        .catch(console.error)
+    }
+
+    if (window.api?.onUpdaterEvent) {
+      return window.api.onUpdaterEvent((msg) => {
+        setUpdateStatus(msg)
+        if (msg.event === 'update-available' || msg.event === 'update-downloaded') {
+          setReleaseNotesOpen(true)
+        }
+        if (
+          msg.event === 'update-available' ||
+          msg.event === 'update-downloaded' ||
+          msg.event === 'error' ||
+          msg.event === 'update-not-available'
+        ) {
+          setIsUpdating(false)
+        }
+      })
+    }
+  }, [])
+
   const seekTimerRef = useRef(null)
   const [isPresetOpen, setIsPresetOpen] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
@@ -261,6 +1017,14 @@ export default function App() {
   const [listenTogetherDrawerOpen, setListenTogetherDrawerOpen] = useState(false)
   const [pluginDrawerOpen, setPluginDrawerOpen] = useState(false)
   const [audioSettingsDrawerOpen, setAudioSettingsDrawerOpen] = useState(false)
+  const [metadataEditorOpen, setMetadataEditorOpen] = useState(false)
+  const [metadataEditorTrack, setMetadataEditorTrack] = useState(null)
+  const [batchRenameOpen, setBatchRenameOpen] = useState(false)
+  const [quickEditField, setQuickEditField] = useState(null)
+  const [quickEditDraft, setQuickEditDraft] = useState('')
+  const [quickEditBusy, setQuickEditBusy] = useState(false)
+  const [quickEditModifierActive, setQuickEditModifierActive] = useState(false)
+  const [historyMenuOpen, setHistoryMenuOpen] = useState(false)
   const [listenTogetherRoomState, setListenTogetherRoomState] = useState(null)
   const [castRemoteActive, setCastRemoteActive] = useState(false)
   const [castDlnaListening, setCastDlnaListening] = useState(false)
@@ -268,59 +1032,162 @@ export default function App() {
   const [lastCastStatus, setLastCastStatus] = useState(null)
   const [mvPlaybackQuality, setMvPlaybackQuality] = useState(null)
   const [lyricsMatchStatus, setLyricsMatchStatus] = useState('idle')
+  const [lyricsSourceStatus, setLyricsSourceStatus] = useState({
+    kind: 'idle',
+    detail: '',
+    origin: ''
+  })
   /** 与 lyrics 等长：主行罗马音（LRC 自带或 Kuroshiro 生成） */
   // Romaji display removed from UI for simplicity; keep state empty.
   const [romajiDisplayLines, setRomajiDisplayLines] = useState([])
-  const [metadata, setMetadata] = useState({ title: '', artist: '' })
+  const [metadata, setMetadata] = useState({
+    title: '',
+    artist: '',
+    album: '',
+    albumArtist: '',
+    trackNo: null,
+    discNo: null
+  })
   const [searchQuery, setSearchQuery] = useState('')
+  const deferredSearchQuery = useDeferredValue(searchQuery)
   const [listMode, setListMode] = useState('songs')
   const [userPlaylists, setUserPlaylists] = useState(() => {
-    try {
-      const s = localStorage.getItem('nc_user_playlists')
-      if (!s) return []
-      const p = JSON.parse(s)
-      return Array.isArray(p) ? p : []
-    } catch {
-      return []
-    }
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('userPlaylists'),
+      localValue: readStoredJson('nc_user_playlists'),
+      normalize: (value) => (Array.isArray(value) ? value : undefined),
+      fallback: []
+    })
+  })
+  const [userSmartCollections, setUserSmartCollections] = useState(() => {
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('userSmartCollections'),
+      localValue: readStoredJson(USER_SMART_COLLECTIONS_LOCAL_KEY),
+      normalize: (value) => {
+        const normalized = normalizeUserSmartCollections(value)
+        return Array.isArray(normalized) ? normalized : undefined
+      },
+      fallback: []
+    })
+  })
+  const [displayMetadataOverrides, setDisplayMetadataOverrides] = useState(() => {
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('displayMetadataOverrides'),
+      localValue: readStoredJson(DISPLAY_METADATA_OVERRIDES_LOCAL_KEY),
+      normalize: (value) => normalizeDisplayMetadataOverrides(value),
+      fallback: {}
+    })
   })
   const playlistStoreHydratedRef = useRef(false)
   const userPlaylistsStoreHydratedRef = useRef(false)
+  const userSmartCollectionsStoreHydratedRef = useRef(false)
+  const displayMetadataOverridesHydratedRef = useRef(false)
   const configStoreHydratedRef = useRef(false)
   const likedPathsStoreHydratedRef = useRef(false)
   const playModeStoreHydratedRef = useRef(false)
   const queuePlaybackStoreHydratedRef = useRef(false)
+  const trackStatsStoreHydratedRef = useRef(false)
+  const playbackHistoryStoreHydratedRef = useRef(false)
+  const volumeStoreHydratedRef = useRef(false)
   const [selectedUserPlaylistId, setSelectedUserPlaylistId] = useState(null)
+  const [selectedSmartCollectionId, setSelectedSmartCollectionId] = useState(null)
+  const [smartCollectionEditorOpen, setSmartCollectionEditorOpen] = useState(false)
+  const [editingSmartCollectionId, setEditingSmartCollectionId] = useState(null)
+  const [smartCollectionDraft, setSmartCollectionDraft] = useState(() =>
+    createSmartCollectionDraft({ rules: createEmptySmartCollectionRules() })
+  )
   const [playlistLibraryMoreOpen, setPlaylistLibraryMoreOpen] = useState(false)
   const playlistLibraryMoreRef = useRef(null)
   /** { originalIdx, path, top, left, width } | null — 浮层用 fixed + portal，避免被侧边栏裁切 */
   const [addToPlaylistMenu, setAddToPlaylistMenu] = useState(null)
   const [likedPaths, setLikedPaths] = useState(() => {
-    try {
-      const raw = localStorage.getItem('nc_liked_paths')
-      if (!raw) return []
-      const arr = JSON.parse(raw)
-      return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : []
-    } catch {
-      return []
-    }
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('likedPaths'),
+      localValue: readStoredJson('nc_liked_paths'),
+      normalize: (value) =>
+        Array.isArray(value) ? value.filter((x) => typeof x === 'string') : undefined,
+      fallback: []
+    })
   })
+  const [trackStats, setTrackStats] = useState(() => {
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('trackStats'),
+      localValue: readStoredJson('nc_track_stats'),
+      normalize: (value) =>
+        value && typeof value === 'object' ? normalizeTrackStatsMap(value) : undefined,
+      fallback: {}
+    })
+  })
+  const [activePlaybackContext, setActivePlaybackContext] = useState(() =>
+    createPlaybackContext('library', 'library', [])
+  )
   const [showLikedOnly, setShowLikedOnly] = useState(false)
   /** 侧栏曲目右键菜单 { clientX, clientY, track } */
   const [trackContextMenu, setTrackContextMenu] = useState(null)
   const [ctxMenuVisualOpen, setCtxMenuVisualOpen] = useState(false)
   const ctxMenuCloseTimerRef = useRef(null)
   const trackContextMenuRef = useRef(null)
+  const [coverContextMenu, setCoverContextMenu] = useState(null)
+  const [coverCtxVisualOpen, setCoverCtxVisualOpen] = useState(false)
+  const coverCtxCloseTimerRef = useRef(null)
+  const coverContextMenuRef = useRef(null)
+  const [groupContextMenu, setGroupContextMenu] = useState(null)
+  const [groupCtxVisualOpen, setGroupCtxVisualOpen] = useState(false)
+  const groupCtxCloseTimerRef = useRef(null)
+  const groupContextMenuRef = useRef(null)
   const songCardCaptureRef = useRef(null)
   const [addPlVisualOpen, setAddPlVisualOpen] = useState(false)
   const addPlCloseTimerRef = useRef(null)
   const playlistRef = useRef(playlist)
   const currentIndexRef = useRef(currentIndex)
+  const currentTimeRef = useRef(currentTime)
   const upNextQueueRef = useRef(upNextQueue)
+  const playbackHistoryRef = useRef(playbackHistory)
+  const userPlaylistsRef = useRef(userPlaylists)
+  const likedPathsRef = useRef(likedPaths)
+  const trackStatsRef = useRef(trackStats)
+  const displayMetadataOverridesRef = useRef(displayMetadataOverrides)
+  const activePlaybackContextRef = useRef(activePlaybackContext)
+  const playbackSessionSeedRef = useRef(
+    normalizePlaybackSession(getInitialAppStateValue('playbackSession')) ||
+      normalizePlaybackSession(readStoredJson(PLAYBACK_SESSION_LOCAL_KEY))
+  )
+  const playbackSessionRestoreAttemptedRef = useRef(false)
+  const pendingTrackStartRef = useRef(null)
+  const lastLoadedTrackPathRef = useRef('')
+  const historyNavigationRef = useRef(false)
+  const lastHistoryTrackedPathRef = useRef('')
+  const lastStatsTrackedPathRef = useRef('')
+  const startupExclusiveResetRef = useRef(false)
+  const releaseNotesFetchedRef = useRef(false)
   const [newPlaylistName, setNewPlaylistName] = useState('')
   const [quickNewPlaylistName, setQuickNewPlaylistName] = useState('')
   const [selectedAlbum, setSelectedAlbum] = useState('all')
+  const [selectedFolder, setSelectedFolder] = useState('all')
+  const [songSortMode, setSongSortMode] = useState('default') // 'default' | 'dateAsc' | 'dateDesc'
+  const [songSortOpen, setSongSortOpen] = useState(false)
+  const songSortRef = useRef(null)
+  const [albumSortMode, setAlbumSortMode] = useState('default')
+  const [albumSortOpen, setAlbumSortOpen] = useState(false)
+  const albumSortRef = useRef(null)
+  const [folderSortMode, setFolderSortMode] = useState('default') // 'default' | 'dateAsc' | 'dateDesc'
+  const [folderSortOpen, setFolderSortOpen] = useState(false)
+  const folderSortRef = useRef(null)
+  const [importedFolders, setImportedFolders] = useState(() => {
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('importedFolders'),
+      localValue: readStoredJson('nc_imported_folders'),
+      normalize: (value) => (Array.isArray(value) ? value : undefined),
+      fallback: []
+    })
+  })
+  const importedFoldersHydratedRef = useRef(false)
+  const [libraryStateReady, setLibraryStateReady] = useState(false)
+  const [playbackSessionRestoreReady, setPlaybackSessionRestoreReady] = useState(false)
+  const [libraryCleanupBusy, setLibraryCleanupBusy] = useState(false)
+  const [missingLibraryPaths, setMissingLibraryPaths] = useState([])
   const [trackMetaMap, setTrackMetaMap] = useState({})
+  const trackMetaMapRef = useRef(trackMetaMap)
   const [technicalInfo, setTechnicalInfo] = useState({
     sampleRate: null,
     originalBpm: null,
@@ -335,84 +1202,267 @@ export default function App() {
 
   // Hi-Fi & Navigation States
   const [view, setView] = useState('player') // 'player', 'lyrics', 'settings'
+  const [settingsQuery, setSettingsQuery] = useState('')
+  const [activeSettingsSection, setActiveSettingsSection] = useState('language')
   const [config, setConfig] = useState(() => {
-    const saved = localStorage.getItem('nc_config')
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        const oldRev = parsed.configRevision ?? 0
-        const appRev = DEFAULT_CONFIG.configRevision ?? 1
-        const merged = {
-          ...DEFAULT_CONFIG,
-          ...parsed,
-          customColors: normalizeThemeColors({
-            ...DEFAULT_CONFIG.customColors,
-            ...(parsed.customColors || {})
-          })
-        }
-        // Keep simplified defaults for new installs, but do not override existing user settings.
-        if (!Object.prototype.hasOwnProperty.call(parsed, 'lyricsShowRomaji')) {
-          merged.lyricsShowRomaji = DEFAULT_CONFIG.lyricsShowRomaji
-        }
-        if (!Object.prototype.hasOwnProperty.call(parsed, 'lyricsShowTranslation')) {
-          merged.lyricsShowTranslation = DEFAULT_CONFIG.lyricsShowTranslation
-        }
-        if (!Object.prototype.hasOwnProperty.call(parsed, 'lyricsWordHighlight')) {
-          merged.lyricsWordHighlight = DEFAULT_CONFIG.lyricsWordHighlight
-        }
-        if (!Object.prototype.hasOwnProperty.call(parsed, 'uiLocale')) {
-          merged.uiLocale = inferUiLocaleFromNavigator()
-        } else {
-          merged.uiLocale = normalizeUiLocale(merged.uiLocale)
-        }
-        if (oldRev < appRev) {
-          merged.configRevision = appRev
-        }
-        if (oldRev < appRev && Array.isArray(parsed.eqBands) && parsed.eqBands.length === 10) {
-          merged.eqBands = migrateEqBandsTo16(parsed.eqBands)
-        }
-        if (!['low', 'balanced', 'stable'].includes(merged.audioOutputBufferProfile)) {
-          merged.audioOutputBufferProfile = 'balanced'
-        }
-        if (
-          merged.theme !== 'custom' &&
-          !Object.prototype.hasOwnProperty.call(PRESET_THEMES, merged.theme)
-        ) {
-          merged.theme = 'minimal'
-          merged.customColors = normalizeThemeColors(PRESET_THEMES.minimal.colors)
-        }
-        // v4: migrate legacy single lyricsFontColor to professional lyricsColor schema
-        if (oldRev < 4) {
-          const legacy = merged.lyricsFontColor
-          if (!merged.lyricsColor && typeof legacy === 'string' && legacy.trim()) {
-            const hex = legacy.trim()
-            merged.lyricsColor = {
-              version: 1,
-              layers: {
-                main: {
-                  active: { hex, a: 1 },
-                  normal: { hex, a: 0.82 },
-                  past: { hex, a: 0.6 }
-                }
-              }
-            }
-          }
-        }
-        return merged
-      } catch (e) {
-        return {
-          ...DEFAULT_CONFIG,
-          uiLocale: inferUiLocaleFromNavigator()
-        }
-      }
-    }
-    return { ...DEFAULT_CONFIG, uiLocale: inferUiLocaleFromNavigator() }
+    const saved = getInitialAppStateValue('config')
+    if (saved && typeof saved === 'object') return normalizeConfigState(saved)
+    return normalizeConfigState(readStoredJson('nc_config'))
   })
+  const settingsSearchInputRef = useRef(null)
+  const settingsContentRef = useRef(null)
 
   const configRef = useRef(config)
   useEffect(() => {
     configRef.current = config
   }, [config])
+
+  const settingsSectionVisibility = useMemo(() => {
+    return {
+      language: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.language),
+      engine: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.engine),
+      integrations: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.integrations),
+      eq: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.eq),
+      aesthetics: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.aesthetics),
+      media: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.media),
+      about: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.about),
+      danger: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.danger)
+    }
+  }, [settingsQuery])
+  const settingsHasResults = Object.values(settingsSectionVisibility).some(Boolean)
+  const settingsNavItems = useMemo(
+    () => [
+      {
+        key: 'language',
+        icon: Globe,
+        label: t('settings.nav.language'),
+        id: 'settings-sec-language'
+      },
+      { key: 'engine', icon: Zap, label: t('settings.nav.engine'), id: 'settings-sec-engine' },
+      {
+        key: 'integrations',
+        icon: Link,
+        label: t('settings.nav.integrations'),
+        id: 'settings-sec-integrations'
+      },
+      { key: 'eq', icon: Sliders, label: t('settings.nav.eq'), id: 'settings-sec-eq' },
+      {
+        key: 'aesthetics',
+        icon: Palette,
+        label: t('settings.nav.aesthetics'),
+        id: 'settings-sec-aesthetics'
+      },
+      {
+        key: 'downloader',
+        icon: Download,
+        label: t('settings.nav.downloader'),
+        id: 'settings-sec-downloader'
+      },
+      { key: 'about', icon: Info, label: t('settings.nav.about'), id: 'settings-sec-about' },
+      { key: 'danger', icon: Trash2, label: t('settings.nav.danger'), id: 'settings-sec-danger' }
+    ],
+    [t]
+  )
+
+  const handleSettingsNavClick = useCallback((sectionKey, sectionId) => {
+    setActiveSettingsSection(sectionKey)
+    setSettingsQuery('')
+    const scrollToSection = () => {
+      document
+        .getElementById(sectionId)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    if (settingsQuery.trim()) {
+      setTimeout(scrollToSection, 0)
+      return
+    }
+    scrollToSection()
+  }, [settingsQuery])
+
+  useEffect(() => {
+    if (view !== 'settings') return
+    setSettingsQuery('')
+    setActiveSettingsSection('language')
+    const focusTimer = setTimeout(() => {
+      settingsSearchInputRef.current?.focus()
+    }, 0)
+    return () => clearTimeout(focusTimer)
+  }, [view])
+
+  useEffect(() => {
+    if (view !== 'settings' || settingsQuery.trim()) return
+    const root = settingsContentRef.current
+    if (!root || typeof IntersectionObserver === 'undefined') return
+    const sectionElements = settingsNavItems
+      .map((item) => document.getElementById(item.id))
+      .filter(Boolean)
+    if (sectionElements.length === 0) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntries = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)
+        if (visibleEntries.length === 0) return
+        const sectionKey = visibleEntries[0].target.getAttribute('data-settings-section')
+        if (sectionKey) setActiveSettingsSection(sectionKey)
+      },
+      {
+        root,
+        threshold: 0.3
+      }
+    )
+    sectionElements.forEach((element) => observer.observe(element))
+    return () => observer.disconnect()
+  }, [settingsNavItems, settingsQuery, view])
+
+  useEffect(() => {
+    if (config.sleepTimerEnabled !== true) return
+    setConfig((prev) => ({ ...prev, sleepTimerEnabled: false }))
+  }, [])
+
+  const stopPlaybackForSleepTimer = useCallback(() => {
+    setIsPlaying(false)
+    if (window.api?.pauseAudio) {
+      void window.api.pauseAudio().catch(() => {})
+    }
+  }, [])
+
+  const cancelSleepTimer = useCallback(() => {
+    setSleepTimerActive(false)
+    setSleepTimerEndMs(null)
+    setConfig((prev) =>
+      prev.sleepTimerEnabled === false ? prev : { ...prev, sleepTimerEnabled: false }
+    )
+  }, [])
+
+  const startSleepTimer = useCallback(() => {
+    setSleepTimerActive(true)
+    setConfig((prev) =>
+      prev.sleepTimerEnabled === true ? prev : { ...prev, sleepTimerEnabled: true }
+    )
+    if (config.sleepTimerMode === 'time') {
+      setSleepTimerEndMs(Date.now() + Number(config.sleepTimerMinutes || 30) * 60 * 1000)
+    } else {
+      setSleepTimerEndMs(null)
+    }
+  }, [config.sleepTimerMinutes, config.sleepTimerMode])
+
+  const sleepTimerRemainingMs =
+    sleepTimerActive && config.sleepTimerMode === 'time' && sleepTimerEndMs
+      ? Math.max(0, sleepTimerEndMs - sleepTimerNowMs)
+      : 0
+
+  const resetCrossfadeState = useCallback(() => {
+    crossfadeStateRef.current = {
+      active: false,
+      sourcePath: '',
+      pendingFadeIn: false
+    }
+  }, [])
+
+  const cancelCrossfade = useCallback(() => {
+    resetCrossfadeState()
+    if (window.api?.audioCancelFade) {
+      void window.api.audioCancelFade().catch(() => {})
+    }
+  }, [resetCrossfadeState])
+
+  useEffect(() => {
+    if (!sleepTimerActive || config.sleepTimerMode !== 'time' || !sleepTimerEndMs) return undefined
+
+    setSleepTimerNowMs(Date.now())
+    const timer = setInterval(() => {
+      const now = Date.now()
+      setSleepTimerNowMs(now)
+      if (now >= sleepTimerEndMs) {
+        stopPlaybackForSleepTimer()
+        cancelSleepTimer()
+      }
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [
+    cancelSleepTimer,
+    config.sleepTimerMode,
+    sleepTimerActive,
+    sleepTimerEndMs,
+    stopPlaybackForSleepTimer
+  ])
+
+  useEffect(() => {
+    if (!sleepTimerActive) return
+    if (config.sleepTimerMode === 'time') {
+      setSleepTimerEndMs(Date.now() + Number(config.sleepTimerMinutes || 30) * 60 * 1000)
+      return
+    }
+    setSleepTimerEndMs(null)
+  }, [config.sleepTimerMinutes, config.sleepTimerMode, sleepTimerActive])
+
+  const loadReleaseNotes = useCallback(
+    async (force = false) => {
+      if (releaseNotesLoading) return
+      if (releaseNotesFetchedRef.current && !force) return
+
+      setReleaseNotesLoading(true)
+      setReleaseNotesError('')
+
+      try {
+        const response = await fetch(GITHUB_RELEASES_API_URL, {
+          headers: {
+            Accept: 'application/vnd.github+json'
+          }
+        })
+        if (!response.ok) {
+          throw new Error(`github_${response.status}`)
+        }
+        const data = await response.json()
+        const releases = Array.isArray(data)
+          ? data
+              .filter((item) => item && item.draft !== true)
+              .map((item) => ({
+                version: normalizeReleaseVersion(item.tag_name || item.name || ''),
+                title: item.name || item.tag_name || 'Release',
+                url: item.html_url || GITHUB_RELEASES_PAGE_URL,
+                publishedAt: item.published_at || '',
+                publishedLabel: item.published_at
+                  ? new Date(item.published_at).toLocaleDateString()
+                  : '',
+                previewLines: buildReleasePreviewLines(item.body)
+              }))
+              .filter((item) => item.version || item.title)
+          : []
+        setReleaseNotes(releases)
+        releaseNotesFetchedRef.current = true
+      } catch (e) {
+        setReleaseNotesError(e?.message || 'release_notes_unavailable')
+      } finally {
+        setReleaseNotesLoading(false)
+      }
+    },
+    [releaseNotesLoading]
+  )
+
+  const openExternalLink = useCallback((url) => {
+    const target = String(url || '').trim()
+    if (!target) return
+    if (window.api?.openExternal) {
+      void window.api.openExternal(target)
+      return
+    }
+    window.open(target, '_blank', 'noopener,noreferrer')
+  }, [])
+
+  useEffect(() => {
+    if ((view === 'settings' || releaseNotesOpen) && !releaseNotesFetchedRef.current) {
+      void loadReleaseNotes()
+    }
+  }, [view, releaseNotesOpen, loadReleaseNotes])
+
+  useEffect(() => {
+    if (updateStatus?.event === 'update-available' || updateStatus?.event === 'update-downloaded') {
+      void loadReleaseNotes()
+    }
+  }, [updateStatus, loadReleaseNotes])
 
   useEffect(() => {
     if (!window.api?.onLyricsDesktopUncheck) return undefined
@@ -421,18 +1471,123 @@ export default function App() {
     })
   }, [setConfig])
 
+  const persistQueueRef = useRef(new Map())
   const likedSet = useMemo(() => new Set(likedPaths), [likedPaths])
   const upNextPathSet = useMemo(
     () => new Set(upNextQueue.map((item) => item?.path).filter((x) => typeof x === 'string')),
     [upNextQueue]
   )
 
-  useEffect(() => {
-    localStorage.setItem('nc_liked_paths', JSON.stringify(likedPaths))
-    if (config.autoSaveLibrary !== false && likedPathsStoreHydratedRef.current && window.api?.appStateSet) {
-      void window.api.appStateSet('likedPaths', likedPaths)
+  const flushPersistedState = useCallback((targetKey = null) => {
+    const queue = persistQueueRef.current
+    const keys = targetKey ? [targetKey] : Array.from(queue.keys())
+
+    for (const persistKey of keys) {
+      const pending = queue.get(persistKey)
+      if (!pending) continue
+      if (pending.timer) clearTimeout(pending.timer)
+      queue.delete(persistKey)
+
+      if (pending.localKey) {
+        try {
+          localStorage.setItem(pending.localKey, JSON.stringify(pending.value))
+        } catch {
+          /* ignore storage quota / serialization failures */
+        }
+      }
+
+      if (pending.writeToAppState && window.api?.appStateSet) {
+        void window.api.appStateSet(persistKey, pending.value)
+      }
     }
-  }, [likedPaths, config.autoSaveLibrary])
+  }, [])
+
+  const schedulePersistedState = useCallback(
+    (persistKey, localKey, value, writeToAppState = true) => {
+      const queue = persistQueueRef.current
+      const existing = queue.get(persistKey)
+      if (
+        existing &&
+        existing.value === value &&
+        existing.localKey === localKey &&
+        existing.writeToAppState === writeToAppState
+      ) {
+        return
+      }
+
+      if (existing?.timer) clearTimeout(existing.timer)
+
+      const timer = window.setTimeout(() => {
+        flushPersistedState(persistKey)
+      }, RENDERER_PERSIST_DEBOUNCE_MS)
+
+      queue.set(persistKey, {
+        localKey,
+        value,
+        writeToAppState,
+        timer
+      })
+    },
+    [flushPersistedState]
+  )
+
+  const getPlaybackSessionSnapshot = useCallback(() => {
+    const currentTrack = playlistRef.current[currentIndexRef.current]
+    if (!currentTrack?.path) return null
+
+    const pendingSession = pendingTrackStartRef.current
+    const currentTimeSec =
+      pendingSession?.trackPath === currentTrack.path
+        ? pendingSession.currentTimeSec
+        : lastLoadedTrackPathRef.current === currentTrack.path
+          ? currentTimeRef.current
+          : 0
+
+    return {
+      trackPath: currentTrack.path,
+      currentTimeSec: Math.max(0, Number(currentTimeSec) || 0),
+      playbackContext: normalizePlaybackContext(activePlaybackContextRef.current),
+      savedAt: Date.now()
+    }
+  }, [])
+
+  const persistPlaybackSession = useCallback(
+    (value, writeToAppState = true) => {
+      playbackSessionSeedRef.current = value
+      schedulePersistedState('playbackSession', PLAYBACK_SESSION_LOCAL_KEY, value, writeToAppState)
+    },
+    [schedulePersistedState]
+  )
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushPersistedState()
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      flushPersistedState()
+    }
+  }, [flushPersistedState])
+
+  useEffect(() => {
+    schedulePersistedState(
+      'likedPaths',
+      'nc_liked_paths',
+      likedPaths,
+      config.autoSaveLibrary !== false && likedPathsStoreHydratedRef.current
+    )
+  }, [likedPaths, config.autoSaveLibrary, schedulePersistedState])
+
+  useEffect(() => {
+    schedulePersistedState(
+      'trackStats',
+      'nc_track_stats',
+      trackStats,
+      config.autoSaveLibrary !== false && trackStatsStoreHydratedRef.current
+    )
+  }, [trackStats, config.autoSaveLibrary, schedulePersistedState])
 
   useEffect(() => {
     playlistRef.current = playlist
@@ -443,8 +1598,163 @@ export default function App() {
   }, [currentIndex])
 
   useEffect(() => {
+    currentTimeRef.current = currentTime
+  }, [currentTime])
+
+  useEffect(() => {
     upNextQueueRef.current = upNextQueue
   }, [upNextQueue])
+
+  useEffect(() => {
+    playbackHistoryRef.current = playbackHistory
+  }, [playbackHistory])
+
+  useEffect(() => {
+    userPlaylistsRef.current = userPlaylists
+  }, [userPlaylists])
+
+  useEffect(() => {
+    likedPathsRef.current = likedPaths
+  }, [likedPaths])
+
+  useEffect(() => {
+    trackStatsRef.current = trackStats
+  }, [trackStats])
+
+  useEffect(() => {
+    activePlaybackContextRef.current = activePlaybackContext
+  }, [activePlaybackContext])
+
+  const getLibraryPlaybackPaths = useCallback(() => {
+    return dedupePathList((playlistRef.current || []).map((track) => track?.path))
+  }, [])
+
+  const getPlaybackSequenceSnapshot = useCallback(() => {
+    const libraryPaths = getLibraryPlaybackPaths()
+    const currentPath = playlistRef.current[currentIndexRef.current]?.path || ''
+    const context =
+      activePlaybackContextRef.current || createPlaybackContext('library', 'library', [])
+
+    if (context.kind === 'library') {
+      return {
+        context,
+        currentPath,
+        paths: libraryPaths,
+        currentSeqIndex: currentPath ? libraryPaths.indexOf(currentPath) : -1
+      }
+    }
+
+    const libraryPathSet = new Set(libraryPaths)
+    const contextPaths = dedupePathList(context.trackPaths).filter((path) =>
+      libraryPathSet.has(path)
+    )
+    if (contextPaths.length > 0 && currentPath && contextPaths.includes(currentPath)) {
+      return {
+        context,
+        currentPath,
+        paths: contextPaths,
+        currentSeqIndex: contextPaths.indexOf(currentPath)
+      }
+    }
+
+    return {
+      context: createPlaybackContext('library', 'library', []),
+      currentPath,
+      paths: libraryPaths,
+      currentSeqIndex: currentPath ? libraryPaths.indexOf(currentPath) : -1
+    }
+  }, [getLibraryPlaybackPaths])
+
+  useEffect(() => {
+    trackMetaMapRef.current = trackMetaMap
+  }, [trackMetaMap])
+
+  useEffect(() => {
+    displayMetadataOverridesRef.current = displayMetadataOverrides
+  }, [displayMetadataOverrides])
+
+  useEffect(() => {
+    const syncModifier = (event) => {
+      setQuickEditModifierActive(Boolean(event?.ctrlKey || event?.metaKey))
+    }
+    const clearModifier = () => setQuickEditModifierActive(false)
+
+    window.addEventListener('keydown', syncModifier)
+    window.addEventListener('keyup', syncModifier)
+    window.addEventListener('blur', clearModifier)
+    return () => {
+      window.removeEventListener('keydown', syncModifier)
+      window.removeEventListener('keyup', syncModifier)
+      window.removeEventListener('blur', clearModifier)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!missingLibraryPaths.length) return
+    const currentReferenced = new Set(
+      collectReferencedLibraryPaths({
+        playlist,
+        userPlaylists,
+        likedPaths,
+        playbackHistory,
+        trackStats
+      })
+    )
+    setMissingLibraryPaths((prev) => {
+      const next = prev.filter((path) => currentReferenced.has(path))
+      return next.length === prev.length ? prev : next
+    })
+  }, [playlist, userPlaylists, likedPaths, playbackHistory, trackStats, missingLibraryPaths.length])
+
+  useEffect(() => {
+    const currentPath = playlist[currentIndex]?.path || ''
+    const previousPath = lastHistoryTrackedPathRef.current
+
+    if (!currentPath) {
+      lastHistoryTrackedPathRef.current = ''
+      lastStatsTrackedPathRef.current = ''
+      return
+    }
+
+    if (isPlaying && lastStatsTrackedPathRef.current !== currentPath) {
+      setTrackStats((prev) => {
+        const current = prev[currentPath] || {}
+        return {
+          ...prev,
+          [currentPath]: {
+            playCount: (Number(current.playCount) || 0) + 1,
+            lastPlayedAt: Date.now()
+          }
+        }
+      })
+      lastStatsTrackedPathRef.current = currentPath
+    }
+
+    lastHistoryTrackedPathRef.current = currentPath
+    if (!previousPath || previousPath === currentPath) return
+
+    if (historyNavigationRef.current) {
+      historyNavigationRef.current = false
+      return
+    }
+
+    setPlaybackHistory((prev) => {
+      const previousTrack = playlist.find((track) => track?.path === previousPath)
+      const nextEntry = buildPlaybackHistoryEntry(
+        previousTrack,
+        trackMetaMapRef.current,
+        Date.now()
+      ) || {
+        path: previousPath,
+        title: '',
+        artist: '',
+        album: '',
+        playedAt: Date.now()
+      }
+      const next = [...prev, nextEntry]
+      return next.slice(-MAX_PLAYBACK_HISTORY)
+    })
+  }, [currentIndex, playlist, isPlaying])
 
   const toggleLike = useCallback((path) => {
     if (!path) return
@@ -465,6 +1775,26 @@ export default function App() {
     return inserted ? { ok: true } : { ok: false, reason: 'duplicate' }
   }, [])
 
+  const enqueueUpNextTracks = useCallback((tracks) => {
+    const validTracks = Array.isArray(tracks) ? tracks.filter((track) => track?.path) : []
+    if (validTracks.length === 0) return { ok: false, reason: 'invalid_path' }
+
+    let addedCount = 0
+    setUpNextQueue((prev) => {
+      const seen = new Set(prev.map((item) => item?.path).filter(Boolean))
+      const next = [...prev]
+      for (const track of validTracks) {
+        if (seen.has(track.path)) continue
+        seen.add(track.path)
+        next.push({ path: track.path })
+        addedCount += 1
+      }
+      return next
+    })
+
+    return addedCount > 0 ? { ok: true, addedCount } : { ok: false, reason: 'duplicate' }
+  }, [])
+
   const removeTrackFromMainPlaylist = useCallback((path) => {
     const prev = playlistRef.current
     const ri = prev.findIndex((t) => t.path === path)
@@ -478,6 +1808,11 @@ export default function App() {
     else newCi = ci
     setPlaylist(next)
     setUpNextQueue((prev) => prev.filter((item) => item?.path !== path))
+    setPlaybackHistory((prev) => {
+      const nextHistory = prev.filter((entry) => entry?.path !== path)
+      playbackHistoryRef.current = nextHistory
+      return nextHistory
+    })
     setCurrentIndex(newCi)
     if (next.length === 0) setIsPlaying(false)
   }, [])
@@ -486,6 +1821,184 @@ export default function App() {
     if (!path) return
     setUpNextQueue((prev) => prev.filter((item) => item?.path !== path))
   }, [])
+
+  const applyLibraryFolderDelta = useCallback((payload) => {
+    const renamed = Array.isArray(payload?.renamed)
+      ? payload.renamed.filter(
+          (item) =>
+            item &&
+            typeof item.from === 'string' &&
+            item.from &&
+            typeof item.to === 'string' &&
+            item.to
+        )
+      : []
+    const removedPaths = Array.isArray(payload?.removedPaths)
+      ? payload.removedPaths.filter((item) => typeof item === 'string' && item)
+      : []
+    const addedTracks = Array.isArray(payload?.added)
+      ? payload.added.map(normalizeWatchedTrack).filter(Boolean)
+      : []
+
+    if (!renamed.length && !removedPaths.length && !addedTracks.length) return
+
+    const pathMap = Object.fromEntries(renamed.map((item) => [item.from, item.to]))
+    const removedSet = new Set(removedPaths)
+
+    remapLyricsOverrides(pathMap, removedPaths)
+    remapMvOverrides(pathMap, removedPaths)
+
+    const nextTrackStats = remapTrackStatsEntries(trackStatsRef.current, pathMap, removedSet)
+    trackStatsRef.current = nextTrackStats
+    setTrackStats(nextTrackStats)
+
+    const nextTrackMetaMap = remapTrackMetaEntries(trackMetaMapRef.current, pathMap, removedSet)
+    trackMetaMapRef.current = nextTrackMetaMap
+    setTrackMetaMap(nextTrackMetaMap)
+
+    const nextDisplayMetadataOverrides = remapTrackMetaEntries(
+      displayMetadataOverridesRef.current,
+      pathMap,
+      removedSet
+    )
+    displayMetadataOverridesRef.current = nextDisplayMetadataOverrides
+    setDisplayMetadataOverrides(nextDisplayMetadataOverrides)
+
+    const nextLikedPaths = remapPathList(likedPathsRef.current, pathMap, removedSet)
+    likedPathsRef.current = nextLikedPaths
+    setLikedPaths(nextLikedPaths)
+
+    const nextUserPlaylists = (userPlaylistsRef.current || []).map((playlistItem) => ({
+      ...playlistItem,
+      paths: remapPathList(playlistItem?.paths || [], pathMap, removedSet)
+    }))
+    userPlaylistsRef.current = nextUserPlaylists
+    setUserPlaylists(nextUserPlaylists)
+
+    const nextUpNextQueue = remapQueueItems(upNextQueueRef.current, pathMap, removedSet)
+    upNextQueueRef.current = nextUpNextQueue
+    setUpNextQueue(nextUpNextQueue)
+
+    const nextPlaybackHistory = remapPlaybackHistoryEntries(
+      playbackHistoryRef.current,
+      pathMap,
+      removedSet
+    )
+    playbackHistoryRef.current = nextPlaybackHistory
+    setPlaybackHistory(nextPlaybackHistory)
+
+    const savedSession = playbackSessionSeedRef.current
+    if (savedSession?.trackPath) {
+      const mappedSessionPath = pathMap[savedSession.trackPath] || savedSession.trackPath
+      playbackSessionSeedRef.current =
+        !mappedSessionPath || removedSet.has(mappedSessionPath)
+          ? null
+          : {
+              ...savedSession,
+              trackPath: mappedSessionPath
+            }
+    }
+
+    const previousPlaylist = playlistRef.current
+    const previousCurrentIndex = currentIndexRef.current
+    const previousCurrentPath = previousPlaylist[previousCurrentIndex]?.path || ''
+    const nextPlaylist = []
+    const seenPaths = new Set()
+
+    for (const track of previousPlaylist) {
+      const oldPath = track?.path
+      if (!oldPath || removedSet.has(oldPath)) continue
+      const nextPath = pathMap[oldPath] || oldPath
+      if (!nextPath || removedSet.has(nextPath) || seenPaths.has(nextPath)) continue
+      seenPaths.add(nextPath)
+      nextPlaylist.push(withUpdatedTrackPath(track, nextPath))
+    }
+
+    for (const track of addedTracks) {
+      if (!track?.path || seenPaths.has(track.path)) continue
+      seenPaths.add(track.path)
+      nextPlaylist.push(track)
+    }
+
+    let nextCurrentIndex = -1
+    if (previousCurrentPath) {
+      const preferredPath = removedSet.has(previousCurrentPath)
+        ? pathMap[previousCurrentPath] || ''
+        : pathMap[previousCurrentPath] || previousCurrentPath
+
+      if (preferredPath) {
+        nextCurrentIndex = nextPlaylist.findIndex((track) => track.path === preferredPath)
+      }
+
+      if (nextCurrentIndex === -1 && nextPlaylist.length > 0) {
+        nextCurrentIndex = Math.min(previousCurrentIndex, nextPlaylist.length - 1)
+      }
+    }
+
+    if (nextPlaylist.length === 0) {
+      nextCurrentIndex = -1
+    }
+
+    playlistRef.current = nextPlaylist
+    currentIndexRef.current = nextCurrentIndex
+    setPlaylist(nextPlaylist)
+    setCurrentIndex(nextCurrentIndex)
+
+    if (previousCurrentPath && pathMap[previousCurrentPath]) {
+      lastHistoryTrackedPathRef.current = pathMap[previousCurrentPath]
+      if (lastStatsTrackedPathRef.current === previousCurrentPath) {
+        lastStatsTrackedPathRef.current = pathMap[previousCurrentPath]
+      }
+    } else if (previousCurrentPath && removedSet.has(previousCurrentPath)) {
+      lastHistoryTrackedPathRef.current = nextPlaylist[nextCurrentIndex]?.path || ''
+      if (lastStatsTrackedPathRef.current === previousCurrentPath) {
+        lastStatsTrackedPathRef.current = nextPlaylist[nextCurrentIndex]?.path || ''
+      }
+      setIsPlaying(false)
+    }
+  }, [])
+
+  const scanMissingLibraryPaths = useCallback(async () => {
+    if (!window.api?.batchExistsHandler) return []
+
+    const referencedPaths = collectReferencedLibraryPaths({
+      playlist: playlistRef.current,
+      userPlaylists: userPlaylistsRef.current,
+      likedPaths: likedPathsRef.current,
+      playbackHistory: playbackHistoryRef.current,
+      trackStats: trackStatsRef.current
+    })
+
+    if (!referencedPaths.length) {
+      setMissingLibraryPaths([])
+      return []
+    }
+
+    setLibraryCleanupBusy(true)
+    try {
+      const missing = []
+      for (let i = 0; i < referencedPaths.length; i += 200) {
+        const batch = referencedPaths.slice(i, i + 200)
+        const result = await window.api.batchExistsHandler(batch)
+        for (const path of batch) {
+          if (result?.[path] === false) missing.push(path)
+        }
+      }
+      setMissingLibraryPaths(missing)
+      return missing
+    } finally {
+      setLibraryCleanupBusy(false)
+    }
+  }, [])
+
+  const cleanupMissingLibraryPaths = useCallback(async () => {
+    const missing = missingLibraryPaths.length
+      ? missingLibraryPaths
+      : await scanMissingLibraryPaths()
+    if (!missing.length) return
+    applyLibraryFolderDelta({ renamed: [], removedPaths: missing, added: [] })
+    setMissingLibraryPaths([])
+  }, [applyLibraryFolderDelta, missingLibraryPaths, scanMissingLibraryPaths])
 
   useEffect(() => {
     if (playlist.length === 0) {
@@ -506,66 +2019,84 @@ export default function App() {
   }, [config.uiLocale])
 
   useEffect(() => {
-    let cancelled = false
-    const hydrateFromMainStore = async () => {
-      try {
-        if (!window.api?.appStateGet) return
-        const [
-          savedPlaylist,
-          savedUserPlaylists,
-          savedConfig,
-          savedLikedPaths,
-          savedPlayMode,
-          savedQueuePlaybackEnabled
-        ] = await Promise.all([
-          window.api.appStateGet('playlist'),
-          window.api.appStateGet('userPlaylists'),
-          window.api.appStateGet('config'),
-          window.api.appStateGet('likedPaths'),
-          window.api.appStateGet('playMode'),
-          window.api.appStateGet('queuePlaybackEnabled')
-        ])
-        if (cancelled) return
-        if (Array.isArray(savedPlaylist)) setPlaylist(savedPlaylist)
-        if (Array.isArray(savedUserPlaylists)) setUserPlaylists(savedUserPlaylists)
-        if (savedConfig && typeof savedConfig === 'object') {
-          setConfig((prev) => ({
-            ...prev,
-            ...savedConfig,
-            customColors: normalizeThemeColors({
-              ...prev.customColors,
-              ...(savedConfig.customColors || {})
-            })
-          }))
-        }
-        if (Array.isArray(savedLikedPaths)) {
-          setLikedPaths(savedLikedPaths.filter((x) => typeof x === 'string'))
-        }
-        if (typeof savedPlayMode === 'string') setPlayMode(savedPlayMode)
-        if (typeof savedQueuePlaybackEnabled === 'boolean') {
-          setQueuePlaybackEnabled(savedQueuePlaybackEnabled)
-        }
-      } catch {
-        // Keep localStorage fallback when main-store read fails.
-      } finally {
-        if (!cancelled) {
-          playlistStoreHydratedRef.current = true
-          userPlaylistsStoreHydratedRef.current = true
-          configStoreHydratedRef.current = true
-          likedPathsStoreHydratedRef.current = true
-          playModeStoreHydratedRef.current = true
-          queuePlaybackStoreHydratedRef.current = true
-        }
-      }
+    playlistStoreHydratedRef.current = true
+    userPlaylistsStoreHydratedRef.current = true
+    userSmartCollectionsStoreHydratedRef.current = true
+    displayMetadataOverridesHydratedRef.current = true
+    configStoreHydratedRef.current = true
+    likedPathsStoreHydratedRef.current = true
+    trackStatsStoreHydratedRef.current = true
+    importedFoldersHydratedRef.current = true
+    playModeStoreHydratedRef.current = true
+    queuePlaybackStoreHydratedRef.current = true
+    playbackHistoryStoreHydratedRef.current = true
+    volumeStoreHydratedRef.current = true
+    setLibraryStateReady(true)
+  }, [])
+
+  useEffect(() => {
+    if (!libraryStateReady || startupExclusiveResetRef.current) return
+    startupExclusiveResetRef.current = true
+    setIsAudioExclusive(false)
+    if (window.api?.setAudioExclusive) {
+      void window.api.setAudioExclusive(false)
     }
-    hydrateFromMainStore()
-    return () => {
-      cancelled = true
+    setConfig((prev) => (prev.audioExclusive === false ? prev : { ...prev, audioExclusive: false }))
+  }, [libraryStateReady])
+
+  useEffect(() => {
+    const snapshotHistory = getInitialAppStateValue('playbackHistory')
+    const localHistory = readStoredJson('nc_playback_history')
+    const loadedHistory = snapshotHistory ?? localHistory
+    if (containsLegacyPlaybackHistoryEntries(loadedHistory)) {
+      console.info('[PlaybackHistory] Loaded legacy string[] history and upgraded it in memory')
     }
   }, [])
 
   useEffect(() => {
-    if (!config.devModeEnabled || !config.devOpenDevToolsOnStartup || !window.api?.dev?.openDevTools) {
+    if (!libraryStateReady || playbackSessionRestoreAttemptedRef.current) return
+    playbackSessionRestoreAttemptedRef.current = true
+
+    const savedSession = playbackSessionSeedRef.current
+    if (!savedSession) {
+      console.info('[PlaybackSession] No saved playback session to restore')
+      setPlaybackSessionRestoreReady(true)
+      return
+    }
+
+    const nextIndex = playlist.findIndex((track) => track?.path === savedSession.trackPath)
+    if (nextIndex === -1) {
+      console.warn(
+        `[PlaybackSession] Saved track no longer exists, clearing session for ${savedSession.trackPath}`
+      )
+      playbackSessionSeedRef.current = null
+      if (window.api?.appStateSet) {
+        void window.api.appStateSet('playbackSession', null)
+      }
+      setPlaybackSessionRestoreReady(true)
+      return
+    }
+
+    pendingTrackStartRef.current = savedSession
+    setActivePlaybackContext(normalizePlaybackContext(savedSession.playbackContext))
+    setCurrentTime(Math.max(0, savedSession.currentTimeSec || 0))
+    setCurrentIndex(nextIndex)
+    setIsPlaying(false)
+    console.info(
+      `[PlaybackSession] Restored paused session for ${savedSession.trackPath} at ${Math.max(
+        0,
+        savedSession.currentTimeSec || 0
+      ).toFixed(2)}s`
+    )
+    setPlaybackSessionRestoreReady(true)
+  }, [libraryStateReady, playlist])
+
+  useEffect(() => {
+    if (
+      !config.devModeEnabled ||
+      !config.devOpenDevToolsOnStartup ||
+      !window.api?.dev?.openDevTools
+    ) {
       return undefined
     }
     const id = window.setTimeout(() => {
@@ -577,22 +2108,32 @@ export default function App() {
 
   const themeBackdropStyle = useMemo(() => {
     const raw =
-      config.theme === 'custom' && config.customColors
-        ? config.customColors
-  : PRESET_THEMES[config.theme]?.colors || PRESET_THEMES.minimal.colors
+      config.themeDynamicCoverColor && dynamicCoverTheme
+        ? dynamicCoverTheme
+        : config.theme === 'custom' && config.customColors
+          ? config.customColors
+          : PRESET_THEMES[config.theme]?.colors || PRESET_THEMES.minimal.colors
     return getAppThemeBackgroundStyle(raw, config.uiAccentBackgroundGlow !== false)
-  }, [config.theme, config.customColors, config.uiAccentBackgroundGlow])
+  }, [
+    config.theme,
+    config.customColors,
+    config.uiAccentBackgroundGlow,
+    config.themeDynamicCoverColor,
+    dynamicCoverTheme
+  ])
 
   const activeAccentHex = useMemo(() => {
     const raw =
-      config.theme === 'custom' && config.customColors
-        ? config.customColors
-  : PRESET_THEMES[config.theme]?.colors || PRESET_THEMES.minimal.colors
+      config.themeDynamicCoverColor && dynamicCoverTheme
+        ? dynamicCoverTheme
+        : config.theme === 'custom' && config.customColors
+          ? config.customColors
+          : PRESET_THEMES[config.theme]?.colors || PRESET_THEMES.minimal.colors
     return normalizeThemeColors(raw).accent1
-  }, [config.theme, config.customColors])
+  }, [config.theme, config.customColors, config.themeDynamicCoverColor, dynamicCoverTheme])
 
   const customThemePreviewBg = useMemo(() => {
-  const c = normalizeThemeColors(config.customColors || PRESET_THEMES.minimal.colors)
+    const c = normalizeThemeColors(config.customColors || PRESET_THEMES.minimal.colors)
     return `linear-gradient(135deg, ${c.accent1}, ${c.accent2}, ${c.accent3})`
   }, [config.customColors])
 
@@ -600,7 +2141,32 @@ export default function App() {
     if (confirm(t('settings.resetConfirm'))) {
       setConfig(DEFAULT_CONFIG)
       localStorage.removeItem('nc_config')
+      localStorage.removeItem(STORED_VOLUME_KEY)
+      setVolume(1)
     }
+  }
+
+  const handleResetThemeConfig = () => {
+    if (!confirm(t('settings.resetThemeConfirm'))) return
+
+    setConfig((prev) => ({
+      ...prev,
+      // Theme / appearance related settings only
+      theme: DEFAULT_CONFIG.theme,
+      customColors: DEFAULT_CONFIG.customColors,
+      customBgPath: DEFAULT_CONFIG.customBgPath,
+      customBgOpacity: DEFAULT_CONFIG.customBgOpacity,
+      uiBgOpacity: DEFAULT_CONFIG.uiBgOpacity,
+      uiBlur: DEFAULT_CONFIG.uiBlur,
+      uiFontFamily: DEFAULT_CONFIG.uiFontFamily,
+      uiCustomFontPath: DEFAULT_CONFIG.uiCustomFontPath,
+      uiBaseFontSize: DEFAULT_CONFIG.uiBaseFontSize,
+      uiRadiusScale: DEFAULT_CONFIG.uiRadiusScale,
+      uiShadowIntensity: DEFAULT_CONFIG.uiShadowIntensity,
+      uiSaturation: DEFAULT_CONFIG.uiSaturation,
+      uiAccentBackgroundGlow: DEFAULT_CONFIG.uiAccentBackgroundGlow,
+      playerCoverSize: DEFAULT_CONFIG.playerCoverSize
+    }))
   }
 
   const pickUiCustomFont = useCallback(async () => {
@@ -615,15 +2181,16 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('nc_config', JSON.stringify(config))
-    if (configStoreHydratedRef.current && window.api?.appStateSet) {
-      void window.api.appStateSet('config', config)
-    }
+    schedulePersistedState('config', 'nc_config', config, configStoreHydratedRef.current)
+  }, [config, schedulePersistedState])
 
+  useEffect(() => {
     const root = document.documentElement
 
-  let rawTheme = PRESET_THEMES.minimal.colors
-    if (config.theme === 'custom' && config.customColors) {
+    let rawTheme = PRESET_THEMES.minimal.colors
+    if (config.themeDynamicCoverColor && dynamicCoverTheme) {
+      rawTheme = dynamicCoverTheme
+    } else if (config.theme === 'custom' && config.customColors) {
       rawTheme = config.customColors
     } else if (PRESET_THEMES[config.theme]) {
       rawTheme = PRESET_THEMES[config.theme].colors
@@ -656,6 +2223,8 @@ export default function App() {
 
     const baseFs = config.uiBaseFontSize ?? 15
     root.style.fontSize = `${baseFs}px`
+    const playerCoverSize = Math.max(180, Math.min(360, Number(config.playerCoverSize ?? 360)))
+    root.style.setProperty('--player-cover-size', `${playerCoverSize}px`)
 
     const rs = config.uiRadiusScale ?? 1
     root.style.setProperty('--border-radius-lg', `${20 * rs}px`)
@@ -723,7 +2292,7 @@ export default function App() {
 
     const sat = config.uiSaturation ?? 1
     root.style.filter = sat !== 1 && sat > 0 ? `saturate(${sat})` : ''
-  }, [config])
+  }, [config, dynamicCoverTheme])
 
   const audioRef = useRef(new Audio())
   const listenTogetherSyncRef = useRef({
@@ -755,7 +2324,7 @@ export default function App() {
 
     const analyser = ctx.createAnalyser()
     analyser.fftSize = 1024 // 512 bins; lighter CPU, still enough for RTA / main visualizer
-    analyser.smoothingTimeConstant = 0.85 // Fluid motion
+    analyser.smoothingTimeConstant = 0.72 // More responsive for mini waveform / visualizer
     analyserNode.current = analyser
 
     const gain = ctx.createGain()
@@ -856,17 +2425,33 @@ export default function App() {
     void window.api.setAudioOutputBufferProfile(p)
   }, [config.audioOutputBufferProfile])
 
+  useEffect(() => {
+    if (!window.api?.setAudioExclusive) return
+    void window.api.setAudioExclusive(config.audioExclusive === true)
+  }, [config.audioExclusive])
+
+  useEffect(() => {
+    if (!window.api?.setAudioDevice) return
+    const savedDeviceId = config.audioDeviceId
+    if (savedDeviceId == null || savedDeviceId === '') {
+      void window.api.setAudioDevice('')
+      return
+    }
+    if (!Array.isArray(audioDevices) || audioDevices.length === 0) return
+    const matched = audioDevices.find((device) => String(device?.id) === String(savedDeviceId))
+    if (!matched) return
+    void window.api.setAudioDevice(matched.id)
+  }, [config.audioDeviceId, audioDevices])
+
   // Persist playlist and mode
   useEffect(() => {
-    try {
-      if (config.autoSaveLibrary !== false) {
-        localStorage.setItem('nc_playlist', JSON.stringify(playlist))
-      }
-    } catch {}
-    if (config.autoSaveLibrary !== false && playlistStoreHydratedRef.current && window.api?.appStateSet) {
-      void window.api.appStateSet('playlist', playlist)
-    }
-  }, [playlist, config.autoSaveLibrary])
+    schedulePersistedState(
+      'playlist',
+      'nc_playlist',
+      playlist,
+      config.autoSaveLibrary !== false && playlistStoreHydratedRef.current
+    )
+  }, [playlist, config.autoSaveLibrary, schedulePersistedState])
 
   useEffect(() => {
     localStorage.setItem('nc_queue_playback_enabled', queuePlaybackEnabled ? '1' : '0')
@@ -881,25 +2466,164 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('nc_playmode', playMode)
-    if (config.autoSaveLibrary !== false && playModeStoreHydratedRef.current && window.api?.appStateSet) {
+    if (
+      config.autoSaveLibrary !== false &&
+      playModeStoreHydratedRef.current &&
+      window.api?.appStateSet
+    ) {
       void window.api.appStateSet('playMode', playMode)
     }
   }, [playMode, config.autoSaveLibrary])
 
   useEffect(() => {
-    try {
-      if (config.autoSaveLibrary !== false) {
-        localStorage.setItem('nc_user_playlists', JSON.stringify(userPlaylists))
-      }
-    } catch {}
-    if (
-      config.autoSaveLibrary !== false &&
-      userPlaylistsStoreHydratedRef.current &&
-      window.api?.appStateSet
-    ) {
-      void window.api.appStateSet('userPlaylists', userPlaylists)
+    localStorage.setItem(STORED_VOLUME_KEY, String(clampVolume(volume)))
+    if (volumeStoreHydratedRef.current && window.api?.appStateSet) {
+      void window.api.appStateSet('volume', clampVolume(volume))
     }
-  }, [userPlaylists, config.autoSaveLibrary])
+  }, [volume])
+
+  useEffect(() => {
+    schedulePersistedState(
+      'playbackHistory',
+      'nc_playback_history',
+      playbackHistory,
+      playbackHistoryStoreHydratedRef.current
+    )
+  }, [playbackHistory, schedulePersistedState])
+
+  useEffect(() => {
+    schedulePersistedState(
+      'userPlaylists',
+      'nc_user_playlists',
+      userPlaylists,
+      config.autoSaveLibrary !== false && userPlaylistsStoreHydratedRef.current
+    )
+  }, [userPlaylists, config.autoSaveLibrary, schedulePersistedState])
+
+  useEffect(() => {
+    schedulePersistedState(
+      'userSmartCollections',
+      USER_SMART_COLLECTIONS_LOCAL_KEY,
+      userSmartCollections,
+      config.autoSaveLibrary !== false && userSmartCollectionsStoreHydratedRef.current
+    )
+  }, [userSmartCollections, config.autoSaveLibrary, schedulePersistedState])
+
+  useEffect(() => {
+    schedulePersistedState(
+      'displayMetadataOverrides',
+      DISPLAY_METADATA_OVERRIDES_LOCAL_KEY,
+      displayMetadataOverrides,
+      config.autoSaveLibrary !== false && displayMetadataOverridesHydratedRef.current
+    )
+  }, [displayMetadataOverrides, config.autoSaveLibrary, schedulePersistedState])
+
+  // Persist imported folders
+  useEffect(() => {
+    schedulePersistedState(
+      'importedFolders',
+      'nc_imported_folders',
+      importedFolders,
+      importedFoldersHydratedRef.current
+    )
+  }, [importedFolders, schedulePersistedState])
+
+  useEffect(() => {
+    if (!libraryStateReady || !playbackSessionRestoreReady) return
+    persistPlaybackSession(getPlaybackSessionSnapshot(), true)
+  }, [
+    currentIndex,
+    playlist,
+    activePlaybackContext,
+    libraryStateReady,
+    playbackSessionRestoreReady,
+    getPlaybackSessionSnapshot,
+    persistPlaybackSession
+  ])
+
+  useEffect(() => {
+    if (!libraryStateReady || !playbackSessionRestoreReady || isSeeking || currentIndex < 0) return
+    persistPlaybackSession(getPlaybackSessionSnapshot(), true)
+  }, [
+    Math.floor(Math.max(0, currentTime)),
+    isPlaying,
+    isSeeking,
+    currentIndex,
+    libraryStateReady,
+    playbackSessionRestoreReady,
+    getPlaybackSessionSnapshot,
+    persistPlaybackSession
+  ])
+
+  useEffect(() => {
+    if (!libraryStateReady || !playbackSessionRestoreReady || isSeeking || currentIndex < 0) return
+    persistPlaybackSession(getPlaybackSessionSnapshot(), true)
+  }, [
+    isSeeking,
+    currentIndex,
+    libraryStateReady,
+    playbackSessionRestoreReady,
+    getPlaybackSessionSnapshot,
+    persistPlaybackSession
+  ])
+
+  useEffect(() => {
+    if (!window.api?.onLibraryFoldersChanged) return undefined
+    return window.api.onLibraryFoldersChanged((payload) => {
+      applyLibraryFolderDelta(payload)
+    })
+  }, [applyLibraryFolderDelta])
+
+  useEffect(() => {
+    if (!window.api?.watchLibraryFolders || !window.api?.stopWatchingLibraryFolders)
+      return undefined
+    if (!importedFolders.length) {
+      void window.api.stopWatchingLibraryFolders().catch(() => {})
+      return undefined
+    }
+
+    let disposed = false
+    window.api.watchLibraryFolders({ folders: importedFolders }).catch((error) => {
+      if (!disposed) {
+        console.error('Library watch start failed:', error)
+      }
+    })
+
+    return () => {
+      disposed = true
+      void window.api.stopWatchingLibraryFolders().catch(() => {})
+    }
+  }, [importedFolders])
+
+  // Auto-rescan imported folders on startup to discover new files
+  useEffect(() => {
+    if (!libraryStateReady || !importedFolders.length || !window.api?.rescanFolders) return
+    let cancelled = false
+    const doRescan = async () => {
+      try {
+        const scannedTracks = await window.api.rescanFolders({ folders: importedFolders })
+        if (cancelled || !Array.isArray(scannedTracks)) return
+
+        const previousImportedTracks = playlistRef.current.filter((track) =>
+          isTrackInsideImportedFolders(track?.path, importedFolders)
+        )
+        const delta = diffImportedFolderSnapshot(
+          previousImportedTracks,
+          scannedTracks.map(normalizeWatchedTrack).filter(Boolean)
+        )
+
+        if (delta.renamed.length || delta.removedPaths.length || delta.added.length) {
+          applyLibraryFolderDelta(delta)
+        }
+      } catch (e) {
+        console.error('Folder rescan failed:', e)
+      }
+    }
+    doRescan()
+    return () => {
+      cancelled = true
+    }
+  }, [libraryStateReady, importedFolders, applyLibraryFolderDelta])
 
   // Update playback speed whenever it changes
   useEffect(() => {
@@ -949,6 +2673,79 @@ export default function App() {
     })
   }, [config.useEQ, config.preamp, config.eqBands])
 
+  const handleTrackEndedAdvance = useCallback(() => {
+    const libraryPaths = getLibraryPlaybackPaths()
+    if (libraryPaths.length === 0) return
+
+    if (queuePlaybackEnabled) {
+      const queueSnapshot = upNextQueueRef.current
+      if (queueSnapshot.length > 0) {
+        let nextPath = null
+        const remaining = []
+        for (const item of queueSnapshot) {
+          const path = item?.path
+          if (typeof path !== 'string' || !path) continue
+          const exists = playlistRef.current.some((track) => track.path === path)
+          if (!exists) continue
+          if (!nextPath) nextPath = path
+          else remaining.push({ path })
+        }
+        if (nextPath) {
+          const nextIdx = playlistRef.current.findIndex((track) => track.path === nextPath)
+          setUpNextQueue(remaining)
+          if (nextIdx !== -1) {
+            setCurrentIndex(nextIdx)
+            setIsPlaying(true)
+            return
+          }
+        }
+      }
+    }
+
+    if (playMode === 'single') {
+      setCurrentTime(0)
+
+      if (useNativeEngineRef.current && window.api?.playAudio) {
+        const trackPath = playlistRef.current[currentIndexRef.current]?.path
+        if (trackPath) {
+          window.api.playAudio(trackPath, 0, playbackRateRef.current).catch(console.error)
+          setIsPlaying(true)
+          return
+        }
+      }
+
+      const audio = audioRef.current
+      if (audio) {
+        audio.currentTime = 0
+        audio.play().catch(console.error)
+        setIsPlaying(true)
+        return
+      }
+    }
+
+    if (playMode === 'shuffle') {
+      const { currentPath, paths } = getPlaybackSequenceSnapshot()
+      if (paths.length === 0) return
+      let nextPath = paths[Math.floor(Math.random() * paths.length)]
+      if (nextPath === currentPath && paths.length > 1) {
+        const currentSeqIndex = paths.indexOf(currentPath)
+        nextPath = paths[(currentSeqIndex + 1 + paths.length) % paths.length]
+      }
+      const nextIdx = playlistRef.current.findIndex((track) => track.path === nextPath)
+      if (nextIdx === -1) return
+      setCurrentIndex(nextIdx)
+    } else {
+      const { currentSeqIndex, paths } = getPlaybackSequenceSnapshot()
+      if (paths.length === 0) return
+      const baseIndex = currentSeqIndex >= 0 ? currentSeqIndex : 0
+      const nextPath = paths[(baseIndex + 1) % paths.length]
+      const nextIdx = playlistRef.current.findIndex((track) => track.path === nextPath)
+      if (nextIdx === -1) return
+      setCurrentIndex(nextIdx)
+    }
+    setIsPlaying(true)
+  }, [queuePlaybackEnabled, playMode, getLibraryPlaybackPaths, getPlaybackSequenceSnapshot])
+
   // Audio setup
   useEffect(() => {
     const audio = audioRef.current
@@ -957,8 +2754,7 @@ export default function App() {
     const setAudioData = () => {
       const track = playlist[currentIndex]
       const path = track?.path || ''
-      const dsdLocal =
-        useNativeEngineRef.current && path && /\.(dsf|dff)$/i.test(path)
+      const dsdLocal = useNativeEngineRef.current && path && /\.(dsf|dff)$/i.test(path)
       // Browser cannot decode DSD; audio.duration is bogus — duration comes from main (ffprobe).
       if (!dsdLocal) {
         setDuration(audio.duration)
@@ -986,14 +2782,7 @@ export default function App() {
     }
     const onEnded = () => {
       if (useNativeEngineRef.current) return
-      const shouldUseQueue = queuePlaybackEnabled && upNextQueueRef.current.length > 0
-      if (playMode === 'single' && !shouldUseQueue) {
-        const audio = audioRef.current
-        audio.currentTime = 0
-        audio.play().catch(console.error)
-      } else {
-        handleNext()
-      }
+      handleTrackEndedAdvance()
     }
 
     audio.addEventListener('loadeddata', setAudioData)
@@ -1005,17 +2794,51 @@ export default function App() {
       audio.removeEventListener('timeupdate', updateTime)
       audio.removeEventListener('ended', onEnded)
     }
-  }, [playlist, currentIndex, playMode, queuePlaybackEnabled])
+  }, [playlist, currentIndex, handleTrackEndedAdvance])
   // Play track logic
   useEffect(() => {
     if (currentIndex >= 0 && playlist[currentIndex]) {
       const track = playlist[currentIndex]
+      const pendingSession = pendingTrackStartRef.current
+      const restoreStartTime =
+        pendingSession?.trackPath === track.path
+          ? Math.max(0, Number(pendingSession.currentTimeSec) || 0)
+          : lastLoadedTrackPathRef.current === track.path
+            ? Math.max(0, Number(currentTimeRef.current) || 0)
+            : 0
+
+      const applyStartTimeToAudio = (audio, nextTime) => {
+        if (!audio || !(nextTime > 0)) return
+        const apply = () => {
+          try {
+            if (Math.abs((audio.currentTime || 0) - nextTime) > 0.25) {
+              audio.currentTime = nextTime
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        if (audio.readyState >= 1) {
+          apply()
+          return
+        }
+        const once = () => {
+          audio.removeEventListener('loadedmetadata', once)
+          audio.removeEventListener('loadeddata', once)
+          apply()
+        }
+        audio.addEventListener('loadedmetadata', once)
+        audio.addEventListener('loadeddata', once)
+      }
 
       if (useNativeEngineRef.current && window.api?.playAudio) {
         const now = Date.now()
         const d = nativePlayDedupeRef.current
         if (d.path === track.path && d.index === currentIndex && now - d.t < 120) {
-          loadTrackData(track.path, { mvOriginUrl: track.mvOriginUrl })
+          loadTrackData(track.path, {
+            mvOriginUrl: track.mvOriginUrl,
+            hasLyrics: track.hasLyrics === true
+          })
           return
         }
         d.path = track.path
@@ -1023,24 +2846,45 @@ export default function App() {
         d.t = now
         audioRef.current.src = localPathToAudioSrc(track.path)
         audioRef.current.load()
-        audioRef.current.play().catch(() => {})
-        nativePlayJustCalledRef.current = true
-        window.api.playAudio(track.path, 0, playbackRateRef.current).catch((e) =>
-          console.error('[App] Native playAudio failed:', e)
-        )
+        applyStartTimeToAudio(audioRef.current, restoreStartTime)
+        // Important: do NOT start native playback when UI is paused.
+        // Otherwise a state refresh (e.g. after window resize/background) can restart from 0
+        // while the play button still shows "paused".
+        if (isPlaying) {
+          audioRef.current.play().catch(() => {})
+          nativePlayJustCalledRef.current = true
+          window.api
+            .playAudio(track.path, restoreStartTime, playbackRateRef.current)
+            .catch((e) => console.error('[App] Native playAudio failed:', e))
+        } else {
+          nativePlayJustCalledRef.current = false
+          audioRef.current.pause()
+          // Ensure native engine is not accidentally left playing.
+          window.api.pauseAudio?.()
+        }
       } else {
         // Legacy path: play through HTML <audio> element
         audioRef.current.src = localPathToAudioSrc(track.path)
         audioRef.current.load()
+        applyStartTimeToAudio(audioRef.current, restoreStartTime)
         if (isPlaying) {
           audioRef.current.play().catch(console.error)
         }
       }
 
+      if (pendingSession?.trackPath === track.path) {
+        pendingTrackStartRef.current = null
+        setCurrentTime(restoreStartTime)
+      }
+      lastLoadedTrackPathRef.current = track.path
+
       // Load cover art & Metadata & Lyrics
-      loadTrackData(track.path, { mvOriginUrl: track.mvOriginUrl })
+      loadTrackData(track.path, {
+        mvOriginUrl: track.mvOriginUrl,
+        hasLyrics: track.hasLyrics === true
+      })
     }
-  }, [currentIndex])
+  }, [currentIndex, isPlaying, playlist])
 
   useEffect(() => {
     if (window.api?.getAudioDevices) {
@@ -1111,6 +2955,11 @@ export default function App() {
       if (status.exclusive !== lastExclusive) {
         lastExclusive = !!status.exclusive
         setIsAudioExclusive(!!status.exclusive)
+        setConfig((prev) =>
+          prev.audioExclusive === !!status.exclusive
+            ? prev
+            : { ...prev, audioExclusive: !!status.exclusive }
+        )
       }
       if (!status.nativeBridge) return
       if (isSeekingRef.current) return
@@ -1122,7 +2971,11 @@ export default function App() {
         // so waveform analyser, MV sync, and lyrics all read correct time
         const audio = audioRef.current
         if (audio && Math.abs((audio.currentTime || 0) - status.currentTime) > 0.5) {
-          try { audio.currentTime = status.currentTime } catch { /* ignore */ }
+          try {
+            audio.currentTime = status.currentTime
+          } catch {
+            /* ignore */
+          }
         }
 
         if (lyricsRef.current.length > 0) {
@@ -1176,7 +3029,15 @@ export default function App() {
   }, [isPlaying, initAudioContext])
 
   const lyricsRef = useRef([])
+  const lyricsRequestSeqRef = useRef(0)
   const scrollAreaRef = useRef(null)
+  const sidebarPlaylistRef = useRef(null)
+  const albumGridRef = useRef(null)
+  const albumOverviewScrollTopRef = useRef(0)
+  const pendingAlbumOverviewRestoreRef = useRef(false)
+  const previousSongSortModeRef = useRef(songSortMode)
+  const previousAlbumSortModeRef = useRef(albumSortMode)
+  const previousFolderSortModeRef = useRef(folderSortMode)
 
   useEffect(() => {
     lyricsRef.current = lyrics
@@ -1400,6 +3261,7 @@ export default function App() {
     setLyrics([])
     setActiveLyricIndex(-1)
     setLyricsMatchStatus('loading')
+    setLyricsSourceStatus({ kind: 'loading', detail: '', origin: '' })
     try {
       if (await tryApplyLyricsBySourceLink(link)) return
     } catch (e) {
@@ -1407,17 +3269,26 @@ export default function App() {
     }
     setLyrics([{ time: 0, text: i18n.t('lyrics.none') }])
     setLyricsMatchStatus('none')
+    setLyricsSourceStatus({ kind: 'none', detail: '', origin: '' })
   }
 
-  const applyLyricsFromText = useCallback((raw) => {
+  const applyLyricsFromText = useCallback((raw, sourceMeta = {}) => {
     const parsed = parseAnyLyrics(raw)
     if (parsed.length > 0) {
       setLyrics(parsed)
       setLyricsMatchStatus('matched')
       setActiveLyricIndex(-1)
+      setLyricsSourceStatus({
+        kind: 'manual',
+        detail: '',
+        origin: typeof sourceMeta.origin === 'string' ? sourceMeta.origin : ''
+      })
       const path = playlistRef.current[currentIndexRef.current]?.path
       if (path && typeof raw === 'string' && raw.trim()) {
-        setLyricsOverrideForPath(path, raw)
+        setLyricsOverrideForPath(path, raw, {
+          source: 'manual',
+          origin: typeof sourceMeta.origin === 'string' ? sourceMeta.origin : ''
+        })
       }
     }
   }, [])
@@ -1435,7 +3306,7 @@ export default function App() {
     else if (buf?.data && Array.isArray(buf.data)) u8 = new Uint8Array(buf.data)
     else u8 = new Uint8Array(buf)
     const text = new TextDecoder('utf-8').decode(u8)
-    applyLyricsFromText(text)
+    applyLyricsFromText(text, { origin: 'local' })
   }, [applyLyricsFromText])
 
   const requestLrcLib = async (url) => {
@@ -1444,31 +3315,35 @@ export default function App() {
     return response.json()
   }
 
-  const openLyricsCandidatePicker = async () => {
+  const searchLyricsCandidates = async (customQuery) => {
     const track = playlist[currentIndex]
     if (!track) return
     const metaTitle = metadata.title || stripExtension(track.name) || ''
     const metaArtist = metadata.artist || track?.info?.artist || ''
     const title = (cleanTitleForSearch(metaTitle) || metaTitle || '').trim()
-    if (!title) return
+    if (!title && !customQuery) return
+
     setLyricsCandidateLoading(true)
     setLyricsCandidateOpen(true)
     setLyricsCandidateItems([])
     try {
       const titleVariants = buildLyricTitleVariants(title)
-      if (titleVariants.length === 0) return
+      if (titleVariants.length === 0 && !customQuery) return
+
       const globalParenHints = extractParenArtistHints(title)
       const coverArtistRaw = (metaArtist || '').trim()
       const coverArtistClean = cleanArtistForLyrics(coverArtistRaw)
       const audioDur = audioRef.current?.duration || duration || 0
+
       const rankOpts = {
-        titleCandidates: titleVariants,
-        artistCandidates: [...globalParenHints, coverArtistClean, coverArtistRaw].filter(Boolean)
+        titleCandidates: customQuery ? [customQuery] : titleVariants,
+        artistCandidates: customQuery
+          ? []
+          : [...globalParenHints, coverArtistClean, coverArtistRaw].filter(Boolean)
       }
-      const q = `${titleVariants[0]} ${coverArtistClean || coverArtistRaw}`.trim()
-      const data = await requestLrcLib(
-        `https://lrclib.net/api/search?q=${encodeURIComponent(q)}`
-      )
+      const q = customQuery || `${titleVariants[0]} ${coverArtistClean || coverArtistRaw}`.trim()
+
+      const data = await requestLrcLib(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`)
       const ranked = rankLrcLibCandidates(data, audioDur, rankOpts)
       const lrItems = ranked.slice(0, 30).map((r, i) => {
         const tn = r.item?.trackName || r.item?.track_name || ''
@@ -1507,10 +3382,13 @@ export default function App() {
     }
   }
 
+  const openLyricsCandidatePicker = () => {
+    searchLyricsCandidates()
+  }
+
   const handleLyricsCandidatePick = async (row) => {
     const track = playlist[currentIndex]
     if (!track) return
-    setLyricsCandidateOpen(false)
     try {
       if (row.source === 'lrclib' && row.raw) {
         const parsed = parseAnyLyrics(row.raw)
@@ -1518,7 +3396,11 @@ export default function App() {
           setLyrics(parsed)
           setLyricsMatchStatus('matched')
           setActiveLyricIndex(-1)
-          setLyricsOverrideForPath(track.path, row.raw)
+          setLyricsSourceStatus({ kind: 'manual', detail: '', origin: 'lrclib' })
+          setLyricsOverrideForPath(track.path, row.raw, {
+            source: 'manual',
+            origin: 'lrclib'
+          })
         }
         return
       }
@@ -1530,7 +3412,11 @@ export default function App() {
             setLyrics(parsed)
             setLyricsMatchStatus('matched')
             setActiveLyricIndex(-1)
-            setLyricsOverrideForPath(track.path, res.lrc)
+            setLyricsSourceStatus({ kind: 'manual', detail: '', origin: 'netease' })
+            setLyricsOverrideForPath(track.path, res.lrc, {
+              source: 'manual',
+              origin: 'netease'
+            })
           }
         }
       }
@@ -1551,8 +3437,15 @@ export default function App() {
         if (rows.length > 0) {
           setLyrics(rows)
           setLyricsMatchStatus('matched')
+          setActiveLyricIndex(-1)
+          setLyricsSourceStatus({ kind: 'link', detail: '', origin: 'netease' })
           const p = playlistRef.current[currentIndexRef.current]?.path
-          if (p) setLyricsOverrideForPath(p, res.lrc)
+          if (p) {
+            setLyricsOverrideForPath(p, res.lrc, {
+              source: 'link',
+              origin: 'netease'
+            })
+          }
           return true
         }
       }
@@ -1574,8 +3467,13 @@ export default function App() {
     if (rows.length > 0) {
       setLyrics(rows)
       setLyricsMatchStatus('matched')
+      setActiveLyricIndex(-1)
+      setLyricsSourceStatus({ kind: 'link', detail: '', origin: 'lrclib' })
       if (currentTrack?.path && raw?.trim()) {
-        setLyricsOverrideForPath(currentTrack.path, raw)
+        setLyricsOverrideForPath(currentTrack.path, raw, {
+          source: 'link',
+          origin: 'lrclib'
+        })
       }
       return true
     }
@@ -1583,14 +3481,27 @@ export default function App() {
   }
 
   const fetchLyrics = async (filePath, title, artist, hints = {}) => {
+    const requestSeq = ++lyricsRequestSeqRef.current
+    const isStaleRequest = () => requestSeq !== lyricsRequestSeqRef.current
+    const applyLyricsResult = (rows, matchStatus, sourceStatus) => {
+      if (isStaleRequest()) return true
+      setLyrics(rows)
+      setLyricsMatchStatus(matchStatus)
+      setLyricsSourceStatus(sourceStatus)
+      return false
+    }
+
     setLyrics([])
     setActiveLyricIndex(-1)
     setLyricsMatchStatus('loading')
+    setLyricsSourceStatus({ kind: 'loading', detail: '', origin: '' })
 
     // MV Search
     if (
       window.api.searchMVHandler &&
-      (configRef.current.enableMV || configRef.current.mvAsBackground)
+      (configRef.current.enableMV ||
+        configRef.current.mvAsBackground ||
+        configRef.current.mvAsBackgroundMain)
     ) {
       setIsSearchingMV(true)
       setMvId(null)
@@ -1603,6 +3514,7 @@ export default function App() {
         // Try reading yt-dlp local JSON for exact MV match
         let mvFromInfoJson = false
         const infoJson = await window.api.readInfoJsonHandler(filePath).catch(() => null)
+        if (isStaleRequest()) return
         if (infoJson) {
           if (infoJson.extractor && infoJson.extractor.toLowerCase().includes('youtube')) {
             foundId = infoJson.id
@@ -1639,6 +3551,7 @@ export default function App() {
               ? `${cleanedTitle} ${artist || ''} MV`.trim()
               : `${cleanedTitle} ${artist || ''} official mv`.trim()
           const searchResult = await window.api.searchMVHandler(mvQuery, mvSource)
+          if (isStaleRequest()) return
           if (searchResult) {
             if (typeof searchResult === 'string') {
               foundId = searchResult
@@ -1662,6 +3575,7 @@ export default function App() {
           configRef.current.autoFallbackToBilibili
         ) {
           const bilibiliId = await searchBilibiliMv(title || '', artist || '')
+          if (isStaleRequest()) return
           if (bilibiliId) {
             foundId = bilibiliId
             mvSource = 'bilibili'
@@ -1670,6 +3584,7 @@ export default function App() {
         }
 
         if (foundId) {
+          if (isStaleRequest()) return
           setMvId({ id: foundId, source: mvSource })
           setMvOverrideForPath(filePath, { id: foundId, source: mvSource })
         }
@@ -1680,15 +3595,44 @@ export default function App() {
       }
     }
 
-    // 1. Try local LRC
-    try {
-      const localLrc = await window.api.readLyricsHandler(filePath)
-      if (localLrc) {
-        const parsed = parseAnyLyrics(localLrc)
-        if (parsed.length > 0) {
-          setLyrics(parsed)
-          setLyricsMatchStatus('matched')
+    // 1. Saved manual pick for this file (Highest Priority)
+    const savedOverride = getLyricsOverrideForPath(filePath)
+    if (savedOverride?.raw) {
+      const parsedOv = parseAnyLyrics(savedOverride.raw)
+      if (parsedOv.length > 0) {
+        if (
+          applyLyricsResult(parsedOv, 'matched', {
+            kind: 'cache',
+            detail: savedOverride.source || 'manual',
+            origin: savedOverride.origin || ''
+          })
+        )
           return
+        return
+      }
+    }
+
+    // 2. Try local LRC
+    try {
+      const expectSidecarLyrics = hints?.hasLyrics === true
+      const localReadAttempts = expectSidecarLyrics ? 8 : 1
+      const localRetryDelayMs = expectSidecarLyrics ? 250 : 0
+
+      for (let attempt = 0; attempt < localReadAttempts; attempt++) {
+        const localLrc = await window.api.readLyricsHandler(filePath)
+        if (isStaleRequest()) return
+        if (localLrc) {
+          const parsed = parseAnyLyrics(localLrc)
+          if (parsed.length > 0) {
+            if (applyLyricsResult(parsed, 'matched', { kind: 'local', detail: '', origin: '' })) {
+              return
+            }
+            return
+          }
+        }
+        if (attempt < localReadAttempts - 1) {
+          await wait(localRetryDelayMs)
+          if (isStaleRequest()) return
         }
       }
     } catch (e) {
@@ -1699,19 +3643,14 @@ export default function App() {
     if (hints?.embeddedLyrics) {
       const embeddedParsed = parseAnyLyrics(hints.embeddedLyrics)
       if (embeddedParsed.length > 0) {
-        setLyrics(embeddedParsed)
-        setLyricsMatchStatus('matched')
-        return
-      }
-    }
-
-    // 1.6 Saved manual pick for this file (after local/embedded)
-    const savedOverride = getLyricsOverrideForPath(filePath)
-    if (savedOverride?.raw) {
-      const parsedOv = parseAnyLyrics(savedOverride.raw)
-      if (parsedOv.length > 0) {
-        setLyrics(parsedOv)
-        setLyricsMatchStatus('matched')
+        if (
+          applyLyricsResult(embeddedParsed, 'matched', {
+            kind: 'embedded',
+            detail: '',
+            origin: ''
+          })
+        )
+          return
         return
       }
     }
@@ -1734,14 +3673,25 @@ export default function App() {
         const applyLrcLibPayload = (payload) => {
           const raw = pickLyricsFromLrcLibResult(payload, audioDur, {
             titleCandidates: titleVariants,
-            artistCandidates: [...globalParenHints, coverArtistClean, coverArtistRaw].filter(Boolean)
+            artistCandidates: [...globalParenHints, coverArtistClean, coverArtistRaw].filter(
+              Boolean
+            )
           })
           const parsed = parseAnyLyrics(raw)
           if (parsed.length > 0) {
-            setLyrics(parsed)
-            setLyricsMatchStatus('matched')
+            if (
+              applyLyricsResult(parsed, 'matched', {
+                kind: 'lrclib',
+                detail: '',
+                origin: ''
+              })
+            )
+              return true
             if (raw && String(raw).trim()) {
-              setLyricsOverrideForPath(filePath, raw)
+              setLyricsOverrideForPath(filePath, raw, {
+                source: 'lrclib',
+                origin: ''
+              })
             }
             return true
           }
@@ -1765,6 +3715,7 @@ export default function App() {
           if (triedGet.has(key)) return false
           triedGet.add(key)
           const data = await getFromLib(tn, an)
+          if (isStaleRequest()) return true
           return applyLrcLibPayload(data)
         }
 
@@ -1774,6 +3725,7 @@ export default function App() {
           if (!key || triedSearch.has(key)) return false
           triedSearch.add(key)
           const data = await searchLib(key)
+          if (isStaleRequest()) return true
           return applyLrcLibPayload(data)
         }
 
@@ -1808,7 +3760,10 @@ export default function App() {
             }
             // Short titles are extremely ambiguous — include album name when available.
             if ((cleanedTitle || '').length <= 4 && albumName) {
-              if (coverArtistClean && (await trySearch(`${cleanedTitle} ${coverArtistClean} ${albumName}`.trim())))
+              if (
+                coverArtistClean &&
+                (await trySearch(`${cleanedTitle} ${coverArtistClean} ${albumName}`.trim()))
+              )
                 return true
               if (await trySearch(`${cleanedTitle} ${albumName}`.trim())) return true
             }
@@ -1857,13 +3812,23 @@ export default function App() {
               keywords: k,
               durationSec: audioDur
             })
+            if (isStaleRequest()) return true
             if (res?.ok && res.lrc) {
               const parsed = parseAnyLyrics(res.lrc)
               if (parsed.length >= 3) {
                 console.log(`[Lyrics NetEase] matched with "${k}" (${parsed.length} lines)`)
-                setLyrics(parsed)
-                setLyricsMatchStatus('matched')
-                setLyricsOverrideForPath(filePath, res.lrc)
+                if (
+                  applyLyricsResult(parsed, 'matched', {
+                    kind: 'netease',
+                    detail: '',
+                    origin: ''
+                  })
+                )
+                  return true
+                setLyricsOverrideForPath(filePath, res.lrc, {
+                  source: 'netease',
+                  origin: ''
+                })
                 return true
               }
             }
@@ -1886,8 +3851,14 @@ export default function App() {
       }
     }
 
-    setLyrics([{ time: 0, text: i18n.t('lyrics.none') }])
-    setLyricsMatchStatus('none')
+    if (
+      applyLyricsResult([{ time: 0, text: i18n.t('lyrics.none') }], 'none', {
+        kind: 'none',
+        detail: '',
+        origin: ''
+      })
+    )
+      return
   }
 
   const detectBPM = (buffer) => {
@@ -1962,7 +3933,14 @@ export default function App() {
 
   const loadTrackData = async (filePath, trackHints = {}) => {
     setCoverUrl(null)
-    setMetadata({ title: '', artist: '' })
+    setMetadata({
+      title: '',
+      artist: '',
+      album: '',
+      albumArtist: '',
+      trackNo: null,
+      discNo: null
+    })
     setTechnicalInfo({
       sampleRate: null,
       originalBpm: null,
@@ -1984,7 +3962,14 @@ export default function App() {
           fallbackFromTitle?.artist ||
           'Unknown Artist'
 
-        setMetadata({ title: resolvedTitle, artist: resolvedArtist })
+        setMetadata({
+          title: resolvedTitle,
+          artist: resolvedArtist,
+          album: common.album || '',
+          albumArtist: common.albumArtist || '',
+          trackNo: common.trackNo ?? null,
+          discNo: common.discNo ?? null
+        })
         setTechnicalInfo((prev) => ({
           ...prev,
           sampleRate: technical.sampleRate,
@@ -2026,7 +4011,14 @@ export default function App() {
         const resolvedTitle = fallbackFromTitle?.title || title
         const resolvedArtist = fallbackFromTitle?.artist || 'Unknown Artist'
 
-        setMetadata({ title: resolvedTitle, artist: resolvedArtist })
+        setMetadata({
+          title: resolvedTitle,
+          artist: resolvedArtist,
+          album: '',
+          albumArtist: '',
+          trackNo: null,
+          discNo: null
+        })
         fetchCloudCover(resolvedTitle, resolvedArtist)
         fetchLyrics(filePath, resolvedTitle, resolvedArtist, {
           mvOriginUrl: trackHints.mvOriginUrl
@@ -2050,6 +4042,204 @@ export default function App() {
       console.error('Track data extraction error:', e)
     }
   }
+
+  const openMetadataEditorForTrack = useCallback((track) => {
+    if (!track?.path) return
+    setMetadataEditorTrack(track)
+    setMetadataEditorOpen(true)
+  }, [])
+
+  const buildEditableMetadataDraft = useCallback(
+    (track) => {
+      if (!track?.path) return null
+      const stored = {
+        ...(trackMetaMapRef.current?.[track.path] || {}),
+        ...(displayMetadataOverridesRef.current?.[track.path] || {})
+      }
+      const parsed = parseTrackInfo(track, stored)
+      const isActiveTrack = playlistRef.current[currentIndexRef.current]?.path === track.path
+      return {
+        path: track.path,
+        title: isActiveTrack ? metadata.title || parsed.title || '' : stored.title || parsed.title || '',
+        artist:
+          isActiveTrack
+            ? metadata.artist || parsed.artist || ''
+            : stored.artist || parsed.artist || '',
+        album: isActiveTrack ? metadata.album || parsed.album || '' : stored.album || parsed.album || '',
+        albumArtist: isActiveTrack
+          ? metadata.albumArtist || stored.albumArtist || ''
+          : stored.albumArtist || '',
+        trackNo: isActiveTrack ? metadata.trackNo ?? stored.trackNo ?? null : stored.trackNo ?? null,
+        discNo: isActiveTrack ? metadata.discNo ?? stored.discNo ?? null : stored.discNo ?? null
+      }
+    },
+    [metadata]
+  )
+
+  const handleSaveTrackMetadata = useCallback(
+    async (draft) => {
+      if (!draft?.path || !window.api?.updateExtendedMetadataHandler) return
+      const response = await window.api.updateExtendedMetadataHandler(draft)
+      if (!response?.success) {
+        throw new Error(response?.error || t('metadataEditor.saveFailed', 'Failed to save tags'))
+      }
+
+      const common = response.common || {}
+      const technical = response.technical || {}
+      const nextMetaEntry = {
+        title: common.title || null,
+        artist: common.artist || null,
+        album: common.album || null,
+        albumArtist: common.albumArtist || null,
+        trackNo: common.trackNo ?? null,
+        discNo: common.discNo ?? null,
+        cover: common.cover || null,
+        duration: technical.duration || null
+      }
+
+      setTrackMetaMap((prev) => ({
+        ...prev,
+        [draft.path]: nextMetaEntry
+      }))
+
+      const activeTrack = playlistRef.current[currentIndexRef.current] || null
+      if (activeTrack?.path === draft.path) {
+        setMetadata({
+          title: common.title || '',
+          artist: common.artist || '',
+          album: common.album || '',
+          albumArtist: common.albumArtist || '',
+          trackNo: common.trackNo ?? null,
+          discNo: common.discNo ?? null
+        })
+        if (common.cover) setCoverUrl(common.cover)
+        await loadTrackData(draft.path, {
+          mvOriginUrl: activeTrack?.mvOriginUrl,
+          hasLyrics: activeTrack?.hasLyrics === true
+        })
+      }
+    },
+    [loadTrackData, t]
+  )
+
+  const openQuickMetadataFieldEditor = useCallback(
+    (field) => {
+      const activeTrack = playlistRef.current[currentIndexRef.current] || null
+      if (!activeTrack?.path || !isLocalAudioFilePath(activeTrack.path)) return
+      const draft = buildEditableMetadataDraft(activeTrack)
+      if (!draft) return
+      setQuickEditField(field)
+      setQuickEditDraft(String(draft[field] ?? ''))
+    },
+    [buildEditableMetadataDraft]
+  )
+
+  const handleQuickFieldTrigger = useCallback(
+    (field, event) => {
+      if (!(event?.ctrlKey || event?.metaKey)) return
+      event.preventDefault()
+      event.stopPropagation()
+      openQuickMetadataFieldEditor(field)
+    },
+    [openQuickMetadataFieldEditor]
+  )
+
+  const commitQuickMetadataFieldEdit = useCallback(async () => {
+    if (!quickEditField || quickEditBusy) return
+    const activeTrack = playlistRef.current[currentIndexRef.current] || null
+    if (!activeTrack?.path || !isLocalAudioFilePath(activeTrack.path)) {
+      setQuickEditField(null)
+      setQuickEditDraft('')
+      return
+    }
+
+    const nextDraft = buildEditableMetadataDraft(activeTrack)
+    if (!nextDraft) return
+    const nextValue = String(quickEditDraft || '').trim()
+
+    setQuickEditBusy(true)
+    try {
+      setDisplayMetadataOverrides((prev) => {
+        const current = { ...(prev?.[activeTrack.path] || {}) }
+        if (nextValue) current[quickEditField] = nextValue
+        else delete current[quickEditField]
+        const next = { ...(prev || {}) }
+        if (Object.keys(current).length > 0) next[activeTrack.path] = current
+        else delete next[activeTrack.path]
+        return next
+      })
+      if (playlistRef.current[currentIndexRef.current]?.path === activeTrack.path) {
+        setMetadata((prev) => ({
+          ...prev,
+          [quickEditField]: nextValue
+        }))
+      }
+      setQuickEditField(null)
+      setQuickEditDraft('')
+    } catch (error) {
+      alert(error?.message || String(error))
+    } finally {
+      setQuickEditBusy(false)
+    }
+  }, [buildEditableMetadataDraft, quickEditBusy, quickEditDraft, quickEditField])
+
+  const cancelQuickMetadataFieldEdit = useCallback(() => {
+    if (quickEditBusy) return
+    setQuickEditField(null)
+    setQuickEditDraft('')
+  }, [quickEditBusy])
+
+  const handleQuickCoverPick = useCallback(
+    async (event) => {
+      if (!(event?.ctrlKey || event?.metaKey)) return
+      const activeTrack = playlistRef.current[currentIndexRef.current] || null
+      if (!activeTrack?.path || !isLocalAudioFilePath(activeTrack.path)) return
+
+      event.preventDefault()
+      event.stopPropagation()
+
+      const coverPath = await window.api?.openImageHandler?.(configRef.current.uiLocale)
+      if (!coverPath) return
+
+      const coverHref = window.api?.pathToFileURL?.(coverPath) || coverPath
+
+      setQuickEditBusy(true)
+      try {
+        setDisplayMetadataOverrides((prev) => {
+          const current = { ...(prev?.[activeTrack.path] || {}) }
+          current.coverPath = coverPath
+          current.cover = coverHref
+          return {
+            ...(prev || {}),
+            [activeTrack.path]: current
+          }
+        })
+      } catch (error) {
+        alert(error?.message || String(error))
+      } finally {
+        setQuickEditBusy(false)
+      }
+    },
+    []
+  )
+
+  const openBatchRenameDrawer = useCallback(() => {
+    setBatchRenameOpen(true)
+  }, [])
+
+  const handleApplyBatchRename = useCallback(
+    async (items) => {
+      if (!window.api?.batchRenameFilesHandler) return
+      const response = await window.api.batchRenameFilesHandler(items)
+      if (!response?.success) {
+        throw new Error(response?.error || t('batchRename.failed', 'Failed to rename files'))
+      }
+      if (Array.isArray(response.renamed) && response.renamed.length > 0) {
+        applyLibraryFolderDelta({ renamed: response.renamed, removedPaths: [], added: [] })
+      }
+    },
+    [applyLibraryFolderDelta, t]
+  )
 
   const fetchCloudCover = async (title, artist) => {
     if (!title) return
@@ -2113,10 +4303,17 @@ export default function App() {
   const handleImport = async () => {
     const folders = await window.api.openDirectoryHandler()
     if (folders && folders.length > 0) {
-      const audioFiles = await window.api.readDirectoryHandler(folders[0])
+      const folderPath = folders[0]
+      const audioFiles = await window.api.readDirectoryHandler(folderPath)
       if (audioFiles.length > 0) {
         await processFiles(audioFiles)
       }
+      // Save folder path for auto-rescan
+      setImportedFolders((prev) => {
+        const normalized = folderPath.replace(/[\\/]+$/, '')
+        if (prev.some((f) => f.toLowerCase() === normalized.toLowerCase())) return prev
+        return [...prev, normalized]
+      })
     }
   }
 
@@ -2126,6 +4323,199 @@ export default function App() {
       await processFiles(files)
     }
   }
+
+  const importSharedPlaylistsFromPayload = useCallback(
+    async (sharedPlaylists) => {
+      if (!Array.isArray(sharedPlaylists) || sharedPlaylists.length === 0) return false
+      if (!window.api?.playlistShare?.importPlaylists) return false
+
+      const playlistSaveDir = (
+        configRef.current.playlistImportFolder ||
+        configRef.current.downloadFolder ||
+        ''
+      ).trim()
+      if (!playlistSaveDir) {
+        alert(t('downloader.folderRequired'))
+        return false
+      }
+
+      setIsConverting(true)
+      setConversionMsg(t('downloader.connecting'))
+
+      const createdPlaylistIds = new Map()
+      const streamedPathSet = new Set()
+      const ensureImportedPlaylistTarget = (playlistName) => {
+        const normalizedName = String(playlistName || 'Imported').trim() || 'Imported'
+        if (createdPlaylistIds.has(normalizedName)) {
+          return createdPlaylistIds.get(normalizedName)
+        }
+        const newId = crypto.randomUUID()
+        createdPlaylistIds.set(normalizedName, newId)
+        setUserPlaylists((prev) => [...prev, { id: newId, name: normalizedName, paths: [] }])
+        setSelectedSmartCollectionId(null)
+        setSelectedUserPlaylistId(newId)
+        return newId
+      }
+      const appendImportedTracks = (playlistName, items) => {
+        const normalizedItems = (items || []).filter((item) => item?.path)
+        if (normalizedItems.length === 0) return
+        const targetId = ensureImportedPlaylistTarget(playlistName)
+        const trackItems = normalizedItems.map((item) => ({
+          name: item.name || item.path.split(/[/\\]/).pop() || 'track',
+          path: item.path,
+          type: 'local',
+          ...(item.sourceUrl ? { sourceUrl: item.sourceUrl, mvOriginUrl: item.sourceUrl } : {})
+        }))
+        setPlaylist((prev) => {
+          const seen = new Set(prev.map((track) => track.path))
+          const next = [...prev]
+          for (const track of trackItems) {
+            if (!seen.has(track.path)) {
+              seen.add(track.path)
+              next.push(track)
+            }
+          }
+          return next
+        })
+        const importedPaths = trackItems.map((track) => track.path)
+        setUserPlaylists((prev) =>
+          prev.map((playlistItem) =>
+            playlistItem.id === targetId
+              ? {
+                  ...playlistItem,
+                  paths: [...new Set([...(playlistItem.paths || []), ...importedPaths])]
+                }
+              : playlistItem
+          )
+        )
+      }
+
+      const unsub = window.api.playlistShare.onImportProgress((payload) => {
+        if (payload?.phase === 'meta') {
+          ensureImportedPlaylistTarget(payload.playlistName || 'Imported')
+          setConversionMsg(
+            t('downloader.linkMetaLine', {
+              name: payload.playlistName || 'Imported',
+              total: payload.total ?? 0
+            })
+          )
+          return
+        }
+        if (payload?.phase === 'download') {
+          setConversionMsg(
+            t('downloader.downloadProgress', {
+              current: payload.current ?? 0,
+              total: payload.total ?? 0,
+              track: payload.trackName || ''
+            })
+          )
+          return
+        }
+        if (payload?.phase === 'added' && payload.path) {
+          streamedPathSet.add(payload.path)
+          appendImportedTracks(payload.playlistName || 'Imported', [
+            {
+              name: payload.trackTitle || payload.path.split(/[/\\]/).pop() || 'track',
+              path: payload.path,
+              sourceUrl: payload.sourceUrl || ''
+            }
+          ])
+        }
+      })
+
+      try {
+        const result = await window.api.playlistShare.importPlaylists({
+          playlists: sharedPlaylists,
+          downloadFolder: playlistSaveDir
+        })
+        const importedPlaylists = Array.isArray(result?.playlists) ? result.playlists : []
+        let okCount = 0
+        let failCount = 0
+        let firstFailure = null
+
+        for (const playlistItem of importedPlaylists) {
+          const addedItems = Array.isArray(playlistItem?.added) ? playlistItem.added : []
+          const failedItems = Array.isArray(playlistItem?.failed) ? playlistItem.failed : []
+          okCount += addedItems.length
+          failCount += failedItems.length
+          if (!firstFailure && failedItems.length > 0) firstFailure = failedItems[0]
+
+          const pendingItems = addedItems
+            .filter((item) => item?.path && !streamedPathSet.has(item.path))
+            .map((item) => ({
+              name: item.trackTitle || item.path.split(/[/\\]/).pop() || 'track',
+              path: item.path,
+              sourceUrl: item.sourceUrl || ''
+            }))
+
+          if (pendingItems.length > 0) {
+            appendImportedTracks(playlistItem.playlistName || 'Imported', pendingItems)
+          }
+        }
+
+        if (failCount > 0 && firstFailure) {
+          alert(
+            t('downloader.importPartial', {
+              ok: okCount,
+              fail: failCount,
+              name: firstFailure.name,
+              error: firstFailure.error
+            })
+          )
+        } else if (okCount === 0) {
+          alert(t('downloader.importNone'))
+        }
+
+        return okCount > 0
+      } catch (error) {
+        alert(error?.message || String(error))
+        return false
+      } finally {
+        if (typeof unsub === 'function') unsub()
+        setIsConverting(false)
+        setConversionMsg('')
+      }
+    },
+    [t]
+  )
+
+  const handleDroppedJsonFiles = useCallback(
+    async (jsonPaths) => {
+      if (!Array.isArray(jsonPaths) || jsonPaths.length === 0) return false
+
+      const importedPlaylists = []
+      const sharedPlaylists = []
+
+      for (const jsonPath of jsonPaths) {
+        try {
+          const content = await window.api.readTextFileHandler(jsonPath)
+          if (!content) continue
+          const parsed = JSON.parse(content)
+          const downloadable = extractDownloadablePlaylists(parsed)
+          if (downloadable.length > 0) {
+            sharedPlaylists.push(...downloadable)
+            continue
+          }
+          const imported = normalizeImportedPlaylists(parsed)
+          if (imported.length > 0) {
+            importedPlaylists.push(...imported)
+          }
+        } catch (error) {
+          alert(error?.message || String(error))
+        }
+      }
+
+      if (importedPlaylists.length > 0) {
+        setUserPlaylists((prev) => [...prev, ...importedPlaylists])
+        setSelectedSmartCollectionId(null)
+        setSelectedUserPlaylistId(importedPlaylists[importedPlaylists.length - 1]?.id || null)
+      }
+
+      const sharedImported = await importSharedPlaylistsFromPayload(sharedPlaylists)
+      return importedPlaylists.length > 0 || sharedImported
+    },
+    [importSharedPlaylistsFromPayload]
+  )
 
   const handleDragOver = (e) => {
     e.preventDefault()
@@ -2143,8 +4533,19 @@ export default function App() {
 
     const files = e.dataTransfer.files
     if (files && files.length > 0) {
-      const paths = Array.from(files).map((f) => f.path)
-      const audioFiles = await window.api.getAudioFilesFromPaths(paths)
+      const droppedPaths = Array.from(files)
+        .map((file) => file.path)
+        .filter(Boolean)
+      const jsonPaths = droppedPaths.filter((filePath) => filePath.toLowerCase().endsWith('.json'))
+      const otherPaths = droppedPaths.filter(
+        (filePath) => !filePath.toLowerCase().endsWith('.json')
+      )
+
+      if (jsonPaths.length > 0) {
+        await handleDroppedJsonFiles(jsonPaths)
+      }
+
+      const audioFiles = await window.api.getAudioFilesFromPaths(otherPaths)
       if (audioFiles && audioFiles.length > 0) {
         await processFiles(audioFiles)
       }
@@ -2152,14 +4553,23 @@ export default function App() {
   }
 
   const handleClearPlaylist = () => {
+    cancelCrossfade()
     if (useNativeEngineRef.current) window.api?.stopAudio?.()
     setPlaylist([])
+    setActivePlaybackContext(createPlaybackContext('library', 'library', []))
     setUpNextQueue([])
+    playbackHistoryRef.current = []
+    setPlaybackHistory([])
     setCurrentIndex(-1)
     setIsPlaying(false)
     setDuration(0)
     setCurrentTime(0)
     setCoverUrl(null)
+    setLyricsSourceStatus({ kind: 'idle', detail: '', origin: '' })
+    lastHistoryTrackedPathRef.current = ''
+    pendingTrackStartRef.current = null
+    playbackSessionSeedRef.current = null
+    lastLoadedTrackPathRef.current = ''
     if (audioRef.current) audioRef.current.src = ''
   }
 
@@ -2200,7 +4610,10 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [togglePlay])
 
-  const handleNext = useCallback(() => {
+  const handleNext = useCallback((options = {}) => {
+    if (!options.preserveFade) {
+      cancelCrossfade()
+    }
     if (playlist.length > 0) {
       if (queuePlaybackEnabled) {
         const queueSnapshot = upNextQueueRef.current
@@ -2237,16 +4650,77 @@ export default function App() {
       }
       setIsPlaying(true)
     }
-  }, [playlist, queuePlaybackEnabled, playMode, currentIndex])
+  }, [cancelCrossfade, playlist, queuePlaybackEnabled, playMode, currentIndex])
 
-  // Native bridge: track ended → play next
+  const jumpToPlaybackHistory = useCallback((targetHistoryIndex) => {
+    const historySnapshot = playbackHistoryRef.current
+    if (!Array.isArray(historySnapshot) || historySnapshot.length === 0) return false
+
+    const boundedIndex = Math.max(
+      0,
+      Math.min(
+        Number.isFinite(targetHistoryIndex) ? targetHistoryIndex : historySnapshot.length - 1,
+        historySnapshot.length - 1
+      )
+    )
+
+    for (let idx = boundedIndex; idx >= 0; idx -= 1) {
+      const candidatePath = historySnapshot[idx]?.path
+      const nextIdx = playlistRef.current.findIndex((track) => track.path === candidatePath)
+      if (nextIdx === -1) continue
+
+      historyNavigationRef.current = true
+      setCurrentIndex(nextIdx)
+      setIsPlaying(true)
+      return true
+    }
+
+    return false
+  }, [])
+
+  const goBackInPlaybackHistory = useCallback(() => {
+    return jumpToPlaybackHistory(playbackHistoryRef.current.length - 1)
+  }, [jumpToPlaybackHistory])
+
+  const clearPlaybackHistory = useCallback(() => {
+    playbackHistoryRef.current = []
+    setPlaybackHistory([])
+  }, [])
+
+  const handleHistoryMenuBack = useCallback(() => {
+    goBackInPlaybackHistory()
+  }, [goBackInPlaybackHistory])
+
+  const handleHistoryMenuJump = useCallback(
+    (historyIndex) => {
+      jumpToPlaybackHistory(historyIndex)
+    },
+    [jumpToPlaybackHistory]
+  )
+
+  const handleHistoryMenuClear = useCallback(() => {
+    clearPlaybackHistory()
+  }, [clearPlaybackHistory])
+
+  // Native bridge: track ended → advance using the same rules as HTML audio
   useEffect(() => {
     if (window.api?.onAudioTrackEnded) {
       return window.api.onAudioTrackEnded(() => {
-        handleNext()
+        if (sleepTimerActive && config.sleepTimerMode === 'track') {
+          stopPlaybackForSleepTimer()
+          cancelSleepTimer()
+          return
+        }
+        handleTrackEndedAdvance()
       })
     }
-  }, [handleNext])
+  }, [
+    cancelSleepTimer,
+    config.sleepTimerMode,
+    handleTrackEndedAdvance,
+    sleepTimerActive,
+    stopPlaybackForSleepTimer
+  ])
 
   const getNextTrack = useCallback(() => {
     if (playlist.length === 0) return null
@@ -2263,29 +4737,111 @@ export default function App() {
     }
     if (playMode === 'shuffle') {
       return null // Cannot reliably predict next track in shuffle
-    } else if (playMode === 'repeat-one') {
+    } else if (playMode === 'single') {
       return playlist[currentIndex]
     } else {
-      return playlist[(currentIndex + 1) % playlist.length]
+      const { currentSeqIndex, paths } = getPlaybackSequenceSnapshot()
+      if (paths.length === 0) return null
+      const baseIndex = currentSeqIndex >= 0 ? currentSeqIndex : 0
+      const nextPath = paths[(baseIndex + 1) % paths.length]
+      return playlistRef.current.find((track) => track.path === nextPath) || null
     }
-  }, [playlist, queuePlaybackEnabled, playMode, currentIndex])
+  }, [playlist, queuePlaybackEnabled, playMode, currentIndex, getPlaybackSequenceSnapshot])
 
   const nextTrack = getNextTrack()
 
-  const handlePrev = () => {
-    if (playlist.length > 0) {
-      if (playMode === 'shuffle') {
-        let prevIdx = Math.floor(Math.random() * playlist.length)
-        if (prevIdx === currentIndex && playlist.length > 1) {
-          prevIdx = (prevIdx - 1 + playlist.length) % playlist.length
-        }
-        setCurrentIndex(prevIdx)
-      } else {
-        setCurrentIndex((prev) => (prev - 1 + playlist.length) % playlist.length)
-      }
-      setIsPlaying(true)
+  const handlePrev = useCallback((options = {}) => {
+    if (!options.preserveFade) {
+      cancelCrossfade()
     }
-  }
+    const { currentPath, currentSeqIndex, paths } = getPlaybackSequenceSnapshot()
+    if (paths.length === 0) return
+
+    if (playMode === 'shuffle') {
+      let prevPath = paths[Math.floor(Math.random() * paths.length)]
+      if (prevPath === currentPath && paths.length > 1) {
+        prevPath = paths[(currentSeqIndex - 1 + paths.length) % paths.length]
+      }
+      const prevIdx = playlistRef.current.findIndex((track) => track.path === prevPath)
+      if (prevIdx === -1) return
+      setCurrentIndex(prevIdx)
+    } else {
+      const baseIndex = currentSeqIndex >= 0 ? currentSeqIndex : 0
+      const prevPath = paths[(baseIndex - 1 + paths.length) % paths.length]
+      const prevIdx = playlistRef.current.findIndex((track) => track.path === prevPath)
+      if (prevIdx === -1) return
+      setCurrentIndex(prevIdx)
+    }
+    setIsPlaying(true)
+  }, [cancelCrossfade, playMode, getPlaybackSequenceSnapshot])
+
+  useEffect(() => {
+    if (!window.api?.onPlayerCmd) return undefined
+    return window.api.onPlayerCmd((cmd) => {
+      if (cmd === 'next') {
+        handleNext()
+        return
+      }
+      if (cmd === 'prev') {
+        handlePrev()
+      }
+    })
+  }, [handleNext, handlePrev])
+
+  useEffect(() => {
+    if (config.crossfadeEnabled || !crossfadeStateRef.current.active) return
+    cancelCrossfade()
+  }, [cancelCrossfade, config.crossfadeEnabled])
+
+  useEffect(() => {
+    if (!useNativeEngineRef.current || !window.api?.audioStartFadeOut || !window.api?.audioStartFadeIn)
+      return
+    if (!config.crossfadeEnabled || !isPlaying || playlist.length < 2) return
+    const currentTrackPath = playlist[currentIndex]?.path || ''
+    if (!currentTrackPath || crossfadeStateRef.current.active) return
+    if (!(duration > 0) || !(currentTime >= 0)) return
+
+    const remainingSec = duration - currentTime
+    if (remainingSec > config.crossfadeDuration || remainingSec < 0) return
+
+    crossfadeStateRef.current = {
+      active: true,
+      sourcePath: currentTrackPath,
+      pendingFadeIn: true
+    }
+
+    const fadeMs = Math.max(1000, Number(config.crossfadeDuration || 3) * 1000)
+    void window.api.audioStartFadeOut(fadeMs).catch(() => {})
+    // Do NOT call handleNext() here — let the track end naturally.
+    // The audio stream is single-instance; calling play() for the next track
+    // immediately kills the current stream and the fade-out never plays through.
+    // Instead, track-ended fires when the audio finishes (now at ~0 volume),
+    // handleTrackEndedAdvance() runs normally, and the second useEffect below
+    // picks up pendingFadeIn and calls audioStartFadeIn on the new track.
+  }, [
+    config.crossfadeDuration,
+    config.crossfadeEnabled,
+    currentIndex,
+    currentTime,
+    duration,
+    isPlaying,
+    playlist
+  ])
+
+  useEffect(() => {
+    if (!useNativeEngineRef.current || !window.api?.audioStartFadeIn) return
+    const state = crossfadeStateRef.current
+    if (!state.pendingFadeIn) return
+
+    const currentTrackPath = playlist[currentIndex]?.path || ''
+    if (!currentTrackPath || currentTrackPath === state.sourcePath) return
+
+    state.pendingFadeIn = false
+    state.active = false
+
+    const fadeMs = Math.max(1000, Number(config.crossfadeDuration || 3) * 1000)
+    void window.api.audioStartFadeIn(fadeMs).catch(() => {})
+  }, [config.crossfadeDuration, currentIndex, playlist])
 
   const formatTime = (time) => {
     if (isNaN(time)) return '0:00'
@@ -2491,10 +5047,12 @@ export default function App() {
         const AudioContext = window.AudioContext || window.webkitAudioContext
         ctx = new AudioContext()
         ctx.suspend()
-        refs.forEach(el => {
+        refs.forEach((el) => {
           ctx.createMediaElementSource(el) // Bypasses Chromium audio sync waiting for locked WASAPI endpoint
         })
-        console.log('[Fix] WebAudio WASAPI exclusive playback stutter fix applied to Bilibili video')
+        console.log(
+          '[Fix] WebAudio WASAPI exclusive playback stutter fix applied to Bilibili video'
+        )
       } catch (err) {
         console.warn('Failed to apply exclusive mode stutter fix', err)
       }
@@ -2502,7 +5060,7 @@ export default function App() {
 
     return () => {
       clearTimeout(tmr)
-      if (ctx) ctx.close().catch(()=>{})
+      if (ctx) ctx.close().catch(() => {})
     }
   }, [isAudioExclusive, biliDirectStream, mvId])
 
@@ -2606,9 +5164,7 @@ export default function App() {
         const audio = audioRef.current
         const v = biliVideoRef.current || biliBackgroundVideoRef.current
         if (audio && v) {
-          const audioTime = useNativeEngineRef.current
-            ? (audio.currentTime || 0)
-            : audio.currentTime
+          const audioTime = useNativeEngineRef.current ? audio.currentTime || 0 : audio.currentTime
           const target = Math.max(0, audioTime + (configRef.current.mvOffsetMs ?? 0) / 1000)
           if (Math.abs(v.currentTime - target) > driftThresholdSec) {
             v.currentTime = target
@@ -2625,16 +5181,81 @@ export default function App() {
   const handleSeek = (e) => {
     if (lastCastStatus?.dlnaEnabled && lastCastStatus?.currentUri) return
     const val = parseFloat(e.target.value)
+    if (!Number.isFinite(val)) return
+
+    progressSeekValueRef.current = val
     setCurrentTime(val)
     syncYTVideo(val)
-    const trackPath = playlist[currentIndex]?.path
-    if (useNativeEngineRef.current && window.api?.playAudio && trackPath) {
-      audioRef.current.currentTime = val
-      window.api.playAudio(trackPath, val, playbackRateRef.current).catch(console.error)
-    } else {
-      audioRef.current.currentTime = val
+
+    if (!isProgressDraggingRef.current) {
+      const trackPath = playlist[currentIndex]?.path
+      if (seekTimerRef.current) clearTimeout(seekTimerRef.current)
+      if (useNativeEngineRef.current && window.api?.playAudio && trackPath) {
+        if (audioRef.current) audioRef.current.currentTime = val
+        window.api.playAudio(trackPath, val, playbackRateRef.current).catch(console.error)
+        seekTimerRef.current = setTimeout(() => setIsSeeking(false), 350)
+      } else if (audioRef.current) {
+        audioRef.current.currentTime = val
+        seekTimerRef.current = setTimeout(() => setIsSeeking(false), 120)
+      }
     }
   }
+
+  const commitProgressSeek = useCallback(
+    (overrideValue) => {
+      if (!isProgressDraggingRef.current && !Number.isFinite(overrideValue)) return
+
+      isProgressDraggingRef.current = false
+      setIsProgressDragging(false)
+
+      if (lastCastStatus?.dlnaEnabled && lastCastStatus?.currentUri) {
+        setIsSeeking(false)
+        return
+      }
+
+      const val = Number.isFinite(overrideValue) ? overrideValue : progressSeekValueRef.current
+      if (!Number.isFinite(val)) {
+        setIsSeeking(false)
+        return
+      }
+
+      setCurrentTime(val)
+      syncYTVideo(val)
+
+      const trackPath = playlist[currentIndex]?.path
+      if (seekTimerRef.current) clearTimeout(seekTimerRef.current)
+
+      if (useNativeEngineRef.current && window.api?.playAudio && trackPath) {
+        if (audioRef.current) audioRef.current.currentTime = val
+        window.api.playAudio(trackPath, val, playbackRateRef.current).catch(console.error)
+        seekTimerRef.current = setTimeout(() => setIsSeeking(false), 350)
+      } else if (audioRef.current) {
+        audioRef.current.currentTime = val
+        seekTimerRef.current = setTimeout(() => setIsSeeking(false), 120)
+      } else {
+        setIsSeeking(false)
+      }
+    },
+    [currentIndex, lastCastStatus?.currentUri, lastCastStatus?.dlnaEnabled, playlist, syncYTVideo]
+  )
+
+  useEffect(() => {
+    if (!isProgressDragging) return undefined
+
+    const finishSeek = () => {
+      commitProgressSeek()
+    }
+
+    window.addEventListener('mouseup', finishSeek)
+    window.addEventListener('touchend', finishSeek)
+    window.addEventListener('touchcancel', finishSeek)
+
+    return () => {
+      window.removeEventListener('mouseup', finishSeek)
+      window.removeEventListener('touchend', finishSeek)
+      window.removeEventListener('touchcancel', finishSeek)
+    }
+  }, [isProgressDragging, commitProgressSeek])
 
   useEffect(() => {
     if (!mvId) return
@@ -2746,7 +5367,21 @@ export default function App() {
     return bufferArray
   }
 
+  const effectiveTrackMetaMap = useMemo(() => {
+    const next = { ...trackMetaMap }
+    for (const [path, override] of Object.entries(displayMetadataOverrides || {})) {
+      const prev = next[path] || {}
+      next[path] = {
+        ...prev,
+        ...override,
+        cover: override?.cover || prev.cover || null
+      }
+    }
+    return next
+  }, [trackMetaMap, displayMetadataOverrides])
+
   const currentTrack = currentIndex >= 0 ? playlist[currentIndex] : null
+  const currentDisplayOverride = currentTrack?.path ? displayMetadataOverrides[currentTrack.path] || null : null
   const listenTogetherSyncContent = useMemo(
     () => ({
       coverUrl: coverUrl || '',
@@ -2756,10 +5391,9 @@ export default function App() {
     [coverUrl, mvId, lyrics]
   )
   const currentTrackInfo = useMemo(
-    () => (currentTrack ? parseTrackInfo(currentTrack, trackMetaMap[currentTrack.path]) : null),
-    [currentTrack, trackMetaMap]
+    () => (currentTrack ? parseTrackInfo(currentTrack, effectiveTrackMetaMap[currentTrack.path]) : null),
+    [currentTrack, effectiveTrackMetaMap]
   )
-
   const mvFallbackRunningRef = useRef(false)
   const mvFallbackAttemptKeyRef = useRef('')
 
@@ -2865,11 +5499,12 @@ export default function App() {
   }, [config.mvQuality, mvId, pushYTQuality])
 
   const resolvedDisplayArtist = useMemo(() => {
+    if (currentDisplayOverride?.artist) return currentDisplayOverride.artist
     if (metadata.artist && metadata.artist !== 'Unknown Artist') return metadata.artist
     if (currentTrackInfo?.artist && currentTrackInfo.artist !== 'Unknown Artist')
       return currentTrackInfo.artist
     return currentTrack ? t('player.nightcoreMode') : t('player.ellipsis')
-  }, [metadata.artist, currentTrackInfo, currentTrack, t])
+  }, [currentDisplayOverride, metadata.artist, currentTrackInfo, currentTrack, t])
 
   const dlnaUiOn = useMemo(
     () => !!(lastCastStatus?.dlnaEnabled && lastCastStatus?.currentUri),
@@ -2882,10 +5517,11 @@ export default function App() {
       const title = (s.dlnaMeta?.title || '').trim()
       return title || t('dlna.castTitle')
     }
+    if (currentDisplayOverride?.title) return currentDisplayOverride.title
     if (metadata.title) return metadata.title
     if (currentTrack) return currentTrack.name.replace(/\.[^/.]+$/, '')
     return t('player.selectTrack')
-  }, [lastCastStatus, metadata.title, currentTrack, t])
+  }, [lastCastStatus, currentDisplayOverride, metadata.title, currentTrack, t])
 
   const displayMainArtist = useMemo(() => {
     const s = lastCastStatus
@@ -2901,8 +5537,9 @@ export default function App() {
     if (s?.dlnaEnabled && s?.currentUri) {
       return (s.dlnaMeta?.album || '').trim() || 'Unknown Album'
     }
+    if (currentDisplayOverride?.album) return currentDisplayOverride.album
     return metadata.album || currentTrack?.info?.album || 'Unknown Album'
-  }, [lastCastStatus, metadata.album, currentTrack])
+  }, [lastCastStatus, currentDisplayOverride, metadata.album, currentTrack])
 
   const displayMainCoverUrl = useMemo(() => {
     const s = lastCastStatus
@@ -2910,8 +5547,29 @@ export default function App() {
       const u = (s.dlnaMeta?.albumArtUrl || '').trim()
       return u || null
     }
+    if (currentDisplayOverride?.cover) return currentDisplayOverride.cover
     return coverUrl
-  }, [lastCastStatus, coverUrl])
+  }, [lastCastStatus, currentDisplayOverride, coverUrl])
+
+  useEffect(() => {
+    if (!config.themeDynamicCoverColor || !displayMainCoverUrl) {
+      setDynamicCoverTheme(null)
+      return
+    }
+    let cancelled = false
+    extractAverageHexFromSrc(displayMainCoverUrl)
+      .then((hex) => {
+        if (cancelled) return
+        if (hex) setDynamicCoverTheme(generatePaletteFromHex(hex))
+        else setDynamicCoverTheme(null)
+      })
+      .catch(() => {
+        if (!cancelled) setDynamicCoverTheme(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [config.themeDynamicCoverColor, displayMainCoverUrl])
 
   const buildShareCardSnapshot = useCallback(
     (track) => {
@@ -2988,6 +5646,17 @@ export default function App() {
     }
     return isPlaying
   }, [lastCastStatus, isPlaying])
+
+  const playerTransportPluginContext = useMemo(
+    () => ({
+      trackPath: currentTrack?.path || '',
+      title: displayMainTitle || '',
+      artist: displayMainArtist || '',
+      album: displayMainAlbum || '',
+      isPlaying: transportIsPlaying === true
+    }),
+    [currentTrack?.path, displayMainTitle, displayMainArtist, displayMainAlbum, transportIsPlaying]
+  )
 
   const displayProgressTime = useMemo(() => {
     const s = lastCastStatus
@@ -3137,15 +5806,69 @@ export default function App() {
   ])
 
   const lyricsStatusUi = useMemo(() => {
-    if (lyricsMatchStatus === 'loading') return { tone: 'pending', text: t('lyricsDrawer.statusLoading') }
+    if (lyricsMatchStatus === 'loading')
+      return { tone: 'pending', text: t('lyricsDrawer.statusLoading') }
     if (lyricsMatchStatus === 'none') return { tone: 'bad', text: t('lyricsDrawer.statusNone') }
-    if (lyricsMatchStatus === 'matched' && config.lyricsWordHighlight !== false && !lyricTimelineValid) {
+    if (
+      lyricsMatchStatus === 'matched' &&
+      config.lyricsWordHighlight !== false &&
+      !lyricTimelineValid
+    ) {
       return { tone: 'warn', text: t('lyricsDrawer.statusDegraded') }
     }
-    if (lyricsMatchStatus === 'matched') return { tone: 'ok', text: t('lyricsDrawer.statusMatched') }
+    if (lyricsMatchStatus === 'matched')
+      return { tone: 'ok', text: t('lyricsDrawer.statusMatched') }
     return { tone: 'idle', text: t('lyricsDrawer.statusDash') }
   }, [lyricsMatchStatus, lyricTimelineValid, config.lyricsWordHighlight, t])
 
+  const lyricsSourceUi = useMemo(() => {
+    const labelMap = {
+      idle: t('lyricsDrawer.sourceStateIdle', '—'),
+      loading: t('lyricsDrawer.sourceStateLoading', 'Loading'),
+      none: t('lyricsDrawer.sourceStateNone', 'No lyrics'),
+      local: t('lyricsDrawer.sourceStateLocal', 'Local file'),
+      embedded: t('lyricsDrawer.sourceStateEmbedded', 'Embedded tags'),
+      lrclib: t('lyricsDrawer.sourceStateLrclib', 'LRCLIB'),
+      netease: t('lyricsDrawer.sourceStateNetease', 'NetEase'),
+      manual: t('lyricsDrawer.sourceStateManual', 'Manual'),
+      link: t('lyricsDrawer.sourceStateLink', 'Song link'),
+      cache: t('lyricsDrawer.sourceStateCache', 'Cache')
+    }
+    const detail = lyricsSourceStatus?.detail
+      ? labelMap[lyricsSourceStatus.detail] || lyricsSourceStatus.detail
+      : ''
+    const origin = lyricsSourceStatus?.origin
+      ? labelMap[lyricsSourceStatus.origin] || lyricsSourceStatus.origin
+      : ''
+
+    let text = labelMap[lyricsSourceStatus?.kind] || labelMap.idle
+    if (lyricsSourceStatus?.kind === 'cache' && detail) {
+      text = `${labelMap.cache} · ${detail}${origin && origin !== detail ? ` · ${origin}` : ''}`
+    } else if (
+      (lyricsSourceStatus?.kind === 'manual' || lyricsSourceStatus?.kind === 'link') &&
+      origin
+    ) {
+      text = `${text} · ${origin}`
+    }
+
+    return text
+  }, [lyricsSourceStatus, t])
+
+  const preferredReleaseVersion = useMemo(
+    () => normalizeReleaseVersion(updateStatus?.version || appVersion),
+    [updateStatus, appVersion]
+  )
+
+  const visibleReleaseNotes = useMemo(() => {
+    if (!Array.isArray(releaseNotes) || releaseNotes.length === 0) return []
+    const preferred = preferredReleaseVersion
+      ? releaseNotes.find(
+          (item) => normalizeReleaseVersion(item.version) === preferredReleaseVersion
+        )
+      : null
+    if (!preferred) return releaseNotes.slice(0, 3)
+    return [preferred, ...releaseNotes.filter((item) => item !== preferred).slice(0, 2)]
+  }, [releaseNotes, preferredReleaseVersion])
 
   const customThemeColorFields = useMemo(
     () => [
@@ -3193,9 +5916,9 @@ export default function App() {
       playlist.map((track, originalIdx) => ({
         ...track,
         originalIdx,
-        info: parseTrackInfo(track, trackMetaMap[track.path])
+        info: parseTrackInfo(track, effectiveTrackMetaMap[track.path])
       })),
-    [playlist, trackMetaMap]
+    [playlist, effectiveTrackMetaMap]
   )
 
   useEffect(() => {
@@ -3215,6 +5938,7 @@ export default function App() {
             const data = await window.api.getExtendedMetadataHandler(track.path)
             if (data?.success) {
               const common = data.common || {}
+              const technical = data.technical || {}
               loaded[track.path] = {
                 title: common.title || null,
                 artist: common.artist || null,
@@ -3222,7 +5946,8 @@ export default function App() {
                 albumArtist: common.albumArtist || null,
                 trackNo: common.trackNo ?? null,
                 discNo: common.discNo ?? null,
-                cover: common.cover || null
+                cover: common.cover || null,
+                duration: technical.duration || null
               }
             } else {
               loaded[track.path] = {
@@ -3232,7 +5957,8 @@ export default function App() {
                 albumArtist: null,
                 trackNo: null,
                 discNo: null,
-                cover: null
+                cover: null,
+                duration: null
               }
             }
           } catch (error) {
@@ -3243,7 +5969,8 @@ export default function App() {
               albumArtist: null,
               trackNo: null,
               discNo: null,
-              cover: null
+              cover: null,
+              duration: null
             }
           }
         })
@@ -3262,7 +5989,7 @@ export default function App() {
   }, [playlist, trackMetaMap])
 
   const queryFilteredPlaylist = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase()
+    const q = deferredSearchQuery.trim().toLowerCase()
     if (!q) return parsedPlaylist
 
     return parsedPlaylist.filter(({ info }) => {
@@ -3273,7 +6000,7 @@ export default function App() {
         info.album.toLowerCase().includes(q)
       )
     })
-  }, [parsedPlaylist, searchQuery])
+  }, [parsedPlaylist, deferredSearchQuery])
 
   const albumArtistByName = useMemo(() => {
     const m = {}
@@ -3303,35 +6030,320 @@ export default function App() {
       return acc
     }, new Map())
 
-    return Array.from(groups.entries())
-      .map(([name, tracks]) => ({
-        name,
-        tracks,
-        artist:
-          tracks.find((t) => t.info.artist && t.info.artist !== 'Unknown Artist')?.info.artist ||
-          'Unknown Artist',
-        cover: tracks.find((t) => t.info.cover)?.info.cover || null
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }, [queryFilteredPlaylist])
+    const buckets = Array.from(groups.entries()).map(([name, tracks]) => ({
+      name,
+      tracks,
+      artist:
+        tracks.find((t) => t.info.artist && t.info.artist !== 'Unknown Artist')?.info.artist ||
+        'Unknown Artist',
+      cover: tracks.find((t) => t.info.cover)?.info.cover || null
+    }))
+
+    const getAlbumAddedAt = (album) =>
+      Math.min(...album.tracks.map((track) => track.birthtimeMs || Infinity))
+
+    if (albumSortMode === 'dateAsc') {
+      buckets.sort((a, b) => getAlbumAddedAt(a) - getAlbumAddedAt(b))
+    } else if (albumSortMode === 'dateDesc') {
+      buckets.sort((a, b) => getAlbumAddedAt(b) - getAlbumAddedAt(a))
+    } else if (albumSortMode === 'nameDesc') {
+      buckets.sort((a, b) => b.name.localeCompare(a.name))
+    } else if (albumSortMode === 'artistAsc') {
+      buckets.sort((a, b) => a.artist.localeCompare(b.artist) || a.name.localeCompare(b.name))
+    } else if (albumSortMode === 'artistDesc') {
+      buckets.sort((a, b) => b.artist.localeCompare(a.artist) || a.name.localeCompare(b.name))
+    } else if (albumSortMode === 'tracksAsc') {
+      buckets.sort((a, b) => a.tracks.length - b.tracks.length || a.name.localeCompare(b.name))
+    } else if (albumSortMode === 'tracksDesc') {
+      buckets.sort((a, b) => b.tracks.length - a.tracks.length || a.name.localeCompare(b.name))
+    } else {
+      buckets.sort((a, b) => a.name.localeCompare(b.name))
+    }
+
+    return buckets
+  }, [queryFilteredPlaylist, albumSortMode])
 
   const albumGroups = listMode === 'album' ? albumBuckets : []
 
+  /* Folder grouping – extract parent folder from track path */
+  const folderBuckets = useMemo(() => {
+    const groups = queryFilteredPlaylist.reduce((acc, track) => {
+      const parts = (track.path || '').replace(/\\/g, '/').split('/')
+      const folderPath = parts.length > 1 ? parts.slice(0, -1).join('/') : '/'
+      const folderName = parts.length > 1 ? parts[parts.length - 2] : '/'
+      if (!acc.has(folderPath)) acc.set(folderPath, { name: folderName, folderPath, tracks: [] })
+      acc.get(folderPath).tracks.push(track)
+      return acc
+    }, new Map())
+
+    const buckets = Array.from(groups.values())
+    if (folderSortMode === 'dateAsc') {
+      buckets.sort((a, b) => {
+        const aTime = Math.min(...a.tracks.map((t) => t.birthtimeMs || Infinity))
+        const bTime = Math.min(...b.tracks.map((t) => t.birthtimeMs || Infinity))
+        return aTime - bTime
+      })
+    } else if (folderSortMode === 'dateDesc') {
+      buckets.sort((a, b) => {
+        const aTime = Math.min(...a.tracks.map((t) => t.birthtimeMs || Infinity))
+        const bTime = Math.min(...b.tracks.map((t) => t.birthtimeMs || Infinity))
+        return bTime - aTime
+      })
+    } else {
+      buckets.sort((a, b) => a.name.localeCompare(b.name))
+    }
+    return buckets
+  }, [queryFilteredPlaylist, folderSortMode])
+
+  const folderNamesSet = useMemo(() => {
+    const s = new Set()
+    for (const b of folderBuckets) s.add(b.folderPath)
+    return s
+  }, [folderBuckets])
+
+  const folderGroups = listMode === 'folders' ? folderBuckets : []
+
   const filteredPlaylist = useMemo(() => {
-    if (selectedAlbum === 'all') return queryFilteredPlaylist
-    return queryFilteredPlaylist
-      .filter((track) => track.info.album === selectedAlbum)
-      .sort(compareTrackOrder)
-  }, [queryFilteredPlaylist, selectedAlbum])
+    let result = queryFilteredPlaylist
+    if (listMode === 'folders' && selectedFolder !== 'all') {
+      result = queryFilteredPlaylist.filter((track) => {
+        const parts = (track.path || '').replace(/\\/g, '/').split('/')
+        const fp = parts.length > 1 ? parts.slice(0, -1).join('/') : '/'
+        return fp === selectedFolder
+      })
+    } else if (selectedAlbum !== 'all') {
+      result = queryFilteredPlaylist
+        .filter((track) => track.info.album === selectedAlbum)
+        .sort(compareTrackOrder)
+    }
+
+    if (
+      listMode === 'songs' ||
+      (listMode === 'folders' && selectedFolder !== 'all') ||
+      (listMode === 'album' && selectedAlbum !== 'all')
+    ) {
+      const mode = songSortMode
+      if (mode === 'dateAsc') {
+        return [...result].sort((a, b) => (a.birthtimeMs || Infinity) - (b.birthtimeMs || Infinity))
+      } else if (mode === 'dateDesc') {
+        return [...result].sort((a, b) => (b.birthtimeMs || 0) - (a.birthtimeMs || 0))
+      } else if (mode === 'nameAsc') {
+        return [...result].sort((a, b) => a.info.title.localeCompare(b.info.title))
+      } else if (mode === 'nameDesc') {
+        return [...result].sort((a, b) => b.info.title.localeCompare(a.info.title))
+      } else if (mode === 'durationAsc') {
+        return [...result].sort(
+          (a, b) => (a.info.duration || Infinity) - (b.info.duration || Infinity)
+        )
+      } else if (mode === 'durationDesc') {
+        return [...result].sort((a, b) => (b.info.duration || 0) - (a.info.duration || 0))
+      } else if (mode === 'qualityAsc') {
+        return [...result].sort(
+          (a, b) => (a.info.sizeBytes || Infinity) - (b.info.sizeBytes || Infinity)
+        )
+      } else if (mode === 'qualityDesc') {
+        return [...result].sort((a, b) => (b.info.sizeBytes || 0) - (a.info.sizeBytes || 0))
+      }
+    }
+    return result
+  }, [queryFilteredPlaylist, selectedAlbum, selectedFolder, listMode, songSortMode])
 
   useEffect(() => {
     if (selectedAlbum === 'all') return
     if (!albumNamesSet.has(selectedAlbum)) setSelectedAlbum('all')
   }, [albumNamesSet, selectedAlbum])
 
+  useEffect(() => {
+    if (selectedFolder === 'all') return
+    if (!folderNamesSet.has(selectedFolder)) setSelectedFolder('all')
+  }, [folderNamesSet, selectedFolder])
+
   const selectedUserPlaylist = useMemo(
     () => userPlaylists.find((p) => p.id === selectedUserPlaylistId) || null,
     [userPlaylists, selectedUserPlaylistId]
+  )
+
+  const recentPlayedTracks = useMemo(() => {
+    return parsedPlaylist
+      .filter((track) => Number(trackStats[track.path]?.lastPlayedAt) > 0)
+      .sort((a, b) => {
+        const diff =
+          Number(trackStats[b.path]?.lastPlayedAt || 0) -
+          Number(trackStats[a.path]?.lastPlayedAt || 0)
+        if (diff !== 0) return diff
+        return a.info.title.localeCompare(b.info.title)
+      })
+  }, [parsedPlaylist, trackStats])
+
+  const mostPlayedTracks = useMemo(() => {
+    return parsedPlaylist
+      .filter((track) => Number(trackStats[track.path]?.playCount) > 0)
+      .sort((a, b) => {
+        const playDiff =
+          Number(trackStats[b.path]?.playCount || 0) - Number(trackStats[a.path]?.playCount || 0)
+        if (playDiff !== 0) return playDiff
+        const recentDiff =
+          Number(trackStats[b.path]?.lastPlayedAt || 0) -
+          Number(trackStats[a.path]?.lastPlayedAt || 0)
+        if (recentDiff !== 0) return recentDiff
+        return a.info.title.localeCompare(b.info.title)
+      })
+  }, [parsedPlaylist, trackStats])
+
+  const likedPathSet = useMemo(() => new Set(likedPaths), [likedPaths])
+
+  const customSmartCollections = useMemo(() => {
+    const now = Date.now()
+    return userSmartCollections.map((collection) => ({
+      ...collection,
+      kind: 'custom',
+      icon: Wand2,
+      tracks: parsedPlaylist.filter((track) =>
+        matchTrackAgainstSmartCollection(track, collection.rules, trackStats, likedPathSet, now)
+      )
+    }))
+  }, [userSmartCollections, parsedPlaylist, trackStats, likedPathSet])
+
+  const smartCollections = useMemo(
+    () => [
+      {
+        id: 'recent-played',
+        name: t('playlists.recentPlayed', 'Recently played'),
+        icon: History,
+        kind: 'builtin',
+        tracks: recentPlayedTracks
+      },
+      {
+        id: 'most-played',
+        name: t('playlists.mostPlayed', 'Most played'),
+        icon: Repeat1,
+        kind: 'builtin',
+        tracks: mostPlayedTracks
+      },
+      ...customSmartCollections
+    ],
+    [t, recentPlayedTracks, mostPlayedTracks, customSmartCollections]
+  )
+
+  const selectedSmartCollection = useMemo(
+    () => smartCollections.find((item) => item.id === selectedSmartCollectionId) || null,
+    [smartCollections, selectedSmartCollectionId]
+  )
+
+  useEffect(() => {
+    if (selectedSmartCollectionId && !selectedSmartCollection) {
+      setSelectedSmartCollectionId(null)
+    }
+  }, [selectedSmartCollectionId, selectedSmartCollection])
+
+  const describeSmartCollectionRules = useCallback(
+    (rules) => {
+      const normalized = normalizeSmartCollectionRules(rules)
+      const items = []
+      if (normalized.likedOnly) items.push(t('playlists.smartRuleLikedOnly', 'Liked songs'))
+      if (normalized.minPlayCount) {
+        items.push(
+          t('playlists.smartRuleMinPlayCount', {
+            count: normalized.minPlayCount,
+            defaultValue: 'Played at least {{count}} times'
+          })
+        )
+      }
+      if (normalized.playedWithinDays) {
+        items.push(
+          t('playlists.smartRulePlayedWithinDays', {
+            count: normalized.playedWithinDays,
+            defaultValue: 'Played in the last {{count}} days'
+          })
+        )
+      }
+      if (normalized.addedWithinDays) {
+        items.push(
+          t('playlists.smartRuleAddedWithinDays', {
+            count: normalized.addedWithinDays,
+            defaultValue: 'Added in the last {{count}} days'
+          })
+        )
+      }
+      if (normalized.titleIncludes) {
+        items.push(
+          t('playlists.smartRuleTitleContains', {
+            value: normalized.titleIncludes,
+            defaultValue: 'Title contains "{{value}}"'
+          })
+        )
+      }
+      if (normalized.artistIncludes) {
+        items.push(
+          t('playlists.smartRuleArtistContains', {
+            value: normalized.artistIncludes,
+            defaultValue: 'Artist contains "{{value}}"'
+          })
+        )
+      }
+      if (normalized.albumIncludes) {
+        items.push(
+          t('playlists.smartRuleAlbumContains', {
+            value: normalized.albumIncludes,
+            defaultValue: 'Album contains "{{value}}"'
+          })
+        )
+      }
+      return items
+    },
+    [t]
+  )
+
+  const describeSmartCollectionDraft = useCallback(
+    (draft) => {
+      const normalized = normalizeSmartCollectionDraft(draft)
+      const clauses = describeSmartCollectionRules(normalized.rules)
+      if (clauses.length === 0) {
+        return t(
+          'playlists.smartPreviewEmpty',
+          'This collection will start matching songs after you add a rule.'
+        )
+      }
+      const joiner =
+        normalized.rules.matchMode === 'any'
+          ? t('playlists.smartPreviewAnyJoiner', ' or ')
+          : t('playlists.smartPreviewAllJoiner', ' and ')
+      return t('playlists.smartPreviewSentence', {
+        rules: clauses.join(joiner),
+        defaultValue: 'This collection will include songs that match {{rules}}.'
+      })
+    },
+    [describeSmartCollectionRules, t]
+  )
+
+  const smartCollectionTemplates = useMemo(
+    () => [
+      {
+        id: 'recent-added',
+        label: t('playlists.templateRecentAdded', 'Recently added'),
+        buildDraft: () => ({
+          ...createSmartCollectionTemplateDraft('recent-added'),
+          name: t('playlists.templateRecentAdded', 'Recently added')
+        })
+      },
+      {
+        id: 'recently-played',
+        label: t('playlists.templateRecentListened', 'Recently listened'),
+        buildDraft: () => ({
+          ...createSmartCollectionTemplateDraft('recently-played'),
+          name: t('playlists.templateRecentListened', 'Recently listened')
+        })
+      },
+      {
+        id: 'liked',
+        label: t('playlists.templateMyLikes', 'My likes'),
+        buildDraft: () => ({
+          ...createSmartCollectionTemplateDraft('liked'),
+          name: t('playlists.templateMyLikes', 'My likes')
+        })
+      }
+    ],
+    [t]
   )
 
   const userPlaylistTracks = useMemo(() => {
@@ -3340,10 +6352,16 @@ export default function App() {
     return selectedUserPlaylist.paths.map((p) => pathToTrack.get(p)).filter(Boolean)
   }, [selectedUserPlaylist, parsedPlaylist])
 
+  const smartCollectionTracks = useMemo(() => {
+    if (!selectedSmartCollection || listMode !== 'playlists') return []
+    return selectedSmartCollection.tracks
+  }, [selectedSmartCollection, listMode])
+
   const playlistDetailFiltered = useMemo(() => {
-    if (!selectedUserPlaylistId || listMode !== 'playlists') return []
+    if (listMode !== 'playlists' || (!selectedUserPlaylistId && !selectedSmartCollectionId))
+      return []
     const q = searchQuery.trim().toLowerCase()
-    let list = userPlaylistTracks
+    let list = selectedSmartCollectionId ? smartCollectionTracks : userPlaylistTracks
     if (!q) return list
     return list.filter(({ info }) => {
       return (
@@ -3353,7 +6371,72 @@ export default function App() {
         info.album.toLowerCase().includes(q)
       )
     })
-  }, [userPlaylistTracks, searchQuery, selectedUserPlaylistId, listMode])
+  }, [
+    userPlaylistTracks,
+    smartCollectionTracks,
+    searchQuery,
+    selectedUserPlaylistId,
+    selectedSmartCollectionId,
+    listMode
+  ])
+
+  const sidebarPlaybackContext = useMemo(() => {
+    if (listMode === 'playlists' && selectedUserPlaylistId && selectedUserPlaylist) {
+      return createPlaybackContext(
+        'userPlaylist',
+        selectedUserPlaylistId,
+        selectedUserPlaylist.paths
+      )
+    }
+    if (listMode === 'playlists' && selectedSmartCollectionId && selectedSmartCollection) {
+      return createPlaybackContext(
+        'smartCollection',
+        selectedSmartCollectionId,
+        smartCollectionTracks.map((track) => track.path)
+      )
+    }
+    return createPlaybackContext('library', 'library', [])
+  }, [
+    listMode,
+    selectedUserPlaylistId,
+    selectedUserPlaylist,
+    selectedSmartCollectionId,
+    selectedSmartCollection,
+    smartCollectionTracks
+  ])
+
+  const startPlaybackForTrack = useCallback((track, playbackContext = null) => {
+    if (!track) return
+    setActivePlaybackContext(playbackContext || createPlaybackContext('library', 'library', []))
+    setCurrentIndex(track.originalIdx)
+    setIsPlaying(true)
+  }, [])
+
+  const playPlaylistContextNow = useCallback(
+    (options = {}) => {
+      const context = sidebarPlaybackContext
+      const candidatePaths =
+        context.kind === 'library'
+          ? getLibraryPlaybackPaths()
+          : dedupePathList(context.trackPaths).filter((path) =>
+              playlistRef.current.some((track) => track.path === path)
+            )
+
+      if (candidatePaths.length === 0) return
+
+      const shuffle = options?.shuffle === true
+      const targetPath = shuffle
+        ? candidatePaths[Math.floor(Math.random() * candidatePaths.length)]
+        : candidatePaths[0]
+      const nextIdx = playlistRef.current.findIndex((track) => track.path === targetPath)
+      if (nextIdx === -1) return
+
+      setActivePlaybackContext(context)
+      setCurrentIndex(nextIdx)
+      setIsPlaying(true)
+    },
+    [sidebarPlaybackContext, getLibraryPlaybackPaths]
+  )
 
   const upNextPreviewTracks = useMemo(() => {
     if (upNextQueue.length === 0) return []
@@ -3361,22 +6444,166 @@ export default function App() {
     return upNextQueue.map((item) => pathToTrack.get(item?.path)).filter(Boolean)
   }, [upNextQueue, parsedPlaylist])
 
+  const playbackHistoryEntries = useMemo(() => {
+    if (playbackHistory.length === 0) return []
+    const pathToTrack = new Map(parsedPlaylist.map((track) => [track.path, track]))
+    return playbackHistory
+      .map((entry, historyIndex) => {
+        const normalizedEntry = normalizePlaybackHistoryEntry(entry)
+        if (!normalizedEntry) return null
+        return {
+          ...normalizedEntry,
+          historyIndex,
+          track: pathToTrack.get(normalizedEntry.path)
+        }
+      })
+      .filter(Boolean)
+      .reverse()
+      .sort((a, b) => {
+        const timeA = Number(a.playedAt || 0)
+        const timeB = Number(b.playedAt || 0)
+        if (timeA !== timeB) return timeB - timeA
+        return b.historyIndex - a.historyIndex
+      })
+  }, [playbackHistory, parsedPlaylist, trackStats])
+
   const tracksForSidebarList = useMemo(() => {
-    if (listMode === 'playlists' && selectedUserPlaylistId) {
+    if (listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId)) {
       return playlistDetailFiltered
     }
     return filteredPlaylist
-  }, [listMode, selectedUserPlaylistId, playlistDetailFiltered, filteredPlaylist])
+  }, [
+    listMode,
+    selectedUserPlaylistId,
+    selectedSmartCollectionId,
+    playlistDetailFiltered,
+    filteredPlaylist
+  ])
 
   const tracksForSidebarListFiltered = useMemo(() => {
     if (
       !showLikedOnly ||
-      (listMode !== 'songs' && !(listMode === 'playlists' && selectedUserPlaylistId))
+      (listMode !== 'songs' &&
+        listMode !== 'album' &&
+        listMode !== 'folders' &&
+        !(listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId)))
     ) {
       return tracksForSidebarList
     }
     return tracksForSidebarList.filter((t) => likedSet.has(t.path))
-  }, [tracksForSidebarList, showLikedOnly, listMode, selectedUserPlaylistId, likedSet])
+  }, [
+    tracksForSidebarList,
+    showLikedOnly,
+    listMode,
+    selectedUserPlaylistId,
+    selectedSmartCollectionId,
+    likedSet
+  ])
+
+  const sidebarListIsDetail = useMemo(
+    () => listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId),
+    [listMode, selectedUserPlaylistId, selectedSmartCollectionId]
+  )
+  const renamableVisibleTracks = useMemo(
+    () => tracksForSidebarListFiltered.filter((track) => isLocalAudioFilePath(track?.path)),
+    [tracksForSidebarListFiltered]
+  )
+  const sidebarRowHeight = sidebarListIsDetail ? SIDEBAR_DETAIL_ROW_HEIGHT : SIDEBAR_ROW_HEIGHT
+  const [sidebarScrollTop, setSidebarScrollTop] = useState(0)
+  const [sidebarViewportHeight, setSidebarViewportHeight] = useState(0)
+  const [albumGridScrollTop, setAlbumGridScrollTop] = useState(0)
+  const [albumGridViewportHeight, setAlbumGridViewportHeight] = useState(0)
+  const [albumGridColumnCount, setAlbumGridColumnCount] = useState(1)
+  const [albumGridRowHeight, setAlbumGridRowHeight] = useState(ALBUM_GRID_DEFAULT_ROW_HEIGHT)
+  const [albumGridRowGap, setAlbumGridRowGap] = useState(ALBUM_GRID_DEFAULT_GAP)
+  const [albumGridOffsetTop, setAlbumGridOffsetTop] = useState(0)
+
+  const visibleSidebarRange = useMemo(() => {
+    const total = tracksForSidebarListFiltered.length
+    if (total <= 0) {
+      return {
+        startIndex: 0,
+        endIndex: 0,
+        topSpacer: 0,
+        bottomSpacer: 0
+      }
+    }
+
+    const effectiveViewportHeight = Math.max(sidebarViewportHeight, sidebarRowHeight * 8)
+    const startIndex = Math.max(
+      0,
+      Math.floor(sidebarScrollTop / sidebarRowHeight) - SIDEBAR_LIST_OVERSCAN
+    )
+    const endIndex = Math.min(
+      total,
+      Math.ceil((sidebarScrollTop + effectiveViewportHeight) / sidebarRowHeight) +
+        SIDEBAR_LIST_OVERSCAN
+    )
+
+    return {
+      startIndex,
+      endIndex,
+      topSpacer: startIndex * sidebarRowHeight,
+      bottomSpacer: Math.max(0, (total - endIndex) * sidebarRowHeight)
+    }
+  }, [
+    tracksForSidebarListFiltered.length,
+    sidebarScrollTop,
+    sidebarViewportHeight,
+    sidebarRowHeight
+  ])
+
+  const visibleSidebarTracks = useMemo(
+    () =>
+      tracksForSidebarListFiltered.slice(
+        visibleSidebarRange.startIndex,
+        visibleSidebarRange.endIndex
+      ),
+    [tracksForSidebarListFiltered, visibleSidebarRange]
+  )
+
+  useEffect(() => {
+    const playlistElement = sidebarPlaylistRef.current
+    if (!playlistElement) return undefined
+
+    const syncMetrics = () => {
+      setSidebarViewportHeight(playlistElement.clientHeight || 0)
+      setSidebarScrollTop(playlistElement.scrollTop || 0)
+    }
+
+    syncMetrics()
+
+    if (typeof ResizeObserver === 'undefined') {
+      const fallbackId = window.setInterval(syncMetrics, 250)
+      return () => clearInterval(fallbackId)
+    }
+
+    const ro = new ResizeObserver(() => {
+      syncMetrics()
+    })
+    ro.observe(playlistElement)
+    return () => ro.disconnect()
+  }, [listMode, selectedUserPlaylistId, selectedSmartCollectionId])
+
+  const handleSidebarScroll = useCallback((event) => {
+    setSidebarScrollTop(event.currentTarget.scrollTop || 0)
+  }, [])
+
+  const setAlbumGridElement = useCallback((node) => {
+    if (!node) {
+      if (albumGridRef.current && !albumGridRef.current.isConnected) {
+        albumGridRef.current = null
+      }
+      return
+    }
+    if (node.closest('.playlist')) {
+      albumGridRef.current = node
+      return
+    }
+    if (!albumGridRef.current || !albumGridRef.current.isConnected) {
+      albumGridRef.current = node
+    }
+  }, [])
 
   const handleQueueDragOver = useCallback(
     (e) => {
@@ -3419,6 +6646,187 @@ export default function App() {
       .filter((album) => album.tracks.length > 0)
   }, [albumGroups, showLikedOnly, listMode, likedSet])
 
+  useEffect(() => {
+    if (listMode !== 'album' || selectedAlbum !== 'all') {
+      setAlbumGridScrollTop(0)
+      setAlbumGridViewportHeight(0)
+      return undefined
+    }
+
+    const playlistElement = sidebarPlaylistRef.current
+    const gridElement = albumGridRef.current
+    if (!playlistElement || !gridElement) return undefined
+
+    const syncMetrics = () => {
+      const playlistRect = playlistElement.getBoundingClientRect()
+      const gridRect = gridElement.getBoundingClientRect()
+      const computed = window.getComputedStyle(gridElement)
+      const rowGap =
+        Number.parseFloat(computed.rowGap || computed.gap || `${ALBUM_GRID_DEFAULT_GAP}`) ||
+        ALBUM_GRID_DEFAULT_GAP
+      const firstCard = gridElement.querySelector('.album-card')
+      const firstCardRect = firstCard?.getBoundingClientRect?.()
+      const nextWidth = Math.round(gridElement.clientWidth || gridRect.width || 0)
+      const nextRowHeight =
+        Math.round(firstCardRect?.height || 0) || ALBUM_GRID_DEFAULT_ROW_HEIGHT
+      const nextOffsetTop = Math.max(
+        0, Math.round(gridRect.top - playlistRect.top + (playlistElement.scrollTop || 0))
+      )
+
+      let nextColumnCount = 1
+      if (firstCardRect?.width) {
+        nextColumnCount = Math.max(
+          1,
+          Math.floor((nextWidth + rowGap) / (firstCardRect.width + rowGap))
+        )
+      }
+
+      setAlbumGridRowGap((prev) => (prev === rowGap ? prev : rowGap))
+      setAlbumGridRowHeight((prev) => (prev === nextRowHeight ? prev : nextRowHeight))
+      setAlbumGridOffsetTop((prev) => (prev === nextOffsetTop ? prev : nextOffsetTop))
+      setAlbumGridColumnCount((prev) => (prev === nextColumnCount ? prev : nextColumnCount))
+    }
+
+    syncMetrics()
+
+    if (typeof ResizeObserver === 'undefined') {
+      const fallbackId = window.setInterval(syncMetrics, 250)
+      return () => clearInterval(fallbackId)
+    }
+
+    const ro = new ResizeObserver(() => {
+      syncMetrics()
+    })
+    ro.observe(playlistElement)
+    ro.observe(gridElement)
+    const firstCard = gridElement.querySelector('.album-card')
+    if (firstCard) ro.observe(firstCard)
+    return () => ro.disconnect()
+  }, [listMode, selectedAlbum, albumGroupsFiltered.length])
+
+  useEffect(() => {
+    if (
+      listMode !== 'album' ||
+      selectedAlbum !== 'all' ||
+      !pendingAlbumOverviewRestoreRef.current
+    ) {
+      return
+    }
+
+    const playlistElement = sidebarPlaylistRef.current
+    if (!playlistElement) return
+
+    const restoreScroll = () => {
+      playlistElement.scrollTop = albumOverviewScrollTopRef.current || 0
+      setSidebarScrollTop(playlistElement.scrollTop || 0)
+      pendingAlbumOverviewRestoreRef.current = false
+    }
+
+    const rafId = window.requestAnimationFrame(restoreScroll)
+    return () => window.cancelAnimationFrame(rafId)
+  }, [listMode, selectedAlbum, albumGroupsFiltered.length])
+
+  useEffect(() => {
+    if (listMode !== 'album' || selectedAlbum !== 'all') {
+      setAlbumGridScrollTop(0)
+      setAlbumGridViewportHeight(0)
+      return
+    }
+
+    const totalRows = Math.ceil(albumGroupsFiltered.length / Math.max(1, albumGridColumnCount))
+    const totalHeight =
+      totalRows > 0 ? totalRows * albumGridRowHeight + (totalRows - 1) * albumGridRowGap : 0
+    const nextScrollTop = Math.max(0, sidebarScrollTop - albumGridOffsetTop)
+    const visibleBottom = Math.max(0, sidebarScrollTop + sidebarViewportHeight - albumGridOffsetTop)
+    const nextViewportHeight = Math.max(0, Math.min(totalHeight, visibleBottom) - nextScrollTop)
+
+    setAlbumGridScrollTop((prev) => (prev === nextScrollTop ? prev : nextScrollTop))
+    setAlbumGridViewportHeight((prev) => (prev === nextViewportHeight ? prev : nextViewportHeight))
+  }, [
+    listMode,
+    selectedAlbum,
+    albumGroupsFiltered.length,
+    albumGridColumnCount,
+    albumGridOffsetTop,
+    albumGridRowGap,
+    albumGridRowHeight,
+    sidebarScrollTop,
+    sidebarViewportHeight
+  ])
+
+  const visibleAlbumRange = useMemo(() => {
+    const total = albumGroupsFiltered.length
+    const columnCount = Math.max(1, albumGridColumnCount)
+    const totalRows = Math.ceil(total / columnCount)
+    const rowStride = Math.max(1, albumGridRowHeight + albumGridRowGap)
+
+    if (total <= 0 || totalRows <= 0) {
+      return {
+        startIndex: 0,
+        endIndex: 0,
+        topSpacer: 0,
+        bottomSpacer: 0
+      }
+    }
+
+    const effectiveViewportHeight = Math.max(albumGridViewportHeight, rowStride * 4)
+    const startRow = Math.max(0, Math.floor(albumGridScrollTop / rowStride) - SIDEBAR_LIST_OVERSCAN)
+    const endRow = Math.min(
+      totalRows,
+      Math.ceil((albumGridScrollTop + effectiveViewportHeight) / rowStride) +
+        SIDEBAR_LIST_OVERSCAN
+    )
+
+    return {
+      startIndex: startRow * columnCount,
+      endIndex: Math.min(total, endRow * columnCount),
+      topSpacer: startRow * rowStride,
+      bottomSpacer: Math.max(0, (totalRows - endRow) * rowStride)
+    }
+  }, [
+    albumGroupsFiltered.length,
+    albumGridColumnCount,
+    albumGridRowGap,
+    albumGridRowHeight,
+    albumGridScrollTop,
+    albumGridViewportHeight
+  ])
+
+  const visibleAlbumGroups = useMemo(
+    () => albumGroupsFiltered.slice(visibleAlbumRange.startIndex, visibleAlbumRange.endIndex),
+    [albumGroupsFiltered, visibleAlbumRange]
+  )
+
+  const folderGroupsFiltered = useMemo(() => {
+    if (!showLikedOnly || listMode !== 'folders') return folderGroups
+    return folderGroups
+      .map((folder) => ({
+        ...folder,
+        tracks: folder.tracks.filter((t) => likedSet.has(t.path))
+      }))
+      .filter((folder) => folder.tracks.length > 0)
+  }, [folderGroups, showLikedOnly, listMode, likedSet])
+  const selectedFolderGroup = useMemo(() => {
+    if (listMode !== 'folders' || selectedFolder === 'all') return null
+    return folderGroupsFiltered.find((folder) => folder.folderPath === selectedFolder) || null
+  }, [folderGroupsFiltered, listMode, selectedFolder])
+  const renameScopeLabel = useMemo(() => {
+    if (listMode === 'playlists' && selectedUserPlaylist) return selectedUserPlaylist.name
+    if (listMode === 'playlists' && selectedSmartCollection) return selectedSmartCollection.name
+    if (listMode === 'folders' && selectedFolderGroup?.name) return selectedFolderGroup.name
+    if (listMode === 'album' && selectedAlbum) return selectedAlbum
+    if (listMode === 'folders') return t('listMode.folders')
+    if (listMode === 'album') return t('listMode.albums')
+    return t('listMode.songs')
+  }, [
+    listMode,
+    selectedUserPlaylist,
+    selectedSmartCollection,
+    selectedFolderGroup,
+    selectedAlbum,
+    t
+  ])
+
   const forceCloseTrackContextMenu = useCallback(() => {
     if (ctxMenuCloseTimerRef.current) {
       clearTimeout(ctxMenuCloseTimerRef.current)
@@ -3434,6 +6842,42 @@ export default function App() {
     ctxMenuCloseTimerRef.current = window.setTimeout(() => {
       setTrackContextMenu(null)
       ctxMenuCloseTimerRef.current = null
+    }, MENU_ANIM_MS)
+  }, [])
+
+  const forceCloseCoverContextMenu = useCallback(() => {
+    if (coverCtxCloseTimerRef.current) {
+      clearTimeout(coverCtxCloseTimerRef.current)
+      coverCtxCloseTimerRef.current = null
+    }
+    setCoverCtxVisualOpen(false)
+    setCoverContextMenu(null)
+  }, [])
+
+  const closeCoverContextMenuAnimated = useCallback(() => {
+    setCoverCtxVisualOpen(false)
+    if (coverCtxCloseTimerRef.current) clearTimeout(coverCtxCloseTimerRef.current)
+    coverCtxCloseTimerRef.current = window.setTimeout(() => {
+      setCoverContextMenu(null)
+      coverCtxCloseTimerRef.current = null
+    }, MENU_ANIM_MS)
+  }, [])
+
+  const forceCloseGroupContextMenu = useCallback(() => {
+    if (groupCtxCloseTimerRef.current) {
+      clearTimeout(groupCtxCloseTimerRef.current)
+      groupCtxCloseTimerRef.current = null
+    }
+    setGroupCtxVisualOpen(false)
+    setGroupContextMenu(null)
+  }, [])
+
+  const closeGroupContextMenuAnimated = useCallback(() => {
+    setGroupCtxVisualOpen(false)
+    if (groupCtxCloseTimerRef.current) clearTimeout(groupCtxCloseTimerRef.current)
+    groupCtxCloseTimerRef.current = window.setTimeout(() => {
+      setGroupContextMenu(null)
+      groupCtxCloseTimerRef.current = null
     }, MENU_ANIM_MS)
   }, [])
 
@@ -3459,23 +6903,259 @@ export default function App() {
     (mode) => {
       startTransition(() => {
         forceCloseTrackContextMenu()
+        forceCloseCoverContextMenu()
+        forceCloseGroupContextMenu()
         setListMode(mode)
         if (mode !== 'playlists') {
           setSelectedUserPlaylistId(null)
+          setSelectedSmartCollectionId(null)
           setPlaylistLibraryMoreOpen(false)
         }
         forceCloseAddToPlaylistMenu()
       })
     },
-    [forceCloseTrackContextMenu, forceCloseAddToPlaylistMenu]
+    [
+      forceCloseTrackContextMenu,
+      forceCloseCoverContextMenu,
+      forceCloseGroupContextMenu,
+      forceCloseAddToPlaylistMenu
+    ]
   )
 
   const handlePickAlbumFromSidebar = useCallback(
     (album) => {
-      setSelectedAlbum(album.name)
-      handleListMode('songs')
+      albumOverviewScrollTopRef.current = sidebarPlaylistRef.current?.scrollTop || 0
+      pendingAlbumOverviewRestoreRef.current = false
+      if (sidebarPlaylistRef.current) sidebarPlaylistRef.current.scrollTop = 0
+      setSidebarScrollTop(0)
+      startTransition(() => {
+        setSelectedAlbum(album.name)
+        handleListMode('album')
+      })
     },
     [handleListMode]
+  )
+
+  const handleBackToAlbumOverview = useCallback(() => {
+    pendingAlbumOverviewRestoreRef.current = true
+    setSelectedAlbum('all')
+  }, [])
+
+  const handlePickFolderFromSidebar = useCallback((folder) => {
+    setSelectedFolder(folder.folderPath)
+    setSelectedSmartCollectionId(null)
+    setListMode('folders')
+  }, [])
+
+  const openSmartCollection = useCallback((collectionId) => {
+    setSelectedUserPlaylistId(null)
+    setSelectedSmartCollectionId(collectionId)
+    setListMode('playlists')
+  }, [])
+
+  const resetSmartCollectionEditor = useCallback(() => {
+    setSmartCollectionDraft(
+      createSmartCollectionDraft({ rules: createEmptySmartCollectionRules() })
+    )
+    setEditingSmartCollectionId(null)
+    setSmartCollectionEditorOpen(false)
+  }, [])
+
+  const openCreateSmartCollectionEditor = useCallback(() => {
+    setEditingSmartCollectionId(null)
+    setSmartCollectionDraft(
+      createSmartCollectionDraft({ rules: createEmptySmartCollectionRules() })
+    )
+    setSmartCollectionEditorOpen(true)
+  }, [])
+
+  const openEditSmartCollectionEditor = useCallback(
+    (collectionId) => {
+      const target = userSmartCollections.find((item) => item.id === collectionId)
+      if (!target) return
+      setEditingSmartCollectionId(collectionId)
+      setSmartCollectionDraft(createSmartCollectionDraft(target))
+      setSmartCollectionEditorOpen(true)
+      setSelectedUserPlaylistId(null)
+      setSelectedSmartCollectionId(null)
+      setListMode('playlists')
+    },
+    [userSmartCollections]
+  )
+
+  const createSmartCollectionFromDraft = useCallback(
+    (draft, options = {}) => {
+      const normalized = normalizeSmartCollectionDraft(draft)
+      if (!normalized.name) {
+        alert(t('playlists.smartNameRequired', 'Enter a name for the smart collection.'))
+        return false
+      }
+      if (!hasActiveSmartCollectionRules(normalized.rules)) {
+        alert(
+          t(
+            'playlists.smartRulesRequired',
+            'Add at least one rule so this smart collection knows what to match.'
+          )
+        )
+        return false
+      }
+
+      const nextId = options.id || crypto.randomUUID()
+      const finalName = options.keepName
+        ? normalized.name
+        : createUniqueSmartCollectionName(normalized.name, userSmartCollections)
+      setUserSmartCollections((prev) => {
+        const nextItem = { id: nextId, name: finalName, rules: normalized.rules }
+        if (options.id) return prev.map((item) => (item.id === options.id ? nextItem : item))
+        return [...prev, nextItem]
+      })
+      setSelectedUserPlaylistId(null)
+      setSelectedSmartCollectionId(nextId)
+      setListMode('playlists')
+      return true
+    },
+    [t, userSmartCollections]
+  )
+
+  const applySmartCollectionTemplate = useCallback(
+    (templateBuilder) => {
+      setEditingSmartCollectionId(null)
+      setSmartCollectionEditorOpen(false)
+      createSmartCollectionFromDraft(templateBuilder())
+    },
+    [createSmartCollectionFromDraft]
+  )
+
+  const saveSmartCollectionDraft = useCallback(() => {
+    const ok = createSmartCollectionFromDraft(smartCollectionDraft, {
+      id: editingSmartCollectionId || null,
+      keepName: Boolean(editingSmartCollectionId)
+    })
+    if (ok) resetSmartCollectionEditor()
+  }, [
+    smartCollectionDraft,
+    editingSmartCollectionId,
+    createSmartCollectionFromDraft,
+    resetSmartCollectionEditor
+  ])
+
+  const deleteSmartCollection = useCallback(
+    (id) => {
+      if (!confirm(t('playlists.confirmDeleteSmartCollection', 'Delete this smart collection?'))) {
+        return
+      }
+      setUserSmartCollections((prev) => prev.filter((item) => item.id !== id))
+      setSelectedSmartCollectionId((cur) => (cur === id ? null : cur))
+      if (editingSmartCollectionId === id) {
+        resetSmartCollectionEditor()
+      }
+    },
+    [editingSmartCollectionId, resetSmartCollectionEditor, t]
+  )
+
+  const openGroupContextMenu = useCallback(
+    (e, type, group) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setFolderSortOpen(false)
+      forceCloseAddToPlaylistMenu()
+      forceCloseTrackContextMenu()
+      forceCloseCoverContextMenu()
+      setGroupContextMenu({
+        clientX: e.clientX,
+        clientY: e.clientY,
+        type,
+        group
+      })
+    },
+    [forceCloseAddToPlaylistMenu, forceCloseTrackContextMenu, forceCloseCoverContextMenu]
+  )
+
+  const openCoverContextMenu = useCallback(
+    (e) => {
+      if (!currentTrack) return
+      e.preventDefault()
+      e.stopPropagation()
+      forceCloseCoverContextMenu()
+      forceCloseAddToPlaylistMenu()
+      forceCloseTrackContextMenu()
+      forceCloseGroupContextMenu()
+      setCoverContextMenu({
+        clientX: e.clientX,
+        clientY: e.clientY,
+        track: currentTrack
+      })
+    },
+    [
+      currentTrack,
+      forceCloseCoverContextMenu,
+      forceCloseAddToPlaylistMenu,
+      forceCloseTrackContextMenu,
+      forceCloseGroupContextMenu
+    ]
+  )
+
+  const playGroupNow = useCallback(
+    (type, group) => {
+      const firstTrack = group?.tracks?.[0]
+      if (!firstTrack) return
+      const groupKey = type === 'album' ? group?.name || 'album' : group?.folderPath || 'folder'
+      const playbackContext = createPlaybackContext(
+        type === 'album' ? 'albumGroup' : 'folderGroup',
+        groupKey,
+        (group?.tracks || []).map((track) => track.path)
+      )
+      if (type === 'album') {
+        handlePickAlbumFromSidebar(group)
+      } else if (type === 'folder') {
+        handlePickFolderFromSidebar(group)
+      }
+      setActivePlaybackContext(playbackContext)
+      setCurrentIndex(firstTrack.originalIdx)
+      setIsPlaying(true)
+      closeGroupContextMenuAnimated()
+    },
+    [handlePickAlbumFromSidebar, handlePickFolderFromSidebar, closeGroupContextMenuAnimated]
+  )
+
+  const queueGroupNext = useCallback(
+    (group) => {
+      enqueueUpNextTracks(group?.tracks || [])
+      closeGroupContextMenuAnimated()
+    },
+    [enqueueUpNextTracks, closeGroupContextMenuAnimated]
+  )
+
+  const revealGroupInExplorer = useCallback(
+    async (type, group) => {
+      try {
+        if (type === 'folder' && isLocalAudioFilePath(group?.folderPath) && window.api?.openPath) {
+          const r = await window.api.openPath(group.folderPath)
+          if (r && r.ok === false && r.error) {
+            alert(t('contextMenu.actionFailed', { detail: r.error }))
+          }
+          closeGroupContextMenuAnimated()
+          return
+        }
+
+        const firstLocalTrack = (group?.tracks || []).find((track) =>
+          isLocalAudioFilePath(track?.path)
+        )
+        if (!firstLocalTrack?.path || !window.api?.showItemInFolder) {
+          alert(t('contextMenu.actionFailed', { detail: 'path_unavailable' }))
+          return
+        }
+
+        const r = await window.api.showItemInFolder(firstLocalTrack.path)
+        if (r && r.ok === false && r.error) {
+          alert(t('contextMenu.actionFailed', { detail: r.error }))
+        }
+      } catch (err) {
+        alert(t('contextMenu.actionFailed', { detail: err?.message || String(err) }))
+      }
+      closeGroupContextMenuAnimated()
+    },
+    [closeGroupContextMenuAnimated, t]
   )
 
   const addPathToUserPlaylist = useCallback(
@@ -3510,13 +7190,19 @@ export default function App() {
     const id = crypto.randomUUID()
     setUserPlaylists((prev) => [...prev, { id, name, paths: [] }])
     setNewPlaylistName('')
+    setSelectedSmartCollectionId(null)
     setSelectedUserPlaylistId(id)
   }, [newPlaylistName])
+
+  const updateSmartCollectionDraftField = useCallback((field, value) => {
+    setSmartCollectionDraft((prev) => ({ ...prev, [field]: value }))
+  }, [])
 
   const openAddToPlaylistPopover = useCallback(
     (e, track) => {
       e.stopPropagation()
       forceCloseTrackContextMenu()
+      forceCloseGroupContextMenu()
       if (addToPlaylistMenu?.originalIdx === track.originalIdx) {
         closeAddToPlaylistAnimated()
         return
@@ -3537,7 +7223,12 @@ export default function App() {
         width: w
       })
     },
-    [addToPlaylistMenu, forceCloseTrackContextMenu, closeAddToPlaylistAnimated]
+    [
+      addToPlaylistMenu,
+      forceCloseTrackContextMenu,
+      forceCloseGroupContextMenu,
+      closeAddToPlaylistAnimated
+    ]
   )
 
   const openAddToPlaylistAtPoint = useCallback(
@@ -3550,6 +7241,7 @@ export default function App() {
         top = Math.max(12, clientY - menuH - 4)
       }
       forceCloseTrackContextMenu()
+      forceCloseGroupContextMenu()
       setAddToPlaylistMenu({
         originalIdx: track.originalIdx,
         path: track.path,
@@ -3558,7 +7250,7 @@ export default function App() {
         width: w
       })
     },
-    [forceCloseTrackContextMenu]
+    [forceCloseTrackContextMenu, forceCloseGroupContextMenu]
   )
 
   const createPlaylistAndAddTrackFromPopover = useCallback(() => {
@@ -3622,6 +7314,46 @@ export default function App() {
   }, [trackContextMenu])
 
   useEffect(() => {
+    if (!coverContextMenu) {
+      setCoverCtxVisualOpen(false)
+      return
+    }
+    if (coverCtxCloseTimerRef.current) {
+      clearTimeout(coverCtxCloseTimerRef.current)
+      coverCtxCloseTimerRef.current = null
+    }
+    setCoverCtxVisualOpen(false)
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setCoverCtxVisualOpen(true))
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      if (raf2) cancelAnimationFrame(raf2)
+    }
+  }, [coverContextMenu])
+
+  useEffect(() => {
+    if (!groupContextMenu) {
+      setGroupCtxVisualOpen(false)
+      return
+    }
+    if (groupCtxCloseTimerRef.current) {
+      clearTimeout(groupCtxCloseTimerRef.current)
+      groupCtxCloseTimerRef.current = null
+    }
+    setGroupCtxVisualOpen(false)
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setGroupCtxVisualOpen(true))
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      if (raf2) cancelAnimationFrame(raf2)
+    }
+  }, [groupContextMenu])
+
+  useEffect(() => {
     if (!trackContextMenu) return
     const onKey = (e) => {
       if (e.key === 'Escape') closeTrackContextMenuAnimated()
@@ -3637,6 +7369,40 @@ export default function App() {
       document.removeEventListener('mousedown', onPointerDown, true)
     }
   }, [trackContextMenu, closeTrackContextMenuAnimated])
+
+  useEffect(() => {
+    if (!coverContextMenu) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeCoverContextMenuAnimated()
+    }
+    const onPointerDown = (e) => {
+      const el = coverContextMenuRef.current
+      if (el && !el.contains(e.target)) closeCoverContextMenuAnimated()
+    }
+    window.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onPointerDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onPointerDown, true)
+    }
+  }, [coverContextMenu, closeCoverContextMenuAnimated])
+
+  useEffect(() => {
+    if (!groupContextMenu) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeGroupContextMenuAnimated()
+    }
+    const onPointerDown = (e) => {
+      const el = groupContextMenuRef.current
+      if (el && !el.contains(e.target)) closeGroupContextMenuAnimated()
+    }
+    window.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onPointerDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onPointerDown, true)
+    }
+  }, [groupContextMenu, closeGroupContextMenuAnimated])
 
   useEffect(() => {
     if (!playlistLibraryMoreOpen) return
@@ -3655,6 +7421,53 @@ export default function App() {
       window.removeEventListener('keydown', onKey)
     }
   }, [playlistLibraryMoreOpen])
+
+  useEffect(() => {
+    if (!folderSortOpen) return
+    const onDocMouseDown = (e) => {
+      if (folderSortRef.current && !folderSortRef.current.contains(e.target)) {
+        setFolderSortOpen(false)
+      }
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') setFolderSortOpen(false)
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [folderSortOpen])
+
+  useEffect(() => {
+    if (!songSortOpen) return
+    const onDocMouseDown = (e) => {
+      if (songSortRef.current && !songSortRef.current.contains(e.target)) {
+        setSongSortOpen(false)
+      }
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') setSongSortOpen(false)
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [songSortOpen])
+
+  useEffect(() => {
+    if (!historyMenuOpen) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setHistoryMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [historyMenuOpen])
 
   const deleteUserPlaylist = useCallback(
     (id) => {
@@ -3678,15 +7491,81 @@ export default function App() {
     [userPlaylists, t]
   )
 
+  const libraryTrackByPath = useMemo(() => {
+    const next = Object.create(null)
+    for (const track of playlist) {
+      if (track?.path) next[track.path] = track
+    }
+    return next
+  }, [playlist])
+
+  const buildExportTrackFromPath = useCallback(
+    async (trackPath) => {
+      if (!trackPath || typeof trackPath !== 'string') return null
+      const existingTrack = libraryTrackByPath[trackPath]
+      const fallbackName = trackPath.split(/[/\\]/).pop() || trackPath
+      const baseTrack = existingTrack || { path: trackPath, name: fallbackName }
+      const info = parseTrackInfo(baseTrack, trackMetaMap[trackPath])
+      let sourceUrl =
+        typeof existingTrack?.sourceUrl === 'string' && existingTrack.sourceUrl.trim()
+          ? existingTrack.sourceUrl.trim()
+          : typeof existingTrack?.mvOriginUrl === 'string' && existingTrack.mvOriginUrl.trim()
+            ? existingTrack.mvOriginUrl.trim()
+            : ''
+
+      if (!sourceUrl && window.api?.readInfoJsonHandler) {
+        const infoJson = await window.api.readInfoJsonHandler(trackPath).catch(() => null)
+        const maybeUrl =
+          (typeof infoJson?.webpage_url === 'string' && infoJson.webpage_url.trim()) ||
+          (typeof infoJson?.original_url === 'string' && infoJson.original_url.trim()) ||
+          (typeof infoJson?.url === 'string' && /^https?:\/\//i.test(infoJson.url)
+            ? infoJson.url.trim()
+            : '')
+        if (maybeUrl) sourceUrl = maybeUrl
+      }
+
+      return {
+        path: trackPath,
+        title: info?.title || stripExtension(baseTrack.name || fallbackName) || fallbackName,
+        artist: info?.artist && info.artist !== 'Unknown Artist' ? info.artist : '',
+        ...(sourceUrl ? { sourceUrl } : {})
+      }
+    },
+    [libraryTrackByPath, trackMetaMap]
+  )
+
+  const buildPlaylistsExportJson = useCallback(
+    async (playlistsToExport) => {
+      const enrichedPlaylists = await Promise.all(
+        (playlistsToExport || []).map(async (playlistItem) => {
+          const paths = Array.isArray(playlistItem?.paths) ? playlistItem.paths : []
+          const tracks = (
+            await Promise.all(paths.map((trackPath) => buildExportTrackFromPath(trackPath)))
+          ).filter(Boolean)
+          return {
+            name: playlistItem?.name || 'Playlist',
+            paths,
+            tracks
+          }
+        })
+      )
+      return JSON.stringify(buildPlaylistsExportPayload(enrichedPlaylists), null, 2)
+    },
+    [buildExportTrackFromPath]
+  )
+
+  const exportNamedUserPlaylists = useCallback(
+    async (playlistsToExport, defaultName) => {
+      const json = await buildPlaylistsExportJson(playlistsToExport)
+      const r = await window.api.saveThemeJsonHandler(json, defaultName, configRef.current.uiLocale)
+      if (r && r.success === false && r.error) alert(r.error)
+    },
+    [buildPlaylistsExportJson]
+  )
+
   const exportUserPlaylists = useCallback(async () => {
-    const json = JSON.stringify(buildPlaylistsExportPayload(userPlaylists), null, 2)
-    const r = await window.api.saveThemeJsonHandler(
-      json,
-      'echoes-playlists.json',
-      configRef.current.uiLocale
-    )
-    if (r && r.success === false && r.error) alert(r.error)
-  }, [userPlaylists])
+    await exportNamedUserPlaylists(userPlaylists, 'echoes-playlists.json')
+  }, [exportNamedUserPlaylists, userPlaylists])
 
   const importUserPlaylists = useCallback(async () => {
     const r = await window.api.openThemeJsonHandler(configRef.current.uiLocale)
@@ -3825,9 +7704,7 @@ export default function App() {
 
   /** Full-bleed MV or custom wallpaper behind lyrics — need high-contrast chrome + lyric text */
   const brightLyricsBackdrop = useMemo(
-    () =>
-      Boolean(showLyrics) &&
-      ((config.mvAsBackground && mvId) || Boolean(config.customBgPath)),
+    () => Boolean(showLyrics) && ((config.mvAsBackground && mvId) || Boolean(config.customBgPath)),
     [showLyrics, config.mvAsBackground, mvId, config.customBgPath]
   )
 
@@ -3941,20 +7818,23 @@ export default function App() {
                 setBiliDirectStream(null)
               }}
             />
-            {biliDirectStream.format === 'dash' && biliDirectStream.audioUrl && !config.mvMuted && !isAudioExclusive && (
-              <audio
-                ref={biliAudioRef}
-                src={biliDirectStream.audioUrl}
-                autoPlay
-                loop
-                onLoadedMetadata={() => {
-                  const vEl = biliVideoRef.current || biliBackgroundVideoRef.current
-                  if (vEl && biliAudioRef.current) {
-                    biliAudioRef.current.currentTime = vEl.currentTime
-                  }
-                }}
-              />
-            )}
+            {biliDirectStream.format === 'dash' &&
+              biliDirectStream.audioUrl &&
+              !config.mvMuted &&
+              !isAudioExclusive && (
+                <audio
+                  ref={biliAudioRef}
+                  src={biliDirectStream.audioUrl}
+                  autoPlay
+                  loop
+                  onLoadedMetadata={() => {
+                    const vEl = biliVideoRef.current || biliBackgroundVideoRef.current
+                    if (vEl && biliAudioRef.current) {
+                      biliAudioRef.current.currentTime = vEl.currentTime
+                    }
+                  }}
+                />
+              )}
           </>
         )
       }
@@ -4074,72 +7954,80 @@ export default function App() {
 
   const handleListenTogetherRemoteState = useCallback(
     ({ roomState, memberId, force = false, syncOffsetMs = 0, forceSeekThresholdSec = 2 }) => {
-    setListenTogetherRoomState(roomState || null)
-    const playback = roomState?.playback
-    if (!playback?.streamUrl) return
-    const isHost = !!memberId && roomState?.hostId === memberId
-    if (isHost) return
-    // Keep UI metadata in sync for members even without local track objects.
-    setMetadata((prev) => ({
-      ...prev,
-      title: playback.title || prev.title || '',
-      artist: playback.artist || prev.artist || ''
-    }))
-    if (playback.syncCover && playback.coverUrl) {
-      setCoverUrl(playback.coverUrl)
-    }
-    if (playback.syncMv && playback.mvSync?.id) {
-      setMvId({ id: playback.mvSync.id, source: playback.mvSync.source || 'youtube' })
-    }
-    if (playback.syncLyrics && Array.isArray(playback.syncedLyrics) && playback.syncedLyrics.length) {
-      setLyrics(playback.syncedLyrics)
-      setLyricsMatchStatus('matched')
-    }
-    const streamUrl = playback.streamUrl
-    const trackId = (playback.trackId || '').trim()
-    const audio = audioRef.current
-    if (!audio) return
-    const syncState = listenTogetherSyncRef.current
-
-    if (syncState.trackId !== trackId || syncState.streamUrl !== streamUrl || audio.src !== streamUrl) {
-      syncState.trackId = trackId
-      syncState.streamUrl = streamUrl
-      syncState.isPlaying = null
-      syncState.lastSeekAt = 0
-      try {
-        audio.pause()
-      } catch {}
-      try {
-        audio.src = streamUrl
-        audio.load()
-      } catch {}
-    }
-
-    const expectedPos = Number(playback.positionSec || 0) + Number(syncOffsetMs || 0) / 1000
-    const now = Date.now()
-    if (Number.isFinite(expectedPos) && audio.readyState >= 1) {
-      const diff = Math.abs((audio.currentTime || 0) - expectedPos)
-      const seekThreshold = Math.max(0.5, Number(forceSeekThresholdSec || 2))
-      if ((force || diff > seekThreshold) && now - syncState.lastSeekAt > 1800) {
-        try {
-          audio.currentTime = Math.max(0, expectedPos)
-          syncState.lastSeekAt = now
-        } catch {}
+      setListenTogetherRoomState(roomState || null)
+      const playback = roomState?.playback
+      if (!playback?.streamUrl) return
+      const isHost = !!memberId && roomState?.hostId === memberId
+      if (isHost) return
+      // Keep UI metadata in sync for members even without local track objects.
+      setMetadata((prev) => ({
+        ...prev,
+        title: playback.title || prev.title || '',
+        artist: playback.artist || prev.artist || ''
+      }))
+      if (playback.syncCover && playback.coverUrl) {
+        setCoverUrl(playback.coverUrl)
       }
-    }
+      if (playback.syncMv && playback.mvSync?.id) {
+        setMvId({ id: playback.mvSync.id, source: playback.mvSync.source || 'youtube' })
+      }
+      if (
+        playback.syncLyrics &&
+        Array.isArray(playback.syncedLyrics) &&
+        playback.syncedLyrics.length
+      ) {
+        setLyrics(playback.syncedLyrics)
+        setLyricsMatchStatus('matched')
+      }
+      const streamUrl = playback.streamUrl
+      const trackId = (playback.trackId || '').trim()
+      const audio = audioRef.current
+      if (!audio) return
+      const syncState = listenTogetherSyncRef.current
 
-    if (playback.isPlaying !== syncState.isPlaying) {
-      syncState.isPlaying = !!playback.isPlaying
-      if (playback.isPlaying) {
-        audio.play().catch(() => {})
-        setIsPlaying(true)
-      } else {
+      if (
+        syncState.trackId !== trackId ||
+        syncState.streamUrl !== streamUrl ||
+        audio.src !== streamUrl
+      ) {
+        syncState.trackId = trackId
+        syncState.streamUrl = streamUrl
+        syncState.isPlaying = null
+        syncState.lastSeekAt = 0
         try {
           audio.pause()
         } catch {}
-        setIsPlaying(false)
+        try {
+          audio.src = streamUrl
+          audio.load()
+        } catch {}
       }
-    }
+
+      const expectedPos = Number(playback.positionSec || 0) + Number(syncOffsetMs || 0) / 1000
+      const now = Date.now()
+      if (Number.isFinite(expectedPos) && audio.readyState >= 1) {
+        const diff = Math.abs((audio.currentTime || 0) - expectedPos)
+        const seekThreshold = Math.max(0.5, Number(forceSeekThresholdSec || 2))
+        if ((force || diff > seekThreshold) && now - syncState.lastSeekAt > 1800) {
+          try {
+            audio.currentTime = Math.max(0, expectedPos)
+            syncState.lastSeekAt = now
+          } catch {}
+        }
+      }
+
+      if (playback.isPlaying !== syncState.isPlaying) {
+        syncState.isPlaying = !!playback.isPlaying
+        if (playback.isPlaying) {
+          audio.play().catch(() => {})
+          setIsPlaying(true)
+        } else {
+          try {
+            audio.pause()
+          } catch {}
+          setIsPlaying(false)
+        }
+      }
     },
     []
   )
@@ -4189,10 +8077,12 @@ export default function App() {
         return null
       }
     }
-
     ;(async () => {
       try {
         if (window.api?.openLyricsDesktop) await window.api.openLyricsDesktop()
+        if (window.api?.setLyricsDesktopLocked) {
+          await window.api.setLyricsDesktopLocked(configRef.current.desktopLyricsLocked === true)
+        }
       } catch (e) {
         console.error('[desktop lyrics open]', e)
       }
@@ -4207,6 +8097,13 @@ export default function App() {
     }
   }, [config.desktopLyricsEnabled])
 
+  useEffect(() => {
+    if (!config.desktopLyricsEnabled || !window.api?.setLyricsDesktopLocked) return
+    window.api.setLyricsDesktopLocked(config.desktopLyricsLocked === true).catch((e) => {
+      console.error('[desktop lyrics lock]', e)
+    })
+  }, [config.desktopLyricsEnabled, config.desktopLyricsLocked])
+
   return (
     <div
       className="app-container"
@@ -4215,7 +8112,7 @@ export default function App() {
       onDrop={handleDrop}
     >
       <div className="app-theme-backdrop" style={themeBackdropStyle} aria-hidden />
-      {config.customBgPath && (
+      {config.customBgPath && !config.themeCoverAsBackground && (
         <div
           style={{
             position: 'fixed',
@@ -4232,7 +8129,50 @@ export default function App() {
           }}
         />
       )}
-      {mvId && config.mvAsBackground && showLyrics && (
+      {config.themeCoverAsBackground && displayMainCoverUrl && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundImage: `url("${displayMainCoverUrl.replace(/\\/g, '/')}")`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            filter: 'blur(20px)',
+            transform: 'scale(1.1)',
+            opacity: config.customBgOpacity !== undefined ? config.customBgOpacity : 1.0,
+            zIndex: -2,
+            pointerEvents: 'none'
+          }}
+        />
+      )}
+      {config.lyricsFluidBackground !== false && showLyrics && dynamicCoverTheme && (
+        <div
+          className="fluid-background"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            zIndex: -1,
+            pointerEvents: 'none',
+            background: `
+              radial-gradient(circle at 0% 0%, ${dynamicCoverTheme.accent1} 0%, transparent 60%),
+              radial-gradient(circle at 100% 100%, ${dynamicCoverTheme.accent2} 0%, transparent 60%),
+              radial-gradient(circle at 50% 50%, ${dynamicCoverTheme.bgColor} 0%, transparent 100%)
+            `,
+            mixBlendMode: config.themeCoverAsBackground || config.customBgPath ? 'color' : 'normal',
+            opacity: 0.85,
+            filter: 'blur(40px)',
+            animation: 'fluidPan 20s ease-in-out infinite alternate',
+            transform: 'scale(1.2)'
+          }}
+        />
+      )}
+      {mvId && (showLyrics ? config.mvAsBackground : config.mvAsBackgroundMain) && (
         <div
           style={{
             position: 'fixed',
@@ -4303,6 +8243,33 @@ export default function App() {
           </button>
           <button
             className="no-drag"
+            type="button"
+            aria-expanded={historyMenuOpen}
+            aria-haspopup="dialog"
+            onClick={() => setHistoryMenuOpen((open) => !open)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: historyMenuOpen ? 'var(--accent-pink)' : 'inherit',
+              cursor: 'pointer',
+              padding: '6px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.color = 'var(--accent-pink)'
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.color = historyMenuOpen ? 'var(--accent-pink)' : 'inherit'
+            }}
+            title={t('player.playbackHistory', 'Playback history')}
+          >
+            <History size={18} />
+          </button>
+          <button
+            className="no-drag"
             onClick={() => setDownloaderDrawerOpen((o) => !o)}
             style={{
               background: 'none',
@@ -4344,7 +8311,9 @@ export default function App() {
               e.currentTarget.style.color = 'var(--accent-pink)'
             }}
             onMouseOut={(e) => {
-              e.currentTarget.style.color = audioSettingsDrawerOpen ? 'var(--accent-pink)' : 'inherit'
+              e.currentTarget.style.color = audioSettingsDrawerOpen
+                ? 'var(--accent-pink)'
+                : 'inherit'
             }}
             title={t('titlebar.audioSettings', 'Audio Settings')}
           >
@@ -4535,7 +8504,13 @@ export default function App() {
           </button>
           <button
             className="no-drag"
-            onClick={() => window.api.closeAppHandler()}
+            onClick={async () => {
+              if (config.closeButtonBehavior === 'tray' && window.api?.hideToTrayHandler) {
+                await window.api.hideToTrayHandler()
+                return
+              }
+              window.api.closeAppHandler()
+            }}
             style={{
               background: 'none',
               border: 'none',
@@ -4608,7 +8583,7 @@ export default function App() {
         </div>
 
         <div
-          className={`sidebar-list-stack${listMode === 'playlists' && selectedUserPlaylistId ? ' sidebar-list-stack--pl-detail' : ''}`}
+          className={`sidebar-list-stack${listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId) ? ' sidebar-list-stack--pl-detail' : ''}`}
         >
           <div className="list-filter-bar no-drag">
             <button
@@ -4634,16 +8609,18 @@ export default function App() {
             </button>
             <button
               type="button"
-              className={`list-filter-chip ${showLikedOnly ? 'active' : ''}`}
+              className={`list-filter-chip ${listMode === 'folders' ? 'active' : ''}`}
+              onClick={() => handleListMode('folders')}
+            >
+              {t('listMode.folders')}
+            </button>
+            <button
+              type="button"
+              className={`list-filter-chip list-filter-chip--icon-only ${showLikedOnly ? 'active' : ''}`}
               onClick={() => setShowLikedOnly((v) => !v)}
               title={t('like.filterOnlyTitle')}
             >
-              <Heart
-                size={13}
-                strokeWidth={1.5}
-                style={{ verticalAlign: 'middle', marginRight: 4 }}
-              />
-              {t('like.filterOnly')}
+              <Heart size={13} strokeWidth={1.5} />
             </button>
           </div>
           <div
@@ -4704,12 +8681,152 @@ export default function App() {
           {selectedAlbum !== 'all' && listMode === 'songs' && (
             <div className="album-filter-pill no-drag">
               <span>{t('albumFilter.label', { name: selectedAlbum })}</span>
-              <button onClick={() => setSelectedAlbum('all')}>{t('albumFilter.clear')}</button>
+              <button onClick={handleBackToAlbumOverview}>{t('albumFilter.clear')}</button>
+            </div>
+          )}
+
+          {selectedFolder !== 'all' && listMode === 'folders' && (
+            <div className="album-filter-pill no-drag">
+              <span>{t('folderFilter.label', { name: selectedFolder.split('/').pop() })}</span>
+              <button onClick={() => setSelectedFolder('all')}>{t('folderFilter.clear')}</button>
+            </div>
+          )}
+
+          {playlist.length > 0 && listMode === 'folders' && selectedFolder === 'all' && (
+            <div className="folder-browser-header no-drag" style={{ margin: '0 12px 8px' }}>
+              <span className="folder-browser-title">{t('folders.heading')}</span>
+              <span className="folder-browser-count">({folderGroupsFiltered.length})</span>
+              <div className="folder-sort-wrap" ref={folderSortRef}>
+                <button
+                  type="button"
+                  className="folder-sort-trigger"
+                  onClick={() => setFolderSortOpen((v) => !v)}
+                  aria-expanded={folderSortOpen}
+                >
+                  {folderSortMode === 'dateAsc'
+                    ? t('folders.sortDateAsc')
+                    : folderSortMode === 'dateDesc'
+                      ? t('folders.sortDateDesc')
+                      : t('folders.sortName')}
+                  <ChevronDown size={12} style={{ marginLeft: 2, opacity: 0.6 }} />
+                </button>
+                {folderSortOpen && (
+                  <div className="folder-sort-menu" role="menu">
+                    {[
+                      { key: 'default', label: t('folders.sortName') },
+                      { key: 'dateAsc', label: t('folders.sortDateAsc') },
+                      { key: 'dateDesc', label: t('folders.sortDateDesc') }
+                    ].map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        role="menuitem"
+                        className={`folder-sort-menu-item${folderSortMode === opt.key ? ' active' : ''}`}
+                        onClick={() => {
+                          setFolderSortMode(opt.key)
+                          setFolderSortOpen(false)
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {(listMode === 'songs' || (listMode === 'folders' && selectedFolder !== 'all') || (listMode === 'album' && selectedAlbum !== 'all')) && (
+            <div className="folder-browser-header no-drag" style={{ margin: '0 12px 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flex: 1, gap: '8px' }}>
+                {listMode === 'album' && selectedAlbum !== 'all' && (
+                  <button
+                    type="button"
+                    className="user-playlist-detail-back"
+                    onClick={handleBackToAlbumOverview}
+                    aria-label={t('nav.back')}
+                    title={t('nav.back')}
+                    style={{ marginRight: 4 }}
+                  >
+                    <ChevronLeft size={20} strokeWidth={1.5} />
+                  </button>
+                )}
+                <span className="folder-browser-title">
+                  {listMode === 'folders' && selectedFolder !== 'all'
+                    ? selectedFolder.split(/[\\/]/).pop() || t('folders.heading')
+                    : listMode === 'album' && selectedAlbum !== 'all'
+                      ? selectedAlbum
+                      : t('songs.heading', 'Songs')}
+                </span>
+              </div>
+              <div className="folder-sort-wrap" ref={songSortRef}>
+                <button
+                  type="button"
+                  className="folder-sort-trigger"
+                  onClick={() => setSongSortOpen((v) => !v)}
+                  aria-expanded={songSortOpen}
+                >
+                  {songSortMode === 'dateAsc'
+                    ? t('songs.sortDateAsc', 'Oldest added')
+                    : songSortMode === 'dateDesc'
+                      ? t('songs.sortDateDesc', 'Newest added')
+                      : songSortMode === 'nameAsc'
+                        ? t('songs.sortNameAsc', 'Name (A-Z)')
+                        : songSortMode === 'nameDesc'
+                          ? t('songs.sortNameDesc', 'Name (Z-A)')
+                          : songSortMode === 'durationAsc'
+                            ? t('songs.sortDurationAsc', 'Duration (Short)')
+                            : songSortMode === 'durationDesc'
+                              ? t('songs.sortDurationDesc', 'Duration (Long)')
+                              : songSortMode === 'qualityAsc'
+                                ? t('songs.sortQualityAsc', 'Quality (Low)')
+                                : songSortMode === 'qualityDesc'
+                                  ? t('songs.sortQualityDesc', 'Quality (High)')
+                                  : t('songs.sortDefault', 'Default')}
+                  <ChevronDown size={14} aria-hidden strokeWidth={1.5} />
+                </button>
+                {songSortOpen && (
+                  <div className="folder-sort-menu" role="menu">
+                    {[
+                      { key: 'default', label: t('songs.sortDefault', 'Default') },
+                      { key: 'dateAsc', label: t('songs.sortDateAsc', 'Oldest added') },
+                      { key: 'dateDesc', label: t('songs.sortDateDesc', 'Newest added') },
+                      { key: 'nameAsc', label: t('songs.sortNameAsc', 'Name (A-Z)') },
+                      { key: 'nameDesc', label: t('songs.sortNameDesc', 'Name (Z-A)') },
+                      { key: 'durationAsc', label: t('songs.sortDurationAsc', 'Duration (Short)') },
+                      {
+                        key: 'durationDesc',
+                        label: t('songs.sortDurationDesc', 'Duration (Long)')
+                      },
+                      { key: 'qualityAsc', label: t('songs.sortQualityAsc', 'Quality (Low)') },
+                      { key: 'qualityDesc', label: t('songs.sortQualityDesc', 'Quality (High)') }
+                    ].map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        role="menuitem"
+                        className={`folder-sort-menu-item${songSortMode === opt.key ? ' active' : ''}`}
+                        onClick={() => {
+                          setSongSortMode(opt.key)
+                          setSongSortOpen(false)
+                        }}
+                      >
+                        <div className="folder-sort-chk">
+                          {songSortMode === opt.key && <Check size={14} strokeWidth={2} />}
+                        </div>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
           <div
-            className={`playlist${listMode === 'album' ? ' playlist-album-mode' : ''}${listMode === 'playlists' && selectedUserPlaylistId ? ' playlist--pl-detail' : ''}`}
+            className={`playlist${listMode === 'album' ? ' playlist-album-mode' : ''}${listMode === 'folders' ? ' playlist-album-mode' : ''}${listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId) ? ' playlist--pl-detail' : ''}`}
+            ref={sidebarPlaylistRef}
+            onScroll={handleSidebarScroll}
           >
             {playlist.length === 0 && listMode !== 'playlists' && (
               <div className="app-empty-state app-empty-state--minimal">
@@ -4718,8 +8835,296 @@ export default function App() {
               </div>
             )}
 
-            {listMode === 'playlists' && !selectedUserPlaylistId && (
+            {listMode === 'playlists' && !selectedUserPlaylistId && !selectedSmartCollectionId && (
               <div className="user-playlist-library no-drag">
+                <div className="user-playlist-library-chrome" style={{ marginBottom: 14 }}>
+                  <div className="user-playlist-library-header">
+                    <span className="user-playlist-library-heading">
+                      {t('playlists.smartCollections', 'Smart collections')}
+                    </span>
+                    <span className="user-playlist-library-count">{smartCollections.length}</span>
+                    <button
+                      type="button"
+                      className="user-playlist-detail-btn"
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() =>
+                        smartCollectionEditorOpen && !editingSmartCollectionId
+                          ? resetSmartCollectionEditor()
+                          : openCreateSmartCollectionEditor()
+                      }
+                    >
+                      <Wand2 size={14} aria-hidden />
+                      {smartCollectionEditorOpen && !editingSmartCollectionId
+                        ? t('common.cancel', { defaultValue: 'Cancel' })
+                        : t('playlists.customSmartCollection', 'Custom rules')}
+                    </button>
+                  </div>
+                  <p className="smart-collection-hint">
+                    {t(
+                      'playlists.smartCollectionsHint',
+                      'Tap a template to create it instantly, or open custom rules if you want something more specific.'
+                    )}
+                  </p>
+                  <div className="smart-collection-template-row">
+                    {smartCollectionTemplates.map((template) => (
+                      <button
+                        key={template.id}
+                        type="button"
+                        className="smart-collection-template-chip"
+                        onClick={() => applySmartCollectionTemplate(template.buildDraft)}
+                      >
+                        {template.label}
+                      </button>
+                    ))}
+                  </div>
+                  {smartCollectionEditorOpen && (
+                    <div className="smart-collection-editor">
+                      <div className="smart-collection-preview">
+                        {describeSmartCollectionDraft(smartCollectionDraft)}
+                      </div>
+                      <div className="smart-collection-editor-grid">
+                        <label className="smart-collection-field">
+                          <span className="smart-collection-field-label">
+                            {t('playlists.smartCollectionName', 'Name')}
+                          </span>
+                          <input
+                            type="text"
+                            className="new-playlist-input"
+                            placeholder={t(
+                              'playlists.smartCollectionNamePlaceholder',
+                              'Late-night favorites'
+                            )}
+                            value={smartCollectionDraft.name}
+                            onChange={(e) =>
+                              updateSmartCollectionDraftField('name', e.target.value)
+                            }
+                          />
+                        </label>
+                        <label className="smart-collection-field">
+                          <span className="smart-collection-field-label">
+                            {t('playlists.smartMatchMode', 'Match')}
+                          </span>
+                          <select
+                            className="new-playlist-input smart-collection-select"
+                            value={smartCollectionDraft.matchMode}
+                            onChange={(e) =>
+                              updateSmartCollectionDraftField('matchMode', e.target.value)
+                            }
+                          >
+                            <option value="all">{t('playlists.smartMatchAll', 'All rules')}</option>
+                            <option value="any">{t('playlists.smartMatchAny', 'Any rule')}</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="smart-collection-natural-list">
+                        <label className="smart-collection-natural-row">
+                          <input
+                            type="checkbox"
+                            checked={smartCollectionDraft.likedOnly}
+                            onChange={(e) =>
+                              updateSmartCollectionDraftField('likedOnly', e.target.checked)
+                            }
+                          />
+                          <span>
+                            {t('playlists.smartNaturalLikedOnly', 'Only include liked songs')}
+                          </span>
+                        </label>
+                        <label className="smart-collection-natural-row">
+                          <span>
+                            {t(
+                              'playlists.smartNaturalMinPlayPrefix',
+                              'Include songs played at least'
+                            )}
+                          </span>
+                          <input
+                            type="number"
+                            min="1"
+                            className="smart-collection-inline-input"
+                            placeholder="5"
+                            value={smartCollectionDraft.minPlayCount}
+                            onChange={(e) =>
+                              updateSmartCollectionDraftField('minPlayCount', e.target.value)
+                            }
+                          />
+                          <span>{t('playlists.smartNaturalMinPlaySuffix', 'times')}</span>
+                        </label>
+                        <label className="smart-collection-natural-row">
+                          <span>
+                            {t(
+                              'playlists.smartNaturalPlayedPrefix',
+                              'Include songs played in the last'
+                            )}
+                          </span>
+                          <input
+                            type="number"
+                            min="1"
+                            className="smart-collection-inline-input"
+                            placeholder="30"
+                            value={smartCollectionDraft.playedWithinDays}
+                            onChange={(e) =>
+                              updateSmartCollectionDraftField('playedWithinDays', e.target.value)
+                            }
+                          />
+                          <span>{t('playlists.smartNaturalDaysSuffix', 'days')}</span>
+                        </label>
+                        <label className="smart-collection-natural-row">
+                          <span>
+                            {t(
+                              'playlists.smartNaturalAddedPrefix',
+                              'Include songs added in the last'
+                            )}
+                          </span>
+                          <input
+                            type="number"
+                            min="1"
+                            className="smart-collection-inline-input"
+                            placeholder="14"
+                            value={smartCollectionDraft.addedWithinDays}
+                            onChange={(e) =>
+                              updateSmartCollectionDraftField('addedWithinDays', e.target.value)
+                            }
+                          />
+                          <span>{t('playlists.smartNaturalDaysSuffix', 'days')}</span>
+                        </label>
+                        <label className="smart-collection-natural-row">
+                          <span>
+                            {t(
+                              'playlists.smartNaturalTitlePrefix',
+                              'Include songs whose title contains'
+                            )}
+                          </span>
+                          <input
+                            type="text"
+                            className="smart-collection-inline-input smart-collection-inline-input--text"
+                            placeholder={t('playlists.smartTitleContainsPlaceholder', 'night')}
+                            value={smartCollectionDraft.titleIncludes}
+                            onChange={(e) =>
+                              updateSmartCollectionDraftField('titleIncludes', e.target.value)
+                            }
+                          />
+                        </label>
+                        <label className="smart-collection-natural-row">
+                          <span>
+                            {t(
+                              'playlists.smartNaturalArtistPrefix',
+                              'Include songs whose artist contains'
+                            )}
+                          </span>
+                          <input
+                            type="text"
+                            className="smart-collection-inline-input smart-collection-inline-input--text"
+                            placeholder="Aimer"
+                            value={smartCollectionDraft.artistIncludes}
+                            onChange={(e) =>
+                              updateSmartCollectionDraftField('artistIncludes', e.target.value)
+                            }
+                          />
+                        </label>
+                        <label className="smart-collection-natural-row">
+                          <span>
+                            {t(
+                              'playlists.smartNaturalAlbumPrefix',
+                              'Include songs whose album contains'
+                            )}
+                          </span>
+                          <input
+                            type="text"
+                            className="smart-collection-inline-input smart-collection-inline-input--text"
+                            placeholder={t('playlists.smartAlbumContainsPlaceholder', 'live')}
+                            value={smartCollectionDraft.albumIncludes}
+                            onChange={(e) =>
+                              updateSmartCollectionDraftField('albumIncludes', e.target.value)
+                            }
+                          />
+                        </label>
+                      </div>
+                      <div className="smart-collection-editor-actions">
+                        <button
+                          type="button"
+                          className="user-playlist-detail-btn user-playlist-detail-btn--primary"
+                          onClick={saveSmartCollectionDraft}
+                        >
+                          <Check size={14} aria-hidden />
+                          {editingSmartCollectionId
+                            ? t('common.save', { defaultValue: 'Save' })
+                            : t('playlists.createSmartCollection', 'Create smart collection')}
+                        </button>
+                        <button
+                          type="button"
+                          className="user-playlist-detail-btn"
+                          onClick={resetSmartCollectionEditor}
+                        >
+                          <X size={14} aria-hidden />
+                          {t('common.cancel', { defaultValue: 'Cancel' })}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="user-playlist-list" style={{ marginBottom: 18 }}>
+                  {smartCollections.map((collection) => {
+                    const Icon = collection.icon
+                    const isActive =
+                      listMode === 'playlists' && selectedSmartCollectionId === collection.id
+                    return (
+                      <div
+                        key={collection.id}
+                        className={`user-playlist-card${isActive ? ' user-playlist-card--active' : ''}`}
+                      >
+                        <button
+                          type="button"
+                          className="user-playlist-card-main"
+                          onClick={() => openSmartCollection(collection.id)}
+                        >
+                          <Icon size={16} className="user-playlist-card-icon" aria-hidden />
+                          <span className="user-playlist-name">{collection.name}</span>
+                          <span className="user-playlist-count">
+                            {t('playlists.detailTrackCount', {
+                              count: collection.tracks.length
+                            })}
+                          </span>
+                        </button>
+                        {collection.kind === 'custom' && (
+                          <div className="user-playlist-card-actions">
+                            <button
+                              type="button"
+                              className="user-playlist-card-icon-btn"
+                              aria-label={t(
+                                'playlists.editSmartCollection',
+                                'Edit smart collection'
+                              )}
+                              title={t('playlists.editSmartCollection', 'Edit smart collection')}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openEditSmartCollectionEditor(collection.id)
+                              }}
+                            >
+                              <Pencil size={15} strokeWidth={1.5} />
+                            </button>
+                            <button
+                              type="button"
+                              className="user-playlist-card-icon-btn"
+                              aria-label={t(
+                                'playlists.deleteSmartCollection',
+                                'Delete smart collection'
+                              )}
+                              title={t(
+                                'playlists.deleteSmartCollection',
+                                'Delete smart collection'
+                              )}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                deleteSmartCollection(collection.id)
+                              }}
+                            >
+                              <Trash2 size={15} strokeWidth={1.5} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
                 <div className="user-playlist-library-chrome">
                   <div className="user-playlist-library-header">
                     <span className="user-playlist-library-heading">
@@ -4796,11 +9201,17 @@ export default function App() {
                 ) : (
                   <div className="user-playlist-list">
                     {userPlaylists.map((pl) => (
-                      <div key={pl.id} className="user-playlist-card">
+                      <div
+                        key={pl.id}
+                        className={`user-playlist-card${listMode === 'playlists' && selectedUserPlaylistId === pl.id ? ' user-playlist-card--active' : ''}`}
+                      >
                         <button
                           type="button"
                           className="user-playlist-card-main"
-                          onClick={() => setSelectedUserPlaylistId(pl.id)}
+                          onClick={() => {
+                            setSelectedSmartCollectionId(null)
+                            setSelectedUserPlaylistId(pl.id)
+                          }}
                         >
                           <ListMusic size={16} className="user-playlist-card-icon" aria-hidden />
                           <span className="user-playlist-name">{pl.name}</span>
@@ -4843,27 +9254,207 @@ export default function App() {
               </div>
             )}
 
-            {playlist.length > 0 && listMode === 'album' && (
+            {playlist.length > 0 && listMode === 'album' && selectedAlbum === 'all' && (
               <div className="album-browser no-drag">
                 <div className="album-browser-header">
-                  <h3>{t('playlists.albumsHeading')}</h3>
-                  <span>{t('playlists.groups', { count: albumGroupsFiltered.length })}</span>
+                  <div style={{ flex: 1 }}>
+                    <h3>{t('playlists.albumsHeading')}</h3>
+                    <span>{t('playlists.groups', { count: albumGroupsFiltered.length })}</span>
+                  </div>
+                  <div className="folder-sort-wrap" ref={albumSortRef}>
+                    <button
+                      type="button"
+                      className="folder-sort-trigger"
+                      onClick={() => setAlbumSortOpen((v) => !v)}
+                      aria-expanded={albumSortOpen}
+                    >
+                      {albumSortMode === 'dateAsc'
+                        ? t('folders.sortDateAsc')
+                        : albumSortMode === 'dateDesc'
+                          ? t('folders.sortDateDesc')
+                          : albumSortMode === 'nameDesc'
+                            ? t('songs.sortNameDesc', 'Name (Z-A)')
+                            : albumSortMode === 'artistAsc'
+                              ? t('songs.sortArtistAsc', 'Artist (A-Z)')
+                              : albumSortMode === 'artistDesc'
+                                ? t('songs.sortArtistDesc', 'Artist (Z-A)')
+                                : albumSortMode === 'tracksAsc'
+                                  ? t('playlists.sortTracksAsc', 'Track count (Low)')
+                                  : albumSortMode === 'tracksDesc'
+                                    ? t('playlists.sortTracksDesc', 'Track count (High)')
+                                    : t('songs.sortNameAsc', 'Name (A-Z)')}
+                      <ChevronDown size={12} style={{ marginLeft: 2, opacity: 0.6 }} />
+                    </button>
+                    {albumSortOpen && (
+                      <div className="folder-sort-menu" role="menu">
+                        {[
+                        { key: 'default', label: t('songs.sortNameAsc', 'Name (A-Z)') },
+                        { key: 'nameDesc', label: t('songs.sortNameDesc', 'Name (Z-A)') },
+                        { key: 'artistAsc', label: t('songs.sortArtistAsc', 'Artist (A-Z)') },
+                        { key: 'artistDesc', label: t('songs.sortArtistDesc', 'Artist (Z-A)') },
+                        { key: 'tracksAsc', label: t('playlists.sortTracksAsc', 'Track count (Low)') },
+                        {
+                          key: 'tracksDesc',
+                          label: t('playlists.sortTracksDesc', 'Track count (High)')
+                        },
+                        { key: 'dateAsc', label: t('folders.sortDateAsc') },
+                        { key: 'dateDesc', label: t('folders.sortDateDesc') }
+                        ].map((opt) => (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            role="menuitem"
+                            className={`folder-sort-menu-item${albumSortMode === opt.key ? ' active' : ''}`}
+                            onClick={() => {
+                              setAlbumSortMode(opt.key)
+                              setAlbumSortOpen(false)
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="album-grid album-grid-deferred">
-                  {albumGroupsFiltered.map((album) => (
+                <div
+                  ref={setAlbumGridElement}
+                  className="album-grid album-grid-deferred"
+                  style={{
+                    paddingTop: visibleAlbumRange.topSpacer,
+                    paddingBottom: visibleAlbumRange.bottomSpacer
+                  }}
+                >
+                  {visibleAlbumGroups.map((album) => (
                     <AlbumSidebarCard
                       key={album.name}
                       album={album}
                       isSelected={selectedAlbum === album.name}
                       onPickAlbum={handlePickAlbumFromSidebar}
+                      onContextMenu={(e, pickedAlbum) =>
+                        openGroupContextMenu(e, 'album', pickedAlbum)
+                      }
                     />
                   ))}
                 </div>
               </div>
             )}
 
+            {playlist.length > 0 && listMode === 'folders' && selectedFolder === 'all' && (
+              <div className="folder-browser no-drag">
+                <div className="folder-list">
+                  {folderGroupsFiltered.map((folder) => (
+                    <button
+                      key={folder.folderPath}
+                      type="button"
+                      className={`folder-list-item${selectedFolder === folder.folderPath ? ' active' : ''}`}
+                      onClick={() => handlePickFolderFromSidebar(folder)}
+                      onContextMenu={(e) => openGroupContextMenu(e, 'folder', folder)}
+                      title={folder.folderPath}
+                    >
+                      <FolderOpen size={15} className="folder-list-icon" />
+                      <span className="folder-list-name">{folder.name}</span>
+                      <span className="folder-list-count">{folder.tracks.length}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {listMode === 'playlists' && selectedSmartCollectionId && selectedSmartCollection && (
+              <div
+                key={`smart-${selectedSmartCollectionId}`}
+                className="user-playlist-detail no-drag"
+              >
+                <div className="user-playlist-detail-head">
+                  <button
+                    type="button"
+                    className="user-playlist-detail-back"
+                    onClick={() => setSelectedSmartCollectionId(null)}
+                    aria-label={t('aria.backToPlaylists')}
+                    title={t('nav.back')}
+                  >
+                    <ChevronLeft size={20} strokeWidth={1.5} />
+                  </button>
+                  <div className="user-playlist-detail-text">
+                    <span
+                      className="user-playlist-detail-name"
+                      title={selectedSmartCollection.name}
+                    >
+                      {selectedSmartCollection.name}
+                    </span>
+                    <span className="user-playlist-detail-meta">
+                      {t('playlists.detailTrackCount', {
+                        count: selectedSmartCollection.tracks.length
+                      })}
+                    </span>
+                    {selectedSmartCollection.kind === 'custom' && (
+                      <div className="smart-collection-rule-list">
+                        {describeSmartCollectionRules(selectedSmartCollection.rules).map((item) => (
+                          <span key={item} className="smart-collection-rule-chip">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="user-playlist-detail-actions">
+                  <button
+                    type="button"
+                    className="user-playlist-detail-btn user-playlist-detail-btn--primary"
+                    onClick={() => playPlaylistContextNow()}
+                  >
+                    <Play size={14} aria-hidden />
+                    {t('playlists.playAll', { defaultValue: 'Play all' })}
+                  </button>
+                  <button
+                    type="button"
+                    className="user-playlist-detail-btn"
+                    onClick={() => playPlaylistContextNow({ shuffle: true })}
+                  >
+                    <Shuffle size={14} aria-hidden />
+                    {t('playlists.shufflePlay', { defaultValue: 'Shuffle' })}
+                  </button>
+                  {selectedSmartCollection.kind === 'custom' ? (
+                    <>
+                      <button
+                        type="button"
+                        className="user-playlist-detail-btn"
+                        onClick={() => openEditSmartCollectionEditor(selectedSmartCollection.id)}
+                      >
+                        <Pencil size={14} aria-hidden />
+                        {t('playlists.editSmartCollection', 'Edit smart collection')}
+                      </button>
+                      <button
+                        type="button"
+                        className="user-playlist-detail-btn"
+                        onClick={() => deleteSmartCollection(selectedSmartCollection.id)}
+                      >
+                        <Trash2 size={14} aria-hidden />
+                        {t('playlists.deleteSmartCollection', 'Delete smart collection')}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="user-playlist-detail-btn"
+                      disabled
+                      style={{ opacity: 0.65 }}
+                    >
+                      <History size={14} aria-hidden />
+                      {t('playlists.readonlyCollection', 'Read only')}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {listMode === 'playlists' && selectedUserPlaylistId && selectedUserPlaylist && (
-              <div className="user-playlist-detail no-drag">
+              <div
+                key={`playlist-${selectedUserPlaylistId}`}
+                className="user-playlist-detail no-drag"
+              >
                 <div className="user-playlist-detail-head">
                   <button
                     type="button"
@@ -4886,6 +9477,22 @@ export default function App() {
                   </div>
                 </div>
                 <div className="user-playlist-detail-actions">
+                  <button
+                    type="button"
+                    className="user-playlist-detail-btn user-playlist-detail-btn--primary"
+                    onClick={() => playPlaylistContextNow()}
+                  >
+                    <Play size={14} aria-hidden />
+                    {t('playlists.playAll', { defaultValue: 'Play all' })}
+                  </button>
+                  <button
+                    type="button"
+                    className="user-playlist-detail-btn"
+                    onClick={() => playPlaylistContextNow({ shuffle: true })}
+                  >
+                    <Shuffle size={14} aria-hidden />
+                    {t('playlists.shufflePlay', { defaultValue: 'Shuffle' })}
+                  </button>
                   {playlist.length > 0 && (
                     <button
                       type="button"
@@ -4910,17 +9517,10 @@ export default function App() {
                     type="button"
                     className="user-playlist-detail-btn"
                     onClick={async () => {
-                      const json = JSON.stringify(
-                        buildPlaylistsExportPayload([selectedUserPlaylist]),
-                        null,
-                        2
+                      await exportNamedUserPlaylists(
+                        [selectedUserPlaylist],
+                        `${selectedUserPlaylist.name.replace(/[^\w.-]+/g, '_')}.json`
                       )
-                      const r = await window.api.saveThemeJsonHandler(
-                        json,
-                        `${selectedUserPlaylist.name.replace(/[^\w.-]+/g, '_')}.json`,
-                        configRef.current.uiLocale
-                      )
-                      if (r && r.success === false && r.error) alert(r.error)
                     }}
                   >
                     <Download size={14} aria-hidden />
@@ -4930,7 +9530,11 @@ export default function App() {
               </div>
             )}
 
-            {(listMode === 'songs' || (listMode === 'playlists' && selectedUserPlaylistId)) && (
+            {(listMode === 'songs' ||
+              (listMode === 'folders' && selectedFolder !== 'all') ||
+              (listMode === 'album' && selectedAlbum !== 'all') ||
+              (listMode === 'playlists' &&
+                (selectedUserPlaylistId || selectedSmartCollectionId))) && (
               <>
                 {tracksForSidebarListFiltered.length === 0 && (
                   <div className="app-empty-state app-empty-state--minimal sidebar-empty-hint">
@@ -4938,102 +9542,137 @@ export default function App() {
                       {showLikedOnly
                         ? t('empty.noLikedInView')
                         : listMode === 'playlists'
-                          ? t('empty.playlistEmpty')
+                          ? t(
+                              selectedSmartCollectionId
+                                ? 'empty.smartCollectionEmpty'
+                                : 'empty.playlistEmpty',
+                              selectedSmartCollectionId
+                                ? 'No tracks in this collection yet.'
+                                : undefined
+                            )
                           : t('empty.noSearchMatch')}
                     </p>
                   </div>
                 )}
-                {tracksForSidebarListFiltered.map((track) => {
-                  const displayArtist =
-                    track.info.artist === 'Unknown Artist'
-                      ? albumArtistByName[track.info.album] || track.info.artist
-                      : track.info.artist
+                {tracksForSidebarListFiltered.length > 0 && (
+                  <div
+                    key={listMode === 'album' && selectedAlbum !== 'all' ? selectedAlbum : 'sidebar-list'}
+                    className={`playlist-virtual-list${listMode === 'album' && selectedAlbum !== 'all' ? ' playlist-virtual-list--album-enter' : ''}`}
+                  >
+                    {visibleSidebarRange.topSpacer > 0 && (
+                      <div
+                        className="playlist-spacer"
+                        style={{ height: `${visibleSidebarRange.topSpacer}px` }}
+                        aria-hidden
+                      />
+                    )}
+                    {visibleSidebarTracks.map((track) => {
+                      const displayArtist =
+                        track.info.artist === 'Unknown Artist'
+                          ? albumArtistByName[track.info.album] || track.info.artist
+                          : track.info.artist
 
-                  const liked = likedSet.has(track.path)
-                  return (
-                    <div
-                      key={`${track.path}-${track.originalIdx}`}
-                      className={`track-item${track.originalIdx === currentIndex ? ' active' : ''}${listMode === 'playlists' && selectedUserPlaylistId ? ' track-item--in-pl' : ''}`}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.effectAllowed = 'copy'
-                        e.dataTransfer.setData('application/x-echo-track-path', track.path)
-                        e.dataTransfer.setData('text/plain', track.path)
-                      }}
-                      onClick={() => {
-                        setCurrentIndex(track.originalIdx)
-                        setIsPlaying(true)
-                      }}
-                      onContextMenu={(e) => {
-                        e.preventDefault()
-                        forceCloseAddToPlaylistMenu()
-                        setTrackContextMenu({ clientX: e.clientX, clientY: e.clientY, track })
-                      }}
-                    >
-                      <Music size={16} style={{ marginRight: 8, opacity: 0.5 }} />
-                      <div className="track-text-group">
-                        <div className="track-name" title={track.info.title}>
-                          {track.info.title}
-                        </div>
+                      const liked = likedSet.has(track.path)
+                      return (
                         <div
-                          className="track-subtitle"
-                          title={`${displayArtist} · ${track.info.album}`}
+                          key={`${track.path}-${track.originalIdx}`}
+                          className={`track-item${track.originalIdx === currentIndex ? ' active' : ''}${listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId) ? ' track-item--in-pl' : ''}`}
+                          data-track-index={track.originalIdx}
+                          data-track-path={track.path}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = 'copy'
+                            e.dataTransfer.setData('application/x-echo-track-path', track.path)
+                            e.dataTransfer.setData('text/plain', track.path)
+                          }}
+                          onClick={() => {
+                            startPlaybackForTrack(track, sidebarPlaybackContext)
+                          }}
+                          onContextMenu={(e) => {
+                            e.preventDefault()
+                            forceCloseCoverContextMenu()
+                            forceCloseGroupContextMenu()
+                            forceCloseAddToPlaylistMenu()
+                            setTrackContextMenu({ clientX: e.clientX, clientY: e.clientY, track })
+                          }}
                         >
-                          <ArtistLink
-                            artist={displayArtist}
-                            className="artist-link-subtle"
-                            stopPropagation
-                          />{' '}
-                          · {track.info.album}
-                        </div>
-                      </div>
-                      {(listMode === 'songs' ||
-                        (listMode === 'playlists' && selectedUserPlaylistId)) && (
-                        <div className="track-add-pl-wrap">
-                          <button
-                            type="button"
-                            className={`track-like-btn ${liked ? 'active' : ''}`}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              toggleLike(track.path)
-                            }}
-                            title={liked ? t('like.unlike') : t('like.like')}
-                            aria-pressed={liked}
-                          >
-                            <Heart
-                              size={16}
-                              fill={liked ? 'currentColor' : 'none'}
-                              strokeWidth={liked ? 1.5 : 1.5}
-                            />
-                          </button>
-                          {listMode === 'songs' && (
+                          <Music size={16} style={{ marginRight: 8, opacity: 0.5 }} />
+                          <div className="track-text-group">
+                            <div className="track-name" title={track.info.title}>
+                              {track.info.title}
+                            </div>
+                            <div
+                              className="track-subtitle"
+                              title={`${displayArtist} · ${track.info.album}`}
+                            >
+                              <ArtistLink
+                                artist={displayArtist}
+                                className="artist-link-subtle"
+                                stopPropagation
+                                noLink
+                              />{' '}
+                              · {track.info.album}
+                            </div>
+                          </div>
+                          {(listMode === 'songs' ||
+                            listMode === 'folders' ||
+                            listMode === 'album' ||
+                            (listMode === 'playlists' &&
+                              (selectedUserPlaylistId || selectedSmartCollectionId))) && (
+                            <div className="track-add-pl-wrap">
+                              <button
+                                type="button"
+                                className={`track-like-btn ${liked ? 'active' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  toggleLike(track.path)
+                                }}
+                                title={liked ? t('like.unlike') : t('like.like')}
+                                aria-pressed={liked}
+                              >
+                                <Heart
+                                  size={16}
+                                  fill={liked ? 'currentColor' : 'none'}
+                                  strokeWidth={liked ? 1.5 : 1.5}
+                                />
+                              </button>
+                              {(listMode === 'songs' || listMode === 'folders' || listMode === 'album') && (
+                                <button
+                                  type="button"
+                                  className={`track-add-pl-btn ${addToPlaylistMenu?.originalIdx === track.originalIdx ? 'active' : ''}`}
+                                  onClick={(e) => openAddToPlaylistPopover(e, track)}
+                                  title={t('aria.addToPlaylist')}
+                                >
+                                  <ListPlus size={16} />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {listMode === 'playlists' && selectedUserPlaylistId && (
                             <button
                               type="button"
-                              className={`track-add-pl-btn ${addToPlaylistMenu?.originalIdx === track.originalIdx ? 'active' : ''}`}
-                              onClick={(e) => openAddToPlaylistPopover(e, track)}
-                              title={t('aria.addToPlaylist')}
+                              className="track-remove-pl-btn"
+                              title={t('aria.removeFromPlaylist')}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                removePathFromUserPlaylist(selectedUserPlaylistId, track.path)
+                              }}
                             >
-                              <ListPlus size={16} />
+                              <Minus size={16} />
                             </button>
                           )}
                         </div>
-                      )}
-                      {listMode === 'playlists' && selectedUserPlaylistId && (
-                        <button
-                          type="button"
-                          className="track-remove-pl-btn"
-                          title={t('aria.removeFromPlaylist')}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            removePathFromUserPlaylist(selectedUserPlaylistId, track.path)
-                          }}
-                        >
-                          <Minus size={16} />
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
+                      )
+                    })}
+                    {visibleSidebarRange.bottomSpacer > 0 && (
+                      <div
+                        className="playlist-spacer"
+                        style={{ height: `${visibleSidebarRange.bottomSpacer}px` }}
+                        aria-hidden
+                      />
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -5042,7 +9681,7 @@ export default function App() {
       </div>
 
       <div
-        className={`main-player glass-panel no-drag ${showLyrics ? 'lyrics-mode' : ''} ${showLyrics && config.mvAsBackground && mvId ? 'immersive-mode' : ''} ${brightLyricsBackdrop ? 'main-player--bright-lyrics-bg' : ''} ${view === 'settings' ? 'hidden' : ''}`}
+        className={`main-player glass-panel no-drag ${showLyrics ? 'lyrics-mode' : ''} ${showLyrics && config.mvAsBackground && mvId ? 'immersive-mode' : ''} ${brightLyricsBackdrop ? 'main-player--bright-lyrics-bg' : ''} ${view === 'settings' ? 'hidden' : ''} ${config.lyricsBlurEffect ? 'lyrics-blur-on' : ''}`}
       >
         {showLyrics ? (
           <div className="lyrics-view-container" style={lyricsPanelStyle}>
@@ -5053,21 +9692,18 @@ export default function App() {
                 </button>
 
                 <div className="lyrics-header">
-                  <AlbumCoverLink
-                    artist={displayMainArtist}
-                    album={displayMainAlbum}
-                    title={displayMainTitle}
-                    className="mini-cover"
-                  >
+                  <div className="mini-cover">
                     {displayMainCoverUrl ? <img src={displayMainCoverUrl} alt="" /> : <Music />}
-                  </AlbumCoverLink>
+                  </div>
                   <div className="lyrics-meta">
                     <h2>{displayMainTitle}</h2>
                     <p>
                       <ArtistLink artist={displayMainArtist} className="artist-link-lyrics" />
                     </p>
                     <div className="technical-info-mini">
-                      <span className={`mini-pill lyrics-sync-pill lyrics-sync-pill--${lyricsStatusUi.tone}`}>
+                      <span
+                        className={`mini-pill lyrics-sync-pill lyrics-sync-pill--${lyricsStatusUi.tone}`}
+                      >
                         {lyricsStatusUi.text}
                       </span>
                       {dlnaUiOn && (
@@ -5113,9 +9749,15 @@ export default function App() {
             )}
 
             <div
-              className={`lyrics-and-mv-wrapper${config.lyricsHidden || (lyrics.length > 0 && lyrics.filter(l => l.text.trim()).every(l => l.text.match(/纯音乐|instrumental|.*欣赏.*|.*enjoy.*/i))) ? ' lyrics-and-mv-wrapper--lyrics-hidden' : ''}`}
+              className={`lyrics-and-mv-wrapper${config.lyricsHidden || (lyrics.length > 0 && lyrics.filter((l) => l.text.trim()).every((l) => l.text.match(/纯音乐|instrumental|.*欣赏.*|.*enjoy.*/i))) ? ' lyrics-and-mv-wrapper--lyrics-hidden' : ''}`}
             >
-              {!(config.lyricsHidden || (lyrics.length > 0 && lyrics.filter(l => l.text.trim()).every(l => l.text.match(/纯音乐|instrumental|.*欣赏.*|.*enjoy.*/i)))) && (
+              {!(
+                config.lyricsHidden ||
+                (lyrics.length > 0 &&
+                  lyrics
+                    .filter((l) => l.text.trim())
+                    .every((l) => l.text.match(/纯音乐|instrumental|.*欣赏.*|.*enjoy.*/i)))
+              ) && (
                 <div className="lyrics-scroll-area" ref={scrollAreaRef}>
                   {lyrics.length > 0 ? (
                     lyrics.map((line, idx) => (
@@ -5139,7 +9781,10 @@ export default function App() {
                           if (useNativeEngineRef.current && window.api?.playAudio) {
                             const tp = playlist[currentIndex]?.path
                             if (audioRef.current) audioRef.current.currentTime = newTime
-                            if (tp) window.api.playAudio(tp, newTime, playbackRateRef.current).catch(console.error)
+                            if (tp)
+                              window.api
+                                .playAudio(tp, newTime, playbackRateRef.current)
+                                .catch(console.error)
                             seekTimerRef.current = setTimeout(() => setIsSeeking(false), 500)
                           } else if (audioRef.current) {
                             audioRef.current.currentTime = newTime
@@ -5151,7 +9796,7 @@ export default function App() {
                           <span
                             className="lyric-line-main lyric-line-main--karaoke"
                             style={{
-                              '--karaoke-progress': `${(((lyricKaraokeProgressList[idx] || 0) * 100).toFixed(3))}%`
+                              '--karaoke-progress': `${((lyricKaraokeProgressList[idx] || 0) * 100).toFixed(3)}%`
                             }}
                           >
                             <span className="lyric-line-main-base">{line.text}</span>
@@ -5184,7 +9829,14 @@ export default function App() {
                           }}
                         >
                           <div>{t('lyrics.none')}</div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: 8,
+                              justifyContent: 'center'
+                            }}
+                          >
                             <button
                               className="retry-lyrics-btn"
                               onClick={() => retryFetchLyrics()}
@@ -5236,11 +9888,15 @@ export default function App() {
           </div>
         ) : (
           <div className="main-player-body">
-            <AlbumCoverLink
-              artist={displayMainArtist}
-              album={displayMainAlbum}
-              title={displayMainTitle}
-              className="cover-wrapper"
+            <div
+              className={`cover-wrapper${quickEditModifierActive ? ' quick-edit-target quick-edit-target--armed' : ''}`}
+              onContextMenu={openCoverContextMenu}
+              onClick={handleQuickCoverPick}
+              title={
+                currentTrack?.path && isLocalAudioFilePath(currentTrack.path)
+                  ? t('metadataQuick.coverHint', 'Ctrl+click to change cover')
+                  : undefined
+              }
             >
               {displayMainCoverUrl ? (
                 <img
@@ -5254,12 +9910,76 @@ export default function App() {
                   <Music size={64} style={{ opacity: 0.3 }} />
                 </div>
               )}
-            </AlbumCoverLink>
+            </div>
 
             <div className="track-info">
-              <h1>{displayMainTitle}</h1>
-              <p className="artist-text">
-                <ArtistLink artist={displayMainArtist} className="artist-link-main" />
+              <h1
+                className={quickEditModifierActive ? 'quick-edit-target quick-edit-target--armed' : ''}
+                onClick={(event) => handleQuickFieldTrigger('title', event)}
+                title={
+                  currentTrack?.path && isLocalAudioFilePath(currentTrack.path)
+                    ? t('metadataQuick.titleHint', 'Ctrl+click to edit title')
+                    : undefined
+                }
+              >
+                {quickEditField === 'title' ? (
+                  <input
+                    className="quick-edit-input quick-edit-input--title"
+                    value={quickEditDraft}
+                    onChange={(event) => setQuickEditDraft(event.target.value)}
+                    onBlur={() => {
+                      void commitQuickMetadataFieldEdit()
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        event.currentTarget.blur()
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault()
+                        cancelQuickMetadataFieldEdit()
+                      }
+                    }}
+                    autoFocus
+                    disabled={quickEditBusy}
+                  />
+                ) : (
+                  displayMainTitle
+                )}
+              </h1>
+              <p
+                className={`artist-text${quickEditModifierActive ? ' quick-edit-target quick-edit-target--armed' : ''}`}
+                onClickCapture={(event) => handleQuickFieldTrigger('artist', event)}
+                title={
+                  currentTrack?.path && isLocalAudioFilePath(currentTrack.path)
+                    ? t('metadataQuick.artistHint', 'Ctrl+click to edit artist')
+                    : undefined
+                }
+              >
+                {quickEditField === 'artist' ? (
+                  <input
+                    className="quick-edit-input quick-edit-input--artist"
+                    value={quickEditDraft}
+                    onChange={(event) => setQuickEditDraft(event.target.value)}
+                    onBlur={() => {
+                      void commitQuickMetadataFieldEdit()
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        event.currentTarget.blur()
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault()
+                        cancelQuickMetadataFieldEdit()
+                      }
+                    }}
+                    autoFocus
+                    disabled={quickEditBusy}
+                  />
+                ) : (
+                  <ArtistLink artist={displayMainArtist} className="artist-link-main" />
+                )}
               </p>
 
               <div className="tech-pills-container">
@@ -5320,10 +10040,14 @@ export default function App() {
                     <span className="bpm-orig">
                       {t('tech.bpm', { orig: technicalInfo.originalBpm })}
                     </span>
-                    <span className="bpm-arrow">→</span>
-                    <span className="bpm-nc">
-                      {Math.round(technicalInfo.originalBpm * playbackRate)}
-                    </span>
+                    {playbackRate !== 1 && (
+                      <>
+                        <span className="bpm-arrow">→</span>
+                        <span className="bpm-nc">
+                          {Math.round(technicalInfo.originalBpm * playbackRate)}
+                        </span>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -5350,22 +10074,19 @@ export default function App() {
                 value={displayProgressTime}
                 onChange={handleSeek}
                 onMouseDown={() => {
+                  progressSeekValueRef.current = displayProgressTime
+                  isProgressDraggingRef.current = true
                   setIsSeeking(true)
                   setIsProgressDragging(true)
                 }}
-                onMouseUp={() => {
-                  setIsSeeking(false)
-                  setIsProgressDragging(false)
-                }}
-                onMouseLeave={() => setIsProgressDragging(false)}
+                onMouseUp={(e) => commitProgressSeek(parseFloat(e.currentTarget.value))}
                 onTouchStart={() => {
+                  progressSeekValueRef.current = displayProgressTime
+                  isProgressDraggingRef.current = true
                   setIsSeeking(true)
                   setIsProgressDragging(true)
                 }}
-                onTouchEnd={() => {
-                  setIsSeeking(false)
-                  setIsProgressDragging(false)
-                }}
+                onTouchEnd={(e) => commitProgressSeek(parseFloat(e.currentTarget.value))}
                 disabled={dlnaUiOn}
                 style={{
                   padding: 0,
@@ -5387,51 +10108,62 @@ export default function App() {
               </div>
             </div>
 
-            <div className="buttons">
-              <button
-                className="btn btn--transport"
-                style={{ width: 40, height: 40 }}
-                onClick={() => setPlayMode(playMode === 'shuffle' ? 'loop' : 'shuffle')}
-              >
-                <Shuffle
-                  size={18}
-                  color={playMode === 'shuffle' ? 'var(--accent-pink)' : 'var(--text-soft)'}
-                />
-              </button>
-              <button className="btn btn--transport" onClick={handlePrev}>
-                <SkipBack size={24} color="var(--text-soft)" />
-              </button>
-              <button className="btn play-btn" onClick={togglePlay}>
-                {transportIsPlaying ? (
-                  <Pause size={32} />
-                ) : (
-                  <Play size={32} style={{ marginLeft: 4 }} />
-                )}
-              </button>
-              <button className="btn btn--transport" onClick={handleNext}>
-                <SkipForward size={24} color="var(--text-soft)" />
-              </button>
-              <button
-                className="btn btn--transport"
-                style={{ width: 40, height: 40 }}
-                onClick={() => setPlayMode(playMode === 'single' ? 'loop' : 'single')}
-              >
-                {playMode === 'single' ? (
-                  <Repeat1 size={18} color="var(--accent-pink)" />
-                ) : (
-                  <Repeat
+            <div className="buttons buttons--transport">
+              <div className="transport-cluster transport-cluster--primary">
+                <button
+                  className="btn btn--transport"
+                  style={{ width: 40, height: 40 }}
+                  onClick={() => setPlayMode(playMode === 'shuffle' ? 'loop' : 'shuffle')}
+                >
+                  <Shuffle
                     size={18}
-                    color={playMode === 'loop' ? 'var(--accent-pink)' : 'var(--text-soft)'}
+                    color={playMode === 'shuffle' ? 'var(--accent-pink)' : 'var(--text-soft)'}
                   />
-                )}
-              </button>
-              <button
-                className={`btn btn--transport lyrics-toggle ${showLyrics ? 'active' : ''}`}
-                style={{ width: 40, height: 40 }}
-                onClick={() => setShowLyrics(!showLyrics)}
-              >
-                <Mic2 size={18} color={showLyrics ? 'var(--accent-pink)' : 'var(--text-soft)'} />
-              </button>
+                </button>
+                <button className="btn btn--transport" onClick={handlePrev}>
+                  <SkipBack size={24} color="var(--text-soft)" />
+                </button>
+                <button className="btn play-btn" onClick={togglePlay}>
+                  {transportIsPlaying ? (
+                    <Pause size={32} />
+                  ) : (
+                    <Play size={32} style={{ marginLeft: 4 }} />
+                  )}
+                </button>
+                <button className="btn btn--transport" onClick={handleNext}>
+                  <SkipForward size={24} color="var(--text-soft)" />
+                </button>
+                <button
+                  className="btn btn--transport"
+                  style={{ width: 40, height: 40 }}
+                  onClick={() => setPlayMode(playMode === 'single' ? 'loop' : 'single')}
+                >
+                  {playMode === 'single' ? (
+                    <Repeat1 size={18} color="var(--accent-pink)" />
+                  ) : (
+                    <Repeat
+                      size={18}
+                      color={playMode === 'loop' ? 'var(--accent-pink)' : 'var(--text-soft)'}
+                    />
+                  )}
+                </button>
+              </div>
+
+              <div className="transport-cluster transport-cluster--utility">
+                <button
+                  className={`btn btn--transport lyrics-toggle ${showLyrics ? 'active' : ''}`}
+                  style={{ width: 40, height: 40 }}
+                  onClick={() => setShowLyrics(!showLyrics)}
+                >
+                  <Mic2 size={18} color={showLyrics ? 'var(--accent-pink)' : 'var(--text-soft)'} />
+                </button>
+                <PluginSlot
+                  name="playerTransportExtras"
+                  context={playerTransportPluginContext}
+                  className="no-drag transport-plugin-slot"
+                  style={{ display: 'flex', alignItems: 'center' }}
+                />
+              </div>
             </div>
 
             <div className="nightcore-controls deck-panel">
@@ -5443,11 +10175,11 @@ export default function App() {
                 className={`slider-wrapper deck-slider-row ${isSpeedDragging ? 'is-dragging' : ''}`}
                 style={{ marginBottom: view === 'player' && !showLyrics ? 8 : 0 }}
               >
-                <span className="deck-scale-label">1.0</span>
+                <span className="deck-scale-label">0.5</span>
                 <input
                   type="range"
                   className={`deck-slider ${isSpeedDragging ? 'is-dragging' : ''}`}
-                  min={1.0}
+                  min={0.5}
                   max={2.0}
                   step={0.05}
                   value={playbackRate}
@@ -5467,7 +10199,9 @@ export default function App() {
                 <span>{t('player.vol')}</span>
                 <span className="nc-badge">{Math.round(volume * 100)}%</span>
               </div>
-              <div className={`slider-wrapper deck-slider-row ${isVolumeDragging ? 'is-dragging' : ''}`}>
+              <div
+                className={`slider-wrapper deck-slider-row ${isVolumeDragging ? 'is-dragging' : ''}`}
+              >
                 <Volume2 className="deck-vol-icon" size={16} aria-hidden />
                 <input
                   type="range"
@@ -5487,31 +10221,13 @@ export default function App() {
 
               <button
                 className="export-btn"
-                style={{ marginTop: 12 }}
+                style={{ marginTop: 8 }}
                 onClick={handleExport}
                 disabled={isExporting || !currentTrack}
               >
                 <Download size={16} />
                 {isExporting ? t('player.exportRendering') : t('player.exportButton')}
               </button>
-              <div className="share-card-actions">
-                <button
-                  className="export-btn"
-                  onClick={() => handleCopyTrackCardImage(currentTrack)}
-                  disabled={isCardActionBusy || !currentTrack}
-                >
-                  <Copy size={16} />
-                  {t('player.copyCardImage')}
-                </button>
-                <button
-                  className="export-btn"
-                  onClick={() => handleSaveTrackCardImage(currentTrack)}
-                  disabled={isCardActionBusy || !currentTrack}
-                >
-                  <Image size={16} />
-                  {t('player.saveCardImage')}
-                </button>
-              </div>
             </div>
           </div>
         )}
@@ -5523,9 +10239,115 @@ export default function App() {
               <ChevronLeft size={32} />
             </button>
             <h1>{t('settings.pageTitle')}</h1>
+            <div
+              style={{
+                position: 'relative',
+                width: '100%',
+                maxWidth: 520,
+                marginTop: 12
+              }}
+            >
+              <Search
+                size={16}
+                style={{
+                  position: 'absolute',
+                  left: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-soft)',
+                  pointerEvents: 'none'
+                }}
+              />
+              <input
+                ref={settingsSearchInputRef}
+                type="text"
+                value={settingsQuery}
+                onChange={(e) => setSettingsQuery(e.target.value)}
+                placeholder={t('settings.searchPlaceholder')}
+                style={{
+                  width: '100%',
+                  padding: '10px 40px 10px 36px',
+                  borderRadius: 12,
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg-secondary)',
+                  color: 'inherit',
+                  outline: 'none'
+                }}
+              />
+              {settingsQuery ? (
+                <button
+                  type="button"
+                  onClick={() => setSettingsQuery('')}
+                  aria-label={t('aria.close')}
+                  style={{
+                    position: 'absolute',
+                    right: 8,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 28,
+                    height: 28,
+                    border: 'none',
+                    borderRadius: 999,
+                    background: 'transparent',
+                    color: 'var(--text-soft)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              ) : null}
+            </div>
           </div>
 
-          <div className="settings-content">
+          <div className="settings-body">
+            <nav className="settings-nav" aria-label={t('settings.pageTitle')}>
+              {settingsNavItems.map((item) => {
+                const Icon = item.icon
+                const isActive = activeSettingsSection === item.key
+                const isDanger = item.key === 'danger'
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`settings-nav-item ${isActive ? 'active' : ''}`}
+                    onClick={() => handleSettingsNavClick(item.key, item.id)}
+                    style={{
+                      color: isDanger ? '#ff4d4f' : undefined,
+                      borderLeftColor: isActive
+                        ? isDanger
+                          ? '#ff4d4f'
+                          : 'var(--accent-pink)'
+                        : 'transparent'
+                    }}
+                  >
+                    <Icon size={16} />
+                    <span>{item.label}</span>
+                  </button>
+                )
+              })}
+            </nav>
+
+            <div className="settings-content" ref={settingsContentRef}>
+              {!settingsHasResults ? (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    opacity: 0.5,
+                    fontSize: 14,
+                    padding: '24px 0'
+                  }}
+                >
+                  {t('settings.searchNoResults')}
+                </div>
+              ) : null}
+            <div
+              id="settings-sec-language"
+              data-settings-section="language"
+              style={{ display: settingsSectionVisibility.language ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title">
                 <MessageSquare size={20} />
@@ -5558,7 +10380,13 @@ export default function App() {
                 </div>
               </div>
             </section>
+            </div>
 
+            <div
+              id="settings-sec-engine"
+              data-settings-section="engine"
+              style={{ display: settingsSectionVisibility.engine ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title">
                 <Zap size={20} />
@@ -5600,7 +10428,9 @@ export default function App() {
                 </button>
               </div>
 
-              <p className="settings-visualizer-exclusive-hint">{t('settings.visualizerExclusiveHint')}</p>
+              <p className="settings-visualizer-exclusive-hint">
+                {t('settings.visualizerExclusiveHint')}
+              </p>
 
               <div className="setting-row">
                 <div className="setting-info">
@@ -5638,6 +10468,63 @@ export default function App() {
                   {config.useEQ ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
                 </button>
               </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <h3>{t('settings.crossfadeTitle')}</h3>
+                  <p>{t('settings.crossfadeDesc')}</p>
+                </div>
+                <button
+                  className={`toggle-btn ${config.crossfadeEnabled ? 'active' : ''}`}
+                  onClick={() =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      crossfadeEnabled: !prev.crossfadeEnabled
+                    }))
+                  }
+                >
+                  {config.crossfadeEnabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+                </button>
+              </div>
+
+              {config.crossfadeEnabled ? (
+                <div className="setting-row" style={{ borderTop: 'none', paddingTop: 8 }}>
+                  <div className="setting-info">
+                    <h3>{t('settings.crossfadeDurationTitle')}</h3>
+                    <p>{t('settings.crossfadeDurationDesc')}</p>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      minWidth: 260,
+                      justifyContent: 'flex-end'
+                    }}
+                  >
+                    <span style={{ fontSize: 12, color: 'var(--text-soft)' }}>
+                      {t('settings.crossfadeSeconds', { count: config.crossfadeDuration })}
+                    </span>
+                    <input
+                      type="range"
+                      min={1}
+                      max={12}
+                      step={1}
+                      value={config.crossfadeDuration}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          crossfadeDuration: Math.max(
+                            1,
+                            Math.min(12, Number.parseInt(e.target.value, 10) || 1)
+                          )
+                        }))
+                      }
+                      style={{ width: 160 }}
+                    />
+                  </div>
+                </div>
+              ) : null}
 
               {config.mvAsBackground && (
                 <>
@@ -5719,7 +10606,13 @@ export default function App() {
                 </>
               )}
             </section>
+            </div>
 
+            <div
+              id="settings-sec-integrations"
+              data-settings-section="integrations"
+              style={{ display: settingsSectionVisibility.integrations ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title">
                 <Zap size={20} />
@@ -5742,19 +10635,113 @@ export default function App() {
                   {config.enableDiscordRPC ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
                 </button>
               </div>
+              <div className="setting-row">
+                <div className="setting-info">
+                  <h3>{t('settings.sleepTimerTitle')}</h3>
+                  <p>{t('settings.sleepTimerDesc')}</p>
+                  {sleepTimerActive ? (
+                    <p style={{ marginTop: 8, fontSize: 12, color: 'var(--text-soft)' }}>
+                      {config.sleepTimerMode === 'time'
+                        ? t('settings.sleepTimerRemaining', {
+                            time: formatSleepTimerRemaining(sleepTimerRemainingMs)
+                          })
+                        : t('settings.sleepTimerArmedTrack')}
+                    </p>
+                  ) : null}
+                </div>
+                <div
+                  className="settings-chip-row no-drag"
+                  style={{
+                    justifyContent: 'flex-end',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 8
+                  }}
+                >
+                  {['time', 'track'].map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`list-filter-chip ${config.sleepTimerMode === mode ? 'active' : ''}`}
+                      onClick={() =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          sleepTimerMode: mode
+                        }))
+                      }
+                    >
+                      {mode === 'time'
+                        ? t('settings.sleepTimerModeTime')
+                        : t('settings.sleepTimerModeTrack')}
+                    </button>
+                  ))}
+                  {config.sleepTimerMode === 'time'
+                    ? SLEEP_TIMER_MINUTE_OPTIONS.map((minutes) => (
+                        <button
+                          key={minutes}
+                          type="button"
+                          className={`list-filter-chip ${config.sleepTimerMinutes === minutes ? 'active' : ''}`}
+                          onClick={() =>
+                            setConfig((prev) => ({
+                              ...prev,
+                              sleepTimerMinutes: minutes
+                            }))
+                          }
+                        >
+                          {t('settings.sleepTimerMinutes', { count: minutes })}
+                        </button>
+                      ))
+                    : null}
+                  <UiButton
+                    variant={sleepTimerActive ? 'ghost' : 'secondary'}
+                    size="sm"
+                    onClick={() => {
+                      if (sleepTimerActive) {
+                        cancelSleepTimer()
+                        return
+                      }
+                      startSleepTimer()
+                    }}
+                  >
+                    {sleepTimerActive
+                      ? t('settings.sleepTimerCancel')
+                      : t('settings.sleepTimerStart')}
+                  </UiButton>
+                </div>
+              </div>
             </section>
+            </div>
 
+            <div
+              id="settings-sec-eq"
+              data-settings-section="eq"
+              style={{ display: settingsSectionVisibility.eq ? '' : 'none' }}
+            >
             <section className={`settings-section eq-section ${!config.useEQ ? 'disabled' : ''}`}>
               <div
                 className="section-title"
                 style={{ justifyContent: 'space-between', width: '100%' }}
               >
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '6px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: '6px'
+                  }}
+                >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <Sliders size={20} />
                     <h2>{t('settings.eqSection')}</h2>
                   </div>
-                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted, #888)', maxWidth: '52rem' }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '12px',
+                      color: 'var(--text-muted, #888)',
+                      maxWidth: '52rem'
+                    }}
+                  >
                     {useNativeEngine
                       ? t('settings.eqEngineHintHifi')
                       : t('settings.eqEngineHintStandard')}
@@ -5852,7 +10839,13 @@ export default function App() {
                 }}
               />
             </section>
+            </div>
 
+            <div
+              id="settings-sec-aesthetics"
+              data-settings-section="aesthetics"
+              style={{ display: settingsSectionVisibility.aesthetics ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div
                 className="section-title"
@@ -6085,8 +11078,9 @@ export default function App() {
                     boxShadow:
                       config.theme === 'custom'
                         ? `0 8px 24px ${hexToRgbaString(
-                            normalizeThemeColors(config.customColors || PRESET_THEMES.minimal.colors)
-                              .accent1,
+                            normalizeThemeColors(
+                              config.customColors || PRESET_THEMES.minimal.colors
+                            ).accent1,
                             0.22
                           )}`
                         : '0 4px 12px rgba(0,0,0,0.05)',
@@ -6434,6 +11428,53 @@ export default function App() {
                 >
                   <Image size={18} />
                   <h3 style={{ fontSize: 16, fontWeight: 800 }}>Custom Wallpaper Decor</h3>
+                </div>
+
+                <div
+                  className="setting-row"
+                  style={{ border: 'none', padding: 0, marginBottom: 20 }}
+                >
+                  <div className="setting-info">
+                    <h4>{t('settings.coverSizeTitle', 'Cover size')}</h4>
+                    <p>{t('settings.coverSizeDesc', 'Adjust the main player album cover size.')}</p>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '10px',
+                      minWidth: '240px',
+                      alignItems: 'stretch'
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: '12px',
+                        fontSize: '12px',
+                        opacity: 0.78
+                      }}
+                    >
+                      <span>180px</span>
+                      <strong>{Math.round(config.playerCoverSize ?? 360)}px</strong>
+                      <span>360px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={180}
+                      max={360}
+                      step={4}
+                      value={config.playerCoverSize ?? 360}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          playerCoverSize: parseInt(e.target.value, 10)
+                        }))
+                      }
+                    />
+                  </div>
                 </div>
 
                 <div
@@ -6891,9 +11932,61 @@ export default function App() {
                     )}
                   </button>
                 </div>
+
+                <div className="setting-row" style={{ border: 'none', padding: '16px 0 0 0' }}>
+                  <div className="setting-info">
+                    <h4>动态封面取色 (自适应主题)</h4>
+                    <p>提取当前播放歌曲的专辑封面主色调并作为主题。</p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`toggle-btn ${config.themeDynamicCoverColor ? 'active' : ''}`}
+                    onClick={() =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        themeDynamicCoverColor: !prev.themeDynamicCoverColor
+                      }))
+                    }
+                  >
+                    {config.themeDynamicCoverColor ? (
+                      <ToggleRight size={32} />
+                    ) : (
+                      <ToggleLeft size={32} />
+                    )}
+                  </button>
+                </div>
+
+                <div className="setting-row" style={{ border: 'none', padding: '16px 0 0 0' }}>
+                  <div className="setting-info">
+                    <h4>直接以封面为背景</h4>
+                    <p>将当前正在播放的封面图作为背景显示。</p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`toggle-btn ${config.themeCoverAsBackground ? 'active' : ''}`}
+                    onClick={() =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        themeCoverAsBackground: !prev.themeCoverAsBackground
+                      }))
+                    }
+                  >
+                    {config.themeCoverAsBackground ? (
+                      <ToggleRight size={32} />
+                    ) : (
+                      <ToggleLeft size={32} />
+                    )}
+                  </button>
+                </div>
               </div>
             </section>
+            </div>
 
+            <div
+              id="settings-sec-downloader"
+              data-settings-section="downloader"
+              style={{ display: settingsSectionVisibility.media ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title">
                 <Download size={20} />
@@ -6957,6 +12050,31 @@ export default function App() {
               </div>
               <div className="setting-row">
                 <div className="setting-info">
+                  <h3>{t('settings.closeButtonBehaviorTitle')}</h3>
+                  <p>{t('settings.closeButtonBehaviorDesc')}</p>
+                </div>
+                <div className="settings-chip-row no-drag">
+                  {['tray', 'quit'].map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`list-filter-chip ${config.closeButtonBehavior === mode ? 'active' : ''}`}
+                      onClick={() =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          closeButtonBehavior: mode
+                        }))
+                      }
+                    >
+                      {mode === 'tray'
+                        ? t('settings.closeButtonBehaviorTray')
+                        : t('settings.closeButtonBehaviorQuit')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="setting-row">
+                <div className="setting-info">
                   <h3>{t('settings.plImportTitle')}</h3>
                   <p>{t('settings.plImportDesc')}</p>
                 </div>
@@ -7010,8 +12128,97 @@ export default function App() {
                   ) : null}
                 </div>
               </div>
+              <div className="setting-row">
+                <div className="setting-info">
+                  <h3>{t('settings.libraryCleanupTitle', 'Library cleanup')}</h3>
+                  <p>
+                    {missingLibraryPaths.length > 0
+                      ? t(
+                          'settings.libraryCleanupFound',
+                          `${missingLibraryPaths.length} invalid path(s) found in your library references.`
+                        )
+                      : t(
+                          'settings.libraryCleanupDesc',
+                          'Scan the current library, playlists, likes, and playback history for missing files.'
+                        )}
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <UiButton
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      void scanMissingLibraryPaths()
+                    }}
+                    disabled={libraryCleanupBusy}
+                  >
+                    {libraryCleanupBusy
+                      ? t('settings.libraryCleanupScanning', 'Scanning...')
+                      : t('settings.libraryCleanupScan', 'Scan')}
+                  </UiButton>
+                  <UiButton
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      void cleanupMissingLibraryPaths()
+                    }}
+                    disabled={libraryCleanupBusy || missingLibraryPaths.length === 0}
+                    style={{
+                      opacity: libraryCleanupBusy || missingLibraryPaths.length === 0 ? 0.55 : 1
+                    }}
+                  >
+                    {t('settings.libraryCleanupRemove', 'Remove invalid entries')}
+                  </UiButton>
+                </div>
+              </div>
+              {missingLibraryPaths.length > 0 ? (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg-secondary)',
+                    display: 'grid',
+                    gap: 6
+                  }}
+                >
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>
+                    {t('settings.libraryCleanupPreview', 'Preview of invalid paths')}
+                  </div>
+                  {missingLibraryPaths.slice(0, 5).map((path) => (
+                    <div
+                      key={path}
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--text-soft)',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}
+                      title={path}
+                    >
+                      {path}
+                    </div>
+                  ))}
+                  {missingLibraryPaths.length > 5 ? (
+                    <div style={{ fontSize: 12, opacity: 0.55 }}>
+                      {t(
+                        'settings.libraryCleanupMore',
+                        `and ${missingLibraryPaths.length - 5} more...`
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
+            </div>
 
+            <div
+              id="settings-sec-about"
+              data-settings-section="about"
+              style={{ display: settingsSectionVisibility.about ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title">
                 <Info size={20} />
@@ -7020,9 +12227,241 @@ export default function App() {
               <p style={{ opacity: 0.6, fontSize: '14px', lineHeight: 1.6 }}>
                 {t('settings.aboutBody')}
               </p>
-              <p className="settings-version-text">
-                {t('settings.versionText', { version: '1.1.2' })}
-              </p>
+              <div
+                className="settings-version-text"
+                style={{ display: 'flex', alignItems: 'center', gap: '12px' }}
+              >
+                {t('settings.versionText', { version: appVersion || '1.1.2' })}
+                <button
+                  className="control-btn"
+                  disabled={isUpdating}
+                  onClick={() => {
+                    setIsUpdating(true)
+                    setUpdateStatus({ event: 'checking' })
+                    window.api?.checkForUpdates?.()
+                  }}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border)',
+                    cursor: isUpdating ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {isUpdating
+                    ? t('settings.checkingForUpdates', 'Checking...')
+                    : t('settings.checkUpdates', 'Check for Updates')}
+                </button>
+              </div>
+              {updateStatus && updateStatus.event !== 'checking' && (
+                <div style={{ marginTop: '6px' }}>
+                  {updateStatus.event === 'download-progress' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <p style={{ fontSize: '12px', opacity: 0.8, margin: 0 }}>
+                        {t('settings.downloading', 'Downloading update...')}{' '}
+                        {updateStatus.percent ?? 0}%
+                      </p>
+                      <div
+                        style={{
+                          width: '260px',
+                          height: '4px',
+                          borderRadius: '2px',
+                          background: 'var(--color-border)',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        <div
+                          style={{
+                            height: '100%',
+                            width: `${updateStatus.percent ?? 0}%`,
+                            background: 'var(--color-accent, #3b82f6)',
+                            borderRadius: '2px',
+                            transition: 'width 0.3s ease'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {updateStatus.event !== 'download-progress' && (
+                    <p style={{ fontSize: '12px', opacity: 0.8, margin: 0 }}>
+                      {updateStatus.event === 'update-available'
+                        ? t('settings.updateAvailable', 'Update available, downloading...')
+                        : updateStatus.event === 'update-not-available'
+                          ? t('settings.updateNotAvailable', 'You are on the latest version.')
+                          : updateStatus.event === 'update-downloaded'
+                            ? t(
+                                'settings.updateDownloaded',
+                                `v${updateStatus.version} downloaded, will install on exit.`
+                              )
+                            : updateStatus.event === 'error'
+                              ? t('settings.updateError', 'Error checking for updates.')
+                              : ''}
+                    </p>
+                  )}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: 12 }}>
+                <button
+                  className="control-btn"
+                  onClick={() => {
+                    const nextOpen = !releaseNotesOpen
+                    setReleaseNotesOpen(nextOpen)
+                    if (nextOpen) {
+                      void loadReleaseNotes()
+                    }
+                  }}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {t('settings.viewChangelog', 'View changelog')}
+                </button>
+                <button
+                  className="control-btn"
+                  disabled={releaseNotesLoading}
+                  onClick={() => {
+                    setReleaseNotesOpen(true)
+                    void loadReleaseNotes(true)
+                  }}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border)',
+                    cursor: releaseNotesLoading ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {t('settings.refreshChangelog', 'Refresh changelog')}
+                </button>
+                <button
+                  className="control-btn"
+                  onClick={() => openExternalLink(GITHUB_RELEASES_PAGE_URL)}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {t('settings.openReleasesPage', 'Open releases page')}
+                </button>
+              </div>
+              {releaseNotesOpen ? (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 14,
+                    borderRadius: 12,
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg-secondary)'
+                  }}
+                >
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                      {preferredReleaseVersion
+                        ? t('settings.releaseNotesForVersion', {
+                            version: `v${preferredReleaseVersion}`
+                          })
+                        : t('settings.releaseNotesLatest', 'Latest release notes')}
+                    </div>
+                    <div style={{ opacity: 0.7, fontSize: '12px' }}>
+                      {t(
+                        'settings.releaseNotesHint',
+                        'Recent fixes and changes are pulled from GitHub Releases.'
+                      )}
+                    </div>
+                  </div>
+                  {releaseNotesLoading ? (
+                    <p style={{ margin: 0, opacity: 0.8 }}>
+                      {t('settings.releaseNotesLoading', 'Loading changelog...')}
+                    </p>
+                  ) : releaseNotesError ? (
+                    <p style={{ margin: 0, opacity: 0.8 }}>
+                      {t(
+                        'settings.releaseNotesUnavailable',
+                        'Release notes are temporarily unavailable.'
+                      )}{' '}
+                      ({releaseNotesError})
+                    </p>
+                  ) : visibleReleaseNotes.length === 0 ? (
+                    <p style={{ margin: 0, opacity: 0.8 }}>
+                      {t(
+                        'settings.releaseNotesUnavailable',
+                        'Release notes are temporarily unavailable.'
+                      )}
+                    </p>
+                  ) : (
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {visibleReleaseNotes.map((release) => {
+                        const isPreferred =
+                          preferredReleaseVersion &&
+                          normalizeReleaseVersion(release.version) === preferredReleaseVersion
+                        return (
+                          <div
+                            key={`${release.version}-${release.url}`}
+                            style={{
+                              padding: 12,
+                              borderRadius: 10,
+                              border: `1px solid ${isPreferred ? 'var(--color-accent, #3b82f6)' : 'var(--color-border)'}`,
+                              background: 'var(--color-bg-primary)'
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                justifyContent: 'space-between',
+                                gap: 12
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontWeight: 600 }}>
+                                  {release.title || `v${release.version || '?'}`}
+                                </div>
+                                <div style={{ opacity: 0.7, fontSize: '12px', marginTop: 2 }}>
+                                  {release.publishedLabel || `v${release.version || '?'}`}
+                                </div>
+                              </div>
+                              <button
+                                className="control-btn"
+                                onClick={() => openExternalLink(release.url)}
+                                style={{
+                                  padding: '4px 10px',
+                                  fontSize: '12px',
+                                  borderRadius: '4px',
+                                  background: 'var(--color-bg-secondary)',
+                                  border: '1px solid var(--color-border)',
+                                  cursor: 'pointer',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                {t('settings.openFullRelease', 'Open release')}
+                              </button>
+                            </div>
+                            {Array.isArray(release.previewLines) &&
+                            release.previewLines.length > 0 ? (
+                              <ul style={{ margin: '10px 0 0 18px', padding: 0, lineHeight: 1.5 }}>
+                                {release.previewLines.slice(0, 4).map((line, index) => (
+                                  <li key={`${release.version}-preview-${index}`}>{line}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
               <p className="settings-version-text">{t('settings.poweredBy')}</p>
               <div className="setting-row" style={{ marginTop: 8 }}>
                 <div className="setting-info">
@@ -7175,11 +12614,26 @@ export default function App() {
             </section>
 
             <PluginSlot name="settingsPanel" />
+            </div>
 
+            <div
+              id="settings-sec-danger"
+              data-settings-section="danger"
+              style={{ display: settingsSectionVisibility.danger ? '' : 'none' }}
+            >
             <section className="settings-section">
               <div className="section-title" style={{ color: '#ff4d4f' }}>
                 <Trash2 size={20} aria-hidden />
                 <h2>{t('settings.dangerZone')}</h2>
+              </div>
+              <div className="setting-row" style={{ border: 'none', padding: '16px 0' }}>
+                <div className="setting-info">
+                  <h3 style={{ color: '#ff4d4f' }}>{t('settings.resetThemeTitle')}</h3>
+                  <p>{t('settings.resetThemeDesc')}</p>
+                </div>
+                <UiButton variant="danger" onClick={handleResetThemeConfig}>
+                  {t('settings.resetThemeButton')}
+                </UiButton>
               </div>
               <div className="setting-row" style={{ border: 'none', padding: '16px 0' }}>
                 <div className="setting-info">
@@ -7191,7 +12645,9 @@ export default function App() {
                 </UiButton>
               </div>
             </section>
+            </div>
           </div>
+        </div>
         </div>
       )}
 
@@ -7201,6 +12657,7 @@ export default function App() {
         items={lyricsCandidateItems}
         onClose={() => setLyricsCandidateOpen(false)}
         onPick={handleLyricsCandidatePick}
+        onSearch={searchLyricsCandidates}
       />
       <LyricsSettingsDrawer
         open={lyricsDrawerOpen}
@@ -7209,16 +12666,178 @@ export default function App() {
         setConfig={setConfig}
         lyricsMatchStatus={lyricsMatchStatus}
         lyricTimelineValid={lyricTimelineValid}
+        lyricsSourceUi={lyricsSourceUi}
         onRefreshLyrics={retryFetchLyrics}
+        onOpenManualSearch={openLyricsCandidatePicker}
         onFetchLyricsFromLink={fetchLyricsFromSourceLink}
         onApplyLyricsText={applyLyricsFromText}
         onNativeLyricsFilePick={pickLyricsFileNative}
       />
+      <>
+        <div
+          className={`lyrics-drawer-backdrop ${historyMenuOpen ? 'lyrics-drawer-backdrop--open' : ''}`}
+          onClick={() => setHistoryMenuOpen(false)}
+          aria-hidden={!historyMenuOpen}
+        />
+        <aside
+          className={`lyrics-drawer-panel playback-history-drawer-panel ${historyMenuOpen ? 'lyrics-drawer-panel--open' : ''}`}
+          role="dialog"
+          aria-label={t('player.playbackHistory', 'Playback history')}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="lyrics-drawer-header">
+            <h2 className="lyrics-drawer-title">
+              <History size={18} />
+              {t('player.playbackHistory', 'Playback history')}
+            </h2>
+            <button
+              type="button"
+              className="lyrics-drawer-close"
+              onClick={() => setHistoryMenuOpen(false)}
+              aria-label={t('aria.close')}
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <div className="lyrics-drawer-body playback-history-drawer-body">
+            <section className="lyrics-drawer-section playback-history-drawer-hero">
+              <div className="playback-history-drawer-hero-main">
+                <span className="playback-history-drawer-kicker">
+                  {t('player.playbackHistory', 'Playback history')}
+                </span>
+                <strong className="playback-history-drawer-count">
+                  {playbackHistoryEntries.length > 0
+                    ? t('player.historyCountLabel', {
+                        count: playbackHistoryEntries.length,
+                        defaultValue: `${playbackHistoryEntries.length} tracks in this session`
+                      })
+                    : t('empty.historyEmpty', 'No playback history yet.')}
+                </strong>
+                <p className="playback-history-drawer-copy">
+                  {playbackHistoryEntries.length > 0
+                    ? t(
+                        'player.historyDrawerHint',
+                        'Use this column to jump back through what you listened to.'
+                      )
+                    : playbackHistory.length > 0
+                      ? t(
+                          'player.historyMissingHint',
+                          'Saved history exists, but those tracks are no longer available in the current playlist.'
+                        )
+                      : t(
+                          'player.historyDrawerEmptyHint',
+                          'Once you switch songs, your recent path will appear here.'
+                        )}
+                </p>
+              </div>
+              <div className="playback-history-drawer-actions">
+                <button
+                  type="button"
+                  className="playback-history-drawer-action playback-history-drawer-action--primary"
+                  onClick={handleHistoryMenuBack}
+                  disabled={playbackHistory.length === 0}
+                >
+                  <SkipBack size={15} />
+                  <span>{t('player.backHistory', 'Back through history')}</span>
+                </button>
+                <button
+                  type="button"
+                  className="playback-history-drawer-action playback-history-drawer-action--secondary"
+                  onClick={handleHistoryMenuClear}
+                  disabled={playbackHistory.length === 0}
+                >
+                  <Trash2 size={15} />
+                  <span>{t('player.clearHistory', 'Clear')}</span>
+                </button>
+              </div>
+            </section>
+
+            <section className="lyrics-drawer-section">
+              <div className="audio-drawer-section-header">
+                <History size={16} />
+                <span className="audio-drawer-section-label">
+                  {t('player.recentTracks', 'Recent tracks')}
+                </span>
+              </div>
+              {playbackHistoryEntries.length === 0 ? (
+                <div className="playback-history-drawer-empty">
+                  {playbackHistory.length > 0
+                    ? t(
+                        'player.historyMissingHint',
+                        'Saved history exists, but those tracks are no longer available in the current playlist.'
+                      )
+                    : t('empty.historyEmpty', 'No playback history yet.')}
+                </div>
+              ) : (
+                <div className="playback-history-drawer-list">
+                  {playbackHistoryEntries.map((entry, entryIndex) => {
+                    const track = entry.track
+                    const displayArtist =
+                      track && track.info.artist !== 'Unknown Artist'
+                        ? track.info.artist
+                        : track
+                          ? albumArtistByName[track.info.album] || track.info.artist
+                          : entry.artist || t('track.unknownArtist', 'Unknown Artist')
+                    const displayAlbum =
+                      track?.info?.album && track.info.album !== 'Unknown Album'
+                        ? track.info.album
+                        : entry.album
+                          ? entry.album
+                          : t('track.unknownAlbum', 'Unknown Album')
+                    const displayTitle =
+                      track?.info?.title || entry.title || fileNameFromPath(entry.path)
+                    const playCount =
+                      track && Number(trackStats[track.path]?.playCount) > 0
+                        ? trackStats[track.path].playCount
+                        : 0
+                    return (
+                      <button
+                        key={`${entry.path}-history-drawer-${entry.historyIndex}`}
+                        type="button"
+                        className="playback-history-drawer-item"
+                        onClick={() => handleHistoryMenuJump(entry.historyIndex)}
+                        title={`${displayTitle} - ${displayArtist}`}
+                      >
+                        <div className="playback-history-drawer-item-top">
+                          <span className="playback-history-drawer-item-order">
+                            {entryIndex === 0
+                              ? t('player.historyMostRecent', 'Most recent')
+                              : t('player.historyOrderLabel', {
+                                  index: entryIndex + 1,
+                                  defaultValue: `#${entryIndex + 1}`
+                                })}
+                          </span>
+                          <span className="playback-history-drawer-item-album">{displayAlbum}</span>
+                        </div>
+                        <span className="playback-history-drawer-item-title">{displayTitle}</span>
+                        <span className="playback-history-drawer-item-subtitle">
+                          {displayArtist}
+                          {playCount > 0 && ` - 听过 ${playCount} 次`}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+        </aside>
+      </>
       <MediaDownloaderDrawer
         open={downloaderDrawerOpen}
         onClose={() => setDownloaderDrawerOpen(false)}
         config={config}
         setConfig={setConfig}
+        albumContext={
+          selectedAlbum !== 'all'
+            ? {
+                name: selectedAlbum,
+                artist: albumBuckets.find((a) => a.name === selectedAlbum)?.artist || '',
+                existingTracks: albumBuckets.find((a) => a.name === selectedAlbum)?.tracks || []
+              }
+            : null
+        }
+        downloadFolder={config?.downloadPath || config?.downloadFolder || ''}
         userPlaylists={userPlaylists}
         setUserPlaylists={setUserPlaylists}
         setPlaylist={setPlaylist}
@@ -7226,6 +12845,13 @@ export default function App() {
         onSuccess={(payload) => {
           const filePath = typeof payload === 'string' ? payload : payload?.path
           if (!filePath) return
+          const sourceUrl =
+            typeof payload === 'object' &&
+            payload &&
+            typeof payload.sourceUrl === 'string' &&
+            payload.sourceUrl.trim()
+              ? payload.sourceUrl.trim()
+              : undefined
           const mvOriginUrl =
             typeof payload === 'object' &&
             payload &&
@@ -7238,6 +12864,8 @@ export default function App() {
             name: fileName,
             path: filePath,
             type: 'local',
+            ...(payload?.hasLyrics ? { hasLyrics: true } : {}),
+            ...(sourceUrl ? { sourceUrl } : {}),
             ...(mvOriginUrl ? { mvOriginUrl } : {})
           }
           setPlaylist((prev) => {
@@ -7265,6 +12893,40 @@ export default function App() {
         open={audioSettingsDrawerOpen}
         onClose={() => setAudioSettingsDrawerOpen(false)}
         audioDevices={audioDevices}
+        config={config}
+        setConfig={setConfig}
+      />
+      <MetadataEditorDrawer
+        open={metadataEditorOpen}
+        onClose={() => {
+          setMetadataEditorOpen(false)
+          setMetadataEditorTrack(null)
+        }}
+        track={metadataEditorTrack}
+        initialMetadata={
+          metadataEditorTrack
+            ? {
+                ...(trackMetaMap[metadataEditorTrack.path] || {}),
+                title:
+                  trackMetaMap[metadataEditorTrack.path]?.title ||
+                  parseTrackInfo(metadataEditorTrack, trackMetaMap[metadataEditorTrack.path])?.title ||
+                  stripExtension(metadataEditorTrack.name || ''),
+                artist:
+                  trackMetaMap[metadataEditorTrack.path]?.artist ||
+                  parseTrackInfo(metadataEditorTrack, trackMetaMap[metadataEditorTrack.path])?.artist ||
+                  '',
+                album:
+                  trackMetaMap[metadataEditorTrack.path]?.album ||
+                  parseTrackInfo(metadataEditorTrack, trackMetaMap[metadataEditorTrack.path])?.album ||
+                  '',
+                cover:
+                  trackMetaMap[metadataEditorTrack.path]?.cover ||
+                  (currentTrack?.path === metadataEditorTrack.path ? coverUrl : null) ||
+                  null
+              }
+            : null
+        }
+        onSave={handleSaveTrackMetadata}
       />
       <CastReceiveDrawer open={castDrawerOpen} onClose={() => setCastDrawerOpen(false)} />
       <MvSettingsDrawer
@@ -7294,10 +12956,7 @@ export default function App() {
           }
         }}
       />
-      <PluginManagerDrawer
-        open={pluginDrawerOpen}
-        onClose={() => setPluginDrawerOpen(false)}
-      />
+      <PluginManagerDrawer open={pluginDrawerOpen} onClose={() => setPluginDrawerOpen(false)} />
       <PluginSlot name="drawers" />
       <div className="song-share-capture-root" aria-hidden>
         <div ref={songCardCaptureRef} className="song-share-card">
@@ -7439,7 +13098,9 @@ export default function App() {
                     <Heart size={14} aria-hidden /> {rowLiked ? t('like.unlike') : t('like.like')}
                   </button>
                   {(listMode === 'songs' ||
-                    (listMode === 'playlists' && selectedUserPlaylistId)) && (
+                    listMode === 'album' ||
+                    (listMode === 'playlists' &&
+                      (selectedUserPlaylistId || selectedSmartCollectionId))) && (
                     <button
                       type="button"
                       role="menuitem"
@@ -7507,6 +13168,18 @@ export default function App() {
                       <Minus size={14} aria-hidden /> {t('contextMenu.removeFromPlaylist')}
                     </button>
                   )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={() => {
+                      openMetadataEditorForTrack(tr)
+                      closeTrackContextMenuAnimated()
+                    }}
+                    disabled={!localPath}
+                  >
+                    <Pencil size={14} aria-hidden /> {t('contextMenu.editMetadata', 'Edit tags')}
+                  </button>
                   <button
                     type="button"
                     role="menuitem"
@@ -7597,6 +13270,171 @@ export default function App() {
                       <FolderOpen size={14} aria-hidden /> {t('contextMenu.showInFolder')}
                     </button>
                   )}
+                </>
+              )
+            })()}
+          </div>,
+          document.body
+        )}
+      {coverContextMenu &&
+        createPortal(
+          <div
+            ref={coverContextMenuRef}
+            className={`track-ctx-menu-portal${coverCtxVisualOpen ? ' track-ctx-menu-portal--open' : ''}`}
+            role="menu"
+            aria-label={t('aria.coverContextMenu', 'Cover actions')}
+            style={{
+              position: 'fixed',
+              ...(() => {
+                const mw = 220
+                const mh = 140
+                let left = coverContextMenu.clientX
+                let top = coverContextMenu.clientY
+                const iw = typeof window !== 'undefined' ? window.innerWidth : 800
+                const ih = typeof window !== 'undefined' ? window.innerHeight : 600
+                if (left + mw > iw - 8) left = iw - mw - 8
+                if (top + mh > ih - 8) top = ih - mh - 8
+                return { left: Math.max(8, left), top: Math.max(8, top) }
+              })(),
+              zIndex: 20052
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {(() => {
+              const tr = coverContextMenu.track
+              return (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={async () => {
+                      await handleCopyTrackCardImage(tr)
+                      closeCoverContextMenuAnimated()
+                    }}
+                    disabled={isCardActionBusy || !tr}
+                  >
+                    <Copy size={14} aria-hidden /> {t('contextMenu.copyTrackImage')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={async () => {
+                      await handleSaveTrackCardImage(tr)
+                      closeCoverContextMenuAnimated()
+                    }}
+                    disabled={isCardActionBusy || !tr}
+                  >
+                    <Image size={14} aria-hidden /> {t('contextMenu.saveTrackImage')}
+                  </button>
+                </>
+              )
+            })()}
+          </div>,
+          document.body
+        )}
+      {groupContextMenu &&
+        createPortal(
+          <div
+            ref={groupContextMenuRef}
+            className={`track-ctx-menu-portal${groupCtxVisualOpen ? ' track-ctx-menu-portal--open' : ''}`}
+            role="menu"
+            aria-label={t('aria.groupContextMenu', 'Album or folder actions')}
+            style={{
+              position: 'fixed',
+              ...(() => {
+                const mw = 220
+                const mh = 220
+                let left = groupContextMenu.clientX
+                let top = groupContextMenu.clientY
+                const iw = typeof window !== 'undefined' ? window.innerWidth : 800
+                const ih = typeof window !== 'undefined' ? window.innerHeight : 600
+                if (left + mw > iw - 8) left = iw - mw - 8
+                if (top + mh > ih - 8) top = ih - mh - 8
+                return { left: Math.max(8, left), top: Math.max(8, top) }
+              })(),
+              zIndex: 20052
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {(() => {
+              const type = groupContextMenu.type
+              const group = groupContextMenu.group
+              const name = group?.name || ''
+              const copyName = async () => {
+                try {
+                  if (window.api?.writeClipboardText) {
+                    const r = await window.api.writeClipboardText(name)
+                    if (r && r.ok === false && r.error) {
+                      alert(t('contextMenu.actionFailed', { detail: r.error }))
+                    }
+                  } else if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(name)
+                  } else {
+                    alert(t('contextMenu.actionFailed', { detail: 'clipboard_unavailable' }))
+                  }
+                } catch (err) {
+                  alert(t('contextMenu.actionFailed', { detail: err?.message || String(err) }))
+                }
+              }
+              return (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={() => {
+                      if (type === 'album') {
+                        handlePickAlbumFromSidebar(group)
+                      } else {
+                        handlePickFolderFromSidebar(group)
+                      }
+                      closeGroupContextMenuAnimated()
+                    }}
+                  >
+                    <FolderOpen size={14} aria-hidden />{' '}
+                    {type === 'album'
+                      ? t('contextMenu.openAlbum', 'Open album')
+                      : t('contextMenu.openFolder', 'Open folder')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={() => playGroupNow(type, group)}
+                  >
+                    <Play size={14} aria-hidden /> {t('contextMenu.playGroupNow', 'Play from here')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={() => queueGroupNext(group)}
+                  >
+                    <SkipForward size={14} aria-hidden />{' '}
+                    {t('contextMenu.playGroupNext', 'Queue all next')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={async () => {
+                      await copyName()
+                      closeGroupContextMenuAnimated()
+                    }}
+                  >
+                    <Copy size={14} aria-hidden /> {t('contextMenu.copyGroupName', 'Copy name')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={() => revealGroupInExplorer(type, group)}
+                  >
+                    <FolderOpen size={14} aria-hidden />{' '}
+                    {t('contextMenu.revealInExplorer', 'Show in Explorer')}
+                  </button>
                 </>
               )
             })()}

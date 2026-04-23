@@ -48,9 +48,13 @@ function decodeJoinKey(raw) {
   if (!out || typeof out !== 'object') return null
   return {
     serverBaseUrl: String(out.serverBaseUrl || '').trim(),
-    roomId: String(out.roomId || '').trim().toUpperCase(),
+    roomId: String(out.roomId || '')
+      .trim()
+      .toUpperCase(),
     accessToken: String(out.accessToken || '').trim(),
-    roomAccessKey: String(out.roomAccessKey || '').trim().toUpperCase()
+    roomAccessKey: String(out.roomAccessKey || '')
+      .trim()
+      .toUpperCase()
   }
 }
 
@@ -111,23 +115,23 @@ export default function ListenTogetherDrawer({
     if (!isHost || !inRoom || !nextTrack?.path) return
     if (!window.api?.readBufferHandler || isHttpUrl(nextTrack.path)) return
     if (!duration || duration <= 0) return
-    
+
     // Trigger if remaining time <= 15s
     if (duration - currentTime <= 15) {
       if (preUploadTaskRef.current.path === nextTrack.path) return
-      
+
       const runPreUpload = async () => {
         try {
           const path = nextTrack.path
           preUploadTaskRef.current = { path, promise: null, mediaId: '', streamUrl: '' }
-          
+
           const init = await initMediaUpload(serverBaseUrl, accessToken, {
             roomId: roomState.roomId,
             title: nextTrack?.info?.title || nextTrack?.name || 'track',
             qualityMode: uploadQualityMode
           })
           if (!init?.ok || !init.mediaId) return
-          
+
           const buf = await window.api.readBufferHandler(path)
           const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf)
           for (let i = 0; i < u8.length; i += CHUNK_SIZE) {
@@ -146,10 +150,20 @@ export default function ListenTogetherDrawer({
           // ignore pre-upload errors
         }
       }
-      
+
       preUploadTaskRef.current.promise = runPreUpload()
     }
-  }, [isHost, inRoom, nextTrack?.path, duration, currentTime, serverBaseUrl, accessToken, roomState?.roomId, uploadQualityMode])
+  }, [
+    isHost,
+    inRoom,
+    nextTrack?.path,
+    duration,
+    currentTime,
+    serverBaseUrl,
+    accessToken,
+    roomState?.roomId,
+    uploadQualityMode
+  ])
 
   useEffect(() => {
     memberIdRef.current = memberId
@@ -168,8 +182,12 @@ export default function ListenTogetherDrawer({
       const savedRoom = localStorage.getItem('lt_last_room_id')
       const savedOffset = Number(localStorage.getItem('lt_sync_offset_ms') || 0)
       const savedAutoResyncEnabled = localStorage.getItem('lt_auto_resync_enabled')
-      const savedAutoResyncInterval = Number(localStorage.getItem('lt_auto_resync_interval_sec') || 15)
-      const savedForceSeekThreshold = Number(localStorage.getItem('lt_force_seek_threshold_sec') || 2)
+      const savedAutoResyncInterval = Number(
+        localStorage.getItem('lt_auto_resync_interval_sec') || 15
+      )
+      const savedForceSeekThreshold = Number(
+        localStorage.getItem('lt_force_seek_threshold_sec') || 2
+      )
       const savedUploadQualityMode = localStorage.getItem('lt_upload_quality_mode')
       const savedSyncCoverEnabled = localStorage.getItem('lt_sync_cover_enabled')
       const savedSyncLyricsEnabled = localStorage.getItem('lt_sync_lyrics_enabled')
@@ -181,7 +199,8 @@ export default function ListenTogetherDrawer({
         lastJoinedRoomIdRef.current = savedRoom
         setRoomIdInput(savedRoom)
       }
-      if (Number.isFinite(savedOffset)) setSyncOffsetMs(Math.max(-3000, Math.min(3000, savedOffset)))
+      if (Number.isFinite(savedOffset))
+        setSyncOffsetMs(Math.max(-3000, Math.min(3000, savedOffset)))
       if (savedAutoResyncEnabled != null) setAutoResyncEnabled(savedAutoResyncEnabled !== '0')
       if (Number.isFinite(savedAutoResyncInterval))
         setAutoResyncIntervalSec(Math.max(5, Math.min(120, savedAutoResyncInterval)))
@@ -206,14 +225,20 @@ export default function ListenTogetherDrawer({
           if (typeof persisted.autoResyncEnabled === 'boolean')
             setAutoResyncEnabled(persisted.autoResyncEnabled)
           if (Number.isFinite(Number(persisted.autoResyncIntervalSec)))
-            setAutoResyncIntervalSec(Math.max(5, Math.min(120, Number(persisted.autoResyncIntervalSec))))
+            setAutoResyncIntervalSec(
+              Math.max(5, Math.min(120, Number(persisted.autoResyncIntervalSec)))
+            )
           if (Number.isFinite(Number(persisted.forceSeekThresholdSec)))
-            setForceSeekThresholdSec(Math.max(0.5, Math.min(8, Number(persisted.forceSeekThresholdSec))))
+            setForceSeekThresholdSec(
+              Math.max(0.5, Math.min(8, Number(persisted.forceSeekThresholdSec)))
+            )
           if (persisted.uploadQualityMode === 'compressed') setUploadQualityMode('compressed')
-          if (typeof persisted.syncCoverEnabled === 'boolean') setSyncCoverEnabled(persisted.syncCoverEnabled)
+          if (typeof persisted.syncCoverEnabled === 'boolean')
+            setSyncCoverEnabled(persisted.syncCoverEnabled)
           if (typeof persisted.syncLyricsEnabled === 'boolean')
             setSyncLyricsEnabled(persisted.syncLyricsEnabled)
-          if (typeof persisted.syncMvEnabled === 'boolean') setSyncMvEnabled(persisted.syncMvEnabled)
+          if (typeof persisted.syncMvEnabled === 'boolean')
+            setSyncMvEnabled(persisted.syncMvEnabled)
         }
       } catch {}
       if (!cancelled) {
@@ -335,7 +360,9 @@ export default function ListenTogetherDrawer({
         ? { id: syncContent.mvId.id, source: syncContent.mvId.source || 'youtube' }
         : null
     payload.syncedLyrics =
-      syncLyricsEnabled && Array.isArray(syncContent?.lyrics) ? syncContent.lyrics.slice(0, 400) : []
+      syncLyricsEnabled && Array.isArray(syncContent?.lyrics)
+        ? syncContent.lyrics.slice(0, 400)
+        : []
     return payload
   }, [syncCoverEnabled, syncLyricsEnabled, syncMvEnabled, syncContent])
 
@@ -394,20 +421,30 @@ export default function ListenTogetherDrawer({
       c.disconnect()
       clientRef.current = null
     }
-  }, [activated, serverBaseUrl, displayName, onRemotePlayState, syncOffsetMs, forceSeekThresholdSec])
+  }, [
+    activated,
+    serverBaseUrl,
+    displayName,
+    onRemotePlayState,
+    syncOffsetMs,
+    forceSeekThresholdSec
+  ])
 
   useEffect(() => {
     if (!inRoom || isHost || !autoResyncEnabled) return
-    const iv = setInterval(() => {
-      if (!roomState || typeof onRemotePlayState !== 'function') return
-      onRemotePlayState({
-        roomState,
-        memberId: memberIdRef.current,
-        force: true,
-        syncOffsetMs,
-        forceSeekThresholdSec
-      })
-    }, Math.max(5, autoResyncIntervalSec || 15) * 1000)
+    const iv = setInterval(
+      () => {
+        if (!roomState || typeof onRemotePlayState !== 'function') return
+        onRemotePlayState({
+          roomState,
+          memberId: memberIdRef.current,
+          force: true,
+          syncOffsetMs,
+          forceSeekThresholdSec
+        })
+      },
+      Math.max(5, autoResyncIntervalSec || 15) * 1000
+    )
     return () => clearInterval(iv)
   }, [
     inRoom,
@@ -425,7 +462,8 @@ export default function ListenTogetherDrawer({
     const now = Date.now()
     const trackChanged = prevTrackIdRef.current !== playbackSnapshot.trackId
     const playingChanged = prevPlayingRef.current !== playbackSnapshot.isPlaying
-    const jumped = Math.abs((prevPositionRef.current || 0) - (playbackSnapshot.positionSec || 0)) > 3
+    const jumped =
+      Math.abs((prevPositionRef.current || 0) - (playbackSnapshot.positionSec || 0)) > 3
     const due = now - lastUpdateAtRef.current >= PLAYER_UPDATE_THROTTLE_MS
 
     if (trackChanged) {
@@ -626,11 +664,11 @@ export default function ListenTogetherDrawer({
     })
 
     setStatusText('音频已同步，缓冲等待中...')
-    
+
     setTimeout(() => {
       if (publishToken && activePublishTokenRef.current === publishToken) {
         if (typeof onHostPlayAfterBuffer === 'function') onHostPlayAfterBuffer()
-        
+
         clientRef.current?.send('player:event', {
           eventType: 'play',
           ...playbackSnapshot,
@@ -641,7 +679,7 @@ export default function ListenTogetherDrawer({
           artist: meta.artist || '',
           ...sharedSyncPayload
         })
-        
+
         setStatusText('发布成功，同步播放')
       }
     }, 2500)
@@ -657,11 +695,16 @@ export default function ListenTogetherDrawer({
       const picked = await window.api.openFileHandler('en')
       const first = Array.isArray(picked) ? picked[0] : null
       if (!first?.path) return
-      await publishLocalTrackByPath(first.path, first.name, {
-        trackId: first.path,
-        title: first.name || 'track',
-        artist: ''
-      }, publishToken)
+      await publishLocalTrackByPath(
+        first.path,
+        first.name,
+        {
+          trackId: first.path,
+          title: first.name || 'track',
+          artist: ''
+        },
+        publishToken
+      )
     } catch (e) {
       if (typeof onHostUploadEnd === 'function') onHostUploadEnd()
       if (String(e?.message || '').includes('publish_superseded')) {
@@ -703,7 +746,7 @@ export default function ListenTogetherDrawer({
             // Wait for pre-upload to finish if it's currently running
             await preUploadTaskRef.current.promise
           }
-          
+
           if (preUploadTaskRef.current.path === path && preUploadTaskRef.current.streamUrl) {
             // Instant publish using pre-uploaded media
             clientRef.current?.send('media:publish', {
@@ -718,14 +761,14 @@ export default function ListenTogetherDrawer({
               artist: currentTrackMeta.artist,
               ...sharedSyncPayload
             })
-            
+
             setStatusText('音频已预加载，缓冲等待中...')
             if (typeof onHostUploadStart === 'function') onHostUploadStart()
-            
+
             setTimeout(() => {
               if (activePublishTokenRef.current === publishToken) {
                 if (typeof onHostPlayAfterBuffer === 'function') onHostPlayAfterBuffer()
-                
+
                 clientRef.current?.send('player:event', {
                   eventType: 'play',
                   ...playbackSnapshot,
@@ -736,17 +779,22 @@ export default function ListenTogetherDrawer({
                   artist: currentTrackMeta.artist,
                   ...sharedSyncPayload
                 })
-                
+
                 setStatusText('预加载发布成功，同步播放')
               }
             }, 2500)
           } else {
             setLocalFileBusy(true)
-            await publishLocalTrackByPath(path, currentTrack?.name || 'track', {
-              trackId: path,
-              title: currentTrackMeta.title || currentTrack?.name || 'track',
-              artist: currentTrackMeta.artist
-            }, publishToken)
+            await publishLocalTrackByPath(
+              path,
+              currentTrack?.name || 'track',
+              {
+                trackId: path,
+                title: currentTrackMeta.title || currentTrack?.name || 'track',
+                artist: currentTrackMeta.artist
+              },
+              publishToken
+            )
           }
         }
         lastAutoPublishedTrackRef.current = trackKey
@@ -869,7 +917,11 @@ export default function ListenTogetherDrawer({
               >
                 <Radio size={16} /> {t('listenTogether.createRoom')}
               </button>
-              <button type="button" className="lyrics-drawer-primary-btn lt-btn-soft" onClick={joinRoom}>
+              <button
+                type="button"
+                className="lyrics-drawer-primary-btn lt-btn-soft"
+                onClick={joinRoom}
+              >
                 <Users size={16} /> {t('listenTogether.joinRoom')}
               </button>
             </div>
@@ -894,7 +946,7 @@ export default function ListenTogetherDrawer({
             <div className="lyrics-drawer-offset-controls">
               <button
                 type="button"
-                  className="lyrics-drawer-primary-btn lt-btn-primary"
+                className="lyrics-drawer-primary-btn lt-btn-primary"
                 onClick={() => applyJoinKey(true)}
               >
                 <Link2 size={16} /> {t('listenTogether.useJoinKey')}
@@ -911,7 +963,11 @@ export default function ListenTogetherDrawer({
                 <button type="button" className="lyrics-drawer-primary-btn" onClick={copyInvite}>
                   <Copy size={16} /> {t('listenTogether.copyInvite')}
                 </button>
-                <button type="button" className="lyrics-drawer-primary-btn lt-btn-soft" onClick={copyJoinKey}>
+                <button
+                  type="button"
+                  className="lyrics-drawer-primary-btn lt-btn-soft"
+                  onClick={copyJoinKey}
+                >
                   <Copy size={16} /> {t('listenTogether.copyJoinKey')}
                 </button>
                 <button
@@ -956,7 +1012,9 @@ export default function ListenTogetherDrawer({
                   +200ms
                 </button>
               </div>
-              <p className="lyrics-drawer-hint">{t('listenTogether.syncOffset')}: {syncOffsetMs}ms</p>
+              <p className="lyrics-drawer-hint">
+                {t('listenTogether.syncOffset')}: {syncOffsetMs}ms
+              </p>
               <label className="lt-switch-row">
                 <span>{t('listenTogether.autoResync')}</span>
                 <input
@@ -989,14 +1047,18 @@ export default function ListenTogetherDrawer({
                 <button
                   type="button"
                   className="lyrics-drawer-primary-btn"
-                  onClick={() => setForceSeekThresholdSec((v) => Math.max(0.5, Number((v - 0.5).toFixed(1))))}
+                  onClick={() =>
+                    setForceSeekThresholdSec((v) => Math.max(0.5, Number((v - 0.5).toFixed(1))))
+                  }
                 >
                   阈值-0.5s
                 </button>
                 <button
                   type="button"
                   className="lyrics-drawer-primary-btn"
-                  onClick={() => setForceSeekThresholdSec((v) => Math.min(8, Number((v + 0.5).toFixed(1))))}
+                  onClick={() =>
+                    setForceSeekThresholdSec((v) => Math.min(8, Number((v + 0.5).toFixed(1))))
+                  }
                 >
                   阈值+0.5s
                 </button>
@@ -1053,7 +1115,11 @@ export default function ListenTogetherDrawer({
                 <span className="lt-switch-slider" />
               </label>
               <div className="lyrics-drawer-offset-controls">
-                <button type="button" className="lyrics-drawer-primary-btn lt-btn-primary" onClick={publishUrl}>
+                <button
+                  type="button"
+                  className="lyrics-drawer-primary-btn lt-btn-primary"
+                  onClick={publishUrl}
+                >
                   <Link2 size={16} /> {t('listenTogether.publishUrl')}
                 </button>
                 <button

@@ -1,0 +1,18 @@
+.osu-plugin-btn .osu-plugin-btn-label {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text-soft);
+  transition: color 0.15s ease;
+}
+
+.osu-plugin-btn:hover:not(:disabled) .osu-plugin-btn-label,
+.osu-plugin-btn:focus-visible .osu-plugin-btn-label {
+  color: var(--accent-pink);
+}
+
+.osu-plugin-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}

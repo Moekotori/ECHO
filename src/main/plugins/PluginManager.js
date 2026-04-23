@@ -258,10 +258,10 @@ export class PluginManager {
         if (!f.endsWith('.json')) continue
         try {
           const lang = f.replace('.json', '')
-          payload.locales[lang] = JSON.parse(
-            fs.readFileSync(join(localesDir, f), 'utf-8')
-          )
-        } catch { /* skip broken locale files */ }
+          payload.locales[lang] = JSON.parse(fs.readFileSync(join(localesDir, f), 'utf-8'))
+        } catch {
+          /* skip broken locale files */
+        }
       }
     }
 

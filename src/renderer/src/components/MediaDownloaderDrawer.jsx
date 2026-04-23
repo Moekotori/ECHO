@@ -8,6 +8,8 @@ export default function MediaDownloaderDrawer({
   onClose,
   config,
   setConfig,
+  albumContext,
+  downloadFolder,
   onSuccess,
   userPlaylists,
   setUserPlaylists,
@@ -52,6 +54,8 @@ export default function MediaDownloaderDrawer({
           <DownloaderView
             config={config}
             setConfig={setConfig}
+            albumContext={albumContext}
+            downloadFolder={downloadFolder}
             onSuccess={onSuccess}
             userPlaylists={userPlaylists}
             setUserPlaylists={setUserPlaylists}

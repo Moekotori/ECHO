@@ -83,6 +83,8 @@ export const parseTrackInfo = (track, meta) => {
     album: meta?.album || track?.album || folderAlbum || 'Unknown Album',
     cover: meta?.cover || null,
     trackNo: meta?.trackNo ?? (trackNoFromName ? Number(trackNoFromName) : null),
-    discNo: meta?.discNo ?? null
+    discNo: meta?.discNo ?? null,
+    duration: meta?.duration || 0,
+    sizeBytes: track?.sizeBytes || 0
   }
 }

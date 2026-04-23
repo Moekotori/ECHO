@@ -76,82 +76,75 @@ export default function PluginHostProvider({ children }) {
     }
   })
 
-  const activateRendererPlugin = useCallback(
-    (payload) => {
-      const { manifest, rendererCode, stylesCode, locales } = payload
-      const pluginId = manifest.id
+  const activateRendererPlugin = useCallback((payload) => {
+    const { manifest, rendererCode, stylesCode, locales } = payload
+    const pluginId = manifest.id
 
-      if (stylesCode) {
-        const style = document.createElement('style')
-        style.setAttribute('data-plugin', pluginId)
-        style.textContent = stylesCode
-        document.head.appendChild(style)
+    if (stylesCode) {
+      const style = document.createElement('style')
+      style.setAttribute('data-plugin', pluginId)
+      style.textContent = stylesCode
+      document.head.appendChild(style)
+    }
+
+    if (locales) {
+      for (const [lang, translations] of Object.entries(locales)) {
+        pluginEventBus.emit('plugin:i18n-add', { pluginId, locale: lang, translations })
+      }
+    }
+
+    if (!rendererCode) return
+
+    try {
+      const echoAPI = buildRendererPluginAPI(pluginId, {
+        slotRegistry: slotRegistryRef.current,
+        musicSourceRegistry: musicSourceReg.current,
+        lyricsProviderRegistry: lyricsProviderReg.current
+      })
+
+      const moduleExports = {}
+      const pluginModule = { exports: moduleExports }
+
+      // eslint-disable-next-line no-new-func
+      const factory = new Function('module', 'exports', 'echo', 'React', rendererCode)
+      factory(pluginModule, moduleExports, echoAPI, React)
+
+      const exported = pluginModule.exports || moduleExports
+      if (typeof exported.activate === 'function') {
+        exported.activate(echoAPI)
       }
 
-      if (locales) {
-        for (const [lang, translations] of Object.entries(locales)) {
-          pluginEventBus.emit('plugin:i18n-add', { pluginId, locale: lang, translations })
+      deactivatorsRef.current.set(pluginId, () => {
+        if (typeof exported.deactivate === 'function') {
+          exported.deactivate(echoAPI)
         }
-      }
+        slotRegistryRef.current.unregisterAll(pluginId)
+        pluginEventBus.removeAllForPlugin(pluginId)
+        musicSourceRegistryRef.current.delete(pluginId)
+        lyricsProviderRegistryRef.current.delete(pluginId)
+        setMusicSources(new Map(musicSourceRegistryRef.current))
+        setLyricsProviders(new Map(lyricsProviderRegistryRef.current))
 
-      if (!rendererCode) return
+        const styleEl = document.querySelector(`style[data-plugin="${pluginId}"]`)
+        if (styleEl) styleEl.remove()
+      })
 
-      try {
-        const echoAPI = buildRendererPluginAPI(pluginId, {
-          slotRegistry: slotRegistryRef.current,
-          musicSourceRegistry: musicSourceReg.current,
-          lyricsProviderRegistry: lyricsProviderReg.current
-        })
-
-        const moduleExports = {}
-        const pluginModule = { exports: moduleExports }
-
-        // eslint-disable-next-line no-new-func
-        const factory = new Function(
-          'module',
-          'exports',
-          'echo',
-          'React',
-          rendererCode
-        )
-        factory(pluginModule, moduleExports, echoAPI, React)
-
-        const exported = pluginModule.exports || moduleExports
-        if (typeof exported.activate === 'function') {
-          exported.activate(echoAPI)
-        }
-
-        deactivatorsRef.current.set(pluginId, () => {
-          if (typeof exported.deactivate === 'function') {
-            exported.deactivate(echoAPI)
-          }
-          slotRegistryRef.current.unregisterAll(pluginId)
-          pluginEventBus.removeAllForPlugin(pluginId)
-          musicSourceRegistryRef.current.delete(pluginId)
-          lyricsProviderRegistryRef.current.delete(pluginId)
-          setMusicSources(new Map(musicSourceRegistryRef.current))
-          setLyricsProviders(new Map(lyricsProviderRegistryRef.current))
-
-          const styleEl = document.querySelector(`style[data-plugin="${pluginId}"]`)
-          if (styleEl) styleEl.remove()
-        })
-
-        setLoadedPlugins((prev) => {
-          const next = new Map(prev)
-          next.set(pluginId, { manifest, echoAPI })
-          return next
-        })
-      } catch (e) {
-        console.error(`[PluginHost] failed to activate renderer plugin ${pluginId}:`, e)
-      }
-    },
-    []
-  )
+      setLoadedPlugins((prev) => {
+        const next = new Map(prev)
+        next.set(pluginId, { manifest, echoAPI })
+        return next
+      })
+    } catch (e) {
+      console.error(`[PluginHost] failed to activate renderer plugin ${pluginId}:`, e)
+    }
+  }, [])
 
   const deactivateRendererPlugin = useCallback((pluginId) => {
     const cleanup = deactivatorsRef.current.get(pluginId)
     if (cleanup) {
-      try { cleanup() } catch (e) {
+      try {
+        cleanup()
+      } catch (e) {
         console.error(`[PluginHost] deactivate error for ${pluginId}:`, e)
       }
       deactivatorsRef.current.delete(pluginId)

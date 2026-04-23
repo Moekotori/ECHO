@@ -1,4 +1,4 @@
-import {
+﻿import {
   app,
   shell,
   BrowserWindow,
@@ -7,38 +7,72 @@ import {
   session,
   net,
   clipboard,
-  nativeImage
+  nativeImage,
+  Tray,
+  Menu,
+  globalShortcut
 } from 'electron'
+import { createRequire } from 'module'
 import { join, basename, dirname, extname, resolve, sep } from 'path'
 import { execSync as _execSyncUtf } from 'child_process'
 
 // Fix Windows console encoding so CJK characters in logs aren't garbled
 if (process.platform === 'win32') {
-  try { _execSyncUtf('chcp 65001', { stdio: 'ignore' }) } catch { /* best-effort */ }
+  try {
+    _execSyncUtf('chcp 65001', { stdio: 'ignore' })
+  } catch {
+    /* best-effort */
+  }
 }
 
-// YouTube 内嵌 MV：主界面来自 localhost / 本地 file，embed 为跨�??iframe。Chromium 默认按「顶级站�??× 嵌入源」做
-// 存储分区，导致在「应用内登录」子窗口（同一会话）里写入�??youtube.com Cookie 无法被该 iframe 读取�??// 仍会提示「请登录 / 机器人验证」。须�??app ready 之前关闭第三方存储分区。（合规桌面应用常见做法，非绕过验证逻辑。）
+// YouTube 内嵌 MV：主界面来自 localhost / 本地 file，embed 为跨域 iframe。Chromium 默认按「顶级站点 × 嵌入源」做
+// 存储分区，导致在「应用内登录」子窗口（同一会话）里写入的 youtube.com Cookie 无法被该 iframe 读取，
+// 仍会提示「请登录 / 机器人验证」。须在 app ready 之前关闭第三方存储分区。（合规桌面应用常见做法，非绕过验证逻辑。）
 app.commandLine.appendSwitch('disable-features', 'ThirdPartyStoragePartitioning')
+// 去掉 Chromium 对外暴露的"自动化控制"特征标志，防止 Google 登录页识别 Electron 为不受信任的嵌入式浏览器。
+app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import fs from 'fs'
+import { existsSync } from 'fs'
+import { autoUpdater } from 'electron-updater'
 import { execFile } from 'child_process'
 import DiscordRPC from 'discord-rpc'
 import axios from 'axios'
 import http from 'http'
 import { audioEngine } from './audio/AudioEngine'
+import { listAsioDevices } from './audio/NativeAudioBridge.js'
 import { DlnaMediaRenderer } from './cast/DlnaMediaRenderer.js'
 import { initCrashReporter, logError, getCrashDir } from './CrashReporter'
 import MediaDownloader from './MediaDownloader'
 import { importPlaylistFromLink } from './playlistLinkImport.js'
+import { importSharedPlaylists } from './playlistShareImport.js'
 import { convertLinesToRomaji } from './romajiKuroshiro.js'
 import {
+  collectAudioFilesRecursive,
+  createLibraryWatchManager,
+  rescanImportedFolders
+} from './utils/libraryWatcher.js'
+import {
   fetchNeteaseLrcText,
-  searchNeteaseSongs
+  searchNeteaseSongs,
+  getNeteaseSongDirectUrl
 } from './neteaseLyrics.js'
+import {
+  buildNcmRequestOptions,
+  getNeteaseCookieFromSession,
+  validateNeteaseCookie
+} from './neteaseAuth.js'
 import { getMediaDurationSeconds } from './utils/ffmpegProbeDuration.js'
+import { getResolvedFfmpegStaticPath } from './utils/resolveFfmpegStaticPath.js'
 import { getDialogStrings } from './dialogLocale.js'
 import PluginManager from './plugins/PluginManager.js'
+import { buildUpdaterEventDedupeKey, shouldReuseUpdaterState } from '../shared/updaterState.mjs'
+
+const require = createRequire(import.meta.url)
+
+function getNcmApi() {
+  return require('@neteasecloudmusicapienhanced/api')
+}
 
 function dialogLocaleFromOpts(opts) {
   const loc = opts && typeof opts === 'object' && opts.locale
@@ -46,6 +80,12 @@ function dialogLocaleFromOpts(opts) {
 }
 
 let mainWindow = null
+let tray = null
+let isQuitting = false
+let trayPlaybackState = {
+  isPlaying: false,
+  trackTitle: ''
+}
 /** Floating lyrics panel (renderer `?mode=lyrics-desktop`) */
 let lyricsDesktopWindow = null
 /** Last payload so the child window can request a resend after it subscribes to IPC */
@@ -57,6 +97,15 @@ function stopLyricsDesktopMainSyncTimer() {
   if (lyricsDesktopMainSyncTimer) {
     clearInterval(lyricsDesktopMainSyncTimer)
     lyricsDesktopMainSyncTimer = null
+  }
+}
+
+function applyLyricsDesktopLockState(isLocked) {
+  if (!lyricsDesktopWindow || lyricsDesktopWindow.isDestroyed()) return
+  if (isLocked) {
+    lyricsDesktopWindow.setIgnoreMouseEvents(true, { forward: true })
+  } else {
+    lyricsDesktopWindow.setIgnoreMouseEvents(false)
   }
 }
 
@@ -85,6 +134,224 @@ function startLyricsDesktopMainSyncTimer() {
   }, 50)
 }
 
+function cleanupLyricsDesktopWindow() {
+  try {
+    stopLyricsDesktopMainSyncTimer()
+    if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
+      try {
+        const bounds = lyricsDesktopWindow.getBounds()
+        const state = readAppStateJson()
+        state.lyricsDesktopBounds = bounds
+        writeAppStateJson(state)
+      } catch {
+        /* ignore */
+      }
+      lyricsDesktopWindow.destroy()
+    }
+  } catch {
+    /* ignore */
+  } finally {
+    lyricsDesktopWindow = null
+  }
+}
+
+function getTrayTrackTitle(status) {
+  const filePath = status?.filePath
+  if (typeof filePath !== 'string' || !filePath) return ''
+
+  try {
+    if (/^https?:\/\//i.test(filePath)) {
+      const url = new URL(filePath)
+      const name = basename(decodeURIComponent(url.pathname || ''))
+      return name ? name.replace(new RegExp(`${extname(name)}$`), '') : ''
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const name = basename(filePath)
+  return name ? name.replace(new RegExp(`${extname(name)}$`), '') : ''
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function hideMainWindowToTray() {
+  if (!mainWindow || mainWindow.isDestroyed()) return { ok: false }
+  mainWindow.hide()
+  return { ok: true }
+}
+
+function toggleMainWindowVisibility() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isVisible()) {
+    mainWindow.hide()
+    return
+  }
+  showMainWindow()
+}
+
+function sendPlayerCommand(command) {
+  if (!mainWindow || mainWindow.isDestroyed()) return { ok: false }
+  mainWindow.webContents.send('player:cmd', command)
+  return { ok: true }
+}
+
+function registerGlobalMediaShortcuts() {
+  const shortcutSpecs = [
+    {
+      accelerator: 'MediaPlayPause',
+      handler: () => {
+        const status = audioEngine.getStatus()
+        if (status?.isPlaying) audioEngine.pause()
+        else audioEngine.resume()
+      }
+    },
+    {
+      accelerator: 'MediaNextTrack',
+      handler: () => {
+        sendPlayerCommand('next')
+      }
+    },
+    {
+      accelerator: 'MediaPreviousTrack',
+      handler: () => {
+        sendPlayerCommand('prev')
+      }
+    },
+    {
+      accelerator: 'MediaStop',
+      handler: () => {
+        audioEngine.stop()
+      }
+    }
+  ]
+
+  for (const { accelerator, handler } of shortcutSpecs) {
+    try {
+      const registered = globalShortcut.register(accelerator, handler)
+      if (!registered) {
+        console.warn(`[Shortcut] Failed to register ${accelerator}`)
+      }
+    } catch (error) {
+      console.warn(`[Shortcut] Failed to register ${accelerator}:`, error?.message || error)
+    }
+  }
+}
+
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
+    {
+      label: trayPlaybackState.trackTitle || 'ECHO',
+      enabled: false
+    },
+    { type: 'separator' },
+    {
+      label: trayPlaybackState.isPlaying ? '暂停' : '播放',
+      click: () => {
+        if (trayPlaybackState.isPlaying) audioEngine.pause()
+        else audioEngine.resume()
+      }
+    },
+    {
+      label: '上一首',
+      click: () => {
+        sendPlayerCommand('prev')
+      }
+    },
+    {
+      label: '下一首',
+      click: () => {
+        sendPlayerCommand('next')
+      }
+    },
+    { type: 'separator' },
+    {
+      label: '显示窗口',
+      click: () => {
+        showMainWindow()
+      }
+    },
+    {
+      label: '退出',
+      click: () => {
+        app.quit()
+      }
+    }
+  ])
+}
+
+function refreshTrayMenu(status) {
+  let shouldUpdateMenu = false
+
+  if (status && typeof status === 'object') {
+    const nextState = {
+      isPlaying: !!status.isPlaying,
+      trackTitle: getTrayTrackTitle(status)
+    }
+    shouldUpdateMenu =
+      nextState.isPlaying !== trayPlaybackState.isPlaying ||
+      nextState.trackTitle !== trayPlaybackState.trackTitle
+    trayPlaybackState = nextState
+  }
+
+  if (!tray || tray.isDestroyed()) return
+  if (status && !shouldUpdateMenu) return
+  tray.setContextMenu(buildTrayMenu())
+}
+
+function createTrayIcon() {
+  const candidatePaths = [join(__dirname, '..', '..', 'website', 'icon.png'), resolveAppIconPath()]
+
+  for (const candidate of candidatePaths) {
+    if (!candidate) continue
+    const icon = nativeImage.createFromPath(candidate)
+    if (!icon.isEmpty()) return icon
+  }
+
+  return undefined
+}
+
+function createTray() {
+  if (tray && !tray.isDestroyed()) {
+    refreshTrayMenu(audioEngine.getStatus())
+    return tray
+  }
+
+  const trayIcon = createTrayIcon()
+  if (!trayIcon) return null
+
+  tray = new Tray(trayIcon)
+  tray.setToolTip('ECHO')
+  refreshTrayMenu(audioEngine.getStatus())
+
+  tray.on('click', () => {
+    toggleMainWindowVisibility()
+  })
+  tray.on('right-click', () => {
+    refreshTrayMenu(audioEngine.getStatus())
+    tray?.popUpContextMenu(buildTrayMenu())
+  })
+
+  return tray
+}
+
+function destroyTray() {
+  if (!tray || tray.isDestroyed()) return
+  tray.destroy()
+  tray = null
+}
+
+function broadcastAudioStatus(status) {
+  refreshTrayMenu(status)
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('audio:status-update', status)
+}
+
 function broadcastCastStatus() {
   if (!mainWindow || mainWindow.isDestroyed()) return
   mainWindow.webContents.send('cast:status', dlnaRenderer.getStatus())
@@ -100,18 +367,33 @@ let bilibiliSignInWindow = null
 let neteaseSignInWindow = null
 let rendererHttpServer = null
 let rendererServerUrl = null
+let libraryWatchManager = null
 const APP_STATE_FILE = 'echoes-app-state.json'
+const APP_STATE_WRITE_DEBOUNCE_MS = 1000
 const APP_STATE_KEYS = new Set([
   'playlist',
   'userPlaylists',
+  'userSmartCollections',
+  'displayMetadataOverrides',
   'config',
   'likedPaths',
+  'trackStats',
   'playMode',
   'queuePlaybackEnabled',
+  'playbackHistory',
+  'volume',
+  'importedFolders',
   'downloaderSettings',
   'ltSettings',
-  'lyricsDesktopBounds'
+  'lyricsDesktopBounds',
+  'playbackSession'
 ])
+let appStateCache = {}
+let appStateWriteTimer = null
+let updaterCheckPromise = null
+let updaterCurrentEvent = null
+let updaterLastEventKey = ''
+let updaterListenersBound = false
 
 function readAppStateJson() {
   try {
@@ -134,6 +416,143 @@ function writeAppStateJson(nextState) {
     console.warn('[appState] write failed:', e?.message || e)
     return false
   }
+}
+
+function ensureAppStateCache() {
+  if (!appStateCache || typeof appStateCache !== 'object') {
+    appStateCache = readAppStateJson()
+  }
+  return appStateCache
+}
+
+function loadAppStateCache() {
+  appStateCache = readAppStateJson()
+  return appStateCache
+}
+
+function clearAppStateWriteTimer() {
+  if (appStateWriteTimer) {
+    clearTimeout(appStateWriteTimer)
+    appStateWriteTimer = null
+  }
+}
+
+function flushAppStateCacheSync() {
+  clearAppStateWriteTimer()
+  return writeAppStateJson(ensureAppStateCache())
+}
+
+function scheduleAppStateFlush() {
+  clearAppStateWriteTimer()
+  appStateWriteTimer = setTimeout(() => {
+    appStateWriteTimer = null
+    flushAppStateCacheSync()
+  }, APP_STATE_WRITE_DEBOUNCE_MS)
+}
+
+function cloneAppStateSnapshot() {
+  const state = ensureAppStateCache()
+  try {
+    return JSON.parse(JSON.stringify(state))
+  } catch {
+    return { ...state }
+  }
+}
+
+function getSavedNeteaseCookieFromAppState() {
+  try {
+    const state = ensureAppStateCache()
+    const cookie = state?.downloaderSettings?.neteaseCookie
+    return typeof cookie === 'string' ? cookie.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+async function getMainWindowSession() {
+  if (mainWindow?.webContents?.session) return mainWindow.webContents.session
+  return session.defaultSession
+}
+
+async function resolveNeteaseAuthState(preferredCookie = '') {
+  const candidates = []
+  const pushCandidate = (cookie, source) => {
+    const trimmed = String(cookie || '').trim()
+    if (!trimmed) return
+    if (candidates.some((item) => item.cookie === trimmed)) return
+    candidates.push({ cookie: trimmed, source })
+  }
+
+  const ses = await getMainWindowSession()
+  pushCandidate(await getNeteaseCookieFromSession(ses), 'session')
+  pushCandidate(preferredCookie, 'preferred')
+  pushCandidate(getSavedNeteaseCookieFromAppState(), 'appState')
+  pushCandidate(process.env.ECHOES_NETEASE_COOKIE?.trim(), 'env')
+
+  let lastChecked = null
+  for (const candidate of candidates) {
+    const checked = await validateNeteaseCookie(candidate.cookie)
+    lastChecked = { ...checked, source: candidate.source }
+    if (checked.valid) {
+      return {
+        ok: true,
+        checked: true,
+        valid: true,
+        signedIn: true,
+        cookie: candidate.cookie,
+        source: candidate.source,
+        hasMusicU: checked.hasMusicU,
+        hasMusicA: checked.hasMusicA,
+        account: checked.account,
+        profile: checked.profile,
+        vipType: checked.vipType || 0,
+        isVip: checked.isVip === true
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    checked: Boolean(lastChecked?.checked),
+    valid: false,
+    signedIn: false,
+    cookie: '',
+    source: lastChecked?.source || '',
+    hasMusicU: Boolean(lastChecked?.hasMusicU),
+    hasMusicA: Boolean(lastChecked?.hasMusicA),
+    account: null,
+    profile: null,
+    vipType: 0,
+    isVip: false,
+    error: lastChecked?.checked === false ? lastChecked?.error || '' : ''
+  }
+}
+
+function resolveAppIconPath() {
+  const candidates = [
+    join(__dirname, '..', '..', 'website', 'icon.png'),
+    resolve(app.getAppPath(), 'website', 'icon.png'),
+    resolve(app.getAppPath(), '..', 'website', 'icon.png'),
+    resolve(__dirname, '..', '..', 'website', 'icon.png'),
+    resolve(process.cwd(), 'website', 'icon.png')
+  ]
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate
+    } catch {
+      // ignore and try next path
+    }
+  }
+
+  return ''
+}
+
+function createAppWindowIcon() {
+  const iconPath = resolveAppIconPath()
+  if (!iconPath) return undefined
+  const icon = nativeImage.createFromPath(iconPath)
+  return icon.isEmpty() ? undefined : icon
 }
 
 /** Override with env `ECHOES_SOUNDCLOUD_PROXY` (no trailing slash), e.g. https://your-proxy.example.com */
@@ -159,41 +578,6 @@ const MIME_TYPES = {
 
 function getMimeType(filePath) {
   return MIME_TYPES[extname(filePath).toLowerCase()] || 'application/octet-stream'
-}
-
-const SUPPORTED_AUDIO_EXTS = new Set([
-  '.mp3',
-  '.wav',
-  '.flac',
-  '.ogg',
-  '.m4a',
-  '.aac',
-  '.ncm',
-  '.dsf',
-  '.dff'
-])
-
-/**
- * 递归收集目录下（或单个音频文件）的受支持音频，顺序为目录遍历顺序�?
- * @param {string} entryPath
- * @param {{ name: string, path: string }[]} out
- */
-function collectAudioFilesRecursive(entryPath, out) {
-  try {
-    const stats = fs.statSync(entryPath)
-    if (stats.isDirectory()) {
-      for (const name of fs.readdirSync(entryPath)) {
-        collectAudioFilesRecursive(join(entryPath, name), out)
-      }
-    } else {
-      const ext = extname(entryPath).toLowerCase()
-      if (SUPPORTED_AUDIO_EXTS.has(ext)) {
-        out.push({ name: basename(entryPath), path: entryPath })
-      }
-    }
-  } catch (e) {
-    console.error(`[collectAudioFilesRecursive] ${entryPath}:`, e?.message || e)
-  }
 }
 
 async function startRendererHttpServer() {
@@ -260,15 +644,140 @@ async function stopRendererHttpServer() {
   rendererServerUrl = null
 }
 
+function initUpdater() {
+  if (is.dev) return // 不在开发环境自动更新
+
+  const sendUpdaterEvent = (event, data = {}) => {
+    const payload = { event, ...data }
+    const dedupeKey = buildUpdaterEventDedupeKey(event, data)
+    if (dedupeKey === updaterLastEventKey) return
+    updaterLastEventKey = dedupeKey
+    updaterCurrentEvent = payload
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('updater-message', payload)
+    }
+  }
+
+  const finishCheck = () => {
+    updaterCheckPromise = null
+  }
+
+  const runUpdateCheck = async (source = 'manual') => {
+    if (updaterCheckPromise) {
+      console.log(`[UpdaterState] Reusing in-flight check for source=${source}`)
+      if (source === 'manual' && updaterCurrentEvent?.event) {
+        sendUpdaterEvent(updaterCurrentEvent.event, updaterCurrentEvent)
+      }
+      return updaterCheckPromise
+    }
+
+    if (shouldReuseUpdaterState(updaterCurrentEvent)) {
+      console.log(
+        `[UpdaterState] Reusing existing state=${updaterCurrentEvent?.event || 'unknown'}`
+      )
+      if (source === 'manual') {
+        sendUpdaterEvent(updaterCurrentEvent.event, updaterCurrentEvent)
+      }
+      return { success: true, skipped: true, state: updaterCurrentEvent }
+    }
+
+    updaterCheckPromise = autoUpdater
+      .checkForUpdates()
+      .then((result) => ({ success: true, info: result?.updateInfo }))
+      .catch((e) => {
+        console.error('[Updater] 检查更新失败:', e)
+        sendUpdaterEvent('error', { message: e?.message || String(e) })
+        return { success: false, error: e?.message || String(e) }
+      })
+      .finally(() => {
+        finishCheck()
+      })
+
+    return updaterCheckPromise
+  }
+
+  autoUpdater.autoDownload = true // 发现新版后自动在后台下载
+  autoUpdater.autoInstallOnAppQuit = true // 关闭时自动安装
+
+  if (!updaterListenersBound) {
+    updaterListenersBound = true
+
+    autoUpdater.on('checking-for-update', () => {
+      console.log('[Updater] Checking for updates')
+      sendUpdaterEvent('checking')
+    })
+
+    autoUpdater.on('update-available', (info) => {
+      console.log('[Updater] 发现新版本:', info.version)
+      sendUpdaterEvent('update-available', { version: info.version })
+    })
+
+    autoUpdater.on('update-not-available', () => {
+      console.log('[Updater] Update not available')
+      sendUpdaterEvent('update-not-available')
+    })
+
+    autoUpdater.on('download-progress', (prog) => {
+      sendUpdaterEvent('download-progress', { percent: Math.round(prog.percent || 0) })
+    })
+
+    autoUpdater.on('update-downloaded', (info) => {
+      console.log('[Updater] 新版本已下载完毕:', info.version)
+      sendUpdaterEvent('update-downloaded', { version: info.version })
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      dialog
+        .showMessageBox(mainWindow, {
+          type: 'info',
+          title: '发现新版本',
+          message: `ECHO ${info.version} 已经下载完毕，是否立刻重启并安装更新？`,
+          buttons: ['重启并安装', '稍后安装']
+        })
+        .then((res) => {
+          if (res.response === 0) {
+            autoUpdater.quitAndInstall(false, true)
+          }
+        })
+    })
+
+    autoUpdater.on('error', (err) => {
+      console.error('[Updater] 更新发生错误:', err)
+      sendUpdaterEvent('error', { message: err?.message || String(err) })
+    })
+  }
+
+  ipcMain.handle('app:checkForUpdates', async () => {
+    if (is.dev) {
+      sendUpdaterEvent('update-not-available')
+      return { success: true, dev: true }
+    }
+    return runUpdateCheck('manual')
+  })
+
+  ipcMain.handle('app:installUpdate', async () => {
+    if (is.dev) return { success: true, dev: true }
+    try {
+      autoUpdater.quitAndInstall(false, true)
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e?.message || String(e) }
+    }
+  })
+
+  // 启动后静默检查一次
+  void runUpdateCheck('startup')
+}
+
 async function createWindow() {
+  const appWindowIcon = createAppWindowIcon()
   mainWindow = new BrowserWindow({
-    width: 1560,
-    height: 900,
+    width: 1600,
+    height: 960,
     minWidth: 760,
     minHeight: 500,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
+    ...(appWindowIcon ? { icon: appWindowIcon } : {}),
     // Keep timers/rAF running when minimized so desktop lyrics IPC sync does not stall.
     backgroundThrottling: false,
     webPreferences: {
@@ -284,22 +793,19 @@ async function createWindow() {
     mainWindow.show()
   })
 
-  mainWindow.on('close', () => {
-    try {
-      stopLyricsDesktopMainSyncTimer()
-      if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed()) {
-        try {
-          const bounds = lyricsDesktopWindow.getBounds()
-          const state = readAppStateJson()
-          state.lyricsDesktopBounds = bounds
-          writeAppStateJson(state)
-        } catch (e) {}
-        lyricsDesktopWindow.destroy()
-        lyricsDesktopWindow = null
-      }
-    } catch {
-      /* ignore */
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (updaterCurrentEvent) {
+      mainWindow.webContents.send('updater-message', updaterCurrentEvent)
     }
+  })
+
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault()
+      hideMainWindowToTray()
+      return
+    }
+    cleanupLyricsDesktopWindow()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -313,6 +819,8 @@ async function createWindow() {
     const localUrl = await startRendererHttpServer()
     mainWindow.loadURL(localUrl)
   }
+
+  createTray()
 }
 
 // Discord RPC Setup
@@ -551,6 +1059,7 @@ function initDiscordRPC() {
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.echoes.studio')
+  loadAppStateCache()
 
   const chromeVersion = process.versions.chrome || '126.0.0.0'
   const chromeMajor = chromeVersion.split('.')[0]
@@ -558,6 +1067,8 @@ app.whenReady().then(async () => {
 
   app.userAgentFallback = standardUA
   session.defaultSession.setUserAgent(standardUA)
+
+  initUpdater()
 
   // 修正 Sec-CH-UA Client Hints + B 站视�??CDN Referer 注入
   session.defaultSession.webRequest.onBeforeSendHeaders(
@@ -618,16 +1129,22 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('appState:get', async (_, key) => {
     if (!APP_STATE_KEYS.has(key)) return null
-    const state = readAppStateJson()
+    const state = ensureAppStateCache()
     return state[key] ?? null
+  })
+
+  ipcMain.handle('appState:getSnapshot', async () => cloneAppStateSnapshot())
+
+  ipcMain.on('appState:getSnapshotSync', (event) => {
+    event.returnValue = cloneAppStateSnapshot()
   })
 
   ipcMain.handle('appState:set', async (_, key, value) => {
     if (!APP_STATE_KEYS.has(key)) return { ok: false, error: 'invalid_key' }
-    const state = readAppStateJson()
+    const state = ensureAppStateCache()
     state[key] = value
-    const ok = writeAppStateJson(state)
-    return ok ? { ok: true } : { ok: false, error: 'write_failed' }
+    scheduleAppStateFlush()
+    return { ok: true }
   })
 
   ipcMain.handle('shell:openExternal', async (_, url) => {
@@ -708,7 +1225,24 @@ app.whenReady().then(async () => {
       filters: [
         {
           name: d.filterAudio,
-          extensions: ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'ncm', 'dsf', 'dff']
+          extensions: [
+            'mp3',
+            'wav',
+            'flac',
+            'ogg',
+            'm4a',
+            'aac',
+            'ncm',
+            'dsf',
+            'dff',
+            'opus',
+            'webm',
+            'wma',
+            'alac',
+            'aiff',
+            'm4b',
+            'caf'
+          ]
         }
       ]
     })
@@ -838,7 +1372,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('file:readDirectory', async (_, dirPath) => {
     try {
       const audioFiles = []
-      collectAudioFilesRecursive(dirPath, audioFiles)
+      await collectAudioFilesRecursive(dirPath, audioFiles)
       return audioFiles
     } catch (e) {
       console.error(e)
@@ -850,16 +1384,87 @@ app.whenReady().then(async () => {
   ipcMain.handle('file:getFilesFromPaths', async (_, paths) => {
     const result = []
     for (const p of paths) {
-      collectAudioFilesRecursive(p, result)
+      await collectAudioFilesRecursive(p, result)
     }
     return result
+  })
+
+  ipcMain.handle('file:rescanFolders', async (_, payload) => {
+    try {
+      return await rescanImportedFolders(payload?.folders, payload?.existingPaths)
+    } catch (e) {
+      console.error('[file:rescanFolders]', e)
+      return []
+    }
+  })
+
+  ipcMain.handle('library:watchFolders', async (_, payload) => {
+    try {
+      if (!libraryWatchManager) {
+        libraryWatchManager = createLibraryWatchManager({
+          onChange: (diff) => {
+            if (!mainWindow || mainWindow.isDestroyed()) return
+            mainWindow.webContents.send('library:folders-changed', diff)
+          }
+        })
+      }
+      return await libraryWatchManager.start(payload?.folders)
+    } catch (e) {
+      console.error('[library:watchFolders]', e)
+      return { ok: false, error: String(e?.message || e) }
+    }
+  })
+
+  ipcMain.handle('library:stopWatchingFolders', async () => {
+    try {
+      if (!libraryWatchManager) return { ok: true }
+      return libraryWatchManager.stop()
+    } catch (e) {
+      console.error('[library:stopWatchingFolders]', e)
+      return { ok: false, error: String(e?.message || e) }
+    }
+  })
+
+  // IPC: Batch get file stats (birthtimeMs) for existing tracks that lack it
+  ipcMain.handle('file:batchStats', async (_, paths) => {
+    const out = {}
+    await Promise.all(
+      (Array.isArray(paths) ? paths : []).map(async (p) => {
+        try {
+          const s = await fs.promises.stat(p)
+          out[p] = { birthtimeMs: s.birthtimeMs || s.ctimeMs || 0 }
+        } catch {
+          out[p] = { birthtimeMs: 0 }
+        }
+      })
+    )
+    return out
+  })
+
+  ipcMain.handle('file:batchExists', async (_, paths) => {
+    const out = {}
+    for (const p of Array.isArray(paths) ? paths : []) {
+      out[p] = typeof p === 'string' && p ? fs.existsSync(p) : false
+    }
+    return out
   })
 
   // IPC: Read file as buffer (for jsmediatags or general binary reading)
   ipcMain.handle('file:readBuffer', async (_, filePath) => {
     try {
+      if (!existsSync(filePath)) {
+        return { success: false, error: 'file_not_found' }
+      }
       const buffer = fs.readFileSync(filePath)
       return buffer
+    } catch (e) {
+      return null
+    }
+  })
+
+  ipcMain.handle('file:readText', async (_, filePath) => {
+    try {
+      return fs.readFileSync(filePath, 'utf8')
     } catch (e) {
       return null
     }
@@ -877,7 +1482,11 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('lyrics:neteaseFetch', async (_, payload) => {
     try {
-      const lrc = await fetchNeteaseLrcText(payload || {})
+      const auth = await resolveNeteaseAuthState(payload?.cookie || '')
+      const lrc = await fetchNeteaseLrcText({
+        ...(payload || {}),
+        cookie: auth.valid ? auth.cookie : ''
+      })
       return { ok: !!lrc, lrc: lrc || '' }
     } catch (e) {
       console.warn('[lyrics:neteaseFetch]', e?.message || e)
@@ -925,12 +1534,68 @@ app.whenReady().then(async () => {
   })
 
   // Media Download IPC
-  ipcMain.handle('netease:search', async (event, keywords) => {
-    return await searchNeteaseSongs(keywords)
+  ipcMain.handle('netease:search', async (event, keywords, preferredCookie = '') => {
+    const auth = await resolveNeteaseAuthState(preferredCookie)
+    return await searchNeteaseSongs(keywords, { cookie: auth.valid ? auth.cookie : '' })
+  })
+
+  ipcMain.handle('netease:searchAlbum', async (_, payload) => {
+    try {
+      const auth = await resolveNeteaseAuthState(payload?.cookie || '')
+      const ncm = getNcmApi()
+      const res = await ncm.cloudsearch({
+        keywords: `${payload?.albumName || ''} ${payload?.artist || ''}`.trim(),
+        type: 10,
+        limit: 8,
+        ...buildNcmRequestOptions(auth.valid ? auth.cookie : '')
+      })
+      const albums = res?.body?.result?.albums
+      if (!Array.isArray(albums)) return []
+      return albums.map((album) => ({
+        id: album.id,
+        name: album.name || '',
+        artist:
+          (album.artists || album.ar || []).map((item) => item?.name).filter(Boolean).join(' / ') ||
+          album.artist?.name ||
+          '',
+        picUrl: album.picUrl || album.blurPicUrl || '',
+        size: album.size || album.trackCount || 0
+      }))
+    } catch (e) {
+      console.error('[netease:searchAlbum]', e?.message || e)
+      return []
+    }
+  })
+
+  ipcMain.handle('netease:getAlbumTracks', async (_, payload) => {
+    try {
+      const auth = await resolveNeteaseAuthState(payload?.cookie || '')
+      const ncm = getNcmApi()
+      const res = await ncm.album({
+        id: payload?.albumId,
+        ...buildNcmRequestOptions(auth.valid ? auth.cookie : '')
+      })
+      const songs = res?.body?.songs
+      if (!Array.isArray(songs)) return []
+      return songs.map((track) => ({
+        id: track.id,
+        name: track.name || '',
+        artist: (track.ar || track.artists || []).map((item) => item?.name).filter(Boolean).join(' / '),
+        duration: track.dt || track.duration || 0,
+        fee: track.fee || 0
+      }))
+    } catch (e) {
+      console.error('[netease:getAlbumTracks]', e?.message || e)
+      return []
+    }
   })
 
   ipcMain.handle('netease:fetchLrcText', async (event, params) => {
-    return await fetchNeteaseLrcText(params)
+    const auth = await resolveNeteaseAuthState(params?.cookie || '')
+    return await fetchNeteaseLrcText({
+      ...(params || {}),
+      cookie: auth.valid ? auth.cookie : ''
+    })
   })
 
   ipcMain.handle('media:writeFile', async (event, filePath, text) => {
@@ -944,12 +1609,44 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('media:download', async (event, url, folder, options = {}) => {
-    return await MediaDownloader.downloadAudio(url, folder, event.sender, options)
+    const auth = await resolveNeteaseAuthState(options?.neteaseCookie || '')
+    return await MediaDownloader.downloadAudio(url, folder, event.sender, {
+      ...(options || {}),
+      neteaseCookie: auth.valid ? auth.cookie : ''
+    })
+  })
+
+  ipcMain.handle('netease:getSongUrl', async (_, songId, level, preferredCookie = '') => {
+    const auth = await resolveNeteaseAuthState(preferredCookie)
+    return await getNeteaseSongDirectUrl(songId, level, {
+      cookie: auth.valid ? auth.cookie : ''
+    })
+  })
+
+  ipcMain.handle('media:downloadFromUrl', async (event, opts) => {
+    const { url, targetFolder, filename } = opts || {}
+    if (!url || !targetFolder || !filename) throw new Error('Missing required parameters')
+    return await MediaDownloader.downloadFromUrl(url, targetFolder, filename, event.sender)
   })
 
   ipcMain.handle('playlistLink:importPlaylist', async (event, payload) => {
-    const { playlistInput, downloadFolder } = payload || {}
-    return await importPlaylistFromLink(playlistInput, downloadFolder, event.sender)
+    const { playlistInput, downloadFolder, preferredFolderName, neteaseCookie } = payload || {}
+    const auth = await resolveNeteaseAuthState(neteaseCookie || '')
+    return await importPlaylistFromLink(
+      playlistInput,
+      downloadFolder,
+      event.sender,
+      preferredFolderName,
+      { cookie: auth.valid ? auth.cookie : '' }
+    )
+  })
+
+  ipcMain.handle('playlistShare:import', async (event, payload) => {
+    const { playlists, downloadFolder, neteaseCookie } = payload || {}
+    const auth = await resolveNeteaseAuthState(neteaseCookie || '')
+    return await importSharedPlaylists(playlists, downloadFolder, event.sender, {
+      cookie: auth.valid ? auth.cookie : ''
+    })
   })
 
   // IPC: Search MV
@@ -1065,6 +1762,10 @@ app.whenReady().then(async () => {
     app.quit()
   })
 
+  ipcMain.handle('window:hide-to-tray', async () => {
+    return hideMainWindowToTray()
+  })
+
   // IPC: Maximize App
   ipcMain.on('window:maximize', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -1078,6 +1779,14 @@ app.whenReady().then(async () => {
   ipcMain.on('window:minimize', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     if (win) win.minimize()
+  })
+
+  ipcMain.handle('player:next', async () => {
+    return sendPlayerCommand('next')
+  })
+
+  ipcMain.handle('player:prev', async () => {
+    return sendPlayerCommand('prev')
   })
 
   // IPC: Download from SoundCloud using Third-Party Proxy
@@ -1217,10 +1926,15 @@ app.whenReady().then(async () => {
     }
   }
 
-  // IPC: Get Extended Audio Metadata (Sample rate, bitrate, format, cover)
-  ipcMain.handle('file:getExtendedMetadata', async (_, filePath) => {
+  function normalizeEmbeddedText(text) {
+    return String(text || '')
+      .replace(/\u0000/g, '')
+      .replace(/\r\n/g, '\n')
+      .trim()
+  }
+
+  async function buildExtendedMetadataResponse(filePath) {
     try {
-      // Use dynamic import for pure-ESM music-metadata in CJS main process
       const { parseFile, selectCover } = await import('music-metadata')
       const metadata = await parseFile(filePath)
       let cover = null
@@ -1235,10 +1949,12 @@ app.whenReady().then(async () => {
 
       const picture = selectCover(metadata.common.picture)
       if (picture) {
-        // picture.format is already a MIME type like 'image/jpeg'
         const mime = picture.format.includes('/') ? picture.format : `image/${picture.format}`
         cover = `data:${mime};base64,${Buffer.from(picture.data).toString('base64')}`
       }
+
+      const codecLabel = resolveAudioCodecLabel(metadata, filePath)
+      const embeddedLyrics = extractEmbeddedLyricsText(metadata)
 
       return {
         success: true,
@@ -1246,10 +1962,11 @@ app.whenReady().then(async () => {
           sampleRate: metadata.format.sampleRate,
           bitrate: metadata.format.bitrate,
           channels: metadata.format.numberOfChannels,
-          codec: metadata.format.container, // e.g., 'FLAC', 'MPEG'
+          codec: codecLabel,
           duration: durationSec,
           lossless:
             metadata.format.lossless ||
+            /^(alac|flac|wav|aiff|ape)$/i.test(codecLabel) ||
             metadata.format.container?.toLowerCase() === 'flac' ||
             metadata.format.container?.toLowerCase() === 'wav'
         },
@@ -1260,21 +1977,338 @@ app.whenReady().then(async () => {
           albumArtist: metadata.common.albumartist || metadata.common.albumArtist || null,
           trackNo: metadata.common.track?.no ?? null,
           discNo: metadata.common.disk?.no ?? null,
-          lyrics:
-            Array.isArray(metadata.common.lyrics) && metadata.common.lyrics.length > 0
-              ? metadata.common.lyrics.join('\n')
-              : null,
-          cover: cover
+          lyrics: embeddedLyrics || null,
+          cover
         }
       }
     } catch (e) {
       const msg = e?.message || String(e)
       const isKnownParseNoise =
-        e?.name === 'FieldDecodingError' || /FourCC|invalid characters|Tokenizer/i.test(msg)
+        e?.name === 'FieldDecodingError' ||
+        /FourCC|invalid characters|Tokenizer|Failed to determine|End-Of-Stream|Unexpected end/i.test(
+          msg
+        )
       if (!isKnownParseNoise) {
         console.error('getExtendedMetadata error:', msg)
       }
       return getExtendedMetadataFallback(filePath)
+    }
+  }
+
+  function normalizeMetadataText(value) {
+    return typeof value === 'string' ? value.trim() : ''
+  }
+
+  function normalizeMetadataNumber(value) {
+    if (value === null || value === undefined || value === '') return ''
+    const parsed = Number.parseInt(String(value), 10)
+    return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : ''
+  }
+
+  function runFfmpegCommand(args) {
+    return new Promise((resolve, reject) => {
+      const ffmpegPath = getResolvedFfmpegStaticPath()
+      if (!ffmpegPath) {
+        reject(new Error('FFmpeg executable not found'))
+        return
+      }
+
+      execFile(ffmpegPath, args, { windowsHide: true, maxBuffer: 1024 * 1024 * 32 }, (error) => {
+        if (error) reject(error)
+        else resolve()
+      })
+    })
+  }
+
+  function replaceFileWithBackup(targetPath, tempPath) {
+    const backupPath = resolve(
+      dirname(targetPath),
+      `.${basename(targetPath)}.echo-backup-${process.pid}-${Date.now()}${extname(targetPath)}`
+    )
+
+    fs.renameSync(targetPath, backupPath)
+    try {
+      fs.renameSync(tempPath, targetPath)
+      fs.rmSync(backupPath, { force: true })
+    } catch (error) {
+      try {
+        if (fs.existsSync(backupPath) && !fs.existsSync(targetPath)) {
+          fs.renameSync(backupPath, targetPath)
+        }
+      } catch {
+        /* best effort restore */
+      }
+      throw error
+    }
+  }
+
+  async function writeExtendedMetadata(payload) {
+    const filePath = typeof payload?.path === 'string' ? payload.path.trim() : ''
+    if (!filePath) throw new Error('Missing audio file path')
+    if (!fs.existsSync(filePath)) throw new Error('Audio file not found')
+
+    const coverPath = typeof payload?.coverPath === 'string' ? payload.coverPath.trim() : ''
+    if (coverPath && !fs.existsSync(coverPath)) throw new Error('Selected cover image was not found')
+
+    const title = normalizeMetadataText(payload?.title)
+    const artist = normalizeMetadataText(payload?.artist)
+    const album = normalizeMetadataText(payload?.album)
+    const albumArtist = normalizeMetadataText(payload?.albumArtist)
+    const trackNo = normalizeMetadataNumber(payload?.trackNo)
+    const discNo = normalizeMetadataNumber(payload?.discNo)
+
+    const extension = extname(filePath)
+    const tempPath = resolve(
+      dirname(filePath),
+      `.${basename(filePath)}.echo-tags-${process.pid}-${Date.now()}${extension}`
+    )
+    const args = ['-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-i', filePath]
+
+    if (coverPath) {
+      args.push('-i', coverPath)
+      args.push('-map', '0:a?', '-map', '0:s?', '-map', '0:d?', '-map', '1:v:0')
+    } else {
+      args.push('-map', '0')
+    }
+
+    args.push('-c', 'copy')
+    if (coverPath) {
+      args.push('-c:v', 'mjpeg', '-disposition:v:0', 'attached_pic')
+      if (/\.mp3$/i.test(filePath)) {
+        args.push('-id3v2_version', '3')
+      }
+      args.push('-metadata:s:v', 'title=Album cover', '-metadata:s:v', 'comment=Cover (front)')
+    }
+
+    args.push(
+      '-metadata',
+      `title=${title}`,
+      '-metadata',
+      `artist=${artist}`,
+      '-metadata',
+      `album=${album}`,
+      '-metadata',
+      `album_artist=${albumArtist}`,
+      '-metadata',
+      `track=${trackNo}`,
+      '-metadata',
+      `disc=${discNo}`,
+      tempPath
+    )
+
+    try {
+      await runFfmpegCommand(args)
+      replaceFileWithBackup(filePath, tempPath)
+      return await buildExtendedMetadataResponse(filePath)
+    } catch (error) {
+      try {
+        if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true })
+      } catch {
+        /* ignore temp cleanup errors */
+      }
+      throw error
+    }
+  }
+
+  function createTemporaryRenamePath(filePath, index) {
+    const dir = dirname(filePath)
+    const ext = extname(filePath)
+    let candidate = resolve(
+      dir,
+      `.echo-rename-${process.pid}-${Date.now()}-${index}${ext || '.tmp'}`
+    )
+    let attempt = 1
+    while (fs.existsSync(candidate)) {
+      candidate = resolve(
+        dir,
+        `.echo-rename-${process.pid}-${Date.now()}-${index}-${attempt}${ext || '.tmp'}`
+      )
+      attempt += 1
+    }
+    return candidate
+  }
+
+  function normalizeRenameItems(payload) {
+    return Array.isArray(payload)
+      ? payload.filter(
+          (item) =>
+            item &&
+            typeof item.from === 'string' &&
+            item.from.trim() &&
+            typeof item.to === 'string' &&
+            item.to.trim()
+        )
+      : []
+  }
+
+  async function batchRenameFiles(payload) {
+    const items = normalizeRenameItems(payload)
+      .map((item) => ({ from: item.from.trim(), to: item.to.trim() }))
+      .filter((item) => item.from !== item.to)
+
+    if (!items.length) return { success: true, renamed: [] }
+
+    const sourceSet = new Set(items.map((item) => item.from.toLowerCase()))
+    const targetSet = new Set()
+    for (const item of items) {
+      if (!fs.existsSync(item.from)) {
+        throw new Error(`File not found: ${item.from}`)
+      }
+      if (dirname(item.from).toLowerCase() !== dirname(item.to).toLowerCase()) {
+        throw new Error('Renaming across folders is not supported')
+      }
+      const targetKey = item.to.toLowerCase()
+      if (targetSet.has(targetKey)) {
+        throw new Error(`Duplicate target name: ${item.to}`)
+      }
+      targetSet.add(targetKey)
+      if (fs.existsSync(item.to) && !sourceSet.has(targetKey)) {
+        throw new Error(`Target file already exists: ${item.to}`)
+      }
+    }
+
+    const staged = []
+    const finalized = []
+    try {
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index]
+        const tempPath = createTemporaryRenamePath(item.from, index)
+        fs.renameSync(item.from, tempPath)
+        staged.push({ ...item, tempPath })
+      }
+
+      for (const item of staged) {
+        fs.renameSync(item.tempPath, item.to)
+        finalized.push(item)
+      }
+
+      return {
+        success: true,
+        renamed: finalized.map(({ from, to }) => ({ from, to }))
+      }
+    } catch (error) {
+      for (let index = finalized.length - 1; index >= 0; index -= 1) {
+        const item = finalized[index]
+        try {
+          if (fs.existsSync(item.to)) fs.renameSync(item.to, item.tempPath)
+        } catch {
+          /* best effort rollback */
+        }
+      }
+      for (let index = staged.length - 1; index >= 0; index -= 1) {
+        const item = staged[index]
+        try {
+          if (fs.existsSync(item.tempPath) && !fs.existsSync(item.from)) {
+            fs.renameSync(item.tempPath, item.from)
+          }
+        } catch {
+          /* best effort rollback */
+        }
+      }
+      throw error
+    }
+  }
+
+  function decodeEmbeddedTextValue(value) {
+    if (value == null) return ''
+    if (typeof value === 'string') return normalizeEmbeddedText(value)
+
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => decodeEmbeddedTextValue(item))
+        .filter(Boolean)
+        .join('\n')
+        .trim()
+    }
+
+    if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+      const buffer = Buffer.from(value)
+      const candidates = [
+        buffer.toString('utf8'),
+        buffer.toString('utf16le'),
+        buffer.toString('latin1')
+      ]
+      for (const candidate of candidates) {
+        const normalized = normalizeEmbeddedText(candidate)
+        if (normalized) return normalized
+      }
+      return ''
+    }
+
+    if (typeof value === 'object') {
+      return (
+        decodeEmbeddedTextValue(value.text) ||
+        decodeEmbeddedTextValue(value.value) ||
+        decodeEmbeddedTextValue(value.data) ||
+        decodeEmbeddedTextValue(value.description)
+      )
+    }
+
+    return ''
+  }
+
+  function extractEmbeddedLyricsText(metadata) {
+    const commonLyrics = decodeEmbeddedTextValue(metadata?.common?.lyrics)
+    if (commonLyrics) return commonLyrics
+
+    const lyricTagIds = new Set(['\u00a9lyr', 'lyrics', 'uslt', 'sylt', 'wm/lyrics'])
+    for (const nativeTags of Object.values(metadata?.native || {})) {
+      for (const tag of Array.isArray(nativeTags) ? nativeTags : []) {
+        const tagId = String(tag?.id || '')
+          .trim()
+          .toLowerCase()
+        if (!tagId) continue
+        if (!lyricTagIds.has(tagId) && !tagId.endsWith(':lyrics')) continue
+
+        const text = decodeEmbeddedTextValue(tag?.value)
+        if (text) return text
+      }
+    }
+
+    return ''
+  }
+
+  function resolveAudioCodecLabel(metadata, filePath) {
+    const explicitCodec = String(metadata?.format?.codec || '').trim()
+    const codecProfile = String(metadata?.format?.codecProfile || '').trim()
+    const container = String(metadata?.format?.container || '').trim()
+    const extUpper = extname(filePath).replace(/^\./, '').toUpperCase()
+
+    if (/alac/i.test(explicitCodec) || /alac/i.test(codecProfile) || /\.alac$/i.test(filePath)) {
+      return 'ALAC'
+    }
+
+    return explicitCodec || container || extUpper || 'unknown'
+  }
+
+  // IPC: Get Extended Audio Metadata (Sample rate, bitrate, format, cover)
+  ipcMain.handle('file:getExtendedMetadata', async (_, filePath) => {
+    if (!existsSync(filePath)) {
+      return { success: false, error: 'file_not_found' }
+    }
+    return await buildExtendedMetadataResponse(filePath)
+  })
+
+  ipcMain.handle('file:updateExtendedMetadata', async (_, payload) => {
+    try {
+      return await writeExtendedMetadata(payload)
+    } catch (error) {
+      return {
+        success: false,
+        error: error?.message || String(error)
+      }
+    }
+  })
+
+  ipcMain.handle('file:batchRenameFiles', async (_, payload) => {
+    try {
+      return await batchRenameFiles(payload)
+    } catch (error) {
+      return {
+        success: false,
+        error: error?.message || String(error),
+        renamed: []
+      }
     }
   })
 
@@ -1319,8 +2353,21 @@ app.whenReady().then(async () => {
     return audioEngine.getDevices()
   })
 
+  ipcMain.handle('audio:getAsioDevices', () => {
+    try {
+      return listAsioDevices()
+    } catch {
+      return []
+    }
+  })
+
   ipcMain.handle('audio:setDevice', async (_, deviceId) => {
     return audioEngine.setDevice(deviceId)
+  })
+
+  ipcMain.handle('audio:setAsio', (_, enabled) => {
+    audioEngine.setAsio(enabled)
+    return { ok: true }
   })
 
   ipcMain.handle('audio:setExclusive', async (_, exclusive) => {
@@ -1335,9 +2382,12 @@ app.whenReady().then(async () => {
     audioEngine.setEqConfig(eqConfig)
   })
 
-  ipcMain.handle('audio:play', async (_, filePath, startTime, playbackRate, sourceSampleRateHint) => {
-    return audioEngine.play(filePath, startTime, playbackRate, sourceSampleRateHint)
-  })
+  ipcMain.handle(
+    'audio:play',
+    async (_, filePath, startTime, playbackRate, sourceSampleRateHint) => {
+      return audioEngine.play(filePath, startTime, playbackRate, sourceSampleRateHint)
+    }
+  )
 
   ipcMain.handle('audio:setPlaybackRate', async (_, rate) => {
     return audioEngine.setPlaybackRate(rate)
@@ -1349,6 +2399,22 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('audio:resume', async () => {
     audioEngine.resume()
+  })
+
+  ipcMain.handle('audio:startFadeOut', async (_, durationMs) => {
+    return await new Promise((resolve) => {
+      audioEngine.startFadeOut(durationMs, () => resolve(true))
+    })
+  })
+
+  ipcMain.handle('audio:startFadeIn', async (_, durationMs) => {
+    audioEngine.startFadeIn(durationMs)
+    return true
+  })
+
+  ipcMain.handle('audio:cancelFade', async () => {
+    audioEngine.cancelFade()
+    return true
   })
 
   ipcMain.handle('audio:stop', async () => {
@@ -1376,9 +2442,13 @@ app.whenReady().then(async () => {
   setInterval(() => {
     if (!mainWindow || mainWindow.isDestroyed()) return
     const status = audioEngine.getStatus()
-    if (lastAudioStatus && lastAudioStatus.playing !== status.playing) {
+    if (
+      !lastAudioStatus ||
+      lastAudioStatus.isPlaying !== status.isPlaying ||
+      lastAudioStatus.filePath !== status.filePath
+    ) {
       // Playing state changed, notify renderer
-      mainWindow.webContents.send('audio:status-update', status)
+      broadcastAudioStatus(status)
     }
     lastAudioStatus = status
   }, 200)
@@ -1395,6 +2465,8 @@ app.whenReady().then(async () => {
       const globalState = readAppStateJson()
       const savedBounds = globalState.lyricsDesktopBounds || { width: 680, height: 132 }
       const alwaysOnTop = globalState.config?.desktopLyricsAlwaysOnTop !== false
+      const locked = globalState.config?.desktopLyricsLocked === true
+      const appWindowIcon = createAppWindowIcon()
 
       lyricsDesktopWindow = new BrowserWindow({
         width: savedBounds.width,
@@ -1409,6 +2481,7 @@ app.whenReady().then(async () => {
         hasShadow: false,
         alwaysOnTop: alwaysOnTop,
         autoHideMenuBar: true,
+        ...(appWindowIcon ? { icon: appWindowIcon } : {}),
         backgroundThrottling: false,
         webPreferences: {
           preload: join(__dirname, '../preload/index.js'),
@@ -1417,6 +2490,8 @@ app.whenReady().then(async () => {
           webSecurity: false
         }
       })
+
+      applyLyricsDesktopLockState(locked)
 
       if (alwaysOnTop) {
         lyricsDesktopWindow.setAlwaysOnTop(true, 'screen-saver')
@@ -1456,7 +2531,11 @@ app.whenReady().then(async () => {
         loadUrl = u.toString()
       }
       await lyricsDesktopWindow.loadURL(loadUrl)
-      if (lyricsDesktopWindow && !lyricsDesktopWindow.isDestroyed() && !lyricsDesktopWindow.isVisible()) {
+      if (
+        lyricsDesktopWindow &&
+        !lyricsDesktopWindow.isDestroyed() &&
+        !lyricsDesktopWindow.isVisible()
+      ) {
         lyricsDesktopWindow.show()
       }
       startLyricsDesktopMainSyncTimer()
@@ -1492,6 +2571,15 @@ app.whenReady().then(async () => {
           lyricsDesktopWindow.setVisibleOnAllWorkspaces(false)
         }
       }
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  ipcMain.handle('lyricsDesktop:setLocked', async (_, isLocked) => {
+    try {
+      applyLyricsDesktopLockState(!!isLocked)
       return { ok: true }
     } catch (e) {
       return { ok: false, error: e?.message || String(e) }
@@ -1597,6 +2685,23 @@ app.whenReady().then(async () => {
     Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
     if(!window.chrome)window.chrome={};
     if(!window.chrome.runtime)window.chrome.runtime={connect:function(){},sendMessage:function(){}};
+    if(!window.chrome.app)window.chrome.app={
+      InstallState:{DISABLED:'disabled',INSTALLED:'installed',NOT_INSTALLED:'not_installed'},
+      RunningState:{CANNOT_RUN:'cannot_run',READY_TO_RUN:'ready_to_run',RUNNING:'running'},
+      getDetails:function(){return null},
+      getIsInstalled:function(){return false},
+      isInstalled:false,
+      installState:function(cb){cb('not_installed')},
+      runningState:function(){return 'cannot_run'}
+    };
+    if(!window.chrome.csi)window.chrome.csi=function(){return{onloadT:Date.now(),pageT:3,startE:0,tran:15}};
+    if(!window.chrome.loadTimes)window.chrome.loadTimes=function(){return{
+      commitLoadTime:Date.now()/1e3-1,firstPaintAfterLoadTime:0,firstPaintTime:Date.now()/1e3-0.5,
+      finishDocumentLoadTime:Date.now()/1e3-0.3,finishLoadTime:Date.now()/1e3-0.2,
+      navigationType:'Other',npnNegotiatedProtocol:'h2',requestTime:Date.now()/1e3-2,
+      startLoadTime:Date.now()/1e3-2,wasAlternateProtocolAvailable:false,wasFetchedViaSpdy:true,
+      wasNpnNegotiated:true
+    }};
     Object.defineProperty(navigator,'plugins',{get:()=>{
       const p=[
         {name:'Chrome PDF Plugin',filename:'internal-pdf-viewer',description:'Portable Document Format',length:1,item:()=>null,namedItem:()=>null},
@@ -1620,6 +2725,7 @@ app.whenReady().then(async () => {
 
   function createSignInWindow(url, onClosed) {
     const sharedSession = mainWindow.webContents.session
+    const appWindowIcon = createAppWindowIcon()
     const win = new BrowserWindow({
       parent: mainWindow,
       width: 960,
@@ -1628,6 +2734,7 @@ app.whenReady().then(async () => {
       minHeight: 400,
       show: false,
       autoHideMenuBar: true,
+      ...(appWindowIcon ? { icon: appWindowIcon } : {}),
       webPreferences: {
         session: sharedSession,
         contextIsolation: true,
@@ -1705,39 +2812,20 @@ app.whenReady().then(async () => {
     return { ok: true }
   })
 
-  ipcMain.handle('netease:getCookie', async () => {
-    const ses = session.defaultSession
-    const cookieList = await ses.cookies.get({ domain: '.music.163.com' })
-    const map = new Map()
-    for (const c of cookieList) {
-      map.set(c.name, c.value)
-    }
-    const names = ['MUSIC_U', 'MUSIC_A', '__csrf', 'NMTID']
-    const cookie = names
-      .map((name) => {
-        const value = map.get(name)
-        return value ? `${name}=${value}` : ''
-      })
-      .filter(Boolean)
-      .join('; ')
-    return {
-      ok: true,
-      signedIn: Boolean(map.get('MUSIC_U') || map.get('MUSIC_A')),
-      cookie,
-      hasMusicU: Boolean(map.get('MUSIC_U'))
-    }
+  ipcMain.handle('netease:getCookie', async (_, preferredCookie = '') => {
+    return await resolveNeteaseAuthState(preferredCookie)
   })
 
   ipcMain.handle('signin:checkStatus', async () => {
-    const ses = session.defaultSession
+    const ses = await getMainWindowSession()
     const ytCookies = await ses.cookies.get({ domain: '.youtube.com' })
     const ytSignedIn = ytCookies.some(
       (c) => c.name === 'SID' || c.name === 'SSID' || c.name === 'LOGIN_INFO'
     )
     const biliCookies = await ses.cookies.get({ domain: '.bilibili.com' })
     const biliSignedIn = biliCookies.some((c) => c.name === 'DedeUserID' || c.name === 'SESSDATA')
-    const neteaseCookies = await ses.cookies.get({ domain: '.music.163.com' })
-    const neteaseSignedIn = neteaseCookies.some((c) => c.name === 'MUSIC_U' || c.name === 'MUSIC_A')
+    const neteaseAuth = await resolveNeteaseAuthState()
+    const neteaseSignedIn = neteaseAuth.valid === true
     return { youtube: ytSignedIn, bilibili: biliSignedIn, netease: neteaseSignedIn }
   })
 
@@ -1843,12 +2931,11 @@ app.whenReady().then(async () => {
 
   // 定时推送播放状态到渲染进程 (200ms 间隔)
   setInterval(() => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('audio:status-update', audioEngine.getStatus())
-    }
+    broadcastAudioStatus(audioEngine.getStatus())
   }, 200)
 
   await createWindow()
+  registerGlobalMediaShortcuts()
   pluginManager.setMainWindow(mainWindow)
   pluginManager.loadAll().catch((e) => {
     console.error('[PluginManager] loadAll failed:', e?.message || e)
@@ -1865,11 +2952,20 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  isQuitting = true
+  destroyTray()
   discordRpcQuitting = true
   clearRpcRetryTimer()
   void disposeDiscordRpc()
+  flushAppStateCacheSync()
   stopRendererHttpServer().catch(() => {})
   dlnaRenderer.stop().catch(() => {})
+  libraryWatchManager?.stop()
+})
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
+  flushAppStateCacheSync()
 })
 
 app.on('window-all-closed', () => {

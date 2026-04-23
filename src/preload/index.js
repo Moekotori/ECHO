@@ -5,14 +5,34 @@ if (!process.contextIsolated) {
   throw new Error('contextIsolation must be enabled in the BrowserWindow')
 }
 
+const initialAppStateSnapshot = (() => {
+  try {
+    const snapshot = ipcRenderer.sendSync('appState:getSnapshotSync')
+    return snapshot && typeof snapshot === 'object' ? snapshot : {}
+  } catch {
+    return {}
+  }
+})()
+
 // Expose IPC methods to the renderer via window.api
 contextBridge.exposeInMainWorld('api', {
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
+  checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+  installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
+  onUpdaterEvent: (callback) => {
+    const handler = (_, msg) => callback(msg)
+    ipcRenderer.on('updater-message', handler)
+    return () => ipcRenderer.removeListener('updater-message', handler)
+  },
   appStateGet: (key) => ipcRenderer.invoke('appState:get', key),
+  getInitialAppState: () => initialAppStateSnapshot,
+  getInitialAppStateValue: (key) =>
+    typeof key === 'string' ? initialAppStateSnapshot?.[key] ?? null : null,
   appStateSet: (key, value) => ipcRenderer.invoke('appState:set', key, value),
   openDirectoryHandler: () => ipcRenderer.invoke('dialog:openDirectory'),
   readDirectoryHandler: (path) => ipcRenderer.invoke('file:readDirectory', path),
   readBufferHandler: (path) => ipcRenderer.invoke('file:readBuffer', path),
+  readTextFileHandler: (path) => ipcRenderer.invoke('file:readText', path),
   saveExportHandler: (arrayBuffer, defaultName, locale) =>
     ipcRenderer.invoke('dialog:saveExport', arrayBuffer, defaultName, {
       locale
@@ -28,6 +48,16 @@ contextBridge.exposeInMainWorld('api', {
   openLyricsFileHandler: (locale) => ipcRenderer.invoke('dialog:openLyricsFile', { locale }),
   openFontFileHandler: (locale) => ipcRenderer.invoke('dialog:openFontFile', { locale }),
   getAudioFilesFromPaths: (paths) => ipcRenderer.invoke('file:getFilesFromPaths', paths),
+  rescanFolders: (payload) => ipcRenderer.invoke('file:rescanFolders', payload),
+  batchExistsHandler: (paths) => ipcRenderer.invoke('file:batchExists', paths),
+  watchLibraryFolders: (payload) => ipcRenderer.invoke('library:watchFolders', payload),
+  stopWatchingLibraryFolders: () => ipcRenderer.invoke('library:stopWatchingFolders'),
+  onLibraryFoldersChanged: (callback) => {
+    const channel = 'library:folders-changed'
+    const handler = (_, data) => callback(data)
+    ipcRenderer.on(channel, handler)
+    return () => ipcRenderer.removeListener(channel, handler)
+  },
   readLyricsHandler: (audioPath) => ipcRenderer.invoke('file:readLyrics', audioPath),
   toRomajiBatch: (texts) => ipcRenderer.invoke('lyrics:toRomajiBatch', texts),
   fetchNeteaseLyrics: (payload) => ipcRenderer.invoke('lyrics:neteaseFetch', payload),
@@ -51,21 +81,32 @@ contextBridge.exposeInMainWorld('api', {
     }
   },
   closeAppHandler: () => ipcRenderer.send('window:close'),
+  hideToTrayHandler: () => ipcRenderer.invoke('window:hide-to-tray'),
   maximizeAppHandler: () => ipcRenderer.send('window:maximize'),
   minimizeAppHandler: () => ipcRenderer.send('window:minimize'),
   downloadSoundCloud: (url, downloadPath) =>
     ipcRenderer.invoke('soundcloud:download', url, downloadPath),
   getExtendedMetadataHandler: (path) => ipcRenderer.invoke('file:getExtendedMetadata', path),
+  updateExtendedMetadataHandler: (payload) =>
+    ipcRenderer.invoke('file:updateExtendedMetadata', payload),
+  batchRenameFilesHandler: (payload) => ipcRenderer.invoke('file:batchRenameFiles', payload),
   setDiscordActivity: (activity) => ipcRenderer.send('discord:setActivity', activity),
   clearDiscordActivity: () => ipcRenderer.send('discord:clearActivity'),
   toggleDiscordRPC: (enabled) => ipcRenderer.send('discord:toggle', enabled),
-  neteaseSearch: (keywords) => ipcRenderer.invoke('netease:search', keywords),
-  
+  neteaseSearch: (keywords, cookie) => ipcRenderer.invoke('netease:search', keywords, cookie),
+  neteaseSearchAlbum: (payload) => ipcRenderer.invoke('netease:searchAlbum', payload),
+  neteaseGetAlbumTracks: (albumId, cookie) =>
+    ipcRenderer.invoke('netease:getAlbumTracks', { albumId, cookie }),
+  getNeteaseSongUrl: (songId, level, cookie) =>
+    ipcRenderer.invoke('netease:getSongUrl', songId, level, cookie),
+
   media: {
     fetchNeteaseLrcText: (params) => ipcRenderer.invoke('netease:fetchLrcText', params),
     writeFile: (filePath, text) => ipcRenderer.invoke('media:writeFile', filePath, text),
     getMetadata: (url) => ipcRenderer.invoke('media:getMetadata', url),
-    downloadAudio: (url, folder, options) => ipcRenderer.invoke('media:download', url, folder, options),
+    downloadAudio: (url, folder, options) =>
+      ipcRenderer.invoke('media:download', url, folder, options),
+    downloadFromUrl: (opts) => ipcRenderer.invoke('media:downloadFromUrl', opts),
     onProgress: (callback) => {
       const channel = 'media:download-progress'
       const handler = (_, data) => callback(data)
@@ -82,9 +123,20 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener(channel, handler)
     }
   },
+  playlistShare: {
+    importPlaylists: (payload) => ipcRenderer.invoke('playlistShare:import', payload),
+    onImportProgress: (callback) => {
+      const channel = 'playlist-share:import-progress'
+      const handler = (_, data) => callback(data)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
+    }
+  },
   // === Native Audio Engine ===
   getAudioDevices: () => ipcRenderer.invoke('audio:getDevices'),
+  getAsioDevices: () => ipcRenderer.invoke('audio:getAsioDevices'),
   setAudioDevice: (id) => ipcRenderer.invoke('audio:setDevice', id),
+  setAsioMode: (enabled) => ipcRenderer.invoke('audio:setAsio', enabled),
   setAudioExclusive: (exclusive) => ipcRenderer.invoke('audio:setExclusive', exclusive),
   setAudioOutputBufferProfile: (profile) =>
     ipcRenderer.invoke('audio:setOutputBufferProfile', profile),
@@ -94,6 +146,9 @@ contextBridge.exposeInMainWorld('api', {
   setAudioPlaybackRate: (rate) => ipcRenderer.invoke('audio:setPlaybackRate', rate),
   pauseAudio: () => ipcRenderer.invoke('audio:pause'),
   resumeAudio: () => ipcRenderer.invoke('audio:resume'),
+  audioStartFadeOut: (ms) => ipcRenderer.invoke('audio:startFadeOut', ms),
+  audioStartFadeIn: (ms) => ipcRenderer.invoke('audio:startFadeIn', ms),
+  audioCancelFade: () => ipcRenderer.invoke('audio:cancelFade'),
   stopAudio: () => ipcRenderer.invoke('audio:stop'),
   setAudioVolume: (vol) => ipcRenderer.invoke('audio:setVolume', vol),
   loadVstPlugin: (path) => ipcRenderer.invoke('audio:loadVst', path),
@@ -101,7 +156,9 @@ contextBridge.exposeInMainWorld('api', {
   showVstPluginUI: () => ipcRenderer.invoke('audio:showVstUI'),
   openLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:open'),
   closeLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:close'),
-  setLyricsDesktopAlwaysOnTop: (isAlwaysOnTop) => ipcRenderer.invoke('lyricsDesktop:setAlwaysOnTop', isAlwaysOnTop),
+  setLyricsDesktopAlwaysOnTop: (isAlwaysOnTop) =>
+    ipcRenderer.invoke('lyricsDesktop:setAlwaysOnTop', isAlwaysOnTop),
+  setLyricsDesktopLocked: (isLocked) => ipcRenderer.invoke('lyricsDesktop:setLocked', isLocked),
   /** Close overlay and uncheck “desktop lyrics” in the main window (Escape / right-click). */
   dismissLyricsDesktop: () => ipcRenderer.invoke('lyricsDesktop:dismiss'),
   notifyLyricsDesktopReady: () => ipcRenderer.invoke('lyricsDesktop:ready'),
@@ -130,6 +187,12 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on(channel, handler)
     return () => ipcRenderer.removeListener(channel, handler)
   },
+  onPlayerCmd: (cb) => {
+    const channel = 'player:cmd'
+    const handler = (_, cmd) => cb(cmd)
+    ipcRenderer.on(channel, handler)
+    return () => ipcRenderer.removeListener(channel, handler)
+  },
   cast: {
     dlnaStart: (opts) => ipcRenderer.invoke('cast:dlnaStart', opts),
     dlnaStop: () => ipcRenderer.invoke('cast:dlnaStop'),
@@ -154,7 +217,7 @@ contextBridge.exposeInMainWorld('api', {
   openYoutubeSignInWindow: () => ipcRenderer.invoke('youtube:openSignInWindow'),
   openBilibiliSignInWindow: () => ipcRenderer.invoke('bilibili:openSignInWindow'),
   openNeteaseSignInWindow: () => ipcRenderer.invoke('netease:openSignInWindow'),
-  getNeteaseCookie: () => ipcRenderer.invoke('netease:getCookie'),
+  getNeteaseCookie: (preferredCookie) => ipcRenderer.invoke('netease:getCookie', preferredCookie),
   resolveBilibiliStream: (bvid, quality) =>
     ipcRenderer.invoke('bilibili:resolveStream', bvid, quality),
   checkSignInStatus: () => ipcRenderer.invoke('signin:checkStatus'),

@@ -324,3 +324,140 @@ export const PRESET_THEMES = {
     }
   }
 }
+
+export const extractAverageColorFromSrc = (src) => {
+  return new Promise((resolve) => {
+    if (!src) return resolve(null);
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64; canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 64, 64);
+      try {
+        const data = ctx.getImageData(0, 0, 64, 64).data;
+        let r = 0, g = 0, b = 0, c = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i+3] < 128) continue;
+          r += data[i]; g += data[i+1]; b += data[i+2];
+          c++;
+        }
+        if (c > 0) resolve(`rgb(${Math.round(r/c)}, ${Math.round(g/c)}, ${Math.round(b/c)})`);
+        else resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+export const extractAverageHexFromSrc = (src) => {
+  return new Promise((resolve) => {
+    if (!src) return resolve(null);
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64; canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 64, 64);
+      try {
+        const data = ctx.getImageData(0, 0, 64, 64).data;
+        let r = 0, g = 0, b = 0, c = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i+3] < 128) continue;
+          r += data[i]; g += data[i+1]; b += data[i+2];
+          c++;
+        }
+        if (c > 0) {
+          const hex = `#${((1 << 24) + (r/c) * 65536 + (g/c) * 256 + (b/c) | 0).toString(16).slice(1)}`;
+          resolve(hex);
+        } else resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+export const hexToHsl = (hex) => {
+  const { r, g, b } = hexToRgb(hex);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h, s, l = (max + min) / 2;
+  if (max === min) {
+    h = s = 0; // achromatic
+  } else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / (max - min) + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / (max - min) + 2; break;
+      case b: h = (r - g) / (max - min) + 4; break;
+    }
+    h /= 6;
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+export const generatePaletteFromHex = (hex) => {
+  if (!hex) return generateRandomPalette();
+  let { h, s, l } = hexToHsl(hex);
+  s = Math.max(40, Math.min(90, s));
+  const isDark = l < 50;
+
+  const accent1 = hslToHex(h, s, isDark ? 62 : 58);
+  const accent2 = hslToHex((h + 40) % 360, s, isDark ? 58 : 62);
+  const accent3 = hslToHex((h + 80) % 360, s, isDark ? 65 : 60);
+
+  let bgColor, glassColor;
+  if (isDark) {
+    bgColor = hslToHex(h, Math.min(s, 28), 10);
+    glassColor = hslToHex(h, Math.min(s, 22), 14);
+  } else {
+    bgColor = hslToHex(h, Math.min(s, 18), 97);
+    glassColor = '#ffffff';
+  }
+
+  const pickTextForBg = (bg, hue) => {
+    const Lbg = relativeLuminance(bg);
+    const wantLightText = Lbg < 0.45;
+    let textM = wantLightText ? hslToHex(hue % 360, 12, 94) : hslToHex(hue % 360, 38, 16);
+    let Ltm = relativeLuminance(textM);
+    let ratio = (Math.max(Lbg, Ltm) + 0.05) / (Math.min(Lbg, Ltm) + 0.05);
+    let guard = 0;
+    while (ratio < 4.2 && guard < 12) {
+      textM = wantLightText
+        ? hslToHex(hue % 360, 10, Math.min(98, 88 + guard * 2))
+        : hslToHex(hue % 360, 40, Math.max(8, 14 - guard));
+      Ltm = relativeLuminance(textM);
+      ratio = (Math.max(Lbg, Ltm) + 0.05) / (Math.min(Lbg, Ltm) + 0.05);
+      guard++;
+    }
+    const textS = wantLightText
+      ? hslToHex((hue + 20) % 360, 18, 68)
+      : hslToHex((hue + 15) % 360, 28, 42);
+    return { textMain: textM, textSoft: textS }
+  }
+
+  const { textMain, textSoft } = pickTextForBg(bgColor, h);
+  const bgGradientEnd = isDark ? hslToHex((h + 50) % 360, Math.min(s, 35), 16) : hslToHex((h + 45) % 360, Math.min(s, 25), 92);
+  
+  return {
+    bgColor,
+    glassColor,
+    textMain,
+    textSoft,
+    accent1,
+    accent2,
+    accent3,
+    bgGradientEnd,
+    bgGradientAngle: 135,
+    bgMode: 'linear'
+  };
+}
