@@ -377,6 +377,7 @@ const APP_STATE_KEYS = new Set([
   'displayMetadataOverrides',
   'config',
   'likedPaths',
+  'upNextQueue',
   'trackStats',
   'playMode',
   'queuePlaybackEnabled',
@@ -1504,14 +1505,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('lyrics:neteaseFetch', async (_, payload) => {
     try {
       const auth = await resolveNeteaseAuthState(payload?.cookie || '')
-      const lrc = await fetchNeteaseLrcText({
+      const result = await fetchNeteaseLrcText({
         ...(payload || {}),
         cookie: auth.valid ? auth.cookie : ''
       })
-      return { ok: !!lrc, lrc: lrc || '' }
+      return { ok: !!result?.lrc, lrc: result?.lrc || '', confidence: result?.confidence }
     } catch (e) {
       console.warn('[lyrics:neteaseFetch]', e?.message || e)
-      return { ok: false, lrc: '' }
+      return { ok: false, lrc: '', confidence: null }
     }
   })
 

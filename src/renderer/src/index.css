@@ -461,15 +461,58 @@ body {
   align-items: center;
   gap: 6px;
   min-height: 28px;
+  border: 1px solid transparent;
   border-radius: 8px;
   padding: 4px 6px;
   background: rgba(255, 255, 255, 0.36);
+  transition:
+    background var(--motion-fast, 150ms) var(--ease-standard, ease),
+    border-color var(--motion-fast, 150ms) var(--ease-standard, ease),
+    box-shadow var(--motion-fast, 150ms) var(--ease-standard, ease),
+    transform var(--motion-fast, 150ms) var(--ease-standard, ease),
+    opacity var(--motion-fast, 150ms) var(--ease-standard, ease);
+}
+
+.queue-preview-item:hover {
+  background: rgba(255, 255, 255, 0.46);
+  border-color: color-mix(in srgb, var(--glass-border) 72%, transparent);
+}
+
+.queue-preview-item--dragging {
+  background: color-mix(in srgb, var(--surface-elevated) 90%, rgba(255, 255, 255, 0.3));
+  border-color: color-mix(in srgb, var(--accent-pink) 28%, var(--glass-border));
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.14);
+  opacity: 0.98;
 }
 
 .queue-preview-index {
   font-size: 11px;
   font-weight: 700;
   color: var(--text-soft);
+}
+
+.queue-preview-handle {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-soft);
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.queue-preview-handle:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.queue-preview-handle:active {
+  cursor: grabbing;
 }
 
 .queue-preview-text {

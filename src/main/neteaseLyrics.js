@@ -162,6 +162,7 @@ export async function fetchNeteaseLrcText(params) {
   const base = buildNcmRequestOptions(params?.cookie)
 
   let id = songId
+  let confidence = songId ? 100 : 0
   if (!id) {
     let searchRes
     try {
@@ -223,31 +224,23 @@ export async function fetchNeteaseLrcText(params) {
         const lowerName = (s.name || '').toLowerCase()
         const aliases = [].concat(s.alia || []).concat(s.alias || [])
         const searchStr = lowerName + ' ' + aliases.join(' ').toLowerCase()
-        const lowerKw = keywords.toLowerCase()
+        // 用原始标题（rawKeywords）判断用户意图，而非清理后的 keywords（remix/live 已被删掉）
+        const rawKw = (params?.rawKeywords || keywords).toLowerCase()
 
-        if (!lowerKw.includes('cover') && !lowerKw.includes('翻唱')) {
-          if (searchStr.includes('cover') || searchStr.includes('翻唱')) score -= 60
-        }
-        if (!lowerKw.includes('english') && !lowerKw.includes('eng')) {
-          if (
-            searchStr.includes('english') ||
-            searchStr.includes('eng ver') ||
-            searchStr.includes('english ver')
-          )
-            score -= 80
-        }
-        if (!lowerKw.includes('inst') && !lowerKw.includes('伴奏')) {
-          if (
-            searchStr.includes('inst') ||
-            searchStr.includes('karaoke') ||
-            searchStr.includes('instrumental') ||
-            searchStr.includes('伴奏') ||
-            searchStr.includes('off vocal')
-          )
-            score -= 60
-        }
-        if (!lowerKw.includes('live')) {
-          if (searchStr.includes('live')) score -= 20
+        const versionRules = [
+          { userTerms: ['cover', '翻唱', 'カバー'], resultTerms: ['cover', '翻唱'], penalty: -60, boost: +20 },
+          { userTerms: ['remix', 'rmx'],             resultTerms: ['remix', 'rmx'],   penalty: -30, boost: +25 },
+          { userTerms: ['live'],                      resultTerms: ['live'],           penalty: -20, boost: +20 },
+          { userTerms: ['acoustic'],                  resultTerms: ['acoustic'],       penalty: -20, boost: +20 },
+          { userTerms: ['inst', 'instrumental', '伴奏'], resultTerms: ['inst', 'karaoke', 'instrumental', '伴奏', 'off vocal'], penalty: -60, boost: +15 },
+          { userTerms: ['english', 'eng'],            resultTerms: ['english', 'eng ver', 'english ver'], penalty: -80, boost: +10 },
+        ]
+        for (const rule of versionRules) {
+          const userWants = rule.userTerms.some((t) => rawKw.includes(t))
+          const resultHas = rule.resultTerms.some((t) => searchStr.includes(t))
+          if (userWants && resultHas) score += rule.boost
+          else if (userWants && !resultHas) score -= 8
+          else if (!userWants && resultHas) score += rule.penalty
         }
 
         // Duration proximity bonus
@@ -267,11 +260,12 @@ export async function fetchNeteaseLrcText(params) {
 
     const best = scored[0]
     // Only accept if the match has a reasonable confidence
-    if (!best || best.score < 15) {
+    if (!best || best.score < 30) {
       console.log(`[netease lyrics] No confident match (best score: ${best?.score ?? 0})`)
       return null
     }
     id = best.song?.id
+    confidence = best.score
   }
   if (!id) return null
 
@@ -289,7 +283,7 @@ export async function fetchNeteaseLrcText(params) {
 
   if (lrc) {
     const merged = mergeTimedLyrics(lrc, romalrc, tlyric)
-    return merged || lrc
+    return { lrc: merged || lrc, confidence }
   }
 
   return null

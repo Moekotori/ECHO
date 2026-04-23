@@ -216,6 +216,19 @@ function scoreSyncedTimingFit(lyricsText, audioDuration) {
  * @param {{ titleCandidates?: string[], artistCandidates?: string[] }} options
  * @returns {Array<{ item: object, chosenLyrics: string, synced: boolean, diff: number, titleSim: number, artistSim: number, score: number }>}
  */
+const VERSION_TYPES = [
+  { re: /\b(remix|rmx)\b/i, label: 'remix' },
+  { re: /\blive\b/i, label: 'live' },
+  { re: /\bacoustic\b/i, label: 'acoustic' },
+  { re: /\b(instrumental|inst)\b/i, label: 'inst' },
+  { re: /\bcover\b|翻唱|カバー/i, label: 'cover' },
+]
+
+function detectVersionMarkers(text) {
+  const s = String(text || '')
+  return VERSION_TYPES.filter((vt) => vt.re.test(s)).map((vt) => vt.label)
+}
+
 export function rankLrcLibCandidates(payload, audioDuration, options = {}) {
   if (!payload) return []
 
@@ -225,6 +238,10 @@ export function rankLrcLibCandidates(payload, audioDuration, options = {}) {
   ]
     .filter(Boolean)
     .slice(0, 8)
+
+  // 从原始标题（未清理版）检测用户想要的版本类型
+  const rawUserTitle = String(options.rawTitle || (options.titleCandidates || [])[0] || '')
+  const userVersions = new Set(detectVersionMarkers(rawUserTitle))
 
   const expandArtistCandidates = (arr) => {
     const out = []
@@ -298,6 +315,24 @@ export function rankLrcLibCandidates(payload, audioDuration, options = {}) {
       if (!synced && titleSim < 0.2 && artistSim < 0.2) score -= 10
       if (synced) score += scoreSyncedTimingFit(chosenLyrics, audioDuration)
 
+      // 版本标记匹配奖惩：用户文件是 remix，候选也是 remix → 加分；反之大幅扣分
+      if (userVersions.size > 0) {
+        const candVersions = new Set(detectVersionMarkers(candTitle))
+        for (const v of userVersions) {
+          if (candVersions.has(v)) {
+            score += 14 // 版本吻合，加分
+          } else {
+            // remix/live 时间轴几乎必然和原版不同，惩罚要大到足以让原版低于门槛
+            const heavyPenaltyVersions = new Set(['remix', 'live', 'acoustic'])
+            score -= heavyPenaltyVersions.has(v) ? 38 : 15
+          }
+        }
+      } else {
+        // 用户文件没有版本标记（原版），候选却是 remix/live → 轻微扣分
+        const candVersions = detectVersionMarkers(candTitle)
+        if (candVersions.length > 0) score -= 6
+      }
+
       return { item, chosenLyrics, synced: !!synced, diff, titleSim, artistSim, score }
     })
     .filter(Boolean)
@@ -310,7 +345,7 @@ export function rankLrcLibCandidates(payload, audioDuration, options = {}) {
   return scored
 }
 
-const MIN_CONFIDENCE = 18
+const MIN_CONFIDENCE = 28
 
 /**
  * @returns {string} LRC text or ''
@@ -318,6 +353,27 @@ const MIN_CONFIDENCE = 18
 export function pickLyricsFromLrcLibResult(payload, audioDuration, options = {}) {
   const scored = rankLrcLibCandidates(payload, audioDuration, options)
   const best = scored[0]
+
+  // 硬性版本拒绝：用户明确需要 remix/live，但候选里完全没有匹配版本
+  // 此时宁可返回空（触发手动搜索），也不用错误时间轴的原版歌词
+  const rawUserTitle = String(options.rawTitle || '')
+  const userVersions = new Set(detectVersionMarkers(rawUserTitle))
+  const STRICT_VERSIONS = new Set(['remix', 'live'])
+  const needsStrictVersion = [...userVersions].some((v) => STRICT_VERSIONS.has(v))
+  if (needsStrictVersion && scored.length > 0) {
+    const anyVersionMatch = scored.some((c) => {
+      const ct = c.item?.trackName || c.item?.track_name || c.item?.title || ''
+      const cv = new Set(detectVersionMarkers(ct))
+      return [...userVersions].some((v) => cv.has(v))
+    })
+    if (!anyVersionMatch) {
+      console.log(
+        `[Lyrics] Rejected all: user wants [${[...userVersions].join(',')}] but no candidate has matching version`
+      )
+      return ''
+    }
+  }
+
   if (best) {
     console.log(
       `[Lyrics] Best candidate: score=${best.score.toFixed(2)}, titleSim=${best.titleSim.toFixed(2)}, artistSim=${best.artistSim.toFixed(2)}, diff=${Number.isFinite(best.diff) ? best.diff.toFixed(1) : 'n/a'}s`
@@ -326,9 +382,15 @@ export function pickLyricsFromLrcLibResult(payload, audioDuration, options = {})
       console.log(`[Lyrics] Rejected: score ${best.score.toFixed(2)} < threshold ${MIN_CONFIDENCE}`)
       return ''
     }
-    if (best.titleSim < 0.15 && best.artistSim < 0.15) {
+    if (best.titleSim < 0.25 && best.artistSim < 0.2) {
       console.log(
         `[Lyrics] Rejected: titleSim=${best.titleSim.toFixed(2)} & artistSim=${best.artistSim.toFixed(2)} both too low`
+      )
+      return ''
+    }
+    if (best.titleSim < 0.45 && best.artistSim < 0.35 && best.score < 42) {
+      console.log(
+        `[Lyrics] Rejected: weak title+artist match (titleSim=${best.titleSim.toFixed(2)}, artistSim=${best.artistSim.toFixed(2)}) without high confidence`
       )
       return ''
     }

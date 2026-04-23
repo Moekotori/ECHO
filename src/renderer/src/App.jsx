@@ -63,8 +63,22 @@ import {
   AppWindow,
   Blocks,
   Headphones,
-  History
+  History,
+  GripVertical
 } from 'lucide-react'
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable'
 import LyricsSettingsDrawer from './components/LyricsSettingsDrawer'
 import MediaDownloaderDrawer from './components/MediaDownloaderDrawer'
 import MvSettingsDrawer from './components/MvSettingsDrawer'
@@ -181,6 +195,79 @@ function readStoredJson(localKey) {
     return null
   }
 }
+
+function normalizeUpNextQueue(value) {
+  if (!Array.isArray(value)) return undefined
+  const seen = new Set()
+  const next = []
+  for (const entry of value) {
+    const path =
+      typeof entry === 'string' ? entry : entry && typeof entry.path === 'string' ? entry.path : ''
+    if (!path || seen.has(path)) continue
+    seen.add(path)
+    next.push({ path })
+  }
+  return next
+}
+
+function queueDragTransformToString(transform) {
+  if (!transform) return undefined
+  const x = Number.isFinite(transform.x) ? transform.x : 0
+  const y = Number.isFinite(transform.y) ? transform.y : 0
+  const scaleX = Number.isFinite(transform.scaleX) ? transform.scaleX : 1
+  const scaleY = Number.isFinite(transform.scaleY) ? transform.scaleY : 1
+  return `translate3d(${x}px, ${y}px, 0) scaleX(${scaleX}) scaleY(${scaleY})`
+}
+
+const UpNextQueueSortableItem = memo(function UpNextQueueSortableItem({
+  item,
+  index,
+  albumArtistByName,
+  onRemove,
+  removeButtonTitle
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.path
+  })
+  const displayArtist =
+    item.track.info.artist === 'Unknown Artist'
+      ? albumArtistByName[item.track.info.album] || item.track.info.artist
+      : item.track.info.artist
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: queueDragTransformToString(transform),
+        transition
+      }}
+      className={`queue-preview-item${isDragging ? ' queue-preview-item--dragging' : ''}`}
+    >
+      <button
+        type="button"
+        className="queue-preview-handle"
+        aria-label="Reorder queue item"
+        title="Reorder"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} />
+      </button>
+      <span className="queue-preview-index">{index + 1}.</span>
+      <span className="queue-preview-text" title={`${item.track.info.title} - ${displayArtist}`}>
+        {item.track.info.title} - {displayArtist}
+      </span>
+      <button
+        type="button"
+        className="queue-preview-remove"
+        onClick={() => onRemove(item.path)}
+        title={removeButtonTitle}
+      >
+        <Minus size={14} />
+      </button>
+    </div>
+  )
+})
 
 function normalizeDisplayMetadataOverrides(value) {
   if (!value || typeof value !== 'object') return {}
@@ -900,7 +987,14 @@ export default function App() {
       fallback: []
     })
   })
-  const [upNextQueue, setUpNextQueue] = useState([])
+  const [upNextQueue, setUpNextQueue] = useState(() => {
+    return pickInitialPersistedValue({
+      snapshotValue: getInitialAppStateValue('upNextQueue'),
+      localValue: readStoredJson('nc_up_next_queue'),
+      normalize: (value) => normalizeUpNextQueue(value),
+      fallback: []
+    })
+  })
   const [playbackHistory, setPlaybackHistory] = useState(() => {
     return pickInitialPersistedValue({
       snapshotValue: getInitialAppStateValue('playbackHistory'),
@@ -1129,6 +1223,7 @@ export default function App() {
   const displayMetadataOverridesHydratedRef = useRef(false)
   const configStoreHydratedRef = useRef(false)
   const likedPathsStoreHydratedRef = useRef(false)
+  const upNextQueueStoreHydratedRef = useRef(false)
   const playModeStoreHydratedRef = useRef(false)
   const queuePlaybackStoreHydratedRef = useRef(false)
   const trackStatsStoreHydratedRef = useRef(false)
@@ -1635,6 +1730,15 @@ export default function App() {
   }, [trackStats, config.autoSaveLibrary, schedulePersistedState])
 
   useEffect(() => {
+    schedulePersistedState(
+      'upNextQueue',
+      'nc_up_next_queue',
+      upNextQueue.map((item) => ({ path: item.path })),
+      upNextQueueStoreHydratedRef.current
+    )
+  }, [upNextQueue, schedulePersistedState])
+
+  useEffect(() => {
     playlistRef.current = playlist
   }, [playlist])
 
@@ -2070,6 +2174,7 @@ export default function App() {
     displayMetadataOverridesHydratedRef.current = true
     configStoreHydratedRef.current = true
     likedPathsStoreHydratedRef.current = true
+    upNextQueueStoreHydratedRef.current = true
     trackStatsStoreHydratedRef.current = true
     importedFoldersHydratedRef.current = true
     playModeStoreHydratedRef.current = true
@@ -3254,6 +3359,25 @@ export default function App() {
     for (const q of extractBookTitleQuotes(rt)) add(q)
     for (const q of extractCornerQuotes(rt)) add(q)
     add(rt)
+
+    // 如果标题含版本标记（remix/live/cover等），额外生成一个保留版本词的变体
+    // 只做最小噪声清理，不删 remix/live/cover，让搜索能命中对应版本
+    const VERSION_MARKER_RE = /\b(remix|rmx|live|acoustic|instrumental|inst|cover|edit)\b|翻唱|カバー/i
+    if (VERSION_MARKER_RE.test(rt)) {
+      let withVersion = rt
+      withVersion = withVersion.replace(/【[^】]*】/g, ' ')
+      withVersion = withVersion.replace(/〖[^〗]*〗/g, ' ')
+      withVersion = withVersion.replace(/\[.*?\]/g, '')
+      withVersion = withVersion.replace(/[《》「」]/g, ' ')
+      withVersion = withVersion.replace(/[~`"'·、，。]/g, ' ')
+      withVersion = withVersion.replace(/\bfeat\.?\b|\bft\.?\b/gi, '')
+      withVersion = withVersion.replace(/\s+/g, ' ').trim().toLowerCase()
+      if (withVersion && !seen.has(withVersion)) {
+        seen.add(withVersion)
+        list.push(withVersion)
+      }
+    }
+
     return list
   }
 
@@ -3375,9 +3499,10 @@ export default function App() {
     clearLyricsOverrideForPath(track.path)
     const metaTitle = metadata.title || (track ? stripExtension(track.name) : '')
     const metaArtist = metadata.artist || track?.info?.artist || ''
-    const cleaned = cleanTitleForSearch(metaTitle)
     try {
-      await fetchLyrics(track.path, cleaned || metaTitle, metaArtist, {
+      // 保留原始标题传入，让 fetchLyrics 内部自己决定如何清理
+      // 之前 cleaned || metaTitle 会把 remix/live 提前删掉，导致版本识别失效
+      await fetchLyrics(track.path, metaTitle, metaArtist, {
         album: track.info?.album || '',
         embeddedLyrics: track.info?.lyrics || null,
         mvOriginUrl: track.mvOriginUrl
@@ -3441,10 +3566,30 @@ export default function App() {
     applyLyricsFromText(text, { origin: 'local' })
   }, [applyLyricsFromText])
 
+  const lrcLibCache = useRef(new Map())
+
   const requestLrcLib = async (url) => {
-    const response = await fetch(url)
-    if (!response.ok) return null
-    return response.json()
+    // 命中缓存直接返回，同一首歌换着搜不会重复请求
+    if (lrcLibCache.current.has(url)) return lrcLibCache.current.get(url)
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 6000) // 6秒超时
+    try {
+      const response = await fetch(url, { signal: controller.signal })
+      if (!response.ok) return null
+      const data = await response.json()
+      lrcLibCache.current.set(url, data)
+      // 缓存最多保留 120 条，防止内存无限增长
+      if (lrcLibCache.current.size > 120) {
+        const firstKey = lrcLibCache.current.keys().next().value
+        lrcLibCache.current.delete(firstKey)
+      }
+      return data
+    } catch {
+      return null
+    } finally {
+      clearTimeout(timeoutId)
+    }
   }
 
   const searchLyricsCandidates = async (customQuery) => {
@@ -3475,39 +3620,108 @@ export default function App() {
       }
       const q = customQuery || `${titleVariants[0]} ${coverArtistClean || coverArtistRaw}`.trim()
 
-      const data = await requestLrcLib(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`)
-      const ranked = rankLrcLibCandidates(data, audioDur, rankOpts)
-      const lrItems = ranked.slice(0, 30).map((r, i) => {
-        const tn = r.item?.trackName || r.item?.track_name || ''
-        const an = r.item?.artistName || r.item?.artist_name || ''
-        return {
-          key: `lrclib-${i}-${tn}`,
-          source: 'lrclib',
-          title: tn || '—',
-          subtitle: an || '—',
-          badge: `LRCLIB · ${r.score.toFixed(0)}`,
-          raw: r.chosenLyrics
+      // LRCLIB：主查询 + 仅标题备用查询同时发出，合并去重
+      const lrclibPromise = Promise.all([
+        requestLrcLib(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`),
+        // 如果主查询带了艺术家，额外用纯标题搜一次（防止艺术家名拼写差异导致漏搜）
+        coverArtistClean && titleVariants[0] && q !== titleVariants[0]
+          ? requestLrcLib(`https://lrclib.net/api/search?q=${encodeURIComponent(titleVariants[0])}`)
+          : Promise.resolve(null)
+      ]).then(([data1, data2]) => {
+        // 合并两次结果，按 id 去重
+        const seen = new Set()
+        const merged = []
+        for (const item of [...(Array.isArray(data1) ? data1 : []), ...(Array.isArray(data2) ? data2 : [])]) {
+          const id = item?.id ?? item?.trackName
+          if (id && seen.has(id)) continue
+          if (id) seen.add(id)
+          merged.push(item)
         }
-      })
-      let neItems = []
-      if (window.api?.neteaseSearch) {
-        try {
-          const songs = await window.api.neteaseSearch(q)
-          neItems = (songs || []).slice(0, 25).map((s) => ({
-            key: `ne-${s.id}`,
-            source: 'netease',
-            title: s.name || '—',
-            subtitle: s.artists || '—',
-            badge:
-              typeof s.duration === 'number' && s.duration > 0
-                ? `NetEase · ${(s.duration / 1000).toFixed(0)}s`
-                : 'NetEase',
-            songId: s.id
-          }))
-        } catch (e) {
-          console.warn('[lyrics] neteaseSearch', e)
-        }
-      }
+        const ranked = rankLrcLibCandidates(merged, audioDur, rankOpts)
+        return ranked.slice(0, 30).map((r, i) => {
+          const tn = r.item?.trackName || r.item?.track_name || ''
+          const an = r.item?.artistName || r.item?.artist_name || ''
+          return {
+            key: `lrclib-${i}-${tn}`,
+            source: 'lrclib',
+            title: tn || '—',
+            subtitle: an || '—',
+            badge: `LRCLIB · ${r.score.toFixed(0)}`,
+            raw: r.chosenLyrics
+          }
+        })
+      }).catch(() => [])
+
+      // 网易云：搜索后用本地评分重新排序，过滤明显不相关的结果
+      const neteasePromise = window.api?.neteaseSearch
+        ? window.api.neteaseSearch(q).then((songs) => {
+            if (!songs?.length) return []
+            const normTitle = (titleVariants[0] || '').toLowerCase().replace(/\s+/g, '')
+            const normArtist = (coverArtistClean || coverArtistRaw || '').toLowerCase().replace(/\s+/g, '')
+            const rawKw = (metaTitle || '').toLowerCase()
+
+            // 对每条结果打分，过滤并重排
+            const scored = songs.map((s) => {
+              const sName = (s.name || '').toLowerCase().replace(/\s+/g, '')
+              const sArtist = (s.artists || '').toLowerCase().replace(/\s+/g, '')
+              const sAll = sName + ' ' + sArtist + ' ' + (s.album || '').toLowerCase()
+              const durSec = typeof s.duration === 'number' ? s.duration / 1000 : 0
+
+              let score = 0
+
+              // 标题匹配
+              if (sName === normTitle) score += 50
+              else if (sName.includes(normTitle) && normTitle.length >= 2) score += 25
+              else if (normTitle.includes(sName) && sName.length >= 2) score += 15
+              else score -= 20  // 完全不含标题词，扣分
+
+              // 艺术家匹配
+              if (normArtist && sArtist.includes(normArtist)) score += 40
+              else if (normArtist && normArtist.includes(sArtist) && sArtist.length >= 2) score += 20
+
+              // 时长接近
+              if (durSec > 0 && audioDur > 0) {
+                const diff = Math.abs(durSec - audioDur)
+                if (diff <= 5) score += 20
+                else if (diff <= 15) score += 10
+                else if (diff > 60) score -= 10
+              }
+
+              // 惩罚用户不需要的版本变体
+              const badVariants = [
+                { terms: ['伴奏', 'instrumental', 'inst', 'off vocal', 'karaoke'], penalty: -60 },
+                { terms: ['dj', 'dj版', 'remix'], penalty: -30 },
+                { terms: ['live'], penalty: -15 },
+              ]
+              for (const { terms, penalty } of badVariants) {
+                const userWants = terms.some((t) => rawKw.includes(t))
+                if (!userWants && terms.some((t) => sAll.includes(t))) score += penalty
+              }
+
+              return { s, score }
+            })
+            .filter(({ score }) => score > -30)  // 过滤明显不相关
+            .sort((a, b) => b.score - a.score)
+
+            return scored.slice(0, 20).map(({ s, score }) => ({
+              key: `ne-${s.id}`,
+              source: 'netease',
+              title: s.name || '—',
+              subtitle: s.artists || '—',
+              badge:
+                typeof s.duration === 'number' && s.duration > 0
+                  ? `NetEase · ${(s.duration / 1000).toFixed(0)}s · ${score}`
+                  : `NetEase · ${score}`,
+              songId: s.id
+            }))
+          }).catch(() => [])
+        : Promise.resolve([])
+
+      // 谁先回来先显示，另一个回来后追加
+      const lrItems = await lrclibPromise
+      setLyricsCandidateItems(lrItems)
+
+      const neItems = await neteasePromise
       setLyricsCandidateItems([...lrItems, ...neItems])
     } finally {
       setLyricsCandidateLoading(false)
@@ -3630,7 +3844,7 @@ export default function App() {
     setLyricsMatchStatus('loading')
     setLyricsSourceStatus({ kind: 'loading', detail: '', origin: '' })
 
-    // MV Search
+    // MV 搜索与歌词搜索并行，不再阻塞歌词加载
     if (
       window.api.searchMVHandler &&
       (configRef.current.enableMV ||
@@ -3638,105 +3852,104 @@ export default function App() {
         configRef.current.mvAsBackgroundMain)
     ) {
       setIsSearchingMV(true)
-      try {
-        let foundId = null
-        let mvSource = configRef.current.mvSource || 'bilibili'
-        const isPackagedFileProtocol =
-          typeof window !== 'undefined' && window.location?.protocol === 'file:'
+      // 注意：不 await，让 MV 搜索在后台跑，歌词搜索同时开始
+      ;(async () => {
+        try {
+          let foundId = null
+          let mvSource = configRef.current.mvSource || 'bilibili'
+          const isPackagedFileProtocol =
+            typeof window !== 'undefined' && window.location?.protocol === 'file:'
 
-        // Try reading yt-dlp local JSON for exact MV match
-        let mvFromInfoJson = false
-        const infoJson = await window.api.readInfoJsonHandler(filePath).catch(() => null)
-        if (isStaleRequest()) return
-        if (infoJson) {
-          if (infoJson.extractor && infoJson.extractor.toLowerCase().includes('youtube')) {
-            foundId = infoJson.id
-            mvSource = 'youtube'
-            mvFromInfoJson = true
-          } else if (infoJson.extractor && infoJson.extractor.toLowerCase().includes('bilibili')) {
-            // bvid or aid
-            foundId = infoJson.id
-            mvSource = 'bilibili'
-            mvFromInfoJson = true
-          }
-        }
-
-        if (!foundId && hints?.mvOriginUrl) {
-          const parsed = extractVideoId(String(hints.mvOriginUrl))
-          if (parsed) {
-            foundId = parsed.id
-            mvSource = parsed.source
-          }
-        }
-
-        if (!foundId) {
-          const persistedMv = getMvOverrideForPath(filePath)
-          if (persistedMv?.id && persistedMv?.source) {
-            foundId = persistedMv.id
-            mvSource = persistedMv.source
-          }
-        }
-
-        if (!foundId && title) {
-          const cleanedTitle = cleanTitleForSearch(title)
-          const mvQuery =
-            mvSource === 'bilibili'
-              ? `${cleanedTitle} ${artist || ''} MV`.trim()
-              : `${cleanedTitle} ${artist || ''} official mv`.trim()
-          const searchCacheKey = `${filePath}::${mvSource}::${mvQuery.toLowerCase()}`
-          let searchResult = autoMvSearchByTrackRef.current.get(searchCacheKey)
-          if (searchResult === undefined) {
-            searchResult = await searchMvWithCache(mvQuery, mvSource)
-            autoMvSearchByTrackRef.current.set(searchCacheKey, searchResult || null)
-          }
+          let mvFromInfoJson = false
+          const infoJson = await window.api.readInfoJsonHandler(filePath).catch(() => null)
           if (isStaleRequest()) return
-          if (searchResult) {
-            if (typeof searchResult === 'string') {
-              foundId = searchResult
-            } else {
-              foundId = searchResult.id
-              if (searchResult.source) mvSource = searchResult.source
-              console.log(
-                `[MV] ${mvSource}: "${searchResult.title || '?'}" | id=${foundId}${searchResult.resolution ? ` | source_res=${searchResult.resolution}` : ''}`
-              )
+          if (infoJson) {
+            if (infoJson.extractor && infoJson.extractor.toLowerCase().includes('youtube')) {
+              foundId = infoJson.id
+              mvSource = 'youtube'
+              mvFromInfoJson = true
+            } else if (infoJson.extractor && infoJson.extractor.toLowerCase().includes('bilibili')) {
+              foundId = infoJson.id
+              mvSource = 'bilibili'
+              mvFromInfoJson = true
             }
           }
-        }
 
-        // 打包后 file:// 场景下 YouTube 更容易触发 153，无 .info.json 时可预降级到 B 站。
-        // 若 MV 已来自 yt-dlp info.json，勿替换为搜索结果，以保持「下载源 = 画面」一致。
-        if (
-          foundId &&
-          mvSource === 'youtube' &&
-          !mvFromInfoJson &&
-          isPackagedFileProtocol &&
-          configRef.current.autoFallbackToBilibili
-        ) {
-          const bilibiliId = await searchBilibiliMv(title || '', artist || '')
-          if (isStaleRequest()) return
-          if (bilibiliId) {
-            foundId = bilibiliId
-            mvSource = 'bilibili'
-            console.warn('[MV Fallback] Pre-fallback in packaged mode: YouTube -> Bilibili')
+          if (!foundId && hints?.mvOriginUrl) {
+            const parsed = extractVideoId(String(hints.mvOriginUrl))
+            if (parsed) {
+              foundId = parsed.id
+              mvSource = parsed.source
+            }
           }
-        }
 
-        if (foundId) {
-          if (isStaleRequest()) return
-          setMvId((prev) =>
-            prev?.id === foundId && prev?.source === mvSource ? prev : { id: foundId, source: mvSource }
-          )
-          setMvOverrideForPath(filePath, { id: foundId, source: mvSource })
-        } else if (!isStaleRequest()) {
-          setMvId(null)
-          setBiliDirectStream(null)
-          setMvPlaybackQuality(null)
+          if (!foundId) {
+            const persistedMv = getMvOverrideForPath(filePath)
+            if (persistedMv?.id && persistedMv?.source) {
+              foundId = persistedMv.id
+              mvSource = persistedMv.source
+            }
+          }
+
+          if (!foundId && title) {
+            const cleanedTitle = cleanTitleForSearch(title)
+            const mvQuery =
+              mvSource === 'bilibili'
+                ? `${cleanedTitle} ${artist || ''} MV`.trim()
+                : `${cleanedTitle} ${artist || ''} official mv`.trim()
+            const searchCacheKey = `${filePath}::${mvSource}::${mvQuery.toLowerCase()}`
+            let searchResult = autoMvSearchByTrackRef.current.get(searchCacheKey)
+            if (searchResult === undefined) {
+              searchResult = await searchMvWithCache(mvQuery, mvSource)
+              autoMvSearchByTrackRef.current.set(searchCacheKey, searchResult || null)
+            }
+            if (isStaleRequest()) return
+            if (searchResult) {
+              if (typeof searchResult === 'string') {
+                foundId = searchResult
+              } else {
+                foundId = searchResult.id
+                if (searchResult.source) mvSource = searchResult.source
+                console.log(
+                  `[MV] ${mvSource}: "${searchResult.title || '?'}" | id=${foundId}${searchResult.resolution ? ` | source_res=${searchResult.resolution}` : ''}`
+                )
+              }
+            }
+          }
+
+          if (
+            foundId &&
+            mvSource === 'youtube' &&
+            !mvFromInfoJson &&
+            isPackagedFileProtocol &&
+            configRef.current.autoFallbackToBilibili
+          ) {
+            const bilibiliId = await searchBilibiliMv(title || '', artist || '')
+            if (isStaleRequest()) return
+            if (bilibiliId) {
+              foundId = bilibiliId
+              mvSource = 'bilibili'
+              console.warn('[MV Fallback] Pre-fallback in packaged mode: YouTube -> Bilibili')
+            }
+          }
+
+          if (foundId) {
+            if (isStaleRequest()) return
+            setMvId((prev) =>
+              prev?.id === foundId && prev?.source === mvSource ? prev : { id: foundId, source: mvSource }
+            )
+            setMvOverrideForPath(filePath, { id: foundId, source: mvSource })
+          } else if (!isStaleRequest()) {
+            setMvId(null)
+            setBiliDirectStream(null)
+            setMvPlaybackQuality(null)
+          }
+        } catch (e) {
+          console.error('MV search error', e)
+        } finally {
+          setIsSearchingMV(false)
         }
-      } catch (e) {
-        console.error('MV search error', e)
-      } finally {
-        setIsSearchingMV(false)
-      }
+      })()
     }
 
     // 1. Saved manual pick for this file (Highest Priority)
@@ -3817,6 +4030,7 @@ export default function App() {
         const applyLrcLibPayload = (payload) => {
           const raw = pickLyricsFromLrcLibResult(payload, audioDur, {
             titleCandidates: titleVariants,
+            rawTitle: title,
             artistCandidates: [...globalParenHints, coverArtistClean, coverArtistRaw].filter(
               Boolean
             )
@@ -3878,37 +4092,51 @@ export default function App() {
             const parenHints = [
               ...new Set([...globalParenHints, ...extractParenArtistHints(cleanedTitle)])
             ]
-            for (const hint of parenHints) {
+
+            // 第一波：get + search 并行发出，谁先命中谁用
+            // get 是精确匹配，search 是模糊匹配，两者同时跑比串行快一倍
+            const firstArtist =
+              parenHints[0] ||
+              (coverArtistRaw !== 'Unknown Artist' ? coverArtistRaw : '') ||
+              coverArtistClean ||
+              ''
+            const firstSearchQ = firstArtist
+              ? `${cleanedTitle} ${firstArtist}`.trim()
+              : cleanedTitle
+
+            const [getHit, searchHit] = await Promise.all([
+              tryGet(cleanedTitle, firstArtist),
+              trySearch(firstSearchQ)
+            ])
+            if (getHit || searchHit) return true
+            if (isStaleRequest()) return false
+
+            // 第二波：其余 get 变体串行（已有缓存，通常很快）
+            for (const hint of parenHints.slice(1)) {
               if (await tryGet(cleanedTitle, hint)) return true
             }
-            if (coverArtistRaw && coverArtistRaw !== 'Unknown Artist') {
+            if (coverArtistRaw && coverArtistRaw !== 'Unknown Artist' && coverArtistRaw !== firstArtist) {
               if (await tryGet(cleanedTitle, coverArtistRaw)) return true
             }
-            if (
-              coverArtistClean &&
-              coverArtistClean !== coverArtistRaw &&
-              coverArtistClean !== 'Unknown Artist'
-            ) {
+            if (coverArtistClean && coverArtistClean !== coverArtistRaw && coverArtistClean !== firstArtist) {
               if (await tryGet(cleanedTitle, coverArtistClean)) return true
             }
             if (await tryGet(cleanedTitle, '')) return true
 
-            for (const hint of parenHints) {
+            // 第三波：更多 search 变体
+            for (const hint of parenHints.slice(1)) {
               if (await trySearch(`${cleanedTitle} ${hint}`.trim())) return true
             }
             if (coverArtistRaw && coverArtistRaw !== 'Unknown Artist') {
               if (await trySearch(`${cleanedTitle} ${coverArtistRaw}`.trim())) return true
             }
-            if (coverArtistClean) {
+            if (coverArtistClean && coverArtistClean !== firstSearchQ) {
               if (await trySearch(`${cleanedTitle} ${coverArtistClean}`.trim())) return true
             }
-            // Short titles are extremely ambiguous — include album name when available.
             if ((cleanedTitle || '').length <= 4 && albumName) {
-              if (
-                coverArtistClean &&
-                (await trySearch(`${cleanedTitle} ${coverArtistClean} ${albumName}`.trim()))
-              )
-                return true
+              if (coverArtistClean) {
+                if (await trySearch(`${cleanedTitle} ${coverArtistClean} ${albumName}`.trim())) return true
+              }
               if (await trySearch(`${cleanedTitle} ${albumName}`.trim())) return true
             }
             if (await trySearch(cleanedTitle)) return true
@@ -3954,10 +4182,15 @@ export default function App() {
             console.log(`[Lyrics NetEase] trying: "${k}"`)
             const res = await window.api.fetchNeteaseLyrics({
               keywords: k,
+              rawKeywords: title,
               durationSec: audioDur
             })
             if (isStaleRequest()) return true
             if (res?.ok && res.lrc) {
+              if (typeof res.confidence === 'number' && res.confidence < 30) {
+                console.log(`[Lyrics NetEase] rejected low confidence (${res.confidence}) for "${k}"`)
+                continue
+              }
               const parsed = parseAnyLyrics(res.lrc)
               if (parsed.length >= 3) {
                 console.log(`[Lyrics NetEase] matched with "${k}" (${parsed.length} lines)`)
@@ -4085,6 +4318,11 @@ export default function App() {
       trackNo: null,
       discNo: null
     })
+    // 提前把歌词状态切到 loading，避免 metadata 读取期间显示上一首歌的残留状态
+    setLyrics([])
+    setActiveLyricIndex(-1)
+    setLyricsMatchStatus('loading')
+    setLyricsSourceStatus({ kind: 'loading', detail: '', origin: '' })
     setTechnicalInfo({
       sampleRate: null,
       originalBpm: null,
@@ -6631,6 +6869,23 @@ export default function App() {
     return upNextQueue.map((item) => pathToTrack.get(item?.path)).filter(Boolean)
   }, [upNextQueue, parsedPlaylist])
 
+  const queueSortSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 }
+    })
+  )
+
+  const handleQueueSortEnd = useCallback((event) => {
+    const { active, over } = event
+    if (!active?.id || !over?.id || active.id === over.id) return
+    setUpNextQueue((prev) => {
+      const oldIndex = prev.findIndex((item) => item?.path === active.id)
+      const newIndex = prev.findIndex((item) => item?.path === over.id)
+      if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return prev
+      return arrayMove(prev, oldIndex, newIndex)
+    })
+  }, [])
+
   const playbackHistoryEntries = useMemo(() => {
     if (playbackHistory.length === 0) return []
     const pathToTrack = new Map(parsedPlaylist.map((track) => [track.path, track]))
@@ -8902,7 +9157,7 @@ export default function App() {
               {upNextPreviewTracks.length === 0 ? (
                 <div className="queue-preview-empty">{t('empty.queueEmpty')}</div>
               ) : (
-                upNextPreviewTracks.map((track, idx) => {
+                false ? upNextPreviewTracks.map((track, idx) => {
                   const displayArtist =
                     track.info.artist === 'Unknown Artist'
                       ? albumArtistByName[track.info.album] || track.info.artist
@@ -8926,7 +9181,29 @@ export default function App() {
                       </button>
                     </div>
                   )
-                })
+                }) : (
+                  <DndContext
+                    sensors={queueSortSensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleQueueSortEnd}
+                  >
+                    <SortableContext
+                      items={upNextPreviewTracks.map((track) => track.path)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      {upNextPreviewTracks.map((track, idx) => (
+                        <UpNextQueueSortableItem
+                          key={track.path}
+                          item={{ path: track.path, track }}
+                          index={idx}
+                          albumArtistByName={albumArtistByName}
+                          onRemove={removeFromUpNextQueue}
+                          removeButtonTitle={t('contextMenu.removeFromUpNext')}
+                        />
+                      ))}
+                    </SortableContext>
+                  </DndContext>
+                )
               )}
             </div>
             <div className="queue-drop-hint">{t('queue.dropHint')}</div>
@@ -13685,4 +13962,3 @@ export default function App() {
     </div>
   )
 }
-            

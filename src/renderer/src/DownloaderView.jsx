@@ -468,9 +468,11 @@ export default function DownloaderView({
           const filePath = newFiles[0].path
           try {
             console.log('[DownloaderView] Fetching matched lyrics for netease song id', mId[1])
-            const lrcText = await window.api.media
+            const lrcResult = await window.api.media
               .fetchNeteaseLrcText({ songId: mId[1], cookie: usableNeteaseCookie })
               .catch(() => null)
+            const lrcText =
+              typeof lrcResult === 'string' ? lrcResult : (lrcResult?.lrc ?? '')
             if (lrcText) {
               const lrcPath = filePath.replace(/\.[^/.]+$/, '.lrc')
               await window.api.media.writeFile(lrcPath, lrcText).catch(() => null)
@@ -579,9 +581,11 @@ export default function DownloaderView({
         let hasLyrics = false
         if (filePath) {
           try {
-            const lrcText = await window.api.media
+            const lrcResult = await window.api.media
               .fetchNeteaseLrcText({ songId: song.id, cookie: usableNeteaseCookie })
               .catch(() => null)
+            const lrcText =
+              typeof lrcResult === 'string' ? lrcResult : (lrcResult?.lrc ?? '')
             if (lrcText) {
               const lrcPath = filePath.replace(/\.[^/.]+$/, '.lrc')
               await window.api.media.writeFile(lrcPath, lrcText).catch(() => null)
