@@ -1,5 +1,5 @@
 <div align="center">
-<img src="echo-logo.png" width="680" alt="ECHO">
+<img src="website/echo-logo.png" width="680" alt="ECHO">
 
 <h3>ECHO · 你的 HiFi 桌面音乐播放器</h3>
 
