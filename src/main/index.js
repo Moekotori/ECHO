@@ -92,11 +92,86 @@ let lyricsDesktopWindow = null
 let lyricsDesktopLastPayload = {}
 /** Main-process timer pulls lyrics from the main renderer — not throttled when the main window is minimized */
 let lyricsDesktopMainSyncTimer = null
+const MAX_EMBEDDED_COVER_DIMENSION = 768
+const MAX_EMBEDDED_COVER_BYTES = 350 * 1024
 
 function stopLyricsDesktopMainSyncTimer() {
   if (lyricsDesktopMainSyncTimer) {
     clearInterval(lyricsDesktopMainSyncTimer)
     lyricsDesktopMainSyncTimer = null
+  }
+}
+
+function compressEmbeddedCoverData(picture) {
+  if (!picture?.data) {
+    return { dataUrl: null, bytes: 0, width: 0, height: 0 }
+  }
+
+  try {
+    const originalBuffer = Buffer.isBuffer(picture.data) ? picture.data : Buffer.from(picture.data)
+    const originalMime = picture.format?.includes('/') ? picture.format : `image/${picture.format || 'jpeg'}`
+    let image = nativeImage.createFromBuffer(originalBuffer)
+    if (image.isEmpty()) {
+      return {
+        dataUrl: `data:${originalMime};base64,${originalBuffer.toString('base64')}`,
+        bytes: originalBuffer.length,
+        width: 0,
+        height: 0
+      }
+    }
+
+    let { width, height } = image.getSize()
+    if (width > MAX_EMBEDDED_COVER_DIMENSION || height > MAX_EMBEDDED_COVER_DIMENSION) {
+      const scale = Math.min(
+        MAX_EMBEDDED_COVER_DIMENSION / Math.max(1, width),
+        MAX_EMBEDDED_COVER_DIMENSION / Math.max(1, height)
+      )
+      image = image.resize({
+        width: Math.max(1, Math.round(width * scale)),
+        height: Math.max(1, Math.round(height * scale)),
+        quality: 'good'
+      })
+      ;({ width, height } = image.getSize())
+    }
+
+    let encoded = image.toJPEG(82)
+    if (encoded.length > MAX_EMBEDDED_COVER_BYTES) {
+      for (const quality of [74, 66, 58]) {
+        encoded = image.toJPEG(quality)
+        if (encoded.length <= MAX_EMBEDDED_COVER_BYTES) break
+      }
+    }
+
+    if (encoded.length > MAX_EMBEDDED_COVER_BYTES && width > 320 && height > 320) {
+      const resized = image.resize({
+        width: Math.max(320, Math.round(width * 0.72)),
+        height: Math.max(320, Math.round(height * 0.72)),
+        quality: 'good'
+      })
+      image = resized
+      ;({ width, height } = image.getSize())
+      encoded = image.toJPEG(66)
+    }
+
+    return {
+      dataUrl: `data:image/jpeg;base64,${encoded.toString('base64')}`,
+      bytes: encoded.length,
+      width,
+      height
+    }
+  } catch {
+    try {
+      const fallbackBuffer = Buffer.isBuffer(picture.data) ? picture.data : Buffer.from(picture.data)
+      const fallbackMime = picture.format?.includes('/') ? picture.format : `image/${picture.format || 'jpeg'}`
+      return {
+        dataUrl: `data:${fallbackMime};base64,${fallbackBuffer.toString('base64')}`,
+        bytes: fallbackBuffer.length,
+        width: 0,
+        height: 0
+      }
+    } catch {
+      return { dataUrl: null, bytes: 0, width: 0, height: 0 }
+    }
   }
 }
 
@@ -2031,9 +2106,15 @@ app.whenReady().then(async () => {
       }
 
       const picture = selectCover(metadata.common.picture)
+      let coverBytes = 0
+      let coverWidth = 0
+      let coverHeight = 0
       if (picture) {
-        const mime = picture.format.includes('/') ? picture.format : `image/${picture.format}`
-        cover = `data:${mime};base64,${Buffer.from(picture.data).toString('base64')}`
+        const compressedCover = compressEmbeddedCoverData(picture)
+        cover = compressedCover.dataUrl
+        coverBytes = compressedCover.bytes
+        coverWidth = compressedCover.width
+        coverHeight = compressedCover.height
       }
 
       const codecLabel = resolveAudioCodecLabel(metadata, filePath)
@@ -2061,7 +2142,10 @@ app.whenReady().then(async () => {
           trackNo: metadata.common.track?.no ?? null,
           discNo: metadata.common.disk?.no ?? null,
           lyrics: embeddedLyrics || null,
-          cover
+          cover,
+          coverBytes,
+          coverWidth,
+          coverHeight
         }
       }
     } catch (e) {

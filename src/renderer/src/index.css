@@ -742,7 +742,8 @@ body {
   box-sizing: border-box;
   scrollbar-width: thin;
   scrollbar-gutter: stable;
-  scrollbar-color: rgba(148, 163, 184, 0.38) transparent;
+  scrollbar-color: color-mix(in srgb, var(--accent-pink) 38%, rgba(255, 255, 255, 0.12))
+    transparent;
 }
 
 .playlist.playlist-album-mode {
@@ -781,33 +782,115 @@ body {
 }
 
 .playlist::-webkit-scrollbar {
-  width: 10px;
+  width: 12px;
 }
 
 .playlist::-webkit-scrollbar-track {
-  background: transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, rgba(255, 255, 255, 0.1) 80%, transparent),
+    color-mix(in srgb, rgba(255, 255, 255, 0.03) 75%, transparent)
+  );
   border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--glass-border) 55%, transparent);
 }
 
 .playlist::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-mint) 34%, transparent),
-    color-mix(in srgb, var(--accent-blue) 34%, transparent)
-  );
-  border: 2px solid color-mix(in srgb, rgba(6, 8, 16, 0.34) 75%, transparent);
+  background:
+    radial-gradient(
+      circle at 30% 20%,
+      color-mix(in srgb, #fff 55%, transparent) 0%,
+      transparent 45%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent-pink) 58%, rgba(255, 255, 255, 0.18)),
+      color-mix(in srgb, var(--accent-blue) 54%, rgba(255, 255, 255, 0.12))
+    );
+  border: 3px solid transparent;
   background-clip: padding-box;
-  min-height: 32px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent),
+    0 2px 8px color-mix(in srgb, var(--accent-pink) 18%, transparent);
+  min-height: 42px;
+}
+
+.playlist:hover::-webkit-scrollbar-thumb {
+  background:
+    radial-gradient(
+      circle at 30% 20%,
+      color-mix(in srgb, #fff 72%, transparent) 0%,
+      transparent 48%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent-pink) 72%, rgba(255, 255, 255, 0.22)),
+      color-mix(in srgb, var(--accent-blue) 68%, rgba(255, 255, 255, 0.16))
+    );
+  background-clip: padding-box;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 56%, transparent),
+    0 4px 14px color-mix(in srgb, var(--accent-pink) 24%, transparent);
+}
+
+.playlist::-webkit-scrollbar-thumb:active {
+  background:
+    radial-gradient(
+      circle at 30% 20%,
+      color-mix(in srgb, #fff 78%, transparent) 0%,
+      transparent 52%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent-pink) 80%, rgba(255, 255, 255, 0.22)),
+      color-mix(in srgb, var(--accent-blue) 74%, rgba(255, 255, 255, 0.18))
+    );
+  background-clip: padding-box;
+}
+
+.playlist {
+  --playlist-scrollbar-opacity: 0.72;
+}
+
+.playlist::-webkit-scrollbar-thumb,
+.playlist::-webkit-scrollbar-track {
+  transition:
+    background var(--motion-fast, 150ms) var(--ease-standard, ease),
+    box-shadow var(--motion-fast, 150ms) var(--ease-standard, ease),
+    opacity var(--motion-fast, 150ms) var(--ease-standard, ease);
+}
+
+.playlist:not(:hover)::-webkit-scrollbar-thumb {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
+    0 1px 6px color-mix(in srgb, var(--accent-pink) 12%, transparent);
+  opacity: 0.82;
 }
 
 .playlist::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-mint) 52%, transparent),
-    color-mix(in srgb, var(--accent-blue) 52%, transparent)
-  );
+  background:
+    radial-gradient(
+      circle at 30% 20%,
+      color-mix(in srgb, #fff 78%, transparent) 0%,
+      transparent 52%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent-pink) 80%, rgba(255, 255, 255, 0.24)),
+      color-mix(in srgb, var(--accent-blue) 74%, rgba(255, 255, 255, 0.18))
+    );
   background-clip: padding-box;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 62%, transparent),
+    0 6px 18px color-mix(in srgb, var(--accent-pink) 28%, transparent);
+}
+
+.playlist::-webkit-scrollbar-track-piece:start,
+.playlist::-webkit-scrollbar-track-piece:end {
+  background: transparent;
 }
 
 .playlist::-webkit-scrollbar-button,

@@ -177,6 +177,11 @@ const BILI_STREAM_CACHE_TTL_MS = 8 * 60 * 1000
 const PLAYBACK_SESSION_LOCAL_KEY = 'nc_playback_session'
 const USER_SMART_COLLECTIONS_LOCAL_KEY = 'nc_user_smart_collections'
 const DISPLAY_METADATA_OVERRIDES_LOCAL_KEY = 'nc_display_metadata_overrides'
+const MAX_MV_SEARCH_CACHE_ENTRIES = 24
+const MAX_BILI_STREAM_CACHE_ENTRIES = 12
+const MAX_LRCLIB_CACHE_ENTRIES = 40
+const MAX_SHARE_CARD_COVER_CHARS = 600000
+const CLOUD_COVER_RESOLUTION = '600x600bb'
 
 function getInitialAppStateValue(key) {
   try {
@@ -1093,6 +1098,9 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false)
   const [isCardActionBusy, setIsCardActionBusy] = useState(false)
   const [shareCardSnapshot, setShareCardSnapshot] = useState(null)
+  const trackLoadSeqRef = useRef(0)
+  const cloudCoverFetchSeqRef = useRef(0)
+  const trackSwitchCountRef = useRef(0)
 
   // MV State
   const [mvId, setMvId] = useState(null)
@@ -3198,6 +3206,7 @@ export default function App() {
   const previousSongSortModeRef = useRef(songSortMode)
   const previousAlbumSortModeRef = useRef(albumSortMode)
   const previousFolderSortModeRef = useRef(folderSortMode)
+  const previousTrackPathRef = useRef('')
 
   useEffect(() => {
     lyricsRef.current = lyrics
@@ -3413,13 +3422,78 @@ export default function App() {
       ref.current.delete(key)
       return null
     }
+    ref.current.delete(key)
+    ref.current.set(key, hit)
     return hit.value
   }, [])
 
-  const writeRuntimeCache = useCallback((ref, key, value) => {
+  const writeRuntimeCache = useCallback((ref, key, value, maxEntries = 32) => {
     ref.current.set(key, { value, at: Date.now() })
+    trimMapCache(ref, maxEntries)
     return value
   }, [])
+
+  const trimRuntimeCaches = useCallback(() => {
+    trimMapCache(mvSearchCacheRef, MAX_MV_SEARCH_CACHE_ENTRIES)
+    trimMapCache(biliStreamCacheRef, MAX_BILI_STREAM_CACHE_ENTRIES)
+    trimMapCache(lrcLibCache, MAX_LRCLIB_CACHE_ENTRIES)
+  }, [])
+
+  const disposeTrackRuntimeState = useCallback(
+    (previousTrackPath = '') => {
+      cloudCoverFetchSeqRef.current += 1
+      setShareCardSnapshot(null)
+      setDynamicCoverTheme(null)
+      setLyricsCandidateItems([])
+      setLyricsCandidateLoading(false)
+      setBiliDirectStream(null)
+      trimRuntimeCaches()
+      if (configRef.current?.devModeEnabled && previousTrackPath) {
+        const coverEntries = Object.values(trackMetaMapRef.current || {}).filter((entry) => !!entry?.cover)
+          .length
+        console.info('[memory]', {
+          trackSwitches: trackSwitchCountRef.current,
+          previousTrackPath,
+          mvSearchCache: mvSearchCacheRef.current.size,
+          biliStreamCache: biliStreamCacheRef.current.size,
+          lrcLibCache: lrcLibCache.current.size,
+          trackMetaCoverEntries: coverEntries
+        })
+      }
+    },
+    [currentTrackPath, trimRuntimeCaches]
+  )
+
+  useEffect(() => {
+    const previousTrackPath = previousTrackPathRef.current
+    if (previousTrackPath && previousTrackPath !== currentTrackPath) {
+      trackSwitchCountRef.current += 1
+      disposeTrackRuntimeState(previousTrackPath)
+    }
+    previousTrackPathRef.current = currentTrackPath
+  }, [currentTrackPath, disposeTrackRuntimeState])
+
+  useEffect(() => {
+    if (!config.devModeEnabled) return undefined
+    const dumpMemoryStats = () => {
+      const stats = {
+        trackSwitches: trackSwitchCountRef.current,
+        mvSearchCache: mvSearchCacheRef.current.size,
+        biliStreamCache: biliStreamCacheRef.current.size,
+        lrcLibCache: lrcLibCache.current.size,
+        trackMetaEntries: Object.keys(trackMetaMapRef.current || {}).length,
+        trackMetaCoverEntries: Object.values(trackMetaMapRef.current || {}).filter((entry) => !!entry?.cover).length,
+        currentTrackPath: playlistRef.current[currentIndexRef.current]?.path || ''
+      }
+      console.info('[memory:dump]', stats)
+      return stats
+    }
+
+    window.__echoDumpMemoryStats = dumpMemoryStats
+    return () => {
+      delete window.__echoDumpMemoryStats
+    }
+  }, [config.devModeEnabled])
 
   const searchMvWithCache = useCallback(
     async (query, source = 'bilibili') => {
@@ -3434,7 +3508,9 @@ export default function App() {
       if (pending) return pending
       const task = window.api
         .searchMVHandler(normalizedQuery, normalizedSource)
-        .then((result) => writeRuntimeCache(mvSearchCacheRef, cacheKey, result || null))
+        .then((result) =>
+          writeRuntimeCache(mvSearchCacheRef, cacheKey, result || null, MAX_MV_SEARCH_CACHE_ENTRIES)
+        )
         .finally(() => {
           mvSearchPendingRef.current.delete(cacheKey)
         })
@@ -3456,7 +3532,16 @@ export default function App() {
       if (pending) return pending
       const task = window.api
         .resolveBilibiliStream(normalizedBvid, qn)
-        .then((result) => (result?.ok ? writeRuntimeCache(biliStreamCacheRef, cacheKey, result) : result))
+        .then((result) =>
+          result?.ok
+            ? writeRuntimeCache(
+                biliStreamCacheRef,
+                cacheKey,
+                result,
+                MAX_BILI_STREAM_CACHE_ENTRIES
+              )
+            : result
+        )
         .finally(() => {
           biliStreamPendingRef.current.delete(cacheKey)
         })
@@ -3580,7 +3665,7 @@ export default function App() {
       const data = await response.json()
       lrcLibCache.current.set(url, data)
       // 缓存最多保留 120 条，防止内存无限增长
-      if (lrcLibCache.current.size > 120) {
+      if (lrcLibCache.current.size > MAX_LRCLIB_CACHE_ENTRIES) {
         const firstKey = lrcLibCache.current.keys().next().value
         lrcLibCache.current.delete(firstKey)
       }
@@ -4309,7 +4394,11 @@ export default function App() {
   }
 
   const loadTrackData = async (filePath, trackHints = {}) => {
+    const requestSeq = trackLoadSeqRef.current + 1
+    trackLoadSeqRef.current = requestSeq
+    cloudCoverFetchSeqRef.current += 1
     setCoverUrl(null)
+    setShareCardSnapshot(null)
     setMetadata({
       title: '',
       artist: '',
@@ -4333,6 +4422,7 @@ export default function App() {
     try {
       // 1. Get Extended Metadata from Main Process (Music-Metadata)
       const data = await window.api.getExtendedMetadataHandler(filePath)
+      if (trackLoadSeqRef.current !== requestSeq) return
 
       if (data.success) {
         const { technical, common } = data
@@ -4373,7 +4463,7 @@ export default function App() {
         if (common.cover) {
           setCoverUrl(common.cover)
         } else {
-          fetchCloudCover(resolvedTitle, resolvedArtist)
+          fetchCloudCover(resolvedTitle, resolvedArtist, requestSeq)
         }
 
         fetchLyrics(filePath, resolvedTitle, resolvedArtist, {
@@ -4401,7 +4491,7 @@ export default function App() {
           trackNo: null,
           discNo: null
         })
-        fetchCloudCover(resolvedTitle, resolvedArtist)
+        fetchCloudCover(resolvedTitle, resolvedArtist, requestSeq)
         fetchLyrics(filePath, resolvedTitle, resolvedArtist, {
           mvOriginUrl: trackHints.mvOriginUrl
         })
@@ -4410,14 +4500,24 @@ export default function App() {
       // 2. BPM Detection (Keep as is, but use less memory)
       const arrayBuffer = await window.api.readBufferHandler(filePath)
       if (arrayBuffer) {
+        let audioCtx = null
         try {
-          const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)()
           const slice = arrayBuffer.slice(0, 1024 * 1024 * 10)
           const decodedBuffer = await audioCtx.decodeAudioData(slice.buffer || slice)
+          if (trackLoadSeqRef.current !== requestSeq) return
           const detectedBpm = detectBPM(decodedBuffer)
           setTechnicalInfo((prev) => ({ ...prev, originalBpm: detectedBpm }))
         } catch (e) {
           console.error('BPM detection error:', e)
+        } finally {
+          if (audioCtx && typeof audioCtx.close === 'function') {
+            try {
+              await audioCtx.close()
+            } catch {
+              /* ignore close race */
+            }
+          }
         }
       }
     } catch (e) {
@@ -4476,7 +4576,8 @@ export default function App() {
         trackNo: common.trackNo ?? null,
         discNo: common.discNo ?? null,
         cover: common.cover || null,
-        duration: technical.duration || null
+        duration: technical.duration || null,
+        coverChecked: true
       }
 
       setTrackMetaMap((prev) => ({
@@ -4623,19 +4724,20 @@ export default function App() {
     [applyLibraryFolderDelta, t]
   )
 
-  const fetchCloudCover = async (title, artist) => {
+  const fetchCloudCover = async (title, artist, requestSeq = trackLoadSeqRef.current) => {
     if (!title) return
+    const coverSeq = ++cloudCoverFetchSeqRef.current
     try {
       const query = encodeURIComponent(`${title} ${artist || ''}`)
       const response = await fetch(
         `https://itunes.apple.com/search?term=${query}&entity=song&limit=1`
       )
+      if (trackLoadSeqRef.current !== requestSeq || cloudCoverFetchSeqRef.current !== coverSeq) return
       const data = await response.json()
       if (data && data.results && data.results.length > 0) {
         const artwork = data.results[0].artworkUrl100
-        // Get high-res version: 1000x1000
-        const highRes = artwork.replace('100x100bb.jpg', '1000x1000bb.jpg')
-        setCoverUrl(highRes)
+        const optimized = artwork.replace('100x100bb.jpg', CLOUD_COVER_RESOLUTION)
+        setCoverUrl(optimized)
       }
     } catch (e) {
       console.error('Cloud cover fetch error:', e)
@@ -5997,7 +6099,13 @@ export default function App() {
         trackMetaMap?.[track.path]?.cover ||
         (currentTrack?.path === track.path ? displayMainCoverUrl : null) ||
         null
-      return { title, artist, album, cover }
+      return {
+        title,
+        artist,
+        album,
+        cover:
+          typeof cover === 'string' && cover.length > MAX_SHARE_CARD_COVER_CHARS ? displayMainCoverUrl || null : cover
+      }
     },
     [trackMetaMap, currentTrack, displayMainCoverUrl, t]
   )
@@ -6023,6 +6131,7 @@ export default function App() {
       } catch (err) {
         alert(t('contextMenu.actionFailed', { detail: err?.message || String(err) }))
       } finally {
+        setShareCardSnapshot(null)
         setIsCardActionBusy(false)
       }
     },
@@ -6046,6 +6155,7 @@ export default function App() {
       } catch (err) {
         alert(t('contextMenu.actionFailed', { detail: err?.message || String(err) }))
       } finally {
+        setShareCardSnapshot(null)
         setIsCardActionBusy(false)
       }
     },
@@ -6337,7 +6447,13 @@ export default function App() {
   useEffect(() => {
     if (!playlist.length) return
 
-    const pending = playlist.filter((track) => !trackMetaMap[track.path]).slice(0, 8)
+    const pending = playlist
+      .filter((track) => {
+        const entry = trackMetaMap[track.path]
+        if (!entry) return true
+        return entry.cover == null && entry.coverChecked !== true
+      })
+      .slice(0, 8)
     if (!pending.length) return
 
     let cancelled = false
@@ -6360,7 +6476,8 @@ export default function App() {
                 trackNo: common.trackNo ?? null,
                 discNo: common.discNo ?? null,
                 cover: common.cover || null,
-                duration: technical.duration || null
+                duration: technical.duration || null,
+                coverChecked: true
               }
             } else {
               loaded[track.path] = {
@@ -6371,7 +6488,8 @@ export default function App() {
                 trackNo: null,
                 discNo: null,
                 cover: null,
-                duration: null
+                duration: null,
+                coverChecked: true
               }
             }
           } catch (error) {
@@ -6383,7 +6501,8 @@ export default function App() {
               trackNo: null,
               discNo: null,
               cover: null,
-              duration: null
+              duration: null,
+              coverChecked: true
             }
           }
         })
@@ -13961,4 +14080,13 @@ export default function App() {
         )}
     </div>
   )
+}
+
+function trimMapCache(ref, maxEntries) {
+  if (!ref?.current || !(ref.current instanceof Map) || ref.current.size <= maxEntries) return
+  while (ref.current.size > maxEntries) {
+    const firstKey = ref.current.keys().next().value
+    if (firstKey === undefined) break
+    ref.current.delete(firstKey)
+  }
 }
