@@ -13178,6 +13178,8 @@ export default function App() {
         setMvId={setMvId}
         mvPlaybackQuality={mvPlaybackQuality}
         biliDirectStream={biliDirectStream}
+        currentTrackTitle={displayMainTitle}
+        currentTrackArtist={displayMainArtist}
         onPersistMvOverride={(mv) => {
           const p = playlist[currentIndex]?.path
           if (p && mv?.id && mv?.source) setMvOverrideForPath(p, mv)

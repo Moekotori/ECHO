@@ -748,6 +748,17 @@
     "linkHint": "NetEase links support direct song-id lyrics fetch; other services use best-effort matching."
   },
   "mvDrawer": {
+    "searchTitle": "Search MV",
+    "searchHint": "Search by the current song name or enter your own query, then apply the matched MV.",
+    "searchPlaceholder": "Song title / artist / custom keywords",
+    "useSongName": "Use current song",
+    "useSearchResult": "Use this MV",
+    "searching": "Searching…",
+    "searchEmpty": "Enter a song name or search keywords first.",
+    "searchUnavailable": "MV search is not available in this build.",
+    "searchNoResult": "No MV result found for this query.",
+    "searchFailed": "MV search failed.",
+    "searchUntitled": "Untitled MV",
     "urlError": "Unrecognized URL. Paste a YouTube or Bilibili video link.",
     "customMv": "Custom MV",
     "customHint": "Paste a YouTube or Bilibili video URL to play as the current MV.",

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { X, ToggleLeft, ToggleRight, Link, Play, Minus, Plus } from 'lucide-react'
+import { X, ToggleLeft, ToggleRight, Link, Play, Minus, Plus, Search } from 'lucide-react'
 import { extractVideoId } from '../utils/mvUrlParse'
 
 const QUALITY_LABELS = {
@@ -44,6 +44,12 @@ function getMvQualityPresentation(mvId, mvPlaybackQuality, biliDirectStream, t) 
   }
 }
 
+function buildDefaultMvQuery(title = '', artist = '') {
+  const safeTitle = String(title || '').trim()
+  const safeArtist = String(artist || '').trim()
+  return [safeTitle, safeArtist].filter(Boolean).join(' ').trim()
+}
+
 export default function MvSettingsDrawer({
   open,
   onClose,
@@ -57,11 +63,17 @@ export default function MvSettingsDrawer({
   mvPlaybackQuality,
   biliDirectStream,
   onPersistMvOverride,
-  onRestartPlayback
+  onRestartPlayback,
+  currentTrackTitle,
+  currentTrackArtist
 }) {
   const { t } = useTranslation()
   const [customUrl, setCustomUrl] = useState('')
   const [urlError, setUrlError] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchError, setSearchError] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [searchResults, setSearchResults] = useState([])
 
   useEffect(() => {
     if (!open) return
@@ -75,8 +87,19 @@ export default function MvSettingsDrawer({
   useEffect(() => {
     if (!open) {
       setUrlError('')
+      setSearchError('')
+      setSearching(false)
+      setSearchResults([])
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const nextQuery = buildDefaultMvQuery(currentTrackTitle, currentTrackArtist)
+    setSearchQuery((prev) => (prev.trim() ? prev : nextQuery))
+    setSearchError('')
+    setSearchResults([])
+  }, [open, currentTrackArtist, currentTrackTitle])
 
   const handleCustomMv = useCallback(() => {
     setUrlError('')
@@ -90,7 +113,54 @@ export default function MvSettingsDrawer({
     if (onPersistMvOverride) onPersistMvOverride(next)
     setCustomUrl('')
     if (onRestartPlayback) onRestartPlayback()
-  }, [customUrl, setMvId, onPersistMvOverride, onRestartPlayback, t])
+  }, [customUrl, onPersistMvOverride, onRestartPlayback, setMvId, t])
+
+  const handleSearchMv = useCallback(async () => {
+    const query = searchQuery.trim() || buildDefaultMvQuery(currentTrackTitle, currentTrackArtist)
+    if (!query) {
+      setSearchError(t('mvDrawer.searchEmpty'))
+      setSearchResults([])
+      return
+    }
+    if (!window.api?.searchMVHandler) {
+      setSearchError(t('mvDrawer.searchUnavailable'))
+      setSearchResults([])
+      return
+    }
+    setSearching(true)
+    setSearchError('')
+    try {
+      const result = await window.api.searchMVHandler(query, config.mvSource || 'bilibili')
+      const items = Array.isArray(result?.items)
+        ? result.items.filter((item) => item?.id && item?.source)
+        : result?.id && result?.source
+          ? [result]
+          : []
+      if (items.length === 0) {
+        setSearchResults([])
+        setSearchError(t('mvDrawer.searchNoResult'))
+        return
+      }
+      setSearchQuery(query)
+      setSearchResults(items)
+    } catch (error) {
+      setSearchResults([])
+      setSearchError(error?.message || t('mvDrawer.searchFailed'))
+    } finally {
+      setSearching(false)
+    }
+  }, [config.mvSource, currentTrackArtist, currentTrackTitle, searchQuery, t])
+
+  const handleApplySearchResult = useCallback(
+    (item) => {
+      if (!item?.id || !item?.source) return
+      const next = { id: item.id, source: item.source }
+      setMvId(next)
+      if (onPersistMvOverride) onPersistMvOverride(next)
+      if (onRestartPlayback) onRestartPlayback()
+    },
+    [onPersistMvOverride, onRestartPlayback, setMvId]
+  )
 
   const selectStyle = {
     padding: '8px 12px',
@@ -104,7 +174,6 @@ export default function MvSettingsDrawer({
   }
 
   const qualityPres = getMvQualityPresentation(mvId, mvPlaybackQuality, biliDirectStream, t)
-
   const mvOffsetMs = config.mvOffsetMs ?? 0
 
   return (
@@ -133,7 +202,79 @@ export default function MvSettingsDrawer({
         </div>
 
         <div className="lyrics-drawer-body">
-          {/* Custom MV */}
+          <section className="mv-drawer-section">
+            <h3 className="mv-drawer-section-title">
+              <Search size={16} />
+              {t('mvDrawer.searchTitle')}
+            </h3>
+            <p className="mv-drawer-hint">{t('mvDrawer.searchHint')}</p>
+            <div className="mv-drawer-url-row">
+              <input
+                type="text"
+                className="mv-drawer-url-input"
+                placeholder={t('mvDrawer.searchPlaceholder')}
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value)
+                  setSearchError('')
+                  setSearchResults([])
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSearchMv()
+                }}
+              />
+              <button
+                type="button"
+                className="mv-drawer-url-btn"
+                onClick={() => void handleSearchMv()}
+                disabled={searching}
+              >
+                <Search size={16} />
+              </button>
+            </div>
+            <div className="mv-drawer-search-actions">
+              <button
+                type="button"
+                className="mv-drawer-action-btn"
+                onClick={() => {
+                  const nextQuery = buildDefaultMvQuery(currentTrackTitle, currentTrackArtist)
+                  setSearchQuery(nextQuery)
+                  setSearchError('')
+                  setSearchResults([])
+                }}
+              >
+                {t('mvDrawer.useSongName')}
+              </button>
+            </div>
+            {searchError && <p className="mv-drawer-url-error">{searchError}</p>}
+            {searching && <p className="mv-drawer-search-status">{t('mvDrawer.searching')}</p>}
+            {searchResults.length > 0 && (
+              <div className="mv-drawer-search-list">
+                {searchResults.map((item) => (
+                  <div key={`${item.source}:${item.id}`} className="mv-drawer-search-result">
+                    <div className="mv-drawer-search-result__meta">
+                      <p className="mv-drawer-search-result__title" title={item.title || ''}>
+                        {item.title || t('mvDrawer.searchUntitled')}
+                      </p>
+                      <p className="mv-drawer-search-result__sub">
+                        {[item.source, item.author, item.resolution || item.duration]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="mv-drawer-action-btn"
+                      onClick={() => handleApplySearchResult(item)}
+                    >
+                      {t('mvDrawer.useSearchResult')}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
           <section className="mv-drawer-section">
             <h3 className="mv-drawer-section-title">
               <Link size={16} />
@@ -184,7 +325,6 @@ export default function MvSettingsDrawer({
             )}
           </section>
 
-          {/* Playback */}
           <section className="mv-drawer-section">
             <h3 className="mv-drawer-section-title">{t('mvDrawer.playback')}</h3>
 
@@ -313,7 +453,6 @@ export default function MvSettingsDrawer({
             </div>
           </section>
 
-          {/* Immersive Background */}
           <section className="mv-drawer-section">
             <h3 className="mv-drawer-section-title">{t('mvDrawer.immersive')}</h3>
 
@@ -349,7 +488,11 @@ export default function MvSettingsDrawer({
                   if (config.mvAsBackgroundMain && !config.enableMV) setMvId(null)
                 }}
               >
-                {config.mvAsBackgroundMain ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+                {config.mvAsBackgroundMain ? (
+                  <ToggleRight size={28} />
+                ) : (
+                  <ToggleLeft size={28} />
+                )}
               </button>
             </div>
 
@@ -390,9 +533,7 @@ export default function MvSettingsDrawer({
                 <div className="mv-drawer-row-info">
                   <span className="mv-drawer-label">{t('mvDrawer.bgBlur')}</span>
                   <span className="mv-drawer-value">
-                    {Math.round(
-                      config.mvBackgroundBlur !== undefined ? config.mvBackgroundBlur : 0
-                    )}
+                    {Math.round(config.mvBackgroundBlur !== undefined ? config.mvBackgroundBlur : 0)}
                     px
                   </span>
                 </div>
@@ -441,7 +582,6 @@ export default function MvSettingsDrawer({
             )}
           </section>
 
-          {/* Account */}
           <section className="mv-drawer-section">
             <h3 className="mv-drawer-section-title">{t('mvDrawer.account')}</h3>
 

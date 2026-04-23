@@ -635,6 +635,17 @@
     "linkHint": "网易云链接支持按歌曲 ID 直取歌词；其他平台链接会尝试通用匹配。"
   },
   "mvDrawer": {
+    "searchTitle": "搜索 MV",
+    "searchHint": "可直接用当前歌曲名搜索，也可以手动输入关键词，然后应用匹配到的 MV。",
+    "searchPlaceholder": "歌曲名 / 歌手 / 自定义关键词",
+    "useSongName": "使用当前歌曲名",
+    "useSearchResult": "使用这个 MV",
+    "searching": "正在搜索…",
+    "searchEmpty": "请先输入歌曲名或搜索关键词。",
+    "searchUnavailable": "当前版本暂不可用 MV 搜索。",
+    "searchNoResult": "没有找到匹配的 MV。",
+    "searchFailed": "MV 搜索失败。",
+    "searchUntitled": "未命名 MV",
     "urlError": "无法识别的链接。请粘贴 YouTube 或 Bilibili 视频地址。",
     "customMv": "自定义 MV",
     "customHint": "粘贴 YouTube 或 Bilibili 视频链接作为当前 MV。",

@@ -737,6 +737,17 @@
     "linkHint": "NetEase は曲 ID で直接取得、他サービスはベストエフォートで照合します。"
   },
   "mvDrawer": {
+    "searchTitle": "MV 銈掓绱?",
+    "searchHint": "鐝惧湪銇洸鍚嶃仹銇濄伄銇俱伨妞滅储銇欍倠銇?銈兗銉兗銉夈倰鍏ュ姏銇椼仸涓€鑷淬仐銇?MV 銈掗伕鎶椼仹銇嶃伨銇欍€?",
+    "searchPlaceholder": "鏇查悕 / 銈€銉笺偘銈ｃ偣銉? / 銈兗銉兗銉?",
+    "useSongName": "鐝惧湪銇洸鍚嶃倰浣跨敤",
+    "useSearchResult": "銇撱伄 MV 銈掍娇銇?",
+    "searching": "妞滅储涓€?",
+    "searchEmpty": "鏇查悕銇俱仧銇绱偔銉兗銉夈倰鍏ュ姏銇椼仸銇忋仩銇曘亜銆?",
+    "searchUnavailable": "銇撱伄銉撱儷銉夈仹銇?MV 妤滅储銈掑埄鐢ㄣ仹銇嶃伨銇涖倱銆?",
+    "searchNoResult": "涓€鑷淬仚銈?MV 銇屻倝銇嬨倞銇俱仜銈撱仹銇椼仧銆?",
+    "searchFailed": "MV 銈掓绱仹銇嶃伨銇涖倱銇с仐銇熴€?",
+    "searchUntitled": "銈裤偆銉医??MV",
     "urlError": "URL を認識できません。YouTube または Bilibili の動画リンクを貼り付けてください。",
     "customMv": "カスタム MV",
     "customHint": "現在の MV として YouTube または Bilibili の動画 URL を貼り付けます。",

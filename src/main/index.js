@@ -1678,6 +1678,32 @@ app.whenReady().then(async () => {
     return { score, title: raw, resolution: res }
   }
 
+  function parseYouTubeSearchItems(html = '') {
+    const items = []
+    const seen = new Set()
+    const rendererRegex = /"videoRenderer":\{([\s\S]*?)\}(?=,"(?:radioRenderer|playlistRenderer|reelShelfRenderer|channelRenderer|shelfRenderer|continuationItemRenderer|richItemRenderer)"|],"|}$)/g
+    for (const match of html.matchAll(rendererRegex)) {
+      const block = match[1] || ''
+      const idMatch = block.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)
+      const titleMatch = block.match(/"title":\{"runs":\[\{"text":"([^"]+)"/)
+      if (!idMatch?.[1] || seen.has(idMatch[1])) continue
+      seen.add(idMatch[1])
+      const ownerMatch =
+        block.match(/"ownerText":\{"runs":\[\{"text":"([^"]+)"/) ||
+        block.match(/"longBylineText":\{"runs":\[\{"text":"([^"]+)"/)
+      const durationMatch = block.match(/"lengthText":\{"(?:simpleText":"([^"]+)"|runs":\[\{"text":"([^"]+)")/)
+      items.push({
+        id: idMatch[1],
+        title: titleMatch?.[1] || 'unknown',
+        author: ownerMatch?.[1] || '',
+        duration: durationMatch?.[1] || durationMatch?.[2] || '',
+        source: 'youtube'
+      })
+      if (items.length >= 8) break
+    }
+    return items
+  }
+
   ipcMain.handle('api:searchMV', async (_, query, source = 'youtube') => {
     try {
       if (source === 'bilibili') {
@@ -1701,25 +1727,29 @@ app.whenReady().then(async () => {
           const scored = videoResults.slice(0, 15).map((v) => {
             const { score, title, resolution } = scoreBilibiliResult(v, queryTerms)
             return {
-              bvid: v.bvid,
+              id: v.bvid,
               score,
               title,
               author: v.author || '',
-              resolution
+              resolution,
+              source: 'bilibili'
             }
           })
           scored.sort((a, b) => b.score - a.score)
 
-          const hit = scored[0]
+          const items = scored.map(({ score, ...item }) => item)
+          const hit = items[0]
           if (hit) {
             console.log(
-              `[MV Search] Bilibili: "${query}" -> score=${hit.score} bvid=${hit.bvid} res=${hit.resolution || 'N/A'}`
+              `[MV Search] Bilibili: "${query}" -> items=${items.length} bvid=${hit.id} res=${hit.resolution || 'N/A'}`
             )
             return {
-              id: hit.bvid,
+              id: hit.id,
               title: hit.title,
               source: 'bilibili',
-              resolution: hit.resolution
+              resolution: hit.resolution,
+              author: hit.author,
+              items
             }
           }
         }
@@ -1728,12 +1758,18 @@ app.whenReady().then(async () => {
         const { data } = await axios.get(url, {
           headers: { 'User-Agent': standardUA }
         })
-        const titleMatch = data.match(/"title":\{"runs":\[\{"text":"([^"]+)"\}/)
-        const idMatch = data.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)
-        if (idMatch && idMatch[1]) {
-          const ytTitle = titleMatch ? titleMatch[1] : 'unknown'
-          console.log(`[MV Search] YouTube: "${query}" -> id=${idMatch[1]}`)
-          return { id: idMatch[1], title: ytTitle, source: 'youtube' }
+        const items = parseYouTubeSearchItems(data)
+        const hit = items[0]
+        if (hit?.id) {
+          console.log(`[MV Search] YouTube: "${query}" -> items=${items.length} id=${hit.id}`)
+          return {
+            id: hit.id,
+            title: hit.title,
+            source: 'youtube',
+            author: hit.author,
+            duration: hit.duration,
+            items
+          }
         }
       }
     } catch (e) {

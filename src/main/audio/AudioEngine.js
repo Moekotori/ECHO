@@ -167,6 +167,7 @@ export class AudioEngine {
       totalBytes: 0,
       bufferedSeconds: 0,
       done: false,
+      cancelled: false,
       info: null,
       targetSampleRate: this._outputSampleRate || 44100,
       channels: this._activeChannels || 2,
@@ -196,15 +197,35 @@ export class AudioEngine {
           .audioChannels(channels)
           .audioFrequency(pb.targetSampleRate)
         if (filters.length > 0) cmd.audioFilters(filters)
+        cmd.on('error', (e) => {
+          const message = String(e?.message || '')
+          if (
+            pb.cancelled ||
+            this._nextTrackPb !== pb ||
+            message.includes('SIGKILL') ||
+            message.includes('Output stream closed')
+          ) {
+            return
+          }
+          console.warn('[AudioEngine] Gapless prebuffer ffmpeg error:', message)
+          if (this._nextTrackPb === pb) this._nextTrackPb = null
+        })
         pb.ffmpegCmd = cmd
 
         const stream = cmd.pipe()
         stream.on('data', (chunk) => {
-          if (this._nextTrackPb !== pb) { stream.destroy(); return }
+          if (this._nextTrackPb !== pb) {
+            pb.cancelled = true
+            stream.destroy()
+            return
+          }
           pb.chunks.push(Buffer.from(chunk))
           pb.totalBytes += chunk.byteLength
           pb.bufferedSeconds = pb.totalBytes / bytesPerSec
-          if (pb.totalBytes >= MAX_PREBUFFER_BYTES) stream.destroy()
+          if (pb.totalBytes >= MAX_PREBUFFER_BYTES) {
+            pb.cancelled = true
+            stream.destroy()
+          }
         })
         stream.on('end', () => {
           if (this._nextTrackPb === pb) {
@@ -218,6 +239,13 @@ export class AudioEngine {
           }
         })
         stream.on('error', (e) => {
+          if (
+            pb.cancelled ||
+            e.message?.includes('SIGKILL') ||
+            e.message?.includes('Output stream closed')
+          ) {
+            return
+          }
           if (!e.message?.includes('SIGKILL')) {
             console.warn('[AudioEngine] Gapless prebuffer error:', e.message)
           }
@@ -234,6 +262,7 @@ export class AudioEngine {
     const pb = this._nextTrackPb
     this._nextTrackPb = null
     if (pb?.ffmpegCmd) {
+      pb.cancelled = true
       try { pb.ffmpegCmd.kill('SIGKILL') } catch { /* ignore */ }
     }
   }
