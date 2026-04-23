@@ -11,6 +11,24 @@ const ytDlpBinaryPath = youtubedl.constants.YOUTUBE_DL_PATH.replace('app.asar', 
 
 const AUDIO_EXT_CANDIDATES = ['.mp3', '.m4a', '.aac', '.opus', '.flac', '.ogg', '.wav', '.webm']
 const SIDECAR_SUFFIXES = ['.info.json', '.lrc']
+const METADATA_CACHE_TTL_MS = 5 * 60 * 1000
+const metadataCache = new Map()
+const metadataPending = new Map()
+
+function readTimedCache(cache, key, ttlMs) {
+  const hit = cache.get(key)
+  if (!hit) return null
+  if (Date.now() - hit.at > ttlMs) {
+    cache.delete(key)
+    return null
+  }
+  return hit.value
+}
+
+function writeTimedCache(cache, key, value) {
+  cache.set(key, { value, at: Date.now() })
+  return value
+}
 
 function pickThumbnail(entity) {
   if (!entity || typeof entity !== 'object') return null
@@ -141,10 +159,80 @@ function isBilibiliSinglePartUrl(url) {
   }
 }
 
+function extractProgressPercent(text = '') {
+  const match = String(text || '').match(/\[download\]\s+([\d.]+)%/)
+  if (!match?.[1]) return null
+  const progress = parseFloat(match[1])
+  return Number.isFinite(progress) ? progress : null
+}
+
+function buildYtDlpAudioArgs(url, outputPattern, options = {}) {
+  const ffmpegPath = getResolvedFfmpegStaticPath()
+  const audioFormat = buildAudioFormatByPreset(options.audioQualityPreset)
+  const cookie = String(options.neteaseCookie || '').trim()
+  const extraArgs = Array.isArray(options.extraArgs) ? [...options.extraArgs] : []
+  const forceSinglePartArgs = isBilibiliSinglePartUrl(url) ? ['--no-playlist'] : []
+  const quickMode = options.quickMode === true
+
+  if (cookie && isNeteaseUrl(url)) {
+    extraArgs.push(...buildNeteaseHeaderArgs(cookie))
+  }
+
+  const postProcessArgs = quickMode
+    ? []
+    : ['--embed-thumbnail', '--add-metadata', '--write-info-json']
+
+  return {
+    args: [
+      url,
+      '-x',
+      '--extract-audio',
+      '-f',
+      audioFormat,
+      '--audio-quality',
+      '0',
+      ...postProcessArgs,
+      '-o',
+      outputPattern,
+      '--ffmpeg-location',
+      ffmpegPath,
+      ...forceSinglePartArgs,
+      ...extraArgs
+    ],
+    quickMode
+  }
+}
+
+function logDownloadStageSummary(url, totalStartedAt, downloadCompletedAt, postProcessStartedAt, quickMode) {
+  const finishedAt = Date.now()
+  const downloadEnd = downloadCompletedAt || finishedAt
+  const postProcessStart = postProcessStartedAt || downloadEnd
+  const downloadMs = Math.max(0, downloadEnd - totalStartedAt)
+  const postProcessMs = Math.max(0, finishedAt - postProcessStart)
+  const totalMs = Math.max(0, finishedAt - totalStartedAt)
+  console.log(
+    `[MediaDownloader] download finished (${quickMode ? 'quick' : 'full'}) ${url} | network=${downloadMs}ms | post=${postProcessMs}ms | total=${totalMs}ms`
+  )
+}
+
 export default class MediaDownloader {
   static getMetadata(url) {
-    return new Promise((resolve, reject) => {
-      const forceSinglePartArgs = isBilibiliSinglePartUrl(url) ? ['--no-playlist'] : []
+    const normalizedUrl = String(url || '').trim()
+    const cached = readTimedCache(metadataCache, normalizedUrl, METADATA_CACHE_TTL_MS)
+    if (cached) {
+      console.log(`[MediaDownloader] metadata cache hit: ${normalizedUrl}`)
+      return Promise.resolve(cached)
+    }
+
+    const pending = metadataPending.get(normalizedUrl)
+    if (pending) {
+      console.log(`[MediaDownloader] metadata awaiting in-flight request: ${normalizedUrl}`)
+      return pending
+    }
+
+    const startedAt = Date.now()
+    const task = new Promise((resolve, reject) => {
+      const forceSinglePartArgs = isBilibiliSinglePartUrl(normalizedUrl) ? ['--no-playlist'] : []
       const p = spawn(ytDlpBinaryPath, [
         '-J',
         '--no-warnings',
@@ -152,7 +240,7 @@ export default class MediaDownloader {
         '--socket-timeout',
         '30',
         ...forceSinglePartArgs,
-        url
+        normalizedUrl
       ])
 
       let out = ''
@@ -170,7 +258,12 @@ export default class MediaDownloader {
         if (code === 0) {
           try {
             const result = JSON.parse(out.trim())
-            resolve(extractMetadata(result))
+            const metadata = extractMetadata(result)
+            writeTimedCache(metadataCache, normalizedUrl, metadata)
+            console.log(
+              `[MediaDownloader] metadata fetched: ${normalizedUrl} | total=${Date.now() - startedAt}ms`
+            )
+            resolve(metadata)
           } catch (e) {
             reject(new Error('Failed to parse metadata JSON'))
           }
@@ -179,60 +272,59 @@ export default class MediaDownloader {
         }
       })
     })
+    metadataPending.set(normalizedUrl, task)
+    return task.finally(() => {
+      metadataPending.delete(normalizedUrl)
+    })
   }
 
   static downloadAudio(url, targetFolder, eventSender, options = {}) {
     return new Promise((resolve, reject) => {
-      const ffmpegPath = getResolvedFfmpegStaticPath()
-      const audioFormat = buildAudioFormatByPreset(options.audioQualityPreset)
-      const cookie = String(options.neteaseCookie || '').trim()
-      const extraArgs = []
-      const forceSinglePartArgs = isBilibiliSinglePartUrl(url) ? ['--no-playlist'] : []
-      if (cookie && isNeteaseUrl(url)) {
-        extraArgs.push(...buildNeteaseHeaderArgs(cookie))
-      }
-
-      const args = [
-        url,
-        '-x',
-        '--extract-audio',
-        '-f',
-        audioFormat,
-        '--audio-quality',
-        '0',
-        '--embed-thumbnail',
-        '--add-metadata',
-        '--write-info-json',
-        '-o',
-        `${targetFolder}/%(title)s.%(ext)s`,
-        '--ffmpeg-location',
-        ffmpegPath,
-        ...forceSinglePartArgs,
-        ...extraArgs
-      ]
+      const { args, quickMode } = buildYtDlpAudioArgs(url, `${targetFolder}/%(title)s.%(ext)s`, options)
+      const startedAt = Date.now()
+      let downloadCompletedAt = null
+      let postProcessStartedAt = null
 
       const p = spawn(ytDlpBinaryPath, args)
 
       let err = ''
 
-      p.stdout.on('data', (data) => {
+      const handleOutput = (data, isStdErr = false) => {
         const text = data.toString()
-        // Match [download] 12.3%
-        const match = text.match(/\[download\]\s+([\d.]+)%/)
-        if (match && match[1]) {
-          const progress = parseFloat(match[1])
+        const progress = extractProgressPercent(text)
+        if (progress != null) {
           if (eventSender) {
             eventSender.send('media:download-progress', { url, progress })
           }
+          if (progress >= 100 && !downloadCompletedAt) {
+            downloadCompletedAt = Date.now()
+          }
         }
+        if (!postProcessStartedAt && /\[(ExtractAudio|Metadata|EmbedThumbnail|ffmpeg)\]/i.test(text)) {
+          postProcessStartedAt = Date.now()
+        }
+        if (isStdErr) {
+          err += text
+        }
+      }
+
+      p.stdout.on('data', (data) => {
+        handleOutput(data, false)
       })
 
       p.stderr.on('data', (data) => {
-        err += data.toString()
+        handleOutput(data, true)
       })
 
       p.on('close', (code) => {
         if (code === 0) {
+          logDownloadStageSummary(
+            url,
+            startedAt,
+            downloadCompletedAt,
+            postProcessStartedAt,
+            quickMode
+          )
           resolve()
         } else {
           reject(new Error(err || 'Download failed'))
@@ -246,45 +338,41 @@ export default class MediaDownloader {
    */
   static downloadAudioWithBasename(url, targetFolder, basenameNoExt, eventSender, options = {}) {
     return new Promise((resolve, reject) => {
-      const ffmpegPath = getResolvedFfmpegStaticPath()
       const outputPattern = join(targetFolder, `${basenameNoExt}.%(ext)s`)
-      const extraArgs = options.extraArgs || []
-
-      const args = [
-        url,
-        '-x',
-        '--extract-audio',
-        '-f',
-        'bestaudio/best',
-        '--audio-quality',
-        '0',
-        '--embed-thumbnail',
-        '--add-metadata',
-        '--write-info-json',
-        '-o',
-        outputPattern,
-        '--ffmpeg-location',
-        ffmpegPath,
-        ...extraArgs
-      ]
+      const { args, quickMode } = buildYtDlpAudioArgs(url, outputPattern, options)
+      const startedAt = Date.now()
+      let downloadCompletedAt = null
+      let postProcessStartedAt = null
 
       const p = spawn(ytDlpBinaryPath, args)
 
       let err = ''
 
-      p.stdout.on('data', (data) => {
+      const handleOutput = (data, isStdErr = false) => {
         const text = data.toString()
-        const match = text.match(/\[download\]\s+([\d.]+)%/)
-        if (match && match[1]) {
-          const progress = parseFloat(match[1])
+        const progress = extractProgressPercent(text)
+        if (progress != null) {
           if (eventSender) {
             eventSender.send('media:download-progress', { url, progress })
           }
+          if (progress >= 100 && !downloadCompletedAt) {
+            downloadCompletedAt = Date.now()
+          }
         }
+        if (!postProcessStartedAt && /\[(ExtractAudio|Metadata|EmbedThumbnail|ffmpeg)\]/i.test(text)) {
+          postProcessStartedAt = Date.now()
+        }
+        if (isStdErr) {
+          err += text
+        }
+      }
+
+      p.stdout.on('data', (data) => {
+        handleOutput(data, false)
       })
 
       p.stderr.on('data', (data) => {
-        err += data.toString()
+        handleOutput(data, true)
       })
 
       p.on('close', (code) => {
@@ -292,6 +380,7 @@ export default class MediaDownloader {
           reject(new Error(err || 'Download failed'))
           return
         }
+        logDownloadStageSummary(url, startedAt, downloadCompletedAt, postProcessStartedAt, quickMode)
         const resolved = findResolvedAudioPath(targetFolder, basenameNoExt)
         if (!resolved) {
           reject(new Error('Download finished but output file not found'))

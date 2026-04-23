@@ -120,7 +120,8 @@ export async function importSharedPlaylists(playlists, downloadFolder, eventSend
                 /music\.163\.com/i.test(String(track.sourceUrl || '')) ? options.cookie : ''
               ),
               ...buildExtraArgsForSourceUrl(track.sourceUrl)
-            ]
+            ],
+            quickMode: options.quickMode === true
           }
         )
         const filePath = MediaDownloader.renameDownloadedMedia(

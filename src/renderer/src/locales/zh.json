@@ -513,6 +513,8 @@
     "qualityHigh": "音质：高（优先 320k）",
     "qualityMedium": "音质：中（优先 192k）",
     "qualityLow": "音质：低（节省流量）",
+    "quickModeLabel": "快速下载模式",
+    "quickModeHint": "跳过封面嵌入和部分附加元数据处理，优先提升落盘速度。",
     "use1musicLabel": "从 1music 下载（直链模式，更快更稳定）",
     "directUrlFailed": "无法获取歌曲直链，可能需要登录或该歌曲不可用",
     "downloadBtn": "下载",

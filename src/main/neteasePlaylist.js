@@ -176,7 +176,7 @@ export async function importNeteasePlaylist(
         targetFolder,
         basename,
         eventSender,
-        { extraArgs }
+        { extraArgs, quickMode: opts.quickMode === true }
       )
       const filePath = MediaDownloader.renameDownloadedMedia(
         downloadedPath,

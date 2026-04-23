@@ -557,6 +557,8 @@
     "qualityHigh": "音質: 高（320k 優先）",
     "qualityMedium": "音質: 中（192k 優先）",
     "qualityLow": "音質: 低（帯域節約）",
+    "quickModeLabel": "高速ダウンロードモード",
+    "quickModeHint": "カバー埋め込みと一部メタデータ処理を省いて、保存を速くします。",
     "use1musicLabel": "1music からダウンロード（直リンク・高速・安定）",
     "directUrlFailed": "直リンク取得に失敗しました。ログインまたはトラック利用不可の可能性",
     "downloadBtn": "ダウンロード",

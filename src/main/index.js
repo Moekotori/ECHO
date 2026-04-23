@@ -1064,6 +1064,27 @@ app.whenReady().then(async () => {
   const chromeVersion = process.versions.chrome || '126.0.0.0'
   const chromeMajor = chromeVersion.split('.')[0]
   const standardUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`
+  const MV_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000
+  const BILI_STREAM_CACHE_TTL_MS = 8 * 60 * 1000
+  const mvSearchCache = new Map()
+  const mvSearchPending = new Map()
+  const biliStreamCache = new Map()
+  const biliStreamPending = new Map()
+
+  const readTimedCache = (cache, key, ttlMs) => {
+    const hit = cache.get(key)
+    if (!hit) return null
+    if (Date.now() - hit.at > ttlMs) {
+      cache.delete(key)
+      return null
+    }
+    return hit.value
+  }
+
+  const writeTimedCache = (cache, key, value) => {
+    cache.set(key, { value, at: Date.now() })
+    return value
+  }
 
   app.userAgentFallback = standardUA
   session.defaultSession.setUserAgent(standardUA)
@@ -1630,14 +1651,15 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('playlistLink:importPlaylist', async (event, payload) => {
-    const { playlistInput, downloadFolder, preferredFolderName, neteaseCookie } = payload || {}
+    const { playlistInput, downloadFolder, preferredFolderName, neteaseCookie, quickMode } =
+      payload || {}
     const auth = await resolveNeteaseAuthState(neteaseCookie || '')
     return await importPlaylistFromLink(
       playlistInput,
       downloadFolder,
       event.sender,
       preferredFolderName,
-      { cookie: auth.valid ? auth.cookie : '' }
+      { cookie: auth.valid ? auth.cookie : '', quickMode: quickMode === true }
     )
   })
 
@@ -1705,9 +1727,25 @@ app.whenReady().then(async () => {
   }
 
   ipcMain.handle('api:searchMV', async (_, query, source = 'youtube') => {
+    const normalizedSource = String(source || 'youtube').trim().toLowerCase() || 'youtube'
+    const normalizedQuery = String(query || '').trim()
+    const cacheKey = `${normalizedSource}::${normalizedQuery.toLowerCase()}`
+    const cached = readTimedCache(mvSearchCache, cacheKey, MV_SEARCH_CACHE_TTL_MS)
+    if (cached) {
+      console.log(`[MV Search] cache hit: ${normalizedSource} "${normalizedQuery}"`)
+      return cached
+    }
+    const pending = mvSearchPending.get(cacheKey)
+    if (pending) {
+      console.log(`[MV Search] awaiting in-flight request: ${normalizedSource} "${normalizedQuery}"`)
+      return pending
+    }
+
+    const startedAt = Date.now()
+    const task = (async () => {
     try {
-      if (source === 'bilibili') {
-        const url = `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(query)}`
+      if (normalizedSource === 'bilibili') {
+        const url = `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(normalizedQuery)}`
         const resp = await net.fetch(url, {
           headers: {
             'User-Agent': standardUA,
@@ -1718,7 +1756,7 @@ app.whenReady().then(async () => {
 
         const videoResults = data?.data?.result || []
         if (videoResults.length > 0) {
-          const queryTerms = query
+          const queryTerms = normalizedQuery
             .toLowerCase()
             .replace(/\b(mv|官方|official)\b/gi, '')
             .split(/\s+/)
@@ -1741,41 +1779,49 @@ app.whenReady().then(async () => {
           const hit = items[0]
           if (hit) {
             console.log(
-              `[MV Search] Bilibili: "${query}" -> items=${items.length} bvid=${hit.id} res=${hit.resolution || 'N/A'}`
+              `[MV Search] Bilibili: "${normalizedQuery}" -> items=${items.length} bvid=${hit.id} res=${hit.resolution || 'N/A'} | total=${Date.now() - startedAt}ms`
             )
-            return {
+            return writeTimedCache(mvSearchCache, cacheKey, {
               id: hit.id,
               title: hit.title,
               source: 'bilibili',
               resolution: hit.resolution,
               author: hit.author,
               items
-            }
+            })
           }
         }
       } else {
-        const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
+        const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(normalizedQuery)}`
         const { data } = await axios.get(url, {
           headers: { 'User-Agent': standardUA }
         })
         const items = parseYouTubeSearchItems(data)
         const hit = items[0]
         if (hit?.id) {
-          console.log(`[MV Search] YouTube: "${query}" -> items=${items.length} id=${hit.id}`)
-          return {
+          console.log(
+            `[MV Search] YouTube: "${normalizedQuery}" -> items=${items.length} id=${hit.id} | total=${Date.now() - startedAt}ms`
+          )
+          return writeTimedCache(mvSearchCache, cacheKey, {
             id: hit.id,
             title: hit.title,
             source: 'youtube',
             author: hit.author,
             duration: hit.duration,
             items
-          }
+          })
         }
       }
     } catch (e) {
       console.error('[MV Search] Error:', e.message)
     }
     return null
+    })()
+
+    mvSearchPending.set(cacheKey, task)
+    return task.finally(() => {
+      mvSearchPending.delete(cacheKey)
+    })
   })
 
   // IPC: Save audio file
@@ -2879,79 +2925,103 @@ app.whenReady().then(async () => {
   }
 
   ipcMain.handle('bilibili:resolveStream', async (_, bvid, qualityId) => {
+    const normalizedBvid = String(bvid || '').trim()
+    const qn = qualityId || 80
     try {
       const ses = session.defaultSession
       const cookies = await ses.cookies.get({ domain: '.bilibili.com' })
       const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ')
+      const authBucket = cookieStr ? 'auth' : 'anon'
+      const cacheKey = `${normalizedBvid}::${qn}::${authBucket}`
+      const cached = readTimedCache(biliStreamCache, cacheKey, BILI_STREAM_CACHE_TTL_MS)
+      if (cached) {
+        console.log(`[Bilibili Stream] cache hit: ${normalizedBvid} qn=${qn} (${authBucket})`)
+        return cached
+      }
+      const pending = biliStreamPending.get(cacheKey)
+      if (pending) {
+        console.log(`[Bilibili Stream] awaiting in-flight request: ${normalizedBvid} qn=${qn}`)
+        return pending
+      }
+
+      const startedAt = Date.now()
       const headers = {
         Cookie: cookieStr,
         Referer: 'https://www.bilibili.com/',
         'User-Agent': standardUA
       }
 
-      const infoRes = await axios.get(
-        `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`,
-        { headers, timeout: 10000 }
-      )
-      const cid = infoRes.data?.data?.cid
-      if (!cid) return { ok: false, error: 'no_cid' }
-
-      const qn = qualityId || 80
-      const playRes = await axios.get(
-        `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=${qn}&fnval=4048&fourk=1`,
-        { headers, timeout: 10000 }
-      )
-      const d = playRes.data?.data
-      if (!d) return { ok: false, error: 'no_play_data', code: playRes.data?.code }
-
-      if (d.dash) {
-        const videos = (d.dash.video || []).filter((v) => v.baseUrl || v.base_url)
-        const audios = (d.dash.audio || []).filter((a) => a.baseUrl || a.base_url)
-        const codecPriority = (c) => {
-          if (!c) return 0
-          if (c.startsWith('av01')) return 2 // AV1
-          if (c.startsWith('hev1') || c.startsWith('hvc1')) return 1 // H.265
-          return 0 // H.264
-        }
-        videos.sort((a, b) => {
-          if (b.id !== a.id) return b.id - a.id
-          return codecPriority(b.codecs) - codecPriority(a.codecs)
-        })
-        const bestVideo = videos.find((v) => v.id <= qn) || videos[0]
-        audios.sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))
-        const bestAudio = audios[0]
-        const videoUrl = bestVideo?.baseUrl || bestVideo?.base_url
-        const audioUrl = bestAudio?.baseUrl || bestAudio?.base_url
-        const actualQn = bestVideo?.id || qn
-        console.log(
-          `[Bilibili Stream] DASH: qn=${actualQn} (${BILI_QN_DESC[actualQn] || '?'}), codecs=${bestVideo?.codecs || '?'}`
+      const task = (async () => {
+        const infoRes = await axios.get(
+          `https://api.bilibili.com/x/web-interface/view?bvid=${normalizedBvid}`,
+          { headers, timeout: 10000 }
         )
-        return {
-          ok: true,
-          videoUrl,
-          audioUrl,
-          quality: actualQn,
-          qualityDesc: BILI_QN_DESC[actualQn] || String(actualQn),
-          format: 'dash',
-          acceptQuality: d.accept_quality || []
-        }
-      }
+        const cid = infoRes.data?.data?.cid
+        if (!cid) return { ok: false, error: 'no_cid' }
 
-      if (d.durl?.length > 0) {
-        const actualQn = d.quality || qn
-        console.log(`[Bilibili Stream] durl: qn=${actualQn} (${BILI_QN_DESC[actualQn] || '?'})`)
-        return {
-          ok: true,
-          videoUrl: d.durl[0].url,
-          audioUrl: null,
-          quality: actualQn,
-          qualityDesc: BILI_QN_DESC[actualQn] || String(actualQn),
-          format: 'durl',
-          acceptQuality: d.accept_quality || []
-        }
-      }
+        const playRes = await axios.get(
+          `https://api.bilibili.com/x/player/playurl?bvid=${normalizedBvid}&cid=${cid}&qn=${qn}&fnval=4048&fourk=1`,
+          { headers, timeout: 10000 }
+        )
+        const d = playRes.data?.data
+        if (!d) return { ok: false, error: 'no_play_data', code: playRes.data?.code }
 
-      return { ok: false, error: 'no_stream_found' }
+        if (d.dash) {
+          const videos = (d.dash.video || []).filter((v) => v.baseUrl || v.base_url)
+          const audios = (d.dash.audio || []).filter((a) => a.baseUrl || a.base_url)
+          const codecPriority = (c) => {
+            if (!c) return 0
+            if (c.startsWith('av01')) return 2
+            if (c.startsWith('hev1') || c.startsWith('hvc1')) return 1
+            return 0
+          }
+          videos.sort((a, b) => {
+            if (b.id !== a.id) return b.id - a.id
+            return codecPriority(b.codecs) - codecPriority(a.codecs)
+          })
+          audios.sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))
+          const bestVideo = videos.find((v) => v.id <= qn) || videos[0]
+          const bestAudio = audios[0]
+          const actualQn = bestVideo?.id || qn
+          const result = {
+            ok: true,
+            videoUrl: bestVideo?.baseUrl || bestVideo?.base_url,
+            audioUrl: bestAudio?.baseUrl || bestAudio?.base_url,
+            quality: actualQn,
+            qualityDesc: BILI_QN_DESC[actualQn] || String(actualQn),
+            format: 'dash',
+            acceptQuality: d.accept_quality || []
+          }
+          console.log(
+            `[Bilibili Stream] DASH: qn=${actualQn} (${BILI_QN_DESC[actualQn] || '?'}) | total=${Date.now() - startedAt}ms | cache=miss`
+          )
+          return writeTimedCache(biliStreamCache, cacheKey, result)
+        }
+
+        if (d.durl?.length > 0) {
+          const actualQn = d.quality || qn
+          const result = {
+            ok: true,
+            videoUrl: d.durl[0].url,
+            audioUrl: null,
+            quality: actualQn,
+            qualityDesc: BILI_QN_DESC[actualQn] || String(actualQn),
+            format: 'durl',
+            acceptQuality: d.accept_quality || []
+          }
+          console.log(
+            `[Bilibili Stream] durl: qn=${actualQn} (${BILI_QN_DESC[actualQn] || '?'}) | total=${Date.now() - startedAt}ms | cache=miss`
+          )
+          return writeTimedCache(biliStreamCache, cacheKey, result)
+        }
+
+        return { ok: false, error: 'no_stream_found' }
+      })()
+
+      biliStreamPending.set(cacheKey, task)
+      return task.finally(() => {
+        biliStreamPending.delete(cacheKey)
+      })
     } catch (e) {
       console.error('[Bilibili Stream] Error:', e?.message || e)
       return { ok: false, error: e?.message || 'unknown' }

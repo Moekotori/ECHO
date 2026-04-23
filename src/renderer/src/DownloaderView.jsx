@@ -325,7 +325,8 @@ export default function DownloaderView({
         playlistInput: raw,
         downloadFolder: playlistSaveDir,
         preferredFolderName,
-        neteaseCookie: usableNeteaseCookie
+        neteaseCookie: usableNeteaseCookie,
+        quickMode: config.downloaderQuickMode === true
       })
       const newItems = (r.added || [])
         .filter(({ path }) => path && !streamedPathSet.has(path))
@@ -365,6 +366,7 @@ export default function DownloaderView({
   }, [
     config.playlistImportFolder,
     config.downloadFolder,
+    config.downloaderQuickMode,
     linkImportUrl,
     linkImportTarget,
     setPlaylist,
@@ -446,7 +448,8 @@ export default function DownloaderView({
     try {
       await window.api.media.downloadAudio(url, effectiveDownloadFolder, {
         audioQualityPreset,
-        neteaseCookie: usableNeteaseCookie
+        neteaseCookie: usableNeteaseCookie,
+        quickMode: config.downloaderQuickMode === true
       })
       setStatus('success')
 
@@ -563,7 +566,8 @@ export default function DownloaderView({
             .catch(() => [])
           await window.api.media.downloadAudio(neteaseUrl, effectiveDownloadFolder, {
             audioQualityPreset,
-            neteaseCookie: usableNeteaseCookie
+            neteaseCookie: usableNeteaseCookie,
+            quickMode: config.downloaderQuickMode === true
           })
           const filesAfter = await window.api
             .readDirectoryHandler(effectiveDownloadFolder)
@@ -610,6 +614,7 @@ export default function DownloaderView({
     },
     [
       audioQualityPreset,
+      config.downloaderQuickMode,
       effectiveDownloadFolder,
       ensureUsableNeteaseCookie,
       onSuccess,
@@ -844,6 +849,42 @@ export default function DownloaderView({
               </button>
             ))}
           </div>
+        </div>
+        <div
+          className="md-1music-toggle-row"
+          style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}
+        >
+          <button
+            type="button"
+            role="switch"
+            aria-checked={config.downloaderQuickMode === true}
+            className={`lyrics-drawer-switch ${config.downloaderQuickMode ? 'on' : ''}`}
+            onClick={() => setConfig((prev) => ({ ...prev, downloaderQuickMode: !prev.downloaderQuickMode }))}
+            disabled={isDownloading}
+            style={{ flexShrink: 0 }}
+          >
+            <span className="lyrics-drawer-switch-thumb" />
+          </button>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', userSelect: 'none' }}>
+              {t('downloader.quickModeLabel')}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-soft)', marginTop: 2 }}>
+              {t('downloader.quickModeHint')}
+            </div>
+          </div>
+          {config.downloaderQuickMode && (
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--accent-color)',
+                fontWeight: 600,
+                marginLeft: 'auto'
+              }}
+            >
+              FAST
+            </span>
+          )}
         </div>
         <div
           className="md-1music-toggle-row"

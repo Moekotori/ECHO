@@ -568,6 +568,8 @@
     "qualityHigh": "Quality: High (prefer 320k)",
     "qualityMedium": "Quality: Medium (prefer 192k)",
     "qualityLow": "Quality: Low (save bandwidth)",
+    "quickModeLabel": "Fast download mode",
+    "quickModeHint": "Skip cover embedding and some extra metadata work for faster saves.",
     "use1musicLabel": "Download from 1music (direct link, faster & more stable)",
     "directUrlFailed": "Failed to get direct URL; sign in or track may be unavailable",
     "downloadBtn": "Download",

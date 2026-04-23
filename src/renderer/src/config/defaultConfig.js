@@ -155,6 +155,7 @@ export const DEFAULT_CONFIG = {
   playlistImportFolder: null,
   /** 自动保存媒体库（播放列表/自定义歌单/收藏） */
   autoSaveLibrary: true,
+  downloaderQuickMode: false,
   /** 开发者模式（开启后显示高级开发者功能） */
   devModeEnabled: false,
   /** 启动应用后自动打开开发者工具（Console） */

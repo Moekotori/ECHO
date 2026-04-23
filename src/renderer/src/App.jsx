@@ -158,6 +158,8 @@ const SIDEBAR_DETAIL_ROW_HEIGHT = 60
 const ALBUM_GRID_DEFAULT_ROW_HEIGHT = 68
 const ALBUM_GRID_DEFAULT_GAP = 10
 const RENDERER_PERSIST_DEBOUNCE_MS = 600
+const MV_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000
+const BILI_STREAM_CACHE_TTL_MS = 8 * 60 * 1000
 const PLAYBACK_SESSION_LOCAL_KEY = 'nc_playback_session'
 const USER_SMART_COLLECTIONS_LOCAL_KEY = 'nc_user_smart_collections'
 const DISPLAY_METADATA_OVERRIDES_LOCAL_KEY = 'nc_display_metadata_overrides'
@@ -1007,6 +1009,13 @@ export default function App() {
     bilibili: false
   })
   const [biliDirectStream, setBiliDirectStream] = useState(null)
+  const mvSearchCacheRef = useRef(new Map())
+  const mvSearchPendingRef = useRef(new Map())
+  const autoMvSearchByTrackRef = useRef(new Map())
+  const biliStreamCacheRef = useRef(new Map())
+  const biliStreamPendingRef = useRef(new Map())
+  const lastResolvedMvTrackPathRef = useRef('')
+  const lastMvIdentityRef = useRef('')
 
   useEffect(() => {
     const refresh = () => {
@@ -1023,6 +1032,16 @@ export default function App() {
       if (typeof unsub === 'function') unsub()
     }
   }, [])
+
+  useEffect(() => {
+    if (!currentTrackPath) return
+    if (lastResolvedMvTrackPathRef.current === currentTrackPath) return
+    lastResolvedMvTrackPathRef.current = currentTrackPath
+    setYoutubeMvLoginHint(false)
+    setMvId(null)
+    setBiliDirectStream(null)
+    setMvPlaybackQuality(null)
+  }, [currentTrackPath])
 
   // Lyrics States
   const [showLyrics, setShowLyrics] = useState(false)
@@ -3263,6 +3282,66 @@ export default function App() {
     return out
   }
 
+  const readRuntimeCache = useCallback((ref, key, ttlMs) => {
+    const hit = ref.current.get(key)
+    if (!hit) return null
+    if (Date.now() - hit.at > ttlMs) {
+      ref.current.delete(key)
+      return null
+    }
+    return hit.value
+  }, [])
+
+  const writeRuntimeCache = useCallback((ref, key, value) => {
+    ref.current.set(key, { value, at: Date.now() })
+    return value
+  }, [])
+
+  const searchMvWithCache = useCallback(
+    async (query, source = 'bilibili') => {
+      if (!window.api?.searchMVHandler) return null
+      const normalizedQuery = String(query || '').trim()
+      const normalizedSource = String(source || 'bilibili').trim().toLowerCase() || 'bilibili'
+      if (!normalizedQuery) return null
+      const cacheKey = `${normalizedSource}::${normalizedQuery.toLowerCase()}`
+      const cached = readRuntimeCache(mvSearchCacheRef, cacheKey, MV_SEARCH_CACHE_TTL_MS)
+      if (cached !== null) return cached
+      const pending = mvSearchPendingRef.current.get(cacheKey)
+      if (pending) return pending
+      const task = window.api
+        .searchMVHandler(normalizedQuery, normalizedSource)
+        .then((result) => writeRuntimeCache(mvSearchCacheRef, cacheKey, result || null))
+        .finally(() => {
+          mvSearchPendingRef.current.delete(cacheKey)
+        })
+      mvSearchPendingRef.current.set(cacheKey, task)
+      return task
+    },
+    [readRuntimeCache, writeRuntimeCache]
+  )
+
+  const resolveBiliDirectStreamCached = useCallback(
+    async (bvid, qn) => {
+      if (!window.api?.resolveBilibiliStream) return null
+      const normalizedBvid = String(bvid || '').trim()
+      if (!normalizedBvid) return null
+      const cacheKey = `${normalizedBvid}::${qn}`
+      const cached = readRuntimeCache(biliStreamCacheRef, cacheKey, BILI_STREAM_CACHE_TTL_MS)
+      if (cached) return cached
+      const pending = biliStreamPendingRef.current.get(cacheKey)
+      if (pending) return pending
+      const task = window.api
+        .resolveBilibiliStream(normalizedBvid, qn)
+        .then((result) => (result?.ok ? writeRuntimeCache(biliStreamCacheRef, cacheKey, result) : result))
+        .finally(() => {
+          biliStreamPendingRef.current.delete(cacheKey)
+        })
+      biliStreamPendingRef.current.set(cacheKey, task)
+      return task
+    },
+    [readRuntimeCache, writeRuntimeCache]
+  )
+
   const searchBilibiliMv = useCallback(async (title = '', artist = '') => {
     if (!window.api?.searchMVHandler) return null
 
@@ -3277,7 +3356,7 @@ export default function App() {
 
     for (const q of queries) {
       try {
-        const result = await window.api.searchMVHandler(q.trim(), 'bilibili')
+        const result = await searchMvWithCache(q.trim(), 'bilibili')
         if (result) {
           const id = typeof result === 'string' ? result : result.id
           if (id) return id
@@ -3288,7 +3367,7 @@ export default function App() {
     }
 
     return null
-  }, [])
+  }, [searchMvWithCache])
 
   const retryFetchLyrics = async () => {
     const track = playlist[currentIndex]
@@ -3559,7 +3638,6 @@ export default function App() {
         configRef.current.mvAsBackgroundMain)
     ) {
       setIsSearchingMV(true)
-      setMvId(null)
       try {
         let foundId = null
         let mvSource = configRef.current.mvSource || 'bilibili'
@@ -3605,7 +3683,12 @@ export default function App() {
             mvSource === 'bilibili'
               ? `${cleanedTitle} ${artist || ''} MV`.trim()
               : `${cleanedTitle} ${artist || ''} official mv`.trim()
-          const searchResult = await window.api.searchMVHandler(mvQuery, mvSource)
+          const searchCacheKey = `${filePath}::${mvSource}::${mvQuery.toLowerCase()}`
+          let searchResult = autoMvSearchByTrackRef.current.get(searchCacheKey)
+          if (searchResult === undefined) {
+            searchResult = await searchMvWithCache(mvQuery, mvSource)
+            autoMvSearchByTrackRef.current.set(searchCacheKey, searchResult || null)
+          }
           if (isStaleRequest()) return
           if (searchResult) {
             if (typeof searchResult === 'string') {
@@ -3640,8 +3723,14 @@ export default function App() {
 
         if (foundId) {
           if (isStaleRequest()) return
-          setMvId({ id: foundId, source: mvSource })
+          setMvId((prev) =>
+            prev?.id === foundId && prev?.source === mvSource ? prev : { id: foundId, source: mvSource }
+          )
           setMvOverrideForPath(filePath, { id: foundId, source: mvSource })
+        } else if (!isStaleRequest()) {
+          setMvId(null)
+          setBiliDirectStream(null)
+          setMvPlaybackQuality(null)
         }
       } catch (e) {
         console.error('MV search error', e)
@@ -4975,8 +5064,12 @@ export default function App() {
   }, [mvId?.id, mvId?.source, config.enableMV, config.mvAsBackground, showLyrics])
 
   useEffect(() => {
+    const nextKey = mvId?.id && mvId?.source ? `${mvId.source}:${mvId.id}` : ''
+    if (lastMvIdentityRef.current !== nextKey) {
+      lastMvIdentityRef.current = nextKey
+      setBiliDirectStream(null)
+    }
     setYoutubeMvLoginHint(false)
-    setBiliDirectStream(null)
     if (mvId?.source === 'bilibili') {
       setMvPlaybackQuality(null)
     } else {
@@ -4988,14 +5081,21 @@ export default function App() {
     if (!mvId || mvId.source !== 'bilibili') return
     const qMap = { ultra: 120, highfps: 116, high: 80, medium: 64, low: 16 }
     const qn = qMap[config.mvQuality || 'high'] || 80
+    const cacheKey = `${mvId.id}::${qn}`
+    const cached = readRuntimeCache(biliStreamCacheRef, cacheKey, BILI_STREAM_CACHE_TTL_MS)
+    if (cached?.ok) {
+      setBiliDirectStream(cached)
+      setMvPlaybackQuality(cached.qualityDesc)
+      return
+    }
     let cancelled = false
-    setBiliDirectStream(null)
-    window.api
-      ?.resolveBilibiliStream?.(mvId.id, qn)
+    resolveBiliDirectStreamCached(mvId.id, qn)
       .then((r) => {
         if (cancelled) return
         if (r?.ok) {
-          setBiliDirectStream(r)
+          setBiliDirectStream((prev) =>
+            prev?.videoUrl === r.videoUrl && prev?.audioUrl === r.audioUrl ? prev : r
+          )
           setMvPlaybackQuality(r.qualityDesc)
           console.log(`[Bilibili] Direct stream: ${r.qualityDesc} (${r.format})`)
         } else {
@@ -5014,7 +5114,14 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [mvId?.id, mvId?.source, config.mvQuality, signInStatus.bilibili])
+  }, [
+    config.mvQuality,
+    mvId?.id,
+    mvId?.source,
+    readRuntimeCache,
+    resolveBiliDirectStreamCached,
+    signInStatus.bilibili
+  ])
 
   const refreshSignInStatus = useCallback(() => {
     window.api
@@ -5046,58 +5153,6 @@ export default function App() {
       console.warn('[Bilibili sign-in]', e?.message || e)
     }
   }, [])
-
-  // Sync YouTube playback state and rate
-  useEffect(() => {
-    if (!mvId || mvId.source === 'bilibili') return
-    const func = isPlaying ? 'playVideo' : 'pauseVideo'
-    ;[ytIframeRef, ytBackgroundIframeRef].forEach((ref) => {
-      if (ref.current && ref.current.contentWindow) {
-        ref.current.contentWindow.postMessage(
-          JSON.stringify({
-            event: 'command',
-            func: func,
-            args: []
-          }),
-          '*'
-        )
-      }
-    })
-  }, [isPlaying, mvId])
-
-  useEffect(() => {
-    if (!mvId || mvId.source === 'bilibili') return
-    ;[ytIframeRef, ytBackgroundIframeRef].forEach((ref) => {
-      if (ref.current && ref.current.contentWindow) {
-        ref.current.contentWindow.postMessage(
-          JSON.stringify({
-            event: 'command',
-            func: 'setPlaybackRate',
-            args: [playbackRate]
-          }),
-          '*'
-        )
-      }
-    })
-  }, [playbackRate, mvId])
-
-  // Handle MV Muting via postMessage
-  useEffect(() => {
-    if (!mvId || mvId.source === 'bilibili') return
-    const func = config.mvMuted ? 'mute' : 'unMute'
-    ;[ytIframeRef, ytBackgroundIframeRef].forEach((ref) => {
-      if (ref.current && ref.current.contentWindow) {
-        ref.current.contentWindow.postMessage(
-          JSON.stringify({
-            event: 'command',
-            func: func,
-            args: []
-          }),
-          '*'
-        )
-      }
-    })
-  }, [config.mvMuted, mvId, view, showLyrics])
 
   // Bilibili direct video: play/pause sync
   useEffect(() => {
@@ -5164,19 +5219,58 @@ export default function App() {
     })
   }, [])
 
+  const postMvIframeCommand = useCallback(
+    (func, args = []) => {
+      if (!mvId) return
+      if (mvId.source === 'youtube') {
+        postToAllMvIframes(
+          JSON.stringify({
+            event: 'command',
+            func,
+            args
+          })
+        )
+        return
+      }
+      if (mvId.source === 'bilibili' && !biliDirectStream?.videoUrl) {
+        postToAllMvIframes(
+          JSON.stringify({
+            method: func,
+            data: args.length <= 1 ? args[0] : args
+          })
+        )
+      }
+    },
+    [biliDirectStream?.videoUrl, mvId, postToAllMvIframes]
+  )
+
+  useEffect(() => {
+    if (!mvId) return
+    if (mvId.source === 'youtube') {
+      postMvIframeCommand(isPlaying ? 'playVideo' : 'pauseVideo')
+      postMvIframeCommand('setPlaybackRate', [playbackRate])
+      postMvIframeCommand(config.mvMuted ? 'mute' : 'unMute')
+      return
+    }
+    if (mvId.source === 'bilibili' && !biliDirectStream?.videoUrl) {
+      postMvIframeCommand(isPlaying ? 'play' : 'pause')
+      postMvIframeCommand('volume', [config.mvMuted || isAudioExclusive ? 0 : 1])
+    }
+  }, [
+    biliDirectStream?.videoUrl,
+    config.mvMuted,
+    isAudioExclusive,
+    isPlaying,
+    mvId,
+    playbackRate,
+    postMvIframeCommand
+  ])
+
   const pushYTQuality = useCallback(() => {
     const qMap = { high: 'hd1080', medium: 'hd720', low: 'small' }
     const q = qMap[config.mvQuality || 'high'] || 'hd1080'
-    postToAllMvIframes(
-      JSON.stringify({
-        event: 'command',
-        func: 'setPlaybackQuality',
-        args: [q]
-      })
-    )
-  }, [config.mvQuality, postToAllMvIframes])
-
-  const biliSeekDebounceRef = useRef(null)
+    postMvIframeCommand('setPlaybackQuality', [q])
+  }, [config.mvQuality, postMvIframeCommand])
 
   const syncYTVideo = (time) => {
     const audioT = Number(time) || 0
@@ -5191,76 +5285,65 @@ export default function App() {
         if (biliAudioRef.current) biliAudioRef.current.currentTime = t
         return
       }
-      if (biliSeekDebounceRef.current) clearTimeout(biliSeekDebounceRef.current)
-      biliSeekDebounceRef.current = setTimeout(() => {
-        const secs = Math.floor(t)
-        ;[ytIframeRef, ytBackgroundIframeRef].forEach((ref) => {
-          if (!ref.current) return
-          const cur = ref.current.src || ''
-          const base = cur.replace(/[&?]t=\d+/g, '')
-          ref.current.src = base + `&t=${secs}`
-        })
-      }, 300)
+      postMvIframeCommand('seek', [Math.floor(t)])
+      if (isPlaying) postMvIframeCommand('play')
       return
     }
 
-    ;[ytIframeRef, ytBackgroundIframeRef].forEach((ref) => {
-      if (ref.current && ref.current.contentWindow) {
-        ref.current.contentWindow.postMessage(
-          JSON.stringify({
-            event: 'command',
-            func: 'seekTo',
-            args: [t, true]
-          }),
-          '*'
-        )
-
-        if (isPlaying) {
-          ref.current.contentWindow.postMessage(
-            JSON.stringify({
-              event: 'command',
-              func: 'playVideo',
-              args: []
-            }),
-            '*'
-          )
-        }
-      }
-    })
+    postMvIframeCommand('seekTo', [t, true])
+    if (isPlaying) postMvIframeCommand('playVideo')
   }
 
   const syncYTVideoRef = useRef(syncYTVideo)
   syncYTVideoRef.current = syncYTVideo
 
+  const getMvSyncTime = useCallback(() => {
+    if (useNativeEngineRef.current) {
+      return Math.max(0, Number(currentTimeRef.current) || 0)
+    }
+    return Math.max(0, Number(audioRef.current?.currentTime) || 0)
+  }, [])
+
   /** YouTube / Bilibili 嵌入 iframe：定期按本地音频时间软校正，减轻长播漂移 */
   useEffect(() => {
     if (!isPlaying || !mvId) return
-    const biliEmbedOnly = mvId.source === 'bilibili' && !biliDirectStream?.videoUrl
-    if (mvId.source !== 'youtube' && !biliEmbedOnly) return
+    if (mvId.source !== 'youtube') return
     const id = window.setInterval(() => {
       if (isSeekingRef.current) return
-      const audio = audioRef.current
-      if (!audio) return
-      syncYTVideoRef.current(audio.currentTime || 0)
+      syncYTVideoRef.current(getMvSyncTime())
     }, 3000)
     return () => clearInterval(id)
-  }, [isPlaying, mvId?.id, mvId?.source, biliDirectStream?.videoUrl])
+  }, [getMvSyncTime, isPlaying, mvId?.id, mvId?.source])
 
   /** Bilibili 直连 HTML5 video：偏差超过阈值再对齐，避免每帧 seek */
   useEffect(() => {
     if (!isPlaying || !mvId || mvId.source !== 'bilibili' || !biliDirectStream?.videoUrl) return
     let raf = 0
-    const driftThresholdSec = 0.35
+    const hardSeekThresholdSec = 1.0
+    const rateNudgeThresholdSec = 0.18
     const tick = () => {
       if (!isSeekingRef.current) {
-        const audio = audioRef.current
         const v = biliVideoRef.current || biliBackgroundVideoRef.current
-        if (audio && v) {
-          const audioTime = useNativeEngineRef.current ? audio.currentTime || 0 : audio.currentTime
+        if (v) {
+          const audioTime = getMvSyncTime()
           const target = Math.max(0, audioTime + (configRef.current.mvOffsetMs ?? 0) / 1000)
-          if (Math.abs(v.currentTime - target) > driftThresholdSec) {
+          const drift = target - (v.currentTime || 0)
+          const absDrift = Math.abs(drift)
+          if (absDrift > hardSeekThresholdSec) {
             v.currentTime = target
             if (biliAudioRef.current) biliAudioRef.current.currentTime = target
+            v.playbackRate = playbackRateRef.current
+            if (biliAudioRef.current) biliAudioRef.current.playbackRate = playbackRateRef.current
+          } else if (absDrift > rateNudgeThresholdSec) {
+            const nudgedRate = Math.max(
+              0.5,
+              Math.min(2, playbackRateRef.current + (drift > 0 ? 0.04 : -0.04))
+            )
+            v.playbackRate = nudgedRate
+            if (biliAudioRef.current) biliAudioRef.current.playbackRate = nudgedRate
+          } else if (v.playbackRate !== playbackRateRef.current) {
+            v.playbackRate = playbackRateRef.current
+            if (biliAudioRef.current) biliAudioRef.current.playbackRate = playbackRateRef.current
           }
         }
       }
@@ -5268,7 +5351,7 @@ export default function App() {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [isPlaying, mvId?.id, mvId?.source, biliDirectStream?.videoUrl])
+  }, [biliDirectStream?.videoUrl, getMvSyncTime, isPlaying, mvId?.id, mvId?.source])
 
   const handleSeek = (e) => {
     if (lastCastStatus?.dlnaEnabled && lastCastStatus?.currentUri) return

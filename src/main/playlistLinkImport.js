@@ -134,7 +134,7 @@ function buildTrackFilename(entry, fallbackTitle, fallbackIndex) {
 /**
  * 逐条 URL 下载（Spotify / SoundCloud / Tidal 等由 yt-dlp 支持的链接）
  */
-async function importByYtDlpEntryLoop(url, folder, eventSender, metaJson) {
+async function importByYtDlpEntryLoop(url, folder, eventSender, metaJson, options = {}) {
   const entries = extractEntries(metaJson)
   const playlistLike = isPlaylistLike(metaJson)
   const playlistName =
@@ -188,7 +188,7 @@ async function importByYtDlpEntryLoop(url, folder, eventSender, metaJson) {
         folder,
         basename,
         eventSender,
-        { extraArgs: perTrackArgs }
+        { extraArgs: perTrackArgs, quickMode: options.quickMode === true }
       )
       const filePath = MediaDownloader.renameDownloadedMedia(
         downloadedPath,
@@ -217,7 +217,7 @@ async function importByYtDlpEntryLoop(url, folder, eventSender, metaJson) {
 /**
  * 整包拉取（条目无法逐条解析时的兜底）
  */
-async function importByYtDlpBulk(url, folder, eventSender, hintName) {
+async function importByYtDlpBulk(url, folder, eventSender, hintName, options = {}) {
   const ffmpegPath = getResolvedFfmpegStaticPath()
   let before
   try {
@@ -235,8 +235,7 @@ async function importByYtDlpBulk(url, folder, eventSender, hintName) {
     'bestaudio/best',
     '--audio-quality',
     '0',
-    '--embed-thumbnail',
-    '--add-metadata',
+    ...(options.quickMode === true ? [] : ['--embed-thumbnail', '--add-metadata']),
     '-o',
     join(folder, 'import_%(playlist_index)s_%(id)s.%(ext)s'),
     '--ffmpeg-location',
@@ -341,7 +340,13 @@ export async function importPlaylistFromLink(
       downloadFolder,
       preferredFolderName || deriveFolderNameFromInput(normalized)
     )
-    return importByYtDlpBulk(normalized, fallbackFolder, eventSender, preferredFolderName || null)
+    return importByYtDlpBulk(
+      normalized,
+      fallbackFolder,
+      eventSender,
+      preferredFolderName || null,
+      options
+    )
   }
 
   const entries = extractEntries(metaJson)
@@ -352,12 +357,12 @@ export async function importPlaylistFromLink(
   )
 
   if (entries.length === 0) {
-    return importByYtDlpBulk(normalized, targetFolder, eventSender, playlistName)
+    return importByYtDlpBulk(normalized, targetFolder, eventSender, playlistName, options)
   }
 
   try {
-    return await importByYtDlpEntryLoop(normalized, targetFolder, eventSender, metaJson)
+    return await importByYtDlpEntryLoop(normalized, targetFolder, eventSender, metaJson, options)
   } catch {
-    return importByYtDlpBulk(normalized, targetFolder, eventSender, playlistName)
+    return importByYtDlpBulk(normalized, targetFolder, eventSender, playlistName, options)
   }
 }
