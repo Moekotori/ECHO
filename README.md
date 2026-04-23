@@ -1,7 +1,9 @@
 <div align="center">
 
 <h1>ECHO</h1>
-
+<p align="center">
+  <img src="echo-logo.png" width="700">
+</p>
 <p>基于 Electron 与 React 构建的现代化、功能丰富的桌面音乐播放器。</p>
 
 <p>
