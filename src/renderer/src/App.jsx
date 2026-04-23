@@ -224,6 +224,26 @@ function clampVolume(value) {
   return Math.min(1, Math.max(0, num))
 }
 
+function resolveContextMenuPoint(eventLike, fallbackElement = null) {
+  const event = eventLike || null
+  const currentTarget = event?.currentTarget || fallbackElement || null
+  const rect =
+    currentTarget && typeof currentTarget.getBoundingClientRect === 'function'
+      ? currentTarget.getBoundingClientRect()
+      : null
+  const clientX = Number.isFinite(event?.clientX)
+    ? event.clientX
+    : rect
+      ? rect.left + Math.min(rect.width / 2, 24)
+      : 24
+  const clientY = Number.isFinite(event?.clientY)
+    ? event.clientY
+    : rect
+      ? rect.top + Math.min(rect.height / 2, 24)
+      : 24
+  return { clientX, clientY }
+}
+
 function readStoredVolume() {
   try {
     const saved = getInitialAppStateValue('volume')
@@ -937,6 +957,7 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [lyricsRenderTime, setLyricsRenderTime] = useState(0)
+  const currentTrackPath = playlist[currentIndex]?.path || ''
   const [isSeeking, setIsSeeking] = useState(false)
   const isSeekingRef = useRef(false)
   useEffect(() => {
@@ -1011,6 +1032,11 @@ export default function App() {
   const [lyricsCandidateOpen, setLyricsCandidateOpen] = useState(false)
   const [lyricsCandidateLoading, setLyricsCandidateLoading] = useState(false)
   const [lyricsCandidateItems, setLyricsCandidateItems] = useState([])
+  const [temporarilyHiddenLyricsTrackPath, setTemporarilyHiddenLyricsTrackPath] = useState('')
+  const [lyricsQuickBarDismissed, setLyricsQuickBarDismissed] = useState(false)
+  const [lyricsQuickBarActivityAt, setLyricsQuickBarActivityAt] = useState(() => Date.now())
+  const isCurrentTrackLyricsTemporarilyHidden =
+    !!currentTrackPath && temporarilyHiddenLyricsTrackPath === currentTrackPath
   const [downloaderDrawerOpen, setDownloaderDrawerOpen] = useState(false)
   const [mvDrawerOpen, setMvDrawerOpen] = useState(false)
   const [castDrawerOpen, setCastDrawerOpen] = useState(false)
@@ -2430,6 +2456,16 @@ export default function App() {
     void window.api.setAudioExclusive(config.audioExclusive === true)
   }, [config.audioExclusive])
 
+  // 同步 gapless 设置到主进程引擎
+  useEffect(() => {
+    if (!window.api?.setAudioGapless) return
+    void window.api.setAudioGapless(!!config.gaplessEnabled)
+    // gapless 与 crossfade 互斥：开 gapless 时自动关 crossfade
+    if (config.gaplessEnabled && config.crossfadeEnabled) {
+      setConfig((prev) => ({ ...prev, crossfadeEnabled: false }))
+    }
+  }, [config.gaplessEnabled, config.crossfadeEnabled])
+
   useEffect(() => {
     if (!window.api?.setAudioDevice) return
     const savedDeviceId = config.audioDeviceId
@@ -3044,6 +3080,23 @@ export default function App() {
   }, [lyrics])
 
   useEffect(() => {
+    setTemporarilyHiddenLyricsTrackPath('')
+    setLyricsQuickBarDismissed(false)
+    setLyricsQuickBarActivityAt(Date.now())
+  }, [currentTrackPath])
+
+  useEffect(() => {
+    if (!showLyrics || view !== 'player') return
+    if (!currentTrackPath) return
+    if (isCurrentTrackLyricsTemporarilyHidden || lyricsQuickBarDismissed) return
+    const remainingMs = Math.max(0, 5000 - (Date.now() - lyricsQuickBarActivityAt))
+    const timer = window.setTimeout(() => {
+      setLyricsQuickBarDismissed(true)
+    }, remainingMs)
+    return () => clearTimeout(timer)
+  }, [currentTrackPath, isCurrentTrackLyricsTemporarilyHidden, lyricsQuickBarActivityAt, lyricsQuickBarDismissed, showLyrics, view])
+
+  useEffect(() => {
     if (showLyrics && !config.lyricsHidden && activeLyricIndex !== -1 && scrollAreaRef.current) {
       const activeElement = scrollAreaRef.current.querySelector('.lyric-line.active')
       if (activeElement) {
@@ -3383,6 +3436,8 @@ export default function App() {
   }
 
   const openLyricsCandidatePicker = () => {
+    setLyricsQuickBarDismissed(false)
+    setLyricsQuickBarActivityAt(Date.now())
     searchLyricsCandidates()
   }
 
@@ -4639,18 +4694,24 @@ export default function App() {
           }
         }
       }
+      const { currentSeqIndex, paths } = getPlaybackSequenceSnapshot()
       if (playMode === 'shuffle') {
         let nextIdx = Math.floor(Math.random() * playlist.length)
         if (nextIdx === currentIndex && playlist.length > 1) {
           nextIdx = (nextIdx + 1) % playlist.length
         }
         setCurrentIndex(nextIdx)
+      } else if (paths.length > 0) {
+        const baseIndex = currentSeqIndex >= 0 ? currentSeqIndex : 0
+        const nextPath = paths[(baseIndex + 1) % paths.length]
+        const nextIdx = playlistRef.current.findIndex((track) => track.path === nextPath)
+        if (nextIdx !== -1) setCurrentIndex(nextIdx)
       } else {
         setCurrentIndex((prev) => (prev + 1) % playlist.length)
       }
       setIsPlaying(true)
     }
-  }, [cancelCrossfade, playlist, queuePlaybackEnabled, playMode, currentIndex])
+  }, [cancelCrossfade, playlist, queuePlaybackEnabled, playMode, currentIndex, getPlaybackSequenceSnapshot])
 
   const jumpToPlaybackHistory = useCallback((targetHistoryIndex) => {
     const historySnapshot = playbackHistoryRef.current
@@ -4750,10 +4811,41 @@ export default function App() {
 
   const nextTrack = getNextTrack()
 
+  // Gapless: 当下一首变化时预缓冲（仅 HiFi 引擎 + gapless 开启时）
+  useEffect(() => {
+    if (!config.gaplessEnabled || !useNativeEngineRef.current) return
+    const nextPath = nextTrack?.path
+    if (nextPath && window.api?.audioPrebufferNext) {
+      void window.api.audioPrebufferNext(nextPath)
+    } else if (window.api?.audioCancelPrebuffer) {
+      void window.api.audioCancelPrebuffer()
+    }
+  }, [nextTrack?.path, config.gaplessEnabled])
+
+  // Gapless: 主进程无缝切轨后更新渲染层（不重启音频）
+  useEffect(() => {
+    if (!window.api?.onGaplessTrackChanged) return undefined
+    return window.api.onGaplessTrackChanged((nextPath) => {
+      const nextIdx = playlistRef.current.findIndex((t) => t.path === nextPath)
+      if (nextIdx !== -1) {
+        historyNavigationRef.current = false
+        setCurrentIndex(nextIdx)
+        // isPlaying 保持 true，不触发 playAudio（音频已在主进程连续播放）
+      }
+    })
+  }, [])
+
   const handlePrev = useCallback((options = {}) => {
     if (!options.preserveFade) {
       cancelCrossfade()
     }
+
+    // 历史模式：跳到上一首听的歌，历史为空时降级为列表上一首
+    if (config.prevButtonMode === 'history') {
+      const jumped = goBackInPlaybackHistory()
+      if (jumped) return
+    }
+
     const { currentPath, currentSeqIndex, paths } = getPlaybackSequenceSnapshot()
     if (paths.length === 0) return
 
@@ -4773,7 +4865,7 @@ export default function App() {
       setCurrentIndex(prevIdx)
     }
     setIsPlaying(true)
-  }, [cancelCrossfade, playMode, getPlaybackSequenceSnapshot])
+  }, [cancelCrossfade, config.prevButtonMode, goBackInPlaybackHistory, playMode, getPlaybackSequenceSnapshot])
 
   useEffect(() => {
     if (!window.api?.onPlayerCmd) return undefined
@@ -6395,6 +6487,16 @@ export default function App() {
         smartCollectionTracks.map((track) => track.path)
       )
     }
+    // 专辑视图：上下首在专辑内导航
+    if (listMode === 'album' && selectedAlbum && selectedAlbum !== 'all') {
+      const albumBucket = albumBuckets.find((a) => a.name === selectedAlbum)
+      if (albumBucket?.tracks?.length > 0) {
+        const sortedPaths = [...albumBucket.tracks]
+          .sort(compareTrackOrder)
+          .map((t) => t.path)
+        return createPlaybackContext('albumGroup', selectedAlbum, sortedPaths)
+      }
+    }
     return createPlaybackContext('library', 'library', [])
   }, [
     listMode,
@@ -6402,7 +6504,9 @@ export default function App() {
     selectedUserPlaylist,
     selectedSmartCollectionId,
     selectedSmartCollection,
-    smartCollectionTracks
+    smartCollectionTracks,
+    selectedAlbum,
+    albumBuckets
   ])
 
   const startPlaybackForTrack = useCallback((track, playbackContext = null) => {
@@ -7055,15 +7159,16 @@ export default function App() {
 
   const openGroupContextMenu = useCallback(
     (e, type, group) => {
-      e.preventDefault()
-      e.stopPropagation()
+      e?.preventDefault?.()
+      e?.stopPropagation?.()
+      const { clientX, clientY } = resolveContextMenuPoint(e)
       setFolderSortOpen(false)
       forceCloseAddToPlaylistMenu()
       forceCloseTrackContextMenu()
       forceCloseCoverContextMenu()
       setGroupContextMenu({
-        clientX: e.clientX,
-        clientY: e.clientY,
+        clientX,
+        clientY,
         type,
         group
       })
@@ -7074,15 +7179,16 @@ export default function App() {
   const openCoverContextMenu = useCallback(
     (e) => {
       if (!currentTrack) return
-      e.preventDefault()
-      e.stopPropagation()
+      e?.preventDefault?.()
+      e?.stopPropagation?.()
+      const { clientX, clientY } = resolveContextMenuPoint(e)
       forceCloseCoverContextMenu()
       forceCloseAddToPlaylistMenu()
       forceCloseTrackContextMenu()
       forceCloseGroupContextMenu()
       setCoverContextMenu({
-        clientX: e.clientX,
-        clientY: e.clientY,
+        clientX,
+        clientY,
         track: currentTrack
       })
     },
@@ -7156,6 +7262,64 @@ export default function App() {
       closeGroupContextMenuAnimated()
     },
     [closeGroupContextMenuAnimated, t]
+  )
+
+  const writeTextToClipboard = useCallback(
+    async (text) => {
+      try {
+        if (window.api?.writeClipboardText) {
+          const r = await window.api.writeClipboardText(text)
+          if (r && r.ok === false && r.error) {
+            alert(t('contextMenu.actionFailed', { detail: r.error }))
+          }
+        } else if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text)
+        } else {
+          alert(t('contextMenu.actionFailed', { detail: 'clipboard_unavailable' }))
+        }
+      } catch (err) {
+        alert(t('contextMenu.actionFailed', { detail: err?.message || String(err) }))
+      }
+    },
+    [t]
+  )
+
+  const revealTrackInFolder = useCallback(
+    async (track) => {
+      const path = track?.path
+      if (!path || !window.api?.showItemInFolder) {
+        alert(t('contextMenu.actionFailed', { detail: 'path_unavailable' }))
+        return
+      }
+      try {
+        const r = await window.api.showItemInFolder(path)
+        if (r && r.ok === false && r.error) {
+          alert(t('contextMenu.actionFailed', { detail: r.error }))
+        }
+      } catch (err) {
+        alert(t('contextMenu.actionFailed', { detail: err?.message || String(err) }))
+      }
+    },
+    [t]
+  )
+
+  const openTrackWithDefaultApp = useCallback(
+    async (track) => {
+      const path = track?.path
+      if (!path || !window.api?.openPath) {
+        alert(t('contextMenu.actionFailed', { detail: 'path_unavailable' }))
+        return
+      }
+      try {
+        const r = await window.api.openPath(path)
+        if (r && r.ok === false && r.error) {
+          alert(t('contextMenu.actionFailed', { detail: r.error }))
+        }
+      } catch (err) {
+        alert(t('contextMenu.actionFailed', { detail: err?.message || String(err) }))
+      }
+    },
+    [t]
   )
 
   const addPathToUserPlaylist = useCallback(
@@ -7707,6 +7871,13 @@ export default function App() {
     () => Boolean(showLyrics) && ((config.mvAsBackground && mvId) || Boolean(config.customBgPath)),
     [showLyrics, config.mvAsBackground, mvId, config.customBgPath]
   )
+  const lyricsOnlyInstrumental =
+    lyrics.length > 0 &&
+    lyrics
+      .filter((line) => line.text.trim())
+      .every((line) => line.text.match(/纯音乐|instrumental|.*欣赏.*|.*enjoy.*/i))
+  const isLyricsListHidden =
+    config.lyricsHidden || isCurrentTrackLyricsTemporarilyHidden || lyricsOnlyInstrumental
 
   useEffect(() => {
     if (!hideImmersiveMvChrome) return undefined
@@ -9589,11 +9760,12 @@ export default function App() {
                             startPlaybackForTrack(track, sidebarPlaybackContext)
                           }}
                           onContextMenu={(e) => {
-                            e.preventDefault()
+                            e?.preventDefault?.()
+                            const { clientX, clientY } = resolveContextMenuPoint(e)
                             forceCloseCoverContextMenu()
                             forceCloseGroupContextMenu()
                             forceCloseAddToPlaylistMenu()
-                            setTrackContextMenu({ clientX: e.clientX, clientY: e.clientY, track })
+                            setTrackContextMenu({ clientX, clientY, track })
                           }}
                         >
                           <Music size={16} style={{ marginRight: 8, opacity: 0.5 }} />
@@ -9749,16 +9921,47 @@ export default function App() {
             )}
 
             <div
-              className={`lyrics-and-mv-wrapper${config.lyricsHidden || (lyrics.length > 0 && lyrics.filter((l) => l.text.trim()).every((l) => l.text.match(/纯音乐|instrumental|.*欣赏.*|.*enjoy.*/i))) ? ' lyrics-and-mv-wrapper--lyrics-hidden' : ''}`}
+              className={`lyrics-and-mv-wrapper${isLyricsListHidden ? ' lyrics-and-mv-wrapper--lyrics-hidden' : ''}`}
             >
-              {!(
-                config.lyricsHidden ||
-                (lyrics.length > 0 &&
-                  lyrics
-                    .filter((l) => l.text.trim())
-                    .every((l) => l.text.match(/纯音乐|instrumental|.*欣赏.*|.*enjoy.*/i)))
-              ) && (
-                <div className="lyrics-scroll-area" ref={scrollAreaRef}>
+              <div className="lyrics-main-column">
+                <div
+                  className={`lyrics-quick-actions${lyricsQuickBarDismissed ? ' lyrics-quick-actions--hidden' : ''}`}
+                >
+                  <div className="lyrics-quick-actions__inner">
+                    <span className="lyrics-quick-actions__prompt">{t('lyrics.quickFixPrompt')}</span>
+                    <button
+                      type="button"
+                      className="lyrics-quick-actions__button"
+                      onClick={() => openLyricsCandidatePicker()}
+                    >
+                      {t('lyrics.quickPickManual')}
+                    </button>
+                    <button
+                      type="button"
+                      className="lyrics-quick-actions__button"
+                      disabled={config.lyricsHidden}
+                      title={config.lyricsHidden ? t('lyrics.desktopLyricsHint') : undefined}
+                      onClick={() => {
+                        if (config.lyricsHidden) return
+                        if (isCurrentTrackLyricsTemporarilyHidden) {
+                          setTemporarilyHiddenLyricsTrackPath('')
+                          setLyricsQuickBarDismissed(false)
+                          setLyricsQuickBarActivityAt(Date.now())
+                          return
+                        }
+                        setLyricsQuickBarDismissed(true)
+                        setTemporarilyHiddenLyricsTrackPath(currentTrackPath)
+                      }}
+                    >
+                      {isCurrentTrackLyricsTemporarilyHidden
+                        ? t('lyrics.quickShowForTrack')
+                        : t('lyrics.quickHideForTrack')}
+                    </button>
+                  </div>
+                </div>
+
+                {!isLyricsListHidden && (
+                  <div className="lyrics-scroll-area" ref={scrollAreaRef}>
                   {lyrics.length > 0 ? (
                     lyrics.map((line, idx) => (
                       <div
@@ -9870,8 +10073,9 @@ export default function App() {
                       )}
                     </div>
                   )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
 
               {mvId && config.enableMV && !config.mvAsBackground && (
                 <div ref={mvContainerRef} className="mv-container glass-panel">
@@ -10467,6 +10671,39 @@ export default function App() {
                 >
                   {config.useEQ ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
                 </button>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <h3>{t('settings.gaplessTitle')}</h3>
+                  <p>{t('settings.gaplessDesc')}</p>
+                </div>
+                <button
+                  className={`toggle-btn ${config.gaplessEnabled ? 'active' : ''}`}
+                  onClick={() =>
+                    setConfig((prev) => ({ ...prev, gaplessEnabled: !prev.gaplessEnabled }))
+                  }
+                >
+                  {config.gaplessEnabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+                </button>
+              </div>
+
+              <div className="setting-row">
+                <div className="setting-info">
+                  <h3>{t('settings.prevButtonModeTitle')}</h3>
+                  <p>{t('settings.prevButtonModeDesc')}</p>
+                </div>
+                <div className="settings-chip-row">
+                  {['playlist', 'history'].map((mode) => (
+                    <button
+                      key={mode}
+                      className={`list-filter-chip ${config.prevButtonMode === mode ? 'active' : ''}`}
+                      onClick={() => setConfig((prev) => ({ ...prev, prevButtonMode: mode }))}
+                    >
+                      {t(`settings.prevButtonMode${mode.charAt(0).toUpperCase() + mode.slice(1)}`)}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="setting-row">
@@ -13045,6 +13282,161 @@ export default function App() {
               position: 'fixed',
               ...(() => {
                 const mw = 220
+                const mh = 320
+                let left = trackContextMenu.clientX
+                let top = trackContextMenu.clientY
+                const iw = typeof window !== 'undefined' ? window.innerWidth : 800
+                const ih = typeof window !== 'undefined' ? window.innerHeight : 600
+                if (left + mw > iw - 8) left = iw - mw - 8
+                if (top + mh > ih - 8) top = ih - mh - 8
+                return { left: Math.max(8, left), top: Math.max(8, top) }
+              })(),
+              zIndex: 20052
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {(() => {
+              const track = trackContextMenu.track
+              const info = parseTrackInfo(track, trackMetaMap[track?.path] || null)
+              const inUpNext = upNextPathSet.has(track?.path)
+              const trackLine = [info?.title || stripExtension(track?.name || ''), info?.artist]
+                .filter(Boolean)
+                .join(' - ')
+              const removeLabel =
+                listMode === 'playlists' && selectedUserPlaylistId
+                  ? t('contextMenu.removeFromPlaylist')
+                  : t('contextMenu.removeFromQueue')
+              const handleRemove = () => {
+                if (listMode === 'playlists' && selectedUserPlaylistId) {
+                  removePathFromUserPlaylist(selectedUserPlaylistId, track.path)
+                } else {
+                  removeTrackFromMainPlaylist(track.path)
+                }
+                closeTrackContextMenuAnimated()
+              }
+              return (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={() => {
+                      openAddToPlaylistAtPoint(
+                        trackContextMenu.clientX,
+                        trackContextMenu.clientY,
+                        track
+                      )
+                    }}
+                  >
+                    <Plus size={14} aria-hidden /> {t('contextMenu.addToPlaylist')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={() => {
+                      if (inUpNext) {
+                        removeFromUpNextQueue(track.path)
+                      } else {
+                        enqueueUpNextTrack(track)
+                      }
+                      closeTrackContextMenuAnimated()
+                    }}
+                  >
+                    <SkipForward size={14} aria-hidden />{' '}
+                    {inUpNext ? t('contextMenu.removeFromUpNext') : t('contextMenu.playNext')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={handleRemove}
+                  >
+                    <Minus size={14} aria-hidden /> {removeLabel}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={async () => {
+                      await revealTrackInFolder(track)
+                      closeTrackContextMenuAnimated()
+                    }}
+                  >
+                    <FolderOpen size={14} aria-hidden /> {t('contextMenu.showInFolder')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={async () => {
+                      await writeTextToClipboard(track.path || '')
+                      closeTrackContextMenuAnimated()
+                    }}
+                  >
+                    <Copy size={14} aria-hidden /> {t('contextMenu.copyPath')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={async () => {
+                      await openTrackWithDefaultApp(track)
+                      closeTrackContextMenuAnimated()
+                    }}
+                  >
+                    <AppWindow size={14} aria-hidden /> {t('contextMenu.openWithDefaultApp')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={async () => {
+                      await writeTextToClipboard(trackLine)
+                      closeTrackContextMenuAnimated()
+                    }}
+                  >
+                    <Copy size={14} aria-hidden /> {t('contextMenu.copyTrackLine')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={async () => {
+                      await handleCopyTrackCardImage(track)
+                      closeTrackContextMenuAnimated()
+                    }}
+                  >
+                    <Image size={14} aria-hidden /> {t('contextMenu.copyTrackImage')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={async () => {
+                      await handleSaveTrackCardImage(track)
+                      closeTrackContextMenuAnimated()
+                    }}
+                  >
+                    <Download size={14} aria-hidden /> {t('contextMenu.saveTrackImage')}
+                  </button>
+                </>
+              )
+            })()}
+          </div>,
+          document.body
+        )}
+      {groupContextMenu &&
+        createPortal(
+          <div
+            ref={groupContextMenuRef}
+            className={`track-ctx-menu-portal${groupCtxVisualOpen ? ' track-ctx-menu-portal--open' : ''}`}
+            role="menu"
+            aria-label={t('aria.groupContextMenu')}
+            style={{
+              position: 'fixed',
+              ...(() => {
+                const mw = 220
                 const mh = 220
                 let left = groupContextMenu.clientX
                 let top = groupContextMenu.clientY
@@ -13056,7 +13448,7 @@ export default function App() {
               })(),
               zIndex: 20052
             }}
-            onContextMenu={(e) => e.preventDefault()}
+              onContextMenu={(e) => e.preventDefault()}
           >
             {(() => {
               const type = groupContextMenu.type

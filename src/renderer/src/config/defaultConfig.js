@@ -59,6 +59,10 @@ export const DEFAULT_CONFIG = {
   audioOutputBufferProfile: 'balanced',
   audioDeviceId: '',
   audioExclusive: false,
+  /** 上一首按钮行为：playlist = 列表上一首（默认），history = 上一首听的歌 */
+  prevButtonMode: 'playlist',
+  /** Gapless playback — 无缝播放，默认关闭。开启后与交叉淡入淡出互斥 */
+  gaplessEnabled: false,
   crossfadeEnabled: true,
   crossfadeDuration: 3,
   sleepTimerEnabled: false,

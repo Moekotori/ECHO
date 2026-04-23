@@ -123,8 +123,14 @@ export class AudioEngine {
     this._fileDsdRate = 0
     this._onTrackEnded = null
     this._fadeInterval = null
+    this._userVolume = 1.0   // 用户设定的目标音量，fade 不覆盖这个值
     this._useNativeBridge = isNativeBridgeAvailable()
     this.vstBridge = new VstBridge()
+    /** Gapless playback */
+    this._gaplessEnabled = false
+    this._nextTrackPb = null     // prebuffer state for next track
+    this._activeChannels = 2     // channels used by current bridge stream
+    this._onGaplessTrackChanged = null
 
     if (this._useNativeBridge) {
       console.log('[AudioEngine] Native bridge available — HiFi mode enabled')
@@ -135,6 +141,192 @@ export class AudioEngine {
 
   onTrackEnded(fn) {
     this._onTrackEnded = fn
+  }
+
+  onGaplessTrackChanged(fn) {
+    this._onGaplessTrackChanged = fn
+  }
+
+  setGapless(enabled) {
+    this._gaplessEnabled = !!enabled
+    logLine(`[AudioEngine] Gapless: ${this._gaplessEnabled ? 'enabled' : 'disabled'}`)
+  }
+
+  /**
+   * Begin pre-decoding the next track into memory so it's ready for a
+   * zero-gap transition when the current track ends.
+   * Safe to call while playing; cancels any previous prebuffer.
+   */
+  prebufferNextTrack(filePath) {
+    this._cancelPrebuffer()
+    if (!filePath || !this._gaplessEnabled || !this._useNativeBridge) return
+
+    const pb = {
+      path: filePath,
+      chunks: [],
+      totalBytes: 0,
+      bufferedSeconds: 0,
+      done: false,
+      info: null,
+      targetSampleRate: this._outputSampleRate || 44100,
+      channels: this._activeChannels || 2,
+      ffmpegCmd: null
+    }
+    this._nextTrackPb = pb
+
+    const MAX_PREBUFFER_BYTES = 12 * 1024 * 1024 // ~6s of 44.1kHz stereo float32
+
+    this._getFileInfo(filePath)
+      .then((info) => {
+        if (this._nextTrackPb !== pb) return
+        pb.info = info
+        const fileSampleRate = info.sampleRate || 44100
+        const channels = Math.max(1, Math.min(2, info.channels || 2))
+        pb.channels = channels
+        const bytesPerSec = pb.targetSampleRate * channels * 4
+
+        const filters = []
+        if (fileSampleRate !== pb.targetSampleRate) {
+          filters.push(`aresample=${pb.targetSampleRate}`)
+        }
+
+        const cmd = ffmpeg(filePath)
+          .seekInput(0)
+          .format('f32le')
+          .audioChannels(channels)
+          .audioFrequency(pb.targetSampleRate)
+        if (filters.length > 0) cmd.audioFilters(filters)
+        pb.ffmpegCmd = cmd
+
+        const stream = cmd.pipe()
+        stream.on('data', (chunk) => {
+          if (this._nextTrackPb !== pb) { stream.destroy(); return }
+          pb.chunks.push(Buffer.from(chunk))
+          pb.totalBytes += chunk.byteLength
+          pb.bufferedSeconds = pb.totalBytes / bytesPerSec
+          if (pb.totalBytes >= MAX_PREBUFFER_BYTES) stream.destroy()
+        })
+        stream.on('end', () => {
+          if (this._nextTrackPb === pb) {
+            pb.done = true
+            logLine(`[AudioEngine] Gapless prebuffer done (full): ${filePath}`)
+          }
+        })
+        stream.on('close', () => {
+          if (this._nextTrackPb === pb && !pb.done) {
+            logLine(`[AudioEngine] Gapless prebuffer ready (${pb.bufferedSeconds.toFixed(1)}s): ${filePath}`)
+          }
+        })
+        stream.on('error', (e) => {
+          if (!e.message?.includes('SIGKILL')) {
+            console.warn('[AudioEngine] Gapless prebuffer error:', e.message)
+          }
+          if (this._nextTrackPb === pb) this._nextTrackPb = null
+        })
+      })
+      .catch((e) => {
+        console.warn('[AudioEngine] Gapless prebuffer getFileInfo failed:', e.message)
+        if (this._nextTrackPb === pb) this._nextTrackPb = null
+      })
+  }
+
+  _cancelPrebuffer() {
+    const pb = this._nextTrackPb
+    this._nextTrackPb = null
+    if (pb?.ffmpegCmd) {
+      try { pb.ffmpegCmd.kill('SIGKILL') } catch { /* ignore */ }
+    }
+  }
+
+  /**
+   * Called when current track's processor finishes in gapless mode.
+   * If prebuffer is ready and format matches, transitions without stopping bridge.
+   */
+  _handleGaplessTransition(endedFilePath) {
+    if (this.currentFilePath !== endedFilePath || !this.isPlaying) return
+
+    const pb = this._nextTrackPb
+    const sink = this._outputSink
+    const bridge = this._bridge
+
+    // Fallback to normal end if conditions aren't met
+    if (
+      !pb ||
+      !pb.info ||
+      pb.chunks.length === 0 ||
+      !sink ||
+      !bridge ||
+      pb.targetSampleRate !== this._outputSampleRate ||
+      pb.channels !== this._activeChannels
+    ) {
+      this.isPlaying = false
+      if (this._onTrackEnded) this._onTrackEnded()
+      return
+    }
+
+    this._nextTrackPb = null
+
+    // Kill old processor + ffmpeg (they're done, but clean up refs)
+    if (this.processor) {
+      try { this.processor.destroy() } catch { /* ignore */ }
+      this.processor = null
+    }
+    if (this.ffmpegProcess) {
+      try { this.ffmpegProcess.kill('SIGKILL') } catch { /* ignore */ }
+      this.ffmpegProcess = null
+    }
+
+    // Update track metadata
+    const nextPath = pb.path
+    this.currentFilePath = nextPath
+    this.playbackTime = 0
+    this._fileSampleRate = pb.info.sampleRate || 44100
+    this._fileBitsPerSample = pb.info.bitsPerSample || 16
+    this._fileCodec = pb.info.codec || 'unknown'
+    this._fileIsDSD = !!pb.info.isDSD
+    this._fileDsdRate = pb.info.isDSD ? pb.info.sampleRate : 0
+
+    // Reset bridge position counter for correct time display
+    bridge.resetForGapless(0, this.playbackRate)
+
+    // Create fresh processor for next track
+    const newProcessor = new AudioProcessor({
+      engine: this,
+      targetSampleRate: pb.targetSampleRate,
+      channels: pb.channels,
+      playbackRate: this.playbackRate,
+      startTime: 0
+    })
+    this.processor = newProcessor
+
+    // Keep bridge open: pipe with { end: false } and hook next transition
+    newProcessor.pipe(sink, { end: false })
+    newProcessor.once('finish', () => this._handleGaplessTransition(nextPath))
+
+    // Flush prebuffered chunks first (covers FFmpeg startup time)
+    for (const chunk of pb.chunks) {
+      if (!newProcessor.destroyed) newProcessor.write(chunk)
+    }
+
+    // Start fresh FFmpeg for remainder of track
+    if (!pb.done) {
+      const seekTo = Math.max(0, pb.bufferedSeconds - 0.1) // slight overlap to avoid click
+      this._setupFFmpeg(
+        nextPath,
+        seekTo,
+        this.playbackRate,
+        pb.channels,
+        pb.info.sampleRate || 44100,
+        pb.targetSampleRate
+      )
+      this.ffmpegProcess.pipe(newProcessor)
+      logLine(`[AudioEngine] Gapless transition OK: streaming ${nextPath} from ${seekTo.toFixed(2)}s`)
+    } else {
+      logLine(`[AudioEngine] Gapless transition OK: fully buffered ${nextPath}`)
+    }
+
+    // Notify renderer to advance track display without restarting audio
+    if (this._onGaplessTrackChanged) this._onGaplessTrackChanged(nextPath)
   }
 
   getMediaInfo(uri) {
@@ -284,6 +476,7 @@ export class AudioEngine {
     this._playLocked = true
 
     try {
+      this._cancelPrebuffer()
       await this._releaseResources()
 
       if (/^https?:\/\//i.test(filePath)) filePath = normalizeStreamUri(filePath)
@@ -373,6 +566,7 @@ export class AudioEngine {
         this._bridge = bridge
         this._outputSink = bridge.writable
         this._eqProcessor = createEqFloatProcessor(this.eqConfig, targetSampleRate, channels)
+        this._activeChannels = channels
       } else {
         return this._playLegacy(
           filePath,
@@ -407,6 +601,10 @@ export class AudioEngine {
       // 【绝对安全隔离】：Native 核心管道同样加锁，仅开启时使用 vstBridge
       if (this.vstBridge && this.vstBridge.enabled) {
         this.vstBridge.pipe(this.processor, this._outputSink, targetSampleRate, channels)
+      } else if (this._gaplessEnabled) {
+        // Gapless: keep bridge writable open when processor ends
+        this.processor.pipe(this._outputSink, { end: false })
+        this.processor.once('finish', () => this._handleGaplessTransition(filePath))
       } else {
         this.processor.pipe(this._outputSink)
       }
@@ -500,10 +698,11 @@ export class AudioEngine {
   }
 
   setVolume(vol) {
+    this._userVolume = vol
     this.volume = vol
   }
   getVolume() {
-    return this.volume
+    return this._userVolume
   }
 
   startFadeOut(durationMs, onComplete) {
@@ -532,8 +731,9 @@ export class AudioEngine {
   startFadeIn(durationMs) {
     this._clearFadeInterval()
     const totalMs = Math.max(0, Number(durationMs) || 0)
+    const targetVol = this._userVolume ?? 1.0
     if (totalMs <= 0) {
-      this.volume = 1.0
+      this.volume = targetVol
       return
     }
 
@@ -542,17 +742,17 @@ export class AudioEngine {
     this._fadeInterval = setInterval(() => {
       const elapsed = Date.now() - startAt
       const progress = Math.min(1, elapsed / totalMs)
-      this.volume = Math.min(1, progress)
+      this.volume = Math.min(targetVol, targetVol * progress)
       if (progress >= 1) {
         this._clearFadeInterval()
-        this.volume = 1.0
+        this.volume = targetVol
       }
     }, 50)
   }
 
   cancelFade() {
     this._clearFadeInterval()
-    this.volume = 1.0
+    this.volume = this._userVolume ?? 1.0
   }
 
   async setPlaybackRate(rate) {
@@ -581,6 +781,7 @@ export class AudioEngine {
   }
 
   async stop() {
+    this._cancelPrebuffer()
     this.cancelFade()
     this.isPlaying = false
     await this._releaseResources()

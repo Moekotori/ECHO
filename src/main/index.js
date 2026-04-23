@@ -2929,6 +2929,25 @@ app.whenReady().then(async () => {
     }
   })
 
+  // Gapless: notify renderer when track changes without interruption
+  audioEngine.onGaplessTrackChanged((nextPath) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('audio:gapless-track-changed', nextPath)
+    }
+  })
+
+  ipcMain.handle('audio:setGapless', (_, enabled) => {
+    audioEngine.setGapless(enabled)
+  })
+
+  ipcMain.handle('audio:prebufferNext', (_, filePath) => {
+    audioEngine.prebufferNextTrack(filePath)
+  })
+
+  ipcMain.handle('audio:cancelPrebuffer', () => {
+    audioEngine._cancelPrebuffer()
+  })
+
   // 定时推送播放状态到渲染进程 (200ms 间隔)
   setInterval(() => {
     broadcastAudioStatus(audioEngine.getStatus())

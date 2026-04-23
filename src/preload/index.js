@@ -187,6 +187,15 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on(channel, handler)
     return () => ipcRenderer.removeListener(channel, handler)
   },
+  setAudioGapless: (enabled) => ipcRenderer.invoke('audio:setGapless', enabled),
+  audioPrebufferNext: (filePath) => ipcRenderer.invoke('audio:prebufferNext', filePath),
+  audioCancelPrebuffer: () => ipcRenderer.invoke('audio:cancelPrebuffer'),
+  onGaplessTrackChanged: (callback) => {
+    const channel = 'audio:gapless-track-changed'
+    const handler = (_, nextPath) => callback(nextPath)
+    ipcRenderer.on(channel, handler)
+    return () => ipcRenderer.removeListener(channel, handler)
+  },
   onPlayerCmd: (cb) => {
     const channel = 'player:cmd'
     const handler = (_, cmd) => cb(cmd)

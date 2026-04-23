@@ -340,6 +340,17 @@ export class NativeAudioBridge {
   }
 
   /**
+   * Reset position tracking for gapless track transition.
+   * Called when a new track starts on the same open bridge stream.
+   */
+  resetForGapless(startTime = 0, playbackRate = 1.0) {
+    this._framesConsumed = 0
+    this._startTime = startTime
+    this._playbackRate = playbackRate
+    this._ended = false
+  }
+
+  /**
    * Stop the child process and clean up.
    */
   stop() {
