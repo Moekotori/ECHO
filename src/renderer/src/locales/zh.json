@@ -11,6 +11,7 @@
   "aria": {
     "close": "关闭",
     "playlistLibraryOptions": "歌单库选项",
+    "exportPlaylist": "导出播放列表",
     "renamePlaylist": "重命名歌单",
     "deletePlaylist": "删除歌单",
     "addToPlaylist": "添加到歌单",
@@ -117,6 +118,8 @@
     "more": "更多",
     "importLibrary": "导入…",
     "exportAll": "全部导出…",
+    "exportM3U": "导出为 M3U",
+    "exportText": "导出TXT",
     "newNamePlaceholder": "新歌单名称…",
     "create": "创建",
     "albumsHeading": "专辑",
@@ -276,6 +279,8 @@
     "exclusiveMode": "WASAPI 独占模式",
     "exclusiveDesc": "绕过 Windows 混音器，实现 Bit-Perfect 输出。源文件采样率将被保留（如 192 kHz）。启用后其他应用将静音。",
     "exclusiveWaiting": "独占模式将在下一首曲目开始时生效。",
+    "exclusiveStartupReset": "启动软件时关闭独占模式",
+    "exclusiveStartupResetDesc": "默认开启。关闭后，ECHO 重启时会保留你上次的 WASAPI 独占状态。",
     "bufferProfile": "缓冲区配置",
     "bufferHint": "若独占模式下出现爆音或卡顿，请尝试提高缓冲区大小。",
     "bufferProfiles": {

@@ -135,6 +135,13 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
     }))
   }, [setConfig])
 
+  const handleExclusiveStartupSwitch = useCallback(() => {
+    setConfig((prev) => ({
+      ...prev,
+      audioExclusiveResetOnStartup: !(prev.audioExclusiveResetOnStartup !== false)
+    }))
+  }, [setConfig])
+
   const handleBufferProfileChange = useCallback(
     (prof) => {
       setConfig((prev) => ({
@@ -368,6 +375,31 @@ export default function AudioSettingsDrawer({ open, onClose, audioDevices, confi
                 )}
               </p>
             )}
+            <div className="audio-drawer-exclusive-row" style={{ marginTop: 10 }}>
+              <div className="audio-drawer-exclusive-label">
+                <span className="audio-drawer-section-label">
+                  {t(
+                    'settings.exclusiveStartupReset',
+                    'Turn off exclusive mode on app startup'
+                  )}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={config?.audioExclusiveResetOnStartup !== false}
+                className={`lyrics-drawer-switch ${config?.audioExclusiveResetOnStartup !== false ? 'on' : ''}`}
+                onClick={handleExclusiveStartupSwitch}
+              >
+                <span className="lyrics-drawer-switch-thumb" />
+              </button>
+            </div>
+            <p className="audio-drawer-hint">
+              {t(
+                'settings.exclusiveStartupResetDesc',
+                'Enabled by default. Turn this off if you want WASAPI exclusive mode to stay on after restarting ECHO.'
+              )}
+            </p>
           </div>
 
           {/* Buffer Profile */}

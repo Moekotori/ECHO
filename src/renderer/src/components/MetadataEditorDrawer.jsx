@@ -8,6 +8,19 @@ function normalizeNumberDraft(value) {
   return Number.isFinite(n) && n > 0 ? String(n) : ''
 }
 
+async function readImageAsDataUrl(filePath) {
+  const href = window.api?.pathToFileURL?.(filePath)
+  if (!href) throw new Error('Failed to preview selected image')
+  const response = await fetch(href)
+  const blob = await response.blob()
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('Failed to preview selected image'))
+    reader.readAsDataURL(blob)
+  })
+}
+
 export default function MetadataEditorDrawer({
   open,
   onClose,
@@ -15,19 +28,23 @@ export default function MetadataEditorDrawer({
   initialMetadata,
   onSave
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const [title, setTitle] = useState('')
   const [artist, setArtist] = useState('')
   const [album, setAlbum] = useState('')
   const [albumArtist, setAlbumArtist] = useState('')
   const [trackNo, setTrackNo] = useState('')
-  const [discNo, setDiscNo] = useState('')
+  const [year, setYear] = useState('')
+  const [genre, setGenre] = useState('')
   const [coverPath, setCoverPath] = useState('')
+  const [coverPreview, setCoverPreview] = useState('')
+  const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     if (!open) {
+      setLoading(false)
       setBusy(false)
       setError('')
       return
@@ -38,10 +55,12 @@ export default function MetadataEditorDrawer({
     setAlbum(initialMetadata?.album || '')
     setAlbumArtist(initialMetadata?.albumArtist || '')
     setTrackNo(normalizeNumberDraft(initialMetadata?.trackNo))
-    setDiscNo(normalizeNumberDraft(initialMetadata?.discNo))
+    setYear(normalizeNumberDraft(initialMetadata?.year))
+    setGenre(initialMetadata?.genre || '')
     setCoverPath('')
+    setCoverPreview(initialMetadata?.cover || '')
     setError('')
-  }, [open, initialMetadata])
+  }, [open, track?.path])
 
   useEffect(() => {
     if (!open) return
@@ -52,16 +71,46 @@ export default function MetadataEditorDrawer({
     return () => window.removeEventListener('keydown', onKey)
   }, [busy, onClose, open])
 
-  const loc = useMemo(() => {
-    if (i18n.language.startsWith('zh')) return 'zh'
-    if (i18n.language.startsWith('ja')) return 'ja'
-    return 'en'
-  }, [i18n.language])
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadTags() {
+      if (!open || !track?.path || !window.api?.readTags) return
+      setLoading(true)
+      setError('')
+      try {
+        const response = await window.api.readTags(track.path)
+        if (cancelled) return
+        if (!response || response.error) {
+          throw new Error(response?.error || 'Failed to read tags')
+        }
+        setTitle(String(response.title || initialMetadata?.title || ''))
+        setArtist(String(response.artist || initialMetadata?.artist || ''))
+        setAlbum(String(response.album || initialMetadata?.album || ''))
+        setAlbumArtist(String(response.albumArtist || initialMetadata?.albumArtist || ''))
+        setTrackNo(normalizeNumberDraft(response.trackNumber || initialMetadata?.trackNo))
+        setYear(normalizeNumberDraft(response.year || initialMetadata?.year))
+        setGenre(String(response.genre || initialMetadata?.genre || ''))
+        setCoverPreview(String(response.coverDataUrl || initialMetadata?.cover || ''))
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || String(err))
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    loadTags()
+    return () => {
+      cancelled = true
+    }
+  }, [open, track?.path])
 
   const displayCover = useMemo(() => {
-    if (coverPath) return window.api?.pathToFileURL?.(coverPath) || ''
-    return initialMetadata?.cover || ''
-  }, [coverPath, initialMetadata?.cover])
+    if (coverPath) return window.api?.pathToFileURL?.(coverPath) || coverPreview || ''
+    return coverPreview || initialMetadata?.cover || ''
+  }, [coverPath, coverPreview, initialMetadata?.cover])
 
   const selectedCoverName = useMemo(() => {
     const source = coverPath || ''
@@ -70,9 +119,10 @@ export default function MetadataEditorDrawer({
 
   const handleChooseCover = async () => {
     try {
-      const picked = await window.api?.openImageHandler?.(loc)
+      const picked = await window.api?.selectImageFile?.()
       if (picked) {
         setCoverPath(picked)
+        setCoverPreview(await readImageAsDataUrl(picked))
         setError('')
       }
     } catch (err) {
@@ -92,8 +142,10 @@ export default function MetadataEditorDrawer({
         album,
         albumArtist,
         trackNo,
-        discNo,
-        coverPath: coverPath || null
+        year,
+        genre,
+        coverPath: coverPath || null,
+        cover: coverPreview || null
       })
       onClose()
     } catch (err) {
@@ -158,7 +210,7 @@ export default function MetadataEditorDrawer({
                 type="button"
                 className="export-btn metadata-drawer-cover-btn"
                 onClick={handleChooseCover}
-                disabled={busy}
+                disabled={busy || loading}
               >
                 <ImagePlus size={16} />
                 {coverPath
@@ -180,31 +232,44 @@ export default function MetadataEditorDrawer({
             </div>
           </div>
 
+          {loading ? (
+            <div className="metadata-drawer-cover-note">
+              {t('metadataEditor.loading', 'Loading tags...')}
+            </div>
+          ) : null}
           {error ? <div className="metadata-drawer-error">{error}</div> : null}
 
           <div className="metadata-drawer-grid">
             <label className="metadata-drawer-field">
               <span>{t('metadataEditor.fields.title', 'Title')}</span>
-              <input value={title} onChange={(event) => setTitle(event.target.value)} disabled={busy} />
+              <input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                disabled={busy || loading}
+              />
             </label>
             <label className="metadata-drawer-field">
               <span>{t('metadataEditor.fields.artist', 'Artist')}</span>
               <input
                 value={artist}
                 onChange={(event) => setArtist(event.target.value)}
-                disabled={busy}
+                disabled={busy || loading}
               />
             </label>
             <label className="metadata-drawer-field">
               <span>{t('metadataEditor.fields.album', 'Album')}</span>
-              <input value={album} onChange={(event) => setAlbum(event.target.value)} disabled={busy} />
+              <input
+                value={album}
+                onChange={(event) => setAlbum(event.target.value)}
+                disabled={busy || loading}
+              />
             </label>
             <label className="metadata-drawer-field">
               <span>{t('metadataEditor.fields.albumArtist', 'Album artist')}</span>
               <input
                 value={albumArtist}
                 onChange={(event) => setAlbumArtist(event.target.value)}
-                disabled={busy}
+                disabled={busy || loading}
               />
             </label>
             <label className="metadata-drawer-field">
@@ -213,16 +278,24 @@ export default function MetadataEditorDrawer({
                 inputMode="numeric"
                 value={trackNo}
                 onChange={(event) => setTrackNo(event.target.value.replace(/[^\d]/g, ''))}
-                disabled={busy}
+                disabled={busy || loading}
               />
             </label>
             <label className="metadata-drawer-field">
-              <span>{t('metadataEditor.fields.discNo', 'Disc #')}</span>
+              <span>{t('metadataEditor.fields.year', 'Year')}</span>
               <input
                 inputMode="numeric"
-                value={discNo}
-                onChange={(event) => setDiscNo(event.target.value.replace(/[^\d]/g, ''))}
-                disabled={busy}
+                value={year}
+                onChange={(event) => setYear(event.target.value.replace(/[^\d]/g, ''))}
+                disabled={busy || loading}
+              />
+            </label>
+            <label className="metadata-drawer-field" style={{ gridColumn: '1 / -1' }}>
+              <span>{t('metadataEditor.fields.genre', 'Genre')}</span>
+              <input
+                value={genre}
+                onChange={(event) => setGenre(event.target.value)}
+                disabled={busy || loading}
               />
             </label>
           </div>
@@ -238,9 +311,14 @@ export default function MetadataEditorDrawer({
             <button type="button" className="export-btn secondary" onClick={onClose} disabled={busy}>
               {t('metadataEditor.cancel', 'Cancel')}
             </button>
-            <button type="button" className="export-btn" onClick={handleSubmit} disabled={busy}>
+            <button
+              type="button"
+              className="export-btn"
+              onClick={handleSubmit}
+              disabled={busy || loading}
+            >
               {busy ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}
-              {busy ? t('metadataEditor.saving', 'Saving…') : t('metadataEditor.save', 'Save tags')}
+              {busy ? t('metadataEditor.saving', 'Saving...') : t('metadataEditor.save', 'Save tags')}
             </button>
           </div>
         </div>

@@ -1,0 +1,507 @@
+/**
+ * echo-track-list.css  v3
+ * ECHO 风格精修 — 原生桌面 App Shell 版
+ *  - 主面板去大圆角
+ *  - 歌曲行新 grid（badges 内嵌于歌曲信息区）
+ *  - 紧凑队列空状态（~58px 横向排版）
+ *  - 底部播放器原生底栏样式
+ *  - 轻量滚动条
+ *
+ * 不破坏现有播放逻辑、虚拟列表、metadata loading。
+ * 所有颜色通过 echo-tokens.css CSS variables。
+ */
+
+/* ══════════════════════════════════════════════════════
+   § 0  主面板 / App Shell — 去大圆角
+   ══════════════════════════════════════════════════════ */
+
+/* 浏览器面板（右侧主内容区）去掉大圆角 + 过重阴影 */
+.sidebar.browser-panel,
+.sidebar.browser-panel.glass-panel {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  border-left: 1px solid rgba(15, 23, 42, 0.06) !important;
+  border-top: none !important;
+  border-right: none !important;
+  border-bottom: none !important;
+}
+
+/* 底部播放器 — 原生底栏 */
+.bottom-player-bar {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: rgba(255, 255, 255, 0.90) !important;
+  backdrop-filter: blur(20px) saturate(1.4) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(1.4) !important;
+  border-top: 1px solid var(--echo-border, rgba(15, 23, 42, 0.08)) !important;
+}
+
+/* 歌词/MV 模式下底栏变为浮动毛玻璃胶囊 */
+.bottom-player-bar.bottom-player-bar--lyrics {
+  height: 56px !important;
+  min-height: 56px !important;
+  border-radius: 28px !important;
+
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%) !important;
+  width: calc(100vw - 80px) !important;
+  bottom: 20px !important;
+
+  /* 毛玻璃：白色半透明 + 纯模糊，不改变背景颜色 */
+  background: rgba(255, 255, 255, 0.18) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.25) !important;
+  box-shadow: none !important;
+  animation: none !important;
+
+  padding: 0 24px !important;
+}
+
+/* 歌词模式下隐藏左侧封面+信息（顶部已有，无需重复） */
+.bottom-player-bar.bottom-player-bar--lyrics .bottom-bar-left {
+  display: none !important;
+}
+
+/* Time labels: white on dark */
+.bottom-player-bar.bottom-player-bar--lyrics .bottom-bar-time {
+  color: rgba(255, 255, 255, 0.75) !important;
+  text-shadow: none !important;
+}
+
+/* Transport buttons: ghost white on dark, compact size */
+.bottom-player-bar.bottom-player-bar--lyrics .btn--transport {
+  width: 32px !important;
+  height: 32px !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.bottom-player-bar.bottom-player-bar--lyrics .btn--transport:hover {
+  background: rgba(255, 255, 255, 0.22) !important;
+}
+
+/* Play button: compact size, keep accent color */
+.bottom-player-bar.bottom-player-bar--lyrics .btn.play-btn {
+  width: 44px !important;
+  height: 44px !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35) !important;
+}
+
+/* Progress row: tighter gaps to fit 68px height */
+.bottom-player-bar.bottom-player-bar--lyrics .bottom-bar-progress {
+  gap: 6px !important;
+}
+
+.bottom-player-bar.bottom-player-bar--lyrics .bottom-bar-center {
+  gap: 2px !important;
+}
+
+/* 左侧曲目信息区稍宽，避免拥挤 */
+.bottom-bar-left {
+  width: min(42vw, 480px) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   § 1  歌曲行 — Grid 布局（badges 内嵌于信息区）
+   ══════════════════════════════════════════════════════
+
+  新列顺序：
+    [封面 48px]  [歌曲信息 1fr]  [时长 56px]  [按钮 auto]
+  AudioQualityBadges 已移入 .track-text-group 内部的 .track-meta-pills
+*/
+.track-item {
+  display: grid !important;
+  grid-template-columns:
+    48px
+    minmax(0, 1fr)
+    56px
+    auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 68px;
+  padding: 0 10px 0 8px !important;
+  margin-bottom: 2px !important;
+  border-radius: 8px;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    transform 100ms ease;
+}
+
+/* 封面 — 统一 48px */
+.track-art {
+  position: relative;
+  width: 48px !important;
+  height: 48px !important;
+  flex: none !important;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.track-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+/* 歌曲信息区 */
+.track-text-group {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* 歌名 — 必须 ellipsis */
+.track-name {
+  display: flex !important;
+  align-items: center;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--echo-text-primary, #111827);
+  line-height: 1.4;
+}
+
+/* artist · album — ellipsis */
+.track-subtitle {
+  font-size: 11.5px;
+  color: var(--echo-text-secondary, #667085);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+
+/* badges + trackNo 行 */
+.track-meta-pills {
+  display: flex !important;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+/* 轨道号 pill */
+.track-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  background: var(--quality-codec-bg, rgba(15, 23, 42, 0.05));
+  color: var(--echo-text-tertiary, #98a2b3);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 时长列 */
+.track-row-meta {
+  flex: none !important;
+  width: 56px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 0 !important;
+  color: var(--echo-text-tertiary, #98a2b3) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 右侧按钮组 */
+.track-add-pl-wrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* 废弃旧的独立音质列（保留 class 不崩溃，但折叠） */
+.track-quality-col {
+  display: none !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   § 2  hover / selected / playing 状态
+   ══════════════════════════════════════════════════════ */
+
+.track-item:hover {
+  background: var(--echo-row-hover-bg, rgba(255, 255, 255, 0.72)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 4px 12px -10px rgba(0, 0, 0, 0.15) !important;
+}
+
+.track-item.active {
+  background: var(--echo-active-bg, rgba(244, 222, 217, 0.62)) !important;
+  border-color: var(--echo-active-border, rgba(220, 170, 160, 0.42)) !important;
+  box-shadow:
+    inset 3px 0 0 0 var(--theme-primary, #8fa0bb),
+    inset 0 1px 0 rgba(255, 255, 255, 0.48) !important;
+  transform: translateX(0) !important;
+}
+
+.track-item.active .track-name {
+  color: var(--echo-active-text, #1f2937);
+}
+
+/* 播放中脉冲动画点 */
+.track-playing-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--echo-playing-indicator, var(--theme-primary, #8fa0bb));
+  margin-right: 5px;
+  flex-shrink: 0;
+  animation: echoPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes echoPulse {
+  0%, 100% { opacity: 1;    transform: scale(1);   }
+  50%       { opacity: 0.40; transform: scale(0.65); }
+}
+
+/* 播放中封面蒙版 */
+.track-art--playing::after {
+  content: '▶';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(0, 0, 0, 0.34);
+  border-radius: inherit;
+}
+
+/* ══════════════════════════════════════════════════════
+   § 3  AudioQualityBadges 徽章系统
+   ══════════════════════════════════════════════════════ */
+
+.aq-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 3px;
+}
+
+.aq-badges--compact {
+  gap: 3px;
+}
+
+/* player variant — 底部播放器用稍大尺寸 */
+.aq-badges--player .aq-badge {
+  height: 18px;
+  font-size: 10.5px;
+  padding: 0 7px;
+}
+
+/* ─── badge 基础 ─── */
+.aq-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  transition: opacity 120ms ease;
+}
+
+/* codec 普通 */
+.aq-badge--codec {
+  background: var(--quality-codec-bg, rgba(15, 23, 42, 0.05));
+  color:      var(--quality-codec-text, #667085);
+  border-color: rgba(15, 23, 42, 0.07);
+}
+
+/* codec 无损格式 */
+.aq-badge--lossless-codec {
+  background: var(--quality-lossless-bg, rgba(143, 160, 187, 0.14));
+  color:      var(--quality-lossless-text, #8fa0bb);
+  border-color: var(--theme-accent-border, rgba(143, 160, 187, 0.24));
+}
+
+/* Hi-Res */
+.aq-badge--hires {
+  background: var(--quality-hires-bg, rgba(143, 160, 187, 0.24));
+  color:      var(--quality-hires-text, var(--theme-primary, #8fa0bb));
+  border-color: var(--theme-accent-border, rgba(143, 160, 187, 0.30));
+  font-weight: 800;
+}
+
+/* Lossless — 弱强调 */
+.aq-badge--lossless {
+  background: var(--quality-lossless-bg, rgba(143, 160, 187, 0.14));
+  color:      var(--quality-lossless-text, var(--theme-primary, #8fa0bb));
+  border-color: var(--theme-accent-border, rgba(143, 160, 187, 0.22));
+}
+
+/* 技术参数（bitDepth/sampleRate 合并） */
+.aq-badge--tech {
+  background: var(--quality-tech-bg, rgba(15, 23, 42, 0.04));
+  color:      var(--quality-tech-text, #98a2b3);
+  border-color: rgba(15, 23, 42, 0.05);
+}
+
+/* 比特率 — 最弱 */
+.aq-badge--bitrate {
+  background: transparent;
+  color:      var(--quality-tech-text, #b0bac8);
+  border-color: rgba(15, 23, 42, 0.06);
+}
+
+/* 声道 */
+.aq-badge--channels {
+  background: transparent;
+  color:      var(--quality-tech-text, #b0bac8);
+  border-color: rgba(15, 23, 42, 0.05);
+}
+
+/* ══════════════════════════════════════════════════════
+   § 4  轻量滚动条（hover 时才可见）
+   ══════════════════════════════════════════════════════ */
+
+.playlist-virtual-list::-webkit-scrollbar,
+.queue-preview-list::-webkit-scrollbar {
+  width: 3px;
+}
+.playlist-virtual-list::-webkit-scrollbar-track,
+.queue-preview-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.playlist-virtual-list::-webkit-scrollbar-thumb,
+.queue-preview-list::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  transition: background 200ms;
+}
+/* 容器 hover 时才显示滚动条 */
+.playlist-virtual-list:hover::-webkit-scrollbar-thumb,
+.queue-preview-list:hover::-webkit-scrollbar-thumb {
+  background: var(--echo-scrollbar-thumb, rgba(143, 160, 187, 0.38));
+}
+.playlist-virtual-list::-webkit-scrollbar-thumb:hover,
+.queue-preview-list::-webkit-scrollbar-thumb:hover {
+  background: var(--echo-scrollbar-thumb-hover, rgba(143, 160, 187, 0.60));
+}
+
+.playlist-virtual-list,
+.queue-preview-list {
+  scrollbar-width: thin;
+  scrollbar-color:
+    var(--echo-scrollbar-thumb, rgba(143, 160, 187, 0.25))
+    transparent;
+}
+
+/* ══════════════════════════════════════════════════════
+   § 5  队列区域样式 — 暂时隐藏，逻辑保留
+   ══════════════════════════════════════════════════════ */
+
+/* queue-filter-row 已从 JSX 注释掉，下面样式保留供恢复 */
+.queue-filter-row {
+  display: none !important; /* 暂时隐藏 */
+}
+
+/* ══════════════════════════════════════════════════════
+   § 6  底部播放器 AudioQualityBadges — 亮色适配
+   ══════════════════════════════════════════════════════ */
+
+.bottom-player-bar .aq-badges--player .aq-badge--codec {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--echo-text-secondary, #667085);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+.bottom-player-bar .aq-badges--player .aq-badge--lossless-codec,
+.bottom-player-bar .aq-badges--player .aq-badge--lossless {
+  background: var(--quality-lossless-bg, rgba(143, 160, 187, 0.14));
+  color: var(--quality-lossless-text, #8fa0bb);
+  border-color: var(--theme-accent-border, rgba(143, 160, 187, 0.24));
+}
+.bottom-player-bar .aq-badges--player .aq-badge--hires {
+  background: var(--quality-hires-bg, rgba(143, 160, 187, 0.22));
+  color: var(--quality-hires-text, var(--theme-primary, #8fa0bb));
+  border-color: var(--theme-accent-border, rgba(143, 160, 187, 0.28));
+}
+.bottom-player-bar .aq-badges--player .aq-badge--tech,
+.bottom-player-bar .aq-badges--player .aq-badge--bitrate,
+.bottom-player-bar .aq-badges--player .aq-badge--channels {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--echo-text-tertiary, #98a2b3);
+  border-color: rgba(15, 23, 42, 0.05);
+}
+
+/* BPM pill */
+.echo-bpm-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--echo-text-tertiary, #98a2b3);
+  border: 1px solid rgba(15, 23, 42, 0.05);
+}
+
+/* ══════════════════════════════════════════════════════
+   § 7  顶部区域精修 — 消除截断感，形成连续 header
+   ══════════════════════════════════════════════════════ */
+
+/*
+  结构：
+    .sidebar.browser-panel
+      .browser-topbar-actions   ← PageTitle + ToolbarGroup
+      .search-container         ← 搜索框
+      .sidebar-list-stack
+        .list-filter-bar        ← 歌曲/专辑/文件夹 tabs + heart
+        <TrackList>
+*/
+
+/* 顶部栏：标题 + 工具按钮紧凑同行 */
+.browser-topbar-actions {
+  padding: 14px 24px 10px !important;
+  min-height: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-shrink: 0 !important;
+}
+
+.browser-topbar-title {
+  font-size: 17px !important;
+  font-weight: 700 !important;
+  color: var(--echo-text-primary, #111827) !important;
+  letter-spacing: -0.01em;
+}
+
+/* 工具按钮组：轻边框 pill，不要过重 */
+.br

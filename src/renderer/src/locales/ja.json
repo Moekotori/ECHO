@@ -11,6 +11,7 @@
   "aria": {
     "close": "閉じる",
     "playlistLibraryOptions": "プレイリスト一覧のオプション",
+    "exportPlaylist": "プレイリストを書き出し",
     "renamePlaylist": "プレイリスト名を変更",
     "deletePlaylist": "プレイリストを削除",
     "addToPlaylist": "プレイリストに追加",
@@ -167,6 +168,8 @@
     "more": "その他",
     "importLibrary": "読み込み…",
     "exportAll": "すべて書き出し…",
+    "exportM3U": "M3U として書き出し",
+    "exportText": "TXT 書き出し",
     "newNamePlaceholder": "新しいプレイリスト名…",
     "create": "作成",
     "albumsHeading": "アルバム",

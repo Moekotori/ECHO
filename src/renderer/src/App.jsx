@@ -18,6 +18,7 @@ import {
   SkipForward,
   SkipBack,
   Download,
+  Disc,
   Music,
   X,
   Square,
@@ -64,7 +65,10 @@ import {
   Blocks,
   Headphones,
   History,
-  GripVertical
+  GripVertical,
+  Tag,
+  SlidersHorizontal,
+  RotateCcw
 } from 'lucide-react'
 import {
   DndContext,
@@ -88,6 +92,7 @@ import ListenTogetherDrawer from './components/ListenTogetherDrawer'
 import LyricsCandidatePicker from './components/LyricsCandidatePicker'
 import MetadataEditorDrawer from './components/MetadataEditorDrawer'
 import { UiButton } from './components/ui'
+import AudioQualityBadges from './components/AudioQualityBadges'
 import { parseAnyLyrics } from './utils/lyricsParse'
 import { pickLyricsFromLrcLibResult, rankLrcLibCandidates } from './utils/lyricsCandidateRank'
 import {
@@ -183,6 +188,94 @@ const MAX_LRCLIB_CACHE_ENTRIES = 40
 const MAX_SHARE_CARD_COVER_CHARS = 600000
 const CLOUD_COVER_RESOLUTION = '600x600bb'
 
+function normalizeCoverLookupText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+function normalizeNeteaseCoverUrl(url) {
+  const cleanUrl = String(url || '').trim()
+  if (!cleanUrl) return null
+  return `${cleanUrl.replace(/\?.*$/, '')}?param=600y600`
+}
+
+function normalizeItunesCoverUrl(url) {
+  const cleanUrl = String(url || '').trim()
+  if (!cleanUrl) return null
+  return cleanUrl.replace(/100x100bb(\.[a-z0-9]+)$/i, `${CLOUD_COVER_RESOLUTION}$1`)
+}
+
+function scoreCoverCandidate(candidate, title, artist, album) {
+  const wantedTitle = normalizeCoverLookupText(title)
+  const wantedArtist = normalizeCoverLookupText(artist)
+  const wantedAlbum = normalizeCoverLookupText(album)
+  const candidateTitle = normalizeCoverLookupText(candidate?.name)
+  const candidateArtist = normalizeCoverLookupText(candidate?.artists || candidate?.artist)
+  const candidateAlbum = normalizeCoverLookupText(candidate?.album)
+
+  if (!wantedTitle || !candidateTitle) return 0
+  if (
+    candidateTitle !== wantedTitle &&
+    !candidateTitle.includes(wantedTitle) &&
+    !wantedTitle.includes(candidateTitle)
+  ) {
+    return 0
+  }
+
+  let score = candidateTitle === wantedTitle ? 8 : 5
+  if (wantedArtist && candidateArtist) {
+    if (candidateArtist === wantedArtist) score += 4
+    else if (candidateArtist.includes(wantedArtist) || wantedArtist.includes(candidateArtist)) score += 2
+  }
+  if (wantedAlbum && candidateAlbum) {
+    if (candidateAlbum === wantedAlbum) score += 3
+    else if (candidateAlbum.includes(wantedAlbum) || wantedAlbum.includes(candidateAlbum)) score += 1
+  }
+  return score
+}
+
+function pickBestCoverCandidate(items, title, artist, album) {
+  return (items || [])
+    .filter((item) => item?.cover || item?.picUrl)
+    .map((item) => ({ item, score: scoreCoverCandidate(item, title, artist, album) }))
+    .filter((entry) => entry.score >= 5)
+    .sort((a, b) => b.score - a.score)[0]?.item
+}
+
+function pickBestAlbumCoverCandidate(items, album, artist) {
+  const wantedAlbum = normalizeCoverLookupText(album)
+  const wantedArtist = normalizeCoverLookupText(artist)
+  if (!wantedAlbum) return null
+
+  return (items || [])
+    .filter((item) => item?.picUrl || item?.cover)
+    .map((item) => {
+      const candidateAlbum = normalizeCoverLookupText(item?.name || item?.album)
+      const candidateArtist = normalizeCoverLookupText(item?.artist || item?.artists)
+      if (
+        !candidateAlbum ||
+        (candidateAlbum !== wantedAlbum &&
+          !candidateAlbum.includes(wantedAlbum) &&
+          !wantedAlbum.includes(candidateAlbum))
+      ) {
+        return { item, score: 0 }
+      }
+
+      let score = candidateAlbum === wantedAlbum ? 8 : 5
+      if (wantedArtist && candidateArtist) {
+        if (candidateArtist === wantedArtist) score += 4
+        else if (candidateArtist.includes(wantedArtist) || wantedArtist.includes(candidateArtist)) {
+          score += 2
+        }
+      }
+      return { item, score }
+    })
+    .filter((entry) => entry.score >= 5)
+    .sort((a, b) => b.score - a.score)[0]?.item
+}
+
 function getInitialAppStateValue(key) {
   try {
     if (typeof window === 'undefined' || !window.api?.getInitialAppStateValue) return null
@@ -222,6 +315,56 @@ function queueDragTransformToString(transform) {
   const scaleX = Number.isFinite(transform.scaleX) ? transform.scaleX : 1
   const scaleY = Number.isFinite(transform.scaleY) ? transform.scaleY : 1
   return `translate3d(${x}px, ${y}px, 0) scaleX(${scaleX}) scaleY(${scaleY})`
+}
+
+function getPathBasename(filePath) {
+  return String(filePath || '').split(/[\\/]/).pop() || ''
+}
+
+function getPathDirname(filePath) {
+  const normalized = String(filePath || '')
+  const idx = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'))
+  return idx >= 0 ? normalized.slice(0, idx) : ''
+}
+
+function isAbsolutePlaylistPath(value) {
+  const path = String(value || '').trim()
+  return (
+    /^[a-zA-Z]:[\\/]/.test(path) ||
+    path.startsWith('\\\\') ||
+    path.startsWith('/') ||
+    /^https?:\/\//i.test(path)
+  )
+}
+
+function resolvePlaylistEntryPath(entry, playlistFilePath) {
+  const raw = String(entry || '').trim()
+  if (!raw) return ''
+  if (/^file:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw)
+      const decoded = decodeURIComponent(url.pathname || '')
+      if (url.host) return `\\\\${url.host}${decoded.replace(/\//g, '\\')}`
+      return decoded.replace(/^\/([a-zA-Z]:)/, '$1').replace(/\//g, '\\')
+    } catch {
+      return raw
+    }
+  }
+  if (isAbsolutePlaylistPath(raw)) return raw
+  const baseDir = getPathDirname(playlistFilePath)
+  if (!baseDir) return raw
+  const separator = baseDir.includes('\\') ? '\\' : '/'
+  return `${baseDir.replace(/[\\/]+$/, '')}${separator}${raw.replace(/^[\\/]+/, '')}`
+}
+
+function parseM3UPlaylist(content, filePath) {
+  const paths = []
+  for (const rawLine of String(content || '').split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) continue
+    paths.push(resolvePlaylistEntryPath(line, filePath))
+  }
+  return [...new Set(paths.filter(Boolean))]
 }
 
 const UpNextQueueSortableItem = memo(function UpNextQueueSortableItem({
@@ -644,7 +787,17 @@ const SETTINGS_SECTION_KEYWORDS = {
     '\u30a2\u30c3\u30d7\u30c7\u30fc\u30c8',
     '\u958b\u767a'
   ],
-  danger: ['reset', 'danger', 'clear', '\u91cd\u7f6e', '\u5371\u9669', '\u30ea\u30bb\u30c3\u30c8']
+  danger: ['reset', 'danger', 'clear', '\u91cd\u7f6e', '\u5371\u9669', '\u30ea\u30bb\u30c3\u30c8'],
+  lastfm: [
+    'last.fm',
+    'lastfm',
+    'scrobble',
+    'scrobbling',
+    '\u6b4c\u66f2\u8bb0\u5f55',
+    '\u542c\u6b4c\u5386\u53f2',
+    '\u6b4c\u66f2\u5206\u4eab',
+    '\u30b9\u30af\u30ed\u30d6\u30eb'
+  ]
 }
 
 function formatSleepTimerRemaining(ms) {
@@ -973,6 +1126,82 @@ const AlbumSidebarCard = memo(function AlbumSidebarCard({
   )
 })
 
+/** Last.fm 登录表单（设置页内嵌） */
+function LastFmLoginForm({ onLogin }) {
+  const [username, setUsername] = React.useState('')
+  const [password, setPassword] = React.useState('')
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState('')
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    if (!username.trim() || !password) {
+      setError('请输入用户名和密码')
+      return
+    }
+    if (!window.api?.lastfm?.login) {
+      setError('Last.fm 登录接口不可用，请重启应用后再试')
+      return
+    }
+    setLoading(true)
+    try {
+      const timeoutResult = new Promise((resolve) => {
+        window.setTimeout(() => {
+          resolve({ ok: false, error: '连接超时，请稍后再试' })
+        }, 10000)
+      })
+      const result = await Promise.race([
+        window.api.lastfm.login(username.trim(), password),
+        timeoutResult
+      ])
+      if (result?.ok) {
+        onLogin?.(result.sessionKey, result.username)
+      } else {
+        setError(result?.error || '登录失败，请检查用户名和密码')
+      }
+    } catch (err) {
+      setError('网络错误，请稍后重试')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <form className="lastfm-login-form" onSubmit={handleSubmit}>
+      <div className="setting-row lastfm-login-heading">
+        <div className="setting-info" style={{ maxWidth: 'none' }}>
+          <h3>连接 Last.fm</h3>
+          <p>登录后自动记录听歌历史（Scrobble）</p>
+        </div>
+      </div>
+      <div className="lastfm-login-grid">
+        <input
+          className="settings-text-input"
+          type="text"
+          placeholder="Last.fm 用户名"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          autoComplete="username"
+          disabled={loading}
+        />
+        <input
+          className="settings-text-input"
+          type="password"
+          placeholder="密码"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          disabled={loading}
+        />
+        <button className="lastfm-submit-btn" type="submit" disabled={loading}>
+          {loading ? '登录中...' : '登录'}
+        </button>
+      </div>
+      {error ? <p className="lastfm-error">{error}</p> : null}
+    </form>
+  )
+}
 export default function App() {
   const { t } = useTranslation()
   const [appVersion, setAppVersion] = useState('')
@@ -1036,6 +1265,7 @@ export default function App() {
   const [sleepTimerEndMs, setSleepTimerEndMs] = useState(null)
   const [sleepTimerNowMs, setSleepTimerNowMs] = useState(Date.now())
   const [coverUrl, setCoverUrl] = useState(null)
+  const [failedDisplayCoverUrl, setFailedDisplayCoverUrl] = useState(null)
   const crossfadeStateRef = useRef({
     active: false,
     sourcePath: '',
@@ -1055,6 +1285,8 @@ export default function App() {
   const progressSeekValueRef = useRef(0)
   const [isSpeedDragging, setIsSpeedDragging] = useState(false)
   const [isVolumeDragging, setIsVolumeDragging] = useState(false)
+  const [speedPopoverOpen, setSpeedPopoverOpen] = useState(false)
+  const [deckPopoverOpen, setDeckPopoverOpen] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [lyricsRenderTime, setLyricsRenderTime] = useState(0)
@@ -1064,6 +1296,25 @@ export default function App() {
   useEffect(() => {
     isSeekingRef.current = isSeeking
   }, [isSeeking])
+
+  useEffect(() => {
+    if (!speedPopoverOpen) return
+    const close = (e) => {
+      if (!e.target.closest('.speed-popover')) setSpeedPopoverOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [speedPopoverOpen])
+
+  useEffect(() => {
+    if (!deckPopoverOpen) return
+    const close = (e) => {
+      if (!e.target.closest('.deck-popover') && !e.target.closest('.deck-popover-trigger'))
+        setDeckPopoverOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [deckPopoverOpen])
 
   useEffect(() => {
     if (window.api?.getAppVersion) {
@@ -1100,6 +1351,7 @@ export default function App() {
   const [shareCardSnapshot, setShareCardSnapshot] = useState(null)
   const trackLoadSeqRef = useRef(0)
   const cloudCoverFetchSeqRef = useRef(0)
+  const coverFailureFetchKeyRef = useRef('')
   const trackSwitchCountRef = useRef(0)
 
   // MV State
@@ -1303,6 +1555,9 @@ export default function App() {
   const playbackSessionRestoreAttemptedRef = useRef(false)
   const pendingTrackStartRef = useRef(null)
   const lastLoadedTrackPathRef = useRef('')
+  const trackStartedAtRef = useRef(null)
+  const scrobbledRef = useRef(false)
+  const lastLastFmTrackPathRef = useRef('')
   const historyNavigationRef = useRef(false)
   const lastHistoryTrackedPathRef = useRef('')
   const lastStatsTrackedPathRef = useRef('')
@@ -1374,7 +1629,8 @@ export default function App() {
       aesthetics: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.aesthetics),
       media: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.media),
       about: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.about),
-      danger: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.danger)
+      danger: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.danger),
+      lastfm: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.lastfm)
     }
   }, [settingsQuery])
   const settingsHasResults = Object.values(settingsSectionVisibility).some(Boolean)
@@ -1392,6 +1648,12 @@ export default function App() {
         icon: Link,
         label: t('settings.nav.integrations'),
         id: 'settings-sec-integrations'
+      },
+      {
+        key: 'lastfm',
+        icon: Radio,
+        label: 'Last.fm',
+        id: 'settings-sec-lastfm'
       },
       { key: 'eq', icon: Sliders, label: t('settings.nav.eq'), id: 'settings-sec-eq' },
       {
@@ -2195,12 +2457,25 @@ export default function App() {
   useEffect(() => {
     if (!libraryStateReady || startupExclusiveResetRef.current) return
     startupExclusiveResetRef.current = true
+    if (config.audioExclusiveResetOnStartup === false) return
     setIsAudioExclusive(false)
     if (window.api?.setAudioExclusive) {
       void window.api.setAudioExclusive(false)
     }
     setConfig((prev) => (prev.audioExclusive === false ? prev : { ...prev, audioExclusive: false }))
-  }, [libraryStateReady])
+  }, [libraryStateReady, config.audioExclusiveResetOnStartup])
+
+  useEffect(() => {
+    if (!libraryStateReady) return
+    if (config.lastfmEnabled && config.lastfmSessionKey && window.api?.lastfm) {
+      void window.api.lastfm.setSession(config.lastfmSessionKey, config.lastfmUsername || '')
+    }
+  }, [
+    libraryStateReady,
+    config.lastfmEnabled,
+    config.lastfmSessionKey,
+    config.lastfmUsername
+  ])
 
   useEffect(() => {
     const snapshotHistory = getInitialAppStateValue('playbackHistory')
@@ -2724,6 +2999,30 @@ export default function App() {
   ])
 
   useEffect(() => {
+    if (!config.lastfmEnabled || !config.lastfmSessionKey || scrobbledRef.current) return
+    const track = playlist[currentIndex]
+    if (!track || !window.api?.lastfm?.scrobble) return
+    const info = track.info || {}
+    const dur = Number(info.duration) || 0
+    if (currentTime >= 30 && (dur <= 0 || currentTime >= dur * 0.5)) {
+      scrobbledRef.current = true
+      void window.api.lastfm.scrobble(
+        info.artist || '',
+        info.title || '',
+        info.album || '',
+        trackStartedAtRef.current || Date.now(),
+        dur
+      )
+    }
+  }, [
+    currentTime,
+    currentIndex,
+    config.lastfmEnabled,
+    config.lastfmSessionKey,
+    playlist
+  ])
+
+  useEffect(() => {
     if (!libraryStateReady || !playbackSessionRestoreReady || isSeeking || currentIndex < 0) return
     persistPlaybackSession(getPlaybackSessionSnapshot(), true)
   }, [
@@ -2967,6 +3266,12 @@ export default function App() {
   useEffect(() => {
     if (currentIndex >= 0 && playlist[currentIndex]) {
       const track = playlist[currentIndex]
+      const isNewLastFmTrack = lastLastFmTrackPathRef.current !== track.path
+      if (isNewLastFmTrack) {
+        lastLastFmTrackPathRef.current = track.path
+        trackStartedAtRef.current = Date.now()
+        scrobbledRef.current = false
+      }
       const pendingSession = pendingTrackStartRef.current
       const restoreStartTime =
         pendingSession?.trackPath === track.path
@@ -3051,8 +3356,25 @@ export default function App() {
         mvOriginUrl: track.mvOriginUrl,
         hasLyrics: track.hasLyrics === true
       })
+
+      if (
+        isNewLastFmTrack &&
+        config.lastfmEnabled &&
+        config.lastfmSessionKey &&
+        window.api?.lastfm
+      ) {
+        const info = track.info || {}
+        void window.api.lastfm.nowPlaying(
+          info.artist || '',
+          info.title || '',
+          info.album || '',
+          Number(info.duration) || 0
+        )
+      }
+    } else {
+      lastLastFmTrackPathRef.current = ''
     }
-  }, [currentIndex, isPlaying, playlist])
+  }, [currentIndex, isPlaying, playlist, config.lastfmEnabled, config.lastfmSessionKey])
 
   useEffect(() => {
     if (window.api?.getAudioDevices) {
@@ -3231,9 +3553,20 @@ export default function App() {
 
   useEffect(() => {
     if (showLyrics && !config.lyricsHidden && activeLyricIndex !== -1 && scrollAreaRef.current) {
+      const scrollArea = scrollAreaRef.current
       const activeElement = scrollAreaRef.current.querySelector('.lyric-line.active')
       if (activeElement) {
-        activeElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        const areaRect = scrollArea.getBoundingClientRect()
+        const activeRect = activeElement.getBoundingClientRect()
+        const targetTop =
+          scrollArea.scrollTop +
+          (activeRect.top - areaRect.top) -
+          scrollArea.clientHeight / 2 +
+          activeRect.height / 2
+        scrollArea.scrollTo({
+          top: Math.max(0, targetTop),
+          behavior: 'smooth'
+        })
       }
     }
   }, [activeLyricIndex, showLyrics, config.lyricsHidden])
@@ -4397,7 +4730,9 @@ export default function App() {
     const requestSeq = trackLoadSeqRef.current + 1
     trackLoadSeqRef.current = requestSeq
     cloudCoverFetchSeqRef.current += 1
+    coverFailureFetchKeyRef.current = ''
     setCoverUrl(null)
+    setFailedDisplayCoverUrl(null)
     setShareCardSnapshot(null)
     setMetadata({
       title: '',
@@ -4463,7 +4798,7 @@ export default function App() {
         if (common.cover) {
           setCoverUrl(common.cover)
         } else {
-          fetchCloudCover(resolvedTitle, resolvedArtist, requestSeq)
+          fetchCloudCover(resolvedTitle, resolvedArtist, requestSeq, { album: common.album || '' })
         }
 
         fetchLyrics(filePath, resolvedTitle, resolvedArtist, {
@@ -4560,23 +4895,78 @@ export default function App() {
 
   const handleSaveTrackMetadata = useCallback(
     async (draft) => {
-      if (!draft?.path || !window.api?.updateExtendedMetadataHandler) return
-      const response = await window.api.updateExtendedMetadataHandler(draft)
-      if (!response?.success) {
+      if (!draft?.path || !window.api?.writeTags) return
+
+      const activeTrack = playlistRef.current[currentIndexRef.current] || null
+      const isEditingActiveTrack = activeTrack?.path === draft.path
+      const wasPlayingBeforeSave = isEditingActiveTrack ? !!isPlaying : false
+      const savedPlaybackTime = isEditingActiveTrack
+        ? Math.max(
+            0,
+            Number(
+              useNativeEngineRef.current
+                ? currentTimeRef.current
+                : audioRef.current?.currentTime ?? currentTimeRef.current
+            ) || 0
+          )
+        : 0
+
+      if (isEditingActiveTrack) {
+        try {
+          if (useNativeEngineRef.current && window.api?.stopAudio) {
+            await window.api.stopAudio()
+          }
+        } catch {
+          /* best effort release */
+        }
+
+        try {
+          if (audioRef.current) {
+            audioRef.current.pause()
+            audioRef.current.removeAttribute('src')
+            audioRef.current.src = ''
+            audioRef.current.load()
+          }
+        } catch {
+          /* best effort release */
+        }
+
+        await wait(120)
+      }
+
+      const response = await window.api.writeTags(
+        draft.path,
+        {
+          title: draft.title,
+          artist: draft.artist,
+          albumArtist: draft.albumArtist,
+          album: draft.album,
+          trackNumber: draft.trackNo,
+          year: draft.year,
+          genre: draft.genre
+        },
+        draft.coverPath || null
+      )
+      if (!response?.ok) {
         throw new Error(response?.error || t('metadataEditor.saveFailed', 'Failed to save tags'))
       }
 
-      const common = response.common || {}
-      const technical = response.technical || {}
+      const title = String(draft.title || '').trim()
+      const artist = String(draft.artist || '').trim()
+      const album = String(draft.album || '').trim()
+      const albumArtist = String(draft.albumArtist || '').trim()
+      const genre = String(draft.genre || '').trim()
+      const trackNo = Number.parseInt(String(draft.trackNo || ''), 10)
+      const year = Number.parseInt(String(draft.year || ''), 10)
       const nextMetaEntry = {
-        title: common.title || null,
-        artist: common.artist || null,
-        album: common.album || null,
-        albumArtist: common.albumArtist || null,
-        trackNo: common.trackNo ?? null,
-        discNo: common.discNo ?? null,
-        cover: common.cover || null,
-        duration: technical.duration || null,
+        title: title || null,
+        artist: artist || null,
+        album: album || null,
+        albumArtist: albumArtist || null,
+        trackNo: Number.isFinite(trackNo) && trackNo > 0 ? trackNo : null,
+        year: Number.isFinite(year) && year > 0 ? year : null,
+        genre: genre || null,
+        cover: draft.cover || null,
         coverChecked: true
       }
 
@@ -4585,24 +4975,63 @@ export default function App() {
         [draft.path]: nextMetaEntry
       }))
 
-      const activeTrack = playlistRef.current[currentIndexRef.current] || null
+      setPlaylist((prev) =>
+        prev.map((item) =>
+          item?.path === draft.path
+            ? {
+                ...item,
+                info: {
+                  ...(item.info || {}),
+                  ...(title ? { title } : {}),
+                  ...(artist ? { artist } : {}),
+                  ...(album ? { album } : {})
+                }
+              }
+            : item
+        )
+      )
+
       if (activeTrack?.path === draft.path) {
         setMetadata({
-          title: common.title || '',
-          artist: common.artist || '',
-          album: common.album || '',
-          albumArtist: common.albumArtist || '',
-          trackNo: common.trackNo ?? null,
-          discNo: common.discNo ?? null
+          title,
+          artist,
+          album,
+          albumArtist,
+          trackNo: Number.isFinite(trackNo) && trackNo > 0 ? trackNo : null,
+          discNo: null
         })
-        if (common.cover) setCoverUrl(common.cover)
+        if (draft.cover) setCoverUrl(draft.cover)
+
+        try {
+          if (audioRef.current) {
+            audioRef.current.src = localPathToAudioSrc(draft.path)
+            audioRef.current.load()
+            applyStartTimeToAudio(audioRef.current, savedPlaybackTime)
+          }
+
+          if (useNativeEngineRef.current && window.api?.playAudio) {
+            if (wasPlayingBeforeSave) {
+              audioRef.current?.play?.().catch(() => {})
+              await window.api.playAudio(draft.path, savedPlaybackTime, playbackRateRef.current)
+            } else {
+              await window.api.pauseAudio?.().catch(() => {})
+            }
+          } else if (audioRef.current && wasPlayingBeforeSave) {
+            await audioRef.current.play().catch(() => {})
+          }
+        } catch (restoreError) {
+          console.error('Failed to restore playback after tag save:', restoreError)
+        }
+
+        setCurrentTime(savedPlaybackTime)
+        setIsPlaying(wasPlayingBeforeSave)
         await loadTrackData(draft.path, {
           mvOriginUrl: activeTrack?.mvOriginUrl,
           hasLyrics: activeTrack?.hasLyrics === true
         })
       }
     },
-    [loadTrackData, t]
+    [isPlaying, loadTrackData]
   )
 
   const openQuickMetadataFieldEditor = useCallback(
@@ -4724,11 +5153,59 @@ export default function App() {
     [applyLibraryFolderDelta, t]
   )
 
-  const fetchCloudCover = async (title, artist, requestSeq = trackLoadSeqRef.current) => {
-    if (!title) return
+  const fetchCloudCover = async (
+    title,
+    artist,
+    requestSeq = trackLoadSeqRef.current,
+    options = {}
+  ) => {
+    const cleanTitle = String(title || '').trim()
+    const cleanArtist = String(artist || '').trim()
+    const rawAlbum = String(options.album || '').trim()
+    const cleanAlbum = /^unknown album$/i.test(rawAlbum) ? '' : rawAlbum
+    const excludedUrl = String(options.excludeUrl || '').trim()
+    if (!cleanTitle && !cleanAlbum) return
     const coverSeq = ++cloudCoverFetchSeqRef.current
+
+    const applyResolvedCover = (url) => {
+      const resolvedUrl = String(url || '').trim()
+      if (!resolvedUrl || resolvedUrl === excludedUrl) return false
+      if (trackLoadSeqRef.current !== requestSeq || cloudCoverFetchSeqRef.current !== coverSeq) {
+        return true
+      }
+      setFailedDisplayCoverUrl(null)
+      setCoverUrl(resolvedUrl)
+      return true
+    }
+
+    if (window.api?.neteaseSearch && cleanTitle) {
+      try {
+        const songs = await window.api.neteaseSearch(`${cleanTitle} ${cleanArtist}`.trim())
+        if (trackLoadSeqRef.current !== requestSeq || cloudCoverFetchSeqRef.current !== coverSeq) return
+        const bestSong = pickBestCoverCandidate(songs, cleanTitle, cleanArtist, cleanAlbum)
+        if (applyResolvedCover(normalizeNeteaseCoverUrl(bestSong?.cover))) return
+      } catch (e) {
+        console.warn('Netease cover fetch error:', e)
+      }
+    }
+
+    if (window.api?.neteaseSearchAlbum && cleanAlbum) {
+      try {
+        const albums = await window.api.neteaseSearchAlbum({
+          albumName: cleanAlbum,
+          artist: cleanArtist
+        })
+        if (trackLoadSeqRef.current !== requestSeq || cloudCoverFetchSeqRef.current !== coverSeq) return
+        const bestAlbum = pickBestAlbumCoverCandidate(albums, cleanAlbum, cleanArtist)
+        if (applyResolvedCover(normalizeNeteaseCoverUrl(bestAlbum?.picUrl))) return
+      } catch (e) {
+        console.warn('Netease album cover fetch error:', e)
+      }
+    }
+
+    if (!cleanTitle) return
     try {
-      const query = encodeURIComponent(`${title} ${artist || ''}`)
+      const query = encodeURIComponent(`${cleanTitle} ${cleanArtist}`.trim())
       const response = await fetch(
         `https://itunes.apple.com/search?term=${query}&entity=song&limit=1`
       )
@@ -4736,8 +5213,7 @@ export default function App() {
       const data = await response.json()
       if (data && data.results && data.results.length > 0) {
         const artwork = data.results[0].artworkUrl100
-        const optimized = artwork.replace('100x100bb.jpg', CLOUD_COVER_RESOLUTION)
-        setCoverUrl(optimized)
+        applyResolvedCover(normalizeItunesCoverUrl(artwork))
       }
     } catch (e) {
       console.error('Cloud cover fetch error:', e)
@@ -4807,6 +5283,34 @@ export default function App() {
       await processFiles(files)
     }
   }
+
+  const importM3UPlaylistFromText = useCallback(
+    async (content, filePath) => {
+      const paths = parseM3UPlaylist(content, filePath)
+      if (paths.length === 0) {
+        alert(t('playlists.noPlaylistsInFile'))
+        return false
+      }
+
+      const audioFiles = await window.api.getAudioFilesFromPaths(paths)
+      if (audioFiles && audioFiles.length > 0) {
+        await processFiles(audioFiles)
+      }
+
+      const name = getPathBasename(filePath).replace(/\.(m3u8?|txt)$/i, '') || 'M3U Playlist'
+      const importedPlaylist = {
+        id: crypto.randomUUID(),
+        name,
+        paths
+      }
+      setUserPlaylists((prev) => [...prev, importedPlaylist])
+      setSelectedSmartCollectionId(null)
+      setSelectedUserPlaylistId(importedPlaylist.id)
+      setListMode('playlists')
+      return true
+    },
+    [processFiles, t]
+  )
 
   const importSharedPlaylistsFromPayload = useCallback(
     async (sharedPlaylists) => {
@@ -5001,6 +5505,20 @@ export default function App() {
     [importSharedPlaylistsFromPayload]
   )
 
+  const handleDroppedM3UFiles = useCallback(
+    async (m3uPaths) => {
+      if (!Array.isArray(m3uPaths) || m3uPaths.length === 0) return false
+      let imported = false
+      for (const m3uPath of m3uPaths) {
+        const content = await window.api.readTextFileHandler(m3uPath)
+        if (!content) continue
+        imported = (await importM3UPlaylistFromText(content, m3uPath)) || imported
+      }
+      return imported
+    },
+    [importM3UPlaylistFromText]
+  )
+
   const handleDragOver = (e) => {
     e.preventDefault()
     e.stopPropagation()
@@ -5021,12 +5539,17 @@ export default function App() {
         .map((file) => file.path)
         .filter(Boolean)
       const jsonPaths = droppedPaths.filter((filePath) => filePath.toLowerCase().endsWith('.json'))
+      const m3uPaths = droppedPaths.filter((filePath) => /\.m3u8?$/i.test(filePath))
       const otherPaths = droppedPaths.filter(
-        (filePath) => !filePath.toLowerCase().endsWith('.json')
+        (filePath) => !filePath.toLowerCase().endsWith('.json') && !/\.m3u8?$/i.test(filePath)
       )
 
       if (jsonPaths.length > 0) {
         await handleDroppedJsonFiles(jsonPaths)
+      }
+
+      if (m3uPaths.length > 0) {
+        await handleDroppedM3UFiles(m3uPaths)
       }
 
       const audioFiles = await window.api.getAudioFilesFromPaths(otherPaths)
@@ -5049,6 +5572,8 @@ export default function App() {
     setDuration(0)
     setCurrentTime(0)
     setCoverUrl(null)
+    setFailedDisplayCoverUrl(null)
+    coverFailureFetchKeyRef.current = ''
     setLyricsSourceStatus({ kind: 'idle', detail: '', origin: '' })
     lastHistoryTrackedPathRef.current = ''
     pendingTrackStartRef.current = null
@@ -6066,13 +6591,30 @@ export default function App() {
     return coverUrl
   }, [lastCastStatus, currentDisplayOverride, coverUrl])
 
+  const displaySafeCoverUrl = useMemo(() => {
+    if (!displayMainCoverUrl) return null
+    return displayMainCoverUrl === failedDisplayCoverUrl ? null : displayMainCoverUrl
+  }, [displayMainCoverUrl, failedDisplayCoverUrl])
+
+  const handleDisplayCoverError = () => {
+    if (!displayMainCoverUrl) return
+    setFailedDisplayCoverUrl(displayMainCoverUrl)
+    const failureKey = [displayMainCoverUrl, displayMainTitle, displayMainArtist, displayMainAlbum].join('::')
+    if (coverFailureFetchKeyRef.current === failureKey) return
+    coverFailureFetchKeyRef.current = failureKey
+    fetchCloudCover(displayMainTitle, displayMainArtist, trackLoadSeqRef.current, {
+      album: displayMainAlbum,
+      excludeUrl: displayMainCoverUrl
+    })
+  }
+
   useEffect(() => {
-    if (!config.themeDynamicCoverColor || !displayMainCoverUrl) {
+    if (!config.themeDynamicCoverColor || !displaySafeCoverUrl) {
       setDynamicCoverTheme(null)
       return
     }
     let cancelled = false
-    extractAverageHexFromSrc(displayMainCoverUrl)
+    extractAverageHexFromSrc(displaySafeCoverUrl)
       .then((hex) => {
         if (cancelled) return
         if (hex) setDynamicCoverTheme(generatePaletteFromHex(hex))
@@ -6084,7 +6626,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [config.themeDynamicCoverColor, displayMainCoverUrl])
+  }, [config.themeDynamicCoverColor, displaySafeCoverUrl])
 
   const buildShareCardSnapshot = useCallback(
     (track) => {
@@ -6097,17 +6639,17 @@ export default function App() {
       const cover =
         info?.cover ||
         trackMetaMap?.[track.path]?.cover ||
-        (currentTrack?.path === track.path ? displayMainCoverUrl : null) ||
+        (currentTrack?.path === track.path ? displaySafeCoverUrl : null) ||
         null
       return {
         title,
         artist,
         album,
         cover:
-          typeof cover === 'string' && cover.length > MAX_SHARE_CARD_COVER_CHARS ? displayMainCoverUrl || null : cover
+          typeof cover === 'string' && cover.length > MAX_SHARE_CARD_COVER_CHARS ? displaySafeCoverUrl || null : cover
       }
     },
-    [trackMetaMap, currentTrack, displayMainCoverUrl, t]
+    [trackMetaMap, currentTrack, displaySafeCoverUrl, t]
   )
 
   const waitForShareCardPaint = useCallback(
@@ -6477,7 +7019,12 @@ export default function App() {
                 discNo: common.discNo ?? null,
                 cover: common.cover || null,
                 duration: technical.duration || null,
-                coverChecked: true
+                coverChecked: true,
+                codec: technical.codec || null,
+                bitrateKbps: technical.bitrate ? Math.round(technical.bitrate / 1000) : null,
+                sampleRateHz: technical.sampleRate || null,
+                bitDepth: technical.bitDepth || null,
+                channels: technical.channels || null
               }
             } else {
               loaded[track.path] = {
@@ -6489,7 +7036,12 @@ export default function App() {
                 discNo: null,
                 cover: null,
                 duration: null,
-                coverChecked: true
+                coverChecked: true,
+                codec: null,
+                bitrateKbps: null,
+                sampleRateHz: null,
+                bitDepth: null,
+                channels: null
               }
             }
           } catch (error) {
@@ -6502,7 +7054,12 @@ export default function App() {
               discNo: null,
               cover: null,
               duration: null,
-              coverChecked: true
+              coverChecked: true,
+              codec: null,
+              bitrateKbps: null,
+              sampleRateHz: null,
+              bitDepth: null,
+              channels: null
             }
           }
         })
@@ -7371,6 +7928,15 @@ export default function App() {
     if (listMode !== 'folders' || selectedFolder === 'all') return null
     return folderGroupsFiltered.find((folder) => folder.folderPath === selectedFolder) || null
   }, [folderGroupsFiltered, listMode, selectedFolder])
+
+  const showTrackList = useMemo(() => {
+    if (listMode === 'songs') return true
+    if (listMode === 'album' && selectedAlbum !== 'all') return true
+    if (listMode === 'folders' && selectedFolder !== 'all') return true
+    if (listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId)) return true
+    return false
+  }, [listMode, selectedAlbum, selectedFolder, selectedUserPlaylistId, selectedSmartCollectionId])
+
   const renameScopeLabel = useMemo(() => {
     if (listMode === 'playlists' && selectedUserPlaylist) return selectedUserPlaylist.name
     if (listMode === 'playlists' && selectedSmartCollection) return selectedSmartCollection.name
@@ -8120,6 +8686,75 @@ export default function App() {
     return next
   }, [playlist])
 
+  const buildM3UTrackFromPath = useCallback(
+    (trackPath) => {
+      if (!trackPath || typeof trackPath !== 'string') return null
+      const existingTrack = libraryTrackByPath[trackPath]
+      const fallbackName = trackPath.split(/[/\\]/).pop() || trackPath
+      const baseTrack = existingTrack || { path: trackPath, name: fallbackName }
+      return {
+        ...baseTrack,
+        path: trackPath,
+        info: parseTrackInfo(baseTrack, trackMetaMap[trackPath])
+      }
+    },
+    [libraryTrackByPath, trackMetaMap]
+  )
+
+  const exportUserPlaylistM3U = useCallback(
+    async (playlistId) => {
+      const pl = userPlaylists.find((p) => p.id === playlistId)
+      if (!pl) return
+      const tracks = (pl.paths || []).map(buildM3UTrackFromPath).filter((track) => track?.path)
+      const result = await window.api?.exportPlaylistM3U?.({
+        tracks,
+        suggestedName: pl.name || 'playlist'
+      })
+      if (result?.ok === false && !result.canceled && result.error) {
+        alert(t('playlists.exportFailed', { message: result.error }))
+      }
+    },
+    [buildM3UTrackFromPath, t, userPlaylists]
+  )
+
+  const exportUserPlaylistText = useCallback(
+    async (playlistToExport) => {
+      const pl =
+        typeof playlistToExport === 'string'
+          ? userPlaylists.find((item) => item.id === playlistToExport)
+          : playlistToExport
+      if (!pl) return
+      const tracks = (pl.paths || []).map(buildM3UTrackFromPath).filter((track) => track?.path)
+      if (!window.api?.exportPlaylistText) {
+        alert(t('playlists.exportFailed', { message: 'exportPlaylistText IPC is unavailable' }))
+        return
+      }
+      try {
+        const result = await window.api.exportPlaylistText({
+          tracks,
+          suggestedName: pl.name || 'playlist'
+        })
+        if (result?.ok === false && !result.canceled && result.error) {
+          alert(t('playlists.exportFailed', { message: result.error }))
+        }
+      } catch (error) {
+        alert(t('playlists.exportFailed', { message: error?.message || String(error) }))
+      }
+    },
+    [buildM3UTrackFromPath, t, userPlaylists]
+  )
+
+  const exportMainPlaylistM3U = useCallback(async () => {
+    const tracks = playlist.map((track) => buildM3UTrackFromPath(track?.path)).filter((track) => track?.path)
+    const result = await window.api?.exportPlaylistM3U?.({
+      tracks,
+      suggestedName: 'echo-playlist'
+    })
+    if (result?.ok === false && !result.canceled && result.error) {
+      alert(t('playlists.exportFailed', { message: result.error }))
+    }
+  }, [buildM3UTrackFromPath, playlist, t])
+
   const buildExportTrackFromPath = useCallback(
     async (trackPath) => {
       if (!trackPath || typeof trackPath !== 'string') return null
@@ -8189,13 +8824,19 @@ export default function App() {
   }, [exportNamedUserPlaylists, userPlaylists])
 
   const importUserPlaylists = useCallback(async () => {
-    const r = await window.api.openThemeJsonHandler(configRef.current.uiLocale)
+    const r = window.api?.openPlaylistFileHandler
+      ? await window.api.openPlaylistFileHandler()
+      : await window.api.openThemeJsonHandler(configRef.current.uiLocale)
     if (r?.error) {
       alert(r.error)
       return
     }
     if (!r?.content) return
     try {
+      if (/\.m3u8?$/i.test(r.path || '')) {
+        await importM3UPlaylistFromText(r.content, r.path)
+        return
+      }
       const data = JSON.parse(r.content)
       const imported = normalizeImportedPlaylists(data)
       if (!imported.length) {
@@ -8203,10 +8844,12 @@ export default function App() {
         return
       }
       setUserPlaylists((prev) => [...prev, ...imported])
+      setSelectedSmartCollectionId(null)
+      setSelectedUserPlaylistId(imported[imported.length - 1]?.id || null)
     } catch (e) {
       alert(e.message || String(e))
     }
-  }, [t])
+  }, [importM3UPlaylistFromText, t])
 
   const addAllLibraryVisibleToPlaylist = useCallback(() => {
     if (!selectedUserPlaylistId) return
@@ -8733,12 +9376,13 @@ export default function App() {
   }, [config.desktopLyricsEnabled, config.desktopLyricsLocked])
 
   return (
-    <div
-      className="app-container"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
+    <div className="app-root">
+      <div
+        className="app-container"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
       <div className="app-theme-backdrop" style={themeBackdropStyle} aria-hidden />
       {config.customBgPath && !config.themeCoverAsBackground && (
         <div
@@ -8757,7 +9401,7 @@ export default function App() {
           }}
         />
       )}
-      {config.themeCoverAsBackground && displayMainCoverUrl && (
+      {config.themeCoverAsBackground && displaySafeCoverUrl && (
         <div
           style={{
             position: 'fixed',
@@ -8765,7 +9409,7 @@ export default function App() {
             left: 0,
             width: '100vw',
             height: '100vh',
-            backgroundImage: `url("${displayMainCoverUrl.replace(/\\/g, '/')}")`,
+            backgroundImage: `url("${displaySafeCoverUrl.replace(/\\/g, '/')}")`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             filter: 'blur(20px)',
@@ -9165,39 +9809,112 @@ export default function App() {
         </div>
       </div>
 
+      {!showLyrics && view !== 'settings' && (
+        <nav className="nav-rail no-drag" aria-label="Library navigation">
+          <div className="nav-rail-logo">ECHO</div>
+          <div className="nav-rail-section">
+            <button
+              type="button"
+              className={`nav-rail-item ${listMode === 'songs' ? 'active' : ''}`}
+              onClick={() => handleListMode('songs')}
+            >
+              <Music size={16} /> {t('listMode.songs')}
+            </button>
+            <button
+              type="button"
+              className={`nav-rail-item ${listMode === 'album' ? 'active' : ''}`}
+              onClick={() => handleListMode('album')}
+            >
+              <Disc size={16} /> {t('listMode.albums')}
+            </button>
+            <button
+              type="button"
+              className={`nav-rail-item ${listMode === 'folders' ? 'active' : ''}`}
+              onClick={() => handleListMode('folders')}
+            >
+              <FolderOpen size={16} /> {t('listMode.folders')}
+            </button>
+            <button
+              type="button"
+              className={`nav-rail-item ${listMode === 'playlists' ? 'active' : ''}`}
+              onClick={() => handleListMode('playlists')}
+            >
+              <ListMusic size={16} /> {t('listMode.playlists')}
+            </button>
+          </div>
+          <div className="nav-rail-bottom">
+            <button
+              className={`nav-rail-icon-btn ${showLikedOnly ? 'active' : ''}`}
+              onClick={() => setShowLikedOnly((v) => !v)}
+              title={t('like.filterOnlyTitle')}
+              aria-pressed={showLikedOnly}
+            >
+              <Heart size={15} fill={showLikedOnly ? 'currentColor' : 'none'} strokeWidth={1.5} /> {t('like.filterOnlyTitle')}
+            </button>
+            <button className="nav-rail-icon-btn" onClick={handleImport} title={t('import.folder')}>
+              <FolderHeart size={15} /> {t('import.folder')}
+            </button>
+            <button
+              className="nav-rail-icon-btn"
+              onClick={handleImportFile}
+              title={t('import.files')}
+            >
+              <FileAudio size={15} /> {t('import.files')}
+            </button>
+            <button className="nav-rail-icon-btn" onClick={() => setView('settings')}>
+              <Settings size={15} /> {t('nav.settings', 'Settings')}
+            </button>
+          </div>
+        </nav>
+      )}
+
       <div
-        className={`sidebar glass-panel sidebar-panel-root no-drag ${showLyrics || view === 'settings' ? 'hidden' : ''}`}
+        className={`sidebar browser-panel glass-panel sidebar-panel-root no-drag ${showLyrics || view === 'settings' ? 'hidden' : ''}`}
       >
-        <div style={{ display: 'flex', gap: '8px', zIndex: 10, flexShrink: 0 }}>
-          <button
-            className="import-btn"
-            style={{ flex: 1, padding: '10px' }}
-            onClick={handleImport}
-            title={t('import.folder')}
-          >
-            <FolderHeart size={18} />
-          </button>
-          <button
-            className="import-btn"
-            style={{ flex: 1, padding: '10px' }}
-            onClick={handleImportFile}
-            title={t('import.files')}
-          >
-            <FileAudio size={18} />
-          </button>
-          <button
-            className="import-btn"
-            style={{
-              padding: '10px',
-              background: 'rgba(255,255,255,0.4)',
-              color: 'var(--text-main)',
-              boxShadow: 'none'
-            }}
-            onClick={handleClearPlaylist}
-            title={t('import.clearPlaylist')}
-          >
-            <Trash2 size={18} />
-          </button>
+        <div className="browser-topbar-actions">
+          <span className="browser-topbar-title">
+            {listMode === 'songs' && t('listMode.songs')}
+            {listMode === 'album' && selectedAlbum === 'all' && t('listMode.albums')}
+            {listMode === 'album' && selectedAlbum !== 'all' && selectedAlbum}
+            {listMode === 'folders' && selectedFolder === 'all' && t('listMode.folders')}
+            {listMode === 'folders' && selectedFolder !== 'all' &&
+              (selectedFolder.split(/[\\/]/).pop() || t('listMode.folders'))}
+            {listMode === 'playlists' && t('listMode.playlists')}
+          </span>
+          <div className="browser-toolbar-group" aria-label={t('aria.libraryActions', 'Library actions')}>
+            <button
+              className="browser-toolbar-btn"
+              onClick={handleImport}
+              title={t('import.folder')}
+              aria-label={t('import.folder')}
+            >
+              <FolderHeart size={17} />
+            </button>
+            <button
+              className="browser-toolbar-btn"
+              onClick={handleImportFile}
+              title={t('import.files')}
+              aria-label={t('import.files')}
+            >
+              <FileAudio size={17} />
+            </button>
+            <button
+              className="browser-toolbar-btn"
+              onClick={exportMainPlaylistM3U}
+              title={t('playlists.exportM3U')}
+              aria-label={t('aria.exportPlaylist')}
+            >
+              <Download size={17} />
+            </button>
+            <button
+              className="browser-toolbar-btn browser-toolbar-btn--danger"
+              onClick={handleClearPlaylist}
+              title={t('import.clearPlaylist')}
+              aria-label={t('import.clearPlaylist')}
+            >
+              <Trash2 size={17} />
+            </button>
+          </div>
         </div>
 
         <div className="search-container no-drag" style={{ flexShrink: 0 }}>
@@ -9242,91 +9959,8 @@ export default function App() {
             >
               {t('listMode.folders')}
             </button>
-            <button
-              type="button"
-              className={`list-filter-chip list-filter-chip--icon-only ${showLikedOnly ? 'active' : ''}`}
-              onClick={() => setShowLikedOnly((v) => !v)}
-              title={t('like.filterOnlyTitle')}
-            >
-              <Heart size={13} strokeWidth={1.5} />
-            </button>
           </div>
-          <div
-            className={`queue-filter-row no-drag${queueDragOver ? ' queue-filter-row--drag-over' : ''}`}
-            onDragOver={handleQueueDragOver}
-            onDragLeave={handleQueueDragLeave}
-            onDrop={handleQueueDrop}
-          >
-            <div className="queue-filter-row-head">
-              <span className="queue-filter-row-title">{t('listMode.queue')}</span>
-              <div className="queue-filter-row-head-right">
-                <button
-                  type="button"
-                  className={`queue-toggle-btn ${queuePlaybackEnabled ? 'active' : ''}`}
-                  onClick={() => setQueuePlaybackEnabled((v) => !v)}
-                  title={t('queue.playbackToggleTitle')}
-                  aria-pressed={queuePlaybackEnabled}
-                >
-                  {queuePlaybackEnabled ? t('queue.playbackOn') : t('queue.playbackOff')}
-                </button>
-                <span className="queue-filter-row-count">{upNextPreviewTracks.length}</span>
-              </div>
-            </div>
-            <div className="queue-preview-list">
-              {upNextPreviewTracks.length === 0 ? (
-                <div className="queue-preview-empty">{t('empty.queueEmpty')}</div>
-              ) : (
-                false ? upNextPreviewTracks.map((track, idx) => {
-                  const displayArtist =
-                    track.info.artist === 'Unknown Artist'
-                      ? albumArtistByName[track.info.album] || track.info.artist
-                      : track.info.artist
-                  return (
-                    <div key={`${track.path}-upnext-${idx}`} className="queue-preview-item">
-                      <span className="queue-preview-index">{idx + 1}.</span>
-                      <span
-                        className="queue-preview-text"
-                        title={`${track.info.title} — ${displayArtist}`}
-                      >
-                        {track.info.title} - {displayArtist}
-                      </span>
-                      <button
-                        type="button"
-                        className="queue-preview-remove"
-                        onClick={() => removeFromUpNextQueue(track.path)}
-                        title={t('contextMenu.removeFromUpNext')}
-                      >
-                        <Minus size={14} />
-                      </button>
-                    </div>
-                  )
-                }) : (
-                  <DndContext
-                    sensors={queueSortSensors}
-                    collisionDetection={closestCenter}
-                    onDragEnd={handleQueueSortEnd}
-                  >
-                    <SortableContext
-                      items={upNextPreviewTracks.map((track) => track.path)}
-                      strategy={verticalListSortingStrategy}
-                    >
-                      {upNextPreviewTracks.map((track, idx) => (
-                        <UpNextQueueSortableItem
-                          key={track.path}
-                          item={{ path: track.path, track }}
-                          index={idx}
-                          albumArtistByName={albumArtistByName}
-                          onRemove={removeFromUpNextQueue}
-                          removeButtonTitle={t('contextMenu.removeFromUpNext')}
-                        />
-                      ))}
-                    </SortableContext>
-                  </DndContext>
-                )
-              )}
-            </div>
-            <div className="queue-drop-hint">{t('queue.dropHint')}</div>
-          </div>
+          {/* Queue panel — 暂时隐藏，queue state/logic 保留，恢复时取消注释 */}
 
           {selectedAlbum !== 'all' && listMode === 'songs' && (
             <div className="album-filter-pill no-drag">
@@ -9875,6 +10509,18 @@ export default function App() {
                           <button
                             type="button"
                             className="user-playlist-card-icon-btn"
+                            aria-label={t('aria.exportPlaylist')}
+                            title={t('playlists.exportM3U')}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              exportUserPlaylistM3U(pl.id)
+                            }}
+                          >
+                            <Download size={15} strokeWidth={1.5} />
+                          </button>
+                          <button
+                            type="button"
+                            className="user-playlist-card-icon-btn"
                             aria-label={t('aria.renamePlaylist')}
                             title={t('playlists.rename')}
                             onClick={(e) => {
@@ -10176,15 +10822,27 @@ export default function App() {
                     <Download size={14} aria-hidden />
                     {t('playlists.export')}
                   </button>
+                  <button
+                    type="button"
+                    className="user-playlist-detail-btn"
+                    onClick={() => exportUserPlaylistM3U(selectedUserPlaylist.id)}
+                  >
+                    <Download size={14} aria-hidden />
+                    {t('playlists.exportM3U')}
+                  </button>
+                  <button
+                    type="button"
+                    className="user-playlist-detail-btn"
+                    onClick={() => exportUserPlaylistText(selectedUserPlaylist)}
+                  >
+                    <Download size={14} aria-hidden />
+                    {t('playlists.exportText')}
+                  </button>
                 </div>
               </div>
             )}
 
-            {(listMode === 'songs' ||
-              (listMode === 'folders' && selectedFolder !== 'all') ||
-              (listMode === 'album' && selectedAlbum !== 'all') ||
-              (listMode === 'playlists' &&
-                (selectedUserPlaylistId || selectedSmartCollectionId))) && (
+            {showTrackList && (
               <>
                 {tracksForSidebarListFiltered.length === 0 && (
                   <div className="app-empty-state app-empty-state--minimal sidebar-empty-hint">
@@ -10221,6 +10879,21 @@ export default function App() {
                         track.info.artist === 'Unknown Artist'
                           ? albumArtistByName[track.info.album] || track.info.artist
                           : track.info.artist
+                      const trackExt = String(track.name || track.path || '')
+                        .split('.')
+                        .pop()
+                        ?.toUpperCase()
+                      const formatLabel =
+                        trackExt &&
+                        trackExt.length <= 5 &&
+                        trackExt !== String(track.name || track.path || '').toUpperCase()
+                          ? trackExt
+                          : ''
+                      const durationLabel =
+                        track.info.duration && track.info.duration > 0
+                          ? formatTime(track.info.duration)
+                          : ''
+                      const trackMeta = effectiveTrackMetaMap[track.path] || {}
 
                       const liked = likedSet.has(track.path)
                       return (
@@ -10247,9 +10920,21 @@ export default function App() {
                             setTrackContextMenu({ clientX, clientY, track })
                           }}
                         >
-                          <Music size={16} style={{ marginRight: 8, opacity: 0.5 }} />
+                          <div
+                            className={`track-art${track.originalIdx === currentIndex ? ' track-art--playing' : ''}`}
+                            aria-hidden
+                          >
+                            {track.info.cover ? (
+                              <img src={track.info.cover} alt="" draggable={false} />
+                            ) : (
+                              <Music size={17} />
+                            )}
+                          </div>
                           <div className="track-text-group">
                             <div className="track-name" title={track.info.title}>
+                              {track.originalIdx === currentIndex && (
+                                <span className="track-playing-dot" aria-hidden />
+                              )}
                               {track.info.title}
                             </div>
                             <div
@@ -10264,6 +10949,24 @@ export default function App() {
                               />{' '}
                               · {track.info.album}
                             </div>
+                            <div className="track-meta-pills" aria-hidden>
+                              {track.info.trackNo && (
+                                <span className="track-meta-pill">#{track.info.trackNo}</span>
+                              )}
+                              <AudioQualityBadges
+                                quality={{
+                                  codec: trackMeta.codec || formatLabel || null,
+                                  bitrateKbps: trackMeta.bitrateKbps || null,
+                                  sampleRateHz: trackMeta.sampleRateHz || null,
+                                  bitDepth: trackMeta.bitDepth || null,
+                                  channels: trackMeta.channels || null
+                                }}
+                                compact
+                              />
+                            </div>
+                          </div>
+                          <div className="track-row-meta" aria-hidden>
+                            {durationLabel && <span>{durationLabel}</span>}
                           </div>
                           {(listMode === 'songs' ||
                             listMode === 'folders' ||
@@ -10332,7 +11035,7 @@ export default function App() {
       </div>
 
       <div
-        className={`main-player glass-panel no-drag ${showLyrics ? 'lyrics-mode' : ''} ${showLyrics && config.mvAsBackground && mvId ? 'immersive-mode' : ''} ${brightLyricsBackdrop ? 'main-player--bright-lyrics-bg' : ''} ${view === 'settings' ? 'hidden' : ''} ${config.lyricsBlurEffect ? 'lyrics-blur-on' : ''}`}
+        className={`main-player glass-panel ${showLyrics ? 'lyrics-mode' : 'no-drag'} ${showLyrics && config.mvAsBackground && mvId ? 'immersive-mode' : ''} ${showLyrics && !brightLyricsBackdrop ? 'main-player--lyrics-fallback-bg' : ''} ${brightLyricsBackdrop ? 'main-player--bright-lyrics-bg' : ''} ${view === 'settings' ? 'hidden' : ''} ${config.lyricsBlurEffect ? 'lyrics-blur-on' : ''}`}
       >
         {showLyrics ? (
           <div className="lyrics-view-container" style={lyricsPanelStyle}>
@@ -10344,7 +11047,11 @@ export default function App() {
 
                 <div className="lyrics-header">
                   <div className="mini-cover">
-                    {displayMainCoverUrl ? <img src={displayMainCoverUrl} alt="" /> : <Music />}
+                    {displaySafeCoverUrl ? (
+                      <img src={displaySafeCoverUrl} alt="" onError={handleDisplayCoverError} />
+                    ) : (
+                      <Music />
+                    )}
                   </div>
                   <div className="lyrics-meta">
                     <h2>{displayMainTitle}</h2>
@@ -10400,7 +11107,7 @@ export default function App() {
             )}
 
             <div
-              className={`lyrics-and-mv-wrapper${isLyricsListHidden ? ' lyrics-and-mv-wrapper--lyrics-hidden' : ''}`}
+              className={`lyrics-and-mv-wrapper${isLyricsListHidden ? ' lyrics-and-mv-wrapper--lyrics-hidden' : ''}${!(mvId && config.enableMV && !config.mvAsBackground) ? ' lyrics-and-mv-wrapper--lyrics-solo' : ''}`}
             >
               <div className="lyrics-main-column">
                 <div
@@ -10581,12 +11288,13 @@ export default function App() {
                   : undefined
               }
             >
-              {displayMainCoverUrl ? (
+              {displaySafeCoverUrl ? (
                 <img
-                  src={displayMainCoverUrl}
+                  src={displaySafeCoverUrl}
                   draggable={false}
                   className={`cover-image ${transportIsPlaying ? 'playing' : ''}`}
                   alt={t('lyrics.coverAlt')}
+                  onError={handleDisplayCoverError}
                 />
               ) : (
                 <div className="no-cover">
@@ -12931,6 +13639,73 @@ export default function App() {
             </div>
 
             <div
+              id="settings-sec-lastfm"
+              data-settings-section="lastfm"
+              style={{ display: settingsSectionVisibility.lastfm ? '' : 'none' }}
+            >
+            <section className="settings-section">
+              <div className="section-title">
+                <Radio size={20} />
+                <h2>Last.fm</h2>
+              </div>
+
+              {config.lastfmSessionKey ? (
+                <>
+                  <div className="setting-row">
+                    <div className="setting-info">
+                      <h3>{'已连接'}</h3>
+                      <p>@{config.lastfmUsername || 'unknown'}</p>
+                    </div>
+                    <button
+                      className="toggle-btn active"
+                      onClick={() => {
+                        void window.api?.lastfm?.logout?.()
+                        setConfig((prev) => ({
+                          ...prev,
+                          lastfmEnabled: false,
+                          lastfmSessionKey: null,
+                          lastfmUsername: null
+                        }))
+                      }}
+                    >
+                      {'断开连接'}
+                    </button>
+                  </div>
+                  <div className="setting-row">
+                    <div className="setting-info">
+                      <h3>{'启用 Scrobble'}</h3>
+                      <p>{'自动记录听歌历史到 Last.fm'}</p>
+                    </div>
+                    <button
+                      className={`toggle-btn ${config.lastfmEnabled ? 'active' : ''}`}
+                      onClick={() =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          lastfmEnabled: !prev.lastfmEnabled
+                        }))
+                      }
+                    >
+                      {config.lastfmEnabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <LastFmLoginForm
+                  onLogin={(sessionKey, username) => {
+                    setConfig((prev) => ({
+                      ...prev,
+                      lastfmEnabled: true,
+                      lastfmSessionKey: sessionKey,
+                      lastfmUsername: username
+                    }))
+                    void window.api?.lastfm?.setSession?.(sessionKey, username)
+                  }}
+                />
+              )}
+            </section>
+            </div>
+
+            <div
               id="settings-sec-about"
               data-settings-section="about"
               style={{ display: settingsSectionVisibility.about ? '' : 'none' }}
@@ -13612,7 +14387,7 @@ export default function App() {
         config={config}
         setConfig={setConfig}
       />
-      <MetadataEditorDrawer
+        <MetadataEditorDrawer
         open={metadataEditorOpen}
         onClose={() => {
           setMetadataEditorOpen(false)
@@ -13834,6 +14609,22 @@ export default function App() {
                     onClick={handleRemove}
                   >
                     <Minus size={14} aria-hidden /> {removeLabel}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item"
+                    onClick={() => {
+                      if (!isLocalAudioFilePath(track?.path)) {
+                        closeTrackContextMenuAnimated()
+                        return
+                      }
+                      openMetadataEditorForTrack(track)
+                      closeTrackContextMenuAnimated()
+                    }}
+                    disabled={!isLocalAudioFilePath(track?.path)}
+                  >
+                    <Tag size={14} aria-hidden /> {t('contextMenu.editMetadata', '编辑标签')}
                   </button>
                   <button
                     type="button"
@@ -14078,6 +14869,281 @@ export default function App() {
           </>,
           document.body
         )}
+      </div>
+
+      {view !== 'settings' && !(showLyrics && hideImmersiveMvChrome) && (
+        <div className={`bottom-player-bar no-drag${showLyrics ? ' bottom-player-bar--lyrics' : ''}`}>
+          <div className="bottom-bar-left">
+            {displaySafeCoverUrl ? (
+              <img
+                className="bottom-bar-cover"
+                src={displaySafeCoverUrl}
+                alt=""
+                onClick={() => setShowLyrics(true)}
+                onError={handleDisplayCoverError}
+                draggable={false}
+              />
+            ) : (
+              <div
+                className="bottom-bar-cover-fallback"
+                onClick={() => setShowLyrics(true)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') setShowLyrics(true)
+                }}
+              >
+                <Music size={20} />
+              </div>
+            )}
+            <div className="bottom-bar-meta">
+              <div className="bottom-bar-title" onClick={() => setShowLyrics(true)}>
+                {displayMainTitle || t('player.selectTrack')}
+              </div>
+              <div className="bottom-bar-artist">{displayMainArtist || ''}</div>
+              <div className="bottom-bar-tech-pills">
+                {dlnaUiOn && <span className="mini-pill">DLNA</span>}
+                <AudioQualityBadges
+                  variant="player"
+                  quality={{
+                    codec: technicalInfo.codec || null,
+                    bitrateKbps: technicalInfo.bitrate
+                      ? Math.round(technicalInfo.bitrate / 1000)
+                      : null,
+                    sampleRateHz: technicalInfo.sampleRate || null,
+                    bitDepth: technicalInfo.bitDepth || null,
+                    channels: technicalInfo.channels || null
+                  }}
+                />
+                {technicalInfo.originalBpm && (
+                  <span className="echo-bpm-pill">
+                    BPM {technicalInfo.originalBpm}
+                    {playbackRate !== 1
+                      ? ` › ${Math.round(technicalInfo.originalBpm * playbackRate)}`
+                      : ''}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="bottom-bar-center">
+            <div className="bottom-bar-transport">
+              <button
+                className="btn btn--transport"
+                style={{ width: 36, height: 36 }}
+                onClick={() => setPlayMode(playMode === 'shuffle' ? 'loop' : 'shuffle')}
+              >
+                <Shuffle
+                  size={16}
+                  color={playMode === 'shuffle' ? 'var(--accent-pink)' : 'var(--text-soft)'}
+                />
+              </button>
+              <button className="btn btn--transport" onClick={handlePrev}>
+                <SkipBack size={20} color="var(--text-soft)" />
+              </button>
+              <button className="btn play-btn" onClick={togglePlay}>
+                {transportIsPlaying ? (
+                  <Pause size={26} />
+                ) : (
+                  <Play size={26} style={{ marginLeft: 3 }} />
+                )}
+              </button>
+              <button className="btn btn--transport" onClick={handleNext}>
+                <SkipForward size={20} color="var(--text-soft)" />
+              </button>
+              <button
+                className="btn btn--transport"
+                style={{ width: 36, height: 36 }}
+                onClick={() => setPlayMode(playMode === 'single' ? 'loop' : 'single')}
+              >
+                {playMode === 'single' ? (
+                  <Repeat1 size={16} color="var(--accent-pink)" />
+                ) : (
+                  <Repeat
+                    size={16}
+                    color={playMode === 'loop' ? 'var(--accent-pink)' : 'var(--text-soft)'}
+                  />
+                )}
+              </button>
+            </div>
+
+            <div className="bottom-bar-progress">
+              <span className="bottom-bar-time">{formatTime(displayProgressTime)}</span>
+              <input
+                type="range"
+                className={`player-progress ${isProgressDragging ? 'is-dragging' : ''}`}
+                min={0}
+                max={displayProgressDuration || 0}
+                value={displayProgressTime}
+                onChange={handleSeek}
+                onMouseDown={() => {
+                  progressSeekValueRef.current = displayProgressTime
+                  isProgressDraggingRef.current = true
+                  setIsSeeking(true)
+                  setIsProgressDragging(true)
+                }}
+                onMouseUp={(e) => commitProgressSeek(parseFloat(e.currentTarget.value))}
+                onTouchStart={() => {
+                  progressSeekValueRef.current = displayProgressTime
+                  isProgressDraggingRef.current = true
+                  setIsSeeking(true)
+                  setIsProgressDragging(true)
+                }}
+                onTouchEnd={(e) => commitProgressSeek(parseFloat(e.currentTarget.value))}
+                disabled={dlnaUiOn}
+                style={{
+                  padding: 0,
+                  opacity: dlnaUiOn ? 0.65 : 1,
+                  cursor: dlnaUiOn ? 'not-allowed' : undefined,
+                  ['--seek-pct']:
+                    displayProgressDuration > 0
+                      ? `${Math.min(100, Math.max(0, (displayProgressTime / displayProgressDuration) * 100))}%`
+                      : '0%'
+                }}
+              />
+              <span className="bottom-bar-time">
+                {dlnaUiOn && (!displayProgressDuration || displayProgressDuration <= 0)
+                  ? '--:--'
+                  : formatTime(displayProgressDuration)}
+              </span>
+            </div>
+          </div>
+
+          <div className="bottom-bar-right">
+            {!showLyrics && config.showMiniWaveform && (
+              <MiniWaveform analyser={analyserNode.current} isPlaying={isPlaying} />
+            )}
+
+            {/* 歌词按钮 */}
+            <button
+              className={`btn btn--transport lyrics-toggle ${showLyrics ? 'active' : ''}`}
+              style={{ width: 34, height: 34 }}
+              onClick={() => setShowLyrics(!showLyrics)}
+              title={t('lyrics.toggle')}
+            >
+              <Mic2 size={16} color={showLyrics ? 'var(--accent-pink)' : 'var(--text-soft)'} />
+            </button>
+
+            {/* 音量 + 速度合并浮层触发按钮 */}
+            {showLyrics ? (
+              <div className="bottom-bar-lyrics-deck">
+                <label className="bottom-bar-lyrics-slider">
+                  <span>{playbackRate.toFixed(2)}x</span>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={2.0}
+                    step={0.05}
+                    value={playbackRate}
+                    onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
+                    style={{
+                      ['--slider-pct']: `${Math.min(100, Math.max(0, ((playbackRate - 0.5) / 1.5) * 100))}%`
+                    }}
+                  />
+                </label>
+                <label className="bottom-bar-lyrics-slider">
+                  <span>{Math.round(volume * 100)}%</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={volume}
+                    onChange={(e) => setVolume(parseFloat(e.target.value))}
+                    style={{
+                      ['--slider-pct']: `${Math.min(100, Math.max(0, volume * 100))}%`
+                    }}
+                  />
+                </label>
+              </div>
+            ) : (
+              <button
+                className="btn btn--transport deck-popover-trigger"
+                style={{
+                  width: 34,
+                  height: 34,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: deckPopoverOpen ? 'var(--accent-pink)' : 'var(--text-soft)'
+                }}
+                onClick={() => setDeckPopoverOpen((v) => !v)}
+                title={t('player.vol') + ' / ' + t('player.speed')}
+              >
+                <SlidersHorizontal size={15} />
+              </button>
+            )}
+
+            {/* 浮层面板 —— 用 createPortal 挂到 body，绕开 backdrop-filter 包含块问题 */}
+            {!showLyrics && deckPopoverOpen && createPortal(
+              <div className="deck-popover">
+                {/* 音量 */}
+                <div className="deck-popover-row">
+                  <div className="deck-popover-label">
+                    <span>{t('player.vol')}</span>
+                    <span>{Math.round(volume * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    className="deck-popover-slider"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={volume}
+                    onChange={(e) => setVolume(parseFloat(e.target.value))}
+                  />
+                </div>
+
+                {/* 速度 */}
+                <div className="deck-popover-row">
+                  <div className="deck-popover-label">
+                    <span>{t('player.speed')}</span>
+                    <span>{playbackRate.toFixed(2)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    className="deck-popover-slider"
+                    min={0.5}
+                    max={2.0}
+                    step={0.05}
+                    value={playbackRate}
+                    onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
+                  />
+                </div>
+
+                {/* 速度重置 */}
+                {playbackRate !== 1.0 && (
+                  <button className="deck-popover-btn" onClick={() => setPlaybackRate(1.0)}>
+                    <RotateCcw size={13} />
+                    {t('player.resetSpeed') || '重置速度'}
+                  </button>
+                )}
+
+                {/* 导出 */}
+                <button
+                  className="deck-popover-btn"
+                  onClick={() => {
+                    handleExport()
+                    setDeckPopoverOpen(false)
+                  }}
+                  disabled={isExporting || !currentTrack}
+                >
+                  <Download size={13} />
+                  {t('player.exportButton')}
+                </button>
+              </div>,
+              document.body
+            )}
+
+            <PluginSlot
+              name="playerTransportExtras"
+              context={playerTransportPluginContext}
+              className="no-drag transport-plugin-slot"
+              style={{ display: 'flex', alignItems: 'center' }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

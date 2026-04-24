@@ -1,0 +1,78 @@
+/**
+ * ECHO Design Tokens — 扩展 tokens.css
+ * 所有颜色通过 CSS variables 管理，方便后续用户自定义主题色。
+ * 用法：修改 --theme-primary / --theme-accent 即可改变整体强调色。
+ */
+
+:root {
+  /* ── ECHO 页面背景与表面色 ── */
+  --echo-bg:              #f5f7fb;
+  --echo-surface:         #ffffff;
+  --echo-surface-muted:   #f8fafc;
+  --echo-surface-hover:   #f3f6fb;
+
+  /* ── 文字色 ── */
+  --echo-text-primary:    #111827;
+  --echo-text-secondary:  #667085;
+  --echo-text-tertiary:   #98a2b3;
+
+  /* ── 边框 ── */
+  --echo-border:          rgba(15, 23, 42, 0.08);
+  --echo-border-strong:   rgba(15, 23, 42, 0.14);
+
+  /* ── 主题强调色（后续可由设置覆盖） ── */
+  --theme-primary:        #8fa0bb;
+  --theme-accent:         #9aaac4;
+  --theme-accent-soft:    rgba(143, 160, 187, 0.14);
+  --theme-accent-border:  rgba(143, 160, 187, 0.24);
+
+  /* ── 行交互状态 ── */
+  --echo-row-hover-bg:    rgba(255, 255, 255, 0.72);
+  --echo-row-hover-border: rgba(143, 160, 187, 0.20);
+  --echo-active-bg:       rgba(244, 222, 217, 0.62);
+  --echo-active-border:   rgba(220, 170, 160, 0.42);
+  --echo-active-text:     #1f2937;
+  --echo-playing-indicator: var(--theme-primary);
+
+  /* ── 音质标签色 ── */
+  --quality-codec-bg:     rgba(15, 23, 42, 0.05);
+  --quality-codec-text:   var(--echo-text-secondary);
+  --quality-lossless-bg:  var(--theme-accent-soft);
+  --quality-lossless-text: var(--theme-primary);
+  --quality-hires-bg:     rgba(143, 160, 187, 0.22);
+  --quality-hires-text:   var(--theme-primary);
+  --quality-tech-bg:      rgba(15, 23, 42, 0.04);
+  --quality-tech-text:    var(--echo-text-tertiary);
+
+  /* ── 圆角 ── */
+  --echo-radius-xs:       6px;
+  --echo-radius-sm:       8px;
+  --echo-radius-md:       12px;
+  --echo-radius-lg:       18px;
+  --echo-radius-xl:       24px;
+
+  /* ── 阴影 ── */
+  --echo-shadow-soft:     0 4px 16px rgba(15, 23, 42, 0.04);
+  --echo-shadow-panel:    0 8px 32px rgba(15, 23, 42, 0.06);
+  --echo-shadow-card:     0 2px 8px rgba(15, 23, 42, 0.05);
+
+  /* ── 播放器进度条颜色跟随主题 ── */
+  --echo-progress-fill:   var(--theme-primary);
+  --echo-progress-track:  rgba(15, 23, 42, 0.10);
+
+  /* ── 推荐字体栈（支持中日英混排） ── */
+  --echo-font-stack:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Noto Sans CJK SC', 'Noto Sans JP', 'Microsoft YaHei',
+    'PingFang SC', system-ui, sans-serif;
+
+  /* ── 滚动条 ── */
+  --echo-scrollbar-width:  4px;
+  --echo-scrollbar-thumb:  rgba(143, 160, 187, 0.38);
+  --echo-scrollbar-thumb-hover: rgba(143, 160, 187, 0.60);
+  --echo-scrollbar-track:  transparent;
+
+  /* ── 队列卡片 ── */
+  --echo-queue-card-height: 68px;
+  --echo-queue-empty-color: var(--echo-text-tertiary);
+}

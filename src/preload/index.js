@@ -40,7 +40,9 @@ contextBridge.exposeInMainWorld('api', {
   openFileHandler: (locale) => ipcRenderer.invoke('dialog:openFile', { locale }),
   openVstPluginHandler: (locale) => ipcRenderer.invoke('dialog:openVstPlugin', { locale }),
   openImageHandler: (locale) => ipcRenderer.invoke('dialog:openImage', { locale }),
+  selectImageFile: () => ipcRenderer.invoke('dialog:selectImage'),
   openThemeJsonHandler: (locale) => ipcRenderer.invoke('dialog:openThemeJson', { locale }),
+  openPlaylistFileHandler: () => ipcRenderer.invoke('dialog:openPlaylistFile'),
   saveThemeJsonHandler: (text, defaultName, locale) =>
     ipcRenderer.invoke('dialog:saveThemeJson', text, defaultName, {
       locale
@@ -48,6 +50,8 @@ contextBridge.exposeInMainWorld('api', {
   openLyricsFileHandler: (locale) => ipcRenderer.invoke('dialog:openLyricsFile', { locale }),
   openFontFileHandler: (locale) => ipcRenderer.invoke('dialog:openFontFile', { locale }),
   getAudioFilesFromPaths: (paths) => ipcRenderer.invoke('file:getFilesFromPaths', paths),
+  exportPlaylistM3U: (payload) => ipcRenderer.invoke('playlist:exportM3U', payload),
+  exportPlaylistText: (payload) => ipcRenderer.invoke('playlist:exportText', payload),
   rescanFolders: (payload) => ipcRenderer.invoke('file:rescanFolders', payload),
   batchExistsHandler: (paths) => ipcRenderer.invoke('file:batchExists', paths),
   watchLibraryFolders: (payload) => ipcRenderer.invoke('library:watchFolders', payload),
@@ -89,6 +93,9 @@ contextBridge.exposeInMainWorld('api', {
   getExtendedMetadataHandler: (path) => ipcRenderer.invoke('file:getExtendedMetadata', path),
   updateExtendedMetadataHandler: (payload) =>
     ipcRenderer.invoke('file:updateExtendedMetadata', payload),
+  readTags: (filePath) => ipcRenderer.invoke('tags:read', filePath),
+  writeTags: (filePath, tags, newCoverPath) =>
+    ipcRenderer.invoke('tags:write', filePath, tags, newCoverPath),
   batchRenameFilesHandler: (payload) => ipcRenderer.invoke('file:batchRenameFiles', payload),
   setDiscordActivity: (activity) => ipcRenderer.send('discord:setActivity', activity),
   clearDiscordActivity: () => ipcRenderer.send('discord:clearActivity'),
@@ -99,6 +106,15 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('netease:getAlbumTracks', { albumId, cookie }),
   getNeteaseSongUrl: (songId, level, cookie) =>
     ipcRenderer.invoke('netease:getSongUrl', songId, level, cookie),
+  lastfm: {
+    login: (u, p) => ipcRenderer.invoke('lastfm:login', u, p),
+    logout: () => ipcRenderer.invoke('lastfm:logout'),
+    setSession: (sk, u) => ipcRenderer.invoke('lastfm:setSession', sk, u),
+    nowPlaying: (artist, track, album, dur) =>
+      ipcRenderer.invoke('lastfm:nowPlaying', artist, track, album, dur),
+    scrobble: (artist, track, album, startedAt, dur) =>
+      ipcRenderer.invoke('lastfm:scrobble', artist, track, album, startedAt, dur)
+  },
 
   media: {
     fetchNeteaseLrcText: (params) => ipcRenderer.invoke('netease:fetchLrcText', params),

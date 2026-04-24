@@ -1,6 +1,6 @@
 {
   "name": "echoes",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "ECHO desktop application",
   "main": "./out/main/index.js",
   "author": "Moekotori",

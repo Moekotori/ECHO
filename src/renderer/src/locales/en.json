@@ -11,6 +11,7 @@
   "aria": {
     "close": "Close",
     "playlistLibraryOptions": "Playlist library options",
+    "exportPlaylist": "Export playlist",
     "renamePlaylist": "Rename playlist",
     "deletePlaylist": "Delete playlist",
     "addToPlaylist": "Add to playlist",
@@ -175,6 +176,8 @@
     "more": "More",
     "importLibrary": "Import…",
     "exportAll": "Export all…",
+    "exportM3U": "Export as M3U",
+    "exportText": "Export TXT",
     "newNamePlaceholder": "New playlist name…",
     "create": "Create",
     "albumsHeading": "Albums",
@@ -334,6 +337,8 @@
     "exclusiveMode": "WASAPI Exclusive",
     "exclusiveDesc": "Bypasses Windows audio mixer for bit-perfect output. Source sample rate is preserved (e.g. 192 kHz). Other apps will be muted while active.",
     "exclusiveWaiting": "Exclusive mode will apply on the next track start.",
+    "exclusiveStartupReset": "Turn off exclusive mode on app startup",
+    "exclusiveStartupResetDesc": "Enabled by default. Turn this off if you want WASAPI exclusive mode to stay on after restarting ECHO.",
     "bufferProfile": "Buffer Profile",
     "bufferHint": "If you hear crackling or dropouts in exclusive mode, try increasing the buffer.",
     "bufferProfiles": {

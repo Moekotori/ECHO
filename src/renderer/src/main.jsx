@@ -6,6 +6,8 @@ import PluginHostProvider from './plugins/PluginHost'
 import RendererErrorBoundary from './RendererErrorBoundary'
 import './index.css'
 import './styles/tokens.css'
+import './styles/echo-tokens.css'
+import './styles/echo-track-list.css'
 
 const LyricsDesktop = lazy(() => import('./LyricsDesktop'))
 

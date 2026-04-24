@@ -46,7 +46,7 @@ export const DEFAULT_CONFIG = {
    * 递增并在 App 加载时 run migration（`oldRev < configRevision`）。
    * 老存档无此字段时视为 0。
    */
-  configRevision: 4,
+  configRevision: 5,
   /** UI language: en | zh | ja */
   uiLocale: 'en',
   showVisualizer: false,
@@ -59,6 +59,7 @@ export const DEFAULT_CONFIG = {
   audioOutputBufferProfile: 'balanced',
   audioDeviceId: '',
   audioExclusive: false,
+  audioExclusiveResetOnStartup: true,
   /** 上一首按钮行为：playlist = 列表上一首（默认），history = 上一首听的歌 */
   prevButtonMode: 'playlist',
   /** Gapless playback — 无缝播放，默认关闭。开启后与交叉淡入淡出互斥 */
@@ -70,6 +71,9 @@ export const DEFAULT_CONFIG = {
   sleepTimerMode: 'time',
   visualizerStyle: 'bars',
   showDiscordRPC: true,
+  lastfmEnabled: false,
+  lastfmSessionKey: null,
+  lastfmUsername: null,
   enableMV: false,
   customBgPath: null,
   customBgOpacity: 1.0,
