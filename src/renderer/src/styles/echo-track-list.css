@@ -214,6 +214,7 @@
 .track-row-meta {
   flex: none !important;
   width: 56px !important;
+  margin-right: 14px !important;
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
@@ -771,6 +772,18 @@
   border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 26%, transparent) !important;
 }
 
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .btn--transport.play-mode-toggle.is-active {
+  color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 82%, var(--text-main, #5c4349)) !important;
+  background:
+    radial-gradient(circle at 70% 24%, color-mix(in srgb, #fff 78%, transparent), transparent 34%),
+    color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 20%, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 48%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 72%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 13%, transparent),
+    0 7px 18px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 18%, transparent) !important;
+}
+
 .bottom-player-bar:not(.bottom-player-bar--lyrics) .btn.play-btn {
   width: 54px !important;
   height: 54px !important;
@@ -1042,4 +1055,858 @@
   box-shadow:
     0 0 0 4px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 13%, transparent),
     0 5px 14px color-mix(in srgb, var(--text-main, #5c4349) 18%, transparent) !important;
+}
+
+/* Wallpaper mode: soft-focus glass that keeps custom art visible but readable. */
+.app-root:has(.app-wallpaper-backdrop) {
+  background: transparent !important;
+}
+
+.app-root:has(.app-wallpaper-backdrop)::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 20% 16%, color-mix(in srgb, #ffffff 34%, transparent) 0 20%, transparent 46%),
+    radial-gradient(circle at 82% 72%, color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 16%, transparent) 0 24%, transparent 54%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 24%, transparent) 0%,
+      color-mix(in srgb, #ffffff 40%, transparent) 40%,
+      color-mix(in srgb, #ffffff 30%, transparent) 100%
+    );
+}
+
+.app-root:has(.app-wallpaper-backdrop) .app-container {
+  background: transparent !important;
+}
+
+.app-root:has(.app-wallpaper-backdrop) .app-wallpaper-backdrop--custom {
+  filter: blur(7px) saturate(1.08) brightness(1.05) !important;
+  transform: scale(1.035);
+}
+
+.app-root:has(.app-wallpaper-backdrop) .app-wallpaper-backdrop--cover {
+  filter: blur(26px) saturate(1.08) brightness(1.03) !important;
+  transform: scale(1.14);
+}
+
+.app-root:has(.app-wallpaper-backdrop) .nav-rail,
+.app-container:has(.app-wallpaper-backdrop) .sidebar.browser-panel,
+.app-container:has(.app-wallpaper-backdrop) .sidebar.browser-panel.glass-panel,
+.app-root:has(.app-wallpaper-backdrop) .settings-page.glass-panel,
+.app-root:has(.app-wallpaper-backdrop) .settings-page .settings-section {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 18%, transparent), color-mix(in srgb, #ffffff 8%, transparent)),
+    var(--glass-bg, rgba(255, 255, 255, 0.6)) !important;
+  border-color: var(--glass-border, rgba(255, 255, 255, 0.28)) !important;
+  backdrop-filter: blur(calc(var(--glass-blur, 20px) + 8px)) saturate(1.18) !important;
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur, 20px) + 8px)) saturate(1.18) !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .browser-toolbar-group,
+.app-container:has(.app-wallpaper-backdrop) .browser-panel .search-container,
+.app-container:has(.app-wallpaper-backdrop) .playlist,
+.app-container:has(.app-wallpaper-backdrop) .list-filter-chip,
+.app-container:has(.app-wallpaper-backdrop) .folder-sort-trigger,
+.app-root:has(.app-wallpaper-backdrop) .bottom-player-bar:not(.bottom-player-bar--lyrics) {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 20%, transparent), color-mix(in srgb, #ffffff 8%, transparent)),
+    color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 86%, transparent) !important;
+  border-color: var(--glass-border, rgba(255, 255, 255, 0.28)) !important;
+  backdrop-filter: blur(calc(var(--glass-blur, 20px) + 6px)) saturate(1.16) !important;
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur, 20px) + 6px)) saturate(1.16) !important;
+}
+
+.app-root:has(.app-wallpaper-backdrop) .bottom-player-bar:not(.bottom-player-bar--lyrics) {
+  border-top-color: transparent !important;
+  box-shadow:
+    0 -24px 42px color-mix(in srgb, #ffffff 18%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 22%, transparent) !important;
+}
+
+.app-root:has(.app-wallpaper-backdrop) .bottom-player-bar:not(.bottom-player-bar--lyrics)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -34px;
+  height: 34px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 64%, transparent));
+}
+
+.app-container:has(.app-wallpaper-backdrop) .track-item,
+.app-container:has(.app-wallpaper-backdrop) .track-like-btn,
+.app-container:has(.app-wallpaper-backdrop) .track-add-pl-btn,
+.app-container:has(.app-wallpaper-backdrop) .track-remove-pl-btn,
+.app-container:has(.app-wallpaper-backdrop) .bottom-bar-transport,
+.app-container:has(.app-wallpaper-backdrop) .bottom-bar-toolset,
+.app-container:has(.app-wallpaper-backdrop) .bottom-bar-right .btn--transport {
+  background: color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 68%, #ffffff 10%) !important;
+  border-color: color-mix(in srgb, var(--glass-border, rgba(255, 255, 255, 0.28)) 86%, transparent) !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .track-item:hover,
+.app-container:has(.app-wallpaper-backdrop) .track-like-btn:hover,
+.app-container:has(.app-wallpaper-backdrop) .track-add-pl-btn:hover,
+.app-container:has(.app-wallpaper-backdrop) .track-remove-pl-btn:hover,
+.app-container:has(.app-wallpaper-backdrop) .bottom-bar-toolset .btn--transport:hover {
+  background: color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 72%, var(--theme-accent, var(--accent-blue)) 18%) !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .track-item.active {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 72%, var(--theme-primary, var(--accent-pink)) 20%),
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 72%, var(--theme-accent, var(--accent-blue)) 16%)
+    ) !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .nav-rail-item.active,
+.app-container:has(.app-wallpaper-backdrop) .nav-rail-subitem.active {
+  background: color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 62%, var(--theme-accent, var(--accent-blue)) 22%) !important;
+}
+
+/* Settings needs a calmer wallpaper treatment than the library panes. */
+.app-root:has(.app-wallpaper-backdrop) .settings-page.glass-panel {
+  background:
+    radial-gradient(circle at 18% 8%, color-mix(in srgb, #ffffff 24%, transparent) 0 22%, transparent 48%),
+    radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 12%, transparent) 0 24%, transparent 52%),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.68)) 88%, #ffffff 18%),
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.68)) 74%, transparent)
+    ) !important;
+  border-color: color-mix(in srgb, #ffffff 34%, var(--glass-border, rgba(255, 255, 255, 0.28))) !important;
+  box-shadow:
+    0 22px 64px color-mix(in srgb, var(--text-main, #1f2937) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 44%, transparent) !important;
+}
+
+.app-root:has(.app-wallpaper-backdrop) .settings-page .settings-nav {
+  background: color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.72)) 82%, #ffffff 12%) !important;
+  border-color: color-mix(in srgb, var(--glass-border, rgba(255, 255, 255, 0.32)) 72%, #ffffff 12%) !important;
+  backdrop-filter: blur(calc(var(--glass-blur, 20px) + 6px)) saturate(1.14) !important;
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur, 20px) + 6px)) saturate(1.14) !important;
+}
+
+.app-root:has(.app-wallpaper-backdrop) .settings-page .settings-section,
+.app-root:has(.app-wallpaper-backdrop) .settings-page .settings-disclosure {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 42%, transparent), color-mix(in srgb, #ffffff 18%, transparent)),
+    color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.72)) 86%, #ffffff 8%) !important;
+  border-color: color-mix(in srgb, var(--glass-border, rgba(255, 255, 255, 0.32)) 76%, #ffffff 10%) !important;
+  box-shadow:
+    0 14px 34px color-mix(in srgb, var(--text-main, #1f2937) 7%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 34%, transparent) !important;
+}
+
+.app-root:has(.app-wallpaper-backdrop) .settings-page .setting-row {
+  background: transparent !important;
+  border-bottom-color: color-mix(in srgb, var(--text-main, #1f2937) 9%, transparent) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+.app-root:has(.app-wallpaper-backdrop) .settings-page .setting-row:last-child {
+  border-bottom-color: transparent !important;
+}
+
+.app-root:has(.app-wallpaper-backdrop) .settings-page .settings-visualizer-exclusive-hint,
+.app-root:has(.app-wallpaper-backdrop) .settings-page .settings-text-input,
+.app-root:has(.app-wallpaper-backdrop) .settings-page .list-filter-chip {
+  background: color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.76)) 78%, #ffffff 14%) !important;
+  border-color: color-mix(in srgb, var(--glass-border, rgba(255, 255, 255, 0.32)) 70%, transparent) !important;
+}
+
+/* Main list hierarchy polish: panel reads as content, rows stay light. */
+.playlist {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 82%, transparent),
+      color-mix(in srgb, #ffffff 58%, transparent)
+    ),
+    color-mix(in srgb, var(--echo-surface-muted, #f8fafc) 86%, transparent) !important;
+  border-color: color-mix(in srgb, var(--text-main, #5c4349) 9%, #ffffff 18%) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 82%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--text-main, #5c4349) 3%, transparent),
+    0 20px 52px color-mix(in srgb, var(--text-main, #5c4349) 7%, transparent) !important;
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur, 20px) + 4px)) saturate(1.14) !important;
+  backdrop-filter: blur(calc(var(--glass-blur, 20px) + 4px)) saturate(1.14) !important;
+}
+
+.track-item {
+  background: color-mix(in srgb, #ffffff 38%, transparent) !important;
+  border-color: color-mix(in srgb, var(--glass-border, rgba(255, 255, 255, 0.28)) 58%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 42%, transparent) !important;
+}
+
+.track-item:hover {
+  background: color-mix(in srgb, #ffffff 56%, var(--theme-accent, var(--accent-blue)) 5%) !important;
+  border-color: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 22%, var(--glass-border, rgba(255, 255, 255, 0.28))) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 64%, transparent),
+    0 10px 24px -22px color-mix(in srgb, var(--text-main, #5c4349) 30%, transparent) !important;
+}
+
+.track-item.active {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 10%, #ffffff 58%) 0%,
+      color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 8%, #ffffff 46%) 52%,
+      color-mix(in srgb, #ffffff 34%, transparent) 100%
+    ) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 26%, var(--glass-border, rgba(255, 255, 255, 0.28))) !important;
+  box-shadow:
+    inset 3px 0 0 0 color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 86%, var(--text-main, #5c4349) 10%),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 66%, transparent),
+    0 14px 30px -26px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 44%, transparent) !important;
+}
+
+.track-item.active .track-art {
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 32%, #ffffff 42%) !important;
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--text-main, #5c4349) 12%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 12%, transparent),
+    0 0 22px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 58%, transparent) !important;
+}
+
+.track-item.active .track-name {
+  color: color-mix(in srgb, var(--text-main, #1f2937) 92%, var(--theme-primary, var(--accent-pink)) 8%) !important;
+}
+
+.track-item.active .track-subtitle,
+.track-item.active .track-row-meta {
+  color: color-mix(in srgb, var(--text-soft, #667085) 76%, var(--text-main, #1f2937) 24%) !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .playlist {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 58%, transparent),
+      color-mix(in srgb, #ffffff 40%, transparent)
+    ),
+    color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 94%, #ffffff 8%) !important;
+  border-color: color-mix(in srgb, #ffffff 42%, var(--glass-border, rgba(255, 255, 255, 0.28)) 72%) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 62%, transparent),
+    0 22px 58px color-mix(in srgb, var(--text-main, #1f2937) 10%, transparent) !important;
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur, 20px) + 10px)) saturate(1.18) brightness(1.04) !important;
+  backdrop-filter: blur(calc(var(--glass-blur, 20px) + 10px)) saturate(1.18) brightness(1.04) !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .track-item {
+  background: color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 46%, #ffffff 8%) !important;
+  border-color: color-mix(in srgb, var(--glass-border, rgba(255, 255, 255, 0.28)) 68%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 34%, transparent) !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .track-item:hover {
+  background: color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 56%, #ffffff 18%) !important;
+  border-color: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 20%, var(--glass-border, rgba(255, 255, 255, 0.28))) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 46%, transparent),
+    0 10px 24px -22px color-mix(in srgb, var(--text-main, #1f2937) 28%, transparent) !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .track-item.active {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 58%, var(--theme-primary, var(--accent-pink)) 13%),
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 50%, var(--theme-accent, var(--accent-blue)) 9%),
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 42%, transparent)
+    ) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 30%, var(--glass-border, rgba(255, 255, 255, 0.28))) !important;
+}
+
+/* Compact library header and soften the list-to-player handoff. */
+.browser-topbar-actions {
+  padding: 12px 28px 6px !important;
+  gap: 12px !important;
+}
+
+.browser-panel .search-container {
+  min-height: 42px !important;
+  margin: 6px 28px 0 !important;
+  padding: 8px 17px !important;
+  border-radius: 17px !important;
+}
+
+.sidebar-list-stack {
+  padding: 10px 28px 18px !important;
+  gap: 8px !important;
+}
+
+.list-filter-bar {
+  padding-bottom: 2px !important;
+  min-height: 30px !important;
+}
+
+.folder-sort-trigger {
+  min-height: 28px !important;
+  padding-block: 4px !important;
+}
+
+.playlist {
+  position: relative !important;
+}
+
+.playlist::after {
+  content: '';
+  position: sticky;
+  left: 0;
+  right: 0;
+  bottom: -12px;
+  z-index: 4;
+  display: block;
+  height: 38px;
+  margin-top: -38px;
+  pointer-events: none;
+  border-radius: 0 0 20px 20px;
+  background:
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      color-mix(in srgb, var(--echo-surface-muted, #f8fafc) 22%, transparent) 38%,
+      color-mix(in srgb, var(--echo-surface-muted, #f8fafc) 58%, transparent) 100%
+    );
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -42px;
+  height: 42px;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      color-mix(in srgb, var(--bg-base, #f8f2f7) 20%, transparent) 50%,
+      color-mix(in srgb, var(--bg-base, #f8f2f7) 42%, transparent) 100%
+    );
+}
+
+.app-container:has(.app-wallpaper-backdrop) .browser-topbar-actions {
+  padding-top: 10px !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .browser-panel .search-container {
+  margin-top: 5px !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .sidebar-list-stack {
+  padding-top: 8px !important;
+  gap: 7px !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .playlist::after {
+  background:
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 34%, transparent) 38%,
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 70%, transparent) 100%
+    );
+}
+
+.app-root:has(.app-wallpaper-backdrop) .bottom-player-bar:not(.bottom-player-bar--lyrics)::before {
+  top: -50px;
+  height: 50px;
+  background:
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 24%, transparent) 44%,
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 58%, transparent) 100%
+    );
+}
+
+/* Quiet premium pass: calmer active row, system-like tools, clearer type hierarchy. */
+.track-item.active {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 6%, #ffffff 48%) 0%,
+      color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 5%, #ffffff 34%) 48%,
+      color-mix(in srgb, #ffffff 24%, transparent) 100%
+    ) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 16%, var(--glass-border, rgba(255, 255, 255, 0.28))) !important;
+  box-shadow:
+    inset 3px 0 0 0 color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 76%, var(--text-main, #1f2937) 18%),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 54%, transparent),
+    0 12px 26px -26px color-mix(in srgb, var(--text-main, #1f2937) 22%, transparent) !important;
+}
+
+.track-item.active .track-art {
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 20%, #ffffff 48%) !important;
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--text-main, #1f2937) 10%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 8%, transparent),
+    0 0 18px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 15%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 46%, transparent) !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .track-item.active {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 54%, var(--theme-primary, var(--accent-pink)) 7%),
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 46%, var(--theme-accent, var(--accent-blue)) 5%),
+      color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 36%, transparent)
+    ) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 18%, var(--glass-border, rgba(255, 255, 255, 0.28))) !important;
+}
+
+.browser-toolbar-group {
+  padding: 4px !important;
+  gap: 2px !important;
+  border-radius: 18px !important;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 64%, transparent),
+      color-mix(in srgb, #ffffff 38%, transparent)
+    ) !important;
+  border-color: color-mix(in srgb, var(--text-main, #1f2937) 6%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 58%, transparent),
+    0 10px 26px color-mix(in srgb, var(--text-main, #1f2937) 5%, transparent) !important;
+}
+
+.browser-toolbar-btn {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 13px !important;
+  background: transparent !important;
+  border-color: transparent !important;
+  color: color-mix(in srgb, var(--text-soft, #667085) 84%, var(--text-main, #1f2937) 16%) !important;
+  box-shadow: none !important;
+}
+
+.browser-toolbar-btn:hover {
+  background: color-mix(in srgb, #ffffff 54%, var(--theme-accent, var(--accent-blue)) 10%) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 18%, transparent) !important;
+  color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 58%, var(--text-main, #1f2937)) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 64%, transparent),
+    0 6px 14px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 10%, transparent) !important;
+}
+
+.app-container:has(.app-wallpaper-backdrop) .browser-toolbar-group {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 34%, transparent),
+      color-mix(in srgb, #ffffff 16%, transparent)
+    ),
+    color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.6)) 72%, transparent) !important;
+}
+
+.track-name {
+  color: color-mix(in srgb, var(--text-main, #1f2937) 94%, #000000 6%) !important;
+  font-weight: 760 !important;
+  letter-spacing: 0 !important;
+}
+
+.track-subtitle {
+  color: color-mix(in srgb, var(--text-soft, #667085) 88%, var(--text-main, #1f2937) 12%) !important;
+  font-weight: 560 !important;
+}
+
+.track-row-meta {
+  color: color-mix(in srgb, var(--text-soft, #667085) 82%, var(--text-main, #1f2937) 18%) !important;
+  font-weight: 720 !important;
+}
+
+.track-meta-pills,
+.aq-badges {
+  gap: 3px !important;
+}
+
+.track-meta-pill,
+.aq-badge {
+  height: 14px !important;
+  padding: 0 5px !important;
+  border-radius: 5px !important;
+  font-size: 9px !important;
+  font-weight: 740 !important;
+  letter-spacing: 0 !important;
+  background: color-mix(in srgb, var(--text-main, #1f2937) 4%, transparent) !important;
+  color: color-mix(in srgb, var(--text-soft, #667085) 78%, var(--text-main, #1f2937) 22%) !important;
+  border-color: color-mix(in srgb, var(--text-main, #1f2937) 4%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.aq-badge--lossless,
+.aq-badge--lossless-codec,
+.aq-badge--hires {
+  background: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 8%, transparent) !important;
+  color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 58%, var(--text-main, #1f2937)) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 9%, transparent) !important;
+}
+
+.track-item.active .track-meta-pill,
+.track-item.active .aq-badge {
+  background: color-mix(in srgb, #ffffff 24%, var(--text-main, #1f2937) 3%) !important;
+  border-color: color-mix(in srgb, var(--text-main, #1f2937) 5%, transparent) !important;
+}
+
+/* Align bottom tool popovers and sort controls with the unified floating menu language. */
+.deck-popover--bottom-tools {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-elevated, #ffffff) 88%, transparent),
+      color-mix(in srgb, var(--surface-base, #ffffff) 76%, transparent)
+    ) !important;
+  border-color: color-mix(in srgb, var(--text-main, #243044) 10%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 72%, transparent),
+    0 18px 46px color-mix(in srgb, var(--text-main, #243044) 15%, transparent) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(1.35) !important;
+  backdrop-filter: blur(26px) saturate(1.35) !important;
+}
+
+.deck-popover--bottom-tools::after {
+  background: color-mix(in srgb, var(--surface-elevated, #ffffff) 82%, transparent) !important;
+  border-right-color: color-mix(in srgb, var(--text-main, #243044) 9%, transparent) !important;
+  border-bottom-color: color-mix(in srgb, var(--text-main, #243044) 9%, transparent) !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-btn {
+  background: transparent !important;
+  border-color: color-mix(in srgb, var(--text-main, #243044) 8%, transparent) !important;
+  color: color-mix(in srgb, var(--text-main, #243044) 76%, var(--text-soft, #667085)) !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-btn:hover {
+  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 14%, #ffffff) !important;
+  color: var(--text-main, #243044) !important;
+  transform: translateY(-1px) !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-slider::-webkit-slider-runnable-track {
+  background: color-mix(in srgb, var(--text-main, #243044) 10%, transparent) !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-slider::-webkit-slider-thumb {
+  background: var(--theme-primary, var(--accent-blue)) !important;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--theme-primary, var(--accent-blue)) 14%, transparent),
+    0 5px 14px color-mix(in srgb, var(--text-main, #243044) 18%, transparent) !important;
+}
+
+.folder-sort-trigger {
+  background: color-mix(in srgb, var(--surface-elevated, #ffffff) 58%, transparent) !important;
+  border-color: color-mix(in srgb, var(--text-main, #243044) 8%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.folder-sort-trigger:hover {
+  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 12%, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-blue)) 18%, transparent) !important;
+}
+
+/* Library header and chip clarity pass. */
+.browser-topbar-actions {
+  align-items: flex-start !important;
+  padding-top: 18px !important;
+}
+
+.browser-topbar-title {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 3px !important;
+  font-size: 22px !important;
+  line-height: 1.05 !important;
+  letter-spacing: 0 !important;
+}
+
+.browser-topbar-count {
+  font-size: 11px !important;
+  font-weight: 780 !important;
+  line-height: 1 !important;
+  color: color-mix(in srgb, var(--text-soft, #667085) 78%, var(--text-main, #1f2937)) !important;
+  background: color-mix(in srgb, #ffffff 44%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #1f2937) 6%, transparent) !important;
+  border-radius: 999px !important;
+  padding: 5px 8px !important;
+}
+
+.browser-panel .search-container {
+  position: relative !important;
+}
+
+.browser-panel .search-container input {
+  padding-right: 34px !important;
+}
+
+.search-clear-btn {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  position: absolute !important;
+  right: 10px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 24px !important;
+  height: 24px !important;
+  border-radius: 999px !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #1f2937) 7%, transparent) !important;
+  background: color-mix(in srgb, #ffffff 54%, transparent) !important;
+  color: color-mix(in srgb, var(--text-soft, #667085) 82%, var(--text-main, #1f2937)) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition:
+    background 140ms var(--ease-standard, ease),
+    color 140ms var(--ease-standard, ease),
+    transform 140ms var(--ease-standard, ease) !important;
+}
+
+.search-clear-btn:hover {
+  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 13%, #ffffff) !important;
+  color: var(--text-main, #1f2937) !important;
+  transform: translateY(-50%) scale(1.04) !important;
+}
+
+.library-list-header {
+  margin: 0 12px -1px !important;
+  min-height: 38px !important;
+  padding: 7px 14px 9px !important;
+  border-radius: 18px 18px 0 0 !important;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 64%, transparent),
+      color-mix(in srgb, #ffffff 34%, transparent)
+    ) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #1f2937) 6%, transparent) !important;
+  border-bottom-color: color-mix(in srgb, var(--text-main, #1f2937) 4%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 64%, transparent) !important;
+  z-index: 3 !important;
+}
+
+.library-list-heading {
+  display: flex !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+  gap: 8px !important;
+}
+
+.library-list-heading-text {
+  display: flex !important;
+  align-items: baseline !important;
+  min-width: 0 !important;
+  gap: 8px !important;
+}
+
+.library-list-title {
+  font-size: 14px !important;
+  font-weight: 860 !important;
+  color: var(--text-main, #1f2937) !important;
+}
+
+.library-list-count {
+  font-size: 11px !important;
+  font-weight: 760 !important;
+  color: color-mix(in srgb, var(--text-soft, #667085) 78%, var(--text-main, #1f2937)) !important;
+}
+
+.library-list-header + .playlist {
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+  border-top-color: color-mix(in srgb, var(--text-main, #1f2937) 4%, transparent) !important;
+}
+
+.library-list-header .folder-sort-trigger {
+  min-height: 26px !important;
+  padding-inline: 10px !important;
+  font-size: 10.5px !important;
+}
+
+.aq-badge--codec {
+  background: color-mix(in srgb, var(--text-soft, #667085) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--text-soft, #667085) 86%, var(--text-main, #1f2937)) !important;
+  border-color: color-mix(in srgb, var(--text-soft, #667085) 9%, transparent) !important;
+}
+
+.aq-badge--lossless,
+.aq-badge--lossless-codec {
+  background: color-mix(in srgb, #38a3ff 13%, transparent) !important;
+  color: color-mix(in srgb, #1683d8 72%, var(--text-main, #1f2937)) !important;
+  border-color: color-mix(in srgb, #38a3ff 15%, transparent) !important;
+}
+
+.aq-badge--hires {
+  background: color-mix(in srgb, #f4b740 18%, transparent) !important;
+  color: color-mix(in srgb, #a86d00 72%, var(--text-main, #1f2937)) !important;
+  border-color: color-mix(in srgb, #f4b740 20%, transparent) !important;
+}
+
+.aq-badge--mqa {
+  background: color-mix(in srgb, #7c3aed 14%, transparent) !important;
+  color: color-mix(in srgb, #6d28d9 72%, var(--text-main, #1f2937)) !important;
+  border-color: color-mix(in srgb, #7c3aed 18%, transparent) !important;
+  font-weight: 840 !important;
+}
+
+.aq-badge--bpm {
+  background: color-mix(in srgb, var(--theme-primary, #8fa0bb) 11%, transparent) !important;
+  color: color-mix(in srgb, var(--theme-primary, #8fa0bb) 64%, var(--text-main, #1f2937)) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, #8fa0bb) 14%, transparent) !important;
+  font-weight: 820 !important;
+}
+
+.aq-badge--tech,
+.aq-badge--bitrate,
+.aq-badge--channels {
+  background: color-mix(in srgb, var(--text-soft, #667085) 7%, transparent) !important;
+  color: color-mix(in srgb, var(--text-soft, #667085) 76%, var(--text-main, #1f2937)) !important;
+  border-color: color-mix(in srgb, var(--text-soft, #667085) 7%, transparent) !important;
+}
+
+/* Keep the main page title as the anchor; songs mode only needs a quiet sort row. */
+.browser-topbar-title {
+  font-size: 30px !important;
+  font-weight: 880 !important;
+  line-height: 1 !important;
+  letter-spacing: 0 !important;
+}
+
+.library-list-header--songs {
+  min-height: 30px !important;
+  margin: 0 12px 6px !important;
+  padding: 0 2px !important;
+  justify-content: flex-end !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.library-list-header--songs .folder-sort-wrap {
+  margin-left: auto !important;
+}
+
+.library-list-header--songs .folder-sort-trigger {
+  background: color-mix(in srgb, #ffffff 62%, transparent) !important;
+  border-color: color-mix(in srgb, var(--text-main, #1f2937) 8%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 60%, transparent),
+    0 8px 18px color-mix(in srgb, var(--text-main, #1f2937) 4%, transparent) !important;
+}
+
+.library-list-header--songs + .playlist {
+  border-top-left-radius: 22px !important;
+  border-top-right-radius: 22px !important;
+  border-top-color: color-mix(in srgb, var(--text-main, #1f2937) 7%, transparent) !important;
+}
+
+/* Put songs sorting inside the search field and keep top tools aligned. */
+.browser-topbar-actions {
+  justify-content: flex-start !important;
+  gap: 12px !important;
+}
+
+.browser-toolbar-group {
+  margin-left: auto !important;
+}
+
+.browser-topbar-title {
+  flex-direction: row !important;
+  align-items: baseline !important;
+  gap: 8px !important;
+}
+
+.browser-topbar-count {
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  font-size: 12px !important;
+  font-weight: 760 !important;
+}
+
+.browser-panel .search-container {
+  display: flex !important;
+  align-items: center !important;
+}
+
+.browser-panel .search-container input {
+  padding-right: 190px !important;
+}
+
+.search-sort-wrap {
+  position: absolute !important;
+  right: 10px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  margin-left: 0 !important;
+  z-index: 2 !important;
+}
+
+.search-sort-wrap .folder-sort-trigger {
+  max-width: 138px !important;
+  min-height: 28px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.browser-panel .search-container:has(.search-sort-wrap) .search-clear-btn {
+  right: 156px !important;
+}
+
+/* Keep the search-field sort menu above the virtual track rows. */
+.browser-panel .search-container {
+  position: relative !important;
+  z-index: 30000 !important;
+  overflow: visible !important;
+}
+
+.search-sort-wrap {
+  z-index: 30010 !important;
+}
+
+.search-sort-wrap .folder-sort-menu,
+.folder-browser-header .folder-sort-menu,
+.library-list-header .folder-sort-menu {
+  z-index: 30020 !important;
+  min-width: 208px !important;
+  background: #fff !important;
+  color: var(--text-main, #243044) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #243044) 14%, transparent) !important;
+  box-shadow:
+    0 18px 44px rgba(15, 23, 42, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.search-sort-wrap .folder-sort-menu-item,
+.folder-browser-header .folder-sort-menu-item,
+.library-list-header .folder-sort-menu-item {
+  color: var(--text-main, #243044) !important;
+  opacity: 1 !important;
+  font-weight: 780 !important;
+  text-shadow: none !important;
 }

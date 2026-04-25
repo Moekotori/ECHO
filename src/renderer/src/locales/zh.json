@@ -3,7 +3,8 @@
     "title": "ECHO"
   },
   "nav": {
-    "back": "返回"
+    "back": "返回",
+    "settings": "设置"
   },
   "common": {
     "unknownArtist": "未知艺人"
@@ -25,7 +26,7 @@
     "like": "喜欢",
     "unlike": "取消喜欢",
     "filterOnly": "喜欢的",
-    "filterOnlyTitle": "仅显示已喜欢的曲目"
+    "filterOnlyTitle": "喜欢的曲目"
   },
   "contextMenu": {
     "addToPlaylist": "加入歌单…",
@@ -39,6 +40,8 @@
     "copyTrackLine": "复制歌名与艺术家",
     "copyTrackImage": "复制歌曲卡片图片",
     "saveTrackImage": "保存歌曲卡片图片",
+    "deleteTrack": "删除歌曲",
+    "confirmDeleteTrack": "确定要从所在文件夹删除“{{title}}”吗？\n\n文件会移入系统回收站，并从 ECHO 中移除。\n{{path}}",
     "actionFailed": "操作失败：{{detail}}"
   },
   "queue": {
@@ -72,6 +75,7 @@
   "listMode": {
     "songs": "歌曲",
     "albums": "专辑",
+    "artists": "艺人",
     "playlists": "歌单",
     "folders": "文件夹",
     "queue": "队列"
@@ -101,7 +105,16 @@
     "tracks": "首曲目",
     "sortName": "名称",
     "sortDateAsc": "最早添加",
-    "sortDateDesc": "最新添加"
+    "sortDateDesc": "最新添加",
+    "importedRootsTitle": "已导入文件夹",
+    "noImportedRoots": "还没有导入文件夹",
+    "openImportedFolder": "查看已导入文件夹",
+    "removeImportedFolder": "移除已导入文件夹",
+    "confirmRemoveImportedFolder": "从 ECHO 移除已导入文件夹“{{name}}”？"
+  },
+  "artists": {
+    "heading": "艺人",
+    "unknown": "Unknown Artist"
   },
   "empty": {
     "noTracks": "还没有曲目。",
@@ -111,9 +124,11 @@
     "playlistEmpty": "此歌单为空。请在「歌曲」标签用 (+) 添加曲目，或使用「从搜索结果添加」。",
     "noSearchMatch": "没有符合搜索条件的曲目。",
     "noLikedInView": "当前列表下没有已喜欢的曲目。",
-    "historyEmpty": "\u6682\u65e0\u64ad\u653e\u5386\u53f2\u3002"
+    "historyEmpty": "暂无播放历史。"
   },
   "playlists": {
+    "allPlaylists": "全部歌单",
+    "noPlaylistsShort": "还没有歌单",
     "yourPlaylists": "我的歌单",
     "more": "更多",
     "importLibrary": "导入…",
@@ -195,16 +210,16 @@
     "selectTrack": "请选择曲目",
     "nightcoreMode": "Nightcore 模式",
     "ellipsis": "…",
-    "playbackHistory": "\u64ad\u653e\u5386\u53f2",
-    "backHistory": "\u6309\u5386\u53f2\u8fd4\u56de",
-    "clearHistory": "\u6e05\u7a7a"
+    "playbackHistory": "播放历史",
+    "backHistory": "按历史返回",
+    "clearHistory": "清空"
   },
   "dlna": {
     "castTitle": "DLNA",
     "networkMedia": "网络媒体"
   },
   "settings": {
-    "pageTitle": "音频工作室设置",
+    "pageTitle": "设置",
     "searchPlaceholder": "搜索设置…",
     "searchNoResults": "没有找到",
     "nav": {
@@ -321,15 +336,15 @@
     "aboutBody": "ECHO 2026 致力为用户提供最好的体验!",
     "versionText": "Version {{version}}",
     "poweredBy": "Powered by Moekotori",
-    "viewChangelog": "\u67e5\u770b\u66f4\u65b0\u65e5\u5fd7",
-    "refreshChangelog": "\u5237\u65b0\u66f4\u65b0\u65e5\u5fd7",
-    "openReleasesPage": "\u6253\u5f00 Releases \u9875\u9762",
-    "releaseNotesUnavailable": "\u66f4\u65b0\u65e5\u5fd7\u6682\u65f6\u65e0\u6cd5\u83b7\u53d6\u3002",
-    "releaseNotesForVersion": "{{version}} \u66f4\u65b0\u5185\u5bb9",
-    "releaseNotesLatest": "\u6700\u65b0\u66f4\u65b0\u65e5\u5fd7",
-    "openFullRelease": "\u6253\u5f00\u8be5\u7248\u672c",
-    "releaseNotesLoading": "\u6b63\u5728\u52a0\u8f7d\u66f4\u65b0\u65e5\u5fd7...",
-    "releaseNotesHint": "\u6700\u8fd1\u4fee\u590d\u4e0e\u53d8\u66f4\u6765\u81ea GitHub Releases\u3002",
+    "viewChangelog": "查看更新日志",
+    "refreshChangelog": "刷新更新日志",
+    "openReleasesPage": "打开 Releases 页面",
+    "releaseNotesUnavailable": "更新日志暂时无法获取。",
+    "releaseNotesForVersion": "{{version}} 更新内容",
+    "releaseNotesLatest": "最新更新日志",
+    "openFullRelease": "打开该版本",
+    "releaseNotesLoading": "正在加载更新日志...",
+    "releaseNotesHint": "最近修复与变更来自 GitHub Releases。",
     "devSection": "开发者",
     "devConsoleTitle": "开发者工具（控制台）",
     "devConsoleDesc": "打开或关闭独立窗口的 Chromium 控制台；再点一次可关闭。",
@@ -338,9 +353,9 @@
     "devOpenFailed": "无法打开开发者工具：{{message}}",
     "devReloadFailed": "无法重新加载：{{message}}",
     "devUserDataFailed": "无法打开用户数据目录：{{message}}",
-  "devModeTitle": "开发者模式",
-  "devModeDesc": "开启后显示调试与开发者功能；关闭时这些功能将隐藏。",
-  "devModeDisabledHint": "开发者功能当前已隐藏，开启“开发者模式”后显示。",
+    "devModeTitle": "开发者模式",
+    "devModeDesc": "开启后显示调试与开发者功能；关闭时这些功能将隐藏。",
+    "devModeDisabledHint": "开发者功能当前已隐藏，开启“开发者模式”后显示。",
     "devStartupTitle": "启动时打开控制台",
     "devStartupDesc": "应用启动后自动打开开发者工具（下次启动生效）。",
     "devReloadTitle": "重新加载窗口",
@@ -367,8 +382,16 @@
     "gradientEndDesc": "窗口背景渐变的第二色停靠点。",
     "gradientAngle": "角度",
     "gradientAngleDesc": "渐变方向（角度）。",
+    "customizeTheme": "自定义…",
+    "customWallpaperDecor": "自定义壁纸装饰",
+    "coverSizeTitle": "封面尺寸",
+    "coverSizeDesc": "调整主播放器专辑封面的大小。",
     "bgImage": "背景图",
+    "bgImageDesc": "选择一张本地图片作为应用背景。",
+    "selectImage": "选择图片",
+    "changeImage": "更换图片",
     "wallpaperOpacity": "壁纸不透明度",
+    "wallpaperOpacityDesc": "调整自定义背景图的可见程度。",
     "panelTransparency": "面板透明度",
     "panelTransparencyDesc": "让界面面板更透或更实。",
     "clear": "清除",
@@ -377,6 +400,11 @@
     "blurStrengthDesc": "调节毛玻璃模糊程度。",
     "blurNone": "无",
     "blurHeavy": "强",
+    "libraryCleanupTitle": "资料库清理",
+    "libraryCleanupDesc": "扫描当前媒体库、歌单、收藏和播放历史，找出缺失文件。",
+    "libraryCleanupScan": "扫描",
+    "libraryCleanupScanning": "扫描中...",
+    "libraryCleanupRemove": "移除无效条目",
     "uiFont": "界面字体",
     "uiFontDesc": "与配色预设独立（Outfit / Inter / 系统）。",
     "fontOutfit": "Outfit",
@@ -583,10 +611,10 @@
     "romaji": "罗马字",
     "translation": "翻译",
     "wordHighlight": "逐字高亮",
-  "wordLeadMs": "逐字提前量",
-  "wordLeadMsHint": "正值会让高亮更早，负值会让高亮更晚。",
-  "wordFillRatio": "单行完成比例",
-  "wordFillRatioHint": "控制一行在下一句开始前多早完成 100% 高亮。",
+    "wordLeadMs": "逐字提前量",
+    "wordLeadMsHint": "正值会让高亮更早，负值会让高亮更晚。",
+    "wordFillRatio": "单行完成比例",
+    "wordFillRatioHint": "控制一行在下一句开始前多早完成 100% 高亮。",
     "mainLineSize": "主歌词字号",
     "desktopFontSize": "桌面歌词字号",
     "fontColor": "歌词颜色",
@@ -605,25 +633,25 @@
     "statusPrefix": "歌词状态：",
     "statusLoading": "加载中…",
     "statusMatched": "已匹配",
-  "statusDegraded": "已匹配（逐字已降级）",
+    "statusDegraded": "已匹配（逐字已降级）",
     "statusNone": "无匹配",
     "statusDash": "—",
-    "currentSourcePrefix": "\u5f53\u524d\u6b4c\u8bcd\u6765\u6e90\uff1a",
-    "sourceStateIdle": "\u2014",
-    "sourceStateLoading": "\u52a0\u8f7d\u4e2d",
-    "sourceStateNone": "\u65e0\u6b4c\u8bcd",
-    "sourceStateLocal": "\u672c\u5730\u6587\u4ef6",
-    "sourceStateEmbedded": "\u5185\u5d4c\u6807\u7b7e",
+    "currentSourcePrefix": "当前歌词来源：",
+    "sourceStateIdle": "—",
+    "sourceStateLoading": "加载中",
+    "sourceStateNone": "无歌词",
+    "sourceStateLocal": "本地文件",
+    "sourceStateEmbedded": "内嵌标签",
     "sourceStateLrclib": "LRCLIB",
-    "sourceStateNetease": "\u7f51\u6613\u4e91",
-    "sourceStateManual": "\u624b\u9009",
-    "sourceStateLink": "\u6b4c\u66f2\u94fe\u63a5",
-    "sourceStateCache": "\u7f13\u5b58",
+    "sourceStateNetease": "网易云",
+    "sourceStateManual": "手选",
+    "sourceStateLink": "歌曲链接",
+    "sourceStateCache": "缓存",
     "selectSource": "选择来源",
     "sourceLocal": "本地（同目录 .lrc / 内嵌标签）",
     "sourceLrclib": "LRCLIB（在线）",
-    "sourceNetease": "网易云 API（暂与 LRCLIB 匹配逻辑兼容）",
-    "sourceQq": "QQ 音乐 API（暂与 LRCLIB 匹配逻辑兼容）",
+    "sourceNetease": "网易云（优先中日文曲库）",
+    "sourceQq": "QQ 音乐（失败时自动尝试酷狗 / 酷我）",
     "refresh": "刷新",
     "fetchAgainTitle": "重新获取歌词",
     "localSync": "本地与同步",
@@ -639,7 +667,12 @@
     "applyLyrics": "应用歌词",
     "linkPlaceholder": "粘贴歌曲链接（网易云 / QQ / 酷狗 / 酷我）…",
     "fetchFromLink": "从链接获取歌词",
-    "linkHint": "网易云链接支持按歌曲 ID 直取歌词；其他平台链接会尝试通用匹配。"
+    "linkHint": "网易云链接支持按歌曲 ID 直取歌词；其他平台链接会尝试通用匹配。",
+    "sourceStateQq": "QQ 音乐",
+    "sourceStateKugou": "酷狗",
+    "sourceStateKuwo": "酷我",
+    "sourceKugou": "酷狗音乐（在线）",
+    "sourceKuwo": "酷我音乐（在线）"
   },
   "mvDrawer": {
     "searchTitle": "搜索 MV",

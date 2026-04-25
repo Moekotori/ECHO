@@ -79,7 +79,7 @@ export const DEFAULT_CONFIG = {
   customBgOpacity: 1.0,
   uiBgOpacity: 0.6,
   uiBlur: 20,
-  uiFontFamily: 'system',
+  uiFontFamily: 'outfit',
   /** 用户选择的本地字体文件路径（.ttf / .otf / .woff / .woff2）；与 uiFontFamily === "custom" 一起使用 */
   uiCustomFontPath: null,
   uiBaseFontSize: 15,
@@ -159,6 +159,7 @@ export const DEFAULT_CONFIG = {
   playlistImportFolder: null,
   /** 自动保存媒体库（播放列表/自定义歌单/收藏） */
   autoSaveLibrary: true,
+  autoUpdateEnabled: true,
   downloaderQuickMode: false,
   /** 开发者模式（开启后显示高级开发者功能） */
   devModeEnabled: false,

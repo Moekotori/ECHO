@@ -180,6 +180,18 @@ function uniqueByPath(entries) {
   return next
 }
 
+function normalizeAudioEntrySeed(entry) {
+  if (!entry?.path || typeof entry.path !== 'string') return null
+  return {
+    name: entry.name || basename(entry.path),
+    path: entry.path,
+    folder: entry.folder || dirname(entry.path),
+    birthtimeMs: Number(entry.birthtimeMs) || 0,
+    mtimeMs: Number(entry.mtimeMs) || 0,
+    sizeBytes: Number(entry.sizeBytes) || 0
+  }
+}
+
 function buildSnapshot(entries) {
   const map = new Map()
   for (const entry of uniqueByPath(entries)) {
@@ -387,14 +399,22 @@ export function createLibraryWatchManager({ onChange }) {
   }
 
   return {
-    async start(folders) {
+    async start(folders, existingTracks = []) {
       const nextFolders = Array.isArray(folders)
         ? [...new Set(folders.map(normalizeFolderPath).filter(Boolean))]
         : []
+      const seededSnapshot = buildSnapshot(
+        (Array.isArray(existingTracks) ? existingTracks : [])
+          .map(normalizeAudioEntrySeed)
+          .filter((entry) =>
+            nextFolders.some((folder) => entry?.path && isPathInsideFolder(entry.path, folder))
+          )
+      )
       const addedFolders = nextFolders.filter(
         (folder) => !watchedFolders.some((existing) => isPathInsideFolder(folder, existing))
       )
       watchedFolders = nextFolders
+      snapshot = seededSnapshot
       for (const path of [...snapshot.keys()]) {
         if (!watchedFolders.some((folder) => isPathInsideFolder(path, folder))) {
           snapshot.delete(path)

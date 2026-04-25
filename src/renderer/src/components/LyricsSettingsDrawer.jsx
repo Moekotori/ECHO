@@ -22,7 +22,9 @@ export default function LyricsSettingsDrawer({
       { value: 'local', label: t('lyricsDrawer.sourceLocal') },
       { value: 'lrclib', label: t('lyricsDrawer.sourceLrclib') },
       { value: 'netease', label: t('lyricsDrawer.sourceNetease') },
-      { value: 'qq', label: t('lyricsDrawer.sourceQq') }
+      { value: 'qq', label: t('lyricsDrawer.sourceQq') },
+      { value: 'kugou', label: t('lyricsDrawer.sourceKugou') },
+      { value: 'kuwo', label: t('lyricsDrawer.sourceKuwo') }
     ],
     [t]
   )

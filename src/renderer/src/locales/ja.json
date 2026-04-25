@@ -3,7 +3,8 @@
     "title": "ECHO"
   },
   "nav": {
-    "back": "戻る"
+    "back": "戻る",
+    "settings": "設定"
   },
   "common": {
     "unknownArtist": "不明なアーティスト"
@@ -40,6 +41,8 @@
     "copyTrackLine": "曲名とアーティストをコピー",
     "copyTrackImage": "曲カード画像をコピー",
     "saveTrackImage": "曲カード画像を保存",
+    "deleteTrack": "曲を削除",
+    "confirmDeleteTrack": "「{{title}}」をフォルダから削除しますか？\n\nファイルはシステムのごみ箱に移動され、ECHO からも削除されます。\n{{path}}",
     "actionFailed": "操作に失敗しました：{{detail}}"
   },
   "queue": {
@@ -73,6 +76,7 @@
   "listMode": {
     "songs": "曲",
     "albums": "アルバム",
+    "artists": "アーティスト",
     "playlists": "プレイリスト",
     "folders": "フォルダ",
     "queue": "キュー"
@@ -102,7 +106,16 @@
     "tracks": "曲",
     "sortName": "名前",
     "sortDateAsc": "古い順",
-    "sortDateDesc": "新しい順"
+    "sortDateDesc": "新しい順",
+    "importedRootsTitle": "読み込み済みフォルダ",
+    "noImportedRoots": "読み込み済みフォルダはありません",
+    "openImportedFolder": "読み込み済みフォルダを開く",
+    "removeImportedFolder": "読み込み済みフォルダを削除",
+    "confirmRemoveImportedFolder": "読み込み済みフォルダ「{{name}}」を ECHO から削除しますか？"
+  },
+  "artists": {
+    "heading": "アーティスト",
+    "unknown": "Unknown Artist"
   },
   "empty": {
     "noTracks": "曲がありません。",
@@ -115,6 +128,8 @@
     "historyEmpty": "再生履歴はまだありません。"
   },
   "playlists": {
+    "allPlaylists": "すべてのプレイリスト",
+    "noPlaylistsShort": "プレイリストはありません",
     "smartCollections": "スマートコレクション",
     "smartCollectionsHint": "テンプレートを押すとすぐ作成されます。細かく決めたいときだけカスタムルールを開いてください。",
     "customSmartCollection": "カスタムルール",
@@ -415,8 +430,16 @@
     "gradientEndDesc": "ウィンドウ背景グラデーションの第 2 カラーストップです。",
     "gradientAngle": "角度",
     "gradientAngleDesc": "グラデーションの向き（度）。",
+    "customizeTheme": "カスタマイズ…",
+    "customWallpaperDecor": "カスタム壁紙装飾",
+    "coverSizeTitle": "カバーサイズ",
+    "coverSizeDesc": "メインプレイヤーのアルバムカバーサイズを調整します。",
     "bgImage": "背景画像",
+    "bgImageDesc": "アプリの背景に使うローカル画像を選びます。",
+    "selectImage": "画像を選択",
+    "changeImage": "画像を変更",
     "wallpaperOpacity": "壁紙の不透明度",
+    "wallpaperOpacityDesc": "カスタム背景画像の表示濃度を調整します。",
     "panelTransparency": "パネルの透明度",
     "panelTransparencyDesc": "UI パネルをより透ける／しっかりさせます。",
     "clear": "クリア",
@@ -425,6 +448,11 @@
     "blurStrengthDesc": "すりガラス効果の強さを調整します。",
     "blurNone": "なし",
     "blurHeavy": "強",
+    "libraryCleanupTitle": "ライブラリ整理",
+    "libraryCleanupDesc": "現在のライブラリ、プレイリスト、お気に入り、再生履歴をスキャンして欠落ファイルを探します。",
+    "libraryCleanupScan": "スキャン",
+    "libraryCleanupScanning": "スキャン中...",
+    "libraryCleanupRemove": "無効な項目を削除",
     "uiFont": "UI フォント",
     "uiFontDesc": "配色プリセットとは独立（Outfit / Inter / システム）。",
     "fontOutfit": "Outfit",
@@ -722,8 +750,8 @@
     "selectSource": "ソースを選択",
     "sourceLocal": "ローカル（同フォルダ .lrc / 埋め込みタグ）",
     "sourceLrclib": "LRCLIB（オンライン）",
-    "sourceNetease": "NetEase API（現状 LRCLIB 互換マッチ）",
-    "sourceQq": "QQ Music API（現状 LRCLIB 互換マッチ）",
+    "sourceNetease": "NetEase（中日楽曲向け）",
+    "sourceQq": "QQ Music（失敗時は Kugou / Kuwo も試行）",
     "refresh": "更新",
     "fetchAgainTitle": "歌詞を再取得",
     "localSync": "ローカルと同期",
@@ -739,20 +767,25 @@
     "applyLyrics": "歌詞を適用",
     "linkPlaceholder": "曲リンクを貼り付け（NetEase / QQ / Kugou / Kuwo）…",
     "fetchFromLink": "リンクから歌詞を取得",
-    "linkHint": "NetEase は曲 ID で直接取得、他サービスはベストエフォートで照合します。"
+    "linkHint": "NetEase は曲 ID で直接取得、他サービスはベストエフォートで照合します。",
+    "sourceStateQq": "QQ Music",
+    "sourceStateKugou": "Kugou",
+    "sourceStateKuwo": "Kuwo",
+    "sourceKugou": "Kugou Music（オンライン）",
+    "sourceKuwo": "Kuwo Music（オンライン）"
   },
   "mvDrawer": {
-    "searchTitle": "MV 銈掓绱?",
-    "searchHint": "鐝惧湪銇洸鍚嶃仹銇濄伄銇俱伨妞滅储銇欍倠銇?銈兗銉兗銉夈倰鍏ュ姏銇椼仸涓€鑷淬仐銇?MV 銈掗伕鎶椼仹銇嶃伨銇欍€?",
-    "searchPlaceholder": "鏇查悕 / 銈€銉笺偘銈ｃ偣銉? / 銈兗銉兗銉?",
-    "useSongName": "鐝惧湪銇洸鍚嶃倰浣跨敤",
-    "useSearchResult": "銇撱伄 MV 銈掍娇銇?",
-    "searching": "妞滅储涓€?",
-    "searchEmpty": "鏇查悕銇俱仧銇绱偔銉兗銉夈倰鍏ュ姏銇椼仸銇忋仩銇曘亜銆?",
-    "searchUnavailable": "銇撱伄銉撱儷銉夈仹銇?MV 妤滅储銈掑埄鐢ㄣ仹銇嶃伨銇涖倱銆?",
-    "searchNoResult": "涓€鑷淬仚銈?MV 銇屻倝銇嬨倞銇俱仜銈撱仹銇椼仧銆?",
-    "searchFailed": "MV 銈掓绱仹銇嶃伨銇涖倱銇с仐銇熴€?",
-    "searchUntitled": "銈裤偆銉医??MV",
+    "searchTitle": "MV を検索",
+    "searchHint": "現在の曲名で検索するか、キーワードを入力して一致した MV を適用できます。",
+    "searchPlaceholder": "曲名 / アーティスト / キーワード",
+    "useSongName": "現在の曲名を使う",
+    "useSearchResult": "この MV を使う",
+    "searching": "検索中...",
+    "searchEmpty": "曲名または検索キーワードを入力してください。",
+    "searchUnavailable": "このビルドでは MV 検索を利用できません。",
+    "searchNoResult": "一致する MV が見つかりませんでした。",
+    "searchFailed": "MV を検索できませんでした。",
+    "searchUntitled": "タイトルなし MV",
     "urlError": "URL を認識できません。YouTube または Bilibili の動画リンクを貼り付けてください。",
     "customMv": "カスタム MV",
     "customHint": "現在の MV として YouTube または Bilibili の動画 URL を貼り付けます。",

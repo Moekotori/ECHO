@@ -10,7 +10,7 @@
  *
  * AudioQuality 字段：
  *   codec, bitrateKbps, sampleRateHz, bitDepth,
- *   channels, channelLayout, isLossless, isHiRes
+ *   channels, channelLayout, bpm, isLossless, isHiRes, isMqa
  */
 import React from 'react'
 
@@ -43,6 +43,12 @@ export function formatChannels(ch, layout) {
   if (ch === 1) return '单声道'
   if (ch === 2) return '立体声'
   return `${ch}声道`
+}
+
+export function formatBpm(bpm) {
+  const value = Number(bpm)
+  if (!Number.isFinite(value) || value <= 0) return null
+  return `BPM ${Math.round(value)}`
 }
 
 // ─── DSD 特殊格式化 ──────────────────────────────────────
@@ -84,6 +90,26 @@ const LOSSY_CODECS = new Set([
   'MP3', 'AAC', 'OGG', 'OPUS', 'VORBIS', 'WMA', 'AC3', 'MP2', 'M4A'
 ])
 
+export function formatCodecLabel(codec) {
+  if (!codec || typeof codec !== 'string') return null
+  const raw = codec.trim()
+  if (!raw) return null
+  const upper = raw.toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')
+  if (
+    upper === 'MPEG' ||
+    upper === 'MPEG AUDIO' ||
+    upper === 'MPEG 1 LAYER 3' ||
+    upper === 'MPEG-1 LAYER 3' ||
+    upper === 'MPEG LAYER 3' ||
+    upper === 'MPEG LAYER III' ||
+    upper === 'MPEG 1 AUDIO LAYER 3'
+  ) {
+    return 'MP3'
+  }
+  if (upper === 'MPEG 4 AAC' || upper === 'MPEG-4 AAC') return 'AAC'
+  return upper
+}
+
 export function getIsLossless(quality) {
   if (!quality) return false
   if (typeof quality.isLossless === 'boolean') return quality.isLossless
@@ -96,8 +122,8 @@ export function getIsLossless(quality) {
 export function getIsHiRes(quality) {
   if (!quality) return false
   if (typeof quality.isHiRes === 'boolean') return quality.isHiRes
-  const depth = quality.bitDepth
-  const rate  = quality.sampleRateHz
+  const depth = Number(quality.bitDepth)
+  const rate  = Number(quality.sampleRateHz)
   return (
     Number.isFinite(depth) && depth >= 24 &&
     Number.isFinite(rate)  && rate  >= 96000
@@ -108,10 +134,11 @@ export function normalizeAudioQuality(quality) {
   if (!quality || typeof quality !== 'object') return null
   const n = { ...quality }
   if (n.codec && typeof n.codec === 'string') {
-    n.codec = n.codec.toUpperCase().trim()
+    n.codec = formatCodecLabel(n.codec)
   }
   if (typeof n.isLossless !== 'boolean') n.isLossless = getIsLossless(n)
   if (typeof n.isHiRes    !== 'boolean') n.isHiRes    = getIsHiRes(n)
+  if (typeof n.isMqa      !== 'boolean') n.isMqa      = getIsMqa(n)
   return n
 }
 
@@ -129,6 +156,7 @@ export default function AudioQualityBadges({
   const codec      = q.codec || null
   const isLossless = q.isLossless
   const isHiRes    = q.isHiRes
+  const isMqa      = q.isMqa
   const isDsd      = isDsdCodec(codec)
 
   // compact 模式不显示 bitrate；player 模式全显示
@@ -161,6 +189,11 @@ export default function AudioQualityBadges({
         <span className="aq-badge aq-badge--lossless" title="DSD 无损音频">
           Lossless
         </span>
+        {isMqa && (
+          <span className="aq-badge aq-badge--mqa" title="MQA">
+            MQA
+          </span>
+        )}
         {/* DSD 倍率 badge（最优先，如 DSD64） */}
         {dsdMult && (
           <span className="aq-badge aq-badge--hires" title={`DSD 规格：${dsdMult}`}>
@@ -201,8 +234,11 @@ export default function AudioQualityBadges({
 
   const bitrateStr = formatBitrate(q.bitrateKbps)
   const channels   = showChannels ? formatChannels(q.channels, q.channelLayout) : null
+  const bpmStr      = formatBpm(q.bpm)
 
-  if (!codec && !techLabel && !bitrateStr && !isLossless && !isHiRes) return null
+  if (!codec && !techLabel && !bitrateStr && !channels && !bpmStr && !isLossless && !isHiRes && !isMqa) {
+    return null
+  }
 
   return (
     <div className={cls}>
@@ -220,6 +256,12 @@ export default function AudioQualityBadges({
       {isHiRes && (
         <span className="aq-badge aq-badge--hires" title="Hi-Res 高清音频">
           Hi-Res
+        </span>
+      )}
+
+      {isMqa && (
+        <span className="aq-badge aq-badge--mqa" title="MQA">
+          MQA
         </span>
       )}
 
@@ -250,6 +292,21 @@ export default function AudioQualityBadges({
           {channels}
         </span>
       )}
+
+      {bpmStr && (
+        <span className="aq-badge aq-badge--bpm" title={`节拍：${bpmStr}`}>
+          {bpmStr}
+        </span>
+      )}
     </div>
   )
+}
+
+export function getIsMqa(quality) {
+  if (!quality) return false
+  if (typeof quality.isMqa === 'boolean') return quality.isMqa
+  const text = [quality.codec, quality.codecProfile, quality.container, quality.format]
+    .filter(Boolean)
+    .join(' ')
+  return /\bmqa\b/i.test(text)
 }

@@ -24,6 +24,14 @@ Before editing `App.jsx`:
 - Main process, filesystem, downloader, and export behavior: use `src/main` and expose through preload when needed.
 - Text and labels: update locale JSON files under `src/renderer/src/locales`.
 
+## Encoding Rule
+
+All source, locale, documentation, and script files must stay valid UTF-8. Do not save edited files as ANSI, GBK, UTF-16, or other legacy encodings.
+
+Before finishing changes that touch user-facing text, locale JSON, comments containing non-ASCII text, or files previously edited by external tools, run `npm run guard:encoding`.
+
+The guard blocks invalid UTF-8 by default. It only warns on possible mojibake because single-character scans can false-positive on normal Chinese/Japanese text; review warnings manually. Use `STRICT_ENCODING_GUARD=1 npm run guard:encoding` only when intentionally doing a strict cleanup pass.
+
 ## Regression Checks
 
 Build success is only the baseline. When touching related behavior, also smoke-test:

@@ -2,6 +2,63 @@ import { PRESET_THEMES } from './color.js'
 
 const DEFAULT_ANGLE = 135
 
+function parseHexColor(hex) {
+  if (typeof hex !== 'string') return null
+  let h = hex.trim().replace('#', '')
+  if (h.length === 3) {
+    h = h
+      .split('')
+      .map((c) => c + c)
+      .join('')
+  }
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null
+  return {
+    r: parseInt(h.slice(0, 2), 16) / 255,
+    g: parseInt(h.slice(2, 4), 16) / 255,
+    b: parseInt(h.slice(4, 6), 16) / 255
+  }
+}
+
+function luminance(hex) {
+  const rgb = parseHexColor(hex)
+  if (!rgb) return null
+  const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
+  return 0.2126 * lin(rgb.r) + 0.7152 * lin(rgb.g) + 0.0722 * lin(rgb.b)
+}
+
+function contrastRatio(a, b) {
+  const la = luminance(a)
+  const lb = luminance(b)
+  if (la == null || lb == null) return Infinity
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
+
+function isDarkHex(hex) {
+  const l = luminance(hex)
+  return l != null ? l < 0.42 : false
+}
+
+function readableTextFor(bg) {
+  return isDarkHex(bg) ? '#f7f9fc' : '#151c27'
+}
+
+function readableSoftTextFor(bg) {
+  return isDarkHex(bg) ? '#c5cfdb' : '#4b5968'
+}
+
+function ensureReadableText(base) {
+  const surfaces = [base.bgColor, base.glassColor, base.bgGradientEnd].filter(Boolean)
+  const weakestMain = Math.min(...surfaces.map((surface) => contrastRatio(base.textMain, surface)))
+  const weakestSoft = Math.min(...surfaces.map((surface) => contrastRatio(base.textSoft, surface)))
+  const referenceBg = base.glassColor || base.bgColor || '#ffffff'
+
+  return {
+    ...base,
+    textMain: weakestMain < 4.5 ? readableTextFor(referenceBg) : base.textMain,
+    textSoft: weakestSoft < 3.6 ? readableSoftTextFor(referenceBg) : base.textSoft
+  }
+}
+
 /** Default radial accent positions (%), fade radii (%), and size scale — per-theme overrides in `color.js`. */
 export const DEFAULT_BACKDROP_GLOW_POSITIONS = [
   [15, 25],
@@ -136,13 +193,13 @@ export function normalizeThemeColors(raw) {
         ? 'linear'
         : 'solid'
   }
-  return {
+  return ensureReadableText({
     ...base,
     bgGradientEnd,
     bgGradientAngle,
     bgMode,
     ...normalizeBackdropGlow(base)
-  }
+  })
 }
 
 /**

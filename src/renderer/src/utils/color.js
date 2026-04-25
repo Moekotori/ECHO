@@ -114,213 +114,338 @@ export const generateRandomPalette = () => {
 
 export const PRESET_THEMES = {
   darkmode: {
-    name: 'Dark Mode',
+    name: 'Graphite Bloom',
     colors: {
-      bgColor: '#0b1220',
-      accent1: '#60a5fa',
-      accent2: '#a78bfa',
-      accent3: '#22d3ee',
-      textMain: '#ffffff',
-      textSoft: '#cbd5e1',
-      glassColor: '#111a2b',
-      bgGradientEnd: '#1b2842',
+      bgColor: '#101722',
+      accent1: '#8ea7ff',
+      accent2: '#62d1d1',
+      accent3: '#f0a6c8',
+      textMain: '#f8fbff',
+      textSoft: '#c3cfdd',
+      glassColor: '#151f2d',
+      bgGradientEnd: '#202a3e',
       bgGradientAngle: 136,
       bgMode: 'linear',
-      backdropGlowIntensity: 0.58
+      backdropGlowLayers: 2,
+      backdropGlowIntensity: 0.42,
+      backdropGlowPositions: [
+        [18, 20],
+        [86, 74],
+        [52, 52]
+      ],
+      backdropGlowFade: [42, 46, 54]
     }
   },
   sakura: {
-    name: 'Sakura Blossom',
+    name: 'Sakura Atelier',
     colors: {
-      bgColor: '#f7f3f5',
-      accent1: '#f7aab5',
-      accent2: '#a3d2e3',
-      accent3: '#bbf0d8',
-      textMain: '#4a363b',
-      textSoft: '#7a6a6d',
+      bgColor: '#fff8f9',
+      accent1: '#d97691',
+      accent2: '#6fb7ca',
+      accent3: '#93bd85',
+      textMain: '#32262d',
+      textSoft: '#6d5962',
       glassColor: '#ffffff',
-      bgGradientEnd: '#e3f2fa',
-      bgGradientAngle: 135,
-      bgMode: 'linear'
+      bgGradientEnd: '#eef8f7',
+      bgGradientAngle: 138,
+      bgMode: 'linear',
+      backdropGlowIntensity: 0.36,
+      backdropGlowPositions: [
+        [18, 18],
+        [82, 80],
+        [54, 46]
+      ],
+      backdropGlowFade: [34, 38, 52]
     }
   },
   midnight: {
-    name: 'Midnight Echo',
+    name: 'Midnight Prism',
     colors: {
-      bgColor: '#0f172a',
-      accent1: '#818cf8',
-      accent2: '#c084fc',
-      accent3: '#38bdf8',
-      textMain: '#f8fafc',
-      textSoft: '#94a3b8',
-      glassColor: '#1e293b',
-      bgGradientEnd: '#1e1b4b',
+      bgColor: '#0d1221',
+      accent1: '#a4b3ff',
+      accent2: '#c08bff',
+      accent3: '#5fd5e3',
+      textMain: '#f9fbff',
+      textSoft: '#c4ccda',
+      glassColor: '#131c30',
+      bgGradientEnd: '#251e4a',
       bgGradientAngle: 128,
       bgMode: 'linear',
-      backdropGlowLayers: 2,
-      backdropGlowIntensity: 0.52
+      backdropGlowLayers: 3,
+      backdropGlowIntensity: 0.4,
+      backdropGlowPositions: [
+        [16, 28],
+        [80, 20],
+        [64, 86]
+      ],
+      backdropGlowFade: [38, 36, 44]
     }
   },
   matcha: {
-    name: 'Matcha Latte',
+    name: 'Matcha Linen',
     colors: {
-      bgColor: '#f4fbf4',
-      accent1: '#86efac',
-      accent2: '#fde047',
-      accent3: '#93c5fd',
-      textMain: '#14532d',
-      textSoft: '#5a7260',
+      bgColor: '#f8f8ed',
+      accent1: '#6c9c70',
+      accent2: '#c59b4d',
+      accent3: '#6fa5b8',
+      textMain: '#243326',
+      textSoft: '#586657',
       glassColor: '#ffffff',
-      bgGradientEnd: '#ecfccb',
-      bgGradientAngle: 145,
+      bgGradientEnd: '#edf4df',
+      bgGradientAngle: 142,
       bgMode: 'linear',
-      backdropGlowIntensity: 0.88
+      backdropGlowIntensity: 0.34,
+      backdropGlowPositions: [
+        [20, 24],
+        [84, 78],
+        [55, 45]
+      ],
+      backdropGlowFade: [36, 40, 52]
     }
   },
   sunset: {
-    name: 'Sunset Glow',
+    name: 'Apricot Cinema',
     colors: {
-      bgColor: '#fff1f2',
-      accent1: '#fb7185',
-      accent2: '#fbbf24',
-      accent3: '#a78bfa',
-      textMain: '#881337',
-      textSoft: '#fda4af',
+      bgColor: '#fff8f2',
+      accent1: '#d86f61',
+      accent2: '#d8a24b',
+      accent3: '#7e88d2',
+      textMain: '#3f2824',
+      textSoft: '#705954',
       glassColor: '#ffffff',
-      bgGradientEnd: '#ffe4e6',
-      bgGradientAngle: 135,
+      bgGradientEnd: '#f4edf8',
+      bgGradientAngle: 132,
       bgMode: 'linear',
-      backdropGlowIntensity: 0.92
-    }
-  },
-  nordic: {
-    name: 'Nordic Night',
-    colors: {
-      bgColor: '#1e293b', // Slate 800
-      accent1: '#38bdf8', // Sky 400
-      accent2: '#818cf8', // Indigo 400
-      accent3: '#f472b6', // Pink 400
-      textMain: '#ffffff', // Slate 50
-      textSoft: '#cbd5e1', // Slate 400 -> Slate 300
-      glassColor: '#0f172a', // Slate 900
-      bgGradientEnd: '#0c1828',
-      bgGradientAngle: 160,
-      bgMode: 'linear',
-      backdropGlowLayers: 2,
-      backdropGlowIntensity: 0.44,
-      backdropGlowFade: [52, 52, 58]
-    }
-  },
-  obsidian: {
-    name: 'Obsidian Neon',
-    colors: {
-      bgColor: '#000000',
-      accent1: '#22d3ee', // Cyan 400
-      accent2: '#818cf8',
-      accent3: '#fb7185',
-      textMain: '#ffffff',
-      textSoft: '#a1a1aa', // Zinc 400 -> Zinc 300
-      glassColor: '#09090b', // Zinc 950
-      bgGradientEnd: '#18181b',
-      bgGradientAngle: 135,
-      bgMode: 'linear',
-      backdropGlowLayers: 2,
-      backdropGlowIntensity: 0.5
+      backdropGlowIntensity: 0.38,
+      backdropGlowFade: [38, 42, 54]
     }
   },
   rose: {
-    name: 'Rose Quartz',
+    name: 'Rose Porcelain',
     colors: {
-      bgColor: '#fffcfc',
-      accent1: '#f43f5e', // Rose 500
-      accent2: '#fbbf24', // Amber 400
-      accent3: '#2dd4bf', // Teal 400
-      textMain: '#4c0519', // Rose 950
-      textSoft: '#fb7185', // Rose 400
+      bgColor: '#fff9f7',
+      accent1: '#c96f87',
+      accent2: '#b99555',
+      accent3: '#68b3aa',
+      textMain: '#3c2830',
+      textSoft: '#725a62',
       glassColor: '#ffffff',
-      bgGradientEnd: '#fff1f2',
+      bgGradientEnd: '#f7eef3',
       bgGradientAngle: 135,
       bgMode: 'linear',
-      backdropGlowIntensity: 0.96
-    }
-  },
-  cyber: {
-    name: 'Cyber City',
-    colors: {
-      bgColor: '#0c0a09', // Stone 950
-      accent1: '#d946ef', // Fuchsia 500
-      accent2: '#3b82f6', // Blue 500
-      accent3: '#14b8a6', // Teal 500
-      textMain: '#ffffff', // Stone 50
-      textSoft: '#d6d3d1', // Stone 400->Stone 300
-      glassColor: '#1c1917', // Stone 900
-      bgGradientEnd: '#172554',
-      bgGradientAngle: 140,
-      bgMode: 'linear',
-      backdropGlowIntensity: 0.58
+      backdropGlowIntensity: 0.34,
+      backdropGlowFade: [34, 38, 50]
     }
   },
   magicalGirl: {
-    name: 'Magical Girl',
+    name: 'Magical Ribbon',
     colors: {
-      bgColor: '#fdf2f8',
-      accent1: '#ec4899',
-      accent2: '#fbbf24',
-      accent3: '#8b5cf6',
-      textMain: '#4c0519',
-      textSoft: '#9f1239',
+      bgColor: '#fff7fc',
+      accent1: '#cc6aa6',
+      accent2: '#d6a34c',
+      accent3: '#8e82dd',
+      textMain: '#3a2638',
+      textSoft: '#6d5770',
       glassColor: '#ffffff',
-      bgGradientEnd: '#fce7f3',
+      bgGradientEnd: '#f4efff',
       bgGradientAngle: 120,
-      bgMode: 'linear'
+      bgMode: 'linear',
+      backdropGlowIntensity: 0.36,
+      backdropGlowPositions: [
+        [18, 24],
+        [80, 22],
+        [58, 84]
+      ],
+      backdropGlowFade: [34, 34, 48]
     }
   },
   miku: {
-    name: 'Miku Cyan',
+    name: 'Virtual Aqua',
     colors: {
-      bgColor: '#f0fdfa',
-      accent1: '#14b8a6',
-      accent2: '#f43f5e',
-      accent3: '#0ea5e9',
-      textMain: '#042f2e',
-      textSoft: '#0f766e',
+      bgColor: '#f2fbfa',
+      accent1: '#28aa9f',
+      accent2: '#d56f96',
+      accent3: '#4b98d4',
+      textMain: '#143735',
+      textSoft: '#4f706d',
       glassColor: '#ffffff',
-      bgGradientEnd: '#ccfbf1',
+      bgGradientEnd: '#e3f6f2',
       bgGradientAngle: 135,
       bgMode: 'linear',
-      backdropGlowIntensity: 0.92
+      backdropGlowIntensity: 0.34,
+      backdropGlowFade: [36, 38, 52]
     }
   },
   alice: {
-    name: 'Alice Blue',
+    name: 'Alice Reverie',
     colors: {
-      bgColor: '#f0f9ff',
-      accent1: '#38bdf8',
-      accent2: '#fbbf24',
-      accent3: '#6366f1',
-      textMain: '#082f49',
-      textSoft: '#0369a1',
+      bgColor: '#f6fbff',
+      accent1: '#5899cc',
+      accent2: '#c99a4d',
+      accent3: '#7f87d8',
+      textMain: '#1b3245',
+      textSoft: '#526c80',
       glassColor: '#ffffff',
-      bgGradientEnd: '#e0f2fe',
+      bgGradientEnd: '#eaf2fb',
       bgGradientAngle: 145,
       bgMode: 'linear',
-      backdropGlowIntensity: 0.9
+      backdropGlowIntensity: 0.34,
+      backdropGlowFade: [36, 40, 52]
     }
   },
   minimal: {
-    name: 'Minimal Clarity',
+    name: 'Clear Studio',
     colors: {
-      bgColor: '#f8fafc', // Slate 50
-      accent1: '#94a3b8',
-      accent2: '#cbd5e1',
-      accent3: '#e2e8f0',
-      textMain: '#111827', // Gray 900
-      textSoft: '#4b5563', // Gray 600
+      bgColor: '#f7f9fb',
+      accent1: '#6f829e',
+      accent2: '#8da8b9',
+      accent3: '#b8a884',
+      textMain: '#151c27',
+      textSoft: '#4b5968',
       glassColor: '#ffffff',
-      bgGradientEnd: '#f1f5f9',
+      bgGradientEnd: '#edf3f7',
       bgGradientAngle: 135,
       bgMode: 'solid',
       backdropGlowLayers: 0
+    }
+  },
+  idolStage: {
+    name: 'Idol Stage',
+    colors: {
+      bgColor: '#fff8fc',
+      accent1: '#e06aa8',
+      accent2: '#6bb7f0',
+      accent3: '#ffd06b',
+      textMain: '#342536',
+      textSoft: '#705a72',
+      glassColor: '#ffffff',
+      bgGradientEnd: '#eef7ff',
+      bgGradientAngle: 124,
+      bgMode: 'linear',
+      backdropGlowLayers: 3,
+      backdropGlowIntensity: 0.36,
+      backdropGlowPositions: [
+        [14, 22],
+        [82, 18],
+        [68, 84]
+      ],
+      backdropGlowFade: [34, 36, 46],
+      backdropGlowSize: 142
+    }
+  },
+  yumeKawaii: {
+    name: 'Yume Kawaii',
+    colors: {
+      bgColor: '#fff7ff',
+      accent1: '#c87be8',
+      accent2: '#77c7f2',
+      accent3: '#f2b7cf',
+      textMain: '#32283f',
+      textSoft: '#675c78',
+      glassColor: '#ffffff',
+      bgGradientEnd: '#f0f6ff',
+      bgGradientAngle: 130,
+      bgMode: 'linear',
+      backdropGlowLayers: 3,
+      backdropGlowIntensity: 0.34,
+      backdropGlowPositions: [
+        [16, 18],
+        [84, 20],
+        [54, 78]
+      ],
+      backdropGlowFade: [36, 36, 50]
+    }
+  },
+  sodaPop: {
+    name: 'Soda Pop',
+    colors: {
+      bgColor: '#f3fcff',
+      accent1: '#40aee3',
+      accent2: '#f184b7',
+      accent3: '#78d3a7',
+      textMain: '#153142',
+      textSoft: '#527184',
+      glassColor: '#ffffff',
+      bgGradientEnd: '#eefdf5',
+      bgGradientAngle: 146,
+      bgMode: 'linear',
+      backdropGlowLayers: 3,
+      backdropGlowIntensity: 0.33,
+      backdropGlowPositions: [
+        [18, 24],
+        [88, 22],
+        [70, 80]
+      ],
+      backdropGlowFade: [34, 36, 48]
+    }
+  },
+  academyBlue: {
+    name: 'Academy Blue',
+    colors: {
+      bgColor: '#f4f8ff',
+      accent1: '#5f8fe6',
+      accent2: '#69c3d5',
+      accent3: '#f0b169',
+      textMain: '#1b2e48',
+      textSoft: '#546b86',
+      glassColor: '#ffffff',
+      bgGradientEnd: '#eef4ff',
+      bgGradientAngle: 138,
+      bgMode: 'linear',
+      backdropGlowLayers: 2,
+      backdropGlowIntensity: 0.35,
+      backdropGlowPositions: [
+        [16, 24],
+        [84, 78],
+        [56, 52]
+      ],
+      backdropGlowFade: [38, 44, 54]
+    }
+  },
+  shibuyaNight: {
+    name: 'Shibuya Night',
+    colors: {
+      bgColor: '#100f1c',
+      accent1: '#ff75bf',
+      accent2: '#55b7ff',
+      accent3: '#ffd066',
+      textMain: '#fff9fd',
+      textSoft: '#d7cbd8',
+      glassColor: '#1b1828',
+      bgGradientEnd: '#142544',
+      bgGradientAngle: 142,
+      bgMode: 'linear',
+      backdropGlowLayers: 3,
+      backdropGlowIntensity: 0.34,
+      backdropGlowPositions: [
+        [14, 22],
+        [86, 28],
+        [64, 86]
+      ],
+      backdropGlowFade: [34, 36, 42]
+    }
+  },
+  lullabyPeach: {
+    name: 'Lullaby Peach',
+    colors: {
+      bgColor: '#fff9f5',
+      accent1: '#df7e76',
+      accent2: '#8bb9df',
+      accent3: '#e4bb6a',
+      textMain: '#3a2927',
+      textSoft: '#6f5d58',
+      glassColor: '#ffffff',
+      bgGradientEnd: '#f6f0ff',
+      bgGradientAngle: 126,
+      bgMode: 'linear',
+      backdropGlowLayers: 3,
+      backdropGlowIntensity: 0.32,
+      backdropGlowPositions: [
+        [20, 18],
+        [82, 78],
+        [58, 46]
+      ],
+      backdropGlowFade: [34, 38, 50]
     }
   }
 }

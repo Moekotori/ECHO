@@ -39,11 +39,15 @@ function normalizeTrackMetaEntry(entry) {
     if (typeof entry[key] === 'string') next[key] = entry[key]
     else if (entry[key] == null) next[key] = null
   }
-  for (const key of ['trackNo', 'discNo', 'duration', 'bitrateKbps', 'sampleRateHz', 'bitDepth', 'channels']) {
+  for (const key of ['trackNo', 'discNo', 'duration', 'bitrateKbps', 'sampleRateHz', 'bitDepth', 'channels', 'bpm']) {
     const value = Number(entry[key])
     next[key] = Number.isFinite(value) && value > 0 ? value : null
   }
   next.coverChecked = entry.coverChecked === true
+  next.bpmChecked = entry.bpmChecked === true
+  next.bpmMeasured = entry.bpmMeasured === true
+  next.mqaChecked = entry.mqaChecked === true
+  next.isMqa = entry.isMqa === true
   return next
 }
 

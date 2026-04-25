@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
   checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
   installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
+  setAutoUpdateEnabled: (enabled) => ipcRenderer.invoke('app:setAutoUpdateEnabled', !!enabled),
   onUpdaterEvent: (callback) => {
     const handler = (_, msg) => callback(msg)
     ipcRenderer.on('updater-message', handler)
@@ -54,6 +55,7 @@ contextBridge.exposeInMainWorld('api', {
   exportPlaylistText: (payload) => ipcRenderer.invoke('playlist:exportText', payload),
   rescanFolders: (payload) => ipcRenderer.invoke('file:rescanFolders', payload),
   batchExistsHandler: (paths) => ipcRenderer.invoke('file:batchExists', paths),
+  deleteAudioFileHandler: (filePath) => ipcRenderer.invoke('file:deleteAudioFile', filePath),
   watchLibraryFolders: (payload) => ipcRenderer.invoke('library:watchFolders', payload),
   stopWatchingLibraryFolders: () => ipcRenderer.invoke('library:stopWatchingFolders'),
   onLibraryFoldersChanged: (callback) => {
@@ -65,6 +67,7 @@ contextBridge.exposeInMainWorld('api', {
   readLyricsHandler: (audioPath) => ipcRenderer.invoke('file:readLyrics', audioPath),
   toRomajiBatch: (texts) => ipcRenderer.invoke('lyrics:toRomajiBatch', texts),
   fetchNeteaseLyrics: (payload) => ipcRenderer.invoke('lyrics:neteaseFetch', payload),
+  searchExternalLyrics: (payload) => ipcRenderer.invoke('lyrics:searchExternal', payload),
   readInfoJsonHandler: (audioPath) => ipcRenderer.invoke('file:readInfoJson', audioPath),
   searchMVHandler: (query, source) => ipcRenderer.invoke('api:searchMV', query, source),
   convertNcmHandler: (filePath) => ipcRenderer.invoke('file:convertNcm', filePath),
@@ -91,6 +94,7 @@ contextBridge.exposeInMainWorld('api', {
   downloadSoundCloud: (url, downloadPath) =>
     ipcRenderer.invoke('soundcloud:download', url, downloadPath),
   getExtendedMetadataHandler: (path) => ipcRenderer.invoke('file:getExtendedMetadata', path),
+  detectBpmHandler: (path) => ipcRenderer.invoke('file:detectBpm', path),
   updateExtendedMetadataHandler: (payload) =>
     ipcRenderer.invoke('file:updateExtendedMetadata', payload),
   readTags: (filePath) => ipcRenderer.invoke('tags:read', filePath),

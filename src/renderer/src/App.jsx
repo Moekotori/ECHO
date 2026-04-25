@@ -7,6 +7,7 @@ import React, {
   useState,
   useRef,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useMemo,
   memo,
@@ -23,6 +24,7 @@ import {
   SkipForward,
   SkipBack,
   Download,
+  FileOutput,
   Disc,
   Music,
   X,
@@ -96,6 +98,7 @@ import CastReceiveDrawer from './components/CastReceiveDrawer'
 import ListenTogetherDrawer from './components/ListenTogetherDrawer'
 import LyricsCandidatePicker from './components/LyricsCandidatePicker'
 import MetadataEditorDrawer from './components/MetadataEditorDrawer'
+import ImportedFolderRail from './components/ImportedFolderRail'
 import { UiButton } from './components/ui'
 import AudioQualityBadges from './components/AudioQualityBadges'
 import { parseAnyLyrics } from './utils/lyricsParse'
@@ -164,7 +167,7 @@ import {
 } from '../../shared/playbackPersistence.mjs'
 import { readTrackMetaCache, writeTrackMetaCache } from './utils/trackMetaCache'
 
-/** `<audio src>` 必须用编码后的 file: URL；路径里的 `#`、`%`、Unicode 等手写 `file://` 会失效 */
+/** `<audio src>` 闂傚倸鍊搁崐鎼佸磹閹间讲鈧箓顢楅崟顐わ紱闂佸憡娲﹂崐瀣洪鍕幯冾熆鐠虹尨鍔熼柣銈呮搐閳规垿顢欐慨鎰捕闂佺顑嗛幐鎼佸煘閹达附鏅柛鏇炵仛椤ユ挾绱撴担鍝勑ｇ紒瀣灴閸┿儲寰勬繛鐐€婚棅顐㈡搐濞撮妲愰敃鍌涒拻闁稿本鐟х粣鏃€绻涙担鍐叉濞咃綁姊绘担鍛婂暈濞撴碍顨婂畷浼村箻鐎靛壊娴勯梺闈涚箞閸婃牠鍩涢幒鎳ㄥ綊鏁愰崼顐ｇ秷闂侀潧娲ㄩ崰鏍蓟濞戙垺鍋愰柧蹇ｅ亞椤︻厾绱撴笟鍥ф灈闁绘锕︾划顓㈡偄閻撳海鍔﹀銈嗗笒鐎氼喖鐣垫笟鈧弻娑㈠箛閳轰礁顥嬮梺鍝勫暙閻楀棗顔忓┑鍥ヤ簻闁哄啫鍊哥敮璺侯熆?file: URL闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔兼倻濡儵鎷婚梺娲诲幗閻熲晠寮婚垾鎰佸悑閹肩补鈧磭顔戦梻浣侯焾鐎涒晠銆冩繝鍥ц摕闁绘梻鈷堥弫宥夋煕閳╁喚娈欓悗姘卞缁绘盯宕奸顫枈濠殿喖锕ュ钘夌暦閵婏妇绡€闁告劦鐓堝Σ閬嶆⒒娴ｈ鍋犻柛鏂跨Т椤灝顫滈埀顒勫春閵忕媭鍚嬪璺侯儐濞呫垽姊虹紒妯忣亞澹曢銏犲偍?`#`闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲稿鍫罕闂備礁鎼崐褰掝敄濞嗗浚鐒?`闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲稿鍫罕闂備礁鎼崯顐﹀磹缂佹鈻旂€广儱顦伴悡娆徫涢悧鍫㈢畺闂佸鍏榦de 缂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸婂潡鏌ㄩ弬鍨挃闁活厽鐟╅弻鐔封枎闄囬褍煤椤撱垹绠栫憸鏂跨暦婵傚憡鍋勯柛婵勫劚婵炲洤鈹戦悩鍨毄濠殿喗鎸抽弫鍐Χ婢跺浜遍梺绯曞墲閻熝囨儗?`file://` 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰▕閻掕姤绻涢崱妯诲碍閻熸瑱绠撻幃妤呮晲鎼粹剝鐏嶉梺鎼炲€曢懟顖濈亙闂佹寧绻傞幊搴ㄥ汲濞嗗浚娴栭柛娑樼摠閳锋垹鐥鐐村櫤鐟滄妸鍛＜闁绘ê鍟块悘瀵糕偓?*/
 function localPathToAudioSrc(filePath) {
   if (!filePath || typeof filePath !== 'string') return ''
   const href = typeof window !== 'undefined' && window.api?.pathToFileURL?.(filePath)
@@ -195,15 +198,18 @@ const DISPLAY_METADATA_OVERRIDES_LOCAL_KEY = 'nc_display_metadata_overrides'
 const MAX_MV_SEARCH_CACHE_ENTRIES = 24
 const MAX_BILI_STREAM_CACHE_ENTRIES = 12
 const MAX_LRCLIB_CACHE_ENTRIES = 40
-const MAX_BPM_CACHE_ENTRIES = 160
-const MAX_TRACK_META_COVER_ENTRIES = 96
+const MAX_TRACK_META_COVER_ENTRIES = 1800
+const LIBRARY_META_CACHE_HYDRATE_BATCH_SIZE = 400
 const METADATA_PREFETCH_LIMIT = 96
 const ALBUM_METADATA_PREFETCH_LIMIT = 1200
 const METADATA_PARSE_BATCH_SIZE = 18
 const ALBUM_METADATA_PARSE_BATCH_SIZE = 48
 const METADATA_PARSE_WORKERS = 4
+const ALBUM_CLOUD_COVER_PREFETCH_LIMIT = 16
+const ALBUM_CLOUD_COVER_WORKERS = 2
 const MAX_SHARE_CARD_COVER_CHARS = 600000
 const CLOUD_COVER_RESOLUTION = '600x600bb'
+const SIDEBAR_LOGO_IMAGE_PATH = 'D:\\ECHO - 副本 (3) - 副本\\1.png'
 
 function normalizeCoverLookupText(value) {
   return String(value || '')
@@ -267,10 +273,10 @@ function pickBestAlbumCoverCandidate(items, album, artist) {
   if (!wantedAlbum) return null
 
   return (items || [])
-    .filter((item) => item?.picUrl || item?.cover)
+    .filter((item) => item?.picUrl || item?.cover || item?.artworkUrl100)
     .map((item) => {
-      const candidateAlbum = normalizeCoverLookupText(item?.name || item?.album)
-      const candidateArtist = normalizeCoverLookupText(item?.artist || item?.artists)
+      const candidateAlbum = normalizeCoverLookupText(item?.name || item?.album || item?.collectionName)
+      const candidateArtist = normalizeCoverLookupText(item?.artist || item?.artists || item?.artistName)
       if (
         !candidateAlbum ||
         (candidateAlbum !== wantedAlbum &&
@@ -668,7 +674,7 @@ function normalizeConfigState(raw) {
 
 const SLEEP_TIMER_MINUTE_OPTIONS = [5, 10, 15, 30, 45, 60, 90]
 /* const SETTINGS_SECTION_KEYWORDS = {
-  language: ['language', 'locale', '语言', 'en', 'zh', 'ja', '言語'],
+  language: ['language', 'locale', '闂傚倸鍊搁崐宄懊归崶褏鏆﹂柛顭戝亝閸欏繘鏌℃径瀣鐟滅増甯掔壕濂告煟閹邦垰鐨洪柣鎾村灴濮婃椽鏌呴悙鑼跺濠⒀勬尦閺?, 'en', 'zh', 'ja', '闂傚倸鍊搁崐宄懊归崶褏鏆﹂柣銏㈩焾缁愭骞栧ǎ顒€濡介柛搴＄У缁绘繈妫冨☉鍗炲壈缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓?],
   engine: [
     'visualizer',
     'spectrum',
@@ -682,16 +688,16 @@ const SLEEP_TIMER_MINUTE_OPTIONS = [5, 10, 15, 30, 45, 60, 90]
     'asio',
     'exclusive',
     'audio',
-    '均衡',
-    '音频',
-    '淡入淡出',
-    '睡眠',
-    '定时',
-    'イコライザー',
-    'クロスフェード'
+    '闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ穿缂嶆牠鎮楅敐搴℃灈缂佲偓閸愵喗鐓冮柛婵嗗閺嗗﹪鏌℃担鍝バф慨濠勭帛缁楃喖鍩€椤掆偓椤洩顦查摶鐐碘偓鍏夊亾闁告洦鍋嗛敍?,
+    '闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵稿妽闁哄懏绻堥弻鏇熷緞濞戞﹩娲紓浣哄У閸庢娊鍩為幋锔藉亹闁告瑥顦崑宥夋⒑?,
+    '婵犵數濮烽弫鍛婃叏閻戣棄鏋侀柟闂寸绾惧潡鏌熺€电孝缂佽翰鍊栫换娑橆啅椤旇崵鐩庨梺缁樺笒閻忔岸濡甸崟顖氱闁糕剝銇炴竟鏇㈡⒒娴ｅ憡鎲搁柛鐘查叄閹ê鈹戠€ｅ灚鏅梺鎸庣箓椤︿即骞嗛悙娣簻闁规壋鏅涢埀顒侇殜椤㈡瑩寮撮姀鈾€鎷洪梺鍦焾濞撮绮婚幘缁樼厱濠电姴瀚弳顒傗偓瑙勬礃閸ㄥ潡鐛Ο鍏煎珰闁肩⒈鍓﹀Σ浼存⒒娴ｅ憡鍟為柣鐔村劦钘濋柛妤冨€?,
+    '闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏇楀亾妞ゎ亜鍟村畷绋课旈埀顒傚婵犳碍鐓欓柟瑙勫姇閻撴劖銇勯锝嗙闁哄矉绻濆畷鍫曞煛娴ｇ顥愰梻?,
+    '闂傚倸鍊搁崐宄懊归崶顒夋晪鐟滃秹锝炲┑瀣櫇闁稿矉濡囩粙蹇旂節閵忥絾纭鹃柤娲诲灦瀵悂宕奸埗鈺佷壕妤犵偛鐏濋崝姘舵煙瀹勯偊鍎忛柕?,
+    '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍫濈畺鐟滄柨鐣烽悢纰辨晬婵ɑ鍞荤槐顕€姊绘担渚敯闁规椿浜炵划濠氬箣閻樺樊妫滅紓鍌欑劍椤洨寮ч埀顒勬⒒閸屾氨澧涘〒姘殜瀹曟洝绠涘☉妯垮煘濡炪倖鐗滈崑鐐哄煕閹寸姭鍋撶憴鍕婵炶绠撳畷鐢稿焵椤掑嫭鈷戦悹鍥皺缁犺尙绱掔拠鎻掓殶缂侇喖顑呴鍏煎緞鐎ｎ亖鍋撻悜鑺ョ厽闁瑰鍎愰悞浠嬫煕濮楀棔閭慨濠冩そ瀹曟粓骞撻幒宥咁棜缂傚倷鐒﹁ぐ鍐焽閳ュ磭鏆﹀┑鍌氬閺佸倿鏌涢銈呮灁闁?,
+    '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍫濈畺鐟滃秹鈥﹂妸鈺侀唶婵犻潧妫涢埀顒夊幖椤啴濡堕崱妤冪懆闁诲孩鍑归崜娑欑珶閺囩姵宕夐柕濠忕畱閺嬫垿姊虹紒姗嗘當闁绘妫涚划顓㈠箳濡も偓閻愬﹪鏌℃径瀣闁哄啫鐗婇崑鎰版⒒閸喓鈼ョ紒顔肩埣濮婅櫣鎷犻懠顒傤唹缂備浇顕ч悧鍡涙偩瀹勬壋鏀介悗锝庝簻閼板灝鈹戦悙鏉戠仸闁荤啙鍥у偍妞ゅ繐鐗婇埛鎴︽煕閹炬潙绲诲ù婊勵殕娣囧﹪鎮欓弶鎴狀儌缂備緡鍠栭悧濠勭箔閻旂厧鐒垫い鎺嗗亾闁伙絿鍏樻慨鈧柕鍫濇噽椤斿懘姊洪崗闂磋埅闁稿孩濞婂畷?
   ],
-  integrations: ['discord', 'rpc', 'presence', '集成', '整合', '連携'],
-  eq: ['eq', 'equalizer', 'parametric', 'preamp', 'band', '均衡器', '参量', 'イコライザー'],
+  integrations: ['discord', 'rpc', 'presence', '闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧湱绱掔€ｎ収鍤︽繛鎴烆焸閺冨牆鐒垫い鎺戝暟娴滆鲸绻濋悽闈涗粶婵☆偅鐟╅獮鎰板箹娴ｇ鐎?, '闂傚倸鍊搁崐鎼佸磹瀹勬噴褰掑炊瑜滃ù鏍煏婵炵偓娅嗛柛濠傛健閺屻劑寮村Δ鈧禍鎯ь渻閵堝骸骞栨繛灞傚€濋崺銏℃償閵娿儳顔掗悗瑙勬礀濞层劑寮?, '闂傚倸鍊搁崐鎼佸磹閹间礁纾瑰瀣椤愪粙鏌ㄩ悢鍝勑㈢痪鎯ь煼閺岀喖骞戦幇顓犮€愮紓浣界堪閸婃洝鐏冮梺鎸庣箓閹冲酣寮冲▎鎴犵＜?],
+  eq: ['eq', 'equalizer', 'parametric', 'preamp', 'band', '闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ穿缂嶆牠鎮楅敐搴℃灈缂佲偓閸愵喗鐓冮柛婵嗗閺嗗﹪鏌℃担鍝バф慨濠勭帛缁楃喖鍩€椤掆偓椤洩顦查摶鐐碘偓鍏夊亾闁告洦鍋嗛敍娑㈡⒑閻熸澘鈷旂紒顕呭灦閸?, '闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐閸愯弓鐢婚梻渚€娼чˇ顐﹀疾濞戞艾顥氱憸鐗堝笚閻撴洜鎲告惔銊ｂ偓鍐川鐎涙ǚ鎷?, '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍫濈畺鐟滄柨鐣烽悢纰辨晬婵ɑ鍞荤槐顕€姊绘担渚敯闁规椿浜炵划濠氬箣閻樺樊妫滅紓鍌欑劍椤洨寮ч埀顒勬⒒閸屾氨澧涘〒姘殜瀹曟洝绠涘☉妯垮煘濡炪倖鐗滈崑鐐哄煕閹寸姭鍋撶憴鍕婵炶绠撳畷鐢稿焵椤掑嫭鈷戦悹鍥皺缁犺尙绱掔拠鎻掓殶缂侇喖顑呴鍏煎緞鐎ｎ亖鍋撻悜鑺ョ厽闁瑰鍎愰悞浠嬫煕濮楀棔閭慨濠冩そ瀹曟粓骞撻幒宥咁棜缂傚倷鐒﹁ぐ鍐焽閳ュ磭鏆﹀┑鍌氬閺佸倿鏌涢銈呮灁闁?],
   aesthetics: [
     'theme',
     'color',
@@ -701,13 +707,13 @@ const SLEEP_TIMER_MINUTE_OPTIONS = [5, 10, 15, 30, 45, 60, 90]
     'radius',
     'opacity',
     'gradient',
-    '主题',
-    '颜色',
-    '背景',
-    '字体',
-    '模糊',
-    'テーマ',
-    'フォント'
+    '濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈閸ㄥ倿鏌涢锝嗙缂佺姳鍗抽弻鐔兼⒒绾惧鍞归梺閫炲苯澧剧紒鐘虫崌楠炲啫顭ㄩ崟顒€寮块梺纭呭焽閸斿本绂?,
+    '濠电姷鏁告慨鐑姐€傞挊澹╋綁宕ㄩ弶鎴狅紱闂佺硶鍓濊摫婵炲懐濮垫穱濠囧Χ閸涱厽娈梺鎼炲妽缁诲牓鎮￠锕€鐐婇柕濠忚吂閹峰姊?,
+    '闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ礀閸屻劎鎲搁弬璺ㄦ殾妞ゆ牜鍋涢柨銈嗕繆閵堝倸浜鹃柣搴㈣壘椤︿即濡甸崟顖氱闁糕剝銇炴竟鏇㈡⒒?,
+    '闂傚倸鍊搁崐宄懊归崶顒夋晪鐟滃繘鍩€椤掍胶鈻撻柡鍛箘閸掓帒鈻庨幘宕囶唺濠德板€愰崑鎾愁浖閸涘瓨鈷戠紓浣姑慨澶愭煛娴ｅ憡鎲哥紒?,
+    '婵犵數濮烽弫鍛婃叏閻戝鈧倿鎸婃竟鈺嬬秮瀹曘劑寮堕幋婵堚偓顓㈡⒑娴兼瑧鍒伴柡鍫墴閿濈偤寮撮姀锛勫幐闂佹悶鍎弲娑欑墡-,
+    '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍥棨婵＄偑鍊栭悧妤咁敋閸楃偐妲堟繛鍡樺姇閸斿懘姊洪棃娑辩劸闁稿孩濞婅棟鐟滃秹鍩為幋鐐茬疇闂佺锕ュú鐔肩嵁婵犲啯鍎熼柍鈺佸暞濞?,
+    '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍥棨闂備礁鎼ˇ浼存晬閺囩喆鍋婇悹鎭掑妿閺夌鈹戦悙鏉戠仸妞ゎ厼娲弫宥呪槈閵忊檧鎷洪梺闈╁瘜閸樺ジ銆傞崗鑲╃瘈闁靛繆鍩楅鍫濇瀬妞ゆ洍鍋撴慨濠勭帛閹峰懘鎼归悷鎵偧闂備礁鎲″褰掓晪闁捐崵鍋ら弻娑㈠即閵娿儳浠╃紓浣插亾?
   ],
   media: [
     'download',
@@ -716,14 +722,14 @@ const SLEEP_TIMER_MINUTE_OPTIONS = [5, 10, 15, 30, 45, 60, 90]
     'folder',
     'import',
     'cleanup',
-    '下载',
-    '媒体库',
-    '歌单',
-    '导入',
-    '清理',
-    'ダウンロード',
-    'ライブラリ',
-    'プレイリスト'
+    '濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈閸ㄥ倿鏌涢锝嗙缂佺姳鍗抽弻鐔兼⒒鐎垫瓕绐楅梺杞扮鐎氫即寮诲☉銏╂晝闁挎繂娲╃粚?,
+    '濠电姷鏁告慨鐑藉极閸涘﹥鍙忛柣銏犲閺佸﹪鏌″搴″箹闁搞劌鍊垮鍫曞醇濮橆厽鐝曢梺鍝勬缁矂鍩為幋锔藉亹闁圭粯甯╂导鈧紓鍌欒閸嬫挸鈹戦悩鍙夊闁稿﹦鏁婚弻銊モ攽閸℃侗鈧霉濠婂嫮绠為柡?,
+    '婵犵數濮烽弫鍛婃叏閻㈠壊鏁婇柡宥庡幖缁愭淇婇妶鍛殲鐎规洘鐓￠弻娑樼暆閳ь剟宕戦悙鍝勫惞闁归偊鍘规禍婊堟煛瀹ュ啫濡介柣銊﹀灴閺?,
+    '闂傚倸鍊搁崐宄懊归崶顒夋晪鐟滃秹婀侀梺缁樺灱濡嫰寮告笟鈧弻鐔兼⒒鐎靛壊妲梺绋胯閸斿酣骞夐幖浣告閻犳亽鍔嶅▓?,
+    '婵犵數濮烽弫鍛婃叏閻戣棄鏋侀柟闂寸绾惧鏌ｉ幇顒佹儓缂佺姳鍗抽弻鐔兼⒒鐎靛壊妲紓浣哄Х婵炩偓闁哄瞼鍠栭幃褔宕奸悢鍝勫殥缂?,
+    '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍥棨婵＄偑鍊栭崝褏绮婚幋鐘差棜濠电姵纰嶉悡娆撴煕閹炬鎳庣粭锟犳⒑缂佹ɑ灏紒缁橈耿瀵鈽夐姀鈺傛櫇濡炪倖鍔戦崹褰掑煕婢跺瞼纾藉ù锝嗗絻娴滈箖鏌ｆ惔顖滅У闁哥姵顨婇幃锟犲即閵忋垹褰勯梺鎼炲劘閸斿秶浜搁銏＄厓鐟滄粓宕滃鎵佸亾缁楁稑瀚埞宥呪攽閻樺弶澶勯柛濠呭吹缁辨帒鈽夊鍡楀壉闂佸搫鎷戠徊浠嬪煘閹达附鍋愰悹鍥囧啩绱ｉ梻浣告憸閸ｃ儵宕戞繝鍥ㄥ仒妞ゆ梻鏅弧鈧梺鎼炲劘閸斿骞?,
+    '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍥棨婵＄偑鍊栭崝褏绮婚幋婢稑顫滈埀顒勫蓟濞戞鏆嗛柍褜鍓熷畷鎴濃槈濮橆剦妫滄繝鐢靛У绾板秹鎮￠弴銏＄厓闁宠桨绀侀弳鐔兼煃閽樺妯€鐎规洦鍓熼、娑㈡倷缁瀚奸梻浣告啞缁诲倻鈧凹鍠涢埅褰掓⒒娴ｄ警鐒鹃梺甯稻缁傚秶鎹勯搹瑙勬濠电娀娼ч鍡涘疾濠靛鐓曢悘鐐插⒔閵嗘帡鏌?,
+    '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍥棨濠电偞娼欓崥瀣焽濞嗘劦鏀板┑鐘垫暩婵挳鏁冮妶澶嬪亱闁糕剝鐟ラˉ姘舵煕瑜庨〃鍡涙偂濞嗘挻鈷掗柛灞惧嚬閸ょ喐銇勯敂鑲╃暤鐎规洖鐖奸獮姗€顢欑憴锝嗗闂傚倸鍊搁悧濠勭矙閹惧瓨娅犻柡鍥ュ灪閻撴洟鏌ｉ弴姘鳖槮濞存粍澹嗛埀顒冾潐濞叉鎹㈤崱娴板洩銇愰幒鎾跺幐闁诲繒鍋熼崑鎾剁矆鐎ｎ兘鍋撶憴鍕闁告鍥х厴闁硅揪绠戦柋鍥煏韫囧﹤澧叉い鏂挎濮?
   ],
   about: [
     'about',
@@ -733,15 +739,15 @@ const SLEEP_TIMER_MINUTE_OPTIONS = [5, 10, 15, 30, 45, 60, 90]
     'changelog',
     'developer',
     'devtools',
-    '关于',
-    '版本',
-    '更新',
-    '开发',
-    'バージョン',
-    'アップデート',
-    '開発'
+    '闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ磵閳ь剨绠撳畷濂稿閳ュ啿绨ラ梻浣告贡婢ф顭垮鈧畷鎺楀Ω閳哄倻鍘搁悗骞垮劚妤犲憡绂嶉姘ｆ斀?,
+    '闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛鎾茬閸ㄦ繃銇勯弽顐杭闁逞屽墮閸熸潙鐣烽妸褉鍋撳☉娅亝绂嶆潏銊х瘈闁汇垽娼у瓭闂佺顑呴敃顏堝箠?,
+    '闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偞鐗犻、鏇㈠煕濮橆厽銇濆┑陇鍩栧鍕偓锝庝簷濡叉劙姊绘笟鈧褑澧濋梺鍝勬噺閻╊垶骞?,
+    '闂傚倸鍊峰ù鍥敋瑜忛埀顒佺▓閺呯娀銆佸▎鎾冲唨妞ゆ挾鍋熼悰銉╂⒑閸︻厼鍔嬫い銊ユ噽婢规洘绻濆顓犲幍闂佸憡鎸嗛崨顓狀偧-,
+    '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍥棨濠电偞娼欓崥瀣焽濞嗘垹鐭嗗鑸靛姈閻撴瑩寮堕崼婵嗏挃闁伙綀浜槐鎺楀焵椤掑嫬纾兼繛鎴烆殘缁犳岸姊洪棃娑氬闁瑰啿绻樺畷瀹犮亹閹烘垹鍊為梺鍦檸閸犳鍩涢幋鐘垫／妞ゆ挾鍋為崳鐟懊瑰鍐Ш闁哄本绋撻埀顒婄秵閸嬪棗煤鐎电硶鍋撶憴鍕缂佽鐗婃穱濠囨嚋闂堟稓绐為柣搴秵閸撴瑧鏁?,
+    '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍫濈畺鐟滃秹鈥﹂妸鈺佺闁告挆鍐ㄐㄩ梻鍌欒兌椤宕熼崹顐ゆ殽缂備胶鍋撳畷妯衡枖閺囥垹鐒垫い鎺嗗亾缂佺姴绉瑰畷鏇㈡焼瀹撱儱娲、娑橆潩椤撶喐顔囧┑鐘垫暩婵兘銆傞鐐潟闁哄洢鍨圭壕濠氭煟閺冨倸甯堕柛灞诲妿閹叉悂寮捄銊︽濠电姴锕ら悧鍡欑不椤曗偓閺屻倝骞侀幒鎴濆Б闂佸憡锕╂禍婵堟崲濠靛顫呴柨婵嗘閵嗘劙姊哄ú璇插箹闁绘鎸搁悾鐑藉即閵忊€充汗缂傚倷鐒﹂…鍥储?,
+    '闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾剧懓顪冪€ｎ亝鎹ｉ柣顓炴閵嗘帒顫濋敐鍛婵＄偑鍊戦崹娲偋閻樿尙鏆﹂柟顖炲亰濡茬兘姊?
   ],
-  danger: ['reset', 'danger', 'clear', '重置', '危险', 'リセット']
+  danger: ['reset', 'danger', 'clear', '闂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸婂潡鏌ㄩ弴姘舵濞存粌缍婇弻娑㈠箛閸忓摜鏁栭梺娲诲幗閹瑰洭寮诲☉銏╂晝闁挎繂妫涢ˇ銊╂⒑?, '闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐椤旂懓浜鹃柛鎰ㄦ櫇缁♀偓闂佸憡鍔︽禍璺好洪幖浣圭厽闁绘宕电槐浼存煏閸″繐浜鹃梻?, '闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲搁弮鍥棨闂備礁鍚嬫禍浠嬪磿閹跺鈧懘宕ｆ径澶岀畾闂侀潧鐗嗛幊蹇涘闯閸︻厾妫柟顖嗗瞼鍚嬮梺鍝勮閸旀垵顕ｉ幘顔藉€锋繛鏉戭儏娴滃墽绱掔€ｎ偄顕滈柡鍡樼矒濮婂宕掑▎鎴М闂佺顕滅换婵嗙暦濠靛妲剧紓渚囧枛椤兘鐛€ｎ喗鏅濋柍褜鍓涚划?]
 }
 
 */
@@ -942,6 +948,22 @@ function isTrackInsideImportedFolders(trackPath, folders) {
     if (!normalizedFolder) return false
     return normalizedPath === normalizedFolder || normalizedPath.startsWith(`${normalizedFolder}/`)
   })
+}
+
+function normalizeImportedFolderPath(folderPath) {
+  return String(folderPath || '').replace(/[\\/]+$/, '').trim()
+}
+
+function buildImportedFolderTrackSeed(track) {
+  if (!track?.path) return null
+  return {
+    name: track.name || fileNameFromPath(track.path),
+    path: track.path,
+    folder: getPathDirname(track.path),
+    birthtimeMs: track.birthtimeMs || 0,
+    mtimeMs: track.mtimeMs || 0,
+    sizeBytes: track.sizeBytes || track.info?.sizeBytes || 0
+  }
 }
 
 function buildLibraryTrackFingerprint(track) {
@@ -1159,7 +1181,7 @@ const AlbumSidebarCard = memo(function AlbumSidebarCard({
               noLink
             />
           </span>
-          <span className="album-subtitle-sep">·</span>
+          <span className="album-subtitle-sep">-</span>
           <span className="album-subtitle-count">{album.tracks.length} tracks</span>
         </div>
       </div>
@@ -1167,7 +1189,7 @@ const AlbumSidebarCard = memo(function AlbumSidebarCard({
   )
 })
 
-/** Last.fm 登录表单（设置页内嵌） */
+/** Last.fm 闂傚倸鍊搁崐鎼佸磹瀹勬噴褰掑炊椤掍礁鍓銈嗗姧缁犳垿鐛姀銈嗙厓閺夌偞澹嗛崝宥嗐亜閺傚灝顏紒杈ㄦ崌瀹曟帒顫濋钘変壕闁告縿鍎抽惌鎾绘倵闂堟稒鎲搁柣顓熸崌閺屾盯顢曢敐鍡欘槬缂備胶濮甸悧鏇㈡箒闂佺绻愰崥瀣礊閹达箑绠氶柣鏂垮悑閳锋垿姊婚崼鐔剁繁婵℃彃鐖奸弻娑欐償閵忕姭鏋欓柦妯荤箓闇夐柣鎾虫捣閹界娀鏌嶉柨瀣伌闁哄瞼鍠撶划娆撳箰鎼淬垹闂梻浣哥枃濡嫰藝閻㈢钃熼柨婵嗘啒閺冣偓閹峰懐绮欏▎鐐稈濠碉紕鍋戦崐鎴﹀垂濞差亝鍋￠柍杞扮贰閸ゆ洟鏌熺紒銏犳灍闁稿鍔欓弻锝夊閵忊晜娈扮紓浣稿船閻°劍绌辨繝鍥ㄥ€锋い蹇撳閸嬫捇寮介‖鈥虫惈椤撳吋寰勬繝鍕剁幢闂備胶鎳撴晶鐣屽垝椤栫偞鍋傞煫鍥ㄧ⊕閻撴洟鏌嶉埡浣告灓婵炲牄鍨烘穱濠囶敍濡も偓娴滈箖姊虹拠鍙夊攭妞ゎ偄顦叅婵せ鍋撻柡浣稿暣婵偓闁绘ê鐏氬▓楣冩⒑闂堟单鍫ュ疾閳哄懎鏋侀柛銉墯閻撶喐鎱ㄥΔ鈧Λ妤呭几濞戞◤褰掓偐濞嗗繑澶勯柍?*/
 function LastFmLoginForm({ onLogin }) {
   const [username, setUsername] = React.useState('')
   const [password, setPassword] = React.useState('')
@@ -1178,18 +1200,18 @@ function LastFmLoginForm({ onLogin }) {
     e.preventDefault()
     setError('')
     if (!username.trim() || !password) {
-      setError('请输入用户名和密码')
+      setError('Please enter username and password')
       return
     }
     if (!window.api?.lastfm?.login) {
-      setError('Last.fm 登录接口不可用，请重启应用后再试')
+      setError('Last.fm login API is unavailable. Restart the app and try again.')
       return
     }
     setLoading(true)
     try {
       const timeoutResult = new Promise((resolve) => {
         window.setTimeout(() => {
-          resolve({ ok: false, error: '连接超时，请稍后再试' })
+          resolve({ ok: false, error: 'Connection timed out. Please try again later.' })
         }, 10000)
       })
       const result = await Promise.race([
@@ -1199,10 +1221,10 @@ function LastFmLoginForm({ onLogin }) {
       if (result?.ok) {
         onLogin?.(result.sessionKey, result.username)
       } else {
-        setError(result?.error || '登录失败，请检查用户名和密码')
+        setError(result?.error || 'Login failed. Check username and password.')
       }
     } catch (err) {
-      setError('网络错误，请稍后重试')
+      setError('Network error. Please try again later.')
     } finally {
       setLoading(false)
     }
@@ -1212,15 +1234,15 @@ function LastFmLoginForm({ onLogin }) {
     <form className="lastfm-login-form" onSubmit={handleSubmit}>
       <div className="setting-row lastfm-login-heading">
         <div className="setting-info" style={{ maxWidth: 'none' }}>
-          <h3>连接 Last.fm</h3>
-          <p>登录后自动记录听歌历史（Scrobble）</p>
+          <h3>Connect Last.fm</h3>
+          <p>Log in to record listening history with Scrobble.</p>
         </div>
       </div>
       <div className="lastfm-login-grid">
         <input
           className="settings-text-input"
           type="text"
-          placeholder="Last.fm 用户名"
+          placeholder="Last.fm username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
@@ -1229,14 +1251,14 @@ function LastFmLoginForm({ onLogin }) {
         <input
           className="settings-text-input"
           type="password"
-          placeholder="密码"
+          placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"
           disabled={loading}
         />
         <button className="lastfm-submit-btn" type="submit" disabled={loading}>
-          {loading ? '登录中...' : '登录'}
+          {loading ? 'Logging in...' : 'Log in'}
         </button>
       </div>
       {error ? <p className="lastfm-error">{error}</p> : null}
@@ -1306,6 +1328,7 @@ export default function App() {
   const [sleepTimerEndMs, setSleepTimerEndMs] = useState(null)
   const [sleepTimerNowMs, setSleepTimerNowMs] = useState(Date.now())
   const [coverUrl, setCoverUrl] = useState(null)
+  const [coverUrlTrackPath, setCoverUrlTrackPath] = useState('')
   const [failedDisplayCoverUrl, setFailedDisplayCoverUrl] = useState(null)
   const crossfadeStateRef = useRef({
     active: false,
@@ -1392,10 +1415,12 @@ export default function App() {
   const [isCardActionBusy, setIsCardActionBusy] = useState(false)
   const [shareCardSnapshot, setShareCardSnapshot] = useState(null)
   const trackLoadSeqRef = useRef(0)
-  const bpmDetectionCacheRef = useRef(new Map())
   const albumCoverProbePathsRef = useRef(new Set())
+  const syncedDisplayCoverCacheKeyRef = useRef('')
   const cloudCoverFetchSeqRef = useRef(0)
   const coverFailureFetchKeyRef = useRef('')
+  const albumCloudCoverAttemptedRef = useRef(new Set())
+  const albumCloudCoverPendingRef = useRef(new Set())
   const trackSwitchCountRef = useRef(0)
 
   // MV State
@@ -1471,7 +1496,7 @@ export default function App() {
   const [listenTogetherRoomState, setListenTogetherRoomState] = useState(null)
   const [castRemoteActive, setCastRemoteActive] = useState(false)
   const [castDlnaListening, setCastDlnaListening] = useState(false)
-  /** 主进程合并的投流状态（含 dlnaMeta、进度），用于主页展示 DLNA 歌曲信息 */
+  /** 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈閸ㄥ倿鏌涢锝嗙缂佺姳鍗抽幃褰掑炊瑜嶅Λ姗€鏌ㄥ┑鍡╂Ц缂佺姵濞婇弻锟犲礃閿濆懍澹曢柣搴ゎ潐濞叉牕顕ｉ懜鐢碘攳濠电姴娴傞弫宥嗙節闂堟稒顥欐慨瑙勵殜濮婂搫煤鐠囨彃绠洪梺鑽ゅ暱閺呯娀鐛崘銊庢棃宕ㄩ鑺ョ彸闂佸湱鍘ч悺銊ф崲閸曨垰绀勭憸鐗堝笚閳锋垹绱掔€ｎ偒鍎ラ柣鎺楃畺閺屾稒绻濋崘顏勨拰闂侀潧妫楅崯瀛樹繆閻戣棄鐓涢柛灞惧焹閸嬫捇鎮滈懞銉у幍缂傚倷鐒﹂敋濞ｅ浂鍨堕弻锟犲幢閹邦剛浠奸梺瀹狀潐閸ㄥ潡骞冨▎鎾村殤妞ゆ巻鍋撴い銈傚亾闂傚倷鐒﹂幃鍫曞礉鐏炵瓔鐒介柨鐔哄У閸嬫ɑ銇勯弮鍥撻柛搴ｅ枛閺屾洘绻涢崹顔煎閻庤鎸稿Λ婵嗩潖閾忓湱纾兼俊顖滃劦閹疯绻涚€涙鐭嗙紒顔界懃閻ｇ兘骞嬮悙鐢电槇闂佹悶鍎崝澶愬箯閾忓湱纾介柛灞剧懅閸斿秹鏌ㄩ弴妤佹珚闁诡喚鍋為妶锝夊礃閳哄啫骞堥梻浣稿暱閹碱偊宕愮紒妯绘珷闁汇垹鎲￠悡鏇㈡煃鐟欏嫬鍔ゅù婊呭亾娣囧﹪鎮欓鍕ㄥ亾閺嶎厼鍨傞柣鎾崇岸閺嬫牠鏌￠崶鈺佇ュ瑙勫▕閻擃偊宕堕妸锔绢槶缂佺偓鍎抽妶绋款嚕閸洖閱囨繛鎴灻‖瀣⒑閻熸澘鏆辨繛灞傚姂閸┾偓?dlnaMeta闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掔晫鎲稿鍫罕闂備礁鎼崐褰掓晬閺嚶颁汗闁圭儤鍨归崐鐐烘⒑閸愬弶鎯堥柛濠傛啞閹梹绻濋崒妤佹杸闂佸疇妫勫Λ妤呮倶閿濆洨纾兼い鏇炴噹閻忥妇鈧娲樺ú鐔煎箖閵忋倕绀傞柤娴嬫櫅瀵娊姊绘担鍛婃儓闁哥噥鍋勭叅闁靛牆妫涢々鏌ユ煕閿旇骞樼痪鎯с偢閺屽秷顧侀柛鎾跺枎閻ｇ兘宕￠悙鈺傤潔濠电偛妫欓崹闈涱嚕閾忣偆绡€闁汇垽娼ф禒锕傛煕閵娿儳鍩ｉ柍銉畵瀹曞爼顢楁担绯曞亾閸洘鈷戞い鎺嗗亾缂佸鏁婚幃鈥斥槈濡繐缍婇弫鎰緞鐎ｎ偊鏁梻渚€鈧偛鑻晶顖炴煟濡や胶鐭岄柛鎺撳笧閳ь剨缍嗘禍鍫曞触鐎ｎ喗鐓曢柍鈺佸幘椤忓牆绀夐柛娑卞幐閺€浠嬫煟濡偐甯涙繛鎳峰嫪绻嗘い鎰剁悼閳藉宕￠柆宥嗙叆婵犻潧妫欓ˉ娆戠磼鐠囧弶顥㈤柡宀嬬秮楠炲洭宕楅崫銉ф晨闂備線鈧偛鑻晶顖滅磼鐠囨彃鈧潡鍨鹃敃鍌氱倞妞ゅ繐绉甸埢宀勬⒒娴ｇ瓔鍤冮柛銊ゅ嵆閹囧幢濞戣鲸鏅ｆ繝闈涘€婚…鍫ユ倷婵犲洦鐓冮柛婵嗗閺嗙喖鏌?DLNA 婵犵數濮烽弫鍛婃叏閻㈠壊鏁婇柡宥庡幖缁愭淇婇妶鍛殲鐎规洘鐓￠弻娑樼暆閳ь剟宕戝☉姘ｅ亾濮橆剦妲归柕鍥у楠炴帡宕卞鎯ь棜闂備胶绮幐鍫曞磹濠靛钃熸繛鎴炃氬Σ鍫熸叏濡も偓閻楀棙鎱ㄥ☉銏♀拺鐎规洖娲﹂崵鈧紓浣割槸缂嶅﹤顕ｇ拠宸悑濠㈣泛锕﹂崢鍛婄箾鏉堝墽鍒伴柟娴嬧偓鏂ユ灁闁靛ě鍛紳?*/
   const [lastCastStatus, setLastCastStatus] = useState(null)
   const [mvPlaybackQuality, setMvPlaybackQuality] = useState(null)
   const [lyricsMatchStatus, setLyricsMatchStatus] = useState('idle')
@@ -1480,7 +1505,7 @@ export default function App() {
     detail: '',
     origin: ''
   })
-  /** 与 lyrics 等长：主行罗马音（LRC 自带或 Kuroshiro 生成） */
+  /** 濠?lyrics 缂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸婂潡鏌ㄩ弬鍨挃闁活厽鐟╅弻鐔封枎闄囬褍煤椤撱垹绠栭柣锝呯灱閻瑩鏌熺粙鎸庡攭缂佽翰鍨藉濠氬磼濞嗘垼绐楅梺鍛婃尰閻熝呭垝閺冨牊鍋ㄧ紒瀣硶閺屟冾渻閵堝棗绗傞柣鎺炵畵瀹曪綀绠涢弮鈧崣蹇斾繆閵堝倸浜惧┑鈽嗗亝椤ㄥ棛绮嬪鍜佺叆闁割偆鍠撻崢浠嬫⒑閹稿孩鈷掗柡鍜佸亰閹矂骞掑Δ浣哄幍濡炪倖姊圭€笛呮兜妤ｅ啯鐓冮柦妯侯樈濡叉悂鎽堕敐澶嬬厾婵炴潙顑嗗▍鍐磼鏉堫煈鐒界紒杈ㄦ崌瀹曟帒顫濋钘変壕闁告縿鍎抽惌鎾绘倵闂堟稒鍟炵€规洘鐓￠弻鐔告綇閸撗呮殸婵℃鎳庨埞鎴︽倷閸欏妫￠梺鐟扮毞閺呯姴顕ｉ锕€骞㈡繛鎴炵懅閸橀亶姊洪崫鍕偍闁告柨鐭傞悰顕€寮介鐔蜂壕闁汇垽娼ч。濂告煙閻熺増鎼愭い顐㈢箰鐓ゆい蹇撳椤斿洭鏌熼懝鐗堝涧缂佹彃鎼嵄闁割偅绺鹃弨浠嬫煟濮楀棗浜滃ù婊勫劤椤啴濡堕崘銊т紕濡?闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ礀閸屻劎鎲搁弮鍫澪ラ柛鎰ㄦ櫆閸庣喖鏌曡箛瀣労婵炶尙顭堥埞鎴︽偐鐠囇冧紣闂佺粯顨呴敃顏勭暦閹达箑惟闁挎棁妗ㄧ花濠氭⒑鐟欏嫭绶插褍閰ｉ幃鐐綇閳哄啰锛?Kuroshiro 闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏇炲€归崕鎴犳喐閻楀牆绗掗柛銊ュ€搁埞鎴︽偐鐎圭姴顥濈紓浣瑰姈椤ㄥ﹪寮婚悢鍏煎亱闁割偆鍠撻崙锟犳⒑閹肩偛濡奸柛濠傜秺楠炲牓濡搁妷搴ｅ枛瀹曞綊顢欓幆褍缂氶梻?*/
   // Romaji display removed from UI for simplicity; keep state empty.
   const [romajiDisplayLines, setRomajiDisplayLines] = useState([])
   const [metadata, setMetadata] = useState({
@@ -1494,6 +1519,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const [listMode, setListMode] = useState('songs')
+  const [navPlaylistsExpanded, setNavPlaylistsExpanded] = useState(false)
   const [userPlaylists, setUserPlaylists] = useState(() => {
     return pickInitialPersistedValue({
       snapshotValue: getInitialAppStateValue('userPlaylists'),
@@ -1542,7 +1568,7 @@ export default function App() {
   )
   const [playlistLibraryMoreOpen, setPlaylistLibraryMoreOpen] = useState(false)
   const playlistLibraryMoreRef = useRef(null)
-  /** { originalIdx, path, top, left, width } | null — 浮层用 fixed + portal，避免被侧边栏裁切 */
+  /** { originalIdx, path, top, left, width } | null -婵犵數濮烽弫鍛婃叏閻戣棄鏋侀柟闂寸绾惧鏌ｉ幇顒佹儓缂佺姵姘ㄩ埀顒€鍘滈崑鎾绘煕閺囥劌浜為柣娑栧劦濮婃椽宕崟顓涙瀱闂佸憡眉缁瑥鐣烽弴銏犵婵犮垺绻傜紞濠囧箖閳╁啯鍎熼柨婵嗘閸犳牠姊?fixed + portal闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔告綇妤ｅ啯顎嶉梺绋垮椤ㄥ﹪寮诲☉姘勃闁告挆鈧Σ鍫濐渻閵堝棙绀嬪ù婊冪埣瀵顓兼径濠佺炊闂佸憡娲﹂崜娆忊枍閿濆洨纾藉ù锝嗗絻娴滈箖姊虹粙鎸庢拱濠㈣娲熷畷鎴﹀箻閼姐倕绁﹂梺鍓茬厛閸犳牗鎱ㄦ惔銊︹拺缂備焦锕╁▓鏇犵磼椤旇偐鐒搁柍銉畵瀹曞爼鍩￠崒姘憋紡闂備浇顕栭崢钘夘啅婵犳艾纾婚柟鎹愵嚙缁犳娊鏌熼幖顓炲箺闁稿秶鏁诲娲焻閻愯尪瀚板褍顕埀顒冾潐濞叉牕鐣烽鍕厺閹兼番鍔岀粻锝嗙節闂堟侗鍎戠€规洘娲熷濠氬磼濮橆兘鍋撴搴ｇ焼濞撴埃鍋撴鐐寸墵椤㈡洟濡堕崶鈺冨帬闂佽閰ｅ褔骞夐垾宕囨殾闁告瑥顦换鍡涙煏閸繃鍣洪柛搴㈡緲椤潡鎳滈棃娑橆潓濡ょ姷鍋戦崹铏规崲濞戙垹绠ｉ柣鎴濇閸斿嘲顪?*/
   const [addToPlaylistMenu, setAddToPlaylistMenu] = useState(null)
   const [likedPaths, setLikedPaths] = useState(() => {
     return pickInitialPersistedValue({
@@ -1566,7 +1592,7 @@ export default function App() {
     createPlaybackContext('library', 'library', [])
   )
   const [showLikedOnly, setShowLikedOnly] = useState(false)
-  /** 侧栏曲目右键菜单 { clientX, clientY, track } */
+  /** 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈缁犳澘鈹戦悩宕囶暡闁稿骸绉电换婵囩節閸屾粌顣虹紓浣插亾閻庯綆鍋佹禍婊堟煙閹规劖纭惧ù鐘欏洦鐓曢柡鍌濇硶缁夌儤鎱ㄦ繝鍕笡闁瑰嘲鎳樺畷銊︾節閸愩劌澹嶅┑鐘垫暩閸嬬偟绮婇幘顔肩柧婵犻潧娲ㄩ々鑼磼鐎ｎ亞姘ㄩ柡瀣捣閳ь剛鏁告晶妤冩崲閸曨垰纾块柕鍫濇礌閸嬫捇妫冨☉鏍т划閻庢鍠栭悥濂哥嵁鐎ｎ喗鍋愰梻鍫熺☉缁犳垿姊婚崒姘偓宄懊归崶顒婄稏濠㈣埖鍔曠壕鍧楁煕韫囨挸鎮戦柛娆忕箻閺屾洟宕煎┑鎰﹀┑顔炬嚀瀵墎鎹㈠☉銏犵婵炲棗绻掓禒楣冩⒑缂佹ɑ灏靛┑鐐╁亾闂佸搫鐬奸崰鎾跺垝濞嗘挸绠伴幖娣灩闂傤垶姊绘担瑙勩仧闁告ê銈搁弫鍐晝閸屾氨鍔?{ clientX, clientY, track } */
   const [trackContextMenu, setTrackContextMenu] = useState(null)
   const [ctxMenuVisualOpen, setCtxMenuVisualOpen] = useState(false)
   const ctxMenuCloseTimerRef = useRef(null)
@@ -1607,10 +1633,12 @@ export default function App() {
   const lastStatsTrackedPathRef = useRef('')
   const startupExclusiveResetRef = useRef(false)
   const releaseNotesFetchedRef = useRef(false)
+  const libraryMetaCacheHydrationKeyRef = useRef('')
   const [newPlaylistName, setNewPlaylistName] = useState('')
   const [quickNewPlaylistName, setQuickNewPlaylistName] = useState('')
   const [selectedAlbum, setSelectedAlbum] = useState('all')
   const [selectedFolder, setSelectedFolder] = useState('all')
+  const [selectedArtist, setSelectedArtist] = useState('all')
   const [songSortMode, setSongSortMode] = useState('default') // 'default' | 'dateAsc' | 'dateDesc'
   const [songSortOpen, setSongSortOpen] = useState(false)
   const songSortRef = useRef(null)
@@ -1635,14 +1663,18 @@ export default function App() {
   const [libraryCleanupBusy, setLibraryCleanupBusy] = useState(false)
   const [missingLibraryPaths, setMissingLibraryPaths] = useState([])
   const [trackMetaMap, setTrackMetaMap] = useState({})
+  const [albumCoverMap, setAlbumCoverMap] = useState({})
   const trackMetaMapRef = useRef(trackMetaMap)
   const [technicalInfo, setTechnicalInfo] = useState({
     sampleRate: null,
     originalBpm: null,
     channels: null,
     bitrate: null,
+    bitDepth: null,
+    isMqa: false,
     codec: null
   })
+  const [bpmDetectionState, setBpmDetectionState] = useState('idle')
   const [isConverting, setIsConverting] = useState(false)
   const [conversionMsg, setConversionMsg] = useState('')
   const [audioDevices, setAudioDevices] = useState([])
@@ -1920,6 +1952,11 @@ export default function App() {
   }, [updateStatus, loadReleaseNotes])
 
   useEffect(() => {
+    if (!libraryStateReady || !window.api?.setAutoUpdateEnabled) return
+    void window.api.setAutoUpdateEnabled(config.autoUpdateEnabled !== false).catch(() => {})
+  }, [libraryStateReady, config.autoUpdateEnabled])
+
+  useEffect(() => {
     if (!window.api?.onLyricsDesktopUncheck) return undefined
     return window.api.onLyricsDesktopUncheck(() => {
       setConfig((p) => ({ ...p, desktopLyricsEnabled: false }))
@@ -1954,6 +1991,25 @@ export default function App() {
       if (pending.writeToAppState && window.api?.appStateSet) {
         void window.api.appStateSet(persistKey, pending.value)
       }
+    }
+  }, [])
+
+  const persistStateImmediately = useCallback((persistKey, localKey, value, writeToAppState = true) => {
+    const queue = persistQueueRef.current
+    const pending = queue.get(persistKey)
+    if (pending?.timer) clearTimeout(pending.timer)
+    queue.delete(persistKey)
+
+    if (localKey) {
+      try {
+        localStorage.setItem(localKey, JSON.stringify(value))
+      } catch {
+        /* ignore storage quota / serialization failures */
+      }
+    }
+
+    if (writeToAppState && window.api?.appStateSet) {
+      void window.api.appStateSet(persistKey, value)
     }
   }, [])
 
@@ -2132,6 +2188,67 @@ export default function App() {
   useEffect(() => {
     trackMetaMapRef.current = trackMetaMap
   }, [trackMetaMap])
+
+  useEffect(() => {
+    if (!libraryStateReady || playlist.length === 0) return undefined
+    const paths = [...new Set(playlist.map((track) => track?.path).filter(Boolean))]
+    if (paths.length === 0) return undefined
+
+    const hydrationKey = paths.join('\n')
+    if (libraryMetaCacheHydrationKeyRef.current === hydrationKey) return undefined
+    libraryMetaCacheHydrationKeyRef.current = hydrationKey
+
+    let cancelled = false
+
+    const mergeCachedEntries = (cachedEntries) => {
+      const entries = Object.entries(cachedEntries || {})
+      if (entries.length === 0) return
+
+      setTrackMetaMap((prev) => {
+        let changed = false
+        const next = { ...prev }
+
+        for (const [path, cachedEntry] of entries) {
+          if (!cachedEntry) continue
+          const current = next[path] || {}
+          const merged = { ...cachedEntry, ...current }
+          if (current.cover == null && cachedEntry.cover) {
+            merged.cover = cachedEntry.cover
+            merged.coverChecked = true
+            delete merged.coverMemoryTrimmed
+          }
+          if (current.title == null && cachedEntry.title) merged.title = cachedEntry.title
+          if (current.artist == null && cachedEntry.artist) merged.artist = cachedEntry.artist
+          if (current.album == null && cachedEntry.album) merged.album = cachedEntry.album
+          if (current.albumArtist == null && cachedEntry.albumArtist) {
+            merged.albumArtist = cachedEntry.albumArtist
+          }
+          if (JSON.stringify(current) !== JSON.stringify(merged)) {
+            next[path] = merged
+            changed = true
+          }
+        }
+
+        return changed ? trimTrackMetaCoverEntries(next, new Set(paths)) : prev
+      })
+    }
+
+    const hydrateLibraryMetaCache = async () => {
+      for (let index = 0; index < paths.length && !cancelled; index += LIBRARY_META_CACHE_HYDRATE_BATCH_SIZE) {
+        const chunk = paths.slice(index, index + LIBRARY_META_CACHE_HYDRATE_BATCH_SIZE)
+        const cached = await readTrackMetaCache(chunk)
+        if (cancelled) return
+        mergeCachedEntries(cached)
+        await new Promise((resolve) => window.setTimeout(resolve, 0))
+      }
+    }
+
+    hydrateLibraryMetaCache()
+
+    return () => {
+      cancelled = true
+    }
+  }, [libraryStateReady, playlist])
 
   useEffect(() => {
     displayMetadataOverridesRef.current = displayMetadataOverrides
@@ -2908,11 +3025,11 @@ export default function App() {
     void window.api.setAudioExclusive(config.audioExclusive === true)
   }, [config.audioExclusive])
 
-  // 同步 gapless 设置到主进程引擎
+  // 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐閸愬弶鐤勫┑掳鍊х徊浠嬪疮椤愩倐鍋撳顒夋Ч闁靛洤瀚伴獮鎺楀箣濠垫劒绱濋梻?gapless 闂傚倸鍊搁崐宄懊归崶褏鏆﹂柛顭戝亝閸欏繒鈧娲栧ú銊╂儗閸℃褰掓晲閸偅缍堝┑鐐叉噽婵挳婀侀梺缁樏Ο濠囧磿閹扮増鐓曢悗锝呭悁闁垶鏌＄仦鍓ф创闁糕晛瀚板畷姗€顢旀担璇℃綌缂傚倸鍊风拋鏌ュ磻閹剧粯鐓曢柍鈺佸暔娴滄绻涢幋鐐垫嚂缂佹唻绲介湁闁挎繂瀚鐔镐繆瀹割喖娅嶆慨濠勫劋鐎电厧鈻庨幘鎼偓宥囩磽娓氬洤鏋熼柟鍛婃倐椤㈡岸鏁愭径濠囧敹闂佸搫娲ㄩ崑鐔煎储閹间焦鈷戠紒瀣濠€浼存煕閵堝懘鍙勯柛鈹惧亾濡炪倖甯婄粈浣该归鈧弻锛勪沪閻ｅ睗褔鏌熺粵鍦瘈濠碘€崇埣瀹曘劑顢樺┑鍫濈婵犵绱曢崑鎴﹀磹閺嶎灐娲煛閸愵亞顦繛杈剧到婢瑰﹪宕甸弴銏＄厵缂備降鍨归弸鐔兼煕鐎ｎ亜顏柡灞剧☉閳藉顫滈崼婵呯矗-
   useEffect(() => {
     if (!window.api?.setAudioGapless) return
     void window.api.setAudioGapless(!!config.gaplessEnabled)
-    // gapless 与 crossfade 互斥：开 gapless 时自动关 crossfade
+    // gapless 濠?crossfade 濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴欏灪閸嬨倝鏌曟繛褍鍟悘濠囨倵楠炲灝鍔氭繛璇х畵瀵啿顭ㄩ崟顏嗙畾闂侀潧鐗嗛幊蹇涘闯瑜版帗鐓曢柟瀵稿Т瀛濋梺瀹狀潐閸ㄥ灝鐣烽幒鎴僵妞ゆ挾鍋炲▓姗€姊绘担鍛婃儓闁瑰嘲顑夊畷婊冾潩鐠鸿櫣鐤勯梺闈涱焾閸庡搫顭囬妸鈺傜厱闁斥晛鍠氬▓鏃€銇勯顐簽缂?gapless 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偞鐗犻、鏇㈡晝閳ь剟鎮块濮愪簻闁哄稁鍋勬禒婊呯棯閹呬虎闁宠鍨垮畷鎺戭煥鎼达絽濮奸梻浣告啞娣囨椽锝炴径灞惧床婵犻潧娲ㄧ弧鈧梺绋挎湰缁矂銆傞搹鍦＝濞达絾褰冩禍鐐節閵忥絽鐓愰柛鏃€鐗犻幃陇绠涢幘顖涙杸闂佺粯鍔樼亸娆愮閵忋倖鐓曢柡鍐ｅ亾婵ǜ鍔戦獮?crossfade
     if (config.gaplessEnabled && config.crossfadeEnabled) {
       setConfig((prev) => ({ ...prev, crossfadeEnabled: false }))
     }
@@ -3087,6 +3204,7 @@ export default function App() {
   }, [applyLibraryFolderDelta])
 
   useEffect(() => {
+    if (!libraryStateReady) return undefined
     if (!window.api?.watchLibraryFolders || !window.api?.stopWatchingLibraryFolders)
       return undefined
     if (!importedFolders.length) {
@@ -3095,7 +3213,12 @@ export default function App() {
     }
 
     let disposed = false
-    window.api.watchLibraryFolders({ folders: importedFolders }).catch((error) => {
+    const existingTracks = playlistRef.current
+      .filter((track) => isTrackInsideImportedFolders(track?.path, importedFolders))
+      .map(buildImportedFolderTrackSeed)
+      .filter(Boolean)
+
+    window.api.watchLibraryFolders({ folders: importedFolders, existingTracks }).catch((error) => {
       if (!disposed) {
         console.error('Library watch start failed:', error)
       }
@@ -3105,7 +3228,7 @@ export default function App() {
       disposed = true
       void window.api.stopWatchingLibraryFolders().catch(() => {})
     }
-  }, [importedFolders])
+  }, [libraryStateReady, importedFolders])
 
   // Auto-rescan imported folders on startup to discover new files
   useEffect(() => {
@@ -3116,14 +3239,19 @@ export default function App() {
     const foldersForStartupRescan = importedFolders.slice()
     const doRescan = async () => {
       try {
-        const existingPaths = playlistRef.current
-          .filter((track) => isTrackInsideImportedFolders(track?.path, foldersForStartupRescan))
-          .map((track) => track.path)
-        const scannedTracks = await window.api.rescanFolders({
-          folders: foldersForStartupRescan,
-          existingPaths
-        })
-        if (cancelled || !Array.isArray(scannedTracks)) return
+        let scannedTracks = []
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const rescanResult = await window.api.rescanFolders({
+            folders: foldersForStartupRescan
+          })
+          if (cancelled || !Array.isArray(rescanResult)) return
+          scannedTracks = rescanResult
+          const hasImportedTracks = playlistRef.current.some((track) =>
+            isTrackInsideImportedFolders(track?.path, foldersForStartupRescan)
+          )
+          if (scannedTracks.length || hasImportedTracks || attempt === 2) break
+          await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)))
+        }
 
         const previousImportedTracks = playlistRef.current.filter((track) =>
           isTrackInsideImportedFolders(track?.path, foldersForStartupRescan)
@@ -3133,8 +3261,24 @@ export default function App() {
           scannedTracks.map(normalizeWatchedTrack).filter(Boolean)
         )
 
-        if (delta.renamed.length || delta.removedPaths.length || delta.added.length) {
-          applyLibraryFolderDelta(delta)
+        const safeStartupDelta = {
+          renamed: [],
+          removedPaths: [],
+          added: delta.added
+        }
+
+        if (safeStartupDelta.added.length) {
+          applyLibraryFolderDelta(safeStartupDelta)
+          if (window.api?.watchLibraryFolders) {
+            const seededTracks = playlistRef.current
+              .filter((track) => isTrackInsideImportedFolders(track?.path, foldersForStartupRescan))
+              .map(buildImportedFolderTrackSeed)
+              .filter(Boolean)
+            void window.api.watchLibraryFolders({
+              folders: foldersForStartupRescan,
+              existingTracks: seededTracks
+            })
+          }
         }
       } catch (e) {
         console.error('Folder rescan failed:', e)
@@ -3156,7 +3300,7 @@ export default function App() {
     }
   }, [playbackRate])
 
-  // Update volume — HTML audio / gain node (no IPC)
+  // Update volume -HTML audio / gain node (no IPC)
   useEffect(() => {
     if (useNativeEngineRef.current) {
       // Native mode: HTML audio at full volume so Web Audio analyser gets data,
@@ -3276,7 +3420,7 @@ export default function App() {
       const track = playlist[currentIndex]
       const path = track?.path || ''
       const dsdLocal = useNativeEngineRef.current && path && /\.(dsf|dff)$/i.test(path)
-      // Browser cannot decode DSD; audio.duration is bogus — duration comes from main (ffprobe).
+      // Browser cannot decode DSD; audio.duration is bogus -duration comes from main (ffprobe).
       if (!dsdLocal) {
         setDuration(audio.duration)
       }
@@ -3579,6 +3723,7 @@ export default function App() {
   const albumGridRef = useRef(null)
   const albumOverviewScrollTopRef = useRef(0)
   const pendingAlbumOverviewRestoreRef = useRef(false)
+  const pendingAlbumDetailScrollResetRef = useRef(false)
   const previousSongSortModeRef = useRef(songSortMode)
   const previousAlbumSortModeRef = useRef(albumSortMode)
   const previousFolderSortModeRef = useRef(folderSortMode)
@@ -3682,33 +3827,18 @@ export default function App() {
 
   const cleanTitleForSearch = (rawTitle = '') => {
     if (!rawTitle) return ''
-    let s = rawTitle
-    s = s.replace(/【[^】]*】/g, ' ')
-    s = s.replace(/〖[^〗]*〗/g, ' ')
-    // Remove common noise words (cover, 翻唱, remix, live, ver., version, ft., feat.)
-    s = s.replace(/\(.*?翻唱.*?\)|（.*?翻唱.*?）/gi, '')
-    s = s.replace(/\bcover\b/gi, '')
-    s = s.replace(/翻唱/gi, '')
-    s = s.replace(/\bremix\b/gi, '')
-    s = s.replace(/\blive\b/gi, '')
-    s = s.replace(/\bver\.?\b/gi, '')
-    s = s.replace(/\bversion\b/gi, '')
-    s = s.replace(/\bfeat\.?\b/gi, '')
-    s = s.replace(/\bft\.?\b/gi, '')
-    // Remove bracketed translator/arranger notes
-    s = s.replace(/\[.*?\]/g, '')
-    s = s.replace(/[《》]/g, ' ')
-    s = s.replace(/\(.*?\)/g, '')
-    // Collapse extra spaces and punctuation
-    s = s.replace(/[~`"'·、，。]/g, ' ')
+    let s = String(rawTitle)
+    s = s.replace(/\[[^\]]*\]/g, ' ')
+    s = s.replace(/\([^)]*\)/g, ' ')
+    s = s.replace(/\b(cover|remix|live|ver\.?|version|feat\.?|ft\.?)\b/gi, '')
+    s = s.replace(/[~`"'.,!?;:|/\\]+/g, ' ')
     s = s.replace(/\s+/g, ' ').trim()
     return s
   }
 
-  /** B站/转载常见《真歌名》；优先用于歌词检索 */
   const extractBookTitleQuotes = (rawTitle = '') => {
     const out = []
-    const re = /《([^》]+)》/g
+    const re = /[<\[]([^>\]]+)[>\]]/g
     let m
     while ((m = re.exec(rawTitle)) !== null) {
       const inner = (m[1] || '').trim()
@@ -3719,7 +3849,7 @@ export default function App() {
 
   const extractCornerQuotes = (rawTitle = '') => {
     const out = []
-    const re = /「([^」]+)」/g
+    const re = /["']([^"']+)["']/g
     let m
     while ((m = re.exec(rawTitle)) !== null) {
       const inner = (m[1] || '').trim()
@@ -3728,14 +3858,13 @@ export default function App() {
     return out
   }
 
-  /** 嵌入标签里常见「Vtuber/翻唱」；搜原曲前应 stripped */
   const cleanArtistForLyrics = (raw = '') => {
     let s = (raw || '').trim()
     if (!s) return ''
-    s = s.replace(/\s*\/\s*翻唱\s*/gi, ' ')
-    s = s.replace(/\/\s*翻唱/gi, '')
-    s = s.replace(/翻唱\s*\//gi, '')
-    s = s.replace(/翻唱/g, '')
+    s = s.replace(/\s*\/\s*cover\s*/gi, ' ')
+    s = s.replace(/\/\s*cover/gi, '')
+    s = s.replace(/cover\s*\//gi, '')
+    s = s.replace(/cover/gi, '')
     s = s.replace(/\//g, ' ')
     s = s.replace(/\s+/g, ' ').trim()
     return s
@@ -3756,16 +3885,11 @@ export default function App() {
     for (const q of extractCornerQuotes(rt)) add(q)
     add(rt)
 
-    // 如果标题含版本标记（remix/live/cover等），额外生成一个保留版本词的变体
-    // 只做最小噪声清理，不删 remix/live/cover，让搜索能命中对应版本
-    const VERSION_MARKER_RE = /\b(remix|rmx|live|acoustic|instrumental|inst|cover|edit)\b|翻唱|カバー/i
+    const VERSION_MARKER_RE = /\b(remix|rmx|live|acoustic|instrumental|inst|cover|edit)\b/i
     if (VERSION_MARKER_RE.test(rt)) {
       let withVersion = rt
-      withVersion = withVersion.replace(/【[^】]*】/g, ' ')
-      withVersion = withVersion.replace(/〖[^〗]*〗/g, ' ')
-      withVersion = withVersion.replace(/\[.*?\]/g, '')
-      withVersion = withVersion.replace(/[《》「」]/g, ' ')
-      withVersion = withVersion.replace(/[~`"'·、，。]/g, ' ')
+      withVersion = withVersion.replace(/\[[^\]]*\]/g, ' ')
+      withVersion = withVersion.replace(/[~`"'.,!?;:|/\\]+/g, ' ')
       withVersion = withVersion.replace(/\bfeat\.?\b|\bft\.?\b/gi, '')
       withVersion = withVersion.replace(/\s+/g, ' ').trim().toLowerCase()
       if (withVersion && !seen.has(withVersion)) {
@@ -3777,21 +3901,16 @@ export default function App() {
     return list
   }
 
-  /** 半角/全角括号内常为原唱、本家名；翻唱上传者会误导 LRCLIB，优先用这些提示 */
   const extractParenArtistHints = (rawTitle = '') => {
     if (!rawTitle) return []
     const seen = new Set()
     const out = []
-    const re = /\(([^)]+)\)|（([^）]+)）/g
+    const re = /\(([^)]+)\)/g
     let m
     while ((m = re.exec(rawTitle)) !== null) {
-      const inner = (m[1] || m[2] || '').trim()
+      const inner = (m[1] || '').trim()
       if (!inner || inner.length > 80) continue
-      if (
-        /TV|サイズ|\bsize\b|instrumental|\binst\.?\b|カラオケ|off\s*vocal|伴奏|ver\.|バージョン|翻唱|cover|カバー|\bMV\b|mv\b/i.test(
-          inner
-        )
-      ) {
+      if (/TV|size|instrumental|inst\.?|karaoke|off\s*vocal|ver\.|cover|MV|mv/i.test(inner)) {
         continue
       }
       const key = inner.toLowerCase()
@@ -3801,7 +3920,6 @@ export default function App() {
     }
     return out
   }
-
   const readRuntimeCache = useCallback((ref, key, ttlMs) => {
     const hit = ref.current.get(key)
     if (!hit) return null
@@ -3945,7 +4063,7 @@ export default function App() {
     const safeArtist = (artist || '').trim()
     const queries = [
       safeArtist ? `${safeTitle} ${safeArtist} MV` : `${safeTitle} MV`,
-      safeArtist ? `${safeTitle} ${safeArtist} 官方` : `${safeTitle} 官方MV`,
+      safeArtist ? `${safeTitle} ${safeArtist} official MV` : `${safeTitle} official MV`,
       `${safeTitle} ${safeArtist}`.trim(),
       safeTitle
     ].filter((q) => q && q.trim())
@@ -3972,8 +4090,8 @@ export default function App() {
     const metaTitle = metadata.title || (track ? stripExtension(track.name) : '')
     const metaArtist = metadata.artist || track?.info?.artist || ''
     try {
-      // 保留原始标题传入，让 fetchLyrics 内部自己决定如何清理
-      // 之前 cleaned || metaTitle 会把 remix/live 提前删掉，导致版本识别失效
+      // 濠电姷鏁告慨鐑藉极閹间礁纾块柟瀵稿Т缁躲倝鏌﹀Ο渚＆婵炲樊浜濋弲婊堟煟閹伴潧澧幖鏉戯躬濮婃椽宕ㄦ繝鍐槱闂佹悶鍔嶅妯绘櫏闂佸搫琚崕鏌ユ偂閸愵亝鍠愭繝濠傜墕缁€鍫ユ煟閺冨倸甯堕柦鍐枑缁绘盯骞嬮悜鍡欏姱闂佺粯鏌ㄩ崥瀣磻閸岀偛绠规繛锝庡墮閻忣噣鏌嶈閸撴繈顢氳閳ユ棃宕橀鍢壯囧箹缁厜鍋撻懠顒€鍤梻鍌欑閹测€愁潖瑜版帗鍋￠柕澶嗘櫓閺佸鏌ㄥ┑鍡橆棤妞も晝鍏橀幃妤呮晲鎼存繄鏁栭梺绋匡功閸嬫盯鈥旈崘顔嘉ч柛鈩冾殘閻熴劌顪冮妶蹇涙婵犮垺顭堥。楣冩煟韫囨洖浠滃褏鏅划濠氬礈瑜忓Λ顖炴煙椤栧棗鑻崜鐗堢箾鐎涙鐭岄柟铏崌閸╃偤骞嬮敂缁樻櫓闂佸吋浜介崕閬嶅船婢舵劖鍊甸悷娆忓缁岃法绱撳鍕槮闁伙絿鍏樺畷锟犳倷閳哄偆娼旀繝鐢靛仜濡瑩宕濋弽顓熷仧妞ゆ劧闄勯悡鐔煎箹缁厜鍋撻崘鑼剁窡闂備胶顭堥鍡涘箲閸ヮ剙钃熸繛鎴欏灩缁犳稒銇勯幘璺轰粶濠殿喓鍨藉?fetchLyrics 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐閼碱剦妲烽梻浣告惈濞层垽宕归崷顓犱笉闁绘娅曢崣蹇斾繆閻愰鍤欏ù婊堢畺閹鎲撮崟顒傤槰濠电偠灏欓崰鏍偘椤旂⒈娼ㄩ柍褜鍓熼妴浣糕枎閹炬潙鐧勬繝銏ｆ硾椤戝洭寮堕悷鎵虫斀闁挎稑瀚禍濂告煕婵犲啯绀堥柟骞垮灲楠炲洭顢欓悷棰佸濠殿喗顭囬崢褔寮搁妶鍥╃＜妞ゆ梻鈷堥悡鍏碱殽閻愭潙绗掗摶鏍归敐鍛儓妤犵偛鐗撳缁樻媴閸濄儳楔闂佺顑呴敃顏勭暦濠婂啠鏋庨柟鎹愭珪鏉堝牓姊绘笟鍥у缂佸鏁婚幃锟犳偄閸忚偐鍙嗗┑鐘绘涧濡瑩骞栭幇顑炵懓顭ㄩ崟顐㈠Б闁兼寧鍔欓弻娑㈠Ψ閹存繄啸闁告凹鍋婇幃妤冩喆閸曨剛顦ㄩ柣銏╁灡鐢繝宕洪姀鈩冨劅闁靛鍎抽娲⒑缂佹〞鎴︽晝閳哄懎鍌ㄥ┑鍌滎焾閻撴﹢鏌熸潏楣冩闁稿﹦鍏橀幃妤€鈽夊▍顓т簽閸犲﹤顓兼径瀣ф嫼缂佺虎鍘奸幊蹇涙偟椤忓牊鐓曢柡鍐ｅ亾闁荤啿鏅犻幃?
+      // 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈閸ㄥ倿鏌涢锝嗙闁藉啰鍠栭弻鏇熺箾閻愵剚鐝﹂梺杞扮鐎氫即寮诲☉妯锋闁告鍋為悘宥呪攽?cleaned || metaTitle 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰▕閻掕姤绻涢崱妯诲碍閻熸瑱绠撻幃妤呮晲鎼粹€愁潻闂佸搫顑呴悧蹇涘焵椤掆偓缁犲秹宕曢崡鐐嶆盯寮崒娑樺簥?remix/live 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗ù锝夋交閼板潡寮堕崼姘珔闁搞劍绻冮妵鍕冀椤愵澀绮剁紓浣插亾濠㈣埖鍔栭悡娑㈡煕閵夈垺娅呴柡瀣灦缁绘盯宕ㄩ姘ｆ瀰闂佸搫鐭夌徊鍊熺亽濠电偛妫欓崕鍐测枔椤撶姷纾藉ù锝嗗絻娴滈箖姊虹化鏇炲⒉缂佸甯￠幃锟犳偄闂€鎰畾濡炪倖鐗楃喊宥夊箚閸儲鐓涢柛鈩冪煯閸氼偆绱掓潏銊ユ诞鐎殿噮鍣ｉ崺鈧い鎺戝缁犱即鏌熼幆鐗堫棄闁藉啰鍠栭弻鏇熺箾閸喖濮夊┑鈩冨絻閻楀﹥绌辨繝鍥舵晬婵ê褰夐搹搴☆渻閵堝懏绂嬮柛妯恒偢閳ユ棃宕橀鍢壯囨煕閳╁喚鐒芥い锔惧缁绘稓鈧稒顭囬惌濠囨煟閺嵮佸仮闁绘侗鍠楃换婵嬪磼濡や緡娼旀繝娈垮枟閿曨偆寰婇懞銉ь洸濡わ絽鍟悡鐔兼煏韫囧﹥顫婇柛鐔风箻閺岋綁骞掗弬澶稿闂侀潧娲ょ€氫即寮幇鏉垮窛妞ゆ劦婢€閸掓帡姊绘担鍛婃儓闁活厼顦遍幑銏犫攽閸℃瑦娈炬繝闈涘€告竟濠囧极閸愵喗鐓忛煫鍥ㄦ礀琚ラ梺瑙勭仛閸婃繂顫忕紒妯诲濡炲绨肩憰鍡涙⒒閸屾艾顏╅悗姘緲閻ｇ柉銇愰幒鎴濈€銈嗘⒒閸嬫挸鈻撻幆褉鏀芥い鏃€鏋婚懓鎸庛亜閵堝懎鈧灝顕ｉ锕€绀冮柍鐟般仒缁ㄨ顪冮妶鍡楀Е闁稿瀚板畷銏ゅ箹娴ｅ湱鍘告繝銏ｅ煐閿氱€殿噮鍠楅幈?
       await fetchLyrics(track.path, metaTitle, metaArtist, {
         album: track.info?.album || '',
         embeddedLyrics: track.info?.lyrics || null,
@@ -4095,16 +4213,23 @@ export default function App() {
           : [...globalParenHints, coverArtistClean, coverArtistRaw].filter(Boolean)
       }
       const q = customQuery || `${titleVariants[0]} ${coverArtistClean || coverArtistRaw}`.trim()
+      const sourcePreference = configRef.current.lyricsSource || 'lrclib'
+      const externalSources =
+        sourcePreference === 'qq'
+          ? ['qq', 'kugou', 'kuwo']
+          : sourcePreference === 'kugou' || sourcePreference === 'kuwo'
+            ? [sourcePreference]
+            : ['qq', 'kugou', 'kuwo']
 
-      // LRCLIB：主查询 + 仅标题备用查询同时发出，合并去重
+      // LRCLIB闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔兼倻濮楀棙鐣烽梺绋垮椤ㄥ棝濡甸崟顖氱睄闁割偆鍠愬▓浼存⒑缁嬫鍎愰柟鐟版搐铻為柛鎰╁妷濡插牊鎱ㄥΟ鍝勮埞濠殿噣浜堕弻锝嗘償閵忊晛鏅遍梺鍝ュУ閻楃娀鍨鹃敃鍌涚叆閻庯絺鏅濈粻姘舵⒑缂佹ê鐏辩悮娆撴煃瑜滈崜銊х不閹捐崵宓侀悗锝庝簴閺€浠嬫煕閵夈垺娅嗘繛?+ 濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴欏焺閺佸銇勯幘璺烘瀾闁告瑥绻橀弻鐔虹磼閵忕姵鐏堢紓浣哄Х婵炩偓闁绘搩鍋婂畷鍫曞Ω瑜夋慨鍥⒑缁嬫鍎忔い锔炬暬瀵濡搁妷銏℃杸闂佺硶鍓濋敃顐ゆ閵娧呯＝濞达絿鎳撻弫鍓х磼閼碱剙浜剧紒宀冮哺缁绘繈宕堕懜鍨珫婵犵數鍋涘Λ娆戞暜閳哄懎绀夐柛娑卞幐閺€浠嬫⒔閸モ晙鐒婃繛鍡樻尭閺嬩礁鈹戦悩瀹犲闁藉啰鍠栭弻銊モ攽閸♀晜顎嗙紓鍌氱У閻楁濡甸崟顖氱闁糕剝銇炴竟鏇炩攽閻樻鏆柍褜鍓濈亸娆撴儗濞嗘挻鐓涚€光偓鐎ｎ剛袦濡ょ姷鍋為悷鈺佺暦閻旂⒈鏁囬柣娆忔噽閸氬綊姊婚崒娆戭槮缂傚秴锕棢闁规儳顕粻楣冩煃瑜滈崜娆撳煘閹达富鏁婇柣鐔碱暒婢规洟姊婚崒娆掑厡缂侇噮鍨堕弫瀣⒑閸濄儱鏋庢繛纭风節瀹曟椽鍩€椤掍降浜滈柟鐑樺灥椤徰囨煙閺屻儳鐣洪柡灞糕偓宕囨殕閻庯綆鍓涢惁鍫ユ倵鐟欏嫭绀冮柨鏇樺灲閵嗕礁顫滈埀顒勫箖閵忋倕绠掗柟鍝勬娴滈箖鏌熼幍顔碱暭闁稿鍓濈换婵囩節閸屾凹浠剧紓浣藉煐閻擄繝寮诲☉娆戠瘈闁稿本绮堥搹搴ㄦ⒑娴兼瑧鍒伴柛銏＄叀閸┿垺鎯旈妸銉ь啋闂佸搫顦伴崹宕囧垝閿熺姵鈷戦悹鍥ㄧ叀閸欏嫭绻涙担鍐叉搐缁犵儤绻濇繝鍌滃悋闁搞儺鍓﹂弫瀣煃瑜滈崜娆擄綖韫囨拋娲敂閸曨偆鐛╁┑鐘垫暩婵挳骞婃惔銊嬪鈹戠€ｎ偀鎷虹紓鍌欑劍閿曗晛鈻撻弮鈧穱濠囶敃閿濆洨鐤勫Δ鐘靛仜閿曨亪骞冮姀銈呯闁绘挸绨肩花濠氭⒒娴ｈ櫣甯涢柟绋挎啞椤ㄣ儵骞栨担鍝ワ紱閻庡箍鍎卞Λ娑氬姬閳ь剟姊哄Ч鍥х伈婵炰匠鍕ⅰ闂傚倷娴囨竟鍫ワ綖婢舵劕纾块柟鎯版閻?
       const lrclibPromise = Promise.all([
         requestLrcLib(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`),
-        // 如果主查询带了艺术家，额外用纯标题搜一次（防止艺术家名拼写差异导致漏搜）
+        // 濠电姷鏁告慨鐑藉极閸涘﹥鍙忛柣鎴濐潟閳ь剙鍊圭粋鎺斺偓锝庝簽閸旓箑顪冮妶鍡楀潑闁稿鎹囬弻娑㈡偄闁垮浠撮梺绯曟杹閸嬫挸顪冮妶鍡楀潑闁稿鎸剧槐鎾愁吋閸滃啳鍚Δ鐘靛仜閸燁偉鐏掗柣鐘叉穿鐏忔瑧绮ｉ悙鐑樼厽閹兼惌鍨崇粔鐢告煕韫囨棑鑰跨€殿喗鎮傚浠嬵敃閵堝浄绱抽梻浣侯焾閺堫剟鎮疯瀹曟繂顓奸崱鎰盎濡炪倖鎸鹃崑鐐哄窗濡皷鍋撶憴鍕┛缂傚秳绶氬畷娲焵椤掍降浜滈柟鐑樺灥椤忣亪鏌ｉ幘璺烘灈闁哄矉绲借灒闁告繂瀚鍥⒑缁嬭儻顫﹂柛鏃€鍨垮璇测槈閵忕姈鈺呮煏婢诡垰鎲涢妸鈺傗拺閻犲洠鈧櫕鐏嗙紓渚囧枟閻熲晠濡存笟鈧鎾閳╁啯鐝抽梻浣规偠閸庢挳宕洪弽顓熺叆闁靛牆顦伴埛鎺懨归敐鍫燁仩闁靛棗锕弻娑㈠箻鐎靛摜鐤勯梺纭呮珪缁诲啴濡堕敐澶婄妞ゆ牗鍑瑰Σ鍛娿亜椤愶絿鐭掗柛鈹惧亾濡炪倖甯掔€氼剟鎷戦悢鍏肩叆闁绘柨鎼瓭闂備礁宕ú锕傚Φ閸曨垰绠涢柍杞拌兌娴煎嫭绻涚€电袥闁哄懏鐩垾鏃堝礃椤斿槈褔鏌涢埄鍐剧劷闁告瑥妫涚槐鎾存媴閸撳弶笑缂傚倸绉撮敃銈夘敋閿濆鏁冮柕蹇婃櫅閹垿姊洪崨濠佺繁闁搞劌宕埢鎾诲即閵忊檧鎷洪梺鍛婄☉閿曘儳绮堥埀顒勬⒑鐠囪尙绠查柤褰掔畺閳ワ箓宕稿Δ鈧粻濠氭倵闂堟稒鎲搁柣锕€鐗撳娲濞戙垻宕紓浣藉紦缁瑩骞冮敓鐘茬疀闁绘鐗忛崢钘夆攽鎺抽崐鎾绘嚄閸洘鍎楅柟鐑樻煛閸嬫挸鈻撻崹顔界彯闂佺顑呴敃銉︾┍婵犲洤閱囬柡鍥╁仧閸婄偤姊洪崘鍙夋儓闁稿锕﹀Σ鎰板焺閸愌呯畾闂佺粯鍔︽禍婊堝焵椤掍胶澧甸柟顔ㄥ吘鏃堝礃椤忓棛鍘梻浣筋潐瀹曟﹢顢氳瀹曞綊宕掗悙瀵稿幗闂佽鍎抽崯鍧楊敊閸屾稓绠鹃柟瀛樼懃閻忣亪鏌涚€ｎ亶鍎旈柡灞剧洴閸╋繝宕熼鍌氭锭闂備焦鎮堕崝灞筋焽閿熺姵鍋樻い鏇楀亾鐎规洘锕㈤、娆撴嚍閵夈儱濮冨┑锛勫亼閸婃牠宕濋幋锕€纾归柟鐗堟緲閸戠娀鏌″搴″箺闁抽攱鍨垮娲敃閵堝懍绮堕梺鍏兼た閸ㄩ亶寮查崼鏇ㄦ晪闁逞屽墴瀵顓奸崶銊ョ彴闂佸搫琚崕鍗烆嚕娴煎瓨鈷戠紒顖涙礃閺夋椽鏌涙惔銊︽锭闁伙絿鍏樻俊鎼佸煛婵犲啯娅栨繝鐢靛Т閿曘倗鈧稈鏅為埅鎼佹⒒閸屾艾鈧悂宕愰幖浣哥９闁归棿绀佺壕褰掓煙闂傚顦﹂柣銈庡枟閵囧嫰骞囬埡浣哄姶闂佹悶鍊栧ú鐔煎蓟濞戙埄鏁冮柨婵嗘椤︹晠姊烘潪鎵槮婵☆偅鐟ч幑銏犫槈閵忕姷顓哄┑鐐叉缁绘帗绂掓ィ鍐┾拺闁硅偐鍋涢埀顒佹礋閹矂宕掗悙鑼舵憰闂佹寧绻傞ˇ顖滅不閿濆鐓熼柟閭﹀墯椤ョ偤鏌涢妸銉﹀仴鐎殿喖顭烽弫鍐磼濮樺崬骞愰梻浣告啞娓氭宕伴弽顓炵劦妞ゆ帒鍊归弳鈺呮煟閵夘喕閭い銏★耿閹瑩寮堕幋鐑嗕画缂傚倷鑳堕搹搴ㄥ矗閸愵亞涓嶉柡宥庡幖閽冪喖鏌ｉ弮鍌楁嫛闁轰礁锕弻銈夊箒閹烘垵濮㈠銈忛檮濠㈡鐏冮梺缁橈耿濞佳勭濠婂懐纾肩紓浣癸公閼版寧顨ラ悙鎻掓殻闁糕晛瀚板畷姗€鍩℃担绋课ら梻鍌欑劍閺嬪ジ寮插☉銏犵柈妞ゆ牜鍎愰弫鍌炴煟閺傚灝鎮戦柣鎾跺枛楠炴牗娼忛崜褏蓱闂佹悶鍊愰崑鎾斥攽閻橆喖鐏柟铏崌閺佸啴顢旈崟顓熸婵炴潙鍚嬪娆撳礃閳ь剙顪冮妶鍡楀Ё缂傚秴妫楅…鍥偄閸忓皷鎷洪柣鐔哥懃鐎氼剟宕濋妶澶嬬厽闊洦鎸炬晶锔锯偓瑙勬礃閸ㄥ潡鐛Ο灏栧亾濞戞顏堫敁閹剧粯鈷戦柛娑橈工婵箓鏌ｉ幘宕囧閾荤偤鏌涢鐘插姕闁抽攱鍨块弻鐔兼嚃閳轰椒绮х紓浣介哺閿曘垽寮诲☉銏犵疀妞ゆ巻鍋撻柍閿嬫閺屾稑鈻庨幘鍓佹毇濠碘槅鍋勯幊姗€銆侀弴銏狀潊闁炽儲鍓氬Σ杈ㄧ節濞堝灝鏋涢柨鏇樺€楃槐鐐寸節閸屾粍娈鹃梺鐟扮摠缁洪箖寮ㄦ禒瀣€甸柨婵嗛娴滅偤鏌?
         coverArtistClean && titleVariants[0] && q !== titleVariants[0]
           ? requestLrcLib(`https://lrclib.net/api/search?q=${encodeURIComponent(titleVariants[0])}`)
           : Promise.resolve(null)
       ]).then(([data1, data2]) => {
-        // 合并两次结果，按 id 去重
+        // 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐閸愬弶鐤勫┑掳鍊х徊浠嬪疮椤栫偛纾婚悗锝庡枟閻撴洟鏌嶉埡浣告殶闁愁垱娲熼弻娑㈠Χ閸℃顫掗梺鍝勭焿缂嶄礁顕ｉ鍕閹兼番鍨归弸鎴︽⒒娴ｅ摜锛嶇紒顕呭灠铻為柛鎰靛枛閽冪喖鏌￠崶銉ョ仼闂佸崬娲︾换婵嬫濞戞瑧銈紓浣戒含閸嬨倕顫忛搹鍦煓閻犳亽鍔嶉崳鎶芥⒑閸涘﹣绶遍柛銊﹀▕閺佸秴鈹戦崶鈺冾啎闁哄鐗嗘晶鐣岀矓椤掍降浜滄い鎰╁焺濡插搫霉濠婂啯鍟為悗浣冨亹閳ь剚绋掗…鍥储娴犲顥婃い鎰╁灪婢跺嫰鏌熺亸鏍ㄦ珔閾伙綁鏌嶈閸撶喎顫忛悜妯诲闁规鍣Σ顔剧磽娴ｅ壊妲奸柛鈺傜墱缁骞掑Δ浣规珖闂佺鏈銊╂偩妤ｅ啯鍋℃繝濠傚暟缁犱即鎽?id 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐閾忣偅鐝ㄦ繝纰夌磿閸嬫垿宕愰妶澶婂偍濡わ絽鍟粈鍌涗繆椤栨繃顏犻柡?
         const seen = new Set()
         const merged = []
         for (const item of [...(Array.isArray(data1) ? data1 : []), ...(Array.isArray(data2) ? data2 : [])]) {
@@ -4120,15 +4245,15 @@ export default function App() {
           return {
             key: `lrclib-${i}-${tn}`,
             source: 'lrclib',
-            title: tn || '—',
-            subtitle: an || '—',
-            badge: `LRCLIB · ${r.score.toFixed(0)}`,
+            title: tn || '-',
+            subtitle: an || '-',
+            badge: `LRCLIB -${r.score.toFixed(0)}`,
             raw: r.chosenLyrics
           }
         })
       }).catch(() => [])
 
-      // 网易云：搜索后用本地评分重新排序，过滤明显不相关的结果
+      // 缂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮闁汇値鍠楅妵鍕冀椤愵澀绮堕梺鎼炲妼閸婂潡骞冪憴鍕闁规鍠氬崗闂備焦瀵х换鍌炲箟濮椻偓瀵噣鍩€椤掑嫬绠柛娑卞枤閻熻銇勯弽銊ф创闁轰焦绮撳濠氬磼濞嗘劗銈板銈庡亜椤︾敻鐛崱妤冩殕闁告洦鍋勯悗顓㈡倵鐟欏嫭绀€婵炲眰鍔戦幃宕囩磼濡湱绠氶梺闈涚墕閹冲繘宕冲ú顏呯厽闁规儳顕幊鍥煛鐏炲墽顬肩紒鐘崇☉椤繈顢栭幐搴ｆ綎闂傚倷鐒﹀鍧楀储婵傚憡鍎楅柛宀€鍋涢拑鐔哥箾閹寸偟鐓繛宀婁邯閹綊宕堕妸銉хシ濡炪値鍋勫ú顓㈠箖濡ゅ啯鍠嗛柛鏇ㄥ墰閿涙﹢姊虹粙鍨劉闁绘搫绻濋悰顕€宕卞☉妯肩潉闂佸壊鍋嗛崰鎰枍濠婂牊鈷戠紒顖涙礀婢ф煡鎷戞潏銊ｄ簻闁规儳纾粔鐑樻叏婵犲嫮甯涢柟宄版嚇瀹曘劍绻濋崘銊ュ闂傚倷鑳剁划顖炪€冮崱娆忓灊闁规儳纾弳锔界節婵犲倸鏆婇柡瀣叄閻擃偊宕堕妷銉ュГ闂侀€炲苯澧繛纭风節楠炲啫螖閸涱噮妫冨┑鐐村灦閻熴儵寮抽崼銉︾厽閹兼番鍨婚。鑼偓鍏夊亾闁归棿绀侀拑鐔哥箾閹存瑥鐏╅柛妤佸▕閺屾洘绻涢崹顔煎缂備降鍔岄…宄邦潖閾忚瀚氶柡灞诲労閳ь剚顨嗛妵鍕敇閻愬弶些濡炪値鍋勭换鎰弲濡炪倕绻愮€氼噣顢欏畝鍕拺闁革富鍘奸崝瀣煛鐎ｉ潧澧撮柡浣瑰姈瀵板嫮鈧綆鍓欓獮鎰版⒑鐠囪尙绠抽柛瀣仱瀵憡绻濆鍗炲絾濡炪倖甯婄欢鈥斥枔娴犲鐓熼柟閭﹀幗缂嶆垶绻涢幖顓炴灍妞ゃ劊鍎甸幃娆撳级閹寸偠鐧佹俊銈囧Х閸嬫盯顢栨径鎰畺闁宠桨璁查弸鏃堟煙缁嬪灝顒㈡い鏃€鍔欏濠氬磼濮橆兘鍋撻悜鑺ュ€块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔告綇妤ｅ啯顎嶉梺绋垮椤ㄥ懘婀侀梺鎸庣箓濞层倝宕濈€ｎ兘鍋撶憴鍕闁绘搫绻濆璇测槈閵忕姷鐤€闂佹眹鍨藉褏鏁妷鈺傗拺缂備焦蓱鐏忣亪鏌涙惔锝嗘毈鐎殿喖顭峰鎾閻樿鏁规繝鐢靛█濞佳兠归崒姣兼盯鍨鹃幇浣瑰瘜闂侀潧鐗嗘鍛婄濠靛鐓熸俊銈呭暙閳诲牏鈧鍠栭…鐑藉极閹剧粯鍋愰柤纰卞墻濡茶淇婇悙顏勨偓鏍礉閹达箑鍨傞柤濮愬€楅惌娆撶叓閸ャ劍绀堢痪鎹愭闇夐柨婵嗙墱閸ゅ啯绻涢崼鐔糕拹闁靛洤瀚伴弫鍌炴倷椤掍焦鐦撴俊銈囧Х閸嬫稑螞濠靛棛鏆﹂柣鏃傗拡閺佸洭鏌ｅΟ鍏兼毄闁告﹩鍨跺缁樻媴缁嬫妫岄梺缁樻尭閻楁挸鐣锋导鏉戝唨妞ゆ劑鍊楅ˇ顖氣攽椤斿浠滈柛瀣尰閹便劍绻濋崒娑欏創闁轰礁鐗撻弻娑㈠Ψ閹存繂鏋ら柣搴㈠▕濮婅櫣鎷犻幓鎺濆妷闂佸憡鍨电紞濠傜暦閺夋娼╅悹楦挎椤︻偊姊洪崷顓炲妺妞ゃ劌鎳忛崕顐︽⒒娴ｅ摜鏋冩俊妞煎妿缁牊绗熼埀顒€鐣?
       const neteasePromise = window.api?.neteaseSearch
         ? window.api.neteaseSearch(q).then((songs) => {
             if (!songs?.length) return []
@@ -4136,7 +4261,7 @@ export default function App() {
             const normArtist = (coverArtistClean || coverArtistRaw || '').toLowerCase().replace(/\s+/g, '')
             const rawKw = (metaTitle || '').toLowerCase()
 
-            // 对每条结果打分，过滤并重排
+            // 闂傚倸鍊搁崐宄懊归崶顒夋晪鐟滃繘鎳為柆宥嗗殐闁宠桨鑳剁粵蹇旂節閻㈤潧校闁绘棏鍓涚槐鐐哄冀瑜滈悢鍡涙煠閹间焦娑у┑顔肩墦閺屾稒鎯旈埥鍛板惈闂佸搫琚崝鎴﹀箖閵忋倕浼犻柛鏇熷灟閸ㄨ崵妲愰幒妤佸亼婵炲棗绻戞径鍕煟閹惧崬鍔滅紒缁樼洴楠炲鎮樺ú璁抽偗妞ゃ垺妫冮、鏇㈡晲閸モ晩鍟庡┑鐘灱濞夋盯鎮ч崱娑欏€堕柡灞诲劜閻撴稓鈧厜鍋撻悗锝庡墰閿涚喖姊洪柅鐐茶嫰婢у墽绱撳鍛棦鐎规洘鍨垮畷鍗炩槈濞嗗繐澹掗梺璇插嚱缂嶅棙绂嶉崼鏇熷亜闁糕剝鐟﹂崰鎰節闂堟稓澧㈠☉鎾崇Ч閺岀喖骞嗚閿涘秹鏌￠崱顓㈡闁逛究鍔岃灒闁圭娴烽妴鎰旈悩闈涗杭闁搞劍妞芥俊鐢稿礋椤栨氨顔掗柣鐘烘濞插懘濡烽敂杞扮盎闂佹寧妫侀褍鈻嶅澶嬬厸閻忕偟顭堟晶鑼偓鍨緲鐎氭澘鐣烽崡鐐嶇喖鎳￠妶鍛埌婵犵數濮烽弫鎼佸磻閻樻椿鏁嬫繝濠傛噽娑撳秹鏌熼幑鎰惞鐎规挷绶氶獮鏍庨鈧俊濂稿炊鐎涙绡€闁靛骏绲剧涵楣冩煠濞茶鐏ｇ紒顔硷躬閺佸啴宕掑☉鎺撳闂備礁鎲￠幐鏄忋亹閸愨晝顩叉繝闈涙川缁犻箖鏌涘▎蹇ｆШ濠⒀屼邯閺屽秶鎷犻懠顑冣攽椤旂懓浜鹃梻渚€娼ч悧鍡椢涘☉銏犲偍?
             const scored = songs.map((s) => {
               const sName = (s.name || '').toLowerCase().replace(/\s+/g, '')
               const sArtist = (s.artists || '').toLowerCase().replace(/\s+/g, '')
@@ -4145,17 +4270,17 @@ export default function App() {
 
               let score = 0
 
-              // 标题匹配
+              // 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偞鐗犻、鏇㈠Χ閸モ晝鍘犻梻浣告惈椤︿即宕靛顑炴椽顢斿鍡樻珝婵＄偑鍊ら崑鎺楀礂濮椻偓瀹曟垿骞樼拠鑼紲濠电偞鍨堕崙鐟懊归崟顖涚厽閹兼惌鍨崇粔闈浢瑰鍛槐閽樻繈姊洪鈧粔鐢稿磻閳╁啰绡€濠电姴鍊归崳瑙勩亜閿濆懌鍋㈤柟顔荤矙椤㈡稑鈽夊Ο纰卞剬-
               if (sName === normTitle) score += 50
               else if (sName.includes(normTitle) && normTitle.length >= 2) score += 25
               else if (normTitle.includes(sName) && sName.length >= 2) score += 15
-              else score -= 20  // 完全不含标题词，扣分
+              else score -= 20  // 闂傚倸鍊搁崐宄懊归崶顒夋晪鐟滃秹婀侀梺缁樺灱濡嫮绮婚悩缁樼厵闁告挆鍛闂佹悶鍊栭崝鏍Φ閸曨垰鍐€妞ゆ劦婢€缁爼姊哄ú璇插箺妞ゃ劌锕幃锟狀敃閿曗偓閻愬﹪鏌曟繝蹇氬悅闁瑰嘲顭峰鍝勭暦閸モ晛绗″┑顔硷工椤兘宕洪埀顒併亜閹哄棗浜剧紓浣哄Т缁夌懓鐣烽弴銏＄劶鐎广儱鎳愰悿鍥椤愩垺澶勭紒瀣灩婢规洟宕稿Δ浣哄幍闂佸憡鎸嗛崨顓狀偧闂備胶绮幐鑽ょ矙閹捐鐒垫い鎺嗗亾缂佺姴绉瑰畷鏇㈡焼瀹ュ懐鐤囬棅顐㈡处缁嬫垹绮ｅΔ浣风箚妞ゆ牗绋撳﹢钘壝瑰鍕煉闁哄被鍔岄埞鎴﹀幢濡警妲辨繝鐢靛仜閹冲繐煤閻旂厧钃熼柣鏂垮濡插綊骞栫划鐟邦嚒闁靛緵棰佺盎闂佺懓澧介幊鎾凰夊鍥╃＜闁绘ê纾ú瀵糕偓娈垮枟閹告娊骞冮鍫濈劦妞ゆ巻鍋撻崡閬嶆煟閹达絽袚闁抽攱甯掗湁闁挎繂鎳忛崯鐐烘偣閹般劌澧查柕鍥у閺佹劖鎯旈埄鍐壕闁诲骸鐏氬姗€鏁冮妷褏鐭夐柟鐑樻煛閸嬫捇鏁愭惔婵堢泿-
 
-              // 艺术家匹配
+              // 闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ礀閸屻劎鎲稿澶嬫櫇闁靛繈鍊栭悞鑲┾偓骞垮劚閹虫劙鏁嶉悢鍏尖拺闂傚牊绋撴晶鏇㈡煙闁垮鐏撮柟铏尵閹瑰嫰濡搁姀鐘卞闁荤喐鐟ョ€氼厾绮堥埀顒€鈹戦悙璺虹毢濠电偐鍋撻悗瑙勬礃閸ㄥ潡鐛鈧幊婊堟濞戞ê绠查梻鍌欑閹测剝绗熷Δ鍛獥婵娉涜繚闂佽澹嗘晶妤呮偂閻旇偐鍙撻柛銉ｅ妽鐏忔壆绱掗崒姘煎剶闁哄本鐩弫鎰疀閺囩姌婊堟倵?
               if (normArtist && sArtist.includes(normArtist)) score += 40
               else if (normArtist && normArtist.includes(sArtist) && sArtist.length >= 2) score += 20
 
-              // 时长接近
+              // 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偞鐗犻、鏇㈡晝閳ь剟鎮块濮愪簻闁规澘鐖煎顕€鏌涚€ｎ亶妲搁柍瑙勫灴瀹曟帒顭ㄦ惔锝呭Ъ婵犳鍠涢～澶愭偂閳ユ剚娼栨繛宸憾閺佸棝鏌嶈閸撴稓鍒掗弮鍌楀亾闂堟稒鎲稿☉鎾崇Ч閺岀喖骞嗛弶鍟冩捇鏌ｉ幘宕囩妞ゎ叀娉曢幑鍕惞閻熼偊鏆┑鐘茬棄閵堝棛銆婄紓?
               if (durSec > 0 && audioDur > 0) {
                 const diff = Math.abs(durSec - audioDur)
                 if (diff <= 5) score += 20
@@ -4163,10 +4288,10 @@ export default function App() {
                 else if (diff > 60) score -= 10
               }
 
-              // 惩罚用户不需要的版本变体
+              // 闂傚倸鍊搁崐鎼佸磹瀹勬噴褰掑炊椤掑鏅梺鍝勭▉閸樺ジ宕归崒娑栦簻闊洦鎸炬晶鏇㈡煟閵堝洤浜剧紒缁樼箞濡啫鈽夊顑藉彙缂傚倷璁查崑鎾斥攽閻樺弶澶勯柣鎾寸懇閺岋綁骞嬮悜鍥︾返濠电偛鐗婂ú鐔煎蓟濞戞埃鍋撻敐鍐ㄥ濠殿喖鍊块弻锛勪沪閻愵剛顦ㄧ紓浣虹帛缁诲棛绮诲☉銏犲嵆闁绘娅曢蹇涙⒒閸屾瑨鍏岀紒顕呭灦楠炴劗鎷犵憗浣规そ瀵粙顢橀悙闈涘绩濠电姰鍨奸崺鏍礉閺囩姷涓嶉柤濮愬€愰崑鎾舵喆閸曨剛顦ュ┑鐐差檧缁犳帡藝瀹曞洨纾肩紓浣诡焽濞插瓨顨ラ悙杈捐€跨€规洘锚椤斿繘顢欓懞銉晥闂傚倸鍊烽懗鍫曘€佹繝鍕剨婵炲棙鍔栧▍鐘充繆閵堝懏鍣圭紒鐙€鍨堕弻娑樷槈濡吋鎲奸梺绋匡功缁垱绌辨繝鍥舵晬婵﹩鍓氶崐顖氣攽閻愯尙澧涢柟顔煎€搁～蹇曠磼濡顎撻梺鎯х箳閹虫挾绮垾鎰佹富闁靛牆鍟俊濂告煙閾忣偓鑰挎鐐插暢椤﹀磭绱掔紒妯肩疄鐎规洘甯￠弫鍐╂媴閹绘帊澹曢梺鍓茬厛閸熸棁銇愰幒鎴狀槯闂佺绻楅崑鎰矙閸ヮ剚鈷戞繛鑼额嚙楠炴銇勯妸銉︻棡缂佸矁椴哥换婵嬪炊閼稿灚娅栨繝娈垮枟閿曗晠宕ｉ埀顒傜棯椤撴稑浜剧紓?
               const badVariants = [
-                { terms: ['伴奏', 'instrumental', 'inst', 'off vocal', 'karaoke'], penalty: -60 },
-                { terms: ['dj', 'dj版', 'remix'], penalty: -30 },
+                { terms: ['instrumental', 'inst', 'off vocal', 'karaoke'], penalty: -60 },
+                { terms: ['dj', 'remix'], penalty: -30 },
                 { terms: ['live'], penalty: -15 },
               ]
               for (const { terms, penalty } of badVariants) {
@@ -4176,29 +4301,60 @@ export default function App() {
 
               return { s, score }
             })
-            .filter(({ score }) => score > -30)  // 过滤明显不相关
+            .filter(({ score }) => score > -30)  // 闂傚倸鍊搁崐椋庣矆娓氣偓楠炴牠顢曚綅閸ヮ剦鏁冮柨鏇楀亾闁汇倗鍋撶换娑㈠箣閻愨晜锛堝┑鐐叉▕娴滄繈寮插┑瀣厱閻忕偟鍋撻惃鎴炪亜閺傛寧鍤囨慨濠冩そ濡啫鈽夊顒夋毇婵＄偑鍊х€靛矂宕圭捄铏规殾闁挎繂妫涚弧鈧梺鎼炲劀閸滀礁鏅ｅ┑鐘垫暩閸庢垹绱為崱娑樼婵炲棙鎸婚崐鑸点亜韫囨挾澧涢柣鎾冲暟缁辨挻鎷呴懖鈩冨灴閹繝濡烽埡鍌滃帗闂佽姤锚椤﹁棄螣閳ь剙螖閻橀潧浠﹂柨姘舵煟閿濆洤鍘寸€规洖鐖煎畷閬嶅箛椤戣棄浜鹃柡宥庡亝瀹曞弶绻涢幋娆忕仼缂佺嫏鍥ㄧ厵闁圭⒈鍘奸獮妤呮煃鐠囪尙澧﹂柟?
             .sort((a, b) => b.score - a.score)
 
             return scored.slice(0, 20).map(({ s, score }) => ({
               key: `ne-${s.id}`,
               source: 'netease',
-              title: s.name || '—',
-              subtitle: s.artists || '—',
+              title: s.name || '-',
+              subtitle: s.artists || '-',
               badge:
                 typeof s.duration === 'number' && s.duration > 0
-                  ? `NetEase · ${(s.duration / 1000).toFixed(0)}s · ${score}`
-                  : `NetEase · ${score}`,
+                  ? `NetEase -${(s.duration / 1000).toFixed(0)}s -${score}`
+                  : `NetEase -${score}`,
               songId: s.id
             }))
           }).catch(() => [])
         : Promise.resolve([])
 
-      // 谁先回来先显示，另一个回来后追加
+      const externalPromise = window.api?.searchExternalLyrics
+        ? window.api
+            .searchExternalLyrics({
+              keywords: q,
+              durationSec: audioDur,
+              sources: externalSources
+            })
+            .then((res) => {
+              const items = Array.isArray(res?.items) ? res.items : []
+              const ranked = rankLrcLibCandidates(items, audioDur, rankOpts)
+              return ranked.slice(0, 24).map((r, i) => {
+                const item = r.item || {}
+                const source = item.source || 'external'
+                const sourceName =
+                  source === 'qq' ? 'QQ' : source === 'kugou' ? 'Kugou' : source === 'kuwo' ? 'Kuwo' : source
+                return {
+                  key: `${source}-${i}-${item.providerId || item.trackName || i}`,
+                  source,
+                  title: item.trackName || '-',
+                  subtitle: item.artistName || '-',
+                  badge: `${sourceName} -${r.score.toFixed(0)}`,
+                  raw: r.chosenLyrics || item.syncedLyrics || item.plainLyrics || ''
+                }
+              })
+            })
+            .catch(() => [])
+        : Promise.resolve([])
+
+      // 闂傚倸鍊搁崐宄懊归崶褏鏆﹂柛顭戝亝閸欏繘鏌熺紒銏犳珮闁轰礁瀚伴弻娑㈠即閵娿儱绠婚梺娲诲幖濡濡撮幒鎴僵闁挎繂鎳嶆竟鏇㈡煟鎼淬値娼愭繛鎻掔箻瀹曠銇愰幒鎴犲弨婵犮垼鍩栭崝鏇綖閸涘瓨鐓熸慨妞诲亾婵炰匠鍥х劦妞ゆ帒鍊告禒杈ㄦ叏婵犲懏顏犵紒杈ㄥ笒铻ｉ柛婵嗗濞兼捇姊绘担鍓插悢闁哄鐏濋～鍥р攽椤旂》榫氭俊顐㈠椤㈡﹢宕楅悡搴ｇ獮闁诲函缍嗛崜娆撶嵁閸儲鈷掑┑鐘查娴滄粍绻涚拠褏鐣垫鐐村姍閹瑩顢楁担鍦娇婵犵數鍋為崹鍫曟偡閵堝洦宕查柛鈩兦滄禍婊堟煛瀹ュ啫濡奸柛銈庡墯娣囧﹪鎳犻懜娈夸哗缂備浇椴哥敮锟犮€佸▎鎾村殐闁宠桨璁查崣娲⒒娴ｇ瓔鍤冮柛锝庡櫍瀹曟澘顫濈捄铏瑰姦濡炪倖甯掔€氼厼鈽夎閺岀喖鎳為妷褏鐓夐柦妯荤箖閵囧嫰寮村Δ鈧禍鎯р攽椤旂》鏀绘俊鐐舵閻ｇ兘濡搁敂鍓х槇闂佸憡娲﹂崜娆忊枔韫囨洜纾介柛灞捐壘閳ь剚鎮傚畷鎰版偡闁附鍍甸梺闈浤涢崘銊т喊闂備礁鍟块幖顐﹀疮閻樿纾婚柟鐐灱濡插牊绻涢崱姗嗙劷闁告梻鍏樺鍝勭暦閸モ晛绗″┑顔硷工缂嶅﹥淇婇悽绋跨妞ゆ柨澧介弶鎼佹⒑閸︻厼浜鹃柛鎾寸缁傛帡宕滆绾捐棄霉閿濆棗绲诲ù婊堢畺濮婃椽鏌呴悙鑼跺濠⒀冪摠閹便劍绻濋崘鈹夸虎閻庤娲﹂崑濠傜暦閻旂厧鍨傛い鎰Р閸婃繂顫忛搹鍦煓闁秆勵殔瀵増绻涚€涙鐭婇柣鏍с偢閹即顢氶埀顒€鐣峰鈧俊鍛婃償閵忊檧鎷归梺鐟板槻閹虫﹢寮婚崨顓涙婵炲棗绻戦弫顏堟⒒閸屾艾鈧嘲霉閸ャ劍鍙忛柕鍫濐槹閺咁亝淇婇悙顏勨偓褏鈧潧鐭傚畷褰掑醇閺囩喐娅?
       const lrItems = await lrclibPromise
       setLyricsCandidateItems(lrItems)
 
       const neItems = await neteasePromise
       setLyricsCandidateItems([...lrItems, ...neItems])
+
+      const externalItems = await externalPromise
+      setLyricsCandidateItems([...lrItems, ...neItems, ...externalItems])
     } finally {
       setLyricsCandidateLoading(false)
     }
@@ -4214,16 +4370,16 @@ export default function App() {
     const track = playlist[currentIndex]
     if (!track) return
     try {
-      if (row.source === 'lrclib' && row.raw) {
+      if (['lrclib', 'qq', 'kugou', 'kuwo'].includes(row.source) && row.raw) {
         const parsed = parseAnyLyrics(row.raw)
         if (parsed.length > 0) {
           setLyrics(parsed)
           setLyricsMatchStatus('matched')
           setActiveLyricIndex(-1)
-          setLyricsSourceStatus({ kind: 'manual', detail: '', origin: 'lrclib' })
+          setLyricsSourceStatus({ kind: 'manual', detail: '', origin: row.source })
           setLyricsOverrideForPath(track.path, row.raw, {
             source: 'manual',
-            origin: 'lrclib'
+            origin: row.source
           })
         }
         return
@@ -4320,7 +4476,7 @@ export default function App() {
     setLyricsMatchStatus('loading')
     setLyricsSourceStatus({ kind: 'loading', detail: '', origin: '' })
 
-    // MV 搜索与歌词搜索并行，不再阻塞歌词加载
+    // MV 闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ礀缁犵娀鏌熼幑鎰靛殭閻熸瑱绠撻幃妤呮晲鎼粹€愁潻闂佹悶鍔嶇换鍫ョ嵁閺嶎灔搴敆閳ь剚淇婇懖鈺冩／闁诡垎浣镐划闂佸搫鏈ú妯兼崲濠靛﹦鐤€闁瑰灝鍟崰姗€姊绘担鍝ワ紞缂侇噮鍨拌灋闁告劦鍠氬畵渚€鏌″搴ｄ粓閹兼惌鐓堥弫鍡涙煃瑜滈崜鐔煎箖濮椻偓椤㈡岸鍩€椤掑嫬钃熼柣鏂垮悑鐎电姴顭跨捄鐚存敾婵炲牆顭峰铏规嫚閳ヨ櫕鐏堢紓鍌氱Т閿曘倝鎮鹃悜钘夌畾闂侇叏闄勯瀷闂備礁鎼粙鍕崲濠靛棭娼栭柧蹇氼潐鐎氭岸鏌嶉妷銊︾彧闁诲繐鐗忕槐鎺楀礈瑜戝鎼佹煕濡厧甯剁€规挸瀚板娲捶椤撶儐鏆┑鐘灪閿曘垽鏁愰悙鍝勫窛閻庢稒顭囬崢钘夆攽閳藉棗鐏ｉ柛搴涘€濋獮鍡涘醇閵夛妇鍘藉┑鐘茬仛閸旀洟鎮橀敃鍌涚厸鐎光偓鐎ｎ剛袦闂佽鍠楅悷褔鍩€椤掑倹鏆╃痪顓℃硾鍗遍柛顐犲劜閳锋垶绻涢懠棰濆殭妤犵偞鐗楅妵鍕晝閳ь剙鐣烽鈧畵鍕⒑瑜版帒浜伴柛蹇旓耿瀵劍绂掔€ｎ偆鍘遍梺闈涱槶閸ㄦ椽寮惰ぐ鎺撶厸閻庯綆鍋嗘晶鐢告煙椤旂瓔娈滈柣娑卞櫍瀹曞綊顢欓悡搴經闂傚倷鑳堕幊鎾诲疮閸ф鐓€闁挎繂鎷嬮崵鏇㈡煙缂佹ê鍧婇柡瀣叄閺岀喖宕滆钘熼梺鐟板槻椤嘲顫忓ú顏勫窛濠电姴鍊歌闂備礁鎲￠悷銉╂煀閿濆懐鏆﹂梻鍫熺▓閺嬪酣鏌熼幍铏珒缂併劏顕ч—鍐Χ鎼粹€茶埅闂佸摜濮靛畝绋跨暦濮樿埖鍋嬮柛顐ｇ◥缁ㄨ顪冮妶鍡楀濠殿喗鎸抽幃姗€鍩￠崨顔惧幗闂佹寧绻傚Λ娑氱不閻愮鍋撶憴鍕闁挎洏鍨介妴渚€寮崼婵嗙獩闂佸憡渚楅崰妤€鐣风仦鐐弿濠电姴鍟妵婵堚偓瑙勬磸閸斿秶鎹㈠┑瀣闁挎繂妫楅鐑樼節閻㈤潧校妞ゆ梹鐗犲畷鏉课旈崨顓狅紵闂佽鍎兼慨銈囩不?
     if (
       window.api.searchMVHandler &&
       (configRef.current.enableMV ||
@@ -4328,7 +4484,7 @@ export default function App() {
         configRef.current.mvAsBackgroundMain)
     ) {
       setIsSearchingMV(true)
-      // 注意：不 await，让 MV 搜索在后台跑，歌词搜索同时开始
+      // 婵犵數濮烽弫鍛婃叏閻戣棄鏋侀柟闂寸绾剧粯绻涢幋鏃€鍤嶉柛銉墻閺佸洭鏌曡箛鏇炐ユい锔诲櫍閹鐛崹顔煎濡炪倧瀵岄崹宕囧垝閸儱閱囨繝銏＄箓缂嶅﹪骞冮埄鍐╁劅闁挎繂妫欓崰鏍⒒娴ｅ憡鎯堥柟宄邦儔瀹曟粌顫濈捄铏圭杽闂侀潧顭堥崕鍝勵焽閵娾晜鐓曢柍鈺佸暔娴狅妇绱掗妸銈囩煓婵?await闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔告綇妤ｅ啯顎嶉梺绋垮椤ㄥ懘濡撮幒鎴僵闁挎繂鎳嶆竟鏇熶繆閻愵亜鈧垿宕瑰ú顏呭仭闁冲搫鎳庨弰銉╂煃?MV 闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ礀缁犵娀鏌熼幑鎰靛殭閻熸瑱绠撻幃妤呮晲鎼粹€愁潻闂佹悶鍔嶇换鍫ョ嵁閺嶎灔搴敆閳ь剚淇婇懖鈺冩／闁诡垎浣镐划闂佸搫鏈ú妯兼崲濞戙垺鍊锋い鎺嶈兌瑜板懘姊绘担鍛婅础闁硅櫕鎹囬幃銉︾附缁嬭儻鎽曢梺鍝勬川閸犳挾绮绘ィ鍐╃厱妞ゎ厽鍨甸弸娑樷攽椤旇姤绀嬫慨濠呮缁瑩宕犻垾鍐差潬闂備浇妗ㄧ粈渚€鈥﹀畡閭﹀殨閻犲洦绁村Σ鍫熶繆椤栫偞鏁遍柣搴☆煼濮婇缚銇愰幒鎴滃枈闂佸憡鎼粻鎾诲春閳ь剚銇勯幒宥堝厡闁活厼鐬肩槐鎺撴綇閵娿儲璇炲Δ鐘靛仜濞差參銆佸Δ浣瑰闁告稑锕︽禍鐑芥⒒閸屾瑦绁版俊妞煎妿缁牊鎷呴搹鍦厠闂佺厧鎽滈弫鎼併€呴悜鑺ョ叆闁哄洨鍋涢埀顒€鎽滅划鍫ュ醇閵忊€虫瀾闁瑰吋鐣崝宀€绮婚悢鍝ョ闁糕剝蓱鐏忎即鏌ｉ幘璺烘灈闁哄矉绲借灒闁告繂瀚鍥⒑閻熸澘鎮戦柛鏃€顨堝Σ鎰板箳閹惧磭绐為柣蹇曞仧閸嬫挸袙閸惊鏃堟偐闂堟稐绮堕梺鍝ュ櫏閸嬪﹪骞冩ィ鍐╁€婚柦妯侯槺閸婄偛顪冮妶搴″箺闁搞劌澧庣槐鐐参旈崨顔规嫽婵炴挻鍩冮崑鎾寸箾娴ｅ啿鎳忓畷鏌ユ煙閻戞ɑ灏伴柛娆忕箻閺岋綁濮€閵忊晝鍔哥紒鐐劤缂嶅﹤顫忓ú顏嶆晢闁逞屽墰缁棃鎮介崨濠備簵濠电偞鍨崹娲偂閺囥垺鐓欏ù鐓庣摠濞懷勵殽閻愭惌娈橀柣銉邯椤㈡﹢鎮欏ù瀣瘱缂傚倷娴囨ご鍝ユ暜濡も偓椤洩绠涘☉妯溾晠鏌曟竟顖氬€归、姗€姊?
       ;(async () => {
         try {
           let foundId = null
@@ -4490,7 +4646,7 @@ export default function App() {
 
     const lyricsSource = configRef.current.lyricsSource || 'lrclib'
     const useOnlineLyrics =
-      lyricsSource !== 'local' && ['lrclib', 'netease', 'qq'].includes(lyricsSource)
+      lyricsSource !== 'local' && ['lrclib', 'netease', 'qq', 'kugou', 'kuwo'].includes(lyricsSource)
 
     const audioDur = audioRef.current?.duration || duration || 0
 
@@ -4536,7 +4692,7 @@ export default function App() {
           const params = new URLSearchParams({ track_name: trackName })
           if (artistName) params.set('artist_name', artistName)
           if (albumName) params.set('album_name', albumName)
-          /** 不传 duration：翻唱与 LRCLIB 里原版时长不一致时 get 会直接空 */
+          /** 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈閸ㄥ倿鏌涢锝嗙缂佺姳鍗抽弻娑樷攽閸曨偄濮㈤梺娲诲幗閹搁箖鍩€椤掑喚娼愭繛鍙夌墪鐓ら柨鏇炲亰缂?duration闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔兼倻濡櫣鍔稿┑鐐茬毞閺呯娀寮婚弴鐔虹闁绘劦鍓氶悵鏇㈡⒑缁嬪尅鍔熼柛蹇旓耿瀵鏁撻悩鑼€為梺闈涱槶閸庤櫕绂掓總鍛娾拺闁兼祴鏅╅悞鍓х磽瀹ュ拑韬€殿喛顕ч埥澶娢熼柨瀣偓濠氭⒑鐟欏嫬顥嬮柡浣规倐瀹曟繈鎮滈懞銉㈡嫼?LRCLIB 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸婂潡鏌ㄩ弴姘舵濞存粌缍婇弻娑㈠箛闂堟稒鐏嶉梺鎼炲€栭崝鏍Φ閸曨垰鍐€闁靛ě鍛帒闂備礁鎼Λ娆戝垝瀹ュ桅闁告洦鍨扮粻娑㈡煕椤愶絾绀冩い搴＄Ч濮婅櫣绮欏▎鎯у壈濡炪倖鍨甸ˇ闈涱嚕鐠囨祴妲堥柕蹇婃櫆閺呮繈姊洪棃娑氬闁瑰啿绻橀幃妤呭箚瑜滃〒濠氭煏閸ヨ泛鐏熺紒鈧担璇ユ椽鏁冮崒姘卞幈闂佸湱鍎ら〃鍡涙偂閸愵亝鍠愭繝濠傜墕缁€鍫熸叏濮楀棗澧婚柛銈嗩殜閺屾盯寮撮妸銉т哗婵炵鍋愭繛鈧柡灞炬礃缁旂喖顢涘顒変患闂佸搫顑嗛幐鑽ゆ崲濠靛鍋ㄩ梻鍫熺◥濞岊亪姊洪幖鐐插闁绘牕銈搁悰顕€骞囬弶璺啋濡炪倖妫侀崑鎰版晬濞戙垺鈷戦柣鐔告緲閳锋梻绱掗鍛仸闁诡噯绻濋幃鈺冨枈濡桨澹曢梺鑽ゅ枑濠㈡﹢顢旈鍕电唵闁荤喓澧楅ˉ銏☆殽閻愭惌娈滈柟顔规櫊瀹曟宕ㄩ婊呮毎?get 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰▕閻掕姤绻涢崱妯诲碍閻熸瑱绠撻幃妤呮晲鎼存繃鍠氬┑鐐茬毞閺呯娀寮婚弴鐔虹闁割煈鍠栨竟鍕攽閻愬弶鈻曞ù婊勭矒閺屻劑濡堕崱鏇犵畾闂侀潧鐗嗛崐鍛婄閸撗呯＝濞达絽鎼牎婵犵數鍋涢敃顏勵嚕婵犳艾鍗抽柣鏃囨瑜版儳顪冮妶鍡欏妞ゃ劌鎳忕粋宥嗐偅閸愨斁鎷?*/
           return requestLrcLib(`https://lrclib.net/api/get?${params.toString()}`)
         }
 
@@ -4593,8 +4749,8 @@ export default function App() {
               ...new Set([...globalParenHints, ...extractParenArtistHints(cleanedTitle)])
             ]
 
-            // 第一波：get + search 并行发出，谁先命中谁用
-            // get 是精确匹配，search 是模糊匹配，两者同时跑比串行快一倍
+            // 缂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸婂潡鏌ㄩ弴鐐测偓鍫曞焵椤掆偓閸熷磭绮诲☉妯锋婵☆垳鈷堝Σ顖涚節閻㈤潧浠﹂柛銊ㄦ硾椤繈濡搁埡浣侯攨濠殿喗顭堥崺鏍偂濞戞﹩鐔嗛悹杞拌閸庡繘鏌ｈ箛鎾缎ч柡宀嬬磿閳ь剨缍嗛崑鍡樻櫠椤掑嫭鐓忛柛銉戝喚浼冨銈冨灪濞茬喖銆侀弴銏狀潊闁挎稑瀚竟鏇犵磽閸屾艾鈧兘鎮為敃鍌氱闁哄稁鍘归埀顒€鍊诲濠傘€?+ search 婵犵數濮撮惀澶愬级鎼存挸浜炬俊銈勭劍閸欏繘鏌ｉ幋锝嗩棄缁炬儳顭烽弻锝夊箛椤掍焦鍎撶紒鐐劤閻忔繈鍩為幋锕€纾兼繛鎴炵懃娴犫晠姊洪柅鐐茶嫰閸樺摜绱掗懜闈涘摵闁绘侗鍠氶埀顒婄秵閸犳寮插┑瀣厓鐟滄粓宕滈悢鐓庣畾閻忕偠濞囬弮鍫濆窛妞ゆ梹鍎抽獮宥夋⒑鐠囨彃顒㈢紒瀣浮閳ワ箓宕堕埡鍐х瑝闂佽鍎抽悺銊╁矗韫囨稒鐓ユ繝闈涙婵吋淇婇妤€浜鹃梻鍌欑閹碱偆鎮锕€绀夌€光偓閸曨偆鍙€婵犮垼娉涜癌闁绘柨鍚嬮崵鍐煃鏉炴壆顦︾悮銊╂⒒閸屾艾鈧兘鎮為敃鍌涘剳鐟滅増甯掔粈澶屸偓骞垮劚濞诧箑鐣烽弻銉︾厱妞ゆ劧绲跨粻姗€鏌￠崱顓㈡濞ｅ洤锕俊鍫曞川椤斿吋顏犻梻鍌欑瀹曨剙煤閿旂偓宕叉繝闈涱儐椤ュ牊绻涢幋鐐垫噭闁诡喗鐟ラ埞鎴︽倷閼碱剙顣堕梺绋挎唉鐏忔瑩骞戦姀鐘闁靛繒濮烽娲⒑缂佹ê濮囬柣掳鍔戝畷鏇熸償閵婏腹鎷洪梺鍛婄☉閿曪箓骞夐崸妤佺厱閻庯綆鍋呭畷灞炬叏婵犲倹鎯堥弫鍫ユ煕閵夋垵鍠氶悗瀵哥磽閸屾瑦绁版い鏇嗗洦鍋嬮柟鎹愬吹瀹?
+            // get 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偞鐗犻、鏇㈠Χ閸屾矮澹曞┑顔矫畷顒勫储鐎电硶鍋撶憴鍕闁硅櫕鎹囬幃楣冩倻閽樺鍊炲銈呯箰鐎氬懘鏁撻悩宕囧幗闂佺粯锚閸樻牠鎳滈鍫熺厱闁哄倽娉曟晥閻庤娲橀〃鍛粹€﹂妸鈺佺闁宠　鍋撶紒銊ヮ煼濮婃椽宕崟顐ｆ闂佺锕ら幗婊堝极椤曗偓瀹曞ジ寮撮悢鍝勫箺闂備礁鎼粙渚€宕㈠ú顏勭疅闁绘劦鍓氶崣蹇撯攽閻樻彃鏆為柕鍥ㄧ箘閳ь剚顔栭崰鏍ㄦ櫠鎼淬劌绠查柛鏇ㄥ灠鎯熼梺闈涢獜缁辨洟鍩€椤掆偓閹芥粎妲愰幘璇茬＜婵炲棙鍔楅妶鐗堜繆閻愬瓨缍戦柟鑺ョ矒閸┾偓妞ゆ帊娴囨竟姗€鏌嶉妷顔藉巶rch 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偞鐗犻、鏇㈠Χ閸屾矮澹曞┑顔矫畷顒勫储鐎电硶鍋撶憴鍕妞ゎ偄顦…鍥疀濞戣鲸鏅濋梺闈涚箚閸撴繈顢欐径宀€纾介柛灞捐壘閳ь剚鎮傚畷鎰槹鎼淬埄鍋ㄩ梺璺ㄥ枔婵挳宕归崒姣綊鎮℃惔锝嗘喖闂佸搫鎳忕换鍫ュ蓟閺囥垹閱囨繝闈涙川閻撴垿姊虹紒妯虹瑨闁挎洏鍎垫俊鐢稿礋椤栨艾宓嗗┑掳鍊愰崑鎾趁瑰鍫㈢暫婵﹥妞藉畷顐﹀礋椤旂⒈浼冮梻浣瑰濞插繘宕愬┑瀣ㄢ偓浣割潨閳ь剟骞婂┑瀣妞ゆ梻鍋撳鎴︽⒒娴ｅ憡鎯堟繛灞傚妽閸掑﹪顢橀悙宥忕到閻ｏ繝骞嶉搹顐ｆ澑闂備胶绮崝鏍ь焽濞嗘挻鍊堕柨鏇炲€归悡娆戠磼鐎ｎ厽纭堕柛鈺嬬悼閳ь剝顫夊ú姗€宕濋弴銏犵叀濠㈣埖鍔曢～鍛存煟濮椻偓濞佳勬叏閿旀垝绻嗛柣鎰典簻閳ь剚鐗曢蹇旂節濮橆剛锛涢梺鐟板⒔缁垶鎮″▎鎾寸厱闁归偊鍘鹃崣鈧梺鍛婄懃鐎氼參銆冮妷鈺傚€烽柟缁樺笚濞堣螖閻橀潧浠︽い顓炴喘楠炲繘鎮╃紒妯烘濡炪倖甯掗崐鍦礊娓氣偓濮婂宕掑▎鎰偘濡炪倖娲橀悧鐘茬暦鐟欏嫭缍囬柕濞у懎楠勯梻浣虹《閸撴繄绮欓幒妤€纾绘慨妞诲亾闁哄瞼鍠栭獮鍡氼槾闁圭晫濞€閺屾稑鈻庤箛鏇狀啋闂佸搫琚崝宀勫煘閹达箑骞㈡慨妤€妫欓敍渚€姊绘担铏瑰笡闁圭⒈鍋嗙槐鐐寸瑹閳ь剟鐛崘顔藉€婚柦妯侯槸瀹撳棝姊虹紒妯哄闁诡垰鑻灋闁靛牆顦伴埛鎴︽偣閸ワ絺鍋撻搹顐や憾濠电姰鍨婚幊鎾澄涘▎鎴犵焿闁圭儤顨嗛弲婵嬫煕鐏炲墽鈽夋繛鍫㈠枛濮婃椽妫冨☉杈ㄐら梺绋挎唉鐏忔瑧鍒掗鐔稿劅闁抽敮鍋撻柡鈧禒瀣厽闁归偊鍘界紞鎴︽煟韫囥儳鐣甸柡宀€鍠栧畷銊︾節閸愩劌鏀柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯舵?
             const firstArtist =
               parenHints[0] ||
               (coverArtistRaw !== 'Unknown Artist' ? coverArtistRaw : '') ||
@@ -4611,7 +4767,7 @@ export default function App() {
             if (firstWaveHit) return true
             if (isStaleRequest()) return false
 
-            // 第二波：其余 get 变体串行（已有缓存，通常很快）
+            // 缂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸婂潡鏌ㄩ弴鐐测偓鍫曞焵椤掆偓閸熷磭绮诲☉妯锋婵☆垳鈷堝Σ顖涚節閻㈤潧浠﹂柛銊ㄥ煐缁岄亶鎮滃Ο璇插伎闂佽鍎兼慨銈夋偂閸愵喖绾ч柣鎰綑椤庢粍銇勯弬娆炬█闁哄矉绱曢埀顒婄秵閸嬪棙鏅堕鍕厪闁搞儜鍐句純濡炪們鍨哄ú鐔笺€侀弴銏狀潊闁挎稑瀚竟鏇犵磽閸屾艾鈧兘鎮為敃鍌氱闁哄稁鍘归埀顒€鍟换婵嬪炊瑜戦幗鏇炩攽閻愭潙鐏︾紒顔奸叄閹潡鍩€椤掑嫭鈷戦柛婵嗗閺嗗﹪鏌涚€ｎ偅宕岄柡宀嬬磿閳ь剨缍嗘禍婊堫敂椤愩倗纾?get 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐閸愯弓鐢婚梻浣瑰濮婂宕戦幘鍓佷笉闁圭儤姊荤壕浠嬫煕鐏炴崘澹橀柍褜鍓欓幗婊呭垝閺冨牆绠绘い鏇炴噺閺呯偤姊虹化鏇炲⒉闁荤啙鍥ㄥ剹婵炲棗娴氶悢鍡涙煠閹间焦娑у┑顔肩墦閺屾盯濡堕崱妤冧淮闁捐崵鍋ら弻锝呂旈埀顒勬偋韫囨洜涓嶉柡宥庡幗閻撴盯鏌涚仦缁㈡當濞存粓绠栧濠氬磼濮橆兘鍋撻悜鑺ュ€块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔告綇妤ｅ啯顎嶉梺绋款儏椤戝寮诲☉銏犵労闁告劦浜栧Σ鍫㈢磽娴ｆ彃浜鹃梺鍛婃处閸ㄩ亶鎮￠妷鈺傜厽闁哄倹瀵ч幆鍫⑩偓娑欑箞閺岋絾鎯旈姀锝咁棟濡炪倧瀵岄崹鍫曞灳閿旂偓宕夐柕濠忕畱绾绢垶姊洪幆褏绠版繝鈧潏銊ヮ嚤闁搞儯鍔庣弧鈧梺闈涢獜缁插墽娑垫ィ鍐╁€垫慨姗嗗亜瀹撳棙顨ラ悙鎻掓殭閾绘牠鏌嶈閸撶喖宕洪妷锕€绶炲┑鐐靛亾閻庤鈹戦悙鍙夘棞缂佺粯鍔橀妵鎰板幢濞嗘垹锛濋梺绋挎湰閻燂妇绮婇弶娆炬富闁哄鍨堕幉鎼佹煙楠炲灝鐏茬€规洖銈告俊鐑藉Ψ閵婏附鍟洪梻鍌欑閹测剝绗熷Δ鍛煑閹肩补妲呴悞浠嬫煃閸濆嫬鈧埖绂嶅鍫熺厵闁绘垶锚閻忋儵鏌嶈閸撴岸骞冮崒鐐茬畺闁跨喓濮寸粻锝夋煥閺冨洦顥夐柍褜鍓涢弫濠氬蓟濞戔懇鈧箓骞嬪┑鍛嚬缂傚倷娴囬崺鏍偂閿熺姴钃熼柨婵嗘啒閺冨牆鐒垫い鎺嗗亾閾荤偞绻濋棃娑卞剳鐎规挷绶氶弻鐔煎箲閹伴潧娈梺缁樻尰閻╊垶寮诲☉妯锋闁告鍋為悘宥呪攽?
             for (const hint of parenHints.slice(1)) {
               if (await tryGet(cleanedTitle, hint)) return true
             }
@@ -4623,7 +4779,7 @@ export default function App() {
             }
             if (await tryGet(cleanedTitle, '')) return true
 
-            // 第三波：更多 search 变体
+            // 缂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸婂潡鏌ㄩ弴鐐测偓鍫曞焵椤掆偓閸熷磭绮诲☉妯锋婵☆垳鈷堝Σ顖涚節閻㈤潧浠﹂柛銊ㄦ硾椤繈濡歌娑撳秹鏌￠崒娑崇穿鐟滅増甯楅弲鏌ユ煕閵夈垺鏉洪柍褜鍓欓敃顏堝蓟閿涘嫧鍋撻敐搴′簽濠⒀屽墴閺屾洟宕惰椤忣厽銇勯姀鈩冪妞ゃ垺娲熸慨鈧柨娑樺婢规洜绱撻崒姘偓鐑芥倿閿曞倸绀夐柡宥庡幑閳ь剙鍟换婵嬪炊瑜戦幗鏇㈡⒑鐠恒劌鏋斿┑顔芥尦閹瑦绻濋崶銊у帾婵犵數濮寸换鎰般€呴鍌滅＜閻庯綆浜濋幖鎰亜?search 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐閸愯弓鐢婚梻浣瑰濮婂宕戦幘鍓佷笉闁圭儤姊荤壕?
             for (const hint of parenHints.slice(1)) {
               if (await trySearch(`${cleanedTitle} ${hint}`.trim())) return true
             }
@@ -4713,15 +4869,83 @@ export default function App() {
           return false
         }
 
+        const tryExternalVariants = async (sources = ['qq', 'kugou', 'kuwo']) => {
+          if (!window.api?.searchExternalLyrics) return false
+          const triedKw = new Set()
+          const queries = []
+          for (const tv of titleVariants) {
+            if (coverArtistClean) queries.push(`${tv} ${coverArtistClean}`)
+            for (const hint of globalParenHints) queries.push(`${tv} ${hint}`.trim())
+            if (
+              coverArtistRaw &&
+              coverArtistRaw !== 'Unknown Artist' &&
+              coverArtistRaw !== coverArtistClean
+            ) {
+              queries.push(`${tv} ${coverArtistRaw}`.trim())
+            }
+            queries.push(tv)
+          }
+          for (const kw of queries) {
+            const k = (kw || '').trim()
+            if (!k || triedKw.has(k)) continue
+            triedKw.add(k)
+            const res = await window.api.searchExternalLyrics({
+              keywords: k,
+              durationSec: audioDur,
+              sources
+            })
+            if (isStaleRequest()) return true
+            const items = Array.isArray(res?.items) ? res.items : []
+            const ranked = rankLrcLibCandidates(items, audioDur, {
+              titleCandidates: titleVariants,
+              rawTitle: title,
+              artistCandidates: [...globalParenHints, coverArtistClean, coverArtistRaw].filter(
+                Boolean
+              )
+            })
+            const hit = ranked.find((r) => r?.chosenLyrics && r.score >= 25) || ranked[0]
+            const raw = hit?.chosenLyrics || hit?.item?.syncedLyrics || hit?.item?.plainLyrics || ''
+            if (!raw) continue
+            const parsed = parseAnyLyrics(raw)
+            if (parsed.length >= 3) {
+              const source = hit?.item?.source || sources[0] || 'external'
+              if (
+                applyLyricsResult(parsed, 'matched', {
+                  kind: source,
+                  detail: '',
+                  origin: ''
+                })
+              )
+                return true
+              setLyricsOverrideForPath(filePath, raw, {
+                source,
+                origin: ''
+              })
+              return true
+            }
+          }
+          return false
+        }
+
         if (lyricsSource === 'netease') {
-          // User chose NetEase — try it first since it's better for CJK metadata,
+          // User chose NetEase -try it first since it's better for CJK metadata,
           // then fall back to LRCLIB for Western songs NetEase may not have.
           if (await tryNeteaseVariants()) return
           if (await runLrcLibAttempts()) return
-        } else {
-          // Default (lrclib) — LRCLIB first, NetEase as fallback.
+          if (await tryExternalVariants()) return
+        } else if (lyricsSource === 'qq') {
+          if (await tryExternalVariants(['qq', 'kugou', 'kuwo'])) return
           if (await runLrcLibAttempts()) return
           if (await tryNeteaseVariants()) return
+        } else if (lyricsSource === 'kugou' || lyricsSource === 'kuwo') {
+          if (await tryExternalVariants([lyricsSource])) return
+          if (await runLrcLibAttempts()) return
+          if (await tryNeteaseVariants()) return
+        } else {
+          // Default (lrclib) -LRCLIB first, NetEase as fallback.
+          if (await runLrcLibAttempts()) return
+          if (await tryNeteaseVariants()) return
+          if (await tryExternalVariants()) return
         }
       } catch (e) {
         console.error('Online lyrics error', e)
@@ -4738,81 +4962,12 @@ export default function App() {
       return
   }
 
-  const detectBPM = (buffer) => {
-    const data = buffer.getChannelData(0)
-    const sampleRate = buffer.sampleRate
-
-    // 1. Calculate an envelope (moving average of absolute values)
-    // We'll use a larger step to speed up processing
-    const step = 100
-    const envelope = []
-    for (let i = 0; i < data.length; i += step) {
-      let sum = 0
-      for (let j = 0; j < step && i + j < data.length; j++) {
-        sum += Math.abs(data[i + j])
-      }
-      envelope.push(sum / step)
-    }
-
-    // 2. Normalization
-    const max = Math.max(...envelope)
-    if (max < 0.01) return null
-    const normalized = envelope.map((v) => v / max)
-
-    // 3. Peak Detection (Onset Detection)
-    // We look for points where the envelope is high and increasing
-    const peaks = []
-    const threshold = 0.3
-    const minDistance = (sampleRate / step) * 0.3 // ~200 BPM max limit
-
-    for (let i = 1; i < normalized.length - 1; i++) {
-      if (
-        normalized[i] > threshold &&
-        normalized[i] > normalized[i - 1] &&
-        normalized[i] > normalized[i + 1]
-      ) {
-        peaks.push(i)
-        i += Math.floor(minDistance)
-      }
-    }
-
-    if (peaks.length < 5) return null
-
-    // 4. Interval Histogram
-    const intervals = []
-    for (let i = 1; i < peaks.length; i++) {
-      const interval = peaks[i] - peaks[i - 1]
-      const bpm = Math.round(60 / ((interval * step) / sampleRate))
-      if (bpm >= 60 && bpm <= 200) {
-        intervals.push(bpm)
-      }
-    }
-
-    if (intervals.length === 0) return null
-
-    // 5. Find the most frequent BPM range (the mode)
-    const counts = {}
-    let maxCount = 0
-    let bestBpm = null
-
-    intervals.forEach((bpm) => {
-      // Group similar BPMs into buckets of 2
-      const bucket = Math.round(bpm / 2) * 2
-      counts[bucket] = (counts[bucket] || 0) + 1
-      if (counts[bucket] > maxCount) {
-        maxCount = counts[bucket]
-        bestBpm = bucket
-      }
-    })
-
-    return bestBpm
-  }
-
   const loadTrackData = async (filePath, trackHints = {}) => {
     const requestSeq = trackLoadSeqRef.current + 1
     trackLoadSeqRef.current = requestSeq
     cloudCoverFetchSeqRef.current += 1
     coverFailureFetchKeyRef.current = ''
+    setCoverUrlTrackPath(filePath)
     setCoverUrl(null)
     setFailedDisplayCoverUrl(null)
     setShareCardSnapshot(null)
@@ -4824,7 +4979,7 @@ export default function App() {
       trackNo: null,
       discNo: null
     })
-    // 提前把歌词状态切到 loading，避免 metadata 读取期间显示上一首歌的残留状态
+    // 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗ù锝夋交閼板潡寮堕崼姘珔闁搞劍绻冮妵鍕冀椤愵澀绮剁紓浣插亾濠㈣埖鍔栭悡娑㈡煕閵夈垺娅呴柡瀣灦缁绘盯宕ㄩ姘ｆ瀰闂佸搫鐭夌徊鍊熺亽濠电偛妫欓崕鍐测枔椤撶姷纾藉ù锝呮惈椤庡矂鏌涢悩宕囧⒌闁糕晝鍋ら獮瀣晜閽樺姹楅梻浣告贡缁垳鏁Δ鈧埢鎾诲醇閺囩啿鎷虹紒缁㈠幖閹冲繘藟婢舵劖鐓曢柣鏂挎啞鐏忥附顨ラ悙鎻掓殺闁靛洦鍔欓獮鎺楀箣閻樻祴鍋撻悙鐑樺仭婵犲﹤鍟扮粻娲煕婵犲啯缍戦柍瑙勫灴閹晠骞囨担鍛婃珱闂備礁鎽滄慨鐢搞€冩繝鍥╁祦闁告劦鍠栫壕濂告煟閹扮増娑х紒渚婄畵濮婃椽鏌呴悙鑼跺濠⒀屽櫍濡焦寰勯幇顓犲弳濠电娀娼уΛ娆戠矈閳哄懏鐓熼柟鐑橆殘閻ｆ椽鏌″畝瀣ɑ闁诡垱姊归獮濠囨煕鐎ｃ劌鐏查柡?loading闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔告綇妤ｅ啯顎嶉梺绋垮椤ㄥ﹪寮诲☉姘勃闁告挆鈧Σ鍫濐渻閵堝棙绀嬪ù婊冪埣瀵顓兼径濠佺炊闂佸憡娲﹂崜娆忊枍閿濆洨纾藉ù锝嗗絻娴?metadata 闂傚倸鍊搁崐宄懊归崶褏鏆﹂柛顭戝亝閸欏繘鏌℃径瀣婵炲樊浜滈悡娑㈡煕濠娾偓閻掞箓寮查鍫熷仭婵犲﹤瀚悘鏉戔攽閿涘嫭鏆鐐叉喘瀵墎鎹勯妸銉㈠亾閻愬樊娓婚柕鍫濇閸у﹪鏌涚€ｎ偅宕岄柟顔筋殔椤繈顢楁径瀣ф瀰闂備礁鎼惌澶岀礊娴ｅ壊鍤曟い鎺戝閸ㄥ倹銇勯弮鍥棄闁逞屽墻閸ㄨ泛顫忓ú顏勭閹艰揪绲婚埀顒佸浮閺屾盯鎮╁畷鍥р拰閻庢鍠栭…鐑藉极閹剧粯鍋愰柤纰卞墻濡茶淇婇悙顏勨偓鏍礉韫囨稑绠犻柛銉墮缁犱即鏌涢幇闈涙灍闁抽攱鍨垮濠氬醇閻旇　濮囨繝銏ｆ硾鐎氼噣鎯€椤忓牆绾ч悹鎭掑壉閵堝洨纾兼い鏃傛櫕閹冲嫮鈧灚婢樼€氼噣鍩€椤掑﹦绉甸柛鎾寸洴閹線宕奸悢铏诡啎闁哄鐗嗘晶鐣屸偓闈涖偢閹綊鍩€椤掑嫭鏅滈柦妯侯樈閸ゃ倝姊洪幖鐐插姌闁告柨顑囬幑銏ゅ幢濡晲绨婚梺閫涘嵆濞佳勬櫠閹殿喚纾奸悗锝庝憾閻撳ジ鏌″畝瀣埌閾绘牕銆掑顒佸闁汇倓绶氬铏规嫚閳ヨ櫕鐏嶅┑锛勫仩濡嫰顢氶敐澶婄妞ゆ梻鈷堝濠囨⒑閻愯棄鍔氶柛鐔稿缁旂喖宕熼娑掓嫽婵炶揪绲介幉锟犲疮閻愬绠鹃悹鍥囧懐鏆ら悗瑙勬礃缁矂鍩ユ径鎰潊闁绘ê鐤囩欢銏＄節閻㈤潧浠滄俊顐ｇ懇楠炴劖绻濆顓炰簵闂佺粯鏌ㄩ崥瀣偂閵夛妇绡€闂傚牊绋掗ˉ鐐淬亜閵壯冣枅闁哄瞼鍠栧畷姗€宕ｆ径濠冾仩闂備礁鐤囬～澶愬垂閸фぜ鈧礁鈻庨幘鏉戞疅闂侀潧顦崕顕€宕戦幘璇茬疀妞ゆ挆鍕靛晬闂備胶绮崝蹇涘疾濞戞瑧顩?
     setLyrics([])
     setActiveLyricIndex(-1)
     setLyricsMatchStatus('loading')
@@ -4832,15 +4987,74 @@ export default function App() {
     setTechnicalInfo({
       sampleRate: null,
       originalBpm: null,
+      channels: null,
       bitrate: null,
+      bitDepth: null,
+      isMqa: false,
       codec: null
     })
+    setBpmDetectionState('idle')
+
+    const detectMeasuredBpm = async (baseMeta = {}) => {
+      if (baseMeta?.bpmMeasured && Number(baseMeta.bpm) > 0) {
+        setBpmDetectionState('done')
+        return
+      }
+      if (!window.api?.detectBpmHandler) {
+        setBpmDetectionState('unavailable')
+        return
+      }
+
+      try {
+        setBpmDetectionState('detecting')
+        const result = await window.api.detectBpmHandler(filePath)
+        if (trackLoadSeqRef.current !== requestSeq) return
+        const bpm = Number(result?.bpm)
+        if (!result?.success || !Number.isFinite(bpm) || bpm <= 0) {
+          setBpmDetectionState('failed')
+          writeTrackMetaCache({
+            [filePath]: {
+              ...baseMeta,
+              bpm: null,
+              bpmChecked: true,
+              bpmMeasured: false
+            }
+          })
+          return
+        }
+
+        const measuredBpm = Math.round(bpm)
+        const measuredEntry = {
+          ...baseMeta,
+          bpm: measuredBpm,
+          bpmChecked: true,
+          bpmMeasured: true
+        }
+
+        setTechnicalInfo((prev) => ({
+          ...prev,
+          originalBpm: measuredBpm
+        }))
+        setBpmDetectionState('done')
+        setTrackMetaMap((prev) => ({
+          ...prev,
+          [filePath]: {
+            ...(prev[filePath] || {}),
+            ...measuredEntry
+          }
+        }))
+        writeTrackMetaCache({ [filePath]: measuredEntry })
+      } catch {
+        setBpmDetectionState('failed')
+        /* BPM detection is best-effort. */
+      }
+    }
 
     try {
       const cachedMeta = (await readTrackMetaCache([filePath]))[filePath]
       if (trackLoadSeqRef.current !== requestSeq) return
 
-      if (cachedMeta?.coverChecked) {
+      if (cachedMeta?.coverChecked && cachedMeta?.bpmChecked && cachedMeta?.mqaChecked) {
         const fallbackFromTitle = parseArtistTitleFromName(cachedMeta.title || '')
         const resolvedTitle = fallbackFromTitle?.title || cachedMeta.title || stripExtension(filePath.split(/[\\/]/).pop() || '')
         const resolvedArtist =
@@ -4862,8 +5076,10 @@ export default function App() {
           sampleRate: cachedMeta.sampleRateHz || null,
           bitrate: cachedMeta.bitrateKbps ? cachedMeta.bitrateKbps * 1000 : null,
           channels: cachedMeta.channels || null,
+          bitDepth: cachedMeta.bitDepth || null,
+          isMqa: cachedMeta.isMqa === true,
           codec: cachedMeta.codec || null,
-          originalBpm: null
+          originalBpm: cachedMeta.bpmMeasured ? cachedMeta.bpm || null : null
         }))
         if (typeof cachedMeta.duration === 'number' && cachedMeta.duration > 0) {
           setDuration(cachedMeta.duration)
@@ -4879,6 +5095,7 @@ export default function App() {
           hasLyrics: trackHints.hasLyrics === true,
           mvOriginUrl: trackHints.mvOriginUrl
         })
+        detectMeasuredBpm(cachedMeta)
       } else {
         // 1. Get Extended Metadata from Main Process (Music-Metadata)
         const data = await window.api.getExtendedMetadataHandler(filePath)
@@ -4886,19 +5103,25 @@ export default function App() {
 
         if (data.success) {
         const { technical, common } = data
-        const fallbackFromTitle = parseArtistTitleFromName(common.title || '')
-        const resolvedTitle = fallbackFromTitle?.title || common.title
+        const fallbackFromTitle = parseArtistTitleFromName(common.title || cachedMeta?.title || '')
+        const resolvedTitle = fallbackFromTitle?.title || common.title || cachedMeta?.title
         const resolvedArtist =
           (common.artist && common.artist !== 'Unknown Artist' ? common.artist : null) ||
           common.albumArtist ||
+          (cachedMeta?.artist && cachedMeta.artist !== 'Unknown Artist' ? cachedMeta.artist : null) ||
+          cachedMeta?.albumArtist ||
           fallbackFromTitle?.artist ||
           'Unknown Artist'
+        const resolvedAlbum = common.album || cachedMeta?.album || ''
+        const resolvedAlbumArtist = common.albumArtist || cachedMeta?.albumArtist || ''
+        const resolvedCover = common.cover || cachedMeta?.cover || null
+        const resolvedLyrics = common.lyrics || cachedMeta?.lyrics || null
 
         setMetadata({
           title: resolvedTitle,
           artist: resolvedArtist,
-          album: common.album || '',
-          albumArtist: common.albumArtist || '',
+          album: resolvedAlbum,
+          albumArtist: resolvedAlbumArtist,
           trackNo: common.trackNo ?? null,
           discNo: common.discNo ?? null
         })
@@ -4907,8 +5130,10 @@ export default function App() {
           sampleRate: technical.sampleRate,
           bitrate: technical.bitrate,
           channels: technical.channels,
+          bitDepth: technical.bitDepth,
+          isMqa: technical.isMqa === true,
           codec: technical.codec,
-          originalBpm: null // Will be updated by detection or tags below
+          originalBpm: null
         }))
 
         // DSD / native HiFi: <audio> duration is unreliable (browser does not decode DSD correctly).
@@ -4920,37 +5145,42 @@ export default function App() {
           setDuration(technical.duration)
         }
 
-        if (common.cover) {
-          setCoverUrl(common.cover)
+        if (resolvedCover) {
+          setCoverUrl(resolvedCover)
         } else {
-          fetchCloudCover(resolvedTitle, resolvedArtist, requestSeq, { album: common.album || '' })
+          fetchCloudCover(resolvedTitle, resolvedArtist, requestSeq, { album: resolvedAlbum })
         }
 
         fetchLyrics(filePath, resolvedTitle, resolvedArtist, {
-          album: common.album || '',
-          embeddedLyrics: common.lyrics || '',
+          album: resolvedAlbum,
+          embeddedLyrics: resolvedLyrics || '',
           hasLyrics: trackHints.hasLyrics === true,
           mvOriginUrl: trackHints.mvOriginUrl
         })
-        writeTrackMetaCache({
-          [filePath]: {
-            title: resolvedTitle || null,
-            artist: resolvedArtist || null,
-            album: common.album || null,
-            albumArtist: common.albumArtist || null,
-            trackNo: common.trackNo ?? null,
-            discNo: common.discNo ?? null,
-            cover: common.cover || null,
-            duration: technical.duration || null,
-            coverChecked: true,
-            codec: technical.codec || null,
-            bitrateKbps: technical.bitrate ? Math.round(technical.bitrate / 1000) : null,
-            sampleRateHz: technical.sampleRate || null,
-            bitDepth: technical.bitDepth || null,
-            channels: technical.channels || null,
-            lyrics: common.lyrics || null
-          }
-        })
+        const parsedMetaEntry = {
+          title: resolvedTitle || null,
+          artist: resolvedArtist || null,
+          album: resolvedAlbum || null,
+          albumArtist: resolvedAlbumArtist || null,
+          trackNo: common.trackNo ?? null,
+          discNo: common.discNo ?? null,
+          cover: resolvedCover,
+          duration: technical.duration || null,
+          coverChecked: true,
+          bpmChecked: true,
+          bpmMeasured: false,
+          mqaChecked: true,
+          codec: technical.codec || null,
+          bitrateKbps: technical.bitrate ? Math.round(technical.bitrate / 1000) : null,
+          sampleRateHz: technical.sampleRate || null,
+          bitDepth: technical.bitDepth || null,
+          channels: technical.channels || null,
+          isMqa: technical.isMqa === true,
+          bpm: null,
+          lyrics: resolvedLyrics
+        }
+        writeTrackMetaCache({ [filePath]: parsedMetaEntry })
+        detectMeasuredBpm(parsedMetaEntry)
       } else {
         // Fallback for failed extraction
         const title = filePath
@@ -4979,38 +5209,6 @@ export default function App() {
       }
       }
 
-      // 2. BPM Detection (cached per session to avoid repeat audio decoding)
-      if (bpmDetectionCacheRef.current.has(filePath)) {
-        setTechnicalInfo((prev) => ({
-          ...prev,
-          originalBpm: bpmDetectionCacheRef.current.get(filePath)
-        }))
-      } else {
-        const arrayBuffer = await window.api.readBufferHandler(filePath)
-        if (arrayBuffer) {
-          let audioCtx = null
-          try {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-            const slice = arrayBuffer.slice(0, 1024 * 1024 * 10)
-            const decodedBuffer = await audioCtx.decodeAudioData(slice.buffer || slice)
-            if (trackLoadSeqRef.current !== requestSeq) return
-            const detectedBpm = detectBPM(decodedBuffer)
-            bpmDetectionCacheRef.current.set(filePath, detectedBpm)
-            trimMapCache(bpmDetectionCacheRef, MAX_BPM_CACHE_ENTRIES)
-            setTechnicalInfo((prev) => ({ ...prev, originalBpm: detectedBpm }))
-          } catch (e) {
-            console.error('BPM detection error:', e)
-          } finally {
-            if (audioCtx && typeof audioCtx.close === 'function') {
-              try {
-                await audioCtx.close()
-              } catch {
-                /* ignore close race */
-              }
-            }
-          }
-        }
-      }
     } catch (e) {
       console.error('Track data extraction error:', e)
     }
@@ -5157,7 +5355,10 @@ export default function App() {
           trackNo: Number.isFinite(trackNo) && trackNo > 0 ? trackNo : null,
           discNo: null
         })
-        if (draft.cover) setCoverUrl(draft.cover)
+        if (draft.cover) {
+          setCoverUrlTrackPath(draft.path)
+          setCoverUrl(draft.cover)
+        }
 
         try {
           if (audioRef.current) {
@@ -5377,6 +5578,39 @@ export default function App() {
     }
   }
 
+  const fetchCloudAlbumCover = async (album, artist) => {
+    const cleanAlbum = String(album || '').trim()
+    const cleanArtist = String(artist || '').trim()
+    if (!cleanAlbum || /^unknown album$/i.test(cleanAlbum)) return null
+
+    if (window.api?.neteaseSearchAlbum) {
+      try {
+        const albums = await window.api.neteaseSearchAlbum({
+          albumName: cleanAlbum,
+          artist: cleanArtist
+        })
+        const bestAlbum = pickBestAlbumCoverCandidate(albums, cleanAlbum, cleanArtist)
+        const cover = normalizeNeteaseCoverUrl(bestAlbum?.picUrl || bestAlbum?.cover)
+        if (cover) return cover
+      } catch (e) {
+        console.warn('Netease album cover prefetch error:', e)
+      }
+    }
+
+    try {
+      const query = encodeURIComponent(`${cleanAlbum} ${cleanArtist}`.trim())
+      const response = await fetch(
+        `https://itunes.apple.com/search?term=${query}&entity=album&limit=5`
+      )
+      const data = await response.json()
+      const bestAlbum = pickBestAlbumCoverCandidate(data?.results || [], cleanAlbum, cleanArtist)
+      return normalizeItunesCoverUrl(bestAlbum?.artworkUrl100) || null
+    } catch (e) {
+      console.warn('iTunes album cover prefetch error:', e)
+      return null
+    }
+  }
+
   /** @returns {Promise<string[]>} Paths to reference (new or already in library), for user playlists etc. */
   const processFiles = async (files) => {
     setIsConverting(true)
@@ -5409,7 +5643,17 @@ export default function App() {
     }
 
     if (processed.length > 0) {
-      setPlaylist((prev) => [...prev, ...processed])
+      setPlaylist((prev) => {
+        const next = [...prev, ...processed]
+        playlistRef.current = next
+        persistStateImmediately(
+          'playlist',
+          'nc_playlist',
+          next,
+          configRef.current.autoSaveLibrary !== false && playlistStoreHydratedRef.current
+        )
+        return next
+      })
       if (currentIndex === -1) setCurrentIndex(0)
     }
     setIsConverting(false)
@@ -5427,9 +5671,16 @@ export default function App() {
       }
       // Save folder path for auto-rescan
       setImportedFolders((prev) => {
-        const normalized = folderPath.replace(/[\\/]+$/, '')
+        const normalized = normalizeImportedFolderPath(folderPath)
         if (prev.some((f) => f.toLowerCase() === normalized.toLowerCase())) return prev
-        return [...prev, normalized]
+        const next = [...prev, normalized]
+        persistStateImmediately(
+          'importedFolders',
+          'nc_imported_folders',
+          next,
+          importedFoldersHydratedRef.current
+        )
+        return next
       })
     }
   }
@@ -5728,6 +5979,7 @@ export default function App() {
     setIsPlaying(false)
     setDuration(0)
     setCurrentTime(0)
+    setCoverUrlTrackPath('')
     setCoverUrl(null)
     setFailedDisplayCoverUrl(null)
     coverFailureFetchKeyRef.current = ''
@@ -5874,7 +6126,7 @@ export default function App() {
     clearPlaybackHistory()
   }, [clearPlaybackHistory])
 
-  // Native bridge: track ended → advance using the same rules as HTML audio
+  // Native bridge: track ended -advance using the same rules as HTML audio
   useEffect(() => {
     if (window.api?.onAudioTrackEnded) {
       return window.api.onAudioTrackEnded(() => {
@@ -5922,7 +6174,7 @@ export default function App() {
 
   const nextTrack = getNextTrack()
 
-  // Gapless: 当下一首变化时预缓冲（仅 HiFi 引擎 + gapless 开启时）
+  // Gapless: 闂傚倸鍊峰ù鍥х暦閻㈢绐楅柟閭﹀枛閸ㄦ繈骞栧ǎ顒€鐏繛鍛У娣囧﹪濡堕崨顔兼缂備胶濮靛姗€鈥旈崘顏佸亾閿濆簼绨奸柟鐧哥悼缁辨帡鎮╅搹顐闂佸搫鏈粙鎴﹀煡婢舵劕纭€闁绘劕顕禍楣冩⒒娴ｅ摜锛嶇紒顕呭灠铻為柛鎰靛枛閽冪喓鈧箍鍎遍悧婊冾瀶閵娾晜鈷戦柛娑橈攻鐏忔壆鈧厜鍋撻柟闂寸閺嬩胶鈧箍鍎遍ˇ顖滅矆閸愨斂浜滈柡鍐ㄥ€哥敮鍫曟煕閻愵亜濮傞柟顔煎槻椤劑宕橀顖樺€楃槐鎺撴綇閳轰椒娌紓浣诡殘閸犳牠宕洪埀顒併亜閹烘垵顏╅柦鍐枑缁绘盯骞嬪▎蹇曚患闂佸憡鍔忛崑鎾绘⒒娓氣偓濞佳嗗櫣闂佸憡鍔楅崑鎾愁渻閹烘垟鏀介柣妯活問閺嗘粎绱掓潏銊︾鐎规洘鍨甸埥澶愬閻樼绱柣鐔哥矌婢ф鏁Δ鍛柧妞ゆ帒瀚悡娆撴煟濡も偓閻楀﹦娆㈤懠顒傜＜闁逞屽墰閳ь剨缍嗛崑浣圭濠婂牊鐓欓柟瑙勫姈绾墽鈧稒绻傞—鍐Χ韫囨艾鎮呴梺鍝勬噽婵挳锝炶箛鎾佹椽顢旈崟顐ょ崺濠电姷鏁告慨鎾磹閹间緤缍栭柟瀛樼箥濞撳鏌曢崼婵囶棡缂佲偓閸愵亞纾兼い鏂裤偢椤庢宕￠柆宥嗙厵闂侇叏绠戦崢鎾煛鐎ｎ亪鍙勯柡宀€鍠栭弻鍥晝閳ь剙鈻嶅Ο鑽ょ?HiFi 闂傚倸鍊峰ù鍥敋瑜忛埀顒佺▓閺呯娀銆佸▎鎾冲唨妞ゆ挾鍋熼悰銉モ攽鎺抽崐鎰板磻閹剧粯鍋傞柕鍫濇閸欏繑淇婇悙棰濆殭濞存粍鍎宠灃?+ gapless 闂傚倸鍊峰ù鍥敋瑜忛埀顒佺▓閺呯娀銆佸▎鎾冲唨妞ゆ挾鍋熼悰銉╂⒑閸︻厼鍔嬫い銊ユ噽婢规洘绻濆顓犲幍闂佸憡鎸嗛崨顓狀偧闂備胶绮幐璇裁哄鈧獮鍫ュΩ閵夊海鍠栭幃鈩冩償閳ヨ尙甯涢梻鍌欐祰椤曆呮崲閸℃稑绀堟繝闈涙川閳瑰秴鈹戦悩鍙夊闁稿﹦鍏橀弻鐔虹磼濡搫娼戦梺绋款儐閹瑰洤鐣风粙璇炬棃鍩€椤掑嫬鍑?
   useEffect(() => {
     if (!config.gaplessEnabled || !useNativeEngineRef.current) return
     const nextPath = nextTrack?.path
@@ -5933,7 +6185,7 @@ export default function App() {
     }
   }, [nextTrack?.path, config.gaplessEnabled])
 
-  // Gapless: 主进程无缝切轨后更新渲染层（不重启音频）
+  // Gapless: 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈閸ㄥ倿鏌涢锝嗙缂佺姳鍗抽幃褰掑炊瑜嶅Λ姗€鏌ㄥ┑鍡╂Ц缂佺姵濞婇弻锟犲礃閿濆懍澹曢柣搴ゎ潐濞叉牕顕ｉ懜鐢碘攳濠电姴娴傞弫宥嗙節闂堟稒顥欐慨瑙勵殜濮婂搫煤鐠囨彃绠洪梺鑽ゅ暱閺呯娀鐛崘銊庢棃宕ㄩ鑺ョ彸闂佺鍋愮悰銉╁焵椤掑啫鐨洪柛鎴濈秺濮婄粯鎷呴懞銉с€婇梺鍝ュТ濡繂鐣烽弴鐐垫殾闁搞儺鐓堝鐔兼⒑鐟欏嫬绀冩い鏇嗗懎顥氶柛蹇氬亹缁犻箖鏌熺€电浠﹂柣銊﹀灴閺岋綁鏁愰崶銊︽瘓濠殿喖锕ュ浠嬬嵁閺嶎厽鍊烽柟缁樺俯閻庡磭绱撻崒娆掑厡缂侇噮鍨跺畷褰掓偨缁洍鍋撻敃鍌氱倞妞ゆ帒顦伴弲婊堟⒑閸撴彃浜濋柟顖氾躬閸╋繝宕ㄩ鎯у妇濠电姰鍨奸崺鏍矙閹剧粯鍋╅梺顒€绉甸悡鍐喐濠婂牆绀堟繛鎴欏灩閺嬩礁鈹戦悩瀹犲闁藉啰鍠栭弻銊╂偄閸濆嫅銏ゆ煟閹邦剨鍔熼柟鍙夌摃缁犳稑鈽夊Ο纰卞晥闂備胶绮…鍥╁垝椤栫偞鍋傛繛鎴欏灪閸婂爼鏌ｉ幇顒傛憼闁诲浚鍠氶埀顒冾潐閹爼宕曢悽绋胯摕闁哄洢鍨归獮銏′繆椤栨粌鍔嬮悹鍥╁仱閹鎲撮崟顒傗敍缂備礁寮堕崕鎶筋敋閵夆晛绀嬫い鎾寸箖閸曞啴姊洪懞銉冾亪藝閹惰棄绀夋慨妞诲亾婵﹦绮幏鍛驳鐎ｎ亝顔勭紓鍌欒兌缁垳鏁垾宕囨殾闁瑰瓨绺惧Σ鍫ユ煏韫囨洖啸闁挎稒绋掔换婵嬫偨闂堟刀銏ゆ倵濮樼厧寮柨婵堝仱瀵挳鎮㈤搹璇″晭闂備胶纭堕崜婵嬫晪婵犳鍠栭ˇ鐢稿蓟瀹ュ洨纾兼俊顖滃劦閹峰姊洪柅鐐茶嫰婢ь喚绱掗悩鑼х€规洘娲熼弻鍡楃暤閵夈儲鍠樻い銏＄☉椤繈鏁愰崱娆屽亾濞差亝鈷戦梻鍫熺〒缁犵偤鏌涙繝鍐⒌闁诡噯绻濆鎾偄缁嬪灝浼庢繝纰樻閸ㄦ娊宕㈣閺侇噣宕奸弴鐔哄幗闂婎偄娲㈤崕鎶芥偩閻㈠憡鐓涚€光偓鐎ｎ剛袦濡ょ姷鍋為敃銏ゅ箖閻戣棄绠ユい鏃傚帶缂傛岸姊婚崒娆戝妽閻庣瑳鍛煓闁圭儤顨呯粈澶嬬箾閸℃ɑ灏电€规挷绶氶幃妤呮晲鎼粹剝鐝梺杞扮缁夌數鎹㈠┑鍥╃瘈闁稿本绋戦娑樷攽?
   useEffect(() => {
     if (!window.api?.onGaplessTrackChanged) return undefined
     return window.api.onGaplessTrackChanged((nextPath) => {
@@ -5941,7 +6193,7 @@ export default function App() {
       if (nextIdx !== -1) {
         historyNavigationRef.current = false
         setCurrentIndex(nextIdx)
-        // isPlaying 保持 true，不触发 playAudio（音频已在主进程连续播放）
+        // isPlaying 濠电姷鏁告慨鐑藉极閹间礁纾块柟瀵稿Т缁躲倝鏌﹀Ο渚＆婵炲樊浜濋弲婊堟煟閹伴潧澧幖鏉戯躬濮婃椽宕ㄦ繝鍌毿曟繛瀛樼矋閻楃姴鐣?true闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔衡偓鐢殿焾娴犙囨⒒閸曨偄顏柡宀嬬節瀹曟﹢濡搁妷銏犱壕闁煎鍊楁稉宥夋煛閸屾侗鍎ラ柣鏂挎閹綊鎼归悷鏉垮濠电姭鍋撳ù鐓庣摠閻撴洟鏌ｅΟ鍝勭骇妞ゃ儯鍨介弻锛勪沪鐠囨彃顫囬悗娈垮枟濞兼瑨鐏冮梺閫炲苯澧紒鍌氱У閵堬綁宕橀埡浣风敾?playAudio闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔告綇妤ｅ啯顎嶉梺绋款儏椤戝寮婚悢鐓庣鐟滃繒鏁☉銏＄厱閻庯綆浜滈埀顒€娼″濠氬Χ婢跺﹣绱堕梺闈涱樈閸犳鈻撻幍顔剧＝濞达絿鎳撻弫鍓х磽瀹ュ嫮绐旂€殿喖顭烽幃銏㈡偘閳ュ厖澹曞┑鐐村灦閻燁垶鎮為悾宀€纾奸柣妯挎珪瀹曞矂鏌＄仦鍓ф创濠碘€崇埣瀹曞崬螖娴ｇ晫妾ㄩ梻鍌欑閹碱偊寮甸鍕剮妞ゆ牜鍋涢弸渚€鏌涘畝鈧崑娑欏閻樼粯鐓曢柡鍥ュ妼娴滀粙鏌ｆ惔銊ゆ喚婵﹨娅ｉ幏鐘诲蓟閵夈儱鍙婃繝鐢靛仒閸栫娀宕惰閻濇ê顪冮妶鍡楀潑闁稿鎸婚妵鍕敇閻愭潙绐涢梺褰掝棑婵挳婀侀柣搴秵閸嬫帒顭囬弮鈧换婵嗏枔閸喗鐏嶉梺鎸庢处閸嬪棗顕ユ繝鍐﹀亝闁告劏鏅涙禍妤呮⒑缂佹﹩鐒界紒顕呭灦閹€斥槈濮楀棛鍞甸柣鐘烘閸庛倝藟閻愬绠鹃柛娑卞幗閸犳﹢鏌＄仦鍓с€掗柍褜鍓ㄧ紞鍡涘礈濞嗘挸鍑犳繛鎴欏灪閻撴瑦銇勯弬璺ㄤ虎鐞氭氨绱撴担铏瑰笡缂佽鍊块敐鐐测攽鐎ｅ灚鏅㈤梺绋胯閸婃洟寮查鍕ㄦ斀闁挎稑瀚禍濂告煕婵犲啰澧垫鐐村姈閵堬綁宕橀妸褏宕堕梻浣告贡婢ф顭垮Ο鑲╂／鐟滃繘骞夐幖浣瑰亱闁割偅绻勯悷鏌ユ⒑?
       }
     })
   }, [])
@@ -5951,7 +6203,7 @@ export default function App() {
       cancelCrossfade()
     }
 
-    // 历史模式：跳到上一首听的歌，历史为空时降级为列表上一首
+    // 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐閾忣偅鐝ㄦ繝鐢靛Х椤ｈ棄危閸涙潙纾婚柛娑欑暘閳ь剙鍟鍕箛椤戔晪绠撻弻鐔兼焽閿曗偓閺嬬喓鈧娲栭ˇ顖炴箒闂佹寧绻傚Λ娆戠矆閸儲鐓曢柣妯虹－婢х數鈧娲栫紞濠囩嵁閸℃凹妲鹃梺鍝勬４缁犳捇寮诲☉銏犖ㄩ柕蹇婂墲閻濓箓姊虹悰鈥充壕闂侀潧艌閺呮粓鍩涢幒鎳ㄥ綊鏁愰崶銊ユ畬濡炪倖娲樼划搴ｆ閹烘柡鍋撻敐搴′簻缂佹姘ㄧ槐鎺斾沪閽樺鍩為柣鎾卞€栭妵鍕疀閹炬潙娅ｉ梺閫炲苯澧い顓犲厴瀵濡搁埡浣稿祮闂佺粯鍔栫粊鎾磻閹捐浼犻柕澹懐鍔堕梻浣虹《閸撴繈濡甸崒姘ｆ婵炲棙鐟ч惌妤佺箾鏉堝墽绉俊顐㈠瀹曘垽鏁撻悩鏂ユ嫼闂佺厧顫曢崐鏇㈠几閹达附鐓曢柡鍐ｅ亾婵炶尙鍠栧畷娲Ψ閿曗偓缁剁偤鏌熼柇锕€澧版い鏃€甯掗—鍐Χ閸℃瑥顫ч梺娲诲弾閸犳绮╅悢鐓庡嵆闁绘劏鏅滈弬鈧梻浣哥枃濡嫬螞濡や胶顩查柛鎾楀懐锛滈梺鍝勮閸庢娊鎮惧ú顏呯厵妞ゆ柣鍔屽ú銈夊础閹惰姤鐓忛煫鍥ㄦ礀鍟搁梺浼欑悼閸嬫挾鎹㈠┑瀣潊闁挎繂鎳愰崢顐︽⒑閸涘﹥鈷愰柣妤冨Т閻ｇ兘寮撮悜鍡楁倯婵犮垼娉涢鍥储闁秵鈷戦柛婵嗗閸屻劑鏌涢弬鎸庢拱闁哄懓鍩栫€佃偐鈧稒顭囬崢鐢告⒑閼恒儍顏埶囬鐐叉辈闁挎繂顦伴悡娑㈡倶閻愰鍤欏┑鈥炽偢閺屽秹鎸婃径妯恍﹂柧浼欑秮閺屾盯鈥﹂幋婵囩彯婵炲鍘ч崯鎾蓟閿濆棙鍎熼柍鈺佸暢绾偓婵＄偑鍊ら崢濂告偋閹捐鐏抽柨鏇楀亾闁伙綇绻濋獮宥夘敊閼恒儺鍟庨梻鍌欑劍鐎笛呮崲閸岀倛鍥焼瀹ュ懐鐓戦梺鍦亾閻ｎ亝绂嶅鍫熺厵闁割煈鍠栭顐ょ棯閻愵剙顕滈柕鍥у閺佸倿鎸婃径妯活棆缂傚倷娴囨ご鎼佸箰婵犳艾绠柛娑欐綑娴肩娀鏌曟竟顖氬€荤粈鍐⒒閸屾瑨鍏屾い顓炵墢閼哄崬煤椤忓嫮锛欓梺鍝勬礌閹冲洭鍩€椤掍焦顥堢€规洘锕㈤、娆撴嚃閳哄搴婇梻鍌欒兌缁垶宕濆Δ鍐╁仒闁靛鏅涚粻浼存煕閹伴潧鏋熼柛濠傜仛椤ㄣ儵鎮欓懠顑胯檸闂佸憡姊圭喊宥囨崲濞戞﹩鍟呮い鏃傚帶缁秹姊虹拠鈥虫灆闁告濞婇悰顔碱潨閳ь剙顕ｉ鍕ㄩ柨鏃傜帛缂嶅矂姊婚崒娆愮グ妞ゎ偄顦悾宄拔熺悰鈩冪€洪梺鍝勬储閸ㄥ湱绮诲鑸电厱妞ゆ劗濮撮崝婊堟煟閹惧瓨绀冮柕鍥у椤㈡﹢鎮㈡搴濆寲缂傚倷闄嶉崝瀣垝濞嗘挸钃熼柣鏃傗拡閺佸﹪鎮归崶銊ョ祷缂佷緡鍠楃换婵堝枈濡搫鈷夐梺璇″枛閸婅绌辨繝鍥ч唶闁哄洨鍋熼崐鐐烘⒑閸愬弶鎯堥柛濠冩倐瀵娊鎮㈤崫銉х槇闂佹眹鍨藉褎绂掗敃鍌涚厱闁靛鍎抽崺锝嗩殽閻愭潙濮嶆鐐达耿椤㈡瑩鎳栭埡瀣耿闂傚倷绀佸﹢閬嶅磻閹捐埖顐?
     if (config.prevButtonMode === 'history') {
       const jumped = goBackInPlaybackHistory()
       if (jumped) return
@@ -6015,7 +6267,7 @@ export default function App() {
 
     const fadeMs = Math.max(1000, Number(config.crossfadeDuration || 3) * 1000)
     void window.api.audioStartFadeOut(fadeMs).catch(() => {})
-    // Do NOT call handleNext() here — let the track end naturally.
+    // Do NOT call handleNext() here -let the track end naturally.
     // The audio stream is single-instance; calling play() for the next track
     // immediately kills the current stream and the fade-out never plays through.
     // Instead, track-ended fires when the audio finishes (now at ~0 volume),
@@ -6062,7 +6314,7 @@ export default function App() {
   const biliBackgroundVideoRef = useRef(null)
   const biliAudioRef = useRef(null)
 
-  /** 侧栏 MV：嵌入 iframe 按 1920×1080 布局再整体缩放，减轻“小窗=低清档” */
+  /** 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈缁犳澘鈹戦悩宕囶暡闁稿骸绉电换婵囩節閸屾粌顣虹紓浣插亾閻庯綆鍋佹禍婊堟煙閹规劖纭惧ù鐘欏洦鐓?MV闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔兼倻濮楀棙鐣烽梺鎼炲€曢惌鍌炲蓟濞戙垹绠绘俊銈傚亾闁硅櫕鍔欓幃鐐淬偅閸愨斁鎷哄┑顔炬嚀濞层倝鎮橀濮愪簻妞ゆ挾鍋熸晶銏㈢磼?iframe -1920-080 闂傚倸鍊搁崐鐑芥倿閿曞倹鍎戠憸鐗堝笒閺勩儵鏌涢弴銊ョ仩闁搞劌鍊搁湁闁稿繐鍚嬬紞鎴︽煟閵堝骸鏋熼柕鍥у楠炲洭宕奸弴鐕佲偓宥夋⒑缁嬪灝顒㈤柛銊ョ埣婵＄敻宕熼姘鳖唺闂佺懓鐡ㄧ换宥嗙閼测晝纾藉ù锝嗗絻娴滈箖姊洪崨濠傚Е濞存粍鐗犲畷鎴﹀箻閼姐倕绁﹂梺鍓茬厛閸犳牗鎱ㄦ惔鈾€鏀介柍钘夋娴滄繈鏌ｉ悢鏉戝姦闁糕斂鍨介獮姗€鎳滈棃娑氬酱闂佽崵鍠嶅鎺旂矆娴ｈ櫣绀婂┑鐘叉搐閺嬩線鏌熼悧鍫熺凡妤犵偑鍨烘穱濠囶敍濠婂啫濡哄┑鐐茬墱閸嬪棛妲愰幘璇茬＜婵﹩鍏橀崑鎾诲箹娴ｅ摜锛欓梺褰掓？缁叉悂宕堕渚囨濠电偞鍨靛畷顒€鈻撻妸鈺傗拺闂傚牊鍗曢崼銉ョ柧婵炴垶姘ㄦ稉宥呪攽閻樺磭顣查柣鎾存礃缁绘盯骞嬪┑鍡氬煘闂佽楠忕徊楣冨Φ閸曨垱鏅滈悹鍥у级閻濇繂鈹戦纭锋敾婵＄偠妫勯悾鐑藉Ω閿斿墽鐦堥梺绋挎湰缁牆菐椤斿墽纾介柛灞剧懆閸忓瞼绱掗鍛仸闁靛棗鍟村畷鍗炩枎閹寸姷鍔归柣搴＄畭閸庨亶藝椤栨碍绾繝鐢靛О閸ㄧ厧鈻斿☉銏℃櫇闁挎棁妫勯閬嶆倵閿濆簼绨撮柡鈧禒瀣厽婵☆垱顑欓崵瀣偓瑙勬偠閸庣敻寮诲☉銏″亜闁告稑锕﹂崙锟犳偠濮橆厾鎳囬柡灞剧洴椤㈡洟鎮╅懠顑跨磿缂?濠电姷鏁告慨鐑藉极閹间礁纾婚柣妯款嚙缁犲灚銇勮箛鎾搭棞缂佽翰鍊濋弻锝夋晲閸涱収妲甸梺绋款儐閹告悂鍩ユ径鎰闁规儳顕ぐ鍥╃磽閸屾瑧璐伴柛鐘冲浮瀵彃鈹戠€ｎ亞顔嗛梺缁樏Ο濠囧疮閸涱喓浜滈柡鍐ㄥ€瑰▍鏇熴亜閳哄﹤浜版慨濠勭帛閹峰懘鎮烽柇锕€娈濈紓鍌欐祰椤曆囧磹閸喚鏆﹂柟鎵閸嬨劎绱掔€ｎ厽纭堕柨?*/
   useEffect(() => {
     if (!mvId || !config.enableMV || config.mvAsBackground || !showLyrics) {
       return undefined
@@ -6326,7 +6578,7 @@ export default function App() {
     return Math.max(0, Number(audioRef.current?.currentTime) || 0)
   }, [])
 
-  /** YouTube / Bilibili 嵌入 iframe：定期按本地音频时间软校正，减轻长播漂移 */
+  /** YouTube / Bilibili 闂傚倸鍊峰ù鍥敋瑜嶉～婵嬫晝閸岋妇绋忔繝銏ｅ煐閸旀洜绮绘导瀛樼厵闂傚倸顕崝宥夋煕閵堝棗濮堥柕鍥у瀵粙顢曢～顓犳崟-iframe闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔兼倻濮楀棙鐣烽梺鎼炲€曢懟顖濈亙闂佹寧绻傞幊搴ㄥ汲閻愮儤鐓曢悗锛卞嫭鐝旈柧缁樼墵閺屻劌鈹戦崱妯烘闂佸搫妫欓悷鈺呭箖濡も偓椤繈顢楁径瀣ф瀰闂備礁鎼惌澶岀礊娴ｅ壊鍤曟い鏇楀亾鐎规洘甯℃俊鍫曞炊瑜嶆瓏闂傚倸鍊峰鎺旀椤斿墽涓嶉柟杈捐吂閳ь剨绠撻幃婊堟寠婢跺孩鎲伴梻浣芥硶閸犳挻鎱ㄩ幘顔界厑闁搞儯鍔婃禍婊堟煙閹佃櫕娅呴柣蹇婃櫆閵囧嫰顢曢悢鍛婄彅闂佸疇顫夐崹鍧楀箖閳哄拋鏁冩い顐幖椤ユ岸姊婚崒娆戭槮婵犫偓闁秵鎯為幖娣妼缁愭淇婇妶鍛劙濠㈣泛顑囩弧鈧梺鎼炲劘閸斿酣宕㈤悽鍛娾拺闁告稑锕ョ亸顐︽煠閸愯尙鍩ｆ鐐搭殜瀹曟帡鎮欑€电骞愰梻浣虹《閸撴繈宕濋弴銏犵闁挎洖鍊归悡娑氣偓鍏夊亾閻庯綆鍓涢惁鍫ユ倵鐟欏嫭绀冮柨鏇樺灪娣囧﹤顫㈠畝濠冃╅梻浣虹帛閹搁箖宕版惔銊ョ厴闁硅揪绠戦悡锟犳煕閳╁啨浠︾紒銊ャ偢閺岋絾鎯旈敐鍥ㄥ殑闂佸憡鍔曟晶浠嬪礉瀹勯偊娓婚柕鍫濇噽缁犱即鏌ｅΔ浣虹煉鐎殿噮鍋勯濂稿幢濞嗘埈鍟庨梻浣烘嚀椤曨參宕戦悩宕囩彾婵せ鍋撻柡灞界Ч椤㈡棃宕ㄩ鎯у殥闂備礁鐤囬～澶愬垂閸фぜ鈧礁鈻庨幘鏉戜患閻庡厜鍋撻柍褜鍓熼、娆撳炊閳哄啰锛濋梺绋挎湰濮樸劌鐡繝鐢靛仜閻即宕濈仦钘夌カ闂備礁缍婇崑濠囧礂濮椻偓瀵劍绂掔€ｎ偄鈧敻鏌ㄥ┑鍡欏嚬缂併劏濮ら妵鍕晜鐟欏嫭鐝氬┑鈽嗗亜閹虫﹢銆侀弴銏狀潊闁炽儲鍓氬Σ閬嶆⒒娴ｈ銇熼柛娆忛叄瀹曚即寮介銊х◤濠电娀娼ч鍡涘疾濠靛鐓曢悘鐐插⒔閳绘捇鏌熷畡閭︾吋婵﹥妞介弻鍛存倷閼艰泛顏繝鈷€鍐憼妞ゃ劊鍎甸幃娆撳级閹存繍娼旈梻浣筋嚃閸ㄥ崬螞閸愨晜鍙忛柍褜鍓熼弻锝呂熼崫鍕獓濠电偛鎳忛幐鎼佸煘閹达附鍋愰柛顭戝亝濮ｅ嫭绻濆▓鍨珝婵炰匠鍛疾闂備礁鎼粙渚€宕㈤懖鈺侇棜鐟滅増甯楅崑锝吤归敐鍛喐闁挎稑绉归弻?*/
   useEffect(() => {
     if (!isPlaying || !mvId) return
     if (mvId.source !== 'youtube') return
@@ -6337,7 +6589,7 @@ export default function App() {
     return () => clearInterval(id)
   }, [getMvSyncTime, isPlaying, mvId?.id, mvId?.source])
 
-  /** Bilibili 直连 HTML5 video：偏差超过阈值再对齐，避免每帧 seek */
+  /** Bilibili 闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ礀绾惧潡鏌ｉ姀銏╃劸闁汇倗鍋撶换婵嬫濞戞碍鍣ユ繝銏ｅ煐閸旀洜绮诲☉娆嶄簻闁哄啫娲﹂ˉ澶愬箹?HTML5 video闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔兼倻濮楀棙鐣烽梺鎼炲€曢惌鍌炲蓟閿濆绠涢梻鍫熺☉椤偄顪冮妶鍌涙珗閻忓繑鐟уΣ鎰板箳閺傚搫浜鹃柨婵嗛娴滀粙鏌涙惔娑樺姦闁哄本鐩幃銏ゆ煥鐎ｎ亝顏￠梻渚€娼уú銈団偓姘緲椤曪綁顢氶埀顒€鐣烽崼鏇炍╃憸瀣焵椤掆偓閿曨亪骞冨Δ鈧埥澶娾枎閹寸姷鏉介梻浣告惈婢跺洭宕滃┑鍡╁殫闁告洦鍨伴獮銏′繆椤栨繂鍚圭憸鏉挎噺缁绘繈鎮介棃娑楃捕濠碘槅鍨伴敃顏勭暦閵忋倖鍋傞幖杈剧磿閵堫偊姊婚崒娆戝妽闁诡喖鐖煎畷鏇灻洪鍕槶濠电偛妫欓崹鐢杆夊杈ㄥ枑闁绘鐗嗙粭姘舵煟閹捐泛鏋涢柡宀€鍠栭幃娆擃敆閳ь剟鍩㈤弴鐔翠簻閹兼番鍩勫▓婊堟煛瀹€瀣瘈鐎规洏鍔戦、娆撴倷椤掆偓濞呮岸姊绘担绛嬪殐闁哥姵顨婇妴鍐╃節閸嬭姤鐩畷姗€濡搁姀鈽嗘綌婵犳鍠楄摫闁伙妇鍏樻俊姝岊槾缁惧彞绮欓弻娑氫沪閻愵剛娈ら悗娑欑箞濮婅櫣绱掑鍡樼暦闂佸湱鎳撳ú銈夘敋閿濆鏁冮柕蹇婃櫅閹垿姊洪崨濠佺繁闁搞劌宕埢鎾诲即閵忊檧鎷洪梺鍛婄☉閿曘儲寰勯崟顐€鐟邦煥閸涱厺鎴峰┑鈥冲级閸旀洟锝炲┑瀣殝缁剧増蓱鐎氳偐绱撻崒娆戭槮妞ゆ垵鐗嗛埢鏃堝即閻樺吀绗夐梺瑙勵問閸犳氨澹曢悡搴唵閻犺櫣鍎ゅ﹢浼存煛閸♀晛澧撮柡宀€鍠栭、娑樷枎閹寸姷宕查梻浣芥〃缁€浣虹矓閻熸壆鏆﹂柣鏃傗拡閺佸棗霉閿濆牜鍤冮柛?seek */
   useEffect(() => {
     if (!isPlaying || !mvId || mvId.source !== 'bilibili' || !biliDirectStream?.videoUrl) return
     let raf = 0
@@ -6459,7 +6711,7 @@ export default function App() {
     const ax = audioRef.current?.currentTime
     const t = typeof ax === 'number' && !Number.isNaN(ax) ? ax : currentTime
     syncYTVideo(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅在用户调整 MV 偏移时重新对齐画面
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴欏焺閺佸銇勯幘璺烘瀾闁告瑥绻橀弻鐔虹磼閵忕姵鐏堢紓浣哄Х婵炩偓妤犵偞鐗滈崚鎺旀喆閸曞灚缍堥梻浣藉亹婢ф鈧瑳鍥﹂柛鏇ㄥ枤閻も偓闂佽宕樺▔娑⒙烽埀顒勬⒒娴ｄ警鐒炬い鎴濆暣瀹曟繈骞嬮敃鈧拑鐔兼煛閸モ晛鏋旂紒鈾€鍋撻梻濠庡亜濞诧箑煤濠婂牆姹查柣妯肩帛閳锋垹绱撴担鑲℃垹浜搁悧鍫㈢闁肩⒈鍓欓弸娑欘殽閻愭彃鏆ｇ€规洜鍏橀、妯衡槈濡懓顥氶梻浣瑰缁诲倻鑺遍懖鈺勫С濠电姵纰嶉悡娑㈡煕閳╁啰鎳冨ù鐘讳憾閺?MV 闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ磵閳ь剨绠撳畷濂稿Ψ椤旇姤娅堥梻浣告啞娓氭宕归崡鐐垫殾闁哄被鍎查悡娆撴煕濠靛棗顏懖鏍⒑閸濆嫬顏╅柛濠傜仢椤繒绱掑Ο璇差€撻梺鍛婄☉閿曘儵宕曢幘缁樷拺闁告縿鍎卞▍蹇涙煕鐎ｎ亷韬鐐插暣婵＄兘鏁傛ィ鍐╊€嶇紓鍌欑椤戝懎顭囬垾婢勬盯鎮滈懞銉㈡嫼閻熸粎澧楃敮妤呮晬閻旇櫣纾奸柍褜鍓氶幏鍛存嚃濠靛洨鈽夋い顐ｇ矒閸┾偓妞ゆ帒瀚拑鐔兼煃閳轰礁鏆欑紒鍓佸仱閹鏁愭径瀣敪闂佸憡鏌ㄩ惌鍌氼潖濞差亜绠归柣鎰ゴ閸嬫挸螖娴ｇ懓寮块梺鍦檸閸ｎ垳绱為弽銊ょ箚闁靛牆鎳庨弳鐔虹棯閹冩倯濞ｅ洤锕、娑橆潩椤撶喎鍓垫俊鐐€ら崑鍕煀閿濆拋娼栭柣鎴炆戞慨婊堟煙濞堝灝鏋ら柣娑栧灮缁辨挻鎷呴崫鍕戯綁鏌ｅΔ浣圭闁?
   }, [config.mvOffsetMs])
 
   const handleExport = async () => {
@@ -6591,6 +6843,17 @@ export default function App() {
     () => (currentTrack ? parseTrackInfo(currentTrack, effectiveTrackMetaMap[currentTrack.path]) : null),
     [currentTrack, effectiveTrackMetaMap]
   )
+  const currentTrackMeta = currentTrack?.path ? trackMetaMap[currentTrack.path] || null : null
+  const currentBpmRaw = Number(
+    technicalInfo.originalBpm || (currentTrackMeta?.bpmMeasured ? currentTrackMeta?.bpm : 0)
+  )
+  const currentBottomBarBpm =
+    Number.isFinite(currentBpmRaw) && currentBpmRaw > 0 ? Math.round(currentBpmRaw) : null
+  const currentBottomBarAdjustedBpm =
+    currentBottomBarBpm && playbackRate !== 1
+      ? Math.round(currentBottomBarBpm * playbackRate)
+      : null
+  const showBottomBarBpmDetecting = Boolean(currentTrack?.path) && !currentBottomBarBpm && bpmDetectionState === 'detecting'
   const mvFallbackRunningRef = useRef(false)
   const mvFallbackAttemptKeyRef = useRef('')
 
@@ -6697,11 +6960,14 @@ export default function App() {
 
   const resolvedDisplayArtist = useMemo(() => {
     if (currentDisplayOverride?.artist) return currentDisplayOverride.artist
-    if (metadata.artist && metadata.artist !== 'Unknown Artist') return metadata.artist
+    const metadataMatchesCurrentTrack = coverUrlTrackPath === currentTrack?.path
+    if (metadataMatchesCurrentTrack && metadata.artist && metadata.artist !== 'Unknown Artist') {
+      return metadata.artist
+    }
     if (currentTrackInfo?.artist && currentTrackInfo.artist !== 'Unknown Artist')
       return currentTrackInfo.artist
     return currentTrack ? t('player.nightcoreMode') : t('player.ellipsis')
-  }, [currentDisplayOverride, metadata.artist, currentTrackInfo, currentTrack, t])
+  }, [coverUrlTrackPath, currentDisplayOverride, currentTrackInfo, currentTrack, metadata.artist, t])
 
   const dlnaUiOn = useMemo(
     () => !!(lastCastStatus?.dlnaEnabled && lastCastStatus?.currentUri),
@@ -6715,10 +6981,10 @@ export default function App() {
       return title || t('dlna.castTitle')
     }
     if (currentDisplayOverride?.title) return currentDisplayOverride.title
-    if (metadata.title) return metadata.title
+    if (coverUrlTrackPath === currentTrack?.path && metadata.title) return metadata.title
     if (currentTrack) return currentTrack.name.replace(/\.[^/.]+$/, '')
     return t('player.selectTrack')
-  }, [lastCastStatus, currentDisplayOverride, metadata.title, currentTrack, t])
+  }, [coverUrlTrackPath, lastCastStatus, currentDisplayOverride, metadata.title, currentTrack, t])
 
   const displayMainArtist = useMemo(() => {
     const s = lastCastStatus
@@ -6735,8 +7001,9 @@ export default function App() {
       return (s.dlnaMeta?.album || '').trim() || 'Unknown Album'
     }
     if (currentDisplayOverride?.album) return currentDisplayOverride.album
-    return metadata.album || currentTrack?.info?.album || 'Unknown Album'
-  }, [lastCastStatus, currentDisplayOverride, metadata.album, currentTrack])
+    if (coverUrlTrackPath === currentTrack?.path && metadata.album) return metadata.album
+    return currentTrack?.info?.album || 'Unknown Album'
+  }, [coverUrlTrackPath, lastCastStatus, currentDisplayOverride, metadata.album, currentTrack])
 
   const displayMainCoverUrl = useMemo(() => {
     const s = lastCastStatus
@@ -6745,13 +7012,119 @@ export default function App() {
       return u || null
     }
     if (currentDisplayOverride?.cover) return currentDisplayOverride.cover
-    return coverUrl
-  }, [lastCastStatus, currentDisplayOverride, coverUrl])
+    if (!currentTrack?.path) return null
+    const knownTrackCover = currentTrackInfo?.cover || effectiveTrackMetaMap[currentTrack.path]?.cover || null
+    if (coverUrlTrackPath === currentTrack.path && coverUrl) return coverUrl
+    return knownTrackCover
+  }, [
+    lastCastStatus,
+    currentDisplayOverride,
+    currentTrack?.path,
+    currentTrackInfo?.cover,
+    effectiveTrackMetaMap,
+    coverUrlTrackPath,
+    coverUrl
+  ])
 
   const displaySafeCoverUrl = useMemo(() => {
     if (!displayMainCoverUrl) return null
     return displayMainCoverUrl === failedDisplayCoverUrl ? null : displayMainCoverUrl
   }, [displayMainCoverUrl, failedDisplayCoverUrl])
+
+  const customWallpaperUrl = useMemo(() => {
+    if (!config.customBgPath) return ''
+    return window.api?.pathToFileURL?.(config.customBgPath) || `file:///${String(config.customBgPath).replace(/\\/g, '/')}`
+  }, [config.customBgPath])
+
+  useEffect(() => {
+    if (!currentTrack?.path || !displaySafeCoverUrl) return
+    if (
+      !lastCastStatus?.dlnaEnabled &&
+      !currentDisplayOverride?.cover &&
+      coverUrlTrackPath !== currentTrack.path
+    ) {
+      return
+    }
+
+    const albumName =
+      metadata.album || currentTrackInfo?.album || currentTrack?.info?.album || 'Singles'
+    const syncKey = `${currentTrack.path}::${displaySafeCoverUrl}::${albumName}`
+    if (syncedDisplayCoverCacheKeyRef.current === syncKey) return
+    syncedDisplayCoverCacheKeyRef.current = syncKey
+
+    const title =
+      metadata.title ||
+      currentTrackInfo?.title ||
+      currentTrack.name?.replace(/\.[^/.]+$/, '') ||
+      null
+    const artist =
+      (metadata.artist && metadata.artist !== 'Unknown Artist' ? metadata.artist : null) ||
+      currentTrackInfo?.artist ||
+      null
+    const albumArtist = metadata.albumArtist || currentTrackInfo?.albumArtist || null
+    const coverEntry = {
+      title,
+      artist,
+      album: albumName,
+      albumArtist,
+      trackNo: metadata.trackNo ?? currentTrackInfo?.trackNo ?? null,
+      discNo: metadata.discNo ?? currentTrackInfo?.discNo ?? null,
+      cover: displaySafeCoverUrl,
+      duration: duration || currentTrackInfo?.duration || null,
+      coverChecked: true,
+      codec: technicalInfo.codec || trackMetaMap[currentTrack.path]?.codec || null,
+      bitrateKbps: technicalInfo.bitrate
+        ? Math.round(technicalInfo.bitrate / 1000)
+        : trackMetaMap[currentTrack.path]?.bitrateKbps || null,
+      sampleRateHz: technicalInfo.sampleRate || trackMetaMap[currentTrack.path]?.sampleRateHz || null,
+      bitDepth: technicalInfo.bitDepth || trackMetaMap[currentTrack.path]?.bitDepth || null,
+      channels: technicalInfo.channels || trackMetaMap[currentTrack.path]?.channels || null,
+      isMqa: technicalInfo.isMqa === true || trackMetaMap[currentTrack.path]?.isMqa === true,
+      bpm: technicalInfo.originalBpm || trackMetaMap[currentTrack.path]?.bpm || null,
+      lyrics: trackMetaMap[currentTrack.path]?.lyrics || null
+    }
+
+    setTrackMetaMap((prev) => {
+      const existing = prev[currentTrack.path] || {}
+      if (existing.cover === displaySafeCoverUrl && existing.coverChecked === true) return prev
+      return {
+        ...prev,
+        [currentTrack.path]: {
+          ...existing,
+          ...coverEntry
+        }
+      }
+    })
+
+    if (albumName) {
+      setAlbumCoverMap((prev) => {
+        if (prev[albumName]) return prev
+        return { ...prev, [albumName]: displaySafeCoverUrl }
+      })
+    }
+
+    writeTrackMetaCache({ [currentTrack.path]: coverEntry })
+  }, [
+    currentTrack,
+    currentTrackInfo,
+    coverUrlTrackPath,
+    currentDisplayOverride?.cover,
+    displaySafeCoverUrl,
+    duration,
+    lastCastStatus,
+    metadata.album,
+    metadata.albumArtist,
+    metadata.artist,
+    metadata.discNo,
+    metadata.title,
+    metadata.trackNo,
+    technicalInfo.bitrate,
+    technicalInfo.channels,
+    technicalInfo.codec,
+    technicalInfo.originalBpm,
+    technicalInfo.sampleRate,
+    trackMetaMap
+  ])
 
   const handleDisplayCoverError = () => {
     if (!displayMainCoverUrl) return
@@ -6859,6 +7232,63 @@ export default function App() {
       }
     },
     [isCardActionBusy, buildShareCardSnapshot, waitForShareCardPaint, t]
+  )
+
+  const handleDeleteTrackFile = useCallback(
+    async (track) => {
+      const filePath = track?.path || ''
+      if (!filePath || !isLocalAudioFilePath(filePath)) {
+        alert(t('contextMenu.actionFailed', { detail: 'path_unavailable' }))
+        return
+      }
+      if (!window.api?.deleteAudioFileHandler) {
+        alert(t('contextMenu.actionFailed', { detail: 'delete_unavailable' }))
+        return
+      }
+
+      const info = parseTrackInfo(track, trackMetaMapRef.current?.[filePath] || null)
+      const title = info?.title || stripExtension(track?.name || fileNameFromPath(filePath))
+      const ok = window.confirm(
+        t('contextMenu.confirmDeleteTrack', {
+          title,
+          path: filePath,
+          defaultValue: `Delete "${title}" from its folder?\n\n${filePath}`
+        })
+      )
+      if (!ok) return
+
+      const deletingCurrentTrack = playlistRef.current[currentIndexRef.current]?.path === filePath
+      if (deletingCurrentTrack) {
+        try {
+          if (window.api?.stopAudio) await window.api.stopAudio()
+        } catch {
+          /* best effort release before deleting */
+        }
+        try {
+          if (audioRef.current) {
+            audioRef.current.pause()
+            audioRef.current.removeAttribute('src')
+            audioRef.current.src = ''
+            audioRef.current.load()
+          }
+        } catch {
+          /* best effort release before deleting */
+        }
+      }
+
+      const result = await window.api.deleteAudioFileHandler(filePath)
+      if (!result?.ok) {
+        alert(t('contextMenu.actionFailed', { detail: result?.error || 'delete_failed' }))
+        return
+      }
+
+      applyLibraryFolderDelta({
+        renamed: [],
+        removedPaths: [result.path || filePath],
+        added: []
+      })
+    },
+    [applyLibraryFolderDelta, t]
   )
 
   const transportIsPlaying = useMemo(() => {
@@ -6971,7 +7401,7 @@ export default function App() {
     const span = lastTime - firstTime
     if (!Number.isFinite(span) || span <= 0.2) return false
 
-    // parsePlainLyrics 产生的“每行固定 3.5 秒”伪时间轴，不适合逐字高亮
+    // parsePlainLyrics 濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴欏灪閸嬨倝鏌曟繛褍鎳庨弳妤呮⒑缁嬭法鐏遍柛瀣☉椤斿繐鈹戦崶銉ょ盎闂佸搫鍟ú銈堫暱婵＄偑鍊曠换鎺楀窗閺嵮屾綎缂備焦蓱婵挳鏌涢敂璇插箺闁煎灝娲娲川婵犲啰鍙嗛梺娲诲墮閵堟悂宕洪埀顒併亜閹哄秷鍏屾繛鍫滃嵆閺屾盯濡烽幋婵囧櫣濠殿噯闄勬穱濠囨倷椤忓嫧鍋撻弽顐ｆ殰濠电姴娲﹂崵鍕煕椤愶絾绀冮柛搴㈩殜閹鏁愭惔鈩冪亶闂佺粯鎸鹃崰鏍蓟閵娾晛绫嶉柛銉戝倹鐫忕紓浣哄亾閸庡啿顭囬敓鐘茶摕闁绘梻鈷堥弫濠囨煢濡警妯堟俊顐㈡缁绘稓鈧數顭堥鎾剁磼閻樿櫕宕屾鐐诧躬閹瑩宕崟搴涘妿閹插摜鈧綆鍠栫壕鑽ゆ喐閺傛娼?3.5 缂傚倸鍊搁崐鎼佸磹閹间礁纾瑰瀣捣閻棗銆掑锝呬壕闁芥ɑ绻堥弻鈩冨緞鐎ｉ潧鍔岄梺鍝ュ枎閹冲酣鍩為幋锔藉亹閻庡湱濮撮ˉ婵嬫⒑缂佹ê绗掗柣蹇斿哺婵＄敻宕熼姘鳖唺閻庡箍鍎遍悧鍡涘储閿涘嫮纾藉ù锝呮惈鏍￠梺鎼炲妼濞尖€愁嚕鐠囨祴妲堟慨妤€妫欓崓闈涱渻閵堝棗绗掓い锔垮嵆閸┿垽宕奸妷锕€鈧灚绻涢崼婵堜虎婵炲懏锕㈤弻娑㈡晲韫囨洖鍩岄梺浼欑秮閺€杈╃紦閻ｅ瞼鐭欓柛顭戝枛缁侇噣姊绘担铏瑰笡婵炲弶鐗犲畷鎰節濮橆剝袝閻熸粎澧楃敮妤呭煕閹达附鐓曟繝闈涙椤忓瓨淇婇崣澶嬨仢闁哄本绋撻埀顒婄秵閸撴瑩鍩㈤崼鐕佹闁绘劕鐡ㄥ畷灞俱亜閵忊剝顥堢€规洖宕～婊堝幢濡偐鈼ユ繝鐢靛Х閺佸憡绻涢埀顒佺箾娴ｅ啿鍘惧ú顏勎╅柍杞拌兌閸樻椽姊洪崫鍕殭闁稿﹦鏁诲畷鎴﹀箻閼姐倕绁﹂梺鍓茬厛閸犳牗鎱ㄦ惔鈽嗘富闁靛牆绻愰惁婊堟煕鐎ｎ亷宸ラ柣锝囧厴楠炲鏁冮埀顒傜不婵犳碍鍋ｉ柛銉簻閻ㄦ椽鏌ㄥ☉娆戠煀闁宠鍨块、娆撳棘閵堝嫮杩旈梻浣告啞閿氶柕鍫熸倐瀹曟椽鍩€椤掍降浜滈柟瀵稿仜閸斻倝鏌嶈閸撴氨鎹㈤崒鐑囩稏闊洦鎷嬪ú顏嶆晜鐎广儱妫欏▍鍥⒒娴ｇ懓顕滅紒璇插€块獮濠冩償椤帞绋忛悗鍏夊亾闁告洦鍏橀幏娲⒑缂佹ê鐏嶉柡鍛洴閿濈偤骞掑Δ浣哄幈闂佸搫娲ㄩ崑鐔哥濞戙垺鐓熼柨婵嗙墱閸ゆ瑩鏌嶇憴鍕伌闁糕斂鍎靛畷鍗炍旈崘褍瀵查梻鍌欒兌椤㈠﹤鈻嶉弴銏犵闁搞儺鍓欑粻?
     if (positiveGapCount >= 4 && nearPlainGapCount / positiveGapCount > 0.75) return false
 
     if (
@@ -7045,13 +7475,16 @@ export default function App() {
 
   const lyricsSourceUi = useMemo(() => {
     const labelMap = {
-      idle: t('lyricsDrawer.sourceStateIdle', '—'),
+      idle: t('lyricsDrawer.sourceStateIdle', '-'),
       loading: t('lyricsDrawer.sourceStateLoading', 'Loading'),
       none: t('lyricsDrawer.sourceStateNone', 'No lyrics'),
       local: t('lyricsDrawer.sourceStateLocal', 'Local file'),
       embedded: t('lyricsDrawer.sourceStateEmbedded', 'Embedded tags'),
       lrclib: t('lyricsDrawer.sourceStateLrclib', 'LRCLIB'),
       netease: t('lyricsDrawer.sourceStateNetease', 'NetEase'),
+      qq: t('lyricsDrawer.sourceStateQq', 'QQ Music'),
+      kugou: t('lyricsDrawer.sourceStateKugou', 'Kugou'),
+      kuwo: t('lyricsDrawer.sourceStateKuwo', 'Kuwo'),
       manual: t('lyricsDrawer.sourceStateManual', 'Manual'),
       link: t('lyricsDrawer.sourceStateLink', 'Song link'),
       cache: t('lyricsDrawer.sourceStateCache', 'Cache')
@@ -7065,12 +7498,12 @@ export default function App() {
 
     let text = labelMap[lyricsSourceStatus?.kind] || labelMap.idle
     if (lyricsSourceStatus?.kind === 'cache' && detail) {
-      text = `${labelMap.cache} · ${detail}${origin && origin !== detail ? ` · ${origin}` : ''}`
+      text = `${labelMap.cache} -${detail}${origin && origin !== detail ? ` -${origin}` : ''}`
     } else if (
       (lyricsSourceStatus?.kind === 'manual' || lyricsSourceStatus?.kind === 'link') &&
       origin
     ) {
-      text = `${text} · ${origin}`
+      text = `${text} -${origin}`
     }
 
     return text
@@ -7157,6 +7590,30 @@ export default function App() {
     })
   }, [parsedPlaylist, deferredSearchQuery])
 
+  useEffect(() => {
+    const foundCovers = {}
+    for (const track of parsedPlaylist) {
+      const albumName = track?.info?.album || 'Singles'
+      const cover = track?.info?.cover
+      if (albumName && cover && !foundCovers[albumName]) {
+        foundCovers[albumName] = cover
+      }
+    }
+    if (Object.keys(foundCovers).length === 0) return
+
+    setAlbumCoverMap((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const [albumName, cover] of Object.entries(foundCovers)) {
+        if (!next[albumName] && cover) {
+          next[albumName] = cover
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [parsedPlaylist])
+
   const albumArtistByName = useMemo(() => {
     const m = {}
     for (const track of queryFilteredPlaylist) {
@@ -7191,7 +7648,11 @@ export default function App() {
       artist:
         tracks.find((t) => t.info.artist && t.info.artist !== 'Unknown Artist')?.info.artist ||
         'Unknown Artist',
-      cover: tracks.find((t) => t.info.cover)?.info.cover || null
+      cover:
+        albumCoverMap[name] ||
+        trackMetaMap[tracks.find((t) => trackMetaMap[t.path]?.cover)?.path]?.cover ||
+        tracks.find((t) => t.info.cover)?.info.cover ||
+        null
     }))
 
     const getAlbumAddedAt = (album) =>
@@ -7215,12 +7676,17 @@ export default function App() {
       buckets.sort((a, b) => a.name.localeCompare(b.name))
     }
 
+    buckets.sort((a, b) => {
+      if (!!a.cover === !!b.cover) return 0
+      return a.cover ? -1 : 1
+    })
+
     return buckets
-  }, [queryFilteredPlaylist, albumSortMode])
+  }, [queryFilteredPlaylist, albumSortMode, albumCoverMap, trackMetaMap])
 
   const albumGroups = listMode === 'album' ? albumBuckets : []
 
-  /* Folder grouping – extract parent folder from track path */
+  /* Folder grouping -extract parent folder from track path */
   const folderBuckets = useMemo(() => {
     const groups = queryFilteredPlaylist.reduce((acc, track) => {
       const parts = (track.path || '').replace(/\\/g, '/').split('/')
@@ -7258,14 +7724,59 @@ export default function App() {
 
   const folderGroups = listMode === 'folders' ? folderBuckets : []
 
+  const artistBuckets = useMemo(() => {
+    const unknownArtist = t('artists.unknown', 'Unknown Artist')
+    const groups = queryFilteredPlaylist.reduce((acc, track) => {
+      const key = track.info.artist || unknownArtist
+      if (!acc.has(key)) acc.set(key, { name: key, tracks: [] })
+      acc.get(key).tracks.push(track)
+      return acc
+    }, new Map())
+
+    return Array.from(groups.values()).sort(
+      (a, b) => b.tracks.length - a.tracks.length || a.name.localeCompare(b.name)
+    )
+  }, [queryFilteredPlaylist, t])
+
+  const artistNamesSet = useMemo(() => {
+    const s = new Set()
+    for (const b of artistBuckets) s.add(b.name)
+    return s
+  }, [artistBuckets])
+
+  const artistGroups = listMode === 'artists' ? artistBuckets : []
+
+  const importedFolderItems = useMemo(() => {
+    const seen = new Set()
+    return importedFolders
+      .map(normalizeImportedFolderPath)
+      .filter(Boolean)
+      .filter((folderPath) => {
+        const key = folderPath.toLowerCase()
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      .map((folderPath) => ({
+        path: folderPath,
+        name: getPathBasename(folderPath) || folderPath,
+        trackCount: playlist.filter((track) => isTrackInsideImportedFolders(track?.path, [folderPath]))
+          .length
+      }))
+  }, [importedFolders, playlist])
+
   const filteredPlaylist = useMemo(() => {
     let result = queryFilteredPlaylist
     if (listMode === 'folders' && selectedFolder !== 'all') {
       result = queryFilteredPlaylist.filter((track) => {
         const parts = (track.path || '').replace(/\\/g, '/').split('/')
         const fp = parts.length > 1 ? parts.slice(0, -1).join('/') : '/'
-        return fp === selectedFolder
+        return fp === selectedFolder || isTrackInsideImportedFolders(track.path, [selectedFolder])
       })
+    } else if (listMode === 'artists' && selectedArtist !== 'all') {
+      result = queryFilteredPlaylist
+        .filter((track) => (track.info.artist || t('artists.unknown', 'Unknown Artist')) === selectedArtist)
+        .sort(compareTrackOrder)
     } else if (selectedAlbum !== 'all') {
       result = queryFilteredPlaylist
         .filter((track) => track.info.album === selectedAlbum)
@@ -7275,6 +7786,7 @@ export default function App() {
     if (
       listMode === 'songs' ||
       (listMode === 'folders' && selectedFolder !== 'all') ||
+      (listMode === 'artists' && selectedArtist !== 'all') ||
       (listMode === 'album' && selectedAlbum !== 'all')
     ) {
       const mode = songSortMode
@@ -7301,17 +7813,25 @@ export default function App() {
       }
     }
     return result
-  }, [queryFilteredPlaylist, selectedAlbum, selectedFolder, listMode, songSortMode])
+  }, [queryFilteredPlaylist, selectedAlbum, selectedFolder, selectedArtist, listMode, songSortMode, t])
 
   useEffect(() => {
     if (selectedAlbum === 'all') return
+    if (listMode === 'album') return
     if (!albumNamesSet.has(selectedAlbum)) setSelectedAlbum('all')
-  }, [albumNamesSet, selectedAlbum])
+  }, [albumNamesSet, listMode, selectedAlbum])
 
   useEffect(() => {
     if (selectedFolder === 'all') return
+    if (importedFolderItems.some((folder) => folder.path === selectedFolder)) return
     if (!folderNamesSet.has(selectedFolder)) setSelectedFolder('all')
-  }, [folderNamesSet, selectedFolder])
+  }, [folderNamesSet, importedFolderItems, selectedFolder])
+
+  useEffect(() => {
+    if (selectedArtist === 'all') return
+    if (listMode === 'artists') return
+    if (!artistNamesSet.has(selectedArtist)) setSelectedArtist('all')
+  }, [artistNamesSet, listMode, selectedArtist])
 
   const selectedUserPlaylist = useMemo(
     () => userPlaylists.find((p) => p.id === selectedUserPlaylistId) || null,
@@ -7550,7 +8070,7 @@ export default function App() {
         smartCollectionTracks.map((track) => track.path)
       )
     }
-    // 专辑视图：上下首在专辑内导航
+    // 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈閸ㄥ倿鏌涢锝嗙缂佺姵婢橀埞鎴︽偐鐎圭姴顥濈紓浣哄У瑜板啴婀侀梺鎸庣箓濞层倝宕濈€ｎ偁浜滈柟閭﹀灠琚氶梺闈涙搐鐎氫即鐛崶顒€鐓涘ù锝嗗絻娴滈箖鏌″搴″箹缂佹劖顨婇弻娑㈠焺閸愵亖濮囬梺缁樻尰濞茬喖寮诲澶婄厸濞达絽鎲￠悘鎾斥攽閻愯尙澧涙繛鍙夌矌濡叉劙骞掑Δ鈧壕鍏兼叏濡搫鑸归柍顏嗘暬濮婃椽宕崟顕呮蕉闂佸憡鏌ㄩ惌鍌炲春閵夛箑绶炲┑鐐靛亾閻庡姊洪悷閭﹀殶濠殿喚顥愰妵鎰償閿濆洨锛濋梺绋挎湰閻熝囧礉瀹ュ棎浜滈柕濞垮劜閸ゅ洨鈧娲橀崝娆忕暦閻戠瓔鏁囬柣妯兼暩閸橆垰鈹戦悩顔肩伇婵炲绋掑鍕炊椤掆偓绾惧鏌熼崜褏甯涢柡鍛叀楠炴牜鍒掗悷鏉库拤闂佺粯绻嶉崰鏍煘閹达附鍊烽柤纰卞墯閹茬厧鈹戦悙璺虹毢闁哥姵鐗曢锝囨嫚濞村顫嶉梺闈涚箚閸撴繂鈻嶉崱娑欌拺闁告稑锕︾粻鎾绘倵濮樼厧澧撮柍銉︾墵瀹曞崬鈻庨幋鐙呯闯濠电偠鎻紞鈧い鏇熺墪閳绘捇寮撮姀锛勫幍濠殿喗绻傞惌鍫ュ吹濞嗘劑浜滄い鎾跺仦缁岃法绱掗悩宕団槈闁宠棄顦灒缁炬澘宕幃鍫濃攽閻樺灚鏆╁┑鐐╁亾濠电偘鍖犻崗鐐☉閳诲酣骞橀搹顐ョ发闂備線娼чˇ顐﹀疾濠婂牊鍋傞柣鏃傚帶缁犲綊鎮楀☉娆樼劷缂佺姵顭囩槐鎺撴媴缁嬫寧些濡炪値鍘煎锟犲箖閻戣棄绠ユい鏂跨毞閸欐椽鏌?
     if (listMode === 'album' && selectedAlbum && selectedAlbum !== 'all') {
       const albumBucket = albumBuckets.find((a) => a.name === selectedAlbum)
       if (albumBucket?.tracks?.length > 0) {
@@ -7670,6 +8190,7 @@ export default function App() {
       (listMode !== 'songs' &&
         listMode !== 'album' &&
         listMode !== 'folders' &&
+        listMode !== 'artists' &&
         !(listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId)))
     ) {
       return tracksForSidebarList
@@ -8027,9 +8548,17 @@ export default function App() {
     if (listMode === 'songs') return true
     if (listMode === 'album' && selectedAlbum !== 'all') return true
     if (listMode === 'folders' && selectedFolder !== 'all') return true
+    if (listMode === 'artists' && selectedArtist !== 'all') return true
     if (listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId)) return true
     return false
-  }, [listMode, selectedAlbum, selectedFolder, selectedUserPlaylistId, selectedSmartCollectionId])
+  }, [
+    listMode,
+    selectedAlbum,
+    selectedFolder,
+    selectedArtist,
+    selectedUserPlaylistId,
+    selectedSmartCollectionId
+  ])
 
   const metadataPrefetchTracks = useMemo(() => {
     const byPath = new Map()
@@ -8045,15 +8574,31 @@ export default function App() {
     }
 
     if (listMode === 'album' && selectedAlbum === 'all') {
-      for (const album of metadataPrefetchAlbumGroups) {
-        const coverTrack =
-          album.tracks.find((track) => {
-            const entry = trackMetaMap[track.path]
-            if (entry?.cover) return false
-            if (entry?.coverChecked !== true) return true
-            return !albumCoverProbePathsRef.current.has(track.path)
-          }) || album.tracks[0]
-        pushTrack(coverTrack)
+      const albumsNeedingCover = metadataPrefetchAlbumGroups.filter((album) => {
+        if (album.cover) return false
+        return album.tracks.some((track) => !trackMetaMap[track.path]?.cover)
+      })
+      const longestAlbumTrackCount = Math.max(
+        0,
+        ...albumsNeedingCover.map((album) => album.tracks.length)
+      )
+
+      for (
+        let trackOffset = 0;
+        trackOffset < longestAlbumTrackCount && byPath.size < ALBUM_METADATA_PREFETCH_LIMIT;
+        trackOffset += 1
+      ) {
+        for (const album of albumsNeedingCover) {
+          const track = album.tracks[trackOffset]
+          if (!track?.path) continue
+          const entry = trackMetaMap[track.path]
+          if (entry?.cover) continue
+          if (entry?.coverChecked === true && albumCoverProbePathsRef.current.has(track.path)) {
+            continue
+          }
+          pushTrack(track)
+          if (byPath.size >= ALBUM_METADATA_PREFETCH_LIMIT) break
+        }
       }
     }
 
@@ -8146,11 +8691,16 @@ export default function App() {
       cover: null,
       duration: null,
       coverChecked: true,
+      bpmChecked: true,
+      bpmMeasured: true,
+      mqaChecked: true,
       codec: null,
       bitrateKbps: null,
       sampleRateHz: null,
       bitDepth: null,
-      channels: null
+      channels: null,
+      isMqa: false,
+      bpm: null
     })
 
     const loadMetadata = async () => {
@@ -8158,6 +8708,28 @@ export default function App() {
       const cached = await readTrackMetaCache(pending.map((track) => track.path))
       for (const [path, entry] of Object.entries(cached)) {
         loaded[path] = entry
+      }
+      const cachedAlbumCovers = {}
+      for (const track of pending) {
+        const cachedEntry = cached[track.path]
+        if (!cachedEntry?.cover) continue
+        const albumName = cachedEntry.album || track?.info?.album || 'Singles'
+        if (albumName && !cachedAlbumCovers[albumName]) {
+          cachedAlbumCovers[albumName] = cachedEntry.cover
+        }
+      }
+      if (!cancelled && Object.keys(cachedAlbumCovers).length > 0) {
+        setAlbumCoverMap((prev) => {
+          let changed = false
+          const next = { ...prev }
+          for (const [albumName, cover] of Object.entries(cachedAlbumCovers)) {
+            if (!next[albumName] && cover) {
+              next[albumName] = cover
+              changed = true
+            }
+          }
+          return changed ? next : prev
+        })
       }
       if (!cancelled && Object.keys(cached).length > 0) {
         setTrackMetaMap((prev) => {
@@ -8167,8 +8739,11 @@ export default function App() {
       }
 
       const uncachedPending = pending.filter((track) => {
-        if (!cached[track.path]) return true
-        return !cached[track.path]?.cover && !albumCoverProbePathsRef.current.has(track.path)
+        const cachedMeta = cached[track.path]
+        if (!cachedMeta) return true
+        if (!cachedMeta.bpmChecked) return true
+        if (!cachedMeta.mqaChecked) return true
+        return !cachedMeta.cover && !albumCoverProbePathsRef.current.has(track.path)
       })
       if (cancelled) return
       const parseBatchSize =
@@ -8188,21 +8763,27 @@ export default function App() {
             if (data?.success) {
               const common = data.common || {}
               const technical = data.technical || {}
+              const cachedMeta = cached[track.path] || {}
               loaded[track.path] = {
-                title: common.title || null,
-                artist: common.artist || null,
-                album: common.album || null,
-                albumArtist: common.albumArtist || null,
+                title: common.title || cachedMeta.title || null,
+                artist: common.artist || cachedMeta.artist || null,
+                album: common.album || cachedMeta.album || null,
+                albumArtist: common.albumArtist || cachedMeta.albumArtist || null,
                 trackNo: common.trackNo ?? null,
                 discNo: common.discNo ?? null,
-                cover: common.cover || null,
-                duration: technical.duration || null,
+                cover: common.cover || cachedMeta.cover || null,
+                duration: technical.duration || cachedMeta.duration || null,
                 coverChecked: true,
-                codec: technical.codec || null,
-                bitrateKbps: technical.bitrate ? Math.round(technical.bitrate / 1000) : null,
-                sampleRateHz: technical.sampleRate || null,
-                bitDepth: technical.bitDepth || null,
-                channels: technical.channels || null
+                bpmChecked: true,
+                bpmMeasured: cachedMeta.bpmMeasured === true,
+                mqaChecked: true,
+                codec: technical.codec || cachedMeta.codec || null,
+                bitrateKbps: technical.bitrate ? Math.round(technical.bitrate / 1000) : cachedMeta.bitrateKbps || null,
+                sampleRateHz: technical.sampleRate || cachedMeta.sampleRateHz || null,
+                bitDepth: technical.bitDepth || cachedMeta.bitDepth || null,
+                channels: technical.channels || cachedMeta.channels || null,
+                isMqa: technical.isMqa === true || cachedMeta.isMqa === true,
+                bpm: cachedMeta.bpmMeasured ? cachedMeta.bpm || null : null
               }
             } else {
               loaded[track.path] = buildEmptyMetaEntry()
@@ -8224,6 +8805,29 @@ export default function App() {
       }
 
       if (!cancelled && Object.keys(loaded).length > 0) {
+        const parsedAlbumCovers = {}
+        for (const track of parseQueue) {
+          const loadedEntry = loaded[track.path]
+          if (!loadedEntry?.cover) continue
+          const albumName = loadedEntry.album || track?.info?.album || 'Singles'
+          if (albumName && !parsedAlbumCovers[albumName]) {
+            parsedAlbumCovers[albumName] = loadedEntry.cover
+          }
+        }
+        if (Object.keys(parsedAlbumCovers).length > 0) {
+          setAlbumCoverMap((prev) => {
+            let changed = false
+            const next = { ...prev }
+            for (const [albumName, cover] of Object.entries(parsedAlbumCovers)) {
+              if (!next[albumName] && cover) {
+                next[albumName] = cover
+                changed = true
+              }
+            }
+            return changed ? next : prev
+          })
+        }
+
         setTrackMetaMap((prev) => {
           const merged = { ...prev, ...loaded }
           return trimTrackMetaCoverEntries(merged, metadataCoverKeepPathSet)
@@ -8248,6 +8852,110 @@ export default function App() {
     listMode,
     metadataCoverKeepPathSet,
     metadataPrefetchTracks,
+    selectedAlbum,
+    trackMetaMap
+  ])
+
+  useEffect(() => {
+    if (listMode !== 'album' || selectedAlbum !== 'all') return undefined
+    if (!metadataPrefetchAlbumGroups.length) return undefined
+
+    const candidates = []
+    for (const album of metadataPrefetchAlbumGroups) {
+      const albumName = String(album?.name || '').trim()
+      if (!albumName || album?.cover || albumCoverMap[albumName]) continue
+
+      const representativeTrack =
+        album.tracks.find((track) => trackMetaMap[track.path]?.coverChecked === true) ||
+        album.tracks.find((track) => albumCoverProbePathsRef.current.has(track.path)) ||
+        null
+      if (!representativeTrack?.path) continue
+
+      const artist =
+        album.artist ||
+        albumArtistByName[albumName] ||
+        representativeTrack.info?.artist ||
+        trackMetaMap[representativeTrack.path]?.artist ||
+        ''
+      const key = `${normalizeCoverLookupText(albumName)}::${normalizeCoverLookupText(artist)}`
+      if (!key || albumCloudCoverAttemptedRef.current.has(key)) continue
+      if (albumCloudCoverPendingRef.current.has(key)) continue
+
+      candidates.push({ albumName, artist, key, track: representativeTrack })
+      if (candidates.length >= ALBUM_CLOUD_COVER_PREFETCH_LIMIT) break
+    }
+
+    if (!candidates.length) return undefined
+    let cancelled = false
+    let nextIndex = 0
+
+    const applyCloudAlbumCover = (candidate, cover) => {
+      if (!cover) return
+      setAlbumCoverMap((prev) => {
+        if (prev[candidate.albumName]) return prev
+        return { ...prev, [candidate.albumName]: cover }
+      })
+
+      const currentEntry = trackMetaMapRef.current?.[candidate.track.path] || {}
+      const info = parseTrackInfo(candidate.track, currentEntry)
+      const cacheEntry = {
+        ...currentEntry,
+        title: currentEntry.title || info.title || null,
+        artist: currentEntry.artist || info.artist || candidate.artist || null,
+        album: currentEntry.album || candidate.albumName,
+        albumArtist: currentEntry.albumArtist || null,
+        trackNo: currentEntry.trackNo ?? info.trackNo ?? null,
+        discNo: currentEntry.discNo ?? info.discNo ?? null,
+        duration: currentEntry.duration || info.duration || null,
+        cover,
+        coverChecked: true
+      }
+
+      setTrackMetaMap((prev) => {
+        const existing = prev[candidate.track.path] || {}
+        if (existing.cover) return prev
+        return {
+          ...prev,
+          [candidate.track.path]: {
+            ...existing,
+            ...cacheEntry
+          }
+        }
+      })
+      writeTrackMetaCache({ [candidate.track.path]: cacheEntry })
+    }
+
+    const runNext = async () => {
+      while (!cancelled) {
+        const candidate = candidates[nextIndex]
+        nextIndex += 1
+        if (!candidate) return
+
+        albumCloudCoverAttemptedRef.current.add(candidate.key)
+        albumCloudCoverPendingRef.current.add(candidate.key)
+        try {
+          const cover = await fetchCloudAlbumCover(candidate.albumName, candidate.artist)
+          applyCloudAlbumCover(candidate, cover)
+        } finally {
+          albumCloudCoverPendingRef.current.delete(candidate.key)
+        }
+      }
+    }
+
+    Promise.all(
+      Array.from({ length: Math.min(ALBUM_CLOUD_COVER_WORKERS, candidates.length) }, () =>
+        runNext()
+      )
+    ).catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    albumArtistByName,
+    albumCoverMap,
+    listMode,
+    metadataPrefetchAlbumGroups,
     selectedAlbum,
     trackMetaMap
   ])
@@ -8353,6 +9061,13 @@ export default function App() {
           setSelectedSmartCollectionId(null)
           setPlaylistLibraryMoreOpen(false)
         }
+        if (mode !== 'artists') {
+          setSelectedArtist('all')
+        }
+        if (mode === 'artists') {
+          setSelectedAlbum('all')
+          setSelectedFolder('all')
+        }
         forceCloseAddToPlaylistMenu()
       })
     },
@@ -8368,14 +9083,24 @@ export default function App() {
     (album) => {
       albumOverviewScrollTopRef.current = sidebarPlaylistRef.current?.scrollTop || 0
       pendingAlbumOverviewRestoreRef.current = false
-      if (sidebarPlaylistRef.current) sidebarPlaylistRef.current.scrollTop = 0
-      setSidebarScrollTop(0)
-      startTransition(() => {
-        setSelectedAlbum(album.name)
-        handleListMode('album')
-      })
+      pendingAlbumDetailScrollResetRef.current = true
+      forceCloseTrackContextMenu()
+      forceCloseCoverContextMenu()
+      forceCloseGroupContextMenu()
+      forceCloseAddToPlaylistMenu()
+      setSelectedUserPlaylistId(null)
+      setSelectedSmartCollectionId(null)
+      setPlaylistLibraryMoreOpen(false)
+      setSelectedArtist('all')
+      setSelectedAlbum(album.name)
+      setListMode('album')
     },
-    [handleListMode]
+    [
+      forceCloseTrackContextMenu,
+      forceCloseCoverContextMenu,
+      forceCloseGroupContextMenu,
+      forceCloseAddToPlaylistMenu
+    ]
   )
 
   const handleBackToAlbumOverview = useCallback(() => {
@@ -8383,15 +9108,91 @@ export default function App() {
     setSelectedAlbum('all')
   }, [])
 
+  useLayoutEffect(() => {
+    if (
+      !pendingAlbumDetailScrollResetRef.current ||
+      listMode !== 'album' ||
+      selectedAlbum === 'all'
+    ) {
+      return
+    }
+
+    const playlistElement = sidebarPlaylistRef.current
+    if (playlistElement) {
+      playlistElement.scrollTop = 0
+    }
+    setSidebarScrollTop(0)
+    pendingAlbumDetailScrollResetRef.current = false
+  }, [listMode, selectedAlbum])
+
   const handlePickFolderFromSidebar = useCallback((folder) => {
     setSelectedFolder(folder.folderPath)
+    setSelectedAlbum('all')
+    setSelectedArtist('all')
     setSelectedSmartCollectionId(null)
     setListMode('folders')
   }, [])
 
+  const handlePickArtistFromSidebar = useCallback((artist) => {
+    if (!artist?.name) return
+    setSelectedArtist(artist.name)
+    setSelectedAlbum('all')
+    setSelectedFolder('all')
+    setSelectedUserPlaylistId(null)
+    setSelectedSmartCollectionId(null)
+    setPlaylistLibraryMoreOpen(false)
+    setListMode('artists')
+  }, [])
+
+  const handleBackToArtistOverview = useCallback(() => {
+    setSelectedArtist('all')
+  }, [])
+
+  const handleOpenImportedFolder = useCallback((folder) => {
+    if (!folder?.path) return
+    setSelectedFolder(folder.path)
+    setSelectedAlbum('all')
+    setSelectedArtist('all')
+    setSelectedUserPlaylistId(null)
+    setSelectedSmartCollectionId(null)
+    setPlaylistLibraryMoreOpen(false)
+    setListMode('folders')
+  }, [])
+
+  const handleRemoveImportedFolder = useCallback(
+    (folder) => {
+      const folderPath = normalizeImportedFolderPath(folder?.path)
+      if (!folderPath) return
+      const folderName = getPathBasename(folderPath) || folderPath
+      const ok = window.confirm(
+        t('folders.confirmRemoveImportedFolder', {
+          name: folderName,
+          defaultValue: `Remove imported folder "${folderName}" from ECHO?`
+        })
+      )
+      if (!ok) return
+
+      const removedPaths = playlistRef.current
+        .filter((track) => isTrackInsideImportedFolders(track?.path, [folderPath]))
+        .map((track) => track.path)
+
+      setImportedFolders((prev) =>
+        prev.filter(
+          (item) => normalizeImportedFolderPath(item).toLowerCase() !== folderPath.toLowerCase()
+        )
+      )
+      if (selectedFolder === folderPath) setSelectedFolder('all')
+      if (removedPaths.length > 0) {
+        applyLibraryFolderDelta({ renamed: [], removedPaths, added: [] })
+      }
+    },
+    [applyLibraryFolderDelta, selectedFolder, t]
+  )
+
   const openSmartCollection = useCallback((collectionId) => {
     setSelectedUserPlaylistId(null)
     setSelectedSmartCollectionId(collectionId)
+    setSelectedArtist('all')
     setListMode('playlists')
   }, [])
 
@@ -9189,7 +9990,7 @@ export default function App() {
     )
   }
 
-  // Discord Rich Presence（单一同步源：enable + show 均开才上报）
+  // Discord Rich Presence闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔告綇妤ｅ啯顎嶉梺绋款儏椤戝寮诲☉銏犵労闁告劗鍋撻悾濂告⒑閸濆嫭锛旂紒鐘虫崌瀵鏁愭径濠冾棟闂佸湱顭堢€涒晠宕伴幇鐗堚拺鐎规洖娲ㄧ敮娑欎繆椤愩垹鏆ｇ€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷鐗堟償閵婏箑浠奸梺缁樺灱濡嫬鏁柣鐔哥矊閼活垶鍩㈡禒瀣垫晜闁糕剝鐟ч敍婵囩箾鏉堝墽绉繛浣冲洦鍊堕柍杞拌閺€浠嬫煃閵夈儱鏆遍柤绋跨秺閺屽秶鎲撮崟顐や紝闂佽鍠掗弲娑㈠煝鎼淬倗鐤€闁瑰灝鍟╅幃锝呪攽閻樻剚鍟忛柛鐕佸亰瀹曘劑顢涘鎰簥闂備礁鎼ˇ顖炴偋閸愵喖鐤炬繝濠傜墛閸嬬喓鐥幆褑鐦絙le + show 闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ穿缂嶆牠鎮楅敐搴℃灈缂佲偓閸愵喗鐓冮柛婵嗗閳ь剙缍婂畷鎰槹鎼达絿锛濋梺绋挎湰閻燂妇绮婇弶娆炬富閻庢稒蓱閸婃劗鈧娲栫紞濠傜暦缁嬭鏃堝礃閵娧佸亰闂佽楠哥粻宥夊磿闁秴绠悗锝庡枛鐟欙箓鎮楅敐搴℃灍闁绘挻娲熼弻锟犲炊閵夈儱顬堝Δ鐘靛仦閿曘垽寮婚悢濂夊晠妞ゆ柨顭烽崑妤€鈹戦纭烽練婵炲拑绲介埥澶愭偨缁嬪灝绐涘銈嗙墬濮樸劍鏅堕鐐粹拻濞达絼璀﹂悞鐐叏濮楀牏鐣遍柣锝囧厴濡啫霉?
   useEffect(() => {
     if (!window.api?.setDiscordActivity) return
 
@@ -9281,16 +10082,16 @@ export default function App() {
     [showLyrics, mvId, config.mvAsBackground, config.mvHideImmersiveChrome]
   )
 
-  /** Full-bleed MV or custom wallpaper behind lyrics — need high-contrast chrome + lyric text */
+  /** Full-bleed MV or custom wallpaper behind lyrics -need high-contrast chrome + lyric text */
   const brightLyricsBackdrop = useMemo(
-    () => Boolean(showLyrics) && ((config.mvAsBackground && mvId) || Boolean(config.customBgPath)),
-    [showLyrics, config.mvAsBackground, mvId, config.customBgPath]
+    () => Boolean(showLyrics) && Boolean(config.mvAsBackground && mvId),
+    [showLyrics, config.mvAsBackground, mvId]
   )
   const lyricsOnlyInstrumental =
     lyrics.length > 0 &&
     lyrics
       .filter((line) => line.text.trim())
-      .every((line) => line.text.match(/纯音乐|instrumental|.*欣赏.*|.*enjoy.*/i))
+      .every((line) => /instrumental|inst\.?|karaoke|off\s*vocal|enjoy/i.test(line.text))
   const isLyricsListHidden =
     config.lyricsHidden || isCurrentTrackLyricsTemporarilyHidden || lyricsOnlyInstrumental
 
@@ -9306,7 +10107,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [hideImmersiveMvChrome])
 
-  // Visualizer Animation — subsampled bars + cached gradient (see MiniWaveform pattern)
+  // Visualizer Animation -subsampled bars + cached gradient (see MiniWaveform pattern)
   useEffect(() => {
     if (!config.showVisualizer || !isPlaying || view === 'settings') {
       if (animationRef.current) cancelAnimationFrame(animationRef.current)
@@ -9480,7 +10281,7 @@ export default function App() {
               '*'
             )
 
-            // 某些打包环境下 onError 不一定会被稳定上报；加一层超时兜底（提示登录 + 可选 B 站降级）。
+            // 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偞鐗犻、鏇㈡晝閳ь剛鈧艾顦伴妵鍕箳閹存繍浠肩紓浣插亾濠㈣埖鍔栭悡娆撴煟閹寸倖鎴λ夐崱妞绘斀妞ゆ梹瀵ч悵顏嗙磼缂佹鈽夋い鏂跨箻椤㈡瑩鎳￠妶鍥ㄦ櫒缂傚倸鍊烽懗鑸垫叏娴兼潙纾块柣銏㈩焾閽冪喖鏌ｉ弮鍌氬付缂佺姵姘ㄩ幉绋款吋婢跺﹥杈堥梻渚囧墮缁夌敻鎮￠悢鍏肩叆闁哄洦顨呮禍楣冩⒑缂佹澧柕鍫㈩焾椤曪絾绻濆顓熸珳闂佸憡绮堥懗鍫曞矗閸℃稒鐓欓柤鍦瑜把呯磼鏉堛劍绀冪紒鍌涘浮閸┾剝绗熼崶銊ョ槣闂備線娼ч悧鍡欐崲閹烘梻鐭堥柣鎴ｅГ閻撴洟鏌￠崒婵囩《閼叉牜绱?onError 濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈閸ㄥ倿鏌涢锝嗙缂佺姳鍗抽弻娑樷攽閸曨偄濮㈤梺娲诲幗閹搁箖鍩€椤掑喚娼愭繛鍙夌墪鐓ら柕濞炬櫅绾偓濠殿喗顭堥崺鏍磹閻㈠憡鐓熼柕蹇嬪灪閺嗏晠鏌曢崱妤嬭含闁哄本绋撻埀顒婄秵閸嬪懐浜搁悽鍛婄厵闁告瑥顦扮亸锔锯偓瑙勬礈閸犳牠銆佸鈧幃鈺呭箵閹烘梻校缂傚倸鍊搁崐鎼佸磹瀹勬噴褰掑炊閵婏絼绮撻梺鍛婄☉閿曪箓鎮甸崼鏇熺厱闁斥晛鍟伴埥澶岀磼閻樺磭澧柕鍥у瀵潙螖閳ь剚绂嶉幆褜娓婚柕鍫濆暙閻忣亝绻涢懠顒€鏋戝ǎ鍥э攻閹峰懘宕橀悙顑亝绻濆▓鍨灈闁挎洏鍊濋垾锕傛倻閽樺妲梺閫炲苯澧柕鍥у楠炴帡骞嬪┑鍥╀壕婵犵數鍋涢崥瀣礉濞嗘挸钃熼柨婵嗩樈閺佸洨鎲稿澶婂嚑闁靛牆娲ㄧ壕鍏笺亜閺囩偞鍣圭€殿噮鍠氶埀顒冾潐濞叉鏁敓鐘茬畺婵炲棙鎸婚崵鎴炪亜閹烘埈妲搁柡浣哥埣濮婂宕掑▎鎴犵崲濠电偘鍖犻崶浣告处缁傛帞鈧綆浜滈悗顓㈡⒑閻熸澘顣抽柡鍜佸亜閻ｅ灚绗熼埀顒勫蓟閺囷紕鐤€閻庯綆浜栭崑鎾诲冀椤撶喎浜楅梺鍝勬储閸ㄦ椽鎮″☉銏＄厱闁规壋鏅涙俊濂告煃瑜滈崜娑⑩€﹂崼銉﹀剭妞ゆ帒鍊荤壕浠嬫煕鐏炲墽鎳呴柛鏂跨Ч閺岋紕浠︾拠鎻掝潎濡炪們鍨哄畝鎼併€佸鈧幃銏＄瑹椤栨稓銈梻鍌欑劍鐎笛兠洪弽顓炵９闁告縿鍎遍ˉ姘舵煕韫囨艾浜圭紒鈾€鍋撻梻鍌氬€搁悧濠勭矙閹捐鑸归柣銏犳啞閻撳繘鐓崶褜鍎忛柍褜鍓氶悧鐘诲箖閳ユ枼妲堥柕蹇ョ磿閸橀亶姊洪柅娑樺祮婵炰匠鍥╁祦婵°倕鍟板Λ顖涖亜閹惧崬鐏柣锝嗘そ閺岋紕浠﹂崜褉妲堥柧浼欑稻缁绘盯宕卞▎蹇庡缂傚倸绉撮悧鎾愁潖閾忚瀚氶柍銉ョ－娴狀厼鈹戦埥鍡椾簻闁哥噥鍋婇、姘舵晲婢跺﹦顔掑銈嗘礀閹冲繘寮插鍫熲拺缂侇垱娲栨晶鏌ユ煟閻曚礁鐏犻崡閬嶆⒑椤掆偓缁夌敻鍩涢幒鎳ㄥ綊鏁愰崨顔兼殘闁荤姵鍔х槐鏇犳閹烘鏁嬮柛娑卞幘娴犳悂鎮楃憴鍕缂佽鍊介悘鍐⒑閸涘﹣绶遍柛妯荤懇閺佸倿鎳為妷銉ヤ紟婵犵妲呴崹浼存倶濠靛鍋傞柟鎵閻撴洟骞栨潏鍓х？闁绘帗鎮傞弻鐔碱敊閼测晝楔閻庤娲栭悥濂搞€侀弮鍫濈妞ゆ挾鍣ラ崵鍕磽?+ 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐閸愯弓鐢绘俊鐐€栭悧婊堝磻濞戙垹鍨傞柛宀€鍋為悡鏇熴亜閹板墎绋荤紒鈧埀顒勬⒑?B 缂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸婂潡鏌ㄩ弴妤€浜惧銈庡亜缁绘濡甸幇鏉跨闁规儳鍘栭悽濠氭⒒娴ｅ摜鏋冩俊妞煎妿濞嗐垽鏁撻悩鍐测偓鐢告偣鏉炴媽顒熸繛鎾愁煼閹鏁愭惔婵堝嚬闂佸湱娅㈢徊鐐┍婵犲浂鏁冩い鎰╁灮娴狀垶姊虹涵鍛毢妞ゎ厼鐗撻崺鐐哄箣閿曗偓闁卞洭鏌ｉ弴姘卞妽缂傚秵顨嗙换婵嗏枔閸喗鐏嶅銈庡幖閻楀棝鍩㈤弬搴撴婵犲﹤鎳愰?
             if (mvObj.source === 'youtube') {
               if (ytFallbackTimerRef.current) {
                 clearTimeout(ytFallbackTimerRef.current)
@@ -9552,6 +10353,7 @@ export default function App() {
         artist: playback.artist || prev.artist || ''
       }))
       if (playback.syncCover && playback.coverUrl) {
+        setCoverUrlTrackPath(playlistRef.current[currentIndexRef.current]?.path || '')
         setCoverUrl(playback.coverUrl)
       }
       if (playback.syncMv && playback.mvSync?.id) {
@@ -9699,39 +10501,21 @@ export default function App() {
         onDrop={handleDrop}
       >
       <div className="app-theme-backdrop" style={themeBackdropStyle} aria-hidden />
-      {config.customBgPath && !config.themeCoverAsBackground && (
+      {!showLyrics && customWallpaperUrl && !config.themeCoverAsBackground && (
         <div
+          className="app-wallpaper-backdrop app-wallpaper-backdrop--custom"
           style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100vw',
-            height: '100vh',
-            backgroundImage: `url("file:///${config.customBgPath.replace(/\\/g, '/')}")`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
             opacity: config.customBgOpacity,
-            zIndex: -2,
-            pointerEvents: 'none'
+            backgroundImage: `url("${customWallpaperUrl}")`
           }}
         />
       )}
-      {config.themeCoverAsBackground && displaySafeCoverUrl && (
+      {!showLyrics && config.themeCoverAsBackground && displaySafeCoverUrl && (
         <div
+          className="app-wallpaper-backdrop app-wallpaper-backdrop--cover"
           style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100vw',
-            height: '100vh',
             backgroundImage: `url("${displaySafeCoverUrl.replace(/\\/g, '/')}")`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            filter: 'blur(20px)',
-            transform: 'scale(1.1)',
-            opacity: config.customBgOpacity !== undefined ? config.customBgOpacity : 1.0,
-            zIndex: -2,
-            pointerEvents: 'none'
+            opacity: config.customBgOpacity !== undefined ? config.customBgOpacity : 1.0
           }}
         />
       )}
@@ -9751,7 +10535,7 @@ export default function App() {
               radial-gradient(circle at 100% 100%, ${dynamicCoverTheme.accent2} 0%, transparent 60%),
               radial-gradient(circle at 50% 50%, ${dynamicCoverTheme.bgColor} 0%, transparent 100%)
             `,
-            mixBlendMode: config.themeCoverAsBackground || config.customBgPath ? 'color' : 'normal',
+            mixBlendMode: config.themeCoverAsBackground ? 'color' : 'normal',
             opacity: 0.85,
             filter: 'blur(40px)',
             animation: 'fluidPan 20s ease-in-out infinite alternate',
@@ -10126,7 +10910,9 @@ export default function App() {
 
       {!showLyrics && view !== 'settings' && (
         <nav className="nav-rail no-drag" aria-label="Library navigation">
-          <div className="nav-rail-logo">ECHO</div>
+          <div className="nav-rail-logo nav-rail-logo--image">
+            <img src={localPathToAudioSrc(SIDEBAR_LOGO_IMAGE_PATH)} alt="ECHO" draggable={false} />
+          </div>
           <div className="nav-rail-section">
             <button
               type="button"
@@ -10144,19 +10930,77 @@ export default function App() {
             </button>
             <button
               type="button"
+              className={`nav-rail-item ${listMode === 'artists' ? 'active' : ''}`}
+              onClick={() => handleListMode('artists')}
+            >
+              <Users size={16} /> {t('listMode.artists', 'Artists')}
+            </button>
+            <button
+              type="button"
               className={`nav-rail-item ${listMode === 'folders' ? 'active' : ''}`}
               onClick={() => handleListMode('folders')}
             >
               <FolderOpen size={16} /> {t('listMode.folders')}
             </button>
-            <button
-              type="button"
-              className={`nav-rail-item ${listMode === 'playlists' ? 'active' : ''}`}
-              onClick={() => handleListMode('playlists')}
-            >
-              <ListMusic size={16} /> {t('listMode.playlists')}
-            </button>
+            <div className={`nav-rail-collapse ${navPlaylistsExpanded ? 'is-open' : ''}`}>
+              <button
+                type="button"
+                className={`nav-rail-item nav-rail-item--with-caret ${listMode === 'playlists' ? 'active' : ''}`}
+                onClick={() => {
+                  handleListMode('playlists')
+                  setNavPlaylistsExpanded((value) => !value)
+                }}
+                aria-expanded={navPlaylistsExpanded}
+              >
+                <ListMusic size={16} />
+                <span>{t('listMode.playlists')}</span>
+                <ChevronDown size={14} className="nav-rail-caret" aria-hidden />
+              </button>
+              {navPlaylistsExpanded && (
+                <div className="nav-rail-sublist" aria-label={t('listMode.playlists')}>
+                  <button
+                    type="button"
+                    className={`nav-rail-subitem ${listMode === 'playlists' && !selectedUserPlaylistId && !selectedSmartCollectionId ? 'active' : ''}`}
+                    onClick={() => handleListMode('playlists')}
+                  >
+                    {t('playlists.allPlaylists', 'All playlists')}
+                  </button>
+                  {userPlaylists.length === 0 ? (
+                    <span className="nav-rail-subempty">
+                      {t('playlists.noPlaylistsShort', 'No playlists')}
+                    </span>
+                  ) : (
+                    userPlaylists.map((playlistItem) => (
+                      <button
+                        key={playlistItem.id}
+                        type="button"
+                        className={`nav-rail-subitem ${selectedUserPlaylistId === playlistItem.id ? 'active' : ''}`}
+                        title={playlistItem.name}
+                        onClick={() => {
+                          setSelectedSmartCollectionId(null)
+                          setSelectedUserPlaylistId(playlistItem.id)
+                          setSelectedArtist('all')
+                          setListMode('playlists')
+                        }}
+                      >
+                        {playlistItem.name}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
+          <ImportedFolderRail
+            folders={importedFolderItems}
+            activeFolder={selectedFolder}
+            title={t('folders.importedRootsTitle', 'Imported folders')}
+            emptyLabel={t('folders.noImportedRoots', 'No imported folders')}
+            openLabel={t('folders.openImportedFolder', 'Open imported folder')}
+            removeLabel={t('folders.removeImportedFolder', 'Remove imported folder')}
+            onOpen={handleOpenImportedFolder}
+            onRemove={handleRemoveImportedFolder}
+          />
           <div className="nav-rail-bottom">
             <button
               className={`nav-rail-icon-btn ${showLikedOnly ? 'active' : ''}`}
@@ -10188,13 +11032,24 @@ export default function App() {
       >
         <div className="browser-topbar-actions">
           <span className="browser-topbar-title">
-            {listMode === 'songs' && t('listMode.songs')}
-            {listMode === 'album' && selectedAlbum === 'all' && t('listMode.albums')}
-            {listMode === 'album' && selectedAlbum !== 'all' && selectedAlbum}
-            {listMode === 'folders' && selectedFolder === 'all' && t('listMode.folders')}
-            {listMode === 'folders' && selectedFolder !== 'all' &&
-              (selectedFolder.split(/[\\/]/).pop() || t('listMode.folders'))}
-            {listMode === 'playlists' && t('listMode.playlists')}
+            <span>
+              {listMode === 'songs' && t('listMode.songs')}
+              {listMode === 'album' && selectedAlbum === 'all' && t('listMode.albums')}
+              {listMode === 'album' && selectedAlbum !== 'all' && selectedAlbum}
+              {listMode === 'artists' && selectedArtist === 'all' && t('listMode.artists', 'Artists')}
+              {listMode === 'artists' && selectedArtist !== 'all' && selectedArtist}
+              {listMode === 'folders' && selectedFolder === 'all' && t('listMode.folders')}
+              {listMode === 'folders' && selectedFolder !== 'all' &&
+                (selectedFolder.split(/[\\/]/).pop() || t('listMode.folders'))}
+              {listMode === 'playlists' && t('listMode.playlists')}
+            </span>
+            <span className="browser-topbar-count">
+              {'\u00b7 '}
+              {t('songs.count', {
+                count: tracksForSidebarListFiltered.length,
+                defaultValue: '{{count}} \u9996'
+              })}
+            </span>
           </span>
           <div className="browser-toolbar-group" aria-label={t('aria.libraryActions', 'Library actions')}>
             <button
@@ -10223,7 +11078,18 @@ export default function App() {
             </button>
             <button
               className="browser-toolbar-btn browser-toolbar-btn--danger"
-              onClick={handleClearPlaylist}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    t('import.clearPlaylistConfirm', {
+                      defaultValue:
+                        '\u786e\u5b9a\u8981\u6e05\u7a7a\u5f53\u524d\u64ad\u653e\u5217\u8868\u5417\uff1f'
+                    })
+                  )
+                ) {
+                  handleClearPlaylist()
+                }
+              }}
               title={t('import.clearPlaylist')}
               aria-label={t('import.clearPlaylist')}
             >
@@ -10231,7 +11097,6 @@ export default function App() {
             </button>
           </div>
         </div>
-
         <div className="search-container no-drag" style={{ flexShrink: 0 }}>
           <Search size={16} className="search-icon" />
           <input
@@ -10240,6 +11105,80 @@ export default function App() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
+          {searchQuery.trim() && (
+            <button
+              type="button"
+              className="search-clear-btn"
+              onClick={() => setSearchQuery('')}
+              aria-label={t('common.clear', { defaultValue: 'Clear' })}
+              title={t('common.clear', { defaultValue: 'Clear' })}
+            >
+              <X size={14} strokeWidth={1.8} />
+            </button>
+          )}
+          {listMode === 'songs' && (
+            <div className="folder-sort-wrap search-sort-wrap" ref={songSortRef}>
+              <button
+                type="button"
+                className="folder-sort-trigger"
+                onClick={() => setSongSortOpen((v) => !v)}
+                aria-expanded={songSortOpen}
+              >
+                {songSortMode === 'dateAsc'
+                  ? t('songs.sortDateAsc', 'Oldest added')
+                  : songSortMode === 'dateDesc'
+                    ? t('songs.sortDateDesc', 'Newest added')
+                    : songSortMode === 'nameAsc'
+                      ? t('songs.sortNameAsc', 'Name (A-Z)')
+                      : songSortMode === 'nameDesc'
+                        ? t('songs.sortNameDesc', 'Name (Z-A)')
+                        : songSortMode === 'durationAsc'
+                          ? t('songs.sortDurationAsc', 'Duration (Short)')
+                          : songSortMode === 'durationDesc'
+                            ? t('songs.sortDurationDesc', 'Duration (Long)')
+                            : songSortMode === 'qualityAsc'
+                              ? t('songs.sortQualityAsc', 'Quality (Low)')
+                              : songSortMode === 'qualityDesc'
+                                ? t('songs.sortQualityDesc', 'Quality (High)')
+                                : t('songs.sortDefault', 'Default')}
+                <ChevronDown size={14} aria-hidden strokeWidth={1.5} />
+              </button>
+              {songSortOpen && (
+                <div className="folder-sort-menu" role="menu">
+                  {[
+                    { key: 'default', label: t('songs.sortDefault', 'Default') },
+                    { key: 'dateAsc', label: t('songs.sortDateAsc', 'Oldest added') },
+                    { key: 'dateDesc', label: t('songs.sortDateDesc', 'Newest added') },
+                    { key: 'nameAsc', label: t('songs.sortNameAsc', 'Name (A-Z)') },
+                    { key: 'nameDesc', label: t('songs.sortNameDesc', 'Name (Z-A)') },
+                    { key: 'durationAsc', label: t('songs.sortDurationAsc', 'Duration (Short)') },
+                    {
+                      key: 'durationDesc',
+                      label: t('songs.sortDurationDesc', 'Duration (Long)')
+                    },
+                    { key: 'qualityAsc', label: t('songs.sortQualityAsc', 'Quality (Low)') },
+                    { key: 'qualityDesc', label: t('songs.sortQualityDesc', 'Quality (High)') }
+                  ].map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      role="menuitem"
+                      className={`folder-sort-menu-item${songSortMode === opt.key ? ' active' : ''}`}
+                      onClick={() => {
+                        setSongSortMode(opt.key)
+                        setSongSortOpen(false)
+                      }}
+                    >
+                      <div className="folder-sort-chk">
+                        {songSortMode === opt.key && <Check size={14} strokeWidth={2} />}
+                      </div>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div
@@ -10262,6 +11201,13 @@ export default function App() {
             </button>
             <button
               type="button"
+              className={`list-filter-chip ${listMode === 'artists' ? 'active' : ''}`}
+              onClick={() => handleListMode('artists')}
+            >
+              {t('listMode.artists', 'Artists')}
+            </button>
+            <button
+              type="button"
               className={`list-filter-chip ${listMode === 'playlists' ? 'active' : ''}`}
               onClick={() => handleListMode('playlists')}
             >
@@ -10275,7 +11221,7 @@ export default function App() {
               {t('listMode.folders')}
             </button>
           </div>
-          {/* Queue panel — 暂时隐藏，queue state/logic 保留，恢复时取消注释 */}
+          {/* Queue panel -闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偞鐗犻、鏇㈠煑閼恒儳鈽夐摶鏍煕濞戝崬骞橀柨娑欑懇濮婃椽鎳￠妶鍛亪闂佺顑呴敃銈夊Υ閹烘挾绡€婵﹩鍘鹃崢閬嶆倵閸忓浜鹃梺閫炲苯澧寸€规洘鍨块幃娆撳传閸曨厼骞堥梻浣告惈濞层垽宕瑰ú顏呭亗婵炲棙鎸婚埛鎴炪亜閹惧崬濡块柣锝変憾閺岋綀绠涙繝鍌氣拤闂侀潧娲ょ€氱増淇婇悜鑺ユ櫇闁逞屽墴閹﹢骞橀鐣屽幐闁诲繒鍋犻褎淇婃總鍛婄厓闁芥ê顦藉Σ鍛娿亜椤愶絿鐭掔€规洖宕灃濞达絽婀辫ぐ鍞榚ue state/logic 濠电姷鏁告慨鐑藉极閹间礁纾块柟瀵稿Т缁躲倝鏌﹀Ο渚＆婵炲樊浜濋弲婊堟煟閹伴潧澧幖鏉戯躬濮婃椽宕ㄦ繝鍐槱闂佹悶鍔嶅妯绘櫏闂佸搫琚崕鏌ユ偂閸愵亝鍠愭繝濠傜墕缁€鍫ユ煟閺冨倸甯堕柦鍐枛閺屾洘绻涢崹顔煎濠碘剝褰冮悧濠冪┍婵犲浂鏁嶆繝濠傛噹缁楋繝姊洪崷顓熺効濡炴潙鎽滈幑銏犫槈濮橈絽浜鹃柣銏☆問閻掔偓銇勬惔锛勭劯闁哄本鐩幃鈺呭箛娴ｅ湱鏆ユ俊鐐€栧ú蹇涘磿闂堟稓鏆﹂柣鏃傗拡閺佸啯銇勯幇鈺佺仾闁稿鍨跺缁樻媴閾忓箍鈧﹪鏌涢幘瀵哥疄闁轰礁鍟撮崺鈩冩媴閸曞墎绉い銏＄洴閹瑧鍒掔憴鍕伖闂傚倷绀侀幉锛勭矙閹达附鏅濋柨鏇炲€哥粻鐘绘煕閺囥劌鐏￠柣鎾跺枑娣囧﹪濡堕崟顓＄獥濠电偛鐗婇…鍥╂閹烘鏁婇柤鎭掑劤閸欏棝姊烘导娆戠Ф缂佺粯绻堥悰顔碱吋婢跺鍎銈嗗姂閸婃挾鑺遍悜鑺モ拻闁稿本鐟х粣鏃€绻涙担鍐叉椤ゅ倿姊绘担鍛婃儓闁瑰啿绻掔划娆撳箣閿曗偓閻?*/}
 
           {selectedAlbum !== 'all' && listMode === 'songs' && (
             <div className="album-filter-pill no-drag">
@@ -10286,7 +11232,7 @@ export default function App() {
 
           {selectedFolder !== 'all' && listMode === 'folders' && (
             <div className="album-filter-pill no-drag">
-              <span>{t('folderFilter.label', { name: selectedFolder.split('/').pop() })}</span>
+              <span>{t('folderFilter.label', { name: getPathBasename(selectedFolder) })}</span>
               <button onClick={() => setSelectedFolder('all')}>{t('folderFilter.clear')}</button>
             </div>
           )}
@@ -10335,9 +11281,11 @@ export default function App() {
             </div>
           )}
 
-          {(listMode === 'songs' || (listMode === 'folders' && selectedFolder !== 'all') || (listMode === 'album' && selectedAlbum !== 'all')) && (
-            <div className="folder-browser-header no-drag" style={{ margin: '0 12px 8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', flex: 1, gap: '8px' }}>
+          {((listMode === 'folders' && selectedFolder !== 'all') ||
+            (listMode === 'artists' && selectedArtist !== 'all') ||
+            (listMode === 'album' && selectedAlbum !== 'all')) && (
+            <div className="folder-browser-header library-list-header no-drag">
+                <div className="library-list-heading">
                 {listMode === 'album' && selectedAlbum !== 'all' && (
                   <button
                     type="button"
@@ -10350,14 +11298,35 @@ export default function App() {
                     <ChevronLeft size={20} strokeWidth={1.5} />
                   </button>
                 )}
-                <span className="folder-browser-title">
-                  {listMode === 'folders' && selectedFolder !== 'all'
-                    ? selectedFolder.split(/[\\/]/).pop() || t('folders.heading')
-                    : listMode === 'album' && selectedAlbum !== 'all'
-                      ? selectedAlbum
-                      : t('songs.heading', 'Songs')}
-                </span>
-              </div>
+                {listMode === 'artists' && selectedArtist !== 'all' && (
+                  <button
+                    type="button"
+                    className="user-playlist-detail-back"
+                    onClick={handleBackToArtistOverview}
+                    aria-label={t('nav.back')}
+                    title={t('nav.back')}
+                    style={{ marginRight: 4 }}
+                  >
+                    <ChevronLeft size={20} strokeWidth={1.5} />
+                  </button>
+                )}
+                <div className="library-list-heading-text">
+                  <span className="folder-browser-title library-list-title">
+                    {listMode === 'folders' && selectedFolder !== 'all'
+                      ? getPathBasename(selectedFolder) || t('folders.heading')
+                      : listMode === 'artists'
+                        ? selectedArtist
+                        : listMode === 'album'
+                          ? selectedAlbum
+                          : t('songs.heading', 'Songs')}
+                  </span>
+                  <span className="folder-browser-count library-list-count">
+                    {t('playlists.detailTrackCount', {
+                      count: tracksForSidebarListFiltered.length
+                    })}
+                  </span>
+                </div>
+                </div>
               <div className="folder-sort-wrap" ref={songSortRef}>
                 <button
                   type="button"
@@ -10423,7 +11392,7 @@ export default function App() {
           )}
 
           <div
-            className={`playlist${listMode === 'album' ? ' playlist-album-mode' : ''}${listMode === 'folders' ? ' playlist-album-mode' : ''}${listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId) ? ' playlist--pl-detail' : ''}`}
+            className={`playlist${listMode === 'album' ? ' playlist-album-mode' : ''}${listMode === 'folders' ? ' playlist-album-mode' : ''}${listMode === 'artists' ? ' playlist-album-mode' : ''}${listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId) ? ' playlist--pl-detail' : ''}`}
             ref={sidebarPlaylistRef}
             onScroll={handleSidebarScroll}
           >
@@ -10951,6 +11920,30 @@ export default function App() {
               </div>
             )}
 
+            {playlist.length > 0 && listMode === 'artists' && selectedArtist === 'all' && (
+              <div className="folder-browser artist-browser no-drag">
+                <div className="folder-browser-header">
+                  <span className="folder-browser-title">{t('artists.heading', 'Artists')}</span>
+                  <span className="folder-browser-count">({artistGroups.length})</span>
+                </div>
+                <div className="folder-list">
+                  {artistGroups.map((artist) => (
+                    <button
+                      key={artist.name}
+                      type="button"
+                      className={`folder-list-item${selectedArtist === artist.name ? ' active' : ''}`}
+                      onClick={() => handlePickArtistFromSidebar(artist)}
+                      title={artist.name}
+                    >
+                      <Users size={15} className="folder-list-icon" />
+                      <span className="folder-list-name">{artist.name}</span>
+                      <span className="folder-list-count">{artist.tracks.length}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {playlist.length > 0 && listMode === 'folders' && selectedFolder === 'all' && (
               <div className="folder-browser no-drag">
                 <div className="folder-list">
@@ -11254,7 +12247,7 @@ export default function App() {
                             </div>
                             <div
                               className="track-subtitle"
-                              title={`${displayArtist} · ${track.info.album}`}
+                              title={`${displayArtist} - ${track.info.album}`}
                             >
                               <ArtistLink
                                 artist={displayArtist}
@@ -11262,19 +12255,18 @@ export default function App() {
                                 stopPropagation
                                 noLink
                               />{' '}
-                              · {track.info.album}
-                            </div>
+                              - {track.info.album}
+                          </div>
                             <div className="track-meta-pills" aria-hidden>
-                              {track.info.trackNo && (
-                                <span className="track-meta-pill">#{track.info.trackNo}</span>
-                              )}
                               <AudioQualityBadges
                                 quality={{
                                   codec: trackMeta.codec || formatLabel || null,
                                   bitrateKbps: trackMeta.bitrateKbps || null,
                                   sampleRateHz: trackMeta.sampleRateHz || null,
                                   bitDepth: trackMeta.bitDepth || null,
-                                  channels: trackMeta.channels || null
+                                  channels: trackMeta.channels || null,
+                                  isMqa: trackMeta.isMqa === true,
+                                  bpm: trackMeta.bpm || null
                                 }}
                                 compact
                               />
@@ -11285,6 +12277,7 @@ export default function App() {
                           </div>
                           {(listMode === 'songs' ||
                             listMode === 'folders' ||
+                            listMode === 'artists' ||
                             listMode === 'album' ||
                             (listMode === 'playlists' &&
                               (selectedUserPlaylistId || selectedSmartCollectionId))) && (
@@ -11305,7 +12298,10 @@ export default function App() {
                                   strokeWidth={liked ? 1.5 : 1.5}
                                 />
                               </button>
-                              {(listMode === 'songs' || listMode === 'folders' || listMode === 'album') && (
+                              {(listMode === 'songs' ||
+                                listMode === 'folders' ||
+                                listMode === 'artists' ||
+                                listMode === 'album') && (
                                 <button
                                   type="button"
                                   className={`track-add-pl-btn ${addToPlaylistMenu?.originalIdx === track.originalIdx ? 'active' : ''}`}
@@ -11741,21 +12737,6 @@ export default function App() {
                     {technicalInfo.channels > 1 ? t('tech.stereo') : t('tech.mono')}
                   </div>
                 )}
-                {technicalInfo.originalBpm && (
-                  <div className="tech-pill bpm-pill">
-                    <span className="bpm-orig">
-                      {t('tech.bpm', { orig: technicalInfo.originalBpm })}
-                    </span>
-                    {playbackRate !== 1 && (
-                      <>
-                        <span className="bpm-arrow">→</span>
-                        <span className="bpm-nc">
-                          {Math.round(technicalInfo.originalBpm * playbackRate)}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                )}
               </div>
 
               {config.showMiniWaveform && (
@@ -11817,14 +12798,12 @@ export default function App() {
             <div className="buttons buttons--transport">
               <div className="transport-cluster transport-cluster--primary">
                 <button
-                  className="btn btn--transport"
+                  className={`btn btn--transport play-mode-toggle ${playMode === 'shuffle' ? 'is-active' : ''}`}
                   style={{ width: 40, height: 40 }}
                   onClick={() => setPlayMode(playMode === 'shuffle' ? 'loop' : 'shuffle')}
+                  aria-pressed={playMode === 'shuffle'}
                 >
-                  <Shuffle
-                    size={18}
-                    color={playMode === 'shuffle' ? 'var(--accent-pink)' : 'var(--text-soft)'}
-                  />
+                  <Shuffle size={18} color="currentColor" />
                 </button>
                 <button className="btn btn--transport" onClick={handlePrev}>
                   <SkipBack size={24} color="var(--text-soft)" />
@@ -12788,7 +13767,7 @@ export default function App() {
                           cursor: 'pointer'
                         }}
                       >
-                        Customize…
+                        {t('settings.customizeTheme')}
                       </button>
                     </div>
                   )
@@ -13120,7 +14099,7 @@ export default function App() {
                                 width: 240
                               }}
                             >
-                              <span style={{ fontSize: 11, opacity: 0.5 }}>0°</span>
+                              <span style={{ fontSize: 11, opacity: 0.5 }}>0</span>
                               <input
                                 type="range"
                                 min={0}
@@ -13137,7 +14116,7 @@ export default function App() {
                                 }
                                 className="slider-nc"
                               />
-                              <span style={{ fontSize: 11, opacity: 0.5 }}>360°</span>
+                              <span style={{ fontSize: 11, opacity: 0.5 }}>360</span>
                             </div>
                           </div>
                         </>
@@ -13166,7 +14145,9 @@ export default function App() {
                   }}
                 >
                   <Image size={18} />
-                  <h3 style={{ fontSize: 16, fontWeight: 800 }}>Custom Wallpaper Decor</h3>
+                  <h3 style={{ fontSize: 16, fontWeight: 800 }}>
+                    {t('settings.customWallpaperDecor')}
+                  </h3>
                 </div>
 
                 <div
@@ -13175,7 +14156,7 @@ export default function App() {
                 >
                   <div className="setting-info">
                     <h4>{t('settings.coverSizeTitle', 'Cover size')}</h4>
-                    <p>{t('settings.coverSizeDesc', 'Adjust the main player album cover size.')}</p>
+                    <p>{t('settings.coverSizeDesc', 'Adjust the main player cover size.')}</p>
                   </div>
                   <div
                     style={{
@@ -13222,7 +14203,7 @@ export default function App() {
                 >
                   <div className="setting-info">
                     <h4>{t('settings.bgImage')}</h4>
-                    <p>Select a local image to use as your application backdrop.</p>
+                    <p>{t('settings.bgImageDesc')}</p>
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
                     {config.customBgPath && (
@@ -13237,7 +14218,7 @@ export default function App() {
                           borderRadius: 18
                         }}
                       >
-                        Clear
+                        {t('settings.clear')}
                       </button>
                     )}
                     <button
@@ -13261,7 +14242,9 @@ export default function App() {
                         color: 'white'
                       }}
                     >
-                      {config.customBgPath ? 'Change Image' : 'Select Image'}
+                      {config.customBgPath
+                        ? t('settings.changeImage')
+                        : t('settings.selectImage')}
                     </button>
                   </div>
                 </div>
@@ -13270,7 +14253,7 @@ export default function App() {
                   <div className="setting-row" style={{ border: 'none', padding: 0 }}>
                     <div className="setting-info">
                       <h4>{t('settings.wallpaperOpacity')}</h4>
-                      <p>Adjust the visibility of your custom background image.</p>
+                      <p>{t('settings.wallpaperOpacityDesc')}</p>
                     </div>
                     <div
                       style={{
@@ -13674,8 +14657,8 @@ export default function App() {
 
                 <div className="setting-row" style={{ border: 'none', padding: '16px 0 0 0' }}>
                   <div className="setting-info">
-                    <h4>动态封面取色 (自适应主题)</h4>
-                    <p>提取当前播放歌曲的专辑封面主色调并作为主题。</p>
+                    <h4>{t('settings.themeDynamicCoverColor', 'Dynamic cover colors')}</h4>
+                    <p>{t('settings.themeDynamicCoverColorDesc', 'Use the current track cover as the theme color source.')}</p>
                   </div>
                   <button
                     type="button"
@@ -13697,8 +14680,8 @@ export default function App() {
 
                 <div className="setting-row" style={{ border: 'none', padding: '16px 0 0 0' }}>
                   <div className="setting-info">
-                    <h4>直接以封面为背景</h4>
-                    <p>将当前正在播放的封面图作为背景显示。</p>
+                    <h4>{t('settings.themeCoverAsBackground', 'Cover background')}</h4>
+                    <p>{t('settings.themeCoverAsBackgroundDesc', 'Use the current playing cover as the background image.')}</p>
                   </div>
                   <button
                     type="button"
@@ -13878,7 +14861,7 @@ export default function App() {
                         )
                       : t(
                           'settings.libraryCleanupDesc',
-                          'Scan the current library, playlists, likes, and playback history for missing files.'
+                          'Remove missing files and stale folder references from the library.'
                         )}
                   </p>
                 </div>
@@ -13893,7 +14876,7 @@ export default function App() {
                   >
                     {libraryCleanupBusy
                       ? t('settings.libraryCleanupScanning', 'Scanning...')
-                      : t('settings.libraryCleanupScan', 'Scan')}
+                      : t('settings.libraryCleanupScan', 'Scan library')}
                   </UiButton>
                   <UiButton
                     variant="ghost"
@@ -13906,7 +14889,7 @@ export default function App() {
                       opacity: libraryCleanupBusy || missingLibraryPaths.length === 0 ? 0.55 : 1
                     }}
                   >
-                    {t('settings.libraryCleanupRemove', 'Remove invalid entries')}
+                    {t('settings.libraryCleanupRemove', 'Remove missing')}
                   </UiButton>
                 </div>
               </div>
@@ -13968,7 +14951,7 @@ export default function App() {
                 <>
                   <div className="setting-row">
                     <div className="setting-info">
-                      <h3>{'已连接'}</h3>
+                      <h3>{t('settings.lastfmConnected', 'Connected')}</h3>
                       <p>@{config.lastfmUsername || 'unknown'}</p>
                     </div>
                     <button
@@ -13983,13 +14966,13 @@ export default function App() {
                         }))
                       }}
                     >
-                      {'断开连接'}
+                      {t('settings.lastfmLogout', 'Disconnect')}
                     </button>
                   </div>
                   <div className="setting-row">
                     <div className="setting-info">
-                      <h3>{'启用 Scrobble'}</h3>
-                      <p>{'自动记录听歌历史到 Last.fm'}</p>
+                      <h3>{t('settings.lastfmScrobbleTitle', 'Scrobble')}</h3>
+                      <p>{t('settings.lastfmScrobbleDesc', 'Send played tracks to Last.fm.')}</p>
                     </div>
                     <button
                       className={`toggle-btn ${config.lastfmEnabled ? 'active' : ''}`}
@@ -14033,6 +15016,29 @@ export default function App() {
               <p style={{ opacity: 0.6, fontSize: '14px', lineHeight: 1.6 }}>
                 {t('settings.aboutBody')}
               </p>
+              <div className="setting-row" style={{ marginTop: 12 }}>
+                <div className="setting-info">
+                  <h3>{t('settings.autoUpdateTitle', '自动更新')}</h3>
+                  <p>{t('settings.autoUpdateDesc', '启动 ECHO 时自动检查并下载可用更新。')}</p>
+                </div>
+                <button
+                  type="button"
+                  className={`toggle-btn ${config.autoUpdateEnabled !== false ? 'active' : ''}`}
+                  onClick={() =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      autoUpdateEnabled: !(prev.autoUpdateEnabled !== false)
+                    }))
+                  }
+                  aria-pressed={config.autoUpdateEnabled !== false}
+                >
+                  {config.autoUpdateEnabled !== false ? (
+                    <ToggleRight size={32} />
+                  ) : (
+                    <ToggleLeft size={32} />
+                  )}
+                </button>
+              </div>
               <div
                 className="settings-version-text"
                 style={{ display: 'flex', alignItems: 'center', gap: '12px' }}
@@ -14618,7 +15624,7 @@ export default function App() {
                         <span className="playback-history-drawer-item-title">{displayTitle}</span>
                         <span className="playback-history-drawer-item-subtitle">
                           {displayArtist}
-                          {playCount > 0 && ` - 听过 ${playCount} 次`}
+                          {playCount > 0 && ' - Played ' + playCount + ' times'}
                         </span>
                       </button>
                     )
@@ -14771,7 +15777,7 @@ export default function App() {
           {shareCardSnapshot?.cover ? (
             <div
               className="song-share-card-bg-image"
-              style={{ backgroundImage: `url(${shareCardSnapshot.cover})` }}
+              style={{ backgroundImage: 'url(' + shareCardSnapshot.cover + ')' }}
             />
           ) : null}
           <div className="song-share-card-bg-overlay" />
@@ -14846,14 +15852,14 @@ export default function App() {
         createPortal(
           <div
             ref={trackContextMenuRef}
-            className={`track-ctx-menu-portal${ctxMenuVisualOpen ? ' track-ctx-menu-portal--open' : ''}`}
+            className={'track-ctx-menu-portal' + (ctxMenuVisualOpen ? ' track-ctx-menu-portal--open' : '')}
             role="menu"
             aria-label={t('aria.trackContextMenu')}
             style={{
               position: 'fixed',
               ...(() => {
                 const mw = 220
-                const mh = 320
+                const mh = 480
                 let left = trackContextMenu.clientX
                 let top = trackContextMenu.clientY
                 const iw = typeof window !== 'undefined' ? window.innerWidth : 800
@@ -14939,7 +15945,7 @@ export default function App() {
                     }}
                     disabled={!isLocalAudioFilePath(track?.path)}
                   >
-                    <Tag size={14} aria-hidden /> {t('contextMenu.editMetadata', '编辑标签')}
+                    <Tag size={14} aria-hidden /> {t('contextMenu.editMetadata', 'Edit metadata')}
                   </button>
                   <button
                     type="button"
@@ -15007,6 +16013,18 @@ export default function App() {
                   >
                     <Download size={14} aria-hidden /> {t('contextMenu.saveTrackImage')}
                   </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="track-ctx-item track-ctx-item--danger"
+                    onClick={async () => {
+                      closeTrackContextMenuAnimated()
+                      await handleDeleteTrackFile(track)
+                    }}
+                    disabled={!isLocalAudioFilePath(track?.path)}
+                  >
+                    <Trash2 size={14} aria-hidden /> {t('contextMenu.deleteTrack', 'Delete track')}
+                  </button>
                 </>
               )
             })()}
@@ -15017,7 +16035,7 @@ export default function App() {
         createPortal(
           <div
             ref={groupContextMenuRef}
-            className={`track-ctx-menu-portal${groupCtxVisualOpen ? ' track-ctx-menu-portal--open' : ''}`}
+            className={'track-ctx-menu-portal' + (groupCtxVisualOpen ? ' track-ctx-menu-portal--open' : '')}
             role="menu"
             aria-label={t('aria.groupContextMenu')}
             style={{
@@ -15124,12 +16142,12 @@ export default function App() {
         createPortal(
           <>
             <div
-              className={`add-to-pl-backdrop${addPlVisualOpen ? ' add-to-pl-backdrop--open' : ''}`}
+              className={'add-to-pl-backdrop' + (addPlVisualOpen ? ' add-to-pl-backdrop--open' : '')}
               aria-hidden
               onMouseDown={() => closeAddToPlaylistAnimated()}
             />
             <div
-              className={`add-to-pl-menu-portal${addPlVisualOpen ? ' add-to-pl-menu-portal--open' : ''}`}
+              className={'add-to-pl-menu-portal' + (addPlVisualOpen ? ' add-to-pl-menu-portal--open' : '')}
               role="dialog"
               aria-label={t('aria.addToPlaylistDialog')}
               style={{
@@ -15187,7 +16205,7 @@ export default function App() {
       </div>
 
       {view !== 'settings' && !(showLyrics && hideImmersiveMvChrome) && (
-        <div className={`bottom-player-bar no-drag${showLyrics ? ' bottom-player-bar--lyrics' : ''}`}>
+        <div className={'bottom-player-bar no-drag' + (showLyrics ? ' bottom-player-bar--lyrics' : '')}>
           <div className="bottom-bar-left">
             {displaySafeCoverUrl ? (
               <img
@@ -15218,6 +16236,18 @@ export default function App() {
               <div className="bottom-bar-artist">{displayMainArtist || ''}</div>
               <div className="bottom-bar-tech-pills">
                 {dlnaUiOn && <span className="mini-pill">DLNA</span>}
+                {(currentBottomBarBpm || showBottomBarBpmDetecting) && (
+                  <span className="echo-bpm-pill echo-bpm-pill--bottom">
+                    {currentBottomBarBpm ? (
+                      <>
+                        BPM {currentBottomBarBpm}
+                        {currentBottomBarAdjustedBpm ? ' -> ' + currentBottomBarAdjustedBpm : ''}
+                      </>
+                    ) : (
+                      'BPM...'
+                    )}
+                  </span>
+                )}
                 <AudioQualityBadges
                   variant="player"
                   quality={{
@@ -15226,18 +16256,11 @@ export default function App() {
                       ? Math.round(technicalInfo.bitrate / 1000)
                       : null,
                     sampleRateHz: technicalInfo.sampleRate || null,
-                    bitDepth: technicalInfo.bitDepth || null,
-                    channels: technicalInfo.channels || null
+                    bitDepth: technicalInfo.bitDepth || currentTrackMeta?.bitDepth || null,
+                    channels: technicalInfo.channels || null,
+                    isMqa: technicalInfo.isMqa === true || currentTrackMeta?.isMqa === true
                   }}
                 />
-                {technicalInfo.originalBpm && (
-                  <span className="echo-bpm-pill">
-                    BPM {technicalInfo.originalBpm}
-                    {playbackRate !== 1
-                      ? ` › ${Math.round(technicalInfo.originalBpm * playbackRate)}`
-                      : ''}
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -15245,14 +16268,12 @@ export default function App() {
           <div className="bottom-bar-center">
             <div className="bottom-bar-transport">
               <button
-                className="btn btn--transport"
+                className={`btn btn--transport play-mode-toggle ${playMode === 'shuffle' ? 'is-active' : ''}`}
                 style={{ width: 36, height: 36 }}
                 onClick={() => setPlayMode(playMode === 'shuffle' ? 'loop' : 'shuffle')}
+                aria-pressed={playMode === 'shuffle'}
               >
-                <Shuffle
-                  size={16}
-                  color={playMode === 'shuffle' ? 'var(--accent-pink)' : 'var(--text-soft)'}
-                />
+                <Shuffle size={16} color="currentColor" />
               </button>
               <button className="btn btn--transport" onClick={handlePrev}>
                 <SkipBack size={20} color="var(--text-soft)" />
@@ -15287,7 +16308,7 @@ export default function App() {
               <span className="bottom-bar-time">{formatTime(displayProgressTime)}</span>
               <input
                 type="range"
-                className={`player-progress ${isProgressDragging ? 'is-dragging' : ''}`}
+                className={'player-progress ' + (isProgressDragging ? 'is-dragging' : '')}
                 min={0}
                 max={displayProgressDuration || 0}
                 value={displayProgressTime}
@@ -15313,7 +16334,7 @@ export default function App() {
                   cursor: dlnaUiOn ? 'not-allowed' : undefined,
                   ['--seek-pct']:
                     displayProgressDuration > 0
-                      ? `${Math.min(100, Math.max(0, (displayProgressTime / displayProgressDuration) * 100))}%`
+                      ? Math.min(100, Math.max(0, (displayProgressTime / displayProgressDuration) * 100)) + '%'
                       : '0%'
                 }}
               />
@@ -15330,9 +16351,9 @@ export default function App() {
               <MiniWaveform analyser={analyserNode.current} isPlaying={isPlaying} />
             )}
 
-            {/* 歌词按钮 */}
+            {/* 婵犵數濮烽弫鍛婃叏閻㈠壊鏁婇柡宥庡幖缁愭淇婇妶鍛殲鐎规洘鐓￠弻娑樼暆閳ь剟宕戦悙鍝勭？婵°倐鍋撻柕鍡樺笒椤繈鏁愰崨顒€顥氶梻鍌欐祰椤曟牠宕归婊呯焼濞撴埃鍋撻柛鈺冨仱楠炲鎮╅顫闂佹寧绻傜花鑲╄姳閼恒儯浜滈柡鍌涘婢跺嫮绱掔紒妯肩疄濠殿喒鍋撻梺鎸庣箓閹虫劙宕㈤锔解拺闁告稑锕ラ埛鎰版煟濡や胶鐭嬬紒?*/}
             <button
-              className={`btn btn--transport lyrics-toggle ${showLyrics ? 'active' : ''}`}
+              className={'btn btn--transport lyrics-toggle ' + (showLyrics ? 'active' : '')}
               style={{ width: 34, height: 34 }}
               onClick={() => setShowLyrics(!showLyrics)}
               title={t('lyrics.toggle')}
@@ -15340,7 +16361,7 @@ export default function App() {
               <Mic2 size={16} color={showLyrics ? 'var(--accent-pink)' : 'var(--text-soft)'} />
             </button>
 
-            {/* 音量 + 速度合并浮层触发按钮 */}
+            {/* 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵稿妽闁哄懏绻堥弻鏇熷緞濞戞﹩娲紓浣哄У閸庢娊鍩為幋锔藉亹闁告瑥顦伴幃娆撴⒒?+ 闂傚倸鍊搁崐鎼佸磹閹间礁纾瑰瀣椤愪粙鏌ㄩ悢鍝勑㈢痪鎯ь煼閺屾盯鍩勯崘顏佹缂備焦鍔栭〃濠囩嵁閺嶃劍缍囬柛鎾楀啰鐓楅梻浣侯焾椤戝棝骞愭ィ鍐ㄧ疅闁圭虎鍠栫粈瀣亜閹邦喖鏋戦柣蹇撴閺岋絾鎯旈妶搴㈢秷濠电偞褰冪换妯虹暦閺囥垺顥堟繛鎴炵濞堥箖姊虹紒妯诲碍缂併劌鐖煎銊╂寠婢跺棙鏂€闂佺粯蓱瑜板啴鍩€椤掍焦顫楅柕鍥ㄥ姍瀹曪絾寰勫畝鈧惁鍫ユ⒑濮瑰洤鐏叉繛浣冲嫮顩烽柨鏇炲€归悡娆愩亜閺嶃劍鐨戦柣鎺戞憸閳ь剝顫夊ú鎴﹀础閸愬樊鍤曞ù鐘差儛閺佸洭鏌ｉ弬鍨Щ濠㈢懓顑夊缁樻媴缁涘缍堝銈嗘⒐閻楃姴鐣烽弶璇炬棃宕ㄩ鐘靛炊闂備胶纭堕崜婵堢矙閹烘鍋傞柕澶嗘櫆閻撴盯鏌涢妷顔惧帥婵炲牊鏌ㄩ湁婵犲﹤鐗忛悾娲煙椤旂厧妲绘い顓滃姂瀹曠喖顢楅崒姘闂傚倷鑳堕…鍫ユ晝閵堝拋鐒介柨鐔哄У閸嬫ɑ銇勯弴妤€浜惧Δ鐘靛仜濞差參銆佸鈧幃娆撴偨閻㈤潧绁﹂梻鍌氬€风粈浣虹礊婵犲洤纾诲┑鐘叉搐閸屻劌鈹戦崒婊庣劸闁?*/}
             {showLyrics ? (
               <div className="bottom-bar-lyrics-deck">
                 <label className="bottom-bar-lyrics-slider">
@@ -15353,7 +16374,7 @@ export default function App() {
                     value={playbackRate}
                     onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
                     style={{
-                      ['--slider-pct']: `${Math.min(100, Math.max(0, ((playbackRate - 0.5) / 1.5) * 100))}%`
+                      ['--slider-pct']: Math.min(100, Math.max(0, ((playbackRate - 0.5) / 1.5) * 100)) + '%'
                     }}
                   />
                 </label>
@@ -15367,7 +16388,7 @@ export default function App() {
                     value={volume}
                     onChange={(e) => setVolume(parseFloat(e.target.value))}
                     style={{
-                      ['--slider-pct']: `${Math.min(100, Math.max(0, volume * 100))}%`
+                      ['--slider-pct']: Math.min(100, Math.max(0, volume * 100)) + '%'
                     }}
                   />
                 </label>
@@ -15375,7 +16396,7 @@ export default function App() {
             ) : (
               <div className="bottom-bar-toolset">
                 <button
-                  className={`btn btn--transport deck-tool-trigger ${activeDeckPopover === 'volume' ? 'active' : ''}`}
+                  className={'btn btn--transport deck-tool-trigger ' + (activeDeckPopover === 'volume' ? 'active' : '')}
                   onClick={() =>
                     setActiveDeckPopover((value) => (value === 'volume' ? null : 'volume'))
                   }
@@ -15384,7 +16405,7 @@ export default function App() {
                   {volume <= 0.001 ? <VolumeX size={16} /> : <Volume2 size={16} />}
                 </button>
                 <button
-                  className={`btn btn--transport deck-tool-trigger ${activeDeckPopover === 'speed' ? 'active' : ''}`}
+                  className={'btn btn--transport deck-tool-trigger ' + (activeDeckPopover === 'speed' ? 'active' : '')}
                   onClick={() =>
                     setActiveDeckPopover((value) => (value === 'speed' ? null : 'speed'))
                   }
@@ -15401,15 +16422,15 @@ export default function App() {
                   disabled={isExporting || !currentTrack}
                   title={t('player.exportButton')}
                 >
-                  <Download size={16} />
+                  <FileOutput size={16} />
                 </button>
               </div>
             )}
 
-            {/* 浮层面板 —— 用 createPortal 挂到 body，绕开 backdrop-filter 包含块问题 */}
+            {/* 婵犵數濮烽弫鍛婃叏閻戣棄鏋侀柟闂寸绾惧鏌ｉ幇顒佹儓缂佺姵姘ㄩ埀顒€鍘滈崑鎾绘煕閺囥劌浜為柣娑栧劦濮婃椽宕崟顓涙瀱闂佸憡眉缁瑥鐣烽弴銏犵婵犮垺绻傜紞濠囧箖閳╁啯鍎熼柨婵嗘閸犳牗淇婇悙顏勨偓鎴﹀磿闁秵鍋嬮柟鎹愵嚙閽冪喖鏌￠崶椋庣？闁汇倐鍋撳┑鐘垫暩婵挳宕愰幖浣哥厱濠㈣泛鐬肩壕?闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ礀绾惧鏌曟繛鐐珔缁炬儳娼￠弻锛勪沪鐠囨彃濮庨梺钘夊暟閸犳牠寮婚妸鈺傚亜闁告繂瀚呴姀銈嗙厽?-createPortal 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗ù锝夋交閼板潡姊洪鈧粔顕€鍩€椤掑﹦鐣电€规洖銈告俊鐑藉Ψ瑜濈槐顕€姊绘担鍝ョШ婵☆偉娉曠划鍫熺瑹閳ь剙顕?body闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔告綇妤ｅ啯顎嶉梺绋垮濡啴寮婚妶鍚ゅ湱鈧綆鍋呴悵鏃堟⒑閹肩偛濡界紒璇插暣婵＄敻宕熼姘辩杸闂佸疇妗ㄩ懗鍫曞礉閹绢喗鈷戦柟鑲╁仜閳ь剚鐗曠叅闁绘梻鍘ч拑?backdrop-filter 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸弫鎾绘偐閸愯弓缃曢梻浣告惈濞层垽宕归崷顓犱笉闁绘顕х粻瑙勭箾閿濆骸澧┑陇鍋愮槐鎺楁偐閸愭彃鎽甸梺鍝勬湰閻╊垶銆侀弴銏″亹闁圭粯甯掗～鎾绘⒒閸屾瑦绁伴柨鐔村劦瀹曟劙寮介妸褉鏀虫繝鐢靛Т濞层倕娲块梻浣告啞娓氭宕伴弽褉鏋嶉柕鍫濐槹閳锋垿鏌熺粙鎸庢崳闁愁垱娲熼弻锝呂旀担鍦槷-*/}
             {!showLyrics && activeDeckPopover && createPortal(
               <div
-                className={`deck-popover deck-popover--bottom-tools deck-popover--${activeDeckPopover}`}
+                className={'deck-popover deck-popover--bottom-tools deck-popover--' + activeDeckPopover}
               >
                 {activeDeckPopover === 'volume' ? (
                   <div className="deck-popover-row deck-popover-volume-row">
@@ -15446,7 +16467,7 @@ export default function App() {
                       <button
                         className="deck-popover-btn deck-popover-speed-reset"
                         onClick={() => setPlaybackRate(1.0)}
-                        title={t('player.resetSpeed') || '重置速度'}
+                        title={t('player.resetSpeed') || 'Reset speed'}
                       >
                         <RotateCcw size={13} />
                       </button>

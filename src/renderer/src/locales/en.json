@@ -3,7 +3,8 @@
     "title": "ECHO"
   },
   "nav": {
-    "back": "Back"
+    "back": "Back",
+    "settings": "Settings"
   },
   "common": {
     "unknownArtist": "Unknown Artist"
@@ -42,6 +43,8 @@
     "copyTrackLine": "Copy title and artist",
     "copyTrackImage": "Copy song card image",
     "saveTrackImage": "Save song card image",
+    "deleteTrack": "Delete song",
+    "confirmDeleteTrack": "Delete \"{{title}}\" from its folder?\n\nThe file will be moved to the system Recycle Bin and removed from ECHO.\n{{path}}",
     "openAlbum": "Open album",
     "openFolder": "Open folder",
     "playGroupNow": "Play from here",
@@ -81,6 +84,7 @@
   "listMode": {
     "songs": "Songs",
     "albums": "Albums",
+    "artists": "Artists",
     "playlists": "Playlists",
     "folders": "Folders",
     "queue": "Queue"
@@ -110,7 +114,16 @@
     "tracks": "tracks",
     "sortName": "Name",
     "sortDateAsc": "Oldest",
-    "sortDateDesc": "Newest"
+    "sortDateDesc": "Newest",
+    "importedRootsTitle": "Imported folders",
+    "noImportedRoots": "No imported folders",
+    "openImportedFolder": "Open imported folder",
+    "removeImportedFolder": "Remove imported folder",
+    "confirmRemoveImportedFolder": "Remove imported folder \"{{name}}\" from ECHO?"
+  },
+  "artists": {
+    "heading": "Artists",
+    "unknown": "Unknown Artist"
   },
   "empty": {
     "noTracks": "No tracks yet.",
@@ -123,6 +136,8 @@
     "historyEmpty": "No playback history yet."
   },
   "playlists": {
+    "allPlaylists": "All playlists",
+    "noPlaylistsShort": "No playlists",
     "smartCollections": "Smart collections",
     "smartCollectionsHint": "Tap a template to create it instantly, or open custom rules if you want something more specific.",
     "customSmartCollection": "Custom rules",
@@ -388,6 +403,8 @@
     "openFullRelease": "Open release",
     "releaseNotesLoading": "Loading changelog...",
     "releaseNotesHint": "Recent fixes and changes are pulled from GitHub Releases.",
+    "autoUpdateTitle": "Automatic updates",
+    "autoUpdateDesc": "Check for and download available updates when ECHO starts.",
     "devSection": "Developer",
     "devConsoleTitle": "Developer Tools (Console)",
     "devConsoleDesc": "Open or close the detached Chromium DevTools. Click again to close.",
@@ -425,8 +442,16 @@
     "gradientEndDesc": "Second color stop for the window backdrop.",
     "gradientAngle": "Angle",
     "gradientAngleDesc": "Gradient direction (degrees).",
+    "customizeTheme": "Customize…",
+    "customWallpaperDecor": "Custom Wallpaper Decor",
+    "coverSizeTitle": "Cover size",
+    "coverSizeDesc": "Adjust the main player album cover size.",
     "bgImage": "Background Image",
+    "bgImageDesc": "Select a local image to use as your application backdrop.",
+    "selectImage": "Select Image",
+    "changeImage": "Change Image",
     "wallpaperOpacity": "Wallpaper Opacity",
+    "wallpaperOpacityDesc": "Adjust the visibility of your custom background image.",
     "panelTransparency": "Panel Transparency",
     "panelTransparencyDesc": "Make UI panels more transparent or solid.",
     "clear": "Clear",
@@ -435,6 +460,11 @@
     "blurStrengthDesc": "Adjust the intensity of the frosted glass effect.",
     "blurNone": "None",
     "blurHeavy": "Heavy",
+    "libraryCleanupTitle": "Library cleanup",
+    "libraryCleanupDesc": "Scan the current library, playlists, likes, and playback history for missing files.",
+    "libraryCleanupScan": "Scan",
+    "libraryCleanupScanning": "Scanning...",
+    "libraryCleanupRemove": "Remove invalid entries",
     "uiFont": "UI font",
     "uiFontDesc": "Independent of the color preset (Outfit / Inter / System).",
     "fontOutfit": "Outfit",
@@ -735,8 +765,8 @@
     "selectSource": "Select source",
     "sourceLocal": "Local (.lrc next to file / embedded tags)",
     "sourceLrclib": "LRCLIB (online)",
-    "sourceNetease": "NetEase API (uses LRCLIB-compatible match for now)",
-    "sourceQq": "QQ Music API (uses LRCLIB-compatible match for now)",
+    "sourceNetease": "NetEase (good for CJK catalogs)",
+    "sourceQq": "QQ Music (falls back to Kugou / Kuwo)",
     "refresh": "Refresh",
     "fetchAgainTitle": "Fetch lyrics again",
     "localSync": "Local & sync",
@@ -752,7 +782,12 @@
     "applyLyrics": "Apply lyrics",
     "linkPlaceholder": "Paste song link (NetEase / QQ / Kugou / Kuwo)…",
     "fetchFromLink": "Fetch lyrics from link",
-    "linkHint": "NetEase links support direct song-id lyrics fetch; other services use best-effort matching."
+    "linkHint": "NetEase links support direct song-id lyrics fetch; other services use best-effort matching.",
+    "sourceStateQq": "QQ Music",
+    "sourceStateKugou": "Kugou",
+    "sourceStateKuwo": "Kuwo",
+    "sourceKugou": "Kugou Music (online)",
+    "sourceKuwo": "Kuwo Music (online)"
   },
   "mvDrawer": {
     "searchTitle": "Search MV",

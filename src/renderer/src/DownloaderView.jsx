@@ -378,7 +378,7 @@ export default function DownloaderView({
   ])
 
   useEffect(() => {
-    const unsubscribe = window.api.media.onProgress((data) => {
+    const unsubscribe = window.api?.media?.onProgress?.((data) => {
       setProgress(data.progress)
     })
     return () => {
@@ -628,8 +628,9 @@ export default function DownloaderView({
   )
 
   /**
-   * 鎼滅储缁撴灉鐐瑰嚮鍚庣洿鎺ヤ笅杞斤細
-   * - use1music ON  鈫?閫氳繃 NCM API song_url 鑾峰彇鐩存帴閾炬帴骞朵笅杞斤紙1music 妯″紡锛?   * - use1music OFF 鈫?璧?yt-dlp 娴佺▼锛堢綉鏄撲簯妯″紡锛屽師鏈夎涓猴級
+   * 搜索结果点击后直接下载：
+   * - use1music ON: 通过 NCM API song_url 获取直链并下载（1music 模式）
+   * - use1music OFF: 走 yt-dlp 流程（网易云模式，原有行为）
    */
   const handleSearchResultDownload = async (song) => {
     if (!effectiveDownloadFolder) {
@@ -1091,7 +1092,7 @@ export default function DownloaderView({
             {isLoadingMeta || isSearching ? (
               <Loader2 size={24} className="spin" />
             ) : (
-              t('downloader.parseLink', '瑙ｆ瀽/鎼滅储')
+              t('downloader.parseLink', '解析/搜索')
             )}
           </button>
         </div>
