@@ -162,6 +162,7 @@ import {
   pickInitialPersistedValue,
   remapPlaybackHistoryEntries
 } from '../../shared/playbackPersistence.mjs'
+import { readTrackMetaCache, writeTrackMetaCache } from './utils/trackMetaCache'
 
 /** `<audio src>` 必须用编码后的 file: URL；路径里的 `#`、`%`、Unicode 等手写 `file://` 会失效 */
 function localPathToAudioSrc(filePath) {
@@ -177,6 +178,10 @@ const GITHUB_RELEASES_PAGE_URL = 'https://github.com/Moekotori/Echoes/releases'
 const MAX_PLAYBACK_HISTORY = 40
 const STORED_VOLUME_KEY = 'nc_volume'
 const SIDEBAR_LIST_OVERSCAN = 10
+const SIDEBAR_META_PREFETCH_BEHIND_ROWS = 16
+const SIDEBAR_META_PREFETCH_AHEAD_ROWS = 72
+const ALBUM_META_PREFETCH_BEHIND_ROWS = 2
+const ALBUM_META_PREFETCH_AHEAD_ROWS = 8
 const SIDEBAR_ROW_HEIGHT = 64
 const SIDEBAR_DETAIL_ROW_HEIGHT = 60
 const ALBUM_GRID_DEFAULT_ROW_HEIGHT = 68
@@ -190,6 +195,13 @@ const DISPLAY_METADATA_OVERRIDES_LOCAL_KEY = 'nc_display_metadata_overrides'
 const MAX_MV_SEARCH_CACHE_ENTRIES = 24
 const MAX_BILI_STREAM_CACHE_ENTRIES = 12
 const MAX_LRCLIB_CACHE_ENTRIES = 40
+const MAX_BPM_CACHE_ENTRIES = 160
+const MAX_TRACK_META_COVER_ENTRIES = 96
+const METADATA_PREFETCH_LIMIT = 96
+const ALBUM_METADATA_PREFETCH_LIMIT = 1200
+const METADATA_PARSE_BATCH_SIZE = 18
+const ALBUM_METADATA_PARSE_BATCH_SIZE = 48
+const METADATA_PARSE_WORKERS = 4
 const MAX_SHARE_CARD_COVER_CHARS = 600000
 const CLOUD_COVER_RESOLUTION = '600x600bb'
 
@@ -437,6 +449,30 @@ function normalizeDisplayMetadataOverrides(value) {
       if (Number.isFinite(parsed) && parsed > 0) normalizedItem[key] = parsed
     }
     if (Object.keys(normalizedItem).length > 0) next[path] = normalizedItem
+  }
+  return next
+}
+
+function trimTrackMetaCoverEntries(metaMap, keepPaths = new Set(), maxEntries = MAX_TRACK_META_COVER_ENTRIES) {
+  if (!metaMap || typeof metaMap !== 'object') return metaMap
+  const coverEntries = Object.entries(metaMap).filter(([, entry]) => {
+    return typeof entry?.cover === 'string' && entry.cover
+  })
+  if (coverEntries.length <= maxEntries) return metaMap
+
+  const protectedPaths = keepPaths instanceof Set ? keepPaths : new Set()
+  const removableEntries = coverEntries.filter(([path]) => !protectedPaths.has(path))
+  const removeCount = Math.min(removableEntries.length, coverEntries.length - maxEntries)
+  if (removeCount <= 0) return metaMap
+
+  const next = { ...metaMap }
+  for (const [path, entry] of removableEntries.slice(0, removeCount)) {
+    next[path] = {
+      ...entry,
+      cover: null,
+      coverChecked: true,
+      coverMemoryTrimmed: true
+    }
   }
   return next
 }
@@ -1356,6 +1392,8 @@ export default function App() {
   const [isCardActionBusy, setIsCardActionBusy] = useState(false)
   const [shareCardSnapshot, setShareCardSnapshot] = useState(null)
   const trackLoadSeqRef = useRef(0)
+  const bpmDetectionCacheRef = useRef(new Map())
+  const albumCoverProbePathsRef = useRef(new Set())
   const cloudCoverFetchSeqRef = useRef(0)
   const coverFailureFetchKeyRef = useRef('')
   const trackSwitchCountRef = useRef(0)
@@ -1591,6 +1629,7 @@ export default function App() {
     })
   })
   const importedFoldersHydratedRef = useRef(false)
+  const startupImportedFolderRescanDoneRef = useRef(false)
   const [libraryStateReady, setLibraryStateReady] = useState(false)
   const [playbackSessionRestoreReady, setPlaybackSessionRestoreReady] = useState(false)
   const [libraryCleanupBusy, setLibraryCleanupBusy] = useState(false)
@@ -3071,14 +3110,23 @@ export default function App() {
   // Auto-rescan imported folders on startup to discover new files
   useEffect(() => {
     if (!libraryStateReady || !importedFolders.length || !window.api?.rescanFolders) return
+    if (startupImportedFolderRescanDoneRef.current) return
+    startupImportedFolderRescanDoneRef.current = true
     let cancelled = false
+    const foldersForStartupRescan = importedFolders.slice()
     const doRescan = async () => {
       try {
-        const scannedTracks = await window.api.rescanFolders({ folders: importedFolders })
+        const existingPaths = playlistRef.current
+          .filter((track) => isTrackInsideImportedFolders(track?.path, foldersForStartupRescan))
+          .map((track) => track.path)
+        const scannedTracks = await window.api.rescanFolders({
+          folders: foldersForStartupRescan,
+          existingPaths
+        })
         if (cancelled || !Array.isArray(scannedTracks)) return
 
         const previousImportedTracks = playlistRef.current.filter((track) =>
-          isTrackInsideImportedFolders(track?.path, importedFolders)
+          isTrackInsideImportedFolders(track?.path, foldersForStartupRescan)
         )
         const delta = diffImportedFolderSnapshot(
           previousImportedTracks,
@@ -4789,11 +4837,54 @@ export default function App() {
     })
 
     try {
-      // 1. Get Extended Metadata from Main Process (Music-Metadata)
-      const data = await window.api.getExtendedMetadataHandler(filePath)
+      const cachedMeta = (await readTrackMetaCache([filePath]))[filePath]
       if (trackLoadSeqRef.current !== requestSeq) return
 
-      if (data.success) {
+      if (cachedMeta?.coverChecked) {
+        const fallbackFromTitle = parseArtistTitleFromName(cachedMeta.title || '')
+        const resolvedTitle = fallbackFromTitle?.title || cachedMeta.title || stripExtension(filePath.split(/[\\/]/).pop() || '')
+        const resolvedArtist =
+          (cachedMeta.artist && cachedMeta.artist !== 'Unknown Artist' ? cachedMeta.artist : null) ||
+          cachedMeta.albumArtist ||
+          fallbackFromTitle?.artist ||
+          'Unknown Artist'
+
+        setMetadata({
+          title: resolvedTitle,
+          artist: resolvedArtist,
+          album: cachedMeta.album || '',
+          albumArtist: cachedMeta.albumArtist || '',
+          trackNo: cachedMeta.trackNo ?? null,
+          discNo: cachedMeta.discNo ?? null
+        })
+        setTechnicalInfo((prev) => ({
+          ...prev,
+          sampleRate: cachedMeta.sampleRateHz || null,
+          bitrate: cachedMeta.bitrateKbps ? cachedMeta.bitrateKbps * 1000 : null,
+          channels: cachedMeta.channels || null,
+          codec: cachedMeta.codec || null,
+          originalBpm: null
+        }))
+        if (typeof cachedMeta.duration === 'number' && cachedMeta.duration > 0) {
+          setDuration(cachedMeta.duration)
+        }
+        if (cachedMeta.cover) {
+          setCoverUrl(cachedMeta.cover)
+        } else {
+          fetchCloudCover(resolvedTitle, resolvedArtist, requestSeq, { album: cachedMeta.album || '' })
+        }
+        fetchLyrics(filePath, resolvedTitle, resolvedArtist, {
+          album: cachedMeta.album || '',
+          embeddedLyrics: cachedMeta.lyrics || '',
+          hasLyrics: trackHints.hasLyrics === true,
+          mvOriginUrl: trackHints.mvOriginUrl
+        })
+      } else {
+        // 1. Get Extended Metadata from Main Process (Music-Metadata)
+        const data = await window.api.getExtendedMetadataHandler(filePath)
+        if (trackLoadSeqRef.current !== requestSeq) return
+
+        if (data.success) {
         const { technical, common } = data
         const fallbackFromTitle = parseArtistTitleFromName(common.title || '')
         const resolvedTitle = fallbackFromTitle?.title || common.title
@@ -4841,6 +4932,25 @@ export default function App() {
           hasLyrics: trackHints.hasLyrics === true,
           mvOriginUrl: trackHints.mvOriginUrl
         })
+        writeTrackMetaCache({
+          [filePath]: {
+            title: resolvedTitle || null,
+            artist: resolvedArtist || null,
+            album: common.album || null,
+            albumArtist: common.albumArtist || null,
+            trackNo: common.trackNo ?? null,
+            discNo: common.discNo ?? null,
+            cover: common.cover || null,
+            duration: technical.duration || null,
+            coverChecked: true,
+            codec: technical.codec || null,
+            bitrateKbps: technical.bitrate ? Math.round(technical.bitrate / 1000) : null,
+            sampleRateHz: technical.sampleRate || null,
+            bitDepth: technical.bitDepth || null,
+            channels: technical.channels || null,
+            lyrics: common.lyrics || null
+          }
+        })
       } else {
         // Fallback for failed extraction
         const title = filePath
@@ -4867,26 +4977,36 @@ export default function App() {
           mvOriginUrl: trackHints.mvOriginUrl
         })
       }
+      }
 
-      // 2. BPM Detection (Keep as is, but use less memory)
-      const arrayBuffer = await window.api.readBufferHandler(filePath)
-      if (arrayBuffer) {
-        let audioCtx = null
-        try {
-          audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-          const slice = arrayBuffer.slice(0, 1024 * 1024 * 10)
-          const decodedBuffer = await audioCtx.decodeAudioData(slice.buffer || slice)
-          if (trackLoadSeqRef.current !== requestSeq) return
-          const detectedBpm = detectBPM(decodedBuffer)
-          setTechnicalInfo((prev) => ({ ...prev, originalBpm: detectedBpm }))
-        } catch (e) {
-          console.error('BPM detection error:', e)
-        } finally {
-          if (audioCtx && typeof audioCtx.close === 'function') {
-            try {
-              await audioCtx.close()
-            } catch {
-              /* ignore close race */
+      // 2. BPM Detection (cached per session to avoid repeat audio decoding)
+      if (bpmDetectionCacheRef.current.has(filePath)) {
+        setTechnicalInfo((prev) => ({
+          ...prev,
+          originalBpm: bpmDetectionCacheRef.current.get(filePath)
+        }))
+      } else {
+        const arrayBuffer = await window.api.readBufferHandler(filePath)
+        if (arrayBuffer) {
+          let audioCtx = null
+          try {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+            const slice = arrayBuffer.slice(0, 1024 * 1024 * 10)
+            const decodedBuffer = await audioCtx.decodeAudioData(slice.buffer || slice)
+            if (trackLoadSeqRef.current !== requestSeq) return
+            const detectedBpm = detectBPM(decodedBuffer)
+            bpmDetectionCacheRef.current.set(filePath, detectedBpm)
+            trimMapCache(bpmDetectionCacheRef, MAX_BPM_CACHE_ENTRIES)
+            setTechnicalInfo((prev) => ({ ...prev, originalBpm: detectedBpm }))
+          } catch (e) {
+            console.error('BPM detection error:', e)
+          } finally {
+            if (audioCtx && typeof audioCtx.close === 'function') {
+              try {
+                await audioCtx.close()
+              } catch {
+                /* ignore close race */
+              }
             }
           }
         }
@@ -5010,6 +5130,7 @@ export default function App() {
         ...prev,
         [draft.path]: nextMetaEntry
       }))
+      writeTrackMetaCache({ [draft.path]: nextMetaEntry })
 
       setPlaylist((prev) =>
         prev.map((item) =>
@@ -7022,97 +7143,6 @@ export default function App() {
     [playlist, effectiveTrackMetaMap]
   )
 
-  useEffect(() => {
-    if (!playlist.length) return
-
-    const pending = playlist
-      .filter((track) => {
-        const entry = trackMetaMap[track.path]
-        if (!entry) return true
-        return entry.cover == null && entry.coverChecked !== true
-      })
-      .slice(0, 8)
-    if (!pending.length) return
-
-    let cancelled = false
-
-    const loadMetadata = async () => {
-      const loaded = {}
-
-      await Promise.all(
-        pending.map(async (track) => {
-          try {
-            const data = await window.api.getExtendedMetadataHandler(track.path)
-            if (data?.success) {
-              const common = data.common || {}
-              const technical = data.technical || {}
-              loaded[track.path] = {
-                title: common.title || null,
-                artist: common.artist || null,
-                album: common.album || null,
-                albumArtist: common.albumArtist || null,
-                trackNo: common.trackNo ?? null,
-                discNo: common.discNo ?? null,
-                cover: common.cover || null,
-                duration: technical.duration || null,
-                coverChecked: true,
-                codec: technical.codec || null,
-                bitrateKbps: technical.bitrate ? Math.round(technical.bitrate / 1000) : null,
-                sampleRateHz: technical.sampleRate || null,
-                bitDepth: technical.bitDepth || null,
-                channels: technical.channels || null
-              }
-            } else {
-              loaded[track.path] = {
-                title: null,
-                artist: null,
-                album: null,
-                albumArtist: null,
-                trackNo: null,
-                discNo: null,
-                cover: null,
-                duration: null,
-                coverChecked: true,
-                codec: null,
-                bitrateKbps: null,
-                sampleRateHz: null,
-                bitDepth: null,
-                channels: null
-              }
-            }
-          } catch (error) {
-            loaded[track.path] = {
-              title: null,
-              artist: null,
-              album: null,
-              albumArtist: null,
-              trackNo: null,
-              discNo: null,
-              cover: null,
-              duration: null,
-              coverChecked: true,
-              codec: null,
-              bitrateKbps: null,
-              sampleRateHz: null,
-              bitDepth: null,
-              channels: null
-            }
-          }
-        })
-      )
-
-      if (!cancelled && Object.keys(loaded).length > 0) {
-        setTrackMetaMap((prev) => ({ ...prev, ...loaded }))
-      }
-    }
-
-    loadMetadata()
-
-    return () => {
-      cancelled = true
-    }
-  }, [playlist, trackMetaMap])
-
   const queryFilteredPlaylist = useMemo(() => {
     const q = deferredSearchQuery.trim().toLowerCase()
     if (!q) return parsedPlaylist
@@ -7716,6 +7746,19 @@ export default function App() {
     [tracksForSidebarListFiltered, visibleSidebarRange]
   )
 
+  const metadataPrefetchSidebarTracks = useMemo(() => {
+    if (tracksForSidebarListFiltered.length === 0) return []
+    const startIndex = Math.max(
+      0,
+      visibleSidebarRange.startIndex - SIDEBAR_META_PREFETCH_BEHIND_ROWS
+    )
+    const endIndex = Math.min(
+      tracksForSidebarListFiltered.length,
+      visibleSidebarRange.endIndex + SIDEBAR_META_PREFETCH_AHEAD_ROWS
+    )
+    return tracksForSidebarListFiltered.slice(startIndex, endIndex)
+  }, [tracksForSidebarListFiltered, visibleSidebarRange])
+
   useEffect(() => {
     const playlistElement = sidebarPlaylistRef.current
     if (!playlistElement) return undefined
@@ -7951,6 +7994,21 @@ export default function App() {
     [albumGroupsFiltered, visibleAlbumRange]
   )
 
+  const metadataPrefetchAlbumGroups = useMemo(() => {
+    if (albumGroupsFiltered.length === 0) return []
+    if (listMode === 'album' && selectedAlbum === 'all') return albumGroupsFiltered
+    const columnCount = Math.max(1, albumGridColumnCount)
+    const startIndex = Math.max(
+      0,
+      visibleAlbumRange.startIndex - columnCount * ALBUM_META_PREFETCH_BEHIND_ROWS
+    )
+    const endIndex = Math.min(
+      albumGroupsFiltered.length,
+      visibleAlbumRange.endIndex + columnCount * ALBUM_META_PREFETCH_AHEAD_ROWS
+    )
+    return albumGroupsFiltered.slice(startIndex, endIndex)
+  }, [albumGroupsFiltered, albumGridColumnCount, listMode, selectedAlbum, visibleAlbumRange])
+
   const folderGroupsFiltered = useMemo(() => {
     if (!showLikedOnly || listMode !== 'folders') return folderGroups
     return folderGroups
@@ -7972,6 +8030,227 @@ export default function App() {
     if (listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId)) return true
     return false
   }, [listMode, selectedAlbum, selectedFolder, selectedUserPlaylistId, selectedSmartCollectionId])
+
+  const metadataPrefetchTracks = useMemo(() => {
+    const byPath = new Map()
+    const pushTrack = (track) => {
+      if (!track?.path || byPath.has(track.path)) return
+      byPath.set(track.path, track)
+    }
+
+    pushTrack(currentTrack)
+
+    if (showTrackList) {
+      for (const track of metadataPrefetchSidebarTracks) pushTrack(track)
+    }
+
+    if (listMode === 'album' && selectedAlbum === 'all') {
+      for (const album of metadataPrefetchAlbumGroups) {
+        const coverTrack =
+          album.tracks.find((track) => {
+            const entry = trackMetaMap[track.path]
+            if (entry?.cover) return false
+            if (entry?.coverChecked !== true) return true
+            return !albumCoverProbePathsRef.current.has(track.path)
+          }) || album.tracks[0]
+        pushTrack(coverTrack)
+      }
+    }
+
+    const limit =
+      listMode === 'album' && selectedAlbum === 'all'
+        ? ALBUM_METADATA_PREFETCH_LIMIT
+        : METADATA_PREFETCH_LIMIT
+    return Array.from(byPath.values()).slice(0, limit)
+  }, [
+    currentTrack,
+    listMode,
+    metadataPrefetchAlbumGroups,
+    metadataPrefetchSidebarTracks,
+    selectedAlbum,
+    showTrackList,
+    trackMetaMap
+  ])
+
+  const metadataCoverKeepPathKey = useMemo(() => {
+    const paths = []
+    const pushTrack = (track) => {
+      if (track?.path) paths.push(track.path)
+    }
+
+    pushTrack(currentTrack)
+
+    if (showTrackList) {
+      for (const track of metadataPrefetchSidebarTracks) pushTrack(track)
+    }
+
+    if (listMode === 'album' && selectedAlbum === 'all') {
+      for (const album of visibleAlbumGroups) {
+        pushTrack(album.tracks.find((track) => trackMetaMap[track.path]?.cover) || album.tracks[0])
+      }
+    }
+
+    return [...new Set(paths)].join('\n')
+  }, [
+    currentTrack,
+    listMode,
+    metadataPrefetchSidebarTracks,
+    selectedAlbum,
+    showTrackList,
+    trackMetaMap,
+    visibleAlbumGroups
+  ])
+
+  const metadataCoverKeepPathSet = useMemo(() => {
+    if (!metadataCoverKeepPathKey) return new Set()
+    return new Set(metadataCoverKeepPathKey.split('\n').filter(Boolean))
+  }, [metadataCoverKeepPathKey])
+
+  useEffect(() => {
+    setTrackMetaMap((prev) => {
+      const next = trimTrackMetaCoverEntries(prev, metadataCoverKeepPathSet)
+      return next === prev ? prev : next
+    })
+  }, [metadataCoverKeepPathSet])
+
+  useEffect(() => {
+    const pending = metadataPrefetchTracks.filter((track) => {
+      const entry = trackMetaMap[track.path]
+      if (entry?.coverMemoryTrimmed && metadataCoverKeepPathSet.has(track.path)) return true
+      const shouldProbeMissingCover =
+        entry?.coverChecked === true &&
+        !entry?.cover &&
+        entry?.coverMemoryTrimmed !== true &&
+        !albumCoverProbePathsRef.current.has(track.path)
+      const shouldProbeAlbumCover =
+        listMode === 'album' &&
+        selectedAlbum === 'all' &&
+        !entry?.cover &&
+        !albumCoverProbePathsRef.current.has(track.path)
+      if (shouldProbeMissingCover) return true
+      if (shouldProbeAlbumCover) return true
+      if (!entry) return true
+      return entry.cover == null && entry.coverChecked !== true
+    })
+    if (!pending.length) return undefined
+
+    let cancelled = false
+
+    const buildEmptyMetaEntry = () => ({
+      title: null,
+      artist: null,
+      album: null,
+      albumArtist: null,
+      trackNo: null,
+      discNo: null,
+      cover: null,
+      duration: null,
+      coverChecked: true,
+      codec: null,
+      bitrateKbps: null,
+      sampleRateHz: null,
+      bitDepth: null,
+      channels: null
+    })
+
+    const loadMetadata = async () => {
+      const loaded = {}
+      const cached = await readTrackMetaCache(pending.map((track) => track.path))
+      for (const [path, entry] of Object.entries(cached)) {
+        loaded[path] = entry
+      }
+      if (!cancelled && Object.keys(cached).length > 0) {
+        setTrackMetaMap((prev) => {
+          const merged = { ...prev, ...cached }
+          return trimTrackMetaCoverEntries(merged, metadataCoverKeepPathSet)
+        })
+      }
+
+      const uncachedPending = pending.filter((track) => {
+        if (!cached[track.path]) return true
+        return !cached[track.path]?.cover && !albumCoverProbePathsRef.current.has(track.path)
+      })
+      if (cancelled) return
+      const parseBatchSize =
+        listMode === 'album' && selectedAlbum === 'all'
+          ? ALBUM_METADATA_PARSE_BATCH_SIZE
+          : METADATA_PARSE_BATCH_SIZE
+      const parseQueue = uncachedPending.slice(0, parseBatchSize)
+      let nextIndex = 0
+
+      const parseNextTrack = async () => {
+        while (!cancelled) {
+          const track = parseQueue[nextIndex]
+          nextIndex += 1
+          if (!track) return
+          try {
+            const data = await window.api.getExtendedMetadataHandler(track.path)
+            if (data?.success) {
+              const common = data.common || {}
+              const technical = data.technical || {}
+              loaded[track.path] = {
+                title: common.title || null,
+                artist: common.artist || null,
+                album: common.album || null,
+                albumArtist: common.albumArtist || null,
+                trackNo: common.trackNo ?? null,
+                discNo: common.discNo ?? null,
+                cover: common.cover || null,
+                duration: technical.duration || null,
+                coverChecked: true,
+                codec: technical.codec || null,
+                bitrateKbps: technical.bitrate ? Math.round(technical.bitrate / 1000) : null,
+                sampleRateHz: technical.sampleRate || null,
+                bitDepth: technical.bitDepth || null,
+                channels: technical.channels || null
+              }
+            } else {
+              loaded[track.path] = buildEmptyMetaEntry()
+            }
+          } catch (error) {
+            loaded[track.path] = buildEmptyMetaEntry()
+          }
+        }
+      }
+
+      await Promise.all(
+        Array.from({ length: Math.min(METADATA_PARSE_WORKERS, parseQueue.length) }, () =>
+          parseNextTrack()
+        )
+      )
+
+      for (const track of parseQueue) {
+        if (track?.path) albumCoverProbePathsRef.current.add(track.path)
+      }
+
+      if (!cancelled && Object.keys(loaded).length > 0) {
+        setTrackMetaMap((prev) => {
+          const merged = { ...prev, ...loaded }
+          return trimTrackMetaCoverEntries(merged, metadataCoverKeepPathSet)
+        })
+      }
+
+      const freshLoaded = {}
+      for (const track of parseQueue) {
+        if (loaded[track.path]) freshLoaded[track.path] = loaded[track.path]
+      }
+      if (Object.keys(freshLoaded).length > 0) {
+        writeTrackMetaCache(freshLoaded)
+      }
+    }
+
+    loadMetadata()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    listMode,
+    metadataCoverKeepPathSet,
+    metadataPrefetchTracks,
+    selectedAlbum,
+    trackMetaMap
+  ])
 
   const renameScopeLabel = useMemo(() => {
     if (listMode === 'playlists' && selectedUserPlaylist) return selectedUserPlaylist.name

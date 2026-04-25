@@ -10,6 +10,7 @@ export function MiniWaveform({ analyser, isPlaying }) {
   // Visual height is controlled by CSS on `.mini-waveform-container`.
   // Keep a fallback here for initial layout before first ResizeObserver tick.
   const CANVAS_HEIGHT = 120
+  const FRAME_INTERVAL_MS = 1000 / 30
   const BAR_WIDTH = 10
   const BAR_GAP = 6
 
@@ -17,6 +18,7 @@ export function MiniWaveform({ analyser, isPlaying }) {
   const canvasRef = useRef(null)
   const animationRef = useRef(null)
   const lastFrameAtRef = useRef(0)
+  const lastDrawAtRef = useRef(0)
   const gradientRef = useRef({ key: '', gradient: null })
   const layoutRef = useRef({ width: 0, height: CANVAS_HEIGHT, dpr: 1 })
   const dataArrayRef = useRef(null)
@@ -188,18 +190,23 @@ export function MiniWaveform({ analyser, isPlaying }) {
 
   useEffect(() => {
     const loop = (timestamp) => {
-      draw(timestamp)
+      if (!lastDrawAtRef.current || timestamp - lastDrawAtRef.current >= FRAME_INTERVAL_MS) {
+        draw(timestamp)
+        lastDrawAtRef.current = timestamp
+      }
       animationRef.current = requestAnimationFrame(loop)
     }
     if (isPlaying) {
       barStateRef.current = []
       energyPeakRef.current = 0.22
       lastFrameAtRef.current = 0
+      lastDrawAtRef.current = 0
       animationRef.current = requestAnimationFrame(loop)
     } else {
       barStateRef.current = []
       energyPeakRef.current = 0.22
       lastFrameAtRef.current = 0
+      lastDrawAtRef.current = 0
       draw(performance.now())
     }
     return () => cancelAnimationFrame(animationRef.current)

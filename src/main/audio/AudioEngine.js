@@ -14,6 +14,17 @@ import { VstBridge } from './VstBridge.js'
 const resolvedFfmpeg = getResolvedFfmpegStaticPath()
 ffmpeg.setFfmpegPath(resolvedFfmpeg)
 
+const MAX_FILE_INFO_CACHE_ENTRIES = 512
+
+function trimMapCache(cache, maxEntries) {
+  if (!(cache instanceof Map) || cache.size <= maxEntries) return
+  while (cache.size > maxEntries) {
+    const firstKey = cache.keys().next().value
+    if (firstKey === undefined) break
+    cache.delete(firstKey)
+  }
+}
+
 function normalizeStreamUri(uri) {
   if (!uri || typeof uri !== 'string') return uri
   let s = uri.trim()
@@ -939,6 +950,7 @@ export class AudioEngine {
         isDSD
       }
       this._fileInfoCache.set(filePath, result)
+      trimMapCache(this._fileInfoCache, MAX_FILE_INFO_CACHE_ENTRIES)
       return result
     } catch (e) {
       console.warn('[AudioEngine] _getFileInfo failed, using defaults:', e?.message)

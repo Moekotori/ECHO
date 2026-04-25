@@ -25,6 +25,20 @@ function normalizeFolderPath(folderPath) {
   return folderPath.replace(/[\\/]+$/, '').trim()
 }
 
+function normalizeForCompare(itemPath) {
+  return normalizeFolderPath(itemPath).replace(/\\/g, '/').toLowerCase()
+}
+
+function isPathInsideFolder(itemPath, folderPath) {
+  const normalizedPath = normalizeForCompare(itemPath)
+  const normalizedFolder = normalizeForCompare(folderPath)
+  return (
+    !!normalizedPath &&
+    !!normalizedFolder &&
+    (normalizedPath === normalizedFolder || normalizedPath.startsWith(`${normalizedFolder}/`))
+  )
+}
+
 function toAudioEntry(entryPath, stats) {
   return {
     name: basename(entryPath),
@@ -94,6 +108,64 @@ function collectDirectoriesRecursive(entryPath, out, seen) {
   } catch (e) {
     console.warn(`[libraryWatcher] skip root ${normalized}:`, e?.message || e)
   }
+}
+
+function collectKnownDirectoriesFromPaths(existingPaths = []) {
+  const dirs = new Set()
+  for (const path of Array.isArray(existingPaths) ? existingPaths : []) {
+    if (typeof path !== 'string' || !path) continue
+    let dir = dirname(path)
+    while (dir && dir !== dirname(dir)) {
+      dirs.add(normalizeFolderPath(dir))
+      dir = dirname(dir)
+    }
+  }
+  return dirs
+}
+
+function collectDirectoriesForFolders(folders) {
+  const allDirectories = []
+  const seenDirectories = new Set()
+  for (const folder of folders) {
+    collectDirectoriesRecursive(folder, allDirectories, seenDirectories)
+  }
+  return allDirectories
+}
+
+function collectUnknownDirectoriesForRescan(entryPath, knownDirectories, out, seen) {
+  const normalized = normalizeFolderPath(entryPath)
+  if (!normalized || seen.has(normalized)) return
+
+  try {
+    const stats = fs.statSync(normalized)
+    if (!stats.isDirectory()) return
+    seen.add(normalized)
+
+    const isKnown = knownDirectories.has(normalized)
+    if (!isKnown) out.push(normalized)
+
+    for (const name of fs.readdirSync(normalized)) {
+      const nextPath = normalizeFolderPath(join(normalized, name))
+      try {
+        if (!fs.statSync(nextPath).isDirectory()) continue
+        if (isKnown && knownDirectories.has(nextPath)) continue
+        collectUnknownDirectoriesForRescan(nextPath, knownDirectories, out, seen)
+      } catch (e) {
+        console.warn(`[libraryWatcher] skip rescan dir ${nextPath}:`, e?.message || e)
+      }
+    }
+  } catch (e) {
+    console.warn(`[libraryWatcher] skip rescan root ${normalized}:`, e?.message || e)
+  }
+}
+
+function collectUnknownDirectoriesForFolders(folders, knownDirectories) {
+  const allDirectories = []
+  const seenDirectories = new Set()
+  for (const folder of folders) {
+    collectUnknownDirectoriesForRescan(folder, knownDirectories, allDirectories, seenDirectories)
+  }
+  return allDirectories
 }
 
 function uniqueByPath(entries) {
@@ -204,6 +276,11 @@ export async function rescanImportedFolders(folders, existingPaths = []) {
   const existingPathSet = new Set(
     Array.isArray(existingPaths) ? existingPaths.filter((item) => typeof item === 'string') : []
   )
+  if (existingPathSet.size > 0) {
+    const knownDirectories = collectKnownDirectoriesFromPaths(existingPaths)
+    const candidateDirectories = collectUnknownDirectoriesForFolders(normalizedFolders, knownDirectories)
+    return (await scanFolders(candidateDirectories)).filter((entry) => !existingPathSet.has(entry.path))
+  }
   return (await scanFolders(normalizedFolders)).filter((entry) => !existingPathSet.has(entry.path))
 }
 
@@ -214,6 +291,7 @@ export function createLibraryWatchManager({ onChange }) {
   let debounceTimer = null
   let scanning = false
   let rescanQueued = false
+  let dirtyScanRoots = new Set()
   const lastErrorRescanAtByDir = new Map()
 
   const closeAllWatchers = () => {
@@ -227,17 +305,12 @@ export function createLibraryWatchManager({ onChange }) {
     watchers = new Map()
   }
 
-  const rebuildWatchers = () => {
-    const allDirectories = []
-    const seenDirectories = new Set()
-    for (const folder of watchedFolders) {
-      collectDirectoriesRecursive(folder, allDirectories, seenDirectories)
-    }
-
+  const rebuildWatchers = (scanRoots = watchedFolders) => {
+    const allDirectories = collectDirectoriesForFolders(scanRoots)
     const nextDirectorySet = new Set(allDirectories)
 
     for (const [dirPath, watcher] of watchers) {
-      if (nextDirectorySet.has(dirPath)) continue
+      if (watchedFolders.some((folder) => isPathInsideFolder(dirPath, folder))) continue
       try {
         watcher.close()
       } catch {
@@ -250,7 +323,7 @@ export function createLibraryWatchManager({ onChange }) {
       if (watchers.has(dirPath)) continue
       try {
         const watcher = fs.watch(dirPath, () => {
-          scheduleRescan()
+          scheduleRescan(dirPath)
         })
         watcher.on('error', (error) => {
           console.warn(`[libraryWatcher] ${dirPath}:`, error?.message || error)
@@ -258,7 +331,7 @@ export function createLibraryWatchManager({ onChange }) {
           const lastAt = lastErrorRescanAtByDir.get(dirPath) || 0
           if (now - lastAt >= 1000) {
             lastErrorRescanAtByDir.set(dirPath, now)
-            scheduleRescan()
+            scheduleRescan(dirPath)
           }
         })
         watchers.set(dirPath, watcher)
@@ -276,10 +349,22 @@ export function createLibraryWatchManager({ onChange }) {
 
     scanning = true
     try {
-      const nextSnapshot = buildSnapshot(await scanFolders(watchedFolders))
-      const diff = diffSnapshots(snapshot, nextSnapshot)
-      snapshot = nextSnapshot
-      rebuildWatchers()
+      const scanRoots = [...dirtyScanRoots].filter((dirPath) =>
+        watchedFolders.some((folder) => isPathInsideFolder(dirPath, folder))
+      )
+      dirtyScanRoots = new Set()
+      if (!scanRoots.length) return
+
+      const nextSnapshot = buildSnapshot(await scanFolders(scanRoots))
+      const previousSnapshot = new Map(
+        [...snapshot].filter(([path]) =>
+          scanRoots.some((rootPath) => isPathInsideFolder(path, rootPath))
+        )
+      )
+      const diff = diffSnapshots(previousSnapshot, nextSnapshot)
+      for (const path of previousSnapshot.keys()) snapshot.delete(path)
+      for (const [path, entry] of nextSnapshot) snapshot.set(path, entry)
+      rebuildWatchers(scanRoots)
       if (diff.renamed.length || diff.removedPaths.length || diff.added.length) {
         onChange?.(diff)
       }
@@ -292,7 +377,8 @@ export function createLibraryWatchManager({ onChange }) {
     }
   }
 
-  const scheduleRescan = () => {
+  const scheduleRescan = (dirPath) => {
+    if (dirPath) dirtyScanRoots.add(normalizeFolderPath(dirPath))
     if (debounceTimer) clearTimeout(debounceTimer)
     debounceTimer = setTimeout(() => {
       debounceTimer = null
@@ -302,12 +388,19 @@ export function createLibraryWatchManager({ onChange }) {
 
   return {
     async start(folders) {
-      watchedFolders = Array.isArray(folders)
+      const nextFolders = Array.isArray(folders)
         ? [...new Set(folders.map(normalizeFolderPath).filter(Boolean))]
         : []
-      closeAllWatchers()
-      snapshot = buildSnapshot(await scanFolders(watchedFolders))
-      rebuildWatchers()
+      const addedFolders = nextFolders.filter(
+        (folder) => !watchedFolders.some((existing) => isPathInsideFolder(folder, existing))
+      )
+      watchedFolders = nextFolders
+      for (const path of [...snapshot.keys()]) {
+        if (!watchedFolders.some((folder) => isPathInsideFolder(path, folder))) {
+          snapshot.delete(path)
+        }
+      }
+      rebuildWatchers(addedFolders)
       return {
         ok: true,
         trackedFolders: watchedFolders.slice()
@@ -323,6 +416,7 @@ export function createLibraryWatchManager({ onChange }) {
       snapshot = new Map()
       scanning = false
       rescanQueued = false
+      dirtyScanRoots = new Set()
       return { ok: true }
     }
   }
