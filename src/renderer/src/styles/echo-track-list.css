@@ -504,4 +504,542 @@
 }
 
 /* 工具按钮组：轻边框 pill，不要过重 */
-.br
+.sidebar.browser-panel,
+.sidebar.browser-panel.glass-panel {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 76%, transparent), color-mix(in srgb, #fff 46%, transparent)),
+    color-mix(in srgb, var(--echo-bg, var(--bg-color)) 90%, #ffffff) !important;
+  border-left: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 6%, transparent) !important;
+}
+
+.browser-topbar-actions {
+  padding: 16px 28px 10px !important;
+}
+
+.browser-topbar-title {
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  color: color-mix(in srgb, var(--text-main, #5c4349) 86%, #111827) !important;
+}
+
+.browser-toolbar-group {
+  padding: 5px !important;
+  border-radius: 19px !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 84%, transparent), color-mix(in srgb, #fff 54%, transparent)) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 7%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 78%, transparent),
+    0 12px 26px color-mix(in srgb, var(--text-main, #5c4349) 5%, transparent) !important;
+}
+
+.browser-toolbar-btn {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 14px !important;
+  color: color-mix(in srgb, var(--text-soft, #857178) 88%, var(--text-main, #5c4349)) !important;
+}
+
+.browser-toolbar-btn:hover {
+  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 13%, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 24%, transparent) !important;
+  color: var(--text-main, #5c4349) !important;
+}
+
+.browser-panel .search-container {
+  min-height: 46px !important;
+  margin: 8px 28px 0 !important;
+  border-radius: 18px !important;
+  padding: 9px 18px !important;
+}
+
+.sidebar-list-stack {
+  padding: 16px 28px 24px !important;
+  gap: 12px !important;
+}
+
+.list-filter-bar {
+  padding-bottom: 6px !important;
+}
+
+.list-filter-chip,
+.folder-sort-trigger {
+  border-radius: 999px !important;
+  border-color: color-mix(in srgb, var(--text-main, #5c4349) 8%, transparent) !important;
+  background: color-mix(in srgb, #fff 62%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 62%, transparent);
+}
+
+.list-filter-chip.active,
+.folder-sort-trigger:hover {
+  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 14%, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 30%, transparent) !important;
+  color: var(--text-main, #5c4349) !important;
+}
+
+.playlist {
+  padding: 12px !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 76%, transparent), color-mix(in srgb, #fff 42%, transparent)),
+    color-mix(in srgb, var(--echo-surface-muted, #f8fafc) 74%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 7%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 72%, transparent),
+    0 18px 42px color-mix(in srgb, var(--text-main, #5c4349) 5%, transparent) !important;
+}
+
+.track-item {
+  min-height: 70px !important;
+  padding: 8px 12px 8px 10px !important;
+  margin-bottom: 5px !important;
+  border-radius: 16px !important;
+  background: color-mix(in srgb, #fff 44%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 5%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 46%, transparent) !important;
+  transition:
+    background 160ms var(--ease-standard, ease),
+    border-color 160ms var(--ease-standard, ease),
+    box-shadow 180ms var(--ease-standard, ease),
+    transform 160ms var(--ease-standard, ease) !important;
+}
+
+.track-item:hover {
+  background: var(--echo-row-hover-bg, color-mix(in srgb, #fff 78%, var(--theme-accent, #a3d2e3) 8%)) !important;
+  border-color: var(--echo-row-hover-border, color-mix(in srgb, var(--theme-accent, #a3d2e3) 30%, transparent)) !important;
+  transform: translateY(-1px) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 72%, transparent),
+    0 12px 26px -22px color-mix(in srgb, var(--text-main, #5c4349) 34%, transparent) !important;
+}
+
+.track-item.active {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 16%, #ffffff), color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 12%, #ffffff)) !important;
+  border-color: var(--echo-active-border, color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 34%, transparent)) !important;
+  box-shadow:
+    inset 4px 0 0 0 var(--theme-primary, var(--accent-pink)),
+    inset 0 1px 0 color-mix(in srgb, #fff 72%, transparent),
+    0 14px 28px -24px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 42%, transparent) !important;
+}
+
+.track-art {
+  border-radius: 13px !important;
+  border: 1px solid color-mix(in srgb, #fff 54%, transparent);
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--text-main, #5c4349) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 48%, transparent);
+}
+
+.track-art img {
+  transform: scale(1.001);
+}
+
+.track-item:hover .track-art {
+  box-shadow:
+    0 10px 20px color-mix(in srgb, var(--text-main, #5c4349) 13%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 14%, transparent);
+}
+
+.track-name {
+  font-size: 13.75px !important;
+  font-weight: 720 !important;
+}
+
+.track-subtitle {
+  color: color-mix(in srgb, var(--echo-text-secondary, #667085) 88%, var(--text-main, #5c4349)) !important;
+}
+
+.track-meta-pill,
+.aq-badge,
+.echo-bpm-pill {
+  border-radius: 7px !important;
+  background: color-mix(in srgb, #fff 54%, var(--theme-accent, var(--accent-blue)) 8%) !important;
+  border-color: color-mix(in srgb, var(--text-main, #5c4349) 6%, transparent) !important;
+}
+
+.aq-badge--lossless,
+.aq-badge--lossless-codec,
+.aq-badge--hires {
+  background: var(--theme-accent-soft, color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 14%, transparent)) !important;
+  color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 76%, var(--text-main, #5c4349)) !important;
+  border-color: var(--theme-accent-border, color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 28%, transparent)) !important;
+}
+
+.track-row-meta {
+  color: color-mix(in srgb, var(--echo-text-tertiary, #98a2b3) 82%, var(--text-main, #5c4349)) !important;
+}
+
+.track-like-btn,
+.track-add-pl-btn,
+.track-remove-pl-btn {
+  border-radius: 13px !important;
+  background: color-mix(in srgb, #fff 56%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 6%, transparent) !important;
+}
+
+.track-like-btn:hover,
+.track-add-pl-btn:hover,
+.track-remove-pl-btn:hover {
+  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 15%, #ffffff) !important;
+  color: var(--text-main, #5c4349) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) {
+  height: 124px !important;
+  padding: 0 28px !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 88%, transparent), color-mix(in srgb, #fff 76%, transparent)) !important;
+  border-top: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 8%, transparent) !important;
+  box-shadow:
+    0 -14px 34px color-mix(in srgb, var(--text-main, #5c4349) 5%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 70%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-cover,
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-cover-fallback {
+  width: 88px !important;
+  height: 88px !important;
+  border-radius: 18px !important;
+  box-shadow:
+    0 16px 34px color-mix(in srgb, var(--text-main, #5c4349) 14%, transparent),
+    0 0 0 1px color-mix(in srgb, #fff 58%, transparent);
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-title {
+  font-size: 15.5px !important;
+  font-weight: 800 !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-center {
+  align-self: stretch !important;
+  display: grid !important;
+  grid-template-rows: 46px 24px !important;
+  align-content: center !important;
+  justify-items: center !important;
+  gap: 12px !important;
+  padding: 0 clamp(18px, 3.2vw, 54px) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-transport {
+  height: 46px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 9px !important;
+  padding: 4px 7px !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, #fff 46%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 7%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 70%, transparent),
+    0 8px 22px color-mix(in srgb, var(--text-main, #5c4349) 6%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .btn--transport {
+  width: 36px !important;
+  height: 36px !important;
+  color: color-mix(in srgb, var(--text-soft, #857178) 80%, var(--text-main, #5c4349)) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  transition:
+    background 140ms var(--ease-standard, ease),
+    border-color 140ms var(--ease-standard, ease),
+    color 140ms var(--ease-standard, ease),
+    transform 140ms var(--ease-standard, ease) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .btn--transport svg {
+  stroke: currentColor !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .btn--transport:hover {
+  color: var(--text-main, #5c4349) !important;
+  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 13%, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 18%, transparent) !important;
+  transform: translateY(-1px) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .btn--transport:active {
+  transform: scale(0.94) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .btn--transport.lyrics-toggle.active {
+  color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 74%, var(--text-main, #5c4349)) !important;
+  background: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 12%, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 26%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .btn.play-btn {
+  width: 54px !important;
+  height: 54px !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 20%, transparent), transparent 46%),
+    var(--theme-primary, var(--accent-pink)) !important;
+  border: 1px solid color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 16%, #ffffff) !important;
+  box-shadow:
+    0 10px 22px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 20%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 9%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .btn.play-btn:hover {
+  opacity: 1 !important;
+  transform: translateY(-1px) scale(1.025) !important;
+  box-shadow:
+    0 12px 24px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 22%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 12%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-progress {
+  width: min(100%, 940px) !important;
+  display: grid !important;
+  grid-template-columns: 46px minmax(180px, 1fr) 46px !important;
+  align-items: center !important;
+  gap: 12px !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-time {
+  min-width: 46px !important;
+  font-size: 12px !important;
+  font-weight: 720 !important;
+  line-height: 1 !important;
+  color: color-mix(in srgb, var(--text-soft, #857178) 86%, var(--text-main, #5c4349)) !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-progress .player-progress {
+  height: 18px !important;
+  min-width: 0 !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-progress .player-progress::-webkit-slider-runnable-track {
+  height: 4px !important;
+  background:
+    linear-gradient(
+      to right,
+      var(--theme-primary, var(--accent-pink)) 0 var(--seek-pct, 0%),
+      color-mix(in srgb, var(--text-main, #5c4349) 10%, transparent) var(--seek-pct, 0%) 100%
+    ) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-progress .player-progress::-webkit-slider-thumb {
+  width: 12px !important;
+  height: 12px !important;
+  margin-top: -4px !important;
+  border: 2px solid #fff !important;
+  background: var(--theme-primary, var(--accent-pink)) !important;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 13%, transparent),
+    0 4px 10px color-mix(in srgb, var(--text-main, #5c4349) 14%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-progress .player-progress::-moz-range-track {
+  height: 4px !important;
+  background: color-mix(in srgb, var(--text-main, #5c4349) 10%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-progress .player-progress::-moz-range-progress {
+  height: 4px !important;
+  background: var(--theme-primary, var(--accent-pink)) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-progress .player-progress::-moz-range-thumb {
+  width: 12px !important;
+  height: 12px !important;
+  border: 2px solid #fff !important;
+  background: var(--theme-primary, var(--accent-pink)) !important;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 13%, transparent),
+    0 4px 10px color-mix(in srgb, var(--text-main, #5c4349) 14%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-right .btn--transport {
+  width: 38px !important;
+  height: 38px !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 70%, transparent), color-mix(in srgb, #fff 44%, transparent)) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 7%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 66%, transparent),
+    0 8px 18px color-mix(in srgb, var(--text-main, #5c4349) 6%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-toolset {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 9px !important;
+  padding: 4px !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, #fff 34%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 6%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 58%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-toolset .btn--transport {
+  width: 38px !important;
+  height: 38px !important;
+  color: color-mix(in srgb, var(--text-soft, #857178) 78%, var(--text-main, #5c4349)) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-toolset .btn--transport.active {
+  color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 72%, var(--text-main, #5c4349)) !important;
+  background: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 12%, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 26%, transparent) !important;
+}
+
+.bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-toolset .btn--transport:disabled {
+  opacity: 0.42 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+}
+
+.deck-popover--bottom-tools {
+  bottom: 124px !important;
+  right: 32px !important;
+  width: 190px !important;
+  min-width: 190px !important;
+  max-width: 190px !important;
+  min-height: 0 !important;
+  padding: 14px 16px !important;
+  border-radius: 20px !important;
+  color: var(--text-main, #5c4349) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 86%, transparent), color-mix(in srgb, #fff 70%, transparent)) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 8%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 82%, transparent),
+    0 20px 46px color-mix(in srgb, var(--text-main, #5c4349) 12%, transparent) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.35) !important;
+  backdrop-filter: blur(22px) saturate(1.35) !important;
+}
+
+.deck-popover--speed {
+  right: 32px !important;
+  min-height: 0 !important;
+}
+
+.deck-popover--bottom-tools::after {
+  content: '';
+  position: absolute;
+  right: 50%;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  transform: translateX(50%) rotate(45deg);
+  background: color-mix(in srgb, #fff 76%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 7%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 7%, transparent);
+}
+
+.deck-popover--volume .deck-popover-speed-row,
+.deck-popover--volume .deck-popover-speed-reset,
+.deck-popover--bottom-tools .deck-popover-export,
+.deck-popover--speed .deck-popover-volume-row {
+  display: none !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-row {
+  height: auto !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-control-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.deck-popover--speed {
+  width: 218px !important;
+  min-width: 218px !important;
+  max-width: 218px !important;
+}
+
+.deck-popover--speed .deck-popover-slider {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-label {
+  width: 100% !important;
+  min-width: 0 !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 12px !important;
+  color: color-mix(in srgb, var(--text-soft, #857178) 82%, var(--text-main, #5c4349)) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-label span:last-child {
+  color: var(--text-main, #5c4349) !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-slider {
+  width: 100% !important;
+  height: 18px !important;
+  writing-mode: horizontal-tb !important;
+  direction: ltr !important;
+  accent-color: var(--theme-primary, var(--accent-pink)) !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-btn {
+  width: auto !important;
+  justify-content: center !important;
+  align-self: flex-end !important;
+  margin-top: -2px !important;
+  padding: 6px 8px !important;
+  border-radius: 12px !important;
+  font-size: 0 !important;
+  color: color-mix(in srgb, var(--text-soft, #857178) 82%, var(--text-main, #5c4349)) !important;
+  background: color-mix(in srgb, #fff 50%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--text-main, #5c4349) 7%, transparent) !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-speed-reset {
+  flex: 0 0 30px !important;
+  width: 30px !important;
+  height: 30px !important;
+  align-self: center !important;
+  margin-top: 0 !important;
+  padding: 0 !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-btn:hover {
+  color: var(--text-main, #5c4349) !important;
+  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 13%, #ffffff) !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-btn svg {
+  margin: 0 !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-slider::-webkit-slider-runnable-track {
+  width: 100% !important;
+  height: 5px !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, var(--text-main, #5c4349) 10%, transparent) !important;
+}
+
+.deck-popover--bottom-tools .deck-popover-slider::-webkit-slider-thumb {
+  -webkit-appearance: none !important;
+  width: 14px !important;
+  height: 14px !important;
+  margin-top: -4.5px !important;
+  margin-left: 0 !important;
+  border-radius: 50% !important;
+  border: 2px solid #fff !important;
+  background: var(--theme-primary, var(--accent-pink)) !important;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 13%, transparent),
+    0 5px 14px color-mix(in srgb, var(--text-main, #5c4349) 18%, transparent) !important;
+}

@@ -6,10 +6,10 @@
 
 :root {
   /* ── ECHO 页面背景与表面色 ── */
-  --echo-bg:              #f5f7fb;
-  --echo-surface:         #ffffff;
-  --echo-surface-muted:   #f8fafc;
-  --echo-surface-hover:   #f3f6fb;
+  --echo-bg:              color-mix(in srgb, var(--bg-color, #f7f3f5) 86%, #f8fbff);
+  --echo-surface:         color-mix(in srgb, #ffffff 88%, var(--bg-color, #f7f3f5));
+  --echo-surface-muted:   color-mix(in srgb, #ffffff 70%, var(--bg-color, #f7f3f5));
+  --echo-surface-hover:   color-mix(in srgb, #ffffff 78%, var(--accent-blue, #a3d2e3) 10%);
 
   /* ── 文字色 ── */
   --echo-text-primary:    #111827;
@@ -17,31 +17,31 @@
   --echo-text-tertiary:   #98a2b3;
 
   /* ── 边框 ── */
-  --echo-border:          rgba(15, 23, 42, 0.08);
-  --echo-border-strong:   rgba(15, 23, 42, 0.14);
+  --echo-border:          color-mix(in srgb, var(--text-main, #5c4349) 8%, transparent);
+  --echo-border-strong:   color-mix(in srgb, var(--text-main, #5c4349) 15%, transparent);
 
   /* ── 主题强调色（后续可由设置覆盖） ── */
-  --theme-primary:        #8fa0bb;
-  --theme-accent:         #9aaac4;
-  --theme-accent-soft:    rgba(143, 160, 187, 0.14);
-  --theme-accent-border:  rgba(143, 160, 187, 0.24);
+  --theme-primary:        var(--accent-pink, #8fa0bb);
+  --theme-accent:         color-mix(in srgb, var(--accent-blue, #a3d2e3) 58%, var(--theme-primary));
+  --theme-accent-soft:    color-mix(in srgb, var(--theme-primary) 14%, transparent);
+  --theme-accent-border:  color-mix(in srgb, var(--theme-primary) 28%, transparent);
 
   /* ── 行交互状态 ── */
-  --echo-row-hover-bg:    rgba(255, 255, 255, 0.72);
-  --echo-row-hover-border: rgba(143, 160, 187, 0.20);
-  --echo-active-bg:       rgba(244, 222, 217, 0.62);
-  --echo-active-border:   rgba(220, 170, 160, 0.42);
+  --echo-row-hover-bg:    color-mix(in srgb, #ffffff 78%, var(--theme-accent) 8%);
+  --echo-row-hover-border: color-mix(in srgb, var(--theme-accent) 30%, transparent);
+  --echo-active-bg:       color-mix(in srgb, #ffffff 72%, var(--theme-primary) 16%);
+  --echo-active-border:   color-mix(in srgb, var(--theme-primary) 36%, transparent);
   --echo-active-text:     #1f2937;
   --echo-playing-indicator: var(--theme-primary);
 
   /* ── 音质标签色 ── */
-  --quality-codec-bg:     rgba(15, 23, 42, 0.05);
+  --quality-codec-bg:     color-mix(in srgb, var(--text-main, #5c4349) 5%, transparent);
   --quality-codec-text:   var(--echo-text-secondary);
   --quality-lossless-bg:  var(--theme-accent-soft);
   --quality-lossless-text: var(--theme-primary);
-  --quality-hires-bg:     rgba(143, 160, 187, 0.22);
+  --quality-hires-bg:     color-mix(in srgb, var(--theme-accent) 24%, transparent);
   --quality-hires-text:   var(--theme-primary);
-  --quality-tech-bg:      rgba(15, 23, 42, 0.04);
+  --quality-tech-bg:      color-mix(in srgb, var(--text-main, #5c4349) 4%, transparent);
   --quality-tech-text:    var(--echo-text-tertiary);
 
   /* ── 圆角 ── */
@@ -52,9 +52,9 @@
   --echo-radius-xl:       24px;
 
   /* ── 阴影 ── */
-  --echo-shadow-soft:     0 4px 16px rgba(15, 23, 42, 0.04);
-  --echo-shadow-panel:    0 8px 32px rgba(15, 23, 42, 0.06);
-  --echo-shadow-card:     0 2px 8px rgba(15, 23, 42, 0.05);
+  --echo-shadow-soft:     0 8px 24px color-mix(in srgb, var(--text-main, #5c4349) 6%, transparent);
+  --echo-shadow-panel:    0 18px 48px color-mix(in srgb, var(--text-main, #5c4349) 8%, transparent);
+  --echo-shadow-card:     0 10px 24px color-mix(in srgb, var(--text-main, #5c4349) 7%, transparent);
 
   /* ── 播放器进度条颜色跟随主题 ── */
   --echo-progress-fill:   var(--theme-primary);

@@ -7,6 +7,7 @@
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint . --ext js,jsx,cjs,mjs,ts,tsx --fix",
+    "guard:app-jsx": "node scripts/guard-app-jsx-edits.mjs",
     "test:unit": "node --test test/unit/*.test.mjs",
     "verify:release": "node scripts/verify-release.mjs",
     "postinstall": "cross-env PYTHONUTF8=1 electron-builder install-app-deps",

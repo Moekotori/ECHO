@@ -1,3 +1,8 @@
+/*
+ * App.jsx is a legacy integration surface. Keep new feature logic in focused
+ * components, utils, config, main/preload modules, or styles first.
+ * Read docs/APP_JSX_CHANGE_MAP.md before editing this file.
+ */
 import React, {
   useState,
   useRef,
@@ -67,7 +72,7 @@ import {
   History,
   GripVertical,
   Tag,
-  SlidersHorizontal,
+  Gauge,
   RotateCcw
 } from 'lucide-react'
 import {
@@ -1286,7 +1291,7 @@ export default function App() {
   const [isSpeedDragging, setIsSpeedDragging] = useState(false)
   const [isVolumeDragging, setIsVolumeDragging] = useState(false)
   const [speedPopoverOpen, setSpeedPopoverOpen] = useState(false)
-  const [deckPopoverOpen, setDeckPopoverOpen] = useState(false)
+  const [activeDeckPopover, setActiveDeckPopover] = useState(null)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [lyricsRenderTime, setLyricsRenderTime] = useState(0)
@@ -1307,14 +1312,15 @@ export default function App() {
   }, [speedPopoverOpen])
 
   useEffect(() => {
-    if (!deckPopoverOpen) return
+    if (!activeDeckPopover) return
     const close = (e) => {
-      if (!e.target.closest('.deck-popover') && !e.target.closest('.deck-popover-trigger'))
-        setDeckPopoverOpen(false)
+      if (!e.target.closest('.deck-popover') && !e.target.closest('.deck-tool-trigger')) {
+        setActiveDeckPopover(null)
+      }
     }
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
-  }, [deckPopoverOpen])
+  }, [activeDeckPopover])
 
   useEffect(() => {
     if (window.api?.getAppVersion) {
@@ -3985,29 +3991,33 @@ export default function App() {
   }, [applyLyricsFromText])
 
   const lrcLibCache = useRef(new Map())
+  const lrcLibPendingRef = useRef(new Map())
 
   const requestLrcLib = async (url) => {
-    // 命中缓存直接返回，同一首歌换着搜不会重复请求
     if (lrcLibCache.current.has(url)) return lrcLibCache.current.get(url)
+    if (lrcLibPendingRef.current.has(url)) return lrcLibPendingRef.current.get(url)
 
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 6000) // 6秒超时
-    try {
-      const response = await fetch(url, { signal: controller.signal })
-      if (!response.ok) return null
-      const data = await response.json()
-      lrcLibCache.current.set(url, data)
-      // 缓存最多保留 120 条，防止内存无限增长
-      if (lrcLibCache.current.size > MAX_LRCLIB_CACHE_ENTRIES) {
-        const firstKey = lrcLibCache.current.keys().next().value
-        lrcLibCache.current.delete(firstKey)
-      }
-      return data
-    } catch {
-      return null
-    } finally {
-      clearTimeout(timeoutId)
-    }
+    const timeoutId = setTimeout(() => controller.abort(), 6000)
+    const task = fetch(url, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return null
+        const data = await response.json()
+        lrcLibCache.current.set(url, data)
+        if (lrcLibCache.current.size > MAX_LRCLIB_CACHE_ENTRIES) {
+          const firstKey = lrcLibCache.current.keys().next().value
+          lrcLibCache.current.delete(firstKey)
+        }
+        return data
+      })
+      .catch(() => null)
+      .finally(() => {
+        clearTimeout(timeoutId)
+        lrcLibPendingRef.current.delete(url)
+      })
+
+    lrcLibPendingRef.current.set(url, task)
+    return task
   }
 
   const searchLyricsCandidates = async (customQuery) => {
@@ -4387,11 +4397,27 @@ export default function App() {
       }
     }
 
-    // 2. Try local LRC
+    // 1.5 Try embedded metadata lyrics before touching disk or network.
+    if (hints?.embeddedLyrics) {
+      const embeddedParsed = parseAnyLyrics(hints.embeddedLyrics)
+      if (embeddedParsed.length > 0) {
+        if (
+          applyLyricsResult(embeddedParsed, 'matched', {
+            kind: 'embedded',
+            detail: '',
+            origin: ''
+          })
+        )
+          return
+        return
+      }
+    }
+
+    // 2. Try local LRC briefly, then let online search continue.
     try {
       const expectSidecarLyrics = hints?.hasLyrics === true
-      const localReadAttempts = expectSidecarLyrics ? 8 : 1
-      const localRetryDelayMs = expectSidecarLyrics ? 250 : 0
+      const localReadAttempts = expectSidecarLyrics ? 2 : 1
+      const localRetryDelayMs = expectSidecarLyrics ? 80 : 0
 
       for (let attempt = 0; attempt < localReadAttempts; attempt++) {
         const localLrc = await window.api.readLyricsHandler(filePath)
@@ -4412,22 +4438,6 @@ export default function App() {
       }
     } catch (e) {
       console.error('Local LRC error', e)
-    }
-
-    // 1.5 Try embedded metadata lyrics
-    if (hints?.embeddedLyrics) {
-      const embeddedParsed = parseAnyLyrics(hints.embeddedLyrics)
-      if (embeddedParsed.length > 0) {
-        if (
-          applyLyricsResult(embeddedParsed, 'matched', {
-            kind: 'embedded',
-            detail: '',
-            origin: ''
-          })
-        )
-          return
-        return
-      }
     }
 
     const lyricsSource = configRef.current.lyricsSource || 'lrclib'
@@ -4505,6 +4515,30 @@ export default function App() {
           return applyLrcLibPayload(data)
         }
 
+        const waitForFirstLyricsHit = (attempts) =>
+          new Promise((resolve) => {
+            let pending = attempts.length
+            if (pending === 0) {
+              resolve(false)
+              return
+            }
+            attempts.forEach((attempt) => {
+              attempt
+                .then((hit) => {
+                  if (hit) {
+                    resolve(true)
+                    return
+                  }
+                  pending -= 1
+                  if (pending === 0) resolve(false)
+                })
+                .catch(() => {
+                  pending -= 1
+                  if (pending === 0) resolve(false)
+                })
+            })
+          })
+
         const runLrcLibAttempts = async () => {
           for (const cleanedTitle of titleVariants) {
             const parenHints = [
@@ -4522,11 +4556,11 @@ export default function App() {
               ? `${cleanedTitle} ${firstArtist}`.trim()
               : cleanedTitle
 
-            const [getHit, searchHit] = await Promise.all([
+            const firstWaveHit = await waitForFirstLyricsHit([
               tryGet(cleanedTitle, firstArtist),
               trySearch(firstSearchQ)
             ])
-            if (getHit || searchHit) return true
+            if (firstWaveHit) return true
             if (isStaleRequest()) return false
 
             // 第二波：其余 get 变体串行（已有缓存，通常很快）
@@ -4804,6 +4838,7 @@ export default function App() {
         fetchLyrics(filePath, resolvedTitle, resolvedArtist, {
           album: common.album || '',
           embeddedLyrics: common.lyrics || '',
+          hasLyrics: trackHints.hasLyrics === true,
           mvOriginUrl: trackHints.mvOriginUrl
         })
       } else {
@@ -4828,6 +4863,7 @@ export default function App() {
         })
         fetchCloudCover(resolvedTitle, resolvedArtist, requestSeq)
         fetchLyrics(filePath, resolvedTitle, resolvedArtist, {
+          hasLyrics: trackHints.hasLyrics === true,
           mvOriginUrl: trackHints.mvOriginUrl
         })
       }
@@ -15058,79 +15094,86 @@ export default function App() {
                 </label>
               </div>
             ) : (
-              <button
-                className="btn btn--transport deck-popover-trigger"
-                style={{
-                  width: 34,
-                  height: 34,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: deckPopoverOpen ? 'var(--accent-pink)' : 'var(--text-soft)'
-                }}
-                onClick={() => setDeckPopoverOpen((v) => !v)}
-                title={t('player.vol') + ' / ' + t('player.speed')}
-              >
-                <SlidersHorizontal size={15} />
-              </button>
+              <div className="bottom-bar-toolset">
+                <button
+                  className={`btn btn--transport deck-tool-trigger ${activeDeckPopover === 'volume' ? 'active' : ''}`}
+                  onClick={() =>
+                    setActiveDeckPopover((value) => (value === 'volume' ? null : 'volume'))
+                  }
+                  title={t('player.vol')}
+                >
+                  {volume <= 0.001 ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                </button>
+                <button
+                  className={`btn btn--transport deck-tool-trigger ${activeDeckPopover === 'speed' ? 'active' : ''}`}
+                  onClick={() =>
+                    setActiveDeckPopover((value) => (value === 'speed' ? null : 'speed'))
+                  }
+                  title={t('player.speed')}
+                >
+                  <Gauge size={16} />
+                </button>
+                <button
+                  className="btn btn--transport deck-tool-trigger deck-tool-export"
+                  onClick={() => {
+                    handleExport()
+                    setActiveDeckPopover(null)
+                  }}
+                  disabled={isExporting || !currentTrack}
+                  title={t('player.exportButton')}
+                >
+                  <Download size={16} />
+                </button>
+              </div>
             )}
 
             {/* 浮层面板 —— 用 createPortal 挂到 body，绕开 backdrop-filter 包含块问题 */}
-            {!showLyrics && deckPopoverOpen && createPortal(
-              <div className="deck-popover">
-                {/* 音量 */}
-                <div className="deck-popover-row">
-                  <div className="deck-popover-label">
-                    <span>{t('player.vol')}</span>
-                    <span>{Math.round(volume * 100)}%</span>
+            {!showLyrics && activeDeckPopover && createPortal(
+              <div
+                className={`deck-popover deck-popover--bottom-tools deck-popover--${activeDeckPopover}`}
+              >
+                {activeDeckPopover === 'volume' ? (
+                  <div className="deck-popover-row deck-popover-volume-row">
+                    <div className="deck-popover-label">
+                      <span>{t('player.vol')}</span>
+                      <span>{Math.round(volume * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      className="deck-popover-slider"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={volume}
+                      onChange={(e) => setVolume(parseFloat(e.target.value))}
+                    />
                   </div>
-                  <input
-                    type="range"
-                    className="deck-popover-slider"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={volume}
-                    onChange={(e) => setVolume(parseFloat(e.target.value))}
-                  />
-                </div>
-
-                {/* 速度 */}
-                <div className="deck-popover-row">
-                  <div className="deck-popover-label">
-                    <span>{t('player.speed')}</span>
-                    <span>{playbackRate.toFixed(2)}x</span>
+                ) : (
+                  <div className="deck-popover-row deck-popover-speed-row">
+                    <div className="deck-popover-label">
+                      <span>{t('player.speed')}</span>
+                      <span>{playbackRate.toFixed(2)}x</span>
+                    </div>
+                    <div className="deck-popover-control-row">
+                      <input
+                        type="range"
+                        className="deck-popover-slider"
+                        min={0.5}
+                        max={2.0}
+                        step={0.05}
+                        value={playbackRate}
+                        onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
+                      />
+                      <button
+                        className="deck-popover-btn deck-popover-speed-reset"
+                        onClick={() => setPlaybackRate(1.0)}
+                        title={t('player.resetSpeed') || '重置速度'}
+                      >
+                        <RotateCcw size={13} />
+                      </button>
+                    </div>
                   </div>
-                  <input
-                    type="range"
-                    className="deck-popover-slider"
-                    min={0.5}
-                    max={2.0}
-                    step={0.05}
-                    value={playbackRate}
-                    onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
-                  />
-                </div>
-
-                {/* 速度重置 */}
-                {playbackRate !== 1.0 && (
-                  <button className="deck-popover-btn" onClick={() => setPlaybackRate(1.0)}>
-                    <RotateCcw size={13} />
-                    {t('player.resetSpeed') || '重置速度'}
-                  </button>
                 )}
-
-                {/* 导出 */}
-                <button
-                  className="deck-popover-btn"
-                  onClick={() => {
-                    handleExport()
-                    setDeckPopoverOpen(false)
-                  }}
-                  disabled={isExporting || !currentTrack}
-                >
-                  <Download size={13} />
-                  {t('player.exportButton')}
-                </button>
               </div>,
               document.body
             )}

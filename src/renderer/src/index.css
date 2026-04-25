@@ -121,6 +121,10 @@ body {
   overflow: hidden;
 }
 
+.app-root:has(.main-player.lyrics-mode) {
+  background: transparent;
+}
+
 .app-container {
   display: flex;
   flex-direction: row;
@@ -9841,4 +9845,74 @@ input[type='range']::-moz-range-track {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+}
+
+/* Main shell polish: theme-aware, soft, and slightly playful without hiding controls. */
+.app-root:not(:has(.main-player.lyrics-mode)) {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-color) 92%, #ffffff) 0%,
+      color-mix(in srgb, var(--accent-blue) 12%, var(--bg-color)) 46%,
+      color-mix(in srgb, var(--accent-pink) 10%, #ffffff) 100%
+    );
+}
+
+.nav-rail {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 48%, transparent), transparent 68%),
+    color-mix(in srgb, var(--bg-color) 88%, #ffffff);
+  border-right-color: color-mix(in srgb, var(--text-main) 7%, transparent);
+}
+
+.nav-rail-logo {
+  color: var(--theme-primary, var(--accent-pink));
+  text-shadow: 0 8px 24px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 20%, transparent);
+}
+
+.nav-rail-item,
+.nav-rail-icon-btn {
+  border-radius: 14px;
+}
+
+.nav-rail-item:hover,
+.nav-rail-icon-btn:hover {
+  background: color-mix(in srgb, #fff 62%, var(--theme-accent, var(--accent-blue)) 8%);
+  color: var(--text-main);
+}
+
+.nav-rail-item.active {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 18%, #fff), color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 14%, #fff));
+  color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 76%, var(--text-main));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 64%, transparent),
+    0 10px 24px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 13%, transparent);
+}
+
+.browser-toolbar-group {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 76%, transparent), color-mix(in srgb, #fff 48%, transparent));
+  border-color: color-mix(in srgb, var(--text-main) 7%, transparent);
+  border-radius: 18px;
+}
+
+.browser-toolbar-btn {
+  border-radius: 14px;
+}
+
+.search-container {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 78%, transparent), color-mix(in srgb, #fff 52%, transparent));
+  border-color: color-mix(in srgb, var(--text-main) 7%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 70%, transparent),
+    0 12px 28px color-mix(in srgb, var(--text-main) 4%, transparent);
+}
+
+.search-container:focus-within {
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 44%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 82%, transparent),
+    0 14px 32px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 13%, transparent);
 }

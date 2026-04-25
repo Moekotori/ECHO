@@ -1,0 +1,27 @@
+---
+description: Keep App.jsx as a routing layer; route new feature work to focused modules first.
+globs:
+  - "src/renderer/src/App.jsx"
+  - "src/renderer/src/components/**"
+  - "src/renderer/src/utils/**"
+  - "src/renderer/src/config/**"
+alwaysApply: true
+---
+
+# App.jsx Guard
+
+`src/renderer/src/App.jsx` is a legacy integration surface. Prefer not to add new feature logic there by default, but small routing edits are allowed when they are the clearest route.
+
+Before editing `App.jsx`, read `docs/APP_JSX_CHANGE_MAP.md` and explain which single region you need to touch.
+
+Prefer these routes:
+
+- Component UI -> `src/renderer/src/components`
+- Reusable controls -> `src/renderer/src/components/ui`
+- Pure transforms and ranking/parsing logic -> `src/renderer/src/utils`
+- Persisted defaults -> `src/renderer/src/config/defaultConfig.js`
+- Main-process IO/export/download work -> `src/main` plus preload wiring
+- Styling -> `src/renderer/src/index.css` or `src/renderer/src/styles`
+- Copy -> `src/renderer/src/locales/*.json`
+
+If `App.jsx` must change, keep the edit small, contiguous, and limited to routing, props, state wiring, or replacing one complete JSX block. Afterward run `npm run guard:app-jsx` and `npm run build`; the guard is a warning unless `STRICT_APP_JSX_GUARD=1` is set.
