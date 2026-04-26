@@ -7,7 +7,7 @@ Run this before cutting a desktop release, especially after changes to `AudioEng
 1. **Startup restore**: Close the app mid-track, reopen it, and confirm the last track, current progress, volume, and playback history restore from `appState`. Expected UI: track restores in paused state.
 2. **Play / pause / resume**: Start a track, pause, resume; confirm no duplicate `[NativeAudioBridge] spawn` lines for a single user action (aside from intentional track change).
 3. **Next / previous track**: Switch tracks while playing; audio should switch cleanly and playback history should update once per previous track.
-4. **Seek**: Drag the progress bar and use lyrics click-to-seek in HiFi mode; waveform/MV should stay aligned with audible position.
+4. **Seek**: Drag the progress bar and use lyrics click-to-seek in HiFi mode; lyrics/MV should stay aligned with audible position.
 5. **Volume restore**: Change master volume, close and reopen the app, and confirm the restored value is not reset to 100%.
 
 ## Audio stack

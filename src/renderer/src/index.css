@@ -280,10 +280,6 @@ body {
   gap: 12px;
 }
 
-.bottom-player-bar--lyrics .bottom-bar-right .mini-waveform-container {
-  display: none;
-}
-
 .bottom-player-bar--lyrics .bottom-bar-progress {
   order: 1;
   flex: 1 1 420px;
@@ -633,12 +629,6 @@ body {
 .bottom-bar-right .btn--transport {
   width: 42px !important;
   height: 42px !important;
-}
-
-.bottom-bar-right .mini-waveform-container {
-  width: 58px;
-  height: 28px;
-  margin: 0;
 }
 
 .bottom-bar-volume {
@@ -1595,6 +1585,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
+  -webkit-app-region: no-drag;
 }
 
 .nav-rail-subitem:hover,
@@ -2484,8 +2475,8 @@ body {
 
 .search-container:focus-within {
   background: rgba(255, 255, 255, 0.7);
-  box-shadow: 0 4px 15px var(--shadow-color);
-  border-color: var(--accent-pink);
+  box-shadow: 0 4px 15px color-mix(in srgb, var(--shadow-color) 72%, transparent);
+  border-color: color-mix(in srgb, var(--text-main) 9%, transparent);
 }
 
 .search-icon {
@@ -2501,6 +2492,15 @@ body {
   font-size: 14px;
   color: var(--text-main);
   outline: none;
+  box-shadow: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.search-container input:focus,
+.search-container input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .search-container input::placeholder {
@@ -3147,19 +3147,20 @@ body {
 .new-playlist-inline {
   display: flex;
   gap: 8px;
-  align-items: stretch;
-  margin-bottom: 10px;
+  align-items: center;
+  margin-bottom: 0;
 }
 
 .new-playlist-input {
   flex: 1;
   min-width: 0;
-  padding: 10px 12px;
-  border-radius: 12px;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: 10px;
   border: 1px solid var(--glass-border);
   background: rgba(255, 255, 255, 0.35);
   color: var(--text-main);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   outline: none;
 }
@@ -3172,9 +3173,11 @@ body {
 .new-playlist-submit {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 0 14px;
-  border-radius: 12px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
   border: none;
   font-weight: 800;
   font-size: 12px;
@@ -3207,12 +3210,8 @@ body {
 .user-playlist-library-chrome {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   margin-bottom: 12px;
-}
-
-.user-playlist-library-chrome .new-playlist-inline {
-  margin-bottom: 0;
 }
 
 .user-playlist-library-header {
@@ -3220,6 +3219,11 @@ body {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.user-playlist-library-header .new-playlist-inline {
+  flex: 0 1 330px;
+  margin-left: 10px;
 }
 
 .user-playlist-library-heading {
@@ -4167,11 +4171,6 @@ body {
   max-width: unset;
   --player-progress-width: 100%;
 }
-/* Bottom bar: hide visualizer canvas (no room) */
-.main-player:not(.lyrics-mode) .visualizer-canvas {
-  display: none;
-}
-
 /* Scroll without showing the OS scrollbar (same idea as .playlist) */
 .main-player-body::-webkit-scrollbar,
 .main-player-body::-webkit-scrollbar-track,
@@ -4342,15 +4341,6 @@ body {
   letter-spacing: 0.01em;
 }
 
-.mini-waveform-container {
-  width: 100%;
-  max-width: 800px;
-  height: var(--mini-waveform-h, clamp(104px, 14vh, 152px));
-  margin: 0 auto 0 auto;
-  opacity: 1;
-  filter: drop-shadow(0 4px 18px color-mix(in srgb, var(--accent-pink) 38%, transparent));
-}
-
 .tech-pills-container {
   display: flex;
   align-items: center;
@@ -4462,15 +4452,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-/* Non-lyrics main player: keep progress bar slightly lower by default.
-   This avoids overlapping the mini waveform in the typical window size.
-   When the window is tall (fullscreen / large), we pull it back to keep the layout tight. */
-/* Non-lyrics main player: keep waveform + progress visually grouped.
-   Use a small, consistent gap to avoid overlap without feeling "detached". */
-.main-player:not(.lyrics-mode) .mini-waveform-container {
-  display: none;
 }
 
 .main-player:not(.lyrics-mode) .progress-area {
@@ -6232,18 +6213,6 @@ input[type='range']::-moz-range-track {
   }
 }
 
-/* Hi-Fi & Visualizer */
-.visualizer-canvas {
-  width: 100%;
-  max-width: 500px;
-  height: 80px;
-  margin-top: 20px;
-  border-radius: var(--border-radius-md);
-  opacity: 0.8;
-  mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
-  -webkit-mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
-}
-
 .lossless-glow {
   color: #ffcc00 !important;
   border: 1px solid rgba(255, 204, 0, 0.4) !important;
@@ -6596,18 +6565,6 @@ input[type='range']::-moz-range-track {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-soft);
-}
-
-.settings-visualizer-exclusive-hint {
-  margin: 0 0 14px;
-  max-width: 42rem;
-  padding: 10px 12px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-soft);
-  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 10%, var(--glass-bg));
-  border: 1px solid color-mix(in srgb, var(--settings-glass-border) 60%, transparent);
-  border-radius: 10px;
 }
 
 .settings-version-text {
@@ -7133,12 +7090,6 @@ input[type='range']::-moz-range-track {
     font-size: clamp(14px, 1.8vw, 18px);
   }
 
-  .mini-waveform-container {
-    width: min(100%, 620px);
-    height: var(--mini-waveform-h, clamp(96px, 13vh, 136px));
-    margin: 0 auto 0 auto;
-  }
-
   .main-player.lyrics-mode {
     padding: 24px 24px;
   }
@@ -7293,11 +7244,6 @@ input[type='range']::-moz-range-track {
     margin-bottom: 2px;
   }
 
-  .mini-waveform-container {
-    width: 100%;
-    height: var(--mini-waveform-h, clamp(90px, 12vh, 120px));
-  }
-
   .tech-pills-container {
     flex-wrap: wrap;
     gap: 6px;
@@ -7422,11 +7368,6 @@ input[type='range']::-moz-range-track {
     width: min(var(--player-cover-size, 360px), 22vh);
     min-width: 150px;
     max-width: 210px;
-  }
-
-  .mini-waveform-container {
-    height: var(--mini-waveform-h, clamp(84px, 12vh, 112px));
-    margin-top: 2px;
   }
 
   .controls-container {
@@ -8002,7 +7943,78 @@ input[type='range']::-moz-range-track {
 .lyrics-color-inline {
   display: flex;
   flex-direction: column;
+  gap: 12px;
+}
+
+.lyrics-color-card {
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  gap: 12px;
+  align-items: stretch;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035)),
+    var(--overlay-light);
+}
+
+.lyrics-color-picker-panel {
+  position: relative;
+  min-height: 104px;
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 10px 26px rgba(0, 0, 0, 0.12);
+}
+
+.lyrics-color-picker-panel input[type='color'] {
+  position: absolute;
+  inset: -12px;
+  width: calc(100% + 24px);
+  height: calc(100% + 24px);
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+.lyrics-color-picker-panel .lyrics-color-inline-label {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 1;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(8, 12, 20, 0.52);
+  color: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(10px);
+}
+
+.lyrics-color-fields {
+  display: grid;
+  grid-template-rows: auto 1fr;
   gap: 10px;
+  min-width: 0;
+}
+
+.lyrics-color-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lyrics-color-field > span {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.lyrics-color-alpha-field {
+  justify-content: end;
 }
 
 .lyrics-color-inline-row {
@@ -10585,8 +10597,8 @@ input[type='range']::-moz-range-track {
 }
 
 .search-container:focus-within {
-  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 44%, transparent);
+  border-color: color-mix(in srgb, var(--text-main) 10%, transparent);
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #fff 82%, transparent),
-    0 14px 32px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 13%, transparent);
+    0 14px 32px color-mix(in srgb, var(--text-main) 6%, transparent);
 }

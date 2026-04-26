@@ -93,6 +93,15 @@
     "label": "Album: {{name}}",
     "clear": "Clear"
   },
+  "albums": {
+    "count": "{{count}} albums",
+    "sortNameAsc": "Album name (A-Z)",
+    "sortNameDesc": "Album name (Z-A)",
+    "sortArtistAsc": "Artist (A-Z)",
+    "sortArtistDesc": "Artist (Z-A)",
+    "sortTracksAsc": "Track count (Low)",
+    "sortTracksDesc": "Track count (High)"
+  },
   "folderFilter": {
     "label": "Folder: {{name}}",
     "clear": "Clear"
@@ -130,7 +139,7 @@
     "importFolder": "Import a folder to start!",
     "queueEmpty": "Up Next queue is empty.",
     "noPlaylists": "No playlists yet. Create one or import a JSON file.",
-    "playlistEmpty": "This playlist is empty. Add tracks from the Songs tab (+) or use \"Add library results\".",
+    "playlistEmpty": "This playlist is empty. Add tracks from the Songs tab (+) or import audio from disk.",
     "noSearchMatch": "No tracks match your search.",
     "noLikedInView": "No liked tracks in this view.",
     "historyEmpty": "No playback history yet."
@@ -199,8 +208,6 @@
     "groups": "{{count}} groups",
     "detailTrackCount_one": "{{count}} track",
     "detailTrackCount_other": "{{count}} tracks",
-    "addFromResults": "Add from results",
-    "addFromResultsTitle": "Add all tracks currently visible under Songs search",
     "import": "Import",
     "importTitle": "Add audio files from disk to this playlist (library is updated if needed)",
     "export": "Export",
@@ -302,11 +309,6 @@
     "langZh": "简体中文",
     "langJa": "日本語",
     "engineMastery": "Engine Mastery",
-    "spectrumTitle": "Real-time Spectrum visualizer",
-    "spectrumDesc": "Display audio frequency analytics on the main player.",
-    "miniWaveTitle": "Mini Waveform Bar",
-    "miniWaveDesc": "Display audio frequency analytics under technical info.",
-    "visualizerExclusiveHint": "These visualizations rely on the in-app audio graph and may not work in exclusive (WASAPI) output mode.",
     "eqMasterTitle": "Master Equalizer (16-band)",
     "eqMasterDesc": "Enable precise frequency control for high-fidelity output.",
     "gaplessTitle": "Gapless playback",
@@ -446,6 +448,8 @@
     "customWallpaperDecor": "Custom Wallpaper Decor",
     "coverSizeTitle": "Cover size",
     "coverSizeDesc": "Adjust the main player album cover size.",
+    "sidebarLogoTitle": "Sidebar logo",
+    "sidebarLogoDesc": "Show the ECHO logo at the top of the left navigation. Turning it off lets the library list move up.",
     "bgImage": "Background Image",
     "bgImageDesc": "Select a local image to use as your application backdrop.",
     "selectImage": "Select Image",

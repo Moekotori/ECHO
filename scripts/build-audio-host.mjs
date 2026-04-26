@@ -9,10 +9,24 @@
  */
 
 import { execSync } from 'child_process'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, symlinkSync } from 'fs'
 import { join, resolve } from 'path'
+import { tmpdir } from 'os'
 
-const ROOT = resolve(import.meta.dirname, '..')
+const isWin = process.platform === 'win32'
+const isMac = process.platform === 'darwin'
+const REAL_ROOT = resolve(import.meta.dirname, '..')
+
+function getBuildRoot(root) {
+  if (!isWin || /^[\x00-\x7F]*$/.test(root)) return root
+
+  const link = join(tmpdir(), `echo-audio-host-build-${process.pid}-${Date.now()}`)
+  symlinkSync(root, link, 'junction')
+  console.log(`[build-audio-host] Using ASCII build path: ${link}`)
+  return link
+}
+
+const ROOT = getBuildRoot(REAL_ROOT)
 const SRC = join(ROOT, 'src', 'main', 'audio', 'engine', 'echo_out.cpp')
 const ASIO_SRC = join(ROOT, 'src', 'main', 'audio', 'asio-sdk', 'common', 'asio.cpp')
 const ASIO_DRIVERS_SRC = join(ROOT, 'src', 'main', 'audio', 'asio-sdk', 'host', 'asiodrivers.cpp')
@@ -22,8 +36,6 @@ const ASIO_HOST_INC = join(ROOT, 'src', 'main', 'audio', 'asio-sdk', 'host')
 const ASIO_HOST_PC_INC = join(ROOT, 'src', 'main', 'audio', 'asio-sdk', 'host', 'pc')
 const VST_SRC = join(ROOT, 'src', 'main', 'audio', 'engine', 'vst_worker.cpp')
 const OUT_DIR = join(ROOT, 'electron-app', 'build')
-const isWin = process.platform === 'win32'
-const isMac = process.platform === 'darwin'
 const EXE = isWin ? 'echo-audio-host.exe' : 'echo-audio-host'
 const VST_EXE = isWin ? 'vst-worker.exe' : 'vst-worker'
 const OUT = join(OUT_DIR, EXE)

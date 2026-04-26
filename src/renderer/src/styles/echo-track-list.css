@@ -120,10 +120,10 @@
   grid-template-columns:
     48px
     minmax(0, 1fr)
-    56px
+    64px
     auto;
   align-items: center;
-  column-gap: 10px;
+  column-gap: 12px;
   min-height: 68px;
   padding: 0 10px 0 8px !important;
   margin-bottom: 2px !important;
@@ -213,8 +213,8 @@
 /* 时长列 */
 .track-row-meta {
   flex: none !important;
-  width: 56px !important;
-  margin-right: 14px !important;
+  width: 64px !important;
+  margin-right: 18px !important;
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
@@ -1217,7 +1217,6 @@
   border-bottom-color: transparent !important;
 }
 
-.app-root:has(.app-wallpaper-backdrop) .settings-page .settings-visualizer-exclusive-hint,
 .app-root:has(.app-wallpaper-backdrop) .settings-page .settings-text-input,
 .app-root:has(.app-wallpaper-backdrop) .settings-page .list-filter-chip {
   background: color-mix(in srgb, var(--glass-bg, rgba(255, 255, 255, 0.76)) 78%, #ffffff 14%) !important;
@@ -1909,4 +1908,332 @@
   opacity: 1 !important;
   font-weight: 780 !important;
   text-shadow: none !important;
+}
+
+:root[data-echo-theme-tone='dark'] {
+  --echo-bg: color-mix(in srgb, var(--bg-color, #101722) 88%, #07101a);
+  --echo-surface: color-mix(in srgb, var(--glass-bg, rgba(21, 31, 45, 0.8)) 86%, #0b1420);
+  --echo-surface-muted: color-mix(in srgb, var(--glass-bg, rgba(21, 31, 45, 0.8)) 72%, #101927);
+  --echo-surface-hover: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 16%, rgba(255, 255, 255, 0.08));
+  --echo-text-primary: color-mix(in srgb, var(--text-main, #f8fbff) 94%, #ffffff);
+  --echo-text-secondary: color-mix(in srgb, var(--text-soft, #c3cfdd) 90%, #ffffff 10%);
+  --echo-text-tertiary: color-mix(in srgb, var(--text-soft, #c3cfdd) 72%, #6f8095);
+  --echo-border: rgba(255, 255, 255, 0.12);
+  --echo-border-strong: rgba(255, 255, 255, 0.2);
+  --echo-row-hover-bg: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 15%, rgba(255, 255, 255, 0.08));
+  --echo-row-hover-border: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 36%, rgba(255, 255, 255, 0.14));
+  --echo-active-bg: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 20%, rgba(255, 255, 255, 0.09));
+  --echo-active-border: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 46%, rgba(255, 255, 255, 0.18));
+  --echo-active-text: #ffffff;
+  --quality-codec-bg: rgba(255, 255, 255, 0.08);
+  --quality-codec-text: var(--echo-text-secondary);
+  --quality-lossless-bg: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 18%, rgba(255, 255, 255, 0.08));
+  --quality-lossless-text: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 48%, #ffffff);
+  --quality-hires-bg: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 22%, rgba(255, 255, 255, 0.08));
+  --quality-hires-text: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 50%, #ffffff);
+  --quality-tech-bg: rgba(255, 255, 255, 0.06);
+  --quality-tech-text: var(--echo-text-tertiary);
+  --echo-progress-track: rgba(255, 255, 255, 0.16);
+  --echo-scrollbar-thumb: rgba(180, 196, 216, 0.36);
+  --echo-scrollbar-thumb-hover: rgba(206, 220, 238, 0.58);
+}
+
+:root[data-echo-theme-tone='dark'] body {
+  color: var(--text-main);
+}
+
+:root[data-echo-theme-tone='dark'] .app-root:not(:has(.main-player.lyrics-mode)) {
+  background:
+    radial-gradient(circle at 14% 8%, color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 16%, transparent) 0, transparent 34%),
+    radial-gradient(circle at 86% 6%, color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 14%, transparent) 0, transparent 38%),
+    linear-gradient(135deg, color-mix(in srgb, var(--bg-color, #101722) 92%, #050b12), color-mix(in srgb, var(--bg-gradient-end, #202a3e) 82%, #080e17)) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .titlebar,
+:root[data-echo-theme-tone='dark'] .titlebar-version,
+:root[data-echo-theme-tone='dark'] .bottom-bar-artist,
+:root[data-echo-theme-tone='dark'] .bottom-bar-time,
+:root[data-echo-theme-tone='dark'] .bottom-bar-volume-value,
+:root[data-echo-theme-tone='dark'] .settings-nav-item,
+:root[data-echo-theme-tone='dark'] .section-title,
+:root[data-echo-theme-tone='dark'] .section-title h2,
+:root[data-echo-theme-tone='dark'] .setting-info p,
+:root[data-echo-theme-tone='dark'] .settings-version-text,
+:root[data-echo-theme-tone='dark'] .folder-browser-count,
+:root[data-echo-theme-tone='dark'] .folder-list-count,
+:root[data-echo-theme-tone='dark'] .queue-preview-empty,
+:root[data-echo-theme-tone='dark'] .queue-drop-hint,
+:root[data-echo-theme-tone='dark'] .deck-popover-label {
+  color: var(--echo-text-secondary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .titlebar-appname,
+:root[data-echo-theme-tone='dark'] .browser-topbar-title,
+:root[data-echo-theme-tone='dark'] .track-name,
+:root[data-echo-theme-tone='dark'] .bottom-bar-title,
+:root[data-echo-theme-tone='dark'] .folder-browser-title,
+:root[data-echo-theme-tone='dark'] .folder-list-name,
+:root[data-echo-theme-tone='dark'] .queue-preview-text,
+:root[data-echo-theme-tone='dark'] .settings-header h1,
+:root[data-echo-theme-tone='dark'] .setting-info h3,
+:root[data-echo-theme-tone='dark'] .settings-disclosure__summary,
+:root[data-echo-theme-tone='dark'] .deck-popover-label span:last-child {
+  color: var(--echo-text-primary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .nav-rail {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), transparent 68%),
+    color-mix(in srgb, var(--bg-color, #101722) 82%, #050b12) !important;
+  border-right-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .nav-rail-item,
+:root[data-echo-theme-tone='dark'] .nav-rail-icon-btn,
+:root[data-echo-theme-tone='dark'] .nav-rail-subitem,
+:root[data-echo-theme-tone='dark'] .imported-folder-rail-open,
+:root[data-echo-theme-tone='dark'] .imported-folder-rail-remove {
+  color: var(--echo-text-secondary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .nav-rail-item:hover,
+:root[data-echo-theme-tone='dark'] .nav-rail-icon-btn:hover,
+:root[data-echo-theme-tone='dark'] .nav-rail-subitem:hover,
+:root[data-echo-theme-tone='dark'] .nav-rail-subitem.active,
+:root[data-echo-theme-tone='dark'] .imported-folder-rail-item:hover,
+:root[data-echo-theme-tone='dark'] .imported-folder-rail-item.active {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--echo-text-primary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .nav-rail-item.active {
+  background: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 20%, rgba(255, 255, 255, 0.08)) !important;
+  color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 52%, #ffffff) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 10px 24px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 14%, transparent) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .sidebar.browser-panel,
+:root[data-echo-theme-tone='dark'] .sidebar.browser-panel.glass-panel,
+:root[data-echo-theme-tone='dark'] .browser-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.072), rgba(255, 255, 255, 0.034)),
+    color-mix(in srgb, var(--bg-color, #101722) 86%, #07101a) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .browser-toolbar-group,
+:root[data-echo-theme-tone='dark'] .search-container,
+:root[data-echo-theme-tone='dark'] .folder-browser,
+:root[data-echo-theme-tone='dark'] .queue-filter-row,
+:root[data-echo-theme-tone='dark'] .settings-nav,
+:root[data-echo-theme-tone='dark'] .settings-section,
+:root[data-echo-theme-tone='dark'] .settings-disclosure,
+:root[data-echo-theme-tone='dark'] .album-filter-pill,
+:root[data-echo-theme-tone='dark'] .deck-popover--bottom-tools,
+:root[data-echo-theme-tone='dark'] .speed-popover,
+:root[data-echo-theme-tone='dark'] .deck-popover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.078), rgba(255, 255, 255, 0.036)),
+    var(--echo-surface) !important;
+  border-color: var(--echo-border) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 42px rgba(0, 0, 0, 0.24) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .settings-page {
+  --settings-glass-surface: color-mix(in srgb, var(--glass-bg) 82%, #08111c);
+  --settings-glass-card: color-mix(in srgb, var(--glass-bg) 76%, #0d1725);
+  --settings-glass-border: rgba(255, 255, 255, 0.12);
+  --settings-divider: rgba(255, 255, 255, 0.1);
+  background:
+    radial-gradient(circle at 18% 8%, color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 14%, transparent) 0, transparent 36%),
+    radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 12%, transparent) 0, transparent 40%),
+    linear-gradient(135deg, color-mix(in srgb, var(--glass-bg) 82%, #07101a), color-mix(in srgb, var(--bg-color) 74%, #050b12)) !important;
+  border-color: var(--settings-glass-border) !important;
+  color: var(--echo-text-primary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .settings-nav-item:hover,
+:root[data-echo-theme-tone='dark'] .settings-nav-item.active,
+:root[data-echo-theme-tone='dark'] .list-filter-chip:hover,
+:root[data-echo-theme-tone='dark'] .list-filter-chip.active,
+:root[data-echo-theme-tone='dark'] .folder-sort-trigger:hover,
+:root[data-echo-theme-tone='dark'] .folder-sort-menu-item:hover,
+:root[data-echo-theme-tone='dark'] .folder-sort-menu-item.active {
+  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 18%, rgba(255, 255, 255, 0.08)) !important;
+  border-color: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 34%, rgba(255, 255, 255, 0.12)) !important;
+  color: var(--echo-text-primary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .playlist {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.074), rgba(255, 255, 255, 0.03)),
+    var(--echo-surface-muted) !important;
+  border-color: var(--echo-border) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 42px rgba(0, 0, 0, 0.22) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .track-item,
+:root[data-echo-theme-tone='dark'] .queue-preview-item,
+:root[data-echo-theme-tone='dark'] .playlist--pl-detail .track-item--in-pl,
+:root[data-echo-theme-tone='dark'] .user-playlist-card {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .track-item:hover,
+:root[data-echo-theme-tone='dark'] .queue-preview-item:hover,
+:root[data-echo-theme-tone='dark'] .playlist--pl-detail .track-item--in-pl:hover,
+:root[data-echo-theme-tone='dark'] .user-playlist-card:hover {
+  background: var(--echo-row-hover-bg) !important;
+  border-color: var(--echo-row-hover-border) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 12px 26px -22px rgba(0, 0, 0, 0.7) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .track-item.active,
+:root[data-echo-theme-tone='dark'] .playlist--pl-detail .track-item--in-pl.active,
+:root[data-echo-theme-tone='dark'] .user-playlist-card--active {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 22%, rgba(255, 255, 255, 0.08)), color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 14%, rgba(255, 255, 255, 0.07))) !important;
+  border-color: var(--echo-active-border) !important;
+  box-shadow:
+    inset 4px 0 0 0 var(--theme-primary, var(--accent-pink)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 14px 28px -24px color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 50%, transparent) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .track-subtitle,
+:root[data-echo-theme-tone='dark'] .track-row-meta,
+:root[data-echo-theme-tone='dark'] .user-playlist-count {
+  color: var(--echo-text-secondary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .track-meta-pill,
+:root[data-echo-theme-tone='dark'] .aq-badge,
+:root[data-echo-theme-tone='dark'] .echo-bpm-pill,
+:root[data-echo-theme-tone='dark'] .bottom-bar-tech-pills .echo-bpm-pill--bottom {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: var(--echo-text-secondary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .aq-badge--lossless,
+:root[data-echo-theme-tone='dark'] .aq-badge--lossless-codec,
+:root[data-echo-theme-tone='dark'] .aq-badge--hires {
+  background: var(--quality-lossless-bg) !important;
+  color: var(--quality-lossless-text) !important;
+  border-color: var(--echo-active-border) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .track-like-btn,
+:root[data-echo-theme-tone='dark'] .track-add-pl-btn,
+:root[data-echo-theme-tone='dark'] .track-remove-pl-btn,
+:root[data-echo-theme-tone='dark'] .browser-toolbar-btn,
+:root[data-echo-theme-tone='dark'] .list-filter-chip,
+:root[data-echo-theme-tone='dark'] .folder-sort-trigger,
+:root[data-echo-theme-tone='dark'] .queue-toggle-btn,
+:root[data-echo-theme-tone='dark'] .queue-preview-remove,
+:root[data-echo-theme-tone='dark'] .album-filter-pill button,
+:root[data-echo-theme-tone='dark'] .import-btn,
+:root[data-echo-theme-tone='dark'] .deck-popover-btn {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: var(--echo-text-secondary) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .track-like-btn:hover,
+:root[data-echo-theme-tone='dark'] .track-add-pl-btn:hover,
+:root[data-echo-theme-tone='dark'] .track-remove-pl-btn:hover,
+:root[data-echo-theme-tone='dark'] .browser-toolbar-btn:hover,
+:root[data-echo-theme-tone='dark'] .import-btn:hover,
+:root[data-echo-theme-tone='dark'] .deck-popover-btn:hover {
+  background: color-mix(in srgb, var(--theme-accent, var(--accent-blue)) 18%, rgba(255, 255, 255, 0.08)) !important;
+  color: var(--echo-text-primary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .search-container input,
+:root[data-echo-theme-tone='dark'] .settings-text-input,
+:root[data-echo-theme-tone='dark'] select,
+:root[data-echo-theme-tone='dark'] textarea,
+:root[data-echo-theme-tone='dark'] input:not([type]),
+:root[data-echo-theme-tone='dark'] input[type='text'],
+:root[data-echo-theme-tone='dark'] input[type='search'],
+:root[data-echo-theme-tone='dark'] input[type='url'],
+:root[data-echo-theme-tone='dark'] input[type='number'],
+:root[data-echo-theme-tone='dark'] input[type='password'] {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: var(--echo-text-primary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .search-container input::placeholder,
+:root[data-echo-theme-tone='dark'] input::placeholder,
+:root[data-echo-theme-tone='dark'] textarea::placeholder {
+  color: color-mix(in srgb, var(--echo-text-secondary) 72%, transparent) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .folder-sort-menu,
+:root[data-echo-theme-tone='dark'] .search-sort-wrap .folder-sort-menu,
+:root[data-echo-theme-tone='dark'] .folder-browser-header .folder-sort-menu,
+:root[data-echo-theme-tone='dark'] .library-list-header .folder-sort-menu,
+:root[data-echo-theme-tone='dark'] .user-playlist-more-menu,
+:root[data-echo-theme-tone='dark'] .lyrics-drawer-dropdown-menu {
+  background: color-mix(in srgb, var(--glass-bg, rgba(21, 31, 45, 0.92)) 92%, #07101a) !important;
+  color: var(--echo-text-primary) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .folder-sort-menu-item,
+:root[data-echo-theme-tone='dark'] .search-sort-wrap .folder-sort-menu-item,
+:root[data-echo-theme-tone='dark'] .folder-browser-header .folder-sort-menu-item,
+:root[data-echo-theme-tone='dark'] .library-list-header .folder-sort-menu-item,
+:root[data-echo-theme-tone='dark'] .user-playlist-more-menu button,
+:root[data-echo-theme-tone='dark'] .lyrics-drawer-dropdown-menu button {
+  color: var(--echo-text-primary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .bottom-player-bar:not(.bottom-player-bar--lyrics) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.05)),
+    color-mix(in srgb, var(--glass-bg, rgba(21, 31, 45, 0.88)) 92%, #070f18) !important;
+  border-top-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow:
+    0 -18px 42px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-transport,
+:root[data-echo-theme-tone='dark'] .bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-toolset,
+:root[data-echo-theme-tone='dark'] .bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-right .btn--transport,
+:root[data-echo-theme-tone='dark'] .bottom-player-bar:not(.bottom-player-bar--lyrics) .btn--transport {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: var(--echo-text-secondary) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .bottom-player-bar:not(.bottom-player-bar--lyrics) .btn--transport:hover,
+:root[data-echo-theme-tone='dark'] .bottom-player-bar:not(.bottom-player-bar--lyrics) .bottom-bar-toolset .btn--transport.active,
+:root[data-echo-theme-tone='dark'] .bottom-player-bar:not(.bottom-player-bar--lyrics) .btn--transport.play-mode-toggle.is-active,
+:root[data-echo-theme-tone='dark'] .bottom-player-bar:not(.bottom-player-bar--lyrics) .btn--transport.lyrics-toggle.active {
+  background: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 18%, rgba(255, 255, 255, 0.08)) !important;
+  border-color: color-mix(in srgb, var(--theme-primary, var(--accent-pink)) 34%, rgba(255, 255, 255, 0.12)) !important;
+  color: var(--echo-text-primary) !important;
+}
+
+:root[data-echo-theme-tone='dark'] .deck-popover--bottom-tools::after {
+  background: color-mix(in srgb, var(--glass-bg, rgba(21, 31, 45, 0.92)) 92%, #07101a) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
 }

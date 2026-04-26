@@ -1,6 +1,6 @@
-import { getDevices, AudioIO, SampleFormatFloat32 } from 'naudiodon'
 import ffmpeg from 'fluent-ffmpeg'
 import { Transform } from 'stream'
+import { createRequire } from 'module'
 import {
   NativeAudioBridge,
   isNativeBridgeAvailable,
@@ -15,6 +15,41 @@ const resolvedFfmpeg = getResolvedFfmpegStaticPath()
 ffmpeg.setFfmpegPath(resolvedFfmpeg)
 
 const MAX_FILE_INFO_CACHE_ENTRIES = 512
+const MAX_WASAPI_EXCLUSIVE_PCM_SAMPLE_RATE = 192000
+const require = createRequire(import.meta.url)
+let naudiodonApi = null
+let naudiodonLoadFailed = false
+
+function disableNaudiodonSegfaultHandler() {
+  try {
+    const handlerPath = require.resolve('segfault-handler')
+    if (!require.cache[handlerPath]) {
+      require.cache[handlerPath] = {
+        id: handlerPath,
+        filename: handlerPath,
+        loaded: true,
+        exports: {
+          registerHandler: () => {}
+        }
+      }
+    }
+  } catch {
+    /* optional dependency guard */
+  }
+}
+
+function loadNaudiodon() {
+  if (naudiodonApi || naudiodonLoadFailed) return naudiodonApi
+  try {
+    disableNaudiodonSegfaultHandler()
+    naudiodonApi = require('naudiodon')
+    return naudiodonApi
+  } catch (e) {
+    naudiodonLoadFailed = true
+    console.warn('[AudioEngine] naudiodon fallback unavailable:', e?.message || e)
+    return null
+  }
+}
 
 function trimMapCache(cache, maxEntries) {
   if (!(cache instanceof Map) || cache.size <= maxEntries) return
@@ -382,16 +417,20 @@ export class AudioEngine {
             id: d.index,
             name: d.name,
             hostApi: 'WASAPI',
-            sampleRate: 0,
-            maxChannels: 0
+            sampleRate: d.sampleRate ? Math.min(d.sampleRate, MAX_WASAPI_EXCLUSIVE_PCM_SAMPLE_RATE) : 0,
+            maxChannels: 0,
+            isDefault: !!d.isDefault
           }))
         }
       } catch (e) {
         console.warn('[AudioEngine] native device list failed, fallback:', e?.message)
       }
+      return []
     }
     try {
-      const devices = getDevices()
+      const naudiodon = loadNaudiodon()
+      if (!naudiodon) return []
+      const devices = naudiodon.getDevices()
       return devices
         .filter((d) => d.maxOutputChannels > 0)
         .map((d) => ({
@@ -403,6 +442,20 @@ export class AudioEngine {
         }))
     } catch {
       return []
+    }
+  }
+
+  _getNativeExclusiveSampleRate() {
+    const activeRate = Number(this.activeDevice?.sampleRate) || 0
+    if (activeRate > 0) return activeRate
+
+    try {
+      const devices = listNativeDevices()
+      const target = devices.find((d) => d.isDefault) || devices[0]
+      const defaultRate = Number(target?.sampleRate) || 0
+      return defaultRate > 0 ? defaultRate : 0
+    } catch {
+      return 0
     }
   }
 
@@ -432,10 +485,20 @@ export class AudioEngine {
       const pos = this.playbackTime
       const file = this.currentFilePath
       const rate = this.playbackRate
+      const selectedDevice = listNativeDevices().find((d) => d.index === idx)
 
       this.activeDeviceIndex = idx
-      this.activeDevice = { id: idx, name: `Device #${idx}`, sampleRate: 0 }
-      console.log(`[AudioEngine] Native device set: index ${idx}`)
+      const selectedSampleRate = selectedDevice?.sampleRate
+        ? Math.min(selectedDevice.sampleRate, MAX_WASAPI_EXCLUSIVE_PCM_SAMPLE_RATE)
+        : 0
+      this.activeDevice = {
+        id: idx,
+        name: selectedDevice?.name || `Device #${idx}`,
+        sampleRate: selectedSampleRate,
+        isDefault: !!selectedDevice?.isDefault
+      }
+      const srText = this.activeDevice.sampleRate > 0 ? `, max ${this.activeDevice.sampleRate}Hz` : ''
+      console.log(`[AudioEngine] Native device set: index ${idx}${srText}`)
 
       if (wasPlaying && file) {
         await this._releaseResources()
@@ -444,7 +507,9 @@ export class AudioEngine {
       return { success: true, device: this.activeDevice }
     }
 
-    const devices = getDevices()
+    const naudiodon = loadNaudiodon()
+    if (!naudiodon) return { success: false, error: 'PortAudio fallback unavailable' }
+    const devices = naudiodon.getDevices()
     const device = devices.find((d) => d.id === deviceId)
     if (device) {
       this.activeDevice = device
@@ -541,6 +606,12 @@ export class AudioEngine {
         targetSampleRate =
           (this.exclusiveMode || this._asioMode) && this._useNativeBridge ? dsdPcmRate : 44100
         logLine(`[AudioEngine] DSD detected: native=${fileSampleRate}Hz -> PCM ${dsdPcmRate}Hz`)
+      } else if (this.exclusiveMode && !this._asioMode && this._useNativeBridge) {
+        const nativeDeviceSampleRate = this._getNativeExclusiveSampleRate()
+        targetSampleRate =
+          nativeDeviceSampleRate > 0
+            ? Math.min(nativeDeviceSampleRate, MAX_WASAPI_EXCLUSIVE_PCM_SAMPLE_RATE)
+            : fileSampleRate
       } else if ((this.exclusiveMode || this._asioMode) && this._useNativeBridge) {
         targetSampleRate = fileSampleRate
       } else if (this.activeDevice && this.activeDevice.sampleRate > 0) {
@@ -561,7 +632,7 @@ export class AudioEngine {
       if (this._useNativeBridge) {
         const bridge = new NativeAudioBridge()
         try {
-          await bridge.start({
+          const bridgeStart = await bridge.start({
             sampleRate: targetSampleRate,
             channels,
             deviceIndex: this.activeDeviceIndex,
@@ -571,6 +642,18 @@ export class AudioEngine {
             startTime,
             playbackRate
           })
+          const actualSampleRate = bridgeStart?.device?.sampleRate
+          if (
+            typeof actualSampleRate === 'number' &&
+            actualSampleRate > 0 &&
+            actualSampleRate !== targetSampleRate
+          ) {
+            logLine(
+              `[AudioEngine] Native output sample-rate adjusted: requested=${targetSampleRate}Hz -> actual=${actualSampleRate}Hz; decoder resampling to actual output rate`
+            )
+            targetSampleRate = actualSampleRate
+            this._outputSampleRate = actualSampleRate
+          }
         } catch (e) {
           console.warn('[AudioEngine] Native bridge start failed:', e?.message)
           bridge.stop()
@@ -661,10 +744,12 @@ export class AudioEngine {
    */
   _playLegacy(filePath, startTime, playbackRate, channels, fileSampleRate, targetSampleRate) {
     try {
-      const ao = new AudioIO({
+      const naudiodon = loadNaudiodon()
+      if (!naudiodon) return { success: false, error: 'PortAudio fallback unavailable' }
+      const ao = new naudiodon.AudioIO({
         outOptions: {
           channelCount: channels,
-          sampleFormat: SampleFormatFloat32,
+          sampleFormat: naudiodon.SampleFormatFloat32,
           sampleRate: targetSampleRate,
           deviceId: this.activeDevice ? this.activeDevice.id : -1,
           closeOnError: false

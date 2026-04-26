@@ -46,11 +46,9 @@ export const DEFAULT_CONFIG = {
    * 递增并在 App 加载时 run migration（`oldRev < configRevision`）。
    * 老存档无此字段时视为 0。
    */
-  configRevision: 5,
+  configRevision: 6,
   /** UI language: en | zh | ja */
   uiLocale: 'en',
-  showVisualizer: false,
-  showMiniWaveform: true,
   useEQ: true,
   eqBands: DEFAULT_EQ_BANDS.map((b) => ({ ...b })),
   /**
@@ -69,7 +67,6 @@ export const DEFAULT_CONFIG = {
   sleepTimerEnabled: false,
   sleepTimerMinutes: 30,
   sleepTimerMode: 'time',
-  visualizerStyle: 'bars',
   showDiscordRPC: true,
   lastfmEnabled: false,
   lastfmSessionKey: null,
@@ -89,6 +86,7 @@ export const DEFAULT_CONFIG = {
   uiShadowIntensity: 1,
   uiSaturation: 1,
   uiAccentBackgroundGlow: false,
+  showSidebarLogo: true,
   theme: 'minimal',
   customColors: { ...PRESET_THEMES.minimal.colors },
   themeDynamicCoverColor: false,
@@ -161,6 +159,8 @@ export const DEFAULT_CONFIG = {
   autoSaveLibrary: true,
   autoUpdateEnabled: true,
   downloaderQuickMode: false,
+  youtubeCookieBrowser: 'edge',
+  youtubeCookieFile: '',
   /** 开发者模式（开启后显示高级开发者功能） */
   devModeEnabled: false,
   /** 启动应用后自动打开开发者工具（Console） */

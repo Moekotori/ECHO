@@ -85,6 +85,15 @@
     "label": "アルバム: {{name}}",
     "clear": "解除"
   },
+  "albums": {
+    "count": "{{count}} 枚",
+    "sortNameAsc": "アルバム名順 (A-Z)",
+    "sortNameDesc": "アルバム名順 (Z-A)",
+    "sortArtistAsc": "アーティスト (A-Z)",
+    "sortArtistDesc": "アーティスト (Z-A)",
+    "sortTracksAsc": "曲数 (少ない順)",
+    "sortTracksDesc": "曲数 (多い順)"
+  },
   "folderFilter": {
     "label": "フォルダ: {{name}}",
     "clear": "解除"
@@ -122,7 +131,7 @@
     "importFolder": "フォルダを読み込んで開始してください。",
     "queueEmpty": "次に再生キューは空です。",
     "noPlaylists": "プレイリストがありません。新規作成するか JSON を読み込んでください。",
-    "playlistEmpty": "このプレイリストは空です。「曲」タブの (+) から追加するか、「検索結果から追加」を使ってください。",
+    "playlistEmpty": "このプレイリストは空です。「曲」タブの (+) から追加するか、ディスクから音声を読み込んでください。",
     "noSearchMatch": "検索に一致する曲がありません。",
     "noLikedInView": "この一覧にお気に入りの曲がありません。",
     "historyEmpty": "再生履歴はまだありません。"
@@ -191,8 +200,6 @@
     "groups": "{{count}} グループ",
     "detailTrackCount_one": "{{count}} 曲",
     "detailTrackCount_other": "{{count}} 曲",
-    "addFromResults": "検索結果から追加",
-    "addFromResultsTitle": "「曲」検索で表示中のすべてのトラックを追加",
     "import": "読み込み",
     "importTitle": "ディスクからこのプレイリストに音声を追加（必要ならライブラリも更新）",
     "export": "書き出し",
@@ -294,11 +301,6 @@
     "langZh": "简体中文",
     "langJa": "日本語",
     "engineMastery": "エンジンと表示",
-    "spectrumTitle": "リアルタイムスペクトラム",
-    "spectrumDesc": "メインプレーヤーに周波数解析を表示します。",
-    "miniWaveTitle": "ミニ波形バー",
-    "miniWaveDesc": "曲情報の下に小型スペクトラムを表示します。",
-    "visualizerExclusiveHint": "いずれもアプリ内のオーディオ解析に依存します。排他（WASAPI）出力モードでは正しく表示されない場合があります。",
     "eqMasterTitle": "マスター EQ（16 バンド）",
     "eqMasterDesc": "高精度な周波数調整で高音質出力を実現します。",
     "outputBufferTitle": "オーディオ出力バッファ",
@@ -434,6 +436,8 @@
     "customWallpaperDecor": "カスタム壁紙装飾",
     "coverSizeTitle": "カバーサイズ",
     "coverSizeDesc": "メインプレイヤーのアルバムカバーサイズを調整します。",
+    "sidebarLogoTitle": "左上ロゴ",
+    "sidebarLogoDesc": "左側ナビ上部に ECHO ロゴを表示します。オフにすると曲/アルバム一覧が上に詰まります。",
     "bgImage": "背景画像",
     "bgImageDesc": "アプリの背景に使うローカル画像を選びます。",
     "selectImage": "画像を選択",

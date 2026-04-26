@@ -26,7 +26,7 @@
   "build": {
     "appId": "com.echoes.studio",
     "productName": "ECHO",
-    "icon": "website/icon.png",
+    "icon": "software.png",
     "publish": [
       {
         "provider": "github",
@@ -48,6 +48,10 @@
         "to": "NCMconverter.exe"
       },
       {
+        "from": "software.png",
+        "to": "software.png"
+      },
+      {
         "from": "electron-app/build",
         "to": ".",
         "filter": [
@@ -58,7 +62,7 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "website/icon.png",
+      "icon": "electron-app/build/software.ico",
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {

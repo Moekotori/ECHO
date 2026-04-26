@@ -1,8 +1,8 @@
 const DB_NAME = 'echo-track-meta-cache'
 const DB_VERSION = 1
 const STORE_NAME = 'trackMeta'
-const MAX_CACHE_ENTRIES = 8000
-const MAX_CACHE_COVER_ENTRIES = 3000
+const MAX_CACHE_ENTRIES = 12000
+const MAX_CACHE_COVER_ENTRIES = 6000
 
 let dbPromise = null
 let prunePromise = null
@@ -42,6 +42,10 @@ function normalizeTrackMetaEntry(entry) {
   for (const key of ['trackNo', 'discNo', 'duration', 'bitrateKbps', 'sampleRateHz', 'bitDepth', 'channels', 'bpm']) {
     const value = Number(entry[key])
     next[key] = Number.isFinite(value) && value > 0 ? value : null
+  }
+  {
+    const value = Number(entry.coverExtractorVersion)
+    next.coverExtractorVersion = Number.isFinite(value) && value > 0 ? value : null
   }
   next.coverChecked = entry.coverChecked === true
   next.bpmChecked = entry.bpmChecked === true

@@ -37,7 +37,8 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import fs from 'fs'
 import { existsSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
+import nodeNet from 'node:net'
 import DiscordRPC from 'discord-rpc'
 import axios from 'axios'
 import http from 'http'
@@ -65,12 +66,27 @@ import {
   getNeteaseCookieFromSession,
   validateNeteaseCookie
 } from './neteaseAuth.js'
+import { getQqMusicCookieFromSession, validateQqMusicCookie } from './qqMusicAuth.js'
+import {
+  getQqMusicAlbumTracks,
+  getQqMusicSongDirectUrl,
+  searchQqMusicAlbums,
+  searchQqMusicSongs
+} from './qqMusicProvider.js'
 import { getMediaDurationSeconds } from './utils/ffmpegProbeDuration.js'
 import { detectBpm } from './utils/detectBpm.js'
 import { findFolderCoverDataUrl } from './utils/folderCover.js'
 import { getResolvedFfmpegStaticPath } from './utils/resolveFfmpegStaticPath.js'
 import { getDialogStrings } from './dialogLocale.js'
 import PluginManager from './plugins/PluginManager.js'
+
+const APP_NAME = 'ECHO'
+const APP_USER_MODEL_ID = 'com.echoes.studio'
+
+app.setName(APP_NAME)
+if (process.platform === 'win32') {
+  app.setAppUserModelId(APP_USER_MODEL_ID)
+}
 import { lastFmClient } from './lastfm.js'
 import { buildUpdaterEventDedupeKey, shouldReuseUpdaterState } from '../shared/updaterState.mjs'
 
@@ -484,7 +500,7 @@ function refreshTrayMenu(status) {
 }
 
 function createTrayIcon() {
-  const candidatePaths = [join(__dirname, '..', '..', 'website', 'icon.png'), resolveAppIconPath()]
+  const candidatePaths = [resolveAppIconPath(), join(__dirname, '..', '..', 'website', 'icon.png')]
 
   for (const candidate of candidatePaths) {
     if (!candidate) continue
@@ -528,7 +544,15 @@ function destroyTray() {
 function broadcastAudioStatus(status) {
   refreshTrayMenu(status)
   if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.webContents.send('audio:status-update', status)
+  const webContents = mainWindow.webContents
+  if (!webContents || webContents.isDestroyed()) return
+  try {
+    webContents.send('audio:status-update', status)
+  } catch (e) {
+    if (!isQuitting) {
+      console.warn('[AudioStatus] skipped send:', e?.message || e)
+    }
+  }
 }
 
 function broadcastCastStatus() {
@@ -544,6 +568,8 @@ const dlnaRenderer = new DlnaMediaRenderer({
 let youtubeSignInWindow = null
 let bilibiliSignInWindow = null
 let neteaseSignInWindow = null
+let qqMusicSignInWindow = null
+let youtubeSystemBrowserSession = null
 let rendererHttpServer = null
 let rendererServerUrl = null
 let libraryWatchManager = null
@@ -624,6 +650,157 @@ function flushAppStateCacheSync() {
   return writeAppStateJson(ensureAppStateCache())
 }
 
+function getInternalYoutubeCookieFile() {
+  return join(app.getPath('userData'), 'youtube-cookies.txt')
+}
+
+function getYoutubeSystemProfileRoot(browser = 'edge') {
+  const safeBrowser = browser === 'chrome' ? 'chrome' : 'edge'
+  return join(app.getPath('userData'), 'youtube-login-browser', safeBrowser)
+}
+
+function resolveYoutubeBrowserExecutable(browser = 'edge') {
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files'
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
+  const localAppData = process.env.LOCALAPPDATA || ''
+  const candidates =
+    browser === 'chrome'
+      ? [
+          join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          localAppData ? join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe') : '',
+          'chrome.exe'
+        ]
+      : [
+          join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+          join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+          localAppData ? join(localAppData, 'Microsoft', 'Edge', 'Application', 'msedge.exe') : '',
+          'msedge.exe'
+        ]
+
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    if (candidate.includes(sep)) {
+      if (existsSync(candidate)) return candidate
+    } else {
+      return candidate
+    }
+  }
+  return ''
+}
+
+function findFreeLocalPort() {
+  return new Promise((resolvePort, rejectPort) => {
+    const server = nodeNet.createServer()
+    server.once('error', rejectPort)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      const port = typeof address === 'object' && address ? address.port : 0
+      server.close(() => resolvePort(port))
+    })
+  })
+}
+
+async function fetchJsonWithRetry(url, retries = 20) {
+  let lastError = null
+  for (let i = 0; i < retries; i += 1) {
+    try {
+      const response = await fetch(url)
+      if (response.ok) return await response.json()
+      lastError = new Error(`HTTP ${response.status}`)
+    } catch (error) {
+      lastError = error
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 250))
+  }
+  throw lastError || new Error('Browser debugging endpoint is not ready')
+}
+
+function sendCdpCommand(webSocketUrl, method, params = {}) {
+  return new Promise((resolveCommand, rejectCommand) => {
+    const WebSocketImpl = require('ws')
+    const ws = new WebSocketImpl(webSocketUrl)
+    const id = 1
+    const timer = setTimeout(() => {
+      try {
+        ws.close()
+      } catch (_) {}
+      rejectCommand(new Error('Timed out while reading YouTube login cookies'))
+    }, 10000)
+
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ id, method, params }))
+    })
+    ws.on('message', (message) => {
+      try {
+        const payload = JSON.parse(String(message))
+        if (payload.id !== id) return
+        clearTimeout(timer)
+        ws.close()
+        if (payload.error) {
+          rejectCommand(new Error(payload.error.message || 'Chrome DevTools command failed'))
+          return
+        }
+        resolveCommand(payload.result)
+      } catch (error) {
+        clearTimeout(timer)
+        try {
+          ws.close()
+        } catch (_) {}
+        rejectCommand(error)
+      }
+    })
+    ws.on('error', (error) => {
+      clearTimeout(timer)
+      rejectCommand(error)
+    })
+  })
+}
+
+function toNetscapeCookieLine(cookie) {
+  if (!cookie?.name || typeof cookie.value !== 'string') return ''
+  const rawDomain = String(cookie.domain || '').trim()
+  if (!rawDomain) return ''
+  const domain = cookie.httpOnly && !rawDomain.startsWith('#HttpOnly_')
+    ? `#HttpOnly_${rawDomain}`
+    : rawDomain
+  const includeSubdomains = rawDomain.startsWith('.') ? 'TRUE' : 'FALSE'
+  const pathValue = cookie.path || '/'
+  const secure = cookie.secure ? 'TRUE' : 'FALSE'
+  const expires = Number.isFinite(cookie.expires)
+    ? Math.max(0, Math.trunc(cookie.expires))
+    : Number.isFinite(cookie.expirationDate)
+      ? Math.max(0, Math.trunc(cookie.expirationDate))
+      : 0
+  return [domain, includeSubdomains, pathValue, secure, expires, cookie.name, cookie.value].join('\t')
+}
+
+function writeNetscapeCookiesFile(cookies, filePath) {
+  const lines = [
+    '# Netscape HTTP Cookie File',
+    '# This file is generated by ECHO for yt-dlp. Do not share it.',
+    ...cookies.map(toNetscapeCookieLine).filter(Boolean)
+  ]
+  fs.writeFileSync(filePath, `${lines.join('\n')}\n`, 'utf8')
+}
+
+function isYouTubeCookieSignedIn(cookies = []) {
+  return cookies.some(
+    (cookie) =>
+      /(^|\.)youtube\.com$/i.test(String(cookie.domain || '').replace(/^#HttpOnly_/, '')) &&
+      (cookie.name === 'SID' || cookie.name === 'SSID' || cookie.name === 'LOGIN_INFO')
+  )
+}
+
+function withResolvedYoutubeCookieOptions(options = {}) {
+  const next = { ...(options || {}) }
+  const internalCookieFile = getInternalYoutubeCookieFile()
+  if (existsSync(internalCookieFile)) {
+    next.youtubeCookieFile = internalCookieFile
+  }
+  return next
+}
+
 function scheduleAppStateFlush() {
   clearAppStateWriteTimer()
   appStateWriteTimer = setTimeout(() => {
@@ -650,6 +827,16 @@ function getSavedNeteaseCookieFromAppState() {
   try {
     const state = ensureAppStateCache()
     const cookie = state?.downloaderSettings?.neteaseCookie
+    return typeof cookie === 'string' ? cookie.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+function getSavedQqMusicCookieFromAppState() {
+  try {
+    const state = ensureAppStateCache()
+    const cookie = state?.downloaderSettings?.qqMusicCookie
     return typeof cookie === 'string' ? cookie.trim() : ''
   } catch {
     return ''
@@ -717,6 +904,12 @@ async function resolveNeteaseAuthState(preferredCookie = '') {
 
 function resolveAppIconPath() {
   const candidates = [
+    join(__dirname, '..', '..', 'software.png'),
+    resolve(process.resourcesPath || '', 'software.png'),
+    resolve(app.getAppPath(), 'software.png'),
+    resolve(app.getAppPath(), '..', 'software.png'),
+    resolve(__dirname, '..', '..', 'software.png'),
+    resolve(process.cwd(), 'software.png'),
     join(__dirname, '..', '..', 'website', 'icon.png'),
     resolve(app.getAppPath(), 'website', 'icon.png'),
     resolve(app.getAppPath(), '..', 'website', 'icon.png'),
@@ -746,6 +939,26 @@ function createAppWindowIcon() {
 const SOUNDCLOUD_PROXY_BASE = (
   process.env.ECHOES_SOUNDCLOUD_PROXY || 'https://soundcloud-ep22.onrender.com'
 ).replace(/\/$/, '')
+
+function sanitizeDownloadStem(name, fallback = 'soundcloud-track') {
+  const stem = String(name || fallback)
+    .replace(/[<>:"/\\|?*\x00-\x1F]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '')
+  return stem || fallback
+}
+
+function buildUniqueDownloadPath(targetDir, stem, ext) {
+  const baseStem = sanitizeDownloadStem(stem)
+  let candidate = join(targetDir, `${baseStem}${ext}`)
+  let index = 2
+  while (fs.existsSync(candidate)) {
+    candidate = join(targetDir, `${baseStem} (${index})${ext}`)
+    index += 1
+  }
+  return candidate
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -833,7 +1046,6 @@ async function stopRendererHttpServer() {
 
 function initUpdater() {
   updaterAutoCheckEnabled = getAutoUpdateEnabledFromState()
-  if (is.dev) return // 不在开发环境自动更新
 
   const sendUpdaterEvent = (event, data = {}) => {
     const payload = { event, ...data }
@@ -957,6 +1169,8 @@ function initUpdater() {
     return { success: true, enabled: updaterAutoCheckEnabled }
   })
 
+  if (is.dev) return // 不在开发环境自动更新
+
   if (updaterAutoCheckEnabled) {
     void runUpdateCheck('startup')
   }
@@ -969,6 +1183,7 @@ async function createWindow() {
     height: 960,
     minWidth: 760,
     minHeight: 500,
+    title: APP_NAME,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
@@ -1085,6 +1300,20 @@ async function disposeDiscordRpc() {
   } catch (_) {}
 }
 
+function handleDiscordRpcCommandFailure(error, reason, client, reconnect = true) {
+  if (discordRpcQuitting) return
+  const message = error?.message || error
+  rpcReady = false
+  rpcConnecting = false
+  if (rpcClient === client) destroyRpcClient()
+  const now = Date.now()
+  if (now - rpcLastActivityErrorLogAt > 15000) {
+    rpcLastActivityErrorLogAt = now
+    console.warn(`[Discord RPC] ${reason}:`, message)
+  }
+  if (reconnect) scheduleDiscordReconnect(reason)
+}
+
 function buildRpcPayload(activity = {}) {
   const payload = {
     details: activity.title || 'Unknown Track',
@@ -1198,6 +1427,54 @@ async function applyRpcActivity(activity, fallbackToDefault = false) {
   }
 }
 
+async function resolveQqMusicAuthState(preferredCookie = '') {
+  const candidates = []
+  const pushCandidate = (cookie, source) => {
+    const trimmed = String(cookie || '').trim()
+    if (!trimmed) return
+    if (candidates.some((item) => item.cookie === trimmed)) return
+    candidates.push({ cookie: trimmed, source })
+  }
+
+  const ses = await getMainWindowSession()
+  pushCandidate(await getQqMusicCookieFromSession(ses), 'session')
+  pushCandidate(preferredCookie, 'preferred')
+  pushCandidate(getSavedQqMusicCookieFromAppState(), 'appState')
+  pushCandidate(process.env.ECHOES_QQMUSIC_COOKIE?.trim(), 'env')
+
+  let lastChecked = null
+  for (const candidate of candidates) {
+    const checked = await validateQqMusicCookie(candidate.cookie)
+    lastChecked = { ...checked, source: candidate.source }
+    if (checked.valid) {
+      return {
+        ok: true,
+        checked: true,
+        valid: true,
+        signedIn: true,
+        cookie: candidate.cookie,
+        source: candidate.source,
+        uin: checked.uin,
+        profile: checked.profile,
+        isVip: checked.isVip === true
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    checked: Boolean(lastChecked?.checked),
+    valid: false,
+    signedIn: false,
+    cookie: candidates[0]?.cookie || '',
+    source: lastChecked?.source || '',
+    uin: lastChecked?.uin || '',
+    profile: null,
+    isVip: false,
+    error: lastChecked?.checked === false ? lastChecked?.error || '' : ''
+  }
+}
+
 function scheduleDiscordReconnect(reason = 'unknown') {
   if (discordRpcQuitting || !rpcEnabled) return
   if (rpcRetryTimer) return
@@ -1269,7 +1546,8 @@ function initDiscordRPC() {
 }
 
 app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('com.echoes.studio')
+  app.setName(APP_NAME)
+  electronApp.setAppUserModelId(APP_USER_MODEL_ID)
   loadAppStateCache()
 
   const chromeVersion = process.versions.chrome || '126.0.0.0'
@@ -1512,6 +1790,20 @@ app.whenReady().then(async () => {
           name: d.filterLyrics,
           extensions: ['lrc', 'lrcx', 'txt']
         }
+      ]
+    })
+    if (canceled || !filePaths?.length) return null
+    return filePaths[0]
+  })
+
+  ipcMain.handle('dialog:openCookiesFile', async (_, opts) => {
+    const loc = dialogLocaleFromOpts(opts)
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: loc === 'zh' ? '选择 YouTube cookies.txt' : 'Select YouTube cookies.txt',
+      properties: ['openFile'],
+      filters: [
+        { name: loc === 'zh' ? 'Cookies 文本文件' : 'Cookies text file', extensions: ['txt'] },
+        { name: loc === 'zh' ? '所有文件' : 'All files', extensions: ['*'] }
       ]
     })
     if (canceled || !filePaths?.length) return null
@@ -1868,6 +2160,35 @@ app.whenReady().then(async () => {
     }
   })
 
+  ipcMain.handle('qqMusic:search', async (_, keywords, preferredCookie = '') => {
+    const auth = await resolveQqMusicAuthState(preferredCookie)
+    return await searchQqMusicSongs(keywords, { cookie: auth.cookie || '' })
+  })
+
+  ipcMain.handle('qqMusic:searchAlbum', async (_, payload) => {
+    const auth = await resolveQqMusicAuthState(payload?.cookie || '')
+    return await searchQqMusicAlbums({
+      ...(payload || {}),
+      cookie: auth.cookie || ''
+    })
+  })
+
+  ipcMain.handle('qqMusic:getAlbumTracks', async (_, payload) => {
+    const auth = await resolveQqMusicAuthState(payload?.cookie || '')
+    return await getQqMusicAlbumTracks({
+      ...(payload || {}),
+      cookie: auth.cookie || ''
+    })
+  })
+
+  ipcMain.handle('qqMusic:getSongUrl', async (_, song, qualityPreset = 'auto', preferredCookie = '') => {
+    const auth = await resolveQqMusicAuthState(preferredCookie)
+    return await getQqMusicSongDirectUrl(song, {
+      qualityPreset,
+      cookie: auth.cookie || ''
+    })
+  })
+
   ipcMain.handle('netease:fetchLrcText', async (event, params) => {
     const auth = await resolveNeteaseAuthState(params?.cookie || '')
     return await fetchNeteaseLrcText({
@@ -1882,14 +2203,14 @@ app.whenReady().then(async () => {
     return true
   })
 
-  ipcMain.handle('media:getMetadata', async (event, url) => {
-    return await MediaDownloader.getMetadata(url)
+  ipcMain.handle('media:getMetadata', async (event, url, options = {}) => {
+    return await MediaDownloader.getMetadata(url, withResolvedYoutubeCookieOptions(options))
   })
 
   ipcMain.handle('media:download', async (event, url, folder, options = {}) => {
     const auth = await resolveNeteaseAuthState(options?.neteaseCookie || '')
     return await MediaDownloader.downloadAudio(url, folder, event.sender, {
-      ...(options || {}),
+      ...withResolvedYoutubeCookieOptions(options),
       neteaseCookie: auth.valid ? auth.cookie : ''
     })
   })
@@ -1902,21 +2223,44 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('media:downloadFromUrl', async (event, opts) => {
-    const { url, targetFolder, filename } = opts || {}
+    const { url, targetFolder, filename, headers } = opts || {}
     if (!url || !targetFolder || !filename) throw new Error('Missing required parameters')
-    return await MediaDownloader.downloadFromUrl(url, targetFolder, filename, event.sender)
+    return await MediaDownloader.downloadFromUrl(url, targetFolder, filename, event.sender, { headers })
+  })
+
+  ipcMain.handle('media:applyDownloadedMetadata', async (_, payload) => {
+    return await applyDownloadedMetadata(payload)
   })
 
   ipcMain.handle('playlistLink:importPlaylist', async (event, payload) => {
-    const { playlistInput, downloadFolder, preferredFolderName, neteaseCookie, quickMode } =
-      payload || {}
+    const {
+      playlistInput,
+      downloadFolder,
+      preferredFolderName,
+      neteaseCookie,
+      qqMusicCookie,
+      downloadProvider,
+      audioQualityPreset,
+      youtubeCookieBrowser,
+      youtubeCookieFile,
+      quickMode
+    } = payload || {}
     const auth = await resolveNeteaseAuthState(neteaseCookie || '')
+    const qqAuth = await resolveQqMusicAuthState(qqMusicCookie || '')
     return await importPlaylistFromLink(
       playlistInput,
       downloadFolder,
       event.sender,
       preferredFolderName,
-      { cookie: auth.valid ? auth.cookie : '', quickMode: quickMode === true }
+      {
+        cookie: auth.valid ? auth.cookie : '',
+        qqCookie: qqAuth.valid ? qqAuth.cookie : '',
+        downloadProvider: downloadProvider === 'qq' ? 'qq' : 'netease',
+        qualityPreset: audioQualityPreset || 'auto',
+        youtubeCookieBrowser,
+        youtubeCookieFile: withResolvedYoutubeCookieOptions({ youtubeCookieFile }).youtubeCookieFile,
+        quickMode: quickMode === true
+      }
     )
   })
 
@@ -2203,9 +2547,9 @@ app.whenReady().then(async () => {
       const metaRes = await axios.get(oembedUrl)
       const info = metaRes.data || {}
 
-      if (!info.title) throw new Error('Could not fetch track metadata')
+      if (!info.title) throw new Error('SoundCloud 链接不可用，可能已删除、私密或地址写错')
 
-      const title = info.title.replace(/[\\/:*?"<>|]/g, '_')
+      const title = sanitizeDownloadStem(info.title)
 
       // 2. Prepare Download Path
       const targetDir = downloadPath || join(app.getAppPath(), 'downloads')
@@ -2213,8 +2557,8 @@ app.whenReady().then(async () => {
         fs.mkdirSync(targetDir, { recursive: true })
       }
 
-      const fileName = `${title}.mp3`
-      const filePath = join(targetDir, fileName)
+      const filePath = buildUniqueDownloadPath(targetDir, title, '.mp3')
+      const fileName = basename(filePath)
 
       // 3. Download via Proxy
       const proxyUrl = `${SOUNDCLOUD_PROXY_BASE}/stream?url=${encodeURIComponent(url)}`
@@ -2224,7 +2568,7 @@ app.whenReady().then(async () => {
         method: 'GET',
         url: proxyUrl,
         responseType: 'stream',
-        timeout: 30000 // 30s timeout
+        timeout: 60000
       })
 
       const writeStream = fs.createWriteStream(filePath)
@@ -2254,7 +2598,12 @@ app.whenReady().then(async () => {
       console.error('SoundCloud download error:', e)
       return {
         success: false,
-        error: e.response?.status === 500 ? 'Proxy error (Render instance sleepy)' : e.message
+        error:
+          e.response?.status === 404
+            ? 'SoundCloud 链接不可用，可能已删除、私密或地址写错'
+            : e.response?.status >= 500
+              ? 'SoundCloud 代理暂时不可用，请稍后重试'
+              : e.message
       }
     }
   })
@@ -2419,15 +2768,31 @@ app.whenReady().then(async () => {
       let coverBytes = 0
       let coverWidth = 0
       let coverHeight = 0
+      let coverExtractorVersion = 0
+      const preferFfmpegCover = /\.(opus|ogg)$/i.test(filePath) || /ogg/i.test(metadata.format?.container || '')
+      if (preferFfmpegCover) {
+        const extractedCover = await extractAttachedCoverWithFfmpeg(filePath)
+        if (extractedCover?.dataUrl) {
+          cover = extractedCover.dataUrl
+          coverBytes = extractedCover.bytes
+          coverWidth = extractedCover.width
+          coverHeight = extractedCover.height
+          coverExtractorVersion = 2
+        }
+      }
       if (picture) {
-        const compressedCover = compressEmbeddedCoverData(picture)
-        cover = compressedCover.dataUrl
-        coverBytes = compressedCover.bytes
-        coverWidth = compressedCover.width
-        coverHeight = compressedCover.height
+        const compressedCover = cover ? null : compressEmbeddedCoverData(picture)
+        if (compressedCover) {
+          cover = compressedCover.dataUrl
+          coverBytes = compressedCover.bytes
+          coverWidth = compressedCover.width
+          coverHeight = compressedCover.height
+          coverExtractorVersion = 1
+        }
       }
       if (!cover) {
         cover = findFolderCoverDataUrl(filePath)
+        coverExtractorVersion = cover ? 1 : 0
       }
 
       const codecLabel = resolveAudioCodecLabel(metadata, filePath)
@@ -2459,6 +2824,7 @@ app.whenReady().then(async () => {
           bpm: extractBpmMetadataValue(metadata),
           lyrics: embeddedLyrics || null,
           cover,
+          coverExtractorVersion,
           coverBytes,
           coverWidth,
           coverHeight
@@ -2533,6 +2899,39 @@ app.whenReady().then(async () => {
     }
   }
 
+  async function extractAttachedCoverWithFfmpeg(filePath) {
+    const tempPath = resolve(app.getPath('temp'), `echo-attached-cover-${process.pid}-${Date.now()}.jpg`)
+    try {
+      await runFfmpegCommand([
+        '-y',
+        '-i',
+        filePath,
+        '-map',
+        '0:v:0?',
+        '-an',
+        '-frames:v',
+        '1',
+        '-update',
+        '1',
+        '-q:v',
+        '3',
+        tempPath
+      ])
+      if (!fs.existsSync(tempPath)) return null
+      const data = fs.readFileSync(tempPath)
+      if (!data.length) return null
+      return compressEmbeddedCoverData({ data, format: 'image/jpeg' })
+    } catch {
+      return null
+    } finally {
+      try {
+        if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true })
+      } catch {
+        /* ignore temp cleanup errors */
+      }
+    }
+  }
+
   function buildFfmpegMetadataArgs(entries, { skipEmptyFields = false } = {}) {
     const args = []
     for (const [key, value] of entries) {
@@ -2603,6 +3002,73 @@ app.whenReady().then(async () => {
         /* best effort restore */
       }
       throw error
+    }
+  }
+
+  function resolveImageExtensionFromUrl(url, contentType = '') {
+    const type = String(contentType || '').toLowerCase()
+    if (type.includes('png')) return '.png'
+    if (type.includes('webp')) return '.webp'
+    if (type.includes('jpeg') || type.includes('jpg')) return '.jpg'
+    try {
+      const parsed = new URL(url)
+      const found = extname(parsed.pathname).toLowerCase()
+      if (['.jpg', '.jpeg', '.png', '.webp'].includes(found)) return found
+    } catch {
+      /* ignore invalid cover urls */
+    }
+    return '.jpg'
+  }
+
+  async function downloadRemoteCoverToTemp(coverUrl) {
+    const raw = String(coverUrl || '').trim()
+    if (!/^https?:\/\//i.test(raw)) return ''
+    const res = await axios.get(raw, {
+      responseType: 'arraybuffer',
+      timeout: 12000,
+      maxContentLength: 8 * 1024 * 1024,
+      headers: {
+        Referer: 'https://y.qq.com/',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
+      }
+    })
+    const ext = resolveImageExtensionFromUrl(raw, res?.headers?.['content-type'])
+    const tempPath = resolve(app.getPath('temp'), `echo-cover-${process.pid}-${Date.now()}${ext}`)
+    fs.writeFileSync(tempPath, Buffer.from(res.data))
+    return tempPath
+  }
+
+  async function applyDownloadedMetadata(payload) {
+    const filePath = assertEditableLocalPath(payload?.path)
+    if (!fs.existsSync(filePath)) throw new Error('Audio file not found')
+
+    let tempCoverPath = ''
+    try {
+      tempCoverPath = await downloadRemoteCoverToTemp(payload?.coverUrl)
+      await writeAudioMetadata(
+        {
+          path: filePath,
+          title: payload?.title,
+          artist: payload?.artist,
+          album: payload?.album,
+          albumArtist: payload?.albumArtist || payload?.artist,
+          trackNumber: payload?.trackNumber
+        },
+        {
+          coverPath: tempCoverPath,
+          skipEmptyFields: true
+        }
+      )
+      return { ok: true }
+    } finally {
+      if (tempCoverPath) {
+        try {
+          fs.rmSync(tempCoverPath, { force: true })
+        } catch {
+          /* ignore temp cleanup errors */
+        }
+      }
     }
   }
 
@@ -3024,9 +3490,14 @@ app.whenReady().then(async () => {
   ipcMain.on('discord:clearActivity', () => {
     rpcLastActivity = null
     if (!rpcClient || !rpcReady) return
+    const client = rpcClient
     try {
-      rpcClient.clearActivity()
-    } catch (e) {}
+      Promise.resolve(client.clearActivity()).catch((error) => {
+        handleDiscordRpcCommandFailure(error, 'clear-activity-failed', client, false)
+      })
+    } catch (error) {
+      handleDiscordRpcCommandFailure(error, 'clear-activity-failed', client, false)
+    }
   })
 
   // IPC: Toggle Discord RPC
@@ -3169,6 +3640,7 @@ app.whenReady().then(async () => {
         y: savedBounds.y,
         minWidth: 400,
         minHeight: 64,
+        title: `${APP_NAME} Lyrics`,
         show: false,
         frame: false,
         transparent: true,
@@ -3426,6 +3898,7 @@ app.whenReady().then(async () => {
       height: 720,
       minWidth: 400,
       minHeight: 400,
+      title: APP_NAME,
       show: false,
       autoHideMenuBar: true,
       ...(appWindowIcon ? { icon: appWindowIcon } : {}),
@@ -3478,6 +3951,93 @@ app.whenReady().then(async () => {
     return { ok: true }
   })
 
+  ipcMain.handle('youtube:openSystemSignIn', async (_, browser = 'edge') => {
+    const normalizedBrowser = browser === 'chrome' ? 'chrome' : 'edge'
+    try {
+      const executable = resolveYoutubeBrowserExecutable(normalizedBrowser)
+      if (!executable) {
+        return { ok: false, error: normalizedBrowser === 'chrome' ? 'chrome_not_found' : 'edge_not_found' }
+      }
+      const userDataDir = getYoutubeSystemProfileRoot(normalizedBrowser)
+      fs.mkdirSync(userDataDir, { recursive: true })
+      const port = await findFreeLocalPort()
+      const args = [
+        `--user-data-dir=${userDataDir}`,
+        `--remote-debugging-port=${port}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--new-window',
+        'https://www.youtube.com/'
+      ]
+      const child = spawn(executable, args, {
+        detached: false,
+        stdio: 'ignore',
+        windowsHide: false
+      })
+      child.on('exit', () => {
+        if (youtubeSystemBrowserSession?.pid === child.pid) {
+          youtubeSystemBrowserSession = null
+        }
+      })
+      youtubeSystemBrowserSession = {
+        browser: normalizedBrowser,
+        port,
+        userDataDir,
+        pid: child.pid || 0
+      }
+      return { ok: true, browser: normalizedBrowser }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) }
+    }
+  })
+
+  ipcMain.handle('youtube:saveSystemCookies', async () => {
+    try {
+      if (!youtubeSystemBrowserSession?.port) {
+        return { ok: false, error: 'browser_not_open' }
+      }
+      const targets = await fetchJsonWithRetry(
+        `http://127.0.0.1:${youtubeSystemBrowserSession.port}/json/list`
+      )
+      const pageTarget = Array.isArray(targets)
+        ? targets.find((target) => /youtube\.com/i.test(String(target.url || ''))) || targets[0]
+        : null
+      const webSocketDebuggerUrl = pageTarget?.webSocketDebuggerUrl
+      if (!webSocketDebuggerUrl) {
+        return { ok: false, error: 'debug_endpoint_not_ready' }
+      }
+      const result = await sendCdpCommand(webSocketDebuggerUrl, 'Network.getAllCookies')
+      const cookies = Array.isArray(result?.cookies) ? result.cookies : []
+      const usefulCookies = cookies.filter((cookie) => {
+        const domain = String(cookie.domain || '').replace(/^#HttpOnly_/, '')
+        return /(^|\.)youtube\.com$/i.test(domain) || /(^|\.)google\.com$/i.test(domain)
+      })
+      if (!usefulCookies.length) {
+        return { ok: false, error: 'no_youtube_cookies' }
+      }
+      const filePath = getInternalYoutubeCookieFile()
+      writeNetscapeCookiesFile(usefulCookies, filePath)
+      const signedIn = isYouTubeCookieSignedIn(usefulCookies)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('signin:status-changed')
+      }
+      return { ok: true, signedIn, count: usefulCookies.length }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) }
+    }
+  })
+
+  ipcMain.handle('youtube:getSystemCookieStatus', async () => {
+    const filePath = getInternalYoutubeCookieFile()
+    if (!existsSync(filePath)) return { ok: true, available: false }
+    try {
+      const stat = fs.statSync(filePath)
+      return { ok: true, available: true, updatedAt: stat.mtimeMs }
+    } catch (error) {
+      return { ok: false, available: false, error: error?.message || String(error) }
+    }
+  })
+
   ipcMain.handle('bilibili:openSignInWindow', async () => {
     if (!mainWindow || mainWindow.isDestroyed()) {
       return { ok: false, error: 'no_main_window' }
@@ -3506,8 +4066,26 @@ app.whenReady().then(async () => {
     return { ok: true }
   })
 
+  ipcMain.handle('qqMusic:openSignInWindow', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { ok: false, error: 'no_main_window' }
+    }
+    if (qqMusicSignInWindow && !qqMusicSignInWindow.isDestroyed()) {
+      qqMusicSignInWindow.focus()
+      return { ok: true, reused: true }
+    }
+    qqMusicSignInWindow = createSignInWindow('https://y.qq.com/', () => {
+      qqMusicSignInWindow = null
+    })
+    return { ok: true }
+  })
+
   ipcMain.handle('netease:getCookie', async (_, preferredCookie = '') => {
     return await resolveNeteaseAuthState(preferredCookie)
+  })
+
+  ipcMain.handle('qqMusic:getCookie', async (_, preferredCookie = '') => {
+    return await resolveQqMusicAuthState(preferredCookie)
   })
 
   ipcMain.handle('signin:checkStatus', async () => {
@@ -3515,12 +4093,14 @@ app.whenReady().then(async () => {
     const ytCookies = await ses.cookies.get({ domain: '.youtube.com' })
     const ytSignedIn = ytCookies.some(
       (c) => c.name === 'SID' || c.name === 'SSID' || c.name === 'LOGIN_INFO'
-    )
+    ) || existsSync(getInternalYoutubeCookieFile())
     const biliCookies = await ses.cookies.get({ domain: '.bilibili.com' })
     const biliSignedIn = biliCookies.some((c) => c.name === 'DedeUserID' || c.name === 'SESSDATA')
     const neteaseAuth = await resolveNeteaseAuthState()
     const neteaseSignedIn = neteaseAuth.valid === true
-    return { youtube: ytSignedIn, bilibili: biliSignedIn, netease: neteaseSignedIn }
+    const qqMusicAuth = await resolveQqMusicAuthState()
+    const qqMusicSignedIn = qqMusicAuth.valid === true
+    return { youtube: ytSignedIn, bilibili: biliSignedIn, netease: neteaseSignedIn, qqMusic: qqMusicSignedIn }
   })
 
   // ─── Bilibili: 直接解析视频流地址（绕过嵌入播放器画质限制）───

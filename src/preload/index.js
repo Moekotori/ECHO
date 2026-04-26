@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('api', {
       locale
     }),
   openLyricsFileHandler: (locale) => ipcRenderer.invoke('dialog:openLyricsFile', { locale }),
+  openCookiesFileHandler: (locale) => ipcRenderer.invoke('dialog:openCookiesFile', { locale }),
   openFontFileHandler: (locale) => ipcRenderer.invoke('dialog:openFontFile', { locale }),
   getAudioFilesFromPaths: (paths) => ipcRenderer.invoke('file:getFilesFromPaths', paths),
   exportPlaylistM3U: (payload) => ipcRenderer.invoke('playlist:exportM3U', payload),
@@ -110,6 +111,12 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('netease:getAlbumTracks', { albumId, cookie }),
   getNeteaseSongUrl: (songId, level, cookie) =>
     ipcRenderer.invoke('netease:getSongUrl', songId, level, cookie),
+  qqMusicSearch: (keywords, cookie) => ipcRenderer.invoke('qqMusic:search', keywords, cookie),
+  qqMusicSearchAlbum: (payload) => ipcRenderer.invoke('qqMusic:searchAlbum', payload),
+  qqMusicGetAlbumTracks: (album, cookie) =>
+    ipcRenderer.invoke('qqMusic:getAlbumTracks', { ...(album || {}), cookie }),
+  qqMusicGetSongUrl: (song, qualityPreset, cookie) =>
+    ipcRenderer.invoke('qqMusic:getSongUrl', song, qualityPreset, cookie),
   lastfm: {
     login: (u, p) => ipcRenderer.invoke('lastfm:login', u, p),
     logout: () => ipcRenderer.invoke('lastfm:logout'),
@@ -123,10 +130,11 @@ contextBridge.exposeInMainWorld('api', {
   media: {
     fetchNeteaseLrcText: (params) => ipcRenderer.invoke('netease:fetchLrcText', params),
     writeFile: (filePath, text) => ipcRenderer.invoke('media:writeFile', filePath, text),
-    getMetadata: (url) => ipcRenderer.invoke('media:getMetadata', url),
+    getMetadata: (url, options) => ipcRenderer.invoke('media:getMetadata', url, options),
     downloadAudio: (url, folder, options) =>
       ipcRenderer.invoke('media:download', url, folder, options),
     downloadFromUrl: (opts) => ipcRenderer.invoke('media:downloadFromUrl', opts),
+    applyDownloadedMetadata: (payload) => ipcRenderer.invoke('media:applyDownloadedMetadata', payload),
     onProgress: (callback) => {
       const channel = 'media:download-progress'
       const handler = (_, data) => callback(data)
@@ -244,9 +252,14 @@ contextBridge.exposeInMainWorld('api', {
   listCrashReports: () => ipcRenderer.invoke('crash:listReports'),
   openCrashDir: () => ipcRenderer.send('crash:openDir'),
   openYoutubeSignInWindow: () => ipcRenderer.invoke('youtube:openSignInWindow'),
+  openYoutubeSystemSignIn: (browser) => ipcRenderer.invoke('youtube:openSystemSignIn', browser),
+  saveYoutubeSystemCookies: () => ipcRenderer.invoke('youtube:saveSystemCookies'),
+  getYoutubeSystemCookieStatus: () => ipcRenderer.invoke('youtube:getSystemCookieStatus'),
   openBilibiliSignInWindow: () => ipcRenderer.invoke('bilibili:openSignInWindow'),
   openNeteaseSignInWindow: () => ipcRenderer.invoke('netease:openSignInWindow'),
   getNeteaseCookie: (preferredCookie) => ipcRenderer.invoke('netease:getCookie', preferredCookie),
+  openQqMusicSignInWindow: () => ipcRenderer.invoke('qqMusic:openSignInWindow'),
+  getQqMusicCookie: (preferredCookie) => ipcRenderer.invoke('qqMusic:getCookie', preferredCookie),
   resolveBilibiliStream: (bvid, quality) =>
     ipcRenderer.invoke('bilibili:resolveStream', bvid, quality),
   checkSignInStatus: () => ipcRenderer.invoke('signin:checkStatus'),

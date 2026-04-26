@@ -3,8 +3,14 @@ import { join, extname } from 'path'
 import fs from 'fs'
 import { getResolvedFfmpegStaticPath } from './utils/resolveFfmpegStaticPath.js'
 import youtubedl from 'youtube-dl-exec'
-import MediaDownloader from './MediaDownloader.js'
+import MediaDownloader, { buildYoutubeCookieArgs, buildYtDlpMetadataArgs } from './MediaDownloader.js'
 import { importNeteasePlaylist, parseNeteasePlaylistId } from './neteasePlaylist.js'
+import { getNeteaseSongDirectUrl, searchNeteaseSongs } from './neteaseLyrics.js'
+import {
+  getQqMusicPlaylistTracks,
+  getQqMusicSongDirectUrl,
+  searchQqMusicSongs
+} from './qqMusicProvider.js'
 
 const ytDlpBinaryPath = youtubedl.constants.YOUTUBE_DL_PATH.replace('app.asar', 'app.asar.unpacked')
 
@@ -14,10 +20,11 @@ function isAudioFilename(name) {
   return AUDIO_EXT.has(extname(name).toLowerCase())
 }
 
-function ytDlpExtraFromEnv() {
-  return process.env.ECHOES_YTDLP_EXTRA
+function ytDlpExtraFromEnv(url = '', options = {}) {
+  const envArgs = process.env.ECHOES_YTDLP_EXTRA
     ? process.env.ECHOES_YTDLP_EXTRA.split(/\s+/).filter(Boolean)
     : []
+  return [...envArgs, ...buildYoutubeCookieArgs(url, options)]
 }
 
 function sanitizeFolderName(name) {
@@ -62,16 +69,45 @@ function looksLikeNetEasePlaylistInput(raw) {
   }
 }
 
-function runYtDlpDumpJson(url) {
+function parseQqMusicPlaylistId(input) {
+  const s = String(input || '').trim()
+  if (!s) return null
+  try {
+    const u = new URL(s.includes('://') ? s : `https://${s}`)
+    if (!/qq\.com$/i.test(u.hostname) && !/qq\.com\./i.test(u.hostname)) return null
+    const direct =
+      u.searchParams.get('id') ||
+      u.searchParams.get('tid') ||
+      u.searchParams.get('disstid') ||
+      u.searchParams.get('dirid')
+    if (direct && /^\d+$/.test(direct)) return direct
+    const pathMatch = u.pathname.match(/(?:playlist|taoge|details\/taoge)(?:\.html)?\/?(\d+)/i)
+    if (pathMatch) return pathMatch[1]
+  } catch {
+    // fall through
+  }
+  const m = /(?:id|tid|disstid|dirid)=(\d+)/i.exec(s)
+  return m ? m[1] : null
+}
+
+function looksLikeQqMusicPlaylistInput(raw) {
+  return !!parseQqMusicPlaylistId(raw)
+}
+
+function looksLikeSpotifyPlaylistInput(raw) {
+  const s = String(raw || '').trim()
+  if (!s) return false
+  try {
+    const u = new URL(s.includes('://') ? s : `https://${s}`)
+    return /(^|\.)spotify\.com$/i.test(u.hostname) && /\/playlist\//i.test(u.pathname)
+  } catch {
+    return /open\.spotify\.com\/playlist\//i.test(s)
+  }
+}
+
+function runYtDlpDumpJson(url, options = {}) {
   return new Promise((resolve, reject) => {
-    const p = spawn(ytDlpBinaryPath, [
-      '-J',
-      '--no-warnings',
-      '--skip-download',
-      '--socket-timeout',
-      '30',
-      url
-    ])
+    const p = spawn(ytDlpBinaryPath, buildYtDlpMetadataArgs(url, options))
     let out = ''
     let err = ''
     p.stdout.on('data', (d) => {
@@ -131,6 +167,273 @@ function buildTrackFilename(entry, fallbackTitle, fallbackIndex) {
   return title || `track_${fallbackIndex}`
 }
 
+function sanitizeFilenameStem(name) {
+  const cleaned = String(name || '')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '')
+  return cleaned || 'track'
+}
+
+function normalizeCatalogTrack(entry, index = 0) {
+  const title = String(entry?.track || entry?.title || entry?.name || '').trim()
+  const artist = String(entry?.artist || entry?.artists || entry?.uploader || entry?.channel || '').trim()
+  const album = String(entry?.album || entry?.release_title || '').trim()
+  const durationRaw = Number(entry?.duration || entry?.duration_ms || entry?.durationMs || 0)
+  const durationMs = durationRaw > 0 && durationRaw < 10000 ? durationRaw * 1000 : durationRaw
+  return {
+    title: title || `Track ${index + 1}`,
+    artist,
+    album,
+    durationMs: Number.isFinite(durationMs) ? durationMs : 0,
+    cover: entry?.thumbnail || entry?.cover || null,
+    sourceUrl: entryPlaybackUrl(entry) || entry?.webpage_url || null
+  }
+}
+
+function normalizeMatchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\[[^\]]*\]|\([^)]*\)|（[^）]*）|【[^】]*】/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function compactMatchText(value) {
+  return normalizeMatchText(value).replace(/\s+/g, '')
+}
+
+function tokenSet(value) {
+  return new Set(normalizeMatchText(value).split(/\s+/).filter(Boolean))
+}
+
+function overlapRatio(a, b) {
+  const left = tokenSet(a)
+  const right = tokenSet(b)
+  if (left.size === 0 || right.size === 0) return 0
+  let hits = 0
+  for (const token of left) {
+    if (right.has(token)) hits++
+  }
+  return hits / Math.max(left.size, 1)
+}
+
+function versionIntentScore(inputTitle, candidateTitle) {
+  const source = normalizeMatchText(inputTitle)
+  const result = normalizeMatchText(candidateTitle)
+  const rules = [
+    ['live', '演唱会', '现场'],
+    ['remix', 'rmx', '混音'],
+    ['acoustic', '不插电'],
+    ['instrumental', '伴奏', 'off vocal', 'karaoke'],
+    ['cover', '翻唱']
+  ]
+  let score = 0
+  for (const terms of rules) {
+    const wants = terms.some((term) => source.includes(term))
+    const has = terms.some((term) => result.includes(term))
+    if (wants && has) score += 8
+    else if (!wants && has) score -= 22
+    else if (wants && !has) score -= 6
+  }
+  return score
+}
+
+function scoreSearchCandidate(track, candidate) {
+  const sourceTitle = compactMatchText(track.title)
+  const resultTitle = compactMatchText(candidate.name || candidate.title)
+  const sourceArtist = track.artist || ''
+  const resultArtist = candidate.artist || candidate.artists || ''
+  const sourceAlbum = compactMatchText(track.album)
+  const resultAlbum = compactMatchText(candidate.album)
+  let score = 0
+
+  if (sourceTitle && resultTitle) {
+    if (sourceTitle === resultTitle) score += 70
+    else if (sourceTitle.includes(resultTitle) || resultTitle.includes(sourceTitle)) score += 52
+    else score += Math.round(overlapRatio(track.title, candidate.name || candidate.title) * 42)
+  }
+
+  if (sourceArtist && resultArtist) {
+    const artistOverlap = overlapRatio(sourceArtist, resultArtist)
+    const compactSourceArtist = compactMatchText(sourceArtist)
+    const compactResultArtist = compactMatchText(resultArtist)
+    if (compactSourceArtist && compactSourceArtist === compactResultArtist) score += 42
+    else if (
+      compactSourceArtist &&
+      compactResultArtist &&
+      (compactSourceArtist.includes(compactResultArtist) ||
+        compactResultArtist.includes(compactSourceArtist))
+    ) {
+      score += 34
+    } else {
+      score += Math.round(artistOverlap * 36)
+    }
+  }
+
+  if (sourceAlbum && resultAlbum) {
+    if (sourceAlbum === resultAlbum) score += 16
+    else if (sourceAlbum.includes(resultAlbum) || resultAlbum.includes(sourceAlbum)) score += 9
+  }
+
+  const sourceDuration = Number(track.durationMs || 0)
+  const resultDuration = Number(candidate.duration || candidate.durationMs || 0)
+  if (sourceDuration > 0 && resultDuration > 0) {
+    const diffSec = Math.abs(sourceDuration - resultDuration) / 1000
+    if (diffSec <= 3) score += 24
+    else if (diffSec <= 8) score += 16
+    else if (diffSec <= 20) score += 8
+    else if (diffSec > 60) score -= 18
+  }
+
+  score += versionIntentScore(track.title, candidate.name || candidate.title)
+  return score
+}
+
+function buildSearchQueries(track) {
+  const title = String(track.title || '').trim()
+  const artist = String(track.artist || '').trim()
+  const album = String(track.album || '').trim()
+  const queries = [
+    [title, artist].filter(Boolean).join(' '),
+    [artist, title].filter(Boolean).join(' '),
+    [title, album, artist].filter(Boolean).join(' ')
+  ]
+  return [...new Set(queries.map((q) => q.trim()).filter(Boolean))]
+}
+
+function providerOrderForTrack(sourceKind, preferredProvider) {
+  const preferred = preferredProvider === 'qq' ? 'qq' : 'netease'
+  if (sourceKind === 'qq') return ['qq', preferred === 'qq' ? 'netease' : preferred]
+  return [preferred, preferred === 'qq' ? 'netease' : 'qq']
+}
+
+async function searchProvider(provider, query, options) {
+  if (provider === 'qq') {
+    return await searchQqMusicSongs(query, { cookie: options.qqCookie || '', limit: 12 })
+  }
+  return await searchNeteaseSongs(query, { cookie: options.cookie || '' })
+}
+
+async function findBestProviderMatch(track, sourceKind, options) {
+  if (sourceKind === 'qq' && track.qqSong?.mid) {
+    return { provider: 'qq', candidate: track.qqSong, score: 140 }
+  }
+  const order = providerOrderForTrack(sourceKind, options.downloadProvider)
+  let best = null
+  for (const provider of order) {
+    for (const query of buildSearchQueries(track)) {
+      let results = []
+      try {
+        results = await searchProvider(provider, query, options)
+      } catch {
+        results = []
+      }
+      for (const candidate of results || []) {
+        const score = scoreSearchCandidate(track, candidate)
+        if (!best || score > best.score) {
+          best = { provider, candidate, score }
+        }
+      }
+      if (best?.provider === provider && best.score >= 112) return best
+    }
+    if (best?.provider === provider && best.score >= 82) return best
+  }
+  return best && best.score >= 78 ? best : null
+}
+
+async function downloadMatchedTrack(match, track, targetFolder, index, eventSender, options) {
+  const candidate = match.candidate
+  const artist = candidate.artist || candidate.artists || track.artist || ''
+  const title = candidate.name || candidate.title || track.title || `Track ${index + 1}`
+  const stem = sanitizeFilenameStem(`${String(index + 1).padStart(2, '0')} - ${artist ? `${artist} - ` : ''}${title}`)
+  let direct = null
+  let filename = ''
+
+  if (match.provider === 'qq') {
+    direct = await getQqMusicSongDirectUrl(candidate, {
+      qualityPreset: options.qualityPreset || 'auto',
+      cookie: options.qqCookie || ''
+    })
+    if (!direct?.url) throw new Error('QQ Music did not return a playable link for this account.')
+    filename = `${stem}.${direct.ext || direct.type || 'mp3'}`
+  } else {
+    direct = await getNeteaseSongDirectUrl(candidate.id, options.neteaseLevel || 'exhigh', {
+      cookie: options.cookie || ''
+    })
+    if (!direct?.url) throw new Error('NetEase did not return a playable link for this account.')
+    filename = `${stem}.${direct.type || 'mp3'}`
+  }
+
+  const filePath = await MediaDownloader.downloadFromUrl(
+    direct.url,
+    targetFolder,
+    filename,
+    eventSender,
+    { headers: direct.headers || {} }
+  )
+  return {
+    path: filePath,
+    trackTitle: title,
+    artist,
+    album: candidate.album || track.album || '',
+    cover: candidate.cover || track.cover || null,
+    sourceUrl: track.sourceUrl || direct.url,
+    provider: match.provider,
+    matchScore: match.score
+  }
+}
+
+async function importCatalogTracks(
+  tracks,
+  playlistName,
+  targetFolder,
+  eventSender,
+  sourceKind,
+  options = {}
+) {
+  const total = tracks.length
+  const added = []
+  const failed = []
+  eventSender.send('playlist-link:import-progress', {
+    phase: 'meta',
+    playlistName,
+    total
+  })
+
+  for (let i = 0; i < tracks.length; i++) {
+    const track = tracks[i]
+    eventSender.send('playlist-link:import-progress', {
+      phase: 'download',
+      current: i + 1,
+      total,
+      trackName: track.title,
+      artists: track.artist || ''
+    })
+    try {
+      const match = await findBestProviderMatch(track, sourceKind, options)
+      if (!match) throw new Error('No high-confidence match found.')
+      const item = await downloadMatchedTrack(match, track, targetFolder, i, eventSender, options)
+      added.push(item)
+      eventSender.send('playlist-link:import-progress', {
+        phase: 'added',
+        playlistName,
+        ...item
+      })
+    } catch (error) {
+      failed.push({
+        name: track.artist ? `${track.artist} - ${track.title}` : track.title,
+        error: error.message || String(error)
+      })
+    }
+    await new Promise((resolve) => setTimeout(resolve, 180))
+  }
+
+  return { playlistName, added, failed }
+}
+
 /**
  * 逐条 URL 下载（Spotify / SoundCloud / Tidal 等由 yt-dlp 支持的链接）
  */
@@ -151,7 +454,6 @@ async function importByYtDlpEntryLoop(url, folder, eventSender, metaJson, option
     return { playlistName, added: [], failed: [] }
   }
 
-  const extraArgs = ytDlpExtraFromEnv()
   const added = []
   const failed = []
 
@@ -179,6 +481,7 @@ async function importByYtDlpEntryLoop(url, folder, eventSender, metaJson, option
     })
 
     const basename = `lk_${i}_${e.id != null ? e.id : i}`
+    const extraArgs = ytDlpExtraFromEnv(trackUrl, options)
     const perTrackArgs = playlistLike
       ? [...extraArgs, '--yes-playlist', '--playlist-items', String(playlistItem)]
       : extraArgs
@@ -226,7 +529,7 @@ async function importByYtDlpBulk(url, folder, eventSender, hintName, options = {
     before = new Set()
   }
 
-  const extraArgs = ytDlpExtraFromEnv()
+  const extraArgs = ytDlpExtraFromEnv(url, options)
   const args = [
     url,
     '-x',
@@ -330,12 +633,44 @@ export async function importPlaylistFromLink(
     return importNeteasePlaylist(trimmed, downloadFolder, eventSender, preferredFolderName, options)
   }
 
+  if (looksLikeQqMusicPlaylistInput(trimmed)) {
+    const playlistId = parseQqMusicPlaylistId(trimmed)
+    const meta = await getQqMusicPlaylistTracks({
+      playlistId,
+      cookie: options.qqCookie || ''
+    })
+    const targetFolder = ensurePlaylistFolder(
+      downloadFolder,
+      preferredFolderName || meta.name || 'QQ Music Playlist'
+    )
+    const tracks = (meta.tracks || []).map((song) => ({
+      title: song.name,
+      artist: song.artist || song.artists || '',
+      album: song.album || '',
+      durationMs: song.duration || 0,
+      cover: song.cover || null,
+      qqSong: song,
+      sourceUrl: song.mid ? `https://y.qq.com/n/ryqq/songDetail/${song.mid}` : null
+    }))
+    return importCatalogTracks(
+      tracks,
+      meta.name || 'QQ Music Playlist',
+      targetFolder,
+      eventSender,
+      'qq',
+      options
+    )
+  }
+
   const normalized = trimmed.includes('://') ? trimmed : `https://${trimmed}`
 
   let metaJson
   try {
-    metaJson = await runYtDlpDumpJson(normalized)
+    metaJson = await runYtDlpDumpJson(normalized, options)
   } catch {
+    if (looksLikeSpotifyPlaylistInput(trimmed)) {
+      throw new Error('无法读取 Spotify 歌单曲目，请确认歌单是公开链接，或稍后重试。')
+    }
     const fallbackFolder = ensurePlaylistFolder(
       downloadFolder,
       preferredFolderName || deriveFolderNameFromInput(normalized)
@@ -358,6 +693,18 @@ export async function importPlaylistFromLink(
 
   if (entries.length === 0) {
     return importByYtDlpBulk(normalized, targetFolder, eventSender, playlistName, options)
+  }
+
+  if (looksLikeSpotifyPlaylistInput(trimmed)) {
+    const tracks = entries.map((entry, index) => normalizeCatalogTrack(entry, index))
+    return importCatalogTracks(
+      tracks,
+      playlistName || preferredFolderName || 'Spotify Playlist',
+      targetFolder,
+      eventSender,
+      'spotify',
+      options
+    )
   }
 
   try {

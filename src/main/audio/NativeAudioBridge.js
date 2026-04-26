@@ -41,6 +41,20 @@ export function isNativeBridgeAvailable() {
   return resolveHostBinary() !== null
 }
 
+function parseDeviceListLine(line) {
+  const parts = line.trim().split('\t')
+  if (parts.length < 2) return null
+  const index = parseInt(parts[0], 10)
+  if (!Number.isFinite(index)) return null
+  const sampleRate = parseInt(parts[2] || '0', 10)
+  return {
+    index,
+    name: parts[1],
+    sampleRate: Number.isFinite(sampleRate) ? sampleRate : 0,
+    isDefault: parts[3] === '1'
+  }
+}
+
 /**
  * List audio devices by running `echo-audio-host -list`.
  * Returns an array of `{ index, name }`.
@@ -54,11 +68,7 @@ export function listNativeDevices() {
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
-      .map((line) => {
-        const tab = line.indexOf('\t')
-        if (tab < 0) return null
-        return { index: parseInt(line.slice(0, tab), 10), name: line.slice(tab + 1) }
-      })
+      .map(parseDeviceListLine)
       .filter(Boolean)
   } catch (e) {
     console.error('[NativeAudioBridge] listDevices failed:', e?.message || e)
@@ -75,11 +85,7 @@ export function listAsioDevices() {
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
-      .map((line) => {
-        const tab = line.indexOf('\t')
-        if (tab < 0) return null
-        return { index: parseInt(line.slice(0, tab), 10), name: line.slice(tab + 1) }
-      })
+      .map(parseDeviceListLine)
       .filter(Boolean)
   } catch (e) {
     console.error('[NativeAudioBridge] listAsioDevices failed:', e?.message || e)

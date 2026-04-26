@@ -81,6 +81,7 @@ typedef struct listed_device {
     ma_device_id id;
     char name[512];
     ma_uint32 highestSampleRate;
+    ma_bool32 isDefault;
 } listed_device;
 
 #ifdef _WIN32
@@ -223,6 +224,66 @@ static ma_uint32 get_highest_sample_rate(const ma_device_info* info) {
     return highest;
 }
 
+static void probe_data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
+    (void)pDevice;
+    (void)pInput;
+    if (pOutput != NULL) {
+        memset(pOutput, 0, frameCount * 2 * sizeof(float));
+    }
+}
+
+static ma_uint32 probe_highest_exclusive_sample_rate(ma_context* context, const ma_device_id* deviceId) {
+    static const ma_uint32 rates[] = {
+        768000, 705600, 384000, 352800, 192000, 176400, 96000, 88200, 48000, 44100
+    };
+
+    if (context == NULL || deviceId == NULL) return 0;
+
+    for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); ++i) {
+        ma_device_config config = ma_device_config_init(ma_device_type_playback);
+        ma_device device;
+        ma_result result;
+
+        memset(&device, 0, sizeof(device));
+        config.playback.format = ma_format_f32;
+        config.playback.channels = 2;
+        config.playback.pDeviceID = deviceId;
+        config.playback.shareMode = ma_share_mode_exclusive;
+        config.sampleRate = rates[i];
+        config.dataCallback = probe_data_callback;
+
+        result = ma_device_init(context, &config, &device);
+        if (result == MA_SUCCESS) {
+            ma_uint32 actualRate = device.sampleRate > 0 ? device.sampleRate : rates[i];
+            ma_device_uninit(&device);
+            if (actualRate == rates[i]) {
+                return actualRate;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static ma_uint32 get_highest_sample_rate_for_device(ma_context* context, const ma_device_info* info) {
+    ma_uint32 highest = get_highest_sample_rate(info);
+    ma_device_info detailed;
+    ma_uint32 probedHighest;
+
+    if (context == NULL || info == NULL) return highest;
+
+    memset(&detailed, 0, sizeof(detailed));
+    if (ma_context_get_device_info(context, ma_device_type_playback, &info->id, &detailed) == MA_SUCCESS) {
+        ma_uint32 detailedHighest = get_highest_sample_rate(&detailed);
+        if (detailedHighest > highest) highest = detailedHighest;
+    }
+
+    probedHighest = probe_highest_exclusive_sample_rate(context, &info->id);
+    if (probedHighest > highest) highest = probedHighest;
+
+    return highest;
+}
+
 static int collect_unique_playback_devices(ma_context* context, listed_device** outDevices, ma_uint32* outCount) {
     ma_device_info* playbackInfos = NULL;
     ma_uint32 playbackCount = 0;
@@ -244,7 +305,7 @@ static int collect_unique_playback_devices(ma_context* context, listed_device** 
 
     for (ma_uint32 i = 0; i < playbackCount; ++i) {
         char utf8Name[512];
-        ma_uint32 highestSampleRate = get_highest_sample_rate(&playbackInfos[i]);
+        ma_uint32 highestSampleRate = get_highest_sample_rate_for_device(context, &playbackInfos[i]);
         ma_uint32 existingIndex = (ma_uint32)-1;
 
         utf8Name[0] = '\0';
@@ -267,6 +328,9 @@ static int collect_unique_playback_devices(ma_context* context, listed_device** 
             if (highestSampleRate > devices[existingIndex].highestSampleRate) {
                 devices[existingIndex].highestSampleRate = highestSampleRate;
             }
+            if (playbackInfos[i].isDefault) {
+                devices[existingIndex].isDefault = MA_TRUE;
+            }
             if (devices[existingIndex].name[0] == '\0' && utf8Name[0] != '\0') {
                 snprintf(devices[existingIndex].name, sizeof(devices[existingIndex].name), "%s", utf8Name);
             }
@@ -275,6 +339,7 @@ static int collect_unique_playback_devices(ma_context* context, listed_device** 
 
         devices[uniqueCount].id = playbackInfos[i].id;
         devices[uniqueCount].highestSampleRate = highestSampleRate;
+        devices[uniqueCount].isDefault = playbackInfos[i].isDefault;
         snprintf(devices[uniqueCount].name, sizeof(devices[uniqueCount].name), "%s", utf8Name);
         uniqueCount += 1;
     }
@@ -305,7 +370,7 @@ static int collect_unique_playback_devices_by_name(ma_context* context, listed_d
 
     for (ma_uint32 i = 0; i < playbackCount; ++i) {
         char utf8Name[512];
-        ma_uint32 highestSampleRate = get_highest_sample_rate(&playbackInfos[i]);
+        ma_uint32 highestSampleRate = get_highest_sample_rate_for_device(context, &playbackInfos[i]);
         ma_uint32 existingIndex = (ma_uint32)-1;
 
         device_name_to_utf8(playbackInfos[i].name, utf8Name, (int)sizeof(utf8Name));
@@ -942,8 +1007,12 @@ int main(int argc, char** argv) {
         ma_uint32 deviceCount = 0;
         if (collect_unique_playback_devices(&context, &devices, &deviceCount) == 0) {
             for (ma_uint32 i = 0; i < deviceCount; i++) {
-                /* stdout: one device per line  index\tname\n */
-                fprintf(stdout, "%u\t%s\n", i, devices[i].name);
+                /* stdout: one device per line  index\tname\thighestSampleRate\tisDefault\n */
+                fprintf(stdout, "%u\t%s\t%u\t%d\n",
+                        i,
+                        devices[i].name,
+                        devices[i].highestSampleRate,
+                        devices[i].isDefault ? 1 : 0);
             }
             fflush(stdout);
             free(devices);

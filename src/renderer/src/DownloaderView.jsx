@@ -9,6 +9,23 @@ import {
   AlertCircle,
   CloudDownload
 } from 'lucide-react'
+import { writeTrackMetaCache } from './utils/trackMetaCache'
+
+function isSoundCloudUrl(value) {
+  try {
+    const hostname = new URL(String(value || '').trim()).hostname
+    return /(^|\.)soundcloud\.com$/i.test(hostname)
+  } catch {
+    return false
+  }
+}
+
+function normalizeYoutubeCookieBrowser(value) {
+  const browser = String(value || 'edge').trim().toLowerCase()
+  if (browser === 'chrome' || browser === 'edge' || browser === 'firefox') return browser
+  if (browser === 'none') return 'none'
+  return 'edge'
+}
 
 export default function DownloaderView({
   config,
@@ -34,6 +51,7 @@ export default function DownloaderView({
   const [linkImportTarget, setLinkImportTarget] = useState('new')
   const [linkImporting, setLinkImporting] = useState(false)
   const [linkImportStatus, setLinkImportStatus] = useState('')
+  const [downloadProvider, setDownloadProvider] = useState('netease')
   const [neteaseCookieInput, setNeteaseCookieInput] = useState('')
   const [neteaseCookieSaved, setNeteaseCookieSaved] = useState('')
   const [neteaseAuth, setNeteaseAuth] = useState({
@@ -43,10 +61,21 @@ export default function DownloaderView({
     isVip: false,
     error: ''
   })
+  const [qqMusicCookieInput, setQqMusicCookieInput] = useState('')
+  const [qqMusicCookieSaved, setQqMusicCookieSaved] = useState('')
+  const [qqMusicAuth, setQqMusicAuth] = useState({
+    checking: true,
+    valid: false,
+    signedIn: false,
+    isVip: false,
+    error: ''
+  })
   const [audioQualityPreset, setAudioQualityPreset] = useState('auto')
   const [isNeteaseSigningIn, setIsNeteaseSigningIn] = useState(false)
+  const [isQqMusicSigningIn, setIsQqMusicSigningIn] = useState(false)
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
+  const [downloadNotice, setDownloadNotice] = useState('')
   const [use1music, setUse1music] = useState(() => {
     try {
       return localStorage.getItem('echoes.use1music') === '1'
@@ -59,9 +88,13 @@ export default function DownloaderView({
   const [albumMissingTracks, setAlbumMissingTracks] = useState([])
   const [albumError, setAlbumError] = useState('')
   const [albumDownloadingId, setAlbumDownloadingId] = useState(null)
+  const [youtubeLoginSaving, setYoutubeLoginSaving] = useState(false)
+  const [youtubeLoginStatus, setYoutubeLoginStatus] = useState('')
   const downloaderPrefsHydratedRef = useRef(false)
 
   const effectiveDownloadFolder = String(downloadFolder || config.downloadFolder || '').trim()
+  const youtubeCookieBrowser = normalizeYoutubeCookieBrowser(config.youtubeCookieBrowser)
+  const youtubeCookieFile = String(config.youtubeCookieFile || '').trim()
 
   const normalizeTrackCompareTitle = useCallback((value) => {
     return String(value || '')
@@ -90,10 +123,14 @@ export default function DownloaderView({
     const hydrate = async () => {
       try {
         const savedCookie = localStorage.getItem('echoes.neteaseCookie') || ''
+        const savedQqMusicCookie = localStorage.getItem('echoes.qqMusicCookie') || ''
         const savedQuality = localStorage.getItem('echoes.downloaderAudioQuality') || 'auto'
+        const savedProvider = localStorage.getItem('echoes.downloaderProvider') || 'netease'
         if (!cancelled) {
           setNeteaseCookieSaved(savedCookie)
+          setQqMusicCookieSaved(savedQqMusicCookie)
           setAudioQualityPreset(savedQuality)
+          setDownloadProvider(savedProvider === 'qq' ? 'qq' : 'netease')
         }
       } catch (_) {}
       try {
@@ -102,11 +139,17 @@ export default function DownloaderView({
           !cancelled &&
           prefs &&
           typeof prefs === 'object' &&
-          (typeof prefs.neteaseCookie === 'string' || typeof prefs.audioQualityPreset === 'string')
+          (typeof prefs.neteaseCookie === 'string' ||
+            typeof prefs.qqMusicCookie === 'string' ||
+            typeof prefs.audioQualityPreset === 'string' ||
+            typeof prefs.downloadProvider === 'string')
         ) {
           if (typeof prefs.neteaseCookie === 'string') setNeteaseCookieSaved(prefs.neteaseCookie)
+          if (typeof prefs.qqMusicCookie === 'string') setQqMusicCookieSaved(prefs.qqMusicCookie)
           if (typeof prefs.audioQualityPreset === 'string')
             setAudioQualityPreset(prefs.audioQualityPreset || 'auto')
+          if (typeof prefs.downloadProvider === 'string')
+            setDownloadProvider(prefs.downloadProvider === 'qq' ? 'qq' : 'netease')
         }
       } catch (_) {}
       if (!cancelled) downloaderPrefsHydratedRef.current = true
@@ -121,9 +164,11 @@ export default function DownloaderView({
     if (!downloaderPrefsHydratedRef.current || !window.api?.appStateSet) return
     void window.api.appStateSet('downloaderSettings', {
       neteaseCookie: neteaseCookieSaved || '',
+      qqMusicCookie: qqMusicCookieSaved || '',
+      downloadProvider,
       audioQualityPreset: audioQualityPreset || 'auto'
     })
-  }, [neteaseCookieSaved, audioQualityPreset])
+  }, [neteaseCookieSaved, qqMusicCookieSaved, downloadProvider, audioQualityPreset])
 
   useEffect(() => {
     try {
@@ -131,12 +176,48 @@ export default function DownloaderView({
     } catch (_) {}
   }, [use1music])
 
+  useEffect(() => {
+    let cancelled = false
+    const loadYoutubeCookieStatus = async () => {
+      try {
+        const status = await window.api?.getYoutubeSystemCookieStatus?.()
+        if (cancelled || !status?.available) return
+        setYoutubeLoginStatus(isZh ? '已保存 YouTube 登录状态' : 'YouTube sign-in saved')
+      } catch (_) {}
+    }
+    void loadYoutubeCookieStatus()
+    return () => {
+      cancelled = true
+    }
+  }, [isZh])
+
   const applyNeteaseCookie = useCallback((cookie) => {
     const next = String(cookie || '').trim()
     setNeteaseCookieSaved(next)
     try {
       if (next) localStorage.setItem('echoes.neteaseCookie', next)
       else localStorage.removeItem('echoes.neteaseCookie')
+    } catch (_) {}
+  }, [])
+
+  const applyQqMusicCookie = useCallback((cookie) => {
+    const next = String(cookie || '').trim()
+    setQqMusicCookieSaved(next)
+    try {
+      if (next) localStorage.setItem('echoes.qqMusicCookie', next)
+      else localStorage.removeItem('echoes.qqMusicCookie')
+    } catch (_) {}
+  }, [])
+
+  const updateDownloadProvider = useCallback((provider) => {
+    const next = provider === 'qq' ? 'qq' : 'netease'
+    setDownloadProvider(next)
+    setSearchResults([])
+    setAlbumMissingTracks([])
+    setAlbumError('')
+    setDownloadNotice('')
+    try {
+      localStorage.setItem('echoes.downloaderProvider', next)
     } catch (_) {}
   }, [])
 
@@ -196,20 +277,137 @@ export default function DownloaderView({
     return ''
   }, [applyNeteaseCookie, neteaseCookieSaved])
 
+  const refreshQqMusicCookieFromSession = useCallback(
+    async (preferredCookie = '') => {
+      if (!window.api?.getQqMusicCookie) return
+      setQqMusicAuth((prev) => ({ ...prev, checking: true, error: '' }))
+      try {
+        const out = await window.api.getQqMusicCookie(preferredCookie || qqMusicCookieSaved)
+        if (out?.ok && out?.valid && out?.cookie) {
+          applyQqMusicCookie(out.cookie)
+        } else if (out?.checked) {
+          applyQqMusicCookie('')
+        }
+        setQqMusicAuth({
+          checking: false,
+          valid: out?.valid === true,
+          signedIn: out?.signedIn === true,
+          isVip: out?.isVip === true,
+          error: out?.error || ''
+        })
+      } catch (_) {
+      } finally {
+        setQqMusicAuth((prev) => ({ ...prev, checking: false }))
+      }
+    },
+    [applyQqMusicCookie, qqMusicCookieSaved]
+  )
+
+  const ensureUsableQqMusicCookie = useCallback(async () => {
+    if (!window.api?.getQqMusicCookie) return ''
+    try {
+      const out = await window.api.getQqMusicCookie(qqMusicCookieSaved)
+      setQqMusicAuth({
+        checking: false,
+        valid: out?.valid === true,
+        signedIn: out?.signedIn === true,
+        isVip: out?.isVip === true,
+        error: out?.error || ''
+      })
+      if (out?.ok && out?.valid && out?.cookie) {
+        if (out.cookie !== qqMusicCookieSaved) applyQqMusicCookie(out.cookie)
+        return out.cookie
+      }
+      if (out?.checked === false && out?.cookie) {
+        if (out.cookie !== qqMusicCookieSaved) applyQqMusicCookie(out.cookie)
+        return out.cookie
+      }
+      if (out?.checked) {
+        applyQqMusicCookie('')
+      }
+    } catch (error) {
+      setQqMusicAuth({
+        checking: false,
+        valid: false,
+        signedIn: false,
+        isVip: false,
+        error: error?.message || String(error)
+      })
+    }
+    return ''
+  }, [applyQqMusicCookie, qqMusicCookieSaved])
+
   useEffect(() => {
     if (!window.api?.onSignInStatusChanged) return
     const unsub = window.api.onSignInStatusChanged(() => {
       void refreshNeteaseCookieFromSession()
+      void refreshQqMusicCookieFromSession()
     })
     return () => {
       if (typeof unsub === 'function') unsub()
     }
-  }, [refreshNeteaseCookieFromSession])
+  }, [refreshNeteaseCookieFromSession, refreshQqMusicCookieFromSession])
 
   useEffect(() => {
     if (!downloaderPrefsHydratedRef.current) return
     void refreshNeteaseCookieFromSession(neteaseCookieSaved)
   }, [neteaseCookieSaved, refreshNeteaseCookieFromSession])
+
+  useEffect(() => {
+    if (!downloaderPrefsHydratedRef.current) return
+    void refreshQqMusicCookieFromSession(qqMusicCookieSaved)
+  }, [qqMusicCookieSaved, refreshQqMusicCookieFromSession])
+
+  const openYoutubeSystemSignIn = useCallback(async () => {
+    const browser = youtubeCookieBrowser === 'chrome' ? 'chrome' : 'edge'
+    try {
+      const result = await window.api?.openYoutubeSystemSignIn?.(browser)
+      if (result?.ok) {
+        setYoutubeLoginStatus(
+          isZh
+            ? `已打开 ${browser === 'chrome' ? 'Chrome' : 'Edge'}，登录完成后回到 ECHO 点“已登录”。`
+            : `${browser === 'chrome' ? 'Chrome' : 'Edge'} opened. After signing in, return to ECHO and click Saved.`
+        )
+      } else {
+        setYoutubeLoginStatus(
+          isZh
+            ? `无法打开 ${browser === 'chrome' ? 'Chrome' : 'Edge'}：${result?.error || '未知错误'}`
+            : `Could not open ${browser === 'chrome' ? 'Chrome' : 'Edge'}: ${result?.error || 'unknown error'}`
+        )
+      }
+    } catch (error) {
+      setYoutubeLoginStatus(error?.message || String(error))
+    }
+  }, [isZh, youtubeCookieBrowser])
+
+  const saveYoutubeSystemCookies = useCallback(async () => {
+    setYoutubeLoginSaving(true)
+    setYoutubeLoginStatus(isZh ? '正在保存 YouTube 登录状态…' : 'Saving YouTube sign-in...')
+    try {
+      const result = await window.api?.saveYoutubeSystemCookies?.()
+      if (result?.ok) {
+        setYoutubeLoginStatus(
+          result.signedIn
+            ? isZh
+              ? '已保存 YouTube 登录状态，之后会自动用于解析/下载。'
+              : 'YouTube sign-in saved. ECHO will use it automatically.'
+            : isZh
+              ? '已保存浏览器 cookies，但没有检测到完整登录状态；如果仍失败，请确认 YouTube 页面已登录。'
+              : 'Browser cookies saved, but full sign-in was not detected. Please confirm YouTube is signed in if downloads still fail.'
+        )
+      } else {
+        setYoutubeLoginStatus(
+          isZh
+            ? `保存失败：${result?.error || '请先打开登录窗口'}`
+            : `Save failed: ${result?.error || 'open the sign-in window first'}`
+        )
+      }
+    } catch (error) {
+      setYoutubeLoginStatus(error?.message || String(error))
+    } finally {
+      setYoutubeLoginSaving(false)
+    }
+  }, [isZh])
 
   const handleLinkPlaylistImport = useCallback(async () => {
     if (!window.api?.playlistLink?.importPlaylist) return
@@ -221,6 +419,7 @@ export default function DownloaderView({
     const raw = linkImportUrl.trim()
     if (!raw) return
     const usableNeteaseCookie = await ensureUsableNeteaseCookie()
+    const usableQqMusicCookie = await ensureUsableQqMusicCookie()
     setLinkImporting(true)
     setLinkImportStatus(t('downloader.connecting'))
     const tFn = i18n.getFixedT(i18n.language)
@@ -254,6 +453,21 @@ export default function DownloaderView({
     const appendImportedItems = (items) => {
       const normalizedItems = (items || []).filter((item) => item?.path)
       if (normalizedItems.length === 0) return
+      const cacheEntries = {}
+      for (const item of normalizedItems) {
+        if (!item.cover && !item.title && !item.artist && !item.album) continue
+        cacheEntries[item.path] = {
+          title: item.title || item.trackTitle || null,
+          artist: item.artist || item.artists || null,
+          album: item.album || null,
+          albumArtist: item.artist || item.artists || null,
+          cover: item.cover || null,
+          coverChecked: Boolean(item.cover)
+        }
+      }
+      if (Object.keys(cacheEntries).length > 0) {
+        void writeTrackMetaCache(cacheEntries)
+      }
       if (setPlaylist) {
         setPlaylist((prev) => {
           const seen = new Set(prev.map((x) => x.path))
@@ -311,6 +525,11 @@ export default function DownloaderView({
             name: p.path.split(/[/\\]/).pop() || p.trackTitle || 'track',
             path: p.path,
             type: 'local',
+            ...(p.trackTitle ? { title: p.trackTitle } : {}),
+            ...(p.artist ? { artist: p.artist, artists: p.artist } : {}),
+            ...(p.album ? { album: p.album } : {}),
+            ...(p.cover ? { cover: p.cover } : {}),
+            ...(p.provider ? { downloadProvider: p.provider } : {}),
             ...(p.sourceUrl ? { sourceUrl: p.sourceUrl, mvOriginUrl: p.sourceUrl } : {})
           }
         ])
@@ -326,14 +545,24 @@ export default function DownloaderView({
         downloadFolder: playlistSaveDir,
         preferredFolderName,
         neteaseCookie: usableNeteaseCookie,
+        qqMusicCookie: usableQqMusicCookie,
+        downloadProvider,
+        audioQualityPreset,
+        youtubeCookieBrowser,
+        youtubeCookieFile,
         quickMode: config.downloaderQuickMode === true
       })
       const newItems = (r.added || [])
         .filter(({ path }) => path && !streamedPathSet.has(path))
-        .map(({ path, trackTitle, sourceUrl }) => ({
+        .map(({ path, trackTitle, sourceUrl, artist, album, cover, provider }) => ({
           name: path.split(/[/\\]/).pop() || trackTitle || 'track',
           path,
           type: 'local',
+          ...(trackTitle ? { title: trackTitle } : {}),
+          ...(artist ? { artist, artists: artist } : {}),
+          ...(album ? { album } : {}),
+          ...(cover ? { cover } : {}),
+          ...(provider ? { downloadProvider: provider } : {}),
           ...(sourceUrl ? { sourceUrl, mvOriginUrl: sourceUrl } : {})
         }))
       if (r.playlistName) ensurePlaylistTarget(r.playlistName)
@@ -374,7 +603,12 @@ export default function DownloaderView({
     setSelectedUserPlaylistId,
     t,
     i18n,
-    ensureUsableNeteaseCookie
+    ensureUsableNeteaseCookie,
+    ensureUsableQqMusicCookie,
+    downloadProvider,
+    audioQualityPreset,
+    youtubeCookieBrowser,
+    youtubeCookieFile
   ])
 
   useEffect(() => {
@@ -401,7 +635,22 @@ export default function DownloaderView({
     setMetadata(null)
     setSearchResults([])
     try {
-      const meta = await window.api.media.getMetadata(url)
+      const meta = await Promise.race([
+        window.api.media.getMetadata(rawUrl, { youtubeCookieBrowser, youtubeCookieFile }),
+        new Promise((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  isZh
+                    ? '解析超时，请重新保存 YouTube 登录状态后再试'
+                    : 'Metadata lookup timed out. Save YouTube sign-in again and retry.'
+                )
+              ),
+            30000
+          )
+        )
+      ])
       setMetadata(meta)
       setStatus('ready')
     } catch (err) {
@@ -417,16 +666,26 @@ export default function DownloaderView({
     setIsSearching(true)
     setStatus('searching')
     setErrorMsg('')
+    setDownloadNotice('')
     setMetadata(null)
     setSearchResults([])
     try {
-      const usableNeteaseCookie = await ensureUsableNeteaseCookie()
-      const res = await window.api.neteaseSearch(keywords, usableNeteaseCookie)
+      const res =
+        downloadProvider === 'qq'
+          ? await window.api.qqMusicSearch(keywords, await ensureUsableQqMusicCookie())
+          : await window.api.neteaseSearch(keywords, await ensureUsableNeteaseCookie())
       setSearchResults(res || [])
       setStatus('search_ok')
     } catch (err) {
       console.error(err)
-      setErrorMsg(err.message || 'Search failed')
+      const rawMessage = err?.message || ''
+      setErrorMsg(
+        downloadProvider === 'qq'
+          ? isZh
+            ? `QQ 音乐搜索失败${rawMessage ? `：${rawMessage}` : ''}`
+            : `QQ Music search failed${rawMessage ? `: ${rawMessage}` : ''}`
+          : rawMessage || 'Search failed'
+      )
       setStatus('error')
     } finally {
       setIsSearching(false)
@@ -435,20 +694,41 @@ export default function DownloaderView({
 
   const handleDownload = async () => {
     if (!url || !effectiveDownloadFolder) return
-    const usableNeteaseCookie = await ensureUsableNeteaseCookie()
     setIsDownloading(true)
     setStatus('downloading')
     setProgress(0)
     setErrorMsg('')
-
-    const filesBefore = await window.api
-      .readDirectoryHandler(effectiveDownloadFolder)
-      .catch(() => [])
+    setDownloadNotice('')
 
     try {
+      if (isSoundCloudUrl(url)) {
+        const result = await window.api.downloadSoundCloud(url.trim(), effectiveDownloadFolder)
+        if (!result?.success || !result?.path) {
+          throw new Error(result?.error || t('downloader.downloadFailed'))
+        }
+        setProgress(100)
+        setStatus('success')
+        if (onSuccess) {
+          onSuccess({
+            path: result.path,
+            sourceUrl: url.trim(),
+            mvOriginUrl: url.trim(),
+            hasLyrics: false
+          })
+        }
+        return
+      }
+
+      const usableNeteaseCookie = await ensureUsableNeteaseCookie()
+      const filesBefore = await window.api
+        .readDirectoryHandler(effectiveDownloadFolder)
+        .catch(() => [])
+
       await window.api.media.downloadAudio(url, effectiveDownloadFolder, {
         audioQualityPreset,
         neteaseCookie: usableNeteaseCookie,
+        youtubeCookieBrowser,
+        youtubeCookieFile,
         quickMode: config.downloaderQuickMode === true
       })
       setStatus('success')
@@ -461,7 +741,31 @@ export default function DownloaderView({
       if (newFiles.length > 0) {
         const mId = url.match(/song\?id=(\d+)/) || url.match(/song\/(\d+)/i)
         const neteaseIdMatches = !!mId && newFiles.length === 1
+        const downloadedMeta = {
+          title: metadata?.title || null,
+          artist: metadata?.artist || null,
+          album: metadata?.album || null,
+          albumArtist: metadata?.artist || null,
+          cover: metadata?.thumbnail || null,
+          coverChecked: Boolean(metadata?.thumbnail)
+        }
+        const hasDownloadedMeta =
+          downloadedMeta.title ||
+          downloadedMeta.artist ||
+          downloadedMeta.album ||
+          downloadedMeta.cover
         let hasLyrics = false
+
+        if (hasDownloadedMeta) {
+          const cacheEntries = {}
+          for (const file of newFiles) {
+            if (!file?.path) continue
+            cacheEntries[file.path] = downloadedMeta
+          }
+          if (Object.keys(cacheEntries).length > 0) {
+            void writeTrackMetaCache(cacheEntries)
+          }
+        }
 
         // Only apply matched NetEase lyrics when we know this download maps to a single file.
         if (neteaseIdMatches) {
@@ -490,7 +794,11 @@ export default function DownloaderView({
               path: file.path,
               sourceUrl: url.trim(),
               mvOriginUrl: url.trim(),
-              hasLyrics: hasLyrics && index === 0
+              hasLyrics: hasLyrics && index === 0,
+              ...(downloadedMeta.title ? { title: downloadedMeta.title } : {}),
+              ...(downloadedMeta.artist ? { artist: downloadedMeta.artist } : {}),
+              ...(downloadedMeta.album ? { album: downloadedMeta.album } : {}),
+              ...(downloadedMeta.cover ? { cover: downloadedMeta.cover } : {})
             })
           })
         }
@@ -627,11 +935,137 @@ export default function DownloaderView({
     ]
   )
 
-  /**
-   * 搜索结果点击后直接下载：
-   * - use1music ON: 通过 NCM API song_url 获取直链并下载（1music 模式）
-   * - use1music OFF: 走 yt-dlp 流程（网易云模式，原有行为）
-   */
+  const downloadQqMusicSong = useCallback(
+    async (song, options = {}) => {
+      if (!effectiveDownloadFolder) {
+        throw new Error(t('downloader.noDirHint'))
+      }
+
+      const {
+        onBeforeDownload,
+        onAfterDownload,
+        onFinallyDownload,
+        updateGlobalStatus = false
+      } = options
+
+      const sanitize = (s) =>
+        String(s || '')
+          .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+          .trim()
+      const artist = song.artist || song.artists || ''
+      const safeName = sanitize(artist ? `${artist} - ${song.name}` : song.name) || `qq_${song.id}`
+      const usableQqMusicCookie = await ensureUsableQqMusicCookie()
+
+      if (typeof onBeforeDownload === 'function') onBeforeDownload()
+      if (updateGlobalStatus) {
+        setIsDownloading(true)
+        setProgress(0)
+        setErrorMsg('')
+        setDownloadNotice('')
+        setStatus('downloading')
+      }
+
+      try {
+        const urlInfo = await window.api.qqMusicGetSongUrl(
+          song,
+          audioQualityPreset,
+          usableQqMusicCookie
+        )
+        if (!urlInfo?.url) {
+          throw new Error(
+            isZh
+              ? '无法获取 QQ 音乐直链，可能需要会员权限、单曲不可用或 Cookie 已失效'
+              : 'Failed to get QQ Music direct URL; the track may require VIP, be unavailable, or the cookie expired'
+          )
+        }
+        const filename = `${safeName}.${urlInfo.ext || urlInfo.type || 'mp3'}`
+        const filePath = await window.api.media.downloadFromUrl({
+          url: urlInfo.url,
+          targetFolder: effectiveDownloadFolder,
+          filename,
+          headers: urlInfo.headers || {}
+        })
+        if (filePath && window.api.media.applyDownloadedMetadata) {
+          try {
+            await window.api.media.applyDownloadedMetadata({
+              path: filePath,
+              title: song.name || '',
+              artist,
+              album: song.album || '',
+              albumArtist: artist,
+              coverUrl: song.cover || ''
+            })
+          } catch (metadataError) {
+            console.warn('[DownloaderView] failed to apply QQ Music metadata:', metadataError)
+          }
+        }
+        if (filePath) {
+          writeTrackMetaCache({
+            [filePath]: {
+              title: song.name || null,
+              artist: artist || null,
+              album: song.album || null,
+              albumArtist: artist || null,
+              cover: song.cover || null,
+              coverChecked: true
+            }
+          })
+        }
+
+        if (urlInfo.degraded) {
+          setDownloadNotice(
+            isZh
+              ? `QQ 音乐未返回无损音源，已降级保存为 ${urlInfo.qualityLabel || '最高可用音质'}。`
+              : `QQ Music did not return a lossless stream; saved as ${urlInfo.qualityLabel || 'best available quality'}.`
+          )
+        }
+
+        if (updateGlobalStatus) setStatus('success')
+        if (filePath && onSuccess) {
+          onSuccess({
+            path: filePath,
+            title: song.name || '',
+            artist,
+            artists: artist,
+            album: song.album || '',
+            albumArtist: artist,
+            cover: song.cover || '',
+            downloadProvider: 'qq',
+            sourceUrl: song.mid ? `https://y.qq.com/n/ryqq/songDetail/${song.mid}` : '',
+            mvOriginUrl: song.mid ? `https://y.qq.com/n/ryqq/songDetail/${song.mid}` : '',
+            hasLyrics: false
+          })
+        }
+        if (typeof onAfterDownload === 'function')
+          onAfterDownload({ filePath, hasLyrics: false, degraded: urlInfo.degraded })
+        return { filePath, hasLyrics: false, degraded: urlInfo.degraded }
+      } catch (err) {
+        if (updateGlobalStatus) {
+          setErrorMsg(err.message || t('downloader.downloadFailed'))
+          setStatus('error')
+        }
+        throw err
+      } finally {
+        if (updateGlobalStatus) setIsDownloading(false)
+        if (typeof onFinallyDownload === 'function') onFinallyDownload()
+      }
+    },
+    [
+      audioQualityPreset,
+      effectiveDownloadFolder,
+      ensureUsableQqMusicCookie,
+      isZh,
+      onSuccess,
+      t
+    ]
+  )
+
+  const downloadProviderSong = useCallback(
+    (song, options = {}) =>
+      downloadProvider === 'qq' ? downloadQqMusicSong(song, options) : downloadNeteaseSong(song, options),
+    [downloadProvider, downloadNeteaseSong, downloadQqMusicSong]
+  )
+
   const handleSearchResultDownload = async (song) => {
     if (!effectiveDownloadFolder) {
       setErrorMsg(t('downloader.noDirHint'))
@@ -640,7 +1074,7 @@ export default function DownloaderView({
     }
 
     try {
-      await downloadNeteaseSong(song, {
+      await downloadProviderSong(song, {
         updateGlobalStatus: true,
         onBeforeDownload: () => setDownloadingSongId(song.id),
         onFinallyDownload: () => setDownloadingSongId(null)
@@ -655,7 +1089,7 @@ export default function DownloaderView({
     setAlbumError('')
     setAlbumSearching(false)
     setAlbumDownloadingId(null)
-  }, [albumContext?.name])
+  }, [albumContext?.name, downloadProvider])
 
   const handleFindAlbumMissingTracks = useCallback(async () => {
     if (!albumContext?.name) return
@@ -664,11 +1098,18 @@ export default function DownloaderView({
     setAlbumMissingTracks([])
 
     try {
-      const searchResults = await window.api.neteaseSearchAlbum({
-        albumName: albumContext.name,
-        artist: albumContext.artist || '',
-        cookie: neteaseCookieSaved || ''
-      })
+      const searchResults =
+        downloadProvider === 'qq'
+          ? await window.api.qqMusicSearchAlbum({
+              albumName: albumContext.name,
+              artist: albumContext.artist || '',
+              cookie: await ensureUsableQqMusicCookie()
+            })
+          : await window.api.neteaseSearchAlbum({
+              albumName: albumContext.name,
+              artist: albumContext.artist || '',
+              cookie: neteaseCookieSaved || ''
+            })
 
       if (!Array.isArray(searchResults) || searchResults.length === 0) {
         setAlbumError(
@@ -705,7 +1146,10 @@ export default function DownloaderView({
         return
       }
 
-      const tracks = await window.api.neteaseGetAlbumTracks(bestAlbum.id, neteaseCookieSaved || '')
+      const tracks =
+        downloadProvider === 'qq'
+          ? await window.api.qqMusicGetAlbumTracks(bestAlbum, await ensureUsableQqMusicCookie())
+          : await window.api.neteaseGetAlbumTracks(bestAlbum.id, neteaseCookieSaved || '')
       if (!Array.isArray(tracks) || tracks.length === 0) {
         setAlbumError(t('downloader.importNone', isZh ? '未找到可用曲目' : 'No available tracks found'))
         return
@@ -727,6 +1171,8 @@ export default function DownloaderView({
     }
   }, [
     albumContext,
+    downloadProvider,
+    ensureUsableQqMusicCookie,
     neteaseCookieSaved,
     normalizeAlbumCompareTitle,
     normalizeTrackCompareTitle,
@@ -739,7 +1185,7 @@ export default function DownloaderView({
         setAlbumError('')
         setAlbumDownloadingId(track.id)
         setProgress(0)
-        await downloadNeteaseSong(track, {
+        await downloadProviderSong(track, {
           onFinallyDownload: () => setAlbumDownloadingId(null)
         })
       } catch (error) {
@@ -747,7 +1193,7 @@ export default function DownloaderView({
         setAlbumError(error?.message || t('downloader.downloadFailed'))
       }
     },
-    [downloadNeteaseSong, t]
+    [downloadProviderSong, t]
   )
 
   const handleDownloadAllMissingTracks = useCallback(async () => {
@@ -761,7 +1207,7 @@ export default function DownloaderView({
       for (const track of downloadableTracks) {
         setAlbumDownloadingId(track.id)
         setProgress(0)
-        await downloadNeteaseSong(track)
+        await downloadProviderSong(track)
       }
     } catch (error) {
       console.error('[DownloaderView] album bulk download error:', error)
@@ -769,39 +1215,101 @@ export default function DownloaderView({
     } finally {
       setAlbumDownloadingId(null)
     }
-  }, [albumMissingTracks, downloadNeteaseSong, t])
+  }, [albumMissingTracks, downloadProviderSong, t])
+
+  const activeAuth = downloadProvider === 'qq' ? qqMusicAuth : neteaseAuth
+  const activeCookieSaved = downloadProvider === 'qq' ? qqMusicCookieSaved : neteaseCookieSaved
+  const providerName = downloadProvider === 'qq' ? 'QQ 音乐' : '网易云'
 
   return (
     <div className="md-root">
       <section className="md-section">
+        <div className="md-quality-row">
+          <div
+            className="md-quality-group"
+            role="group"
+            aria-label={isZh ? '下载来源选择' : 'Download source'}
+          >
+            <button
+              type="button"
+              className={`md-quality-btn ${downloadProvider === 'netease' ? 'active' : ''}`}
+              onClick={() => updateDownloadProvider('netease')}
+              disabled={isDownloading}
+            >
+              网易云
+            </button>
+            <button
+              type="button"
+              className={`md-quality-btn ${downloadProvider === 'qq' ? 'active' : ''}`}
+              onClick={() => updateDownloadProvider('qq')}
+              disabled={isDownloading}
+            >
+              QQ 音乐
+            </button>
+          </div>
+        </div>
         <div className="md-input-row md-netease-login-row">
           <input
             type="text"
             className="md-input"
-            placeholder={t('downloader.neteaseCookiePlaceholder')}
-            value={neteaseCookieInput}
-            onChange={(e) => setNeteaseCookieInput(e.target.value)}
+            placeholder={
+              downloadProvider === 'qq'
+                ? isZh
+                  ? '粘贴 QQ 音乐 Cookie 后点击登录'
+                  : 'Paste QQ Music cookie, then sign in'
+                : t('downloader.neteaseCookiePlaceholder')
+            }
+            value={downloadProvider === 'qq' ? qqMusicCookieInput : neteaseCookieInput}
+            onChange={(e) =>
+              downloadProvider === 'qq'
+                ? setQqMusicCookieInput(e.target.value)
+                : setNeteaseCookieInput(e.target.value)
+            }
             disabled={isDownloading}
           />
           <button
             type="button"
             className="md-btn-parse"
-            disabled={!neteaseCookieInput.trim() || isDownloading}
+            disabled={
+              !(downloadProvider === 'qq' ? qqMusicCookieInput : neteaseCookieInput).trim() ||
+              isDownloading
+            }
             onClick={async () => {
-              const next = neteaseCookieInput.trim()
-              applyNeteaseCookie(next)
-              setNeteaseCookieInput('')
-              await refreshNeteaseCookieFromSession(next)
+              const next =
+                downloadProvider === 'qq' ? qqMusicCookieInput.trim() : neteaseCookieInput.trim()
+              if (downloadProvider === 'qq') {
+                applyQqMusicCookie(next)
+                setQqMusicCookieInput('')
+                await refreshQqMusicCookieFromSession(next)
+              } else {
+                applyNeteaseCookie(next)
+                setNeteaseCookieInput('')
+                await refreshNeteaseCookieFromSession(next)
+              }
             }}
           >
-            {t('downloader.neteaseLogin')}
+            {downloadProvider === 'qq'
+              ? isZh
+                ? '登录 QQ 音乐'
+                : 'Sign in QQ Music'
+              : t('downloader.neteaseLogin')}
           </button>
           <button
             type="button"
             className="md-btn-secondary md-btn-netease-oneclick"
-            disabled={isDownloading || isNeteaseSigningIn}
+            disabled={isDownloading || isNeteaseSigningIn || isQqMusicSigningIn}
             onClick={async () => {
               try {
+                if (downloadProvider === 'qq') {
+                  if (!window.api?.openQqMusicSignInWindow || !window.api?.getQqMusicCookie) {
+                    throw new Error(t('downloader.neteaseFeatureNeedRestart'))
+                  }
+                  setIsQqMusicSigningIn(true)
+                  const r = await window.api.openQqMusicSignInWindow()
+                  if (!r?.ok) throw new Error(r?.error || 'open_failed')
+                  await refreshQqMusicCookieFromSession()
+                  return
+                }
                 if (!window.api?.openNeteaseSignInWindow || !window.api?.getNeteaseCookie) {
                   throw new Error(t('downloader.neteaseFeatureNeedRestart'))
                 }
@@ -810,26 +1318,60 @@ export default function DownloaderView({
                 if (!r?.ok) throw new Error(r?.error || 'open_failed')
                 await refreshNeteaseCookieFromSession()
               } catch (e) {
-                setErrorMsg(e?.message || t('downloader.neteaseOpenLoginFailed'))
+                setErrorMsg(
+                  e?.message ||
+                    (downloadProvider === 'qq'
+                      ? isZh
+                        ? '无法打开 QQ 音乐登录窗口'
+                        : 'Failed to open QQ Music sign-in window'
+                      : t('downloader.neteaseOpenLoginFailed'))
+                )
                 setStatus('error')
               } finally {
                 setIsNeteaseSigningIn(false)
+                setIsQqMusicSigningIn(false)
               }
             }}
           >
-            {isNeteaseSigningIn ? t('downloader.neteaseOpening') : t('downloader.neteaseOneClick')}
+            {downloadProvider === 'qq'
+              ? isQqMusicSigningIn
+                ? isZh
+                  ? '正在打开登录页…'
+                  : 'Opening sign-in page...'
+                : isZh
+                  ? '一键登录获取'
+                  : 'One-click Sign In'
+              : isNeteaseSigningIn
+                ? t('downloader.neteaseOpening')
+                : t('downloader.neteaseOneClick')}
           </button>
         </div>
         <p className="md-netease-status">
-          {neteaseAuth.checking
-            ? t('downloader.neteaseChecking')
-            : neteaseAuth.valid
-              ? neteaseAuth.isVip
-                ? t('downloader.neteaseLoggedInVip')
-                : t('downloader.neteaseLoggedIn')
-              : neteaseCookieSaved
-                ? t('downloader.neteaseCookieExpired')
-                : t('downloader.neteaseNotLoggedIn')}
+          {activeAuth.checking
+            ? downloadProvider === 'qq'
+              ? isZh
+                ? '正在检查 QQ 音乐登录状态…'
+                : 'Checking QQ Music sign-in status...'
+              : t('downloader.neteaseChecking')
+            : activeAuth.valid
+              ? downloadProvider === 'qq'
+                ? isZh
+                  ? 'QQ 音乐账号已登录（Cookie 已保存）'
+                  : 'QQ Music account signed in (cookie saved)'
+                : activeAuth.isVip
+                  ? t('downloader.neteaseLoggedInVip')
+                  : t('downloader.neteaseLoggedIn')
+              : activeCookieSaved
+                ? downloadProvider === 'qq'
+                  ? isZh
+                    ? '已保存的 QQ 音乐 Cookie 已失效，请重新登录'
+                    : 'Saved QQ Music cookie expired. Please sign in again.'
+                  : t('downloader.neteaseCookieExpired')
+                : downloadProvider === 'qq'
+                  ? isZh
+                    ? '未登录 QQ 音乐账号（无损/高音质通常需要会员 Cookie）'
+                    : 'Not signed in to QQ Music (lossless/high quality usually requires a VIP cookie)'
+                  : t('downloader.neteaseNotLoggedIn')}
         </p>
         <div className="md-quality-row">
           <div
@@ -853,6 +1395,88 @@ export default function DownloaderView({
                 {t(`downloader.quality${key.charAt(0).toUpperCase()}${key.slice(1)}`)}
               </button>
             ))}
+          </div>
+        </div>
+        <div className="md-quality-row" style={{ alignItems: 'flex-start', marginTop: 8 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>
+              {isZh ? 'YouTube 登录来源' : 'YouTube sign-in source'}
+            </div>
+            <div
+              className="md-quality-group"
+              role="group"
+              aria-label={isZh ? 'YouTube 登录来源' : 'YouTube sign-in source'}
+            >
+              {[
+                ['edge', 'Edge'],
+                ['chrome', 'Chrome'],
+                ['firefox', 'Firefox'],
+                ['none', isZh ? '不使用' : 'None']
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`md-quality-btn ${youtubeCookieBrowser === key ? 'active' : ''}`}
+                  onClick={() =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      youtubeCookieBrowser: key
+                    }))
+                  }
+                  disabled={isDownloading}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-soft)', marginTop: 5 }}>
+              {isZh
+                ? '推荐用下面的一键登录：ECHO 会打开真正的系统浏览器，并自动保存登录状态给下载器使用。'
+                : 'Recommended: use one-click sign-in below. ECHO opens the real system browser and saves the sign-in for downloads.'}
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                marginTop: 8
+              }}
+            >
+              <button
+                type="button"
+                className="md-btn-secondary"
+                disabled={
+                  isDownloading ||
+                  youtubeCookieBrowser === 'firefox' ||
+                  youtubeCookieBrowser === 'none'
+                }
+                onClick={openYoutubeSystemSignIn}
+              >
+                {isZh
+                  ? `用 ${youtubeCookieBrowser === 'chrome' ? 'Chrome' : 'Edge'} 登录`
+                  : `Sign in with ${youtubeCookieBrowser === 'chrome' ? 'Chrome' : 'Edge'}`}
+              </button>
+              <button
+                type="button"
+                className="md-btn-secondary"
+                disabled={isDownloading || youtubeLoginSaving}
+                onClick={saveYoutubeSystemCookies}
+              >
+                {youtubeLoginSaving ? (
+                  <Loader2 size={14} className="spin" />
+                ) : isZh ? (
+                  '已登录，保存'
+                ) : (
+                  'Saved'
+                )}
+              </button>
+            </div>
+            {youtubeLoginStatus ? (
+              <div style={{ fontSize: 11, color: 'var(--text-soft)', marginTop: 6 }}>
+                {youtubeLoginStatus}
+              </div>
+            ) : null}
           </div>
         </div>
         <div
@@ -891,55 +1515,72 @@ export default function DownloaderView({
             </span>
           )}
         </div>
-        <div
-          className="md-1music-toggle-row"
-          style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}
-        >
-          <button
-            type="button"
-            role="switch"
-            aria-checked={use1music}
-            className={`lyrics-drawer-switch ${use1music ? 'on' : ''}`}
-            onClick={() => setUse1music((v) => !v)}
-            disabled={isDownloading}
-            style={{ flexShrink: 0 }}
+        {downloadProvider === 'netease' && (
+          <div
+            className="md-1music-toggle-row"
+            style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}
           >
-            <span className="lyrics-drawer-switch-thumb" />
-          </button>
-          <span style={{ fontSize: 13, color: 'var(--text-secondary)', userSelect: 'none' }}>
-            {t('downloader.use1musicLabel')}
-          </span>
-          {use1music && (
-            <span
-              style={{
-                fontSize: 11,
-                color: 'var(--accent-color)',
-                fontWeight: 600,
-                marginLeft: 'auto'
-              }}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={use1music}
+              className={`lyrics-drawer-switch ${use1music ? 'on' : ''}`}
+              onClick={() => setUse1music((v) => !v)}
+              disabled={isDownloading}
+              style={{ flexShrink: 0 }}
             >
-              1music
+              <span className="lyrics-drawer-switch-thumb" />
+            </button>
+            <span style={{ fontSize: 13, color: 'var(--text-secondary)', userSelect: 'none' }}>
+              {t('downloader.use1musicLabel')}
             </span>
-          )}
-        </div>
-        {neteaseCookieSaved ? (
+            {use1music && (
+              <span
+                style={{
+                  fontSize: 11,
+                  color: 'var(--accent-color)',
+                  fontWeight: 600,
+                  marginLeft: 'auto'
+                }}
+              >
+                1music
+              </span>
+            )}
+          </div>
+        )}
+        {activeCookieSaved ? (
           <div className="md-logout-row">
             <button
               type="button"
               className="md-btn-secondary"
               disabled={isDownloading}
               onClick={() => {
-                applyNeteaseCookie('')
-                setNeteaseAuth({
-                  checking: false,
-                  valid: false,
-                  signedIn: false,
-                  isVip: false,
-                  error: ''
-                })
+                if (downloadProvider === 'qq') {
+                  applyQqMusicCookie('')
+                  setQqMusicAuth({
+                    checking: false,
+                    valid: false,
+                    signedIn: false,
+                    isVip: false,
+                    error: ''
+                  })
+                } else {
+                  applyNeteaseCookie('')
+                  setNeteaseAuth({
+                    checking: false,
+                    valid: false,
+                    signedIn: false,
+                    isVip: false,
+                    error: ''
+                  })
+                }
               }}
             >
-              {t('downloader.neteaseLogout')}
+              {downloadProvider === 'qq'
+                ? isZh
+                  ? '退出 QQ 音乐'
+                  : 'Sign out QQ Music'
+                : t('downloader.neteaseLogout')}
             </button>
           </div>
         ) : null}
@@ -971,6 +1612,9 @@ export default function DownloaderView({
                         : 'Local library has {{have}} tracks. Click Fill Album to find missing tracks.',
                       have: albumContext.existingTracks.length
                     })}
+              </div>
+              <div className="md-album-fill-sub">
+                {isZh ? `当前来源：${providerName}` : `Current source: ${providerName}`}
               </div>
             </div>
             <button
@@ -1110,7 +1754,11 @@ export default function DownloaderView({
       {status === 'search_ok' && searchResults.length === 0 && (
         <section className="md-section">
           <div className="md-search-status">
-            {t('downloader.neteaseSearchNoResults', 'No related songs found')}
+            {downloadProvider === 'qq'
+              ? isZh
+                ? 'QQ 音乐未找到相关歌曲'
+                : 'No related QQ Music songs found'
+              : t('downloader.neteaseSearchNoResults', 'No related songs found')}
           </div>
         </section>
       )}
@@ -1119,23 +1767,28 @@ export default function DownloaderView({
         <section className="md-section">
           <h3 className="md-search-heading">
             {t('downloader.neteaseSearchResults', 'Search Results')}
-            {use1music && <span className="md-search-via">via 1music</span>}
+            <span className="md-search-via">{providerName}</span>
+            {downloadProvider === 'netease' && use1music && (
+              <span className="md-search-via">via 1music</span>
+            )}
           </h3>
           <div className="md-search-list">
             {searchResults.map((s) => {
               const isBusy = downloadingSongId === s.id
+              const coverSrc =
+                s.cover && downloadProvider === 'netease' ? `${s.cover}?param=80y80` : s.cover
               return (
                 <div
-                  key={s.id}
+                  key={`${downloadProvider}-${s.id}-${s.mid || ''}`}
                   className={`md-search-item${isDownloading && !isBusy ? ' md-search-item--disabled' : ''}`}
                   onClick={() => {
                     if (isDownloading) return
                     handleSearchResultDownload(s)
                   }}
                 >
-                  {s.cover ? (
+                  {coverSrc ? (
                     <img
-                      src={`${s.cover}?param=80y80`}
+                      src={coverSrc}
                       alt=""
                       loading="lazy"
                       className="md-search-cover"
@@ -1207,7 +1860,10 @@ export default function DownloaderView({
       {status === 'success' && (
         <div className="md-alert md-alert-success" role="status">
           <CheckCircle2 size={24} />
-          <span>{t('downloader.downloadComplete')}</span>
+          <span>
+            {t('downloader.downloadComplete')}
+            {downloadNotice ? ` ${downloadNotice}` : ''}
+          </span>
         </div>
       )}
 

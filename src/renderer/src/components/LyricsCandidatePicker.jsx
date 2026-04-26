@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { X, Search } from 'lucide-react'
 
@@ -8,6 +8,11 @@ import { X, Search } from 'lucide-react'
 export default function LyricsCandidatePicker({ open, loading, items, onClose, onPick, onSearch }) {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
+  const overlayRef = useRef(null)
+
+  const closePicker = useCallback(() => {
+    onClose?.()
+  }, [onClose])
 
   useEffect(() => {
     if (!open) {
@@ -15,11 +20,17 @@ export default function LyricsCandidatePicker({ open, loading, items, onClose, o
       return
     }
     const onKey = (e) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') closePicker()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, closePicker])
+
+  useEffect(() => {
+    if (open) {
+      requestAnimationFrame(() => overlayRef.current?.focus())
+    }
+  }, [open])
 
   const handleSearch = (e) => {
     e.preventDefault()
@@ -28,14 +39,21 @@ export default function LyricsCandidatePicker({ open, loading, items, onClose, o
     }
   }
 
+  const handlePick = (row) => {
+    onPick?.(row)
+    closePicker()
+  }
+
   if (!open) return null
 
   return (
     <div
-      className="lyrics-candidate-overlay"
+      ref={overlayRef}
+      className="lyrics-candidate-overlay no-drag"
       role="dialog"
       aria-modal="true"
       aria-labelledby="lyrics-candidate-title"
+      tabIndex={-1}
       style={{
         position: 'fixed',
         inset: 0,
@@ -46,12 +64,12 @@ export default function LyricsCandidatePicker({ open, loading, items, onClose, o
         justifyContent: 'center',
         padding: 16
       }}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) closePicker()
       }}
     >
       <div
-        className="glass-panel lyrics-candidate-panel"
+        className="glass-panel lyrics-candidate-panel no-drag"
         style={{
           width: 'min(520px, 100%)',
           maxHeight: 'min(72vh, 640px)',
@@ -59,9 +77,10 @@ export default function LyricsCandidatePicker({ open, loading, items, onClose, o
           display: 'flex',
           flexDirection: 'column',
           borderRadius: 12,
-          padding: 0
+          padding: 0,
+          WebkitAppRegion: 'no-drag'
         }}
-        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         <div
           style={{
@@ -77,8 +96,9 @@ export default function LyricsCandidatePicker({ open, loading, items, onClose, o
           </h2>
           <button
             type="button"
-            onClick={onClose}
-            className="lyrics-candidate-close"
+            onClick={closePicker}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="lyrics-candidate-close no-drag"
             style={{
               border: 'none',
               background: 'transparent',
@@ -88,7 +108,8 @@ export default function LyricsCandidatePicker({ open, loading, items, onClose, o
               borderRadius: 6,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              WebkitAppRegion: 'no-drag'
             }}
             aria-label={t('aria.close')}
           >
@@ -111,6 +132,7 @@ export default function LyricsCandidatePicker({ open, loading, items, onClose, o
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('lyrics.searchPlaceholder', 'Title / Artist')}
+            className="no-drag"
             style={{
               flex: 1,
               background: 'rgba(255,255,255,0.1)',
@@ -125,6 +147,7 @@ export default function LyricsCandidatePicker({ open, loading, items, onClose, o
           <button
             type="submit"
             disabled={loading || !query.trim()}
+            className="no-drag"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -163,7 +186,8 @@ export default function LyricsCandidatePicker({ open, loading, items, onClose, o
                 <li key={row.key}>
                   <button
                     type="button"
-                    onClick={() => onPick(row)}
+                    onClick={() => handlePick(row)}
+                    className="no-drag"
                     style={{
                       width: '100%',
                       textAlign: 'left',

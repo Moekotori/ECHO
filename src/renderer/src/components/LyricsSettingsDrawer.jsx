@@ -76,24 +76,6 @@ export default function LyricsSettingsDrawer({
     [t]
   )
 
-  const colorPresets = useMemo(
-    () => [
-      '#FFFFFF',
-      '#EAF2FF',
-      '#DDE7F3',
-      '#BFC9D6',
-      '#111827',
-      '#0B1220',
-      '#22D3EE',
-      '#60A5FA',
-      '#A78BFA',
-      '#FB7185',
-      '#FBBF24',
-      '#86EFAC'
-    ],
-    []
-  )
-
   const getColor = useCallback(
     (layer, state) => {
       const v = lyricsColor?.layers?.[layer]?.[state]
@@ -155,19 +137,58 @@ export default function LyricsSettingsDrawer({
     setNormalInvalid(false)
   }, [getColor])
 
-  const applyPreset = useCallback(
+  const applyColorHex = useCallback(
     (state, hex) => {
       const prev = getColor('main', state)
-      setMainColor(state, { hex, a: prev?.a ?? 1 })
+      const nextHex = String(hex || '').toUpperCase()
+      setMainColor(state, { hex: nextHex, a: prev?.a ?? 1 })
       if (state === 'active') {
-        setActiveHexDraft(hex)
+        setActiveHexDraft(nextHex)
         setActiveInvalid(false)
       } else {
-        setNormalHexDraft(hex)
+        setNormalHexDraft(nextHex)
         setNormalInvalid(false)
       }
     },
     [getColor, setMainColor]
+  )
+
+  const applyColorAlpha = useCallback(
+    (state, alpha) => {
+      const prev = getColor('main', state)
+      const fallbackHex = state === 'active' ? '#FFFFFF' : '#DDE7F3'
+      setMainColor(state, {
+        hex: prev?.hex || fallbackHex,
+        a: Math.max(0.1, Math.min(1, Number(alpha) || 1))
+      })
+      if (!prev?.hex) {
+        if (state === 'active') setActiveHexDraft(fallbackHex)
+        else setNormalHexDraft(fallbackHex)
+      }
+    },
+    [getColor, setMainColor]
+  )
+
+  const commitHexDraft = useCallback(
+    (state, draft) => {
+      const value = String(draft || '').trim()
+      const setInvalid = state === 'active' ? setActiveInvalid : setNormalInvalid
+      const setDraft = state === 'active' ? setActiveHexDraft : setNormalHexDraft
+      if (!value) {
+        setMainColor(state, null)
+        setInvalid(false)
+        return
+      }
+      const parsed = parseHexWithOptionalAlpha(value)
+      if (!parsed) {
+        setInvalid(true)
+        return
+      }
+      setMainColor(state, parsed)
+      setDraft(parsed.hex)
+      setInvalid(false)
+    },
+    [parseHexWithOptionalAlpha, setMainColor]
   )
 
   const statusLabel =
@@ -346,116 +367,82 @@ export default function LyricsSettingsDrawer({
               <p className="lyrics-drawer-hint">{t('lyricsDrawer.fontColorHint')}</p>
 
               <div className="lyrics-color-inline">
-                <div className="lyrics-color-inline-row">
-                  <div className="lyrics-color-inline-label">{t('lyricsDrawer.stateActive')}</div>
-                  <div
-                    className="lyrics-color-inline-swatch"
-                    style={{
-                      background: activeInit?.hex ? activeInit.hex : 'transparent'
-                    }}
-                  />
-                  <input
-                    className={`lyrics-drawer-text-input ${activeInvalid ? 'is-invalid' : ''}`}
-                    value={activeHexDraft}
-                    placeholder="#RRGGBB or #RRGGBBAA"
-                    onChange={(e) => {
-                      setActiveHexDraft(e.target.value)
-                      setActiveInvalid(false)
-                    }}
-                    onBlur={() => {
-                      if (!activeHexDraft.trim()) {
-                        setMainColor('active', null)
-                        setActiveInvalid(false)
-                        return
-                      }
-                      const parsed = parseHexWithOptionalAlpha(activeHexDraft)
-                      if (!parsed) {
-                        setActiveInvalid(true)
-                        return
-                      }
-                      setMainColor('active', parsed)
-                      setActiveHexDraft(parsed.hex)
-                      setActiveInvalid(false)
-                    }}
-                  />
-                </div>
-                <div className="lyrics-color-inline-tools">
-                  <div className="lyrics-color-palette" role="group" aria-label="Active color presets">
-                    {colorPresets.map((hex) => (
-                      <button
-                        key={`active-${hex}`}
-                        type="button"
-                        className="lyrics-color-preset"
-                        style={{ background: hex }}
-                        onClick={() => applyPreset('active', hex)}
-                        aria-label={hex}
-                      />
-                    ))}
-                  </div>
-                  <label className="lyrics-color-picker">
+                <div className="lyrics-color-card">
+                  <label className="lyrics-color-picker-panel">
+                    <span className="lyrics-color-inline-label">{t('lyricsDrawer.stateActive')}</span>
                     <input
                       type="color"
                       value={activeInit?.hex || '#FFFFFF'}
-                      onChange={(e) => applyPreset('active', e.target.value.toUpperCase())}
+                      onChange={(e) => applyColorHex('active', e.target.value)}
                       aria-label="Pick active color"
                     />
                   </label>
+                  <div className="lyrics-color-fields">
+                    <label className="lyrics-color-field">
+                      <span>HEX</span>
+                      <input
+                        className={`lyrics-drawer-text-input ${activeInvalid ? 'is-invalid' : ''}`}
+                        value={activeHexDraft}
+                        placeholder="#RRGGBB"
+                        onChange={(e) => {
+                          setActiveHexDraft(e.target.value)
+                          setActiveInvalid(false)
+                        }}
+                        onBlur={() => commitHexDraft('active', activeHexDraft)}
+                      />
+                    </label>
+                    <label className="lyrics-color-field lyrics-color-alpha-field">
+                      <span>A {Math.round((activeInit?.a ?? 1) * 100)}%</span>
+                      <input
+                        type="range"
+                        min={0.1}
+                        max={1}
+                        step={0.01}
+                        value={activeInit?.a ?? 1}
+                        onChange={(e) => applyColorAlpha('active', e.target.value)}
+                        className="lyrics-drawer-range"
+                      />
+                    </label>
+                  </div>
                 </div>
 
-                <div className="lyrics-color-inline-row">
-                  <div className="lyrics-color-inline-label">{t('lyricsDrawer.stateNormal')}</div>
-                  <div
-                    className="lyrics-color-inline-swatch"
-                    style={{
-                      background: normalInit?.hex ? normalInit.hex : 'transparent'
-                    }}
-                  />
-                  <input
-                    className={`lyrics-drawer-text-input ${normalInvalid ? 'is-invalid' : ''}`}
-                    value={normalHexDraft}
-                    placeholder="#RRGGBB or #RRGGBBAA"
-                    onChange={(e) => {
-                      setNormalHexDraft(e.target.value)
-                      setNormalInvalid(false)
-                    }}
-                    onBlur={() => {
-                      if (!normalHexDraft.trim()) {
-                        setMainColor('normal', null)
-                        setNormalInvalid(false)
-                        return
-                      }
-                      const parsed = parseHexWithOptionalAlpha(normalHexDraft)
-                      if (!parsed) {
-                        setNormalInvalid(true)
-                        return
-                      }
-                      setMainColor('normal', parsed)
-                      setNormalHexDraft(parsed.hex)
-                      setNormalInvalid(false)
-                    }}
-                  />
-                </div>
-                <div className="lyrics-color-inline-tools">
-                  <div className="lyrics-color-palette" role="group" aria-label="Normal color presets">
-                    {colorPresets.map((hex) => (
-                      <button
-                        key={`normal-${hex}`}
-                        type="button"
-                        className="lyrics-color-preset"
-                        style={{ background: hex }}
-                        onClick={() => applyPreset('normal', hex)}
-                        aria-label={hex}
-                      />
-                    ))}
-                  </div>
-                  <label className="lyrics-color-picker">
+                <div className="lyrics-color-card">
+                  <label className="lyrics-color-picker-panel">
+                    <span className="lyrics-color-inline-label">{t('lyricsDrawer.stateNormal')}</span>
                     <input
                       type="color"
-                      value={normalInit?.hex || '#FFFFFF'}
-                      onChange={(e) => applyPreset('normal', e.target.value.toUpperCase())}
+                      value={normalInit?.hex || '#DDE7F3'}
+                      onChange={(e) => applyColorHex('normal', e.target.value)}
                       aria-label="Pick normal color"
                     />
                   </label>
+                  <div className="lyrics-color-fields">
+                    <label className="lyrics-color-field">
+                      <span>HEX</span>
+                      <input
+                        className={`lyrics-drawer-text-input ${normalInvalid ? 'is-invalid' : ''}`}
+                        value={normalHexDraft}
+                        placeholder="#RRGGBB"
+                        onChange={(e) => {
+                          setNormalHexDraft(e.target.value)
+                          setNormalInvalid(false)
+                        }}
+                        onBlur={() => commitHexDraft('normal', normalHexDraft)}
+                      />
+                    </label>
+                    <label className="lyrics-color-field lyrics-color-alpha-field">
+                      <span>A {Math.round((normalInit?.a ?? 1) * 100)}%</span>
+                      <input
+                        type="range"
+                        min={0.1}
+                        max={1}
+                        step={0.01}
+                        value={normalInit?.a ?? 1}
+                        onChange={(e) => applyColorAlpha('normal', e.target.value)}
+                        className="lyrics-drawer-range"
+                      />
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>
