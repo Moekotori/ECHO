@@ -54,11 +54,76 @@
     "actionFailed": "Action failed: {{detail}}"
   },
   "queue": {
+    "title": "Up Next",
+    "empty": {
+      "title": "Queue is empty",
+      "hint": "Drag songs here, or right-click any track and choose 'Add to Queue'"
+    },
+    "totalCount": "{{count}} tracks · {{duration}}",
+    "actions": {
+      "clear": "Clear",
+      "shuffle": "Shuffle",
+      "saveAs": "Save as Playlist",
+      "toggle": "Use Queue"
+    },
+    "contextMenu": {
+      "playNow": "Play Now",
+      "playNext": "Play Next",
+      "addToQueue": "Add to Queue",
+      "moveTop": "Move to Top",
+      "moveBottom": "Move to Bottom",
+      "remove": "Remove",
+      "removeAbove": "Remove all above",
+      "removeBelow": "Remove all below",
+      "clearQueue": "Clear Queue"
+    },
+    "toast": {
+      "removed": "Removed '{{title}}'",
+      "alreadyIn": "Already in queue",
+      "cleared": "Cleared {{count}} tracks",
+      "undo": "Undo",
+      "savedAs": "Saved as playlist '{{name}}'"
+    },
+    "savePrompt": "Playlist name",
+    "defaultPlaylistName": "Up Next",
     "alreadyInUpNext": "This track is already in Up Next.",
     "dropHint": "Drag songs here to add to Up Next",
     "playbackOn": "Queue On",
     "playbackOff": "Queue Off",
     "playbackToggleTitle": "Toggle Up Next priority playback"
+  },
+  "history": {
+    "title": "Listening history",
+    "totalCount": "{{count}} tracks",
+    "backOneStep": "Back one step",
+    "searchPlaceholder": "Search title / artist / album...",
+    "sort": "Sort history",
+    "sortByTime": "By time",
+    "sortByPlayCount": "By play count",
+    "bucket": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "thisWeek": "This week",
+      "thisMonth": "This month",
+      "earlier": "Earlier"
+    },
+    "actionPlay": "Play",
+    "actionJump": "Jump in playlist",
+    "actionJumpDisabled": "This track is not in the current playlist",
+    "actionRemove": "Remove from history",
+    "playCount": "x{{count}}",
+    "relative": {
+      "justNow": "Just now",
+      "minutesAgo": "{{count}} min ago",
+      "hoursAgo": "{{count}} hr ago",
+      "todayAt": "Today {{time}}",
+      "yesterdayAt": "Yesterday {{time}}"
+    },
+    "empty": {
+      "noHistory": "Once you start playing tracks, they'll show up here.",
+      "noSearchMatch": "No matches for \"{{query}}\""
+    },
+    "confirmClear": "Clear all listening history?"
   },
   "dropOverlay": {
     "title": "Drop to add music",
@@ -87,7 +152,8 @@
     "artists": "Artists",
     "playlists": "Playlists",
     "folders": "Folders",
-    "queue": "Queue"
+    "queue": "Queue",
+    "history": "History"
   },
   "albumFilter": {
     "label": "Album: {{name}}",
@@ -141,8 +207,7 @@
     "noPlaylists": "No playlists yet. Create one or import a JSON file.",
     "playlistEmpty": "This playlist is empty. Add tracks from the Songs tab (+) or import audio from disk.",
     "noSearchMatch": "No tracks match your search.",
-    "noLikedInView": "No liked tracks in this view.",
-    "historyEmpty": "No playback history yet."
+    "noLikedInView": "No liked tracks in this view."
   },
   "playlists": {
     "allPlaylists": "All playlists",
@@ -274,10 +339,7 @@
     "saveCardImage": "Save card image",
     "selectTrack": "Select a track",
     "nightcoreMode": "Nightcore Mode",
-    "ellipsis": "...",
-    "playbackHistory": "Playback history",
-    "backHistory": "Back through history",
-    "clearHistory": "Clear"
+    "ellipsis": "..."
   },
   "dlna": {
     "castTitle": "DLNA Cast",
@@ -312,15 +374,15 @@
     "eqMasterTitle": "Master Equalizer (16-band)",
     "eqMasterDesc": "Enable precise frequency control for high-fidelity output.",
     "gaplessTitle": "Gapless playback",
-    "gaplessDesc": "Eliminate silence between tracks. Requires HiFi engine. Disables crossfade.",
+    "gaplessDesc": "Eliminate silence between tracks. Requires HiFi engine. Disables Automix.",
     "prevButtonModeTitle": "Previous button behavior",
     "prevButtonModeDesc": "Choose what the previous track button does.",
     "prevButtonModePlaylist": "Previous in playlist",
     "prevButtonModeHistory": "Last played track",
-    "crossfadeTitle": "Crossfade",
-    "crossfadeDesc": "Fade out the current track and fade in the next one during track transitions.",
-    "crossfadeDurationTitle": "Crossfade duration",
-    "crossfadeDurationDesc": "Set how long the transition lasts.",
+    "crossfadeTitle": "Smart Automix",
+    "crossfadeDesc": "Prewarms the next track near the ending and blends both tracks with an equal-power curve.",
+    "crossfadeDurationTitle": "Automix duration",
+    "crossfadeDurationDesc": "Set the maximum overlap time. Short tracks are shortened automatically.",
     "crossfadeSeconds_one": "{{count}} second",
     "crossfadeSeconds_other": "{{count}} seconds",
     "outputBufferTitle": "Audio output buffer",
@@ -448,6 +510,8 @@
     "customWallpaperDecor": "Custom Wallpaper Decor",
     "coverSizeTitle": "Cover size",
     "coverSizeDesc": "Adjust the main player album cover size.",
+    "autoLocateCurrentTrackTitle": "Locate current playing song",
+    "autoLocateCurrentTrackDesc": "When playback switches songs, automatically scroll the current list to the playing track.",
     "sidebarLogoTitle": "Sidebar logo",
     "sidebarLogoDesc": "Show the ECHO logo at the top of the left navigation. Turning it off lets the library list move up.",
     "bgImage": "Background Image",
@@ -521,6 +585,12 @@
   "eqPreset": {
     "Custom": "Custom",
     "Flat": "Flat",
+    "Reference (Harman 2018)": "Reference (Harman 2018)",
+    "Warm": "Warm",
+    "Bright": "Bright",
+    "Dialogue / Podcast": "Dialogue / Podcast",
+    "Late Night": "Late Night",
+    "V-Shape": "V-Shape",
     "Bass Boost": "Bass Boost",
     "Treble Boost": "Treble Boost",
     "Vocal": "Vocal",
@@ -532,8 +602,31 @@
   },
   "eqPlot": {
     "scrollQ": "Scroll to adjust Q",
+    "preamp": "PREAMP",
+    "band": "Band",
+    "bandOption": "Band {{index}} - {{freq}}",
+    "freq": "FREQ",
+    "gain": "GAIN",
     "filterType": "Type",
     "qLabel": "Q",
+    "slope": "Slope",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "solo": "Solo",
+    "mute": "Mute",
+    "bypassedEnable": "EQ Bypassed - click to enable",
+    "quality": "Quality",
+    "outputSafety": "Output Safety",
+    "oversampling": {
+      "high": "High Quality 4x",
+      "balanced": "Balanced 2x",
+      "lowCpu": "Low CPU"
+    },
+    "outputSafetyModes": {
+      "soft": "Soft Clip",
+      "hard": "Hard Limit",
+      "off": "Off"
+    },
     "types": {
       "peaking": "Peaking",
       "lowshelf": "Low shelf",
@@ -852,7 +945,41 @@
     "lan": "LAN",
     "state": "State",
     "uri": "URI",
+    "port": "Port",
+    "client": "Client",
+    "airplayShort": "AirPlay",
+    "airplayIntro": "AirPlay: Start this receiver, then choose ECHO AirPlay from iPhone, iPad, or Mac AirPlay audio output on the same Wi-Fi. Audio is routed through ECHO's selected output device.",
+    "airplayNameLabel": "Device display name (AirPlay)",
+    "stopAirplayReceiver": "Stop AirPlay receiver",
+    "startAirplayReceiver": "Start AirPlay receiver",
+    "airplayError": "AirPlay: {{error}}",
     "dlnaError": "DLNA: {{error}}"
+  },
+  "remote": {
+    "settingsTitle": "Phone Remote",
+    "settingsDesc": "Control playback, volume, lyrics, and EQ from a phone on the same Wi-Fi.",
+    "openDrawer": "Open remote",
+    "drawerTitle": "Phone Remote",
+    "heroTitle": "Control ECHO from your phone",
+    "heroDesc": "Scan the QR code on the same Wi-Fi network.",
+    "statusStopped": "Stopped",
+    "statusStarting": "Starting",
+    "statusReady": "READY",
+    "qrAlt": "Phone remote QR code",
+    "noUrl": "Start the server to get a URL",
+    "copyUrl": "Copy URL",
+    "start": "Start",
+    "stop": "Stop",
+    "refresh": "Refresh",
+    "rotateToken": "Rotate token",
+    "network": "Network",
+    "port": "Port",
+    "noTokenTitle": "Allow no-token LAN mode",
+    "noTokenDesc": "Only enable this on a trusted private LAN. Existing clients reconnect when this changes.",
+    "clients": "Connected clients: {{count}}",
+    "unknownClient": "Unknown device",
+    "kick": "Kick client",
+    "noClients": "No phone is connected yet."
   },
   "plugins": {
     "title": "Plugins",

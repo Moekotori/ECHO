@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 14)
 
 add_executable(echo-audio-host
     echo_out.cpp
+    wasapi_exclusive.cpp
     ../asio-sdk/common/asio.cpp
     ../asio-sdk/host/asiodrivers.cpp
     ../asio-sdk/host/pc/asiolist.cpp
@@ -12,7 +13,7 @@ add_executable(echo-audio-host
 
 if(WIN32)
     target_include_directories(echo-audio-host PRIVATE ../asio-sdk/common ../asio-sdk/host ../asio-sdk/host/pc)
-    target_link_libraries(echo-audio-host PRIVATE ole32 user32 winmm propsys uuid)
+    target_link_libraries(echo-audio-host PRIVATE ole32 user32 winmm propsys uuid avrt)
     target_compile_definitions(echo-audio-host PRIVATE _CRT_SECURE_NO_WARNINGS MA_ENABLE_ASIO)
 elseif(APPLE)
     find_library(COREAUDIO_LIB CoreAudio)

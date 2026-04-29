@@ -1,0 +1,62 @@
+fix(audio): stop reporting fake hi-res rates; honor true hardware rate
+
+User-visible bug: WASAPI exclusive mode was advertised as 192kHz / bit-perfect
+in the UI but external DACs received 48kHz. ASIO had the same class of bug:
+echo-audio-host stored the user's requested rate as truth without ever
+asking the driver what rate it was actually running at.
+
+Root cause (WASAPI exclusive)
+  In ma_share_mode_exclusive, miniaudio reads the device's currently-configured
+  exclusive format from PKEY_AudioEngine_DeviceFormat (= the dropdown in
+  mmsys.cpl -> device -> Advanced -> Default Format), regardless of what
+  config.sampleRate the caller asked for (miniaudio.h ~L23694). It then
+  silently inserts an internal SRC between the app rate and the device rate
+  (miniaudio.h ~L42587), and leaves device.sampleRate equal to the app rate —
+  so the caller has no way to know SRC happened. echo_out.cpp was reporting
+  device.sampleRate as the truth, so JS / UI / `bitPerfect` indicator all lied
+  about hi-res output that wasn't actually happening.
+
+Root cause (ASIO)
+  init_asio_runtime stored requestedRate into g_asio.sampleRate without ever
+  calling ASIOCanSampleRate / ASIOSetSampleRate / ASIOGetSampleRate. ASIO
+  drivers stay at whatever rate was last set via their own control panel
+  (typically 44.1k or whatever the driver was last opened at), so reported
+  rate and actual rate could diverge silently.
+
+Fixes
+  echo_out.cpp
+    * probe_highest_exclusive_sample_rate: compare device.playback.internalSampleRate
+      (true hw rate) instead of device.sampleRate (app-facing). Prior code
+      compared device.sampleRate to the requested rate, which is always equal
+      when init succeeds — so the probe was effectively a no-op declaring
+      every rate "supported" even when miniaudio was inserting SRC under the
+      hood.
+    * get_highest_sample_rate_for_device: when the probe returns >0, treat it
+      as authoritative instead of taking max() with the permissive
+      IsFormatSupported list. Keeps the device-max display honest.
+    * main(): after ma_device_init in WASAPI exclusive, detect
+      device.sampleRate != device.playback.internalSampleRate. On mismatch,
+      tear down the device + ring buffer and reopen at the hardware rate.
+      Re-build the config from scratch for the second init. Add a defensive
+      post-reopen check that fails with a new exit code (-4 = bit-perfect
+      not achievable) if rates still don't match.
+    * main(): include hardwareSampleRate in the ready JSON so upstream can
+      tell the truth even if a future code path slips past the guard.
+    * init_asio_runtime: negotiate the rate via
+      ASIOCanSampleRate -> ASIOSetSampleRate -> ASIOGetSampleRate. Use the
+      result to update sampleRate / g_asio.sampleRate, and log when the
+      driver overrode the request.
+
+  AudioEngine.js
+    * getStatus: prefer deviceInfo.hardwareSampleRate (when present) over
+      deviceInfo.sampleRate when computing outputSampleRate and bitPerfect.
+      Old binaries without the new field still work via the existing
+      fallback chain.
+
+User-facing impact
+  * If mmsys default format is below the source rate, app now plays honestly
+    at the mmsys rate (and clearly logs the auto-adjust). To get true 192k
+    exclusive output, set mmsys -> device -> Advanced -> Default Format
+    to 24-bit, 192000 Hz.
+  * UI bitPerfect indicator now reflects reality.
+  * ASIO playback now shows the driver's actual rate, not the user's wish.

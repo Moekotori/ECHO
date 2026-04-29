@@ -1,11 +1,17 @@
 const DB_NAME = 'echo-track-meta-cache'
-const DB_VERSION = 1
+const DB_VERSION = 3
 const STORE_NAME = 'trackMeta'
+const ALBUM_COVER_STORE_NAME = 'albumCover'
+const ARTIST_AVATAR_STORE_NAME = 'artistAvatar'
 const MAX_CACHE_ENTRIES = 12000
 const MAX_CACHE_COVER_ENTRIES = 6000
+const MAX_ALBUM_COVER_CACHE_ENTRIES = 6000
+const MAX_ARTIST_AVATAR_CACHE_ENTRIES = 8000
 
 let dbPromise = null
 let prunePromise = null
+let albumCoverPrunePromise = null
+let artistAvatarPrunePromise = null
 
 function hasIndexedDb() {
   return typeof indexedDB !== 'undefined'
@@ -19,9 +25,35 @@ function openTrackMetaDb() {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
     request.onupgradeneeded = () => {
       const db = request.result
+      const tx = request.transaction
+      let trackStore = null
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: 'path' })
-        store.createIndex('updatedAt', 'updatedAt', { unique: false })
+        trackStore = db.createObjectStore(STORE_NAME, { keyPath: 'path' })
+      } else {
+        trackStore = tx?.objectStore(STORE_NAME) || null
+      }
+      if (trackStore && !trackStore.indexNames.contains('updatedAt')) {
+        trackStore.createIndex('updatedAt', 'updatedAt', { unique: false })
+      }
+
+      let albumCoverStore = null
+      if (!db.objectStoreNames.contains(ALBUM_COVER_STORE_NAME)) {
+        albumCoverStore = db.createObjectStore(ALBUM_COVER_STORE_NAME, { keyPath: 'key' })
+      } else {
+        albumCoverStore = tx?.objectStore(ALBUM_COVER_STORE_NAME) || null
+      }
+      if (albumCoverStore && !albumCoverStore.indexNames.contains('updatedAt')) {
+        albumCoverStore.createIndex('updatedAt', 'updatedAt', { unique: false })
+      }
+
+      let artistAvatarStore = null
+      if (!db.objectStoreNames.contains(ARTIST_AVATAR_STORE_NAME)) {
+        artistAvatarStore = db.createObjectStore(ARTIST_AVATAR_STORE_NAME, { keyPath: 'key' })
+      } else {
+        artistAvatarStore = tx?.objectStore(ARTIST_AVATAR_STORE_NAME) || null
+      }
+      if (artistAvatarStore && !artistAvatarStore.indexNames.contains('updatedAt')) {
+        artistAvatarStore.createIndex('updatedAt', 'updatedAt', { unique: false })
       }
     }
     request.onsuccess = () => resolve(request.result)
@@ -30,6 +62,74 @@ function openTrackMetaDb() {
   })
 
   return dbPromise
+}
+
+function normalizeAlbumCoverCacheText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function normalizeAlbumCoverCacheKeyPart(value) {
+  return normalizeAlbumCoverCacheText(value)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+export function createAlbumCoverCacheKey(album, artist = '') {
+  const normalizedAlbum = normalizeAlbumCoverCacheKeyPart(album || 'Singles')
+  const normalizedArtist = normalizeAlbumCoverCacheKeyPart(artist)
+  return normalizedAlbum ? `${normalizedAlbum}\u0001${normalizedArtist}` : ''
+}
+
+export function createAlbumCoverFallbackKey(album) {
+  const normalizedAlbum = normalizeAlbumCoverCacheKeyPart(album || 'Singles')
+  return normalizedAlbum ? `${normalizedAlbum}\u0001` : ''
+}
+
+export function createArtistAvatarCacheKey(artist) {
+  return normalizeAlbumCoverCacheKeyPart(artist)
+}
+
+function normalizeAlbumCoverCacheEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null
+  const cover = typeof entry.cover === 'string' && entry.cover ? entry.cover : null
+  if (!cover) return null
+  return {
+    album: normalizeAlbumCoverCacheText(entry.album || entry.albumName || 'Singles') || 'Singles',
+    artist: normalizeAlbumCoverCacheText(entry.artist || ''),
+    cover
+  }
+}
+
+function normalizeArtistAvatarCacheEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null
+  const artist = normalizeAlbumCoverCacheText(entry.artist || '')
+  if (!artist) return null
+  const avatarUrl = typeof entry.avatarUrl === 'string' && entry.avatarUrl ? entry.avatarUrl : null
+  return {
+    artist,
+    avatarUrl,
+    source: typeof entry.source === 'string' ? entry.source : '',
+    checkedAt: Number.isFinite(Number(entry.checkedAt)) ? Number(entry.checkedAt) : null
+  }
+}
+
+export function buildAlbumCoverCacheEntries(items = []) {
+  if (!Array.isArray(items) || items.length === 0) return {}
+  const entries = {}
+
+  for (const item of items) {
+    const entry = normalizeAlbumCoverCacheEntry(item)
+    if (!entry) continue
+    const exactKey = createAlbumCoverCacheKey(entry.album, entry.artist)
+    const fallbackKey = createAlbumCoverFallbackKey(entry.album)
+    if (exactKey) entries[exactKey] = entry
+    if (fallbackKey) entries[fallbackKey] = entry
+  }
+
+  return entries
 }
 
 function normalizeTrackMetaEntry(entry) {
@@ -113,6 +213,191 @@ export async function writeTrackMetaCache(entries = {}) {
   })
 
   pruneTrackMetaCache()
+}
+
+export async function readAlbumCoverCache(keys = []) {
+  const db = await openTrackMetaDb()
+  if (!db || !Array.isArray(keys) || keys.length === 0) return {}
+
+  return new Promise((resolve) => {
+    const tx = db.transaction(ALBUM_COVER_STORE_NAME, 'readonly')
+    const store = tx.objectStore(ALBUM_COVER_STORE_NAME)
+    const result = {}
+    const uniqueKeys = [...new Set(keys.filter(Boolean))]
+    let pending = uniqueKeys.length
+
+    if (pending === 0) {
+      resolve(result)
+      return
+    }
+
+    const finish = () => {
+      pending -= 1
+      if (pending <= 0) resolve(result)
+    }
+
+    for (const key of uniqueKeys) {
+      const request = store.get(key)
+      request.onsuccess = () => {
+        const cached = normalizeAlbumCoverCacheEntry(request.result?.entry)
+        if (cached) result[key] = cached
+        finish()
+      }
+      request.onerror = finish
+    }
+
+    tx.onerror = () => resolve(result)
+    tx.onabort = () => resolve(result)
+  })
+}
+
+export async function writeAlbumCoverCache(entries = {}) {
+  const db = await openTrackMetaDb()
+  if (!db || !entries || typeof entries !== 'object') return
+
+  await new Promise((resolve) => {
+    const tx = db.transaction(ALBUM_COVER_STORE_NAME, 'readwrite')
+    const store = tx.objectStore(ALBUM_COVER_STORE_NAME)
+    const updatedAt = Date.now()
+
+    for (const [key, entry] of Object.entries(entries)) {
+      if (!key) continue
+      const normalized = normalizeAlbumCoverCacheEntry(entry)
+      if (!normalized) continue
+      store.put({ key, entry: normalized, updatedAt })
+    }
+
+    tx.oncomplete = resolve
+    tx.onerror = resolve
+    tx.onabort = resolve
+  })
+
+  pruneAlbumCoverCache()
+}
+
+export async function readArtistAvatarCache(keys = []) {
+  const db = await openTrackMetaDb()
+  if (!db || !Array.isArray(keys) || keys.length === 0) return {}
+
+  return new Promise((resolve) => {
+    const tx = db.transaction(ARTIST_AVATAR_STORE_NAME, 'readonly')
+    const store = tx.objectStore(ARTIST_AVATAR_STORE_NAME)
+    const result = {}
+    const uniqueKeys = [...new Set(keys.filter(Boolean))]
+    let pending = uniqueKeys.length
+
+    if (pending === 0) {
+      resolve(result)
+      return
+    }
+
+    const finish = () => {
+      pending -= 1
+      if (pending <= 0) resolve(result)
+    }
+
+    for (const key of uniqueKeys) {
+      const request = store.get(key)
+      request.onsuccess = () => {
+        const cached = normalizeArtistAvatarCacheEntry(request.result?.entry)
+        if (cached) result[key] = cached
+        finish()
+      }
+      request.onerror = finish
+    }
+
+    tx.onerror = () => resolve(result)
+    tx.onabort = () => resolve(result)
+  })
+}
+
+export async function writeArtistAvatarCache(entries = {}) {
+  const db = await openTrackMetaDb()
+  if (!db || !entries || typeof entries !== 'object') return
+
+  await new Promise((resolve) => {
+    const tx = db.transaction(ARTIST_AVATAR_STORE_NAME, 'readwrite')
+    const store = tx.objectStore(ARTIST_AVATAR_STORE_NAME)
+    const updatedAt = Date.now()
+
+    for (const [key, entry] of Object.entries(entries)) {
+      if (!key) continue
+      const normalized = normalizeArtistAvatarCacheEntry({
+        ...entry,
+        checkedAt: entry?.checkedAt || updatedAt
+      })
+      if (!normalized) continue
+      store.put({ key, entry: normalized, updatedAt })
+    }
+
+    tx.oncomplete = resolve
+    tx.onerror = resolve
+    tx.onabort = resolve
+  })
+
+  pruneArtistAvatarCache()
+}
+
+export async function pruneArtistAvatarCache() {
+  if (artistAvatarPrunePromise) return artistAvatarPrunePromise
+
+  artistAvatarPrunePromise = (async () => {
+    const db = await openTrackMetaDb()
+    if (!db) return
+
+    const readTx = db.transaction(ARTIST_AVATAR_STORE_NAME, 'readonly')
+    const records = await getAllRecords(readTx.objectStore(ARTIST_AVATAR_STORE_NAME))
+    const overflow = records.length - MAX_ARTIST_AVATAR_CACHE_ENTRIES
+    if (overflow <= 0) return
+
+    await new Promise((resolve) => {
+      const tx = db.transaction(ARTIST_AVATAR_STORE_NAME, 'readwrite')
+      const store = tx.objectStore(ARTIST_AVATAR_STORE_NAME)
+      records.sort((a, b) => Number(a.updatedAt || 0) - Number(b.updatedAt || 0))
+      for (const record of records.slice(0, overflow)) {
+        if (record?.key) store.delete(record.key)
+      }
+
+      tx.oncomplete = resolve
+      tx.onerror = resolve
+      tx.onabort = resolve
+    })
+  })().finally(() => {
+    artistAvatarPrunePromise = null
+  })
+
+  return artistAvatarPrunePromise
+}
+
+export async function pruneAlbumCoverCache() {
+  if (albumCoverPrunePromise) return albumCoverPrunePromise
+
+  albumCoverPrunePromise = (async () => {
+    const db = await openTrackMetaDb()
+    if (!db) return
+
+    const readTx = db.transaction(ALBUM_COVER_STORE_NAME, 'readonly')
+    const records = await getAllRecords(readTx.objectStore(ALBUM_COVER_STORE_NAME))
+    const overflow = records.length - MAX_ALBUM_COVER_CACHE_ENTRIES
+    if (overflow <= 0) return
+
+    await new Promise((resolve) => {
+      const tx = db.transaction(ALBUM_COVER_STORE_NAME, 'readwrite')
+      const store = tx.objectStore(ALBUM_COVER_STORE_NAME)
+      records.sort((a, b) => Number(a.updatedAt || 0) - Number(b.updatedAt || 0))
+      for (const record of records.slice(0, overflow)) {
+        if (record?.key) store.delete(record.key)
+      }
+
+      tx.oncomplete = resolve
+      tx.onerror = resolve
+      tx.onabort = resolve
+    })
+  })().finally(() => {
+    albumCoverPrunePromise = null
+  })
+
+  return albumCoverPrunePromise
 }
 
 export async function pruneTrackMetaCache() {

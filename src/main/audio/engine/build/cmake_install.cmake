@@ -1,8 +1,8 @@
-# Install script for directory: E:/Echoes-codex-tree/Echoes-codex-tree/src/main/audio/engine
+# Install script for directory: D:/ECHO - 副本 (3) - 副本/src/main/audio/engine
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "C:/Program Files (x86)/echo-audio-host")
+  set(CMAKE_INSTALL_PREFIX "C:/Program Files/echo-audio-host")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 
@@ -40,5 +40,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "E:/Echoes-codex-tree/Echoes-codex-tree/src/main/audio/engine/build/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "D:/ECHO - 副本 (3) - 副本/src/main/audio/engine/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

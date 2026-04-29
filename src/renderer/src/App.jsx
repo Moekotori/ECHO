@@ -76,7 +76,9 @@ import {
   GripVertical,
   Tag,
   Gauge,
-  RotateCcw
+  RotateCcw,
+  Smartphone,
+  Cast
 } from 'lucide-react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import {
@@ -90,7 +92,13 @@ import MediaDownloaderDrawer from './components/MediaDownloaderDrawer'
 import MvSettingsDrawer from './components/MvSettingsDrawer'
 import AudioSettingsDrawer from './components/AudioSettingsDrawer'
 import CastReceiveDrawer from './components/CastReceiveDrawer'
+import CastSendDrawer from './components/CastSendDrawer'
 import ListenTogetherDrawer from './components/ListenTogetherDrawer'
+import PhoneRemoteDrawer from './components/PhoneRemoteDrawer'
+import RemoteLibrarySettings from './components/RemoteLibrarySettings'
+import RemoteLibraryView from './components/RemoteLibraryView'
+import QueueSidebarView from './components/QueueSidebarView'
+import HistorySidebarView from './components/HistorySidebarView'
 import LyricsCandidatePicker from './components/LyricsCandidatePicker'
 import MetadataEditorDrawer from './components/MetadataEditorDrawer'
 import ImportedFolderRail from './components/ImportedFolderRail'
@@ -128,7 +136,7 @@ import {
 import { ArtistLink } from './components/ArtistLink'
 import { EqPlot } from './components/EqPlot'
 import { EQ_PRESETS } from './constants/eq'
-import { DEFAULT_CONFIG, migrateEqBandsTo16 } from './config/defaultConfig'
+import { DEFAULT_CONFIG, normalizeEqBands } from './config/defaultConfig'
 import {
   normalizeImportedPlaylists,
   buildPlaylistsExportPayload,
@@ -148,6 +156,7 @@ import { parseLyricsSourceLink } from './utils/lyricsLink'
 import PluginSlot from './plugins/PluginSlot'
 import PluginManagerDrawer from './components/PluginManagerDrawer'
 import { extractAverageHexFromSrc, generatePaletteFromHex } from './utils/color'
+import { buildArtistBucketsWithAvatars } from './utils/artistAvatar'
 import {
   containsLegacyPlaybackHistoryEntries,
   createPlaybackContext,
@@ -159,10 +168,28 @@ import {
   pickInitialPersistedValue,
   remapPlaybackHistoryEntries
 } from '../../shared/playbackPersistence.mjs'
-import { readTrackMetaCache, writeTrackMetaCache } from './utils/trackMetaCache'
+import {
+  buildAlbumCoverCacheEntries,
+  createAlbumCoverCacheKey,
+  createAlbumCoverFallbackKey,
+  createArtistAvatarCacheKey,
+  readAlbumCoverCache,
+  readArtistAvatarCache,
+  readTrackMetaCache,
+  writeAlbumCoverCache,
+  writeArtistAvatarCache,
+  writeTrackMetaCache
+} from './utils/trackMetaCache'
+import {
+  buildRemoteTrackMeta,
+  isRemoteTrackPath,
+  isSubsonicTrackPath,
+  isWebDavTrackPath
+} from './utils/remoteLibrary'
 
 function localPathToAudioSrc(filePath) {
   if (!filePath || typeof filePath !== 'string') return ''
+  if (isRemoteTrackPath(filePath)) return ''
   const href = typeof window !== 'undefined' && window.api?.pathToFileURL?.(filePath)
   if (href) return href
   return `file://${filePath}`
@@ -171,15 +198,16 @@ function localPathToAudioSrc(filePath) {
 const MENU_ANIM_MS = 160
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/Moekotori/Echoes/releases?per_page=6'
 const GITHUB_RELEASES_PAGE_URL = 'https://github.com/Moekotori/Echoes/releases'
-const MAX_PLAYBACK_HISTORY = 40
+const DEFAULT_PLAYBACK_HISTORY_MAX = 1000
+const HISTORY_MAX_ENTRY_OPTIONS = new Set([200, 500, 1000, 5000])
 const STORED_VOLUME_KEY = 'nc_volume'
 const SIDEBAR_LIST_OVERSCAN = 10
 const SIDEBAR_META_PREFETCH_BEHIND_ROWS = 16
 const SIDEBAR_META_PREFETCH_AHEAD_ROWS = 72
 const ALBUM_META_PREFETCH_BEHIND_ROWS = 4
 const ALBUM_META_PREFETCH_AHEAD_ROWS = 24
-const SIDEBAR_ROW_HEIGHT = 64
-const SIDEBAR_DETAIL_ROW_HEIGHT = 60
+const SIDEBAR_ROW_HEIGHT = 75
+const SIDEBAR_DETAIL_ROW_HEIGHT = 75
 const ALBUM_GRID_DEFAULT_ROW_HEIGHT = 68
 const ALBUM_GRID_DEFAULT_GAP = 10
 const RENDERER_PERSIST_DEBOUNCE_MS = 600
@@ -200,9 +228,51 @@ const ALBUM_METADATA_PARSE_BATCH_SIZE = 160
 const METADATA_PARSE_WORKERS = 8
 const ALBUM_CLOUD_COVER_PREFETCH_LIMIT = 40
 const ALBUM_CLOUD_COVER_WORKERS = 5
+const ARTIST_AVATAR_LOOKUP_VERSION = 2
+const ARTIST_AVATAR_PREFETCH_LIMIT = 96
+const ARTIST_AVATAR_PREFETCH_WORKERS = 4
+const ARTIST_AVATAR_MISS_TTL_MS = 12 * 60 * 60 * 1000
 const MAX_SHARE_CARD_COVER_CHARS = 600000
 const CLOUD_COVER_RESOLUTION = '600x600bb'
 const SIDEBAR_LOGO_IMAGE_SRC = sidebarLogoImage
+const BPM_DETECTOR_VERSION = 2
+const BPM_DETECTION_START_DELAY_MS = 1200
+
+function isCastSessionActive(status) {
+  return !!(
+    status?.castActive ||
+    (status?.dlnaEnabled &&
+      status?.currentUri &&
+      (status.transportState === 'PLAYING' || status.transportState === 'PAUSED_PLAYBACK'))
+  )
+}
+
+function getCastStatusMeta(status) {
+  return status?.castKind === 'airplay'
+    ? status?.airplayMeta || {}
+    : status?.dlnaMeta || status?.airplayMeta || {}
+}
+
+function buildCastVirtualTrack(status) {
+  if (!isCastSessionActive(status)) return null
+  const kind = status?.castKind || 'cast'
+  const meta = getCastStatusMeta(status)
+  const title = String(meta?.title || '').trim()
+  const artist = String(meta?.artist || '').trim()
+  const album = String(meta?.album || '').trim()
+  const cover = String(meta?.cover || meta?.albumArtUrl || meta?.artworkUrl || '').trim()
+  const metadataTrusted = kind === 'dlna' ? !!title : !!status?.castMetadataTrusted && !!title
+  const stableTitle = metadataTrusted ? title : ''
+  return {
+    path: `cast://${kind}/${encodeURIComponent(stableTitle || status?.currentUri || 'stream')}`,
+    title: stableTitle,
+    artist,
+    album,
+    cover,
+    source: kind,
+    metadataTrusted
+  }
+}
 
 function normalizeCoverLookupText(value) {
   return String(value || '')
@@ -221,6 +291,104 @@ function normalizeItunesCoverUrl(url) {
   const cleanUrl = String(url || '').trim()
   if (!cleanUrl) return null
   return cleanUrl.replace(/100x100bb(\.[a-z0-9]+)$/i, `${CLOUD_COVER_RESOLUTION}$1`)
+}
+
+function normalizeNeteaseArtistImageUrl(url) {
+  const cleanUrl = String(url || '').trim()
+  if (!cleanUrl) return null
+  return `${cleanUrl.replace(/\?.*$/, '')}?param=600y600`
+}
+
+function normalizeQqMusicArtistImageUrl(url) {
+  const cleanUrl = String(url || '').trim()
+  if (!cleanUrl) return null
+  return cleanUrl.replace(/T001R\d+x\d+M000/i, 'T001R500x500M000')
+}
+
+function cleanupArtistSearchText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/^[\s"'“”‘’「」『』【】\[\]()（）]+|[\s"'“”‘’「」『』【】\[\]()（）]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function stripArtistDecorations(value) {
+  return cleanupArtistSearchText(
+    String(value || '')
+      .replace(/[（(［\[]\s*(?:cv|cv\.|voice|vo|歌|唱|feat|featuring)[^）)\]］]*[）)\]］]/gi, '')
+      .replace(/[（(［\[][^）)\]］]{1,32}[）)\]］]/g, '')
+      .replace(/\b(?:feat|ft|featuring)\.?\b.*$/i, '')
+  )
+}
+
+function buildArtistAvatarSearchQueries(artistName) {
+  const raw = cleanupArtistSearchText(artistName)
+  if (!raw) return []
+
+  const queries = []
+  const push = (value) => {
+    const next = cleanupArtistSearchText(value)
+    if (!next) return
+    const normalized = normalizeCoverLookupText(next)
+    if (!normalized) return
+    if (queries.some((item) => normalizeCoverLookupText(item) === normalized)) return
+    queries.push(next)
+  }
+
+  push(raw)
+  push(stripArtistDecorations(raw))
+
+  for (const match of raw.matchAll(/[（(［\[]([^）)\]］]{1,48})[）)\]］]/g)) {
+    const inner = cleanupArtistSearchText(
+      match[1].replace(/^(?:cv|cv\.|voice|vo|歌|唱)\s*[:：]?\s*/i, '')
+    )
+    push(inner)
+  }
+
+  const base = stripArtistDecorations(raw) || raw
+  for (const part of base.split(/\s*(?:\/|／|,|，|、|;|；|\+|＋|&|＆|×|x|X|・|·|\|)\s*/)) {
+    push(part)
+  }
+
+  return queries.slice(0, 6)
+}
+
+function pickBestArtistAvatarCandidate(candidates, artistName, query = artistName) {
+  const wantedArtist = normalizeCoverLookupText(artistName)
+  const wantedQuery = normalizeCoverLookupText(query)
+  if ((!wantedArtist && !wantedQuery) || !Array.isArray(candidates)) return null
+
+  let best = null
+  for (const candidate of candidates) {
+    const candidateName = normalizeCoverLookupText(candidate?.name)
+    const aliasTokens = Array.isArray(candidate?.alias)
+      ? candidate.alias.map(normalizeCoverLookupText).filter(Boolean)
+      : []
+    const imageUrl = candidate?.picUrl || candidate?.img1v1Url
+    if (!imageUrl) continue
+
+    let score = 0
+    if (candidateName === wantedArtist || candidateName === wantedQuery) score += 130
+    else if (aliasTokens.includes(wantedArtist) || aliasTokens.includes(wantedQuery)) score += 105
+    else if (
+      (wantedQuery &&
+        (candidateName.includes(wantedQuery) || wantedQuery.includes(candidateName))) ||
+      (wantedArtist &&
+        (candidateName.includes(wantedArtist) || wantedArtist.includes(candidateName)))
+    ) {
+      score += 52
+    } else score -= 60
+    if (candidate?.source === 'qq') score += 4
+    score += Math.min(20, Number(candidate?.musicSize || 0) / 10)
+    score += Math.min(10, Number(candidate?.albumSize || 0) / 5)
+
+    if (!best || score > best.score) {
+      best = { candidate, score }
+    }
+  }
+
+  return best && best.score > 0 ? best.candidate : null
 }
 
 function scoreCoverCandidate(candidate, title, artist, album) {
@@ -515,6 +683,62 @@ function clampVolume(value) {
   return Math.min(1, Math.max(0, num))
 }
 
+function sanitizeCoverForPhoneRemote(value) {
+  const text = String(value || '').trim()
+  if (/^data:image\//i.test(text)) return text
+  if (/^https?:\/\//i.test(text)) return text
+  return ''
+}
+
+function makePhoneRemoteTrackId(path) {
+  const text = String(path || '')
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `tr_${(hash >>> 0).toString(36)}_${text.length.toString(36)}`
+}
+
+function buildPhoneRemoteTrackPayload(track, meta, id, extra = {}) {
+  if (!track?.path) return null
+  const info = parseTrackInfo(track, meta)
+  const fallbackName = stripExtension(track.name || fileNameFromPath(track.path))
+  const title = info?.title || track?.info?.title || fallbackName || 'Unknown Track'
+  const artist =
+    (info?.artist && info.artist !== 'Unknown Artist' ? info.artist : '') ||
+    (track?.info?.artist && track.info.artist !== 'Unknown Artist' ? track.info.artist : '') ||
+    ''
+  const album =
+    (info?.album && info.album !== 'Unknown Album' ? info.album : '') ||
+    (track?.info?.album && track.info.album !== 'Unknown Album' ? track.info.album : '') ||
+    ''
+  const durationValue =
+    Number(meta?.duration) ||
+    Number(info?.duration) ||
+    Number(track?.duration) ||
+    Number(track?.info?.duration) ||
+    0
+  const bitrateKbps =
+    Number(meta?.bitrateKbps) ||
+    (Number(meta?.bitrate) ? Math.round(Number(meta.bitrate) / 1000) : 0)
+  return {
+    id,
+    title,
+    artist,
+    album,
+    cover: sanitizeCoverForPhoneRemote(
+      extra.cover ?? meta?.cover ?? info?.cover ?? track?.cover ?? track?.info?.cover ?? ''
+    ),
+    duration: Number.isFinite(durationValue) ? durationValue : 0,
+    codec: String(meta?.codec || track?.codec || track?.format || '').toUpperCase(),
+    sampleRateHz: Number(meta?.sampleRateHz || meta?.sampleRate || 0) || 0,
+    bitDepth: Number(meta?.bitDepth || 0) || 0,
+    bitrateKbps: Number.isFinite(bitrateKbps) ? bitrateKbps : 0,
+    ...extra
+  }
+}
+
 function resolveContextMenuPoint(eventLike, fallbackElement = null) {
   const event = eventLike || null
   const currentTarget = event?.currentTarget || fallbackElement || null
@@ -592,6 +816,96 @@ function buildPlaybackHistoryEntry(track, trackMetaMap, playedAt = Date.now()) {
   }
 }
 
+function normalizeHistoryMaxEntries(value) {
+  if (value === Infinity || value === 'Infinity' || value === 'unlimited') return Infinity
+  const numeric = Number(value)
+  if (HISTORY_MAX_ENTRY_OPTIONS.has(numeric)) return numeric
+  return DEFAULT_PLAYBACK_HISTORY_MAX
+}
+
+function trimPlaybackHistoryEntries(entries, maxEntries = DEFAULT_PLAYBACK_HISTORY_MAX) {
+  const normalizedMax = normalizeHistoryMaxEntries(maxEntries)
+  const normalized = Array.isArray(entries) ? normalizePlaybackHistory(entries, Number.MAX_SAFE_INTEGER) : []
+  return normalizedMax === Infinity ? normalized : normalized.slice(-normalizedMax)
+}
+
+function collapseConsecutiveHistoryEntries(entries) {
+  const source = Array.isArray(entries) ? entries : []
+  const next = []
+  for (const entry of source) {
+    const normalizedEntry = normalizePlaybackHistoryEntry(entry)
+    if (!normalizedEntry) continue
+    const previous = next[next.length - 1]
+    if (previous?.path === normalizedEntry.path) {
+      next[next.length - 1] = {
+        ...previous,
+        ...normalizedEntry,
+        playedAt: Math.max(Number(previous.playedAt) || 0, Number(normalizedEntry.playedAt) || 0)
+      }
+    } else {
+      next.push(normalizedEntry)
+    }
+  }
+  return next
+}
+
+function getHistoryBucket(playedAt, now = Date.now()) {
+  const time = Number(playedAt) || 0
+  if (!time) return 'earlier'
+  const date = new Date(time)
+  const today = new Date(now)
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
+  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000
+  const startOfWeek = startOfToday - 6 * 24 * 60 * 60 * 1000
+  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).getTime()
+  if (time >= startOfToday) return 'today'
+  if (time >= startOfYesterday) return 'yesterday'
+  if (time >= startOfWeek) return 'thisWeek'
+  if (time >= startOfMonth) return 'thisMonth'
+  return 'earlier'
+}
+
+function formatHistoryClock(playedAt) {
+  const date = new Date(Number(playedAt) || Date.now())
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function buildHistoryRelativeTime(playedAt, t, now = Date.now()) {
+  const time = Number(playedAt) || 0
+  if (!time) return ''
+  const deltaMs = Math.max(0, now - time)
+  const minute = 60 * 1000
+  const hour = 60 * minute
+  if (deltaMs < minute) return t('history.relative.justNow', 'Just now')
+  if (deltaMs < hour) {
+    return t('history.relative.minutesAgo', {
+      count: Math.max(1, Math.floor(deltaMs / minute)),
+      defaultValue: '{{count}} min ago'
+    })
+  }
+  if (deltaMs < 6 * hour) {
+    return t('history.relative.hoursAgo', {
+      count: Math.max(1, Math.floor(deltaMs / hour)),
+      defaultValue: '{{count}} hr ago'
+    })
+  }
+  const bucket = getHistoryBucket(time, now)
+  const clock = formatHistoryClock(time)
+  if (bucket === 'today') {
+    return t('history.relative.todayAt', { time: clock, defaultValue: 'Today {{time}}' })
+  }
+  if (bucket === 'yesterday') {
+    return t('history.relative.yesterdayAt', {
+      time: clock,
+      defaultValue: 'Yesterday {{time}}'
+    })
+  }
+  return new Date(time).toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric'
+  })
+}
+
 function normalizeConfigState(raw) {
   const source = raw && typeof raw === 'object' ? raw : null
   if (!source) {
@@ -650,11 +964,25 @@ function normalizeConfigState(raw) {
   if (typeof merged.showSidebarLogo !== 'boolean') {
     merged.showSidebarLogo = DEFAULT_CONFIG.showSidebarLogo
   }
+  if (typeof merged.autoLocateCurrentTrack !== 'boolean') {
+    merged.autoLocateCurrentTrack = DEFAULT_CONFIG.autoLocateCurrentTrack
+  }
+  merged.historyMaxEntries = normalizeHistoryMaxEntries(merged.historyMaxEntries)
+  if (typeof merged.historyCollapseRepeats !== 'boolean') {
+    merged.historyCollapseRepeats = DEFAULT_CONFIG.historyCollapseRepeats
+  }
+  if (typeof merged.historyShowInSidebar !== 'boolean') {
+    merged.historyShowInSidebar = DEFAULT_CONFIG.historyShowInSidebar
+  }
   if (oldRev < appRev) {
     merged.configRevision = appRev
   }
-  if (oldRev < appRev && Array.isArray(source.eqBands) && source.eqBands.length === 10) {
-    merged.eqBands = migrateEqBandsTo16(source.eqBands)
+  merged.eqBands = normalizeEqBands(source.eqBands ?? merged.eqBands)
+  if (!['off', '2x', '4x'].includes(merged.eqOversampling)) {
+    merged.eqOversampling = DEFAULT_CONFIG.eqOversampling
+  }
+  if (!['soft', 'hard', 'off'].includes(merged.eqOutputSafety)) {
+    merged.eqOutputSafety = DEFAULT_CONFIG.eqOutputSafety
   }
   if (!['low', 'balanced', 'stable'].includes(merged.audioOutputBufferProfile)) {
     merged.audioOutputBufferProfile = 'balanced'
@@ -696,6 +1024,7 @@ const SETTINGS_SECTION_KEYWORDS = {
     'equalizer',
     'buffer',
     'crossfade',
+    'automix',
     'sleep',
     'timer',
     'asio',
@@ -709,7 +1038,30 @@ const SETTINGS_SECTION_KEYWORDS = {
     '\u30a4\u30b3\u30e9\u30a4\u30b6\u30fc',
     '\u30af\u30ed\u30b9\u30d5\u30a7\u30fc\u30c9'
   ],
-  integrations: ['discord', 'rpc', 'presence', '\u96c6\u6210', '\u6574\u5408', '\u9023\u643a'],
+  integrations: [
+    'discord',
+    'rpc',
+    'presence',
+    'phone',
+    'remote',
+    'wifi',
+    '\u624b\u673a',
+    '\u9065\u63a7',
+    '\u96c6\u6210',
+    '\u6574\u5408',
+    '\u9023\u643a'
+  ],
+  remoteLibrary: [
+    'navidrome',
+    'subsonic',
+    'remote',
+    'server',
+    'library',
+    '\u8fdc\u7a0b',
+    '\u4e91\u7aef',
+    '\u670d\u52a1\u5668',
+    '\u66f2\u5e93'
+  ],
   eq: [
     'eq',
     'equalizer',
@@ -731,6 +1083,11 @@ const SETTINGS_SECTION_KEYWORDS = {
     'gradient',
     'logo',
     'sidebar',
+    'locate',
+    'current',
+    'playing',
+    '\u5b9a\u4f4d',
+    '\u5f53\u524d\u64ad\u653e',
     '\u4e3b\u9898',
     '\u989c\u8272',
     '\u80cc\u666f',
@@ -975,6 +1332,7 @@ function collectReferencedLibraryPaths({
   const next = []
   const pushPath = (path) => {
     if (typeof path !== 'string' || !path || seen.has(path)) return
+    if (isRemoteTrackPath(path)) return
     seen.add(path)
     next.push(path)
   }
@@ -1149,6 +1507,46 @@ const AlbumSidebarCard = memo(function AlbumSidebarCard({
   )
 })
 
+const ArtistSidebarCard = memo(function ArtistSidebarCard({ artist, isSelected, onPickArtist }) {
+  const [coverFailed, setCoverFailed] = useState(false)
+  const avatarStyle = useMemo(
+    () => ({ '--artist-avatar-hue': `${Number(artist.avatarHue || 0)}` }),
+    [artist.avatarHue]
+  )
+
+  useEffect(() => {
+    setCoverFailed(false)
+  }, [artist.cover])
+
+  return (
+    <button
+      type="button"
+      className={`artist-card ${isSelected ? 'active' : ''}`}
+      onClick={() => onPickArtist(artist)}
+      title={`${artist.name} - ${artist.tracks.length} tracks`}
+    >
+      {artist.cover && !coverFailed ? (
+        <img
+          src={artist.cover}
+          alt={artist.name}
+          className="artist-avatar-image"
+          loading={String(artist.cover).startsWith('data:') ? 'eager' : 'lazy'}
+          decoding="async"
+          onError={() => setCoverFailed(true)}
+        />
+      ) : (
+        <div className="artist-avatar-fallback" style={avatarStyle}>
+          <span className="artist-avatar-initials">{artist.avatarInitials || '?'}</span>
+        </div>
+      )}
+      <div className="artist-card-meta">
+        <div className="artist-card-title">{artist.name}</div>
+        <div className="artist-card-subtitle">{artist.tracks.length} tracks</div>
+      </div>
+    </button>
+  )
+})
+
 function LastFmLoginForm({ onLogin }) {
   const [username, setUsername] = React.useState('')
   const [password, setPassword] = React.useState('')
@@ -1256,7 +1654,7 @@ export default function App() {
       snapshotValue: getInitialAppStateValue('playbackHistory'),
       localValue: readStoredJson('nc_playback_history'),
       normalize: (value) =>
-        Array.isArray(value) ? normalizePlaybackHistory(value, MAX_PLAYBACK_HISTORY) : undefined,
+        Array.isArray(value) ? trimPlaybackHistoryEntries(value, DEFAULT_PLAYBACK_HISTORY_MAX) : undefined,
       fallback: []
     })
   })
@@ -1292,15 +1690,18 @@ export default function App() {
   const crossfadeStateRef = useRef({
     active: false,
     sourcePath: '',
+    targetPath: '',
     pendingFadeIn: false
   })
 
   const [playbackRate, setPlaybackRate] = useState(1.0)
   const [volume, setVolume] = useState(() => readStoredVolume())
+  const remotePreviousVolumeRef = useRef(1)
   const [useNativeEngine, setUseNativeEngine] = useState(false)
   const [isAudioExclusive, setIsAudioExclusive] = useState(false)
   const useNativeEngineRef = useRef(false)
   const nativePlayJustCalledRef = useRef(false)
+  const nativeSilentTrackSwitchRef = useRef('')
   /** Avoid duplicate native playAudio for the same track (React Strict Mode double-invokes effects). */
   const nativePlayDedupeRef = useRef({ path: '', index: -1, t: 0 })
   const [isProgressDragging, setIsProgressDragging] = useState(false)
@@ -1398,6 +1799,7 @@ export default function App() {
   const biliStreamPendingRef = useRef(new Map())
   const lastResolvedMvTrackPathRef = useRef('')
   const lastMvIdentityRef = useRef('')
+  const localMvBeforeCastRef = useRef(null)
 
   useEffect(() => {
     const refresh = () => {
@@ -1441,7 +1843,20 @@ export default function App() {
   const [downloaderDrawerOpen, setDownloaderDrawerOpen] = useState(false)
   const [mvDrawerOpen, setMvDrawerOpen] = useState(false)
   const [castDrawerOpen, setCastDrawerOpen] = useState(false)
+  const [castSendDrawerOpen, setCastSendDrawerOpen] = useState(false)
   const [listenTogetherDrawerOpen, setListenTogetherDrawerOpen] = useState(false)
+  const [phoneRemoteDrawerOpen, setPhoneRemoteDrawerOpen] = useState(false)
+  const [phoneRemoteStatus, setPhoneRemoteStatus] = useState(null)
+  const [phoneRemoteBusy, setPhoneRemoteBusy] = useState(false)
+  const [phoneRemoteSearchQuery, setPhoneRemoteSearchQuery] = useState('')
+  const [phoneRemoteSearchResults, setPhoneRemoteSearchResults] = useState([])
+  const [phoneRemoteLibraryView, setPhoneRemoteLibraryView] = useState({
+    query: '',
+    offset: 0,
+    total: 0,
+    paths: []
+  })
+  const phoneRemoteTrackIdMapRef = useRef(new Map())
   const [pluginDrawerOpen, setPluginDrawerOpen] = useState(false)
   const [audioSettingsDrawerOpen, setAudioSettingsDrawerOpen] = useState(false)
   const [metadataEditorOpen, setMetadataEditorOpen] = useState(false)
@@ -1451,11 +1866,13 @@ export default function App() {
   const [quickEditDraft, setQuickEditDraft] = useState('')
   const [quickEditBusy, setQuickEditBusy] = useState(false)
   const [quickEditModifierActive, setQuickEditModifierActive] = useState(false)
-  const [historyMenuOpen, setHistoryMenuOpen] = useState(false)
   const [listenTogetherRoomState, setListenTogetherRoomState] = useState(null)
   const [castRemoteActive, setCastRemoteActive] = useState(false)
   const [castDlnaListening, setCastDlnaListening] = useState(false)
   const [lastCastStatus, setLastCastStatus] = useState(null)
+  const [remoteLibrarySources, setRemoteLibrarySources] = useState([])
+  const [remoteLibraryEncryptionAvailable, setRemoteLibraryEncryptionAvailable] = useState(false)
+  const [activeRemoteLibrarySourceId, setActiveRemoteLibrarySourceId] = useState('')
   const [mvPlaybackQuality, setMvPlaybackQuality] = useState(null)
   const [lyricsMatchStatus, setLyricsMatchStatus] = useState('idle')
   const [lyricsSourceStatus, setLyricsSourceStatus] = useState({
@@ -1589,6 +2006,7 @@ export default function App() {
   const startupExclusiveResetRef = useRef(false)
   const releaseNotesFetchedRef = useRef(false)
   const libraryMetaCacheHydrationKeyRef = useRef('')
+  const artistAvatarAttemptedRef = useRef(new Set())
   const [newPlaylistName, setNewPlaylistName] = useState('')
   const newPlaylistInputRef = useRef(null)
   const [quickNewPlaylistName, setQuickNewPlaylistName] = useState('')
@@ -1620,7 +2038,9 @@ export default function App() {
   const [missingLibraryPaths, setMissingLibraryPaths] = useState([])
   const [trackMetaMap, setTrackMetaMap] = useState({})
   const [albumCoverMap, setAlbumCoverMap] = useState({})
+  const [artistAvatarMap, setArtistAvatarMap] = useState({})
   const trackMetaMapRef = useRef(trackMetaMap)
+  const albumCoverCachePersistedEntriesRef = useRef(new Set())
   const [technicalInfo, setTechnicalInfo] = useState({
     sampleRate: null,
     originalBpm: null,
@@ -1635,6 +2055,9 @@ export default function App() {
   const [conversionMsg, setConversionMsg] = useState('')
   const [audioDevices, setAudioDevices] = useState([])
   const [queueDragOver, setQueueDragOver] = useState(false)
+  const [queueUndoStack, setQueueUndoStack] = useState([])
+  const [selectedSidebarTrackPaths, setSelectedSidebarTrackPaths] = useState([])
+  const lastSelectedSidebarTrackPathRef = useRef('')
 
   // Hi-Fi & Navigation States
   const [view, setView] = useState('player') // 'player', 'lyrics', 'settings'
@@ -1645,6 +2068,17 @@ export default function App() {
     if (saved && typeof saved === 'object') return normalizeConfigState(saved)
     return normalizeConfigState(readStoredJson('nc_config'))
   })
+  const [eqSoloBandIdx, setEqSoloBandIdx] = useState(null)
+  const effectiveEqBands = useMemo(() => {
+    const list = Array.isArray(config.eqBands) ? config.eqBands : []
+    if (eqSoloBandIdx === null || eqSoloBandIdx < 0 || eqSoloBandIdx >= list.length) return list
+    return list.map((band, index) => (index === eqSoloBandIdx ? band : { ...band, gain: 0 }))
+  }, [config.eqBands, eqSoloBandIdx])
+  useEffect(() => {
+    if (eqSoloBandIdx !== null && eqSoloBandIdx >= (config.eqBands?.length ?? 0)) {
+      setEqSoloBandIdx(null)
+    }
+  }, [config.eqBands?.length, eqSoloBandIdx])
   const settingsSearchInputRef = useRef(null)
   const settingsContentRef = useRef(null)
 
@@ -1658,6 +2092,7 @@ export default function App() {
       language: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.language),
       engine: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.engine),
       integrations: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.integrations),
+      remoteLibrary: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.remoteLibrary),
       eq: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.eq),
       aesthetics: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.aesthetics),
       media: matchesSettingsSection(settingsQuery, SETTINGS_SECTION_KEYWORDS.media),
@@ -1688,6 +2123,12 @@ export default function App() {
         label: 'Last.fm',
         id: 'settings-sec-lastfm'
       },
+      {
+        key: 'remoteLibrary',
+        icon: Globe,
+        label: '远程音乐库',
+        id: 'settings-sec-remote-library'
+      },
       { key: 'eq', icon: Sliders, label: t('settings.nav.eq'), id: 'settings-sec-eq' },
       {
         key: 'aesthetics',
@@ -1706,6 +2147,25 @@ export default function App() {
     ],
     [t]
   )
+
+  const reloadRemoteLibrarySources = useCallback(async () => {
+    try {
+      const result = await window.api?.remoteLibrary?.listSources?.()
+      if (!result?.ok) return
+      const sources = Array.isArray(result.sources) ? result.sources : []
+      setRemoteLibrarySources(sources)
+      setRemoteLibraryEncryptionAvailable(Boolean(result.encryptionAvailable))
+      setActiveRemoteLibrarySourceId((current) =>
+        current && sources.some((source) => source.id === current) ? current : sources[0]?.id || ''
+      )
+    } catch (error) {
+      console.warn('[remote-library] list sources failed:', error?.message || error)
+    }
+  }, [])
+
+  useEffect(() => {
+    reloadRemoteLibrarySources()
+  }, [reloadRemoteLibrarySources])
 
   const handleSettingsNavClick = useCallback(
     (sectionKey, sectionId) => {
@@ -1800,12 +2260,16 @@ export default function App() {
     crossfadeStateRef.current = {
       active: false,
       sourcePath: '',
+      targetPath: '',
       pendingFadeIn: false
     }
   }, [])
 
   const cancelCrossfade = useCallback(() => {
     resetCrossfadeState()
+    if (window.api?.audioCancelAutomix) {
+      void window.api.audioCancelAutomix().catch(() => {})
+    }
     if (window.api?.audioCancelFade) {
       void window.api.audioCancelFade().catch(() => {})
     }
@@ -1925,6 +2389,10 @@ export default function App() {
   const upNextPathSet = useMemo(
     () => new Set(upNextQueue.map((item) => item?.path).filter((x) => typeof x === 'string')),
     [upNextQueue]
+  )
+  const selectedSidebarTrackPathSet = useMemo(
+    () => new Set(selectedSidebarTrackPaths),
+    [selectedSidebarTrackPaths]
   )
 
   const flushPersistedState = useCallback((targetKey = null) => {
@@ -2090,6 +2558,18 @@ export default function App() {
   }, [playbackHistory])
 
   useEffect(() => {
+    setPlaybackHistory((prev) => {
+      const collapsed = config.historyCollapseRepeats ? collapseConsecutiveHistoryEntries(prev) : prev
+      const trimmed = trimPlaybackHistoryEntries(collapsed, config.historyMaxEntries)
+      if (trimmed.length === prev.length && trimmed.every((entry, index) => entry === prev[index])) {
+        return prev
+      }
+      playbackHistoryRef.current = trimmed
+      return trimmed
+    })
+  }, [config.historyCollapseRepeats, config.historyMaxEntries])
+
+  useEffect(() => {
     userPlaylistsRef.current = userPlaylists
   }, [userPlaylists])
 
@@ -2148,6 +2628,24 @@ export default function App() {
   useEffect(() => {
     trackMetaMapRef.current = trackMetaMap
   }, [trackMetaMap])
+
+  const persistAlbumCoverCacheItems = useCallback((items) => {
+    const entries = buildAlbumCoverCacheEntries(Array.isArray(items) ? items : [items])
+    const freshEntries = {}
+    for (const [key, entry] of Object.entries(entries)) {
+      const cover = entry?.cover || ''
+      const signature = `${key}\u0002${cover.length}\u0002${cover.slice(0, 80)}\u0002${cover.slice(-80)}`
+      if (albumCoverCachePersistedEntriesRef.current.has(signature)) continue
+      albumCoverCachePersistedEntriesRef.current.add(signature)
+      freshEntries[key] = entry
+    }
+    if (albumCoverCachePersistedEntriesRef.current.size > 16000) {
+      albumCoverCachePersistedEntriesRef.current.clear()
+    }
+    if (Object.keys(freshEntries).length > 0) {
+      writeAlbumCoverCache(freshEntries).catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     if (!libraryStateReady || playlist.length === 0) return undefined
@@ -2297,9 +2795,10 @@ export default function App() {
         playedAt: Date.now()
       }
       const next = [...prev, nextEntry]
-      return next.slice(-MAX_PLAYBACK_HISTORY)
+      const collapsed = config.historyCollapseRepeats ? collapseConsecutiveHistoryEntries(next) : next
+      return trimPlaybackHistoryEntries(collapsed, config.historyMaxEntries)
     })
-  }, [currentIndex, playlist, isPlaying])
+  }, [currentIndex, playlist, isPlaying, config.historyCollapseRepeats, config.historyMaxEntries])
 
   const toggleLike = useCallback((path) => {
     if (!path) return
@@ -2318,6 +2817,18 @@ export default function App() {
       return [...prev, { path }]
     })
     return inserted ? { ok: true } : { ok: false, reason: 'duplicate' }
+  }, [])
+
+  const enqueueUpNextTrackAtFront = useCallback((track) => {
+    const path = track?.path
+    if (!path) return { ok: false, reason: 'invalid_path' }
+    let changed = false
+    setUpNextQueue((prev) => {
+      const filtered = prev.filter((item) => item?.path !== path)
+      changed = filtered.length !== prev.length || filtered[0]?.path !== path
+      return [{ path }, ...filtered]
+    })
+    return changed ? { ok: true } : { ok: false, reason: 'duplicate' }
   }, [])
 
   const enqueueUpNextTracks = useCallback((tracks) => {
@@ -2365,6 +2876,53 @@ export default function App() {
   const removeFromUpNextQueue = useCallback((path) => {
     if (!path) return
     setUpNextQueue((prev) => prev.filter((item) => item?.path !== path))
+  }, [])
+
+  const pushQueueUndoSnapshot = useCallback((prevQueue) => {
+    const snapshot = Array.isArray(prevQueue) ? prevQueue.map((item) => ({ path: item.path })) : []
+    if (snapshot.length === 0) return
+    setQueueUndoStack((prev) => [{ queue: snapshot, savedAt: Date.now() }, ...prev].slice(0, 5))
+  }, [])
+
+  const removeFromUpNextQueueWithUndo = useCallback(
+    (path) => {
+      if (!path) return
+      setUpNextQueue((prev) => {
+        if (!prev.some((item) => item?.path === path)) return prev
+        pushQueueUndoSnapshot(prev)
+        return prev.filter((item) => item?.path !== path)
+      })
+    },
+    [pushQueueUndoSnapshot]
+  )
+
+  const removeManyFromUpNextQueueWithUndo = useCallback(
+    (paths) => {
+      const pathSet = new Set((Array.isArray(paths) ? paths : []).filter(Boolean))
+      if (pathSet.size === 0) return
+      setUpNextQueue((prev) => {
+        if (!prev.some((item) => pathSet.has(item?.path))) return prev
+        pushQueueUndoSnapshot(prev)
+        return prev.filter((item) => !pathSet.has(item?.path))
+      })
+    },
+    [pushQueueUndoSnapshot]
+  )
+
+  const clearUpNextQueueWithUndo = useCallback(() => {
+    setUpNextQueue((prev) => {
+      if (prev.length === 0) return prev
+      pushQueueUndoSnapshot(prev)
+      return []
+    })
+  }, [pushQueueUndoSnapshot])
+
+  const undoQueueMutation = useCallback(() => {
+    setQueueUndoStack((prev) => {
+      const [entry, ...rest] = prev
+      if (entry?.queue) setUpNextQueue(entry.queue)
+      return rest
+    })
   }, [])
 
   const applyLibraryFolderDelta = useCallback((payload) => {
@@ -2427,7 +2985,8 @@ export default function App() {
     const nextPlaybackHistory = remapPlaybackHistoryEntries(
       playbackHistoryRef.current,
       pathMap,
-      removedSet
+      removedSet,
+      normalizeHistoryMaxEntries(configRef.current?.historyMaxEntries)
     )
     playbackHistoryRef.current = nextPlaybackHistory
     setPlaybackHistory(nextPlaybackHistory)
@@ -2735,8 +3294,9 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    schedulePersistedState('config', 'nc_config', config, configStoreHydratedRef.current)
-  }, [config, schedulePersistedState])
+    if (!configStoreHydratedRef.current) return
+    persistStateImmediately('config', 'nc_config', config, true)
+  }, [config, persistStateImmediately])
 
   useEffect(() => {
     const root = document.documentElement
@@ -2889,12 +3449,13 @@ export default function App() {
     preampNode.current = preamp
 
     // Create Parametric EQ chain
-    const filters = config.eqBands.map((band) => {
+    const filters = effectiveEqBands.map((band) => {
       const filter = ctx.createBiquadFilter()
-      filter.type = band.type
+      const bandActive = config.useEQ && band.enabled !== false
+      filter.type = bandActive ? band.type : 'peaking'
       filter.frequency.value = band.freq
       filter.Q.value = clampBiquadQ(band.type, band.q)
-      filter.gain.value = config.useEQ && band.enabled ? band.gain : 0
+      filter.gain.value = bandActive ? band.gain : 0
       return filter
     })
     eqFilters.current = filters
@@ -2917,7 +3478,7 @@ export default function App() {
     if (useNativeEngineRef.current) {
       gain.gain.value = 0
     }
-  }, [config.useEQ, config.eqBands, config.preamp])
+  }, [config.useEQ, effectiveEqBands, config.preamp])
 
   useEffect(() => {
     // Update EQ Filters in real-time
@@ -2925,16 +3486,18 @@ export default function App() {
     if (preampNode.current) {
       preampNode.current.gain.setTargetAtTime(Math.pow(10, (config.preamp || 0) / 20), now, 0.05)
     }
-    if (eqFilters.current.length > 0 && eqFilters.current.length === config.eqBands.length) {
+    if (eqFilters.current.length > 0 && eqFilters.current.length === effectiveEqBands.length) {
       eqFilters.current.forEach((filter, i) => {
-        const band = config.eqBands[i]
-        if (filter.type !== band.type) filter.type = band.type
+        const band = effectiveEqBands[i]
+        const bandActive = config.useEQ && band.enabled !== false
+        const filterType = bandActive ? band.type : 'peaking'
+        if (filter.type !== filterType) filter.type = filterType
         filter.frequency.setTargetAtTime(band.freq, now, 0.05)
         filter.Q.setTargetAtTime(clampBiquadQ(band.type, band.q), now, 0.05)
-        filter.gain.setTargetAtTime(config.useEQ && band.enabled ? band.gain : 0, now, 0.05)
+        filter.gain.setTargetAtTime(bandActive ? band.gain : 0, now, 0.05)
       })
     }
-  }, [config.eqBands, config.useEQ, config.preamp])
+  }, [effectiveEqBands, config.useEQ, config.preamp])
 
   useEffect(() => {
     const ctx = audioContext.current
@@ -2942,7 +3505,7 @@ export default function App() {
     const analyser = analyserNode.current
     if (!ctx || !preamp || !analyser || !sourceNode.current) return
 
-    const bands = configRef.current.eqBands
+    const bands = effectiveEqBands
     if (eqFilters.current.length === bands.length) return
 
     preamp.disconnect()
@@ -2957,10 +3520,11 @@ export default function App() {
     const useEQ = configRef.current.useEQ
     const filters = bands.map((band) => {
       const filter = ctx.createBiquadFilter()
-      filter.type = band.type
+      const bandActive = useEQ && band.enabled !== false
+      filter.type = bandActive ? band.type : 'peaking'
       filter.frequency.value = band.freq
       filter.Q.value = clampBiquadQ(band.type, band.q)
-      filter.gain.value = useEQ && band.enabled ? band.gain : 0
+      filter.gain.value = bandActive ? band.gain : 0
       return filter
     })
     eqFilters.current = filters
@@ -2971,7 +3535,7 @@ export default function App() {
       lastNode = f
     })
     lastNode.connect(analyser)
-  }, [config.eqBands.length])
+  }, [effectiveEqBands])
 
   useEffect(() => {
     const p = config.audioOutputBufferProfile
@@ -3042,6 +3606,10 @@ export default function App() {
     if (volumeStoreHydratedRef.current && window.api?.appStateSet) {
       void window.api.appStateSet('volume', clampVolume(volume))
     }
+  }, [volume])
+
+  useEffect(() => {
+    if (volume > 0.001) remotePreviousVolumeRef.current = volume
   }, [volume])
 
   useEffect(() => {
@@ -3256,19 +3824,15 @@ export default function App() {
     if (useNativeEngineRef.current) {
       // Native mode: HTML audio at full volume so Web Audio analyser gets data,
       // but mute the final gain node so no sound comes from the Web Audio pipeline.
-      if (audioRef.current) {
-        audioRef.current.muted = config.audioExclusive === true || isAudioExclusive
-        audioRef.current.volume = config.audioExclusive === true || isAudioExclusive ? 0 : 1
-      }
+      if (audioRef.current) audioRef.current.volume = 1
       if (gainNode.current) gainNode.current.gain.value = 0
     } else {
       if (audioRef.current) {
-        audioRef.current.muted = false
         audioRef.current.volume = volume
       }
       if (gainNode.current) gainNode.current.gain.value = 1
     }
-  }, [volume, useNativeEngine, config.audioExclusive, isAudioExclusive])
+  }, [volume, useNativeEngine])
 
   // Native engine volume via main process (rAF while dragging to reduce IPC flood)
   useEffect(() => {
@@ -3289,9 +3853,11 @@ export default function App() {
     void window.api.setAudioEqConfig({
       useEQ: config.useEQ,
       preamp: config.preamp ?? 0,
-      eqBands: config.eqBands
+      eqBands: effectiveEqBands,
+      eqOversampling: config.eqOversampling || '2x',
+      eqOutputSafety: config.eqOutputSafety || 'soft'
     })
-  }, [config.useEQ, config.preamp, config.eqBands])
+  }, [config.useEQ, config.preamp, effectiveEqBands, config.eqOversampling, config.eqOutputSafety])
 
   const handleTrackEndedAdvance = useCallback(() => {
     const libraryPaths = getLibraryPlaybackPaths()
@@ -3457,7 +4023,10 @@ export default function App() {
         audio.addEventListener('loadeddata', once)
       }
 
+      const trackIsRemote = isRemoteTrackPath(track.path)
       if (useNativeEngineRef.current && window.api?.playAudio) {
+        const suppressNativeStart = nativeSilentTrackSwitchRef.current === track.path
+        if (suppressNativeStart) nativeSilentTrackSwitchRef.current = ''
         const now = Date.now()
         const d = nativePlayDedupeRef.current
         if (d.path === track.path && d.index === currentIndex && now - d.t < 120) {
@@ -3470,24 +4039,30 @@ export default function App() {
         d.path = track.path
         d.index = currentIndex
         d.t = now
-        audioRef.current.src = localPathToAudioSrc(track.path)
-        audioRef.current.load()
-        applyStartTimeToAudio(audioRef.current, restoreStartTime)
+        if (trackIsRemote) {
+          audioRef.current.pause()
+          audioRef.current.removeAttribute('src')
+          audioRef.current.src = ''
+        } else {
+          audioRef.current.src = localPathToAudioSrc(track.path)
+          audioRef.current.load()
+          applyStartTimeToAudio(audioRef.current, restoreStartTime)
+        }
         // Important: do NOT start native playback when UI is paused.
         // Otherwise a state refresh (e.g. after window resize/background) can restart from 0
         // while the play button still shows "paused".
         if (isPlaying) {
-          if (configRef.current.audioExclusive === true || isAudioExclusive) {
-            audioRef.current.muted = true
-            audioRef.current.pause()
-          } else {
-            audioRef.current.muted = false
+          if (!trackIsRemote) {
             audioRef.current.play().catch(() => {})
           }
           nativePlayJustCalledRef.current = true
-          window.api
-            .playAudio(track.path, restoreStartTime, playbackRateRef.current)
-            .catch((e) => console.error('[App] Native playAudio failed:', e))
+          if (suppressNativeStart) {
+            console.log('[App] Automix UI switched without restarting native audio')
+          } else {
+            window.api
+              .playAudio(track.path, restoreStartTime, playbackRateRef.current)
+              .catch((e) => console.error('[App] Native playAudio failed:', e))
+          }
         } else {
           nativePlayJustCalledRef.current = false
           audioRef.current.pause()
@@ -3496,11 +4071,24 @@ export default function App() {
         }
       } else {
         // Legacy path: play through HTML <audio> element
-        audioRef.current.src = localPathToAudioSrc(track.path)
-        audioRef.current.load()
-        applyStartTimeToAudio(audioRef.current, restoreStartTime)
-        if (isPlaying) {
-          audioRef.current.play().catch(console.error)
+        if (trackIsRemote) {
+          window.api?.remoteLibrary?.resolveStreamUrl?.(track.path).then((result) => {
+            const activePath = playlistRef.current[currentIndexRef.current]?.path
+            if (!result?.ok || !result.url || activePath !== track.path) return
+            audioRef.current.src = result.url
+            audioRef.current.load()
+            applyStartTimeToAudio(audioRef.current, restoreStartTime)
+            if (isPlaying) {
+              audioRef.current.play().catch(console.error)
+            }
+          })
+        } else {
+          audioRef.current.src = localPathToAudioSrc(track.path)
+          audioRef.current.load()
+          applyStartTimeToAudio(audioRef.current, restoreStartTime)
+          if (isPlaying) {
+            audioRef.current.play().catch(console.error)
+          }
         }
       }
 
@@ -3570,11 +4158,8 @@ export default function App() {
     if (window.api?.cast?.getStatus) {
       window.api.cast.getStatus().then((s) => {
         setLastCastStatus(s)
-        setCastDlnaListening(!!s.dlnaEnabled)
-        const dlnaActive =
-          s.dlnaEnabled &&
-          (s.transportState === 'PLAYING' || s.transportState === 'PAUSED_PLAYBACK')
-        setCastRemoteActive(dlnaActive)
+        setCastDlnaListening(!!(s.dlnaEnabled || s.airplayEnabled))
+        setCastRemoteActive(isCastSessionActive(s))
       })
     }
   }, [])
@@ -3583,10 +4168,8 @@ export default function App() {
     if (!window.api?.cast?.onStatus) return
     return window.api.cast.onStatus((s) => {
       setLastCastStatus(s)
-      setCastDlnaListening(!!s.dlnaEnabled)
-      const dlnaActive =
-        s.dlnaEnabled && (s.transportState === 'PLAYING' || s.transportState === 'PAUSED_PLAYBACK')
-      setCastRemoteActive(dlnaActive)
+      setCastDlnaListening(!!(s.dlnaEnabled || s.airplayEnabled))
+      setCastRemoteActive(isCastSessionActive(s))
     })
   }, [])
 
@@ -3647,21 +4230,13 @@ export default function App() {
   useEffect(() => {
     if (useNativeEngineRef.current && window.api) {
       if (isPlaying) {
-        if (config.audioExclusive === true || isAudioExclusive) {
-          audioRef.current.muted = true
-          audioRef.current.pause()
-          if (audioContext.current?.state === 'running') {
-            audioContext.current.suspend()
-          }
-        } else {
-          initAudioContext()
-          if (audioContext.current?.state === 'suspended') {
-            audioContext.current.resume()
-          }
-          // Keep HTML audio playing for waveform analyser + MV sync.
-          audioRef.current.muted = false
-          audioRef.current.play().catch(() => {})
+        initAudioContext()
+        if (audioContext.current?.state === 'suspended') {
+          audioContext.current.resume()
         }
+        // Keep HTML audio playing for waveform analyser + MV sync
+        // (gainNode is muted so no double audio; actual sound from native engine)
+        audioRef.current.play().catch(() => {})
         if (nativePlayJustCalledRef.current) {
           nativePlayJustCalledRef.current = false
         } else {
@@ -3678,16 +4253,17 @@ export default function App() {
         if (audioContext.current?.state === 'suspended') {
           audioContext.current.resume()
         }
-        audioRef.current.muted = false
         audioRef.current.play().catch(console.error)
       } else {
         audioRef.current.pause()
       }
     }
-  }, [isPlaying, initAudioContext, config.audioExclusive, isAudioExclusive])
+  }, [isPlaying, initAudioContext])
 
   const lyricsRef = useRef([])
   const lyricsRequestSeqRef = useRef(0)
+  const localLyricsBeforeCastRef = useRef(null)
+  const lastCastLyricsPathRef = useRef('')
   const scrollAreaRef = useRef(null)
   const sidebarPlaylistRef = useRef(null)
   const albumGridRef = useRef(null)
@@ -4064,6 +4640,130 @@ export default function App() {
     [searchMvWithCache]
   )
 
+  const searchAndApplyMvForTrack = useCallback(
+    async ({ filePath, title = '', artist = '', hints = {}, requestSeq = null }) => {
+      if (
+        !filePath ||
+        !window.api?.searchMVHandler ||
+        !(
+          configRef.current.enableMV ||
+          configRef.current.mvAsBackground ||
+          configRef.current.mvAsBackgroundMain
+        )
+      ) {
+        return
+      }
+
+      const isStaleRequest = () =>
+        requestSeq !== null && requestSeq !== undefined && requestSeq !== trackLoadSeqRef.current
+
+      setIsSearchingMV(true)
+      try {
+        let foundId = null
+        let mvSource = configRef.current.mvSource || 'bilibili'
+        const isPackagedFileProtocol =
+          typeof window !== 'undefined' && window.location?.protocol === 'file:'
+
+        let mvFromInfoJson = false
+        if (!isRemoteTrackPath(filePath)) {
+          const infoJson = await window.api.readInfoJsonHandler(filePath).catch(() => null)
+          if (isStaleRequest()) return
+          if (infoJson) {
+            if (infoJson.extractor && infoJson.extractor.toLowerCase().includes('youtube')) {
+              foundId = infoJson.id
+              mvSource = 'youtube'
+              mvFromInfoJson = true
+            } else if (
+              infoJson.extractor &&
+              infoJson.extractor.toLowerCase().includes('bilibili')
+            ) {
+              foundId = infoJson.id
+              mvSource = 'bilibili'
+              mvFromInfoJson = true
+            }
+          }
+        }
+
+        if (!foundId && hints?.mvOriginUrl) {
+          const parsed = extractVideoId(String(hints.mvOriginUrl))
+          if (parsed) {
+            foundId = parsed.id
+            mvSource = parsed.source
+          }
+        }
+
+        if (!foundId) {
+          const persistedMv = getMvOverrideForPath(filePath)
+          if (persistedMv?.id && persistedMv?.source) {
+            foundId = persistedMv.id
+            mvSource = persistedMv.source
+          }
+        }
+
+        if (!foundId && title) {
+          const cleanedTitle = cleanTitleForSearch(title)
+          const mvQuery =
+            mvSource === 'bilibili'
+              ? `${cleanedTitle} ${artist || ''} MV`.trim()
+              : `${cleanedTitle} ${artist || ''} official mv`.trim()
+          const searchCacheKey = `${filePath}::${mvSource}::${mvQuery.toLowerCase()}`
+          let searchResult = autoMvSearchByTrackRef.current.get(searchCacheKey)
+          if (searchResult === undefined) {
+            searchResult = await searchMvWithCache(mvQuery, mvSource)
+            autoMvSearchByTrackRef.current.set(searchCacheKey, searchResult || null)
+          }
+          if (isStaleRequest()) return
+          if (searchResult) {
+            if (typeof searchResult === 'string') {
+              foundId = searchResult
+            } else {
+              foundId = searchResult.id
+              if (searchResult.source) mvSource = searchResult.source
+              console.log(
+                `[MV] ${mvSource}: "${searchResult.title || '?'}" | id=${foundId}${searchResult.resolution ? ` | source_res=${searchResult.resolution}` : ''}`
+              )
+            }
+          }
+        }
+
+        if (
+          foundId &&
+          mvSource === 'youtube' &&
+          !mvFromInfoJson &&
+          isPackagedFileProtocol &&
+          configRef.current.autoFallbackToBilibili
+        ) {
+          const bilibiliId = await searchBilibiliMv(title || '', artist || '')
+          if (isStaleRequest()) return
+          if (bilibiliId) {
+            foundId = bilibiliId
+            mvSource = 'bilibili'
+            console.warn('[MV Fallback] Pre-fallback in packaged mode: YouTube -> Bilibili')
+          }
+        }
+
+        if (foundId) {
+          if (isStaleRequest()) return
+          setMvId((prev) =>
+            prev?.id === foundId && prev?.source === mvSource
+              ? prev
+              : { id: foundId, source: mvSource }
+          )
+          setMvOverrideForPath(filePath, { id: foundId, source: mvSource })
+        } else if (!isStaleRequest()) {
+          setMvId(null)
+          setBiliDirectStream(null)
+          setMvPlaybackQuality(null)
+        }
+      } catch (e) {
+        console.error('MV search error', e)
+      } finally {
+        setIsSearchingMV(false)
+      }
+    },
+    [searchBilibiliMv, searchMvWithCache]
+  )
+
   const retryFetchLyrics = async () => {
     const track = playlist[currentIndex]
     if (!track) return
@@ -4257,7 +4957,7 @@ export default function App() {
                   if (sName === normTitle) score += 50
                   else if (sName.includes(normTitle) && normTitle.length >= 2) score += 25
                   else if (normTitle.includes(sName) && sName.length >= 2) score += 15
-                  else score -= 20 
+                  else score -= 20
 
                   if (normArtist && sArtist.includes(normArtist)) score += 40
                   else if (normArtist && normArtist.includes(sArtist) && sArtist.length >= 2)
@@ -4282,7 +4982,7 @@ export default function App() {
 
                   return { s, score }
                 })
-                .filter(({ score }) => score > -30) 
+                .filter(({ score }) => score > -30)
                 .sort((a, b) => b.score - a.score)
 
               return scored.slice(0, 20).map(({ s, score }) => ({
@@ -4469,109 +5169,7 @@ export default function App() {
         configRef.current.mvAsBackground ||
         configRef.current.mvAsBackgroundMain)
     ) {
-      setIsSearchingMV(true)
-      ;(async () => {
-        try {
-          let foundId = null
-          let mvSource = configRef.current.mvSource || 'bilibili'
-          const isPackagedFileProtocol =
-            typeof window !== 'undefined' && window.location?.protocol === 'file:'
-
-          let mvFromInfoJson = false
-          const infoJson = await window.api.readInfoJsonHandler(filePath).catch(() => null)
-          if (isStaleRequest()) return
-          if (infoJson) {
-            if (infoJson.extractor && infoJson.extractor.toLowerCase().includes('youtube')) {
-              foundId = infoJson.id
-              mvSource = 'youtube'
-              mvFromInfoJson = true
-            } else if (
-              infoJson.extractor &&
-              infoJson.extractor.toLowerCase().includes('bilibili')
-            ) {
-              foundId = infoJson.id
-              mvSource = 'bilibili'
-              mvFromInfoJson = true
-            }
-          }
-
-          if (!foundId && hints?.mvOriginUrl) {
-            const parsed = extractVideoId(String(hints.mvOriginUrl))
-            if (parsed) {
-              foundId = parsed.id
-              mvSource = parsed.source
-            }
-          }
-
-          if (!foundId) {
-            const persistedMv = getMvOverrideForPath(filePath)
-            if (persistedMv?.id && persistedMv?.source) {
-              foundId = persistedMv.id
-              mvSource = persistedMv.source
-            }
-          }
-
-          if (!foundId && title) {
-            const cleanedTitle = cleanTitleForSearch(title)
-            const mvQuery =
-              mvSource === 'bilibili'
-                ? `${cleanedTitle} ${artist || ''} MV`.trim()
-                : `${cleanedTitle} ${artist || ''} official mv`.trim()
-            const searchCacheKey = `${filePath}::${mvSource}::${mvQuery.toLowerCase()}`
-            let searchResult = autoMvSearchByTrackRef.current.get(searchCacheKey)
-            if (searchResult === undefined) {
-              searchResult = await searchMvWithCache(mvQuery, mvSource)
-              autoMvSearchByTrackRef.current.set(searchCacheKey, searchResult || null)
-            }
-            if (isStaleRequest()) return
-            if (searchResult) {
-              if (typeof searchResult === 'string') {
-                foundId = searchResult
-              } else {
-                foundId = searchResult.id
-                if (searchResult.source) mvSource = searchResult.source
-                console.log(
-                  `[MV] ${mvSource}: "${searchResult.title || '?'}" | id=${foundId}${searchResult.resolution ? ` | source_res=${searchResult.resolution}` : ''}`
-                )
-              }
-            }
-          }
-
-          if (
-            foundId &&
-            mvSource === 'youtube' &&
-            !mvFromInfoJson &&
-            isPackagedFileProtocol &&
-            configRef.current.autoFallbackToBilibili
-          ) {
-            const bilibiliId = await searchBilibiliMv(title || '', artist || '')
-            if (isStaleRequest()) return
-            if (bilibiliId) {
-              foundId = bilibiliId
-              mvSource = 'bilibili'
-              console.warn('[MV Fallback] Pre-fallback in packaged mode: YouTube -> Bilibili')
-            }
-          }
-
-          if (foundId) {
-            if (isStaleRequest()) return
-            setMvId((prev) =>
-              prev?.id === foundId && prev?.source === mvSource
-                ? prev
-                : { id: foundId, source: mvSource }
-            )
-            setMvOverrideForPath(filePath, { id: foundId, source: mvSource })
-          } else if (!isStaleRequest()) {
-            setMvId(null)
-            setBiliDirectStream(null)
-            setMvPlaybackQuality(null)
-          }
-        } catch (e) {
-          console.error('MV search error', e)
-        } finally {
-          setIsSearchingMV(false)
-        }
-      })()
+      searchAndApplyMvForTrack({ filePath, title, artist, hints, requestSeq })
     }
 
     // 1. Saved manual pick for this file (Highest Priority)
@@ -4965,9 +5563,117 @@ export default function App() {
     cloudCoverFetchSeqRef.current += 1
     coverFailureFetchKeyRef.current = ''
     setCoverUrlTrackPath(filePath)
-    setCoverUrl(null)
     setFailedDisplayCoverUrl(null)
     setShareCardSnapshot(null)
+    setLyrics([])
+    setActiveLyricIndex(-1)
+    setLyricsMatchStatus('loading')
+    setLyricsSourceStatus({ kind: 'loading', detail: '', origin: '' })
+
+    const getFallbackMetadata = (entry = {}) => {
+      const fallbackFromTitle = parseArtistTitleFromName(entry.title || '')
+      const resolvedTitle =
+        fallbackFromTitle?.title ||
+        entry.title ||
+        stripExtension(filePath.split(/[\\/]/).pop() || '')
+      const resolvedArtist =
+        (entry.artist && entry.artist !== 'Unknown Artist' ? entry.artist : null) ||
+        entry.albumArtist ||
+        fallbackFromTitle?.artist ||
+        'Unknown Artist'
+      return { resolvedTitle, resolvedArtist }
+    }
+
+    const shouldRefreshCachedOggOpusCover = (entry) =>
+      /\.(opus|ogg)$/i.test(filePath) &&
+      entry?.coverChecked &&
+      typeof entry?.cover === 'string' &&
+      entry.coverExtractorVersion !== 2
+
+    const isCompleteCachedMeta = (entry) =>
+      !!(
+        entry?.coverChecked &&
+        entry?.bpmChecked &&
+        entry?.bpmDetectorVersion === BPM_DETECTOR_VERSION &&
+        entry?.mqaChecked &&
+        !shouldRefreshCachedOggOpusCover(entry) &&
+        entry.coverMemoryTrimmed !== true
+      )
+
+    const applyCachedMeta = (entry, { loadLyrics = true } = {}) => {
+      const { resolvedTitle, resolvedArtist } = getFallbackMetadata(entry)
+
+      setMetadata({
+        title: resolvedTitle,
+        artist: resolvedArtist,
+        album: entry.album || '',
+        albumArtist: entry.albumArtist || '',
+        trackNo: entry.trackNo ?? null,
+        discNo: entry.discNo ?? null
+      })
+      setTechnicalInfo((prev) => ({
+        ...prev,
+        sampleRate: entry.sampleRateHz || null,
+        bitrate: entry.bitrateKbps ? entry.bitrateKbps * 1000 : null,
+        channels: entry.channels || null,
+        bitDepth: entry.bitDepth || null,
+        isMqa: entry.isMqa === true,
+        codec: entry.codec || null,
+        originalBpm: entry.bpmMeasured ? entry.bpm || null : null
+      }))
+      setBpmDetectionState(entry.bpmMeasured ? 'done' : entry.bpmChecked ? 'failed' : 'idle')
+      if (typeof entry.duration === 'number' && entry.duration > 0) {
+        setDuration(entry.duration)
+      }
+      if (entry.cover) {
+        setCoverUrl(entry.cover)
+      } else {
+        setCoverUrl(null)
+        fetchCloudCover(resolvedTitle, resolvedArtist, requestSeq, {
+          album: entry.album || ''
+        })
+      }
+      if (loadLyrics) {
+        fetchLyrics(filePath, resolvedTitle, resolvedArtist, {
+          album: entry.album || '',
+          embeddedLyrics: entry.lyrics || '',
+          hasLyrics: trackHints.hasLyrics === true,
+          mvOriginUrl: trackHints.mvOriginUrl
+        })
+      }
+      return { resolvedTitle, resolvedArtist }
+    }
+
+    const memoryMeta = trackMetaMapRef.current?.[filePath]
+    if (isCompleteCachedMeta(memoryMeta)) {
+      applyCachedMeta(memoryMeta, { loadLyrics: !isRemoteTrackPath(filePath) })
+      return
+    }
+
+    if (isSubsonicTrackPath(filePath) || isWebDavTrackPath(filePath)) {
+      const playlistTrack = playlistRef.current.find((track) => track.path === filePath)
+      const remoteMeta = {
+        ...buildRemoteTrackMeta(playlistTrack || { path: filePath, info: trackHints }),
+        ...(memoryMeta || {})
+      }
+      setLyricsMatchStatus('none')
+      setLyricsSourceStatus({ kind: 'none', detail: '', origin: 'remote' })
+      const { resolvedTitle, resolvedArtist } = applyCachedMeta(remoteMeta, { loadLyrics: false })
+      searchAndApplyMvForTrack({
+        filePath,
+        title: resolvedTitle,
+        artist: resolvedArtist,
+        hints: {
+          album: remoteMeta.album || '',
+          mvOriginUrl: trackHints.mvOriginUrl
+        },
+        requestSeq
+      })
+      writeTrackMetaCache({ [filePath]: remoteMeta })
+      return
+    }
+
+    setCoverUrl(null)
     setMetadata({
       title: '',
       artist: '',
@@ -4976,10 +5682,6 @@ export default function App() {
       trackNo: null,
       discNo: null
     })
-    setLyrics([])
-    setActiveLyricIndex(-1)
-    setLyricsMatchStatus('loading')
-    setLyricsSourceStatus({ kind: 'loading', detail: '', origin: '' })
     setTechnicalInfo({
       sampleRate: null,
       originalBpm: null,
@@ -4992,8 +5694,13 @@ export default function App() {
     setBpmDetectionState('idle')
 
     const detectMeasuredBpm = async (baseMeta = {}) => {
-      if (baseMeta?.bpmMeasured && Number(baseMeta.bpm) > 0) {
+      const hasCurrentBpmVersion = baseMeta?.bpmDetectorVersion === BPM_DETECTOR_VERSION
+      if (hasCurrentBpmVersion && baseMeta?.bpmMeasured && Number(baseMeta.bpm) > 0) {
         setBpmDetectionState('done')
+        return
+      }
+      if (hasCurrentBpmVersion && baseMeta?.bpmChecked) {
+        setBpmDetectionState('failed')
         return
       }
       if (!window.api?.detectBpmHandler) {
@@ -5002,6 +5709,8 @@ export default function App() {
       }
 
       try {
+        await new Promise((resolve) => setTimeout(resolve, BPM_DETECTION_START_DELAY_MS))
+        if (trackLoadSeqRef.current !== requestSeq) return
         setBpmDetectionState('detecting')
         const result = await window.api.detectBpmHandler(filePath)
         if (trackLoadSeqRef.current !== requestSeq) return
@@ -5013,7 +5722,9 @@ export default function App() {
               ...baseMeta,
               bpm: null,
               bpmChecked: true,
-              bpmMeasured: false
+              bpmMeasured: false,
+              bpmDetectorVersion: BPM_DETECTOR_VERSION,
+              bpmBackend: result?.backend || null
             }
           })
           return
@@ -5024,7 +5735,10 @@ export default function App() {
           ...baseMeta,
           bpm: measuredBpm,
           bpmChecked: true,
-          bpmMeasured: true
+          bpmMeasured: true,
+          bpmDetectorVersion: BPM_DETECTOR_VERSION,
+          bpmBackend: result?.backend || null,
+          bpmConfidence: Number(result?.confidence) || 0
         }
 
         setTechnicalInfo((prev) => ({
@@ -5050,65 +5764,8 @@ export default function App() {
       const cachedMeta = (await readTrackMetaCache([filePath]))[filePath]
       if (trackLoadSeqRef.current !== requestSeq) return
 
-      const shouldRefreshOggOpusCover =
-        /\.(opus|ogg)$/i.test(filePath) &&
-        cachedMeta?.coverChecked &&
-        typeof cachedMeta?.cover === 'string' &&
-        cachedMeta.coverExtractorVersion !== 2
-
-      if (
-        cachedMeta?.coverChecked &&
-        cachedMeta?.bpmChecked &&
-        cachedMeta?.mqaChecked &&
-        !shouldRefreshOggOpusCover
-      ) {
-        const fallbackFromTitle = parseArtistTitleFromName(cachedMeta.title || '')
-        const resolvedTitle =
-          fallbackFromTitle?.title ||
-          cachedMeta.title ||
-          stripExtension(filePath.split(/[\\/]/).pop() || '')
-        const resolvedArtist =
-          (cachedMeta.artist && cachedMeta.artist !== 'Unknown Artist'
-            ? cachedMeta.artist
-            : null) ||
-          cachedMeta.albumArtist ||
-          fallbackFromTitle?.artist ||
-          'Unknown Artist'
-
-        setMetadata({
-          title: resolvedTitle,
-          artist: resolvedArtist,
-          album: cachedMeta.album || '',
-          albumArtist: cachedMeta.albumArtist || '',
-          trackNo: cachedMeta.trackNo ?? null,
-          discNo: cachedMeta.discNo ?? null
-        })
-        setTechnicalInfo((prev) => ({
-          ...prev,
-          sampleRate: cachedMeta.sampleRateHz || null,
-          bitrate: cachedMeta.bitrateKbps ? cachedMeta.bitrateKbps * 1000 : null,
-          channels: cachedMeta.channels || null,
-          bitDepth: cachedMeta.bitDepth || null,
-          isMqa: cachedMeta.isMqa === true,
-          codec: cachedMeta.codec || null,
-          originalBpm: cachedMeta.bpmMeasured ? cachedMeta.bpm || null : null
-        }))
-        if (typeof cachedMeta.duration === 'number' && cachedMeta.duration > 0) {
-          setDuration(cachedMeta.duration)
-        }
-        if (cachedMeta.cover) {
-          setCoverUrl(cachedMeta.cover)
-        } else {
-          fetchCloudCover(resolvedTitle, resolvedArtist, requestSeq, {
-            album: cachedMeta.album || ''
-          })
-        }
-        fetchLyrics(filePath, resolvedTitle, resolvedArtist, {
-          album: cachedMeta.album || '',
-          embeddedLyrics: cachedMeta.lyrics || '',
-          hasLyrics: trackHints.hasLyrics === true,
-          mvOriginUrl: trackHints.mvOriginUrl
-        })
+      if (isCompleteCachedMeta(cachedMeta)) {
+        applyCachedMeta(cachedMeta)
         detectMeasuredBpm(cachedMeta)
       } else {
         // 1. Get Extended Metadata from Main Process (Music-Metadata)
@@ -5392,14 +6049,7 @@ export default function App() {
 
           if (useNativeEngineRef.current && window.api?.playAudio) {
             if (wasPlayingBeforeSave) {
-              if (configRef.current.audioExclusive === true || isAudioExclusive) {
-                if (audioRef.current) {
-                  audioRef.current.muted = true
-                  audioRef.current.pause()
-                }
-              } else {
-                audioRef.current?.play?.().catch(() => {})
-              }
+              audioRef.current?.play?.().catch(() => {})
               await window.api.playAudio(draft.path, savedPlaybackTime, playbackRateRef.current)
             } else {
               await window.api.pauseAudio?.().catch(() => {})
@@ -6003,8 +6653,6 @@ export default function App() {
     setPlaylist([])
     setActivePlaybackContext(createPlaybackContext('library', 'library', []))
     setUpNextQueue([])
-    playbackHistoryRef.current = []
-    setPlaybackHistory([])
     setCurrentIndex(-1)
     setIsPlaying(false)
     setDuration(0)
@@ -6023,6 +6671,10 @@ export default function App() {
 
   const togglePlay = useCallback(async () => {
     const s = lastCastStatus
+    if (isCastSessionActive(s) && s?.castKind === 'airplay') {
+      await window.api?.cast?.airplayCommand?.(s.transportState === 'PLAYING' ? 'pause' : 'play')
+      return
+    }
     if (s?.dlnaEnabled && s?.currentUri && window.api?.pauseAudio && window.api?.playAudio) {
       if (s.transportState === 'PLAYING') {
         await window.api.pauseAudio()
@@ -6088,13 +6740,15 @@ export default function App() {
             }
           }
         }
-        const { currentSeqIndex, paths } = getPlaybackSequenceSnapshot()
+        const { currentPath, currentSeqIndex, paths } = getPlaybackSequenceSnapshot()
         if (playMode === 'shuffle') {
-          let nextIdx = Math.floor(Math.random() * playlist.length)
-          if (nextIdx === currentIndex && playlist.length > 1) {
-            nextIdx = (nextIdx + 1) % playlist.length
+          if (paths.length === 0) return
+          let nextPath = paths[Math.floor(Math.random() * paths.length)]
+          if (nextPath === currentPath && paths.length > 1) {
+            nextPath = paths[(currentSeqIndex + 1 + paths.length) % paths.length]
           }
-          setCurrentIndex(nextIdx)
+          const nextIdx = playlistRef.current.findIndex((track) => track.path === nextPath)
+          if (nextIdx !== -1) setCurrentIndex(nextIdx)
         } else if (paths.length > 0) {
           const baseIndex = currentSeqIndex >= 0 ? currentSeqIndex : 0
           const nextPath = paths[(baseIndex + 1) % paths.length]
@@ -6116,7 +6770,7 @@ export default function App() {
     ]
   )
 
-  const jumpToPlaybackHistory = useCallback((targetHistoryIndex) => {
+  const jumpToHistoryCursor = useCallback((targetHistoryIndex, options = {}) => {
     const historySnapshot = playbackHistoryRef.current
     if (!Array.isArray(historySnapshot) || historySnapshot.length === 0) return false
 
@@ -6127,42 +6781,63 @@ export default function App() {
         historySnapshot.length - 1
       )
     )
+    const candidatePath = historySnapshot[boundedIndex]?.path
+    const nextIdx = playlistRef.current.findIndex((track) => track.path === candidatePath)
 
-    for (let idx = boundedIndex; idx >= 0; idx -= 1) {
-      const candidatePath = historySnapshot[idx]?.path
-      const nextIdx = playlistRef.current.findIndex((track) => track.path === candidatePath)
-      if (nextIdx === -1) continue
-
-      historyNavigationRef.current = true
-      setCurrentIndex(nextIdx)
-      setIsPlaying(true)
-      return true
+    if (nextIdx === -1) {
+      console.warn('[history] entry is not in the current playlist:', candidatePath)
+      return false
     }
 
-    return false
+    historyNavigationRef.current = true
+    setCurrentIndex(nextIdx)
+    setIsPlaying(true)
+    if (options.consume) {
+      setPlaybackHistory((prev) => {
+        const next = prev.slice(0, boundedIndex)
+        playbackHistoryRef.current = next
+        return next
+      })
+    }
+    return true
   }, [])
 
   const goBackInPlaybackHistory = useCallback(() => {
-    return jumpToPlaybackHistory(playbackHistoryRef.current.length - 1)
-  }, [jumpToPlaybackHistory])
+    return jumpToHistoryCursor(playbackHistoryRef.current.length - 1, { consume: true })
+  }, [jumpToHistoryCursor])
 
   const clearPlaybackHistory = useCallback(() => {
     playbackHistoryRef.current = []
     setPlaybackHistory([])
   }, [])
 
-  const handleHistoryMenuBack = useCallback(() => {
+  const removePlaybackHistoryEntry = useCallback((entryOrIndex) => {
+    const targetIndex =
+      typeof entryOrIndex === 'number' ? entryOrIndex : Number(entryOrIndex?.historyIndex)
+    if (!Number.isInteger(targetIndex) || targetIndex < 0) return
+
+    setPlaybackHistory((prev) => {
+      if (targetIndex >= prev.length) return prev
+      const next = prev.filter((_, index) => index !== targetIndex)
+      playbackHistoryRef.current = next
+      return next
+    })
+  }, [])
+
+  const handleHistoryBack = useCallback(() => {
     goBackInPlaybackHistory()
   }, [goBackInPlaybackHistory])
 
-  const handleHistoryMenuJump = useCallback(
-    (historyIndex) => {
-      jumpToPlaybackHistory(historyIndex)
+  const handleHistoryJump = useCallback(
+    (entryOrIndex) => {
+      const historyIndex =
+        typeof entryOrIndex === 'number' ? entryOrIndex : Number(entryOrIndex?.historyIndex)
+      return jumpToHistoryCursor(historyIndex)
     },
-    [jumpToPlaybackHistory]
+    [jumpToHistoryCursor]
   )
 
-  const handleHistoryMenuClear = useCallback(() => {
+  const handleHistoryClear = useCallback(() => {
     clearPlaybackHistory()
   }, [clearPlaybackHistory])
 
@@ -6235,6 +6910,27 @@ export default function App() {
     })
   }, [])
 
+  useEffect(() => {
+    if (!window.api?.onAutomixTrackChanged) return undefined
+    return window.api.onAutomixTrackChanged((nextPath) => {
+      if (!nextPath) return
+      const nextIdx = playlistRef.current.findIndex((t) => t.path === nextPath)
+      if (nextIdx === -1) return
+      nativeSilentTrackSwitchRef.current = nextPath
+      historyNavigationRef.current = false
+      crossfadeStateRef.current = {
+        active: false,
+        sourcePath: '',
+        targetPath: '',
+        pendingFadeIn: false
+      }
+      setUpNextQueue((prev) => prev.filter((item) => item?.path !== nextPath))
+      setCurrentTime(0)
+      setCurrentIndex(nextIdx)
+      setIsPlaying(true)
+    })
+  }, [])
+
   const handlePrev = useCallback(
     (options = {}) => {
       if (!options.preserveFade) {
@@ -6294,58 +6990,65 @@ export default function App() {
   }, [cancelCrossfade, config.crossfadeEnabled])
 
   useEffect(() => {
-    if (
-      !useNativeEngineRef.current ||
-      !window.api?.audioStartFadeOut ||
-      !window.api?.audioStartFadeIn
-    )
-      return
+    if (!useNativeEngineRef.current || !window.api?.audioStartAutomixNext) return
     if (!config.crossfadeEnabled || !isPlaying || playlist.length < 2) return
+    if (config.gaplessEnabled || playbackRateRef.current !== 1) return
     const currentTrackPath = playlist[currentIndex]?.path || ''
-    if (!currentTrackPath || crossfadeStateRef.current.active) return
+    const targetPath = nextTrack?.path || ''
+    if (!currentTrackPath || !targetPath || targetPath === currentTrackPath) return
+    if (
+      crossfadeStateRef.current.active &&
+      crossfadeStateRef.current.sourcePath === currentTrackPath &&
+      crossfadeStateRef.current.targetPath === targetPath
+    ) {
+      return
+    }
     if (!(duration > 0) || !(currentTime >= 0)) return
 
     const remainingSec = duration - currentTime
-    if (remainingSec > config.crossfadeDuration || remainingSec < 0) return
+    const baseDurationSec = Math.max(1, Math.min(12, Number(config.crossfadeDuration || 6)))
+    const trackBoundedDuration = Math.max(
+      1,
+      Math.min(baseDurationSec, duration * 0.18, Math.max(1, duration - 1))
+    )
+    const primingLeadSec = 0.65
+    if (remainingSec > trackBoundedDuration + primingLeadSec || remainingSec < 0) return
+
+    const transitionSec = Math.max(1, Math.min(trackBoundedDuration, remainingSec || 1))
+    const leadSec = Math.max(0, Math.min(primingLeadSec, remainingSec - transitionSec))
 
     crossfadeStateRef.current = {
       active: true,
       sourcePath: currentTrackPath,
-      pendingFadeIn: true
+      targetPath,
+      pendingFadeIn: false
     }
 
-    const fadeMs = Math.max(1000, Number(config.crossfadeDuration || 3) * 1000)
-    void window.api.audioStartFadeOut(fadeMs).catch(() => {})
-    // Do NOT call handleNext() here -let the track end naturally.
-    // The audio stream is single-instance; calling play() for the next track
-    // immediately kills the current stream and the fade-out never plays through.
-    // Instead, track-ended fires when the audio finishes (now at ~0 volume),
-    // handleTrackEndedAdvance() runs normally, and the second useEffect below
-    // picks up pendingFadeIn and calls audioStartFadeIn on the new track.
+    void window.api
+      .audioStartAutomixNext(targetPath, {
+        durationSec: transitionSec,
+        leadSec
+      })
+      .then((result) => {
+        if (!result?.ok && crossfadeStateRef.current.targetPath === targetPath) {
+          resetCrossfadeState()
+        }
+      })
+      .catch(() => {
+        if (crossfadeStateRef.current.targetPath === targetPath) resetCrossfadeState()
+      })
   }, [
     config.crossfadeDuration,
     config.crossfadeEnabled,
+    config.gaplessEnabled,
     currentIndex,
     currentTime,
     duration,
     isPlaying,
-    playlist
+    nextTrack?.path,
+    playlist,
+    resetCrossfadeState
   ])
-
-  useEffect(() => {
-    if (!useNativeEngineRef.current || !window.api?.audioStartFadeIn) return
-    const state = crossfadeStateRef.current
-    if (!state.pendingFadeIn) return
-
-    const currentTrackPath = playlist[currentIndex]?.path || ''
-    if (!currentTrackPath || currentTrackPath === state.sourcePath) return
-
-    state.pendingFadeIn = false
-    state.active = false
-
-    const fadeMs = Math.max(1000, Number(config.crossfadeDuration || 3) * 1000)
-    void window.api.audioStartFadeIn(fadeMs).catch(() => {})
-  }, [config.crossfadeDuration, currentIndex, playlist])
 
   const formatTime = (time) => {
     if (isNaN(time)) return '0:00'
@@ -6674,7 +7377,7 @@ export default function App() {
   }, [biliDirectStream?.videoUrl, getMvSyncTime, isPlaying, mvId?.id, mvId?.source])
 
   const handleSeek = (e) => {
-    if (lastCastStatus?.dlnaEnabled && lastCastStatus?.currentUri) return
+    if (isCastSessionActive(lastCastStatus)) return
     const val = parseFloat(e.target.value)
     if (!Number.isFinite(val)) return
 
@@ -6703,7 +7406,7 @@ export default function App() {
       isProgressDraggingRef.current = false
       setIsProgressDragging(false)
 
-      if (lastCastStatus?.dlnaEnabled && lastCastStatus?.currentUri) {
+      if (isCastSessionActive(lastCastStatus)) {
         setIsSeeking(false)
         return
       }
@@ -6731,7 +7434,33 @@ export default function App() {
         setIsSeeking(false)
       }
     },
-    [currentIndex, lastCastStatus?.currentUri, lastCastStatus?.dlnaEnabled, playlist, syncYTVideo]
+    [currentIndex, lastCastStatus, playlist, syncYTVideo]
+  )
+
+  const seekToPosition = useCallback(
+    (positionSec) => {
+      if (isCastSessionActive(lastCastStatus)) return
+      const val = Number(positionSec)
+      if (!Number.isFinite(val)) return
+      const nextTime = Math.max(0, val)
+      setIsSeeking(true)
+      setCurrentTime(nextTime)
+      syncYTVideo(nextTime)
+
+      const trackPath = playlist[currentIndex]?.path
+      if (seekTimerRef.current) clearTimeout(seekTimerRef.current)
+      if (useNativeEngineRef.current && window.api?.playAudio && trackPath) {
+        if (audioRef.current) audioRef.current.currentTime = nextTime
+        window.api.playAudio(trackPath, nextTime, playbackRateRef.current).catch(console.error)
+        seekTimerRef.current = setTimeout(() => setIsSeeking(false), 350)
+      } else if (audioRef.current) {
+        audioRef.current.currentTime = nextTime
+        seekTimerRef.current = setTimeout(() => setIsSeeking(false), 120)
+      } else {
+        setIsSeeking(false)
+      }
+    },
+    [currentIndex, lastCastStatus, playlist, syncYTVideo]
   )
 
   useEffect(() => {
@@ -7026,16 +7755,19 @@ export default function App() {
     t
   ])
 
-  const dlnaUiOn = useMemo(
-    () => !!(lastCastStatus?.dlnaEnabled && lastCastStatus?.currentUri),
-    [lastCastStatus]
-  )
+  const dlnaUiOn = useMemo(() => isCastSessionActive(lastCastStatus), [lastCastStatus])
+  const castPillLabel = useMemo(() => lastCastStatus?.castLabel || 'DLNA', [lastCastStatus])
+  const castVirtualTrack = useMemo(() => buildCastVirtualTrack(lastCastStatus), [lastCastStatus])
 
   const displayMainTitle = useMemo(() => {
     const s = lastCastStatus
-    if (s?.dlnaEnabled && s?.currentUri) {
-      const title = (s.dlnaMeta?.title || '').trim()
-      return title || t('dlna.castTitle')
+    if (isCastSessionActive(s)) {
+      const meta = getCastStatusMeta(s)
+      const title = (meta.title || '').trim()
+      const trustedTitle = s?.castKind !== 'airplay' || s?.castMetadataTrusted
+      return (
+        (trustedTitle ? title : '') || (s?.castKind === 'airplay' ? 'AirPlay' : t('dlna.castTitle'))
+      )
     }
     if (currentDisplayOverride?.title) return currentDisplayOverride.title
     if (coverUrlTrackPath === currentTrack?.path && metadata.title) return metadata.title
@@ -7045,17 +7777,21 @@ export default function App() {
 
   const displayMainArtist = useMemo(() => {
     const s = lastCastStatus
-    if (s?.dlnaEnabled && s?.currentUri) {
-      const a = (s.dlnaMeta?.artist || '').trim()
-      return a || t('dlna.networkMedia')
+    if (isCastSessionActive(s)) {
+      const meta = getCastStatusMeta(s)
+      const a = (meta.artist || '').trim()
+      return (
+        a || (s?.castKind === 'airplay' ? t('castDrawer.airplayShort') : t('dlna.networkMedia'))
+      )
     }
     return resolvedDisplayArtist
   }, [lastCastStatus, resolvedDisplayArtist, t])
 
   const displayMainAlbum = useMemo(() => {
     const s = lastCastStatus
-    if (s?.dlnaEnabled && s?.currentUri) {
-      return (s.dlnaMeta?.album || '').trim() || 'Unknown Album'
+    if (isCastSessionActive(s)) {
+      const meta = getCastStatusMeta(s)
+      return (meta.album || '').trim() || 'Unknown Album'
     }
     if (currentDisplayOverride?.album) return currentDisplayOverride.album
     if (coverUrlTrackPath === currentTrack?.path && metadata.album) return metadata.album
@@ -7064,9 +7800,11 @@ export default function App() {
 
   const displayMainCoverUrl = useMemo(() => {
     const s = lastCastStatus
-    if (s?.dlnaEnabled && s?.currentUri) {
-      const u = (s.dlnaMeta?.albumArtUrl || '').trim()
-      return u || null
+    if (isCastSessionActive(s)) {
+      const meta = getCastStatusMeta(s)
+      const u = (meta.albumArtUrl || '').trim()
+      const cover = (meta.cover || meta.artworkUrl || '').trim()
+      return cover || u || null
     }
     if (currentDisplayOverride?.cover) return currentDisplayOverride.cover
     if (!currentTrack?.path) return null
@@ -7106,6 +7844,288 @@ export default function App() {
     return displayMainCoverUrl === failedDisplayCoverUrl ? null : displayMainCoverUrl
   }, [displayMainCoverUrl, failedDisplayCoverUrl])
 
+  const castLyricsIdentity = useMemo(() => {
+    if (!isCastSessionActive(lastCastStatus)) return ''
+    return [
+      castVirtualTrack?.source || lastCastStatus?.castKind || 'cast',
+      castVirtualTrack?.path || lastCastStatus?.currentUri || 'stream',
+      castVirtualTrack?.metadataTrusted ? 'trusted' : 'untrusted',
+      castVirtualTrack?.title || '',
+      castVirtualTrack?.artist || '',
+      castVirtualTrack?.album || ''
+    ].join('::')
+  }, [lastCastStatus, castVirtualTrack])
+
+  useEffect(() => {
+    if (!isCastSessionActive(lastCastStatus)) {
+      if (localLyricsBeforeCastRef.current && lastCastLyricsPathRef.current) {
+        const snapshot = localLyricsBeforeCastRef.current
+        lyricsRequestSeqRef.current += 1
+        setLyrics(snapshot.lyrics || [])
+        setActiveLyricIndex(snapshot.activeLyricIndex ?? -1)
+        setLyricsMatchStatus(snapshot.lyricsMatchStatus || 'idle')
+        setLyricsSourceStatus(
+          snapshot.lyricsSourceStatus || { kind: 'idle', detail: '', origin: '' }
+        )
+        localLyricsBeforeCastRef.current = null
+        lastCastLyricsPathRef.current = ''
+      }
+      return
+    }
+
+    const identity = castLyricsIdentity || `cast://${lastCastStatus?.castKind || 'cast'}`
+    if (lastCastLyricsPathRef.current === identity) return
+    if (!lastCastLyricsPathRef.current) {
+      localLyricsBeforeCastRef.current = {
+        lyrics,
+        activeLyricIndex,
+        lyricsMatchStatus,
+        lyricsSourceStatus
+      }
+    }
+    lastCastLyricsPathRef.current = identity
+
+    const requestSeq = ++lyricsRequestSeqRef.current
+    const isStaleRequest = () => requestSeq !== lyricsRequestSeqRef.current
+    setLyricsCandidateItems([])
+    setLyricsCandidateLoading(false)
+    setLyrics([])
+    setActiveLyricIndex(-1)
+    setLyricsRenderTime(
+      typeof lastCastStatus?.positionSec === 'number' ? lastCastStatus.positionSec : 0
+    )
+
+    if (!castVirtualTrack?.metadataTrusted || !castVirtualTrack?.title) {
+      setLyricsMatchStatus('idle')
+      setLyricsSourceStatus({ kind: 'idle', detail: '', origin: '' })
+      return
+    }
+
+    const savedOverride = getLyricsOverrideForPath(castVirtualTrack.path)
+    if (savedOverride?.raw) {
+      const parsedOv = parseAnyLyrics(savedOverride.raw)
+      if (parsedOv.length > 0) {
+        setLyrics(parsedOv)
+        setLyricsMatchStatus('matched')
+        setLyricsSourceStatus({
+          kind: 'cache',
+          detail: savedOverride.source || 'manual',
+          origin: savedOverride.origin || castVirtualTrack.source || ''
+        })
+        return
+      }
+    }
+
+    let cancelled = false
+    setLyricsMatchStatus('loading')
+    setLyricsSourceStatus({ kind: 'loading', detail: '', origin: castVirtualTrack.source || '' })
+    ;(async () => {
+      try {
+        const title = castVirtualTrack.title
+        const titleVariants = buildLyricTitleVariants(title)
+        if (titleVariants.length === 0) throw new Error('empty cast lyrics title')
+        const artistRaw = (castVirtualTrack.artist || '').trim()
+        const artistClean = cleanArtistForLyrics(artistRaw)
+        const artistCandidates = [...extractParenArtistHints(title), artistClean, artistRaw].filter(
+          Boolean
+        )
+        const audioDur =
+          Number(lastCastStatus?.trackDurationSec || lastCastStatus?.airplayDurationSec) || 0
+
+        const applyLrcLibPayload = (payload) => {
+          const raw = pickLyricsFromLrcLibResult(payload, audioDur, {
+            titleCandidates: titleVariants,
+            rawTitle: title,
+            artistCandidates
+          })
+          const parsed = parseAnyLyrics(raw)
+          if (parsed.length === 0 || cancelled || isStaleRequest()) return false
+          setLyrics(parsed)
+          setLyricsMatchStatus('matched')
+          setActiveLyricIndex(-1)
+          setLyricsSourceStatus({
+            kind: 'lrclib',
+            detail: '',
+            origin: castVirtualTrack.source || ''
+          })
+          if (raw && String(raw).trim()) {
+            setLyricsOverrideForPath(castVirtualTrack.path, raw, {
+              source: 'lrclib',
+              origin: castVirtualTrack.source || ''
+            })
+          }
+          return true
+        }
+
+        const tryPayload = async (url) => {
+          const payload = await requestLrcLib(url)
+          if (cancelled || isStaleRequest()) return true
+          return applyLrcLibPayload(payload)
+        }
+
+        const tried = new Set()
+        const tryUrl = (url) => {
+          if (!url || tried.has(url)) return Promise.resolve(false)
+          tried.add(url)
+          return tryPayload(url)
+        }
+
+        for (const variant of titleVariants) {
+          const artist = artistCandidates[0] || ''
+          const params = new URLSearchParams({ track_name: variant })
+          if (artist) params.set('artist_name', artist)
+          if (castVirtualTrack.album) params.set('album_name', castVirtualTrack.album)
+          if (await tryUrl(`https://lrclib.net/api/get?${params.toString()}`)) return
+          if (artist) {
+            const q = `${variant} ${artist}`.trim()
+            if (await tryUrl(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`)) return
+          }
+          if (await tryUrl(`https://lrclib.net/api/search?q=${encodeURIComponent(variant)}`)) return
+        }
+
+        if (!cancelled && !isStaleRequest()) {
+          setLyrics([{ time: 0, text: i18n.t('lyrics.none') }])
+          setLyricsMatchStatus('none')
+          setLyricsSourceStatus({ kind: 'none', detail: '', origin: castVirtualTrack.source || '' })
+        }
+      } catch (e) {
+        if (!cancelled && !isStaleRequest()) {
+          console.error('Cast lyrics error', e)
+          setLyrics([{ time: 0, text: i18n.t('lyrics.none') }])
+          setLyricsMatchStatus('none')
+          setLyricsSourceStatus({ kind: 'none', detail: '', origin: castVirtualTrack.source || '' })
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [castLyricsIdentity])
+
+  const castMvIdentity = useMemo(() => {
+    if (!castVirtualTrack?.metadataTrusted || !castVirtualTrack.title) return ''
+    return [
+      castVirtualTrack.source,
+      castVirtualTrack.title,
+      castVirtualTrack.artist,
+      castVirtualTrack.album
+    ].join('::')
+  }, [castVirtualTrack])
+
+  useEffect(() => {
+    if (!isCastSessionActive(lastCastStatus)) {
+      if (
+        localMvBeforeCastRef.current &&
+        lastResolvedMvTrackPathRef.current.startsWith('cast://')
+      ) {
+        const snapshot = localMvBeforeCastRef.current
+        setMvId(snapshot.mvId || null)
+        setBiliDirectStream(snapshot.biliDirectStream || null)
+        setMvPlaybackQuality(snapshot.mvPlaybackQuality || null)
+        lastResolvedMvTrackPathRef.current = currentTrackPath || ''
+        localMvBeforeCastRef.current = null
+      }
+      return
+    }
+    const identity = castVirtualTrack?.path || `cast://${lastCastStatus?.castKind || 'cast'}`
+    if (lastResolvedMvTrackPathRef.current === identity) return
+    if (!lastResolvedMvTrackPathRef.current.startsWith('cast://')) {
+      localMvBeforeCastRef.current = { mvId, biliDirectStream, mvPlaybackQuality }
+    }
+    lastResolvedMvTrackPathRef.current = identity
+    setYoutubeMvLoginHint(false)
+    setMvId(null)
+    setBiliDirectStream(null)
+    setMvPlaybackQuality(null)
+  }, [
+    lastCastStatus,
+    castVirtualTrack?.path,
+    currentTrackPath,
+    mvId,
+    biliDirectStream,
+    mvPlaybackQuality
+  ])
+
+  useEffect(() => {
+    if (!castMvIdentity || !castVirtualTrack?.metadataTrusted) return
+    if (
+      !window.api?.searchMVHandler ||
+      !(config.enableMV || config.mvAsBackground || config.mvAsBackgroundMain)
+    ) {
+      return
+    }
+
+    let cancelled = false
+    const mvSource = config.mvSource || 'bilibili'
+    const title = castVirtualTrack.title
+    const artist = castVirtualTrack.artist
+    const cleanedTitle = cleanTitleForSearch(title)
+    const mvQuery =
+      mvSource === 'bilibili'
+        ? `${cleanedTitle} ${artist || ''} MV`.trim()
+        : `${cleanedTitle} ${artist || ''} official mv`.trim()
+    const searchCacheKey = `${castVirtualTrack.path}::${mvSource}::${mvQuery.toLowerCase()}`
+
+    setIsSearchingMV(true)
+    ;(async () => {
+      try {
+        const persistedMv = getMvOverrideForPath(castVirtualTrack.path)
+        if (persistedMv?.id && persistedMv?.source) {
+          if (!cancelled) {
+            setMvId((prev) =>
+              prev?.id === persistedMv.id && prev?.source === persistedMv.source
+                ? prev
+                : { id: persistedMv.id, source: persistedMv.source }
+            )
+          }
+          return
+        }
+
+        let searchResult = autoMvSearchByTrackRef.current.get(searchCacheKey)
+        if (searchResult === undefined) {
+          searchResult = await searchMvWithCache(mvQuery, mvSource)
+          autoMvSearchByTrackRef.current.set(searchCacheKey, searchResult || null)
+        }
+        if (cancelled) return
+        if (searchResult) {
+          const foundId = typeof searchResult === 'string' ? searchResult : searchResult.id
+          const foundSource =
+            typeof searchResult === 'object' && searchResult?.source
+              ? searchResult.source
+              : mvSource
+          if (foundId) {
+            setMvId((prev) =>
+              prev?.id === foundId && prev?.source === foundSource
+                ? prev
+                : { id: foundId, source: foundSource }
+            )
+            return
+          }
+        }
+        setMvId(null)
+        setBiliDirectStream(null)
+        setMvPlaybackQuality(null)
+      } catch (e) {
+        console.error('Cast MV search error', e)
+      } finally {
+        if (!cancelled) setIsSearchingMV(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    castMvIdentity,
+    castVirtualTrack,
+    config.enableMV,
+    config.mvAsBackground,
+    config.mvAsBackgroundMain,
+    config.mvSource,
+    searchMvWithCache
+  ])
+
   const customWallpaperUrl = useMemo(() => {
     if (!config.customBgPath) return ''
     return (
@@ -7117,7 +8137,7 @@ export default function App() {
   useEffect(() => {
     if (!currentTrack?.path || !displaySafeCoverUrl) return
     if (
-      !lastCastStatus?.dlnaEnabled &&
+      !isCastSessionActive(lastCastStatus) &&
       !currentDisplayOverride?.cover &&
       coverUrlTrackPath !== currentTrack.path
     ) {
@@ -7181,6 +8201,11 @@ export default function App() {
         if (prev[albumName]) return prev
         return { ...prev, [albumName]: displaySafeCoverUrl }
       })
+      persistAlbumCoverCacheItems({
+        album: albumName,
+        artist: albumArtist || artist || '',
+        cover: displaySafeCoverUrl
+      })
     }
 
     writeTrackMetaCache({ [currentTrack.path]: coverEntry })
@@ -7198,6 +8223,7 @@ export default function App() {
     metadata.discNo,
     metadata.title,
     metadata.trackNo,
+    persistAlbumCoverCacheItems,
     technicalInfo.bitrate,
     technicalInfo.channels,
     technicalInfo.codec,
@@ -7380,7 +8406,7 @@ export default function App() {
 
   const transportIsPlaying = useMemo(() => {
     const s = lastCastStatus
-    if (s?.dlnaEnabled && s?.currentUri) {
+    if (isCastSessionActive(s)) {
       return s.transportState === 'PLAYING'
     }
     return isPlaying
@@ -7399,7 +8425,7 @@ export default function App() {
 
   const displayProgressTime = useMemo(() => {
     const s = lastCastStatus
-    if (s?.dlnaEnabled && s?.currentUri) {
+    if (isCastSessionActive(s)) {
       return typeof s.positionSec === 'number' ? s.positionSec : 0
     }
     return currentTime
@@ -7407,11 +8433,619 @@ export default function App() {
 
   const displayProgressDuration = useMemo(() => {
     const s = lastCastStatus
-    if (s?.dlnaEnabled && s?.currentUri && (s.trackDurationSec ?? 0) > 0) {
+    if (isCastSessionActive(s) && (s.trackDurationSec ?? 0) > 0) {
       return s.trackDurationSec
     }
     return duration
   }, [lastCastStatus, duration])
+
+  const castSendCurrentTrack = useMemo(() => {
+    if (!currentTrack?.path) return null
+    const codecText =
+      technicalInfo.codec ||
+      currentTrackMeta?.codec ||
+      (currentTrack?.name ? currentTrack.name.split('.').pop() : '')
+    const sampleRateValue = technicalInfo.sampleRate || currentTrackMeta?.sampleRateHz || 0
+    const bitDepthValue = technicalInfo.bitDepth || currentTrackMeta?.bitDepth || 0
+    const qualityParts = []
+    if (codecText) qualityParts.push(String(codecText).toUpperCase())
+    if (bitDepthValue && sampleRateValue) {
+      qualityParts.push(`${bitDepthValue}bit / ${Math.round(sampleRateValue / 100) / 10}kHz`)
+    } else if (sampleRateValue) {
+      qualityParts.push(`${Math.round(sampleRateValue / 100) / 10}kHz`)
+    }
+    return {
+      path: currentTrack.path,
+      title: displayMainTitle || stripExtension(currentTrack.name || ''),
+      artist: displayMainArtist || '',
+      album: displayMainAlbum || '',
+      cover: displaySafeCoverUrl || currentTrackMeta?.cover || '',
+      duration: displayProgressDuration || duration || currentTrackMeta?.duration || 0,
+      codec: codecText || '',
+      sampleRateHz: sampleRateValue || 0,
+      bitDepth: bitDepthValue || 0,
+      bitrateKbps:
+        (technicalInfo.bitrate ? Math.round(technicalInfo.bitrate / 1000) : 0) ||
+        currentTrackMeta?.bitrateKbps ||
+        0,
+      qualityText: qualityParts.join(' · ')
+    }
+  }, [
+    currentTrack,
+    currentTrackMeta,
+    displayMainAlbum,
+    displayMainArtist,
+    displayMainTitle,
+    displayProgressDuration,
+    displaySafeCoverUrl,
+    duration,
+    technicalInfo.bitDepth,
+    technicalInfo.bitrate,
+    technicalInfo.codec,
+    technicalInfo.sampleRate
+  ])
+
+  const phoneRemoteStateRef = useRef(null)
+
+  const applyEqPreset = useCallback((presetName) => {
+    const name = String(presetName || '').trim()
+    if (!Object.prototype.hasOwnProperty.call(EQ_PRESETS, name)) return
+    const preset = EQ_PRESETS[name]
+    if (!preset) {
+      setConfig((prev) => ({ ...prev, activePreset: name }))
+      return
+    }
+    setEqSoloBandIdx(null)
+    setConfig((prev) => ({
+      ...prev,
+      useEQ: true,
+      activePreset: name,
+      preamp: preset.preamp ?? prev.preamp,
+      eqBands: prev.eqBands?.map((band, index) => ({
+        ...band,
+        gain: preset.bands[index] ?? band.gain
+      }))
+    }))
+  }, [])
+
+  const refreshPhoneRemoteStatus = useCallback(async () => {
+    if (!window.api?.phoneRemote?.status) return null
+    try {
+      const result = await window.api.phoneRemote.status()
+      setPhoneRemoteStatus(result)
+      return result
+    } catch (error) {
+      setPhoneRemoteStatus({ ok: false, lastError: error?.message || String(error) })
+      return null
+    }
+  }, [])
+
+  const startPhoneRemoteServer = useCallback(async (sourceConfig = configRef.current) => {
+    if (!window.api?.phoneRemote?.start) return null
+    const result = await window.api.phoneRemote.start({
+      port: sourceConfig?.phoneRemotePort || 18888,
+      allowNoToken: sourceConfig?.phoneRemoteAllowNoToken === true
+    })
+    setPhoneRemoteStatus(result)
+    return result
+  }, [])
+
+  const stopPhoneRemoteServer = useCallback(async () => {
+    if (!window.api?.phoneRemote?.stop) return null
+    const result = await window.api.phoneRemote.stop()
+    setPhoneRemoteStatus(result)
+    return result
+  }, [])
+
+  const handlePhoneRemoteStart = useCallback(async () => {
+    setPhoneRemoteBusy(true)
+    try {
+      const nextConfig = { ...configRef.current, phoneRemoteEnabled: true }
+      setConfig((prev) => ({ ...prev, phoneRemoteEnabled: true }))
+      await startPhoneRemoteServer(nextConfig)
+    } finally {
+      setPhoneRemoteBusy(false)
+    }
+  }, [startPhoneRemoteServer])
+
+  const handlePhoneRemoteStop = useCallback(async () => {
+    setPhoneRemoteBusy(true)
+    try {
+      setConfig((prev) => ({ ...prev, phoneRemoteEnabled: false }))
+      await stopPhoneRemoteServer()
+    } finally {
+      setPhoneRemoteBusy(false)
+    }
+  }, [stopPhoneRemoteServer])
+
+  const handlePhoneRemoteRotateToken = useCallback(async () => {
+    if (!window.api?.phoneRemote?.rotateToken) return
+    setPhoneRemoteBusy(true)
+    try {
+      const result = await window.api.phoneRemote.rotateToken()
+      setPhoneRemoteStatus(result)
+    } finally {
+      setPhoneRemoteBusy(false)
+    }
+  }, [])
+
+  const handlePhoneRemoteKickClient = useCallback(async (clientId) => {
+    if (!window.api?.phoneRemote?.kickClient) return
+    const result = await window.api.phoneRemote.kickClient(clientId)
+    setPhoneRemoteStatus(result)
+  }, [])
+
+  const updatePhoneRemoteConfig = useCallback((patch) => {
+    setConfig((prev) => ({ ...prev, ...(patch || {}) }))
+  }, [])
+
+  useEffect(() => {
+    if (!window.api?.phoneRemote) return undefined
+    let cancelled = false
+    ;(async () => {
+      const result = config.phoneRemoteEnabled
+        ? await startPhoneRemoteServer(config)
+        : await stopPhoneRemoteServer()
+      if (!cancelled && result) setPhoneRemoteStatus(result)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    config.phoneRemoteAllowNoToken,
+    config.phoneRemoteEnabled,
+    config.phoneRemotePort,
+    startPhoneRemoteServer,
+    stopPhoneRemoteServer
+  ])
+
+  useEffect(() => {
+    if (!phoneRemoteDrawerOpen) return undefined
+    refreshPhoneRemoteStatus()
+    const timer = window.setInterval(refreshPhoneRemoteStatus, 2000)
+    return () => window.clearInterval(timer)
+  }, [phoneRemoteDrawerOpen, refreshPhoneRemoteStatus])
+
+  const phoneRemoteSnapshot = useMemo(() => {
+    const activeLine = Array.isArray(lyrics) ? lyrics[activeLyricIndex] : null
+    const prevLine = Array.isArray(lyrics) ? lyrics[activeLyricIndex - 1] : null
+    const nextLine = Array.isArray(lyrics) ? lyrics[activeLyricIndex + 1] : null
+    const remoteTrackMap = new Map()
+    const registerRemoteTrack = (path) => {
+      if (!path) return ''
+      const id = makePhoneRemoteTrackId(path)
+      remoteTrackMap.set(id, path)
+      return id
+    }
+    const pathToTrack = new Map(playlist.map((track) => [track.path, track]))
+    const buildRemoteTrack = (track, extra = {}) => {
+      if (!track?.path) return null
+      return buildPhoneRemoteTrackPayload(
+        track,
+        effectiveTrackMetaMap[track.path] || trackMetaMap[track.path] || null,
+        registerRemoteTrack(track.path),
+        extra
+      )
+    }
+    const queueItems = []
+    if (currentTrack?.path) {
+      const item = buildRemoteTrack(currentTrack, {
+        cover: displaySafeCoverUrl,
+        isCurrent: true
+      })
+      if (item) queueItems.push(item)
+    }
+    for (const item of upNextQueue) {
+      const track = pathToTrack.get(item?.path)
+      if (!track || track.path === currentTrack?.path) continue
+      const queueItem = buildRemoteTrack(track, { isCurrent: false })
+      if (queueItem) queueItems.push(queueItem)
+    }
+    const searchResults = phoneRemoteSearchResults
+      .map((path) => pathToTrack.get(path))
+      .filter(Boolean)
+      .map((track) => buildRemoteTrack(track))
+      .filter(Boolean)
+    const explicitLibraryPaths = Array.isArray(phoneRemoteLibraryView.paths)
+      ? phoneRemoteLibraryView.paths
+      : []
+    const hasExplicitLibraryView =
+      explicitLibraryPaths.length > 0 ||
+      !!phoneRemoteLibraryView.query ||
+      Number(phoneRemoteLibraryView.total) > 0 ||
+      Number(phoneRemoteLibraryView.offset) > 0
+    const libraryPaths = hasExplicitLibraryView
+      ? explicitLibraryPaths
+      : playlist.slice(0, 80).map((track) => track.path)
+    const libraryResults = libraryPaths
+      .map((path) => pathToTrack.get(path))
+      .filter(Boolean)
+      .map((track) => buildRemoteTrack(track, { cover: '' }))
+      .filter(Boolean)
+    const libraryTotal = hasExplicitLibraryView
+      ? Math.max(0, Number(phoneRemoteLibraryView.total) || 0)
+      : playlist.length
+    phoneRemoteTrackIdMapRef.current = remoteTrackMap
+    const codecText =
+      technicalInfo.codec ||
+      currentTrackMeta?.codec ||
+      (currentTrack?.name ? currentTrack.name.split('.').pop() : '')
+    const sampleRateValue = technicalInfo.sampleRate || currentTrackMeta?.sampleRateHz || 0
+    const bitDepthValue = technicalInfo.bitDepth || currentTrackMeta?.bitDepth || 0
+    const qualityParts = []
+    if (codecText) qualityParts.push(String(codecText).toUpperCase())
+    if (bitDepthValue && sampleRateValue) {
+      qualityParts.push(`${bitDepthValue}bit / ${Math.round(sampleRateValue / 100) / 10}kHz`)
+    } else if (sampleRateValue) {
+      qualityParts.push(`${Math.round(sampleRateValue / 100) / 10}kHz`)
+    }
+    qualityParts.push(useNativeEngine ? (isAudioExclusive ? 'Exclusive' : 'Native') : 'WebAudio')
+    const activeDevice = audioDevices.find(
+      (device) => String(device?.id || '') === String(config.audioDeviceId || '')
+    )
+    return {
+      track: {
+        id: isCastSessionActive(lastCastStatus)
+          ? lastCastStatus?.castKind || 'cast'
+          : currentTrack?.path
+            ? 'local-current'
+            : '',
+        title: displayMainTitle || '',
+        artist: displayMainArtist || '',
+        album: displayMainAlbum || '',
+        cover: sanitizeCoverForPhoneRemote(displaySafeCoverUrl),
+        liked: !!(currentTrack?.path && likedSet.has(currentTrack.path)),
+        qualityText: qualityParts.filter(Boolean).join(' · ')
+      },
+      playback: {
+        isPlaying: transportIsPlaying === true,
+        position: displayProgressTime || 0,
+        duration: displayProgressDuration || 0,
+        playbackRate,
+        volume,
+        isMuted: volume <= 0.001,
+        playMode
+      },
+      lyrics: {
+        prev: prevLine?.text || '',
+        current: activeLine?.text || '',
+        next: nextLine?.text || '',
+        index: activeLyricIndex
+      },
+      queue: queueItems,
+      search: {
+        query: phoneRemoteSearchQuery,
+        results: searchResults
+      },
+      library: {
+        query: phoneRemoteLibraryView.query || '',
+        offset: Number(phoneRemoteLibraryView.offset) || 0,
+        total: libraryTotal,
+        results: libraryResults,
+        hasMore: (Number(phoneRemoteLibraryView.offset) || 0) + libraryResults.length < libraryTotal
+      },
+      controls: {
+        libraryCount: playlist.length,
+        useNativeEngine,
+        audioExclusive: config.audioExclusive === true || isAudioExclusive === true,
+        gaplessEnabled: config.gaplessEnabled === true,
+        automixEnabled: config.crossfadeEnabled === true,
+        desktopLyricsEnabled: config.desktopLyricsEnabled === true,
+        useEQ: config.useEQ === true,
+        activePreset: config.activePreset || 'Custom',
+        eqPresets: Object.keys(EQ_PRESETS),
+        outputDeviceId: config.audioDeviceId || '',
+        outputDeviceName: activeDevice?.name || activeDevice?.label || '系统默认',
+        outputDevices: [
+          { id: '', name: '系统默认', isDefault: true },
+          ...audioDevices.map((device) => ({
+            id: String(device?.id || ''),
+            name: String(device?.name || device?.label || device?.id || 'Unknown device'),
+            isDefault: device?.isDefault === true
+          }))
+        ]
+      }
+    }
+  }, [
+    activeLyricIndex,
+    audioDevices,
+    config.activePreset,
+    config.audioDeviceId,
+    config.audioExclusive,
+    config.crossfadeEnabled,
+    config.desktopLyricsEnabled,
+    config.gaplessEnabled,
+    config.useEQ,
+    currentTrack?.path,
+    currentTrack,
+    currentTrackMeta,
+    displayMainAlbum,
+    displayMainArtist,
+    displayMainTitle,
+    displayProgressDuration,
+    displayProgressTime,
+    displaySafeCoverUrl,
+    effectiveTrackMetaMap,
+    isAudioExclusive,
+    lastCastStatus,
+    likedSet,
+    lyrics,
+    playMode,
+    playbackRate,
+    phoneRemoteSearchQuery,
+    phoneRemoteSearchResults,
+    phoneRemoteLibraryView,
+    playlist,
+    technicalInfo.bitDepth,
+    technicalInfo.codec,
+    technicalInfo.sampleRate,
+    trackMetaMap,
+    transportIsPlaying,
+    upNextQueue,
+    useNativeEngine,
+    volume
+  ])
+
+  useEffect(() => {
+    phoneRemoteStateRef.current = phoneRemoteSnapshot
+  }, [phoneRemoteSnapshot])
+
+  useEffect(() => {
+    if (!config.phoneRemoteEnabled || !window.api?.phoneRemote?.updateState) return undefined
+    window.api.phoneRemote.updateState(phoneRemoteStateRef.current).catch(() => {})
+    const timer = window.setInterval(() => {
+      window.api.phoneRemote.updateState(phoneRemoteStateRef.current).catch(() => {})
+    }, 500)
+    return () => window.clearInterval(timer)
+  }, [config.phoneRemoteEnabled])
+
+  useEffect(() => {
+    if (!window.api?.phoneRemote?.onCommand) return undefined
+    return window.api.phoneRemote.onCommand(async (message) => {
+      const command = String(message?.command || '')
+      const payload = message?.payload || {}
+      if (command === 'togglePlay') {
+        await togglePlay()
+        return
+      }
+      if (command === 'play') {
+        if (!transportIsPlaying) await togglePlay()
+        return
+      }
+      if (command === 'pause') {
+        if (transportIsPlaying) await togglePlay()
+        return
+      }
+      if (command === 'next') {
+        handleNext()
+        return
+      }
+      if (command === 'previous') {
+        handlePrev()
+        return
+      }
+      if (command === 'seek') {
+        seekToPosition(payload.position)
+        return
+      }
+      if (command === 'setVolume') {
+        setVolume(clampVolume(payload.volume))
+        return
+      }
+      if (command === 'toggleMute') {
+        if (volume > 0.001) {
+          remotePreviousVolumeRef.current = volume
+          setVolume(0)
+        } else {
+          setVolume(clampVolume(remotePreviousVolumeRef.current || 0.7))
+        }
+        return
+      }
+      if (command === 'setPlaybackRate') {
+        const nextRate = Math.max(0.5, Math.min(2, Number(payload.rate) || 1))
+        setPlaybackRate(nextRate)
+        return
+      }
+      if (command === 'cyclePlayMode') {
+        setPlayMode((prev) =>
+          prev === 'loop' ? 'shuffle' : prev === 'shuffle' ? 'single' : 'loop'
+        )
+        return
+      }
+      if (command === 'setPlayMode') {
+        const mode = String(payload.mode || '')
+        if (['loop', 'shuffle', 'single'].includes(mode)) setPlayMode(mode)
+        return
+      }
+      if (command === 'toggleLike') {
+        if (currentTrack?.path) toggleLike(currentTrack.path)
+        return
+      }
+      if (command === 'setEqPreset') {
+        applyEqPreset(payload.preset)
+        return
+      }
+      if (command === 'setEqEnabled') {
+        setConfig((prev) => ({ ...prev, useEQ: payload.enabled === true }))
+        return
+      }
+      if (command === 'toggleLyricsView') {
+        setShowLyrics((prev) => !prev)
+        return
+      }
+      if (command === 'setDesktopLyrics') {
+        setConfig((prev) => ({ ...prev, desktopLyricsEnabled: payload.enabled === true }))
+        return
+      }
+      if (command === 'setGapless') {
+        setConfig((prev) => ({
+          ...prev,
+          gaplessEnabled: payload.enabled === true,
+          crossfadeEnabled: payload.enabled === true ? false : prev.crossfadeEnabled
+        }))
+        return
+      }
+      if (command === 'setAutomix') {
+        setConfig((prev) => ({
+          ...prev,
+          crossfadeEnabled: payload.enabled === true,
+          gaplessEnabled: payload.enabled === true ? false : prev.gaplessEnabled
+        }))
+        return
+      }
+      if (command === 'setExclusive') {
+        setConfig((prev) => ({ ...prev, audioExclusive: payload.enabled === true }))
+        return
+      }
+      if (command === 'setOutputDevice') {
+        const nextId = String(payload.id || '')
+        setConfig((prev) => ({ ...prev, audioDeviceId: nextId }))
+        if (window.api?.setAudioDevice) window.api.setAudioDevice(nextId).catch(() => {})
+        return
+      }
+      if (command === 'browseTracks') {
+        const query = String(payload.query || '').trim()
+        const offset = Math.max(0, Math.floor(Number(payload.offset) || 0))
+        const limit = Math.max(20, Math.min(120, Math.floor(Number(payload.limit) || 80)))
+        const append = payload.append === true
+        const terms = query
+          .toLowerCase()
+          .split(/\s+/)
+          .filter(Boolean)
+        const sourceTracks = Array.isArray(playlistRef.current) ? playlistRef.current : []
+        const matches = []
+        sourceTracks.forEach((track, index) => {
+          if (!track?.path) return
+          const meta = trackMetaMapRef.current?.[track.path] || null
+          const info = parseTrackInfo(track, meta)
+          const title = info?.title || stripExtension(track.name || fileNameFromPath(track.path))
+          const artist = info?.artist || track?.info?.artist || ''
+          const album = info?.album || track?.info?.album || ''
+          const haystack = `${title} ${artist} ${album}`.toLowerCase()
+          if (terms.length && !terms.every((term) => haystack.includes(term))) return
+          let score = sourceTracks.length - index
+          if (terms.length) {
+            const queryLower = query.toLowerCase()
+            const titleLower = String(title || '').toLowerCase()
+            const artistLower = String(artist || '').toLowerCase()
+            score =
+              (titleLower.startsWith(queryLower) ? 120 : 0) +
+              (artistLower.startsWith(queryLower) ? 60 : 0) +
+              Math.max(0, 40 - Math.max(0, haystack.indexOf(terms[0]))) +
+              Math.max(0, sourceTracks.length - index) / 100000
+          }
+          matches.push({ path: track.path, score })
+        })
+        const sortedPaths = terms.length
+          ? matches.sort((a, b) => b.score - a.score).map((item) => item.path)
+          : matches.map((item) => item.path)
+        const nextPaths = sortedPaths.slice(offset, offset + limit)
+        setPhoneRemoteLibraryView((prev) => ({
+          query,
+          offset: append ? Math.max(0, Number(prev?.offset) || 0) : offset,
+          total: sortedPaths.length,
+          paths: append ? [...(Array.isArray(prev?.paths) ? prev.paths : []), ...nextPaths] : nextPaths
+        }))
+        return
+      }
+      if (command === 'searchTracks') {
+        const query = String(payload.query || '').trim()
+        setPhoneRemoteSearchQuery(query)
+        if (!query) {
+          setPhoneRemoteSearchResults([])
+          return
+        }
+        const terms = query
+          .toLowerCase()
+          .split(/\s+/)
+          .filter(Boolean)
+        const scored = []
+        for (const track of playlistRef.current || []) {
+          if (!track?.path) continue
+          const meta = trackMetaMapRef.current?.[track.path] || null
+          const info = parseTrackInfo(track, meta)
+          const title = info?.title || stripExtension(track.name || fileNameFromPath(track.path))
+          const artist = info?.artist || track?.info?.artist || ''
+          const album = info?.album || track?.info?.album || ''
+          const haystack = `${title} ${artist} ${album}`.toLowerCase()
+          if (!terms.every((term) => haystack.includes(term))) continue
+          const titleLower = String(title || '').toLowerCase()
+          const artistLower = String(artist || '').toLowerCase()
+          const score =
+            (titleLower.startsWith(query.toLowerCase()) ? 80 : 0) +
+            (artistLower.startsWith(query.toLowerCase()) ? 40 : 0) +
+            Math.max(0, 30 - haystack.indexOf(terms[0]))
+          scored.push({ path: track.path, score })
+        }
+        setPhoneRemoteSearchResults(
+          scored
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 30)
+            .map((item) => item.path)
+        )
+        return
+      }
+      const remotePath =
+        phoneRemoteTrackIdMapRef.current.get(String(payload.id || '')) ||
+        (playlistRef.current.some((track) => track?.path === payload.path) ? payload.path : '')
+      const remoteTrack = remotePath
+        ? playlistRef.current.find((track) => track?.path === remotePath)
+        : null
+      if (command === 'playTrack' || command === 'playQueueItem') {
+        if (!remoteTrack?.path) return
+        const trackIndex = playlistRef.current.findIndex((track) => track?.path === remoteTrack.path)
+        if (trackIndex === -1) return
+        setCurrentIndex(trackIndex)
+        setIsPlaying(true)
+        if (command === 'playQueueItem') {
+          setQueuePlaybackEnabled(true)
+          setUpNextQueue((prev) => {
+            const queueIndex = prev.findIndex((item) => item?.path === remoteTrack.path)
+            return queueIndex === -1 ? prev : prev.slice(queueIndex + 1)
+          })
+        } else {
+          setQueuePlaybackEnabled(false)
+        }
+        return
+      }
+      if (command === 'queueTrack') {
+        if (!remoteTrack?.path) return
+        setUpNextQueue((prev) =>
+          prev.some((item) => item?.path === remoteTrack.path)
+            ? prev
+            : [...prev, { path: remoteTrack.path }]
+        )
+        return
+      }
+      if (command === 'playNext') {
+        if (!remoteTrack?.path) return
+        setUpNextQueue((prev) => [
+          { path: remoteTrack.path },
+          ...prev.filter((item) => item?.path !== remoteTrack.path)
+        ])
+        return
+      }
+      if (command === 'removeQueueItem') {
+        if (!remoteTrack?.path) return
+        setUpNextQueue((prev) => prev.filter((item) => item?.path !== remoteTrack.path))
+        return
+      }
+      if (command === 'clearQueue') {
+        setUpNextQueue([])
+        return
+      }
+    })
+  }, [
+    applyEqPreset,
+    currentTrack?.path,
+    handleNext,
+    handlePrev,
+    seekToPosition,
+    toggleLike,
+    togglePlay,
+    transportIsPlaying,
+    volume
+  ])
 
   useEffect(() => {
     if (!showLyrics || config.lyricsWordHighlight === false) {
@@ -7421,7 +9055,7 @@ export default function App() {
 
     if (!transportIsPlaying) {
       const s = lastCastStatus
-      if (s?.dlnaEnabled && s?.currentUri) {
+      if (isCastSessionActive(s)) {
         setLyricsRenderTime(typeof s.positionSec === 'number' ? s.positionSec : displayProgressTime)
       } else if (useNativeEngineRef.current) {
         setLyricsRenderTime(displayProgressTime)
@@ -7434,7 +9068,7 @@ export default function App() {
     let rafId = 0
     const tick = () => {
       const s = lastCastStatus
-      if (s?.dlnaEnabled && s?.currentUri) {
+      if (isCastSessionActive(s)) {
         setLyricsRenderTime(typeof s.positionSec === 'number' ? s.positionSec : displayProgressTime)
       } else if (useNativeEngineRef.current) {
         setLyricsRenderTime(displayProgressTime)
@@ -7663,10 +9297,11 @@ export default function App() {
   )
 
   const queryFilteredPlaylist = useMemo(() => {
+    const localTracks = parsedPlaylist.filter((track) => !isRemoteTrackPath(track.path))
     const q = deferredSearchQuery.trim().toLowerCase()
-    if (!q) return parsedPlaylist
+    if (!q) return localTracks
 
-    return parsedPlaylist.filter(({ info }) => {
+    return localTracks.filter(({ info }) => {
       return (
         info.fileName.toLowerCase().includes(q) ||
         info.title.toLowerCase().includes(q) ||
@@ -7678,14 +9313,21 @@ export default function App() {
 
   useEffect(() => {
     const foundCovers = {}
+    const foundCoverItems = []
     for (const track of parsedPlaylist) {
       const albumName = track?.info?.album || 'Singles'
       const cover = track?.info?.cover
       if (albumName && cover && !foundCovers[albumName]) {
         foundCovers[albumName] = cover
+        foundCoverItems.push({
+          album: albumName,
+          artist: track?.info?.artist || '',
+          cover
+        })
       }
     }
     if (Object.keys(foundCovers).length === 0) return
+    persistAlbumCoverCacheItems(foundCoverItems)
 
     setAlbumCoverMap((prev) => {
       let changed = false
@@ -7698,7 +9340,7 @@ export default function App() {
       }
       return changed ? next : prev
     })
-  }, [parsedPlaylist])
+  }, [parsedPlaylist, persistAlbumCoverCacheItems])
 
   const albumArtistByName = useMemo(() => {
     const m = {}
@@ -7710,6 +9352,57 @@ export default function App() {
     }
     return m
   }, [queryFilteredPlaylist])
+
+  const albumCoverCacheTargets = useMemo(() => {
+    const targetsByAlbum = new Map()
+    for (const track of queryFilteredPlaylist) {
+      const albumName = String(track?.info?.album || 'Singles').trim() || 'Singles'
+      if (!albumName || targetsByAlbum.has(albumName)) continue
+      const artist =
+        track?.info?.artist && track.info.artist !== 'Unknown Artist' ? track.info.artist : ''
+      targetsByAlbum.set(albumName, {
+        albumName,
+        artist,
+        exactKey: createAlbumCoverCacheKey(albumName, artist),
+        fallbackKey: createAlbumCoverFallbackKey(albumName)
+      })
+    }
+    return Array.from(targetsByAlbum.values())
+  }, [queryFilteredPlaylist])
+
+  useEffect(() => {
+    if (!libraryStateReady || albumCoverCacheTargets.length === 0) return undefined
+    let cancelled = false
+
+    const hydrateAlbumCoverCache = async () => {
+      const keys = []
+      for (const target of albumCoverCacheTargets) {
+        if (target.exactKey) keys.push(target.exactKey)
+        if (target.fallbackKey) keys.push(target.fallbackKey)
+      }
+      const cached = await readAlbumCoverCache(keys).catch(() => ({}))
+      if (cancelled || Object.keys(cached).length === 0) return
+
+      setAlbumCoverMap((prev) => {
+        let changed = false
+        const next = { ...prev }
+        for (const target of albumCoverCacheTargets) {
+          if (next[target.albumName]) continue
+          const entry = cached[target.exactKey] || cached[target.fallbackKey]
+          if (entry?.cover) {
+            next[target.albumName] = entry.cover
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+    }
+
+    hydrateAlbumCoverCache()
+    return () => {
+      cancelled = true
+    }
+  }, [albumCoverCacheTargets, libraryStateReady])
 
   const albumNamesSet = useMemo(() => {
     const s = new Set()
@@ -7812,17 +9505,13 @@ export default function App() {
 
   const artistBuckets = useMemo(() => {
     const unknownArtist = t('artists.unknown', 'Unknown Artist')
-    const groups = queryFilteredPlaylist.reduce((acc, track) => {
-      const key = track.info.artist || unknownArtist
-      if (!acc.has(key)) acc.set(key, { name: key, tracks: [] })
-      acc.get(key).tracks.push(track)
-      return acc
-    }, new Map())
-
-    return Array.from(groups.values()).sort(
-      (a, b) => b.tracks.length - a.tracks.length || a.name.localeCompare(b.name)
-    )
-  }, [queryFilteredPlaylist, t])
+    return buildArtistBucketsWithAvatars(queryFilteredPlaylist, {
+      unknownArtist,
+      trackMetaMap,
+      albumCoverMap,
+      artistAvatarMap
+    })
+  }, [queryFilteredPlaylist, t, trackMetaMap, albumCoverMap, artistAvatarMap])
 
   const artistNamesSet = useMemo(() => {
     const s = new Set()
@@ -7831,6 +9520,147 @@ export default function App() {
   }, [artistBuckets])
 
   const artistGroups = listMode === 'artists' ? artistBuckets : []
+
+  useEffect(() => {
+    if (listMode !== 'artists' || !libraryStateReady || artistBuckets.length === 0) {
+      return undefined
+    }
+    if (!window.api?.fetchArtistAvatarImage) return undefined
+    if (!window.api?.neteaseSearchArtist && !window.api?.qqMusicSearchArtist) return undefined
+
+    const targets = artistBuckets
+      .filter((artist) => !artist.hasLocalCover && !artist.hasRemoteAvatar)
+      .map((artist) => ({
+        name: artist.name,
+        key: createArtistAvatarCacheKey(artist.name),
+        queries: buildArtistAvatarSearchQueries(artist.name)
+      }))
+      .filter((target) => target.key && target.queries.length > 0 && !artistAvatarMap[target.name])
+
+    if (targets.length === 0) return undefined
+    let cancelled = false
+
+    const writeArtistAvatarMiss = (target) => {
+      writeArtistAvatarCache({
+        [target.key]: {
+          artist: target.name,
+          avatarUrl: null,
+          source: `miss-v${ARTIST_AVATAR_LOOKUP_VERSION}`,
+          checkedAt: Date.now()
+        }
+      }).catch(() => {})
+    }
+
+    const run = async () => {
+      const cached = await readArtistAvatarCache(targets.map((target) => target.key)).catch(
+        () => ({})
+      )
+      if (cancelled) return
+
+      const cachedAvatars = {}
+      const unresolved = []
+      const now = Date.now()
+      for (const target of targets) {
+        const entry = cached[target.key]
+        if (entry?.avatarUrl) {
+          cachedAvatars[target.name] = entry.avatarUrl
+          artistAvatarAttemptedRef.current.add(target.key)
+          continue
+        }
+        if (
+          entry?.checkedAt &&
+          entry?.source === `miss-v${ARTIST_AVATAR_LOOKUP_VERSION}` &&
+          now - Number(entry.checkedAt) < ARTIST_AVATAR_MISS_TTL_MS
+        ) {
+          artistAvatarAttemptedRef.current.add(target.key)
+          continue
+        }
+        if (!artistAvatarAttemptedRef.current.has(target.key)) {
+          unresolved.push(target)
+        }
+      }
+
+      if (Object.keys(cachedAvatars).length > 0) {
+        setArtistAvatarMap((prev) => ({ ...prev, ...cachedAvatars }))
+      }
+      if (unresolved.length === 0) return
+
+      const queue = unresolved.slice(0, ARTIST_AVATAR_PREFETCH_LIMIT)
+      let nextIndex = 0
+
+      const runNext = async () => {
+        while (!cancelled) {
+          const target = queue[nextIndex]
+          nextIndex += 1
+          if (!target) return
+          artistAvatarAttemptedRef.current.add(target.key)
+
+          try {
+            let resolved = null
+            for (const query of target.queries) {
+              const providerAttempts = [
+                {
+                  source: 'netease',
+                  search: window.api.neteaseSearchArtist,
+                  normalizeUrl: normalizeNeteaseArtistImageUrl
+                },
+                {
+                  source: 'qq',
+                  search: window.api.qqMusicSearchArtist,
+                  normalizeUrl: normalizeQqMusicArtistImageUrl
+                }
+              ].filter((provider) => typeof provider.search === 'function')
+
+              for (const provider of providerAttempts) {
+                const candidates = await provider.search({ artist: query })
+                if (cancelled) return
+                const best = pickBestArtistAvatarCandidate(candidates, target.name, query)
+                const avatarUrl = provider.normalizeUrl(best?.picUrl || best?.img1v1Url)
+                if (!avatarUrl) continue
+                const imageResult = await window.api?.fetchArtistAvatarImage?.(avatarUrl)
+                if (cancelled) return
+                const dataUrl = imageResult?.ok && imageResult?.dataUrl ? imageResult.dataUrl : ''
+                if (dataUrl) {
+                  resolved = { dataUrl, source: provider.source }
+                  break
+                }
+              }
+              if (resolved) break
+            }
+
+            if (resolved?.dataUrl) {
+              setArtistAvatarMap((prev) =>
+                prev[target.name] ? prev : { ...prev, [target.name]: resolved.dataUrl }
+              )
+              writeArtistAvatarCache({
+                [target.key]: {
+                  artist: target.name,
+                  avatarUrl: resolved.dataUrl,
+                  source: `${resolved.source}-v${ARTIST_AVATAR_LOOKUP_VERSION}`,
+                  checkedAt: Date.now()
+                }
+              }).catch(() => {})
+            } else {
+              writeArtistAvatarMiss(target)
+            }
+          } catch (e) {
+            writeArtistAvatarMiss(target)
+          }
+        }
+      }
+
+      await Promise.all(
+        Array.from({ length: Math.min(ARTIST_AVATAR_PREFETCH_WORKERS, queue.length) }, () =>
+          runNext()
+        )
+      )
+    }
+
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [artistAvatarMap, artistBuckets, libraryStateReady, listMode])
 
   const importedFolderItems = useMemo(() => {
     const seen = new Set()
@@ -8187,15 +10017,141 @@ export default function App() {
     albumBuckets
   ])
 
-  const startPlaybackForTrack = useCallback((track, playbackContext = null) => {
-    if (!track) return
-    setActivePlaybackContext(playbackContext || createPlaybackContext('library', 'library', []))
-    setCurrentIndex(track.originalIdx)
-    setIsPlaying(true)
+  const stopCastBeforeLocalPlayback = useCallback(async () => {
+    const status = lastCastStatus
+    if (!isCastSessionActive(status)) return
+
+    setCastRemoteActive(false)
+    setLastCastStatus((prev) =>
+      prev
+        ? {
+            ...prev,
+            castActive: false,
+            airplayActive: false,
+            transportState: 'STOPPED',
+            isPlaying: false
+          }
+        : prev
+    )
+
+    try {
+      if (window.api?.cast?.stopPlayback) {
+        await window.api.cast.stopPlayback()
+      } else if (status?.castKind === 'airplay' && window.api?.cast?.airplayCommand) {
+        await window.api.cast.airplayCommand('stop')
+      } else {
+        await window.api?.stopAudio?.()
+      }
+    } catch (e) {
+      console.warn('[cast] failed to stop before local playback:', e?.message || e)
+    }
+  }, [lastCastStatus])
+
+  const playFromHistoryEntry = useCallback(
+    async (entry) => {
+      const normalizedEntry = normalizePlaybackHistoryEntry(entry)
+      if (!normalizedEntry?.path) return false
+
+      const existingIndex = playlistRef.current.findIndex(
+        (track) => track.path === normalizedEntry.path
+      )
+      const targetIndex = existingIndex >= 0 ? existingIndex : playlistRef.current.length
+
+      if (existingIndex < 0) {
+        const fallbackName = fileNameFromPath(normalizedEntry.path)
+        const title = normalizedEntry.title || stripExtension(fallbackName) || fallbackName
+        const historyTrack = {
+          path: normalizedEntry.path,
+          name: title || fallbackName,
+          info: {
+            title,
+            artist: normalizedEntry.artist || '',
+            album: normalizedEntry.album || '',
+            cover: entry?.cover || null
+          }
+        }
+        setPlaylist((prev) => {
+          if (prev.some((track) => track.path === historyTrack.path)) return prev
+          return [...prev, historyTrack]
+        })
+      }
+
+      await stopCastBeforeLocalPlayback()
+      setActivePlaybackContext(createPlaybackContext('library', 'history', [normalizedEntry.path]))
+      setCurrentIndex(targetIndex)
+      setIsPlaying(true)
+      return true
+    },
+    [stopCastBeforeLocalPlayback]
+  )
+
+  const startPlaybackForTrack = useCallback(
+    async (track, playbackContext = null) => {
+      if (!track) return
+      await stopCastBeforeLocalPlayback()
+      setActivePlaybackContext(playbackContext || createPlaybackContext('library', 'library', []))
+      setCurrentIndex(track.originalIdx)
+      setIsPlaying(true)
+    },
+    [stopCastBeforeLocalPlayback]
+  )
+
+  const ensureRemoteTrackInPlaylist = useCallback((track) => {
+    if (!track?.path) return -1
+    const remoteMeta = buildRemoteTrackMeta(track)
+    writeTrackMetaCache({ [track.path]: remoteMeta })
+    setTrackMetaMap((prev) => ({
+      ...prev,
+      [track.path]: {
+        ...(prev[track.path] || {}),
+        ...remoteMeta
+      }
+    }))
+
+    let targetIndex = playlistRef.current.findIndex((item) => item.path === track.path)
+    if (targetIndex !== -1) {
+      return targetIndex
+    }
+
+    const normalizedTrack = {
+      ...track,
+      name: track.name || track.title || remoteMeta.title,
+      info: {
+        ...(track.info || {}),
+        ...remoteMeta
+      }
+    }
+    targetIndex = playlistRef.current.length
+    setPlaylist((prev) => {
+      if (prev.some((item) => item.path === normalizedTrack.path)) return prev
+      return [...prev, normalizedTrack]
+    })
+    return targetIndex
   }, [])
 
+  const playRemoteLibraryTrack = useCallback(
+    async (track) => {
+      const targetIndex = ensureRemoteTrackInPlaylist(track)
+      if (targetIndex < 0) return
+      await stopCastBeforeLocalPlayback()
+      setActivePlaybackContext(createPlaybackContext('library', 'remoteLibrary', [track.path]))
+      setCurrentIndex(targetIndex)
+      setIsPlaying(true)
+    },
+    [ensureRemoteTrackInPlaylist, stopCastBeforeLocalPlayback]
+  )
+
+  const queueRemoteLibraryTrack = useCallback(
+    (track) => {
+      const targetIndex = ensureRemoteTrackInPlaylist(track)
+      if (targetIndex < 0) return
+      enqueueUpNextTrack(track)
+    },
+    [enqueueUpNextTrack, ensureRemoteTrackInPlaylist]
+  )
+
   const playPlaylistContextNow = useCallback(
-    (options = {}) => {
+    async (options = {}) => {
       const context = sidebarPlaybackContext
       const candidatePaths =
         context.kind === 'library'
@@ -8213,17 +10169,29 @@ export default function App() {
       const nextIdx = playlistRef.current.findIndex((track) => track.path === targetPath)
       if (nextIdx === -1) return
 
+      await stopCastBeforeLocalPlayback()
       setActivePlaybackContext(context)
       setCurrentIndex(nextIdx)
       setIsPlaying(true)
     },
-    [sidebarPlaybackContext, getLibraryPlaybackPaths]
+    [sidebarPlaybackContext, getLibraryPlaybackPaths, stopCastBeforeLocalPlayback]
   )
 
   const upNextPreviewTracks = useMemo(() => {
     if (upNextQueue.length === 0) return []
     const pathToTrack = new Map(parsedPlaylist.map((track) => [track.path, track]))
     return upNextQueue.map((item) => pathToTrack.get(item?.path)).filter(Boolean)
+  }, [upNextQueue, parsedPlaylist])
+
+  const upNextSidebarItems = useMemo(() => {
+    if (upNextQueue.length === 0) return []
+    const pathToTrack = new Map(parsedPlaylist.map((track) => [track.path, track]))
+    return upNextQueue
+      .map((item) => {
+        const track = pathToTrack.get(item?.path)
+        return track ? { path: item.path, track } : null
+      })
+      .filter(Boolean)
   }, [upNextQueue, parsedPlaylist])
 
   const queueSortSensors = useSensors(
@@ -8243,20 +10211,170 @@ export default function App() {
     })
   }, [])
 
+  const reorderUpNextQueueByPath = useCallback((activePath, overPath) => {
+    if (!activePath || !overPath || activePath === overPath) return
+    setUpNextQueue((prev) => {
+      const oldIndex = prev.findIndex((item) => item?.path === activePath)
+      const newIndex = prev.findIndex((item) => item?.path === overPath)
+      if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return prev
+      return arrayMove(prev, oldIndex, newIndex)
+    })
+  }, [])
+
+  const moveUpNextPathToTop = useCallback((path) => {
+    if (!path) return
+    setUpNextQueue((prev) => {
+      const item = prev.find((entry) => entry?.path === path)
+      if (!item || prev[0]?.path === path) return prev
+      return [item, ...prev.filter((entry) => entry?.path !== path)]
+    })
+  }, [])
+
+  const moveUpNextPathToBottom = useCallback((path) => {
+    if (!path) return
+    setUpNextQueue((prev) => {
+      const item = prev.find((entry) => entry?.path === path)
+      if (!item || prev[prev.length - 1]?.path === path) return prev
+      return [...prev.filter((entry) => entry?.path !== path), item]
+    })
+  }, [])
+
+  const removeUpNextAboveWithUndo = useCallback(
+    (path) => {
+      if (!path) return
+      setUpNextQueue((prev) => {
+        const index = prev.findIndex((item) => item?.path === path)
+        if (index <= 0) return prev
+        pushQueueUndoSnapshot(prev)
+        return prev.slice(index)
+      })
+    },
+    [pushQueueUndoSnapshot]
+  )
+
+  const removeUpNextBelowWithUndo = useCallback(
+    (path) => {
+      if (!path) return
+      setUpNextQueue((prev) => {
+        const index = prev.findIndex((item) => item?.path === path)
+        if (index === -1 || index >= prev.length - 1) return prev
+        pushQueueUndoSnapshot(prev)
+        return prev.slice(0, index + 1)
+      })
+    },
+    [pushQueueUndoSnapshot]
+  )
+
+  const shuffleUpNextQueue = useCallback(() => {
+    setUpNextQueue((prev) => {
+      if (prev.length < 2) return prev
+      const currentPath = playlistRef.current[currentIndexRef.current]?.path || ''
+      const currentQueueIndex = prev.findIndex((item) => item?.path === currentPath)
+      const lockedPrefix = currentQueueIndex >= 0 ? prev.slice(0, currentQueueIndex + 1) : []
+      const pool = currentQueueIndex >= 0 ? prev.slice(currentQueueIndex + 1) : [...prev]
+      for (let i = pool.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[pool[i], pool[j]] = [pool[j], pool[i]]
+      }
+      return [...lockedPrefix, ...pool]
+    })
+  }, [])
+
+  const playUpNextQueueItemNow = useCallback(
+    async (path) => {
+      if (!path) return
+      const trackIndex = playlistRef.current.findIndex((track) => track.path === path)
+      if (trackIndex === -1) return
+      await stopCastBeforeLocalPlayback()
+      setUpNextQueue((prev) => {
+        const queueIndex = prev.findIndex((item) => item?.path === path)
+        if (queueIndex === -1) return prev
+        return prev.slice(queueIndex + 1)
+      })
+      setCurrentIndex(trackIndex)
+      setQueuePlaybackEnabled(true)
+      setIsPlaying(true)
+    },
+    [stopCastBeforeLocalPlayback]
+  )
+
+  const playUpNextPathNext = useCallback((path) => {
+    const track = playlistRef.current.find((item) => item.path === path)
+    if (!track) return
+    enqueueUpNextTrackAtFront(track)
+  }, [enqueueUpNextTrackAtFront])
+
+  const saveUpNextQueueAsPlaylist = useCallback(() => {
+    const paths = upNextQueueRef.current.map((item) => item?.path).filter(Boolean)
+    if (paths.length === 0) return { ok: false, reason: 'empty' }
+    const fallbackName = t('queue.defaultPlaylistName', {
+      defaultValue: 'Up Next'
+    })
+    const name = window.prompt(t('queue.savePrompt', 'Playlist name'), fallbackName)
+    const normalizedName = String(name || '').trim()
+    if (!normalizedName) return { ok: false, reason: 'cancelled' }
+    const id = crypto.randomUUID()
+    setUserPlaylists((prev) => [...prev, { id, name: normalizedName, paths: [...new Set(paths)] }])
+    setSelectedSmartCollectionId(null)
+    setSelectedUserPlaylistId(id)
+    setListMode('playlists')
+    return { ok: true, name: normalizedName }
+  }, [t])
+
   const playbackHistoryEntries = useMemo(() => {
     if (playbackHistory.length === 0) return []
-    const pathToTrack = new Map(parsedPlaylist.map((track) => [track.path, track]))
-    return playbackHistory
+    const now = Date.now()
+    const pathToTrackInLibrary = new Map(playlist.map((track) => [track.path, track]))
+    const indexedEntries = playbackHistory
       .map((entry, historyIndex) => {
         const normalizedEntry = normalizePlaybackHistoryEntry(entry)
         if (!normalizedEntry) return null
-        return {
-          ...normalizedEntry,
-          historyIndex,
-          track: pathToTrack.get(normalizedEntry.path)
-        }
+        return { ...normalizedEntry, historyIndex }
       })
       .filter(Boolean)
+    const sourceEntries = config.historyCollapseRepeats
+      ? indexedEntries.reduce((acc, entry) => {
+          const previous = acc[acc.length - 1]
+          if (previous?.path === entry.path) acc[acc.length - 1] = { ...previous, ...entry }
+          else acc.push(entry)
+          return acc
+        }, [])
+      : indexedEntries
+
+    return sourceEntries
+      .map((entry) => {
+        const track = pathToTrackInLibrary.get(entry.path)
+        const meta = effectiveTrackMetaMap[entry.path] || {}
+        const info = track ? parseTrackInfo(track, meta) : meta
+        const album = info?.album || entry.album || ''
+        const artist =
+          info?.artist && info.artist !== 'Unknown Artist'
+            ? info.artist
+            : entry.artist || albumArtistByName[album] || ''
+        const title =
+          info?.title ||
+          entry.title ||
+          stripExtension(track?.name || fileNameFromPath(entry.path)) ||
+          entry.path
+        const cover =
+          info?.cover ||
+          meta?.cover ||
+          track?.info?.cover ||
+          (album && albumCoverMap[album]) ||
+          null
+        return {
+          ...entry,
+          title,
+          artist,
+          album,
+          cover,
+          track,
+          inCurrentPlaylist: !!track,
+          bucket: getHistoryBucket(entry.playedAt, now),
+          relativeTime: buildHistoryRelativeTime(entry.playedAt, t, now),
+          playCount: Number(trackStats[entry.path]?.playCount) || 0
+        }
+      })
       .reverse()
       .sort((a, b) => {
         const timeA = Number(a.playedAt || 0)
@@ -8264,7 +10382,16 @@ export default function App() {
         if (timeA !== timeB) return timeB - timeA
         return b.historyIndex - a.historyIndex
       })
-  }, [playbackHistory, parsedPlaylist, trackStats])
+  }, [
+    albumArtistByName,
+    albumCoverMap,
+    config.historyCollapseRepeats,
+    effectiveTrackMetaMap,
+    playbackHistory,
+    playlist,
+    t,
+    trackStats
+  ])
 
   const tracksForSidebarList = useMemo(() => {
     if (listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId)) {
@@ -8362,6 +10489,34 @@ export default function App() {
     [tracksForSidebarListFiltered, visibleSidebarRange]
   )
 
+  const handleSidebarTrackSelectionClick = useCallback(
+    (track, event) => {
+      if (!track?.path || (!event?.ctrlKey && !event?.metaKey && !event?.shiftKey)) return false
+      const orderedPaths = tracksForSidebarListFiltered.map((item) => item.path).filter(Boolean)
+      setSelectedSidebarTrackPaths((prev) => {
+        const next = new Set(prev)
+        if (event.shiftKey && lastSelectedSidebarTrackPathRef.current) {
+          const from = orderedPaths.indexOf(lastSelectedSidebarTrackPathRef.current)
+          const to = orderedPaths.indexOf(track.path)
+          if (from !== -1 && to !== -1) {
+            next.clear()
+            const start = Math.min(from, to)
+            const end = Math.max(from, to)
+            for (let i = start; i <= end; i += 1) next.add(orderedPaths[i])
+          }
+        } else if (next.has(track.path)) {
+          next.delete(track.path)
+        } else {
+          next.add(track.path)
+        }
+        return [...next]
+      })
+      lastSelectedSidebarTrackPathRef.current = track.path
+      return true
+    },
+    [tracksForSidebarListFiltered]
+  )
+
   const metadataPrefetchSidebarTracks = useMemo(() => {
     if (tracksForSidebarListFiltered.length === 0) return []
     const startIndex = Math.max(
@@ -8438,15 +10593,28 @@ export default function App() {
       e.preventDefault()
       e.stopPropagation()
       setQueueDragOver(false)
-      const path =
+      const pathsPayload = e.dataTransfer.getData('application/x-echo-track-paths')
+      let paths = []
+      if (pathsPayload) {
+        try {
+          const parsed = JSON.parse(pathsPayload)
+          if (Array.isArray(parsed)) paths = parsed.filter((item) => typeof item === 'string')
+        } catch {
+          paths = []
+        }
+      }
+      const singlePath =
         e.dataTransfer.getData('application/x-echo-track-path') ||
         e.dataTransfer.getData('text/plain')
-      if (!path) return
-      const track = playlistRef.current.find((item) => item.path === path)
-      if (!track) return
-      enqueueUpNextTrack(track)
+      if (singlePath) paths.push(singlePath)
+      const uniquePaths = [...new Set(paths.filter(Boolean))]
+      if (uniquePaths.length === 0) return { ok: false, reason: 'invalid_path' }
+      const byPath = new Map(playlistRef.current.map((item) => [item.path, item]))
+      const tracks = uniquePaths.map((path) => byPath.get(path)).filter(Boolean)
+      if (tracks.length === 0) return { ok: false, reason: 'invalid_path' }
+      return tracks.length === 1 ? enqueueUpNextTrack(tracks[0]) : enqueueUpNextTracks(tracks)
     },
-    [enqueueUpNextTrack]
+    [enqueueUpNextTrack, enqueueUpNextTracks]
   )
 
   const albumGroupsFiltered = useMemo(() => {
@@ -8690,6 +10858,56 @@ export default function App() {
     selectedSmartCollectionId
   ])
 
+  useEffect(() => {
+    if (config.autoLocateCurrentTrack !== true) return
+    if (!showTrackList || showLyrics || view === 'settings') return
+
+    const currentPath = currentTrack?.path || ''
+    if (!currentPath) return
+
+    const targetIndex = tracksForSidebarListFiltered.findIndex(
+      (track) => track?.path === currentPath
+    )
+    if (targetIndex < 0) return
+
+    const playlistElement = sidebarPlaylistRef.current
+    if (!playlistElement) return
+
+    const viewportHeight = playlistElement.clientHeight || sidebarViewportHeight || 0
+    if (viewportHeight <= 0) return
+
+    const rowTop = targetIndex * sidebarRowHeight
+    const rowBottom = rowTop + sidebarRowHeight
+    const currentTop = playlistElement.scrollTop || 0
+    const currentBottom = currentTop + viewportHeight
+    const comfortPadding = Math.min(sidebarRowHeight * 1.5, viewportHeight * 0.25)
+
+    if (rowTop >= currentTop + comfortPadding && rowBottom <= currentBottom - comfortPadding) {
+      return
+    }
+
+    const maxScrollTop = Math.max(
+      0,
+      tracksForSidebarListFiltered.length * sidebarRowHeight - viewportHeight
+    )
+    const targetTop = Math.min(
+      maxScrollTop,
+      Math.max(0, rowTop - Math.max(0, (viewportHeight - sidebarRowHeight) / 2))
+    )
+
+    playlistElement.scrollTo({ top: targetTop, behavior: 'smooth' })
+    setSidebarScrollTop(targetTop)
+  }, [
+    config.autoLocateCurrentTrack,
+    currentTrack?.path,
+    showLyrics,
+    showTrackList,
+    sidebarRowHeight,
+    sidebarViewportHeight,
+    tracksForSidebarListFiltered,
+    view
+  ])
+
   const metadataPrefetchTracks = useMemo(() => {
     const byPath = new Map()
     const pushTrack = (track) => {
@@ -8845,14 +11063,25 @@ export default function App() {
         if (!cachedEntry?.cover) continue
         const albumName = cachedEntry.album || track?.info?.album || 'Singles'
         if (albumName && !cachedAlbumCovers[albumName]) {
-          cachedAlbumCovers[albumName] = cachedEntry.cover
+          cachedAlbumCovers[albumName] = {
+            cover: cachedEntry.cover,
+            artist: cachedEntry.albumArtist || cachedEntry.artist || track?.info?.artist || ''
+          }
         }
       }
       if (!cancelled && Object.keys(cachedAlbumCovers).length > 0) {
+        persistAlbumCoverCacheItems(
+          Object.entries(cachedAlbumCovers).map(([albumName, entry]) => ({
+            album: albumName,
+            artist: entry.artist,
+            cover: entry.cover
+          }))
+        )
         setAlbumCoverMap((prev) => {
           let changed = false
           const next = { ...prev }
-          for (const [albumName, cover] of Object.entries(cachedAlbumCovers)) {
+          for (const [albumName, entry] of Object.entries(cachedAlbumCovers)) {
+            const cover = entry.cover
             if (!next[albumName] && cover) {
               next[albumName] = cover
               changed = true
@@ -8943,14 +11172,25 @@ export default function App() {
           if (!loadedEntry?.cover) continue
           const albumName = loadedEntry.album || track?.info?.album || 'Singles'
           if (albumName && !parsedAlbumCovers[albumName]) {
-            parsedAlbumCovers[albumName] = loadedEntry.cover
+            parsedAlbumCovers[albumName] = {
+              cover: loadedEntry.cover,
+              artist: loadedEntry.albumArtist || loadedEntry.artist || track?.info?.artist || ''
+            }
           }
         }
         if (Object.keys(parsedAlbumCovers).length > 0) {
+          persistAlbumCoverCacheItems(
+            Object.entries(parsedAlbumCovers).map(([albumName, entry]) => ({
+              album: albumName,
+              artist: entry.artist,
+              cover: entry.cover
+            }))
+          )
           setAlbumCoverMap((prev) => {
             let changed = false
             const next = { ...prev }
-            for (const [albumName, cover] of Object.entries(parsedAlbumCovers)) {
+            for (const [albumName, entry] of Object.entries(parsedAlbumCovers)) {
+              const cover = entry.cover
               if (!next[albumName] && cover) {
                 next[albumName] = cover
                 changed = true
@@ -8980,7 +11220,14 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [listMode, metadataCoverKeepPathSet, metadataPrefetchTracks, selectedAlbum, trackMetaMap])
+  }, [
+    listMode,
+    metadataCoverKeepPathSet,
+    metadataPrefetchTracks,
+    persistAlbumCoverCacheItems,
+    selectedAlbum,
+    trackMetaMap
+  ])
 
   useEffect(() => {
     if (listMode !== 'album' || selectedAlbum !== 'all') return undefined
@@ -9020,6 +11267,11 @@ export default function App() {
       setAlbumCoverMap((prev) => {
         if (prev[candidate.albumName]) return prev
         return { ...prev, [candidate.albumName]: cover }
+      })
+      persistAlbumCoverCacheItems({
+        album: candidate.albumName,
+        artist: candidate.artist || '',
+        cover
       })
 
       const currentEntry = trackMetaMapRef.current?.[candidate.track.path] || {}
@@ -9082,6 +11334,7 @@ export default function App() {
     albumCoverMap,
     listMode,
     metadataPrefetchAlbumGroups,
+    persistAlbumCoverCacheItems,
     selectedAlbum,
     trackMetaMap
   ])
@@ -9181,6 +11434,8 @@ export default function App() {
         forceCloseTrackContextMenu()
         forceCloseCoverContextMenu()
         forceCloseGroupContextMenu()
+        setSelectedSidebarTrackPaths([])
+        lastSelectedSidebarTrackPathRef.current = ''
         setListMode(mode)
         if (mode === 'playlists') {
           setSelectedUserPlaylistId(null)
@@ -9210,6 +11465,12 @@ export default function App() {
       forceCloseAddToPlaylistMenu
     ]
   )
+
+  useEffect(() => {
+    if (listMode === 'history' && config.historyShowInSidebar === false) {
+      setListMode('songs')
+    }
+  }, [config.historyShowInSidebar, listMode])
 
   const handlePickAlbumFromSidebar = useCallback(
     (album) => {
@@ -9482,7 +11743,7 @@ export default function App() {
   )
 
   const playGroupNow = useCallback(
-    (type, group) => {
+    async (type, group) => {
       const firstTrack = group?.tracks?.[0]
       if (!firstTrack) return
       const groupKey = type === 'album' ? group?.name || 'album' : group?.folderPath || 'folder'
@@ -9496,12 +11757,18 @@ export default function App() {
       } else if (type === 'folder') {
         handlePickFolderFromSidebar(group)
       }
+      await stopCastBeforeLocalPlayback()
       setActivePlaybackContext(playbackContext)
       setCurrentIndex(firstTrack.originalIdx)
       setIsPlaying(true)
       closeGroupContextMenuAnimated()
     },
-    [handlePickAlbumFromSidebar, handlePickFolderFromSidebar, closeGroupContextMenuAnimated]
+    [
+      handlePickAlbumFromSidebar,
+      handlePickFolderFromSidebar,
+      stopCastBeforeLocalPlayback,
+      closeGroupContextMenuAnimated
+    ]
   )
 
   const queueGroupNext = useCallback(
@@ -9972,17 +12239,6 @@ export default function App() {
       window.removeEventListener('keydown', onKey)
     }
   }, [songSortOpen])
-
-  useEffect(() => {
-    if (!historyMenuOpen) return
-    const onKey = (e) => {
-      if (e.key === 'Escape') setHistoryMenuOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [historyMenuOpen])
 
   const deleteUserPlaylist = useCallback(
     (id) => {
@@ -10765,33 +13021,6 @@ export default function App() {
             </button>
             <button
               className="no-drag"
-              type="button"
-              aria-expanded={historyMenuOpen}
-              aria-haspopup="dialog"
-              onClick={() => setHistoryMenuOpen((open) => !open)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: historyMenuOpen ? 'var(--accent-pink)' : 'inherit',
-                cursor: 'pointer',
-                padding: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.3s ease'
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.color = 'var(--accent-pink)'
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.color = historyMenuOpen ? 'var(--accent-pink)' : 'inherit'
-              }}
-              title={t('player.playbackHistory', 'Playback history')}
-            >
-              <History size={18} />
-            </button>
-            <button
-              className="no-drag"
               onClick={() => setDownloaderDrawerOpen((o) => !o)}
               style={{
                 background: 'none',
@@ -10867,6 +13096,31 @@ export default function App() {
               title={t('titlebar.mvSettings')}
             >
               <Film size={18} />
+            </button>
+            <button
+              className="no-drag"
+              type="button"
+              onClick={() => setCastSendDrawerOpen((o) => !o)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: castSendDrawerOpen ? 'var(--accent-pink)' : 'inherit',
+                cursor: 'pointer',
+                padding: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.color = 'var(--accent-pink)'
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.color = castSendDrawerOpen ? 'var(--accent-pink)' : 'inherit'
+              }}
+              title={t('titlebar.castSender', '投送到数播')}
+            >
+              <Cast size={18} />
             </button>
             <button
               className="no-drag"
@@ -11100,6 +13354,29 @@ export default function App() {
               >
                 <FolderOpen size={16} /> {t('listMode.folders')}
               </button>
+              <button
+                type="button"
+                className={`nav-rail-item ${listMode === 'remoteLibrary' ? 'active' : ''}`}
+                onClick={() => handleListMode('remoteLibrary')}
+              >
+                <Globe size={16} /> 远程音乐库
+              </button>
+              <button
+                type="button"
+                className={`nav-rail-item ${listMode === 'queue' ? 'active' : ''}`}
+                onClick={() => handleListMode('queue')}
+              >
+                <ListPlus size={16} /> {t('listMode.queue')}
+              </button>
+              {config.historyShowInSidebar !== false && (
+                <button
+                  type="button"
+                  className={`nav-rail-item ${listMode === 'history' ? 'active' : ''}`}
+                  onClick={() => handleListMode('history')}
+                >
+                  <History size={16} /> {t('listMode.history', 'History')}
+                </button>
+              )}
               <div className={`nav-rail-collapse ${navPlaylistsExpanded ? 'is-open' : ''}`}>
                 <button
                   type="button"
@@ -11203,23 +13480,39 @@ export default function App() {
                   selectedFolder !== 'all' &&
                   (selectedFolder.split(/[\\/]/).pop() || t('listMode.folders'))}
                 {listMode === 'playlists' && t('listMode.playlists')}
+                {listMode === 'remoteLibrary' && '远程音乐库'}
+                {listMode === 'queue' && t('queue.title', 'Up Next')}
+                {listMode === 'history' && t('listMode.history', 'History')}
               </span>
-              <span className="browser-topbar-count">
-                {'\u00b7 '}
-                {listMode === 'album' && selectedAlbum === 'all'
-                  ? t('albums.count', {
-                      count: albumGroupsFiltered.length,
-                      defaultValue: '{{count}} 张'
-                    })
-                  : t('songs.count', {
-                      count: tracksForSidebarListFiltered.length,
-                      defaultValue: '{{count}} \u9996'
-                    })}
-              </span>
+              {listMode !== 'remoteLibrary' && listMode !== 'queue' && listMode !== 'history' && (
+                <span className="browser-topbar-count">
+                  {'\u00b7 '}
+                  {listMode === 'album' && selectedAlbum === 'all'
+                    ? t('albums.count', {
+                        count: albumGroupsFiltered.length,
+                        defaultValue: '{{count}} 张'
+                      })
+                    : listMode === 'folders' && selectedFolder === 'all'
+                      ? t('playlists.groups', {
+                          count: folderGroupsFiltered.length,
+                          defaultValue: '{{count}} 组'
+                        })
+                      : t('songs.count', {
+                          count: tracksForSidebarListFiltered.length,
+                          defaultValue: '{{count}} \u9996'
+                        })}
+                </span>
+              )}
             </span>
             <div
               className="browser-toolbar-group"
               aria-label={t('aria.libraryActions', 'Library actions')}
+              style={{
+                display:
+                  listMode === 'remoteLibrary' || listMode === 'queue' || listMode === 'history'
+                    ? 'none'
+                    : ''
+              }}
             >
               <button
                 className="browser-toolbar-btn"
@@ -11266,26 +13559,27 @@ export default function App() {
               </button>
             </div>
           </div>
-          <div className="search-container no-drag" style={{ flexShrink: 0 }}>
-            <Search size={16} className="search-icon" />
-            <input
-              type="text"
-              placeholder={t('search.placeholder')}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            {searchQuery.trim() && (
-              <button
-                type="button"
-                className="search-clear-btn"
-                onClick={() => setSearchQuery('')}
-                aria-label={t('common.clear', { defaultValue: 'Clear' })}
-                title={t('common.clear', { defaultValue: 'Clear' })}
-              >
-                <X size={14} strokeWidth={1.8} />
-              </button>
-            )}
-            {listMode === 'songs' && (
+          {listMode !== 'history' && (
+            <div className="search-container no-drag" style={{ flexShrink: 0 }}>
+              <Search size={16} className="search-icon" />
+              <input
+                type="text"
+                placeholder={t('search.placeholder')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery.trim() && (
+                <button
+                  type="button"
+                  className="search-clear-btn"
+                  onClick={() => setSearchQuery('')}
+                  aria-label={t('common.clear', { defaultValue: 'Clear' })}
+                  title={t('common.clear', { defaultValue: 'Clear' })}
+                >
+                  <X size={14} strokeWidth={1.8} />
+                </button>
+              )}
+              {listMode === 'songs' && (
               <div className="folder-sort-wrap search-sort-wrap" ref={songSortRef}>
                 <button
                   type="button"
@@ -11382,7 +13676,8 @@ export default function App() {
                 )}
               </div>
             )}
-          </div>
+            </div>
+          )}
 
           <div
             className={`sidebar-list-stack${listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId) ? ' sidebar-list-stack--pl-detail' : ''}`}
@@ -11423,6 +13718,29 @@ export default function App() {
               >
                 {t('listMode.folders')}
               </button>
+              <button
+                type="button"
+                className={`list-filter-chip ${listMode === 'remoteLibrary' ? 'active' : ''}`}
+                onClick={() => handleListMode('remoteLibrary')}
+              >
+                远程
+              </button>
+              <button
+                type="button"
+                className={`list-filter-chip ${listMode === 'queue' ? 'active' : ''}`}
+                onClick={() => handleListMode('queue')}
+              >
+                {t('listMode.queue')}
+              </button>
+              {config.historyShowInSidebar !== false && (
+                <button
+                  type="button"
+                  className={`list-filter-chip ${listMode === 'history' ? 'active' : ''}`}
+                  onClick={() => handleListMode('history')}
+                >
+                  {t('listMode.history', 'History')}
+                </button>
+              )}
             </div>
 
             {selectedAlbum !== 'all' && listMode === 'songs' && (
@@ -11597,16 +13915,76 @@ export default function App() {
             )}
 
             <div
-              className={`playlist${listMode === 'album' ? ' playlist-album-mode' : ''}${listMode === 'folders' ? ' playlist-album-mode' : ''}${listMode === 'artists' ? ' playlist-album-mode' : ''}${listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId) ? ' playlist--pl-detail' : ''}`}
+              className={`playlist${listMode === 'album' ? ' playlist-album-mode' : ''}${listMode === 'folders' ? ' playlist-album-mode' : ''}${listMode === 'artists' ? ' playlist-album-mode' : ''}${listMode === 'queue' ? ' playlist--queue' : ''}${listMode === 'history' ? ' playlist--history' : ''}${listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId) ? ' playlist--pl-detail' : ''}`}
               ref={sidebarPlaylistRef}
               onScroll={handleSidebarScroll}
             >
-              {playlist.length === 0 && listMode !== 'playlists' && (
-                <div className="app-empty-state app-empty-state--minimal">
-                  <p className="app-empty-state__title">{t('empty.noTracks')}</p>
-                  <p className="app-empty-state__hint">{t('empty.importFolder')}</p>
-                </div>
+              {listMode === 'queue' && (
+                <QueueSidebarView
+                  items={upNextSidebarItems}
+                  currentPath={currentTrack?.path || ''}
+                  rowHeight={SIDEBAR_ROW_HEIGHT}
+                  queueDragOver={queueDragOver}
+                  queuePlaybackEnabled={queuePlaybackEnabled}
+                  canUndo={queueUndoStack.length > 0}
+                  albumArtistByName={albumArtistByName}
+                  formatDuration={formatTime}
+                  onExternalDragOver={handleQueueDragOver}
+                  onExternalDragLeave={handleQueueDragLeave}
+                  onExternalDrop={handleQueueDrop}
+                  onReorder={reorderUpNextQueueByPath}
+                  onRemove={removeFromUpNextQueueWithUndo}
+                  onRemoveMany={removeManyFromUpNextQueueWithUndo}
+                  onRemoveAbove={removeUpNextAboveWithUndo}
+                  onRemoveBelow={removeUpNextBelowWithUndo}
+                  onClear={clearUpNextQueueWithUndo}
+                  onShuffle={shuffleUpNextQueue}
+                  onSaveAsPlaylist={saveUpNextQueueAsPlaylist}
+                  onToggleQueuePlayback={() => setQueuePlaybackEnabled((prev) => !prev)}
+                  onPlayNow={playUpNextQueueItemNow}
+                  onPlayNext={playUpNextPathNext}
+                  onMoveTop={moveUpNextPathToTop}
+                  onMoveBottom={moveUpNextPathToBottom}
+                  onUndo={undoQueueMutation}
+                />
               )}
+
+              {listMode === 'history' && config.historyShowInSidebar !== false && (
+                <HistorySidebarView
+                  entries={playbackHistoryEntries}
+                  canBack={playbackHistory.length > 0}
+                  onBack={handleHistoryBack}
+                  onClear={handleHistoryClear}
+                  onPlay={playFromHistoryEntry}
+                  onJump={handleHistoryJump}
+                  onRemove={removePlaybackHistoryEntry}
+                />
+              )}
+
+              {listMode === 'remoteLibrary' && (
+                <RemoteLibraryView
+                  sources={remoteLibrarySources}
+                  activeSourceId={activeRemoteLibrarySourceId}
+                  onActiveSourceChange={setActiveRemoteLibrarySourceId}
+                  onOpenSettings={() => {
+                    setView('settings')
+                    setActiveSettingsSection('remoteLibrary')
+                  }}
+                  onPlayTrack={playRemoteLibraryTrack}
+                  onQueueTrack={queueRemoteLibraryTrack}
+                />
+              )}
+
+              {playlist.length === 0 &&
+                listMode !== 'playlists' &&
+                listMode !== 'remoteLibrary' &&
+                listMode !== 'queue' &&
+                listMode !== 'history' && (
+                  <div className="app-empty-state app-empty-state--minimal">
+                    <p className="app-empty-state__title">{t('empty.noTracks')}</p>
+                    <p className="app-empty-state__hint">{t('empty.importFolder')}</p>
+                  </div>
+                )}
 
               {listMode === 'playlists' &&
                 !selectedUserPlaylistId &&
@@ -12099,24 +14477,19 @@ export default function App() {
               )}
 
               {playlist.length > 0 && listMode === 'artists' && selectedArtist === 'all' && (
-                <div className="folder-browser artist-browser no-drag">
+                <div className="artist-browser no-drag">
                   <div className="folder-browser-header">
                     <span className="folder-browser-title">{t('artists.heading', 'Artists')}</span>
                     <span className="folder-browser-count">({artistGroups.length})</span>
                   </div>
-                  <div className="folder-list">
+                  <div className="artist-grid">
                     {artistGroups.map((artist) => (
-                      <button
+                      <ArtistSidebarCard
                         key={artist.name}
-                        type="button"
-                        className={`folder-list-item${selectedArtist === artist.name ? ' active' : ''}`}
-                        onClick={() => handlePickArtistFromSidebar(artist)}
-                        title={artist.name}
-                      >
-                        <Users size={15} className="folder-list-icon" />
-                        <span className="folder-list-name">{artist.name}</span>
-                        <span className="folder-list-count">{artist.tracks.length}</span>
-                      </button>
+                        artist={artist}
+                        isSelected={selectedArtist === artist.name}
+                        onPickArtist={handlePickArtistFromSidebar}
+                      />
                     ))}
                   </div>
                 </div>
@@ -12375,21 +14748,34 @@ export default function App() {
                             ? formatTime(track.info.duration)
                             : ''
                         const trackMeta = effectiveTrackMetaMap[track.path] || {}
+                        const selectedForDrag = selectedSidebarTrackPathSet.has(track.path)
 
                         const liked = likedSet.has(track.path)
+                        const inUpNext = upNextPathSet.has(track.path)
                         return (
                           <div
                             key={`${track.path}-${track.originalIdx}`}
-                            className={`track-item${track.originalIdx === currentIndex ? ' active' : ''}${listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId) ? ' track-item--in-pl' : ''}`}
+                            className={`track-item${track.originalIdx === currentIndex ? ' active' : ''}${selectedForDrag ? ' track-item--selected' : ''}${listMode === 'playlists' && (selectedUserPlaylistId || selectedSmartCollectionId) ? ' track-item--in-pl' : ''}`}
                             data-track-index={track.originalIdx}
                             data-track-path={track.path}
                             draggable
                             onDragStart={(e) => {
+                              const dragPaths =
+                                selectedForDrag && selectedSidebarTrackPaths.length > 1
+                                  ? selectedSidebarTrackPaths
+                                  : [track.path]
                               e.dataTransfer.effectAllowed = 'copy'
                               e.dataTransfer.setData('application/x-echo-track-path', track.path)
+                              e.dataTransfer.setData(
+                                'application/x-echo-track-paths',
+                                JSON.stringify(dragPaths)
+                              )
                               e.dataTransfer.setData('text/plain', track.path)
                             }}
-                            onClick={() => {
+                            onClick={(event) => {
+                              if (handleSidebarTrackSelectionClick(track, event)) return
+                              setSelectedSidebarTrackPaths([])
+                              lastSelectedSidebarTrackPathRef.current = ''
                               startPlaybackForTrack(track, sidebarPlaybackContext)
                             }}
                             onContextMenu={(e) => {
@@ -12464,42 +14850,62 @@ export default function App() {
                                   }}
                                   title={liked ? t('like.unlike') : t('like.like')}
                                   aria-pressed={liked}
-                                 >
-                                   <Heart
-                                     size={16}
-                                     fill={liked ? 'currentColor' : 'none'}
-                                     strokeWidth={liked ? 1.5 : 1.5}
-                                   />
-                                 </button>
-                                 {listMode === 'playlists' && selectedUserPlaylistId && (
-                                   <button
-                                     type="button"
-                                     className="track-remove-pl-btn"
-                                     title={t('aria.removeFromPlaylist')}
-                                     onClick={(e) => {
-                                       e.stopPropagation()
-                                       removePathFromUserPlaylist(selectedUserPlaylistId, track.path)
-                                     }}
-                                   >
-                                     <Minus size={16} />
-                                   </button>
-                                 )}
-                                 {(listMode === 'songs' ||
-                                   listMode === 'folders' ||
-                                   listMode === 'artists' ||
+                                >
+                                  <Heart
+                                    size={16}
+                                    fill={liked ? 'currentColor' : 'none'}
+                                    strokeWidth={liked ? 1.5 : 1.5}
+                                  />
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`track-add-pl-btn track-queue-btn ${inUpNext ? 'active' : ''}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    if (inUpNext) {
+                                      removeFromUpNextQueue(track.path)
+                                    } else {
+                                      enqueueUpNextTrack(track)
+                                    }
+                                  }}
+                                  title={
+                                    inUpNext
+                                      ? t('contextMenu.removeFromUpNext')
+                                      : t('queue.contextMenu.addToQueue', 'Add to Queue')
+                                  }
+                                  aria-pressed={inUpNext}
+                                >
+                                  <ListPlus size={16} />
+                                </button>
+                                {listMode === 'playlists' && selectedUserPlaylistId && (
+                                  <button
+                                    type="button"
+                                    className="track-remove-pl-btn"
+                                    title={t('aria.removeFromPlaylist')}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      removePathFromUserPlaylist(selectedUserPlaylistId, track.path)
+                                    }}
+                                  >
+                                    <Minus size={16} />
+                                  </button>
+                                )}
+                                {(listMode === 'songs' ||
+                                  listMode === 'folders' ||
+                                  listMode === 'artists' ||
                                   listMode === 'album') && (
                                   <button
                                     type="button"
-                                    className={`track-add-pl-btn ${addToPlaylistMenu?.originalIdx === track.originalIdx ? 'active' : ''}`}
+                                    className={`track-add-pl-btn track-playlist-btn ${addToPlaylistMenu?.originalIdx === track.originalIdx ? 'active' : ''}`}
                                     onClick={(e) => openAddToPlaylistPopover(e, track)}
                                     title={t('aria.addToPlaylist')}
                                   >
-                                    <ListPlus size={16} />
+                                    <Plus size={16} />
                                   </button>
-                                 )}
-                               </div>
-                             )}
-                           </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )
                       })}
                       {visibleSidebarRange.bottomSpacer > 0 && (
@@ -12558,7 +14964,7 @@ export default function App() {
                               color: 'var(--accent-pink)'
                             }}
                           >
-                            DLNA
+                            {castPillLabel}
                           </span>
                         )}
                         {technicalInfo.codec && (
@@ -12890,7 +15296,7 @@ export default function App() {
                         boxShadow: '0 0 12px rgba(236, 72, 153, 0.25)'
                       }}
                     >
-                      DLNA
+                      {castPillLabel}
                     </div>
                   )}
                   {technicalInfo.codec && (
@@ -12915,7 +15321,6 @@ export default function App() {
                     </div>
                   )}
                 </div>
-
               </div>
             </div>
           )}
@@ -13502,6 +15907,45 @@ export default function App() {
                     </div>
                     <div className="setting-row">
                       <div className="setting-info">
+                        <h3>{t('remote.settingsTitle', 'Phone Remote')}</h3>
+                        <p>
+                          {t(
+                            'remote.settingsDesc',
+                            'Control playback from a phone on the same Wi-Fi.'
+                          )}
+                        </p>
+                      </div>
+                      <div
+                        className="settings-chip-row no-drag"
+                        style={{ justifyContent: 'flex-end' }}
+                      >
+                        <UiButton
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setPhoneRemoteDrawerOpen(true)}
+                        >
+                          <Smartphone size={14} />
+                          {t('remote.openDrawer', 'Open remote')}
+                        </UiButton>
+                        <button
+                          className={`toggle-btn ${config.phoneRemoteEnabled ? 'active' : ''}`}
+                          onClick={() =>
+                            setConfig((prev) => ({
+                              ...prev,
+                              phoneRemoteEnabled: !prev.phoneRemoteEnabled
+                            }))
+                          }
+                        >
+                          {config.phoneRemoteEnabled ? (
+                            <ToggleRight size={32} />
+                          ) : (
+                            <ToggleLeft size={32} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="setting-row">
+                      <div className="setting-info">
                         <h3>{t('settings.sleepTimerTitle')}</h3>
                         <p>{t('settings.sleepTimerDesc')}</p>
                         {sleepTimerActive ? (
@@ -13583,38 +16027,73 @@ export default function App() {
                   style={{ display: settingsSectionVisibility.eq ? '' : 'none' }}
                 >
                   <section
-                    className={`settings-section eq-section ${!config.useEQ ? 'disabled' : ''}`}
+                    className={`settings-section eq-section echo-clean-eq-section ${!config.useEQ ? 'eq-bypassed-section' : ''}`}
                   >
-                    <div
-                      className="section-title"
-                      style={{ justifyContent: 'space-between', width: '100%' }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'flex-start',
-                          gap: '6px'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <Sliders size={20} />
-                          <h2>{t('settings.eqSection')}</h2>
+                    <div className="eq-clean-header">
+                      <div className="eq-clean-heading">
+                        <div className="eq-clean-icon">
+                          <Sliders size={18} />
                         </div>
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: '12px',
-                            color: 'var(--text-muted, #888)',
-                            maxWidth: '52rem'
-                          }}
-                        >
-                          {useNativeEngine
-                            ? t('settings.eqEngineHintHifi')
-                            : t('settings.eqEngineHintStandard')}
-                        </p>
+                        <div className="eq-clean-heading-copy">
+                          <div className="eq-clean-title-row">
+                            <h2>{t('settings.eqSection')}</h2>
+                            <span
+                              className={`eq-clean-status-pill ${config.useEQ ? 'active' : ''}`}
+                            >
+                              {config.useEQ ? t('eqPlot.enabled') : t('eqPlot.disabled')}
+                            </span>
+                          </div>
+                          <p>
+                            {useNativeEngine
+                              ? t('settings.eqEngineHintHifi')
+                              : t('settings.eqEngineHintStandard')}
+                          </p>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <div className="eq-clean-toolbar">
+                        <button
+                          type="button"
+                          className={`eq-status-toggle ${config.useEQ ? 'active' : ''}`}
+                          aria-pressed={config.useEQ}
+                          onClick={() => setConfig((prev) => ({ ...prev, useEQ: !prev.useEQ }))}
+                        >
+                          {config.useEQ ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
+                          <span>{config.useEQ ? t('eqPlot.enabled') : t('eqPlot.disabled')}</span>
+                        </button>
+                        <label className="eq-toolbar-control">
+                          {t('eqPlot.quality')}
+                          <select
+                            className="eq-toolbar-select"
+                            value={config.eqOversampling || '2x'}
+                            onChange={(e) =>
+                              setConfig((prev) => ({
+                                ...prev,
+                                eqOversampling: e.target.value
+                              }))
+                            }
+                          >
+                            <option value="4x">{t('eqPlot.oversampling.high')}</option>
+                            <option value="2x">{t('eqPlot.oversampling.balanced')}</option>
+                            <option value="off">{t('eqPlot.oversampling.lowCpu')}</option>
+                          </select>
+                        </label>
+                        <label className="eq-toolbar-control">
+                          {t('eqPlot.outputSafety')}
+                          <select
+                            className="eq-toolbar-select"
+                            value={config.eqOutputSafety || 'soft'}
+                            onChange={(e) =>
+                              setConfig((prev) => ({
+                                ...prev,
+                                eqOutputSafety: e.target.value
+                              }))
+                            }
+                          >
+                            <option value="soft">{t('eqPlot.outputSafetyModes.soft')}</option>
+                            <option value="hard">{t('eqPlot.outputSafetyModes.hard')}</option>
+                            <option value="off">{t('eqPlot.outputSafetyModes.off')}</option>
+                          </select>
+                        </label>
                         <button
                           className="eq-toolbar-btn"
                           onClick={() => {
@@ -13622,6 +16101,7 @@ export default function App() {
                               ...b,
                               gain: 0
                             }))
+                            setEqSoloBandIdx(null)
                             setConfig((prev) => ({
                               ...prev,
                               eqBands: resetBands,
@@ -13632,10 +16112,10 @@ export default function App() {
                           <Repeat size={14} /> {t('settings.reset')}
                         </button>
 
-                        {/* Custom Preamp Styled Dropdown */}
-                        <div className="custom-dropdown-container">
-                          <div
-                            className="dropdown-trigger"
+                        <div className="custom-dropdown-container eq-preset-menu">
+                          <button
+                            type="button"
+                            className="dropdown-trigger eq-preset-trigger"
                             onClick={() => setIsPresetOpen(!isPresetOpen)}
                           >
                             <span>
@@ -13644,7 +16124,7 @@ export default function App() {
                               })}
                             </span>
                             <ChevronDown size={14} />
-                          </div>
+                          </button>
                           {isPresetOpen && (
                             <div className="dropdown-menu show">
                               {Object.keys(EQ_PRESETS).map((name) => (
@@ -13654,6 +16134,7 @@ export default function App() {
                                   onClick={() => {
                                     const preset = EQ_PRESETS[name]
                                     if (preset) {
+                                      setEqSoloBandIdx(null)
                                       const newBands = config.eqBands?.map((b, i) => ({
                                         ...b,
                                         gain:
@@ -13683,29 +16164,46 @@ export default function App() {
                       </div>
                     </div>
 
-                    <EqPlot
-                      accentHex={activeAccentHex}
-                      bands={config.eqBands}
-                      enabled={config.useEQ}
-                      preamp={config.preamp || 0}
-                      analyser={analyserNode.current}
-                      onPreampChange={(val) =>
-                        setConfig((prev) => ({
-                          ...prev,
-                          preamp: val,
-                          activePreset: 'Custom'
-                        }))
-                      }
-                      onBandChange={(idx, updates) => {
-                        const newBands = [...config.eqBands]
-                        newBands[idx] = { ...newBands[idx], ...updates }
-                        setConfig((prev) => ({
-                          ...prev,
-                          eqBands: newBands,
-                          activePreset: 'Custom'
-                        }))
-                      }}
-                    />
+                    <details className="eq-advanced-details">
+                      <summary className="eq-advanced-summary">
+                        <span>
+                          {t('eqPlot.advancedEditor', { defaultValue: '高级参数编辑' })}
+                        </span>
+                        <small>
+                          {t('eqPlot.advancedEditorHint', {
+                            defaultValue: '展开后调整曲线、频段、Q 值与前级'
+                          })}
+                        </small>
+                        <ChevronDown size={14} className="eq-advanced-chevron" />
+                      </summary>
+
+                      <EqPlot
+                        accentHex={activeAccentHex}
+                        bands={config.eqBands}
+                        enabled={config.useEQ}
+                        preamp={config.preamp || 0}
+                        analyser={analyserNode.current}
+                        soloIdx={eqSoloBandIdx}
+                        onSoloChange={setEqSoloBandIdx}
+                        onEnable={() => setConfig((prev) => ({ ...prev, useEQ: true }))}
+                        onPreampChange={(val) =>
+                          setConfig((prev) => ({
+                            ...prev,
+                            preamp: val,
+                            activePreset: 'Custom'
+                          }))
+                        }
+                        onBandChange={(idx, updates) => {
+                          const newBands = [...config.eqBands]
+                          newBands[idx] = { ...newBands[idx], ...updates }
+                          setConfig((prev) => ({
+                            ...prev,
+                            eqBands: newBands,
+                            activePreset: 'Custom'
+                          }))
+                        }}
+                      />
+                    </details>
                   </section>
                 </div>
 
@@ -13799,6 +16297,36 @@ export default function App() {
                           <Wand2 size={16} /> {t('settings.randomize')}
                         </UiButton>
                       </div>
+                    </div>
+
+                    <div className="setting-row" style={{ marginBottom: 20 }}>
+                      <div className="setting-info">
+                        <h3>
+                          {t('settings.autoLocateCurrentTrackTitle', 'Locate current playing song')}
+                        </h3>
+                        <p>
+                          {t(
+                            'settings.autoLocateCurrentTrackDesc',
+                            'When playback switches songs, automatically scroll the current list to the playing track.'
+                          )}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`toggle-btn ${config.autoLocateCurrentTrack === true ? 'active' : ''}`}
+                        onClick={() =>
+                          setConfig((prev) => ({
+                            ...prev,
+                            autoLocateCurrentTrack: !prev.autoLocateCurrentTrack
+                          }))
+                        }
+                      >
+                        {config.autoLocateCurrentTrack === true ? (
+                          <ToggleRight size={32} />
+                        ) : (
+                          <ToggleLeft size={32} />
+                        )}
+                      </button>
                     </div>
 
                     <div className="setting-row" style={{ marginBottom: 20 }}>
@@ -15240,6 +17768,25 @@ export default function App() {
                 </div>
 
                 <div
+                  id="settings-sec-remote-library"
+                  data-settings-section="remoteLibrary"
+                  style={{ display: settingsSectionVisibility.remoteLibrary ? '' : 'none' }}
+                >
+                  <section className="settings-section">
+                    <div className="section-title">
+                      <Globe size={20} />
+                      <h2>远程音乐库</h2>
+                    </div>
+                    <RemoteLibrarySettings
+                      sources={remoteLibrarySources}
+                      encryptionAvailable={remoteLibraryEncryptionAvailable}
+                      onReload={reloadRemoteLibrarySources}
+                      onSelectSource={setActiveRemoteLibrarySourceId}
+                    />
+                  </section>
+                </div>
+
+                <div
                   id="settings-sec-about"
                   data-settings-section="about"
                   style={{ display: settingsSectionVisibility.about ? '' : 'none' }}
@@ -15736,158 +18283,6 @@ export default function App() {
           onApplyLyricsText={applyLyricsFromText}
           onNativeLyricsFilePick={pickLyricsFileNative}
         />
-        <>
-          <div
-            className={`lyrics-drawer-backdrop ${historyMenuOpen ? 'lyrics-drawer-backdrop--open' : ''}`}
-            onClick={() => setHistoryMenuOpen(false)}
-            aria-hidden={!historyMenuOpen}
-          />
-          <aside
-            className={`lyrics-drawer-panel playback-history-drawer-panel ${historyMenuOpen ? 'lyrics-drawer-panel--open' : ''}`}
-            role="dialog"
-            aria-label={t('player.playbackHistory', 'Playback history')}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="lyrics-drawer-header">
-              <h2 className="lyrics-drawer-title">
-                <History size={18} />
-                {t('player.playbackHistory', 'Playback history')}
-              </h2>
-              <button
-                type="button"
-                className="lyrics-drawer-close"
-                onClick={() => setHistoryMenuOpen(false)}
-                aria-label={t('aria.close')}
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="lyrics-drawer-body playback-history-drawer-body">
-              <section className="lyrics-drawer-section playback-history-drawer-hero">
-                <div className="playback-history-drawer-hero-main">
-                  <span className="playback-history-drawer-kicker">
-                    {t('player.playbackHistory', 'Playback history')}
-                  </span>
-                  <strong className="playback-history-drawer-count">
-                    {playbackHistoryEntries.length > 0
-                      ? t('player.historyCountLabel', {
-                          count: playbackHistoryEntries.length,
-                          defaultValue: `${playbackHistoryEntries.length} tracks in this session`
-                        })
-                      : t('empty.historyEmpty', 'No playback history yet.')}
-                  </strong>
-                  <p className="playback-history-drawer-copy">
-                    {playbackHistoryEntries.length > 0
-                      ? t(
-                          'player.historyDrawerHint',
-                          'Use this column to jump back through what you listened to.'
-                        )
-                      : playbackHistory.length > 0
-                        ? t(
-                            'player.historyMissingHint',
-                            'Saved history exists, but those tracks are no longer available in the current playlist.'
-                          )
-                        : t(
-                            'player.historyDrawerEmptyHint',
-                            'Once you switch songs, your recent path will appear here.'
-                          )}
-                  </p>
-                </div>
-                <div className="playback-history-drawer-actions">
-                  <button
-                    type="button"
-                    className="playback-history-drawer-action playback-history-drawer-action--primary"
-                    onClick={handleHistoryMenuBack}
-                    disabled={playbackHistory.length === 0}
-                  >
-                    <SkipBack size={15} />
-                    <span>{t('player.backHistory', 'Back through history')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="playback-history-drawer-action playback-history-drawer-action--secondary"
-                    onClick={handleHistoryMenuClear}
-                    disabled={playbackHistory.length === 0}
-                  >
-                    <Trash2 size={15} />
-                    <span>{t('player.clearHistory', 'Clear')}</span>
-                  </button>
-                </div>
-              </section>
-
-              <section className="lyrics-drawer-section">
-                <div className="audio-drawer-section-header">
-                  <History size={16} />
-                  <span className="audio-drawer-section-label">
-                    {t('player.recentTracks', 'Recent tracks')}
-                  </span>
-                </div>
-                {playbackHistoryEntries.length === 0 ? (
-                  <div className="playback-history-drawer-empty">
-                    {playbackHistory.length > 0
-                      ? t(
-                          'player.historyMissingHint',
-                          'Saved history exists, but those tracks are no longer available in the current playlist.'
-                        )
-                      : t('empty.historyEmpty', 'No playback history yet.')}
-                  </div>
-                ) : (
-                  <div className="playback-history-drawer-list">
-                    {playbackHistoryEntries.map((entry, entryIndex) => {
-                      const track = entry.track
-                      const displayArtist =
-                        track && track.info.artist !== 'Unknown Artist'
-                          ? track.info.artist
-                          : track
-                            ? albumArtistByName[track.info.album] || track.info.artist
-                            : entry.artist || t('track.unknownArtist', 'Unknown Artist')
-                      const displayAlbum =
-                        track?.info?.album && track.info.album !== 'Unknown Album'
-                          ? track.info.album
-                          : entry.album
-                            ? entry.album
-                            : t('track.unknownAlbum', 'Unknown Album')
-                      const displayTitle =
-                        track?.info?.title || entry.title || fileNameFromPath(entry.path)
-                      const playCount =
-                        track && Number(trackStats[track.path]?.playCount) > 0
-                          ? trackStats[track.path].playCount
-                          : 0
-                      return (
-                        <button
-                          key={`${entry.path}-history-drawer-${entry.historyIndex}`}
-                          type="button"
-                          className="playback-history-drawer-item"
-                          onClick={() => handleHistoryMenuJump(entry.historyIndex)}
-                          title={`${displayTitle} - ${displayArtist}`}
-                        >
-                          <div className="playback-history-drawer-item-top">
-                            <span className="playback-history-drawer-item-order">
-                              {entryIndex === 0
-                                ? t('player.historyMostRecent', 'Most recent')
-                                : t('player.historyOrderLabel', {
-                                    index: entryIndex + 1,
-                                    defaultValue: `#${entryIndex + 1}`
-                                  })}
-                            </span>
-                            <span className="playback-history-drawer-item-album">
-                              {displayAlbum}
-                            </span>
-                          </div>
-                          <span className="playback-history-drawer-item-title">{displayTitle}</span>
-                          <span className="playback-history-drawer-item-subtitle">
-                            {displayArtist}
-                            {playCount > 0 && ' - Played ' + playCount + ' times'}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </section>
-            </div>
-          </aside>
-        </>
         <MediaDownloaderDrawer
           open={downloaderDrawerOpen}
           onClose={() => setDownloaderDrawerOpen(false)}
@@ -15985,6 +18380,20 @@ export default function App() {
           onHostPlayAfterBuffer={handleHostPlayAfterBuffer}
           onHostUploadEnd={handleHostUploadEnd}
         />
+        <PhoneRemoteDrawer
+          open={phoneRemoteDrawerOpen}
+          onClose={() => setPhoneRemoteDrawerOpen(false)}
+          t={t}
+          config={config}
+          status={phoneRemoteStatus}
+          busy={phoneRemoteBusy}
+          onStart={handlePhoneRemoteStart}
+          onStop={handlePhoneRemoteStop}
+          onRefresh={refreshPhoneRemoteStatus}
+          onRotateToken={handlePhoneRemoteRotateToken}
+          onKickClient={handlePhoneRemoteKickClient}
+          onConfigChange={updatePhoneRemoteConfig}
+        />
         <AudioSettingsDrawer
           open={audioSettingsDrawerOpen}
           onClose={() => setAudioSettingsDrawerOpen(false)}
@@ -16028,6 +18437,16 @@ export default function App() {
           onSave={handleSaveTrackMetadata}
         />
         <CastReceiveDrawer open={castDrawerOpen} onClose={() => setCastDrawerOpen(false)} />
+        <CastSendDrawer
+          open={castSendDrawerOpen}
+          onClose={() => setCastSendDrawerOpen(false)}
+          t={t}
+          currentTrack={castSendCurrentTrack}
+          isLocalPlaying={isPlaying}
+          onLocalTakeover={async () => {
+            if (isPlaying) await togglePlay()
+          }}
+        />
         <MvSettingsDrawer
           open={mvDrawerOpen}
           onClose={() => setMvDrawerOpen(false)}
@@ -16043,7 +18462,10 @@ export default function App() {
           currentTrackTitle={displayMainTitle}
           currentTrackArtist={displayMainArtist}
           onPersistMvOverride={(mv) => {
-            const p = playlist[currentIndex]?.path
+            const p =
+              castVirtualTrack?.metadataTrusted && castVirtualTrack?.path
+                ? castVirtualTrack.path
+                : playlist[currentIndex]?.path
             if (p && mv?.id && mv?.source) setMvOverrideForPath(p, mv)
           }}
           onRestartPlayback={() => {
@@ -16204,6 +18626,22 @@ export default function App() {
                       className="track-ctx-item"
                       onClick={() => {
                         if (inUpNext) {
+                          moveUpNextPathToTop(track.path)
+                        } else {
+                          enqueueUpNextTrackAtFront(track)
+                        }
+                        closeTrackContextMenuAnimated()
+                      }}
+                    >
+                      <SkipForward size={14} aria-hidden />{' '}
+                      {t('queue.contextMenu.playNext', 'Play Next')}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="track-ctx-item"
+                      onClick={() => {
+                        if (inUpNext) {
                           removeFromUpNextQueue(track.path)
                         } else {
                           enqueueUpNextTrack(track)
@@ -16211,8 +18649,10 @@ export default function App() {
                         closeTrackContextMenuAnimated()
                       }}
                     >
-                      <SkipForward size={14} aria-hidden />{' '}
-                      {inUpNext ? t('contextMenu.removeFromUpNext') : t('contextMenu.playNext')}
+                      <ListPlus size={14} aria-hidden />{' '}
+                      {inUpNext
+                        ? t('contextMenu.removeFromUpNext')
+                        : t('queue.contextMenu.addToQueue', 'Add to Queue')}
                     </button>
                     <button
                       type="button"
@@ -16536,7 +18976,7 @@ export default function App() {
               </div>
               <div className="bottom-bar-artist">{displayMainArtist || ''}</div>
               <div className="bottom-bar-tech-pills">
-                {dlnaUiOn && <span className="mini-pill">DLNA</span>}
+                {dlnaUiOn && <span className="mini-pill">{castPillLabel}</span>}
                 {(currentBottomBarBpm || showBottomBarBpmDetecting) && (
                   <span className="echo-bpm-pill echo-bpm-pill--bottom">
                     {currentBottomBarBpm ? (

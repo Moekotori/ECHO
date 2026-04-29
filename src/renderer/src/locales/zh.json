@@ -45,6 +45,38 @@
     "actionFailed": "操作失败：{{detail}}"
   },
   "queue": {
+    "title": "播放队列",
+    "empty": {
+      "title": "队列是空的",
+      "hint": "把歌曲拖到这里，或右键任意歌曲选择“加入队列”"
+    },
+    "totalCount": "{{count}} 首 · {{duration}}",
+    "actions": {
+      "clear": "清空",
+      "shuffle": "打乱",
+      "saveAs": "保存为歌单",
+      "toggle": "使用队列"
+    },
+    "contextMenu": {
+      "playNow": "立即播放",
+      "playNext": "下一首播放",
+      "addToQueue": "加入队列",
+      "moveTop": "移到顶部",
+      "moveBottom": "移到底部",
+      "remove": "移除",
+      "removeAbove": "移除上方全部",
+      "removeBelow": "移除下方全部",
+      "clearQueue": "清空队列"
+    },
+    "toast": {
+      "removed": "已移除“{{title}}”",
+      "alreadyIn": "已在队列中",
+      "cleared": "已清空 {{count}} 首",
+      "undo": "撤销",
+      "savedAs": "已保存为歌单“{{name}}”"
+    },
+    "savePrompt": "歌单名称",
+    "defaultPlaylistName": "播放队列",
     "alreadyInUpNext": "该曲目已在“下一首”队列中。",
     "dropHint": "将歌曲拖到这里可加入下一首队列",
     "playbackOn": "队列开",
@@ -78,7 +110,8 @@
     "artists": "艺人",
     "playlists": "歌单",
     "folders": "文件夹",
-    "queue": "队列"
+    "queue": "队列",
+    "history": "历史"
   },
   "albumFilter": {
     "label": "专辑：{{name}}",
@@ -132,8 +165,7 @@
     "noPlaylists": "还没有歌单。新建一个或导入 JSON 文件。",
     "playlistEmpty": "此歌单为空。请在「歌曲」标签用 (+) 添加曲目，或从磁盘导入音频。",
     "noSearchMatch": "没有符合搜索条件的曲目。",
-    "noLikedInView": "当前列表下没有已喜欢的曲目。",
-    "historyEmpty": "暂无播放历史。"
+    "noLikedInView": "当前列表下没有已喜欢的曲目。"
   },
   "playlists": {
     "allPlaylists": "全部歌单",
@@ -265,10 +297,7 @@
     "saveCardImage": "保存卡片图片",
     "selectTrack": "请选择曲目",
     "nightcoreMode": "Nightcore 模式",
-    "ellipsis": "…",
-    "playbackHistory": "播放历史",
-    "backHistory": "按历史返回",
-    "clearHistory": "清空"
+    "ellipsis": "…"
   },
   "dlna": {
     "castTitle": "DLNA",
@@ -303,15 +332,15 @@
     "eqMasterTitle": "主均衡器（16 段）",
     "eqMasterDesc": "精确调节各频段，获得高保真输出。",
     "gaplessTitle": "无缝播放",
-    "gaplessDesc": "消除曲目间的静音间隙。需要 HiFi 引擎，开启后交叉淡入淡出自动关闭。",
+    "gaplessDesc": "消除曲目间的静音间隙。需要 HiFi 引擎，开启后智能过渡会自动关闭。",
     "prevButtonModeTitle": "上一首按钮行为",
     "prevButtonModeDesc": "选择点击上一首时的切换方式。",
     "prevButtonModePlaylist": "列表上一首",
     "prevButtonModeHistory": "上一首听的歌",
-    "crossfadeTitle": "交叉淡入淡出",
-    "crossfadeDesc": "在曲目切换时淡出当前曲目并淡入下一曲。",
-    "crossfadeDurationTitle": "交叉淡入淡出时长",
-    "crossfadeDurationDesc": "设置切换过渡持续的时间。",
+    "crossfadeTitle": "智能过渡 Automix",
+    "crossfadeDesc": "在当前曲尾部提前预热下一首，并用等功率曲线把两首歌丝滑叠接。",
+    "crossfadeDurationTitle": "Automix 过渡时长",
+    "crossfadeDurationDesc": "设置两首歌重叠混音的最长时间；短歌会自动缩短。",
     "crossfadeSeconds_one": "{{count}} 秒",
     "crossfadeSeconds_other": "{{count}} 秒",
     "outputBufferTitle": "音频输出缓冲",
@@ -437,6 +466,8 @@
     "customWallpaperDecor": "自定义壁纸装饰",
     "coverSizeTitle": "封面尺寸",
     "coverSizeDesc": "调整主播放器专辑封面的大小。",
+    "autoLocateCurrentTrackTitle": "定位当前播放歌曲",
+    "autoLocateCurrentTrackDesc": "开启后，切歌时会自动把左侧当前列表滚动到正在播放的歌曲位置。",
     "sidebarLogoTitle": "左上角 Logo",
     "sidebarLogoDesc": "在左侧导航顶部显示 ECHO Logo。关闭后歌曲/专辑列表会自动上移，避免空白。",
     "bgImage": "背景图",
@@ -510,6 +541,12 @@
   "eqPreset": {
     "Custom": "自定义",
     "Flat": "平直",
+    "Reference (Harman 2018)": "参考曲线 (Harman 2018)",
+    "Warm": "暖声",
+    "Bright": "明亮",
+    "Dialogue / Podcast": "对白 / 播客",
+    "Late Night": "深夜聆听",
+    "V-Shape": "V 型听感",
     "Bass Boost": "低音增强",
     "Treble Boost": "高音增强",
     "Vocal": "人声",
@@ -521,8 +558,31 @@
   },
   "eqPlot": {
     "scrollQ": "滚轮调 Q",
+    "preamp": "前级",
+    "band": "频段",
+    "bandOption": "Band {{index}} - {{freq}}",
+    "freq": "频率",
+    "gain": "增益",
     "filterType": "类型",
     "qLabel": "Q",
+    "slope": "斜率",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "solo": "Solo",
+    "mute": "归零",
+    "bypassedEnable": "EQ 已旁路 - 点击启用",
+    "quality": "音质",
+    "outputSafety": "输出保护",
+    "oversampling": {
+      "high": "高音质 4x",
+      "balanced": "均衡 2x",
+      "lowCpu": "低 CPU"
+    },
+    "outputSafetyModes": {
+      "soft": "软限幅",
+      "hard": "硬限幅",
+      "off": "关闭"
+    },
     "types": {
       "peaking": "峰化",
       "lowshelf": "低搁架",
@@ -786,7 +846,41 @@
     "lan": "局域网",
     "state": "状态",
     "uri": "URI",
+    "port": "端口",
+    "client": "客户端",
+    "airplayShort": "AirPlay",
+    "airplayIntro": "AirPlay：启动接收后，在同一 Wi-Fi 下从 iPhone、iPad 或 Mac 的 AirPlay 音频输出中选择 ECHO AirPlay。声音会走 ECHO 当前选择的输出设备。",
+    "airplayNameLabel": "设备显示名称（AirPlay）",
+    "stopAirplayReceiver": "停止 AirPlay 接收",
+    "startAirplayReceiver": "启动 AirPlay 接收",
+    "airplayError": "AirPlay：{{error}}",
     "dlnaError": "DLNA：{{error}}"
+  },
+  "remote": {
+    "settingsTitle": "手机遥控",
+    "settingsDesc": "在同一 Wi-Fi 下用手机控制播放、音量、歌词和 EQ。",
+    "openDrawer": "打开遥控",
+    "drawerTitle": "手机遥控",
+    "heroTitle": "用手机控制 ECHO",
+    "heroDesc": "在同一 Wi-Fi 下扫码打开遥控页。",
+    "statusStopped": "已停止",
+    "statusStarting": "启动中",
+    "statusReady": "READY",
+    "qrAlt": "手机遥控二维码",
+    "noUrl": "启动服务后显示地址",
+    "copyUrl": "复制地址",
+    "start": "启动",
+    "stop": "停止",
+    "refresh": "刷新",
+    "rotateToken": "更换 token",
+    "network": "网络",
+    "port": "端口",
+    "noTokenTitle": "允许局域网免 token",
+    "noTokenDesc": "只建议在可信私人局域网开启。切换后现有手机连接会重新连接。",
+    "clients": "已连接客户端：{{count}}",
+    "unknownClient": "未知设备",
+    "kick": "踢出客户端",
+    "noClients": "还没有手机连接。"
   },
   "plugins": {
     "title": "插件",
@@ -800,5 +894,38 @@
     "permissions": "权限",
     "noPermissions": "不需要特殊权限",
     "confirmUninstall": "确定卸载插件「{{name}}」？此操作不可撤销。"
+  },
+  "history": {
+    "title": "播放历史",
+    "totalCount": "{{count}} 首",
+    "backOneStep": "返回上一首",
+    "searchPlaceholder": "搜索曲目 / 艺人 / 专辑...",
+    "sort": "历史排序",
+    "sortByTime": "按时间",
+    "sortByPlayCount": "按播放次数",
+    "bucket": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "thisWeek": "本周",
+      "thisMonth": "本月",
+      "earlier": "更早"
+    },
+    "actionPlay": "播放",
+    "actionJump": "跳到当前列表",
+    "actionJumpDisabled": "这首歌不在当前播放列表中",
+    "actionRemove": "移除记录",
+    "playCount": "×{{count}}",
+    "relative": {
+      "justNow": "刚刚",
+      "minutesAgo": "{{count}} 分钟前",
+      "hoursAgo": "{{count}} 小时前",
+      "todayAt": "今天 {{time}}",
+      "yesterdayAt": "昨天 {{time}}"
+    },
+    "empty": {
+      "noHistory": "播放过的歌曲会显示在这里。",
+      "noSearchMatch": "没有找到“{{query}}”"
+    },
+    "confirmClear": "确定要清空播放历史吗？"
   }
 }

@@ -2,22 +2,22 @@ import { PRESET_THEMES } from '../utils/color'
 
 /** 参量 EQ 16 段：双搁架 + 14 峰化，对数分布覆盖 20Hz–20kHz */
 export const DEFAULT_EQ_BANDS = [
-  { id: 1, type: 'lowshelf', freq: 32, gain: 0, q: 1.0, enabled: true },
-  { id: 2, type: 'peaking', freq: 45, gain: 0, q: 1.2, enabled: true },
-  { id: 3, type: 'peaking', freq: 90, gain: 0, q: 1.2, enabled: true },
-  { id: 4, type: 'peaking', freq: 125, gain: 0, q: 1.3, enabled: true },
-  { id: 5, type: 'peaking', freq: 180, gain: 0, q: 1.3, enabled: true },
-  { id: 6, type: 'peaking', freq: 250, gain: 0, q: 1.3, enabled: true },
-  { id: 7, type: 'peaking', freq: 350, gain: 0, q: 1.3, enabled: true },
-  { id: 8, type: 'peaking', freq: 500, gain: 0, q: 1.3, enabled: true },
-  { id: 9, type: 'peaking', freq: 700, gain: 0, q: 1.3, enabled: true },
-  { id: 10, type: 'peaking', freq: 1000, gain: 0, q: 1.3, enabled: true },
-  { id: 11, type: 'peaking', freq: 1800, gain: 0, q: 1.3, enabled: true },
-  { id: 12, type: 'peaking', freq: 2800, gain: 0, q: 1.3, enabled: true },
-  { id: 13, type: 'peaking', freq: 4500, gain: 0, q: 1.3, enabled: true },
-  { id: 14, type: 'peaking', freq: 7000, gain: 0, q: 1.3, enabled: true },
-  { id: 15, type: 'peaking', freq: 11000, gain: 0, q: 1.2, enabled: true },
-  { id: 16, type: 'highshelf', freq: 16000, gain: 0, q: 1.0, enabled: true }
+  { id: 1, type: 'lowshelf', freq: 32, gain: 0, q: 1.0, slope: 12, enabled: true },
+  { id: 2, type: 'peaking', freq: 45, gain: 0, q: 1.0, enabled: true },
+  { id: 3, type: 'peaking', freq: 90, gain: 0, q: 1.0, enabled: true },
+  { id: 4, type: 'peaking', freq: 125, gain: 0, q: 1.0, enabled: true },
+  { id: 5, type: 'peaking', freq: 180, gain: 0, q: 1.0, enabled: true },
+  { id: 6, type: 'peaking', freq: 250, gain: 0, q: 1.0, enabled: true },
+  { id: 7, type: 'peaking', freq: 350, gain: 0, q: 1.0, enabled: true },
+  { id: 8, type: 'peaking', freq: 500, gain: 0, q: 1.0, enabled: true },
+  { id: 9, type: 'peaking', freq: 700, gain: 0, q: 1.0, enabled: true },
+  { id: 10, type: 'peaking', freq: 1000, gain: 0, q: 1.0, enabled: true },
+  { id: 11, type: 'peaking', freq: 1800, gain: 0, q: 1.0, enabled: true },
+  { id: 12, type: 'peaking', freq: 2800, gain: 0, q: 1.0, enabled: true },
+  { id: 13, type: 'peaking', freq: 4500, gain: 0, q: 1.0, enabled: true },
+  { id: 14, type: 'peaking', freq: 7000, gain: 0, q: 1.0, enabled: true },
+  { id: 15, type: 'peaking', freq: 11000, gain: 0, q: 1.0, enabled: true },
+  { id: 16, type: 'highshelf', freq: 16000, gain: 0, q: 1.0, slope: 12, enabled: true }
 ]
 
 /**
@@ -41,16 +41,61 @@ export function migrateEqBandsTo16(oldBands) {
   })
 }
 
+const EQ_FILTER_TYPES = new Set([
+  'lowshelf',
+  'peaking',
+  'highshelf',
+  'lowpass',
+  'highpass',
+  'notch',
+  'allpass'
+])
+
+function clampNumber(value, min, max, fallback) {
+  const n = typeof value === 'number' && Number.isFinite(value) ? value : fallback
+  return Math.max(min, Math.min(max, n))
+}
+
+function normalizeShelfSlope(value) {
+  return value === 6 || value === 24 ? value : 12
+}
+
+export function normalizeEqBands(bands) {
+  if (Array.isArray(bands) && bands.length === 10) {
+    return migrateEqBandsTo16(bands)
+  }
+  const source = Array.isArray(bands) ? bands : []
+  return DEFAULT_EQ_BANDS.map((template, index) => {
+    const incoming = source[index] && typeof source[index] === 'object' ? source[index] : null
+    if (!incoming) return { ...template }
+    const type = EQ_FILTER_TYPES.has(incoming.type) ? incoming.type : template.type
+    const isShelf = type === 'lowshelf' || type === 'highshelf'
+    return {
+      ...template,
+      ...incoming,
+      id: typeof incoming.id === 'number' ? incoming.id : template.id,
+      type,
+      freq: clampNumber(incoming.freq, 20, 20000, template.freq),
+      gain: clampNumber(incoming.gain, -24, 24, template.gain),
+      q: clampNumber(incoming.q, 0.1, isShelf ? 2 : 10, template.q),
+      slope: isShelf ? normalizeShelfSlope(incoming.slope) : undefined,
+      enabled: incoming.enabled !== false
+    }
+  })
+}
+
 export const DEFAULT_CONFIG = {
   /**
    * 递增并在 App 加载时 run migration（`oldRev < configRevision`）。
    * 老存档无此字段时视为 0。
    */
-  configRevision: 6,
+  configRevision: 9,
   /** UI language: en | zh | ja */
   uiLocale: 'en',
   useEQ: true,
   eqBands: DEFAULT_EQ_BANDS.map((b) => ({ ...b })),
+  eqOversampling: '2x',
+  eqOutputSafety: 'soft',
   /**
    * 主进程 naudiodon 输出缓冲：low 低延迟 / balanced 默认 / stable 减卡顿
    */
@@ -60,13 +105,19 @@ export const DEFAULT_CONFIG = {
   audioExclusiveResetOnStartup: true,
   /** 上一首按钮行为：playlist = 列表上一首（默认），history = 上一首听的歌 */
   prevButtonMode: 'playlist',
+  historyMaxEntries: 1000,
+  historyCollapseRepeats: true,
+  historyShowInSidebar: true,
   /** Gapless playback — 无缝播放，默认关闭。开启后与交叉淡入淡出互斥 */
   gaplessEnabled: false,
   crossfadeEnabled: true,
-  crossfadeDuration: 3,
+  crossfadeDuration: 6,
   sleepTimerEnabled: false,
   sleepTimerMinutes: 30,
   sleepTimerMode: 'time',
+  phoneRemoteEnabled: false,
+  phoneRemotePort: 18888,
+  phoneRemoteAllowNoToken: false,
   showDiscordRPC: true,
   lastfmEnabled: false,
   lastfmSessionKey: null,
@@ -87,6 +138,7 @@ export const DEFAULT_CONFIG = {
   uiSaturation: 1,
   uiAccentBackgroundGlow: false,
   showSidebarLogo: true,
+  autoLocateCurrentTrack: false,
   theme: 'minimal',
   customColors: { ...PRESET_THEMES.minimal.colors },
   themeDynamicCoverColor: false,

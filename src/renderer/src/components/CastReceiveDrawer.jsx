@@ -5,14 +5,18 @@ import { X, Radio, AlertCircle } from 'lucide-react'
 export default function CastReceiveDrawer({ open, onClose }) {
   const { t } = useTranslation()
   const [friendlyName, setFriendlyName] = useState('ECHO')
+  const [airplayName, setAirplayName] = useState('ECHO AirPlay')
   const [dlnaOn, setDlnaOn] = useState(false)
+  const [airplayOn, setAirplayOn] = useState(false)
   const [status, setStatus] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [airplayBusy, setAirplayBusy] = useState(false)
 
   const applyStatus = useCallback((s) => {
     if (!s) return
     setStatus(s)
     setDlnaOn(!!s.dlnaEnabled)
+    setAirplayOn(!!s.airplayEnabled)
   }, [])
 
   const refresh = useCallback(async () => {
@@ -51,6 +55,26 @@ export default function CastReceiveDrawer({ open, onClose }) {
     }
   }
 
+  const toggleAirplay = async () => {
+    if (!window.api?.cast) return
+    setAirplayBusy(true)
+    try {
+      if (airplayOn) {
+        await window.api.cast.airplayStop()
+      } else {
+        const r = await window.api.cast.airplayStart({ friendlyName: airplayName })
+        if (!r.ok && r.error) {
+          alert(r.error)
+        }
+      }
+      await refresh()
+    } catch (e) {
+      alert(e.message || String(e))
+    } finally {
+      setAirplayBusy(false)
+    }
+  }
+
   useEffect(() => {
     if (!open) return
     const onKey = (e) => {
@@ -62,7 +86,8 @@ export default function CastReceiveDrawer({ open, onClose }) {
 
   const ip = status?.dlnaLanIp || 'N/A'
   const port = status?.dlnaPort || 'N/A'
-  const dlnaErr = status?.lastError
+  const dlnaErr = status?.dlnaEnabled ? status?.lastError : ''
+  const airplayErr = status?.airplayEnabled || status?.airplayState === 'ERROR' ? status?.lastError : ''
 
   return (
     <>
@@ -127,6 +152,111 @@ export default function CastReceiveDrawer({ open, onClose }) {
           >
             {t('castDrawer.netease')}
           </p>
+
+          <p
+            style={{
+              opacity: 0.9,
+              fontSize: 13,
+              lineHeight: 1.55,
+              marginBottom: 16,
+              padding: '10px 12px',
+              borderRadius: 'var(--border-radius-sm)',
+              background: 'rgba(255,255,255,0.06)'
+            }}
+          >
+            {t('castDrawer.airplayIntro')}
+          </p>
+
+          <label
+            style={{
+              display: 'block',
+              fontSize: 12,
+              fontWeight: 700,
+              opacity: 0.7,
+              marginBottom: 6
+            }}
+          >
+            {t('castDrawer.airplayNameLabel')}
+          </label>
+          <input
+            type="text"
+            value={airplayName}
+            disabled={airplayOn || airplayBusy}
+            onChange={(e) => setAirplayName(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              borderRadius: 'var(--border-radius-sm)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              background: 'rgba(0,0,0,0.15)',
+              color: 'inherit',
+              marginBottom: 12
+            }}
+          />
+
+          <button
+            type="button"
+            className="export-btn"
+            style={{ width: '100%', marginBottom: 12 }}
+            disabled={airplayBusy}
+            onClick={toggleAirplay}
+          >
+            <Radio size={16} />
+            {airplayBusy
+              ? t('castDrawer.working')
+              : airplayOn
+                ? t('castDrawer.stopAirplayReceiver')
+                : t('castDrawer.startAirplayReceiver')}
+          </button>
+
+          {airplayOn && (
+            <div
+              className="glass-panel"
+              style={{
+                padding: 12,
+                fontSize: 13,
+                lineHeight: 1.6,
+                marginBottom: 12
+              }}
+            >
+              <div>
+                <strong>{t('castDrawer.state')}</strong> {status?.airplayState || 'READY'}
+              </div>
+              {status?.airplayHost ? (
+                <div style={{ marginTop: 6 }}>
+                  <strong>{t('castDrawer.lan')}</strong> {status.airplayHost}
+                </div>
+              ) : null}
+              {status?.airplayPort ? (
+                <div style={{ marginTop: 6 }}>
+                  <strong>{t('castDrawer.port')}</strong> {status.airplayPort}
+                </div>
+              ) : null}
+              {status?.airplayClient ? (
+                <div style={{ marginTop: 6 }}>
+                  <strong>{t('castDrawer.client')}</strong> {status.airplayClient}
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {airplayErr && (
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                alignItems: 'flex-start',
+                padding: 10,
+                borderRadius: 'var(--border-radius-sm)',
+                background: 'rgba(255,80,80,0.12)',
+                fontSize: 13,
+                marginBottom: 12
+              }}
+            >
+              <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+              <span>{t('castDrawer.airplayError', { error: airplayErr })}</span>
+            </div>
+          )}
 
           <label
             style={{

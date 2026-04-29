@@ -47,10 +47,12 @@ function parseDeviceListLine(line) {
   const index = parseInt(parts[0], 10)
   if (!Number.isFinite(index)) return null
   const sampleRate = parseInt(parts[2] || '0', 10)
+  const sharedSampleRate = parseInt(parts[4] || '0', 10)
   return {
     index,
     name: parts[1],
     sampleRate: Number.isFinite(sampleRate) ? sampleRate : 0,
+    sharedSampleRate: Number.isFinite(sharedSampleRate) ? sharedSampleRate : 0,
     isDefault: parts[3] === '1'
   }
 }
@@ -173,6 +175,7 @@ export class NativeAudioBridge {
     this._proc = null
     this._writable = null
     this._framesConsumed = 0
+    this._frameOffset = 0
     this._sampleRate = 44100
     this._startTime = 0
     this._playbackRate = 1.0
@@ -213,6 +216,7 @@ export class NativeAudioBridge {
       this._startTime = startTime
       this._playbackRate = playbackRate
       this._framesConsumed = 0
+      this._frameOffset = 0
       this._ready = false
       this._ended = false
 
@@ -325,7 +329,8 @@ export class NativeAudioBridge {
    */
   getPosition() {
     if (this._sampleRate <= 0) return this._startTime
-    return this._startTime + (this._framesConsumed / this._sampleRate) * this._playbackRate
+    const localFrames = Math.max(0, this._framesConsumed - this._frameOffset)
+    return this._startTime + (localFrames / this._sampleRate) * this._playbackRate
   }
 
   get isReady() {
@@ -350,7 +355,7 @@ export class NativeAudioBridge {
    * Called when a new track starts on the same open bridge stream.
    */
   resetForGapless(startTime = 0, playbackRate = 1.0) {
-    this._framesConsumed = 0
+    this._frameOffset = this._framesConsumed
     this._startTime = startTime
     this._playbackRate = playbackRate
     this._ended = false

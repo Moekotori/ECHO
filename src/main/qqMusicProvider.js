@@ -62,6 +62,33 @@ function normalizeAlbum(album) {
   }
 }
 
+function normalizeArtist(artist) {
+  const mid = pickString(
+    artist?.singerMID,
+    artist?.singerMid,
+    artist?.singer_mid,
+    artist?.mid,
+    artist?.singerMID
+  )
+  const id = artist?.singerID || artist?.singerId || artist?.id || mid
+  const name = pickString(
+    artist?.singerName,
+    artist?.singer_name,
+    artist?.name,
+    artist?.title
+  )
+  return {
+    id: mid || String(id || ''),
+    mid,
+    name,
+    alias: [],
+    picUrl: mid ? `https://y.qq.com/music/photo_new/T001R500x500M000${mid}.jpg` : '',
+    albumSize: Number(artist?.albumNum || artist?.album_num || artist?.album_count || 0),
+    musicSize: Number(artist?.songNum || artist?.song_num || artist?.song_count || 0),
+    source: 'qq'
+  }
+}
+
 async function requestMusicu(payload, cookie) {
   const res = await axios.post(QQ_MUSICU_URL, payload, {
     params: { format: 'json', inCharset: 'utf8', outCharset: 'utf-8' },
@@ -147,6 +174,26 @@ export async function searchQqMusicAlbums({ albumName = '', artist = '', cookie 
     const message = error?.response?.status
       ? `QQ Music album search failed: HTTP ${error.response.status}`
       : error?.message || 'QQ Music album search failed'
+    throw new Error(message)
+  }
+}
+
+export async function searchQqMusicArtists({ artist = '', cookie = '', limit = 8 } = {}) {
+  const key = String(artist || '').trim()
+  if (!key) return []
+  try {
+    const data = await getMusicu(buildSearchPayload(key, 1, limit), cookie)
+    const list =
+      data?.req_0?.data?.body?.singer?.list ||
+      data?.req_0?.data?.body?.singerList ||
+      data?.req_0?.data?.body?.zhida?.singer ||
+      []
+    const normalized = Array.isArray(list) ? list.map(normalizeArtist).filter((item) => item.id) : []
+    return normalized
+  } catch (error) {
+    const message = error?.response?.status
+      ? `QQ Music artist search failed: HTTP ${error.response.status}`
+      : error?.message || 'QQ Music artist search failed'
     throw new Error(message)
   }
 }

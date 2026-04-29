@@ -1,16 +1,28 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="E:\Echoes-codex-tree\Echoes-codex-tree\src\main\audio\engine\echo_out.cpp">
+    <ClCompile Include="D:\ECHO - 副本 (3) - 副本\src\main\audio\engine\echo_out.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\ECHO - 副本 (3) - 副本\src\main\audio\engine\wasapi_exclusive.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\ECHO - 副本 (3) - 副本\src\main\audio\asio-sdk\common\asio.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\ECHO - 副本 (3) - 副本\src\main\audio\asio-sdk\host\asiodrivers.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\ECHO - 副本 (3) - 副本\src\main\audio\asio-sdk\host\pc\asiolist.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="E:\Echoes-codex-tree\Echoes-codex-tree\src\main\audio\engine\CMakeLists.txt" />
+    <CustomBuild Include="D:\ECHO - 副本 (3) - 副本\src\main\audio\engine\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
-      <UniqueIdentifier>{E77554F2-0769-3DBC-9D51-7D8332CD41FC}</UniqueIdentifier>
+      <UniqueIdentifier>{9C1B01F8-4E82-38BA-A3E4-82F15FF9F11C}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

@@ -1,13 +1,13 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <CustomBuild Include="E:\Echoes-codex-tree\Echoes-codex-tree\src\main\audio\engine\build\CMakeFiles\1b8511a6be094c042dcf21be3ad76f62\generate.stamp.rule">
+    <CustomBuild Include="D:\ECHO - 副本 (3) - 副本\src\main\audio\engine\build\CMakeFiles\1e898f75a055d565651a4e41faca1480\generate.stamp.rule">
       <Filter>CMake Rules</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="CMake Rules">
-      <UniqueIdentifier>{8CE846B3-30E2-3745-8175-193D687D158D}</UniqueIdentifier>
+      <UniqueIdentifier>{2B8D9225-9FE2-32F2-887D-2D1BBF8F4118}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

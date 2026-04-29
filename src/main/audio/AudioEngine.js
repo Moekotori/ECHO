@@ -1,5 +1,5 @@
 import ffmpeg from 'fluent-ffmpeg'
-import { Transform } from 'stream'
+import { Transform, Writable } from 'stream'
 import { createRequire } from 'module'
 import {
   NativeAudioBridge,
@@ -15,7 +15,7 @@ const resolvedFfmpeg = getResolvedFfmpegStaticPath()
 ffmpeg.setFfmpegPath(resolvedFfmpeg)
 
 const MAX_FILE_INFO_CACHE_ENTRIES = 512
-const MAX_WASAPI_EXCLUSIVE_PCM_SAMPLE_RATE = 192000
+const MAX_WASAPI_EXCLUSIVE_PCM_SAMPLE_RATE = 768000
 const require = createRequire(import.meta.url)
 let naudiodonApi = null
 let naudiodonLoadFailed = false
@@ -71,6 +71,9 @@ const NETEASE_UA =
   'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36 NeteaseMusic/9.0.0'
 const NETEASE_HEADERS = 'Referer: https://music.163.com/\r\nOrigin: https://music.163.com\r\n'
 
+const AUTOMIX_MIN_DURATION_SEC = 1.2
+const AUTOMIX_MAX_DURATION_SEC = 12
+
 function isNeteaseStreamUrl(uri) {
   return /music\.163\.com|126\.net|netease|interface\.music\.163/i.test(uri)
 }
@@ -110,6 +113,8 @@ class AudioProcessor extends Transform {
     const dstFloat32 = new Float32Array(ab)
     dstFloat32.set(srcFloat32)
 
+    this.engine._mixAutomixIntoCurrent(dstFloat32, this.targetSampleRate, this.channels)
+
     if (this.engine._bridge && this.engine._eqProcessor) {
       try {
         this.engine._eqProcessor.processInterleaved(dstFloat32)
@@ -141,6 +146,168 @@ class AudioProcessor extends Transform {
   }
 }
 
+class S16lePcmProcessor extends Transform {
+  constructor(options) {
+    super(options)
+    this.engine = options.engine
+    this.targetSampleRate = options.targetSampleRate
+    this.channels = options.channels
+    this.startTime = options.startTime || 0
+    this.bytesWritten = 0
+    this._carry = null
+  }
+
+  _transform(chunk, encoding, callback) {
+    if (!this.engine.isPlaying) return callback()
+
+    const input =
+      this._carry && this._carry.length
+        ? Buffer.concat([this._carry, chunk], this._carry.length + chunk.length)
+        : chunk
+    const usableBytes = input.length - (input.length % 2)
+    this._carry = usableBytes < input.length ? Buffer.from(input.subarray(usableBytes)) : null
+
+    if (usableBytes <= 0) return callback()
+
+    const sampleCount = usableBytes / 2
+    const ab = new ArrayBuffer(sampleCount * 4)
+    const dstFloat32 = new Float32Array(ab)
+    for (let i = 0, o = 0; i < usableBytes; i += 2, o++) {
+      const s = input.readInt16LE(i)
+      dstFloat32[o] = s < 0 ? s / 32768 : s / 32767
+    }
+
+    if (this.engine._eqProcessor) {
+      try {
+        this.engine._eqProcessor.processInterleaved(dstFloat32)
+      } catch {
+        /* ignore single-frame EQ errors */
+      }
+    }
+
+    const vol = this.engine.volume
+    for (let i = 0; i < dstFloat32.length; i++) {
+      dstFloat32[i] *= vol
+    }
+
+    this.push(Buffer.from(ab))
+    this.bytesWritten += usableBytes
+
+    if (!this.engine._bridge) {
+      const secondsProcessed = this.bytesWritten / (this.targetSampleRate * this.channels * 2)
+      this.engine.playbackTime = Math.max(0, this.startTime + secondsProcessed)
+    }
+
+    callback()
+  }
+}
+
+class AutomixSourceBuffer extends Writable {
+  constructor() {
+    super()
+    this._chunks = []
+    this._queuedBytes = 0
+    this._output = null
+    this._ended = false
+    this._skipBytes = 0
+  }
+
+  _write(chunk, encoding, callback) {
+    let buf = Buffer.from(chunk)
+    if (this._skipBytes > 0) {
+      const drop = Math.min(this._skipBytes, buf.byteLength)
+      this._skipBytes -= drop
+      buf = buf.subarray(drop)
+      if (buf.byteLength === 0) {
+        callback()
+        return
+      }
+    }
+    if (this._output) {
+      this._flushQueued()
+      this._writeToOutput(buf)
+    } else {
+      this._chunks.push(buf)
+      this._queuedBytes += buf.byteLength
+    }
+    callback()
+  }
+
+  _final(callback) {
+    this._ended = true
+    if (this._output) {
+      this._flushQueued()
+      try {
+        this._output.end()
+      } catch {
+        /* ignore */
+      }
+    }
+    callback()
+  }
+
+  get queuedBytes() {
+    return this._queuedBytes
+  }
+
+  get ended() {
+    return this._ended
+  }
+
+  readBytes(byteCount) {
+    const wanted = Math.max(0, Number(byteCount) || 0)
+    if (wanted <= 0) return Buffer.alloc(0)
+    const out = Buffer.alloc(wanted)
+    let offset = 0
+    while (offset < wanted && this._chunks.length > 0) {
+      const chunk = this._chunks[0]
+      const take = Math.min(chunk.byteLength, wanted - offset)
+      chunk.copy(out, offset, 0, take)
+      offset += take
+      this._queuedBytes -= take
+      if (take >= chunk.byteLength) {
+        this._chunks.shift()
+      } else {
+        this._chunks[0] = chunk.subarray(take)
+      }
+    }
+    if (offset < wanted) {
+      this._skipBytes += wanted - offset
+      out.fill(0, offset)
+    }
+    return out
+  }
+
+  promoteTo(output) {
+    this._output = output || null
+    this._flushQueued()
+    if (this._ended && this._output) {
+      try {
+        this._output.end()
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  _flushQueued() {
+    if (!this._output || this._chunks.length === 0) return
+    for (const chunk of this._chunks) this._writeToOutput(chunk)
+    this._chunks = []
+    this._queuedBytes = 0
+  }
+
+  _writeToOutput(chunk) {
+    const output = this._output
+    if (!output || output.destroyed || output.writableEnded) return
+    try {
+      output.write(chunk)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export class AudioEngine {
   constructor() {
     this._outputSink = null // naudiodon AudioIO OR bridge writable
@@ -154,6 +321,7 @@ export class AudioEngine {
     this.playbackRate = 1.0
     this.currentFilePath = null
     this.processor = null
+    this._pcmInputStream = null
     this.exclusiveMode = false
     this._asioMode = false
     this.eqConfig = null
@@ -163,6 +331,7 @@ export class AudioEngine {
     /** Track the sample rates and format info for status reporting */
     this._fileSampleRate = 0
     this._outputSampleRate = 0
+    this._deviceOutputSampleRate = 0
     this._fileCodec = ''
     this._fileBitsPerSample = 0
     this._fileIsDSD = false
@@ -177,6 +346,9 @@ export class AudioEngine {
     this._nextTrackPb = null     // prebuffer state for next track
     this._activeChannels = 2     // channels used by current bridge stream
     this._onGaplessTrackChanged = null
+    this._automixState = null
+    this._automixSerial = 0
+    this._onAutomixTrackChanged = null
 
     if (this._useNativeBridge) {
       console.log('[AudioEngine] Native bridge available — HiFi mode enabled')
@@ -191,6 +363,10 @@ export class AudioEngine {
 
   onGaplessTrackChanged(fn) {
     this._onGaplessTrackChanged = fn
+  }
+
+  onAutomixTrackChanged(fn) {
+    this._onAutomixTrackChanged = fn
   }
 
   setGapless(enabled) {
@@ -313,6 +489,261 @@ export class AudioEngine {
     }
   }
 
+  cancelAutomix() {
+    const state = this._automixState
+    this._automixState = null
+    if (!state) return
+    state.cancelled = true
+    try {
+      state.stream?.destroy()
+    } catch {
+      /* ignore */
+    }
+    try {
+      state.ffmpegCmd?.kill('SIGKILL')
+    } catch {
+      /* ignore */
+    }
+    if (!state.switchNotified && this.processor && this._outputSink && this.isPlaying) {
+      try {
+        this.processor.unpipe(this._outputSink)
+        this.processor.pipe(this._outputSink)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async startAutomixNextTrack(filePath, options = {}) {
+    const nextPath = normalizeStreamUri(filePath)
+    if (!nextPath || !this.isPlaying || !this._bridge || !this._outputSink || !this.processor) {
+      return { ok: false, skipped: 'inactive' }
+    }
+    if (this.playbackRate !== 1.0) {
+      return { ok: false, skipped: 'playback_rate' }
+    }
+    if (this.vstBridge?.enabled) {
+      return { ok: false, skipped: 'vst_active' }
+    }
+
+    const existing = this._automixState
+    if (existing?.nextPath === nextPath && !existing.cancelled) {
+      return { ok: true, alreadyActive: true }
+    }
+
+    this.cancelAutomix()
+
+    const currentPathAtStart = this.currentFilePath
+    const targetSampleRate = this._outputSampleRate || this._deviceOutputSampleRate || 44100
+    const channels = this._activeChannels || 2
+    const durationSec = Math.max(
+      AUTOMIX_MIN_DURATION_SEC,
+      Math.min(AUTOMIX_MAX_DURATION_SEC, Number(options.durationSec) || 6)
+    )
+    const leadSec = Math.max(0, Math.min(1.5, Number(options.leadSec) || 0))
+    const nextInfo = await this._getFileInfo(nextPath)
+    if (!this.isPlaying || this.currentFilePath !== currentPathAtStart || !this._bridge) {
+      return { ok: false, skipped: 'track_changed' }
+    }
+
+    if (
+      (this.exclusiveMode || this._asioMode) &&
+      nextInfo.sampleRate > 0 &&
+      targetSampleRate > 0 &&
+      nextInfo.sampleRate !== targetSampleRate
+    ) {
+      logLine(
+        `[AudioEngine] Automix skipped: exclusive/asio sample-rate switch required (${targetSampleRate}Hz -> ${nextInfo.sampleRate}Hz)`
+      )
+      return { ok: false, skipped: 'exclusive_sample_rate_switch' }
+    }
+
+    const ffmpegCmd = this._createFfmpegCommand(
+      nextPath,
+      0,
+      1.0,
+      channels,
+      nextInfo.sampleRate || targetSampleRate,
+      targetSampleRate
+    )
+    const sourceBuffer = new AutomixSourceBuffer()
+    const stream = ffmpegCmd.pipe()
+    const serial = ++this._automixSerial
+    const state = {
+      serial,
+      currentPath: currentPathAtStart,
+      nextPath,
+      nextInfo,
+      ffmpegCmd,
+      stream,
+      sourceBuffer,
+      sampleRate: targetSampleRate,
+      channels,
+      totalFrames: Math.max(1, Math.round(durationSec * targetSampleRate)),
+      waitFrames: Math.max(0, Math.round(leadSec * targetSampleRate)),
+      mixedFrames: 0,
+      nextFramesUsed: 0,
+      switchNotified: false,
+      promoteScheduled: false,
+      cancelled: false
+    }
+
+    this._automixState = state
+
+    try {
+      this.processor.unpipe(this._outputSink)
+      this.processor.pipe(this._outputSink, { end: false })
+      this.processor.once('finish', () => {
+        if (this._automixState !== state || state.promoteScheduled || state.cancelled) return
+        if (state.switchNotified) {
+          this._scheduleAutomixPromotion(state)
+        } else {
+          this.cancelAutomix()
+          this.isPlaying = false
+          if (this._onTrackEnded) this._onTrackEnded()
+        }
+      })
+    } catch {
+      /* keep the existing pipe when it cannot be rewired */
+    }
+
+    stream.on('error', (e) => {
+      if (state.cancelled || String(e?.message || '').includes('SIGKILL')) return
+      console.warn('[AudioEngine] Automix input stream error:', e?.message || e)
+      if (this._automixState === state) this.cancelAutomix()
+    })
+    stream.pipe(sourceBuffer)
+
+    logLine(
+      `[AudioEngine] Automix armed: ${formatPathForLog(nextPath)} | duration=${durationSec.toFixed(2)}s | lead=${leadSec.toFixed(2)}s | out=${targetSampleRate}Hz ch=${channels}`
+    )
+    return { ok: true, durationSec, leadSec }
+  }
+
+  _mixAutomixIntoCurrent(samples, sampleRate, channels) {
+    const state = this._automixState
+    if (!state || state.cancelled || !samples?.length) return
+    if (sampleRate !== state.sampleRate || channels !== state.channels) {
+      this.cancelAutomix()
+      return
+    }
+
+    const frameCount = Math.floor(samples.length / channels)
+    if (frameCount <= 0) return
+
+    if (state.waitFrames > 0) {
+      state.waitFrames = Math.max(0, state.waitFrames - frameCount)
+      return
+    }
+
+    const bytesNeeded = frameCount * channels * 4
+    if (!state.switchNotified) {
+      const minStartBytes = Math.min(bytesNeeded, Math.round(sampleRate * channels * 4 * 0.12))
+      if (!state.sourceBuffer.ended && state.sourceBuffer.queuedBytes < minStartBytes) {
+        return
+      }
+      this._switchAutomixIdentity(state)
+    }
+
+    const nextChunk = state.sourceBuffer.readBytes(bytesNeeded)
+    const nextSamples = new Float32Array(
+      nextChunk.buffer,
+      nextChunk.byteOffset,
+      nextChunk.byteLength / 4
+    )
+
+    const totalFrames = Math.max(1, state.totalFrames)
+    const halfPi = Math.PI / 2
+    for (let frame = 0; frame < frameCount; frame++) {
+      const absoluteFrame = state.mixedFrames + frame
+      const t = Math.max(0, Math.min(1, absoluteFrame / totalFrames))
+      const currentGain = Math.cos(t * halfPi)
+      const nextGain = Math.sin(t * halfPi)
+      const base = frame * channels
+      for (let ch = 0; ch < channels; ch++) {
+        const idx = base + ch
+        samples[idx] = samples[idx] * currentGain + (nextSamples[idx] || 0) * nextGain
+      }
+    }
+
+    state.mixedFrames += frameCount
+    state.nextFramesUsed += frameCount
+
+    if (state.mixedFrames >= state.totalFrames) {
+      this._scheduleAutomixPromotion(state)
+    }
+  }
+
+  _switchAutomixIdentity(state) {
+    if (!state || state.switchNotified || this._automixState !== state) return
+    state.switchNotified = true
+    this.currentFilePath = state.nextPath
+    this.playbackTime = 0
+    this._fileSampleRate = state.nextInfo.sampleRate || state.sampleRate
+    this._fileBitsPerSample = state.nextInfo.bitsPerSample || 16
+    this._fileCodec = state.nextInfo.codec || 'unknown'
+    this._fileIsDSD = !!state.nextInfo.isDSD
+    this._fileDsdRate = state.nextInfo.isDSD ? state.nextInfo.sampleRate : 0
+    this._bridge?.resetForGapless?.(0, this.playbackRate)
+    if (this._onAutomixTrackChanged) this._onAutomixTrackChanged(state.nextPath)
+  }
+
+  _scheduleAutomixPromotion(state) {
+    if (!state || state.promoteScheduled || this._automixState !== state) return
+    state.promoteScheduled = true
+    setImmediate(() => this._promoteAutomixNext(state))
+  }
+
+  _promoteAutomixNext(state) {
+    if (!state || this._automixState !== state || state.cancelled) return
+    const sink = this._outputSink
+    if (!sink || !this.isPlaying) {
+      this.cancelAutomix()
+      return
+    }
+
+    const oldProcessor = this.processor
+    const oldFfmpeg = this.ffmpegProcess
+    this.processor = null
+    this.ffmpegProcess = null
+
+    try {
+      if (oldProcessor && oldProcessor !== state.sourceBuffer) {
+        oldProcessor.unpipe(sink)
+        oldProcessor.destroy()
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (oldFfmpeg && oldFfmpeg !== state.ffmpegCmd) oldFfmpeg.kill('SIGKILL')
+    } catch {
+      /* ignore */
+    }
+
+    const nextProcessor = new AudioProcessor({
+      engine: this,
+      targetSampleRate: state.sampleRate,
+      channels: state.channels,
+      playbackRate: this.playbackRate,
+      startTime: 0
+    })
+    this.processor = nextProcessor
+    this.ffmpegProcess = state.ffmpegCmd
+
+    nextProcessor.pipe(sink)
+    nextProcessor.once('finish', () => {
+      if (this.currentFilePath === state.nextPath && this.isPlaying) {
+        this.isPlaying = false
+        if (this._onTrackEnded) this._onTrackEnded()
+      }
+    })
+
+    state.sourceBuffer.promoteTo(nextProcessor)
+    this._automixState = null
+    logLine(`[AudioEngine] Automix promoted: ${formatPathForLog(state.nextPath)}`)
+  }
+
   /**
    * Called when current track's processor finishes in gapless mode.
    * If prebuffer is ready and format matches, transitions without stopping bridge.
@@ -417,7 +848,8 @@ export class AudioEngine {
             id: d.index,
             name: d.name,
             hostApi: 'WASAPI',
-            sampleRate: d.sampleRate ? Math.min(d.sampleRate, MAX_WASAPI_EXCLUSIVE_PCM_SAMPLE_RATE) : 0,
+            sampleRate: d.sampleRate || 0,
+            sharedSampleRate: d.sharedSampleRate || 0,
             maxChannels: 0,
             isDefault: !!d.isDefault
           }))
@@ -459,6 +891,20 @@ export class AudioEngine {
     }
   }
 
+  _getNativeSharedSampleRate() {
+    const activeRate = Number(this.activeDevice?.sharedSampleRate) || 0
+    if (activeRate > 0) return activeRate
+
+    try {
+      const devices = listNativeDevices()
+      const target = devices.find((d) => d.isDefault) || devices[0]
+      const sharedRate = Number(target?.sharedSampleRate) || 0
+      return sharedRate > 0 ? sharedRate : 0
+    } catch {
+      return 0
+    }
+  }
+
   async setDevice(deviceId) {
     if (deviceId == null || deviceId === '') {
       const wasPlaying = this.isPlaying
@@ -488,13 +934,11 @@ export class AudioEngine {
       const selectedDevice = listNativeDevices().find((d) => d.index === idx)
 
       this.activeDeviceIndex = idx
-      const selectedSampleRate = selectedDevice?.sampleRate
-        ? Math.min(selectedDevice.sampleRate, MAX_WASAPI_EXCLUSIVE_PCM_SAMPLE_RATE)
-        : 0
       this.activeDevice = {
         id: idx,
         name: selectedDevice?.name || `Device #${idx}`,
-        sampleRate: selectedSampleRate,
+        sampleRate: selectedDevice?.sampleRate || 0,
+        sharedSampleRate: selectedDevice?.sharedSampleRate || 0,
         isDefault: !!selectedDevice?.isDefault
       }
       const srText = this.activeDevice.sampleRate > 0 ? `, max ${this.activeDevice.sampleRate}Hz` : ''
@@ -582,6 +1026,7 @@ export class AudioEngine {
 
     try {
       this._cancelPrebuffer()
+      this.cancelAutomix()
       await this._releaseResources()
 
       if (/^https?:\/\//i.test(filePath)) filePath = normalizeStreamUri(filePath)
@@ -599,29 +1044,53 @@ export class AudioEngine {
       this._fileDsdRate = info.isDSD ? fileSampleRate : 0
 
       let targetSampleRate
+      let deviceOutputSampleRate = 0
       if (info.isDSD) {
         // DSD -> PCM: convert at a high-res rate preserving maximum fidelity
         // DSD64 (2.8 MHz) -> 176.4 kHz, DSD128 (5.6 MHz) -> 352.8 kHz
         const dsdPcmRate = Math.min(352800, Math.max(176400, Math.round(fileSampleRate / 16)))
         targetSampleRate =
           (this.exclusiveMode || this._asioMode) && this._useNativeBridge ? dsdPcmRate : 44100
+        deviceOutputSampleRate = targetSampleRate
         logLine(`[AudioEngine] DSD detected: native=${fileSampleRate}Hz -> PCM ${dsdPcmRate}Hz`)
       } else if (this.exclusiveMode && !this._asioMode && this._useNativeBridge) {
         const nativeDeviceSampleRate = this._getNativeExclusiveSampleRate()
-        targetSampleRate =
+        const exclusiveRateLimit =
           nativeDeviceSampleRate > 0
             ? Math.min(nativeDeviceSampleRate, MAX_WASAPI_EXCLUSIVE_PCM_SAMPLE_RATE)
-            : fileSampleRate
+            : MAX_WASAPI_EXCLUSIVE_PCM_SAMPLE_RATE
+        if (fileSampleRate > exclusiveRateLimit) {
+          targetSampleRate = exclusiveRateLimit
+          logLine(
+            `[AudioEngine] WASAPI exclusive source rate ${fileSampleRate}Hz exceeds device exact capability ${exclusiveRateLimit}Hz; decoder resampling to device rate`
+          )
+        } else {
+          targetSampleRate = fileSampleRate
+        }
+        deviceOutputSampleRate = targetSampleRate
       } else if ((this.exclusiveMode || this._asioMode) && this._useNativeBridge) {
         targetSampleRate = fileSampleRate
+        deviceOutputSampleRate = targetSampleRate
+      } else if (this._useNativeBridge) {
+        const nativeSharedSampleRate = this._getNativeSharedSampleRate()
+        targetSampleRate = fileSampleRate
+        deviceOutputSampleRate = nativeSharedSampleRate > 0 ? nativeSharedSampleRate : targetSampleRate
+        if (deviceOutputSampleRate > 0 && fileSampleRate !== deviceOutputSampleRate) {
+          logLine(
+            `[AudioEngine] WASAPI shared mixer will resample: bridge=${targetSampleRate}Hz -> mixer=${deviceOutputSampleRate}Hz`
+          )
+        }
       } else if (this.activeDevice && this.activeDevice.sampleRate > 0) {
         targetSampleRate = this.activeDevice.sampleRate
+        deviceOutputSampleRate = targetSampleRate
       } else {
         targetSampleRate = 44100
+        deviceOutputSampleRate = targetSampleRate
       }
 
       this._fileSampleRate = fileSampleRate
       this._outputSampleRate = targetSampleRate
+      this._deviceOutputSampleRate = deviceOutputSampleRate || targetSampleRate
       const playLogText =
         `[AudioEngine] Play: ${formatPathForLog(filePath)} | ${info.codec} ${info.bitsPerSample}bit | ` +
         `src=${fileSampleRate}Hz -> out=${targetSampleRate}Hz | rate=${playbackRate} | ` +
@@ -653,6 +1122,9 @@ export class AudioEngine {
             )
             targetSampleRate = actualSampleRate
             this._outputSampleRate = actualSampleRate
+            if (this.exclusiveMode || this._asioMode) {
+              this._deviceOutputSampleRate = actualSampleRate
+            }
           }
         } catch (e) {
           console.warn('[AudioEngine] Native bridge start failed:', e?.message)
@@ -739,6 +1211,140 @@ export class AudioEngine {
     }
   }
 
+  async playPcmStream({
+    stream,
+    sampleRate = 44100,
+    channels = 2,
+    sampleFormat = 's16le',
+    label = 'PCM Stream',
+    metadata = {}
+  } = {}) {
+    if (!stream || typeof stream.pipe !== 'function') {
+      return { success: false, error: 'invalid_pcm_stream' }
+    }
+    if (sampleFormat !== 's16le') {
+      return { success: false, error: `unsupported_pcm_format_${sampleFormat}` }
+    }
+
+    while (this._playLocked) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    this._playLocked = true
+
+    try {
+      this._cancelPrebuffer()
+      this.cancelAutomix()
+      await this._releaseResources()
+
+      const targetSampleRate = Number(sampleRate) > 0 ? Number(sampleRate) : 44100
+      const targetChannels = Math.max(1, Math.min(2, Number(channels) || 2))
+
+      this._pcmInputStream = stream
+      this.currentFilePath = `airplay://${encodeURIComponent(label || 'stream')}`
+      this.playbackRate = 1.0
+      this.playbackTime = 0
+      this._fileSampleRate = targetSampleRate
+      this._outputSampleRate = targetSampleRate
+      this._deviceOutputSampleRate = targetSampleRate
+      this._fileCodec = label || 'PCM Stream'
+      this._fileBitsPerSample = 16
+      this._fileIsDSD = false
+      this._fileDsdRate = 0
+
+      logLine(
+        `[AudioEngine] PCM stream: ${label || 'stream'} | src=${targetSampleRate}Hz -> out=${targetSampleRate}Hz | ch=${targetChannels} | bridge=${this._useNativeBridge} | exclusive=${this.exclusiveMode} | asio=${this._asioMode}`
+      )
+
+      if (this._useNativeBridge) {
+        const bridge = new NativeAudioBridge()
+        try {
+          const bridgeStart = await bridge.start({
+            sampleRate: targetSampleRate,
+            channels: targetChannels,
+            deviceIndex: this.activeDeviceIndex,
+            asio: this._asioMode,
+            exclusive: this._asioMode ? false : this.exclusiveMode,
+            volume: this.volume,
+            startTime: 0,
+            playbackRate: 1.0
+          })
+          const actualSampleRate = bridgeStart?.device?.sampleRate
+          if (
+            typeof actualSampleRate === 'number' &&
+            actualSampleRate > 0 &&
+            actualSampleRate !== targetSampleRate
+          ) {
+            logLine(
+              `[AudioEngine] PCM stream output adjusted: requested=${targetSampleRate}Hz -> actual=${actualSampleRate}Hz`
+            )
+            this._outputSampleRate = actualSampleRate
+            if (this.exclusiveMode || this._asioMode) this._deviceOutputSampleRate = actualSampleRate
+          }
+        } catch (e) {
+          bridge.stop()
+          return { success: false, error: e?.message || 'pcm_bridge_start_failed' }
+        }
+
+        bridge.onEnded(() => {
+          if (this._bridge === bridge && this.isPlaying) this.isPlaying = false
+        })
+
+        bridge.onError((err) => {
+          console.error('[AudioEngine] PCM bridge error:', err?.message)
+          if (err?.message === 'exclusive_denied') this.exclusiveMode = false
+        })
+
+        this._bridge = bridge
+        this._outputSink = bridge.writable
+      } else {
+        const naudiodon = loadNaudiodon()
+        if (!naudiodon) return { success: false, error: 'PortAudio fallback unavailable' }
+        this._outputSink = new naudiodon.AudioIO({
+          outOptions: {
+            channelCount: targetChannels,
+            sampleFormat: naudiodon.SampleFormatFloat32,
+            sampleRate: targetSampleRate,
+            deviceId: this.activeDevice ? this.activeDevice.id : -1,
+            closeOnError: false
+          }
+        })
+        this._bridge = null
+      }
+
+      this._eqProcessor = createEqFloatProcessor(this.eqConfig, targetSampleRate, targetChannels)
+      this._activeChannels = targetChannels
+      this.processor = new S16lePcmProcessor({
+        engine: this,
+        targetSampleRate,
+        channels: targetChannels,
+        startTime: 0
+      })
+
+      stream.on('error', (e) => {
+        console.warn('[AudioEngine] PCM input stream error:', e?.message || e)
+      })
+      stream.once('end', () => {
+        if (this._pcmInputStream === stream) this.isPlaying = false
+      })
+      stream.once('close', () => {
+        if (this._pcmInputStream === stream) this._pcmInputStream = null
+      })
+
+      stream.pipe(this.processor)
+      if (this.vstBridge && this.vstBridge.enabled) {
+        this.vstBridge.pipe(this.processor, this._outputSink, targetSampleRate, targetChannels)
+      } else {
+        this.processor.pipe(this._outputSink)
+      }
+      if (!this._bridge && this._outputSink?.start) this._outputSink.start()
+
+      this.isPlaying = true
+      return { success: true, metadata }
+    } finally {
+      this._playLocked = false
+    }
+  }
+
   /**
    * Legacy playback path using naudiodon (PortAudio).
    */
@@ -792,6 +1398,17 @@ export class AudioEngine {
    * Set up the FFmpeg decode process (shared by both paths).
    */
   _setupFFmpeg(filePath, startTime, playbackRate, channels, fileSampleRate, targetSampleRate) {
+    this.ffmpegProcess = this._createFfmpegCommand(
+      filePath,
+      startTime,
+      playbackRate,
+      channels,
+      fileSampleRate,
+      targetSampleRate
+    )
+  }
+
+  _createFfmpegCommand(filePath, startTime, playbackRate, channels, fileSampleRate, targetSampleRate) {
     const filters = []
     if (playbackRate !== 1.0) {
       const ncRate = Math.round(targetSampleRate * playbackRate)
@@ -802,7 +1419,7 @@ export class AudioEngine {
       filters.push(`aresample=${targetSampleRate}`)
     }
 
-    this.ffmpegProcess = ffmpeg(filePath)
+    const command = ffmpeg(filePath)
       .seekInput(startTime)
       .format('f32le')
       .audioChannels(channels)
@@ -812,14 +1429,16 @@ export class AudioEngine {
       const opts = isNeteaseStreamUrl(filePath)
         ? ['-user_agent', NETEASE_UA, '-headers', NETEASE_HEADERS]
         : ['-user_agent', 'EchoesStudio/1.0']
-      this.ffmpegProcess.inputOptions(opts)
+      command.inputOptions(opts)
     }
 
-    if (filters.length > 0) this.ffmpegProcess.audioFilters(filters)
+    if (filters.length > 0) command.audioFilters(filters)
 
-    this.ffmpegProcess.on('error', (err) => {
+    command.on('error', (err) => {
       if (!err.message.includes('SIGKILL')) console.error('[FFmpeg] Error:', err.message)
     })
+
+    return command
   }
 
   setVolume(vol) {
@@ -907,6 +1526,7 @@ export class AudioEngine {
 
   async stop() {
     this._cancelPrebuffer()
+    this.cancelAutomix()
     this.cancelFade()
     this.isPlaying = false
     await this._releaseResources()
@@ -921,6 +1541,17 @@ export class AudioEngine {
   }
 
   async _releaseResources() {
+    if (this._automixState) this.cancelAutomix()
+
+    if (this._pcmInputStream) {
+      try {
+        this._pcmInputStream.destroy()
+      } catch {
+        /* ignore */
+      }
+      this._pcmInputStream = null
+    }
+
     if (this.processor) {
       try {
         if (this._outputSink) this.processor.unpipe(this._outputSink)
@@ -981,7 +1612,15 @@ export class AudioEngine {
       this.playbackTime = currentTime
     }
     const deviceInfo = this._bridge?.deviceInfo
-    const outSR = deviceInfo?.sampleRate || this._outputSampleRate || 0
+    /* Prefer hardwareSampleRate only for exclusive output. Shared WASAPI has
+     * an app-facing bridge rate and a separate final mixer/device rate. */
+    const hwSR = deviceInfo && typeof deviceInfo.hardwareSampleRate === 'number'
+      ? deviceInfo.hardwareSampleRate
+      : 0
+    const exclusiveOutput = deviceInfo?.exclusive === true || this._asioMode
+    const outSR = exclusiveOutput && hwSR > 0
+      ? hwSR
+      : (this._deviceOutputSampleRate || this._outputSampleRate || 0)
     const srcSR = this._fileSampleRate
     return {
       isPlaying: this.isPlaying,
@@ -992,6 +1631,7 @@ export class AudioEngine {
       exclusiveConfirmed: !!(!this._asioMode && deviceInfo && deviceInfo.exclusive === true),
       asio: this._asioMode,
       nativeBridge: this._useNativeBridge,
+      automix: !!this._automixState,
       fileSampleRate: srcSR,
       outputSampleRate: outSR,
       codec: this._fileCodec,

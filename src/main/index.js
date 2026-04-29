@@ -10,10 +10,12 @@ import {
   nativeImage,
   Tray,
   Menu,
-  globalShortcut
+  globalShortcut,
+  safeStorage
 } from 'electron'
 import { createRequire } from 'module'
 import { join, basename, dirname, extname, resolve, sep } from 'path'
+import { pathToFileURL } from 'url'
 import { execSync as _execSyncUtf } from 'child_process'
 
 // Fix Windows console encoding so CJK characters in logs aren't garbled
@@ -42,9 +44,24 @@ import nodeNet from 'node:net'
 import DiscordRPC from 'discord-rpc'
 import axios from 'axios'
 import http from 'http'
+import { randomBytes } from 'crypto'
 import { audioEngine } from './audio/AudioEngine'
 import { listAsioDevices } from './audio/NativeAudioBridge.js'
 import { DlnaMediaRenderer } from './cast/DlnaMediaRenderer.js'
+import { AirplayRaopReceiver } from './cast/AirplayRaopReceiver.js'
+import { UpnpSender } from './cast/UpnpSender.js'
+import {
+  SubsonicClient,
+  isSubsonicTrackPath,
+  parseSubsonicTrackPath
+} from './remote/SubsonicClient.js'
+import {
+  WebDavClient,
+  isWebDavTrackPath,
+  mapWebDavFile,
+  parseWebDavTrackPath
+} from './remote/WebDavClient.js'
+import { PhoneRemoteServer } from './remote/PhoneRemoteServer.js'
 import { initCrashReporter, logError, getCrashDir } from './CrashReporter'
 import MediaDownloader from './MediaDownloader'
 import { importPlaylistFromLink } from './playlistLinkImport.js'
@@ -71,6 +88,7 @@ import {
   getQqMusicAlbumTracks,
   getQqMusicSongDirectUrl,
   searchQqMusicAlbums,
+  searchQqMusicArtists,
   searchQqMusicSongs
 } from './qqMusicProvider.js'
 import { getMediaDurationSeconds } from './utils/ffmpegProbeDuration.js'
@@ -82,6 +100,13 @@ import PluginManager from './plugins/PluginManager.js'
 
 const APP_NAME = 'ECHO'
 const APP_USER_MODEL_ID = 'com.echoes.studio'
+const APP_USER_DATA_DIR_NAME = 'ECHO'
+
+try {
+  app.setPath('userData', join(app.getPath('appData'), APP_USER_DATA_DIR_NAME))
+} catch {
+  /* keep Electron default when appData is unavailable */
+}
 
 app.setName(APP_NAME)
 if (process.platform === 'win32') {
@@ -214,12 +239,46 @@ let lyricsDesktopLastPayload = {}
 let lyricsDesktopMainSyncTimer = null
 const MAX_EMBEDDED_COVER_DIMENSION = 768
 const MAX_EMBEDDED_COVER_BYTES = 350 * 1024
+const MAX_ARTIST_AVATAR_IMAGE_BYTES = 2 * 1024 * 1024
 
 function stopLyricsDesktopMainSyncTimer() {
   if (lyricsDesktopMainSyncTimer) {
     clearInterval(lyricsDesktopMainSyncTimer)
     lyricsDesktopMainSyncTimer = null
   }
+}
+
+async function fetchImageDataUrl(url) {
+  const cleanUrl = String(url || '').trim()
+  if (!/^https?:\/\//i.test(cleanUrl)) return null
+
+  const response = await fetch(cleanUrl, {
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+      Referer: cleanUrl.includes('y.qq.com') ? 'https://y.qq.com/' : 'https://music.163.com/'
+    }
+  })
+  if (!response.ok) return null
+
+  const contentType = response.headers.get('content-type') || 'image/jpeg'
+  if (!/^image\//i.test(contentType)) return null
+
+  const arrayBuffer = await response.arrayBuffer()
+  if (!arrayBuffer || arrayBuffer.byteLength <= 0) return null
+  if (arrayBuffer.byteLength > MAX_ARTIST_AVATAR_IMAGE_BYTES) return null
+
+  const originalBuffer = Buffer.from(arrayBuffer)
+  const image = nativeImage.createFromBuffer(originalBuffer)
+  if (!image.isEmpty()) {
+    const resized = image.resize({ width: 360, height: 360, quality: 'best' })
+    const encoded = resized.toJPEG(88)
+    if (encoded?.length) {
+      return `data:image/jpeg;base64,${encoded.toString('base64')}`
+    }
+  }
+
+  return `data:${contentType.split(';')[0]};base64,${originalBuffer.toString('base64')}`
 }
 
 function compressEmbeddedCoverData(picture) {
@@ -557,7 +616,7 @@ function broadcastAudioStatus(status) {
 
 function broadcastCastStatus() {
   if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.webContents.send('cast:status', dlnaRenderer.getStatus())
+  mainWindow.webContents.send('cast:status', getCastStatus())
 }
 
 const dlnaRenderer = new DlnaMediaRenderer({
@@ -565,6 +624,60 @@ const dlnaRenderer = new DlnaMediaRenderer({
   getMainWindow: () => mainWindow,
   onCastActivity: broadcastCastStatus
 })
+const airplayReceiver = new AirplayRaopReceiver({
+  audioEngine,
+  getMainWindow: () => mainWindow,
+  beforePlayHook: () => dlnaRenderer.stopPlaybackOnly(),
+  onCastActivity: broadcastCastStatus
+})
+const upnpSender = new UpnpSender({
+  logLine: (line) => console.info(line)
+})
+const phoneRemoteServer = new PhoneRemoteServer({
+  getMainWindow: () => mainWindow,
+  onCommand: (message) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('remote:command', message)
+  }
+})
+
+function getCastStatus() {
+  const dlna = dlnaRenderer.getStatus()
+  const airplay = airplayReceiver.getStatus()
+  const airplayActive = !!airplay.airplayActive
+  const dlnaActive =
+    !!dlna.dlnaEnabled &&
+    !!dlna.currentUri &&
+    (dlna.transportState === 'PLAYING' || dlna.transportState === 'PAUSED_PLAYBACK')
+
+  if (airplayActive) {
+    return {
+      ...dlna,
+      ...airplay,
+      castActive: true,
+      castKind: 'airplay',
+      castLabel: 'AirPlay',
+      currentUri: 'airplay://stream',
+      transportState: airplay.airplayState,
+      trackDurationSec: airplay.airplayDurationSec || 0,
+      positionSec: airplay.airplayPositionSec || 0,
+      isPlaying: airplay.airplayState === 'PLAYING',
+      dlnaMeta: { ...airplay.airplayMeta },
+      castMetadataTrusted: !!airplay.airplayMetadataTrusted,
+      lastError: airplay.lastError || dlna.lastError
+    }
+  }
+
+  return {
+    ...dlna,
+    ...airplay,
+    castActive: dlnaActive,
+    castKind: dlnaActive ? 'dlna' : '',
+    castLabel: dlnaActive ? 'DLNA' : '',
+    castMetadataTrusted: dlnaActive,
+    lastError: airplay.lastError || dlna.lastError
+  }
+}
 let youtubeSignInWindow = null
 let bilibiliSignInWindow = null
 let neteaseSignInWindow = null
@@ -572,6 +685,14 @@ let qqMusicSignInWindow = null
 let youtubeSystemBrowserSession = null
 let rendererHttpServer = null
 let rendererServerUrl = null
+const RENDERER_HTTP_HOST = '127.0.0.1'
+const RENDERER_HTTP_PORT_FROM_ENV = Number(process.env.ECHO_RENDERER_PORT || 17631)
+const RENDERER_HTTP_PREFERRED_PORT =
+  Number.isInteger(RENDERER_HTTP_PORT_FROM_ENV) &&
+  RENDERER_HTTP_PORT_FROM_ENV > 0 &&
+  RENDERER_HTTP_PORT_FROM_ENV < 65536
+    ? RENDERER_HTTP_PORT_FROM_ENV
+    : 17631
 let libraryWatchManager = null
 const APP_STATE_FILE = 'echoes-app-state.json'
 const APP_STATE_WRITE_DEBOUNCE_MS = 1000
@@ -590,11 +711,17 @@ const APP_STATE_KEYS = new Set([
   'volume',
   'importedFolders',
   'downloaderSettings',
+  'remoteLibraries',
   'ltSettings',
   'lyricsDesktopBounds',
   'playbackSession'
 ])
-const APP_STATE_IMMEDIATE_FLUSH_KEYS = new Set(['playlist', 'importedFolders'])
+const APP_STATE_IMMEDIATE_FLUSH_KEYS = new Set([
+  'config',
+  'playlist',
+  'importedFolders',
+  'remoteLibraries'
+])
 let appStateCache = {}
 let appStateWriteTimer = null
 let updaterCheckPromise = null
@@ -603,9 +730,12 @@ let updaterLastEventKey = ''
 let updaterListenersBound = false
 let updaterAutoCheckEnabled = true
 
-function readAppStateJson() {
+function getAppStateFilePath(baseDir = app.getPath('userData')) {
+  return join(baseDir, APP_STATE_FILE)
+}
+
+function readAppStateJsonFile(filePath) {
   try {
-    const filePath = join(app.getPath('userData'), APP_STATE_FILE)
     if (!fs.existsSync(filePath)) return {}
     const raw = fs.readFileSync(filePath, 'utf-8')
     const parsed = JSON.parse(raw)
@@ -615,10 +745,141 @@ function readAppStateJson() {
   }
 }
 
+function isMeaningfulAppStateValue(value) {
+  if (value == null) return false
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === 'object') return Object.keys(value).length > 0
+  if (typeof value === 'string') return value.trim().length > 0
+  return true
+}
+
+function mergeAppStateConfig(primaryConfig, fallbackConfig) {
+  const primary =
+    primaryConfig && typeof primaryConfig === 'object' && !Array.isArray(primaryConfig)
+      ? primaryConfig
+      : null
+  const fallback =
+    fallbackConfig && typeof fallbackConfig === 'object' && !Array.isArray(fallbackConfig)
+      ? fallbackConfig
+      : null
+  if (!primary && !fallback) return primaryConfig
+  if (!primary) return fallback
+  if (!fallback) return primary
+  return {
+    ...fallback,
+    ...primary,
+    customColors: {
+      ...(fallback.customColors || {}),
+      ...(primary.customColors || {})
+    },
+    lyricsColor: primary.lyricsColor || fallback.lyricsColor || null
+  }
+}
+
+function mergeAppStateSnapshot(primaryState, fallbackState) {
+  const primary =
+    primaryState && typeof primaryState === 'object' && !Array.isArray(primaryState)
+      ? primaryState
+      : {}
+  const fallback =
+    fallbackState && typeof fallbackState === 'object' && !Array.isArray(fallbackState)
+      ? fallbackState
+      : {}
+  const next = { ...primary }
+  let changed = false
+
+  for (const key of APP_STATE_KEYS) {
+    if (key === 'config') {
+      const mergedConfig = mergeAppStateConfig(next.config, fallback.config)
+      if (mergedConfig && JSON.stringify(mergedConfig) !== JSON.stringify(next.config)) {
+        next.config = mergedConfig
+        changed = true
+      }
+      continue
+    }
+    if (!isMeaningfulAppStateValue(next[key]) && isMeaningfulAppStateValue(fallback[key])) {
+      next[key] = fallback[key]
+      changed = true
+    }
+  }
+
+  return { state: next, changed }
+}
+
+function getLegacyAppStateFileCandidates() {
+  const candidates = []
+  try {
+    const appDataDir = app.getPath('appData')
+    for (const dirName of ['ECHO', 'echoes', 'Echoes', 'com.echo.player']) {
+      candidates.push(getAppStateFilePath(join(appDataDir, dirName)))
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const currentPath = resolve(getAppStateFilePath())
+  const seen = new Set()
+  return candidates
+    .flatMap((filePath) => [filePath, `${filePath}.bak`])
+    .filter((filePath) => {
+      const resolved = resolve(filePath)
+      if (resolved === currentPath || seen.has(resolved)) return false
+      seen.add(resolved)
+      return fs.existsSync(filePath)
+    })
+}
+
+function writeAppStateJsonFile(filePath, nextState) {
+  fs.mkdirSync(dirname(filePath), { recursive: true })
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.copyFileSync(filePath, `${filePath}.bak`)
+    }
+  } catch {
+    /* backup is best-effort */
+  }
+  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+  fs.writeFileSync(tmpPath, JSON.stringify(nextState), 'utf-8')
+  fs.renameSync(tmpPath, filePath)
+}
+
+function readAppStateJson() {
+  const currentFilePath = getAppStateFilePath()
+  let currentState = readAppStateJsonFile(currentFilePath)
+  let changed = false
+
+  if (!isMeaningfulAppStateValue(currentState)) {
+    const backupState = readAppStateJsonFile(`${currentFilePath}.bak`)
+    if (isMeaningfulAppStateValue(backupState)) {
+      currentState = backupState
+      changed = true
+    }
+  }
+
+  for (const candidate of getLegacyAppStateFileCandidates()) {
+    const legacyState = readAppStateJsonFile(candidate)
+    if (!isMeaningfulAppStateValue(legacyState)) continue
+    const merged = mergeAppStateSnapshot(currentState, legacyState)
+    currentState = merged.state
+    changed = changed || merged.changed
+  }
+
+  if (changed) {
+    try {
+      writeAppStateJsonFile(currentFilePath, currentState)
+      console.log(`[appState] Migrated persisted state into ${currentFilePath}`)
+    } catch (error) {
+      console.warn('[appState] migration write failed:', error?.message || error)
+    }
+  }
+
+  return currentState
+}
+
 function writeAppStateJson(nextState) {
   try {
-    const filePath = join(app.getPath('userData'), APP_STATE_FILE)
-    fs.writeFileSync(filePath, JSON.stringify(nextState), 'utf-8')
+    const filePath = getAppStateFilePath()
+    writeAppStateJsonFile(filePath, nextState)
     return true
   } catch (e) {
     console.warn('[appState] write failed:', e?.message || e)
@@ -648,6 +909,357 @@ function clearAppStateWriteTimer() {
 function flushAppStateCacheSync() {
   clearAppStateWriteTimer()
   return writeAppStateJson(ensureAppStateCache())
+}
+
+function createRemoteSourceId() {
+  return `remote-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`
+}
+
+function normalizeRemoteSourceType(value) {
+  if (value === 'networkFolder' || value === 'sshfs' || value === 'webdav') return value
+  return 'subsonic'
+}
+
+function isFileBackedRemoteSourceType(value) {
+  const sourceType = normalizeRemoteSourceType(value)
+  return sourceType === 'networkFolder' || sourceType === 'sshfs'
+}
+
+function getDefaultRemoteSourceName(value) {
+  const sourceType = normalizeRemoteSourceType(value)
+  if (sourceType === 'webdav') return 'WebDAV Music'
+  if (sourceType === 'sshfs') return 'SSHFS Music'
+  if (sourceType === 'networkFolder') return 'NAS Music'
+  return 'Navidrome'
+}
+
+function isCredentialRemoteSourceType(value) {
+  const sourceType = normalizeRemoteSourceType(value)
+  return sourceType === 'subsonic' || sourceType === 'webdav'
+}
+
+function normalizeRemoteServerUrl(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
+  try {
+    const url = new URL(withProtocol)
+    url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/rest$/i, '')
+    url.search = ''
+    url.hash = ''
+    return url.toString().replace(/\/+$/, '')
+  } catch {
+    return raw.replace(/\/+$/, '')
+  }
+}
+
+function encryptRemotePassword(password) {
+  const value = String(password || '')
+  if (!value) return null
+  if (!safeStorage?.isEncryptionAvailable?.()) {
+    return null
+  }
+  return {
+    encoding: 'safeStorage',
+    value: safeStorage.encryptString(value).toString('base64')
+  }
+}
+
+function decryptRemotePassword(secret) {
+  if (!secret || secret.encoding !== 'safeStorage' || !secret.value) return ''
+  try {
+    return safeStorage.decryptString(Buffer.from(secret.value, 'base64'))
+  } catch (error) {
+    console.warn('[remote-library] password decrypt failed:', error?.message || error)
+    return ''
+  }
+}
+
+function getRemoteLibraryState() {
+  const state = ensureAppStateCache()
+  if (!state.remoteLibraries || typeof state.remoteLibraries !== 'object') {
+    state.remoteLibraries = { sources: [] }
+  }
+  if (!Array.isArray(state.remoteLibraries.sources)) {
+    state.remoteLibraries.sources = []
+  }
+  return state.remoteLibraries
+}
+
+function getRemoteSourcesSafe() {
+  return getRemoteLibraryState().sources.map(source => ({
+    id: source.id,
+    type: normalizeRemoteSourceType(source.type),
+    name: source.name || getDefaultRemoteSourceName(source.type),
+    serverUrl: source.serverUrl || '',
+    folderPath: source.folderPath || '',
+    username: source.username || '',
+    createdAt: source.createdAt || null,
+    updatedAt: source.updatedAt || null,
+    hasPassword: Boolean(source.password),
+    passwordPersisted: Boolean(source.password)
+  }))
+}
+
+function findRemoteSource(sourceId) {
+  return getRemoteLibraryState().sources.find(source => source.id === sourceId) || null
+}
+
+function createSubsonicClientForSource(source, passwordOverride) {
+  if (!source) {
+    throw new Error('远程音乐库不存在')
+  }
+  const password =
+    passwordOverride !== undefined && passwordOverride !== null
+      ? String(passwordOverride)
+      : decryptRemotePassword(source.password)
+  if (!password) {
+    throw new Error('远程音乐库密码不可用，请重新保存连接')
+  }
+  return new SubsonicClient({
+    serverUrl: source.serverUrl,
+    username: source.username,
+    password
+  })
+}
+
+function createWebDavClientForSource(source, passwordOverride) {
+  if (!source) {
+    throw new Error('WebDAV 音乐库不存在')
+  }
+  const password =
+    passwordOverride !== undefined && passwordOverride !== null
+      ? String(passwordOverride)
+      : decryptRemotePassword(source.password)
+  return new WebDavClient({
+    serverUrl: source.serverUrl,
+    username: source.username,
+    password
+  })
+}
+
+let webDavProxyServer = null
+let webDavProxyPort = 0
+const webDavProxyTokens = new Map()
+const WEB_DAV_PROXY_TOKEN_TTL_MS = 30 * 60 * 1000
+
+function cleanupWebDavProxyTokens() {
+  const now = Date.now()
+  for (const [token, entry] of webDavProxyTokens.entries()) {
+    if (!entry || entry.expiresAt <= now) webDavProxyTokens.delete(token)
+  }
+}
+
+async function ensureWebDavProxyServer() {
+  if (webDavProxyServer && webDavProxyPort) return webDavProxyPort
+
+  webDavProxyServer = http.createServer(async (req, res) => {
+    try {
+      cleanupWebDavProxyTokens()
+      const requestUrl = new URL(req.url || '/', 'http://127.0.0.1')
+      const match = requestUrl.pathname.match(/^\/webdav\/([^/]+)$/)
+      if (!match) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+
+      const token = decodeURIComponent(match[1])
+      const entry = webDavProxyTokens.get(token)
+      if (!entry || entry.expiresAt <= Date.now()) {
+        webDavProxyTokens.delete(token)
+        res.writeHead(410)
+        res.end('remote token expired')
+        return
+      }
+
+      const source = findRemoteSource(entry.sourceId)
+      const client = createWebDavClientForSource(source)
+      const headers = {
+        ...client.authHeaders(),
+        'User-Agent': 'ECHO-WebDAV-Proxy/1.0'
+      }
+      if (req.headers.range) headers.Range = req.headers.range
+
+      const upstream = await axios.request({
+        method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+        url: client.buildUrl(entry.itemPath),
+        responseType: req.method === 'HEAD' ? 'text' : 'stream',
+        timeout: 30000,
+        headers,
+        validateStatus: status => status >= 200 && status < 500
+      })
+
+      const responseHeaders = {}
+      for (const key of [
+        'content-type',
+        'content-length',
+        'content-range',
+        'accept-ranges',
+        'last-modified',
+        'etag'
+      ]) {
+        if (upstream.headers?.[key] !== undefined) responseHeaders[key] = upstream.headers[key]
+      }
+      responseHeaders['cache-control'] = 'no-store'
+      res.writeHead(upstream.status, responseHeaders)
+      if (req.method === 'HEAD') {
+        res.end()
+        return
+      }
+      upstream.data.on('error', () => {
+        if (!res.destroyed) res.destroy()
+      })
+      req.on('close', () => {
+        upstream.data?.destroy?.()
+      })
+      upstream.data.pipe(res)
+    } catch (error) {
+      if (!res.headersSent) {
+        res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
+      }
+      res.end(error?.message || 'WebDAV proxy error')
+    }
+  })
+
+  await new Promise((resolvePromise, rejectPromise) => {
+    webDavProxyServer.once('error', rejectPromise)
+    webDavProxyServer.listen(0, '127.0.0.1', () => {
+      const address = webDavProxyServer.address()
+      webDavProxyPort = typeof address === 'object' && address ? address.port : 0
+      console.log(`[WebDAVProxy] Started at http://127.0.0.1:${webDavProxyPort}`)
+      resolvePromise()
+    })
+  })
+  return webDavProxyPort
+}
+
+async function createWebDavProxyUrl(sourceId, itemPath) {
+  const port = await ensureWebDavProxyServer()
+  const token = randomBytes(24).toString('hex')
+  webDavProxyTokens.set(token, {
+    sourceId,
+    itemPath,
+    expiresAt: Date.now() + WEB_DAV_PROXY_TOKEN_TTL_MS
+  })
+  return `http://127.0.0.1:${port}/webdav/${encodeURIComponent(token)}`
+}
+
+async function stopWebDavProxyServer() {
+  webDavProxyTokens.clear()
+  webDavProxyPort = 0
+  if (!webDavProxyServer) return
+  await new Promise((resolvePromise) => {
+    webDavProxyServer.close(() => resolvePromise())
+  })
+  webDavProxyServer = null
+}
+
+function isRemoteAudioFilePath(value) {
+  return /\.(mp3|wav|flac|ogg|m4a|aac|dsf|dff|opus|webm|wma|alac|aiff|m4b|caf)$/i.test(
+    String(value || '')
+  )
+}
+
+async function resolveSubsonicPlaybackPath(filePath) {
+  const parsed = parseSubsonicTrackPath(filePath)
+  if (!parsed) {
+    return filePath
+  }
+  const source = findRemoteSource(parsed.sourceId)
+  const client = createSubsonicClientForSource(source)
+  return client.getStreamUrl(parsed.songId)
+}
+
+async function resolveWebDavPlaybackPath(filePath) {
+  const parsed = parseWebDavTrackPath(filePath)
+  if (!parsed) return filePath
+  return await createWebDavProxyUrl(parsed.sourceId, parsed.itemPath)
+}
+
+function createNetworkFolderTrackPath(sourceId, filePath) {
+  return `network-folder://${encodeURIComponent(sourceId)}/file/${encodeURIComponent(filePath)}`
+}
+
+function parseNetworkFolderTrackPath(value) {
+  const raw = String(value || '')
+  const match = raw.match(/^network-folder:\/\/([^/]+)\/file\/(.+)$/i)
+  if (!match) return null
+  return {
+    sourceId: decodeURIComponent(match[1]),
+    filePath: decodeURIComponent(match[2])
+  }
+}
+
+function isNetworkFolderTrackPath(value) {
+  return Boolean(parseNetworkFolderTrackPath(value))
+}
+
+function mapNetworkFolderAudioEntry(source, entry) {
+  const filePath = String(entry?.path || '')
+  const title = basename(filePath, extname(filePath)) || entry?.name || 'Unknown Title'
+  const folderName = basename(dirname(filePath)) || source?.name || 'Network Folder'
+  const remoteType = normalizeRemoteSourceType(source?.type)
+  const sourceName = source?.name || getDefaultRemoteSourceName(remoteType)
+  return {
+    path: createNetworkFolderTrackPath(source.id, filePath),
+    name: title,
+    title,
+    artist: folderName,
+    album: sourceName,
+    remote: true,
+    remoteType,
+    remoteSourceId: source.id,
+    remoteSourceName: sourceName,
+    remoteActualPath: filePath,
+    folder: entry?.folder || dirname(filePath),
+    birthtimeMs: Number(entry?.birthtimeMs || 0),
+    mtimeMs: Number(entry?.mtimeMs || 0),
+    sizeBytes: Number(entry?.sizeBytes || 0),
+    info: {
+      title,
+      artist: folderName,
+      album: sourceName,
+      source: sourceName,
+      remoteType
+    }
+  }
+}
+
+async function collectNetworkFolderTracks(source) {
+  if (!source?.folderPath) throw new Error('Network folder path is empty')
+  const stats = await fs.promises.stat(source.folderPath)
+  if (!stats.isDirectory()) throw new Error('Network folder path is not a directory')
+  const entries = []
+  await collectAudioFilesRecursive(source.folderPath, entries)
+  return entries.map(entry => mapNetworkFolderAudioEntry(source, entry))
+}
+
+async function resolveRemotePlaybackPath(filePath) {
+  const networkParsed = parseNetworkFolderTrackPath(filePath)
+  if (networkParsed) return networkParsed.filePath
+  if (isWebDavTrackPath(filePath)) return await resolveWebDavPlaybackPath(filePath)
+  return await resolveSubsonicPlaybackPath(filePath)
+}
+
+async function resolveRemotePlaybackUrl(filePath) {
+  const networkParsed = parseNetworkFolderTrackPath(filePath)
+  if (networkParsed) return pathToFileURL(networkParsed.filePath).href
+  if (isWebDavTrackPath(filePath)) return await resolveWebDavPlaybackPath(filePath)
+  if (isSubsonicTrackPath(filePath)) return await resolveSubsonicPlaybackPath(filePath)
+  return ''
+}
+
+function resolveMetadataFilePath(filePath) {
+  return parseNetworkFolderTrackPath(filePath)?.filePath || filePath
+}
+
+async function getSubsonicTrackMetadata(filePath) {
+  const parsed = parseSubsonicTrackPath(filePath)
+  if (!parsed) return null
+  const source = findRemoteSource(parsed.sourceId)
+  const client = createSubsonicClientForSource(source)
+  return client.getSong(parsed.songId, source)
 }
 
 function getInternalYoutubeCookieFile() {
@@ -980,14 +1592,10 @@ function getMimeType(filePath) {
   return MIME_TYPES[extname(filePath).toLowerCase()] || 'application/octet-stream'
 }
 
-async function startRendererHttpServer() {
-  if (rendererServerUrl) return rendererServerUrl
-
-  const rendererRoot = resolve(join(__dirname, '../renderer'))
-
-  rendererHttpServer = http.createServer((req, res) => {
+function createRendererHttpServer(rendererRoot) {
+  return http.createServer((req, res) => {
     try {
-      const requestUrl = new URL(req.url || '/', 'http://127.0.0.1')
+      const requestUrl = new URL(req.url || '/', `http://${RENDERER_HTTP_HOST}`)
       let pathname = decodeURIComponent(requestUrl.pathname || '/')
       if (pathname === '/') pathname = '/index.html'
 
@@ -1021,16 +1629,51 @@ async function startRendererHttpServer() {
       res.end('Internal Server Error')
     }
   })
+}
 
-  await new Promise((resolvePromise, rejectPromise) => {
-    rendererHttpServer.once('error', rejectPromise)
-    rendererHttpServer.listen(0, '127.0.0.1', () => {
-      const addr = rendererHttpServer.address()
-      rendererServerUrl = `http://127.0.0.1:${addr.port}`
-      console.log(`[RendererServer] Started at ${rendererServerUrl}`)
-      resolvePromise()
-    })
+function listenRendererHttpServer(server, port) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const onError = (error) => {
+      server.off('listening', onListening)
+      rejectPromise(error)
+    }
+    const onListening = () => {
+      server.off('error', onError)
+      const addr = server.address()
+      const resolvedPort = typeof addr === 'object' && addr ? addr.port : port
+      resolvePromise(resolvedPort)
+    }
+
+    server.once('error', onError)
+    server.once('listening', onListening)
+    server.listen(port, RENDERER_HTTP_HOST)
   })
+}
+
+async function startRendererHttpServer() {
+  if (rendererServerUrl) return rendererServerUrl
+
+  const rendererRoot = resolve(join(__dirname, '../renderer'))
+  let server = createRendererHttpServer(rendererRoot)
+  let port = RENDERER_HTTP_PREFERRED_PORT
+
+  try {
+    port = await listenRendererHttpServer(server, RENDERER_HTTP_PREFERRED_PORT)
+  } catch (error) {
+    if (error?.code !== 'EADDRINUSE') throw error
+    console.warn(
+      `[RendererServer] Preferred port ${RENDERER_HTTP_PREFERRED_PORT} is busy; falling back to a random port. Renderer IndexedDB caches may not be reused for this run.`
+    )
+    try {
+      server.close()
+    } catch {}
+    server = createRendererHttpServer(rendererRoot)
+    port = await listenRendererHttpServer(server, 0)
+  }
+
+  rendererHttpServer = server
+  rendererServerUrl = `http://${RENDERER_HTTP_HOST}:${port}`
+  console.log(`[RendererServer] Started at ${rendererServerUrl}`)
 
   return rendererServerUrl
 }
@@ -1661,6 +2304,437 @@ app.whenReady().then(async () => {
     return { ok: true }
   })
 
+  ipcMain.handle('remoteLibrary:listSources', async () => ({
+    ok: true,
+    sources: getRemoteSourcesSafe(),
+    encryptionAvailable: Boolean(safeStorage?.isEncryptionAvailable?.())
+  }))
+
+  ipcMain.handle('remoteLibrary:saveSource', async (_, payload = {}) => {
+    try {
+      const state = getRemoteLibraryState()
+      const now = new Date().toISOString()
+      const id = payload.id || createRemoteSourceId()
+      const existingIndex = state.sources.findIndex(source => source.id === id)
+      const existing = existingIndex >= 0 ? state.sources[existingIndex] : null
+      const sourceType = normalizeRemoteSourceType(payload.type || existing?.type)
+      const passwordProvided = typeof payload.password === 'string' && payload.password.length > 0
+      const encryptedPassword =
+        isCredentialRemoteSourceType(sourceType)
+          ? passwordProvided
+            ? encryptRemotePassword(payload.password)
+            : existing?.password || null
+          : null
+      const source = {
+        id,
+        type: sourceType,
+        name:
+          String(
+            payload.name ||
+              existing?.name ||
+              getDefaultRemoteSourceName(sourceType)
+          ).trim() || getDefaultRemoteSourceName(sourceType),
+        serverUrl:
+          isCredentialRemoteSourceType(sourceType)
+            ? normalizeRemoteServerUrl(payload.serverUrl || existing?.serverUrl || '')
+            : '',
+        folderPath:
+          isFileBackedRemoteSourceType(sourceType)
+            ? String(payload.folderPath || existing?.folderPath || '').trim()
+            : '',
+        username:
+          isCredentialRemoteSourceType(sourceType)
+            ? String(payload.username || existing?.username || '').trim()
+            : '',
+        password: encryptedPassword,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now
+      }
+      if (isFileBackedRemoteSourceType(sourceType)) {
+        if (!source.folderPath) {
+          return { ok: false, error: '文件夹路径不能为空' }
+        }
+        try {
+          const stats = await fs.promises.stat(source.folderPath)
+          if (!stats.isDirectory()) {
+            return { ok: false, error: '路径不是可访问的文件夹' }
+          }
+        } catch (error) {
+          return { ok: false, error: error?.message || String(error) }
+        }
+      }
+      if (sourceType === 'subsonic' && !source.serverUrl) {
+        return { ok: false, error: '服务器地址不能为空' }
+      }
+      if (sourceType === 'webdav' && !source.serverUrl) {
+        return { ok: false, error: 'WebDAV 地址不能为空' }
+      }
+      if (sourceType === 'subsonic' && !source.username) {
+        return { ok: false, error: '用户名不能为空' }
+      }
+      if (false && sourceType === 'subsonic' && !source.username) {
+        return { ok: false, error: '用户名不能为空' }
+      }
+      if (isCredentialRemoteSourceType(sourceType) && passwordProvided && !encryptedPassword) {
+        return { ok: false, error: '当前系统不可用安全存储，未保存密码' }
+      }
+      if (sourceType === 'subsonic' && !source.password) {
+        return { ok: false, error: '请填写密码或 API 密码' }
+      }
+      if (false && sourceType === 'subsonic' && !source.serverUrl) {
+        return { ok: false, error: '服务器地址不能为空' }
+      }
+      if (false && sourceType === 'subsonic' && !source.username) {
+        return { ok: false, error: '用户名不能为空' }
+      }
+      if (false && sourceType === 'subsonic' && passwordProvided && !encryptedPassword) {
+        return { ok: false, error: '当前系统不可用安全存储，未保存密码' }
+      }
+      if (false && sourceType === 'subsonic' && !source.password) {
+        return { ok: false, error: '请填写密码或 API 密码' }
+      }
+      if (existingIndex >= 0) {
+        state.sources[existingIndex] = source
+      } else {
+        state.sources.push(source)
+      }
+      flushAppStateCacheSync()
+      return { ok: true, source: getRemoteSourcesSafe().find(item => item.id === id) }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) }
+    }
+  })
+
+  ipcMain.handle('remoteLibrary:removeSource', async (_, sourceId) => {
+    const state = getRemoteLibraryState()
+    const before = state.sources.length
+    state.sources = state.sources.filter(source => source.id !== sourceId)
+    if (state.sources.length !== before) {
+      flushAppStateCacheSync()
+    }
+    return { ok: true, sources: getRemoteSourcesSafe() }
+  })
+
+  ipcMain.handle('remoteLibrary:testSource', async (_, payload = {}) => {
+    try {
+      const existing = payload.id ? findRemoteSource(payload.id) : null
+      const sourceType = normalizeRemoteSourceType(payload.type || existing?.type)
+      if (isFileBackedRemoteSourceType(sourceType)) {
+        const folderPath = String(payload.folderPath || existing?.folderPath || '').trim()
+        if (!folderPath) return { ok: false, error: '文件夹路径不能为空' }
+        const stats = await fs.promises.stat(folderPath)
+        if (!stats.isDirectory()) {
+          return { ok: false, error: '路径不是可访问的文件夹' }
+        }
+        return { ok: true }
+      }
+      if (sourceType === 'webdav') {
+        const source =
+          payload.id && !payload.serverUrl
+            ? existing
+            : {
+                id: payload.id || 'test',
+                name: payload.name || 'WebDAV Music',
+                serverUrl: normalizeRemoteServerUrl(payload.serverUrl || existing?.serverUrl || ''),
+                username: String(payload.username || existing?.username || '').trim(),
+                password: existing?.password || null
+              }
+        const passwordOverride =
+          typeof payload.password === 'string' && payload.password.length > 0
+            ? payload.password
+            : undefined
+        const client = createWebDavClientForSource(source, passwordOverride)
+        await client.ping()
+        return { ok: true }
+      }
+      const source =
+        payload.id && !payload.serverUrl
+          ? existing
+          : {
+              id: payload.id || 'test',
+              name: payload.name || 'Navidrome',
+              serverUrl: normalizeRemoteServerUrl(payload.serverUrl || existing?.serverUrl || ''),
+              username: String(payload.username || existing?.username || '').trim(),
+              password: existing?.password || null
+            }
+      const passwordOverride =
+        typeof payload.password === 'string' && payload.password.length > 0 ? payload.password : undefined
+      const client = createSubsonicClientForSource(source, passwordOverride)
+      await client.ping()
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) }
+    }
+  })
+
+  ipcMain.handle('remoteLibrary:getArtists', async (_, sourceId) => {
+    try {
+      const source = findRemoteSource(sourceId)
+      if (isFileBackedRemoteSourceType(source?.type)) {
+        const tracks = await collectNetworkFolderTracks(source)
+        const folders = new Map()
+        for (const track of tracks) {
+          const id = track.folder || dirname(track.remoteActualPath || '')
+          if (!folders.has(id)) {
+            folders.set(id, {
+              id,
+              name: basename(id) || source.name || 'Network Folder',
+              albumCount: 0
+            })
+          }
+          folders.get(id).albumCount += 1
+        }
+        return { ok: true, artists: Array.from(folders.values()) }
+      }
+      if (normalizeRemoteSourceType(source?.type) === 'webdav') {
+        const client = createWebDavClientForSource(source)
+        const entries = await client.list('/')
+        const folders = entries
+          .filter(entry => entry.isDirectory)
+          .map(entry => ({
+            id: entry.path,
+            name: entry.name || basename(entry.path) || source.name || 'WebDAV',
+            albumCount: 0
+          }))
+        return {
+          ok: true,
+          artists: folders.length
+            ? folders
+            : [{ id: '/', name: source?.name || 'WebDAV', albumCount: 0 }]
+        }
+      }
+      const client = createSubsonicClientForSource(source)
+      const artists = await client.getArtists()
+      return { ok: true, artists }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error), artists: [] }
+    }
+  })
+
+  ipcMain.handle('remoteLibrary:getArtist', async (_, sourceId, artistId) => {
+    try {
+      const source = findRemoteSource(sourceId)
+      if (isFileBackedRemoteSourceType(source?.type)) {
+        const tracks = (await collectNetworkFolderTracks(source)).filter(
+          track => track.folder === artistId
+        )
+        return {
+          ok: true,
+          artist: {
+            id: artistId,
+            name: basename(artistId) || source.name || 'Network Folder',
+            albums: [
+              {
+                id: artistId,
+                name: basename(artistId) || source.name || 'Network Folder',
+                title: basename(artistId) || source.name || 'Network Folder',
+                artist: source.name || 'Network Folder',
+                songCount: tracks.length,
+                duration: 0
+              }
+            ]
+          }
+        }
+      }
+      if (normalizeRemoteSourceType(source?.type) === 'webdav') {
+        const client = createWebDavClientForSource(source)
+        const entries = await client.list(artistId || '/')
+        const folders = entries.filter(entry => entry.isDirectory)
+        return {
+          ok: true,
+          artist: {
+            id: artistId || '/',
+            name: basename(artistId || '/') || source.name || 'WebDAV',
+            albums: folders.length
+              ? folders.map(folder => ({
+                  id: folder.path,
+                  name: folder.name,
+                  title: folder.name,
+                  artist: source.name || 'WebDAV',
+                  songCount: 0,
+                  duration: 0
+                }))
+              : [
+                  {
+                    id: artistId || '/',
+                    name: basename(artistId || '/') || source.name || 'WebDAV',
+                    title: basename(artistId || '/') || source.name || 'WebDAV',
+                    artist: source.name || 'WebDAV',
+                    songCount: entries.filter(entry => !entry.isDirectory && isRemoteAudioFilePath(entry.path)).length,
+                    duration: 0
+                  }
+                ]
+          }
+        }
+      }
+      const client = createSubsonicClientForSource(source)
+      const artist = await client.getArtist(artistId)
+      return { ok: true, artist }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error), artist: null }
+    }
+  })
+
+  ipcMain.handle('remoteLibrary:getAlbum', async (_, sourceId, albumId) => {
+    try {
+      const source = findRemoteSource(sourceId)
+      if (isFileBackedRemoteSourceType(source?.type)) {
+        const songs = (await collectNetworkFolderTracks(source)).filter(track => track.folder === albumId)
+        return {
+          ok: true,
+          album: {
+            id: albumId,
+            name: basename(albumId) || source.name || 'Network Folder',
+            title: basename(albumId) || source.name || 'Network Folder',
+            artist: source.name || 'Network Folder',
+            songCount: songs.length,
+            duration: 0,
+            songs
+          }
+        }
+      }
+      if (normalizeRemoteSourceType(source?.type) === 'webdav') {
+        const client = createWebDavClientForSource(source)
+        const entries = await client.list(albumId || '/')
+        const songs = entries
+          .filter(entry => !entry.isDirectory && isRemoteAudioFilePath(entry.path))
+          .map(entry => mapWebDavFile(source, entry, client))
+        return {
+          ok: true,
+          album: {
+            id: albumId || '/',
+            name: basename(albumId || '/') || source.name || 'WebDAV',
+            title: basename(albumId || '/') || source.name || 'WebDAV',
+            artist: source.name || 'WebDAV',
+            songCount: songs.length,
+            duration: 0,
+            songs
+          }
+        }
+      }
+      const client = createSubsonicClientForSource(source)
+      const album = await client.getAlbum(albumId, source)
+      return { ok: true, album }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error), album: null }
+    }
+  })
+
+  ipcMain.handle('remoteLibrary:search', async (_, sourceId, query) => {
+    try {
+      const source = findRemoteSource(sourceId)
+      if (isFileBackedRemoteSourceType(source?.type)) {
+        const needle = String(query || '').trim().toLowerCase()
+        const allTracks = await collectNetworkFolderTracks(source)
+        const songs = needle
+          ? allTracks.filter(track => {
+              const haystack = [
+                track.title,
+                track.artist,
+                track.album,
+                track.remoteActualPath
+              ]
+                .filter(Boolean)
+                .join('\n')
+                .toLowerCase()
+              return haystack.includes(needle)
+            })
+          : allTracks.slice(0, 250)
+        const albumMap = new Map()
+        for (const track of songs) {
+          const folderId = track.folder || dirname(track.remoteActualPath || '')
+          if (!albumMap.has(folderId)) {
+            albumMap.set(folderId, {
+              id: folderId,
+              name: basename(folderId) || source.name || 'Network Folder',
+              title: basename(folderId) || source.name || 'Network Folder',
+              artist: source.name || 'Network Folder',
+              songCount: 0,
+              duration: 0
+            })
+          }
+          albumMap.get(folderId).songCount += 1
+        }
+        return {
+          ok: true,
+          result: { artists: [], albums: Array.from(albumMap.values()), songs }
+        }
+      }
+      if (normalizeRemoteSourceType(source?.type) === 'webdav') {
+        const client = createWebDavClientForSource(source)
+        const result = await client.search(query, source)
+        return { ok: true, result }
+      }
+      const client = createSubsonicClientForSource(source)
+      const result = await client.search(query, source)
+      return { ok: true, result }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error?.message || String(error),
+        result: { artists: [], albums: [], songs: [] }
+      }
+    }
+  })
+
+  ipcMain.handle('remoteLibrary:getSubsonicSpecial', async (_, sourceId, kind) => {
+    try {
+      const source = findRemoteSource(sourceId)
+      if (normalizeRemoteSourceType(source?.type) !== 'subsonic') {
+        return { ok: false, error: 'not_subsonic', result: { artists: [], albums: [], songs: [] } }
+      }
+      const client = createSubsonicClientForSource(source)
+      const result =
+        kind === 'recentlyPlayed'
+          ? await client.getRecentlyPlayed(source)
+          : await client.getStarred(source)
+      return { ok: true, result }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error?.message || String(error),
+        result: { artists: [], albums: [], songs: [] }
+      }
+    }
+  })
+
+  ipcMain.handle('remoteLibrary:getPlaylists', async (_, sourceId) => {
+    try {
+      const source = findRemoteSource(sourceId)
+      if (normalizeRemoteSourceType(source?.type) !== 'subsonic') {
+        return { ok: true, playlists: [] }
+      }
+      const client = createSubsonicClientForSource(source)
+      return { ok: true, playlists: await client.getPlaylists() }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error), playlists: [] }
+    }
+  })
+
+  ipcMain.handle('remoteLibrary:getPlaylist', async (_, sourceId, playlistId) => {
+    try {
+      const source = findRemoteSource(sourceId)
+      if (normalizeRemoteSourceType(source?.type) !== 'subsonic') {
+        return { ok: false, error: 'not_subsonic', playlist: null }
+      }
+      const client = createSubsonicClientForSource(source)
+      return { ok: true, playlist: await client.getPlaylist(playlistId, source) }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error), playlist: null }
+    }
+  })
+
+  ipcMain.handle('remoteLibrary:resolveStreamUrl', async (_, filePath) => {
+    try {
+      if (!isSubsonicTrackPath(filePath) && !isNetworkFolderTrackPath(filePath) && !isWebDavTrackPath(filePath)) {
+        return { ok: false, error: 'not_remote_track' }
+      }
+      return { ok: true, url: await resolveRemotePlaybackUrl(filePath) }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) }
+    }
+  })
+
   ipcMain.handle('shell:openExternal', async (_, url) => {
     if (typeof url !== 'string') return { ok: false, error: 'invalid_url' }
     const t = url.trim()
@@ -2067,6 +3141,8 @@ app.whenReady().then(async () => {
   // IPC: Read LRC lyrics file (same directory, same name as audio file)
   ipcMain.handle('file:readLyrics', async (_, audioFilePath) => {
     try {
+      if (isSubsonicTrackPath(audioFilePath)) return null
+      audioFilePath = resolveMetadataFilePath(audioFilePath)
       const { dirname, basename, join: pathJoin, extname } = await import('path')
       const dir = dirname(audioFilePath)
       const nameWithoutExt = basename(audioFilePath, extname(audioFilePath))
@@ -2088,6 +3164,8 @@ app.whenReady().then(async () => {
   // IPC: Read info JSON (from yt-dlp)
   ipcMain.handle('file:readInfoJson', async (_, audioFilePath) => {
     try {
+      if (isSubsonicTrackPath(audioFilePath)) return null
+      audioFilePath = resolveMetadataFilePath(audioFilePath)
       const { dirname, basename, join: pathJoin, extname } = await import('path')
       const dir = dirname(audioFilePath)
       const nameWithoutExt = basename(audioFilePath, extname(audioFilePath))
@@ -2134,6 +3212,59 @@ app.whenReady().then(async () => {
     } catch (e) {
       console.error('[netease:searchAlbum]', e?.message || e)
       return []
+    }
+  })
+
+  ipcMain.handle('netease:searchArtist', async (_, payload) => {
+    try {
+      const artistName = String(payload?.artist || '').trim()
+      if (!artistName) return []
+      const auth = await resolveNeteaseAuthState(payload?.cookie || '')
+      const ncm = getNcmApi()
+      const res = await ncm.cloudsearch({
+        keywords: artistName,
+        type: 100,
+        limit: 8,
+        ...buildNcmRequestOptions(auth.valid ? auth.cookie : '')
+      })
+      const artists = res?.body?.result?.artists
+      if (!Array.isArray(artists)) return []
+      return artists.map((artist) => ({
+        id: artist.id,
+        name: artist.name || '',
+        alias: Array.isArray(artist.alias) ? artist.alias.filter(Boolean) : [],
+        picUrl: artist.picUrl || artist.img1v1Url || artist.avatar || '',
+        img1v1Url: artist.img1v1Url || '',
+        albumSize: artist.albumSize || 0,
+        musicSize: artist.musicSize || 0
+      }))
+    } catch (e) {
+      console.error('[netease:searchArtist]', e?.message || e)
+      return []
+    }
+  })
+
+  ipcMain.handle('qqMusic:searchArtist', async (_, payload) => {
+    try {
+      const auth = await resolveQqMusicAuthState(payload?.cookie || '')
+      return await searchQqMusicArtists({
+        artist: payload?.artist || '',
+        cookie: auth.cookie || '',
+        limit: payload?.limit || 8
+      })
+    } catch (e) {
+      console.error('[qqMusic:searchArtist]', e?.message || e)
+      return []
+    }
+  })
+
+  ipcMain.handle('artistAvatar:fetchImageDataUrl', async (_, url) => {
+    try {
+      const dataUrl = await fetchImageDataUrl(url)
+      return { ok: !!dataUrl, dataUrl: dataUrl || '' }
+    } catch (e) {
+      console.error('[artistAvatar:fetchImageDataUrl]', e?.message || e)
+      return { ok: false, dataUrl: '' }
     }
   })
 
@@ -3336,6 +4467,45 @@ app.whenReady().then(async () => {
 
   // IPC: Get Extended Audio Metadata (Sample rate, bitrate, format, cover)
   ipcMain.handle('file:getExtendedMetadata', async (_, filePath) => {
+    if (isSubsonicTrackPath(filePath)) {
+      try {
+        const track = await getSubsonicTrackMetadata(filePath)
+        const info = track?.info || {}
+        const bitrateKbps = Number(info.bitrateKbps || 0)
+        const codec = info.codec || 'Remote'
+        return {
+          success: true,
+          technical: {
+            sampleRate: Number(info.sampleRateHz || 0) || null,
+            bitrate: bitrateKbps ? bitrateKbps * 1000 : null,
+            channels: Number(info.channels || 0) || null,
+            bitDepth: Number(info.bitDepth || 0) || null,
+            codec,
+            duration: Number(info.duration || track?.duration || 0) || null,
+            isMqa: false,
+            lossless: /^(flac|alac|wav|aiff)$/i.test(codec)
+          },
+          common: {
+            title: track?.title || info.title || 'Unknown Title',
+            artist: track?.artist || info.artist || 'Unknown Artist',
+            album: track?.album || info.album || '',
+            albumArtist: info.albumArtist || null,
+            trackNo: null,
+            discNo: null,
+            bpm: null,
+            lyrics: null,
+            cover: info.cover || null,
+            coverExtractorVersion: info.cover ? 1 : 0,
+            coverBytes: 0,
+            coverWidth: 0,
+            coverHeight: 0
+          }
+        }
+      } catch (error) {
+        return { success: false, error: error?.message || String(error) }
+      }
+    }
+    filePath = resolveMetadataFilePath(filePath)
     if (!existsSync(filePath)) {
       return { success: false, error: 'file_not_found' }
     }
@@ -3344,6 +4514,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('file:detectBpm', async (_, filePath) => {
     try {
+      if (isSubsonicTrackPath(filePath)) {
+        return { success: false, error: 'remote_bpm_unavailable', bpm: null }
+      }
+      filePath = resolveMetadataFilePath(filePath)
       if (!existsSync(filePath)) {
         return { success: false, error: 'file_not_found', bpm: null }
       }
@@ -3351,7 +4525,8 @@ app.whenReady().then(async () => {
       return {
         success: true,
         bpm: result.bpm || null,
-        confidence: result.confidence || 0
+        confidence: result.confidence || 0,
+        backend: result.backend || null
       }
     } catch (error) {
       return {
@@ -3550,7 +4725,8 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'audio:play',
     async (_, filePath, startTime, playbackRate, sourceSampleRateHint) => {
-      return audioEngine.play(filePath, startTime, playbackRate, sourceSampleRateHint)
+      const resolvedPath = await resolveRemotePlaybackPath(filePath)
+      return audioEngine.play(resolvedPath, startTime, playbackRate, sourceSampleRateHint)
     }
   )
 
@@ -3776,6 +4952,25 @@ app.whenReady().then(async () => {
     return { ok: true }
   })
 
+  // === Phone remote control Web app ===
+  ipcMain.handle('remote:start', async (_, opts = {}) => {
+    try {
+      return await phoneRemoteServer.start(opts || {})
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error), ...phoneRemoteServer.getStatus() }
+    }
+  })
+
+  ipcMain.handle('remote:stop', async () => phoneRemoteServer.stop())
+  ipcMain.handle('remote:status', async () => phoneRemoteServer.getStatus())
+  ipcMain.handle('remote:rotateToken', async () => phoneRemoteServer.rotateToken())
+  ipcMain.handle('remote:listClients', async () => ({
+    ok: true,
+    clients: phoneRemoteServer.listClients()
+  }))
+  ipcMain.handle('remote:kickClient', async (_, clientId) => phoneRemoteServer.kickClient(clientId))
+  ipcMain.handle('remote:updateState', async (_, snapshot) => phoneRemoteServer.updateState(snapshot))
+
   // === 手机投流到本机（DLNA MediaRenderer???==
   ipcMain.handle('cast:dlnaStart', async (_, opts) => {
     return dlnaRenderer.start(opts || {})
@@ -3785,8 +4980,75 @@ app.whenReady().then(async () => {
     return dlnaRenderer.stop()
   })
 
+  ipcMain.handle('cast:airplayStart', async (_, opts) => {
+    return airplayReceiver.start(opts || {})
+  })
+
+  ipcMain.handle('cast:airplayStop', async () => {
+    return airplayReceiver.stop()
+  })
+
+  ipcMain.handle('cast:airplayCommand', async (_, command) => {
+    return airplayReceiver.sendRemoteCommand(command)
+  })
+
+  ipcMain.handle('cast:stopPlayback', async () => {
+    const airplay = airplayReceiver.getStatus()
+    const dlna = dlnaRenderer.getStatus()
+    const dlnaActive =
+      !!dlna.dlnaEnabled &&
+      !!dlna.currentUri &&
+      (dlna.transportState === 'PLAYING' || dlna.transportState === 'PAUSED_PLAYBACK')
+    let stopped = false
+    if (airplay.airplayActive) {
+      await airplayReceiver.stopPlaybackOnly({ localTakeover: true })
+      stopped = true
+    }
+    if (dlnaActive) {
+      await dlnaRenderer.stopPlaybackOnly()
+      stopped = true
+    }
+    broadcastCastStatus()
+    return { ok: true, stopped }
+  })
+
   ipcMain.handle('cast:getStatus', async () => {
-    return dlnaRenderer.getStatus()
+    return getCastStatus()
+  })
+
+  // === 本机投送到数播（DLNA/OpenHome Control Point）===
+  ipcMain.handle('castSend:discover', async (_, opts = {}) => {
+    return upnpSender.safeCall(() => upnpSender.discover(opts || {}))
+  })
+
+  ipcMain.handle('castSend:getStatus', async () => {
+    return upnpSender.getStatus()
+  })
+
+  ipcMain.handle('castSend:playTrack', async (_, payload = {}) => {
+    const track = payload?.track || payload
+    const deviceId = payload?.deviceId || payload?.targetDeviceId || ''
+    return upnpSender.safeCall(() => upnpSender.playTrack(deviceId, track, payload?.options || {}))
+  })
+
+  ipcMain.handle('castSend:pause', async (_, deviceId = '') => {
+    return upnpSender.safeCall(() => upnpSender.pause(deviceId))
+  })
+
+  ipcMain.handle('castSend:resume', async (_, deviceId = '') => {
+    return upnpSender.safeCall(() => upnpSender.resume(deviceId))
+  })
+
+  ipcMain.handle('castSend:stop', async (_, deviceId = '') => {
+    return upnpSender.safeCall(() => upnpSender.stop(deviceId))
+  })
+
+  ipcMain.handle('castSend:seek', async (_, payload = {}) => {
+    return upnpSender.safeCall(() => upnpSender.seek(payload?.seconds || 0, payload?.deviceId || ''))
+  })
+
+  ipcMain.handle('castSend:setVolume', async (_, payload = {}) => {
+    return upnpSender.safeCall(() => upnpSender.setVolume(payload?.volume ?? 0.7, payload?.deviceId || ''))
   })
 
   // 获取崩溃报告目录
@@ -4234,16 +5496,33 @@ app.whenReady().then(async () => {
     }
   })
 
+  audioEngine.onAutomixTrackChanged((nextPath) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('audio:automix-track-changed', nextPath)
+    }
+  })
+
   ipcMain.handle('audio:setGapless', (_, enabled) => {
     audioEngine.setGapless(enabled)
   })
 
-  ipcMain.handle('audio:prebufferNext', (_, filePath) => {
-    audioEngine.prebufferNextTrack(filePath)
+  ipcMain.handle('audio:prebufferNext', async (_, filePath) => {
+    const resolvedPath = await resolveRemotePlaybackPath(filePath)
+    audioEngine.prebufferNextTrack(resolvedPath)
   })
 
   ipcMain.handle('audio:cancelPrebuffer', () => {
     audioEngine._cancelPrebuffer()
+  })
+
+  ipcMain.handle('audio:startAutomixNext', async (_, filePath, options = {}) => {
+    const resolvedPath = await resolveRemotePlaybackPath(filePath)
+    return audioEngine.startAutomixNextTrack(resolvedPath, options || {})
+  })
+
+  ipcMain.handle('audio:cancelAutomix', () => {
+    audioEngine.cancelAutomix()
+    return { ok: true }
   })
 
   // 定时推送播放状态到渲染进程 (200ms 间隔)
@@ -4276,7 +5555,11 @@ app.on('before-quit', () => {
   void disposeDiscordRpc()
   flushAppStateCacheSync()
   stopRendererHttpServer().catch(() => {})
+  stopWebDavProxyServer().catch(() => {})
   dlnaRenderer.stop().catch(() => {})
+  airplayReceiver.stop().catch(() => {})
+  upnpSender.shutdown().catch(() => {})
+  phoneRemoteServer.stop().catch(() => {})
   libraryWatchManager?.stop()
 })
 

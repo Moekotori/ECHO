@@ -33,6 +33,7 @@ DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0
 #include <functiondiscoverykeys_devpkey.h>
 #endif
 #ifdef MA_ENABLE_ASIO
+#include "asiosys.h"
 #include "asio.h"
 #include "asiodrivers.h"
 extern AsioDrivers* asioDrivers;
@@ -58,6 +59,7 @@ typedef struct asio_runtime {
 } asio_runtime;
 static asio_runtime g_asio;
 #endif
+#include "wasapi_exclusive.h"
 #else
 #include <time.h>
 static void portable_sleep_ms(int ms) {
@@ -254,10 +256,18 @@ static ma_uint32 probe_highest_exclusive_sample_rate(ma_context* context, const 
 
         result = ma_device_init(context, &config, &device);
         if (result == MA_SUCCESS) {
-            ma_uint32 actualRate = device.sampleRate > 0 ? device.sampleRate : rates[i];
+            /* Use internalSampleRate (= true hw rate) instead of device.sampleRate
+             * (= app-facing rate). In WASAPI exclusive, miniaudio always uses the
+             * device's currently-configured "Default Format" (mmsys.cpl) and
+             * silently inserts an internal SRC when the requested rate differs,
+             * so device.sampleRate stays equal to rates[i] regardless of what
+             * the hardware actually opens at. */
+            ma_uint32 hwRate = device.playback.internalSampleRate > 0
+                                ? device.playback.internalSampleRate
+                                : (device.sampleRate > 0 ? device.sampleRate : rates[i]);
             ma_device_uninit(&device);
-            if (actualRate == rates[i]) {
-                return actualRate;
+            if (hwRate == rates[i]) {
+                return hwRate;
             }
         }
     }
@@ -279,7 +289,15 @@ static ma_uint32 get_highest_sample_rate_for_device(ma_context* context, const m
     }
 
     probedHighest = probe_highest_exclusive_sample_rate(context, &info->id);
-    if (probedHighest > highest) highest = probedHighest;
+    /* Probe is authoritative when it returns > 0: it represents the actual rate
+     * the hardware will run at in exclusive mode given the current mmsys
+     * "Default Format" setting. The native-format list (which we read above)
+     * comes from IsFormatSupported() which is permissive and will happily say
+     * "yes 192k is supported" even when mmsys is locked to 48k — which is the
+     * exact misreport that started this whole mess. */
+    if (probedHighest > 0) {
+        return probedHighest;
+    }
 
     return highest;
 }
@@ -339,6 +357,67 @@ static int collect_unique_playback_devices(ma_context* context, listed_device** 
 
         devices[uniqueCount].id = playbackInfos[i].id;
         devices[uniqueCount].highestSampleRate = highestSampleRate;
+        devices[uniqueCount].isDefault = playbackInfos[i].isDefault;
+        snprintf(devices[uniqueCount].name, sizeof(devices[uniqueCount].name), "%s", utf8Name);
+        uniqueCount += 1;
+    }
+
+    *outDevices = devices;
+    *outCount = uniqueCount;
+    return 0;
+}
+
+static int collect_unique_playback_devices_fast(ma_context* context, listed_device** outDevices, ma_uint32* outCount) {
+    ma_device_info* playbackInfos = NULL;
+    ma_uint32 playbackCount = 0;
+    listed_device* devices = NULL;
+    ma_uint32 uniqueCount = 0;
+
+    if (outDevices == NULL || outCount == NULL) return -1;
+    *outDevices = NULL;
+    *outCount = 0;
+
+    if (ma_context_get_devices(context, &playbackInfos, &playbackCount, NULL, NULL) != MA_SUCCESS) {
+        return -1;
+    }
+
+    devices = (listed_device*)calloc((size_t)(playbackCount > 0 ? playbackCount : 1), sizeof(listed_device));
+    if (devices == NULL) {
+        return -1;
+    }
+
+    for (ma_uint32 i = 0; i < playbackCount; ++i) {
+        char utf8Name[512];
+        ma_uint32 existingIndex = (ma_uint32)-1;
+
+        utf8Name[0] = '\0';
+#ifdef _WIN32
+        get_wasapi_device_friendly_name_utf8(&playbackInfos[i].id, utf8Name, (int)sizeof(utf8Name));
+#endif
+        if (utf8Name[0] == '\0') {
+            device_name_to_utf8(playbackInfos[i].name, utf8Name, (int)sizeof(utf8Name));
+        }
+
+        for (ma_uint32 j = 0; j < uniqueCount; ++j) {
+            if (device_ids_equal(&devices[j].id, &playbackInfos[i].id) ||
+                (devices[j].name[0] != '\0' && utf8Name[0] != '\0' && strcmp(devices[j].name, utf8Name) == 0)) {
+                existingIndex = j;
+                break;
+            }
+        }
+
+        if (existingIndex != (ma_uint32)-1) {
+            if (playbackInfos[i].isDefault) {
+                devices[existingIndex].isDefault = MA_TRUE;
+            }
+            if (devices[existingIndex].name[0] == '\0' && utf8Name[0] != '\0') {
+                snprintf(devices[existingIndex].name, sizeof(devices[existingIndex].name), "%s", utf8Name);
+            }
+            continue;
+        }
+
+        devices[uniqueCount].id = playbackInfos[i].id;
+        devices[uniqueCount].highestSampleRate = 0;
         devices[uniqueCount].isDefault = playbackInfos[i].isDefault;
         snprintf(devices[uniqueCount].name, sizeof(devices[uniqueCount].name), "%s", utf8Name);
         uniqueCount += 1;
@@ -808,8 +887,49 @@ static int init_asio_runtime(const char* targetDeviceName, int targetDeviceIndex
         return -1;
     }
 
+    /* ── Negotiate the actual ASIO rate ──
+     *
+     * Previously this code stored sampleRate (the caller's request) into
+     * g_asio.sampleRate without ever calling ASIOSetSampleRate / GetSampleRate.
+     * Result: the driver kept running at whatever rate was last set via its
+     * control panel (TEAC ASIO often defaults to 44.1k), but echo-audio-host
+     * reported the *requested* rate to upstream, lying just like the WASAPI
+     * exclusive path used to.
+     *
+     * Correct sequence: ask the driver via ASIOCanSampleRate, set it if
+     * supported, then GetSampleRate to read the truth. If the driver refuses,
+     * stay at whatever it's currently at (the user can fix via the driver
+     * panel or fall back to WASAPI). */
     ASIOSampleRate requestedRate = asio_sample_rate_from_double((double)sampleRate);
-    g_asio.sampleRate = requestedRate;
+    ASIOSampleRate actualRate    = requestedRate;
+    if (ASIOCanSampleRate(requestedRate) == ASE_OK) {
+        if (ASIOSetSampleRate(requestedRate) != ASE_OK) {
+            fprintf(stderr,
+                    "[echo-audio-host] ASIOSetSampleRate(%u) refused by driver; reading current rate.\n",
+                    sampleRate);
+        }
+    } else {
+        fprintf(stderr,
+                "[echo-audio-host] ASIO driver does not advertise %u Hz; reading current rate.\n",
+                sampleRate);
+    }
+    if (ASIOGetSampleRate(&actualRate) != ASE_OK) {
+        fprintf(stderr, "[echo-audio-host] ASIOGetSampleRate failed; falling back to requested.\n");
+        actualRate = requestedRate;
+    }
+    {
+        ma_uint32 actualU32 = (ma_uint32)(asio_sample_rate_to_double(actualRate) + 0.5);
+        if (actualU32 != sampleRate) {
+            fprintf(stderr,
+                    "[echo-audio-host] ASIO rate adjusted by driver: requested=%u actual=%u\n",
+                    sampleRate, actualU32);
+            sampleRate = actualU32;
+            /* The ring buffer was sized for the requested rate; oversized now
+             * is fine (just a bit more latency), undersized would have been a
+             * real problem. We accept it rather than reinit. */
+        }
+    }
+    g_asio.sampleRate = actualRate;
 
     g_asio.postOutput = ASIOOutputReady() == ASE_OK ? ASIOTrue : ASIOFalse;
     g_asio.inputChannelCount = inputChannels < MAX_ASIO_INPUT_CHANNELS ? inputChannels : MAX_ASIO_INPUT_CHANNELS;
@@ -948,6 +1068,100 @@ void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uin
     g_framesConsumed += framesRead;
 }
 
+static ma_uint32 read_float_frames_from_ring(void* userData, float* output, ma_uint32 frameCount, ma_uint32 channels)
+{
+    (void)userData;
+    if (output == NULL || frameCount == 0 || channels == 0) return 0;
+
+    ma_uint32 framesRead = frameCount;
+    void* pBuffer = NULL;
+    memset(output, 0, (size_t)frameCount * channels * sizeof(float));
+
+    ma_result result = ma_pcm_rb_acquire_read(&g_rb, &framesRead, &pBuffer);
+    if (result != MA_SUCCESS || framesRead == 0) return 0;
+
+    memcpy(output, pBuffer, (size_t)framesRead * channels * sizeof(float));
+    ma_pcm_rb_commit_read(&g_rb, framesRead);
+
+    float vol = g_volume;
+    if (vol < 0.999f || vol > 1.001f) {
+        ma_uint32 total = framesRead * channels;
+        for (ma_uint32 i = 0; i < total; i++) {
+            output[i] *= vol;
+        }
+    }
+
+    g_framesConsumed += framesRead;
+    return framesRead;
+}
+
+static int pump_stdin_to_ring(ma_uint32 channels)
+{
+    const size_t chunkFrames = 2048;
+    const size_t chunkBytes  = chunkFrames * channels * sizeof(float);
+    ma_uint8* chunk = (ma_uint8*)malloc(chunkBytes);
+    ma_uint64 lastReportedPos = 0;
+    int posReportCounter = 0;
+
+    if (chunk == NULL) {
+        fprintf(stderr, "[echo-audio-host] Failed to allocate stdin buffer\n");
+        return -1;
+    }
+
+    while (1) {
+        size_t bytesRead = fread(chunk, 1, chunkBytes, stdin);
+        if (bytesRead == 0) {
+            g_stdinEOF = 1;
+            break;
+        }
+
+        ma_uint32 framesToWrite = (ma_uint32)(bytesRead / (channels * sizeof(float)));
+        ma_uint32 framesWritten = 0;
+
+        while (framesToWrite > 0) {
+            void* pWriteBuffer;
+            ma_uint32 framesToAcquire = framesToWrite;
+            ma_result res = ma_pcm_rb_acquire_write(&g_rb, &framesToAcquire, &pWriteBuffer);
+
+            if (res == MA_SUCCESS && framesToAcquire > 0) {
+                memcpy(pWriteBuffer,
+                       chunk + (framesWritten * channels * sizeof(float)),
+                       framesToAcquire * channels * sizeof(float));
+                ma_pcm_rb_commit_write(&g_rb, framesToAcquire);
+                framesToWrite -= framesToAcquire;
+                framesWritten += framesToAcquire;
+            } else {
+                sleep_ms(2);
+            }
+        }
+
+        posReportCounter++;
+        if (posReportCounter >= 4) {
+            posReportCounter = 0;
+            ma_uint64 pos = g_framesConsumed;
+            if (pos != lastReportedPos) {
+                fprintf(stdout, "{\"pos\":%llu}\n", (unsigned long long)pos);
+                fflush(stdout);
+                lastReportedPos = pos;
+            }
+        }
+    }
+
+    for (int drainIter = 0; drainIter < 500; drainIter++) {
+        ma_uint32 remaining = ma_pcm_rb_available_read(&g_rb);
+        if (remaining == 0) break;
+        sleep_ms(10);
+    }
+
+    fprintf(stdout, "{\"pos\":%llu}\n", (unsigned long long)g_framesConsumed);
+    fflush(stdout);
+    fprintf(stdout, "{\"event\":\"ended\"}\n");
+    fflush(stdout);
+
+    free(chunk);
+    return 0;
+}
+
 /* ── main ── */
 
 int main(int argc, char** argv) {
@@ -987,6 +1201,21 @@ int main(int argc, char** argv) {
             return -3;
         }
 #endif
+        wasapi_exclusive_device_info* wasapiDevices = NULL;
+        uint32_t wasapiDeviceCount = 0;
+        if (wasapi_exclusive_list_devices(&wasapiDevices, &wasapiDeviceCount) == 0) {
+            for (uint32_t i = 0; i < wasapiDeviceCount; i++) {
+                fprintf(stdout, "%u\t%s\t%u\t%d\t%u\n",
+                        i,
+                        wasapiDevices[i].name,
+                        wasapiDevices[i].highestSampleRate,
+                        wasapiDevices[i].isDefault ? 1 : 0,
+                        wasapiDevices[i].sharedSampleRate);
+            }
+            fflush(stdout);
+            wasapi_exclusive_free_devices(wasapiDevices);
+        }
+        return 0;
 #else
         if (useAsio) {
             fprintf(stderr, "[echo-audio-host] ASIO is only supported on Windows builds\n");
@@ -1038,6 +1267,60 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "-vol") == 0 && i + 1 < argc)     g_volume = (float)atof(argv[++i]);
     }
 
+#ifdef _WIN32
+    if (!useAsio && exclusive) {
+        ma_format format = ma_format_f32;
+        ma_uint32 rbFrames = (ma_uint32)((double)sampleRate * 0.4);
+        wasapi_exclusive_runtime* wasapiRuntime = NULL;
+        wasapi_exclusive_ready_info readyInfo;
+        char wasapiError[512];
+
+        if (channels == 0) channels = 2;
+        if (rbFrames < sampleRate / 5) rbFrames = sampleRate / 5;
+        if (ma_pcm_rb_init(format, channels, rbFrames, NULL, NULL, &g_rb) != MA_SUCCESS) {
+            fprintf(stderr, "[echo-audio-host] Failed to initialize ring buffer\n");
+            return -1;
+        }
+
+        int wasapiResult = wasapi_exclusive_start(
+            targetDeviceName,
+            targetDeviceIndex,
+            sampleRate,
+            channels,
+            read_float_frames_from_ring,
+            NULL,
+            &wasapiRuntime,
+            &readyInfo,
+            wasapiError,
+            sizeof(wasapiError));
+
+        if (wasapiResult != 0) {
+            fprintf(stderr, "[echo-audio-host] %s\n",
+                    wasapiError[0] != '\0' ? wasapiError : "Failed to initialize WASAPI exclusive output");
+            ma_pcm_rb_uninit(&g_rb);
+            return wasapiResult;
+        }
+
+        fprintf(stderr, "[echo-audio-host] Ready: sr=%u hw=%u ch=%u exclusive=YES backend=wasapi-exclusive format=%s\n",
+                readyInfo.sampleRate,
+                readyInfo.hardwareSampleRate,
+                readyInfo.channels,
+                readyInfo.format);
+        fprintf(stdout,
+                "{\"ready\":true,\"sampleRate\":%u,\"hardwareSampleRate\":%u,\"channels\":%u,\"exclusive\":true,\"backend\":\"wasapi-exclusive\",\"format\":\"%s\"}\n",
+                readyInfo.sampleRate,
+                readyInfo.hardwareSampleRate,
+                readyInfo.channels,
+                readyInfo.format);
+        fflush(stdout);
+
+        int pumpResult = pump_stdin_to_ring(channels);
+        wasapi_exclusive_stop(wasapiRuntime);
+        ma_pcm_rb_uninit(&g_rb);
+        return pumpResult;
+    }
+#endif
+
     /* ── init context (WASAPI on Windows) ── */
     ma_uint32 actualSampleRate = sampleRate;
     ma_uint32 actualChannels = channels;
@@ -1079,7 +1362,7 @@ int main(int argc, char** argv) {
     } else if (targetDeviceIndex >= 0) {
         listed_device* devices = NULL;
         ma_uint32 deviceCount = 0;
-        if (collect_unique_playback_devices(&context, &devices, &deviceCount) == 0) {
+        if (collect_unique_playback_devices_fast(&context, &devices, &deviceCount) == 0) {
             if ((ma_uint32)targetDeviceIndex < deviceCount) {
                 deviceId  = devices[targetDeviceIndex].id;
                 pDeviceId = &deviceId;
@@ -1094,7 +1377,7 @@ int main(int argc, char** argv) {
     } else if (targetDeviceName != NULL) {
         listed_device* devices = NULL;
         ma_uint32 deviceCount = 0;
-        if (collect_unique_playback_devices(&context, &devices, &deviceCount) == 0) {
+        if (collect_unique_playback_devices_fast(&context, &devices, &deviceCount) == 0) {
             for (ma_uint32 i = 0; i < deviceCount; i++) {
                 if (contains_icase(devices[i].name, targetDeviceName) ||
                     contains_icase(targetDeviceName, devices[i].name) ||
@@ -1163,8 +1446,91 @@ int main(int argc, char** argv) {
         return -2; /* special exit code: exclusive denied */
     }
 
-    fprintf(stderr, "[echo-audio-host] Ready: sr=%d ch=%d exclusive=%s\n",
-            device.sampleRate, device.playback.channels,
+    /* ── BIT-PERFECT GUARD: detect hidden internal SRC in WASAPI exclusive ──
+     *
+     * In exclusive mode miniaudio uses whatever rate is set in
+     * mmsys.cpl -> device -> Advanced -> Default Format (see miniaudio.h
+     * ~23694), independent of config.sampleRate. If they differ it silently
+     * inserts a 192k->48k (or whatever) resampler, which defeats the entire
+     * point of exclusive mode and causes the upstream chain (and UI) to
+     * believe it is sending hi-res to the DAC while the DAC actually receives
+     * the mmsys default rate.
+     *
+     * Fix: detect device.sampleRate != device.playback.internalSampleRate,
+     * tear down, and reopen at the hardware rate. Then upstream (JS / ffmpeg)
+     * will adjust its decode rate via the actualSampleRate echo and the path
+     * becomes honest end to end. */
+    if (!useAsio && exclusive
+        && device.playback.internalSampleRate != 0
+        && device.playback.internalSampleRate != device.sampleRate) {
+
+        ma_uint32 hwRate = device.playback.internalSampleRate;
+        fprintf(stderr,
+                "[echo-audio-host] WASAPI exclusive rate mismatch: app=%u hw=%u. "
+                "Reopening at hw rate to avoid hidden SRC. "
+                "(Tip: set mmsys -> device -> Advanced -> Default Format to your "
+                "desired rate for true high-res exclusive output.)\n",
+                device.sampleRate, hwRate);
+
+        ma_device_uninit(&device);
+        ma_pcm_rb_uninit(&g_rb);
+
+        rbFrames = (ma_uint32)((double)hwRate * 0.4);
+        if (rbFrames < hwRate / 5) rbFrames = hwRate / 5;
+        if (ma_pcm_rb_init(format, channels, rbFrames, NULL, NULL, &g_rb) != MA_SUCCESS) {
+            fprintf(stderr, "[echo-audio-host] Failed to reinit ring buffer at hw rate %u\n", hwRate);
+            ma_context_uninit(&context);
+            return -1;
+        }
+
+        /* Re-init config from scratch instead of mutating the prior one. Cheap
+         * insurance against any internal state miniaudio might have written
+         * during the failed-intent first init. */
+        config = ma_device_config_init(ma_device_type_playback);
+        config.playback.format    = format;
+        config.playback.channels  = channels;
+        config.playback.pDeviceID = pDeviceId;
+        config.playback.shareMode = ma_share_mode_exclusive;
+        config.sampleRate         = hwRate;
+        config.dataCallback       = data_callback;
+        config.periodSizeInFrames = hwRate / 100;
+
+        if (ma_device_init(&context, &config, &device) != MA_SUCCESS) {
+            fprintf(stderr, "[echo-audio-host] Failed to reopen device at hw rate %u\n", hwRate);
+            ma_pcm_rb_uninit(&g_rb);
+            ma_context_uninit(&context);
+            return -1;
+        }
+        if (device.playback.shareMode != ma_share_mode_exclusive) {
+            fprintf(stderr, "[echo-audio-host] Exclusive lost after rate-adjust reopen. Aborting.\n");
+            ma_device_uninit(&device);
+            ma_pcm_rb_uninit(&g_rb);
+            ma_context_uninit(&context);
+            return -2;
+        }
+        /* Defensive: after reopen, the two rates MUST match. If they don't,
+         * miniaudio is doing something we don't understand — fail loud rather
+         * than ship hidden SRC again. */
+        if (device.playback.internalSampleRate != 0
+            && device.playback.internalSampleRate != device.sampleRate) {
+            fprintf(stderr,
+                    "[echo-audio-host] Reopen still mismatched (app=%u hw=%u). Aborting bit-perfect.\n",
+                    device.sampleRate, device.playback.internalSampleRate);
+            ma_device_uninit(&device);
+            ma_pcm_rb_uninit(&g_rb);
+            ma_context_uninit(&context);
+            return -4; /* new code: bit-perfect not achievable */
+        }
+        fprintf(stderr,
+                "[echo-audio-host] Reopen OK: app=%u hw=%u (bit-perfect path).\n",
+                device.sampleRate, device.playback.internalSampleRate);
+        sampleRate = hwRate;
+    }
+
+    fprintf(stderr, "[echo-audio-host] Ready: sr=%d hw=%u ch=%d exclusive=%s\n",
+            device.sampleRate,
+            device.playback.internalSampleRate,
+            device.playback.channels,
             device.playback.shareMode == ma_share_mode_exclusive ? "YES" : "NO");
         actualSampleRate = device.sampleRate;
         actualChannels = device.playback.channels;
@@ -1178,8 +1544,10 @@ int main(int argc, char** argv) {
         fprintf(stdout, "{\"ready\":true,\"sampleRate\":%d,\"channels\":%d,\"exclusive\":false,\"asio\":true}\n",
                 actualSampleRate, actualChannels);
     } else {
-        fprintf(stdout, "{\"ready\":true,\"sampleRate\":%d,\"channels\":%d,\"exclusive\":%s}\n",
-                device.sampleRate, device.playback.channels,
+        fprintf(stdout, "{\"ready\":true,\"sampleRate\":%d,\"hardwareSampleRate\":%u,\"channels\":%d,\"exclusive\":%s}\n",
+                device.sampleRate,
+                device.playback.internalSampleRate,
+                device.playback.channels,
                 device.playback.shareMode == ma_share_mode_exclusive ? "true" : "false");
     }
     fflush(stdout);

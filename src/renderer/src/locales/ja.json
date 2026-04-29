@@ -46,6 +46,38 @@
     "actionFailed": "操作に失敗しました：{{detail}}"
   },
   "queue": {
+    "title": "再生キュー",
+    "empty": {
+      "title": "キューは空です",
+      "hint": "曲をここへドラッグするか、曲を右クリックして「キューに追加」を選択します"
+    },
+    "totalCount": "{{count}} 曲 · {{duration}}",
+    "actions": {
+      "clear": "クリア",
+      "shuffle": "シャッフル",
+      "saveAs": "プレイリストに保存",
+      "toggle": "キューを使う"
+    },
+    "contextMenu": {
+      "playNow": "今すぐ再生",
+      "playNext": "次に再生",
+      "addToQueue": "キューに追加",
+      "moveTop": "先頭へ移動",
+      "moveBottom": "末尾へ移動",
+      "remove": "削除",
+      "removeAbove": "上をすべて削除",
+      "removeBelow": "下をすべて削除",
+      "clearQueue": "キューをクリア"
+    },
+    "toast": {
+      "removed": "「{{title}}」を削除しました",
+      "alreadyIn": "すでにキューにあります",
+      "cleared": "{{count}} 曲をクリアしました",
+      "undo": "元に戻す",
+      "savedAs": "プレイリスト「{{name}}」に保存しました"
+    },
+    "savePrompt": "プレイリスト名",
+    "defaultPlaylistName": "再生キュー",
     "alreadyInUpNext": "この曲はすでに「次に再生」に入っています。",
     "dropHint": "曲をここにドラッグすると次に再生へ追加できます",
     "playbackOn": "キューON",
@@ -79,7 +111,8 @@
     "artists": "アーティスト",
     "playlists": "プレイリスト",
     "folders": "フォルダ",
-    "queue": "キュー"
+    "queue": "キュー",
+    "history": "履歴"
   },
   "albumFilter": {
     "label": "アルバム: {{name}}",
@@ -133,8 +166,7 @@
     "noPlaylists": "プレイリストがありません。新規作成するか JSON を読み込んでください。",
     "playlistEmpty": "このプレイリストは空です。「曲」タブの (+) から追加するか、ディスクから音声を読み込んでください。",
     "noSearchMatch": "検索に一致する曲がありません。",
-    "noLikedInView": "この一覧にお気に入りの曲がありません。",
-    "historyEmpty": "再生履歴はまだありません。"
+    "noLikedInView": "この一覧にお気に入りの曲がありません。"
   },
   "playlists": {
     "allPlaylists": "すべてのプレイリスト",
@@ -266,10 +298,7 @@
     "saveCardImage": "カード画像を保存",
     "selectTrack": "曲を選択",
     "nightcoreMode": "Nightcore モード",
-    "ellipsis": "…",
-    "playbackHistory": "再生履歴",
-    "backHistory": "履歴から戻る",
-    "clearHistory": "消去"
+    "ellipsis": "…"
   },
   "dlna": {
     "castTitle": "DLNA キャスト",
@@ -306,15 +335,15 @@
     "outputBufferTitle": "オーディオ出力バッファ",
     "outputBufferDesc": "メインプロセス経由のネイティブ再生に適用。安定はバッファを大きくして途切れを減らし遅延はやや増加。低遅延はその逆です。",
     "gaplessTitle": "ギャップレス再生",
-    "gaplessDesc": "曲間の無音を除去します。HiFi エンジンが必要です。有効にするとクロスフェードは無効になります。",
+    "gaplessDesc": "曲間の無音を除去します。HiFi エンジンが必要です。有効にすると Automix は無効になります。",
     "prevButtonModeTitle": "前の曲ボタンの動作",
     "prevButtonModeDesc": "前の曲ボタンを押したときの動作を選択します。",
     "prevButtonModePlaylist": "プレイリストの前の曲",
     "prevButtonModeHistory": "最後に再生した曲",
-    "crossfadeTitle": "クロスフェード",
-    "crossfadeDesc": "曲の切り替え時に現在の曲をフェードアウトし、次の曲をフェードインします。",
-    "crossfadeDurationTitle": "クロスフェード時間",
-    "crossfadeDurationDesc": "切り替えに使う長さを設定します。",
+    "crossfadeTitle": "Smart Automix",
+    "crossfadeDesc": "曲の終わりで次の曲を先読みし、等パワーカーブでなめらかに重ねます。",
+    "crossfadeDurationTitle": "Automix 時間",
+    "crossfadeDurationDesc": "重ねる最大時間を設定します。短い曲では自動で短くなります。",
     "crossfadeSeconds_one": "{{count}} 秒",
     "crossfadeSeconds_other": "{{count}} 秒",
     "outputBuffer": {
@@ -436,6 +465,8 @@
     "customWallpaperDecor": "カスタム壁紙装飾",
     "coverSizeTitle": "カバーサイズ",
     "coverSizeDesc": "メインプレイヤーのアルバムカバーサイズを調整します。",
+    "autoLocateCurrentTrackTitle": "再生中の曲へ移動",
+    "autoLocateCurrentTrackDesc": "曲が切り替わったとき、左側の現在リストを再生中の曲まで自動スクロールします。",
     "sidebarLogoTitle": "左上ロゴ",
     "sidebarLogoDesc": "左側ナビ上部に ECHO ロゴを表示します。オフにすると曲/アルバム一覧が上に詰まります。",
     "bgImage": "背景画像",
@@ -509,6 +540,12 @@
   "eqPreset": {
     "Custom": "カスタム",
     "Flat": "フラット",
+    "Reference (Harman 2018)": "リファレンス (Harman 2018)",
+    "Warm": "ウォーム",
+    "Bright": "ブライト",
+    "Dialogue / Podcast": "会話 / ポッドキャスト",
+    "Late Night": "ナイトリスニング",
+    "V-Shape": "Vシェイプ",
     "Bass Boost": "低音ブースト",
     "Treble Boost": "高音ブースト",
     "Vocal": "ボーカル",
@@ -520,8 +557,31 @@
   },
   "eqPlot": {
     "scrollQ": "スクロールで Q",
+    "preamp": "プリアンプ",
+    "band": "バンド",
+    "bandOption": "Band {{index}} - {{freq}}",
+    "freq": "周波数",
+    "gain": "ゲイン",
     "filterType": "タイプ",
     "qLabel": "Q",
+    "slope": "スロープ",
+    "enabled": "有効",
+    "disabled": "無効",
+    "solo": "Solo",
+    "mute": "ゼロ",
+    "bypassedEnable": "EQ バイパス中 - クリックで有効",
+    "quality": "品質",
+    "outputSafety": "出力保護",
+    "oversampling": {
+      "high": "高品質 4x",
+      "balanced": "バランス 2x",
+      "lowCpu": "低 CPU"
+    },
+    "outputSafetyModes": {
+      "soft": "ソフトクリップ",
+      "hard": "ハードリミット",
+      "off": "オフ"
+    },
     "types": {
       "peaking": "ピーキング",
       "lowshelf": "ローシェルフ",
@@ -837,7 +897,41 @@
     "lan": "LAN",
     "state": "状態",
     "uri": "URI",
+    "port": "ポート",
+    "client": "クライアント",
+    "airplayShort": "AirPlay",
+    "airplayIntro": "AirPlay: 受信を開始してから、同じ Wi-Fi 上の iPhone、iPad、Mac の AirPlay 音声出力で ECHO AirPlay を選択してください。音声は ECHO で選択中の出力デバイスへ送られます。",
+    "airplayNameLabel": "デバイス表示名 (AirPlay)",
+    "stopAirplayReceiver": "AirPlay 受信を停止",
+    "startAirplayReceiver": "AirPlay 受信を開始",
+    "airplayError": "AirPlay: {{error}}",
     "dlnaError": "DLNA: {{error}}"
+  },
+  "remote": {
+    "settingsTitle": "スマホリモコン",
+    "settingsDesc": "同じ Wi-Fi のスマホから再生、音量、歌詞、EQ を操作します。",
+    "openDrawer": "リモコンを開く",
+    "drawerTitle": "スマホリモコン",
+    "heroTitle": "スマホで ECHO を操作",
+    "heroDesc": "同じ Wi-Fi で QR コードを読み取ってください。",
+    "statusStopped": "停止中",
+    "statusStarting": "起動中",
+    "statusReady": "READY",
+    "qrAlt": "スマホリモコン QR コード",
+    "noUrl": "サーバー起動後に URL を表示します",
+    "copyUrl": "URL をコピー",
+    "start": "開始",
+    "stop": "停止",
+    "refresh": "更新",
+    "rotateToken": "token を更新",
+    "network": "ネットワーク",
+    "port": "ポート",
+    "noTokenTitle": "LAN 内 token なしを許可",
+    "noTokenDesc": "信頼できるプライベート LAN でのみ有効にしてください。変更後、接続中の端末は再接続します。",
+    "clients": "接続中の端末: {{count}}",
+    "unknownClient": "不明な端末",
+    "kick": "端末を切断",
+    "noClients": "まだスマホは接続されていません。"
   },
   "plugins": {
     "title": "プラグイン",
@@ -851,5 +945,38 @@
     "permissions": "権限",
     "noPermissions": "特別な権限は不要です",
     "confirmUninstall": "プラグイン「{{name}}」をアンインストールしますか？この操作は元に戻せません。"
+  },
+  "history": {
+    "title": "再生履歴",
+    "totalCount": "{{count}} 曲",
+    "backOneStep": "1曲戻る",
+    "searchPlaceholder": "曲名 / アーティスト / アルバムを検索...",
+    "sort": "履歴の並び替え",
+    "sortByTime": "時間順",
+    "sortByPlayCount": "再生回数順",
+    "bucket": {
+      "today": "今日",
+      "yesterday": "昨日",
+      "thisWeek": "今週",
+      "thisMonth": "今月",
+      "earlier": "それ以前"
+    },
+    "actionPlay": "再生",
+    "actionJump": "現在のリストへ移動",
+    "actionJumpDisabled": "この曲は現在のプレイリストにありません",
+    "actionRemove": "履歴から削除",
+    "playCount": "×{{count}}",
+    "relative": {
+      "justNow": "たった今",
+      "minutesAgo": "{{count}} 分前",
+      "hoursAgo": "{{count}} 時間前",
+      "todayAt": "今日 {{time}}",
+      "yesterdayAt": "昨日 {{time}}"
+    },
+    "empty": {
+      "noHistory": "再生した曲はここに表示されます。",
+      "noSearchMatch": "「{{query}}」に一致する履歴はありません"
+    },
+    "confirmClear": "再生履歴をすべて消去しますか？"
   }
 }

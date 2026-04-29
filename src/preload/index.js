@@ -107,16 +107,19 @@ contextBridge.exposeInMainWorld('api', {
   toggleDiscordRPC: (enabled) => ipcRenderer.send('discord:toggle', enabled),
   neteaseSearch: (keywords, cookie) => ipcRenderer.invoke('netease:search', keywords, cookie),
   neteaseSearchAlbum: (payload) => ipcRenderer.invoke('netease:searchAlbum', payload),
+  neteaseSearchArtist: (payload) => ipcRenderer.invoke('netease:searchArtist', payload),
   neteaseGetAlbumTracks: (albumId, cookie) =>
     ipcRenderer.invoke('netease:getAlbumTracks', { albumId, cookie }),
   getNeteaseSongUrl: (songId, level, cookie) =>
     ipcRenderer.invoke('netease:getSongUrl', songId, level, cookie),
   qqMusicSearch: (keywords, cookie) => ipcRenderer.invoke('qqMusic:search', keywords, cookie),
   qqMusicSearchAlbum: (payload) => ipcRenderer.invoke('qqMusic:searchAlbum', payload),
+  qqMusicSearchArtist: (payload) => ipcRenderer.invoke('qqMusic:searchArtist', payload),
   qqMusicGetAlbumTracks: (album, cookie) =>
     ipcRenderer.invoke('qqMusic:getAlbumTracks', { ...(album || {}), cookie }),
   qqMusicGetSongUrl: (song, qualityPreset, cookie) =>
     ipcRenderer.invoke('qqMusic:getSongUrl', song, qualityPreset, cookie),
+  fetchArtistAvatarImage: (url) => ipcRenderer.invoke('artistAvatar:fetchImageDataUrl', url),
   lastfm: {
     login: (u, p) => ipcRenderer.invoke('lastfm:login', u, p),
     logout: () => ipcRenderer.invoke('lastfm:logout'),
@@ -125,6 +128,24 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('lastfm:nowPlaying', artist, track, album, dur),
     scrobble: (artist, track, album, startedAt, dur) =>
       ipcRenderer.invoke('lastfm:scrobble', artist, track, album, startedAt, dur)
+  },
+
+  remoteLibrary: {
+    listSources: () => ipcRenderer.invoke('remoteLibrary:listSources'),
+    saveSource: (payload) => ipcRenderer.invoke('remoteLibrary:saveSource', payload),
+    removeSource: (sourceId) => ipcRenderer.invoke('remoteLibrary:removeSource', sourceId),
+    testSource: (payload) => ipcRenderer.invoke('remoteLibrary:testSource', payload),
+    getArtists: (sourceId) => ipcRenderer.invoke('remoteLibrary:getArtists', sourceId),
+    getArtist: (sourceId, artistId) =>
+      ipcRenderer.invoke('remoteLibrary:getArtist', sourceId, artistId),
+    getAlbum: (sourceId, albumId) => ipcRenderer.invoke('remoteLibrary:getAlbum', sourceId, albumId),
+    search: (sourceId, query) => ipcRenderer.invoke('remoteLibrary:search', sourceId, query),
+    getSubsonicSpecial: (sourceId, kind) =>
+      ipcRenderer.invoke('remoteLibrary:getSubsonicSpecial', sourceId, kind),
+    getPlaylists: (sourceId) => ipcRenderer.invoke('remoteLibrary:getPlaylists', sourceId),
+    getPlaylist: (sourceId, playlistId) =>
+      ipcRenderer.invoke('remoteLibrary:getPlaylist', sourceId, playlistId),
+    resolveStreamUrl: (trackPath) => ipcRenderer.invoke('remoteLibrary:resolveStreamUrl', trackPath)
   },
 
   media: {
@@ -218,8 +239,17 @@ contextBridge.exposeInMainWorld('api', {
   setAudioGapless: (enabled) => ipcRenderer.invoke('audio:setGapless', enabled),
   audioPrebufferNext: (filePath) => ipcRenderer.invoke('audio:prebufferNext', filePath),
   audioCancelPrebuffer: () => ipcRenderer.invoke('audio:cancelPrebuffer'),
+  audioStartAutomixNext: (filePath, options) =>
+    ipcRenderer.invoke('audio:startAutomixNext', filePath, options),
+  audioCancelAutomix: () => ipcRenderer.invoke('audio:cancelAutomix'),
   onGaplessTrackChanged: (callback) => {
     const channel = 'audio:gapless-track-changed'
+    const handler = (_, nextPath) => callback(nextPath)
+    ipcRenderer.on(channel, handler)
+    return () => ipcRenderer.removeListener(channel, handler)
+  },
+  onAutomixTrackChanged: (callback) => {
+    const channel = 'audio:automix-track-changed'
     const handler = (_, nextPath) => callback(nextPath)
     ipcRenderer.on(channel, handler)
     return () => ipcRenderer.removeListener(channel, handler)
@@ -233,6 +263,10 @@ contextBridge.exposeInMainWorld('api', {
   cast: {
     dlnaStart: (opts) => ipcRenderer.invoke('cast:dlnaStart', opts),
     dlnaStop: () => ipcRenderer.invoke('cast:dlnaStop'),
+    airplayStart: (opts) => ipcRenderer.invoke('cast:airplayStart', opts),
+    airplayStop: () => ipcRenderer.invoke('cast:airplayStop'),
+    airplayCommand: (command) => ipcRenderer.invoke('cast:airplayCommand', command),
+    stopPlayback: () => ipcRenderer.invoke('cast:stopPlayback'),
     getStatus: () => ipcRenderer.invoke('cast:getStatus'),
     onPauseLocal: (callback) => {
       const ch = 'cast:pause-local'
@@ -243,6 +277,31 @@ contextBridge.exposeInMainWorld('api', {
     onStatus: (callback) => {
       const ch = 'cast:status'
       const handler = (_, status) => callback(status)
+      ipcRenderer.on(ch, handler)
+      return () => ipcRenderer.removeListener(ch, handler)
+    }
+  },
+  castSend: {
+    discover: (opts) => ipcRenderer.invoke('castSend:discover', opts),
+    getStatus: () => ipcRenderer.invoke('castSend:getStatus'),
+    playTrack: (payload) => ipcRenderer.invoke('castSend:playTrack', payload),
+    pause: (deviceId) => ipcRenderer.invoke('castSend:pause', deviceId),
+    resume: (deviceId) => ipcRenderer.invoke('castSend:resume', deviceId),
+    stop: (deviceId) => ipcRenderer.invoke('castSend:stop', deviceId),
+    seek: (payload) => ipcRenderer.invoke('castSend:seek', payload),
+    setVolume: (payload) => ipcRenderer.invoke('castSend:setVolume', payload)
+  },
+  phoneRemote: {
+    start: (opts) => ipcRenderer.invoke('remote:start', opts),
+    stop: () => ipcRenderer.invoke('remote:stop'),
+    status: () => ipcRenderer.invoke('remote:status'),
+    rotateToken: () => ipcRenderer.invoke('remote:rotateToken'),
+    listClients: () => ipcRenderer.invoke('remote:listClients'),
+    kickClient: (clientId) => ipcRenderer.invoke('remote:kickClient', clientId),
+    updateState: (snapshot) => ipcRenderer.invoke('remote:updateState', snapshot),
+    onCommand: (callback) => {
+      const ch = 'remote:command'
+      const handler = (_, message) => callback(message)
       ipcRenderer.on(ch, handler)
       return () => ipcRenderer.removeListener(ch, handler)
     }
