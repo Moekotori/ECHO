@@ -1,268 +1,232 @@
 <div align="center">
 
-<h1>ECHO</h1>
+<img src="main/1.png" alt="ECHO Banner" width="100%" />
 
-<p>A modern, feature-rich desktop music player built with Electron and React.</p>
+<br />
 
-<p>
-  <a href="https://github.com/Moekotori/Echoes/releases/latest">
-    <img src="https://img.shields.io/github/v/release/Moekotori/Echoes?label=release&color=blue" alt="Latest Release">
-  </a>
-  <a href="https://github.com/Moekotori/Echoes/releases">
-    <img src="https://img.shields.io/github/downloads/Moekotori/Echoes/total?color=brightgreen" alt="Downloads">
-  </a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platform">
-  <img src="https://img.shields.io/badge/electron-31.x-47848f" alt="Electron">
-  <img src="https://img.shields.io/badge/react-18-61dafb" alt="React">
-</p>
+# 🎵 ECHO
 
-<p>
-  <a href="https://github.com/Moekotori/Echoes/releases/latest">
-    <strong>Download latest release</strong>
-  </a>
-  &nbsp;&middot;&nbsp;
-  <a href="docs/plugin-development.md">Plugin Development</a>
-  &nbsp;&middot;&nbsp;
-  <a href="#getting-started">Getting Started</a>
-</p>
+### *The Bit-Perfect Bridge to Your Sonic Multiverse*
+
+**一款现代化、功能丰富的高保真桌面音乐播放器**
+*A modern, feature-rich HiFi desktop music player built with Electron & React*
+
+<br />
+
+[![Release](https://img.shields.io/github/v/release/Moekotori/ECHO?style=for-the-badge&color=8B5CF6&logo=github&logoColor=white)](https://github.com/Moekotori/ECHO/releases)
+[![Stars](https://img.shields.io/github/stars/Moekotori/ECHO?style=for-the-badge&color=FFD700&logo=apachespark&logoColor=white)](https://github.com/Moekotori/ECHO/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/Moekotori/ECHO/total?style=for-the-badge&color=00D9FF&logo=icloud&logoColor=white)](https://github.com/Moekotori/ECHO/releases)
+[![Issues](https://img.shields.io/github/issues/Moekotori/ECHO?style=for-the-badge&color=FF6B6B&logo=target&logoColor=white)](https://github.com/Moekotori/ECHO/issues)
+[![License](https://img.shields.io/badge/License-MIT-success?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](LICENSE)
+
+<br />
+
+![Electron](https://img.shields.io/badge/Electron-31.x-47848F?style=flat-square&logo=electron&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)
+![Vite](https://img.shields.io/badge/electron--vite-9333EA?style=flat-square&logo=vite&logoColor=white)
+![Node](https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js&logoColor=white)
+![C](https://img.shields.io/badge/C-Audio_Engine-A8B9CC?style=flat-square&logo=c&logoColor=white)
+![FFmpeg](https://img.shields.io/badge/FFmpeg-007808?style=flat-square&logo=ffmpeg&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-WASAPI-0078D4?style=flat-square&logo=windows&logoColor=white)
+
+<br />
+
+[**📥 Download**](https://github.com/Moekotori/ECHO/releases) ·
+[**📖 Docs**](./docs) ·
+[**🔌 Plugins**](./plugin%20development) ·
+[**🐛 Report Bug**](https://github.com/Moekotori/ECHO/issues) ·
+[**✨ Request Feature**](https://github.com/Moekotori/ECHO/issues)
 
 </div>
 
 ---
 
----
+## ✨ 项目简介 · Overview
+
+> **ECHO** 不只是一个播放器,它是一座连接你与音乐宇宙的「位完美」之桥。
+> 从硬件级的 WASAPI 独占输出,到逐字卡拉 OK 歌词;从一键匹配 MV 到与好友实时共听 —— ECHO 让每一段声波都纯净如初,每一次聆听都不再孤单。
+
+ECHO is a cross-platform desktop music player engineered for audiophiles and music lovers alike. With a native C-based audio host running out-of-process, bit-perfect Windows output via WASAPI Exclusive Mode, synchronized karaoke lyrics, automatic MV matching, room-based co-listening, and a sandboxed plugin system — ECHO turns your desktop into a true sonic multiverse.
 
 ---
 
-## Overview
-
-ECHO is a cross-platform desktop music player focused on audio quality, extensibility, and a clean listening experience. It provides a native audio pipeline for high-fidelity local playback, an integrated lyrics system, MV playback via YouTube and Bilibili, and a plugin architecture for extending core functionality.
-
----
-
-## Feature Highlights
+## 🚀 核心特性 · Features
 
 <table>
-  <tr>
-    <td valign="top" width="50%">
-      <b>HiFi Audio Engine</b><br>
-      Out-of-process native audio host (<code>echo-audio-host</code>) for low-latency, high-fidelity playback. WASAPI Exclusive Mode for bit-perfect output on Windows. Parametric EQ with pre-amp, applied in real time.
-    </td>
-    <td valign="top" width="50%">
-      <b>Synchronized Lyrics</b><br>
-      Line-by-line and word-level karaoke highlight for LRC files. NetEase lyrics auto-fetch and manual candidate search. Japanese romaji conversion via Kuroshiro. Floating desktop overlay window.
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <b>Music Video</b><br>
-      Auto-match and play YouTube or Bilibili MV alongside playback. Quality selection, direct stream support, and full-screen MV-as-background mode.
-    </td>
-    <td valign="top">
-      <b>Listen Together</b><br>
-      Room-based synchronized co-listening via a self-hosted WebSocket server. Optional token authentication. DLNA cast to network renderers.
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <b>Media Download</b><br>
-      Download audio from YouTube, Bilibili, and SoundCloud. NetEase playlist import. Metadata and cover art written automatically.
-    </td>
-    <td valign="top">
-      <b>Plugin System</b><br>
-      First-class extensibility via a sandboxed plugin API. Plugins can contribute music sources, lyrics providers, UI panels, and more.
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <b>Theming</b><br>
-      Full CSS variable-based theme engine with an in-app editor. Import, export, and audit themes via built-in tooling.
-    </td>
-    <td valign="top">
-      <b>Auto-Update</b><br>
-      GitHub Releases-based OTA updates via <code>electron-updater</code>. Background download with a restart prompt. Manual check available in Settings.
-    </td>
-  </tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🎧 HiFi 音频引擎
+- 🔊 **WASAPI 独占模式** — Windows 位完美输出
+- ⚙️ **out-of-process 原生音频宿主** — C 语言编写,稳定零卡顿
+- 🎚️ **参数化均衡器** — 多段 EQ 实时调音
+- 🌊 高采样率 / 高位深无损支持
+
+### 🎤 同步歌词系统
+- 📝 **LRC 标准歌词** + 逐字卡拉 OK 模式
+- 🎵 **网易云音乐歌词自动抓取**
+- 🇯🇵 **日文罗马音转换** (Kuroshiro 驱动)
+- 🌐 多语言界面:English / 简体中文 / 日本語
+
+### 📺 音乐视频 (MV)
+- 🎬 自动匹配 **YouTube / Bilibili** MV
+- 📊 多清晰度选择
+- 🔁 音画同步播放
+
+</td>
+<td width="50%" valign="top">
+
+### 👥 共听房间 · Listen Together
+- 🌐 基于 **WebSocket** 的房间式共听
+- 📡 **DLNA 投屏**到家中智能设备
+- 👫 与朋友隔空同步每一拍
+
+### ⬇️ 媒体下载
+- 🎯 支持 YouTube / Bilibili / SoundCloud
+- 🏷️ 自动写入元数据与封面
+- 🔄 NCM 格式无损转换
+
+### 🔌 插件系统
+- 🧩 **沙箱化插件**:音乐源 / 歌词源 / UI 面板
+- 📦 详尽插件开发文档
+- 🛡️ 权限隔离,安全可控
+
+### 🎨 主题 & 体验
+- 🖌️ **CSS 变量主题编辑器**(可导入导出)
+- 🎮 Discord Rich Presence
+- 🚀 **electron-updater** OTA 自动更新
+
+</td>
+</tr>
 </table>
 
 ---
 
-## Additional Features
+## 🛠️ 技术栈 · Tech Stack
 
-- Local library management with drag-and-drop folder scanning
-- Album view with cover art grouping
-- User playlists, liked tracks, and queue management
-- Playback rate control with pitch preservation
-- Audio output device switching without interruption
-- NCM format conversion via bundled converter
-- Discord Rich Presence integration
-- Share card image export
-- Crash reporter with in-app log viewer
-- English, Simplified Chinese, and Japanese UI (i18n)
+<div align="center">
 
----
+| 模块 | 技术 |
+|:---:|:---:|
+| 🖥️ **桌面框架** | ![Electron](https://img.shields.io/badge/Electron-31.x-47848F?logo=electron&logoColor=white) |
+| ⚛️ **前端 UI** | ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black) ![lucide](https://img.shields.io/badge/lucide--react-F56565?logo=lucide&logoColor=white) |
+| ⚡ **构建工具** | ![Vite](https://img.shields.io/badge/electron--vite-9333EA?logo=vite&logoColor=white) |
+| 🔊 **原生音频** | ![C](https://img.shields.io/badge/C-61.6%25-A8B9CC?logo=c&logoColor=white) ![naudiodon](https://img.shields.io/badge/naudiodon-native-orange) |
+| 🎞️ **媒体处理** | ![FFmpeg](https://img.shields.io/badge/FFmpeg-007808?logo=ffmpeg&logoColor=white) ![yt-dlp](https://img.shields.io/badge/yt--dlp-red) |
+| 📊 **元数据** | ![music-metadata](https://img.shields.io/badge/music--metadata-blue) |
+| 🇯🇵 **日文转换** | ![Kuroshiro](https://img.shields.io/badge/Kuroshiro-pink) |
 
----
-
-## Requirements
-
-| Dependency | Version |
-|---|---|
-| Node.js | >= 18 |
-| npm | >= 9 |
-| Electron | 31.x (managed by devDependencies) |
-
-> Windows is the primary development and test target. macOS and Linux builds are supported but not continuously validated.
->
-> For the smoothest local development experience with native dependencies such as `naudiodon`, use Node.js 20 LTS.
+</div>
 
 ---
 
-## Getting Started
+## 📦 安装 · Installation
 
-### 1. Clone the repository
+### 🎁 直接下载 (推荐)
+
+前往 [**Releases 页面**](https://github.com/Moekotori/ECHO/releases) 下载最新版本的安装包。
 
 ```bash
-git clone https://github.com/Moekotori/Echoes.git
-cd Echoes
+# 当前最新版本
+v1.3.4
 ```
 
-### 2. Install dependencies
+### 🔧 从源码构建
 
 ```bash
+# 1. 克隆仓库
+git clone https://github.com/Moekotori/ECHO.git
+cd ECHO
+
+# 2. 安装依赖
 npm install
-```
 
-If you are developing from mainland China, this repository includes a project-local `.npmrc` that points package installation to a domestic registry mirror and Node.js headers to the Tsinghua Tuna mirror.
-
-Native modules (`naudiodon`) are compiled automatically via `electron-builder install-app-deps` in the `postinstall` hook.
-
-### 3. Start the development server
-
-```bash
+# 3. 开发模式运行
 npm run dev
+
+# 4. 打包构建
+npm run build:win   # Windows
+npm run build:mac   # macOS
+npm run build:linux # Linux
 ```
 
-This launches the Electron app with hot-reload via `electron-vite`.
+> 💡 **Tip**: 首次启动会自动下载 FFmpeg / yt-dlp 等依赖,请保持网络畅通。
 
 ---
 
-## Building
+## 📂 项目结构 · Structure
 
-### Windows
-
-```bash
-npm run build:win
 ```
-
-Produces a distributable NSIS installer under `dist/`.
-
-### Windows (Release with auto-update artifacts)
-
-```bash
-npm run build:win:release
-```
-
-Outputs to `release/` including the `.blockmap` and `latest.yml` required by `electron-updater`.
-
-### macOS
-
-```bash
-npm run build:mac
-```
-
-### Linux
-
-```bash
-npm run build:linux
+ECHO/
+├── 📁 src/                    # React 前端源码
+├── 📁 electron-app/           # Electron 主进程
+├── 📁 server/listen-together/ # 共听 WebSocket 服务
+├── 📁 plugin development/     # 插件开发文档与示例
+├── 📁 examples/               # 示例插件
+├── 📁 scripts/                # 构建与工具脚本
+├── 📁 docs/                   # 项目文档
+├── 📁 website/                # 官方站点
+├── 📁 artifacts/              # 构建产物
+├── 📁 test/unit/              # 单元测试
+├── ⚙️  electron.vite.config.mjs
+└── 📦 package.json
 ```
 
 ---
 
-## Testing
+## 🔌 插件开发 · Plugin Development
 
-Run the lightweight unit regression suite:
+ECHO 提供了完整的沙箱化插件 API,支持扩展:
+
+- 🎵 **音乐源 (Music Source)** — 接入第三方曲库
+- 📝 **歌词源 (Lyrics Provider)** — 自定义歌词来源
+- 🖼️ **UI 面板 (UI Panel)** — 注入自定义界面
+
+详细文档请见 [`plugin development/`](./plugin%20development) 目录,示例插件位于 [`examples/`](./examples)。
+
+---
+
+## 🤝 贡献 · Contributing
+
+欢迎所有形式的贡献!无论是 Bug 反馈、功能建议、文档改进还是代码 PR。
 
 ```bash
-npm run test:unit
+# Fork → Branch → Commit → Push → PR
+git checkout -b feature/AmazingFeature
+git commit -m '✨ Add some AmazingFeature'
+git push origin feature/AmazingFeature
 ```
 
-Before a release build, run:
-
-```bash
-npm run verify:release
-```
-
-See [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) for the full release gate and smoke flow.
+提交 Issue 之前,请先搜索是否已有相同问题。
 
 ---
 
-## Listen Together Server
+## 📜 开源协议 · License
 
-The optional server enables synchronized co-listening sessions.
-
-```bash
-cd server/listen-together
-npm install
-PORT=8787 npm start
-```
-
-For production deployment with Nginx reverse proxy and PM2, see [`server/listen-together/DEPLOY_FROM_ZERO_ZH.md`](server/listen-together/DEPLOY_FROM_ZERO_ZH.md).
+本项目基于 **MIT License** 开源协议发布。详见 [LICENSE](LICENSE) 文件。
 
 ---
 
-## Plugin Development
+## 💖 致谢 · Acknowledgements
 
-Plugins are placed in the user's plugin directory and loaded at startup. Each plugin is a folder containing a `plugin.json` manifest and optional `main.js` (Node.js sandbox), `renderer.js`, and `styles.css` files.
+感谢以下开源项目让 ECHO 成为可能:
 
-For the full API reference and manifest specification, see [`docs/plugin-development.md`](docs/plugin-development.md).
+[Electron](https://www.electronjs.org/) · [React](https://react.dev/) · [electron-vite](https://electron-vite.org/) · [naudiodon](https://github.com/streamich/naudiodon) · [Kuroshiro](https://github.com/hexenq/kuroshiro) · [music-metadata](https://github.com/Borewit/music-metadata) · [yt-dlp](https://github.com/yt-dlp/yt-dlp) · [FFmpeg](https://ffmpeg.org/) · [lucide-react](https://lucide.dev/)
 
-Example plugins are provided in [`examples/`](examples/).
-
----
-
-## Project Structure
-
-```
-src/
-  main/           # Electron main process (IPC, audio engine, plugins, cast)
-    audio/        # Native audio bridge and AudioEngine wrapper
-    cast/         # DLNA renderer
-    plugins/      # Plugin manager, sandbox, storage
-  preload/        # Context bridge exposing APIs to renderer
-  renderer/
-    src/
-      components/ # Reusable UI components
-      locales/    # i18n translation files (en, zh, ja)
-      styles/     # Global styles and theme variables
-      App.jsx     # Root application component
-server/
-  listen-together/  # WebSocket-based co-listening server
-scripts/            # Build and maintenance scripts
-docs/               # Developer documentation
-examples/           # Example plugins
-```
+以及网易云音乐歌词 API、Bilibili 与 YouTube 的开放生态。
 
 ---
 
-## Contributing
+<div align="center">
 
-1. Fork the repository and create a feature branch.
-2. Follow the existing code style (`npm run lint` and `npm run format`).
-3. Open a pull request with a clear description of the change.
+### ⭐ 如果你喜欢 ECHO,请给我们一个 Star!
 
----
+[![Star History Chart](https://api.star-history.com/svg?repos=Moekotori/ECHO&type=Date)](https://star-history.com/#Moekotori/ECHO&Date)
 
-## Acknowledgements
+<br />
 
-ECHO uses the following open-source projects:
+**Made with 🎵 and ❤️ by [@Moekotori](https://github.com/Moekotori)**
 
-- [Electron](https://www.electronjs.org/)
-- [React](https://react.dev/)
-- [electron-vite](https://electron-vite.org/)
-- [naudiodon](https://github.com/Streampunk/naudiodon)
-- [Kuroshiro](https://kuroshiro.org/)
-- [music-metadata](https://github.com/borewit/music-metadata)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-- [FFmpeg](https://ffmpeg.org/)
-- [lucide-react](https://lucide.dev/)
+*Listen Bit-Perfect. Listen Together. Listen as ECHO.*
+
+</div>
