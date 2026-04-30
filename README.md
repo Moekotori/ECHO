@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="1.png" alt="ECHO Banner" width="100%" />
+<img src="2.png" alt="ECHO Banner" width="100%" />
 
 <br />
 
