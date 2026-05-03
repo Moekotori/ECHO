@@ -327,6 +327,7 @@
     "fontCustomActive": "{{name}}",
     "langEn": "English",
     "langZh": "简体中文",
+    "langZhTw": "繁體中文",
     "langJa": "日本語",
     "engineMastery": "引擎与显示",
     "eqMasterTitle": "主均衡器（16 段）",

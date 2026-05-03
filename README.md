@@ -37,7 +37,7 @@
   <img src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white" />
   <img src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white" />
   <img src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black" />
-  <img src="https://img.shields.io/badge/i18n-EN%20%C2%B7%20%E4%B8%AD%E6%96%87%20%C2%B7%20%E6%97%A5%E6%9C%AC%E8%AA%9E-blueviolet?style=flat-square" />
+  <img src="https://img.shields.io/badge/i18n-EN%20%C2%B7%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%20%C2%B7%20%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87%20%C2%B7%20%E6%97%A5%E6%9C%AC%E8%AA%9E-blueviolet?style=flat-square" />
   <img src="https://img.shields.io/badge/HiFi-Bit--Perfect-brightgreen?style=flat-square&logo=soundcloud&logoColor=white" />
 </p>
 
@@ -137,7 +137,7 @@ CSS 变量主题编辑器,一键切换视觉风格
 - 📝 **LRC 标准 + 逐字卡拉 OK 模式** —— 一字一闪烁,KTV 既视感
 - 🎵 **网易云歌词 API** —— 自动匹配抓取,翻译 / 音译可选
 - 🇯🇵 **Kuroshiro 日文转换** —— 汉字 ➜ ひらがな ➜ Romaji,一键搞定
-- 🌐 **三语界面** —— English · 简体中文 · 日本語
+- 🌐 **四语界面** —— English · 简体中文 · 繁體中文 · 日本語
 
 </details>
 

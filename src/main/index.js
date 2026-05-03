@@ -211,7 +211,7 @@ function repairPossiblyMojibakeSearchQuery(value) {
 
 function dialogLocaleFromOpts(opts) {
   const loc = opts && typeof opts === 'object' && opts.locale
-  return loc === 'zh' || loc === 'ja' ? loc : 'en'
+  return loc === 'zh' || loc === 'zh-tw' || loc === 'ja' ? loc : 'en'
 }
 
 let mainWindow = null
