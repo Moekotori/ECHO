@@ -328,6 +328,7 @@
     "fontCustomActive": "{{name}}",
     "langEn": "English",
     "langZh": "简体中文",
+    "langZhTw": "繁體中文",
     "langJa": "日本語",
     "engineMastery": "エンジンと表示",
     "eqMasterTitle": "マスター EQ（16 バンド）",

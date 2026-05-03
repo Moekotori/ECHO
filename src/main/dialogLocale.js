@@ -1,4 +1,4 @@
-/** Dialog filter/title strings for Electron file pickers (mirror renderer locales: en | zh | ja). */
+/** Dialog filter/title strings for Electron file pickers (mirror renderer locales: en | zh | zh-tw | ja). */
 
 const STRINGS = {
   en: {
@@ -34,6 +34,6 @@ const STRINGS = {
 }
 
 export function getDialogStrings(locale) {
-  const key = locale === 'zh' || locale === 'ja' ? locale : 'en'
+  const key = locale === 'zh-tw' ? 'zh' : locale === 'zh' || locale === 'ja' ? locale : 'en'
   return STRINGS[key]
 }

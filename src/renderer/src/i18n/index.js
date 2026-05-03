@@ -2,6 +2,7 @@ import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import en from '../locales/en.json'
 import zh from '../locales/zh.json'
+import zhTw from '../locales/zh-tw.json'
 import ja from '../locales/ja.json'
 import { inferUiLocaleFromNavigator, normalizeUiLocale } from '../utils/uiLocale'
 
@@ -22,6 +23,7 @@ i18n.use(initReactI18next).init({
   resources: {
     en: { translation: en },
     zh: { translation: zh },
+    'zh-tw': { translation: zhTw },
     ja: { translation: ja }
   },
   lng: initialLng(),

@@ -1015,7 +1015,18 @@ function normalizeConfigState(raw) {
 
 const SLEEP_TIMER_MINUTE_OPTIONS = [5, 10, 15, 30, 45, 60, 90]
 const SETTINGS_SECTION_KEYWORDS = {
-  language: ['language', 'locale', '\u8bed\u8a00', 'en', 'zh', 'ja', '\u8a00\u8a9e'],
+  language: [
+    'language',
+    'locale',
+    '\u8bed\u8a00',
+    '\u7b80\u4f53',
+    '\u7e41\u9ad4',
+    'en',
+    'zh',
+    'zh-tw',
+    'ja',
+    '\u8a00\u8a9e'
+  ],
   engine: [
     'visualizer',
     'spectrum',
@@ -15621,7 +15632,7 @@ export default function App() {
                         <p style={{ opacity: 0.85, marginTop: 0 }}>{t('settings.languageHint')}</p>
                       </div>
                       <div className="settings-chip-row no-drag">
-                        {['en', 'zh', 'ja'].map((code) => (
+                        {['en', 'zh', 'zh-tw', 'ja'].map((code) => (
                           <button
                             key={code}
                             type="button"
@@ -15637,7 +15648,9 @@ export default function App() {
                               ? t('settings.langEn')
                               : code === 'zh'
                                 ? t('settings.langZh')
-                                : t('settings.langJa')}
+                                : code === 'zh-tw'
+                                  ? t('settings.langZhTw')
+                                  : t('settings.langJa')}
                           </button>
                         ))}
                       </div>

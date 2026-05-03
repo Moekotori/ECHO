@@ -90,7 +90,7 @@ export const DEFAULT_CONFIG = {
    * 老存档无此字段时视为 0。
    */
   configRevision: 9,
-  /** UI language: en | zh | ja */
+  /** UI language: en | zh | zh-tw | ja */
   uiLocale: 'en',
   useEQ: true,
   eqBands: DEFAULT_EQ_BANDS.map((b) => ({ ...b })),
