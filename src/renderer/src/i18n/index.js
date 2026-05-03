@@ -1,21 +1,10 @@
 import i18n from 'i18next'
-import * as OpenCC from 'opencc-js'
 import { initReactI18next } from 'react-i18next'
 import en from '../locales/en.json'
 import zh from '../locales/zh.json'
+import zhTw from '../locales/zh-tw.json'
 import ja from '../locales/ja.json'
 import { inferUiLocaleFromNavigator, normalizeUiLocale } from '../utils/uiLocale'
-
-const cnToTw = OpenCC.Converter({ from: 'cn', to: 'tw' })
-
-function convertLocaleTree(value) {
-  if (typeof value === 'string') return cnToTw(value)
-  if (Array.isArray(value)) return value.map(convertLocaleTree)
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, convertLocaleTree(item)]))
-  }
-  return value
-}
 
 function initialLng() {
   try {
@@ -34,7 +23,7 @@ i18n.use(initReactI18next).init({
   resources: {
     en: { translation: en },
     zh: { translation: zh },
-    'zh-tw': { translation: convertLocaleTree(zh) },
+    'zh-tw': { translation: zhTw },
     ja: { translation: ja }
   },
   lng: initialLng(),
