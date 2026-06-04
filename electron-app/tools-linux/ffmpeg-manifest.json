@@ -1,0 +1,12 @@
+{
+  "name": "ffmpeg",
+  "version": "",
+  "source": "Linux x64 release ffmpeg prepared locally or in CI",
+  "sourceUrl": "",
+  "downloadPage": "https://ffmpeg.org/download.html",
+  "artifact": "electron-app/tools-linux/ffmpeg",
+  "sha256": "",
+  "requiresSoxr": true,
+  "requiredFilters": ["aresample"],
+  "licenseFamily": "GPLv3"
+}

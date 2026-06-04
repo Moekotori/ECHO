@@ -1,0 +1,317 @@
+@font-face {
+  font-family: "ZCOOL Happy";
+  src: url("../assets/fonts/echo-zcool-happy.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Monocraft";
+  src: url("../assets/fonts/echo-monocraft.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --echo-font-family:
+    Outfit, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Microsoft YaHei", "PingFang SC", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --echo-mono-font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  --font-main: var(--echo-font-family);
+  --font-mono: var(--echo-mono-font-family);
+  --echo-base-font-size: 14px;
+  --echo-ui-line-height: 1.35;
+
+  font-family: var(--echo-font-family);
+  font-size: var(--echo-base-font-size);
+  line-height: var(--echo-ui-line-height);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --color-bg: #f6f6f7;
+  --color-bg-elevated: #fffefb;
+  --color-bg-soft: #edeef0;
+  --color-surface: rgba(255, 255, 255, 0.76);
+  --color-surface-strong: rgba(255, 255, 255, 0.96);
+  --color-border: rgba(38, 40, 46, 0.1);
+  --color-border-strong: rgba(38, 40, 46, 0.18);
+  --color-text: #2d3036;
+  --color-muted: #6c7179;
+  --color-subtle: #a0a4aa;
+  --echo-heading-text: #1e2025;
+  --color-accent: #4b55e8;
+  --color-accent-soft: #eceeff;
+  --color-accent-strong: #3239c7;
+  --color-red: #ff3b30;
+  --color-teal: #727987;
+  --color-blue: #4b55e8;
+  --color-blue-soft: #eceeff;
+
+  --theme-app-bg: var(--color-bg);
+  --theme-page-bg:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(247, 247, 248, 0.98) 48%, rgba(241, 242, 244, 0.98)),
+    var(--color-bg);
+  --theme-page-text: var(--color-text);
+  --theme-heading-text: var(--echo-heading-text);
+  --theme-muted-text: var(--color-muted);
+  --theme-subtle-text: var(--color-subtle);
+  --theme-panel-bg: var(--color-surface);
+  --theme-panel-bg-strong: var(--color-surface-strong);
+  --theme-panel-bg-muted: rgba(239, 240, 242, 0.78);
+  --theme-panel-border: var(--color-border);
+  --theme-panel-border-strong: var(--color-border-strong);
+  --theme-field-bg: rgba(255, 255, 255, 0.86);
+  --theme-field-bg-strong: rgba(255, 255, 255, 0.96);
+  --theme-field-border: rgba(38, 40, 46, 0.12);
+  --theme-field-placeholder: #9a9fa7;
+  --theme-button-bg: rgba(255, 255, 255, 0.72);
+  --theme-button-bg-hover: rgba(255, 255, 255, 0.96);
+  --theme-button-border: rgba(38, 40, 46, 0.12);
+  --theme-button-text: #3c4048;
+  --theme-button-muted-bg: rgba(238, 239, 241, 0.76);
+  --theme-button-muted-text: #6a707a;
+  --theme-list-row-bg: rgba(255, 255, 255, 0.68);
+  --theme-list-row-bg-hover: rgba(255, 255, 255, 0.92);
+  --theme-list-row-bg-active: rgba(75, 85, 232, 0.12);
+  --theme-list-row-border: rgba(38, 40, 46, 0.08);
+  --theme-chip-bg: rgba(255, 255, 255, 0.66);
+  --theme-chip-bg-active: var(--color-accent-soft);
+  --theme-chip-text: var(--color-muted);
+  --theme-player-bg: rgba(250, 250, 251, 0.95);
+  --theme-player-border: rgba(64, 68, 76, 0.16);
+  --theme-control-bg: rgba(38, 40, 46, 0.08);
+  --theme-control-bg-hover: rgba(38, 40, 46, 0.13);
+  --theme-control-bg-active: rgba(75, 85, 232, 0.15);
+  --theme-overlay-bg: rgba(24, 26, 32, 0.22);
+  --theme-overlay-text: #ffffff;
+  --theme-overlay-muted-text: rgba(255, 255, 255, 0.68);
+  --theme-glass-bg-subtle: rgba(255, 255, 255, 0.06);
+  --theme-glass-bg-muted: rgba(255, 255, 255, 0.08);
+  --theme-glass-bg-soft: rgba(255, 255, 255, 0.1);
+  --theme-glass-bg: rgba(255, 255, 255, 0.12);
+  --theme-glass-bg-raised: rgba(255, 255, 255, 0.13);
+  --theme-glass-bg-strong: rgba(255, 255, 255, 0.14);
+  --theme-glass-bg-hover: rgba(255, 255, 255, 0.18);
+  --theme-scrollbar-thumb: rgba(108, 113, 124, 0.34);
+  --theme-scrollbar-thumb-hover: rgba(108, 113, 124, 0.52);
+  --theme-focus-ring: rgba(75, 85, 232, 0.28);
+  --theme-danger-bg: rgba(255, 59, 48, 0.12);
+  --theme-danger-panel-bg: rgba(255, 250, 250, 0.98);
+  --theme-danger-text: #b3261e;
+  --theme-danger-border: rgba(255, 59, 48, 0.2);
+  --theme-success-bg: rgba(77, 132, 104, 0.12);
+  --theme-success-panel-bg: rgba(248, 251, 249, 0.98);
+  --theme-success-text: #456d58;
+  --theme-success-border: rgba(77, 132, 104, 0.2);
+  --theme-warning-bg: rgba(245, 189, 84, 0.2);
+  --theme-warning-panel-bg: rgba(255, 251, 244, 0.98);
+  --theme-warning-text: #72572a;
+  --theme-warning-border: rgba(245, 189, 84, 0.24);
+  --theme-info-panel-bg: rgba(247, 251, 255, 0.98);
+  --theme-accent-bg: var(--color-accent-soft);
+  --theme-accent-bg-strong: rgba(75, 85, 232, 0.18);
+  --theme-accent-border: rgba(75, 85, 232, 0.24);
+  --theme-accent-solid-bg: #4b55e8;
+  --theme-accent-text: var(--color-accent-strong);
+  --theme-accent-text-strong: var(--color-accent-strong);
+  --theme-on-accent: #ffffff;
+  --theme-danger-solid-bg: #c5534b;
+  --theme-modal-bg: var(--theme-panel-bg-strong);
+  --theme-skeleton-bg: rgba(116, 134, 156, 0.18);
+  --theme-shadow-soft: var(--shadow-soft);
+  --theme-shadow-panel: var(--shadow-panel);
+
+  --theme-legacy-white-a06: var(--theme-glass-bg-subtle);
+  --theme-legacy-white-a08: var(--theme-glass-bg-muted);
+  --theme-legacy-white-a10: var(--theme-glass-bg-soft);
+  --theme-legacy-white-a12: var(--theme-glass-bg);
+  --theme-legacy-white-a13: var(--theme-glass-bg-raised);
+  --theme-legacy-white-a14: var(--theme-glass-bg-strong);
+  --theme-legacy-white-a18: var(--theme-glass-bg-hover);
+  --theme-legacy-surface-a52: var(--theme-panel-bg-muted);
+  --theme-legacy-surface-a54: var(--theme-panel-bg-muted);
+  --theme-legacy-surface-a56: var(--theme-panel-bg-muted);
+  --theme-legacy-surface-a58: var(--theme-panel-bg-muted);
+  --theme-legacy-surface-a62: var(--theme-chip-bg);
+  --theme-legacy-surface-a64: var(--theme-panel-bg);
+  --theme-legacy-surface-a72: var(--theme-list-row-bg);
+  --theme-legacy-surface-a76: var(--theme-panel-bg);
+  --theme-legacy-surface-a78: var(--theme-panel-bg);
+  --theme-legacy-surface-a82: var(--theme-field-bg);
+  --theme-legacy-surface-a86: var(--theme-panel-bg-strong);
+  --theme-legacy-surface-a88: var(--theme-panel-bg-strong);
+  --theme-legacy-surface-a90: var(--theme-panel-bg-strong);
+  --theme-legacy-surface-a92: var(--theme-panel-bg-strong);
+  --theme-legacy-panel-cool-a90: var(--theme-panel-bg-strong);
+  --theme-legacy-panel-cool-a92: var(--theme-panel-bg-strong);
+  --theme-legacy-heading-text: var(--theme-heading-text);
+  --theme-legacy-page-text: var(--theme-page-text);
+  --theme-legacy-muted-text: var(--theme-muted-text);
+  --theme-legacy-subtle-text: var(--theme-subtle-text);
+  --theme-legacy-accent-bg: var(--theme-accent-bg);
+  --theme-legacy-accent-text: var(--theme-accent-text);
+  --theme-legacy-accent-text-strong: var(--theme-accent-text-strong);
+  --theme-legacy-accent-strong: var(--color-accent-strong);
+  --theme-legacy-border-soft: var(--theme-panel-border);
+  --theme-legacy-border: var(--theme-panel-border-strong);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --shadow-soft: 0 20px 56px rgba(36, 39, 48, 0.08);
+  --shadow-panel: 0 10px 28px rgba(36, 39, 48, 0.05);
+  --titlebar-height: 44px;
+  --sidebar-width: 220px;
+  --player-height: 124px;
+
+  --echo-polish-app-bg: #f6f6f7;
+  --echo-polish-app-bg-layer: linear-gradient(180deg, #ffffff 0%, #f6f6f7 44%, #eeeef0 100%);
+  --echo-polish-titlebar-bg: rgba(255, 255, 255, 0.9);
+  --echo-polish-sidebar-bg:
+    linear-gradient(180deg, rgba(250, 250, 251, 0.95), rgba(244, 244, 245, 0.94) 58%, rgba(239, 240, 242, 0.96));
+  --echo-polish-page-bg:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(248, 248, 249, 0.98) 54%, rgba(243, 244, 246, 0.98));
+  --echo-polish-player-bg:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 248, 250, 0.96));
+  --echo-polish-surface: rgba(255, 255, 255, 0.7);
+  --echo-polish-surface-strong: rgba(255, 255, 255, 0.9);
+  --echo-polish-surface-muted: rgba(239, 240, 242, 0.88);
+  --echo-polish-field-bg: rgba(255, 255, 255, 0.86);
+  --echo-polish-button-bg: rgba(255, 255, 255, 0.76);
+  --echo-polish-button-bg-hover: rgba(255, 255, 255, 0.98);
+  --echo-polish-row-bg: rgba(255, 255, 255, 0.62);
+  --echo-polish-row-bg-hover: rgba(255, 255, 255, 0.92);
+  --echo-polish-row-bg-active: rgba(236, 238, 255, 0.9);
+  --echo-polish-border: rgba(38, 40, 46, 0.1);
+  --echo-polish-border-strong: rgba(38, 40, 46, 0.18);
+  --echo-polish-hairline: rgba(255, 255, 255, 0.76);
+  --echo-polish-accent-text: #3239c7;
+  --echo-polish-accent-bg: rgba(75, 85, 232, 0.1);
+  --echo-polish-on-accent: #ffffff;
+  --echo-polish-active-bg: rgba(236, 238, 255, 0.86);
+  --echo-polish-active-border: rgba(75, 85, 232, 0.24);
+  --echo-polish-play-bg: linear-gradient(180deg, #5962f2, #3f46d4);
+  --echo-polish-danger-bg: rgba(255, 59, 48, 0.1);
+  --echo-polish-shadow-soft: 0 24px 68px rgba(36, 39, 48, 0.09);
+  --echo-polish-shadow-panel: 0 14px 34px rgba(36, 39, 48, 0.06);
+  --echo-polish-shadow-row: 0 9px 22px rgba(36, 39, 48, 0.055);
+  --echo-polish-shadow-player: 0 -18px 46px rgba(36, 39, 48, 0.075);
+  --echo-polish-cover-shadow: 0 18px 38px rgba(34, 36, 42, 0.13);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #101318;
+  --color-bg-elevated: #171b22;
+  --color-bg-soft: #1e242d;
+  --color-surface: rgba(24, 29, 37, 0.78);
+  --color-surface-strong: rgba(31, 37, 47, 0.96);
+  --color-border: rgba(232, 238, 247, 0.09);
+  --color-border-strong: rgba(232, 238, 247, 0.16);
+  --color-text: hsl(216 28% 86%);
+  --color-muted: hsl(216 14% 66%);
+  --color-subtle: hsl(216 10% 48%);
+  --echo-heading-text: hsl(214 32% 94%);
+  --color-accent: #64b5ff;
+  --color-accent-soft: rgba(100, 181, 255, 0.16);
+  --color-accent-strong: #a8d6ff;
+  --color-red: #ff6961;
+  --color-teal: #58d5c4;
+  --color-blue: #64b5ff;
+  --color-blue-soft: rgba(100, 181, 255, 0.15);
+  --theme-page-bg:
+    linear-gradient(180deg, rgba(24, 30, 39, 0.82), rgba(9, 12, 17, 0.98) 52%),
+    var(--color-bg);
+  --theme-panel-bg: rgba(24, 29, 37, 0.78);
+  --theme-panel-bg-strong: rgba(31, 37, 47, 0.96);
+  --theme-panel-bg-muted: rgba(20, 26, 35, 0.72);
+  --theme-field-bg: rgba(17, 23, 32, 0.88);
+  --theme-field-bg-strong: rgba(24, 31, 42, 0.96);
+  --theme-field-border: rgba(232, 238, 247, 0.11);
+  --theme-field-placeholder: rgba(214, 224, 238, 0.48);
+  --theme-button-bg: rgba(28, 35, 46, 0.82);
+  --theme-button-bg-hover: rgba(39, 48, 61, 0.95);
+  --theme-button-border: rgba(232, 238, 247, 0.1);
+  --theme-button-text: var(--color-text);
+  --theme-button-muted-bg: rgba(23, 30, 40, 0.74);
+  --theme-button-muted-text: var(--color-muted);
+  --theme-list-row-bg: rgba(23, 29, 38, 0.72);
+  --theme-list-row-bg-hover: rgba(31, 39, 51, 0.88);
+  --theme-list-row-bg-active: rgba(64, 151, 204, 0.2);
+  --theme-list-row-border: rgba(232, 238, 247, 0.08);
+  --theme-chip-bg: rgba(27, 34, 45, 0.78);
+  --theme-chip-bg-active: rgba(71, 151, 204, 0.28);
+  --theme-player-bg: rgba(18, 22, 29, 0.94);
+  --theme-player-border: rgba(232, 238, 247, 0.09);
+  --theme-control-bg: rgba(232, 238, 247, 0.1);
+  --theme-control-bg-hover: rgba(232, 238, 247, 0.16);
+  --theme-control-bg-active: rgba(100, 181, 255, 0.18);
+  --theme-overlay-bg: rgba(0, 0, 0, 0.48);
+  --theme-scrollbar-thumb: rgba(154, 170, 192, 0.34);
+  --theme-scrollbar-thumb-hover: rgba(184, 198, 216, 0.5);
+  --theme-focus-ring: rgba(100, 181, 255, 0.34);
+  --theme-danger-bg: rgba(255, 105, 97, 0.16);
+  --theme-danger-panel-bg: rgba(56, 29, 33, 0.94);
+  --theme-danger-text: #ff9b9f;
+  --theme-danger-border: rgba(255, 105, 97, 0.26);
+  --theme-success-bg: rgba(88, 213, 196, 0.16);
+  --theme-success-panel-bg: rgba(25, 50, 47, 0.94);
+  --theme-success-text: #9de8dd;
+  --theme-success-border: rgba(88, 213, 196, 0.26);
+  --theme-warning-bg: rgba(245, 189, 84, 0.18);
+  --theme-warning-panel-bg: rgba(58, 45, 27, 0.94);
+  --theme-warning-text: #ffe2a3;
+  --theme-warning-border: rgba(245, 189, 84, 0.26);
+  --theme-info-panel-bg: rgba(25, 33, 44, 0.94);
+  --theme-accent-bg: rgba(100, 181, 255, 0.16);
+  --theme-accent-bg-strong: rgba(100, 181, 255, 0.24);
+  --theme-accent-border: rgba(100, 181, 255, 0.3);
+  --theme-accent-solid-bg: #2f6da8;
+  --theme-accent-text: #9bd4ff;
+  --theme-accent-text-strong: #cce9ff;
+  --theme-danger-solid-bg: #b95258;
+  --theme-modal-bg: var(--theme-panel-bg-strong);
+  --theme-skeleton-bg: rgba(154, 170, 192, 0.16);
+  --shadow-soft: 0 18px 48px rgba(0, 0, 0, 0.34);
+  --shadow-panel: 0 8px 24px rgba(0, 0, 0, 0.24);
+  --theme-shadow-soft: var(--shadow-soft);
+  --theme-shadow-panel: var(--shadow-panel);
+
+  --echo-polish-app-bg: #080b10;
+  --echo-polish-app-bg-layer: linear-gradient(180deg, #11161d 0%, #0b0f15 48%, #070a0f 100%);
+  --echo-polish-titlebar-bg: rgba(13, 17, 23, 0.88);
+  --echo-polish-sidebar-bg:
+    linear-gradient(180deg, rgba(20, 26, 34, 0.94), rgba(14, 19, 26, 0.93) 56%, rgba(9, 13, 19, 0.96));
+  --echo-polish-page-bg:
+    linear-gradient(180deg, rgba(18, 24, 32, 0.96), rgba(11, 15, 22, 0.98) 56%, rgba(8, 11, 16, 1));
+  --echo-polish-player-bg:
+    linear-gradient(180deg, rgba(35, 44, 57, 0.95), rgba(27, 35, 47, 0.96));
+  --echo-polish-surface: rgba(24, 31, 41, 0.66);
+  --echo-polish-surface-strong: rgba(29, 37, 48, 0.88);
+  --echo-polish-surface-muted: rgba(17, 23, 31, 0.84);
+  --echo-polish-field-bg: rgba(15, 21, 29, 0.88);
+  --echo-polish-button-bg: rgba(32, 41, 53, 0.76);
+  --echo-polish-button-bg-hover: rgba(43, 55, 69, 0.94);
+  --echo-polish-row-bg: rgba(22, 29, 38, 0.62);
+  --echo-polish-row-bg-hover: rgba(33, 43, 55, 0.9);
+  --echo-polish-row-bg-active: rgba(24, 70, 78, 0.42);
+  --echo-polish-border: rgba(228, 237, 247, 0.1);
+  --echo-polish-border-strong: rgba(228, 237, 247, 0.18);
+  --echo-polish-hairline: rgba(255, 255, 255, 0.06);
+  --echo-polish-accent-text: #8de6d8;
+  --echo-polish-accent-bg: rgba(94, 234, 212, 0.1);
+  --echo-polish-on-accent: #ffffff;
+  --echo-polish-active-bg: rgba(36, 95, 101, 0.32);
+  --echo-polish-active-border: rgba(94, 234, 212, 0.24);
+  --echo-polish-play-bg: linear-gradient(180deg, #45b7a7, #2f86a3);
+  --echo-polish-danger-bg: rgba(255, 105, 97, 0.12);
+  --echo-polish-shadow-soft: 0 24px 68px rgba(0, 0, 0, 0.38);
+  --echo-polish-shadow-panel: 0 14px 34px rgba(0, 0, 0, 0.26);
+  --echo-polish-shadow-row: 0 10px 24px rgba(0, 0, 0, 0.22);
+  --echo-polish-shadow-player: 0 -18px 46px rgba(0, 0, 0, 0.32);
+  --echo-polish-cover-shadow: 0 20px 42px rgba(0, 0, 0, 0.36);
+}

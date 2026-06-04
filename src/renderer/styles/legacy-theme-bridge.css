@@ -1,0 +1,232 @@
+/*
+ * Temporary bridge for legacy CSS that still describes colors directly.
+ * Keep this small and role-based; remove selectors as their source files move
+ * fully onto semantic theme tokens.
+ */
+
+:where(
+  .app-shell,
+  .page-surface,
+  .songs-page,
+  .settings-page,
+  .queue-page,
+  .folders-page,
+  .album-detail-page,
+  .artist-detail-page,
+  .lyrics-page,
+  .eq-panel
+) {
+  color: var(--theme-page-text);
+}
+
+:where(
+  .app-titlebar,
+  .sidebar,
+  .player-bar,
+  .chrome-notice,
+  .settings-card,
+  .settings-section,
+  .setting-row,
+  .settings-account-panel,
+  .settings-cache-panel,
+  .settings-font-modal,
+  .settings-font-option,
+  .audio-dev-panel,
+  .track-row,
+  .album-card,
+  .artist-card,
+  .playlist-list-item,
+  .playlist-daily-recommend,
+  .queue-now-card,
+  .queue-toolbar,
+  .queue-row,
+  .queue-empty-state,
+  .artist-hero,
+  .artist-stat-grid div,
+  .artist-album-card,
+  .artist-track-row,
+  .folders-panel,
+  .library-folder-row,
+  .eq-card,
+  .eq-preset-menu,
+  .lyrics-match-panel,
+  .lyrics-offset-controls
+) {
+  color: var(--theme-page-text);
+  border-color: var(--theme-panel-border);
+  background-color: var(--theme-panel-bg);
+}
+
+:where(
+  .search-box,
+  .settings-search,
+  .settings-font-search,
+  .settings-select-field select,
+  .settings-font-picker-button,
+  .settings-font-file-button,
+  .settings-wallpaper-control,
+  .settings-wallpaper-path,
+  .settings-cache-path,
+  .settings-cache-confirm,
+  .settings-cache-result,
+  .settings-account-cookie-field input,
+  .settings-account-browser-field select,
+  .playlist-create-form input,
+  .playlist-search,
+  .playlist-quality-control,
+  .playlist-quality-menu,
+  .audio-field input,
+  .audio-field select,
+  .lyrics-background-segmented,
+  .lyrics-source-panel,
+  .lyrics-color-panel,
+  .eq-preset-search,
+  .eq-preset-trigger,
+  .eq-preset-option,
+  .eq-preset-tools input
+) {
+  color: var(--theme-page-text);
+  border-color: var(--theme-field-border);
+  background-color: var(--theme-field-bg);
+}
+
+:where(
+  .titlebar-action,
+  .window-control,
+  .nav-item,
+  .tool-button,
+  .sort-button,
+  .duplicate-toggle,
+  .duplicate-analyze-button,
+  .secondary-action,
+  .primary-action,
+  .settings-action-button,
+  .settings-danger-button,
+  .settings-icon-button,
+  .audio-command-button,
+  .audio-icon-command,
+  .queue-icon-button,
+  .queue-tool-button,
+  .queue-repeat-group button,
+  .album-icon-action,
+  .album-load-more,
+  .artist-secondary-action,
+  .artist-load-more,
+  .artist-track-actions button,
+  .streaming-actions button,
+  .streaming-load-more,
+  .lyrics-back-button,
+  .lyrics-color-reset,
+  .lyrics-source-option,
+  .lyrics-source-filters button,
+  .eq-preset-filter-chip
+) {
+  color: var(--theme-button-text);
+  border-color: var(--theme-button-border);
+  background-color: var(--theme-button-bg);
+}
+
+:where(
+  .titlebar-action:hover,
+  .window-control:hover,
+  .nav-item:hover,
+  .tool-button:hover,
+  .sort-button:hover,
+  .duplicate-toggle:hover,
+  .duplicate-analyze-button:hover,
+  .secondary-action:hover,
+  .primary-action:hover,
+  .settings-action-button:hover,
+  .settings-icon-button:hover,
+  .audio-command-button:hover,
+  .audio-icon-command:hover,
+  .queue-icon-button:hover,
+  .queue-tool-button:hover,
+  .album-icon-action:hover,
+  .album-load-more:hover,
+  .artist-secondary-action:hover,
+  .artist-load-more:hover,
+  .artist-track-actions button:hover,
+  .streaming-actions button:hover,
+  .streaming-load-more:hover,
+  .lyrics-back-button:hover,
+  .lyrics-color-reset:hover,
+  .lyrics-source-option:hover,
+  .lyrics-source-filters button:hover,
+  .eq-preset-filter-chip:hover
+) {
+  color: var(--theme-heading-text);
+  border-color: var(--theme-panel-border-strong);
+  background-color: var(--theme-button-bg-hover);
+}
+
+:where(
+  .nav-item[data-active="true"],
+  .settings-nav-item.active,
+  .track-row[data-playing="true"],
+  .playlist-list-item[data-active="true"],
+  .queue-row[data-current="true"],
+  .album-track-row[data-playing="true"],
+  .artist-track-row[data-playing="true"],
+  .lyrics-source-option[data-enabled="true"],
+  .lyrics-source-filters button[data-active="true"],
+  .eq-preset-filter-chip[data-active="true"],
+  .eq-preset-option[data-selected="true"]
+) {
+  color: var(--theme-heading-text);
+  border-color: var(--theme-accent-border);
+  background-color: var(--theme-list-row-bg-active);
+}
+
+:where(
+  .songs-title-group h1,
+  .settings-page h1,
+  .setting-row strong,
+  .track-title,
+  .album-copy strong,
+  .artist-copy strong,
+  .queue-row-copy strong,
+  .album-detail-copy h1,
+  .album-track-copy strong,
+  .artist-hero-copy h1,
+  .artist-section h2,
+  .artist-track-copy strong,
+  .lyrics-track-copy h1,
+  .eq-panel h2,
+  .eq-panel h3
+) {
+  color: var(--theme-heading-text);
+}
+
+:where(
+  .songs-title-group span,
+  .setting-row p,
+  .settings-page small,
+  .track-artist,
+  .track-album,
+  .track-duration,
+  .album-copy span,
+  .artist-copy span,
+  .queue-row-duration,
+  .queue-kicker,
+  .album-detail-meta,
+  .album-track-duration,
+  .artist-track-duration,
+  .lyrics-track-copy p,
+  .lyrics-track-album,
+  .eq-panel small,
+  .eq-panel em
+) {
+  color: var(--theme-muted-text);
+}
+
+:where(
+  .settings-danger-button,
+  .tool-button.danger,
+  .queue-tool-button.danger,
+  .queue-icon-button.danger
+) {
+  color: var(--theme-danger-text);
+  border-color: var(--theme-danger-border);
+  background-color: var(--theme-danger-bg);
+}

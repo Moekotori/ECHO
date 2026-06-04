@@ -1,0 +1,48 @@
+node_modules/
+.cache/
+out/
+dist/
+.electron-cache/
+*.log
+.DS_Store
+
+# Local Codex workspace state
+/.codex/
+/.codex-pet-runs/
+/.codex-run/
+/.codex-screenshots/
+/.codex-temp/
+/.codex-tmp/
+/.codex-backups/
+
+# Native/Electron build outputs
+electron-app/build/
+native/**/build/
+native/**/cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Local binary tools downloaded outside source control
+electron-app/tools/ffmpeg.exe
+electron-app/tools/ffprobe.exe
+electron-app/tools-linux/ffmpeg
+electron-app/tools-linux/ffprobe
+electron-app/tools-linux/yt-dlp
+
+# Electron Builder artifacts
+dist-packaged*/
+*.blockmap
+*.AppImage
+*.deb
+*.rpm
+*.dmg
+
+# Local media/lyrics scratch files
+*.lrc
+/tmp-*
+/*.patch
+
+# Local runtime state
+/room-correction-state.json

@@ -1,0 +1,250 @@
+html:has(.desktop-lyrics-app),
+body:has(.desktop-lyrics-app),
+#root:has(.desktop-lyrics-app) {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+.desktop-lyrics-app {
+  --desktop-lyrics-font-size: 34px;
+  --desktop-lyrics-scale: 1;
+  --desktop-lyrics-color: #ffffff;
+  --desktop-lyrics-stroke-color: #111827;
+  --desktop-lyrics-opacity: 0.96;
+  --desktop-lyrics-font-family: "Microsoft YaHei", "Noto Sans SC", "Segoe UI", sans-serif;
+  --desktop-lyrics-theme-color: var(--echo-lyrics-gradient-start, var(--theme-heading-text));
+  --desktop-lyrics-theme-gradient: var(
+    --echo-lyrics-active-gradient,
+    linear-gradient(
+      92deg,
+      var(--theme-heading-text),
+      var(--theme-accent-text-strong) 48%,
+      var(--preset-secondary, var(--theme-accent-solid-bg))
+    )
+  );
+  --desktop-lyrics-theme-shadow: var(
+    --echo-lyrics-active-shadow,
+    0 8px 24px rgb(36 39 48 / 0.16)
+  );
+  --desktop-lyrics-theme-stroke-color: rgb(var(--preset-shadow-rgb, 36 39 48) / 0.7);
+  display: grid;
+  width: 100vw;
+  height: 100vh;
+  place-items: center;
+  color: var(--desktop-lyrics-color);
+  opacity: var(--desktop-lyrics-opacity);
+  user-select: none;
+}
+
+html[data-theme="dark"] .desktop-lyrics-app {
+  --desktop-lyrics-theme-color: var(--theme-heading-text, #f8fbff);
+  --desktop-lyrics-theme-stroke-color: #020617;
+}
+
+html[data-theme-preset="darkSideMoon"] .desktop-lyrics-app[data-color-mode="theme"] {
+  --desktop-lyrics-theme-color: var(--echo-lyrics-gradient-start, var(--preset-heading));
+  --desktop-lyrics-theme-gradient: var(
+    --echo-lyrics-active-gradient,
+    linear-gradient(92deg, var(--preset-heading), var(--preset-accent-strong) 52%, var(--preset-secondary))
+  );
+}
+
+.desktop-lyrics-stage {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  padding: 10px 18px;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-lyrics-lines {
+  display: grid;
+  width: fit-content;
+  max-width: calc(100vw - 36px);
+  box-sizing: border-box;
+  min-width: 0;
+  justify-self: center;
+  justify-items: center;
+  gap: 3px;
+  pointer-events: auto;
+  text-align: center;
+  transform: scale(var(--desktop-lyrics-scale));
+  transform-origin: center;
+  font-family: var(--desktop-lyrics-font-family);
+  -webkit-app-region: drag;
+}
+
+.desktop-lyrics-app[data-locked="true"] .desktop-lyrics-lines {
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-lyrics-lines strong,
+.desktop-lyrics-lines span {
+  display: block;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  letter-spacing: 0;
+  text-shadow:
+    0 1px 1px rgb(0 0 0 / 0.48),
+    0 0 3px color-mix(in srgb, var(--desktop-lyrics-stroke-color) 72%, transparent),
+    0 3px 12px rgb(0 0 0 / 0.28);
+  -webkit-font-smoothing: antialiased;
+}
+
+.desktop-lyrics-lines strong {
+  font-size: calc(var(--desktop-lyrics-font-size) * var(--desktop-lyrics-text-fit-scale, 1));
+  font-weight: 700;
+  line-height: 1.18;
+}
+
+.desktop-lyrics-app[data-color-mode="theme"] .desktop-lyrics-lines strong {
+  color: var(--desktop-lyrics-theme-color);
+  background-image: var(--desktop-lyrics-theme-gradient);
+  background-clip: text;
+  text-shadow: var(--desktop-lyrics-theme-shadow);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.desktop-lyrics-lines span {
+  color: color-mix(in srgb, var(--desktop-lyrics-color) 82%, transparent);
+  font-size: calc(var(--desktop-lyrics-font-size) * 0.56);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.desktop-lyrics-menu {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  display: flex;
+  max-width: calc(100% - 24px);
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 6px;
+  color: #eef6ff;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: 8px;
+  background: rgb(15 23 42 / 0.78);
+  box-shadow: none;
+  backdrop-filter: blur(18px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-lyrics-app[data-menu-visible="true"] .desktop-lyrics-menu {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.desktop-lyrics-menu::-webkit-scrollbar {
+  height: 0;
+}
+
+.desktop-lyrics-menu button,
+.desktop-lyrics-menu input {
+  -webkit-app-region: no-drag;
+}
+
+.desktop-lyrics-menu button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  color: inherit;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 0.08);
+  cursor: pointer;
+}
+
+.desktop-lyrics-menu button:hover,
+.desktop-lyrics-menu button:focus-visible {
+  background: rgb(255 255 255 / 0.18);
+  outline: none;
+}
+
+.desktop-lyrics-menu-toggle[aria-pressed="true"] {
+  color: #ffffff;
+  border-color: rgb(147 197 253 / 0.54);
+  background: rgb(96 165 250 / 0.32);
+}
+
+.desktop-lyrics-menu-toggle span {
+  margin-left: -5px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.desktop-lyrics-menu output {
+  min-width: 38px;
+  color: rgb(238 246 255 / 0.9);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.desktop-lyrics-menu > svg {
+  flex: 0 0 auto;
+  color: rgb(238 246 255 / 0.78);
+}
+
+.desktop-lyrics-swatches {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.desktop-lyrics-swatches button {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.2);
+}
+
+.desktop-lyrics-swatches .desktop-lyrics-theme-swatch {
+  background: var(--desktop-lyrics-theme-gradient);
+}
+
+.desktop-lyrics-swatches button[aria-pressed="true"] {
+  outline: 2px solid #ffffff;
+  outline-offset: 1px;
+}
+
+.desktop-lyrics-menu input[type="color"] {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.desktop-lyrics-menu input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.desktop-lyrics-menu input[type="color"]::-webkit-color-swatch {
+  border: 0;
+}
