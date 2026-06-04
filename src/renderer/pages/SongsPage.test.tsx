@@ -196,6 +196,13 @@ const installEcho = (tracks: LibraryTrack[] = []) => {
       getAlbumTracks: vi.fn(),
       getSummary: vi.fn(),
       chooseFolder: vi.fn(),
+      chooseImportFiles: vi.fn().mockResolvedValue(null),
+      importAudioFiles: vi.fn().mockResolvedValue({
+        importedCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        importedTrackIds: [],
+      }),
       addFolder: vi.fn(),
       getFolders: vi.fn().mockResolvedValue([]),
       removeFolder: vi.fn(),
@@ -470,6 +477,32 @@ describe('SongsPage', () => {
 
     await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
     window.removeEventListener('app:navigate:import-folder', navigate);
+  });
+
+  it('imports selected audio files from the songs toolbar', async () => {
+    installEcho([makeTrack()]);
+    const libraryChanged = vi.fn();
+    const chromeNotice = vi.fn();
+    vi.mocked(window.echo.library.chooseImportFiles).mockResolvedValue(['D:\\Music\\new-song.flac']);
+    vi.mocked(window.echo.library.importAudioFiles).mockResolvedValue({
+      importedCount: 1,
+      skippedCount: 0,
+      failedCount: 0,
+      importedTrackIds: ['track-imported'],
+    });
+    window.addEventListener('library:changed', libraryChanged);
+    window.addEventListener('app:show-chrome-notice', chromeNotice);
+
+    await renderSongsPage();
+    fireEvent.click(screen.getByRole('button', { name: /导入文件|Import File/ }));
+
+    await waitFor(() => expect(window.echo.library.chooseImportFiles).toHaveBeenCalledTimes(1));
+    expect(window.echo.library.importAudioFiles).toHaveBeenCalledWith(['D:\\Music\\new-song.flac']);
+    await waitFor(() => expect(libraryChanged).toHaveBeenCalledTimes(1));
+    expect(chromeNotice).toHaveBeenCalledWith(expect.objectContaining({ detail: expect.stringMatching(/已入库 1 个文件|Imported 1 files into the library/) }));
+
+    window.removeEventListener('library:changed', libraryChanged);
+    window.removeEventListener('app:show-chrome-notice', chromeNotice);
   });
 
   it('plays a local file from TrackRow and exposes queue currentTrackId to TrackList', async () => {

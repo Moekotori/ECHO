@@ -1,5 +1,5 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Download, FolderPlus, ListFilter, Play, RotateCw, Search, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, Download, FilePlus2, FolderPlus, ListFilter, Play, RotateCw, Search, Trash2, X } from 'lucide-react';
 import type { DuplicateTrackIndexSummary, DuplicateTrackMember, EditableTrackTags, LibraryPlaylist, LibraryScanStatus, LibrarySort, LibraryTrack } from '../../shared/types/library';
 import type { RemoteSource } from '../../shared/types/remoteSources';
 import { TrackContextMenu } from '../components/library/TrackContextMenu';
@@ -45,6 +45,9 @@ const isPreserveScrollLibraryEvent = (event: Event): boolean =>
   event instanceof CustomEvent && event.detail && typeof event.detail === 'object' && event.detail.preserveScroll === true;
 const dispatchLibraryChangedPreservingScroll = (): void => {
   window.dispatchEvent(new CustomEvent('library:changed', { detail: { preserveScroll: true } }));
+};
+const dispatchChromeNotice = (message: string): void => {
+  window.dispatchEvent(new CustomEvent('app:show-chrome-notice', { detail: message }));
 };
 const sortOptions: Array<{ value: LibrarySort; labelKey: TranslationKey }> = [
   { value: 'default', labelKey: 'songs.sort.default' },
@@ -662,6 +665,40 @@ export const SongsPage = (): JSX.Element => {
   const handleImportFolder = (): void => {
     window.dispatchEvent(new Event('app:navigate:import-folder'));
   };
+
+  const handleImportFile = useCallback(async (): Promise<void> => {
+    const library = window.echo?.library;
+
+    if (!library?.chooseImportFiles || !library.importAudioFiles) {
+      setError(t('songs.error.desktopBridgeFileActions'));
+      return;
+    }
+
+    try {
+      setError(null);
+      const filePaths = await library.chooseImportFiles();
+
+      if (!filePaths?.length) {
+        return;
+      }
+
+      const result = await library.importAudioFiles(filePaths);
+      if (result.importedCount > 0) {
+        clearSongsFirstPageSnapshot();
+        clearListMetadataCache();
+        window.dispatchEvent(new Event('library:changed'));
+      }
+
+      const details = [
+        result.importedCount > 0 ? t('notice.importFiles.imported', { count: result.importedCount }) : null,
+        result.skippedCount > 0 ? t('notice.importFiles.skipped', { count: result.skippedCount }) : null,
+        result.failedCount > 0 ? t('notice.importFiles.failed', { count: result.failedCount }) : null,
+      ].filter(Boolean).join(t('punctuation.clauseSeparator'));
+      dispatchChromeNotice(details || t('notice.importFiles.empty'));
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : String(importError));
+    }
+  }, [clearListMetadataCache, t]);
 
   const handleOpenTrackArtist = useCallback(async (track: LibraryTrack): Promise<void> => {
     try {
@@ -1415,6 +1452,9 @@ export const SongsPage = (): JSX.Element => {
         <div className="songs-tools" aria-label="歌曲工具">
           <button className="tool-button" type="button" aria-label="导入文件夹" title="导入文件夹" onClick={handleImportFolder}>
             <FolderPlus size={17} />
+          </button>
+          <button className="tool-button" type="button" aria-label={t('route.importFile.label')} title={t('route.importFile.label')} onClick={() => void handleImportFile()}>
+            <FilePlus2 size={17} />
           </button>
           <button
             className="tool-button"

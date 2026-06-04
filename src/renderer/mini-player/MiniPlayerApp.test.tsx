@@ -212,7 +212,8 @@ describe('MiniPlayerApp', () => {
       </PlaybackQueueProvider>,
     );
 
-    const slider = await screen.findByRole('slider', { name: '鎾斁杩涘害' }) as HTMLInputElement;
+    expect(await screen.findByText('Mini Song')).toBeTruthy();
+    const slider = document.querySelector('.mini-player-progress-row input') as HTMLInputElement;
     await waitFor(() => expect(slider.value).toBe('42'));
 
     fireEvent.change(slider, { target: { value: '0' } });
