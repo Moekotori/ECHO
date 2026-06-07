@@ -1999,8 +1999,8 @@ describe('Audio Core sample-rate regression guard', () => {
     const bridge = new FakeBridge(48000, {
       uzumeActive: false,
       uzumeBackend: 'cpu-reference',
-      uzumeProfile: 'legacy-dsp-compat',
-      uzumeRuntimeModel: 'uzume-native-engine',
+      uzumeProfile: 'uzume-skeleton-compat',
+      uzumeRuntimeModel: 'identity-bypass',
       uzumeFallbackActive: false,
       uzumeGpuCompiled: false,
       uzumeGpuAvailable: false,
@@ -2010,6 +2010,12 @@ describe('Audio Core sample-rate regression guard', () => {
       uzumeGpuFftConvolutionPrepared: false,
       uzumeCudaRuntimeVersion: 0,
       uzumeCufftVersion: 0,
+      uzumeFormatPath: 'pcm_bitperfect',
+      uzumeBitPerfectState: 'available',
+      uzumeHeadroomActive: false,
+      uzumeTransitionalConvolutionPath: 'legacy-convolution-processor',
+      uzumeFusedMacroKernel: false,
+      uzumeBypassReason: 'identity-bypass',
     });
     const session = createAudioSessionForTest({
       decoder,
@@ -2025,8 +2031,8 @@ describe('Audio Core sample-rate regression guard', () => {
 
       expect(readyStatus.uzumeActive).toBe(false);
       expect(readyStatus.uzumeBackend).toBe('cpu-reference');
-      expect(readyStatus.uzumeProfile).toBe('legacy-dsp-compat');
-      expect(readyStatus.uzumeRuntimeModel).toBe('uzume-native-engine');
+      expect(readyStatus.uzumeProfile).toBe('uzume-skeleton-compat');
+      expect(readyStatus.uzumeRuntimeModel).toBe('identity-bypass');
       expect(readyStatus.uzumeFallbackActive).toBe(false);
       expect(readyStatus.uzumeGpuCompiled).toBe(false);
       expect(readyStatus.uzumeGpuAvailable).toBe(false);
@@ -2038,6 +2044,13 @@ describe('Audio Core sample-rate regression guard', () => {
       expect(readyStatus.uzumeCufftFallbackReason).toBe(null);
       expect(readyStatus.uzumeCudaRuntimeVersion).toBe(0);
       expect(readyStatus.uzumeCufftVersion).toBe(0);
+      expect(readyStatus.uzumeFormatPath).toBe('pcm_bitperfect');
+      expect(readyStatus.uzumeBitPerfectState).toBe('available');
+      expect(readyStatus.uzumeDirectDisabledReason).toBe(null);
+      expect(readyStatus.uzumeHeadroomActive).toBe(false);
+      expect(readyStatus.uzumeTransitionalConvolutionPath).toBe('legacy-convolution-processor');
+      expect(readyStatus.uzumeFusedMacroKernel).toBe(false);
+      expect(readyStatus.uzumeBypassReason).toBe('identity-bypass');
 
       bridge.emit('position', 4800, {
         positionFrames: 4800,
@@ -2048,8 +2061,8 @@ describe('Audio Core sample-rate regression guard', () => {
         dspLimiterProtecting: true,
         uzumeActive: true,
         uzumeBackend: 'hybrid-gpu-matrix-limiter',
-        uzumeProfile: 'legacy-dsp-compat',
-        uzumeRuntimeModel: 'uzume-native-engine',
+        uzumeProfile: 'uzume-skeleton-compat',
+        uzumeRuntimeModel: 'transitional-processor-chain',
         uzumeFallbackActive: false,
         uzumeGpuCompiled: true,
         uzumeGpuAvailable: true,
@@ -2062,13 +2075,20 @@ describe('Audio Core sample-rate regression guard', () => {
         uzumeCufftFallbackReason: null,
         uzumeCudaRuntimeVersion: 13030,
         uzumeCufftVersion: 11400,
+        uzumeFormatPath: 'pcm_processed',
+        uzumeBitPerfectState: 'disabled',
+        uzumeDirectDisabledReason: 'uzume_processing_enabled',
+        uzumeHeadroomActive: true,
+        uzumeTransitionalConvolutionPath: 'legacy-convolution-processor',
+        uzumeFusedMacroKernel: false,
+        uzumeBypassReason: null,
       });
 
       const liveStatus = session.getStatus();
       expect(liveStatus.uzumeActive).toBe(true);
       expect(liveStatus.uzumeBackend).toBe('hybrid-gpu-matrix-limiter');
-      expect(liveStatus.uzumeProfile).toBe('legacy-dsp-compat');
-      expect(liveStatus.uzumeRuntimeModel).toBe('uzume-native-engine');
+      expect(liveStatus.uzumeProfile).toBe('uzume-skeleton-compat');
+      expect(liveStatus.uzumeRuntimeModel).toBe('transitional-processor-chain');
       expect(liveStatus.uzumeFallbackActive).toBe(false);
       expect(liveStatus.uzumeGpuCompiled).toBe(true);
       expect(liveStatus.uzumeGpuAvailable).toBe(true);
@@ -2081,6 +2101,13 @@ describe('Audio Core sample-rate regression guard', () => {
       expect(liveStatus.uzumeCufftFallbackReason).toBe(null);
       expect(liveStatus.uzumeCudaRuntimeVersion).toBe(13030);
       expect(liveStatus.uzumeCufftVersion).toBe(11400);
+      expect(liveStatus.uzumeFormatPath).toBe('pcm_processed');
+      expect(liveStatus.uzumeBitPerfectState).toBe('disabled');
+      expect(liveStatus.uzumeDirectDisabledReason).toBe('uzume_processing_enabled');
+      expect(liveStatus.uzumeHeadroomActive).toBe(true);
+      expect(liveStatus.uzumeTransitionalConvolutionPath).toBe('legacy-convolution-processor');
+      expect(liveStatus.uzumeFusedMacroKernel).toBe(false);
+      expect(liveStatus.uzumeBypassReason).toBe(null);
       expect(liveStatus.dspClippingRisk).toBe(true);
       expect(liveStatus.dspLimiterProtecting).toBe(true);
       expect(liveStatus.warnings).toContain('dsp_limiter_protecting');
@@ -2094,8 +2121,8 @@ describe('Audio Core sample-rate regression guard', () => {
       expect(outputReady?.details).toMatchObject({
         uzumeActive: false,
         uzumeBackend: 'cpu-reference',
-        uzumeProfile: 'legacy-dsp-compat',
-        uzumeRuntimeModel: 'uzume-native-engine',
+        uzumeProfile: 'uzume-skeleton-compat',
+        uzumeRuntimeModel: 'identity-bypass',
         uzumeFallbackActive: false,
         uzumeGpuCompiled: false,
         uzumeGpuAvailable: false,
@@ -2107,6 +2134,13 @@ describe('Audio Core sample-rate regression guard', () => {
         uzumeCufftFallbackReason: null,
         uzumeCudaRuntimeVersion: 0,
         uzumeCufftVersion: 0,
+        uzumeFormatPath: 'pcm_bitperfect',
+        uzumeBitPerfectState: 'available',
+        uzumeDirectDisabledReason: null,
+        uzumeHeadroomActive: false,
+        uzumeTransitionalConvolutionPath: 'legacy-convolution-processor',
+        uzumeFusedMacroKernel: false,
+        uzumeBypassReason: 'identity-bypass',
       });
     } finally {
       session.dispose();
@@ -10187,7 +10221,7 @@ describe('NativeOutputBridge diagnostics', () => {
     });
 
     bridge.beginSession();
-    hostStdout.write('{"pos":480,"dspClippingRisk":true,"dspLimiterProtecting":true,"uzumeActive":true,"uzumeBackend":"hybrid-gpu-matrix-limiter","uzumeProfile":"legacy-dsp-compat","uzumeRuntimeModel":"uzume-native-engine","uzumeGpuLimiterPlaybackActive":true,"uzumeGpuMatrixPlaybackActive":true,"uzumeGpuFftConvolutionPrepared":true}\n');
+    hostStdout.write('{"pos":480,"dspClippingRisk":true,"dspLimiterProtecting":true,"uzumeActive":true,"uzumeBackend":"hybrid-gpu-matrix-limiter","uzumeProfile":"uzume-skeleton-compat","uzumeRuntimeModel":"transitional-processor-chain","uzumeFormatPath":"pcm_processed","uzumeBitPerfectState":"disabled","uzumeDirectDisabledReason":"uzume_processing_enabled","uzumeHeadroomActive":true,"uzumeTransitionalConvolutionPath":"legacy-convolution-processor","uzumeFusedMacroKernel":false,"uzumeGpuLimiterPlaybackActive":true,"uzumeGpuMatrixPlaybackActive":true,"uzumeGpuFftConvolutionPrepared":true}\n');
     bridge.beginSession();
     hostStdout.write('{"pos":960}\n');
 
@@ -10199,8 +10233,14 @@ describe('NativeOutputBridge diagnostics', () => {
       dspLimiterProtecting: true,
       uzumeActive: true,
       uzumeBackend: 'hybrid-gpu-matrix-limiter',
-      uzumeProfile: 'legacy-dsp-compat',
-      uzumeRuntimeModel: 'uzume-native-engine',
+      uzumeProfile: 'uzume-skeleton-compat',
+      uzumeRuntimeModel: 'transitional-processor-chain',
+      uzumeFormatPath: 'pcm_processed',
+      uzumeBitPerfectState: 'disabled',
+      uzumeDirectDisabledReason: 'uzume_processing_enabled',
+      uzumeHeadroomActive: true,
+      uzumeTransitionalConvolutionPath: 'legacy-convolution-processor',
+      uzumeFusedMacroKernel: false,
       uzumeGpuLimiterPlaybackActive: true,
       uzumeGpuMatrixPlaybackActive: true,
       uzumeGpuFftConvolutionPrepared: true,
@@ -10224,6 +10264,13 @@ describe('NativeOutputBridge diagnostics', () => {
       uzumeCufftFallbackReason: null,
       uzumeCudaRuntimeVersion: null,
       uzumeCufftVersion: null,
+      uzumeFormatPath: null,
+      uzumeBitPerfectState: null,
+      uzumeDirectDisabledReason: null,
+      uzumeHeadroomActive: false,
+      uzumeTransitionalConvolutionPath: null,
+      uzumeFusedMacroKernel: false,
+      uzumeBypassReason: null,
     });
 
     bridge.stop();

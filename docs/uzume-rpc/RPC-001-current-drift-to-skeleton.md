@@ -9,6 +9,14 @@
 - 操作分支：`uzume-dspchain-replacement`
 - Upstream tracking：`origin/main`
 
+## 实施记录
+
+- 2026-06-08：已创建本地 safepoint commit `ebdfcfe`，随后 merge `origin/main` 到 `uzume-dspchain-replacement`，merge commit 为 `8e54b0d`。
+- 已解决上游同步冲突：`DspChain.cpp` 保留上游 legacy DSP chain / safety limiter 路径，`audio_engine_tests.cpp` 合并 UZUME 与 legacy DspChain 测试注册。
+- 已移除 `DspChain -> UzumeEngine` wrapper route：`DspChain.h/.cpp` 不再 include、持有或转发 `UzumeEngine`。
+- 已推进 skeleton status：`UzumeEngine` 使用 `uzume-skeleton-compat`，按 active state 暴露 `transitional-processor-chain` / `identity-bypass`，并透出 `formatPath`、`bitPerfectState`、`directDisabledReason`、`headroomActive`、`transitionalConvolutionPath`、`fusedMacroKernel=false`、`bypassReason`。
+- 已修正 headroom-only：`DspHeadroomProcessor::isEnabled()` 会激活 UZUME processed path；旧的 headroom bypass 断言已替换为 `testDspHeadroomActivatesUzumeProcessedPath`。
+
 ## 当前偏移
 
 本 RPC 必须从当前代码偏移开始，不从理想架构空降。

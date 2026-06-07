@@ -19,8 +19,8 @@ struct UzumeRuntimeStatus
     bool limiterProtecting = false;
     bool fallbackActive = false;
     const char* backend = "cpu-reference";
-    const char* profile = "legacy-dsp-compat";
-    const char* runtimeModel = "uzume-native-engine";
+    const char* profile = "uzume-skeleton-compat";
+    const char* runtimeModel = "identity-bypass";
     bool gpuCompiled = false;
     bool gpuAvailable = false;
     bool gpuCufftAvailable = false;
@@ -32,6 +32,13 @@ struct UzumeRuntimeStatus
     const char* cufftFallbackReason = nullptr;
     int cudaRuntimeVersion = 0;
     int cufftVersion = 0;
+    const char* formatPath = "pcm_bitperfect";
+    const char* bitPerfectState = "available";
+    const char* directDisabledReason = nullptr;
+    bool headroomActive = false;
+    const char* transitionalConvolutionPath = "legacy-convolution-processor";
+    bool fusedMacroKernel = false;
+    const char* bypassReason = "identity-bypass";
 };
 
 class UzumeEngine

@@ -125,7 +125,10 @@ void UzumeEngine::processBlock(juce::AudioBuffer<float>& buffer, int startSample
 
 bool UzumeEngine::isActive() const
 {
-    return eqProcessor.isEnabled() || convolutionProcessor.isEnabled() || channelBalanceProcessor.isEnabled();
+    return headroomProcessor.isEnabled()
+        || eqProcessor.isEnabled()
+        || convolutionProcessor.isEnabled()
+        || channelBalanceProcessor.isEnabled();
 }
 
 bool UzumeEngine::hasClippingRisk() const
@@ -157,15 +160,16 @@ UzumeRuntimeStatus UzumeEngine::getRuntimeStatus() const
         : (playbackGpuMatrixFallbackReason != nullptr
             ? playbackGpuMatrixFallbackReason
             : (gpuProbe.compiled && ! gpuReady ? gpuProbe.fallbackReason : nullptr));
+    const bool active = isActive();
 
     return {
-        isActive(),
+        active,
         hasClippingRisk(),
         isSafetyLimiterProtecting(),
         backendFallbackActive,
         classifyPlaybackBackend(playbackGpuMatrix, playbackGpuLimiter),
-        "legacy-dsp-compat",
-        "uzume-native-engine",
+        "uzume-skeleton-compat",
+        active ? "transitional-processor-chain" : "identity-bypass",
         gpuProbe.compiled,
         gpuReady,
         gpuProbe.cufftAvailable,
@@ -177,6 +181,13 @@ UzumeRuntimeStatus UzumeEngine::getRuntimeStatus() const
         gpuProbe.cufftFallbackReason,
         gpuProbe.cudaRuntimeVersion,
         gpuProbe.cufftVersion,
+        active ? "pcm_processed" : "pcm_bitperfect",
+        active ? "disabled" : "available",
+        active ? "uzume_processing_enabled" : nullptr,
+        headroomProcessor.isEnabled(),
+        "legacy-convolution-processor",
+        false,
+        active ? nullptr : "identity-bypass",
     };
 }
 

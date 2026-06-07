@@ -322,7 +322,18 @@ std::string formatUzumeRuntimeJson(const echo::UzumeRuntimeStatus& status)
             ? ",\"uzumeCufftFallbackReason\":\"" + jsonEscape(juce::String::fromUTF8(status.cufftFallbackReason)) + "\""
             : "")
         + ",\"uzumeCudaRuntimeVersion\":" + std::to_string(status.cudaRuntimeVersion)
-        + ",\"uzumeCufftVersion\":" + std::to_string(status.cufftVersion);
+        + ",\"uzumeCufftVersion\":" + std::to_string(status.cufftVersion)
+        + ",\"uzumeFormatPath\":\"" + jsonEscape(juce::String::fromUTF8(status.formatPath)) + "\""
+        + ",\"uzumeBitPerfectState\":\"" + jsonEscape(juce::String::fromUTF8(status.bitPerfectState)) + "\""
+        + ",\"uzumeDirectDisabledReason\":" + (status.directDisabledReason != nullptr
+            ? "\"" + jsonEscape(juce::String::fromUTF8(status.directDisabledReason)) + "\""
+            : "null")
+        + ",\"uzumeHeadroomActive\":" + jsonBool(status.headroomActive)
+        + ",\"uzumeTransitionalConvolutionPath\":\"" + jsonEscape(juce::String::fromUTF8(status.transitionalConvolutionPath)) + "\""
+        + ",\"uzumeFusedMacroKernel\":" + jsonBool(status.fusedMacroKernel)
+        + ",\"uzumeBypassReason\":" + (status.bypassReason != nullptr
+            ? "\"" + jsonEscape(juce::String::fromUTF8(status.bypassReason)) + "\""
+            : "null");
 }
 
 int parseInt(const juce::String& value, int fallback)

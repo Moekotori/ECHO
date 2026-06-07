@@ -286,6 +286,16 @@ void testUzumeEngineBypassPreservesDryBuffer()
     requireBuffersClose(buffer, dry, strictTolerance, "inactive UZUME engine must not touch native playback samples");
     require(! uzumeEngine.hasClippingRisk(), "inactive UZUME engine must not report clipping risk");
     require(! uzumeEngine.isSafetyLimiterProtecting(), "inactive UZUME engine must not report limiter protection");
+    const auto status = uzumeEngine.getRuntimeStatus();
+    require(status.profile == std::string("uzume-skeleton-compat"), "inactive UZUME skeleton profile must be explicit");
+    require(status.runtimeModel == std::string("identity-bypass"), "inactive UZUME skeleton must report identity bypass runtime");
+    require(status.formatPath == std::string("pcm_bitperfect"), "inactive UZUME skeleton must expose PCM bit-perfect format path");
+    require(status.bitPerfectState == std::string("available"), "inactive UZUME skeleton must expose available bit-perfect state");
+    require(status.directDisabledReason == nullptr, "inactive UZUME skeleton must not report a direct disabled reason");
+    require(! status.headroomActive, "inactive UZUME skeleton must not report active headroom");
+    require(status.transitionalConvolutionPath == std::string("legacy-convolution-processor"), "UZUME skeleton must label legacy convolution path");
+    require(! status.fusedMacroKernel, "UZUME skeleton must not claim fused macro-kernel execution");
+    require(status.bypassReason != nullptr && std::string(status.bypassReason) == "identity-bypass", "inactive UZUME skeleton must expose identity bypass reason");
 }
 
 void testUzumeEngineLimiterProtectsActiveOutput()
@@ -362,6 +372,14 @@ void testUzumeEngineLimiterProtectsActiveOutput()
     {
         require(status.backend == std::string("cpu-reference"), "UZUME playback backend must stay CPU when CUDA limiter playback is unavailable");
     }
+    require(status.profile == std::string("uzume-skeleton-compat"), "active UZUME skeleton profile must be explicit");
+    require(status.runtimeModel == std::string("transitional-processor-chain"), "active UZUME skeleton must report transitional processor chain runtime");
+    require(status.formatPath == std::string("pcm_processed"), "active UZUME skeleton must expose PCM processed format path");
+    require(status.bitPerfectState == std::string("disabled"), "active UZUME skeleton must expose disabled bit-perfect state");
+    require(status.directDisabledReason != nullptr && std::string(status.directDisabledReason) == "uzume_processing_enabled", "active UZUME skeleton must expose direct disabled reason");
+    require(status.transitionalConvolutionPath == std::string("legacy-convolution-processor"), "active UZUME skeleton must label legacy convolution path");
+    require(! status.fusedMacroKernel, "active UZUME skeleton must not claim fused macro-kernel execution");
+    require(status.bypassReason == nullptr, "active UZUME skeleton must not report bypass reason");
 }
 
 void testUzumeEngineUsesGpuMatrixForStableChannelBalance()
@@ -587,9 +605,13 @@ void testUzumeRuntimeStatusReportsBackend()
     uzumeEngine.prepare(48000.0, 128, 2);
 
     const auto status = uzumeEngine.getRuntimeStatus();
-    require(status.profile == std::string("legacy-dsp-compat"), "UZUME MVP profile must be stable for telemetry");
+    require(status.profile == std::string("uzume-skeleton-compat"), "UZUME skeleton profile must be stable for telemetry");
     require(status.backend == std::string("cpu-reference"), "UZUME MVP playback backend must stay CPU before a GPU playback limiter processes a block");
-    require(status.runtimeModel == std::string("uzume-native-engine"), "UZUME runtime model must be explicit");
+    require(status.runtimeModel == std::string("identity-bypass"), "UZUME inactive runtime model must expose identity bypass");
+    require(status.formatPath == std::string("pcm_bitperfect"), "UZUME runtime status must expose format path");
+    require(status.bitPerfectState == std::string("available"), "UZUME runtime status must expose bit-perfect state");
+    require(status.transitionalConvolutionPath == std::string("legacy-convolution-processor"), "UZUME runtime status must expose transitional convolution path");
+    require(! status.fusedMacroKernel, "UZUME runtime status must not report fused macro-kernel before Phase 3");
     require(! status.gpuLimiterPlaybackActive, "UZUME runtime status must not report GPU limiter playback before a playback block processes");
     require(! status.gpuMatrixPlaybackActive, "UZUME runtime status must not report GPU matrix playback before a playback block processes");
     if (status.gpuAvailable)
@@ -1546,6 +1568,70 @@ void testUzumeEnginePreparePrewarmsGpuStreamingFftConvolutionScratch()
     require(std::abs(resetBlock[0] - secondBlock[0] * impulse[0]) <= nearTolerance, "UZUME engine reset must clear streaming playback cuFFT history");
 }
 
+void testDspChainBypassPreservesDryBuffer()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ConvolutionProcessor convolutionProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    echo::DspHeadroomProcessor headroomProcessor;
+    echo::DspChain dspChain(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
+    dspChain.prepare(48000.0, 128, 2);
+
+    auto buffer = makeBuffer(2, 128);
+    auto dry = makeBuffer(2, 128);
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        auto* samples = buffer.getWritePointer(channel);
+        auto* drySamples = dry.getWritePointer(channel);
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        {
+            const float value = channel == 0
+                ? static_cast<float>(sample) / 127.0f
+                : -static_cast<float>(sample) / 127.0f;
+            samples[sample] = value;
+            drySamples[sample] = value;
+        }
+    }
+
+    require(! dspChain.isActive(), "inactive DSP chain must report bypass");
+    dspChain.processBlock(buffer, 0, buffer.getNumSamples());
+    requireBuffersClose(buffer, dry, strictTolerance, "inactive DSP chain must not touch native playback samples");
+    require(! dspChain.hasClippingRisk(), "inactive DSP chain must not report clipping risk");
+    require(! dspChain.isSafetyLimiterProtecting(), "inactive DSP chain must not report limiter protection");
+}
+
+void testDspChainLimiterProtectsActiveOutput()
+{
+    echo::DspChain::setSafetyLimiterEnabled(true);
+    echo::EqProcessor eqProcessor;
+    echo::ConvolutionProcessor convolutionProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    echo::DspHeadroomProcessor headroomProcessor;
+    echo::DspChain dspChain(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
+    dspChain.prepare(48000.0, 128, 2);
+    eqProcessor.setEnabled(true);
+
+    auto buffer = makeBuffer(2, 128);
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        auto* samples = buffer.getWritePointer(channel);
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+            samples[sample] = sample % 2 == 0 ? 2.0f : -2.0f;
+    }
+
+    require(dspChain.isActive(), "enabled EQ must activate DSP chain");
+    dspChain.processBlock(buffer, 0, buffer.getNumSamples());
+    require(dspChain.hasClippingRisk(), "active DSP chain must report clipping risk after limiting hot output");
+    require(dspChain.isSafetyLimiterProtecting(), "active DSP chain must expose safety limiter protection");
+
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        const auto* samples = buffer.getReadPointer(channel);
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+            require(std::abs(samples[sample]) <= 1.0f + nearTolerance, "DSP safety limiter must cap active-chain output");
+    }
+}
+
 void testDspChainLimiterIgnoresNearFullScaleOutput()
 {
     echo::DspChain::setSafetyLimiterEnabled(true);
@@ -1596,7 +1682,7 @@ void testDspChainLimiterCanBeBypassed()
     echo::DspChain::setSafetyLimiterEnabled(true);
 }
 
-void testDspHeadroomOnlyAppliesToActiveDsp()
+void testDspHeadroomActivatesUzumeProcessedPath()
 {
     echo::DspChain::setSafetyLimiterEnabled(true);
     echo::EqProcessor eqProcessor;
@@ -1607,23 +1693,22 @@ void testDspHeadroomOnlyAppliesToActiveDsp()
     uzumeEngine.prepare(48000.0, 128, 2);
     headroomProcessor.setHeadroomDb(-6.0f);
 
-    auto bypassed = makeBuffer(2, 128);
-    bypassed.clear();
-    bypassed.setSample(0, 0, 0.5f);
-    bypassed.setSample(1, 0, -0.5f);
-    uzumeEngine.processBlock(bypassed, 0, bypassed.getNumSamples());
-    require(std::abs(bypassed.getSample(0, 0) - 0.5f) <= strictTolerance, "DSP headroom must not affect native bypass");
-    require(std::abs(bypassed.getSample(1, 0) + 0.5f) <= strictTolerance, "DSP headroom must preserve bypass polarity");
-
-    eqProcessor.setEnabled(true);
     auto processed = makeBuffer(2, 128);
     processed.clear();
     processed.setSample(0, 0, 0.5f);
     processed.setSample(1, 0, -0.5f);
     uzumeEngine.processBlock(processed, 0, processed.getNumSamples());
 
-    require(std::abs(processed.getSample(0, 0)) < 0.5f, "DSP headroom must attenuate active DSP output");
-    require(std::abs(processed.getSample(1, 0)) < 0.5f, "DSP headroom must attenuate active DSP output on all channels");
+    require(uzumeEngine.isActive(), "UZUME headroom-only profile must activate the processed path");
+    require(std::abs(processed.getSample(0, 0)) < 0.5f, "UZUME headroom-only profile must attenuate output");
+    require(std::abs(processed.getSample(1, 0)) < 0.5f, "UZUME headroom-only profile must attenuate output on all channels");
+
+    const auto status = uzumeEngine.getRuntimeStatus();
+    require(status.headroomActive, "UZUME headroom-only status must expose active headroom");
+    require(status.runtimeModel == std::string("transitional-processor-chain"), "UZUME headroom-only status must report transitional runtime");
+    require(status.formatPath == std::string("pcm_processed"), "UZUME headroom-only status must expose PCM processed path");
+    require(status.bitPerfectState == std::string("disabled"), "UZUME headroom-only status must disable bit-perfect");
+    require(status.directDisabledReason != nullptr && std::string(status.directDisabledReason) == "uzume_processing_enabled", "UZUME headroom-only status must expose direct disabled reason");
 }
 
 void testDisabledEqIsDry()
@@ -2604,7 +2689,7 @@ int main()
         { "DSP chain limiter protects active output", testDspChainLimiterProtectsActiveOutput },
         { "DSP chain limiter ignores near full-scale output", testDspChainLimiterIgnoresNearFullScaleOutput },
         { "DSP chain limiter can be bypassed", testDspChainLimiterCanBeBypassed },
-        { "DSP headroom only applies to active DSP", testDspHeadroomOnlyAppliesToActiveDsp },
+        { "UZUME headroom activates processed path", testDspHeadroomActivatesUzumeProcessedPath },
         { "host buffer fallback attempts", testHostBufferFallbackAttempts },
         { "host shared backend options", testHostSharedBackendOptions },
         { "host backend names", testHostBackendNames },

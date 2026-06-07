@@ -1534,6 +1534,13 @@ export class AudioSession extends EventEmitter {
     uzumeCufftFallbackReason: null,
     uzumeCudaRuntimeVersion: null,
     uzumeCufftVersion: null,
+    uzumeFormatPath: null,
+    uzumeBitPerfectState: null,
+    uzumeDirectDisabledReason: null,
+    uzumeHeadroomActive: false,
+    uzumeTransitionalConvolutionPath: null,
+    uzumeFusedMacroKernel: false,
+    uzumeBypassReason: null,
   };
   private lastNativeTelemetryStatusEmittedAt = 0;
   private lastLevelMeterStatusEmittedAt = 0;
@@ -3350,7 +3357,14 @@ export class AudioSession extends EventEmitter {
       this.nativeTelemetry.uzumeFallbackReason !== null ||
       this.nativeTelemetry.uzumeCufftFallbackReason !== null ||
       this.nativeTelemetry.uzumeCudaRuntimeVersion !== null ||
-      this.nativeTelemetry.uzumeCufftVersion !== null;
+      this.nativeTelemetry.uzumeCufftVersion !== null ||
+      this.nativeTelemetry.uzumeFormatPath !== null ||
+      this.nativeTelemetry.uzumeBitPerfectState !== null ||
+      this.nativeTelemetry.uzumeDirectDisabledReason !== null ||
+      this.nativeTelemetry.uzumeHeadroomActive === true ||
+      this.nativeTelemetry.uzumeTransitionalConvolutionPath !== null ||
+      this.nativeTelemetry.uzumeFusedMacroKernel === true ||
+      this.nativeTelemetry.uzumeBypassReason !== null;
     const nativeUzumeActive = hasNativeUzumeTelemetry ? this.nativeTelemetry.uzumeActive === true : readyUzumeActive;
     const nativeUzumeBackend =
       typeof this.nativeTelemetry.uzumeBackend === 'string'
@@ -3426,6 +3440,52 @@ export class AudioSession extends EventEmitter {
         ? this.nativeTelemetry.uzumeCufftVersion
         : typeof this.currentReadyResult?.device.uzumeCufftVersion === 'number'
           ? this.currentReadyResult.device.uzumeCufftVersion
+          : null;
+    const nativeUzumeFormatPath =
+      hasNativeUzumeTelemetry
+        ? typeof this.nativeTelemetry.uzumeFormatPath === 'string'
+          ? this.nativeTelemetry.uzumeFormatPath
+          : null
+        : typeof this.currentReadyResult?.device.uzumeFormatPath === 'string'
+          ? this.currentReadyResult.device.uzumeFormatPath
+          : null;
+    const nativeUzumeBitPerfectState =
+      hasNativeUzumeTelemetry
+        ? typeof this.nativeTelemetry.uzumeBitPerfectState === 'string'
+          ? this.nativeTelemetry.uzumeBitPerfectState
+          : null
+        : typeof this.currentReadyResult?.device.uzumeBitPerfectState === 'string'
+          ? this.currentReadyResult.device.uzumeBitPerfectState
+          : null;
+    const nativeUzumeDirectDisabledReason =
+      hasNativeUzumeTelemetry
+        ? typeof this.nativeTelemetry.uzumeDirectDisabledReason === 'string'
+          ? this.nativeTelemetry.uzumeDirectDisabledReason
+          : null
+        : typeof this.currentReadyResult?.device.uzumeDirectDisabledReason === 'string'
+          ? this.currentReadyResult.device.uzumeDirectDisabledReason
+          : null;
+    const nativeUzumeHeadroomActive = hasNativeUzumeTelemetry
+      ? this.nativeTelemetry.uzumeHeadroomActive === true
+      : this.currentReadyResult?.device.uzumeHeadroomActive === true;
+    const nativeUzumeTransitionalConvolutionPath =
+      hasNativeUzumeTelemetry
+        ? typeof this.nativeTelemetry.uzumeTransitionalConvolutionPath === 'string'
+          ? this.nativeTelemetry.uzumeTransitionalConvolutionPath
+          : null
+        : typeof this.currentReadyResult?.device.uzumeTransitionalConvolutionPath === 'string'
+          ? this.currentReadyResult.device.uzumeTransitionalConvolutionPath
+          : null;
+    const nativeUzumeFusedMacroKernel = hasNativeUzumeTelemetry
+      ? this.nativeTelemetry.uzumeFusedMacroKernel === true
+      : this.currentReadyResult?.device.uzumeFusedMacroKernel === true;
+    const nativeUzumeBypassReason =
+      hasNativeUzumeTelemetry
+        ? typeof this.nativeTelemetry.uzumeBypassReason === 'string'
+          ? this.nativeTelemetry.uzumeBypassReason
+          : null
+        : typeof this.currentReadyResult?.device.uzumeBypassReason === 'string'
+          ? this.currentReadyResult.device.uzumeBypassReason
           : null;
     const chainedPlaybackActive = this.activeAutomix !== null;
     const gaplessActive = this.activeAutomix?.gapless === true;
@@ -3633,6 +3693,13 @@ export class AudioSession extends EventEmitter {
       uzumeCufftFallbackReason: nativeUzumeCufftFallbackReason,
       uzumeCudaRuntimeVersion: nativeUzumeCudaRuntimeVersion,
       uzumeCufftVersion: nativeUzumeCufftVersion,
+      uzumeFormatPath: nativeUzumeFormatPath,
+      uzumeBitPerfectState: nativeUzumeBitPerfectState,
+      uzumeDirectDisabledReason: nativeUzumeDirectDisabledReason,
+      uzumeHeadroomActive: nativeUzumeHeadroomActive,
+      uzumeTransitionalConvolutionPath: nativeUzumeTransitionalConvolutionPath,
+      uzumeFusedMacroKernel: nativeUzumeFusedMacroKernel,
+      uzumeBypassReason: nativeUzumeBypassReason,
       preampDb: eqState.preampDb,
       dspHeadroomDb: eqState.dspHeadroomDb ?? 0,
       eqPresetName: eqState.presetName,
@@ -5237,6 +5304,17 @@ export class AudioSession extends EventEmitter {
           typeof readyDevice.uzumeCudaRuntimeVersion === 'number' ? readyDevice.uzumeCudaRuntimeVersion : null,
         uzumeCufftVersion:
           typeof readyDevice.uzumeCufftVersion === 'number' ? readyDevice.uzumeCufftVersion : null,
+        uzumeFormatPath: typeof readyDevice.uzumeFormatPath === 'string' ? readyDevice.uzumeFormatPath : null,
+        uzumeBitPerfectState: typeof readyDevice.uzumeBitPerfectState === 'string' ? readyDevice.uzumeBitPerfectState : null,
+        uzumeDirectDisabledReason:
+          typeof readyDevice.uzumeDirectDisabledReason === 'string' ? readyDevice.uzumeDirectDisabledReason : null,
+        uzumeHeadroomActive: readyDevice.uzumeHeadroomActive === true,
+        uzumeTransitionalConvolutionPath:
+          typeof readyDevice.uzumeTransitionalConvolutionPath === 'string'
+            ? readyDevice.uzumeTransitionalConvolutionPath
+            : null,
+        uzumeFusedMacroKernel: readyDevice.uzumeFusedMacroKernel === true,
+        uzumeBypassReason: typeof readyDevice.uzumeBypassReason === 'string' ? readyDevice.uzumeBypassReason : null,
       },
     });
   }
@@ -7226,6 +7304,44 @@ export class AudioSession extends EventEmitter {
           : typeof telemetry.uzumeCufftVersion === 'number' && Number.isFinite(telemetry.uzumeCufftVersion)
             ? Math.max(0, Math.round(telemetry.uzumeCufftVersion))
             : null,
+      uzumeFormatPath:
+        telemetry.uzumeFormatPath === undefined
+          ? this.nativeTelemetry.uzumeFormatPath
+          : typeof telemetry.uzumeFormatPath === 'string'
+            ? telemetry.uzumeFormatPath
+            : null,
+      uzumeBitPerfectState:
+        telemetry.uzumeBitPerfectState === undefined
+          ? this.nativeTelemetry.uzumeBitPerfectState
+          : typeof telemetry.uzumeBitPerfectState === 'string'
+            ? telemetry.uzumeBitPerfectState
+            : null,
+      uzumeDirectDisabledReason:
+        telemetry.uzumeDirectDisabledReason === undefined
+          ? this.nativeTelemetry.uzumeDirectDisabledReason
+          : typeof telemetry.uzumeDirectDisabledReason === 'string'
+            ? telemetry.uzumeDirectDisabledReason
+            : null,
+      uzumeHeadroomActive:
+        telemetry.uzumeHeadroomActive === undefined
+          ? this.nativeTelemetry.uzumeHeadroomActive
+          : telemetry.uzumeHeadroomActive === true,
+      uzumeTransitionalConvolutionPath:
+        telemetry.uzumeTransitionalConvolutionPath === undefined
+          ? this.nativeTelemetry.uzumeTransitionalConvolutionPath
+          : typeof telemetry.uzumeTransitionalConvolutionPath === 'string'
+            ? telemetry.uzumeTransitionalConvolutionPath
+            : null,
+      uzumeFusedMacroKernel:
+        telemetry.uzumeFusedMacroKernel === undefined
+          ? this.nativeTelemetry.uzumeFusedMacroKernel
+          : telemetry.uzumeFusedMacroKernel === true,
+      uzumeBypassReason:
+        telemetry.uzumeBypassReason === undefined
+          ? this.nativeTelemetry.uzumeBypassReason
+          : typeof telemetry.uzumeBypassReason === 'string'
+            ? telemetry.uzumeBypassReason
+            : null,
       reportedAtMs:
         telemetry.reportedAtMs === null || telemetry.reportedAtMs === undefined
           ? null
@@ -7564,6 +7680,13 @@ export class AudioSession extends EventEmitter {
       uzumeCufftFallbackReason: null,
       uzumeCudaRuntimeVersion: null,
       uzumeCufftVersion: null,
+      uzumeFormatPath: null,
+      uzumeBitPerfectState: null,
+      uzumeDirectDisabledReason: null,
+      uzumeHeadroomActive: false,
+      uzumeTransitionalConvolutionPath: null,
+      uzumeFusedMacroKernel: false,
+      uzumeBypassReason: null,
       reportedAtMs: null,
       nativePositionStalenessMs: null,
     };

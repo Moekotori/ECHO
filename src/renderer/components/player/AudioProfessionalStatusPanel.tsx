@@ -195,6 +195,11 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
     : status?.uzumeGpuCompiled
       ? status.uzumeCufftFallbackReason ?? disabled
       : disabled;
+  const uzumeBitPerfectText = status?.uzumeBitPerfectState
+    ? status.uzumeDirectDisabledReason
+      ? `${status.uzumeBitPerfectState} / ${formatBitPerfectReason(status.uzumeDirectDisabledReason, unknown)}`
+      : status.uzumeBitPerfectState
+    : unknown;
 
   const issueReasons = useMemo(() => (
     [status?.error, ...(status?.warnings ?? [])]
@@ -311,6 +316,12 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.channelBalance'), value: status?.channelBalanceEnabled ? enabled : disabled, tone: status?.channelBalanceEnabled ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeBackend'), value: status?.uzumeBackend ?? disabled, tone: status?.uzumeFallbackActive ? 'warning' : isUzumeGpuBackend(status?.uzumeBackend) ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeRuntime'), value: status?.uzumeRuntimeModel ?? unknown },
+        { label: t('audioProfessional.row.uzumeFormatPath'), value: status?.uzumeFormatPath ?? unknown },
+        { label: t('audioProfessional.row.uzumeBitPerfect'), value: uzumeBitPerfectText, tone: status?.uzumeBitPerfectState === 'available' ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeHeadroom'), value: status?.uzumeHeadroomActive ? enabled : disabled, tone: status?.uzumeHeadroomActive ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeConvolution'), value: status?.uzumeTransitionalConvolutionPath ?? unknown },
+        { label: t('audioProfessional.row.uzumeFused'), value: status?.uzumeFusedMacroKernel ? yes : no, tone: status?.uzumeFusedMacroKernel ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeBypass'), value: status?.uzumeBypassReason ?? disabled, tone: status?.uzumeBypassReason ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeGpu'), value: uzumeGpuText, tone: status?.uzumeGpuAvailable ? 'good' : status?.uzumeGpuCompiled ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeGpuLimiter'), value: status?.uzumeGpuLimiterPlaybackActive ? enabled : disabled, tone: status?.uzumeGpuLimiterPlaybackActive ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeGpuMatrix'), value: status?.uzumeGpuMatrixPlaybackActive ? enabled : disabled, tone: status?.uzumeGpuMatrixPlaybackActive ? 'good' : 'muted' },
@@ -339,7 +350,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.error'), value: status?.error ?? unknown, tone: status?.error ? 'danger' : 'muted' },
       ],
     },
-  ], [bitPerfectText, disabled, dspModules.length, enabled, no, protectLimiterText, signalPathText, status, t, unknown, uzumeCufftText, uzumeGpuText, yes]);
+  ], [bitPerfectText, disabled, dspModules.length, enabled, no, protectLimiterText, signalPathText, status, t, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeGpuText, yes]);
 
   const visibleSections = detailsOpen ? sections : [];
   const panelStateIcon = status?.error ? AlertTriangle : status?.bitPerfectCandidate ? CheckCircle2 : Zap;

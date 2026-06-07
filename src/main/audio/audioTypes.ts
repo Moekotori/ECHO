@@ -183,6 +183,13 @@ export type NativeOutputTelemetry = {
   uzumeCufftFallbackReason?: string | null;
   uzumeCudaRuntimeVersion?: number | null;
   uzumeCufftVersion?: number | null;
+  uzumeFormatPath?: string | null;
+  uzumeBitPerfectState?: string | null;
+  uzumeDirectDisabledReason?: string | null;
+  uzumeHeadroomActive?: boolean;
+  uzumeTransitionalConvolutionPath?: string | null;
+  uzumeFusedMacroKernel?: boolean;
+  uzumeBypassReason?: string | null;
   reportedAtMs?: number | null;
   nativePositionStalenessMs?: number | null;
 };
@@ -234,6 +241,13 @@ export type NativeBridgeReadyMessage = Record<string, unknown> & {
   uzumeCufftFallbackReason?: string;
   uzumeCudaRuntimeVersion?: number;
   uzumeCufftVersion?: number;
+  uzumeFormatPath?: string;
+  uzumeBitPerfectState?: string;
+  uzumeDirectDisabledReason?: string;
+  uzumeHeadroomActive?: boolean;
+  uzumeTransitionalConvolutionPath?: string;
+  uzumeFusedMacroKernel?: boolean;
+  uzumeBypassReason?: string;
   asioInputChannels?: number;
   asioOutputChannels?: number;
   asioPreferredBufferFrames?: number;

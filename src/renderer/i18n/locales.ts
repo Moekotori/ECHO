@@ -884,13 +884,19 @@ export type TranslationKey =
   | 'audioProfessional.row.state'
   | 'audioProfessional.row.underrun'
   | 'audioProfessional.row.uzumeBackend'
+  | 'audioProfessional.row.uzumeBitPerfect'
+  | 'audioProfessional.row.uzumeBypass'
+  | 'audioProfessional.row.uzumeConvolution'
   | 'audioProfessional.row.uzumeCuda'
   | 'audioProfessional.row.uzumeCufft'
   | 'audioProfessional.row.uzumeFallback'
   | 'audioProfessional.row.uzumeFftScratch'
+  | 'audioProfessional.row.uzumeFormatPath'
+  | 'audioProfessional.row.uzumeFused'
   | 'audioProfessional.row.uzumeGpu'
   | 'audioProfessional.row.uzumeGpuLimiter'
   | 'audioProfessional.row.uzumeGpuMatrix'
+  | 'audioProfessional.row.uzumeHeadroom'
   | 'audioProfessional.row.uzumeRuntime'
   | 'audioProfessional.row.warnings'
   | 'audioProfessional.summary.pending'
@@ -3853,13 +3859,19 @@ const zhCN: TranslationMap = {
   'audioProfessional.row.sampleRateMismatch': '采样率不匹配',
   'audioProfessional.row.upsampling': '升频',
   'audioProfessional.row.uzumeBackend': 'UZUME 后端',
+  'audioProfessional.row.uzumeBitPerfect': 'UZUME bit-perfect',
+  'audioProfessional.row.uzumeBypass': 'UZUME 旁路',
+  'audioProfessional.row.uzumeConvolution': 'UZUME FIR 路径',
   'audioProfessional.row.uzumeCuda': 'CUDA runtime',
   'audioProfessional.row.uzumeCufft': 'cuFFT',
   'audioProfessional.row.uzumeFallback': 'UZUME 回退',
   'audioProfessional.row.uzumeFftScratch': 'FIR GPU 预热',
+  'audioProfessional.row.uzumeFormatPath': 'UZUME format path',
+  'audioProfessional.row.uzumeFused': 'UZUME fused kernel',
   'audioProfessional.row.uzumeGpu': 'UZUME GPU',
   'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
   'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
+  'audioProfessional.row.uzumeHeadroom': 'UZUME headroom',
   'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
   'audioProfessional.row.signalPath': '信号路径',
   'audioProfessional.row.sharedDeviceSampleRate': '共享设备采样率',
@@ -7187,13 +7199,19 @@ const zhTW: TranslationMap = {
   'audioProfessional.row.sampleRateMismatch': '取樣率不符',
   'audioProfessional.row.upsampling': '升頻',
   'audioProfessional.row.uzumeBackend': 'UZUME 後端',
+  'audioProfessional.row.uzumeBitPerfect': 'UZUME bit-perfect',
+  'audioProfessional.row.uzumeBypass': 'UZUME bypass',
+  'audioProfessional.row.uzumeConvolution': 'UZUME FIR 路徑',
   'audioProfessional.row.uzumeCuda': 'CUDA runtime',
   'audioProfessional.row.uzumeCufft': 'cuFFT',
   'audioProfessional.row.uzumeFallback': 'UZUME fallback',
   'audioProfessional.row.uzumeFftScratch': 'FIR GPU 預熱',
+  'audioProfessional.row.uzumeFormatPath': 'UZUME format path',
+  'audioProfessional.row.uzumeFused': 'UZUME fused kernel',
   'audioProfessional.row.uzumeGpu': 'UZUME GPU',
   'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
   'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
+  'audioProfessional.row.uzumeHeadroom': 'UZUME headroom',
   'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
   'audioProfessional.row.signalPath': '訊號路徑',
   'audioProfessional.row.sharedDeviceSampleRate': '共享裝置取樣率',
@@ -10094,13 +10112,19 @@ const jaJP: TranslationMap = {
   'audioProfessional.row.sampleRateMismatch': 'レート不一致',
   'audioProfessional.row.upsampling': 'アップサンプル',
   'audioProfessional.row.uzumeBackend': 'UZUME backend',
+  'audioProfessional.row.uzumeBitPerfect': 'UZUME bit-perfect',
+  'audioProfessional.row.uzumeBypass': 'UZUME bypass',
+  'audioProfessional.row.uzumeConvolution': 'UZUME FIR path',
   'audioProfessional.row.uzumeCuda': 'CUDA runtime',
   'audioProfessional.row.uzumeCufft': 'cuFFT',
   'audioProfessional.row.uzumeFallback': 'UZUME fallback',
   'audioProfessional.row.uzumeFftScratch': 'FIR GPU prewarm',
+  'audioProfessional.row.uzumeFormatPath': 'UZUME format path',
+  'audioProfessional.row.uzumeFused': 'UZUME fused kernel',
   'audioProfessional.row.uzumeGpu': 'UZUME GPU',
   'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
   'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
+  'audioProfessional.row.uzumeHeadroom': 'UZUME headroom',
   'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
   'audioProfessional.row.signalPath': '信号パス',
   'audioProfessional.row.sharedDeviceSampleRate': '共有デバイスレート',
@@ -13070,13 +13094,19 @@ const enUS: TranslationMap = {
   'audioProfessional.row.sampleRateMismatch': 'Sample-rate mismatch',
   'audioProfessional.row.upsampling': 'Upsampling',
   'audioProfessional.row.uzumeBackend': 'UZUME backend',
+  'audioProfessional.row.uzumeBitPerfect': 'UZUME bit-perfect',
+  'audioProfessional.row.uzumeBypass': 'UZUME bypass',
+  'audioProfessional.row.uzumeConvolution': 'UZUME FIR path',
   'audioProfessional.row.uzumeCuda': 'CUDA runtime',
   'audioProfessional.row.uzumeCufft': 'cuFFT',
   'audioProfessional.row.uzumeFallback': 'UZUME fallback',
   'audioProfessional.row.uzumeFftScratch': 'FIR GPU prewarm',
+  'audioProfessional.row.uzumeFormatPath': 'UZUME format path',
+  'audioProfessional.row.uzumeFused': 'UZUME fused kernel',
   'audioProfessional.row.uzumeGpu': 'UZUME GPU',
   'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
   'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
+  'audioProfessional.row.uzumeHeadroom': 'UZUME headroom',
   'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
   'audioProfessional.row.signalPath': 'Signal path',
   'audioProfessional.row.sharedDeviceSampleRate': 'Shared device rate',

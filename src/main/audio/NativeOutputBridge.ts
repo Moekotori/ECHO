@@ -98,6 +98,13 @@ const createInitialTelemetry = (): NativeOutputTelemetry => ({
   uzumeCufftFallbackReason: null,
   uzumeCudaRuntimeVersion: null,
   uzumeCufftVersion: null,
+  uzumeFormatPath: null,
+  uzumeBitPerfectState: null,
+  uzumeDirectDisabledReason: null,
+  uzumeHeadroomActive: false,
+  uzumeTransitionalConvolutionPath: null,
+  uzumeFusedMacroKernel: false,
+  uzumeBypassReason: null,
   reportedAtMs: null,
   nativePositionStalenessMs: null,
 });
@@ -1373,6 +1380,44 @@ export class NativeOutputBridge extends EventEmitter {
           typeof message.uzumeCufftVersion === 'number' && Number.isFinite(message.uzumeCufftVersion)
             ? Math.max(0, Math.round(message.uzumeCufftVersion))
             : this.telemetry.uzumeCufftVersion ?? null,
+        uzumeFormatPath:
+          'uzumeFormatPath' in message
+            ? typeof message.uzumeFormatPath === 'string'
+              ? message.uzumeFormatPath
+              : null
+            : this.telemetry.uzumeFormatPath ?? null,
+        uzumeBitPerfectState:
+          'uzumeBitPerfectState' in message
+            ? typeof message.uzumeBitPerfectState === 'string'
+              ? message.uzumeBitPerfectState
+              : null
+            : this.telemetry.uzumeBitPerfectState ?? null,
+        uzumeDirectDisabledReason:
+          'uzumeDirectDisabledReason' in message
+            ? typeof message.uzumeDirectDisabledReason === 'string'
+              ? message.uzumeDirectDisabledReason
+              : null
+            : this.telemetry.uzumeDirectDisabledReason ?? null,
+        uzumeHeadroomActive:
+          typeof message.uzumeHeadroomActive === 'boolean'
+            ? message.uzumeHeadroomActive
+            : this.telemetry.uzumeHeadroomActive,
+        uzumeTransitionalConvolutionPath:
+          'uzumeTransitionalConvolutionPath' in message
+            ? typeof message.uzumeTransitionalConvolutionPath === 'string'
+              ? message.uzumeTransitionalConvolutionPath
+              : null
+            : this.telemetry.uzumeTransitionalConvolutionPath ?? null,
+        uzumeFusedMacroKernel:
+          typeof message.uzumeFusedMacroKernel === 'boolean'
+            ? message.uzumeFusedMacroKernel
+            : this.telemetry.uzumeFusedMacroKernel,
+        uzumeBypassReason:
+          'uzumeBypassReason' in message
+            ? typeof message.uzumeBypassReason === 'string'
+              ? message.uzumeBypassReason
+              : null
+            : this.telemetry.uzumeBypassReason ?? null,
         reportedAtMs,
         nativePositionStalenessMs: 0,
       };

@@ -225,6 +225,13 @@ export type AudioStatus = {
   uzumeCufftFallbackReason?: string | null;
   uzumeCudaRuntimeVersion?: number | null;
   uzumeCufftVersion?: number | null;
+  uzumeFormatPath?: string | null;
+  uzumeBitPerfectState?: string | null;
+  uzumeDirectDisabledReason?: string | null;
+  uzumeHeadroomActive?: boolean;
+  uzumeTransitionalConvolutionPath?: string | null;
+  uzumeFusedMacroKernel?: boolean;
+  uzumeBypassReason?: string | null;
   preampDb: number;
   dspHeadroomDb?: number;
   eqPresetName: string | null;
