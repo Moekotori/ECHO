@@ -205,7 +205,7 @@ export const PlaybackCommandController = (): null => {
   const audioStatus = sharedPlaybackStatus.audioStatus;
   const state = audioStatus?.state ?? playbackStatus?.state ?? 'idle';
   const visualState = getVisualPlaybackState(sharedPlaybackStatus);
-  const isPlaying = visualState === 'playing';
+  const isPlaying = visualState === 'playing' || visualState === 'loading';
   const positionSeconds = audioStatus?.positionSeconds ?? (playbackStatus?.positionMs ?? 0) / 1000;
   const durationSeconds = audioStatus?.durationSeconds ?? (playbackStatus?.durationMs ?? 0) / 1000;
   const isSpotifyCurrentTrack = isSpotifyTrack(queue.currentTrack);
@@ -242,6 +242,28 @@ export const PlaybackCommandController = (): null => {
     },
     [durationSeconds, queue.currentTrack?.path, queue.currentTrackId],
   );
+
+  const publishOptimisticPause = useCallback((): void => {
+    setPlaybackStatusSnapshot({
+      audioStatus: audioStatus
+        ? {
+            ...audioStatus,
+            state: 'paused',
+            positionSeconds,
+            durationSeconds,
+          }
+        : null,
+      playbackStatus: {
+        state: 'paused',
+        currentTrackId: playbackStatus?.currentTrackId ?? audioStatus?.currentTrackId ?? queue.currentTrackId,
+        positionMs: Math.round(Math.max(0, positionSeconds) * 1000),
+        durationMs: Math.round(Math.max(0, durationSeconds) * 1000),
+        filePath: playbackStatus?.filePath ?? audioStatus?.currentFilePath ?? queue.currentTrack?.path ?? null,
+      },
+      playbackVisualIntent: null,
+      error: null,
+    });
+  }, [audioStatus, durationSeconds, playbackStatus?.currentTrackId, playbackStatus?.filePath, positionSeconds, queue.currentTrack?.path, queue.currentTrackId]);
 
   const handlePlayPause = useCallback(async (): Promise<void> => {
     const playback = window.echo?.playback;
@@ -282,13 +304,14 @@ export const PlaybackCommandController = (): null => {
 
     await runPlaybackAction(async () => {
       if (visualState === 'playing' || visualState === 'loading') {
+        publishOptimisticPause();
         return playback.pause();
       }
 
       const latestStatus = await playback.getStatus();
       return latestStatus.state === 'playing' || latestStatus.state === 'loading' ? playback.pause() : playback.play();
     });
-  }, [applyConnectPlaybackStatus, isSpotifyCurrentTrack, queue, refreshPlaybackStatus, runPlaybackAction, visualState]);
+  }, [applyConnectPlaybackStatus, isSpotifyCurrentTrack, publishOptimisticPause, queue, refreshPlaybackStatus, runPlaybackAction, visualState]);
 
   const handlePrevious = useCallback((): void => {
     void runPlaybackAction(queue.playPrevious);
@@ -530,6 +553,7 @@ export const PlaybackCommandController = (): null => {
           }
 
           if (playback) {
+            publishOptimisticPause();
             await runPlaybackAction(() => playback.pause());
           }
         })();
@@ -550,7 +574,7 @@ export const PlaybackCommandController = (): null => {
         handleStop();
       }
     },
-    [applyConnectPlaybackStatus, commitSeek, handleNext, handlePlayPause, handlePrevious, handleStop, isPlaying, isSpotifyCurrentTrack, queue, runPlaybackAction, state],
+    [applyConnectPlaybackStatus, commitSeek, handleNext, handlePlayPause, handlePrevious, handleStop, isPlaying, isSpotifyCurrentTrack, publishOptimisticPause, queue, runPlaybackAction, state],
   );
 
   const handleGlobalShortcutCommand = useCallback(

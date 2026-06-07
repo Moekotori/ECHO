@@ -9,16 +9,25 @@ vi.mock('../components/library/TrackList', () => ({
   TrackList: ({
     tracks,
     canLoadMore,
+    totalCount,
+    loadedCount,
+    isLoadingMore,
     onEndReached,
     onToggleLiked,
   }: {
     tracks: LibraryTrack[];
     canLoadMore?: boolean;
+    totalCount?: number;
+    loadedCount?: number;
+    isLoadingMore?: boolean;
     onEndReached?: () => void;
     onToggleLiked?: (track: LibraryTrack) => void;
   }) => (
     <section aria-label="mock-track-list">
       <span>{tracks.length} liked tracks</span>
+      <span>
+        loaded {loadedCount ?? tracks.length} / {totalCount ?? tracks.length} {isLoadingMore ? 'loading' : 'idle'}
+      </span>
       {tracks.map((track) => (
         <button key={track.id} type="button" onClick={() => onToggleLiked?.(track)}>
           Unlike {track.title}
@@ -108,11 +117,28 @@ const installLibrary = (
     syncedAt: '2026-05-16T00:00:00.000Z',
   }),
   setTrackLiked: ReturnType<typeof vi.fn> = vi.fn(),
+  getLikedSongsPlaylist: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({
+    id: 'liked-tracks',
+    name: '喜欢的歌曲',
+    description: null,
+    kind: 'system',
+    sourceProvider: 'local',
+    sourcePlaylistId: null,
+    coverId: null,
+    coverThumb: null,
+    sortMode: 'manual',
+    itemCount: 1,
+    createdAt: '2026-05-16T00:00:00.000Z',
+    updatedAt: '2026-05-16T00:00:00.000Z',
+  }),
+  exportPlaylist: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue('D:\\Exports\\liked.json'),
 ): void => {
   window.echo = {
     library: {
       getLikedTracks,
       getLikedAlbums,
+      getLikedSongsPlaylist,
+      exportPlaylist,
       unlikeTrack: vi.fn(),
       unlikeAlbum: vi.fn(),
       clearLikedTracks: vi.fn(),
@@ -159,10 +185,40 @@ afterEach(() => {
 });
 
 describe('LikedPage', () => {
-  it('keeps liked media local-only and hides provider shortcuts', async () => {
-    const getLikedTracks = vi.fn().mockResolvedValue(page([]));
+  it('syncs provider liked songs from the liked page', async () => {
+    const neteasePage = page(
+      [
+        playlistItem('netease-1', {
+          mediaType: 'stream_track',
+          mediaId: 'streaming:netease:1',
+          sourceProvider: 'netease',
+          sourceItemId: '1',
+          titleSnapshot: 'NetEase 1',
+        }),
+        playlistItem('netease-2', {
+          mediaType: 'stream_track',
+          mediaId: 'streaming:netease:2',
+          sourceProvider: 'netease',
+          sourceItemId: '2',
+          titleSnapshot: 'NetEase 2',
+        }),
+      ],
+      { total: 955, hasMore: true },
+    );
+    const getLikedTracks = vi
+      .fn()
+      .mockResolvedValueOnce(page([]))
+      .mockResolvedValueOnce(neteasePage)
+      .mockResolvedValue(neteasePage);
     const getLikedAlbums = vi.fn().mockResolvedValue(page([]));
-    installLibrary(getLikedTracks, getLikedAlbums);
+    const syncLikedSongs = vi.fn().mockResolvedValue({
+      playlistId: 'liked',
+      importedCount: 2,
+      addedCount: 1,
+      providers: [{ provider: 'netease', success: true, importedCount: 2, addedCount: 1, total: 2 }],
+      syncedAt: '2026-05-16T00:00:00.000Z',
+    });
+    installLibrary(getLikedTracks, getLikedAlbums, syncLikedSongs);
 
     renderLikedPage();
 
@@ -172,8 +228,77 @@ describe('LikedPage', () => {
     await waitFor(() =>
       expect(getLikedAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 100, search: '', sort: 'recent', sourceProvider: 'local' }),
     );
-    expect(screen.queryByRole('button', { name: /网易云喜欢/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /QQ 喜欢/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '网易云' }));
+
+    await waitFor(() => expect(syncLikedSongs).toHaveBeenCalledWith('netease'));
+    await waitFor(() =>
+      expect(getLikedTracks).toHaveBeenCalledWith({ page: 1, pageSize: 100, search: '', sort: 'recent', sourceProvider: 'netease' }),
+    );
+    expect(screen.getByText('网易云 我喜欢已同步：2 首，新增 1 首。')).toBeTruthy();
+    expect(screen.getByText('loaded 2 / 955 idle')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '本地' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('button', { name: '网易云' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'QQ音乐' })).toBeTruthy();
+  });
+
+  it('exports the selected liked source from the liked page', async () => {
+    const qqPage = page([
+      playlistItem('qq-1', {
+        mediaType: 'stream_track',
+        mediaId: 'streaming:qqmusic:1',
+        sourceProvider: 'qqmusic',
+        sourceItemId: '1',
+        titleSnapshot: 'QQ 1',
+      }),
+    ]);
+    const getLikedTracks = vi
+      .fn()
+      .mockResolvedValueOnce(page([]))
+      .mockResolvedValueOnce(qqPage)
+      .mockResolvedValue(qqPage);
+    const getLikedAlbums = vi.fn().mockResolvedValue(page([]));
+    const syncLikedSongs = vi.fn().mockResolvedValue({
+      playlistId: 'liked',
+      importedCount: 1,
+      addedCount: 1,
+      providers: [{ provider: 'qqmusic', success: true, importedCount: 1, addedCount: 1, total: 1 }],
+      syncedAt: '2026-05-16T00:00:00.000Z',
+    });
+    const getLikedSongsPlaylist = vi.fn().mockResolvedValue({
+      id: 'liked-tracks',
+      name: '喜欢的歌曲',
+      description: null,
+      kind: 'system',
+      sourceProvider: 'local',
+      sourcePlaylistId: null,
+      coverId: null,
+      coverThumb: null,
+      sortMode: 'manual',
+      itemCount: 1,
+      createdAt: '2026-05-16T00:00:00.000Z',
+      updatedAt: '2026-05-16T00:00:00.000Z',
+    });
+    const exportPlaylist = vi.fn().mockResolvedValue('D:\\Exports\\qq-liked.json');
+    installLibrary(getLikedTracks, getLikedAlbums, syncLikedSongs, vi.fn(), getLikedSongsPlaylist, exportPlaylist);
+
+    renderLikedPage();
+
+    await waitFor(() => expect(getLikedTracks).toHaveBeenCalledWith({ page: 1, pageSize: 100, search: '', sort: 'recent', sourceProvider: 'local' }));
+    fireEvent.click(screen.getByRole('button', { name: 'QQ音乐' }));
+
+    await waitFor(() => expect(syncLikedSongs).toHaveBeenCalledWith('qqmusic'));
+    await waitFor(() => expect(screen.getByText('1 liked tracks')).toBeTruthy());
+    const exportButton = screen.getAllByRole('button').find((button) => button.textContent?.includes('导出'));
+    expect(exportButton).toBeTruthy();
+    fireEvent.click(exportButton as HTMLButtonElement);
+
+    await waitFor(() =>
+      expect(exportPlaylist).toHaveBeenCalledWith({
+        playlistId: 'liked-tracks',
+        format: 'json',
+        sourceProvider: 'qqmusic',
+      }),
+    );
   });
 
   it('clears only local liked tracks from the liked page', async () => {

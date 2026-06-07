@@ -454,6 +454,88 @@ describe('playback media prepare IPC', () => {
     });
   });
 
+  it('keeps streaming provider no-URL failures out of fatal audio crash reports', async () => {
+    const handlers = new Map<string, (...args: unknown[]) => unknown>();
+    const reportAudioError = vi.fn();
+    const playLocalFile = vi.fn();
+    const resolvePlayback = vi.fn().mockRejectedValue(new Error('KuGou Music did not return a playable URL for this track.'));
+
+    vi.doMock('electron', () => ({
+      BrowserWindow: { getAllWindows: vi.fn(() => []) },
+      dialog: { showOpenDialog: vi.fn() },
+      ipcMain: {
+        on: vi.fn(),
+        handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
+          handlers.set(channel, handler);
+        }),
+      },
+    }));
+    vi.doMock('../audio/AudioSession', () => ({
+      getAudioSession: () => ({
+        getStatus: () => ({
+          state: 'paused',
+          currentTrackId: null,
+          positionSeconds: 0,
+          durationSeconds: 0,
+          currentFilePath: null,
+          error: null,
+        }),
+        on: vi.fn(),
+        restorePlaybackMemory: vi.fn(),
+        playLocalFile,
+      }),
+    }));
+    vi.doMock('../audio/PlaybackMemoryStore', () => ({
+      getPlaybackMemoryStore: () => ({
+        load: vi.fn(() => null),
+        save: vi.fn(),
+        clear: vi.fn(),
+      }),
+    }));
+    vi.doMock('../diagnostics/CrashReportService', () => ({
+      getCrashReportService: () => ({ reportAudioError }),
+    }));
+    vi.doMock('../integrations/smtc/SmtcStatusSync', () => ({ syncSmtcStatus: vi.fn() }));
+    vi.doMock('../library/remote/RemoteSourceService', () => ({
+      getRemoteSourceService: () => ({
+        setPlaybackActive: vi.fn(),
+        refreshTrackMetadata: vi.fn(),
+        createStreamUrl: vi.fn(),
+        backfillDuration: vi.fn(),
+      }),
+    }));
+    vi.doMock('../streaming/StreamingService', () => ({
+      getStreamingService: () => ({
+        resolvePlayback,
+        invalidatePlayback: vi.fn(),
+      }),
+    }));
+    vi.doMock('../app/localFileOpen', () => ({ resolveLocalAudioFiles: vi.fn() }));
+
+    const { IpcChannels } = await import('../../shared/constants/ipcChannels');
+    const { registerPlaybackIpc } = await import('./playbackIpc');
+    registerPlaybackIpc();
+
+    const request = {
+      item: {
+        mediaType: 'streaming',
+        trackId: 'streaming:kugou:47c05e140aef49a214c6edb17f9db35c.26482909.191403760',
+        provider: 'kugou',
+        providerTrackId: '47c05e140aef49a214c6edb17f9db35c.26482909.191403760',
+        stableKey: 'streaming:kugou:47c05e140aef49a214c6edb17f9db35c.26482909.191403760',
+        quality: 'lossless',
+        title: 'Afterglow',
+        artist: 'Taylor Swift',
+        album: 'Lover',
+        duration: 223,
+      },
+    };
+
+    await expect(handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, request)).rejects.toThrow('did not return a playable URL');
+    expect(playLocalFile).not.toHaveBeenCalled();
+    expect(reportAudioError).not.toHaveBeenCalled();
+  });
+
   it('queues ReplayGain analysis only for the local track that starts playback', async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const playLocalFile = vi.fn().mockResolvedValue(undefined);

@@ -270,6 +270,7 @@ describe('DownloadService', () => {
     expect(importAudioFile).toHaveBeenCalledWith(
       completedJob.outputPath,
       expect.objectContaining({
+        deferGroupingRefresh: true,
         metadata: expect.objectContaining({
           title: 'Song',
           artist: 'Artist',
@@ -892,6 +893,7 @@ describe('DownloadService', () => {
       expect.objectContaining({
         folderPath: outputDirectory,
         coverUrl: expectedCoverUrl,
+        deferGroupingRefresh: true,
       }),
     );
   });
@@ -1063,6 +1065,7 @@ describe('DownloadService', () => {
       completedJob.outputPath,
       expect.objectContaining({
         folderPath: playlistFolder,
+        deferGroupingRefresh: true,
       }),
     );
   });
@@ -1496,6 +1499,7 @@ describe('DownloadService', () => {
       completedJob.outputPath,
       expect.objectContaining({
         folderPath: outputDirectory,
+        deferGroupingRefresh: true,
         metadata: {
           title: 'Streaming Song',
           artist: 'Artist',
@@ -1566,6 +1570,7 @@ describe('DownloadService', () => {
       completedJob?.outputPath,
       expect.objectContaining({
         folderPath: outputDirectory,
+        deferGroupingRefresh: true,
         metadata: {
           title: 'Streaming Song',
           artist: 'Artist',
@@ -1708,7 +1713,7 @@ describe('DownloadService', () => {
     expect(completedJob.status).toBe('completed');
     expect(completedJob.importedTrackId).toBe('track-1');
     expect(addLibraryFolder).toHaveBeenCalledWith(outputDirectory);
-    expect(importAudioFile).toHaveBeenCalledWith(outputPath, { folderPath: outputDirectory });
+    expect(importAudioFile).toHaveBeenCalledWith(outputPath, { folderPath: outputDirectory, deferGroupingRefresh: true });
     expect(bindMvUrl).toHaveBeenCalledWith('track-1', 'https://www.bilibili.com/video/BV1ECHO');
   });
 
@@ -1751,7 +1756,7 @@ describe('DownloadService', () => {
     expect(completedJob.status).toBe('completed');
     expect(completedJob.outputPath).toBe(outputPath);
     expect(completedJob.importedTrackId).toBe('track-unicode');
-    expect(importAudioFile).toHaveBeenCalledWith(outputPath, { folderPath: outputDirectory });
+    expect(importAudioFile).toHaveBeenCalledWith(outputPath, { folderPath: outputDirectory, deferGroupingRefresh: true });
   });
 
   it('keeps the downloaded audio imported when MV binding rejects the source URL', async () => {
@@ -1797,7 +1802,7 @@ describe('DownloadService', () => {
     expect(completedJob.error).toBeNull();
     expect(completedJob.importedTrackId).toBe('track-imported');
     expect(existsSync(outputPath)).toBe(true);
-    expect(importAudioFile).toHaveBeenCalledWith(outputPath, { folderPath: outputDirectory });
+    expect(importAudioFile).toHaveBeenCalledWith(outputPath, { folderPath: outputDirectory, deferGroupingRefresh: true });
     expect(bindMvUrl).toHaveBeenCalledWith('track-imported', 'https://example.com/audio-page');
   });
 
@@ -1840,7 +1845,7 @@ describe('DownloadService', () => {
 
     expect(completedJob.status).toBe('completed');
     expect(completedJob.importedTrackId).toBe('track-immediate');
-    expect(importAudioFile).toHaveBeenCalledWith(outputPath, { folderPath: outputDirectory });
+    expect(importAudioFile).toHaveBeenCalledWith(outputPath, { folderPath: outputDirectory, deferGroupingRefresh: true });
     expect(bindMvUrl).toHaveBeenCalledWith('track-immediate', 'https://www.youtube.com/watch?v=immediate');
   });
 });

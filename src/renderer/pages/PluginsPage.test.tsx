@@ -164,6 +164,32 @@ describe('PluginsPage', () => {
     await waitFor(() => expect(pluginsBridge.exportPackage).toHaveBeenCalledWith('echo.playback-panel'));
   });
 
+  it('imports dropped .echo plugin packages', async () => {
+    const { container } = render(<PluginsPage />);
+    const page = container.querySelector('.plugins-page') as HTMLElement;
+    const file = new File(['{}'], 'echo.playback-panel.echo', { type: 'application/json' });
+
+    fireEvent.dragOver(page, {
+      dataTransfer: {
+        files: [file],
+        types: ['Files'],
+        dropEffect: '',
+      },
+    });
+
+    expect(screen.getByText('释放导入 .echo 插件包')).toBeTruthy();
+
+    fireEvent.drop(page, {
+      dataTransfer: {
+        files: [file],
+        types: ['Files'],
+        dropEffect: '',
+      },
+    });
+
+    await waitFor(() => expect(pluginsBridge.importPackage).toHaveBeenCalledWith(file));
+  });
+
   it('routes sandbox panel bridge requests to the selected plugin only', async () => {
     render(<PluginsPage />);
 

@@ -46,3 +46,9 @@ dist-packaged*/
 
 # Local runtime state
 /room-correction-state.json
+
+# Local config files (not for upstream)
+CLAUDE.md
+FORK.md
+docs/agents/
+prd-sleep-timer.md

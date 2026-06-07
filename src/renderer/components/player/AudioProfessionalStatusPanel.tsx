@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Activity, AlertTriangle, CheckCircle2, Gauge, RadioTower, SlidersHorizontal, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AudioStatus } from '../../../shared/types/audio';
+import { formatAudioChannelLayout } from '../../../shared/utils/audioChannels';
 import { useI18n } from '../../i18n/I18nProvider';
 
 type AudioProfessionalStatusPanelProps = {
@@ -105,7 +106,7 @@ const formatBitrate = (value: number | null | undefined, unknown: string): strin
   value && Number.isFinite(value) ? `${Math.round(value / 1000)} kbps` : unknown;
 
 const formatChannels = (value: number | null | undefined, unknown: string): string =>
-  value && Number.isFinite(value) ? `${Math.round(value)} ch` : unknown;
+  formatAudioChannelLayout(value) ?? unknown;
 
 const formatFrames = (value: number | null | undefined, unknown: string): string =>
   value && Number.isFinite(value) ? `${Math.round(value)} frames` : unknown;

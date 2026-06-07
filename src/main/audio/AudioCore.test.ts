@@ -1383,8 +1383,8 @@ describe('Audio Core sample-rate regression guard', () => {
     session.stop();
   });
 
-  it('raises realtime clipping risk from estimated output level and clip count', async () => {
-    const decoder = new PcmChunkDecoder(new Map([['hot.flac', probe('hot.flac', 44100)]]), [pcmBuffer([1, 0.5])]);
+  it('raises realtime clipping risk from estimated output level and hard clip count', async () => {
+    const decoder = new PcmChunkDecoder(new Map([['hot.flac', probe('hot.flac', 44100)]]), [pcmBuffer([1.05, 0.5])]);
     const session = createAudioSessionForTest({
       decoder,
       deviceService: { listDevices: () => [] },
@@ -1396,11 +1396,32 @@ describe('Audio Core sample-rate regression guard', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     const status = session.getStatus();
 
-    expect(status.audioLevels?.estimatedOutputPeakDb).toBe(0);
+    expect(status.audioLevels?.estimatedOutputPeakDb).toBeGreaterThan(0);
     expect(status.audioLevels?.clipCount).toBe(1);
     expect(status.clippingRisk).toBe(true);
     expect(status.warnings).toContain('audio_level_clipping_risk');
     expect(status.warnings).toContain('audio_level_clipped');
+    session.stop();
+  });
+
+  it('flags full-scale peaks as clipping risk without a hard clip count', async () => {
+    const decoder = new PcmChunkDecoder(new Map([['full-scale.flac', probe('full-scale.flac', 44100)]]), [pcmBuffer([1, 0.5])]);
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: { listDevices: () => [] },
+      createBridge: () => new FakeBridge(),
+      logger: noopLogger,
+    });
+
+    await session.playLocalFile({ filePath: 'full-scale.flac', output: { outputMode: 'shared' } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const status = session.getStatus();
+
+    expect(status.audioLevels?.estimatedOutputPeakDb).toBe(0);
+    expect(status.audioLevels?.clipCount).toBe(0);
+    expect(status.clippingRisk).toBe(true);
+    expect(status.warnings).toContain('audio_level_clipping_risk');
+    expect(status.warnings).not.toContain('audio_level_clipped');
     session.stop();
   });
 

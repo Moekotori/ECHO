@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { KeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
-import { Check, ChevronDown, Image as ImageIcon, ListFilter, Play, RefreshCw, Search } from 'lucide-react';
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { Check, ChevronDown, Image as ImageIcon, ImagePlus, Link, ListFilter, Play, RefreshCw, RotateCcw, Search } from 'lucide-react';
 import type { LibraryArtist, LibrarySort } from '../../shared/types/library';
 import type { RemoteSource } from '../../shared/types/remoteSources';
 import { ArtistDetailView } from '../components/artist/ArtistDetailView';
@@ -43,6 +44,14 @@ const hasArtistAvatar = (artist: LibraryArtist): boolean => Boolean(artist.avata
 const prioritizeArtistsWithAvatars = (items: LibraryArtist[]): LibraryArtist[] =>
   [...items].sort((left, right) => Number(hasArtistAvatar(right)) - Number(hasArtistAvatar(left)));
 
+const versionedArtistImageUrl = (imageUrl: string | null, version: number | undefined): string | null => {
+  if (!imageUrl || !version || !imageUrl.startsWith('echo-artist-image://')) {
+    return imageUrl;
+  }
+
+  return `${imageUrl}${imageUrl.includes('?') ? '&' : '?'}v=${version}`;
+};
+
 const artistMeta = (artist: LibraryArtist, t: (key: TranslationKey, options?: Record<string, string | number>) => string): string => {
   const parts: string[] = [];
 
@@ -55,6 +64,87 @@ const artistMeta = (artist: LibraryArtist, t: (key: TranslationKey, options?: Re
   }
 
   return parts.join(' / ') || t('library.artists.meta.noTracks');
+};
+
+type ArtistAvatarMenuAction = 'choose-file' | 'set-url' | 'clear-custom';
+
+type ArtistAvatarContextMenuProps = {
+  artist: LibraryArtist;
+  position: { x: number; y: number };
+  onAction: (action: ArtistAvatarMenuAction, artist: LibraryArtist) => void;
+  onClose: () => void;
+};
+
+const menuViewportPadding = 8;
+const menuPointerOffset = 6;
+const artistAvatarMenuWidth = 226;
+
+const clampMenuPosition = (value: number, min: number, max: number): number => Math.max(min, Math.min(value, max));
+
+const ArtistAvatarContextMenu = ({ artist, position, onAction, onClose }: ArtistAvatarContextMenuProps): JSX.Element => {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuPosition, setMenuPosition] = useState(() => ({
+    x: position.x + menuPointerOffset,
+    y: position.y + menuPointerOffset,
+  }));
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) {
+      return;
+    }
+
+    const rect = menu.getBoundingClientRect();
+    setMenuPosition({
+      x: clampMenuPosition(position.x + menuPointerOffset, menuViewportPadding, window.innerWidth - rect.width - menuViewportPadding),
+      y: clampMenuPosition(position.y + menuPointerOffset, menuViewportPadding, window.innerHeight - rect.height - menuViewportPadding),
+    });
+  }, [position.x, position.y]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', onClose);
+    window.addEventListener('scroll', onClose, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', onClose);
+      window.removeEventListener('scroll', onClose, true);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="album-menu-layer" role="presentation" onMouseDown={onClose}>
+      <div
+        ref={menuRef}
+        className="album-context-menu artist-avatar-context-menu"
+        role="menu"
+        style={{ left: menuPosition.x, top: menuPosition.y, width: artistAvatarMenuWidth }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button className="album-menu-item" role="menuitem" type="button" onClick={() => onAction('choose-file', artist)}>
+          <ImagePlus size={16} />
+          <span>设置头像</span>
+        </button>
+        <button className="album-menu-item" role="menuitem" type="button" onClick={() => onAction('set-url', artist)}>
+          <Link size={16} />
+          <span>从网络加载头像</span>
+        </button>
+        {artist.avatarProvider === 'manual' ? (
+          <button className="album-menu-item" role="menuitem" type="button" onClick={() => onAction('clear-custom', artist)}>
+            <RotateCcw size={16} />
+            <span>恢复自动头像</span>
+          </button>
+        ) : null}
+      </div>
+    </div>,
+    document.body,
+  );
 };
 
 export const ArtistsPage = (): JSX.Element => {
@@ -77,6 +167,8 @@ export const ArtistsPage = (): JSX.Element => {
   const [artistWallAlbumArtwork, setArtistWallAlbumArtwork] = useState(false);
   const [artistWallAlbumFallbackForMissingAvatars, setArtistWallAlbumFallbackForMissingAvatars] = useState(false);
   const [artistImagesAutoFetch, setArtistImagesAutoFetch] = useState(false);
+  const [artistAvatarMenu, setArtistAvatarMenu] = useState<{ artist: LibraryArtist; position: { x: number; y: number } } | null>(null);
+  const [artistAvatarVersions, setArtistAvatarVersions] = useState<Record<string, number>>({});
   const [failedAvatarUrls, setFailedAvatarUrls] = useState<Record<string, string>>({});
   const [failedCoverUrls, setFailedCoverUrls] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -311,6 +403,28 @@ export const ArtistsPage = (): JSX.Element => {
   }, [loadArtists]);
 
   const applyUpdatedArtist = useCallback((updatedArtist: LibraryArtist): void => {
+    setArtistAvatarVersions((current) => ({
+      ...current,
+      [updatedArtist.id]: (current[updatedArtist.id] ?? 0) + 1,
+    }));
+    setFailedAvatarUrls((current) => {
+      if (!(updatedArtist.id in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[updatedArtist.id];
+      return next;
+    });
+    setFailedCoverUrls((current) => {
+      if (!(updatedArtist.id in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[updatedArtist.id];
+      return next;
+    });
     setArtists((current) => {
       let changed = false;
       const next = current.map((artist) => {
@@ -444,6 +558,94 @@ export const ArtistsPage = (): JSX.Element => {
     [applyUpdatedArtist, artistImagesAutoFetch],
   );
 
+  const reloadArtistAfterAvatarChange = useCallback(
+    async (artist: LibraryArtist): Promise<void> => {
+      const library = window.echo?.library;
+      if (!library?.getArtist) {
+        return;
+      }
+
+      setFailedAvatarUrls((current) => {
+        const next = { ...current };
+        delete next[artist.id];
+        return next;
+      });
+      setFailedCoverUrls((current) => {
+        const next = { ...current };
+        delete next[artist.id];
+        return next;
+      });
+
+      const updatedArtist = await library.getArtist(artist.id);
+      if (updatedArtist) {
+        applyUpdatedArtist(updatedArtist);
+      }
+    },
+    [applyUpdatedArtist],
+  );
+
+  const handleArtistAvatarContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>, artist: LibraryArtist): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    setArtistAvatarMenu({
+      artist,
+      position: { x: event.clientX, y: event.clientY },
+    });
+  }, []);
+
+  const handleArtistAvatarMenuAction = useCallback(
+    (action: ArtistAvatarMenuAction, artist: LibraryArtist): void => {
+      setArtistAvatarMenu(null);
+      const library = window.echo?.library;
+
+      if (!library) {
+        setError('当前运行环境不支持设置艺术家头像。');
+        return;
+      }
+
+      const run = async (): Promise<void> => {
+        if (action === 'choose-file') {
+          if (!library.chooseArtistAvatar) {
+            throw new Error('当前运行环境不支持选择艺术家头像。');
+          }
+          const entry = await library.chooseArtistAvatar(artist.id);
+          if (!entry) {
+            return;
+          }
+          await reloadArtistAfterAvatarChange(artist);
+          return;
+        }
+
+        if (action === 'set-url') {
+          if (!library.setArtistAvatarFromUrl) {
+            throw new Error('当前运行环境不支持从网络设置艺术家头像。');
+          }
+          const url = window.prompt('输入头像图片 URL', '');
+          if (!url?.trim()) {
+            return;
+          }
+          await library.setArtistAvatarFromUrl(artist.id, url.trim());
+          await reloadArtistAfterAvatarChange(artist);
+          return;
+        }
+
+        if (!library.clearCustomArtistAvatar) {
+          throw new Error('当前运行环境不支持恢复自动头像。');
+        }
+        await library.clearCustomArtistAvatar(artist.id);
+        if (artistImagesAutoFetch && library.refreshArtistImage) {
+          await library.refreshArtistImage(artist.id, true).catch(() => undefined);
+        }
+        await reloadArtistAfterAvatarChange(artist);
+      };
+
+      void run().catch((avatarError) => {
+        setError(avatarError instanceof Error ? avatarError.message : String(avatarError));
+      });
+    },
+    [artistImagesAutoFetch, reloadArtistAfterAvatarChange],
+  );
+
   const openArtistDetail = useCallback((artist: LibraryArtist, returnTo: DetailReturnTarget | null = null): void => {
     if (artistWallReturnTimerRef.current !== null) {
       window.clearTimeout(artistWallReturnTimerRef.current);
@@ -537,7 +739,7 @@ export const ArtistsPage = (): JSX.Element => {
     closeArtistDetail(true);
   }, [closeArtistDetail, closeArtistDetailAfterSourceRouteSwitch, selectedArtistReturnTo]);
 
-  const handleArtistKeyDown = useCallback((event: KeyboardEvent<HTMLElement>, artist: LibraryArtist): void => {
+  const handleArtistKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>, artist: LibraryArtist): void => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       openArtistDetail(artist);
@@ -547,6 +749,14 @@ export const ArtistsPage = (): JSX.Element => {
   return (
     <>
       {selectedArtist ? <ArtistDetailView artist={selectedArtist} onBack={handleBackFromArtistDetail} /> : null}
+      {artistAvatarMenu ? (
+        <ArtistAvatarContextMenu
+          artist={artistAvatarMenu.artist}
+          position={artistAvatarMenu.position}
+          onAction={handleArtistAvatarMenuAction}
+          onClose={() => setArtistAvatarMenu(null)}
+        />
+      ) : null}
       <div
         className="artists-page"
         data-detail-open={selectedArtist ? 'true' : 'false'}
@@ -627,7 +837,8 @@ export const ArtistsPage = (): JSX.Element => {
       <div ref={pageRootRef} className="media-wall-scroll-shell page-scroll-container">
         <section ref={artistWallRef} className="artist-wall" aria-label={t('library.artists.listAria')}>
           {artists.map((artist, index) => {
-            const avatarImageUrl = artist.avatarUrl ?? artist.avatarThumbUrl ?? null;
+            const avatarVersion = artistAvatarVersions[artist.id];
+            const avatarImageUrl = versionedArtistImageUrl(artist.avatarUrl ?? artist.avatarThumbUrl ?? null, avatarVersion);
             const coverImageUrl = artist.coverSource === 'default' ? null : artist.coverThumb;
             const shouldShowAvatar = Boolean(
               avatarImageUrl && failedAvatarUrls[artist.id] !== avatarImageUrl,
@@ -644,7 +855,7 @@ export const ArtistsPage = (): JSX.Element => {
             );
             const imageUrl = shouldShowAvatar ? avatarImageUrl : shouldShowCover ? coverImageUrl : null;
             const avatarSrcSet = shouldShowAvatar && artist.avatarThumbUrl && artist.avatarUrl && artist.avatarThumbUrl !== artist.avatarUrl
-              ? `${artist.avatarThumbUrl} 192w, ${artist.avatarUrl} 1024w`
+              ? `${versionedArtistImageUrl(artist.avatarThumbUrl, avatarVersion)} 192w, ${versionedArtistImageUrl(artist.avatarUrl, avatarVersion)} 1024w`
               : undefined;
 
             return (
@@ -657,7 +868,13 @@ export const ArtistsPage = (): JSX.Element => {
                 onClick={() => openArtistDetail(artist)}
                 onKeyDown={(event) => handleArtistKeyDown(event, artist)}
               >
-                <div className="artist-avatar" data-cover={Boolean(imageUrl)} data-visual={shouldShowAvatar ? 'avatar' : shouldShowCover ? 'cover' : 'letter'} aria-hidden="true">
+                <div
+                  className="artist-avatar"
+                  data-cover={Boolean(imageUrl)}
+                  data-visual={shouldShowAvatar ? 'avatar' : shouldShowCover ? 'cover' : 'letter'}
+                  aria-hidden="true"
+                  onContextMenu={(event) => handleArtistAvatarContextMenu(event, artist)}
+                >
                   {imageUrl ? (
                     <DeferredWallImage
                       alt=""

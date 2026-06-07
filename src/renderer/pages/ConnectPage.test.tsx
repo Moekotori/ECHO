@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppSettings } from '../../shared/types/appSettings';
 import { hqPlayerConnectDeviceId, type ConnectDevice, type ConnectSessionStatus } from '../../shared/types/connect';
 import type {
   HqPlayerPlaybackControlPlan,
@@ -281,10 +282,17 @@ const installEchoBridge = (
   devices: ConnectDevice[] = [hqPlayerDevice],
 ) => {
   const sentControl = hqControl('sent');
+  let appSettings: Partial<AppSettings> = {
+    connectAutoStartReceiversEnabled: false,
+    airPlayReceiverProtocol: 'airplay1',
+  };
   const bridge = {
     app: {
-      getSettings: vi.fn().mockResolvedValue({ connectAutoStartReceiversEnabled: false }),
-      setSettings: vi.fn(),
+      getSettings: vi.fn(async () => appSettings),
+      setSettings: vi.fn(async (patch: Partial<AppSettings>) => {
+        appSettings = { ...appSettings, ...patch };
+        return appSettings;
+      }),
     },
     connect: {
       listDevices: vi.fn().mockResolvedValue(devices),
@@ -461,6 +469,40 @@ describe('ConnectPage HQPlayer controls', () => {
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('control frame decrypt failed')));
     expect(writeText.mock.calls[0]?.[0]).toContain('192.168.1.10:53124 ENC /airplay2 #probe-error 400');
+  });
+
+  it('saves the AirPlay protocol setting and restarts the active receiver', async () => {
+    const bridge = installEchoBridge(hqStatus('available'));
+    const enabledAirPlayStatus = {
+      enabled: true,
+      state: 'idle',
+      protocol: 'airplay1',
+      advertisedName: 'ECHO Next (AirPlay)',
+      nativeAvailable: true,
+      currentSourceId: null,
+      currentClient: null,
+      metadata: null,
+      currentLyricLine: null,
+      artworkUrl: null,
+      positionSeconds: 0,
+      durationSeconds: 0,
+      volume: 100,
+      error: null,
+      debugEvents: [],
+      updatedAt: '2026-05-21T01:00:00.000Z',
+    } as const;
+    bridge.connect.getAirPlayReceiverStatus.mockResolvedValue(enabledAirPlayStatus);
+    bridge.connect.setAirPlayReceiverEnabled
+      .mockResolvedValueOnce({ ...enabledAirPlayStatus, enabled: false, state: 'disabled' })
+      .mockResolvedValueOnce({ ...enabledAirPlayStatus, protocol: 'airplay2' });
+
+    renderConnectPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'AirPlay 2 实验' }));
+
+    await waitFor(() => expect(bridge.app.setSettings).toHaveBeenCalledWith({ airPlayReceiverProtocol: 'airplay2' }));
+    expect(bridge.connect.setAirPlayReceiverEnabled).toHaveBeenNthCalledWith(1, false);
+    expect(bridge.connect.setAirPlayReceiverEnabled).toHaveBeenNthCalledWith(2, true);
   });
 
   it('saves and plays a manual internet radio stream from Connect', async () => {

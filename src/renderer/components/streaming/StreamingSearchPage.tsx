@@ -1925,7 +1925,7 @@ export const StreamingSearchPage = (): JSX.Element => {
                   <Link size={18} />
                   添加流媒体歌单
                 </span>
-                <p>粘贴网易云音乐、QQ 音乐或酷狗音乐歌单链接，导入后会保存到本地播放列表，重开软件也不会消失。</p>
+                <p>粘贴网易云音乐、QQ 音乐或 Spotify 歌单链接，导入后会保存到本地播放列表，重开软件也不会消失。</p>
               </div>
               <label>
                 <Link size={18} />

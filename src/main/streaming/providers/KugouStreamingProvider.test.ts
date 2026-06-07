@@ -46,10 +46,26 @@ describe('KugouStreamingProvider', () => {
     expect(encodeKugouProviderTrackId({ hash: 'ABCDEF1234567890ABCDEF1234567890', albumId: '22', albumAudioId: '33' })).toBe(
       'abcdef1234567890abcdef1234567890.22.33',
     );
+    expect(encodeKugouProviderTrackId({
+      hash: 'ABCDEF1234567890ABCDEF1234567890',
+      albumId: '22',
+      albumAudioId: '33',
+      hqHash: '11111111111111111111111111111111',
+      sqHash: '22222222222222222222222222222222',
+    })).toBe('abcdef1234567890abcdef1234567890.22.33.11111111111111111111111111111111.22222222222222222222222222222222');
     expect(parseKugouProviderTrackId('abcdef1234567890abcdef1234567890')).toEqual({
       hash: 'abcdef1234567890abcdef1234567890',
       albumId: null,
       albumAudioId: null,
+      hqHash: null,
+      sqHash: null,
+    });
+    expect(parseKugouProviderTrackId('abcdef1234567890abcdef1234567890.22.33.11111111111111111111111111111111.22222222222222222222222222222222')).toEqual({
+      hash: 'abcdef1234567890abcdef1234567890',
+      albumId: '22',
+      albumAudioId: '33',
+      hqHash: '11111111111111111111111111111111',
+      sqHash: '22222222222222222222222222222222',
     });
   });
 
@@ -90,6 +106,46 @@ describe('KugouStreamingProvider', () => {
       duration: 181,
       qualities: ['high', 'standard'],
       coverThumb: remoteImageUrl('https://imge.kugou.com/stdmusic/400/cover.jpg'),
+    });
+  });
+
+  it('marks protected KuGou tracks unavailable until an account is connected', async () => {
+    accountState.connected = false;
+    accountState.cookie = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({
+          data: {
+            total: 1,
+            info: [
+              {
+                hash: '47c05e140aef49a214c6edb17f9db35c',
+                album_id: '26482909',
+                album_audio_id: 191403760,
+                songname: 'Afterglow',
+                singername: 'Taylor Swift',
+                AlbumName: 'Lover',
+                duration: 223,
+                pay_type: 3,
+                price: 200,
+                '320hash': '6903be622e9e34bc4c20e290172cebb3',
+                sqhash: 'b658f8b26bdb09e25033b72df5b667da',
+              },
+            ],
+          },
+        }),
+      ),
+    );
+
+    const result = await new KugouStreamingProvider().search({ provider: 'kugou', query: 'afterglow', mediaTypes: ['track'] });
+
+    expect(result.tracks[0]).toMatchObject({
+      providerTrackId:
+        '47c05e140aef49a214c6edb17f9db35c.26482909.191403760.6903be622e9e34bc4c20e290172cebb3.b658f8b26bdb09e25033b72df5b667da',
+      playable: false,
+      unavailableReason: 'Sign in with KuGou Music before playing protected tracks.',
+      qualities: ['lossless', 'high', 'standard'],
     });
   });
 
@@ -194,7 +250,7 @@ describe('KugouStreamingProvider', () => {
 
     const source = await resolveKugouPlaybackUrl({
       provider: 'kugou',
-      providerTrackId: 'dddddd1234567890dddddd1234567890.55.66',
+      providerTrackId: 'dddddd1234567890dddddd1234567890.55.66.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       quality: 'high',
     });
 
@@ -202,7 +258,7 @@ describe('KugouStreamingProvider', () => {
     const secondUrl = new URL(String(fetchRunner.mock.calls[1][0]));
     expect(firstUrl.pathname).toBe('/v5/url');
     expect(firstUrl.searchParams.get('quality')).toBe('320');
-    expect(firstUrl.searchParams.get('hash')).toBe('dddddd1234567890dddddd1234567890');
+    expect(firstUrl.searchParams.get('hash')).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
     expect(firstUrl.searchParams.get('album_id')).toBe('55');
     expect(firstUrl.searchParams.get('album_audio_id')).toBe('66');
     expect(firstUrl.searchParams.get('key')).toBeTruthy();
@@ -210,7 +266,7 @@ describe('KugouStreamingProvider', () => {
     expect(secondUrl.searchParams.get('quality')).toBe('128');
     expect(source).toMatchObject({
       provider: 'kugou',
-      providerTrackId: 'dddddd1234567890dddddd1234567890.55.66',
+      providerTrackId: 'dddddd1234567890dddddd1234567890.55.66.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       url: 'https://fs.open.kugou.com/audio.mp3',
       bitrate: 128000,
       codec: 'mp3',
@@ -218,17 +274,18 @@ describe('KugouStreamingProvider', () => {
     });
   });
 
-  it('defaults KuGou playback to lossless quality', async () => {
+  it('defaults KuGou playback to lossless quality and uses the SQ hash when present', async () => {
     const fetchRunner = vi.fn().mockResolvedValueOnce(jsonResponse({ status: 1, data: { url: 'https://fs.open.kugou.com/audio.flac' } }));
     vi.stubGlobal('fetch', fetchRunner);
 
     const source = await resolveKugouPlaybackUrl({
       provider: 'kugou',
-      providerTrackId: 'dddddd1234567890dddddd1234567890.55.66',
+      providerTrackId: 'dddddd1234567890dddddd1234567890.55.66.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     });
 
     const url = new URL(String(fetchRunner.mock.calls[0][0]));
     expect(url.searchParams.get('quality')).toBe('flac');
+    expect(url.searchParams.get('hash')).toBe('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
     expect(source).toMatchObject({
       url: 'https://fs.open.kugou.com/audio.flac',
       bitrate: 999000,

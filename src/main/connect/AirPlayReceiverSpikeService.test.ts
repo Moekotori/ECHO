@@ -669,10 +669,47 @@ describe('AirPlayReceiverSpikeService', () => {
     expect(status.debugEvents.some((event) => event.action === 'mdns' && event.message?.includes('EADDRINUSE'))).toBe(true);
   });
 
-  it('advertises AirPlay 2 discovery from the normal AirPlay receiver toggle by default', async () => {
+  it('keeps the normal AirPlay receiver toggle on AirPlay 1 discovery by default', async () => {
     const mdnsStarts: Array<{ airPlay2Experimental?: boolean; airPlayPort?: number | null; airPlayPublicKey?: string | null }> = [];
     const service = new AirPlayReceiverSpikeService({
       audioSession: new FakeAudioSession() as never,
+      getAdvertiseInterfaces: () => [
+        { name: 'Wi-Fi', address: '192.168.31.214', mac: '60:CF:84:CB:1E:D1' },
+      ],
+      createMdnsAdvertiser: () => ({
+        start: vi.fn(async (advertisement) => {
+          mdnsStarts.push({
+            airPlay2Experimental: advertisement.airPlay2Experimental,
+            airPlayPort: advertisement.airPlayPort,
+            airPlayPublicKey: advertisement.airPlayPublicKey,
+          });
+        }),
+        stop: vi.fn(async () => undefined),
+      }),
+      loadRaopModule: async () => ({
+        startReceiver: vi.fn(() => 23),
+        stopReceiver: vi.fn(),
+        sendRemoteCommand: vi.fn(() => true),
+      }),
+    });
+
+    const status = await service.setEnabled(true);
+
+    expect(mdnsStarts).toEqual([{
+      airPlay2Experimental: false,
+      airPlayPort: null,
+      airPlayPublicKey: expect.stringMatching(/^[\da-f]{64}$/u),
+    }]);
+    expect(status.protocol).toBe('airplay1');
+    expect(status.debugEvents.some((event) => event.action === 'airplay2')).toBe(false);
+    await service.setEnabled(false);
+  });
+
+  it('advertises AirPlay 2 discovery when the receiver protocol setting selects the experimental mode', async () => {
+    const mdnsStarts: Array<{ airPlay2Experimental?: boolean; airPlayPort?: number | null; airPlayPublicKey?: string | null }> = [];
+    const service = new AirPlayReceiverSpikeService({
+      audioSession: new FakeAudioSession() as never,
+      getAirPlayReceiverProtocol: () => 'airplay2',
       getAdvertiseInterfaces: () => [
         { name: 'Wi-Fi', address: '192.168.31.214', mac: '60:CF:84:CB:1E:D1' },
       ],
@@ -700,6 +737,7 @@ describe('AirPlayReceiverSpikeService', () => {
       airPlayPort: expect.any(Number),
       airPlayPublicKey: expect.stringMatching(/^[\da-f]{64}$/u),
     }]);
+    expect(status.protocol).toBe('airplay2');
     expect(status.debugEvents.some((event) => event.action === 'airplay2')).toBe(true);
     await service.setEnabled(false);
   });

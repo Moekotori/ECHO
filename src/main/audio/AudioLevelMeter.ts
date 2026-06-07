@@ -35,6 +35,8 @@ const visualSpectrumMinFrequencyHz = 40;
 const visualSpectrumMaxFrequencyHz = 18000;
 const visualWarmupSnapshotCount = 8;
 const visualSpectrumComputeIntervalMs = 250;
+const hardClipThreshold = 1;
+const hardClipReleaseThreshold = 0.999;
 const emptyBuffer = Buffer.alloc(0);
 const emptyVisualSpectrum = (): number[] => Array.from({ length: visualSpectrumBucketCount }, () => 0);
 const roundCostMs = (value: number): number => (Number.isFinite(value) ? Math.round(Math.max(0, value) * 1000) / 1000 : 0);
@@ -289,6 +291,7 @@ export class PcmLevelMeterTransform extends Transform {
   private sumSquares = 0;
   private sampleCount = 0;
   private clipCount = 0;
+  private hardClipActive = false;
   private lastClipAt: string | null = null;
   private lastEmitAt = 0;
   private readonly sampleRateHz: number;
@@ -383,6 +386,7 @@ export class PcmLevelMeterTransform extends Transform {
     this.sumSquares = 0;
     this.sampleCount = 0;
     this.clipCount = 0;
+    this.hardClipActive = false;
     this.lastClipAt = null;
     this.lastEmitAt = 0;
     this.lastObserveCostMs = 0;
@@ -474,9 +478,14 @@ export class PcmLevelMeterTransform extends Transform {
     this.sumSquares += sample * sample;
     this.sampleCount += 1;
 
-    if (absSample >= 1) {
-      this.clipCount += 1;
-      this.lastClipAt = new Date().toISOString();
+    if (absSample > hardClipThreshold) {
+      if (!this.hardClipActive) {
+        this.clipCount += 1;
+        this.lastClipAt = new Date().toISOString();
+      }
+      this.hardClipActive = true;
+    } else if (absSample < hardClipReleaseThreshold) {
+      this.hardClipActive = false;
     }
   }
 

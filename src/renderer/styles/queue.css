@@ -280,8 +280,7 @@
 .queue-list {
   display: block;
   min-height: 0;
-  overflow: auto;
-  padding-right: 4px;
+  overflow: visible;
 }
 
 .queue-list[data-virtualized='true'] {
@@ -616,43 +615,6 @@ html[data-theme="dark"] .queue-icon-button.danger {
     grid-template-columns: 24px 44px minmax(0, 1fr) auto;
   }
 
-  .queue-row-duration {
-    display: none;
-  }
-
-  .queue-row-actions {
-    grid-column: 2 / -1;
-    justify-content: flex-start;
-  }
-}
-
-@media (orientation: portrait) and (min-width: 721px) and (max-width: 1400px) {
-  .queue-now-card,
-  .queue-toolbar,
-  .queue-saved-item {
-    align-items: stretch;
-    grid-template-columns: 1fr;
-  }
-
-  .queue-toolbar,
-  .queue-repeat-group {
-    flex-wrap: wrap;
-  }
-
-  .queue-now-cover {
-    width: min(100%, 240px);
-  }
-
-  .queue-now-actions {
-    grid-column: 1 / -1;
-  }
-
-  .queue-row {
-    grid-template-columns: 24px 48px minmax(0, 1fr) auto;
-  }
-
-  .queue-row-source,
-  .queue-row-quality,
   .queue-row-duration {
     display: none;
   }

@@ -119,9 +119,29 @@ describe('AudioAuthenticitySpectrumProbe', () => {
       topBandToAudibleDb: -80,
     });
 
-    expect(selectBestAudioSpectrumProbeResult([weak, brickwall], false)).toMatchObject({
+    expect(selectBestAudioSpectrumProbeResult([weak, brickwall], false, true)).toMatchObject({
       selectedStartSeconds: 84,
       brickwallLikely: true,
+    });
+  });
+
+  it('selects upper-treble evidence over CD-bandwidth brickwall for standard lossless probes', () => {
+    const lowpass = result({
+      selectedStartSeconds: 32,
+      spectralCutoffHz: 18_000,
+      upperTrebleToAudibleDb: -66,
+      brickwallLikely: true,
+    });
+    const upperTreblePresent = result({
+      selectedStartSeconds: 84,
+      spectralCutoffHz: 22_000,
+      upperTrebleToAudibleDb: -28,
+      brickwallLikely: true,
+    });
+
+    expect(selectBestAudioSpectrumProbeResult([lowpass, upperTreblePresent], false, false)).toMatchObject({
+      selectedStartSeconds: 84,
+      upperTrebleToAudibleDb: -28,
     });
   });
 });

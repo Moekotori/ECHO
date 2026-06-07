@@ -6,7 +6,7 @@ const electronBuilderCli = join(projectRoot, 'node_modules', 'electron-builder',
 
 const child = spawn(
   process.execPath,
-  [electronBuilderCli, '--win', '--publish', 'never', '--config.win.signAndEditExecutable=false'],
+  [electronBuilderCli, '--win', '--publish', 'never'],
   {
     cwd: projectRoot,
     env: {

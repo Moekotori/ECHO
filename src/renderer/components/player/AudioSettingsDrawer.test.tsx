@@ -62,6 +62,7 @@ const testTranslations: Record<string, string> = {
   'audioDrawer.signal.dsdDop': 'DSF bitstream -> DoP',
   'audioDrawer.signal.dsdDopFallback': 'DSD DoP fallback',
   'audioDrawer.signal.dsdDopStandby': 'DSD DoP not used',
+  'audioDrawer.device.asioDriver': 'ASIO driver',
   'audioDrawer.device.systemAudio': 'Windows Direct Output',
   'audioDrawer.device.systemAudioDescription': 'Default Windows audio path for headphones, Bluetooth, and computer speakers',
   'audioDrawer.warning.highOutputSampleRate': '当前音频设备采样率过高，可能导致播放速度异常，建议改为 48 kHz。',
@@ -370,8 +371,57 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
 
     await waitFor(() => expect(screen.getAllByText('ASIO4ALL v2').length).toBeGreaterThan(0));
 
-    expect(screen.getByRole('button', { name: /Realtek 1 \/ Realtek 2/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /USB 1 \/ USB 2/ })).toBeTruthy();
+    expect(screen.getByText('ASIO driver / 4 outputs')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /1\/2 - Realtek 1 \/ Realtek 2/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /3\/4 - USB 1 \/ USB 2/ })).toBeTruthy();
+  });
+
+  it('applies an explicit ASIO channel pair without changing the default route', async () => {
+    const setOutput = vi.fn().mockResolvedValue({
+      ...baseStatus,
+      outputMode: 'asio',
+      outputDeviceName: 'ASIO4ALL v2',
+      asioOutputChannelStart: 2,
+    });
+    renderDrawer(
+      baseStatus,
+      setOutput,
+      vi.fn().mockResolvedValue({ ...baseStatus, state: 'stopped' }),
+      vi.fn().mockResolvedValue({ ...baseStatus, state: 'stopped' }),
+      vi.fn().mockResolvedValue({ ...baseStatus, state: 'stopped' }),
+      {},
+      [{
+        id: 'asio:1',
+        index: 1,
+        name: 'ASIO4ALL v2',
+        outputMode: 'asio',
+        sampleRate: null,
+        sharedDeviceSampleRate: 48000,
+        isDefault: false,
+        asioOutputChannels: 4,
+        asioOutputChannelStart: 0,
+        asioChannelNames: ['Realtek 1', 'Realtek 2', 'USB 1', 'USB 2'],
+      }],
+    );
+
+    await waitFor(() => expect(screen.getAllByText('ASIO4ALL v2').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('button', { name: /3\/4 - USB 1 \/ USB 2/ }));
+
+    await waitFor(() => expect(setOutput).toHaveBeenCalledWith(expect.objectContaining({
+      outputMode: 'asio',
+      deviceIndex: 1,
+      deviceName: 'ASIO4ALL v2',
+      asioOutputChannelStart: 2,
+    })));
+  });
+
+  it('shows multichannel source layouts in the drawer meter', async () => {
+    renderDrawer({
+      ...baseStatus,
+      channels: 6,
+    });
+
+    await waitFor(() => expect(screen.getByText(/FLAC \/ 16 bit \/ 48 kHz \/ 5\.1 \(6 ch\)/)).toBeTruthy());
   });
 
   it('labels system audio as Windows direct output', () => {

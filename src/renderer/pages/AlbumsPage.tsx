@@ -15,14 +15,14 @@ import { likedAlbumsChangedEvent, likedChangedEvent } from '../hooks/useLikedMed
 import { useI18n } from '../i18n/I18nProvider';
 import type { TranslationKey } from '../i18n/locales';
 import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
-import { albumDetailNavigationEvent, consumePendingAlbumDetailNavigation, type DetailReturnTarget } from '../utils/albumNavigation';
+import { albumDetailNavigationEvent, consumePendingAlbumDetailNavigation, peekPendingAlbumDetailNavigation, type DetailReturnTarget } from '../utils/albumNavigation';
 import { getRemoteSourcesBridge } from '../utils/echoBridge';
 import { useImeAwareDebouncedSearch } from '../utils/imeInput';
 import { readStoredLibrarySort, writeStoredLibrarySort } from '../utils/librarySortMemory';
 import { readStoredLibrarySourceMode, writeStoredLibrarySourceMode, type LibrarySourceMode } from '../utils/librarySourceMode';
 
 const pageSize = 90;
-const albumWallReturnAnimationMs = 80;
+const albumWallReturnAnimationMs = 0;
 const priorityAlbumWallImageCount = 32;
 const albumWallLoadAheadDistancePx = 1400;
 const albumWallImageLoadAheadMargin = '1000px 0px';
@@ -74,7 +74,7 @@ export const AlbumsPage = (): JSX.Element => {
   const [isSortOpen, setIsSortOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
-  const [initialAlbumDetailRequest] = useState(() => consumePendingAlbumDetailNavigation());
+  const [initialAlbumDetailRequest] = useState(() => peekPendingAlbumDetailNavigation());
   const [selectedAlbum, setSelectedAlbum] = useState<LibraryAlbum | null>(() => initialAlbumDetailRequest?.album ?? null);
   const [selectedAlbumReturnTo, setSelectedAlbumReturnTo] = useState<DetailReturnTarget | null>(() => initialAlbumDetailRequest?.returnTo ?? null);
   const [isAlbumWallReturning, setIsAlbumWallReturning] = useState(false);
@@ -306,7 +306,7 @@ export const AlbumsPage = (): JSX.Element => {
     setSelectedAlbumReturnTo(null);
     setSelectedAlbum(null);
 
-    if (!showReturnAnimation) {
+    if (!showReturnAnimation || albumWallReturnAnimationMs <= 0) {
       return;
     }
 

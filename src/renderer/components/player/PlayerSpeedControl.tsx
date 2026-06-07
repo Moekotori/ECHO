@@ -19,6 +19,7 @@ const modeFromStatus = (status: AudioStatus | null): PlaybackSpeedMode => status
 const speedsMatch = (left: number, right: number): boolean => Math.abs(left - right) < 0.001;
 const popoverCloseDistancePx = 150;
 const popoverExitAnimationMs = 180;
+const pendingCommitGuardMs = 1200;
 
 const distanceFromRect = (x: number, y: number, rect: DOMRect): number => {
   const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
@@ -42,6 +43,39 @@ export const PlayerSpeedControl = ({
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const isDraggingRef = useRef(false);
   const pendingCommitRef = useRef<{ playbackRate: number; mode: PlaybackSpeedMode } | null>(null);
+  const pendingCommitTimeoutRef = useRef<number | null>(null);
+  const interactionRevisionRef = useRef(0);
+
+  const clearPendingCommit = useCallback((): void => {
+    pendingCommitRef.current = null;
+    if (pendingCommitTimeoutRef.current !== null) {
+      window.clearTimeout(pendingCommitTimeoutRef.current);
+      pendingCommitTimeoutRef.current = null;
+    }
+  }, []);
+
+  const holdPendingCommit = useCallback((pendingCommit: { playbackRate: number; mode: PlaybackSpeedMode }): void => {
+    clearPendingCommit();
+    pendingCommitRef.current = pendingCommit;
+    pendingCommitTimeoutRef.current = window.setTimeout(() => {
+      if (
+        pendingCommitRef.current &&
+        speedsMatch(pendingCommitRef.current.playbackRate, pendingCommit.playbackRate) &&
+        pendingCommitRef.current.mode === pendingCommit.mode
+      ) {
+        pendingCommitRef.current = null;
+      }
+      pendingCommitTimeoutRef.current = null;
+    }, pendingCommitGuardMs);
+  }, [clearPendingCommit]);
+
+  const markUserInteraction = useCallback((): void => {
+    interactionRevisionRef.current += 1;
+  }, []);
+
+  useEffect(() => {
+    return () => clearPendingCommit();
+  }, [clearPendingCommit]);
 
   useEffect(() => {
     if (isOpen) {
@@ -66,7 +100,7 @@ export const PlayerSpeedControl = ({
 
     if (pendingCommit) {
       if (speedsMatch(nextPlaybackRate, pendingCommit.playbackRate) && nextMode === pendingCommit.mode) {
-        pendingCommitRef.current = null;
+        clearPendingCommit();
       } else {
         return;
       }
@@ -76,7 +110,7 @@ export const PlayerSpeedControl = ({
       setPlaybackRate(nextPlaybackRate);
     }
     setMode(nextMode);
-  }, [status]);
+  }, [clearPendingCommit, status]);
 
   useEffect(() => {
     const getSettings = window.echo?.app?.getSettings;
@@ -87,9 +121,10 @@ export const PlayerSpeedControl = ({
     }
 
     let isCancelled = false;
+    const requestRevision = interactionRevisionRef.current;
     void getSettings()
       .then(async (settings) => {
-        if (isCancelled) {
+        if (isCancelled || requestRevision !== interactionRevisionRef.current || isDraggingRef.current || pendingCommitRef.current) {
           return;
         }
 
@@ -98,7 +133,7 @@ export const PlayerSpeedControl = ({
         setPlaybackRate(nextRate);
         setMode(nextMode);
         const nextStatus = await audio.setOutput({ playbackRate: nextRate, playbackSpeedMode: nextMode });
-        if (!isCancelled) {
+        if (!isCancelled && requestRevision === interactionRevisionRef.current && !pendingCommitRef.current) {
           onStatusChange(nextStatus);
         }
       })
@@ -149,8 +184,9 @@ export const PlayerSpeedControl = ({
     async (nextPlaybackRate: number): Promise<void> => {
       const audio = window.echo?.audio;
       const safeRate = clampPlaybackRate(nextPlaybackRate);
+      markUserInteraction();
       setPlaybackRate(safeRate);
-      pendingCommitRef.current = { playbackRate: safeRate, mode };
+      holdPendingCommit({ playbackRate: safeRate, mode });
 
       if (!audio) {
         onError('Desktop bridge unavailable');
@@ -164,15 +200,15 @@ export const PlayerSpeedControl = ({
           void setSettings({ playbackSpeed: safeRate }).catch(() => undefined);
         }
         const pending = pendingCommitRef.current;
-        if (pending?.playbackRate === safeRate && pending.mode === mode) {
+        if (pending && speedsMatch(pending.playbackRate, safeRate) && pending.mode === mode) {
           onStatusChange(nextStatus);
         }
       } catch (error) {
-        pendingCommitRef.current = null;
+        clearPendingCommit();
         onError(error instanceof Error ? error.message : String(error));
       }
     },
-    [mode, onError, onStatusChange],
+    [clearPendingCommit, holdPendingCommit, markUserInteraction, mode, onError, onStatusChange],
   );
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>): void => {
@@ -213,7 +249,10 @@ export const PlayerSpeedControl = ({
             aria-label={t('playerSpeed.label')}
             max={2}
             min={0.5}
-            onChange={(event) => setPlaybackRate(Number(event.currentTarget.value))}
+            onChange={(event) => {
+              markUserInteraction();
+              setPlaybackRate(Number(event.currentTarget.value));
+            }}
             onPointerCancel={(event) => {
               isDraggingRef.current = false;
               if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -221,6 +260,7 @@ export const PlayerSpeedControl = ({
               }
             }}
             onPointerDown={(event) => {
+              markUserInteraction();
               isDraggingRef.current = true;
               event.currentTarget.setPointerCapture(event.pointerId);
             }}

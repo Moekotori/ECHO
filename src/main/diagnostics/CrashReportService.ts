@@ -256,6 +256,13 @@ const classifyAudioFailure = (message: string): string => {
     return 'superseded_playback_run';
   }
 
+  if (
+    /did not return a playable URL|metadata only|requires the official .* player|must not enter the native audio session/iu.test(message) ||
+    /(?:会员|會員|版权|版權|不可播放|无播放权限|無播放權限|permission|unavailable)/iu.test(message)
+  ) {
+    return 'streaming_playback_unavailable';
+  }
+
   if (/\bplay\(\) request was interrupted by a call to (?:pause|load)\(\)/iu.test(message)) {
     return 'superseded_playback_run';
   }

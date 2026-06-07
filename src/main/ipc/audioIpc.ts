@@ -707,6 +707,9 @@ export const registerAudioIpc = (): void => {
   ipcMain.handle(IpcChannels.EqSetDspHeadroom, async (_event, headroomDb: unknown): Promise<EqState> =>
     getEqBridge().setDspHeadroom(Number(headroomDb)),
   );
+  ipcMain.handle(IpcChannels.EqSetDspSafetyLimiterEnabled, async (_event, enabled: unknown): Promise<EqState> =>
+    getEqBridge().setDspSafetyLimiterEnabled(enabled !== false),
+  );
   ipcMain.handle(IpcChannels.EqSetPreset, async (_event, presetId: unknown): Promise<EqState> =>
     getEqBridge().setPreset(String(presetId)),
   );

@@ -60,6 +60,7 @@ export type EqState = {
   enabled: boolean;
   preampDb: number;
   dspHeadroomDb?: number;
+  dspSafetyLimiterEnabled?: boolean;
   bands: EqBand[];
   presetId: string;
   presetName: string;

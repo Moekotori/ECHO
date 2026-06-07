@@ -98,6 +98,7 @@ const installEcho = (
       chooseTrackCover: vi.fn(),
       loadEmbeddedTrackTags: vi.fn(),
       updateTrackTags: vi.fn(),
+      copyTrackOriginalCover: vi.fn().mockResolvedValue(true),
     },
     lyrics: {
       getForTrack: vi.fn().mockResolvedValue(null),
@@ -408,6 +409,26 @@ describe('TrackTagEditorDrawer network tags', () => {
     expect((screen.getByLabelText('标题') as HTMLInputElement).value).toBe('山海');
     expect((screen.getByLabelText('艺术家') as HTMLInputElement).value).toBe('草东没有派对');
     expect(screen.getByText('已从源文件内嵌标签重新加载，并同步更新媒体库。')).toBeTruthy();
+  });
+
+  it('copies the original cover from the tag editor cover context menu', async () => {
+    installEcho();
+
+    render(
+      <TrackTagEditorDrawer
+        track={track({ coverId: 'cover-1', coverThumb: 'echo-cover://thumb/cover-1' })}
+        isOpen
+        isSaving={false}
+        error={null}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(document.querySelector('.tag-editor-cover')!);
+
+    await waitFor(() => expect(window.echo.library.copyTrackOriginalCover).toHaveBeenCalledWith('track-1'));
+    expect(screen.getByText('已复制封面原图。')).toBeTruthy();
   });
 
   it('toggles all candidate fields from the select-all checkbox', async () => {

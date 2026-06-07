@@ -23,6 +23,8 @@ export const consumePendingAlbumDetailNavigation = (): AlbumDetailNavigationRequ
   return request;
 };
 
+export const peekPendingAlbumDetailNavigation = (): AlbumDetailNavigationRequest | null => pendingAlbumDetail;
+
 const normalizeAlbumText = (value: string | null | undefined): string =>
   (value ?? '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
 

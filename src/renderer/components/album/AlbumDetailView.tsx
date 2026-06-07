@@ -489,7 +489,10 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
   const { locale, t } = useI18n();
   const { appendToQueue, appendTracksToQueue, currentTrackId, playTrack, playTrackNext, removeTrackFromQueue, replaceQueue, updateTrackSnapshot } = usePlaybackQueue();
   const detailRootRef = useRef<HTMLDivElement | null>(null);
-  const { isReturning, returnBack } = useAnimatedBackNavigation(onBack, true, { rootRef: detailRootRef });
+  const { isReturning, returnBack } = useAnimatedBackNavigation(onBack, true, {
+    durationMs: 80,
+    rootRef: detailRootRef,
+  });
   const [firstTrack, setFirstTrack] = useState<LibraryTrack | null>(null);
   const [loadedTracks, setLoadedTracks] = useState<LibraryTrack[]>([]);
   const [loadedTotal, setLoadedTotal] = useState(0);

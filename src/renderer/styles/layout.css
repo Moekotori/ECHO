@@ -625,6 +625,10 @@ html[data-theme="dark"] .app-shell:has(.lyrics-page) .window-control:hover {
   scrollbar-width: none;
 }
 
+.page-surface:has(.liked-page--tracks) {
+  overflow: hidden;
+}
+
 .page-surface:has(.liked-page)::-webkit-scrollbar {
   display: none;
 }

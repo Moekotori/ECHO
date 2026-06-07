@@ -66,6 +66,26 @@ describe('PlayerStatusChips', () => {
     expect(screen.queryByText('HQPlayer')).toBeNull();
   });
 
+  it('hides KuGou source chips while keeping audio spec chips', () => {
+    render(
+      <PlayerStatusChips
+        status={null}
+        state="playing"
+        track={track({
+          mediaType: 'streaming',
+          provider: 'kugou',
+          codec: 'mp3',
+          bitDepth: null,
+          bitrate: 128000,
+        })}
+      />,
+    );
+
+    expect(screen.queryByText('kugou')).toBeNull();
+    expect(screen.getByText('MP3')).toBeTruthy();
+    expect(screen.getByText('128kbps')).toBeTruthy();
+  });
+
   it('surfaces remote playback loading even when codec chips are available', () => {
     render(<PlayerStatusChips status={null} state="loading" track={track({ mediaType: 'remote', sourceDisplayName: '百度网盘' })} />);
 

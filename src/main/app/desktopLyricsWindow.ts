@@ -324,6 +324,9 @@ export const closeDesktopLyricsWindow = (): void => {
     rememberBoundsTimer = null;
   }
 
+  setAppSettings({
+    desktopLyricsEnabled: desktopLyricsWindow.isVisible() || getAppSettings().desktopLyricsEnabled === true,
+  });
   rememberDesktopLyricsBounds(desktopLyricsWindow);
   desktopLyricsWindow.destroy();
   desktopLyricsMousePassthrough = false;

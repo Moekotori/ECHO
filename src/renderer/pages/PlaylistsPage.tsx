@@ -562,6 +562,9 @@ export const PlaylistsPage = (): JSX.Element => {
   const [playlistSearch, setPlaylistSearch] = useState('');
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [showNewPlaylistForm, setShowNewPlaylistForm] = useState(false);
+  const [renamePlaylist, setRenamePlaylist] = useState<LibraryPlaylist | null>(null);
+  const [renamePlaylistName, setRenamePlaylistName] = useState('');
+  const [isRenamingPlaylist, setIsRenamingPlaylist] = useState(false);
   const [isImportingPlaylist, setIsImportingPlaylist] = useState(false);
   const [favoriteImportUrl, setFavoriteImportUrl] = useState('');
   const [isImportingFavorites, setIsImportingFavorites] = useState(false);
@@ -593,6 +596,7 @@ export const PlaylistsPage = (): JSX.Element => {
   const playlistDownloadRunIdRef = useRef(0);
   const notifiedDownloadJobIdsRef = useRef<Set<string>>(new Set());
   const newPlaylistInputRef = useRef<HTMLInputElement>(null);
+  const renamePlaylistInputRef = useRef<HTMLInputElement>(null);
   const qualityMenuRef = useRef<HTMLDivElement | null>(null);
   const playlistMenuRef = useRef<HTMLDivElement | null>(null);
   const { currentTrack, currentTrackId, playlistPlayback, playPlaylistSequence, exitPlaylistSequence, playTrack, appendToQueue, appendTracksToQueue, playTrackNext, removeTrackFromQueue } = usePlaybackQueue();
@@ -1017,6 +1021,15 @@ export const PlaylistsPage = (): JSX.Element => {
   }, [showNewPlaylistForm]);
 
   useEffect(() => {
+    if (renamePlaylist) {
+      window.setTimeout(() => {
+        renamePlaylistInputRef.current?.focus();
+        renamePlaylistInputRef.current?.select();
+      }, 0);
+    }
+  }, [renamePlaylist]);
+
+  useEffect(() => {
     if (!qualityMenuOpen) {
       return undefined;
     }
@@ -1173,26 +1186,53 @@ export const PlaylistsPage = (): JSX.Element => {
     }
   };
 
-  const handleRenamePlaylist = async (): Promise<void> => {
-    const library = window.echo?.library;
-    if (!library || !selectedPlaylist) {
+  const handleRenamePlaylist = (): void => {
+    if (!selectedPlaylist || isSelectedPlaylistProtected) {
       return;
     }
 
-    const name = window.prompt('重命名歌单', selectedPlaylist.name);
-    if (!name?.trim() || name.trim() === selectedPlaylist.name) {
+    setPlaylistMenuOpen(false);
+    setError(null);
+    setRenamePlaylist(selectedPlaylist);
+    setRenamePlaylistName(selectedPlaylist.name);
+  };
+
+  const handleCloseRenamePlaylist = (): void => {
+    if (isRenamingPlaylist) {
+      return;
+    }
+
+    setRenamePlaylist(null);
+    setRenamePlaylistName('');
+  };
+
+  const handleSubmitRenamePlaylist = async (): Promise<void> => {
+    const library = window.echo?.library;
+    const playlist = renamePlaylist;
+    const name = renamePlaylistName.trim();
+    if (!library || !playlist || !name) {
+      return;
+    }
+
+    if (name === playlist.name) {
+      handleCloseRenamePlaylist();
       return;
     }
 
     try {
-      setPlaylistMenuOpen(false);
-      const updated = await library.updatePlaylist({ playlistId: selectedPlaylist.id, name: name.trim() });
+      setIsRenamingPlaylist(true);
+      setError(null);
+      const updated = await library.updatePlaylist({ playlistId: playlist.id, name });
       await loadPlaylists();
       setSelectedPlaylistId(updated.id);
+      setRenamePlaylist(null);
+      setRenamePlaylistName('');
       setStatusMessage('歌单已重命名');
       window.dispatchEvent(new Event('library:playlists-changed'));
     } catch (renameError) {
       setError(renameError instanceof Error ? renameError.message : String(renameError));
+    } finally {
+      setIsRenamingPlaylist(false);
     }
   };
 
@@ -2918,6 +2958,74 @@ export const PlaylistsPage = (): JSX.Element => {
           />
         ) : null}
       </section>
+
+      {renamePlaylist ? (
+        <div
+          className="playlist-rename-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              handleCloseRenamePlaylist();
+            }
+          }}
+        >
+          <form
+            className="playlist-rename-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="playlist-rename-title"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleSubmitRenamePlaylist();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                handleCloseRenamePlaylist();
+              }
+            }}
+          >
+            <header className="playlist-rename-dialog-header">
+              <h2 id="playlist-rename-title">重命名歌单</h2>
+              <button
+                className="tool-button"
+                type="button"
+                aria-label="关闭重命名"
+                title="关闭重命名"
+                disabled={isRenamingPlaylist}
+                onClick={handleCloseRenamePlaylist}
+              >
+                <X size={16} />
+              </button>
+            </header>
+            <label className="playlist-rename-field" htmlFor="playlist-rename-input">
+              <span>歌单名称</span>
+              <input
+                id="playlist-rename-input"
+                ref={renamePlaylistInputRef}
+                value={renamePlaylistName}
+                maxLength={120}
+                disabled={isRenamingPlaylist}
+                onChange={(event) => setRenamePlaylistName(event.target.value)}
+              />
+            </label>
+            <div className="playlist-rename-actions">
+              <button className="secondary-action" type="button" disabled={isRenamingPlaylist} onClick={handleCloseRenamePlaylist}>
+                <X size={15} />
+                <span>取消</span>
+              </button>
+              <button
+                className="primary-action"
+                type="submit"
+                disabled={isRenamingPlaylist || !renamePlaylistName.trim() || renamePlaylistName.trim() === renamePlaylist.name}
+              >
+                {isRenamingPlaylist ? <Loader2 className="spinning-icon" size={15} /> : <Check size={15} />}
+                <span>保存</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 };

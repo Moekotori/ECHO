@@ -18,6 +18,54 @@
   font-weight: 760;
 }
 
+.app-titlebar-update {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 112px;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--theme-accent-text) 22%, transparent);
+  border-radius: 999px;
+  color: var(--theme-accent-text-strong);
+  background: color-mix(in srgb, var(--theme-accent-bg) 72%, transparent);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 820;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.app-titlebar-update:hover {
+  border-color: color-mix(in srgb, var(--theme-accent-text) 36%, transparent);
+  background: color-mix(in srgb, var(--theme-accent-bg) 92%, transparent);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--theme-accent-text) 12%, transparent);
+}
+
+.app-titlebar-update:active {
+  transform: scale(0.96);
+}
+
+.app-titlebar-update svg {
+  flex: 0 0 auto;
+}
+
+.app-titlebar-update span {
+  overflow: hidden;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .app-titlebar-actions,
 .window-controls {
   display: inline-flex;
@@ -138,6 +186,19 @@
 .titlebar-action:active,
 .window-control:active {
   transform: scale(0.94);
+}
+
+@media (max-width: 640px) {
+  .app-titlebar-update {
+    width: 28px;
+    max-width: 28px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .app-titlebar-update span {
+    display: none;
+  }
 }
 
 .browser-preview-picker {
@@ -1633,7 +1694,9 @@
   overflow-x: hidden;
   overflow-y: auto;
   scroll-behavior: smooth;
-  scrollbar-width: none;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-scrollbar-thumb) transparent;
 }
 
 .settings-scroll-frame {
@@ -1705,9 +1768,8 @@
 }
 
 .settings-scroll-shell::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
+  width: 10px;
+  height: 10px;
 }
 
 .settings-scroll-shell::-webkit-scrollbar-track {
@@ -2040,7 +2102,7 @@
 }
 
 .app-shell[data-feature-comments-hidden="true"] .settings-page .setting-row--shortcut {
-  grid-template-columns: minmax(140px, 0.7fr) repeat(2, minmax(180px, 1fr));
+  grid-template-columns: minmax(160px, 0.55fr) repeat(2, minmax(260px, 1fr));
   min-height: 0;
   gap: 12px;
 }
@@ -4426,6 +4488,29 @@
 
 .plugins-page {
   gap: 18px;
+  position: relative;
+}
+
+.plugins-drop-overlay {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px dashed rgba(79, 70, 229, 0.48);
+  border-radius: 8px;
+  box-shadow: 0 18px 50px rgba(37, 54, 75, 0.16);
+  color: #334155;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  inset: 8px;
+  justify-content: center;
+  min-height: 180px;
+  pointer-events: none;
+  position: absolute;
+  z-index: 25;
+}
+
+.plugins-drop-overlay svg {
+  color: #4f46e5;
 }
 
 .plugins-header {
@@ -7209,6 +7294,322 @@
 .volume-fixed-button--active:hover {
   color: #ffffff;
   background: var(--volume-popover-active-hover-bg);
+}
+
+/* ============================================================
+   Sleep Timer Popover
+   ============================================================ */
+
+.sleep-timer-control {
+  position: relative;
+  z-index: 1;
+}
+
+/* 运行态按钮：倒计时文字模式，覆盖 icon-button 圆形固定尺寸 */
+.sleep-timer-control .icon-button.is-soft-active {
+  width: auto !important;
+  min-width: 44px;
+  height: 30px !important;
+  border-radius: 8px !important;
+  padding: 0 8px !important;
+}
+
+.sleep-timer-countdown {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  text-align: center;
+  line-height: 1;
+}
+
+/* ---- Popover 面板 ---- */
+.sleep-timer-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 228px;
+  padding: 14px 16px;
+
+  border: 1px solid var(--echo-polish-border, rgba(38, 40, 46, 0.12));
+  border-radius: 16px;
+  background: var(--echo-polish-surface-strong, rgba(255, 255, 255, 0.96));
+  box-shadow:
+    0 18px 42px rgba(36, 39, 48, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px) saturate(1.15);
+
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px) scale(0.97);
+  transform-origin: calc(100% - 17px) 100%;
+  transition:
+    opacity 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+
+  z-index: 20;
+}
+
+.sleep-timer-popover[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+/* ---- 标题 ---- */
+.st-popover-title {
+  color: var(--theme-heading-text, #1e2025);
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 12px;
+  letter-spacing: 0.01em;
+}
+
+/* ---- 运行态（倒计时）---- */
+.st-popover-running {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0 4px;
+}
+
+.st-countdown {
+  font-size: 28px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  color: var(--echo-polish-accent-text, var(--color-accent-strong, #3239c7));
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.st-hint {
+  font-size: 11px;
+  color: var(--theme-muted-text, #6c7179);
+  margin-top: 4px;
+}
+
+.st-cancel-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin-top: 10px;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 32px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: 8px !important;
+  border-color: var(--echo-polish-border) !important;
+  background: var(--echo-polish-button-bg) !important;
+  color: var(--theme-page-text) !important;
+  box-shadow: none !important;
+  transition: all 150ms ease !important;
+  white-space: nowrap;
+}
+
+.st-cancel-btn:hover:not(:disabled) {
+  background: var(--echo-polish-active-bg) !important;
+  border-color: var(--echo-polish-active-border) !important;
+  transform: translateY(-1px) !important;
+}
+
+.st-cancel-btn:active:not(:disabled) {
+  transform: scale(0.97) !important;
+}
+
+/* ---- 行为选择栏 ---- */
+.st-action-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.st-action-btn {
+  flex: 1;
+  padding: 5px 0;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--theme-muted-text, #6c7179);
+  border: 1px solid var(--echo-polish-border, rgba(38, 40, 46, 0.12)) !important;
+  border-radius: 8px !important;
+  background: var(--echo-polish-button-bg, rgba(255, 255, 255, 0.76)) !important;
+  box-shadow: none !important;
+  transition: all 150ms ease !important;
+}
+
+.st-action-btn:hover {
+  color: var(--theme-heading-text, #1e2025) !important;
+  background: var(--echo-polish-button-bg-hover, rgba(255, 255, 255, 0.98)) !important;
+  border-color: var(--echo-polish-border-strong, rgba(38, 40, 46, 0.18)) !important;
+  transform: translateY(-1px) !important;
+}
+
+.st-action-btn.is-active {
+  color: var(--echo-polish-accent-text, #3239c7) !important;
+  background: var(--echo-polish-active-bg, rgba(236, 238, 255, 0.86)) !important;
+  border-color: var(--echo-polish-active-border, rgba(75, 85, 232, 0.24)) !important;
+  font-weight: 600;
+}
+
+.st-action-btn:active:not(:disabled) {
+  transform: scale(0.95) !important;
+}
+
+/* ---- 渐弱开关行 ---- */
+.st-fade-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 8px;
+}
+
+.st-label {
+  font-size: 12px;
+  color: var(--theme-muted-text, #6c7179);
+}
+
+/* Toggle 开关 */
+.st-toggle {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--theme-control-bg, rgba(38, 40, 46, 0.1));
+  border: 1px solid var(--echo-polish-border, rgba(38, 40, 46, 0.1));
+  transition: background 200ms ease, border-color 200ms ease;
+  flex-shrink: 0;
+}
+
+.st-toggle.is-on {
+  background: var(--color-accent, #4b55e8);
+  border-color: transparent;
+}
+
+.st-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: left 200ms cubic-bezier(0.22, 1, 0.36, 1), transform 200ms ease;
+}
+
+.st-toggle.is-on .st-toggle-knob {
+  left: 18px;
+}
+
+/* ---- 预设时长网格 ---- */
+.st-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.st-preset-btn {
+  padding: 7px 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--theme-page-text, #2d3036);
+  border: 1px solid var(--echo-polish-border, rgba(38, 40, 46, 0.1)) !important;
+  border-radius: 8px !important;
+  background: var(--echo-polish-surface, rgba(255, 255, 255, 0.72)) !important;
+  box-shadow: none !important;
+  transition: all 140ms ease !important;
+}
+
+.st-preset-btn:hover {
+  background: var(--echo-polish-button-bg-hover, rgba(255, 255, 255, 0.96)) !important;
+  border-color: var(--echo-polish-border-strong, rgba(38, 40, 46, 0.16)) !important;
+  color: var(--echo-polish-accent-text, #3239c7) !important;
+  transform: translateY(-1px) scale(1.02) !important;
+}
+
+.st-preset-btn:active:not(:disabled) {
+  transform: scale(0.95) !important;
+}
+
+/* ---- 自定义输入行 ---- */
+.st-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.st-input {
+  width: 52px;
+  height: 30px;
+  padding: 0 6px;
+  font-size: 12px;
+  text-align: center;
+  color: var(--theme-page-text, #2d3036);
+  border: 1px solid var(--theme-field-border, rgba(38, 40, 46, 0.12));
+  border-radius: 8px;
+  background: var(--theme-field-bg, rgba(255, 255, 255, 0.86));
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+  /* 移除 number input 箭头 */
+  -moz-appearance: textfield;
+}
+
+.st-input::-webkit-inner-spin-button,
+.st-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.st-input:focus {
+  border-color: var(--echo-polish-accent-text, #3239c7);
+  box-shadow: 0 0 0 3px var(--theme-accent-bg, rgba(75, 85, 232, 0.12));
+}
+
+.st-unit {
+  font-size: 12px;
+  color: var(--theme-muted-text, #6c7179);
+  white-space: nowrap;
+}
+
+.st-confirm-btn {
+  flex: 1;
+  max-width: 56px;
+  height: 30px;
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: #ffffff;
+  border: none !important;
+  border-radius: 8px !important;
+  background: linear-gradient(135deg, var(--color-accent, #4b55e8), var(--color-accent-strong, #3239c7)) !important;
+  box-shadow: 0 2px 8px rgba(75, 85, 232, 0.25) !important;
+  cursor: pointer;
+  opacity: 1;
+  transition: all 150ms ease !important;
+  margin-left: auto;
+}
+
+.st-confirm-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 4px 12px rgba(75, 85, 232, 0.35) !important;
+  transform: translateY(-1px) !important;
+}
+
+.st-confirm-btn:active:not(:disabled) {
+  transform: scale(0.95) !important;
+}
+
+.st-confirm-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  box-shadow: none !important;
+  filter: none !important;
 }
 
 .audio-drawer-root {
@@ -10801,11 +11202,11 @@
 }
 
 .setting-row--shortcut {
-  grid-template-columns: minmax(240px, 1fr) minmax(260px, 300px) minmax(260px, 300px);
+  grid-template-columns: minmax(220px, 0.7fr) repeat(2, minmax(320px, 1fr));
   align-items: flex-start;
-  gap: 24px;
-  padding-right: 12px;
-  padding-left: 12px;
+  gap: 16px;
+  min-height: 58px;
+  padding: 9px 12px;
 }
 
 .settings-page .setting-row.setting-row--shortcut {
@@ -10821,9 +11222,9 @@
 }
 
 .setting-row--shortcut-header {
-  min-height: 44px;
+  min-height: 36px;
   margin: 4px 0 2px;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border: 1px solid color-mix(in srgb, var(--theme-panel-border) 70%, transparent);
   border-radius: 8px;
   background:
@@ -10837,7 +11238,7 @@
 .setting-row--shortcut-header span {
   display: flex;
   min-width: 0;
-  height: 28px;
+  height: 24px;
   align-items: center;
   border-radius: 6px;
   color: var(--theme-muted-text);
@@ -10850,8 +11251,7 @@
   color: var(--theme-page-text);
 }
 
-.settings-shortcut-toolbar,
-.settings-shortcut-control {
+.settings-shortcut-toolbar {
   display: grid;
   width: 100%;
   gap: 9px;
@@ -10863,16 +11263,21 @@
 }
 
 .settings-shortcut-control {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto;
   min-width: 0;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
 }
 
 .settings-shortcut-key {
   display: inline-flex;
   width: 100%;
-  min-height: 40px;
+  min-height: 34px;
   align-items: center;
   justify-content: center;
-  padding: 0 12px;
+  padding: 0 10px;
   border: 1px solid var(--theme-button-border);
   border-radius: 8px;
   background: var(--theme-button-bg);
@@ -10897,7 +11302,7 @@
 
 .settings-shortcut-unavailable {
   display: inline-flex;
-  min-height: 40px;
+  min-height: 34px;
   width: 100%;
   align-items: center;
   justify-content: center;
@@ -10909,22 +11314,19 @@
   font-weight: 780;
 }
 
-.settings-shortcut-control .settings-chip-row--actions {
-  width: 100%;
-  max-width: none;
-  flex-wrap: nowrap;
-  justify-content: stretch;
+.settings-shortcut-actions {
+  display: contents;
 }
 
-.settings-shortcut-control .settings-action-button {
-  flex: 1 1 0;
-  min-width: 0;
-  padding-right: 12px;
-  padding-left: 12px;
-}
-
+.settings-shortcut-control .settings-icon-button,
 .settings-shortcut-control .toggle-btn {
-  flex: 0 0 auto;
+  flex: none;
+}
+
+.settings-shortcut-clear {
+  min-height: 30px;
+  width: 30px;
+  color: var(--theme-muted-text);
 }
 
 .setting-row--compact-panel {
@@ -12036,6 +12438,7 @@
 .lyrics-settings-drawer .lyrics-font-panel,
 .lyrics-settings-drawer .lyrics-desktop-font-panel-body,
 .lyrics-settings-drawer .lyrics-font-actions,
+.lyrics-settings-drawer .lyrics-background-select,
 .lyrics-settings-drawer .lyrics-background-segmented,
 .lyrics-settings-drawer .lyrics-desktop-opacity-control,
 .lyrics-settings-drawer .mv-threshold-slider {
@@ -12184,6 +12587,8 @@
   background: var(--theme-accent-solid-bg);
 }
 
+.settings-lyrics-panel .lyrics-background-select__trigger,
+.settings-lyrics-panel .lyrics-background-select__menu,
 .settings-lyrics-panel .lyrics-background-segmented button,
 .settings-lyrics-panel .lyrics-source-option,
 .settings-lyrics-panel .lyrics-color-reset,
@@ -12208,6 +12613,8 @@ html[data-theme="dark"] .settings-lyrics-panel {
 
 html[data-theme="dark"] .settings-lyrics-panel .audio-engine-meter,
 html[data-theme="dark"] .settings-lyrics-panel .audio-device-pill,
+html[data-theme="dark"] .settings-lyrics-panel .lyrics-background-select__trigger,
+html[data-theme="dark"] .settings-lyrics-panel .lyrics-background-select__menu,
 html[data-theme="dark"] .settings-lyrics-panel .lyrics-background-segmented button,
 html[data-theme="dark"] .settings-lyrics-panel .lyrics-source-option,
 html[data-theme="dark"] .settings-lyrics-panel .lyrics-color-reset,
@@ -14979,6 +15386,16 @@ html[data-theme="dark"] .history-play-count {
   gap: 14px;
 }
 
+.liked-page--tracks {
+  height: 100%;
+  align-content: stretch;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+}
+
+.liked-page--tracks > .track-list-shell {
+  min-height: 0;
+}
+
 .liked-hero {
   display: grid;
   max-width: 520px;
@@ -15629,6 +16046,12 @@ html[data-theme="dark"] .history-play-count {
 .liked-tabs,
 .liked-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.liked-sync-actions {
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -17778,6 +18201,40 @@ html[data-theme="dark"] .history-play-count {
   min-width: 0;
 }
 
+.connect-airplay-protocols {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--theme-control-bg);
+}
+
+.connect-airplay-protocols button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--theme-subtle-text);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.connect-airplay-protocols button[aria-pressed="true"] {
+  color: var(--theme-accent-text);
+  background: color-mix(in srgb, var(--theme-accent-text) 12%, transparent);
+}
+
+.connect-airplay-protocols button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .connect-receiver-meta {
   min-width: 0;
   display: grid;
@@ -19364,6 +19821,10 @@ html[data-theme="dark"] .app-shell--wallpaper-ready {
 
   .setting-row--shortcut-header {
     display: none;
+  }
+
+  .settings-shortcut-control {
+    grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
   .setting-row:hover {

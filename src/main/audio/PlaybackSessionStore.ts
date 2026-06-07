@@ -31,7 +31,7 @@ const runtimePragmas = [
 ] as const;
 
 const repeatModes = new Set<PersistedPlaybackRepeatMode>(['off', 'one', 'all']);
-const queueSourceTypes = new Set(['songs', 'album', 'artist', 'folder', 'streaming', 'local-file', 'manual']);
+const queueSourceTypes = new Set(['songs', 'album', 'artist', 'folder', 'liked', 'streaming', 'local-file', 'manual']);
 const playbackStates = new Set<AudioPlaybackState>(['idle', 'loading', 'playing', 'paused', 'stopped', 'ended', 'error']);
 const receiverIdentityPrefixes = ['dlna-receiver:', 'airplay-receiver:'];
 

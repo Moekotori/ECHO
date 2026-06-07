@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { dirname } from 'node:path';
+import { basename, dirname } from 'node:path';
 
 const normalizeKeyPart = (value: string): string => value.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
 
@@ -28,6 +28,13 @@ export type AlbumKeyInput = {
 };
 
 const reliableAlbumArtistSources = new Set(['embedded', 'manual', 'network', 'sidecar']);
+const discFolderNamePattern = /^(?:cd|disc|disk|vol(?:ume)?\.?|part)\s*[-_.#]?\s*(?:\d{1,3}|[ivxlcdm]{1,8})$/iu;
+
+const albumFolderForPath = (filePath: string): string => {
+  const folderPath = dirname(filePath);
+  const folderName = basename(folderPath).trim();
+  return discFolderNamePattern.test(folderName) ? dirname(folderPath) : folderPath;
+};
 
 export class AlbumService {
   makeAlbumKey(input: AlbumKeyInput): string {
@@ -51,7 +58,7 @@ export class AlbumService {
       reliableAlbumArtistSources.has(input.albumArtistSource ?? '') &&
       normalizedAlbumArtist.length > 0 &&
       normalizedAlbumArtist !== 'unknown artist';
-    const artistOrGrouping = hasReliableAlbumArtist ? normalizedAlbumArtist : `folder:${normalizeKeyPart(dirname(input.filePath))}`;
+    const artistOrGrouping = hasReliableAlbumArtist ? normalizedAlbumArtist : `folder:${normalizeKeyPart(albumFolderForPath(input.filePath))}`;
     const yearPart = input.year ? String(input.year) : '';
     return createAlbumKey(artistOrGrouping, normalizedAlbum, yearPart);
   }

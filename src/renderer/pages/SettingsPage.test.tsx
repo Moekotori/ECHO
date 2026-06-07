@@ -4,9 +4,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SettingsPage } from './SettingsPage';
-import type { AppSettings } from '../../shared/types/appSettings';
+import type { AppSettings, AppThemeToneOverride } from '../../shared/types/appSettings';
 import type { PluginSummary } from '../../shared/types/plugins';
-import { defaultSidebarRouteOrder } from '../../shared/types/sidebar';
+import { defaultSidebarHiddenRouteIds, defaultSidebarRouteOrder } from '../../shared/types/sidebar';
 import type { DownloadSettings } from '../../shared/types/downloads';
 import {
   createDefaultGlobalShortcuts,
@@ -31,7 +31,6 @@ const settings: AppSettings = {
   touchOnScreenKeyboardEnabled: false,
   appWindowAcrylicEnabled: false,
   appWindowAcrylicKeepWhenUnfocusedEnabled: false,
-  appWindowAcrylicBlurPx: 22,
   appWindowAcrylicTransparencyPercent: 70,
   appCustomWallpaperPath: null,
   appWallpaperScalePercent: 100,
@@ -782,6 +781,36 @@ const createThemePluginSummary = (): PluginSummary => ({
   settingsValues: {},
 });
 
+const hexToRgb = (value: string): { r: number; g: number; b: number } => ({
+  r: Number.parseInt(value.slice(1, 3), 16),
+  g: Number.parseInt(value.slice(3, 5), 16),
+  b: Number.parseInt(value.slice(5, 7), 16),
+});
+
+const relativeLuminance = (value: string): number => {
+  const channel = (component: number): number => {
+    const normalized = component / 255;
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  const rgb = hexToRgb(value);
+  return channel(rgb.r) * 0.2126 + channel(rgb.g) * 0.7152 + channel(rgb.b) * 0.0722;
+};
+
+const contrastRatio = (foreground: string, background: string): number => {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+};
+
+const expectReadableThemeTone = (tone: AppThemeToneOverride): void => {
+  expect(contrastRatio(tone.text ?? '', tone.appBg ?? '')).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(tone.heading ?? '', tone.appBg ?? '')).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(tone.buttonText ?? '', tone.panel ?? '')).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(tone.onAccent ?? '', tone.accent ?? '')).toBeGreaterThanOrEqual(3);
+};
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -905,6 +934,57 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ sidebarIconOnlyEnabled: true, sidebarAutoHideEnabled: false }));
   });
 
+  it('hides optional Plugins, Remote, and EQ settings nav items by default', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    const nav = screen.getByRole('navigation', { name: 'route.settings.label' });
+
+    expect(within(nav).queryByRole('button', { name: /settings\.nav\.plugins\.label/ })).toBeNull();
+    expect(within(nav).queryByRole('button', { name: /settings\.nav\.remote\.label/ })).toBeNull();
+    expect(within(nav).queryByRole('button', { name: /settings\.nav\.eq\.label/ })).toBeNull();
+    expect(screen.getByText('settings.general.settingsOptionalSections.title')).toBeTruthy();
+  });
+
+  it('shows optional Plugins, Remote, and EQ settings nav items when enabled', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue({
+      ...settings,
+      settingsOptionalSectionsVisible: true,
+    });
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    const nav = screen.getByRole('navigation', { name: 'route.settings.label' });
+
+    expect(within(nav).getByRole('button', { name: /settings\.nav\.plugins\.label/ })).toBeTruthy();
+    expect(within(nav).getByRole('button', { name: /settings\.nav\.remote\.label/ })).toBeTruthy();
+    expect(within(nav).getByRole('button', { name: /settings\.nav\.eq\.label/ })).toBeTruthy();
+  });
+
+  it('saves optional settings sections visibility from general settings', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    fireEvent.click(within(screen.getByText('settings.general.settingsOptionalSections.title').closest('.setting-row') as HTMLElement).getByRole('button'));
+
+    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ settingsOptionalSectionsVisible: true }));
+  });
+
   it('saves hidden feature comments from the general settings toggle', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     const nextSettings = { ...settings, featureCommentsHidden: true };
@@ -980,7 +1060,7 @@ describe('SettingsPage', () => {
       ...settings,
       downloadsFeatureUnlocked: true,
       sidebarRouteOrder: [...defaultSidebarRouteOrder],
-      sidebarHiddenRouteIds: [],
+      sidebarHiddenRouteIds: [...defaultSidebarHiddenRouteIds],
     };
     getSettingsMock.mockResolvedValue(currentSettings);
     setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => {
@@ -995,7 +1075,7 @@ describe('SettingsPage', () => {
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
     const row = screen.getByText('settings.appearance.sidebar.title').closest('.setting-row') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button', { name: /settings\.appearance\.sidebar\.summary\.allVisible/ }));
+    fireEvent.click(within(row).getByRole('button', { name: /settings\.appearance\.sidebar\.summary\.hidden/ }));
     await waitFor(() => expect(setSettingsMock).toHaveBeenLastCalledWith({ appearanceSidebarLayoutExpanded: true }));
     expect(within(row).getByText('route.dsp.label')).toBeTruthy();
     const streamingItem = within(row).getByText('route.streaming.label').closest('.settings-sidebar-route-item') as HTMLElement;
@@ -1004,7 +1084,7 @@ describe('SettingsPage', () => {
     await waitFor(() =>
       expect(setSettingsMock).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          sidebarHiddenRouteIds: ['streaming'],
+          sidebarHiddenRouteIds: [...defaultSidebarHiddenRouteIds, 'streaming'],
         }),
       ),
     );
@@ -1041,7 +1121,7 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       const lastPatch = setSettingsMock.mock.calls.at(-1)?.[0] as Partial<AppSettings>;
       expect(lastPatch.sidebarRouteOrder?.slice(0, 2)).toEqual(['songs', 'home']);
-      expect(lastPatch.sidebarHiddenRouteIds).toEqual(['streaming']);
+      expect(lastPatch.sidebarHiddenRouteIds).toEqual([...defaultSidebarHiddenRouteIds, 'streaming']);
     });
   });
 
@@ -1050,7 +1130,7 @@ describe('SettingsPage', () => {
     let currentSettings: AppSettings = {
       ...settings,
       sidebarRouteOrder: [...defaultSidebarRouteOrder],
-      sidebarHiddenRouteIds: [],
+      sidebarHiddenRouteIds: [...defaultSidebarHiddenRouteIds],
       appearanceSidebarLayoutExpanded: false,
     };
     getSettingsMock.mockResolvedValue(currentSettings);
@@ -1066,7 +1146,7 @@ describe('SettingsPage', () => {
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
     const row = screen.getByText('settings.appearance.sidebar.title').closest('.setting-row') as HTMLElement;
-    const toggle = within(row).getByRole('button', { name: /settings\.appearance\.sidebar\.summary\.allVisible/ });
+    const toggle = within(row).getByRole('button', { name: /settings\.appearance\.sidebar\.summary\.hidden/ });
 
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(within(row).queryByText('route.home.label')).toBeNull();
@@ -1091,6 +1171,7 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /官方网站/ }));
     fireEvent.click(screen.getByRole('button', { name: /使用文档/ }));
     fireEvent.click(screen.getByRole('button', { name: /百度网盘/ }));
+    fireEvent.click(screen.getByRole('button', { name: /哔哩哔哩/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.updates\.action\.afdian/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.updates\.action\.history/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.updates\.action\.qq/ }));
@@ -1099,6 +1180,7 @@ describe('SettingsPage', () => {
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://echonext.moe');
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://echonext.moe/zh/docs/');
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://pan.baidu.com/s/1ta0McyhY9knaD6FT5xW3Og?pwd=echo');
+    expect(openExternalUrlMock).toHaveBeenCalledWith('https://space.bilibili.com/25265128');
     await waitFor(() => expect(openExternalUrlMock).toHaveBeenCalledWith('https://afdian.com/a/echonext'));
     await waitFor(() => expect(openExternalUrlMock).toHaveBeenCalledWith('https://github.com/moekotori/echo/releases'));
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://qm.qq.com/q/KrJE8PIqSQ');
@@ -1777,7 +1859,11 @@ describe('SettingsPage', () => {
     Element.prototype.scrollIntoView = vi.fn();
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     getSettingsMock.mockResolvedValue(settings);
-    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
+    let currentSettings = settings;
+    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => {
+      currentSettings = { ...currentSettings, ...patch };
+      return currentSettings;
+    });
     resetSettingsMock.mockResolvedValue(settings);
     clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
 
@@ -1792,12 +1878,9 @@ describe('SettingsPage', () => {
     expect(confirmSpy).toHaveBeenCalledWith('settings.appearance.windowAcrylic.restartConfirm');
     expect(relaunchAppMock).toHaveBeenCalledTimes(1);
 
-    const sliders = within(row).getAllByRole('slider') as HTMLInputElement[];
-    fireEvent.change(sliders[0], { target: { value: '100' } });
+    const transparencySlider = within(row).getByRole('slider') as HTMLInputElement;
+    fireEvent.change(transparencySlider, { target: { value: '100' } });
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appWindowAcrylicTransparencyPercent: 100 }));
-
-    fireEvent.change(sliders[1], { target: { value: '36' } });
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appWindowAcrylicBlurPx: 36 }));
 
     const keepWhenUnfocusedToggle = within(row)
       .getByText('settings.appearance.windowAcrylic.keepWhenUnfocused')
@@ -1827,7 +1910,7 @@ describe('SettingsPage', () => {
     expect(document.documentElement.dataset.themePreset).toBe('darkSideMoon');
   });
 
-  it('locks the FINAL theme preset until finalaudio is entered in settings search', async () => {
+  it('locks the FINAL theme preset until the exact new key is entered in settings search', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
@@ -1838,18 +1921,47 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
+    expandThemePresetGrid();
 
-    expect(screen.queryByText('settings.appearance.themePreset.FINAL')).toBeNull();
+    const lockedPresetButton = (await screen.findByText('settings.appearance.themePreset.FINAL')).closest('button') as HTMLButtonElement;
+    expect(lockedPresetButton.disabled).toBe(true);
+    expect(screen.getByText('需持有FINAL耳机解锁主题')).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText('settings.header.searchPlaceholder'), { target: { value: 'finalaudio' } });
 
+    await waitFor(() => expect(lockedPresetButton.disabled).toBe(true));
+
+    fireEvent.change(screen.getByPlaceholderText('settings.header.searchPlaceholder'), { target: { value: ' FINAL-8K-7Q4M-H2ND-2026 ' } });
+
+    await waitFor(() => expect(lockedPresetButton.disabled).toBe(true));
+
+    fireEvent.change(screen.getByPlaceholderText('settings.header.searchPlaceholder'), { target: { value: 'FINAL-8K-7Q4M-H2ND-2026' } });
+
     const presetButton = (await screen.findByText('settings.appearance.themePreset.FINAL')).closest('button') as HTMLButtonElement;
-    expect(window.localStorage.getItem('echo-next:settings:final-theme-unlocked')).toBe('true');
+    await waitFor(() => expect(presetButton.disabled).toBe(false));
+    expect(window.localStorage.getItem('echo-next:settings:final-theme-unlocked')).toBe('2026-06-final-key-v2');
 
     fireEvent.click(presetButton);
 
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appearanceThemePreset: 'FINAL' }));
+    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appearanceThemePreset: 'FINAL', finalThemeUnlockVersion: '2026-06-final-key-v2' }));
     expect(document.documentElement.dataset.themePreset).toBe('FINAL');
+  });
+
+  it('relocks an old FINAL theme unlock on the new key version', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const finalSettings: AppSettings = { ...settings, appearanceThemePreset: 'FINAL' };
+    window.localStorage.setItem('echo-next:settings:final-theme-unlocked', 'true');
+    getSettingsMock.mockResolvedValue(finalSettings);
+    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...finalSettings, ...patch }));
+    resetSettingsMock.mockResolvedValue(finalSettings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+
+    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appearanceThemePreset: 'classic', appearanceThemeCustomId: null, finalThemeUnlockVersion: null }));
+    expect(document.documentElement.dataset.themePreset).toBe('classic');
   });
 
   it('creates a custom theme, saves a color, and clears it when a built-in preset is selected', async () => {
@@ -1905,6 +2017,59 @@ describe('SettingsPage', () => {
     fireEvent.click(presetButton);
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appearanceThemePreset: 'darkSideMoon', appearanceThemeCustomId: null }));
+  });
+
+  it('generates a readable random theme draft and only saves it after confirmation', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.spyOn(Math, 'random').mockReturnValue(0.42);
+    let currentSettings: AppSettings = { ...settings, appearanceThemePreset: 'classic', appearanceCustomThemes: [], appearanceThemeCustomId: null };
+    getSettingsMock.mockResolvedValue(currentSettings);
+    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => {
+      currentSettings = { ...currentSettings, ...patch };
+      return currentSettings;
+    });
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    clickSettingsNav('settings\\.nav\\.appearance\\.label');
+    expandThemePresetGrid();
+    setSettingsMock.mockClear();
+    const randomButton = (await screen.findByText('settings.appearance.themePreset.random')).closest('button') as HTMLButtonElement;
+    fireEvent.click(randomButton);
+
+    expect(setSettingsMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.themeCustom\.expand/ }));
+    expect(await screen.findByText('settings.appearance.themeCustom.message.randomReady')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.themeCustom\.action\.save/ }));
+
+    await waitFor(() =>
+      expect(setSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appearanceThemePreset: 'classic',
+          appearanceThemeCustomId: expect.any(String),
+          appearanceCustomThemes: expect.arrayContaining([
+            expect.objectContaining({
+              basePreset: 'classic',
+              name: 'settings.appearance.themePreset.random',
+            }),
+          ]),
+        }),
+      ),
+    );
+
+    const randomPatch = setSettingsMock.mock.calls.find(([patch]) => {
+      const nextPatch = patch as Partial<AppSettings>;
+      return nextPatch.appearanceCustomThemes?.some((theme) => theme.name === 'settings.appearance.themePreset.random');
+    })?.[0] as Partial<AppSettings>;
+    const randomTheme = randomPatch.appearanceCustomThemes?.find((theme) => theme.name === 'settings.appearance.themePreset.random');
+    expect(randomTheme?.light).toBeTruthy();
+    expect(randomTheme?.dark).toBeTruthy();
+    expectReadableThemeTone(randomTheme?.light ?? {});
+    expectReadableThemeTone(randomTheme?.dark ?? {});
+    expect(document.documentElement.dataset.themeCustomId).toBe(randomTheme?.id);
   });
 
   it('imports and applies an enabled plugin theme preset as a custom theme', async () => {

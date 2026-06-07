@@ -89,7 +89,7 @@ export const registerDiagnosticsIpc = (): void => {
   );
   ipcMain.handle(IpcChannels.DiagnosticsRelaunchApp, (): void => {
     app.relaunch();
-    app.exit(0);
+    app.quit();
   });
   ipcMain.handle(IpcChannels.DiagnosticsOpenDevConsole, (): void => {
     openDevConsoleWindow();

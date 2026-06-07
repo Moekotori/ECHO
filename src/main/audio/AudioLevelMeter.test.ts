@@ -236,11 +236,19 @@ describe('AudioLevelMeter', () => {
     expect(maxAdjacentDelta).toBeLessThanOrEqual(0.085);
   });
 
-  it('tracks clipping samples and last clip timestamp', async () => {
-    const result = await runMeter([1, -1.1, 0.2]);
+  it('tracks hard clipping events and last clip timestamp', async () => {
+    const result = await runMeter([1, -1.1, -1.2, 0.998, 1.05]);
 
     expect(result.snapshot.clipCount).toBe(2);
     expect(result.snapshot.lastClipAt).toEqual(expect.any(String));
+  });
+
+  it('treats full-scale peaks as headroom pressure without counting them as hard clips', async () => {
+    const result = await runMeter([0.4, 1, -1, 0.6]);
+
+    expect(result.snapshot.inputPeakDb).toBe(0);
+    expect(result.snapshot.clipCount).toBe(0);
+    expect(result.snapshot.lastClipAt).toBeNull();
   });
 
   it('samples large chunks without changing playback bytes', async () => {

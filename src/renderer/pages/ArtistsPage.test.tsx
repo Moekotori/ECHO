@@ -428,6 +428,49 @@ describe('ArtistsPage', () => {
     expect(screen.queryByText('AR')).toBeNull();
   });
 
+  it('refreshes the artist wall avatar after an artist image update reuses the same local URL', async () => {
+    let emitArtistImagesUpdated: (payload: { artistId: string | null; artistKey: string; status: string }) => void = () => undefined;
+    const getArtists = vi.fn().mockResolvedValue(
+      page([
+        artist('1', {
+          avatarUrl: 'echo-artist-image://large/artist-1',
+          avatarStatus: 'matched',
+        }),
+      ]),
+    );
+    const getArtist = vi.fn().mockResolvedValue(
+      artist('1', {
+        avatarThumbUrl: 'echo-artist-image://thumb/artist-1',
+        avatarUrl: 'echo-artist-image://large/artist-1',
+        avatarStatus: 'matched',
+      }),
+    );
+    installLibrary(getArtists, vi.fn().mockResolvedValue({ artistWallAlbumArtwork: false, autoFetchArtistImages: false }));
+    window.echo!.library.getArtist = getArtist;
+    window.echo!.library.onArtistImagesUpdated = vi.fn((callback: (payload: { artistId: string | null; artistKey: string; status: string }) => void) => {
+      emitArtistImagesUpdated = callback;
+      return vi.fn();
+    });
+
+    renderArtistsPage();
+
+    await screen.findByText('Artist 1');
+    const staleImage = document.querySelector('.artist-avatar img') as HTMLImageElement | null;
+    expect(staleImage?.getAttribute('src')).toBe('echo-artist-image://large/artist-1');
+    fireEvent.error(staleImage!);
+    expect(document.querySelector('.artist-avatar img')).toBeNull();
+    expect(screen.getByText('AR')).toBeTruthy();
+
+    emitArtistImagesUpdated({ artistId: '1', artistKey: 'artist-1', status: 'matched' });
+
+    await waitFor(() => expect(getArtist).toHaveBeenCalledWith('1'));
+    await waitFor(() => expect(document.querySelector('.artist-avatar img')?.getAttribute('src')).toBe('echo-artist-image://large/artist-1?v=1'));
+    expect((document.querySelector('.artist-avatar img') as HTMLImageElement | null)?.getAttribute('srcset')).toBe(
+      'echo-artist-image://thumb/artist-1?v=1 192w, echo-artist-image://large/artist-1?v=1 1024w',
+    );
+    expect(screen.queryByText('AR')).toBeNull();
+  });
+
   it('queues current page artist avatars only when automatic fetching is enabled', async () => {
     const getArtists = vi.fn().mockResolvedValue(page([artist('1'), artist('2')]));
     const refreshVisibleArtistImages = vi.fn().mockResolvedValue({ queued: 2, skipped: 0 });

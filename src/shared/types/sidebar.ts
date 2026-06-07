@@ -25,6 +25,13 @@ export const sidebarRouteIds = [
 export type SidebarRouteId = typeof sidebarRouteIds[number];
 
 export const defaultSidebarRouteOrder: SidebarRouteId[] = [...sidebarRouteIds];
+export const defaultSidebarHiddenRouteIds: SidebarRouteId[] = [
+  'inbox',
+  'plugins',
+  'import-folder',
+  'lyrics-settings',
+  'import-file',
+];
 export const lockedVisibleSidebarRouteIds: SidebarRouteId[] = ['settings'];
 
 const sidebarRouteIdSet = new Set<string>(sidebarRouteIds);

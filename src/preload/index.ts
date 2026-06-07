@@ -15,6 +15,7 @@ import type { SmtcCommand, SmtcLyricsProgress } from '../shared/types/smtc';
 import type { UpdateStatus } from '../shared/types/updates';
 import type { DiagnosticConsoleEntry } from '../shared/types/diagnostics';
 import type { DataBackupProgress } from '../shared/types/settingsBackup';
+import type { SleepTimerStatus, SleepTimerStartRequest } from '../shared/types/sleepTimer';
 import { calculateReplayGain, dbToLinearGain, type ReplayGainCalculation, type ReplayGainTrackData } from '../shared/utils/replayGain';
 import { DEFAULT_REPLAY_GAIN_TARGET_LUFS } from '../shared/constants/replayGain';
 
@@ -1734,6 +1735,10 @@ const echoApi: EchoApi = {
     setArtistImageJobsPaused: (paused) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesSetPaused, paused),
     kickoffArtistImageBackfill: (options) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesKickoff, options),
     clearArtistImageCache: () => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesClearCache),
+    chooseArtistAvatar: (artistId) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesChooseCustom, artistId),
+    setArtistAvatarFromUrl: (artistId, url) =>
+      ipcRenderer.invoke(IpcChannels.LibraryArtistImagesSetCustomUrl, { artistId, url }),
+    clearCustomArtistAvatar: (artistId) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesClearCustom, artistId),
     onArtistImagesUpdated: (handler) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: unknown): void => {
         handler(payload as { artistId: string | null; artistKey: string; status: string });
@@ -1804,6 +1809,9 @@ const echoApi: EchoApi = {
     scanMissingMetadata: (options) => ipcRenderer.invoke(IpcChannels.LibraryNetworkScanMissingMetadata, options),
     startMissingMetadataScan: (options) => ipcRenderer.invoke(IpcChannels.LibraryNetworkStartMissingMetadataScan, options),
     getMissingMetadataScanStatus: (jobId) => ipcRenderer.invoke(IpcChannels.LibraryNetworkGetMissingMetadataScanStatus, jobId),
+    startMissingCoverBackfill: (options) => ipcRenderer.invoke(IpcChannels.LibraryNetworkStartMissingCoverBackfill, options),
+    getMissingCoverBackfillStatus: (jobId) => ipcRenderer.invoke(IpcChannels.LibraryNetworkGetMissingCoverBackfillStatus, jobId),
+    getActiveMissingCoverBackfillStatus: () => ipcRenderer.invoke(IpcChannels.LibraryNetworkGetActiveMissingCoverBackfillStatus),
     showNetworkCandidates: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryNetworkShowCandidates, trackId),
     searchNetworkTagCandidates: (trackId, options) =>
       ipcRenderer.invoke(IpcChannels.LibrarySearchNetworkTagCandidates, { trackId, ...options }),
@@ -2306,7 +2314,20 @@ const echoApi: EchoApi = {
     reload: (pluginId) => ipcRenderer.invoke(IpcChannels.PluginsReload, pluginId),
     openDirectory: (pluginId) => ipcRenderer.invoke(IpcChannels.PluginsOpenDirectory, pluginId),
     exportPackage: (pluginId) => ipcRenderer.invoke(IpcChannels.PluginsExportPackage, pluginId),
-    importPackage: () => ipcRenderer.invoke(IpcChannels.PluginsImportPackage),
+    importPackage: (source) => {
+      if (source === undefined) {
+        return ipcRenderer.invoke(IpcChannels.PluginsImportPackage);
+      }
+      if (typeof source === 'string') {
+        return ipcRenderer.invoke(IpcChannels.PluginsImportPackage, source);
+      }
+
+      const sourcePath = webUtils?.getPathForFile(source) || '';
+      if (!sourcePath) {
+        throw new Error('plugin_package_path_unavailable');
+      }
+      return ipcRenderer.invoke(IpcChannels.PluginsImportPackage, sourcePath);
+    },
     runCommand: (request) => ipcRenderer.invoke(IpcChannels.PluginsRunCommand, request),
     queryMetadata: (request) => ipcRenderer.invoke(IpcChannels.PluginsQueryMetadata, request),
     querySources: (request) => ipcRenderer.invoke(IpcChannels.PluginsQuerySources, request),
@@ -2357,6 +2378,7 @@ const echoApi: EchoApi = {
     setBandEnabled: (request) => ipcRenderer.invoke(IpcChannels.EqSetBandEnabled, request),
     setPreamp: (preampDb) => ipcRenderer.invoke(IpcChannels.EqSetPreamp, preampDb),
     setDspHeadroom: (headroomDb) => ipcRenderer.invoke(IpcChannels.EqSetDspHeadroom, headroomDb),
+    setDspSafetyLimiterEnabled: (enabled) => ipcRenderer.invoke(IpcChannels.EqSetDspSafetyLimiterEnabled, enabled),
     setPreset: (presetId) => ipcRenderer.invoke(IpcChannels.EqSetPreset, presetId),
     reset: () => ipcRenderer.invoke(IpcChannels.EqReset),
     listPresets: () => ipcRenderer.invoke(IpcChannels.EqListPresets),
@@ -2396,6 +2418,18 @@ const echoApi: EchoApi = {
     setRoomCorrectionEnabled: (enabled) => ipcRenderer.invoke(IpcChannels.RoomCorrectionSetEnabled, enabled) as Promise<RoomCorrectionState>,
     setRoomCorrectionTrim: (trimDb) => ipcRenderer.invoke(IpcChannels.RoomCorrectionSetTrim, trimDb) as Promise<RoomCorrectionState>,
     clearRoomCorrection: () => ipcRenderer.invoke(IpcChannels.RoomCorrectionClear) as Promise<RoomCorrectionState>,
+  },
+  sleepTimer: {
+    start: (request) => ipcRenderer.invoke(IpcChannels.SleepTimerStart, request),
+    cancel: () => ipcRenderer.invoke(IpcChannels.SleepTimerCancel),
+    getStatus: () => ipcRenderer.invoke(IpcChannels.SleepTimerGetStatus),
+    onTick: (handler) => {
+      const listener = (_event: Electron.IpcRendererEvent, remainingMs: unknown): void => {
+        handler(typeof remainingMs === 'number' ? remainingMs : 0);
+      };
+      ipcRenderer.on(IpcChannels.SleepTimerOnTick, listener);
+      return () => ipcRenderer.off(IpcChannels.SleepTimerOnTick, listener);
+    },
   },
 };
 

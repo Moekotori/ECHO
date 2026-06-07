@@ -160,6 +160,22 @@ describe('LyricsMatchEngine', () => {
     expect(matched.candidates[0].risk).toBe('high');
   });
 
+  it('allows safe medium-risk candidates only for relaxed backfill matching', async () => {
+    const engine = new LyricsMatchEngine([provider('lrclib', [result({ durationSeconds: 121 })])]);
+    const coverQuery = { ...query, title: 'Echo Song Cover', durationSeconds: 120 };
+
+    const normal = await engine.match(coverQuery, { enabledProviders: ['lrclib'], autoAcceptScore: 0.45 });
+    const relaxed = await engine.match(coverQuery, {
+      enabledProviders: ['lrclib'],
+      autoAcceptScore: 0.45,
+      relaxedAutoAccept: true,
+    });
+
+    expect(normal.accepted).toBeNull();
+    expect(normal.candidates[0].risk).toBe('medium');
+    expect(relaxed.accepted?.providerLyricsId).toBe('same-id');
+  });
+
   it('does not auto accept a user-rejected provider lyrics id', async () => {
     const engine = new LyricsMatchEngine([provider('lrclib', [result()])]);
 

@@ -1,5 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { AlertTriangle, Download, FileText, Power, RefreshCw, RotateCcw, ShieldCheck } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import '@fontsource/outfit/400.css';
 import '@fontsource/outfit/500.css';
 import '@fontsource/outfit/600.css';
@@ -98,6 +100,82 @@ type CrashGuardState = {
   actionMessage: string;
 };
 
+type CrashGuardActionButtonProps = {
+  disabled?: boolean;
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  title: string;
+  variant?: 'primary' | 'secondary' | 'danger';
+};
+
+const crashGuardActionButtonStyleByVariant = (
+  variant: NonNullable<CrashGuardActionButtonProps['variant']>,
+  disabled: boolean,
+): React.CSSProperties => {
+  const baseStyle: React.CSSProperties = {
+    minHeight: 46,
+    minWidth: 144,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    border: '1px solid rgba(20, 28, 42, 0.14)',
+    borderRadius: 8,
+    padding: '0 16px',
+    color: '#18212f',
+    background: '#fffaf0',
+    font: 'inherit',
+    fontSize: 14,
+    fontWeight: 800,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.52 : 1,
+    boxShadow: '0 8px 18px rgba(20, 28, 42, 0.08)',
+  };
+
+  if (variant === 'primary') {
+    return {
+      ...baseStyle,
+      borderColor: '#0f766e',
+      color: '#ffffff',
+      background: '#0f766e',
+      boxShadow: '0 16px 30px rgba(15, 118, 110, 0.22)',
+    };
+  }
+
+  if (variant === 'danger') {
+    return {
+      ...baseStyle,
+      borderColor: '#b42318',
+      color: '#ffffff',
+      background: '#b42318',
+      boxShadow: '0 16px 28px rgba(180, 35, 24, 0.2)',
+    };
+  }
+
+  return baseStyle;
+};
+
+const CrashGuardActionButton = ({
+  disabled = false,
+  icon: Icon,
+  label,
+  onClick,
+  title,
+  variant = 'secondary',
+}: CrashGuardActionButtonProps): JSX.Element => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    style={crashGuardActionButtonStyleByVariant(variant, disabled)}
+    title={title}
+  >
+    <Icon size={17} strokeWidth={2.2} aria-hidden="true" />
+    <span>{label}</span>
+  </button>
+);
+
 class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
   state: CrashGuardState = {
     error: null,
@@ -125,9 +203,10 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
   };
 
   private exportDiagnostics = (): void => {
+    this.setActionMessage('正在准备诊断包...');
     void window.echo?.diagnostics.exportDiagnosticsZip()
       .then((outputPath) => {
-        this.setActionMessage(outputPath ? `已导出: ${outputPath}` : '已取消导出。');
+        this.setActionMessage(outputPath ? `诊断包已导出: ${outputPath}` : '已取消导出。');
       })
       .catch((error) => {
         this.setActionMessage(error instanceof Error ? error.message : String(error));
@@ -135,9 +214,10 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
   };
 
   private openCrashReport = (): void => {
+    this.setActionMessage('正在打开崩溃报告...');
     void window.echo?.diagnostics.openCrashReport()
       .then((outputPath) => {
-        this.setActionMessage(outputPath ? `已打开: ${outputPath}` : '未找到崩溃报告。');
+        this.setActionMessage(outputPath ? `已打开崩溃报告: ${outputPath}` : '未找到崩溃报告。');
       })
       .catch((error) => {
         this.setActionMessage(error instanceof Error ? error.message : String(error));
@@ -145,12 +225,14 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
   };
 
   private restartApp = (): void => {
+    this.setActionMessage('已请求重启 ECHO。若再次回到这里，请优先导出诊断包。');
     void window.echo?.diagnostics.relaunchApp().catch((error) => {
       this.setActionMessage(error instanceof Error ? error.message : String(error));
     });
   };
 
   private quitApp = (): void => {
+    this.setActionMessage('正在关闭 ECHO...');
     void window.echo?.app.quit().catch((error) => {
       this.setActionMessage(error instanceof Error ? error.message : String(error));
     });
@@ -167,46 +249,105 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
 
     const diagnosticsAvailable = Boolean(window.echo?.diagnostics);
     const appControlsAvailable = Boolean(window.echo?.app);
+    const bridgeStatus = diagnosticsAvailable ? '诊断桥在线' : '诊断桥不可用';
+    const windowLabel = this.props.label === 'main-window'
+      ? '主窗口'
+      : this.props.label === 'mini-player'
+        ? '迷你播放器'
+        : '桌面歌词';
 
     return (
       <main style={crashGuardShellStyle}>
-        <section style={crashGuardPanelStyle}>
-          <div style={crashGuardTopStyle}>
-            <p style={crashGuardEyebrowStyle}>ECHO Recovery</p>
-            <span style={crashGuardChipStyle}>UI 保护页</span>
-          </div>
-          <div style={crashGuardBodyStyle}>
-            <aside style={crashGuardRailStyle} aria-hidden="true">
-              <span style={crashGuardRailCodeStyle}>UI</span>
-              <span style={crashGuardRailTextStyle}>已接管</span>
-            </aside>
-            <div style={crashGuardContentStyle}>
-              <h1 style={crashGuardTitleStyle}>界面崩了，但 ECHO 还在。</h1>
-              <p style={crashGuardLeadStyle}>
-                当前窗口进入恢复模式。可以先导出诊断和查看报告，也可以重载界面、重启应用，或者直接关闭 ECHO。
-              </p>
-              <div style={crashGuardActionsStyle}>
-                <button type="button" onClick={this.exportDiagnostics} disabled={!diagnosticsAvailable} style={crashGuardPrimaryButtonStyle}>
-                  导出日志
-                </button>
-                <button type="button" onClick={this.openCrashReport} disabled={!diagnosticsAvailable} style={crashGuardButtonStyle}>
-                  打开报告
-                </button>
-                <button type="button" onClick={this.reloadRenderer} style={crashGuardButtonStyle}>
-                  重载界面
-                </button>
-                <button type="button" onClick={this.restartApp} disabled={!diagnosticsAvailable} style={crashGuardButtonStyle}>
-                  重启 ECHO
-                </button>
-                <button type="button" onClick={this.quitApp} disabled={!appControlsAvailable} style={crashGuardDangerButtonStyle}>
-                  关闭 ECHO
-                </button>
+        <section style={crashGuardPanelStyle} aria-labelledby="echo-crash-guard-title">
+          <div style={crashGuardHeaderStyle}>
+            <div style={crashGuardBrandStyle}>
+              <span style={crashGuardSealStyle}>
+                <ShieldCheck size={19} strokeWidth={2.4} aria-hidden="true" />
+              </span>
+              <div>
+                <p style={crashGuardEyebrowStyle}>ECHO Next Recovery</p>
+                <strong style={crashGuardBrandTitleStyle}>Renderer Guard</strong>
               </div>
             </div>
+            <span style={crashGuardChipStyle}>{bridgeStatus}</span>
           </div>
-          <p style={crashGuardStatusStyle}>
-            {this.state.actionMessage || (diagnosticsAvailable ? '' : '诊断桥不可用，请手动重启 ECHO。')}
-          </p>
+          <div style={crashGuardBodyStyle}>
+            <aside style={crashGuardRailStyle}>
+              <div style={crashGuardWarningPlateStyle}>
+                <AlertTriangle size={38} strokeWidth={2.3} aria-hidden="true" />
+              </div>
+              <p style={crashGuardRailKickerStyle}>UI 保护已接管</p>
+              <strong style={crashGuardRailTitleStyle}>不要反复重启，先留下现场。</strong>
+              <dl style={crashGuardMetaListStyle}>
+                <div style={crashGuardMetaItemStyle}>
+                  <dt style={crashGuardMetaTermStyle}>窗口</dt>
+                  <dd style={crashGuardMetaValueStyle}>{windowLabel}</dd>
+                </div>
+                <div style={crashGuardMetaItemStyle}>
+                  <dt style={crashGuardMetaTermStyle}>状态</dt>
+                  <dd style={crashGuardMetaValueStyle}>{bridgeStatus}</dd>
+                </div>
+                <div style={crashGuardMetaItemStyle}>
+                  <dt style={crashGuardMetaTermStyle}>判断</dt>
+                  <dd style={crashGuardMetaValueStyle}>渲染层报错</dd>
+                </div>
+              </dl>
+            </aside>
+            <div style={crashGuardContentStyle}>
+              <p style={crashGuardSectionLabelStyle}>Crash containment</p>
+              <h1 id="echo-crash-guard-title" style={crashGuardTitleStyle}>
+                界面被保护页拦住了，ECHO 还活着。
+              </h1>
+              <p style={crashGuardLeadStyle}>
+                这是当前窗口的 React 渲染错误，不等于播放核心已经崩掉。重启后如果马上又回到这里，说明同一段界面状态还会触发错误；诊断包和报告比继续重启更有用。
+              </p>
+              <div style={crashGuardCalloutStyle}>
+                <strong style={crashGuardCalloutTitleStyle}>推荐顺序</strong>
+                <span>先导出诊断包，再打开崩溃报告；重载界面只适合临时状态抖动。</span>
+              </div>
+              <div style={crashGuardActionsStyle}>
+                <CrashGuardActionButton
+                  icon={Download}
+                  label="导出诊断包"
+                  onClick={this.exportDiagnostics}
+                  disabled={!diagnosticsAvailable}
+                  title="导出当前诊断信息和崩溃线索"
+                  variant="primary"
+                />
+                <CrashGuardActionButton
+                  icon={FileText}
+                  label="打开报告"
+                  onClick={this.openCrashReport}
+                  disabled={!diagnosticsAvailable}
+                  title="打开最近一次崩溃报告"
+                />
+                <CrashGuardActionButton
+                  icon={RefreshCw}
+                  label="重载界面"
+                  onClick={this.reloadRenderer}
+                  title="只刷新当前渲染窗口"
+                />
+                <CrashGuardActionButton
+                  icon={RotateCcw}
+                  label="重启应用"
+                  onClick={this.restartApp}
+                  disabled={!diagnosticsAvailable}
+                  title="重新启动 ECHO Next"
+                />
+                <CrashGuardActionButton
+                  icon={Power}
+                  label="关闭 ECHO"
+                  onClick={this.quitApp}
+                  disabled={!appControlsAvailable}
+                  title="退出 ECHO Next"
+                  variant="danger"
+                />
+              </div>
+              <p style={crashGuardStatusStyle}>
+                {this.state.actionMessage || (diagnosticsAvailable ? '诊断桥可用，可以安全导出现场信息。' : '诊断桥不可用，请手动重启 ECHO。')}
+              </p>
+            </div>
+          </div>
           <details style={crashGuardDetailsStyle}>
             <summary style={crashGuardSummaryStyle}>错误摘要</summary>
             <pre style={crashGuardPreStyle}>{this.state.error.message}</pre>
@@ -222,154 +363,231 @@ const crashGuardShellStyle: React.CSSProperties = {
   minHeight: '100vh',
   display: 'grid',
   placeItems: 'center',
-  padding: 24,
-  backgroundColor: '#eef2ef',
+  padding: 28,
+  backgroundColor: '#111827',
   backgroundImage:
-    'linear-gradient(rgba(16, 24, 40, 0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(16, 24, 40, 0.045) 1px, transparent 1px)',
-  backgroundSize: '36px 36px',
-  color: '#18212f',
+    'linear-gradient(135deg, rgba(17, 24, 39, 0.96) 0%, rgba(24, 33, 47, 0.98) 46%, rgba(236, 231, 221, 0.98) 46%, rgba(249, 246, 238, 0.98) 100%), linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px)',
+  backgroundSize: 'auto, 42px 42px, 42px 42px',
+  color: '#141c2a',
   fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif',
 };
 
 const crashGuardPanelStyle: React.CSSProperties = {
-  width: 'min(940px, 100%)',
-  border: '1px solid rgba(24, 33, 47, 0.12)',
+  width: 'min(1120px, 100%)',
+  border: '1px solid rgba(255, 255, 255, 0.72)',
   borderRadius: 8,
-  padding: 28,
-  background: '#fbfcf8',
-  boxShadow: '0 24px 70px rgba(24, 33, 47, 0.18)',
+  padding: 26,
+  background: 'rgba(255, 251, 241, 0.96)',
+  boxShadow: '0 30px 80px rgba(7, 11, 19, 0.32)',
+  backdropFilter: 'blur(14px)',
 };
 
-const crashGuardTopStyle: React.CSSProperties = {
+const crashGuardHeaderStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
   gap: 16,
-  paddingBottom: 18,
-  borderBottom: '1px solid rgba(24, 33, 47, 0.1)',
+  paddingBottom: 22,
+  borderBottom: '1px solid rgba(20, 28, 42, 0.12)',
+};
+
+const crashGuardBrandStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+};
+
+const crashGuardSealStyle: React.CSSProperties = {
+  width: 42,
+  height: 42,
+  display: 'inline-grid',
+  placeItems: 'center',
+  borderRadius: 8,
+  color: '#f7d477',
+  background: '#172033',
+  boxShadow: 'inset 0 -4px 0 #b76e2b',
 };
 
 const crashGuardEyebrowStyle: React.CSSProperties = {
   margin: 0,
-  color: '#176c66',
-  fontSize: 13,
-  fontWeight: 900,
-  letterSpacing: '0.12em',
+  color: '#687385',
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: 0,
   textTransform: 'uppercase',
 };
 
+const crashGuardBrandTitleStyle: React.CSSProperties = {
+  display: 'block',
+  marginTop: 2,
+  color: '#172033',
+  fontSize: 17,
+  fontWeight: 900,
+};
+
 const crashGuardChipStyle: React.CSSProperties = {
-  border: '1px solid rgba(23, 108, 102, 0.18)',
-  borderRadius: 999,
-  padding: '6px 10px',
-  color: '#176c66',
-  background: '#e7f2ed',
+  border: '1px solid rgba(15, 118, 110, 0.24)',
+  borderRadius: 8,
+  padding: '8px 11px',
+  color: '#0f766e',
+  background: '#e9f5ef',
   fontSize: 12,
   fontWeight: 800,
 };
 
 const crashGuardBodyStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'minmax(72px, 112px) minmax(0, 1fr)',
-  gap: 28,
-  marginTop: 26,
+  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+  gap: 26,
+  marginTop: 24,
 };
 
 const crashGuardRailStyle: React.CSSProperties = {
-  minHeight: 178,
+  minHeight: 320,
+  display: 'flex',
+  flexDirection: 'column',
+  justifyContent: 'space-between',
+  borderRadius: 8,
+  padding: 24,
+  background: '#172033',
+  color: '#fff7e8',
+  boxShadow: 'inset 0 -7px 0 #d99a2b',
+};
+
+const crashGuardWarningPlateStyle: React.CSSProperties = {
+  width: 74,
+  height: 74,
   display: 'grid',
   placeItems: 'center',
-  alignContent: 'center',
-  gap: 10,
+  border: '1px solid rgba(247, 212, 119, 0.34)',
   borderRadius: 8,
-  background: '#1d2633',
-  color: '#fff7e3',
-  boxShadow: 'inset 0 -6px 0 #e2aa3b',
+  color: '#f7d477',
+  background: 'rgba(247, 212, 119, 0.1)',
 };
 
-const crashGuardRailCodeStyle: React.CSSProperties = {
-  fontSize: 34,
+const crashGuardRailKickerStyle: React.CSSProperties = {
+  margin: '24px 0 0',
+  color: '#f7d477',
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+const crashGuardRailTitleStyle: React.CSSProperties = {
+  display: 'block',
+  maxWidth: 300,
+  marginTop: 8,
+  color: '#fffaf0',
+  fontSize: 27,
+  lineHeight: 1.22,
   fontWeight: 900,
-  lineHeight: 1,
 };
 
-const crashGuardRailTextStyle: React.CSSProperties = {
-  color: '#f0cf8b',
+const crashGuardMetaListStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 10,
+  margin: '28px 0 0',
+};
+
+const crashGuardMetaItemStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '72px minmax(0, 1fr)',
+  gap: 10,
+  alignItems: 'center',
+  minHeight: 34,
+  borderTop: '1px solid rgba(255, 250, 240, 0.12)',
+  paddingTop: 10,
+};
+
+const crashGuardMetaTermStyle: React.CSSProperties = {
+  margin: 0,
+  color: 'rgba(255, 250, 240, 0.58)',
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const crashGuardMetaValueStyle: React.CSSProperties = {
+  margin: 0,
+  color: '#fffaf0',
   fontSize: 13,
   fontWeight: 800,
 };
 
 const crashGuardContentStyle: React.CSSProperties = {
   minWidth: 0,
+  alignSelf: 'center',
+};
+
+const crashGuardSectionLabelStyle: React.CSSProperties = {
+  margin: 0,
+  color: '#b76e2b',
+  fontSize: 13,
+  fontWeight: 900,
 };
 
 const crashGuardTitleStyle: React.CSSProperties = {
-  margin: 0,
-  color: '#111827',
-  fontSize: 42,
-  lineHeight: 1.16,
+  maxWidth: 680,
+  margin: '10px 0 0',
+  color: '#141c2a',
+  fontSize: 40,
+  lineHeight: 1.18,
   fontWeight: 900,
 };
 
 const crashGuardLeadStyle: React.CSSProperties = {
-  maxWidth: 660,
-  margin: '16px 0 0',
-  color: '#4b5563',
+  maxWidth: 720,
+  margin: '18px 0 0',
+  color: '#485467',
   fontSize: 15,
   lineHeight: 1.8,
+};
+
+const crashGuardCalloutStyle: React.CSSProperties = {
+  maxWidth: 720,
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 8,
+  marginTop: 22,
+  borderLeft: '4px solid #d99a2b',
+  padding: '12px 14px',
+  color: '#3c4658',
+  background: '#f4ecd9',
+  borderRadius: 8,
+  fontSize: 14,
+  lineHeight: 1.6,
+};
+
+const crashGuardCalloutTitleStyle: React.CSSProperties = {
+  color: '#172033',
+  fontWeight: 900,
 };
 
 const crashGuardActionsStyle: React.CSSProperties = {
   display: 'flex',
   flexWrap: 'wrap',
-  gap: 10,
+  gap: 11,
   marginTop: 24,
 };
 
-const crashGuardButtonStyle: React.CSSProperties = {
-  minHeight: 44,
-  border: '1px solid rgba(24, 33, 47, 0.14)',
-  borderRadius: 8,
-  padding: '0 18px',
-  color: '#1f2937',
-  background: '#ffffff',
-  font: 'inherit',
-  fontWeight: 800,
-  cursor: 'pointer',
-  boxShadow: '0 1px 2px rgba(24, 33, 47, 0.08)',
-};
-
-const crashGuardPrimaryButtonStyle: React.CSSProperties = {
-  ...crashGuardButtonStyle,
-  borderColor: '#176c66',
-  color: '#ffffff',
-  background: '#176c66',
-};
-
-const crashGuardDangerButtonStyle: React.CSSProperties = {
-  ...crashGuardButtonStyle,
-  borderColor: '#b42318',
-  color: '#ffffff',
-  background: '#b42318',
-};
-
 const crashGuardStatusStyle: React.CSSProperties = {
-  minHeight: 22,
-  margin: '18px 0 0',
-  color: '#9a3412',
+  minHeight: 24,
+  margin: '16px 0 0',
+  color: '#8a4b0f',
   fontSize: 14,
-  fontWeight: 700,
+  fontWeight: 800,
   wordBreak: 'break-word',
 };
 
 const crashGuardDetailsStyle: React.CSSProperties = {
-  marginTop: 18,
-  color: '#374151',
+  marginTop: 24,
+  borderTop: '1px solid rgba(20, 28, 42, 0.12)',
+  paddingTop: 18,
+  color: '#3c4658',
 };
 
 const crashGuardSummaryStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontWeight: 900,
+  outline: 'none',
 };
 
 const crashGuardPreStyle: React.CSSProperties = {
@@ -377,10 +595,10 @@ const crashGuardPreStyle: React.CSSProperties = {
   overflow: 'auto',
   margin: '14px 0 0',
   padding: 14,
-  border: '1px solid rgba(24, 33, 47, 0.1)',
+  border: '1px solid rgba(20, 28, 42, 0.14)',
   borderRadius: 8,
-  background: '#111827',
-  color: '#e5e7eb',
+  background: '#0f1724',
+  color: '#e9eef7',
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
 };

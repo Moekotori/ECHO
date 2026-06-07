@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, Code2, Download, Eye, FolderOpen, LockKeyhole, PackagePlus, Play, Power, RefreshCw, ScrollText, ShieldCheck, TerminalSquare, Upload } from 'lucide-react';
 import { pluginPanelBridgeActions, pluginPanelBridgeChannel, pluginPanelBridgeVersion, pluginPermissionDescriptors } from '../../shared/types/plugins';
 import type {
@@ -37,6 +37,14 @@ const exampleLabels: Array<{ kind: PluginCreateExampleKind; label: string; descr
 const formatError = (error: unknown): string => (error instanceof Error ? error.message : String(error || '插件操作失败'));
 
 const fileUrlFromPath = (path: string): string => `file:///${path.replace(/\\/gu, '/')}`;
+
+const echoPackageExtension = '.echo';
+
+const hasFileDrag = (dataTransfer: DataTransfer): boolean =>
+  Array.from(dataTransfer.types ?? []).some((type) => type === 'Files');
+
+const firstEchoPackageFile = (files: FileList | null | undefined): File | null =>
+  Array.from(files ?? []).find((file) => file.name.toLowerCase().endsWith(echoPackageExtension)) ?? null;
 
 const getPermissionLabel = (permission: PluginPermission): string => pluginPermissionDescriptors[permission]?.label ?? permission;
 
@@ -220,6 +228,7 @@ export const PluginsPage = (): JSX.Element => {
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [isPackageDragging, setIsPackageDragging] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<PluginSettingsPatch>({});
 
   const selectedPlugin = useMemo(
@@ -281,7 +290,7 @@ export const PluginsPage = (): JSX.Element => {
     [refresh, refreshLogs, selectedPlugin?.id],
   );
 
-  const handleImportPackage = (): void => {
+  const importPackage = useCallback((source?: File): void => {
     if (!pluginsApi) {
       return;
     }
@@ -289,7 +298,7 @@ export const PluginsPage = (): JSX.Element => {
       try {
         setBusyAction('import-package');
         setMessage(null);
-        const result = await pluginsApi.importPackage();
+        const result = await pluginsApi.importPackage(source);
         if (!result) {
           setMessage('已取消导入。');
           return;
@@ -304,7 +313,52 @@ export const PluginsPage = (): JSX.Element => {
         setBusyAction(null);
       }
     })();
+  }, [pluginsApi, refresh, refreshLogs]);
+
+  const handleImportPackage = (): void => {
+    importPackage();
   };
+
+  const handlePackageDragOver = useCallback((event: DragEvent<HTMLDivElement>): void => {
+    if (!firstEchoPackageFile(event.dataTransfer.files) && !hasFileDrag(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = busyAction === 'import-package' ? 'none' : 'copy';
+    setIsPackageDragging(true);
+  }, [busyAction]);
+
+  const handlePackageDragLeave = useCallback((event: DragEvent<HTMLDivElement>): void => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+
+    setIsPackageDragging(false);
+  }, []);
+
+  const handlePackageDrop = useCallback((event: DragEvent<HTMLDivElement>): void => {
+    if (!firstEchoPackageFile(event.dataTransfer.files) && !hasFileDrag(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setIsPackageDragging(false);
+
+    if (busyAction === 'import-package') {
+      return;
+    }
+
+    const file = firstEchoPackageFile(event.dataTransfer.files);
+    if (!file) {
+      setMessage('请拖入 .echo 插件包。');
+      return;
+    }
+
+    importPackage(file);
+  }, [busyAction, importPackage]);
 
   const handleExportPackage = (plugin: PluginSummary): void => {
     if (!pluginsApi) {
@@ -461,7 +515,13 @@ export const PluginsPage = (): JSX.Element => {
   }
 
   return (
-    <div className="page-stack plugins-page">
+    <div
+      className="page-stack plugins-page"
+      data-package-dragging={isPackageDragging ? 'true' : 'false'}
+      onDragLeave={handlePackageDragLeave}
+      onDragOver={handlePackageDragOver}
+      onDrop={handlePackageDrop}
+    >
       <header className="plain-page-header plugins-header">
         <div>
           <span className="section-kicker">本地插件</span>
@@ -484,6 +544,13 @@ export const PluginsPage = (): JSX.Element => {
           </button>
         </div>
       </header>
+
+      {isPackageDragging ? (
+        <div className="plugins-drop-overlay" aria-hidden="true">
+          <Upload size={26} />
+          <strong>释放导入 .echo 插件包</strong>
+        </div>
+      ) : null}
 
       <section className="plugin-example-grid" aria-label="示例插件">
         {exampleLabels.map((example) => (

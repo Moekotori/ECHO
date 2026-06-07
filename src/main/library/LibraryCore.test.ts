@@ -3801,6 +3801,31 @@ describe('Library Core', () => {
     harness.cleanup();
   });
 
+  it('can defer full grouping refresh for latency-sensitive single-file imports', async () => {
+    const metadataReader = new FakeMetadataReader(metadataResult({
+      title: 'Dropped Song',
+      artist: 'Dropped Artist',
+      album: 'Dropped Album',
+      albumArtist: 'Dropped Artist',
+    }));
+    const harness = createHarness({ metadataReader, coverExtractor: new FakeCoverExtractor() });
+    const filePath = writeAudioFile(harness.folder, 'Dropped Song.flac');
+
+    const track = await harness.service.importAudioFile(filePath, { deferGroupingRefresh: true });
+
+    expect(track.title).toBe('Dropped Song');
+    expect(harness.service.getTracks({ pageSize: 10 }).total).toBe(1);
+    expect(harness.service.getAlbums({ pageSize: 10 }).total).toBe(1);
+    expect(harness.service.getArtists({ pageSize: 10 }).total).toBe(0);
+    expect(harness.service.getDiagnostics().groupingRefreshQueued).toBe(true);
+
+    await (harness.service as unknown as { runScheduledGroupingRefresh: () => Promise<void> }).runScheduledGroupingRefresh();
+
+    expect(harness.service.getArtists({ pageSize: 10 }).total).toBeGreaterThan(0);
+    expect(harness.service.getDiagnostics().groupingRefreshQueued).toBe(false);
+    harness.cleanup();
+  });
+
   it('updates an existing track when the same path is imported again', async () => {
     const metadataReader = new FakeMetadataReader(metadataResult({ title: 'Repeat Title' }));
     const harness = createHarness({ metadataReader, coverExtractor: new FakeCoverExtractor() });

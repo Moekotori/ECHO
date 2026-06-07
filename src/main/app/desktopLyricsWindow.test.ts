@@ -2,8 +2,93 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   settings: {
+    desktopLyricsEnabled: false,
+    desktopLyricsLocked: false,
     desktopLyricsBounds: null as { x: number; y: number; width: number; height: number } | null,
     desktopLyricsTextDirection: 'horizontal' as 'horizontal' | 'vertical',
+  },
+  createdWindows: [] as Array<{
+    visible: boolean;
+    destroyed: boolean;
+    bounds: { x: number; y: number; width: number; height: number };
+    webContents: {
+      on: ReturnType<typeof vi.fn>;
+      send: ReturnType<typeof vi.fn>;
+    };
+    destroy: ReturnType<typeof vi.fn>;
+    getBounds: ReturnType<typeof vi.fn>;
+    hide: ReturnType<typeof vi.fn>;
+    isDestroyed: ReturnType<typeof vi.fn>;
+    isVisible: ReturnType<typeof vi.fn>;
+    loadFile: ReturnType<typeof vi.fn>;
+    loadURL: ReturnType<typeof vi.fn>;
+    moveTop: ReturnType<typeof vi.fn>;
+    on: ReturnType<typeof vi.fn>;
+    once: ReturnType<typeof vi.fn>;
+    setAlwaysOnTop: ReturnType<typeof vi.fn>;
+    setBounds: ReturnType<typeof vi.fn>;
+    setIgnoreMouseEvents: ReturnType<typeof vi.fn>;
+    setMenuBarVisibility: ReturnType<typeof vi.fn>;
+    setVisibleOnAllWorkspaces: ReturnType<typeof vi.fn>;
+    showInactive: ReturnType<typeof vi.fn>;
+  }>,
+  makeBrowserWindow: (options: { x: number; y: number; width: number; height: number }) => {
+    const listeners = new Map<string, Array<() => void>>();
+    const window = {
+      visible: false,
+      destroyed: false,
+      bounds: {
+        x: options.x,
+        y: options.y,
+        width: options.width,
+        height: options.height,
+      },
+      webContents: {
+        on: vi.fn(),
+        send: vi.fn(),
+      },
+      destroy: vi.fn(() => {
+        window.destroyed = true;
+        for (const listener of listeners.get('closed') ?? []) {
+          listener();
+        }
+      }),
+      getBounds: vi.fn(() => window.bounds),
+      hide: vi.fn(() => {
+        window.visible = false;
+        for (const listener of listeners.get('hide') ?? []) {
+          listener();
+        }
+      }),
+      isDestroyed: vi.fn(() => window.destroyed),
+      isVisible: vi.fn(() => window.visible),
+      loadFile: vi.fn(),
+      loadURL: vi.fn(),
+      moveTop: vi.fn(),
+      on: vi.fn((event: string, listener: () => void) => {
+        listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+        return window;
+      }),
+      once: vi.fn((event: string, listener: () => void) => {
+        listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+        return window;
+      }),
+      setAlwaysOnTop: vi.fn(),
+      setBounds: vi.fn((bounds: { x: number; y: number; width: number; height: number }) => {
+        window.bounds = bounds;
+      }),
+      setIgnoreMouseEvents: vi.fn(),
+      setMenuBarVisibility: vi.fn(),
+      setVisibleOnAllWorkspaces: vi.fn(),
+      showInactive: vi.fn(() => {
+        window.visible = true;
+        for (const listener of listeners.get('show') ?? []) {
+          listener();
+        }
+      }),
+    };
+
+    return window;
   },
   displays: [
     {
@@ -16,8 +101,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('electron', () => ({
   BrowserWindow: class {
+    constructor(options: { x: number; y: number; width: number; height: number }) {
+      const window = mocks.makeBrowserWindow(options);
+      mocks.createdWindows.push(window);
+      return window;
+    }
+
     static getAllWindows(): unknown[] {
-      return [];
+      return mocks.createdWindows;
     }
   },
   screen: {
@@ -47,8 +138,11 @@ vi.mock('../diagnostics/DevConsoleService', () => ({
 
 describe('desktop lyrics window bounds', () => {
   beforeEach(() => {
+    mocks.settings.desktopLyricsEnabled = false;
+    mocks.settings.desktopLyricsLocked = false;
     mocks.settings.desktopLyricsBounds = null;
     mocks.settings.desktopLyricsTextDirection = 'horizontal';
+    mocks.createdWindows.splice(0);
     mocks.displays = [
       {
         bounds: { x: 0, y: 0, width: 1920, height: 1080 },
@@ -115,5 +209,50 @@ describe('desktop lyrics window bounds', () => {
       width: 760,
       height: 640,
     });
+  });
+});
+
+describe('desktop lyrics startup memory', () => {
+  beforeEach(() => {
+    mocks.settings.desktopLyricsEnabled = false;
+    mocks.settings.desktopLyricsLocked = false;
+    mocks.settings.desktopLyricsBounds = null;
+    mocks.settings.desktopLyricsTextDirection = 'horizontal';
+    mocks.createdWindows.splice(0);
+    mocks.setAppSettings.mockClear();
+    vi.resetModules();
+  });
+
+  it('does not restore the desktop lyrics window when it was disabled before exit', async () => {
+    const { restoreDesktopLyricsWindowOnStartup } = await import('./desktopLyricsWindow');
+
+    restoreDesktopLyricsWindowOnStartup();
+
+    expect(mocks.createdWindows).toHaveLength(0);
+    expect(mocks.setAppSettings).not.toHaveBeenCalledWith({ desktopLyricsEnabled: true });
+  });
+
+  it('restores the desktop lyrics window when it was open before exit', async () => {
+    mocks.settings.desktopLyricsEnabled = true;
+    const { restoreDesktopLyricsWindowOnStartup } = await import('./desktopLyricsWindow');
+
+    restoreDesktopLyricsWindowOnStartup();
+
+    expect(mocks.createdWindows).toHaveLength(1);
+    expect(mocks.createdWindows[0].showInactive).toHaveBeenCalledTimes(1);
+    expect(mocks.createdWindows[0].setAlwaysOnTop).toHaveBeenCalled();
+    expect(mocks.setAppSettings).toHaveBeenCalledWith({ desktopLyricsEnabled: true });
+  });
+
+  it('keeps the desktop lyrics enabled memory when closing a visible window during quit', async () => {
+    mocks.settings.desktopLyricsEnabled = true;
+    const { closeDesktopLyricsWindow, showDesktopLyricsWindow } = await import('./desktopLyricsWindow');
+    showDesktopLyricsWindow();
+    mocks.setAppSettings.mockClear();
+
+    closeDesktopLyricsWindow();
+
+    expect(mocks.setAppSettings).toHaveBeenCalledWith({ desktopLyricsEnabled: true });
+    expect(mocks.createdWindows[0].destroy).toHaveBeenCalledTimes(1);
   });
 });

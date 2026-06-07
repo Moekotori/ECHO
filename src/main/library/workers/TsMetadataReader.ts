@@ -1,4 +1,4 @@
-import { open } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
 import { basename, dirname, extname } from 'node:path';
 import iconv from 'iconv-lite';
 import { parseFile } from 'music-metadata';
@@ -51,6 +51,8 @@ const unsafeEmbeddedMetadataWarning = 'embedded_metadata_skipped_unsafe_text';
 const commonTextMetadataKeys = new Set(['title', 'artist', 'artists', 'album', 'albumartist', 'genre', 'date']);
 const nativeArtworkTagIds = ['apic', 'pic', 'covr', 'coverart', 'metadata_block_picture', 'metadatablockpicture', 'wmpicture'];
 const asfMetadataExtensions = new Set(['.asf', '.wma', '.wmv']);
+const containerBitrateFallbackExtensions = new Set(['.ape']);
+const suspiciouslyLowLosslessBitrate = 64_000;
 const mojibakeFragments = [
   '\u00c3',
   '\u00c2',
@@ -903,6 +905,41 @@ const normalizeTagLibBitrate = (value: unknown): number | null => {
   return Math.round(parsed * 1000);
 };
 
+const estimateBitrateFromFileSize = async (filePath: string, durationSeconds: number | null): Promise<number | null> => {
+  if (!durationSeconds || durationSeconds <= 0) {
+    return null;
+  }
+
+  try {
+    const fileStats = await stat(filePath);
+    const bitrate = Math.round((fileStats.size * 8) / durationSeconds);
+    return Number.isFinite(bitrate) && bitrate > 0 ? bitrate : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveTagLibBitrate = async (
+  filePath: string,
+  durationSeconds: number | null,
+  tagLibBitrate: number | null,
+): Promise<number | null> => {
+  if (!containerBitrateFallbackExtensions.has(extname(filePath).toLowerCase())) {
+    return tagLibBitrate;
+  }
+
+  const estimatedBitrate = await estimateBitrateFromFileSize(filePath, durationSeconds);
+  if (!estimatedBitrate) {
+    return tagLibBitrate;
+  }
+
+  if (!tagLibBitrate || tagLibBitrate < suspiciouslyLowLosslessBitrate) {
+    return estimatedBitrate;
+  }
+
+  return tagLibBitrate;
+};
+
 const normalizeTagLibCodec = (properties: Record<string, unknown> | undefined): string | null => {
   const codec = cleanText(properties?.codec);
   if (codec && codec.toLowerCase() !== 'unknown') {
@@ -922,6 +959,8 @@ export const readTagLibFallbackMetadata = async (filePath: string): Promise<TagL
     const tags = (metadata.tags ?? {}) as Record<string, unknown>;
     const properties = (metadata.properties ?? {}) as Record<string, unknown> | undefined;
     const skipTagMetadata = hasUnsafeTagMapTextMetadata(tags);
+    const duration = positiveFloatOrNull(properties?.duration);
+    const bitrate = await resolveTagLibBitrate(filePath, duration, normalizeTagLibBitrate(properties?.bitrate));
     let embeddedCover: EmbeddedCoverData | undefined;
 
     if (skipTagMetadata) {
@@ -953,11 +992,11 @@ export const readTagLibFallbackMetadata = async (filePath: string): Promise<TagL
         discNo: skipTagMetadata ? null : firstNumber(tagValue(tags, ['discNumber', 'discnumber', 'disc', 'disk'])),
         year: skipTagMetadata ? null : yearFromMetadata(tagValue(tags, ['year', 'date', 'originalDate', 'originaldate'])),
         genre: skipTagMetadata ? null : firstText(tagValue(tags, ['genre'])),
-        duration: positiveFloatOrNull(properties?.duration),
+        duration,
         codec: normalizeTagLibCodec(properties),
         sampleRate: numberOrNull(properties?.sampleRate),
         bitDepth: numberOrNull(properties?.bitsPerSample),
-        bitrate: normalizeTagLibBitrate(properties?.bitrate),
+        bitrate,
         bpm: skipTagMetadata ? null : positiveFloatOrNull(tagValue(tags, ['bpm'])),
         replayGainTrackGainDb:
           skipTagMetadata

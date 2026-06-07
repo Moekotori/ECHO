@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabase, type EchoDatabase } from '../database/createDatabase';
 import { AlbumService } from './AlbumService';
 import { LibraryStore } from './LibraryStore';
-import type { TrackWrite } from './libraryTypes';
+import type { FieldSources, TrackWrite } from './libraryTypes';
 
 let database: EchoDatabase | null = null;
 
@@ -328,5 +328,45 @@ describe('LibraryStore track metadata safety', () => {
       duration: 240,
     });
     expect(store.getFolderOverviews()[0]).toMatchObject({ albumCount: 1, trackCount: 2 });
+  });
+
+  it('respects sameTitleAndCover grouping when seeding tracks incrementally', () => {
+    const store = makeStore();
+    const folder = store.addFolder('D:\\Music');
+    const albumService = new AlbumService();
+    const fieldSources: FieldSources = {
+      artist: 'embedded',
+      album: 'embedded',
+      albumArtist: 'artist_fallback',
+      genre: 'embedded',
+      codec: 'technical',
+    };
+
+    store.upsertTrack(baseTrack(folder.id, 'D:\\Music\\Disc A\\one.flac', {
+      id: 'track-1',
+      title: 'One',
+      artist: 'Artist One',
+      album: 'Shared Album',
+      albumArtist: 'Artist One',
+      fieldSources,
+    }));
+    store.seedAlbumsForTracks(['track-1'], albumService, '2026-01-01T00:00:00.000Z', { albumMergeStrategy: 'sameTitleAndCover' });
+
+    store.upsertTrack(baseTrack(folder.id, 'D:\\Music\\Disc B\\two.flac', {
+      id: 'track-2',
+      title: 'Two',
+      artist: 'Artist Two',
+      album: 'Shared Album',
+      albumArtist: 'Artist Two',
+      fieldSources,
+    }));
+    store.seedAlbumsForTracks(['track-2'], albumService, '2026-01-01T00:00:01.000Z', { albumMergeStrategy: 'sameTitleAndCover' });
+
+    const albums = store.getAlbums({ pageSize: 10 });
+    expect(albums.total).toBe(1);
+    expect(albums.items[0]).toMatchObject({
+      title: 'Shared Album',
+      trackCount: 2,
+    });
   });
 });

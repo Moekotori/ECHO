@@ -227,7 +227,8 @@ std::string EqMessageProtocol::createDspStateMessage(const DspHeadroomProcessor&
     std::ostringstream output;
     output << "{\"type\":\"dsp:state\","
            << "\"ok\":true,"
-           << "\"headroomDb\":" << processor.getHeadroomDb()
+           << "\"headroomDb\":" << processor.getHeadroomDb() << ','
+           << "\"safetyLimiterEnabled\":" << boolText(DspChain::isSafetyLimiterEnabled())
            << "}";
     return output.str();
 }
@@ -262,6 +263,12 @@ std::string EqMessageProtocol::handleJsonLine(
     if (type == "dsp.setHeadroom" || type == "dsp:set-headroom")
     {
         headroomProcessor.setHeadroomDb(getNumber(*object, "headroomDb", 0.0f));
+        return createDspStateMessage(headroomProcessor);
+    }
+
+    if (type == "dsp.setSafetyLimiterEnabled" || type == "dsp:set-safety-limiter-enabled")
+    {
+        DspChain::setSafetyLimiterEnabled(getBool(*object, "enabled", true));
         return createDspStateMessage(headroomProcessor);
     }
 

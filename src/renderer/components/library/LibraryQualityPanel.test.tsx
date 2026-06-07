@@ -158,12 +158,16 @@ describe('LibraryQualityPanel', () => {
     const getLibraryQualityIssues = vi.fn().mockResolvedValue(issuePage());
     const openTrackInFolder = vi.fn().mockResolvedValue(undefined);
     const startMissingMetadataScan = vi.fn().mockResolvedValue(completedJob());
+    const startMissingCoverBackfill = vi.fn().mockResolvedValue({ ...completedJob(), status: 'completed', scannedCount: 1, totalTracks: 1 });
+    const getMissingCoverBackfillStatus = vi.fn().mockResolvedValue({ ...completedJob(), status: 'completed', scannedCount: 1, totalTracks: 1 });
     libraryBridge = {
       getLibraryQualityOverview,
       getLibraryQualityIssues,
       onLibraryChanged: vi.fn(),
       openTrackInFolder,
       startMissingMetadataScan,
+      startMissingCoverBackfill,
+      getMissingCoverBackfillStatus,
     };
 
     render(<LibraryQualityPanel networkMetadataEnabled />);
@@ -175,7 +179,9 @@ describe('LibraryQualityPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /定位文件/ }));
     await waitFor(() => expect(openTrackInFolder).toHaveBeenCalledWith('track-1'));
 
-    fireEvent.click(screen.getByRole('button', { name: /扫描当前分类/ }));
-    await waitFor(() => expect(startMissingMetadataScan).toHaveBeenCalledWith({ limit: 100, fields: ['cover'] }));
+    fireEvent.click(screen.getByRole('button', { name: /补全缺失封面/ }));
+    await waitFor(() => expect(startMissingCoverBackfill).toHaveBeenCalledWith({ limit: 500, fields: ['cover'] }));
+    expect(screen.getByRole('progressbar', { name: /网络封面补全进度/ })).toBeTruthy();
+    expect(startMissingMetadataScan).not.toHaveBeenCalled();
   });
 });

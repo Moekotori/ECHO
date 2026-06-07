@@ -33,6 +33,7 @@ import {
   isAdvancedNativeOutputPlatform,
   normalizeAudioSharedBackendForPlatform,
 } from '../../../shared/utils/audioPlatformCapabilities';
+import { formatAudioChannelLayout } from '../../../shared/utils/audioChannels';
 import { detectAsioCompatibilityProfile } from '../../../shared/utils/asioCompatibility';
 import { isHiResAudioSpec } from '../../../shared/utils/audioQuality';
 import { useI18n } from '../../i18n/I18nProvider';
@@ -437,6 +438,7 @@ const formatSourceQuality = (status: AudioStatus | null, copy: AudioDrawerCopy):
     status?.codec?.toUpperCase() ?? null,
     status?.bitDepth ? `${status.bitDepth} bit` : null,
     formatRate(status?.fileSampleRate) || null,
+    formatAudioChannelLayout(status?.channels),
   ].filter(Boolean);
 
   return parts.length ? parts.join(' / ') : copy.noActiveSource;
@@ -678,15 +680,27 @@ const shouldShowAsioAdvancedRoutes = (device: AudioDeviceInfo): boolean =>
     (device.asioOutputChannels ?? 0) > 2
   );
 
-const formatAsioChannelRoute = (device: AudioDeviceInfo, start: number): string => {
-  const firstName = device.asioChannelNames?.[start]?.trim();
-  const secondName = device.asioChannelNames?.[start + 1]?.trim();
+const formatAsioChannelPair = (start: number): string => `${start + 1}/${start + 2}`;
+
+const formatAsioChannelRoute = (device: AudioDeviceInfo | null | undefined, start: number): string => {
+  const pair = formatAsioChannelPair(start);
+  const firstName = device?.asioChannelNames?.[start]?.trim();
+  const secondName = device?.asioChannelNames?.[start + 1]?.trim();
 
   if (firstName && secondName) {
-    return `${firstName} / ${secondName}`;
+    return `${pair} - ${firstName} / ${secondName}`;
   }
 
-  return `Output ${start + 1}-${start + 2}`;
+  return `Output ${pair}`;
+};
+
+const formatAsioOutputCount = (
+  device: AudioDeviceInfo,
+): string | null => {
+  const outputChannels = device.asioOutputChannels;
+  return outputChannels && Number.isFinite(outputChannels) && outputChannels > 0
+    ? `${Math.round(outputChannels)} outputs`
+    : null;
 };
 
 const createAsioRouteDevice = (device: AudioDeviceInfo, start: number): AudioDeviceInfo => ({
@@ -980,6 +994,14 @@ export const AudioSettingsDrawer = ({
     !hqPlayerTakeoverEnabled &&
     (currentOutputMode === 'shared' || currentOutputMode === 'system') &&
     isHighOutputSampleRate(currentOutputSampleRate);
+  const currentAsioRoute = useMemo(() => {
+    if (hqPlayerTakeoverEnabled || status?.outputMode !== 'asio') {
+      return null;
+    }
+
+    const start = normalizeAsioOutputChannelStart(status.asioOutputChannelStart) ?? 0;
+    return formatAsioChannelRoute(statusDevice, start);
+  }, [hqPlayerTakeoverEnabled, status?.asioOutputChannelStart, status?.outputMode, statusDevice]);
 
   const currentOutput = useMemo(() => {
     const currentMode = currentOutputMode;
@@ -991,6 +1013,7 @@ export const AudioSettingsDrawer = ({
         mode: currentMode,
         modeLabel: '外部渲染器',
         backend: 'HQPlayer Connect',
+        asioRoute: null,
         sampleRate: formatRate(hqPlayerTrack?.sampleRate),
         bitPerfect: '由 HQPlayer 负责输出',
         highlight: true,
@@ -1003,6 +1026,7 @@ export const AudioSettingsDrawer = ({
       mode: currentMode,
       modeLabel: formatMode(currentMode, copy),
       backend: getCurrentBackend(status, copy),
+      asioRoute: currentAsioRoute,
       sampleRate: formatRate(currentOutputSampleRate),
       bitPerfect: status?.bitPerfectCandidate
         ? copy.bitPerfectReady
@@ -1012,7 +1036,7 @@ export const AudioSettingsDrawer = ({
       highlight: shouldHighlightCurrentOutput(currentMode, status?.outputBackend),
       Icon: getDeviceIcon(name, currentMode),
     };
-  }, [copy, currentOutputMode, currentOutputName, currentOutputSampleRate, hqPlayerTakeoverEnabled, hqPlayerTrack?.sampleRate, status]);
+  }, [copy, currentAsioRoute, currentOutputMode, currentOutputName, currentOutputSampleRate, hqPlayerTakeoverEnabled, hqPlayerTrack?.sampleRate, status]);
   const currentLatencyProfile = status?.latencyProfile ?? readRememberedAudioOutput().latencyProfile ?? 'lowLatency';
   const supportedLatencyProfile = resolveSupportedLatencyProfile(outputMode, currentLatencyProfile);
   const currentAsioBufferFrames =
@@ -1915,7 +1939,7 @@ export const AudioSettingsDrawer = ({
                 {currentOutput.modeLabel} / {currentOutput.sampleRate || copy.ratePending}
               </span>
               <span>
-                {currentOutput.backend} / {currentOutput.bitPerfect}
+                {[currentOutput.backend, currentOutput.asioRoute, currentOutput.bitPerfect].filter(Boolean).join(' / ')}
               </span>
             </div>
             <em>{t('audioDrawer.device.selected')}</em>
@@ -2066,6 +2090,7 @@ export const AudioSettingsDrawer = ({
               const defaultRouteDevice = createAsioRouteDevice(device, 0);
               const isActive = !hqPlayerTakeoverEnabled && deviceMatchesStatus(defaultRouteDevice, status, 'asio');
               const DeviceIcon = getDeviceIcon(device.name, 'asio');
+              const outputCountLabel = formatAsioOutputCount(device);
               const routeCount = Math.max(0, Math.floor((device.asioOutputChannels ?? 0) / 2));
               const routeStarts = shouldShowAsioAdvancedRoutes(device)
                 ? Array.from({ length: routeCount }, (_value, index) => index * 2)
@@ -2085,7 +2110,7 @@ export const AudioSettingsDrawer = ({
                     <DeviceIcon size={15} />
                     <span>
                       <strong>{device.name}</strong>
-                      <small>{copy.asioDriver} / {t('audioDrawer.device.lowLatency')}</small>
+                      <small>{copy.asioDriver} / {outputCountLabel ?? t('audioDrawer.device.lowLatency')}</small>
                     </span>
                     <em>ASIO</em>
                     {isActive ? <Check size={15} /> : null}

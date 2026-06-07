@@ -120,6 +120,7 @@ const defaultBrowserEqState = (): EqState => ({
   enabled: false,
   preampDb: 0,
   dspHeadroomDb: 0,
+  dspSafetyLimiterEnabled: true,
   bands: createBands(),
   presetId: 'flat',
   presetName: 'Flat',
@@ -223,6 +224,7 @@ const normalizeState = (value: unknown): EqState => {
     enabled: Boolean(input.enabled),
     preampDb: Number.isFinite(preampDb) ? clamp(preampDb, eqMinPreampDb, eqMaxPreampDb) : 0,
     dspHeadroomDb: Number.isFinite(dspHeadroomDb) ? clamp(dspHeadroomDb, dspHeadroomMinDb, dspHeadroomMaxDb) : 0,
+    dspSafetyLimiterEnabled: input.dspSafetyLimiterEnabled !== false,
     bands: normalizeBands(input.bands),
     presetId: typeof input.presetId === 'string' && input.presetId ? input.presetId : 'flat',
     presetName: typeof input.presetName === 'string' && input.presetName ? input.presetName : 'Flat',
@@ -485,6 +487,12 @@ class BrowserEqBridge implements EqBridgeApi {
     return this.getState();
   }
 
+  async setDspSafetyLimiterEnabled(enabled: boolean): Promise<EqState> {
+    this.storage.state = { ...this.storage.state, dspSafetyLimiterEnabled: enabled !== false };
+    this.writeStorage();
+    return this.getState();
+  }
+
   async setPreset(presetId: string): Promise<EqState> {
     const preset = this.allPresets().find((item) => item.id === presetId);
 
@@ -496,6 +504,7 @@ class BrowserEqBridge implements EqBridgeApi {
       enabled: this.storage.state.enabled,
       preampDb: preset.preampDb,
       dspHeadroomDb: this.storage.state.dspHeadroomDb,
+      dspSafetyLimiterEnabled: this.storage.state.dspSafetyLimiterEnabled !== false,
       bands: cloneBands(preset.bands),
       presetId: preset.id,
       presetName: preset.name,

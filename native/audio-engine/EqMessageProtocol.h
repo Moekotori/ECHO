@@ -2,6 +2,7 @@
 
 #include "ChannelBalanceProcessor.h"
 #include "ConvolutionProcessor.h"
+#include "DspChain.h"
 #include "DspHeadroomProcessor.h"
 #include "EqProcessor.h"
 

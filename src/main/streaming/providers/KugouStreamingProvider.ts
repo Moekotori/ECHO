@@ -44,6 +44,8 @@ export type KugouTrackKey = {
   hash: string;
   albumId: string | null;
   albumAudioId: string | null;
+  hqHash?: string | null;
+  sqHash?: string | null;
 };
 
 type KugouPlaybackQuality = 'flac' | '320' | '128';
@@ -78,6 +80,11 @@ const idText = (value: unknown): string | null => {
   }
 
   return cleanText(value);
+};
+
+const normalizeKugouHash = (value: unknown): string | null => {
+  const hash = cleanText(value)?.toLocaleLowerCase() ?? null;
+  return hash && /^[a-f0-9]{16,64}$/iu.test(hash) ? hash : null;
 };
 
 const firstText = (record: Record<string, unknown>, keys: readonly string[]): string | null => {
@@ -164,6 +171,11 @@ export const encodeKugouProviderTrackId = (key: KugouTrackKey): string => {
   const hash = key.hash.trim().toLocaleLowerCase();
   const albumId = key.albumId?.trim() || '0';
   const albumAudioId = key.albumAudioId?.trim() || '0';
+  const hqHash = key.hqHash?.trim().toLocaleLowerCase() || '0';
+  const sqHash = key.sqHash?.trim().toLocaleLowerCase() || '0';
+  if (hqHash !== '0' || sqHash !== '0') {
+    return `${hash}.${albumId}.${albumAudioId}.${hqHash}.${sqHash}`;
+  }
   return `${hash}.${albumId}.${albumAudioId}`;
 };
 
@@ -173,7 +185,7 @@ export const parseKugouProviderTrackId = (value: string): KugouTrackKey | null =
     return null;
   }
 
-  const [hashPart, albumIdPart, albumAudioIdPart] = trimmed.split('.');
+  const [hashPart, albumIdPart, albumAudioIdPart, hqHashPart, sqHashPart] = trimmed.split('.');
   const hash = (hashPart ?? trimmed).trim().toLocaleLowerCase();
   if (!/^[a-f0-9]{16,64}$/iu.test(hash)) {
     return null;
@@ -183,6 +195,8 @@ export const parseKugouProviderTrackId = (value: string): KugouTrackKey | null =
     hash,
     albumId: albumIdPart && albumIdPart !== '0' ? albumIdPart : null,
     albumAudioId: albumAudioIdPart && albumAudioIdPart !== '0' ? albumAudioIdPart : null,
+    hqHash: hqHashPart && hqHashPart !== '0' ? hqHashPart.trim().toLocaleLowerCase() : null,
+    sqHash: sqHashPart && sqHashPart !== '0' ? sqHashPart.trim().toLocaleLowerCase() : null,
   };
 };
 
@@ -210,12 +224,25 @@ const qualitiesFromSong = (song: Record<string, unknown>): StreamingAudioQuality
   if (firstText(song, ['SQFileHash', 'sqhash', 'ResFileHash']) || number(song.SQFileSize) || number(song.resFileSize)) {
     qualities.push('lossless');
   }
-  if (firstText(song, ['HQFileHash', 'hqhash']) || number(song.HQFileSize)) {
+  if (firstText(song, ['HQFileHash', 'hqhash', '320hash']) || number(song.HQFileSize) || number(song['320filesize'])) {
     qualities.push('high');
   }
   qualities.push('standard');
   return [...new Set(qualities)];
 };
+
+const protectedNumber = (value: unknown): number => number(value) ?? 0;
+
+const kugouTrackRequiresAccount = (song: Record<string, unknown>): boolean =>
+  protectedNumber(song.pay_type) > 0 ||
+  protectedNumber(song.pay_type_320) > 0 ||
+  protectedNumber(song.pay_type_sq) > 0 ||
+  protectedNumber(song.price) > 0 ||
+  protectedNumber(song.price_320) > 0 ||
+  protectedNumber(song.price_sq) > 0 ||
+  protectedNumber(song.pkg_price) > 0 ||
+  protectedNumber(song.pkg_price_320) > 0 ||
+  protectedNumber(song.pkg_price_sq) > 0;
 
 const mvStatusFromSong = (song: Record<string, unknown>): StreamingTrack['mvStatus'] => {
   if (firstText(song, ['mvhash', 'mv_hash', 'mvHash'])) {
@@ -245,11 +272,17 @@ const mapSong = (value: unknown, fallback: Partial<KugouTrackKey> = {}): Streami
   const albumId = firstIdText(song, ['album_id', 'albumid', 'albumId', 'AlbumId', 'AlbumID']) ?? fallback.albumId ?? null;
   const albumAudioId =
     firstIdText(song, ['album_audio_id', 'albumAudioId', 'audio_id', 'audioid', 'mixsongid', 'mixsong_id']) ?? fallback.albumAudioId ?? null;
-  const providerTrackId = encodeKugouProviderTrackId({ hash, albumId, albumAudioId });
+  const hqHash =
+    normalizeKugouHash(song.HQFileHash) ?? normalizeKugouHash(song.hqhash) ?? normalizeKugouHash(song['320hash']) ?? fallback.hqHash ?? null;
+  const sqHash =
+    normalizeKugouHash(song.SQFileHash) ?? normalizeKugouHash(song.sqhash) ?? normalizeKugouHash(song.ResFileHash) ?? fallback.sqHash ?? null;
+  const providerTrackId = encodeKugouProviderTrackId({ hash, albumId, albumAudioId, hqHash, sqHash });
   const title = firstText(song, ['songname', 'SongName', 'song_name', 'name', 'title']) ?? filenameParts.title ?? hash;
   const artist = firstText(song, ['singername', 'SingerName', 'singer_name', 'author_name', 'artist']) ?? filenameParts.artist ?? 'Unknown Artist';
   const album = firstText(song, ['AlbumName', 'album_name', 'albumname', 'albumName']) ?? 'Unknown Album';
   const cover = kugouImageUrl(song.imgurl ?? song.image ?? song.cover ?? song.album_img, 400);
+  const requiresAccount = kugouTrackRequiresAccount(song);
+  const playable = !requiresAccount || accountStatus().connected;
 
   return {
     id: streamingStableKey(provider, providerTrackId),
@@ -267,8 +300,8 @@ const mapSong = (value: unknown, fallback: Partial<KugouTrackKey> = {}): Streami
     coverThumb: cover ?? kugouImageUrl(song.imgurl ?? song.image ?? song.cover ?? song.album_img, 150),
     qualities: qualitiesFromSong(song),
     explicit: false,
-    playable: true,
-    unavailableReason: null,
+    playable,
+    unavailableReason: playable ? null : 'Sign in with KuGou Music before playing protected tracks.',
     lyricsStatus: 'available',
     mvStatus: mvStatusFromSong(song),
   };
@@ -438,6 +471,7 @@ const buildPlaybackParams = (
   quality: KugouPlaybackQuality,
   cookie: string | undefined,
 ): { params: Record<string, string | number>; headers: Record<string, string> } => {
+  const playbackHash = quality === 'flac' ? trackKey.sqHash ?? trackKey.hash : quality === '320' ? trackKey.hqHash ?? trackKey.hash : trackKey.hash;
   const dfid = cookieValue(cookie, 'dfid', 'kg_dfid', 'DFID') ?? randomKugouString(24);
   const mid = cookieValue(cookie, 'KUGOU_API_MID', 'kg_mid', 'mid') ?? stableNumericId(dfid);
   const userid = cookieValue(cookie, 'userid', 'KugooID', 'KugouID', 'kg_uid');
@@ -451,7 +485,7 @@ const buildPlaybackParams = (
     clienttime,
     album_id: Number(trackKey.albumId ?? 0),
     area_code: 1,
-    hash: trackKey.hash.toLocaleLowerCase(),
+    hash: playbackHash.toLocaleLowerCase(),
     ssa_flag: 'is_fromtrack',
     version: 11430,
     page_id: 151369488,

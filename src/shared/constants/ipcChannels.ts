@@ -209,6 +209,9 @@ export const IpcChannels = {
   LibraryArtistImagesSetPaused: 'library:artist-images:set-paused',
   LibraryArtistImagesKickoff: 'library:artist-images:kickoff',
   LibraryArtistImagesClearCache: 'library:artist-images:clear-cache',
+  LibraryArtistImagesChooseCustom: 'library:artist-images:choose-custom',
+  LibraryArtistImagesSetCustomUrl: 'library:artist-images:set-custom-url',
+  LibraryArtistImagesClearCustom: 'library:artist-images:clear-custom',
   LibraryArtistImagesUpdated: 'library:artist-images:updated',
   LibraryChanged: 'library:changed',
   LibraryGetAlbumTracks: 'library:get-album-tracks',
@@ -272,6 +275,9 @@ export const IpcChannels = {
   LibraryNetworkScanMissingMetadata: 'library:network-scan-missing-metadata',
   LibraryNetworkStartMissingMetadataScan: 'library:network-start-missing-metadata-scan',
   LibraryNetworkGetMissingMetadataScanStatus: 'library:network-get-missing-metadata-scan-status',
+  LibraryNetworkStartMissingCoverBackfill: 'library:network-start-missing-cover-backfill',
+  LibraryNetworkGetMissingCoverBackfillStatus: 'library:network-get-missing-cover-backfill-status',
+  LibraryNetworkGetActiveMissingCoverBackfillStatus: 'library:network-get-active-missing-cover-backfill-status',
   LibraryNetworkShowCandidates: 'library:network-show-candidates',
   LibrarySearchNetworkTagCandidates: 'library:search-network-tag-candidates',
   LibraryResolveLyricsBackgroundCover: 'library:resolve-lyrics-background-cover',
@@ -455,6 +461,7 @@ export const IpcChannels = {
   EqSetBandEnabled: 'eq:set-band-enabled',
   EqSetPreamp: 'eq:set-preamp',
   EqSetDspHeadroom: 'eq:set-dsp-headroom',
+  EqSetDspSafetyLimiterEnabled: 'eq:set-dsp-safety-limiter-enabled',
   EqSetPreset: 'eq:set-preset',
   EqReset: 'eq:reset',
   EqListPresets: 'eq:list-presets',
@@ -482,6 +489,10 @@ export const IpcChannels = {
   RoomCorrectionSetEnabled: 'room-correction:set-enabled',
   RoomCorrectionSetTrim: 'room-correction:set-trim',
   RoomCorrectionClear: 'room-correction:clear',
+  SleepTimerStart: 'sleep-timer:start',
+  SleepTimerCancel: 'sleep-timer:cancel',
+  SleepTimerGetStatus: 'sleep-timer:get-status',
+  SleepTimerOnTick: 'sleep-timer:on-tick',
 } as const;
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels];

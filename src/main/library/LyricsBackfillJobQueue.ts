@@ -66,19 +66,19 @@ const playbackSlotWaitMs = 500;
 const playbackInterTrackDelayMs = 150;
 const statusPersistIntervalMs = 750;
 const attemptedFlushSize = 50;
-const quickProviders: LyricsProviderId[] = ['local', 'netease', 'qqmusic', 'kugou', 'kuwo', 'lrclib', 'amll-ttml'];
-const completeProviders: LyricsProviderId[] = ['local', 'netease', 'qqmusic', 'kugou', 'kuwo', 'lrclib', 'amll-ttml'];
+const quickProviders: LyricsProviderId[] = ['local', 'lrclib', 'netease', 'qqmusic', 'amll-ttml', 'kugou', 'kuwo'];
+const completeProviders: LyricsProviderId[] = ['local', 'lrclib', 'netease', 'qqmusic', 'amll-ttml', 'kugou', 'kuwo'];
 const modeDefaults: Record<LyricsBackfillMode, LyricsBackfillModeDefaults> = {
   quick: {
     limit: 10000,
-    concurrency: 18,
+    concurrency: 10,
     lookupOptions: {
       enabledProviders: quickProviders,
       networkEnabled: true,
       autoSearch: true,
       deepSearchEnabled: true,
-      providerTimeoutMs: 1600,
-      totalMatchTimeoutMs: 2400,
+      providerTimeoutMs: 2300,
+      totalMatchTimeoutMs: 4200,
       autoAcceptScore: defaultBackfillAutoAcceptScore,
       preferPrimaryProvider: false,
     },
@@ -165,6 +165,7 @@ const normalizeRunOptions = (options: LyricsBackfillStartOptions = {}): Normaliz
 const lookupOptionsFor = (mode: LyricsBackfillMode, autoAcceptScore: number): LyricsLookupOptions => ({
   ...modeDefaults[mode].lookupOptions,
   autoAcceptScore,
+  relaxedAutoAccept: true,
 });
 
 export class LyricsBackfillJobPersistence {

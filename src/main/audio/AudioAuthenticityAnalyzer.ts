@@ -131,17 +131,31 @@ export class AudioAuthenticityAnalyzer {
     const durationSeconds = positiveNumber(track.duration);
     const fileSizeBytes = this.resolveFileSize(filePath);
     const dsdByName = isDsdFilePath(filePath) || isDsdCodec(codec);
+    const codecIsLossless = hasCodecToken(codec, losslessCodecs) || (extension !== null && losslessExtensions.has(extension));
+    const codecIsLossy = hasCodecToken(codec, lossyCodecs) || (extension !== null && lossyExtensions.has(extension));
     const dsdNativeSampleRate = dsdByName && filePath && this.exists(filePath)
       ? await this.readDsdRate(filePath)
       : null;
     const isHiRes = (sampleRate !== null && sampleRate >= 88_200) || (bitDepth !== null && bitDepth >= 24);
-    const shouldRunSpectrumProbe = Boolean(filePath && this.exists(filePath) && (dsdByName || isHiRes));
+    const shouldRunStandardLosslessSpectrumProbe = Boolean(
+      !dsdByName &&
+      codecIsLossless &&
+      sampleRate !== null &&
+      sampleRate >= 32_000 &&
+      sampleRate <= 48_000,
+    );
+    const shouldRunSpectrumProbe = Boolean(
+      filePath &&
+      this.exists(filePath) &&
+      (dsdByName || isHiRes || shouldRunStandardLosslessSpectrumProbe),
+    );
     const spectrum = shouldRunSpectrumProbe && filePath
-      ? await this.safeProbeSpectrum({
-          filePath,
-          trackDurationSeconds: durationSeconds,
-          isDsd: dsdByName,
-        })
+        ? await this.safeProbeSpectrum({
+            filePath,
+            trackDurationSeconds: durationSeconds,
+            isDsd: dsdByName,
+            isHiRes,
+          })
       : null;
     const spectrumProbeStatus = spectrum?.status ?? (shouldRunSpectrumProbe ? 'unavailable' : 'skipped');
     const metrics = (): PluginAudioAnalysisReport['metrics'] => ({
@@ -157,8 +171,11 @@ export class AudioAuthenticityAnalyzer {
       spectrumProbeWindows: spectrum?.probeWindowCount ?? null,
       spectrumSelectedStartSeconds: spectrum?.selectedStartSeconds ?? null,
       spectralCutoffHz: spectrum?.spectralCutoffHz ?? null,
+      upperTrebleToAudibleDb: spectrum?.upperTrebleToAudibleDb ?? null,
+      lowUltrasonicToAudibleDb: spectrum?.lowUltrasonicToAudibleDb ?? null,
       highFrequencyToAudibleDb: spectrum?.highFrequencyToAudibleDb ?? null,
       ultrasonicToAudibleDb: spectrum?.ultrasonicToAudibleDb ?? null,
+      topBandToAudibleDb: spectrum?.topBandToAudibleDb ?? null,
     });
     const items: PluginAudioAnalysisEvidence[] = [];
     const limitations: string[] = [
@@ -252,8 +269,6 @@ export class AudioAuthenticityAnalyzer {
       return this.report(track.id, 'ready', 'trusted_dsd_container', trustedDsdConfidence, metrics(), items, limitations);
     }
 
-    const codecIsLossless = hasCodecToken(codec, losslessCodecs) || (extension !== null && losslessExtensions.has(extension));
-    const codecIsLossy = hasCodecToken(codec, lossyCodecs) || (extension !== null && lossyExtensions.has(extension));
     const isJasHiResContainer = sampleRate !== null && sampleRate >= 96_000 && bitDepth !== null && bitDepth >= 24;
     const isHighBitDepthOnly = bitDepth !== null && bitDepth >= 24 && sampleRate !== null && sampleRate < 88_200;
     const longEnoughForBitrateSignal = durationSeconds === null || durationSeconds >= 45;
@@ -276,7 +291,12 @@ export class AudioAuthenticityAnalyzer {
     } else if (isHighBitDepthOnly) {
       items.push(evidence('high_bit_depth_not_jas_hires', 'warning', 'Bit depth is above CD quality, but sample rate is below the common 96 kHz Hi-Res logo threshold.'));
     }
-    this.addSpectrumEvidence(items, spectrum, 'hires');
+    const spectralLosslessTranscodeRisk = isHiRes
+      ? false
+      : this.addStandardLosslessSpectrumEvidence(items, spectrum);
+    if (isHiRes) {
+      this.addSpectrumEvidence(items, spectrum, 'hires');
+    }
     const spectralHiResRisk = isHiRes && spectrum?.status === 'ready' && spectrum.brickwallLikely;
     const spectralHiResSupport = isHiRes &&
       spectrum?.status === 'ready' &&
@@ -295,7 +315,11 @@ export class AudioAuthenticityAnalyzer {
 
     if (bitrate !== null && longEnoughForBitrateSignal && bitrate < 360_000) {
       items.push(evidence('low_lossless_bitrate', 'risk', 'Average bitrate is unusually low for a normal lossless music file.'));
-      return this.report(track.id, 'ready', 'likely_lossy_transcode', 0.72, metrics(), items, limitations);
+      return this.report(track.id, 'ready', 'likely_lossy_transcode', spectralLosslessTranscodeRisk ? 0.82 : 0.72, metrics(), items, limitations);
+    }
+
+    if (spectralLosslessTranscodeRisk) {
+      return this.report(track.id, 'ready', 'likely_lossy_transcode', 0.68, metrics(), items, limitations);
     }
 
     if (isHiRes && bitrate !== null && longEnoughForBitrateSignal && bitrate < 900_000) {
@@ -447,6 +471,61 @@ export class AudioAuthenticityAnalyzer {
         'High-frequency energy above the CD audio band is weak; this alone is not proof of fake Hi-Res, but it lowers provenance confidence.',
       ));
     }
+  }
+
+  private addStandardLosslessSpectrumEvidence(
+    items: PluginAudioAnalysisEvidence[],
+    spectrum: AudioAuthenticitySpectrumProbeResult | null,
+  ): boolean {
+    if (!spectrum || spectrum.status === 'skipped') {
+      return false;
+    }
+
+    if (spectrum.status !== 'ready') {
+      items.push(evidence(
+        'spectrum_probe_unavailable',
+        'warning',
+        `Spectral probe status is ${spectrum.status}${spectrum.error ? `: ${spectrum.error}` : ''}.`,
+      ));
+      return false;
+    }
+
+    items.push(evidence(
+      'spectrum_probe_ready',
+      'info',
+      `Spectral probe decoded ${Math.round((spectrum.analyzedDurationSeconds ?? 0) * 10) / 10}s at ${formatKhz(spectrum.decodeSampleRate ?? 0)}; upper-treble/audible ${formatDb(spectrum.upperTrebleToAudibleDb)}, cutoff ${formatHz(spectrum.spectralCutoffHz)}.`,
+    ));
+
+    const hasLossyLowpassSignature =
+      spectrum.spectralCutoffHz !== null &&
+      spectrum.spectralCutoffHz <= 20_000 &&
+      spectrum.upperTrebleToAudibleDb !== null &&
+      spectrum.upperTrebleToAudibleDb < -58;
+
+    if (hasLossyLowpassSignature) {
+      items.push(evidence(
+        'lossless_spectrum_lowpass_cutoff',
+        'risk',
+        `Lossless container has a steep low-pass around ${formatHz(spectrum.spectralCutoffHz)} and very weak 18-24 kHz energy (${formatDb(spectrum.upperTrebleToAudibleDb)} vs audible band), which is consistent with a lossy-source transcode.`,
+      ));
+      return true;
+    }
+
+    if (spectrum.upperTrebleToAudibleDb !== null && spectrum.upperTrebleToAudibleDb > -45) {
+      items.push(evidence(
+        'lossless_spectrum_upper_treble_present',
+        'info',
+        'Sampled windows contain meaningful 18-24 kHz upper-treble energy, so no obvious lossy-codec low-pass was found.',
+      ));
+    } else {
+      items.push(evidence(
+        'lossless_spectrum_upper_treble_weak',
+        'warning',
+        '18-24 kHz upper-treble energy is weak in the sampled windows; this alone can be mastering or material choice, so it is not treated as transcode proof.',
+      ));
+    }
+
+    return false;
   }
 
   private report(

@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AudioStatus } from '../../shared/types/audio';
 import { hqPlayerConnectDeviceId, type ConnectSessionStatus } from '../../shared/types/connect';
-import type { LibraryTrack } from '../../shared/types/library';
+import type { LibraryPlaylistItem, LibraryTrack } from '../../shared/types/library';
 import type { PersistedPlaybackSessionV1 } from '../../shared/types/playback';
 import { PlaybackQueueProvider, isPlaybackCancellationError, usePlaybackQueue } from './PlaybackQueueProvider';
 import { useSharedPlaybackStatus } from './playbackStatusStore';
@@ -28,6 +28,26 @@ const makeTrack = (index: number): LibraryTrack => ({
   coverId: null,
   coverThumb: null,
   fieldSources: {},
+});
+
+const makeLikedPlaylistItem = (track: LibraryTrack, sourceProvider: LibraryPlaylistItem['sourceProvider'] = 'local'): LibraryPlaylistItem => ({
+  id: `liked-${track.id}`,
+  playlistId: 'liked-tracks',
+  mediaType: 'track',
+  mediaId: track.id,
+  sourceProvider,
+  sourceItemId: track.id,
+  titleSnapshot: track.title,
+  artistSnapshot: track.artist,
+  albumSnapshot: track.album,
+  durationSnapshot: track.duration,
+  coverId: track.coverId,
+  coverThumb: track.coverThumb,
+  position: 0,
+  addedAt: '2026-05-21T00:00:00.000Z',
+  addedFrom: null,
+  unavailable: false,
+  track,
 });
 
 const makePersistedQueueSession = (
@@ -4005,6 +4025,93 @@ describe('PlaybackQueueProvider playback modes', () => {
       excludeTrackIds: ['track-1'],
       randomWindow: true,
     });
+  });
+
+  it('keeps shuffled liked playback inside the active liked source', async () => {
+    const likedTracks = [makeTrack(1), makeTrack(2)];
+    const outsideTrack = makeTrack(99);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const getTracks = vi.fn().mockResolvedValue({
+      items: [outsideTrack],
+      page: 1,
+      pageSize: 128,
+      total: 1,
+      hasMore: false,
+    });
+    const getLikedTracks = vi.fn().mockResolvedValue({
+      items: [makeLikedPlaylistItem(likedTracks[1], 'netease')],
+      page: 1,
+      pageSize: 128,
+      total: 2,
+      hasMore: false,
+    });
+
+    window.echo = {
+      playback: {
+        playLocalFile: vi.fn().mockImplementation((request: { trackId: string; filePath: string }) =>
+          Promise.resolve({
+            state: 'playing',
+            currentTrackId: request.trackId,
+            positionMs: 0,
+            durationMs: 120000,
+            filePath: request.filePath,
+          }),
+        ),
+      },
+      library: {
+        getLikedTracks,
+        getTracks,
+      },
+    } as unknown as Window['echo'];
+
+    const LikedShuffleProbe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      const didStartRef = useRef(false);
+
+      useEffect(() => {
+        if (didStartRef.current) {
+          return;
+        }
+
+        didStartRef.current = true;
+        queue.toggleShuffle();
+        void queue.playTrack(likedTracks[0], {
+          replaceQueueWith: [likedTracks[0]],
+          source: { type: 'liked', label: 'NetEase liked', sourceProvider: 'netease' },
+        });
+      }, [queue]);
+
+      return (
+        <div>
+          <output aria-label="current-track">{queue.currentTrackId ?? ''}</output>
+          <button type="button" disabled={!queue.canGoNext} onClick={() => void queue.playNext()}>
+            next
+          </button>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <LikedShuffleProbe />
+      </PlaybackQueueProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('current-track').textContent).toBe('track-1'));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'next' }) as HTMLButtonElement).disabled).toBe(false));
+
+    fireEvent.click(screen.getByRole('button', { name: 'next' }));
+
+    await waitFor(() => expect(screen.getByLabelText('current-track').textContent).toBe('track-2'));
+    expect(getLikedTracks).toHaveBeenCalledWith({
+      page: 1,
+      pageSize: 128,
+      search: undefined,
+      sort: 'random',
+      sourceProvider: 'netease',
+      randomWindow: true,
+    });
+    expect(getTracks).not.toHaveBeenCalled();
   });
 
   it('reuses full-library shuffle batches instead of querying on every next track', async () => {

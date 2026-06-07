@@ -73,6 +73,7 @@ export type LyricsLookupOptions = {
   totalMatchTimeoutMs?: number;
   autoAcceptScore?: number;
   preferPrimaryProvider?: boolean;
+  relaxedAutoAccept?: boolean;
 };
 
 type LibraryLookup = {
@@ -855,6 +856,7 @@ export class LyricsService {
         deepSearchEnabled: settings.lyricsDeepSearchEnabled,
         collectAllCandidates: false,
         preferPrimaryProvider: options.preferPrimaryProvider ?? true,
+        relaxedAutoAccept: options.relaxedAutoAccept === true,
         preferredSecondaryFields: preferredSecondaryFields(settings),
         isRejected: (provider, providerLyricsId) => this.hasRejectedProviderLyrics(trackId, provider, providerLyricsId),
       });

@@ -26,8 +26,10 @@ import readline from 'node:readline';
 import { PassThrough, Transform } from 'node:stream';
 import { app } from 'electron';
 import type { AudioOutputSettings, AudioStatus } from '../../shared/types/audio';
+import type { AirPlayReceiverProtocol } from '../../shared/types/appSettings';
 import type { AirPlayReceiverStatus, ConnectMetadata, ConnectReceiverClient, ConnectReceiverDebugEvent } from '../../shared/types/connect';
 import { getAudioSession } from '../audio/AudioSession';
+import { getAppSettings } from '../app/appSettings';
 import { AirPlayMdnsAdvertiser, airPlay2FeatureMask, createAirPlay2PairingUuid } from './AirPlayMdnsAdvertiser';
 
 type RaopEvent = Record<string, unknown> & {
@@ -99,6 +101,7 @@ type AirPlayReceiverDependencies = {
   createMdnsAdvertiser?: () => AirPlayMdnsAdvertiserLike;
   useHttpPcmBridge?: boolean;
   airPlay2Experimental?: boolean;
+  getAirPlayReceiverProtocol?: () => AirPlayReceiverProtocol;
   startupTimeoutMs?: number;
   now?: () => number;
 };
@@ -288,7 +291,19 @@ const airPlayHttpPcmReconnectMs = 120;
 const airPlayRaopLatencies = '1000:1000';
 const airPlayStartupStepTimeoutMs = 10_000;
 const shouldUseAirPlayHttpPcmBridge = (): boolean => process.env.ECHO_AIRPLAY_HTTP_PCM === '1';
-const shouldAdvertiseAirPlay2Experimental = (): boolean => process.env.ECHO_AIRPLAY2_EXPERIMENTAL !== '0';
+const readConfiguredAirPlayReceiverProtocol = (): AirPlayReceiverProtocol => {
+  if (process.env.ECHO_AIRPLAY2_EXPERIMENTAL === '1') {
+    return 'airplay2';
+  }
+  if (process.env.ECHO_AIRPLAY2_EXPERIMENTAL === '0') {
+    return 'airplay1';
+  }
+  try {
+    return getAppSettings().airPlayReceiverProtocol === 'airplay2' ? 'airplay2' : 'airplay1';
+  } catch {
+    return 'airplay1';
+  }
+};
 const highVolumeDebugActions = new Set(['pcm', 'rtp', 'rtcp']);
 const airPlay2ProbeSourceVersion = '366.0';
 const airPlay2ProbeBodyLimitBytes = 64 * 1024;
@@ -2419,10 +2434,11 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
   private readonly getAdvertiseInterfaces: () => AirPlayAdvertiseInterface[];
   private readonly createMdnsAdvertiser: () => AirPlayMdnsAdvertiserLike;
   private readonly useHttpPcmBridge: boolean;
-  private readonly airPlay2Experimental: boolean;
+  private readonly getAirPlayReceiverProtocol: () => AirPlayReceiverProtocol;
   private readonly startupTimeoutMs: number;
   private readonly now: () => number;
   private readonly airPlay2Identity: AirPlay2Identity;
+  private airPlayReceiverProtocol: AirPlayReceiverProtocol;
   private raopModule: RaopModule | null = null;
   private receiverHandle: number | null = null;
   private advertisedInterface: AirPlayAdvertiseInterface | null = null;
@@ -2466,7 +2482,10 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
     this.getAdvertiseInterfaces = dependencies.getAdvertiseInterfaces ?? getAdvertiseInterfaces;
     this.createMdnsAdvertiser = dependencies.createMdnsAdvertiser ?? (() => new AirPlayMdnsAdvertiser());
     this.useHttpPcmBridge = dependencies.useHttpPcmBridge ?? shouldUseAirPlayHttpPcmBridge();
-    this.airPlay2Experimental = dependencies.airPlay2Experimental ?? shouldAdvertiseAirPlay2Experimental();
+    this.getAirPlayReceiverProtocol = dependencies.airPlay2Experimental !== undefined
+      ? () => (dependencies.airPlay2Experimental ? 'airplay2' : 'airplay1')
+      : dependencies.getAirPlayReceiverProtocol ?? readConfiguredAirPlayReceiverProtocol;
+    this.airPlayReceiverProtocol = this.getAirPlayReceiverProtocol();
     this.startupTimeoutMs = dependencies.startupTimeoutMs ?? airPlayStartupStepTimeoutMs;
     this.now = dependencies.now ?? Date.now;
     this.airPlay2Identity = loadOrCreateAirPlay2Identity();
@@ -2546,6 +2565,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
     return {
       enabled: false,
       state: 'disabled',
+      protocol: this.airPlayReceiverProtocol,
       advertisedName: this.advertisedName,
       nativeAvailable: false,
       currentSourceId: null,
@@ -2569,6 +2589,8 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
 
     this.setStatus({ enabled: false, state: 'starting', error: null });
     try {
+      this.airPlayReceiverProtocol = this.getAirPlayReceiverProtocol();
+      const airPlay2Experimental = this.airPlayReceiverProtocol === 'airplay2';
       this.raopModule ??= await this.loadRaopModule();
       this.raopModule.setLogHandler?.((event) => this.handleNativeLog(event), 'info', 'info', 'warn');
       const advertiseInterfaces = this.getAdvertiseInterfaces();
@@ -2576,7 +2598,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
       const advertisedMac = advertiseInterface?.mac ?? '02:45:43:48:4F:00';
       this.advertisedInterface = advertiseInterface;
       const portBase = await findAvailableTcpPort(null, 6000, 100);
-      const airPlay2ProbePort = this.airPlay2Experimental ? await this.startAirPlay2ProbeServer() : null;
+      const airPlay2ProbePort = airPlay2Experimental ? await this.startAirPlay2ProbeServer() : null;
       this.receiverHandle = await withTimeout(
         this.raopModule.startReceiver(
           {
@@ -2606,7 +2628,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
               port: portBase,
               airPlayPort: airPlay2ProbePort,
               airPlayPublicKey: this.airPlay2Identity.publicKey.toString('hex'),
-              airPlay2Experimental: this.airPlay2Experimental,
+              airPlay2Experimental,
             }),
             this.startupTimeoutMs,
             `AirPlay mDNS advertiser startup timed out on ${item.address}.`,
@@ -2636,7 +2658,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
           ? `RAOP receiver started on 0.0.0.0:${portBase}; primary advertisement ${advertiseInterface.address} (${advertiseInterface.mac})`
           : `RAOP receiver started on 0.0.0.0:${portBase}; no LAN IPv4 interface found`,
       );
-      if (this.airPlay2Experimental) {
+      if (airPlay2Experimental) {
         this.addDebugEvent(
           'airplay2',
           airPlay2ProbePort
@@ -2647,6 +2669,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
       this.setStatus({
         enabled: true,
         state: 'idle',
+        protocol: this.airPlayReceiverProtocol,
         nativeAvailable: true,
         error: advertisedAddresses.length > 0 ? null : 'AirPlay discovery unavailable: mDNS advertiser did not start on any LAN interface.',
       });

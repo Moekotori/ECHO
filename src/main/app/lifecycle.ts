@@ -34,6 +34,7 @@ import { closeDefaultMvService } from '../mv/MvService';
 import { closeDefaultStreamingService } from '../streaming/StreamingService';
 import { disposeDefaultAudioSessionGracefully } from '../audio/AudioSession';
 import { closeDefaultLibraryDatabaseManager, getLibraryDatabaseManager } from '../database/LibraryDatabaseManager';
+import { getSleepTimerService } from '../sleepTimer/SleepTimerService';
 import { isLibraryRecoveryMode } from './libraryRecoveryMode';
 import { applyNetworkProxySettings } from '../network/proxySettings';
 import { markStartupStage, openSafeModeStartupConsoleIfEnabled } from '../diagnostics/StartupDiagnostics';
@@ -348,6 +349,7 @@ export const registerAppLifecycle = (): void => {
     await disposeConnectService();
     await disposeSmtcIntegration();
     await disposeDefaultAudioSessionGracefully('app-quit');
+    getSleepTimerService().dispose();
     disposeDataBackupScheduler();
     disposeBackgroundPlaybackShortcuts();
     closeDefaultLyricsService();

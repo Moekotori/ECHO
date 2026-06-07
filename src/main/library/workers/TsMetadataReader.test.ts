@@ -265,6 +265,46 @@ describe('TsMetadataReader parser fallbacks', () => {
     expect(Array.from(result.embeddedCover?.data ?? [])).toEqual([1, 2, 3]);
   });
 
+  it('recovers APE tags and avoids TagLib low bitrate when music-metadata cannot parse the file', async () => {
+    const root = makeTempRoot();
+    const filePath = join(root, 'YUI - again.ape');
+    writeFileSync(filePath, Buffer.alloc(122_021));
+    parseFileMock.mockRejectedValue(new Error('End-Of-Stream'));
+    readTagLibMetadataMock.mockResolvedValue({
+      tags: {
+        title: ['again-《钢之炼金术师 FULLMETAL ALCHEMIST》TV动画第1-14集片头曲'],
+        artist: ['YUI'],
+        album: ['鋼の錬金術師 FULLMETAL ALCHEMIST FINAL BEST'],
+      },
+      properties: {
+        duration: 1,
+        sampleRate: 44100,
+        bitsPerSample: 0,
+        bitrate: 37,
+        codec: 'unknown',
+        containerFormat: 'unknown',
+      },
+      hasCoverArt: false,
+    } as never);
+
+    const result = await new TsMetadataReader().read(filePath);
+
+    expect(result.status).toBe('ok');
+    expect(result.errors).toEqual([]);
+    expect(result.fields).toMatchObject({
+      title: 'again-《钢之炼金术师 FULLMETAL ALCHEMIST》TV动画第1-14集片头曲',
+      artist: 'YUI',
+      album: '鋼の錬金術師 FULLMETAL ALCHEMIST FINAL BEST',
+      duration: 1,
+      codec: 'APE',
+      sampleRate: 44100,
+      bitrate: 976168,
+    });
+    expect(result.fieldSources.title).toBe('embedded');
+    expect(result.fieldSources.bitrate).toBe('technical');
+    expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('music_metadata_unavailable: End-Of-Stream')]));
+  });
+
   it('does not let TagLib overwrite metadata that music-metadata already read', async () => {
     parseFileMock.mockResolvedValue(emptyMetadata({
       common: {

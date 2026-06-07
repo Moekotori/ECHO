@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { mkdir, rename, rm } from 'node:fs/promises';
-import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import sharp from 'sharp';
 import type { EchoDatabase } from '../../database/createDatabase';
 import { fetchWithNetworkProxy } from '../../network/networkFetch';
@@ -92,6 +92,7 @@ const maxImageBytes = 5 * 1024 * 1024;
 const imageRequestTimeoutMs = 8000;
 const minAcceptedImageSide = 240;
 const defaultProvider = 'qqmusic';
+const manualProvider = 'manual';
 const defaultConcurrency = 2;
 const providerRotationConfidenceTolerance = 0.03;
 const firstPassPrimaryProviderCount = 3;
@@ -180,6 +181,20 @@ const mimeTypeForImageUrl = (url: string): string | null => {
     }
   } catch {
     return null;
+  }
+};
+
+const mimeTypeForLocalImagePath = (filePath: string): string | null => {
+  switch (extname(filePath).toLocaleLowerCase()) {
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.png':
+      return 'image/png';
+    case '.webp':
+      return 'image/webp';
+    default:
+      return null;
   }
 };
 
@@ -421,10 +436,85 @@ export class ArtistImageCacheService {
     });
   }
 
+  async setCustomArtistImageFromFile(artistIdOrKey: string, filePath: string): Promise<ArtistImageCacheEntry | null> {
+    const artist = this.resolveArtist({ id: artistIdOrKey, artistKey: artistIdOrKey });
+    if (!artist) {
+      return null;
+    }
+
+    const resolvedPath = resolve(filePath);
+    const mimeType = mimeTypeForLocalImagePath(resolvedPath);
+    if (!mimeType || !isSupportedImageMimeType(mimeType)) {
+      throw new ArtistImageDownloadError('artist_image_unsupported_type', 'error');
+    }
+
+    const stat = statSync(resolvedPath);
+    if (!stat.isFile()) {
+      throw new ArtistImageDownloadError('artist_image_not_found', 'not_found');
+    }
+    if (stat.size > maxImageBytes) {
+      throw new ArtistImageDownloadError('artist_image_too_large', 'error');
+    }
+
+    const data = await readFile(resolvedPath);
+    return this.storeCustomArtistImage(artist, data, `file://${resolvedPath}`);
+  }
+
+  async setCustomArtistImageFromUrl(artistIdOrKey: string, url: string): Promise<ArtistImageCacheEntry | null> {
+    const artist = this.resolveArtist({ id: artistIdOrKey, artistKey: artistIdOrKey });
+    if (!artist) {
+      return null;
+    }
+
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new ArtistImageDownloadError('artist_image_unsupported_url', 'error');
+    }
+
+    const downloaded = await this.fetchImage(parsed.toString());
+    return this.storeCustomArtistImage(artist, downloaded.data, parsed.toString());
+  }
+
+  clearCustomArtistImage(artistIdOrKey: string): ArtistImageCacheEntry | null {
+    const artist = this.resolveArtist({ id: artistIdOrKey, artistKey: artistIdOrKey });
+    if (!artist) {
+      return null;
+    }
+
+    const existing = this.getCacheEntry(artist.artistKey);
+    if (existing?.provider !== manualProvider) {
+      return existing;
+    }
+
+    this.database.prepare('DELETE FROM artist_image_cache WHERE artist_key = ? AND provider = ?').run(artist.artistKey, manualProvider);
+    this.removeArtistCacheDirectory(artist.artistKey);
+    this.onUpdated?.({
+      artistId: artist.artistId,
+      artistKey: artist.artistKey,
+      status: 'pending',
+    });
+
+    return null;
+  }
+
   clearCache(): ArtistImageCacheClearResult {
-    const stats = directoryStats(this.cacheRoot);
-    const removedRows = Number(this.database.prepare('DELETE FROM artist_image_cache').run().changes ?? 0);
-    clearDirectoryContents(this.cacheRoot);
+    const rows = this.database
+      .prepare<[string], { artist_key: string }>('SELECT artist_key FROM artist_image_cache WHERE provider != ?')
+      .all(manualProvider);
+    const stats = rows.reduce(
+      (total, row) => {
+        const current = directoryStats(this.artistCacheDirectory(String(row.artist_key)));
+        return {
+          fileCount: total.fileCount + current.fileCount,
+          sizeBytes: total.sizeBytes + current.sizeBytes,
+        };
+      },
+      { fileCount: 0, sizeBytes: 0 },
+    );
+    const removedRows = Number(this.database.prepare('DELETE FROM artist_image_cache WHERE provider != ?').run(manualProvider).changes ?? 0);
+    for (const row of rows) {
+      this.removeArtistCacheDirectory(String(row.artist_key));
+    }
     this.queue.splice(0);
     this.queuedKeys.clear();
     this.backfillAttemptedKeys.clear();
@@ -486,6 +576,9 @@ export class ArtistImageCacheService {
     }
 
     const existing = this.getCacheEntry(artist.artistKey);
+    if (existing?.provider === manualProvider) {
+      return false;
+    }
     if (!force && existing && this.isReusableCacheEntry(existing)) {
       return false;
     }
@@ -782,6 +875,41 @@ export class ArtistImageCacheService {
     return { entry: null, attemptedCount, downloadErrors };
   }
 
+  private async storeCustomArtistImage(
+    artist: ResolvedArtist,
+    data: Uint8Array,
+    sourceUrl: string,
+  ): Promise<ArtistImageCacheEntry> {
+    if (data.byteLength > maxImageBytes) {
+      throw new ArtistImageDownloadError('artist_image_too_large', 'error');
+    }
+
+    const contentHash = createHash('sha256').update(data).digest('hex');
+    const paths = await this.writeImageVariants(artist.artistKey, data, { allowDefaultLikeImage: true });
+    const entry = this.markStatus(artist, 'matched', {
+      provider: manualProvider,
+      providerArtistId: null,
+      sourceUrl,
+      sourceHash: `manual:${contentHash}`,
+      thumbPath: paths.thumbPath,
+      mediumPath: paths.mediumPath,
+      largePath: paths.largePath,
+      confidence: 1,
+      failureReason: null,
+      fetchedAt: nowIso(),
+    });
+
+    this.queuedKeys.delete(artist.artistKey);
+    this.queue.splice(0, this.queue.length, ...this.queue.filter((task) => task.artist.artistKey !== artist.artistKey));
+    this.onUpdated?.({
+      artistId: artist.artistId,
+      artistKey: artist.artistKey,
+      status: entry.status,
+    });
+
+    return entry;
+  }
+
   private async searchProvider(provider: ArtistImageProvider, artist: ResolvedArtist): Promise<ProviderLookupResult> {
     try {
       this.throwIfPlaybackActive();
@@ -829,6 +957,9 @@ export class ArtistImageCacheService {
   private ensurePendingRow(artist: ResolvedArtist, force: boolean): void {
     const timestamp = nowIso();
     const existing = this.getCacheEntry(artist.artistKey);
+    if (existing?.provider === manualProvider) {
+      return;
+    }
 
     if (!existing) {
       this.database
@@ -880,6 +1011,11 @@ export class ArtistImageCacheService {
       fetchedAt: string | null;
     }> = {},
   ): ArtistImageCacheEntry {
+    const existing = this.getCacheEntry(artist.artistKey);
+    if (existing?.provider === manualProvider && fields.provider !== manualProvider) {
+      return existing;
+    }
+
     const timestamp = nowIso();
     const sourceHash = fields.sourceHash
       ? artistImageCacheSourceHash(fields.sourceHash)
@@ -912,7 +1048,7 @@ export class ArtistImageCacheService {
       .run(
         artist.artistKey,
         artist.artistName,
-        fields.provider ?? this.getCacheEntry(artist.artistKey)?.provider ?? this.providers[0]?.name ?? defaultProvider,
+        fields.provider ?? existing?.provider ?? this.providers[0]?.name ?? defaultProvider,
         fields.providerArtistId ?? null,
         fields.sourceUrl ?? null,
         sourceHash,
@@ -1102,8 +1238,9 @@ export class ArtistImageCacheService {
   private async writeImageVariants(
     artistKey: string,
     data: Uint8Array,
+    options: { allowDefaultLikeImage?: boolean } = {},
   ): Promise<{ thumbPath: string; mediumPath: string; largePath: string }> {
-    const artistDirectory = join(this.cacheRoot, hashText(artistKey));
+    const artistDirectory = this.artistCacheDirectory(artistKey);
     const thumbPath = join(artistDirectory, 'thumb.webp');
     const mediumPath = join(artistDirectory, 'medium.webp');
     const largePath = join(artistDirectory, 'large.webp');
@@ -1124,7 +1261,7 @@ export class ArtistImageCacheService {
         throw new ArtistImageDownloadError('artist_image_too_small', 'not_found');
       }
 
-      if (await isLikelyDefaultArtistAvatarImage(source)) {
+      if (!options.allowDefaultLikeImage && await isLikelyDefaultArtistAvatarImage(source)) {
         throw new ArtistImageDownloadError('artist_image_default_placeholder', 'not_found');
       }
 
@@ -1154,6 +1291,17 @@ export class ArtistImageCacheService {
       largePath,
     };
   }
+
+  private artistCacheDirectory(artistKey: string): string {
+    return join(this.cacheRoot, hashText(artistKey));
+  }
+
+  private removeArtistCacheDirectory(artistKey: string): void {
+    const artistDirectory = this.artistCacheDirectory(artistKey);
+    if (isPathInsideDirectory(this.cacheRoot, artistDirectory)) {
+      rmSync(artistDirectory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    }
+  }
 }
 
 const directoryStats = (targetPath: string): { fileCount: number; sizeBytes: number } => {
@@ -1180,21 +1328,6 @@ const directoryStats = (targetPath: string): { fileCount: number; sizeBytes: num
   }
 
   return { fileCount, sizeBytes };
-};
-
-const clearDirectoryContents = (targetPath: string): void => {
-  const root = resolve(targetPath);
-  if (basename(root) !== 'artist-images') {
-    throw new Error(`Refusing to clear unexpected artist image cache directory: ${root}`);
-  }
-
-  if (!existsSync(root)) {
-    return;
-  }
-
-  for (const entry of readdirSync(root)) {
-    rmSync(join(root, entry), { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
-  }
 };
 
 const isPathInsideDirectory = (directory: string, filePath: string): boolean => {

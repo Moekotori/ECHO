@@ -108,6 +108,7 @@ export type PersistedQueueSource =
   | { type: 'album'; label: string; albumId: string }
   | { type: 'artist'; label: string; artistId?: string }
   | { type: 'folder'; label: string; folderId: string; path: string; recursive: boolean; search?: string; sort?: string }
+  | { type: 'liked'; label: string; sourceProvider: 'local' | 'netease' | 'qqmusic'; search?: string; sort?: string }
   | { type: 'streaming'; label: string; provider: string }
   | { type: 'local-file'; label: string }
   | { type: 'manual'; label: string };

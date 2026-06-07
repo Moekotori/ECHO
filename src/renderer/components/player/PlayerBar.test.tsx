@@ -3,14 +3,15 @@ import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { AudioStatus } from '../../../shared/types/audio';
-import { hqPlayerConnectDeviceId, type ConnectSessionStatus } from '../../../shared/types/connect';
+import { hqPlayerConnectDeviceId, type AirPlayReceiverStatus, type ConnectSessionStatus } from '../../../shared/types/connect';
 import type { EqState } from '../../../shared/types/eq';
 import { createDefaultGlobalShortcuts, createDefaultLocalShortcuts, type GlobalShortcutAction } from '../../../shared/types/globalShortcuts';
 import type { HqPlayerStatus } from '../../../shared/types/hqplayer';
 import type { LibraryTrack } from '../../../shared/types/library';
 import type { SmtcCommand } from '../../../shared/types/smtc';
+import { I18nProvider } from '../../i18n/I18nProvider';
 import { PlaybackQueueProvider, usePlaybackQueue } from '../../stores/PlaybackQueueProvider';
-import { setPlaybackStatusSnapshot } from '../../stores/playbackStatusStore';
+import { beginPlaybackSeekSnapshot, setPlaybackStatusSnapshot } from '../../stores/playbackStatusStore';
 import { AudioSignalPathControl, AudioSignalPathPopover } from './AudioSignalPathPopover';
 import { PlaybackCommandController } from './PlaybackCommandController';
 import { PlayerBar } from './PlayerBar';
@@ -133,6 +134,32 @@ const hqPlayerConnectStatus = (track: LibraryTrack, state: ConnectSessionStatus[
   latencyMs: 42,
   error: null,
   updatedAt: '2026-06-05T08:00:00.000Z',
+});
+
+const airPlayReceiverStatus = (track: LibraryTrack, state: AirPlayReceiverStatus['state'] = 'playing'): AirPlayReceiverStatus => ({
+  enabled: true,
+  state,
+  protocol: 'airplay1',
+  advertisedName: 'ECHO Next',
+  nativeAvailable: true,
+  currentSourceId: track.path,
+  currentClient: null,
+  metadata: {
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    albumArtist: track.albumArtist,
+    durationSeconds: track.duration,
+    coverHttpUrl: '',
+  },
+  currentLyricLine: null,
+  artworkUrl: null,
+  positionSeconds: 12,
+  durationSeconds: track.duration,
+  volume: 100,
+  error: null,
+  debugEvents: [],
+  updatedAt: '2026-06-07T05:30:00.000Z',
 });
 
 const subscribeAudioStatusHandlers = (handlers: Array<(status: AudioStatus) => void>) => (handler: (status: AudioStatus) => void): (() => void) => {
@@ -2932,6 +2959,68 @@ describe('PlayerBar', () => {
     expect(Number(slider.value)).toBeGreaterThanOrEqual(12);
   });
 
+  it('does not retain same-track audio status after a shared seek snapshot clears audio telemetry', async () => {
+    const track = makeTrack(1, { duration: 240 });
+    const initialAudioStatus = {
+      ...audioStatus(track),
+      durationSeconds: track.duration,
+      positionSeconds: 181,
+    };
+
+    window.echo = {
+      playback: {
+        getStatus: vi.fn().mockResolvedValue({
+          state: 'playing',
+          currentTrackId: track.id,
+          positionMs: 181000,
+          durationMs: track.duration * 1000,
+          filePath: track.path,
+        }),
+        playLocalFile: vi.fn(),
+        play: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(),
+        seek: vi.fn(),
+        openLocalAudioFile: vi.fn(),
+      },
+      audio: {
+        getStatus: vi.fn().mockResolvedValue(initialAudioStatus),
+        onStatus: vi.fn(),
+        listDevices: vi.fn(),
+        setOutput: vi.fn(),
+      },
+      library: {
+        getLikedTrackIds: vi.fn().mockResolvedValue({ [track.id]: false }),
+      },
+      app: {
+        getSettings: vi.fn().mockResolvedValue({ smtcEnabled: true }),
+      },
+    } as unknown as Window['echo'];
+
+    render(
+      <PlaybackQueueProvider>
+        <QueueSeed tracks={[track]} />
+      </PlaybackQueueProvider>,
+    );
+
+    await screen.findByText('Song 1');
+    const slider = screen.getByRole('slider', { name: 'Seek position' }) as HTMLInputElement;
+    await waitFor(() => expect(Number(slider.value)).toBeGreaterThanOrEqual(181));
+
+    act(() => {
+      beginPlaybackSeekSnapshot({
+        state: 'playing',
+        currentTrackId: track.id,
+        positionMs: 60000,
+        durationMs: track.duration * 1000,
+        filePath: track.path,
+      });
+    });
+
+    await waitFor(() => expect(Number(slider.value)).toBeLessThan(65));
+    expect(Number(slider.value)).toBeGreaterThanOrEqual(60);
+  });
+
   it('keeps high-speed progress from jumping backward on a brief same-track stale audio status', async () => {
     const performanceNow = vi.spyOn(performance, 'now').mockReturnValue(0);
     const track = makeTrack(1);
@@ -3339,6 +3428,96 @@ describe('PlayerBar', () => {
     expect((seekedHandler.mock.calls[0][0] as CustomEvent).detail.positionSeconds).toBe(21);
 
     window.removeEventListener('playback:seeked', seekedHandler);
+  });
+
+  it('keeps the progress slider enabled for AirPlay receiver playback', async () => {
+    const track = makeTrack(71, {
+      id: 'airplay-receiver:source-1:air-song',
+      path: 'airplay-receiver:source-1',
+      mediaType: 'remote',
+      isTemporary: true,
+      title: 'AirPlay Seek Track',
+      artist: 'Air Artist',
+      duration: 180,
+      fieldSources: { title: 'airplay', artist: 'airplay' },
+    });
+    const seek = vi.fn().mockResolvedValue({
+      state: 'playing',
+      currentTrackId: track.id,
+      positionMs: 42_000,
+      durationMs: track.duration * 1000,
+      filePath: track.path,
+    });
+    const status = airPlayReceiverStatus(track, 'playing');
+
+    window.echo = {
+      playback: {
+        getStatus: vi.fn().mockResolvedValue({
+          state: 'playing',
+          currentTrackId: track.id,
+          positionMs: 12_000,
+          durationMs: track.duration * 1000,
+          filePath: track.path,
+        }),
+        playLocalFile: vi.fn(),
+        play: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(),
+        seek,
+        openLocalAudioFile: vi.fn(),
+      },
+      connect: {
+        getStatus: vi.fn().mockResolvedValue(null),
+        getAirPlayReceiverStatus: vi.fn().mockResolvedValue(status),
+        onAirPlayReceiverStatus: vi.fn(() => vi.fn()),
+      },
+      audio: {
+        getStatus: vi.fn().mockResolvedValue({
+          ...audioStatus(track),
+          currentFilePath: track.path,
+          currentTrackId: track.id,
+          positionSeconds: 12,
+        }),
+        onStatus: vi.fn(() => vi.fn()),
+        listDevices: vi.fn(),
+        setOutput: vi.fn(),
+      },
+      eq: {
+        getState: vi.fn().mockResolvedValue(eqState()),
+        setEnabled: vi.fn().mockResolvedValue(eqState()),
+        setBandGain: vi.fn().mockResolvedValue(eqState()),
+        setPreamp: vi.fn().mockResolvedValue(eqState()),
+        setPreset: vi.fn().mockResolvedValue(eqState()),
+        reset: vi.fn().mockResolvedValue(eqState()),
+        listPresets: vi.fn().mockResolvedValue([]),
+        savePreset: vi.fn(),
+        deletePreset: vi.fn().mockResolvedValue([]),
+      },
+      app: {
+        getSettings: vi.fn().mockResolvedValue({}),
+      },
+      library: {
+        getTrack: vi.fn().mockResolvedValue(track),
+        getLikedTrackIds: vi.fn().mockResolvedValue({ [track.id]: false }),
+      },
+    } as unknown as Window['echo'];
+
+    render(
+      <I18nProvider>
+        <PlaybackQueueProvider>
+          <QueueSeed tracks={[track]} />
+        </PlaybackQueueProvider>
+      </I18nProvider>,
+    );
+
+    await screen.findByText('AirPlay Seek Track');
+    const slider = screen.getByRole('slider', { name: 'Seek position' }) as HTMLInputElement;
+    await waitFor(() => expect(slider.disabled).toBe(false));
+
+    fireEvent.change(slider, { target: { value: '42' } });
+    fireEvent.pointerUp(slider);
+
+    await waitFor(() => expect(seek).toHaveBeenCalledWith(42));
   });
 
   it('keeps the visible progress anchored when status hovers just behind a seek target', async () => {

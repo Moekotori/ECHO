@@ -217,6 +217,7 @@ type DownloadServiceDependencies = {
         albumArtist?: string;
       };
       coverUrl?: string | null;
+      deferGroupingRefresh?: boolean;
     },
   ) => Promise<{ id: string }>;
   bindMvUrl?: (trackId: string, url: string) => unknown;
@@ -2155,6 +2156,7 @@ export class DownloadService extends EventEmitter {
           }
         : undefined,
       coverUrl: coverUrl ?? undefined,
+      deferGroupingRefresh: true,
     });
     this.updateJob(jobId, { importedTrackId: track.id });
     if (options.streamingProvider && options.streamingProviderTrackId) {

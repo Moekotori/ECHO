@@ -298,6 +298,14 @@ const isQqMusicPermissionError = (error: unknown): boolean => {
   return /QQ\s*音乐.*(?:无播放权限|104003)|QQ\s*Music.*(?:104003|permission)/iu.test(message);
 };
 
+const isStreamingPlaybackResolutionError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /did not return a playable URL|metadata only|requires the official .* player|must not enter the native audio session/iu.test(message) ||
+    /(?:会员|會員|版权|版權|不可播放|无播放权限|無播放權限|permission|unavailable)/iu.test(message)
+  );
+};
+
 const normalizeMatchText = (value: string | null | undefined): string =>
   (value ?? '')
     .normalize('NFKC')
@@ -1168,6 +1176,10 @@ const runImmediatePlaybackStatusCommand = async (fn: () => Promise<PlaybackStatu
 const reportPlaybackAudioError = (error: unknown, phase: string, details?: unknown): void => {
   const normalized = error instanceof Error ? error : new Error(String(error));
   const status = getAudioSession().getStatus();
+
+  if (isStreamingPlaybackResolutionError(normalized)) {
+    return;
+  }
 
   if (status.error === normalized.message) {
     return;

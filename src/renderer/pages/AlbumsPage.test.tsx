@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AlbumsPage } from './AlbumsPage';
@@ -124,6 +125,19 @@ const renderAlbumsPage = (): ReturnType<typeof render> =>
         </main>
       </PlaybackQueueProvider>
     </I18nProvider>,
+  );
+
+const renderAlbumsPageInStrictMode = (): ReturnType<typeof render> =>
+  render(
+    <StrictMode>
+      <I18nProvider>
+        <PlaybackQueueProvider>
+          <main className="page-surface">
+            <AlbumsPage />
+          </main>
+        </PlaybackQueueProvider>
+      </I18nProvider>
+    </StrictMode>,
   );
 
 const QueueProbe = (): JSX.Element => {
@@ -255,6 +269,22 @@ describe('AlbumsPage', () => {
 
     requestAlbumDetailNavigation(targetAlbum, { returnTo: 'home' });
     const { container } = renderAlbumsPage();
+
+    expect(screen.getByLabelText('Dream within a dream album details')).toBeTruthy();
+    expect(container.querySelector('.albums-page')?.getAttribute('data-detail-open')).toBe('true');
+  });
+
+  it('keeps pending home album detail through strict-mode first mount replay', () => {
+    const targetAlbum = album('1', { title: 'Dream within a dream' });
+    installLibrary(
+      vi.fn().mockResolvedValue(page([targetAlbum])),
+      vi.fn(),
+      vi.fn().mockResolvedValue(trackPage([])),
+      vi.fn().mockResolvedValue(null),
+    );
+
+    requestAlbumDetailNavigation(targetAlbum, { returnTo: 'home' });
+    const { container } = renderAlbumsPageInStrictMode();
 
     expect(screen.getByLabelText('Dream within a dream album details')).toBeTruthy();
     expect(container.querySelector('.albums-page')?.getAttribute('data-detail-open')).toBe('true');

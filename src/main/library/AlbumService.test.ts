@@ -23,6 +23,32 @@ describe('AlbumService', () => {
     expect(first).not.toBe(second);
   });
 
+  it('standard strategy merges disc-number subfolders under the same album folder when albumArtist is not reliable', () => {
+    const service = new AlbumService();
+    const first = service.makeAlbumKey(makeInput({ filePath: 'D:\\Music\\Pink Floyd\\The Dark Side Of The Moon\\disc1\\A.flac' }));
+    const second = service.makeAlbumKey(
+      makeInput({
+        filePath: 'D:\\Music\\Pink Floyd\\The Dark Side Of The Moon\\Disc 2\\B.flac',
+        trackId: 'track-b',
+      }),
+    );
+
+    expect(first).toBe(second);
+  });
+
+  it('standard strategy keeps disc-number subfolders split when their parent album folders differ', () => {
+    const service = new AlbumService();
+    const first = service.makeAlbumKey(makeInput({ filePath: 'D:\\Music\\Album One\\disc1\\A.flac' }));
+    const second = service.makeAlbumKey(
+      makeInput({
+        filePath: 'D:\\Music\\Album Two\\disc1\\B.flac',
+        trackId: 'track-b',
+      }),
+    );
+
+    expect(first).not.toBe(second);
+  });
+
   it('sameTitleAndCover strategy merges same title and cover across folder and artist differences', () => {
     const service = new AlbumService();
     const first = service.makeAlbumKey(makeInput({ mergeStrategy: 'sameTitleAndCover' }));

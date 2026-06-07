@@ -898,6 +898,121 @@ html:not([data-theme="dark"]) .lyrics-page[data-background="customWallpaper"]:ha
   display: none;
 }
 
+.lyrics-background-select {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.lyrics-background-select span {
+  color: var(--theme-legacy-surface-a78);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.lyrics-background-select__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 12px;
+  color: var(--theme-legacy-surface-a88);
+  border: 1px solid var(--theme-legacy-var(--theme-on-accent)-a12);
+  border-radius: 10px;
+  outline: 0;
+  background: var(--theme-legacy-var(--theme-on-accent)-a08);
+  font: inherit;
+  cursor: pointer;
+}
+
+.lyrics-background-select__trigger strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 820;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lyrics-background-select__trigger svg {
+  flex: 0 0 auto;
+  transition: transform 160ms ease;
+}
+
+.lyrics-background-select__trigger[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.lyrics-background-select__trigger:focus-visible {
+  border-color: rgba(143, 207, 189, 0.5);
+  box-shadow: 0 0 0 3px rgba(143, 207, 189, 0.18);
+}
+
+.lyrics-background-select__trigger:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.lyrics-background-select__menu {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--theme-legacy-var(--theme-on-accent)-a12);
+  border-radius: 12px;
+  background: rgba(60, 62, 78, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 14px 28px rgba(9, 12, 20, 0.28);
+}
+
+.lyrics-background-select__option {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 10px;
+  color: rgba(244, 248, 255, 0.9);
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 780;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lyrics-background-select__option:hover,
+.lyrics-background-select__option:focus-visible {
+  color: rgba(255, 255, 255, 0.98);
+  outline: 0;
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.lyrics-background-select__option[aria-selected="true"] {
+  color: var(--theme-legacy-heading-text);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.lyrics-background-select__option span {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .lyrics-color-panel__header,
 .lyrics-color-panel__header span,
 .lyrics-color-input,
@@ -1357,11 +1472,28 @@ html:not([data-theme="dark"]) .lyrics-page[data-background="customWallpaper"]:ha
 
 .audio-drawer .lyrics-source-option,
 .audio-drawer .lyrics-search-pill__field,
+.audio-drawer .lyrics-background-select__trigger,
+.audio-drawer .lyrics-background-select__menu,
 .audio-drawer .lyrics-background-segmented,
 .audio-drawer .lyrics-background-segmented button {
   color: var(--audio-drawer-soft-text);
   border-color: var(--theme-glass-bg);
   background: var(--theme-glass-bg-muted);
+}
+
+.audio-drawer .lyrics-background-select span {
+  color: var(--audio-drawer-muted-text);
+}
+
+.audio-drawer .lyrics-background-select__trigger:focus-visible {
+  color: var(--audio-drawer-text);
+  border-color: var(--theme-glass-bg-hover);
+  background: var(--theme-glass-bg-raised);
+}
+
+.audio-drawer .lyrics-background-select__option[aria-selected="true"] {
+  color: var(--audio-drawer-text);
+  background: var(--theme-glass-bg-raised);
 }
 
 .audio-drawer .lyrics-color-reset {

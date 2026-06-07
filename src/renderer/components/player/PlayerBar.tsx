@@ -32,6 +32,7 @@ import { PlayerSpeedControl } from './PlayerSpeedControl';
 import { PlayerStatusChips } from './PlayerStatusChips';
 import { PlayerTransport } from './PlayerTransport';
 import { PlayerVolumeControl } from './PlayerVolumeControl';
+import { SleepTimerButton } from './SleepTimerButton';
 import { formatAudioHostError, shouldSuppressAudioHostError } from './audioErrorFormat';
 import { applyMediaSessionSnapshot } from './mediaSession';
 import { titleFromPath } from './playerFormat';
@@ -750,9 +751,8 @@ export const PlayerBar = ({
       let appliedAudioStatus = false;
       if (snapshotAudioStatus && shouldApplyAudioStatus) {
         appliedAudioStatus = applyAudioStatus(snapshotAudioStatus);
-      } else if (snapshot.playbackStatus) {
-        const nextPlaybackStatus = snapshot.playbackStatus;
-        setAudioStatus((current) => (current && !isAudioStatusForPlayback(current, nextPlaybackStatus) ? null : current));
+      } else if (snapshotAudioStatus || snapshot.playbackStatus || snapshot.error) {
+        setAudioStatus(null);
       }
 
       const nextTrackId =
@@ -833,7 +833,7 @@ export const PlayerBar = ({
     !activeReceiverStatus &&
     visualState === 'paused' &&
     (playbackAudioStatus?.state === 'paused' || currentPlaybackStatus?.state === 'paused');
-  const isPlaying = visualState === 'playing';
+  const isPlaying = visualState === 'playing' || visualState === 'loading';
   const isRemotePlaybackLoading =
     currentTrack?.mediaType === 'remote' &&
     !isReceiverTrackId(currentTrack.id) &&
@@ -2046,6 +2046,46 @@ export const PlayerBar = ({
     [refreshStatus, setQueueCurrentTrackId],
   );
 
+  const publishOptimisticPause = useCallback((): void => {
+    const status: PlaybackStatus = {
+      state: 'paused',
+      currentTrackId: trackId,
+      filePath,
+      positionMs: Math.round(Math.max(0, positionSeconds) * 1000),
+      durationMs: Math.round(Math.max(0, durationSeconds) * 1000),
+    };
+    lastPlaybackActionStatusRef.current = {
+      state: status.state,
+      trackId: status.currentTrackId,
+      filePath: status.filePath,
+      updatedAtMs: performance.now(),
+    };
+    setPlaybackStatus(status);
+    setAudioStatus((current) =>
+      current
+        ? {
+            ...current,
+            state: 'paused',
+            positionSeconds,
+            durationSeconds,
+          }
+        : current,
+    );
+    setPlaybackStatusSnapshot({
+      audioStatus: audioStatus
+        ? {
+            ...audioStatus,
+            state: 'paused',
+            positionSeconds,
+            durationSeconds,
+          }
+        : null,
+      playbackStatus: status,
+      playbackVisualIntent: null,
+      error: null,
+    });
+  }, [audioStatus, durationSeconds, filePath, positionSeconds, trackId]);
+
   const applyConnectPlaybackStatus = useCallback(
     (connectStatus: ConnectSessionStatus, fallbackPositionSeconds?: number): PlaybackStatus => {
       const nextStatus = playbackStatusFromConnectStatus(connectStatus, {
@@ -2121,6 +2161,7 @@ export const PlayerBar = ({
 
     await runPlaybackAction(async () => {
       if (visualState === 'playing' || visualState === 'loading') {
+        publishOptimisticPause();
         return playback.pause();
       }
 
@@ -2623,7 +2664,7 @@ export const PlayerBar = ({
           />
         </div>
         <PlayerProgress
-          disabled={isAirPlayReceiverPlaybackActive || (!filePath && !isSpotifyCurrentTrack)}
+          disabled={!filePath && !isSpotifyCurrentTrack}
           durationSeconds={durationSeconds}
           isLoading={isNetworkPlaybackLoading}
           waveformEnabled={playerWaveformProgressEnabled && !lowLoadPlaybackModeEnabled && !isNetworkPlaybackLoading}
@@ -2635,6 +2676,7 @@ export const PlayerBar = ({
       </div>
 
       <div className="output-status">
+        <SleepTimerButton />
         {hasDesktopLyricsBridge ? (
           <button
             className={`icon-button ${desktopLyricsVisible ? 'is-soft-active' : ''}`}

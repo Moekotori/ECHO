@@ -694,6 +694,37 @@ describe('EqPanel', () => {
     await waitFor(() => expect(window.echo.eq.setBandGain).toHaveBeenCalledWith({ band: 2, gainDb: 0 }));
   });
 
+  it('keeps every EQ curve handle visible while dragging into parametric layout', async () => {
+    const { container } = renderEqPanel();
+
+    const curve = await screen.findByRole('img', { name: 'Draggable 31-band EQ frequency response' });
+    curve.getBoundingClientRect = vi.fn(() => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 920,
+      bottom: 260,
+      width: 920,
+      height: 260,
+      toJSON: () => undefined,
+    }));
+
+    const node = await screen.findByTestId('eq-curve-node-2');
+    expect(container.querySelectorAll('[data-testid^="eq-curve-node-"]')).toHaveLength(eqFrequenciesHz.length);
+
+    fireEvent.pointerDown(node, { clientX: 410, clientY: 94, pointerId: 1 });
+    fireEvent.pointerMove(curve, { clientX: 410, clientY: 94, pointerId: 1 });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid^="eq-curve-node-"]')).toHaveLength(eqFrequenciesHz.length);
+    });
+    expect(screen.getByTestId('eq-curve-node-0')).toBeTruthy();
+    expect(screen.getByTestId(`eq-curve-node-${eqFrequenciesHz.length - 1}`)).toBeTruthy();
+
+    fireEvent.pointerUp(curve, { clientX: 410, clientY: 94, pointerId: 1 });
+  });
+
   it('maps EQ drag coordinates through the SVG screen matrix when the chart is letterboxed', async () => {
     renderEqPanel();
 

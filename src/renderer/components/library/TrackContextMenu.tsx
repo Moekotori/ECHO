@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ChevronRight,
@@ -78,6 +78,7 @@ const submenuGap = 8;
 const menuWidth = 224;
 const submenuWidth = 224;
 const submenuMaxHeight = 360;
+const menuCloseAnimationMs = 120;
 const nonLocalHiddenActions = new Set<TrackMenuAction>([
   'edit-tags',
   'reload-embedded-tags',
@@ -114,6 +115,7 @@ export const TrackContextMenu = ({ track, position, liked = false, selectionCoun
   const { t } = useI18n();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const playlistLoadStartedRef = useRef(false);
+  const closeTimerRef = useRef<number | null>(null);
   const [playlistSubmenuOpen, setPlaylistSubmenuOpen] = useState(false);
   const [playlists, setPlaylists] = useState<LibraryPlaylist[]>([]);
   const [playlistsLoading, setPlaylistsLoading] = useState(false);
@@ -125,6 +127,34 @@ export const TrackContextMenu = ({ track, position, liked = false, selectionCoun
   }));
   const [menuMaxHeight, setMenuMaxHeight] = useState(() => window.innerHeight - viewportPadding * 2);
   const [extraActionsEnabled, setExtraActionsEnabled] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+
+  const requestClose = useCallback((): void => {
+    if (closeTimerRef.current !== null) {
+      return;
+    }
+
+    setIsClosing(true);
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      onClose();
+    }, menuCloseAnimationMs);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    setIsClosing(false);
+  }, [position.x, position.y, track.id]);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
 
   useLayoutEffect(() => {
     const menu = menuRef.current;
@@ -186,19 +216,19 @@ export const TrackContextMenu = ({ track, position, liked = false, selectionCoun
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
-        onClose();
+        requestClose();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('resize', onClose);
-    window.addEventListener('scroll', onClose, true);
+    window.addEventListener('resize', requestClose);
+    window.addEventListener('scroll', requestClose, true);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('resize', onClose);
-      window.removeEventListener('scroll', onClose, true);
+      window.removeEventListener('resize', requestClose);
+      window.removeEventListener('scroll', requestClose, true);
     };
-  }, [onClose]);
+  }, [requestClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -312,10 +342,10 @@ export const TrackContextMenu = ({ track, position, liked = false, selectionCoun
   });
 
   return createPortal(
-    <div className="track-menu-layer" role="presentation" onMouseDown={onClose}>
+    <div className="track-menu-layer" role="presentation" onMouseDown={requestClose}>
       <div
         ref={menuRef}
-        className="track-context-menu"
+        className={`track-context-menu${isClosing ? ' track-context-menu--closing' : ''}`}
         role="menu"
         style={{ left: menuPosition.x, top: menuPosition.y, maxHeight: menuMaxHeight }}
         onMouseDown={(event) => event.stopPropagation()}
@@ -376,7 +406,7 @@ export const TrackContextMenu = ({ track, position, liked = false, selectionCoun
       </div>
       {playlistSubmenuOpen ? (
         <div
-          className="track-playlist-submenu"
+          className={`track-playlist-submenu${isClosing ? ' track-playlist-submenu--closing' : ''}`}
           role="menu"
           aria-label="选择歌单"
           style={{ left: playlistSubmenuPosition.x, top: playlistSubmenuPosition.y }}

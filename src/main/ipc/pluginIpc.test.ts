@@ -75,6 +75,7 @@ describe('plugin IPC', () => {
     await expect(handlers[IpcChannels.PluginsReload]!(null, 'echo.playback-panel')).resolves.toMatchObject({ status: 'running' });
     await expect(handlers[IpcChannels.PluginsExportPackage]!(null, 'echo.playback-panel')).resolves.toContain('echo.playback-panel');
     await expect(handlers[IpcChannels.PluginsImportPackage]!(null)).resolves.toMatchObject({ pluginId: 'echo.playback-panel' });
+    await expect(handlers[IpcChannels.PluginsImportPackage]!(null, 'D:\\Echo\\plugin.echo')).resolves.toMatchObject({ pluginId: 'echo.playback-panel' });
     await expect(handlers[IpcChannels.PluginsRunCommand]!(null, { pluginId: 'echo.playback-panel', commandId: 'show-status' })).resolves.toEqual({ ok: true });
     await expect(handlers[IpcChannels.PluginsQueryMetadata]!(null, { track: { title: 'Song' } })).resolves.toEqual({ providers: [], candidates: [] });
     await expect(handlers[IpcChannels.PluginsQuerySources]!(null, { query: 'Song' })).resolves.toEqual({ providers: [], tracks: [] });
@@ -93,7 +94,8 @@ describe('plugin IPC', () => {
     expect(serviceMock.createExample).toHaveBeenCalledWith('theme-preset');
     expect(serviceMock.enable).toHaveBeenCalledWith({ pluginId: 'echo.playback-panel' });
     expect(serviceMock.exportPluginPackage).toHaveBeenCalledWith('echo.playback-panel');
-    expect(serviceMock.importPluginPackage).toHaveBeenCalledTimes(1);
+    expect(serviceMock.importPluginPackage).toHaveBeenCalledWith(undefined);
+    expect(serviceMock.importPluginPackage).toHaveBeenCalledWith('D:\\Echo\\plugin.echo');
     expect(serviceMock.runCommand).toHaveBeenCalledWith({ pluginId: 'echo.playback-panel', commandId: 'show-status' });
     expect(serviceMock.queryMetadata).toHaveBeenCalledWith({ track: { title: 'Song' } });
     expect(serviceMock.querySources).toHaveBeenCalledWith({ query: 'Song' });

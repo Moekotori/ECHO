@@ -14,6 +14,15 @@ export default defineConfig({
         output: {
           footer: '\nimport "node:module";\n',
         },
+        onLog(level, log, handler) {
+          if (
+            level === 'warn' &&
+            log.message.includes('dynamic import will not move module into another chunk')
+          ) {
+            return;
+          }
+          handler(level, log);
+        },
       },
     },
   },

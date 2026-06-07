@@ -10,6 +10,7 @@ import type {
   LibraryDatabaseRestoreResult,
   LibraryAllUserDataDeleteResult,
   LibraryHealthReport,
+  LibraryPlaylist,
 } from '../../shared/types/library';
 import type { RemoteBackgroundGlobalStatus, RemoteSource } from '../../shared/types/remoteSources';
 
@@ -216,7 +217,7 @@ const installLibraryService = () => {
   };
   const service = {
     getTrack: vi.fn((_trackId?: string) => track),
-    getPlaylist: vi.fn(() => ({
+    getPlaylist: vi.fn<() => LibraryPlaylist>(() => ({
       id: 'playlist-1',
       name: 'Export Mix',
       description: 'For export',
@@ -274,6 +275,47 @@ const installLibraryService = () => {
       page: 1,
       pageSize: 500,
       total: 2,
+      hasMore: false,
+    })),
+    getLikedSongsPlaylist: vi.fn(() => ({
+      id: 'liked-tracks',
+      name: '喜欢的歌曲',
+      description: null,
+      kind: 'system',
+      sourceProvider: 'local',
+      sourcePlaylistId: null,
+      coverId: null,
+      coverThumb: null,
+      sortMode: 'manual',
+      itemCount: 2,
+      createdAt: '2026-05-14T00:00:00.000Z',
+      updatedAt: '2026-05-14T00:00:00.000Z',
+    })),
+    getLikedTracks: vi.fn((query?: { sourceProvider?: string }) => ({
+      items: [
+        {
+          id: 'liked-item-1',
+          playlistId: 'liked-tracks',
+          mediaType: 'stream_track',
+          mediaId: 'stream-qq-1',
+          sourceProvider: 'qqmusic',
+          sourceItemId: 'qq-song-1',
+          titleSnapshot: 'QQ Song',
+          artistSnapshot: 'QQ Artist',
+          albumSnapshot: 'QQ Album',
+          durationSnapshot: 321,
+          coverId: null,
+          coverThumb: null,
+          position: 0,
+          addedAt: '2026-05-14T00:00:00.000Z',
+          addedFrom: 'qqmusic-liked-sync',
+          unavailable: false,
+          track: null,
+        },
+      ].filter((item) => !query?.sourceProvider || item.sourceProvider === query.sourceProvider),
+      page: 1,
+      pageSize: 500,
+      total: query?.sourceProvider === 'qqmusic' ? 1 : 0,
       hasMore: false,
     })),
     createPlaylist: vi.fn((request: { name: string }) => ({
@@ -507,6 +549,9 @@ const installLibraryService = () => {
       summary: { total: 2, matched: 0, pending: 2, loading: 0, notFound: 0, error: 0, rateLimited: 0 },
     })),
     clearArtistImageCache: vi.fn(() => ({ removedRows: 0, deletedFiles: 0, freedBytes: 0 })),
+    setCustomArtistImageFromFile: vi.fn(async () => null),
+    setCustomArtistImageFromUrl: vi.fn(async () => null),
+    clearCustomArtistImage: vi.fn(() => null),
     getAlbumTracks: vi.fn(),
     getSummary: vi.fn(() => ({ songCount: 2, albumCount: 1, artistCount: 2, folderCount: 1, totalDuration: 2, lastScanAt: null })),
     refreshAlbumGrouping: vi.fn(() => ({ songCount: 2, albumCount: 1, artistCount: 2, folderCount: 1, totalDuration: 2, lastScanAt: null })),
@@ -584,6 +629,7 @@ const installLibraryService = () => {
     hasRunningJobs: vi.fn(() => false),
     updateTrackTags: vi.fn(),
     searchNetworkTagCandidates: vi.fn(async () => []),
+    getActiveMissingCoverBackfillStatus: vi.fn<() => unknown>(() => null),
     recordTrackPlayback: vi.fn(),
     getPlaybackStatsDashboardPlaybackSafe: vi.fn(() => Promise.resolve({
       generatedAt: '2026-05-20T00:00:00.000Z',
@@ -704,6 +750,36 @@ describe('library IPC', () => {
       query: undefined,
       providers: ['netease-cloud-music', 'qq-music'],
     });
+  });
+
+  it('returns the active missing-cover backfill job without starting a new one', async () => {
+    const service = installLibraryService();
+    service.getActiveMissingCoverBackfillStatus.mockReturnValue({
+      id: 'cover-job-1',
+      status: 'running',
+      fields: ['cover'],
+      totalTracks: 20,
+      processedTracks: 5,
+      scannedCount: 5,
+      candidateCount: 2,
+      items: [],
+      errors: [],
+      diagnostics: {
+        targetCount: 10,
+        providerErrors: 0,
+        noCandidateCount: 0,
+        protectedCount: 0,
+        appliedCount: 1,
+      },
+      startedAt: '2026-06-07T00:00:00.000Z',
+      finishedAt: null,
+      currentTrackTitle: 'Song',
+    });
+
+    const result = await handlers[IpcChannels.LibraryNetworkGetActiveMissingCoverBackfillStatus]!();
+
+    expect(service.getActiveMissingCoverBackfillStatus).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ id: 'cover-job-1', status: 'running' });
   });
 
   it('normalizes library quality issue queries to local bounded pages', async () => {
@@ -908,7 +984,10 @@ describe('library IPC', () => {
       outputDirectory: root,
     });
     expect(existsSync(join(root, 'song.flac'))).toBe(true);
-    expect(getLibraryServiceMock().importAudioFile).toHaveBeenCalledWith(join(root, 'song.flac'), { folderPath: root });
+    expect(getLibraryServiceMock().importAudioFile).toHaveBeenCalledWith(
+      join(root, 'song.flac'),
+      { folderPath: root, deferGroupingRefresh: true },
+    );
   });
 
   it('imports dropped osu archives through the shared importer without treating them as unsupported', async () => {
@@ -935,6 +1014,7 @@ describe('library IPC', () => {
       `${root}\\Artist - Song.mp3`,
       expect.objectContaining({
         folderPath: root,
+        deferGroupingRefresh: true,
         metadata: expect.objectContaining({
           title: 'Song',
           artist: 'Artist',
@@ -997,8 +1077,8 @@ describe('library IPC', () => {
       missingPath,
     ]);
 
-    expect(service.importAudioFile).toHaveBeenCalledWith(firstPath);
-    expect(service.importAudioFile).toHaveBeenCalledWith(secondPath);
+    expect(service.importAudioFile).toHaveBeenCalledWith(firstPath, { deferGroupingRefresh: true });
+    expect(service.importAudioFile).toHaveBeenCalledWith(secondPath, { deferGroupingRefresh: true });
     expect(osuArchiveImportMock.importOsuArchiveAsMp3Queued).toHaveBeenCalledWith(
       expect.objectContaining({ archivePath: osuPath }),
     );
@@ -1129,6 +1209,40 @@ describe('library IPC', () => {
     expect(service.getPlaylistItems).toHaveBeenCalledWith('playlist-1', { page: 1, pageSize: 500 });
   });
 
+  it('exports liked playlists for one source provider', async () => {
+    const service = installLibraryService();
+    service.getPlaylist.mockReturnValueOnce({
+      id: 'liked-tracks',
+      name: '喜欢的歌曲',
+      description: null,
+      kind: 'system',
+      sourceProvider: 'local',
+      sourcePlaylistId: null,
+      coverId: null,
+      coverThumb: null,
+      sortMode: 'manual',
+      itemCount: 2,
+      createdAt: '2026-05-14T00:00:00.000Z',
+      updatedAt: '2026-05-14T00:00:00.000Z',
+    });
+    const root = makeTempRoot();
+    const outputPath = join(root, 'qq-liked.csv');
+    showSaveDialogMock.mockResolvedValueOnce({ canceled: false, filePath: outputPath });
+
+    const result = await handlers[IpcChannels.LibraryExportPlaylist]!(null, { playlistId: 'liked-tracks', format: 'csv', sourceProvider: 'qqmusic' });
+
+    expect(result).toBe(outputPath);
+    expect(service.getLikedTracks).toHaveBeenCalledWith({ page: 1, pageSize: 500, sourceProvider: 'qqmusic' });
+    expect(service.getPlaylistItems).not.toHaveBeenCalled();
+    const content = readFileSync(outputPath, 'utf8');
+    expect(content).toContain('QQ Song,QQ Artist,QQ Album,321,,qqmusic,qq-song-1,false');
+    expect(showSaveDialogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: '喜欢的歌曲 - QQ音乐.csv',
+      }),
+    );
+  });
+
   it('returns null when playlist export is cancelled', async () => {
     showSaveDialogMock.mockResolvedValue({ canceled: true, filePath: undefined });
 
@@ -1155,7 +1269,7 @@ describe('library IPC', () => {
       filePath: playlistPath,
     });
     expect(service.createPlaylist).toHaveBeenCalledWith({ name: 'Road Mix' });
-    expect(service.importAudioFile).toHaveBeenCalledWith(audioPath);
+    expect(service.importAudioFile).toHaveBeenCalledWith(audioPath, { deferGroupingRefresh: true });
     expect(service.addTracksToPlaylist).toHaveBeenCalledWith('playlist-imported', [`track-${audioPath}`]);
   });
 
@@ -1164,7 +1278,8 @@ describe('library IPC', () => {
 
     const result = await handlers[IpcChannels.LibraryRefreshAlbumGrouping]!();
 
-    expect(service.refreshAlbumGroupingPlaybackSafe).toHaveBeenCalledTimes(1);
+    expect(service.refreshAlbumGrouping).toHaveBeenCalledTimes(1);
+    expect(service.refreshAlbumGroupingPlaybackSafe).not.toHaveBeenCalled();
     expect(result).toMatchObject({ albumCount: 1 });
   });
 
@@ -1410,6 +1525,7 @@ describe('library IPC', () => {
 
   it('registers artist image cache IPC handlers', async () => {
     const service = installLibraryService();
+    showOpenDialogMock.mockResolvedValue({ canceled: false, filePaths: ['D:\\Avatar\\suara.png'] });
 
     await handlers[IpcChannels.LibraryArtistImagesEnqueueMissing]!(null, {
       artists: [{ id: 'artist-1', name: 'Suara' }],
@@ -1424,6 +1540,9 @@ describe('library IPC', () => {
     await handlers[IpcChannels.LibraryArtistImagesSetPaused]!(null, true);
     await handlers[IpcChannels.LibraryArtistImagesKickoff]!(null, { force: true, limit: 50 });
     await handlers[IpcChannels.LibraryArtistImagesClearCache]!();
+    await handlers[IpcChannels.LibraryArtistImagesChooseCustom]!(null, 'artist-1');
+    await handlers[IpcChannels.LibraryArtistImagesSetCustomUrl]!(null, { artistId: 'artist-1', url: 'https://example.test/avatar.png' });
+    await handlers[IpcChannels.LibraryArtistImagesClearCustom]!(null, 'artist-1');
     await handlers[IpcChannels.LibraryArtistOnlineInfoClearCache]!();
 
     expect(service.enqueueMissingArtistImages).toHaveBeenCalledWith([{ id: 'artist-1', name: 'Suara', artistKey: undefined, artistName: undefined }], {
@@ -1438,6 +1557,9 @@ describe('library IPC', () => {
     expect(service.setArtistImageJobsPaused).toHaveBeenCalledWith(true);
     expect(service.kickoffArtistImageBackfill).toHaveBeenCalledWith({ force: true, limit: 50 });
     expect(service.clearArtistImageCache).toHaveBeenCalledTimes(1);
+    expect(service.setCustomArtistImageFromFile).toHaveBeenCalledWith('artist-1', 'D:\\Avatar\\suara.png');
+    expect(service.setCustomArtistImageFromUrl).toHaveBeenCalledWith('artist-1', 'https://example.test/avatar.png');
+    expect(service.clearCustomArtistImage).toHaveBeenCalledWith('artist-1');
     expect(service.clearArtistOnlineInfoCache).toHaveBeenCalledTimes(1);
   });
 

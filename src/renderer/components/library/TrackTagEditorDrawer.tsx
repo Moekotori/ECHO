@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CloudDownload, Disc3, FileAudio, FileText, ImagePlus, ListChecks, RefreshCw, Save, Search, Tag, X } from 'lucide-react';
 import type { EditableTrackTags, LibraryTrack, NetworkTagCandidate, TrackCoverSelection } from '../../../shared/types/library';
@@ -594,6 +594,36 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
     }
   };
 
+  const handleCoverContextMenu = (event: MouseEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const library = window.echo?.library;
+    if (!previewCover || selectedCover || pendingNetworkCover || !library?.copyTrackOriginalCover) {
+      setLocalError(
+        selectedCover || pendingNetworkCover
+          ? '新选择的封面需要先保存后，才能复制文件里的封面原图。'
+          : '这首歌没有可复制的封面原图。',
+      );
+      return;
+    }
+
+    void (async () => {
+      try {
+        setLocalError(null);
+        const copied = await library.copyTrackOriginalCover(track.id);
+        if (!copied) {
+          setLocalError('这首歌没有可复制的封面原图。');
+          return;
+        }
+
+        setNetworkMessage('已复制封面原图。');
+      } catch (copyError) {
+        setLocalError(copyError instanceof Error ? copyError.message : '复制封面失败。');
+      }
+    })();
+  };
+
   const handleSearchNetwork = async (): Promise<void> => {
     const library = window.echo?.library;
 
@@ -911,7 +941,12 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
           <div className="tag-editor-workbench">
             <aside className="tag-editor-rail">
               <section className="tag-editor-cover-card" aria-label="当前文件">
-                <div className="tag-editor-cover" data-empty={!previewCover}>
+                <div
+                  className="tag-editor-cover"
+                  data-empty={!previewCover}
+                  onContextMenu={handleCoverContextMenu}
+                  title={previewCover ? '右键复制封面原图' : undefined}
+                >
                   {previewCover ? <img alt="" src={previewCover} /> : <Disc3 size={42} />}
                 </div>
                 <div className="tag-editor-file">

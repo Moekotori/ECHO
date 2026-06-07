@@ -1,4 +1,5 @@
 #include "EqProcessor.h"
+#include "DspSafetyLimiter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -27,21 +28,15 @@ float moveTowards(float current, float target, float step)
 
 float protectClippingSample(float sample, bool shouldProtect, bool& risk)
 {
+    (void)shouldProtect;
+
     if (! std::isfinite(sample))
         return 0.0f;
 
-    constexpr float threshold = 0.98f;
-    constexpr float headroom = 1.0f - threshold;
+    constexpr float riskThreshold = 0.98f;
     const float magnitude = std::abs(sample);
-    if (magnitude <= threshold)
-        return sample;
-
-    risk = true;
-    if (! shouldProtect)
-        return sample;
-
-    const float limited = threshold + headroom * std::tanh((magnitude - threshold) / headroom);
-    return std::copysign(std::min(1.0f, limited), sample);
+    risk = risk || magnitude > riskThreshold;
+    return sample;
 }
 } // namespace
 
@@ -150,7 +145,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, int startSample
                 wet = channelStates[static_cast<size_t>(channel)].filters[band].process(wet, coefficients[band]);
 
             const float mixed = dry + (wet - dry) * bypassMix;
-            const bool shouldProtect = bypassMix > 0.0f || targetBypassMix > 0.0f || wasEnabled;
+            const bool shouldProtect = isDspSafetyLimiterEnabled() && (bypassMix > 0.0f || targetBypassMix > 0.0f || wasEnabled);
             samples[sample] = protectClippingSample(mixed, shouldProtect, risk);
         }
     }

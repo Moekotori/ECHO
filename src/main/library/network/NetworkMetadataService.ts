@@ -47,6 +47,14 @@ type MissingMetadataScanProgress = {
 };
 
 const NETWORK_TAG_EDITOR_VISIBLE_THRESHOLD = 0.45;
+const providerPriority: NetworkProviderName[] = [
+  'netease-cloud-music',
+  'qq-music',
+  'kugou-music',
+  'musicbrainz',
+  'cover-art-archive',
+  'mock',
+];
 
 const emptyDiagnostics = (overrides: Partial<NetworkMetadataDiagnostics> = {}): NetworkMetadataDiagnostics => ({
   targetCount: 0,
@@ -130,7 +138,7 @@ export class NetworkMetadataService {
         };
       }
 
-      const providers = this.providers.filter((provider) => !providerNames?.length || providerNames.includes(provider.name));
+      const providers = this.selectProviders(providerNames);
       this.database.prepare("UPDATE tracks SET network_metadata_status = 'pending', updated_at = ? WHERE id = ?").run(new Date().toISOString(), trackId);
 
       const tasks = providers.map((provider) => async () => {
@@ -283,7 +291,7 @@ export class NetworkMetadataService {
             filename: request.query.trim(),
           }
         : track;
-      const providers = this.providers.filter((provider) => !request.providers?.length || request.providers.includes(provider.name));
+      const providers = this.selectProviders(request.providers);
 
       if (!providers.length) {
         throw new Error('Network metadata provider is unavailable');
@@ -354,11 +362,7 @@ export class NetworkMetadataService {
         return null;
       }
 
-      const providers = this.providers.filter(
-        (provider) =>
-          provider.name !== 'mock' &&
-          (!providerNames?.length || providerNames.includes(provider.name)),
-      );
+      const providers = this.selectProviders(providerNames).filter((provider) => provider.name !== 'mock');
       const candidates: LyricsBackgroundCoverResult[] = [];
 
       await Promise.all(
@@ -430,7 +434,7 @@ export class NetworkMetadataService {
     onProgress?: (progress: MissingMetadataScanProgress) => void,
   ): Promise<MissingMetadataScanResult> {
     const targets = this.store.findMissingMetadataTargets(limit, { includeCoverOnly: true, fields });
-    const providers = this.providers.filter((provider) => !providerNames?.length || providerNames.includes(provider.name));
+    const providers = this.selectProviders(providerNames);
     const items: MissingMetadataScanItem[] = [];
     const errors: string[] = [];
     let protectedCount = 0;
@@ -519,6 +523,13 @@ export class NetworkMetadataService {
       job.errors = [...job.errors, progress.error];
       job.diagnostics = { ...job.diagnostics, providerErrors: job.errors.length };
     }
+  }
+
+  private selectProviders(providerNames?: NetworkProviderName[]): NetworkMetadataProvider[] {
+    const enabledNames = providerNames?.length ? new Set(providerNames) : null;
+    return this.providers
+      .filter((provider) => !enabledNames || enabledNames.has(provider.name))
+      .sort((left, right) => providerPriority.indexOf(left.name) - providerPriority.indexOf(right.name));
   }
 
   private cloneScanJob(job: MutableNetworkMetadataScanJobStatus): NetworkMetadataScanJobStatus {

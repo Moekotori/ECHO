@@ -1,4 +1,5 @@
 import type { LibraryTrack } from './library';
+import type { AirPlayReceiverProtocol } from './appSettings';
 
 export type ConnectProtocol = 'dlna' | 'airplay' | 'hqplayer';
 
@@ -115,6 +116,7 @@ export type AirPlayReceiverState = 'disabled' | 'unavailable' | 'idle' | 'starti
 export type AirPlayReceiverStatus = {
   enabled: boolean;
   state: AirPlayReceiverState;
+  protocol?: AirPlayReceiverProtocol;
   advertisedName: string;
   nativeAvailable: boolean;
   currentSourceId: string | null;

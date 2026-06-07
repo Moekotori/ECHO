@@ -25,6 +25,13 @@
   line-height: 1;
 }
 
+.app-titlebar-brand .app-titlebar-update span {
+  height: auto;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 820;
+}
+
 .titlebar-action,
 .window-control,
 .tool-button,
@@ -771,7 +778,7 @@ html[data-theme="dark"] .sidebar-folder:hover {
   box-shadow:
     0 14px 34px rgba(0, 0, 0, 0.26),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(var(--app-acrylic-blur, 22px)) saturate(1.18);
+  backdrop-filter: blur(22px) saturate(1.18);
 }
 
 html[data-theme="dark"] .app-shell--wallpaper-ready .player-bar {
@@ -791,26 +798,26 @@ html[data-theme="dark"] .app-shell--lyrics-player-drawer .lyrics-player-drawer-h
   --echo-polish-page-bg:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-page-strong-mix, 38%), transparent),
-      color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-page-muted-mix, 32%), transparent)
+      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-readable-page-strong-mix, var(--app-acrylic-page-strong-mix, 38%)), transparent),
+      color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-readable-page-muted-mix, var(--app-acrylic-page-muted-mix, 32%)), transparent)
     );
-  --echo-polish-titlebar-bg: color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-titlebar-mix, 48%), transparent);
+  --echo-polish-titlebar-bg: color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-readable-page-muted-mix, var(--app-acrylic-titlebar-mix, 48%)), transparent);
   --echo-polish-sidebar-bg:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-sidebar-strong-mix, 44%), transparent),
-      color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-sidebar-muted-mix, 40%), transparent)
+      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-readable-sidebar-mix, var(--app-acrylic-sidebar-strong-mix, 44%)), transparent),
+      color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-readable-page-muted-mix, var(--app-acrylic-sidebar-muted-mix, 40%)), transparent)
     );
   --echo-polish-player-bg:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-player-strong-mix, 52%), transparent),
-      color-mix(in srgb, var(--theme-panel-bg) var(--app-acrylic-player-mix, 48%), transparent)
+      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-readable-player-mix, var(--app-acrylic-player-strong-mix, 52%)), transparent),
+      color-mix(in srgb, var(--theme-panel-bg) var(--app-acrylic-readable-surface-strong-mix, var(--app-acrylic-player-mix, 48%)), transparent)
     );
-  --echo-polish-surface: color-mix(in srgb, var(--theme-panel-bg) var(--app-acrylic-surface-mix, 38%), transparent);
-  --echo-polish-surface-strong: color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-surface-strong-mix, 50%), transparent);
-  --echo-polish-surface-muted: color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-surface-muted-mix, 34%), transparent);
-  --echo-polish-field-bg: color-mix(in srgb, var(--theme-field-bg) var(--app-acrylic-field-mix, 52%), transparent);
+  --echo-polish-surface: color-mix(in srgb, var(--theme-panel-bg) var(--app-acrylic-readable-surface-mix, var(--app-acrylic-surface-mix, 38%)), transparent);
+  --echo-polish-surface-strong: color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-readable-surface-strong-mix, var(--app-acrylic-surface-strong-mix, 50%)), transparent);
+  --echo-polish-surface-muted: color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-readable-page-muted-mix, var(--app-acrylic-surface-muted-mix, 34%)), transparent);
+  --echo-polish-field-bg: color-mix(in srgb, var(--theme-field-bg) var(--app-acrylic-readable-surface-strong-mix, var(--app-acrylic-field-mix, 52%)), transparent);
   --echo-polish-button-bg: color-mix(in srgb, var(--theme-button-bg) var(--app-acrylic-button-mix, 50%), transparent);
   --echo-polish-button-bg-hover: color-mix(in srgb, var(--theme-button-bg-hover) var(--app-acrylic-button-hover-mix, 64%), transparent);
   --echo-polish-row-bg: color-mix(in srgb, var(--theme-list-row-bg) var(--app-acrylic-row-mix, 34%), transparent);
@@ -820,33 +827,75 @@ html[data-theme="dark"] .app-shell--lyrics-player-drawer .lyrics-player-drawer-h
   background: transparent;
 }
 
+.app-shell--acrylic:not(.app-shell--wallpaper)::before {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-text-protection-mix, 16%), transparent),
+      color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-text-protection-mix, 16%), transparent)
+    ),
+    transparent;
+  backdrop-filter: blur(30px) saturate(1.08);
+  content: "";
+  pointer-events: none;
+}
+
+.app-shell--acrylic:not(.app-shell--wallpaper) {
+  isolation: isolate;
+}
+
+.app-shell--acrylic:not(.app-shell--wallpaper) :is(
+  .app-titlebar,
+  .sidebar,
+  .page-surface,
+  .player-bar
+) {
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell--acrylic:not(.app-shell--wallpaper) .lyrics-player-drawer-host {
+  z-index: 30;
+}
+
+.app-shell--acrylic:not(.app-shell--wallpaper) :is(
+  .audio-drawer-root,
+  .lyrics-settings-drawer-root,
+  .mv-settings-drawer-root
+) {
+  z-index: 130;
+}
+
 .app-shell--acrylic:not(.app-shell--wallpaper) .page-surface {
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-page-strong-mix, 38%), transparent),
-      color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-page-muted-mix, 32%), transparent)
+      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-readable-page-strong-mix, var(--app-acrylic-page-strong-mix, 38%)), transparent),
+      color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-readable-page-muted-mix, var(--app-acrylic-page-muted-mix, 32%)), transparent)
     ),
     transparent;
-  backdrop-filter: blur(var(--app-acrylic-blur, 22px)) saturate(1.18);
+  backdrop-filter: blur(22px) saturate(1.18);
 }
 
 .app-shell--acrylic:not(.app-shell--wallpaper) .app-titlebar,
 .app-shell--acrylic:not(.app-shell--wallpaper) .sidebar,
 .app-shell--acrylic:not(.app-shell--wallpaper) .player-bar {
-  backdrop-filter: blur(var(--app-acrylic-titlebar-blur, 24px)) saturate(1.18);
+  backdrop-filter: blur(24px) saturate(1.18);
 }
 
 .app-shell--acrylic:not(.app-shell--wallpaper) .app-titlebar {
-  background: color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-titlebar-mix, 48%), transparent);
+  background: color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-readable-page-muted-mix, var(--app-acrylic-titlebar-mix, 48%)), transparent);
 }
 
 .app-shell--acrylic:not(.app-shell--wallpaper) .sidebar {
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-sidebar-strong-mix, 44%), transparent),
-      color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-sidebar-muted-mix, 40%), transparent)
+      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-readable-sidebar-mix, var(--app-acrylic-sidebar-strong-mix, 44%)), transparent),
+      color-mix(in srgb, var(--theme-panel-bg-muted) var(--app-acrylic-readable-page-muted-mix, var(--app-acrylic-sidebar-muted-mix, 40%)), transparent)
     );
 }
 
@@ -854,8 +903,8 @@ html[data-theme="dark"] .app-shell--lyrics-player-drawer .lyrics-player-drawer-h
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-player-strong-mix, 52%), transparent),
-      color-mix(in srgb, var(--theme-panel-bg) var(--app-acrylic-player-mix, 48%), transparent)
+      color-mix(in srgb, var(--theme-panel-bg-strong) var(--app-acrylic-readable-player-mix, var(--app-acrylic-player-strong-mix, 52%)), transparent),
+      color-mix(in srgb, var(--theme-panel-bg) var(--app-acrylic-readable-surface-strong-mix, var(--app-acrylic-player-mix, 48%)), transparent)
     );
 }
 
@@ -921,7 +970,7 @@ html[data-theme="dark"] .app-shell--lyrics-player-drawer .lyrics-player-drawer-h
   .home-week-stat,
   .home-week-heatmap
 ) {
-  backdrop-filter: blur(var(--app-acrylic-blur, 18px)) saturate(1.12);
+  backdrop-filter: blur(18px) saturate(1.12);
 }
 
 .app-shell--acrylic:not(.app-shell--wallpaper) :is(.home-hero, .home-panel, .home-metric-tile) {
@@ -965,7 +1014,7 @@ html[data-theme="dark"] .app-shell--lyrics-player-drawer .lyrics-player-drawer-h
   .album-source-link-grid a
 ) {
   background: color-mix(in srgb, var(--theme-panel-bg) var(--app-acrylic-surface-mix, 38%), transparent);
-  backdrop-filter: blur(var(--app-acrylic-blur, 18px)) saturate(1.12);
+  backdrop-filter: blur(18px) saturate(1.12);
 }
 
 .app-shell--acrylic:not(.app-shell--wallpaper) :is(.album-detail-track-console, .album-detail-tabs) {
@@ -1004,7 +1053,42 @@ html[data-theme="dark"] .app-shell--lyrics-player-drawer .lyrics-player-drawer-h
 .app-shell--acrylic .settings-search,
 .app-shell--acrylic .settings-nav,
 .app-shell--acrylic .settings-nav-item.active {
-  text-shadow: 0 1px 1px color-mix(in srgb, var(--theme-panel-bg-strong) 82%, transparent);
+  text-shadow:
+    0 1px 1px color-mix(in srgb, var(--theme-panel-bg-strong) 74%, transparent),
+    0 0 10px color-mix(in srgb, var(--theme-panel-bg-strong) 46%, transparent);
+}
+
+.app-shell--acrylic:not(.app-shell--wallpaper) :is(
+  .settings-page,
+  .settings-nav,
+  .sidebar,
+  .player-bar
+) {
+  color: var(--theme-body-text);
+}
+
+.app-shell--acrylic:not(.app-shell--wallpaper) :is(
+  .settings-page h1,
+  .settings-page h2,
+  .setting-info h3,
+  .settings-nav-label,
+  .nav-item-label,
+  .player-track-copy strong
+) {
+  color: var(--theme-heading-text);
+}
+
+.app-shell--acrylic:not(.app-shell--wallpaper) :is(
+  .setting-info p,
+  .settings-header-context,
+  .settings-header-context em,
+  .settings-nav-desc,
+  .settings-acrylic-slider,
+  .settings-acrylic-subtoggle,
+  .nav-item,
+  .player-track-copy > span
+) {
+  color: color-mix(in srgb, var(--theme-heading-text) 72%, var(--theme-muted-text));
 }
 
 .player-now {
@@ -1509,6 +1593,29 @@ html[data-theme="dark"] .app-shell:has(.lyrics-page) .player-tags .tag-bpm {
   align-content: start;
   gap: 8px;
   padding: 10px;
+}
+
+.settings-page .settings-theme-preset-card.locked {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.settings-page .settings-theme-preset-card.locked:hover {
+  border-color: var(--theme-panel-border);
+  background: var(--theme-panel-bg);
+}
+
+.settings-page .settings-theme-preset-card.locked .settings-theme-preset-preview {
+  filter: grayscale(0.8);
+}
+
+.settings-page .settings-theme-preset-copy small {
+  display: block;
+  margin-top: 4px;
+  color: var(--theme-accent-text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .settings-page .settings-theme-preset-preview {

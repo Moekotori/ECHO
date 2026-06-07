@@ -10,6 +10,7 @@ export type AudioAuthenticitySpectrumProbeRequest = {
   filePath: string;
   trackDurationSeconds: number | null;
   isDsd: boolean;
+  isHiRes?: boolean;
 };
 
 export type AudioAuthenticitySpectrumProbeResult = {
@@ -360,7 +361,7 @@ const chooseProbeWindows = (trackDurationSeconds: number | null): ProbeWindow[] 
   return starts.map((startSeconds) => ({ startSeconds, durationSeconds }));
 };
 
-const probeResultScore = (result: AudioAuthenticitySpectrumProbeResult, isDsd: boolean): number => {
+const probeResultScore = (result: AudioAuthenticitySpectrumProbeResult, isDsd: boolean, isHiRes = false): number => {
   if (result.status !== 'ready') {
     if (result.status === 'too_quiet') {
       return 40;
@@ -382,26 +383,37 @@ const probeResultScore = (result: AudioAuthenticitySpectrumProbeResult, isDsd: b
     if (result.dsdUltrasonicNoiseLikely) {
       score += 3_000;
     }
-  } else if (result.brickwallLikely) {
+  } else if (isHiRes && result.brickwallLikely) {
     score += 10_000;
-  } else if (result.highFrequencyToAudibleDb !== null && result.highFrequencyToAudibleDb > -55) {
+  } else if (isHiRes && result.highFrequencyToAudibleDb !== null && result.highFrequencyToAudibleDb > -55) {
     score += 2_000;
+  } else if (!isHiRes && result.upperTrebleToAudibleDb !== null && result.upperTrebleToAudibleDb > -45) {
+    score += 2_000;
+  } else if (
+    !isHiRes &&
+    result.spectralCutoffHz !== null &&
+    result.spectralCutoffHz <= 20_000 &&
+    result.upperTrebleToAudibleDb !== null &&
+    result.upperTrebleToAudibleDb < -58
+  ) {
+    score += 1_000;
   }
 
   return score;
 };
 
-const isRiskResult = (result: AudioAuthenticitySpectrumProbeResult, isDsd: boolean): boolean =>
+const isRiskResult = (result: AudioAuthenticitySpectrumProbeResult, isDsd: boolean, isHiRes = false): boolean =>
   result.status === 'ready' &&
-  (isDsd ? result.brickwallLikely || result.pcmBandwidthCutoffLikely : result.brickwallLikely);
+  (isDsd ? result.brickwallLikely || result.pcmBandwidthCutoffLikely : isHiRes && result.brickwallLikely);
 
 export const selectBestAudioSpectrumProbeResult = (
   results: AudioAuthenticitySpectrumProbeResult[],
   isDsd: boolean,
+  isHiRes = false,
 ): AudioAuthenticitySpectrumProbeResult =>
   results
     .slice()
-    .sort((left, right) => probeResultScore(right, isDsd) - probeResultScore(left, isDsd))[0] ??
+    .sort((left, right) => probeResultScore(right, isDsd, isHiRes) - probeResultScore(left, isDsd, isHiRes))[0] ??
   emptyResult('unavailable');
 
 const maxProbeBytesForDuration = (durationSeconds: number): number =>
@@ -417,6 +429,7 @@ export class AudioAuthenticitySpectrumProbe {
   }
 
   async probe(request: AudioAuthenticitySpectrumProbeRequest): Promise<AudioAuthenticitySpectrumProbeResult> {
+    const isHiRes = request.isHiRes === true;
     const windows = chooseProbeWindows(request.trackDurationSeconds);
     const results: AudioAuthenticitySpectrumProbeResult[] = [];
     for (const window of windows) {
@@ -427,12 +440,12 @@ export class AudioAuthenticitySpectrumProbe {
         probeWindowCount: windows.length,
       };
       results.push(windowResult);
-      if (isRiskResult(windowResult, request.isDsd)) {
+      if (isRiskResult(windowResult, request.isDsd, isHiRes)) {
         return windowResult;
       }
     }
 
-    return selectBestAudioSpectrumProbeResult(results, request.isDsd);
+    return selectBestAudioSpectrumProbeResult(results, request.isDsd, isHiRes);
   }
 
   private async probeWindow(filePath: string, window: ProbeWindow): Promise<AudioAuthenticitySpectrumProbeResult> {

@@ -171,15 +171,6 @@ const isStandardFrequencySlot = (band: EqBand, index: number): boolean => {
   return Math.abs(Math.log2(band.frequencyHz / standardFrequency)) < 0.025;
 };
 
-const isAudibleCurveBand = (band: EqBand): boolean => {
-  if (band.enabled === false) {
-    return false;
-  }
-
-  const filterType = band.filterType ?? 'peaking';
-  return !isEqFilterGainEditable(filterType) || Math.abs(band.gainDb) > 0.05;
-};
-
 const buildXAxisLabelEntries = (
   entries: DisplayBandEntry[],
   axisLimitDb: number,
@@ -338,14 +329,7 @@ export const EqCurveView = ({
   const readoutBandIndex = activeBand ?? hoverBand ?? selectedBandIndex;
   const selectedBand = displayBands[readoutBandIndex];
   const selectedPoint = selectedBand ? bandToSvgPoint(selectedBand, axisLimitDb) : null;
-  const curveNodeEntries = useMemo(
-    () => (hasParametricLayout
-      ? displayBandEntries.filter(({ band, index }) => (
-        isAudibleCurveBand(band) || index === selectedBandIndex || index === activeBand || index === hoverBand
-      ))
-      : displayBandEntries),
-    [activeBand, displayBandEntries, hasParametricLayout, hoverBand, selectedBandIndex],
-  );
+  const curveNodeEntries = displayBandEntries;
   const xAxisLabelEntries = useMemo(
     () => buildXAxisLabelEntries(
       hasParametricLayout ? curveNodeEntries : displayBandEntries,

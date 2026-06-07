@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -167,6 +167,35 @@ describe('ArtistImageCacheService', () => {
     expect(result).toEqual({ queued: 1, skipped: 0 });
     await waitFor(() => providerSearch.mock.calls.length === 1);
     await waitFor(() => service.getJobStatus().active === 0);
+    database.close();
+  });
+
+  it('keeps manual artist avatars out of automatic refreshes and cache clears', async () => {
+    const database = createDatabase(':memory:');
+    const root = makeTempRoot();
+    const artistKey = insertArtist(database, 'artist-1', 'Echo Artist');
+    const avatarPath = join(root, 'manual-avatar.png');
+    writeFileSync(avatarPath, validPng());
+    const providerSearch = vi.fn().mockResolvedValue([]);
+    const service = createService(database, createProvider(providerSearch), root);
+
+    const manualEntry = await service.setCustomArtistImageFromFile('artist-1', avatarPath);
+
+    expect(manualEntry?.provider).toBe('manual');
+    expect(manualEntry?.status).toBe('matched');
+    expect(service.refreshVisibleArtistImages([{ id: 'artist-1', name: 'Echo Artist' }])).toEqual({ queued: 0, skipped: 1 });
+    expect(await service.refreshArtistImage('artist-1', true)).toEqual({ queued: false, entry: expect.objectContaining({ provider: 'manual' }) });
+    expect(providerSearch).not.toHaveBeenCalled();
+
+    const assetBeforeClear = service.resolveAsset(artistKey, 'thumb');
+    expect(assetBeforeClear?.filePath).toBeTruthy();
+    expect(existsSync(assetBeforeClear!.filePath)).toBe(true);
+    expect(service.clearCache().removedRows).toBe(0);
+    expect(service.getArtistImage('artist-1')).toEqual(expect.objectContaining({ provider: 'manual', status: 'matched' }));
+    expect(existsSync(assetBeforeClear!.filePath)).toBe(true);
+
+    expect(service.clearCustomArtistImage('artist-1')).toBeNull();
+    expect(service.getArtistImage('artist-1')).toBeNull();
     database.close();
   });
 

@@ -71,6 +71,38 @@ describe('AppTitleBar', () => {
     expect(onRouteChange).not.toHaveBeenCalled();
   });
 
+  it('shows an update hint and opens update settings when a new version is available', () => {
+    const onOpenUpdateSettings = vi.fn();
+
+    renderTitleBar({
+      activeRouteId: 'songs',
+      updateStatus: {
+        state: 'available',
+        currentVersion: '26.6.6',
+        latestVersion: '26.6.7',
+        releaseName: null,
+        releaseNotes: null,
+        downloadPercent: null,
+        transferredBytes: null,
+        totalBytes: null,
+        bytesPerSecond: null,
+        error: null,
+        checkedAt: '2026-06-07T00:00:00.000Z',
+      },
+      onRouteChange: vi.fn(),
+      onOpenUpdateSettings,
+      onOpenAudioSettings: vi.fn(),
+      onMinimize: vi.fn(),
+      onToggleMaximize: vi.fn(),
+      onClose: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'A new ECHO NEXT version 26.6.7 is available.' }));
+
+    expect(screen.getByText('26.6.7')).toBeTruthy();
+    expect(onOpenUpdateSettings).toHaveBeenCalledTimes(1);
+  });
+
   it('opens the MV drawer from the MV settings button', () => {
     const onRouteChange = vi.fn();
     const onOpenMvSettings = vi.fn();

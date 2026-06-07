@@ -101,13 +101,14 @@ describe('LyricsBackfillJobQueue', () => {
     expect(hasCachedLyricsForTrackIds).toHaveBeenCalledWith(['cached', 'hit', 'miss']);
     expect(getLyricsForTrack).toHaveBeenCalledTimes(2);
     expect(getLyricsForTrack).toHaveBeenCalledWith('hit', expect.objectContaining({
-      enabledProviders: ['local', 'netease', 'qqmusic', 'kugou', 'kuwo', 'lrclib', 'amll-ttml'],
+      enabledProviders: ['local', 'lrclib', 'netease', 'qqmusic', 'amll-ttml', 'kugou', 'kuwo'],
       networkEnabled: true,
       deepSearchEnabled: true,
-      providerTimeoutMs: 1600,
-      totalMatchTimeoutMs: 2400,
+      providerTimeoutMs: 2300,
+      totalMatchTimeoutMs: 4200,
       autoAcceptScore: 0.62,
       preferPrimaryProvider: false,
+      relaxedAutoAccept: true,
     }));
   });
 

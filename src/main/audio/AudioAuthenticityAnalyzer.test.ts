@@ -81,6 +81,92 @@ describe('AudioAuthenticityAnalyzer', () => {
     });
   });
 
+  it('flags CD-quality lossless containers with codec-like low-pass spectrum as likely transcodes', async () => {
+    const analyzer = createAnalyzer({
+      existsSync: () => true,
+      probeSpectrum: async () => ({
+        status: 'ready',
+        decodeSampleRate: 192_000,
+        analyzedDurationSeconds: 10,
+        selectedStartSeconds: 24,
+        probeWindowCount: 3,
+        rmsDb: -18,
+        upperTrebleToAudibleDb: -66,
+        lowUltrasonicToAudibleDb: -82,
+        highFrequencyToAudibleDb: -88,
+        ultrasonicToAudibleDb: -92,
+        topBandToAudibleDb: -96,
+        spectralCutoffHz: 18_000,
+        brickwallLikely: true,
+        pcmBandwidthCutoffLikely: false,
+        dsdUltrasonicNoiseLikely: false,
+        error: null,
+      }),
+    });
+
+    await expect(analyzer.analyzeTrack(track({
+      path: 'D:\\Music\\Album\\Suspicious.flac',
+      codec: 'FLAC',
+      sampleRate: 44_100,
+      bitDepth: 16,
+      bitrate: 920_000,
+    }))).resolves.toMatchObject({
+      verdict: 'likely_lossy_transcode',
+      confidence: 0.68,
+      metrics: {
+        spectrumProbeStatus: 'ready',
+        spectralCutoffHz: 18_000,
+        upperTrebleToAudibleDb: -66,
+      },
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ id: 'spectrum_probe_ready', severity: 'info' }),
+        expect.objectContaining({ id: 'lossless_spectrum_lowpass_cutoff', severity: 'risk' }),
+      ]),
+    });
+  });
+
+  it('does not flag CD-quality lossless only because the spectrum ends at CD bandwidth', async () => {
+    const analyzer = createAnalyzer({
+      existsSync: () => true,
+      probeSpectrum: async () => ({
+        status: 'ready',
+        decodeSampleRate: 192_000,
+        analyzedDurationSeconds: 10,
+        selectedStartSeconds: 24,
+        probeWindowCount: 3,
+        rmsDb: -18,
+        upperTrebleToAudibleDb: -28,
+        lowUltrasonicToAudibleDb: -72,
+        highFrequencyToAudibleDb: -78,
+        ultrasonicToAudibleDb: -86,
+        topBandToAudibleDb: -90,
+        spectralCutoffHz: 22_000,
+        brickwallLikely: true,
+        pcmBandwidthCutoffLikely: false,
+        dsdUltrasonicNoiseLikely: false,
+        error: null,
+      }),
+    });
+
+    const result = await analyzer.analyzeTrack(track({
+      path: 'D:\\Music\\Album\\Normal.flac',
+      codec: 'FLAC',
+      sampleRate: 44_100,
+      bitDepth: 16,
+      bitrate: 920_000,
+    }));
+
+    expect(result).toMatchObject({
+      verdict: 'trusted_lossless',
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ id: 'lossless_spectrum_upper_treble_present', severity: 'info' }),
+      ]),
+    });
+    expect(result.evidence).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'hires_spectrum_brickwall_cutoff' }),
+    ]));
+  });
+
   it('treats valid DSD headers as container evidence instead of proof of native source', async () => {
     const analyzer = createAnalyzer({
       existsSync: () => true,

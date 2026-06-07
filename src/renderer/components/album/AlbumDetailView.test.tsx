@@ -401,7 +401,7 @@ describe('AlbumDetailView', () => {
 
     expect(onBack).not.toHaveBeenCalled();
     act(() => {
-      vi.advanceTimersByTime(180);
+      vi.advanceTimersByTime(80);
     });
     expect(onBack).toHaveBeenCalledTimes(1);
   });

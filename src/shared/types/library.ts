@@ -763,6 +763,7 @@ export type UpdatePlaylistRequest = {
 export type ExportPlaylistRequest = {
   playlistId: string;
   format: PlaylistExportFormat;
+  sourceProvider?: Extract<PlaylistSourceProvider, 'local' | 'netease' | 'qqmusic'>;
 };
 
 export type ImportPlaylistFileResult = {

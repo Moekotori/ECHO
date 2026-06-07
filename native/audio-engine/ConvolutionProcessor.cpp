@@ -1,4 +1,5 @@
 #include "ConvolutionProcessor.h"
+#include "DspSafetyLimiter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -112,7 +113,7 @@ void ConvolutionProcessor::processBlock(juce::AudioBuffer<float>& buffer, int st
             buffer.setSample(
                 channel,
                 startSample + sample,
-                protectClippingSample(static_cast<float>(output) * trimGain, true, risk));
+                protectClippingSample(static_cast<float>(output) * trimGain, isDspSafetyLimiterEnabled(), risk));
         }
 
         historyWriteIndex = (historyWriteIndex + 1) % roomCorrectionMaxTaps;
@@ -267,21 +268,15 @@ float ConvolutionProcessor::sanitize(float value)
 
 float ConvolutionProcessor::protectClippingSample(float sample, bool shouldProtect, bool& risk)
 {
+    (void)shouldProtect;
+
     if (! std::isfinite(sample))
         return 0.0f;
 
-    constexpr float threshold = 0.98f;
-    constexpr float headroom = 1.0f - threshold;
+    constexpr float riskThreshold = 0.98f;
     const float magnitude = std::abs(sample);
-    if (magnitude <= threshold)
-        return sample;
-
-    risk = true;
-    if (! shouldProtect)
-        return sample;
-
-    const float limited = threshold + headroom * std::tanh((magnitude - threshold) / headroom);
-    return std::copysign(std::min(1.0f, limited), sample);
+    risk = risk || magnitude > riskThreshold;
+    return sample;
 }
 
 #if defined(ECHO_AUDIO_ENGINE_TESTS) && ECHO_AUDIO_ENGINE_TESTS

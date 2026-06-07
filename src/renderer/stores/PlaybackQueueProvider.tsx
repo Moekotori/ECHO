@@ -4,7 +4,7 @@ import type { AudioOutputSettings, AudioPlaybackState, AudioStatus, PlaybackSpee
 import type { AppSettings } from '../../shared/types/appSettings';
 import type { AirPlayReceiverStatus, ConnectReceiverStatus, ConnectSessionStatus } from '../../shared/types/connect';
 import { hqPlayerConnectDeviceId } from '../../shared/types/connect';
-import type { LibraryTrack } from '../../shared/types/library';
+import type { LibraryPlaylistItem, LibraryTrack, PlaylistSourceProvider } from '../../shared/types/library';
 import type {
   LocalFileResolveResult,
   PlaybackStatus,
@@ -475,7 +475,7 @@ const isQueueSource = (value: unknown): value is QueueSource =>
   isRecord(value) &&
   typeof value.type === 'string' &&
   typeof value.label === 'string' &&
-  ['songs', 'album', 'artist', 'folder', 'streaming', 'local-file', 'manual'].includes(value.type);
+  ['songs', 'album', 'artist', 'folder', 'liked', 'streaming', 'local-file', 'manual'].includes(value.type);
 
 const isQueueItemSnapshot = (value: unknown): value is QueueItem =>
   isRecord(value) &&
@@ -1094,6 +1094,47 @@ const createQueueItem = (track: LibraryTrack, source: QueueSource = manualSource
   addedAt: new Date().toISOString(),
 });
 
+const playlistItemToTrack = (item: LibraryPlaylistItem): LibraryTrack | null => {
+  if (item.track) {
+    return { ...item.track, unavailable: item.unavailable, playlistItemId: item.id };
+  }
+
+  if (item.mediaType === 'stream_track' && item.mediaId && item.sourceItemId && item.unavailable !== true) {
+    return {
+      id: item.mediaId,
+      mediaType: 'streaming',
+      path: item.mediaId,
+      provider: item.sourceProvider,
+      providerTrackId: item.sourceItemId,
+      stableKey: item.mediaId,
+      title: item.titleSnapshot ?? 'Streaming track',
+      artist: item.artistSnapshot ?? 'Unknown Artist',
+      album: item.albumSnapshot ?? '',
+      albumArtist: item.artistSnapshot ?? '',
+      trackNo: null,
+      discNo: null,
+      year: null,
+      genre: null,
+      duration: item.durationSnapshot ?? 0,
+      codec: null,
+      sampleRate: null,
+      bitDepth: null,
+      bitrate: null,
+      coverId: item.coverId,
+      coverThumb: item.coverThumb,
+      fieldSources: {
+        title: item.sourceProvider,
+        artist: item.sourceProvider,
+        album: item.sourceProvider,
+      },
+      unavailable: false,
+      playlistItemId: item.id,
+    };
+  }
+
+  return null;
+};
+
 const isLocalAutomixCandidate = (track: LibraryTrack): boolean =>
   !isSpotifyTrack(track) && (track.mediaType === undefined || track.mediaType === 'local');
 
@@ -1268,15 +1309,29 @@ const isFolderSource = (source: QueueSource | null | undefined): source is Extra
 const isFolderRandomSortSource = (source: QueueSource | null | undefined): source is Extract<QueueSource, { type: 'folder' }> =>
   source?.type === 'folder' && source.sort === 'random';
 
+const likedQueueSourceProviders = new Set<PlaylistSourceProvider>(['local', 'netease', 'qqmusic']);
+
+const isLikedSource = (source: QueueSource | null | undefined): source is Extract<QueueSource, { type: 'liked' }> =>
+  source?.type === 'liked' && likedQueueSourceProviders.has(source.sourceProvider);
+
 const libraryShuffleSource: Extract<QueueSource, { type: 'songs' }> = {
   type: 'songs',
   label: 'Library shuffle',
   sort: 'random',
 };
 
-const shuffleDeckKeyForSource = (source: Extract<QueueSource, { type: 'songs' }> | Extract<QueueSource, { type: 'folder' }>): string => {
+type ShuffleDeckSource =
+  | Extract<QueueSource, { type: 'songs' }>
+  | Extract<QueueSource, { type: 'folder' }>
+  | Extract<QueueSource, { type: 'liked' }>;
+
+const shuffleDeckKeyForSource = (source: ShuffleDeckSource): string => {
   if (source.type === 'folder') {
     return ['folder', source.folderId, source.path, source.recursive ? 'recursive' : 'direct', source.search ?? ''].join('\0');
+  }
+
+  if (source.type === 'liked') {
+    return ['liked', source.sourceProvider, source.search ?? '', source.sort ?? ''].join('\0');
   }
 
   return ['songs', source.search ?? '', source.sort ?? '', source.hideDuplicates === true ? 'hide-duplicates' : '', source.showDuplicatesOnly === true ? 'duplicates-only' : ''].join('\0');
@@ -3171,6 +3226,73 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     [clearLibraryShuffleDeck],
   );
 
+  const fetchLikedShuffleTarget = useCallback(
+    async (source: Extract<QueueSource, { type: 'liked' }>, activeItem: QueueItem | null): Promise<QueueItem | null> => {
+      const library = window.echo?.library;
+      const sourceKey = shuffleDeckKeyForSource(source);
+
+      if (!library?.getLikedTracks) {
+        return null;
+      }
+
+      if (libraryShuffleDeckRef.current.sourceKey !== sourceKey) {
+        libraryShuffleDeckRef.current = { sourceKey, items: [] };
+      }
+
+      const dequeueFreshDeckItem = (): QueueItem | null => {
+        const excludedTrackIds = new Set(getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current));
+        const remainingItems: QueueItem[] = [];
+        let target: QueueItem | null = null;
+
+        for (const item of libraryShuffleDeckRef.current.items) {
+          if (excludedTrackIds.has(item.track.id)) {
+            continue;
+          }
+          if (!target) {
+            target = itemsRef.current.find((candidate) => candidate.track.id === item.track.id) ?? item;
+            excludedTrackIds.add(item.track.id);
+            continue;
+          }
+          remainingItems.push(item);
+        }
+
+        libraryShuffleDeckRef.current = { sourceKey, items: remainingItems };
+        return target;
+      };
+
+      const deckTarget = dequeueFreshDeckItem();
+      if (deckTarget) {
+        return deckTarget;
+      }
+
+      try {
+        const excludedTrackIds = new Set(getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current));
+        const result = await library.getLikedTracks({
+          page: 1,
+          pageSize: libraryShuffleCandidatePageSize,
+          search: source.search,
+          sort: 'random',
+          sourceProvider: source.sourceProvider,
+          randomWindow: true,
+        });
+
+        libraryShuffleDeckRef.current = {
+          sourceKey,
+          items: result.items
+            .map(playlistItemToTrack)
+            .filter((track): track is LibraryTrack => track !== null && track.unavailable !== true && Boolean(track.path) && !excludedTrackIds.has(track.id))
+            .map((track) => createQueueItem(track, source)),
+        };
+
+        return dequeueFreshDeckItem();
+      } catch {
+        clearLibraryShuffleDeck();
+        return null;
+      }
+    },
+    [clearLibraryShuffleDeck],
+  );
+
   const fetchLibraryRandomQueueRefresh = useCallback(
     async (source: Extract<QueueSource, { type: 'songs' }>, activeItem: QueueItem | null, pageSize: number): Promise<QueueItem[]> => {
       const library = window.echo?.library;
@@ -3229,6 +3351,37 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
 
         return result.items
           .filter((track) => track.id !== activeTrackId)
+          .map((track) => createQueueItem(track, source));
+      } catch {
+        return [];
+      }
+    },
+    [],
+  );
+
+  const fetchLikedRandomQueueRefresh = useCallback(
+    async (source: Extract<QueueSource, { type: 'liked' }>, activeItem: QueueItem | null, pageSize: number): Promise<QueueItem[]> => {
+      const library = window.echo?.library;
+
+      if (!library?.getLikedTracks) {
+        return [];
+      }
+
+      try {
+        const excludeTrackIds = new Set(getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current));
+        const result = await library.getLikedTracks({
+          page: 1,
+          pageSize: Math.max(2, Math.min(pageSize, libraryRandomQueueRefreshPageSize)),
+          search: source.search,
+          sort: 'random',
+          sourceProvider: source.sourceProvider,
+          randomWindow: true,
+        });
+        const activeTrackId = activeItem?.track.id ?? null;
+
+        return result.items
+          .map(playlistItemToTrack)
+          .filter((track): track is LibraryTrack => track !== null && track.id !== activeTrackId && track.unavailable !== true && Boolean(track.path) && !excludeTrackIds.has(track.id))
           .map((track) => createQueueItem(track, source));
       } catch {
         return [];
@@ -3429,6 +3582,21 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           if (!target && !folderShuffleAvailable && navigationRepeatMode === 'all') {
             target = activeItem ?? current[0] ?? null;
           }
+        } else if (isLikedSource(source)) {
+          target = await fetchLikedShuffleTarget(source, activeItem ?? null);
+          if (!target) {
+            candidates = getShuffleCandidates(current, activeItem ?? null, historyRef.current);
+            target = pickRandom(candidates);
+          }
+
+          if (!target && navigationRepeatMode === 'all') {
+            candidates = activeItem ? current.filter((item) => item.queueId !== activeItem.queueId) : current;
+            target = pickRandom(candidates);
+          }
+
+          if (!target && navigationRepeatMode === 'all') {
+            target = activeItem ?? current[0] ?? null;
+          }
         } else {
           const librarySource = isLibraryRandomSource(source) ? source : libraryShuffleSource;
           const libraryShuffleAvailable = Boolean(window.echo?.library?.getTracks);
@@ -3479,6 +3647,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       if (options.autoAdvance === true && autoFillQueueEnabledRef.current) {
         if (isFolderRandomSortSource(activeItem?.source)) {
           refreshedRandomQueue = await fetchFolderRandomQueueRefresh(activeItem.source, activeItem ?? null, libraryRandomQueueRefreshPageSize);
+        } else if (isLikedSource(activeItem?.source)) {
+          refreshedRandomQueue = await fetchLikedRandomQueueRefresh(activeItem.source, activeItem ?? null, libraryRandomQueueRefreshPageSize);
         } else {
           const source = isLibraryRandomSource(activeItem?.source) ? activeItem.source : libraryShuffleSource;
           refreshedRandomQueue = await fetchLibraryRandomQueueRefresh(source, activeItem ?? null, libraryRandomQueueRefreshPageSize);
@@ -3511,7 +3681,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     }
     commitPlayedItem(target, status);
     return status;
-  }, [commitPlayedItem, fetchFolderRandomQueueRefresh, fetchFolderShuffleTarget, fetchLibraryRandomQueueRefresh, fetchLibraryShuffleTarget, finishPlaylistSequence, isConnectOutputActive, playLocalTrack, playTrack, setHistory, setItems]);
+  }, [commitPlayedItem, fetchFolderRandomQueueRefresh, fetchFolderShuffleTarget, fetchLibraryRandomQueueRefresh, fetchLibraryShuffleTarget, fetchLikedRandomQueueRefresh, fetchLikedShuffleTarget, finishPlaylistSequence, isConnectOutputActive, playLocalTrack, playTrack, setHistory, setItems]);
 
   const activateHqPlayerTakeover = useCallback(async (): Promise<PlaybackStatus | null> => {
     const activeItem =

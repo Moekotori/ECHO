@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, FolderOpen, ListFilter, RefreshCw, Search, Wand2 } from 'lucide-react';
 import type {
   LibraryQualityIssueKind,
@@ -6,6 +6,7 @@ import type {
   LibraryQualityIssueReason,
   LibraryQualityOverviewItem,
   MissingMetadataField,
+  NetworkMetadataScanJobStatus,
 } from '../../../shared/types/library';
 import { getLibraryBridge } from '../../utils/echoBridge';
 
@@ -54,6 +55,65 @@ const formatReason = (reason: LibraryQualityIssueReason): string => reasonLabels
 const overviewTotal = (overview: LibraryQualityOverviewItem[]): number =>
   overview.reduce((total, item) => total + item.count, 0);
 
+const wait = (durationMs: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, durationMs));
+
+const getCoverBackfillTotal = (job: NetworkMetadataScanJobStatus): number =>
+  Math.max(0, job.totalTracks || job.scannedCount || job.diagnostics.targetCount);
+
+const getCoverBackfillProcessed = (job: NetworkMetadataScanJobStatus): number => {
+  const total = getCoverBackfillTotal(job);
+  return Math.max(0, Math.min(total || job.processedTracks, job.processedTracks));
+};
+
+const getCoverBackfillProgressPercent = (job: NetworkMetadataScanJobStatus): number => {
+  const total = getCoverBackfillTotal(job);
+  if (total <= 0) {
+    return job.status === 'completed' || job.status === 'failed' ? 100 : 0;
+  }
+
+  return Math.max(0, Math.min(100, Math.round((getCoverBackfillProcessed(job) / total) * 100)));
+};
+
+const isCoverBackfillApplying = (job: NetworkMetadataScanJobStatus): boolean =>
+  job.status === 'running' && job.scannedCount > 0 && job.processedTracks > job.scannedCount;
+
+const coverBackfillPhaseLabel = (job: NetworkMetadataScanJobStatus, indeterminate: boolean): string => {
+  if (job.status === 'completed') {
+    return '封面补全完成';
+  }
+  if (job.status === 'failed') {
+    return '封面补全失败';
+  }
+  if (isCoverBackfillApplying(job)) {
+    return '正在下载并应用网络封面';
+  }
+  if (job.candidateCount > 0) {
+    return '正在搜索网络封面候选，扫描完成后开始应用';
+  }
+  return indeterminate ? '正在检测缺失/默认封面' : '正在搜索网络封面候选';
+};
+
+const formatMissingCoverBackfillMessage = (job: NetworkMetadataScanJobStatus): string => {
+  const total = job.totalTracks || job.scannedCount || job.diagnostics.targetCount;
+  const processed = Math.min(total || job.processedTracks, job.processedTracks);
+  const applied = job.diagnostics.appliedCount;
+
+  if (job.status === 'queued') {
+    return '封面补全已排队，等待后台网络任务开始。';
+  }
+  if (job.status === 'running') {
+    if (!total) {
+      return '正在检测缺失/默认封面的歌曲并搜索网络封面...';
+    }
+    return `正在补全网络封面：${processed}/${total}，已应用 ${applied} 张`;
+  }
+  if (job.status === 'failed') {
+    return `封面补全失败：${job.errors[0] ?? '未知错误'}`;
+  }
+
+  return `封面补全完成：检测 ${job.scannedCount} 首，找到 ${job.candidateCount} 个候选条目，已应用 ${applied} 张`;
+};
+
 export const LibraryQualityPanel = ({ autoRefresh = true, networkMetadataEnabled = false }: LibraryQualityPanelProps): JSX.Element => {
   const [expanded, setExpanded] = useState(false);
   const [overview, setOverview] = useState<LibraryQualityOverviewItem[]>([]);
@@ -64,9 +124,28 @@ export const LibraryQualityPanel = ({ autoRefresh = true, networkMetadataEnabled
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [message, setMessage] = useState<string | null>(null);
+  const [coverBackfillJob, setCoverBackfillJob] = useState<NetworkMetadataScanJobStatus | null>(null);
+  const coverBackfillPollGenerationRef = useRef(0);
+  const coverBackfillPollingJobIdRef = useRef<string | null>(null);
   const total = useMemo(() => overviewTotal(overview), [overview]);
   const selectedOverview = overview.find((item) => item.kind === selectedKind) ?? null;
   const selectedFields = issueKindFields[selectedKind] ?? [];
+  const coverBackfillProgressPercent = coverBackfillJob ? getCoverBackfillProgressPercent(coverBackfillJob) : 0;
+  const coverBackfillTotal = coverBackfillJob ? getCoverBackfillTotal(coverBackfillJob) : 0;
+  const coverBackfillProcessed = coverBackfillJob ? getCoverBackfillProcessed(coverBackfillJob) : 0;
+  const coverBackfillIndeterminate = Boolean(
+    coverBackfillJob && coverBackfillTotal === 0 && (coverBackfillJob.status === 'queued' || coverBackfillJob.status === 'running'),
+  );
+  const coverBackfillProgressTitle =
+    coverBackfillJob?.status === 'completed'
+      ? '封面补全完成'
+      : coverBackfillJob?.status === 'failed'
+        ? '封面补全失败'
+        : '正在补全网络封面';
+  const coverBackfillProgressLabel = coverBackfillIndeterminate
+    ? '正在检测缺失/默认封面'
+    : `${coverBackfillProcessed} / ${coverBackfillTotal || coverBackfillProcessed}`;
+  const coverBackfillPhase = coverBackfillJob ? coverBackfillPhaseLabel(coverBackfillJob, coverBackfillIndeterminate) : null;
 
   const refreshOverview = useCallback(async (): Promise<void> => {
     const library = getLibraryBridge();
@@ -220,6 +299,97 @@ export const LibraryQualityPanel = ({ autoRefresh = true, networkMetadataEnabled
     [issuePage.page, loadIssues, networkMetadataEnabled, refreshOverview, selectedKind],
   );
 
+  const pollMissingCoverBackfillJob = useCallback(
+    async (jobId: string): Promise<void> => {
+      if (coverBackfillPollingJobIdRef.current === jobId) {
+        return;
+      }
+
+      const library = getLibraryBridge();
+      if (!library?.getMissingCoverBackfillStatus) {
+        setActionBusy(null);
+        setMessage('桌面桥接暂不可用，无法读取封面补全进度。');
+        return;
+      }
+
+      const pollGeneration = coverBackfillPollGenerationRef.current + 1;
+      coverBackfillPollGenerationRef.current = pollGeneration;
+      coverBackfillPollingJobIdRef.current = jobId;
+      const isCurrentPoll = (): boolean => coverBackfillPollGenerationRef.current === pollGeneration;
+
+      try {
+        for (;;) {
+          await wait(900);
+          if (!isCurrentPoll()) {
+            return;
+          }
+          const status = await library.getMissingCoverBackfillStatus(jobId);
+          if (!isCurrentPoll()) {
+            return;
+          }
+          setCoverBackfillJob(status);
+          setMessage(formatMissingCoverBackfillMessage(status));
+          if (status.status === 'completed' || status.status === 'failed') {
+            await refreshOverview();
+            await loadIssues(selectedKind, issuePage.page);
+            return;
+          }
+        }
+      } catch (error) {
+        if (isCurrentPoll()) {
+          setMessage(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
+        if (isCurrentPoll()) {
+          setActionBusy(null);
+          coverBackfillPollingJobIdRef.current = null;
+        }
+      }
+    },
+    [issuePage.page, loadIssues, refreshOverview, selectedKind],
+  );
+
+  useEffect(() => {
+    return () => {
+      coverBackfillPollGenerationRef.current += 1;
+      coverBackfillPollingJobIdRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!networkMetadataEnabled) {
+      return;
+    }
+
+    const library = getLibraryBridge();
+    if (!library?.getActiveMissingCoverBackfillStatus) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const status = await library.getActiveMissingCoverBackfillStatus?.();
+        if (cancelled || !status) {
+          return;
+        }
+
+        setCoverBackfillJob(status);
+        setMessage(formatMissingCoverBackfillMessage(status));
+        if (status.status === 'queued' || status.status === 'running') {
+          setActionBusy('cover-backfill');
+          void pollMissingCoverBackfillJob(status.id);
+        }
+      } catch {
+        // Reattaching to an existing main-process job is best-effort.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [networkMetadataEnabled, pollMissingCoverBackfillJob]);
+
   const handleStartBatchScan = useCallback(async (): Promise<void> => {
     const library = getLibraryBridge();
     if (!networkMetadataEnabled) {
@@ -235,16 +405,36 @@ export const LibraryQualityPanel = ({ autoRefresh = true, networkMetadataEnabled
       return;
     }
 
-    setActionBusy('batch-scan');
+    const isMissingCoverBackfill = selectedKind === 'missing_cover';
+    if (isMissingCoverBackfill && !library.startMissingCoverBackfill) {
+      setMessage('桌面桥接暂不可用，无法启动网络封面补全。');
+      return;
+    }
+
+    setActionBusy(isMissingCoverBackfill ? 'cover-backfill' : 'batch-scan');
     try {
+      if (isMissingCoverBackfill) {
+        const job = await library.startMissingCoverBackfill({ limit: 500, fields: ['cover'] });
+        setCoverBackfillJob(job);
+        setMessage(formatMissingCoverBackfillMessage(job));
+        if (job.status === 'completed' || job.status === 'failed') {
+          setActionBusy(null);
+        } else {
+          void pollMissingCoverBackfillJob(job.id);
+        }
+        return;
+      }
+
       const job = await library.startMissingMetadataScan({ limit: 100, fields: selectedFields });
       setMessage(`已开始小批量资料扫描：${job.id.slice(0, 8)}，最多处理 ${job.totalTracks || 100} 首。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
-      setActionBusy(null);
+      if (!isMissingCoverBackfill) {
+        setActionBusy(null);
+      }
     }
-  }, [networkMetadataEnabled, selectedFields, selectedOverview?.actionAvailable]);
+  }, [networkMetadataEnabled, pollMissingCoverBackfillJob, selectedFields, selectedKind, selectedOverview?.actionAvailable]);
 
   return (
     <div className="settings-cache-panel settings-cache-panel--library-quality">
@@ -307,8 +497,8 @@ export const LibraryQualityPanel = ({ autoRefresh = true, networkMetadataEnabled
               onClick={() => void handleStartBatchScan()}
               type="button"
             >
-              <RefreshCw className={actionBusy === 'batch-scan' ? 'spinning-icon' : undefined} size={15} />
-              扫描当前分类
+              <RefreshCw className={actionBusy === 'batch-scan' || actionBusy === 'cover-backfill' ? 'spinning-icon' : undefined} size={15} />
+              {selectedKind === 'missing_cover' ? '补全缺失封面' : '扫描当前分类'}
             </button>
           </div>
 
@@ -316,6 +506,33 @@ export const LibraryQualityPanel = ({ autoRefresh = true, networkMetadataEnabled
             <p className="settings-inline-note">网络补全未开启；当前仍可查看和定位问题歌曲，不会自动修改标签。</p>
           ) : null}
           {message ? <p className="settings-inline-note">{message}</p> : null}
+          {coverBackfillJob && selectedKind === 'missing_cover' ? (
+            <div className="settings-update-progress settings-library-cover-backfill-progress" role="status" aria-live="polite">
+              <div className="settings-update-progress-label">
+                <strong>{coverBackfillPhase ?? coverBackfillProgressTitle}</strong>
+                <span>{coverBackfillProgressLabel}</span>
+              </div>
+              <div
+                aria-label="网络封面补全进度"
+                aria-valuemax={100}
+                aria-valuemin={0}
+                aria-valuenow={coverBackfillIndeterminate ? undefined : coverBackfillProgressPercent}
+                className="settings-update-progress-track"
+                data-indeterminate={coverBackfillIndeterminate ? 'true' : undefined}
+                role="progressbar"
+              >
+                <span style={{ width: `${coverBackfillIndeterminate ? 35 : coverBackfillProgressPercent}%` }} />
+              </div>
+              <div className="settings-update-progress-meta">
+                <span title={coverBackfillJob.currentTrackTitle ?? undefined}>
+                  {coverBackfillJob.currentTrackTitle ?? coverBackfillPhase ?? (coverBackfillIndeterminate ? '正在搜索网络封面候选' : '等待后台结果')}
+                </span>
+                <span>
+                  候选条目 {coverBackfillJob.candidateCount} / 已应用 {coverBackfillJob.diagnostics.appliedCount} / 错误 {coverBackfillJob.errors.length}
+                </span>
+              </div>
+            </div>
+          ) : null}
 
           <div className="settings-library-quality-list" aria-busy={issuesBusy}>
             {issuesBusy ? <p className="settings-inline-note">正在读取问题歌曲...</p> : null}

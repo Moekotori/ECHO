@@ -23,6 +23,8 @@ const volumeFromStatus = (status: AudioStatus | null): number => {
 
 const popoverCloseDistancePx = 150;
 const popoverExitAnimationMs = 180;
+const pendingCommitGuardMs = 1200;
+const volumesMatch = (left: number, right: number): boolean => Math.abs(left - right) < 0.001;
 
 const distanceFromRect = (x: number, y: number, rect: DOMRect): number => {
   const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
@@ -48,9 +50,38 @@ export const PlayerVolumeControl = ({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const pendingCommitRef = useRef<number | null>(null);
+  const pendingCommitTimeoutRef = useRef<number | null>(null);
   const isInteractingRef = useRef(false);
+  const interactionRevisionRef = useRef(0);
   const Icon = volume <= 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
   const fixedVolumeToggleDisabled = Boolean(fixedVolumeAutoReason);
+
+  const clearPendingCommit = useCallback((): void => {
+    pendingCommitRef.current = null;
+    if (pendingCommitTimeoutRef.current !== null) {
+      window.clearTimeout(pendingCommitTimeoutRef.current);
+      pendingCommitTimeoutRef.current = null;
+    }
+  }, []);
+
+  const holdPendingCommit = useCallback((nextVolume: number): void => {
+    clearPendingCommit();
+    pendingCommitRef.current = nextVolume;
+    pendingCommitTimeoutRef.current = window.setTimeout(() => {
+      if (pendingCommitRef.current !== null && volumesMatch(pendingCommitRef.current, nextVolume)) {
+        pendingCommitRef.current = null;
+      }
+      pendingCommitTimeoutRef.current = null;
+    }, pendingCommitGuardMs);
+  }, [clearPendingCommit]);
+
+  const markUserInteraction = useCallback((): void => {
+    interactionRevisionRef.current += 1;
+  }, []);
+
+  useEffect(() => {
+    return () => clearPendingCommit();
+  }, [clearPendingCommit]);
 
   useEffect(() => {
     if (isOpen) {
@@ -70,16 +101,27 @@ export const PlayerVolumeControl = ({
 
   useEffect(() => {
     if (fixedVolumeEnabled) {
+      clearPendingCommit();
       setVolume(1);
       return;
     }
 
-    if (isInteractingRef.current || pendingCommitRef.current !== null) {
+    const nextVolume = volumeFromStatus(status);
+    const pendingCommit = pendingCommitRef.current;
+    if (pendingCommit !== null) {
+      if (volumesMatch(nextVolume, pendingCommit)) {
+        clearPendingCommit();
+      } else {
+        return;
+      }
+    }
+
+    if (isInteractingRef.current) {
       return;
     }
 
-    setVolume(volumeFromStatus(status));
-  }, [fixedVolumeEnabled, status]);
+    setVolume(nextVolume);
+  }, [clearPendingCommit, fixedVolumeEnabled, status]);
 
   useEffect(() => {
     const getSettings = window.echo?.app?.getSettings;
@@ -90,9 +132,10 @@ export const PlayerVolumeControl = ({
     }
 
     let isCancelled = false;
+    const requestRevision = interactionRevisionRef.current;
     void getSettings()
       .then(async (settings) => {
-        if (isCancelled) {
+        if (isCancelled || requestRevision !== interactionRevisionRef.current || isInteractingRef.current || pendingCommitRef.current !== null) {
           return;
         }
 
@@ -100,7 +143,7 @@ export const PlayerVolumeControl = ({
         const safeVolume = fixedVolume ? 1 : Math.max(0, Math.min(1, settings.playerVolume));
         setVolume(safeVolume);
         const nextStatus = await audio.setOutput({ volume: safeVolume });
-        if (!isCancelled) {
+        if (!isCancelled && requestRevision === interactionRevisionRef.current && pendingCommitRef.current === null) {
           onFixedVolumeChange?.(fixedVolume);
           onStatusChange(nextStatus);
         }
@@ -157,8 +200,9 @@ export const PlayerVolumeControl = ({
 
       const audio = window.echo?.audio;
       const safeVolume = Math.max(0, Math.min(1, nextVolume));
+      markUserInteraction();
       setVolume(safeVolume);
-      pendingCommitRef.current = safeVolume;
+      holdPendingCommit(safeVolume);
 
       if (onCommitVolume) {
         try {
@@ -167,12 +211,9 @@ export const PlayerVolumeControl = ({
           if (typeof setSettings === 'function') {
             void setSettings({ playerVolume: safeVolume }).catch(() => undefined);
           }
-          if (pendingCommitRef.current === safeVolume) {
-            pendingCommitRef.current = null;
-          }
         } catch (error) {
-          if (pendingCommitRef.current === safeVolume) {
-            pendingCommitRef.current = null;
+          if (pendingCommitRef.current !== null && volumesMatch(pendingCommitRef.current, safeVolume)) {
+            clearPendingCommit();
           }
           onError(error instanceof Error ? error.message : String(error));
         }
@@ -190,18 +231,17 @@ export const PlayerVolumeControl = ({
         if (typeof setSettings === 'function') {
           void setSettings({ playerVolume: safeVolume }).catch(() => undefined);
         }
-        if (pendingCommitRef.current === safeVolume) {
-          pendingCommitRef.current = null;
+        if (pendingCommitRef.current !== null && volumesMatch(pendingCommitRef.current, safeVolume)) {
           onStatusChange(nextStatus);
         }
       } catch (error) {
-        if (pendingCommitRef.current === safeVolume) {
-          pendingCommitRef.current = null;
+        if (pendingCommitRef.current !== null && volumesMatch(pendingCommitRef.current, safeVolume)) {
+          clearPendingCommit();
         }
         onError(error instanceof Error ? error.message : String(error));
       }
     },
-    [fixedVolumeEnabled, onCommitVolume, onError, onStatusChange],
+    [clearPendingCommit, fixedVolumeEnabled, holdPendingCommit, markUserInteraction, onCommitVolume, onError, onStatusChange],
   );
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>): void => {
@@ -228,8 +268,10 @@ export const PlayerVolumeControl = ({
     const setSettings = window.echo?.app?.setSettings;
     const audio = window.echo?.audio;
 
+    markUserInteraction();
     onFixedVolumeChange?.(nextFixedVolumeEnabled);
     if (nextFixedVolumeEnabled) {
+      clearPendingCommit();
       setVolume(1);
     }
 
@@ -269,7 +311,10 @@ export const PlayerVolumeControl = ({
             disabled={fixedVolumeEnabled}
             max={1}
             min={0}
-            onChange={(event) => setVolume(Number(event.currentTarget.value))}
+            onChange={(event) => {
+              markUserInteraction();
+              setVolume(Number(event.currentTarget.value));
+            }}
             onBlur={(event) => {
               if (isInteractingRef.current) {
                 finishInteraction(Number(event.currentTarget.value));
@@ -282,6 +327,7 @@ export const PlayerVolumeControl = ({
             }}
             onPointerCancel={(event) => finishInteraction(Number(event.currentTarget.value))}
             onPointerDown={() => {
+              markUserInteraction();
               isInteractingRef.current = true;
             }}
             onPointerUp={(event) => finishInteraction(Number(event.currentTarget.value))}

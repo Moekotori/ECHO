@@ -1241,7 +1241,7 @@ describe('LyricsSettingsDrawer', () => {
     window.removeEventListener('lyrics:display-settings-changed', displaySettingsChangedListener);
   });
 
-  it('switches lyrics background to cover color from the background section', async () => {
+  it('switches lyrics background to cover color from the background select', async () => {
     const setSettings = vi.fn(async (patch: Partial<AppSettings>) => makeSettings(patch));
     const settingsChangedListener = vi.fn();
     const displaySettingsChangedListener = vi.fn();
@@ -1257,12 +1257,19 @@ describe('LyricsSettingsDrawer', () => {
 
     const { container } = render(<LyricsSettingsDrawer isOpen onClose={vi.fn()} />);
 
-    await waitFor(() => expect(container.querySelector('.lyrics-background-segmented button')).toBeTruthy());
-    const coverColorButton = Array.from(container.querySelectorAll<HTMLButtonElement>('.lyrics-background-segmented button'))
-      .find((button) => button.textContent?.includes('封面取色') || button.textContent?.includes('Cover color'));
-    expect(coverColorButton).toBeTruthy();
+    const backgroundModeTrigger = await waitFor(() => {
+      const trigger = container.querySelector<HTMLButtonElement>('.lyrics-background-select__trigger');
+      expect(trigger).toBeTruthy();
+      return trigger!;
+    });
 
-    fireEvent.click(coverColorButton as HTMLButtonElement);
+    fireEvent.click(backgroundModeTrigger);
+    const coverColorOption = await waitFor(() => {
+      const option = container.querySelector<HTMLButtonElement>('.lyrics-background-select__option[data-mode="coverColor"]');
+      expect(option).toBeTruthy();
+      return option!;
+    });
+    fireEvent.click(coverColorOption);
 
     await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ lyricsBackgroundMode: 'coverColor' }));
     expect(settingsChangedListener).toHaveBeenCalledWith(

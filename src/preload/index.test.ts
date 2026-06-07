@@ -277,6 +277,7 @@ describe('preload SMTC API', () => {
     await exposedApi!.library.classifyImportPaths(['D:\\Music']);
     await exposedApi!.library.chooseImportFiles();
     await exposedApi!.library.resolveLyricsBackgroundCover('track-1');
+    await exposedApi!.library.getActiveMissingCoverBackfillStatus?.();
     await exposedApi!.library.getLibraryInboxBatches();
     await exposedApi!.library.getLibraryInboxTracks({ scope: 'latest', filter: 'all' });
     await exposedApi!.library.createPlaylistFromLibraryInbox({ scope: 'latest', filter: 'missing_cover' });
@@ -284,9 +285,23 @@ describe('preload SMTC API', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LibraryClassifyImportPaths, ['D:\\Music']);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LibraryChooseImportFiles);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LibraryResolveLyricsBackgroundCover, 'track-1');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LibraryNetworkGetActiveMissingCoverBackfillStatus);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LibraryGetInboxBatches);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LibraryGetInboxTracks, { scope: 'latest', filter: 'all' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LibraryCreateInboxPlaylist, { scope: 'latest', filter: 'missing_cover' });
+  });
+
+  it('exposes custom artist avatar helpers through IPC', async () => {
+    await exposedApi!.library.chooseArtistAvatar('artist-1');
+    await exposedApi!.library.setArtistAvatarFromUrl('artist-1', 'https://example.test/avatar.png');
+    await exposedApi!.library.clearCustomArtistAvatar('artist-1');
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LibraryArtistImagesChooseCustom, 'artist-1');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LibraryArtistImagesSetCustomUrl, {
+      artistId: 'artist-1',
+      url: 'https://example.test/avatar.png',
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LibraryArtistImagesClearCustom, 'artist-1');
   });
 
   it('serializes dropped files for library import', async () => {
@@ -1633,6 +1648,9 @@ describe('preload SMTC API', () => {
     await exposedApi!.plugins.openDirectory('echo.playback-panel');
     await exposedApi!.plugins.exportPackage('echo.playback-panel');
     await exposedApi!.plugins.importPackage();
+    const pluginPackageFile = new File(['{}'], 'plugin.echo', { type: 'application/json' });
+    vi.mocked(webUtils.getPathForFile).mockReturnValueOnce('D:\\Echo\\plugin.echo');
+    await exposedApi!.plugins.importPackage(pluginPackageFile);
     await exposedApi!.plugins.runCommand({ pluginId: 'echo.playback-panel', commandId: 'show-status' });
     await exposedApi!.plugins.queryMetadata({ track: { title: 'Song' } });
     await exposedApi!.plugins.querySources({ query: 'Song' });
@@ -1654,6 +1672,7 @@ describe('preload SMTC API', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsOpenDirectory, 'echo.playback-panel');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsExportPackage, 'echo.playback-panel');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsImportPackage);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsImportPackage, 'D:\\Echo\\plugin.echo');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsRunCommand, {
       pluginId: 'echo.playback-panel',
       commandId: 'show-status',

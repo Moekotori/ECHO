@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -32,6 +32,7 @@ import { OsuTimingPanel } from '../components/library/OsuTimingPanel';
 import { TrackContextMenu } from '../components/library/TrackContextMenu';
 import type { TrackMenuAction } from '../components/library/TrackContextMenu';
 import { TrackTagEditorDrawer } from '../components/library/TrackTagEditorDrawer';
+import { getPageScrollContainer } from '../components/ui/InfiniteScrollSentinel';
 
 const automixTemporarilyDisabled = true;
 const randomQueuePageSize = 96;
@@ -285,7 +286,9 @@ export const QueuePage = (): JSX.Element => {
   const [isTagEditorOpen, setIsTagEditorOpen] = useState(false);
   const [tagEditorError, setTagEditorError] = useState<string | null>(null);
   const [isSavingTags, setIsSavingTags] = useState(false);
-  const queueListRef = useRef<HTMLDivElement | null>(null);
+  const queueVirtualSpacerRef = useRef<HTMLDivElement | null>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const scrollMarginRef = useRef(0);
   const mountStartedAtRef = useRef(performance.now());
   const tagEditorCloseTimerRef = useRef<number | null>(null);
   const currentIndex = useMemo(
@@ -319,9 +322,10 @@ export const QueuePage = (): JSX.Element => {
   const queueMenuSource = useMemo(() => ({ type: 'manual' as const, label: t('queue.header.title') }), [t]);
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
-    getScrollElement: () => queueListRef.current,
+    getScrollElement: () => getPageScrollContainer(queueVirtualSpacerRef.current),
     estimateSize: () => 64,
     overscan: 12,
+    scrollMargin,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
   const firstPaintDetailsRef = useRef<Record<string, QueuePagePerfValue>>({});
@@ -361,6 +365,33 @@ export const QueuePage = (): JSX.Element => {
   );
   const likedTrackIds = useLikedTrackIds(likedTrackIdsInput);
   const isNowPlayingLiked = nowPlaying && !isNowPlayingTemporary ? likedTrackIds[nowPlaying.id] === true : false;
+
+  useLayoutEffect(() => {
+    const calculateScrollMargin = (): void => {
+      const spacer = queueVirtualSpacerRef.current;
+      const scrollContainer = getPageScrollContainer(spacer);
+
+      if (!spacer || !scrollContainer) {
+        if (scrollMarginRef.current !== 0) {
+          scrollMarginRef.current = 0;
+          setScrollMargin(0);
+        }
+        return;
+      }
+
+      const spacerRect = spacer.getBoundingClientRect();
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const nextScrollMargin = Math.max(0, Math.round(spacerRect.top - containerRect.top + scrollContainer.scrollTop));
+      if (scrollMarginRef.current !== nextScrollMargin) {
+        scrollMarginRef.current = nextScrollMargin;
+        setScrollMargin(nextScrollMargin);
+      }
+    };
+
+    calculateScrollMargin();
+    window.addEventListener('resize', calculateScrollMargin);
+    return () => window.removeEventListener('resize', calculateScrollMargin);
+  }, [rows.length, savedQueues.length]);
 
   useEffect(() => {
     return deferQueuePageIdleTask(() => {
@@ -1065,8 +1096,8 @@ export const QueuePage = (): JSX.Element => {
         </div>
 
         {rows.length > 0 ? (
-          <div className="queue-list" ref={queueListRef} role="list" data-virtualized="true">
-            <div className="queue-virtual-spacer" style={{ height: rowVirtualizer.getTotalSize() }}>
+          <div className="queue-list" role="list" data-virtualized="true">
+            <div className="queue-virtual-spacer" ref={queueVirtualSpacerRef} style={{ height: rowVirtualizer.getTotalSize() }}>
               {virtualRows.map((virtualRow) => {
                 const item = rows[virtualRow.index];
                 const isCurrent = item.queueId === queue.currentQueueId;
@@ -1077,7 +1108,7 @@ export const QueuePage = (): JSX.Element => {
                     key={item.queueId}
                     ref={rowVirtualizer.measureElement}
                     data-index={virtualRow.index}
-                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                    style={{ transform: `translateY(${virtualRow.start - scrollMargin}px)` }}
                   >
                     <div
                       className="queue-row"

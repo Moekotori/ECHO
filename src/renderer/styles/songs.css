@@ -1243,6 +1243,79 @@
   color: var(--color-subtle);
 }
 
+.playlist-rename-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: var(--theme-overlay-bg);
+  backdrop-filter: blur(10px);
+}
+
+.playlist-rename-dialog {
+  display: grid;
+  width: min(420px, 100%);
+  gap: 16px;
+  padding: 18px;
+  color: var(--theme-page-text);
+  border: 1px solid var(--theme-panel-border-strong);
+  border-radius: 8px;
+  background: var(--theme-modal-bg);
+  box-shadow: var(--theme-shadow-soft);
+}
+
+.playlist-rename-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.playlist-rename-dialog-header h2 {
+  margin: 0;
+  color: var(--theme-heading-text);
+  font-size: 16px;
+  font-weight: 860;
+}
+
+.playlist-rename-field {
+  display: grid;
+  gap: 8px;
+}
+
+.playlist-rename-field span {
+  color: var(--theme-muted-text);
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.playlist-rename-field input {
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  color: var(--theme-heading-text);
+  border: 1px solid var(--theme-field-border);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--theme-field-bg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.playlist-rename-field input:focus {
+  border-color: var(--theme-accent-border);
+  box-shadow: 0 0 0 3px var(--theme-accent-bg);
+}
+
+.playlist-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .playlist-list-item small,
 .playlist-empty,
 .streaming-section em,
@@ -1862,6 +1935,14 @@
     0 14px 38px rgba(20, 30, 43, 0.16),
     inset 0 1px 0 var(--theme-panel-bg-strong);
   backdrop-filter: blur(18px);
+  transform-origin: top left;
+  animation: track-context-menu-in 130ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+.track-context-menu--closing {
+  pointer-events: none;
+  animation: track-context-menu-out 110ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
 .track-menu-heading {
@@ -4288,6 +4369,14 @@ html[data-theme="dark"] .tag-editor-actions {
     0 14px 38px rgba(20, 30, 43, 0.16),
     inset 0 1px 0 var(--theme-panel-bg-strong);
   backdrop-filter: blur(18px);
+  transform-origin: top left;
+  animation: track-context-menu-in 120ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+.track-playlist-submenu--closing {
+  pointer-events: none;
+  animation: track-context-menu-out 100ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
 .track-playlist-submenu-item {
@@ -4326,6 +4415,39 @@ html[data-theme="dark"] .tag-editor-actions {
 
 .track-playlist-submenu-empty {
   padding: 8px 9px;
+}
+
+@keyframes track-context-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes track-context-menu-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track-context-menu,
+  .track-context-menu--closing,
+  .track-playlist-submenu,
+  .track-playlist-submenu--closing {
+    animation: none;
+  }
 }
 
 .albums-page .media-wall-scroll-shell,
@@ -5067,6 +5189,8 @@ html[data-theme="dark"] .playlist-quality-control,
 html[data-theme="dark"] .playlist-quality-menu,
 html[data-theme="dark"] .secondary-action,
 html[data-theme="dark"] .playlist-download-progress,
+html[data-theme="dark"] .playlist-rename-dialog,
+html[data-theme="dark"] .playlist-rename-field input,
 html[data-theme="dark"] .playlist-action-menu,
 html[data-theme="dark"] .playlist-action-menu-item,
 html[data-theme="dark"] .playlist-cover-button,
@@ -5107,6 +5231,8 @@ html[data-theme="dark"] .playlist-list-item[data-active="true"] {
 html[data-theme="dark"] .playlist-list-item strong,
 html[data-theme="dark"] .playlist-daily-recommend strong,
 html[data-theme="dark"] .playlist-detail-copy h2,
+html[data-theme="dark"] .playlist-rename-dialog-header h2,
+html[data-theme="dark"] .playlist-rename-field input,
 html[data-theme="dark"] .playlist-download-progress-copy span,
 html[data-theme="dark"] .streaming-section span,
 html[data-theme="dark"] .playlist-import-box input,
@@ -5125,6 +5251,7 @@ html[data-theme="dark"] .streaming-section h2,
 html[data-theme="dark"] .streaming-section em,
 html[data-theme="dark"] .playlist-detail-copy p,
 html[data-theme="dark"] .playlist-detail-copy small,
+html[data-theme="dark"] .playlist-rename-field span,
 html[data-theme="dark"] .playlist-download-progress,
 html[data-theme="dark"] .playlist-download-progress small,
 html[data-theme="dark"] .playlist-download-progress-copy strong,

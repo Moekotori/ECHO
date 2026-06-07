@@ -245,8 +245,11 @@ type EchoPluginAudioAnalysisReport = {
     spectrumProbeWindows?: number | null;
     spectrumSelectedStartSeconds?: number | null;
     spectralCutoffHz?: number | null;
+    upperTrebleToAudibleDb?: number | null;
+    lowUltrasonicToAudibleDb?: number | null;
     highFrequencyToAudibleDb?: number | null;
     ultrasonicToAudibleDb?: number | null;
+    topBandToAudibleDb?: number | null;
   };
   evidence: EchoPluginAudioAnalysisEvidence[];
   limitations: string[];

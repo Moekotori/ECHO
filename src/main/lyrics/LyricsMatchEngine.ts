@@ -15,6 +15,7 @@ export type LyricsMatchEngineOptions = {
   deepSearchEnabled: boolean;
   collectAllCandidates: boolean;
   preferPrimaryProvider: boolean;
+  relaxedAutoAccept: boolean;
   preferredSecondaryFields: Array<'translation' | 'romanization'>;
   isRejected?: (provider: LyricsProviderId, providerLyricsId: string | null) => boolean;
 };
@@ -40,6 +41,7 @@ const defaultOptions: LyricsMatchEngineOptions = {
   deepSearchEnabled: true,
   collectAllCandidates: false,
   preferPrimaryProvider: true,
+  relaxedAutoAccept: false,
   preferredSecondaryFields: [],
 };
 
@@ -77,8 +79,25 @@ const streamingPrimaryProviderFromQuery = (query: LyricsQuery): LyricsProviderId
 
 const hasText = (value: string | null | undefined): boolean => typeof value === 'string' && value.trim().length > 0;
 
-const isAutoAcceptCandidate = (candidate: MatchedLyricsCandidate | null): boolean =>
-  Boolean(candidate?.decision.autoAccept && candidate.decision.risk === 'low');
+const isRelaxedAutoAcceptCandidate = (candidate: MatchedLyricsCandidate | null, settings: LyricsMatchEngineOptions): boolean => {
+  if (!settings.relaxedAutoAccept || !candidate) {
+    return false;
+  }
+
+  const decision = candidate.decision;
+  return (
+    !decision.rejected &&
+    decision.risk === 'medium' &&
+    decision.score > settings.autoAcceptScore &&
+    decision.titleScore >= 0.82 &&
+    decision.artistScore >= 0.75 &&
+    decision.durationScore >= 0.62 &&
+    decision.versionScore >= 0.7
+  );
+};
+
+const isAutoAcceptCandidate = (candidate: MatchedLyricsCandidate | null, settings: LyricsMatchEngineOptions): boolean =>
+  Boolean(candidate?.decision.autoAccept && candidate.decision.risk === 'low') || isRelaxedAutoAcceptCandidate(candidate, settings);
 
 const localDecision = (provider: LyricsProvider, result: LyricsProviderResult, settings: LyricsMatchEngineOptions): LyricsMatchDecision => {
   const reasons = result.matchReasons?.length ? [...result.matchReasons] : ['local_sidecar_priority'];
@@ -144,7 +163,7 @@ export class LyricsMatchEngine {
 
       if (localCandidates.length && !settings.collectAllCandidates) {
         const sorted = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(localCandidates));
-        const accepted = sorted.find(isAutoAcceptCandidate) ?? null;
+        const accepted = sorted.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null;
         if (!accepted) {
           continue;
         }
@@ -161,7 +180,7 @@ export class LyricsMatchEngine {
       const candidates = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(localCollected));
       return {
         normalized,
-        accepted: candidates.find((candidate) => candidate.decision.autoAccept && candidate.decision.risk === 'low') ?? null,
+        accepted: candidates.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null,
         candidates,
       };
     }
@@ -172,7 +191,7 @@ export class LyricsMatchEngine {
         const providerCandidates = await this.searchProvider(provider, query, normalized, settings, new AbortController().signal);
         collected.push(...providerCandidates);
         const sorted = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(collected));
-        const accepted = sorted.find((candidate) => candidate.decision.autoAccept && candidate.decision.risk === 'low') ?? null;
+        const accepted = sorted.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null;
         if (accepted && !settings.collectAllCandidates) {
           return { normalized, accepted, candidates: sorted };
         }
@@ -181,7 +200,7 @@ export class LyricsMatchEngine {
       const candidates = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(collected));
       return {
         normalized,
-        accepted: candidates.find((candidate) => candidate.decision.autoAccept && candidate.decision.risk === 'low') ?? null,
+        accepted: candidates.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null,
         candidates,
       };
     }
@@ -204,7 +223,7 @@ export class LyricsMatchEngine {
         const primaryCandidates = await this.searchProvider(primaryProvider, query, normalized, settings, totalController.signal);
         collected.push(...primaryCandidates);
         const sorted = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(collected));
-        accepted = sorted.find((candidate) => candidate.provider === primaryProvider.id && isAutoAcceptCandidate(candidate)) ?? null;
+        accepted = sorted.find((candidate) => candidate.provider === primaryProvider.id && isAutoAcceptCandidate(candidate, settings)) ?? null;
         if (accepted) {
           return { normalized, accepted, candidates: sorted };
         }
@@ -224,7 +243,7 @@ export class LyricsMatchEngine {
         pending.delete(next.id);
         collected.push(...next.candidates);
         const sorted = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(collected));
-        accepted = sorted.find((candidate) => candidate.decision.autoAccept && candidate.decision.risk === 'low') ?? null;
+        accepted = sorted.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null;
         if (accepted && !settings.collectAllCandidates) {
           totalController.abort();
           break;
@@ -237,7 +256,7 @@ export class LyricsMatchEngine {
     const candidates = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(collected));
     return {
       normalized,
-      accepted: accepted ?? candidates.find((candidate) => candidate.decision.autoAccept && candidate.decision.risk === 'low') ?? null,
+      accepted: accepted ?? candidates.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null,
       candidates,
     };
   }

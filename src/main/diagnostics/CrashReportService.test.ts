@@ -561,6 +561,44 @@ describe('CrashReportService', () => {
     }
   });
 
+  it('classifies streaming provider no-URL failures separately from audio pipeline errors', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-06-07T10:09:00.382Z'));
+      const service = new CrashReportService(tempDir);
+      service.initialize();
+
+      service.reportAudioError({
+        message: 'KuGou Music did not return a playable URL for this track.',
+        phase: 'play-media-item-ipc',
+        severity: 'fatal',
+        details: {
+          request: {
+            item: {
+              mediaType: 'streaming',
+              provider: 'kugou',
+              providerTrackId: '47c05e140aef49a214c6edb17f9db35c.26482909.191403760',
+            },
+          },
+        },
+        audioStatus: createAudioStatus({
+          state: 'paused',
+          outputMode: 'shared',
+          outputDeviceName: null,
+          error: null,
+        }) as never,
+      });
+
+      const report = readFileSync(join(service.getSessionDir()!, 'audio-crash-report.md'), 'utf8');
+
+      expect(report).toContain('streaming_playback_unavailable');
+      expect(report).not.toContain('audio_pipeline_error');
+      expect(report).toContain('KuGou Music did not return a playable URL for this track.');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('opens the dedicated audio crash report file', async () => {
     const service = new CrashReportService(tempDir);
     service.initialize();

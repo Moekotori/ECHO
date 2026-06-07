@@ -61,6 +61,7 @@ import { registerPluginIpc } from './pluginIpc';
 import { registerRemoteSourcesIpc } from './remoteSourcesIpc';
 import { registerSmtcIpc } from './smtcIpc';
 import { registerStreamingIpc } from './streamingIpc';
+import { registerSleepTimerIpc } from './sleepTimerIpc';
 
 const fontMimeTypes: Record<string, string> = {
   '.otf': 'font/otf',
@@ -656,4 +657,5 @@ export const registerIpc = (): void => {
   registerIpcStartupStep('streaming', registerStreamingIpc);
   registerIpcStartupStep('playback', registerPlaybackIpc);
   registerIpcStartupStep('audio', registerAudioIpc);
+  registerIpcStartupStep('sleepTimer', registerSleepTimerIpc);
 };

@@ -151,6 +151,7 @@ const defaultState = (): EqState => ({
   enabled: false,
   preampDb: 0,
   dspHeadroomDb: 0,
+  dspSafetyLimiterEnabled: true,
   bands: createBands(),
   presetId: 'flat',
   presetName: 'Flat',
@@ -165,6 +166,7 @@ const normalizeState = (value: unknown): EqState | null => {
   const input = value as Partial<EqState>;
   const preampDb = Number(input.preampDb ?? 0);
   const dspHeadroomDb = Number(input.dspHeadroomDb ?? 0);
+  const dspSafetyLimiterEnabled = input.dspSafetyLimiterEnabled !== false;
   const bands = validateBands(input.bands);
 
   if (!Number.isFinite(preampDb) || !Number.isFinite(dspHeadroomDb) || !bands) {
@@ -175,6 +177,7 @@ const normalizeState = (value: unknown): EqState | null => {
     enabled: input.enabled === true,
     preampDb: clamp(preampDb, eqMinPreampDb, eqMaxPreampDb),
     dspHeadroomDb: clamp(dspHeadroomDb, dspHeadroomMinDb, dspHeadroomMaxDb),
+    dspSafetyLimiterEnabled,
     bands,
     presetId: typeof input.presetId === 'string' && input.presetId.trim() ? input.presetId.trim().slice(0, 64) : 'flat',
     presetName: typeof input.presetName === 'string' && input.presetName.trim() ? input.presetName.trim().slice(0, 64) : 'Flat',
@@ -684,6 +687,15 @@ export class EqBridge extends EventEmitter {
     return this.emitState();
   }
 
+  async setDspSafetyLimiterEnabled(enabled: boolean): Promise<EqState> {
+    const safetyLimiterEnabled = enabled !== false;
+    this.state = { ...this.state, dspSafetyLimiterEnabled: safetyLimiterEnabled };
+    this.markStateChanged();
+    this.persistState();
+    await this.sendNative({ type: 'dsp:set-safety-limiter-enabled', enabled: safetyLimiterEnabled });
+    return this.emitState();
+  }
+
   async setPreset(presetId: string): Promise<EqState> {
     const preset = this.listPresets().find((item) => item.id === presetId);
 
@@ -695,6 +707,7 @@ export class EqBridge extends EventEmitter {
       enabled: this.state.enabled,
       preampDb: preset.preampDb,
       dspHeadroomDb: this.state.dspHeadroomDb,
+      dspSafetyLimiterEnabled: this.state.dspSafetyLimiterEnabled !== false,
       bands: preset.bands.map((band) => ({ ...band })),
       presetId: preset.id,
       presetName: preset.name,
@@ -712,6 +725,7 @@ export class EqBridge extends EventEmitter {
       enabled: this.state.enabled,
       preampDb: flat.preampDb,
       dspHeadroomDb: this.state.dspHeadroomDb,
+      dspSafetyLimiterEnabled: this.state.dspSafetyLimiterEnabled !== false,
       bands: flat.bands.map((band) => ({ ...band })),
       presetId: flat.id,
       presetName: flat.name,
@@ -1003,6 +1017,7 @@ export class EqBridge extends EventEmitter {
         await this.sendNativeNow({ type: 'eq:set-enabled', enabled: eqState.enabled });
         await this.sendNativeNow({ type: 'eq:set-preset', preampDb: eqState.preampDb, bands: eqState.bands });
         await this.sendNativeNow({ type: 'dsp:set-headroom', headroomDb: eqState.dspHeadroomDb ?? 0 });
+        await this.sendNativeNow({ type: 'dsp:set-safety-limiter-enabled', enabled: eqState.dspSafetyLimiterEnabled !== false });
       });
     } finally {
       const syncRevision = this.nativeSyncTargetRevision;
@@ -1139,7 +1154,7 @@ export class EqBridge extends EventEmitter {
     }
 
     try {
-      const message = JSON.parse(line) as Partial<EqState & ChannelBalanceState & RoomCorrectionState> & { type?: string; message?: string; headroomDb?: unknown };
+      const message = JSON.parse(line) as Partial<EqState & ChannelBalanceState & RoomCorrectionState> & { type?: string; message?: string; headroomDb?: unknown; safetyLimiterEnabled?: unknown };
 
       if (message.type === 'eq:error') {
         pending?.reject(new Error(message.message ?? 'eq_native_error'));
@@ -1184,6 +1199,7 @@ export class EqBridge extends EventEmitter {
         this.state = {
           ...this.state,
           dspHeadroomDb: Number.isFinite(dspHeadroomDb) ? clamp(dspHeadroomDb, dspHeadroomMinDb, dspHeadroomMaxDb) : this.state.dspHeadroomDb,
+          dspSafetyLimiterEnabled: message.safetyLimiterEnabled !== false,
         };
         this.emitState();
       }
