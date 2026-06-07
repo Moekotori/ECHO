@@ -1501,6 +1501,31 @@ describe('Audio Core sample-rate regression guard', () => {
     });
   });
 
+  it('treats Headroom alone as a processed path and exits DSD direct', async () => {
+    await getEqBridge().setDspHeadroom(-6);
+    const { decoder, session } = createSessionHarness([dsdProbe('headroom-dsd.dsf')]);
+
+    try {
+      const status = await session.playLocalFile({
+        filePath: 'headroom-dsd.dsf',
+        output: { outputMode: 'exclusive', dsdOutputMode: 'dop' },
+      });
+
+      expect(status.dspActive).toBe(true);
+      expect(status.bitPerfectCandidate).toBe(false);
+      expect(status.bitPerfectDisabledReason).toBe('dsp_headroom_enabled');
+      expect(status.activeDsdOutputMode).toBeNull();
+      expect(status.warnings).toContain('dsd_dop_disabled_by_dsp');
+      expect(status.warnings).toContain('dsp_headroom_bit_perfect_disabled');
+      expect(decoder.decodeRequests.at(-1)).toMatchObject({
+        filePath: 'headroom-dsd.dsf',
+        decoderOutputSampleRate: 176400,
+      });
+    } finally {
+      await getEqBridge().setDspHeadroom(0);
+    }
+  });
+
   it('applies ECHO SRC family 8x to PCM direct output as an experimental ultra path', async () => {
     const { bridges, decoder, session } = createSessionHarness([probe('441.flac', 44100), probe('48.flac', 48000)]);
 

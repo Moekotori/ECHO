@@ -518,11 +518,11 @@ export const EqPanel = ({ audioStatus, onAudioStatusRefresh, surface = 'full' }:
   const realtimeLevelClipped = (audioLevels?.clipCount ?? 0) > 0;
   const dspLimiterProtecting = audioStatus?.dspLimiterProtecting === true;
   const clippingRisk = Boolean(state.clippingRisk || roomCorrection.clippingRisk || channelBalance.clippingRisk || audioStatus?.clippingRisk || audioStatus?.dspClippingRisk || dspLimiterProtecting || realtimeLevelClippingRisk || realtimeLevelClipped);
+  const dspHeadroomArmed = Math.abs(state.dspHeadroomDb ?? 0) > 0.05;
   const eqOrBalanceEnabled = state.enabled || roomCorrection.enabled || channelBalance.enabled;
-  const dspActive = Boolean(audioStatus?.dspActive || eqOrBalanceEnabled);
+  const dspActive = Boolean(audioStatus?.dspActive || eqOrBalanceEnabled || dspHeadroomArmed);
   const surfaceDspActive = showEmbeddedDspModules ? dspActive : state.enabled;
   const surfaceClippingRisk = showEmbeddedDspModules ? clippingRisk : Boolean(state.clippingRisk || audioStatus?.clippingRisk || audioStatus?.dspClippingRisk || dspLimiterProtecting || realtimeLevelClippingRisk || realtimeLevelClipped);
-  const dspHeadroomArmed = Math.abs(state.dspHeadroomDb ?? 0) > 0.05;
   const dspHeadroomActive = dspActive && dspHeadroomArmed;
   const recommendedPreampDb = computeRecommendedPreamp(state);
   const maxBandGainDb = computeMaxBandGainDb(state.bands);
@@ -2225,6 +2225,7 @@ export const EqPanel = ({ audioStatus, onAudioStatusRefresh, surface = 'full' }:
   const calibrationReady = hasDistanceMeasurement || hasSplMeasurement;
   const channelBalanceRisk = leftTotalDb > 0 || rightTotalDb > 0 || Boolean(channelBalance.clippingRisk);
   const activeDspSourceLabels = [
+    dspHeadroomArmed ? t('settings.eq.status.headroom') : null,
     state.enabled ? t('settings.eq.bitPerfect.sourceEq') : null,
     roomCorrection.enabled ? t('settings.eq.bitPerfect.sourceRoom') : null,
     channelBalance.enabled ? t('settings.eq.bitPerfect.sourceChannel') : null,
@@ -2236,6 +2237,7 @@ export const EqPanel = ({ audioStatus, onAudioStatusRefresh, surface = 'full' }:
     ? t('settings.eq.bitPerfect.disabled', { reason: dspSource ? ` (${dspSource})` : '' })
     : t('settings.eq.bitPerfect.readyPath');
   const activeDspModuleCount = [
+    dspHeadroomArmed,
     state.enabled,
     roomCorrection.enabled,
     channelBalance.enabled,
@@ -2610,15 +2612,16 @@ export const EqPanel = ({ audioStatus, onAudioStatusRefresh, surface = 'full' }:
           <em>{t('settings.eq.routing.modules')}</em>
           <strong>
             {[
+              dspHeadroomArmed ? t('settings.eq.status.headroom') : null,
               state.enabled ? t('settings.eq.status.eq') : null,
               roomCorrection.enabled ? 'FIR' : null,
               channelBalance.enabled ? t('settings.eq.channel.group.balance') : null,
             ].filter(Boolean).join(' / ') || t('settings.eq.routing.modulesBypassed')}
           </strong>
-          <small>{eqOrBalanceEnabled ? t('settings.eq.routing.modulesActiveDetail') : t('settings.eq.routing.modulesBypassedDetail')}</small>
+          <small>{dspActive ? t('settings.eq.routing.modulesActiveDetail') : t('settings.eq.routing.modulesBypassedDetail')}</small>
         </span>
         <div className="eq-routing-actions">
-          <button className="eq-soft-button" type="button" disabled={!eqOrBalanceEnabled} onClick={handleNativeDirect}>
+          <button className="eq-soft-button" type="button" disabled={!dspActive} onClick={handleNativeDirect}>
             {t('settings.eq.routing.action.nativeDirect')}
           </button>
           <button className="eq-soft-button" data-active={Math.abs((state.dspHeadroomDb ?? 0) + 6) <= 0.05} type="button" onClick={() => handleDspHeadroomChange(-6)}>
@@ -2689,7 +2692,7 @@ export const EqPanel = ({ audioStatus, onAudioStatusRefresh, surface = 'full' }:
               <strong>{roomCorrection.enabled ? formatDb(roomCorrection.trimDb) : roomCorrectionStatusLabel}</strong>
             </span>
           ) : null}
-          <span className="eq-signal-node" data-active={showEmbeddedDspModules ? state.enabled || roomCorrection.enabled || channelBalance.enabled : state.enabled} data-risk={surfaceClippingRisk}>
+          <span className="eq-signal-node" data-active={showEmbeddedDspModules ? dspHeadroomArmed || state.enabled || roomCorrection.enabled || channelBalance.enabled : state.enabled} data-risk={surfaceClippingRisk}>
             <ShieldCheck size={14} aria-hidden="true" />
             <em>{t('settings.eq.signal.limiter')}</em>
             <strong>{dspLimiterProtecting ? t('settings.eq.signal.protecting') : surfaceClippingRisk ? t('settings.eq.status.warning') : t('settings.eq.signal.armed')}</strong>

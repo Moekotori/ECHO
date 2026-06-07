@@ -1550,6 +1550,31 @@ const formatRate = (value: number | null): string => {
   return `${value} Hz`;
 };
 
+const formatUzumeSettingsPath = (status: AudioStatus | null): string => {
+  switch (status?.uzumeFormatPath) {
+    case 'pcm_bitperfect':
+      return 'PCM bit-perfect';
+    case 'pcm_processed':
+      return 'PCM processed by UZUME';
+    case 'dsd_direct':
+      return status.activeDsdOutputMode === 'native' ? 'DSD direct / Native' : 'DSD direct / DoP';
+    case 'dsd_upsampling':
+      return 'DSD upsampling / SDM-only';
+    case 'd2p_processed':
+      return 'DSD -> PCM processed';
+    case 'sdm_processed':
+      return 'SDM processed';
+    default:
+      if (status?.activeDsdOutputMode === 'native') {
+        return 'DSD direct / Native';
+      }
+      if (status?.activeDsdOutputMode === 'dop') {
+        return 'DSD direct / DoP';
+      }
+      return status?.dspActive ? 'PCM processed by UZUME' : 'PCM bit-perfect';
+  }
+};
+
 const themeModeOptions: Array<{ mode: AppThemeMode; labelKey: TranslationKey }> = [
   { mode: 'light', labelKey: 'settings.appearance.theme.light' },
   { mode: 'dark', labelKey: 'settings.appearance.theme.dark' },
@@ -12739,7 +12764,7 @@ export const SettingsPage = (): JSX.Element => {
                   <div className="settings-status-grid settings-status-grid--audio">
                     <span>
                       <em>Signal path</em>
-                      <strong>{status?.dspActive ? 'UZUME path' : 'Native direct'}</strong>
+                      <strong>{formatUzumeSettingsPath(status)}</strong>
                     </span>
                     <span>
                       <em>EQ</em>

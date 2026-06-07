@@ -841,7 +841,8 @@ const getDsdDopDisabledWarning = (
   const eqState = getEqBridge().getState();
   const channelBalanceState = getEqBridge().getChannelBalanceState();
   const roomCorrectionState = getEqBridge().getRoomCorrectionState();
-  if (eqState.enabled || roomCorrectionState.enabled || channelBalanceState.enabled) {
+  const headroomActive = Math.abs(eqState.dspHeadroomDb ?? 0) > 0.05;
+  if (eqState.enabled || roomCorrectionState.enabled || channelBalanceState.enabled || headroomActive) {
     return 'dsd_dop_disabled_by_dsp';
   }
 
@@ -3327,7 +3328,8 @@ export class AudioSession extends EventEmitter {
     const eqState = getEqBridge().getState();
     const channelBalanceState = getEqBridge().getChannelBalanceState();
     const roomCorrectionState = getEqBridge().getRoomCorrectionState();
-    const dspModuleActive = eqState.enabled || roomCorrectionState.enabled || channelBalanceState.enabled;
+    const headroomModuleActive = Math.abs(eqState.dspHeadroomDb ?? 0) > 0.05;
+    const dspModuleActive = eqState.enabled || roomCorrectionState.enabled || channelBalanceState.enabled || headroomModuleActive;
     const audioVisualSpectrumEnabled = isAudioVisualSpectrumEnabled();
     this.levelMeterTransform?.setVisualSpectrumEnabled(audioVisualSpectrumEnabled);
     const audioLevels = createAudioLevelTelemetry(
@@ -3501,15 +3503,17 @@ export class AudioSession extends EventEmitter {
         ? 'room_correction_enabled'
         : channelBalanceState.enabled
           ? 'channel_balance_enabled'
-          : chainedPlaybackActive
-            ? gaplessActive
-              ? 'gapless_enabled'
-              : 'automix_enabled'
-            : replayGainActive
-              ? 'replay_gain_enabled'
-              : echoSrcActive
-                ? 'echo_src_enabled'
-                : null;
+          : headroomModuleActive
+            ? 'dsp_headroom_enabled'
+            : chainedPlaybackActive
+              ? gaplessActive
+                ? 'gapless_enabled'
+                : 'automix_enabled'
+              : replayGainActive
+                ? 'replay_gain_enabled'
+                : echoSrcActive
+                  ? 'echo_src_enabled'
+                  : null;
     const warnings = [...(plan?.warnings ?? [])];
     for (const warning of this.outputWarnings) {
       if (!warnings.includes(warning)) {
@@ -3523,6 +3527,8 @@ export class AudioSession extends EventEmitter {
       warnings.push('room_correction_bit_perfect_disabled');
     } else if (channelBalanceState.enabled) {
       warnings.push('channel_balance_bit_perfect_disabled');
+    } else if (headroomModuleActive) {
+      warnings.push('dsp_headroom_bit_perfect_disabled');
     } else if (chainedPlaybackActive) {
       warnings.push(gaplessActive ? 'gapless_enabled_bit_perfect_disabled' : 'automix_enabled_bit_perfect_disabled');
     } else if (replayGainActive) {

@@ -126,10 +126,10 @@ const formatEchoSrcPath = (status: AudioStatus | null, track?: LibraryTrack | nu
   const quality = formatEchoSrcQualityProfile(status.echoSrcQualityProfile);
 
   if (sourceRate && targetRate) {
-    return `${sourceRate} -> ECHO SRC ${targetRate} / ${engine} ${quality}`;
+    return `${sourceRate} -> ${targetRate} / ${engine} ${quality}`;
   }
 
-  return targetRate ? `ECHO SRC -> ${targetRate} / ${engine} ${quality}` : `ECHO SRC / ${engine} ${quality}`;
+  return targetRate ? `${targetRate} / ${engine} ${quality}` : `${engine} ${quality}`;
 };
 
 const formatResamplePath = (status: AudioStatus | null, track?: LibraryTrack | null): string | null => {
@@ -191,6 +191,31 @@ const cleanReason = (value: string | null | undefined): string | null => value?.
 
 const joinSpec = (parts: Array<string | null | undefined>, fallback = unknown): string =>
   parts.filter((part): part is string => Boolean(part?.trim())).join(' / ') || fallback;
+
+const formatUzumePath = (status: AudioStatus | null): string | null => {
+  switch (status?.uzumeFormatPath) {
+    case 'pcm_bitperfect':
+      return 'PCM bit-perfect';
+    case 'pcm_processed':
+      return 'PCM processed by UZUME';
+    case 'dsd_direct':
+      return status.activeDsdOutputMode === 'native' ? 'DSD direct / Native' : 'DSD direct / DoP';
+    case 'dsd_upsampling':
+      return 'DSD upsampling / SDM-only';
+    case 'd2p_processed':
+      return 'DSD -> PCM processed';
+    case 'sdm_processed':
+      return 'SDM processed';
+    default:
+      if (status?.activeDsdOutputMode === 'native') {
+        return 'DSD direct / Native';
+      }
+      if (status?.activeDsdOutputMode === 'dop') {
+        return 'DSD direct / DoP';
+      }
+      return status?.dspActive ? 'PCM processed by UZUME' : null;
+  }
+};
 
 const isHqPlayerSignalPath = (connectStatus: ConnectSessionStatus | null | undefined): connectStatus is ConnectSessionStatus =>
   isHqPlayerConnectStatus(connectStatus) && connectStatus.state !== 'idle' && connectStatus.state !== 'unsupported';
@@ -362,11 +387,11 @@ const buildDspModules = (status: AudioStatus | null): string[] => {
   }
 
   return [
-    status.dspActive && Math.abs(status.dspHeadroomDb ?? 0) > 0.05
+    (status.uzumeHeadroomActive || status.dspActive) && Math.abs(status.dspHeadroomDb ?? 0) > 0.05
       ? `Headroom ${formatDb(status.dspHeadroomDb) ?? ''}`.trim()
       : null,
     status.eqEnabled ? status.eqPresetName ? `EQ ${status.eqPresetName}` : 'EQ' : null,
-    status.echoSrcActive ? 'ECHO SRC' : null,
+    status.echoSrcActive ? 'ECHO/SOXR SRC (compat)' : null,
     status.roomCorrectionEnabled ? 'FIR 房间校正' : null,
     status.channelBalanceEnabled ? '声道平衡' : null,
     status.replayGainEnabled ? `ReplayGain ${formatDb(status.replayGainAppliedDb) ?? ''}`.trim() : null,
@@ -376,6 +401,7 @@ const buildDspModules = (status: AudioStatus | null): string[] => {
 
 export const buildAudioSignalPathNodes = (status: AudioStatus | null, track: LibraryTrack | null): SignalNode[] => {
   const dspModules = buildDspModules(status);
+  const uzumePath = formatUzumePath(status);
   const outputRate = formatRate(status?.actualDeviceSampleRate ?? status?.requestedOutputSampleRate ?? status?.sharedDeviceSampleRate);
   const sourceTone: SignalTone = status ? 'good' : 'muted';
   const decodeTone: SignalTone = status?.resampling ? 'warning' : status ? 'good' : 'muted';
@@ -405,8 +431,8 @@ export const buildAudioSignalPathNodes = (status: AudioStatus | null, track: Lib
     },
     {
       title: 'Process',
-      value: dspModules.length ? dspModules.join(' + ') : '原生路径',
-      detail: dspModules.length ? '经过 UZUME 处理链' : '未启用 UZUME section',
+      value: dspModules.length ? dspModules.join(' + ') : uzumePath ?? '原生路径',
+      detail: dspModules.length ? `${uzumePath ?? 'UZUME processed'} / section active` : `${uzumePath ?? 'PCM bit-perfect'} / 未启用 UZUME section`,
       icon: dspModules.length ? SlidersHorizontal : ShieldCheck,
       tone: dspTone,
     },
@@ -451,6 +477,7 @@ const getSignalSummary = (status: AudioStatus | null, track: LibraryTrack | null
   const tone = summaryTone(status);
   const spec = sourceCompactSpec(status, track);
   const resamplePath = formatResamplePath(status, track);
+  const uzumePath = formatUzumePath(status);
 
   if (!status) {
     return {
@@ -487,7 +514,15 @@ const getSignalSummary = (status: AudioStatus | null, track: LibraryTrack | null
   if (status.echoSrcActive) {
     return {
       label: '升频',
-      detail: formatEchoSrcPath(status, track) ?? 'ECHO SRC active',
+      detail: `${formatEchoSrcPath(status, track) ?? 'ECHO/SOXR SRC active'} / 兼容路径`,
+      spec,
+      tone,
+    };
+  }
+  if (status.uzumeFormatPath === 'dsd_direct' || status.activeDsdOutputMode === 'dop' || status.activeDsdOutputMode === 'native') {
+    return {
+      label: 'DSD direct',
+      detail: uzumePath ?? 'DSD direct',
       spec,
       tone,
     };
@@ -500,8 +535,8 @@ const getSignalSummary = (status: AudioStatus | null, track: LibraryTrack | null
     || status.replayGainEnabled
   ) {
     return {
-      label: '已强化',
-      detail: buildDspModules(status).slice(0, 2).join(' + ') || 'UZUME active',
+      label: 'UZUME processed',
+      detail: buildDspModules(status).slice(0, 2).join(' + ') || uzumePath || 'UZUME active',
       spec,
       tone,
     };
@@ -541,6 +576,9 @@ const getRoonPathLabel = (status: AudioStatus | null): string => {
   if (status.dspLimiterProtecting || status.dspClippingRisk) {
     return '保护中';
   }
+  if (status.uzumeFormatPath === 'dsd_direct' || status.activeDsdOutputMode === 'dop' || status.activeDsdOutputMode === 'native') {
+    return 'DSD direct';
+  }
   if (
     status.dspActive
     || status.eqEnabled
@@ -548,7 +586,7 @@ const getRoonPathLabel = (status: AudioStatus | null): string => {
     || status.channelBalanceEnabled
     || status.replayGainEnabled
   ) {
-    return '已强化';
+    return 'UZUME processed';
   }
   if (status.resampling) {
     return '重采样';
@@ -599,7 +637,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   if (echoSrcPath) {
     nodes.push({
       badge: '',
-      title: 'ECHO SRC / 升频',
+      title: 'ECHO/SOXR SRC (compat)',
       value: echoSrcPath,
       tone: 'process',
       variant: 'process',

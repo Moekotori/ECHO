@@ -141,6 +141,34 @@ afterEach(() => {
 });
 
 describe('DspPage UZUME SRC surface', () => {
+  it('shows format path transitions instead of disabling PCM DSP controls from bit-perfect', () => {
+    audioStatus = baseAudioStatus({
+      bitPerfectCandidate: true,
+      uzumeFormatPath: 'pcm_bitperfect',
+      uzumeBitPerfectState: 'available',
+    });
+
+    renderDspPage();
+
+    expect(screen.getAllByText('PCM bit-perfect').length).toBeGreaterThan(0);
+    expect(screen.getByText('由控件触发')).toBeTruthy();
+    expect(screen.getByText('打开此 section 会退出 PCM bit-perfect，后端会重新规划为 PCM processed。')).toBeTruthy();
+  });
+
+  it('explains that enabling DSP sections exits DSD direct instead of leaving dead controls', () => {
+    audioStatus = baseAudioStatus({
+      bitPerfectCandidate: true,
+      activeDsdOutputMode: 'dop',
+      uzumeFormatPath: 'dsd_direct',
+      uzumeBitPerfectState: 'available',
+    });
+
+    renderDspPage();
+
+    expect(screen.getAllByText('DSD direct').length).toBeGreaterThan(0);
+    expect(screen.getByText('打开此 section 会退出 DSD direct / DoP，后端会重新规划为 DSD -> PCM processed。')).toBeTruthy();
+  });
+
   it('marks UZUME SRC as unimplemented instead of exposing live switches', () => {
     renderDspPage();
     openSrcPanel();

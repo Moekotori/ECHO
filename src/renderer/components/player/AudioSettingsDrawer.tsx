@@ -433,6 +433,50 @@ const getPlaybackChainText = (status: AudioStatus | null, copy: AudioDrawerCopy)
   return `${decodeText} -> ${copy.standardPath}`;
 };
 
+const formatUzumeFormatPath = (status: AudioStatus | null): string | null => {
+  switch (status?.uzumeFormatPath) {
+    case 'pcm_bitperfect':
+      return 'PCM bit-perfect';
+    case 'pcm_processed':
+      return 'PCM processed by UZUME';
+    case 'dsd_direct':
+      return status.activeDsdOutputMode === 'native' ? 'DSD direct / Native' : 'DSD direct / DoP';
+    case 'dsd_upsampling':
+      return 'DSD upsampling / SDM-only';
+    case 'd2p_processed':
+      return 'DSD -> PCM processed';
+    case 'sdm_processed':
+      return 'SDM processed';
+    default:
+      if (status?.activeDsdOutputMode === 'native') {
+        return 'DSD direct / Native';
+      }
+      if (status?.activeDsdOutputMode === 'dop') {
+        return 'DSD direct / DoP';
+      }
+      return status?.dspActive ? 'PCM processed by UZUME' : null;
+  }
+};
+
+const formatBitPerfectDisabledReason = (status: AudioStatus | null, copy: AudioDrawerCopy): string => {
+  switch (status?.bitPerfectDisabledReason) {
+    case 'echo_src_enabled':
+      return 'ECHO/SOXR SRC (compat)';
+    case 'dsp_headroom_enabled':
+      return 'Headroom -> UZUME processed';
+    case 'uzume_processing_enabled':
+      return 'UZUME processed';
+    case 'eq_enabled':
+      return copy.eqOn;
+    case 'room_correction_enabled':
+      return 'FIR -> UZUME processed';
+    case 'channel_balance_enabled':
+      return `${copy.balanceDsp} -> UZUME processed`;
+    default:
+      return status?.bitPerfectDisabledReason?.replaceAll('_', ' ') ?? copy.standardPath;
+  }
+};
+
 const formatSourceQuality = (status: AudioStatus | null, copy: AudioDrawerCopy): string => {
   const parts = [
     status?.codec?.toUpperCase() ?? null,
@@ -487,6 +531,10 @@ const formatRatePath = (status: AudioStatus | null, deviceSampleRate: number | n
 };
 
 const getEqSignalText = (status: AudioStatus | null, copy: AudioDrawerCopy): string => {
+  if (status?.uzumeHeadroomActive || (status?.dspActive && Math.abs(status.dspHeadroomDb ?? 0) > 0.05)) {
+    return `${copy.dspOn} / Headroom`;
+  }
+
   if (status?.eqEnabled) {
     return status.eqPresetName ? `${copy.eqOn} / ${status.eqPresetName}` : copy.eqOn;
   }
@@ -544,11 +592,12 @@ const getDirectSignalText = (status: AudioStatus | null, deviceSampleRate: numbe
   }
 
   if (status?.bitPerfectDisabledReason) {
-    if (status.bitPerfectDisabledReason === 'echo_src_enabled') {
-      return 'ECHO SRC';
-    }
+    return formatBitPerfectDisabledReason(status, copy);
+  }
 
-    return status.bitPerfectDisabledReason.replaceAll('_', ' ');
+  const uzumePath = formatUzumeFormatPath(status);
+  if (uzumePath && uzumePath !== 'PCM bit-perfect' && !uzumePath.startsWith('DSD direct')) {
+    return uzumePath;
   }
 
   if (
@@ -557,6 +606,7 @@ const getDirectSignalText = (status: AudioStatus | null, deviceSampleRate: numbe
     hasInferredRateMismatch(status, deviceSampleRate) ||
     status?.dspActive ||
     status?.eqEnabled ||
+    status?.roomCorrectionEnabled ||
     status?.channelBalanceEnabled
   ) {
     return copy.processed;
@@ -920,7 +970,9 @@ export const AudioSettingsDrawer = ({
       badges.push({ label: copy.soxrResampler, tone: 'ready' });
     }
 
-    if (isActiveDsdDop(status)) {
+    if (status?.activeDsdOutputMode === 'native') {
+      badges.push({ label: 'DSD direct', tone: 'ready' });
+    } else if (isActiveDsdDop(status)) {
       badges.push({ label: copy.dsdDop, tone: 'ready' });
     } else if (isDsdDopFallbackVisible(status)) {
       badges.push({ label: copy.dsdDopFallback, tone: 'warning' });
@@ -1030,9 +1082,9 @@ export const AudioSettingsDrawer = ({
       sampleRate: formatRate(currentOutputSampleRate),
       bitPerfect: status?.bitPerfectCandidate
         ? copy.bitPerfectReady
-        : status?.bitPerfectDisabledReason === 'echo_src_enabled'
-          ? 'ECHO SRC'
-          : status?.bitPerfectDisabledReason ?? copy.standardPath,
+        : status?.bitPerfectDisabledReason
+          ? formatBitPerfectDisabledReason(status, copy)
+          : formatUzumeFormatPath(status) ?? copy.standardPath,
       highlight: shouldHighlightCurrentOutput(currentMode, status?.outputBackend),
       Icon: getDeviceIcon(name, currentMode),
     };

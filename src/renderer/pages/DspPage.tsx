@@ -25,6 +25,10 @@ type DspModule = {
   accent: 'blue' | 'violet' | 'green' | 'amber';
 };
 
+type UzumeFormatPath = 'pcm_bitperfect' | 'pcm_processed' | 'dsd_direct' | 'dsd_upsampling' | 'd2p_processed' | 'sdm_processed';
+
+type UzumeFormatPathState = 'current' | 'available' | 'transition' | 'planned' | 'unavailable';
+
 const fallbackEqState: EqState = {
   enabled: false,
   preampDb: 0,
@@ -421,6 +425,33 @@ const dspLocalText: Record<string, string> = {
   'dsp.status.stereoDirect': '立体声直通',
   'dsp.status.systemOutput': '系统输出',
   'dsp.status.unimplemented': '未实现',
+  'dsp.format.detail': '后端 planner 是实际路径来源；UI 只显示当前路径和启用 section 后会触发的路径变化。',
+  'dsp.format.path.d2p_processed.detail': 'DSD 解码为 PCM 后进入 UZUME。当前只作为后端状态展示。',
+  'dsp.format.path.d2p_processed.title': 'D2P processed',
+  'dsp.format.path.dsd_direct.detail': 'Native / DoP 直出；打开 EQ/FIR/Headroom/Matrix 会退出 direct。',
+  'dsp.format.path.dsd_direct.title': 'DSD direct',
+  'dsp.format.path.dsd_upsampling.detail': 'SDM-only 规划路径；PCM-domain DSP 会退出此路径。',
+  'dsp.format.path.dsd_upsampling.title': 'DSD upsampling',
+  'dsp.format.path.pcm_bitperfect.detail': '不进入改样本处理；打开 section 会切到 PCM processed。',
+  'dsp.format.path.pcm_bitperfect.title': 'PCM bit-perfect',
+  'dsp.format.path.pcm_processed.detail': 'Headroom / EQ / FIR / Matrix / Safety 作用于 UZUME chain。',
+  'dsp.format.path.pcm_processed.title': 'PCM processed',
+  'dsp.format.path.sdm_processed.detail': '完整 SDM processed 尚未完成，只显示为不可选能力。',
+  'dsp.format.path.sdm_processed.title': 'SDM processed',
+  'dsp.format.state.available': '可进入',
+  'dsp.format.state.current': '当前',
+  'dsp.format.state.planned': '未实现',
+  'dsp.format.state.transition': '由控件触发',
+  'dsp.format.state.unavailable': '不可用',
+  'dsp.format.title': 'Format path',
+  'dsp.transition.detail.d2p': '当前已经离开 DSD direct；此 section 作用在 DSD 解码后的 PCM 域。',
+  'dsp.transition.detail.dsdDirect': '打开此 section 会退出 DSD direct / DoP，后端会重新规划为 DSD -> PCM processed。',
+  'dsp.transition.detail.dsdUpsampling': '打开此 PCM-domain section 会退出 DSD upsampling / SDM-only；完整 SDM processed 还未完成。',
+  'dsp.transition.detail.pcmBitperfect': '打开此 section 会退出 PCM bit-perfect，后端会重新规划为 PCM processed。',
+  'dsp.transition.detail.pcmProcessed': '当前已经在 PCM processed；控件会直接作用于 UZUME chain。',
+  'dsp.transition.detail.sdm': '当前处于 SDM processed 遥测路径；这部分仍按实验/不可用状态展示。',
+  'dsp.transition.detail.src': 'UZUME Poly-Sinc SRC 尚未实现，这里只显示规划倍率和 ECHO/SOXR 兼容读数。',
+  'dsp.transition.title': '路径变化',
 };
 
 type DspTranslate = (key: string, options?: Parameters<ReturnType<typeof useI18n>['t']>[1]) => string;
@@ -656,6 +687,7 @@ type ModulePanelProps = {
   eqState: EqState;
   roomCorrection: RoomCorrectionState;
   channelBalance: ChannelBalanceState;
+  formatPath: UzumeFormatPath;
   echoSrcMode: AudioEchoSrcMode;
   echoSrcQualityProfile: AudioEchoSrcQualityProfile;
   busyKey: string | null;
@@ -700,6 +732,124 @@ const getUzumeCapabilityStateLabelKey = (state: UzumeCapabilityState): string =>
   }
 
   return 'dsp.capability.state.planned';
+};
+
+const uzumeFormatPathOrder: UzumeFormatPath[] = [
+  'pcm_bitperfect',
+  'pcm_processed',
+  'dsd_direct',
+  'dsd_upsampling',
+  'd2p_processed',
+  'sdm_processed',
+];
+
+const normalizeUzumeFormatPath = (audioStatus: AudioStatus | null, dspActive: boolean): UzumeFormatPath => {
+  const rawPath = audioStatus?.uzumeFormatPath;
+  if (rawPath && uzumeFormatPathOrder.includes(rawPath as UzumeFormatPath)) {
+    return rawPath as UzumeFormatPath;
+  }
+
+  if (audioStatus?.activeDsdOutputMode === 'dop' || audioStatus?.activeDsdOutputMode === 'native') {
+    return 'dsd_direct';
+  }
+
+  return dspActive ? 'pcm_processed' : 'pcm_bitperfect';
+};
+
+const getUzumeFormatPathTitleKey = (path: UzumeFormatPath): string => `dsp.format.path.${path}.title`;
+
+const getUzumeFormatPathDetailKey = (path: UzumeFormatPath): string => `dsp.format.path.${path}.detail`;
+
+const getUzumePathStateLabelKey = (state: UzumeFormatPathState): string => `dsp.format.state.${state}`;
+
+const getUzumePathState = (path: UzumeFormatPath, currentPath: UzumeFormatPath): UzumeFormatPathState => {
+  if (path === currentPath) {
+    return 'current';
+  }
+  if (path === 'pcm_processed') {
+    return currentPath === 'pcm_bitperfect' || currentPath === 'dsd_direct' || currentPath === 'dsd_upsampling'
+      ? 'transition'
+      : 'available';
+  }
+  if (path === 'pcm_bitperfect') {
+    return currentPath === 'pcm_processed' ? 'available' : 'unavailable';
+  }
+  if (path === 'dsd_direct') {
+    return currentPath === 'dsd_direct' ? 'current' : 'unavailable';
+  }
+
+  return 'planned';
+};
+
+const getTransitionDetailKey = (path: UzumeFormatPath, moduleId: DspModuleId): string => {
+  if (moduleId === 'src') {
+    return 'dsp.transition.detail.src';
+  }
+  if (path === 'pcm_bitperfect') {
+    return 'dsp.transition.detail.pcmBitperfect';
+  }
+  if (path === 'pcm_processed') {
+    return 'dsp.transition.detail.pcmProcessed';
+  }
+  if (path === 'dsd_direct') {
+    return 'dsp.transition.detail.dsdDirect';
+  }
+  if (path === 'dsd_upsampling') {
+    return 'dsp.transition.detail.dsdUpsampling';
+  }
+  if (path === 'd2p_processed') {
+    return 'dsp.transition.detail.d2p';
+  }
+
+  return 'dsp.transition.detail.sdm';
+};
+
+const UzumeFormatPathStrip = ({ currentPath }: { currentPath: UzumeFormatPath }): JSX.Element => {
+  const { t } = useDspI18n();
+
+  return (
+    <section className="dsp-format-strip" aria-label={t('dsp.format.title')}>
+      <div className="dsp-format-strip__head">
+        <span>
+          <Route size={15} aria-hidden="true" />
+          {t('dsp.format.title')}
+        </span>
+        <p>{t('dsp.format.detail')}</p>
+      </div>
+      <div className="dsp-format-controls" role="group" aria-label={t('dsp.format.title')}>
+        {uzumeFormatPathOrder.map((path) => {
+          const state = getUzumePathState(path, currentPath);
+
+          return (
+            <span
+              className="dsp-format-chip"
+              data-state={state}
+              key={path}
+              title={t(getUzumeFormatPathDetailKey(path))}
+            >
+              <strong>{t(getUzumeFormatPathTitleKey(path))}</strong>
+              <small>{t(getUzumePathStateLabelKey(state))}</small>
+            </span>
+          );
+        })}
+      </div>
+    </section>
+  );
+};
+
+const DspTransitionNotice = ({ formatPath, moduleId }: { formatPath: UzumeFormatPath; moduleId: DspModuleId }): JSX.Element => {
+  const { t } = useDspI18n();
+  const tone: HeadroomTone = formatPath === 'pcm_processed' || formatPath === 'd2p_processed' ? 'good' : 'warn';
+
+  return (
+    <div className="dsp-transition-notice" data-tone={tone} role="note">
+      <Route size={16} aria-hidden="true" />
+      <span>
+        <strong>{t('dsp.transition.title')}</strong>
+        <small>{t(getTransitionDetailKey(formatPath, moduleId))}</small>
+      </span>
+    </div>
+  );
 };
 
 const UzumeCapabilityStrip = ({ capabilities }: { capabilities: UzumeCapability[] }): JSX.Element => {
@@ -833,7 +983,7 @@ const EchoSrcPanel = ({
   );
 };
 
-const HeadroomPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, busyKey, onHeadroomChange, onRefresh }: ModulePanelProps): JSX.Element => {
+const HeadroomPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, formatPath, busyKey, onHeadroomChange, onRefresh }: ModulePanelProps): JSX.Element => {
   const { t } = useDspI18n();
   const headroomDb = eqState.dspHeadroomDb ?? 0;
   const dspPathActive = audioStatus?.dspActive === true;
@@ -909,6 +1059,7 @@ const HeadroomPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, b
             </span>
             <p>{t(reasonKey)}</p>
           </div>
+          <DspTransitionNotice formatPath={formatPath} moduleId="headroom" />
           <div className="dsp-module-metrics dsp-headroom-metrics">
             <DspMetric label={t('dsp.metric.inputPeak')} value={formatLevel(inputPeakDb)} />
             <DspMetric label={t('dsp.metric.outputEstimate')} value={formatLevel(outputPeakDb)} />
@@ -1012,6 +1163,7 @@ const RoomCorrectionPanel = ({
   roomCorrection,
   eqState,
   audioStatus,
+  formatPath,
   busyKey,
   onImportRoomCorrection,
   onToggleRoomCorrection,
@@ -1060,6 +1212,7 @@ const RoomCorrectionPanel = ({
             <strong>{status}</strong>
           </div>
           <p>{t(heroDetailKey)}</p>
+          <DspTransitionNotice formatPath={formatPath} moduleId="room" />
           <div className="dsp-room-primary">
             <span>
               <em>{t('dsp.panel.room.hero.state')}</em>
@@ -1220,7 +1373,7 @@ const RoomCorrectionPanel = ({
   );
 };
 
-const ChannelPanel = ({ channelBalance, busyKey, onChannelPatch, onChannelReset }: ModulePanelProps): JSX.Element => {
+const ChannelPanel = ({ channelBalance, formatPath, busyKey, onChannelPatch, onChannelReset }: ModulePanelProps): JSX.Element => {
   const { t } = useDspI18n();
   const [trimStepDb, setTrimStepDb] = useState(0.25);
   const [channelPresets, setChannelPresets] = useState<ChannelBalancePreset[]>(() => readChannelPresets());
@@ -1412,6 +1565,7 @@ const ChannelPanel = ({ channelBalance, busyKey, onChannelPatch, onChannelReset 
             <span><Headphones size={18} />{t('dsp.module.channel.title')}</span>
             <strong>{channelBalance.enabled ? t('dsp.status.active') : t('dsp.status.bypassed')}</strong>
           </div>
+          <DspTransitionNotice formatPath={formatPath} moduleId="channel" />
           <div className="dsp-channel-primary">
             <span>
               <em>{t('dsp.panel.channel.compensationTitle')}</em>
@@ -1702,7 +1856,7 @@ const ChannelPanel = ({ channelBalance, busyKey, onChannelPatch, onChannelReset 
   );
 };
 
-const SafetyPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, busyKey, onSafetyLimiterChange, onRefresh }: ModulePanelProps): JSX.Element => {
+const SafetyPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, formatPath, busyKey, onSafetyLimiterChange, onRefresh }: ModulePanelProps): JSX.Element => {
   const { t } = useDspI18n();
   const dspActive = audioStatus?.dspActive === true;
   const limiterProtecting = audioStatus?.dspLimiterProtecting === true;
@@ -1802,6 +1956,7 @@ const SafetyPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, bus
           <p>{t(heroDetailKey)}</p>
         </div>
       </div>
+      <DspTransitionNotice formatPath={formatPath} moduleId="safety" />
 
       <div className="dsp-safety-route" aria-label={t('dsp.panel.safety.chainTitle')}>
         {routeItems.map((item) => {
@@ -1840,19 +1995,10 @@ const SafetyPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, bus
               type="button"
               data-active={safetyLimiterEnabled}
               disabled={busyKey === 'safety'}
-              onClick={() => onSafetyLimiterChange(true)}
+              onClick={() => onSafetyLimiterChange(!safetyLimiterEnabled)}
             >
               <ShieldCheck size={14} aria-hidden="true" />
-              {t('dsp.panel.safety.enableLimiter')}
-            </button>
-            <button
-              type="button"
-              data-active={!safetyLimiterEnabled}
-              disabled={busyKey === 'safety'}
-              onClick={() => onSafetyLimiterChange(false)}
-            >
-              <Zap size={14} aria-hidden="true" />
-              {t('dsp.panel.safety.disableLimiter')}
+              {safetyLimiterEnabled ? t('dsp.panel.safety.disableLimiter') : t('dsp.panel.safety.enableLimiter')}
             </button>
           </div>
           {!safetyLimiterEnabled ? <p>{t('dsp.panel.safety.limiterBypassedDetail')}</p> : null}
@@ -2095,6 +2241,8 @@ export const DspPage = (): JSX.Element => {
   }, [runModuleAction, t]);
 
   const dspActive = audioStatus?.dspActive === true;
+  const formatPath = normalizeUzumeFormatPath(audioStatus, dspActive);
+  const formatPathLabel = t(getUzumeFormatPathTitleKey(formatPath));
   const eqEnabled = audioStatus?.eqEnabled ?? eqState.enabled;
   const activeEqPresetName = audioStatus?.eqPresetName || eqState.presetName || '';
   const headphoneCorrectionActive = eqEnabled && activeEqPresetName.startsWith('耳机校正 -');
@@ -2190,7 +2338,6 @@ export const DspPage = (): JSX.Element => {
     [activeEqPresetName, audioStatus?.dspLimiterProtecting, channelBalanceEnabled, clippingRisk, dspActive, dspHeadroomDb, echoSrcEnabled, echoSrcSubtitle, eqEnabled, eqState.presetName, headroomWarning, headphoneCorrectionActive, roomCorrection.enabled, roomCorrection.irName, safetyLimiterEnabled, t],
   );
 
-  const activeCount = modules.filter((module) => module.enabled).length;
   const selectedModule = modules.find((module) => module.id === selectedModuleId) ?? modules[1];
   const SelectedIcon = selectedModule.icon;
   const pipelineNodes = modules.map((module) => ({
@@ -2257,6 +2404,7 @@ export const DspPage = (): JSX.Element => {
     eqState,
     roomCorrection,
     channelBalance,
+    formatPath,
     echoSrcMode,
     echoSrcQualityProfile,
     busyKey,
@@ -2346,7 +2494,7 @@ export const DspPage = (): JSX.Element => {
             <div className="dsp-topbar-status">
               <span data-active={dspActive}>
                 <Activity size={14} aria-hidden="true" />
-                {dspActive ? t('dsp.status.modulesActive', { count: activeCount }) : t('dsp.status.nativeDirect')}
+                {formatPathLabel}
               </span>
               <span data-risk={clippingRisk}>
                 <AudioWaveform size={14} aria-hidden="true" />
@@ -2375,12 +2523,14 @@ export const DspPage = (): JSX.Element => {
             </span>
             <span>
               <em>{t('dsp.label.bitPerfect')}</em>
-              <strong>{dspActive ? t('dsp.status.dspPath') : t('dsp.status.ready')}</strong>
+              <strong>{formatPath === 'pcm_bitperfect' || formatPath === 'dsd_direct' ? t('dsp.status.ready') : t('dsp.status.dspPath')}</strong>
             </span>
             <button type="button" onClick={panelProps.onRefresh}>
               {t('dsp.action.refresh')}
             </button>
           </div>
+
+          <UzumeFormatPathStrip currentPath={formatPath} />
 
           <UzumeCapabilityStrip capabilities={uzumeCapabilities} />
 
@@ -2389,15 +2539,23 @@ export const DspPage = (): JSX.Element => {
           <div className="dsp-editor-shell" data-module={selectedModuleId}>
             {selectedModuleId === 'headroom' ? <HeadroomPanel {...panelProps} /> : null}
             {selectedModuleId === 'src' ? <EchoSrcPanel {...panelProps} /> : null}
-            {selectedModuleId === 'eq' ? <EqPanel audioStatus={audioStatus} onAudioStatusRefresh={() => void refreshPlaybackStatus()} surface="eq-only" /> : null}
+            {selectedModuleId === 'eq' ? (
+              <>
+                <DspTransitionNotice formatPath={formatPath} moduleId="eq" />
+                <EqPanel audioStatus={audioStatus} onAudioStatusRefresh={() => void refreshPlaybackStatus()} surface="eq-only" />
+              </>
+            ) : null}
             {selectedModuleId === 'headphone' ? (
-              <HeadphoneCorrectionPanel
-                eqState={eqState}
-                onApplied={setEqState}
-                onAppliedStatusRefresh={() => {
-                  void refreshPlaybackStatus();
-                }}
-              />
+              <>
+                <DspTransitionNotice formatPath={formatPath} moduleId="headphone" />
+                <HeadphoneCorrectionPanel
+                  eqState={eqState}
+                  onApplied={setEqState}
+                  onAppliedStatusRefresh={() => {
+                    void refreshPlaybackStatus();
+                  }}
+                />
+              </>
             ) : null}
             {selectedModuleId === 'room' ? <RoomCorrectionPanel {...panelProps} /> : null}
             {selectedModuleId === 'channel' ? <ChannelPanel {...panelProps} /> : null}
