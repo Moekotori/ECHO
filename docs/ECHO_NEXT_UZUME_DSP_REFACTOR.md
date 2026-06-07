@@ -1,7 +1,7 @@
 # ECHO NEXT UZUME DSP 重构方案
 
 生成时间：2026-06-07
-仓库状态：`uzume-dspchain-replacement` PR 分支，基线提交 `c155621`。
+仓库状态：`uzume-dspchain-replacement` PR 分支；2026-06-08 代码收口提交为 `3b4ff01`，文档反馈在其后单独追踪，PR 前以 `git status --short --branch` 再确认 clean / ahead 状态。
 文档位置：当前仓库没有 `doc` 目录，既有工程文档位于 `docs`，因此本文按现有约定放入 `docs`。
 
 `UZUME` 是 ECHO NEXT 的下一代数字处理核心层。它不是把现有 EQ、FFmpeg/SOXR SRC、IR 卷积简单改名，也不是在现有 `DspChain` 旁边外挂一串小 DSP 模块。它的目标是直接替代现有 DSP 层，把 ECHO 的原生高质量 Poly-Sinc SRC、长 FIR、卷积预处理接口、PCM 输出位深保护、未来 SDM/DSD 生成，以及 CPU/GPU offload 融合到一个可审计、可回退、可解释的大 kernel 系统里。
@@ -31,15 +31,15 @@
   - IR 只读 WAV，最多 2ch，重采样用线性插值。
 - `native/audio-host/src/main.cpp`
   - 当前 PR 过渡实现为 PCM FIFO / automix 渲染后调用 `uzumeEngine.processBlock()`，再做 declick ramp。
-  - 这不应成为最终边界：正式目标是 host / output bridge 在 `UzumeEngine` 与独立 `LegacyDspChain` backend 之间二选一。
-  - `DspChain` 不应作为包住 `UzumeEngine` 的 legacy compatibility wrapper 长期存在。
+  - RPC-001 已移除 `DspChain -> UzumeEngine` wrapper route；`DspChain.h/.cpp` 不再 include、持有或转发 `UzumeEngine`。
+  - 当前 host/output 仍是 skeleton / transitional compatibility execution，不是最终 fused macro-kernel 边界；后续正式目标仍是 host / output bridge 在 `UzumeEngine` 与独立 `LegacyDspChain` backend 之间二选一。
   - 音频 callback 必须保持轻量、可预测。
 - `src/renderer/pages/DspPage.tsx`
-  - 当前 DSP 前端已经按 Headroom、SRC、EQ、耳机校正、FIR/房间、声道工具、输出安全组织用户控制。
-  - 这些是 UZUME 前端迁移的用户心智基线。
+  - 当前 UI 已由 UZUME 工作台替代旧 DSP 面板，但 RPC-001 阶段所有未真正实现的 UZUME 子模块均显示 `未实现`，不提供假开关。
+  - 旧 Headroom / EQ / FIR / Matrix / Safety / ECHO-SOXR 等状态只作为 legacy / compat readout，不冒充 UZUME kernel 能力。
 - `src/renderer/components/player/AudioSignalPathPopover.tsx`、`AudioProfessionalStatusPanel.tsx`
-  - 当前已有接近 Roon/MUSE 的 Signal Path / professional status 展示雏形。
-  - UZUME 前端应沿这个方向强化，而不是只做一个算法开关页。
+  - Signal Path / Professional Status 已显示 `UZUME skeleton`、`transitional-processor-chain` / `identity-bypass`、`uzume-skeleton-compat`、format path 和 disabled reason。
+  - UZUME 前端应沿这个方向强化，而不是只做一个算法开关页；在 RPC-003 以前不得把 skeleton 文案改成正式 `UZUME processed`。
 
 这些证据决定了 UZUME 不应硬塞进现有 `DspChain` 当作普通后置效果器，也不应被拆成一串小 DSP processor 逐个拼接。SRC、长 FIR、GPU offload 和未来 SDM 都会改变处理域、延迟、缓冲和输出格式，UZUME 应在 Audio Core 的 sample-rate plan / native worker / output bridge 边界替代现有 DSP 层，并通过 fused macro-kernel 降低模块串联开销。
 
@@ -2574,8 +2574,9 @@ schema / profile contract
 - 剔除 `DspChain -> UzumeEngine` wrapper route；`DspChain` 只能作为 legacy backend / `LegacyDspChain` 候选，不能承载 UZUME skeleton。
 - 本地 multi-stage UZUME PR 只作为资产池评估：CUDA probe、telemetry、tests 可保留；绑定 DspChain route 的部分必须改造或丢弃。
 - 实现 formatPath planner skeleton：PCM bit-perfect、PCM processed、DSD direct、DSD upsampling、D2P、SDM 都能得到 `available / unavailable / disabled reason`，但 D2P / SDM 可先不可用。
+- RPC-001 当前落地为 `uzumeFormatPathPlan` telemetry：六条 path 都有 `state` 与 `reason`；当前 PCM skeleton 下 DSD/D2P/SDM 仍可报告 `source_is_pcm` / `sdm_engine_not_ready` 等 unavailable reason。
 - 实现 UZUME identity / bypass backend，不改变样本；只验证 generation id、status handoff、callback ring 读 committed block。
-- 前端先做 thin UI：Format / Output Path、Headroom、SRC、Stereo Procedural、FIR / IR、DSD / SDM、Output Safety 的基础面板和 Signal Path，不实现完整算法编辑器。
+- 前端先做 thin UI：Format / Output Path、Headroom、SRC、Stereo Procedural、FIR / IR、DSD / SDM、Output Safety 的基础面板和 Signal Path，不实现完整算法编辑器；未真正工作的 UZUME 子控件必须显示 `未实现`，只保留 legacy / compat readout。
 - 控件 gating 先跑通：例如 `dsd_direct` 禁用所有改样本 DSP，`dsd_upsampling` 只开放 SDM modulator、headroom、Safety Metering / overload guard。
 - Signal Path 显示 formatPath、source/output container、internal domain、direct disabled reason、shared engine assignment placeholder、backend、bit-perfect disabled reason。
 - 默认关闭，不影响普通播放、曲库和资料功能。
@@ -2911,7 +2912,7 @@ Phase 1 exit：`Skeleton Gate`
 - `DspChain -> UzumeEngine` wrapper route 不再是正式路径；legacy 与 UZUME 由 host / output bridge 并列选择。
 - 本地 multi-stage UZUME PR 已完成 keep / adapt / drop 分类，且没有把 DspChain route 带入 skeleton gate。
 - `formatPath` 覆盖 PCM bit-perfect、PCM processed、DSD direct、DSD upsampling、D2P、SDM 的 available / unavailable / disabled reason。
-- 前端 thin UI 能显示基础 section 和控件 gating，但不宣称高质量 DSP 算法完成。
+- 前端 thin UI 能显示基础 section、formatPath plan、runtime/profile/disabled reason 和控件 gating；未实现 section 不暴露假开关，也不宣称高质量 DSP 算法完成。
 - 默认关闭，不影响普通播放、曲库和资料功能。
 
 Phase 2 exit：`Reference Gate`
@@ -2959,10 +2960,11 @@ Phase 7 exit：`Advanced Backend Gate`
 
 本 PR 记录当前 UZUME 过渡实现状态，并把后续工作收敛到 Phase Exit Gates；它不再定义独立 MVP 清单，也不宣称一次性完成完整 SRC/FIR/SDM/GPU offload：
 
-- 当前操作分支是 `uzume-dspchain-replacement`，已设置 tracking `origin/main`；截至 2026-06-08 本地 behind 12，工作区 dirty files 属于该分支上的未提交 multi-stage UZUME / 文档改动，不是失败的 `git pull --ff-only` 写入造成。
-- 当前 PR 过渡状态中 `UzumeEngine` 已成为 native PCM 实时路径持有的处理核心，同时本地 multi-stage UZUME 改动里还存在 `DspChain -> UzumeEngine` wrapper route。RPC-001 必须先剔除这条 route：后续应拆出独立 `LegacyDspChain` backend，由 host / output bridge 并列选择 legacy 或 UZUME。
-- 当前 CPU 过渡实现覆盖现有 `DspChain` 功能面：Headroom、EQ、IR/room correction、Channel Balance、Safety Limiter 与 clipping telemetry。
-- Host ready / position JSON、`NativeOutputBridge`、`AudioSession`、`AudioStatus`、Professional Status Panel 已透传 UZUME backend/profile/runtime/fallback/CUDA/cuFFT 信息；其中 `uzumeBackend` 表示当前真实播放处理 backend，`uzumeGpuCompiled` / `uzumeGpuAvailable` / `uzumeGpuCufftAvailable` 表示 CUDA/cuFFT 能力；只有实际播放 block 走过 CUDA prepared planar multichannel safety-limiter、CUDA safety-limiter 或 adjacent identity stereo matrix+limiter pairs 时才报告 `hybrid-gpu-limiter`，稳定简单 Channel Balance 矩阵（仅首个 stereo pair，额外声道保持原样，含已稳定的 mono mode 矩阵）也实际走过 CUDA 时才报告 `hybrid-gpu-matrix-limiter`，不会把可用 CUDA 误报成完整 GPU profile offload。
+- 当前操作分支是 `uzume-dspchain-replacement`，已设置 tracking `origin/main`；截至 2026-06-08 代码收口提交为 `3b4ff01`，文档反馈在其后单独追踪，PR 前以 `git status --short --branch` 再确认 clean / ahead 状态。
+- RPC-001 已剔除 `DspChain -> UzumeEngine` wrapper route：`DspChain.h/.cpp` 不再 include、持有或转发 `UzumeEngine`；后续仍应拆出 / 保留独立 `LegacyDspChain` backend，由 host / output bridge 并列选择 legacy 或 UZUME。
+- 当前 native PCM realtime skeleton 由 host 直接持有 `UzumeEngine`；它仍是 `transitional-processor-chain` / `uzume-skeleton-compat`，不是正式 fused macro-kernel，也不是 Poly-Sinc / Shared Convolution / SDM 完成状态。
+- 当前 UZUME UI 已替代旧 DSP 页面；未真正实现的 UZUME 子模块（Headroom、SRC、EQ、OPRA、FIR、Matrix、Safety 等）显示 `未实现`，不提供按钮、滑杆或开关。旧 Headroom / EQ / FIR / Matrix / Safety / ECHO-SOXR 状态只作为 legacy / compat readout。
+- Host ready / position JSON、`NativeOutputBridge`、`AudioSession`、`AudioStatus`、Signal Path、Professional Status Panel 已透传 UZUME backend/profile/runtime/fallback/CUDA/cuFFT 信息，并新增 `uzumeFormatPathPlan`：`pcm_bitperfect`、`pcm_processed`、`dsd_direct`、`dsd_upsampling`、`d2p_processed`、`sdm_processed` 均有 `state` 与 `reason`。其中 `uzumeBackend` 表示当前真实播放处理 backend，`uzumeGpuCompiled` / `uzumeGpuAvailable` / `uzumeGpuCufftAvailable` 表示 CUDA/cuFFT 能力；只有实际播放 block 走过 CUDA prepared planar multichannel safety-limiter、CUDA safety-limiter 或 adjacent identity stereo matrix+limiter pairs 时才报告 `hybrid-gpu-limiter`，稳定简单 Channel Balance 矩阵（仅首个 stereo pair，额外声道保持原样，含已稳定的 mono mode 矩阵）也实际走过 CUDA 时才报告 `hybrid-gpu-matrix-limiter`，不会把可用 CUDA 误报成完整 GPU profile offload。
 - `ECHO_UZUME_ENABLE_CUDA` 已作为默认关闭的 CMake / Node build opt-in。默认构建不要求 CUDA；开启后会编译独立 `echo-uzume-cuda-probe` static library，通过 nvcc、CUDA runtime、device probe、cuFFT plan/exec、cuFFT single-block FIR convolution primitive、prepared streaming cuFFT FIR convolution primitive、CUDA safety-limiter kernel、fused gain+limiter kernel、fused stereo matrix+limiter kernel 和不带 limiter 的 stereo matrix kernel 给 Phase 5 GPU Render-Ahead Gate 建立真实编译门。
 - 当前 GPU 过渡实现包含 probe / telemetry / fallback 基座、prepared planar multichannel CUDA safety-limiter playback offload、adjacent identity stereo matrix+limiter pair playback offload、稳定简单 Channel Balance 首个 stereo pair matrix playback offload、fused gain+limiter primitive、fused stereo matrix+limiter primitive、不带 limiter 的 stereo matrix primitive、cuFFT R2C/C2R roundtrip primitive，以及 cuFFT FIR primitives：single-block FIR convolution primitive 覆盖 host/device buffer 搬运、kernel launch、clipping risk 回传、cuFFT plan/exec、complex multiply、normalization 和 CPU reference 等价测试；prepared streaming cuFFT FIR convolution primitive 覆盖跨 process 调用 history、reset history、prepared capacity fallback 和两段 block CPU reference 等价测试。
 - safety-limiter / planar multichannel safety-limiter / fused gain+limiter / fused stereo matrix+limiter / stereo matrix 已使用 thread-local non-blocking CUDA stream、reusable scratch device buffers 和 reusable pinned host staging buffers，测试覆盖第二次调用复用 scratch / pinned capacity；UZUME playback path 已在 CUDA opt-in 且 backend 可用时优先用 prepare 阶段预分配的 CUDA planar limiter scratch 对真实输出 block 的全部已准备声道做一次 multichannel safety-limiter offload，process 阶段不会为 playback limiter 执行 GPU/pinned allocation；若 planar scratch 不可用、capacity 不足或 backend 不可用，则继续回退到 prepared CUDA stereo matrix+limiter scratch 对 adjacent stereo pairs 做 identity matrix+limiter offload，奇数剩余声道继续用 prepared CUDA safety-limiter scratch，最终仍可回退 CPU limiter；稳定简单 Channel Balance 在 enabled、至少 2ch、无 band compensation、无 delay、无平滑/切换过渡时会使用同一 prepared stereo matrix scratch 对首个 stereo pair 做不带 limiter 的等价矩阵 offload，额外声道保持原样，覆盖普通 stereo、SumToMono、LeftOnly、RightOnly 这些已经稳定且可表示为 2x2 线性矩阵的模式，process 阶段在 capacity 不足时只回退不分配；cuFFT FIR primitives 已使用 thread-local non-blocking CUDA stream、reusable scratch device buffers、reusable pinned host staging buffers 和 same-size cuFFT plan reuse，`UzumeEngine::prepare()` 会预热 max playback block 与 `roomCorrectionMaxTaps` 覆盖范围的 playback cuFFT FIR scratch 和 streaming cuFFT FIR scratch，process 阶段在 FFT capacity 不足时只回退不分配；新增 prepared streaming cuFFT FIR primitive 维护跨调用 host-side input history，可 reset history，并用 history-padded FFT window 输出当前 block 对应区间，为后续 FIR playback worker 做前置。这是后续 playback worker / memory pool 的最小前置形态，但还不是完整 profile 级 GPU offload。
@@ -2975,6 +2977,8 @@ npm run test:audio-engine
 $env:ECHO_UZUME_ENABLE_CUDA='ON'; npm run test:audio-engine
 npm run typecheck
 npx vitest run src/main/audio/AudioCore.test.ts
+npx vitest run src/renderer/pages/DspPage.test.tsx src/renderer/components/player/AudioProfessionalStatusPanel.test.tsx src/renderer/components/player/AudioSettingsDrawer.test.tsx src/renderer/components/player/PlayerBar.test.tsx src/renderer/components/audio/EqPanel.test.tsx src/main/audio/AudioCore.test.ts
+npm run build:win:unsigned
 nvcc --version
 ```
 
@@ -2984,6 +2988,8 @@ nvcc --version
 - CUDA opt-in audio-engine test 通过，证明 `.cu` probe / prepared safety-limiter playback offload / prepared planar multichannel safety-limiter playback offload / prepared adjacent identity stereo matrix+limiter pair playback offload / prepared stereo matrix playback scratch / prepared playback cuFFT FIR scratch / prepared streaming cuFFT FIR scratch+history / fused gain+limiter / fused stereo matrix+limiter / non-limiter stereo matrix / stable Channel Balance GPU playback matrix（首个 stereo pair，含 stable mono mode matrix，并保留额外声道）/ stream-backed scratch reuse / pinned host staging / cuFFT roundtrip / cuFFT convolution / cuFFT plan reuse 经 nvcc 编译并链接到测试目标；CUDA/cuFFT backend 可用时测试执行 GPU playback limiter、prepared planar multichannel playback limiter、adjacent identity stereo matrix+limiter playback limiter、stable Channel Balance playback matrix、stable mono Channel Balance playback matrix、prepared scratch reuse、prepared planar capacity fallback、prepared stereo matrix capacity fallback、prepared playback cuFFT FIR capacity fallback、prepared streaming cuFFT FIR cross-block history、streaming FIR history reset、engine-level streaming FIR prewarm/reset、streaming FIR capacity fallback、fused gain+limiter、fused stereo matrix+limiter、non-limiter stereo matrix、scratch reuse、pinned host staging、cuFFT roundtrip、cuFFT FIR primitive 和 same-size cuFFT plan reuse，backend 不可用时要求明确 fallback reason。
 - TypeScript typecheck 通过。
 - `AudioCore.test.ts` 305 个测试通过，覆盖 UZUME telemetry reset / ready metadata / live telemetry。
+- RPC-001 收口后，相关 renderer/main vitest 6 个文件、477 个测试通过，覆盖 DSP 页 `未实现` UI、Signal Path skeleton 文案、Professional Status、AudioSettingsDrawer 和 `uzumeFormatPathPlan` telemetry。
+- `npm run build:win:unsigned` 通过，刷新 `dist/ECHO-NEXT-Setup-26.6.7.exe`、`dist/ECHO-NEXT-Portable-26.6.7.exe` 和 `dist/win-unpacked/ECHO NEXT.exe`。
 - 构建中仍有 JUCE、Harfbuzz、CUDA SDK 头文件在 Windows code page 936 下的 C4819 warning；这是第三方头文件编码噪声，不来自本 PR 文档读写。
 
 ## 最终建议

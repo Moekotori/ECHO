@@ -10,6 +10,8 @@
 
 把 FIR EQ、耳机 FIR 校正、room IR、可兼容 long-tail response 统一到 Shared Convolution Engine。`ConvolutionProcessor` 只保留为 legacy / diagnostic / tiny-IR fallback。
 
+继承 RPC-001：当前 `ConvolutionProcessor` 只是 UZUME skeleton 的 legacy / transitional convolver source。RPC-004 必须用 Shared Convolution Engine 替换生产路径，不能把 RPC-001 的 transitional `ConvolutionProcessor` 状态继承为 production convolution。
+
 ## 非目标
 
 - 不要求 GPU offload。
@@ -70,6 +72,7 @@ Production path 使用 partitioned FFT convolution。8192 taps direct convolutio
 - gapless no-reset history 通过。
 - callback block size 改变不破坏 internal FFT plan 语义。
 - Signal Path 显示 block/FFT/tail plan。
+- status 中不再把 RPC-001 的 `legacy-convolution-processor` 当作 UZUME production path；如仍使用，只能标为 fallback / diagnostic。
 
 ## 必跑测试
 

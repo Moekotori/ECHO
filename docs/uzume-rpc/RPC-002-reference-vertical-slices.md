@@ -53,6 +53,12 @@ CompiledUzumePlan
 
 D2P / SDM 可以报告 unavailable，但必须有准确 reason。
 
+继承 RPC-001：
+
+- 继续使用 `uzumeFormatPathPlan` 作为六条 path 的状态 / reason contract。
+- RPC-002 必须把 RPC-001 skeleton 的 placeholder reason（例如 `source_is_pcm`、`sdm_engine_not_ready`）替换为 reference planner 可解释 reason，不能把 unavailable reason 当作实现完成。
+- tests 必须覆盖六条 path 的 state / reason，而不是只检查当前 active path。
+
 ### 3. PCM Reference DSP
 
 Reference 行为覆盖：
@@ -93,6 +99,7 @@ Reference 行为覆盖：
 - Signal Path 能解释每个 UI section 被分配到哪个 engine。
 - Headroom / Safety / Limiter telemetry 能分开显示。
 - Resampling artifact 至少覆盖 impulse、sweep、near-Nyquist、phase/group-delay。
+- `uzumeFormatPathPlan` 六条 path 的 reference reason 可被 snapshot / inspect report 稳定验证。
 
 ## 必跑测试
 

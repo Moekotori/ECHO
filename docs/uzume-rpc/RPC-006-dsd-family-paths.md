@@ -17,6 +17,8 @@
 
 它们必须在 UI、backend、telemetry 和 tests 中分开。
 
+继承 RPC-001：当前只提供六条 path 的 skeleton plan 与 unavailable / disabled reason。RPC-006 必须实现真实 DSD direct / DSD upsampling / D2P / SDM planner，不能把 `source_is_pcm`、`sdm_engine_not_ready` 等 placeholder reason 当成 DSD family 完成。
+
 ## 非目标
 
 - 不默认开启 DSD1024。
@@ -65,6 +67,7 @@
 - D2P 和 SDM processed 的 internal domain / output container 不混淆。
 - Signal Path 能解释 DSD direct disabled reason。
 - SDM unavailable / experimental 状态诚实显示。
+- RPC-001 的 skeleton unavailable reason 已被真实 DSD family planner reason 替换，并且 UI 不展示未实现的可操作 DSD 子控件。
 
 ## 必跑测试
 

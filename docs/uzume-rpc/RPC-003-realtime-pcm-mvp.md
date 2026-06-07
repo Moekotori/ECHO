@@ -90,13 +90,15 @@ callback 中禁止：
 - safety meter state
 - limiter gain reduction
 
+RPC-003 是首个允许移除 RPC-001 skeleton 文案的 gate。只有在受控开关下真实 PCM realtime macro-kernel 生效、reference parity 通过、legacy fallback reason 清晰时，Signal Path / Professional Status 才能把 `UZUME skeleton`、`transitional-processor-chain`、`uzume-skeleton-compat` 改成正式 PCM runtime 文案。
+
 ## 验收
 
 - 在开关下可替代 legacy `DspChain` 的 PCM processed path。
 - CPU reference vs realtime output 通过误差门槛。
 - Headroom-only、EQ-only、crossfeed-only、channel-only、SRC-only 均可作为独立 profile section 生效。
 - bit-perfect bypass 不改变样本。
-- Signal Path 不再显示 transitional processor chain。
+- Signal Path 不再显示 transitional processor chain；这条变更只能由 RPC-003 的真实 PCM MVP 完成，不能由 RPC-001 / RPC-002 的 skeleton 或 reference planner 提前改名。
 - Phase 3 不依赖 CUDA。
 
 ## 必跑测试

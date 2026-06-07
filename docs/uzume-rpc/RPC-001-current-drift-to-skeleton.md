@@ -16,6 +16,9 @@
 - 已移除 `DspChain -> UzumeEngine` wrapper route：`DspChain.h/.cpp` 不再 include、持有或转发 `UzumeEngine`。
 - 已推进 skeleton status：`UzumeEngine` 使用 `uzume-skeleton-compat`，按 active state 暴露 `transitional-processor-chain` / `identity-bypass`，并透出 `formatPath`、`bitPerfectState`、`directDisabledReason`、`headroomActive`、`transitionalConvolutionPath`、`fusedMacroKernel=false`、`bypassReason`。
 - 已修正 headroom-only：`DspHeadroomProcessor::isEnabled()` 会激活 UZUME processed path；旧的 headroom bypass 断言已替换为 `testDspHeadroomActivatesUzumeProcessedPath`。
+- 2026-06-08：`5badcd6` 将 UZUME DSP 页替代旧 DSP 模块 UI，未真正实现的子模块全部显示 `未实现`，只保留 legacy / compat readout。
+- 2026-06-08：`3b4ff01` 增加 `uzumeFormatPathPlan`，六条 path 均透出 state/reason，并把 Signal Path / Professional Status 文案收紧为 `UZUME skeleton` / transitional compatibility。
+- 代码收口提交：`3b4ff01`；文档反馈在其后单独追踪，PR 前以 `git status --short --branch` 再确认 clean / ahead 状态。
 
 ## 当前偏移
 
@@ -29,7 +32,7 @@
 | `DspChain` 反向包住 `UzumeEngine` | 当前 `DspChain.h` include `UzumeEngine.h`，并以成员 `UzumeEngine uzumeEngine` 转发 prepare / process / status | 这条路线必须剔除；DspChain 只能成为 legacy backend 或被 `LegacyDspChain` 取代，不能作为 UZUME wrapper |
 | telemetry 过早像最终 UZUME | 当前 profile 类似 `legacy-dsp-compat`，backend/status 主要表达 CUDA/cuFFT 能力 | 增加 skeleton 所需的 formatPath、runtimeModel、transitional flags、disabled reason；避免误报完整 UZUME profile |
 | phase 与当前 PR 状态混在一起 | 文档已改为 Phase Exit Gates，但代码仍是过渡实现 | 当前 PR 只应落在 RPC-001 的 drift closure / skeleton 范围 |
-| 上游已前进，本地工作区有重叠改动 | 2026-06-08 已 `git fetch origin`，`origin/main` 更新到 `ee751ed`；`uzume-dspchain-replacement` 已设置 tracking `origin/main`，当前 behind 12；dry-run merge tree 可生成，但本地 dirty files 与上游有重叠 | RPC-001 必须先完成 upstream conflict closure，再修改 headroom / skeleton 行为 |
+| 上游已前进，本地工作区有重叠改动 | 已创建 safepoint 并 merge `origin/main`；代码收口提交为 `3b4ff01` | 已完成 upstream conflict closure；后续 PR 提交前只需常规 rebase/merge 检查 |
 | 本地 multi-stage UZUME PR 需要纳入评估 | 当前本地未发现独立 `uzume` ref，multi-stage 内容表现为当前 dirty working tree / staged additions | 可以吸收 CUDA probe、telemetry、tests 等资产；依赖 `DspChain -> UzumeEngine` 的 route 必须改造或丢弃 |
 
 ## 目标
@@ -59,29 +62,22 @@
 
 RPC-001 的第一步是同步上游并关闭冲突风险。目标不是盲目 `git pull`，而是在当前大量本地改动存在时，先保护本地状态，再把上游变化纳入可评审基线。
 
-当前已知状态：
+已执行并收口的状态：
 
 ```text
 current branch: uzume-dspchain-replacement
 upstream: origin/main
 fetched upstream head: ee751ed
-dry-run merge-tree: can produce merged tree
-dirty overlap files:
-  native/audio-engine/DspChain.cpp
-  native/audio-engine/DspChain.h
-  native/audio-host/tests/audio_engine_tests.cpp
-  src/main/audio/AudioCore.test.ts
-  src/renderer/components/player/AudioProfessionalStatusPanel.tsx
-  src/renderer/i18n/locales.ts
-  src/shared/types/library.ts
+integration merge: 8e54b0d
+code closure head: 3b4ff01
+post-doc status: run git status --short --branch before PR
 ```
 
 Dirty files 说明：
 
-- 这些文件是 `uzume-dspchain-replacement` 当前工作区上的未提交改动。
-- 它们不是 `git fetch` 或失败的 `git pull --ff-only` 产生的；pull 已被 Git 拒绝并中止，没有写入工作区。
-- 从内容看，它们主要来自本地 multi-stage UZUME PR / 当前文档规划工作。
-- 因为当前分支 tracking `origin/main` 且 behind 12，后续必须先做 safepoint / integration merge，再继续实现 RPC-001。
+- 早期 dirty overlap 已通过 safepoint、integration merge 和后续 commits 收口。
+- 当前 RPC-001 评审基线不再依赖未提交 multi-stage UZUME 改动。
+- 后续只需在 PR 前重新检查 `git status --short --branch` 与 upstream 差异，避免新的未跟踪生成物进入提交。
 
 Required procedure:
 
@@ -182,6 +178,7 @@ Runtime status 至少报告：
 - `formatPath.path`
 - `formatPath.bitPerfectState`
 - `formatPath.directDisabledReason`
+- `uzumeFormatPathPlan`：`pcm_bitperfect`、`pcm_processed`、`dsd_direct`、`dsd_upsampling`、`d2p_processed`、`sdm_processed` 均提供 `state` 与 `reason`
 - `runtimeModel`
 - `profileName`
 - `headroomActive`
@@ -231,6 +228,8 @@ UI gating 必须覆盖：
 - `pcm_bitperfect` 禁用 headroom/EQ/FIR/channel/limiter。
 - `pcm_processed` 允许当前 transitional chain section。
 
+当前 RPC-001 UI 落地比原始 thin UI 更严格：`pcm_processed` 可以解释当前 transitional compatibility path，但未真正实现的 UZUME 子模块不得出现可操作开关、滑杆或错误状态，只能显示 `未实现` 与必要的 legacy / compat readout。真正启用会改样本的功能时，后续 RPC 必须通过 profile / formatPath compiler 退出 bit-perfect、DSD direct 或 DSD upsampling 的不兼容路径。
+
 ## 验收
 
 RPC-001 完成时必须满足：
@@ -243,6 +242,8 @@ RPC-001 完成时必须满足：
 - `UzumeEngine` status 不再暗示已完成 fused macro-kernel。
 - `ConvolutionProcessor` 在 status 中标记为 transitional / legacy path。
 - Signal Path 能显示当前 formatPath、runtimeModel、profile、disabled reason。
+- `uzumeFormatPathPlan` 覆盖六条 path，且每条都有 `state` / `reason`；D2P / SDM / DSD unavailable reason 不得被当作实现完成。
+- DSP 页面由 UZUME 工作台替代旧 DSP 页面；未实现子模块显示 `未实现`，不保留假开关或空功能错误指示。
 - 当前测试不再断言 “headroom only applies to active DSP” 这种与目标设计冲突的行为。
 
 ## 必跑测试
@@ -251,8 +252,10 @@ RPC-001 完成时必须满足：
 git fetch origin
 git merge-tree --write-tree HEAD origin/main
 npm run test:audio-engine
-npx vitest run src/main/audio/AudioCore.test.ts
 npm run typecheck
+npx eslint src/renderer/pages/DspPage.tsx src/renderer/components/player/AudioProfessionalStatusPanel.tsx src/renderer/components/player/AudioSettingsDrawer.tsx src/renderer/components/player/PlayerBar.tsx src/main/audio/AudioCore.ts src/shared/types/library.ts
+npx vitest run src/renderer/pages/DspPage.test.tsx src/renderer/components/player/AudioProfessionalStatusPanel.test.tsx src/renderer/components/player/AudioSettingsDrawer.test.tsx src/renderer/components/player/PlayerBar.test.tsx src/renderer/components/audio/EqPanel.test.tsx src/main/audio/AudioCore.test.ts
+npm run build:win:unsigned
 ```
 
 CUDA opt-in 测试如果本机具备 CUDA SDK，则作为附加检查，不作为 RPC-001 阻塞项。
