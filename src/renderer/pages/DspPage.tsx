@@ -156,25 +156,36 @@ const dspLocalText: Record<string, string> = {
   'dsp.capability.state.unavailable': '不可用',
   'dsp.capability.stripTitle': 'RPC-001 能力面',
   'dsp.capability.stripDetail': '已完成的 section 可用；未完成的 UZUME 能力以禁用控件保留，不藏进设置开关。',
-  'dsp.module.src.description': 'PCM rate plan',
+  'dsp.module.src.description': 'Poly-Sinc 未实现',
   'dsp.module.src.title': 'UZUME SRC / PCM',
-  'dsp.panel.src.abBypass': 'A/B 原生',
-  'dsp.panel.src.abRestore': '恢复升频',
-  'dsp.panel.src.active': '正在升频',
+  'dsp.panel.src.active': 'ECHO/SOXR 兼容升频',
   'dsp.panel.src.bypassDsd': 'DSD 输出旁路',
   'dsp.panel.src.bypassShared': '共享输出旁路',
-  'dsp.panel.src.detail': 'UZUME UI 现在承接 PCM rate plan；RPC-001 仍使用 ECHO/SOXR 兼容 SRC，开启后会进入 UZUME processed path 并不再标记 bit-perfect。',
+  'dsp.panel.src.compatDetail': 'SOXR 仍是旧链路，不在这里伪装成 UZUME profile。现有 ECHO/SOXR 设置只作为状态读数显示。',
+  'dsp.panel.src.compatModeConfigured': '已保存兼容设置',
+  'dsp.panel.src.compatModeOff': '兼容 SRC 关闭',
+  'dsp.panel.src.compatPath': '兼容路径',
+  'dsp.panel.src.compatSettings': 'ECHO/SOXR 设置',
+  'dsp.panel.src.compatTitle': '当前可用的是 ECHO/SOXR 兼容路径',
+  'dsp.panel.src.detail': 'RPC-001 只展示 PCM rate plan 和 disabled reason；正式 UZUME Poly-Sinc SRC 尚未接入。',
   'dsp.panel.src.engine': '引擎',
   'dsp.panel.src.kicker': '采样率转换',
+  'dsp.panel.src.legacyPrecision': '兼容精度',
   'dsp.panel.src.mode': '模式',
   'dsp.panel.src.native': '原生直通',
-  'dsp.panel.src.note': '只处理 PCM。共享输出、DSD 输出或 HQPlayer 接管时不会叠加升频。',
+  'dsp.panel.src.note': '这里只显示状态，不提供 UZUME SRC 开关。共享输出、DSD 输出或 HQPlayer 接管时，ECHO/SOXR 兼容 SRC 也会旁路。',
   'dsp.panel.src.pending': '等待下一次播放规划',
+  'dsp.panel.src.plannedProfiles': '规划中的 UZUME SRC profile',
   'dsp.panel.src.precision': '精度',
+  'dsp.panel.src.profileUnavailable': '待实现',
   'dsp.panel.src.quality': '质量策略',
   'dsp.panel.src.route': '路径',
   'dsp.panel.src.sourceRate': '源采样率',
   'dsp.panel.src.targetRate': '目标采样率',
+  'dsp.panel.src.unavailable': '未实现',
+  'dsp.panel.src.unavailableDetail': 'Poly-Sinc planner / kernel 完成前，这些倍率不能作为 UZUME 控件启用。',
+  'dsp.panel.src.unavailableTitle': 'UZUME Poly-Sinc SRC 未实现',
+  'dsp.panel.src.uzumeStatus': 'UZUME SRC',
   'dsp.stage.src': '采样率',
   'dsp.error.channelBridge': '声道工具不可用。',
   'dsp.error.desktopBridge': '桌面桥接不可用。',
@@ -389,6 +400,7 @@ const dspLocalText: Record<string, string> = {
   'dsp.status.bypassed': '已旁路',
   'dsp.status.candidate': '候选',
   'dsp.status.clear': '正常',
+  'dsp.status.compatPath': '兼容路径',
   'dsp.status.direct': '直通',
   'dsp.status.disabledByDsp': 'UZUME 路径',
   'dsp.status.dspPath': 'UZUME 路径',
@@ -408,6 +420,7 @@ const dspLocalText: Record<string, string> = {
   'dsp.status.signalProtected': '信号安全',
   'dsp.status.stereoDirect': '立体声直通',
   'dsp.status.systemOutput': '系统输出',
+  'dsp.status.unimplemented': '未实现',
 };
 
 type DspTranslate = (key: string, options?: Parameters<ReturnType<typeof useI18n>['t']>[1]) => string;
@@ -645,11 +658,7 @@ type ModulePanelProps = {
   channelBalance: ChannelBalanceState;
   echoSrcMode: AudioEchoSrcMode;
   echoSrcQualityProfile: AudioEchoSrcQualityProfile;
-  echoSrcCompareReturnMode: AudioEchoSrcMode | null;
   busyKey: string | null;
-  onEchoSrcModeChange: (mode: AudioEchoSrcMode) => void;
-  onEchoSrcQualityProfileChange: (profile: AudioEchoSrcQualityProfile) => void;
-  onEchoSrcCompareToggle: () => void;
   onHeadroomChange: (headroomDb: number) => void;
   onSafetyLimiterChange: (enabled: boolean) => void;
   onImportRoomCorrection: () => void;
@@ -735,98 +744,88 @@ const EchoSrcPanel = ({
   audioStatus,
   echoSrcMode,
   echoSrcQualityProfile,
-  echoSrcCompareReturnMode,
-  busyKey,
-  onEchoSrcModeChange,
-  onEchoSrcQualityProfileChange,
-  onEchoSrcCompareToggle,
-  onRefresh,
 }: ModulePanelProps): JSX.Element => {
   const { t } = useDspI18n();
   const warnings = audioStatus?.warnings ?? [];
   const active = audioStatus?.echoSrcActive === true;
+  const compatConfigured = echoSrcMode !== 'off';
   const effectiveQualityProfile = normalizeEchoSrcQualityProfile(audioStatus?.echoSrcQualityProfile ?? echoSrcQualityProfile);
   const qualityOption = echoSrcQualityOptions.find((option) => option.profile === effectiveQualityProfile) ?? echoSrcQualityOptions[0];
   const modeOption = echoSrcModeOptions.find((option) => option.mode === echoSrcMode) ?? echoSrcModeOptions[0];
-  const sharedBypass = echoSrcMode !== 'off' && (audioStatus?.outputMode === 'shared' || warnings.includes('echo_src_bypassed_in_shared_output'));
+  const sharedBypass = compatConfigured && (audioStatus?.outputMode === 'shared' || warnings.includes('echo_src_bypassed_in_shared_output'));
   const dsdBypass =
-    echoSrcMode !== 'off' &&
+    compatConfigured &&
     (warnings.includes('echo_src_bypassed_for_dsd_direct') || warnings.includes('echo_src_bypassed_for_dsd_pcm'));
   const routeKey: string =
     active ? 'dsp.panel.src.active' :
     sharedBypass ? 'dsp.panel.src.bypassShared' :
     dsdBypass ? 'dsp.panel.src.bypassDsd' :
-    echoSrcMode === 'off' ? 'dsp.panel.src.native' :
+    !compatConfigured ? 'dsp.panel.src.compatModeOff' :
     'dsp.panel.src.pending';
-  const routeTone: HeadroomTone | undefined = active ? 'good' : sharedBypass || dsdBypass ? 'warn' : undefined;
+  const routeTone: HeadroomTone | undefined = active || sharedBypass || dsdBypass || compatConfigured ? 'warn' : undefined;
   const sourceRate = audioStatus?.fileSampleRate ?? null;
   const targetRate = active ? audioStatus?.echoSrcTargetSampleRate : null;
-  const busy = busyKey === 'src';
-  const compareDisabled = busy || (echoSrcMode === 'off' && !echoSrcCompareReturnMode);
+  const plannedProfiles = echoSrcModeOptions.filter((option) => option.mode !== 'off');
+  const compatModeLabel = compatConfigured ? modeOption.title : t('dsp.panel.src.compatModeOff');
+  const compatModeDetail = compatConfigured ? t('dsp.panel.src.compatModeConfigured') : t('dsp.panel.src.native');
+  const compatQualityLabel = compatConfigured || active ? qualityOption.title : '--';
+  const compatPrecisionLabel = compatConfigured || active ? qualityOption.precision : '--';
 
   return (
     <section className="dsp-module-panel dsp-module-panel--src">
       <p className="dsp-module-kicker">{t('dsp.panel.src.kicker')}</p>
       <div className="dsp-module-heading">
         <span><RadioTower size={18} />{t('dsp.module.src.title')}</span>
-        <strong>{echoSrcMode === 'off' ? 'Off' : modeOption.title}</strong>
+        <strong>{t('dsp.panel.src.unavailable')}</strong>
       </div>
       <p className="dsp-module-note">{t('dsp.panel.src.detail')}</p>
 
       <div className="dsp-module-metrics">
-        <DspMetric label={t('dsp.panel.src.route')} value={t(routeKey)} tone={routeTone} />
+        <DspMetric label={t('dsp.panel.src.uzumeStatus')} value={t('dsp.panel.src.unavailable')} tone="warn" />
+        <DspMetric label={t('dsp.panel.src.compatPath')} value={t(routeKey)} tone={routeTone} />
         <DspMetric label={t('dsp.panel.src.sourceRate')} value={formatRate(sourceRate, '--')} />
         <DspMetric label={t('dsp.panel.src.targetRate')} value={formatRate(targetRate, '--')} tone={active ? 'good' : undefined} />
-        <DspMetric label={t('dsp.panel.src.engine')} value={active ? 'SOXR' : '--'} tone={active ? 'good' : undefined} />
-        <DspMetric label={t('dsp.panel.src.quality')} value={qualityOption.title} tone={active ? 'good' : undefined} />
-        <DspMetric label={t('dsp.panel.src.precision')} value={active ? qualityOption.precision.replace('SOXR ', '') : qualityOption.precision} />
+        <DspMetric label={t('dsp.panel.src.engine')} value={compatConfigured || active ? 'ECHO/SOXR' : '--'} tone={active ? 'warn' : undefined} />
+        <DspMetric label={t('dsp.panel.src.legacyPrecision')} value={compatPrecisionLabel} />
       </div>
 
-      <div className="dsp-module-actions" role="group" aria-label={t('dsp.panel.src.mode')}>
-        {echoSrcModeOptions.map((option) => (
+      <div className="dsp-src-unavailable" role="status">
+        <span className="dsp-src-unavailable__icon">
+          <ShieldCheck size={17} aria-hidden="true" />
+        </span>
+        <span className="dsp-src-unavailable__copy">
+          <strong>{t('dsp.panel.src.unavailableTitle')}</strong>
+          <small>{t('dsp.panel.src.unavailableDetail')}</small>
+        </span>
+      </div>
+
+      <div className="dsp-src-planned" role="group" aria-label={t('dsp.panel.src.plannedProfiles')}>
+        {plannedProfiles.map((option) => (
           <button
             type="button"
-            data-active={echoSrcMode === option.mode}
-            disabled={busy}
+            disabled
             key={option.mode}
-            onClick={() => onEchoSrcModeChange(option.mode)}
           >
             <RadioTower size={14} aria-hidden="true" />
-            {option.title}
-          </button>
-        ))}
-        <button type="button" disabled={busy} onClick={onRefresh}>
-          <Activity size={14} aria-hidden="true" />
-          {t('dsp.action.refresh')}
-        </button>
-        <button type="button" data-active={echoSrcMode === 'off' && Boolean(echoSrcCompareReturnMode)} disabled={compareDisabled} onClick={onEchoSrcCompareToggle}>
-          <RotateCcw size={14} aria-hidden="true" />
-          {echoSrcMode === 'off' ? t('dsp.panel.src.abRestore') : t('dsp.panel.src.abBypass')}
-        </button>
-      </div>
-
-      <div className="dsp-module-actions" role="group" aria-label={t('dsp.panel.src.quality')}>
-        {echoSrcQualityOptions.map((option) => (
-          <button
-            type="button"
-            data-active={effectiveQualityProfile === option.profile}
-            disabled={busy}
-            key={option.profile}
-            onClick={() => onEchoSrcQualityProfileChange(option.profile)}
-          >
-            <ShieldCheck size={14} aria-hidden="true" />
-            {option.title}
+            <span>
+              <strong>{option.title}</strong>
+              <small>{t('dsp.panel.src.profileUnavailable')}</small>
+            </span>
           </button>
         ))}
       </div>
 
-      <div className="dsp-module-grid">
-        {echoSrcQualityOptions.map((option) => (
-          <label key={option.profile}>
-            <span>{option.title}</span>
-            <input readOnly value={`${option.detail} / ${option.precision}`} />
-          </label>
-        ))}
+      <div className="dsp-src-readouts" aria-label={t('dsp.panel.src.compatTitle')}>
+        <article>
+          <span>{t('dsp.panel.src.compatSettings')}</span>
+          <strong>{compatModeLabel}</strong>
+          <small>{compatModeDetail}</small>
+        </article>
+        <article>
+          <span>{t('dsp.panel.src.quality')}</span>
+          <strong>{compatQualityLabel}</strong>
+          <small>{t('dsp.panel.src.compatDetail')}</small>
+        </article>
       </div>
 
       <p className="dsp-module-note">{t('dsp.panel.src.note')}</p>
@@ -1878,7 +1877,6 @@ export const DspPage = (): JSX.Element => {
   const [channelBalance, setChannelBalance] = useState<ChannelBalanceState>(fallbackChannelBalance);
   const [echoSrcMode, setEchoSrcMode] = useState<AudioEchoSrcMode>('off');
   const [echoSrcQualityProfile, setEchoSrcQualityProfile] = useState<AudioEchoSrcQualityProfile>('transparent');
-  const [echoSrcCompareReturnMode, setEchoSrcCompareReturnMode] = useState<AudioEchoSrcMode | null>(null);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
@@ -1912,11 +1910,7 @@ export const DspPage = (): JSX.Element => {
     let cancelled = false;
     const applyEchoSrcSetting = (mode: unknown): void => {
       if (!cancelled) {
-        const nextMode = normalizeEchoSrcMode(mode);
-        setEchoSrcMode(nextMode);
-        if (nextMode !== 'off') {
-          setEchoSrcCompareReturnMode(nextMode);
-        }
+        setEchoSrcMode(normalizeEchoSrcMode(mode));
       }
     };
     const applyEchoSrcQualitySetting = (profile: unknown): void => {
@@ -1961,72 +1955,6 @@ export const DspPage = (): JSX.Element => {
       setBusyKey(null);
     }
   }, []);
-
-  const handleEchoSrcModeChange = useCallback(
-    (mode: AudioEchoSrcMode): void => {
-      const app = window.echo?.app;
-      const audio = window.echo?.audio;
-      if (!app?.setSettings || !audio?.setOutput) {
-        setModuleError(t('dsp.error.desktopBridge'));
-        return;
-      }
-
-      const previousMode = echoSrcMode;
-      if (mode !== 'off') {
-        setEchoSrcCompareReturnMode(mode);
-      }
-      setEchoSrcMode(mode);
-      void runModuleAction('src', async () => {
-        try {
-          const nextSettings = await app.setSettings({ audioEchoSrcMode: mode });
-          window.dispatchEvent(new CustomEvent('settings:changed', { detail: nextSettings }));
-          await audio.setOutput({ echoSrcMode: mode });
-        } catch (actionError) {
-          setEchoSrcMode(previousMode);
-          throw actionError;
-        }
-      });
-    },
-    [echoSrcMode, runModuleAction, t],
-  );
-
-  const handleEchoSrcCompareToggle = useCallback((): void => {
-    if (echoSrcMode !== 'off') {
-      setEchoSrcCompareReturnMode(echoSrcMode);
-      handleEchoSrcModeChange('off');
-      return;
-    }
-
-    const restoreMode = normalizeEchoSrcMode(echoSrcCompareReturnMode);
-    if (restoreMode !== 'off') {
-      handleEchoSrcModeChange(restoreMode);
-    }
-  }, [echoSrcCompareReturnMode, echoSrcMode, handleEchoSrcModeChange]);
-
-  const handleEchoSrcQualityProfileChange = useCallback(
-    (profile: AudioEchoSrcQualityProfile): void => {
-      const app = window.echo?.app;
-      const audio = window.echo?.audio;
-      if (!app?.setSettings || !audio?.setOutput) {
-        setModuleError(t('dsp.error.desktopBridge'));
-        return;
-      }
-
-      const previousProfile = echoSrcQualityProfile;
-      setEchoSrcQualityProfile(profile);
-      void runModuleAction('src', async () => {
-        try {
-          const nextSettings = await app.setSettings({ audioEchoSrcQualityProfile: profile });
-          window.dispatchEvent(new CustomEvent('settings:changed', { detail: nextSettings }));
-          await audio.setOutput({ echoSrcQualityProfile: profile });
-        } catch (actionError) {
-          setEchoSrcQualityProfile(previousProfile);
-          throw actionError;
-        }
-      });
-    },
-    [echoSrcQualityProfile, runModuleAction, t],
-  );
 
   const handleHeadroomChange = useCallback(
     (headroomDb: number): void => {
@@ -2182,12 +2110,9 @@ export const DspPage = (): JSX.Element => {
   const sampleRate = audioStatus?.actualDeviceSampleRate ?? audioStatus?.requestedOutputSampleRate ?? audioStatus?.fileSampleRate ?? null;
   const echoSrcActive = audioStatus?.echoSrcActive === true;
   const echoSrcEnabled = echoSrcMode !== 'off' || echoSrcActive;
-  const echoSrcModeOption = echoSrcModeOptions.find((option) => option.mode === echoSrcMode) ?? echoSrcModeOptions[0];
   const echoSrcSubtitle = echoSrcActive
-    ? formatRate(audioStatus?.echoSrcTargetSampleRate, t('dsp.status.auto'))
-    : echoSrcMode !== 'off'
-      ? echoSrcModeOption.title
-      : t('dsp.status.bypassed');
+    ? t('dsp.status.compatPath')
+    : t('dsp.status.unimplemented');
 
   const modules = useMemo<DspModule[]>(
     () => [
@@ -2208,8 +2133,8 @@ export const DspPage = (): JSX.Element => {
         subtitle: echoSrcSubtitle,
         description: t('dsp.module.src.description'),
         icon: RadioTower,
-        enabled: echoSrcEnabled,
-        accent: echoSrcActive ? 'green' : 'blue',
+        enabled: false,
+        accent: echoSrcEnabled ? 'amber' : 'blue',
       },
       {
         id: 'eq',
@@ -2262,7 +2187,7 @@ export const DspPage = (): JSX.Element => {
         accent: !safetyLimiterEnabled || audioStatus?.dspLimiterProtecting === true || clippingRisk || headroomWarning ? 'amber' : 'green',
       },
     ],
-    [activeEqPresetName, audioStatus?.dspLimiterProtecting, channelBalanceEnabled, clippingRisk, dspActive, dspHeadroomDb, echoSrcActive, echoSrcEnabled, echoSrcSubtitle, eqEnabled, eqState.presetName, headroomWarning, headphoneCorrectionActive, roomCorrection.enabled, roomCorrection.irName, safetyLimiterEnabled, t],
+    [activeEqPresetName, audioStatus?.dspLimiterProtecting, channelBalanceEnabled, clippingRisk, dspActive, dspHeadroomDb, echoSrcEnabled, echoSrcSubtitle, eqEnabled, eqState.presetName, headroomWarning, headphoneCorrectionActive, roomCorrection.enabled, roomCorrection.irName, safetyLimiterEnabled, t],
   );
 
   const activeCount = modules.filter((module) => module.enabled).length;
@@ -2271,7 +2196,7 @@ export const DspPage = (): JSX.Element => {
   const pipelineNodes = modules.map((module) => ({
     id: module.id,
     label: t(module.stageKey),
-    value: module.enabled ? module.subtitle : t('dsp.status.bypassed'),
+    value: module.id === 'src' ? module.subtitle : module.enabled ? module.subtitle : t('dsp.status.bypassed'),
     enabled: module.enabled,
     selected: module.id === selectedModuleId,
     risk: module.id === 'safety' && clippingRisk,
@@ -2334,11 +2259,7 @@ export const DspPage = (): JSX.Element => {
     channelBalance,
     echoSrcMode,
     echoSrcQualityProfile,
-    echoSrcCompareReturnMode,
     busyKey,
-    onEchoSrcModeChange: handleEchoSrcModeChange,
-    onEchoSrcQualityProfileChange: handleEchoSrcQualityProfileChange,
-    onEchoSrcCompareToggle: handleEchoSrcCompareToggle,
     onHeadroomChange: handleHeadroomChange,
     onSafetyLimiterChange: handleSafetyLimiterChange,
     onImportRoomCorrection: handleImportRoomCorrection,
@@ -2387,6 +2308,7 @@ export const DspPage = (): JSX.Element => {
                     type="button"
                     className="dsp-chain-item"
                     data-active={module.enabled}
+                    data-state={module.id === 'src' ? 'planned' : module.enabled ? 'active' : 'bypassed'}
                     data-selected={isSelected}
                     data-accent={module.accent}
                     onClick={() => setSelectedModuleId(module.id)}
@@ -2449,7 +2371,7 @@ export const DspPage = (): JSX.Element => {
             </span>
             <span>
               <em>{t('dsp.label.moduleStatus')}</em>
-              <strong>{selectedModule.enabled ? t('dsp.status.active') : t('dsp.status.bypassed')}</strong>
+              <strong>{selectedModule.id === 'src' ? t('dsp.status.unimplemented') : selectedModule.enabled ? t('dsp.status.active') : t('dsp.status.bypassed')}</strong>
             </span>
             <span>
               <em>{t('dsp.label.bitPerfect')}</em>
