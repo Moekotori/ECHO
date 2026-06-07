@@ -1,12 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AudioWaveform, CheckCircle2, Clock3, FileAudio, Gauge, Headphones, Info, Pencil, RadioTower, RotateCcw, Route, Save, ShieldCheck, SlidersHorizontal, Trash2, Waves, Zap } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Activity, AudioWaveform, CheckCircle2, Gauge, Headphones, Info, RadioTower, Route, ShieldCheck, SlidersHorizontal, Waves, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { AudioEchoSrcMode, AudioEchoSrcQualityProfile, AudioStatus, ChannelBalanceBandId, ChannelBalanceMonoMode, ChannelBalanceState } from '../../shared/types/audio';
+import type { AudioEchoSrcMode, AudioEchoSrcQualityProfile, AudioStatus, ChannelBalanceMonoMode, ChannelBalanceState } from '../../shared/types/audio';
 import type { EqState, RoomCorrectionState } from '../../shared/types/eq';
-import { channelBalanceBandIds, channelBalanceBandMaxGainDb, channelBalanceBandMinGainDb, channelBalanceMaxDelayMs, channelBalanceMaxGainDb, channelBalanceMinDelayMs, channelBalanceMinGainDb } from '../../shared/types/audio';
-import { dspHeadroomMaxDb, dspHeadroomMinDb, roomCorrectionMaxTrimDb, roomCorrectionMinTrimDb } from '../../shared/types/eq';
-import { EqPanel } from '../components/audio/EqPanel';
-import { HeadphoneCorrectionPanel } from '../components/audio/HeadphoneCorrectionPanel';
 import { useI18n } from '../i18n/I18nProvider';
 import type { TranslationKey } from '../i18n/locales';
 import { refreshPlaybackStatus, useSharedPlaybackStatus } from '../stores/playbackStatusStore';
@@ -81,29 +77,6 @@ const monoModeKeyMap: Record<ChannelBalanceMonoMode, string> = {
   right: 'dsp.panel.channel.mono.right',
 };
 
-const channelTrimSteps = [0.25, 0.5, 1] as const;
-const electrostaticTrimSteps = [0.1, 0.25] as const;
-const channelPresetStorageKey = 'echo:dsp-channel-presets:v1';
-const maxChannelPresetCount = 6;
-const defaultBandGains: NonNullable<ChannelBalanceState['bandGains']> = {
-  low: { leftGainDb: 0, rightGainDb: 0 },
-  mid: { leftGainDb: 0, rightGainDb: 0 },
-  high: { leftGainDb: 0, rightGainDb: 0 },
-};
-const channelBandLabels: Record<ChannelBalanceBandId, { titleKey: string; range: string }> = {
-  low: { titleKey: 'dsp.panel.channel.bandLow', range: '20-200 Hz' },
-  mid: { titleKey: 'dsp.panel.channel.bandMid', range: '200 Hz-2 kHz' },
-  high: { titleKey: 'dsp.panel.channel.bandHigh', range: '2 kHz-10 kHz' },
-};
-type ChannelPanelMode = 'simple' | 'pro';
-
-type ChannelBalancePreset = {
-  id: string;
-  name: string;
-  state: ChannelBalanceState;
-  createdAt: string;
-};
-
 const echoSrcModeOptions: Array<{ mode: AudioEchoSrcMode; title: string; detail: string }> = [
   { mode: 'off', title: '关闭', detail: '保持源采样率，Bit-perfect 条件不受 SRC 影响。' },
   { mode: 'family2x', title: '2x PCM', detail: '44.1k 家族升到 88.2k，48k 家族升到 96k。' },
@@ -146,20 +119,20 @@ const dspLocalText: Record<string, string> = {
   'dsp.capability.dsd.title': 'DSD family',
   'dsp.capability.fused.detail': 'RPC-001 仍是 skeleton / transitional path，不能声明完整 fused macro-kernel。',
   'dsp.capability.fused.title': 'Fused macro-kernel',
-  'dsp.capability.gpu.detail': '当前只暴露 limiter / matrix / FIR scratch 片段，完整 profile offload 未开放。',
+  'dsp.capability.gpu.detail': 'GPU limiter / matrix / FIR scratch 目前只作为遥测字段，不作为 UZUME 可用能力。',
   'dsp.capability.gpu.title': 'GPU render-ahead',
-  'dsp.capability.headroom.detail': 'Headroom 已能激活 UZUME processed path。',
+  'dsp.capability.headroom.detail': '当前 Headroom 仍通过 legacy/compat DSP 参数工作，UZUME Headroom kernel 未实现。',
   'dsp.capability.headroom.title': 'Headroom section',
   'dsp.capability.polySinc.detail': '当前 PCM SRC 仍来自 ECHO/SOXR 兼容路径，UZUME Poly-Sinc 尚未落地。',
   'dsp.capability.polySinc.title': 'UZUME Poly-Sinc SRC',
-  'dsp.capability.sharedConvolution.detail': '当前 FIR 使用 transitional/legacy convolver source，Shared Convolution Engine 未启用。',
+  'dsp.capability.sharedConvolution.detail': '当前 FIR 使用 legacy convolver source，Shared Convolution Engine 未实现。',
   'dsp.capability.sharedConvolution.title': 'Shared convolution',
   'dsp.capability.state.active': '可用',
-  'dsp.capability.state.planned': '待实现',
+  'dsp.capability.state.planned': '未实现',
   'dsp.capability.state.transitional': '过渡',
   'dsp.capability.state.unavailable': '不可用',
   'dsp.capability.stripTitle': 'RPC-001 能力面',
-  'dsp.capability.stripDetail': '已完成的 section 可用；未完成的 UZUME 能力以禁用控件保留，不藏进设置开关。',
+  'dsp.capability.stripDetail': 'RPC-001 仍是 skeleton；这里全部只读标记为未实现，不提供 UZUME 开关。',
   'dsp.module.src.description': 'Poly-Sinc 未实现',
   'dsp.module.src.title': 'UZUME SRC / PCM',
   'dsp.panel.src.active': 'ECHO/SOXR 兼容升频',
@@ -181,7 +154,7 @@ const dspLocalText: Record<string, string> = {
   'dsp.panel.src.pending': '等待下一次播放规划',
   'dsp.panel.src.plannedProfiles': '规划中的 UZUME SRC profile',
   'dsp.panel.src.precision': '精度',
-  'dsp.panel.src.profileUnavailable': '待实现',
+  'dsp.panel.src.profileUnavailable': '未实现',
   'dsp.panel.src.quality': '质量策略',
   'dsp.panel.src.route': '路径',
   'dsp.panel.src.sourceRate': '源采样率',
@@ -202,6 +175,7 @@ const dspLocalText: Record<string, string> = {
   'dsp.label.output': '输出',
   'dsp.metric.bitPerfect': 'Bit-perfect',
   'dsp.metric.clipping': '削波',
+  'dsp.metric.compatBackend': '兼容后端',
   'dsp.metric.dsp': 'UZUME',
   'dsp.metric.inputPeak': '输入峰值',
   'dsp.metric.ir': 'IR',
@@ -209,20 +183,23 @@ const dspLocalText: Record<string, string> = {
   'dsp.metric.liveHeadroom': '实时余量',
   'dsp.metric.mode': '模式',
   'dsp.metric.outputEstimate': '输出估算',
+  'dsp.metric.preamp': 'Preamp',
+  'dsp.metric.preset': 'Preset',
   'dsp.metric.reason': '原因',
   'dsp.metric.sampleRate': '采样率',
+  'dsp.metric.status': '状态',
   'dsp.metric.taps': 'Taps',
-  'dsp.module.channel.description': 'Matrix / delay / mono',
+  'dsp.module.channel.description': 'Matrix 未实现',
   'dsp.module.channel.title': 'UZUME Matrix',
-  'dsp.module.eq.description': 'Profile EQ / OPRA',
+  'dsp.module.eq.description': 'EQ 未实现',
   'dsp.module.eq.title': 'UZUME EQ',
-  'dsp.module.headroom.description': '处理前余量',
+  'dsp.module.headroom.description': 'Headroom 未实现',
   'dsp.module.headroom.title': 'UZUME Headroom',
-  'dsp.module.headphone.description': 'OPRA profile source',
+  'dsp.module.headphone.description': 'OPRA 未实现',
   'dsp.module.headphone.title': 'OPRA Headphone',
-  'dsp.module.room.description': 'Transitional FIR source',
+  'dsp.module.room.description': 'FIR 未实现',
   'dsp.module.room.title': 'UZUME FIR',
-  'dsp.module.safety.description': 'Limiter / bit-perfect',
+  'dsp.module.safety.description': 'Safety 未实现',
   'dsp.module.safety.title': 'UZUME Safety',
   'dsp.panel.channel.advanced': '高级声道',
   'dsp.panel.channel.balance': '声像平衡',
@@ -452,6 +429,14 @@ const dspLocalText: Record<string, string> = {
   'dsp.transition.detail.sdm': '当前处于 SDM processed 遥测路径；这部分仍按实验/不可用状态展示。',
   'dsp.transition.detail.src': 'UZUME Poly-Sinc SRC 尚未实现，这里只显示规划倍率和 ECHO/SOXR 兼容读数。',
   'dsp.transition.title': '路径变化',
+  'dsp.unimplemented.compat': '兼容读数',
+  'dsp.unimplemented.compatDetail': '这些数值来自现有 legacy/compat backend，只读显示，不作为 UZUME 功能开关。',
+  'dsp.unimplemented.detail': 'RPC-001 仍是 skeleton；真正的 UZUME kernel、planner 和 control backend 尚未接入。',
+  'dsp.unimplemented.kicker': 'RPC-001 skeleton',
+  'dsp.unimplemented.noControl': '没有 UZUME 控件',
+  'dsp.unimplemented.noControlDetail': '未实现的子功能不提供按钮、滑杆或开关，避免误触后看起来像已经接入。',
+  'dsp.unimplemented.note': 'UI 只标记 UZUME 状态；legacy/compat 后端状态保留为读数，不在这里伪装成 UZUME 能力。',
+  'dsp.unimplemented.title': '{module} 未实现',
 };
 
 type DspTranslate = (key: string, options?: Parameters<ReturnType<typeof useI18n>['t']>[1]) => string;
@@ -481,68 +466,11 @@ const formatDb = (value: number | null | undefined): string => {
   return `${rounded > 0 ? '+' : ''}${rounded.toFixed(Math.abs(rounded) % 1 > 0 ? 1 : 0)} dB`;
 };
 
-const formatPreciseDb = (value: number | null | undefined): string => {
-  if (!Number.isFinite(value)) {
-    return '0 dB';
-  }
-
-  const rounded = Math.round(Number(value) * 100) / 100;
-  const decimals = Math.abs(rounded % 1) < 0.001 ? 0 : Math.abs((rounded * 10) % 1) < 0.001 ? 1 : 2;
-  return `${rounded > 0 ? '+' : ''}${rounded.toFixed(decimals)} dB`;
-};
-
 const formatLevel = (value: number | null | undefined): string => (Number.isFinite(value) ? formatDb(value) : '--');
 
 const formatRate = (value: number | null | undefined, autoLabel: string): string => (value ? `${Math.round(value / 1000)} kHz` : autoLabel);
 
-const clampNumber = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
-
 const finiteLevel = (value: number | null | undefined): number | null => (Number.isFinite(value) ? Number(value) : null);
-
-const roundHeadroomDb = (value: number): number => Math.round(clampNumber(value, dspHeadroomMinDb, dspHeadroomMaxDb) * 10) / 10;
-
-const roundChannelGainDb = (value: number): number => {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.round(clampNumber(value, channelBalanceMinGainDb, channelBalanceMaxGainDb) * 100) / 100;
-};
-
-const roundChannelBandGainDb = (value: number): number => {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.round(clampNumber(value, channelBalanceBandMinGainDb, channelBalanceBandMaxGainDb) * 100) / 100;
-};
-
-const roundChannelDelayMs = (value: number): number => {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.round(clampNumber(value, channelBalanceMinDelayMs, channelBalanceMaxDelayMs) * 100) / 100;
-};
-
-const linearToDb = (value: number): number => 20 * Math.log10(Math.max(0.000001, value));
-
-const getBalanceGainDb = (balance: number, constantPower: boolean): { leftDb: number; rightDb: number } => {
-  const safeBalance = clampNumber(balance, -1, 1);
-
-  if (!constantPower) {
-    const leftGain = safeBalance > 0 ? 1 - safeBalance : 1;
-    const rightGain = safeBalance < 0 ? 1 + safeBalance : 1;
-    return { leftDb: linearToDb(leftGain), rightDb: linearToDb(rightGain) };
-  }
-
-  const pan = (safeBalance + 1) * Math.PI * 0.25;
-  const compensation = Math.sqrt(2);
-  return {
-    leftDb: linearToDb(Math.min(1, Math.cos(pan) * compensation)),
-    rightDb: linearToDb(Math.min(1, Math.sin(pan) * compensation)),
-  };
-};
 
 const formatBalancePosition = (balance: number): string => {
   const percent = Math.round(Math.abs(balance) * 100);
@@ -551,110 +479,6 @@ const formatBalancePosition = (balance: number): string => {
   }
 
   return `${balance > 0 ? 'R' : 'L'} ${percent}%`;
-};
-
-const normalizeChannelBandGains = (bandGains: ChannelBalanceState['bandGains'] | null | undefined): NonNullable<ChannelBalanceState['bandGains']> => (
-  channelBalanceBandIds.reduce<NonNullable<ChannelBalanceState['bandGains']>>((next, bandId) => {
-    next[bandId] = {
-      leftGainDb: roundChannelBandGainDb(Number(bandGains?.[bandId]?.leftGainDb ?? 0)),
-      rightGainDb: roundChannelBandGainDb(Number(bandGains?.[bandId]?.rightGainDb ?? 0)),
-    };
-    return next;
-  }, {
-    low: { ...defaultBandGains.low },
-    mid: { ...defaultBandGains.mid },
-    high: { ...defaultBandGains.high },
-  })
-);
-
-const normalizeChannelBalanceState = (state: Partial<ChannelBalanceState> | null | undefined): ChannelBalanceState => ({
-  enabled: state?.enabled === true,
-  balance: clampNumber(Number(state?.balance ?? 0), -1, 1),
-  leftGainDb: roundChannelGainDb(Number(state?.leftGainDb ?? 0)),
-  rightGainDb: roundChannelGainDb(Number(state?.rightGainDb ?? 0)),
-  bandGains: normalizeChannelBandGains(state?.bandGains),
-  leftDelayMs: roundChannelDelayMs(Number(state?.leftDelayMs ?? 0)),
-  rightDelayMs: roundChannelDelayMs(Number(state?.rightDelayMs ?? 0)),
-  swapLeftRight: state?.swapLeftRight === true,
-  monoMode: state?.monoMode === 'sum' || state?.monoMode === 'left' || state?.monoMode === 'right' ? state.monoMode : 'off',
-  invertLeft: state?.invertLeft === true,
-  invertRight: state?.invertRight === true,
-  constantPower: state?.constantPower !== false,
-  clippingRisk: state?.clippingRisk === true,
-});
-
-const readChannelPresets = (): ChannelBalancePreset[] => {
-  if (typeof window === 'undefined') {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(channelPresetStorageKey) ?? '[]') as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed
-      .map((item): ChannelBalancePreset | null => {
-        if (!item || typeof item !== 'object') {
-          return null;
-        }
-
-        const preset = item as Partial<ChannelBalancePreset>;
-        const name = typeof preset.name === 'string' && preset.name.trim() ? preset.name.trim().slice(0, 40) : null;
-        if (!name) {
-          return null;
-        }
-
-        return {
-          id: typeof preset.id === 'string' && preset.id ? preset.id : `channel-${Date.now()}`,
-          name,
-          state: normalizeChannelBalanceState(preset.state),
-          createdAt: typeof preset.createdAt === 'string' ? preset.createdAt : new Date().toISOString(),
-        };
-      })
-      .filter((item): item is ChannelBalancePreset => item !== null)
-      .slice(0, maxChannelPresetCount);
-  } catch {
-    return [];
-  }
-};
-
-const writeChannelPresets = (presets: ChannelBalancePreset[]): void => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.setItem(channelPresetStorageKey, JSON.stringify(presets.slice(0, maxChannelPresetCount)));
-};
-
-const formatTime = (value: string | null | undefined, emptyLabel: string): string => {
-  if (!value) {
-    return emptyLabel;
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return emptyLabel;
-  }
-
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
-const getRecommendedHeadroomDb = (audioStatus: AudioStatus | null, currentHeadroomDb: number): number => {
-  const targetHeadroomDb = 1;
-  const outputPeakDb = finiteLevel(audioStatus?.audioLevels?.estimatedOutputPeakDb);
-  const liveHeadroomDb = finiteLevel(audioStatus?.audioLevels?.headroomDb);
-  const reductionFromOutput = outputPeakDb === null ? 0 : Math.max(0, outputPeakDb + targetHeadroomDb);
-  const reductionFromLive = liveHeadroomDb === null ? 0 : Math.max(0, targetHeadroomDb - liveHeadroomDb);
-  const fallbackReduction = audioStatus?.clippingRisk ? 6 : 0;
-  const neededReductionDb = Math.max(reductionFromOutput, reductionFromLive, fallbackReduction);
-
-  if (neededReductionDb <= 0.05) {
-    return roundHeadroomDb(currentHeadroomDb);
-  }
-
-  return roundHeadroomDb(currentHeadroomDb - neededReductionDb);
 };
 
 type HeadroomTone = 'good' | 'warn' | 'risk';
@@ -690,16 +514,6 @@ type ModulePanelProps = {
   formatPath: UzumeFormatPath;
   echoSrcMode: AudioEchoSrcMode;
   echoSrcQualityProfile: AudioEchoSrcQualityProfile;
-  busyKey: string | null;
-  onHeadroomChange: (headroomDb: number) => void;
-  onSafetyLimiterChange: (enabled: boolean) => void;
-  onImportRoomCorrection: () => void;
-  onToggleRoomCorrection: () => void;
-  onEnableRoomSafely: () => void;
-  onRoomTrimChange: (trimDb: number) => void;
-  onClearRoomCorrection: () => void;
-  onChannelPatch: (patch: Partial<ChannelBalanceState>) => void;
-  onChannelReset: () => void;
   onRefresh: () => void;
 };
 
@@ -869,11 +683,9 @@ const UzumeCapabilityStrip = ({ capabilities }: { capabilities: UzumeCapability[
           const Icon = capability.icon;
 
           return (
-            <button
-              type="button"
-              aria-disabled="true"
+            <span
+              className="dsp-capability-chip"
               data-state={capability.state}
-              disabled
               key={capability.id}
               title={capability.detail}
             >
@@ -882,7 +694,7 @@ const UzumeCapabilityStrip = ({ capabilities }: { capabilities: UzumeCapability[
                 <strong>{capability.title}</strong>
                 <small>{t(getUzumeCapabilityStateLabelKey(capability.state))}</small>
               </span>
-            </button>
+            </span>
           );
         })}
       </div>
@@ -951,17 +763,19 @@ const EchoSrcPanel = ({
 
       <div className="dsp-src-planned" role="group" aria-label={t('dsp.panel.src.plannedProfiles')}>
         {plannedProfiles.map((option) => (
-          <button
-            type="button"
-            disabled
+          <article
             key={option.mode}
+            title={t('dsp.panel.src.unavailableDetail')}
           >
             <RadioTower size={14} aria-hidden="true" />
             <span>
               <strong>{option.title}</strong>
-              <small>{t('dsp.panel.src.profileUnavailable')}</small>
+              <small>
+                <ShieldCheck size={13} aria-hidden="true" />
+                {t('dsp.panel.src.profileUnavailable')}
+              </small>
             </span>
-          </button>
+          </article>
         ))}
       </div>
 
@@ -983,1033 +797,140 @@ const EchoSrcPanel = ({
   );
 };
 
-const HeadroomPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, formatPath, busyKey, onHeadroomChange, onRefresh }: ModulePanelProps): JSX.Element => {
-  const { t } = useDspI18n();
-  const headroomDb = eqState.dspHeadroomDb ?? 0;
-  const dspPathActive = audioStatus?.dspActive === true;
-  const recommendedHeadroomDb = getRecommendedHeadroomDb(audioStatus, headroomDb);
-  const hasRecommendation = dspPathActive && Math.abs(recommendedHeadroomDb - headroomDb) > 0.05;
-  const liveHeadroomDb = finiteLevel(audioStatus?.audioLevels?.headroomDb);
-  const outputPeakDb = finiteLevel(audioStatus?.audioLevels?.estimatedOutputPeakDb);
-  const inputPeakDb = finiteLevel(audioStatus?.audioLevels?.inputPeakDb);
-  const clipCount = audioStatus?.audioLevels?.clipCount ?? 0;
-  const clippingRisk = hasObservedDspClippingRisk(audioStatus, eqState, roomCorrection, channelBalance, clipCount);
-  const headroomWarning = hasHeadroomWarning(audioStatus, outputPeakDb, liveHeadroomDb);
-  const lastClipAt = audioStatus?.audioLevels?.lastClipAt ?? null;
-  const headroomArmed = Math.abs(headroomDb) > 0.05;
-  const headroomActive = dspPathActive && headroomArmed;
-  const guardStateKey: string =
-    headroomActive ? 'dsp.panel.headroom.guardActive' :
-    headroomArmed ? 'dsp.panel.headroom.guardStandby' :
-    'dsp.panel.headroom.guardDirect';
-  const statusTone: HeadroomTone = !dspPathActive ? 'good' : clippingRisk ? 'risk' : headroomWarning ? 'warn' : 'good';
-  const statusKey: string =
-    statusTone === 'risk' ? 'dsp.panel.headroom.statusRisk' :
-    statusTone === 'warn' ? 'dsp.panel.headroom.statusClose' :
-    'dsp.panel.headroom.statusSafe';
-  const reasonKey: string =
-    !dspPathActive ? 'dsp.panel.headroom.reasonDirect' :
-    clipCount > 0 || audioStatus?.dspClippingRisk || audioStatus?.dspLimiterProtecting ? 'dsp.panel.headroom.reasonClipping' :
-    eqState.clippingRisk ? 'dsp.panel.headroom.reasonEq' :
-    roomCorrection.clippingRisk ? 'dsp.panel.headroom.reasonRoom' :
-    channelBalance.clippingRisk ? 'dsp.panel.headroom.reasonChannel' :
-    outputPeakDb !== null && outputPeakDb >= -1 ? 'dsp.panel.headroom.reasonOutput' :
-    liveHeadroomDb !== null && liveHeadroomDb <= 1 ? 'dsp.panel.headroom.reasonLive' :
-    'dsp.panel.headroom.reasonSafe';
-  const modeOptions = [
-    { value: 0, title: t('dsp.panel.headroom.modeDirect'), detail: t('dsp.panel.headroom.modeDirectDetail') },
-    { value: -3, title: t('dsp.panel.headroom.modeDaily'), detail: t('dsp.panel.headroom.modeDailyDetail') },
-    { value: -6, title: t('dsp.panel.headroom.modeDsp'), detail: t('dsp.panel.headroom.modeDspDetail') },
-  ];
-  const protectiveFloorDb = statusTone === 'risk' ? -6 : statusTone === 'warn' ? -3 : headroomDb;
-  const protectiveHeadroomDb = roundHeadroomDb(Math.min(headroomDb, recommendedHeadroomDb, protectiveFloorDb));
-  const conservativeHeadroomDb = roundHeadroomDb(Math.min(headroomDb, -6));
-  const canApplyProtective = dspPathActive && protectiveHeadroomDb < headroomDb - 0.05;
-  const canApplyConservative = dspPathActive && conservativeHeadroomDb < headroomDb - 0.05;
-  const nextStepKey: string =
-    !dspPathActive ? 'dsp.panel.headroom.nextDirect' :
-    canApplyProtective ? 'dsp.panel.headroom.nextProtect' :
-    statusTone === 'risk' ? 'dsp.panel.headroom.nextHoldRisk' :
-    statusTone === 'warn' ? 'dsp.panel.headroom.nextWatch' :
-    headroomActive ? 'dsp.panel.headroom.nextReady' :
-    headroomArmed ? 'dsp.panel.headroom.nextStandby' :
-    'dsp.panel.headroom.nextDirect';
-  const nextStepDetailKey: string =
-    !dspPathActive ? 'dsp.panel.headroom.nextDirectDetail' :
-    canApplyProtective ? 'dsp.panel.headroom.nextProtectDetail' :
-    statusTone === 'risk' ? 'dsp.panel.headroom.nextHoldRiskDetail' :
-    statusTone === 'warn' ? 'dsp.panel.headroom.nextWatchDetail' :
-    headroomActive ? 'dsp.panel.headroom.nextReadyDetail' :
-    headroomArmed ? 'dsp.panel.headroom.nextStandbyDetail' :
-    'dsp.panel.headroom.nextDirectDetail';
-
-  return (
-    <section className="dsp-module-panel dsp-module-panel--headroom">
-      <div className="dsp-headroom-main">
-        <div className="dsp-headroom-control">
-          <p className="dsp-module-kicker">{t('dsp.panel.headroom.kicker')}</p>
-          <div className="dsp-module-heading">
-            <span><Gauge size={18} />{t('dsp.module.headroom.title')}</span>
-            <strong>{formatDb(headroomDb)}</strong>
-          </div>
-          <div className="dsp-headroom-status" data-tone={statusTone}>
-            <span>
-              <em>{t('dsp.panel.headroom.status')}</em>
-              <strong>{t(statusKey)}</strong>
-            </span>
-            <p>{t(reasonKey)}</p>
-          </div>
-          <DspTransitionNotice formatPath={formatPath} moduleId="headroom" />
-          <div className="dsp-module-metrics dsp-headroom-metrics">
-            <DspMetric label={t('dsp.metric.inputPeak')} value={formatLevel(inputPeakDb)} />
-            <DspMetric label={t('dsp.metric.outputEstimate')} value={formatLevel(outputPeakDb)} />
-            <DspMetric label={t('dsp.metric.liveHeadroom')} value={formatLevel(liveHeadroomDb)} tone={statusTone === 'risk' ? 'risk' : 'good'} />
-            <DspMetric label={t('dsp.panel.headroom.guardState')} value={t(guardStateKey)} tone={headroomActive ? 'good' : headroomArmed ? 'warn' : undefined} />
-            <DspMetric label={t('dsp.panel.headroom.clipCount')} value={t('dsp.panel.headroom.clipCountValue', { count: String(clipCount) })} tone={clipCount > 0 ? 'risk' : 'good'} />
-            <DspMetric label={t('dsp.panel.headroom.lastClip')} value={formatTime(lastClipAt, t('dsp.panel.headroom.noClip'))} tone={clipCount > 0 ? 'risk' : undefined} />
-          </div>
-          <label className="dsp-module-range">
-            <span>{t('dsp.panel.headroom.reserve')}</span>
-            <input
-              type="range"
-              min={dspHeadroomMinDb}
-              max={dspHeadroomMaxDb}
-              step="0.1"
-              value={headroomDb}
-              onChange={(event) => onHeadroomChange(Number(event.currentTarget.value))}
-            />
-            <strong>{formatDb(headroomDb)}</strong>
-          </label>
-          <div className="dsp-headroom-budget" aria-label={t('dsp.panel.headroom.budgetAria')}>
-            <span style={{ width: `${Math.max(6, Math.min(100, ((inputPeakDb ?? -18) + 24) * 3.3))}%` }}>
-              <em>{t('dsp.metric.inputPeak')}</em>
-              <strong>{formatLevel(inputPeakDb)}</strong>
-            </span>
-            <span style={{ width: `${Math.max(6, Math.min(100, ((outputPeakDb ?? -18) + 24) * 3.3))}%` }}>
-              <em>{t('dsp.metric.outputEstimate')}</em>
-              <strong>{formatLevel(outputPeakDb)}</strong>
-            </span>
-            <span data-tone={statusTone}>
-              <em>{t('dsp.metric.liveHeadroom')}</em>
-              <strong>{formatLevel(liveHeadroomDb)}</strong>
-            </span>
-          </div>
-        </div>
-
-        <aside className="dsp-headroom-assist">
-          <div className="dsp-headroom-next-step" data-tone={statusTone}>
-            <span>
-              <em>{t('dsp.panel.headroom.nextStep')}</em>
-              <strong>{t(nextStepKey)}</strong>
-            </span>
-            <p>{t(nextStepDetailKey)}</p>
-            <div>
-              <button type="button" disabled={!canApplyProtective || busyKey === 'headroom'} onClick={() => onHeadroomChange(protectiveHeadroomDb)}>
-                <ShieldCheck size={14} aria-hidden="true" />
-                {t('dsp.panel.headroom.primaryAction', { value: formatDb(protectiveHeadroomDb) })}
-              </button>
-              <button type="button" onClick={onRefresh}>
-                <Activity size={14} aria-hidden="true" />
-                {t('dsp.action.refresh')}
-              </button>
-            </div>
-          </div>
-          <div className="dsp-headroom-recommendation" data-active={hasRecommendation}>
-            <em>{t('dsp.panel.headroom.recommendation')}</em>
-            <strong>{hasRecommendation ? formatDb(recommendedHeadroomDb) : t('dsp.panel.headroom.recommendationSafe')}</strong>
-            <button type="button" disabled={!hasRecommendation || busyKey === 'headroom'} onClick={() => onHeadroomChange(recommendedHeadroomDb)}>
-              <Gauge size={14} aria-hidden="true" />
-              {t('dsp.panel.headroom.applyRecommended')}
-            </button>
-          </div>
-          <div className="dsp-headroom-safe-actions">
-            <span>
-              <em>{t('dsp.panel.headroom.safetyActions')}</em>
-              <strong>{t('dsp.panel.headroom.safePolicy')}</strong>
-            </span>
-            <button type="button" disabled={!canApplyProtective || busyKey === 'headroom'} onClick={() => onHeadroomChange(protectiveHeadroomDb)}>
-              <ShieldCheck size={14} aria-hidden="true" />
-              {t('dsp.panel.headroom.makeSafe', { value: formatDb(protectiveHeadroomDb) })}
-            </button>
-            <button type="button" disabled={!canApplyConservative || busyKey === 'headroom'} onClick={() => onHeadroomChange(conservativeHeadroomDb)}>
-              <ShieldCheck size={14} aria-hidden="true" />
-              {t('dsp.panel.headroom.makeConservative')}
-            </button>
-          </div>
-          <div className="dsp-headroom-modes" role="group" aria-label={t('dsp.panel.headroom.modeAria')}>
-            {modeOptions.map((option) => (
-              <button type="button" data-active={Math.abs(headroomDb - option.value) <= 0.05} disabled={busyKey === 'headroom'} key={option.value} onClick={() => onHeadroomChange(option.value)}>
-                <strong>{option.title}</strong>
-                <span>{option.detail}</span>
-                <em>{formatDb(option.value)}</em>
-              </button>
-            ))}
-          </div>
-          <div className="dsp-module-actions" role="group" aria-label={t('dsp.panel.headroom.presetsAria')}>
-            {[0, -3, -6, -9].map((value) => (
-              <button type="button" data-active={Math.abs(headroomDb - value) <= 0.05} disabled={busyKey === 'headroom'} key={value} onClick={() => onHeadroomChange(value)}>
-                {formatDb(value)}
-              </button>
-            ))}
-          </div>
-          <p className="dsp-module-note">{t('dsp.panel.headroom.note')}</p>
-        </aside>
-      </div>
-    </section>
-  );
+type UzumeUnimplementedReadout = {
+  label: string;
+  value: string;
+  tone?: HeadroomTone;
 };
 
-const RoomCorrectionPanel = ({
-  roomCorrection,
-  eqState,
+const UzumeUnimplementedPanel = ({
+  module,
   audioStatus,
+  eqState,
+  roomCorrection,
+  channelBalance,
   formatPath,
-  busyKey,
-  onImportRoomCorrection,
-  onToggleRoomCorrection,
-  onEnableRoomSafely,
-  onRoomTrimChange,
-  onClearRoomCorrection,
-  onRefresh,
-}: ModulePanelProps): JSX.Element => {
+}: ModulePanelProps & { module: DspModule }): JSX.Element => {
   const { t } = useDspI18n();
-  const status = roomCorrection.enabled ? t('dsp.status.active') : t(`dsp.room.status.${roomCorrection.status}` as TranslationKey);
-  const hasIr = Boolean(roomCorrection.irId);
-  const roomTone: HeadroomTone = roomCorrection.clippingRisk || roomCorrection.status === 'error' ? 'risk' : roomCorrection.enabled ? 'good' : hasIr ? 'warn' : 'good';
-  const heroTitleKey: string =
-    roomCorrection.enabled ? 'dsp.panel.room.hero.activeTitle' :
-    hasIr ? 'dsp.panel.room.hero.loadedTitle' :
-    'dsp.panel.room.hero.emptyTitle';
-  const heroDetailKey: string =
-    roomCorrection.enabled ? 'dsp.panel.room.hero.activeDetail' :
-    hasIr ? 'dsp.panel.room.hero.loadedDetail' :
-    'dsp.panel.room.hero.emptyDetail';
-  const nextTitleKey: string =
-    roomCorrection.clippingRisk ? 'dsp.panel.room.nextTrim' :
-    roomCorrection.enabled ? 'dsp.panel.room.nextListen' :
-    hasIr ? 'dsp.panel.room.nextEnable' :
-    'dsp.panel.room.nextImport';
-  const nextDetailKey: string =
-    roomCorrection.clippingRisk ? 'dsp.panel.room.nextTrimDetail' :
-    roomCorrection.enabled ? 'dsp.panel.room.nextListenDetail' :
-    hasIr ? 'dsp.panel.room.nextEnableDetail' :
-    'dsp.panel.room.nextImportDetail';
-  const dspHeadroomDb = eqState.dspHeadroomDb ?? 0;
-  const bitPerfectValue = roomCorrection.enabled ? t('dsp.status.disabledByDsp') : t('dsp.status.ready');
-  const clippingValue = roomCorrection.clippingRisk ? t('dsp.status.riskDetected') : t('dsp.status.clear');
-  const latencyValue = roomCorrection.latencySamples > 0 ? `${roomCorrection.latencySamples} samples` : t('dsp.status.none');
-  const outputPeakDb = finiteLevel(audioStatus?.audioLevels?.estimatedOutputPeakDb);
-  const safeTrimDb = Math.min(roomCorrection.trimDb, -6);
-  const canSafeEnable = hasIr && !roomCorrection.enabled;
-
-  return (
-    <section className="dsp-module-panel dsp-module-panel--room" data-enabled={roomCorrection.enabled} data-tone={roomTone}>
-      <div className="dsp-room-main">
-        <div className="dsp-room-hero">
-          <p className="dsp-module-kicker">{t('dsp.panel.room.kicker')}</p>
-          <div className="dsp-module-heading">
-            <span><Waves size={18} />{t('dsp.module.room.title')}</span>
-            <strong>{status}</strong>
-          </div>
-          <p>{t(heroDetailKey)}</p>
-          <DspTransitionNotice formatPath={formatPath} moduleId="room" />
-          <div className="dsp-room-primary">
-            <span>
-              <em>{t('dsp.panel.room.hero.state')}</em>
-              <strong>{t(heroTitleKey)}</strong>
-              <small>{t('dsp.panel.room.safeEnableHint')}</small>
-            </span>
-            <div className="dsp-module-actions">
-              <button type="button" disabled={busyKey === 'room-import'} onClick={onImportRoomCorrection}>
-                <FileAudio size={14} aria-hidden="true" />
-                {t('dsp.action.importIr')}
-              </button>
-              <button type="button" disabled={!canSafeEnable || busyKey !== null} onClick={onEnableRoomSafely}>
-                <ShieldCheck size={14} aria-hidden="true" />
-                {t('dsp.action.enableFirSafely')}
-              </button>
-              <button type="button" data-active={roomCorrection.enabled} disabled={!hasIr || busyKey === 'room-toggle'} onClick={onToggleRoomCorrection}>
-                <Zap size={14} aria-hidden="true" />
-                {roomCorrection.enabled ? t('dsp.action.disableFir') : t('dsp.action.enableFir')}
-              </button>
-              <button type="button" disabled={!hasIr || busyKey === 'room-clear'} onClick={onClearRoomCorrection}>
-                {t('dsp.action.clear')}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <label className="dsp-module-range dsp-room-trim">
-          <span>{t('dsp.panel.room.trim')}</span>
-          <input
-            type="range"
-            min={roomCorrectionMinTrimDb}
-            max={roomCorrectionMaxTrimDb}
-            step="0.1"
-            value={roomCorrection.trimDb}
-            disabled={!hasIr}
-            onChange={(event) => onRoomTrimChange(Number(event.currentTarget.value))}
-          />
-          <strong>{formatDb(roomCorrection.trimDb)}</strong>
-        </label>
-
-        <div className="dsp-room-trim-tools" role="group" aria-label={t('dsp.panel.room.quickTrim')}>
-          <span>{t('dsp.panel.room.quickTrim')}</span>
-          {[-6, -3, 0].map((trimPreset) => (
-            <button
-              type="button"
-              data-active={Math.abs(roomCorrection.trimDb - trimPreset) <= 0.05}
-              disabled={!hasIr || busyKey === 'room-trim'}
-              key={trimPreset}
-              onClick={() => onRoomTrimChange(trimPreset)}
-            >
-              {formatDb(trimPreset)}
-            </button>
-          ))}
-        </div>
-
-        <div className="dsp-module-metrics dsp-room-metrics">
-          <DspMetric label={t('dsp.metric.ir')} value={roomCorrection.irName ?? t('dsp.status.noIr')} tone={hasIr ? 'good' : undefined} />
-          <DspMetric label={t('dsp.metric.mode')} value={roomCorrection.channelMode} />
-          <DspMetric label={t('dsp.metric.taps')} value={roomCorrection.tapCount > 0 ? String(roomCorrection.tapCount) : '--'} />
-          <DspMetric label={t('dsp.metric.sampleRate')} value={roomCorrection.sampleRate ? `${roomCorrection.sampleRate} Hz` : '--'} />
-          <DspMetric label={t('dsp.metric.latency')} value={latencyValue} />
-          <DspMetric label={t('dsp.metric.outputEstimate')} value={formatLevel(outputPeakDb)} tone={roomCorrection.clippingRisk ? 'risk' : undefined} />
-        </div>
-
-        {roomCorrection.error ? <p className="dsp-module-error">{roomCorrection.error}</p> : null}
-        <p className="dsp-module-note">{t('dsp.panel.room.note')}</p>
-      </div>
-
-      <aside className="dsp-room-side">
-        <div className="dsp-room-status" data-tone={roomTone}>
-          <span>
-            <ShieldCheck size={17} aria-hidden="true" />
-            <em>{t('dsp.panel.room.safetyTitle')}</em>
-          </span>
-          <strong>{roomTone === 'risk' ? t('dsp.status.riskDetected') : t('dsp.status.signalProtected')}</strong>
-          <p>{roomTone === 'risk' ? t('dsp.panel.room.safetyRisk') : t('dsp.panel.room.safetySafe')}</p>
-        </div>
-
-        <div className="dsp-room-route">
-          <span>
-            <Route size={16} aria-hidden="true" />
-            <em>{t('dsp.panel.room.routeTitle')}</em>
-          </span>
-          <dl>
-            <div>
-              <dt>{t('dsp.metric.bitPerfect')}</dt>
-              <dd>{bitPerfectValue}</dd>
-            </div>
-            <div>
-              <dt>{t('dsp.panel.headroom.reserve')}</dt>
-              <dd>{formatDb(dspHeadroomDb)}</dd>
-            </div>
-            <div>
-              <dt>{t('dsp.metric.clipping')}</dt>
-              <dd>{clippingValue}</dd>
-            </div>
-            <div>
-              <dt>{t('dsp.metric.latency')}</dt>
-              <dd>{latencyValue}</dd>
-            </div>
-          </dl>
-        </div>
-
-        <div className="dsp-room-next">
-          <span>
-            <Info size={16} aria-hidden="true" />
-            <em>{t('dsp.panel.headroom.nextStep')}</em>
-          </span>
-          <strong>{t(nextTitleKey)}</strong>
-          <p>{t(nextDetailKey)}</p>
-          <div className="dsp-room-next-actions">
-            {!hasIr ? (
-              <button type="button" disabled={busyKey === 'room-import'} onClick={onImportRoomCorrection}>
-                <FileAudio size={14} aria-hidden="true" />
-                {t('dsp.action.importIr')}
-              </button>
-            ) : roomCorrection.clippingRisk ? (
-              <>
-                <button type="button" disabled={busyKey === 'room-trim'} onClick={() => onRoomTrimChange(safeTrimDb)}>
-                  <Gauge size={14} aria-hidden="true" />
-                  {t('dsp.panel.room.nextTrim')}
-                </button>
-                <button type="button" onClick={onRefresh}>
-                  {t('dsp.action.refresh')}
-                </button>
-              </>
-            ) : roomCorrection.enabled ? (
-              <>
-                <button type="button" data-active onClick={onToggleRoomCorrection}>
-                  <Zap size={14} aria-hidden="true" />
-                  {t('dsp.action.disableFir')}
-                </button>
-                <button type="button" onClick={onRefresh}>
-                  {t('dsp.action.refresh')}
-                </button>
-              </>
-            ) : (
-              <>
-                <button type="button" disabled={busyKey !== null} onClick={onEnableRoomSafely}>
-                  <ShieldCheck size={14} aria-hidden="true" />
-                  {t('dsp.action.enableFirSafely')}
-                </button>
-                <button type="button" disabled={busyKey === 'room-toggle'} onClick={onToggleRoomCorrection}>
-                  <Zap size={14} aria-hidden="true" />
-                  {t('dsp.action.enableFir')}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="dsp-room-expansion">
-          <span><Clock3 size={15} aria-hidden="true" />{t('dsp.panel.room.future.recent')}</span>
-          <span><AudioWaveform size={15} aria-hidden="true" />{t('dsp.panel.room.future.response')}</span>
-        </div>
-      </aside>
-    </section>
-  );
-};
-
-const ChannelPanel = ({ channelBalance, formatPath, busyKey, onChannelPatch, onChannelReset }: ModulePanelProps): JSX.Element => {
-  const { t } = useDspI18n();
-  const [trimStepDb, setTrimStepDb] = useState(0.25);
-  const [channelPresets, setChannelPresets] = useState<ChannelBalancePreset[]>(() => readChannelPresets());
-  const [activeChannelPresetId, setActiveChannelPresetId] = useState<string | null>(null);
-  const [presetNameDraft, setPresetNameDraft] = useState(() => t('dsp.panel.channel.presetDefaultName'));
-  const [renamingPresetId, setRenamingPresetId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState('');
-  const [compareBypassed, setCompareBypassed] = useState(false);
-  const [panelMode, setPanelMode] = useState<ChannelPanelMode>('simple');
-  const [balanceDraftPercent, setBalanceDraftPercent] = useState(() => Math.round(channelBalance.balance * 1000) / 10);
-  const [balanceDragging, setBalanceDragging] = useState(false);
-  const compareSnapshotRef = useRef<ChannelBalanceState | null>(null);
-  const leftGainDb = Number(channelBalance.leftGainDb ?? 0);
-  const rightGainDb = Number(channelBalance.rightGainDb ?? 0);
-  const bandGains = normalizeChannelBandGains(channelBalance.bandGains);
-  const leftDelayMs = Number(channelBalance.leftDelayMs ?? 0);
-  const rightDelayMs = Number(channelBalance.rightDelayMs ?? 0);
-  const balanceGain = getBalanceGainDb(channelBalance.balance, channelBalance.constantPower);
-  const effectiveLeftDb = leftGainDb + balanceGain.leftDb;
-  const effectiveRightDb = rightGainDb + balanceGain.rightDb;
-  const outputSkewDb = effectiveRightDb - effectiveLeftDb;
-  const outputSkewAbsDb = Math.abs(outputSkewDb);
-  const outputSkewLabel = outputSkewAbsDb < 0.05
-    ? t('dsp.panel.channel.centered')
-    : outputSkewDb > 0
-      ? t('dsp.panel.channel.leansRight', { value: formatPreciseDb(outputSkewAbsDb) })
-      : t('dsp.panel.channel.leansLeft', { value: formatPreciseDb(outputSkewAbsDb) });
-  const delaySkewMs = rightDelayMs - leftDelayMs;
-  const leftMeterWidth = clampNumber(50 - (outputSkewDb * 8), 8, 92);
-  const rightMeterWidth = 100 - leftMeterWidth;
-  const hasBandEffect = channelBalanceBandIds.some((bandId) => (
-    Math.abs(bandGains[bandId].leftGainDb) > 0.001 || Math.abs(bandGains[bandId].rightGainDb) > 0.001
-  ));
-  const hasAdvancedEffect =
-    channelBalance.swapLeftRight
-    || channelBalance.monoMode !== 'off'
-    || channelBalance.invertLeft
-    || channelBalance.invertRight
-    || hasBandEffect;
-  const patchChannel = (patch: Partial<ChannelBalanceState>): void => {
-    setActiveChannelPresetId(null);
-    onChannelPatch(patch);
-  };
-  useEffect(() => {
-    if (!balanceDragging) {
-      setBalanceDraftPercent(Math.round(channelBalance.balance * 1000) / 10);
-    }
-  }, [balanceDragging, channelBalance.balance]);
-  const patchBalancePercent = (nextPercent: number): void => {
-    const roundedPercent = Math.round(clampNumber(nextPercent, -100, 100) * 10) / 10;
-    setBalanceDraftPercent(roundedPercent);
-    patchChannel({ balance: clampNumber(roundedPercent / 100, -1, 1), enabled: true });
-  };
-  const patchBandGain = (bandId: ChannelBalanceBandId, side: 'leftGainDb' | 'rightGainDb', gainDb: number): void => {
-    patchChannel({
-      bandGains: {
-        ...bandGains,
-        [bandId]: {
-          ...bandGains[bandId],
-          [side]: roundChannelBandGainDb(gainDb),
-        },
-      },
-      enabled: true,
-    });
-  };
-  const swapCompensationDirection = (): void => {
-    patchChannel({
-      leftGainDb: rightGainDb,
-      rightGainDb: leftGainDb,
-      leftDelayMs: rightDelayMs,
-      rightDelayMs: leftDelayMs,
-      bandGains: channelBalanceBandIds.reduce<NonNullable<ChannelBalanceState['bandGains']>>((next, bandId) => {
-        next[bandId] = {
-          leftGainDb: bandGains[bandId].rightGainDb,
-          rightGainDb: bandGains[bandId].leftGainDb,
-        };
-        return next;
-      }, {
-        low: { ...defaultBandGains.low },
-        mid: { ...defaultBandGains.mid },
-        high: { ...defaultBandGains.high },
-      }),
-      enabled: true,
-    });
-  };
-  const resetChannel = (): void => {
-    compareSnapshotRef.current = null;
-    setCompareBypassed(false);
-    setActiveChannelPresetId(null);
-    onChannelReset();
-  };
-  const clearCompensation = (): void => {
-    patchChannel({
-      enabled: hasAdvancedEffect,
-      balance: 0,
-      leftGainDb: 0,
-      rightGainDb: 0,
-      bandGains: normalizeChannelBandGains(null),
-      leftDelayMs: 0,
-      rightDelayMs: 0,
-    });
-  };
-  const toggleCompareBypass = (): void => {
-    if (compareBypassed) {
-      const snapshot = compareSnapshotRef.current;
-      compareSnapshotRef.current = null;
-      setCompareBypassed(false);
-      if (snapshot) {
-        onChannelPatch(snapshot);
-      }
-      return;
-    }
-
-    compareSnapshotRef.current = normalizeChannelBalanceState(channelBalance);
-    setCompareBypassed(true);
-    onChannelPatch({ enabled: false });
-  };
-  const saveChannelPreset = (): void => {
-    const presetName = presetNameDraft.trim() || t('dsp.panel.channel.presetDefaultName');
-
-    const sourceState = compareBypassed && compareSnapshotRef.current ? compareSnapshotRef.current : channelBalance;
-    const nextPreset: ChannelBalancePreset = {
-      id: `channel-${Date.now()}`,
-      name: presetName.slice(0, 40),
-      state: { ...normalizeChannelBalanceState(sourceState), enabled: true, clippingRisk: false },
-      createdAt: new Date().toISOString(),
-    };
-    setChannelPresets((current) => {
-      const next = [nextPreset, ...current.filter((preset) => preset.name !== nextPreset.name)].slice(0, maxChannelPresetCount);
-      writeChannelPresets(next);
-      return next;
-    });
-    setActiveChannelPresetId(nextPreset.id);
-    setPresetNameDraft(t('dsp.panel.channel.presetDefaultName'));
-  };
-  const applyChannelPreset = (preset: ChannelBalancePreset): void => {
-    compareSnapshotRef.current = null;
-    setCompareBypassed(false);
-    setActiveChannelPresetId(preset.id);
-    onChannelPatch({ ...preset.state, enabled: true });
-  };
-  const renameChannelPreset = (preset: ChannelBalancePreset): void => {
-    setRenamingPresetId(preset.id);
-    setRenameDraft(preset.name);
-  };
-  const commitRenameChannelPreset = (presetId: string): void => {
-    const presetName = renameDraft.trim();
-
-    if (!presetName) {
-      setRenamingPresetId(null);
-      return;
-    }
-
-    setChannelPresets((current) => {
-      const next = current.map((item) => (
-        item.id === presetId
-          ? { ...item, name: presetName.slice(0, 40) }
-          : item
-      ));
-      writeChannelPresets(next);
-      return next;
-    });
-    setRenamingPresetId(null);
-    setRenameDraft('');
-  };
-  const removeChannelPreset = (presetId: string): void => {
-    if (activeChannelPresetId === presetId) {
-      setActiveChannelPresetId(null);
-    }
-    if (renamingPresetId === presetId) {
-      setRenamingPresetId(null);
-      setRenameDraft('');
-    }
-
-    setChannelPresets((current) => {
-      const next = current.filter((preset) => preset.id !== presetId);
-      writeChannelPresets(next);
-      return next;
-    });
-  };
-  const activeChannelPreset = channelPresets.find((preset) => preset.id === activeChannelPresetId) ?? null;
-
-  return (
-    <section className="dsp-module-panel dsp-module-panel--channel" data-enabled={channelBalance.enabled}>
-      <div className="dsp-channel-main">
-        <div className="dsp-channel-hero">
-          <p className="dsp-module-kicker">{t('dsp.panel.channel.kicker')}</p>
-          <div className="dsp-module-heading">
-            <span><Headphones size={18} />{t('dsp.module.channel.title')}</span>
-            <strong>{channelBalance.enabled ? t('dsp.status.active') : t('dsp.status.bypassed')}</strong>
-          </div>
-          <DspTransitionNotice formatPath={formatPath} moduleId="channel" />
-          <div className="dsp-channel-primary">
-            <span>
-              <em>{t('dsp.panel.channel.compensationTitle')}</em>
-              <strong>{outputSkewLabel}</strong>
-              <small>{t('dsp.panel.channel.compensationDetail')}</small>
-            </span>
-            <div className="dsp-module-actions">
-              <button
-                type="button"
-                className="dsp-channel-toggle"
-                aria-pressed={channelBalance.enabled}
-                data-active={channelBalance.enabled}
-                disabled={busyKey === 'channel'}
-                onClick={() => patchChannel({ enabled: !channelBalance.enabled })}
-              >
-                <span className="dsp-channel-toggle-rail" aria-hidden="true"><span /></span>
-                <span className="dsp-channel-toggle-copy">
-                  <strong>{t('dsp.panel.channel.compensationTitle')}</strong>
-                  <small>{channelBalance.enabled ? t('dsp.panel.channel.compensationOn') : t('dsp.panel.channel.compensationOff')}</small>
-                </span>
-              </button>
-              <button type="button" data-active={compareBypassed} disabled={busyKey === 'channel'} onClick={toggleCompareBypass}>
-                {compareBypassed ? t('dsp.panel.channel.compareActive') : t('dsp.panel.channel.compare')}
-              </button>
-              <button type="button" disabled={busyKey === 'channel-reset'} onClick={resetChannel}>
-                <RotateCcw size={14} />{t('dsp.action.reset')}
-              </button>
-            </div>
-          </div>
-
-          <div className="dsp-channel-mode-tabs" role="tablist" aria-label={t('dsp.panel.channel.advanced')}>
-            {(['simple', 'pro'] as const).map((mode) => (
-              <button
-                type="button"
-                aria-selected={panelMode === mode}
-                data-active={panelMode === mode}
-                key={mode}
-                onClick={() => setPanelMode(mode)}
-                role="tab"
-              >
-                {mode === 'simple' ? t('dsp.panel.channel.modeSimple') : t('dsp.panel.channel.modePro')}
-              </button>
-            ))}
-          </div>
-
-          <div className="dsp-channel-bias-card">
-            <div className="dsp-channel-bias-head">
-              <span>{t('dsp.panel.channel.leftOutput')}</span>
-              <strong>{outputSkewLabel}</strong>
-              <span>{t('dsp.panel.channel.rightOutput')}</span>
-            </div>
-            <div className="dsp-channel-bias-meter" aria-hidden="true">
-              <span data-side="left" style={{ width: `${leftMeterWidth}%` }} />
-              <i />
-              <span data-side="right" style={{ width: `${rightMeterWidth}%` }} />
-            </div>
-            <div className="dsp-channel-bias-values">
-              <strong>{formatPreciseDb(effectiveLeftDb)}</strong>
-              <strong>{formatPreciseDb(effectiveRightDb)}</strong>
-            </div>
-          </div>
-
-          <div className="dsp-channel-trim-tools">
-            <span>{t('dsp.panel.channel.step')}</span>
-            {[...electrostaticTrimSteps, ...channelTrimSteps.filter((stepDb) => stepDb !== 0.25)].map((stepDb) => (
-              <button type="button" data-active={trimStepDb === stepDb} key={stepDb} onClick={() => setTrimStepDb(stepDb)}>
-                {formatPreciseDb(stepDb)}
-              </button>
-            ))}
-            <button
-              type="button"
-              disabled={leftGainDb <= channelBalanceMinGainDb + 0.001}
-              onClick={() => patchChannel({ leftGainDb: roundChannelGainDb(leftGainDb - trimStepDb), enabled: true })}
-            >
-              {t('dsp.panel.channel.leftTooLoud')}
-            </button>
-            <button
-              type="button"
-              disabled={rightGainDb <= channelBalanceMinGainDb + 0.001}
-              onClick={() => patchChannel({ rightGainDb: roundChannelGainDb(rightGainDb - trimStepDb), enabled: true })}
-            >
-              {t('dsp.panel.channel.rightTooLoud')}
-            </button>
-            <button type="button" onClick={clearCompensation}>
-              {t('dsp.panel.channel.trimCenter')}
-            </button>
-            <button type="button" onClick={swapCompensationDirection}>
-              {t('dsp.panel.channel.swapCompensation')}
-            </button>
-          </div>
-
-          {panelMode === 'pro' ? (
-            <div className="dsp-channel-band-card">
-              <div className="dsp-channel-band-head">
-                <em>{t('dsp.panel.channel.bandCompensation')}</em>
-                <span><Info size={15} aria-hidden="true" />{t('dsp.panel.channel.safeAttenuation')}</span>
-              </div>
-              {channelBalanceBandIds.map((bandId) => (
-                <div className="dsp-channel-band-row" key={bandId}>
-                  <span>
-                    <strong>{t(channelBandLabels[bandId].titleKey)}</strong>
-                    <small>{channelBandLabels[bandId].range}</small>
-                  </span>
-                  <label>
-                    <small>{t('dsp.panel.channel.leftOutput')}</small>
-                    <input
-                      type="number"
-                      min={channelBalanceBandMinGainDb}
-                      max={channelBalanceBandMaxGainDb}
-                      step="0.1"
-                      value={bandGains[bandId].leftGainDb}
-                      onChange={(event) => patchBandGain(bandId, 'leftGainDb', Number(event.currentTarget.value))}
-                    />
-                  </label>
-                  <label>
-                    <small>{t('dsp.panel.channel.rightOutput')}</small>
-                    <input
-                      type="number"
-                      min={channelBalanceBandMinGainDb}
-                      max={channelBalanceBandMaxGainDb}
-                      step="0.1"
-                      value={bandGains[bandId].rightGainDb}
-                      onChange={(event) => patchBandGain(bandId, 'rightGainDb', Number(event.currentTarget.value))}
-                    />
-                  </label>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          <label className="dsp-module-range dsp-channel-balance-range">
-            <span>{t('dsp.panel.channel.balance')}</span>
-            <input
-              type="range"
-              min="-100"
-              max="100"
-              step="0.5"
-              value={balanceDragging ? balanceDraftPercent : Math.round(channelBalance.balance * 1000) / 10}
-              onBlur={() => setBalanceDragging(false)}
-              onChange={(event) => patchBalancePercent(Number(event.currentTarget.value))}
-              onPointerCancel={() => setBalanceDragging(false)}
-              onPointerDown={() => setBalanceDragging(true)}
-              onPointerUp={() => setBalanceDragging(false)}
-            />
-            <strong>{formatBalancePosition((balanceDragging ? balanceDraftPercent : Math.round(channelBalance.balance * 1000) / 10) / 100)}</strong>
-          </label>
-
-          {panelMode === 'pro' ? (
-            <div className="dsp-module-grid dsp-channel-grid">
-              <label>
-                <span>{t('dsp.panel.channel.leftGain')}</span>
-                <input type="number" min={channelBalanceMinGainDb} max={channelBalanceMaxGainDb} step="0.05" value={leftGainDb} onChange={(event) => patchChannel({ leftGainDb: roundChannelGainDb(Number(event.currentTarget.value)), enabled: true })} />
-              </label>
-              <label>
-                <span>{t('dsp.panel.channel.rightGain')}</span>
-                <input type="number" min={channelBalanceMinGainDb} max={channelBalanceMaxGainDb} step="0.05" value={rightGainDb} onChange={(event) => patchChannel({ rightGainDb: roundChannelGainDb(Number(event.currentTarget.value)), enabled: true })} />
-              </label>
-              <label>
-                <span>{t('dsp.panel.channel.leftDelay')}</span>
-                <input type="number" min={channelBalanceMinDelayMs} max={channelBalanceMaxDelayMs} step="0.01" value={leftDelayMs} onChange={(event) => patchChannel({ leftDelayMs: roundChannelDelayMs(Number(event.currentTarget.value)), enabled: true })} />
-              </label>
-              <label>
-                <span>{t('dsp.panel.channel.rightDelay')}</span>
-                <input type="number" min={channelBalanceMinDelayMs} max={channelBalanceMaxDelayMs} step="0.01" value={rightDelayMs} onChange={(event) => patchChannel({ rightDelayMs: roundChannelDelayMs(Number(event.currentTarget.value)), enabled: true })} />
-              </label>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <aside className="dsp-channel-side">
-        <div className="dsp-channel-summary">
-          <DspMetric label={t('dsp.panel.channel.leftOutput')} value={formatPreciseDb(effectiveLeftDb)} />
-          <DspMetric label={t('dsp.panel.channel.rightOutput')} value={formatPreciseDb(effectiveRightDb)} />
-          <DspMetric label={t('dsp.panel.channel.delaySkew')} value={`${delaySkewMs > 0 ? '+' : ''}${Math.round(delaySkewMs * 100) / 100} ms`} />
-        </div>
-
-        <div className="dsp-channel-tools">
-          <span><Info size={15} aria-hidden="true" />{t('dsp.panel.channel.he90Hint')}</span>
-        </div>
-
-        <div className="dsp-channel-tools">
-          <span><Info size={15} aria-hidden="true" />{t('dsp.panel.channel.compareHint')}</span>
-        </div>
-
-        <div className="dsp-channel-tools">
-          <em>{t('dsp.panel.channel.presets')}</em>
-          <div className="dsp-channel-presets">
-            <div className="dsp-channel-save-row">
-              <label>
-                <span>{t('dsp.panel.channel.presetName')}</span>
-                <input
-                  type="text"
-                  maxLength={40}
-                  value={presetNameDraft}
-                  onChange={(event) => setPresetNameDraft(event.currentTarget.value)}
-                />
-              </label>
-              <button type="button" onClick={saveChannelPreset}>
-                <Save size={14} aria-hidden="true" />{t('dsp.panel.channel.saveCurrent')}
-              </button>
-            </div>
-            {channelPresets.length > 0 ? (
-              <>
-                <div className="dsp-channel-preset-picker">
-                  <label>
-                    <span>{t('dsp.panel.channel.switchPreset')}</span>
-                    <select
-                      value={activeChannelPresetId ?? ''}
-                      onChange={(event) => {
-                        const preset = channelPresets.find((item) => item.id === event.currentTarget.value);
-                        if (preset) {
-                          applyChannelPreset(preset);
-                        }
-                      }}
-                    >
-                      <option value="">{t('dsp.panel.channel.selectPreset')}</option>
-                      {channelPresets.map((preset) => (
-                        <option key={preset.id} value={preset.id}>{preset.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="dsp-channel-preset-actions">
-                    <button type="button" disabled={!activeChannelPreset} onClick={() => activeChannelPreset ? renameChannelPreset(activeChannelPreset) : undefined}>
-                      <Pencil size={13} aria-hidden="true" />
-                      {t('dsp.panel.channel.renamePreset')}
-                    </button>
-                    <button type="button" disabled={!activeChannelPreset} onClick={() => activeChannelPreset ? removeChannelPreset(activeChannelPreset.id) : undefined}>
-                      <Trash2 size={13} aria-hidden="true" />
-                      {t('dsp.panel.channel.removePreset')}
-                    </button>
-                  </div>
-                </div>
-                {activeChannelPreset && renamingPresetId === activeChannelPreset.id ? (
-                  <div className="dsp-channel-rename-row">
-                    <input
-                      aria-label={t('dsp.panel.channel.renamePrompt')}
-                      maxLength={40}
-                      type="text"
-                      value={renameDraft}
-                      onChange={(event) => setRenameDraft(event.currentTarget.value)}
-                    />
-                    <button type="button" onClick={() => commitRenameChannelPreset(activeChannelPreset.id)}>
-                      <CheckCircle2 size={13} aria-hidden="true" />
-                      {t('dsp.action.save')}
-                    </button>
-                    <button type="button" onClick={() => setRenamingPresetId(null)}>
-                      {t('dsp.action.clear')}
-                    </button>
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <small>{t('dsp.panel.channel.presetEmpty')}</small>
-            )}
-          </div>
-        </div>
-
-        {panelMode === 'pro' ? (
-          <>
-            <div className="dsp-channel-tools">
-              <em>{t('dsp.panel.channel.monoTools')}</em>
-              <span><Info size={15} aria-hidden="true" />{t('dsp.panel.channel.monoHint')}</span>
-              <div className="dsp-module-actions">
-                {(['off', 'sum', 'left', 'right'] as const).map((mode) => (
-                  <button type="button" data-active={channelBalance.monoMode === mode} key={mode} onClick={() => patchChannel({ monoMode: mode, enabled: mode !== 'off' || channelBalance.enabled })}>
-                    {t(monoModeKeyMap[mode])}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="dsp-channel-tools">
-              <em>{t('dsp.panel.channel.phaseTools')}</em>
-              <div className="dsp-module-actions">
-                <button type="button" data-active={channelBalance.swapLeftRight} onClick={() => patchChannel({ swapLeftRight: !channelBalance.swapLeftRight, enabled: true })}>{t('dsp.panel.channel.swap')}</button>
-                <button type="button" data-active={channelBalance.invertLeft} onClick={() => patchChannel({ invertLeft: !channelBalance.invertLeft, enabled: true })}>{t('dsp.panel.channel.invertLeft')}</button>
-                <button type="button" data-active={channelBalance.invertRight} onClick={() => patchChannel({ invertRight: !channelBalance.invertRight, enabled: true })}>{t('dsp.panel.channel.invertRight')}</button>
-                <button type="button" data-active={channelBalance.constantPower} onClick={() => patchChannel({ constantPower: !channelBalance.constantPower })}>{t('dsp.panel.channel.constantPower')}</button>
-              </div>
-            </div>
-          </>
-        ) : null}
-
-        <p className="dsp-module-note">{t('dsp.panel.channel.note')}</p>
-      </aside>
-    </section>
-  );
-};
-
-const SafetyPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, formatPath, busyKey, onSafetyLimiterChange, onRefresh }: ModulePanelProps): JSX.Element => {
-  const { t } = useDspI18n();
-  const dspActive = audioStatus?.dspActive === true;
-  const limiterProtecting = audioStatus?.dspLimiterProtecting === true;
-  const safetyLimiterEnabled = eqState.dspSafetyLimiterEnabled !== false;
-  const liveHeadroomDb = finiteLevel(audioStatus?.audioLevels?.headroomDb);
-  const outputPeakDb = finiteLevel(audioStatus?.audioLevels?.estimatedOutputPeakDb);
-  const clipCount = audioStatus?.audioLevels?.clipCount ?? 0;
-  const clippingRisk = hasObservedDspClippingRisk(audioStatus, eqState, roomCorrection, channelBalance, clipCount);
-  const headroomWarning = hasHeadroomWarning(audioStatus, outputPeakDb, liveHeadroomDb);
-  const routeTone: HeadroomTone = limiterProtecting ? 'risk' : clippingRisk || headroomWarning ? 'warn' : dspActive ? 'good' : 'warn';
-  const heroTitleKey: string =
-    limiterProtecting || clippingRisk ? 'dsp.panel.safety.heroRiskTitle' :
-    dspActive ? 'dsp.panel.safety.heroProtectedTitle' :
-    'dsp.panel.safety.heroDirectTitle';
-  const heroDetailKey: string =
-    limiterProtecting || clippingRisk ? 'dsp.panel.safety.heroRiskDetail' :
-    dspActive ? 'dsp.panel.safety.heroProtectedDetail' :
-    'dsp.panel.safety.heroDirectDetail';
-  const nextTitleKey: string =
-    limiterProtecting || clippingRisk ? 'dsp.panel.safety.nextRisk' :
-    dspActive ? 'dsp.panel.safety.nextProtected' :
-    'dsp.panel.safety.nextDirect';
-  const nextDetailKey: string =
-    limiterProtecting || clippingRisk ? 'dsp.panel.safety.nextRiskDetail' :
-    dspActive ? 'dsp.panel.safety.nextProtectedDetail' :
-    'dsp.panel.safety.nextDirectDetail';
-  const activeProcessModules = [
-    eqState.enabled || audioStatus?.eqEnabled ? t('dsp.module.eq.title') : null,
-    roomCorrection.enabled ? t('dsp.module.room.title') : null,
-    channelBalance.enabled || audioStatus?.channelBalanceEnabled ? t('dsp.module.channel.title') : null,
-  ].filter((module): module is string => Boolean(module));
-  const processLabel = activeProcessModules.length > 0 ? activeProcessModules.join(' / ') : t('dsp.status.bypassed');
-  const routeItems = [
-    { key: 'dsp.panel.safety.routeInput', icon: RadioTower, value: audioStatus?.codec ?? t('dsp.status.systemOutput') },
-    { key: 'dsp.panel.safety.routeHeadroom', icon: Gauge, value: formatDb(eqState.dspHeadroomDb ?? audioStatus?.dspHeadroomDb ?? 0) },
-    { key: 'dsp.panel.safety.routeProcess', icon: SlidersHorizontal, value: processLabel },
-    { key: 'dsp.panel.safety.routeOutput', icon: ShieldCheck, value: limiterProtecting ? t('dsp.status.limiting') : clippingRisk ? t('dsp.status.riskDetected') : t('dsp.status.ready') },
+  const Icon = module.icon;
+  const bitPerfectValue = formatPath === 'pcm_bitperfect' || formatPath === 'dsd_direct'
+    ? t('dsp.status.ready')
+    : t('dsp.status.dspPath');
+  const baseReadouts: UzumeUnimplementedReadout[] = [
+    { label: t('dsp.metric.dsp'), value: t('dsp.status.unimplemented'), tone: 'warn' },
+    { label: t('dsp.label.bitPerfect'), value: bitPerfectValue },
   ];
-  const safetyChecks = [
-    {
-      label: t('dsp.panel.safety.checkBitPerfect'),
-      value: dspActive ? t('dsp.status.dspPath') : t('dsp.status.candidate'),
-      tone: dspActive ? undefined : 'good' as HeadroomTone,
-    },
-    {
-      label: t('dsp.panel.safety.checkLimiter'),
-      value: safetyLimiterEnabled
-        ? (limiterProtecting ? t('dsp.status.limiting') : t('dsp.status.limiterArmed'))
-        : t('dsp.panel.safety.limiterBypassed'),
-      tone: !safetyLimiterEnabled ? 'risk' as HeadroomTone : limiterProtecting ? 'risk' as HeadroomTone : 'good' as HeadroomTone,
-    },
-    {
-      label: t('dsp.metric.outputEstimate'),
-      value: formatLevel(outputPeakDb),
-      tone: outputPeakDb !== null && outputPeakDb >= -1 ? 'warn' as HeadroomTone : undefined,
-    },
-    {
-      label: t('dsp.metric.liveHeadroom'),
-      value: formatLevel(liveHeadroomDb),
-      tone: liveHeadroomDb !== null && liveHeadroomDb <= 1 ? 'warn' as HeadroomTone : 'good' as HeadroomTone,
-    },
-    {
-      label: t('dsp.panel.headroom.clipCount'),
-      value: t('dsp.panel.headroom.clipCountValue', { count: String(clipCount) }),
-      tone: clipCount > 0 ? 'risk' as HeadroomTone : 'good' as HeadroomTone,
-    },
-    {
-      label: t('dsp.panel.safety.checkRoom'),
-      value: roomCorrection.enabled ? t('dsp.status.active') : t('dsp.status.bypassed'),
-      tone: roomCorrection.clippingRisk ? 'risk' as HeadroomTone : roomCorrection.enabled ? 'good' as HeadroomTone : undefined,
-    },
-    {
-      label: t('dsp.panel.safety.checkChannel'),
-      value: channelBalance.enabled ? t('dsp.status.active') : t('dsp.status.bypassed'),
-      tone: channelBalance.clippingRisk ? 'risk' as HeadroomTone : channelBalance.enabled ? 'good' as HeadroomTone : undefined,
-    },
-    {
-      label: t('dsp.metric.reason'),
-      value: audioStatus?.bitPerfectDisabledReason ?? t('dsp.status.none'),
-      tone: clippingRisk ? 'risk' as HeadroomTone : undefined,
-    },
-  ];
+  const moduleReadouts = ((): UzumeUnimplementedReadout[] => {
+    if (module.id === 'headroom') {
+      return [
+        { label: t('dsp.metric.compatBackend'), value: 'legacy headroom' },
+        { label: t('dsp.panel.headroom.reserve'), value: formatDb(eqState.dspHeadroomDb ?? audioStatus?.dspHeadroomDb ?? 0) },
+        { label: t('dsp.metric.liveHeadroom'), value: formatLevel(finiteLevel(audioStatus?.audioLevels?.headroomDb)) },
+        { label: t('dsp.metric.outputEstimate'), value: formatLevel(finiteLevel(audioStatus?.audioLevels?.estimatedOutputPeakDb)) },
+      ];
+    }
+
+    if (module.id === 'eq') {
+      return [
+        { label: t('dsp.metric.compatBackend'), value: 'legacy EQ' },
+        { label: t('dsp.metric.status'), value: eqState.enabled || audioStatus?.eqEnabled ? t('dsp.status.active') : t('dsp.status.bypassed') },
+        { label: t('dsp.metric.preset'), value: audioStatus?.eqPresetName || eqState.presetName || t('dsp.status.flat') },
+        { label: t('dsp.metric.preamp'), value: formatDb(eqState.preampDb ?? 0) },
+      ];
+    }
+
+    if (module.id === 'headphone') {
+      const presetName = audioStatus?.eqPresetName || eqState.presetName || '';
+      const opraProfile = presetName.startsWith('耳机校正 -') ? presetName : t('dsp.status.none');
+
+      return [
+        { label: t('dsp.metric.compatBackend'), value: 'Profile EQ' },
+        { label: t('dsp.metric.status'), value: opraProfile === t('dsp.status.none') ? t('dsp.status.bypassed') : t('dsp.status.active') },
+        { label: t('dsp.metric.preset'), value: opraProfile },
+      ];
+    }
+
+    if (module.id === 'room') {
+      return [
+        { label: t('dsp.metric.compatBackend'), value: 'legacy FIR' },
+        { label: t('dsp.metric.status'), value: roomCorrection.enabled ? t('dsp.status.active') : t('dsp.status.bypassed') },
+        { label: t('dsp.metric.ir'), value: roomCorrection.irName ?? t('dsp.status.noIr') },
+        { label: t('dsp.panel.room.trim'), value: formatDb(roomCorrection.trimDb) },
+        { label: t('dsp.metric.latency'), value: roomCorrection.latencySamples > 0 ? `${roomCorrection.latencySamples} samples` : t('dsp.status.none') },
+      ];
+    }
+
+    if (module.id === 'channel') {
+      const monoMode = channelBalance.monoMode ?? 'off';
+
+      return [
+        { label: t('dsp.metric.compatBackend'), value: 'legacy matrix' },
+        { label: t('dsp.metric.status'), value: channelBalance.enabled || audioStatus?.channelBalanceEnabled ? t('dsp.status.active') : t('dsp.status.bypassed') },
+        { label: t('dsp.panel.channel.balance'), value: formatBalancePosition(Number(channelBalance.balance ?? 0)) },
+        { label: t('dsp.metric.mode'), value: t(monoModeKeyMap[monoMode]) },
+        { label: t('dsp.metric.clipping'), value: channelBalance.clippingRisk ? t('dsp.status.riskDetected') : t('dsp.status.clear') },
+      ];
+    }
+
+    if (module.id === 'safety') {
+      const limiterProtecting = audioStatus?.dspLimiterProtecting === true;
+      const safetyLimiterEnabled = eqState.dspSafetyLimiterEnabled !== false;
+
+      return [
+        { label: t('dsp.metric.compatBackend'), value: 'legacy safety' },
+        { label: t('dsp.panel.safety.limiterToggleTitle'), value: safetyLimiterEnabled ? t('dsp.status.limiterArmed') : t('dsp.panel.safety.limiterBypassed'), tone: !safetyLimiterEnabled ? 'risk' : undefined },
+        { label: t('dsp.panel.safety.routeOutput'), value: limiterProtecting ? t('dsp.status.limiting') : t('dsp.status.ready'), tone: limiterProtecting ? 'risk' : undefined },
+        { label: t('dsp.metric.outputEstimate'), value: formatLevel(finiteLevel(audioStatus?.audioLevels?.estimatedOutputPeakDb)) },
+        { label: t('dsp.metric.reason'), value: audioStatus?.bitPerfectDisabledReason ?? t('dsp.status.none') },
+      ];
+    }
+
+    return [];
+  })();
 
   return (
-    <section className="dsp-module-panel dsp-module-panel--safety" data-tone={routeTone}>
-      <div className="dsp-safety-hero">
-        <div className="dsp-safety-emblem">
-          <ShieldCheck size={28} aria-hidden="true" />
-        </div>
+    <section className="dsp-module-panel dsp-module-panel--unimplemented" data-module={module.id} data-state="planned">
+      <div className="dsp-unimplemented-hero">
+        <span className="dsp-unimplemented-icon" aria-hidden="true">
+          <Icon size={26} />
+        </span>
         <div>
-          <p className="dsp-module-kicker">{t('dsp.panel.safety.kicker')}</p>
+          <p className="dsp-module-kicker">{t('dsp.unimplemented.kicker')}</p>
           <div className="dsp-module-heading">
-            <span>{t('dsp.module.safety.title')}</span>
-            <strong>{limiterProtecting ? t('dsp.status.limiting') : clippingRisk ? t('dsp.status.risk') : dspActive ? t('dsp.status.ready') : t('dsp.status.direct')}</strong>
+            <span>{module.title}</span>
+            <strong>{t('dsp.status.unimplemented')}</strong>
           </div>
-          <h2>{t(heroTitleKey)}</h2>
-          <p>{t(heroDetailKey)}</p>
+          <h2>{t('dsp.unimplemented.title', { module: module.title })}</h2>
+          <p>{t('dsp.unimplemented.detail')}</p>
         </div>
       </div>
-      <DspTransitionNotice formatPath={formatPath} moduleId="safety" />
 
-      <div className="dsp-safety-route" aria-label={t('dsp.panel.safety.chainTitle')}>
-        {routeItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <span key={item.key}>
-              <Icon size={17} aria-hidden="true" />
-              <em>{t(item.key)}</em>
-              <strong>{item.value}</strong>
-            </span>
-          );
-        })}
-      </div>
+      <DspTransitionNotice formatPath={formatPath} moduleId={module.id} />
 
-      <div className="dsp-safety-body">
-        <div className="dsp-safety-checks">
-          <div className="dsp-safety-section-head">
-            <span><AudioWaveform size={16} aria-hidden="true" />{t('dsp.panel.safety.checkTitle')}</span>
-          </div>
-          <div className="dsp-module-metrics dsp-safety-metrics">
-            {safetyChecks.map((check) => (
-              <DspMetric key={check.label} label={check.label} value={check.value} tone={check.tone} />
-            ))}
-          </div>
-        </div>
-
-        <aside className="dsp-safety-next">
+      <div className="dsp-unimplemented-grid">
+        <article data-tone="warn">
+          <ShieldCheck size={16} aria-hidden="true" />
           <span>
-            <Info size={16} aria-hidden="true" />
-            <em>{t('dsp.panel.safety.nextTitle')}</em>
+            <strong>{t('dsp.unimplemented.noControl')}</strong>
+            <small>{t('dsp.unimplemented.noControlDetail')}</small>
           </span>
-          <strong>{t(nextTitleKey)}</strong>
-          <p>{t(nextDetailKey)}</p>
-          <div className="dsp-module-actions" role="group" aria-label={t('dsp.panel.safety.limiterToggleTitle')}>
-            <button
-              type="button"
-              data-active={safetyLimiterEnabled}
-              disabled={busyKey === 'safety'}
-              onClick={() => onSafetyLimiterChange(!safetyLimiterEnabled)}
-            >
-              <ShieldCheck size={14} aria-hidden="true" />
-              {safetyLimiterEnabled ? t('dsp.panel.safety.disableLimiter') : t('dsp.panel.safety.enableLimiter')}
-            </button>
-          </div>
-          {!safetyLimiterEnabled ? <p>{t('dsp.panel.safety.limiterBypassedDetail')}</p> : null}
-          <button type="button" onClick={onRefresh}>
-            <Activity size={14} aria-hidden="true" />
-            {t('dsp.action.refresh')}
-          </button>
-        </aside>
+        </article>
+        <article>
+          <Info size={16} aria-hidden="true" />
+          <span>
+            <strong>{t('dsp.unimplemented.compat')}</strong>
+            <small>{t('dsp.unimplemented.compatDetail')}</small>
+          </span>
+        </article>
       </div>
 
-      <p className="dsp-module-note">{t('dsp.panel.safety.note')}</p>
+      <div className="dsp-module-metrics dsp-unimplemented-metrics">
+        {[...baseReadouts, ...moduleReadouts].map((readout) => (
+          <DspMetric key={`${readout.label}:${readout.value}`} label={readout.label} value={readout.value} tone={readout.tone} />
+        ))}
+      </div>
+
+      <p className="dsp-module-note">{t('dsp.unimplemented.note')}</p>
     </section>
   );
 };
@@ -2024,7 +945,6 @@ export const DspPage = (): JSX.Element => {
   const [echoSrcMode, setEchoSrcMode] = useState<AudioEchoSrcMode>('off');
   const [echoSrcQualityProfile, setEchoSrcQualityProfile] = useState<AudioEchoSrcQualityProfile>('transparent');
   const [moduleError, setModuleError] = useState<string | null>(null);
-  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const loadModuleStates = useCallback(async (): Promise<void> => {
     const eq = getEqBridge();
@@ -2089,178 +1009,20 @@ export const DspPage = (): JSX.Element => {
     };
   }, []);
 
-  const runModuleAction = useCallback(async (key: string, action: () => Promise<void>): Promise<void> => {
-    setBusyKey(key);
-    setModuleError(null);
-    try {
-      await action();
-      await refreshPlaybackStatus();
-    } catch (actionError) {
-      setModuleError(actionError instanceof Error ? actionError.message : String(actionError));
-    } finally {
-      setBusyKey(null);
-    }
-  }, []);
-
-  const handleHeadroomChange = useCallback(
-    (headroomDb: number): void => {
-      const eq = getEqBridge();
-      if (!eq?.setDspHeadroom) {
-        setModuleError(t('dsp.error.dspBridge'));
-        return;
-      }
-
-      const safeHeadroomDb = Math.round(clampNumber(headroomDb, dspHeadroomMinDb, dspHeadroomMaxDb) * 10) / 10;
-      setEqState((current) => ({ ...current, dspHeadroomDb: safeHeadroomDb }));
-      void runModuleAction('headroom', async () => {
-        setEqState(await eq.setDspHeadroom(safeHeadroomDb));
-      });
-    },
-    [runModuleAction, t],
-  );
-
-  const handleSafetyLimiterChange = useCallback(
-    (enabled: boolean): void => {
-      const eq = getEqBridge();
-      if (!eq?.setDspSafetyLimiterEnabled) {
-        setModuleError(t('dsp.error.dspBridge'));
-        return;
-      }
-
-      setEqState((current) => ({ ...current, dspSafetyLimiterEnabled: enabled }));
-      void runModuleAction('safety', async () => {
-        setEqState(await eq.setDspSafetyLimiterEnabled(enabled));
-      });
-    },
-    [runModuleAction, t],
-  );
-
-  const handleImportRoomCorrection = useCallback((): void => {
-    const eq = getEqBridge();
-    if (!eq?.importRoomCorrectionIr) {
-      setModuleError(t('dsp.error.firBridge'));
-      return;
-    }
-
-    void runModuleAction('room-import', async () => {
-      const imported = await eq.importRoomCorrectionIr();
-      if (imported) {
-        setRoomCorrection(imported);
-      }
-    });
-  }, [runModuleAction, t]);
-
-  const handleToggleRoomCorrection = useCallback((): void => {
-    const eq = getEqBridge();
-    if (!eq?.setRoomCorrectionEnabled) {
-      setModuleError(t('dsp.error.firBridge'));
-      return;
-    }
-
-    void runModuleAction('room-toggle', async () => {
-      setRoomCorrection(await eq.setRoomCorrectionEnabled(!roomCorrection.enabled));
-    });
-  }, [roomCorrection.enabled, runModuleAction, t]);
-
-  const handleEnableRoomSafely = useCallback((): void => {
-    const eq = getEqBridge();
-    if (!eq?.setDspHeadroom || !eq?.setRoomCorrectionEnabled) {
-      setModuleError(t('dsp.error.firBridge'));
-      return;
-    }
-
-    if (!roomCorrection.irId) {
-      setModuleError(t('dsp.error.firBridge'));
-      return;
-    }
-
-    const safeHeadroomDb = roundHeadroomDb(Math.min(eqState.dspHeadroomDb ?? 0, -6));
-    setEqState((current) => ({ ...current, dspHeadroomDb: safeHeadroomDb }));
-    setRoomCorrection((current) => ({ ...current, enabled: true }));
-    void runModuleAction('room-safe-enable', async () => {
-      setEqState(await eq.setDspHeadroom(safeHeadroomDb));
-      setRoomCorrection(await eq.setRoomCorrectionEnabled(true));
-    });
-  }, [eqState.dspHeadroomDb, roomCorrection.irId, runModuleAction, t]);
-
-  const handleRoomTrimChange = useCallback(
-    (trimDb: number): void => {
-      const eq = getEqBridge();
-      if (!eq?.setRoomCorrectionTrim) {
-        setModuleError(t('dsp.error.firBridge'));
-        return;
-      }
-
-      const safeTrimDb = Math.round(clampNumber(trimDb, roomCorrectionMinTrimDb, roomCorrectionMaxTrimDb) * 10) / 10;
-      setRoomCorrection((current) => ({ ...current, trimDb: safeTrimDb }));
-      void runModuleAction('room-trim', async () => {
-        setRoomCorrection(await eq.setRoomCorrectionTrim(safeTrimDb));
-      });
-    },
-    [runModuleAction, t],
-  );
-
-  const handleClearRoomCorrection = useCallback((): void => {
-    const eq = getEqBridge();
-    if (!eq?.clearRoomCorrection) {
-      setModuleError(t('dsp.error.firBridge'));
-      return;
-    }
-
-    void runModuleAction('room-clear', async () => {
-      setRoomCorrection(await eq.clearRoomCorrection());
-    });
-  }, [runModuleAction, t]);
-
-  const handleChannelPatch = useCallback(
-    (patch: Partial<ChannelBalanceState>): void => {
-      const eq = getEqBridge();
-      if (!eq?.setChannelBalanceState) {
-        setModuleError(t('dsp.error.channelBridge'));
-        return;
-      }
-
-      setChannelBalance((current) => ({ ...current, ...patch }));
-      void runModuleAction('channel', async () => {
-        setChannelBalance(await eq.setChannelBalanceState(patch));
-      });
-    },
-    [runModuleAction, t],
-  );
-
-  const handleChannelReset = useCallback((): void => {
-    const eq = getEqBridge();
-    if (!eq?.resetChannelBalance) {
-      setModuleError(t('dsp.error.channelBridge'));
-      return;
-    }
-
-    void runModuleAction('channel-reset', async () => {
-      setChannelBalance(await eq.resetChannelBalance());
-    });
-  }, [runModuleAction, t]);
-
   const dspActive = audioStatus?.dspActive === true;
   const formatPath = normalizeUzumeFormatPath(audioStatus, dspActive);
   const formatPathLabel = t(getUzumeFormatPathTitleKey(formatPath));
-  const eqEnabled = audioStatus?.eqEnabled ?? eqState.enabled;
-  const activeEqPresetName = audioStatus?.eqPresetName || eqState.presetName || '';
-  const headphoneCorrectionActive = eqEnabled && activeEqPresetName.startsWith('耳机校正 -');
-  const channelBalanceEnabled = audioStatus?.channelBalanceEnabled ?? channelBalance.enabled;
   const outputPeakDb = finiteLevel(audioStatus?.audioLevels?.estimatedOutputPeakDb);
   const liveHeadroomDb = finiteLevel(audioStatus?.audioLevels?.headroomDb);
   const clipCount = audioStatus?.audioLevels?.clipCount ?? 0;
   const clippingRisk = hasObservedDspClippingRisk(audioStatus, eqState, roomCorrection, channelBalance, clipCount);
   const headroomWarning = hasHeadroomWarning(audioStatus, outputPeakDb, liveHeadroomDb);
-  const dspHeadroomDb = eqState.dspHeadroomDb ?? 0;
   const safetyLimiterEnabled = eqState.dspSafetyLimiterEnabled !== false;
   const outputName = audioStatus?.outputDeviceName || t('dsp.status.systemOutput');
   const sampleRate = audioStatus?.actualDeviceSampleRate ?? audioStatus?.requestedOutputSampleRate ?? audioStatus?.fileSampleRate ?? null;
   const echoSrcActive = audioStatus?.echoSrcActive === true;
   const echoSrcEnabled = echoSrcMode !== 'off' || echoSrcActive;
-  const echoSrcSubtitle = echoSrcActive
-    ? t('dsp.status.compatPath')
-    : t('dsp.status.unimplemented');
+  const uzumeModuleStatus = t('dsp.status.unimplemented');
 
   const modules = useMemo<DspModule[]>(
     () => [
@@ -2268,17 +1030,17 @@ export const DspPage = (): JSX.Element => {
         id: 'headroom',
         stageKey: 'dsp.stage.input',
         title: t('dsp.module.headroom.title'),
-        subtitle: formatDb(dspHeadroomDb),
+        subtitle: uzumeModuleStatus,
         description: t('dsp.module.headroom.description'),
         icon: Gauge,
-        enabled: Math.abs(dspHeadroomDb) > 0.05,
+        enabled: false,
         accent: 'blue',
       },
       {
         id: 'src',
         stageKey: 'dsp.stage.src',
         title: t('dsp.module.src.title'),
-        subtitle: echoSrcSubtitle,
+        subtitle: uzumeModuleStatus,
         description: t('dsp.module.src.description'),
         icon: RadioTower,
         enabled: false,
@@ -2288,54 +1050,54 @@ export const DspPage = (): JSX.Element => {
         id: 'eq',
         stageKey: 'dsp.stage.shape',
         title: t('dsp.module.eq.title'),
-        subtitle: audioStatus?.eqPresetName || eqState.presetName || t('dsp.status.flat'),
+        subtitle: uzumeModuleStatus,
         description: t('dsp.module.eq.description'),
         icon: SlidersHorizontal,
-        enabled: eqEnabled,
+        enabled: false,
         accent: 'violet',
       },
       {
         id: 'headphone',
         stageKey: 'dsp.stage.shape',
         title: t('dsp.module.headphone.title'),
-        subtitle: headphoneCorrectionActive ? activeEqPresetName : 'OPRA',
+        subtitle: uzumeModuleStatus,
         description: t('dsp.module.headphone.description'),
         icon: Headphones,
-        enabled: headphoneCorrectionActive,
+        enabled: false,
         accent: 'blue',
       },
       {
         id: 'room',
         stageKey: 'dsp.stage.space',
         title: t('dsp.module.room.title'),
-        subtitle: roomCorrection.irName ?? t('dsp.status.noIr'),
+        subtitle: uzumeModuleStatus,
         description: t('dsp.module.room.description'),
         icon: Waves,
-        enabled: roomCorrection.enabled,
+        enabled: false,
         accent: 'green',
       },
       {
         id: 'channel',
         stageKey: 'dsp.stage.stereo',
         title: t('dsp.module.channel.title'),
-        subtitle: channelBalanceEnabled ? t('dsp.status.balanceActive') : t('dsp.status.stereoDirect'),
+        subtitle: uzumeModuleStatus,
         description: t('dsp.module.channel.description'),
         icon: Headphones,
-        enabled: channelBalanceEnabled,
+        enabled: false,
         accent: 'amber',
       },
       {
         id: 'safety',
         stageKey: 'dsp.stage.output',
         title: t('dsp.module.safety.title'),
-        subtitle: !safetyLimiterEnabled ? t('dsp.panel.safety.limiterBypassed') : audioStatus?.dspLimiterProtecting === true ? t('dsp.status.limiting') : clippingRisk ? t('dsp.status.riskDetected') : headroomWarning ? t('dsp.status.headroomRisk') : t('dsp.status.limiterArmed'),
+        subtitle: uzumeModuleStatus,
         description: t('dsp.module.safety.description'),
         icon: ShieldCheck,
-        enabled: !safetyLimiterEnabled || audioStatus?.dspLimiterProtecting === true || clippingRisk || headroomWarning || dspActive,
+        enabled: false,
         accent: !safetyLimiterEnabled || audioStatus?.dspLimiterProtecting === true || clippingRisk || headroomWarning ? 'amber' : 'green',
       },
     ],
-    [activeEqPresetName, audioStatus?.dspLimiterProtecting, channelBalanceEnabled, clippingRisk, dspActive, dspHeadroomDb, echoSrcEnabled, echoSrcSubtitle, eqEnabled, eqState.presetName, headroomWarning, headphoneCorrectionActive, roomCorrection.enabled, roomCorrection.irName, safetyLimiterEnabled, t],
+    [audioStatus?.dspLimiterProtecting, clippingRisk, echoSrcEnabled, headroomWarning, safetyLimiterEnabled, t, uzumeModuleStatus],
   );
 
   const selectedModule = modules.find((module) => module.id === selectedModuleId) ?? modules[1];
@@ -2343,31 +1105,31 @@ export const DspPage = (): JSX.Element => {
   const pipelineNodes = modules.map((module) => ({
     id: module.id,
     label: t(module.stageKey),
-    value: module.id === 'src' ? module.subtitle : module.enabled ? module.subtitle : t('dsp.status.bypassed'),
+    value: module.subtitle,
     enabled: module.enabled,
     selected: module.id === selectedModuleId,
-    risk: module.id === 'safety' && clippingRisk,
+    risk: false,
   }));
   const uzumeCapabilities = useMemo<UzumeCapability[]>(() => [
     {
       id: 'headroom',
       title: t('dsp.capability.headroom.title'),
       detail: t('dsp.capability.headroom.detail'),
-      state: audioStatus?.uzumeHeadroomActive || (dspActive && Math.abs(dspHeadroomDb) > 0.05) ? 'active' : 'transitional',
+      state: 'planned',
       icon: Gauge,
     },
     {
       id: 'fused-kernel',
       title: t('dsp.capability.fused.title'),
       detail: t('dsp.capability.fused.detail'),
-      state: audioStatus?.uzumeFusedMacroKernel ? 'active' : 'planned',
+      state: 'planned',
       icon: Zap,
     },
     {
       id: 'shared-convolution',
       title: t('dsp.capability.sharedConvolution.title'),
       detail: t('dsp.capability.sharedConvolution.detail'),
-      state: audioStatus?.uzumeTransitionalConvolutionPath ? 'transitional' : 'planned',
+      state: 'planned',
       icon: Waves,
     },
     {
@@ -2388,7 +1150,7 @@ export const DspPage = (): JSX.Element => {
       id: 'gpu-render-ahead',
       title: t('dsp.capability.gpu.title'),
       detail: t('dsp.capability.gpu.detail'),
-      state: audioStatus?.uzumeGpuLimiterPlaybackActive || audioStatus?.uzumeGpuMatrixPlaybackActive || audioStatus?.uzumeGpuFftConvolutionPrepared ? 'transitional' : 'planned',
+      state: 'planned',
       icon: Activity,
     },
     {
@@ -2398,7 +1160,7 @@ export const DspPage = (): JSX.Element => {
       state: 'planned',
       icon: Gauge,
     },
-  ], [audioStatus?.uzumeFusedMacroKernel, audioStatus?.uzumeGpuFftConvolutionPrepared, audioStatus?.uzumeGpuLimiterPlaybackActive, audioStatus?.uzumeGpuMatrixPlaybackActive, audioStatus?.uzumeHeadroomActive, audioStatus?.uzumeTransitionalConvolutionPath, dspActive, dspHeadroomDb, t]);
+  ], [t]);
   const panelProps: ModulePanelProps = {
     audioStatus,
     eqState,
@@ -2407,16 +1169,6 @@ export const DspPage = (): JSX.Element => {
     formatPath,
     echoSrcMode,
     echoSrcQualityProfile,
-    busyKey,
-    onHeadroomChange: handleHeadroomChange,
-    onSafetyLimiterChange: handleSafetyLimiterChange,
-    onImportRoomCorrection: handleImportRoomCorrection,
-    onToggleRoomCorrection: handleToggleRoomCorrection,
-    onEnableRoomSafely: handleEnableRoomSafely,
-    onRoomTrimChange: handleRoomTrimChange,
-    onClearRoomCorrection: handleClearRoomCorrection,
-    onChannelPatch: handleChannelPatch,
-    onChannelReset: handleChannelReset,
     onRefresh: () => {
       void loadModuleStates();
       void refreshPlaybackStatus();
@@ -2456,7 +1208,7 @@ export const DspPage = (): JSX.Element => {
                     type="button"
                     className="dsp-chain-item"
                     data-active={module.enabled}
-                    data-state={module.id === 'src' ? 'planned' : module.enabled ? 'active' : 'bypassed'}
+                    data-state="planned"
                     data-selected={isSelected}
                     data-accent={module.accent}
                     onClick={() => setSelectedModuleId(module.id)}
@@ -2519,7 +1271,7 @@ export const DspPage = (): JSX.Element => {
             </span>
             <span>
               <em>{t('dsp.label.moduleStatus')}</em>
-              <strong>{selectedModule.id === 'src' ? t('dsp.status.unimplemented') : selectedModule.enabled ? t('dsp.status.active') : t('dsp.status.bypassed')}</strong>
+              <strong>{t('dsp.status.unimplemented')}</strong>
             </span>
             <span>
               <em>{t('dsp.label.bitPerfect')}</em>
@@ -2537,29 +1289,8 @@ export const DspPage = (): JSX.Element => {
           {error || moduleError ? <p className="dsp-status-error">{moduleError ?? error}</p> : null}
 
           <div className="dsp-editor-shell" data-module={selectedModuleId}>
-            {selectedModuleId === 'headroom' ? <HeadroomPanel {...panelProps} /> : null}
             {selectedModuleId === 'src' ? <EchoSrcPanel {...panelProps} /> : null}
-            {selectedModuleId === 'eq' ? (
-              <>
-                <DspTransitionNotice formatPath={formatPath} moduleId="eq" />
-                <EqPanel audioStatus={audioStatus} onAudioStatusRefresh={() => void refreshPlaybackStatus()} surface="eq-only" />
-              </>
-            ) : null}
-            {selectedModuleId === 'headphone' ? (
-              <>
-                <DspTransitionNotice formatPath={formatPath} moduleId="headphone" />
-                <HeadphoneCorrectionPanel
-                  eqState={eqState}
-                  onApplied={setEqState}
-                  onAppliedStatusRefresh={() => {
-                    void refreshPlaybackStatus();
-                  }}
-                />
-              </>
-            ) : null}
-            {selectedModuleId === 'room' ? <RoomCorrectionPanel {...panelProps} /> : null}
-            {selectedModuleId === 'channel' ? <ChannelPanel {...panelProps} /> : null}
-            {selectedModuleId === 'safety' ? <SafetyPanel {...panelProps} /> : null}
+            {selectedModuleId !== 'src' ? <UzumeUnimplementedPanel {...panelProps} module={selectedModule} /> : null}
           </div>
         </section>
       </div>

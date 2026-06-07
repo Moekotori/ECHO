@@ -118,6 +118,10 @@ const openSrcPanel = (): void => {
   fireEvent.click(screen.getByRole('button', { name: /UZUME SRC \/ PCM/u }));
 };
 
+const openModulePanel = (name: RegExp): void => {
+  fireEvent.click(screen.getByRole('button', { name }));
+};
+
 beforeEach(() => {
   audioStatus = baseAudioStatus();
   settings = {
@@ -176,9 +180,38 @@ describe('DspPage UZUME SRC surface', () => {
     expect(screen.getByText('UZUME Poly-Sinc SRC 未实现')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /A\/B 原生/u })).toBeNull();
     expect(screen.queryByRole('button', { name: /Transparent/u })).toBeNull();
+    expect(screen.queryByRole('button', { name: /2x PCM/u })).toBeNull();
 
-    const planned2x = screen.getByRole('button', { name: /2x PCM待实现/u }) as HTMLButtonElement;
-    expect(planned2x.disabled).toBe(true);
+    expect(screen.getByText('2x PCM')).toBeTruthy();
+    expect(screen.getAllByText('未实现').length).toBeGreaterThan(0);
+    expect(screen.getByText('Headroom 未实现')).toBeTruthy();
+    expect(screen.getByText('EQ 未实现')).toBeTruthy();
+    expect(screen.getByText('OPRA 未实现')).toBeTruthy();
+    expect(screen.getByText('FIR 未实现')).toBeTruthy();
+    expect(screen.getByText('Matrix 未实现')).toBeTruthy();
+    expect(screen.getByText('Safety 未实现')).toBeTruthy();
+  });
+
+  it('renders every UZUME child module as a read-only unimplemented surface', () => {
+    renderDspPage();
+
+    [
+      { button: /UZUME Headroom/u, title: 'UZUME Headroom 未实现' },
+      { button: /UZUME EQ/u, title: 'UZUME EQ 未实现' },
+      { button: /OPRA Headphone/u, title: 'OPRA Headphone 未实现' },
+      { button: /UZUME FIR/u, title: 'UZUME FIR 未实现' },
+      { button: /UZUME Matrix/u, title: 'UZUME Matrix 未实现' },
+      { button: /UZUME Safety/u, title: 'UZUME Safety 未实现' },
+    ].forEach((module) => {
+      openModulePanel(module.button);
+
+      expect(screen.getByText(module.title)).toBeTruthy();
+      expect(screen.getByText('没有 UZUME 控件')).toBeTruthy();
+      expect(screen.getByText('兼容读数')).toBeTruthy();
+    });
+
+    expect(screen.queryByTestId('eq-panel')).toBeNull();
+    expect(screen.queryByTestId('headphone-panel')).toBeNull();
   });
 
   it('shows active SOXR upsampling as a compatibility path, not a UZUME implementation', () => {
