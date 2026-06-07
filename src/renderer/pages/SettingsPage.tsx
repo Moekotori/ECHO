@@ -12739,7 +12739,7 @@ export const SettingsPage = (): JSX.Element => {
                   <div className="settings-status-grid settings-status-grid--audio">
                     <span>
                       <em>Signal path</em>
-                      <strong>{status?.dspActive ? 'DSP path' : 'Native direct'}</strong>
+                      <strong>{status?.dspActive ? 'UZUME path' : 'Native direct'}</strong>
                     </span>
                     <span>
                       <em>EQ</em>

@@ -193,7 +193,7 @@ export const PlayerStatusChips = ({ hqPlayerActiveRate = null, status, state, tr
         : null,
     status?.roomCorrectionEnabled ? { label: 'FIR', className: 'tag-warning' } : null,
     status?.dspLimiterProtecting ? { label: 'Protect', className: 'tag-warning' } : null,
-    !status?.dspLimiterProtecting && status?.dspClippingRisk ? { label: 'DSP Risk', className: 'tag-warning' } : null,
+    !status?.dspLimiterProtecting && status?.dspClippingRisk ? { label: 'UZUME Risk', className: 'tag-warning' } : null,
     status?.dspActive && Math.abs(status?.dspHeadroomDb ?? 0) > 0.05 ? { label: `Headroom ${status?.dspHeadroomDb?.toFixed(1)}dB`, className: 'tag-warning' } : null,
     status?.eqEnabled ? { label: 'EQ', className: 'tag-warning' } : null,
     status?.channelBalanceEnabled ? { label: 'Balance', className: 'tag-warning' } : null,

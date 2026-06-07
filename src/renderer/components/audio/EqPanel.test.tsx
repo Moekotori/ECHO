@@ -269,7 +269,7 @@ describe('EqPanel', () => {
     expect(screen.getByText('Bit-perfect')).toBeTruthy();
   });
 
-  it('keeps detached DSP modules out of the EQ-only surface', async () => {
+  it('keeps detached UZUME sections out of the EQ-only surface', async () => {
     const { container } = renderEqPanel(audioStatus, { surface: 'eq-only' });
 
     await screen.findByRole('img', { name: 'Draggable 31-band EQ frequency response' });
@@ -336,18 +336,18 @@ describe('EqPanel', () => {
     await waitFor(() => expect(window.echo.eq.listPresets).toHaveBeenCalled());
   });
 
-  it('shows readable DSP comfort guidance in Simple mode', async () => {
+  it('shows readable UZUME comfort guidance in Simple mode', async () => {
     renderEqPanel();
 
     expect(await screen.findByText('Sound is being shaped')).toBeTruthy();
-    expect(screen.getByText('Only enabled DSP modules are processed. Turn them off to return to the native playback path.')).toBeTruthy();
+    expect(screen.getByText('Only enabled UZUME sections are processed. Turn them off to return to the native playback path.')).toBeTruthy();
 
     cleanup();
     vi.mocked(window.echo.eq.getState).mockResolvedValue(eqState({ enabled: false }));
     renderEqPanel(null);
 
     expect(await screen.findByText('Native direct')).toBeTruthy();
-    expect(screen.getByText('When DSP is off, volume is not reduced and samples are not changed. Good for hearing the original path.')).toBeTruthy();
+    expect(screen.getByText('When UZUME sections are off, volume is not reduced and samples are not changed. Good for hearing the original path.')).toBeTruthy();
   });
 
   it('applies a beginner-friendly Simple tone curve with safe preamp', async () => {
@@ -585,7 +585,7 @@ describe('EqPanel', () => {
     expect((await screen.findAllByText('IR too long')).length).toBeGreaterThan(0);
   });
 
-  it('names Room Correction as the bit-perfect DSP source', async () => {
+  it('names Room Correction as the bit-perfect UZUME source', async () => {
     vi.mocked(window.echo.eq.getRoomCorrectionState).mockResolvedValue(roomCorrectionState({
       enabled: true,
       status: 'active',
@@ -599,7 +599,7 @@ describe('EqPanel', () => {
     renderEqPanel({ ...audioStatus, eqEnabled: false, dspActive: true, bitPerfectDisabledReason: 'room_correction_enabled', warnings: ['room_correction_bit_perfect_disabled'] });
     await showAdvancedEqTools();
 
-    expect((await screen.findAllByText('DSP active: bit-perfect disabled (Room Correction).')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('UZUME active: bit-perfect disabled (Room Correction).')).length).toBeGreaterThan(0);
   });
 
   it('updates PEQ band Q, filter type, and bypass state from the advanced inspector', async () => {
@@ -858,7 +858,7 @@ describe('EqPanel', () => {
     expect(screen.getAllByText('-5.2 dB').length).toBeGreaterThan(0);
     expect(screen.getByText('Est. output peak')).toBeTruthy();
     expect(screen.getAllByText('Headroom').length).toBeGreaterThan(0);
-    expect(screen.getByText(/pre-native \+ DSP estimate/)).toBeTruthy();
+    expect(screen.getByText(/pre-native \+ UZUME estimate/)).toBeTruthy();
     expect(screen.getByText(/Clips 3/)).toBeTruthy();
   });
 

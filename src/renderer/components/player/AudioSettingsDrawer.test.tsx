@@ -70,14 +70,14 @@ const testTranslations: Record<string, string> = {
   'audioProfessional.action.refresh': 'Refresh status',
   'audioProfessional.action.showDetails': 'Show professional details',
   'audioProfessional.badge.bitPerfect': 'Bit-perfect',
-  'audioProfessional.badge.dsp': 'DSP active',
+  'audioProfessional.badge.dsp': 'UZUME active',
   'audioProfessional.badge.replayGain': 'ReplayGain',
   'audioProfessional.badge.resampling': 'Resampling',
   'audioProfessional.badge.sampleMismatch': 'Sample-rate mismatch',
   'audioProfessional.badge.upsampling': 'Upsampling',
   'audioProfessional.badge.warning': 'Device issue/warning',
   'audioProfessional.issue.reason': 'Reason',
-  'audioProfessional.group.directDsp': 'Direct And DSP',
+  'audioProfessional.group.directDsp': 'Direct And UZUME',
   'audioProfessional.group.playbackChain': 'Playback Chain',
   'audioProfessional.group.sampleRate': 'Sample-Rate Chain',
   'audioProfessional.group.stability': 'Stability',
@@ -554,17 +554,17 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
     expect(screen.getByText('Professional Playback Status')).toBeTruthy();
     expect(screen.getByText('Bit-perfect')).toBeTruthy();
     expect(screen.getByText('Resampling')).toBeTruthy();
-    expect(screen.getByText('DSP active')).toBeTruthy();
+    expect(screen.getByText('UZUME active')).toBeTruthy();
     expect(screen.getByText('ReplayGain')).toBeTruthy();
     expect(screen.getByText('Sample-rate mismatch')).toBeTruthy();
     expect(screen.getByText('Device issue/warning')).toBeTruthy();
     expect(screen.getByText('Reason')).toBeTruthy();
     expect(screen.getByText('native buffer recovered')).toBeTruthy();
-    expect(screen.queryByText('Direct And DSP')).toBeNull();
+    expect(screen.queryByText('Direct And UZUME')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /Show professional details/ }));
 
-    expect(screen.getByText('Direct And DSP')).toBeTruthy();
+    expect(screen.getByText('Direct And UZUME')).toBeTruthy();
     expect(screen.queryByRole('checkbox', { name: /JUCE Main Output/ })).toBeNull();
   });
 

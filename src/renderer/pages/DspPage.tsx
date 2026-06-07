@@ -130,19 +130,40 @@ const dspLocalText: Record<string, string> = {
   'dsp.action.refresh': '刷新状态',
   'dsp.action.reset': '重置',
   'dsp.action.save': '保存',
-  'dsp.aria.chain': 'DSP 模块链',
-  'dsp.aria.modules': 'DSP 模块',
-  'dsp.aria.pipeline': 'DSP 路径',
-  'dsp.aria.workspace': 'DSP 工作区',
-  'dsp.brand.subtitle': 'Signal Control',
-  'dsp.module.src.description': 'PCM 采样率转换',
-  'dsp.module.src.title': 'SRC / 升频',
+  'dsp.aria.capabilities': 'UZUME 能力控制',
+  'dsp.aria.chain': 'UZUME section 链',
+  'dsp.aria.modules': 'UZUME sections',
+  'dsp.aria.pipeline': 'UZUME 路径',
+  'dsp.aria.workspace': 'UZUME 工作区',
+  'dsp.brand.subtitle': 'Signal Engine',
+  'dsp.capability.avx.detail': 'CPU SIMD backend 将在 UZUME kernel ABI 冻结后接入。',
+  'dsp.capability.avx.title': 'AVX2 / AVX512',
+  'dsp.capability.dsd.detail': 'DSD direct / D2P / SDM family 尚未接入 UI 可用路径。',
+  'dsp.capability.dsd.title': 'DSD family',
+  'dsp.capability.fused.detail': 'RPC-001 仍是 skeleton / transitional path，不能声明完整 fused macro-kernel。',
+  'dsp.capability.fused.title': 'Fused macro-kernel',
+  'dsp.capability.gpu.detail': '当前只暴露 limiter / matrix / FIR scratch 片段，完整 profile offload 未开放。',
+  'dsp.capability.gpu.title': 'GPU render-ahead',
+  'dsp.capability.headroom.detail': 'Headroom 已能激活 UZUME processed path。',
+  'dsp.capability.headroom.title': 'Headroom section',
+  'dsp.capability.polySinc.detail': '当前 PCM SRC 仍来自 ECHO/SOXR 兼容路径，UZUME Poly-Sinc 尚未落地。',
+  'dsp.capability.polySinc.title': 'UZUME Poly-Sinc SRC',
+  'dsp.capability.sharedConvolution.detail': '当前 FIR 使用 transitional/legacy convolver source，Shared Convolution Engine 未启用。',
+  'dsp.capability.sharedConvolution.title': 'Shared convolution',
+  'dsp.capability.state.active': '可用',
+  'dsp.capability.state.planned': '待实现',
+  'dsp.capability.state.transitional': '过渡',
+  'dsp.capability.state.unavailable': '不可用',
+  'dsp.capability.stripTitle': 'RPC-001 能力面',
+  'dsp.capability.stripDetail': '已完成的 section 可用；未完成的 UZUME 能力以禁用控件保留，不藏进设置开关。',
+  'dsp.module.src.description': 'PCM rate plan',
+  'dsp.module.src.title': 'UZUME SRC / PCM',
   'dsp.panel.src.abBypass': 'A/B 原生',
   'dsp.panel.src.abRestore': '恢复升频',
   'dsp.panel.src.active': '正在升频',
   'dsp.panel.src.bypassDsd': 'DSD 输出旁路',
   'dsp.panel.src.bypassShared': '共享输出旁路',
-  'dsp.panel.src.detail': '独立于 HQPlayer 的本机 PCM SRC。默认关闭；开启后会进入 DSP 路径并不再标记 bit-perfect。',
+  'dsp.panel.src.detail': 'UZUME UI 现在承接 PCM rate plan；RPC-001 仍使用 ECHO/SOXR 兼容 SRC，开启后会进入 UZUME processed path 并不再标记 bit-perfect。',
   'dsp.panel.src.engine': '引擎',
   'dsp.panel.src.kicker': '采样率转换',
   'dsp.panel.src.mode': '模式',
@@ -157,16 +178,16 @@ const dspLocalText: Record<string, string> = {
   'dsp.stage.src': '采样率',
   'dsp.error.channelBridge': '声道工具不可用。',
   'dsp.error.desktopBridge': '桌面桥接不可用。',
-  'dsp.error.dspBridge': 'DSP 桥接不可用。',
+  'dsp.error.dspBridge': 'UZUME 参数桥接不可用。',
   'dsp.error.firBridge': 'FIR 桥接不可用。',
   'dsp.label.bitPerfect': 'Bit-perfect',
   'dsp.label.currentModule': '当前模块',
-  'dsp.label.module': 'DSP 模块',
+  'dsp.label.module': 'UZUME section',
   'dsp.label.moduleStatus': '模块状态',
   'dsp.label.output': '输出',
   'dsp.metric.bitPerfect': 'Bit-perfect',
   'dsp.metric.clipping': '削波',
-  'dsp.metric.dsp': 'DSP',
+  'dsp.metric.dsp': 'UZUME',
   'dsp.metric.inputPeak': '输入峰值',
   'dsp.metric.ir': 'IR',
   'dsp.metric.latency': '延迟',
@@ -176,18 +197,18 @@ const dspLocalText: Record<string, string> = {
   'dsp.metric.reason': '原因',
   'dsp.metric.sampleRate': '采样率',
   'dsp.metric.taps': 'Taps',
-  'dsp.module.channel.description': '平衡、延迟、Mono',
-  'dsp.module.channel.title': '声道工具',
-  'dsp.module.eq.description': '频段、前级、预设',
-  'dsp.module.eq.title': '参数 EQ',
-  'dsp.module.headroom.description': 'DSP 前余量预留',
-  'dsp.module.headroom.title': 'Headroom',
-  'dsp.module.headphone.description': 'OPRA 耳机曲线',
-  'dsp.module.headphone.title': '耳机校正',
-  'dsp.module.room.description': '只处理 IR 卷积',
-  'dsp.module.room.title': 'FIR / 房间校正',
-  'dsp.module.safety.description': '只监控输出链',
-  'dsp.module.safety.title': '输出安全',
+  'dsp.module.channel.description': 'Matrix / delay / mono',
+  'dsp.module.channel.title': 'UZUME Matrix',
+  'dsp.module.eq.description': 'Profile EQ / OPRA',
+  'dsp.module.eq.title': 'UZUME EQ',
+  'dsp.module.headroom.description': '处理前余量',
+  'dsp.module.headroom.title': 'UZUME Headroom',
+  'dsp.module.headphone.description': 'OPRA profile source',
+  'dsp.module.headphone.title': 'OPRA Headphone',
+  'dsp.module.room.description': 'Transitional FIR source',
+  'dsp.module.room.title': 'UZUME FIR',
+  'dsp.module.safety.description': 'Limiter / bit-perfect',
+  'dsp.module.safety.title': 'UZUME Safety',
   'dsp.panel.channel.advanced': '高级声道',
   'dsp.panel.channel.balance': '声像平衡',
   'dsp.panel.channel.bandCompensation': '分频段左右补偿',
@@ -258,31 +279,31 @@ const dspLocalText: Record<string, string> = {
   'dsp.panel.headroom.makeSafe': '设为 {value}',
   'dsp.panel.headroom.modeAria': 'Headroom 模式',
   'dsp.panel.headroom.modeDaily': '日常',
-  'dsp.panel.headroom.modeDailyDetail': '轻量 DSP 预留。',
+  'dsp.panel.headroom.modeDailyDetail': '轻量 UZUME 预留。',
   'dsp.panel.headroom.modeDirect': '直通',
   'dsp.panel.headroom.modeDirectDetail': '不额外降低电平。',
-  'dsp.panel.headroom.modeDsp': 'DSP',
-  'dsp.panel.headroom.modeDspDetail': '给 EQ/FIR 留出安全空间。',
+  'dsp.panel.headroom.modeDsp': 'UZUME',
+  'dsp.panel.headroom.modeDspDetail': '给 EQ / FIR / Matrix 留出安全空间。',
   'dsp.panel.headroom.nextDirect': '保持直通',
-  'dsp.panel.headroom.nextDirectDetail': '当前没有需要预留的 DSP 风险。',
+  'dsp.panel.headroom.nextDirectDetail': '当前没有需要预留的 UZUME 风险。',
   'dsp.panel.headroom.nextHoldRisk': '先降低余量',
   'dsp.panel.headroom.nextHoldRiskDetail': '检测到削波风险，建议先预留 Headroom。',
   'dsp.panel.headroom.nextProtect': '应用保护余量',
   'dsp.panel.headroom.nextProtectDetail': '当前输出接近满幅，建议立即降低。',
   'dsp.panel.headroom.nextReady': '继续监听',
-  'dsp.panel.headroom.nextReadyDetail': 'DSP 已有安全余量。',
+  'dsp.panel.headroom.nextReadyDetail': 'UZUME 已有安全余量。',
   'dsp.panel.headroom.nextStandby': '保持待命',
-  'dsp.panel.headroom.nextStandbyDetail': '有 DSP 模块开启，但暂未检测到风险。',
+  'dsp.panel.headroom.nextStandbyDetail': '有 UZUME section 开启，但暂未检测到风险。',
   'dsp.panel.headroom.nextStep': '下一步',
   'dsp.panel.headroom.nextWatch': '观察输出',
   'dsp.panel.headroom.nextWatchDetail': '输出接近上限，建议留意削波。',
   'dsp.panel.headroom.noClip': '无记录',
-  'dsp.panel.headroom.note': 'Headroom 只负责预留电平空间，不再混进 EQ 或 FIR 的具体调音。',
+  'dsp.panel.headroom.note': 'Headroom 只负责预留电平空间；RPC-001 中它已经能单独激活 UZUME processed path。',
   'dsp.panel.headroom.presetsAria': 'Headroom 预设',
   'dsp.panel.headroom.primaryAction': '应用 {value}',
   'dsp.panel.headroom.reasonChannel': '声道工具可能提高电平。',
   'dsp.panel.headroom.reasonClipping': '检测到削波。',
-  'dsp.panel.headroom.reasonDirect': 'Headroom 只在 DSP 路径生效；当前 EQ / FIR / 声道工具都未启用，原生直通不会被它处理。',
+  'dsp.panel.headroom.reasonDirect': 'Headroom 只在 UZUME processed path 生效；当前 EQ / FIR / Matrix 都未启用，原生直通不会被它处理。',
   'dsp.panel.headroom.reasonEq': 'EQ 曲线可能提高电平。',
   'dsp.panel.headroom.reasonLive': '实时余量偏低。',
   'dsp.panel.headroom.reasonOutput': '输出估算接近满幅。',
@@ -299,14 +320,14 @@ const dspLocalText: Record<string, string> = {
   'dsp.panel.headroom.statusSafe': '安全',
   'dsp.panel.room.future.recent': '最近 IR',
   'dsp.panel.room.future.response': '响应预览',
-  'dsp.panel.room.hero.activeDetail': '卷积正在参与输出链。',
+  'dsp.panel.room.hero.activeDetail': 'Transitional FIR convolver 正在参与 UZUME 输出链。',
   'dsp.panel.room.hero.activeTitle': 'FIR 已启用',
   'dsp.panel.room.hero.emptyDetail': '导入 IR 后才能启用房间校正。',
   'dsp.panel.room.hero.emptyTitle': '未载入 IR',
   'dsp.panel.room.hero.loadedDetail': 'IR 已载入，可以启用。',
   'dsp.panel.room.hero.loadedTitle': 'IR 已载入',
   'dsp.panel.room.hero.state': '状态',
-  'dsp.panel.room.kicker': '空间处理',
+  'dsp.panel.room.kicker': 'FIR / transitional',
   'dsp.panel.room.nextEnable': '启用 FIR',
   'dsp.panel.room.nextEnableDetail': 'IR 已准备好，可以试听。',
   'dsp.panel.room.nextImport': '导入 IR',
@@ -315,7 +336,7 @@ const dspLocalText: Record<string, string> = {
   'dsp.panel.room.nextListenDetail': '确认校正后音量和相位正常。',
   'dsp.panel.room.nextTrim': '降低 Trim',
   'dsp.panel.room.nextTrimDetail': 'FIR 输出存在削波风险。',
-  'dsp.panel.room.note': 'FIR / 房间校正只处理卷积和 IR，不再和 EQ 预设混在一起。',
+  'dsp.panel.room.note': 'RPC-001 中 FIR 仍是 transitional convolver source；正式 Shared Convolution Engine 尚未启用。',
   'dsp.panel.room.quickTrim': '快速 Trim',
   'dsp.panel.room.routeTitle': '路径',
   'dsp.panel.room.safeEnableHint': '先预留 -6 dB Headroom，再启用 FIR。',
@@ -325,20 +346,20 @@ const dspLocalText: Record<string, string> = {
   'dsp.panel.room.trim': 'Trim',
   'dsp.panel.safety.kicker': '输出安全',
   'dsp.panel.safety.heroProtectedTitle': '输出链路受保护',
-  'dsp.panel.safety.heroProtectedDetail': 'DSP 正在参与播放，输出安全会持续监控削波、余量和 bit-perfect 路径。',
+  'dsp.panel.safety.heroProtectedDetail': 'UZUME 正在参与播放，输出安全会持续监控削波、余量和 bit-perfect 路径。',
   'dsp.panel.safety.heroRiskTitle': '检测到输出风险',
   'dsp.panel.safety.heroRiskDetail': '当前链路有削波或余量风险，先降低 Headroom、EQ 增益或 FIR Trim。',
   'dsp.panel.safety.heroDirectTitle': '原生直通',
-  'dsp.panel.safety.heroDirectDetail': '没有启用 DSP 模块时，播放保持 bit-perfect 候选路径，输出安全只做状态观察。',
+  'dsp.panel.safety.heroDirectDetail': '没有启用 UZUME section 时，播放保持 bit-perfect 候选路径，输出安全只做状态观察。',
   'dsp.panel.safety.chainTitle': '当前链路',
   'dsp.panel.safety.checkTitle': '安全检查',
   'dsp.panel.safety.nextTitle': '建议动作',
   'dsp.panel.safety.nextRisk': '先处理余量',
-  'dsp.panel.safety.nextRiskDetail': '有风险时不要继续叠加 EQ / FIR 增益，优先降 Headroom 或相关模块 Trim。',
+  'dsp.panel.safety.nextRiskDetail': '有风险时不要继续叠加 EQ / FIR 增益，优先降 Headroom 或相关 section Trim。',
   'dsp.panel.safety.nextProtected': '继续监听',
-  'dsp.panel.safety.nextProtectedDetail': '链路处于 DSP 路径但没有发现削波风险，可以继续观察实时输出。',
+  'dsp.panel.safety.nextProtectedDetail': '链路处于 UZUME processed path 但没有发现削波风险，可以继续观察实时输出。',
   'dsp.panel.safety.nextDirect': '保持直通',
-  'dsp.panel.safety.nextDirectDetail': '当前没有 DSP 处理，适合确认原始输出、设备采样率和 bit-perfect 候选状态。',
+  'dsp.panel.safety.nextDirectDetail': '当前没有 UZUME 处理，适合确认原始输出、设备采样率和 bit-perfect 候选状态。',
   'dsp.panel.safety.routeInput': '输入',
   'dsp.panel.safety.routeHeadroom': '余量',
   'dsp.panel.safety.routeProcess': '处理',
@@ -369,13 +390,13 @@ const dspLocalText: Record<string, string> = {
   'dsp.status.candidate': '候选',
   'dsp.status.clear': '正常',
   'dsp.status.direct': '直通',
-  'dsp.status.disabledByDsp': 'DSP 路径',
-  'dsp.status.dspPath': 'DSP 路径',
+  'dsp.status.disabledByDsp': 'UZUME 路径',
+  'dsp.status.dspPath': 'UZUME 路径',
   'dsp.status.flat': 'Flat',
   'dsp.status.headroomRisk': '余量风险',
   'dsp.status.limiterArmed': '待命',
   'dsp.status.limiting': '正在限幅',
-  'dsp.status.modulesActive': '{count} 个模块启用',
+  'dsp.status.modulesActive': '{count} 个 section 启用',
   'dsp.status.nativeDirect': 'Bit-perfect 路径',
   'dsp.status.noIr': '无 IR',
   'dsp.status.none': '无',
@@ -647,6 +668,68 @@ const DspMetric = ({ label, value, tone }: { label: string; value: string; tone?
     <strong>{value}</strong>
   </span>
 );
+
+type UzumeCapabilityState = 'active' | 'transitional' | 'planned' | 'unavailable';
+
+type UzumeCapability = {
+  id: string;
+  title: string;
+  detail: string;
+  state: UzumeCapabilityState;
+  icon: LucideIcon;
+};
+
+const getUzumeCapabilityStateLabelKey = (state: UzumeCapabilityState): string => {
+  if (state === 'active') {
+    return 'dsp.capability.state.active';
+  }
+  if (state === 'transitional') {
+    return 'dsp.capability.state.transitional';
+  }
+  if (state === 'unavailable') {
+    return 'dsp.capability.state.unavailable';
+  }
+
+  return 'dsp.capability.state.planned';
+};
+
+const UzumeCapabilityStrip = ({ capabilities }: { capabilities: UzumeCapability[] }): JSX.Element => {
+  const { t } = useDspI18n();
+
+  return (
+    <section className="dsp-capability-strip" aria-label={t('dsp.aria.capabilities')}>
+      <div className="dsp-capability-strip__head">
+        <span>
+          <Zap size={15} aria-hidden="true" />
+          {t('dsp.capability.stripTitle')}
+        </span>
+        <p>{t('dsp.capability.stripDetail')}</p>
+      </div>
+      <div className="dsp-capability-controls" role="group" aria-label={t('dsp.aria.capabilities')}>
+        {capabilities.map((capability) => {
+          const Icon = capability.icon;
+
+          return (
+            <button
+              type="button"
+              aria-disabled="true"
+              data-state={capability.state}
+              disabled
+              key={capability.id}
+              title={capability.detail}
+            >
+              <Icon size={15} aria-hidden="true" />
+              <span>
+                <strong>{capability.title}</strong>
+                <small>{t(getUzumeCapabilityStateLabelKey(capability.state))}</small>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+};
 
 const EchoSrcPanel = ({
   audioStatus,
@@ -2193,6 +2276,57 @@ export const DspPage = (): JSX.Element => {
     selected: module.id === selectedModuleId,
     risk: module.id === 'safety' && clippingRisk,
   }));
+  const uzumeCapabilities = useMemo<UzumeCapability[]>(() => [
+    {
+      id: 'headroom',
+      title: t('dsp.capability.headroom.title'),
+      detail: t('dsp.capability.headroom.detail'),
+      state: audioStatus?.uzumeHeadroomActive || (dspActive && Math.abs(dspHeadroomDb) > 0.05) ? 'active' : 'transitional',
+      icon: Gauge,
+    },
+    {
+      id: 'fused-kernel',
+      title: t('dsp.capability.fused.title'),
+      detail: t('dsp.capability.fused.detail'),
+      state: audioStatus?.uzumeFusedMacroKernel ? 'active' : 'planned',
+      icon: Zap,
+    },
+    {
+      id: 'shared-convolution',
+      title: t('dsp.capability.sharedConvolution.title'),
+      detail: t('dsp.capability.sharedConvolution.detail'),
+      state: audioStatus?.uzumeTransitionalConvolutionPath ? 'transitional' : 'planned',
+      icon: Waves,
+    },
+    {
+      id: 'poly-sinc-src',
+      title: t('dsp.capability.polySinc.title'),
+      detail: t('dsp.capability.polySinc.detail'),
+      state: 'planned',
+      icon: RadioTower,
+    },
+    {
+      id: 'dsd-family',
+      title: t('dsp.capability.dsd.title'),
+      detail: t('dsp.capability.dsd.detail'),
+      state: 'planned',
+      icon: AudioWaveform,
+    },
+    {
+      id: 'gpu-render-ahead',
+      title: t('dsp.capability.gpu.title'),
+      detail: t('dsp.capability.gpu.detail'),
+      state: audioStatus?.uzumeGpuLimiterPlaybackActive || audioStatus?.uzumeGpuMatrixPlaybackActive || audioStatus?.uzumeGpuFftConvolutionPrepared ? 'transitional' : 'planned',
+      icon: Activity,
+    },
+    {
+      id: 'avx-backend',
+      title: t('dsp.capability.avx.title'),
+      detail: t('dsp.capability.avx.detail'),
+      state: 'planned',
+      icon: Gauge,
+    },
+  ], [audioStatus?.uzumeFusedMacroKernel, audioStatus?.uzumeGpuFftConvolutionPrepared, audioStatus?.uzumeGpuLimiterPlaybackActive, audioStatus?.uzumeGpuMatrixPlaybackActive, audioStatus?.uzumeHeadroomActive, audioStatus?.uzumeTransitionalConvolutionPath, dspActive, dspHeadroomDb, t]);
   const panelProps: ModulePanelProps = {
     audioStatus,
     eqState,
@@ -2225,7 +2359,7 @@ export const DspPage = (): JSX.Element => {
       <div className="dsp-stage" data-module={selectedModuleId}>
         <aside className="dsp-rail" aria-label={t('dsp.aria.modules')}>
           <div className="dsp-brand">
-            <span>DSP</span>
+            <span>UZUME</span>
             <strong>ECHO</strong>
             <em>{t('dsp.brand.subtitle')}</em>
           </div>
@@ -2325,6 +2459,8 @@ export const DspPage = (): JSX.Element => {
               {t('dsp.action.refresh')}
             </button>
           </div>
+
+          <UzumeCapabilityStrip capabilities={uzumeCapabilities} />
 
           {error || moduleError ? <p className="dsp-status-error">{moduleError ?? error}</p> : null}
 

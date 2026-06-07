@@ -26,14 +26,14 @@ afterEach(() => {
 });
 
 describe('AudioProfessionalStatusPanel', () => {
-  it('renders friendly Room Correction DSP warnings', () => {
+  it('renders friendly Room Correction UZUME warnings', () => {
     render(
       <I18nProvider>
         <AudioProfessionalStatusPanel status={roomCorrectionStatus()} />
       </I18nProvider>,
     );
 
-    expect(screen.getByText('DSP active')).toBeTruthy();
+    expect(screen.getByText('UZUME active')).toBeTruthy();
     expect(screen.getByText(/Room correction disables bit-perfect output/u)).toBeTruthy();
     expect(screen.getByText(/Room correction output has clipping risk/u)).toBeTruthy();
   });

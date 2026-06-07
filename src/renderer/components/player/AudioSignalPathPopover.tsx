@@ -406,7 +406,7 @@ export const buildAudioSignalPathNodes = (status: AudioStatus | null, track: Lib
     {
       title: 'Process',
       value: dspModules.length ? dspModules.join(' + ') : '原生路径',
-      detail: dspModules.length ? '经过 ECHO 处理链' : '未启用 EQ / FIR / 声道处理',
+      detail: dspModules.length ? '经过 UZUME 处理链' : '未启用 UZUME section',
       icon: dspModules.length ? SlidersHorizontal : ShieldCheck,
       tone: dspTone,
     },
@@ -501,7 +501,7 @@ const getSignalSummary = (status: AudioStatus | null, track: LibraryTrack | null
   ) {
     return {
       label: '已强化',
-      detail: buildDspModules(status).slice(0, 2).join(' + ') || 'DSP active',
+      detail: buildDspModules(status).slice(0, 2).join(' + ') || 'UZUME active',
       spec,
       tone,
     };
@@ -525,7 +525,7 @@ const getSignalSummary = (status: AudioStatus | null, track: LibraryTrack | null
 
   return {
     label: '原生播放',
-    detail: '未启用 DSP',
+    detail: '未启用 UZUME',
     spec,
     tone,
   };
