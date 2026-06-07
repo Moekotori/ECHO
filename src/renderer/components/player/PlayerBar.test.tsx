@@ -582,9 +582,9 @@ describe('PlayerBar', () => {
       </>,
     );
 
-    expect(screen.getByRole('button', { name: '打开音频链路：UZUME processed，FLAC / 96k / 24b' }).textContent).toBe('');
+    expect(screen.getByRole('button', { name: '打开音频链路：UZUME skeleton，FLAC / 96k / 24b' }).textContent).toBe('');
     const dialog = screen.getByRole('dialog', { name: '信号路径' });
-    expect(dialog.textContent).toContain('信号路径: UZUME processed');
+    expect(dialog.textContent).toContain('信号路径: UZUME skeleton');
     expect(dialog.textContent).toContain('参数化 EQ');
     expect(dialog.textContent).toContain('5 个频段');
     expect(dialog.textContent).toContain('比特位深转换');

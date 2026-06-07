@@ -2021,6 +2021,19 @@ describe('Audio Core sample-rate regression guard', () => {
   it('surfaces UZUME native runtime state from ready metadata and telemetry', async () => {
     const logs: string[] = [];
     const decoder = new FakeDecoder(new Map([['song.flac', probe('song.flac', 44100)]]));
+    const bitPerfectPlan = {
+      pcm_bitperfect: { state: 'current', reason: null },
+      pcm_processed: { state: 'available', reason: null },
+      dsd_direct: { state: 'unavailable', reason: 'source_is_pcm' },
+      dsd_upsampling: { state: 'unavailable', reason: 'source_is_pcm' },
+      d2p_processed: { state: 'unavailable', reason: 'source_is_pcm' },
+      sdm_processed: { state: 'unavailable', reason: 'sdm_engine_not_ready' },
+    } as const;
+    const processedPlan = {
+      ...bitPerfectPlan,
+      pcm_bitperfect: { state: 'disabled', reason: 'uzume_processing_enabled' },
+      pcm_processed: { state: 'current', reason: null },
+    } as const;
     const bridge = new FakeBridge(48000, {
       uzumeActive: false,
       uzumeBackend: 'cpu-reference',
@@ -2037,6 +2050,7 @@ describe('Audio Core sample-rate regression guard', () => {
       uzumeCufftVersion: 0,
       uzumeFormatPath: 'pcm_bitperfect',
       uzumeBitPerfectState: 'available',
+      uzumeFormatPathPlan: bitPerfectPlan,
       uzumeHeadroomActive: false,
       uzumeTransitionalConvolutionPath: 'legacy-convolution-processor',
       uzumeFusedMacroKernel: false,
@@ -2072,6 +2086,7 @@ describe('Audio Core sample-rate regression guard', () => {
       expect(readyStatus.uzumeFormatPath).toBe('pcm_bitperfect');
       expect(readyStatus.uzumeBitPerfectState).toBe('available');
       expect(readyStatus.uzumeDirectDisabledReason).toBe(null);
+      expect(readyStatus.uzumeFormatPathPlan).toMatchObject(bitPerfectPlan);
       expect(readyStatus.uzumeHeadroomActive).toBe(false);
       expect(readyStatus.uzumeTransitionalConvolutionPath).toBe('legacy-convolution-processor');
       expect(readyStatus.uzumeFusedMacroKernel).toBe(false);
@@ -2103,6 +2118,7 @@ describe('Audio Core sample-rate regression guard', () => {
         uzumeFormatPath: 'pcm_processed',
         uzumeBitPerfectState: 'disabled',
         uzumeDirectDisabledReason: 'uzume_processing_enabled',
+        uzumeFormatPathPlan: processedPlan,
         uzumeHeadroomActive: true,
         uzumeTransitionalConvolutionPath: 'legacy-convolution-processor',
         uzumeFusedMacroKernel: false,
@@ -2129,6 +2145,7 @@ describe('Audio Core sample-rate regression guard', () => {
       expect(liveStatus.uzumeFormatPath).toBe('pcm_processed');
       expect(liveStatus.uzumeBitPerfectState).toBe('disabled');
       expect(liveStatus.uzumeDirectDisabledReason).toBe('uzume_processing_enabled');
+      expect(liveStatus.uzumeFormatPathPlan).toMatchObject(processedPlan);
       expect(liveStatus.uzumeHeadroomActive).toBe(true);
       expect(liveStatus.uzumeTransitionalConvolutionPath).toBe('legacy-convolution-processor');
       expect(liveStatus.uzumeFusedMacroKernel).toBe(false);
@@ -10246,7 +10263,7 @@ describe('NativeOutputBridge diagnostics', () => {
     });
 
     bridge.beginSession();
-    hostStdout.write('{"pos":480,"dspClippingRisk":true,"dspLimiterProtecting":true,"uzumeActive":true,"uzumeBackend":"hybrid-gpu-matrix-limiter","uzumeProfile":"uzume-skeleton-compat","uzumeRuntimeModel":"transitional-processor-chain","uzumeFormatPath":"pcm_processed","uzumeBitPerfectState":"disabled","uzumeDirectDisabledReason":"uzume_processing_enabled","uzumeHeadroomActive":true,"uzumeTransitionalConvolutionPath":"legacy-convolution-processor","uzumeFusedMacroKernel":false,"uzumeGpuLimiterPlaybackActive":true,"uzumeGpuMatrixPlaybackActive":true,"uzumeGpuFftConvolutionPrepared":true}\n');
+    hostStdout.write('{"pos":480,"dspClippingRisk":true,"dspLimiterProtecting":true,"uzumeActive":true,"uzumeBackend":"hybrid-gpu-matrix-limiter","uzumeProfile":"uzume-skeleton-compat","uzumeRuntimeModel":"transitional-processor-chain","uzumeFormatPath":"pcm_processed","uzumeBitPerfectState":"disabled","uzumeDirectDisabledReason":"uzume_processing_enabled","uzumeFormatPathPlan":{"pcm_bitperfect":{"state":"disabled","reason":"uzume_processing_enabled"},"pcm_processed":{"state":"current","reason":null},"dsd_direct":{"state":"unavailable","reason":"source_is_pcm"},"dsd_upsampling":{"state":"unavailable","reason":"source_is_pcm"},"d2p_processed":{"state":"unavailable","reason":"source_is_pcm"},"sdm_processed":{"state":"unavailable","reason":"sdm_engine_not_ready"}},"uzumeHeadroomActive":true,"uzumeTransitionalConvolutionPath":"legacy-convolution-processor","uzumeFusedMacroKernel":false,"uzumeGpuLimiterPlaybackActive":true,"uzumeGpuMatrixPlaybackActive":true,"uzumeGpuFftConvolutionPrepared":true}\n');
     bridge.beginSession();
     hostStdout.write('{"pos":960}\n');
 
@@ -10263,6 +10280,14 @@ describe('NativeOutputBridge diagnostics', () => {
       uzumeFormatPath: 'pcm_processed',
       uzumeBitPerfectState: 'disabled',
       uzumeDirectDisabledReason: 'uzume_processing_enabled',
+      uzumeFormatPathPlan: {
+        pcm_bitperfect: { state: 'disabled', reason: 'uzume_processing_enabled' },
+        pcm_processed: { state: 'current', reason: null },
+        dsd_direct: { state: 'unavailable', reason: 'source_is_pcm' },
+        dsd_upsampling: { state: 'unavailable', reason: 'source_is_pcm' },
+        d2p_processed: { state: 'unavailable', reason: 'source_is_pcm' },
+        sdm_processed: { state: 'unavailable', reason: 'sdm_engine_not_ready' },
+      },
       uzumeHeadroomActive: true,
       uzumeTransitionalConvolutionPath: 'legacy-convolution-processor',
       uzumeFusedMacroKernel: false,

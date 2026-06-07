@@ -299,6 +299,36 @@ std::string jsonBool(bool value)
     return value ? "true" : "false";
 }
 
+std::string jsonStringOrNull(const char* value)
+{
+    return value != nullptr
+        ? "\"" + jsonEscape(juce::String::fromUTF8(value)) + "\""
+        : "null";
+}
+
+std::string formatUzumePathPlanEntryJson(const char* state, const char* reason)
+{
+    return std::string("{\"state\":\"") + state + "\",\"reason\":" + jsonStringOrNull(reason) + "}";
+}
+
+std::string formatUzumeFormatPathPlanJson(const echo::UzumeRuntimeStatus& status)
+{
+    const bool pcmProcessed = std::strcmp(status.formatPath, "pcm_processed") == 0;
+    const bool pcmBitPerfect = std::strcmp(status.formatPath, "pcm_bitperfect") == 0;
+    const char* directDisabledReason = status.directDisabledReason != nullptr
+        ? status.directDisabledReason
+        : "uzume_processing_enabled";
+
+    return std::string(",\"uzumeFormatPathPlan\":{")
+        + "\"pcm_bitperfect\":" + formatUzumePathPlanEntryJson(pcmBitPerfect ? "current" : "disabled", pcmBitPerfect ? nullptr : directDisabledReason)
+        + ",\"pcm_processed\":" + formatUzumePathPlanEntryJson(pcmProcessed ? "current" : "available", nullptr)
+        + ",\"dsd_direct\":" + formatUzumePathPlanEntryJson("unavailable", "source_is_pcm")
+        + ",\"dsd_upsampling\":" + formatUzumePathPlanEntryJson("unavailable", "source_is_pcm")
+        + ",\"d2p_processed\":" + formatUzumePathPlanEntryJson("unavailable", "source_is_pcm")
+        + ",\"sdm_processed\":" + formatUzumePathPlanEntryJson("unavailable", "sdm_engine_not_ready")
+        + "}";
+}
+
 std::string formatUzumeRuntimeJson(const echo::UzumeRuntimeStatus& status)
 {
     return std::string(",\"uzumeActive\":") + jsonBool(status.active)
@@ -325,15 +355,12 @@ std::string formatUzumeRuntimeJson(const echo::UzumeRuntimeStatus& status)
         + ",\"uzumeCufftVersion\":" + std::to_string(status.cufftVersion)
         + ",\"uzumeFormatPath\":\"" + jsonEscape(juce::String::fromUTF8(status.formatPath)) + "\""
         + ",\"uzumeBitPerfectState\":\"" + jsonEscape(juce::String::fromUTF8(status.bitPerfectState)) + "\""
-        + ",\"uzumeDirectDisabledReason\":" + (status.directDisabledReason != nullptr
-            ? "\"" + jsonEscape(juce::String::fromUTF8(status.directDisabledReason)) + "\""
-            : "null")
+        + ",\"uzumeDirectDisabledReason\":" + jsonStringOrNull(status.directDisabledReason)
+        + formatUzumeFormatPathPlanJson(status)
         + ",\"uzumeHeadroomActive\":" + jsonBool(status.headroomActive)
         + ",\"uzumeTransitionalConvolutionPath\":\"" + jsonEscape(juce::String::fromUTF8(status.transitionalConvolutionPath)) + "\""
         + ",\"uzumeFusedMacroKernel\":" + jsonBool(status.fusedMacroKernel)
-        + ",\"uzumeBypassReason\":" + (status.bypassReason != nullptr
-            ? "\"" + jsonEscape(juce::String::fromUTF8(status.bypassReason)) + "\""
-            : "null");
+        + ",\"uzumeBypassReason\":" + jsonStringOrNull(status.bypassReason);
 }
 
 int parseInt(const juce::String& value, int fallback)

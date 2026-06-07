@@ -438,7 +438,7 @@ const formatUzumeFormatPath = (status: AudioStatus | null): string | null => {
     case 'pcm_bitperfect':
       return 'PCM bit-perfect';
     case 'pcm_processed':
-      return 'PCM processed by UZUME';
+      return 'PCM processed / UZUME skeleton';
     case 'dsd_direct':
       return status.activeDsdOutputMode === 'native' ? 'DSD direct / Native' : 'DSD direct / DoP';
     case 'dsd_upsampling':
@@ -454,7 +454,7 @@ const formatUzumeFormatPath = (status: AudioStatus | null): string | null => {
       if (status?.activeDsdOutputMode === 'dop') {
         return 'DSD direct / DoP';
       }
-      return status?.dspActive ? 'PCM processed by UZUME' : null;
+      return status?.dspActive ? 'PCM processed / UZUME skeleton' : null;
   }
 };
 
@@ -463,15 +463,15 @@ const formatBitPerfectDisabledReason = (status: AudioStatus | null, copy: AudioD
     case 'echo_src_enabled':
       return 'ECHO/SOXR SRC (compat)';
     case 'dsp_headroom_enabled':
-      return 'Headroom -> UZUME processed';
+      return 'Headroom -> PCM processed skeleton';
     case 'uzume_processing_enabled':
-      return 'UZUME processed';
+      return 'UZUME skeleton processing';
     case 'eq_enabled':
       return copy.eqOn;
     case 'room_correction_enabled':
-      return 'FIR -> UZUME processed';
+      return 'FIR -> PCM processed skeleton';
     case 'channel_balance_enabled':
-      return `${copy.balanceDsp} -> UZUME processed`;
+      return `${copy.balanceDsp} -> PCM processed skeleton`;
     default:
       return status?.bitPerfectDisabledReason?.replaceAll('_', ' ') ?? copy.standardPath;
   }

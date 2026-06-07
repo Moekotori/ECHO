@@ -197,7 +197,7 @@ const formatUzumePath = (status: AudioStatus | null): string | null => {
     case 'pcm_bitperfect':
       return 'PCM bit-perfect';
     case 'pcm_processed':
-      return 'PCM processed by UZUME';
+      return 'PCM processed / UZUME skeleton';
     case 'dsd_direct':
       return status.activeDsdOutputMode === 'native' ? 'DSD direct / Native' : 'DSD direct / DoP';
     case 'dsd_upsampling':
@@ -213,8 +213,18 @@ const formatUzumePath = (status: AudioStatus | null): string | null => {
       if (status?.activeDsdOutputMode === 'dop') {
         return 'DSD direct / DoP';
       }
-      return status?.dspActive ? 'PCM processed by UZUME' : null;
+      return status?.dspActive ? 'PCM processed / UZUME skeleton' : null;
   }
+};
+
+const formatUzumeRuntimeDetail = (status: AudioStatus | null): string => {
+  const parts = [
+    status?.uzumeRuntimeModel ?? null,
+    status?.uzumeProfile ?? null,
+    status?.uzumeDirectDisabledReason ? cleanReason(status.uzumeDirectDisabledReason) : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.length ? parts.join(' / ') : 'transitional compatibility chain';
 };
 
 const isHqPlayerSignalPath = (connectStatus: ConnectSessionStatus | null | undefined): connectStatus is ConnectSessionStatus =>
@@ -392,8 +402,8 @@ const buildDspModules = (status: AudioStatus | null): string[] => {
       : null,
     status.eqEnabled ? status.eqPresetName ? `EQ ${status.eqPresetName}` : 'EQ' : null,
     status.echoSrcActive ? 'ECHO/SOXR SRC (compat)' : null,
-    status.roomCorrectionEnabled ? 'FIR 房间校正' : null,
-    status.channelBalanceEnabled ? '声道平衡' : null,
+    status.roomCorrectionEnabled ? 'FIR 房间校正 (compat)' : null,
+    status.channelBalanceEnabled ? '声道平衡 (compat)' : null,
     status.replayGainEnabled ? `ReplayGain ${formatDb(status.replayGainAppliedDb) ?? ''}`.trim() : null,
     status.dspLimiterProtecting ? '安全限幅' : null,
   ].filter((module): module is string => Boolean(module));
@@ -432,7 +442,9 @@ export const buildAudioSignalPathNodes = (status: AudioStatus | null, track: Lib
     {
       title: 'Process',
       value: dspModules.length ? dspModules.join(' + ') : uzumePath ?? '原生路径',
-      detail: dspModules.length ? `${uzumePath ?? 'UZUME processed'} / section active` : `${uzumePath ?? 'PCM bit-perfect'} / 未启用 UZUME section`,
+      detail: dspModules.length
+        ? `${uzumePath ?? 'UZUME skeleton'} / ${formatUzumeRuntimeDetail(status)}`
+        : `${uzumePath ?? 'PCM bit-perfect'} / ${formatUzumeRuntimeDetail(status)} / 未启用 UZUME section`,
       icon: dspModules.length ? SlidersHorizontal : ShieldCheck,
       tone: dspTone,
     },
@@ -535,8 +547,8 @@ const getSignalSummary = (status: AudioStatus | null, track: LibraryTrack | null
     || status.replayGainEnabled
   ) {
     return {
-      label: 'UZUME processed',
-      detail: buildDspModules(status).slice(0, 2).join(' + ') || uzumePath || 'UZUME active',
+      label: 'UZUME skeleton',
+      detail: buildDspModules(status).slice(0, 2).join(' + ') || uzumePath || formatUzumeRuntimeDetail(status),
       spec,
       tone,
     };
@@ -586,7 +598,7 @@ const getRoonPathLabel = (status: AudioStatus | null): string => {
     || status.channelBalanceEnabled
     || status.replayGainEnabled
   ) {
-    return 'UZUME processed';
+    return 'UZUME skeleton';
   }
   if (status.resampling) {
     return '重采样';

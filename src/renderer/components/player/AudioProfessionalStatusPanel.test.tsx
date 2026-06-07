@@ -33,7 +33,7 @@ describe('AudioProfessionalStatusPanel', () => {
       </I18nProvider>,
     );
 
-    expect(screen.getByText('UZUME active')).toBeTruthy();
+    expect(screen.getByText('UZUME skeleton')).toBeTruthy();
     expect(screen.getByText(/Room correction disables bit-perfect output/u)).toBeTruthy();
     expect(screen.getByText(/Room correction output has clipping risk/u)).toBeTruthy();
   });

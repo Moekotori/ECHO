@@ -599,7 +599,7 @@ describe('EqPanel', () => {
     renderEqPanel({ ...audioStatus, eqEnabled: false, dspActive: true, bitPerfectDisabledReason: 'room_correction_enabled', warnings: ['room_correction_bit_perfect_disabled'] });
     await showAdvancedEqTools();
 
-    expect((await screen.findAllByText('UZUME active: bit-perfect disabled (Room Correction).')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('DSP path active: bit-perfect disabled (Room Correction).')).length).toBeGreaterThan(0);
   });
 
   it('updates PEQ band Q, filter type, and bypass state from the advanced inspector', async () => {

@@ -70,7 +70,7 @@ const testTranslations: Record<string, string> = {
   'audioProfessional.action.refresh': 'Refresh status',
   'audioProfessional.action.showDetails': 'Show professional details',
   'audioProfessional.badge.bitPerfect': 'Bit-perfect',
-  'audioProfessional.badge.dsp': 'UZUME active',
+  'audioProfessional.badge.dsp': 'UZUME skeleton',
   'audioProfessional.badge.replayGain': 'ReplayGain',
   'audioProfessional.badge.resampling': 'Resampling',
   'audioProfessional.badge.sampleMismatch': 'Sample-rate mismatch',
@@ -554,7 +554,7 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
     expect(screen.getByText('Professional Playback Status')).toBeTruthy();
     expect(screen.getByText('Bit-perfect')).toBeTruthy();
     expect(screen.getByText('Resampling')).toBeTruthy();
-    expect(screen.getByText('UZUME active')).toBeTruthy();
+    expect(screen.getByText('UZUME skeleton')).toBeTruthy();
     expect(screen.getByText('ReplayGain')).toBeTruthy();
     expect(screen.getByText('Sample-rate mismatch')).toBeTruthy();
     expect(screen.getByText('Device issue/warning')).toBeTruthy();

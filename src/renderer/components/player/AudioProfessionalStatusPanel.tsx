@@ -43,10 +43,10 @@ const formatBitPerfectReason = (value: string | null | undefined, fallback: stri
     return 'ECHO/SOXR SRC (compat)';
   }
   if (value === 'uzume_processing_enabled') {
-    return 'UZUME processing enabled';
+    return 'UZUME skeleton processing';
   }
   if (value === 'dsp_headroom_enabled') {
-    return 'Headroom enters UZUME processed path';
+    return 'Headroom enters PCM processed skeleton path';
   }
 
   return normalizeReason(value, fallback);
@@ -57,7 +57,7 @@ const formatUzumeFormatPath = (status: AudioStatus | null, unknown: string): str
     case 'pcm_bitperfect':
       return 'PCM bit-perfect';
     case 'pcm_processed':
-      return 'PCM processed by UZUME';
+      return 'PCM processed / UZUME skeleton';
     case 'dsd_direct':
       return status.activeDsdOutputMode === 'native' ? 'DSD direct / Native' : 'DSD direct / DoP';
     case 'dsd_upsampling':
@@ -73,8 +73,27 @@ const formatUzumeFormatPath = (status: AudioStatus | null, unknown: string): str
       if (status?.activeDsdOutputMode === 'dop') {
         return 'DSD direct / DoP';
       }
-      return status?.dspActive ? 'PCM processed by UZUME' : unknown;
+      return status?.dspActive ? 'PCM processed / UZUME skeleton' : unknown;
   }
+};
+
+const formatUzumePathPlan = (status: AudioStatus | null, fallback: string): string => {
+  const plan = status?.uzumeFormatPathPlan;
+  if (!plan) {
+    return fallback;
+  }
+
+  return ['pcm_bitperfect', 'pcm_processed', 'dsd_direct', 'dsd_upsampling', 'd2p_processed', 'sdm_processed']
+    .map((path) => {
+      const entry = plan[path as keyof typeof plan];
+      if (!entry) {
+        return null;
+      }
+
+      return `${path}:${entry.state}${entry.reason ? `/${normalizeReason(entry.reason, fallback)}` : ''}`;
+    })
+    .filter((part): part is string => Boolean(part))
+    .join(' | ') || fallback;
 };
 
 const formatIssueReason = (
@@ -349,8 +368,10 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.roomCorrection'), value: status?.roomCorrectionEnabled ? enabled : disabled, tone: status?.roomCorrectionEnabled ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.channelBalance'), value: status?.channelBalanceEnabled ? enabled : disabled, tone: status?.channelBalanceEnabled ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeBackend'), value: status?.uzumeBackend ?? disabled, tone: status?.uzumeFallbackActive ? 'warning' : isUzumeGpuBackend(status?.uzumeBackend) ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeProfile'), value: status?.uzumeProfile ?? unknown },
         { label: t('audioProfessional.row.uzumeRuntime'), value: status?.uzumeRuntimeModel ?? unknown },
         { label: t('audioProfessional.row.uzumeFormatPath'), value: uzumeFormatPathText, tone: status?.uzumeFormatPath === 'pcm_processed' ? 'warning' : status?.uzumeFormatPath === 'pcm_bitperfect' || status?.uzumeFormatPath === 'dsd_direct' ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumePathPlan'), value: formatUzumePathPlan(status, unknown), tone: status?.uzumeFormatPathPlan ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeBitPerfect'), value: uzumeBitPerfectText, tone: status?.uzumeBitPerfectState === 'available' ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeHeadroom'), value: status?.uzumeHeadroomActive ? enabled : disabled, tone: status?.uzumeHeadroomActive ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeConvolution'), value: status?.uzumeTransitionalConvolutionPath ? `${transitional} / ${status.uzumeTransitionalConvolutionPath}` : planned, tone: status?.uzumeTransitionalConvolutionPath ? 'warning' : 'muted' },

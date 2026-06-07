@@ -1555,7 +1555,7 @@ const formatUzumeSettingsPath = (status: AudioStatus | null): string => {
     case 'pcm_bitperfect':
       return 'PCM bit-perfect';
     case 'pcm_processed':
-      return 'PCM processed by UZUME';
+      return 'PCM processed / UZUME skeleton';
     case 'dsd_direct':
       return status.activeDsdOutputMode === 'native' ? 'DSD direct / Native' : 'DSD direct / DoP';
     case 'dsd_upsampling':
@@ -1571,7 +1571,7 @@ const formatUzumeSettingsPath = (status: AudioStatus | null): string => {
       if (status?.activeDsdOutputMode === 'dop') {
         return 'DSD direct / DoP';
       }
-      return status?.dspActive ? 'PCM processed by UZUME' : 'PCM bit-perfect';
+      return status?.dspActive ? 'PCM processed / UZUME skeleton' : 'PCM bit-perfect';
   }
 };
 

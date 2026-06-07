@@ -20,6 +20,21 @@ export type ActiveDsdOutputMode = 'pcm' | 'dop' | 'native' | null;
 export type AudioAutomixMode = 'off' | 'armed' | 'transitioning';
 export const audioExportFormats = ['mp3', 'wav', 'flac', 'ogg'] as const;
 export type AudioExportFormat = (typeof audioExportFormats)[number];
+export const uzumeFormatPaths = [
+  'pcm_bitperfect',
+  'pcm_processed',
+  'dsd_direct',
+  'dsd_upsampling',
+  'd2p_processed',
+  'sdm_processed',
+] as const;
+export type UzumeFormatPath = (typeof uzumeFormatPaths)[number];
+export type UzumeFormatPathPlanState = 'current' | 'available' | 'disabled' | 'unavailable' | 'planned';
+export type UzumeFormatPathPlanEntry = {
+  state: UzumeFormatPathPlanState;
+  reason?: string | null;
+};
+export type UzumeFormatPathPlan = Partial<Record<UzumeFormatPath, UzumeFormatPathPlanEntry>>;
 
 export type AudioExportRequest = {
   filePath: string;
@@ -228,6 +243,7 @@ export type AudioStatus = {
   uzumeFormatPath?: string | null;
   uzumeBitPerfectState?: string | null;
   uzumeDirectDisabledReason?: string | null;
+  uzumeFormatPathPlan?: UzumeFormatPathPlan | null;
   uzumeHeadroomActive?: boolean;
   uzumeTransitionalConvolutionPath?: string | null;
   uzumeFusedMacroKernel?: boolean;

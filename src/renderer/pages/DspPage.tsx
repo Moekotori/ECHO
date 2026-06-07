@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, AudioWaveform, CheckCircle2, Gauge, Headphones, Info, RadioTower, Route, ShieldCheck, SlidersHorizontal, Waves, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { AudioEchoSrcMode, AudioEchoSrcQualityProfile, AudioStatus, ChannelBalanceMonoMode, ChannelBalanceState } from '../../shared/types/audio';
+import { uzumeFormatPaths, type AudioEchoSrcMode, type AudioEchoSrcQualityProfile, type AudioStatus, type ChannelBalanceMonoMode, type ChannelBalanceState, type UzumeFormatPath, type UzumeFormatPathPlan } from '../../shared/types/audio';
 import type { EqState, RoomCorrectionState } from '../../shared/types/eq';
 import { useI18n } from '../i18n/I18nProvider';
 import type { TranslationKey } from '../i18n/locales';
@@ -21,9 +21,7 @@ type DspModule = {
   accent: 'blue' | 'violet' | 'green' | 'amber';
 };
 
-type UzumeFormatPath = 'pcm_bitperfect' | 'pcm_processed' | 'dsd_direct' | 'dsd_upsampling' | 'd2p_processed' | 'sdm_processed';
-
-type UzumeFormatPathState = 'current' | 'available' | 'transition' | 'planned' | 'unavailable';
+type UzumeFormatPathState = 'current' | 'available' | 'transition' | 'disabled' | 'planned' | 'unavailable';
 
 const fallbackEqState: EqState = {
   enabled: false,
@@ -290,12 +288,12 @@ const dspLocalText: Record<string, string> = {
   'dsp.panel.headroom.nextWatch': '观察输出',
   'dsp.panel.headroom.nextWatchDetail': '输出接近上限，建议留意削波。',
   'dsp.panel.headroom.noClip': '无记录',
-  'dsp.panel.headroom.note': 'Headroom 只负责预留电平空间；RPC-001 中它已经能单独激活 UZUME processed path。',
+  'dsp.panel.headroom.note': 'Headroom 只负责预留电平空间；RPC-001 中它会进入 PCM processed skeleton path。',
   'dsp.panel.headroom.presetsAria': 'Headroom 预设',
   'dsp.panel.headroom.primaryAction': '应用 {value}',
   'dsp.panel.headroom.reasonChannel': '声道工具可能提高电平。',
   'dsp.panel.headroom.reasonClipping': '检测到削波。',
-  'dsp.panel.headroom.reasonDirect': 'Headroom 只在 UZUME processed path 生效；当前 EQ / FIR / Matrix 都未启用，原生直通不会被它处理。',
+  'dsp.panel.headroom.reasonDirect': 'Headroom 只在 PCM processed skeleton path 生效；当前 EQ / FIR / Matrix 都未启用，原生直通不会被它处理。',
   'dsp.panel.headroom.reasonEq': 'EQ 曲线可能提高电平。',
   'dsp.panel.headroom.reasonLive': '实时余量偏低。',
   'dsp.panel.headroom.reasonOutput': '输出估算接近满幅。',
@@ -349,7 +347,7 @@ const dspLocalText: Record<string, string> = {
   'dsp.panel.safety.nextRisk': '先处理余量',
   'dsp.panel.safety.nextRiskDetail': '有风险时不要继续叠加 EQ / FIR 增益，优先降 Headroom 或相关 section Trim。',
   'dsp.panel.safety.nextProtected': '继续监听',
-  'dsp.panel.safety.nextProtectedDetail': '链路处于 UZUME processed path 但没有发现削波风险，可以继续观察实时输出。',
+  'dsp.panel.safety.nextProtectedDetail': '链路处于 PCM processed skeleton path 但没有发现削波风险，可以继续观察实时输出。',
   'dsp.panel.safety.nextDirect': '保持直通',
   'dsp.panel.safety.nextDirectDetail': '当前没有 UZUME 处理，适合确认原始输出、设备采样率和 bit-perfect 候选状态。',
   'dsp.panel.safety.routeInput': '输入',
@@ -411,12 +409,13 @@ const dspLocalText: Record<string, string> = {
   'dsp.format.path.dsd_upsampling.title': 'DSD upsampling',
   'dsp.format.path.pcm_bitperfect.detail': '不进入改样本处理；打开 section 会切到 PCM processed。',
   'dsp.format.path.pcm_bitperfect.title': 'PCM bit-perfect',
-  'dsp.format.path.pcm_processed.detail': 'Headroom / EQ / FIR / Matrix / Safety 作用于 UZUME chain。',
+  'dsp.format.path.pcm_processed.detail': '当前只展示 UZUME skeleton / transitional compatibility 状态，未实现的 section 不提供控件。',
   'dsp.format.path.pcm_processed.title': 'PCM processed',
   'dsp.format.path.sdm_processed.detail': '完整 SDM processed 尚未完成，只显示为不可选能力。',
   'dsp.format.path.sdm_processed.title': 'SDM processed',
   'dsp.format.state.available': '可进入',
   'dsp.format.state.current': '当前',
+  'dsp.format.state.disabled': '已禁用',
   'dsp.format.state.planned': '未实现',
   'dsp.format.state.transition': '由控件触发',
   'dsp.format.state.unavailable': '不可用',
@@ -425,7 +424,7 @@ const dspLocalText: Record<string, string> = {
   'dsp.transition.detail.dsdDirect': '打开此 section 会退出 DSD direct / DoP，后端会重新规划为 DSD -> PCM processed。',
   'dsp.transition.detail.dsdUpsampling': '打开此 PCM-domain section 会退出 DSD upsampling / SDM-only；完整 SDM processed 还未完成。',
   'dsp.transition.detail.pcmBitperfect': '打开此 section 会退出 PCM bit-perfect，后端会重新规划为 PCM processed。',
-  'dsp.transition.detail.pcmProcessed': '当前已经在 PCM processed；控件会直接作用于 UZUME chain。',
+  'dsp.transition.detail.pcmProcessed': '当前已经在 PCM processed；此 section 仍未实现，只显示兼容读数。',
   'dsp.transition.detail.sdm': '当前处于 SDM processed 遥测路径；这部分仍按实验/不可用状态展示。',
   'dsp.transition.detail.src': 'UZUME Poly-Sinc SRC 尚未实现，这里只显示规划倍率和 ECHO/SOXR 兼容读数。',
   'dsp.transition.title': '路径变化',
@@ -548,14 +547,7 @@ const getUzumeCapabilityStateLabelKey = (state: UzumeCapabilityState): string =>
   return 'dsp.capability.state.planned';
 };
 
-const uzumeFormatPathOrder: UzumeFormatPath[] = [
-  'pcm_bitperfect',
-  'pcm_processed',
-  'dsd_direct',
-  'dsd_upsampling',
-  'd2p_processed',
-  'sdm_processed',
-];
+const uzumeFormatPathOrder: UzumeFormatPath[] = [...uzumeFormatPaths];
 
 const normalizeUzumeFormatPath = (audioStatus: AudioStatus | null, dspActive: boolean): UzumeFormatPath => {
   const rawPath = audioStatus?.uzumeFormatPath;
@@ -576,7 +568,12 @@ const getUzumeFormatPathDetailKey = (path: UzumeFormatPath): string => `dsp.form
 
 const getUzumePathStateLabelKey = (state: UzumeFormatPathState): string => `dsp.format.state.${state}`;
 
-const getUzumePathState = (path: UzumeFormatPath, currentPath: UzumeFormatPath): UzumeFormatPathState => {
+const getUzumePathState = (path: UzumeFormatPath, currentPath: UzumeFormatPath, pathPlan?: UzumeFormatPathPlan | null): UzumeFormatPathState => {
+  const plannedState = pathPlan?.[path]?.state;
+  if (plannedState === 'current' || plannedState === 'available' || plannedState === 'disabled' || plannedState === 'planned' || plannedState === 'unavailable') {
+    return plannedState;
+  }
+
   if (path === currentPath) {
     return 'current';
   }
@@ -594,6 +591,8 @@ const getUzumePathState = (path: UzumeFormatPath, currentPath: UzumeFormatPath):
 
   return 'planned';
 };
+
+const formatUzumeDisabledReason = (reason?: string | null): string | null => reason?.replaceAll('_', ' ') ?? null;
 
 const getTransitionDetailKey = (path: UzumeFormatPath, moduleId: DspModuleId): string => {
   if (moduleId === 'src') {
@@ -618,7 +617,7 @@ const getTransitionDetailKey = (path: UzumeFormatPath, moduleId: DspModuleId): s
   return 'dsp.transition.detail.sdm';
 };
 
-const UzumeFormatPathStrip = ({ currentPath }: { currentPath: UzumeFormatPath }): JSX.Element => {
+const UzumeFormatPathStrip = ({ currentPath, pathPlan }: { currentPath: UzumeFormatPath; pathPlan?: UzumeFormatPathPlan | null }): JSX.Element => {
   const { t } = useDspI18n();
 
   return (
@@ -632,14 +631,15 @@ const UzumeFormatPathStrip = ({ currentPath }: { currentPath: UzumeFormatPath })
       </div>
       <div className="dsp-format-controls" role="group" aria-label={t('dsp.format.title')}>
         {uzumeFormatPathOrder.map((path) => {
-          const state = getUzumePathState(path, currentPath);
+          const state = getUzumePathState(path, currentPath, pathPlan);
+          const reason = formatUzumeDisabledReason(pathPlan?.[path]?.reason);
 
           return (
             <span
               className="dsp-format-chip"
               data-state={state}
               key={path}
-              title={t(getUzumeFormatPathDetailKey(path))}
+              title={[t(getUzumeFormatPathDetailKey(path)), reason].filter(Boolean).join(' / ')}
             >
               <strong>{t(getUzumeFormatPathTitleKey(path))}</strong>
               <small>{t(getUzumePathStateLabelKey(state))}</small>
@@ -1282,7 +1282,7 @@ export const DspPage = (): JSX.Element => {
             </button>
           </div>
 
-          <UzumeFormatPathStrip currentPath={formatPath} />
+          <UzumeFormatPathStrip currentPath={formatPath} pathPlan={audioStatus?.uzumeFormatPathPlan} />
 
           <UzumeCapabilityStrip capabilities={uzumeCapabilities} />
 

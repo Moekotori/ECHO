@@ -573,6 +573,7 @@
 }
 
 .dsp-format-chip[data-state="planned"],
+.dsp-format-chip[data-state="disabled"],
 .dsp-format-chip[data-state="unavailable"],
 .dsp-capability-chip[data-state="planned"],
 .dsp-capability-chip[data-state="unavailable"] {
@@ -3630,6 +3631,7 @@ html[data-theme="dark"] .dsp-capability-chip[data-state="transitional"] {
 }
 
 html[data-theme="dark"] .dsp-format-chip[data-state="planned"],
+html[data-theme="dark"] .dsp-format-chip[data-state="disabled"],
 html[data-theme="dark"] .dsp-format-chip[data-state="unavailable"],
 html[data-theme="dark"] .dsp-capability-chip[data-state="planned"],
 html[data-theme="dark"] .dsp-capability-chip[data-state="unavailable"] {

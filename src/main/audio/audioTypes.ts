@@ -12,6 +12,7 @@ import type {
   AudioSharedBackend,
   AudioPlaybackState,
   AudioStatus,
+  UzumeFormatPathPlan,
 } from '../../shared/types/audio';
 import type { PlaybackProbeHint, PlaybackTrackMetadataHint } from '../../shared/types/playback';
 import type { ReplayGainTrackData } from '../../shared/utils/replayGain';
@@ -30,6 +31,7 @@ export type {
   AudioSharedBackend,
   AudioPlaybackState,
   AudioStatus,
+  UzumeFormatPathPlan,
 };
 
 export type LocalAudioSource = {
@@ -186,6 +188,7 @@ export type NativeOutputTelemetry = {
   uzumeFormatPath?: string | null;
   uzumeBitPerfectState?: string | null;
   uzumeDirectDisabledReason?: string | null;
+  uzumeFormatPathPlan?: UzumeFormatPathPlan | null;
   uzumeHeadroomActive?: boolean;
   uzumeTransitionalConvolutionPath?: string | null;
   uzumeFusedMacroKernel?: boolean;
@@ -244,6 +247,7 @@ export type NativeBridgeReadyMessage = Record<string, unknown> & {
   uzumeFormatPath?: string;
   uzumeBitPerfectState?: string;
   uzumeDirectDisabledReason?: string;
+  uzumeFormatPathPlan?: UzumeFormatPathPlan;
   uzumeHeadroomActive?: boolean;
   uzumeTransitionalConvolutionPath?: string;
   uzumeFusedMacroKernel?: boolean;

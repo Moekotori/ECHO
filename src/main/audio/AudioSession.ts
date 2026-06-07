@@ -24,6 +24,7 @@ import { normalizeAudioSharedBackendForPlatform } from '../../shared/utils/audio
 import { detectAsioCompatibilityProfile } from '../../shared/utils/asioCompatibility';
 import { DEFAULT_REPLAY_GAIN_TARGET_LUFS } from '../../shared/constants/replayGain';
 import type { AudioTransportFadeCurve, ReplayGainMode } from '../../shared/types/appSettings';
+import { uzumeFormatPaths } from '../../shared/types/audio';
 import {
   createEstimatedAutomixAnalysis,
   planAutomixTransition,
@@ -66,6 +67,7 @@ import type {
   PlaybackSpeedMode,
   SharedStabilityTier,
   AsioCompatibilityProfile,
+  UzumeFormatPathPlan,
 } from '../../shared/types/audio';
 import type { PlaybackMemory } from './PlaybackMemoryStore';
 import type { AudioCrashReportPayload } from '../diagnostics/CrashReportService';
@@ -75,6 +77,32 @@ type DecoderPipelineLike = Pick<DecoderPipeline, 'probeLocalFile' | 'decodeLocal
   decodeAutomixPair?: DecoderPipeline['decodeAutomixPair'];
   decodeGaplessSequence?: DecoderPipeline['decodeGaplessSequence'];
   getToolchainInfo?: () => FfmpegToolchainDiagnostics;
+};
+
+const uzumeFormatPathPlanStates = new Set(['current', 'available', 'disabled', 'unavailable', 'planned']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const normalizeUzumeFormatPathPlan = (value: unknown): UzumeFormatPathPlan | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const plan: UzumeFormatPathPlan = {};
+  for (const path of uzumeFormatPaths) {
+    const entry = value[path];
+    if (!isRecord(entry) || typeof entry.state !== 'string' || !uzumeFormatPathPlanStates.has(entry.state)) {
+      continue;
+    }
+
+    plan[path] = {
+      state: entry.state as NonNullable<UzumeFormatPathPlan[typeof path]>['state'],
+      reason: typeof entry.reason === 'string' ? entry.reason : null,
+    };
+  }
+
+  return Object.keys(plan).length > 0 ? plan : null;
 };
 type JuceDecodePipelineLike = Pick<JuceDecodePipeline, 'decodeLocalFile'> & {
   dispose?: () => void;
@@ -1538,6 +1566,7 @@ export class AudioSession extends EventEmitter {
     uzumeFormatPath: null,
     uzumeBitPerfectState: null,
     uzumeDirectDisabledReason: null,
+    uzumeFormatPathPlan: null,
     uzumeHeadroomActive: false,
     uzumeTransitionalConvolutionPath: null,
     uzumeFusedMacroKernel: false,
@@ -3363,6 +3392,7 @@ export class AudioSession extends EventEmitter {
       this.nativeTelemetry.uzumeFormatPath !== null ||
       this.nativeTelemetry.uzumeBitPerfectState !== null ||
       this.nativeTelemetry.uzumeDirectDisabledReason !== null ||
+      this.nativeTelemetry.uzumeFormatPathPlan !== null ||
       this.nativeTelemetry.uzumeHeadroomActive === true ||
       this.nativeTelemetry.uzumeTransitionalConvolutionPath !== null ||
       this.nativeTelemetry.uzumeFusedMacroKernel === true ||
@@ -3467,6 +3497,9 @@ export class AudioSession extends EventEmitter {
         : typeof this.currentReadyResult?.device.uzumeDirectDisabledReason === 'string'
           ? this.currentReadyResult.device.uzumeDirectDisabledReason
           : null;
+    const nativeUzumeFormatPathPlan = hasNativeUzumeTelemetry
+      ? this.nativeTelemetry.uzumeFormatPathPlan ?? null
+      : normalizeUzumeFormatPathPlan(this.currentReadyResult?.device.uzumeFormatPathPlan);
     const nativeUzumeHeadroomActive = hasNativeUzumeTelemetry
       ? this.nativeTelemetry.uzumeHeadroomActive === true
       : this.currentReadyResult?.device.uzumeHeadroomActive === true;
@@ -3702,6 +3735,7 @@ export class AudioSession extends EventEmitter {
       uzumeFormatPath: nativeUzumeFormatPath,
       uzumeBitPerfectState: nativeUzumeBitPerfectState,
       uzumeDirectDisabledReason: nativeUzumeDirectDisabledReason,
+      uzumeFormatPathPlan: nativeUzumeFormatPathPlan,
       uzumeHeadroomActive: nativeUzumeHeadroomActive,
       uzumeTransitionalConvolutionPath: nativeUzumeTransitionalConvolutionPath,
       uzumeFusedMacroKernel: nativeUzumeFusedMacroKernel,
@@ -5314,6 +5348,7 @@ export class AudioSession extends EventEmitter {
         uzumeBitPerfectState: typeof readyDevice.uzumeBitPerfectState === 'string' ? readyDevice.uzumeBitPerfectState : null,
         uzumeDirectDisabledReason:
           typeof readyDevice.uzumeDirectDisabledReason === 'string' ? readyDevice.uzumeDirectDisabledReason : null,
+        uzumeFormatPathPlan: normalizeUzumeFormatPathPlan(readyDevice.uzumeFormatPathPlan),
         uzumeHeadroomActive: readyDevice.uzumeHeadroomActive === true,
         uzumeTransitionalConvolutionPath:
           typeof readyDevice.uzumeTransitionalConvolutionPath === 'string'
@@ -5845,7 +5880,7 @@ export class AudioSession extends EventEmitter {
       }
 
       let startRetryAttempts = 0;
-      while (true) {
+      for (;;) {
         const bridge = this.createBridge();
         this.bridge = bridge;
         this.attachBridgeEvents(bridge, token);
@@ -7328,6 +7363,10 @@ export class AudioSession extends EventEmitter {
           : typeof telemetry.uzumeDirectDisabledReason === 'string'
             ? telemetry.uzumeDirectDisabledReason
             : null,
+      uzumeFormatPathPlan:
+        telemetry.uzumeFormatPathPlan === undefined
+          ? this.nativeTelemetry.uzumeFormatPathPlan
+          : normalizeUzumeFormatPathPlan(telemetry.uzumeFormatPathPlan),
       uzumeHeadroomActive:
         telemetry.uzumeHeadroomActive === undefined
           ? this.nativeTelemetry.uzumeHeadroomActive
@@ -7689,6 +7728,7 @@ export class AudioSession extends EventEmitter {
       uzumeFormatPath: null,
       uzumeBitPerfectState: null,
       uzumeDirectDisabledReason: null,
+      uzumeFormatPathPlan: null,
       uzumeHeadroomActive: false,
       uzumeTransitionalConvolutionPath: null,
       uzumeFusedMacroKernel: false,

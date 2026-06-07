@@ -14,6 +14,7 @@ import type {
   NativeBridgeReadyResult,
   NativeOutputTelemetry,
   NativeOutputStartOptions,
+  UzumeFormatPathPlan,
 } from './audioTypes';
 import type { AutomixTransitionPlan } from './AutomixPlanner';
 
@@ -68,6 +69,15 @@ const forceKilledExitWaitMs = 1_000;
 const forceKilledReleaseSettleMs = 200;
 const maxPositionExtrapolationMs = 250;
 const lowLatencyMaxBufferSizeFrames = 2048;
+const uzumeFormatPathIds = [
+  'pcm_bitperfect',
+  'pcm_processed',
+  'dsd_direct',
+  'dsd_upsampling',
+  'd2p_processed',
+  'sdm_processed',
+] as const;
+const uzumeFormatPathPlanStates = new Set(['current', 'available', 'disabled', 'unavailable', 'planned']);
 const nativeHostNotificationEvents = new Set<NativeHostNotificationEvent['event']>([
   'default_device_changed',
   'device_state_changed',
@@ -101,6 +111,7 @@ const createInitialTelemetry = (): NativeOutputTelemetry => ({
   uzumeFormatPath: null,
   uzumeBitPerfectState: null,
   uzumeDirectDisabledReason: null,
+  uzumeFormatPathPlan: null,
   uzumeHeadroomActive: false,
   uzumeTransitionalConvolutionPath: null,
   uzumeFusedMacroKernel: false,
@@ -108,6 +119,30 @@ const createInitialTelemetry = (): NativeOutputTelemetry => ({
   reportedAtMs: null,
   nativePositionStalenessMs: null,
 });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const parseUzumeFormatPathPlan = (value: unknown): UzumeFormatPathPlan | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const plan: UzumeFormatPathPlan = {};
+  for (const path of uzumeFormatPathIds) {
+    const entry = value[path];
+    if (!isRecord(entry) || typeof entry.state !== 'string' || !uzumeFormatPathPlanStates.has(entry.state)) {
+      continue;
+    }
+
+    plan[path] = {
+      state: entry.state as NonNullable<UzumeFormatPathPlan[typeof path]>['state'],
+      reason: typeof entry.reason === 'string' ? entry.reason : null,
+    };
+  }
+
+  return Object.keys(plan).length > 0 ? plan : null;
+};
 
 const appendTailLine = (lines: string[], line: string): void => {
   const trimmed = line.trim();
@@ -1398,6 +1433,10 @@ export class NativeOutputBridge extends EventEmitter {
               ? message.uzumeDirectDisabledReason
               : null
             : this.telemetry.uzumeDirectDisabledReason ?? null,
+        uzumeFormatPathPlan:
+          'uzumeFormatPathPlan' in message
+            ? parseUzumeFormatPathPlan(message.uzumeFormatPathPlan)
+            : this.telemetry.uzumeFormatPathPlan ?? null,
         uzumeHeadroomActive:
           typeof message.uzumeHeadroomActive === 'boolean'
             ? message.uzumeHeadroomActive
