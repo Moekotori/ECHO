@@ -4,11 +4,11 @@
 #include <juce_core/juce_core.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "../../audio-engine/ChannelBalanceProcessor.h"
+#include "../../audio-engine/ConvolutionProcessor.h"
 #include "../../audio-engine/EqMessageProtocol.h"
-  #include "../../audio-engine/DspChain.h"
-  #include "../../audio-engine/ChannelBalanceProcessor.h"
-  #include "../../audio-engine/ConvolutionProcessor.h"
-  #include "../../audio-engine/EqProcessor.h"
+#include "../../audio-engine/EqProcessor.h"
+#include "../../audio-engine/UzumeEngine.h"
 
 #if JUCE_WINDOWS
 #include "audio_host_exit_codes.h"
@@ -292,6 +292,37 @@ std::string jsonEscape(const juce::String& input)
     }
 
     return result;
+}
+
+std::string jsonBool(bool value)
+{
+    return value ? "true" : "false";
+}
+
+std::string formatUzumeRuntimeJson(const echo::UzumeRuntimeStatus& status)
+{
+    return std::string(",\"uzumeActive\":") + jsonBool(status.active)
+        + ",\"uzumeBackend\":\"" + jsonEscape(juce::String::fromUTF8(status.backend)) + "\""
+        + ",\"uzumeProfile\":\"" + jsonEscape(juce::String::fromUTF8(status.profile)) + "\""
+        + ",\"uzumeRuntimeModel\":\"" + jsonEscape(juce::String::fromUTF8(status.runtimeModel)) + "\""
+        + ",\"uzumeFallbackActive\":" + jsonBool(status.fallbackActive)
+        + ",\"uzumeGpuCompiled\":" + jsonBool(status.gpuCompiled)
+        + ",\"uzumeGpuAvailable\":" + jsonBool(status.gpuAvailable)
+        + ",\"uzumeGpuCufftAvailable\":" + jsonBool(status.gpuCufftAvailable)
+        + ",\"uzumeGpuLimiterPlaybackActive\":" + jsonBool(status.gpuLimiterPlaybackActive)
+        + ",\"uzumeGpuMatrixPlaybackActive\":" + jsonBool(status.gpuMatrixPlaybackActive)
+        + ",\"uzumeGpuFftConvolutionPrepared\":" + jsonBool(status.gpuFftConvolutionPrepared)
+        + (status.gpuDeviceName != nullptr
+            ? ",\"uzumeGpuDevice\":\"" + jsonEscape(juce::String::fromUTF8(status.gpuDeviceName)) + "\""
+            : "")
+        + (status.fallbackReason != nullptr
+            ? ",\"uzumeFallbackReason\":\"" + jsonEscape(juce::String::fromUTF8(status.fallbackReason)) + "\""
+            : "")
+        + (status.cufftFallbackReason != nullptr
+            ? ",\"uzumeCufftFallbackReason\":\"" + jsonEscape(juce::String::fromUTF8(status.cufftFallbackReason)) + "\""
+            : "")
+        + ",\"uzumeCudaRuntimeVersion\":" + std::to_string(status.cudaRuntimeVersion)
+        + ",\"uzumeCufftVersion\":" + std::to_string(status.cufftVersion);
 }
 
 int parseInt(const juce::String& value, int fallback)
@@ -1343,7 +1374,7 @@ public:
           convolutionProcessor(ownedConvolutionProcessor.get()),
           ownedHeadroomProcessor(std::make_unique<echo::DspHeadroomProcessor>()),
           headroomProcessor(ownedHeadroomProcessor.get()),
-          dspChain(eqProcessorToUse, *convolutionProcessor, channelBalanceProcessorToUse, *headroomProcessor)
+          uzumeEngine(eqProcessorToUse, *convolutionProcessor, channelBalanceProcessorToUse, *headroomProcessor)
     {
     }
 
@@ -1367,14 +1398,14 @@ public:
           automixBuffer(static_cast<size_t>(capacityFrames * channelCount), 0.0f),
           convolutionProcessor(&convolutionProcessorToUse),
           headroomProcessor(&headroomProcessorToUse),
-          dspChain(eqProcessorToUse, *convolutionProcessor, channelBalanceProcessorToUse, *headroomProcessor)
+          uzumeEngine(eqProcessorToUse, *convolutionProcessor, channelBalanceProcessorToUse, *headroomProcessor)
     {
     }
 
     void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override
     {
         configureDeclickRamp(sampleRate);
-        dspChain.prepare(sampleRate, samplesPerBlockExpected, channels);
+        uzumeEngine.prepare(sampleRate, samplesPerBlockExpected, channels);
     }
 
     void prepareForNativeRender(int maxFramesPerCallback, double sampleRate)
@@ -1382,27 +1413,32 @@ public:
         const int safeFrames = std::max(1, maxFramesPerCallback);
         nativeRenderBuffer.setSize(channels, safeFrames, false, true, true);
         configureDeclickRamp(sampleRate);
-        dspChain.prepare(sampleRate, safeFrames, channels);
+        uzumeEngine.prepare(sampleRate, safeFrames, channels);
     }
 
     void releaseResources() override
     {
-        dspChain.reset();
+        uzumeEngine.reset();
     }
 
     bool isDspActive() const
     {
-        return dspChain.isActive();
+        return uzumeEngine.isActive();
     }
 
     bool hasDspClippingRisk() const
     {
-        return dspChain.hasClippingRisk();
+        return uzumeEngine.hasClippingRisk();
     }
 
     bool isDspLimiterProtecting() const
     {
-        return dspChain.isSafetyLimiterProtecting();
+        return uzumeEngine.isSafetyLimiterProtecting();
+    }
+
+    echo::UzumeRuntimeStatus getUzumeRuntimeStatus() const
+    {
+        return uzumeEngine.getRuntimeStatus();
     }
 
     void getNextAudioBlock(const juce::AudioSourceChannelInfo& info) override
@@ -1519,7 +1555,7 @@ public:
         if (renderedFrames > 0)
             framesPlayed.fetch_add(renderedFrames, std::memory_order_relaxed);
 
-        dspChain.processBlock(output, startSample, frameCount);
+        uzumeEngine.processBlock(output, startSample, frameCount);
         applyDeclickRamp(output, startSample, frameCount);
 
         return renderedFrames;
@@ -2029,7 +2065,7 @@ private:
     echo::ConvolutionProcessor* convolutionProcessor = nullptr;
     std::unique_ptr<echo::DspHeadroomProcessor> ownedHeadroomProcessor;
     echo::DspHeadroomProcessor* headroomProcessor = nullptr;
-    echo::DspChain dspChain;
+    echo::UzumeEngine uzumeEngine;
     mutable std::mutex fifoMutex;
     mutable std::mutex automixMutex;
     AutomixNativePlan automixPlan;
@@ -2075,6 +2111,18 @@ private:
         return true;
     }
 };
+
+std::string formatPcmPositionJson(const PcmRingAudioSource& source, uint64_t frames)
+{
+    return std::string("{\"pos\":") + std::to_string(frames)
+        + ",\"bufferedFrames\":" + std::to_string(source.getReadyFrames())
+        + ",\"underrunCallbacks\":" + std::to_string(source.getUnderrunCallbacks())
+        + ",\"underrunFrames\":" + std::to_string(source.getUnderrunFrames())
+        + ",\"dspClippingRisk\":" + jsonBool(source.hasDspClippingRisk())
+        + ",\"dspLimiterProtecting\":" + jsonBool(source.isDspLimiterProtecting())
+        + formatUzumeRuntimeJson(source.getUzumeRuntimeStatus())
+        + "}";
+}
 
 class DopRingSource final
 {
@@ -4337,6 +4385,7 @@ int runLegacyWasapiExclusiveHost(const Options& options)
         + ",\"dspActive\":" + std::string(source.isDspActive() ? "true" : "false")
         + ",\"dspClippingRisk\":" + std::string(source.hasDspClippingRisk() ? "true" : "false")
         + ",\"dspLimiterProtecting\":" + std::string(source.isDspLimiterProtecting() ? "true" : "false")
+        + formatUzumeRuntimeJson(source.getUzumeRuntimeStatus())
         + ",\"backend\":\"wasapi-exclusive\""
         + ",\"backendImpl\":\"legacy-wasapi-exclusive\""
         + ",\"format\":\"" + jsonEscape(juce::String::fromUTF8(readyInfo.format)) + "\""
@@ -4353,12 +4402,7 @@ int runLegacyWasapiExclusiveHost(const Options& options)
 
         if (frames != lastReported)
         {
-            writeJsonLine(
-                std::string("{\"pos\":") + std::to_string(frames)
-                + ",\"bufferedFrames\":" + std::to_string(source.getReadyFrames())
-                + ",\"underrunCallbacks\":" + std::to_string(source.getUnderrunCallbacks())
-                + ",\"underrunFrames\":" + std::to_string(source.getUnderrunFrames())
-                + "}");
+            writeJsonLine(formatPcmPositionJson(source, frames));
             lastReported = frames;
         }
 
@@ -4386,12 +4430,7 @@ int runLegacyWasapiExclusiveHost(const Options& options)
 
     const auto finalFrames = source.getFramesPlayed();
     if (finalFrames != lastReported)
-        writeJsonLine(
-            std::string("{\"pos\":") + std::to_string(finalFrames)
-            + ",\"bufferedFrames\":" + std::to_string(source.getReadyFrames())
-            + ",\"underrunCallbacks\":" + std::to_string(source.getUnderrunCallbacks())
-            + ",\"underrunFrames\":" + std::to_string(source.getUnderrunFrames())
-            + "}");
+        writeJsonLine(formatPcmPositionJson(source, finalFrames));
 
     if (source.getUnderrunCallbacks() > 0)
     {
@@ -4683,6 +4722,7 @@ int runLegacyWasapiSharedHost(const Options& options)
         + ",\"dspActive\":" + std::string(source.isDspActive() ? "true" : "false")
         + ",\"dspClippingRisk\":" + std::string(source.hasDspClippingRisk() ? "true" : "false")
         + ",\"dspLimiterProtecting\":" + std::string(source.isDspLimiterProtecting() ? "true" : "false")
+        + formatUzumeRuntimeJson(source.getUzumeRuntimeStatus())
         + ",\"backend\":\"wasapi-shared\""
         + ",\"backendImpl\":\"legacy-wasapi-shared\""
         + ",\"format\":\"" + jsonEscape(juce::String::fromUTF8(readyInfo.format)) + "\""
@@ -4699,12 +4739,7 @@ int runLegacyWasapiSharedHost(const Options& options)
 
         if (frames != lastReported)
         {
-            writeJsonLine(
-                std::string("{\"pos\":") + std::to_string(frames)
-                + ",\"bufferedFrames\":" + std::to_string(source.getReadyFrames())
-                + ",\"underrunCallbacks\":" + std::to_string(source.getUnderrunCallbacks())
-                + ",\"underrunFrames\":" + std::to_string(source.getUnderrunFrames())
-                + "}");
+            writeJsonLine(formatPcmPositionJson(source, frames));
             lastReported = frames;
         }
 
@@ -4732,12 +4767,7 @@ int runLegacyWasapiSharedHost(const Options& options)
 
     const auto finalFrames = source.getFramesPlayed();
     if (finalFrames != lastReported)
-        writeJsonLine(
-            std::string("{\"pos\":") + std::to_string(finalFrames)
-            + ",\"bufferedFrames\":" + std::to_string(source.getReadyFrames())
-            + ",\"underrunCallbacks\":" + std::to_string(source.getUnderrunCallbacks())
-            + ",\"underrunFrames\":" + std::to_string(source.getUnderrunFrames())
-            + "}");
+        writeJsonLine(formatPcmPositionJson(source, finalFrames));
 
     if (source.getUnderrunCallbacks() > 0)
     {
@@ -4872,6 +4902,7 @@ int runLegacyAsioHost(const Options& options)
         + ",\"dspActive\":" + std::string(source.isDspActive() ? "true" : "false")
         + ",\"dspClippingRisk\":" + std::string(source.hasDspClippingRisk() ? "true" : "false")
         + ",\"dspLimiterProtecting\":" + std::string(source.isDspLimiterProtecting() ? "true" : "false")
+        + formatUzumeRuntimeJson(source.getUzumeRuntimeStatus())
         + ",\"backend\":\"asio\""
         + ",\"backendImpl\":\"legacy-asio-sdk\""
         + ",\"format\":\"" + jsonEscape(juce::String::fromUTF8(readyInfo.format)) + "\""
@@ -4899,12 +4930,7 @@ int runLegacyAsioHost(const Options& options)
 
         if (frames != lastReported)
         {
-            writeJsonLine(
-                std::string("{\"pos\":") + std::to_string(frames)
-                + ",\"bufferedFrames\":" + std::to_string(source.getReadyFrames())
-                + ",\"underrunCallbacks\":" + std::to_string(source.getUnderrunCallbacks())
-                + ",\"underrunFrames\":" + std::to_string(source.getUnderrunFrames())
-                + "}");
+            writeJsonLine(formatPcmPositionJson(source, frames));
             lastReported = frames;
         }
 
@@ -4934,12 +4960,7 @@ int runLegacyAsioHost(const Options& options)
 
     const auto finalFrames = source.getFramesPlayed();
     if (finalFrames != lastReported)
-        writeJsonLine(
-            std::string("{\"pos\":") + std::to_string(finalFrames)
-            + ",\"bufferedFrames\":" + std::to_string(source.getReadyFrames())
-            + ",\"underrunCallbacks\":" + std::to_string(source.getUnderrunCallbacks())
-            + ",\"underrunFrames\":" + std::to_string(source.getUnderrunFrames())
-            + "}");
+        writeJsonLine(formatPcmPositionJson(source, finalFrames));
 
     if (source.getUnderrunCallbacks() > 0)
     {
@@ -5566,6 +5587,7 @@ int runHost(const Options& options)
         + ",\"dspActive\":" + std::string(source.isDspActive() ? "true" : "false")
         + ",\"dspClippingRisk\":" + std::string(source.hasDspClippingRisk() ? "true" : "false")
         + ",\"dspLimiterProtecting\":" + std::string(source.isDspLimiterProtecting() ? "true" : "false")
+        + formatUzumeRuntimeJson(source.getUzumeRuntimeStatus())
         + ",\"backend\":\"" + getBackendName(options, openedDescriptor.typeName)
         + "\",\"backendImpl\":\"" + getBackendImplName(options, openedDescriptor.typeName)
         + "\",\"deviceType\":\""
@@ -5592,12 +5614,7 @@ int runHost(const Options& options)
 
         if (frames != lastReported)
         {
-            writeJsonLine(
-                std::string("{\"pos\":") + std::to_string(frames)
-                + ",\"bufferedFrames\":" + std::to_string(source.getReadyFrames())
-                + ",\"underrunCallbacks\":" + std::to_string(source.getUnderrunCallbacks())
-                + ",\"underrunFrames\":" + std::to_string(source.getUnderrunFrames())
-                + "}");
+            writeJsonLine(formatPcmPositionJson(source, frames));
             lastReported = frames;
         }
 
@@ -5625,12 +5642,7 @@ int runHost(const Options& options)
 
     const auto finalFrames = source.getFramesPlayed();
     if (finalFrames != lastReported)
-        writeJsonLine(
-            std::string("{\"pos\":") + std::to_string(finalFrames)
-            + ",\"bufferedFrames\":" + std::to_string(source.getReadyFrames())
-            + ",\"underrunCallbacks\":" + std::to_string(source.getUnderrunCallbacks())
-            + ",\"underrunFrames\":" + std::to_string(source.getUnderrunFrames())
-            + "}");
+        writeJsonLine(formatPcmPositionJson(source, finalFrames));
 
     if (source.getUnderrunCallbacks() > 0)
     {

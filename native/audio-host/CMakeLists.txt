@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 project(echo_audio_host VERSION 0.1.0 LANGUAGES CXX)
 
 include(FetchContent)
+include(CheckLanguage)
 
 set(JUCE_VERSION "8.0.12" CACHE STRING "JUCE version to fetch")
 set(JUCE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -14,6 +15,7 @@ if(WIN32)
 else()
   option(ECHO_ENABLE_ASIO "Enable JUCE ASIO support in echo-audio-host" OFF)
 endif()
+option(ECHO_UZUME_ENABLE_CUDA "Enable the experimental UZUME CUDA GPU MVP probe, limiter, and cuFFT backend" OFF)
 
 FetchContent_Declare(
   JUCE
@@ -32,7 +34,10 @@ set(ECHO_AUDIO_ENGINE_SOURCES
   ../audio-engine/EqMessageProtocol.cpp
   ../audio-engine/EqPresetStore.cpp
   ../audio-engine/EqProcessor.cpp
+  ../audio-engine/UzumeEngine.cpp
+  ../audio-engine/UzumeCudaProbe.cpp
 )
+set(ECHO_UZUME_LIBRARIES)
 
 set(ECHO_JUCE_DEFINITIONS
   JUCE_DISPLAY_SPLASH_SCREEN=0
@@ -43,7 +48,32 @@ set(ECHO_JUCE_DEFINITIONS
   JUCE_USE_WINDOWS_MEDIA_FORMAT=1
   JUCE_ASIO=$<BOOL:${ECHO_ENABLE_ASIO}>
   ECHO_ENABLE_ASIO=$<BOOL:${ECHO_ENABLE_ASIO}>
+  ECHO_UZUME_ENABLE_CUDA=0
 )
+
+if(ECHO_UZUME_ENABLE_CUDA)
+  check_language(CUDA)
+  if(NOT CMAKE_CUDA_COMPILER)
+    message(FATAL_ERROR "ECHO_UZUME_ENABLE_CUDA=ON requires an nvcc-compatible CUDA compiler.")
+  endif()
+
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  set(CMAKE_CUDA_STANDARD 17)
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+  list(REMOVE_ITEM ECHO_AUDIO_ENGINE_SOURCES ../audio-engine/UzumeCudaProbe.cpp)
+  add_library(echo-uzume-cuda-probe STATIC ../audio-engine/UzumeCudaProbe.cu)
+  set_target_properties(echo-uzume-cuda-probe PROPERTIES
+    CUDA_STANDARD 17
+    CUDA_STANDARD_REQUIRED ON
+  )
+  target_link_libraries(echo-uzume-cuda-probe PUBLIC CUDA::cudart CUDA::cufft)
+
+  list(REMOVE_ITEM ECHO_JUCE_DEFINITIONS ECHO_UZUME_ENABLE_CUDA=0)
+  list(APPEND ECHO_JUCE_DEFINITIONS ECHO_UZUME_ENABLE_CUDA=1)
+  list(APPEND ECHO_UZUME_LIBRARIES echo-uzume-cuda-probe)
+endif()
 
 if(UNIX AND NOT APPLE)
   find_package(ALSA REQUIRED)
@@ -102,6 +132,7 @@ target_compile_definitions(echo-audio-host
 target_link_libraries(echo-audio-host
   PRIVATE
     ${ECHO_JUCE_LIBRARIES}
+    ${ECHO_UZUME_LIBRARIES}
 )
 
 if(WIN32)
@@ -152,6 +183,7 @@ target_compile_definitions(echo-audio-engine-tests
 target_link_libraries(echo-audio-engine-tests
   PRIVATE
     ${ECHO_JUCE_LIBRARIES}
+    ${ECHO_UZUME_LIBRARIES}
 )
 
 if(WIN32)

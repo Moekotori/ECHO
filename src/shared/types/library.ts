@@ -1238,7 +1238,7 @@ export type LyricsBackgroundCoverResult = {
 
 export type LibraryAlbum = {
   id: string;
-  mediaType?: 'local' | 'remote';
+  mediaType?: 'local' | 'remote' | 'streaming';
   sourceId?: string | null;
   sourceDisplayName?: string | null;
   provider?: string | null;

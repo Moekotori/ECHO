@@ -1518,6 +1518,22 @@ export class AudioSession extends EventEmitter {
     underrunFrames: 0,
     dspClippingRisk: false,
     dspLimiterProtecting: false,
+    uzumeActive: false,
+    uzumeBackend: null,
+    uzumeProfile: null,
+    uzumeRuntimeModel: null,
+    uzumeFallbackActive: false,
+    uzumeGpuCompiled: false,
+    uzumeGpuAvailable: false,
+    uzumeGpuCufftAvailable: false,
+    uzumeGpuLimiterPlaybackActive: false,
+    uzumeGpuMatrixPlaybackActive: false,
+    uzumeGpuFftConvolutionPrepared: false,
+    uzumeGpuDevice: null,
+    uzumeFallbackReason: null,
+    uzumeCufftFallbackReason: null,
+    uzumeCudaRuntimeVersion: null,
+    uzumeCufftVersion: null,
   };
   private lastNativeTelemetryStatusEmittedAt = 0;
   private lastLevelMeterStatusEmittedAt = 0;
@@ -3317,6 +3333,100 @@ export class AudioSession extends EventEmitter {
     const realtimeLevelClipped = audioLevels.clipCount > 0;
     const nativeDspClippingRisk = this.nativeTelemetry.dspClippingRisk === true;
     const nativeDspLimiterProtecting = this.nativeTelemetry.dspLimiterProtecting === true;
+    const readyUzumeActive = this.currentReadyResult?.device.uzumeActive === true;
+    const hasNativeUzumeTelemetry =
+      this.nativeTelemetry.uzumeActive === true ||
+      this.nativeTelemetry.uzumeFallbackActive === true ||
+      this.nativeTelemetry.uzumeBackend !== null ||
+      this.nativeTelemetry.uzumeProfile !== null ||
+      this.nativeTelemetry.uzumeRuntimeModel !== null ||
+      this.nativeTelemetry.uzumeGpuCompiled === true ||
+      this.nativeTelemetry.uzumeGpuAvailable === true ||
+      this.nativeTelemetry.uzumeGpuCufftAvailable === true ||
+      this.nativeTelemetry.uzumeGpuLimiterPlaybackActive === true ||
+      this.nativeTelemetry.uzumeGpuMatrixPlaybackActive === true ||
+      this.nativeTelemetry.uzumeGpuFftConvolutionPrepared === true ||
+      this.nativeTelemetry.uzumeGpuDevice !== null ||
+      this.nativeTelemetry.uzumeFallbackReason !== null ||
+      this.nativeTelemetry.uzumeCufftFallbackReason !== null ||
+      this.nativeTelemetry.uzumeCudaRuntimeVersion !== null ||
+      this.nativeTelemetry.uzumeCufftVersion !== null;
+    const nativeUzumeActive = hasNativeUzumeTelemetry ? this.nativeTelemetry.uzumeActive === true : readyUzumeActive;
+    const nativeUzumeBackend =
+      typeof this.nativeTelemetry.uzumeBackend === 'string'
+        ? this.nativeTelemetry.uzumeBackend
+        : typeof this.currentReadyResult?.device.uzumeBackend === 'string'
+          ? this.currentReadyResult.device.uzumeBackend
+          : null;
+    const nativeUzumeProfile =
+      typeof this.nativeTelemetry.uzumeProfile === 'string'
+        ? this.nativeTelemetry.uzumeProfile
+        : typeof this.currentReadyResult?.device.uzumeProfile === 'string'
+          ? this.currentReadyResult.device.uzumeProfile
+          : null;
+    const nativeUzumeRuntimeModel =
+      typeof this.nativeTelemetry.uzumeRuntimeModel === 'string'
+        ? this.nativeTelemetry.uzumeRuntimeModel
+        : typeof this.currentReadyResult?.device.uzumeRuntimeModel === 'string'
+          ? this.currentReadyResult.device.uzumeRuntimeModel
+          : null;
+    const nativeUzumeFallbackActive = hasNativeUzumeTelemetry
+      ? this.nativeTelemetry.uzumeFallbackActive === true
+      : this.currentReadyResult?.device.uzumeFallbackActive === true;
+    const nativeUzumeGpuCompiled =
+      hasNativeUzumeTelemetry
+        ? this.nativeTelemetry.uzumeGpuCompiled === true
+        : this.currentReadyResult?.device.uzumeGpuCompiled === true;
+    const nativeUzumeGpuAvailable =
+      hasNativeUzumeTelemetry
+        ? this.nativeTelemetry.uzumeGpuAvailable === true
+        : this.currentReadyResult?.device.uzumeGpuAvailable === true;
+    const nativeUzumeGpuCufftAvailable =
+      hasNativeUzumeTelemetry
+        ? this.nativeTelemetry.uzumeGpuCufftAvailable === true
+        : this.currentReadyResult?.device.uzumeGpuCufftAvailable === true;
+    const nativeUzumeGpuLimiterPlaybackActive =
+      hasNativeUzumeTelemetry
+        ? this.nativeTelemetry.uzumeGpuLimiterPlaybackActive === true
+        : this.currentReadyResult?.device.uzumeGpuLimiterPlaybackActive === true;
+    const nativeUzumeGpuMatrixPlaybackActive =
+      hasNativeUzumeTelemetry
+        ? this.nativeTelemetry.uzumeGpuMatrixPlaybackActive === true
+        : this.currentReadyResult?.device.uzumeGpuMatrixPlaybackActive === true;
+    const nativeUzumeGpuFftConvolutionPrepared =
+      hasNativeUzumeTelemetry
+        ? this.nativeTelemetry.uzumeGpuFftConvolutionPrepared === true
+        : this.currentReadyResult?.device.uzumeGpuFftConvolutionPrepared === true;
+    const nativeUzumeGpuDevice =
+      typeof this.nativeTelemetry.uzumeGpuDevice === 'string'
+        ? this.nativeTelemetry.uzumeGpuDevice
+        : typeof this.currentReadyResult?.device.uzumeGpuDevice === 'string'
+          ? this.currentReadyResult.device.uzumeGpuDevice
+          : null;
+    const nativeUzumeCudaRuntimeVersion =
+      typeof this.nativeTelemetry.uzumeCudaRuntimeVersion === 'number'
+        ? this.nativeTelemetry.uzumeCudaRuntimeVersion
+        : typeof this.currentReadyResult?.device.uzumeCudaRuntimeVersion === 'number'
+          ? this.currentReadyResult.device.uzumeCudaRuntimeVersion
+          : null;
+    const nativeUzumeFallbackReason =
+      typeof this.nativeTelemetry.uzumeFallbackReason === 'string'
+        ? this.nativeTelemetry.uzumeFallbackReason
+        : typeof this.currentReadyResult?.device.uzumeFallbackReason === 'string'
+          ? this.currentReadyResult.device.uzumeFallbackReason
+          : null;
+    const nativeUzumeCufftFallbackReason =
+      typeof this.nativeTelemetry.uzumeCufftFallbackReason === 'string'
+        ? this.nativeTelemetry.uzumeCufftFallbackReason
+        : typeof this.currentReadyResult?.device.uzumeCufftFallbackReason === 'string'
+          ? this.currentReadyResult.device.uzumeCufftFallbackReason
+          : null;
+    const nativeUzumeCufftVersion =
+      typeof this.nativeTelemetry.uzumeCufftVersion === 'number'
+        ? this.nativeTelemetry.uzumeCufftVersion
+        : typeof this.currentReadyResult?.device.uzumeCufftVersion === 'number'
+          ? this.currentReadyResult.device.uzumeCufftVersion
+          : null;
     const chainedPlaybackActive = this.activeAutomix !== null;
     const gaplessActive = this.activeAutomix?.gapless === true;
     const automixActive = chainedPlaybackActive && !gaplessActive;
@@ -3507,6 +3617,22 @@ export class AudioSession extends EventEmitter {
       roomCorrectionEnabled: roomCorrectionState.enabled,
       channelBalanceEnabled: channelBalanceState.enabled,
       dspActive,
+      uzumeActive: nativeUzumeActive,
+      uzumeBackend: nativeUzumeBackend,
+      uzumeProfile: nativeUzumeProfile,
+      uzumeRuntimeModel: nativeUzumeRuntimeModel,
+      uzumeFallbackActive: nativeUzumeFallbackActive,
+      uzumeGpuCompiled: nativeUzumeGpuCompiled,
+      uzumeGpuAvailable: nativeUzumeGpuAvailable,
+      uzumeGpuCufftAvailable: nativeUzumeGpuCufftAvailable,
+      uzumeGpuLimiterPlaybackActive: nativeUzumeGpuLimiterPlaybackActive,
+      uzumeGpuMatrixPlaybackActive: nativeUzumeGpuMatrixPlaybackActive,
+      uzumeGpuFftConvolutionPrepared: nativeUzumeGpuFftConvolutionPrepared,
+      uzumeGpuDevice: nativeUzumeGpuDevice,
+      uzumeFallbackReason: nativeUzumeFallbackReason,
+      uzumeCufftFallbackReason: nativeUzumeCufftFallbackReason,
+      uzumeCudaRuntimeVersion: nativeUzumeCudaRuntimeVersion,
+      uzumeCufftVersion: nativeUzumeCufftVersion,
       preampDb: eqState.preampDb,
       dspHeadroomDb: eqState.dspHeadroomDb ?? 0,
       eqPresetName: eqState.presetName,
@@ -5092,6 +5218,25 @@ export class AudioSession extends EventEmitter {
         nativeActualBufferFrames: this.nativeActualBufferFrames,
         nativeFifoCapacityFrames: this.nativeFifoCapacityFrames,
         nativeStartupPrebufferFrames: this.nativeStartupPrebufferFrames,
+        uzumeActive: readyDevice.uzumeActive === true,
+        uzumeBackend: typeof readyDevice.uzumeBackend === 'string' ? readyDevice.uzumeBackend : null,
+        uzumeProfile: typeof readyDevice.uzumeProfile === 'string' ? readyDevice.uzumeProfile : null,
+        uzumeRuntimeModel: typeof readyDevice.uzumeRuntimeModel === 'string' ? readyDevice.uzumeRuntimeModel : null,
+        uzumeFallbackActive: readyDevice.uzumeFallbackActive === true,
+        uzumeGpuCompiled: readyDevice.uzumeGpuCompiled === true,
+        uzumeGpuAvailable: readyDevice.uzumeGpuAvailable === true,
+        uzumeGpuCufftAvailable: readyDevice.uzumeGpuCufftAvailable === true,
+        uzumeGpuLimiterPlaybackActive: readyDevice.uzumeGpuLimiterPlaybackActive === true,
+        uzumeGpuMatrixPlaybackActive: readyDevice.uzumeGpuMatrixPlaybackActive === true,
+        uzumeGpuFftConvolutionPrepared: readyDevice.uzumeGpuFftConvolutionPrepared === true,
+        uzumeGpuDevice: typeof readyDevice.uzumeGpuDevice === 'string' ? readyDevice.uzumeGpuDevice : null,
+        uzumeFallbackReason: typeof readyDevice.uzumeFallbackReason === 'string' ? readyDevice.uzumeFallbackReason : null,
+        uzumeCufftFallbackReason:
+          typeof readyDevice.uzumeCufftFallbackReason === 'string' ? readyDevice.uzumeCufftFallbackReason : null,
+        uzumeCudaRuntimeVersion:
+          typeof readyDevice.uzumeCudaRuntimeVersion === 'number' ? readyDevice.uzumeCudaRuntimeVersion : null,
+        uzumeCufftVersion:
+          typeof readyDevice.uzumeCufftVersion === 'number' ? readyDevice.uzumeCufftVersion : null,
       },
     });
   }
@@ -6998,8 +7143,89 @@ export class AudioSession extends EventEmitter {
           : Math.max(0, Math.round(Number(telemetry.bufferedFrames) || 0)),
       underrunCallbacks: Math.max(0, Math.round(Number(telemetry.underrunCallbacks) || 0)),
       underrunFrames: Math.max(0, Math.round(Number(telemetry.underrunFrames) || 0)),
-      dspClippingRisk: telemetry.dspClippingRisk === true,
-      dspLimiterProtecting: telemetry.dspLimiterProtecting === true,
+      dspClippingRisk:
+        telemetry.dspClippingRisk === undefined ? this.nativeTelemetry.dspClippingRisk : telemetry.dspClippingRisk === true,
+      dspLimiterProtecting:
+        telemetry.dspLimiterProtecting === undefined
+          ? this.nativeTelemetry.dspLimiterProtecting
+          : telemetry.dspLimiterProtecting === true,
+      uzumeActive: telemetry.uzumeActive === undefined ? this.nativeTelemetry.uzumeActive : telemetry.uzumeActive === true,
+      uzumeBackend:
+        telemetry.uzumeBackend === undefined
+          ? this.nativeTelemetry.uzumeBackend
+          : typeof telemetry.uzumeBackend === 'string'
+            ? telemetry.uzumeBackend
+            : null,
+      uzumeProfile:
+        telemetry.uzumeProfile === undefined
+          ? this.nativeTelemetry.uzumeProfile
+          : typeof telemetry.uzumeProfile === 'string'
+            ? telemetry.uzumeProfile
+            : null,
+      uzumeRuntimeModel:
+        telemetry.uzumeRuntimeModel === undefined
+          ? this.nativeTelemetry.uzumeRuntimeModel
+          : typeof telemetry.uzumeRuntimeModel === 'string'
+            ? telemetry.uzumeRuntimeModel
+            : null,
+      uzumeFallbackActive:
+        telemetry.uzumeFallbackActive === undefined
+          ? this.nativeTelemetry.uzumeFallbackActive
+          : telemetry.uzumeFallbackActive === true,
+      uzumeGpuCompiled:
+        telemetry.uzumeGpuCompiled === undefined
+          ? this.nativeTelemetry.uzumeGpuCompiled
+          : telemetry.uzumeGpuCompiled === true,
+      uzumeGpuAvailable:
+        telemetry.uzumeGpuAvailable === undefined
+          ? this.nativeTelemetry.uzumeGpuAvailable
+          : telemetry.uzumeGpuAvailable === true,
+      uzumeGpuCufftAvailable:
+        telemetry.uzumeGpuCufftAvailable === undefined
+          ? this.nativeTelemetry.uzumeGpuCufftAvailable
+          : telemetry.uzumeGpuCufftAvailable === true,
+      uzumeGpuLimiterPlaybackActive:
+        telemetry.uzumeGpuLimiterPlaybackActive === undefined
+          ? this.nativeTelemetry.uzumeGpuLimiterPlaybackActive
+          : telemetry.uzumeGpuLimiterPlaybackActive === true,
+      uzumeGpuMatrixPlaybackActive:
+        telemetry.uzumeGpuMatrixPlaybackActive === undefined
+          ? this.nativeTelemetry.uzumeGpuMatrixPlaybackActive
+          : telemetry.uzumeGpuMatrixPlaybackActive === true,
+      uzumeGpuFftConvolutionPrepared:
+        telemetry.uzumeGpuFftConvolutionPrepared === undefined
+          ? this.nativeTelemetry.uzumeGpuFftConvolutionPrepared
+          : telemetry.uzumeGpuFftConvolutionPrepared === true,
+      uzumeGpuDevice:
+        telemetry.uzumeGpuDevice === undefined
+          ? this.nativeTelemetry.uzumeGpuDevice
+          : typeof telemetry.uzumeGpuDevice === 'string'
+            ? telemetry.uzumeGpuDevice
+            : null,
+      uzumeFallbackReason:
+        telemetry.uzumeFallbackReason === undefined
+          ? this.nativeTelemetry.uzumeFallbackReason
+          : typeof telemetry.uzumeFallbackReason === 'string'
+            ? telemetry.uzumeFallbackReason
+            : null,
+      uzumeCufftFallbackReason:
+        telemetry.uzumeCufftFallbackReason === undefined
+          ? this.nativeTelemetry.uzumeCufftFallbackReason
+          : typeof telemetry.uzumeCufftFallbackReason === 'string'
+            ? telemetry.uzumeCufftFallbackReason
+            : null,
+      uzumeCudaRuntimeVersion:
+        telemetry.uzumeCudaRuntimeVersion === undefined
+          ? this.nativeTelemetry.uzumeCudaRuntimeVersion
+          : typeof telemetry.uzumeCudaRuntimeVersion === 'number' && Number.isFinite(telemetry.uzumeCudaRuntimeVersion)
+            ? Math.max(0, Math.round(telemetry.uzumeCudaRuntimeVersion))
+            : null,
+      uzumeCufftVersion:
+        telemetry.uzumeCufftVersion === undefined
+          ? this.nativeTelemetry.uzumeCufftVersion
+          : typeof telemetry.uzumeCufftVersion === 'number' && Number.isFinite(telemetry.uzumeCufftVersion)
+            ? Math.max(0, Math.round(telemetry.uzumeCufftVersion))
+            : null,
       reportedAtMs:
         telemetry.reportedAtMs === null || telemetry.reportedAtMs === undefined
           ? null
@@ -7322,6 +7548,22 @@ export class AudioSession extends EventEmitter {
       underrunFrames: 0,
       dspClippingRisk: false,
       dspLimiterProtecting: false,
+      uzumeActive: false,
+      uzumeBackend: null,
+      uzumeProfile: null,
+      uzumeRuntimeModel: null,
+      uzumeFallbackActive: false,
+      uzumeGpuCompiled: false,
+      uzumeGpuAvailable: false,
+      uzumeGpuCufftAvailable: false,
+      uzumeGpuLimiterPlaybackActive: false,
+      uzumeGpuMatrixPlaybackActive: false,
+      uzumeGpuFftConvolutionPrepared: false,
+      uzumeGpuDevice: null,
+      uzumeFallbackReason: null,
+      uzumeCufftFallbackReason: null,
+      uzumeCudaRuntimeVersion: null,
+      uzumeCufftVersion: null,
       reportedAtMs: null,
       nativePositionStalenessMs: null,
     };

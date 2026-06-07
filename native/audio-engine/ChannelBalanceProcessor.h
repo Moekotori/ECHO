@@ -63,6 +63,10 @@ public:
 
     bool isEnabled() const;
     bool hasClippingRisk() const;
+    bool didUseGpuMatrixPlayback() const;
+    bool hadGpuMatrixPlaybackFallback() const;
+    const char* getGpuMatrixPlaybackFallbackReason() const;
+    void clearGpuPlaybackStatus();
 
 private:
     struct TargetSnapshot
@@ -86,6 +90,14 @@ private:
     TargetSnapshot readTargetSnapshot() const;
     void updateSwitchTargets(const TargetSnapshot& target);
     static void calculateBalanceGains(float balance, bool constantPower, float& leftGain, float& rightGain);
+    bool tryProcessStableStereoGpuPath(
+        juce::AudioBuffer<float>& buffer,
+        int startSample,
+        int numSamples,
+        int channelCount,
+        const TargetSnapshot& target,
+        bool& risk);
+    bool isStableStereoGpuPathEligible(int channelCount, const TargetSnapshot& target) const;
     float applyBandCompensation(int channel, float sample, const std::array<float, channelBalanceBandCount>& bandGainsDb);
     float readDelaySample(int channel, float delayMs) const;
     void pushDelaySample(int channel, float sample);
@@ -147,5 +159,8 @@ private:
     std::atomic<bool> targetInvertRight { false };
     std::atomic<bool> targetConstantPower { true };
     std::atomic<bool> clippingRisk { false };
+    std::atomic<bool> gpuMatrixPlaybackProcessed { false };
+    std::atomic<bool> gpuMatrixPlaybackFallback { false };
+    std::atomic<const char*> gpuMatrixPlaybackFallbackReason { nullptr };
 };
 } // namespace echo

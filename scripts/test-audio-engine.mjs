@@ -9,6 +9,7 @@ const sourceDir = join(projectRoot, 'native', 'audio-host');
 const buildDir = join(projectRoot, 'out', 'native', 'audio-host');
 const config = process.env.ECHO_AUDIO_HOST_CONFIG || 'Release';
 const enableAsio = process.env.ECHO_ENABLE_ASIO ?? (process.platform === 'win32' ? 'ON' : 'OFF');
+const enableUzumeCuda = process.env.ECHO_UZUME_ENABLE_CUDA ?? 'OFF';
 const isWindows = process.platform === 'win32';
 const pngSignature = '89504e470d0a1a0a';
 
@@ -158,6 +159,7 @@ try {
     '-B',
     buildDir,
     `-DECHO_ENABLE_ASIO=${enableAsio}`,
+    `-DECHO_UZUME_ENABLE_CUDA=${enableUzumeCuda}`,
   ];
 
   if (isWindows) {

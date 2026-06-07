@@ -883,6 +883,15 @@ export type TranslationKey =
   | 'audioProfessional.row.soxr'
   | 'audioProfessional.row.state'
   | 'audioProfessional.row.underrun'
+  | 'audioProfessional.row.uzumeBackend'
+  | 'audioProfessional.row.uzumeCuda'
+  | 'audioProfessional.row.uzumeCufft'
+  | 'audioProfessional.row.uzumeFallback'
+  | 'audioProfessional.row.uzumeFftScratch'
+  | 'audioProfessional.row.uzumeGpu'
+  | 'audioProfessional.row.uzumeGpuLimiter'
+  | 'audioProfessional.row.uzumeGpuMatrix'
+  | 'audioProfessional.row.uzumeRuntime'
   | 'audioProfessional.row.warnings'
   | 'audioProfessional.summary.pending'
   | 'audioProfessional.title'
@@ -3825,6 +3834,15 @@ const zhCN: TranslationMap = {
   'audioProfessional.row.resampling': '重采样',
   'audioProfessional.row.sampleRateMismatch': '采样率不匹配',
   'audioProfessional.row.upsampling': '升频',
+  'audioProfessional.row.uzumeBackend': 'UZUME 后端',
+  'audioProfessional.row.uzumeCuda': 'CUDA runtime',
+  'audioProfessional.row.uzumeCufft': 'cuFFT',
+  'audioProfessional.row.uzumeFallback': 'UZUME 回退',
+  'audioProfessional.row.uzumeFftScratch': 'FIR GPU 预热',
+  'audioProfessional.row.uzumeGpu': 'UZUME GPU',
+  'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
+  'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
+  'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
   'audioProfessional.row.signalPath': '信号路径',
   'audioProfessional.row.sharedDeviceSampleRate': '共享设备采样率',
   'audioProfessional.row.sharedStability': '共享稳定档',
@@ -7132,6 +7150,15 @@ const zhTW: TranslationMap = {
   'audioProfessional.row.resampling': '重取樣',
   'audioProfessional.row.sampleRateMismatch': '取樣率不符',
   'audioProfessional.row.upsampling': '升頻',
+  'audioProfessional.row.uzumeBackend': 'UZUME 後端',
+  'audioProfessional.row.uzumeCuda': 'CUDA runtime',
+  'audioProfessional.row.uzumeCufft': 'cuFFT',
+  'audioProfessional.row.uzumeFallback': 'UZUME fallback',
+  'audioProfessional.row.uzumeFftScratch': 'FIR GPU 預熱',
+  'audioProfessional.row.uzumeGpu': 'UZUME GPU',
+  'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
+  'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
+  'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
   'audioProfessional.row.signalPath': '訊號路徑',
   'audioProfessional.row.sharedDeviceSampleRate': '共享裝置取樣率',
   'audioProfessional.row.sharedStability': '共享穩定檔',
@@ -10011,6 +10038,15 @@ const jaJP: TranslationMap = {
   'audioProfessional.row.resampling': 'リサンプル',
   'audioProfessional.row.sampleRateMismatch': 'レート不一致',
   'audioProfessional.row.upsampling': 'アップサンプル',
+  'audioProfessional.row.uzumeBackend': 'UZUME backend',
+  'audioProfessional.row.uzumeCuda': 'CUDA runtime',
+  'audioProfessional.row.uzumeCufft': 'cuFFT',
+  'audioProfessional.row.uzumeFallback': 'UZUME fallback',
+  'audioProfessional.row.uzumeFftScratch': 'FIR GPU prewarm',
+  'audioProfessional.row.uzumeGpu': 'UZUME GPU',
+  'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
+  'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
+  'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
   'audioProfessional.row.signalPath': '信号パス',
   'audioProfessional.row.sharedDeviceSampleRate': '共有デバイスレート',
   'audioProfessional.row.sharedStability': '共有安定度',
@@ -12960,6 +12996,15 @@ const enUS: TranslationMap = {
   'audioProfessional.row.resampling': 'Resampling',
   'audioProfessional.row.sampleRateMismatch': 'Sample-rate mismatch',
   'audioProfessional.row.upsampling': 'Upsampling',
+  'audioProfessional.row.uzumeBackend': 'UZUME backend',
+  'audioProfessional.row.uzumeCuda': 'CUDA runtime',
+  'audioProfessional.row.uzumeCufft': 'cuFFT',
+  'audioProfessional.row.uzumeFallback': 'UZUME fallback',
+  'audioProfessional.row.uzumeFftScratch': 'FIR GPU prewarm',
+  'audioProfessional.row.uzumeGpu': 'UZUME GPU',
+  'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
+  'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
+  'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
   'audioProfessional.row.signalPath': 'Signal path',
   'audioProfessional.row.sharedDeviceSampleRate': 'Shared device rate',
   'audioProfessional.row.sharedStability': 'Shared stability',

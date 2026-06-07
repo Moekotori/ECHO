@@ -75,6 +75,33 @@ const nativeHostNotificationEvents = new Set<NativeHostNotificationEvent['event'
   'audio_session_disconnected',
 ]);
 
+const createInitialTelemetry = (): NativeOutputTelemetry => ({
+  positionFrames: 0,
+  bufferedFrames: null,
+  underrunCallbacks: 0,
+  underrunFrames: 0,
+  dspClippingRisk: false,
+  dspLimiterProtecting: false,
+  uzumeActive: false,
+  uzumeBackend: null,
+  uzumeProfile: null,
+  uzumeRuntimeModel: null,
+  uzumeFallbackActive: false,
+  uzumeGpuCompiled: false,
+  uzumeGpuAvailable: false,
+  uzumeGpuCufftAvailable: false,
+  uzumeGpuLimiterPlaybackActive: false,
+  uzumeGpuMatrixPlaybackActive: false,
+  uzumeGpuFftConvolutionPrepared: false,
+  uzumeGpuDevice: null,
+  uzumeFallbackReason: null,
+  uzumeCufftFallbackReason: null,
+  uzumeCudaRuntimeVersion: null,
+  uzumeCufftVersion: null,
+  reportedAtMs: null,
+  nativePositionStalenessMs: null,
+});
+
 const appendTailLine = (lines: string[], line: string): void => {
   const trimmed = line.trim();
 
@@ -492,16 +519,7 @@ export class NativeOutputBridge extends EventEmitter {
   private actualDeviceSampleRate: number | null = null;
   private durationSeconds: number | null = null;
   private lastPositionReportedAtMs: number | null = null;
-  private telemetry: NativeOutputTelemetry = {
-    positionFrames: 0,
-    bufferedFrames: null,
-    underrunCallbacks: 0,
-    underrunFrames: 0,
-    dspClippingRisk: false,
-    dspLimiterProtecting: false,
-    reportedAtMs: null,
-    nativePositionStalenessMs: null,
-  };
+  private telemetry: NativeOutputTelemetry = createInitialTelemetry();
   private startSeconds = 0;
   private playbackRate = 1;
   private ready = false;
@@ -576,14 +594,7 @@ export class NativeOutputBridge extends EventEmitter {
           ? options.durationSeconds
           : null;
       this.lastPositionReportedAtMs = null;
-      this.telemetry = {
-        positionFrames: 0,
-        bufferedFrames: null,
-        underrunCallbacks: 0,
-        underrunFrames: 0,
-        reportedAtMs: null,
-        nativePositionStalenessMs: null,
-      };
+      this.telemetry = createInitialTelemetry();
       this.startSeconds = options.startSeconds ?? 0;
       this.playbackRate = options.playbackRate ?? 1;
       this.framesConsumed = 0;
@@ -817,14 +828,7 @@ export class NativeOutputBridge extends EventEmitter {
         ? options.durationSeconds
         : null;
     this.resetOutputClock(options.startSeconds ?? 0, options.playbackRate ?? 1);
-    this.telemetry = {
-      positionFrames: 0,
-      bufferedFrames: null,
-      underrunCallbacks: 0,
-      underrunFrames: 0,
-      reportedAtMs: null,
-      nativePositionStalenessMs: null,
-    };
+    this.telemetry = createInitialTelemetry();
     this.writeFrame(frameTypeBeginSession, sessionId, Buffer.alloc(0));
     return sessionId;
   }
@@ -1305,6 +1309,70 @@ export class NativeOutputBridge extends EventEmitter {
           typeof message.dspLimiterProtecting === 'boolean'
             ? message.dspLimiterProtecting
             : this.telemetry.dspLimiterProtecting,
+        uzumeActive:
+          typeof message.uzumeActive === 'boolean'
+            ? message.uzumeActive
+            : this.telemetry.uzumeActive,
+        uzumeBackend:
+          typeof message.uzumeBackend === 'string'
+            ? message.uzumeBackend
+            : this.telemetry.uzumeBackend ?? null,
+        uzumeProfile:
+          typeof message.uzumeProfile === 'string'
+            ? message.uzumeProfile
+            : this.telemetry.uzumeProfile ?? null,
+        uzumeRuntimeModel:
+          typeof message.uzumeRuntimeModel === 'string'
+            ? message.uzumeRuntimeModel
+            : this.telemetry.uzumeRuntimeModel ?? null,
+        uzumeFallbackActive:
+          typeof message.uzumeFallbackActive === 'boolean'
+            ? message.uzumeFallbackActive
+            : this.telemetry.uzumeFallbackActive,
+        uzumeGpuCompiled:
+          typeof message.uzumeGpuCompiled === 'boolean'
+            ? message.uzumeGpuCompiled
+            : this.telemetry.uzumeGpuCompiled,
+        uzumeGpuAvailable:
+          typeof message.uzumeGpuAvailable === 'boolean'
+            ? message.uzumeGpuAvailable
+            : this.telemetry.uzumeGpuAvailable,
+        uzumeGpuCufftAvailable:
+          typeof message.uzumeGpuCufftAvailable === 'boolean'
+            ? message.uzumeGpuCufftAvailable
+            : this.telemetry.uzumeGpuCufftAvailable,
+        uzumeGpuLimiterPlaybackActive:
+          typeof message.uzumeGpuLimiterPlaybackActive === 'boolean'
+            ? message.uzumeGpuLimiterPlaybackActive
+            : this.telemetry.uzumeGpuLimiterPlaybackActive,
+        uzumeGpuMatrixPlaybackActive:
+          typeof message.uzumeGpuMatrixPlaybackActive === 'boolean'
+            ? message.uzumeGpuMatrixPlaybackActive
+            : this.telemetry.uzumeGpuMatrixPlaybackActive,
+        uzumeGpuFftConvolutionPrepared:
+          typeof message.uzumeGpuFftConvolutionPrepared === 'boolean'
+            ? message.uzumeGpuFftConvolutionPrepared
+            : this.telemetry.uzumeGpuFftConvolutionPrepared,
+        uzumeGpuDevice:
+          typeof message.uzumeGpuDevice === 'string'
+            ? message.uzumeGpuDevice
+            : this.telemetry.uzumeGpuDevice ?? null,
+        uzumeFallbackReason:
+          typeof message.uzumeFallbackReason === 'string'
+            ? message.uzumeFallbackReason
+            : this.telemetry.uzumeFallbackReason ?? null,
+        uzumeCufftFallbackReason:
+          typeof message.uzumeCufftFallbackReason === 'string'
+            ? message.uzumeCufftFallbackReason
+            : this.telemetry.uzumeCufftFallbackReason ?? null,
+        uzumeCudaRuntimeVersion:
+          typeof message.uzumeCudaRuntimeVersion === 'number' && Number.isFinite(message.uzumeCudaRuntimeVersion)
+            ? Math.max(0, Math.round(message.uzumeCudaRuntimeVersion))
+            : this.telemetry.uzumeCudaRuntimeVersion ?? null,
+        uzumeCufftVersion:
+          typeof message.uzumeCufftVersion === 'number' && Number.isFinite(message.uzumeCufftVersion)
+            ? Math.max(0, Math.round(message.uzumeCufftVersion))
+            : this.telemetry.uzumeCufftVersion ?? null,
         reportedAtMs,
         nativePositionStalenessMs: 0,
       };

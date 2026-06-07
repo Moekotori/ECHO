@@ -1,4 +1,5 @@
 #include "ChannelBalanceProcessor.h"
+#include "UzumeGpuBackend.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,6 +9,7 @@ namespace echo
 namespace
 {
 constexpr float pi = 3.14159265358979323846f;
+constexpr float stableEpsilon = 0.000001f;
 
 float dbToGain(float db)
 {
@@ -25,6 +27,18 @@ float moveTowards(float current, float target, float step)
 float sanitize(float value)
 {
     return std::isfinite(value) ? value : 0.0f;
+}
+
+bool nearlyEqual(float left, float right)
+{
+    return std::abs(left - right) <= stableEpsilon;
+}
+
+bool allZeroBands(const std::array<float, channelBalanceBandCount>& values)
+{
+    return std::all_of(values.begin(), values.end(), [] (float value) {
+        return nearlyEqual(value, 0.0f);
+    });
 }
 
 ChannelBalanceMonoMode monoModeFromInt(int value)
@@ -145,18 +159,26 @@ void ChannelBalanceProcessor::reset()
     highLowpassState = {};
     delayWriteIndex = 0;
     clippingRisk.store(false, std::memory_order_release);
+    clearGpuPlaybackStatus();
 }
 
 void ChannelBalanceProcessor::processBlock(juce::AudioBuffer<float>& buffer, int startSample, int numSamples)
 {
     if (numSamples <= 0)
+    {
+        clearGpuPlaybackStatus();
         return;
+    }
 
     const int channelCount = std::min(buffer.getNumChannels(), preparedChannels);
 
     if (channelCount <= 0)
+    {
+        clearGpuPlaybackStatus();
         return;
+    }
 
+    clearGpuPlaybackStatus();
     const auto target = readTargetSnapshot();
     updateSwitchTargets(target);
     const bool physicalSoloActive = target.enabled
@@ -222,6 +244,12 @@ void ChannelBalanceProcessor::processBlock(juce::AudioBuffer<float>& buffer, int
 
     auto* leftSamples = buffer.getWritePointer(0, startSample);
     auto* rightSamples = buffer.getWritePointer(1, startSample);
+
+    if (tryProcessStableStereoGpuPath(buffer, startSample, numSamples, channelCount, target, risk))
+    {
+        clippingRisk.store(risk, std::memory_order_release);
+        return;
+    }
 
     for (int sample = 0; sample < numSamples; ++sample)
     {
@@ -351,6 +379,173 @@ bool ChannelBalanceProcessor::isEnabled() const
 bool ChannelBalanceProcessor::hasClippingRisk() const
 {
     return clippingRisk.load(std::memory_order_acquire);
+}
+
+bool ChannelBalanceProcessor::didUseGpuMatrixPlayback() const
+{
+    return gpuMatrixPlaybackProcessed.load(std::memory_order_acquire);
+}
+
+bool ChannelBalanceProcessor::hadGpuMatrixPlaybackFallback() const
+{
+    return gpuMatrixPlaybackFallback.load(std::memory_order_acquire);
+}
+
+const char* ChannelBalanceProcessor::getGpuMatrixPlaybackFallbackReason() const
+{
+    return gpuMatrixPlaybackFallbackReason.load(std::memory_order_acquire);
+}
+
+void ChannelBalanceProcessor::clearGpuPlaybackStatus()
+{
+    gpuMatrixPlaybackProcessed.store(false, std::memory_order_release);
+    gpuMatrixPlaybackFallback.store(false, std::memory_order_release);
+    gpuMatrixPlaybackFallbackReason.store(nullptr, std::memory_order_release);
+}
+
+bool ChannelBalanceProcessor::tryProcessStableStereoGpuPath(
+    juce::AudioBuffer<float>& buffer,
+    int startSample,
+    int numSamples,
+    int channelCount,
+    const TargetSnapshot& target,
+    bool& risk)
+{
+    if (! isStableStereoGpuPathEligible(channelCount, target))
+        return false;
+
+    float linearLeft = 1.0f;
+    float linearRight = 1.0f;
+    float constantLeft = 1.0f;
+    float constantRight = 1.0f;
+    calculateBalanceGains(target.balance, false, linearLeft, linearRight);
+    calculateBalanceGains(target.balance, true, constantLeft, constantRight);
+    const float constantMix = target.constantPower ? 1.0f : 0.0f;
+    const float balanceLeft = linearLeft + (constantLeft - linearLeft) * constantMix;
+    const float balanceRight = linearRight + (constantRight - linearRight) * constantMix;
+    const float leftGain = balanceLeft * dbToGain(target.leftGainDb) * (target.invertLeft ? -1.0f : 1.0f);
+    const float rightGain = balanceRight * dbToGain(target.rightGainDb) * (target.invertRight ? -1.0f : 1.0f);
+    const float baseLeftToLeft = target.swapLeftRight ? 0.0f : leftGain;
+    const float baseRightToLeft = target.swapLeftRight ? leftGain : 0.0f;
+    const float baseLeftToRight = target.swapLeftRight ? rightGain : 0.0f;
+    const float baseRightToRight = target.swapLeftRight ? 0.0f : rightGain;
+    UzumeGpuStereoMatrix matrix {
+        baseLeftToLeft,
+        baseRightToLeft,
+        baseLeftToRight,
+        baseRightToRight,
+        1.0f,
+    };
+
+    switch (target.monoMode)
+    {
+        case ChannelBalanceMonoMode::SumToMono:
+        {
+            const float leftInputToMono = (baseLeftToLeft + baseLeftToRight) * 0.5f;
+            const float rightInputToMono = (baseRightToLeft + baseRightToRight) * 0.5f;
+            matrix = {
+                leftInputToMono,
+                rightInputToMono,
+                leftInputToMono,
+                rightInputToMono,
+                1.0f,
+            };
+            break;
+        }
+        case ChannelBalanceMonoMode::LeftOnly:
+            matrix = {
+                baseLeftToLeft,
+                baseRightToLeft,
+                0.0f,
+                0.0f,
+                1.0f,
+            };
+            break;
+        case ChannelBalanceMonoMode::RightOnly:
+            matrix = {
+                0.0f,
+                0.0f,
+                baseLeftToRight,
+                baseRightToRight,
+                1.0f,
+            };
+            break;
+        case ChannelBalanceMonoMode::Off:
+        default:
+            break;
+    }
+
+    auto* leftSamples = buffer.getWritePointer(0, startSample);
+    auto* rightSamples = buffer.getWritePointer(1, startSample);
+    const auto gpuResult = processUzumeGpuPreparedPlaybackStereoMatrix(leftSamples, rightSamples, numSamples, matrix);
+    if (! gpuResult.processed)
+    {
+        if (gpuResult.available)
+        {
+            gpuMatrixPlaybackFallback.store(true, std::memory_order_release);
+            gpuMatrixPlaybackFallbackReason.store(gpuResult.fallbackReason, std::memory_order_release);
+        }
+        return false;
+    }
+
+    for (int sample = 0; sample < numSamples; ++sample)
+    {
+        leftSamples[sample] = sanitize(leftSamples[sample]);
+        rightSamples[sample] = sanitize(rightSamples[sample]);
+        pushDelaySample(0, leftSamples[sample]);
+        pushDelaySample(1, rightSamples[sample]);
+        delayWriteIndex = (delayWriteIndex + 1) % delayBufferLength;
+    }
+
+    risk = gpuResult.clippingRisk;
+    gpuMatrixPlaybackProcessed.store(true, std::memory_order_release);
+    return true;
+}
+
+bool ChannelBalanceProcessor::isStableStereoGpuPathEligible(int channelCount, const TargetSnapshot& target) const
+{
+    if (channelCount < 2 || ! target.enabled)
+        return false;
+
+    if (activeMonoMode != target.monoMode || targetMonoMode != target.monoMode)
+        return false;
+
+    if (! allZeroBands(target.leftBandGainsDb)
+        || ! allZeroBands(target.rightBandGainsDb)
+        || ! allZeroBands(smoothedLeftBandGainsDb)
+        || ! allZeroBands(smoothedRightBandGainsDb))
+        return false;
+
+    if (! nearlyEqual(target.leftDelayMs, 0.0f)
+        || ! nearlyEqual(target.rightDelayMs, 0.0f)
+        || ! nearlyEqual(smoothedLeftDelayMs, 0.0f)
+        || ! nearlyEqual(smoothedRightDelayMs, 0.0f))
+        return false;
+
+    if (! nearlyEqual(smoothedBalance, target.balance)
+        || ! nearlyEqual(smoothedLeftGainDb, target.leftGainDb)
+        || ! nearlyEqual(smoothedRightGainDb, target.rightGainDb)
+        || ! nearlyEqual(enabledMix, 1.0f)
+        || ! nearlyEqual(swapMix, target.swapLeftRight ? 1.0f : 0.0f)
+        || ! nearlyEqual(monoMix, 1.0f)
+        || ! nearlyEqual(invertLeftMix, target.invertLeft ? 1.0f : 0.0f)
+        || ! nearlyEqual(invertRightMix, target.invertRight ? 1.0f : 0.0f)
+        || ! nearlyEqual(constantPowerMix, target.constantPower ? 1.0f : 0.0f))
+        return false;
+
+    return nearlyEqual(balanceStep, 0.0f)
+        && nearlyEqual(leftGainStepDb, 0.0f)
+        && nearlyEqual(rightGainStepDb, 0.0f)
+        && allZeroBands(leftBandGainStepsDb)
+        && allZeroBands(rightBandGainStepsDb)
+        && nearlyEqual(leftDelayStepMs, 0.0f)
+        && nearlyEqual(rightDelayStepMs, 0.0f)
+        && nearlyEqual(enabledStep, 0.0f)
+        && nearlyEqual(swapStep, 0.0f)
+        && nearlyEqual(monoStep, 0.0f)
+        && nearlyEqual(invertLeftStep, 0.0f)
+        && nearlyEqual(invertRightStep, 0.0f)
+        && nearlyEqual(constantPowerStep, 0.0f);
 }
 
 void ChannelBalanceProcessor::updateSmoothingSteps()

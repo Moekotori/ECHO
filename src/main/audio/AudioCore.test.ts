@@ -21,6 +21,7 @@ import type {
   NativeBridgeReadyResult,
   NativeHostNotificationEvent,
   NativeOutputStartOptions,
+  NativeOutputTelemetry,
   PcmAutomixDecodeRequest,
   PcmDecodeRequest,
   PcmGaplessDecodeRequest,
@@ -1281,7 +1282,7 @@ describe('AudioSession stability cleanup', () => {
         positionFrames: 48512,
         bufferedFrames: 0,
         underrunCallbacks: 3,
-        underrunFrames: 512,
+        underrunFrames: 4800,
       });
       await Promise.resolve();
       await Promise.resolve();
@@ -1969,6 +1970,126 @@ describe('Audio Core sample-rate regression guard', () => {
         }),
       ]),
     );
+  });
+
+  it('surfaces UZUME native runtime state from ready metadata and telemetry', async () => {
+    const logs: string[] = [];
+    const decoder = new FakeDecoder(new Map([['song.flac', probe('song.flac', 44100)]]));
+    const bridge = new FakeBridge(48000, {
+      uzumeActive: false,
+      uzumeBackend: 'cpu-reference',
+      uzumeProfile: 'legacy-dsp-compat',
+      uzumeRuntimeModel: 'uzume-native-engine',
+      uzumeFallbackActive: false,
+      uzumeGpuCompiled: false,
+      uzumeGpuAvailable: false,
+      uzumeGpuCufftAvailable: false,
+      uzumeGpuLimiterPlaybackActive: false,
+      uzumeGpuMatrixPlaybackActive: false,
+      uzumeGpuFftConvolutionPrepared: false,
+      uzumeCudaRuntimeVersion: 0,
+      uzumeCufftVersion: 0,
+    });
+    const session = createAudioSessionForTest({
+      decoder,
+      createBridge: () => bridge,
+      persistJuceDecodePreference: () => undefined,
+      logger: noopLogger,
+      diagnosticLogger: (message) => logs.push(message),
+    });
+    (session as unknown as { outputSettings: { useJuceDecode: boolean } }).outputSettings.useJuceDecode = false;
+
+    try {
+      const readyStatus = await session.playLocalFile({ filePath: 'song.flac', output: { outputMode: 'shared' } });
+
+      expect(readyStatus.uzumeActive).toBe(false);
+      expect(readyStatus.uzumeBackend).toBe('cpu-reference');
+      expect(readyStatus.uzumeProfile).toBe('legacy-dsp-compat');
+      expect(readyStatus.uzumeRuntimeModel).toBe('uzume-native-engine');
+      expect(readyStatus.uzumeFallbackActive).toBe(false);
+      expect(readyStatus.uzumeGpuCompiled).toBe(false);
+      expect(readyStatus.uzumeGpuAvailable).toBe(false);
+      expect(readyStatus.uzumeGpuCufftAvailable).toBe(false);
+      expect(readyStatus.uzumeGpuLimiterPlaybackActive).toBe(false);
+      expect(readyStatus.uzumeGpuMatrixPlaybackActive).toBe(false);
+      expect(readyStatus.uzumeGpuFftConvolutionPrepared).toBe(false);
+      expect(readyStatus.uzumeFallbackReason).toBe(null);
+      expect(readyStatus.uzumeCufftFallbackReason).toBe(null);
+      expect(readyStatus.uzumeCudaRuntimeVersion).toBe(0);
+      expect(readyStatus.uzumeCufftVersion).toBe(0);
+
+      bridge.emit('position', 4800, {
+        positionFrames: 4800,
+        bufferedFrames: 960,
+        underrunCallbacks: 0,
+        underrunFrames: 0,
+        dspClippingRisk: true,
+        dspLimiterProtecting: true,
+        uzumeActive: true,
+        uzumeBackend: 'hybrid-gpu-matrix-limiter',
+        uzumeProfile: 'legacy-dsp-compat',
+        uzumeRuntimeModel: 'uzume-native-engine',
+        uzumeFallbackActive: false,
+        uzumeGpuCompiled: true,
+        uzumeGpuAvailable: true,
+        uzumeGpuCufftAvailable: true,
+        uzumeGpuLimiterPlaybackActive: true,
+        uzumeGpuMatrixPlaybackActive: true,
+        uzumeGpuFftConvolutionPrepared: true,
+        uzumeGpuDevice: 'NVIDIA test adapter',
+        uzumeFallbackReason: null,
+        uzumeCufftFallbackReason: null,
+        uzumeCudaRuntimeVersion: 13030,
+        uzumeCufftVersion: 11400,
+      });
+
+      const liveStatus = session.getStatus();
+      expect(liveStatus.uzumeActive).toBe(true);
+      expect(liveStatus.uzumeBackend).toBe('hybrid-gpu-matrix-limiter');
+      expect(liveStatus.uzumeProfile).toBe('legacy-dsp-compat');
+      expect(liveStatus.uzumeRuntimeModel).toBe('uzume-native-engine');
+      expect(liveStatus.uzumeFallbackActive).toBe(false);
+      expect(liveStatus.uzumeGpuCompiled).toBe(true);
+      expect(liveStatus.uzumeGpuAvailable).toBe(true);
+      expect(liveStatus.uzumeGpuCufftAvailable).toBe(true);
+      expect(liveStatus.uzumeGpuLimiterPlaybackActive).toBe(true);
+      expect(liveStatus.uzumeGpuMatrixPlaybackActive).toBe(true);
+      expect(liveStatus.uzumeGpuFftConvolutionPrepared).toBe(true);
+      expect(liveStatus.uzumeGpuDevice).toBe('NVIDIA test adapter');
+      expect(liveStatus.uzumeFallbackReason).toBe(null);
+      expect(liveStatus.uzumeCufftFallbackReason).toBe(null);
+      expect(liveStatus.uzumeCudaRuntimeVersion).toBe(13030);
+      expect(liveStatus.uzumeCufftVersion).toBe(11400);
+      expect(liveStatus.dspClippingRisk).toBe(true);
+      expect(liveStatus.dspLimiterProtecting).toBe(true);
+      expect(liveStatus.warnings).toContain('dsp_limiter_protecting');
+
+      const prefix = '[AudioSession] playback diagnostic ';
+      const outputReady = logs
+        .filter((line) => line.startsWith(prefix))
+        .map((line) => JSON.parse(line.slice(prefix.length)) as Record<string, unknown>)
+        .find((entry) => entry.event === 'output_ready');
+
+      expect(outputReady?.details).toMatchObject({
+        uzumeActive: false,
+        uzumeBackend: 'cpu-reference',
+        uzumeProfile: 'legacy-dsp-compat',
+        uzumeRuntimeModel: 'uzume-native-engine',
+        uzumeFallbackActive: false,
+        uzumeGpuCompiled: false,
+        uzumeGpuAvailable: false,
+        uzumeGpuCufftAvailable: false,
+        uzumeGpuLimiterPlaybackActive: false,
+        uzumeGpuMatrixPlaybackActive: false,
+        uzumeGpuFftConvolutionPrepared: false,
+        uzumeFallbackReason: null,
+        uzumeCufftFallbackReason: null,
+        uzumeCudaRuntimeVersion: 0,
+        uzumeCufftVersion: 0,
+      });
+    } finally {
+      session.dispose();
+    }
   });
 
   it('rebases accumulated startup position drift without restarting exclusive output', async () => {
@@ -6352,13 +6473,13 @@ describe('AudioSession playback watchdog', () => {
         positionFrames: 48000 + index * 1000,
         bufferedFrames: 0,
         underrunCallbacks: index * 3,
-        underrunFrames: index * 512,
+        underrunFrames: index * 4800,
       });
       bridges[index].emit('position', 48512 + index * 1000, {
         positionFrames: 48512 + index * 1000,
         bufferedFrames: 0,
         underrunCallbacks: (index + 1) * 3,
-        underrunFrames: (index + 1) * 512,
+        underrunFrames: (index + 1) * 4800,
       });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -6394,7 +6515,7 @@ describe('AudioSession playback watchdog', () => {
       positionFrames: 48512,
       bufferedFrames: 0,
       underrunCallbacks: 3,
-      underrunFrames: 512,
+      underrunFrames: 4800,
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -10007,6 +10128,84 @@ describe('NativeOutputBridge diagnostics', () => {
       }),
     ).rejects.toThrow('nativeMessage="ASIO open failed: failed to open output device \\"TEAC ASIO USB DRIVER\\": No device found."');
     expect(runtimeError).not.toHaveBeenCalled();
+  });
+
+  it('resets UZUME telemetry between framed native output sessions', async () => {
+    let hostStdout!: PassThrough;
+    const fakeSpawn = (): ChildProcessWithoutNullStreams => {
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      hostStdout = stdout;
+      const child = Object.assign(new EventEmitter(), {
+        stdin,
+        stdout,
+        stderr,
+        kill: vi.fn(() => true),
+      }) as unknown as ChildProcessWithoutNullStreams;
+
+      queueMicrotask(() => {
+        stdout.write('{"ready":true,"sampleRate":48000,"backend":"wasapi-shared","backendImpl":"legacy-wasapi-shared","deviceType":"Windows Audio","deviceName":"Default output"}\n');
+      });
+
+      return child;
+    };
+    const bridge = new NativeOutputBridge({
+      hostBinary: 'echo-audio-host.exe',
+      spawn: fakeSpawn as HostSpawner,
+      logger: noopLogger,
+    });
+    const samples: NativeOutputTelemetry[] = [];
+    bridge.on('position', (_frames, telemetry: NativeOutputTelemetry) => {
+      samples.push(telemetry);
+    });
+
+    await bridge.start({
+      requestedOutputSampleRate: 48000,
+      channels: 2,
+    });
+
+    bridge.beginSession();
+    hostStdout.write('{"pos":480,"dspClippingRisk":true,"dspLimiterProtecting":true,"uzumeActive":true,"uzumeBackend":"hybrid-gpu-matrix-limiter","uzumeProfile":"legacy-dsp-compat","uzumeRuntimeModel":"uzume-native-engine","uzumeGpuLimiterPlaybackActive":true,"uzumeGpuMatrixPlaybackActive":true,"uzumeGpuFftConvolutionPrepared":true}\n');
+    bridge.beginSession();
+    hostStdout.write('{"pos":960}\n');
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(samples).toHaveLength(2);
+    expect(samples[0]).toMatchObject({
+      dspClippingRisk: true,
+      dspLimiterProtecting: true,
+      uzumeActive: true,
+      uzumeBackend: 'hybrid-gpu-matrix-limiter',
+      uzumeProfile: 'legacy-dsp-compat',
+      uzumeRuntimeModel: 'uzume-native-engine',
+      uzumeGpuLimiterPlaybackActive: true,
+      uzumeGpuMatrixPlaybackActive: true,
+      uzumeGpuFftConvolutionPrepared: true,
+    });
+    expect(samples[1]).toMatchObject({
+      dspClippingRisk: false,
+      dspLimiterProtecting: false,
+      uzumeActive: false,
+      uzumeBackend: null,
+      uzumeProfile: null,
+      uzumeRuntimeModel: null,
+      uzumeFallbackActive: false,
+      uzumeGpuCompiled: false,
+      uzumeGpuAvailable: false,
+      uzumeGpuCufftAvailable: false,
+      uzumeGpuLimiterPlaybackActive: false,
+      uzumeGpuMatrixPlaybackActive: false,
+      uzumeGpuFftConvolutionPrepared: false,
+      uzumeGpuDevice: null,
+      uzumeFallbackReason: null,
+      uzumeCufftFallbackReason: null,
+      uzumeCudaRuntimeVersion: null,
+      uzumeCufftVersion: null,
+    });
+
+    bridge.stop();
   });
 
   it('emits native host notification events from stdout', async () => {

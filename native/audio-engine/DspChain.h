@@ -1,13 +1,6 @@
 #pragma once
 
-#include "ChannelBalanceProcessor.h"
-#include "ConvolutionProcessor.h"
-#include "DspHeadroomProcessor.h"
-#include "EqProcessor.h"
-
-#include <juce_audio_basics/juce_audio_basics.h>
-
-#include <atomic>
+#include "UzumeEngine.h"
 
 namespace echo
 {
@@ -29,16 +22,6 @@ public:
     bool isSafetyLimiterProtecting() const;
 
 private:
-    static constexpr int bypassTailBlocks = 16;
-
-    void processSafetyLimiter(juce::AudioBuffer<float>& buffer, int startSample, int numSamples);
-
-    EqProcessor& eqProcessor;
-    ConvolutionProcessor& convolutionProcessor;
-    ChannelBalanceProcessor& channelBalanceProcessor;
-    DspHeadroomProcessor& headroomProcessor;
-    bool wasActive = false;
-    int bypassTailBlocksRemaining = 0;
-    std::atomic<bool> safetyLimiterClippingRisk { false };
+    UzumeEngine uzumeEngine;
 };
 } // namespace echo

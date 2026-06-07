@@ -1,7 +1,7 @@
 #include "../../audio-engine/ChannelBalanceProcessor.h"
-#include "../../audio-engine/DspChain.h"
 #include "../../audio-engine/EqMessageProtocol.h"
 #include "../../audio-engine/EqProcessor.h"
+#include "../../audio-engine/UzumeEngine.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <sstream>
 #include <string>
@@ -255,14 +256,14 @@ void testChannelBalanceBandGainCompensation()
     requireFinite(buffer, "channel band compensation finite");
 }
 
-void testDspChainBypassPreservesDryBuffer()
+void testUzumeEngineBypassPreservesDryBuffer()
 {
     echo::EqProcessor eqProcessor;
     echo::ConvolutionProcessor convolutionProcessor;
     echo::ChannelBalanceProcessor channelBalanceProcessor;
     echo::DspHeadroomProcessor headroomProcessor;
-    echo::DspChain dspChain(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
-    dspChain.prepare(48000.0, 128, 2);
+    echo::UzumeEngine uzumeEngine(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
+    uzumeEngine.prepare(48000.0, 128, 2);
 
     auto buffer = makeBuffer(2, 128);
     auto dry = makeBuffer(2, 128);
@@ -280,42 +281,1268 @@ void testDspChainBypassPreservesDryBuffer()
         }
     }
 
-    require(! dspChain.isActive(), "inactive DSP chain must report bypass");
-    dspChain.processBlock(buffer, 0, buffer.getNumSamples());
-    requireBuffersClose(buffer, dry, strictTolerance, "inactive DSP chain must not touch native playback samples");
-    require(! dspChain.hasClippingRisk(), "inactive DSP chain must not report clipping risk");
-    require(! dspChain.isSafetyLimiterProtecting(), "inactive DSP chain must not report limiter protection");
+    require(! uzumeEngine.isActive(), "inactive UZUME engine must report bypass");
+    uzumeEngine.processBlock(buffer, 0, buffer.getNumSamples());
+    requireBuffersClose(buffer, dry, strictTolerance, "inactive UZUME engine must not touch native playback samples");
+    require(! uzumeEngine.hasClippingRisk(), "inactive UZUME engine must not report clipping risk");
+    require(! uzumeEngine.isSafetyLimiterProtecting(), "inactive UZUME engine must not report limiter protection");
 }
 
-void testDspChainLimiterProtectsActiveOutput()
+void testUzumeEngineLimiterProtectsActiveOutput()
 {
     echo::EqProcessor eqProcessor;
     echo::ConvolutionProcessor convolutionProcessor;
     echo::ChannelBalanceProcessor channelBalanceProcessor;
     echo::DspHeadroomProcessor headroomProcessor;
-    echo::DspChain dspChain(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
-    dspChain.prepare(48000.0, 128, 2);
+    echo::UzumeEngine uzumeEngine(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
+    uzumeEngine.prepare(48000.0, 128, 5);
     eqProcessor.setEnabled(true);
+    echo::EqProcessor referenceEqProcessor;
+    referenceEqProcessor.prepare(48000.0, 128, 5);
+    referenceEqProcessor.setEnabled(true);
 
-    auto buffer = makeBuffer(2, 128);
+    auto buffer = makeBuffer(5, 128);
+    auto expected = makeBuffer(5, 128);
+    bool expectedRisk = false;
+    const auto softLimit = [&expectedRisk](float sample) {
+        constexpr float threshold = 0.98f;
+        constexpr float headroom = 1.0f - threshold;
+        const float sanitized = std::isfinite(sample) ? sample : 0.0f;
+        const float magnitude = std::abs(sanitized);
+        if (magnitude <= threshold)
+            return sanitized;
+
+        expectedRisk = true;
+        const float limited = threshold + headroom * std::tanh((magnitude - threshold) / headroom);
+        return std::copysign(std::min(1.0f, limited), sanitized);
+    };
     for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
     {
         auto* samples = buffer.getWritePointer(channel);
+        auto* expectedSamples = expected.getWritePointer(channel);
         for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
-            samples[sample] = sample % 2 == 0 ? 2.0f : -2.0f;
+        {
+            const float value = sample % 2 == 0 ? 2.0f : -2.0f;
+            samples[sample] = value;
+            expectedSamples[sample] = value;
+        }
+    }
+    referenceEqProcessor.processBlock(expected, 0, expected.getNumSamples());
+    for (int channel = 0; channel < expected.getNumChannels(); ++channel)
+    {
+        auto* expectedSamples = expected.getWritePointer(channel);
+        for (int sample = 0; sample < expected.getNumSamples(); ++sample)
+            expectedSamples[sample] = softLimit(expectedSamples[sample]);
     }
 
-    require(dspChain.isActive(), "enabled EQ must activate DSP chain");
-    dspChain.processBlock(buffer, 0, buffer.getNumSamples());
-    require(dspChain.hasClippingRisk(), "active DSP chain must report clipping risk after limiting hot output");
-    require(dspChain.isSafetyLimiterProtecting(), "active DSP chain must expose safety limiter protection");
+    require(uzumeEngine.isActive(), "enabled EQ must activate UZUME engine");
+    uzumeEngine.processBlock(buffer, 0, buffer.getNumSamples());
+    require(expectedRisk, "UZUME limiter reference must mark hot test output as clipping risk");
+    require(uzumeEngine.hasClippingRisk(), "active UZUME engine must report clipping risk after limiting hot output");
+    require(uzumeEngine.isSafetyLimiterProtecting(), "active UZUME engine must expose safety limiter protection");
 
     for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
     {
         const auto* samples = buffer.getReadPointer(channel);
         for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
-            require(std::abs(samples[sample]) <= 1.0f + nearTolerance, "DSP safety limiter must cap active-chain output");
+            require(std::abs(samples[sample] - expected.getSample(channel, sample)) <= nearTolerance, "UZUME safety limiter must match CPU soft-limit reference at channel " + std::to_string(channel) + " sample " + std::to_string(sample));
     }
+
+    const auto status = uzumeEngine.getRuntimeStatus();
+    if (status.gpuCompiled && status.gpuAvailable)
+    {
+        require(status.backend == std::string("hybrid-gpu-limiter"), "CUDA-enabled UZUME playback must report hybrid GPU limiter backend after GPU limiter processing");
+        require(status.gpuLimiterPlaybackActive, "CUDA-enabled UZUME playback must expose active GPU limiter section telemetry after limiter processing");
+        require(! status.gpuMatrixPlaybackActive, "CUDA-enabled UZUME limiter-only playback must not expose active GPU matrix section telemetry");
+        require(! status.fallbackActive, "CUDA-enabled UZUME playback limiter must not report fallback after successful GPU limiter processing");
+        require(status.fallbackReason == nullptr, "CUDA-enabled UZUME playback limiter must not report a fallback reason after successful GPU limiter processing");
+    }
+    else
+    {
+        require(status.backend == std::string("cpu-reference"), "UZUME playback backend must stay CPU when CUDA limiter playback is unavailable");
+    }
+}
+
+void testUzumeEngineUsesGpuMatrixForStableChannelBalance()
+{
+    echo::ChannelBalanceState state;
+    state.enabled = true;
+    state.balance = 0.25f;
+    state.leftGainDb = -1.0f;
+    state.rightGainDb = -3.0f;
+    state.swapLeftRight = true;
+    state.invertRight = true;
+    state.constantPower = false;
+
+    echo::ChannelBalanceProcessor referenceProcessor;
+    referenceProcessor.prepare(48000.0, 128, 3);
+    referenceProcessor.setState(state);
+    referenceProcessor.reset();
+
+    juce::AudioBuffer<float> reference(3, 128);
+    reference.clear();
+    juce::AudioBuffer<float> processed(3, 128);
+    processed.clear();
+    for (int sample = 0; sample < 128; ++sample)
+    {
+        const float left = 0.18f * std::sin(static_cast<float>(sample) * 0.13f);
+        const float right = 0.16f * std::cos(static_cast<float>(sample) * 0.17f);
+        reference.setSample(0, sample, left);
+        reference.setSample(1, sample, right);
+        reference.setSample(2, sample, -0.05f);
+        processed.setSample(0, sample, left);
+        processed.setSample(1, sample, right);
+        processed.setSample(2, sample, -0.05f);
+    }
+
+    referenceProcessor.processBlock(reference, 0, reference.getNumSamples());
+
+    echo::EqProcessor eqProcessor;
+    echo::ConvolutionProcessor convolutionProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    echo::DspHeadroomProcessor headroomProcessor;
+    echo::UzumeEngine uzumeEngine(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
+    uzumeEngine.prepare(48000.0, 128, 3);
+    channelBalanceProcessor.setState(state);
+    channelBalanceProcessor.reset();
+
+    uzumeEngine.processBlock(processed, 0, processed.getNumSamples());
+
+    for (int channel = 0; channel < processed.getNumChannels(); ++channel)
+    {
+        for (int sample = 0; sample < processed.getNumSamples(); ++sample)
+            require(std::abs(processed.getSample(channel, sample) - reference.getSample(channel, sample)) <= nearTolerance, "stable Channel Balance UZUME output must match CPU reference and preserve extra channels at channel " + std::to_string(channel) + " sample " + std::to_string(sample));
+    }
+
+    const auto status = uzumeEngine.getRuntimeStatus();
+    if (status.gpuCompiled && status.gpuAvailable)
+    {
+        require(channelBalanceProcessor.didUseGpuMatrixPlayback(), "stable Channel Balance must use prepared GPU matrix playback when CUDA is available");
+        require(status.backend == std::string("hybrid-gpu-matrix-limiter"), "CUDA-enabled stable Channel Balance playback must report hybrid GPU matrix and limiter backend");
+        require(status.gpuMatrixPlaybackActive, "CUDA-enabled stable Channel Balance playback must expose active GPU matrix section telemetry");
+        require(status.gpuLimiterPlaybackActive, "CUDA-enabled stable Channel Balance playback must expose active GPU limiter section telemetry");
+        require(! status.fallbackActive, "CUDA-enabled stable Channel Balance playback must not report fallback after successful GPU matrix processing");
+        require(status.fallbackReason == nullptr, "CUDA-enabled stable Channel Balance playback must not report a fallback reason after successful GPU matrix processing");
+    }
+    else
+    {
+        require(! channelBalanceProcessor.didUseGpuMatrixPlayback(), "stable Channel Balance must stay CPU when CUDA matrix playback is unavailable");
+        require(status.backend == std::string("cpu-reference"), "stable Channel Balance backend must stay CPU when CUDA matrix playback is unavailable");
+    }
+}
+
+void testUzumeEngineUsesGpuMatrixForStableMonoChannelBalance()
+{
+    struct Scenario
+    {
+        echo::ChannelBalanceMonoMode monoMode;
+        const char* name;
+    };
+
+    const Scenario scenarios[] {
+        { echo::ChannelBalanceMonoMode::SumToMono, "sum-to-mono" },
+        { echo::ChannelBalanceMonoMode::LeftOnly, "left-only" },
+        { echo::ChannelBalanceMonoMode::RightOnly, "right-only" },
+    };
+
+    for (const auto& scenario : scenarios)
+    {
+        echo::ChannelBalanceState state;
+        state.enabled = true;
+        state.balance = -0.2f;
+        state.leftGainDb = -1.5f;
+        state.rightGainDb = -2.5f;
+        state.swapLeftRight = true;
+        state.monoMode = scenario.monoMode;
+        state.invertLeft = scenario.monoMode == echo::ChannelBalanceMonoMode::SumToMono;
+        state.invertRight = scenario.monoMode == echo::ChannelBalanceMonoMode::RightOnly;
+        state.constantPower = true;
+
+        echo::ChannelBalanceProcessor referenceProcessor;
+        referenceProcessor.prepare(48000.0, 96, 3);
+        referenceProcessor.setState(state);
+        referenceProcessor.reset();
+
+        juce::AudioBuffer<float> reference(3, 96);
+        reference.clear();
+        juce::AudioBuffer<float> processed(2, 96);
+        processed.clear();
+        for (int sample = 0; sample < 96; ++sample)
+        {
+            const float left = 0.11f * std::sin(static_cast<float>(sample) * 0.19f);
+            const float right = 0.09f * std::cos(static_cast<float>(sample) * 0.23f);
+            reference.setSample(0, sample, left);
+            reference.setSample(1, sample, right);
+            reference.setSample(2, sample, 0.04f);
+            processed.setSample(0, sample, left);
+            processed.setSample(1, sample, right);
+        }
+
+        referenceProcessor.processBlock(reference, 0, reference.getNumSamples());
+
+        echo::EqProcessor eqProcessor;
+        echo::ConvolutionProcessor convolutionProcessor;
+        echo::ChannelBalanceProcessor channelBalanceProcessor;
+        echo::DspHeadroomProcessor headroomProcessor;
+        echo::UzumeEngine uzumeEngine(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
+        uzumeEngine.prepare(48000.0, 96, 2);
+        channelBalanceProcessor.setState(state);
+        channelBalanceProcessor.reset();
+
+        uzumeEngine.processBlock(processed, 0, processed.getNumSamples());
+
+        for (int channel = 0; channel < processed.getNumChannels(); ++channel)
+        {
+            for (int sample = 0; sample < processed.getNumSamples(); ++sample)
+                require(std::abs(processed.getSample(channel, sample) - reference.getSample(channel, sample)) <= nearTolerance, std::string("stable mono Channel Balance UZUME output must match CPU reference for ") + scenario.name + " at channel " + std::to_string(channel) + " sample " + std::to_string(sample));
+        }
+
+        const auto status = uzumeEngine.getRuntimeStatus();
+        if (status.gpuCompiled && status.gpuAvailable)
+        {
+            require(channelBalanceProcessor.didUseGpuMatrixPlayback(), std::string("stable mono Channel Balance must use prepared GPU matrix playback for ") + scenario.name);
+            require(status.backend == std::string("hybrid-gpu-matrix-limiter"), std::string("CUDA-enabled stable mono Channel Balance playback must report hybrid GPU matrix and limiter backend for ") + scenario.name);
+            require(status.gpuMatrixPlaybackActive, std::string("CUDA-enabled stable mono Channel Balance playback must expose active GPU matrix section telemetry for ") + scenario.name);
+            require(status.gpuLimiterPlaybackActive, std::string("CUDA-enabled stable mono Channel Balance playback must expose active GPU limiter section telemetry for ") + scenario.name);
+            require(! status.fallbackActive, std::string("CUDA-enabled stable mono Channel Balance playback must not report fallback for ") + scenario.name);
+            require(status.fallbackReason == nullptr, std::string("CUDA-enabled stable mono Channel Balance playback must not report a fallback reason for ") + scenario.name);
+        }
+        else
+        {
+            require(! channelBalanceProcessor.didUseGpuMatrixPlayback(), std::string("stable mono Channel Balance must stay CPU when CUDA matrix playback is unavailable for ") + scenario.name);
+            require(status.backend == std::string("cpu-reference"), std::string("stable mono Channel Balance backend must stay CPU when CUDA matrix playback is unavailable for ") + scenario.name);
+        }
+    }
+}
+
+float cpuReferenceUzumeSanitizeSample(float sample)
+{
+    return std::isfinite(sample) ? sample : 0.0f;
+}
+
+float cpuReferenceUzumeSoftLimitSample(float sample, bool& risk)
+{
+    constexpr float threshold = 0.98f;
+    constexpr float headroom = 1.0f - threshold;
+
+    const float sanitized = cpuReferenceUzumeSanitizeSample(sample);
+    const float magnitude = std::abs(sanitized);
+    if (magnitude <= threshold)
+        return sanitized;
+
+    risk = true;
+    const float limited = threshold + headroom * std::tanh((magnitude - threshold) / headroom);
+    return std::copysign(std::min(1.0f, limited), sanitized);
+}
+
+float cpuReferenceUzumeFusedGainLimiterSample(float sample, float gain, bool& risk)
+{
+    return cpuReferenceUzumeSoftLimitSample(sample * gain, risk);
+}
+
+void cpuReferenceUzumeStereoMatrixLimiter(
+    std::vector<float>& leftSamples,
+    std::vector<float>& rightSamples,
+    const echo::UzumeGpuStereoMatrix& matrix,
+    bool& risk)
+{
+    for (size_t index = 0; index < leftSamples.size(); ++index)
+    {
+        const float inputLeft = cpuReferenceUzumeSanitizeSample(leftSamples[index]);
+        const float inputRight = cpuReferenceUzumeSanitizeSample(rightSamples[index]);
+        const float outputLeft = (inputLeft * matrix.leftToLeft + inputRight * matrix.rightToLeft) * matrix.outputGain;
+        const float outputRight = (inputLeft * matrix.leftToRight + inputRight * matrix.rightToRight) * matrix.outputGain;
+        leftSamples[index] = cpuReferenceUzumeSoftLimitSample(outputLeft, risk);
+        rightSamples[index] = cpuReferenceUzumeSoftLimitSample(outputRight, risk);
+    }
+}
+
+void cpuReferenceUzumeStereoMatrix(
+    std::vector<float>& leftSamples,
+    std::vector<float>& rightSamples,
+    const echo::UzumeGpuStereoMatrix& matrix,
+    bool& risk)
+{
+    for (size_t index = 0; index < leftSamples.size(); ++index)
+    {
+        const float inputLeft = cpuReferenceUzumeSanitizeSample(leftSamples[index]);
+        const float inputRight = cpuReferenceUzumeSanitizeSample(rightSamples[index]);
+        const float outputLeft = cpuReferenceUzumeSanitizeSample((inputLeft * matrix.leftToLeft + inputRight * matrix.rightToLeft) * matrix.outputGain);
+        const float outputRight = cpuReferenceUzumeSanitizeSample((inputLeft * matrix.leftToRight + inputRight * matrix.rightToRight) * matrix.outputGain);
+        leftSamples[index] = outputLeft;
+        rightSamples[index] = outputRight;
+        if (std::abs(outputLeft) > 0.98f || std::abs(outputRight) > 0.98f)
+            risk = true;
+    }
+}
+
+void testUzumeRuntimeStatusReportsBackend()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ConvolutionProcessor convolutionProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    echo::DspHeadroomProcessor headroomProcessor;
+    echo::UzumeEngine uzumeEngine(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
+    uzumeEngine.prepare(48000.0, 128, 2);
+
+    const auto status = uzumeEngine.getRuntimeStatus();
+    require(status.profile == std::string("legacy-dsp-compat"), "UZUME MVP profile must be stable for telemetry");
+    require(status.backend == std::string("cpu-reference"), "UZUME MVP playback backend must stay CPU before a GPU playback limiter processes a block");
+    require(status.runtimeModel == std::string("uzume-native-engine"), "UZUME runtime model must be explicit");
+    require(! status.gpuLimiterPlaybackActive, "UZUME runtime status must not report GPU limiter playback before a playback block processes");
+    require(! status.gpuMatrixPlaybackActive, "UZUME runtime status must not report GPU matrix playback before a playback block processes");
+    if (status.gpuAvailable)
+        require(status.gpuCompiled, "available UZUME GPU backend must also report compiled CUDA support");
+    if (status.gpuCufftAvailable)
+    {
+        require(status.gpuAvailable && status.cufftVersion > 0, "available UZUME cuFFT backend must report GPU availability and cuFFT version");
+        require(status.gpuFftConvolutionPrepared, "available UZUME cuFFT backend must expose prepared playback FIR scratch telemetry after prepare");
+    }
+    else
+    {
+        require(! status.gpuFftConvolutionPrepared, "unavailable UZUME cuFFT backend must not expose prepared playback FIR scratch telemetry");
+    }
+    require(status.cudaRuntimeVersion >= 0, "UZUME CUDA runtime version must be non-negative");
+    require(status.cufftVersion >= 0, "UZUME cuFFT version must be non-negative");
+}
+
+void testUzumeGpuSafetyLimiterMatchesCpuReference()
+{
+    std::vector<float> gpuSamples {
+        -2.0f,
+        -1.0f,
+        -0.25f,
+        0.0f,
+        0.25f,
+        0.979f,
+        0.981f,
+        1.0f,
+        2.0f,
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+    };
+    auto cpuSamples = gpuSamples;
+
+    bool cpuRisk = false;
+    for (auto& sample : cpuSamples)
+        sample = cpuReferenceUzumeSoftLimitSample(sample, cpuRisk);
+
+    auto result = echo::processUzumeGpuSafetyLimiter(gpuSamples.data(), static_cast<int>(gpuSamples.size()));
+
+    if (! result.processed)
+    {
+        require(! result.available || result.fallbackReason != nullptr, "unprocessed UZUME GPU limiter must expose fallback reason");
+        return;
+    }
+
+    require(result.available, "processed UZUME GPU limiter must report available backend");
+    require(result.fallbackReason == nullptr, "processed UZUME GPU limiter must not report fallback");
+    require(result.clippingRisk == cpuRisk, "UZUME GPU limiter clipping risk must match CPU reference");
+    require(result.streamBacked, "processed UZUME GPU limiter must use stream-backed scratch");
+    require(result.pinnedHostBacked, "processed UZUME GPU limiter must use pinned host staging buffers");
+    require(result.scratchCapacitySamples >= static_cast<int>(gpuSamples.size()), "processed UZUME GPU limiter must report scratch capacity");
+    require(result.pinnedHostCapacitySamples >= static_cast<int>(gpuSamples.size()), "processed UZUME GPU limiter must report pinned host capacity");
+
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        require(std::abs(gpuSamples[index] - cpuSamples[index]) <= nearTolerance, "UZUME GPU limiter output must match CPU reference at sample " + std::to_string(index));
+}
+
+void testUzumeGpuPreparedPlaybackLimiterMatchesCpuReference()
+{
+    auto prepareResult = echo::prepareUzumeGpuPlaybackSafetyLimiter(64);
+    if (! prepareResult.prepared)
+    {
+        require(! prepareResult.available || prepareResult.fallbackReason != nullptr, "unprepared UZUME GPU playback limiter must expose fallback reason");
+        return;
+    }
+
+    require(prepareResult.available, "prepared UZUME GPU playback limiter must report available backend");
+    require(prepareResult.streamBacked, "prepared UZUME GPU playback limiter must use stream-backed scratch");
+    require(prepareResult.pinnedHostBacked, "prepared UZUME GPU playback limiter must use pinned host staging buffers");
+    require(prepareResult.scratchCapacitySamples >= 64, "prepared UZUME GPU playback limiter must report scratch capacity");
+    require(prepareResult.pinnedHostCapacitySamples >= 64, "prepared UZUME GPU playback limiter must report pinned host capacity");
+
+    const auto secondPrepareResult = echo::prepareUzumeGpuPlaybackSafetyLimiter(32);
+    require(secondPrepareResult.prepared, "second UZUME GPU playback limiter prepare must succeed");
+    require(secondPrepareResult.scratchReused, "second UZUME GPU playback limiter prepare must reuse prepared scratch");
+    require(secondPrepareResult.scratchCapacitySamples >= prepareResult.scratchCapacitySamples, "second UZUME GPU playback limiter prepare must keep scratch capacity");
+
+    std::vector<float> gpuSamples {
+        -2.0f,
+        -0.75f,
+        0.0f,
+        0.75f,
+        2.0f,
+        std::numeric_limits<float>::quiet_NaN(),
+    };
+    auto cpuSamples = gpuSamples;
+
+    bool cpuRisk = false;
+    for (auto& sample : cpuSamples)
+        sample = cpuReferenceUzumeSoftLimitSample(sample, cpuRisk);
+
+    auto result = echo::processUzumeGpuPreparedPlaybackSafetyLimiter(gpuSamples.data(), static_cast<int>(gpuSamples.size()));
+    require(result.processed, "prepared UZUME GPU playback limiter must process with preallocated scratch");
+    require(result.clippingRisk == cpuRisk, "prepared UZUME GPU playback limiter clipping risk must match CPU reference");
+    require(result.streamBacked, "prepared UZUME GPU playback limiter must process on stream-backed scratch");
+    require(result.scratchReused, "prepared UZUME GPU playback limiter must reuse prepared scratch");
+    require(result.pinnedHostBacked, "prepared UZUME GPU playback limiter must use pinned host staging buffers");
+    require(result.fallbackReason == nullptr, "prepared UZUME GPU playback limiter must not report fallback");
+
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        require(std::abs(gpuSamples[index] - cpuSamples[index]) <= nearTolerance, "prepared UZUME GPU playback limiter output must match CPU reference at sample " + std::to_string(index));
+}
+
+void testUzumeGpuPreparedPlaybackPlanarLimiterMatchesCpuReference()
+{
+    auto prepareResult = echo::prepareUzumeGpuPlaybackPlanarSafetyLimiter(64, 5);
+    if (! prepareResult.prepared)
+    {
+        require(! prepareResult.available || prepareResult.fallbackReason != nullptr, "unprepared UZUME GPU playback planar limiter must expose fallback reason");
+        return;
+    }
+
+    require(prepareResult.available, "prepared UZUME GPU playback planar limiter must report available backend");
+    require(prepareResult.streamBacked, "prepared UZUME GPU playback planar limiter must use stream-backed scratch");
+    require(prepareResult.pinnedHostBacked, "prepared UZUME GPU playback planar limiter must use pinned host staging buffers");
+    require(prepareResult.scratchCapacitySamples >= 64, "prepared UZUME GPU playback planar limiter must report sample scratch capacity");
+    require(prepareResult.pinnedHostCapacitySamples >= 64, "prepared UZUME GPU playback planar limiter must report sample pinned host capacity");
+    require(prepareResult.scratchCapacityChannels >= 5, "prepared UZUME GPU playback planar limiter must report channel scratch capacity");
+    require(prepareResult.pinnedHostCapacityChannels >= 5, "prepared UZUME GPU playback planar limiter must report channel pinned host capacity");
+
+    const auto secondPrepareResult = echo::prepareUzumeGpuPlaybackPlanarSafetyLimiter(32, 4);
+    require(secondPrepareResult.prepared, "second UZUME GPU playback planar limiter prepare must succeed");
+    require(secondPrepareResult.scratchReused, "second UZUME GPU playback planar limiter prepare must reuse prepared scratch");
+    require(secondPrepareResult.scratchCapacitySamples >= prepareResult.scratchCapacitySamples, "second UZUME GPU playback planar limiter prepare must keep sample scratch capacity");
+    require(secondPrepareResult.scratchCapacityChannels >= prepareResult.scratchCapacityChannels, "second UZUME GPU playback planar limiter prepare must keep channel scratch capacity");
+
+    std::vector<std::vector<float>> gpuChannels {
+        { -2.0f, -0.75f, 0.0f, 0.75f, 2.0f, std::numeric_limits<float>::quiet_NaN() },
+        { 0.2f, -1.4f, std::numeric_limits<float>::infinity(), -0.3f, 0.4f, 1.2f },
+        { -0.1f, -0.2f, -0.3f, -std::numeric_limits<float>::infinity(), -0.5f, -0.6f },
+        { 0.979f, 0.981f, -0.982f, 0.4f, -0.4f, 0.0f },
+        { 1.5f, -1.5f, 0.1f, -0.1f, 0.3f, -0.3f },
+    };
+    auto cpuChannels = gpuChannels;
+    std::vector<float*> channelPointers;
+    channelPointers.reserve(gpuChannels.size());
+
+    bool cpuRisk = false;
+    for (auto& channel : cpuChannels)
+        for (auto& sample : channel)
+            sample = cpuReferenceUzumeSoftLimitSample(sample, cpuRisk);
+    for (auto& channel : gpuChannels)
+        channelPointers.push_back(channel.data());
+
+    auto result = echo::processUzumeGpuPreparedPlaybackPlanarSafetyLimiter(
+        channelPointers.data(),
+        static_cast<int>(channelPointers.size()),
+        static_cast<int>(gpuChannels.front().size()));
+
+    require(result.processed, "prepared UZUME GPU playback planar limiter must process with preallocated scratch");
+    require(result.clippingRisk == cpuRisk, "prepared UZUME GPU playback planar limiter clipping risk must match CPU reference");
+    require(result.streamBacked, "prepared UZUME GPU playback planar limiter must process on stream-backed scratch");
+    require(result.scratchReused, "prepared UZUME GPU playback planar limiter must reuse prepared scratch");
+    require(result.pinnedHostBacked, "prepared UZUME GPU playback planar limiter must use pinned host staging buffers");
+    require(result.scratchCapacitySamples >= prepareResult.scratchCapacitySamples, "prepared UZUME GPU playback planar limiter must report sample scratch capacity");
+    require(result.scratchCapacityChannels >= prepareResult.scratchCapacityChannels, "prepared UZUME GPU playback planar limiter must report channel scratch capacity");
+    require(result.fallbackReason == nullptr, "prepared UZUME GPU playback planar limiter must not report fallback");
+
+    for (size_t channel = 0; channel < gpuChannels.size(); ++channel)
+        for (size_t sample = 0; sample < gpuChannels[channel].size(); ++sample)
+            require(std::abs(gpuChannels[channel][sample] - cpuChannels[channel][sample]) <= nearTolerance, "prepared UZUME GPU playback planar limiter output must match CPU reference at channel " + std::to_string(channel) + " sample " + std::to_string(sample));
+
+    const int oversizedChannelCount = secondPrepareResult.scratchCapacityChannels + 1;
+    std::vector<std::vector<float>> oversizedChannels(static_cast<size_t>(oversizedChannelCount), std::vector<float>(8, 0.1f));
+    std::vector<float*> oversizedChannelPointers;
+    oversizedChannelPointers.reserve(oversizedChannels.size());
+    for (auto& channel : oversizedChannels)
+        oversizedChannelPointers.push_back(channel.data());
+
+    const auto oversizedResult = echo::processUzumeGpuPreparedPlaybackPlanarSafetyLimiter(
+        oversizedChannelPointers.data(),
+        oversizedChannelCount,
+        8);
+
+    require(! oversizedResult.processed, "oversized UZUME GPU playback planar limiter must not allocate during processing");
+    require(oversizedResult.available, "oversized UZUME GPU playback planar limiter must still report available backend");
+    require(oversizedResult.scratchCapacitySamples == secondPrepareResult.scratchCapacitySamples, "oversized UZUME GPU playback planar limiter must keep prepared sample scratch capacity");
+    require(oversizedResult.scratchCapacityChannels == secondPrepareResult.scratchCapacityChannels, "oversized UZUME GPU playback planar limiter must keep prepared channel scratch capacity");
+    require(oversizedResult.fallbackReason != nullptr && std::string(oversizedResult.fallbackReason) == "cuda-playback-planar-scratch-too-small", "oversized UZUME GPU playback planar limiter must report prepared planar scratch capacity fallback");
+}
+
+void testUzumeGpuFusedGainLimiterMatchesCpuReference()
+{
+    constexpr float fusedGain = 1.75f;
+    std::vector<float> gpuSamples {
+        -0.8f,
+        -0.5f,
+        -0.1f,
+        0.0f,
+        0.1f,
+        0.5f,
+        0.8f,
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+    };
+    auto cpuSamples = gpuSamples;
+
+    bool cpuRisk = false;
+    for (auto& sample : cpuSamples)
+        sample = cpuReferenceUzumeFusedGainLimiterSample(sample, fusedGain, cpuRisk);
+
+    auto result = echo::processUzumeGpuFusedGainLimiter(gpuSamples.data(), static_cast<int>(gpuSamples.size()), fusedGain);
+
+    if (! result.processed)
+    {
+        require(! result.available || result.fallbackReason != nullptr, "unprocessed UZUME GPU fused gain limiter must expose fallback reason");
+        return;
+    }
+
+    require(result.available, "processed UZUME GPU fused gain limiter must report available backend");
+    require(result.fallbackReason == nullptr, "processed UZUME GPU fused gain limiter must not report fallback");
+    require(result.clippingRisk == cpuRisk, "UZUME GPU fused gain limiter clipping risk must match CPU reference");
+    require(result.streamBacked, "processed UZUME GPU fused gain limiter must use stream-backed scratch");
+    require(result.pinnedHostBacked, "processed UZUME GPU fused gain limiter must use pinned host staging buffers");
+    require(result.scratchCapacitySamples >= static_cast<int>(gpuSamples.size()), "processed UZUME GPU fused gain limiter must report scratch capacity");
+    require(result.pinnedHostCapacitySamples >= static_cast<int>(gpuSamples.size()), "processed UZUME GPU fused gain limiter must report pinned host capacity");
+
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        require(std::abs(gpuSamples[index] - cpuSamples[index]) <= nearTolerance, "UZUME GPU fused gain limiter output must match CPU reference at sample " + std::to_string(index));
+
+    std::vector<float> secondGpuSamples { 0.2f, -0.4f, 0.6f, -0.8f };
+    auto secondCpuSamples = secondGpuSamples;
+    bool secondCpuRisk = false;
+    for (auto& sample : secondCpuSamples)
+        sample = cpuReferenceUzumeFusedGainLimiterSample(sample, fusedGain, secondCpuRisk);
+
+    auto secondResult = echo::processUzumeGpuFusedGainLimiter(secondGpuSamples.data(), static_cast<int>(secondGpuSamples.size()), fusedGain);
+
+    require(secondResult.processed, "second UZUME GPU fused gain limiter pass must process after first pass");
+    require(secondResult.streamBacked, "second UZUME GPU fused gain limiter pass must use stream-backed scratch");
+    require(secondResult.scratchReused, "second UZUME GPU fused gain limiter pass must reuse scratch buffers");
+    require(secondResult.pinnedHostBacked, "second UZUME GPU fused gain limiter pass must use pinned host staging buffers");
+    require(secondResult.scratchCapacitySamples >= result.scratchCapacitySamples, "second UZUME GPU fused gain limiter pass must keep scratch capacity");
+    require(secondResult.pinnedHostCapacitySamples >= result.pinnedHostCapacitySamples, "second UZUME GPU fused gain limiter pass must keep pinned host capacity");
+    require(secondResult.clippingRisk == secondCpuRisk, "second UZUME GPU fused gain limiter clipping risk must match CPU reference");
+
+    for (size_t index = 0; index < secondGpuSamples.size(); ++index)
+        require(std::abs(secondGpuSamples[index] - secondCpuSamples[index]) <= nearTolerance, "second UZUME GPU fused gain limiter output must match CPU reference at sample " + std::to_string(index));
+}
+
+void testUzumeGpuStereoMatrixLimiterMatchesCpuReference()
+{
+    std::vector<float> gpuLeftSamples {
+        -0.8f,
+        -0.25f,
+        0.0f,
+        0.35f,
+        1.1f,
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+    };
+    std::vector<float> gpuRightSamples {
+        0.5f,
+        -0.5f,
+        0.25f,
+        -0.7f,
+        -1.2f,
+        -std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::quiet_NaN(),
+    };
+    auto cpuLeftSamples = gpuLeftSamples;
+    auto cpuRightSamples = gpuRightSamples;
+    const echo::UzumeGpuStereoMatrix matrix {
+        0.8f,
+        -0.35f,
+        0.2f,
+        1.1f,
+        1.25f,
+    };
+
+    bool cpuRisk = false;
+    cpuReferenceUzumeStereoMatrixLimiter(cpuLeftSamples, cpuRightSamples, matrix, cpuRisk);
+
+    auto result = echo::processUzumeGpuStereoMatrixLimiter(
+        gpuLeftSamples.data(),
+        gpuRightSamples.data(),
+        static_cast<int>(gpuLeftSamples.size()),
+        matrix);
+
+    if (! result.processed)
+    {
+        require(! result.available || result.fallbackReason != nullptr, "unprocessed UZUME GPU stereo matrix limiter must expose fallback reason");
+        return;
+    }
+
+    require(result.available, "processed UZUME GPU stereo matrix limiter must report available backend");
+    require(result.fallbackReason == nullptr, "processed UZUME GPU stereo matrix limiter must not report fallback");
+    require(result.clippingRisk == cpuRisk, "UZUME GPU stereo matrix limiter clipping risk must match CPU reference");
+    require(result.streamBacked, "UZUME GPU stereo matrix limiter must use stream-backed scratch");
+    require(result.scratchCapacitySamples >= static_cast<int>(gpuLeftSamples.size()), "UZUME GPU stereo matrix limiter must report scratch capacity");
+    require(result.pinnedHostBacked, "UZUME GPU stereo matrix limiter must use pinned host staging buffers");
+    require(result.pinnedHostCapacitySamples >= static_cast<int>(gpuLeftSamples.size()), "UZUME GPU stereo matrix limiter must report pinned host capacity");
+
+    for (size_t index = 0; index < gpuLeftSamples.size(); ++index)
+    {
+        require(std::abs(gpuLeftSamples[index] - cpuLeftSamples[index]) <= nearTolerance, "UZUME GPU stereo matrix limiter left output must match CPU reference at sample " + std::to_string(index));
+        require(std::abs(gpuRightSamples[index] - cpuRightSamples[index]) <= nearTolerance, "UZUME GPU stereo matrix limiter right output must match CPU reference at sample " + std::to_string(index));
+    }
+
+    std::vector<float> secondGpuLeftSamples { 0.2f, -0.3f, 0.4f, -0.5f };
+    std::vector<float> secondGpuRightSamples { -0.1f, 0.6f, -0.7f, 0.8f };
+    auto secondCpuLeftSamples = secondGpuLeftSamples;
+    auto secondCpuRightSamples = secondGpuRightSamples;
+    bool secondCpuRisk = false;
+    cpuReferenceUzumeStereoMatrixLimiter(secondCpuLeftSamples, secondCpuRightSamples, matrix, secondCpuRisk);
+
+    auto secondResult = echo::processUzumeGpuStereoMatrixLimiter(
+        secondGpuLeftSamples.data(),
+        secondGpuRightSamples.data(),
+        static_cast<int>(secondGpuLeftSamples.size()),
+        matrix);
+
+    require(secondResult.processed, "second UZUME GPU stereo matrix limiter pass must process after first pass");
+    require(secondResult.streamBacked, "second UZUME GPU stereo matrix limiter pass must use stream-backed scratch");
+    require(secondResult.scratchReused, "second UZUME GPU stereo matrix limiter pass must reuse scratch buffers");
+    require(secondResult.scratchCapacitySamples >= result.scratchCapacitySamples, "second UZUME GPU stereo matrix limiter pass must keep scratch capacity");
+    require(secondResult.pinnedHostBacked, "second UZUME GPU stereo matrix limiter pass must use pinned host staging buffers");
+    require(secondResult.pinnedHostCapacitySamples >= result.pinnedHostCapacitySamples, "second UZUME GPU stereo matrix limiter pass must keep pinned host capacity");
+    require(secondResult.clippingRisk == secondCpuRisk, "second UZUME GPU stereo matrix limiter clipping risk must match CPU reference");
+
+    for (size_t index = 0; index < secondGpuLeftSamples.size(); ++index)
+    {
+        require(std::abs(secondGpuLeftSamples[index] - secondCpuLeftSamples[index]) <= nearTolerance, "second UZUME GPU stereo matrix limiter left output must match CPU reference at sample " + std::to_string(index));
+        require(std::abs(secondGpuRightSamples[index] - secondCpuRightSamples[index]) <= nearTolerance, "second UZUME GPU stereo matrix limiter right output must match CPU reference at sample " + std::to_string(index));
+    }
+}
+
+void testUzumeGpuStereoMatrixMatchesCpuReference()
+{
+    std::vector<float> gpuLeftSamples {
+        -0.8f,
+        -0.25f,
+        0.0f,
+        0.35f,
+        1.1f,
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+    };
+    std::vector<float> gpuRightSamples {
+        0.5f,
+        -0.5f,
+        0.25f,
+        -0.7f,
+        -1.2f,
+        -std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::quiet_NaN(),
+    };
+    auto cpuLeftSamples = gpuLeftSamples;
+    auto cpuRightSamples = gpuRightSamples;
+    const echo::UzumeGpuStereoMatrix matrix {
+        0.8f,
+        -0.35f,
+        0.2f,
+        1.1f,
+        1.25f,
+    };
+
+    bool cpuRisk = false;
+    cpuReferenceUzumeStereoMatrix(cpuLeftSamples, cpuRightSamples, matrix, cpuRisk);
+
+    auto result = echo::processUzumeGpuStereoMatrix(
+        gpuLeftSamples.data(),
+        gpuRightSamples.data(),
+        static_cast<int>(gpuLeftSamples.size()),
+        matrix);
+
+    if (! result.processed)
+    {
+        require(! result.available || result.fallbackReason != nullptr, "unprocessed UZUME GPU stereo matrix must expose fallback reason");
+        return;
+    }
+
+    require(result.available, "processed UZUME GPU stereo matrix must report available backend");
+    require(result.fallbackReason == nullptr, "processed UZUME GPU stereo matrix must not report fallback");
+    require(result.clippingRisk == cpuRisk, "UZUME GPU stereo matrix clipping risk must match CPU reference");
+    require(result.streamBacked, "UZUME GPU stereo matrix must use stream-backed scratch");
+    require(result.scratchCapacitySamples >= static_cast<int>(gpuLeftSamples.size()), "UZUME GPU stereo matrix must report scratch capacity");
+    require(result.pinnedHostBacked, "UZUME GPU stereo matrix must use pinned host staging buffers");
+    require(result.pinnedHostCapacitySamples >= static_cast<int>(gpuLeftSamples.size()), "UZUME GPU stereo matrix must report pinned host capacity");
+
+    for (size_t index = 0; index < gpuLeftSamples.size(); ++index)
+    {
+        require(std::abs(gpuLeftSamples[index] - cpuLeftSamples[index]) <= nearTolerance, "UZUME GPU stereo matrix left output must match CPU reference at sample " + std::to_string(index));
+        require(std::abs(gpuRightSamples[index] - cpuRightSamples[index]) <= nearTolerance, "UZUME GPU stereo matrix right output must match CPU reference at sample " + std::to_string(index));
+    }
+}
+
+void testUzumeGpuPreparedPlaybackStereoMatrixLimiterMatchesCpuReference()
+{
+    auto prepareResult = echo::prepareUzumeGpuPlaybackStereoMatrixLimiter(64);
+    if (! prepareResult.prepared)
+    {
+        require(! prepareResult.available || prepareResult.fallbackReason != nullptr, "unprepared UZUME GPU playback stereo matrix limiter must expose fallback reason");
+        return;
+    }
+
+    require(prepareResult.available, "prepared UZUME GPU playback stereo matrix limiter must report available backend");
+    require(prepareResult.streamBacked, "prepared UZUME GPU playback stereo matrix limiter must use stream-backed scratch");
+    require(prepareResult.pinnedHostBacked, "prepared UZUME GPU playback stereo matrix limiter must use pinned host staging buffers");
+    require(prepareResult.scratchCapacitySamples >= 64, "prepared UZUME GPU playback stereo matrix limiter must report scratch capacity");
+    require(prepareResult.pinnedHostCapacitySamples >= 64, "prepared UZUME GPU playback stereo matrix limiter must report pinned host capacity");
+
+    const auto secondPrepareResult = echo::prepareUzumeGpuPlaybackStereoMatrixLimiter(32);
+    require(secondPrepareResult.prepared, "second UZUME GPU playback stereo matrix prepare must succeed");
+    require(secondPrepareResult.scratchReused, "second UZUME GPU playback stereo matrix prepare must reuse prepared scratch");
+    require(secondPrepareResult.scratchCapacitySamples >= prepareResult.scratchCapacitySamples, "second UZUME GPU playback stereo matrix prepare must keep scratch capacity");
+
+    std::vector<float> gpuLeftSamples {
+        -0.8f,
+        -0.25f,
+        0.0f,
+        0.35f,
+        1.1f,
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+    };
+    std::vector<float> gpuRightSamples {
+        0.5f,
+        -0.5f,
+        0.25f,
+        -0.7f,
+        -1.2f,
+        -std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::quiet_NaN(),
+    };
+    auto cpuLeftSamples = gpuLeftSamples;
+    auto cpuRightSamples = gpuRightSamples;
+    const echo::UzumeGpuStereoMatrix matrix {
+        0.8f,
+        -0.35f,
+        0.2f,
+        1.1f,
+        1.25f,
+    };
+
+    bool cpuRisk = false;
+    cpuReferenceUzumeStereoMatrixLimiter(cpuLeftSamples, cpuRightSamples, matrix, cpuRisk);
+
+    auto result = echo::processUzumeGpuPreparedPlaybackStereoMatrixLimiter(
+        gpuLeftSamples.data(),
+        gpuRightSamples.data(),
+        static_cast<int>(gpuLeftSamples.size()),
+        matrix);
+
+    require(result.processed, "prepared UZUME GPU playback stereo matrix limiter must process with preallocated scratch");
+    require(result.clippingRisk == cpuRisk, "prepared UZUME GPU playback stereo matrix limiter clipping risk must match CPU reference");
+    require(result.streamBacked, "prepared UZUME GPU playback stereo matrix limiter must process on stream-backed scratch");
+    require(result.scratchReused, "prepared UZUME GPU playback stereo matrix limiter must reuse prepared scratch");
+    require(result.pinnedHostBacked, "prepared UZUME GPU playback stereo matrix limiter must use pinned host staging buffers");
+    require(result.fallbackReason == nullptr, "prepared UZUME GPU playback stereo matrix limiter must not report fallback");
+
+    for (size_t index = 0; index < gpuLeftSamples.size(); ++index)
+    {
+        require(std::abs(gpuLeftSamples[index] - cpuLeftSamples[index]) <= nearTolerance, "prepared UZUME GPU playback stereo matrix limiter left output must match CPU reference at sample " + std::to_string(index));
+        require(std::abs(gpuRightSamples[index] - cpuRightSamples[index]) <= nearTolerance, "prepared UZUME GPU playback stereo matrix limiter right output must match CPU reference at sample " + std::to_string(index));
+    }
+
+    const int oversizedSampleCount = secondPrepareResult.scratchCapacitySamples + 1;
+    std::vector<float> oversizedLeftSamples(static_cast<size_t>(oversizedSampleCount), 0.1f);
+    std::vector<float> oversizedRightSamples(static_cast<size_t>(oversizedSampleCount), -0.1f);
+    const auto oversizedResult = echo::processUzumeGpuPreparedPlaybackStereoMatrixLimiter(
+        oversizedLeftSamples.data(),
+        oversizedRightSamples.data(),
+        oversizedSampleCount,
+        matrix);
+
+    require(! oversizedResult.processed, "oversized UZUME GPU playback stereo matrix limiter must not allocate during processing");
+    require(oversizedResult.available, "oversized UZUME GPU playback stereo matrix limiter must still report available backend");
+    require(oversizedResult.scratchCapacitySamples == secondPrepareResult.scratchCapacitySamples, "oversized UZUME GPU playback stereo matrix limiter must keep prepared scratch capacity");
+    require(oversizedResult.fallbackReason != nullptr && std::string(oversizedResult.fallbackReason) == "cuda-playback-stereo-scratch-too-small", "oversized UZUME GPU playback stereo matrix limiter must report prepared scratch capacity fallback");
+}
+
+void testUzumeGpuPreparedPlaybackStereoMatrixMatchesCpuReference()
+{
+    auto prepareResult = echo::prepareUzumeGpuPlaybackStereoMatrixLimiter(64);
+    if (! prepareResult.prepared)
+    {
+        require(! prepareResult.available || prepareResult.fallbackReason != nullptr, "unprepared UZUME GPU playback stereo matrix must expose fallback reason");
+        return;
+    }
+
+    require(prepareResult.available, "prepared UZUME GPU playback stereo matrix must report available backend");
+    require(prepareResult.streamBacked, "prepared UZUME GPU playback stereo matrix must use stream-backed scratch");
+    require(prepareResult.pinnedHostBacked, "prepared UZUME GPU playback stereo matrix must use pinned host staging buffers");
+    require(prepareResult.scratchCapacitySamples >= 64, "prepared UZUME GPU playback stereo matrix must report scratch capacity");
+    require(prepareResult.pinnedHostCapacitySamples >= 64, "prepared UZUME GPU playback stereo matrix must report pinned host capacity");
+
+    const auto secondPrepareResult = echo::prepareUzumeGpuPlaybackStereoMatrixLimiter(32);
+    require(secondPrepareResult.prepared, "second UZUME GPU playback stereo matrix prepare must succeed");
+    require(secondPrepareResult.scratchReused, "second UZUME GPU playback stereo matrix prepare must reuse prepared scratch");
+    require(secondPrepareResult.scratchCapacitySamples >= prepareResult.scratchCapacitySamples, "second UZUME GPU playback stereo matrix prepare must keep scratch capacity");
+
+    std::vector<float> gpuLeftSamples {
+        -0.8f,
+        -0.25f,
+        0.0f,
+        0.35f,
+        1.1f,
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+    };
+    std::vector<float> gpuRightSamples {
+        0.5f,
+        -0.5f,
+        0.25f,
+        -0.7f,
+        -1.2f,
+        -std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::quiet_NaN(),
+    };
+    auto cpuLeftSamples = gpuLeftSamples;
+    auto cpuRightSamples = gpuRightSamples;
+    const echo::UzumeGpuStereoMatrix matrix {
+        0.8f,
+        -0.35f,
+        0.2f,
+        1.1f,
+        1.25f,
+    };
+
+    bool cpuRisk = false;
+    cpuReferenceUzumeStereoMatrix(cpuLeftSamples, cpuRightSamples, matrix, cpuRisk);
+
+    auto result = echo::processUzumeGpuPreparedPlaybackStereoMatrix(
+        gpuLeftSamples.data(),
+        gpuRightSamples.data(),
+        static_cast<int>(gpuLeftSamples.size()),
+        matrix);
+
+    require(result.processed, "prepared UZUME GPU playback stereo matrix must process with preallocated scratch");
+    require(result.clippingRisk == cpuRisk, "prepared UZUME GPU playback stereo matrix clipping risk must match CPU reference");
+    require(result.streamBacked, "prepared UZUME GPU playback stereo matrix must process on stream-backed scratch");
+    require(result.scratchReused, "prepared UZUME GPU playback stereo matrix must reuse prepared scratch");
+    require(result.pinnedHostBacked, "prepared UZUME GPU playback stereo matrix must use pinned host staging buffers");
+    require(result.fallbackReason == nullptr, "prepared UZUME GPU playback stereo matrix must not report fallback");
+
+    for (size_t index = 0; index < gpuLeftSamples.size(); ++index)
+    {
+        require(std::abs(gpuLeftSamples[index] - cpuLeftSamples[index]) <= nearTolerance, "prepared UZUME GPU playback stereo matrix left output must match CPU reference at sample " + std::to_string(index));
+        require(std::abs(gpuRightSamples[index] - cpuRightSamples[index]) <= nearTolerance, "prepared UZUME GPU playback stereo matrix right output must match CPU reference at sample " + std::to_string(index));
+    }
+
+    const int oversizedSampleCount = secondPrepareResult.scratchCapacitySamples + 1;
+    std::vector<float> oversizedLeftSamples(static_cast<size_t>(oversizedSampleCount), 0.1f);
+    std::vector<float> oversizedRightSamples(static_cast<size_t>(oversizedSampleCount), -0.1f);
+    const auto oversizedResult = echo::processUzumeGpuPreparedPlaybackStereoMatrix(
+        oversizedLeftSamples.data(),
+        oversizedRightSamples.data(),
+        oversizedSampleCount,
+        matrix);
+
+    require(! oversizedResult.processed, "oversized UZUME GPU playback stereo matrix must not allocate during processing");
+    require(oversizedResult.available, "oversized UZUME GPU playback stereo matrix must still report available backend");
+    require(oversizedResult.scratchCapacitySamples == secondPrepareResult.scratchCapacitySamples, "oversized UZUME GPU playback stereo matrix must keep prepared scratch capacity");
+    require(oversizedResult.fallbackReason != nullptr && std::string(oversizedResult.fallbackReason) == "cuda-playback-stereo-scratch-too-small", "oversized UZUME GPU playback stereo matrix must report prepared scratch capacity fallback");
+}
+
+void testUzumeGpuCufftRoundtripMatchesCpuReference()
+{
+    std::vector<float> gpuSamples(64, 0.0f);
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        gpuSamples[index] = 0.5f * std::sin(static_cast<float>(index) * 0.37f)
+            + 0.25f * std::cos(static_cast<float>(index) * 0.11f);
+    const auto cpuSamples = gpuSamples;
+
+    auto result = echo::processUzumeGpuFftRoundtrip(gpuSamples.data(), static_cast<int>(gpuSamples.size()));
+
+    if (! result.processed)
+    {
+        require(! result.available || ! result.cufftAvailable || result.fallbackReason != nullptr, "unprocessed UZUME cuFFT roundtrip must expose fallback reason");
+        return;
+    }
+
+    require(result.available, "processed UZUME cuFFT roundtrip must report available CUDA backend");
+    require(result.cufftAvailable, "processed UZUME cuFFT roundtrip must report available cuFFT backend");
+    require(result.fallbackReason == nullptr, "processed UZUME cuFFT roundtrip must not report fallback");
+    require(result.maxAbsError <= nearTolerance, "UZUME cuFFT roundtrip max error must stay within tolerance");
+
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        require(std::abs(gpuSamples[index] - cpuSamples[index]) <= nearTolerance, "UZUME cuFFT roundtrip output must match CPU reference at sample " + std::to_string(index));
+}
+
+void testUzumeGpuCufftConvolutionMatchesCpuReference()
+{
+    std::vector<float> gpuSamples(64, 0.0f);
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        gpuSamples[index] = 0.4f * std::sin(static_cast<float>(index) * 0.29f)
+            + 0.2f * std::cos(static_cast<float>(index) * 0.17f);
+    const std::vector<float> impulse { 0.5f, -0.25f, 0.125f, 0.0625f, -0.03125f };
+    std::vector<float> cpuSamples(gpuSamples.size(), 0.0f);
+
+    for (size_t sample = 0; sample < cpuSamples.size(); ++sample)
+    {
+        float sum = 0.0f;
+        for (size_t tap = 0; tap < impulse.size(); ++tap)
+        {
+            if (sample >= tap)
+                sum += gpuSamples[sample - tap] * impulse[tap];
+        }
+        cpuSamples[sample] = sum;
+    }
+
+    auto result = echo::processUzumeGpuFftConvolution(
+        gpuSamples.data(),
+        impulse.data(),
+        static_cast<int>(gpuSamples.size()),
+        static_cast<int>(impulse.size()));
+
+    if (! result.processed)
+    {
+        require(! result.available || ! result.cufftAvailable || result.fallbackReason != nullptr, "unprocessed UZUME cuFFT convolution must expose fallback reason");
+        return;
+    }
+
+    require(result.available, "processed UZUME cuFFT convolution must report available CUDA backend");
+    require(result.cufftAvailable, "processed UZUME cuFFT convolution must report available cuFFT backend");
+    require(result.fftSize >= static_cast<int>(gpuSamples.size() + impulse.size() - 1), "UZUME cuFFT convolution must report padded FFT size");
+    require(result.fallbackReason == nullptr, "processed UZUME cuFFT convolution must not report fallback");
+    require(result.maxAbsError <= nearTolerance, "UZUME cuFFT convolution max error must stay within tolerance");
+    require(result.streamBacked, "processed UZUME cuFFT convolution must use stream-backed scratch");
+    require(result.scratchFftSize == result.fftSize, "processed UZUME cuFFT convolution must report scratch FFT size");
+    require(result.pinnedHostBacked, "processed UZUME cuFFT convolution must use pinned host staging buffers");
+    require(result.pinnedHostFftSize == result.fftSize, "processed UZUME cuFFT convolution must report pinned host FFT size");
+
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        require(std::abs(gpuSamples[index] - cpuSamples[index]) <= nearTolerance, "UZUME cuFFT convolution output must match CPU reference at sample " + std::to_string(index));
+
+    std::vector<float> secondGpuSamples(64, 0.0f);
+    for (size_t index = 0; index < secondGpuSamples.size(); ++index)
+        secondGpuSamples[index] = 0.3f * std::sin(static_cast<float>(index) * 0.19f)
+            - 0.1f * std::cos(static_cast<float>(index) * 0.41f);
+    std::vector<float> secondCpuSamples(secondGpuSamples.size(), 0.0f);
+    for (size_t sample = 0; sample < secondCpuSamples.size(); ++sample)
+    {
+        float sum = 0.0f;
+        for (size_t tap = 0; tap < impulse.size(); ++tap)
+        {
+            if (sample >= tap)
+                sum += secondGpuSamples[sample - tap] * impulse[tap];
+        }
+        secondCpuSamples[sample] = sum;
+    }
+
+    auto secondResult = echo::processUzumeGpuFftConvolution(
+        secondGpuSamples.data(),
+        impulse.data(),
+        static_cast<int>(secondGpuSamples.size()),
+        static_cast<int>(impulse.size()));
+
+    require(secondResult.processed, "second UZUME cuFFT convolution pass must process after first pass");
+    require(secondResult.streamBacked, "second UZUME cuFFT convolution pass must use stream-backed scratch");
+    require(secondResult.scratchReused, "second UZUME cuFFT convolution pass must reuse scratch buffers");
+    require(secondResult.planReused, "second UZUME cuFFT convolution pass must reuse cuFFT plans");
+    require(secondResult.scratchFftSize == result.scratchFftSize, "second UZUME cuFFT convolution pass must keep scratch FFT size");
+    require(secondResult.pinnedHostBacked, "second UZUME cuFFT convolution pass must use pinned host staging buffers");
+    require(secondResult.pinnedHostFftSize == result.pinnedHostFftSize, "second UZUME cuFFT convolution pass must keep pinned host FFT size");
+    require(secondResult.maxAbsError <= nearTolerance, "second UZUME cuFFT convolution max error must stay within tolerance");
+
+    for (size_t index = 0; index < secondGpuSamples.size(); ++index)
+        require(std::abs(secondGpuSamples[index] - secondCpuSamples[index]) <= nearTolerance, "second UZUME cuFFT convolution output must match CPU reference at sample " + std::to_string(index));
+}
+
+void testUzumeGpuPreparedPlaybackFftConvolutionMatchesCpuReference()
+{
+    const std::vector<float> impulse { 0.5f, -0.25f, 0.125f, 0.0625f, -0.03125f };
+    auto prepareResult = echo::prepareUzumeGpuPlaybackFftConvolution(64, static_cast<int>(impulse.size()));
+    if (! prepareResult.prepared)
+    {
+        require(! prepareResult.available || ! prepareResult.cufftAvailable || prepareResult.fallbackReason != nullptr, "unprepared UZUME playback cuFFT convolution must expose fallback reason");
+        return;
+    }
+
+    require(prepareResult.available, "prepared UZUME playback cuFFT convolution must report available CUDA backend");
+    require(prepareResult.cufftAvailable, "prepared UZUME playback cuFFT convolution must report available cuFFT backend");
+    require(prepareResult.streamBacked, "prepared UZUME playback cuFFT convolution must use stream-backed scratch");
+    require(prepareResult.pinnedHostBacked, "prepared UZUME playback cuFFT convolution must use pinned host staging buffers");
+    require(prepareResult.fftSize >= static_cast<int>(64 + impulse.size() - 1), "prepared UZUME playback cuFFT convolution must report padded FFT size");
+    require(prepareResult.scratchFftSize == prepareResult.fftSize, "prepared UZUME playback cuFFT convolution must report scratch FFT size");
+    require(prepareResult.pinnedHostFftSize == prepareResult.fftSize, "prepared UZUME playback cuFFT convolution must report pinned host FFT size");
+
+    const auto secondPrepareResult = echo::prepareUzumeGpuPlaybackFftConvolution(61, static_cast<int>(impulse.size()));
+    require(secondPrepareResult.prepared, "second UZUME playback cuFFT convolution prepare must succeed");
+    require(secondPrepareResult.scratchReused, "second UZUME playback cuFFT convolution prepare must reuse scratch for same FFT size");
+    require(secondPrepareResult.planReused, "second UZUME playback cuFFT convolution prepare must reuse cuFFT plans for same FFT size");
+
+    std::vector<float> gpuSamples(64, 0.0f);
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        gpuSamples[index] = 0.35f * std::sin(static_cast<float>(index) * 0.23f)
+            + 0.15f * std::cos(static_cast<float>(index) * 0.13f);
+    std::vector<float> cpuSamples(gpuSamples.size(), 0.0f);
+
+    for (size_t sample = 0; sample < cpuSamples.size(); ++sample)
+    {
+        float sum = 0.0f;
+        for (size_t tap = 0; tap < impulse.size(); ++tap)
+        {
+            if (sample >= tap)
+                sum += gpuSamples[sample - tap] * impulse[tap];
+        }
+        cpuSamples[sample] = sum;
+    }
+
+    auto result = echo::processUzumeGpuPreparedPlaybackFftConvolution(
+        gpuSamples.data(),
+        impulse.data(),
+        static_cast<int>(gpuSamples.size()),
+        static_cast<int>(impulse.size()));
+
+    require(result.processed, "prepared UZUME playback cuFFT convolution must process with preallocated scratch");
+    require(result.streamBacked, "prepared UZUME playback cuFFT convolution must process on stream-backed scratch");
+    require(result.scratchReused, "prepared UZUME playback cuFFT convolution must reuse prepared scratch");
+    require(result.planReused, "prepared UZUME playback cuFFT convolution must reuse prepared cuFFT plans");
+    require(result.pinnedHostBacked, "prepared UZUME playback cuFFT convolution must use pinned host staging buffers");
+    require(result.scratchFftSize == prepareResult.scratchFftSize, "prepared UZUME playback cuFFT convolution must keep scratch FFT size");
+    require(result.pinnedHostFftSize == prepareResult.pinnedHostFftSize, "prepared UZUME playback cuFFT convolution must keep pinned host FFT size");
+    require(result.fallbackReason == nullptr, "prepared UZUME playback cuFFT convolution must not report fallback");
+
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        require(std::abs(gpuSamples[index] - cpuSamples[index]) <= nearTolerance, "prepared UZUME playback cuFFT convolution output must match CPU reference at sample " + std::to_string(index));
+
+    const int oversizedSampleCount = prepareResult.scratchFftSize;
+    std::vector<float> oversizedSamples(static_cast<size_t>(oversizedSampleCount), 0.1f);
+    const auto oversizedResult = echo::processUzumeGpuPreparedPlaybackFftConvolution(
+        oversizedSamples.data(),
+        impulse.data(),
+        oversizedSampleCount,
+        static_cast<int>(impulse.size()));
+
+    require(! oversizedResult.processed, "oversized UZUME playback cuFFT convolution must not allocate during processing");
+    require(oversizedResult.available, "oversized UZUME playback cuFFT convolution must still report available CUDA backend");
+    require(oversizedResult.cufftAvailable, "oversized UZUME playback cuFFT convolution must still report available cuFFT backend");
+    require(oversizedResult.fftSize > prepareResult.scratchFftSize, "oversized UZUME playback cuFFT convolution must require larger FFT than prepared");
+    require(oversizedResult.scratchFftSize == prepareResult.scratchFftSize, "oversized UZUME playback cuFFT convolution must keep prepared scratch FFT size");
+    require(oversizedResult.fallbackReason != nullptr && std::string(oversizedResult.fallbackReason) == "cuda-playback-fft-scratch-too-small", "oversized UZUME playback cuFFT convolution must report prepared FFT capacity fallback");
+}
+
+void testUzumeGpuPreparedPlaybackStreamingFftConvolutionKeepsHistory()
+{
+    const std::vector<float> impulse { 0.5f, -0.25f, 0.125f, 0.0625f, -0.03125f };
+    auto prepareResult = echo::prepareUzumeGpuPlaybackStreamingFftConvolution(32, static_cast<int>(impulse.size()));
+    if (! prepareResult.prepared)
+    {
+        require(! prepareResult.available || ! prepareResult.cufftAvailable || prepareResult.fallbackReason != nullptr, "unprepared UZUME streaming playback cuFFT convolution must expose fallback reason");
+        return;
+    }
+
+    require(prepareResult.available, "prepared UZUME streaming playback cuFFT convolution must report available CUDA backend");
+    require(prepareResult.cufftAvailable, "prepared UZUME streaming playback cuFFT convolution must report available cuFFT backend");
+    require(prepareResult.streamBacked, "prepared UZUME streaming playback cuFFT convolution must use stream-backed scratch");
+    require(prepareResult.pinnedHostBacked, "prepared UZUME streaming playback cuFFT convolution must use pinned host staging buffers");
+    require(prepareResult.fftSize >= static_cast<int>(32 + 2 * impulse.size() - 2), "prepared UZUME streaming playback cuFFT convolution must cover history-padded FFT size");
+    require(prepareResult.scratchFftSize >= prepareResult.fftSize, "prepared UZUME streaming playback cuFFT convolution must report sufficient scratch FFT size");
+
+    const auto secondPrepareResult = echo::prepareUzumeGpuPlaybackStreamingFftConvolution(24, static_cast<int>(impulse.size()));
+    require(secondPrepareResult.prepared, "second UZUME streaming playback cuFFT convolution prepare must succeed");
+    require(secondPrepareResult.scratchReused, "second UZUME streaming playback cuFFT convolution prepare must reuse scratch for same FFT size");
+    require(secondPrepareResult.planReused, "second UZUME streaming playback cuFFT convolution prepare must reuse cuFFT plans for same FFT size");
+
+    std::vector<float> firstBlock(16, 0.0f);
+    std::vector<float> secondBlock(16, 0.0f);
+    for (size_t index = 0; index < firstBlock.size(); ++index)
+        firstBlock[index] = 0.35f * std::sin(static_cast<float>(index) * 0.23f)
+            + 0.15f * std::cos(static_cast<float>(index) * 0.13f);
+    for (size_t index = 0; index < secondBlock.size(); ++index)
+        secondBlock[index] = 0.25f * std::sin(static_cast<float>(index + firstBlock.size()) * 0.17f)
+            - 0.1f * std::cos(static_cast<float>(index) * 0.31f);
+
+    std::vector<float> cpuInput;
+    cpuInput.reserve(firstBlock.size() + secondBlock.size());
+    cpuInput.insert(cpuInput.end(), firstBlock.begin(), firstBlock.end());
+    cpuInput.insert(cpuInput.end(), secondBlock.begin(), secondBlock.end());
+    std::vector<float> cpuOutput(cpuInput.size(), 0.0f);
+    for (size_t sample = 0; sample < cpuOutput.size(); ++sample)
+    {
+        float sum = 0.0f;
+        for (size_t tap = 0; tap < impulse.size(); ++tap)
+        {
+            if (sample >= tap)
+                sum += cpuInput[sample - tap] * impulse[tap];
+        }
+        cpuOutput[sample] = sum;
+    }
+
+    auto gpuFirstBlock = firstBlock;
+    auto gpuSecondBlock = secondBlock;
+    echo::resetUzumeGpuPlaybackStreamingFftConvolution();
+    auto firstResult = echo::processUzumeGpuPreparedPlaybackStreamingFftConvolution(
+        gpuFirstBlock.data(),
+        impulse.data(),
+        static_cast<int>(gpuFirstBlock.size()),
+        static_cast<int>(impulse.size()));
+    auto secondResult = echo::processUzumeGpuPreparedPlaybackStreamingFftConvolution(
+        gpuSecondBlock.data(),
+        impulse.data(),
+        static_cast<int>(gpuSecondBlock.size()),
+        static_cast<int>(impulse.size()));
+
+    require(firstResult.processed, "first UZUME streaming playback cuFFT convolution block must process with preallocated scratch");
+    require(secondResult.processed, "second UZUME streaming playback cuFFT convolution block must process with preserved history");
+    require(firstResult.streamBacked && secondResult.streamBacked, "UZUME streaming playback cuFFT convolution must process on stream-backed scratch");
+    require(firstResult.scratchReused && secondResult.scratchReused, "UZUME streaming playback cuFFT convolution must reuse prepared scratch");
+    require(firstResult.planReused && secondResult.planReused, "UZUME streaming playback cuFFT convolution must reuse prepared cuFFT plans");
+    require(firstResult.pinnedHostBacked && secondResult.pinnedHostBacked, "UZUME streaming playback cuFFT convolution must use pinned host staging buffers");
+    require(secondResult.fallbackReason == nullptr, "second UZUME streaming playback cuFFT convolution must not report fallback");
+
+    for (size_t index = 0; index < gpuFirstBlock.size(); ++index)
+        require(std::abs(gpuFirstBlock[index] - cpuOutput[index]) <= nearTolerance, "first UZUME streaming playback cuFFT convolution block must match CPU reference at sample " + std::to_string(index));
+    for (size_t index = 0; index < gpuSecondBlock.size(); ++index)
+        require(std::abs(gpuSecondBlock[index] - cpuOutput[firstBlock.size() + index]) <= nearTolerance, "second UZUME streaming playback cuFFT convolution block must include previous block history at sample " + std::to_string(index));
+
+    echo::resetUzumeGpuPlaybackStreamingFftConvolution();
+    auto resetBlock = secondBlock;
+    auto resetResult = echo::processUzumeGpuPreparedPlaybackStreamingFftConvolution(
+        resetBlock.data(),
+        impulse.data(),
+        static_cast<int>(resetBlock.size()),
+        static_cast<int>(impulse.size()));
+    require(resetResult.processed, "reset UZUME streaming playback cuFFT convolution block must process after history reset");
+    require(std::abs(resetBlock[0] - secondBlock[0] * impulse[0]) <= nearTolerance, "reset UZUME streaming playback cuFFT convolution must clear previous block history");
+
+    const int oversizedSampleCount = prepareResult.scratchFftSize;
+    std::vector<float> oversizedSamples(static_cast<size_t>(oversizedSampleCount), 0.1f);
+    const auto oversizedResult = echo::processUzumeGpuPreparedPlaybackStreamingFftConvolution(
+        oversizedSamples.data(),
+        impulse.data(),
+        oversizedSampleCount,
+        static_cast<int>(impulse.size()));
+
+    require(! oversizedResult.processed, "oversized UZUME streaming playback cuFFT convolution must not allocate during processing");
+    require(oversizedResult.available, "oversized UZUME streaming playback cuFFT convolution must still report available CUDA backend");
+    require(oversizedResult.cufftAvailable, "oversized UZUME streaming playback cuFFT convolution must still report available cuFFT backend");
+    require(oversizedResult.scratchFftSize == prepareResult.scratchFftSize, "oversized UZUME streaming playback cuFFT convolution must keep prepared scratch FFT size");
+    require(oversizedResult.fallbackReason != nullptr && std::string(oversizedResult.fallbackReason) == "cuda-playback-streaming-fft-scratch-too-small", "oversized UZUME streaming playback cuFFT convolution must report prepared streaming FFT capacity fallback");
+}
+
+void testUzumeEnginePreparePrewarmsGpuFftConvolutionScratch()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ConvolutionProcessor convolutionProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    echo::DspHeadroomProcessor headroomProcessor;
+    echo::UzumeEngine uzumeEngine(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
+    uzumeEngine.prepare(48000.0, 64, 2);
+
+    std::vector<float> gpuSamples(64, 0.0f);
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        gpuSamples[index] = 0.25f * std::sin(static_cast<float>(index) * 0.11f);
+    const auto cpuSamples = gpuSamples;
+    std::vector<float> impulse(static_cast<size_t>(echo::roomCorrectionMaxTaps), 0.0f);
+    impulse[0] = 1.0f;
+
+    const auto result = echo::processUzumeGpuPreparedPlaybackFftConvolution(
+        gpuSamples.data(),
+        impulse.data(),
+        static_cast<int>(gpuSamples.size()),
+        static_cast<int>(impulse.size()));
+
+    if (! result.processed)
+    {
+        require(! result.available || ! result.cufftAvailable || result.fallbackReason != nullptr, "unprocessed UZUME engine-prepared playback cuFFT convolution must expose fallback reason");
+        return;
+    }
+
+    require(result.streamBacked, "UZUME engine prepare must prewarm stream-backed playback cuFFT convolution scratch");
+    require(result.scratchReused, "UZUME engine prepare must allow playback cuFFT convolution process to reuse scratch");
+    require(result.planReused, "UZUME engine prepare must allow playback cuFFT convolution process to reuse cuFFT plans");
+    require(result.pinnedHostBacked, "UZUME engine prepare must prewarm playback cuFFT convolution pinned staging");
+    require(result.scratchFftSize >= echo::roomCorrectionMaxTaps + static_cast<int>(gpuSamples.size()) - 1, "UZUME engine prepare must cover max room correction tap capacity");
+    require(result.fallbackReason == nullptr, "UZUME engine-prepared playback cuFFT convolution must not report fallback");
+
+    for (size_t index = 0; index < gpuSamples.size(); ++index)
+        require(std::abs(gpuSamples[index] - cpuSamples[index]) <= nearTolerance, "UZUME engine-prepared playback cuFFT identity convolution output must match CPU reference at sample " + std::to_string(index));
+}
+
+void testUzumeEnginePreparePrewarmsGpuStreamingFftConvolutionScratch()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ConvolutionProcessor convolutionProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    echo::DspHeadroomProcessor headroomProcessor;
+    echo::UzumeEngine uzumeEngine(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
+    uzumeEngine.prepare(48000.0, 64, 2);
+
+    const std::vector<float> impulse { 0.5f, -0.25f, 0.125f };
+    std::vector<float> firstBlock(64, 0.0f);
+    std::vector<float> secondBlock(64, 0.0f);
+    for (size_t index = 0; index < firstBlock.size(); ++index)
+        firstBlock[index] = 0.35f * std::sin(static_cast<float>(index) * 0.19f)
+            + 0.05f * std::cos(static_cast<float>(index) * 0.07f);
+    for (size_t index = 0; index < secondBlock.size(); ++index)
+        secondBlock[index] = -0.2f * std::sin(static_cast<float>(index + firstBlock.size()) * 0.13f)
+            + 0.15f * std::cos(static_cast<float>(index) * 0.17f);
+
+    std::vector<float> cpuInput;
+    cpuInput.reserve(firstBlock.size() + secondBlock.size());
+    cpuInput.insert(cpuInput.end(), firstBlock.begin(), firstBlock.end());
+    cpuInput.insert(cpuInput.end(), secondBlock.begin(), secondBlock.end());
+    std::vector<float> cpuOutput(cpuInput.size(), 0.0f);
+    for (size_t sample = 0; sample < cpuOutput.size(); ++sample)
+    {
+        float sum = 0.0f;
+        for (size_t tap = 0; tap < impulse.size(); ++tap)
+        {
+            if (sample >= tap)
+                sum += cpuInput[sample - tap] * impulse[tap];
+        }
+        cpuOutput[sample] = sum;
+    }
+
+    auto gpuFirstBlock = firstBlock;
+    auto gpuSecondBlock = secondBlock;
+    auto firstResult = echo::processUzumeGpuPreparedPlaybackStreamingFftConvolution(
+        gpuFirstBlock.data(),
+        impulse.data(),
+        static_cast<int>(gpuFirstBlock.size()),
+        static_cast<int>(impulse.size()));
+
+    if (! firstResult.processed)
+    {
+        require(! firstResult.available || ! firstResult.cufftAvailable || firstResult.fallbackReason != nullptr, "unprocessed UZUME engine-prepared streaming playback cuFFT convolution must expose fallback reason");
+        return;
+    }
+
+    auto secondResult = echo::processUzumeGpuPreparedPlaybackStreamingFftConvolution(
+        gpuSecondBlock.data(),
+        impulse.data(),
+        static_cast<int>(gpuSecondBlock.size()),
+        static_cast<int>(impulse.size()));
+
+    require(firstResult.streamBacked && secondResult.streamBacked, "UZUME engine prepare must prewarm stream-backed streaming playback cuFFT convolution scratch");
+    require(firstResult.scratchReused && secondResult.scratchReused, "UZUME engine prepare must allow streaming playback cuFFT convolution process to reuse scratch");
+    require(firstResult.planReused && secondResult.planReused, "UZUME engine prepare must allow streaming playback cuFFT convolution process to reuse cuFFT plans");
+    require(firstResult.pinnedHostBacked && secondResult.pinnedHostBacked, "UZUME engine prepare must prewarm streaming playback cuFFT convolution pinned staging");
+    require(firstResult.scratchFftSize >= static_cast<int>(gpuFirstBlock.size()) + 2 * echo::roomCorrectionMaxTaps - 2, "UZUME engine prepare must cover max streaming room correction tap capacity");
+    require(firstResult.fallbackReason == nullptr && secondResult.fallbackReason == nullptr, "UZUME engine-prepared streaming playback cuFFT convolution must not report fallback");
+
+    for (size_t index = 0; index < gpuFirstBlock.size(); ++index)
+        require(std::abs(gpuFirstBlock[index] - cpuOutput[index]) <= nearTolerance, "UZUME engine-prepared streaming playback cuFFT first block must match CPU reference at sample " + std::to_string(index));
+    for (size_t index = 0; index < gpuSecondBlock.size(); ++index)
+        require(std::abs(gpuSecondBlock[index] - cpuOutput[firstBlock.size() + index]) <= nearTolerance, "UZUME engine-prepared streaming playback cuFFT second block must include history at sample " + std::to_string(index));
+
+    uzumeEngine.reset();
+    auto resetBlock = secondBlock;
+    const auto resetResult = echo::processUzumeGpuPreparedPlaybackStreamingFftConvolution(
+        resetBlock.data(),
+        impulse.data(),
+        static_cast<int>(resetBlock.size()),
+        static_cast<int>(impulse.size()));
+    require(resetResult.processed, "UZUME engine reset must leave prepared streaming playback cuFFT scratch usable");
+    require(resetResult.scratchReused, "UZUME engine reset must not force streaming playback cuFFT scratch allocation");
+    require(std::abs(resetBlock[0] - secondBlock[0] * impulse[0]) <= nearTolerance, "UZUME engine reset must clear streaming playback cuFFT history");
 }
 
 void testDspHeadroomOnlyAppliesToActiveDsp()
@@ -324,15 +1551,15 @@ void testDspHeadroomOnlyAppliesToActiveDsp()
     echo::ConvolutionProcessor convolutionProcessor;
     echo::ChannelBalanceProcessor channelBalanceProcessor;
     echo::DspHeadroomProcessor headroomProcessor;
-    echo::DspChain dspChain(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
-    dspChain.prepare(48000.0, 128, 2);
+    echo::UzumeEngine uzumeEngine(eqProcessor, convolutionProcessor, channelBalanceProcessor, headroomProcessor);
+    uzumeEngine.prepare(48000.0, 128, 2);
     headroomProcessor.setHeadroomDb(-6.0f);
 
     auto bypassed = makeBuffer(2, 128);
     bypassed.clear();
     bypassed.setSample(0, 0, 0.5f);
     bypassed.setSample(1, 0, -0.5f);
-    dspChain.processBlock(bypassed, 0, bypassed.getNumSamples());
+    uzumeEngine.processBlock(bypassed, 0, bypassed.getNumSamples());
     require(std::abs(bypassed.getSample(0, 0) - 0.5f) <= strictTolerance, "DSP headroom must not affect native bypass");
     require(std::abs(bypassed.getSample(1, 0) + 0.5f) <= strictTolerance, "DSP headroom must preserve bypass polarity");
 
@@ -341,7 +1568,7 @@ void testDspHeadroomOnlyAppliesToActiveDsp()
     processed.clear();
     processed.setSample(0, 0, 0.5f);
     processed.setSample(1, 0, -0.5f);
-    dspChain.processBlock(processed, 0, processed.getNumSamples());
+    uzumeEngine.processBlock(processed, 0, processed.getNumSamples());
 
     require(std::abs(processed.getSample(0, 0)) < 0.5f, "DSP headroom must attenuate active DSP output");
     require(std::abs(processed.getSample(1, 0)) < 0.5f, "DSP headroom must attenuate active DSP output on all channels");
@@ -962,20 +2189,20 @@ void testAsioBufferCandidateGeneration()
 {
     auto explicitValid = buildAsioCandidates(128, 4096, 512, 128, 1024);
     require(! explicitValid.empty(), "ASIO explicit valid candidate list");
-    require(explicitValid[0] == 1024, "ASIO explicit valid buffer must be first");
-    require(std::find(explicitValid.begin(), explicitValid.end(), 512) != explicitValid.end(), "ASIO preferred fallback must be included");
+    require(explicitValid[0] == 1024u, "ASIO explicit valid buffer must be first");
+    require(std::find(explicitValid.begin(), explicitValid.end(), 512u) != explicitValid.end(), "ASIO preferred fallback must be included");
 
     auto defaultPreferred = buildAsioCandidates(128, 4096, 512, 128, 0);
     require(! defaultPreferred.empty(), "ASIO default candidate list");
-    require(defaultPreferred[0] == 512, "ASIO default buffer must prefer driver preferred size");
+    require(defaultPreferred[0] == 512u, "ASIO default buffer must prefer driver preferred size");
 
     auto powerOfTwo = buildAsioCandidates(64, 4096, 512, -1, 300);
-    require(std::find(powerOfTwo.begin(), powerOfTwo.end(), 256) != powerOfTwo.end(), "ASIO power-of-two lower candidate");
-    require(std::find(powerOfTwo.begin(), powerOfTwo.end(), 512) != powerOfTwo.end(), "ASIO power-of-two preferred candidate");
+    require(std::find(powerOfTwo.begin(), powerOfTwo.end(), 256u) != powerOfTwo.end(), "ASIO power-of-two lower candidate");
+    require(std::find(powerOfTwo.begin(), powerOfTwo.end(), 512u) != powerOfTwo.end(), "ASIO power-of-two preferred candidate");
 
     auto stepped = buildAsioCandidates(128, 4096, 512, 128, 1000);
-    require(std::find(stepped.begin(), stepped.end(), 896) != stepped.end(), "ASIO stepped lower aligned candidate");
-    require(std::find(stepped.begin(), stepped.end(), 1024) != stepped.end(), "ASIO stepped upper aligned candidate");
+    require(std::find(stepped.begin(), stepped.end(), 896u) != stepped.end(), "ASIO stepped lower aligned candidate");
+    require(std::find(stepped.begin(), stepped.end(), 1024u) != stepped.end(), "ASIO stepped upper aligned candidate");
 
     requireVectorEquals(
         buildAsioIncludeInputAttempts(2, false, false),
@@ -1300,8 +2527,25 @@ int main()
         { "Channel balance delay compensation", testChannelBalanceDelayCompensation },
         { "Channel balance solo keeps physical side", testChannelBalanceSoloKeepsPhysicalSide },
         { "Channel balance band gain compensation", testChannelBalanceBandGainCompensation },
-        { "DSP chain bypass preserves dry buffer", testDspChainBypassPreservesDryBuffer },
-        { "DSP chain limiter protects active output", testDspChainLimiterProtectsActiveOutput },
+        { "UZUME engine bypass preserves dry buffer", testUzumeEngineBypassPreservesDryBuffer },
+        { "UZUME engine limiter protects active output", testUzumeEngineLimiterProtectsActiveOutput },
+        { "UZUME engine uses GPU matrix for stable channel balance", testUzumeEngineUsesGpuMatrixForStableChannelBalance },
+        { "UZUME engine uses GPU matrix for stable mono channel balance", testUzumeEngineUsesGpuMatrixForStableMonoChannelBalance },
+        { "UZUME runtime status reports backend", testUzumeRuntimeStatusReportsBackend },
+        { "UZUME GPU safety limiter matches CPU reference", testUzumeGpuSafetyLimiterMatchesCpuReference },
+        { "UZUME GPU prepared playback limiter matches CPU reference", testUzumeGpuPreparedPlaybackLimiterMatchesCpuReference },
+        { "UZUME GPU prepared playback planar limiter matches CPU reference", testUzumeGpuPreparedPlaybackPlanarLimiterMatchesCpuReference },
+        { "UZUME GPU fused gain limiter matches CPU reference", testUzumeGpuFusedGainLimiterMatchesCpuReference },
+        { "UZUME GPU stereo matrix limiter matches CPU reference", testUzumeGpuStereoMatrixLimiterMatchesCpuReference },
+        { "UZUME GPU stereo matrix matches CPU reference", testUzumeGpuStereoMatrixMatchesCpuReference },
+        { "UZUME GPU prepared playback stereo matrix limiter matches CPU reference", testUzumeGpuPreparedPlaybackStereoMatrixLimiterMatchesCpuReference },
+        { "UZUME GPU prepared playback stereo matrix matches CPU reference", testUzumeGpuPreparedPlaybackStereoMatrixMatchesCpuReference },
+        { "UZUME GPU cuFFT roundtrip matches CPU reference", testUzumeGpuCufftRoundtripMatchesCpuReference },
+        { "UZUME GPU cuFFT convolution matches CPU reference", testUzumeGpuCufftConvolutionMatchesCpuReference },
+        { "UZUME GPU prepared playback cuFFT convolution matches CPU reference", testUzumeGpuPreparedPlaybackFftConvolutionMatchesCpuReference },
+        { "UZUME GPU prepared playback streaming cuFFT convolution keeps history", testUzumeGpuPreparedPlaybackStreamingFftConvolutionKeepsHistory },
+        { "UZUME engine prepare prewarms GPU cuFFT convolution scratch", testUzumeEnginePreparePrewarmsGpuFftConvolutionScratch },
+        { "UZUME engine prepare prewarms GPU streaming cuFFT convolution scratch", testUzumeEnginePreparePrewarmsGpuStreamingFftConvolutionScratch },
         { "DSP headroom only applies to active DSP", testDspHeadroomOnlyAppliesToActiveDsp },
         { "host buffer fallback attempts", testHostBufferFallbackAttempts },
         { "host shared backend options", testHostSharedBackendOptions },
