@@ -2169,6 +2169,62 @@ describe('AudioProfessionalStatusPanel', () => {
     );
   });
 
+  it('marks direct-like output device mismatch as warning without enabling scheduler', () => {
+    const status = referenceStatus();
+    const plan = status.uzumeReferencePlan!;
+    plan.outputDevicePolicy = {
+      ...plan.outputDevicePolicy,
+      outputMode: 'exclusive',
+      deviceCapability: 'direct-like-rate-mismatch',
+      state: 'device-rate-mismatch-risk',
+      fileRate: 44100,
+      decoderOutputRate: 44100,
+      requestedOutputRate: 96000,
+      actualDeviceRate: 48000,
+      sharedDeviceRate: null,
+      bitPerfectCandidate: false,
+      resampling: false,
+      sampleRateMismatch: true,
+      recommendation: 'inspect-device-rate-mismatch',
+      reasons: ['actual_device_rate_differs_from_requested_output_rate', 'output_device_policy_reference_only'],
+    };
+    plan.backendSupport.outputDevicePolicyState = 'device-rate-mismatch-risk';
+    plan.latencyBudget.outputDevicePolicyState = 'device-rate-mismatch-risk';
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME output device policy reference',
+          value: expect.stringContaining('exclusive / direct-like-rate-mismatch / device-rate-mismatch-risk'),
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME output device policy reference',
+          value: expect.stringContaining('requested 96 kHz / actual 48 kHz'),
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME output device policy reference',
+          value: expect.stringContaining('recommend inspect-device-rate-mismatch'),
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME readiness contract reference',
+          value: expect.stringContaining('scheduler not-enabled'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+  });
+
   it('marks DSD direct positive bypass reference state as good', () => {
     const status = referenceStatus();
     const plan = status.uzumeReferencePlan!;
