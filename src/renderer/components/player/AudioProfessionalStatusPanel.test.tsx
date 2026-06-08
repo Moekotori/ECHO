@@ -1453,6 +1453,59 @@ describe('AudioProfessionalStatusPanel', () => {
     expect(visualState.rows.filter((row) => row.tone === 'danger')).toEqual([]);
   });
 
+  it('marks same-rate bypass SRC budget reference state as good', () => {
+    const status = referenceStatus();
+    const plan = status.uzumeReferencePlan!;
+    plan.realtimeBudgetSummary.state = 'same-rate-bypass-reference';
+    plan.realtimeBudgetSummary.srcEstimatedMultiplyAdds = 8;
+    plan.realtimeBudgetSummary.srcSafetyClass = 'same-rate-bypass';
+    plan.resampling.active = false;
+    plan.resampling.sourceRate = 48000;
+    plan.resampling.targetRate = 48000;
+    plan.resampling.sourceFamily = '48k-family';
+    plan.resampling.targetFamily = '48k-family';
+    plan.resampling.ratio = 1;
+    plan.resampling.sameRateBypass = true;
+    plan.resampling.groupDelaySamples = 0;
+    plan.resampling.groupDelayMs = 0;
+    plan.resampling.lookaheadSamples = 0;
+    plan.resampling.lookaheadMs = 0;
+    plan.resampling.phaseAccumulator = 'same-rate-bypass';
+    plan.resampling.realtimeSafetyClass = 'same-rate-bypass';
+    plan.resampling.artifactMetrics.realtimeBudget.estimatedMultiplyAdds = 8;
+    plan.resampling.artifactMetrics.realtimeBudget.safetyClass = 'same-rate-bypass';
+    plan.resampling.artifactMetrics.nullResidual = {
+      state: 'exact-bypass',
+      comparedFrames: 8,
+      maxAbs: 0,
+      rms: 0,
+    };
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    const visualState = readProfessionalVisualState();
+    expect(visualState.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME realtime budget summary reference',
+          value: expect.stringContaining('same-rate-bypass-reference'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME SRC budget reference',
+          value: expect.stringContaining('scalar-float64-reference / 8 multiply-adds / realtime factor unmeasured / same-rate-bypass / null exact-bypass max 0.000000 rms 0.000000'),
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
   it('keeps not-applicable artifact manifest entries non-blocking while planned entries warn', () => {
     const notApplicableStatus = referenceStatus();
     notApplicableStatus.uzumeReferencePlan!.artifactPlan.dsdFamilyPath = 'not-applicable';
