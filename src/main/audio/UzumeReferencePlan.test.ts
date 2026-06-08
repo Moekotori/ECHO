@@ -724,6 +724,44 @@ describe('UZUME reference plan compiler', () => {
     expect(JSON.stringify(compiled.formatPathPlan)).not.toContain('sdm_engine_not_ready');
   });
 
+  it('reports direct-like output device rate mismatch as reference-only telemetry', () => {
+    const compiled = compile({
+      sampleRatePlan: plan({
+        requestedOutputSampleRate: 96000,
+        actualDeviceSampleRate: 48000,
+        sharedDeviceSampleRate: null,
+        outputMode: 'exclusive',
+        resampling: false,
+        bitPerfectCandidate: false,
+        sampleRateMismatch: true,
+      }),
+      outputMode: 'exclusive',
+    });
+
+    expect(compiled.outputDevicePolicy).toEqual({
+      artifact: 'output-device-policy-reference',
+      formatPath: 'pcm_bitperfect',
+      outputMode: 'exclusive',
+      deviceCapability: 'direct-like-rate-mismatch',
+      state: 'device-rate-mismatch-risk',
+      sourceContainer: 'pcm',
+      outputContainer: 'pcm',
+      fileRate: 44100,
+      decoderOutputRate: 44100,
+      requestedOutputRate: 96000,
+      actualDeviceRate: 48000,
+      sharedDeviceRate: null,
+      bitPerfectCandidate: false,
+      resampling: false,
+      sampleRateMismatch: true,
+      recommendation: 'inspect-device-rate-mismatch',
+      reasons: ['actual_device_rate_differs_from_requested_output_rate', 'output_device_policy_reference_only'],
+    });
+    expect(compiled.backendSupport.outputDevicePolicyState).toBe('device-rate-mismatch-risk');
+    expect(compiled.latencyBudget.outputDevicePolicyState).toBe('device-rate-mismatch-risk');
+    expect(compiled.readinessContract.productionScheduler).toBe('not-enabled');
+  });
+
   it('assigns active UI sections to reference engines instead of runtime processors', () => {
     const compiled = compile({
       sampleRatePlan: plan({ requestedOutputSampleRate: 48000, resampling: true }),
