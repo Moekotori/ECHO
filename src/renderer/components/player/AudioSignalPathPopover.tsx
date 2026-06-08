@@ -730,6 +730,43 @@ const formatUzumeReferenceResponseResample = (status: AudioStatus | null): strin
   ])).join(' | ');
 };
 
+const isExpectedUzumeReferenceResponseResample = (
+  reports: NonNullable<AudioStatus['uzumeReferencePlan']>['sharedConvolution']['responseResampleReports'] | null | undefined,
+): boolean => {
+  if (!reports?.length) {
+    return false;
+  }
+
+  return reports.every((report) => {
+    if (report.state === 'same-rate-bypass') {
+      return report.sameRateBypass &&
+        report.engine === 'exact-bypass' &&
+        !report.linearInterpolationRejected &&
+        report.filterContract === null &&
+        report.reason === 'same_rate_exact_bypass';
+    }
+
+    if (report.state === 'windowed-sinc-reference-required') {
+      const contract = report.filterContract;
+
+      return !report.sameRateBypass &&
+        report.engine === 'windowed-sinc-float64-reference' &&
+        report.linearInterpolationRejected &&
+        contract !== null &&
+        contract.tapCount > 0 &&
+        contract.phaseCount > 0 &&
+        contract.cutoffRatio > 0 &&
+        contract.cutoffRatio < 1 &&
+        contract.transitionWidthRatio > 0 &&
+        contract.stopbandAttenuationDb > 0 &&
+        (report.reason === 'cross_family_response_resample_uses_windowed_sinc_reference' ||
+          report.reason === 'exact_rate_mismatch_response_resample_uses_windowed_sinc_reference');
+    }
+
+    return false;
+  });
+};
+
 const formatUzumeReferenceConvolutionDuplicateGuard = (status: AudioStatus | null): string | null => {
   const report = status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard;
   if (!report) {
@@ -2355,7 +2392,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME response resample reference',
       value: referenceResponseResample,
-      tone: 'process',
+      tone: isExpectedUzumeReferenceResponseResample(referencePlan?.sharedConvolution.responseResampleReports) ? 'process' : 'warning',
       variant: 'process',
     });
   }

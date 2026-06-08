@@ -596,6 +596,43 @@ const formatUzumeReferenceResponseResample = (status: AudioStatus | null, fallba
   ].filter((part): part is string => Boolean(part)).join(' / ')).join(' | ');
 };
 
+const isExpectedUzumeReferenceResponseResample = (
+  reports: NonNullable<AudioStatus['uzumeReferencePlan']>['sharedConvolution']['responseResampleReports'] | null | undefined,
+): boolean => {
+  if (!reports?.length) {
+    return false;
+  }
+
+  return reports.every((report) => {
+    if (report.state === 'same-rate-bypass') {
+      return report.sameRateBypass &&
+        report.engine === 'exact-bypass' &&
+        !report.linearInterpolationRejected &&
+        report.filterContract === null &&
+        report.reason === 'same_rate_exact_bypass';
+    }
+
+    if (report.state === 'windowed-sinc-reference-required') {
+      const contract = report.filterContract;
+
+      return !report.sameRateBypass &&
+        report.engine === 'windowed-sinc-float64-reference' &&
+        report.linearInterpolationRejected &&
+        contract !== null &&
+        contract.tapCount > 0 &&
+        contract.phaseCount > 0 &&
+        contract.cutoffRatio > 0 &&
+        contract.cutoffRatio < 1 &&
+        contract.transitionWidthRatio > 0 &&
+        contract.stopbandAttenuationDb > 0 &&
+        (report.reason === 'cross_family_response_resample_uses_windowed_sinc_reference' ||
+          report.reason === 'exact_rate_mismatch_response_resample_uses_windowed_sinc_reference');
+    }
+
+    return false;
+  });
+};
+
 const formatUzumeReferenceConvolutionDuplicateGuard = (status: AudioStatus | null, fallback: string): string => {
   const report = status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard;
   if (!report) {
@@ -1599,7 +1636,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceSrcPhaseApodizing'), value: uzumeReferenceSrcPhaseApodizingText, tone: status?.uzumeReferencePlan?.resampling.phaseModeArtifacts ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceDsdFamily'), value: uzumeReferenceDsdFamilyText, tone: status?.uzumeReferencePlan?.dsdFamily?.state === 'unavailable' ? 'warning' : status?.uzumeReferencePlan?.dsdFamily?.state === 'direct' ? 'good' : status?.uzumeReferencePlan?.dsdFamily ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolution'), value: uzumeReferenceConvolutionText, tone: status?.uzumeReferencePlan?.sharedConvolution?.sources.length ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceResponseResample'), value: uzumeReferenceResponseResampleText, tone: status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports?.some((report) => report.linearInterpolationRejected) ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports?.length ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceResponseResample'), value: uzumeReferenceResponseResampleText, tone: isExpectedUzumeReferenceResponseResample(status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports?.length ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard'), value: uzumeReferenceConvolutionDuplicateGuardText, tone: isExpectedUzumeReferenceConvolutionDuplicateGuard(status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'single-shared-plan' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'split-required' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolutionSerialNull'), value: uzumeReferenceConvolutionSerialNullText, tone: status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'merged-matches-serial' ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'residual-over-threshold' ? 'danger' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePcmOutputQuantization'), value: uzumeReferencePcmOutputQuantizationText, tone: status?.uzumeReferencePlan?.pcmOutputQuantization?.state === 'rejected' ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization?.dither.enabled ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization ? 'good' : 'muted' },

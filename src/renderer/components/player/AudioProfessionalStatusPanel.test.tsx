@@ -1422,7 +1422,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME response resample reference',
           value: 'room-ir:same-rate-bypass / 48 kHz->48 kHz / 48k-family->48k-family / exact-bypass / linear interpolation not used / same rate exact bypass | headphone-fir:windowed-sinc-reference-required / 44.1 kHz->48 kHz / 44.1k-family->48k-family / windowed-sinc-float64-reference / linear interpolation rejected / 64 taps/0.9200 cutoff/96 dB / cross family response resample uses windowed sinc reference',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME convolution duplicate guard',
@@ -1557,6 +1557,31 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME convolution duplicate guard',
           value: expect.stringContaining('headphone-fir:split-required split sample rate family mismatch'),
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected response resample reference contract as good', () => {
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={referenceStatus()} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME response resample reference',
+          value: expect.stringContaining('room-ir:same-rate-bypass'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME response resample reference',
+          value: expect.stringContaining('headphone-fir:windowed-sinc-reference-required'),
           tone: 'good',
         }),
       ]),
