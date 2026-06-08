@@ -1830,6 +1830,8 @@ describe('PlayerBar', () => {
       expect.arrayContaining([
         expect.objectContaining({ title: 'UZUME reference compiler', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'Reference assignment', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'Reference merge groups', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'Reference latency owners', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME artifact manifest reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME reference path plan', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME reference bit-perfect', tone: 'warning', variant: 'process' }),
@@ -1869,6 +1871,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({ title: 'UZUME callback ring reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME render-ahead cache reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME underrun fallback reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME headroom reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME safety meter', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME limiter reference', tone: 'warning', variant: 'process' }),
       ]),
