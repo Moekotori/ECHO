@@ -1517,6 +1517,75 @@ const formatUzumeReferenceUnderrunFallback = (status: AudioStatus | null, fallba
   return `${fallbackReference.state} / source ${fallbackReference.selectedSource ?? 'none'} / ${fallbackReference.telemetryStatus} / rollback ${fallbackReference.qualityRollback} / ${fallbackReference.fallbackInjected ? 'fallback injected' : 'full-profile commit'} / no GPU wait / short bridge blocked ${normalizeReason(fallbackReference.shortBridgeReason, fallback)}`;
 };
 
+const isExpectedUzumeReferenceContinuity = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['continuity'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const continuity = report.continuity;
+  const preRoll = report.preRoll;
+  const ring = report.callbackRing;
+  const cache = report.renderAheadCache;
+  const fallback = report.fallback;
+
+  const continuityContract = report.artifact === 'continuity-telemetry-reference' &&
+    report.policy === 'callback-read-committed-reference' &&
+    continuity.artifact === 'continuity-quality-policy-reference' &&
+    continuity.callbackRule === 'read-committed-output-only' &&
+    !continuity.shortBridgeAllowed &&
+    continuity.shortBridgeReason !== null &&
+    continuity.qualityRollback === 'none' &&
+    !continuity.commitAllowed &&
+    continuity.waitTarget !== 'none';
+  const preRollContract = preRoll.artifact === 'pre-roll-deadline-reference' &&
+    (preRoll.state === 'ready' || preRoll.state === 'deadline-safe' || preRoll.state === 'start-pre-roll-now') &&
+    preRoll.preRollRequiredFrames >= 0 &&
+    preRoll.framesUntilBoundary >= 0 &&
+    preRoll.deadlineSlackFrames >= 0 &&
+    preRoll.renderAheadTargetFrames >= preRoll.renderAheadReadyFrames &&
+    preRoll.renderAheadReadyFrames >= 0 &&
+    preRoll.callbackBlockFrames > 0 &&
+    preRoll.outputRingDepthFrames >= 0 &&
+    preRoll.readRule === 'read-committed-output-only' &&
+    preRoll.mustNotWaitForGpu &&
+    !preRoll.shortBridgeAllowed;
+  const ringContract = ring.artifact === 'cpu-callback-ring-reference' &&
+    ring.state === 'stable' &&
+    ring.telemetryStatus === 'safe' &&
+    ring.capacityFrames >= ring.depthFrames &&
+    ring.depthFrames >= ring.callbackBlockFrames &&
+    ring.depthBlocks > 0 &&
+    ring.missingFrames === 0 &&
+    ring.readRule === 'read-committed-output-only' &&
+    ring.mustNotWaitForGpu &&
+    !ring.shortBridgeAllowed &&
+    ring.shortBridgeReason === 'cpu_only_ring_does_not_enable_short_bridge';
+  const cacheCommitMatchesState = cache.commitState === 'commit-to-callback-slot'
+    ? cache.commitAllowed
+    : !cache.commitAllowed;
+  const cacheContract = cache.artifact === 'render-ahead-cache-reference' &&
+    cache.requestKey.length > 0 &&
+    cache.budgetBytes >= 0 &&
+    cache.bytesBeforeEvict >= 0 &&
+    cache.bytesAfterEvict >= 0 &&
+    cache.evictionCount >= 0 &&
+    cacheCommitMatchesState &&
+    cache.callbackRule === 'read-committed-output-only' &&
+    cache.mustNotWaitForGpu;
+  const fallbackContract = fallback.artifact === 'fallback-injection-underrun-reference' &&
+    fallback.telemetryStatus !== 'unsafe' &&
+    fallback.callbackMustNotWaitForGpu &&
+    !fallback.shortBridgeAllowed &&
+    fallback.shortBridgeReason === 'underrun_protection_does_not_enable_short_bridge' &&
+    ((fallback.state === 'gpu-render-ahead-commit' && fallback.selectedSource === 'gpu-render-ahead' && fallback.commitAllowed && !fallback.fallbackInjected && fallback.qualityRollback === 'none') ||
+      (fallback.state === 'cpu-main-chain-fallback' && fallback.selectedSource === 'cpu-main-chain' && fallback.commitAllowed && fallback.fallbackInjected && fallback.qualityRollback === 'controlled-fallback') ||
+      (fallback.state === 'prior-committed-fallback' && fallback.selectedSource === 'prior-committed' && fallback.commitAllowed && fallback.fallbackInjected && fallback.qualityRollback === 'controlled-fallback'));
+
+  return continuityContract && preRollContract && ringContract && cacheContract && fallbackContract;
+};
+
 const joinedWarnings = (warnings: string[] | undefined, unknown: string): string =>
   warnings?.length ? warnings.join(', ') : unknown;
 
@@ -1644,6 +1713,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceCallbackRingText = formatUzumeReferenceCallbackRing(status, unknown);
   const uzumeReferenceRenderAheadCacheText = formatUzumeReferenceRenderAheadCache(status, unknown);
   const uzumeReferenceUnderrunFallbackText = formatUzumeReferenceUnderrunFallback(status, unknown);
+  const expectedUzumeReferenceContinuity = isExpectedUzumeReferenceContinuity(status?.uzumeReferencePlan?.continuity);
   const planned = 'Planned / not implemented';
   const transitional = 'Transitional';
   const uzumeHeadroomTelemetryText = status
@@ -1813,11 +1883,11 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard'), value: uzumeReferenceConvolutionDuplicateGuardText, tone: isExpectedUzumeReferenceConvolutionDuplicateGuard(status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'single-shared-plan' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'split-required' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolutionSerialNull'), value: uzumeReferenceConvolutionSerialNullText, tone: status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'merged-matches-serial' ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'residual-over-threshold' ? 'danger' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePcmOutputQuantization'), value: uzumeReferencePcmOutputQuantizationText, tone: isExpectedUzumeReferencePcmOutputQuantization(status?.uzumeReferencePlan?.pcmOutputQuantization) ? 'good' : status?.uzumeReferencePlan?.pcmOutputQuantization?.state === 'rejected' ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization?.dither.enabled ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceContinuity'), value: uzumeReferenceContinuityText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferencePreRoll'), value: uzumeReferencePreRollText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceCallbackRing'), value: uzumeReferenceCallbackRingText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceRenderAheadCache'), value: uzumeReferenceRenderAheadCacheText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceUnderrunFallback'), value: uzumeReferenceUnderrunFallbackText, tone: status?.uzumeReferencePlan?.continuity?.fallback.telemetryStatus === 'unsafe' ? 'danger' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceContinuity'), value: uzumeReferenceContinuityText, tone: expectedUzumeReferenceContinuity ? 'good' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferencePreRoll'), value: uzumeReferencePreRollText, tone: expectedUzumeReferenceContinuity ? 'good' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceCallbackRing'), value: uzumeReferenceCallbackRingText, tone: expectedUzumeReferenceContinuity ? 'good' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceRenderAheadCache'), value: uzumeReferenceRenderAheadCacheText, tone: expectedUzumeReferenceContinuity ? 'good' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceUnderrunFallback'), value: uzumeReferenceUnderrunFallbackText, tone: status?.uzumeReferencePlan?.continuity?.fallback.telemetryStatus === 'unsafe' ? 'danger' : expectedUzumeReferenceContinuity ? 'good' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeBitPerfect'), value: uzumeBitPerfectText, tone: status?.uzumeBitPerfectState === 'available' ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeHeadroom'), value: uzumeHeadroomTelemetryText, tone: status?.uzumeHeadroomActive || Math.abs(status?.dspHeadroomDb ?? 0) > 0.05 ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeSafetyMeter'), value: uzumeSafetyMeterText, tone: status?.dspLimiterProtecting ? 'danger' : status?.dspClippingRisk || status?.uzumeReferencePlan ? 'warning' : 'muted' },

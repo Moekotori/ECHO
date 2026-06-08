@@ -1645,6 +1645,75 @@ const formatUzumeUnderrunFallbackReference = (status: AudioStatus | null): strin
   ]);
 };
 
+const isExpectedUzumeReferenceContinuity = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['continuity'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const continuity = report.continuity;
+  const preRoll = report.preRoll;
+  const ring = report.callbackRing;
+  const cache = report.renderAheadCache;
+  const fallback = report.fallback;
+
+  const continuityContract = report.artifact === 'continuity-telemetry-reference' &&
+    report.policy === 'callback-read-committed-reference' &&
+    continuity.artifact === 'continuity-quality-policy-reference' &&
+    continuity.callbackRule === 'read-committed-output-only' &&
+    !continuity.shortBridgeAllowed &&
+    continuity.shortBridgeReason !== null &&
+    continuity.qualityRollback === 'none' &&
+    !continuity.commitAllowed &&
+    continuity.waitTarget !== 'none';
+  const preRollContract = preRoll.artifact === 'pre-roll-deadline-reference' &&
+    (preRoll.state === 'ready' || preRoll.state === 'deadline-safe' || preRoll.state === 'start-pre-roll-now') &&
+    preRoll.preRollRequiredFrames >= 0 &&
+    preRoll.framesUntilBoundary >= 0 &&
+    preRoll.deadlineSlackFrames >= 0 &&
+    preRoll.renderAheadTargetFrames >= preRoll.renderAheadReadyFrames &&
+    preRoll.renderAheadReadyFrames >= 0 &&
+    preRoll.callbackBlockFrames > 0 &&
+    preRoll.outputRingDepthFrames >= 0 &&
+    preRoll.readRule === 'read-committed-output-only' &&
+    preRoll.mustNotWaitForGpu &&
+    !preRoll.shortBridgeAllowed;
+  const ringContract = ring.artifact === 'cpu-callback-ring-reference' &&
+    ring.state === 'stable' &&
+    ring.telemetryStatus === 'safe' &&
+    ring.capacityFrames >= ring.depthFrames &&
+    ring.depthFrames >= ring.callbackBlockFrames &&
+    ring.depthBlocks > 0 &&
+    ring.missingFrames === 0 &&
+    ring.readRule === 'read-committed-output-only' &&
+    ring.mustNotWaitForGpu &&
+    !ring.shortBridgeAllowed &&
+    ring.shortBridgeReason === 'cpu_only_ring_does_not_enable_short_bridge';
+  const cacheCommitMatchesState = cache.commitState === 'commit-to-callback-slot'
+    ? cache.commitAllowed
+    : !cache.commitAllowed;
+  const cacheContract = cache.artifact === 'render-ahead-cache-reference' &&
+    cache.requestKey.length > 0 &&
+    cache.budgetBytes >= 0 &&
+    cache.bytesBeforeEvict >= 0 &&
+    cache.bytesAfterEvict >= 0 &&
+    cache.evictionCount >= 0 &&
+    cacheCommitMatchesState &&
+    cache.callbackRule === 'read-committed-output-only' &&
+    cache.mustNotWaitForGpu;
+  const fallbackContract = fallback.artifact === 'fallback-injection-underrun-reference' &&
+    fallback.telemetryStatus !== 'unsafe' &&
+    fallback.callbackMustNotWaitForGpu &&
+    !fallback.shortBridgeAllowed &&
+    fallback.shortBridgeReason === 'underrun_protection_does_not_enable_short_bridge' &&
+    ((fallback.state === 'gpu-render-ahead-commit' && fallback.selectedSource === 'gpu-render-ahead' && fallback.commitAllowed && !fallback.fallbackInjected && fallback.qualityRollback === 'none') ||
+      (fallback.state === 'cpu-main-chain-fallback' && fallback.selectedSource === 'cpu-main-chain' && fallback.commitAllowed && fallback.fallbackInjected && fallback.qualityRollback === 'controlled-fallback') ||
+      (fallback.state === 'prior-committed-fallback' && fallback.selectedSource === 'prior-committed' && fallback.commitAllowed && fallback.fallbackInjected && fallback.qualityRollback === 'controlled-fallback'));
+
+  return continuityContract && preRollContract && ringContract && cacheContract && fallbackContract;
+};
+
 const formatUzumePath = (status: AudioStatus | null): string | null => {
   switch (status?.uzumeFormatPath) {
     case 'pcm_bitperfect':
@@ -2141,6 +2210,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceCallbackRing = formatUzumeCallbackRingReference(status);
   const referenceRenderAheadCache = formatUzumeRenderAheadCacheReference(status);
   const referenceUnderrunFallback = formatUzumeUnderrunFallbackReference(status);
+  const expectedReferenceContinuity = isExpectedUzumeReferenceContinuity(referencePlan?.continuity);
   const referenceHeadroom = formatUzumeHeadroomReference(status);
   const referenceSafetyMeter = formatUzumeSafetyMeterReference(status);
   const referenceLimiter = formatUzumeLimiterReference(status);
@@ -2609,7 +2679,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME continuity reference',
       value: referenceContinuity,
-      tone: 'process',
+      tone: expectedReferenceContinuity ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -2619,7 +2689,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME pre-roll reference',
       value: referencePreRoll,
-      tone: 'process',
+      tone: expectedReferenceContinuity ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -2629,7 +2699,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME callback ring reference',
       value: referenceCallbackRing,
-      tone: 'process',
+      tone: expectedReferenceContinuity ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -2639,7 +2709,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME render-ahead cache reference',
       value: referenceRenderAheadCache,
-      tone: 'process',
+      tone: expectedReferenceContinuity ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -2649,7 +2719,9 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME underrun fallback reference',
       value: referenceUnderrunFallback,
-      tone: status.uzumeReferencePlan?.continuity?.fallback.telemetryStatus === 'unsafe' ? 'warning' : 'process',
+      tone: status.uzumeReferencePlan?.continuity?.fallback.telemetryStatus === 'unsafe'
+        ? 'warning'
+        : expectedReferenceContinuity ? 'process' : 'warning',
       variant: 'process',
     });
   }

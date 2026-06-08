@@ -1439,11 +1439,11 @@ describe('AudioProfessionalStatusPanel', () => {
           value: 'pcm-output-quantization-dither-reference / pcm_processed->int32 / quantized / bit-perfect disabled / pcm dither allowed / dither tpdf enabled / seed 219668994 / lsb 4.66e-10 / peak 0.8750 lsb / noise none / 32 bit / max 2147483647 / clips 0 / residual 2.40e-10/1.10e-10 / sdm noise none / reasons fixed point pcm output quantized | pcm dither disables bitperfect | pcm tpdf or plain quantization reference',
           tone: 'good',
         }),
-        expect.objectContaining({ label: 'UZUME continuity reference', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME pre-roll reference', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME callback ring reference', value: 'stable / safe / depth 2560 frames / 5.0 blocks / block 512 frames / missing 0 frames / read-committed-output-only / no GPU wait', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME render-ahead cache reference', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME underrun fallback reference', tone: 'warning' }),
+        expect.objectContaining({ label: 'UZUME continuity reference', tone: 'good' }),
+        expect.objectContaining({ label: 'UZUME pre-roll reference', tone: 'good' }),
+        expect.objectContaining({ label: 'UZUME callback ring reference', value: 'stable / safe / depth 2560 frames / 5.0 blocks / block 512 frames / missing 0 frames / read-committed-output-only / no GPU wait', tone: 'good' }),
+        expect.objectContaining({ label: 'UZUME render-ahead cache reference', tone: 'good' }),
+        expect.objectContaining({ label: 'UZUME underrun fallback reference', tone: 'good' }),
         expect.objectContaining({ label: 'UZUME headroom', value: '-6.00 dB / gain-reference / Enabled', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME safety meter', value: 'near-limit / clipping risk / stage telemetry separate from limiter', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME limiter reference', value: 'sample-domain safety limiter / standby / GPU limiter Planned / not implemented', tone: 'warning' }),
@@ -1532,6 +1532,46 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME equal-power crossfade reference',
           value: expect.stringContaining('rejected-boundary:gapless-boundary:rejected'),
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected continuity and cache reference contracts as good', () => {
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={referenceStatus()} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME continuity reference',
+          value: expect.stringContaining('predictive-cache / normal-playlist-boundary->wait-for-full-profile'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME pre-roll reference',
+          value: expect.stringContaining('deadline-safe / required 10240 frames / slack 13760 frames'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME callback ring reference',
+          value: expect.stringContaining('read-committed-output-only / no GPU wait'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME render-ahead cache reference',
+          value: expect.stringContaining('miss->callback-keeps-prior-committed-output'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME underrun fallback reference',
+          value: expect.stringContaining('prior-committed-fallback / source prior-committed / marginal'),
           tone: 'good',
         }),
       ]),
