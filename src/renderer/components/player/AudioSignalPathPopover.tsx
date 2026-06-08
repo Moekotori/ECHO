@@ -334,6 +334,30 @@ const isExpectedUzumeReferenceBackendSupport = (
     expectedReasons.every((reason) => report.reasons.includes(reason));
 };
 
+const isExpectedUzumeReferenceLatencyBudget = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['latencyBudget'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedReasons = [
+    'latency_budget_summary_derived_from_reference_reports',
+    'cpu_float64_reference_only_no_runtime_scheduler',
+    'callback_reads_committed_output_only',
+    'production_latency_compensation_deferred_to_realtime_gate',
+  ];
+
+  return report.artifact === 'latency-budget-reference' &&
+    report.policy === 'reference-budget-summary-no-runtime-scheduler' &&
+    report.state === 'ready' &&
+    report.selectedBackend === 'cpu-float64-reference' &&
+    report.realtimeBackend === 'not-enabled' &&
+    report.callbackRule === 'read-committed-output-only' &&
+    report.schedulerState === 'reference-only' &&
+    expectedReasons.every((reason) => report.reasons.includes(reason));
+};
+
 const formatUzumeReferenceArtifactManifest = (status: AudioStatus | null): string | null => {
   return buildUzumeReferenceArtifactManifestSummary(status?.uzumeReferencePlan?.artifactPlan)?.text ?? null;
 };
@@ -2675,6 +2699,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referencePlan = status.uzumeReferencePlan;
   const expectedReferenceCompiler = isExpectedUzumeReferenceCompiler(referencePlan);
   const expectedReferenceBackendSupport = isExpectedUzumeReferenceBackendSupport(referencePlan?.backendSupport);
+  const expectedReferenceLatencyBudget = isExpectedUzumeReferenceLatencyBudget(referencePlan?.latencyBudget);
   const referenceAssignments = formatUzumeReferenceAssignments(status);
   const referenceMergeGroups = formatUzumeReferenceMergeGroups(status);
   const referenceLatencyOwners = formatUzumeReferenceLatencyOwners(status);
@@ -2869,7 +2894,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME latency budget reference',
       value: referenceLatencyBudget,
-      tone: referencePlan?.latencyBudget.state === 'ready' ? 'process' : 'warning',
+      tone: expectedReferenceLatencyBudget ? 'process' : 'warning',
       variant: 'process',
     });
   }

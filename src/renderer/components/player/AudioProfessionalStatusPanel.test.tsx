@@ -1666,6 +1666,65 @@ describe('AudioProfessionalStatusPanel', () => {
     );
   });
 
+  it('marks latency budget runtime drift as warning', () => {
+    const status = referenceStatus();
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME latency budget reference',
+          value: expect.stringContaining('realtime not-enabled'),
+          tone: 'good',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const driftedStatus = referenceStatus();
+    const driftedLatencyBudget = driftedStatus.uzumeReferencePlan!.latencyBudget as unknown as {
+      realtimeBackend: string;
+      schedulerState: string;
+      reasons: string[];
+    };
+    driftedLatencyBudget.realtimeBackend = 'production-enabled';
+    driftedLatencyBudget.schedulerState = 'production-scheduler';
+    driftedLatencyBudget.reasons = driftedLatencyBudget.reasons.filter(
+      (reason) => reason !== 'cpu_float64_reference_only_no_runtime_scheduler',
+    );
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={driftedStatus} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME latency budget reference',
+          value: expect.stringContaining('realtime production-enabled'),
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME latency budget reference',
+          value: expect.stringContaining('production-scheduler'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+  });
+
   it('marks expected DSP reference contracts as good', () => {
     const status = referenceStatus();
 

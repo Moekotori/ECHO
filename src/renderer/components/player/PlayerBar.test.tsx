@@ -1880,6 +1880,39 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    const latencyDriftStatus = {
+      ...status,
+      uzumeReferencePlan: {
+        ...status.uzumeReferencePlan!,
+        latencyBudget: {
+          ...status.uzumeReferencePlan!.latencyBudget,
+          realtimeBackend: 'production-enabled',
+          schedulerState: 'production-scheduler',
+          reasons: status.uzumeReferencePlan!.latencyBudget.reasons.filter(
+            (reason) => reason !== 'cpu_float64_reference_only_no_runtime_scheduler',
+          ),
+        },
+      },
+    } as unknown as AudioStatus;
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={latencyDriftStatus} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={latencyDriftStatus} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const latencyDriftDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(latencyDriftDialog.textContent).toContain('latency-budget-reference / cpu-float64-reference / realtime production-enabled');
+    expect(latencyDriftDialog.textContent).toContain('production-scheduler');
+    expect(readSignalPathVisualState(latencyDriftDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME latency budget reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     status.uzumeReferencePlan!.dsdFamily!.fallbackReason = 'd2p_reference_engine_not_ready';
     status.uzumeReferencePlan!.dsdFamily!.d2p.available = false;
 
