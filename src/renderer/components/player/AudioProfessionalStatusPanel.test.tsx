@@ -1063,9 +1063,9 @@ const referenceStatus = (): AudioStatus => ({
       phaseGroupDelay: 'deterministic-reference',
       phaseMode: 'deterministic-reference',
       apodizing: 'deterministic-reference',
-      aliasRejection: 'planned',
-      realtimeBudget: 'planned',
-      nullResidual: 'planned',
+      aliasRejection: 'deterministic-reference',
+      realtimeBudget: 'deterministic-reference',
+      nullResidual: 'deterministic-reference',
       formalValidation: 'deterministic-reference',
       dsdFamilyPath: 'deterministic-reference',
       backendSupport: 'deterministic-reference',
@@ -1141,6 +1141,8 @@ type ToneEntry = {
   tone: string | null;
 };
 
+const referenceArtifactManifestText = 'artifact-manifest-reference / deterministic 38/38 / planned none / not-applicable none / source impulse+sweep+log-sweep+near-nyquist+multi-tone+random+silence+phase-group-delay+phase-mode+apodizing+alias-rejection+realtime-budget+null-residual+formal-validation / reports dsd-family-path+backend-support+output-device-policy+latency-budget+readiness-contract+generation-cache-key+realtime-budget-summary+quality-rollback+output-resampling-risk+pcm-output-quantization+pcm-ingress-guard+gain-staging+iir-eq+channel-scope+stereo-procedural+per-ear-eq-placement+shared-convolution-duplicate-guard+shared-convolution-serial-null+gapless-concat+fir-gapless-history+callback-safe-controls+equal-power-crossfade+block-boundary+flush-drain';
+
 const readProfessionalVisualState = (): {
   badges: ToneEntry[];
   signal: ToneEntry[];
@@ -1202,6 +1204,7 @@ describe('AudioProfessionalStatusPanel', () => {
     expect(screen.getByText(/stereo-procedural->stereo procedural ref \(inactive, merge stereo-procedural-reference, split channel balance band compensation pending reference\)/u)).toBeTruthy();
     expect(screen.getByText(/shared-convolution-reference->shared convolution planner ref \(active, 48k-family, sections shared-convolution\)/u)).toBeTruthy();
     expect(screen.getAllByText(/pcm-src->resampling-reference/u).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(referenceArtifactManifestText)).toBeTruthy();
     expect(screen.getByText(/disabled \/ direct disabled uzume processing enabled \/ pcm->pcm \/ multibit-pcm \/ pcm_processed/u)).toBeTruthy();
     expect(screen.getByText(/backend-support-reference \/ reference-backend-only-no-runtime-switch \/ selected cpu-float64-reference \/ realtime not-enabled/u)).toBeTruthy();
     expect(screen.getByText(/output-device-policy-reference \/ pcm_processed \/ shared \/ shared-mixer \/ shared-mixer-risk \/ file 44.1 kHz \/ decoder 44.1 kHz \/ requested 48 kHz \/ actual 48 kHz \/ shared 48 kHz/u)).toBeTruthy();
@@ -1271,6 +1274,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({ label: 'UZUME reference assignment', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME reference merge groups', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME reference latency owners', value: 'shared-convolution->room-ir-latency | pcm-src->resampling-reference', tone: 'warning' }),
+        expect.objectContaining({ label: 'UZUME artifact manifest reference', value: referenceArtifactManifestText, tone: 'good' }),
         expect.objectContaining({ label: 'UZUME reference bit-perfect', value: 'disabled / direct disabled uzume processing enabled / pcm->pcm / multibit-pcm / pcm_processed', tone: 'warning' }),
         expect.objectContaining({
           label: 'UZUME backend support reference',

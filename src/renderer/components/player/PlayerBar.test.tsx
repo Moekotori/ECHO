@@ -107,6 +107,8 @@ const readSignalPathVisualState = (dialog: HTMLElement): {
   })),
 });
 
+const referenceArtifactManifestText = 'artifact-manifest-reference / deterministic 38/38 / planned none / not-applicable none / source impulse+sweep+log-sweep+near-nyquist+multi-tone+random+silence+phase-group-delay+phase-mode+apodizing+alias-rejection+realtime-budget+null-residual+formal-validation / reports dsd-family-path+backend-support+output-device-policy+latency-budget+readiness-contract+generation-cache-key+realtime-budget-summary+quality-rollback+output-resampling-risk+pcm-output-quantization+pcm-ingress-guard+gain-staging+iir-eq+channel-scope+stereo-procedural+per-ear-eq-placement+shared-convolution-duplicate-guard+shared-convolution-serial-null+gapless-concat+fir-gapless-history+callback-safe-controls+equal-power-crossfade+block-boundary+flush-drain';
+
 const eqState = (): EqState => ({
   enabled: false,
   preampDb: 0,
@@ -1683,6 +1685,8 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).toContain('format-path->format path planner ref(active)');
     expect(dialog.textContent).toContain('shared-convolution->shared convolution planner ref(active, merge:shared-convolution-reference, latency:room-ir-latency)');
     expect(dialog.textContent).toContain('pcm-src->resampling ref(active, merge:resampling-reference, latency:resampling-reference, split:legacy default resampler active reference only)');
+    expect(dialog.textContent).toContain('UZUME artifact manifest reference');
+    expect(dialog.textContent).toContain(referenceArtifactManifestText);
     expect(dialog.textContent).toContain('UZUME reference path plan');
     expect(dialog.textContent).toContain('pcm_bitperfect:disabled/uzume processing enabled | pcm_processed:current | dsd_direct:unavailable/requires dsd source | dsd_upsampling:unavailable/requires dsd source | d2p_processed:unavailable/d2p requires dsd source | sdm_processed:unavailable/sdm reference engine not ready');
     expect(dialog.textContent).toContain('UZUME reference bit-perfect');
@@ -1779,6 +1783,7 @@ describe('PlayerBar', () => {
       expect.arrayContaining([
         expect.objectContaining({ title: 'UZUME reference compiler', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'Reference assignment', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME artifact manifest reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME reference path plan', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME reference bit-perfect', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME backend support reference', tone: 'warning', variant: 'process' }),

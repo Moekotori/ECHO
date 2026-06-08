@@ -901,6 +901,7 @@ export type TranslationKey =
   | 'audioProfessional.row.uzumePathPlan'
   | 'audioProfessional.row.uzumeProfile'
   | 'audioProfessional.row.uzumeReferenceAssignments'
+  | 'audioProfessional.row.uzumeReferenceArtifactManifest'
   | 'audioProfessional.row.uzumeReferenceBackendSupport'
   | 'audioProfessional.row.uzumeReferenceBitPerfect'
   | 'audioProfessional.row.uzumeReferenceBlockBoundary'
@@ -3921,6 +3922,7 @@ const zhCN: TranslationMap = {
   'audioProfessional.row.uzumePathPlan': 'UZUME path plan',
   'audioProfessional.row.uzumeProfile': 'UZUME profile',
   'audioProfessional.row.uzumeReferenceAssignments': 'UZUME reference assignment',
+  'audioProfessional.row.uzumeReferenceArtifactManifest': 'UZUME artifact manifest reference',
   'audioProfessional.row.uzumeReferenceBackendSupport': 'UZUME backend support reference',
   'audioProfessional.row.uzumeReferenceBitPerfect': 'UZUME reference bit-perfect',
   'audioProfessional.row.uzumeReferenceBlockBoundary': 'UZUME block boundary reference',
@@ -7306,6 +7308,7 @@ const zhTW: TranslationMap = {
   'audioProfessional.row.uzumePathPlan': 'UZUME path plan',
   'audioProfessional.row.uzumeProfile': 'UZUME profile',
   'audioProfessional.row.uzumeReferenceAssignments': 'UZUME reference assignment',
+  'audioProfessional.row.uzumeReferenceArtifactManifest': 'UZUME artifact manifest reference',
   'audioProfessional.row.uzumeReferenceBackendSupport': 'UZUME backend support reference',
   'audioProfessional.row.uzumeReferenceBitPerfect': 'UZUME reference bit-perfect',
   'audioProfessional.row.uzumeReferenceBlockBoundary': 'UZUME block boundary reference',
@@ -10264,6 +10267,7 @@ const jaJP: TranslationMap = {
   'audioProfessional.row.uzumePathPlan': 'UZUME path plan',
   'audioProfessional.row.uzumeProfile': 'UZUME profile',
   'audioProfessional.row.uzumeReferenceAssignments': 'UZUME reference assignment',
+  'audioProfessional.row.uzumeReferenceArtifactManifest': 'UZUME artifact manifest reference',
   'audioProfessional.row.uzumeReferenceBackendSupport': 'UZUME backend support reference',
   'audioProfessional.row.uzumeReferenceBitPerfect': 'UZUME reference bit-perfect',
   'audioProfessional.row.uzumeReferenceBlockBoundary': 'UZUME block boundary reference',
@@ -13291,6 +13295,7 @@ const enUS: TranslationMap = {
   'audioProfessional.row.uzumePathPlan': 'UZUME path plan',
   'audioProfessional.row.uzumeProfile': 'UZUME profile',
   'audioProfessional.row.uzumeReferenceAssignments': 'UZUME reference assignment',
+  'audioProfessional.row.uzumeReferenceArtifactManifest': 'UZUME artifact manifest reference',
   'audioProfessional.row.uzumeReferenceBackendSupport': 'UZUME backend support reference',
   'audioProfessional.row.uzumeReferenceBitPerfect': 'UZUME reference bit-perfect',
   'audioProfessional.row.uzumeReferenceBlockBoundary': 'UZUME block boundary reference',

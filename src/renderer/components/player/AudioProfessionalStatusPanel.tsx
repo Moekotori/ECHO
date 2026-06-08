@@ -33,6 +33,54 @@ type SignalPathNode = {
   tone: 'good' | 'warning' | 'danger' | 'muted';
 };
 
+type UzumeReferenceArtifactPlan = NonNullable<NonNullable<AudioStatus['uzumeReferencePlan']>['artifactPlan']>;
+type UzumeReferenceArtifactManifestGroup = 'source' | 'report';
+
+const uzumeReferenceArtifactManifestEntries: ReadonlyArray<{
+  key: keyof UzumeReferenceArtifactPlan;
+  label: string;
+  group: UzumeReferenceArtifactManifestGroup;
+}> = [
+  { key: 'impulse', label: 'impulse', group: 'source' },
+  { key: 'sweep', label: 'sweep', group: 'source' },
+  { key: 'logSweep', label: 'log-sweep', group: 'source' },
+  { key: 'nearNyquist', label: 'near-nyquist', group: 'source' },
+  { key: 'multiTone', label: 'multi-tone', group: 'source' },
+  { key: 'random', label: 'random', group: 'source' },
+  { key: 'silence', label: 'silence', group: 'source' },
+  { key: 'phaseGroupDelay', label: 'phase-group-delay', group: 'source' },
+  { key: 'phaseMode', label: 'phase-mode', group: 'source' },
+  { key: 'apodizing', label: 'apodizing', group: 'source' },
+  { key: 'aliasRejection', label: 'alias-rejection', group: 'source' },
+  { key: 'realtimeBudget', label: 'realtime-budget', group: 'source' },
+  { key: 'nullResidual', label: 'null-residual', group: 'source' },
+  { key: 'formalValidation', label: 'formal-validation', group: 'source' },
+  { key: 'dsdFamilyPath', label: 'dsd-family-path', group: 'report' },
+  { key: 'backendSupport', label: 'backend-support', group: 'report' },
+  { key: 'outputDevicePolicy', label: 'output-device-policy', group: 'report' },
+  { key: 'latencyBudget', label: 'latency-budget', group: 'report' },
+  { key: 'readinessContract', label: 'readiness-contract', group: 'report' },
+  { key: 'generationCacheKey', label: 'generation-cache-key', group: 'report' },
+  { key: 'realtimeBudgetSummary', label: 'realtime-budget-summary', group: 'report' },
+  { key: 'qualityRollback', label: 'quality-rollback', group: 'report' },
+  { key: 'outputResamplingRisk', label: 'output-resampling-risk', group: 'report' },
+  { key: 'pcmOutputQuantization', label: 'pcm-output-quantization', group: 'report' },
+  { key: 'pcmIngressGuard', label: 'pcm-ingress-guard', group: 'report' },
+  { key: 'gainStaging', label: 'gain-staging', group: 'report' },
+  { key: 'iirEq', label: 'iir-eq', group: 'report' },
+  { key: 'channelScope', label: 'channel-scope', group: 'report' },
+  { key: 'stereoProcedural', label: 'stereo-procedural', group: 'report' },
+  { key: 'perEarEqPlacement', label: 'per-ear-eq-placement', group: 'report' },
+  { key: 'sharedConvolutionDuplicateGuard', label: 'shared-convolution-duplicate-guard', group: 'report' },
+  { key: 'sharedConvolutionSerialNull', label: 'shared-convolution-serial-null', group: 'report' },
+  { key: 'gaplessConcat', label: 'gapless-concat', group: 'report' },
+  { key: 'firGaplessHistory', label: 'fir-gapless-history', group: 'report' },
+  { key: 'callbackSafeControls', label: 'callback-safe-controls', group: 'report' },
+  { key: 'equalPowerCrossfade', label: 'equal-power-crossfade', group: 'report' },
+  { key: 'blockBoundary', label: 'block-boundary', group: 'report' },
+  { key: 'flushDrain', label: 'flush-drain', group: 'report' },
+];
+
 const trimTrailingZero = (value: string): string => value.replace(/\.0$/u, '');
 
 const normalizeReason = (value: string | null | undefined, fallback: string): string =>
@@ -106,6 +154,30 @@ const formatUzumeReferenceCompiler = (status: AudioStatus | null, fallback: stri
   }
 
   return `schema v${plan.schemaVersion} / telemetry v${plan.telemetrySchemaVersion} / ${plan.internalDomain}`;
+};
+
+const formatManifestLabels = (labels: string[]): string => labels.length ? labels.join('+') : 'none';
+
+const formatUzumeReferenceArtifactManifest = (status: AudioStatus | null, fallback: string): string => {
+  const plan = status?.uzumeReferencePlan?.artifactPlan;
+  if (!plan) {
+    return fallback;
+  }
+
+  const deterministic = uzumeReferenceArtifactManifestEntries.filter(({ key }) => plan[key] === 'deterministic-reference');
+  const planned = uzumeReferenceArtifactManifestEntries.filter(({ key }) => plan[key] === 'planned');
+  const notApplicable = uzumeReferenceArtifactManifestEntries.filter(({ key }) => plan[key] === 'not-applicable');
+  const source = uzumeReferenceArtifactManifestEntries.filter(({ group }) => group === 'source').map(({ label }) => label);
+  const reports = uzumeReferenceArtifactManifestEntries.filter(({ group }) => group === 'report').map(({ label }) => label);
+
+  return [
+    'artifact-manifest-reference',
+    `deterministic ${deterministic.length}/${uzumeReferenceArtifactManifestEntries.length}`,
+    `planned ${formatManifestLabels(planned.map(({ label }) => label))}`,
+    `not-applicable ${formatManifestLabels(notApplicable.map(({ label }) => label))}`,
+    `source ${source.join('+')}`,
+    `reports ${reports.join('+')}`,
+  ].join(' / ');
 };
 
 const formatUzumeReferenceAssignments = (status: AudioStatus | null, fallback: string): string => {
@@ -1219,6 +1291,9 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceAssignmentsText = formatUzumeReferenceAssignments(status, unknown);
   const uzumeReferenceMergeGroupsText = formatUzumeReferenceMergeGroups(status, unknown);
   const uzumeReferenceLatencyOwnersText = formatUzumeReferenceLatencyOwners(status, unknown);
+  const uzumeReferenceArtifactPlan = status?.uzumeReferencePlan?.artifactPlan;
+  const uzumeReferenceArtifactManifestText = formatUzumeReferenceArtifactManifest(status, unknown);
+  const uzumeReferenceArtifactManifestHasPlanned = Boolean(uzumeReferenceArtifactPlan && uzumeReferenceArtifactManifestEntries.some(({ key }) => uzumeReferenceArtifactPlan[key] === 'planned'));
   const uzumeReferenceBitPerfectText = formatUzumeReferenceBitPerfect(status, unknown);
   const uzumeReferenceBackendSupportText = formatUzumeReferenceBackendSupport(status, unknown);
   const uzumeReferenceOutputDevicePolicyText = formatUzumeReferenceOutputDevicePolicy(status, unknown);
@@ -1392,6 +1467,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceAssignments'), value: uzumeReferenceAssignmentsText, tone: status?.uzumeReferencePlan ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceMergeGroups'), value: uzumeReferenceMergeGroupsText, tone: status?.uzumeReferencePlan?.mergeGroups.length ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceLatencyOwners'), value: uzumeReferenceLatencyOwnersText, tone: Object.keys(status?.uzumeReferencePlan?.latencyOwners ?? {}).length ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceArtifactManifest'), value: uzumeReferenceArtifactManifestText, tone: uzumeReferenceArtifactManifestHasPlanned ? 'warning' : uzumeReferenceArtifactPlan ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBitPerfect'), value: uzumeReferenceBitPerfectText, tone: status?.uzumeReferencePlan?.bitPerfectState === 'available' ? 'good' : status?.uzumeReferencePlan ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBackendSupport'), value: uzumeReferenceBackendSupportText, tone: status?.uzumeReferencePlan?.backendSupport ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceOutputDevicePolicy'), value: uzumeReferenceOutputDevicePolicyText, tone: status?.uzumeReferencePlan?.outputDevicePolicy?.state === 'direct-like-ready' ? 'good' : status?.uzumeReferencePlan?.outputDevicePolicy ? 'warning' : 'muted' },
