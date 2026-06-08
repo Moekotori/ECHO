@@ -760,6 +760,35 @@ const formatUzumeReferenceConvolutionDuplicateGuard = (status: AudioStatus | nul
   ]);
 };
 
+const isExpectedUzumeReferenceConvolutionDuplicateGuard = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['sharedConvolution']['duplicatePlanGuard'] | null | undefined,
+): boolean => {
+  if (!report || report.state !== 'single-shared-plan') {
+    return false;
+  }
+
+  const sharedAssignments = report.sourceAssignments.filter((assignment) => assignment.state === 'shared-plan');
+  const splitAssignments = report.sourceAssignments.filter((assignment) => assignment.state === 'split-required');
+
+  return report.engine === 'shared-convolution-planner-reference' &&
+    report.planCounts.mergedSourceCount > 0 &&
+    report.planCounts.convolverPlanCount === 1 &&
+    report.planCounts.cpuFftPlanCount === 1 &&
+    report.planCounts.gpuFftPlanCount <= 1 &&
+    sharedAssignments.length === report.planCounts.mergedSourceCount &&
+    splitAssignments.length === report.planCounts.splitSourceCount &&
+    sharedAssignments.every((assignment) => Boolean(assignment.convolverPlanId) && Boolean(assignment.fftPlanId) && assignment.splitReason === null) &&
+    splitAssignments.every((assignment) => !assignment.convolverPlanId && !assignment.fftPlanId && Boolean(assignment.splitReason)) &&
+    report.planCounts.rejectedDuplicateConvolverCount === report.rejectedDuplicatePlans.length &&
+    report.planCounts.rejectedDuplicateFftPlanCount === report.rejectedDuplicatePlans.length &&
+    report.rejectedDuplicatePlans.every((plan) =>
+      plan.reason === 'compatible_source_uses_shared_convolution_plan' &&
+      Boolean(plan.rejectedConvolverPlanId) &&
+      Boolean(plan.rejectedFftPlanId)) &&
+    report.reasons.includes('compatible_sources_share_single_convolution_plan') &&
+    report.reasons.includes('duplicate_per_source_convolver_and_fft_plans_rejected');
+};
+
 const formatUzumeReferenceConvolutionSerialNull = (status: AudioStatus | null): string | null => {
   const report = status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference;
   if (!report) {
@@ -2336,7 +2365,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME convolution duplicate guard',
       value: referenceConvolutionDuplicateGuard,
-      tone: referencePlan?.sharedConvolution.duplicatePlanGuard?.state === 'inactive' ? 'muted' : 'warning',
+      tone: isExpectedUzumeReferenceConvolutionDuplicateGuard(referencePlan?.sharedConvolution.duplicatePlanGuard) ? 'process' : referencePlan?.sharedConvolution.duplicatePlanGuard?.state === 'inactive' ? 'muted' : 'warning',
       variant: 'process',
     });
   }

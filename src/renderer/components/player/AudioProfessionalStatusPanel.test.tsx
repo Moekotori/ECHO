@@ -1427,7 +1427,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME convolution duplicate guard',
           value: 'shared-convolution-duplicate-plan-guard-reference / shared-convolution-planner-reference / single-shared-plan / merged 1 / split 1 / convolver plans 1 / cpu fft 1 / gpu fft 1 / rejected conv 0 / rejected fft 0 / room-ir:shared-plan conv cpu-sce-48k-family:48000:stereo:room-ir:512 fft cpu-sce-48k-family:48000:stereo:room-ir:512:fft:1024 | headphone-fir:split-required split sample rate family mismatch / rejected none / reasons compatible sources share single convolution plan | duplicate per source convolver and fft plans rejected',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME convolution serial null reference',
@@ -1532,6 +1532,31 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME equal-power crossfade reference',
           value: expect.stringContaining('rejected-boundary:gapless-boundary:rejected'),
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected shared convolution duplicate guard reference contract as good', () => {
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={referenceStatus()} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME convolution duplicate guard',
+          value: expect.stringContaining('single-shared-plan / merged 1 / split 1 / convolver plans 1'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME convolution duplicate guard',
+          value: expect.stringContaining('headphone-fir:split-required split sample rate family mismatch'),
           tone: 'good',
         }),
       ]),

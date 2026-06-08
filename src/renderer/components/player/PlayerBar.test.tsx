@@ -1841,7 +1841,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({ title: 'UZUME DSD family reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME convolution reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME response resample reference', tone: 'process', variant: 'process' }),
-        expect.objectContaining({ title: 'UZUME convolution duplicate guard', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME convolution duplicate guard', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME convolution serial null reference', tone: 'muted', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME PCM output quantization reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME continuity reference', tone: 'process', variant: 'process' }),
