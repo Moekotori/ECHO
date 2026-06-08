@@ -973,6 +973,7 @@ describe('PlayerBar', () => {
           groupDelaySamples: 35,
           groupDelayMs: 0.729,
           lookaheadMs: 0.729,
+          phaseAccumulator: 'rational-fixed-step',
           realtimeSafetyClass: 'offline-reference-only',
           outputResamplingRisk: {
             artifact: 'output-double-resampling-risk-reference',
@@ -986,6 +987,13 @@ describe('PlayerBar', () => {
             recommendation: 'show-legacy-resampler-as-non-uzume-risk',
           },
           artifactMetrics: {
+            impulsePeakIndex: 32,
+            impulsePeak: 1,
+            impulseEnergy: 1.5,
+            sweepPeak: 0.9,
+            logSweepPeak: 0.95,
+            nearNyquistPeak: 0.1,
+            silencePeak: 0,
             aliasRejectionDb: 18.5,
             passbandRippleDb: 0.01,
             stopbandAttenuationDb: 96,

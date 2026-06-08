@@ -435,6 +435,9 @@ const formatMetricScalar = (value: number | null | undefined): string | null => 
   return value.toFixed(6);
 };
 
+const isFiniteNonNegativeMetric = (value: number | null | undefined): value is number =>
+  value !== null && value !== undefined && Number.isFinite(value) && value >= 0;
+
 const formatUzumeReferenceSrcArtifacts = (status: AudioStatus | null, fallback: string): string => {
   const metrics = status?.uzumeReferencePlan?.resampling?.artifactMetrics;
   if (!metrics) {
@@ -461,6 +464,76 @@ const formatUzumeReferenceSrcArtifacts = (status: AudioStatus | null, fallback: 
     randomPeak ? `seeded-random peak ${randomPeak}` : null,
     randomSeed,
   ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const isExpectedUzumeReferenceSrcArtifacts = (
+  resampling: NonNullable<AudioStatus['uzumeReferencePlan']>['resampling'] | null | undefined,
+): boolean => {
+  const metrics = resampling?.artifactMetrics;
+  if (!resampling || !metrics || resampling.validation?.overall !== 'pass') {
+    return false;
+  }
+
+  const silenceResidualIsExact = metrics.silencePeak === 0 &&
+    metrics.silenceResidual.state === 'exact-silence' &&
+    metrics.silenceResidual.maxAbs <= 1e-12 &&
+    metrics.silenceResidual.rms <= 1e-12;
+  const commonArtifactShape = resampling.family === 'poly-sinc-reference' &&
+    metrics.realtimeBudget.backend === 'scalar-float64-reference' &&
+    metrics.realtimeBudget.estimatedMultiplyAdds > 0 &&
+    metrics.realtimeBudget.estimatedRealtimeFactor === null &&
+    Number.isInteger(metrics.randomSeed) &&
+    metrics.randomSeed > 0 &&
+    isFiniteNonNegativeMetric(metrics.impulsePeak) &&
+    metrics.impulsePeak > 0 &&
+    isFiniteNonNegativeMetric(metrics.impulseEnergy) &&
+    metrics.impulseEnergy > 0 &&
+    isFiniteNonNegativeMetric(metrics.sweepPeak) &&
+    metrics.sweepPeak > 0 &&
+    isFiniteNonNegativeMetric(metrics.logSweepPeak) &&
+    metrics.logSweepPeak > 0 &&
+    isFiniteNonNegativeMetric(metrics.nearNyquistPeak) &&
+    isFiniteNonNegativeMetric(metrics.multiTonePeak) &&
+    metrics.multiTonePeak > 0 &&
+    isFiniteNonNegativeMetric(metrics.randomPeak) &&
+    metrics.randomPeak > 0 &&
+    silenceResidualIsExact;
+
+  if (!commonArtifactShape) {
+    return false;
+  }
+
+  if (resampling.sameRateBypass) {
+    return !resampling.active &&
+      resampling.phaseAccumulator === 'same-rate-bypass' &&
+      metrics.realtimeBudget.safetyClass === 'same-rate-bypass' &&
+      metrics.nullResidual.state === 'exact-bypass' &&
+      metrics.nullResidual.maxAbs !== null &&
+      metrics.nullResidual.maxAbs <= 1e-12 &&
+      metrics.nullResidual.rms !== null &&
+      metrics.nullResidual.rms <= 1e-12 &&
+      metrics.passbandRippleDb === 0 &&
+      metrics.stopbandAttenuationDb === 0;
+  }
+
+  return resampling.active &&
+    resampling.phaseAccumulator === 'rational-fixed-step' &&
+    metrics.realtimeBudget.safetyClass === 'offline-reference-only' &&
+    metrics.nullResidual.state === 'not-applicable' &&
+    metrics.aliasRejectionDb !== null &&
+    metrics.aliasRejectionDb >= 0 &&
+    metrics.phaseGroupDelaySpreadSamples !== null &&
+    metrics.phaseGroupDelaySpreadSamples > 0 &&
+    metrics.passbandRippleDb !== null &&
+    metrics.passbandRippleDb >= 0 &&
+    metrics.stopbandAttenuationDb !== null &&
+    metrics.stopbandAttenuationDb > 0 &&
+    metrics.cutoffRatioEstimate !== null &&
+    metrics.cutoffRatioEstimate > 0 &&
+    metrics.cutoffRatioEstimate < 1 &&
+    metrics.transitionWidthRatioEstimate !== null &&
+    metrics.transitionWidthRatioEstimate > 0 &&
+    metrics.transitionWidthRatioEstimate <= 1;
 };
 
 const formatUzumeReferenceSrcValidation = (status: AudioStatus | null, fallback: string): string => {
@@ -519,6 +592,70 @@ const formatUzumeReferenceSrcPhaseApodizing = (status: AudioStatus | null, fallb
     `response residual ${apodizing.responseResidualMaxAbs.toFixed(4)}/${apodizing.responseResidualRms.toFixed(4)}`,
     apodizing.highFrequencyRestorationClaim ? 'hf restoration claimed' : 'no hf restoration claim',
   ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const isExpectedUzumeReferenceSrcPhaseApodizing = (
+  resampling: NonNullable<AudioStatus['uzumeReferencePlan']>['resampling'] | null | undefined,
+): boolean => {
+  const phase = resampling?.phaseModeArtifacts;
+  const apodizing = resampling?.apodizingArtifact;
+  if (!resampling || !phase || !apodizing) {
+    return false;
+  }
+
+  const phaseModes = phase.modes;
+  const modesById = new Map(phaseModes.map((mode) => [mode.mode, mode]));
+  const linear = modesById.get('linear');
+  const minimum = modesById.get('minimum');
+  const intermediate = modesById.get('intermediate');
+  const modeShapeIsValid = phase.artifact === 'poly-sinc-phase-mode-reference' &&
+    phase.phaseModesMeasured.join('|') === 'linear|minimum|intermediate' &&
+    phaseModes.length === 3 &&
+    [linear, minimum, intermediate].every((mode) =>
+      Boolean(mode) &&
+      (mode!.impulsePeakIndex === null || isFiniteNonNegativeMetric(mode!.impulsePeakIndex)) &&
+      isFiniteNonNegativeMetric(mode!.groupDelaySamples) &&
+      (mode!.groupDelaySpreadSamples === null || isFiniteNonNegativeMetric(mode!.groupDelaySpreadSamples)) &&
+      isFiniteNonNegativeMetric(mode!.preRingingEnergy) &&
+      isFiniteNonNegativeMetric(mode!.postRingingEnergy) &&
+      isFiniteNonNegativeMetric(mode!.residualVsLinearMaxAbs) &&
+      isFiniteNonNegativeMetric(mode!.residualVsLinearRms));
+
+  if (!modeShapeIsValid || !linear || !minimum || !intermediate) {
+    return false;
+  }
+
+  const phaseContractIsExpected = linear.groupDelaySamples > intermediate.groupDelaySamples &&
+    intermediate.groupDelaySamples > minimum.groupDelaySamples &&
+    linear.residualVsLinearMaxAbs === 0 &&
+    linear.residualVsLinearRms === 0 &&
+    minimum.residualVsLinearMaxAbs > 0 &&
+    intermediate.residualVsLinearRms > 0;
+  const apodizingShapeIsValid = apodizing.artifact === 'poly-sinc-apodizing-response-reference' &&
+    apodizing.mode === 'reference-windowed-sinc' &&
+    apodizing.baseline === 'rectangular-sinc-reference' &&
+    !apodizing.highFrequencyRestorationClaim &&
+    isFiniteNonNegativeMetric(apodizing.apodizedRingingEnergy) &&
+    isFiniteNonNegativeMetric(apodizing.baselineRingingEnergy) &&
+    isFiniteNonNegativeMetric(apodizing.responseResidualMaxAbs) &&
+    isFiniteNonNegativeMetric(apodizing.responseResidualRms);
+
+  if (!phaseContractIsExpected || !apodizingShapeIsValid) {
+    return false;
+  }
+
+  if (resampling.sameRateBypass) {
+    return apodizing.state === 'same-rate-bypass' &&
+      apodizing.responseResidualMaxAbs <= 1e-12 &&
+      apodizing.responseResidualRms <= 1e-12;
+  }
+
+  return resampling.active &&
+    apodizing.state === 'apodizing-changes-ringing-response' &&
+    apodizing.ringingReductionDb !== null &&
+    Number.isFinite(apodizing.ringingReductionDb) &&
+    apodizing.responseResidualMaxAbs > 0 &&
+    apodizing.responseResidualRms > 0;
 };
 
 const formatUzumeReferenceDsdFamily = (status: AudioStatus | null, fallback: string): string => {
@@ -1666,10 +1803,10 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceResampling'), value: uzumeReferenceResamplingText, tone: status?.uzumeReferencePlan?.resampling.active ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcRollback'), value: uzumeReferenceSrcRollbackText, tone: status?.uzumeReferencePlan?.resampling.qualityRollback.state === 'armed' ? 'warning' : status?.uzumeReferencePlan?.resampling.qualityRollback ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcBudget'), value: uzumeReferenceSrcBudgetText, tone: status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget.safetyClass === 'offline-reference-only' ? 'warning' : status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceSrcArtifacts'), value: uzumeReferenceSrcArtifactsText, tone: status?.uzumeReferencePlan?.resampling.artifactMetrics ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceSrcArtifacts'), value: uzumeReferenceSrcArtifactsText, tone: isExpectedUzumeReferenceSrcArtifacts(status?.uzumeReferencePlan?.resampling) ? 'good' : status?.uzumeReferencePlan?.resampling.artifactMetrics ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcValidation'), value: uzumeReferenceSrcValidationText, tone: status?.uzumeReferencePlan?.resampling.validation?.overall === 'fail' ? 'danger' : status?.uzumeReferencePlan?.resampling.validation?.overall === 'warn' ? 'warning' : status?.uzumeReferencePlan?.resampling.validation ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcOutputRisk'), value: uzumeReferenceSrcOutputRiskText, tone: status?.uzumeReferencePlan?.resampling.outputResamplingRisk.signalPathTone === 'warning' ? 'warning' : status?.uzumeReferencePlan?.resampling.outputResamplingRisk ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceSrcPhaseApodizing'), value: uzumeReferenceSrcPhaseApodizingText, tone: status?.uzumeReferencePlan?.resampling.phaseModeArtifacts ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceSrcPhaseApodizing'), value: uzumeReferenceSrcPhaseApodizingText, tone: isExpectedUzumeReferenceSrcPhaseApodizing(status?.uzumeReferencePlan?.resampling) ? 'good' : status?.uzumeReferencePlan?.resampling.phaseModeArtifacts ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceDsdFamily'), value: uzumeReferenceDsdFamilyText, tone: status?.uzumeReferencePlan?.dsdFamily?.state === 'unavailable' ? 'warning' : status?.uzumeReferencePlan?.dsdFamily?.state === 'direct' ? 'good' : status?.uzumeReferencePlan?.dsdFamily ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolution'), value: uzumeReferenceConvolutionText, tone: status?.uzumeReferencePlan?.sharedConvolution?.sources.length ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceResponseResample'), value: uzumeReferenceResponseResampleText, tone: isExpectedUzumeReferenceResponseResample(status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports?.length ? 'warning' : 'muted' },

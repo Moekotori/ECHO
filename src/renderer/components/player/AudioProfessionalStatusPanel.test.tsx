@@ -1396,7 +1396,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME SRC artifact reference',
           value: 'passband 0.01 dB / stopband 96.00 dB / cutoff 0.9200 / transition 0.0800 / phase spread 2.5000 samples / silence exact-silence max 0.000000 / multi-tone peak 0.7500 / seeded-random peak 0.6200 / random seed 99537410',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME SRC validation reference',
@@ -1411,7 +1411,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME SRC phase/apodizing reference',
           value: 'poly-sinc-phase-mode-reference / modes linear+minimum+intermediate / linear gd 32.00 spread 2.50 residual 0.0000/0.0000 | minimum gd 8.00 spread 1.10 residual 0.1200/0.0300 | intermediate gd 20.00 spread 1.80 residual 0.0600/0.0150 / poly-sinc-apodizing-response-reference / apodizing-changes-ringing-response / reference-windowed-sinc vs rectangular-sinc-reference / ringing reduction 2.22 dB / response residual 0.0400/0.0100 / no hf restoration claim',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME DSD family reference',
@@ -1608,6 +1608,46 @@ describe('AudioProfessionalStatusPanel', () => {
           label: 'UZUME PCM output quantization reference',
           value: expect.stringContaining('clips 0 / residual 2.40e-10/1.10e-10'),
           tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected SRC artifact and phase/apodizing reference contracts as good', () => {
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={referenceStatus()} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME SRC artifact reference',
+          value: expect.stringContaining('silence exact-silence max 0.000000'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME SRC artifact reference',
+          value: expect.stringContaining('seeded-random peak 0.6200 / random seed 99537410'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME SRC phase/apodizing reference',
+          value: expect.stringContaining('modes linear+minimum+intermediate'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME SRC phase/apodizing reference',
+          value: expect.stringContaining('no hf restoration claim'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME SRC budget reference',
+          value: expect.stringContaining('offline-reference-only'),
+          tone: 'warning',
         }),
       ]),
     );
