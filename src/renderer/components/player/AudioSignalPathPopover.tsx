@@ -454,6 +454,22 @@ const isExpectedUzumeReferenceGenerationCacheKey = (
     expectedReasons.every((reason) => report.reasons.includes(reason));
 };
 
+const isExpectedUzumeReferenceFormatPathPlan = (
+  plan: NonNullable<AudioStatus['uzumeReferencePlan']>['formatPathPlan'] | null | undefined,
+): boolean => {
+  if (!plan) {
+    return false;
+  }
+
+  const requiredPaths = ['pcm_bitperfect', 'pcm_processed', 'dsd_direct', 'dsd_upsampling', 'd2p_processed', 'sdm_processed'] as const;
+  const stalePlaceholderReasons = new Set(['source_is_pcm', 'sdm_engine_not_ready']);
+
+  return requiredPaths.every((path) => {
+    const entry = plan[path];
+    return Boolean(entry) && !stalePlaceholderReasons.has(entry!.reason ?? '');
+  }) && requiredPaths.some((path) => plan[path]?.state === 'current');
+};
+
 const formatUzumeReferenceArtifactManifest = (status: AudioStatus | null): string | null => {
   return buildUzumeReferenceArtifactManifestSummary(status?.uzumeReferencePlan?.artifactPlan)?.text ?? null;
 };
@@ -660,6 +676,44 @@ const formatUzumeReferenceRealtimeBudgetSummary = (status: AudioStatus | null): 
   ]);
 };
 
+const isExpectedUzumeReferenceRealtimeBudgetSummary = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['realtimeBudgetSummary'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedReasons = [
+    'realtime_factor_not_measured_in_rpc002',
+    'scalar_float64_budget_is_reference_only',
+    'cpu_avx2_realtime_gate_deferred_to_rpc003',
+    'gpu_render_ahead_realtime_gate_deferred_to_rpc005',
+    'renderer_may_inspect_but_not_control_realtime_path',
+  ];
+
+  return report.artifact === 'realtime-budget-summary-reference' &&
+    report.policy === 'reference-budget-no-measured-runtime-factor' &&
+    report.state === 'same-rate-bypass-reference' &&
+    report.selectedBackend === 'cpu-float64-reference' &&
+    report.realtimeBackend === 'not-enabled' &&
+    report.measuredRealtimeFactor === null &&
+    report.measuredRealtimeFactorState === 'not-measured-in-rpc002' &&
+    report.srcBudgetBackend === 'scalar-float64-reference' &&
+    report.srcEstimatedMultiplyAdds > 0 &&
+    report.srcEstimatedRealtimeFactor === null &&
+    report.srcSafetyClass === 'same-rate-bypass' &&
+    report.callbackRingDepthBlocks > 0 &&
+    report.callbackRingTelemetryStatus !== 'unsafe' &&
+    report.renderAheadTargetFrames >= report.renderAheadReadyFrames &&
+    report.cpuFullProfileFallback === 'reference-available' &&
+    report.gpuRealtimeFactor === null &&
+    report.realtimeSafetyGate === 'rpc-003-cpu-realtime-gate' &&
+    report.gpuRenderAheadGate === 'rpc-005-gpu-render-ahead-gate' &&
+    report.thresholdSafeFactor > report.thresholdMarginalFactor &&
+    report.rendererControl === 'inspect-only' &&
+    expectedReasons.every((reason) => report.reasons.includes(reason));
+};
+
 const formatFractionalMs = (value: number | null | undefined): string | null => {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return null;
@@ -863,6 +917,28 @@ const isExpectedUzumeReferenceSrcArtifacts = (
     metrics.transitionWidthRatioEstimate <= 1;
 };
 
+const isExpectedUzumeReferenceSrcBudget = (
+  resampling: NonNullable<AudioStatus['uzumeReferencePlan']>['resampling'] | null | undefined,
+): boolean => {
+  const metrics = resampling?.artifactMetrics;
+  if (!resampling || !metrics || !resampling.sameRateBypass) {
+    return false;
+  }
+
+  return !resampling.active &&
+    resampling.phaseAccumulator === 'same-rate-bypass' &&
+    resampling.realtimeSafetyClass === 'same-rate-bypass' &&
+    metrics.realtimeBudget.backend === 'scalar-float64-reference' &&
+    metrics.realtimeBudget.estimatedMultiplyAdds > 0 &&
+    metrics.realtimeBudget.estimatedRealtimeFactor === null &&
+    metrics.realtimeBudget.safetyClass === 'same-rate-bypass' &&
+    metrics.nullResidual.state === 'exact-bypass' &&
+    metrics.nullResidual.maxAbs !== null &&
+    metrics.nullResidual.maxAbs <= 1e-12 &&
+    metrics.nullResidual.rms !== null &&
+    metrics.nullResidual.rms <= 1e-12;
+};
+
 const formatUzumeReferenceSrcValidation = (status: AudioStatus | null): string | null => {
   const validation = status?.uzumeReferencePlan?.resampling?.validation;
   if (!validation) {
@@ -875,6 +951,31 @@ const formatUzumeReferenceSrcValidation = (status: AudioStatus | null): string |
     `overall ${validation.overall}`,
     checks,
   ]);
+};
+
+const isExpectedUzumeReferenceSrcValidation = (
+  validation: NonNullable<AudioStatus['uzumeReferencePlan']>['resampling']['validation'] | null | undefined,
+): boolean => {
+  if (!validation) {
+    return false;
+  }
+
+  const expectedChecks = [
+    'passband-ripple',
+    'stopband-attenuation',
+    'transition-width',
+    'silence-preservation',
+    'same-rate-null',
+    'realtime-budget',
+  ] as const;
+  const checksById = new Map(validation.checks.map((check) => [check.id, check.state]));
+
+  return validation.artifact === 'poly-sinc-formal-validation-reference' &&
+    validation.overall === 'pass' &&
+    expectedChecks.every((id) => {
+      const state = checksById.get(id);
+      return state === 'pass' || state === 'not-applicable';
+    });
 };
 
 const formatUzumeReferenceSrcOutputRisk = (status: AudioStatus | null): string | null => {
@@ -1440,6 +1541,25 @@ const formatUzumeReferenceConvolutionSerialNull = (status: AudioStatus | null): 
   ]);
 };
 
+const isExpectedUzumeReferenceConvolutionSerialNull = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['sharedConvolution']['serialNullReference'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  return report.artifact === 'shared-convolution-serial-null-reference' &&
+    report.engine === 'shared-convolution-planner-reference' &&
+    report.state === 'merged-matches-serial' &&
+    report.sourceOrder.length > 1 &&
+    report.mergedResponseTapCounts.length === report.sourceOrder.length &&
+    report.comparedFrames > 0 &&
+    report.maxAbs === 0 &&
+    report.rms === 0 &&
+    report.reasons.includes('merged_response_matches_serial_direct_fir_reference') &&
+    report.reasons.includes('serial_null_reference_only');
+};
+
 const formatUzumeReferencePcmOutputQuantization = (status: AudioStatus | null): string | null => {
   const report = status?.uzumeReferencePlan?.pcmOutputQuantization;
   if (!report) {
@@ -1524,6 +1644,27 @@ const formatUzumeReferencePcmIngressGuard = (status: AudioStatus | null): string
     `silence ${report.counts.silenceFrames}`,
     report.reasons.length ? `reasons ${report.reasons.map(cleanReason).filter(Boolean).join(' | ')}` : null,
   ]);
+};
+
+const isExpectedUzumeReferencePcmIngressGuard = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['pcmIngressGuard'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  return report.artifact === 'pcm-ingress-guard-reference' &&
+    (report.state === 'ok' || report.state === 'silence') &&
+    report.expectedChannels !== null &&
+    report.expectedChannels === report.channelCount &&
+    report.frameCount > 0 &&
+    report.rectangular &&
+    report.counts.nonFiniteReplaced === 0 &&
+    report.counts.denormalZeroed === 0 &&
+    report.counts.channelMismatchCount === 0 &&
+    Number.isFinite(report.peak) &&
+    report.peak >= 0 &&
+    report.reasons.includes('pcm_ingress_ready_for_reference_processing');
 };
 
 const formatUzumeReferenceGainStaging = (status: AudioStatus | null): string | null => {
@@ -1657,6 +1798,36 @@ const formatUzumeReferenceBlockBoundary = (status: AudioStatus | null): string |
     `introduced ${trimFixed(report.maxIntroducedDiscontinuity, 6)}`,
     report.reasons.length ? `reasons ${report.reasons.map(cleanReason).filter(Boolean).join(' | ')}` : null,
   ]);
+};
+
+const isExpectedUzumeReferenceBlockBoundary = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['blockBoundary'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  return report.artifact === 'block-boundary-split-reference' &&
+    report.policy === 'valid-frames-committed-padding-never-output' &&
+    report.blockFrames > 0 &&
+    report.inputFrames > 0 &&
+    report.channelCount > 0 &&
+    report.blockCount > 0 &&
+    report.blockStates.includes('partial-padded') &&
+    report.coverage.state === 'exact' &&
+    report.coverage.coveredFrames === report.inputFrames &&
+    report.coverage.missingFrames === 0 &&
+    report.coverage.duplicateFrames === 0 &&
+    report.coverage.committedFrames === report.inputFrames &&
+    report.coverage.paddedFrames >= 0 &&
+    report.residual.state === 'exact-reassembly' &&
+    report.residual.comparedFrames === report.inputFrames &&
+    report.residual.maxAbs === 0 &&
+    report.residual.rms === 0 &&
+    report.maxIntroducedDiscontinuity === 0 &&
+    report.reasons.includes('block_boundaries_cover_each_source_frame_once') &&
+    report.reasons.includes('final_block_zero_padding_not_committed') &&
+    report.reasons.includes('reassembled_output_matches_source_without_boundary_discontinuity');
 };
 
 const formatFlushDrainIntent = (
@@ -2804,6 +2975,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceLatencyOwners = formatUzumeReferenceLatencyOwners(status);
   const referenceArtifactManifest = formatUzumeReferenceArtifactManifest(status);
   const referencePathPlan = formatUzumeReferencePathPlan(status);
+  const expectedReferencePathPlan = isExpectedUzumeReferenceFormatPathPlan(referencePlan?.formatPathPlan);
   const referenceBitPerfect = formatUzumeReferenceBitPerfect(status);
   const referenceBackendSupport = formatUzumeReferenceBackendSupport(status);
   const referenceOutputDevicePolicy = formatUzumeReferenceOutputDevicePolicy(status);
@@ -2811,12 +2983,15 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceReadinessContract = formatUzumeReferenceReadinessContract(status);
   const referenceGenerationCacheKey = formatUzumeReferenceGenerationCacheKey(status);
   const referenceRealtimeBudgetSummary = formatUzumeReferenceRealtimeBudgetSummary(status);
+  const expectedReferenceRealtimeBudgetSummary = isExpectedUzumeReferenceRealtimeBudgetSummary(referencePlan?.realtimeBudgetSummary);
   const referenceResampling = formatUzumeReferenceResampling(status);
   const expectedReferenceResampling = isExpectedUzumeReferenceResampling(referencePlan?.resampling);
   const referenceSrcRollback = formatUzumeReferenceSrcRollback(status);
   const referenceSrcBudget = formatUzumeReferenceSrcBudget(status);
   const referenceSrcArtifacts = formatUzumeReferenceSrcArtifacts(status);
   const referenceSrcValidation = formatUzumeReferenceSrcValidation(status);
+  const expectedReferenceSrcBudget = isExpectedUzumeReferenceSrcBudget(referencePlan?.resampling);
+  const expectedReferenceSrcValidation = isExpectedUzumeReferenceSrcValidation(referencePlan?.resampling.validation);
   const referenceSrcOutputRisk = formatUzumeReferenceSrcOutputRisk(status);
   const referenceSrcPhaseApodizing = formatUzumeReferenceSrcPhaseApodizing(status);
   const referenceDsdFamily = formatUzumeReferenceDsdFamily(status);
@@ -2826,8 +3001,10 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceResponseResample = formatUzumeReferenceResponseResample(status);
   const referenceConvolutionDuplicateGuard = formatUzumeReferenceConvolutionDuplicateGuard(status);
   const referenceConvolutionSerialNull = formatUzumeReferenceConvolutionSerialNull(status);
+  const expectedReferenceConvolutionSerialNull = isExpectedUzumeReferenceConvolutionSerialNull(referencePlan?.sharedConvolution?.serialNullReference);
   const referencePcmOutputQuantization = formatUzumeReferencePcmOutputQuantization(status);
   const referencePcmIngressGuard = formatUzumeReferencePcmIngressGuard(status);
+  const expectedReferencePcmIngressGuard = isExpectedUzumeReferencePcmIngressGuard(referencePlan?.pcmIngressGuard);
   const referenceGainStaging = formatUzumeReferenceGainStaging(status);
   const referenceIirEq = formatUzumeReferenceIirEq(status);
   const referenceChannelScope = formatUzumeReferenceChannelScope(status);
@@ -2839,6 +3016,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const expectedReferenceStereoProcedural = isExpectedUzumeReferenceStereoProcedural(referencePlan?.stereoProcedural);
   const expectedReferencePerEarEqPlacement = isExpectedUzumeReferencePerEarEqPlacement(referencePlan?.perEarEqPlacement);
   const referenceBlockBoundary = formatUzumeReferenceBlockBoundary(status);
+  const expectedReferenceBlockBoundary = isExpectedUzumeReferenceBlockBoundary(referencePlan?.blockBoundary);
   const referenceFlushDrain = formatUzumeReferenceFlushDrain(status);
   const referenceGaplessConcat = formatUzumeReferenceGaplessConcat(status);
   const referenceFirGaplessHistory = formatUzumeReferenceFirGaplessHistory(status);
@@ -2953,7 +3131,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME reference path plan',
       value: referencePathPlan,
-      tone: 'process',
+      tone: expectedReferencePathPlan ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -3023,7 +3201,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME realtime budget summary reference',
       value: referenceRealtimeBudgetSummary,
-      tone: referencePlan?.realtimeBudgetSummary.state === 'offline-reference-only' ? 'warning' : 'process',
+      tone: expectedReferenceRealtimeBudgetSummary ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -3033,9 +3211,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME PCM ingress guard reference',
       value: referencePcmIngressGuard,
-      tone: referencePlan?.pcmIngressGuard.state === 'channel-mismatch' || referencePlan?.pcmIngressGuard.state === 'sanitized'
-        ? 'warning'
-        : 'process',
+      tone: expectedReferencePcmIngressGuard ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -3095,8 +3271,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME block boundary reference',
       value: referenceBlockBoundary,
-      tone: referencePlan?.blockBoundary.coverage.state === 'exact' &&
-        referencePlan?.blockBoundary.residual.state === 'exact-reassembly' ? 'process' : 'warning',
+      tone: expectedReferenceBlockBoundary ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -3210,7 +3385,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME SRC budget reference',
       value: referenceSrcBudget,
-      tone: referencePlan?.resampling.artifactMetrics.realtimeBudget.safetyClass === 'offline-reference-only' ? 'warning' : 'process',
+      tone: expectedReferenceSrcBudget ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -3230,9 +3405,11 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME SRC validation reference',
       value: referenceSrcValidation,
-      tone: referencePlan?.resampling.validation?.overall === 'fail'
+      tone: expectedReferenceSrcValidation
+        ? 'good'
+        : referencePlan?.resampling.validation?.overall === 'fail'
         ? 'danger'
-        : referencePlan?.resampling.validation?.overall === 'warn' ? 'warning' : 'good',
+        : referencePlan?.resampling.validation ? 'warning' : 'muted',
       variant: 'process',
     });
   }
@@ -3292,9 +3469,11 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME convolution serial null reference',
       value: referenceConvolutionSerialNull,
-      tone: referencePlan?.sharedConvolution.serialNullReference?.state === 'merged-matches-serial'
+      tone: expectedReferenceConvolutionSerialNull
         ? 'good'
-        : referencePlan?.sharedConvolution.serialNullReference?.state === 'residual-over-threshold' ? 'danger' : 'muted',
+        : referencePlan?.sharedConvolution.serialNullReference?.state === 'residual-over-threshold'
+          ? 'danger'
+          : referencePlan?.sharedConvolution.serialNullReference?.state === 'merged-matches-serial' ? 'warning' : 'muted',
       variant: 'process',
     });
   }

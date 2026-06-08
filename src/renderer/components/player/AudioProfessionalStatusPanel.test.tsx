@@ -2046,44 +2046,61 @@ describe('AudioProfessionalStatusPanel', () => {
     );
   });
 
-  it('marks same-rate bypass SRC budget reference state as good', () => {
-    const status = referenceStatus();
-    const plan = status.uzumeReferencePlan!;
-    plan.realtimeBudgetSummary.state = 'same-rate-bypass-reference';
-    plan.realtimeBudgetSummary.srcEstimatedMultiplyAdds = 8;
-    plan.realtimeBudgetSummary.srcSafetyClass = 'same-rate-bypass';
-    plan.resampling.active = false;
-    plan.resampling.sourceRate = 48000;
-    plan.resampling.targetRate = 48000;
-    plan.resampling.sourceFamily = '48k-family';
-    plan.resampling.targetFamily = '48k-family';
-    plan.resampling.ratio = 1;
-    plan.resampling.sameRateBypass = true;
-    plan.resampling.groupDelaySamples = 0;
-    plan.resampling.groupDelayMs = 0;
-    plan.resampling.lookaheadSamples = 0;
-    plan.resampling.lookaheadMs = 0;
-    plan.resampling.phaseAccumulator = 'same-rate-bypass';
-    plan.resampling.realtimeSafetyClass = 'same-rate-bypass';
-    plan.resampling.artifactMetrics.realtimeBudget.estimatedMultiplyAdds = 8;
-    plan.resampling.artifactMetrics.realtimeBudget.safetyClass = 'same-rate-bypass';
-    plan.resampling.artifactMetrics.nullResidual = {
-      state: 'exact-bypass',
-      comparedFrames: 8,
-      maxAbs: 0,
-      rms: 0,
+  it('marks same-rate reference guards good and drifted reports warning', () => {
+    const makeSameRateStatus = (): AudioStatus => {
+      const status = referenceStatus();
+      const plan = status.uzumeReferencePlan!;
+      plan.realtimeBudgetSummary.state = 'same-rate-bypass-reference';
+      plan.realtimeBudgetSummary.srcEstimatedMultiplyAdds = 8;
+      plan.realtimeBudgetSummary.srcSafetyClass = 'same-rate-bypass';
+      plan.resampling.active = false;
+      plan.resampling.sourceRate = 48000;
+      plan.resampling.targetRate = 48000;
+      plan.resampling.sourceFamily = '48k-family';
+      plan.resampling.targetFamily = '48k-family';
+      plan.resampling.ratio = 1;
+      plan.resampling.sameRateBypass = true;
+      plan.resampling.groupDelaySamples = 0;
+      plan.resampling.groupDelayMs = 0;
+      plan.resampling.lookaheadSamples = 0;
+      plan.resampling.lookaheadMs = 0;
+      plan.resampling.phaseAccumulator = 'same-rate-bypass';
+      plan.resampling.realtimeSafetyClass = 'same-rate-bypass';
+      plan.resampling.artifactMetrics.realtimeBudget.estimatedMultiplyAdds = 8;
+      plan.resampling.artifactMetrics.realtimeBudget.safetyClass = 'same-rate-bypass';
+      plan.resampling.artifactMetrics.nullResidual = {
+        state: 'exact-bypass',
+        comparedFrames: 8,
+        maxAbs: 0,
+        rms: 0,
+      };
+      return status;
+    };
+    const renderRows = (status: AudioStatus) => {
+      render(
+        <I18nProvider>
+          <AudioProfessionalStatusPanel status={status} />
+        </I18nProvider>,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+      return readProfessionalVisualState().rows;
     };
 
-    render(
-      <I18nProvider>
-        <AudioProfessionalStatusPanel status={status} />
-      </I18nProvider>,
-    );
+    const status = makeSameRateStatus();
+    const plan = status.uzumeReferencePlan!;
+    plan.sharedConvolution.serialNullReference = {
+      ...plan.sharedConvolution.serialNullReference!,
+      state: 'merged-matches-serial',
+      sourceOrder: ['fir-eq', 'headphone-fir', 'room-ir'],
+      mergedResponseTapCounts: [3, 4, 5],
+      comparedFrames: 128,
+      maxAbs: 0,
+      rms: 0,
+      reasons: ['merged_response_matches_serial_direct_fir_reference', 'serial_null_reference_only'],
+    };
 
-    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
-
-    const visualState = readProfessionalVisualState();
-    expect(visualState.rows).toEqual(
+    expect(renderRows(status)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           label: 'UZUME realtime budget summary reference',
@@ -2094,6 +2111,101 @@ describe('AudioProfessionalStatusPanel', () => {
           label: 'UZUME SRC budget reference',
           value: expect.stringContaining('scalar-float64-reference / 8 multiply-adds / realtime factor unmeasured / same-rate-bypass / null exact-bypass max 0.000000 rms 0.000000'),
           tone: 'good',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const realtimeDrift = makeSameRateStatus();
+    realtimeDrift.uzumeReferencePlan!.realtimeBudgetSummary.reasons = realtimeDrift.uzumeReferencePlan!.realtimeBudgetSummary.reasons.filter(
+      (reason) => reason !== 'renderer_may_inspect_but_not_control_realtime_path',
+    );
+    expect(renderRows(realtimeDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME realtime budget summary reference',
+          value: expect.stringContaining('same-rate-bypass-reference'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const srcBudgetDrift = makeSameRateStatus();
+    srcBudgetDrift.uzumeReferencePlan!.resampling.artifactMetrics.nullResidual.maxAbs = 0.25;
+    expect(renderRows(srcBudgetDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME SRC budget reference',
+          value: expect.stringContaining('null exact-bypass max 0.250000 rms 0.000000'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const validationDrift = makeSameRateStatus();
+    validationDrift.uzumeReferencePlan!.resampling.validation!.checks[0].state = 'fail';
+    expect(renderRows(validationDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME SRC validation reference',
+          value: expect.stringContaining('overall pass'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const ingressDrift = makeSameRateStatus();
+    ingressDrift.uzumeReferencePlan!.pcmIngressGuard.counts.nonFiniteReplaced = 1;
+    expect(renderRows(ingressDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME PCM ingress guard reference',
+          value: expect.stringContaining('non-finite 1'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const blockDrift = makeSameRateStatus();
+    blockDrift.uzumeReferencePlan!.blockBoundary.coverage.committedFrames = 7;
+    expect(renderRows(blockDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME block boundary reference',
+          value: expect.stringContaining('committed 7'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const serialDrift = makeSameRateStatus();
+    serialDrift.uzumeReferencePlan!.sharedConvolution.serialNullReference = {
+      ...serialDrift.uzumeReferencePlan!.sharedConvolution.serialNullReference!,
+      state: 'merged-matches-serial',
+      sourceOrder: ['fir-eq', 'headphone-fir', 'room-ir'],
+      mergedResponseTapCounts: [3, 4, 5],
+      comparedFrames: 128,
+      maxAbs: 0,
+      rms: 0,
+      reasons: ['serial_null_reference_only'],
+    };
+    expect(renderRows(serialDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME convolution serial null reference',
+          value: expect.stringContaining('merged-matches-serial'),
+          tone: 'warning',
         }),
       ]),
     );

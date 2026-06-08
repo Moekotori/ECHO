@@ -373,6 +373,44 @@ const isExpectedUzumeReferenceGenerationCacheKey = (
     expectedReasons.every((reason) => report.reasons.includes(reason));
 };
 
+const isExpectedUzumeReferenceRealtimeBudgetSummary = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['realtimeBudgetSummary'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedReasons = [
+    'realtime_factor_not_measured_in_rpc002',
+    'scalar_float64_budget_is_reference_only',
+    'cpu_avx2_realtime_gate_deferred_to_rpc003',
+    'gpu_render_ahead_realtime_gate_deferred_to_rpc005',
+    'renderer_may_inspect_but_not_control_realtime_path',
+  ];
+
+  return report.artifact === 'realtime-budget-summary-reference' &&
+    report.policy === 'reference-budget-no-measured-runtime-factor' &&
+    report.state === 'same-rate-bypass-reference' &&
+    report.selectedBackend === 'cpu-float64-reference' &&
+    report.realtimeBackend === 'not-enabled' &&
+    report.measuredRealtimeFactor === null &&
+    report.measuredRealtimeFactorState === 'not-measured-in-rpc002' &&
+    report.srcBudgetBackend === 'scalar-float64-reference' &&
+    report.srcEstimatedMultiplyAdds > 0 &&
+    report.srcEstimatedRealtimeFactor === null &&
+    report.srcSafetyClass === 'same-rate-bypass' &&
+    report.callbackRingDepthBlocks > 0 &&
+    report.callbackRingTelemetryStatus !== 'unsafe' &&
+    report.renderAheadTargetFrames >= report.renderAheadReadyFrames &&
+    report.cpuFullProfileFallback === 'reference-available' &&
+    report.gpuRealtimeFactor === null &&
+    report.realtimeSafetyGate === 'rpc-003-cpu-realtime-gate' &&
+    report.gpuRenderAheadGate === 'rpc-005-gpu-render-ahead-gate' &&
+    report.thresholdSafeFactor > report.thresholdMarginalFactor &&
+    report.rendererControl === 'inspect-only' &&
+    expectedReasons.every((reason) => report.reasons.includes(reason));
+};
+
 const formatUzumeReferenceBitPerfect = (status: AudioStatus | null, fallback: string): string => {
   const plan = status?.uzumeReferencePlan;
   if (!plan) {
@@ -736,6 +774,28 @@ const isExpectedUzumeReferenceSrcArtifacts = (
     metrics.transitionWidthRatioEstimate <= 1;
 };
 
+const isExpectedUzumeReferenceSrcBudget = (
+  resampling: NonNullable<AudioStatus['uzumeReferencePlan']>['resampling'] | null | undefined,
+): boolean => {
+  const metrics = resampling?.artifactMetrics;
+  if (!resampling || !metrics || !resampling.sameRateBypass) {
+    return false;
+  }
+
+  return !resampling.active &&
+    resampling.phaseAccumulator === 'same-rate-bypass' &&
+    resampling.realtimeSafetyClass === 'same-rate-bypass' &&
+    metrics.realtimeBudget.backend === 'scalar-float64-reference' &&
+    metrics.realtimeBudget.estimatedMultiplyAdds > 0 &&
+    metrics.realtimeBudget.estimatedRealtimeFactor === null &&
+    metrics.realtimeBudget.safetyClass === 'same-rate-bypass' &&
+    metrics.nullResidual.state === 'exact-bypass' &&
+    metrics.nullResidual.maxAbs !== null &&
+    metrics.nullResidual.maxAbs <= 1e-12 &&
+    metrics.nullResidual.rms !== null &&
+    metrics.nullResidual.rms <= 1e-12;
+};
+
 const formatUzumeReferenceSrcValidation = (status: AudioStatus | null, fallback: string): string => {
   const validation = status?.uzumeReferencePlan?.resampling?.validation;
   if (!validation) {
@@ -748,6 +808,31 @@ const formatUzumeReferenceSrcValidation = (status: AudioStatus | null, fallback:
     `overall ${validation.overall}`,
     checks,
   ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const isExpectedUzumeReferenceSrcValidation = (
+  validation: NonNullable<AudioStatus['uzumeReferencePlan']>['resampling']['validation'] | null | undefined,
+): boolean => {
+  if (!validation) {
+    return false;
+  }
+
+  const expectedChecks = [
+    'passband-ripple',
+    'stopband-attenuation',
+    'transition-width',
+    'silence-preservation',
+    'same-rate-null',
+    'realtime-budget',
+  ] as const;
+  const checksById = new Map(validation.checks.map((check) => [check.id, check.state]));
+
+  return validation.artifact === 'poly-sinc-formal-validation-reference' &&
+    validation.overall === 'pass' &&
+    expectedChecks.every((id) => {
+      const state = checksById.get(id);
+      return state === 'pass' || state === 'not-applicable';
+    });
 };
 
 const formatUzumeReferenceSrcOutputRisk = (status: AudioStatus | null, fallback: string): string => {
@@ -1306,6 +1391,25 @@ const formatUzumeReferenceConvolutionSerialNull = (status: AudioStatus | null, f
   ].filter((part): part is string => Boolean(part)).join(' / ');
 };
 
+const isExpectedUzumeReferenceConvolutionSerialNull = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['sharedConvolution']['serialNullReference'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  return report.artifact === 'shared-convolution-serial-null-reference' &&
+    report.engine === 'shared-convolution-planner-reference' &&
+    report.state === 'merged-matches-serial' &&
+    report.sourceOrder.length > 1 &&
+    report.mergedResponseTapCounts.length === report.sourceOrder.length &&
+    report.comparedFrames > 0 &&
+    report.maxAbs === 0 &&
+    report.rms === 0 &&
+    report.reasons.includes('merged_response_matches_serial_direct_fir_reference') &&
+    report.reasons.includes('serial_null_reference_only');
+};
+
 const formatUzumeReferencePcmOutputQuantization = (status: AudioStatus | null, fallback: string): string => {
   const report = status?.uzumeReferencePlan?.pcmOutputQuantization;
   if (!report) {
@@ -1390,6 +1494,27 @@ const formatUzumeReferencePcmIngressGuard = (status: AudioStatus | null, fallbac
     `silence ${report.counts.silenceFrames}`,
     report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
   ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const isExpectedUzumeReferencePcmIngressGuard = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['pcmIngressGuard'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  return report.artifact === 'pcm-ingress-guard-reference' &&
+    (report.state === 'ok' || report.state === 'silence') &&
+    report.expectedChannels !== null &&
+    report.expectedChannels === report.channelCount &&
+    report.frameCount > 0 &&
+    report.rectangular &&
+    report.counts.nonFiniteReplaced === 0 &&
+    report.counts.denormalZeroed === 0 &&
+    report.counts.channelMismatchCount === 0 &&
+    Number.isFinite(report.peak) &&
+    report.peak >= 0 &&
+    report.reasons.includes('pcm_ingress_ready_for_reference_processing');
 };
 
 const formatUzumeReferenceGainStaging = (status: AudioStatus | null, fallback: string): string => {
@@ -1524,6 +1649,36 @@ const formatUzumeReferenceBlockBoundary = (status: AudioStatus | null, fallback:
     `introduced ${report.maxIntroducedDiscontinuity.toFixed(6)}`,
     report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
   ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const isExpectedUzumeReferenceBlockBoundary = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['blockBoundary'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  return report.artifact === 'block-boundary-split-reference' &&
+    report.policy === 'valid-frames-committed-padding-never-output' &&
+    report.blockFrames > 0 &&
+    report.inputFrames > 0 &&
+    report.channelCount > 0 &&
+    report.blockCount > 0 &&
+    report.blockStates.includes('partial-padded') &&
+    report.coverage.state === 'exact' &&
+    report.coverage.coveredFrames === report.inputFrames &&
+    report.coverage.missingFrames === 0 &&
+    report.coverage.duplicateFrames === 0 &&
+    report.coverage.committedFrames === report.inputFrames &&
+    report.coverage.paddedFrames >= 0 &&
+    report.residual.state === 'exact-reassembly' &&
+    report.residual.comparedFrames === report.inputFrames &&
+    report.residual.maxAbs === 0 &&
+    report.residual.rms === 0 &&
+    report.maxIntroducedDiscontinuity === 0 &&
+    report.reasons.includes('block_boundaries_cover_each_source_frame_once') &&
+    report.reasons.includes('final_block_zero_padding_not_committed') &&
+    report.reasons.includes('reassembled_output_matches_source_without_boundary_discontinuity');
 };
 
 const formatFlushDrainIntent = (
@@ -2314,12 +2469,15 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceReadinessContractText = formatUzumeReferenceReadinessContract(status, unknown);
   const uzumeReferenceGenerationCacheKeyText = formatUzumeReferenceGenerationCacheKey(status, unknown);
   const uzumeReferenceRealtimeBudgetSummaryText = formatUzumeReferenceRealtimeBudgetSummary(status, unknown);
+  const expectedUzumeReferenceRealtimeBudgetSummary = isExpectedUzumeReferenceRealtimeBudgetSummary(status?.uzumeReferencePlan?.realtimeBudgetSummary);
   const uzumeReferenceResamplingText = formatUzumeReferenceResampling(status, unknown);
   const expectedUzumeReferenceResampling = isExpectedUzumeReferenceResampling(status?.uzumeReferencePlan?.resampling);
   const uzumeReferenceSrcRollbackText = formatUzumeReferenceSrcRollback(status, unknown);
   const uzumeReferenceSrcBudgetText = formatUzumeReferenceSrcBudget(status, unknown);
   const uzumeReferenceSrcArtifactsText = formatUzumeReferenceSrcArtifacts(status, unknown);
   const uzumeReferenceSrcValidationText = formatUzumeReferenceSrcValidation(status, unknown);
+  const expectedUzumeReferenceSrcBudget = isExpectedUzumeReferenceSrcBudget(status?.uzumeReferencePlan?.resampling);
+  const expectedUzumeReferenceSrcValidation = isExpectedUzumeReferenceSrcValidation(status?.uzumeReferencePlan?.resampling.validation);
   const uzumeReferenceSrcOutputRiskText = formatUzumeReferenceSrcOutputRisk(status, unknown);
   const uzumeReferenceSrcPhaseApodizingText = formatUzumeReferenceSrcPhaseApodizing(status, unknown);
   const uzumeReferenceDsdFamilyText = formatUzumeReferenceDsdFamily(status, unknown);
@@ -2329,8 +2487,10 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceResponseResampleText = formatUzumeReferenceResponseResample(status, unknown);
   const uzumeReferenceConvolutionDuplicateGuardText = formatUzumeReferenceConvolutionDuplicateGuard(status, unknown);
   const uzumeReferenceConvolutionSerialNullText = formatUzumeReferenceConvolutionSerialNull(status, unknown);
+  const expectedUzumeReferenceConvolutionSerialNull = isExpectedUzumeReferenceConvolutionSerialNull(status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference);
   const uzumeReferencePcmOutputQuantizationText = formatUzumeReferencePcmOutputQuantization(status, unknown);
   const uzumeReferencePcmIngressGuardText = formatUzumeReferencePcmIngressGuard(status, unknown);
+  const expectedUzumeReferencePcmIngressGuard = isExpectedUzumeReferencePcmIngressGuard(status?.uzumeReferencePlan?.pcmIngressGuard);
   const uzumeReferenceGainStagingText = formatUzumeReferenceGainStaging(status, unknown);
   const uzumeReferenceIirEqText = formatUzumeReferenceIirEq(status, unknown);
   const uzumeReferenceChannelScopeText = formatUzumeReferenceChannelScope(status, unknown);
@@ -2342,6 +2502,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const expectedUzumeReferenceStereoProcedural = isExpectedUzumeReferenceStereoProcedural(status?.uzumeReferencePlan?.stereoProcedural);
   const expectedUzumeReferencePerEarEqPlacement = isExpectedUzumeReferencePerEarEqPlacement(status?.uzumeReferencePlan?.perEarEqPlacement);
   const uzumeReferenceBlockBoundaryText = formatUzumeReferenceBlockBoundary(status, unknown);
+  const expectedUzumeReferenceBlockBoundary = isExpectedUzumeReferenceBlockBoundary(status?.uzumeReferencePlan?.blockBoundary);
   const uzumeReferenceFlushDrainText = formatUzumeReferenceFlushDrain(status, unknown);
   const uzumeReferenceGaplessConcatText = formatUzumeReferenceGaplessConcat(status, unknown);
   const uzumeReferenceFirGaplessHistoryText = formatUzumeReferenceFirGaplessHistory(status, unknown);
@@ -2496,14 +2657,14 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceLatencyBudget'), value: uzumeReferenceLatencyBudgetText, tone: expectedUzumeReferenceLatencyBudget ? 'good' : status?.uzumeReferencePlan?.latencyBudget ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceReadinessContract'), value: uzumeReferenceReadinessContractText, tone: expectedUzumeReferenceReadinessContract ? 'good' : status?.uzumeReferencePlan?.readinessContract ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceGenerationCacheKey'), value: uzumeReferenceGenerationCacheKeyText, tone: expectedUzumeReferenceGenerationCacheKey ? 'good' : status?.uzumeReferencePlan?.generationCacheKey ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceRealtimeBudgetSummary'), value: uzumeReferenceRealtimeBudgetSummaryText, tone: status?.uzumeReferencePlan?.realtimeBudgetSummary?.state === 'offline-reference-only' ? 'warning' : status?.uzumeReferencePlan?.realtimeBudgetSummary ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferencePcmIngressGuard'), value: uzumeReferencePcmIngressGuardText, tone: status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'channel-mismatch' || status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'sanitized' ? 'warning' : status?.uzumeReferencePlan?.pcmIngressGuard ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceRealtimeBudgetSummary'), value: uzumeReferenceRealtimeBudgetSummaryText, tone: expectedUzumeReferenceRealtimeBudgetSummary ? 'good' : status?.uzumeReferencePlan?.realtimeBudgetSummary ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferencePcmIngressGuard'), value: uzumeReferencePcmIngressGuardText, tone: expectedUzumeReferencePcmIngressGuard ? 'good' : status?.uzumeReferencePlan?.pcmIngressGuard ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceGainStaging'), value: uzumeReferenceGainStagingText, tone: expectedUzumeReferenceGainStaging ? 'good' : status?.uzumeReferencePlan?.gainStaging ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceIirEq'), value: uzumeReferenceIirEqText, tone: expectedUzumeReferenceIirEq ? 'good' : status?.uzumeReferencePlan?.iirEq ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceChannelScope'), value: uzumeReferenceChannelScopeText, tone: expectedUzumeReferenceChannelScope ? 'good' : status?.uzumeReferencePlan?.channelScope ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceStereoProcedural'), value: uzumeReferenceStereoProceduralText, tone: expectedUzumeReferenceStereoProcedural ? 'good' : status?.uzumeReferencePlan?.stereoProcedural ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePerEarEqPlacement'), value: uzumeReferencePerEarEqPlacementText, tone: expectedUzumeReferencePerEarEqPlacement ? 'good' : status?.uzumeReferencePlan?.perEarEqPlacement ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceBlockBoundary'), value: uzumeReferenceBlockBoundaryText, tone: status?.uzumeReferencePlan?.blockBoundary?.coverage.state === 'exact' && status?.uzumeReferencePlan?.blockBoundary?.residual.state === 'exact-reassembly' ? 'good' : status?.uzumeReferencePlan?.blockBoundary ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceBlockBoundary'), value: uzumeReferenceBlockBoundaryText, tone: expectedUzumeReferenceBlockBoundary ? 'good' : status?.uzumeReferencePlan?.blockBoundary ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceFlushDrain'), value: uzumeReferenceFlushDrainText, tone: isExpectedUzumeReferenceFlushDrain(status?.uzumeReferencePlan?.flushDrain) ? 'good' : status?.uzumeReferencePlan?.flushDrain ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceGaplessConcat'), value: uzumeReferenceGaplessConcatText, tone: isExpectedUzumeReferenceGaplessConcat(status?.uzumeReferencePlan?.gaplessConcat) ? 'good' : status?.uzumeReferencePlan?.gaplessConcat?.state === 'src-stateful' ? 'warning' : status?.uzumeReferencePlan?.gaplessConcat ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceFirGaplessHistory'), value: uzumeReferenceFirGaplessHistoryText, tone: isExpectedUzumeReferenceFirGaplessHistory(status?.uzumeReferencePlan?.firGaplessHistory) ? 'good' : status?.uzumeReferencePlan?.firGaplessHistory?.state === 'history-required' ? 'warning' : status?.uzumeReferencePlan?.firGaplessHistory ? 'good' : 'muted' },
@@ -2511,16 +2672,16 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceEqualPowerCrossfade'), value: uzumeReferenceEqualPowerCrossfadeText, tone: isExpectedUzumeReferenceEqualPowerCrossfade(status?.uzumeReferencePlan?.equalPowerCrossfade) ? 'good' : status?.uzumeReferencePlan?.equalPowerCrossfade?.rendered.state === 'crossfade-rendered' ? 'warning' : status?.uzumeReferencePlan?.equalPowerCrossfade ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceResampling'), value: uzumeReferenceResamplingText, tone: expectedUzumeReferenceResampling ? 'good' : status?.uzumeReferencePlan?.resampling.active ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcRollback'), value: uzumeReferenceSrcRollbackText, tone: status?.uzumeReferencePlan?.resampling.qualityRollback.state === 'armed' ? 'warning' : status?.uzumeReferencePlan?.resampling.qualityRollback ? 'muted' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceSrcBudget'), value: uzumeReferenceSrcBudgetText, tone: status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget.safetyClass === 'offline-reference-only' ? 'warning' : status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceSrcBudget'), value: uzumeReferenceSrcBudgetText, tone: expectedUzumeReferenceSrcBudget ? 'good' : status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcArtifacts'), value: uzumeReferenceSrcArtifactsText, tone: isExpectedUzumeReferenceSrcArtifacts(status?.uzumeReferencePlan?.resampling) ? 'good' : status?.uzumeReferencePlan?.resampling.artifactMetrics ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceSrcValidation'), value: uzumeReferenceSrcValidationText, tone: status?.uzumeReferencePlan?.resampling.validation?.overall === 'fail' ? 'danger' : status?.uzumeReferencePlan?.resampling.validation?.overall === 'warn' ? 'warning' : status?.uzumeReferencePlan?.resampling.validation ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceSrcValidation'), value: uzumeReferenceSrcValidationText, tone: expectedUzumeReferenceSrcValidation ? 'good' : status?.uzumeReferencePlan?.resampling.validation?.overall === 'fail' ? 'danger' : status?.uzumeReferencePlan?.resampling.validation ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcOutputRisk'), value: uzumeReferenceSrcOutputRiskText, tone: status?.uzumeReferencePlan?.resampling.outputResamplingRisk.signalPathTone === 'warning' ? 'warning' : status?.uzumeReferencePlan?.resampling.outputResamplingRisk ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcPhaseApodizing'), value: uzumeReferenceSrcPhaseApodizingText, tone: isExpectedUzumeReferenceSrcPhaseApodizing(status?.uzumeReferencePlan?.resampling) ? 'good' : status?.uzumeReferencePlan?.resampling.phaseModeArtifacts ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceDsdFamily'), value: uzumeReferenceDsdFamilyText, tone: expectedUzumeReferenceDsdFamily ? 'good' : status?.uzumeReferencePlan?.dsdFamily ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolution'), value: uzumeReferenceConvolutionText, tone: expectedUzumeReferenceConvolution ? 'good' : status?.uzumeReferencePlan?.sharedConvolution ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceResponseResample'), value: uzumeReferenceResponseResampleText, tone: isExpectedUzumeReferenceResponseResample(status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports?.length ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard'), value: uzumeReferenceConvolutionDuplicateGuardText, tone: isExpectedUzumeReferenceConvolutionDuplicateGuard(status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'single-shared-plan' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'split-required' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard ? 'muted' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceConvolutionSerialNull'), value: uzumeReferenceConvolutionSerialNullText, tone: status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'merged-matches-serial' ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'residual-over-threshold' ? 'danger' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference ? 'muted' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceConvolutionSerialNull'), value: uzumeReferenceConvolutionSerialNullText, tone: expectedUzumeReferenceConvolutionSerialNull ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'residual-over-threshold' ? 'danger' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'merged-matches-serial' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePcmOutputQuantization'), value: uzumeReferencePcmOutputQuantizationText, tone: isExpectedUzumeReferencePcmOutputQuantization(status?.uzumeReferencePlan?.pcmOutputQuantization) ? 'good' : status?.uzumeReferencePlan?.pcmOutputQuantization?.state === 'rejected' ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization?.dither.enabled ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceContinuity'), value: uzumeReferenceContinuityText, tone: expectedUzumeReferenceContinuity ? 'good' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePreRoll'), value: uzumeReferencePreRollText, tone: expectedUzumeReferenceContinuity ? 'good' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },

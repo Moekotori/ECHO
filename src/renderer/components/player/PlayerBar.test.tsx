@@ -2291,6 +2291,7 @@ describe('PlayerBar', () => {
     status.uzumeReferencePlan!.resampling.groupDelaySamples = 0;
     status.uzumeReferencePlan!.resampling.groupDelayMs = 0;
     status.uzumeReferencePlan!.resampling.lookaheadMs = 0;
+    status.uzumeReferencePlan!.resampling.phaseAccumulator = 'same-rate-bypass';
     status.uzumeReferencePlan!.resampling.realtimeSafetyClass = 'same-rate-bypass';
     status.uzumeReferencePlan!.resampling.artifactMetrics.realtimeBudget.estimatedMultiplyAdds = 8;
     status.uzumeReferencePlan!.resampling.artifactMetrics.realtimeBudget.safetyClass = 'same-rate-bypass';
@@ -2316,6 +2317,99 @@ describe('PlayerBar', () => {
       expect.arrayContaining([
         expect.objectContaining({ title: 'UZUME realtime budget summary reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME SRC budget reference', tone: 'process', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const cloneAudioStatus = (value: AudioStatus): AudioStatus => JSON.parse(JSON.stringify(value)) as AudioStatus;
+    const renderSignalNodes = (nextStatus: AudioStatus) => {
+      render(
+        <>
+          <AudioSignalPathControl isOpen={true} status={nextStatus} track={track} onClick={vi.fn()} />
+          <AudioSignalPathPopover isOpen={true} status={nextStatus} track={track} onClose={vi.fn()} />
+        </>,
+      );
+
+      return readSignalPathVisualState(screen.getByRole('dialog', { name: '信号路径' })).nodes;
+    };
+
+    const pathPlanDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    delete pathPlanDrift.uzumeReferencePlan!.formatPathPlan.sdm_processed;
+    expect(renderSignalNodes(pathPlanDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME reference path plan', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const realtimeDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    realtimeDrift.uzumeReferencePlan!.realtimeBudgetSummary.reasons = realtimeDrift.uzumeReferencePlan!.realtimeBudgetSummary.reasons.filter(
+      (reason) => reason !== 'renderer_may_inspect_but_not_control_realtime_path',
+    );
+    expect(renderSignalNodes(realtimeDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME realtime budget summary reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const srcBudgetDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    srcBudgetDrift.uzumeReferencePlan!.resampling.artifactMetrics.nullResidual.maxAbs = 0.25;
+    expect(renderSignalNodes(srcBudgetDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME SRC budget reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const validationDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    validationDrift.uzumeReferencePlan!.resampling.validation!.checks[0].state = 'fail';
+    expect(renderSignalNodes(validationDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME SRC validation reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const ingressDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    ingressDrift.uzumeReferencePlan!.pcmIngressGuard.counts.nonFiniteReplaced = 1;
+    expect(renderSignalNodes(ingressDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME PCM ingress guard reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const blockDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    blockDrift.uzumeReferencePlan!.blockBoundary.coverage.committedFrames = 7;
+    expect(renderSignalNodes(blockDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME block boundary reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const serialDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    serialDrift.uzumeReferencePlan!.sharedConvolution.serialNullReference = {
+      ...serialDrift.uzumeReferencePlan!.sharedConvolution.serialNullReference!,
+      state: 'merged-matches-serial',
+      sourceOrder: ['fir-eq', 'headphone-fir', 'room-ir'],
+      mergedResponseTapCounts: [3, 4, 5],
+      comparedFrames: 128,
+      maxAbs: 0,
+      rms: 0,
+      reasons: ['serial_null_reference_only'],
+    };
+    expect(renderSignalNodes(serialDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME convolution serial null reference', tone: 'warning', variant: 'process' }),
       ]),
     );
 
