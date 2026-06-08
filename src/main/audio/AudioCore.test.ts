@@ -2022,12 +2022,12 @@ describe('Audio Core sample-rate regression guard', () => {
     const logs: string[] = [];
     const decoder = new FakeDecoder(new Map([['song.flac', probe('song.flac', 44100)]]));
     const bitPerfectPlan = {
-      pcm_bitperfect: { state: 'current', reason: null },
+      pcm_bitperfect: { state: 'current', reason: 'shared_output_resampling_or_mixer_rate_difference' },
       pcm_processed: { state: 'available', reason: null },
-      dsd_direct: { state: 'unavailable', reason: 'source_is_pcm' },
-      dsd_upsampling: { state: 'unavailable', reason: 'source_is_pcm' },
-      d2p_processed: { state: 'unavailable', reason: 'source_is_pcm' },
-      sdm_processed: { state: 'unavailable', reason: 'sdm_engine_not_ready' },
+      dsd_direct: { state: 'unavailable', reason: 'requires_dsd_source' },
+      dsd_upsampling: { state: 'unavailable', reason: 'requires_dsd_source' },
+      d2p_processed: { state: 'unavailable', reason: 'd2p_requires_dsd_source' },
+      sdm_processed: { state: 'unavailable', reason: 'sdm_reference_engine_not_ready' },
     } as const;
     const processedPlan = {
       ...bitPerfectPlan,
@@ -2087,6 +2087,13 @@ describe('Audio Core sample-rate regression guard', () => {
       expect(readyStatus.uzumeBitPerfectState).toBe('available');
       expect(readyStatus.uzumeDirectDisabledReason).toBe(null);
       expect(readyStatus.uzumeFormatPathPlan).toMatchObject(bitPerfectPlan);
+      expect(readyStatus.uzumeReferencePlan).toMatchObject({
+        schemaVersion: 1,
+        formatPath: 'pcm_bitperfect',
+        sourceContainer: 'pcm',
+        outputContainer: 'pcm',
+        formatPathPlan: bitPerfectPlan,
+      });
       expect(readyStatus.uzumeHeadroomActive).toBe(false);
       expect(readyStatus.uzumeTransitionalConvolutionPath).toBe('legacy-convolution-processor');
       expect(readyStatus.uzumeFusedMacroKernel).toBe(false);
@@ -2146,6 +2153,11 @@ describe('Audio Core sample-rate regression guard', () => {
       expect(liveStatus.uzumeBitPerfectState).toBe('disabled');
       expect(liveStatus.uzumeDirectDisabledReason).toBe('uzume_processing_enabled');
       expect(liveStatus.uzumeFormatPathPlan).toMatchObject(processedPlan);
+      expect(liveStatus.uzumeReferencePlan).toMatchObject({
+        schemaVersion: 1,
+        formatPath: 'pcm_processed',
+        formatPathPlan: processedPlan,
+      });
       expect(liveStatus.uzumeHeadroomActive).toBe(true);
       expect(liveStatus.uzumeTransitionalConvolutionPath).toBe('legacy-convolution-processor');
       expect(liveStatus.uzumeFusedMacroKernel).toBe(false);

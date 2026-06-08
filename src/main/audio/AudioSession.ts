@@ -7,6 +7,7 @@ import { DeviceService, type DeviceListOptions } from './DeviceService';
 import { DecoderPipeline } from './DecoderPipeline';
 import { JuceDecodePipeline } from './JuceDecodePipeline';
 import { getEqBridge } from './EqBridge';
+import { compileUzumeReferencePlan } from './UzumeReferencePlan';
 import { PcmLevelMeterTransform, createAudioLevelTelemetry, visualSpectrumBucketCount, type PcmLevelSnapshot } from './AudioLevelMeter';
 import type { EqProfileBindingTarget } from '../../shared/types/eq';
 import { NativeOutputBridge, isNativeOutputBridgeAvailable } from './NativeOutputBridge';
@@ -3547,6 +3548,34 @@ export class AudioSession extends EventEmitter {
                 : echoSrcActive
                   ? 'echo_src_enabled'
                   : null;
+    const uzumeReferencePlan = plan
+      ? compileUzumeReferencePlan({
+        probe: this.currentProbe,
+        sampleRatePlan: plan,
+        outputMode: plan.outputMode,
+        activeDsdOutputMode: this.currentActiveDsdOutputMode,
+        requestedDsdOutputMode: this.currentOutputSettings
+          ? this.currentDsdOutputModeRequested
+          : normalizeDsdOutputMode(this.outputSettings.dsdOutputMode),
+        eqState,
+        channelBalanceState,
+        roomCorrectionState,
+        dspActive,
+        dspModuleActive,
+        replayGainActive,
+        replayGainDb: replayGainCalculation.appliedDb,
+        chainedPlaybackActive,
+        gaplessActive,
+        echoSrcActive,
+        bitPerfectDisabledReason,
+        currentResamplerEngine: this.currentResamplerEngine,
+        nativeFormatPath: nativeUzumeFormatPath,
+        nativeOutputFormat: getReadyOutputFormat(this.currentReadyResult),
+        nativeBitPerfectState: nativeUzumeBitPerfectState,
+        nativeDirectDisabledReason: nativeUzumeDirectDisabledReason,
+      })
+      : null;
+    const referenceUzumeFormatPathPlan = uzumeReferencePlan?.formatPathPlan ?? nativeUzumeFormatPathPlan;
     const warnings = [...(plan?.warnings ?? [])];
     for (const warning of this.outputWarnings) {
       if (!warnings.includes(warning)) {
@@ -3735,7 +3764,8 @@ export class AudioSession extends EventEmitter {
       uzumeFormatPath: nativeUzumeFormatPath,
       uzumeBitPerfectState: nativeUzumeBitPerfectState,
       uzumeDirectDisabledReason: nativeUzumeDirectDisabledReason,
-      uzumeFormatPathPlan: nativeUzumeFormatPathPlan,
+      uzumeFormatPathPlan: referenceUzumeFormatPathPlan,
+      uzumeReferencePlan,
       uzumeHeadroomActive: nativeUzumeHeadroomActive,
       uzumeTransitionalConvolutionPath: nativeUzumeTransitionalConvolutionPath,
       uzumeFusedMacroKernel: nativeUzumeFusedMacroKernel,

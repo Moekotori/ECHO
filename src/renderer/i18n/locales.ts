@@ -897,9 +897,47 @@ export type TranslationKey =
   | 'audioProfessional.row.uzumeGpuLimiter'
   | 'audioProfessional.row.uzumeGpuMatrix'
   | 'audioProfessional.row.uzumeHeadroom'
+  | 'audioProfessional.row.uzumeLimiterReference'
   | 'audioProfessional.row.uzumePathPlan'
   | 'audioProfessional.row.uzumeProfile'
+  | 'audioProfessional.row.uzumeReferenceAssignments'
+  | 'audioProfessional.row.uzumeReferenceBitPerfect'
+  | 'audioProfessional.row.uzumeReferenceBlockBoundary'
+  | 'audioProfessional.row.uzumeReferenceCallbackRing'
+  | 'audioProfessional.row.uzumeReferenceCallbackSafeControls'
+  | 'audioProfessional.row.uzumeReferenceCompiler'
+  | 'audioProfessional.row.uzumeReferenceContinuity'
+  | 'audioProfessional.row.uzumeReferenceConvolution'
+  | 'audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard'
+  | 'audioProfessional.row.uzumeReferenceConvolutionSerialNull'
+  | 'audioProfessional.row.uzumeReferenceDsdFamily'
+  | 'audioProfessional.row.uzumeReferenceEqualPowerCrossfade'
+  | 'audioProfessional.row.uzumeReferenceFirGaplessHistory'
+  | 'audioProfessional.row.uzumeReferenceFlushDrain'
+  | 'audioProfessional.row.uzumeReferenceGaplessConcat'
+  | 'audioProfessional.row.uzumeReferenceGainStaging'
+  | 'audioProfessional.row.uzumeReferenceIirEq'
+  | 'audioProfessional.row.uzumeReferenceChannelScope'
+  | 'audioProfessional.row.uzumeReferenceStereoProcedural'
+  | 'audioProfessional.row.uzumeReferenceLatencyOwners'
+  | 'audioProfessional.row.uzumeReferenceMergeGroups'
+  | 'audioProfessional.row.uzumeReferenceOutputDevicePolicy'
+  | 'audioProfessional.row.uzumeReferencePcmIngressGuard'
+  | 'audioProfessional.row.uzumeReferencePcmOutputQuantization'
+  | 'audioProfessional.row.uzumeReferencePerEarEqPlacement'
+  | 'audioProfessional.row.uzumeReferencePreRoll'
+  | 'audioProfessional.row.uzumeReferenceRenderAheadCache'
+  | 'audioProfessional.row.uzumeReferenceResampling'
+  | 'audioProfessional.row.uzumeReferenceResponseResample'
+  | 'audioProfessional.row.uzumeReferenceSrcArtifacts'
+  | 'audioProfessional.row.uzumeReferenceSrcBudget'
+  | 'audioProfessional.row.uzumeReferenceSrcOutputRisk'
+  | 'audioProfessional.row.uzumeReferenceSrcPhaseApodizing'
+  | 'audioProfessional.row.uzumeReferenceSrcRollback'
+  | 'audioProfessional.row.uzumeReferenceSrcValidation'
+  | 'audioProfessional.row.uzumeReferenceUnderrunFallback'
   | 'audioProfessional.row.uzumeRuntime'
+  | 'audioProfessional.row.uzumeSafetyMeter'
   | 'audioProfessional.row.warnings'
   | 'audioProfessional.summary.pending'
   | 'audioProfessional.title'
@@ -3874,9 +3912,47 @@ const zhCN: TranslationMap = {
   'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
   'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
   'audioProfessional.row.uzumeHeadroom': 'UZUME headroom',
+  'audioProfessional.row.uzumeLimiterReference': 'UZUME limiter reference',
   'audioProfessional.row.uzumePathPlan': 'UZUME path plan',
   'audioProfessional.row.uzumeProfile': 'UZUME profile',
+  'audioProfessional.row.uzumeReferenceAssignments': 'UZUME reference assignment',
+  'audioProfessional.row.uzumeReferenceBitPerfect': 'UZUME reference bit-perfect',
+  'audioProfessional.row.uzumeReferenceBlockBoundary': 'UZUME block boundary reference',
+  'audioProfessional.row.uzumeReferenceCallbackRing': 'UZUME callback ring reference',
+  'audioProfessional.row.uzumeReferenceCallbackSafeControls': 'UZUME urgent controls reference',
+  'audioProfessional.row.uzumeReferenceCompiler': 'UZUME reference compiler',
+  'audioProfessional.row.uzumeReferenceContinuity': 'UZUME continuity reference',
+  'audioProfessional.row.uzumeReferenceConvolution': 'UZUME convolution reference',
+  'audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard': 'UZUME convolution duplicate guard',
+  'audioProfessional.row.uzumeReferenceConvolutionSerialNull': 'UZUME convolution serial null reference',
+  'audioProfessional.row.uzumeReferenceDsdFamily': 'UZUME DSD family reference',
+  'audioProfessional.row.uzumeReferenceEqualPowerCrossfade': 'UZUME equal-power crossfade reference',
+  'audioProfessional.row.uzumeReferenceFirGaplessHistory': 'UZUME FIR gapless reference',
+  'audioProfessional.row.uzumeReferenceFlushDrain': 'UZUME flush/drain reference',
+  'audioProfessional.row.uzumeReferenceGaplessConcat': 'UZUME gapless SRC reference',
+  'audioProfessional.row.uzumeReferenceGainStaging': 'UZUME gain staging reference',
+  'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
+  'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
+  'audioProfessional.row.uzumeReferenceStereoProcedural': 'UZUME stereo procedural reference',
+  'audioProfessional.row.uzumeReferenceLatencyOwners': 'UZUME reference latency owners',
+  'audioProfessional.row.uzumeReferenceMergeGroups': 'UZUME reference merge groups',
+  'audioProfessional.row.uzumeReferenceOutputDevicePolicy': 'UZUME output device policy reference',
+  'audioProfessional.row.uzumeReferencePcmIngressGuard': 'UZUME PCM ingress guard reference',
+  'audioProfessional.row.uzumeReferencePcmOutputQuantization': 'UZUME PCM output quantization reference',
+  'audioProfessional.row.uzumeReferencePerEarEqPlacement': 'UZUME per-ear EQ placement reference',
+  'audioProfessional.row.uzumeReferencePreRoll': 'UZUME pre-roll reference',
+  'audioProfessional.row.uzumeReferenceRenderAheadCache': 'UZUME render-ahead cache',
+  'audioProfessional.row.uzumeReferenceResampling': 'UZUME SRC reference',
+  'audioProfessional.row.uzumeReferenceResponseResample': 'UZUME response resample reference',
+  'audioProfessional.row.uzumeReferenceSrcArtifacts': 'UZUME SRC artifact reference',
+  'audioProfessional.row.uzumeReferenceSrcBudget': 'UZUME SRC budget reference',
+  'audioProfessional.row.uzumeReferenceSrcOutputRisk': 'UZUME SRC output risk reference',
+  'audioProfessional.row.uzumeReferenceSrcPhaseApodizing': 'UZUME SRC phase/apodizing reference',
+  'audioProfessional.row.uzumeReferenceSrcRollback': 'UZUME SRC rollback reference',
+  'audioProfessional.row.uzumeReferenceSrcValidation': 'UZUME SRC validation reference',
+  'audioProfessional.row.uzumeReferenceUnderrunFallback': 'UZUME underrun fallback reference',
   'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
+  'audioProfessional.row.uzumeSafetyMeter': 'UZUME safety meter',
   'audioProfessional.row.signalPath': '信号路径',
   'audioProfessional.row.sharedDeviceSampleRate': '共享设备采样率',
   'audioProfessional.row.sharedStability': '共享稳定档',
@@ -7216,9 +7292,47 @@ const zhTW: TranslationMap = {
   'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
   'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
   'audioProfessional.row.uzumeHeadroom': 'UZUME headroom',
+  'audioProfessional.row.uzumeLimiterReference': 'UZUME limiter reference',
   'audioProfessional.row.uzumePathPlan': 'UZUME path plan',
   'audioProfessional.row.uzumeProfile': 'UZUME profile',
+  'audioProfessional.row.uzumeReferenceAssignments': 'UZUME reference assignment',
+  'audioProfessional.row.uzumeReferenceBitPerfect': 'UZUME reference bit-perfect',
+  'audioProfessional.row.uzumeReferenceBlockBoundary': 'UZUME block boundary reference',
+  'audioProfessional.row.uzumeReferenceCallbackRing': 'UZUME callback ring reference',
+  'audioProfessional.row.uzumeReferenceCallbackSafeControls': 'UZUME urgent controls reference',
+  'audioProfessional.row.uzumeReferenceCompiler': 'UZUME reference compiler',
+  'audioProfessional.row.uzumeReferenceContinuity': 'UZUME continuity reference',
+  'audioProfessional.row.uzumeReferenceConvolution': 'UZUME convolution reference',
+  'audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard': 'UZUME convolution duplicate guard',
+  'audioProfessional.row.uzumeReferenceConvolutionSerialNull': 'UZUME convolution serial null reference',
+  'audioProfessional.row.uzumeReferenceDsdFamily': 'UZUME DSD family reference',
+  'audioProfessional.row.uzumeReferenceEqualPowerCrossfade': 'UZUME equal-power crossfade reference',
+  'audioProfessional.row.uzumeReferenceFirGaplessHistory': 'UZUME FIR gapless reference',
+  'audioProfessional.row.uzumeReferenceFlushDrain': 'UZUME flush/drain reference',
+  'audioProfessional.row.uzumeReferenceGaplessConcat': 'UZUME gapless SRC reference',
+  'audioProfessional.row.uzumeReferenceGainStaging': 'UZUME gain staging reference',
+  'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
+  'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
+  'audioProfessional.row.uzumeReferenceStereoProcedural': 'UZUME stereo procedural reference',
+  'audioProfessional.row.uzumeReferenceLatencyOwners': 'UZUME reference latency owners',
+  'audioProfessional.row.uzumeReferenceMergeGroups': 'UZUME reference merge groups',
+  'audioProfessional.row.uzumeReferenceOutputDevicePolicy': 'UZUME output device policy reference',
+  'audioProfessional.row.uzumeReferencePcmIngressGuard': 'UZUME PCM ingress guard reference',
+  'audioProfessional.row.uzumeReferencePcmOutputQuantization': 'UZUME PCM output quantization reference',
+  'audioProfessional.row.uzumeReferencePerEarEqPlacement': 'UZUME per-ear EQ placement reference',
+  'audioProfessional.row.uzumeReferencePreRoll': 'UZUME pre-roll reference',
+  'audioProfessional.row.uzumeReferenceRenderAheadCache': 'UZUME render-ahead cache',
+  'audioProfessional.row.uzumeReferenceResampling': 'UZUME SRC reference',
+  'audioProfessional.row.uzumeReferenceResponseResample': 'UZUME response resample reference',
+  'audioProfessional.row.uzumeReferenceSrcArtifacts': 'UZUME SRC artifact reference',
+  'audioProfessional.row.uzumeReferenceSrcBudget': 'UZUME SRC budget reference',
+  'audioProfessional.row.uzumeReferenceSrcOutputRisk': 'UZUME SRC output risk reference',
+  'audioProfessional.row.uzumeReferenceSrcPhaseApodizing': 'UZUME SRC phase/apodizing reference',
+  'audioProfessional.row.uzumeReferenceSrcRollback': 'UZUME SRC rollback reference',
+  'audioProfessional.row.uzumeReferenceSrcValidation': 'UZUME SRC validation reference',
+  'audioProfessional.row.uzumeReferenceUnderrunFallback': 'UZUME underrun fallback reference',
   'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
+  'audioProfessional.row.uzumeSafetyMeter': 'UZUME safety meter',
   'audioProfessional.row.signalPath': '訊號路徑',
   'audioProfessional.row.sharedDeviceSampleRate': '共享裝置取樣率',
   'audioProfessional.row.sharedStability': '共享穩定檔',
@@ -10131,9 +10245,47 @@ const jaJP: TranslationMap = {
   'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
   'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
   'audioProfessional.row.uzumeHeadroom': 'UZUME headroom',
+  'audioProfessional.row.uzumeLimiterReference': 'UZUME limiter reference',
   'audioProfessional.row.uzumePathPlan': 'UZUME path plan',
   'audioProfessional.row.uzumeProfile': 'UZUME profile',
+  'audioProfessional.row.uzumeReferenceAssignments': 'UZUME reference assignment',
+  'audioProfessional.row.uzumeReferenceBitPerfect': 'UZUME reference bit-perfect',
+  'audioProfessional.row.uzumeReferenceBlockBoundary': 'UZUME block boundary reference',
+  'audioProfessional.row.uzumeReferenceCallbackRing': 'UZUME callback ring reference',
+  'audioProfessional.row.uzumeReferenceCallbackSafeControls': 'UZUME urgent controls reference',
+  'audioProfessional.row.uzumeReferenceCompiler': 'UZUME reference compiler',
+  'audioProfessional.row.uzumeReferenceContinuity': 'UZUME continuity reference',
+  'audioProfessional.row.uzumeReferenceConvolution': 'UZUME convolution reference',
+  'audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard': 'UZUME convolution duplicate guard',
+  'audioProfessional.row.uzumeReferenceConvolutionSerialNull': 'UZUME convolution serial null reference',
+  'audioProfessional.row.uzumeReferenceDsdFamily': 'UZUME DSD family reference',
+  'audioProfessional.row.uzumeReferenceEqualPowerCrossfade': 'UZUME equal-power crossfade reference',
+  'audioProfessional.row.uzumeReferenceFirGaplessHistory': 'UZUME FIR gapless reference',
+  'audioProfessional.row.uzumeReferenceFlushDrain': 'UZUME flush/drain reference',
+  'audioProfessional.row.uzumeReferenceGaplessConcat': 'UZUME gapless SRC reference',
+  'audioProfessional.row.uzumeReferenceGainStaging': 'UZUME gain staging reference',
+  'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
+  'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
+  'audioProfessional.row.uzumeReferenceStereoProcedural': 'UZUME stereo procedural reference',
+  'audioProfessional.row.uzumeReferenceLatencyOwners': 'UZUME reference latency owners',
+  'audioProfessional.row.uzumeReferenceMergeGroups': 'UZUME reference merge groups',
+  'audioProfessional.row.uzumeReferenceOutputDevicePolicy': 'UZUME output device policy reference',
+  'audioProfessional.row.uzumeReferencePcmIngressGuard': 'UZUME PCM ingress guard reference',
+  'audioProfessional.row.uzumeReferencePcmOutputQuantization': 'UZUME PCM output quantization reference',
+  'audioProfessional.row.uzumeReferencePerEarEqPlacement': 'UZUME per-ear EQ placement reference',
+  'audioProfessional.row.uzumeReferencePreRoll': 'UZUME pre-roll reference',
+  'audioProfessional.row.uzumeReferenceRenderAheadCache': 'UZUME render-ahead cache',
+  'audioProfessional.row.uzumeReferenceResampling': 'UZUME SRC reference',
+  'audioProfessional.row.uzumeReferenceResponseResample': 'UZUME response resample reference',
+  'audioProfessional.row.uzumeReferenceSrcArtifacts': 'UZUME SRC artifact reference',
+  'audioProfessional.row.uzumeReferenceSrcBudget': 'UZUME SRC budget reference',
+  'audioProfessional.row.uzumeReferenceSrcOutputRisk': 'UZUME SRC output risk reference',
+  'audioProfessional.row.uzumeReferenceSrcPhaseApodizing': 'UZUME SRC phase/apodizing reference',
+  'audioProfessional.row.uzumeReferenceSrcRollback': 'UZUME SRC rollback reference',
+  'audioProfessional.row.uzumeReferenceSrcValidation': 'UZUME SRC validation reference',
+  'audioProfessional.row.uzumeReferenceUnderrunFallback': 'UZUME underrun fallback reference',
   'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
+  'audioProfessional.row.uzumeSafetyMeter': 'UZUME safety meter',
   'audioProfessional.row.signalPath': '信号パス',
   'audioProfessional.row.sharedDeviceSampleRate': '共有デバイスレート',
   'audioProfessional.row.sharedStability': '共有安定度',
@@ -13115,9 +13267,47 @@ const enUS: TranslationMap = {
   'audioProfessional.row.uzumeGpuLimiter': 'GPU limiter',
   'audioProfessional.row.uzumeGpuMatrix': 'GPU matrix',
   'audioProfessional.row.uzumeHeadroom': 'UZUME headroom',
+  'audioProfessional.row.uzumeLimiterReference': 'UZUME limiter reference',
   'audioProfessional.row.uzumePathPlan': 'UZUME path plan',
   'audioProfessional.row.uzumeProfile': 'UZUME profile',
+  'audioProfessional.row.uzumeReferenceAssignments': 'UZUME reference assignment',
+  'audioProfessional.row.uzumeReferenceBitPerfect': 'UZUME reference bit-perfect',
+  'audioProfessional.row.uzumeReferenceBlockBoundary': 'UZUME block boundary reference',
+  'audioProfessional.row.uzumeReferenceCallbackRing': 'UZUME callback ring reference',
+  'audioProfessional.row.uzumeReferenceCallbackSafeControls': 'UZUME urgent controls reference',
+  'audioProfessional.row.uzumeReferenceCompiler': 'UZUME reference compiler',
+  'audioProfessional.row.uzumeReferenceContinuity': 'UZUME continuity reference',
+  'audioProfessional.row.uzumeReferenceConvolution': 'UZUME convolution reference',
+  'audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard': 'UZUME convolution duplicate guard',
+  'audioProfessional.row.uzumeReferenceConvolutionSerialNull': 'UZUME convolution serial null reference',
+  'audioProfessional.row.uzumeReferenceDsdFamily': 'UZUME DSD family reference',
+  'audioProfessional.row.uzumeReferenceEqualPowerCrossfade': 'UZUME equal-power crossfade reference',
+  'audioProfessional.row.uzumeReferenceFirGaplessHistory': 'UZUME FIR gapless reference',
+  'audioProfessional.row.uzumeReferenceFlushDrain': 'UZUME flush/drain reference',
+  'audioProfessional.row.uzumeReferenceGaplessConcat': 'UZUME gapless SRC reference',
+  'audioProfessional.row.uzumeReferenceGainStaging': 'UZUME gain staging reference',
+  'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
+  'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
+  'audioProfessional.row.uzumeReferenceStereoProcedural': 'UZUME stereo procedural reference',
+  'audioProfessional.row.uzumeReferenceLatencyOwners': 'UZUME reference latency owners',
+  'audioProfessional.row.uzumeReferenceMergeGroups': 'UZUME reference merge groups',
+  'audioProfessional.row.uzumeReferenceOutputDevicePolicy': 'UZUME output device policy reference',
+  'audioProfessional.row.uzumeReferencePcmIngressGuard': 'UZUME PCM ingress guard reference',
+  'audioProfessional.row.uzumeReferencePcmOutputQuantization': 'UZUME PCM output quantization reference',
+  'audioProfessional.row.uzumeReferencePerEarEqPlacement': 'UZUME per-ear EQ placement reference',
+  'audioProfessional.row.uzumeReferencePreRoll': 'UZUME pre-roll reference',
+  'audioProfessional.row.uzumeReferenceRenderAheadCache': 'UZUME render-ahead cache',
+  'audioProfessional.row.uzumeReferenceResampling': 'UZUME SRC reference',
+  'audioProfessional.row.uzumeReferenceResponseResample': 'UZUME response resample reference',
+  'audioProfessional.row.uzumeReferenceSrcArtifacts': 'UZUME SRC artifact reference',
+  'audioProfessional.row.uzumeReferenceSrcBudget': 'UZUME SRC budget reference',
+  'audioProfessional.row.uzumeReferenceSrcOutputRisk': 'UZUME SRC output risk reference',
+  'audioProfessional.row.uzumeReferenceSrcPhaseApodizing': 'UZUME SRC phase/apodizing reference',
+  'audioProfessional.row.uzumeReferenceSrcRollback': 'UZUME SRC rollback reference',
+  'audioProfessional.row.uzumeReferenceSrcValidation': 'UZUME SRC validation reference',
+  'audioProfessional.row.uzumeReferenceUnderrunFallback': 'UZUME underrun fallback reference',
   'audioProfessional.row.uzumeRuntime': 'UZUME runtime',
+  'audioProfessional.row.uzumeSafetyMeter': 'UZUME safety meter',
   'audioProfessional.row.signalPath': 'Signal path',
   'audioProfessional.row.sharedDeviceSampleRate': 'Shared device rate',
   'audioProfessional.row.sharedStability': 'Shared stability',

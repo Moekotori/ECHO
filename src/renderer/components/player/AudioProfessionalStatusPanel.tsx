@@ -96,6 +96,764 @@ const formatUzumePathPlan = (status: AudioStatus | null, fallback: string): stri
     .join(' | ') || fallback;
 };
 
+const formatReferenceEngineId = (value: string): string =>
+  value.replace(/-reference$/u, ' ref').replaceAll('-', ' ');
+
+const formatUzumeReferenceCompiler = (status: AudioStatus | null, fallback: string): string => {
+  const plan = status?.uzumeReferencePlan;
+  if (!plan) {
+    return fallback;
+  }
+
+  return `schema v${plan.schemaVersion} / telemetry v${plan.telemetrySchemaVersion} / ${plan.internalDomain}`;
+};
+
+const formatUzumeReferenceAssignments = (status: AudioStatus | null, fallback: string): string => {
+  const plan = status?.uzumeReferencePlan;
+  const assignments = plan?.engineAssignments ?? [];
+  if (!assignments.length) {
+    return fallback;
+  }
+
+  const assignmentsBySection = new Map(assignments.map((assignment) => [assignment.sectionId, assignment]));
+  const orderedSections = plan?.orderedProfileSections.length ? plan.orderedProfileSections : assignments.map((assignment) => assignment.sectionId);
+
+  return orderedSections
+    .map((sectionId) => {
+      const assignment = assignmentsBySection.get(sectionId);
+      if (!assignment) {
+        return `${sectionId}->missing assignment`;
+      }
+
+      const details = [
+        assignment.active ? 'active' : 'inactive',
+        assignment.mergeGroupId ? `merge ${assignment.mergeGroupId}` : null,
+        assignment.latencyOwner ? `latency ${assignment.latencyOwner}` : null,
+        assignment.splitReason ? `split ${normalizeReason(assignment.splitReason, fallback)}` : null,
+      ].filter((part): part is string => Boolean(part));
+
+      return `${assignment.sectionId}->${formatReferenceEngineId(assignment.engineId)} (${details.join(', ')})`;
+    })
+    .join(' | ');
+};
+
+const formatUzumeReferenceMergeGroups = (status: AudioStatus | null, fallback: string): string => {
+  const groups = status?.uzumeReferencePlan?.mergeGroups ?? [];
+  if (!groups.length) {
+    return fallback;
+  }
+
+  return groups
+    .map((group) => {
+      const details = [
+        group.active ? 'active' : 'inactive',
+        group.sampleRateFamily ?? null,
+        group.sections.length ? `sections ${group.sections.join('+')}` : null,
+        group.splitReason ? `split ${normalizeReason(group.splitReason, fallback)}` : null,
+      ].filter((part): part is string => Boolean(part));
+
+      return `${group.id}->${formatReferenceEngineId(group.engineId)} (${details.join(', ')})`;
+    })
+    .join(' | ');
+};
+
+const formatUzumeReferenceLatencyOwners = (status: AudioStatus | null, fallback: string): string => {
+  const owners = Object.entries(status?.uzumeReferencePlan?.latencyOwners ?? {});
+  if (!owners.length) {
+    return fallback;
+  }
+
+  return owners
+    .map(([sectionId, owner]) => `${sectionId}->${owner}`)
+    .join(' | ');
+};
+
+const formatUzumeReferenceBitPerfect = (status: AudioStatus | null, fallback: string): string => {
+  const plan = status?.uzumeReferencePlan;
+  if (!plan) {
+    return fallback;
+  }
+
+  const direct = plan.directDisabledReason
+    ? `direct disabled ${normalizeReason(plan.directDisabledReason, fallback)}`
+    : 'direct path available';
+
+  return `${plan.bitPerfectState} / ${direct} / ${plan.sourceContainer}->${plan.outputContainer} / ${plan.internalDomain} / ${plan.formatPath}`;
+};
+
+const formatUzumeReferenceOutputDevicePolicy = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.outputDevicePolicy;
+  if (!report) {
+    return fallback;
+  }
+
+  const reasons = report.reasons.length
+    ? ` / reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}`
+    : '';
+
+  return [
+    report.artifact,
+    report.formatPath,
+    report.outputMode ?? fallback,
+    report.deviceCapability,
+    report.state,
+    `file ${formatRate(report.fileRate, fallback)}`,
+    `decoder ${formatRate(report.decoderOutputRate, fallback)}`,
+    `requested ${formatRate(report.requestedOutputRate, fallback)}`,
+    `actual ${formatRate(report.actualDeviceRate, fallback)}`,
+    `shared ${formatRate(report.sharedDeviceRate, fallback)}`,
+    `output ${report.outputContainer}`,
+    `bit-perfect candidate ${report.bitPerfectCandidate === null ? fallback : report.bitPerfectCandidate ? 'yes' : 'no'}`,
+    `resampling ${report.resampling === null ? fallback : report.resampling ? 'yes' : 'no'}`,
+    `mismatch ${report.sampleRateMismatch === null ? fallback : report.sampleRateMismatch ? 'yes' : 'no'}`,
+    `recommend ${normalizeReason(report.recommendation, fallback)}`,
+  ].join(' / ') + reasons;
+};
+
+const formatUzumeReferenceResampling = (status: AudioStatus | null, fallback: string): string => {
+  const resampling = status?.uzumeReferencePlan?.resampling;
+  if (!resampling) {
+    return fallback;
+  }
+
+  const source = formatRate(resampling.sourceRate, fallback);
+  const target = formatRate(resampling.targetRate, fallback);
+  const delayMs = resampling.groupDelayMs !== null && resampling.groupDelayMs !== undefined
+    ? ` / ${formatFractionalMs(resampling.groupDelayMs, fallback)}`
+    : '';
+  const delay = `${resampling.groupDelaySamples} samples${delayMs}`;
+  const taps = resampling.filterContract?.tapCount ? ` / ${resampling.filterContract.tapCount} taps` : '';
+  const cutoff = resampling.filterContract?.tapCount
+    ? ` / cutoff ${Math.round(resampling.filterContract.cutoffRatio * 100)}%`
+    : '';
+  const alias = resampling.artifactMetrics?.aliasRejectionDb !== null && resampling.artifactMetrics?.aliasRejectionDb !== undefined
+    ? ` / alias ${resampling.artifactMetrics.aliasRejectionDb.toFixed(1)} dB`
+    : '';
+  const risk = resampling.doubleResamplingRisk ? ` / ${normalizeReason(resampling.doubleResamplingRisk, fallback)}` : '';
+
+  return resampling.active
+    ? `${resampling.family} ${source}->${target} / ${resampling.phaseMode} / ${delay}${taps}${cutoff}${alias}${risk}`
+    : `${resampling.family} / same-rate bypass`;
+};
+
+const formatUzumeReferenceSrcRollback = (status: AudioStatus | null, fallback: string): string => {
+  const rollback = status?.uzumeReferencePlan?.resampling?.qualityRollback;
+  if (!rollback) {
+    return fallback;
+  }
+
+  const profiles = [rollback.primaryProfile, ...rollback.rollbackChain]
+    .map((profile) => `${profile.id} ${profile.tapCount} taps ${profile.stopbandAttenuationDb} dB ${profile.latencyClass}`)
+    .join(' -> ');
+
+  return `${rollback.state} / ${rollback.reason.replaceAll('-', ' ')} / ${rollback.familyLock} / ${profiles} / ${rollback.legacyFallbackAllowed ? 'legacy fallback allowed' : `legacy blocked ${rollback.legacyFallbackSignalPath}`} / ${rollback.shortBridgeIsRollback ? 'short bridge rollback' : 'short bridge not rollback'}`;
+};
+
+const formatUzumeReferenceSrcBudget = (status: AudioStatus | null, fallback: string): string => {
+  const metrics = status?.uzumeReferencePlan?.resampling?.artifactMetrics;
+  const budget = metrics?.realtimeBudget;
+  const nullResidual = metrics?.nullResidual;
+  if (!budget) {
+    return fallback;
+  }
+
+  const realtimeFactor = budget.estimatedRealtimeFactor === null
+    ? 'realtime factor unmeasured'
+    : `realtime factor ${budget.estimatedRealtimeFactor.toFixed(2)}x`;
+  const nullText = nullResidual
+    ? `null ${nullResidual.state}${nullResidual.maxAbs !== null && nullResidual.maxAbs !== undefined ? ` max ${nullResidual.maxAbs.toFixed(6)}` : ''}${nullResidual.rms !== null && nullResidual.rms !== undefined ? ` rms ${nullResidual.rms.toFixed(6)}` : ''}`
+    : fallback;
+
+  return `${budget.backend} / ${budget.estimatedMultiplyAdds} multiply-adds / ${realtimeFactor} / ${budget.safetyClass} / ${nullText}`;
+};
+
+const formatMetricDb = (value: number | null | undefined): string | null =>
+  value !== null && value !== undefined && Number.isFinite(value) ? `${value.toFixed(2)} dB` : null;
+
+const formatMetricRatio = (value: number | null | undefined): string | null =>
+  value !== null && value !== undefined && Number.isFinite(value) ? value.toFixed(4) : null;
+
+const formatMetricScalar = (value: number | null | undefined): string | null => {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+  if (Math.abs(value) > 0 && Math.abs(value) < 0.000001) {
+    return value.toExponential(2);
+  }
+  return value.toFixed(6);
+};
+
+const formatUzumeReferenceSrcArtifacts = (status: AudioStatus | null, fallback: string): string => {
+  const metrics = status?.uzumeReferencePlan?.resampling?.artifactMetrics;
+  if (!metrics) {
+    return fallback;
+  }
+
+  const passbandRipple = formatMetricDb(metrics.passbandRippleDb);
+  const stopbandAttenuation = formatMetricDb(metrics.stopbandAttenuationDb);
+  const cutoffRatio = formatMetricRatio(metrics.cutoffRatioEstimate);
+  const transitionWidth = formatMetricRatio(metrics.transitionWidthRatioEstimate);
+  const phaseSpread = formatMetricRatio(metrics.phaseGroupDelaySpreadSamples);
+  const multiTonePeak = formatMetricRatio(metrics.multiTonePeak);
+  const randomPeak = formatMetricRatio(metrics.randomPeak);
+  const randomSeed = Number.isFinite(metrics.randomSeed) ? `random seed ${metrics.randomSeed}` : null;
+
+  return [
+    passbandRipple ? `passband ${passbandRipple}` : null,
+    stopbandAttenuation ? `stopband ${stopbandAttenuation}` : null,
+    cutoffRatio ? `cutoff ${cutoffRatio}` : null,
+    transitionWidth ? `transition ${transitionWidth}` : null,
+    phaseSpread ? `phase spread ${phaseSpread} samples` : null,
+    `silence ${metrics.silenceResidual.state} max ${metrics.silenceResidual.maxAbs.toFixed(6)}`,
+    multiTonePeak ? `multi-tone peak ${multiTonePeak}` : null,
+    randomPeak ? `seeded-random peak ${randomPeak}` : null,
+    randomSeed,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceSrcValidation = (status: AudioStatus | null, fallback: string): string => {
+  const validation = status?.uzumeReferencePlan?.resampling?.validation;
+  if (!validation) {
+    return fallback;
+  }
+
+  const checks = validation.checks.map((check) => `${check.id}:${check.state}`).join(' / ');
+  return [
+    validation.artifact,
+    `overall ${validation.overall}`,
+    checks,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceSrcOutputRisk = (status: AudioStatus | null, fallback: string): string => {
+  const risk = status?.uzumeReferencePlan?.resampling?.outputResamplingRisk;
+  if (!risk) {
+    return fallback;
+  }
+
+  return [
+    risk.artifact,
+    risk.state,
+    risk.reason ? normalizeReason(risk.reason, fallback) : 'no double-resampling risk',
+    `requested ${formatRate(risk.requestedOutputRate, fallback)}`,
+    `actual ${formatRate(risk.actualDeviceRate, fallback)}`,
+    risk.sharedDeviceRate !== null && risk.sharedDeviceRate !== undefined ? `shared ${formatRate(risk.sharedDeviceRate, fallback)}` : null,
+    `current ${risk.currentResamplerEngine ?? 'none'}`,
+    `tone ${risk.signalPathTone}`,
+    `recommend ${risk.recommendation?.replaceAll('-', ' ') ?? 'none'}`,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceSrcPhaseApodizing = (status: AudioStatus | null, fallback: string): string => {
+  const resampling = status?.uzumeReferencePlan?.resampling;
+  if (!resampling) {
+    return fallback;
+  }
+
+  const phase = resampling.phaseModeArtifacts;
+  const apodizing = resampling.apodizingArtifact;
+  const phaseModes = phase.modes
+    .map((mode) => `${mode.mode} gd ${mode.groupDelaySamples.toFixed(2)} spread ${(mode.groupDelaySpreadSamples ?? 0).toFixed(2)} residual ${mode.residualVsLinearMaxAbs.toFixed(4)}/${mode.residualVsLinearRms.toFixed(4)}`)
+    .join(' | ');
+
+  return [
+    phase.artifact,
+    `modes ${phase.phaseModesMeasured.join('+')}`,
+    phaseModes,
+    apodizing.artifact,
+    apodizing.state,
+    `${apodizing.mode} vs ${apodizing.baseline}`,
+    apodizing.ringingReductionDb !== null ? `ringing reduction ${apodizing.ringingReductionDb.toFixed(2)} dB` : null,
+    `response residual ${apodizing.responseResidualMaxAbs.toFixed(4)}/${apodizing.responseResidualRms.toFixed(4)}`,
+    apodizing.highFrequencyRestorationClaim ? 'hf restoration claimed' : 'no hf restoration claim',
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceDsdFamily = (status: AudioStatus | null, fallback: string): string => {
+  const dsd = status?.uzumeReferencePlan?.dsdFamily;
+  if (!dsd) {
+    return fallback;
+  }
+
+  const disabled = dsd.disabledControls.length
+    ? dsd.disabledControls.map((control) => `${control.control}:${normalizeReason(control.reason, fallback)}`).join(' | ')
+    : 'disabled none';
+  const d2p = dsd.d2p.active
+    ? `d2p ${dsd.d2p.decimationProfile ?? fallback} @ ${dsd.d2p.internalPcmRate ?? fallback} Hz`
+    : dsd.d2p.available ? 'd2p available' : 'd2p unavailable';
+  const sdm = dsd.sdm.active
+    ? `sdm ${dsd.sdm.mode} / ${dsd.sdm.modulatorProfile ?? fallback} / target ${dsd.sdm.targetDsdRate ?? fallback} / overload ${dsd.sdm.overloadMarginDb ?? fallback} dB / noise ${dsd.sdm.ultrasonicNoiseRisk ?? fallback} / ${dsd.sdm.realtimeSafetyClass}`
+    : dsd.sdm.available ? 'sdm available' : 'sdm unavailable';
+
+  return [
+    dsd.artifact,
+    `${dsd.formatPath}:${dsd.state}`,
+    `${dsd.sourceContainer}->${dsd.outputContainer}`,
+    dsd.internalDomain,
+    dsd.directDisabledReason ? `direct disabled ${normalizeReason(dsd.directDisabledReason, fallback)}` : 'direct allowed',
+    dsd.fallbackReason ? `fallback ${normalizeReason(dsd.fallbackReason, fallback)}` : null,
+    `allowed ${dsd.allowedControls.join('+') || 'none'}`,
+    disabled,
+    `pcm dsp ${dsd.pcmDomainDspAllowed ? 'allowed' : 'blocked'}`,
+    `pcm dither ${dsd.pcmDitherAllowed ? 'allowed' : 'blocked'}`,
+    `sdm noise ${dsd.sdmNoiseShapingTelemetry ? 'telemetry' : 'none'}`,
+    dsd.dsd.outputEncoding ? `output ${dsd.dsd.outputEncoding}` : null,
+    d2p,
+    sdm,
+    dsd.reasons.length ? `reasons ${dsd.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceConvolution = (status: AudioStatus | null, fallback: string): string => {
+  const convolution = status?.uzumeReferencePlan?.sharedConvolution;
+  if (!convolution) {
+    return fallback;
+  }
+
+  const plan = convolution.partitionPlan;
+  const sourceText = convolution.mergedSourceIds.length
+    ? convolution.mergedSourceIds.join('+')
+    : convolution.sources.map((source) => source.id).join('+') || fallback;
+  const blockText = plan.internalBlockFrames
+    ? `${plan.callbackBlockFrames}->${plan.internalBlockFrames}`
+    : `${plan.callbackBlockFrames}->inactive`;
+  const splitText = Object.entries(convolution.splitReasons)
+    .map(([sourceId, reason]) => `${sourceId}:${normalizeReason(reason, fallback)}`)
+    .join(' | ');
+  const splitSuffix = splitText ? ` / split ${splitText}` : '';
+
+  return convolution.active
+    ? `${convolution.engine} / ${sourceText} / ${plan.sampleRateFamily ?? fallback} / block ${blockText} / tail ${plan.tailFrames} / drain ${plan.drainFrames}${splitSuffix}`
+    : `${convolution.engine} / inactive / ${sourceText}${splitSuffix}`;
+};
+
+const formatUzumeReferenceResponseResample = (status: AudioStatus | null, fallback: string): string => {
+  const reports = status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports ?? [];
+  if (!reports.length) {
+    return fallback;
+  }
+
+  return reports.map((report) => [
+    `${report.sourceId}:${report.state}`,
+    `${formatRate(report.sourceRate, fallback)}->${formatRate(report.targetRate, fallback)}`,
+    `${report.sourceFamily ?? fallback}->${report.targetFamily ?? fallback}`,
+    report.engine,
+    report.linearInterpolationRejected ? 'linear interpolation rejected' : 'linear interpolation not used',
+    report.filterContract ? `${report.filterContract.tapCount} taps/${report.filterContract.cutoffRatio.toFixed(4)} cutoff/${report.filterContract.stopbandAttenuationDb} dB` : null,
+    normalizeReason(report.reason, fallback),
+  ].filter((part): part is string => Boolean(part)).join(' / ')).join(' | ');
+};
+
+const formatUzumeReferenceConvolutionDuplicateGuard = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard;
+  if (!report) {
+    return fallback;
+  }
+
+  const assignments = report.sourceAssignments
+    .map((assignment) => `${assignment.sourceId}:${assignment.state}${assignment.convolverPlanId ? ` conv ${assignment.convolverPlanId}` : ''}${assignment.fftPlanId ? ` fft ${assignment.fftPlanId}` : ''}${assignment.splitReason ? ` split ${normalizeReason(assignment.splitReason, fallback)}` : ''}`)
+    .join(' | ');
+  const rejected = report.rejectedDuplicatePlans
+    .map((plan) => `${plan.sourceId}:${plan.rejectedConvolverPlanId}+${plan.rejectedFftPlanId}`)
+    .join(' | ');
+
+  return [
+    report.artifact,
+    report.engine,
+    report.state,
+    `merged ${report.planCounts.mergedSourceCount}`,
+    `split ${report.planCounts.splitSourceCount}`,
+    `convolver plans ${report.planCounts.convolverPlanCount}`,
+    `cpu fft ${report.planCounts.cpuFftPlanCount}`,
+    `gpu fft ${report.planCounts.gpuFftPlanCount}`,
+    `rejected conv ${report.planCounts.rejectedDuplicateConvolverCount}`,
+    `rejected fft ${report.planCounts.rejectedDuplicateFftPlanCount}`,
+    assignments,
+    rejected ? `rejected ${rejected}` : 'rejected none',
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceConvolutionSerialNull = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference;
+  if (!report) {
+    return fallback;
+  }
+
+  return [
+    report.artifact,
+    report.engine,
+    report.state,
+    `order ${report.sourceOrder.length ? report.sourceOrder.join('->') : 'none'}`,
+    `merged taps ${report.mergedResponseTapCounts.length ? report.mergedResponseTapCounts.join('+') : 'none'}`,
+    `frames ${report.comparedFrames}`,
+    report.maxAbs !== null && report.rms !== null
+      ? `residual ${report.maxAbs.toFixed(6)}/${report.rms.toFixed(6)}`
+      : 'residual n/a',
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferencePcmOutputQuantization = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.pcmOutputQuantization;
+  if (!report) {
+    return fallback;
+  }
+
+  return [
+    report.artifact,
+    `${report.formatPath}->${report.outputSampleFormat}`,
+    report.state,
+    `bit-perfect ${report.bitPerfectState}`,
+    `pcm dither ${report.pcmDitherAllowed ? 'allowed' : 'blocked'}`,
+    `dither ${report.dither.mode} ${report.dither.enabled ? 'enabled' : 'disabled'}`,
+    report.dither.seed !== null ? `seed ${report.dither.seed}` : null,
+    report.dither.lsbAmplitude !== null ? `lsb ${formatMetricScalar(report.dither.lsbAmplitude)}` : null,
+    `peak ${report.dither.peakDitherLsb.toFixed(4)} lsb`,
+    report.dither.noiseShaping !== 'none' ? `noise ${report.dither.noiseShaping}` : 'noise none',
+    report.quantization.bitDepth !== null ? `${report.quantization.bitDepth} bit` : 'float/no pcm integer depth',
+    report.quantization.maxInteger !== null ? `max ${report.quantization.maxInteger}` : null,
+    `clips ${report.quantization.clippedSamples}`,
+    report.quantization.residualMaxAbs !== null && report.quantization.residualRms !== null
+      ? `residual ${formatMetricScalar(report.quantization.residualMaxAbs)}/${formatMetricScalar(report.quantization.residualRms)}`
+      : 'residual not measured',
+    `sdm noise ${report.sdmNoiseShapingTelemetry ? 'telemetry' : 'none'}`,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferencePcmIngressGuard = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.pcmIngressGuard;
+  if (!report) {
+    return fallback;
+  }
+
+  return [
+    report.artifact,
+    report.state,
+    `expected ${report.expectedChannels ?? fallback}`,
+    `channels ${report.channelCount}`,
+    `frames ${report.frameCount}`,
+    report.rectangular ? 'rectangular' : 'non-rectangular',
+    `peak ${report.peak.toFixed(4)}`,
+    `non-finite ${report.counts.nonFiniteReplaced}`,
+    `denormal ${report.counts.denormalZeroed}`,
+    `mismatch ${report.counts.channelMismatchCount}`,
+    `silence ${report.counts.silenceFrames}`,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceGainStaging = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.gainStaging;
+  if (!report) {
+    return fallback;
+  }
+
+  const stages = report.stages
+    .map((stage) => `${stage.id}:gain ${stage.gainDb.toFixed(2)} dB/cum ${stage.cumulativeGainDb.toFixed(2)} dB/peak ${stage.peak.toFixed(4)}`)
+    .join(' | ');
+
+  return [
+    report.artifact,
+    `order ${report.orderContract.join('->')}`,
+    `total ${report.totalGainDb.toFixed(2)} dB`,
+    `linear ${report.totalGainLinear.toFixed(4)}`,
+    report.clipRisk ? 'clip risk' : 'clip safe',
+    `extra headroom ${report.recommendedAdditionalHeadroomDb.toFixed(2)} dB`,
+    stages,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceIirEq = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.iirEq;
+  if (!report) {
+    return fallback;
+  }
+
+  const bands = report.bands
+    .slice(0, 4)
+    .map((band) =>
+      `band${band.index} ${band.filterType} ${formatRate(band.frequencyHz, fallback)} ${band.gainDb.toFixed(2)} dB q ${band.q.toFixed(2)} ${band.state} coeff ${band.coefficientState} resp ${band.responsePeakDb.toFixed(2)}/${band.responseDipDb.toFixed(2)} dB phase ${band.phaseSpanRadians.toFixed(4)}`)
+    .join(' | ');
+  const omitted = report.bands.length > 4 ? `bands omitted ${report.bands.length - 4}` : null;
+
+  return [
+    report.artifact,
+    report.engine,
+    report.state,
+    `sample ${formatRate(report.sampleRate, fallback)}`,
+    `bands ${report.activeBandCount}/${report.bandCount} active`,
+    `bypassed ${report.bypassedBandCount}`,
+    `order ${report.orderContract}`,
+    bands,
+    omitted,
+    `residual ${report.residual.state} ${report.residual.maxAbs.toFixed(6)}/${report.residual.rms.toFixed(6)}`,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceChannelScope = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.channelScope;
+  if (!report) {
+    return fallback;
+  }
+
+  const operations = report.operations
+    .map((operation) => `${operation.id}:${operation.state}->${operation.targetChannels.join('+') || 'none'} skip ${operation.skippedChannels.join('+') || 'none'}${operation.gainDb !== null ? ` gain ${operation.gainDb.toFixed(2)} dB` : ''}${operation.sourceChannel !== null ? ` source ${operation.sourceChannel}` : ''}`)
+    .join(' | ');
+  const residual = report.residualByChannel
+    .map((channel) => `ch${channel.channelIndex}:${channel.state} ${channel.maxAbs.toFixed(6)}/${channel.rms.toFixed(6)}`)
+    .join(' | ');
+
+  return [
+    report.artifact,
+    report.engine,
+    report.scopeContract,
+    `channels ${report.channelCount}`,
+    `ops ${report.operationCount}`,
+    `applied ${report.appliedOperationCount}`,
+    `noop ${report.noopOperationCount}`,
+    `invalid ${report.invalidOperationCount}`,
+    `untouched ${report.untouchedChannelIndexes.length ? report.untouchedChannelIndexes.join('+') : 'none'}`,
+    operations,
+    residual,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceStereoProcedural = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.stereoProcedural;
+  if (!report) {
+    return fallback;
+  }
+
+  const matrix = `[${report.matrix[0].map((value) => value.toFixed(3)).join(',')};${report.matrix[1].map((value) => value.toFixed(3)).join(',')}]`;
+  const routing = [
+    report.routing.invertLeft ? 'invert-left' : null,
+    report.routing.invertRight ? 'invert-right' : null,
+    report.routing.swapLeftRight ? 'swap' : null,
+    report.routing.monoMode !== 'off' ? `mono ${report.routing.monoMode}` : null,
+  ].filter((part): part is string => Boolean(part)).join('+') || 'routing identity';
+
+  return [
+    report.artifact,
+    report.engine,
+    report.state,
+    `sample ${formatRate(report.sampleRate, fallback)}`,
+    `channels ${report.channelCount}`,
+    `steps ${report.steps.length ? report.steps.join('->') : 'identity'}`,
+    `delay ${report.delaySamples.left.toFixed(3)}/${report.delaySamples.right.toFixed(3)} samples`,
+    `matrix ${matrix}`,
+    routing,
+    report.crossfeed.enabled
+      ? `crossfeed delay ${report.crossfeed.crossDelaySamples} lowpass ${report.crossfeed.lowPassHz ?? fallback} center ${report.crossfeed.centerPreservation}`
+      : 'crossfeed disabled',
+    `input peak ${report.input.peak.toFixed(4)} output peak ${report.output.peak.toFixed(4)}`,
+    `residual ${report.residual.state} ${report.residual.maxAbs.toFixed(6)}/${report.residual.rms.toFixed(6)}`,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceBlockBoundary = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.blockBoundary;
+  if (!report) {
+    return fallback;
+  }
+
+  return [
+    report.artifact,
+    report.policy,
+    `block ${report.blockFrames}`,
+    `input ${report.inputFrames}`,
+    `channels ${report.channelCount}`,
+    `blocks ${report.blockCount}`,
+    `states ${report.blockStates.join('+')}`,
+    `coverage ${report.coverage.state} covered ${report.coverage.coveredFrames} missing ${report.coverage.missingFrames} duplicate ${report.coverage.duplicateFrames} committed ${report.coverage.committedFrames} padded ${report.coverage.paddedFrames}`,
+    `residual ${report.residual.state} ${report.residual.maxAbs.toFixed(6)}/${report.residual.rms.toFixed(6)}`,
+    `boundaries ${report.boundaryCount}`,
+    `introduced ${report.maxIntroducedDiscontinuity.toFixed(6)}`,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatFlushDrainIntent = (
+  label: string,
+  intent: NonNullable<AudioStatus['uzumeReferencePlan']>['flushDrain']['naturalEof'],
+  fallback: string,
+): string => [
+  `${label}:${intent.state}`,
+  `gen ${intent.generationAfter}`,
+  `tail ${intent.tailFrames}`,
+  `drain ${intent.drainFrames}`,
+  intent.resetRequired ? 'reset required' : 'no reset',
+  intent.drainCommitAllowed ? 'drain committed' : 'drain blocked',
+  `source residual ${intent.residual.sourceWindowMaxAbs.toFixed(6)}/${intent.residual.sourceWindowRms.toFixed(6)}`,
+  intent.residual.drainMaxAbs !== null && intent.residual.drainRms !== null
+    ? `drain residual ${intent.residual.drainMaxAbs.toFixed(6)}/${intent.residual.drainRms.toFixed(6)}`
+    : 'drain residual n/a',
+  intent.reasons.length ? `reasons ${intent.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+].filter((part): part is string => Boolean(part)).join(' / ');
+
+const formatUzumeReferenceFlushDrain = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.flushDrain;
+  if (!report) {
+    return fallback;
+  }
+
+  return [
+    report.artifact,
+    report.engine,
+    `generation ${report.generationId}/${report.generationState}`,
+    formatFlushDrainIntent('natural-eof', report.naturalEof, fallback),
+    formatFlushDrainIntent('manual-flush', report.manualFlush, fallback),
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceGaplessConcat = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.gaplessConcat;
+  if (!report) {
+    return fallback;
+  }
+
+  const boundaries = report.boundaries
+    .map((boundary) => `${boundary.beforeSegmentId}->${boundary.afterSegmentId} out ${boundary.outputFrameOffset} reset ${boundary.resetVsConcatMaxAbs.toFixed(6)} jump ${boundary.outputJump.toFixed(6)}`)
+    .join(' | ');
+
+  return [
+    report.artifact,
+    report.policy,
+    report.state,
+    `${formatRate(report.sourceRate, fallback)}->${formatRate(report.targetRate, fallback)}`,
+    `ratio ${report.ratio.toFixed(6)}`,
+    `segments ${report.segmentCount}`,
+    `boundaries ${report.boundaryCount}`,
+    `concat ${report.concatNullResidual.state} ${report.concatNullResidual.maxAbs.toFixed(6)}/${report.concatNullResidual.rms.toFixed(6)}`,
+    `reset ${report.resetResidual.state} ${report.resetResidual.maxAbs.toFixed(6)}/${report.resetResidual.rms.toFixed(6)}`,
+    boundaries ? `boundary ${boundaries}` : null,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceFirGaplessHistory = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.firGaplessHistory;
+  if (!report) {
+    return fallback;
+  }
+
+  const boundaries = report.boundaries
+    .map((boundary) => `${boundary.beforeSegmentId}->${boundary.afterSegmentId} out ${boundary.outputFrameOffset} overlap ${boundary.overlapHistoryFrames} reset ${boundary.resetVsConcatMaxAbs.toFixed(6)} jump ${boundary.outputJump.toFixed(6)}`)
+    .join(' | ');
+
+  return [
+    report.artifact,
+    report.policy,
+    report.engine,
+    report.state,
+    report.sourceId,
+    `sample ${formatRate(report.sampleRate, fallback)}`,
+    `segments ${report.segmentCount}`,
+    `boundaries ${report.boundaryCount}`,
+    `tail ${report.tailFrames}`,
+    `drain ${report.drainFrames}`,
+    `concat ${report.concatNullResidual.state} ${report.concatNullResidual.maxAbs.toFixed(6)}/${report.concatNullResidual.rms.toFixed(6)}`,
+    `reset ${report.resetResidual.state} ${report.resetResidual.maxAbs.toFixed(6)}/${report.resetResidual.rms.toFixed(6)}`,
+    boundaries ? `boundary ${boundaries}` : null,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferencePerEarEqPlacement = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.perEarEqPlacement;
+  if (!report) {
+    return fallback;
+  }
+
+  return [
+    report.artifact,
+    report.compilerRule,
+    report.state,
+    `sample ${formatRate(report.sampleRate, fallback)}`,
+    `order ${report.orderContract.join('->')}`,
+    `per-ear ${report.perEarEq.leftGainDb.toFixed(2)}/${report.perEarEq.rightGainDb.toFixed(2)} dB`,
+    report.crossfeed.enabled
+      ? `crossfeed ${report.crossfeed.crossGainDb?.toFixed(2) ?? fallback} dB delay ${report.crossfeed.crossDelayMs?.toFixed(3) ?? fallback} ms lowpass ${report.crossfeed.lowPassHz ?? fallback} center ${report.crossfeed.centerPreservation}`
+      : 'crossfeed disabled',
+    `pre ${report.preCrossfeedSteps.join('->') || fallback}`,
+    `post ${report.postCrossfeedSteps.join('->') || fallback}`,
+    `residual ${report.residual.comparedFrames} frames ${report.residual.maxAbs.toFixed(6)}/${report.residual.rms.toFixed(6)}`,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatCallbackSafeCase = (
+  label: string,
+  control: NonNullable<AudioStatus['uzumeReferencePlan']>['callbackSafeControls']['urgentControl'],
+  fallback: string,
+): string => [
+  `${label}:${control.control}:${control.state}`,
+  control.classification,
+  control.callbackRule,
+  `cache ${control.renderCacheAction}`,
+  `gen ${control.generationAfterControl}`,
+  control.requiresRenderGraphRebuild ? 'rebuild required' : 'no rebuild',
+  control.commitAllowed ? 'commit allowed' : 'commit blocked',
+  `declick ${control.declick.enabled ? 'enabled' : 'off'} ${control.declick.frames} frames ${control.declick.startGain.toFixed(3)}->${control.declick.endGain.toFixed(3)} step ${control.declick.maxStep.toFixed(6)}`,
+  `envelope ${control.gainEnvelopeFrames}`,
+  `peak ${control.peak.input.toFixed(6)}->${control.peak.output.toFixed(6)}`,
+  control.reasons.length ? `reasons ${control.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+].filter((part): part is string => Boolean(part)).join(' / ');
+
+const formatUzumeReferenceCallbackSafeControls = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.callbackSafeControls;
+  if (!report) {
+    return fallback;
+  }
+
+  return [
+    report.artifact,
+    report.policy,
+    formatCallbackSafeCase('urgent', report.urgentControl, fallback),
+    formatCallbackSafeCase('boundary', report.renderStateBoundary, fallback),
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatCrossfadeCase = (
+  label: string,
+  crossfade: NonNullable<AudioStatus['uzumeReferencePlan']>['equalPowerCrossfade']['rendered'],
+  fallback: string,
+): string => [
+  `${label}:${crossfade.intent}:${crossfade.state}`,
+  crossfade.rejectionReason ? `reject ${normalizeReason(crossfade.rejectionReason, fallback)}` : 'accepted',
+  `sample ${formatRate(crossfade.sampleRate, fallback)}`,
+  `fade ${crossfade.fadeFrames} frames/${crossfade.durationMs.toFixed(3)} ms`,
+  `gain ${crossfade.gainLaw.state}`,
+  crossfade.gainLaw.midpointShortBridgeGain !== null && crossfade.gainLaw.midpointFullProfileGain !== null
+    ? `mid ${crossfade.gainLaw.midpointShortBridgeGain.toFixed(6)}/${crossfade.gainLaw.midpointFullProfileGain.toFixed(6)}`
+    : 'mid n/a',
+  `power error ${crossfade.gainLaw.maxPowerSumError.toFixed(6)}`,
+  crossfade.residualVsHardSwitch.maxAbs !== null && crossfade.residualVsHardSwitch.rms !== null
+    ? `residual ${crossfade.residualVsHardSwitch.state} ${crossfade.residualVsHardSwitch.maxAbs.toFixed(6)}/${crossfade.residualVsHardSwitch.rms.toFixed(6)}`
+    : `residual ${crossfade.residualVsHardSwitch.state}`,
+  `peak ${crossfade.peak.shortBridge.toFixed(6)}/${crossfade.peak.fullProfile.toFixed(6)}/${crossfade.peak.output.toFixed(6)}`,
+  crossfade.reasons.length ? `reasons ${crossfade.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+].filter((part): part is string => Boolean(part)).join(' / ');
+
+const formatUzumeReferenceEqualPowerCrossfade = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.equalPowerCrossfade;
+  if (!report) {
+    return fallback;
+  }
+
+  return [
+    report.artifact,
+    report.policy,
+    formatCrossfadeCase('rendered', report.rendered, fallback),
+    formatCrossfadeCase('rejected-boundary', report.rejectedBoundary, fallback),
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
 const formatIssueReason = (
   value: string,
   fallback: string,
@@ -159,13 +917,72 @@ const formatChannels = (value: number | null | undefined, unknown: string): stri
   formatAudioChannelLayout(value) ?? unknown;
 
 const formatFrames = (value: number | null | undefined, unknown: string): string =>
-  value && Number.isFinite(value) ? `${Math.round(value)} frames` : unknown;
+  value !== null && value !== undefined && Number.isFinite(value) ? `${Math.round(value)} frames` : unknown;
 
 const formatMs = (value: number | null | undefined, unknown: string): string =>
   value !== null && value !== undefined && Number.isFinite(value) ? `${Math.round(value)} ms` : unknown;
 
+const formatFractionalMs = (value: number | null | undefined, unknown: string): string => {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return unknown;
+  }
+  if (Math.abs(value) < 0.005) {
+    return '0 ms';
+  }
+  return `${trimTrailingZero(value.toFixed(value < 10 ? 2 : 1))} ms`;
+};
+
 const formatDb = (value: number | null | undefined, unknown: string): string =>
   value !== null && value !== undefined && Number.isFinite(value) ? `${value.toFixed(2)} dB` : unknown;
+
+const formatUzumeReferenceContinuity = (status: AudioStatus | null, fallback: string): string => {
+  const continuity = status?.uzumeReferencePlan?.continuity?.continuity;
+  if (!continuity) {
+    return fallback;
+  }
+
+  const shortBridge = continuity.shortBridgeAllowed
+    ? 'short bridge allowed'
+    : `short bridge blocked ${normalizeReason(continuity.shortBridgeReason, fallback)}`;
+
+  return `${continuity.policy} / ${continuity.intent}->${continuity.selectedPath} / ${continuity.callbackRule} / wait ${continuity.waitTarget} / ${shortBridge} / rollback ${continuity.qualityRollback}`;
+};
+
+const formatUzumeReferencePreRoll = (status: AudioStatus | null, fallback: string): string => {
+  const preRoll = status?.uzumeReferencePlan?.continuity?.preRoll;
+  if (!preRoll) {
+    return fallback;
+  }
+
+  return `${preRoll.state} / required ${formatFrames(preRoll.preRollRequiredFrames, fallback)} / slack ${formatFrames(preRoll.deadlineSlackFrames, fallback)} / render-ahead ${preRoll.renderAheadState} ${preRoll.renderAheadReadyFrames}/${preRoll.renderAheadTargetFrames} / ring ${formatFrames(preRoll.outputRingDepthFrames, fallback)} / ${preRoll.handoffStrategy} / ${preRoll.commitAllowed ? 'commit ready' : 'commit waits full profile'}`;
+};
+
+const formatUzumeReferenceCallbackRing = (status: AudioStatus | null, fallback: string): string => {
+  const ring = status?.uzumeReferencePlan?.continuity?.callbackRing;
+  if (!ring) {
+    return fallback;
+  }
+
+  return `${ring.state} / ${ring.telemetryStatus} / depth ${formatFrames(ring.depthFrames, fallback)} / ${ring.depthBlocks.toFixed(1)} blocks / block ${formatFrames(ring.callbackBlockFrames, fallback)} / missing ${formatFrames(ring.missingFrames, fallback)} / ${ring.readRule} / no GPU wait`;
+};
+
+const formatUzumeReferenceRenderAheadCache = (status: AudioStatus | null, fallback: string): string => {
+  const cache = status?.uzumeReferencePlan?.continuity?.renderAheadCache;
+  if (!cache) {
+    return fallback;
+  }
+
+  return `${cache.lookupState}->${cache.commitState} / key ${cache.requestKey} / cache ${cache.bytesAfterEvict}/${cache.budgetBytes} bytes / retained ${cache.retainedKeys.length ? cache.retainedKeys.join('+') : 'none'} / evictions ${cache.evictionCount} / ${cache.callbackRule} / no GPU wait`;
+};
+
+const formatUzumeReferenceUnderrunFallback = (status: AudioStatus | null, fallback: string): string => {
+  const fallbackReference = status?.uzumeReferencePlan?.continuity?.fallback;
+  if (!fallbackReference) {
+    return fallback;
+  }
+
+  return `${fallbackReference.state} / source ${fallbackReference.selectedSource ?? 'none'} / ${fallbackReference.telemetryStatus} / rollback ${fallbackReference.qualityRollback} / ${fallbackReference.fallbackInjected ? 'fallback injected' : 'full-profile commit'} / no GPU wait / short bridge blocked ${normalizeReason(fallbackReference.shortBridgeReason, fallback)}`;
+};
 
 const joinedWarnings = (warnings: string[] | undefined, unknown: string): string =>
   warnings?.length ? warnings.join(', ') : unknown;
@@ -251,8 +1068,55 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
       : status.uzumeBitPerfectState
     : unknown;
   const uzumeFormatPathText = formatUzumeFormatPath(status, unknown);
+  const uzumeReferenceCompilerText = formatUzumeReferenceCompiler(status, unknown);
+  const uzumeReferenceAssignmentsText = formatUzumeReferenceAssignments(status, unknown);
+  const uzumeReferenceMergeGroupsText = formatUzumeReferenceMergeGroups(status, unknown);
+  const uzumeReferenceLatencyOwnersText = formatUzumeReferenceLatencyOwners(status, unknown);
+  const uzumeReferenceBitPerfectText = formatUzumeReferenceBitPerfect(status, unknown);
+  const uzumeReferenceOutputDevicePolicyText = formatUzumeReferenceOutputDevicePolicy(status, unknown);
+  const uzumeReferenceResamplingText = formatUzumeReferenceResampling(status, unknown);
+  const uzumeReferenceSrcRollbackText = formatUzumeReferenceSrcRollback(status, unknown);
+  const uzumeReferenceSrcBudgetText = formatUzumeReferenceSrcBudget(status, unknown);
+  const uzumeReferenceSrcArtifactsText = formatUzumeReferenceSrcArtifacts(status, unknown);
+  const uzumeReferenceSrcValidationText = formatUzumeReferenceSrcValidation(status, unknown);
+  const uzumeReferenceSrcOutputRiskText = formatUzumeReferenceSrcOutputRisk(status, unknown);
+  const uzumeReferenceSrcPhaseApodizingText = formatUzumeReferenceSrcPhaseApodizing(status, unknown);
+  const uzumeReferenceDsdFamilyText = formatUzumeReferenceDsdFamily(status, unknown);
+  const uzumeReferenceConvolutionText = formatUzumeReferenceConvolution(status, unknown);
+  const uzumeReferenceResponseResampleText = formatUzumeReferenceResponseResample(status, unknown);
+  const uzumeReferenceConvolutionDuplicateGuardText = formatUzumeReferenceConvolutionDuplicateGuard(status, unknown);
+  const uzumeReferenceConvolutionSerialNullText = formatUzumeReferenceConvolutionSerialNull(status, unknown);
+  const uzumeReferencePcmOutputQuantizationText = formatUzumeReferencePcmOutputQuantization(status, unknown);
+  const uzumeReferencePcmIngressGuardText = formatUzumeReferencePcmIngressGuard(status, unknown);
+  const uzumeReferenceGainStagingText = formatUzumeReferenceGainStaging(status, unknown);
+  const uzumeReferenceIirEqText = formatUzumeReferenceIirEq(status, unknown);
+  const uzumeReferenceChannelScopeText = formatUzumeReferenceChannelScope(status, unknown);
+  const uzumeReferenceStereoProceduralText = formatUzumeReferenceStereoProcedural(status, unknown);
+  const uzumeReferencePerEarEqPlacementText = formatUzumeReferencePerEarEqPlacement(status, unknown);
+  const uzumeReferenceBlockBoundaryText = formatUzumeReferenceBlockBoundary(status, unknown);
+  const uzumeReferenceFlushDrainText = formatUzumeReferenceFlushDrain(status, unknown);
+  const uzumeReferenceGaplessConcatText = formatUzumeReferenceGaplessConcat(status, unknown);
+  const uzumeReferenceFirGaplessHistoryText = formatUzumeReferenceFirGaplessHistory(status, unknown);
+  const uzumeReferenceCallbackSafeControlsText = formatUzumeReferenceCallbackSafeControls(status, unknown);
+  const uzumeReferenceEqualPowerCrossfadeText = formatUzumeReferenceEqualPowerCrossfade(status, unknown);
+  const uzumeReferenceContinuityText = formatUzumeReferenceContinuity(status, unknown);
+  const uzumeReferencePreRollText = formatUzumeReferencePreRoll(status, unknown);
+  const uzumeReferenceCallbackRingText = formatUzumeReferenceCallbackRing(status, unknown);
+  const uzumeReferenceRenderAheadCacheText = formatUzumeReferenceRenderAheadCache(status, unknown);
+  const uzumeReferenceUnderrunFallbackText = formatUzumeReferenceUnderrunFallback(status, unknown);
   const planned = 'Planned / not implemented';
   const transitional = 'Transitional';
+  const uzumeHeadroomTelemetryText = status
+    ? Math.abs(status.dspHeadroomDb ?? 0) > 0.05 || status.uzumeHeadroomActive
+      ? `${formatDb(status.dspHeadroomDb, unknown)} / gain-reference / ${status.uzumeHeadroomActive ? enabled : 'reference pending'}`
+      : disabled
+    : unknown;
+  const uzumeSafetyMeterText = status
+    ? `${status.dspLimiterProtecting ? 'limiting' : status.dspClippingRisk ? 'near-limit' : 'monitoring'} / ${status.dspClippingRisk || status.dspLimiterProtecting ? 'clipping risk' : 'safe'} / stage telemetry separate from limiter`
+    : unknown;
+  const uzumeLimiterReferenceText = status
+    ? `sample-domain safety limiter / ${status.dspLimiterProtecting ? 'active' : 'standby'} / GPU limiter ${status.uzumeGpuLimiterPlaybackActive ? enabled : planned}`
+    : unknown;
 
   const issueReasons = useMemo(() => (
     [status?.error, ...(status?.warnings ?? [])]
@@ -372,8 +1236,46 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeRuntime'), value: status?.uzumeRuntimeModel ?? unknown },
         { label: t('audioProfessional.row.uzumeFormatPath'), value: uzumeFormatPathText, tone: status?.uzumeFormatPath === 'pcm_processed' ? 'warning' : status?.uzumeFormatPath === 'pcm_bitperfect' || status?.uzumeFormatPath === 'dsd_direct' ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumePathPlan'), value: formatUzumePathPlan(status, unknown), tone: status?.uzumeFormatPathPlan ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceCompiler'), value: uzumeReferenceCompilerText, tone: status?.uzumeReferencePlan ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceAssignments'), value: uzumeReferenceAssignmentsText, tone: status?.uzumeReferencePlan ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceMergeGroups'), value: uzumeReferenceMergeGroupsText, tone: status?.uzumeReferencePlan?.mergeGroups.length ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceLatencyOwners'), value: uzumeReferenceLatencyOwnersText, tone: Object.keys(status?.uzumeReferencePlan?.latencyOwners ?? {}).length ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceBitPerfect'), value: uzumeReferenceBitPerfectText, tone: status?.uzumeReferencePlan?.bitPerfectState === 'available' ? 'good' : status?.uzumeReferencePlan ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceOutputDevicePolicy'), value: uzumeReferenceOutputDevicePolicyText, tone: status?.uzumeReferencePlan?.outputDevicePolicy?.state === 'direct-like-ready' ? 'good' : status?.uzumeReferencePlan?.outputDevicePolicy ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferencePcmIngressGuard'), value: uzumeReferencePcmIngressGuardText, tone: status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'channel-mismatch' || status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'sanitized' ? 'warning' : status?.uzumeReferencePlan?.pcmIngressGuard ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceGainStaging'), value: uzumeReferenceGainStagingText, tone: status?.uzumeReferencePlan?.gainStaging?.clipRisk ? 'warning' : Math.abs(status?.uzumeReferencePlan?.gainStaging?.totalGainDb ?? 0) > 0.001 ? 'warning' : status?.uzumeReferencePlan?.gainStaging ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceIirEq'), value: uzumeReferenceIirEqText, tone: status?.uzumeReferencePlan?.iirEq?.state === 'active' ? 'warning' : status?.uzumeReferencePlan?.iirEq ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceChannelScope'), value: uzumeReferenceChannelScopeText, tone: status?.uzumeReferencePlan?.channelScope?.invalidOperationCount ? 'warning' : status?.uzumeReferencePlan?.channelScope?.appliedOperationCount ? 'warning' : status?.uzumeReferencePlan?.channelScope ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceStereoProcedural'), value: uzumeReferenceStereoProceduralText, tone: status?.uzumeReferencePlan?.stereoProcedural?.state === 'active' ? 'warning' : status?.uzumeReferencePlan?.stereoProcedural ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferencePerEarEqPlacement'), value: uzumeReferencePerEarEqPlacementText, tone: status?.uzumeReferencePlan?.perEarEqPlacement?.state === 'placement-sensitive' ? 'warning' : status?.uzumeReferencePlan?.perEarEqPlacement ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceBlockBoundary'), value: uzumeReferenceBlockBoundaryText, tone: status?.uzumeReferencePlan?.blockBoundary?.coverage.state === 'exact' && status?.uzumeReferencePlan?.blockBoundary?.residual.state === 'exact-reassembly' ? 'good' : status?.uzumeReferencePlan?.blockBoundary ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceFlushDrain'), value: uzumeReferenceFlushDrainText, tone: status?.uzumeReferencePlan?.flushDrain ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceGaplessConcat'), value: uzumeReferenceGaplessConcatText, tone: status?.uzumeReferencePlan?.gaplessConcat?.state === 'src-stateful' ? 'warning' : status?.uzumeReferencePlan?.gaplessConcat ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceFirGaplessHistory'), value: uzumeReferenceFirGaplessHistoryText, tone: status?.uzumeReferencePlan?.firGaplessHistory?.state === 'history-required' ? 'warning' : status?.uzumeReferencePlan?.firGaplessHistory ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceCallbackSafeControls'), value: uzumeReferenceCallbackSafeControlsText, tone: status?.uzumeReferencePlan?.callbackSafeControls ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceEqualPowerCrossfade'), value: uzumeReferenceEqualPowerCrossfadeText, tone: status?.uzumeReferencePlan?.equalPowerCrossfade?.rendered.state === 'crossfade-rendered' ? 'warning' : status?.uzumeReferencePlan?.equalPowerCrossfade ? 'muted' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceResampling'), value: uzumeReferenceResamplingText, tone: status?.uzumeReferencePlan?.resampling.active ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceSrcRollback'), value: uzumeReferenceSrcRollbackText, tone: status?.uzumeReferencePlan?.resampling.qualityRollback.state === 'armed' ? 'warning' : status?.uzumeReferencePlan?.resampling.qualityRollback ? 'muted' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceSrcBudget'), value: uzumeReferenceSrcBudgetText, tone: status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget.safetyClass === 'offline-reference-only' ? 'warning' : status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget ? 'muted' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceSrcArtifacts'), value: uzumeReferenceSrcArtifactsText, tone: status?.uzumeReferencePlan?.resampling.artifactMetrics ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceSrcValidation'), value: uzumeReferenceSrcValidationText, tone: status?.uzumeReferencePlan?.resampling.validation?.overall === 'fail' ? 'danger' : status?.uzumeReferencePlan?.resampling.validation?.overall === 'warn' ? 'warning' : status?.uzumeReferencePlan?.resampling.validation ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceSrcOutputRisk'), value: uzumeReferenceSrcOutputRiskText, tone: status?.uzumeReferencePlan?.resampling.outputResamplingRisk.signalPathTone === 'warning' ? 'warning' : status?.uzumeReferencePlan?.resampling.outputResamplingRisk ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceSrcPhaseApodizing'), value: uzumeReferenceSrcPhaseApodizingText, tone: status?.uzumeReferencePlan?.resampling.phaseModeArtifacts ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceDsdFamily'), value: uzumeReferenceDsdFamilyText, tone: status?.uzumeReferencePlan?.dsdFamily?.state === 'unavailable' ? 'warning' : status?.uzumeReferencePlan?.dsdFamily?.state === 'direct' ? 'good' : status?.uzumeReferencePlan?.dsdFamily ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceConvolution'), value: uzumeReferenceConvolutionText, tone: status?.uzumeReferencePlan?.sharedConvolution?.sources.length ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceResponseResample'), value: uzumeReferenceResponseResampleText, tone: status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports?.some((report) => report.linearInterpolationRejected) ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports?.length ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard'), value: uzumeReferenceConvolutionDuplicateGuardText, tone: status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'single-shared-plan' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'split-required' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard ? 'muted' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceConvolutionSerialNull'), value: uzumeReferenceConvolutionSerialNullText, tone: status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'merged-matches-serial' ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'residual-over-threshold' ? 'danger' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference ? 'muted' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferencePcmOutputQuantization'), value: uzumeReferencePcmOutputQuantizationText, tone: status?.uzumeReferencePlan?.pcmOutputQuantization?.state === 'rejected' ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization?.dither.enabled ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceContinuity'), value: uzumeReferenceContinuityText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferencePreRoll'), value: uzumeReferencePreRollText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceCallbackRing'), value: uzumeReferenceCallbackRingText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceRenderAheadCache'), value: uzumeReferenceRenderAheadCacheText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceUnderrunFallback'), value: uzumeReferenceUnderrunFallbackText, tone: status?.uzumeReferencePlan?.continuity?.fallback.telemetryStatus === 'unsafe' ? 'danger' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeBitPerfect'), value: uzumeBitPerfectText, tone: status?.uzumeBitPerfectState === 'available' ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeHeadroom'), value: status?.uzumeHeadroomActive ? enabled : disabled, tone: status?.uzumeHeadroomActive ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeHeadroom'), value: uzumeHeadroomTelemetryText, tone: status?.uzumeHeadroomActive || Math.abs(status?.dspHeadroomDb ?? 0) > 0.05 ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeSafetyMeter'), value: uzumeSafetyMeterText, tone: status?.dspLimiterProtecting ? 'danger' : status?.dspClippingRisk || status?.uzumeReferencePlan ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeLimiterReference'), value: uzumeLimiterReferenceText, tone: status?.dspLimiterProtecting ? 'danger' : status?.dspClippingRisk || status?.uzumeReferencePlan ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeConvolution'), value: status?.uzumeTransitionalConvolutionPath ? `${transitional} / ${status.uzumeTransitionalConvolutionPath}` : planned, tone: status?.uzumeTransitionalConvolutionPath ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeFused'), value: status?.uzumeFusedMacroKernel ? yes : planned, tone: status?.uzumeFusedMacroKernel ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeBypass'), value: status?.uzumeBypassReason ?? disabled, tone: status?.uzumeBypassReason ? 'good' : 'muted' },
@@ -405,7 +1307,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.error'), value: status?.error ?? unknown, tone: status?.error ? 'danger' : 'muted' },
       ],
     },
-  ], [bitPerfectText, disabled, dspModules.length, enabled, no, planned, protectLimiterText, signalPathText, status, t, transitional, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeFormatPathText, uzumeGpuText, yes]);
+  ], [bitPerfectText, disabled, dspModules.length, enabled, no, planned, protectLimiterText, signalPathText, status, t, transitional, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeFormatPathText, uzumeGpuText, uzumeHeadroomTelemetryText, uzumeLimiterReferenceText, uzumeReferenceAssignmentsText, uzumeReferenceBitPerfectText, uzumeReferenceBlockBoundaryText, uzumeReferenceCallbackRingText, uzumeReferenceCallbackSafeControlsText, uzumeReferenceChannelScopeText, uzumeReferenceCompilerText, uzumeReferenceContinuityText, uzumeReferenceConvolutionDuplicateGuardText, uzumeReferenceConvolutionSerialNullText, uzumeReferenceConvolutionText, uzumeReferenceDsdFamilyText, uzumeReferenceEqualPowerCrossfadeText, uzumeReferenceFirGaplessHistoryText, uzumeReferenceFlushDrainText, uzumeReferenceGainStagingText, uzumeReferenceGaplessConcatText, uzumeReferenceIirEqText, uzumeReferenceLatencyOwnersText, uzumeReferenceMergeGroupsText, uzumeReferenceOutputDevicePolicyText, uzumeReferencePcmIngressGuardText, uzumeReferencePcmOutputQuantizationText, uzumeReferencePerEarEqPlacementText, uzumeReferencePreRollText, uzumeReferenceRenderAheadCacheText, uzumeReferenceResamplingText, uzumeReferenceResponseResampleText, uzumeReferenceSrcArtifactsText, uzumeReferenceSrcBudgetText, uzumeReferenceSrcOutputRiskText, uzumeReferenceSrcPhaseApodizingText, uzumeReferenceSrcRollbackText, uzumeReferenceSrcValidationText, uzumeReferenceStereoProceduralText, uzumeReferenceUnderrunFallbackText, uzumeSafetyMeterText, yes]);
 
   const visibleSections = detailsOpen ? sections : [];
   const panelStateIcon = status?.error ? AlertTriangle : status?.bitPerfectCandidate ? CheckCircle2 : Zap;

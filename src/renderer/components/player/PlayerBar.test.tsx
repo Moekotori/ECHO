@@ -87,6 +87,26 @@ const audioStatus = (track: LibraryTrack): AudioStatus => ({
   error: null,
 });
 
+type SignalPathVisualNode = {
+  title: string;
+  value: string;
+  tone: string | null;
+  variant: string | null;
+};
+
+const readSignalPathVisualState = (dialog: HTMLElement): {
+  tone: string | null;
+  nodes: SignalPathVisualNode[];
+} => ({
+  tone: dialog.getAttribute('data-tone'),
+  nodes: Array.from(dialog.querySelectorAll('.signal-path-roon-node')).map((node) => ({
+    title: node.querySelector('.signal-path-roon-node__title')?.textContent ?? '',
+    value: node.querySelector('.signal-path-roon-node__copy em')?.textContent ?? '',
+    tone: node.getAttribute('data-tone'),
+    variant: node.getAttribute('data-variant'),
+  })),
+});
+
 const eqState = (): EqState => ({
   enabled: false,
   preampDb: 0,
@@ -589,6 +609,1023 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).toContain('5 个频段');
     expect(dialog.textContent).toContain('比特位深转换');
     expect(dialog.textContent).toContain('64bit Float 至 32bit');
+  });
+
+  it('shows UZUME reference compiler assignments in the signal path popover', () => {
+    const track = makeTrack(134, { title: 'Reference Signal Track', codec: 'flac', sampleRate: 48000, bitDepth: 24 });
+    const status = {
+      ...audioStatus(track),
+      bitDepth: 24,
+      dspActive: true,
+      eqEnabled: true,
+      roomCorrectionEnabled: true,
+      dspClippingRisk: true,
+      dspLimiterProtecting: false,
+      dspHeadroomDb: -6,
+      nativeOutputFormat: 'pcm32',
+      uzumeFormatPath: 'pcm_processed',
+      uzumeHeadroomActive: true,
+      uzumeGpuLimiterPlaybackActive: false,
+      uzumeReferencePlan: {
+        schemaVersion: 1,
+        telemetrySchemaVersion: 2,
+        formatPath: 'pcm_processed',
+        sourceContainer: 'pcm',
+        outputContainer: 'pcm',
+        internalDomain: 'multibit-pcm',
+        bitPerfectState: 'disabled',
+        directDisabledReason: 'uzume_processing_enabled',
+        formatPathPlan: {
+          pcm_bitperfect: { state: 'disabled', reason: 'uzume_processing_enabled' },
+          pcm_processed: { state: 'current', reason: null },
+          dsd_direct: { state: 'unavailable', reason: 'requires_dsd_source' },
+          dsd_upsampling: { state: 'unavailable', reason: 'requires_dsd_source' },
+          d2p_processed: { state: 'unavailable', reason: 'd2p_requires_dsd_source' },
+          sdm_processed: { state: 'unavailable', reason: 'sdm_reference_engine_not_ready' },
+        },
+        outputDevicePolicy: {
+          artifact: 'output-device-policy-reference',
+          formatPath: 'pcm_processed',
+          outputMode: 'shared',
+          deviceCapability: 'shared-mixer',
+          state: 'shared-mixer-risk',
+          sourceContainer: 'pcm',
+          outputContainer: 'pcm',
+          fileRate: 44100,
+          decoderOutputRate: 44100,
+          requestedOutputRate: 48000,
+          actualDeviceRate: 48000,
+          sharedDeviceRate: 48000,
+          bitPerfectCandidate: false,
+          resampling: true,
+          sampleRateMismatch: true,
+          recommendation: 'prefer-exclusive-or-device-rate-match',
+          reasons: ['shared_or_system_output_may_use_mixer_resampling', 'output_device_policy_reference_only'],
+        },
+        orderedProfileSections: ['format-path', 'peq', 'shared-convolution', 'pcm-src', 'dither'],
+        engineAssignments: [
+          { sectionId: 'format-path', engineId: 'format-path-planner-reference', active: true, source: 'format-planner' },
+          { sectionId: 'peq', engineId: 'iir-reference', active: true, source: 'ui-section', mergeGroupId: 'iir-reference' },
+          { sectionId: 'shared-convolution', engineId: 'shared-convolution-planner-reference', active: true, source: 'ui-section', mergeGroupId: 'shared-convolution-reference', latencyOwner: 'room-ir-latency' },
+          { sectionId: 'pcm-src', engineId: 'resampling-reference', active: true, source: 'ui-section', mergeGroupId: 'resampling-reference', splitReason: 'legacy_default_resampler_active_reference_only', latencyOwner: 'resampling-reference' },
+          { sectionId: 'dither', engineId: 'dither-reference', active: true, source: 'format-planner', mergeGroupId: 'dither-reference' },
+        ],
+        mergeGroups: [
+          { id: 'iir-reference', engineId: 'iir-reference', sections: ['peq'], active: true, splitReason: null },
+          { id: 'shared-convolution-reference', engineId: 'shared-convolution-planner-reference', sections: ['shared-convolution'], active: true, sampleRateFamily: '48k-family', splitReason: null },
+          { id: 'resampling-reference', engineId: 'resampling-reference', sections: ['pcm-src'], active: true, sampleRateFamily: '48k-family', splitReason: 'legacy_default_resampler_active_reference_only' },
+          { id: 'dither-reference', engineId: 'dither-reference', sections: ['dither'], active: true, splitReason: null },
+        ],
+        latencyOwners: { 'shared-convolution': 'room-ir-latency', 'pcm-src': 'resampling-reference' },
+        artifactPlan: {
+          impulse: 'deterministic-reference',
+          sweep: 'deterministic-reference',
+          logSweep: 'deterministic-reference',
+          nearNyquist: 'deterministic-reference',
+          multiTone: 'deterministic-reference',
+          random: 'deterministic-reference',
+          silence: 'deterministic-reference',
+          phaseGroupDelay: 'deterministic-reference',
+          phaseMode: 'deterministic-reference',
+          apodizing: 'deterministic-reference',
+          aliasRejection: 'deterministic-reference',
+          realtimeBudget: 'deterministic-reference',
+          nullResidual: 'deterministic-reference',
+          formalValidation: 'deterministic-reference',
+          dsdFamilyPath: 'deterministic-reference',
+          outputDevicePolicy: 'deterministic-reference',
+          qualityRollback: 'deterministic-reference',
+          outputResamplingRisk: 'deterministic-reference',
+          pcmOutputQuantization: 'deterministic-reference',
+          pcmIngressGuard: 'deterministic-reference',
+          gainStaging: 'deterministic-reference',
+          iirEq: 'deterministic-reference',
+          channelScope: 'deterministic-reference',
+          stereoProcedural: 'deterministic-reference',
+          perEarEqPlacement: 'deterministic-reference',
+          sharedConvolutionDuplicateGuard: 'deterministic-reference',
+          sharedConvolutionSerialNull: 'deterministic-reference',
+          gaplessConcat: 'deterministic-reference',
+          firGaplessHistory: 'deterministic-reference',
+          callbackSafeControls: 'deterministic-reference',
+          equalPowerCrossfade: 'deterministic-reference',
+          blockBoundary: 'deterministic-reference',
+          flushDrain: 'deterministic-reference',
+        },
+        dsdFamily: {
+          artifact: 'dsd-family-path-control-reference',
+          formatPath: 'd2p_processed',
+          sourceContainer: 'dsd',
+          outputContainer: 'pcm',
+          internalDomain: 'multibit-pcm',
+          state: 'd2p-reference',
+          directDisabledReason: 'dsd_source_decoded_to_pcm',
+          fallbackReason: null,
+          experimental: false,
+          pcmDomainDspAllowed: true,
+          entersPcmDsp: true,
+          pcmDitherAllowed: true,
+          sdmNoiseShapingTelemetry: false,
+          allowedControls: ['safety-metering', 'eq', 'fir', 'pcm-src', 'pcm-dither', 'pcm-limiter'],
+          disabledControls: [],
+          dsd: {
+            sourceDsdRate: 2822400,
+            targetDsdRate: 2822400,
+            outputEncoding: null,
+          },
+          d2p: {
+            active: true,
+            available: true,
+            decimationProfile: 'dsd64-to-176k4-reference-low-pass',
+            internalPcmRate: 176400,
+          },
+          sdm: {
+            active: false,
+            available: false,
+            mode: 'none',
+            modulatorProfile: null,
+            targetDsdRate: null,
+            headroomDb: null,
+            overloadMarginDb: null,
+            ultrasonicNoiseRisk: null,
+            realtimeSafetyClass: 'offline-reference-only',
+          },
+          reasons: ['d2p_reports_decimation_profile_and_internal_pcm_rate'],
+        },
+        resampling: {
+          active: true,
+          family: 'poly-sinc-reference',
+          phaseMode: 'linear',
+          apodizing: 'reference-windowed-sinc',
+          sourceRate: 44100,
+          targetRate: 48000,
+          sameRateBypass: false,
+          groupDelaySamples: 35,
+          groupDelayMs: 0.729,
+          lookaheadMs: 0.729,
+          realtimeSafetyClass: 'offline-reference-only',
+          outputResamplingRisk: {
+            artifact: 'output-double-resampling-risk-reference',
+            state: 'legacy-resampler-active',
+            reason: 'legacy_default_resampler_active_reference_only',
+            requestedOutputRate: 48000,
+            actualDeviceRate: 48000,
+            sharedDeviceRate: null,
+            currentResamplerEngine: 'default',
+            signalPathTone: 'warning',
+            recommendation: 'show-legacy-resampler-as-non-uzume-risk',
+          },
+          artifactMetrics: {
+            aliasRejectionDb: 18.5,
+            passbandRippleDb: 0.01,
+            stopbandAttenuationDb: 96,
+            cutoffRatioEstimate: 0.92,
+            transitionWidthRatioEstimate: 0.08,
+            phaseGroupDelaySpreadSamples: 2.5,
+            silenceResidual: {
+              state: 'exact-silence',
+              comparedFrames: 64,
+              maxAbs: 0,
+              rms: 0,
+            },
+            multiTonePeak: 0.75,
+            randomPeak: 0.62,
+            randomSeed: 99537410,
+            realtimeBudget: {
+              backend: 'scalar-float64-reference',
+              estimatedMultiplyAdds: 2048,
+              estimatedRealtimeFactor: null,
+              safetyClass: 'offline-reference-only',
+            },
+            nullResidual: {
+              state: 'not-applicable',
+              comparedFrames: 64,
+              maxAbs: null,
+              rms: null,
+            },
+          },
+          phaseModeArtifacts: {
+            artifact: 'poly-sinc-phase-mode-reference',
+            phaseModesMeasured: ['linear', 'minimum', 'intermediate'],
+            modes: [
+              { mode: 'linear', impulsePeakIndex: 32, groupDelaySamples: 32, groupDelaySpreadSamples: 2.5, preRingingEnergy: 0.2, postRingingEnergy: 0.2, residualVsLinearMaxAbs: 0, residualVsLinearRms: 0 },
+              { mode: 'minimum', impulsePeakIndex: 8, groupDelaySamples: 8, groupDelaySpreadSamples: 1.1, preRingingEnergy: 0.01, postRingingEnergy: 0.35, residualVsLinearMaxAbs: 0.12, residualVsLinearRms: 0.03 },
+              { mode: 'intermediate', impulsePeakIndex: 20, groupDelaySamples: 20, groupDelaySpreadSamples: 1.8, preRingingEnergy: 0.08, postRingingEnergy: 0.28, residualVsLinearMaxAbs: 0.06, residualVsLinearRms: 0.015 },
+            ],
+          },
+          apodizingArtifact: {
+            artifact: 'poly-sinc-apodizing-response-reference',
+            mode: 'reference-windowed-sinc',
+            baseline: 'rectangular-sinc-reference',
+            state: 'apodizing-changes-ringing-response',
+            highFrequencyRestorationClaim: false,
+            apodizedRingingEnergy: 0.12,
+            baselineRingingEnergy: 0.2,
+            ringingReductionDb: 2.22,
+            responseResidualMaxAbs: 0.04,
+            responseResidualRms: 0.01,
+          },
+          validation: {
+            artifact: 'poly-sinc-formal-validation-reference',
+            overall: 'pass',
+            checks: [
+              { id: 'passband-ripple', state: 'pass', actual: 0.01, threshold: 0.1, reason: 'passband_ripple_threshold' },
+              { id: 'stopband-attenuation', state: 'pass', actual: 96, threshold: 36, reason: 'stopband_attenuation_threshold' },
+              { id: 'transition-width', state: 'pass', actual: 0.08, threshold: 0.08, reason: 'transition_width_threshold' },
+              { id: 'silence-preservation', state: 'pass', actual: 0, threshold: 1e-12, reason: 'silence_must_remain_exact_zero' },
+              { id: 'same-rate-null', state: 'not-applicable', actual: null, threshold: 1e-12, reason: 'sample_rate_conversion_null_not_applicable' },
+              { id: 'realtime-budget', state: 'pass', actual: 2048, threshold: 20000, reason: 'scalar_float64_reference_budget_threshold' },
+            ],
+            thresholds: {
+              passbandRippleDbMax: 0.1,
+              stopbandAttenuationDbMin: 36,
+              transitionWidthRatioMax: 0.08,
+              silenceMaxAbs: 1e-12,
+              sameRateNullMaxAbs: 1e-12,
+              sameRateNullRmsMax: 1e-12,
+              estimatedMultiplyAddsMax: 20000,
+              requireMeasuredRealtimeFactor: false,
+            },
+          },
+          qualityRollback: {
+            artifact: 'poly-sinc-quality-rollback-reference',
+            state: 'armed',
+            reason: 'realtime-budget-warning',
+            primaryProfile: {
+              id: 'poly-sinc-reference-linear-full',
+              family: 'poly-sinc-reference',
+              phaseMode: 'linear',
+              apodizing: 'reference-windowed-sinc',
+              tapCount: 64,
+              stopbandAttenuationDb: 96,
+              latencyClass: 'full',
+              shortBridgeOnlyFor: null,
+            },
+            rollbackChain: [
+              {
+                id: 'poly-sinc-reference-linear-balanced',
+                family: 'poly-sinc-reference',
+                phaseMode: 'linear',
+                apodizing: 'reference-windowed-sinc',
+                tapCount: 48,
+                stopbandAttenuationDb: 84,
+                latencyClass: 'balanced',
+                shortBridgeOnlyFor: null,
+              },
+              {
+                id: 'poly-sinc-reference-linear-short',
+                family: 'poly-sinc-reference',
+                phaseMode: 'linear',
+                apodizing: 'reference-windowed-sinc',
+                tapCount: 32,
+                stopbandAttenuationDb: 72,
+                latencyClass: 'balanced',
+                shortBridgeOnlyFor: null,
+              },
+            ],
+            familyLock: 'poly-sinc-reference-only',
+            legacyFallbackAllowed: false,
+            legacyFallbackSignalPath: 'UZUME bypass / legacy non-UZUME path',
+            shortBridgeIsRollback: false,
+          },
+        },
+        sharedConvolution: {
+          active: true,
+          engine: 'shared-convolution-planner-reference',
+          sources: [
+            { id: 'room-ir', kind: 'room-ir', sampleRate: 48000, sampleRateFamily: '48k-family', channelLayout: 'stereo', channels: 2, tapCount: 2048, latencySamples: 1024, phasePolicy: 'linear', routing: 'per-channel' },
+            { id: 'headphone-fir', kind: 'headphone-fir-correction', sampleRate: 44100, sampleRateFamily: '44.1k-family', channelLayout: 'stereo', channels: 2, tapCount: 512, latencySamples: 256, phasePolicy: 'linear', routing: 'per-channel' },
+          ],
+          mergedSourceIds: ['room-ir'],
+          splitSourceIds: ['headphone-fir'],
+          splitReasons: { 'headphone-fir': 'sample_rate_family_mismatch' },
+          partitionPlan: {
+            sampleRateFamily: '48k-family',
+            latencyClass: 'quality-first',
+            callbackBlockFrames: 512,
+            internalBlockFrames: 1024,
+            fftHeadSize: 2048,
+            tailFrames: 2047,
+            drainFrames: 2047,
+          },
+          responseResampleReports: [
+            {
+              artifact: 'high-precision-response-resample-policy-reference',
+              sourceId: 'room-ir',
+              kind: 'room-ir',
+              sourceRate: 48000,
+              targetRate: 48000,
+              sourceFamily: '48k-family',
+              targetFamily: '48k-family',
+              state: 'same-rate-bypass',
+              engine: 'exact-bypass',
+              sameRateBypass: true,
+              linearInterpolationRejected: false,
+              filterContract: null,
+              reason: 'same_rate_exact_bypass',
+            },
+            {
+              artifact: 'high-precision-response-resample-policy-reference',
+              sourceId: 'headphone-fir',
+              kind: 'headphone-fir-correction',
+              sourceRate: 44100,
+              targetRate: 48000,
+              sourceFamily: '44.1k-family',
+              targetFamily: '48k-family',
+              state: 'windowed-sinc-reference-required',
+              engine: 'windowed-sinc-float64-reference',
+              sameRateBypass: false,
+              linearInterpolationRejected: true,
+              filterContract: {
+                tapCount: 64,
+                phaseCount: 1024,
+                cutoffRatio: 0.92,
+                transitionWidthRatio: 0.08,
+                stopbandAttenuationDb: 96,
+                passbandRippleDb: 0.01,
+              },
+              reason: 'cross_family_response_resample_uses_windowed_sinc_reference',
+            },
+          ],
+          duplicatePlanGuard: {
+            artifact: 'shared-convolution-duplicate-plan-guard-reference',
+            engine: 'shared-convolution-planner-reference',
+            state: 'single-shared-plan',
+            sourceAssignments: [
+              {
+                sourceId: 'room-ir',
+                state: 'shared-plan',
+                convolverPlanId: 'cpu-sce-48k-family:48000:stereo:room-ir:512',
+                fftPlanId: 'cpu-sce-48k-family:48000:stereo:room-ir:512:fft:1024',
+                splitReason: null,
+              },
+              {
+                sourceId: 'headphone-fir',
+                state: 'split-required',
+                convolverPlanId: null,
+                fftPlanId: null,
+                splitReason: 'sample_rate_family_mismatch',
+              },
+            ],
+            planCounts: {
+              mergedSourceCount: 1,
+              splitSourceCount: 1,
+              convolverPlanCount: 1,
+              cpuFftPlanCount: 1,
+              gpuFftPlanCount: 1,
+              rejectedDuplicateConvolverCount: 0,
+              rejectedDuplicateFftPlanCount: 0,
+            },
+            rejectedDuplicatePlans: [],
+            reasons: ['compatible_sources_share_single_convolution_plan', 'duplicate_per_source_convolver_and_fft_plans_rejected'],
+          },
+          serialNullReference: {
+            artifact: 'shared-convolution-serial-null-reference',
+            engine: 'shared-convolution-planner-reference',
+            state: 'split-or-inactive',
+            sourceOrder: ['room-ir'],
+            mergedResponseTapCounts: [],
+            comparedFrames: 0,
+            maxAbs: null,
+            rms: null,
+            reasons: ['serial_null_skipped_for_split_or_inactive_plan', 'serial_null_reference_only'],
+          },
+        },
+        pcmOutputQuantization: {
+          artifact: 'pcm-output-quantization-dither-reference',
+          formatPath: 'pcm_processed',
+          outputSampleFormat: 'int32',
+          state: 'quantized',
+          bitPerfectState: 'disabled',
+          pcmDitherAllowed: true,
+          sdmNoiseShapingTelemetry: false,
+          dither: {
+            mode: 'tpdf',
+            enabled: true,
+            seed: 219668994,
+            lsbAmplitude: 1 / 2147483647,
+            peakDitherLsb: 0.875,
+            noiseShaping: 'none',
+          },
+          quantization: {
+            bitDepth: 32,
+            maxInteger: 2147483647,
+            clippedSamples: 0,
+            residualMaxAbs: 2.4e-10,
+            residualRms: 1.1e-10,
+          },
+          reasons: [
+            'fixed_point_pcm_output_quantized',
+            'pcm_dither_disables_bitperfect',
+            'pcm_tpdf_or_plain_quantization_reference',
+          ],
+        },
+        pcmIngressGuard: {
+          artifact: 'pcm-ingress-guard-reference',
+          state: 'ok',
+          expectedChannels: 2,
+          channelCount: 2,
+          frameCount: 8,
+          rectangular: true,
+          counts: {
+            nonFiniteReplaced: 0,
+            denormalZeroed: 0,
+            channelMismatchCount: 0,
+            silenceFrames: 1,
+          },
+          peak: 0.875,
+          reasons: ['pcm_ingress_ready_for_reference_processing'],
+        },
+        gainStaging: {
+          artifact: 'gain-staging-reference',
+          engine: 'gain-reference',
+          orderContract: ['input', 'headroom', 'replaygain', 'materialized-gain', 'output'],
+          stages: [
+            { id: 'input', gainDb: 0, cumulativeGainDb: 0, peak: 0.875, rms: 0.4, peakDbfs: -1.16, rmsDbfs: -7.96, clippingRisk: false },
+            { id: 'headroom', gainDb: -6, cumulativeGainDb: -6, peak: 0.4385, rms: 0.2, peakDbfs: -7.16, rmsDbfs: -13.96, clippingRisk: false },
+            { id: 'replaygain', gainDb: 0, cumulativeGainDb: -6, peak: 0.4385, rms: 0.2, peakDbfs: -7.16, rmsDbfs: -13.96, clippingRisk: false },
+            { id: 'materialized-gain', gainDb: 0, cumulativeGainDb: -6, peak: 0.4385, rms: 0.2, peakDbfs: -7.16, rmsDbfs: -13.96, clippingRisk: false },
+            { id: 'output', gainDb: 0, cumulativeGainDb: -6, peak: 0.4385, rms: 0.2, peakDbfs: -7.16, rmsDbfs: -13.96, clippingRisk: false },
+          ],
+          totalGainDb: -6,
+          totalGainLinear: 0.501187,
+          recommendedAdditionalHeadroomDb: 0,
+          clipRisk: false,
+          reasons: [
+            'headroom_applied_before_replaygain_and_materialized_gain',
+            'gain_stages_merge_to_single_gain_reference',
+            'gain_staging_within_sample_peak_budget',
+          ],
+        },
+        iirEq: {
+          artifact: 'iir-eq-reference',
+          engine: 'iir-reference',
+          orderContract: 'ui-band-order-biquad-cascade',
+          state: 'active',
+          sampleRate: 44100,
+          bandCount: 1,
+          activeBandCount: 1,
+          bypassedBandCount: 0,
+          bands: [
+            {
+              index: 0,
+              filterType: 'peaking',
+              frequencyHz: 1000,
+              requestedFrequencyHz: 1000,
+              q: 1,
+              gainDb: 3,
+              state: 'active',
+              coefficientState: 'generated',
+              responsePeakDb: 3,
+              responseDipDb: 0,
+              phaseSpanRadians: 0.25,
+              reasons: ['biquad_coefficients_generated', 'frequency_response_measured'],
+            },
+          ],
+          residual: {
+            state: 'processed',
+            comparedFrames: 8,
+            maxAbs: 0.12,
+            rms: 0.04,
+          },
+          reasons: ['peq_basic_iir_reference_only', 'active_biquads_applied_in_ui_order'],
+        },
+        channelScope: {
+          artifact: 'channel-scope-reference',
+          engine: 'stereo-procedural-reference',
+          scopeContract: 'targeted-channels-only',
+          channelCount: 2,
+          operationCount: 1,
+          appliedOperationCount: 1,
+          noopOperationCount: 0,
+          invalidOperationCount: 0,
+          untouchedChannelIndexes: [1],
+          operations: [
+            {
+              id: 'left-trim-scope',
+              kind: 'gain',
+              targetChannels: [0],
+              skippedChannels: [1],
+              state: 'applied',
+              gainDb: -1,
+              sourceChannel: null,
+              reasons: ['operation_applied_to_target_channels_only'],
+            },
+          ],
+          residualByChannel: [
+            { channelIndex: 0, state: 'processed', maxAbs: 0.01, rms: 0.004 },
+            { channelIndex: 1, state: 'out-of-scope-bypass', maxAbs: 0, rms: 0 },
+          ],
+          reasons: ['channel_scope_resolved_before_operation', 'out_of_scope_channels_must_remain_exact_bypass'],
+        },
+        stereoProcedural: {
+          artifact: 'stereo-procedural-matrix-filter-reference',
+          engine: 'stereo-procedural-reference',
+          state: 'active',
+          sampleRate: 44100,
+          channelCount: 2,
+          steps: ['trim', 'delay'],
+          matrix: [[1, 0], [0, 1]],
+          delaySamples: { left: 0, right: 44.1 },
+          routing: {
+            invertLeft: false,
+            invertRight: false,
+            swapLeftRight: false,
+            monoMode: 'off',
+          },
+          crossfeed: {
+            enabled: false,
+            crossDelaySamples: 0,
+            lowPassHz: null,
+            centerPreservation: 'none',
+          },
+          input: { peak: 0.875, rms: 0.4 },
+          output: { peak: 0.78, rms: 0.35 },
+          residual: {
+            state: 'processed',
+            comparedFrames: 8,
+            maxAbs: 0.1,
+            rms: 0.03,
+          },
+          reasons: [
+            'stereo_procedural_reference_only',
+            'stereo_procedural_steps_applied_in_order',
+            'band_compensation_requires_iir_reference_split',
+          ],
+        },
+        perEarEqPlacement: {
+          artifact: 'per-ear-eq-placement-reference',
+          orderContract: ['pre-crossfeed-eq', 'crossfeed-matrix-filter', 'post-crossfeed-eq'],
+          compilerRule: 'do-not-reorder-across-crossfeed-without-null-proof',
+          state: 'placement-sensitive',
+          sampleRate: 44100,
+          perEarEq: {
+            leftGainDb: -6,
+            rightGainDb: 6,
+          },
+          crossfeed: {
+            enabled: true,
+            crossGainDb: -9,
+            crossDelayMs: 0,
+            lowPassHz: 22050,
+            centerPreservation: 'none',
+          },
+          preCrossfeedSteps: ['pre-per-ear-eq', 'crossfeed'],
+          postCrossfeedSteps: ['crossfeed', 'post-per-ear-eq'],
+          residual: {
+            comparedFrames: 4,
+            maxAbs: 0.188,
+            rms: 0.052,
+          },
+          reasons: ['crossfeed_and_asymmetric_per_ear_eq_are_not_commutative', 'do_not_reorder_across_crossfeed_without_null_proof', 'per_ear_eq_placement_reference_only'],
+        },
+        blockBoundary: {
+          artifact: 'block-boundary-split-reference',
+          policy: 'valid-frames-committed-padding-never-output',
+          blockFrames: 6,
+          inputFrames: 8,
+          channelCount: 2,
+          blockCount: 2,
+          blockStates: ['full', 'partial-padded'],
+          coverage: {
+            state: 'exact',
+            coveredFrames: 8,
+            missingFrames: 0,
+            duplicateFrames: 0,
+            committedFrames: 8,
+            paddedFrames: 4,
+          },
+          residual: {
+            state: 'exact-reassembly',
+            comparedFrames: 8,
+            maxAbs: 0,
+            rms: 0,
+          },
+          boundaryCount: 1,
+          maxIntroducedDiscontinuity: 0,
+          reasons: [
+            'block_boundaries_cover_each_source_frame_once',
+            'final_block_zero_padding_not_committed',
+            'reassembled_output_matches_source_without_boundary_discontinuity',
+          ],
+        },
+        flushDrain: {
+          artifact: 'flush-drain-reference',
+          engine: 'direct-fir-float64-reference',
+          generationId: 7,
+          generationState: 'current',
+          naturalEof: {
+            intent: 'natural-eof',
+            generationAfter: 7,
+            state: 'drain-committed',
+            sourceFrames: 3,
+            tailFrames: 2,
+            drainFrames: 2,
+            resetRequired: false,
+            drainCommitAllowed: true,
+            residual: {
+              sourceWindowMaxAbs: 0,
+              sourceWindowRms: 0,
+              drainMaxAbs: 0,
+              drainRms: 0,
+            },
+            reasons: ['natural_eof_commits_drain_tail', 'drain_frames_match_filter_tail'],
+          },
+          manualFlush: {
+            intent: 'manual-flush',
+            generationAfter: 8,
+            state: 'tail-dropped-and-reset',
+            sourceFrames: 3,
+            tailFrames: 2,
+            drainFrames: 0,
+            resetRequired: true,
+            drainCommitAllowed: false,
+            residual: {
+              sourceWindowMaxAbs: 0,
+              sourceWindowRms: 0,
+              drainMaxAbs: 0,
+              drainRms: 0,
+            },
+            reasons: ['transport_boundary_drops_pending_tail', 'generation_increment_required', 'render_state_reset_required'],
+          },
+        },
+        gaplessConcat: {
+          artifact: 'gapless-concat-reference',
+          policy: 'source-pcm-concat-before-src',
+          state: 'src-stateful',
+          sourceRate: 44100,
+          targetRate: 48000,
+          ratio: 48000 / 44100,
+          segmentCount: 2,
+          boundaryCount: 1,
+          concatNullResidual: {
+            state: 'concat-matches-no-reset',
+            comparedFrames: 18,
+            maxAbs: 0,
+            rms: 0,
+          },
+          resetResidual: {
+            state: 'reset-vs-concat-reference',
+            comparedFrames: 18,
+            maxAbs: 0.125,
+            rms: 0.03125,
+          },
+          boundaries: [
+            { beforeSegmentId: 'track-a', afterSegmentId: 'track-b', sourceFrameOffset: 8, outputFrameOffset: 9, concatVsNoResetMaxAbs: 0, resetVsConcatMaxAbs: 0.125, resetVsConcatRms: 0.03125, outputJump: 0.25 },
+          ],
+          reasons: ['source_pcm_concat_before_src', 'src_state_must_not_reset_at_gapless_boundary', 'reset_per_track_src_compared_against_concat_reference', 'reference_artifact_generated_offline'],
+        },
+        firGaplessHistory: {
+          artifact: 'fir-gapless-history-reference',
+          policy: 'source-pcm-concat-before-fir',
+          engine: 'direct-fir-float64-reference',
+          state: 'history-required',
+          sourceId: 'room-ir',
+          sampleRate: 48000,
+          segmentCount: 2,
+          boundaryCount: 1,
+          tailFrames: 3,
+          drainFrames: 3,
+          concatNullResidual: {
+            state: 'concat-matches-no-reset-history',
+            comparedFrames: 19,
+            maxAbs: 0,
+            rms: 0,
+          },
+          resetResidual: {
+            state: 'reset-vs-concat-history-reference',
+            comparedFrames: 19,
+            maxAbs: 0.1875,
+            rms: 0.046875,
+          },
+          boundaries: [
+            { beforeSegmentId: 'track-a', afterSegmentId: 'track-b', sourceFrameOffset: 8, outputFrameOffset: 8, overlapHistoryFrames: 3, concatVsNoResetMaxAbs: 0, resetVsConcatMaxAbs: 0.1875, resetVsConcatRms: 0.046875, outputJump: 0.3125 },
+          ],
+          reasons: ['source_pcm_concat_before_fir', 'fir_history_must_cross_gapless_boundary', 'reset_per_track_fir_history_compared_against_concat_reference', 'fir_gapless_reference_only'],
+        },
+        callbackSafeControls: {
+          artifact: 'callback-safe-urgent-controls-reference',
+          policy: 'urgent-controls-after-committed-output',
+          urgentControl: {
+            control: 'mute',
+            classification: 'callback-safe-urgent-control',
+            generationState: 'current',
+            state: 'applied',
+            callbackRule: 'read-committed-output-then-apply-urgent-control',
+            renderCacheAction: 'preserve',
+            generationAfterControl: 1,
+            requiresRenderGraphRebuild: false,
+            commitAllowed: true,
+            gainEnvelopeFrames: 8,
+            declick: {
+              enabled: true,
+              frames: 4,
+              startGain: 1,
+              endGain: 0,
+              maxStep: 1 / 3,
+            },
+            peak: {
+              input: 0.875,
+              output: 1 / 12,
+            },
+            reasons: ['callback_safe_urgent_control', 'render_cache_preserved', 'declick_gain_ramp', 'output_gain_zeroed'],
+          },
+          renderStateBoundary: {
+            control: 'seek',
+            classification: 'render-state-boundary',
+            generationState: 'current',
+            state: 'render-cache-invalidated',
+            callbackRule: 'read-committed-output-only',
+            renderCacheAction: 'invalidate-generation',
+            generationAfterControl: 2,
+            requiresRenderGraphRebuild: true,
+            commitAllowed: false,
+            gainEnvelopeFrames: 0,
+            declick: {
+              enabled: false,
+              frames: 0,
+              startGain: 0,
+              endGain: 0,
+              maxStep: 0,
+            },
+            peak: {
+              input: 0.875,
+              output: 0,
+            },
+            reasons: ['transport_boundary_requires_generation_increment', 'render_ahead_cache_invalidated', 'callback_keeps_prior_committed_output'],
+          },
+        },
+        equalPowerCrossfade: {
+          artifact: 'equal-power-crossfade-reference',
+          policy: 'random-access-short-bridge-to-full-profile-only',
+          rendered: {
+            intent: 'user-random-seek-or-skip',
+            sampleRate: 48000,
+            fadeFrames: 5,
+            durationMs: 5 / 48000 * 1000,
+            state: 'crossfade-rendered',
+            rejectionReason: null,
+            gainLaw: {
+              state: 'equal-power',
+              maxPowerSumError: 0,
+              midpointShortBridgeGain: Math.SQRT1_2,
+              midpointFullProfileGain: Math.SQRT1_2,
+            },
+            residualVsHardSwitch: {
+              state: 'measured-crossfade-difference',
+              comparedFrames: 5,
+              maxAbs: 0.20710678118654746,
+              rms: 0.09578113585405947,
+            },
+            peak: {
+              shortBridge: 1,
+              fullProfile: 1,
+              output: 1,
+            },
+            reasons: ['random_access_short_bridge_requires_equal_power_crossfade', 'full_profile_ready', 'equal_power_gain_law_reference', 'hard_switch_residual_measured'],
+          },
+          rejectedBoundary: {
+            intent: 'gapless-boundary',
+            sampleRate: 48000,
+            fadeFrames: 5,
+            durationMs: 5 / 48000 * 1000,
+            state: 'rejected',
+            rejectionReason: 'intent_not_user_random_seek_or_skip',
+            gainLaw: {
+              state: 'not-applicable',
+              maxPowerSumError: 0,
+              midpointShortBridgeGain: null,
+              midpointFullProfileGain: null,
+            },
+            residualVsHardSwitch: {
+              state: 'not-applicable',
+              comparedFrames: 0,
+              maxAbs: null,
+              rms: null,
+            },
+            peak: {
+              shortBridge: 1,
+              fullProfile: 1,
+              output: 0,
+            },
+            reasons: ['only_user_random_seek_or_skip_can_use_short_bridge_crossfade', 'gapless_boundary_waits_for_full_profile', 'equal_power_crossfade_reference_only'],
+          },
+        },
+        continuity: {
+          artifact: 'continuity-telemetry-reference',
+          policy: 'callback-read-committed-reference',
+          continuity: {
+            artifact: 'continuity-quality-policy-reference',
+            intent: 'normal-playlist-boundary',
+            policy: 'predictive-cache',
+            selectedPath: 'wait-for-full-profile',
+            callbackRule: 'read-committed-output-only',
+            commitAllowed: false,
+            shortBridgeAllowed: false,
+            shortBridgeReason: 'intent_requires_full_quality_profile',
+            qualityRollback: 'none',
+            waitTarget: 'cpu-or-gpu-full-profile',
+          },
+          preRoll: {
+            artifact: 'pre-roll-deadline-reference',
+            state: 'deadline-safe',
+            preRollRequiredFrames: 10240,
+            framesUntilBoundary: 24000,
+            deadlineSlackFrames: 13760,
+            renderAheadState: 'cache-warming',
+            renderAheadTargetFrames: 9600,
+            renderAheadReadyFrames: 2400,
+            callbackBlockFrames: 512,
+            outputRingDepthFrames: 1024,
+            readRule: 'read-committed-output-only',
+            mustNotWaitForGpu: true,
+            handoffStrategy: 'same-pipeline-no-reset',
+            requiresDualPipeline: false,
+            commitAllowed: false,
+            shortBridgeAllowed: false,
+          },
+          callbackRing: {
+            artifact: 'cpu-callback-ring-reference',
+            state: 'stable',
+            telemetryStatus: 'safe',
+            capacityFrames: 4096,
+            depthFrames: 2560,
+            depthBlocks: 5,
+            callbackBlockFrames: 512,
+            missingFrames: 0,
+            readRule: 'read-committed-output-only',
+            mustNotWaitForGpu: true,
+            shortBridgeAllowed: false,
+            shortBridgeReason: 'cpu_only_ring_does_not_enable_short_bridge',
+          },
+          renderAheadCache: {
+            artifact: 'render-ahead-cache-reference',
+            lookupState: 'miss',
+            commitState: 'callback-keeps-prior-committed-output',
+            commitAllowed: false,
+            callbackRule: 'read-committed-output-only',
+            mustNotWaitForGpu: true,
+            requestKey: 'next-head:reference:0',
+            budgetBytes: 384000,
+            bytesBeforeEvict: 0,
+            bytesAfterEvict: 0,
+            retainedKeys: [],
+            evictionCount: 0,
+          },
+          fallback: {
+            artifact: 'fallback-injection-underrun-reference',
+            state: 'prior-committed-fallback',
+            selectedSource: 'prior-committed',
+            telemetryStatus: 'marginal',
+            callbackMustNotWaitForGpu: true,
+            shortBridgeAllowed: false,
+            shortBridgeReason: 'underrun_protection_does_not_enable_short_bridge',
+            qualityRollback: 'controlled-fallback',
+            fallbackInjected: true,
+            commitAllowed: true,
+          },
+        },
+      },
+    } as unknown as AudioStatus;
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(dialog.textContent).toContain('UZUME reference compiler');
+    expect(dialog.textContent).toContain('schema v1 / telemetry v2 / pcm_processed / multibit-pcm');
+    expect(dialog.textContent).toContain('Reference assignment');
+    expect(dialog.textContent).toContain('format-path->format path planner ref(active)');
+    expect(dialog.textContent).toContain('shared-convolution->shared convolution planner ref(active, merge:shared-convolution-reference, latency:room-ir-latency)');
+    expect(dialog.textContent).toContain('pcm-src->resampling ref(active, merge:resampling-reference, latency:resampling-reference, split:legacy default resampler active reference only)');
+    expect(dialog.textContent).toContain('UZUME reference path plan');
+    expect(dialog.textContent).toContain('pcm_bitperfect:disabled/uzume processing enabled | pcm_processed:current | dsd_direct:unavailable/requires dsd source | dsd_upsampling:unavailable/requires dsd source | d2p_processed:unavailable/d2p requires dsd source | sdm_processed:unavailable/sdm reference engine not ready');
+    expect(dialog.textContent).toContain('UZUME reference bit-perfect');
+    expect(dialog.textContent).toContain('disabled / direct disabled:uzume processing enabled / pcm->pcm / multibit-pcm / format:pcm_processed');
+    expect(dialog.textContent).toContain('UZUME output device policy reference');
+    expect(dialog.textContent).toContain('output-device-policy-reference / pcm_processed / shared / shared-mixer / shared-mixer-risk / file 44.1kHz / decoder 44.1kHz / requested 48kHz / actual 48kHz / shared 48kHz / output pcm / bit-perfect candidate no / resampling yes / mismatch yes / recommend prefer-exclusive-or-device-rate-match / reasons shared or system output may use mixer resampling | output device policy reference only');
+    expect(dialog.textContent).toContain('Reference merge groups');
+    expect(dialog.textContent).toContain('shared-convolution-reference->shared convolution planner ref(active, 48k-family, sections:shared-convolution)');
+    expect(dialog.textContent).toContain('Reference latency owners');
+    expect(dialog.textContent).toContain('shared-convolution->room-ir-latency | pcm-src->resampling-reference');
+    expect(dialog.textContent).toContain('UZUME SRC reference');
+    expect(dialog.textContent).toContain('poly-sinc-reference / 44.1kHz->48kHz / linear / reference-windowed-sinc / 35 samples / 0.73 ms / lookahead 0.73 ms / offline-reference-only');
+    expect(dialog.textContent).toContain('risk:legacy default resampler active reference only');
+    expect(dialog.textContent).toContain('artifacts:impulse+sweep+near-Nyquist+phase/group-delay');
+    expect(dialog.textContent).toContain('alias 18.5 dB');
+    expect(dialog.textContent).toContain('UZUME SRC rollback reference');
+    expect(dialog.textContent).toContain('armed / realtime budget warning / poly-sinc-reference-only / poly-sinc-reference-linear-full:64 taps/96 dB/full -> poly-sinc-reference-linear-balanced:48 taps/84 dB/balanced -> poly-sinc-reference-linear-short:32 taps/72 dB/balanced / legacy blocked:UZUME bypass / legacy non-UZUME path / short bridge not rollback');
+    expect(dialog.textContent).toContain('UZUME SRC budget reference');
+    expect(dialog.textContent).toContain('scalar-float64-reference / 2048 multiply-adds / realtime factor unmeasured / offline-reference-only / null not-applicable');
+    expect(dialog.textContent).toContain('UZUME SRC artifact reference');
+    expect(dialog.textContent).toContain('passband 0.01 dB / stopband 96 dB / cutoff 0.92 / transition 0.08 / phase spread 2.5 samples / silence exact-silence max 0 / multi-tone peak 0.75 / seeded-random peak 0.62 / random seed 99537410');
+    expect(dialog.textContent).toContain('UZUME SRC validation reference');
+    expect(dialog.textContent).toContain('poly-sinc-formal-validation-reference / overall pass / passband-ripple:pass / stopband-attenuation:pass / transition-width:pass / silence-preservation:pass / same-rate-null:not-applicable / realtime-budget:pass');
+    expect(dialog.textContent).toContain('UZUME SRC output risk reference');
+    expect(dialog.textContent).toContain('output-double-resampling-risk-reference / legacy-resampler-active / legacy default resampler active reference only / requested 48kHz / actual 48kHz / current default / tone warning / recommend show legacy resampler as non uzume risk');
+    expect(dialog.textContent).toContain('UZUME SRC phase/apodizing reference');
+    expect(dialog.textContent).toContain('poly-sinc-phase-mode-reference / modes linear+minimum+intermediate / linear gd 32 spread 2.5 residual 0/0 | minimum gd 8 spread 1.1 residual 0.12/0.03 | intermediate gd 20 spread 1.8 residual 0.06/0.015 / poly-sinc-apodizing-response-reference / apodizing-changes-ringing-response / reference-windowed-sinc vs rectangular-sinc-reference / ringing reduction 2.22 dB / response residual 0.04/0.01 / no hf restoration claim');
+    expect(dialog.textContent).toContain('UZUME DSD family reference');
+    expect(dialog.textContent).toContain('dsd-family-path-control-reference / d2p_processed:d2p-reference / dsd->pcm / multibit-pcm / direct disabled dsd source decoded to pcm / allowed safety-metering+eq+fir+pcm-src+pcm-dither+pcm-limiter / disabled none / pcm dsp allowed / pcm dither allowed / sdm noise none / d2p dsd64-to-176k4-reference-low-pass @ 176400 Hz / sdm unavailable / reasons d2p reports decimation profile and internal pcm rate');
+    expect(dialog.textContent).toContain('UZUME convolution reference');
+    expect(dialog.textContent).toContain('shared-convolution-planner-reference / room-ir / 48k-family / quality-first / block 512->1024 / fft 2048 / tail 2047 / drain 2047');
+    expect(dialog.textContent).toContain('UZUME response resample reference');
+    expect(dialog.textContent).toContain('room-ir:same-rate-bypass / 48kHz->48kHz / 48k-family->48k-family / exact-bypass / linear interpolation not used / same rate exact bypass | headphone-fir:windowed-sinc-reference-required / 44.1kHz->48kHz / 44.1k-family->48k-family / windowed-sinc-float64-reference / linear interpolation rejected / 64 taps/0.92 cutoff/96 dB / cross family response resample uses windowed sinc reference');
+    expect(dialog.textContent).toContain('UZUME convolution duplicate guard');
+    expect(dialog.textContent).toContain('shared-convolution-duplicate-plan-guard-reference / shared-convolution-planner-reference / single-shared-plan / merged 1 / split 1 / convolver plans 1 / cpu fft 1 / gpu fft 1 / rejected conv 0 / rejected fft 0 / room-ir:shared-plan conv cpu-sce-48k-family:48000:stereo:room-ir:512 fft cpu-sce-48k-family:48000:stereo:room-ir:512:fft:1024 | headphone-fir:split-required split sample rate family mismatch / rejected none / reasons compatible sources share single convolution plan | duplicate per source convolver and fft plans rejected');
+    expect(dialog.textContent).toContain('UZUME convolution serial null reference');
+    expect(dialog.textContent).toContain('shared-convolution-serial-null-reference / shared-convolution-planner-reference / split-or-inactive / order room-ir / merged taps none / frames 0 / residual n/a / reasons serial null skipped for split or inactive plan | serial null reference only');
+    expect(dialog.textContent).toContain('UZUME PCM output quantization reference');
+    expect(dialog.textContent).toContain('pcm-output-quantization-dither-reference / pcm_processed->int32 / quantized / bit-perfect disabled / pcm dither allowed / dither tpdf enabled / seed 219668994 / lsb 4.66e-10 / peak 0.875 lsb / noise none / 32 bit / max 2147483647 / clips 0 / residual 2.40e-10/1.10e-10 / sdm noise none / reasons fixed point pcm output quantized | pcm dither disables bitperfect | pcm tpdf or plain quantization reference');
+    expect(dialog.textContent).toContain('UZUME PCM ingress guard reference');
+    expect(dialog.textContent).toContain('pcm-ingress-guard-reference / ok / expected 2 / channels 2 / frames 8 / rectangular / peak 0.875 / non-finite 0 / denormal 0 / mismatch 0 / silence 1 / reasons pcm ingress ready for reference processing');
+    expect(dialog.textContent).toContain('UZUME gain staging reference');
+    expect(dialog.textContent).toContain('gain-staging-reference / order input->headroom->replaygain->materialized-gain->output / total -6 dB / linear 0.5012 / clip safe / extra headroom 0 dB / input:gain 0 dB/cum 0 dB/peak 0.875 | headroom:gain -6 dB/cum -6 dB/peak 0.4385');
+    expect(dialog.textContent).toContain('UZUME PEQ/IIR reference');
+    expect(dialog.textContent).toContain('iir-eq-reference / iir-reference / active / sample 44.1kHz / bands 1/1 active / bypassed 0 / order ui-band-order-biquad-cascade / band0 peaking 1kHz 3 dB q 1 active coeff generated resp 3/0 dB phase 0.25 / residual processed 0.12/0.04');
+    expect(dialog.textContent).toContain('UZUME channel scope reference');
+    expect(dialog.textContent).toContain('channel-scope-reference / stereo-procedural-reference / targeted-channels-only / channels 2 / ops 1 / applied 1 / noop 0 / invalid 0 / untouched 1 / left-trim-scope:applied->0 skip 1 gain -1 dB');
+    expect(dialog.textContent).toContain('UZUME stereo procedural reference');
+    expect(dialog.textContent).toContain('stereo-procedural-matrix-filter-reference / stereo-procedural-reference / active / sample 44.1kHz / channels 2 / steps trim->delay / delay 0/44.1 samples / matrix [1,0;0,1] / routing identity / crossfeed disabled');
+    expect(dialog.textContent).toContain('UZUME per-ear EQ placement reference');
+    expect(dialog.textContent).toContain('per-ear-eq-placement-reference / do-not-reorder-across-crossfeed-without-null-proof / placement-sensitive / sample 44.1kHz / order pre-crossfeed-eq->crossfeed-matrix-filter->post-crossfeed-eq / per-ear -6/6 dB / crossfeed -9 dB delay 0 ms lowpass 22050 center none / pre pre-per-ear-eq->crossfeed / post crossfeed->post-per-ear-eq / residual 4 frames 0.188/0.052 / reasons crossfeed and asymmetric per ear eq are not commutative | do not reorder across crossfeed without null proof | per ear eq placement reference only');
+    expect(dialog.textContent).toContain('UZUME block boundary reference');
+    expect(dialog.textContent).toContain('block-boundary-split-reference / valid-frames-committed-padding-never-output / block 6 / input 8 / channels 2 / blocks 2 / states full+partial-padded / coverage exact covered 8 missing 0 duplicate 0 committed 8 padded 4 / residual exact-reassembly 0/0 / boundaries 1 / introduced 0');
+    expect(dialog.textContent).toContain('UZUME flush/drain reference');
+    expect(dialog.textContent).toContain('flush-drain-reference / direct-fir-float64-reference / generation 7/current / natural-eof:drain-committed / gen 7 / tail 2 / drain 2 / no reset / drain committed / source residual 0/0 / drain residual 0/0 / reasons natural eof commits drain tail | drain frames match filter tail / manual-flush:tail-dropped-and-reset / gen 8 / tail 2 / drain 0 / reset required / drain blocked');
+    expect(dialog.textContent).toContain('UZUME gapless SRC reference');
+    expect(dialog.textContent).toContain('gapless-concat-reference / source-pcm-concat-before-src / src-stateful / 44.1kHz->48kHz / ratio 1.088435 / segments 2 / boundaries 1 / concat concat-matches-no-reset 0/0 / reset reset-vs-concat-reference 0.125/0.03125 / boundary track-a->track-b out 9 reset 0.125 jump 0.25 / reasons source pcm concat before src | src state must not reset at gapless boundary | reset per track src compared against concat reference | reference artifact generated offline');
+    expect(dialog.textContent).toContain('UZUME FIR gapless reference');
+    expect(dialog.textContent).toContain('fir-gapless-history-reference / source-pcm-concat-before-fir / direct-fir-float64-reference / history-required / room-ir / sample 48kHz / segments 2 / boundaries 1 / tail 3 / drain 3 / concat concat-matches-no-reset-history 0/0 / reset reset-vs-concat-history-reference 0.1875/0.046875 / boundary track-a->track-b out 8 overlap 3 reset 0.1875 jump 0.3125 / reasons source pcm concat before fir | fir history must cross gapless boundary | reset per track fir history compared against concat reference | fir gapless reference only');
+    expect(dialog.textContent).toContain('UZUME urgent controls reference');
+    expect(dialog.textContent).toContain('callback-safe-urgent-controls-reference / urgent-controls-after-committed-output / urgent:mute:applied / callback-safe-urgent-control / read-committed-output-then-apply-urgent-control / cache preserve / gen 1 / no rebuild / commit allowed / declick enabled 4 frames 1->0 step 0.333333 / envelope 8 / peak 0.875->0.083333 / reasons callback safe urgent control | render cache preserved | declick gain ramp | output gain zeroed / boundary:seek:render-cache-invalidated / render-state-boundary / read-committed-output-only / cache invalidate-generation / gen 2 / rebuild required / commit blocked / declick off 0 frames 0->0 step 0 / envelope 0 / peak 0.875->0 / reasons transport boundary requires generation increment | render ahead cache invalidated | callback keeps prior committed output');
+    expect(dialog.textContent).toContain('UZUME equal-power crossfade reference');
+    expect(dialog.textContent).toContain('equal-power-crossfade-reference / random-access-short-bridge-to-full-profile-only / rendered:user-random-seek-or-skip:crossfade-rendered / accepted / sample 48kHz / fade 5 frames/0.104 ms / gain equal-power / mid 0.707107/0.707107 / power error 0 / residual measured-crossfade-difference 0.207107/0.095781 / peak 1/1/1 / reasons random access short bridge requires equal power crossfade | full profile ready | equal power gain law reference | hard switch residual measured / rejected-boundary:gapless-boundary:rejected / reject intent not user random seek or skip / sample 48kHz / fade 5 frames/0.104 ms / gain not-applicable / mid n/a / power error 0 / residual not-applicable / peak 1/1/0 / reasons only user random seek or skip can use short bridge crossfade | gapless boundary waits for full profile | equal power crossfade reference only');
+    expect(dialog.textContent).toContain('UZUME continuity reference');
+    expect(dialog.textContent).toContain('predictive-cache / normal-playlist-boundary->wait-for-full-profile / callback:read-committed-output-only / wait:cpu-or-gpu-full-profile / short bridge blocked:intent requires full quality profile / rollback:none');
+    expect(dialog.textContent).toContain('UZUME pre-roll reference');
+    expect(dialog.textContent).toContain('deadline-safe / required 10240 frames / slack 13760 frames / render-ahead cache-warming 2400/9600 / ring 1024 frames / same-pipeline-no-reset / same pipeline / commit waits full profile');
+    expect(dialog.textContent).toContain('UZUME callback ring reference');
+    expect(dialog.textContent).toContain('stable/safe / depth 2560 frames / 5 blocks / block 512 frames / missing 0 frames / read-committed-output-only / no GPU wait / short bridge blocked:cpu only ring does not enable short bridge');
+    expect(dialog.textContent).toContain('UZUME render-ahead cache');
+    expect(dialog.textContent).toContain('miss->callback-keeps-prior-committed-output / key next-head:reference:0 / cache 0 bytes/384000 bytes / retained none / evictions 0 / read-committed-output-only / no GPU wait');
+    expect(dialog.textContent).toContain('UZUME underrun fallback reference');
+    expect(dialog.textContent).toContain('prior-committed-fallback / source prior-committed / marginal / rollback:controlled-fallback / fallback injected / no GPU wait / short bridge blocked:underrun protection does not enable short bridge');
+    expect(dialog.textContent).toContain('UZUME headroom reference');
+    expect(dialog.textContent).toContain('Headroom -6.0 dB / gain-reference / active');
+    expect(dialog.textContent).toContain('UZUME safety meter');
+    expect(dialog.textContent).toContain('near-limit / clipping risk / stage telemetry separate from limiter');
+    expect(dialog.textContent).toContain('UZUME limiter reference');
+    expect(dialog.textContent).toContain('sample-domain safety limiter / standby / GPU limiter planned');
+
+    const visualState = readSignalPathVisualState(dialog);
+    expect(visualState.tone).toBe('warning');
+    expect(visualState.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME reference compiler', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'Reference assignment', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME reference path plan', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME reference bit-perfect', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME output device policy reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME PCM ingress guard reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME gain staging reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME PEQ/IIR reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME channel scope reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME stereo procedural reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME per-ear EQ placement reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME block boundary reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME flush/drain reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME gapless SRC reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME FIR gapless reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME urgent controls reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME equal-power crossfade reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME SRC reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME SRC rollback reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME SRC budget reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME SRC artifact reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME SRC validation reference', tone: 'good', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME SRC output risk reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME SRC phase/apodizing reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME DSD family reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME convolution reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME response resample reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME convolution duplicate guard', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME convolution serial null reference', tone: 'muted', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME PCM output quantization reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME continuity reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME pre-roll reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME callback ring reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME render-ahead cache', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME underrun fallback reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME safety meter', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME limiter reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+    expect(visualState.nodes.filter((node) => node.tone === 'danger')).toEqual([]);
   });
 
   it('shows the source and output rates when playback is resampled', () => {
