@@ -740,6 +740,42 @@ const formatUzumeReferencePcmOutputQuantization = (status: AudioStatus | null, f
   ].filter((part): part is string => Boolean(part)).join(' / ');
 };
 
+const isExpectedUzumeReferencePcmOutputQuantization = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['pcmOutputQuantization'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  if (report.state === 'bypass') {
+    return report.bitPerfectState === 'preserved' &&
+      !report.dither.enabled &&
+      report.dither.mode === 'none' &&
+      report.quantization.clippedSamples === 0;
+  }
+
+  if (report.state === 'quantized') {
+    return report.bitPerfectState === 'disabled' &&
+      report.pcmDitherAllowed &&
+      report.dither.enabled &&
+      report.dither.mode !== 'none' &&
+      report.dither.seed !== null &&
+      report.dither.lsbAmplitude !== null &&
+      report.dither.lsbAmplitude > 0 &&
+      report.quantization.bitDepth !== null &&
+      report.quantization.maxInteger !== null &&
+      report.quantization.clippedSamples === 0 &&
+      report.quantization.residualMaxAbs !== null &&
+      report.quantization.residualMaxAbs >= 0 &&
+      report.quantization.residualRms !== null &&
+      report.quantization.residualRms >= 0 &&
+      report.reasons.includes('fixed_point_pcm_output_quantized') &&
+      report.reasons.includes('pcm_tpdf_or_plain_quantization_reference');
+  }
+
+  return false;
+};
+
 const formatUzumeReferencePcmIngressGuard = (status: AudioStatus | null, fallback: string): string => {
   const report = status?.uzumeReferencePlan?.pcmIngressGuard;
   if (!report) {
@@ -1639,7 +1675,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceResponseResample'), value: uzumeReferenceResponseResampleText, tone: isExpectedUzumeReferenceResponseResample(status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports?.length ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard'), value: uzumeReferenceConvolutionDuplicateGuardText, tone: isExpectedUzumeReferenceConvolutionDuplicateGuard(status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'single-shared-plan' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'split-required' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolutionSerialNull'), value: uzumeReferenceConvolutionSerialNullText, tone: status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'merged-matches-serial' ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'residual-over-threshold' ? 'danger' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference ? 'muted' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferencePcmOutputQuantization'), value: uzumeReferencePcmOutputQuantizationText, tone: status?.uzumeReferencePlan?.pcmOutputQuantization?.state === 'rejected' ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization?.dither.enabled ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferencePcmOutputQuantization'), value: uzumeReferencePcmOutputQuantizationText, tone: isExpectedUzumeReferencePcmOutputQuantization(status?.uzumeReferencePlan?.pcmOutputQuantization) ? 'good' : status?.uzumeReferencePlan?.pcmOutputQuantization?.state === 'rejected' ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization?.dither.enabled ? 'warning' : status?.uzumeReferencePlan?.pcmOutputQuantization ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceContinuity'), value: uzumeReferenceContinuityText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePreRoll'), value: uzumeReferencePreRollText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceCallbackRing'), value: uzumeReferenceCallbackRingText, tone: status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },

@@ -1437,7 +1437,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME PCM output quantization reference',
           value: 'pcm-output-quantization-dither-reference / pcm_processed->int32 / quantized / bit-perfect disabled / pcm dither allowed / dither tpdf enabled / seed 219668994 / lsb 4.66e-10 / peak 0.8750 lsb / noise none / 32 bit / max 2147483647 / clips 0 / residual 2.40e-10/1.10e-10 / sdm noise none / reasons fixed point pcm output quantized | pcm dither disables bitperfect | pcm tpdf or plain quantization reference',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({ label: 'UZUME continuity reference', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME pre-roll reference', tone: 'warning' }),
@@ -1582,6 +1582,31 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME response resample reference',
           value: expect.stringContaining('headphone-fir:windowed-sinc-reference-required'),
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected PCM output quantization reference contract as good', () => {
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={referenceStatus()} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME PCM output quantization reference',
+          value: expect.stringContaining('quantized / bit-perfect disabled / pcm dither allowed / dither tpdf enabled'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME PCM output quantization reference',
+          value: expect.stringContaining('clips 0 / residual 2.40e-10/1.10e-10'),
           tone: 'good',
         }),
       ]),

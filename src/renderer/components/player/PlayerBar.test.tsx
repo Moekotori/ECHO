@@ -1843,7 +1843,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({ title: 'UZUME response resample reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME convolution duplicate guard', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME convolution serial null reference', tone: 'muted', variant: 'process' }),
-        expect.objectContaining({ title: 'UZUME PCM output quantization reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME PCM output quantization reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME continuity reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME pre-roll reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME callback ring reference', tone: 'process', variant: 'process' }),

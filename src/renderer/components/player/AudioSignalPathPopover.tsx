@@ -874,6 +874,42 @@ const formatUzumeReferencePcmOutputQuantization = (status: AudioStatus | null): 
   ]);
 };
 
+const isExpectedUzumeReferencePcmOutputQuantization = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['pcmOutputQuantization'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  if (report.state === 'bypass') {
+    return report.bitPerfectState === 'preserved' &&
+      !report.dither.enabled &&
+      report.dither.mode === 'none' &&
+      report.quantization.clippedSamples === 0;
+  }
+
+  if (report.state === 'quantized') {
+    return report.bitPerfectState === 'disabled' &&
+      report.pcmDitherAllowed &&
+      report.dither.enabled &&
+      report.dither.mode !== 'none' &&
+      report.dither.seed !== null &&
+      report.dither.lsbAmplitude !== null &&
+      report.dither.lsbAmplitude > 0 &&
+      report.quantization.bitDepth !== null &&
+      report.quantization.maxInteger !== null &&
+      report.quantization.clippedSamples === 0 &&
+      report.quantization.residualMaxAbs !== null &&
+      report.quantization.residualMaxAbs >= 0 &&
+      report.quantization.residualRms !== null &&
+      report.quantization.residualRms >= 0 &&
+      report.reasons.includes('fixed_point_pcm_output_quantized') &&
+      report.reasons.includes('pcm_tpdf_or_plain_quantization_reference');
+  }
+
+  return false;
+};
+
 const formatUzumeReferencePcmIngressGuard = (status: AudioStatus | null): string | null => {
   const report = status?.uzumeReferencePlan?.pcmIngressGuard;
   if (!report) {
@@ -2426,7 +2462,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       value: referencePcmOutputQuantization,
       tone: referencePlan?.pcmOutputQuantization.state === 'rejected'
         ? 'warning'
-        : referencePlan?.pcmOutputQuantization.dither.enabled ? 'warning' : 'process',
+        : isExpectedUzumeReferencePcmOutputQuantization(referencePlan?.pcmOutputQuantization) ? 'process' : referencePlan?.pcmOutputQuantization.dither.enabled ? 'warning' : 'process',
       variant: 'process',
     });
   }
