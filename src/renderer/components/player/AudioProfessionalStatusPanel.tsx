@@ -813,6 +813,80 @@ const formatUzumeReferenceResponseResample = (status: AudioStatus | null, fallba
   ].filter((part): part is string => Boolean(part)).join(' / ')).join(' | ');
 };
 
+const isExpectedUzumeReferenceConvolution = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['sharedConvolution'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  if (!report.active) {
+    return report.sources.length === 0 &&
+      report.mergedSourceIds.length === 0 &&
+      report.splitSourceIds.length === 0 &&
+      report.partitionPlan.latencyClass === 'inactive';
+  }
+
+  const plan = report.partitionPlan;
+  const sourceIds = new Set(report.sources.map((source) => source.id));
+  const mergedIds = new Set(report.mergedSourceIds);
+  const splitIds = new Set(report.splitSourceIds);
+  const responseReportIds = new Set(report.responseResampleReports.map((resampleReport) => resampleReport.sourceId));
+  const mergedAndSplitCoverSources = report.sources.length > 0 &&
+    report.sources.every((source) => (mergedIds.has(source.id) || splitIds.has(source.id)) && !(mergedIds.has(source.id) && splitIds.has(source.id)));
+  const splitReasonsMatch = report.splitSourceIds.every((sourceId) => Boolean(report.splitReasons[sourceId])) &&
+    Object.keys(report.splitReasons).every((sourceId) => splitIds.has(sourceId));
+  const sourcesAreValid = report.sources.every((source) =>
+    source.id.length > 0 &&
+    source.sampleRate > 0 &&
+    source.channels > 0 &&
+    source.tapCount > 0 &&
+    source.latencySamples >= 0 &&
+    Number.isFinite(source.sampleRate) &&
+    Number.isFinite(source.latencySamples));
+  const mergedSourcesMatchPlan = report.mergedSourceIds.length > 0 &&
+    report.mergedSourceIds.every((sourceId) => {
+      const source = report.sources.find((candidate) => candidate.id === sourceId);
+      return source !== undefined &&
+        source.sampleRateFamily === plan.sampleRateFamily &&
+        (plan.exactSampleRate === null || plan.exactSampleRate === undefined || source.sampleRate === plan.exactSampleRate) &&
+        (plan.channelLayout === null || plan.channelLayout === undefined || source.channelLayout === plan.channelLayout);
+    });
+  const partitionPlanIsValid = plan.sampleRateFamily !== null &&
+    plan.sampleRateFamily !== undefined &&
+    (plan.exactSampleRate === null || plan.exactSampleRate === undefined || plan.exactSampleRate > 0) &&
+    (plan.channelLayout === null || plan.channelLayout === undefined || plan.channelLayout.length > 0) &&
+    plan.latencyClass !== 'inactive' &&
+    plan.callbackBlockFrames > 0 &&
+    plan.internalBlockFrames > 0 &&
+    (plan.outputBlockFrames === undefined || plan.outputBlockFrames > 0) &&
+    (plan.directHeadTaps === undefined || plan.directHeadTaps >= 0) &&
+    plan.fftHeadSize > 0 &&
+    (plan.fftTailSizes === undefined || (plan.fftTailSizes.length > 0 && plan.fftTailSizes.every((size) => size > 0))) &&
+    (plan.partitionHopSizes === undefined || (plan.partitionHopSizes.length > 0 && plan.partitionHopSizes.every((size) => size > 0))) &&
+    (plan.partitionCount === undefined || plan.fftTailSizes === undefined || plan.partitionCount >= plan.fftTailSizes.length) &&
+    plan.tailFrames >= 0 &&
+    (plan.tailSeconds === undefined || plan.tailSeconds >= 0) &&
+    (plan.warmupFrames === undefined || plan.warmupFrames >= 0) &&
+    plan.drainFrames >= 0 &&
+    (plan.overlapStrategy === undefined || plan.overlapStrategy === 'overlap-save-reference') &&
+    (plan.cpuPlanId === undefined || plan.cpuPlanId === null || plan.cpuPlanId.length > 0) &&
+    (plan.gpuPlanId === undefined || plan.gpuPlanId === null || plan.gpuPlanId.length > 0);
+  const responseReportsCoverSources = report.responseResampleReports.length === report.sources.length &&
+    report.sources.every((source) => responseReportIds.has(source.id));
+
+  return report.engine === 'shared-convolution-planner-reference' &&
+    sourceIds.size === report.sources.length &&
+    [...mergedIds].every((sourceId) => sourceIds.has(sourceId)) &&
+    [...splitIds].every((sourceId) => sourceIds.has(sourceId)) &&
+    sourcesAreValid &&
+    mergedAndSplitCoverSources &&
+    splitReasonsMatch &&
+    mergedSourcesMatchPlan &&
+    partitionPlanIsValid &&
+    responseReportsCoverSources;
+};
+
 const isExpectedUzumeReferenceResponseResample = (
   reports: NonNullable<AudioStatus['uzumeReferencePlan']>['sharedConvolution']['responseResampleReports'] | null | undefined,
 ): boolean => {
@@ -1942,6 +2016,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceSrcPhaseApodizingText = formatUzumeReferenceSrcPhaseApodizing(status, unknown);
   const uzumeReferenceDsdFamilyText = formatUzumeReferenceDsdFamily(status, unknown);
   const uzumeReferenceConvolutionText = formatUzumeReferenceConvolution(status, unknown);
+  const expectedUzumeReferenceConvolution = isExpectedUzumeReferenceConvolution(status?.uzumeReferencePlan?.sharedConvolution);
   const uzumeReferenceResponseResampleText = formatUzumeReferenceResponseResample(status, unknown);
   const uzumeReferenceConvolutionDuplicateGuardText = formatUzumeReferenceConvolutionDuplicateGuard(status, unknown);
   const uzumeReferenceConvolutionSerialNullText = formatUzumeReferenceConvolutionSerialNull(status, unknown);
@@ -2133,7 +2208,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceSrcOutputRisk'), value: uzumeReferenceSrcOutputRiskText, tone: status?.uzumeReferencePlan?.resampling.outputResamplingRisk.signalPathTone === 'warning' ? 'warning' : status?.uzumeReferencePlan?.resampling.outputResamplingRisk ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcPhaseApodizing'), value: uzumeReferenceSrcPhaseApodizingText, tone: isExpectedUzumeReferenceSrcPhaseApodizing(status?.uzumeReferencePlan?.resampling) ? 'good' : status?.uzumeReferencePlan?.resampling.phaseModeArtifacts ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceDsdFamily'), value: uzumeReferenceDsdFamilyText, tone: status?.uzumeReferencePlan?.dsdFamily?.state === 'unavailable' ? 'warning' : status?.uzumeReferencePlan?.dsdFamily?.state === 'direct' ? 'good' : status?.uzumeReferencePlan?.dsdFamily ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceConvolution'), value: uzumeReferenceConvolutionText, tone: status?.uzumeReferencePlan?.sharedConvolution?.sources.length ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceConvolution'), value: uzumeReferenceConvolutionText, tone: expectedUzumeReferenceConvolution ? 'good' : status?.uzumeReferencePlan?.sharedConvolution ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceResponseResample'), value: uzumeReferenceResponseResampleText, tone: isExpectedUzumeReferenceResponseResample(status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports?.length ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard'), value: uzumeReferenceConvolutionDuplicateGuardText, tone: isExpectedUzumeReferenceConvolutionDuplicateGuard(status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'single-shared-plan' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'split-required' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolutionSerialNull'), value: uzumeReferenceConvolutionSerialNullText, tone: status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'merged-matches-serial' ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference?.state === 'residual-over-threshold' ? 'danger' : status?.uzumeReferencePlan?.sharedConvolution?.serialNullReference ? 'muted' : 'muted' },

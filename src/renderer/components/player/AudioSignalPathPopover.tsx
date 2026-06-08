@@ -947,6 +947,80 @@ const formatUzumeReferenceResponseResample = (status: AudioStatus | null): strin
   ])).join(' | ');
 };
 
+const isExpectedUzumeReferenceConvolution = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['sharedConvolution'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  if (!report.active) {
+    return report.sources.length === 0 &&
+      report.mergedSourceIds.length === 0 &&
+      report.splitSourceIds.length === 0 &&
+      report.partitionPlan.latencyClass === 'inactive';
+  }
+
+  const plan = report.partitionPlan;
+  const sourceIds = new Set(report.sources.map((source) => source.id));
+  const mergedIds = new Set(report.mergedSourceIds);
+  const splitIds = new Set(report.splitSourceIds);
+  const responseReportIds = new Set(report.responseResampleReports.map((resampleReport) => resampleReport.sourceId));
+  const mergedAndSplitCoverSources = report.sources.length > 0 &&
+    report.sources.every((source) => (mergedIds.has(source.id) || splitIds.has(source.id)) && !(mergedIds.has(source.id) && splitIds.has(source.id)));
+  const splitReasonsMatch = report.splitSourceIds.every((sourceId) => Boolean(report.splitReasons[sourceId])) &&
+    Object.keys(report.splitReasons).every((sourceId) => splitIds.has(sourceId));
+  const sourcesAreValid = report.sources.every((source) =>
+    source.id.length > 0 &&
+    source.sampleRate > 0 &&
+    source.channels > 0 &&
+    source.tapCount > 0 &&
+    source.latencySamples >= 0 &&
+    Number.isFinite(source.sampleRate) &&
+    Number.isFinite(source.latencySamples));
+  const mergedSourcesMatchPlan = report.mergedSourceIds.length > 0 &&
+    report.mergedSourceIds.every((sourceId) => {
+      const source = report.sources.find((candidate) => candidate.id === sourceId);
+      return source !== undefined &&
+        source.sampleRateFamily === plan.sampleRateFamily &&
+        (plan.exactSampleRate === null || plan.exactSampleRate === undefined || source.sampleRate === plan.exactSampleRate) &&
+        (plan.channelLayout === null || plan.channelLayout === undefined || source.channelLayout === plan.channelLayout);
+    });
+  const partitionPlanIsValid = plan.sampleRateFamily !== null &&
+    plan.sampleRateFamily !== undefined &&
+    (plan.exactSampleRate === null || plan.exactSampleRate === undefined || plan.exactSampleRate > 0) &&
+    (plan.channelLayout === null || plan.channelLayout === undefined || plan.channelLayout.length > 0) &&
+    plan.latencyClass !== 'inactive' &&
+    plan.callbackBlockFrames > 0 &&
+    plan.internalBlockFrames > 0 &&
+    (plan.outputBlockFrames === undefined || plan.outputBlockFrames > 0) &&
+    (plan.directHeadTaps === undefined || plan.directHeadTaps >= 0) &&
+    plan.fftHeadSize > 0 &&
+    (plan.fftTailSizes === undefined || (plan.fftTailSizes.length > 0 && plan.fftTailSizes.every((size) => size > 0))) &&
+    (plan.partitionHopSizes === undefined || (plan.partitionHopSizes.length > 0 && plan.partitionHopSizes.every((size) => size > 0))) &&
+    (plan.partitionCount === undefined || plan.fftTailSizes === undefined || plan.partitionCount >= plan.fftTailSizes.length) &&
+    plan.tailFrames >= 0 &&
+    (plan.tailSeconds === undefined || plan.tailSeconds >= 0) &&
+    (plan.warmupFrames === undefined || plan.warmupFrames >= 0) &&
+    plan.drainFrames >= 0 &&
+    (plan.overlapStrategy === undefined || plan.overlapStrategy === 'overlap-save-reference') &&
+    (plan.cpuPlanId === undefined || plan.cpuPlanId === null || plan.cpuPlanId.length > 0) &&
+    (plan.gpuPlanId === undefined || plan.gpuPlanId === null || plan.gpuPlanId.length > 0);
+  const responseReportsCoverSources = report.responseResampleReports.length === report.sources.length &&
+    report.sources.every((source) => responseReportIds.has(source.id));
+
+  return report.engine === 'shared-convolution-planner-reference' &&
+    sourceIds.size === report.sources.length &&
+    [...mergedIds].every((sourceId) => sourceIds.has(sourceId)) &&
+    [...splitIds].every((sourceId) => sourceIds.has(sourceId)) &&
+    sourcesAreValid &&
+    mergedAndSplitCoverSources &&
+    splitReasonsMatch &&
+    mergedSourcesMatchPlan &&
+    partitionPlanIsValid &&
+    responseReportsCoverSources;
+};
+
 const isExpectedUzumeReferenceResponseResample = (
   reports: NonNullable<AudioStatus['uzumeReferencePlan']>['sharedConvolution']['responseResampleReports'] | null | undefined,
 ): boolean => {
@@ -2439,6 +2513,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceSrcPhaseApodizing = formatUzumeReferenceSrcPhaseApodizing(status);
   const referenceDsdFamily = formatUzumeReferenceDsdFamily(status);
   const referenceConvolution = formatUzumeReferenceConvolution(status);
+  const expectedReferenceConvolution = isExpectedUzumeReferenceConvolution(referencePlan?.sharedConvolution);
   const referenceResponseResample = formatUzumeReferenceResponseResample(status);
   const referenceConvolutionDuplicateGuard = formatUzumeReferenceConvolutionDuplicateGuard(status);
   const referenceConvolutionSerialNull = formatUzumeReferenceConvolutionSerialNull(status);
@@ -2876,7 +2951,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME convolution reference',
       value: referenceConvolution,
-      tone: 'process',
+      tone: expectedReferenceConvolution ? 'process' : 'warning',
       variant: 'process',
     });
   }

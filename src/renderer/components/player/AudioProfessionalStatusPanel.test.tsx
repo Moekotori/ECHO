@@ -1418,7 +1418,7 @@ describe('AudioProfessionalStatusPanel', () => {
           value: 'dsd-family-path-control-reference / d2p_processed:d2p-reference / dsd->pcm / multibit-pcm / direct disabled dsd source decoded to pcm / allowed safety-metering+eq+fir+pcm-src+pcm-dither+pcm-limiter / disabled none / pcm dsp allowed / pcm dither allowed / sdm noise none / d2p dsd64-to-176k4-reference-low-pass @ 176400 Hz / sdm unavailable / reasons d2p reports decimation profile and internal pcm rate',
           tone: 'warning',
         }),
-        expect.objectContaining({ label: 'UZUME convolution reference', tone: 'warning' }),
+        expect.objectContaining({ label: 'UZUME convolution reference', tone: 'good' }),
         expect.objectContaining({
           label: 'UZUME response resample reference',
           value: 'room-ir:same-rate-bypass / 48 kHz->48 kHz / 48k-family->48k-family / exact-bypass / linear interpolation not used / same rate exact bypass | headphone-fir:windowed-sinc-reference-required / 44.1 kHz->48 kHz / 44.1k-family->48k-family / windowed-sinc-float64-reference / linear interpolation rejected / 64 taps/0.9200 cutoff/96 dB / cross family response resample uses windowed sinc reference',
@@ -1751,6 +1751,56 @@ describe('AudioProfessionalStatusPanel', () => {
           label: 'UZUME convolution duplicate guard',
           value: expect.stringContaining('headphone-fir:split-required split sample rate family mismatch'),
           tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected shared convolution planner reference contract as good', () => {
+    const status = referenceStatus();
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME convolution reference',
+          value: expect.stringContaining('shared-convolution-planner-reference / room-ir / 48k-family / block 512->512 / tail 2047 / drain 2047'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME convolution reference',
+          value: expect.stringContaining('split headphone-fir:sample rate family mismatch'),
+          tone: 'good',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const driftedStatus = referenceStatus();
+    driftedStatus.uzumeReferencePlan!.sharedConvolution.splitReasons = {};
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={driftedStatus} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME convolution reference',
+          value: expect.not.stringContaining('split headphone-fir:sample rate family mismatch'),
+          tone: 'warning',
         }),
       ]),
     );
