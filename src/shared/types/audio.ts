@@ -385,6 +385,7 @@ export type UzumeReferenceArtifactPlan = {
   outputDevicePolicy: 'deterministic-reference';
   latencyBudget: 'deterministic-reference';
   readinessContract: 'deterministic-reference';
+  generationCacheKey: 'deterministic-reference';
   qualityRollback: 'deterministic-reference';
   outputResamplingRisk: 'deterministic-reference';
   pcmOutputQuantization: 'deterministic-reference';
@@ -1081,6 +1082,38 @@ export type UzumeReferenceReadinessContractInspectReport = {
   productionScheduler: 'not-enabled';
   reasons: string[];
 };
+export type UzumeReferenceGenerationCacheKeyInspectReport = {
+  artifact: 'generation-cache-key-reference';
+  policy: 'generation-safe-cache-key-contract-reference';
+  state: 'ready';
+  generationId: number;
+  generationSource: 'playback-intent-reference';
+  timelineScope: 'normal-next-track-head' | 'gapless-album-segment';
+  trackRole: 'next-track-head' | 'gapless-segment';
+  sourceIdentity: 'next-reference';
+  albumSegmentKey: string | null;
+  albumSegmentIndex: number | null;
+  requestKey: string;
+  cacheKey: string;
+  profileFingerprint: string;
+  profileComponents: string[];
+  deviceFingerprint: string;
+  deviceComponents: string[];
+  invalidatesOn: Array<
+    | 'seek'
+    | 'manual-skip'
+    | 'profile-change'
+    | 'device-change'
+    | 'output-mode-change'
+    | 'sample-rate-plan-change'
+  >;
+  preservesOn: Array<'pause' | 'resume' | 'mute' | 'volume' | 'declick'>;
+  staleCommitRule: 'reject-stale-generation';
+  callbackSlotRule: 'late-current-generation-retain-for-future-only';
+  evictionRule: 'stale-then-farthest-from-boundary';
+  rendererControl: 'inspect-only';
+  reasons: string[];
+};
 export type UzumeCompiledReferencePlan = {
   schemaVersion: 1;
   telemetrySchemaVersion: 2;
@@ -1099,6 +1132,7 @@ export type UzumeCompiledReferencePlan = {
   outputDevicePolicy: UzumeReferenceOutputDevicePolicyInspectReport;
   latencyBudget: UzumeReferenceLatencyBudgetInspectReport;
   readinessContract: UzumeReferenceReadinessContractInspectReport;
+  generationCacheKey: UzumeReferenceGenerationCacheKeyInspectReport;
   orderedProfileSections: UzumeReferenceSectionId[];
   engineAssignments: UzumeReferenceAssignment[];
   mergeGroups: UzumeReferenceMergeGroup[];

@@ -916,6 +916,7 @@ export type TranslationKey =
   | 'audioProfessional.row.uzumeReferenceFirGaplessHistory'
   | 'audioProfessional.row.uzumeReferenceFlushDrain'
   | 'audioProfessional.row.uzumeReferenceGaplessConcat'
+  | 'audioProfessional.row.uzumeReferenceGenerationCacheKey'
   | 'audioProfessional.row.uzumeReferenceGainStaging'
   | 'audioProfessional.row.uzumeReferenceIirEq'
   | 'audioProfessional.row.uzumeReferenceChannelScope'
@@ -3934,6 +3935,7 @@ const zhCN: TranslationMap = {
   'audioProfessional.row.uzumeReferenceFirGaplessHistory': 'UZUME FIR gapless reference',
   'audioProfessional.row.uzumeReferenceFlushDrain': 'UZUME flush/drain reference',
   'audioProfessional.row.uzumeReferenceGaplessConcat': 'UZUME gapless SRC reference',
+  'audioProfessional.row.uzumeReferenceGenerationCacheKey': 'UZUME generation cache key reference',
   'audioProfessional.row.uzumeReferenceGainStaging': 'UZUME gain staging reference',
   'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
   'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
@@ -7317,6 +7319,7 @@ const zhTW: TranslationMap = {
   'audioProfessional.row.uzumeReferenceFirGaplessHistory': 'UZUME FIR gapless reference',
   'audioProfessional.row.uzumeReferenceFlushDrain': 'UZUME flush/drain reference',
   'audioProfessional.row.uzumeReferenceGaplessConcat': 'UZUME gapless SRC reference',
+  'audioProfessional.row.uzumeReferenceGenerationCacheKey': 'UZUME generation cache key reference',
   'audioProfessional.row.uzumeReferenceGainStaging': 'UZUME gain staging reference',
   'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
   'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
@@ -10273,6 +10276,7 @@ const jaJP: TranslationMap = {
   'audioProfessional.row.uzumeReferenceFirGaplessHistory': 'UZUME FIR gapless reference',
   'audioProfessional.row.uzumeReferenceFlushDrain': 'UZUME flush/drain reference',
   'audioProfessional.row.uzumeReferenceGaplessConcat': 'UZUME gapless SRC reference',
+  'audioProfessional.row.uzumeReferenceGenerationCacheKey': 'UZUME generation cache key reference',
   'audioProfessional.row.uzumeReferenceGainStaging': 'UZUME gain staging reference',
   'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
   'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
@@ -13298,6 +13302,7 @@ const enUS: TranslationMap = {
   'audioProfessional.row.uzumeReferenceFirGaplessHistory': 'UZUME FIR gapless reference',
   'audioProfessional.row.uzumeReferenceFlushDrain': 'UZUME flush/drain reference',
   'audioProfessional.row.uzumeReferenceGaplessConcat': 'UZUME gapless SRC reference',
+  'audioProfessional.row.uzumeReferenceGenerationCacheKey': 'UZUME generation cache key reference',
   'audioProfessional.row.uzumeReferenceGainStaging': 'UZUME gain staging reference',
   'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
   'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',

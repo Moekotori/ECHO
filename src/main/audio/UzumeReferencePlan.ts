@@ -1457,6 +1457,16 @@ const gainToDb = (gain: number): number => 20 * Math.log10(Math.max(gain, 1e-12)
 const normalizeRate = (value: number | null | undefined): number | null =>
   isFiniteNumber(value) && value > 0 ? Math.round(value) : null;
 
+const stableReferenceHash = (parts: ReadonlyArray<string | number | boolean | null | undefined>): string => {
+  const text = parts.map((part) => part === null || part === undefined ? 'null' : String(part)).join('|');
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+};
+
 const samplesToMilliseconds = (samples: number, sampleRate: number | null): number | null =>
   sampleRate ? Math.round((samples / sampleRate) * 1000000) / 1000 : null;
 
@@ -4295,6 +4305,91 @@ const buildReadinessContractInspectReport = (
   };
 };
 
+const buildGenerationCacheKeyInspectReport = (
+  input: UzumeReferenceCompileInput,
+  format: FormatPlannerResult,
+  backendSupport: UzumeCompiledReferencePlan['backendSupport'],
+  outputDevicePolicy: UzumeCompiledReferencePlan['outputDevicePolicy'],
+  resampling: UzumeReferenceResamplingReport,
+  sharedConvolution: UzumeReferenceSharedConvolutionReport,
+  compiler: ReturnType<typeof buildCompilerAssignments>,
+  continuity: UzumeCompiledReferencePlan['continuity'],
+): UzumeCompiledReferencePlan['generationCacheKey'] => {
+  const generationId = 1;
+  const timelineScope = input.gaplessActive ? 'gapless-album-segment' : 'normal-next-track-head';
+  const trackRole = input.gaplessActive ? 'gapless-segment' : 'next-track-head';
+  const albumSegmentIndex = input.gaplessActive ? 1 : null;
+  const albumSegmentKey = input.gaplessActive ? 'album-reference:segment-0:index-1' : null;
+  const activeSections = compiler.engineAssignments
+    .filter((assignment) => assignment.active)
+    .map((assignment) => assignment.sectionId);
+  const profileComponents = [
+    `format:${format.formatPath}`,
+    `domain:${format.internalDomain}`,
+    `sections:${activeSections.join('+') || 'none'}`,
+    `src:${resampling.sourceFamily ?? 'unknown'}->${resampling.targetFamily ?? 'unknown'}`,
+    `conv:${sharedConvolution.partitionPlan.sampleRateFamily ?? 'unknown'}:${sharedConvolution.partitionPlan.latencyClass}`,
+    `backend:${backendSupport.selectedBackend}`,
+  ];
+  const deviceComponents = [
+    `mode:${outputDevicePolicy.outputMode ?? 'unknown'}`,
+    `capability:${outputDevicePolicy.deviceCapability}`,
+    `requested:${outputDevicePolicy.requestedOutputRate ?? 'unknown'}`,
+    `actual:${outputDevicePolicy.actualDeviceRate ?? 'unknown'}`,
+    `shared:${outputDevicePolicy.sharedDeviceRate ?? 'unknown'}`,
+    `output:${outputDevicePolicy.outputContainer}`,
+  ];
+  const profileFingerprint = `profile:${stableReferenceHash(profileComponents)}`;
+  const deviceFingerprint = `device:${stableReferenceHash(deviceComponents)}`;
+  const cacheKey = [
+    continuity.renderAheadCache.requestKey,
+    `generation:${generationId}`,
+    `timeline:${timelineScope}`,
+    albumSegmentKey ? `album:${albumSegmentKey}` : 'album:none',
+    profileFingerprint,
+    deviceFingerprint,
+  ].join('|');
+
+  return {
+    artifact: 'generation-cache-key-reference',
+    policy: 'generation-safe-cache-key-contract-reference',
+    state: 'ready',
+    generationId,
+    generationSource: 'playback-intent-reference',
+    timelineScope,
+    trackRole,
+    sourceIdentity: 'next-reference',
+    albumSegmentKey,
+    albumSegmentIndex,
+    requestKey: continuity.renderAheadCache.requestKey,
+    cacheKey,
+    profileFingerprint,
+    profileComponents,
+    deviceFingerprint,
+    deviceComponents,
+    invalidatesOn: [
+      'seek',
+      'manual-skip',
+      'profile-change',
+      'device-change',
+      'output-mode-change',
+      'sample-rate-plan-change',
+    ],
+    preservesOn: ['pause', 'resume', 'mute', 'volume', 'declick'],
+    staleCommitRule: 'reject-stale-generation',
+    callbackSlotRule: 'late-current-generation-retain-for-future-only',
+    evictionRule: 'stale-then-farthest-from-boundary',
+    rendererControl: 'inspect-only',
+    reasons: [
+      'cache_key_includes_generation_profile_device_and_timeline',
+      'album_segments_use_segment_index_when_gapless',
+      'file_path_alone_is_not_a_valid_cache_key',
+      'renderer_may_inspect_but_not_mutate_cache_keys',
+      'generation_cache_key_reference_only',
+    ],
+  };
+};
+
 const compactCallbackSafeControlCaseReport = (
   result: UzumeReferenceCallbackSafeControlResult,
 ): UzumeCompiledReferencePlan['callbackSafeControls']['urgentControl'] => ({
@@ -4422,6 +4517,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
   const continuity = buildContinuityInspectReport(input, resampling, sharedConvolution);
   const latencyBudget = buildLatencyBudgetInspectReport(backendSupport, resampling, sharedConvolution, continuity, compiler.latencyOwners);
   const readinessContract = buildReadinessContractInspectReport(backendSupport, continuity);
+  const generationCacheKey = buildGenerationCacheKeyInspectReport(input, format, backendSupport, outputDevicePolicy, resampling, sharedConvolution, compiler, continuity);
   const callbackSafeControls = buildCallbackSafeControlsInspectReport(input);
   const equalPowerCrossfade = buildEqualPowerCrossfadeInspectReport(input, resampling);
   const dsdFamily = buildDsdFamilyReport(input, format);
@@ -4434,6 +4530,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
     outputDevicePolicy,
     latencyBudget,
     readinessContract,
+    generationCacheKey,
     ...compiler,
     resampling,
     sharedConvolution,
@@ -4472,6 +4569,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
       outputDevicePolicy: 'deterministic-reference',
       latencyBudget: 'deterministic-reference',
       readinessContract: 'deterministic-reference',
+      generationCacheKey: 'deterministic-reference',
       qualityRollback: 'deterministic-reference',
       outputResamplingRisk: 'deterministic-reference',
       pcmOutputQuantization: 'deterministic-reference',

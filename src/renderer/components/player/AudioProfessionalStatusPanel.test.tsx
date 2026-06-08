@@ -201,6 +201,37 @@ const referenceStatus = (): AudioStatus => ({
         'readiness_contract_reference_only',
       ],
     },
+    generationCacheKey: {
+      artifact: 'generation-cache-key-reference',
+      policy: 'generation-safe-cache-key-contract-reference',
+      state: 'ready',
+      generationId: 1,
+      generationSource: 'playback-intent-reference',
+      timelineScope: 'normal-next-track-head',
+      trackRole: 'next-track-head',
+      sourceIdentity: 'next-reference',
+      albumSegmentKey: null,
+      albumSegmentIndex: null,
+      requestKey: 'next-head:reference:0',
+      cacheKey: 'next-head:reference:0|generation:1|timeline:normal-next-track-head|album:none|profile:ui-ref|device:ui-ref',
+      profileFingerprint: 'profile:ui-ref',
+      profileComponents: ['format:pcm_processed', 'domain:multibit-pcm', 'sections:format-path+headroom+peq+shared-convolution+pcm-src', 'src:44.1k-family->48k-family', 'conv:48k-family:quality-first', 'backend:cpu-float64-reference'],
+      deviceFingerprint: 'device:ui-ref',
+      deviceComponents: ['mode:shared', 'capability:shared-mixer', 'requested:48000', 'actual:48000', 'shared:48000', 'output:pcm'],
+      invalidatesOn: ['seek', 'manual-skip', 'profile-change', 'device-change', 'output-mode-change', 'sample-rate-plan-change'],
+      preservesOn: ['pause', 'resume', 'mute', 'volume', 'declick'],
+      staleCommitRule: 'reject-stale-generation',
+      callbackSlotRule: 'late-current-generation-retain-for-future-only',
+      evictionRule: 'stale-then-farthest-from-boundary',
+      rendererControl: 'inspect-only',
+      reasons: [
+        'cache_key_includes_generation_profile_device_and_timeline',
+        'album_segments_use_segment_index_when_gapless',
+        'file_path_alone_is_not_a_valid_cache_key',
+        'renderer_may_inspect_but_not_mutate_cache_keys',
+        'generation_cache_key_reference_only',
+      ],
+    },
     resampling: {
       active: true,
       family: 'poly-sinc-reference',
@@ -1009,6 +1040,7 @@ const referenceStatus = (): AudioStatus => ({
       outputDevicePolicy: 'deterministic-reference',
       latencyBudget: 'deterministic-reference',
       readinessContract: 'deterministic-reference',
+      generationCacheKey: 'deterministic-reference',
       qualityRollback: 'deterministic-reference',
       outputResamplingRisk: 'deterministic-reference',
       pcmOutputQuantization: 'deterministic-reference',
@@ -1143,6 +1175,7 @@ describe('AudioProfessionalStatusPanel', () => {
     expect(screen.getByText(/latency-budget-reference \/ cpu-float64-reference \/ realtime not-enabled \/ src 35 samples\/0.73 ms lookahead 35 samples\/0.73 ms/u)).toBeTruthy();
     expect(screen.getByText(/conv quality-first latency 1024 frames direct-head 128 taps warmup 512 frames tail 2047 frames drain 2047 frames/u)).toBeTruthy();
     expect(screen.getByText(/readiness-contract-reference \/ main-playback-owns-timeline-uzume-reports-readiness \/ waiting-for-full-profile \/ normal-playlist-boundary->wait-for-full-profile/u)).toBeTruthy();
+    expect(screen.getByText(/generation-cache-key-reference \/ generation-safe-cache-key-contract-reference \/ gen 1 \/ normal-next-track-head \/ next-track-head/u)).toBeTruthy();
     expect(screen.getByText(/poly-sinc-reference 44.1 kHz->48 kHz/u)).toBeTruthy();
     expect(screen.getByText(/35 samples \/ 0.73 ms/u)).toBeTruthy();
     expect(screen.getByText(/64 taps \/ cutoff 92% \/ alias 18.5 dB/u)).toBeTruthy();
@@ -1223,6 +1256,11 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME readiness contract reference',
           value: 'readiness-contract-reference / main-playback-owns-timeline-uzume-reports-readiness / waiting-for-full-profile / normal-playlist-boundary->wait-for-full-profile / wait cpu-or-gpu-full-profile / full-profile not-ready / gpu-prewarm future-render-ahead-gate / cache miss->callback-keeps-prior-committed-output key next-head:reference:0 / render-ahead cache-warming 2400/9600 / deadline deadline-safe slack 13760 frames / ring stable/safe / short-bridge blocked intent requires full quality profile / crossfade blocked-by-intent / generation current-generation-only stale blocked / same-pipeline-no-reset / scheduler not-enabled / reasons readiness summary derived from reference reports | main playback logic owns timeline and policy | gpu prewarm deferred to render ahead gate | stale generation commit disallowed | readiness contract reference only',
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME generation cache key reference',
+          value: 'generation-cache-key-reference / generation-safe-cache-key-contract-reference / gen 1 / normal-next-track-head / next-track-head / request next-head:reference:0 / cache next-head:reference:0|generation:1|timeline:normal-next-track-head|album:none|profile:ui-ref|device:ui-ref / profile:ui-ref / device:ui-ref / profile format:pcm_processed + domain:multibit-pcm + sections:format-path+headroom+peq+shared-convolution+pcm-src + src:44.1k-family->48k-family + conv:48k-family:quality-first + backend:cpu-float64-reference / device mode:shared + capability:shared-mixer + requested:48000 + actual:48000 + shared:48000 + output:pcm / album none index n/a / invalidate seek+manual-skip+profile-change+device-change+output-mode-change+sample-rate-plan-change / preserve pause+resume+mute+volume+declick / reject-stale-generation / late-current-generation-retain-for-future-only / stale-then-farthest-from-boundary / renderer inspect-only / reasons cache key includes generation profile device and timeline | album segments use segment index when gapless | file path alone is not a valid cache key | renderer may inspect but not mutate cache keys | generation cache key reference only',
           tone: 'warning',
         }),
         expect.objectContaining({

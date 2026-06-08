@@ -262,6 +262,34 @@ describe('UZUME reference plan compiler', () => {
         'readiness_contract_reference_only',
       ],
     });
+    expect(compiled.generationCacheKey).toMatchObject({
+      artifact: 'generation-cache-key-reference',
+      policy: 'generation-safe-cache-key-contract-reference',
+      state: 'ready',
+      generationId: 1,
+      generationSource: 'playback-intent-reference',
+      timelineScope: 'normal-next-track-head',
+      trackRole: 'next-track-head',
+      sourceIdentity: 'next-reference',
+      albumSegmentKey: null,
+      albumSegmentIndex: null,
+      requestKey: 'next-head:reference:0',
+      staleCommitRule: 'reject-stale-generation',
+      callbackSlotRule: 'late-current-generation-retain-for-future-only',
+      evictionRule: 'stale-then-farthest-from-boundary',
+      rendererControl: 'inspect-only',
+      reasons: [
+        'cache_key_includes_generation_profile_device_and_timeline',
+        'album_segments_use_segment_index_when_gapless',
+        'file_path_alone_is_not_a_valid_cache_key',
+        'renderer_may_inspect_but_not_mutate_cache_keys',
+        'generation_cache_key_reference_only',
+      ],
+    });
+    expect(compiled.generationCacheKey.cacheKey).toContain('generation:1');
+    expect(compiled.generationCacheKey.cacheKey).toContain('timeline:normal-next-track-head');
+    expect(compiled.generationCacheKey.profileFingerprint).toMatch(/^profile:[0-9a-f]{8}$/u);
+    expect(compiled.generationCacheKey.deviceFingerprint).toMatch(/^device:[0-9a-f]{8}$/u);
     expect(compiled.resampling).toMatchObject({
       active: true,
       family: 'poly-sinc-reference',
@@ -578,6 +606,7 @@ describe('UZUME reference plan compiler', () => {
     expect(compiled.artifactPlan.outputDevicePolicy).toBe('deterministic-reference');
     expect(compiled.artifactPlan.latencyBudget).toBe('deterministic-reference');
     expect(compiled.artifactPlan.readinessContract).toBe('deterministic-reference');
+    expect(compiled.artifactPlan.generationCacheKey).toBe('deterministic-reference');
     expect(compiled.artifactPlan.qualityRollback).toBe('deterministic-reference');
     expect(compiled.artifactPlan.pcmOutputQuantization).toBe('deterministic-reference');
     expect(compiled.artifactPlan.pcmIngressGuard).toBe('deterministic-reference');

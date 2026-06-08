@@ -393,6 +393,35 @@ const formatUzumeReferenceReadinessContract = (status: AudioStatus | null): stri
   ]);
 };
 
+const formatUzumeReferenceGenerationCacheKey = (status: AudioStatus | null): string | null => {
+  const report = status?.uzumeReferencePlan?.generationCacheKey;
+  if (!report) {
+    return null;
+  }
+
+  return joinSpec([
+    report.artifact,
+    report.policy,
+    `gen ${report.generationId}`,
+    report.timelineScope,
+    report.trackRole,
+    `request ${report.requestKey}`,
+    `cache ${report.cacheKey}`,
+    report.profileFingerprint,
+    report.deviceFingerprint,
+    `profile ${report.profileComponents.join(' + ')}`,
+    `device ${report.deviceComponents.join(' + ')}`,
+    `album ${report.albumSegmentKey ?? 'none'} index ${report.albumSegmentIndex ?? 'n/a'}`,
+    `invalidate ${report.invalidatesOn.map(cleanReason).filter(Boolean).join('+')}`,
+    `preserve ${report.preservesOn.join('+')}`,
+    report.staleCommitRule,
+    report.callbackSlotRule,
+    report.evictionRule,
+    `renderer ${report.rendererControl}`,
+    report.reasons.length ? `reasons ${report.reasons.map(cleanReason).filter(Boolean).join(' | ')}` : null,
+  ]);
+};
+
 const formatFractionalMs = (value: number | null | undefined): string | null => {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return null;
@@ -1660,6 +1689,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceOutputDevicePolicy = formatUzumeReferenceOutputDevicePolicy(status);
   const referenceLatencyBudget = formatUzumeReferenceLatencyBudget(status);
   const referenceReadinessContract = formatUzumeReferenceReadinessContract(status);
+  const referenceGenerationCacheKey = formatUzumeReferenceGenerationCacheKey(status);
   const referenceResampling = formatUzumeReferenceResampling(status);
   const referenceSrcRollback = formatUzumeReferenceSrcRollback(status);
   const referenceSrcBudget = formatUzumeReferenceSrcBudget(status);
@@ -1833,6 +1863,16 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       title: 'UZUME readiness contract reference',
       value: referenceReadinessContract,
       tone: referencePlan?.readinessContract.state === 'ready-to-commit' || referencePlan?.readinessContract.state === 'cache-ready' ? 'process' : 'warning',
+      variant: 'process',
+    });
+  }
+
+  if (referenceGenerationCacheKey) {
+    nodes.push({
+      badge: '',
+      title: 'UZUME generation cache key reference',
+      value: referenceGenerationCacheKey,
+      tone: 'warning',
       variant: 'process',
     });
   }
