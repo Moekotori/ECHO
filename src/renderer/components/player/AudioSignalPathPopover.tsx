@@ -1931,7 +1931,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   if (referenceRealtimeBudgetSummary) {
     nodes.push({
       badge: '',
-      title: 'UZUME realtime budget summary',
+      title: 'UZUME realtime budget summary reference',
       value: referenceRealtimeBudgetSummary,
       tone: referencePlan?.realtimeBudgetSummary.state === 'offline-reference-only' ? 'warning' : 'process',
       variant: 'process',
@@ -2256,7 +2256,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   if (referenceRenderAheadCache) {
     nodes.push({
       badge: '',
-      title: 'UZUME render-ahead cache',
+      title: 'UZUME render-ahead cache reference',
       value: referenceRenderAheadCache,
       tone: 'process',
       variant: 'process',

@@ -1302,7 +1302,7 @@ describe('AudioProfessionalStatusPanel', () => {
           tone: 'warning',
         }),
         expect.objectContaining({
-          label: 'UZUME realtime budget summary',
+          label: 'UZUME realtime budget summary reference',
           value: 'realtime-budget-summary-reference / reference-budget-no-measured-runtime-factor / offline-reference-only / selected cpu-float64-reference / realtime not-enabled / measured not-measured-in-rpc002 / src scalar-float64-reference 2048 multiply-adds factor unmeasured offline-reference-only / ring 5.0 blocks safe / render-ahead 2400/9600 25% / cpu reference-available / gpu factor unmeasured / thresholds safe 2.0x marginal 1.1x / rpc-003-cpu-realtime-gate / rpc-005-gpu-render-ahead-gate / renderer inspect-only / reasons realtime factor not measured in rpc002 | scalar float64 budget is reference only | cpu avx2 realtime gate deferred to rpc003 | gpu render ahead realtime gate deferred to rpc005 | renderer may inspect but not control realtime path',
           tone: 'warning',
         }),
@@ -1418,7 +1418,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({ label: 'UZUME continuity reference', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME pre-roll reference', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME callback ring reference', value: 'stable / safe / depth 2560 frames / 5.0 blocks / block 512 frames / missing 0 frames / read-committed-output-only / no GPU wait', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME render-ahead cache', tone: 'warning' }),
+        expect.objectContaining({ label: 'UZUME render-ahead cache reference', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME underrun fallback reference', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME headroom', value: '-6.00 dB / gain-reference / Enabled', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME safety meter', value: 'near-limit / clipping risk / stage telemetry separate from limiter', tone: 'warning' }),
