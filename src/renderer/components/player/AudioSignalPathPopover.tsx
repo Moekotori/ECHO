@@ -967,6 +967,122 @@ const formatUzumeReferenceDsdFamily = (status: AudioStatus | null): string | nul
   ]);
 };
 
+const isExpectedUzumeReferenceDsdFamily = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['dsdFamily'] | null | undefined,
+): boolean => {
+  if (!report || report.artifact !== 'dsd-family-path-control-reference' || report.sourceContainer !== 'dsd') {
+    return false;
+  }
+
+  const hasDsdIngressRate = report.dsd.sourceDsdRate !== null &&
+    report.dsd.targetDsdRate !== null &&
+    report.dsd.sourceDsdRate > 0 &&
+    report.dsd.targetDsdRate > 0;
+  const disabledControlsHaveReasons = report.disabledControls.every((control) => Boolean(control.control) && Boolean(control.reason));
+
+  if (!hasDsdIngressRate || !disabledControlsHaveReasons) {
+    return false;
+  }
+
+  if (report.state === 'direct') {
+    return report.formatPath === 'dsd_direct' &&
+      report.internalDomain === 'dsd-direct' &&
+      (report.outputContainer === 'dop' || report.outputContainer === 'dsd_native') &&
+      report.directDisabledReason === null &&
+      report.fallbackReason === null &&
+      !report.experimental &&
+      !report.pcmDomainDspAllowed &&
+      !report.entersPcmDsp &&
+      !report.pcmDitherAllowed &&
+      !report.sdmNoiseShapingTelemetry &&
+      report.allowedControls.includes('safety-metering') &&
+      !report.d2p.active &&
+      !report.d2p.available &&
+      !report.sdm.active &&
+      !report.sdm.available &&
+      report.dsd.outputEncoding !== null;
+  }
+
+  if (report.state === 'd2p-reference') {
+    return report.formatPath === 'd2p_processed' &&
+      report.outputContainer === 'pcm' &&
+      report.internalDomain === 'multibit-pcm' &&
+      Boolean(report.directDisabledReason) &&
+      report.fallbackReason === null &&
+      !report.experimental &&
+      report.pcmDomainDspAllowed &&
+      report.entersPcmDsp &&
+      report.pcmDitherAllowed &&
+      !report.sdmNoiseShapingTelemetry &&
+      report.allowedControls.includes('pcm-src') &&
+      report.allowedControls.includes('pcm-dither') &&
+      report.d2p.active &&
+      report.d2p.available &&
+      Boolean(report.d2p.decimationProfile) &&
+      report.d2p.internalPcmRate !== null &&
+      report.d2p.internalPcmRate > 0 &&
+      !report.sdm.active &&
+      !report.sdm.available &&
+      report.reasons.includes('d2p_reports_decimation_profile_and_internal_pcm_rate');
+  }
+
+  if (report.state === 'sdm-only-reference') {
+    return report.formatPath === 'dsd_upsampling' &&
+      report.internalDomain === 'sdm-modulator-input' &&
+      (report.outputContainer === 'dop' || report.outputContainer === 'dsd_native') &&
+      Boolean(report.directDisabledReason) &&
+      report.fallbackReason === null &&
+      report.experimental &&
+      !report.pcmDomainDspAllowed &&
+      !report.entersPcmDsp &&
+      !report.pcmDitherAllowed &&
+      report.sdmNoiseShapingTelemetry &&
+      report.allowedControls.includes('sdm-modulator') &&
+      report.disabledControls.some((control) => control.reason === 'requires_d2p_processed_or_sdm_processed') &&
+      !report.d2p.active &&
+      !report.d2p.available &&
+      report.sdm.active &&
+      report.sdm.available &&
+      report.sdm.mode === 'dsd-upsampling' &&
+      Boolean(report.sdm.modulatorProfile) &&
+      report.sdm.targetDsdRate !== null &&
+      report.sdm.targetDsdRate > 0 &&
+      report.sdm.overloadMarginDb !== null &&
+      report.sdm.ultrasonicNoiseRisk !== null &&
+      report.sdm.realtimeSafetyClass === 'offline-reference-only' &&
+      report.reasons.includes('dsd_upsampling_is_sdm_only_not_pcm_domain_dsp');
+  }
+
+  if (report.state === 'sdm-processed-reference') {
+    return report.formatPath === 'sdm_processed' &&
+      report.internalDomain === 'sdm-modulator-input' &&
+      (report.outputContainer === 'dop' || report.outputContainer === 'dsd_native') &&
+      report.directDisabledReason === 'sdm_processed_enabled' &&
+      report.fallbackReason === null &&
+      report.experimental &&
+      report.pcmDomainDspAllowed &&
+      report.entersPcmDsp &&
+      !report.pcmDitherAllowed &&
+      report.sdmNoiseShapingTelemetry &&
+      report.allowedControls.includes('sdm-modulator') &&
+      report.disabledControls.some((control) => control.control === 'pcm-dither' && control.reason === 'sdm_uses_noise_shaping_not_pcm_dither') &&
+      !report.d2p.active &&
+      !report.d2p.available &&
+      report.sdm.active &&
+      report.sdm.available &&
+      report.sdm.mode === 'sdm-processed' &&
+      Boolean(report.sdm.modulatorProfile) &&
+      report.sdm.targetDsdRate !== null &&
+      report.sdm.targetDsdRate > 0 &&
+      report.sdm.overloadMarginDb !== null &&
+      report.sdm.ultrasonicNoiseRisk !== null &&
+      report.sdm.realtimeSafetyClass === 'offline-reference-only' &&
+      report.reasons.includes('sdm_reports_modulator_overload_and_ultrasonic_noise');
+  }
+
+  return false;
+};
+
 const formatUzumeReferenceConvolution = (status: AudioStatus | null): string | null => {
   const convolution = status?.uzumeReferencePlan?.sharedConvolution;
   if (!convolution) {
@@ -2580,6 +2696,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceSrcOutputRisk = formatUzumeReferenceSrcOutputRisk(status);
   const referenceSrcPhaseApodizing = formatUzumeReferenceSrcPhaseApodizing(status);
   const referenceDsdFamily = formatUzumeReferenceDsdFamily(status);
+  const expectedReferenceDsdFamily = isExpectedUzumeReferenceDsdFamily(referencePlan?.dsdFamily);
   const referenceConvolution = formatUzumeReferenceConvolution(status);
   const expectedReferenceConvolution = isExpectedUzumeReferenceConvolution(referencePlan?.sharedConvolution);
   const referenceResponseResample = formatUzumeReferenceResponseResample(status);
@@ -2915,9 +3032,11 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME DSD family reference',
       value: referenceDsdFamily,
-      tone: referencePlan?.dsdFamily?.state === 'unavailable'
+      tone: expectedReferenceDsdFamily
+        ? referencePlan?.dsdFamily?.state === 'direct' ? 'good' : 'process'
+        : referencePlan?.dsdFamily
         ? 'warning'
-        : referencePlan?.dsdFamily?.state === 'direct' ? 'good' : 'process',
+        : 'muted',
       variant: 'process',
     });
   }

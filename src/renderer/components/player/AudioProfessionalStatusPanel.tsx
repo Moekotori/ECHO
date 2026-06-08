@@ -840,6 +840,122 @@ const formatUzumeReferenceDsdFamily = (status: AudioStatus | null, fallback: str
   ].filter((part): part is string => Boolean(part)).join(' / ');
 };
 
+const isExpectedUzumeReferenceDsdFamily = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['dsdFamily'] | null | undefined,
+): boolean => {
+  if (!report || report.artifact !== 'dsd-family-path-control-reference' || report.sourceContainer !== 'dsd') {
+    return false;
+  }
+
+  const hasDsdIngressRate = report.dsd.sourceDsdRate !== null &&
+    report.dsd.targetDsdRate !== null &&
+    report.dsd.sourceDsdRate > 0 &&
+    report.dsd.targetDsdRate > 0;
+  const disabledControlsHaveReasons = report.disabledControls.every((control) => Boolean(control.control) && Boolean(control.reason));
+
+  if (!hasDsdIngressRate || !disabledControlsHaveReasons) {
+    return false;
+  }
+
+  if (report.state === 'direct') {
+    return report.formatPath === 'dsd_direct' &&
+      report.internalDomain === 'dsd-direct' &&
+      (report.outputContainer === 'dop' || report.outputContainer === 'dsd_native') &&
+      report.directDisabledReason === null &&
+      report.fallbackReason === null &&
+      !report.experimental &&
+      !report.pcmDomainDspAllowed &&
+      !report.entersPcmDsp &&
+      !report.pcmDitherAllowed &&
+      !report.sdmNoiseShapingTelemetry &&
+      report.allowedControls.includes('safety-metering') &&
+      !report.d2p.active &&
+      !report.d2p.available &&
+      !report.sdm.active &&
+      !report.sdm.available &&
+      report.dsd.outputEncoding !== null;
+  }
+
+  if (report.state === 'd2p-reference') {
+    return report.formatPath === 'd2p_processed' &&
+      report.outputContainer === 'pcm' &&
+      report.internalDomain === 'multibit-pcm' &&
+      Boolean(report.directDisabledReason) &&
+      report.fallbackReason === null &&
+      !report.experimental &&
+      report.pcmDomainDspAllowed &&
+      report.entersPcmDsp &&
+      report.pcmDitherAllowed &&
+      !report.sdmNoiseShapingTelemetry &&
+      report.allowedControls.includes('pcm-src') &&
+      report.allowedControls.includes('pcm-dither') &&
+      report.d2p.active &&
+      report.d2p.available &&
+      Boolean(report.d2p.decimationProfile) &&
+      report.d2p.internalPcmRate !== null &&
+      report.d2p.internalPcmRate > 0 &&
+      !report.sdm.active &&
+      !report.sdm.available &&
+      report.reasons.includes('d2p_reports_decimation_profile_and_internal_pcm_rate');
+  }
+
+  if (report.state === 'sdm-only-reference') {
+    return report.formatPath === 'dsd_upsampling' &&
+      report.internalDomain === 'sdm-modulator-input' &&
+      (report.outputContainer === 'dop' || report.outputContainer === 'dsd_native') &&
+      Boolean(report.directDisabledReason) &&
+      report.fallbackReason === null &&
+      report.experimental &&
+      !report.pcmDomainDspAllowed &&
+      !report.entersPcmDsp &&
+      !report.pcmDitherAllowed &&
+      report.sdmNoiseShapingTelemetry &&
+      report.allowedControls.includes('sdm-modulator') &&
+      report.disabledControls.some((control) => control.reason === 'requires_d2p_processed_or_sdm_processed') &&
+      !report.d2p.active &&
+      !report.d2p.available &&
+      report.sdm.active &&
+      report.sdm.available &&
+      report.sdm.mode === 'dsd-upsampling' &&
+      Boolean(report.sdm.modulatorProfile) &&
+      report.sdm.targetDsdRate !== null &&
+      report.sdm.targetDsdRate > 0 &&
+      report.sdm.overloadMarginDb !== null &&
+      report.sdm.ultrasonicNoiseRisk !== null &&
+      report.sdm.realtimeSafetyClass === 'offline-reference-only' &&
+      report.reasons.includes('dsd_upsampling_is_sdm_only_not_pcm_domain_dsp');
+  }
+
+  if (report.state === 'sdm-processed-reference') {
+    return report.formatPath === 'sdm_processed' &&
+      report.internalDomain === 'sdm-modulator-input' &&
+      (report.outputContainer === 'dop' || report.outputContainer === 'dsd_native') &&
+      report.directDisabledReason === 'sdm_processed_enabled' &&
+      report.fallbackReason === null &&
+      report.experimental &&
+      report.pcmDomainDspAllowed &&
+      report.entersPcmDsp &&
+      !report.pcmDitherAllowed &&
+      report.sdmNoiseShapingTelemetry &&
+      report.allowedControls.includes('sdm-modulator') &&
+      report.disabledControls.some((control) => control.control === 'pcm-dither' && control.reason === 'sdm_uses_noise_shaping_not_pcm_dither') &&
+      !report.d2p.active &&
+      !report.d2p.available &&
+      report.sdm.active &&
+      report.sdm.available &&
+      report.sdm.mode === 'sdm-processed' &&
+      Boolean(report.sdm.modulatorProfile) &&
+      report.sdm.targetDsdRate !== null &&
+      report.sdm.targetDsdRate > 0 &&
+      report.sdm.overloadMarginDb !== null &&
+      report.sdm.ultrasonicNoiseRisk !== null &&
+      report.sdm.realtimeSafetyClass === 'offline-reference-only' &&
+      report.reasons.includes('sdm_reports_modulator_overload_and_ultrasonic_noise');
+  }
+
+  return false;
+};
+
 const formatUzumeReferenceConvolution = (status: AudioStatus | null, fallback: string): string => {
   const convolution = status?.uzumeReferencePlan?.sharedConvolution;
   if (!convolution) {
@@ -2083,6 +2199,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceSrcOutputRiskText = formatUzumeReferenceSrcOutputRisk(status, unknown);
   const uzumeReferenceSrcPhaseApodizingText = formatUzumeReferenceSrcPhaseApodizing(status, unknown);
   const uzumeReferenceDsdFamilyText = formatUzumeReferenceDsdFamily(status, unknown);
+  const expectedUzumeReferenceDsdFamily = isExpectedUzumeReferenceDsdFamily(status?.uzumeReferencePlan?.dsdFamily);
   const uzumeReferenceConvolutionText = formatUzumeReferenceConvolution(status, unknown);
   const expectedUzumeReferenceConvolution = isExpectedUzumeReferenceConvolution(status?.uzumeReferencePlan?.sharedConvolution);
   const uzumeReferenceResponseResampleText = formatUzumeReferenceResponseResample(status, unknown);
@@ -2275,7 +2392,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceSrcValidation'), value: uzumeReferenceSrcValidationText, tone: status?.uzumeReferencePlan?.resampling.validation?.overall === 'fail' ? 'danger' : status?.uzumeReferencePlan?.resampling.validation?.overall === 'warn' ? 'warning' : status?.uzumeReferencePlan?.resampling.validation ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcOutputRisk'), value: uzumeReferenceSrcOutputRiskText, tone: status?.uzumeReferencePlan?.resampling.outputResamplingRisk.signalPathTone === 'warning' ? 'warning' : status?.uzumeReferencePlan?.resampling.outputResamplingRisk ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcPhaseApodizing'), value: uzumeReferenceSrcPhaseApodizingText, tone: isExpectedUzumeReferenceSrcPhaseApodizing(status?.uzumeReferencePlan?.resampling) ? 'good' : status?.uzumeReferencePlan?.resampling.phaseModeArtifacts ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceDsdFamily'), value: uzumeReferenceDsdFamilyText, tone: status?.uzumeReferencePlan?.dsdFamily?.state === 'unavailable' ? 'warning' : status?.uzumeReferencePlan?.dsdFamily?.state === 'direct' ? 'good' : status?.uzumeReferencePlan?.dsdFamily ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceDsdFamily'), value: uzumeReferenceDsdFamilyText, tone: expectedUzumeReferenceDsdFamily ? 'good' : status?.uzumeReferencePlan?.dsdFamily ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolution'), value: uzumeReferenceConvolutionText, tone: expectedUzumeReferenceConvolution ? 'good' : status?.uzumeReferencePlan?.sharedConvolution ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceResponseResample'), value: uzumeReferenceResponseResampleText, tone: isExpectedUzumeReferenceResponseResample(status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.responseResampleReports?.length ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceConvolutionDuplicateGuard'), value: uzumeReferenceConvolutionDuplicateGuardText, tone: isExpectedUzumeReferenceConvolutionDuplicateGuard(status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard) ? 'good' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'single-shared-plan' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard?.state === 'split-required' ? 'warning' : status?.uzumeReferencePlan?.sharedConvolution?.duplicatePlanGuard ? 'muted' : 'muted' },
@@ -2321,7 +2438,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.error'), value: status?.error ?? unknown, tone: status?.error ? 'danger' : 'muted' },
       ],
     },
-  ], [bitPerfectText, disabled, dspModules.length, enabled, expectedUzumeReferenceResampling, no, planned, protectLimiterText, signalPathText, status, t, transitional, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeFormatPathText, uzumeGpuText, uzumeHeadroomTelemetryText, uzumeLimiterReferenceText, uzumeReferenceAssignmentsText, uzumeReferenceBackendSupportText, uzumeReferenceBitPerfectText, uzumeReferenceBlockBoundaryText, uzumeReferenceCallbackRingText, uzumeReferenceCallbackSafeControlsText, uzumeReferenceChannelScopeText, uzumeReferenceCompilerText, uzumeReferenceContinuityText, uzumeReferenceConvolutionDuplicateGuardText, uzumeReferenceConvolutionSerialNullText, uzumeReferenceConvolutionText, uzumeReferenceDsdFamilyText, uzumeReferenceEqualPowerCrossfadeText, uzumeReferenceFirGaplessHistoryText, uzumeReferenceFlushDrainText, uzumeReferenceGainStagingText, uzumeReferenceGaplessConcatText, uzumeReferenceIirEqText, uzumeReferenceLatencyOwnersText, uzumeReferenceMergeGroupsText, uzumeReferenceOutputDevicePolicyText, uzumeReferencePcmIngressGuardText, uzumeReferencePcmOutputQuantizationText, uzumeReferencePerEarEqPlacementText, uzumeReferencePreRollText, uzumeReferenceRenderAheadCacheText, uzumeReferenceResamplingText, uzumeReferenceResponseResampleText, uzumeReferenceSrcArtifactsText, uzumeReferenceSrcBudgetText, uzumeReferenceSrcOutputRiskText, uzumeReferenceSrcPhaseApodizingText, uzumeReferenceSrcRollbackText, uzumeReferenceSrcValidationText, uzumeReferenceStereoProceduralText, uzumeReferenceUnderrunFallbackText, uzumeSafetyMeterText, yes]);
+  ], [bitPerfectText, disabled, dspModules.length, enabled, expectedUzumeReferenceDsdFamily, expectedUzumeReferenceResampling, no, planned, protectLimiterText, signalPathText, status, t, transitional, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeFormatPathText, uzumeGpuText, uzumeHeadroomTelemetryText, uzumeLimiterReferenceText, uzumeReferenceAssignmentsText, uzumeReferenceBackendSupportText, uzumeReferenceBitPerfectText, uzumeReferenceBlockBoundaryText, uzumeReferenceCallbackRingText, uzumeReferenceCallbackSafeControlsText, uzumeReferenceChannelScopeText, uzumeReferenceCompilerText, uzumeReferenceContinuityText, uzumeReferenceConvolutionDuplicateGuardText, uzumeReferenceConvolutionSerialNullText, uzumeReferenceConvolutionText, uzumeReferenceDsdFamilyText, uzumeReferenceEqualPowerCrossfadeText, uzumeReferenceFirGaplessHistoryText, uzumeReferenceFlushDrainText, uzumeReferenceGainStagingText, uzumeReferenceGaplessConcatText, uzumeReferenceIirEqText, uzumeReferenceLatencyOwnersText, uzumeReferenceMergeGroupsText, uzumeReferenceOutputDevicePolicyText, uzumeReferencePcmIngressGuardText, uzumeReferencePcmOutputQuantizationText, uzumeReferencePerEarEqPlacementText, uzumeReferencePreRollText, uzumeReferenceRenderAheadCacheText, uzumeReferenceResamplingText, uzumeReferenceResponseResampleText, uzumeReferenceSrcArtifactsText, uzumeReferenceSrcBudgetText, uzumeReferenceSrcOutputRiskText, uzumeReferenceSrcPhaseApodizingText, uzumeReferenceSrcRollbackText, uzumeReferenceSrcValidationText, uzumeReferenceStereoProceduralText, uzumeReferenceUnderrunFallbackText, uzumeSafetyMeterText, yes]);
 
   const visibleSections = detailsOpen ? sections : [];
   const panelStateIcon = status?.error ? AlertTriangle : status?.bitPerfectCandidate ? CheckCircle2 : Zap;

@@ -1416,7 +1416,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME DSD family reference',
           value: 'dsd-family-path-control-reference / d2p_processed:d2p-reference / dsd->pcm / multibit-pcm / direct disabled dsd source decoded to pcm / allowed safety-metering+eq+fir+pcm-src+pcm-dither+pcm-limiter / disabled none / pcm dsp allowed / pcm dither allowed / sdm noise none / d2p dsd64-to-176k4-reference-low-pass @ 176400 Hz / sdm unavailable / reasons d2p reports decimation profile and internal pcm rate',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({ label: 'UZUME convolution reference', tone: 'good' }),
         expect.objectContaining({
@@ -1935,6 +1935,52 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME SRC reference',
           value: expect.stringContaining('poly-sinc-reference 44.1 kHz->48 kHz'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected D2P DSD family reference contract as good', () => {
+    const status = referenceStatus();
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME DSD family reference',
+          value: expect.stringContaining('d2p dsd64-to-176k4-reference-low-pass @ 176400 Hz'),
+          tone: 'good',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const driftedStatus = referenceStatus();
+    driftedStatus.uzumeReferencePlan!.dsdFamily!.fallbackReason = 'd2p_reference_engine_not_ready';
+    driftedStatus.uzumeReferencePlan!.dsdFamily!.d2p.available = false;
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={driftedStatus} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME DSD family reference',
+          value: expect.stringContaining('fallback d2p reference engine not ready'),
           tone: 'warning',
         }),
       ]),

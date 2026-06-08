@@ -1877,6 +1877,27 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    status.uzumeReferencePlan!.dsdFamily!.fallbackReason = 'd2p_reference_engine_not_ready';
+    status.uzumeReferencePlan!.dsdFamily!.d2p.available = false;
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const dsdDriftDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(readSignalPathVisualState(dsdDriftDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME DSD family reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    status.uzumeReferencePlan!.dsdFamily!.fallbackReason = null;
+    status.uzumeReferencePlan!.dsdFamily!.d2p.available = true;
     status.uzumeReferencePlan!.resampling.phaseAccumulator = 'unavailable';
 
     render(
