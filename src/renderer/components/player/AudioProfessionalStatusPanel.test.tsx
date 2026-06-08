@@ -971,6 +971,30 @@ const referenceStatus = (): AudioStatus => ({
         },
         reasons: ['callback_safe_urgent_control', 'render_cache_preserved', 'declick_gain_ramp', 'output_gain_zeroed'],
       },
+      volumeControl: {
+        control: 'volume',
+        classification: 'callback-safe-urgent-control',
+        generationState: 'current',
+        state: 'applied',
+        callbackRule: 'read-committed-output-then-apply-urgent-control',
+        renderCacheAction: 'preserve',
+        generationAfterControl: 1,
+        requiresRenderGraphRebuild: false,
+        commitAllowed: true,
+        gainEnvelopeFrames: 8,
+        declick: {
+          enabled: false,
+          frames: 0,
+          startGain: 10 ** (-6 / 20),
+          endGain: 10 ** (-6 / 20),
+          maxStep: 0,
+        },
+        peak: {
+          input: 0.875,
+          output: 0.875 * 10 ** (-6 / 20),
+        },
+        reasons: ['callback_safe_urgent_control', 'render_cache_preserved', 'constant_gain_applied'],
+      },
       renderStateBoundary: {
         control: 'seek',
         classification: 'render-state-boundary',
@@ -1382,7 +1406,7 @@ describe('AudioProfessionalStatusPanel', () => {
         }),
         expect.objectContaining({
           label: 'UZUME urgent controls reference',
-          value: 'callback-safe-urgent-controls-reference / urgent-controls-after-committed-output / urgent:mute:applied / callback-safe-urgent-control / read-committed-output-then-apply-urgent-control / cache preserve / gen 1 / no rebuild / commit allowed / declick enabled 4 frames 1.000->0.000 step 0.333333 / envelope 8 / peak 0.875000->0.083333 / reasons callback safe urgent control | render cache preserved | declick gain ramp | output gain zeroed / boundary:seek:render-cache-invalidated / render-state-boundary / read-committed-output-only / cache invalidate-generation / gen 2 / rebuild required / commit blocked / declick off 0 frames 0.000->0.000 step 0.000000 / envelope 0 / peak 0.875000->0.000000 / reasons transport boundary requires generation increment | render ahead cache invalidated | callback keeps prior committed output',
+          value: expect.stringContaining('volume:volume:applied'),
           tone: 'good',
         }),
         expect.objectContaining({
@@ -1517,6 +1541,11 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME urgent controls reference',
           value: expect.stringContaining('urgent:mute:applied'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME urgent controls reference',
+          value: expect.stringContaining('volume:volume:applied'),
           tone: 'good',
         }),
         expect.objectContaining({

@@ -4465,6 +4465,12 @@ const buildCallbackSafeControlsInspectReport = (
     mute: true,
     declickFrames: Math.min(4, committedBlock[0]?.length ?? 4),
   });
+  const volumeControl = renderUzumeCallbackSafeControlReference({
+    generationId: 1,
+    control: 'volume',
+    committedBlock,
+    targetVolumeDb: -6,
+  });
   const renderStateBoundary = renderUzumeCallbackSafeControlReference({
     generationId: 1,
     control: 'seek',
@@ -4475,6 +4481,7 @@ const buildCallbackSafeControlsInspectReport = (
     artifact: urgentControl.artifact,
     policy: urgentControl.policy,
     urgentControl: compactCallbackSafeControlCaseReport(urgentControl),
+    volumeControl: compactCallbackSafeControlCaseReport(volumeControl),
     renderStateBoundary: compactCallbackSafeControlCaseReport(renderStateBoundary),
   };
 };

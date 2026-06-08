@@ -433,6 +433,7 @@ export type UzumeReferenceCallbackSafeControlsInspectReport = {
   artifact: 'callback-safe-urgent-controls-reference';
   policy: 'urgent-controls-after-committed-output';
   urgentControl: UzumeReferenceCallbackSafeControlCaseReport;
+  volumeControl: UzumeReferenceCallbackSafeControlCaseReport;
   renderStateBoundary: UzumeReferenceCallbackSafeControlCaseReport;
 };
 export type UzumeReferenceEqualPowerCrossfadeCaseReport = {

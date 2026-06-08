@@ -532,6 +532,20 @@ describe('UZUME reference plan compiler', () => {
           endGain: 0,
         },
       },
+      volumeControl: {
+        control: 'volume',
+        classification: 'callback-safe-urgent-control',
+        state: 'applied',
+        callbackRule: 'read-committed-output-then-apply-urgent-control',
+        renderCacheAction: 'preserve',
+        generationAfterControl: 1,
+        requiresRenderGraphRebuild: false,
+        commitAllowed: true,
+        declick: {
+          enabled: false,
+          frames: 0,
+        },
+      },
       renderStateBoundary: {
         control: 'seek',
         classification: 'render-state-boundary',
@@ -910,6 +924,12 @@ describe('UZUME reference plan compiler', () => {
       control: 'mute',
       state: 'applied',
       renderCacheAction: 'preserve',
+    });
+    expect(compiled.callbackSafeControls.volumeControl).toMatchObject({
+      control: 'volume',
+      state: 'applied',
+      renderCacheAction: 'preserve',
+      requiresRenderGraphRebuild: false,
     });
     expect(compiled.callbackSafeControls.renderStateBoundary).toMatchObject({
       control: 'seek',

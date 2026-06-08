@@ -2106,9 +2106,11 @@ const isExpectedUzumeReferenceCallbackSafeControls = (
   }
 
   const urgent = report.urgentControl;
+  const volume = report.volumeControl;
   const boundary = report.renderStateBoundary;
 
   return report.policy === 'urgent-controls-after-committed-output' &&
+    urgent.control === 'mute' &&
     urgent.classification === 'callback-safe-urgent-control' &&
     urgent.generationState === 'current' &&
     urgent.state === 'applied' &&
@@ -2120,6 +2122,20 @@ const isExpectedUzumeReferenceCallbackSafeControls = (
     urgent.declick.frames > 0 &&
     urgent.gainEnvelopeFrames >= urgent.declick.frames &&
     urgent.peak.output <= urgent.peak.input &&
+    urgent.reasons.includes('declick_gain_ramp') &&
+    volume.control === 'volume' &&
+    volume.classification === 'callback-safe-urgent-control' &&
+    volume.generationState === 'current' &&
+    volume.state === 'applied' &&
+    volume.callbackRule === 'read-committed-output-then-apply-urgent-control' &&
+    volume.renderCacheAction === 'preserve' &&
+    !volume.requiresRenderGraphRebuild &&
+    volume.commitAllowed &&
+    !volume.declick.enabled &&
+    volume.declick.frames === 0 &&
+    volume.gainEnvelopeFrames > 0 &&
+    volume.peak.output <= volume.peak.input &&
+    volume.reasons.includes('constant_gain_applied') &&
     boundary.classification === 'render-state-boundary' &&
     boundary.generationState === 'current' &&
     boundary.state === 'render-cache-invalidated' &&
@@ -2380,6 +2396,7 @@ const formatUzumeReferenceCallbackSafeControls = (status: AudioStatus | null): s
     report.artifact,
     report.policy,
     formatCallbackSafeCase('urgent', report.urgentControl),
+    formatCallbackSafeCase('volume', report.volumeControl),
     formatCallbackSafeCase('boundary', report.renderStateBoundary),
   ]);
 };

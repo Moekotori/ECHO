@@ -1560,6 +1560,30 @@ describe('PlayerBar', () => {
             },
             reasons: ['callback_safe_urgent_control', 'render_cache_preserved', 'declick_gain_ramp', 'output_gain_zeroed'],
           },
+          volumeControl: {
+            control: 'volume',
+            classification: 'callback-safe-urgent-control',
+            generationState: 'current',
+            state: 'applied',
+            callbackRule: 'read-committed-output-then-apply-urgent-control',
+            renderCacheAction: 'preserve',
+            generationAfterControl: 1,
+            requiresRenderGraphRebuild: false,
+            commitAllowed: true,
+            gainEnvelopeFrames: 8,
+            declick: {
+              enabled: false,
+              frames: 0,
+              startGain: 10 ** (-6 / 20),
+              endGain: 10 ** (-6 / 20),
+              maxStep: 0,
+            },
+            peak: {
+              input: 0.875,
+              output: 0.875 * 10 ** (-6 / 20),
+            },
+            reasons: ['callback_safe_urgent_control', 'render_cache_preserved', 'constant_gain_applied'],
+          },
           renderStateBoundary: {
             control: 'seek',
             classification: 'render-state-boundary',
@@ -1804,7 +1828,9 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).toContain('UZUME FIR gapless reference');
     expect(dialog.textContent).toContain('fir-gapless-history-reference / source-pcm-concat-before-fir / direct-fir-float64-reference / history-required / room-ir / sample 48kHz / segments 2 / boundaries 1 / tail 3 / drain 3 / concat concat-matches-no-reset-history 0/0 / reset reset-vs-concat-history-reference 0.1875/0.046875 / boundary track-a->track-b out 8 overlap 3 reset 0.1875 jump 0.3125 / reasons source pcm concat before fir | fir history must cross gapless boundary | reset per track fir history compared against concat reference | fir gapless reference only');
     expect(dialog.textContent).toContain('UZUME urgent controls reference');
-    expect(dialog.textContent).toContain('callback-safe-urgent-controls-reference / urgent-controls-after-committed-output / urgent:mute:applied / callback-safe-urgent-control / read-committed-output-then-apply-urgent-control / cache preserve / gen 1 / no rebuild / commit allowed / declick enabled 4 frames 1->0 step 0.333333 / envelope 8 / peak 0.875->0.083333 / reasons callback safe urgent control | render cache preserved | declick gain ramp | output gain zeroed / boundary:seek:render-cache-invalidated / render-state-boundary / read-committed-output-only / cache invalidate-generation / gen 2 / rebuild required / commit blocked / declick off 0 frames 0->0 step 0 / envelope 0 / peak 0.875->0 / reasons transport boundary requires generation increment | render ahead cache invalidated | callback keeps prior committed output');
+    expect(dialog.textContent).toContain('callback-safe-urgent-controls-reference / urgent-controls-after-committed-output / urgent:mute:applied');
+    expect(dialog.textContent).toContain('volume:volume:applied');
+    expect(dialog.textContent).toContain('boundary:seek:render-cache-invalidated');
     expect(dialog.textContent).toContain('UZUME equal-power crossfade reference');
     expect(dialog.textContent).toContain('equal-power-crossfade-reference / random-access-short-bridge-to-full-profile-only / rendered:user-random-seek-or-skip:crossfade-rendered / accepted / sample 48kHz / fade 5 frames/0.104 ms / gain equal-power / mid 0.707107/0.707107 / power error 0 / residual measured-crossfade-difference 0.207107/0.095781 / peak 1/1/1 / reasons random access short bridge requires equal power crossfade | full profile ready | equal power gain law reference | hard switch residual measured / rejected-boundary:gapless-boundary:rejected / reject intent not user random seek or skip / sample 48kHz / fade 5 frames/0.104 ms / gain not-applicable / mid n/a / power error 0 / residual not-applicable / peak 1/1/0 / reasons only user random seek or skip can use short bridge crossfade | gapless boundary waits for full profile | equal power crossfade reference only');
     expect(dialog.textContent).toContain('UZUME continuity reference');
