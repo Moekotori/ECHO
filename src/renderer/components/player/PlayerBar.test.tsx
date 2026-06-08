@@ -613,6 +613,33 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).toContain('64bit Float 至 32bit');
   });
 
+  it('does not render UZUME reference nodes without a compiled reference plan', () => {
+    const track = makeTrack(37, { title: 'No Reference Signal Track', codec: 'flac', sampleRate: 48000, bitDepth: 24 });
+    const status = {
+      ...audioStatus(track),
+      bitDepth: 24,
+      dspActive: true,
+      eqEnabled: true,
+      nativeOutputFormat: 'pcm32',
+    };
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: '信号路径' });
+    const visualState = readSignalPathVisualState(dialog);
+
+    expect(dialog.textContent).toContain('信号路径: UZUME skeleton');
+    expect(dialog.textContent).not.toContain('UZUME reference compiler');
+    expect(dialog.textContent).not.toContain('artifact-manifest-reference');
+    expect(dialog.textContent).not.toContain('realtime-budget-summary-reference');
+    expect(visualState.nodes.filter((node) => node.title.toLowerCase().includes('reference'))).toEqual([]);
+  });
+
   it('shows UZUME reference compiler assignments in the signal path popover', () => {
     const track = makeTrack(134, { title: 'Reference Signal Track', codec: 'flac', sampleRate: 48000, bitDepth: 24 });
     const status = {

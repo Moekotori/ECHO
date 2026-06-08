@@ -1188,6 +1188,30 @@ describe('AudioProfessionalStatusPanel', () => {
     expect(screen.getByText(/Room correction output has clipping risk/u)).toBeTruthy();
   });
 
+  it('keeps RPC-002 reference rows muted when no compiled reference plan is present', () => {
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={roomCorrectionStatus()} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    const visualState = readProfessionalVisualState();
+    const referenceRows = visualState.rows.filter((row) => row.label.toLowerCase().includes('reference'));
+
+    expect(referenceRows.length).toBeGreaterThan(20);
+    expect(referenceRows.filter((row) => row.tone !== 'muted')).toEqual([]);
+    expect(referenceRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'UZUME reference compiler', tone: 'muted' }),
+        expect.objectContaining({ label: 'UZUME artifact manifest reference', tone: 'muted' }),
+        expect.objectContaining({ label: 'UZUME realtime budget summary reference', tone: 'muted' }),
+        expect.objectContaining({ label: 'UZUME render-ahead cache reference', tone: 'muted' }),
+      ]),
+    );
+  });
+
   it('renders UZUME reference compiler assignments in details', () => {
     render(
       <I18nProvider>
