@@ -384,6 +384,50 @@ const isExpectedUzumeReferenceReadinessContract = (
     expectedReasons.every((reason) => report.reasons.includes(reason));
 };
 
+const isExpectedUzumeReferenceGenerationCacheKey = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['generationCacheKey'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedInvalidates = ['seek', 'manual-skip', 'profile-change', 'device-change', 'output-mode-change', 'sample-rate-plan-change'];
+  const expectedPreserves = ['pause', 'resume', 'mute', 'volume', 'declick'];
+  const expectedReasons = [
+    'cache_key_includes_generation_profile_device_and_timeline',
+    'album_segments_use_segment_index_when_gapless',
+    'file_path_alone_is_not_a_valid_cache_key',
+    'renderer_may_inspect_but_not_mutate_cache_keys',
+    'generation_cache_key_reference_only',
+  ];
+  const albumSegmentScopeMatches =
+    report.timelineScope === 'gapless-album-segment'
+      ? report.trackRole === 'gapless-segment' && report.albumSegmentKey !== null && report.albumSegmentIndex !== null
+      : report.trackRole === 'next-track-head' && report.albumSegmentKey === null && report.albumSegmentIndex === null;
+
+  return report.artifact === 'generation-cache-key-reference' &&
+    report.policy === 'generation-safe-cache-key-contract-reference' &&
+    report.state === 'ready' &&
+    report.generationSource === 'playback-intent-reference' &&
+    report.sourceIdentity === 'next-reference' &&
+    report.generationId > 0 &&
+    report.requestKey.length > 0 &&
+    report.cacheKey.includes(`generation:${report.generationId}`) &&
+    report.cacheKey.includes(`timeline:${report.timelineScope}`) &&
+    report.profileFingerprint.length > 0 &&
+    report.profileComponents.length > 0 &&
+    report.deviceFingerprint.length > 0 &&
+    report.deviceComponents.length > 0 &&
+    albumSegmentScopeMatches &&
+    expectedInvalidates.every((rule) => report.invalidatesOn.includes(rule as (typeof report.invalidatesOn)[number])) &&
+    expectedPreserves.every((rule) => report.preservesOn.includes(rule as (typeof report.preservesOn)[number])) &&
+    report.staleCommitRule === 'reject-stale-generation' &&
+    report.callbackSlotRule === 'late-current-generation-retain-for-future-only' &&
+    report.evictionRule === 'stale-then-farthest-from-boundary' &&
+    report.rendererControl === 'inspect-only' &&
+    expectedReasons.every((reason) => report.reasons.includes(reason));
+};
+
 const formatUzumeReferenceArtifactManifest = (status: AudioStatus | null): string | null => {
   return buildUzumeReferenceArtifactManifestSummary(status?.uzumeReferencePlan?.artifactPlan)?.text ?? null;
 };
@@ -2727,6 +2771,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const expectedReferenceBackendSupport = isExpectedUzumeReferenceBackendSupport(referencePlan?.backendSupport);
   const expectedReferenceLatencyBudget = isExpectedUzumeReferenceLatencyBudget(referencePlan?.latencyBudget);
   const expectedReferenceReadinessContract = isExpectedUzumeReferenceReadinessContract(referencePlan?.readinessContract);
+  const expectedReferenceGenerationCacheKey = isExpectedUzumeReferenceGenerationCacheKey(referencePlan?.generationCacheKey);
   const referenceAssignments = formatUzumeReferenceAssignments(status);
   const referenceMergeGroups = formatUzumeReferenceMergeGroups(status);
   const referenceLatencyOwners = formatUzumeReferenceLatencyOwners(status);
@@ -2941,7 +2986,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME generation cache key reference',
       value: referenceGenerationCacheKey,
-      tone: referencePlan?.generationCacheKey.state === 'ready' ? 'process' : 'warning',
+      tone: expectedReferenceGenerationCacheKey ? 'process' : 'warning',
       variant: 'process',
     });
   }

@@ -2437,6 +2437,43 @@ describe('AudioProfessionalStatusPanel', () => {
     );
   });
 
+  it('marks generation cache key writer drift as warning', () => {
+    const status = referenceStatus();
+    const driftedCacheKey = status.uzumeReferencePlan!.generationCacheKey as unknown as {
+      staleCommitRule: string;
+      rendererControl: string;
+      reasons: string[];
+    };
+    driftedCacheKey.staleCommitRule = 'allow-stale-generation';
+    driftedCacheKey.rendererControl = 'production-cache-writer';
+    driftedCacheKey.reasons = driftedCacheKey.reasons.filter(
+      (reason) => reason !== 'renderer_may_inspect_but_not_mutate_cache_keys',
+    );
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME generation cache key reference',
+          value: expect.stringContaining('allow-stale-generation'),
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME generation cache key reference',
+          value: expect.stringContaining('renderer production-cache-writer'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+  });
+
   it('marks DSD direct positive bypass reference state as good', () => {
     const status = referenceStatus();
     const plan = status.uzumeReferencePlan!;

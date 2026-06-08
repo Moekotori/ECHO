@@ -2143,6 +2143,39 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    const cacheWriterDriftStatus = {
+      ...status,
+      uzumeReferencePlan: {
+        ...status.uzumeReferencePlan!,
+        generationCacheKey: {
+          ...status.uzumeReferencePlan!.generationCacheKey,
+          staleCommitRule: 'allow-stale-generation',
+          rendererControl: 'production-cache-writer',
+          reasons: status.uzumeReferencePlan!.generationCacheKey.reasons.filter(
+            (reason) => reason !== 'renderer_may_inspect_but_not_mutate_cache_keys',
+          ),
+        },
+      },
+    } as unknown as AudioStatus;
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={cacheWriterDriftStatus} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={cacheWriterDriftStatus} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const cacheWriterDriftDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(cacheWriterDriftDialog.textContent).toContain('allow-stale-generation');
+    expect(cacheWriterDriftDialog.textContent).toContain('renderer production-cache-writer');
+    expect(readSignalPathVisualState(cacheWriterDriftDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME generation cache key reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     status.uzumeReferencePlan!.formatPath = 'pcm_bitperfect';
     status.uzumeReferencePlan!.internalDomain = 'pcm-bypass';
     status.uzumeReferencePlan!.bitPerfectState = 'available';

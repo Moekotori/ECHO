@@ -303,6 +303,50 @@ const isExpectedUzumeReferenceReadinessContract = (
     expectedReasons.every((reason) => report.reasons.includes(reason));
 };
 
+const isExpectedUzumeReferenceGenerationCacheKey = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['generationCacheKey'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedInvalidates = ['seek', 'manual-skip', 'profile-change', 'device-change', 'output-mode-change', 'sample-rate-plan-change'];
+  const expectedPreserves = ['pause', 'resume', 'mute', 'volume', 'declick'];
+  const expectedReasons = [
+    'cache_key_includes_generation_profile_device_and_timeline',
+    'album_segments_use_segment_index_when_gapless',
+    'file_path_alone_is_not_a_valid_cache_key',
+    'renderer_may_inspect_but_not_mutate_cache_keys',
+    'generation_cache_key_reference_only',
+  ];
+  const albumSegmentScopeMatches =
+    report.timelineScope === 'gapless-album-segment'
+      ? report.trackRole === 'gapless-segment' && report.albumSegmentKey !== null && report.albumSegmentIndex !== null
+      : report.trackRole === 'next-track-head' && report.albumSegmentKey === null && report.albumSegmentIndex === null;
+
+  return report.artifact === 'generation-cache-key-reference' &&
+    report.policy === 'generation-safe-cache-key-contract-reference' &&
+    report.state === 'ready' &&
+    report.generationSource === 'playback-intent-reference' &&
+    report.sourceIdentity === 'next-reference' &&
+    report.generationId > 0 &&
+    report.requestKey.length > 0 &&
+    report.cacheKey.includes(`generation:${report.generationId}`) &&
+    report.cacheKey.includes(`timeline:${report.timelineScope}`) &&
+    report.profileFingerprint.length > 0 &&
+    report.profileComponents.length > 0 &&
+    report.deviceFingerprint.length > 0 &&
+    report.deviceComponents.length > 0 &&
+    albumSegmentScopeMatches &&
+    expectedInvalidates.every((rule) => report.invalidatesOn.includes(rule as (typeof report.invalidatesOn)[number])) &&
+    expectedPreserves.every((rule) => report.preservesOn.includes(rule as (typeof report.preservesOn)[number])) &&
+    report.staleCommitRule === 'reject-stale-generation' &&
+    report.callbackSlotRule === 'late-current-generation-retain-for-future-only' &&
+    report.evictionRule === 'stale-then-farthest-from-boundary' &&
+    report.rendererControl === 'inspect-only' &&
+    expectedReasons.every((reason) => report.reasons.includes(reason));
+};
+
 const formatUzumeReferenceBitPerfect = (status: AudioStatus | null, fallback: string): string => {
   const plan = status?.uzumeReferencePlan;
   if (!plan) {
@@ -2233,6 +2277,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const expectedUzumeReferenceBackendSupport = isExpectedUzumeReferenceBackendSupport(status?.uzumeReferencePlan?.backendSupport);
   const expectedUzumeReferenceLatencyBudget = isExpectedUzumeReferenceLatencyBudget(status?.uzumeReferencePlan?.latencyBudget);
   const expectedUzumeReferenceReadinessContract = isExpectedUzumeReferenceReadinessContract(status?.uzumeReferencePlan?.readinessContract);
+  const expectedUzumeReferenceGenerationCacheKey = isExpectedUzumeReferenceGenerationCacheKey(status?.uzumeReferencePlan?.generationCacheKey);
   const uzumeReferenceArtifactManifest = buildUzumeReferenceArtifactManifestSummary(status?.uzumeReferencePlan?.artifactPlan);
   const uzumeReferenceArtifactManifestText = formatUzumeReferenceArtifactManifest(status, unknown);
   const uzumeReferenceBitPerfectText = formatUzumeReferenceBitPerfect(status, unknown);
@@ -2423,7 +2468,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceOutputDevicePolicy'), value: uzumeReferenceOutputDevicePolicyText, tone: status?.uzumeReferencePlan?.outputDevicePolicy?.state === 'direct-like-ready' ? 'good' : status?.uzumeReferencePlan?.outputDevicePolicy ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceLatencyBudget'), value: uzumeReferenceLatencyBudgetText, tone: expectedUzumeReferenceLatencyBudget ? 'good' : status?.uzumeReferencePlan?.latencyBudget ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceReadinessContract'), value: uzumeReferenceReadinessContractText, tone: expectedUzumeReferenceReadinessContract ? 'good' : status?.uzumeReferencePlan?.readinessContract ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceGenerationCacheKey'), value: uzumeReferenceGenerationCacheKeyText, tone: status?.uzumeReferencePlan?.generationCacheKey?.state === 'ready' ? 'good' : status?.uzumeReferencePlan?.generationCacheKey ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceGenerationCacheKey'), value: uzumeReferenceGenerationCacheKeyText, tone: expectedUzumeReferenceGenerationCacheKey ? 'good' : status?.uzumeReferencePlan?.generationCacheKey ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceRealtimeBudgetSummary'), value: uzumeReferenceRealtimeBudgetSummaryText, tone: status?.uzumeReferencePlan?.realtimeBudgetSummary?.state === 'offline-reference-only' ? 'warning' : status?.uzumeReferencePlan?.realtimeBudgetSummary ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePcmIngressGuard'), value: uzumeReferencePcmIngressGuardText, tone: status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'channel-mismatch' || status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'sanitized' ? 'warning' : status?.uzumeReferencePlan?.pcmIngressGuard ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceGainStaging'), value: uzumeReferenceGainStagingText, tone: expectedUzumeReferenceGainStaging ? 'good' : status?.uzumeReferencePlan?.gainStaging ? 'warning' : 'muted' },
