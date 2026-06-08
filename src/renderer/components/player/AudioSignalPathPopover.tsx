@@ -1903,7 +1903,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME latency budget reference',
       value: referenceLatencyBudget,
-      tone: 'warning',
+      tone: referencePlan?.latencyBudget.state === 'ready' ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -1923,7 +1923,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME generation cache key reference',
       value: referenceGenerationCacheKey,
-      tone: 'warning',
+      tone: referencePlan?.generationCacheKey.state === 'ready' ? 'process' : 'warning',
       variant: 'process',
     });
   }

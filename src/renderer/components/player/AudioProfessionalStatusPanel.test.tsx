@@ -1313,7 +1313,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME latency budget reference',
           value: 'latency-budget-reference / cpu-float64-reference / realtime not-enabled / src 35 samples/0.73 ms lookahead 35 samples/0.73 ms / conv quality-first latency 1024 frames direct-head 128 taps warmup 512 frames tail 2047 frames drain 2047 frames / blocks 512 frames->512 frames->512 frames / pre-roll 10240 frames slack 13760 frames / ring 2560 frames/4096 frames 5.0 blocks / render-ahead cache-warming 2400/9600 frames / cache 0/384000 bytes / owners shared-convolution->room-ir-latency | pcm-src->resampling-reference / read-committed-output-only / reference-only / reasons latency budget summary derived from reference reports | cpu float64 reference only no runtime scheduler | callback reads committed output only | production latency compensation deferred to realtime gate',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME readiness contract reference',
@@ -1323,7 +1323,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME generation cache key reference',
           value: 'generation-cache-key-reference / generation-safe-cache-key-contract-reference / gen 1 / normal-next-track-head / next-track-head / request next-head:reference:0 / cache next-head:reference:0|generation:1|timeline:normal-next-track-head|album:none|profile:ui-ref|device:ui-ref / profile:ui-ref / device:ui-ref / profile format:pcm_processed + domain:multibit-pcm + sections:format-path+headroom+peq+shared-convolution+pcm-src + src:44.1k-family->48k-family + conv:48k-family:quality-first + backend:cpu-float64-reference / device mode:shared + capability:shared-mixer + requested:48000 + actual:48000 + shared:48000 + output:pcm / album none index n/a / invalidate seek+manual-skip+profile-change+device-change+output-mode-change+sample-rate-plan-change / preserve pause+resume+mute+volume+declick / reject-stale-generation / late-current-generation-retain-for-future-only / stale-then-farthest-from-boundary / renderer inspect-only / reasons cache key includes generation profile device and timeline | album segments use segment index when gapless | file path alone is not a valid cache key | renderer may inspect but not mutate cache keys | generation cache key reference only',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME realtime budget summary reference',
