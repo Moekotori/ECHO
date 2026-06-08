@@ -386,6 +386,7 @@ export type UzumeReferenceArtifactPlan = {
   latencyBudget: 'deterministic-reference';
   readinessContract: 'deterministic-reference';
   generationCacheKey: 'deterministic-reference';
+  realtimeBudgetSummary: 'deterministic-reference';
   qualityRollback: 'deterministic-reference';
   outputResamplingRisk: 'deterministic-reference';
   pcmOutputQuantization: 'deterministic-reference';
@@ -1114,6 +1115,32 @@ export type UzumeReferenceGenerationCacheKeyInspectReport = {
   rendererControl: 'inspect-only';
   reasons: string[];
 };
+export type UzumeReferenceRealtimeBudgetSummaryInspectReport = {
+  artifact: 'realtime-budget-summary-reference';
+  policy: 'reference-budget-no-measured-runtime-factor';
+  state: 'offline-reference-only' | 'same-rate-bypass-reference';
+  selectedBackend: UzumeReferenceBackendSupportInspectReport['selectedBackend'];
+  realtimeBackend: UzumeReferenceBackendSupportInspectReport['realtimeBackend'];
+  measuredRealtimeFactor: number | null;
+  measuredRealtimeFactorState: 'not-measured-in-rpc002';
+  srcBudgetBackend: UzumeReferenceResamplingArtifactMetrics['realtimeBudget']['backend'];
+  srcEstimatedMultiplyAdds: number;
+  srcEstimatedRealtimeFactor: number | null;
+  srcSafetyClass: UzumeReferenceResamplingArtifactMetrics['realtimeBudget']['safetyClass'];
+  callbackRingDepthBlocks: number;
+  callbackRingTelemetryStatus: UzumeReferenceContinuityInspectReport['callbackRing']['telemetryStatus'];
+  renderAheadReadyFrames: number;
+  renderAheadTargetFrames: number;
+  renderAheadCoverageRatio: number;
+  cpuFullProfileFallback: 'reference-available';
+  gpuRealtimeFactor: number | null;
+  realtimeSafetyGate: 'rpc-003-cpu-realtime-gate';
+  gpuRenderAheadGate: 'rpc-005-gpu-render-ahead-gate';
+  thresholdSafeFactor: number;
+  thresholdMarginalFactor: number;
+  rendererControl: 'inspect-only';
+  reasons: string[];
+};
 export type UzumeCompiledReferencePlan = {
   schemaVersion: 1;
   telemetrySchemaVersion: 2;
@@ -1133,6 +1160,7 @@ export type UzumeCompiledReferencePlan = {
   latencyBudget: UzumeReferenceLatencyBudgetInspectReport;
   readinessContract: UzumeReferenceReadinessContractInspectReport;
   generationCacheKey: UzumeReferenceGenerationCacheKeyInspectReport;
+  realtimeBudgetSummary: UzumeReferenceRealtimeBudgetSummaryInspectReport;
   orderedProfileSections: UzumeReferenceSectionId[];
   engineAssignments: UzumeReferenceAssignment[];
   mergeGroups: UzumeReferenceMergeGroup[];

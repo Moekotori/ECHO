@@ -931,6 +931,7 @@ export type TranslationKey =
   | 'audioProfessional.row.uzumeReferencePreRoll'
   | 'audioProfessional.row.uzumeReferenceRenderAheadCache'
   | 'audioProfessional.row.uzumeReferenceReadinessContract'
+  | 'audioProfessional.row.uzumeReferenceRealtimeBudgetSummary'
   | 'audioProfessional.row.uzumeReferenceResampling'
   | 'audioProfessional.row.uzumeReferenceResponseResample'
   | 'audioProfessional.row.uzumeReferenceSrcArtifacts'
@@ -3950,6 +3951,7 @@ const zhCN: TranslationMap = {
   'audioProfessional.row.uzumeReferencePreRoll': 'UZUME pre-roll reference',
   'audioProfessional.row.uzumeReferenceRenderAheadCache': 'UZUME render-ahead cache',
   'audioProfessional.row.uzumeReferenceReadinessContract': 'UZUME readiness contract reference',
+  'audioProfessional.row.uzumeReferenceRealtimeBudgetSummary': 'UZUME realtime budget summary',
   'audioProfessional.row.uzumeReferenceResampling': 'UZUME SRC reference',
   'audioProfessional.row.uzumeReferenceResponseResample': 'UZUME response resample reference',
   'audioProfessional.row.uzumeReferenceSrcArtifacts': 'UZUME SRC artifact reference',
@@ -7334,6 +7336,7 @@ const zhTW: TranslationMap = {
   'audioProfessional.row.uzumeReferencePreRoll': 'UZUME pre-roll reference',
   'audioProfessional.row.uzumeReferenceRenderAheadCache': 'UZUME render-ahead cache',
   'audioProfessional.row.uzumeReferenceReadinessContract': 'UZUME readiness contract reference',
+  'audioProfessional.row.uzumeReferenceRealtimeBudgetSummary': 'UZUME realtime budget summary',
   'audioProfessional.row.uzumeReferenceResampling': 'UZUME SRC reference',
   'audioProfessional.row.uzumeReferenceResponseResample': 'UZUME response resample reference',
   'audioProfessional.row.uzumeReferenceSrcArtifacts': 'UZUME SRC artifact reference',
@@ -10291,6 +10294,7 @@ const jaJP: TranslationMap = {
   'audioProfessional.row.uzumeReferencePreRoll': 'UZUME pre-roll reference',
   'audioProfessional.row.uzumeReferenceRenderAheadCache': 'UZUME render-ahead cache',
   'audioProfessional.row.uzumeReferenceReadinessContract': 'UZUME readiness contract reference',
+  'audioProfessional.row.uzumeReferenceRealtimeBudgetSummary': 'UZUME realtime budget summary',
   'audioProfessional.row.uzumeReferenceResampling': 'UZUME SRC reference',
   'audioProfessional.row.uzumeReferenceResponseResample': 'UZUME response resample reference',
   'audioProfessional.row.uzumeReferenceSrcArtifacts': 'UZUME SRC artifact reference',
@@ -13317,6 +13321,7 @@ const enUS: TranslationMap = {
   'audioProfessional.row.uzumeReferencePreRoll': 'UZUME pre-roll reference',
   'audioProfessional.row.uzumeReferenceRenderAheadCache': 'UZUME render-ahead cache',
   'audioProfessional.row.uzumeReferenceReadinessContract': 'UZUME readiness contract reference',
+  'audioProfessional.row.uzumeReferenceRealtimeBudgetSummary': 'UZUME realtime budget summary',
   'audioProfessional.row.uzumeReferenceResampling': 'UZUME SRC reference',
   'audioProfessional.row.uzumeReferenceResponseResample': 'UZUME response resample reference',
   'audioProfessional.row.uzumeReferenceSrcArtifacts': 'UZUME SRC artifact reference',

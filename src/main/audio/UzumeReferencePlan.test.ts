@@ -290,6 +290,31 @@ describe('UZUME reference plan compiler', () => {
     expect(compiled.generationCacheKey.cacheKey).toContain('timeline:normal-next-track-head');
     expect(compiled.generationCacheKey.profileFingerprint).toMatch(/^profile:[0-9a-f]{8}$/u);
     expect(compiled.generationCacheKey.deviceFingerprint).toMatch(/^device:[0-9a-f]{8}$/u);
+    expect(compiled.realtimeBudgetSummary).toMatchObject({
+      artifact: 'realtime-budget-summary-reference',
+      policy: 'reference-budget-no-measured-runtime-factor',
+      state: 'offline-reference-only',
+      selectedBackend: 'cpu-float64-reference',
+      realtimeBackend: 'not-enabled',
+      measuredRealtimeFactor: null,
+      measuredRealtimeFactorState: 'not-measured-in-rpc002',
+      srcBudgetBackend: 'scalar-float64-reference',
+      srcEstimatedRealtimeFactor: null,
+      srcSafetyClass: 'offline-reference-only',
+      callbackRingTelemetryStatus: 'safe',
+      cpuFullProfileFallback: 'reference-available',
+      gpuRealtimeFactor: null,
+      realtimeSafetyGate: 'rpc-003-cpu-realtime-gate',
+      gpuRenderAheadGate: 'rpc-005-gpu-render-ahead-gate',
+      rendererControl: 'inspect-only',
+      reasons: [
+        'realtime_factor_not_measured_in_rpc002',
+        'scalar_float64_budget_is_reference_only',
+        'cpu_avx2_realtime_gate_deferred_to_rpc003',
+        'gpu_render_ahead_realtime_gate_deferred_to_rpc005',
+        'renderer_may_inspect_but_not_control_realtime_path',
+      ],
+    });
     expect(compiled.resampling).toMatchObject({
       active: true,
       family: 'poly-sinc-reference',
@@ -607,6 +632,7 @@ describe('UZUME reference plan compiler', () => {
     expect(compiled.artifactPlan.latencyBudget).toBe('deterministic-reference');
     expect(compiled.artifactPlan.readinessContract).toBe('deterministic-reference');
     expect(compiled.artifactPlan.generationCacheKey).toBe('deterministic-reference');
+    expect(compiled.artifactPlan.realtimeBudgetSummary).toBe('deterministic-reference');
     expect(compiled.artifactPlan.qualityRollback).toBe('deterministic-reference');
     expect(compiled.artifactPlan.pcmOutputQuantization).toBe('deterministic-reference');
     expect(compiled.artifactPlan.pcmIngressGuard).toBe('deterministic-reference');

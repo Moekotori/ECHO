@@ -4390,6 +4390,50 @@ const buildGenerationCacheKeyInspectReport = (
   };
 };
 
+const buildRealtimeBudgetSummaryInspectReport = (
+  backendSupport: UzumeCompiledReferencePlan['backendSupport'],
+  resampling: UzumeReferenceResamplingReport,
+  continuity: UzumeCompiledReferencePlan['continuity'],
+): UzumeCompiledReferencePlan['realtimeBudgetSummary'] => {
+  const realtimeBudget = resampling.artifactMetrics.realtimeBudget;
+  const coverageRatio = continuity.preRoll.renderAheadTargetFrames > 0
+    ? Math.round((continuity.preRoll.renderAheadReadyFrames / continuity.preRoll.renderAheadTargetFrames) * 10000) / 10000
+    : 0;
+
+  return {
+    artifact: 'realtime-budget-summary-reference',
+    policy: 'reference-budget-no-measured-runtime-factor',
+    state: resampling.sameRateBypass ? 'same-rate-bypass-reference' : 'offline-reference-only',
+    selectedBackend: backendSupport.selectedBackend,
+    realtimeBackend: backendSupport.realtimeBackend,
+    measuredRealtimeFactor: null,
+    measuredRealtimeFactorState: 'not-measured-in-rpc002',
+    srcBudgetBackend: realtimeBudget.backend,
+    srcEstimatedMultiplyAdds: realtimeBudget.estimatedMultiplyAdds,
+    srcEstimatedRealtimeFactor: realtimeBudget.estimatedRealtimeFactor,
+    srcSafetyClass: realtimeBudget.safetyClass,
+    callbackRingDepthBlocks: continuity.callbackRing.depthBlocks,
+    callbackRingTelemetryStatus: continuity.callbackRing.telemetryStatus,
+    renderAheadReadyFrames: continuity.preRoll.renderAheadReadyFrames,
+    renderAheadTargetFrames: continuity.preRoll.renderAheadTargetFrames,
+    renderAheadCoverageRatio: coverageRatio,
+    cpuFullProfileFallback: 'reference-available',
+    gpuRealtimeFactor: null,
+    realtimeSafetyGate: 'rpc-003-cpu-realtime-gate',
+    gpuRenderAheadGate: 'rpc-005-gpu-render-ahead-gate',
+    thresholdSafeFactor: 2,
+    thresholdMarginalFactor: 1.1,
+    rendererControl: 'inspect-only',
+    reasons: [
+      'realtime_factor_not_measured_in_rpc002',
+      'scalar_float64_budget_is_reference_only',
+      'cpu_avx2_realtime_gate_deferred_to_rpc003',
+      'gpu_render_ahead_realtime_gate_deferred_to_rpc005',
+      'renderer_may_inspect_but_not_control_realtime_path',
+    ],
+  };
+};
+
 const compactCallbackSafeControlCaseReport = (
   result: UzumeReferenceCallbackSafeControlResult,
 ): UzumeCompiledReferencePlan['callbackSafeControls']['urgentControl'] => ({
@@ -4518,6 +4562,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
   const latencyBudget = buildLatencyBudgetInspectReport(backendSupport, resampling, sharedConvolution, continuity, compiler.latencyOwners);
   const readinessContract = buildReadinessContractInspectReport(backendSupport, continuity);
   const generationCacheKey = buildGenerationCacheKeyInspectReport(input, format, backendSupport, outputDevicePolicy, resampling, sharedConvolution, compiler, continuity);
+  const realtimeBudgetSummary = buildRealtimeBudgetSummaryInspectReport(backendSupport, resampling, continuity);
   const callbackSafeControls = buildCallbackSafeControlsInspectReport(input);
   const equalPowerCrossfade = buildEqualPowerCrossfadeInspectReport(input, resampling);
   const dsdFamily = buildDsdFamilyReport(input, format);
@@ -4531,6 +4576,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
     latencyBudget,
     readinessContract,
     generationCacheKey,
+    realtimeBudgetSummary,
     ...compiler,
     resampling,
     sharedConvolution,
@@ -4570,6 +4616,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
       latencyBudget: 'deterministic-reference',
       readinessContract: 'deterministic-reference',
       generationCacheKey: 'deterministic-reference',
+      realtimeBudgetSummary: 'deterministic-reference',
       qualityRollback: 'deterministic-reference',
       outputResamplingRisk: 'deterministic-reference',
       pcmOutputQuantization: 'deterministic-reference',

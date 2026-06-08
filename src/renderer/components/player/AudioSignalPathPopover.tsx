@@ -422,6 +422,39 @@ const formatUzumeReferenceGenerationCacheKey = (status: AudioStatus | null): str
   ]);
 };
 
+const formatUzumeReferenceRealtimeBudgetSummary = (status: AudioStatus | null): string | null => {
+  const report = status?.uzumeReferencePlan?.realtimeBudgetSummary;
+  if (!report) {
+    return null;
+  }
+
+  const measured = report.measuredRealtimeFactor === null
+    ? report.measuredRealtimeFactorState
+    : `${trimFixed(report.measuredRealtimeFactor, 2)}x`;
+  const srcRealtime = report.srcEstimatedRealtimeFactor === null
+    ? 'unmeasured'
+    : `${trimFixed(report.srcEstimatedRealtimeFactor, 2)}x`;
+
+  return joinSpec([
+    report.artifact,
+    report.policy,
+    report.state,
+    `selected ${report.selectedBackend}`,
+    `realtime ${report.realtimeBackend}`,
+    `measured ${measured}`,
+    `src ${report.srcBudgetBackend} ${report.srcEstimatedMultiplyAdds} multiply-adds factor ${srcRealtime} ${report.srcSafetyClass}`,
+    `ring ${trimFixed(report.callbackRingDepthBlocks, 1)} blocks ${report.callbackRingTelemetryStatus}`,
+    `render-ahead ${report.renderAheadReadyFrames}/${report.renderAheadTargetFrames} ${Math.round(report.renderAheadCoverageRatio * 100)}%`,
+    `cpu ${report.cpuFullProfileFallback}`,
+    `gpu factor ${report.gpuRealtimeFactor === null ? 'unmeasured' : `${trimFixed(report.gpuRealtimeFactor, 2)}x`}`,
+    `thresholds safe ${trimFixed(report.thresholdSafeFactor, 1)}x marginal ${trimFixed(report.thresholdMarginalFactor, 1)}x`,
+    report.realtimeSafetyGate,
+    report.gpuRenderAheadGate,
+    `renderer ${report.rendererControl}`,
+    report.reasons.length ? `reasons ${report.reasons.map(cleanReason).filter(Boolean).join(' | ')}` : null,
+  ]);
+};
+
 const formatFractionalMs = (value: number | null | undefined): string | null => {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return null;
@@ -1690,6 +1723,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceLatencyBudget = formatUzumeReferenceLatencyBudget(status);
   const referenceReadinessContract = formatUzumeReferenceReadinessContract(status);
   const referenceGenerationCacheKey = formatUzumeReferenceGenerationCacheKey(status);
+  const referenceRealtimeBudgetSummary = formatUzumeReferenceRealtimeBudgetSummary(status);
   const referenceResampling = formatUzumeReferenceResampling(status);
   const referenceSrcRollback = formatUzumeReferenceSrcRollback(status);
   const referenceSrcBudget = formatUzumeReferenceSrcBudget(status);
@@ -1873,6 +1907,16 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       title: 'UZUME generation cache key reference',
       value: referenceGenerationCacheKey,
       tone: 'warning',
+      variant: 'process',
+    });
+  }
+
+  if (referenceRealtimeBudgetSummary) {
+    nodes.push({
+      badge: '',
+      title: 'UZUME realtime budget summary',
+      value: referenceRealtimeBudgetSummary,
+      tone: referencePlan?.realtimeBudgetSummary.state === 'offline-reference-only' ? 'warning' : 'process',
       variant: 'process',
     });
   }

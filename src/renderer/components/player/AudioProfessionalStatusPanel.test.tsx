@@ -232,6 +232,38 @@ const referenceStatus = (): AudioStatus => ({
         'generation_cache_key_reference_only',
       ],
     },
+    realtimeBudgetSummary: {
+      artifact: 'realtime-budget-summary-reference',
+      policy: 'reference-budget-no-measured-runtime-factor',
+      state: 'offline-reference-only',
+      selectedBackend: 'cpu-float64-reference',
+      realtimeBackend: 'not-enabled',
+      measuredRealtimeFactor: null,
+      measuredRealtimeFactorState: 'not-measured-in-rpc002',
+      srcBudgetBackend: 'scalar-float64-reference',
+      srcEstimatedMultiplyAdds: 2048,
+      srcEstimatedRealtimeFactor: null,
+      srcSafetyClass: 'offline-reference-only',
+      callbackRingDepthBlocks: 5,
+      callbackRingTelemetryStatus: 'safe',
+      renderAheadReadyFrames: 2400,
+      renderAheadTargetFrames: 9600,
+      renderAheadCoverageRatio: 0.25,
+      cpuFullProfileFallback: 'reference-available',
+      gpuRealtimeFactor: null,
+      realtimeSafetyGate: 'rpc-003-cpu-realtime-gate',
+      gpuRenderAheadGate: 'rpc-005-gpu-render-ahead-gate',
+      thresholdSafeFactor: 2,
+      thresholdMarginalFactor: 1.1,
+      rendererControl: 'inspect-only',
+      reasons: [
+        'realtime_factor_not_measured_in_rpc002',
+        'scalar_float64_budget_is_reference_only',
+        'cpu_avx2_realtime_gate_deferred_to_rpc003',
+        'gpu_render_ahead_realtime_gate_deferred_to_rpc005',
+        'renderer_may_inspect_but_not_control_realtime_path',
+      ],
+    },
     resampling: {
       active: true,
       family: 'poly-sinc-reference',
@@ -1041,6 +1073,7 @@ const referenceStatus = (): AudioStatus => ({
       latencyBudget: 'deterministic-reference',
       readinessContract: 'deterministic-reference',
       generationCacheKey: 'deterministic-reference',
+      realtimeBudgetSummary: 'deterministic-reference',
       qualityRollback: 'deterministic-reference',
       outputResamplingRisk: 'deterministic-reference',
       pcmOutputQuantization: 'deterministic-reference',
@@ -1176,6 +1209,7 @@ describe('AudioProfessionalStatusPanel', () => {
     expect(screen.getByText(/conv quality-first latency 1024 frames direct-head 128 taps warmup 512 frames tail 2047 frames drain 2047 frames/u)).toBeTruthy();
     expect(screen.getByText(/readiness-contract-reference \/ main-playback-owns-timeline-uzume-reports-readiness \/ waiting-for-full-profile \/ normal-playlist-boundary->wait-for-full-profile/u)).toBeTruthy();
     expect(screen.getByText(/generation-cache-key-reference \/ generation-safe-cache-key-contract-reference \/ gen 1 \/ normal-next-track-head \/ next-track-head/u)).toBeTruthy();
+    expect(screen.getByText(/realtime-budget-summary-reference \/ reference-budget-no-measured-runtime-factor \/ offline-reference-only \/ selected cpu-float64-reference \/ realtime not-enabled \/ measured not-measured-in-rpc002/u)).toBeTruthy();
     expect(screen.getByText(/poly-sinc-reference 44.1 kHz->48 kHz/u)).toBeTruthy();
     expect(screen.getByText(/35 samples \/ 0.73 ms/u)).toBeTruthy();
     expect(screen.getByText(/64 taps \/ cutoff 92% \/ alias 18.5 dB/u)).toBeTruthy();
@@ -1261,6 +1295,11 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME generation cache key reference',
           value: 'generation-cache-key-reference / generation-safe-cache-key-contract-reference / gen 1 / normal-next-track-head / next-track-head / request next-head:reference:0 / cache next-head:reference:0|generation:1|timeline:normal-next-track-head|album:none|profile:ui-ref|device:ui-ref / profile:ui-ref / device:ui-ref / profile format:pcm_processed + domain:multibit-pcm + sections:format-path+headroom+peq+shared-convolution+pcm-src + src:44.1k-family->48k-family + conv:48k-family:quality-first + backend:cpu-float64-reference / device mode:shared + capability:shared-mixer + requested:48000 + actual:48000 + shared:48000 + output:pcm / album none index n/a / invalidate seek+manual-skip+profile-change+device-change+output-mode-change+sample-rate-plan-change / preserve pause+resume+mute+volume+declick / reject-stale-generation / late-current-generation-retain-for-future-only / stale-then-farthest-from-boundary / renderer inspect-only / reasons cache key includes generation profile device and timeline | album segments use segment index when gapless | file path alone is not a valid cache key | renderer may inspect but not mutate cache keys | generation cache key reference only',
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME realtime budget summary',
+          value: 'realtime-budget-summary-reference / reference-budget-no-measured-runtime-factor / offline-reference-only / selected cpu-float64-reference / realtime not-enabled / measured not-measured-in-rpc002 / src scalar-float64-reference 2048 multiply-adds factor unmeasured offline-reference-only / ring 5.0 blocks safe / render-ahead 2400/9600 25% / cpu reference-available / gpu factor unmeasured / thresholds safe 2.0x marginal 1.1x / rpc-003-cpu-realtime-gate / rpc-005-gpu-render-ahead-gate / renderer inspect-only / reasons realtime factor not measured in rpc002 | scalar float64 budget is reference only | cpu avx2 realtime gate deferred to rpc003 | gpu render ahead realtime gate deferred to rpc005 | renderer may inspect but not control realtime path',
           tone: 'warning',
         }),
         expect.objectContaining({

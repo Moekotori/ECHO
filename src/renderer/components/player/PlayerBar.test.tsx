@@ -806,6 +806,38 @@ describe('PlayerBar', () => {
             'generation_cache_key_reference_only',
           ],
         },
+        realtimeBudgetSummary: {
+          artifact: 'realtime-budget-summary-reference',
+          policy: 'reference-budget-no-measured-runtime-factor',
+          state: 'offline-reference-only',
+          selectedBackend: 'cpu-float64-reference',
+          realtimeBackend: 'not-enabled',
+          measuredRealtimeFactor: null,
+          measuredRealtimeFactorState: 'not-measured-in-rpc002',
+          srcBudgetBackend: 'scalar-float64-reference',
+          srcEstimatedMultiplyAdds: 2048,
+          srcEstimatedRealtimeFactor: null,
+          srcSafetyClass: 'offline-reference-only',
+          callbackRingDepthBlocks: 5,
+          callbackRingTelemetryStatus: 'safe',
+          renderAheadReadyFrames: 2400,
+          renderAheadTargetFrames: 9600,
+          renderAheadCoverageRatio: 0.25,
+          cpuFullProfileFallback: 'reference-available',
+          gpuRealtimeFactor: null,
+          realtimeSafetyGate: 'rpc-003-cpu-realtime-gate',
+          gpuRenderAheadGate: 'rpc-005-gpu-render-ahead-gate',
+          thresholdSafeFactor: 2,
+          thresholdMarginalFactor: 1.1,
+          rendererControl: 'inspect-only',
+          reasons: [
+            'realtime_factor_not_measured_in_rpc002',
+            'scalar_float64_budget_is_reference_only',
+            'cpu_avx2_realtime_gate_deferred_to_rpc003',
+            'gpu_render_ahead_realtime_gate_deferred_to_rpc005',
+            'renderer_may_inspect_but_not_control_realtime_path',
+          ],
+        },
         orderedProfileSections: ['format-path', 'peq', 'shared-convolution', 'pcm-src', 'dither'],
         engineAssignments: [
           { sectionId: 'format-path', engineId: 'format-path-planner-reference', active: true, source: 'format-planner' },
@@ -842,6 +874,7 @@ describe('PlayerBar', () => {
           latencyBudget: 'deterministic-reference',
           readinessContract: 'deterministic-reference',
           generationCacheKey: 'deterministic-reference',
+          realtimeBudgetSummary: 'deterministic-reference',
           qualityRollback: 'deterministic-reference',
           outputResamplingRisk: 'deterministic-reference',
           pcmOutputQuantization: 'deterministic-reference',
@@ -1664,6 +1697,8 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).toContain('readiness-contract-reference / main-playback-owns-timeline-uzume-reports-readiness / waiting-for-full-profile / normal-playlist-boundary->wait-for-full-profile / wait cpu-or-gpu-full-profile / full-profile not-ready / gpu-prewarm future-render-ahead-gate / cache miss->callback-keeps-prior-committed-output key next-head:reference:0 / render-ahead cache-warming 2400/9600 / deadline deadline-safe slack 13760 frames / ring stable/safe / short-bridge blocked intent requires full quality profile / crossfade blocked-by-intent / generation current-generation-only stale blocked / same-pipeline-no-reset / scheduler not-enabled / reasons readiness summary derived from reference reports | main playback logic owns timeline and policy | gpu prewarm deferred to render ahead gate | stale generation commit disallowed | readiness contract reference only');
     expect(dialog.textContent).toContain('UZUME generation cache key reference');
     expect(dialog.textContent).toContain('generation-cache-key-reference / generation-safe-cache-key-contract-reference / gen 1 / normal-next-track-head / next-track-head / request next-head:reference:0 / cache next-head:reference:0|generation:1|timeline:normal-next-track-head|album:none|profile:ui-ref|device:ui-ref / profile:ui-ref / device:ui-ref / profile format:pcm_processed + domain:multibit-pcm + sections:format-path+peq+shared-convolution+pcm-src+dither + src:44.1k-family->48k-family + conv:48k-family:quality-first + backend:cpu-float64-reference / device mode:shared + capability:shared-mixer + requested:48000 + actual:48000 + shared:48000 + output:pcm / album none index n/a / invalidate seek+manual-skip+profile-change+device-change+output-mode-change+sample-rate-plan-change / preserve pause+resume+mute+volume+declick / reject-stale-generation / late-current-generation-retain-for-future-only / stale-then-farthest-from-boundary / renderer inspect-only / reasons cache key includes generation profile device and timeline | album segments use segment index when gapless | file path alone is not a valid cache key | renderer may inspect but not mutate cache keys | generation cache key reference only');
+    expect(dialog.textContent).toContain('UZUME realtime budget summary');
+    expect(dialog.textContent).toContain('realtime-budget-summary-reference / reference-budget-no-measured-runtime-factor / offline-reference-only / selected cpu-float64-reference / realtime not-enabled / measured not-measured-in-rpc002 / src scalar-float64-reference 2048 multiply-adds factor unmeasured offline-reference-only / ring 5 blocks safe / render-ahead 2400/9600 25% / cpu reference-available / gpu factor unmeasured / thresholds safe 2x marginal 1.1x / rpc-003-cpu-realtime-gate / rpc-005-gpu-render-ahead-gate / renderer inspect-only / reasons realtime factor not measured in rpc002 | scalar float64 budget is reference only | cpu avx2 realtime gate deferred to rpc003 | gpu render ahead realtime gate deferred to rpc005 | renderer may inspect but not control realtime path');
     expect(dialog.textContent).toContain('Reference merge groups');
     expect(dialog.textContent).toContain('shared-convolution-reference->shared convolution planner ref(active, 48k-family, sections:shared-convolution)');
     expect(dialog.textContent).toContain('Reference latency owners');
@@ -1751,6 +1786,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({ title: 'UZUME latency budget reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME readiness contract reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME generation cache key reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME realtime budget summary', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME PCM ingress guard reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME gain staging reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME PEQ/IIR reference', tone: 'warning', variant: 'process' }),
