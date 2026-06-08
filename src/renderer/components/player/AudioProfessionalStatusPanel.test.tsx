@@ -1506,6 +1506,35 @@ describe('AudioProfessionalStatusPanel', () => {
     );
   });
 
+  it('marks PCM bit-perfect reference bypass state as good', () => {
+    const status = referenceStatus();
+    const plan = status.uzumeReferencePlan!;
+    plan.formatPath = 'pcm_bitperfect';
+    plan.internalDomain = 'pcm-bypass';
+    plan.bitPerfectState = 'available';
+    plan.directDisabledReason = null;
+    plan.formatPathPlan.pcm_bitperfect = { state: 'current', reason: null };
+    plan.formatPathPlan.pcm_processed = { state: 'available', reason: null };
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME reference bit-perfect',
+          value: 'available / direct path available / pcm->pcm / pcm-bypass / pcm_bitperfect',
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
   it('marks DSD direct positive bypass reference state as good', () => {
     const status = referenceStatus();
     const plan = status.uzumeReferencePlan!;

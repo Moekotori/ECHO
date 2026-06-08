@@ -1857,6 +1857,30 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    status.uzumeReferencePlan!.formatPath = 'pcm_bitperfect';
+    status.uzumeReferencePlan!.internalDomain = 'pcm-bypass';
+    status.uzumeReferencePlan!.bitPerfectState = 'available';
+    status.uzumeReferencePlan!.directDisabledReason = null;
+    status.uzumeReferencePlan!.formatPathPlan.pcm_bitperfect = { state: 'current', reason: null };
+    status.uzumeReferencePlan!.formatPathPlan.pcm_processed = { state: 'available', reason: null };
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const pcmBitPerfectDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(pcmBitPerfectDialog.textContent).toContain('available / direct path available / pcm->pcm / pcm-bypass / format:pcm_bitperfect');
+    expect(readSignalPathVisualState(pcmBitPerfectDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME reference bit-perfect', tone: 'process', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     status.uzumeReferencePlan!.formatPath = 'dsd_direct';
     status.uzumeReferencePlan!.sourceContainer = 'dsd';
     status.uzumeReferencePlan!.outputContainer = 'dop';
