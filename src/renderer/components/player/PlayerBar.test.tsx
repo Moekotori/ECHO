@@ -1857,6 +1857,55 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    status.uzumeReferencePlan!.formatPath = 'dsd_direct';
+    status.uzumeReferencePlan!.sourceContainer = 'dsd';
+    status.uzumeReferencePlan!.outputContainer = 'dop';
+    status.uzumeReferencePlan!.internalDomain = 'dsd-direct';
+    status.uzumeReferencePlan!.formatPathPlan.dsd_direct = { state: 'current', reason: null };
+    status.uzumeReferencePlan!.formatPathPlan.d2p_processed = { state: 'available', reason: null };
+    status.uzumeReferencePlan!.dsdFamily = {
+      ...status.uzumeReferencePlan!.dsdFamily!,
+      formatPath: 'dsd_direct',
+      outputContainer: 'dop',
+      internalDomain: 'dsd-direct',
+      state: 'direct',
+      directDisabledReason: null,
+      pcmDomainDspAllowed: false,
+      entersPcmDsp: false,
+      pcmDitherAllowed: false,
+      allowedControls: ['safety-metering'],
+      disabledControls: [],
+      dsd: {
+        sourceDsdRate: 2822400,
+        targetDsdRate: 2822400,
+        outputEncoding: 'dop-dsd64',
+      },
+      d2p: {
+        active: false,
+        available: false,
+        decimationProfile: null,
+        internalPcmRate: null,
+      },
+      reasons: ['dsd_direct_bypasses_pcm_dsp_src_limiter_dither'],
+    };
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const dsdDirectDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(dsdDirectDialog.textContent).toContain('dsd-family-path-control-reference / dsd_direct:direct / dsd->dop / dsd-direct / direct allowed / allowed safety-metering / disabled none / pcm dsp blocked / pcm dither blocked / sdm noise none / output dop-dsd64 / d2p unavailable / sdm unavailable / reasons dsd direct bypasses pcm dsp src limiter dither');
+    expect(readSignalPathVisualState(dsdDirectDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME DSD family reference', tone: 'good', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     status.uzumeReferencePlan!.realtimeBudgetSummary.state = 'same-rate-bypass-reference';
     status.uzumeReferencePlan!.realtimeBudgetSummary.srcEstimatedMultiplyAdds = 8;
     status.uzumeReferencePlan!.realtimeBudgetSummary.srcSafetyClass = 'same-rate-bypass';

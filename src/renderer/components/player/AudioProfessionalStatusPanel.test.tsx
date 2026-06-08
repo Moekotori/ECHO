@@ -1506,6 +1506,60 @@ describe('AudioProfessionalStatusPanel', () => {
     );
   });
 
+  it('marks DSD direct positive bypass reference state as good', () => {
+    const status = referenceStatus();
+    const plan = status.uzumeReferencePlan!;
+    plan.formatPath = 'dsd_direct';
+    plan.sourceContainer = 'dsd';
+    plan.outputContainer = 'dop';
+    plan.internalDomain = 'dsd-direct';
+    plan.formatPathPlan.dsd_direct = { state: 'current', reason: null };
+    plan.formatPathPlan.d2p_processed = { state: 'available', reason: null };
+    plan.dsdFamily = {
+      ...plan.dsdFamily!,
+      formatPath: 'dsd_direct',
+      outputContainer: 'dop',
+      internalDomain: 'dsd-direct',
+      state: 'direct',
+      directDisabledReason: null,
+      pcmDomainDspAllowed: false,
+      entersPcmDsp: false,
+      pcmDitherAllowed: false,
+      allowedControls: ['safety-metering'],
+      disabledControls: [],
+      dsd: {
+        sourceDsdRate: 2822400,
+        targetDsdRate: 2822400,
+        outputEncoding: 'dop-dsd64',
+      },
+      d2p: {
+        active: false,
+        available: false,
+        decimationProfile: null,
+        internalPcmRate: null,
+      },
+      reasons: ['dsd_direct_bypasses_pcm_dsp_src_limiter_dither'],
+    };
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME DSD family reference',
+          value: 'dsd-family-path-control-reference / dsd_direct:direct / dsd->dop / dsd-direct / direct allowed / allowed safety-metering / disabled none / pcm dsp blocked / pcm dither blocked / sdm noise none / output dop-dsd64 / d2p unavailable / sdm unavailable / reasons dsd direct bypasses pcm dsp src limiter dither',
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
   it('keeps not-applicable artifact manifest entries non-blocking while planned entries warn', () => {
     const notApplicableStatus = referenceStatus();
     notApplicableStatus.uzumeReferencePlan!.artifactPlan.dsdFamilyPath = 'not-applicable';
