@@ -920,6 +920,7 @@ export type TranslationKey =
   | 'audioProfessional.row.uzumeReferenceIirEq'
   | 'audioProfessional.row.uzumeReferenceChannelScope'
   | 'audioProfessional.row.uzumeReferenceStereoProcedural'
+  | 'audioProfessional.row.uzumeReferenceLatencyBudget'
   | 'audioProfessional.row.uzumeReferenceLatencyOwners'
   | 'audioProfessional.row.uzumeReferenceMergeGroups'
   | 'audioProfessional.row.uzumeReferenceOutputDevicePolicy'
@@ -3936,6 +3937,7 @@ const zhCN: TranslationMap = {
   'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
   'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
   'audioProfessional.row.uzumeReferenceStereoProcedural': 'UZUME stereo procedural reference',
+  'audioProfessional.row.uzumeReferenceLatencyBudget': 'UZUME latency budget reference',
   'audioProfessional.row.uzumeReferenceLatencyOwners': 'UZUME reference latency owners',
   'audioProfessional.row.uzumeReferenceMergeGroups': 'UZUME reference merge groups',
   'audioProfessional.row.uzumeReferenceOutputDevicePolicy': 'UZUME output device policy reference',
@@ -7317,6 +7319,7 @@ const zhTW: TranslationMap = {
   'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
   'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
   'audioProfessional.row.uzumeReferenceStereoProcedural': 'UZUME stereo procedural reference',
+  'audioProfessional.row.uzumeReferenceLatencyBudget': 'UZUME latency budget reference',
   'audioProfessional.row.uzumeReferenceLatencyOwners': 'UZUME reference latency owners',
   'audioProfessional.row.uzumeReferenceMergeGroups': 'UZUME reference merge groups',
   'audioProfessional.row.uzumeReferenceOutputDevicePolicy': 'UZUME output device policy reference',
@@ -10271,6 +10274,7 @@ const jaJP: TranslationMap = {
   'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
   'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
   'audioProfessional.row.uzumeReferenceStereoProcedural': 'UZUME stereo procedural reference',
+  'audioProfessional.row.uzumeReferenceLatencyBudget': 'UZUME latency budget reference',
   'audioProfessional.row.uzumeReferenceLatencyOwners': 'UZUME reference latency owners',
   'audioProfessional.row.uzumeReferenceMergeGroups': 'UZUME reference merge groups',
   'audioProfessional.row.uzumeReferenceOutputDevicePolicy': 'UZUME output device policy reference',
@@ -13294,6 +13298,7 @@ const enUS: TranslationMap = {
   'audioProfessional.row.uzumeReferenceIirEq': 'UZUME PEQ/IIR reference',
   'audioProfessional.row.uzumeReferenceChannelScope': 'UZUME channel scope reference',
   'audioProfessional.row.uzumeReferenceStereoProcedural': 'UZUME stereo procedural reference',
+  'audioProfessional.row.uzumeReferenceLatencyBudget': 'UZUME latency budget reference',
   'audioProfessional.row.uzumeReferenceLatencyOwners': 'UZUME reference latency owners',
   'audioProfessional.row.uzumeReferenceMergeGroups': 'UZUME reference merge groups',
   'audioProfessional.row.uzumeReferenceOutputDevicePolicy': 'UZUME output device policy reference',

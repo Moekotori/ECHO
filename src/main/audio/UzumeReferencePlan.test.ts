@@ -220,6 +220,24 @@ describe('UZUME reference plan compiler', () => {
         'backend_support_reference_only',
       ],
     });
+    expect(compiled.latencyBudget).toMatchObject({
+      artifact: 'latency-budget-reference',
+      policy: 'reference-budget-summary-no-runtime-scheduler',
+      state: 'ready',
+      selectedBackend: 'cpu-float64-reference',
+      realtimeBackend: 'not-enabled',
+      outputDevicePolicyState: 'shared-mixer-risk',
+      srcLookaheadSamples: expect.any(Number),
+      convolutionLatencyClass: 'inactive',
+      callbackRule: 'read-committed-output-only',
+      schedulerState: 'reference-only',
+      reasons: [
+        'latency_budget_summary_derived_from_reference_reports',
+        'cpu_float64_reference_only_no_runtime_scheduler',
+        'callback_reads_committed_output_only',
+        'production_latency_compensation_deferred_to_realtime_gate',
+      ],
+    });
     expect(compiled.resampling).toMatchObject({
       active: true,
       family: 'poly-sinc-reference',
@@ -534,6 +552,7 @@ describe('UZUME reference plan compiler', () => {
     expect(compiled.artifactPlan.dsdFamilyPath).toBe('not-applicable');
     expect(compiled.artifactPlan.backendSupport).toBe('deterministic-reference');
     expect(compiled.artifactPlan.outputDevicePolicy).toBe('deterministic-reference');
+    expect(compiled.artifactPlan.latencyBudget).toBe('deterministic-reference');
     expect(compiled.artifactPlan.qualityRollback).toBe('deterministic-reference');
     expect(compiled.artifactPlan.pcmOutputQuantization).toBe('deterministic-reference');
     expect(compiled.artifactPlan.pcmIngressGuard).toBe('deterministic-reference');

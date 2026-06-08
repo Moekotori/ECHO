@@ -122,6 +122,49 @@ const referenceStatus = (): AudioStatus => ({
       recommendation: 'prefer-exclusive-or-device-rate-match',
       reasons: ['shared_or_system_output_may_use_mixer_resampling', 'output_device_policy_reference_only'],
     },
+    latencyBudget: {
+      artifact: 'latency-budget-reference',
+      policy: 'reference-budget-summary-no-runtime-scheduler',
+      state: 'ready',
+      selectedBackend: 'cpu-float64-reference',
+      realtimeBackend: 'not-enabled',
+      outputDevicePolicyState: 'shared-mixer-risk',
+      sourceRate: 44100,
+      targetRate: 48000,
+      srcGroupDelaySamples: 35,
+      srcGroupDelayMs: 0.729,
+      srcLookaheadSamples: 35,
+      srcLookaheadMs: 0.729,
+      convolutionLatencyClass: 'quality-first',
+      convolutionLatencySamples: 1024,
+      convolutionDirectHeadTaps: 128,
+      convolutionWarmupFrames: 512,
+      convolutionTailFrames: 2047,
+      convolutionDrainFrames: 2047,
+      callbackBlockFrames: 512,
+      internalBlockFrames: 512,
+      outputBlockFrames: 512,
+      preRollRequiredFrames: 10240,
+      deadlineSlackFrames: 13760,
+      outputRingDepthFrames: 1024,
+      callbackRingCapacityFrames: 4096,
+      callbackRingDepthFrames: 2560,
+      callbackRingDepthBlocks: 5,
+      renderAheadState: 'cache-warming',
+      renderAheadTargetFrames: 9600,
+      renderAheadReadyFrames: 2400,
+      cacheBudgetBytes: 384000,
+      cacheBytesAfterEvict: 0,
+      latencyOwners: { 'shared-convolution': 'room-ir-latency', 'pcm-src': 'resampling-reference' },
+      callbackRule: 'read-committed-output-only',
+      schedulerState: 'reference-only',
+      reasons: [
+        'latency_budget_summary_derived_from_reference_reports',
+        'cpu_float64_reference_only_no_runtime_scheduler',
+        'callback_reads_committed_output_only',
+        'production_latency_compensation_deferred_to_realtime_gate',
+      ],
+    },
     resampling: {
       active: true,
       family: 'poly-sinc-reference',
@@ -928,6 +971,7 @@ const referenceStatus = (): AudioStatus => ({
       dsdFamilyPath: 'deterministic-reference',
       backendSupport: 'deterministic-reference',
       outputDevicePolicy: 'deterministic-reference',
+      latencyBudget: 'deterministic-reference',
       qualityRollback: 'deterministic-reference',
       outputResamplingRisk: 'deterministic-reference',
       pcmOutputQuantization: 'deterministic-reference',
@@ -1055,10 +1099,12 @@ describe('AudioProfessionalStatusPanel', () => {
     expect(screen.getByText(/materialized-gain->gain ref \(inactive, merge gain-reference\)/u)).toBeTruthy();
     expect(screen.getByText(/stereo-procedural->stereo procedural ref \(inactive, merge stereo-procedural-reference, split channel balance band compensation pending reference\)/u)).toBeTruthy();
     expect(screen.getByText(/shared-convolution-reference->shared convolution planner ref \(active, 48k-family, sections shared-convolution\)/u)).toBeTruthy();
-    expect(screen.getByText(/pcm-src->resampling-reference/u)).toBeTruthy();
+    expect(screen.getAllByText(/pcm-src->resampling-reference/u).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/disabled \/ direct disabled uzume processing enabled \/ pcm->pcm \/ multibit-pcm \/ pcm_processed/u)).toBeTruthy();
     expect(screen.getByText(/backend-support-reference \/ reference-backend-only-no-runtime-switch \/ selected cpu-float64-reference \/ realtime not-enabled/u)).toBeTruthy();
     expect(screen.getByText(/output-device-policy-reference \/ pcm_processed \/ shared \/ shared-mixer \/ shared-mixer-risk \/ file 44.1 kHz \/ decoder 44.1 kHz \/ requested 48 kHz \/ actual 48 kHz \/ shared 48 kHz/u)).toBeTruthy();
+    expect(screen.getByText(/latency-budget-reference \/ cpu-float64-reference \/ realtime not-enabled \/ src 35 samples\/0.73 ms lookahead 35 samples\/0.73 ms/u)).toBeTruthy();
+    expect(screen.getByText(/conv quality-first latency 1024 frames direct-head 128 taps warmup 512 frames tail 2047 frames drain 2047 frames/u)).toBeTruthy();
     expect(screen.getByText(/poly-sinc-reference 44.1 kHz->48 kHz/u)).toBeTruthy();
     expect(screen.getByText(/35 samples \/ 0.73 ms/u)).toBeTruthy();
     expect(screen.getByText(/64 taps \/ cutoff 92% \/ alias 18.5 dB/u)).toBeTruthy();
@@ -1129,6 +1175,11 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME output device policy reference',
           value: 'output-device-policy-reference / pcm_processed / shared / shared-mixer / shared-mixer-risk / file 44.1 kHz / decoder 44.1 kHz / requested 48 kHz / actual 48 kHz / shared 48 kHz / output pcm / bit-perfect candidate no / resampling yes / mismatch yes / recommend prefer-exclusive-or-device-rate-match / reasons shared or system output may use mixer resampling | output device policy reference only',
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME latency budget reference',
+          value: 'latency-budget-reference / cpu-float64-reference / realtime not-enabled / src 35 samples/0.73 ms lookahead 35 samples/0.73 ms / conv quality-first latency 1024 frames direct-head 128 taps warmup 512 frames tail 2047 frames drain 2047 frames / blocks 512 frames->512 frames->512 frames / pre-roll 10240 frames slack 13760 frames / ring 2560 frames/4096 frames 5.0 blocks / render-ahead cache-warming 2400/9600 frames / cache 0/384000 bytes / owners shared-convolution->room-ir-latency | pcm-src->resampling-reference / read-committed-output-only / reference-only / reasons latency budget summary derived from reference reports | cpu float64 reference only no runtime scheduler | callback reads committed output only | production latency compensation deferred to realtime gate',
           tone: 'warning',
         }),
         expect.objectContaining({

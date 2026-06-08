@@ -696,6 +696,49 @@ describe('PlayerBar', () => {
           recommendation: 'prefer-exclusive-or-device-rate-match',
           reasons: ['shared_or_system_output_may_use_mixer_resampling', 'output_device_policy_reference_only'],
         },
+        latencyBudget: {
+          artifact: 'latency-budget-reference',
+          policy: 'reference-budget-summary-no-runtime-scheduler',
+          state: 'ready',
+          selectedBackend: 'cpu-float64-reference',
+          realtimeBackend: 'not-enabled',
+          outputDevicePolicyState: 'shared-mixer-risk',
+          sourceRate: 44100,
+          targetRate: 48000,
+          srcGroupDelaySamples: 35,
+          srcGroupDelayMs: 0.729,
+          srcLookaheadSamples: 35,
+          srcLookaheadMs: 0.729,
+          convolutionLatencyClass: 'quality-first',
+          convolutionLatencySamples: 1024,
+          convolutionDirectHeadTaps: 128,
+          convolutionWarmupFrames: 512,
+          convolutionTailFrames: 2047,
+          convolutionDrainFrames: 2047,
+          callbackBlockFrames: 512,
+          internalBlockFrames: 1024,
+          outputBlockFrames: 512,
+          preRollRequiredFrames: 10240,
+          deadlineSlackFrames: 13760,
+          outputRingDepthFrames: 1024,
+          callbackRingCapacityFrames: 4096,
+          callbackRingDepthFrames: 2560,
+          callbackRingDepthBlocks: 5,
+          renderAheadState: 'cache-warming',
+          renderAheadTargetFrames: 9600,
+          renderAheadReadyFrames: 2400,
+          cacheBudgetBytes: 384000,
+          cacheBytesAfterEvict: 0,
+          latencyOwners: { 'shared-convolution': 'room-ir-latency', 'pcm-src': 'resampling-reference' },
+          callbackRule: 'read-committed-output-only',
+          schedulerState: 'reference-only',
+          reasons: [
+            'latency_budget_summary_derived_from_reference_reports',
+            'cpu_float64_reference_only_no_runtime_scheduler',
+            'callback_reads_committed_output_only',
+            'production_latency_compensation_deferred_to_realtime_gate',
+          ],
+        },
         orderedProfileSections: ['format-path', 'peq', 'shared-convolution', 'pcm-src', 'dither'],
         engineAssignments: [
           { sectionId: 'format-path', engineId: 'format-path-planner-reference', active: true, source: 'format-planner' },
@@ -729,6 +772,7 @@ describe('PlayerBar', () => {
           dsdFamilyPath: 'deterministic-reference',
           backendSupport: 'deterministic-reference',
           outputDevicePolicy: 'deterministic-reference',
+          latencyBudget: 'deterministic-reference',
           qualityRollback: 'deterministic-reference',
           outputResamplingRisk: 'deterministic-reference',
           pcmOutputQuantization: 'deterministic-reference',
@@ -1545,6 +1589,8 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).toContain('backend-support-reference / reference-backend-only-no-runtime-switch / selected cpu-float64-reference / realtime not-enabled / cpu available deterministic-reference / avx future-production-gate rpc-003-cpu-realtime-gate / gpu future-render-ahead-gate rpc-005-gpu-render-ahead-gate / legacy non-uzume-fallback-only compiler blocked / output shared-mixer-risk / reasons cpu float64 reference selected for rpc002 | avx2 gpu runtime backends deferred beyond reference gate | legacy dsp chain not entered by uzume compiler | backend support reference only');
     expect(dialog.textContent).toContain('UZUME output device policy reference');
     expect(dialog.textContent).toContain('output-device-policy-reference / pcm_processed / shared / shared-mixer / shared-mixer-risk / file 44.1kHz / decoder 44.1kHz / requested 48kHz / actual 48kHz / shared 48kHz / output pcm / bit-perfect candidate no / resampling yes / mismatch yes / recommend prefer-exclusive-or-device-rate-match / reasons shared or system output may use mixer resampling | output device policy reference only');
+    expect(dialog.textContent).toContain('UZUME latency budget reference');
+    expect(dialog.textContent).toContain('latency-budget-reference / cpu-float64-reference / realtime not-enabled / src 35 samples/0.73 ms lookahead 35 samples/0.73 ms / conv quality-first latency 1024 frames direct-head 128 taps warmup 512 frames tail 2047 frames drain 2047 frames / blocks 512 frames->1024 frames->512 frames / pre-roll 10240 frames slack 13760 frames / ring 2560 frames/4096 frames 5 blocks / render-ahead cache-warming 2400/9600 frames / cache 0 bytes/384000 bytes / owners shared-convolution->room-ir-latency | pcm-src->resampling-reference / read-committed-output-only / reference-only / reasons latency budget summary derived from reference reports | cpu float64 reference only no runtime scheduler | callback reads committed output only | production latency compensation deferred to realtime gate');
     expect(dialog.textContent).toContain('Reference merge groups');
     expect(dialog.textContent).toContain('shared-convolution-reference->shared convolution planner ref(active, 48k-family, sections:shared-convolution)');
     expect(dialog.textContent).toContain('Reference latency owners');
@@ -1629,6 +1675,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({ title: 'UZUME reference bit-perfect', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME backend support reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME output device policy reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME latency budget reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME PCM ingress guard reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME gain staging reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME PEQ/IIR reference', tone: 'warning', variant: 'process' }),

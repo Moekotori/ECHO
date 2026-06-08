@@ -230,6 +230,36 @@ const formatUzumeReferenceOutputDevicePolicy = (status: AudioStatus | null, fall
   ].join(' / ') + reasons;
 };
 
+const formatUzumeReferenceLatencyBudget = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.latencyBudget;
+  if (!report) {
+    return fallback;
+  }
+
+  const owners = Object.entries(report.latencyOwners)
+    .map(([sectionId, owner]) => `${sectionId}->${owner}`)
+    .join(' | ') || 'none';
+  const reasons = report.reasons.length
+    ? ` / reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}`
+    : '';
+
+  return [
+    report.artifact,
+    report.selectedBackend,
+    `realtime ${report.realtimeBackend}`,
+    `src ${Math.round(report.srcGroupDelaySamples)} samples/${formatFractionalMs(report.srcGroupDelayMs, fallback)} lookahead ${Math.round(report.srcLookaheadSamples)} samples/${formatFractionalMs(report.srcLookaheadMs, fallback)}`,
+    `conv ${report.convolutionLatencyClass} latency ${formatFrames(report.convolutionLatencySamples, fallback)} direct-head ${Math.round(report.convolutionDirectHeadTaps)} taps warmup ${formatFrames(report.convolutionWarmupFrames, fallback)} tail ${formatFrames(report.convolutionTailFrames, fallback)} drain ${formatFrames(report.convolutionDrainFrames, fallback)}`,
+    `blocks ${formatFrames(report.callbackBlockFrames, fallback)}->${formatFrames(report.internalBlockFrames, fallback)}->${formatFrames(report.outputBlockFrames, fallback)}`,
+    `pre-roll ${formatFrames(report.preRollRequiredFrames, fallback)} slack ${formatFrames(report.deadlineSlackFrames, fallback)}`,
+    `ring ${formatFrames(report.callbackRingDepthFrames, fallback)}/${formatFrames(report.callbackRingCapacityFrames, fallback)} ${report.callbackRingDepthBlocks.toFixed(1)} blocks`,
+    `render-ahead ${report.renderAheadState} ${report.renderAheadReadyFrames}/${report.renderAheadTargetFrames} frames`,
+    `cache ${Math.round(report.cacheBytesAfterEvict)}/${Math.round(report.cacheBudgetBytes)} bytes`,
+    `owners ${owners}`,
+    report.callbackRule,
+    report.schedulerState,
+  ].join(' / ') + reasons;
+};
+
 const formatUzumeReferenceResampling = (status: AudioStatus | null, fallback: string): string => {
   const resampling = status?.uzumeReferencePlan?.resampling;
   if (!resampling) {
@@ -1095,6 +1125,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceBitPerfectText = formatUzumeReferenceBitPerfect(status, unknown);
   const uzumeReferenceBackendSupportText = formatUzumeReferenceBackendSupport(status, unknown);
   const uzumeReferenceOutputDevicePolicyText = formatUzumeReferenceOutputDevicePolicy(status, unknown);
+  const uzumeReferenceLatencyBudgetText = formatUzumeReferenceLatencyBudget(status, unknown);
   const uzumeReferenceResamplingText = formatUzumeReferenceResampling(status, unknown);
   const uzumeReferenceSrcRollbackText = formatUzumeReferenceSrcRollback(status, unknown);
   const uzumeReferenceSrcBudgetText = formatUzumeReferenceSrcBudget(status, unknown);
@@ -1264,6 +1295,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceBitPerfect'), value: uzumeReferenceBitPerfectText, tone: status?.uzumeReferencePlan?.bitPerfectState === 'available' ? 'good' : status?.uzumeReferencePlan ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBackendSupport'), value: uzumeReferenceBackendSupportText, tone: status?.uzumeReferencePlan?.backendSupport ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceOutputDevicePolicy'), value: uzumeReferenceOutputDevicePolicyText, tone: status?.uzumeReferencePlan?.outputDevicePolicy?.state === 'direct-like-ready' ? 'good' : status?.uzumeReferencePlan?.outputDevicePolicy ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceLatencyBudget'), value: uzumeReferenceLatencyBudgetText, tone: status?.uzumeReferencePlan?.latencyBudget ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePcmIngressGuard'), value: uzumeReferencePcmIngressGuardText, tone: status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'channel-mismatch' || status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'sanitized' ? 'warning' : status?.uzumeReferencePlan?.pcmIngressGuard ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceGainStaging'), value: uzumeReferenceGainStagingText, tone: status?.uzumeReferencePlan?.gainStaging?.clipRisk ? 'warning' : Math.abs(status?.uzumeReferencePlan?.gainStaging?.totalGainDb ?? 0) > 0.001 ? 'warning' : status?.uzumeReferencePlan?.gainStaging ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceIirEq'), value: uzumeReferenceIirEqText, tone: status?.uzumeReferencePlan?.iirEq?.state === 'active' ? 'warning' : status?.uzumeReferencePlan?.iirEq ? 'good' : 'muted' },

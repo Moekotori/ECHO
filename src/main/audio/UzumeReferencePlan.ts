@@ -4171,6 +4171,67 @@ const buildContinuityInspectReport = (
   };
 };
 
+const buildLatencyBudgetInspectReport = (
+  backendSupport: UzumeCompiledReferencePlan['backendSupport'],
+  resampling: UzumeReferenceResamplingReport,
+  sharedConvolution: UzumeReferenceSharedConvolutionReport,
+  continuity: UzumeCompiledReferencePlan['continuity'],
+  latencyOwners: Record<string, string>,
+): UzumeCompiledReferencePlan['latencyBudget'] => {
+  const mergedSourceIds = new Set(sharedConvolution.mergedSourceIds);
+  const convolutionLatencySamples = sharedConvolution.active
+    ? sharedConvolution.sources.reduce((maxLatency, source) => (
+      mergedSourceIds.has(source.id)
+        ? Math.max(maxLatency, normalizeFrameCount(source.latencySamples))
+        : maxLatency
+    ), 0)
+    : 0;
+
+  return {
+    artifact: 'latency-budget-reference',
+    policy: 'reference-budget-summary-no-runtime-scheduler',
+    state: 'ready',
+    selectedBackend: backendSupport.selectedBackend,
+    realtimeBackend: backendSupport.realtimeBackend,
+    outputDevicePolicyState: backendSupport.outputDevicePolicyState,
+    sourceRate: resampling.sourceRate,
+    targetRate: resampling.targetRate,
+    srcGroupDelaySamples: resampling.groupDelaySamples,
+    srcGroupDelayMs: resampling.groupDelayMs,
+    srcLookaheadSamples: resampling.lookaheadSamples,
+    srcLookaheadMs: resampling.lookaheadMs,
+    convolutionLatencyClass: sharedConvolution.partitionPlan.latencyClass,
+    convolutionLatencySamples,
+    convolutionDirectHeadTaps: sharedConvolution.partitionPlan.directHeadTaps,
+    convolutionWarmupFrames: sharedConvolution.partitionPlan.warmupFrames,
+    convolutionTailFrames: sharedConvolution.partitionPlan.tailFrames,
+    convolutionDrainFrames: sharedConvolution.partitionPlan.drainFrames,
+    callbackBlockFrames: continuity.preRoll.callbackBlockFrames,
+    internalBlockFrames: sharedConvolution.partitionPlan.internalBlockFrames,
+    outputBlockFrames: sharedConvolution.partitionPlan.outputBlockFrames,
+    preRollRequiredFrames: continuity.preRoll.preRollRequiredFrames,
+    deadlineSlackFrames: continuity.preRoll.deadlineSlackFrames,
+    outputRingDepthFrames: continuity.preRoll.outputRingDepthFrames,
+    callbackRingCapacityFrames: continuity.callbackRing.capacityFrames,
+    callbackRingDepthFrames: continuity.callbackRing.depthFrames,
+    callbackRingDepthBlocks: continuity.callbackRing.depthBlocks,
+    renderAheadState: continuity.preRoll.renderAheadState,
+    renderAheadTargetFrames: continuity.preRoll.renderAheadTargetFrames,
+    renderAheadReadyFrames: continuity.preRoll.renderAheadReadyFrames,
+    cacheBudgetBytes: continuity.renderAheadCache.budgetBytes,
+    cacheBytesAfterEvict: continuity.renderAheadCache.bytesAfterEvict,
+    latencyOwners: { ...latencyOwners },
+    callbackRule: continuity.continuity.callbackRule,
+    schedulerState: 'reference-only',
+    reasons: [
+      'latency_budget_summary_derived_from_reference_reports',
+      'cpu_float64_reference_only_no_runtime_scheduler',
+      'callback_reads_committed_output_only',
+      'production_latency_compensation_deferred_to_realtime_gate',
+    ],
+  };
+};
+
 const compactCallbackSafeControlCaseReport = (
   result: UzumeReferenceCallbackSafeControlResult,
 ): UzumeCompiledReferencePlan['callbackSafeControls']['urgentControl'] => ({
@@ -4296,6 +4357,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
   const flushDrain = buildFlushDrainInspectReport(input);
   const compiler = buildCompilerAssignments(input, format, resampling, sharedConvolution, pcmOutputQuantization);
   const continuity = buildContinuityInspectReport(input, resampling, sharedConvolution);
+  const latencyBudget = buildLatencyBudgetInspectReport(backendSupport, resampling, sharedConvolution, continuity, compiler.latencyOwners);
   const callbackSafeControls = buildCallbackSafeControlsInspectReport(input);
   const equalPowerCrossfade = buildEqualPowerCrossfadeInspectReport(input, resampling);
   const dsdFamily = buildDsdFamilyReport(input, format);
@@ -4306,6 +4368,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
     ...format,
     backendSupport,
     outputDevicePolicy,
+    latencyBudget,
     ...compiler,
     resampling,
     sharedConvolution,
@@ -4342,6 +4405,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
       dsdFamilyPath: dsdFamily ? 'deterministic-reference' : 'not-applicable',
       backendSupport: 'deterministic-reference',
       outputDevicePolicy: 'deterministic-reference',
+      latencyBudget: 'deterministic-reference',
       qualityRollback: 'deterministic-reference',
       outputResamplingRisk: 'deterministic-reference',
       pcmOutputQuantization: 'deterministic-reference',

@@ -333,6 +333,39 @@ const formatUzumeReferenceOutputDevicePolicy = (status: AudioStatus | null): str
   ]);
 };
 
+const formatReferenceSamples = (value: number | null | undefined): string | null =>
+  value !== null && value !== undefined && Number.isFinite(value) ? `${Math.round(value)} samples` : null;
+
+const formatUzumeReferenceLatencyBudget = (status: AudioStatus | null): string | null => {
+  const report = status?.uzumeReferencePlan?.latencyBudget;
+  if (!report) {
+    return null;
+  }
+
+  const frameValue = (value: number | null | undefined): string => formatReferenceFrames(value) ?? 'unknown';
+  const byteValue = (value: number | null | undefined): string => formatReferenceBytes(value) ?? 'unknown';
+  const owners = Object.entries(report.latencyOwners)
+    .map(([sectionId, owner]) => `${sectionId}->${owner}`)
+    .join(' | ') || 'none';
+
+  return joinSpec([
+    report.artifact,
+    report.selectedBackend,
+    `realtime ${report.realtimeBackend}`,
+    `src ${formatReferenceSamples(report.srcGroupDelaySamples) ?? 'unknown'}/${formatFractionalMs(report.srcGroupDelayMs) ?? 'unknown'} lookahead ${formatReferenceSamples(report.srcLookaheadSamples) ?? 'unknown'}/${formatFractionalMs(report.srcLookaheadMs) ?? 'unknown'}`,
+    `conv ${report.convolutionLatencyClass} latency ${frameValue(report.convolutionLatencySamples)} direct-head ${Math.round(report.convolutionDirectHeadTaps)} taps warmup ${frameValue(report.convolutionWarmupFrames)} tail ${frameValue(report.convolutionTailFrames)} drain ${frameValue(report.convolutionDrainFrames)}`,
+    `blocks ${frameValue(report.callbackBlockFrames)}->${frameValue(report.internalBlockFrames)}->${frameValue(report.outputBlockFrames)}`,
+    `pre-roll ${frameValue(report.preRollRequiredFrames)} slack ${frameValue(report.deadlineSlackFrames)}`,
+    `ring ${frameValue(report.callbackRingDepthFrames)}/${frameValue(report.callbackRingCapacityFrames)} ${trimFixed(report.callbackRingDepthBlocks, 1)} blocks`,
+    `render-ahead ${report.renderAheadState} ${report.renderAheadReadyFrames}/${report.renderAheadTargetFrames} frames`,
+    `cache ${byteValue(report.cacheBytesAfterEvict)}/${byteValue(report.cacheBudgetBytes)}`,
+    `owners ${owners}`,
+    report.callbackRule,
+    report.schedulerState,
+    report.reasons.length ? `reasons ${report.reasons.map(cleanReason).filter(Boolean).join(' | ')}` : null,
+  ]);
+};
+
 const formatFractionalMs = (value: number | null | undefined): string | null => {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return null;
@@ -1598,6 +1631,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceBitPerfect = formatUzumeReferenceBitPerfect(status);
   const referenceBackendSupport = formatUzumeReferenceBackendSupport(status);
   const referenceOutputDevicePolicy = formatUzumeReferenceOutputDevicePolicy(status);
+  const referenceLatencyBudget = formatUzumeReferenceLatencyBudget(status);
   const referenceResampling = formatUzumeReferenceResampling(status);
   const referenceSrcRollback = formatUzumeReferenceSrcRollback(status);
   const referenceSrcBudget = formatUzumeReferenceSrcBudget(status);
@@ -1751,6 +1785,16 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       title: 'UZUME output device policy reference',
       value: referenceOutputDevicePolicy,
       tone: referencePlan?.outputDevicePolicy.state === 'direct-like-ready' ? 'process' : 'warning',
+      variant: 'process',
+    });
+  }
+
+  if (referenceLatencyBudget) {
+    nodes.push({
+      badge: '',
+      title: 'UZUME latency budget reference',
+      value: referenceLatencyBudget,
+      tone: 'warning',
       variant: 'process',
     });
   }
