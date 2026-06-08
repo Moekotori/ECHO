@@ -30,6 +30,7 @@
     "rebuild:native": "node scripts/ensure-native-abi.mjs electron && npm run ensure:airplay-raop",
     "rebuild:native:node": "npm rebuild better-sqlite3",
     "sync:audio-host": "node scripts/sync-audio-host.mjs",
+    "sync:fork-base": "node scripts/sync-fork-base.mjs",
     "build": "npm run typecheck && electron-vite build",
     "build:win": "npm run rebuild:native && npm run verify:ffmpeg && npm run build:audio-host && npm run build:smtc-host && npm run build:native-scanner && npm run build && npm run ensure:nsis-resources && electron-builder --win && npm run verify:airplay-package",
     "build:win:unsigned": "npm run rebuild:native && npm run verify:ffmpeg && npm run build:audio-host && npm run build:smtc-host && npm run build:native-scanner && npm run build && npm run ensure:nsis-resources && node scripts/build-win-unsigned.mjs && npm run verify:airplay-package",
