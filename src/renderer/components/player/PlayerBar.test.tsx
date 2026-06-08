@@ -1857,6 +1857,34 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    status.uzumeReferencePlan!.sharedConvolution.serialNullReference = {
+      ...status.uzumeReferencePlan!.sharedConvolution.serialNullReference!,
+      state: 'merged-matches-serial',
+      sourceOrder: ['fir-eq', 'headphone-fir', 'room-ir'],
+      mergedResponseTapCounts: [3, 4, 5],
+      comparedFrames: 128,
+      maxAbs: 0,
+      rms: 0,
+      reasons: ['merged_response_matches_serial_direct_fir_reference', 'serial_null_reference_only'],
+    };
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const serialNullDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(serialNullDialog.textContent).toContain('shared-convolution-serial-null-reference / shared-convolution-planner-reference / merged-matches-serial / order fir-eq->headphone-fir->room-ir / merged taps 3+4+5 / frames 128 / residual 0/0 / reasons merged response matches serial direct fir reference | serial null reference only');
+    expect(readSignalPathVisualState(serialNullDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME convolution serial null reference', tone: 'good', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     status.uzumeReferencePlan!.formatPath = 'pcm_bitperfect';
     status.uzumeReferencePlan!.internalDomain = 'pcm-bypass';
     status.uzumeReferencePlan!.bitPerfectState = 'available';

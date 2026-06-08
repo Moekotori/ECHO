@@ -1535,6 +1535,39 @@ describe('AudioProfessionalStatusPanel', () => {
     );
   });
 
+  it('marks merged shared-convolution serial-null reference state as good', () => {
+    const status = referenceStatus();
+    const sharedConvolution = status.uzumeReferencePlan!.sharedConvolution;
+    sharedConvolution.serialNullReference = {
+      ...sharedConvolution.serialNullReference!,
+      state: 'merged-matches-serial',
+      sourceOrder: ['fir-eq', 'headphone-fir', 'room-ir'],
+      mergedResponseTapCounts: [3, 4, 5],
+      comparedFrames: 128,
+      maxAbs: 0,
+      rms: 0,
+      reasons: ['merged_response_matches_serial_direct_fir_reference', 'serial_null_reference_only'],
+    };
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME convolution serial null reference',
+          value: 'shared-convolution-serial-null-reference / shared-convolution-planner-reference / merged-matches-serial / order fir-eq->headphone-fir->room-ir / merged taps 3+4+5 / frames 128 / residual 0.000000/0.000000 / reasons merged response matches serial direct fir reference | serial null reference only',
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
   it('marks DSD direct positive bypass reference state as good', () => {
     const status = referenceStatus();
     const plan = status.uzumeReferencePlan!;
