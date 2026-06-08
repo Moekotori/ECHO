@@ -1,7 +1,7 @@
 # ECHO NEXT UZUME DSP 重构方案
 
 生成时间：2026-06-07
-仓库状态：`uzume-dspchain-replacement` PR 分支；2026-06-08 代码收口提交为 `3b4ff01`，文档反馈在其后单独追踪，PR 前以 `git status --short --branch` 再确认 clean / ahead 状态。
+仓库状态：`uzume-dspchain-replacement` PR 分支；RPC-001 skeleton 收口后的 RPC-002 reference UI / test / 文档推进均在本分支继续追踪，PR 前以 `git status --short --branch` 与 `git log --oneline origin/main..HEAD` 确认 clean / ahead 状态和提交序列。
 文档位置：当前仓库没有 `doc` 目录，既有工程文档位于 `docs`，因此本文按现有约定放入 `docs`。
 
 `UZUME` 是 ECHO NEXT 的下一代数字处理核心层。它不是把现有 EQ、FFmpeg/SOXR SRC、IR 卷积简单改名，也不是在现有 `DspChain` 旁边外挂一串小 DSP 模块。它的目标是直接替代现有 DSP 层，把 ECHO 的原生高质量 Poly-Sinc SRC、长 FIR、卷积预处理接口、PCM 输出位深保护、未来 SDM/DSD 生成，以及 CPU/GPU offload 融合到一个可审计、可回退、可解释的大 kernel 系统里。
@@ -2960,7 +2960,7 @@ Phase 7 exit：`Advanced Backend Gate`
 
 本 PR 记录当前 UZUME 过渡实现状态，并把后续工作收敛到 Phase Exit Gates；它不再定义独立 MVP 清单，也不宣称一次性完成完整 SRC/FIR/SDM/GPU offload：
 
-- 当前操作分支是 `uzume-dspchain-replacement`，已设置 tracking `origin/main`；截至 2026-06-08 代码收口提交为 `3b4ff01`，文档反馈在其后单独追踪，PR 前以 `git status --short --branch` 再确认 clean / ahead 状态。
+- 当前操作分支是 `uzume-dspchain-replacement`，已设置 tracking `origin/main`；RPC-001 skeleton 收口后的 RPC-002 reference UI / test / 文档推进均在本分支继续追踪，PR 前以 `git status --short --branch` 与 `git log --oneline origin/main..HEAD` 确认 clean / ahead 状态和提交序列。
 - RPC-001 已剔除 `DspChain -> UzumeEngine` wrapper route：`DspChain.h/.cpp` 不再 include、持有或转发 `UzumeEngine`；后续仍应拆出 / 保留独立 `LegacyDspChain` backend，由 host / output bridge 并列选择 legacy 或 UZUME。
 - 当前 native PCM realtime skeleton 由 host 直接持有 `UzumeEngine`；它仍是 `transitional-processor-chain` / `uzume-skeleton-compat`，不是正式 fused macro-kernel，也不是 Poly-Sinc / Shared Convolution / SDM 完成状态。
 - 当前 UZUME UI 已替代旧 DSP 页面；未真正实现的 UZUME 子模块（Headroom、SRC、EQ、OPRA、FIR、Matrix、Safety 等）显示 `未实现`，不提供按钮、滑杆或开关。旧 Headroom / EQ / FIR / Matrix / Safety / ECHO-SOXR 状态只作为 legacy / compat readout。
