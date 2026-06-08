@@ -392,6 +392,7 @@ export type UzumeReferenceArtifactPlan = {
   pcmOutputQuantization: 'deterministic-reference';
   pcmIngressGuard: 'deterministic-reference';
   gainStaging: 'deterministic-reference';
+  headroomSafetyLimiter: 'deterministic-reference';
   iirEq: 'deterministic-reference';
   channelScope: 'deterministic-reference';
   stereoProcedural: 'deterministic-reference';
@@ -799,6 +800,66 @@ export type UzumeReferenceGainStagingReport = {
   clipRisk: boolean;
   reasons: string[];
 };
+export type UzumeReferenceSafetyStageId =
+  | 'input'
+  | 'after-headroom'
+  | 'after-eq-iir'
+  | 'after-stereo-procedural-crossfeed'
+  | 'after-convolution'
+  | 'pre-limiter'
+  | 'post-limiter';
+export type UzumeReferenceSafetyStageInspectReport = {
+  id: UzumeReferenceSafetyStageId;
+  peak: number;
+  rms: number;
+  peakDbfs: number;
+  rmsDbfs: number;
+  truePeak: number;
+  truePeakDbtp: number;
+  sampleClipCount: number;
+  truePeakOverCount: number;
+  peakExpansionDb: number;
+};
+export type UzumeReferenceHeadroomSafetyLimiterReport = {
+  artifact: 'headroom-safety-limiter-reference';
+  engine: 'safety-metering-reference';
+  sampleRate: number;
+  formatPath: UzumeFormatPath;
+  state: 'safe' | 'near-limit' | 'over' | 'limiting';
+  headroom: {
+    currentDb: number;
+    recommendedDb: number;
+    missingDb: number;
+    reason: 'profile_preflight_gain' | 'post_dsp_true_peak' | 'limiter_reduction' | 'sufficient';
+    sourceStage: UzumeReferenceSafetyStageId | null;
+    confidence: 'measured' | 'estimated';
+    targetSafetyMarginDb: number;
+    autoHeadroomEnabled: false;
+  };
+  safetyMeter: {
+    state: 'safe' | 'near-limit' | 'over' | 'limiting';
+    stages: UzumeReferenceSafetyStageInspectReport[];
+    maxSamplePeakDbfs: number;
+    maxTruePeakDbtp: number;
+    sampleClipCount: number;
+    truePeakOverCount: number;
+    stageOfMaxPeak: UzumeReferenceSafetyStageId | null;
+    stageOfMaxTruePeak: UzumeReferenceSafetyStageId | null;
+    historyWindowSeconds: 0;
+  };
+  limiter: {
+    enabled: boolean;
+    active: boolean;
+    triggerCount: number;
+    currentGainReductionDb: number;
+    maxGainReductionDb: number;
+    limitedSamples: number;
+    limitedFrames: number;
+    mode: 'sample-domain-safety-limiter';
+    truePeakLookahead: false;
+  };
+  reasons: string[];
+};
 export type UzumeReferenceIirEqBandInspectReport = {
   index: number;
   filterType: string;
@@ -1177,6 +1238,7 @@ export type UzumeCompiledReferencePlan = {
   pcmOutputQuantization: UzumeReferencePcmOutputQuantizationReport;
   pcmIngressGuard: UzumeReferencePcmIngressGuardReport;
   gainStaging: UzumeReferenceGainStagingReport;
+  headroomSafetyLimiter: UzumeReferenceHeadroomSafetyLimiterReport;
   iirEq: UzumeReferenceIirEqInspectReport;
   channelScope: UzumeReferenceChannelScopeInspectReport;
   stereoProcedural: UzumeReferenceStereoProceduralInspectReport;

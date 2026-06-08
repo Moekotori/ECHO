@@ -651,6 +651,7 @@ describe('UZUME reference plan compiler', () => {
     expect(compiled.artifactPlan.pcmOutputQuantization).toBe('deterministic-reference');
     expect(compiled.artifactPlan.pcmIngressGuard).toBe('deterministic-reference');
     expect(compiled.artifactPlan.gainStaging).toBe('deterministic-reference');
+    expect(compiled.artifactPlan.headroomSafetyLimiter).toBe('deterministic-reference');
     expect(compiled.artifactPlan.iirEq).toBe('deterministic-reference');
     expect(compiled.artifactPlan.channelScope).toBe('deterministic-reference');
     expect(compiled.artifactPlan.stereoProcedural).toBe('deterministic-reference');
@@ -696,6 +697,65 @@ describe('UZUME reference plan compiler', () => {
         shortBridgeAllowed: false,
       },
     });
+  });
+
+  it('carries headroom safety and limiter telemetry in the compiled inspect report', () => {
+    const compiled = compile({
+      eqState: eqState({
+        dspHeadroomDb: 0.5,
+        dspSafetyLimiterEnabled: false,
+      }),
+      dspActive: true,
+      dspModuleActive: true,
+      bitPerfectDisabledReason: 'uzume_processing_enabled',
+      nativeFormatPath: 'pcm_processed',
+      nativeBitPerfectState: 'disabled',
+      nativeDirectDisabledReason: 'uzume_processing_enabled',
+    });
+
+    expect(compiled.headroomSafetyLimiter).toMatchObject({
+      artifact: 'headroom-safety-limiter-reference',
+      engine: 'safety-metering-reference',
+      sampleRate: 44100,
+      formatPath: 'pcm_processed',
+      state: 'near-limit',
+      safetyMeter: {
+        state: 'near-limit',
+        sampleClipCount: 0,
+        truePeakOverCount: 0,
+      },
+      limiter: {
+        enabled: false,
+        active: false,
+        triggerCount: 0,
+        mode: 'sample-domain-safety-limiter',
+        truePeakLookahead: false,
+      },
+    });
+    expect(compiled.headroomSafetyLimiter.headroom).toMatchObject({
+      currentDb: 0.5,
+      reason: 'profile_preflight_gain',
+      sourceStage: 'pre-limiter',
+      confidence: 'measured',
+      autoHeadroomEnabled: false,
+    });
+    expect(compiled.headroomSafetyLimiter.headroom.missingDb).toBeGreaterThan(0);
+    expect(compiled.headroomSafetyLimiter.safetyMeter.stages.map((stage) => stage.id)).toEqual([
+      'input',
+      'after-headroom',
+      'after-eq-iir',
+      'after-stereo-procedural-crossfeed',
+      'after-convolution',
+      'pre-limiter',
+      'post-limiter',
+    ]);
+    expect(compiled.headroomSafetyLimiter.reasons).toEqual(expect.arrayContaining([
+      'headroom_recommendation_from_reference_pcm_probe',
+      'safety_meter_tracks_stage_peak_true_peak_and_clip_history',
+      'limiter_gain_reduction_reported_separately_from_clipping_risk',
+      'sample_domain_limiter_not_true_peak_lookahead',
+      'headroom_safety_limiter_reference_only',
+    ]));
   });
 
   it('keys gapless generation cache entries by album segment index', () => {

@@ -107,7 +107,7 @@ const readSignalPathVisualState = (dialog: HTMLElement): {
   })),
 });
 
-const referenceArtifactManifestText = 'artifact-manifest-reference / deterministic 38/38 / planned none / not-applicable none / source impulse+sweep+log-sweep+near-nyquist+multi-tone+random+silence+phase-group-delay+phase-mode+apodizing+alias-rejection+realtime-budget+null-residual+formal-validation / reports dsd-family-path+backend-support+output-device-policy+latency-budget+readiness-contract+generation-cache-key+realtime-budget-summary+quality-rollback+output-resampling-risk+pcm-output-quantization+pcm-ingress-guard+gain-staging+iir-eq+channel-scope+stereo-procedural+per-ear-eq-placement+shared-convolution-duplicate-guard+shared-convolution-serial-null+gapless-concat+fir-gapless-history+callback-safe-controls+equal-power-crossfade+block-boundary+flush-drain';
+const referenceArtifactManifestText = 'artifact-manifest-reference / deterministic 39/39 / planned none / not-applicable none / source impulse+sweep+log-sweep+near-nyquist+multi-tone+random+silence+phase-group-delay+phase-mode+apodizing+alias-rejection+realtime-budget+null-residual+formal-validation / reports dsd-family-path+backend-support+output-device-policy+latency-budget+readiness-contract+generation-cache-key+realtime-budget-summary+quality-rollback+output-resampling-risk+pcm-output-quantization+pcm-ingress-guard+gain-staging+headroom-safety-limiter+iir-eq+channel-scope+stereo-procedural+per-ear-eq-placement+shared-convolution-duplicate-guard+shared-convolution-serial-null+gapless-concat+fir-gapless-history+callback-safe-controls+equal-power-crossfade+block-boundary+flush-drain';
 
 const eqState = (): EqState => ({
   enabled: false,
@@ -909,6 +909,7 @@ describe('PlayerBar', () => {
           pcmOutputQuantization: 'deterministic-reference',
           pcmIngressGuard: 'deterministic-reference',
           gainStaging: 'deterministic-reference',
+          headroomSafetyLimiter: 'deterministic-reference',
           iirEq: 'deterministic-reference',
           channelScope: 'deterministic-reference',
           stereoProcedural: 'deterministic-reference',
@@ -1285,6 +1286,59 @@ describe('PlayerBar', () => {
             'headroom_applied_before_replaygain_and_materialized_gain',
             'gain_stages_merge_to_single_gain_reference',
             'gain_staging_within_sample_peak_budget',
+          ],
+        },
+        headroomSafetyLimiter: {
+          artifact: 'headroom-safety-limiter-reference',
+          engine: 'safety-metering-reference',
+          sampleRate: 44100,
+          formatPath: 'pcm_processed',
+          state: 'near-limit',
+          headroom: {
+            currentDb: -6,
+            recommendedDb: -8,
+            missingDb: 2,
+            reason: 'post_dsp_true_peak',
+            sourceStage: 'pre-limiter',
+            confidence: 'measured',
+            targetSafetyMarginDb: 1,
+            autoHeadroomEnabled: false,
+          },
+          safetyMeter: {
+            state: 'near-limit',
+            stages: [
+              { id: 'input', peak: 0.875, rms: 0.4, peakDbfs: -1.16, rmsDbfs: -7.96, truePeak: 0.9, truePeakDbtp: -0.92, sampleClipCount: 0, truePeakOverCount: 0, peakExpansionDb: 0 },
+              { id: 'after-headroom', peak: 0.4385, rms: 0.2, peakDbfs: -7.16, rmsDbfs: -13.96, truePeak: 0.45, truePeakDbtp: -6.94, sampleClipCount: 0, truePeakOverCount: 0, peakExpansionDb: -6 },
+              { id: 'after-convolution', peak: 0.933, rms: 0.32, peakDbfs: -0.6, rmsDbfs: -9.9, truePeak: 0.977, truePeakDbtp: -0.2, sampleClipCount: 0, truePeakOverCount: 0, peakExpansionDb: 0.56 },
+              { id: 'pre-limiter', peak: 0.933, rms: 0.32, peakDbfs: -0.6, rmsDbfs: -9.9, truePeak: 0.977, truePeakDbtp: -0.2, sampleClipCount: 0, truePeakOverCount: 0, peakExpansionDb: 0.56 },
+              { id: 'post-limiter', peak: 0.933, rms: 0.32, peakDbfs: -0.6, rmsDbfs: -9.9, truePeak: 0.977, truePeakDbtp: -0.2, sampleClipCount: 0, truePeakOverCount: 0, peakExpansionDb: 0.56 },
+            ],
+            maxSamplePeakDbfs: -0.6,
+            maxTruePeakDbtp: -0.2,
+            sampleClipCount: 0,
+            truePeakOverCount: 0,
+            stageOfMaxPeak: 'after-convolution',
+            stageOfMaxTruePeak: 'pre-limiter',
+            historyWindowSeconds: 0,
+          },
+          limiter: {
+            enabled: true,
+            active: false,
+            triggerCount: 0,
+            currentGainReductionDb: 0,
+            maxGainReductionDb: 0,
+            limitedSamples: 0,
+            limitedFrames: 0,
+            mode: 'sample-domain-safety-limiter',
+            truePeakLookahead: false,
+          },
+          reasons: [
+            'headroom_recommendation_from_reference_pcm_probe',
+            'safety_meter_tracks_stage_peak_true_peak_and_clip_history',
+            'limiter_gain_reduction_reported_separately_from_clipping_risk',
+            'sample_domain_limiter_not_true_peak_lookahead',
+            'after_convolution_stage_attribution_available',
+            'headroom_safety_limiter_reference_only',
           ],
         },
         iirEq: {
@@ -1844,11 +1898,11 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).toContain('UZUME underrun fallback reference');
     expect(dialog.textContent).toContain('prior-committed-fallback / source prior-committed / marginal / rollback:controlled-fallback / fallback injected / no GPU wait / short bridge blocked:underrun protection does not enable short bridge');
     expect(dialog.textContent).toContain('UZUME headroom reference');
-    expect(dialog.textContent).toContain('Headroom -6.0 dB / gain-reference / active');
+    expect(dialog.textContent).toContain('headroom-safety-limiter-reference / current -6.0 dB / recommended -8.0 dB / missing 2.0 dB / reason post dsp true peak / source pre-limiter / auto off');
     expect(dialog.textContent).toContain('UZUME safety meter');
-    expect(dialog.textContent).toContain('near-limit / clipping risk / stage telemetry separate from limiter');
+    expect(dialog.textContent).toContain('near-limit / sample -0.6 dBFS / true -0.2 dBTP / clips 0 / true overs 0 / peak stage after-convolution / true stage pre-limiter');
     expect(dialog.textContent).toContain('UZUME limiter reference');
-    expect(dialog.textContent).toContain('sample-domain safety limiter / standby / GPU limiter planned');
+    expect(dialog.textContent).toContain('sample-domain-safety-limiter / standby / triggers 0 / current 0.0 dB / max 0.0 dB / limited 0 frames / true-peak lookahead no');
 
     const visualState = readSignalPathVisualState(dialog);
     expect(visualState.tone).toBe('warning');
@@ -1897,9 +1951,9 @@ describe('PlayerBar', () => {
         expect.objectContaining({ title: 'UZUME callback ring reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME render-ahead cache reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME underrun fallback reference', tone: 'process', variant: 'process' }),
-        expect.objectContaining({ title: 'UZUME headroom reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME headroom reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME safety meter', tone: 'warning', variant: 'process' }),
-        expect.objectContaining({ title: 'UZUME limiter reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME limiter reference', tone: 'process', variant: 'process' }),
       ]),
     );
     expect(visualState.nodes.filter((node) => node.tone === 'danger')).toEqual([]);
@@ -2518,6 +2572,16 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    const headroomLimiterDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    (headroomLimiterDrift.uzumeReferencePlan!.headroomSafetyLimiter.limiter as unknown as { truePeakLookahead: boolean }).truePeakLookahead = true;
+    expect(renderSignalNodes(headroomLimiterDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME limiter reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     status.uzumeReferencePlan!.artifactPlan.dsdFamilyPath = 'not-applicable';
     render(
       <>
@@ -2527,7 +2591,7 @@ describe('PlayerBar', () => {
     );
 
     let artifactManifestDialog = screen.getByRole('dialog', { name: '信号路径' });
-    expect(artifactManifestDialog.textContent).toContain('deterministic 37/38 / planned none / not-applicable dsd-family-path');
+    expect(artifactManifestDialog.textContent).toContain('deterministic 38/39 / planned none / not-applicable dsd-family-path');
     let artifactManifestVisualState = readSignalPathVisualState(artifactManifestDialog);
     expect(artifactManifestVisualState.nodes).toEqual(
       expect.arrayContaining([
@@ -2546,7 +2610,7 @@ describe('PlayerBar', () => {
     );
 
     artifactManifestDialog = screen.getByRole('dialog', { name: '信号路径' });
-    expect(artifactManifestDialog.textContent).toContain('deterministic 36/38 / planned alias-rejection / not-applicable dsd-family-path');
+    expect(artifactManifestDialog.textContent).toContain('deterministic 37/39 / planned alias-rejection / not-applicable dsd-family-path');
     artifactManifestVisualState = readSignalPathVisualState(artifactManifestDialog);
     expect(artifactManifestVisualState.nodes).toEqual(
       expect.arrayContaining([

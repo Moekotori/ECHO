@@ -2649,6 +2649,57 @@ const buildGainStagingReport = (
   };
 };
 
+const createHeadroomSafetyLimiterReferenceResponses = (
+  input: UzumeReferenceCompileInput,
+  channelCount: number,
+): number[][] | undefined =>
+  input.roomCorrectionState.enabled
+    ? Array.from({ length: Math.max(1, channelCount) }, () => [1, 0.25])
+    : undefined;
+
+const buildHeadroomSafetyLimiterReport = (
+  input: UzumeReferenceCompileInput,
+  format: FormatPlannerResult,
+): UzumeCompiledReferencePlan['headroomSafetyLimiter'] => {
+  const channelCount = Math.max(1, Math.round(input.probe?.channels ?? 2) || 2);
+  const sampleRate = resolveReferenceSampleRate(input);
+  const sampleDomainLimiterEligible = format.formatPath === 'pcm_processed' || format.formatPath === 'd2p_processed';
+  const result = renderUzumePcmReference({
+    sampleRate,
+    channels: createPcmOutputQuantizationReferenceChannels(channelCount),
+    headroomDb: input.eqState.dspHeadroomDb ?? 0,
+    materializedGainDb: input.eqState.preampDb ?? 0,
+    eqBands: input.eqState.enabled ? input.eqState.bands : [],
+    channelBalance: input.channelBalanceState,
+    convolutionResponses: createHeadroomSafetyLimiterReferenceResponses(input, channelCount),
+    safetyLimiterEnabled: sampleDomainLimiterEligible && input.eqState.dspSafetyLimiterEnabled !== false,
+  });
+
+  return {
+    artifact: 'headroom-safety-limiter-reference',
+    engine: 'safety-metering-reference',
+    sampleRate,
+    formatPath: format.formatPath,
+    state: result.telemetry.safetyMeter.state,
+    headroom: result.telemetry.headroom,
+    safetyMeter: result.telemetry.safetyMeter,
+    limiter: result.telemetry.limiter,
+    reasons: [
+      'headroom_recommendation_from_reference_pcm_probe',
+      'safety_meter_tracks_stage_peak_true_peak_and_clip_history',
+      'limiter_gain_reduction_reported_separately_from_clipping_risk',
+      'sample_domain_limiter_not_true_peak_lookahead',
+      sampleDomainLimiterEligible
+        ? 'sample_domain_limiter_eligible_for_processed_pcm_reference'
+        : 'sample_domain_limiter_disabled_for_non_processed_reference_path',
+      input.roomCorrectionState.enabled
+        ? 'after_convolution_stage_attribution_available'
+        : 'after_convolution_stage_present_even_without_production_convolver',
+      'headroom_safety_limiter_reference_only',
+    ],
+  };
+};
+
 const isPeqActive = (state: Pick<EqState, 'enabled' | 'bands'>): boolean =>
   state.enabled && state.bands.some((band) => band.enabled !== false && (
     Math.abs(band.gainDb) > 0.001 ||
@@ -4556,6 +4607,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
   const pcmOutputQuantization = buildPcmOutputQuantizationReport(input, format);
   const pcmIngressGuard = buildPcmIngressGuardReport(input);
   const gainStaging = buildGainStagingReport(input);
+  const headroomSafetyLimiter = buildHeadroomSafetyLimiterReport(input, format);
   const iirEq = buildIirEqInspectReport(input);
   const channelScope = buildChannelScopeInspectReport(input);
   const stereoProcedural = buildStereoProceduralInspectReport(input);
@@ -4594,6 +4646,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
     pcmOutputQuantization,
     pcmIngressGuard,
     gainStaging,
+    headroomSafetyLimiter,
     iirEq,
     channelScope,
     stereoProcedural,
@@ -4629,6 +4682,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
       pcmOutputQuantization: 'deterministic-reference',
       pcmIngressGuard: 'deterministic-reference',
       gainStaging: 'deterministic-reference',
+      headroomSafetyLimiter: 'deterministic-reference',
       iirEq: 'deterministic-reference',
       channelScope: 'deterministic-reference',
       stereoProcedural: 'deterministic-reference',

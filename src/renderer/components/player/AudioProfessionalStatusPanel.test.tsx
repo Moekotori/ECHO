@@ -698,6 +698,59 @@ const referenceStatus = (): AudioStatus => ({
         'gain_staging_within_sample_peak_budget',
       ],
     },
+    headroomSafetyLimiter: {
+      artifact: 'headroom-safety-limiter-reference',
+      engine: 'safety-metering-reference',
+      sampleRate: 44100,
+      formatPath: 'pcm_processed',
+      state: 'near-limit',
+      headroom: {
+        currentDb: -6,
+        recommendedDb: -8,
+        missingDb: 2,
+        reason: 'post_dsp_true_peak',
+        sourceStage: 'pre-limiter',
+        confidence: 'measured',
+        targetSafetyMarginDb: 1,
+        autoHeadroomEnabled: false,
+      },
+      safetyMeter: {
+        state: 'near-limit',
+        stages: [
+          { id: 'input', peak: 0.875, rms: 0.4, peakDbfs: -1.16, rmsDbfs: -7.96, truePeak: 0.9, truePeakDbtp: -0.92, sampleClipCount: 0, truePeakOverCount: 0, peakExpansionDb: 0 },
+          { id: 'after-headroom', peak: 0.4385, rms: 0.2, peakDbfs: -7.16, rmsDbfs: -13.96, truePeak: 0.45, truePeakDbtp: -6.94, sampleClipCount: 0, truePeakOverCount: 0, peakExpansionDb: -6 },
+          { id: 'after-convolution', peak: 0.933, rms: 0.32, peakDbfs: -0.6, rmsDbfs: -9.9, truePeak: 0.977, truePeakDbtp: -0.2, sampleClipCount: 0, truePeakOverCount: 0, peakExpansionDb: 0.56 },
+          { id: 'pre-limiter', peak: 0.933, rms: 0.32, peakDbfs: -0.6, rmsDbfs: -9.9, truePeak: 0.977, truePeakDbtp: -0.2, sampleClipCount: 0, truePeakOverCount: 0, peakExpansionDb: 0.56 },
+          { id: 'post-limiter', peak: 0.933, rms: 0.32, peakDbfs: -0.6, rmsDbfs: -9.9, truePeak: 0.977, truePeakDbtp: -0.2, sampleClipCount: 0, truePeakOverCount: 0, peakExpansionDb: 0.56 },
+        ],
+        maxSamplePeakDbfs: -0.6,
+        maxTruePeakDbtp: -0.2,
+        sampleClipCount: 0,
+        truePeakOverCount: 0,
+        stageOfMaxPeak: 'after-convolution',
+        stageOfMaxTruePeak: 'pre-limiter',
+        historyWindowSeconds: 0,
+      },
+      limiter: {
+        enabled: true,
+        active: false,
+        triggerCount: 0,
+        currentGainReductionDb: 0,
+        maxGainReductionDb: 0,
+        limitedSamples: 0,
+        limitedFrames: 0,
+        mode: 'sample-domain-safety-limiter',
+        truePeakLookahead: false,
+      },
+      reasons: [
+        'headroom_recommendation_from_reference_pcm_probe',
+        'safety_meter_tracks_stage_peak_true_peak_and_clip_history',
+        'limiter_gain_reduction_reported_separately_from_clipping_risk',
+        'sample_domain_limiter_not_true_peak_lookahead',
+        'after_convolution_stage_attribution_available',
+        'headroom_safety_limiter_reference_only',
+      ],
+    },
     iirEq: {
       artifact: 'iir-eq-reference',
       engine: 'iir-reference',
@@ -1103,6 +1156,7 @@ const referenceStatus = (): AudioStatus => ({
       pcmOutputQuantization: 'deterministic-reference',
       pcmIngressGuard: 'deterministic-reference',
       gainStaging: 'deterministic-reference',
+      headroomSafetyLimiter: 'deterministic-reference',
       iirEq: 'deterministic-reference',
       channelScope: 'deterministic-reference',
       stereoProcedural: 'deterministic-reference',
@@ -1165,7 +1219,7 @@ type ToneEntry = {
   tone: string | null;
 };
 
-const referenceArtifactManifestText = 'artifact-manifest-reference / deterministic 38/38 / planned none / not-applicable none / source impulse+sweep+log-sweep+near-nyquist+multi-tone+random+silence+phase-group-delay+phase-mode+apodizing+alias-rejection+realtime-budget+null-residual+formal-validation / reports dsd-family-path+backend-support+output-device-policy+latency-budget+readiness-contract+generation-cache-key+realtime-budget-summary+quality-rollback+output-resampling-risk+pcm-output-quantization+pcm-ingress-guard+gain-staging+iir-eq+channel-scope+stereo-procedural+per-ear-eq-placement+shared-convolution-duplicate-guard+shared-convolution-serial-null+gapless-concat+fir-gapless-history+callback-safe-controls+equal-power-crossfade+block-boundary+flush-drain';
+const referenceArtifactManifestText = 'artifact-manifest-reference / deterministic 39/39 / planned none / not-applicable none / source impulse+sweep+log-sweep+near-nyquist+multi-tone+random+silence+phase-group-delay+phase-mode+apodizing+alias-rejection+realtime-budget+null-residual+formal-validation / reports dsd-family-path+backend-support+output-device-policy+latency-budget+readiness-contract+generation-cache-key+realtime-budget-summary+quality-rollback+output-resampling-risk+pcm-output-quantization+pcm-ingress-guard+gain-staging+headroom-safety-limiter+iir-eq+channel-scope+stereo-procedural+per-ear-eq-placement+shared-convolution-duplicate-guard+shared-convolution-serial-null+gapless-concat+fir-gapless-history+callback-safe-controls+equal-power-crossfade+block-boundary+flush-drain';
 
 const readProfessionalVisualState = (): {
   badges: ToneEntry[];
@@ -1468,9 +1522,21 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({ label: 'UZUME callback ring reference', value: 'stable / safe / depth 2560 frames / 5.0 blocks / block 512 frames / missing 0 frames / read-committed-output-only / no GPU wait', tone: 'good' }),
         expect.objectContaining({ label: 'UZUME render-ahead cache reference', tone: 'good' }),
         expect.objectContaining({ label: 'UZUME underrun fallback reference', tone: 'good' }),
-        expect.objectContaining({ label: 'UZUME headroom', value: '-6.00 dB / gain-reference / Enabled', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME safety meter', value: 'near-limit / clipping risk / stage telemetry separate from limiter', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME limiter reference', value: 'sample-domain safety limiter / standby / GPU limiter Planned / not implemented', tone: 'warning' }),
+        expect.objectContaining({
+          label: 'UZUME headroom',
+          value: expect.stringContaining('headroom-safety-limiter-reference / current -6.00 dB / recommended -8.00 dB / missing 2.00 dB / reason post dsp true peak / source pre-limiter'),
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME safety meter',
+          value: expect.stringContaining('safety-metering-reference / near-limit / sample -0.60 dBFS / true -0.20 dBTP / sample clips 0 / true overs 0 / peak stage after-convolution / true-peak stage pre-limiter'),
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME limiter reference',
+          value: 'sample-domain-safety-limiter / standby / trigger count 0 / current reduction 0.00 dB / max reduction 0.00 dB / limited 0 frames/0 samples / true-peak lookahead no',
+          tone: 'good',
+        }),
         expect.objectContaining({ label: 'Sample-rate mismatch', value: 'No', tone: 'good' }),
       ]),
     );
@@ -2335,6 +2401,20 @@ describe('AudioProfessionalStatusPanel', () => {
 
     cleanup();
 
+    const headroomLimiterDrift = referenceStatus();
+    (headroomLimiterDrift.uzumeReferencePlan!.headroomSafetyLimiter.limiter as unknown as { truePeakLookahead: boolean }).truePeakLookahead = true;
+    expect(renderRows(headroomLimiterDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME limiter reference',
+          value: expect.stringContaining('true-peak lookahead yes'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
     const driftedStatus = referenceStatus();
     driftedStatus.uzumeReferencePlan!.pcmOutputQuantization.dither.enabled = false;
     expect(renderRows(driftedStatus)).toEqual(
@@ -2835,7 +2915,7 @@ describe('AudioProfessionalStatusPanel', () => {
 
     let manifestRow = readProfessionalVisualState().rows.find((row) => row.label === 'UZUME artifact manifest reference');
     expect(manifestRow).toEqual(expect.objectContaining({
-      value: expect.stringContaining('deterministic 37/38 / planned none / not-applicable dsd-family-path'),
+      value: expect.stringContaining('deterministic 38/39 / planned none / not-applicable dsd-family-path'),
       tone: 'good',
     }));
 
@@ -2855,7 +2935,7 @@ describe('AudioProfessionalStatusPanel', () => {
 
     manifestRow = readProfessionalVisualState().rows.find((row) => row.label === 'UZUME artifact manifest reference');
     expect(manifestRow).toEqual(expect.objectContaining({
-      value: expect.stringContaining('deterministic 36/38 / planned alias-rejection / not-applicable dsd-family-path'),
+      value: expect.stringContaining('deterministic 37/39 / planned alias-rejection / not-applicable dsd-family-path'),
       tone: 'warning',
     }));
   });

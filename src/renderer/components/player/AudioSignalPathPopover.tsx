@@ -2436,39 +2436,126 @@ const formatUzumeReferenceEqualPowerCrossfade = (status: AudioStatus | null): st
 };
 
 const formatUzumeHeadroomReference = (status: AudioStatus | null): string | null => {
-  if (!status || (!status.uzumeHeadroomActive && Math.abs(status.dspHeadroomDb ?? 0) <= 0.05)) {
+  const report = status?.uzumeReferencePlan?.headroomSafetyLimiter;
+  if (!report) {
     return null;
   }
+  const headroom = report.headroom;
 
   return joinSpec([
-    `Headroom ${formatDb(status.dspHeadroomDb) ?? '0.0 dB'}`,
-    'gain-reference',
-    status.uzumeHeadroomActive ? 'active' : 'reference pending',
+    report.artifact,
+    `current ${formatDb(headroom.currentDb) ?? '0 dB'}`,
+    `recommended ${formatDb(headroom.recommendedDb) ?? '0 dB'}`,
+    `missing ${formatDb(headroom.missingDb) ?? '0 dB'}`,
+    `reason ${cleanReason(headroom.reason)}`,
+    `source ${cleanReason(headroom.sourceStage) ?? 'none'}`,
+    headroom.autoHeadroomEnabled ? 'auto on' : 'auto off',
   ]);
 };
 
 const formatUzumeSafetyMeterReference = (status: AudioStatus | null): string | null => {
-  if (!status?.uzumeReferencePlan && !status?.dspClippingRisk && !status?.dspLimiterProtecting) {
+  const report = status?.uzumeReferencePlan?.headroomSafetyLimiter;
+  const meter = report?.safetyMeter;
+  if (!meter) {
     return null;
   }
 
   return joinSpec([
-    status.dspLimiterProtecting ? 'limiting' : status.dspClippingRisk ? 'near-limit' : 'monitoring',
-    status.dspClippingRisk || status.dspLimiterProtecting ? 'clipping risk' : 'safe',
-    'stage telemetry separate from limiter',
+    meter.state,
+    `sample ${meter.maxSamplePeakDbfs.toFixed(1)} dBFS`,
+    `true ${meter.maxTruePeakDbtp.toFixed(1)} dBTP`,
+    `clips ${meter.sampleClipCount}`,
+    `true overs ${meter.truePeakOverCount}`,
+    `peak stage ${meter.stageOfMaxPeak ?? 'none'}`,
+    `true stage ${meter.stageOfMaxTruePeak ?? 'none'}`,
   ]);
 };
 
 const formatUzumeLimiterReference = (status: AudioStatus | null): string | null => {
-  if (!status?.uzumeReferencePlan && !status?.dspClippingRisk && !status?.dspLimiterProtecting) {
+  const limiter = status?.uzumeReferencePlan?.headroomSafetyLimiter?.limiter;
+  if (!limiter) {
     return null;
   }
 
   return joinSpec([
-    'sample-domain safety limiter',
-    status.dspLimiterProtecting ? 'active' : 'standby',
-    status.uzumeGpuLimiterPlaybackActive ? 'GPU limiter active' : 'GPU limiter planned',
+    limiter.mode,
+    limiter.active ? 'active' : limiter.enabled ? 'standby' : 'disabled',
+    `triggers ${limiter.triggerCount}`,
+    `current ${formatDb(limiter.currentGainReductionDb) ?? '0 dB'}`,
+    `max ${formatDb(limiter.maxGainReductionDb) ?? '0 dB'}`,
+    `limited ${limiter.limitedFrames} frames`,
+    limiter.truePeakLookahead ? 'true-peak lookahead yes' : 'true-peak lookahead no',
   ]);
+};
+
+const isExpectedUzumeReferenceHeadroomSafetyLimiter = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['headroomSafetyLimiter'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+  const stageIds = report.safetyMeter.stages.map((stage) => stage.id);
+
+  return report.artifact === 'headroom-safety-limiter-reference' &&
+    report.engine === 'safety-metering-reference' &&
+    report.sampleRate > 0 &&
+    report.state === report.safetyMeter.state &&
+    report.headroom.confidence === 'measured' &&
+    !report.headroom.autoHeadroomEnabled &&
+    report.safetyMeter.stageOfMaxPeak !== null &&
+    report.safetyMeter.stageOfMaxTruePeak !== null &&
+    stageIds.includes('input') &&
+    stageIds.includes('pre-limiter') &&
+    stageIds.includes('post-limiter') &&
+    report.limiter.mode === 'sample-domain-safety-limiter' &&
+    !report.limiter.truePeakLookahead &&
+    report.reasons.includes('headroom_recommendation_from_reference_pcm_probe') &&
+    report.reasons.includes('safety_meter_tracks_stage_peak_true_peak_and_clip_history') &&
+    report.reasons.includes('limiter_gain_reduction_reported_separately_from_clipping_risk') &&
+    report.reasons.includes('sample_domain_limiter_not_true_peak_lookahead') &&
+    report.reasons.includes('headroom_safety_limiter_reference_only');
+};
+
+const getReferenceHeadroomTone = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['headroomSafetyLimiter'] | null | undefined,
+  expected: boolean,
+): SignalTone => {
+  if (!report) {
+    return 'muted';
+  }
+  if (!expected) {
+    return 'warning';
+  }
+  return report.headroom.missingDb > 0 ? 'warning' : 'process';
+};
+
+const getReferenceSafetyMeterTone = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['headroomSafetyLimiter'] | null | undefined,
+  expected: boolean,
+): SignalTone => {
+  if (!report) {
+    return 'muted';
+  }
+  if (!expected) {
+    return 'warning';
+  }
+  if (report.safetyMeter.state === 'limiting' || report.safetyMeter.state === 'over') {
+    return 'danger';
+  }
+  return report.safetyMeter.state === 'near-limit' ? 'warning' : 'process';
+};
+
+const getReferenceLimiterTone = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['headroomSafetyLimiter'] | null | undefined,
+  expected: boolean,
+): SignalTone => {
+  if (!report) {
+    return 'muted';
+  }
+  if (!expected) {
+    return 'warning';
+  }
+  return report.limiter.active ? 'danger' : 'process';
 };
 
 const formatReferenceFrames = (value: number | null | undefined): string | null =>
@@ -3153,6 +3240,8 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceHeadroom = formatUzumeHeadroomReference(status);
   const referenceSafetyMeter = formatUzumeSafetyMeterReference(status);
   const referenceLimiter = formatUzumeLimiterReference(status);
+  const referenceHeadroomSafetyLimiter = referencePlan?.headroomSafetyLimiter;
+  const expectedReferenceHeadroomSafetyLimiter = isExpectedUzumeReferenceHeadroomSafetyLimiter(referenceHeadroomSafetyLimiter);
 
   if (echoSrcPath) {
     nodes.push({
@@ -3671,7 +3760,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME headroom reference',
       value: referenceHeadroom,
-      tone: 'process',
+      tone: getReferenceHeadroomTone(referenceHeadroomSafetyLimiter, expectedReferenceHeadroomSafetyLimiter),
       variant: 'process',
     });
   }
@@ -3681,7 +3770,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME safety meter',
       value: referenceSafetyMeter,
-      tone: status.dspLimiterProtecting ? 'danger' : status.dspClippingRisk ? 'warning' : 'process',
+      tone: getReferenceSafetyMeterTone(referenceHeadroomSafetyLimiter, expectedReferenceHeadroomSafetyLimiter),
       variant: 'process',
     });
   }
@@ -3691,7 +3780,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME limiter reference',
       value: referenceLimiter,
-      tone: status.dspLimiterProtecting ? 'danger' : status.dspClippingRisk ? 'warning' : 'process',
+      tone: getReferenceLimiterTone(referenceHeadroomSafetyLimiter, expectedReferenceHeadroomSafetyLimiter),
       variant: 'process',
     });
   }

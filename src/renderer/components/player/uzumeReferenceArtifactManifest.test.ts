@@ -29,6 +29,7 @@ const artifactPlan = (): UzumeReferenceArtifactPlan => ({
   pcmOutputQuantization: 'deterministic-reference',
   pcmIngressGuard: 'deterministic-reference',
   gainStaging: 'deterministic-reference',
+  headroomSafetyLimiter: 'deterministic-reference',
   iirEq: 'deterministic-reference',
   channelScope: 'deterministic-reference',
   stereoProcedural: 'deterministic-reference',
@@ -49,10 +50,10 @@ describe('UZUME reference artifact manifest summary', () => {
 
     expect(summary).toMatchObject({
       hasPlanned: false,
-      text: expect.stringContaining('artifact-manifest-reference / deterministic 38/38 / planned none / not-applicable none'),
+      text: expect.stringContaining('artifact-manifest-reference / deterministic 39/39 / planned none / not-applicable none'),
     });
     expect(summary?.text).toContain('source impulse+sweep+log-sweep+near-nyquist+multi-tone+random+silence+phase-group-delay+phase-mode+apodizing+alias-rejection+realtime-budget+null-residual+formal-validation');
-    expect(summary?.text).toContain('reports dsd-family-path+backend-support+output-device-policy+latency-budget+readiness-contract+generation-cache-key+realtime-budget-summary+quality-rollback+output-resampling-risk+pcm-output-quantization+pcm-ingress-guard+gain-staging+iir-eq+channel-scope+stereo-procedural+per-ear-eq-placement+shared-convolution-duplicate-guard+shared-convolution-serial-null+gapless-concat+fir-gapless-history+callback-safe-controls+equal-power-crossfade+block-boundary+flush-drain');
+    expect(summary?.text).toContain('reports dsd-family-path+backend-support+output-device-policy+latency-budget+readiness-contract+generation-cache-key+realtime-budget-summary+quality-rollback+output-resampling-risk+pcm-output-quantization+pcm-ingress-guard+gain-staging+headroom-safety-limiter+iir-eq+channel-scope+stereo-procedural+per-ear-eq-placement+shared-convolution-duplicate-guard+shared-convolution-serial-null+gapless-concat+fir-gapless-history+callback-safe-controls+equal-power-crossfade+block-boundary+flush-drain');
   });
 
   it('treats not-applicable as non-blocking while planned items set the warning flag', () => {
@@ -64,7 +65,7 @@ describe('UZUME reference artifact manifest summary', () => {
 
     expect(summary).toMatchObject({
       hasPlanned: true,
-      text: expect.stringContaining('deterministic 36/38 / planned alias-rejection / not-applicable dsd-family-path'),
+      text: expect.stringContaining('deterministic 37/39 / planned alias-rejection / not-applicable dsd-family-path'),
     });
   });
 

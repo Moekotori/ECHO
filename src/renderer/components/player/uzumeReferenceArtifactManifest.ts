@@ -41,6 +41,7 @@ const uzumeReferenceArtifactManifestEntries: ReadonlyArray<UzumeReferenceArtifac
   { key: 'pcmOutputQuantization', label: 'pcm-output-quantization', group: 'report' },
   { key: 'pcmIngressGuard', label: 'pcm-ingress-guard', group: 'report' },
   { key: 'gainStaging', label: 'gain-staging', group: 'report' },
+  { key: 'headroomSafetyLimiter', label: 'headroom-safety-limiter', group: 'report' },
   { key: 'iirEq', label: 'iir-eq', group: 'report' },
   { key: 'channelScope', label: 'channel-scope', group: 'report' },
   { key: 'stereoProcedural', label: 'stereo-procedural', group: 'report' },

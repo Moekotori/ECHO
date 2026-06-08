@@ -1605,6 +1605,144 @@ const formatUzumeReferenceGainStaging = (status: AudioStatus | null, fallback: s
   ].filter((part): part is string => Boolean(part)).join(' / ');
 };
 
+const formatUzumeReferenceHeadroom = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.headroomSafetyLimiter;
+  if (!report) {
+    return fallback;
+  }
+  const headroom = report.headroom;
+
+  return [
+    report.artifact,
+    `current ${formatDb(headroom.currentDb, fallback)}`,
+    `recommended ${formatDb(headroom.recommendedDb, fallback)}`,
+    `missing ${formatDb(headroom.missingDb, fallback)}`,
+    `reason ${normalizeReason(headroom.reason, fallback)}`,
+    `source ${normalizeReason(headroom.sourceStage, fallback)}`,
+    `margin ${formatDb(headroom.targetSafetyMarginDb, fallback)}`,
+    headroom.autoHeadroomEnabled ? 'auto headroom on' : 'auto headroom off',
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceSafetyMeter = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.headroomSafetyLimiter;
+  const meter = report?.safetyMeter;
+  if (!meter || !report) {
+    return fallback;
+  }
+  const stages = meter.stages
+    .map((stage) => `${stage.id}:${stage.peakDbfs.toFixed(2)} dBFS/${stage.truePeakDbtp.toFixed(2)} dBTP/exp ${stage.peakExpansionDb.toFixed(2)} dB`)
+    .join(' | ');
+
+  return [
+    report.engine,
+    meter.state,
+    `sample ${meter.maxSamplePeakDbfs.toFixed(2)} dBFS`,
+    `true ${meter.maxTruePeakDbtp.toFixed(2)} dBTP`,
+    `sample clips ${meter.sampleClipCount}`,
+    `true overs ${meter.truePeakOverCount}`,
+    `peak stage ${meter.stageOfMaxPeak ?? fallback}`,
+    `true-peak stage ${meter.stageOfMaxTruePeak ?? fallback}`,
+    stages,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
+const formatUzumeReferenceLimiter = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.headroomSafetyLimiter;
+  const limiter = report?.limiter;
+  if (!limiter) {
+    return fallback;
+  }
+
+  return [
+    limiter.mode,
+    limiter.active ? 'active' : limiter.enabled ? 'standby' : 'disabled',
+    `trigger count ${limiter.triggerCount}`,
+    `current reduction ${formatDb(limiter.currentGainReductionDb, fallback)}`,
+    `max reduction ${formatDb(limiter.maxGainReductionDb, fallback)}`,
+    `limited ${limiter.limitedFrames} frames/${limiter.limitedSamples} samples`,
+    limiter.truePeakLookahead ? 'true-peak lookahead yes' : 'true-peak lookahead no',
+  ].join(' / ');
+};
+
+const isExpectedUzumeReferenceHeadroomSafetyLimiter = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['headroomSafetyLimiter'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+  const stageIds = report.safetyMeter.stages.map((stage) => stage.id);
+
+  return report.artifact === 'headroom-safety-limiter-reference' &&
+    report.engine === 'safety-metering-reference' &&
+    report.sampleRate > 0 &&
+    report.state === report.safetyMeter.state &&
+    report.headroom.confidence === 'measured' &&
+    report.headroom.targetSafetyMarginDb > 0 &&
+    !report.headroom.autoHeadroomEnabled &&
+    report.safetyMeter.stageOfMaxPeak !== null &&
+    report.safetyMeter.stageOfMaxTruePeak !== null &&
+    stageIds.includes('input') &&
+    stageIds.includes('pre-limiter') &&
+    stageIds.includes('post-limiter') &&
+    report.safetyMeter.stages.every((stage) =>
+      Number.isFinite(stage.peakDbfs) &&
+      Number.isFinite(stage.truePeakDbtp) &&
+      Number.isFinite(stage.peakExpansionDb)) &&
+    report.limiter.mode === 'sample-domain-safety-limiter' &&
+    !report.limiter.truePeakLookahead &&
+    Number.isFinite(report.limiter.maxGainReductionDb) &&
+    Number.isFinite(report.limiter.currentGainReductionDb) &&
+    report.reasons.includes('headroom_recommendation_from_reference_pcm_probe') &&
+    report.reasons.includes('safety_meter_tracks_stage_peak_true_peak_and_clip_history') &&
+    report.reasons.includes('limiter_gain_reduction_reported_separately_from_clipping_risk') &&
+    report.reasons.includes('sample_domain_limiter_not_true_peak_lookahead') &&
+    report.reasons.includes('headroom_safety_limiter_reference_only');
+};
+
+const getUzumeHeadroomTone = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['headroomSafetyLimiter'] | null | undefined,
+  expected: boolean,
+): 'good' | 'warning' | 'danger' | 'muted' => {
+  if (!report) {
+    return 'muted';
+  }
+  if (!expected) {
+    return 'warning';
+  }
+  return report.headroom.missingDb > 0 ? 'warning' : 'good';
+};
+
+const getUzumeSafetyMeterTone = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['headroomSafetyLimiter'] | null | undefined,
+  expected: boolean,
+): 'good' | 'warning' | 'danger' | 'muted' => {
+  if (!report) {
+    return 'muted';
+  }
+  if (!expected) {
+    return 'warning';
+  }
+  if (report.safetyMeter.state === 'limiting' || report.safetyMeter.state === 'over') {
+    return 'danger';
+  }
+  return report.safetyMeter.state === 'near-limit' ? 'warning' : 'good';
+};
+
+const getUzumeLimiterTone = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['headroomSafetyLimiter'] | null | undefined,
+  expected: boolean,
+): 'good' | 'warning' | 'danger' | 'muted' => {
+  if (!report) {
+    return 'muted';
+  }
+  if (!expected) {
+    return 'warning';
+  }
+  return report.limiter.active ? 'danger' : 'good';
+};
+
 const formatUzumeReferenceIirEq = (status: AudioStatus | null, fallback: string): string => {
   const report = status?.uzumeReferencePlan?.iirEq;
   if (!report) {
@@ -2638,17 +2776,11 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const expectedUzumeReferenceContinuity = isExpectedUzumeReferenceContinuity(status?.uzumeReferencePlan?.continuity);
   const planned = 'Planned / not implemented';
   const transitional = 'Transitional';
-  const uzumeHeadroomTelemetryText = status
-    ? Math.abs(status.dspHeadroomDb ?? 0) > 0.05 || status.uzumeHeadroomActive
-      ? `${formatDb(status.dspHeadroomDb, unknown)} / gain-reference / ${status.uzumeHeadroomActive ? enabled : 'reference pending'}`
-      : disabled
-    : unknown;
-  const uzumeSafetyMeterText = status
-    ? `${status.dspLimiterProtecting ? 'limiting' : status.dspClippingRisk ? 'near-limit' : 'monitoring'} / ${status.dspClippingRisk || status.dspLimiterProtecting ? 'clipping risk' : 'safe'} / stage telemetry separate from limiter`
-    : unknown;
-  const uzumeLimiterReferenceText = status
-    ? `sample-domain safety limiter / ${status.dspLimiterProtecting ? 'active' : 'standby'} / GPU limiter ${status.uzumeGpuLimiterPlaybackActive ? enabled : planned}`
-    : unknown;
+  const uzumeReferenceHeadroomSafetyLimiter = status?.uzumeReferencePlan?.headroomSafetyLimiter;
+  const expectedUzumeReferenceHeadroomSafetyLimiter = isExpectedUzumeReferenceHeadroomSafetyLimiter(uzumeReferenceHeadroomSafetyLimiter);
+  const uzumeHeadroomTelemetryText = formatUzumeReferenceHeadroom(status, unknown);
+  const uzumeSafetyMeterText = formatUzumeReferenceSafetyMeter(status, unknown);
+  const uzumeLimiterReferenceText = formatUzumeReferenceLimiter(status, unknown);
 
   const issueReasons = useMemo(() => (
     [status?.error, ...(status?.warnings ?? [])]
@@ -2811,9 +2943,9 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceRenderAheadCache'), value: uzumeReferenceRenderAheadCacheText, tone: expectedUzumeReferenceContinuity ? 'good' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceUnderrunFallback'), value: uzumeReferenceUnderrunFallbackText, tone: status?.uzumeReferencePlan?.continuity?.fallback.telemetryStatus === 'unsafe' ? 'danger' : expectedUzumeReferenceContinuity ? 'good' : status?.uzumeReferencePlan?.continuity ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeBitPerfect'), value: uzumeBitPerfectText, tone: status?.uzumeBitPerfectState === 'available' ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeHeadroom'), value: uzumeHeadroomTelemetryText, tone: status?.uzumeHeadroomActive || Math.abs(status?.dspHeadroomDb ?? 0) > 0.05 ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeSafetyMeter'), value: uzumeSafetyMeterText, tone: status?.dspLimiterProtecting ? 'danger' : status?.dspClippingRisk || status?.uzumeReferencePlan ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeLimiterReference'), value: uzumeLimiterReferenceText, tone: status?.dspLimiterProtecting ? 'danger' : status?.dspClippingRisk || status?.uzumeReferencePlan ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeHeadroom'), value: uzumeHeadroomTelemetryText, tone: getUzumeHeadroomTone(uzumeReferenceHeadroomSafetyLimiter, expectedUzumeReferenceHeadroomSafetyLimiter) },
+        { label: t('audioProfessional.row.uzumeSafetyMeter'), value: uzumeSafetyMeterText, tone: getUzumeSafetyMeterTone(uzumeReferenceHeadroomSafetyLimiter, expectedUzumeReferenceHeadroomSafetyLimiter) },
+        { label: t('audioProfessional.row.uzumeLimiterReference'), value: uzumeLimiterReferenceText, tone: getUzumeLimiterTone(uzumeReferenceHeadroomSafetyLimiter, expectedUzumeReferenceHeadroomSafetyLimiter) },
         { label: t('audioProfessional.row.uzumeConvolution'), value: status?.uzumeTransitionalConvolutionPath ? `${transitional} / ${status.uzumeTransitionalConvolutionPath}` : planned, tone: status?.uzumeTransitionalConvolutionPath ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeFused'), value: status?.uzumeFusedMacroKernel ? yes : planned, tone: status?.uzumeFusedMacroKernel ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeBypass'), value: status?.uzumeBypassReason ?? disabled, tone: status?.uzumeBypassReason ? 'good' : 'muted' },
@@ -2845,7 +2977,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.error'), value: status?.error ?? unknown, tone: status?.error ? 'danger' : 'muted' },
       ],
     },
-  ], [bitPerfectText, disabled, dspModules.length, enabled, expectedUzumeReferenceDsdFamily, expectedUzumeReferenceResampling, no, planned, protectLimiterText, signalPathText, status, t, transitional, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeFormatPathText, uzumeGpuText, uzumeHeadroomTelemetryText, uzumeLimiterReferenceText, uzumeReferenceAssignmentsText, uzumeReferenceBackendSupportText, uzumeReferenceBitPerfectText, uzumeReferenceBlockBoundaryText, uzumeReferenceCallbackRingText, uzumeReferenceCallbackSafeControlsText, uzumeReferenceChannelScopeText, uzumeReferenceCompilerText, uzumeReferenceContinuityText, uzumeReferenceConvolutionDuplicateGuardText, uzumeReferenceConvolutionSerialNullText, uzumeReferenceConvolutionText, uzumeReferenceDsdFamilyText, uzumeReferenceEqualPowerCrossfadeText, uzumeReferenceFirGaplessHistoryText, uzumeReferenceFlushDrainText, uzumeReferenceGainStagingText, uzumeReferenceGaplessConcatText, uzumeReferenceIirEqText, uzumeReferenceLatencyOwnersText, uzumeReferenceMergeGroupsText, uzumeReferenceOutputDevicePolicyText, uzumeReferencePcmIngressGuardText, uzumeReferencePcmOutputQuantizationText, uzumeReferencePerEarEqPlacementText, uzumeReferencePreRollText, uzumeReferenceRenderAheadCacheText, uzumeReferenceResamplingText, uzumeReferenceResponseResampleText, uzumeReferenceSrcArtifactsText, uzumeReferenceSrcBudgetText, uzumeReferenceSrcOutputRiskText, uzumeReferenceSrcPhaseApodizingText, uzumeReferenceSrcRollbackText, uzumeReferenceSrcValidationText, uzumeReferenceStereoProceduralText, uzumeReferenceUnderrunFallbackText, uzumeSafetyMeterText, yes]);
+  ], [bitPerfectText, disabled, dspModules.length, enabled, expectedUzumeReferenceDsdFamily, expectedUzumeReferenceHeadroomSafetyLimiter, expectedUzumeReferenceResampling, no, planned, protectLimiterText, signalPathText, status, t, transitional, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeFormatPathText, uzumeGpuText, uzumeHeadroomTelemetryText, uzumeLimiterReferenceText, uzumeReferenceAssignmentsText, uzumeReferenceBackendSupportText, uzumeReferenceBitPerfectText, uzumeReferenceBlockBoundaryText, uzumeReferenceCallbackRingText, uzumeReferenceCallbackSafeControlsText, uzumeReferenceChannelScopeText, uzumeReferenceCompilerText, uzumeReferenceContinuityText, uzumeReferenceConvolutionDuplicateGuardText, uzumeReferenceConvolutionSerialNullText, uzumeReferenceConvolutionText, uzumeReferenceDsdFamilyText, uzumeReferenceEqualPowerCrossfadeText, uzumeReferenceFirGaplessHistoryText, uzumeReferenceFlushDrainText, uzumeReferenceGainStagingText, uzumeReferenceGaplessConcatText, uzumeReferenceHeadroomSafetyLimiter, uzumeReferenceIirEqText, uzumeReferenceLatencyOwnersText, uzumeReferenceMergeGroupsText, uzumeReferenceOutputDevicePolicyText, uzumeReferencePcmIngressGuardText, uzumeReferencePcmOutputQuantizationText, uzumeReferencePerEarEqPlacementText, uzumeReferencePreRollText, uzumeReferenceRenderAheadCacheText, uzumeReferenceResamplingText, uzumeReferenceResponseResampleText, uzumeReferenceSrcArtifactsText, uzumeReferenceSrcBudgetText, uzumeReferenceSrcOutputRiskText, uzumeReferenceSrcPhaseApodizingText, uzumeReferenceSrcRollbackText, uzumeReferenceSrcValidationText, uzumeReferenceStereoProceduralText, uzumeReferenceUnderrunFallbackText, uzumeSafetyMeterText, yes]);
 
   const visibleSections = detailsOpen ? sections : [];
   const panelStateIcon = status?.error ? AlertTriangle : status?.bitPerfectCandidate ? CheckCircle2 : Zap;
