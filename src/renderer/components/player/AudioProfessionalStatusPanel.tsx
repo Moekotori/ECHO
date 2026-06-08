@@ -1400,6 +1400,174 @@ const formatUzumeReferencePerEarEqPlacement = (status: AudioStatus | null, fallb
   ].filter((part): part is string => Boolean(part)).join(' / ');
 };
 
+const hasExactStringOrder = (actual: readonly string[], expected: readonly string[]): boolean =>
+  actual.length === expected.length && expected.every((item, index) => actual[index] === item);
+
+const hasFiniteMetrics = (...values: number[]): boolean => values.every((value) => Number.isFinite(value));
+
+const isExpectedUzumeReferenceGainStaging = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['gainStaging'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedOrder = ['input', 'headroom', 'replaygain', 'materialized-gain', 'output'];
+
+  return report.artifact === 'gain-staging-reference' &&
+    report.engine === 'gain-reference' &&
+    hasExactStringOrder(report.orderContract, expectedOrder) &&
+    hasExactStringOrder(report.stages.map((stage) => stage.id), expectedOrder) &&
+    !report.clipRisk &&
+    report.recommendedAdditionalHeadroomDb >= 0 &&
+    hasFiniteMetrics(report.totalGainDb, report.totalGainLinear, report.recommendedAdditionalHeadroomDb) &&
+    report.stages.every((stage) =>
+      !stage.clippingRisk &&
+      hasFiniteMetrics(stage.gainDb, stage.cumulativeGainDb, stage.peak, stage.rms, stage.peakDbfs, stage.rmsDbfs)) &&
+    report.reasons.includes('headroom_applied_before_replaygain_and_materialized_gain') &&
+    report.reasons.includes('gain_stages_merge_to_single_gain_reference') &&
+    report.reasons.includes('gain_staging_within_sample_peak_budget');
+};
+
+const isExpectedUzumeReferenceIirEq = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['iirEq'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const bandCountsMatch = report.bandCount === report.bands.length &&
+    report.activeBandCount + report.bypassedBandCount === report.bandCount;
+  const bandsAreCoherent = report.bands.every((band) =>
+    band.index >= 0 &&
+    band.frequencyHz === band.requestedFrequencyHz &&
+    band.q > 0 &&
+    (band.state === 'active' ? band.coefficientState === 'generated' : band.coefficientState === 'bypassed') &&
+    hasFiniteMetrics(band.frequencyHz, band.requestedFrequencyHz, band.q, band.gainDb, band.responsePeakDb, band.responseDipDb, band.phaseSpanRadians));
+
+  if (!bandCountsMatch || !bandsAreCoherent || report.artifact !== 'iir-eq-reference' || report.engine !== 'iir-reference' || report.orderContract !== 'ui-band-order-biquad-cascade') {
+    return false;
+  }
+
+  if (report.state === 'exact-bypass') {
+    return report.activeBandCount === 0 &&
+      report.residual.state === 'exact-bypass' &&
+      report.residual.maxAbs === 0 &&
+      report.residual.rms === 0;
+  }
+
+  return report.activeBandCount > 0 &&
+    report.residual.state === 'processed' &&
+    report.residual.comparedFrames > 0 &&
+    hasFiniteMetrics(report.residual.maxAbs, report.residual.rms) &&
+    report.reasons.includes('peq_basic_iir_reference_only') &&
+    report.reasons.includes('active_biquads_applied_in_ui_order');
+};
+
+const isExpectedUzumeReferenceChannelScope = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['channelScope'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const operationCountsMatch = report.operationCount === report.operations.length &&
+    report.appliedOperationCount + report.noopOperationCount + report.invalidOperationCount === report.operationCount;
+  const untouchedBypassIsExact = report.untouchedChannelIndexes.every((channelIndex) =>
+    report.residualByChannel.some((channel) =>
+      channel.channelIndex === channelIndex &&
+      channel.state === 'out-of-scope-bypass' &&
+      channel.maxAbs === 0 &&
+      channel.rms === 0));
+
+  return report.artifact === 'channel-scope-reference' &&
+    report.engine === 'stereo-procedural-reference' &&
+    report.scopeContract === 'targeted-channels-only' &&
+    report.channelCount > 0 &&
+    report.residualByChannel.length === report.channelCount &&
+    operationCountsMatch &&
+    report.invalidOperationCount === 0 &&
+    untouchedBypassIsExact &&
+    report.operations.every((operation) =>
+      operation.state !== 'invalid-source' &&
+      operation.targetChannels.every((channelIndex) => channelIndex >= 0 && channelIndex < report.channelCount) &&
+      operation.skippedChannels.every((channelIndex) => channelIndex >= 0 && channelIndex < report.channelCount)) &&
+    report.residualByChannel.every((channel) =>
+      channel.channelIndex >= 0 &&
+      channel.channelIndex < report.channelCount &&
+      hasFiniteMetrics(channel.maxAbs, channel.rms)) &&
+    report.reasons.includes('channel_scope_resolved_before_operation') &&
+    report.reasons.includes('out_of_scope_channels_must_remain_exact_bypass');
+};
+
+const isExpectedUzumeReferenceStereoProcedural = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['stereoProcedural'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const matrixIsFinite = report.matrix.every((row) => row.every((value) => Number.isFinite(value)));
+
+  if (report.artifact !== 'stereo-procedural-matrix-filter-reference' ||
+    report.engine !== 'stereo-procedural-reference' ||
+    report.sampleRate <= 0 ||
+    report.channelCount !== 2 ||
+    !matrixIsFinite ||
+    !hasFiniteMetrics(report.delaySamples.left, report.delaySamples.right, report.input.peak, report.input.rms, report.output.peak, report.output.rms, report.residual.maxAbs, report.residual.rms)) {
+    return false;
+  }
+
+  if (report.state === 'identity-bypass') {
+    return report.steps.length === 0 &&
+      report.residual.state === 'exact-bypass' &&
+      report.residual.maxAbs === 0 &&
+      report.residual.rms === 0;
+  }
+
+  return report.steps.length > 0 &&
+    report.residual.state === 'processed' &&
+    report.residual.comparedFrames > 0 &&
+    report.reasons.includes('stereo_procedural_reference_only') &&
+    report.reasons.includes('stereo_procedural_steps_applied_in_order');
+};
+
+const isExpectedUzumeReferencePerEarEqPlacement = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['perEarEqPlacement'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedOrder = ['pre-crossfeed-eq', 'crossfeed-matrix-filter', 'post-crossfeed-eq'];
+
+  if (report.artifact !== 'per-ear-eq-placement-reference' ||
+    !hasExactStringOrder(report.orderContract, expectedOrder) ||
+    report.compilerRule !== 'do-not-reorder-across-crossfeed-without-null-proof' ||
+    report.sampleRate <= 0 ||
+    report.residual.comparedFrames <= 0 ||
+    !hasFiniteMetrics(report.perEarEq.leftGainDb, report.perEarEq.rightGainDb, report.residual.maxAbs, report.residual.rms)) {
+    return false;
+  }
+
+  if (report.state === 'commutative-for-input') {
+    return report.residual.maxAbs === 0 && report.residual.rms === 0;
+  }
+
+  return report.crossfeed.enabled &&
+    report.crossfeed.crossGainDb !== null &&
+    report.crossfeed.crossDelayMs !== null &&
+    report.preCrossfeedSteps.includes('pre-per-ear-eq') &&
+    report.preCrossfeedSteps.includes('crossfeed') &&
+    report.postCrossfeedSteps.includes('crossfeed') &&
+    report.postCrossfeedSteps.includes('post-per-ear-eq') &&
+    report.residual.maxAbs > 0 &&
+    report.residual.rms > 0 &&
+    report.reasons.includes('crossfeed_and_asymmetric_per_ear_eq_are_not_commutative') &&
+    report.reasons.includes('do_not_reorder_across_crossfeed_without_null_proof') &&
+    report.reasons.includes('per_ear_eq_placement_reference_only');
+};
+
 const formatCallbackSafeCase = (
   label: string,
   control: NonNullable<AudioStatus['uzumeReferencePlan']>['callbackSafeControls']['urgentControl'],
@@ -1784,6 +1952,11 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceChannelScopeText = formatUzumeReferenceChannelScope(status, unknown);
   const uzumeReferenceStereoProceduralText = formatUzumeReferenceStereoProcedural(status, unknown);
   const uzumeReferencePerEarEqPlacementText = formatUzumeReferencePerEarEqPlacement(status, unknown);
+  const expectedUzumeReferenceGainStaging = isExpectedUzumeReferenceGainStaging(status?.uzumeReferencePlan?.gainStaging);
+  const expectedUzumeReferenceIirEq = isExpectedUzumeReferenceIirEq(status?.uzumeReferencePlan?.iirEq);
+  const expectedUzumeReferenceChannelScope = isExpectedUzumeReferenceChannelScope(status?.uzumeReferencePlan?.channelScope);
+  const expectedUzumeReferenceStereoProcedural = isExpectedUzumeReferenceStereoProcedural(status?.uzumeReferencePlan?.stereoProcedural);
+  const expectedUzumeReferencePerEarEqPlacement = isExpectedUzumeReferencePerEarEqPlacement(status?.uzumeReferencePlan?.perEarEqPlacement);
   const uzumeReferenceBlockBoundaryText = formatUzumeReferenceBlockBoundary(status, unknown);
   const uzumeReferenceFlushDrainText = formatUzumeReferenceFlushDrain(status, unknown);
   const uzumeReferenceGaplessConcatText = formatUzumeReferenceGaplessConcat(status, unknown);
@@ -1941,11 +2114,11 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceGenerationCacheKey'), value: uzumeReferenceGenerationCacheKeyText, tone: status?.uzumeReferencePlan?.generationCacheKey?.state === 'ready' ? 'good' : status?.uzumeReferencePlan?.generationCacheKey ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceRealtimeBudgetSummary'), value: uzumeReferenceRealtimeBudgetSummaryText, tone: status?.uzumeReferencePlan?.realtimeBudgetSummary?.state === 'offline-reference-only' ? 'warning' : status?.uzumeReferencePlan?.realtimeBudgetSummary ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePcmIngressGuard'), value: uzumeReferencePcmIngressGuardText, tone: status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'channel-mismatch' || status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'sanitized' ? 'warning' : status?.uzumeReferencePlan?.pcmIngressGuard ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceGainStaging'), value: uzumeReferenceGainStagingText, tone: status?.uzumeReferencePlan?.gainStaging?.clipRisk ? 'warning' : Math.abs(status?.uzumeReferencePlan?.gainStaging?.totalGainDb ?? 0) > 0.001 ? 'warning' : status?.uzumeReferencePlan?.gainStaging ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceIirEq'), value: uzumeReferenceIirEqText, tone: status?.uzumeReferencePlan?.iirEq?.state === 'active' ? 'warning' : status?.uzumeReferencePlan?.iirEq ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceChannelScope'), value: uzumeReferenceChannelScopeText, tone: status?.uzumeReferencePlan?.channelScope?.invalidOperationCount ? 'warning' : status?.uzumeReferencePlan?.channelScope?.appliedOperationCount ? 'warning' : status?.uzumeReferencePlan?.channelScope ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceStereoProcedural'), value: uzumeReferenceStereoProceduralText, tone: status?.uzumeReferencePlan?.stereoProcedural?.state === 'active' ? 'warning' : status?.uzumeReferencePlan?.stereoProcedural ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferencePerEarEqPlacement'), value: uzumeReferencePerEarEqPlacementText, tone: status?.uzumeReferencePlan?.perEarEqPlacement?.state === 'placement-sensitive' ? 'warning' : status?.uzumeReferencePlan?.perEarEqPlacement ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceGainStaging'), value: uzumeReferenceGainStagingText, tone: expectedUzumeReferenceGainStaging ? 'good' : status?.uzumeReferencePlan?.gainStaging ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceIirEq'), value: uzumeReferenceIirEqText, tone: expectedUzumeReferenceIirEq ? 'good' : status?.uzumeReferencePlan?.iirEq ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceChannelScope'), value: uzumeReferenceChannelScopeText, tone: expectedUzumeReferenceChannelScope ? 'good' : status?.uzumeReferencePlan?.channelScope ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceStereoProcedural'), value: uzumeReferenceStereoProceduralText, tone: expectedUzumeReferenceStereoProcedural ? 'good' : status?.uzumeReferencePlan?.stereoProcedural ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferencePerEarEqPlacement'), value: uzumeReferencePerEarEqPlacementText, tone: expectedUzumeReferencePerEarEqPlacement ? 'good' : status?.uzumeReferencePlan?.perEarEqPlacement ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBlockBoundary'), value: uzumeReferenceBlockBoundaryText, tone: status?.uzumeReferencePlan?.blockBoundary?.coverage.state === 'exact' && status?.uzumeReferencePlan?.blockBoundary?.residual.state === 'exact-reassembly' ? 'good' : status?.uzumeReferencePlan?.blockBoundary ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceFlushDrain'), value: uzumeReferenceFlushDrainText, tone: isExpectedUzumeReferenceFlushDrain(status?.uzumeReferencePlan?.flushDrain) ? 'good' : status?.uzumeReferencePlan?.flushDrain ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceGaplessConcat'), value: uzumeReferenceGaplessConcatText, tone: isExpectedUzumeReferenceGaplessConcat(status?.uzumeReferencePlan?.gaplessConcat) ? 'good' : status?.uzumeReferencePlan?.gaplessConcat?.state === 'src-stateful' ? 'warning' : status?.uzumeReferencePlan?.gaplessConcat ? 'good' : 'muted' },

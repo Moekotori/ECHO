@@ -1338,27 +1338,27 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME gain staging reference',
           value: 'gain-staging-reference / order input->headroom->replaygain->materialized-gain->output / total -6.00 dB / linear 0.5012 / clip safe / extra headroom 0.00 dB / input:gain 0.00 dB/cum 0.00 dB/peak 0.8750 | headroom:gain -6.00 dB/cum -6.00 dB/peak 0.4385 | replaygain:gain 0.00 dB/cum -6.00 dB/peak 0.4385 | materialized-gain:gain 0.00 dB/cum -6.00 dB/peak 0.4385 | output:gain 0.00 dB/cum -6.00 dB/peak 0.4385 / reasons headroom applied before replaygain and materialized gain | gain stages merge to single gain reference | gain staging within sample peak budget',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME PEQ/IIR reference',
           value: 'iir-eq-reference / iir-reference / active / sample 44.1 kHz / bands 1/1 active / bypassed 0 / order ui-band-order-biquad-cascade / band0 peaking 1 kHz 3.00 dB q 1.00 active coeff generated resp 3.00/0.00 dB phase 0.2500 / residual processed 0.120000/0.040000 / reasons peq basic iir reference only | active biquads applied in ui order',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME channel scope reference',
           value: 'channel-scope-reference / stereo-procedural-reference / targeted-channels-only / channels 2 / ops 1 / applied 1 / noop 0 / invalid 0 / untouched 1 / left-trim-scope:applied->0 skip 1 gain -1.00 dB / ch0:processed 0.010000/0.004000 | ch1:out-of-scope-bypass 0.000000/0.000000 / reasons channel scope resolved before operation | out of scope channels must remain exact bypass',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME stereo procedural reference',
           value: 'stereo-procedural-matrix-filter-reference / stereo-procedural-reference / active / sample 44.1 kHz / channels 2 / steps trim->delay / delay 0.000/44.100 samples / matrix [1.000,0.000;0.000,1.000] / routing identity / crossfeed disabled / input peak 0.8750 output peak 0.7800 / residual processed 0.100000/0.030000 / reasons stereo procedural reference only | stereo procedural steps applied in order | band compensation requires iir reference split',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME per-ear EQ placement reference',
           value: 'per-ear-eq-placement-reference / do-not-reorder-across-crossfeed-without-null-proof / placement-sensitive / sample 44.1 kHz / order pre-crossfeed-eq->crossfeed-matrix-filter->post-crossfeed-eq / per-ear -6.00/6.00 dB / crossfeed -9.00 dB delay 0.000 ms lowpass 22050 center none / pre pre-per-ear-eq->crossfeed / post crossfeed->post-per-ear-eq / residual 4 frames 0.188000/0.052000 / reasons crossfeed and asymmetric per ear eq are not commutative | do not reorder across crossfeed without null proof | per ear eq placement reference only',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME block boundary reference',
@@ -1660,6 +1660,71 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME backend support reference',
           value: expect.stringContaining('compiler allowed'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected DSP reference contracts as good', () => {
+    const status = referenceStatus();
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME gain staging reference',
+          value: expect.stringContaining('clip safe'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME PEQ/IIR reference',
+          value: expect.stringContaining('active biquads applied in ui order'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME channel scope reference',
+          value: expect.stringContaining('ch1:out-of-scope-bypass 0.000000/0.000000'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME stereo procedural reference',
+          value: expect.stringContaining('stereo procedural steps applied in order'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME per-ear EQ placement reference',
+          value: expect.stringContaining('do not reorder across crossfeed without null proof'),
+          tone: 'good',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const invalidScopeStatus = referenceStatus();
+    invalidScopeStatus.uzumeReferencePlan!.channelScope.invalidOperationCount = 1;
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={invalidScopeStatus} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME channel scope reference',
+          value: expect.stringContaining('invalid 1'),
           tone: 'warning',
         }),
       ]),
