@@ -2042,6 +2042,35 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    status.uzumeReferencePlan!.generationCacheKey = {
+      ...status.uzumeReferencePlan!.generationCacheKey,
+      timelineScope: 'gapless-album-segment',
+      trackRole: 'gapless-segment',
+      requestKey: 'gapless:next-reference:0',
+      cacheKey: 'gapless:next-reference:0|generation:1|timeline:gapless-album-segment|album:album-reference:segment-0:index-1|profile:ui-ref|device:ui-ref',
+      albumSegmentKey: 'album-reference:segment-0:index-1',
+      albumSegmentIndex: 1,
+    };
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const gaplessCacheDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(gaplessCacheDialog.textContent).toContain('generation-cache-key-reference / generation-safe-cache-key-contract-reference / gen 1 / gapless-album-segment / gapless-segment / request gapless:next-reference:0');
+    expect(gaplessCacheDialog.textContent).toContain('album album-reference:segment-0:index-1 index 1');
+    expect(gaplessCacheDialog.textContent).toContain('renderer inspect-only');
+    expect(readSignalPathVisualState(gaplessCacheDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME generation cache key reference', tone: 'process', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     status.uzumeReferencePlan!.formatPath = 'pcm_bitperfect';
     status.uzumeReferencePlan!.internalDomain = 'pcm-bypass';
     status.uzumeReferencePlan!.bitPerfectState = 'available';

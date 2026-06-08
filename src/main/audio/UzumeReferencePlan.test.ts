@@ -684,6 +684,34 @@ describe('UZUME reference plan compiler', () => {
     });
   });
 
+  it('keys gapless generation cache entries by album segment index', () => {
+    const compiled = compile({ gaplessActive: true });
+
+    expect(compiled.generationCacheKey).toMatchObject({
+      artifact: 'generation-cache-key-reference',
+      timelineScope: 'gapless-album-segment',
+      trackRole: 'gapless-segment',
+      albumSegmentKey: 'album-reference:segment-0:index-1',
+      albumSegmentIndex: 1,
+      requestKey: 'gapless:next-reference:0',
+      rendererControl: 'inspect-only',
+    });
+    expect(compiled.generationCacheKey.cacheKey).toContain('timeline:gapless-album-segment');
+    expect(compiled.generationCacheKey.cacheKey).toContain('album:album-reference:segment-0:index-1');
+    expect(compiled.generationCacheKey.cacheKey).not.toContain('album:none');
+    expect(compiled.generationCacheKey.reasons).toEqual(
+      expect.arrayContaining([
+        'album_segments_use_segment_index_when_gapless',
+        'renderer_may_inspect_but_not_mutate_cache_keys',
+        'generation_cache_key_reference_only',
+      ]),
+    );
+    expect(compiled.readinessContract).toMatchObject({
+      intent: 'gapless-boundary',
+      productionScheduler: 'not-enabled',
+    });
+  });
+
   it('keeps all six formatPath reference reasons in a stable inspect snapshot', () => {
     const compiled = compile({
       sampleRatePlan: plan({

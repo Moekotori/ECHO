@@ -2225,6 +2225,48 @@ describe('AudioProfessionalStatusPanel', () => {
     );
   });
 
+  it('marks gapless album-segment generation cache keys as inspect-only good', () => {
+    const status = referenceStatus();
+    const plan = status.uzumeReferencePlan!;
+    plan.generationCacheKey = {
+      ...plan.generationCacheKey,
+      timelineScope: 'gapless-album-segment',
+      trackRole: 'gapless-segment',
+      requestKey: 'gapless:next-reference:0',
+      cacheKey: 'gapless:next-reference:0|generation:1|timeline:gapless-album-segment|album:album-reference:segment-0:index-1|profile:ui-ref|device:ui-ref',
+      albumSegmentKey: 'album-reference:segment-0:index-1',
+      albumSegmentIndex: 1,
+    };
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME generation cache key reference',
+          value: expect.stringContaining('gapless-album-segment / gapless-segment / request gapless:next-reference:0'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME generation cache key reference',
+          value: expect.stringContaining('album album-reference:segment-0:index-1 index 1'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME generation cache key reference',
+          value: expect.stringContaining('renderer inspect-only'),
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
   it('marks DSD direct positive bypass reference state as good', () => {
     const status = referenceStatus();
     const plan = status.uzumeReferencePlan!;
