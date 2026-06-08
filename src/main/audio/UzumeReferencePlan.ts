@@ -4232,6 +4232,69 @@ const buildLatencyBudgetInspectReport = (
   };
 };
 
+const buildReadinessContractInspectReport = (
+  backendSupport: UzumeCompiledReferencePlan['backendSupport'],
+  continuity: UzumeCompiledReferencePlan['continuity'],
+): UzumeCompiledReferencePlan['readinessContract'] => {
+  const selectedPath = continuity.continuity.selectedPath;
+  const fullProfileReady =
+    selectedPath === 'gpu-full-profile' ||
+    selectedPath === 'cpu-full-profile' ||
+    selectedPath === 'predictive-cache' ||
+    continuity.preRoll.commitAllowed;
+  const cacheReady =
+    continuity.preRoll.renderAheadState === 'cache-hit' ||
+    continuity.renderAheadCache.lookupState === 'hit';
+  const shortBridgeAllowed = continuity.continuity.shortBridgeAllowed;
+  const state: UzumeCompiledReferencePlan['readinessContract']['state'] =
+    selectedPath === 'reject-stale-generation'
+      ? 'stale-generation-rejected'
+      : fullProfileReady
+        ? 'ready-to-commit'
+        : cacheReady
+          ? 'cache-ready'
+          : shortBridgeAllowed
+            ? 'short-bridge-reference-only'
+            : 'waiting-for-full-profile';
+
+  return {
+    artifact: 'readiness-contract-reference',
+    policy: 'main-playback-owns-timeline-uzume-reports-readiness',
+    state,
+    intent: continuity.continuity.intent,
+    playbackPolicy: continuity.continuity.policy,
+    selectedPath,
+    waitTarget: continuity.continuity.waitTarget,
+    fullProfileReady,
+    gpuPrewarmReady: false,
+    gpuPrewarmState: backendSupport.gpu.state,
+    cacheState: continuity.renderAheadCache.lookupState,
+    cacheCommitState: continuity.renderAheadCache.commitState,
+    cacheKey: continuity.renderAheadCache.requestKey,
+    renderAheadState: continuity.preRoll.renderAheadState,
+    renderAheadReadyFrames: continuity.preRoll.renderAheadReadyFrames,
+    renderAheadTargetFrames: continuity.preRoll.renderAheadTargetFrames,
+    deadlineState: continuity.preRoll.state,
+    deadlineSlackFrames: continuity.preRoll.deadlineSlackFrames,
+    callbackRingState: continuity.callbackRing.state,
+    callbackRingTelemetryStatus: continuity.callbackRing.telemetryStatus,
+    shortBridgeCandidate: shortBridgeAllowed ? 'available' : 'blocked',
+    shortBridgeReason: continuity.continuity.shortBridgeReason,
+    crossfadeToFullProfile: shortBridgeAllowed ? 'candidate-ready' : 'blocked-by-intent',
+    generationCommitRule: 'current-generation-only',
+    staleGenerationCommitAllowed: false,
+    handoffStrategy: continuity.preRoll.handoffStrategy,
+    productionScheduler: 'not-enabled',
+    reasons: [
+      'readiness_summary_derived_from_reference_reports',
+      'main_playback_logic_owns_timeline_and_policy',
+      'gpu_prewarm_deferred_to_render_ahead_gate',
+      'stale_generation_commit_disallowed',
+      'readiness_contract_reference_only',
+    ],
+  };
+};
+
 const compactCallbackSafeControlCaseReport = (
   result: UzumeReferenceCallbackSafeControlResult,
 ): UzumeCompiledReferencePlan['callbackSafeControls']['urgentControl'] => ({
@@ -4358,6 +4421,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
   const compiler = buildCompilerAssignments(input, format, resampling, sharedConvolution, pcmOutputQuantization);
   const continuity = buildContinuityInspectReport(input, resampling, sharedConvolution);
   const latencyBudget = buildLatencyBudgetInspectReport(backendSupport, resampling, sharedConvolution, continuity, compiler.latencyOwners);
+  const readinessContract = buildReadinessContractInspectReport(backendSupport, continuity);
   const callbackSafeControls = buildCallbackSafeControlsInspectReport(input);
   const equalPowerCrossfade = buildEqualPowerCrossfadeInspectReport(input, resampling);
   const dsdFamily = buildDsdFamilyReport(input, format);
@@ -4369,6 +4433,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
     backendSupport,
     outputDevicePolicy,
     latencyBudget,
+    readinessContract,
     ...compiler,
     resampling,
     sharedConvolution,
@@ -4406,6 +4471,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
       backendSupport: 'deterministic-reference',
       outputDevicePolicy: 'deterministic-reference',
       latencyBudget: 'deterministic-reference',
+      readinessContract: 'deterministic-reference',
       qualityRollback: 'deterministic-reference',
       outputResamplingRisk: 'deterministic-reference',
       pcmOutputQuantization: 'deterministic-reference',

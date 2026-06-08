@@ -165,6 +165,42 @@ const referenceStatus = (): AudioStatus => ({
         'production_latency_compensation_deferred_to_realtime_gate',
       ],
     },
+    readinessContract: {
+      artifact: 'readiness-contract-reference',
+      policy: 'main-playback-owns-timeline-uzume-reports-readiness',
+      state: 'waiting-for-full-profile',
+      intent: 'normal-playlist-boundary',
+      playbackPolicy: 'predictive-cache',
+      selectedPath: 'wait-for-full-profile',
+      waitTarget: 'cpu-or-gpu-full-profile',
+      fullProfileReady: false,
+      gpuPrewarmReady: false,
+      gpuPrewarmState: 'future-render-ahead-gate',
+      cacheState: 'miss',
+      cacheCommitState: 'callback-keeps-prior-committed-output',
+      cacheKey: 'next-head:reference:0',
+      renderAheadState: 'cache-warming',
+      renderAheadReadyFrames: 2400,
+      renderAheadTargetFrames: 9600,
+      deadlineState: 'deadline-safe',
+      deadlineSlackFrames: 13760,
+      callbackRingState: 'stable',
+      callbackRingTelemetryStatus: 'safe',
+      shortBridgeCandidate: 'blocked',
+      shortBridgeReason: 'intent_requires_full_quality_profile',
+      crossfadeToFullProfile: 'blocked-by-intent',
+      generationCommitRule: 'current-generation-only',
+      staleGenerationCommitAllowed: false,
+      handoffStrategy: 'same-pipeline-no-reset',
+      productionScheduler: 'not-enabled',
+      reasons: [
+        'readiness_summary_derived_from_reference_reports',
+        'main_playback_logic_owns_timeline_and_policy',
+        'gpu_prewarm_deferred_to_render_ahead_gate',
+        'stale_generation_commit_disallowed',
+        'readiness_contract_reference_only',
+      ],
+    },
     resampling: {
       active: true,
       family: 'poly-sinc-reference',
@@ -972,6 +1008,7 @@ const referenceStatus = (): AudioStatus => ({
       backendSupport: 'deterministic-reference',
       outputDevicePolicy: 'deterministic-reference',
       latencyBudget: 'deterministic-reference',
+      readinessContract: 'deterministic-reference',
       qualityRollback: 'deterministic-reference',
       outputResamplingRisk: 'deterministic-reference',
       pcmOutputQuantization: 'deterministic-reference',
@@ -1105,6 +1142,7 @@ describe('AudioProfessionalStatusPanel', () => {
     expect(screen.getByText(/output-device-policy-reference \/ pcm_processed \/ shared \/ shared-mixer \/ shared-mixer-risk \/ file 44.1 kHz \/ decoder 44.1 kHz \/ requested 48 kHz \/ actual 48 kHz \/ shared 48 kHz/u)).toBeTruthy();
     expect(screen.getByText(/latency-budget-reference \/ cpu-float64-reference \/ realtime not-enabled \/ src 35 samples\/0.73 ms lookahead 35 samples\/0.73 ms/u)).toBeTruthy();
     expect(screen.getByText(/conv quality-first latency 1024 frames direct-head 128 taps warmup 512 frames tail 2047 frames drain 2047 frames/u)).toBeTruthy();
+    expect(screen.getByText(/readiness-contract-reference \/ main-playback-owns-timeline-uzume-reports-readiness \/ waiting-for-full-profile \/ normal-playlist-boundary->wait-for-full-profile/u)).toBeTruthy();
     expect(screen.getByText(/poly-sinc-reference 44.1 kHz->48 kHz/u)).toBeTruthy();
     expect(screen.getByText(/35 samples \/ 0.73 ms/u)).toBeTruthy();
     expect(screen.getByText(/64 taps \/ cutoff 92% \/ alias 18.5 dB/u)).toBeTruthy();
@@ -1180,6 +1218,11 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME latency budget reference',
           value: 'latency-budget-reference / cpu-float64-reference / realtime not-enabled / src 35 samples/0.73 ms lookahead 35 samples/0.73 ms / conv quality-first latency 1024 frames direct-head 128 taps warmup 512 frames tail 2047 frames drain 2047 frames / blocks 512 frames->512 frames->512 frames / pre-roll 10240 frames slack 13760 frames / ring 2560 frames/4096 frames 5.0 blocks / render-ahead cache-warming 2400/9600 frames / cache 0/384000 bytes / owners shared-convolution->room-ir-latency | pcm-src->resampling-reference / read-committed-output-only / reference-only / reasons latency budget summary derived from reference reports | cpu float64 reference only no runtime scheduler | callback reads committed output only | production latency compensation deferred to realtime gate',
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME readiness contract reference',
+          value: 'readiness-contract-reference / main-playback-owns-timeline-uzume-reports-readiness / waiting-for-full-profile / normal-playlist-boundary->wait-for-full-profile / wait cpu-or-gpu-full-profile / full-profile not-ready / gpu-prewarm future-render-ahead-gate / cache miss->callback-keeps-prior-committed-output key next-head:reference:0 / render-ahead cache-warming 2400/9600 / deadline deadline-safe slack 13760 frames / ring stable/safe / short-bridge blocked intent requires full quality profile / crossfade blocked-by-intent / generation current-generation-only stale blocked / same-pipeline-no-reset / scheduler not-enabled / reasons readiness summary derived from reference reports | main playback logic owns timeline and policy | gpu prewarm deferred to render ahead gate | stale generation commit disallowed | readiness contract reference only',
           tone: 'warning',
         }),
         expect.objectContaining({

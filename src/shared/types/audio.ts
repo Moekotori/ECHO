@@ -384,6 +384,7 @@ export type UzumeReferenceArtifactPlan = {
   backendSupport: 'deterministic-reference';
   outputDevicePolicy: 'deterministic-reference';
   latencyBudget: 'deterministic-reference';
+  readinessContract: 'deterministic-reference';
   qualityRollback: 'deterministic-reference';
   outputResamplingRisk: 'deterministic-reference';
   pcmOutputQuantization: 'deterministic-reference';
@@ -1045,6 +1046,41 @@ export type UzumeReferenceLatencyBudgetInspectReport = {
   schedulerState: 'reference-only';
   reasons: string[];
 };
+export type UzumeReferenceReadinessContractInspectReport = {
+  artifact: 'readiness-contract-reference';
+  policy: 'main-playback-owns-timeline-uzume-reports-readiness';
+  state:
+    | 'waiting-for-full-profile'
+    | 'ready-to-commit'
+    | 'cache-ready'
+    | 'short-bridge-reference-only'
+    | 'stale-generation-rejected';
+  intent: UzumeReferenceContinuityInspectReport['continuity']['intent'];
+  playbackPolicy: UzumeReferenceContinuityInspectReport['continuity']['policy'];
+  selectedPath: UzumeReferenceContinuityInspectReport['continuity']['selectedPath'];
+  waitTarget: UzumeReferenceContinuityInspectReport['continuity']['waitTarget'];
+  fullProfileReady: boolean;
+  gpuPrewarmReady: boolean;
+  gpuPrewarmState: 'future-render-ahead-gate' | 'not-ready';
+  cacheState: UzumeReferenceContinuityInspectReport['renderAheadCache']['lookupState'];
+  cacheCommitState: UzumeReferenceContinuityInspectReport['renderAheadCache']['commitState'];
+  cacheKey: string;
+  renderAheadState: UzumeReferenceContinuityInspectReport['preRoll']['renderAheadState'];
+  renderAheadReadyFrames: number;
+  renderAheadTargetFrames: number;
+  deadlineState: UzumeReferenceContinuityInspectReport['preRoll']['state'];
+  deadlineSlackFrames: number;
+  callbackRingState: UzumeReferenceContinuityInspectReport['callbackRing']['state'];
+  callbackRingTelemetryStatus: UzumeReferenceContinuityInspectReport['callbackRing']['telemetryStatus'];
+  shortBridgeCandidate: 'available' | 'blocked';
+  shortBridgeReason: string | null;
+  crossfadeToFullProfile: 'candidate-ready' | 'blocked-by-intent';
+  generationCommitRule: 'current-generation-only';
+  staleGenerationCommitAllowed: false;
+  handoffStrategy: UzumeReferenceContinuityInspectReport['preRoll']['handoffStrategy'];
+  productionScheduler: 'not-enabled';
+  reasons: string[];
+};
 export type UzumeCompiledReferencePlan = {
   schemaVersion: 1;
   telemetrySchemaVersion: 2;
@@ -1062,6 +1098,7 @@ export type UzumeCompiledReferencePlan = {
   backendSupport: UzumeReferenceBackendSupportInspectReport;
   outputDevicePolicy: UzumeReferenceOutputDevicePolicyInspectReport;
   latencyBudget: UzumeReferenceLatencyBudgetInspectReport;
+  readinessContract: UzumeReferenceReadinessContractInspectReport;
   orderedProfileSections: UzumeReferenceSectionId[];
   engineAssignments: UzumeReferenceAssignment[];
   mergeGroups: UzumeReferenceMergeGroup[];

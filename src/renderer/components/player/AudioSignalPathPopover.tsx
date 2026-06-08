@@ -366,6 +366,33 @@ const formatUzumeReferenceLatencyBudget = (status: AudioStatus | null): string |
   ]);
 };
 
+const formatUzumeReferenceReadinessContract = (status: AudioStatus | null): string | null => {
+  const report = status?.uzumeReferencePlan?.readinessContract;
+  if (!report) {
+    return null;
+  }
+
+  return joinSpec([
+    report.artifact,
+    report.policy,
+    report.state,
+    `${report.intent}->${report.selectedPath}`,
+    `wait ${report.waitTarget}`,
+    `full-profile ${report.fullProfileReady ? 'ready' : 'not-ready'}`,
+    `gpu-prewarm ${report.gpuPrewarmReady ? 'ready' : report.gpuPrewarmState}`,
+    `cache ${report.cacheState}->${report.cacheCommitState} key ${report.cacheKey}`,
+    `render-ahead ${report.renderAheadState} ${report.renderAheadReadyFrames}/${report.renderAheadTargetFrames}`,
+    `deadline ${report.deadlineState} slack ${formatReferenceFrames(report.deadlineSlackFrames) ?? 'unknown'}`,
+    `ring ${report.callbackRingState}/${report.callbackRingTelemetryStatus}`,
+    `short-bridge ${report.shortBridgeCandidate}${report.shortBridgeReason ? ` ${cleanReason(report.shortBridgeReason)}` : ''}`,
+    `crossfade ${report.crossfadeToFullProfile}`,
+    `generation ${report.generationCommitRule} stale ${report.staleGenerationCommitAllowed ? 'allowed' : 'blocked'}`,
+    report.handoffStrategy,
+    `scheduler ${report.productionScheduler}`,
+    report.reasons.length ? `reasons ${report.reasons.map(cleanReason).filter(Boolean).join(' | ')}` : null,
+  ]);
+};
+
 const formatFractionalMs = (value: number | null | undefined): string | null => {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return null;
@@ -1632,6 +1659,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceBackendSupport = formatUzumeReferenceBackendSupport(status);
   const referenceOutputDevicePolicy = formatUzumeReferenceOutputDevicePolicy(status);
   const referenceLatencyBudget = formatUzumeReferenceLatencyBudget(status);
+  const referenceReadinessContract = formatUzumeReferenceReadinessContract(status);
   const referenceResampling = formatUzumeReferenceResampling(status);
   const referenceSrcRollback = formatUzumeReferenceSrcRollback(status);
   const referenceSrcBudget = formatUzumeReferenceSrcBudget(status);
@@ -1795,6 +1823,16 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       title: 'UZUME latency budget reference',
       value: referenceLatencyBudget,
       tone: 'warning',
+      variant: 'process',
+    });
+  }
+
+  if (referenceReadinessContract) {
+    nodes.push({
+      badge: '',
+      title: 'UZUME readiness contract reference',
+      value: referenceReadinessContract,
+      tone: referencePlan?.readinessContract.state === 'ready-to-commit' || referencePlan?.readinessContract.state === 'cache-ready' ? 'process' : 'warning',
       variant: 'process',
     });
   }

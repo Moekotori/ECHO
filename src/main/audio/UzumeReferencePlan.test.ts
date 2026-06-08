@@ -238,6 +238,30 @@ describe('UZUME reference plan compiler', () => {
         'production_latency_compensation_deferred_to_realtime_gate',
       ],
     });
+    expect(compiled.readinessContract).toMatchObject({
+      artifact: 'readiness-contract-reference',
+      policy: 'main-playback-owns-timeline-uzume-reports-readiness',
+      state: 'waiting-for-full-profile',
+      intent: 'normal-playlist-boundary',
+      playbackPolicy: 'predictive-cache',
+      selectedPath: 'wait-for-full-profile',
+      waitTarget: 'predictive-cache-or-full-profile',
+      fullProfileReady: false,
+      gpuPrewarmReady: false,
+      gpuPrewarmState: 'future-render-ahead-gate',
+      cacheState: 'miss',
+      shortBridgeCandidate: 'blocked',
+      generationCommitRule: 'current-generation-only',
+      staleGenerationCommitAllowed: false,
+      productionScheduler: 'not-enabled',
+      reasons: [
+        'readiness_summary_derived_from_reference_reports',
+        'main_playback_logic_owns_timeline_and_policy',
+        'gpu_prewarm_deferred_to_render_ahead_gate',
+        'stale_generation_commit_disallowed',
+        'readiness_contract_reference_only',
+      ],
+    });
     expect(compiled.resampling).toMatchObject({
       active: true,
       family: 'poly-sinc-reference',
@@ -553,6 +577,7 @@ describe('UZUME reference plan compiler', () => {
     expect(compiled.artifactPlan.backendSupport).toBe('deterministic-reference');
     expect(compiled.artifactPlan.outputDevicePolicy).toBe('deterministic-reference');
     expect(compiled.artifactPlan.latencyBudget).toBe('deterministic-reference');
+    expect(compiled.artifactPlan.readinessContract).toBe('deterministic-reference');
     expect(compiled.artifactPlan.qualityRollback).toBe('deterministic-reference');
     expect(compiled.artifactPlan.pcmOutputQuantization).toBe('deterministic-reference');
     expect(compiled.artifactPlan.pcmIngressGuard).toBe('deterministic-reference');
