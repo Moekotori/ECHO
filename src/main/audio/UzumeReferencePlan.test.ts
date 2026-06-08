@@ -684,6 +684,46 @@ describe('UZUME reference plan compiler', () => {
     });
   });
 
+  it('keeps all six formatPath reference reasons in a stable inspect snapshot', () => {
+    const compiled = compile({
+      sampleRatePlan: plan({
+        requestedOutputSampleRate: 48000,
+        actualDeviceSampleRate: 48000,
+        sharedDeviceSampleRate: 48000,
+        outputMode: 'shared',
+        resampling: true,
+        bitPerfectCandidate: false,
+        sampleRateMismatch: true,
+      }),
+      outputMode: 'shared',
+      dspActive: true,
+      dspModuleActive: true,
+      bitPerfectDisabledReason: 'uzume_processing_enabled',
+      nativeFormatPath: 'pcm_processed',
+      nativeBitPerfectState: 'disabled',
+      nativeDirectDisabledReason: 'uzume_processing_enabled',
+    });
+
+    expect(Object.keys(compiled.formatPathPlan)).toEqual([
+      'pcm_bitperfect',
+      'pcm_processed',
+      'dsd_direct',
+      'dsd_upsampling',
+      'd2p_processed',
+      'sdm_processed',
+    ]);
+    expect(Object.entries(compiled.formatPathPlan).map(([path, entry]) => `${path}:${entry?.state}${entry?.reason ? `/${entry.reason}` : ''}`)).toEqual([
+      'pcm_bitperfect:disabled/uzume_processing_enabled',
+      'pcm_processed:current',
+      'dsd_direct:unavailable/requires_dsd_source',
+      'dsd_upsampling:unavailable/requires_dsd_source',
+      'd2p_processed:unavailable/d2p_requires_dsd_source',
+      'sdm_processed:unavailable/sdm_reference_engine_not_ready',
+    ]);
+    expect(JSON.stringify(compiled.formatPathPlan)).not.toContain('source_is_pcm');
+    expect(JSON.stringify(compiled.formatPathPlan)).not.toContain('sdm_engine_not_ready');
+  });
+
   it('assigns active UI sections to reference engines instead of runtime processors', () => {
     const compiled = compile({
       sampleRatePlan: plan({ requestedOutputSampleRate: 48000, resampling: true }),

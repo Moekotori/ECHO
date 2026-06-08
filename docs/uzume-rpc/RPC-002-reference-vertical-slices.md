@@ -10,6 +10,7 @@
 
 - 2026-06-08：新增主进程纯函数 `UzumeReferencePlan`，先落地 RPC-002 的第一条 vertical slice：formatPath reference planner、compiler assignment inspect report、ResamplingProfile reference metadata、PCM float64 reference helper、deterministic artifact seed。
 - `AudioSession` 现在会生成 `uzumeReferencePlan`，并用 reference planner 产出的六条 `uzumeFormatPathPlan` 替代 RPC-001 skeleton placeholder reason；`source_is_pcm`、`sdm_engine_not_ready` 这类占位 reason 已在主状态中替换为 `requires_dsd_source`、`d2p_requires_dsd_source`、`sdm_reference_engine_not_ready` 等可解释 reason。
+- 2026-06-08：补 `uzumeFormatPathPlan` 六条 reference path 的 stable inspect snapshot guard：主进程测试固定 `pcm_bitperfect`、`pcm_processed`、`dsd_direct`、`dsd_upsampling`、`d2p_processed`、`sdm_processed` 的 key 顺序、state/reason 和 placeholder reason 禁止项，防止后续 UI 只能解释 active path。
 - Professional Status 已显示 reference compiler schema/internal domain、active engine assignment、UZUME SRC reference report，供 Signal Path/状态排查使用；它仍是只读 inspect surface，不开放新控制。
 - Professional Status 增加 jsdom visual-state 分析测试，读取 badges、signal nodes、detail rows 的 `data-tone`，锁定 RPC-002 reference UI 当前应呈现 warning/good 而不是 danger 的视觉语义状态；这不是截图基线。
 - 2026-06-08：补 absent-plan visual-state guard：当 `uzumeReferencePlan` 缺失时，Professional Status 的 RPC-002 reference rows 必须保持 muted，Signal Path 不渲染 UZUME reference nodes，避免 skeleton / legacy 状态被误读为 compiled reference telemetry。
