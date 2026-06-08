@@ -2003,6 +2003,45 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    status.uzumeReferencePlan!.outputDevicePolicy = {
+      ...status.uzumeReferencePlan!.outputDevicePolicy,
+      outputMode: 'exclusive',
+      deviceCapability: 'direct-like-rate-mismatch',
+      state: 'device-rate-mismatch-risk',
+      fileRate: 44100,
+      decoderOutputRate: 44100,
+      requestedOutputRate: 96000,
+      actualDeviceRate: 48000,
+      sharedDeviceRate: null,
+      bitPerfectCandidate: false,
+      resampling: false,
+      sampleRateMismatch: true,
+      recommendation: 'inspect-device-rate-mismatch',
+      reasons: ['actual_device_rate_differs_from_requested_output_rate', 'output_device_policy_reference_only'],
+    };
+    status.uzumeReferencePlan!.backendSupport.outputDevicePolicyState = 'device-rate-mismatch-risk';
+    status.uzumeReferencePlan!.latencyBudget.outputDevicePolicyState = 'device-rate-mismatch-risk';
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const directMismatchDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(directMismatchDialog.textContent).toContain('output-device-policy-reference / pcm_processed / exclusive / direct-like-rate-mismatch / device-rate-mismatch-risk');
+    expect(directMismatchDialog.textContent).toContain('requested 96kHz / actual 48kHz / shared unknown');
+    expect(directMismatchDialog.textContent).toContain('recommend inspect-device-rate-mismatch');
+    expect(directMismatchDialog.textContent).toContain('scheduler not-enabled');
+    expect(readSignalPathVisualState(directMismatchDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME output device policy reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     status.uzumeReferencePlan!.formatPath = 'pcm_bitperfect';
     status.uzumeReferencePlan!.internalDomain = 'pcm-bypass';
     status.uzumeReferencePlan!.bitPerfectState = 'available';
