@@ -1644,6 +1644,7 @@ describe('preload SMTC API', () => {
     await exposedApi!.plugins.createExample('playback-panel');
     await exposedApi!.plugins.enable({ pluginId: 'echo.playback-panel', trustedPermissions: ['playback:read'] });
     await exposedApi!.plugins.disable('echo.playback-panel');
+    await exposedApi!.plugins.delete('echo.playback-panel');
     await exposedApi!.plugins.reload('echo.playback-panel');
     await exposedApi!.plugins.openDirectory('echo.playback-panel');
     await exposedApi!.plugins.exportPackage('echo.playback-panel');
@@ -1668,6 +1669,7 @@ describe('preload SMTC API', () => {
       trustedPermissions: ['playback:read'],
     });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsDisable, 'echo.playback-panel');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsDelete, 'echo.playback-panel');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsReload, 'echo.playback-panel');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsOpenDirectory, 'echo.playback-panel');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsExportPackage, 'echo.playback-panel');

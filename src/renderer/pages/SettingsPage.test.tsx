@@ -18,6 +18,7 @@ import type { HqPlayerConnectionTestResult, HqPlayerSettings, HqPlayerStatus } f
 import type { LibraryDatabaseProtectionStatus, LibraryScanStatus } from '../../shared/types/library';
 import type { MvSettings } from '../../shared/types/mv';
 import { resetLibraryScanSessionForTests } from '../stores/libraryScanSession';
+import { finalThemeUnlockPluginId, finalThemeUnlockVersion } from '../../shared/constants/featureUnlocks';
 
 const settings: AppSettings = {
   appearanceTheme: 'light',
@@ -779,6 +780,20 @@ const createThemePluginSummary = (): PluginSummary => ({
   lyricsProviders: [],
   coverProviders: [],
   settingsValues: {},
+});
+
+const createFinalUnlockPluginSummary = (): PluginSummary => ({
+  ...createThemePluginSummary(),
+  id: finalThemeUnlockPluginId,
+  name: 'FINAL Theme Unlock',
+  directory: 'D:\\Echo\\plugins\\echo.final-theme-unlock',
+  contributes: {
+    themePresets: [],
+  },
+  security: {
+    ...createThemePluginSummary().security,
+    themePresetCount: 0,
+  },
 });
 
 const hexToRgb = (value: string): { r: number; g: number; b: number } => ({
@@ -1910,7 +1925,7 @@ describe('SettingsPage', () => {
     expect(document.documentElement.dataset.themePreset).toBe('darkSideMoon');
   });
 
-  it('locks the FINAL theme preset until the exact new key is entered in settings search', async () => {
+  it('keeps the FINAL theme preset locked for all settings search keys', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
@@ -1937,13 +1952,29 @@ describe('SettingsPage', () => {
 
     fireEvent.change(screen.getByPlaceholderText('settings.header.searchPlaceholder'), { target: { value: 'FINAL-8K-7Q4M-H2ND-2026' } });
 
+    await waitFor(() => expect(lockedPresetButton.disabled).toBe(true));
+    expect(window.localStorage.getItem('echo-next:settings:final-theme-unlocked')).toBeNull();
+  });
+
+  it('unlocks the FINAL theme preset only when the unlock plugin is installed', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    listPluginsMock.mockResolvedValue({ directory: 'D:\\Echo\\plugins', plugins: [createFinalUnlockPluginSummary()] });
+    getSettingsMock.mockResolvedValue(settings);
+    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    clickSettingsNav('settings\\.nav\\.appearance\\.label');
+    expandThemePresetGrid();
+
     const presetButton = (await screen.findByText('settings.appearance.themePreset.FINAL')).closest('button') as HTMLButtonElement;
     await waitFor(() => expect(presetButton.disabled).toBe(false));
-    expect(window.localStorage.getItem('echo-next:settings:final-theme-unlocked')).toBe('2026-06-final-key-v2');
-
     fireEvent.click(presetButton);
 
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appearanceThemePreset: 'FINAL', finalThemeUnlockVersion: '2026-06-final-key-v2' }));
+    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appearanceThemePreset: 'FINAL', finalThemeUnlockVersion }));
     expect(document.documentElement.dataset.themePreset).toBe('FINAL');
   });
 

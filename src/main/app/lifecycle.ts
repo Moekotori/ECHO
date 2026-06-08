@@ -9,6 +9,7 @@ import { registerVideoProtocolHandler } from '../protocol/videoProtocol';
 import { disposeSmtcIntegration, initializeSmtcIntegration } from '../integrations/smtc/SmtcStatusSync';
 import { disposeDiscordPresenceIntegration, initializeDiscordPresenceIntegration } from '../integrations/discord/DiscordPresenceStatusSync';
 import { disposeLastFmIntegration, initializeLastFmIntegration } from '../integrations/lastfm/LastFmStatusSync';
+import { disposeWallpaperEngineBridgeIntegration, initializeWallpaperEngineBridgeIntegration } from '../integrations/wallpaperEngine/getWallpaperEngineBridgeService';
 import { savePlaybackMemoryNow } from '../ipc/playbackIpc';
 import { dispatchLocalAudioFilesOpened, parseLocalAudioFileArguments } from './localFileOpen';
 import { initializeAutoUpdater } from './autoUpdater';
@@ -251,6 +252,7 @@ export const registerAppLifecycle = (): void => {
     registerCoverProtocolHandler();
     registerVideoProtocolHandler();
     markStartupStage('protocols:register:complete');
+    void initializeWallpaperEngineBridgeIntegration();
     markStartupStage('startup-integrations:init:start', {
       libraryRecoveryMode,
       libraryHealth: dataProtection.libraryHealth.status,
@@ -347,6 +349,7 @@ export const registerAppLifecycle = (): void => {
     await disposeAirPlayReceiverSpikeService();
     await disposeConnectReceiverService();
     await disposeConnectService();
+    await disposeWallpaperEngineBridgeIntegration();
     await disposeSmtcIntegration();
     await disposeDefaultAudioSessionGracefully('app-quit');
     getSleepTimerService().dispose();

@@ -782,6 +782,50 @@ describe('AppLayout standalone routes', () => {
     await waitFor(() => expect(screen.getByText('Plugin manager page')).toBeTruthy());
   });
 
+  it('lets the plugin manager own file drops instead of showing the global music import overlay', async () => {
+    const localRoutes: AppRoute[] = [
+      routes[0],
+      routes[1],
+      {
+        id: 'plugins',
+        label: 'Plugins',
+        description: 'Plugins',
+        icon: ListMusic,
+        placement: 'main',
+        element: <div>Plugin manager page</div>,
+      },
+    ];
+
+    const { container } = render(
+      <AppProviders>
+        <AppLayout routes={localRoutes} />
+      </AppProviders>,
+    );
+
+    fireEvent.dragEnter(window, {
+      dataTransfer: {
+        files: [],
+        types: ['Files'],
+      },
+    });
+    expect(container.querySelector('.drag-import-overlay')).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(container.querySelector('.drag-import-overlay')).toBeNull();
+
+    window.dispatchEvent(new Event('app:navigate:plugins'));
+    await waitFor(() => expect(screen.getByText('Plugin manager page')).toBeTruthy());
+
+    fireEvent.dragEnter(window, {
+      dataTransfer: {
+        files: [],
+        types: ['Files'],
+      },
+    });
+
+    expect(container.querySelector('.drag-import-overlay')).toBeNull();
+  });
+
   it('reopens the first-run wizard when settings mark onboarding incomplete', async () => {
     const getSettings = vi.fn().mockResolvedValue({ onboardingCompleted: true, smtcEnabled: true });
     window.echo = {

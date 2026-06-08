@@ -2311,6 +2311,7 @@ const echoApi: EchoApi = {
     createExample: (kind) => ipcRenderer.invoke(IpcChannels.PluginsCreateExample, kind),
     enable: (request) => ipcRenderer.invoke(IpcChannels.PluginsEnable, request),
     disable: (pluginId) => ipcRenderer.invoke(IpcChannels.PluginsDisable, pluginId),
+    delete: (pluginId) => ipcRenderer.invoke(IpcChannels.PluginsDelete, pluginId),
     reload: (pluginId) => ipcRenderer.invoke(IpcChannels.PluginsReload, pluginId),
     openDirectory: (pluginId) => ipcRenderer.invoke(IpcChannels.PluginsOpenDirectory, pluginId),
     exportPackage: (pluginId) => ipcRenderer.invoke(IpcChannels.PluginsExportPackage, pluginId),

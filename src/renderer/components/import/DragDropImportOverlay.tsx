@@ -10,6 +10,7 @@ type DragDropImportOverlayProps = {
 const getEventFiles = (event: DragEvent): File[] => Array.from(event.dataTransfer?.files ?? []);
 
 const hasFileDrag = (event: DragEvent): boolean => Array.from(event.dataTransfer?.types ?? []).includes('Files');
+const escapeKeys = new Set(['Escape', 'Esc']);
 
 type Translate = (key: TranslationKey, options?: Record<string, string | number>) => string;
 
@@ -45,6 +46,24 @@ export const DragDropImportOverlay = ({ onNotice }: DragDropImportOverlayProps):
     dragDepthRef.current = 0;
     setIsDragging(false);
   }, []);
+
+  useEffect(() => {
+    if (!isDragging) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (!escapeKeys.has(event.key) || event.defaultPrevented) {
+        return;
+      }
+
+      event.preventDefault();
+      resetDragState();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDragging, resetDragState]);
 
   useEffect(() => {
     const handleDragEnter = (event: DragEvent): void => {

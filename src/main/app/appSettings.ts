@@ -609,7 +609,13 @@ export const defaultSettings: AppSettings = {
   taskbarPlaybackControlsEnabled: false,
 };
 
+let cachedSettingsSource: Partial<AppSettings> | null = null;
 let cachedSettings: AppSettings | null = null;
+let finalThemeUnlockAvailable = false;
+
+export type NormalizeSettingsOptions = {
+  finalThemeUnlocked?: boolean;
+};
 
 const getSettingsPath = (): string => join(app.getPath('userData'), 'echo-settings.json');
 
@@ -1509,7 +1515,7 @@ export const normalizeChannelBalanceSettings = (value: unknown): ChannelBalanceS
   };
 };
 
-export const normalizeSettings = (value: unknown): AppSettings => {
+export const normalizeSettings = (value: unknown, options: NormalizeSettingsOptions = {}): AppSettings => {
   if (!value || typeof value !== 'object') {
     return { ...defaultSettings };
   }
@@ -1606,16 +1612,20 @@ export const normalizeSettings = (value: unknown): AppSettings => {
   );
   const replayGainTargetLufs = Number(settings.replayGainTargetLufs);
   const replayGainPreampDb = Number(settings.replayGainPreampDb);
-  const finalThemeUnlocked = settings.finalThemeUnlockVersion === finalThemeUnlockVersion;
-  const appearanceCustomThemes = normalizeThemeCustomThemes(settings.appearanceCustomThemes);
+  const finalThemeUnlocked = (options.finalThemeUnlocked ?? finalThemeUnlockAvailable) === true
+    && settings.finalThemeUnlockVersion === finalThemeUnlockVersion;
+  const appearanceCustomThemes = normalizeThemeCustomThemes(settings.appearanceCustomThemes)
+    .filter((theme) => theme.basePreset !== 'FINAL');
   const requestedAppearanceThemeCustomId = normalizeThemeCustomId(settings.appearanceThemeCustomId, appearanceCustomThemes);
   const requestedAppearanceCustomTheme = appearanceCustomThemes.find((theme) => theme.id === requestedAppearanceThemeCustomId);
-  const appearanceThemeCustomId = !finalThemeUnlocked && requestedAppearanceCustomTheme?.basePreset === 'FINAL'
+  const appearanceThemeCustomId = requestedAppearanceCustomTheme?.basePreset === 'FINAL' && !finalThemeUnlocked
     ? null
     : requestedAppearanceThemeCustomId;
   const activeAppearanceCustomTheme = appearanceCustomThemes.find((theme) => theme.id === appearanceThemeCustomId);
   const requestedAppearanceThemePreset = activeAppearanceCustomTheme?.basePreset ?? normalizeAppearanceThemePreset(settings.appearanceThemePreset);
   const appearanceThemePreset = !finalThemeUnlocked && requestedAppearanceThemePreset === 'FINAL' ? 'classic' : requestedAppearanceThemePreset;
+  const appearanceThemePresetOverrides = normalizeThemePresetOverrides(settings.appearanceThemePresetOverrides);
+  delete appearanceThemePresetOverrides.FINAL;
   const downloadsFeatureUnlocked = settings.downloadsFeatureUnlocked === true;
 
   return {
@@ -1627,7 +1637,7 @@ export const normalizeSettings = (value: unknown): AppSettings => {
     appearanceThemeScheduleDarkAt: normalizeThemeScheduleTime(settings.appearanceThemeScheduleDarkAt, defaultAppearanceThemeScheduleDarkAt),
     appearanceThemeScheduleLightAt: normalizeThemeScheduleTime(settings.appearanceThemeScheduleLightAt, defaultAppearanceThemeScheduleLightAt),
     appearanceThemePreset,
-    appearanceThemePresetOverrides: normalizeThemePresetOverrides(settings.appearanceThemePresetOverrides),
+    appearanceThemePresetOverrides,
     appearanceCustomThemes,
     appearanceThemeCustomId,
     finalThemeUnlockVersion: finalThemeUnlocked ? finalThemeUnlockVersion : null,
@@ -1959,34 +1969,72 @@ export const normalizeSettings = (value: unknown): AppSettings => {
   };
 };
 
-export const getAppSettings = (): AppSettings => {
-  if (cachedSettings) {
-    return cachedSettings;
+export const setFinalThemeUnlockAvailable = (available: boolean): void => {
+  if (finalThemeUnlockAvailable === available) {
+    return;
   }
-
-  const settingsPath = getSettingsPath();
-
-  if (!existsSync(settingsPath)) {
-    cachedSettings = { ...defaultSettings };
-    return cachedSettings;
-  }
-
-  try {
-    cachedSettings = normalizeSettings(JSON.parse(readFileSync(settingsPath, 'utf8')));
-  } catch {
-    cachedSettings = { ...defaultSettings };
-  }
-
-  return cachedSettings;
+  finalThemeUnlockAvailable = available;
+  cachedSettings = null;
 };
 
-export const setAppSettings = (patch: Partial<AppSettings>): AppSettings => {
-  const nextSettings = normalizeSettings({ ...getAppSettings(), ...patch });
-  const settingsPath = getSettingsPath();
+const containsFinalThemeCustomTheme = (themes: unknown): boolean =>
+  Array.isArray(themes) && themes.some((theme) =>
+    Boolean(theme && typeof theme === 'object' && !Array.isArray(theme) && (theme as Partial<AppThemeCustomTheme>).basePreset === 'FINAL'),
+  );
 
+const containsFinalThemePresetOverride = (overrides: unknown): boolean =>
+  Boolean(overrides && typeof overrides === 'object' && !Array.isArray(overrides) && Object.prototype.hasOwnProperty.call(overrides, 'FINAL'));
+
+const shouldPersistFinalThemeRelock = (source: Partial<AppSettings>, normalized: AppSettings): boolean =>
+  (source.appearanceThemePreset === 'FINAL' && normalized.appearanceThemePreset !== 'FINAL') ||
+  (typeof source.finalThemeUnlockVersion === 'string' && source.finalThemeUnlockVersion !== normalized.finalThemeUnlockVersion) ||
+  containsFinalThemeCustomTheme(source.appearanceCustomThemes) ||
+  containsFinalThemePresetOverride(source.appearanceThemePresetOverrides);
+
+const persistNormalizedSettings = (settings: AppSettings): void => {
+  const settingsPath = getSettingsPath();
   mkdirSync(dirname(settingsPath), { recursive: true });
-  writeFileSync(settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`, 'utf8');
-  cachedSettings = nextSettings;
+  writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+};
+
+export const getAppSettings = (options: NormalizeSettingsOptions = {}): AppSettings => {
+  if (options.finalThemeUnlocked !== true && cachedSettings) {
+    return cachedSettings;
+  }
+
+  if (!cachedSettingsSource) {
+    const settingsPath = getSettingsPath();
+
+    if (!existsSync(settingsPath)) {
+      cachedSettingsSource = { ...defaultSettings };
+    } else {
+      try {
+        cachedSettingsSource = JSON.parse(readFileSync(settingsPath, 'utf8')) as Partial<AppSettings>;
+      } catch {
+        cachedSettingsSource = { ...defaultSettings };
+      }
+    }
+  }
+
+  const sourceSettings = cachedSettingsSource ?? defaultSettings;
+  const settings = normalizeSettings(sourceSettings, options);
+  if (shouldPersistFinalThemeRelock(sourceSettings, settings)) {
+    persistNormalizedSettings(settings);
+    cachedSettingsSource = settings;
+  }
+  if (options.finalThemeUnlocked !== true) {
+    cachedSettings = settings;
+  }
+
+  return settings;
+};
+
+export const setAppSettings = (patch: Partial<AppSettings>, options: NormalizeSettingsOptions = {}): AppSettings => {
+  const nextSettings = normalizeSettings({ ...getAppSettings(options), ...patch }, options);
+
+  persistNormalizedSettings(nextSettings);
+  cachedSettingsSource = nextSettings;
+  cachedSettings = normalizeSettings(nextSettings, options);
 
   return nextSettings;
 };

@@ -582,6 +582,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   }, [activeRoute, mountedPersistentRouteIds, navigableRoutes]);
   const isStandaloneRoute = activeRoute.chrome === 'standalone';
   const isLyricsRoute = activeRouteId === 'lyrics';
+  const shouldRenderDragDropImportOverlay = !isStandaloneRoute && activeRouteId !== 'plugins';
   const shouldUseLyricsPlayerDrawer =
     isLyricsRoute &&
     (lyricsMiniPlayerSettings.lyricsPlayerBarDrawerEnabled === true ||
@@ -2419,7 +2420,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
 
       <EditableContextMenu />
 
-      {isStandaloneRoute ? null : <DragDropImportOverlay onNotice={setChromeNotice} />}
+      {shouldRenderDragDropImportOverlay ? <DragDropImportOverlay onNotice={setChromeNotice} /> : null}
 
       {isFirstRunWizardOpen ? (
         <FirstRunWizard

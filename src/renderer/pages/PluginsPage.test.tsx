@@ -81,6 +81,7 @@ const pluginsBridge = {
   createExample: vi.fn(async () => ({ pluginId: 'echo.playback-panel', directory: 'D:\\Echo\\plugins\\echo.playback-panel' })),
   enable: vi.fn(async () => ({ ...plugins[0], enabled: true, status: 'running', trustedPermissions: ['playback:read'] })),
   disable: vi.fn(async () => ({ ...plugins[0], enabled: false, status: 'disabled' })),
+  delete: vi.fn(async () => ({ pluginId: 'echo.playback-panel', directory: 'D:\\Echo\\plugins\\echo.playback-panel' })),
   reload: vi.fn(async () => plugins[0]),
   openDirectory: vi.fn(async () => undefined),
   exportPackage: vi.fn(async () => 'D:\\Echo\\plugins\\echo.playback-panel.echo'),
@@ -162,6 +163,15 @@ describe('PluginsPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /导出插件包/u }));
     await waitFor(() => expect(pluginsBridge.exportPackage).toHaveBeenCalledWith('echo.playback-panel'));
+  });
+
+  it('confirms before deleting a local plugin', async () => {
+    render(<PluginsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /删除插件/u }));
+
+    await waitFor(() => expect(pluginsBridge.delete).toHaveBeenCalledWith('echo.playback-panel'));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('D:\\Echo\\plugins\\echo.playback-panel'));
   });
 
   it('imports dropped .echo plugin packages', async () => {

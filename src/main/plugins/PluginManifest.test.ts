@@ -81,6 +81,12 @@ describe('plugin manifest validation', () => {
             basePreset: 'classic',
             preview: '#ffffff',
           },
+          {
+            id: 'Final_Copy',
+            title: 'Final Copy',
+            basePreset: 'FINAL',
+            light: { accent: '#ffffff' },
+          },
         ],
       },
     });

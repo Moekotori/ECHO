@@ -1,5 +1,5 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, Code2, Download, Eye, FolderOpen, LockKeyhole, PackagePlus, Play, Power, RefreshCw, ScrollText, ShieldCheck, TerminalSquare, Upload } from 'lucide-react';
+import { Activity, AlertTriangle, Code2, Download, Eye, FolderOpen, LockKeyhole, PackagePlus, Play, Power, RefreshCw, ScrollText, ShieldCheck, TerminalSquare, Trash2, Upload } from 'lucide-react';
 import { pluginPanelBridgeActions, pluginPanelBridgeChannel, pluginPanelBridgeVersion, pluginPermissionDescriptors } from '../../shared/types/plugins';
 import type {
   PluginCreateExampleKind,
@@ -243,7 +243,7 @@ export const PluginsPage = (): JSX.Element => {
     const result = await pluginsApi.list();
     setPlugins(result.plugins);
     setPluginDirectory(result.directory);
-    setSelectedPluginId((current) => current ?? result.plugins[0]?.id ?? null);
+    setSelectedPluginId((current) => result.plugins.some((plugin) => plugin.id === current) ? current : result.plugins[0]?.id ?? null);
   }, [pluginsApi]);
 
   const refreshLogs = useCallback(async (pluginId?: string | null): Promise<void> => {
@@ -377,6 +377,21 @@ export const PluginsPage = (): JSX.Element => {
         setBusyAction(null);
       }
     })();
+  };
+
+  const handleDeletePlugin = (plugin: PluginSummary): void => {
+    if (!pluginsApi?.delete) {
+      return;
+    }
+    const confirmed = window.confirm(`删除插件“${plugin.name}”？\n\n这会停用插件并删除插件目录：\n${plugin.directory}\n\n此操作不会删除音乐文件。`);
+    if (!confirmed) {
+      return;
+    }
+    void runAction(
+      `delete:${plugin.id}`,
+      () => pluginsApi.delete(plugin.id),
+      `已删除插件 ${plugin.name}`,
+    );
   };
 
   const handleEnable = (plugin: PluginSummary): void => {
@@ -687,6 +702,10 @@ export const PluginsPage = (): JSX.Element => {
                 <button className="settings-action-button" type="button" disabled={busyAction === `export:${selectedPlugin.id}`} onClick={() => handleExportPackage(selectedPlugin)}>
                   <Download size={16} />
                   导出插件包
+                </button>
+                <button className="settings-danger-button" type="button" disabled={busyAction === `delete:${selectedPlugin.id}`} onClick={() => handleDeletePlugin(selectedPlugin)}>
+                  <Trash2 size={16} />
+                  删除插件
                 </button>
               </div>
 

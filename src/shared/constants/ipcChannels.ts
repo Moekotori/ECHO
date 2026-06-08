@@ -91,6 +91,7 @@ export const IpcChannels = {
   PluginsCreateExample: 'plugins:create-example',
   PluginsEnable: 'plugins:enable',
   PluginsDisable: 'plugins:disable',
+  PluginsDelete: 'plugins:delete',
   PluginsReload: 'plugins:reload',
   PluginsOpenDirectory: 'plugins:open-directory',
   PluginsExportPackage: 'plugins:export-package',

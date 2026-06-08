@@ -1,4 +1,5 @@
 import type { AppSettings, AppThemeCustomTheme, AppThemeMode, AppThemePreset, AppThemePresetOverride, AppThemePresetOverrides, AppThemeToneOverride } from '../../shared/types/appSettings';
+import { finalThemeUnlockVersion } from '../../shared/constants/featureUnlocks';
 import { getAppBridge } from '../utils/echoBridge';
 import { applyAppearancePreferences, readAppearancePreferences } from './appearancePreferences';
 
@@ -7,6 +8,10 @@ export type ThemeApplyOptions = {
   animate?: boolean;
   customThemeId?: string | null;
   customThemes?: AppThemeCustomTheme[];
+  finalThemeUnlocked?: boolean;
+};
+type ThemePresetOptions = {
+  finalThemeUnlocked?: boolean;
 };
 
 const storageKey = 'echo-next:appearance-theme';
@@ -47,8 +52,8 @@ const validThemePresets: AppThemePreset[] = [
   'matsuriLantern',
   'ginzaNoir',
   'frostJazz',
-  'FINAL',
 ];
+const unlockedThemePresets: AppThemePreset[] = [...validThemePresets, 'FINAL'];
 const themeTransitionMs = 140;
 const defaultScheduleDarkAt = '19:00';
 const defaultScheduleLightAt = '07:00';
@@ -312,8 +317,10 @@ export const normalizeThemeScheduleTime = (value: unknown, fallback = defaultSch
   return match ? `${match[1]}:${match[2]}` : fallback;
 };
 
-export const normalizeThemePreset = (value: unknown): AppThemePreset =>
-  validThemePresets.includes(value as AppThemePreset) ? (value as AppThemePreset) : defaultThemePreset;
+export const normalizeThemePreset = (value: unknown, options: ThemePresetOptions = {}): AppThemePreset => {
+  const allowedPresets = options.finalThemeUnlocked === true ? unlockedThemePresets : validThemePresets;
+  return allowedPresets.includes(value as AppThemePreset) ? (value as AppThemePreset) : defaultThemePreset;
+};
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
@@ -783,8 +790,8 @@ export const writeThemeMode = (mode: AppThemeMode): AppThemeMode => {
   return normalized;
 };
 
-export const writeThemePreset = (preset: AppThemePreset): AppThemePreset => {
-  const normalized = normalizeThemePreset(preset);
+export const writeThemePreset = (preset: AppThemePreset, options: ThemePresetOptions = {}): AppThemePreset => {
+  const normalized = normalizeThemePreset(preset, options);
 
   try {
     window.localStorage.setItem(presetStorageKey, normalized);
@@ -897,17 +904,20 @@ export const resolveThemeModeForSchedule = (
   return isMinuteInRange(currentMinute, timeToMinutes(darkAt), timeToMinutes(lightAt)) ? 'dark' : 'light';
 };
 
-export const applyThemeSettings = (settings: Partial<AppSettings>, options: ThemeApplyOptions = {}): EffectiveTheme =>
-  applyThemeMode(
+export const applyThemeSettings = (settings: Partial<AppSettings>, options: ThemeApplyOptions = {}): EffectiveTheme => {
+  const finalThemeUnlocked = options.finalThemeUnlocked === true || settings.finalThemeUnlockVersion === finalThemeUnlockVersion;
+  return applyThemeMode(
     resolveThemeModeForSchedule(settings),
     settings.appearanceThemePreset ?? readThemePreset(),
     settings.appearanceThemePresetOverrides ?? readThemePresetOverrides(),
     {
       ...options,
+      finalThemeUnlocked,
       customThemeId: Object.prototype.hasOwnProperty.call(settings, 'appearanceThemeCustomId') ? settings.appearanceThemeCustomId ?? null : options.customThemeId,
       customThemes: settings.appearanceCustomThemes ?? options.customThemes,
     },
   );
+};
 
 const prefersReducedMotion = (): boolean => {
   try {
@@ -941,9 +951,10 @@ const applyThemeModeNow = (
   overrides: AppThemePresetOverrides,
   customThemes: AppThemeCustomTheme[] = readThemeCustomThemes(),
   customThemeId: string | null = readThemeCustomId(),
+  options: ThemeApplyOptions = {},
 ): EffectiveTheme => {
   const normalized = normalizeThemeMode(mode);
-  const normalizedPreset = normalizeThemePreset(preset);
+  const normalizedPreset = normalizeThemePreset(preset, options);
   const normalizedOverrides = normalizeThemePresetOverrides(overrides);
   const normalizedCustomThemes = normalizeThemeCustomThemes(customThemes);
   const normalizedCustomThemeId = normalizeThemeCustomId(customThemeId, normalizedCustomThemes);
@@ -983,14 +994,14 @@ export const applyThemeMode = (
   options: ThemeApplyOptions = {},
 ): EffectiveTheme => {
   const normalized = normalizeThemeMode(mode);
-  const normalizedPreset = normalizeThemePreset(preset);
+  const normalizedPreset = normalizeThemePreset(preset, options);
   const normalizedOverrides = normalizeThemePresetOverrides(overrides);
   const normalizedCustomThemes = normalizeThemeCustomThemes(options.customThemes ?? readThemeCustomThemes());
   const normalizedCustomThemeId = normalizeThemeCustomId(options.customThemeId ?? readThemeCustomId(), normalizedCustomThemes);
   let effectiveTheme = resolveThemeMode(normalized);
 
   runThemeTransition(() => {
-    effectiveTheme = applyThemeModeNow(normalized, normalizedPreset, normalizedOverrides, normalizedCustomThemes, normalizedCustomThemeId);
+    effectiveTheme = applyThemeModeNow(normalized, normalizedPreset, normalizedOverrides, normalizedCustomThemes, normalizedCustomThemeId, options);
   }, options);
 
   return effectiveTheme;
@@ -1003,7 +1014,7 @@ export const updateThemeMode = (mode: AppThemeMode, options: ThemeApplyOptions =
 };
 
 export const updateThemePreset = (preset: AppThemePreset, options: ThemeApplyOptions = {}): AppThemePreset => {
-  const normalized = writeThemePreset(preset);
+  const normalized = writeThemePreset(preset, options);
   const customThemes = options.customThemes ?? readThemeCustomThemes();
   const customThemeId = Object.prototype.hasOwnProperty.call(options, 'customThemeId') ? options.customThemeId ?? null : readThemeCustomId();
   writeThemeCustomId(customThemeId, customThemes);
@@ -1029,7 +1040,7 @@ export const updateThemePreferences = (
   options: ThemeApplyOptions = {},
 ): AppThemeMode => {
   const normalizedMode = writeThemeMode(mode);
-  const normalizedPreset = writeThemePreset(preset);
+  const normalizedPreset = writeThemePreset(preset, options);
   const normalizedOverrides = writeThemePresetOverrides(overrides);
   const normalizedCustomThemes = writeThemeCustomThemes(options.customThemes ?? readThemeCustomThemes());
   const normalizedCustomThemeId = writeThemeCustomId(
@@ -1058,11 +1069,12 @@ export const loadPersistedThemeMode = async (): Promise<AppThemeMode> => {
 
   const settings = await appBridge.getSettings();
   const themeMode = writeThemeMode(settings.appearanceTheme ?? defaultThemeMode);
-  writeThemePreset(settings.appearanceThemePreset ?? defaultThemePreset);
+  const finalThemeUnlocked = settings.finalThemeUnlockVersion === finalThemeUnlockVersion;
+  writeThemePreset(settings.appearanceThemePreset ?? defaultThemePreset, { finalThemeUnlocked });
   writeThemePresetOverrides(settings.appearanceThemePresetOverrides ?? {});
   const customThemes = writeThemeCustomThemes(settings.appearanceCustomThemes ?? []);
   const customThemeId = writeThemeCustomId(settings.appearanceThemeCustomId ?? null, customThemes);
-  applyThemeSettings(settings, { customThemeId, customThemes });
+  applyThemeSettings(settings, { customThemeId, customThemes, finalThemeUnlocked });
   return themeMode;
 };
 

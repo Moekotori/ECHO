@@ -78,6 +78,7 @@ const mocks = vi.hoisted(() => {
     setAppSettingsMock: vi.fn((patch: Record<string, unknown>) => ({ smtcEnabled: true, ...patch })),
     showSaveDialogMock: vi.fn(),
     showOpenDialogMock: vi.fn(),
+    trashItemMock: vi.fn(async (_path: string) => undefined),
   };
 });
 
@@ -87,6 +88,7 @@ vi.mock('electron', () => ({
   },
   shell: {
     openPath: mocks.openPathMock,
+    trashItem: mocks.trashItemMock,
   },
   dialog: {
     showSaveDialog: mocks.showSaveDialogMock,
@@ -138,6 +140,10 @@ describe('PluginService', () => {
     mocks.openPathMock.mockClear();
     mocks.showSaveDialogMock.mockReset();
     mocks.showOpenDialogMock.mockReset();
+    mocks.trashItemMock.mockReset();
+    mocks.trashItemMock.mockImplementation(async (path: string) => {
+      rmSync(path, { recursive: true, force: true });
+    });
     pluginRoot = mkdtempSync(join(tmpdir(), 'echo-next-plugin-service-'));
     service = new PluginService(pluginRoot);
   });
@@ -218,6 +224,31 @@ describe('PluginService', () => {
 
     expect(() => service.enable({ pluginId: 'echo.playback-panel' })).toThrow('plugin_permission_confirmation_required');
     expect(service.list().plugins[0].enabled).toBe(false);
+  });
+
+  it('stops and removes a plugin directory when deleting it', async () => {
+    const manifest: PluginManifest = {
+      id: 'echo.delete-me',
+      name: 'Delete Me',
+      version: '0.0.1',
+      apiVersion: 1,
+      entry: 'plugin.js',
+      permissions: [],
+    };
+    writePlugin(pluginRoot, manifest, "echo.commands.register('ping', () => 'pong');");
+    service.enable({ pluginId: 'echo.delete-me', trustedPermissions: [] });
+
+    const result = await service.deletePlugin('echo.delete-me');
+
+    expect(result).toMatchObject({
+      pluginId: 'echo.delete-me',
+      directory: join(pluginRoot, 'echo.delete-me'),
+    });
+    expect(mocks.trashItemMock).toHaveBeenCalledWith(join(pluginRoot, 'echo.delete-me'));
+    expect(existsSync(join(pluginRoot, 'echo.delete-me'))).toBe(false);
+    expect(service.list().plugins).toEqual([]);
+    const state = JSON.parse(readFileSync(join(pluginRoot, 'plugin-state.json'), 'utf8')) as { plugins: Record<string, unknown> };
+    expect(state.plugins['echo.delete-me']).toBeUndefined();
   });
 
   it('starts trusted plugins and runs registered commands through the sandbox API', async () => {

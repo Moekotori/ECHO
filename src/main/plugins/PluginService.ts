@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { basename, extname, join, resolve } from 'node:path';
+import { basename, extname, join, resolve, sep } from 'node:path';
 import vm from 'node:vm';
 import { app, dialog, shell } from 'electron';
 import type { AudioStatus } from '../../shared/types/audio';
@@ -18,6 +18,7 @@ import type {
   PluginCoverProviderResult,
   PluginCreateExampleKind,
   PluginCreateExampleResult,
+  PluginDeleteResult,
   PluginEnableRequest,
   PluginHealthSummary,
   PluginEventName,
@@ -1096,6 +1097,22 @@ export class PluginService {
     record.status = 'disabled';
     record.error = null;
     return this.toSummary(record);
+  }
+
+  async deletePlugin(pluginId: string): Promise<PluginDeleteResult> {
+    this.scan();
+    const record = this.requireRecord(pluginId);
+    const id = record.manifest?.id ?? pluginId;
+    const directory = record.directory;
+    this.assertPluginDirectoryTarget(directory);
+    this.stopPlugin(id);
+    await shell.trashItem(directory);
+    delete this.state.plugins[id];
+    this.writeState();
+    this.records.delete(id);
+    this.activity.delete(id);
+    this.logs = this.logs.filter((entry) => entry.pluginId !== id);
+    return { pluginId: id, directory };
   }
 
   async reload(pluginId: string): Promise<PluginSummary> {
@@ -2333,6 +2350,16 @@ export class PluginService {
       throw new Error('plugin_not_found');
     }
     return record;
+  }
+
+  private assertPluginDirectoryTarget(targetDirectory: string): void {
+    const root = resolve(this.pluginDirectory);
+    const target = resolve(targetDirectory);
+    const normalizedRoot = root.toLowerCase();
+    const normalizedTarget = target.toLowerCase();
+    if (normalizedTarget === normalizedRoot || !normalizedTarget.startsWith(`${normalizedRoot}${sep}`)) {
+      throw new Error('plugin_delete_target_outside_plugin_directory');
+    }
   }
 
   private normalizeTrustedPermissions(value: unknown, requested: PluginPermission[]): PluginPermission[] {

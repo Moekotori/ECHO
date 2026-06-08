@@ -5,6 +5,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
+import { finalThemeUnlockPluginId } from '../../shared/constants/featureUnlocks';
 import type { AppSettings } from '../../shared/types/appSettings';
 import type {
   DataBackupExportResult,
@@ -18,7 +19,16 @@ import type { TaskbarPlaybackStatus } from '../../shared/types/taskbarPlayback';
 import type { AppCacheInventory, CoverCacheMigrationResult, SetCoverCacheDirectoryRequest } from '../../shared/types/coverCache';
 import type { UpdateStatus } from '../../shared/types/updates';
 import type { FontFileAsset } from '../../preload/apiTypes';
-import { defaultSettings, getAppSettings, getAppWallpaperDirectory, getLyricsWallpaperDirectory, normalizeSettings, setAppSettings } from '../app/appSettings';
+import {
+  defaultSettings,
+  getAppSettings,
+  getAppWallpaperDirectory,
+  getLyricsWallpaperDirectory,
+  normalizeSettings,
+  setAppSettings,
+  setFinalThemeUnlockAvailable,
+  type NormalizeSettingsOptions,
+} from '../app/appSettings';
 import { getAppCacheInventory as collectAppCacheInventory } from '../app/cacheInventory';
 import { checkForUpdates, getUpdateStatus, reconfigureAutoUpdateFeed, setAutoUpdateEnabled } from '../app/autoUpdater';
 import { refreshBackgroundSpaceRegistration, validateGlobalShortcut } from '../app/backgroundPlaybackShortcuts';
@@ -37,6 +47,7 @@ import { ensureCoverCacheDirectory } from '../library/CoverCacheManager';
 import { getLibraryService } from '../library/LibraryService';
 import { setDiscordPresenceEnabled } from '../integrations/discord/getDiscordPresenceService';
 import { getLastFmService } from '../integrations/lastfm/getLastFmService';
+import { getPluginService } from '../plugins/PluginService';
 import { applyNetworkProxySettings, testNetworkProxyConnection } from '../network/proxySettings';
 import { getMainWindow } from '../app/windowManager';
 import { applyMainWindowBackgroundMaterial } from '../app/windowBackgroundMaterial';
@@ -203,6 +214,26 @@ const normalizeCoverCacheRequest = (value: unknown): SetCoverCacheDirectoryReque
 
 const getAppCacheInventory = (): Promise<AppCacheInventory> => collectAppCacheInventory(app.getPath('userData'));
 
+const hasFinalThemeUnlockPlugin = (): boolean => {
+  try {
+    return getPluginService().list().plugins.some((plugin) =>
+      plugin.id === finalThemeUnlockPluginId &&
+      plugin.enabled === true &&
+      plugin.disabledByHost !== true &&
+      !plugin.error &&
+      plugin.status !== 'disabled',
+    );
+  } catch {
+    return false;
+  }
+};
+
+const getFinalThemeSettingsOptions = (): NormalizeSettingsOptions => {
+  const finalThemeUnlocked = hasFinalThemeUnlockPlugin();
+  setFinalThemeUnlockAvailable(finalThemeUnlocked);
+  return { finalThemeUnlocked };
+};
+
 const isWindowMaximizedForChrome = (window: BrowserWindow | null): boolean =>
   Boolean(window && (window.isMaximized() || window.isFullScreen()));
 
@@ -251,7 +282,7 @@ const readSettingsBackupFile = (filePath: string): AppSettings => {
 
 const applyAppSettingsPatch = async (
   patch: Partial<AppSettings>,
-  options: { allowCoverCacheDir?: boolean } = {},
+  options: { allowCoverCacheDir?: boolean; finalThemeUnlocked?: boolean } = {},
 ): Promise<AppSettings> => {
   const settingsPatch = { ...patch };
   const canSetCoverCacheDir = options.allowCoverCacheDir === true && Object.prototype.hasOwnProperty.call(settingsPatch, 'coverCacheDir');
@@ -270,7 +301,9 @@ const applyAppSettingsPatch = async (
     delete settingsPatch.coverCacheDir;
   }
 
-  let settings = setAppSettings(settingsPatch);
+  let settings = options.finalThemeUnlocked === true
+    ? setAppSettings(settingsPatch, { finalThemeUnlocked: true })
+    : setAppSettings(settingsPatch);
   ensureTray();
 
   const autoUpdateSourceChanged =
@@ -415,9 +448,9 @@ export const registerIpc = (): void => {
       app.quit();
     });
     ipcMain.handle(IpcChannels.AppGetSystemUserName, (): string | null => getSystemUserName());
-    ipcMain.handle(IpcChannels.AppGetSettings, (): AppSettings => getAppSettings());
+    ipcMain.handle(IpcChannels.AppGetSettings, (): AppSettings => getAppSettings(getFinalThemeSettingsOptions()));
     ipcMain.handle(IpcChannels.AppSetSettings, (_event: IpcMainInvokeEvent, patch: Partial<AppSettings>): Promise<AppSettings> =>
-      applyAppSettingsPatch(patch),
+      applyAppSettingsPatch(patch, getFinalThemeSettingsOptions()),
     );
     ipcMain.handle(IpcChannels.AppGetTaskbarPlaybackStatus, (): TaskbarPlaybackStatus => {
       refreshTaskbarPlaybackIntegration();

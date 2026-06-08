@@ -194,6 +194,7 @@ import type {
   PluginCreateExampleResult,
   PluginCoverLookupRequest,
   PluginCoverLookupResult,
+  PluginDeleteResult,
   PluginEnableRequest,
   PluginImportPackageResult,
   PluginLyricsLookupRequest,
@@ -758,6 +759,7 @@ export type EchoApi = {
     createExample: (kind: PluginCreateExampleKind) => Promise<PluginCreateExampleResult>;
     enable: (request: PluginEnableRequest) => Promise<PluginSummary>;
     disable: (pluginId: string) => Promise<PluginSummary>;
+    delete: (pluginId: string) => Promise<PluginDeleteResult>;
     reload: (pluginId: string) => Promise<PluginSummary>;
     openDirectory: (pluginId?: string) => Promise<void>;
     exportPackage: (pluginId: string) => Promise<string | null>;

@@ -18,6 +18,7 @@ import { createDsfDopStream, createDsfNativeDsdStream, readDsfDopInfo } from './
 import { AutomixAnalyzer } from './AutomixAnalyzer';
 import { getAppSettings, setAppSettings } from '../app/appSettings';
 import { noteDataProtectionPlaybackActivity } from '../app/dataProtection';
+import { isWallpaperEngineBridgeVisualTelemetryActive } from '../integrations/wallpaperEngine/WallpaperEngineBridgeRuntime';
 import { buildNetworkProxyEnv } from '../network/proxyEnv';
 import { markPlaybackBreadcrumb, runPlaybackPerformanceStep, runPlaybackPerformanceStepSync } from '../diagnostics/PlaybackPerformanceDiagnostics';
 import { calculateReplayGain, dbToLinearGain, type ReplayGainCalculation, type ReplayGainTrackData } from '../../shared/utils/replayGain';
@@ -331,7 +332,10 @@ const getPlaybackLoadSettings = (): PlaybackLoadSettings => {
 };
 const isAudioVisualSpectrumEnabled = (): boolean => {
   const settings = getPlaybackLoadSettings();
-  return settings.homeWaveformVisualizerEnabled && settings.audioVisualSpectrumEnabled && !settings.lowLoadPlaybackModeEnabled;
+  return (
+    (settings.homeWaveformVisualizerEnabled && settings.audioVisualSpectrumEnabled) ||
+    isWallpaperEngineBridgeVisualTelemetryActive()
+  ) && !settings.lowLoadPlaybackModeEnabled;
 };
 const sharedStabilityMemoryTtlMs = 30 * 60 * 1000;
 const asioFailedStartGracefulStopTimeoutMs = 1_000;

@@ -53,7 +53,6 @@ const themeBasePresets = new Set<AppThemePreset>([
   'matsuriLantern',
   'ginzaNoir',
   'frostJazz',
-  'FINAL',
 ]);
 const themeToneColorKeys: Array<keyof Pick<
   AppThemeToneOverride,
@@ -511,6 +510,9 @@ const normalizeThemePreset = (value: unknown): PluginThemePresetContribution | n
 
   const input = value as Partial<PluginThemePresetContribution>;
   try {
+    if (input.basePreset === 'FINAL') {
+      return null;
+    }
     const basePreset = typeof input.basePreset === 'string' && themeBasePresets.has(input.basePreset as AppThemePreset)
       ? input.basePreset as AppThemePreset
       : 'classic';

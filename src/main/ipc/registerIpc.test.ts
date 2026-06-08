@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
+import { finalThemeUnlockPluginId, finalThemeUnlockVersion } from '../../shared/constants/featureUnlocks';
+import type { PluginRuntimeStatus } from '../../shared/types/plugins';
 
 const handlers: Record<string, (...args: unknown[]) => unknown> = {};
 const handleMock = vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
@@ -14,6 +16,14 @@ const showSaveDialogMock = vi.fn();
 const openExternalMock = vi.fn();
 const setAppSettingsMock = vi.fn((patch: Record<string, unknown>) => ({ coverCacheDir: patch.coverCacheDir ?? null, hideToTrayOnClose: false, ...patch }));
 const getAppSettingsMock = vi.fn<() => Record<string, unknown>>(() => ({ coverCacheDir: null, hideToTrayOnClose: false }));
+type MinimalPluginSummary = {
+  id: string;
+  enabled: boolean;
+  disabledByHost: boolean;
+  error: string | null;
+  status: PluginRuntimeStatus;
+};
+const pluginListMock = vi.fn<() => { directory: string; plugins: MinimalPluginSummary[] }>(() => ({ directory: 'D:\\Echo\\plugins', plugins: [] }));
 const proxyTestSessionMock = { partition: 'network-proxy-test' };
 const fromPartitionMock = vi.fn(() => proxyTestSessionMock);
 const getLibraryServiceMock = vi.fn();
@@ -137,6 +147,7 @@ vi.mock('../app/appSettings', () => ({
   getLyricsWallpaperDirectory: vi.fn(() => 'D:\\Echo\\lyrics-wallpapers'),
   normalizeSettings: vi.fn((value) => ({ coverCacheDir: null, hideToTrayOnClose: false, ...(value as Record<string, unknown>) })),
   setAppSettings: setAppSettingsMock,
+  setFinalThemeUnlockAvailable: vi.fn(),
 }));
 
 vi.mock('../app/tray', () => ({
@@ -237,6 +248,12 @@ vi.mock('./pluginIpc', () => ({
   registerPluginIpc: vi.fn(),
 }));
 
+vi.mock('../plugins/PluginService', () => ({
+  getPluginService: () => ({
+    list: pluginListMock,
+  }),
+}));
+
 vi.mock('./lastFmIpc', () => ({
   registerLastFmIpc: vi.fn(),
 }));
@@ -275,6 +292,8 @@ describe('app IPC cover cache directory', () => {
     openExternalMock.mockReset();
     setAppSettingsMock.mockClear();
     getAppSettingsMock.mockClear();
+    pluginListMock.mockReset();
+    pluginListMock.mockReturnValue({ directory: 'D:\\Echo\\plugins', plugins: [] });
     getLibraryServiceMock.mockReset();
     ensureCoverCacheDirectoryMock.mockReset();
     ensureTrayMock.mockClear();
@@ -397,6 +416,34 @@ describe('app IPC cover cache directory', () => {
     expect(setAppSettingsMock).toHaveBeenCalledWith({ hideToTrayOnClose: false });
     expect(ensureTrayMock).toHaveBeenCalledTimes(1);
     expect(destroyTrayMock).not.toHaveBeenCalled();
+  });
+
+  it('allows FINAL theme settings only when the unlock plugin is installed', async () => {
+    pluginListMock.mockReturnValue({
+      directory: 'D:\\Echo\\plugins',
+      plugins: [
+        {
+          id: finalThemeUnlockPluginId,
+          enabled: true,
+          disabledByHost: false,
+          error: null,
+          status: 'running',
+        },
+      ],
+    });
+
+    await handlers[IpcChannels.AppSetSettings]!(null, {
+      appearanceThemePreset: 'FINAL',
+      finalThemeUnlockVersion,
+    });
+
+    expect(setAppSettingsMock).toHaveBeenCalledWith(
+      {
+        appearanceThemePreset: 'FINAL',
+        finalThemeUnlockVersion,
+      },
+      { finalThemeUnlocked: true },
+    );
   });
 
   it('uses an image-only picker for lyrics wallpaper selection', async () => {

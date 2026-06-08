@@ -543,13 +543,36 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({ appearanceThemePreset: 'midnight' as never }).appearanceThemePreset).toBe('classic');
   });
 
-  it('keeps FINAL locked unless the current unlock version is stored', async () => {
+  it('keeps FINAL locked unless the unlock plugin is present for the current marker', async () => {
     const { normalizeSettings } = await import('./appSettings');
     const { finalThemeUnlockVersion } = await import('../../shared/constants/featureUnlocks');
 
     expect(normalizeSettings({ appearanceThemePreset: 'FINAL', finalThemeUnlockVersion: 'true' }).appearanceThemePreset).toBe('classic');
-    expect(normalizeSettings({ appearanceThemePreset: 'FINAL', finalThemeUnlockVersion }).appearanceThemePreset).toBe('FINAL');
-    expect(normalizeSettings({ appearanceThemePreset: 'FINAL', finalThemeUnlockVersion }).finalThemeUnlockVersion).toBe(finalThemeUnlockVersion);
+    expect(normalizeSettings({ appearanceThemePreset: 'FINAL', finalThemeUnlockVersion }).appearanceThemePreset).toBe('classic');
+    expect(normalizeSettings({ appearanceThemePreset: 'FINAL', finalThemeUnlockVersion }, { finalThemeUnlocked: true }).appearanceThemePreset).toBe('FINAL');
+    expect(normalizeSettings({ appearanceThemePreset: 'FINAL', finalThemeUnlockVersion }, { finalThemeUnlocked: true }).finalThemeUnlockVersion).toBe(finalThemeUnlockVersion);
+  });
+
+  it('drops FINAL custom themes and overrides even when the unlock plugin is present', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+    const { finalThemeUnlockVersion } = await import('../../shared/constants/featureUnlocks');
+
+    const normalized = normalizeSettings({
+      appearanceThemePreset: 'FINAL',
+      finalThemeUnlockVersion,
+      appearanceThemeCustomId: 'theme-final',
+      appearanceCustomThemes: [
+        { id: 'theme-final', name: 'Final Copy', basePreset: 'FINAL', createdAt: '2026-06-08T00:00:00.000Z', updatedAt: '2026-06-08T00:00:00.000Z' },
+      ],
+      appearanceThemePresetOverrides: {
+        FINAL: { light: { accent: '#ffffff' } },
+      },
+    }, { finalThemeUnlocked: true });
+
+    expect(normalized.appearanceThemePreset).toBe('FINAL');
+    expect(normalized.appearanceThemeCustomId).toBeNull();
+    expect(normalized.appearanceCustomThemes).toEqual([]);
+    expect(normalized.appearanceThemePresetOverrides?.FINAL).toBeUndefined();
   });
 
   it('normalizes appearance theme preset expansion state', async () => {

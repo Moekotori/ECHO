@@ -40,6 +40,7 @@ export const registerPluginIpc = (): void => {
     return service.enable(request as PluginEnableRequest);
   });
   ipcMain.handle(IpcChannels.PluginsDisable, (_event, pluginId: unknown) => service.disable(requireText(pluginId, 'pluginId')));
+  ipcMain.handle(IpcChannels.PluginsDelete, (_event, pluginId: unknown) => service.deletePlugin(requireText(pluginId, 'pluginId')));
   ipcMain.handle(IpcChannels.PluginsReload, (_event, pluginId: unknown) => service.reload(requireText(pluginId, 'pluginId')));
   ipcMain.handle(IpcChannels.PluginsOpenDirectory, (_event, pluginId: unknown) =>
     service.openDirectory(typeof pluginId === 'string' && pluginId.trim() ? pluginId.trim() : undefined),

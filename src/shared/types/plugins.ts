@@ -645,6 +645,11 @@ export type PluginListResult = {
   directory: string;
 };
 
+export type PluginDeleteResult = {
+  pluginId: string;
+  directory: string;
+};
+
 export type PluginEnableRequest = {
   pluginId: string;
   trustedPermissions?: PluginPermission[];
