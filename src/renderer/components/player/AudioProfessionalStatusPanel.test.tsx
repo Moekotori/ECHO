@@ -1390,7 +1390,7 @@ describe('AudioProfessionalStatusPanel', () => {
           value: 'equal-power-crossfade-reference / random-access-short-bridge-to-full-profile-only / rendered:user-random-seek-or-skip:crossfade-rendered / accepted / sample 48 kHz / fade 5 frames/0.104 ms / gain equal-power / mid 0.707107/0.707107 / power error 0.000000 / residual measured-crossfade-difference 0.207107/0.095781 / peak 1.000000/1.000000/1.000000 / reasons random access short bridge requires equal power crossfade | full profile ready | equal power gain law reference | hard switch residual measured / rejected-boundary:gapless-boundary:rejected / reject intent not user random seek or skip / sample 48 kHz / fade 5 frames/0.104 ms / gain not-applicable / mid n/a / power error 0.000000 / residual not-applicable / peak 1.000000/1.000000/0.000000 / reasons only user random seek or skip can use short bridge crossfade | gapless boundary waits for full profile | equal power crossfade reference only',
           tone: 'good',
         }),
-        expect.objectContaining({ label: 'UZUME SRC reference', tone: 'warning' }),
+        expect.objectContaining({ label: 'UZUME SRC reference', tone: 'good' }),
         expect.objectContaining({ label: 'UZUME SRC rollback reference', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME SRC budget reference', tone: 'warning' }),
         expect.objectContaining({
@@ -1890,6 +1890,51 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME SRC budget reference',
           value: expect.stringContaining('offline-reference-only'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected core SRC reference contract as good', () => {
+    const status = referenceStatus();
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME SRC reference',
+          value: expect.stringContaining('poly-sinc-reference 44.1 kHz->48 kHz / linear / 35 samples / 0.73 ms'),
+          tone: 'good',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const driftedStatus = referenceStatus();
+    driftedStatus.uzumeReferencePlan!.resampling.phaseAccumulator = 'unavailable';
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={driftedStatus} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME SRC reference',
+          value: expect.stringContaining('poly-sinc-reference 44.1 kHz->48 kHz'),
           tone: 'warning',
         }),
       ]),

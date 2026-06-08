@@ -738,6 +738,73 @@ const isExpectedUzumeReferenceSrcPhaseApodizing = (
     apodizing.responseResidualRms > 0;
 };
 
+const isExpectedUzumeReferenceResampling = (
+  resampling: NonNullable<AudioStatus['uzumeReferencePlan']>['resampling'] | null | undefined,
+): boolean => {
+  if (!resampling || resampling.family !== 'poly-sinc-reference') {
+    return false;
+  }
+
+  const contract = resampling.filterContract;
+  const validationChecks = resampling.validation?.checks ?? [];
+  const filterContractIsValid = Boolean(contract) &&
+    contract.tapCount > 0 &&
+    contract.phaseCount > 0 &&
+    contract.cutoffRatio > 0 &&
+    contract.cutoffRatio < 1 &&
+    contract.transitionWidthRatio > 0 &&
+    contract.transitionWidthRatio <= 1 &&
+    contract.stopbandAttenuationDb > 0 &&
+    contract.passbandRippleDb >= 0;
+  const validationIsPass = resampling.validation?.artifact === 'poly-sinc-formal-validation-reference' &&
+    resampling.validation.overall === 'pass' &&
+    validationChecks.length > 0 &&
+    validationChecks.every((check) => check.state === 'pass' || check.state === 'not-applicable');
+  const ratesAreValid = resampling.sourceRate !== null &&
+    resampling.targetRate !== null &&
+    resampling.sourceRate > 0 &&
+    resampling.targetRate > 0 &&
+    resampling.sourceFamily !== null &&
+    resampling.targetFamily !== null &&
+    resampling.ratio !== null &&
+    resampling.ratio > 0;
+  const telemetryIsFinite = isFiniteNonNegativeMetric(resampling.groupDelaySamples) &&
+    isFiniteNonNegativeMetric(resampling.lookaheadSamples) &&
+    (resampling.groupDelayMs === null || isFiniteNonNegativeMetric(resampling.groupDelayMs)) &&
+    (resampling.lookaheadMs === null || isFiniteNonNegativeMetric(resampling.lookaheadMs));
+  const commonContract = resampling.apodizing === 'reference-windowed-sinc' &&
+    filterContractIsValid &&
+    validationIsPass &&
+    ratesAreValid &&
+    telemetryIsFinite &&
+    isExpectedUzumeReferenceSrcArtifacts(resampling) &&
+    isExpectedUzumeReferenceSrcPhaseApodizing(resampling);
+
+  if (!commonContract) {
+    return false;
+  }
+
+  if (resampling.sameRateBypass) {
+    return !resampling.active &&
+      resampling.sourceRate === resampling.targetRate &&
+      resampling.sourceFamily === resampling.targetFamily &&
+      resampling.ratio === 1 &&
+      resampling.phaseAccumulator === 'same-rate-bypass' &&
+      resampling.realtimeSafetyClass === 'same-rate-bypass' &&
+      resampling.groupDelaySamples === 0 &&
+      resampling.lookaheadSamples === 0;
+  }
+
+  return resampling.active &&
+    resampling.sourceRate !== resampling.targetRate &&
+    resampling.phaseAccumulator === 'rational-fixed-step' &&
+    resampling.realtimeSafetyClass === 'offline-reference-only' &&
+    resampling.groupDelaySamples > 0 &&
+    resampling.lookaheadSamples > 0 &&
+    resampling.groupDelayMs !== null &&
+    resampling.lookaheadMs !== null;
+};
+
 const formatUzumeReferenceDsdFamily = (status: AudioStatus | null, fallback: string): string => {
   const dsd = status?.uzumeReferencePlan?.dsdFamily;
   if (!dsd) {
@@ -2008,6 +2075,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceGenerationCacheKeyText = formatUzumeReferenceGenerationCacheKey(status, unknown);
   const uzumeReferenceRealtimeBudgetSummaryText = formatUzumeReferenceRealtimeBudgetSummary(status, unknown);
   const uzumeReferenceResamplingText = formatUzumeReferenceResampling(status, unknown);
+  const expectedUzumeReferenceResampling = isExpectedUzumeReferenceResampling(status?.uzumeReferencePlan?.resampling);
   const uzumeReferenceSrcRollbackText = formatUzumeReferenceSrcRollback(status, unknown);
   const uzumeReferenceSrcBudgetText = formatUzumeReferenceSrcBudget(status, unknown);
   const uzumeReferenceSrcArtifactsText = formatUzumeReferenceSrcArtifacts(status, unknown);
@@ -2200,7 +2268,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceFirGaplessHistory'), value: uzumeReferenceFirGaplessHistoryText, tone: isExpectedUzumeReferenceFirGaplessHistory(status?.uzumeReferencePlan?.firGaplessHistory) ? 'good' : status?.uzumeReferencePlan?.firGaplessHistory?.state === 'history-required' ? 'warning' : status?.uzumeReferencePlan?.firGaplessHistory ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceCallbackSafeControls'), value: uzumeReferenceCallbackSafeControlsText, tone: isExpectedUzumeReferenceCallbackSafeControls(status?.uzumeReferencePlan?.callbackSafeControls) ? 'good' : status?.uzumeReferencePlan?.callbackSafeControls ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceEqualPowerCrossfade'), value: uzumeReferenceEqualPowerCrossfadeText, tone: isExpectedUzumeReferenceEqualPowerCrossfade(status?.uzumeReferencePlan?.equalPowerCrossfade) ? 'good' : status?.uzumeReferencePlan?.equalPowerCrossfade?.rendered.state === 'crossfade-rendered' ? 'warning' : status?.uzumeReferencePlan?.equalPowerCrossfade ? 'muted' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceResampling'), value: uzumeReferenceResamplingText, tone: status?.uzumeReferencePlan?.resampling.active ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceResampling'), value: uzumeReferenceResamplingText, tone: expectedUzumeReferenceResampling ? 'good' : status?.uzumeReferencePlan?.resampling.active ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcRollback'), value: uzumeReferenceSrcRollbackText, tone: status?.uzumeReferencePlan?.resampling.qualityRollback.state === 'armed' ? 'warning' : status?.uzumeReferencePlan?.resampling.qualityRollback ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcBudget'), value: uzumeReferenceSrcBudgetText, tone: status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget.safetyClass === 'offline-reference-only' ? 'warning' : status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcArtifacts'), value: uzumeReferenceSrcArtifactsText, tone: isExpectedUzumeReferenceSrcArtifacts(status?.uzumeReferencePlan?.resampling) ? 'good' : status?.uzumeReferencePlan?.resampling.artifactMetrics ? 'warning' : 'muted' },
@@ -2253,7 +2321,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.error'), value: status?.error ?? unknown, tone: status?.error ? 'danger' : 'muted' },
       ],
     },
-  ], [bitPerfectText, disabled, dspModules.length, enabled, no, planned, protectLimiterText, signalPathText, status, t, transitional, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeFormatPathText, uzumeGpuText, uzumeHeadroomTelemetryText, uzumeLimiterReferenceText, uzumeReferenceAssignmentsText, uzumeReferenceBackendSupportText, uzumeReferenceBitPerfectText, uzumeReferenceBlockBoundaryText, uzumeReferenceCallbackRingText, uzumeReferenceCallbackSafeControlsText, uzumeReferenceChannelScopeText, uzumeReferenceCompilerText, uzumeReferenceContinuityText, uzumeReferenceConvolutionDuplicateGuardText, uzumeReferenceConvolutionSerialNullText, uzumeReferenceConvolutionText, uzumeReferenceDsdFamilyText, uzumeReferenceEqualPowerCrossfadeText, uzumeReferenceFirGaplessHistoryText, uzumeReferenceFlushDrainText, uzumeReferenceGainStagingText, uzumeReferenceGaplessConcatText, uzumeReferenceIirEqText, uzumeReferenceLatencyOwnersText, uzumeReferenceMergeGroupsText, uzumeReferenceOutputDevicePolicyText, uzumeReferencePcmIngressGuardText, uzumeReferencePcmOutputQuantizationText, uzumeReferencePerEarEqPlacementText, uzumeReferencePreRollText, uzumeReferenceRenderAheadCacheText, uzumeReferenceResamplingText, uzumeReferenceResponseResampleText, uzumeReferenceSrcArtifactsText, uzumeReferenceSrcBudgetText, uzumeReferenceSrcOutputRiskText, uzumeReferenceSrcPhaseApodizingText, uzumeReferenceSrcRollbackText, uzumeReferenceSrcValidationText, uzumeReferenceStereoProceduralText, uzumeReferenceUnderrunFallbackText, uzumeSafetyMeterText, yes]);
+  ], [bitPerfectText, disabled, dspModules.length, enabled, expectedUzumeReferenceResampling, no, planned, protectLimiterText, signalPathText, status, t, transitional, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeFormatPathText, uzumeGpuText, uzumeHeadroomTelemetryText, uzumeLimiterReferenceText, uzumeReferenceAssignmentsText, uzumeReferenceBackendSupportText, uzumeReferenceBitPerfectText, uzumeReferenceBlockBoundaryText, uzumeReferenceCallbackRingText, uzumeReferenceCallbackSafeControlsText, uzumeReferenceChannelScopeText, uzumeReferenceCompilerText, uzumeReferenceContinuityText, uzumeReferenceConvolutionDuplicateGuardText, uzumeReferenceConvolutionSerialNullText, uzumeReferenceConvolutionText, uzumeReferenceDsdFamilyText, uzumeReferenceEqualPowerCrossfadeText, uzumeReferenceFirGaplessHistoryText, uzumeReferenceFlushDrainText, uzumeReferenceGainStagingText, uzumeReferenceGaplessConcatText, uzumeReferenceIirEqText, uzumeReferenceLatencyOwnersText, uzumeReferenceMergeGroupsText, uzumeReferenceOutputDevicePolicyText, uzumeReferencePcmIngressGuardText, uzumeReferencePcmOutputQuantizationText, uzumeReferencePerEarEqPlacementText, uzumeReferencePreRollText, uzumeReferenceRenderAheadCacheText, uzumeReferenceResamplingText, uzumeReferenceResponseResampleText, uzumeReferenceSrcArtifactsText, uzumeReferenceSrcBudgetText, uzumeReferenceSrcOutputRiskText, uzumeReferenceSrcPhaseApodizingText, uzumeReferenceSrcRollbackText, uzumeReferenceSrcValidationText, uzumeReferenceStereoProceduralText, uzumeReferenceUnderrunFallbackText, uzumeSafetyMeterText, yes]);
 
   const visibleSections = detailsOpen ? sections : [];
   const panelStateIcon = status?.error ? AlertTriangle : status?.bitPerfectCandidate ? CheckCircle2 : Zap;

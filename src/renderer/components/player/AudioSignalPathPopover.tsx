@@ -865,6 +865,73 @@ const isExpectedUzumeReferenceSrcPhaseApodizing = (
     apodizing.responseResidualRms > 0;
 };
 
+const isExpectedUzumeReferenceResampling = (
+  resampling: NonNullable<AudioStatus['uzumeReferencePlan']>['resampling'] | null | undefined,
+): boolean => {
+  if (!resampling || resampling.family !== 'poly-sinc-reference') {
+    return false;
+  }
+
+  const contract = resampling.filterContract;
+  const validationChecks = resampling.validation?.checks ?? [];
+  const filterContractIsValid = Boolean(contract) &&
+    contract.tapCount > 0 &&
+    contract.phaseCount > 0 &&
+    contract.cutoffRatio > 0 &&
+    contract.cutoffRatio < 1 &&
+    contract.transitionWidthRatio > 0 &&
+    contract.transitionWidthRatio <= 1 &&
+    contract.stopbandAttenuationDb > 0 &&
+    contract.passbandRippleDb >= 0;
+  const validationIsPass = resampling.validation?.artifact === 'poly-sinc-formal-validation-reference' &&
+    resampling.validation.overall === 'pass' &&
+    validationChecks.length > 0 &&
+    validationChecks.every((check) => check.state === 'pass' || check.state === 'not-applicable');
+  const ratesAreValid = resampling.sourceRate !== null &&
+    resampling.targetRate !== null &&
+    resampling.sourceRate > 0 &&
+    resampling.targetRate > 0 &&
+    resampling.sourceFamily !== null &&
+    resampling.targetFamily !== null &&
+    resampling.ratio !== null &&
+    resampling.ratio > 0;
+  const telemetryIsFinite = isFiniteNonNegativeMetric(resampling.groupDelaySamples) &&
+    isFiniteNonNegativeMetric(resampling.lookaheadSamples) &&
+    (resampling.groupDelayMs === null || isFiniteNonNegativeMetric(resampling.groupDelayMs)) &&
+    (resampling.lookaheadMs === null || isFiniteNonNegativeMetric(resampling.lookaheadMs));
+  const commonContract = resampling.apodizing === 'reference-windowed-sinc' &&
+    filterContractIsValid &&
+    validationIsPass &&
+    ratesAreValid &&
+    telemetryIsFinite &&
+    isExpectedUzumeReferenceSrcArtifacts(resampling) &&
+    isExpectedUzumeReferenceSrcPhaseApodizing(resampling);
+
+  if (!commonContract) {
+    return false;
+  }
+
+  if (resampling.sameRateBypass) {
+    return !resampling.active &&
+      resampling.sourceRate === resampling.targetRate &&
+      resampling.sourceFamily === resampling.targetFamily &&
+      resampling.ratio === 1 &&
+      resampling.phaseAccumulator === 'same-rate-bypass' &&
+      resampling.realtimeSafetyClass === 'same-rate-bypass' &&
+      resampling.groupDelaySamples === 0 &&
+      resampling.lookaheadSamples === 0;
+  }
+
+  return resampling.active &&
+    resampling.sourceRate !== resampling.targetRate &&
+    resampling.phaseAccumulator === 'rational-fixed-step' &&
+    resampling.realtimeSafetyClass === 'offline-reference-only' &&
+    resampling.groupDelaySamples > 0 &&
+    resampling.lookaheadSamples > 0 &&
+    resampling.groupDelayMs !== null &&
+    resampling.lookaheadMs !== null;
+};
+
 const formatUzumeReferenceDsdFamily = (status: AudioStatus | null): string | null => {
   const dsd = status?.uzumeReferencePlan?.dsdFamily;
   if (!dsd) {
@@ -2505,6 +2572,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceGenerationCacheKey = formatUzumeReferenceGenerationCacheKey(status);
   const referenceRealtimeBudgetSummary = formatUzumeReferenceRealtimeBudgetSummary(status);
   const referenceResampling = formatUzumeReferenceResampling(status);
+  const expectedReferenceResampling = isExpectedUzumeReferenceResampling(referencePlan?.resampling);
   const referenceSrcRollback = formatUzumeReferenceSrcRollback(status);
   const referenceSrcBudget = formatUzumeReferenceSrcBudget(status);
   const referenceSrcArtifacts = formatUzumeReferenceSrcArtifacts(status);
@@ -2879,7 +2947,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME SRC reference',
       value: referenceResampling,
-      tone: 'process',
+      tone: expectedReferenceResampling ? 'process' : referencePlan?.resampling.active ? 'warning' : 'muted',
       variant: 'process',
     });
   }

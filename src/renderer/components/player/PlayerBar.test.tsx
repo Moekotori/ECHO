@@ -969,11 +969,23 @@ describe('PlayerBar', () => {
           apodizing: 'reference-windowed-sinc',
           sourceRate: 44100,
           targetRate: 48000,
+          sourceFamily: '44.1k-family',
+          targetFamily: '48k-family',
+          ratio: 48000 / 44100,
           sameRateBypass: false,
           groupDelaySamples: 35,
           groupDelayMs: 0.729,
+          lookaheadSamples: 35,
           lookaheadMs: 0.729,
           phaseAccumulator: 'rational-fixed-step',
+          filterContract: {
+            tapCount: 64,
+            phaseCount: 1024,
+            cutoffRatio: 0.92,
+            transitionWidthRatio: 0.08,
+            stopbandAttenuationDb: 96,
+            passbandRippleDb: 0.01,
+          },
           realtimeSafetyClass: 'offline-reference-only',
           outputResamplingRisk: {
             artifact: 'output-double-resampling-risk-reference',
@@ -1865,6 +1877,25 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    status.uzumeReferencePlan!.resampling.phaseAccumulator = 'unavailable';
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const srcDriftDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(readSignalPathVisualState(srcDriftDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME SRC reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    status.uzumeReferencePlan!.resampling.phaseAccumulator = 'rational-fixed-step';
     status.uzumeReferencePlan!.sharedConvolution.serialNullReference = {
       ...status.uzumeReferencePlan!.sharedConvolution.serialNullReference!,
       state: 'merged-matches-serial',
