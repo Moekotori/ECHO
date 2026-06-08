@@ -2328,6 +2328,9 @@ describe('AppLayout local file open integration', () => {
       },
     ];
     window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({ sidebarHiddenRouteIds: [] }),
+      },
       library: {
         chooseImportFiles,
         importAudioFiles,
@@ -2340,7 +2343,7 @@ describe('AppLayout local file open integration', () => {
       </AppProviders>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /导入文件|Import File/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /导入文件|Import File/ }));
 
     await waitFor(() => expect(chooseImportFiles).toHaveBeenCalledTimes(1));
     expect(importAudioFiles).toHaveBeenCalledWith(['D:\\Music\\song.flac', 'D:\\Maps\\beatmap.osz']);
