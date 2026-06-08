@@ -27,6 +27,7 @@
 - 2026-06-08：继续补 Generation Cache Key Reference inspect UI：compiled plan 现在携带 `uzumeReferencePlan.generationCacheKey`，Signal Path / Professional Status 能显示 generation id、timeline scope、request/cache key、profile/device fingerprint、album segment/index、invalidate/preserve 规则、stale commit rule 与 late callback slot rule；这是只读 cache-key contract，不启用 production cache writer。
 - 2026-06-08：继续补 Realtime Budget Summary Reference inspect UI：compiled plan 现在携带 `uzumeReferencePlan.realtimeBudgetSummary`，Signal Path / Professional Status 能把 RPC-002 未实测 realtime factor、scalar float64 SRC 预算、callback ring depth、render-ahead coverage、CPU full-profile fallback、RPC-003 CPU realtime gate 与 RPC-005 GPU render-ahead gate 汇总到一个只读 row/node；jsdom visual-state 测试锁定 offline-reference-only 状态为 warning，且不宣称 production realtime backend 已启用。
 - 2026-06-08：继续补 Artifact Manifest Reference inspect UI：Signal Path / Professional Status 现在显示 `UZUME artifact manifest reference`，按 deterministic / planned / not-applicable 分桶汇总 `artifactPlan`，并列出 source artifact 与 report artifact 清单；visual-state 测试锁定无 planned 项时为 good/process、存在 planned 项时为 warning，避免把 DSD not-applicable 或 reference-only artifact 误报成 RPC-002 阻塞。
+- 2026-06-08：补 Artifact Manifest shared formatter helper 测试：`buildUzumeReferenceArtifactManifestSummary` 现在有 helper-level unit test 锁定 deterministic 38/38、planned 项 warning flag、not-applicable 非阻塞、null/undefined fallback，避免 Professional Status 与 Signal Path 的 manifest 文案/状态漂移。
 - 2026-06-08：继续补 reference path plan Signal Path surface：底部 Signal Path 新增 `UZUME reference path plan` node，逐条显示 `pcm_bitperfect`、`pcm_processed`、`dsd_direct`、`dsd_upsampling`、`d2p_processed`、`sdm_processed` 的 state/reason，覆盖 direct disabled 与 unavailable path reason 的可视解释；仍是 compiled reference plan inspect，不改变正式播放状态。
 - 2026-06-08：继续补 SRC realtime-budget/null-residual UI telemetry：底部 Signal Path 新增 `UZUME SRC budget reference` node，Professional Status 新增对应 row，显示 scalar float64 reference backend、estimated multiply-adds、realtime factor 是否未实测、safety class 和 same-rate null residual 状态；这是 deterministic artifact telemetry，不宣称 realtime SRC 已完成。
 - 2026-06-08：继续补 SRC artifact inspect UI：底部 Signal Path 新增 `UZUME SRC artifact reference` node，Professional Status 新增对应 row，显示 passband ripple、stopband attenuation、cutoff/transition estimate、phase group-delay spread、silence residual、multi-tone peak、seeded-random peak 和 deterministic random seed；这是 artifact telemetry，不表示 realtime SRC 已接入。
@@ -203,8 +204,7 @@ npx vitest run src/main/audio/UzumeReferencePlan.test.ts
 npm run test:audio-engine
 npm run typecheck
 npx vitest run src/main/audio/AudioCore.test.ts
-npx vitest run src/renderer/components/player/AudioProfessionalStatusPanel.test.tsx
-npx vitest run src/renderer/components/player/PlayerBar.test.tsx
+npx vitest run src/renderer/components/player/uzumeReferenceArtifactManifest.test.ts src/renderer/components/player/AudioProfessionalStatusPanel.test.tsx src/renderer/components/player/PlayerBar.test.tsx
 ```
 
 如果新增 artifact 生成脚本，应输出到稳定目录，并避免污染用户资料库。
