@@ -1857,6 +1857,46 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    status.uzumeReferencePlan!.realtimeBudgetSummary.state = 'same-rate-bypass-reference';
+    status.uzumeReferencePlan!.realtimeBudgetSummary.srcEstimatedMultiplyAdds = 8;
+    status.uzumeReferencePlan!.realtimeBudgetSummary.srcSafetyClass = 'same-rate-bypass';
+    status.uzumeReferencePlan!.resampling.active = false;
+    status.uzumeReferencePlan!.resampling.sourceRate = 48000;
+    status.uzumeReferencePlan!.resampling.targetRate = 48000;
+    status.uzumeReferencePlan!.resampling.sameRateBypass = true;
+    status.uzumeReferencePlan!.resampling.groupDelaySamples = 0;
+    status.uzumeReferencePlan!.resampling.groupDelayMs = 0;
+    status.uzumeReferencePlan!.resampling.lookaheadMs = 0;
+    status.uzumeReferencePlan!.resampling.realtimeSafetyClass = 'same-rate-bypass';
+    status.uzumeReferencePlan!.resampling.artifactMetrics.realtimeBudget.estimatedMultiplyAdds = 8;
+    status.uzumeReferencePlan!.resampling.artifactMetrics.realtimeBudget.safetyClass = 'same-rate-bypass';
+    status.uzumeReferencePlan!.resampling.artifactMetrics.nullResidual = {
+      state: 'exact-bypass',
+      comparedFrames: 8,
+      maxAbs: 0,
+      rms: 0,
+    };
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const sameRateDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(sameRateDialog.textContent).toContain('realtime-budget-summary-reference / reference-budget-no-measured-runtime-factor / same-rate-bypass-reference');
+    expect(sameRateDialog.textContent).toContain('scalar-float64-reference / 8 multiply-adds / realtime factor unmeasured / same-rate-bypass / null exact-bypass / max 0 / rms 0');
+    const sameRateVisualState = readSignalPathVisualState(sameRateDialog);
+    expect(sameRateVisualState.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME realtime budget summary reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME SRC budget reference', tone: 'process', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     status.uzumeReferencePlan!.artifactPlan.dsdFamilyPath = 'not-applicable';
     render(
       <>
