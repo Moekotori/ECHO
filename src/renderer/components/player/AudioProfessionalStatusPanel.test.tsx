@@ -1568,6 +1568,73 @@ describe('AudioProfessionalStatusPanel', () => {
     );
   });
 
+  it('marks direct-like output policy and ready reference contract as good', () => {
+    const status = referenceStatus();
+    const plan = status.uzumeReferencePlan!;
+    plan.outputDevicePolicy = {
+      ...plan.outputDevicePolicy,
+      outputMode: 'exclusive',
+      deviceCapability: 'direct-like-rate-match',
+      state: 'direct-like-ready',
+      fileRate: 48000,
+      decoderOutputRate: 48000,
+      requestedOutputRate: 48000,
+      actualDeviceRate: 48000,
+      sharedDeviceRate: null,
+      bitPerfectCandidate: true,
+      resampling: false,
+      sampleRateMismatch: false,
+      recommendation: 'none',
+      reasons: ['direct_like_output_rate_matches_requested_reference', 'output_policy_reference_only'],
+    };
+    plan.backendSupport.outputDevicePolicyState = 'direct-like-ready';
+    plan.latencyBudget.outputDevicePolicyState = 'direct-like-ready';
+    plan.readinessContract = {
+      ...plan.readinessContract,
+      state: 'ready-to-commit',
+      selectedPath: 'cpu-full-profile',
+      waitTarget: 'none',
+      fullProfileReady: true,
+      cacheState: 'hit',
+      cacheCommitState: 'commit-to-callback-slot',
+      renderAheadState: 'full-profile-ready',
+      renderAheadReadyFrames: 9600,
+      renderAheadTargetFrames: 9600,
+      deadlineState: 'ready',
+      deadlineSlackFrames: 24000,
+      shortBridgeReason: 'full_profile_ready',
+      reasons: ['readiness_summary_derived_from_reference_reports', 'cpu_full_profile_ready', 'readiness_contract_reference_only'],
+    };
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME output device policy reference',
+          value: expect.stringContaining('direct-like-ready'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME readiness contract reference',
+          value: expect.stringContaining('ready-to-commit'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME readiness contract reference',
+          value: expect.stringContaining('scheduler not-enabled'),
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
   it('marks DSD direct positive bypass reference state as good', () => {
     const status = referenceStatus();
     const plan = status.uzumeReferencePlan!;

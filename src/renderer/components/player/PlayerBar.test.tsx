@@ -1885,6 +1885,61 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    status.uzumeReferencePlan!.outputDevicePolicy = {
+      ...status.uzumeReferencePlan!.outputDevicePolicy,
+      outputMode: 'exclusive',
+      deviceCapability: 'direct-like-rate-match',
+      state: 'direct-like-ready',
+      fileRate: 48000,
+      decoderOutputRate: 48000,
+      requestedOutputRate: 48000,
+      actualDeviceRate: 48000,
+      sharedDeviceRate: null,
+      bitPerfectCandidate: true,
+      resampling: false,
+      sampleRateMismatch: false,
+      recommendation: 'none',
+      reasons: ['direct_like_output_rate_matches_requested_reference', 'output_policy_reference_only'],
+    };
+    status.uzumeReferencePlan!.backendSupport.outputDevicePolicyState = 'direct-like-ready';
+    status.uzumeReferencePlan!.latencyBudget.outputDevicePolicyState = 'direct-like-ready';
+    status.uzumeReferencePlan!.readinessContract = {
+      ...status.uzumeReferencePlan!.readinessContract,
+      state: 'ready-to-commit',
+      selectedPath: 'cpu-full-profile',
+      waitTarget: 'none',
+      fullProfileReady: true,
+      cacheState: 'hit',
+      cacheCommitState: 'commit-to-callback-slot',
+      renderAheadState: 'full-profile-ready',
+      renderAheadReadyFrames: 9600,
+      renderAheadTargetFrames: 9600,
+      deadlineState: 'ready',
+      deadlineSlackFrames: 24000,
+      shortBridgeReason: 'full_profile_ready',
+      reasons: ['readiness_summary_derived_from_reference_reports', 'cpu_full_profile_ready', 'readiness_contract_reference_only'],
+    };
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const directReadyDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(directReadyDialog.textContent).toContain('output-device-policy-reference / pcm_processed / exclusive / direct-like-rate-match / direct-like-ready');
+    expect(directReadyDialog.textContent).toContain('readiness-contract-reference / main-playback-owns-timeline-uzume-reports-readiness / ready-to-commit / normal-playlist-boundary->cpu-full-profile / wait none / full-profile ready');
+    expect(directReadyDialog.textContent).toContain('scheduler not-enabled');
+    expect(readSignalPathVisualState(directReadyDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME output device policy reference', tone: 'process', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME readiness contract reference', tone: 'process', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     status.uzumeReferencePlan!.formatPath = 'pcm_bitperfect';
     status.uzumeReferencePlan!.internalDomain = 'pcm-bypass';
     status.uzumeReferencePlan!.bitPerfectState = 'available';
