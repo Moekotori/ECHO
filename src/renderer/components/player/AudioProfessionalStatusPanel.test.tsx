@@ -1428,4 +1428,43 @@ describe('AudioProfessionalStatusPanel', () => {
     );
     expect(visualState.rows.filter((row) => row.tone === 'danger')).toEqual([]);
   });
+
+  it('keeps not-applicable artifact manifest entries non-blocking while planned entries warn', () => {
+    const notApplicableStatus = referenceStatus();
+    notApplicableStatus.uzumeReferencePlan!.artifactPlan.dsdFamilyPath = 'not-applicable';
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={notApplicableStatus} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    let manifestRow = readProfessionalVisualState().rows.find((row) => row.label === 'UZUME artifact manifest reference');
+    expect(manifestRow).toEqual(expect.objectContaining({
+      value: expect.stringContaining('deterministic 37/38 / planned none / not-applicable dsd-family-path'),
+      tone: 'good',
+    }));
+
+    cleanup();
+
+    const plannedStatus = referenceStatus();
+    plannedStatus.uzumeReferencePlan!.artifactPlan.aliasRejection = 'planned';
+    plannedStatus.uzumeReferencePlan!.artifactPlan.dsdFamilyPath = 'not-applicable';
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={plannedStatus} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    manifestRow = readProfessionalVisualState().rows.find((row) => row.label === 'UZUME artifact manifest reference');
+    expect(manifestRow).toEqual(expect.objectContaining({
+      value: expect.stringContaining('deterministic 36/38 / planned alias-rejection / not-applicable dsd-family-path'),
+      tone: 'warning',
+    }));
+  });
 });

@@ -1827,6 +1827,44 @@ describe('PlayerBar', () => {
       ]),
     );
     expect(visualState.nodes.filter((node) => node.tone === 'danger')).toEqual([]);
+
+    cleanup();
+
+    status.uzumeReferencePlan!.artifactPlan.dsdFamilyPath = 'not-applicable';
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    let artifactManifestDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(artifactManifestDialog.textContent).toContain('deterministic 37/38 / planned none / not-applicable dsd-family-path');
+    let artifactManifestVisualState = readSignalPathVisualState(artifactManifestDialog);
+    expect(artifactManifestVisualState.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME artifact manifest reference', tone: 'process', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    status.uzumeReferencePlan!.artifactPlan.aliasRejection = 'planned';
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={status} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    artifactManifestDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(artifactManifestDialog.textContent).toContain('deterministic 36/38 / planned alias-rejection / not-applicable dsd-family-path');
+    artifactManifestVisualState = readSignalPathVisualState(artifactManifestDialog);
+    expect(artifactManifestVisualState.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME artifact manifest reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
   });
 
   it('shows the source and output rates when playback is resampled', () => {
