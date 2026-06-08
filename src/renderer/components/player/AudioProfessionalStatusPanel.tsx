@@ -994,6 +994,70 @@ const formatUzumeReferenceFirGaplessHistory = (status: AudioStatus | null, fallb
   ].filter((part): part is string => Boolean(part)).join(' / ');
 };
 
+const isExpectedUzumeReferenceCallbackSafeControls = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['callbackSafeControls'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const urgent = report.urgentControl;
+  const boundary = report.renderStateBoundary;
+
+  return report.policy === 'urgent-controls-after-committed-output' &&
+    urgent.classification === 'callback-safe-urgent-control' &&
+    urgent.generationState === 'current' &&
+    urgent.state === 'applied' &&
+    urgent.callbackRule === 'read-committed-output-then-apply-urgent-control' &&
+    urgent.renderCacheAction === 'preserve' &&
+    !urgent.requiresRenderGraphRebuild &&
+    urgent.commitAllowed &&
+    urgent.declick.enabled &&
+    urgent.declick.frames > 0 &&
+    urgent.gainEnvelopeFrames >= urgent.declick.frames &&
+    urgent.peak.output <= urgent.peak.input &&
+    boundary.classification === 'render-state-boundary' &&
+    boundary.generationState === 'current' &&
+    boundary.state === 'render-cache-invalidated' &&
+    boundary.callbackRule === 'read-committed-output-only' &&
+    boundary.renderCacheAction === 'invalidate-generation' &&
+    boundary.generationAfterControl > urgent.generationAfterControl &&
+    boundary.requiresRenderGraphRebuild &&
+    !boundary.commitAllowed;
+};
+
+const isExpectedUzumeReferenceEqualPowerCrossfade = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['equalPowerCrossfade'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const rendered = report.rendered;
+  const rejected = report.rejectedBoundary;
+
+  return report.policy === 'random-access-short-bridge-to-full-profile-only' &&
+    rendered.intent === 'user-random-seek-or-skip' &&
+    rendered.state === 'crossfade-rendered' &&
+    rendered.rejectionReason === null &&
+    rendered.fadeFrames > 0 &&
+    rendered.gainLaw.state === 'equal-power' &&
+    rendered.gainLaw.midpointShortBridgeGain !== null &&
+    rendered.gainLaw.midpointFullProfileGain !== null &&
+    rendered.gainLaw.maxPowerSumError === 0 &&
+    rendered.residualVsHardSwitch.state === 'measured-crossfade-difference' &&
+    rendered.residualVsHardSwitch.comparedFrames > 0 &&
+    rendered.residualVsHardSwitch.maxAbs !== null &&
+    rendered.residualVsHardSwitch.maxAbs > 0 &&
+    rendered.residualVsHardSwitch.rms !== null &&
+    rendered.residualVsHardSwitch.rms > 0 &&
+    rejected.intent === 'gapless-boundary' &&
+    rejected.state === 'rejected' &&
+    rejected.rejectionReason === 'intent_not_user_random_seek_or_skip' &&
+    rejected.gainLaw.state === 'not-applicable' &&
+    rejected.residualVsHardSwitch.state === 'not-applicable';
+};
+
 const formatUzumeReferencePerEarEqPlacement = (status: AudioStatus | null, fallback: string): string => {
   const report = status?.uzumeReferencePlan?.perEarEqPlacement;
   if (!report) {
@@ -1495,8 +1559,8 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceFlushDrain'), value: uzumeReferenceFlushDrainText, tone: isExpectedUzumeReferenceFlushDrain(status?.uzumeReferencePlan?.flushDrain) ? 'good' : status?.uzumeReferencePlan?.flushDrain ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceGaplessConcat'), value: uzumeReferenceGaplessConcatText, tone: isExpectedUzumeReferenceGaplessConcat(status?.uzumeReferencePlan?.gaplessConcat) ? 'good' : status?.uzumeReferencePlan?.gaplessConcat?.state === 'src-stateful' ? 'warning' : status?.uzumeReferencePlan?.gaplessConcat ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceFirGaplessHistory'), value: uzumeReferenceFirGaplessHistoryText, tone: isExpectedUzumeReferenceFirGaplessHistory(status?.uzumeReferencePlan?.firGaplessHistory) ? 'good' : status?.uzumeReferencePlan?.firGaplessHistory?.state === 'history-required' ? 'warning' : status?.uzumeReferencePlan?.firGaplessHistory ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceCallbackSafeControls'), value: uzumeReferenceCallbackSafeControlsText, tone: status?.uzumeReferencePlan?.callbackSafeControls ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceEqualPowerCrossfade'), value: uzumeReferenceEqualPowerCrossfadeText, tone: status?.uzumeReferencePlan?.equalPowerCrossfade?.rendered.state === 'crossfade-rendered' ? 'warning' : status?.uzumeReferencePlan?.equalPowerCrossfade ? 'muted' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceCallbackSafeControls'), value: uzumeReferenceCallbackSafeControlsText, tone: isExpectedUzumeReferenceCallbackSafeControls(status?.uzumeReferencePlan?.callbackSafeControls) ? 'good' : status?.uzumeReferencePlan?.callbackSafeControls ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceEqualPowerCrossfade'), value: uzumeReferenceEqualPowerCrossfadeText, tone: isExpectedUzumeReferenceEqualPowerCrossfade(status?.uzumeReferencePlan?.equalPowerCrossfade) ? 'good' : status?.uzumeReferencePlan?.equalPowerCrossfade?.rendered.state === 'crossfade-rendered' ? 'warning' : status?.uzumeReferencePlan?.equalPowerCrossfade ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceResampling'), value: uzumeReferenceResamplingText, tone: status?.uzumeReferencePlan?.resampling.active ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcRollback'), value: uzumeReferenceSrcRollbackText, tone: status?.uzumeReferencePlan?.resampling.qualityRollback.state === 'armed' ? 'warning' : status?.uzumeReferencePlan?.resampling.qualityRollback ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceSrcBudget'), value: uzumeReferenceSrcBudgetText, tone: status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget.safetyClass === 'offline-reference-only' ? 'warning' : status?.uzumeReferencePlan?.resampling.artifactMetrics.realtimeBudget ? 'good' : 'muted' },

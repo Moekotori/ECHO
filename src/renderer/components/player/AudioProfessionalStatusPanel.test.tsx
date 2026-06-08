@@ -1383,12 +1383,12 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME urgent controls reference',
           value: 'callback-safe-urgent-controls-reference / urgent-controls-after-committed-output / urgent:mute:applied / callback-safe-urgent-control / read-committed-output-then-apply-urgent-control / cache preserve / gen 1 / no rebuild / commit allowed / declick enabled 4 frames 1.000->0.000 step 0.333333 / envelope 8 / peak 0.875000->0.083333 / reasons callback safe urgent control | render cache preserved | declick gain ramp | output gain zeroed / boundary:seek:render-cache-invalidated / render-state-boundary / read-committed-output-only / cache invalidate-generation / gen 2 / rebuild required / commit blocked / declick off 0 frames 0.000->0.000 step 0.000000 / envelope 0 / peak 0.875000->0.000000 / reasons transport boundary requires generation increment | render ahead cache invalidated | callback keeps prior committed output',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME equal-power crossfade reference',
           value: 'equal-power-crossfade-reference / random-access-short-bridge-to-full-profile-only / rendered:user-random-seek-or-skip:crossfade-rendered / accepted / sample 48 kHz / fade 5 frames/0.104 ms / gain equal-power / mid 0.707107/0.707107 / power error 0.000000 / residual measured-crossfade-difference 0.207107/0.095781 / peak 1.000000/1.000000/1.000000 / reasons random access short bridge requires equal power crossfade | full profile ready | equal power gain law reference | hard switch residual measured / rejected-boundary:gapless-boundary:rejected / reject intent not user random seek or skip / sample 48 kHz / fade 5 frames/0.104 ms / gain not-applicable / mid n/a / power error 0.000000 / residual not-applicable / peak 1.000000/1.000000/0.000000 / reasons only user random seek or skip can use short bridge crossfade | gapless boundary waits for full profile | equal power crossfade reference only',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({ label: 'UZUME SRC reference', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME SRC rollback reference', tone: 'warning' }),
@@ -1497,6 +1497,41 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME FIR gapless reference',
           value: expect.stringContaining('concat concat-matches-no-reset-history 0.000000/0.000000'),
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected callback-safe controls and crossfade reference contracts as good', () => {
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={referenceStatus()} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME urgent controls reference',
+          value: expect.stringContaining('urgent:mute:applied'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME urgent controls reference',
+          value: expect.stringContaining('boundary:seek:render-cache-invalidated'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME equal-power crossfade reference',
+          value: expect.stringContaining('rendered:user-random-seek-or-skip:crossfade-rendered'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME equal-power crossfade reference',
+          value: expect.stringContaining('rejected-boundary:gapless-boundary:rejected'),
           tone: 'good',
         }),
       ]),

@@ -1126,6 +1126,70 @@ const formatUzumeReferenceFirGaplessHistory = (status: AudioStatus | null): stri
   ]);
 };
 
+const isExpectedUzumeReferenceCallbackSafeControls = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['callbackSafeControls'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const urgent = report.urgentControl;
+  const boundary = report.renderStateBoundary;
+
+  return report.policy === 'urgent-controls-after-committed-output' &&
+    urgent.classification === 'callback-safe-urgent-control' &&
+    urgent.generationState === 'current' &&
+    urgent.state === 'applied' &&
+    urgent.callbackRule === 'read-committed-output-then-apply-urgent-control' &&
+    urgent.renderCacheAction === 'preserve' &&
+    !urgent.requiresRenderGraphRebuild &&
+    urgent.commitAllowed &&
+    urgent.declick.enabled &&
+    urgent.declick.frames > 0 &&
+    urgent.gainEnvelopeFrames >= urgent.declick.frames &&
+    urgent.peak.output <= urgent.peak.input &&
+    boundary.classification === 'render-state-boundary' &&
+    boundary.generationState === 'current' &&
+    boundary.state === 'render-cache-invalidated' &&
+    boundary.callbackRule === 'read-committed-output-only' &&
+    boundary.renderCacheAction === 'invalidate-generation' &&
+    boundary.generationAfterControl > urgent.generationAfterControl &&
+    boundary.requiresRenderGraphRebuild &&
+    !boundary.commitAllowed;
+};
+
+const isExpectedUzumeReferenceEqualPowerCrossfade = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['equalPowerCrossfade'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const rendered = report.rendered;
+  const rejected = report.rejectedBoundary;
+
+  return report.policy === 'random-access-short-bridge-to-full-profile-only' &&
+    rendered.intent === 'user-random-seek-or-skip' &&
+    rendered.state === 'crossfade-rendered' &&
+    rendered.rejectionReason === null &&
+    rendered.fadeFrames > 0 &&
+    rendered.gainLaw.state === 'equal-power' &&
+    rendered.gainLaw.midpointShortBridgeGain !== null &&
+    rendered.gainLaw.midpointFullProfileGain !== null &&
+    rendered.gainLaw.maxPowerSumError === 0 &&
+    rendered.residualVsHardSwitch.state === 'measured-crossfade-difference' &&
+    rendered.residualVsHardSwitch.comparedFrames > 0 &&
+    rendered.residualVsHardSwitch.maxAbs !== null &&
+    rendered.residualVsHardSwitch.maxAbs > 0 &&
+    rendered.residualVsHardSwitch.rms !== null &&
+    rendered.residualVsHardSwitch.rms > 0 &&
+    rejected.intent === 'gapless-boundary' &&
+    rejected.state === 'rejected' &&
+    rejected.rejectionReason === 'intent_not_user_random_seek_or_skip' &&
+    rejected.gainLaw.state === 'not-applicable' &&
+    rejected.residualVsHardSwitch.state === 'not-applicable';
+};
+
 const formatUzumeReferencePerEarEqPlacement = (status: AudioStatus | null): string | null => {
   const report = status?.uzumeReferencePlan?.perEarEqPlacement;
   if (!report) {
@@ -2128,7 +2192,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME urgent controls reference',
       value: referenceCallbackSafeControls,
-      tone: 'warning',
+      tone: isExpectedUzumeReferenceCallbackSafeControls(referencePlan?.callbackSafeControls) ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -2138,7 +2202,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME equal-power crossfade reference',
       value: referenceEqualPowerCrossfade,
-      tone: referencePlan?.equalPowerCrossfade.rendered.state === 'crossfade-rendered' ? 'warning' : 'process',
+      tone: isExpectedUzumeReferenceEqualPowerCrossfade(referencePlan?.equalPowerCrossfade) ? 'process' : referencePlan?.equalPowerCrossfade.rendered.state === 'crossfade-rendered' ? 'warning' : 'process',
       variant: 'process',
     });
   }
