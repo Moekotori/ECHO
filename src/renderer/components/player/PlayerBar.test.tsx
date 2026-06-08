@@ -2334,6 +2334,16 @@ describe('PlayerBar', () => {
       return readSignalPathVisualState(screen.getByRole('dialog', { name: '信号路径' })).nodes;
     };
 
+    const quantizationDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    quantizationDrift.uzumeReferencePlan!.pcmOutputQuantization.dither.enabled = false;
+    expect(renderSignalNodes(quantizationDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME PCM output quantization reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     const pathPlanDrift = cloneAudioStatus(status as unknown as AudioStatus);
     delete pathPlanDrift.uzumeReferencePlan!.formatPathPlan.sdm_processed;
     expect(renderSignalNodes(pathPlanDrift)).toEqual(

@@ -1891,15 +1891,18 @@ describe('AudioProfessionalStatusPanel', () => {
   });
 
   it('marks expected PCM output quantization reference contract as good', () => {
-    render(
-      <I18nProvider>
-        <AudioProfessionalStatusPanel status={referenceStatus()} />
-      </I18nProvider>,
-    );
+    const renderRows = (status: AudioStatus) => {
+      render(
+        <I18nProvider>
+          <AudioProfessionalStatusPanel status={status} />
+        </I18nProvider>,
+      );
 
-    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+      fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+      return readProfessionalVisualState().rows;
+    };
 
-    expect(readProfessionalVisualState().rows).toEqual(
+    expect(renderRows(referenceStatus())).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           label: 'UZUME PCM output quantization reference',
@@ -2205,6 +2208,20 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME convolution serial null reference',
           value: expect.stringContaining('merged-matches-serial'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const driftedStatus = referenceStatus();
+    driftedStatus.uzumeReferencePlan!.pcmOutputQuantization.dither.enabled = false;
+    expect(renderRows(driftedStatus)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME PCM output quantization reference',
+          value: expect.stringContaining('quantized / bit-perfect disabled / pcm dither allowed / dither tpdf disabled'),
           tone: 'warning',
         }),
       ]),

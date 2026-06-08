@@ -3483,9 +3483,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME PCM output quantization reference',
       value: referencePcmOutputQuantization,
-      tone: referencePlan?.pcmOutputQuantization.state === 'rejected'
-        ? 'warning'
-        : isExpectedUzumeReferencePcmOutputQuantization(referencePlan?.pcmOutputQuantization) ? 'process' : referencePlan?.pcmOutputQuantization.dither.enabled ? 'warning' : 'process',
+      tone: isExpectedUzumeReferencePcmOutputQuantization(referencePlan?.pcmOutputQuantization) ? 'process' : 'warning',
       variant: 'process',
     });
   }
