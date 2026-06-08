@@ -1995,7 +1995,7 @@ describe('PlayerBar', () => {
       resampling: false,
       sampleRateMismatch: false,
       recommendation: 'none',
-      reasons: ['direct_like_output_rate_matches_requested_reference', 'output_policy_reference_only'],
+      reasons: ['direct_like_output_reports_actual_device_rate', 'output_device_policy_reference_only'],
     };
     status.uzumeReferencePlan!.backendSupport.outputDevicePolicyState = 'direct-like-ready';
     status.uzumeReferencePlan!.latencyBudget.outputDevicePolicyState = 'direct-like-ready';
@@ -2038,6 +2038,38 @@ describe('PlayerBar', () => {
       expect.arrayContaining([
         expect.objectContaining({ title: 'UZUME output device policy reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME readiness contract reference', tone: 'process', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const outputPolicyDriftStatus = {
+      ...status,
+      uzumeReferencePlan: {
+        ...status.uzumeReferencePlan!,
+        outputDevicePolicy: {
+          ...status.uzumeReferencePlan!.outputDevicePolicy,
+          resampling: true,
+          sampleRateMismatch: true,
+          recommendation: 'inspect-device-rate-mismatch',
+          reasons: ['output_device_policy_reference_only'],
+        },
+      },
+    } as unknown as AudioStatus;
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={outputPolicyDriftStatus} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={outputPolicyDriftStatus} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const outputPolicyDriftDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(outputPolicyDriftDialog.textContent).toContain('output-device-policy-reference / pcm_processed / exclusive / direct-like-rate-match / direct-like-ready');
+    expect(outputPolicyDriftDialog.textContent).toContain('recommend inspect-device-rate-mismatch');
+    expect(readSignalPathVisualState(outputPolicyDriftDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME output device policy reference', tone: 'warning', variant: 'process' }),
       ]),
     );
 

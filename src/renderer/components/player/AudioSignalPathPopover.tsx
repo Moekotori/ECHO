@@ -334,6 +334,32 @@ const isExpectedUzumeReferenceBackendSupport = (
     expectedReasons.every((reason) => report.reasons.includes(reason));
 };
 
+const isExpectedUzumeReferenceOutputDevicePolicy = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['outputDevicePolicy'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedReasons = [
+    'direct_like_output_reports_actual_device_rate',
+    'output_device_policy_reference_only',
+  ];
+
+  return report.artifact === 'output-device-policy-reference' &&
+    report.state === 'direct-like-ready' &&
+    (report.outputMode === 'exclusive' || report.outputMode === 'asio') &&
+    report.deviceCapability === 'direct-like-rate-match' &&
+    report.requestedOutputRate !== null &&
+    report.actualDeviceRate === report.requestedOutputRate &&
+    report.sharedDeviceRate === null &&
+    report.bitPerfectCandidate === true &&
+    report.resampling === false &&
+    report.sampleRateMismatch === false &&
+    report.recommendation === 'none' &&
+    expectedReasons.every((reason) => report.reasons.includes(reason));
+};
+
 const isExpectedUzumeReferenceLatencyBudget = (
   report: NonNullable<AudioStatus['uzumeReferencePlan']>['latencyBudget'] | null | undefined,
 ): boolean => {
@@ -2769,6 +2795,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referencePlan = status.uzumeReferencePlan;
   const expectedReferenceCompiler = isExpectedUzumeReferenceCompiler(referencePlan);
   const expectedReferenceBackendSupport = isExpectedUzumeReferenceBackendSupport(referencePlan?.backendSupport);
+  const expectedReferenceOutputDevicePolicy = isExpectedUzumeReferenceOutputDevicePolicy(referencePlan?.outputDevicePolicy);
   const expectedReferenceLatencyBudget = isExpectedUzumeReferenceLatencyBudget(referencePlan?.latencyBudget);
   const expectedReferenceReadinessContract = isExpectedUzumeReferenceReadinessContract(referencePlan?.readinessContract);
   const expectedReferenceGenerationCacheKey = isExpectedUzumeReferenceGenerationCacheKey(referencePlan?.generationCacheKey);
@@ -2956,7 +2983,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME output device policy reference',
       value: referenceOutputDevicePolicy,
-      tone: referencePlan?.outputDevicePolicy.state === 'direct-like-ready' ? 'process' : 'warning',
+      tone: expectedReferenceOutputDevicePolicy ? 'process' : 'warning',
       variant: 'process',
     });
   }

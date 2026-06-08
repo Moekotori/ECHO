@@ -253,6 +253,32 @@ const isExpectedUzumeReferenceBackendSupport = (
     expectedReasons.every((reason) => report.reasons.includes(reason));
 };
 
+const isExpectedUzumeReferenceOutputDevicePolicy = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['outputDevicePolicy'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedReasons = [
+    'direct_like_output_reports_actual_device_rate',
+    'output_device_policy_reference_only',
+  ];
+
+  return report.artifact === 'output-device-policy-reference' &&
+    report.state === 'direct-like-ready' &&
+    (report.outputMode === 'exclusive' || report.outputMode === 'asio') &&
+    report.deviceCapability === 'direct-like-rate-match' &&
+    report.requestedOutputRate !== null &&
+    report.actualDeviceRate === report.requestedOutputRate &&
+    report.sharedDeviceRate === null &&
+    report.bitPerfectCandidate === true &&
+    report.resampling === false &&
+    report.sampleRateMismatch === false &&
+    report.recommendation === 'none' &&
+    expectedReasons.every((reason) => report.reasons.includes(reason));
+};
+
 const isExpectedUzumeReferenceLatencyBudget = (
   report: NonNullable<AudioStatus['uzumeReferencePlan']>['latencyBudget'] | null | undefined,
 ): boolean => {
@@ -2275,6 +2301,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceLatencyOwnersText = formatUzumeReferenceLatencyOwners(status, unknown);
   const expectedUzumeReferenceCompiler = isExpectedUzumeReferenceCompiler(status?.uzumeReferencePlan);
   const expectedUzumeReferenceBackendSupport = isExpectedUzumeReferenceBackendSupport(status?.uzumeReferencePlan?.backendSupport);
+  const expectedUzumeReferenceOutputDevicePolicy = isExpectedUzumeReferenceOutputDevicePolicy(status?.uzumeReferencePlan?.outputDevicePolicy);
   const expectedUzumeReferenceLatencyBudget = isExpectedUzumeReferenceLatencyBudget(status?.uzumeReferencePlan?.latencyBudget);
   const expectedUzumeReferenceReadinessContract = isExpectedUzumeReferenceReadinessContract(status?.uzumeReferencePlan?.readinessContract);
   const expectedUzumeReferenceGenerationCacheKey = isExpectedUzumeReferenceGenerationCacheKey(status?.uzumeReferencePlan?.generationCacheKey);
@@ -2465,7 +2492,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceArtifactManifest'), value: uzumeReferenceArtifactManifestText, tone: uzumeReferenceArtifactManifest?.hasPlanned ? 'warning' : uzumeReferenceArtifactManifest ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBitPerfect'), value: uzumeReferenceBitPerfectText, tone: status?.uzumeReferencePlan?.bitPerfectState === 'available' ? 'good' : status?.uzumeReferencePlan ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBackendSupport'), value: uzumeReferenceBackendSupportText, tone: expectedUzumeReferenceBackendSupport ? 'good' : status?.uzumeReferencePlan?.backendSupport ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceOutputDevicePolicy'), value: uzumeReferenceOutputDevicePolicyText, tone: status?.uzumeReferencePlan?.outputDevicePolicy?.state === 'direct-like-ready' ? 'good' : status?.uzumeReferencePlan?.outputDevicePolicy ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceOutputDevicePolicy'), value: uzumeReferenceOutputDevicePolicyText, tone: expectedUzumeReferenceOutputDevicePolicy ? 'good' : status?.uzumeReferencePlan?.outputDevicePolicy ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceLatencyBudget'), value: uzumeReferenceLatencyBudgetText, tone: expectedUzumeReferenceLatencyBudget ? 'good' : status?.uzumeReferencePlan?.latencyBudget ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceReadinessContract'), value: uzumeReferenceReadinessContractText, tone: expectedUzumeReferenceReadinessContract ? 'good' : status?.uzumeReferencePlan?.readinessContract ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceGenerationCacheKey'), value: uzumeReferenceGenerationCacheKeyText, tone: expectedUzumeReferenceGenerationCacheKey ? 'good' : status?.uzumeReferencePlan?.generationCacheKey ? 'warning' : 'muted' },

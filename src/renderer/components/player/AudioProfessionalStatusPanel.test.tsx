@@ -2178,7 +2178,7 @@ describe('AudioProfessionalStatusPanel', () => {
       resampling: false,
       sampleRateMismatch: false,
       recommendation: 'none',
-      reasons: ['direct_like_output_rate_matches_requested_reference', 'output_policy_reference_only'],
+      reasons: ['direct_like_output_reports_actual_device_rate', 'output_device_policy_reference_only'],
     };
     plan.backendSupport.outputDevicePolicyState = 'direct-like-ready';
     plan.latencyBudget.outputDevicePolicyState = 'direct-like-ready';
@@ -2230,6 +2230,50 @@ describe('AudioProfessionalStatusPanel', () => {
           label: 'UZUME readiness contract reference',
           value: expect.stringContaining('scheduler not-enabled'),
           tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks direct-like output policy drift as warning', () => {
+    const status = referenceStatus();
+    const plan = status.uzumeReferencePlan!;
+    plan.outputDevicePolicy = {
+      ...plan.outputDevicePolicy,
+      outputMode: 'exclusive',
+      deviceCapability: 'direct-like-rate-match',
+      state: 'direct-like-ready',
+      fileRate: 48000,
+      decoderOutputRate: 48000,
+      requestedOutputRate: 48000,
+      actualDeviceRate: 48000,
+      sharedDeviceRate: null,
+      bitPerfectCandidate: true,
+      resampling: true,
+      sampleRateMismatch: true,
+      recommendation: 'inspect-device-rate-mismatch',
+      reasons: ['output_device_policy_reference_only'],
+    };
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME output device policy reference',
+          value: expect.stringContaining('exclusive / direct-like-rate-match / direct-like-ready'),
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME output device policy reference',
+          value: expect.stringContaining('recommend inspect-device-rate-mismatch'),
+          tone: 'warning',
         }),
       ]),
     );
