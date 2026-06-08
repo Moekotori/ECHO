@@ -1821,7 +1821,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({ title: 'UZUME artifact manifest reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME reference path plan', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME reference bit-perfect', tone: 'warning', variant: 'process' }),
-        expect.objectContaining({ title: 'UZUME backend support reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME backend support reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME output device policy reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME latency budget reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME readiness contract reference', tone: 'warning', variant: 'process' }),

@@ -1303,7 +1303,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME backend support reference',
           value: 'backend-support-reference / reference-backend-only-no-runtime-switch / selected cpu-float64-reference / realtime not-enabled / cpu available deterministic-reference / avx future-production-gate rpc-003-cpu-realtime-gate / gpu future-render-ahead-gate rpc-005-gpu-render-ahead-gate / legacy non-uzume-fallback-only compiler blocked / output shared-mixer-risk / reasons cpu float64 reference selected for rpc002 | avx2 gpu runtime backends deferred beyond reference gate | legacy dsp chain not entered by uzume compiler | backend support reference only',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME output device policy reference',
@@ -1608,6 +1608,59 @@ describe('AudioProfessionalStatusPanel', () => {
           label: 'UZUME reference latency owners',
           value: 'shared-convolution->room-ir-latency | pcm-src->resampling-reference',
           tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected backend support reference contract as good', () => {
+    const status = referenceStatus();
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME backend support reference',
+          value: expect.stringContaining('reference-backend-only-no-runtime-switch'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME backend support reference',
+          value: expect.stringContaining('legacy non-uzume-fallback-only compiler blocked'),
+          tone: 'good',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const driftedStatus = referenceStatus();
+    const driftedBackend = driftedStatus.uzumeReferencePlan!.backendSupport as unknown as {
+      legacy: { allowedInCompiler: boolean };
+    };
+    driftedBackend.legacy.allowedInCompiler = true;
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={driftedStatus} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME backend support reference',
+          value: expect.stringContaining('compiler allowed'),
+          tone: 'warning',
         }),
       ]),
     );

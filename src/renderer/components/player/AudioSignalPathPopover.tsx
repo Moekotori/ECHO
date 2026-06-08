@@ -301,6 +301,39 @@ const isExpectedUzumeReferenceCompiler = (plan: AudioStatus['uzumeReferencePlan'
   return orderedSectionsAreCovered && assignmentsAreValid && mergeGroupsAreValid && latencyOwnersAreValid;
 };
 
+const isExpectedUzumeReferenceBackendSupport = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['backendSupport'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedReasons = [
+    'cpu_float64_reference_selected_for_rpc002',
+    'avx2_gpu_runtime_backends_deferred_beyond_reference_gate',
+    'legacy_dsp_chain_not_entered_by_uzume_compiler',
+    'backend_support_reference_only',
+  ];
+
+  return report.artifact === 'backend-support-reference' &&
+    report.policy === 'reference-backend-only-no-runtime-switch' &&
+    report.selectedBackend === 'cpu-float64-reference' &&
+    report.realtimeBackend === 'not-enabled' &&
+    report.cpuReference.id === 'cpu-float64-reference' &&
+    report.cpuReference.state === 'available' &&
+    report.cpuReference.role === 'deterministic-reference' &&
+    report.cpuAvx.id === 'cpu-avx2-fused-macro-kernel' &&
+    report.cpuAvx.state === 'future-production-gate' &&
+    report.cpuAvx.gate === 'rpc-003-cpu-realtime-gate' &&
+    report.gpu.id === 'gpu-render-ahead-offload' &&
+    report.gpu.state === 'future-render-ahead-gate' &&
+    report.gpu.gate === 'rpc-005-gpu-render-ahead-gate' &&
+    report.legacy.id === 'legacy-dsp-chain' &&
+    report.legacy.state === 'non-uzume-fallback-only' &&
+    report.legacy.allowedInCompiler === false &&
+    expectedReasons.every((reason) => report.reasons.includes(reason));
+};
+
 const formatUzumeReferenceArtifactManifest = (status: AudioStatus | null): string | null => {
   return buildUzumeReferenceArtifactManifestSummary(status?.uzumeReferencePlan?.artifactPlan)?.text ?? null;
 };
@@ -2216,6 +2249,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const resamplePath = echoSrcPath ? null : formatResamplePath(status, track);
   const referencePlan = status.uzumeReferencePlan;
   const expectedReferenceCompiler = isExpectedUzumeReferenceCompiler(referencePlan);
+  const expectedReferenceBackendSupport = isExpectedUzumeReferenceBackendSupport(referencePlan?.backendSupport);
   const referenceAssignments = formatUzumeReferenceAssignments(status);
   const referenceMergeGroups = formatUzumeReferenceMergeGroups(status);
   const referenceLatencyOwners = formatUzumeReferenceLatencyOwners(status);
@@ -2382,7 +2416,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME backend support reference',
       value: referenceBackendSupport,
-      tone: 'warning',
+      tone: expectedReferenceBackendSupport ? 'process' : 'warning',
       variant: 'process',
     });
   }
