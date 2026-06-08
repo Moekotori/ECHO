@@ -1826,7 +1826,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({ title: 'UZUME stereo procedural reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME per-ear EQ placement reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME block boundary reference', tone: 'process', variant: 'process' }),
-        expect.objectContaining({ title: 'UZUME flush/drain reference', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME flush/drain reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME gapless SRC reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME FIR gapless reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME urgent controls reference', tone: 'warning', variant: 'process' }),

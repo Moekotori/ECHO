@@ -995,6 +995,33 @@ const formatUzumeReferenceFlushDrain = (status: AudioStatus | null): string | nu
   ]);
 };
 
+const isExpectedUzumeReferenceFlushDrain = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['flushDrain'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const natural = report.naturalEof;
+  const manual = report.manualFlush;
+
+  return natural.state === 'drain-committed' &&
+    !natural.resetRequired &&
+    natural.drainCommitAllowed &&
+    natural.residual.sourceWindowMaxAbs === 0 &&
+    natural.residual.sourceWindowRms === 0 &&
+    natural.residual.drainMaxAbs === 0 &&
+    natural.residual.drainRms === 0 &&
+    manual.state === 'tail-dropped-and-reset' &&
+    manual.resetRequired &&
+    !manual.drainCommitAllowed &&
+    manual.drainFrames === 0 &&
+    manual.residual.sourceWindowMaxAbs === 0 &&
+    manual.residual.sourceWindowRms === 0 &&
+    manual.residual.drainMaxAbs === 0 &&
+    manual.residual.drainRms === 0;
+};
+
 const formatUzumeReferenceGaplessConcat = (status: AudioStatus | null): string | null => {
   const report = status?.uzumeReferencePlan?.gaplessConcat;
   if (!report) {
@@ -2020,7 +2047,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME flush/drain reference',
       value: referenceFlushDrain,
-      tone: 'warning',
+      tone: isExpectedUzumeReferenceFlushDrain(referencePlan?.flushDrain) ? 'process' : 'warning',
       variant: 'process',
     });
   }

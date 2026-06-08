@@ -1368,7 +1368,7 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME flush/drain reference',
           value: 'flush-drain-reference / direct-fir-float64-reference / generation 7/current / natural-eof:drain-committed / gen 7 / tail 2 / drain 2 / no reset / drain committed / source residual 0.000000/0.000000 / drain residual 0.000000/0.000000 / reasons natural eof commits drain tail | drain frames match filter tail / manual-flush:tail-dropped-and-reset / gen 8 / tail 2 / drain 0 / reset required / drain blocked / source residual 0.000000/0.000000 / drain residual 0.000000/0.000000 / reasons transport boundary drops pending tail | generation increment required | render state reset required',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME gapless SRC reference',
@@ -1451,6 +1451,31 @@ describe('AudioProfessionalStatusPanel', () => {
       ]),
     );
     expect(visualState.rows.filter((row) => row.tone === 'danger')).toEqual([]);
+  });
+
+  it('marks expected flush/drain reference contract as good', () => {
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={referenceStatus()} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME flush/drain reference',
+          value: expect.stringContaining('natural-eof:drain-committed'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME flush/drain reference',
+          value: expect.stringContaining('manual-flush:tail-dropped-and-reset'),
+          tone: 'good',
+        }),
+      ]),
+    );
   });
 
   it('marks same-rate bypass SRC budget reference state as good', () => {

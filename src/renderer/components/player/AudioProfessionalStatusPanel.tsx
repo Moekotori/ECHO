@@ -863,6 +863,33 @@ const formatUzumeReferenceFlushDrain = (status: AudioStatus | null, fallback: st
   ].filter((part): part is string => Boolean(part)).join(' / ');
 };
 
+const isExpectedUzumeReferenceFlushDrain = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['flushDrain'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const natural = report.naturalEof;
+  const manual = report.manualFlush;
+
+  return natural.state === 'drain-committed' &&
+    !natural.resetRequired &&
+    natural.drainCommitAllowed &&
+    natural.residual.sourceWindowMaxAbs === 0 &&
+    natural.residual.sourceWindowRms === 0 &&
+    natural.residual.drainMaxAbs === 0 &&
+    natural.residual.drainRms === 0 &&
+    manual.state === 'tail-dropped-and-reset' &&
+    manual.resetRequired &&
+    !manual.drainCommitAllowed &&
+    manual.drainFrames === 0 &&
+    manual.residual.sourceWindowMaxAbs === 0 &&
+    manual.residual.sourceWindowRms === 0 &&
+    manual.residual.drainMaxAbs === 0 &&
+    manual.residual.drainRms === 0;
+};
+
 const formatUzumeReferenceGaplessConcat = (status: AudioStatus | null, fallback: string): string => {
   const report = status?.uzumeReferencePlan?.gaplessConcat;
   if (!report) {
@@ -1414,7 +1441,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceStereoProcedural'), value: uzumeReferenceStereoProceduralText, tone: status?.uzumeReferencePlan?.stereoProcedural?.state === 'active' ? 'warning' : status?.uzumeReferencePlan?.stereoProcedural ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePerEarEqPlacement'), value: uzumeReferencePerEarEqPlacementText, tone: status?.uzumeReferencePlan?.perEarEqPlacement?.state === 'placement-sensitive' ? 'warning' : status?.uzumeReferencePlan?.perEarEqPlacement ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBlockBoundary'), value: uzumeReferenceBlockBoundaryText, tone: status?.uzumeReferencePlan?.blockBoundary?.coverage.state === 'exact' && status?.uzumeReferencePlan?.blockBoundary?.residual.state === 'exact-reassembly' ? 'good' : status?.uzumeReferencePlan?.blockBoundary ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceFlushDrain'), value: uzumeReferenceFlushDrainText, tone: status?.uzumeReferencePlan?.flushDrain ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceFlushDrain'), value: uzumeReferenceFlushDrainText, tone: isExpectedUzumeReferenceFlushDrain(status?.uzumeReferencePlan?.flushDrain) ? 'good' : status?.uzumeReferencePlan?.flushDrain ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceGaplessConcat'), value: uzumeReferenceGaplessConcatText, tone: status?.uzumeReferencePlan?.gaplessConcat?.state === 'src-stateful' ? 'warning' : status?.uzumeReferencePlan?.gaplessConcat ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceFirGaplessHistory'), value: uzumeReferenceFirGaplessHistoryText, tone: status?.uzumeReferencePlan?.firGaplessHistory?.state === 'history-required' ? 'warning' : status?.uzumeReferencePlan?.firGaplessHistory ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceCallbackSafeControls'), value: uzumeReferenceCallbackSafeControlsText, tone: status?.uzumeReferencePlan?.callbackSafeControls ? 'warning' : 'muted' },
