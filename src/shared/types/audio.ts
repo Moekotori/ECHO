@@ -381,6 +381,7 @@ export type UzumeReferenceArtifactPlan = {
   nullResidual: 'deterministic-reference' | 'planned';
   formalValidation: 'deterministic-reference' | 'planned';
   dsdFamilyPath: 'deterministic-reference' | 'not-applicable';
+  backendSupport: 'deterministic-reference';
   outputDevicePolicy: 'deterministic-reference';
   qualityRollback: 'deterministic-reference';
   outputResamplingRisk: 'deterministic-reference';
@@ -976,6 +977,35 @@ export type UzumeReferenceOutputDevicePolicyInspectReport = {
     | 'inspect-device-rate-mismatch';
   reasons: string[];
 };
+export type UzumeReferenceBackendSupportInspectReport = {
+  artifact: 'backend-support-reference';
+  policy: 'reference-backend-only-no-runtime-switch';
+  formatPath: UzumeFormatPath;
+  selectedBackend: 'cpu-float64-reference';
+  realtimeBackend: 'not-enabled';
+  outputDevicePolicyState: UzumeReferenceOutputDevicePolicyInspectReport['state'];
+  cpuReference: {
+    id: 'cpu-float64-reference';
+    state: 'available';
+    role: 'deterministic-reference';
+  };
+  cpuAvx: {
+    id: 'cpu-avx2-fused-macro-kernel';
+    state: 'future-production-gate';
+    gate: 'rpc-003-cpu-realtime-gate';
+  };
+  gpu: {
+    id: 'gpu-render-ahead-offload';
+    state: 'future-render-ahead-gate';
+    gate: 'rpc-005-gpu-render-ahead-gate';
+  };
+  legacy: {
+    id: 'legacy-dsp-chain';
+    state: 'non-uzume-fallback-only';
+    allowedInCompiler: false;
+  };
+  reasons: string[];
+};
 export type UzumeCompiledReferencePlan = {
   schemaVersion: 1;
   telemetrySchemaVersion: 2;
@@ -990,6 +1020,7 @@ export type UzumeCompiledReferencePlan = {
     | 'unknown';
   bitPerfectState: 'available' | 'disabled' | 'unavailable';
   directDisabledReason: string | null;
+  backendSupport: UzumeReferenceBackendSupportInspectReport;
   outputDevicePolicy: UzumeReferenceOutputDevicePolicyInspectReport;
   orderedProfileSections: UzumeReferenceSectionId[];
   engineAssignments: UzumeReferenceAssignment[];

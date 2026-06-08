@@ -1788,6 +1788,44 @@ const buildOutputDevicePolicyInspectReport = (
   };
 };
 
+const buildBackendSupportInspectReport = (
+  format: FormatPlannerResult,
+  outputDevicePolicy: UzumeCompiledReferencePlan['outputDevicePolicy'],
+): UzumeCompiledReferencePlan['backendSupport'] => ({
+  artifact: 'backend-support-reference',
+  policy: 'reference-backend-only-no-runtime-switch',
+  formatPath: format.formatPath,
+  selectedBackend: 'cpu-float64-reference',
+  realtimeBackend: 'not-enabled',
+  outputDevicePolicyState: outputDevicePolicy.state,
+  cpuReference: {
+    id: 'cpu-float64-reference',
+    state: 'available',
+    role: 'deterministic-reference',
+  },
+  cpuAvx: {
+    id: 'cpu-avx2-fused-macro-kernel',
+    state: 'future-production-gate',
+    gate: 'rpc-003-cpu-realtime-gate',
+  },
+  gpu: {
+    id: 'gpu-render-ahead-offload',
+    state: 'future-render-ahead-gate',
+    gate: 'rpc-005-gpu-render-ahead-gate',
+  },
+  legacy: {
+    id: 'legacy-dsp-chain',
+    state: 'non-uzume-fallback-only',
+    allowedInCompiler: false,
+  },
+  reasons: [
+    'cpu_float64_reference_selected_for_rpc002',
+    'avx2_gpu_runtime_backends_deferred_beyond_reference_gate',
+    'legacy_dsp_chain_not_entered_by_uzume_compiler',
+    'backend_support_reference_only',
+  ],
+});
+
 const buildDsdRequestedControls = (input: UzumeReferenceCompileInput, formatPath: UzumeFormatPath): UzumeReferenceDsdControlId[] => {
   const controls = new Set<UzumeReferenceDsdControlId>(['safety-metering']);
   if (formatPath === 'dsd_direct') {
@@ -4242,6 +4280,7 @@ const buildEqualPowerCrossfadeInspectReport = (
 export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): UzumeCompiledReferencePlan => {
   const format = buildFormatPlanner(input);
   const outputDevicePolicy = buildOutputDevicePolicyInspectReport(input, format);
+  const backendSupport = buildBackendSupportInspectReport(format, outputDevicePolicy);
   const resampling = buildResamplingReport(input);
   const sharedConvolution = buildSharedConvolutionReport(input, resampling);
   const pcmOutputQuantization = buildPcmOutputQuantizationReport(input, format);
@@ -4265,6 +4304,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
     schemaVersion: 1,
     telemetrySchemaVersion: 2,
     ...format,
+    backendSupport,
     outputDevicePolicy,
     ...compiler,
     resampling,
@@ -4300,6 +4340,7 @@ export const compileUzumeReferencePlan = (input: UzumeReferenceCompileInput): Uz
       nullResidual: 'deterministic-reference',
       formalValidation: 'deterministic-reference',
       dsdFamilyPath: dsdFamily ? 'deterministic-reference' : 'not-applicable',
+      backendSupport: 'deterministic-reference',
       outputDevicePolicy: 'deterministic-reference',
       qualityRollback: 'deterministic-reference',
       outputResamplingRisk: 'deterministic-reference',

@@ -287,6 +287,26 @@ const formatUzumeReferenceBitPerfect = (status: AudioStatus | null): string | nu
   ]);
 };
 
+const formatUzumeReferenceBackendSupport = (status: AudioStatus | null): string | null => {
+  const report = status?.uzumeReferencePlan?.backendSupport;
+  if (!report) {
+    return null;
+  }
+
+  return joinSpec([
+    report.artifact,
+    report.policy,
+    `selected ${report.selectedBackend}`,
+    `realtime ${report.realtimeBackend}`,
+    `cpu ${report.cpuReference.state} ${report.cpuReference.role}`,
+    `avx ${report.cpuAvx.state} ${report.cpuAvx.gate}`,
+    `gpu ${report.gpu.state} ${report.gpu.gate}`,
+    `legacy ${report.legacy.state} compiler ${report.legacy.allowedInCompiler ? 'allowed' : 'blocked'}`,
+    `output ${report.outputDevicePolicyState}`,
+    report.reasons.length ? `reasons ${report.reasons.map(cleanReason).filter(Boolean).join(' | ')}` : null,
+  ]);
+};
+
 const formatUzumeReferenceOutputDevicePolicy = (status: AudioStatus | null): string | null => {
   const report = status?.uzumeReferencePlan?.outputDevicePolicy;
   if (!report) {
@@ -1576,6 +1596,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const referenceLatencyOwners = formatUzumeReferenceLatencyOwners(status);
   const referencePathPlan = formatUzumeReferencePathPlan(status);
   const referenceBitPerfect = formatUzumeReferenceBitPerfect(status);
+  const referenceBackendSupport = formatUzumeReferenceBackendSupport(status);
   const referenceOutputDevicePolicy = formatUzumeReferenceOutputDevicePolicy(status);
   const referenceResampling = formatUzumeReferenceResampling(status);
   const referenceSrcRollback = formatUzumeReferenceSrcRollback(status);
@@ -1710,6 +1731,16 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       title: 'UZUME reference bit-perfect',
       value: referenceBitPerfect,
       tone: referencePlan?.bitPerfectState === 'available' ? 'process' : 'warning',
+      variant: 'process',
+    });
+  }
+
+  if (referenceBackendSupport) {
+    nodes.push({
+      badge: '',
+      title: 'UZUME backend support reference',
+      value: referenceBackendSupport,
+      tone: 'warning',
       variant: 'process',
     });
   }

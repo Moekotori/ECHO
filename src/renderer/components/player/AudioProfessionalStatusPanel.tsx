@@ -181,6 +181,26 @@ const formatUzumeReferenceBitPerfect = (status: AudioStatus | null, fallback: st
   return `${plan.bitPerfectState} / ${direct} / ${plan.sourceContainer}->${plan.outputContainer} / ${plan.internalDomain} / ${plan.formatPath}`;
 };
 
+const formatUzumeReferenceBackendSupport = (status: AudioStatus | null, fallback: string): string => {
+  const report = status?.uzumeReferencePlan?.backendSupport;
+  if (!report) {
+    return fallback;
+  }
+
+  return [
+    report.artifact,
+    report.policy,
+    `selected ${report.selectedBackend}`,
+    `realtime ${report.realtimeBackend}`,
+    `cpu ${report.cpuReference.state} ${report.cpuReference.role}`,
+    `avx ${report.cpuAvx.state} ${report.cpuAvx.gate}`,
+    `gpu ${report.gpu.state} ${report.gpu.gate}`,
+    `legacy ${report.legacy.state} compiler ${report.legacy.allowedInCompiler ? 'allowed' : 'blocked'}`,
+    `output ${report.outputDevicePolicyState}`,
+    report.reasons.length ? `reasons ${report.reasons.map((reason) => normalizeReason(reason, fallback)).join(' | ')}` : null,
+  ].filter((part): part is string => Boolean(part)).join(' / ');
+};
+
 const formatUzumeReferenceOutputDevicePolicy = (status: AudioStatus | null, fallback: string): string => {
   const report = status?.uzumeReferencePlan?.outputDevicePolicy;
   if (!report) {
@@ -1073,6 +1093,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceMergeGroupsText = formatUzumeReferenceMergeGroups(status, unknown);
   const uzumeReferenceLatencyOwnersText = formatUzumeReferenceLatencyOwners(status, unknown);
   const uzumeReferenceBitPerfectText = formatUzumeReferenceBitPerfect(status, unknown);
+  const uzumeReferenceBackendSupportText = formatUzumeReferenceBackendSupport(status, unknown);
   const uzumeReferenceOutputDevicePolicyText = formatUzumeReferenceOutputDevicePolicy(status, unknown);
   const uzumeReferenceResamplingText = formatUzumeReferenceResampling(status, unknown);
   const uzumeReferenceSrcRollbackText = formatUzumeReferenceSrcRollback(status, unknown);
@@ -1241,6 +1262,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferenceMergeGroups'), value: uzumeReferenceMergeGroupsText, tone: status?.uzumeReferencePlan?.mergeGroups.length ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceLatencyOwners'), value: uzumeReferenceLatencyOwnersText, tone: Object.keys(status?.uzumeReferencePlan?.latencyOwners ?? {}).length ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBitPerfect'), value: uzumeReferenceBitPerfectText, tone: status?.uzumeReferencePlan?.bitPerfectState === 'available' ? 'good' : status?.uzumeReferencePlan ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceBackendSupport'), value: uzumeReferenceBackendSupportText, tone: status?.uzumeReferencePlan?.backendSupport ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceOutputDevicePolicy'), value: uzumeReferenceOutputDevicePolicyText, tone: status?.uzumeReferencePlan?.outputDevicePolicy?.state === 'direct-like-ready' ? 'good' : status?.uzumeReferencePlan?.outputDevicePolicy ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferencePcmIngressGuard'), value: uzumeReferencePcmIngressGuardText, tone: status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'channel-mismatch' || status?.uzumeReferencePlan?.pcmIngressGuard?.state === 'sanitized' ? 'warning' : status?.uzumeReferencePlan?.pcmIngressGuard ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceGainStaging'), value: uzumeReferenceGainStagingText, tone: status?.uzumeReferencePlan?.gainStaging?.clipRisk ? 'warning' : Math.abs(status?.uzumeReferencePlan?.gainStaging?.totalGainDb ?? 0) > 0.001 ? 'warning' : status?.uzumeReferencePlan?.gainStaging ? 'good' : 'muted' },
@@ -1307,7 +1329,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.error'), value: status?.error ?? unknown, tone: status?.error ? 'danger' : 'muted' },
       ],
     },
-  ], [bitPerfectText, disabled, dspModules.length, enabled, no, planned, protectLimiterText, signalPathText, status, t, transitional, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeFormatPathText, uzumeGpuText, uzumeHeadroomTelemetryText, uzumeLimiterReferenceText, uzumeReferenceAssignmentsText, uzumeReferenceBitPerfectText, uzumeReferenceBlockBoundaryText, uzumeReferenceCallbackRingText, uzumeReferenceCallbackSafeControlsText, uzumeReferenceChannelScopeText, uzumeReferenceCompilerText, uzumeReferenceContinuityText, uzumeReferenceConvolutionDuplicateGuardText, uzumeReferenceConvolutionSerialNullText, uzumeReferenceConvolutionText, uzumeReferenceDsdFamilyText, uzumeReferenceEqualPowerCrossfadeText, uzumeReferenceFirGaplessHistoryText, uzumeReferenceFlushDrainText, uzumeReferenceGainStagingText, uzumeReferenceGaplessConcatText, uzumeReferenceIirEqText, uzumeReferenceLatencyOwnersText, uzumeReferenceMergeGroupsText, uzumeReferenceOutputDevicePolicyText, uzumeReferencePcmIngressGuardText, uzumeReferencePcmOutputQuantizationText, uzumeReferencePerEarEqPlacementText, uzumeReferencePreRollText, uzumeReferenceRenderAheadCacheText, uzumeReferenceResamplingText, uzumeReferenceResponseResampleText, uzumeReferenceSrcArtifactsText, uzumeReferenceSrcBudgetText, uzumeReferenceSrcOutputRiskText, uzumeReferenceSrcPhaseApodizingText, uzumeReferenceSrcRollbackText, uzumeReferenceSrcValidationText, uzumeReferenceStereoProceduralText, uzumeReferenceUnderrunFallbackText, uzumeSafetyMeterText, yes]);
+  ], [bitPerfectText, disabled, dspModules.length, enabled, no, planned, protectLimiterText, signalPathText, status, t, transitional, unknown, uzumeBitPerfectText, uzumeCufftText, uzumeFormatPathText, uzumeGpuText, uzumeHeadroomTelemetryText, uzumeLimiterReferenceText, uzumeReferenceAssignmentsText, uzumeReferenceBackendSupportText, uzumeReferenceBitPerfectText, uzumeReferenceBlockBoundaryText, uzumeReferenceCallbackRingText, uzumeReferenceCallbackSafeControlsText, uzumeReferenceChannelScopeText, uzumeReferenceCompilerText, uzumeReferenceContinuityText, uzumeReferenceConvolutionDuplicateGuardText, uzumeReferenceConvolutionSerialNullText, uzumeReferenceConvolutionText, uzumeReferenceDsdFamilyText, uzumeReferenceEqualPowerCrossfadeText, uzumeReferenceFirGaplessHistoryText, uzumeReferenceFlushDrainText, uzumeReferenceGainStagingText, uzumeReferenceGaplessConcatText, uzumeReferenceIirEqText, uzumeReferenceLatencyOwnersText, uzumeReferenceMergeGroupsText, uzumeReferenceOutputDevicePolicyText, uzumeReferencePcmIngressGuardText, uzumeReferencePcmOutputQuantizationText, uzumeReferencePerEarEqPlacementText, uzumeReferencePreRollText, uzumeReferenceRenderAheadCacheText, uzumeReferenceResamplingText, uzumeReferenceResponseResampleText, uzumeReferenceSrcArtifactsText, uzumeReferenceSrcBudgetText, uzumeReferenceSrcOutputRiskText, uzumeReferenceSrcPhaseApodizingText, uzumeReferenceSrcRollbackText, uzumeReferenceSrcValidationText, uzumeReferenceStereoProceduralText, uzumeReferenceUnderrunFallbackText, uzumeSafetyMeterText, yes]);
 
   const visibleSections = detailsOpen ? sections : [];
   const panelStateIcon = status?.error ? AlertTriangle : status?.bitPerfectCandidate ? CheckCircle2 : Zap;

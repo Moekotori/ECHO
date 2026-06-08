@@ -41,6 +41,40 @@ const referenceStatus = (): AudioStatus => ({
     internalDomain: 'multibit-pcm',
     bitPerfectState: 'disabled',
     directDisabledReason: 'uzume_processing_enabled',
+    backendSupport: {
+      artifact: 'backend-support-reference',
+      policy: 'reference-backend-only-no-runtime-switch',
+      formatPath: 'pcm_processed',
+      selectedBackend: 'cpu-float64-reference',
+      realtimeBackend: 'not-enabled',
+      outputDevicePolicyState: 'shared-mixer-risk',
+      cpuReference: {
+        id: 'cpu-float64-reference',
+        state: 'available',
+        role: 'deterministic-reference',
+      },
+      cpuAvx: {
+        id: 'cpu-avx2-fused-macro-kernel',
+        state: 'future-production-gate',
+        gate: 'rpc-003-cpu-realtime-gate',
+      },
+      gpu: {
+        id: 'gpu-render-ahead-offload',
+        state: 'future-render-ahead-gate',
+        gate: 'rpc-005-gpu-render-ahead-gate',
+      },
+      legacy: {
+        id: 'legacy-dsp-chain',
+        state: 'non-uzume-fallback-only',
+        allowedInCompiler: false,
+      },
+      reasons: [
+        'cpu_float64_reference_selected_for_rpc002',
+        'avx2_gpu_runtime_backends_deferred_beyond_reference_gate',
+        'legacy_dsp_chain_not_entered_by_uzume_compiler',
+        'backend_support_reference_only',
+      ],
+    },
     orderedProfileSections: ['format-path', 'headroom', 'materialized-gain', 'peq', 'stereo-procedural', 'shared-convolution', 'pcm-src', 'dither'],
     engineAssignments: [
       { sectionId: 'format-path', engineId: 'format-path-planner-reference', active: true, source: 'format-planner' },
@@ -892,6 +926,7 @@ const referenceStatus = (): AudioStatus => ({
       nullResidual: 'planned',
       formalValidation: 'deterministic-reference',
       dsdFamilyPath: 'deterministic-reference',
+      backendSupport: 'deterministic-reference',
       outputDevicePolicy: 'deterministic-reference',
       qualityRollback: 'deterministic-reference',
       outputResamplingRisk: 'deterministic-reference',
@@ -1022,6 +1057,7 @@ describe('AudioProfessionalStatusPanel', () => {
     expect(screen.getByText(/shared-convolution-reference->shared convolution planner ref \(active, 48k-family, sections shared-convolution\)/u)).toBeTruthy();
     expect(screen.getByText(/pcm-src->resampling-reference/u)).toBeTruthy();
     expect(screen.getByText(/disabled \/ direct disabled uzume processing enabled \/ pcm->pcm \/ multibit-pcm \/ pcm_processed/u)).toBeTruthy();
+    expect(screen.getByText(/backend-support-reference \/ reference-backend-only-no-runtime-switch \/ selected cpu-float64-reference \/ realtime not-enabled/u)).toBeTruthy();
     expect(screen.getByText(/output-device-policy-reference \/ pcm_processed \/ shared \/ shared-mixer \/ shared-mixer-risk \/ file 44.1 kHz \/ decoder 44.1 kHz \/ requested 48 kHz \/ actual 48 kHz \/ shared 48 kHz/u)).toBeTruthy();
     expect(screen.getByText(/poly-sinc-reference 44.1 kHz->48 kHz/u)).toBeTruthy();
     expect(screen.getByText(/35 samples \/ 0.73 ms/u)).toBeTruthy();
@@ -1085,6 +1121,11 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({ label: 'UZUME reference merge groups', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME reference latency owners', value: 'shared-convolution->room-ir-latency | pcm-src->resampling-reference', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME reference bit-perfect', value: 'disabled / direct disabled uzume processing enabled / pcm->pcm / multibit-pcm / pcm_processed', tone: 'warning' }),
+        expect.objectContaining({
+          label: 'UZUME backend support reference',
+          value: 'backend-support-reference / reference-backend-only-no-runtime-switch / selected cpu-float64-reference / realtime not-enabled / cpu available deterministic-reference / avx future-production-gate rpc-003-cpu-realtime-gate / gpu future-render-ahead-gate rpc-005-gpu-render-ahead-gate / legacy non-uzume-fallback-only compiler blocked / output shared-mixer-risk / reasons cpu float64 reference selected for rpc002 | avx2 gpu runtime backends deferred beyond reference gate | legacy dsp chain not entered by uzume compiler | backend support reference only',
+          tone: 'warning',
+        }),
         expect.objectContaining({
           label: 'UZUME output device policy reference',
           value: 'output-device-policy-reference / pcm_processed / shared / shared-mixer / shared-mixer-risk / file 44.1 kHz / decoder 44.1 kHz / requested 48 kHz / actual 48 kHz / shared 48 kHz / output pcm / bit-perfect candidate no / resampling yes / mismatch yes / recommend prefer-exclusive-or-device-rate-match / reasons shared or system output may use mixer resampling | output device policy reference only',

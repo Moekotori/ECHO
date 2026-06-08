@@ -635,6 +635,40 @@ describe('PlayerBar', () => {
         internalDomain: 'multibit-pcm',
         bitPerfectState: 'disabled',
         directDisabledReason: 'uzume_processing_enabled',
+        backendSupport: {
+          artifact: 'backend-support-reference',
+          policy: 'reference-backend-only-no-runtime-switch',
+          formatPath: 'pcm_processed',
+          selectedBackend: 'cpu-float64-reference',
+          realtimeBackend: 'not-enabled',
+          outputDevicePolicyState: 'shared-mixer-risk',
+          cpuReference: {
+            id: 'cpu-float64-reference',
+            state: 'available',
+            role: 'deterministic-reference',
+          },
+          cpuAvx: {
+            id: 'cpu-avx2-fused-macro-kernel',
+            state: 'future-production-gate',
+            gate: 'rpc-003-cpu-realtime-gate',
+          },
+          gpu: {
+            id: 'gpu-render-ahead-offload',
+            state: 'future-render-ahead-gate',
+            gate: 'rpc-005-gpu-render-ahead-gate',
+          },
+          legacy: {
+            id: 'legacy-dsp-chain',
+            state: 'non-uzume-fallback-only',
+            allowedInCompiler: false,
+          },
+          reasons: [
+            'cpu_float64_reference_selected_for_rpc002',
+            'avx2_gpu_runtime_backends_deferred_beyond_reference_gate',
+            'legacy_dsp_chain_not_entered_by_uzume_compiler',
+            'backend_support_reference_only',
+          ],
+        },
         formatPathPlan: {
           pcm_bitperfect: { state: 'disabled', reason: 'uzume_processing_enabled' },
           pcm_processed: { state: 'current', reason: null },
@@ -693,6 +727,7 @@ describe('PlayerBar', () => {
           nullResidual: 'deterministic-reference',
           formalValidation: 'deterministic-reference',
           dsdFamilyPath: 'deterministic-reference',
+          backendSupport: 'deterministic-reference',
           outputDevicePolicy: 'deterministic-reference',
           qualityRollback: 'deterministic-reference',
           outputResamplingRisk: 'deterministic-reference',
@@ -1506,6 +1541,8 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).toContain('pcm_bitperfect:disabled/uzume processing enabled | pcm_processed:current | dsd_direct:unavailable/requires dsd source | dsd_upsampling:unavailable/requires dsd source | d2p_processed:unavailable/d2p requires dsd source | sdm_processed:unavailable/sdm reference engine not ready');
     expect(dialog.textContent).toContain('UZUME reference bit-perfect');
     expect(dialog.textContent).toContain('disabled / direct disabled:uzume processing enabled / pcm->pcm / multibit-pcm / format:pcm_processed');
+    expect(dialog.textContent).toContain('UZUME backend support reference');
+    expect(dialog.textContent).toContain('backend-support-reference / reference-backend-only-no-runtime-switch / selected cpu-float64-reference / realtime not-enabled / cpu available deterministic-reference / avx future-production-gate rpc-003-cpu-realtime-gate / gpu future-render-ahead-gate rpc-005-gpu-render-ahead-gate / legacy non-uzume-fallback-only compiler blocked / output shared-mixer-risk / reasons cpu float64 reference selected for rpc002 | avx2 gpu runtime backends deferred beyond reference gate | legacy dsp chain not entered by uzume compiler | backend support reference only');
     expect(dialog.textContent).toContain('UZUME output device policy reference');
     expect(dialog.textContent).toContain('output-device-policy-reference / pcm_processed / shared / shared-mixer / shared-mixer-risk / file 44.1kHz / decoder 44.1kHz / requested 48kHz / actual 48kHz / shared 48kHz / output pcm / bit-perfect candidate no / resampling yes / mismatch yes / recommend prefer-exclusive-or-device-rate-match / reasons shared or system output may use mixer resampling | output device policy reference only');
     expect(dialog.textContent).toContain('Reference merge groups');
@@ -1590,6 +1627,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({ title: 'Reference assignment', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME reference path plan', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME reference bit-perfect', tone: 'warning', variant: 'process' }),
+        expect.objectContaining({ title: 'UZUME backend support reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME output device policy reference', tone: 'warning', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME PCM ingress guard reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME gain staging reference', tone: 'warning', variant: 'process' }),

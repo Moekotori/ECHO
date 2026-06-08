@@ -190,6 +190,36 @@ describe('UZUME reference plan compiler', () => {
       recommendation: 'prefer-exclusive-or-device-rate-match',
       reasons: ['shared_or_system_output_may_use_mixer_resampling', 'output_device_policy_reference_only'],
     });
+    expect(compiled.backendSupport).toMatchObject({
+      artifact: 'backend-support-reference',
+      policy: 'reference-backend-only-no-runtime-switch',
+      formatPath: 'pcm_bitperfect',
+      selectedBackend: 'cpu-float64-reference',
+      realtimeBackend: 'not-enabled',
+      outputDevicePolicyState: 'shared-mixer-risk',
+      cpuReference: {
+        state: 'available',
+        role: 'deterministic-reference',
+      },
+      cpuAvx: {
+        state: 'future-production-gate',
+        gate: 'rpc-003-cpu-realtime-gate',
+      },
+      gpu: {
+        state: 'future-render-ahead-gate',
+        gate: 'rpc-005-gpu-render-ahead-gate',
+      },
+      legacy: {
+        state: 'non-uzume-fallback-only',
+        allowedInCompiler: false,
+      },
+      reasons: [
+        'cpu_float64_reference_selected_for_rpc002',
+        'avx2_gpu_runtime_backends_deferred_beyond_reference_gate',
+        'legacy_dsp_chain_not_entered_by_uzume_compiler',
+        'backend_support_reference_only',
+      ],
+    });
     expect(compiled.resampling).toMatchObject({
       active: true,
       family: 'poly-sinc-reference',
@@ -502,6 +532,7 @@ describe('UZUME reference plan compiler', () => {
     expect(compiled.artifactPlan.silence).toBe('deterministic-reference');
     expect(compiled.artifactPlan.formalValidation).toBe('deterministic-reference');
     expect(compiled.artifactPlan.dsdFamilyPath).toBe('not-applicable');
+    expect(compiled.artifactPlan.backendSupport).toBe('deterministic-reference');
     expect(compiled.artifactPlan.outputDevicePolicy).toBe('deterministic-reference');
     expect(compiled.artifactPlan.qualityRollback).toBe('deterministic-reference');
     expect(compiled.artifactPlan.pcmOutputQuantization).toBe('deterministic-reference');
