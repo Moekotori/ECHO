@@ -1373,12 +1373,12 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME gapless SRC reference',
           value: 'gapless-concat-reference / source-pcm-concat-before-src / src-stateful / 44.1 kHz->48 kHz / ratio 1.088435 / segments 2 / boundaries 1 / concat concat-matches-no-reset 0.000000/0.000000 / reset reset-vs-concat-reference 0.125000/0.031250 / boundary track-a->track-b out 9 reset 0.125000 jump 0.250000 / reasons source pcm concat before src | src state must not reset at gapless boundary | reset per track src compared against concat reference | reference artifact generated offline',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME FIR gapless reference',
           value: 'fir-gapless-history-reference / source-pcm-concat-before-fir / direct-fir-float64-reference / history-required / room-ir / sample 48 kHz / segments 2 / boundaries 1 / tail 3 / drain 3 / concat concat-matches-no-reset-history 0.000000/0.000000 / reset reset-vs-concat-history-reference 0.187500/0.046875 / boundary track-a->track-b out 8 overlap 3 reset 0.187500 jump 0.312500 / reasons source pcm concat before fir | fir history must cross gapless boundary | reset per track fir history compared against concat reference | fir gapless reference only',
-          tone: 'warning',
+          tone: 'good',
         }),
         expect.objectContaining({
           label: 'UZUME urgent controls reference',
@@ -1472,6 +1472,31 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME flush/drain reference',
           value: expect.stringContaining('manual-flush:tail-dropped-and-reset'),
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected gapless reference contracts as good', () => {
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={referenceStatus()} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME gapless SRC reference',
+          value: expect.stringContaining('concat concat-matches-no-reset 0.000000/0.000000'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME FIR gapless reference',
+          value: expect.stringContaining('concat concat-matches-no-reset-history 0.000000/0.000000'),
           tone: 'good',
         }),
       ]),

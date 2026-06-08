@@ -890,6 +890,57 @@ const isExpectedUzumeReferenceFlushDrain = (
     manual.residual.drainRms === 0;
 };
 
+const hasZeroReferenceResidual = (residual: { maxAbs: number; rms: number }): boolean =>
+  residual.maxAbs === 0 && residual.rms === 0;
+
+const isExpectedUzumeReferenceGaplessConcat = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['gaplessConcat'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  return report.state === 'src-stateful' &&
+    report.policy === 'source-pcm-concat-before-src' &&
+    report.concatNullResidual.state === 'concat-matches-no-reset' &&
+    report.concatNullResidual.comparedFrames > 0 &&
+    hasZeroReferenceResidual(report.concatNullResidual) &&
+    report.resetResidual.state === 'reset-vs-concat-reference' &&
+    report.resetResidual.comparedFrames > 0 &&
+    report.resetResidual.maxAbs > 0 &&
+    report.resetResidual.rms > 0 &&
+    report.boundaryCount > 0 &&
+    report.boundaries.length === report.boundaryCount &&
+    report.boundaries.every((boundary) => boundary.concatVsNoResetMaxAbs === 0 && boundary.resetVsConcatMaxAbs > 0);
+};
+
+const isExpectedUzumeReferenceFirGaplessHistory = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['firGaplessHistory'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  return report.state === 'history-required' &&
+    report.policy === 'source-pcm-concat-before-fir' &&
+    report.engine === 'direct-fir-float64-reference' &&
+    report.tailFrames > 0 &&
+    report.drainFrames > 0 &&
+    report.concatNullResidual.state === 'concat-matches-no-reset-history' &&
+    report.concatNullResidual.comparedFrames > 0 &&
+    hasZeroReferenceResidual(report.concatNullResidual) &&
+    report.resetResidual.state === 'reset-vs-concat-history-reference' &&
+    report.resetResidual.comparedFrames > 0 &&
+    report.resetResidual.maxAbs > 0 &&
+    report.resetResidual.rms > 0 &&
+    report.boundaryCount > 0 &&
+    report.boundaries.length === report.boundaryCount &&
+    report.boundaries.every((boundary) =>
+      boundary.overlapHistoryFrames > 0 &&
+      boundary.concatVsNoResetMaxAbs === 0 &&
+      boundary.resetVsConcatMaxAbs > 0);
+};
+
 const formatUzumeReferenceGaplessConcat = (status: AudioStatus | null, fallback: string): string => {
   const report = status?.uzumeReferencePlan?.gaplessConcat;
   if (!report) {
@@ -1442,8 +1493,8 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeReferencePerEarEqPlacement'), value: uzumeReferencePerEarEqPlacementText, tone: status?.uzumeReferencePlan?.perEarEqPlacement?.state === 'placement-sensitive' ? 'warning' : status?.uzumeReferencePlan?.perEarEqPlacement ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBlockBoundary'), value: uzumeReferenceBlockBoundaryText, tone: status?.uzumeReferencePlan?.blockBoundary?.coverage.state === 'exact' && status?.uzumeReferencePlan?.blockBoundary?.residual.state === 'exact-reassembly' ? 'good' : status?.uzumeReferencePlan?.blockBoundary ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceFlushDrain'), value: uzumeReferenceFlushDrainText, tone: isExpectedUzumeReferenceFlushDrain(status?.uzumeReferencePlan?.flushDrain) ? 'good' : status?.uzumeReferencePlan?.flushDrain ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceGaplessConcat'), value: uzumeReferenceGaplessConcatText, tone: status?.uzumeReferencePlan?.gaplessConcat?.state === 'src-stateful' ? 'warning' : status?.uzumeReferencePlan?.gaplessConcat ? 'good' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceFirGaplessHistory'), value: uzumeReferenceFirGaplessHistoryText, tone: status?.uzumeReferencePlan?.firGaplessHistory?.state === 'history-required' ? 'warning' : status?.uzumeReferencePlan?.firGaplessHistory ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceGaplessConcat'), value: uzumeReferenceGaplessConcatText, tone: isExpectedUzumeReferenceGaplessConcat(status?.uzumeReferencePlan?.gaplessConcat) ? 'good' : status?.uzumeReferencePlan?.gaplessConcat?.state === 'src-stateful' ? 'warning' : status?.uzumeReferencePlan?.gaplessConcat ? 'good' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceFirGaplessHistory'), value: uzumeReferenceFirGaplessHistoryText, tone: isExpectedUzumeReferenceFirGaplessHistory(status?.uzumeReferencePlan?.firGaplessHistory) ? 'good' : status?.uzumeReferencePlan?.firGaplessHistory?.state === 'history-required' ? 'warning' : status?.uzumeReferencePlan?.firGaplessHistory ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceCallbackSafeControls'), value: uzumeReferenceCallbackSafeControlsText, tone: status?.uzumeReferencePlan?.callbackSafeControls ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceEqualPowerCrossfade'), value: uzumeReferenceEqualPowerCrossfadeText, tone: status?.uzumeReferencePlan?.equalPowerCrossfade?.rendered.state === 'crossfade-rendered' ? 'warning' : status?.uzumeReferencePlan?.equalPowerCrossfade ? 'muted' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceResampling'), value: uzumeReferenceResamplingText, tone: status?.uzumeReferencePlan?.resampling.active ? 'warning' : 'muted' },

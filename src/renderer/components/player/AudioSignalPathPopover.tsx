@@ -1022,6 +1022,57 @@ const isExpectedUzumeReferenceFlushDrain = (
     manual.residual.drainRms === 0;
 };
 
+const hasZeroReferenceResidual = (residual: { maxAbs: number; rms: number }): boolean =>
+  residual.maxAbs === 0 && residual.rms === 0;
+
+const isExpectedUzumeReferenceGaplessConcat = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['gaplessConcat'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  return report.state === 'src-stateful' &&
+    report.policy === 'source-pcm-concat-before-src' &&
+    report.concatNullResidual.state === 'concat-matches-no-reset' &&
+    report.concatNullResidual.comparedFrames > 0 &&
+    hasZeroReferenceResidual(report.concatNullResidual) &&
+    report.resetResidual.state === 'reset-vs-concat-reference' &&
+    report.resetResidual.comparedFrames > 0 &&
+    report.resetResidual.maxAbs > 0 &&
+    report.resetResidual.rms > 0 &&
+    report.boundaryCount > 0 &&
+    report.boundaries.length === report.boundaryCount &&
+    report.boundaries.every((boundary) => boundary.concatVsNoResetMaxAbs === 0 && boundary.resetVsConcatMaxAbs > 0);
+};
+
+const isExpectedUzumeReferenceFirGaplessHistory = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['firGaplessHistory'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  return report.state === 'history-required' &&
+    report.policy === 'source-pcm-concat-before-fir' &&
+    report.engine === 'direct-fir-float64-reference' &&
+    report.tailFrames > 0 &&
+    report.drainFrames > 0 &&
+    report.concatNullResidual.state === 'concat-matches-no-reset-history' &&
+    report.concatNullResidual.comparedFrames > 0 &&
+    hasZeroReferenceResidual(report.concatNullResidual) &&
+    report.resetResidual.state === 'reset-vs-concat-history-reference' &&
+    report.resetResidual.comparedFrames > 0 &&
+    report.resetResidual.maxAbs > 0 &&
+    report.resetResidual.rms > 0 &&
+    report.boundaryCount > 0 &&
+    report.boundaries.length === report.boundaryCount &&
+    report.boundaries.every((boundary) =>
+      boundary.overlapHistoryFrames > 0 &&
+      boundary.concatVsNoResetMaxAbs === 0 &&
+      boundary.resetVsConcatMaxAbs > 0);
+};
+
 const formatUzumeReferenceGaplessConcat = (status: AudioStatus | null): string | null => {
   const report = status?.uzumeReferencePlan?.gaplessConcat;
   if (!report) {
@@ -2057,7 +2108,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME gapless SRC reference',
       value: referenceGaplessConcat,
-      tone: referencePlan?.gaplessConcat.state === 'src-stateful' ? 'warning' : 'process',
+      tone: isExpectedUzumeReferenceGaplessConcat(referencePlan?.gaplessConcat) ? 'process' : referencePlan?.gaplessConcat.state === 'src-stateful' ? 'warning' : 'process',
       variant: 'process',
     });
   }
@@ -2067,7 +2118,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME FIR gapless reference',
       value: referenceFirGaplessHistory,
-      tone: referencePlan?.firGaplessHistory.state === 'history-required' ? 'warning' : 'process',
+      tone: isExpectedUzumeReferenceFirGaplessHistory(referencePlan?.firGaplessHistory) ? 'process' : referencePlan?.firGaplessHistory.state === 'history-required' ? 'warning' : 'process',
       variant: 'process',
     });
   }
