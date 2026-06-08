@@ -254,6 +254,53 @@ const formatUzumeReferenceLatencyOwners = (status: AudioStatus | null): string |
   return owners.map(([sectionId, owner]) => `${sectionId}->${owner}`).join(' | ');
 };
 
+const isExpectedUzumeReferenceCompiler = (plan: AudioStatus['uzumeReferencePlan'] | null | undefined): boolean => {
+  if (!plan || plan.schemaVersion !== 1 || plan.telemetrySchemaVersion !== 2 || plan.internalDomain === 'unknown') {
+    return false;
+  }
+
+  const orderedSections = plan.orderedProfileSections;
+  const assignments = plan.engineAssignments;
+  if (!orderedSections.length || assignments.length < orderedSections.length) {
+    return false;
+  }
+
+  const orderedSet = new Set(orderedSections);
+  const assignmentsBySection = new Map(assignments.map((assignment) => [assignment.sectionId, assignment]));
+  const mergeGroupsById = new Map(plan.mergeGroups.map((group) => [group.id, group]));
+  const latencyOwners = Object.entries(plan.latencyOwners);
+  const orderedSectionsAreCovered = orderedSections.every((sectionId) => assignmentsBySection.has(sectionId));
+  const assignmentsAreValid = assignments.every((assignment) => {
+    const mergeGroup = assignment.mergeGroupId ? mergeGroupsById.get(assignment.mergeGroupId) : null;
+    const latencyOwner = assignment.latencyOwner ? plan.latencyOwners[assignment.sectionId] : null;
+
+    return orderedSet.has(assignment.sectionId) &&
+      assignment.engineId.length > 0 &&
+      (!assignment.mergeGroupId || (mergeGroup !== null && mergeGroup !== undefined && mergeGroup.sections.includes(assignment.sectionId))) &&
+      (!assignment.latencyOwner || latencyOwner === assignment.latencyOwner);
+  });
+  const mergeGroupsAreValid = plan.mergeGroups.length > 0 &&
+    plan.mergeGroups.every((group) =>
+      group.id.length > 0 &&
+      group.engineId.length > 0 &&
+      group.sections.length > 0 &&
+      group.sections.every((sectionId) => {
+        const assignment = assignmentsBySection.get(sectionId);
+        return assignment !== undefined &&
+          assignment.engineId === group.engineId &&
+          assignment.mergeGroupId === group.id;
+      }));
+  const latencyOwnersAreValid = latencyOwners.length > 0 &&
+    latencyOwners.every(([sectionId, owner]) => {
+      const assignment = assignmentsBySection.get(sectionId as NonNullable<AudioStatus['uzumeReferencePlan']>['orderedProfileSections'][number]);
+      return owner.length > 0 &&
+        assignment?.latencyOwner === owner &&
+        plan.latencyBudget.latencyOwners[sectionId] === owner;
+    });
+
+  return orderedSectionsAreCovered && assignmentsAreValid && mergeGroupsAreValid && latencyOwnersAreValid;
+};
+
 const formatUzumeReferenceArtifactManifest = (status: AudioStatus | null): string | null => {
   return buildUzumeReferenceArtifactManifestSummary(status?.uzumeReferencePlan?.artifactPlan)?.text ?? null;
 };
@@ -2168,6 +2215,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const echoSrcPath = formatEchoSrcPath(status, track);
   const resamplePath = echoSrcPath ? null : formatResamplePath(status, track);
   const referencePlan = status.uzumeReferencePlan;
+  const expectedReferenceCompiler = isExpectedUzumeReferenceCompiler(referencePlan);
   const referenceAssignments = formatUzumeReferenceAssignments(status);
   const referenceMergeGroups = formatUzumeReferenceMergeGroups(status);
   const referenceLatencyOwners = formatUzumeReferenceLatencyOwners(status);
@@ -2283,7 +2331,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME reference compiler',
       value: `schema v${referencePlan.schemaVersion} / telemetry v${referencePlan.telemetrySchemaVersion} / ${referencePlan.formatPath} / ${referencePlan.internalDomain}`,
-      tone: 'process',
+      tone: expectedReferenceCompiler ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -2293,7 +2341,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'Reference assignment',
       value: referenceAssignments,
-      tone: 'process',
+      tone: expectedReferenceCompiler ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -2533,7 +2581,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'Reference merge groups',
       value: referenceMergeGroups,
-      tone: 'process',
+      tone: expectedReferenceCompiler ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -2543,7 +2591,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'Reference latency owners',
       value: referenceLatencyOwners,
-      tone: 'process',
+      tone: expectedReferenceCompiler ? 'process' : 'warning',
       variant: 'process',
     });
   }

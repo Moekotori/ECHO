@@ -173,6 +173,53 @@ const formatUzumeReferenceLatencyOwners = (status: AudioStatus | null, fallback:
     .join(' | ');
 };
 
+const isExpectedUzumeReferenceCompiler = (plan: AudioStatus['uzumeReferencePlan'] | null | undefined): boolean => {
+  if (!plan || plan.schemaVersion !== 1 || plan.telemetrySchemaVersion !== 2 || plan.internalDomain === 'unknown') {
+    return false;
+  }
+
+  const orderedSections = plan.orderedProfileSections;
+  const assignments = plan.engineAssignments;
+  if (!orderedSections.length || assignments.length < orderedSections.length) {
+    return false;
+  }
+
+  const orderedSet = new Set(orderedSections);
+  const assignmentsBySection = new Map(assignments.map((assignment) => [assignment.sectionId, assignment]));
+  const mergeGroupsById = new Map(plan.mergeGroups.map((group) => [group.id, group]));
+  const latencyOwners = Object.entries(plan.latencyOwners);
+  const orderedSectionsAreCovered = orderedSections.every((sectionId) => assignmentsBySection.has(sectionId));
+  const assignmentsAreValid = assignments.every((assignment) => {
+    const mergeGroup = assignment.mergeGroupId ? mergeGroupsById.get(assignment.mergeGroupId) : null;
+    const latencyOwner = assignment.latencyOwner ? plan.latencyOwners[assignment.sectionId] : null;
+
+    return orderedSet.has(assignment.sectionId) &&
+      assignment.engineId.length > 0 &&
+      (!assignment.mergeGroupId || (mergeGroup !== null && mergeGroup !== undefined && mergeGroup.sections.includes(assignment.sectionId))) &&
+      (!assignment.latencyOwner || latencyOwner === assignment.latencyOwner);
+  });
+  const mergeGroupsAreValid = plan.mergeGroups.length > 0 &&
+    plan.mergeGroups.every((group) =>
+      group.id.length > 0 &&
+      group.engineId.length > 0 &&
+      group.sections.length > 0 &&
+      group.sections.every((sectionId) => {
+        const assignment = assignmentsBySection.get(sectionId);
+        return assignment !== undefined &&
+          assignment.engineId === group.engineId &&
+          assignment.mergeGroupId === group.id;
+      }));
+  const latencyOwnersAreValid = latencyOwners.length > 0 &&
+    latencyOwners.every(([sectionId, owner]) => {
+      const assignment = assignmentsBySection.get(sectionId as NonNullable<AudioStatus['uzumeReferencePlan']>['orderedProfileSections'][number]);
+      return owner.length > 0 &&
+        assignment?.latencyOwner === owner &&
+        plan.latencyBudget.latencyOwners[sectionId] === owner;
+    });
+
+  return orderedSectionsAreCovered && assignmentsAreValid && mergeGroupsAreValid && latencyOwnersAreValid;
+};
+
 const formatUzumeReferenceBitPerfect = (status: AudioStatus | null, fallback: string): string => {
   const plan = status?.uzumeReferencePlan;
   if (!plan) {
@@ -1674,6 +1721,7 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
   const uzumeReferenceAssignmentsText = formatUzumeReferenceAssignments(status, unknown);
   const uzumeReferenceMergeGroupsText = formatUzumeReferenceMergeGroups(status, unknown);
   const uzumeReferenceLatencyOwnersText = formatUzumeReferenceLatencyOwners(status, unknown);
+  const expectedUzumeReferenceCompiler = isExpectedUzumeReferenceCompiler(status?.uzumeReferencePlan);
   const uzumeReferenceArtifactManifest = buildUzumeReferenceArtifactManifestSummary(status?.uzumeReferencePlan?.artifactPlan);
   const uzumeReferenceArtifactManifestText = formatUzumeReferenceArtifactManifest(status, unknown);
   const uzumeReferenceBitPerfectText = formatUzumeReferenceBitPerfect(status, unknown);
@@ -1846,10 +1894,10 @@ export const AudioProfessionalStatusPanel = ({ status, variant = 'drawer' }: Aud
         { label: t('audioProfessional.row.uzumeRuntime'), value: status?.uzumeRuntimeModel ?? unknown },
         { label: t('audioProfessional.row.uzumeFormatPath'), value: uzumeFormatPathText, tone: status?.uzumeFormatPath === 'pcm_processed' ? 'warning' : status?.uzumeFormatPath === 'pcm_bitperfect' || status?.uzumeFormatPath === 'dsd_direct' ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumePathPlan'), value: formatUzumePathPlan(status, unknown), tone: status?.uzumeFormatPathPlan ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceCompiler'), value: uzumeReferenceCompilerText, tone: status?.uzumeReferencePlan ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceAssignments'), value: uzumeReferenceAssignmentsText, tone: status?.uzumeReferencePlan ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceMergeGroups'), value: uzumeReferenceMergeGroupsText, tone: status?.uzumeReferencePlan?.mergeGroups.length ? 'warning' : 'muted' },
-        { label: t('audioProfessional.row.uzumeReferenceLatencyOwners'), value: uzumeReferenceLatencyOwnersText, tone: Object.keys(status?.uzumeReferencePlan?.latencyOwners ?? {}).length ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceCompiler'), value: uzumeReferenceCompilerText, tone: expectedUzumeReferenceCompiler ? 'good' : status?.uzumeReferencePlan ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceAssignments'), value: uzumeReferenceAssignmentsText, tone: expectedUzumeReferenceCompiler ? 'good' : status?.uzumeReferencePlan ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceMergeGroups'), value: uzumeReferenceMergeGroupsText, tone: expectedUzumeReferenceCompiler ? 'good' : status?.uzumeReferencePlan?.mergeGroups.length ? 'warning' : 'muted' },
+        { label: t('audioProfessional.row.uzumeReferenceLatencyOwners'), value: uzumeReferenceLatencyOwnersText, tone: expectedUzumeReferenceCompiler ? 'good' : Object.keys(status?.uzumeReferencePlan?.latencyOwners ?? {}).length ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceArtifactManifest'), value: uzumeReferenceArtifactManifestText, tone: uzumeReferenceArtifactManifest?.hasPlanned ? 'warning' : uzumeReferenceArtifactManifest ? 'good' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBitPerfect'), value: uzumeReferenceBitPerfectText, tone: status?.uzumeReferencePlan?.bitPerfectState === 'available' ? 'good' : status?.uzumeReferencePlan ? 'warning' : 'muted' },
         { label: t('audioProfessional.row.uzumeReferenceBackendSupport'), value: uzumeReferenceBackendSupportText, tone: status?.uzumeReferencePlan?.backendSupport ? 'warning' : 'muted' },

@@ -1294,10 +1294,10 @@ describe('AudioProfessionalStatusPanel', () => {
       expect.arrayContaining([
         expect.objectContaining({ label: 'Signal path', value: 'UZUME Path: Headroom -6.00 dB -> FIR', tone: 'warning' }),
         expect.objectContaining({ label: 'UZUME format path', value: 'PCM processed / UZUME skeleton', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME reference compiler', value: 'schema v1 / telemetry v2 / multibit-pcm', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME reference assignment', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME reference merge groups', tone: 'warning' }),
-        expect.objectContaining({ label: 'UZUME reference latency owners', value: 'shared-convolution->room-ir-latency | pcm-src->resampling-reference', tone: 'warning' }),
+        expect.objectContaining({ label: 'UZUME reference compiler', value: 'schema v1 / telemetry v2 / multibit-pcm', tone: 'good' }),
+        expect.objectContaining({ label: 'UZUME reference assignment', tone: 'good' }),
+        expect.objectContaining({ label: 'UZUME reference merge groups', tone: 'good' }),
+        expect.objectContaining({ label: 'UZUME reference latency owners', value: 'shared-convolution->room-ir-latency | pcm-src->resampling-reference', tone: 'good' }),
         expect.objectContaining({ label: 'UZUME artifact manifest reference', value: referenceArtifactManifestText, tone: 'good' }),
         expect.objectContaining({ label: 'UZUME reference bit-perfect', value: 'disabled / direct disabled uzume processing enabled / pcm->pcm / multibit-pcm / pcm_processed', tone: 'warning' }),
         expect.objectContaining({
@@ -1572,6 +1572,41 @@ describe('AudioProfessionalStatusPanel', () => {
         expect.objectContaining({
           label: 'UZUME underrun fallback reference',
           value: expect.stringContaining('prior-committed-fallback / source prior-committed / marginal'),
+          tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expected compiler assignment references as good', () => {
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={referenceStatus()} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME reference compiler',
+          value: 'schema v1 / telemetry v2 / multibit-pcm',
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME reference assignment',
+          value: expect.stringContaining('shared-convolution->shared convolution planner ref (active, merge shared-convolution-reference, latency room-ir-latency)'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME reference merge groups',
+          value: expect.stringContaining('resampling-reference->resampling ref (active, 48k-family, sections pcm-src, split legacy default resampler active reference only)'),
+          tone: 'good',
+        }),
+        expect.objectContaining({
+          label: 'UZUME reference latency owners',
+          value: 'shared-convolution->room-ir-latency | pcm-src->resampling-reference',
           tone: 'good',
         }),
       ]),
