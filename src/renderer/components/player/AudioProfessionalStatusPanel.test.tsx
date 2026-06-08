@@ -2196,7 +2196,14 @@ describe('AudioProfessionalStatusPanel', () => {
       deadlineState: 'ready',
       deadlineSlackFrames: 24000,
       shortBridgeReason: 'full_profile_ready',
-      reasons: ['readiness_summary_derived_from_reference_reports', 'cpu_full_profile_ready', 'readiness_contract_reference_only'],
+      reasons: [
+        'readiness_summary_derived_from_reference_reports',
+        'main_playback_logic_owns_timeline_and_policy',
+        'gpu_prewarm_deferred_to_render_ahead_gate',
+        'stale_generation_commit_disallowed',
+        'readiness_contract_reference_only',
+        'cpu_full_profile_ready',
+      ],
     };
 
     render(
@@ -2223,6 +2230,110 @@ describe('AudioProfessionalStatusPanel', () => {
           label: 'UZUME readiness contract reference',
           value: expect.stringContaining('scheduler not-enabled'),
           tone: 'good',
+        }),
+      ]),
+    );
+  });
+
+  it('marks readiness contract production scheduler drift as warning', () => {
+    const status = referenceStatus();
+    const plan = status.uzumeReferencePlan!;
+    plan.readinessContract = {
+      ...plan.readinessContract,
+      state: 'ready-to-commit',
+      selectedPath: 'cpu-full-profile',
+      waitTarget: 'none',
+      fullProfileReady: true,
+      cacheState: 'hit',
+      cacheCommitState: 'commit-to-callback-slot',
+      renderAheadState: 'full-profile-ready',
+      renderAheadReadyFrames: 9600,
+      renderAheadTargetFrames: 9600,
+      deadlineState: 'ready',
+      deadlineSlackFrames: 24000,
+      shortBridgeReason: 'full_profile_ready',
+      reasons: [
+        'readiness_summary_derived_from_reference_reports',
+        'main_playback_logic_owns_timeline_and_policy',
+        'gpu_prewarm_deferred_to_render_ahead_gate',
+        'stale_generation_commit_disallowed',
+        'readiness_contract_reference_only',
+      ],
+    };
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={status} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME readiness contract reference',
+          value: expect.stringContaining('scheduler not-enabled'),
+          tone: 'good',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const driftedStatus = referenceStatus();
+    const driftedReadiness = driftedStatus.uzumeReferencePlan!.readinessContract as unknown as {
+      state: string;
+      selectedPath: string;
+      waitTarget: string;
+      fullProfileReady: boolean;
+      cacheState: string;
+      cacheCommitState: string;
+      renderAheadState: string;
+      renderAheadReadyFrames: number;
+      renderAheadTargetFrames: number;
+      deadlineState: string;
+      deadlineSlackFrames: number;
+      shortBridgeReason: string;
+      productionScheduler: string;
+      reasons: string[];
+    };
+    driftedReadiness.state = 'ready-to-commit';
+    driftedReadiness.selectedPath = 'cpu-full-profile';
+    driftedReadiness.waitTarget = 'none';
+    driftedReadiness.fullProfileReady = true;
+    driftedReadiness.cacheState = 'hit';
+    driftedReadiness.cacheCommitState = 'commit-to-callback-slot';
+    driftedReadiness.renderAheadState = 'full-profile-ready';
+    driftedReadiness.renderAheadReadyFrames = 9600;
+    driftedReadiness.renderAheadTargetFrames = 9600;
+    driftedReadiness.deadlineState = 'ready';
+    driftedReadiness.deadlineSlackFrames = 24000;
+    driftedReadiness.shortBridgeReason = 'full_profile_ready';
+    driftedReadiness.productionScheduler = 'production-enabled';
+    driftedReadiness.reasons = driftedReadiness.reasons.filter(
+      (reason) => reason !== 'main_playback_logic_owns_timeline_and_policy',
+    );
+
+    render(
+      <I18nProvider>
+        <AudioProfessionalStatusPanel status={driftedStatus} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show professional details/iu }));
+
+    expect(readProfessionalVisualState().rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME readiness contract reference',
+          value: expect.stringContaining('ready-to-commit'),
+          tone: 'warning',
+        }),
+        expect.objectContaining({
+          label: 'UZUME readiness contract reference',
+          value: expect.stringContaining('scheduler production-enabled'),
+          tone: 'warning',
         }),
       ]),
     );

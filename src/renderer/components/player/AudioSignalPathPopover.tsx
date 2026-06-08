@@ -358,6 +358,32 @@ const isExpectedUzumeReferenceLatencyBudget = (
     expectedReasons.every((reason) => report.reasons.includes(reason));
 };
 
+const isExpectedUzumeReferenceReadinessContract = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['readinessContract'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const expectedReasons = [
+    'readiness_summary_derived_from_reference_reports',
+    'main_playback_logic_owns_timeline_and_policy',
+    'gpu_prewarm_deferred_to_render_ahead_gate',
+    'stale_generation_commit_disallowed',
+    'readiness_contract_reference_only',
+  ];
+
+  return report.artifact === 'readiness-contract-reference' &&
+    report.policy === 'main-playback-owns-timeline-uzume-reports-readiness' &&
+    (report.state === 'ready-to-commit' || report.state === 'cache-ready') &&
+    report.gpuPrewarmReady === false &&
+    report.gpuPrewarmState === 'future-render-ahead-gate' &&
+    report.generationCommitRule === 'current-generation-only' &&
+    report.staleGenerationCommitAllowed === false &&
+    report.productionScheduler === 'not-enabled' &&
+    expectedReasons.every((reason) => report.reasons.includes(reason));
+};
+
 const formatUzumeReferenceArtifactManifest = (status: AudioStatus | null): string | null => {
   return buildUzumeReferenceArtifactManifestSummary(status?.uzumeReferencePlan?.artifactPlan)?.text ?? null;
 };
@@ -2700,6 +2726,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
   const expectedReferenceCompiler = isExpectedUzumeReferenceCompiler(referencePlan);
   const expectedReferenceBackendSupport = isExpectedUzumeReferenceBackendSupport(referencePlan?.backendSupport);
   const expectedReferenceLatencyBudget = isExpectedUzumeReferenceLatencyBudget(referencePlan?.latencyBudget);
+  const expectedReferenceReadinessContract = isExpectedUzumeReferenceReadinessContract(referencePlan?.readinessContract);
   const referenceAssignments = formatUzumeReferenceAssignments(status);
   const referenceMergeGroups = formatUzumeReferenceMergeGroups(status);
   const referenceLatencyOwners = formatUzumeReferenceLatencyOwners(status);
@@ -2904,7 +2931,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME readiness contract reference',
       value: referenceReadinessContract,
-      tone: referencePlan?.readinessContract.state === 'ready-to-commit' || referencePlan?.readinessContract.state === 'cache-ready' ? 'process' : 'warning',
+      tone: expectedReferenceReadinessContract ? 'process' : 'warning',
       variant: 'process',
     });
   }

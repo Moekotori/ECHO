@@ -2013,7 +2013,14 @@ describe('PlayerBar', () => {
       deadlineState: 'ready',
       deadlineSlackFrames: 24000,
       shortBridgeReason: 'full_profile_ready',
-      reasons: ['readiness_summary_derived_from_reference_reports', 'cpu_full_profile_ready', 'readiness_contract_reference_only'],
+      reasons: [
+        'readiness_summary_derived_from_reference_reports',
+        'main_playback_logic_owns_timeline_and_policy',
+        'gpu_prewarm_deferred_to_render_ahead_gate',
+        'stale_generation_commit_disallowed',
+        'readiness_contract_reference_only',
+        'cpu_full_profile_ready',
+      ],
     };
 
     render(
@@ -2031,6 +2038,38 @@ describe('PlayerBar', () => {
       expect.arrayContaining([
         expect.objectContaining({ title: 'UZUME output device policy reference', tone: 'process', variant: 'process' }),
         expect.objectContaining({ title: 'UZUME readiness contract reference', tone: 'process', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const readinessDriftStatus = {
+      ...status,
+      uzumeReferencePlan: {
+        ...status.uzumeReferencePlan!,
+        readinessContract: {
+          ...status.uzumeReferencePlan!.readinessContract,
+          productionScheduler: 'production-enabled',
+          reasons: status.uzumeReferencePlan!.readinessContract.reasons.filter(
+            (reason) => reason !== 'main_playback_logic_owns_timeline_and_policy',
+          ),
+        },
+      },
+    } as unknown as AudioStatus;
+
+    render(
+      <>
+        <AudioSignalPathControl isOpen={true} status={readinessDriftStatus} track={track} onClick={vi.fn()} />
+        <AudioSignalPathPopover isOpen={true} status={readinessDriftStatus} track={track} onClose={vi.fn()} />
+      </>,
+    );
+
+    const readinessDriftDialog = screen.getByRole('dialog', { name: '信号路径' });
+    expect(readinessDriftDialog.textContent).toContain('readiness-contract-reference / main-playback-owns-timeline-uzume-reports-readiness / ready-to-commit');
+    expect(readinessDriftDialog.textContent).toContain('scheduler production-enabled');
+    expect(readSignalPathVisualState(readinessDriftDialog).nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME readiness contract reference', tone: 'warning', variant: 'process' }),
       ]),
     );
 
