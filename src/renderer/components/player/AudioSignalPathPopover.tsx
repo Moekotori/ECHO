@@ -781,6 +781,35 @@ const formatUzumeReferenceSrcRollback = (status: AudioStatus | null): string | n
   ]);
 };
 
+const isExpectedUzumeReferenceSrcRollback = (
+  report: NonNullable<AudioStatus['uzumeReferencePlan']>['resampling']['qualityRollback'] | null | undefined,
+): boolean => {
+  if (!report) {
+    return false;
+  }
+
+  const stateReasonMatches =
+    (report.state === 'armed' && report.reason === 'realtime-budget-warning') ||
+    (report.state === 'standby' && report.reason === 'reference-profile-within-budget') ||
+    (report.state === 'not-applicable' && report.reason === 'same-rate-bypass');
+  const profiles = [report.primaryProfile, ...report.rollbackChain];
+
+  return report.artifact === 'poly-sinc-quality-rollback-reference' &&
+    stateReasonMatches &&
+    report.familyLock === 'poly-sinc-reference-only' &&
+    !report.legacyFallbackAllowed &&
+    report.legacyFallbackSignalPath === 'UZUME bypass / legacy non-UZUME path' &&
+    !report.shortBridgeIsRollback &&
+    profiles.length >= 2 &&
+    profiles.every((profile) =>
+      profile.family === 'poly-sinc-reference' &&
+      profile.phaseMode === 'linear' &&
+      profile.apodizing === 'reference-windowed-sinc' &&
+      profile.tapCount > 0 &&
+      profile.stopbandAttenuationDb > 0 &&
+      profile.shortBridgeOnlyFor === null);
+};
+
 const formatUzumeReferenceSrcBudget = (status: AudioStatus | null): string | null => {
   const metrics = status?.uzumeReferencePlan?.resampling?.artifactMetrics;
   const budget = metrics?.realtimeBudget;
@@ -995,6 +1024,43 @@ const formatUzumeReferenceSrcOutputRisk = (status: AudioStatus | null): string |
     `tone ${risk.signalPathTone}`,
     `recommend ${risk.recommendation?.replaceAll('-', ' ') ?? 'none'}`,
   ]);
+};
+
+const isExpectedUzumeReferenceSrcOutputRisk = (
+  risk: NonNullable<AudioStatus['uzumeReferencePlan']>['resampling']['outputResamplingRisk'] | null | undefined,
+): boolean => {
+  if (!risk || risk.artifact !== 'output-double-resampling-risk-reference') {
+    return false;
+  }
+
+  if (risk.state === 'none') {
+    return risk.reason === null &&
+      risk.currentResamplerEngine === null &&
+      risk.signalPathTone === 'good' &&
+      risk.recommendation === 'none';
+  }
+
+  if (risk.signalPathTone !== 'warning') {
+    return false;
+  }
+
+  if (risk.state === 'legacy-resampler-active') {
+    return risk.currentResamplerEngine !== null &&
+      risk.reason === `legacy_${risk.currentResamplerEngine}_resampler_active_reference_only` &&
+      risk.recommendation === 'show-legacy-resampler-as-non-uzume-risk';
+  }
+
+  if (risk.state === 'shared-output-mixer-risk') {
+    return risk.reason === 'shared_output_mixer_reference_only' &&
+      risk.recommendation === 'prefer-exclusive-or-device-rate-match';
+  }
+
+  return risk.state === 'device-rate-mismatch-risk' &&
+    risk.requestedOutputRate !== null &&
+    risk.actualDeviceRate !== null &&
+    risk.requestedOutputRate !== risk.actualDeviceRate &&
+    risk.reason === 'actual_device_rate_mismatch_reference_only' &&
+    risk.recommendation === 'inspect-device-rate-mismatch';
 };
 
 const formatUzumeReferenceSrcPhaseApodizing = (status: AudioStatus | null): string | null => {
@@ -1899,18 +1965,36 @@ const isExpectedUzumeReferenceGaplessConcat = (
     return false;
   }
 
-  return report.state === 'src-stateful' &&
+  const commonContract = report.artifact === 'gapless-concat-reference' &&
     report.policy === 'source-pcm-concat-before-src' &&
     report.concatNullResidual.state === 'concat-matches-no-reset' &&
     report.concatNullResidual.comparedFrames > 0 &&
     hasZeroReferenceResidual(report.concatNullResidual) &&
     report.resetResidual.state === 'reset-vs-concat-reference' &&
     report.resetResidual.comparedFrames > 0 &&
-    report.resetResidual.maxAbs > 0 &&
-    report.resetResidual.rms > 0 &&
     report.boundaryCount > 0 &&
     report.boundaries.length === report.boundaryCount &&
-    report.boundaries.every((boundary) => boundary.concatVsNoResetMaxAbs === 0 && boundary.resetVsConcatMaxAbs > 0);
+    report.boundaries.every((boundary) => boundary.concatVsNoResetMaxAbs === 0) &&
+    report.reasons.includes('source_pcm_concat_before_src') &&
+    report.reasons.includes('reset_per_track_src_compared_against_concat_reference');
+
+  if (!commonContract) {
+    return false;
+  }
+
+  if (report.state === 'same-rate-bypass') {
+    return report.sourceRate === report.targetRate &&
+      report.ratio === 1 &&
+      hasZeroReferenceResidual(report.resetResidual) &&
+      report.boundaries.every((boundary) => boundary.resetVsConcatMaxAbs === 0) &&
+      report.reasons.includes('same_rate_gapless_src_exact_bypass');
+  }
+
+  return report.state === 'src-stateful' &&
+    report.resetResidual.maxAbs > 0 &&
+    report.resetResidual.rms > 0 &&
+    report.boundaries.every((boundary) => boundary.resetVsConcatMaxAbs > 0) &&
+    report.reasons.includes('src_state_must_not_reset_at_gapless_boundary');
 };
 
 const isExpectedUzumeReferenceFirGaplessHistory = (
@@ -1920,24 +2004,45 @@ const isExpectedUzumeReferenceFirGaplessHistory = (
     return false;
   }
 
-  return report.state === 'history-required' &&
+  const commonContract = report.artifact === 'fir-gapless-history-reference' &&
     report.policy === 'source-pcm-concat-before-fir' &&
     report.engine === 'direct-fir-float64-reference' &&
-    report.tailFrames > 0 &&
-    report.drainFrames > 0 &&
     report.concatNullResidual.state === 'concat-matches-no-reset-history' &&
     report.concatNullResidual.comparedFrames > 0 &&
     hasZeroReferenceResidual(report.concatNullResidual) &&
     report.resetResidual.state === 'reset-vs-concat-history-reference' &&
     report.resetResidual.comparedFrames > 0 &&
-    report.resetResidual.maxAbs > 0 &&
-    report.resetResidual.rms > 0 &&
     report.boundaryCount > 0 &&
     report.boundaries.length === report.boundaryCount &&
+    report.boundaries.every((boundary) => boundary.concatVsNoResetMaxAbs === 0) &&
+    report.reasons.includes('source_pcm_concat_before_fir') &&
+    report.reasons.includes('reset_per_track_fir_history_compared_against_concat_reference') &&
+    report.reasons.includes('fir_gapless_reference_only');
+
+  if (!commonContract) {
+    return false;
+  }
+
+  if (report.state === 'identity-bypass') {
+    return report.tailFrames === 0 &&
+      report.drainFrames === 0 &&
+      hasZeroReferenceResidual(report.resetResidual) &&
+      report.boundaries.every((boundary) =>
+        boundary.overlapHistoryFrames === 0 &&
+        boundary.resetVsConcatMaxAbs === 0) &&
+      report.reasons.includes('identity_fir_has_no_gapless_tail');
+  }
+
+  return report.state === 'history-required' &&
+    report.tailFrames > 0 &&
+    report.drainFrames > 0 &&
+    report.resetResidual.maxAbs > 0 &&
+    report.resetResidual.rms > 0 &&
     report.boundaries.every((boundary) =>
       boundary.overlapHistoryFrames > 0 &&
       boundary.concatVsNoResetMaxAbs === 0 &&
-      boundary.resetVsConcatMaxAbs > 0);
+      boundary.resetVsConcatMaxAbs > 0) &&
+    report.reasons.includes('fir_history_must_cross_gapless_boundary');
 };
 
 const formatUzumeReferenceGaplessConcat = (status: AudioStatus | null): string | null => {
@@ -3291,7 +3396,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME gapless SRC reference',
       value: referenceGaplessConcat,
-      tone: isExpectedUzumeReferenceGaplessConcat(referencePlan?.gaplessConcat) ? 'process' : referencePlan?.gaplessConcat.state === 'src-stateful' ? 'warning' : 'process',
+      tone: isExpectedUzumeReferenceGaplessConcat(referencePlan?.gaplessConcat) ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -3301,7 +3406,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME FIR gapless reference',
       value: referenceFirGaplessHistory,
-      tone: isExpectedUzumeReferenceFirGaplessHistory(referencePlan?.firGaplessHistory) ? 'process' : referencePlan?.firGaplessHistory.state === 'history-required' ? 'warning' : 'process',
+      tone: isExpectedUzumeReferenceFirGaplessHistory(referencePlan?.firGaplessHistory) ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -3321,7 +3426,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME equal-power crossfade reference',
       value: referenceEqualPowerCrossfade,
-      tone: isExpectedUzumeReferenceEqualPowerCrossfade(referencePlan?.equalPowerCrossfade) ? 'process' : referencePlan?.equalPowerCrossfade.rendered.state === 'crossfade-rendered' ? 'warning' : 'process',
+      tone: isExpectedUzumeReferenceEqualPowerCrossfade(referencePlan?.equalPowerCrossfade) ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -3365,7 +3470,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME SRC reference',
       value: referenceResampling,
-      tone: expectedReferenceResampling ? 'process' : referencePlan?.resampling.active ? 'warning' : 'muted',
+      tone: expectedReferenceResampling ? 'process' : 'warning',
       variant: 'process',
     });
   }
@@ -3375,7 +3480,9 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME SRC rollback reference',
       value: referenceSrcRollback,
-      tone: referencePlan?.resampling.qualityRollback.state === 'armed' ? 'warning' : 'process',
+      tone: isExpectedUzumeReferenceSrcRollback(referencePlan?.resampling.qualityRollback)
+        ? referencePlan?.resampling.qualityRollback.state === 'armed' ? 'warning' : 'process'
+        : 'warning',
       variant: 'process',
     });
   }
@@ -3419,7 +3526,9 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: 'UZUME SRC output risk reference',
       value: referenceSrcOutputRisk,
-      tone: referencePlan?.resampling.outputResamplingRisk.signalPathTone === 'warning' ? 'warning' : 'good',
+      tone: isExpectedUzumeReferenceSrcOutputRisk(referencePlan?.resampling.outputResamplingRisk)
+        ? referencePlan?.resampling.outputResamplingRisk.signalPathTone === 'warning' ? 'warning' : 'good'
+        : 'warning',
       variant: 'process',
     });
   }

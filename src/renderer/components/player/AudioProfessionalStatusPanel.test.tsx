@@ -2164,6 +2164,97 @@ describe('AudioProfessionalStatusPanel', () => {
 
     cleanup();
 
+    const srcCoreDrift = makeSameRateStatus();
+    srcCoreDrift.uzumeReferencePlan!.resampling.phaseAccumulator = 'unavailable';
+    expect(renderRows(srcCoreDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME SRC reference',
+          value: expect.stringContaining('poly-sinc-reference / same-rate bypass'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const rollbackDrift = referenceStatus();
+    rollbackDrift.uzumeReferencePlan!.resampling.qualityRollback.state = 'standby';
+    rollbackDrift.uzumeReferencePlan!.resampling.qualityRollback.reason = 'reference-profile-within-budget';
+    (rollbackDrift.uzumeReferencePlan!.resampling.qualityRollback as unknown as { legacyFallbackAllowed: boolean }).legacyFallbackAllowed = true;
+    expect(renderRows(rollbackDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME SRC rollback reference',
+          value: expect.stringContaining('legacy fallback allowed'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const outputRiskDrift = referenceStatus();
+    outputRiskDrift.uzumeReferencePlan!.resampling.outputResamplingRisk.state = 'none';
+    outputRiskDrift.uzumeReferencePlan!.resampling.outputResamplingRisk.reason = null;
+    outputRiskDrift.uzumeReferencePlan!.resampling.outputResamplingRisk.signalPathTone = 'good';
+    outputRiskDrift.uzumeReferencePlan!.resampling.outputResamplingRisk.recommendation = 'none';
+    expect(renderRows(outputRiskDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME SRC output risk reference',
+          value: expect.stringContaining('current default'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const gaplessDrift = referenceStatus();
+    gaplessDrift.uzumeReferencePlan!.gaplessConcat.state = 'same-rate-bypass';
+    expect(renderRows(gaplessDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME gapless SRC reference',
+          value: expect.stringContaining('44.1 kHz->48 kHz'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const firGaplessDrift = referenceStatus();
+    firGaplessDrift.uzumeReferencePlan!.firGaplessHistory.state = 'identity-bypass';
+    expect(renderRows(firGaplessDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME FIR gapless reference',
+          value: expect.stringContaining('identity-bypass / room-ir'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
+    const crossfadeDrift = referenceStatus();
+    crossfadeDrift.uzumeReferencePlan!.equalPowerCrossfade.rendered.state = 'rejected';
+    crossfadeDrift.uzumeReferencePlan!.equalPowerCrossfade.rendered.rejectionReason = 'full_profile_not_ready';
+    crossfadeDrift.uzumeReferencePlan!.equalPowerCrossfade.rendered.gainLaw.state = 'not-applicable';
+    expect(renderRows(crossfadeDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'UZUME equal-power crossfade reference',
+          value: expect.stringContaining('rendered:user-random-seek-or-skip:rejected'),
+          tone: 'warning',
+        }),
+      ]),
+    );
+
+    cleanup();
+
     const ingressDrift = makeSameRateStatus();
     ingressDrift.uzumeReferencePlan!.pcmIngressGuard.counts.nonFiniteReplaced = 1;
     expect(renderRows(ingressDrift)).toEqual(

@@ -2386,6 +2386,73 @@ describe('PlayerBar', () => {
 
     cleanup();
 
+    const srcCoreDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    srcCoreDrift.uzumeReferencePlan!.resampling.phaseAccumulator = 'unavailable';
+    expect(renderSignalNodes(srcCoreDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME SRC reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const rollbackDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    rollbackDrift.uzumeReferencePlan!.resampling.qualityRollback.state = 'standby';
+    rollbackDrift.uzumeReferencePlan!.resampling.qualityRollback.reason = 'reference-profile-within-budget';
+    (rollbackDrift.uzumeReferencePlan!.resampling.qualityRollback as unknown as { legacyFallbackAllowed: boolean }).legacyFallbackAllowed = true;
+    expect(renderSignalNodes(rollbackDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME SRC rollback reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const outputRiskDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    outputRiskDrift.uzumeReferencePlan!.resampling.outputResamplingRisk.state = 'none';
+    outputRiskDrift.uzumeReferencePlan!.resampling.outputResamplingRisk.reason = null;
+    outputRiskDrift.uzumeReferencePlan!.resampling.outputResamplingRisk.signalPathTone = 'good';
+    outputRiskDrift.uzumeReferencePlan!.resampling.outputResamplingRisk.recommendation = 'none';
+    expect(renderSignalNodes(outputRiskDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME SRC output risk reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const gaplessDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    gaplessDrift.uzumeReferencePlan!.gaplessConcat.state = 'same-rate-bypass';
+    expect(renderSignalNodes(gaplessDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME gapless SRC reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const firGaplessDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    firGaplessDrift.uzumeReferencePlan!.firGaplessHistory.state = 'identity-bypass';
+    expect(renderSignalNodes(firGaplessDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME FIR gapless reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
+    const crossfadeDrift = cloneAudioStatus(status as unknown as AudioStatus);
+    crossfadeDrift.uzumeReferencePlan!.equalPowerCrossfade.rendered.state = 'rejected';
+    crossfadeDrift.uzumeReferencePlan!.equalPowerCrossfade.rendered.rejectionReason = 'full_profile_not_ready';
+    crossfadeDrift.uzumeReferencePlan!.equalPowerCrossfade.rendered.gainLaw.state = 'not-applicable';
+    expect(renderSignalNodes(crossfadeDrift)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'UZUME equal-power crossfade reference', tone: 'warning', variant: 'process' }),
+      ]),
+    );
+
+    cleanup();
+
     const ingressDrift = cloneAudioStatus(status as unknown as AudioStatus);
     ingressDrift.uzumeReferencePlan!.pcmIngressGuard.counts.nonFiniteReplaced = 1;
     expect(renderSignalNodes(ingressDrift)).toEqual(
