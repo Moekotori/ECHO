@@ -48,9 +48,15 @@ export const registerAudioIpc = async (): Promise<void> => {
   });
 
   // ── Backward-compat shims for old IPC channels ──
-  ipcMain.handle(IpcChannels.AudioGetStatus, async () => daemonClient.command('getStatus'));
+  ipcMain.handle(IpcChannels.AudioGetStatus, async () => {
+    try { return await daemonClient.command('getStatus'); }
+    catch { return buildStatus(null); }
+  });
   ipcMain.handle(IpcChannels.AudioSetOutput, async (_event, params: unknown) => daemonClient.command('setOutput', params));
-  ipcMain.handle(IpcChannels.AudioListDevices, async () => daemonClient.command('device.list'));
+  ipcMain.handle(IpcChannels.AudioListDevices, async () => {
+    try { return await daemonClient.command('device.list'); }
+    catch { return { devices: [] }; }
+  });
   ipcMain.handle(IpcChannels.AudioResetEngine, async () => daemonClient.command('stop'));
   ipcMain.handle(IpcChannels.AudioForceRestart, async () => {
     await daemonClient.command('stop');
@@ -61,28 +67,35 @@ export const registerAudioIpc = async (): Promise<void> => {
 
   // Push daemon status periodically to renderer (backward compat)
   let statusInterval: ReturnType<typeof setInterval> | null = null;
+
+  const buildStatus = (raw: unknown) => ({
+    state: 'idle', position: 0, duration: 0, volume: 1,
+    outputMode: 'shared', deviceName: '', sampleRate: 0,
+    sharedDeviceSampleRate: 0, actualDeviceSampleRate: 0,
+    dspActive: false, dspClippingRisk: false, dspLimiterProtecting: false,
+    eqEnabled: false, eqPresetName: null,
+    replayGainAppliedDb: 0, replayGainPreventedClipping: false,
+    underrunCallbacks: 0, bitPerfectCandidate: false,
+    warnings: [],
+    ...(typeof raw === 'object' && raw ? raw : {}),
+  });
+
+  // Push default status immediately — renderer renders before daemon is ready
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(IpcChannels.AudioStatus, buildStatus(null));
+  }
+
   daemonClient.on('event.ready', () => {
     if (statusInterval) clearInterval(statusInterval);
     const pushStatus = async () => {
       try {
         const raw = await daemonClient.command('getStatus');
-        const status = {
-          state: 'idle', position: 0, duration: 0, volume: 1,
-          outputMode: 'shared', deviceName: '', sampleRate: 0,
-          sharedDeviceSampleRate: 0, actualDeviceSampleRate: 0,
-          dspActive: false, dspClippingRisk: false, dspLimiterProtecting: false,
-          eqEnabled: false, eqPresetName: null,
-          replayGainAppliedDb: 0, replayGainPreventedClipping: false,
-          underrunCallbacks: 0, bitPerfectCandidate: false,
-          warnings: [],
-          ...(typeof raw === 'object' && raw ? raw : {}),
-        };
         for (const window of BrowserWindow.getAllWindows()) {
-          window.webContents.send(IpcChannels.AudioStatus, status);
+          window.webContents.send(IpcChannels.AudioStatus, buildStatus(raw));
         }
       } catch { /* daemon not ready yet */ }
     };
-    pushStatus(); // Send initial status IMMEDIATELY
+    pushStatus();
     statusInterval = setInterval(pushStatus, 1000);
   });
   daemonClient.on('event.shutdown', () => {
