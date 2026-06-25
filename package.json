@@ -8,9 +8,11 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "npm run rebuild:native && npm run ensure:audio-host && electron-vite dev",
-    "dev:full": "npm run rebuild:native && npm run ensure:audio-host && npm run build:smtc-host && electron-vite dev",
+    "dev": "npm run rebuild:native && npm run ensure:audio-daemon && electron-vite dev",
+    "dev:full": "npm run rebuild:native && npm run ensure:audio-daemon && npm run build:smtc-host && electron-vite dev",
     "build:audio-host": "node scripts/build-audio-host.mjs",
+    "build:audio-daemon": "node scripts/build-audio-daemon.mjs",
+    "ensure:audio-daemon": "node scripts/ensure-audio-daemon.mjs",
     "build:native-scanner": "node scripts/build-native-scanner.mjs",
     "ensure:audio-host": "node scripts/ensure-audio-host.mjs",
     "build:smtc-host": "node scripts/build-smtc-host.mjs",
