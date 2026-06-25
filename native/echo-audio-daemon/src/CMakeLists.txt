@@ -11,6 +11,7 @@ add_executable(echo-audio-daemon
 target_link_libraries(echo-audio-daemon
     PRIVATE
         ${FFMPEG_LIBRARIES}
+        pthread
 )
 
 target_include_directories(echo-audio-daemon

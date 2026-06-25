@@ -63,6 +63,27 @@ set_target_properties(echo-daemon-null-output-tests PROPERTIES
     EXCLUDE_FROM_ALL TRUE
 )
 
+# ── Integration Test Harness (C++ in-process) ─────────────────────────────────
+add_executable(echo-daemon-harness
+    test_harness.cpp
+    ../src/ipc/JsonRpcServer.cpp
+    ../src/output/NullBackend.cpp
+)
+target_compile_features(echo-daemon-harness PRIVATE cxx_std_17)
+target_include_directories(echo-daemon-harness PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/third_party
+)
+target_link_libraries(echo-daemon-harness PRIVATE pthread)
+set_target_properties(echo-daemon-harness PROPERTIES
+    EXCLUDE_FROM_ALL TRUE
+)
+
 add_test(NAME echo-daemon-types COMMAND echo-daemon-tests)
 add_test(NAME echo-daemon-ipc COMMAND echo-daemon-ipc-tests)
 add_test(NAME echo-daemon-null-output COMMAND echo-daemon-null-output-tests)
+add_test(NAME echo-daemon-harness COMMAND echo-daemon-harness)
+add_test(NAME echo-daemon-harness-runner
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/harness_runner.sh
+            $<TARGET_FILE:echo-audio-daemon>
+)
