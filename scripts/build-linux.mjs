@@ -89,6 +89,7 @@ try {
   run('npm', ['run', 'rebuild:native']);
   run('npm', ['run', 'verify:ffmpeg']);
   run('npm', ['run', 'build:audio-host']);
+  run('npm', ['run', 'build:audio-daemon']);
   run('npm', ['run', 'build:native-scanner']);
   assertExecutableFile(hostBinary, 'Linux audio host');
   assertExecutableFile(nativeScannerBinary, 'Linux native scanner');

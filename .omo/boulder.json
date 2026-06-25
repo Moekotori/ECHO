@@ -22,9 +22,9 @@
       "work_id": "echo-audio-daemon-150e97dc",
       "active_plan": "/home/uright/ECHO/.omo/plans/echo-audio-daemon.md",
       "plan_name": "echo-audio-daemon",
-      "status": "active",
+      "status": "completed",
       "started_at": "2026-06-25T04:51:43.970Z",
-      "updated_at": "2026-06-25T07:18:56.619Z",
+      "updated_at": "2026-06-25T07:24:21.113Z",
       "session_ids": [
         "opencode:ses_1030a1756ffeOlSzDbgvV2Htk4",
         "opencode:ses_102e070ddffenF2nCUcRjXkBCy",
@@ -53,7 +53,11 @@
         "opencode:ses_102647648ffeMwj2wv8X5HykyE",
         "opencode:ses_10264558effe8zUd3OIiTE8sya",
         "opencode:ses_10264371cffeYgaJ4Q46R7wttF",
-        "opencode:ses_1025c2e7affeOQfAoQDGp2zFlu"
+        "opencode:ses_1025c2e7affeOQfAoQDGp2zFlu",
+        "opencode:ses_1025a53bcffeExMwyw4fjOPXWC",
+        "opencode:ses_1025a45d2ffe1raTEB3AbUUS3C",
+        "opencode:ses_1025a1861ffeCyByUhI2QYdjmU",
+        "opencode:ses_1025a0a1dffeQ8WoA6SirMdUxc"
       ],
       "session_origins": {
         "opencode:ses_1030a1756ffeOlSzDbgvV2Htk4": "direct",
@@ -83,7 +87,11 @@
         "opencode:ses_102647648ffeMwj2wv8X5HykyE": "appended",
         "opencode:ses_10264558effe8zUd3OIiTE8sya": "appended",
         "opencode:ses_10264371cffeYgaJ4Q46R7wttF": "appended",
-        "opencode:ses_1025c2e7affeOQfAoQDGp2zFlu": "appended"
+        "opencode:ses_1025c2e7affeOQfAoQDGp2zFlu": "appended",
+        "opencode:ses_1025a53bcffeExMwyw4fjOPXWC": "appended",
+        "opencode:ses_1025a45d2ffe1raTEB3AbUUS3C": "appended",
+        "opencode:ses_1025a1861ffeCyByUhI2QYdjmU": "appended",
+        "opencode:ses_1025a0a1dffeQ8WoA6SirMdUxc": "appended"
       },
       "agent": "atlas",
       "task_sessions": {
@@ -195,14 +203,29 @@
           "status": "completed",
           "ended_at": "2026-06-25T07:18:56.619Z",
           "elapsed_ms": 38098
+        },
+        "todo:26": {
+          "task_key": "todo:26",
+          "task_label": "26",
+          "task_title": "Final Integration Smoke Test",
+          "session_id": "opencode:ses_1025a0a1dffeQ8WoA6SirMdUxc",
+          "agent": "Sisyphus-Junior",
+          "category": "deep",
+          "started_at": "2026-06-25T07:23:25.374Z",
+          "status": "completed",
+          "updated_at": "2026-06-25T07:23:46.545Z",
+          "ended_at": "2026-06-25T07:23:46.545Z",
+          "elapsed_ms": 21171
         }
-      }
+      },
+      "ended_at": "2026-06-25T07:24:21.113Z",
+      "elapsed_ms": 9157143
     }
   },
   "active_plan": "/home/uright/ECHO/.omo/plans/echo-audio-daemon.md",
   "started_at": "2026-06-25T04:51:43.970Z",
-  "status": "active",
-  "updated_at": "2026-06-25T07:18:56.619Z",
+  "status": "completed",
+  "updated_at": "2026-06-25T07:24:21.113Z",
   "session_ids": [
     "opencode:ses_1030a1756ffeOlSzDbgvV2Htk4",
     "opencode:ses_102e070ddffenF2nCUcRjXkBCy",
@@ -231,7 +254,11 @@
     "opencode:ses_102647648ffeMwj2wv8X5HykyE",
     "opencode:ses_10264558effe8zUd3OIiTE8sya",
     "opencode:ses_10264371cffeYgaJ4Q46R7wttF",
-    "opencode:ses_1025c2e7affeOQfAoQDGp2zFlu"
+    "opencode:ses_1025c2e7affeOQfAoQDGp2zFlu",
+    "opencode:ses_1025a53bcffeExMwyw4fjOPXWC",
+    "opencode:ses_1025a45d2ffe1raTEB3AbUUS3C",
+    "opencode:ses_1025a1861ffeCyByUhI2QYdjmU",
+    "opencode:ses_1025a0a1dffeQ8WoA6SirMdUxc"
   ],
   "session_origins": {
     "opencode:ses_1030a1756ffeOlSzDbgvV2Htk4": "direct",
@@ -261,7 +288,11 @@
     "opencode:ses_102647648ffeMwj2wv8X5HykyE": "appended",
     "opencode:ses_10264558effe8zUd3OIiTE8sya": "appended",
     "opencode:ses_10264371cffeYgaJ4Q46R7wttF": "appended",
-    "opencode:ses_1025c2e7affeOQfAoQDGp2zFlu": "appended"
+    "opencode:ses_1025c2e7affeOQfAoQDGp2zFlu": "appended",
+    "opencode:ses_1025a53bcffeExMwyw4fjOPXWC": "appended",
+    "opencode:ses_1025a45d2ffe1raTEB3AbUUS3C": "appended",
+    "opencode:ses_1025a1861ffeCyByUhI2QYdjmU": "appended",
+    "opencode:ses_1025a0a1dffeQ8WoA6SirMdUxc": "appended"
   },
   "plan_name": "echo-audio-daemon",
   "task_sessions": {
@@ -373,7 +404,22 @@
       "status": "completed",
       "ended_at": "2026-06-25T07:18:56.619Z",
       "elapsed_ms": 38098
+    },
+    "todo:26": {
+      "task_key": "todo:26",
+      "task_label": "26",
+      "task_title": "Final Integration Smoke Test",
+      "session_id": "opencode:ses_1025a0a1dffeQ8WoA6SirMdUxc",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "started_at": "2026-06-25T07:23:25.374Z",
+      "status": "completed",
+      "updated_at": "2026-06-25T07:23:46.545Z",
+      "ended_at": "2026-06-25T07:23:46.545Z",
+      "elapsed_ms": 21171
     }
   },
-  "agent": "atlas"
+  "agent": "atlas",
+  "ended_at": "2026-06-25T07:24:21.113Z",
+  "elapsed_ms": 9157143
 }

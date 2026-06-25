@@ -58,4 +58,21 @@ export const registerAudioIpc = async (): Promise<void> => {
     return daemonClient.spawn();
   });
   ipcMain.handle(IpcChannels.AudioOpenAsioControlPanel, async () => daemonClient.command('openAsioControlPanel'));
+
+  // Push daemon status periodically to renderer (backward compat)
+  let statusInterval: ReturnType<typeof setInterval> | null = null;
+  daemonClient.on('event.ready', () => {
+    if (statusInterval) clearInterval(statusInterval);
+    statusInterval = setInterval(async () => {
+      try {
+        const status = await daemonClient.command('getStatus');
+        for (const window of BrowserWindow.getAllWindows()) {
+          window.webContents.send(IpcChannels.AudioStatus, status);
+        }
+      } catch { /* daemon might not be ready yet */ }
+    }, 1000);
+  });
+  daemonClient.on('event.shutdown', () => {
+    if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
+  });
 };

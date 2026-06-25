@@ -66,6 +66,16 @@ static int runDaemonMode() {
         };
     });
 
+    server.registerMethod("setOutput", [](const json& params) -> json {
+        // Accept output settings. In current daemon, output mode is
+        // determined at startup via CLI args. Return the accepted config.
+        return json{
+            {"mode", params.value("mode", "shared")},
+            {"deviceId", params.value("deviceId", "")},
+            {"sampleRate", params.value("sampleRate", 0)},
+        };
+    });
+
     server.registerMethod("openAsioControlPanel", [](const json&) -> json {
         return json{{"error", "ASIO control panel is Windows-only"}};
     });
