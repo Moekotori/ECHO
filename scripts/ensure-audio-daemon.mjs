@@ -4,19 +4,20 @@ import { fileURLToPath } from 'node:url';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const projectRoot = resolve(dirname(scriptPath), '..');
-const sourceDir = join(projectRoot, 'native', 'echo-audio-daemon', 'src');
+const sourceDir = join(projectRoot, 'native', 'echo-audio-daemon');
 const targetExe = join(projectRoot, 'electron-app', 'build',
-  process.platform === 'win32' ? 'echo-audio-daemon.exe' : 'echo-audio-daemon');
+    process.platform === 'win32' ? 'echo-audio-daemon.exe' : 'echo-audio-daemon');
 const buildScript = join(projectRoot, 'scripts', 'build-audio-daemon.mjs');
 
-const getLatestMtime = (dir) => {
-  let latest = 0;
-  if (!existsSync(dir)) return latest;
-  for (const name of readdirSync(dir, { recursive: true })) {
-    const p = join(dir, name);
-    try { if (statSync(p).isFile()) latest = Math.max(latest, statSync(p).mtimeMs); } catch {}
-  }
-  return latest;
+const getLatestSourceMtime = (dir) => {
+    let latest = 0;
+    if (!existsSync(dir)) return latest;
+    const srcDir = join(dir, 'src');
+    for (const name of readdirSync(srcDir, { recursive: true })) {
+        const p = join(srcDir, name);
+        if (statSync(p).isFile()) latest = Math.max(latest, statSync(p).mtimeMs);
+    }
+    return latest;
 };
 
 try {
@@ -26,7 +27,7 @@ try {
   }
 
   const targetMtime = existsSync(targetExe) ? statSync(targetExe).mtimeMs : 0;
-  const latestSourceMtime = getLatestMtime(sourceDir);
+  const latestSourceMtime = getLatestSourceMtime(sourceDir);
 
   if (targetMtime > 0 && targetMtime >= latestSourceMtime) {
     console.log(`[ensure:audio-daemon] ${targetExe} is up to date.`);

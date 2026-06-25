@@ -49,6 +49,27 @@ static int runDaemonMode() {
         return json{{"pong", true}};
     });
 
+    server.registerMethod("getStatus", [&sessionManager, &dsp](const json&) -> json {
+        double position = 0.0;
+        int sr = sessionManager.getSampleRate();
+        if (sr > 0) {
+            position = static_cast<double>(sessionManager.getFramesPlayed()) / sr;
+        }
+        return json{
+            {"state", ead::SessionManager::stateToString(sessionManager.getState())},
+            {"position", position},
+            {"duration", sessionManager.getDuration()},
+            {"volume", sessionManager.getVolume()},
+            {"dspActive", dsp.isActive()},
+            {"dspClippingRisk", dsp.hasClippingRisk()},
+            {"dspLimiterProtecting", dsp.isLimiterProtecting()},
+        };
+    });
+
+    server.registerMethod("openAsioControlPanel", [](const json&) -> json {
+        return json{{"error", "ASIO control panel is Windows-only"}};
+    });
+
     // SessionManager registers its own handlers: play, pause, resume, stop,
     // seek, setVolume, queueNext, prepareAutomix, levelMeter.subscribe, etc.
     sessionManager.init();
