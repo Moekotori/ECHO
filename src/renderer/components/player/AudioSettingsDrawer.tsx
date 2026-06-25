@@ -351,7 +351,7 @@ const isJuceDecodeFallbackVisible = (status: AudioStatus | null): boolean =>
     status?.useJuceDecodeRequested &&
       !isActiveJuceDecodeBackend(status) &&
       status.activeDecodeBackendImpl === 'ffmpeg' &&
-      status.warnings.some((warning) => warning === 'juce_decode_fell_back_to_ffmpeg'),
+      status.warnings?.some((warning) => warning === 'juce_decode_fell_back_to_ffmpeg'),
   );
 
 const isJuceDecodeStandbyVisible = (status: AudioStatus | null): boolean =>
@@ -363,7 +363,7 @@ const isJuceDecodeStandbyVisible = (status: AudioStatus | null): boolean =>
   );
 
 const hasJuceFallbackWarning = (status: AudioStatus | null): boolean =>
-  Boolean(status?.warnings.some((warning) => warning.startsWith('juce_') && warning.includes('fell_back')));
+  Boolean(status?.warnings?.some((warning) => warning.startsWith('juce_') && warning.includes('fell_back')));
 
 const isJuceFallbackVisible = (status: AudioStatus | null): boolean =>
   Boolean(
@@ -379,7 +379,7 @@ const isDsdDopFallbackVisible = (status: AudioStatus | null): boolean =>
   Boolean(
     status?.dsdOutputModeRequested === 'dop' &&
       status.activeDsdOutputMode !== 'dop' &&
-      status.warnings.some((warning) => warning.startsWith('dsd_dop_fell_back_to_pcm')),
+      status.warnings?.some((warning) => warning.startsWith('dsd_dop_fell_back_to_pcm')),
   );
 
 const isDsdDopStandbyVisible = (status: AudioStatus | null): boolean =>
@@ -895,7 +895,7 @@ export const AudioSettingsDrawer = ({
       badges.push({ label: 'HQPlayer', tone: 'ready' });
     }
 
-    const hasEq = status?.dspActive || status?.eqEnabled || status?.warnings.some((warning) => /eq|equalizer/i.test(warning));
+    const hasEq = status?.dspActive || status?.eqEnabled || status?.warnings?.some((warning) => /eq|equalizer/i.test(warning));
 
     if (hasEq) {
       badges.push({ label: copy.dspActive, tone: 'neutral' });
