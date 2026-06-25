@@ -3,8 +3,16 @@ import { IpcChannels } from '../../shared/constants/ipcChannels';
 import type { AudioStatus } from '../../shared/types/audio';
 import { getDaemonClient } from '../audio/DaemonClient';
 
-export const registerAudioIpc = (): void => {
+export const registerAudioIpc = async (): Promise<void> => {
   const daemonClient = getDaemonClient();
+
+  // Start the daemon binary (uses resolveBinary → electron-app/build/echo-audio-daemon)
+  try {
+    await daemonClient.spawn();
+  } catch (err) {
+    console.error('[audioIpc] Failed to start daemon:', err);
+    // Continue — the UI will show "Daemon is not running" on command attempts
+  }
 
   // Forward daemon status events to renderers (backward compat)
   daemonClient.on('event.status', (status: unknown) => {
