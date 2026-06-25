@@ -711,11 +711,19 @@ const echoApi: EchoApi & {
     getStatus: () => ipcRenderer.invoke(IpcChannels.AudioGetStatus) as Promise<AudioStatus>,
     getDiagnostics: () => ipcRenderer.invoke(IpcChannels.AudioGetDiagnostics) as Promise<AudioDiagnostics>,
     onStatus: (handler) => {
+      // Immediately provide default status (prevents crash on first render)
+      handler({
+        state: 'idle', position: 0, duration: 0, volume: 1,
+        outputMode: 'shared', deviceName: '', sampleRate: 0,
+        sharedDeviceSampleRate: 0, dspActive: false,
+        dspClippingRisk: false, dspLimiterProtecting: false,
+        eqEnabled: false, eqPresetName: null, warnings: [],
+        underrunCallbacks: 0, bitPerfectCandidate: false,
+      } as AudioStatus);
       const listener = (_event: Electron.IpcRendererEvent, status: unknown): void => {
         handler(status as AudioStatus);
       };
       ipcRenderer.on(IpcChannels.AudioStatus, listener);
-      // Immediately fetch current status (prevents null status crash on first render)
       ipcRenderer.invoke(IpcChannels.AudioGetStatus).then(s => {
         if (s) handler(s as AudioStatus);
       }).catch(() => {});
