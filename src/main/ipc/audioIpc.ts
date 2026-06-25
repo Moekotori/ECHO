@@ -63,24 +63,27 @@ export const registerAudioIpc = async (): Promise<void> => {
   let statusInterval: ReturnType<typeof setInterval> | null = null;
   daemonClient.on('event.ready', () => {
     if (statusInterval) clearInterval(statusInterval);
-    // Send initial status IMMEDIATELY (before first interval tick)
-    // Otherwise the renderer sees undefined/null arrays on first render → crash
-    (async () => {
+    const pushStatus = async () => {
       try {
-        const status = await daemonClient.command('getStatus');
+        const raw = await daemonClient.command('getStatus');
+        const status = {
+          state: 'idle', position: 0, duration: 0, volume: 1,
+          outputMode: 'shared', deviceName: '', sampleRate: 0,
+          sharedDeviceSampleRate: 0, actualDeviceSampleRate: 0,
+          dspActive: false, dspClippingRisk: false, dspLimiterProtecting: false,
+          eqEnabled: false, eqPresetName: null,
+          replayGainAppliedDb: 0, replayGainPreventedClipping: false,
+          underrunCallbacks: 0, bitPerfectCandidate: false,
+          warnings: [],
+          ...(typeof raw === 'object' && raw ? raw : {}),
+        };
         for (const window of BrowserWindow.getAllWindows()) {
           window.webContents.send(IpcChannels.AudioStatus, status);
         }
-      } catch { /* daemon might not be ready yet */ }
-    })();
-    statusInterval = setInterval(async () => {
-      try {
-        const status = await daemonClient.command('getStatus');
-        for (const window of BrowserWindow.getAllWindows()) {
-          window.webContents.send(IpcChannels.AudioStatus, status);
-        }
-      } catch { /* daemon might not be ready yet */ }
-    }, 1000);
+      } catch { /* daemon not ready yet */ }
+    };
+    pushStatus(); // Send initial status IMMEDIATELY
+    statusInterval = setInterval(pushStatus, 1000);
   });
   daemonClient.on('event.shutdown', () => {
     if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
