@@ -63,6 +63,16 @@ export const registerAudioIpc = async (): Promise<void> => {
   let statusInterval: ReturnType<typeof setInterval> | null = null;
   daemonClient.on('event.ready', () => {
     if (statusInterval) clearInterval(statusInterval);
+    // Send initial status IMMEDIATELY (before first interval tick)
+    // Otherwise the renderer sees undefined/null arrays on first render → crash
+    (async () => {
+      try {
+        const status = await daemonClient.command('getStatus');
+        for (const window of BrowserWindow.getAllWindows()) {
+          window.webContents.send(IpcChannels.AudioStatus, status);
+        }
+      } catch { /* daemon might not be ready yet */ }
+    })();
     statusInterval = setInterval(async () => {
       try {
         const status = await daemonClient.command('getStatus');
