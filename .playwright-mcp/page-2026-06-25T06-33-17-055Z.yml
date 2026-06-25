@@ -1,0 +1,815 @@
+- generic [ref=e3]:
+  - banner "ECHO Next" [ref=e4]:
+    - generic [ref=e5]:
+      - strong [ref=e6]: ECHO
+      - generic [ref=e7]: Next
+    - generic "Quick actions" [ref=e8]:
+      - button "Audio Settings" [ref=e9] [cursor=pointer]:
+        - img [ref=e10]
+      - button "Lyrics Settings" [ref=e12] [cursor=pointer]:
+        - img [ref=e13]
+      - button "MV Settings" [ref=e16] [cursor=pointer]:
+        - img [ref=e17]
+      - button "Settings" [ref=e19] [cursor=pointer]:
+        - img [ref=e20]
+    - generic "Window controls" [ref=e23]:
+      - button "Fullscreen" [ref=e24] [cursor=pointer]:
+        - img [ref=e25]
+      - button "Minimize" [ref=e30] [cursor=pointer]:
+        - img [ref=e31]
+      - button "Maximize" [ref=e32] [cursor=pointer]:
+        - img [ref=e33]
+      - button "Close" [ref=e35] [cursor=pointer]:
+        - img [ref=e36]
+  - complementary "Main navigation" [ref=e39]:
+    - navigation [ref=e40]:
+      - button "Home" [ref=e41] [cursor=pointer]:
+        - img [ref=e43]
+        - generic [ref=e48]: Home
+      - button "Songs" [ref=e49] [cursor=pointer]:
+        - img [ref=e51]
+        - generic [ref=e55]: Songs
+      - button "Albums" [ref=e56] [cursor=pointer]:
+        - img [ref=e58]
+        - generic [ref=e61]: Albums
+      - button "Artists" [ref=e62] [cursor=pointer]:
+        - img [ref=e64]
+        - generic [ref=e69]: Artists
+      - button "Folders" [ref=e70] [cursor=pointer]:
+        - img [ref=e72]
+        - generic [ref=e74]: Folders
+      - button "Cloud / Remote" [ref=e75] [cursor=pointer]:
+        - img [ref=e77]
+        - generic [ref=e81]: Cloud / Remote
+      - button "Connect" [ref=e82] [cursor=pointer]:
+        - img [ref=e84]
+        - generic [ref=e86]: Connect
+      - button "DSP" [ref=e87] [cursor=pointer]:
+        - img [ref=e89]
+        - generic [ref=e93]: DSP
+      - button "Queue" [ref=e94] [cursor=pointer]:
+        - img [ref=e96]
+        - generic [ref=e97]: Queue
+      - button "History" [ref=e98] [cursor=pointer]:
+        - img [ref=e100]
+        - generic [ref=e104]: History
+      - button "Playlists" [ref=e105] [cursor=pointer]:
+        - img [ref=e107]
+        - generic [ref=e110]: Playlists
+      - button "Plugins" [ref=e111] [cursor=pointer]:
+        - img [ref=e113]
+        - generic [ref=e118]: Plugins
+    - navigation "Utility navigation" [ref=e120]:
+      - button "Liked" [ref=e121] [cursor=pointer]:
+        - img [ref=e123]
+        - generic [ref=e125]: Liked
+      - button "Settings" [ref=e126] [cursor=pointer]:
+        - img [ref=e128]
+        - generic [ref=e132]: Settings
+      - button "Audio Settings" [ref=e133] [cursor=pointer]:
+        - img [ref=e135]
+        - generic [ref=e140]: Audio Settings
+  - main [ref=e485]:
+    - generic [ref=e487]:
+      - complementary "DSP modules" [ref=e488]:
+        - generic [ref=e489]:
+          - generic [ref=e490]: DSP
+          - strong [ref=e491]: ECHO
+          - emphasis [ref=e492]: Signal Control
+        - generic [ref=e493]:
+          - img [ref=e494]
+          - generic [ref=e501]:
+            - generic [ref=e502]: Output
+            - strong [ref=e503]: System output
+            - generic [ref=e504]: Auto / shared
+        - navigation "DSP module chain" [ref=e505]:
+          - generic [ref=e506]:
+            - generic [ref=e507]: Input
+            - button "Headroom Reserve DSP headroom" [ref=e508] [cursor=pointer]:
+              - img [ref=e510]
+              - generic [ref=e513]:
+                - strong [ref=e514]: Headroom
+                - generic [ref=e515]: Reserve DSP headroom
+          - generic [ref=e516]:
+            - generic [ref=e517]: Sample rate
+            - button "SRC / Upsampling PCM sample-rate conversion" [ref=e518] [cursor=pointer]:
+              - img [ref=e520]
+              - generic [ref=e527]:
+                - strong [ref=e528]: SRC / Upsampling
+                - generic [ref=e529]: PCM sample-rate conversion
+          - generic [ref=e530]:
+            - generic [ref=e531]: Shape
+            - button "Parametric EQ Bands, preamp, presets" [ref=e532] [cursor=pointer]:
+              - img [ref=e534]
+              - generic [ref=e535]:
+                - strong [ref=e536]: Parametric EQ
+                - generic [ref=e537]: Bands, preamp, presets
+          - button "Headphone correction OPRA headphone curves" [ref=e539] [cursor=pointer]:
+            - img [ref=e541]
+            - generic [ref=e543]:
+              - strong [ref=e544]: Headphone correction
+              - generic [ref=e545]: OPRA headphone curves
+          - generic [ref=e546]:
+            - generic [ref=e547]: Space
+            - button "FIR / Room correction IR convolution only" [ref=e548] [cursor=pointer]:
+              - img [ref=e550]
+              - generic [ref=e554]:
+                - strong [ref=e555]: FIR / Room correction
+                - generic [ref=e556]: IR convolution only
+          - generic [ref=e557]:
+            - generic [ref=e558]: Stereo
+            - button "Channel tools Balance, delay, mono" [ref=e559] [cursor=pointer]:
+              - img [ref=e561]
+              - generic [ref=e563]:
+                - strong [ref=e564]: Channel tools
+                - generic [ref=e565]: Balance, delay, mono
+          - generic [ref=e566]:
+            - generic [ref=e567]: Output
+            - button "Output safety Final output monitor" [ref=e568] [cursor=pointer]:
+              - img [ref=e570]
+              - generic [ref=e573]:
+                - strong [ref=e574]: Output safety
+                - generic [ref=e575]: Final output monitor
+      - region "DSP workspace" [ref=e576]:
+        - paragraph [ref=e577]: Desktop bridge unavailable
+        - region "ECHO Next EQ panel" [ref=e579]:
+          - generic [ref=e580]:
+            - generic [ref=e581]:
+              - img [ref=e583]
+              - generic [ref=e585]:
+                - heading "EQ" [level=2] [ref=e586]
+                - paragraph [ref=e587]: Sound curve, safe headroom, and advanced tuning
+            - generic [ref=e588]:
+              - generic [ref=e589]:
+                - checkbox "EQ Enabled" [checked] [ref=e590]
+                - generic [ref=e591]: EQ Enabled
+              - group "EQ view mode" [ref=e592]:
+                - button "Simple" [ref=e593] [cursor=pointer]
+                - button "Pro" [active] [ref=e594] [cursor=pointer]
+              - generic [ref=e595]:
+                - generic [ref=e596]:
+                  - img [ref=e597]
+                  - textbox "Search presets" [ref=e600]
+                - group "Preset filter" [ref=e601]:
+                  - button "All" [ref=e602] [cursor=pointer]
+                  - button "Built-in" [ref=e603] [cursor=pointer]
+                  - button "User" [ref=e604] [cursor=pointer]
+                  - button "Target curves" [ref=e605] [cursor=pointer]
+                  - button "Genre" [ref=e606] [cursor=pointer]
+                  - button "Utility" [ref=e607] [cursor=pointer]
+                - button "EQ preset" [ref=e609] [cursor=pointer]:
+                  - generic [ref=e610]: Modified
+                  - img [ref=e611]
+              - button "Undo" [ref=e1019] [cursor=pointer]:
+                - img [ref=e1020]
+              - button "Redo" [disabled] [ref=e1023]:
+                - img [ref=e1024]
+              - button "Reset EQ" [ref=e613] [cursor=pointer]:
+                - img [ref=e614]
+          - generic [ref=e617]:
+            - button "EQ Enabled" [ref=e618] [cursor=pointer]:
+              - img [ref=e619]
+              - generic [ref=e620]: EQ
+              - strong [ref=e621]: Enabled
+            - button "Hold original" [ref=e622] [cursor=pointer]:
+              - img [ref=e623]
+              - generic [ref=e629]: Hold original
+              - strong [ref=e630]: Bit-perfect path
+            - generic [ref=e631]:
+              - generic [ref=e632]: Preset
+              - strong [ref=e633]: Bass lift
+            - generic [ref=e634]:
+              - generic [ref=e635]: Preamp
+              - slider "Quick EQ preamp" [ref=e636]: "-2.5"
+              - strong [ref=e637]: "-2.5 dB"
+            - button "Quick Auto Gain" [ref=e638] [cursor=pointer]:
+              - img [ref=e639]
+              - generic [ref=e642]: Auto Gain
+              - strong [ref=e643]: 0.0 dB
+          - generic [ref=e733]:
+            - generic [ref=e734]:
+              - emphasis [ref=e735]: Preset
+              - strong [ref=e736]: Bass lift
+            - generic [ref=e737]:
+              - emphasis [ref=e738]: Headroom
+              - strong [ref=e739]: "--"
+            - generic [ref=e740]:
+              - emphasis [ref=e741]: Bit-perfect
+              - strong [ref=e742]: DSP signal path active
+            - generic [ref=e743]:
+              - emphasis [ref=e744]: Mode
+              - strong [ref=e745]: Pro
+          - generic "Signal Path" [ref=e746]:
+            - generic [ref=e747]:
+              - img [ref=e748]
+              - generic [ref=e750]: Signal Path
+              - strong [ref=e751]: DSP signal path active
+            - generic [ref=e752]:
+              - generic [ref=e753]:
+                - img [ref=e754]
+                - emphasis [ref=e761]: Input
+                - strong [ref=e762]: "--"
+              - generic [ref=e763]:
+                - img [ref=e764]
+                - emphasis [ref=e767]: Preamp
+                - strong [ref=e768]: "-2.5 dB"
+              - generic [ref=e769]:
+                - img [ref=e770]
+                - emphasis [ref=e771]: PEQ
+                - strong [ref=e772]: 31/31
+              - generic [ref=e773]:
+                - img [ref=e774]
+                - emphasis [ref=e777]: Guard
+                - strong [ref=e778]: Armed
+              - generic [ref=e779]:
+                - img [ref=e780]
+                - emphasis [ref=e784]: Output
+                - strong [ref=e785]: DSP output
+          - generic [ref=e1027]:
+            - generic [ref=e1028]:
+              - generic [ref=e1029]: EQ
+              - strong [ref=e1030]: Enabled
+            - generic [ref=e1031]:
+              - generic [ref=e1032]: Preset
+              - strong [ref=e1033]: Bass lift
+            - generic [ref=e1034]:
+              - generic [ref=e1035]: Estimated Peak
+              - strong [ref=e1036]: 0.0 dB
+            - generic [ref=e1037]:
+              - generic [ref=e1038]: Processor
+              - strong [ref=e1039]: Realtime IIR
+            - generic [ref=e1040]:
+              - generic [ref=e1041]: Headroom
+              - strong [ref=e1042]: Safe
+            - generic [ref=e1043]:
+              - generic [ref=e1044]: Bit-perfect
+              - strong [ref=e1045]: Disabled
+          - generic [ref=e787]:
+            - generic [ref=e788]:
+              - generic [ref=e789]:
+                - generic [ref=e790]: Headroom Management
+                - strong [ref=e791]: "-2.5 dB"
+              - generic "Headroom safety metrics" [ref=e792]:
+                - generic [ref=e793]: Recommended
+                - strong [ref=e794]: "-2.5 dB"
+                - generic [ref=e795]: Max boost
+                - strong [ref=e796]: +2.5 dB
+                - generic [ref=e797]: Estimated Peak
+                - strong [ref=e798]: 0.0 dB
+              - generic [ref=e799]:
+                - generic [ref=e800]:
+                  - emphasis [ref=e801]: Input peak
+                  - strong [ref=e802]: "--"
+                - generic [ref=e803]:
+                  - emphasis [ref=e804]: Input RMS
+                  - strong [ref=e805]: "--"
+                - generic [ref=e806]:
+                  - emphasis [ref=e807]: Est. output peak
+                  - strong [ref=e808]: "--"
+                - generic [ref=e809]:
+                  - emphasis [ref=e810]: Headroom
+                  - strong [ref=e811]: "--"
+                - paragraph [ref=e812]: pre-native + DSP estimate
+              - slider "EQ preamp" [ref=e813]: "-2.5"
+              - button "Auto -2.5 dB" [disabled] [ref=e1018]
+              - generic [ref=e815]:
+                - button "Auto Gain" [ref=e816] [cursor=pointer]:
+                  - img [ref=e817]
+                  - text: Auto Gain
+                - generic [ref=e820]:
+                  - generic [ref=e821]: Status
+                  - strong [ref=e822]: Idle
+                  - emphasis [ref=e823]: Auto 0.0 dB
+              - generic [ref=e1046]:
+                - button "Analyzer" [ref=e1047] [cursor=pointer]:
+                  - img [ref=e1048]
+                  - text: Analyzer
+                - group "Analyzer mode" [ref=e1050]:
+                  - button "Input" [ref=e1051] [cursor=pointer]
+                  - button "Post EQ" [ref=e1052] [cursor=pointer]
+                - generic [ref=e1053]:
+                  - generic [ref=e1054]: Status
+                  - strong [ref=e1055]: "Off"
+            - img "Draggable 31-band EQ frequency response" [ref=e825]:
+              - generic [ref=e827]: +18 dB
+              - generic [ref=e829]: +12 dB
+              - generic [ref=e831]: +6 dB
+              - generic [ref=e833]: 0 dB
+              - generic [ref=e835]: "-6 dB"
+              - generic [ref=e837]: "-12 dB"
+              - generic [ref=e839]: "-18 dB"
+              - generic "Drag 20 EQ band" [ref=e840]:
+                - generic: P
+                - generic: "20"
+              - generic "Drag 25 EQ band" [ref=e843]:
+                - generic: P
+                - generic: "25"
+              - generic "Drag 31.5 EQ band" [ref=e846]:
+                - generic: P
+                - generic: "31.5"
+              - generic "Drag 40 EQ band" [ref=e849]:
+                - generic: P
+                - generic: "40"
+              - generic "Drag 50 EQ band" [ref=e852]:
+                - generic: P
+                - generic: "50"
+              - generic "Drag 63 EQ band" [ref=e855]:
+                - generic: P
+                - generic: "63"
+              - generic "Drag 80 EQ band" [ref=e858]:
+                - generic: P
+                - generic: "80"
+              - generic "Drag 100 EQ band" [ref=e861]:
+                - generic: P
+                - generic: "100"
+              - generic "Drag 125 EQ band" [ref=e864]:
+                - generic: P
+                - generic: "125"
+              - generic "Drag 160 EQ band" [ref=e867]:
+                - generic: P
+                - generic: "160"
+              - generic "Drag 200 EQ band" [ref=e870]:
+                - generic: P
+                - generic: "200"
+              - generic "Drag 250 EQ band" [ref=e873]:
+                - generic: P
+                - generic: "250"
+              - generic "Drag 315 EQ band" [ref=e876]:
+                - generic: P
+                - generic: "315"
+              - generic "Drag 400 EQ band" [ref=e879]:
+                - generic: P
+                - generic: "400"
+              - generic "Drag 500 EQ band" [ref=e882]:
+                - generic: P
+                - generic: "500"
+              - generic "Drag 630 EQ band" [ref=e885]:
+                - generic: P
+                - generic: "630"
+              - generic "Drag 800 EQ band" [ref=e888]:
+                - generic: P
+                - generic: "800"
+              - generic "Drag 1k EQ band" [ref=e891]:
+                - generic: P
+                - generic: 1k
+              - generic "Drag 1.3k EQ band" [ref=e894]:
+                - generic: P
+                - generic: 1.3k
+              - generic "Drag 1.6k EQ band" [ref=e897]:
+                - generic: P
+                - generic: 1.6k
+              - generic "Drag 2k EQ band" [ref=e900]:
+                - generic: P
+                - generic: 2k
+              - generic "Drag 2.5k EQ band" [ref=e903]:
+                - generic: P
+                - generic: 2.5k
+              - generic "Drag 3.1k EQ band" [ref=e906]:
+                - generic: P
+                - generic: 3.1k
+              - generic "Drag 4k EQ band" [ref=e909]:
+                - generic: P
+                - generic: 4k
+              - generic "Drag 5k EQ band" [ref=e912]:
+                - generic: P
+                - generic: 5k
+              - generic "Drag 6.3k EQ band" [ref=e915]:
+                - generic: P
+                - generic: 6.3k
+              - generic "Drag 8k EQ band" [ref=e918]:
+                - generic: P
+                - generic: 8k
+              - generic "Drag 10k EQ band" [ref=e921]:
+                - generic: P
+                - generic: 10k
+              - generic "Drag 12.5k EQ band" [ref=e924]:
+                - generic: P
+                - generic: 12.5k
+              - generic "Drag 16k EQ band" [ref=e927]:
+                - generic: P
+                - generic: 16k
+              - generic "Drag 20k EQ band" [ref=e930]:
+                - generic: P
+                - generic: 20k
+              - generic [ref=e933]: "20"
+              - generic [ref=e934]: "31.5"
+              - generic [ref=e935]: "50"
+              - generic [ref=e936]: "80"
+              - generic [ref=e937]: "125"
+              - generic [ref=e938]: "200"
+              - generic [ref=e939]: "315"
+              - generic [ref=e940]: "500"
+              - generic [ref=e988]: 1k
+              - generic [ref=e989]: 1.6k
+              - generic [ref=e990]: 2.5k
+              - generic [ref=e991]: 4k
+              - generic [ref=e992]: 6.3k
+              - generic [ref=e993]: 10k
+              - generic [ref=e994]: 16k
+              - generic [ref=e949]:
+                - generic [ref=e950]: 1k / Q 1.0 / Peaking
+                - generic [ref=e951]: 0.0 dB
+              - generic:
+                - generic: 1k / 0.0 dB
+                - generic: Peaking 0.0 dB
+            - generic "Selected band console" [ref=e1056]:
+              - generic [ref=e1057]:
+                - generic [ref=e1058]:
+                  - img [ref=e1059]
+                  - text: Selected band console
+                - strong [ref=e1063]: 18 / 1k
+              - generic [ref=e1064]:
+                - generic [ref=e1065]:
+                  - emphasis [ref=e1066]: Type
+                  - strong [ref=e1067]: Peaking
+                - generic [ref=e1068]:
+                  - emphasis [ref=e1069]: Frequency
+                  - strong [ref=e1070]: 1k
+                - generic [ref=e1071]:
+                  - emphasis [ref=e1072]: Gain
+                  - strong [ref=e1073]: 0.0 dB
+                - generic [ref=e1074]:
+                  - emphasis [ref=e1075]: Q
+                  - strong [ref=e1076]: "1.0"
+                - generic [ref=e1077]:
+                  - emphasis [ref=e1078]: DSP
+                  - strong [ref=e1079]: Band enabled
+                - generic [ref=e1080]:
+                  - emphasis [ref=e1081]: Snapped
+                  - strong [ref=e1082]: Standard bands
+            - generic [ref=e1083]:
+              - region "Selected band" [ref=e1084]:
+                - generic [ref=e1085]:
+                  - generic [ref=e1086]: Selected band
+                  - strong [ref=e1087]: 1k
+                - generic [ref=e1088]:
+                  - generic [ref=e1089]:
+                    - generic [ref=e1090]: Frequency
+                    - spinbutton "Frequency" [ref=e1091]: "1000"
+                    - emphasis [ref=e1092]: Snapped to standard bands
+                  - generic [ref=e1093]:
+                    - generic [ref=e1094]: Gain
+                    - spinbutton "Gain" [ref=e1095]: "0"
+                  - generic [ref=e1096]:
+                    - generic [ref=e1097]: Q
+                    - spinbutton "Q" [ref=e1098]: "1"
+                  - generic [ref=e1099]:
+                    - generic [ref=e1100]: Type
+                    - combobox "Type" [ref=e1101]:
+                      - option "Peaking" [selected]
+                      - option "Low shelf"
+                      - option "High shelf"
+                      - option "Low pass"
+                      - option "High pass"
+                      - option "Notch"
+                - generic [ref=e1102]:
+                  - generic [ref=e1103]:
+                    - checkbox "Band enabled" [checked] [ref=e1104]
+                    - generic [ref=e1105]: Band enabled
+                  - generic [ref=e1106]:
+                    - checkbox "Unlock frequency" [ref=e1107]
+                    - generic [ref=e1108]: Unlock frequency
+                  - button "Reset 1k" [ref=e1109] [cursor=pointer]
+                - generic "Gain stepper" [ref=e1110]:
+                  - button "-0.5" [ref=e1111] [cursor=pointer]
+                  - button "-0.1" [ref=e1112] [cursor=pointer]
+                  - button "+0.1" [ref=e1113] [cursor=pointer]
+                  - button "+0.5" [ref=e1114] [cursor=pointer]
+                - generic "Q presets" [ref=e1115]:
+                  - button "Wide" [ref=e1116] [cursor=pointer]
+                  - button "Normal" [ref=e1117] [cursor=pointer]
+                  - button "Narrow" [ref=e1118] [cursor=pointer]
+                - generic "Frequency stepper" [ref=e1119]:
+                  - button "Freq -" [disabled] [ref=e1120]
+                  - button "Fine -" [disabled] [ref=e1121]
+                  - button "Fine +" [disabled] [ref=e1122]
+                  - button "Freq +" [disabled] [ref=e1123]
+              - region "Profiles" [ref=e1124]:
+                - generic [ref=e1125]:
+                  - generic [ref=e1126]: Profiles
+                  - strong [ref=e1127]: No profile selected
+                - generic [ref=e1128]:
+                  - combobox "EQ profile" [ref=e1129]:
+                    - option "No profile selected" [selected]
+                  - textbox "EQ profile name" [ref=e1130]:
+                    - /placeholder: Save as profile
+                - generic [ref=e1131]:
+                  - button "Save profile" [ref=e1132] [cursor=pointer]:
+                    - img [ref=e1133]
+                    - text: Save profile
+                  - button "Apply profile" [disabled] [ref=e1137]
+                  - button "Bind current output" [disabled] [ref=e1138]
+                  - button "Delete profile" [disabled] [ref=e1139]:
+                    - img [ref=e1140]
+                - generic [ref=e1143]: SHARED / Current output has no profile binding
+            - generic "31-band EQ draggable band readouts" [ref=e1144]:
+              - generic [ref=e1145]:
+                - generic [ref=e1146]: APO Filter Stack
+                - strong [ref=e1147]: 17/31 filters
+              - generic [ref=e1148]:
+                - button "01 Peaking 20 +2.5 dB Q 1.0" [ref=e1149] [cursor=pointer]:
+                  - generic [ref=e1150]: "01"
+                  - generic [ref=e1151]: Peaking
+                  - generic [ref=e1152]: "20"
+                  - strong [ref=e1153]: +2.5 dB
+                  - generic [ref=e1154]: Q 1.0
+                - button "02 Peaking 25 +2.5 dB Q 1.0" [ref=e1155] [cursor=pointer]:
+                  - generic [ref=e1156]: "02"
+                  - generic [ref=e1157]: Peaking
+                  - generic [ref=e1158]: "25"
+                  - strong [ref=e1159]: +2.5 dB
+                  - generic [ref=e1160]: Q 1.0
+                - button "03 Peaking 31.5 +2.5 dB Q 1.0" [ref=e1161] [cursor=pointer]:
+                  - generic [ref=e1162]: "03"
+                  - generic [ref=e1163]: Peaking
+                  - generic [ref=e1164]: "31.5"
+                  - strong [ref=e1165]: +2.5 dB
+                  - generic [ref=e1166]: Q 1.0
+                - button "04 Peaking 40 +2.5 dB Q 1.0" [ref=e1167] [cursor=pointer]:
+                  - generic [ref=e1168]: "04"
+                  - generic [ref=e1169]: Peaking
+                  - generic [ref=e1170]: "40"
+                  - strong [ref=e1171]: +2.5 dB
+                  - generic [ref=e1172]: Q 1.0
+                - button "05 Peaking 50 +2.5 dB Q 1.0" [ref=e1173] [cursor=pointer]:
+                  - generic [ref=e1174]: "05"
+                  - generic [ref=e1175]: Peaking
+                  - generic [ref=e1176]: "50"
+                  - strong [ref=e1177]: +2.5 dB
+                  - generic [ref=e1178]: Q 1.0
+                - button "06 Peaking 63 +2.5 dB Q 1.0" [ref=e1179] [cursor=pointer]:
+                  - generic [ref=e1180]: "06"
+                  - generic [ref=e1181]: Peaking
+                  - generic [ref=e1182]: "63"
+                  - strong [ref=e1183]: +2.5 dB
+                  - generic [ref=e1184]: Q 1.0
+                - button "07 Peaking 80 +2.5 dB Q 1.0" [ref=e1185] [cursor=pointer]:
+                  - generic [ref=e1186]: "07"
+                  - generic [ref=e1187]: Peaking
+                  - generic [ref=e1188]: "80"
+                  - strong [ref=e1189]: +2.5 dB
+                  - generic [ref=e1190]: Q 1.0
+                - button "08 Peaking 100 +1.6 dB Q 1.0" [ref=e1191] [cursor=pointer]:
+                  - generic [ref=e1192]: "08"
+                  - generic [ref=e1193]: Peaking
+                  - generic [ref=e1194]: "100"
+                  - strong [ref=e1195]: +1.6 dB
+                  - generic [ref=e1196]: Q 1.0
+                - button "09 Peaking 125 +1.6 dB Q 1.0" [ref=e1197] [cursor=pointer]:
+                  - generic [ref=e1198]: "09"
+                  - generic [ref=e1199]: Peaking
+                  - generic [ref=e1200]: "125"
+                  - strong [ref=e1201]: +1.6 dB
+                  - generic [ref=e1202]: Q 1.0
+                - button "10 Peaking 160 +1.6 dB Q 1.0" [ref=e1203] [cursor=pointer]:
+                  - generic [ref=e1204]: "10"
+                  - generic [ref=e1205]: Peaking
+                  - generic [ref=e1206]: "160"
+                  - strong [ref=e1207]: +1.6 dB
+                  - generic [ref=e1208]: Q 1.0
+                - button "11 Peaking 200 +0.7 dB Q 1.0" [ref=e1209] [cursor=pointer]:
+                  - generic [ref=e1210]: "11"
+                  - generic [ref=e1211]: Peaking
+                  - generic [ref=e1212]: "200"
+                  - strong [ref=e1213]: +0.7 dB
+                  - generic [ref=e1214]: Q 1.0
+                - button "12 Peaking 250 +0.7 dB Q 1.0" [ref=e1215] [cursor=pointer]:
+                  - generic [ref=e1216]: "12"
+                  - generic [ref=e1217]: Peaking
+                  - generic [ref=e1218]: "250"
+                  - strong [ref=e1219]: +0.7 dB
+                  - generic [ref=e1220]: Q 1.0
+                - button "13 Peaking 315 +0.7 dB Q 1.0" [ref=e1221] [cursor=pointer]:
+                  - generic [ref=e1222]: "13"
+                  - generic [ref=e1223]: Peaking
+                  - generic [ref=e1224]: "315"
+                  - strong [ref=e1225]: +0.7 dB
+                  - generic [ref=e1226]: Q 1.0
+                - button "14 Peaking 400 0.0 dB Q 1.0" [ref=e1227] [cursor=pointer]:
+                  - generic [ref=e1228]: "14"
+                  - generic [ref=e1229]: Peaking
+                  - generic [ref=e1230]: "400"
+                  - strong [ref=e1231]: 0.0 dB
+                  - generic [ref=e1232]: Q 1.0
+                - button "15 Peaking 500 0.0 dB Q 1.0" [ref=e1233] [cursor=pointer]:
+                  - generic [ref=e1234]: "15"
+                  - generic [ref=e1235]: Peaking
+                  - generic [ref=e1236]: "500"
+                  - strong [ref=e1237]: 0.0 dB
+                  - generic [ref=e1238]: Q 1.0
+                - button "16 Peaking 630 0.0 dB Q 1.0" [ref=e1239] [cursor=pointer]:
+                  - generic [ref=e1240]: "16"
+                  - generic [ref=e1241]: Peaking
+                  - generic [ref=e1242]: "630"
+                  - strong [ref=e1243]: 0.0 dB
+                  - generic [ref=e1244]: Q 1.0
+                - button "17 Peaking 800 0.0 dB Q 1.0" [ref=e1245] [cursor=pointer]:
+                  - generic [ref=e1246]: "17"
+                  - generic [ref=e1247]: Peaking
+                  - generic [ref=e1248]: "800"
+                  - strong [ref=e1249]: 0.0 dB
+                  - generic [ref=e1250]: Q 1.0
+                - button "18 Peaking 1k 0.0 dB Q 1.0" [ref=e1251] [cursor=pointer]:
+                  - generic [ref=e1252]: "18"
+                  - generic [ref=e1253]: Peaking
+                  - generic [ref=e1254]: 1k
+                  - strong [ref=e1255]: 0.0 dB
+                  - generic [ref=e1256]: Q 1.0
+                - button "19 Peaking 1.3k 0.0 dB Q 1.0" [ref=e1257] [cursor=pointer]:
+                  - generic [ref=e1258]: "19"
+                  - generic [ref=e1259]: Peaking
+                  - generic [ref=e1260]: 1.3k
+                  - strong [ref=e1261]: 0.0 dB
+                  - generic [ref=e1262]: Q 1.0
+                - button "20 Peaking 1.6k 0.0 dB Q 1.0" [ref=e1263] [cursor=pointer]:
+                  - generic [ref=e1264]: "20"
+                  - generic [ref=e1265]: Peaking
+                  - generic [ref=e1266]: 1.6k
+                  - strong [ref=e1267]: 0.0 dB
+                  - generic [ref=e1268]: Q 1.0
+                - button "21 Peaking 2k 0.0 dB Q 1.0" [ref=e1269] [cursor=pointer]:
+                  - generic [ref=e1270]: "21"
+                  - generic [ref=e1271]: Peaking
+                  - generic [ref=e1272]: 2k
+                  - strong [ref=e1273]: 0.0 dB
+                  - generic [ref=e1274]: Q 1.0
+                - button "22 Peaking 2.5k 0.0 dB Q 1.0" [ref=e1275] [cursor=pointer]:
+                  - generic [ref=e1276]: "22"
+                  - generic [ref=e1277]: Peaking
+                  - generic [ref=e1278]: 2.5k
+                  - strong [ref=e1279]: 0.0 dB
+                  - generic [ref=e1280]: Q 1.0
+                - button "23 Peaking 3.1k 0.0 dB Q 1.0" [ref=e1281] [cursor=pointer]:
+                  - generic [ref=e1282]: "23"
+                  - generic [ref=e1283]: Peaking
+                  - generic [ref=e1284]: 3.1k
+                  - strong [ref=e1285]: 0.0 dB
+                  - generic [ref=e1286]: Q 1.0
+                - button "24 Peaking 4k 0.0 dB Q 1.0" [ref=e1287] [cursor=pointer]:
+                  - generic [ref=e1288]: "24"
+                  - generic [ref=e1289]: Peaking
+                  - generic [ref=e1290]: 4k
+                  - strong [ref=e1291]: 0.0 dB
+                  - generic [ref=e1292]: Q 1.0
+                - button "25 Peaking 5k 0.0 dB Q 1.0" [ref=e1293] [cursor=pointer]:
+                  - generic [ref=e1294]: "25"
+                  - generic [ref=e1295]: Peaking
+                  - generic [ref=e1296]: 5k
+                  - strong [ref=e1297]: 0.0 dB
+                  - generic [ref=e1298]: Q 1.0
+                - button "26 Peaking 6.3k 0.0 dB Q 1.0" [ref=e1299] [cursor=pointer]:
+                  - generic [ref=e1300]: "26"
+                  - generic [ref=e1301]: Peaking
+                  - generic [ref=e1302]: 6.3k
+                  - strong [ref=e1303]: 0.0 dB
+                  - generic [ref=e1304]: Q 1.0
+                - button "27 Peaking 8k 0.0 dB Q 1.0" [ref=e1305] [cursor=pointer]:
+                  - generic [ref=e1306]: "27"
+                  - generic [ref=e1307]: Peaking
+                  - generic [ref=e1308]: 8k
+                  - strong [ref=e1309]: 0.0 dB
+                  - generic [ref=e1310]: Q 1.0
+                - button "28 Peaking 10k -0.4 dB Q 1.0" [ref=e1311] [cursor=pointer]:
+                  - generic [ref=e1312]: "28"
+                  - generic [ref=e1313]: Peaking
+                  - generic [ref=e1314]: 10k
+                  - strong [ref=e1315]: "-0.4 dB"
+                  - generic [ref=e1316]: Q 1.0
+                - button "29 Peaking 12.5k -0.4 dB Q 1.0" [ref=e1317] [cursor=pointer]:
+                  - generic [ref=e1318]: "29"
+                  - generic [ref=e1319]: Peaking
+                  - generic [ref=e1320]: 12.5k
+                  - strong [ref=e1321]: "-0.4 dB"
+                  - generic [ref=e1322]: Q 1.0
+                - button "30 Peaking 16k -0.4 dB Q 1.0" [ref=e1323] [cursor=pointer]:
+                  - generic [ref=e1324]: "30"
+                  - generic [ref=e1325]: Peaking
+                  - generic [ref=e1326]: 16k
+                  - strong [ref=e1327]: "-0.4 dB"
+                  - generic [ref=e1328]: Q 1.0
+                - button "31 Peaking 20k -0.4 dB Q 1.0" [ref=e1329] [cursor=pointer]:
+                  - generic [ref=e1330]: "31"
+                  - generic [ref=e1331]: Peaking
+                  - generic [ref=e1332]: 20k
+                  - strong [ref=e1333]: "-0.4 dB"
+                  - generic [ref=e1334]: Q 1.0
+              - generic [ref=e1335]:
+                - button "Add filter" [ref=e1336] [cursor=pointer]:
+                  - img [ref=e1337]
+                  - text: Add filter
+                - button "Delete filter" [ref=e1338] [cursor=pointer]:
+                  - img [ref=e1339]
+                  - text: Delete filter
+                - button "Reset selected" [ref=e1342] [cursor=pointer]
+                - button "Reset all gains" [ref=e1343] [cursor=pointer]
+                - button "Standard bands" [ref=e1344] [cursor=pointer]
+          - group [ref=e1345]:
+            - generic "A/B and bypass compare" [ref=e1346] [cursor=pointer]
+            - generic [ref=e1347]:
+              - generic [ref=e1348]:
+                - generic [ref=e1349]:
+                  - generic [ref=e1350]: A/B Compare
+                  - paragraph [ref=e1351]: "DSP active: bit-perfect disabled (EQ)."
+                - generic [ref=e1352]:
+                  - checkbox "Loudness matched" [ref=e1353]
+                  - generic [ref=e1354]: Loudness matched
+              - generic [ref=e1355]:
+                - generic [ref=e1356]:
+                  - generic [ref=e1357]:
+                    - generic [ref=e1358]: A
+                    - strong [ref=e1359]: Empty slot
+                  - paragraph [ref=e1360]: Empty slot
+                  - generic [ref=e1361]:
+                    - button "Store A" [ref=e1362] [cursor=pointer]
+                    - button "Apply A" [disabled] [ref=e1363]
+                - generic [ref=e1364]:
+                  - generic [ref=e1365]:
+                    - generic [ref=e1366]: B
+                    - strong [ref=e1367]: Empty slot
+                  - paragraph [ref=e1368]: Empty slot
+                  - generic [ref=e1369]:
+                    - button "Store B" [ref=e1370] [cursor=pointer]
+                    - button "Apply B" [disabled] [ref=e1371]
+              - generic [ref=e1372]:
+                - button "Hold to Bypass EQ" [ref=e1373] [cursor=pointer]
+                - button "Toggle Bypass" [ref=e1374] [cursor=pointer]
+                - generic [ref=e1375]:
+                  - img [ref=e1376]
+                  - text: Safe headroom
+          - generic [ref=e952]:
+            - generic [ref=e953]:
+              - generic [ref=e954]:
+                - generic [ref=e955]: Preset name
+                - textbox "Preset name" [ref=e956]:
+                  - /placeholder: Save as user preset
+              - generic [ref=e957]:
+                - button "Save as" [ref=e958] [cursor=pointer]:
+                  - img [ref=e959]
+                  - text: Save as
+                - button "Export APO" [ref=e963] [cursor=pointer]
+                - button "Export GraphicEQ" [ref=e964] [cursor=pointer]
+                - button "Duplicate current" [ref=e965] [cursor=pointer]:
+                  - img [ref=e966]
+                  - text: Duplicate current
+                - button "Import preset / APO" [ref=e969] [cursor=pointer]
+                - button "Paste APO" [ref=e970] [cursor=pointer]:
+                  - img [ref=e971]
+                  - text: Paste APO
+                - button "Overwrite" [disabled] [ref=e974]:
+                  - img [ref=e975]
+                  - text: Overwrite
+                - button "Revert user preset" [disabled] [ref=e979]:
+                  - img [ref=e980]
+                  - text: Revert user preset
+                - button "Delete" [disabled] [ref=e983]:
+                  - img [ref=e984]
+                  - text: Delete
+            - generic [ref=e987]: Built-in presets are read-only.
+  - button
+  - button
+  - contentinfo "播放控制" [ref=e400]:
+    - generic [ref=e401]:
+      - button "打开歌词" [ref=e402] [cursor=pointer]
+      - generic [ref=e406]:
+        - strong [ref=e407]:
+          - generic [ref=e408]: No local file
+        - generic "Ready" [ref=e409]:
+          - generic [ref=e410]: Ready
+        - generic "Audio specifications" [ref=e411]:
+          - generic [ref=e412]: Ready
+    - generic [ref=e413]:
+      - generic [ref=e414]:
+        - 'button "Open audio chain: Waiting for playback, Signal" [ref=e416] [cursor=pointer]':
+          - img [ref=e418]
+        - generic [ref=e423]:
+          - button "Like current track" [disabled] [ref=e424]:
+            - img [ref=e425]
+          - button "Playback queue" [ref=e427] [cursor=pointer]:
+            - img [ref=e428]
+          - button "Shuffle" [ref=e430] [cursor=pointer]:
+            - img [ref=e431]
+          - button "Previous" [disabled] [ref=e437]:
+            - img [ref=e438]
+          - button "Play" [ref=e440] [cursor=pointer]:
+            - img [ref=e441]
+          - button "Next" [disabled] [ref=e443]:
+            - img [ref=e444]
+          - button "Repeat" [ref=e446] [cursor=pointer]:
+            - img [ref=e447]
+          - button "Lyrics" [ref=e452] [cursor=pointer]:
+            - img [ref=e453]
+          - button "MV" [ref=e457] [cursor=pointer]:
+            - img [ref=e458]
+      - generic "Playback position" [ref=e460]:
+        - generic [ref=e461]: 0:00
+        - slider "Seek position" [disabled] [ref=e463]: "0"
+        - generic [ref=e464]: 0:00
+    - generic [ref=e465]:
+      - button "Sleep Timer" [ref=e467] [cursor=pointer]:
+        - img [ref=e468]
+      - button "显示迷你播放器" [disabled] [ref=e471]:
+        - img [ref=e472]
+      - button "Volume" [ref=e475] [cursor=pointer]:
+        - img [ref=e476]
+      - button "Playback speed" [ref=e481] [cursor=pointer]:
+        - img [ref=e482]

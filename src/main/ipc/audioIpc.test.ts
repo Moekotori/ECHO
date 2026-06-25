@@ -2,14 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('audio IPC daemon command handler', () => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
-  const sessionHandlers = new Map<string, (...args: unknown[]) => void>();
   const daemonListeners = new Map<string, (...args: unknown[]) => void>();
   const commandMock = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
   beforeEach(() => {
     vi.resetModules();
     handlers.clear();
-    sessionHandlers.clear();
     daemonListeners.clear();
     commandMock.mockReset();
 
@@ -29,15 +27,6 @@ describe('audio IPC daemon command handler', () => {
           handlers.set(channel, handler);
         }),
       },
-    }));
-
-    vi.doMock('../audio/AudioSession', () => ({
-      getAudioSession: () => ({
-        on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-          sessionHandlers.set(event, handler);
-        }),
-        getStatus: vi.fn(() => ({ host: 'ready', state: 'idle' })),
-      }),
     }));
 
     vi.doMock('../audio/DaemonClient', () => ({
@@ -69,16 +58,16 @@ describe('audio IPC daemon command handler', () => {
     expect(result).toBe('pong');
   });
 
-  it('subscribes to AudioSession events', async () => {
+  it('subscribes to daemon events for status forwarding', async () => {
     const { registerAudioIpc } = await import('./audioIpc');
     registerAudioIpc();
 
-    expect(sessionHandlers.has('status')).toBe(true);
-    expect(sessionHandlers.has('session-reset')).toBe(true);
-    expect(sessionHandlers.has('automix-advance')).toBe(true);
+    expect(daemonListeners.has('event.status')).toBe(true);
+    expect(daemonListeners.has('event.sessionReset')).toBe(true);
+    expect(daemonListeners.has('event.automixAdvance')).toBe(true);
   });
 
-  it('listens for daemon events', async () => {
+  it('listens for unified daemon events', async () => {
     const { registerAudioIpc } = await import('./audioIpc');
     registerAudioIpc();
 
@@ -96,13 +85,13 @@ describe('audio IPC daemon command handler', () => {
   });
 });
 
-describe('audio IPC session event forwarding', () => {
-  const sessionHandlers = new Map<string, (...args: unknown[]) => void>();
+describe('audio IPC daemon event forwarding', () => {
+  const daemonListeners = new Map<string, (...args: unknown[]) => void>();
   const sendMock = vi.fn();
 
   beforeEach(() => {
     vi.resetModules();
-    sessionHandlers.clear();
+    daemonListeners.clear();
     sendMock.mockReset();
 
     vi.doMock('electron', () => ({
@@ -116,18 +105,11 @@ describe('audio IPC session event forwarding', () => {
       },
     }));
 
-    vi.doMock('../audio/AudioSession', () => ({
-      getAudioSession: () => ({
-        on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-          sessionHandlers.set(event, handler);
-        }),
-        getStatus: vi.fn(() => ({ host: 'ready', state: 'idle' })),
-      }),
-    }));
-
     vi.doMock('../audio/DaemonClient', () => ({
       getDaemonClient: () => ({
-        on: vi.fn(),
+        on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+          daemonListeners.set(event, listener);
+        }),
         command: vi.fn(),
       }),
     }));
@@ -137,21 +119,21 @@ describe('audio IPC session event forwarding', () => {
     vi.restoreAllMocks();
   });
 
-  it('forwards AudioSession status events via IpcChannels.AudioStatus', async () => {
+  it('forwards daemon event.status via IpcChannels.AudioStatus', async () => {
     const { registerAudioIpc } = await import('./audioIpc');
     registerAudioIpc();
 
-    const statusHandler = sessionHandlers.get('status')!;
+    const statusHandler = daemonListeners.get('event.status')!;
     statusHandler({ host: 'ready', state: 'playing' });
 
     expect(sendMock).toHaveBeenCalledWith('audio:status', { host: 'ready', state: 'playing' });
   });
 
-  it('forwards AudioSession session-reset events via IpcChannels.AudioSessionReset', async () => {
+  it('forwards daemon event.sessionReset via IpcChannels.AudioSessionReset', async () => {
     const { registerAudioIpc } = await import('./audioIpc');
     registerAudioIpc();
 
-    const resetHandler = sessionHandlers.get('session-reset')!;
+    const resetHandler = daemonListeners.get('event.sessionReset')!;
     resetHandler({ reason: 'restart' });
 
     expect(sendMock).toHaveBeenCalledWith('audio:session-reset', { reason: 'restart' });

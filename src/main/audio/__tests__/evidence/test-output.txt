@@ -1,0 +1,29 @@
+
+ RUN  v4.1.6 /home/uright/ECHO
+
+[native-abi] better-sqlite3 already matches node ABI 147; skipping rebuild.
+[daemon:err] [echo-audio-daemon] null-output mode
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > device methods > device.list returns at least the null device 4ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > playback methods > test.play starts null-output playback 2ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > playback methods > pause pauses playback 2ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > playback methods > resume resumes playback 2ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > playback methods > stop stops playback 2ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > playback methods > full play → pause → resume → stop cycle 3ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > volume control > setVolume sets the volume level 1ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > volume control > setVolume accepts 0.0 (silent) 1ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > volume control > setVolume accepts 1.0 (full) 1ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > test helpers > test.echo returns the same params 2ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > test helpers > test.getStatus reports current daemon state 1ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > error handling > returns -32601 error for unknown methods (play in null-output) 2ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > error handling > returns -32601 error for probe in null-output mode 1ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > error handling > returns -32601 error for seek in null-output mode 1ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > error handling > returns -32601 error for eq.setBand in null-output mode 1ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > error handling > returns -32601 error for eq.setEnabled in null-output mode 1ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > error handling > returns -32601 error for eq.reset in null-output mode 0ms
+ ✓ src/main/audio/__tests__/daemon_integration.test.ts > ECHO Audio Daemon Integration > shutdown > shutdown returns success and daemon exits 44ms
+
+ Test Files  1 passed (1)
+      Tests  18 passed (18)
+   Start at  14:37:48
+   Duration  634ms (transform 25ms, setup 0ms, import 37ms, tests 377ms, environment 0ms)
+

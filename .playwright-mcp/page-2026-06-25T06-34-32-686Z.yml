@@ -1,0 +1,330 @@
+- generic [ref=e3]:
+  - banner "ECHO Next" [ref=e4]:
+    - generic [ref=e5]:
+      - strong [ref=e6]: ECHO
+      - generic [ref=e7]: Next
+    - generic "Quick actions" [ref=e8]:
+      - button "Audio Settings" [ref=e9] [cursor=pointer]:
+        - img [ref=e10]
+      - button "Lyrics Settings" [ref=e12] [cursor=pointer]:
+        - img [ref=e13]
+      - button "MV Settings" [ref=e16] [cursor=pointer]:
+        - img [ref=e17]
+      - button "Settings" [ref=e19] [cursor=pointer]:
+        - img [ref=e20]
+    - generic "Window controls" [ref=e23]:
+      - button "Fullscreen" [ref=e24] [cursor=pointer]:
+        - img [ref=e25]
+      - button "Minimize" [ref=e30] [cursor=pointer]:
+        - img [ref=e31]
+      - button "Maximize" [ref=e32] [cursor=pointer]:
+        - img [ref=e33]
+      - button "Close" [ref=e35] [cursor=pointer]:
+        - img [ref=e36]
+  - complementary "Main navigation" [ref=e39]:
+    - navigation [ref=e40]:
+      - button "Home" [ref=e41] [cursor=pointer]:
+        - img [ref=e43]
+        - generic [ref=e48]: Home
+      - button "Songs" [ref=e49] [cursor=pointer]:
+        - img [ref=e51]
+        - generic [ref=e55]: Songs
+      - button "Albums" [ref=e56] [cursor=pointer]:
+        - img [ref=e58]
+        - generic [ref=e61]: Albums
+      - button "Artists" [ref=e62] [cursor=pointer]:
+        - img [ref=e64]
+        - generic [ref=e69]: Artists
+      - button "Folders" [ref=e70] [cursor=pointer]:
+        - img [ref=e72]
+        - generic [ref=e74]: Folders
+      - button "Cloud / Remote" [ref=e75] [cursor=pointer]:
+        - img [ref=e77]
+        - generic [ref=e81]: Cloud / Remote
+      - button "Connect" [ref=e82] [cursor=pointer]:
+        - img [ref=e84]
+        - generic [ref=e86]: Connect
+      - button "DSP" [ref=e87] [cursor=pointer]:
+        - img [ref=e89]
+        - generic [ref=e93]: DSP
+      - button "Queue" [ref=e94] [cursor=pointer]:
+        - img [ref=e96]
+        - generic [ref=e97]: Queue
+      - button "History" [ref=e98] [cursor=pointer]:
+        - img [ref=e100]
+        - generic [ref=e104]: History
+      - button "Playlists" [ref=e105] [cursor=pointer]:
+        - img [ref=e107]
+        - generic [ref=e110]: Playlists
+      - button "Plugins" [ref=e111] [cursor=pointer]:
+        - img [ref=e113]
+        - generic [ref=e118]: Plugins
+    - navigation "Utility navigation" [ref=e120]:
+      - button "Liked" [ref=e121] [cursor=pointer]:
+        - img [ref=e123]
+        - generic [ref=e125]: Liked
+      - button "Settings" [ref=e126] [cursor=pointer]:
+        - img [ref=e128]
+        - generic [ref=e132]: Settings
+      - button "Audio Settings" [ref=e133] [cursor=pointer]:
+        - img [ref=e135]
+        - generic [ref=e140]: Audio Settings
+  - main [ref=e141]:
+    - generic [ref=e142]:
+      - region "Today Echo" [ref=e143]:
+        - generic [ref=e144]:
+          - generic [ref=e145]:
+            - img [ref=e146]
+            - text: Today Echo
+          - heading "404 Bass Not Found." [level=1] [ref=e152]
+          - paragraph [ref=e153]: After you import music, this becomes your library entry point, recent plays, and weekly listening pulse.
+          - generic [ref=e154]:
+            - button "Resume playback" [disabled] [ref=e155]:
+              - img [ref=e156]
+              - text: Resume playback
+            - button "View queue" [ref=e158] [cursor=pointer]:
+              - img [ref=e159]
+              - text: View queue
+            - button "Refresh" [ref=e161] [cursor=pointer]:
+              - img [ref=e162]
+              - text: Refresh
+            - button "Generate random queue" [disabled] [ref=e167]:
+              - img [ref=e168]
+              - text: Generate random queue
+        - generic [ref=e174]:
+          - generic [ref=e176]:
+            - img [ref=e177]
+            - generic [ref=e180]: Nothing is playing
+          - generic [ref=e181]:
+            - generic [ref=e182]: Recent signal
+            - strong [ref=e183]: Nothing is playing
+            - generic [ref=e184]: Recent items will appear here once your library is ready
+      - region "Library stats" [ref=e185]:
+        - generic [ref=e186]:
+          - button "Open Songs" [ref=e187] [cursor=pointer]:
+            - img [ref=e188]
+            - generic [ref=e191]:
+              - strong [ref=e192]: "0"
+              - generic [ref=e193]: Songs
+              - generic [ref=e194]: Total 0 min
+          - button "Open Albums" [ref=e195] [cursor=pointer]:
+            - img [ref=e196]
+            - generic [ref=e199]:
+              - strong [ref=e200]: "0"
+              - generic [ref=e201]: Albums
+              - generic [ref=e202]: Grouped by release
+          - button "Open Artists" [ref=e203] [cursor=pointer]:
+            - img [ref=e204]
+            - generic [ref=e207]:
+              - strong [ref=e208]: "0"
+              - generic [ref=e209]: Artists
+              - generic [ref=e210]: ECHO
+          - button "Open Folders" [ref=e211] [cursor=pointer]:
+            - img [ref=e212]
+            - generic [ref=e214]:
+              - strong [ref=e215]: "0"
+              - generic [ref=e216]: Folders
+              - generic [ref=e217]: Last scanned No history yet
+      - generic [ref=e218]:
+        - generic [ref=e219]:
+          - generic [ref=e220]:
+            - generic [ref=e221]:
+              - heading "Recent activity" [level=2] [ref=e222]
+              - tablist "Recent content" [ref=e223]:
+                - tab "Played" [ref=e224] [cursor=pointer]
+                - tab "Added" [selected] [ref=e225] [cursor=pointer]
+            - generic [ref=e226]:
+              - button "Previous page" [disabled] [ref=e227]:
+                - img [ref=e228]
+              - button "Next page" [disabled] [ref=e230]:
+                - img [ref=e231]
+          - generic [ref=e233]:
+            - img [ref=e234]
+            - strong [ref=e236]: No recent additions yet
+            - generic [ref=e237]: After you import a folder, the newest covers added to your library will show here.
+        - generic [ref=e238]:
+          - generic [ref=e239]:
+            - heading "Weekly Echo" [level=2] [ref=e240]
+            - button "History" [ref=e241] [cursor=pointer]
+          - generic [ref=e242]:
+            - generic [ref=e243]:
+              - generic [ref=e244]: This week
+              - strong [ref=e245]: "0"
+              - generic [ref=e246]: plays
+            - generic [ref=e247]:
+              - generic [ref=e248]: Listening time
+              - strong [ref=e249]: 0 min
+          - generic [ref=e250]:
+            - generic [ref=e251]:
+              - generic [ref=e252]: 4 mo
+              - generic [ref=e253]: 5 mo
+              - generic [ref=e254]: 6 mo
+            - generic [ref=e255]:
+              - generic [ref=e256]:
+                - generic [ref=e257]: M
+                - generic [ref=e259]: W
+                - generic [ref=e261]: F
+              - generic "Playback heatmap for the last 12 weeks" [ref=e264]:
+                - generic "2026-04-06, 0 plays" [ref=e265]
+                - generic "2026-04-07, 0 plays" [ref=e266]
+                - generic "2026-04-08, 0 plays" [ref=e267]
+                - generic "2026-04-09, 0 plays" [ref=e268]
+                - generic "2026-04-10, 0 plays" [ref=e269]
+                - generic "2026-04-11, 0 plays" [ref=e270]
+                - generic "2026-04-12, 0 plays" [ref=e271]
+                - generic "2026-04-13, 0 plays" [ref=e272]
+                - generic "2026-04-14, 0 plays" [ref=e273]
+                - generic "2026-04-15, 0 plays" [ref=e274]
+                - generic "2026-04-16, 0 plays" [ref=e275]
+                - generic "2026-04-17, 0 plays" [ref=e276]
+                - generic "2026-04-18, 0 plays" [ref=e277]
+                - generic "2026-04-19, 0 plays" [ref=e278]
+                - generic "2026-04-20, 0 plays" [ref=e279]
+                - generic "2026-04-21, 0 plays" [ref=e280]
+                - generic "2026-04-22, 0 plays" [ref=e281]
+                - generic "2026-04-23, 0 plays" [ref=e282]
+                - generic "2026-04-24, 0 plays" [ref=e283]
+                - generic "2026-04-25, 0 plays" [ref=e284]
+                - generic "2026-04-26, 0 plays" [ref=e285]
+                - generic "2026-04-27, 0 plays" [ref=e286]
+                - generic "2026-04-28, 0 plays" [ref=e287]
+                - generic "2026-04-29, 0 plays" [ref=e288]
+                - generic "2026-04-30, 0 plays" [ref=e289]
+                - generic "2026-05-01, 0 plays" [ref=e290]
+                - generic "2026-05-02, 0 plays" [ref=e291]
+                - generic "2026-05-03, 0 plays" [ref=e292]
+                - generic "2026-05-04, 0 plays" [ref=e293]
+                - generic "2026-05-05, 0 plays" [ref=e294]
+                - generic "2026-05-06, 0 plays" [ref=e295]
+                - generic "2026-05-07, 0 plays" [ref=e296]
+                - generic "2026-05-08, 0 plays" [ref=e297]
+                - generic "2026-05-09, 0 plays" [ref=e298]
+                - generic "2026-05-10, 0 plays" [ref=e299]
+                - generic "2026-05-11, 0 plays" [ref=e300]
+                - generic "2026-05-12, 0 plays" [ref=e301]
+                - generic "2026-05-13, 0 plays" [ref=e302]
+                - generic "2026-05-14, 0 plays" [ref=e303]
+                - generic "2026-05-15, 0 plays" [ref=e304]
+                - generic "2026-05-16, 0 plays" [ref=e305]
+                - generic "2026-05-17, 0 plays" [ref=e306]
+                - generic "2026-05-18, 0 plays" [ref=e307]
+                - generic "2026-05-19, 0 plays" [ref=e308]
+                - generic "2026-05-20, 0 plays" [ref=e309]
+                - generic "2026-05-21, 0 plays" [ref=e310]
+                - generic "2026-05-22, 0 plays" [ref=e311]
+                - generic "2026-05-23, 0 plays" [ref=e312]
+                - generic "2026-05-24, 0 plays" [ref=e313]
+                - generic "2026-05-25, 0 plays" [ref=e314]
+                - generic "2026-05-26, 0 plays" [ref=e315]
+                - generic "2026-05-27, 0 plays" [ref=e316]
+                - generic "2026-05-28, 0 plays" [ref=e317]
+                - generic "2026-05-29, 0 plays" [ref=e318]
+                - generic "2026-05-30, 0 plays" [ref=e319]
+                - generic "2026-05-31, 0 plays" [ref=e320]
+                - generic "2026-06-01, 0 plays" [ref=e321]
+                - generic "2026-06-02, 0 plays" [ref=e322]
+                - generic "2026-06-03, 0 plays" [ref=e323]
+                - generic "2026-06-04, 0 plays" [ref=e324]
+                - generic "2026-06-05, 0 plays" [ref=e325]
+                - generic "2026-06-06, 0 plays" [ref=e326]
+                - generic "2026-06-07, 0 plays" [ref=e327]
+                - generic "2026-06-08, 0 plays" [ref=e328]
+                - generic "2026-06-09, 0 plays" [ref=e329]
+                - generic "2026-06-10, 0 plays" [ref=e330]
+                - generic "2026-06-11, 0 plays" [ref=e331]
+                - generic "2026-06-12, 0 plays" [ref=e332]
+                - generic "2026-06-13, 0 plays" [ref=e333]
+                - generic "2026-06-14, 0 plays" [ref=e334]
+                - generic "2026-06-15, 0 plays" [ref=e335]
+                - generic "2026-06-16, 0 plays" [ref=e336]
+                - generic "2026-06-17, 0 plays" [ref=e337]
+                - generic "2026-06-18, 0 plays" [ref=e338]
+                - generic "2026-06-19, 0 plays" [ref=e339]
+                - generic "2026-06-20, 0 plays" [ref=e340]
+                - generic "2026-06-21, 0 plays" [ref=e341]
+                - generic "2026-06-22, 0 plays" [ref=e342]
+                - generic "2026-06-23, 0 plays" [ref=e343]
+                - generic "2026-06-24, 0 plays" [ref=e344]
+                - generic "2026-06-25, 0 plays" [ref=e345]
+                - generic "2026-06-26, 0 plays" [ref=e346]
+                - generic "2026-06-27, 0 plays" [ref=e347]
+                - generic "2026-06-28, 0 plays" [ref=e348]
+            - generic [ref=e350]: 0 active weeks
+          - paragraph [ref=e356]: After playback starts, the grid lights up to your weekly rhythm.
+      - generic [ref=e357]:
+        - generic [ref=e358]:
+          - heading "Recommended for you" [level=2] [ref=e359]
+          - button "Refresh" [disabled] [ref=e360] [cursor=pointer]:
+            - img [ref=e361]
+            - text: Refresh
+        - generic [ref=e366]:
+          - img [ref=e367]
+          - strong [ref=e370]: No albums to recommend yet
+          - generic [ref=e371]: Import albums and this area will fill with your library right away.
+      - region "Playback preferences" [ref=e372]:
+        - generic [ref=e373]:
+          - heading "Artist leaderboard" [level=2] [ref=e375]
+          - status [ref=e376]:
+            - img [ref=e377]
+            - generic [ref=e380]:
+              - strong [ref=e381]: No artist leaderboard yet
+              - generic [ref=e382]: Play more music and your most frequent artists will show up here.
+        - generic [ref=e383]:
+          - generic [ref=e384]:
+            - heading "Albums you like" [level=2] [ref=e385]
+            - button "Refresh" [disabled] [ref=e386] [cursor=pointer]:
+              - img [ref=e387]
+              - text: Refresh
+          - status [ref=e392]:
+            - img [ref=e393]
+            - generic [ref=e396]:
+              - strong [ref=e397]: No frequent albums yet
+              - generic [ref=e398]: Play more albums and the top four by play count will appear here.
+  - button
+  - button
+  - contentinfo "播放控制" [ref=e400]:
+    - generic [ref=e401]:
+      - button "打开歌词" [ref=e402] [cursor=pointer]
+      - generic [ref=e406]:
+        - strong [ref=e407]:
+          - generic [ref=e408]: No local file
+        - generic "Ready" [ref=e409]:
+          - generic [ref=e410]: Ready
+        - generic "Audio specifications" [ref=e411]:
+          - generic [ref=e412]: Ready
+    - generic [ref=e413]:
+      - generic [ref=e414]:
+        - 'button "Open audio chain: Waiting for playback, Signal" [ref=e416] [cursor=pointer]':
+          - img [ref=e418]
+        - generic [ref=e423]:
+          - button "Like current track" [disabled] [ref=e424]:
+            - img [ref=e425]
+          - button "Playback queue" [ref=e427] [cursor=pointer]:
+            - img [ref=e428]
+          - button "Shuffle" [ref=e430] [cursor=pointer]:
+            - img [ref=e431]
+          - button "Previous" [disabled] [ref=e437]:
+            - img [ref=e438]
+          - button "Play" [ref=e440] [cursor=pointer]:
+            - img [ref=e441]
+          - button "Next" [disabled] [ref=e443]:
+            - img [ref=e444]
+          - button "Repeat" [ref=e446] [cursor=pointer]:
+            - img [ref=e447]
+          - button "Lyrics" [ref=e452] [cursor=pointer]:
+            - img [ref=e453]
+          - button "MV" [ref=e457] [cursor=pointer]:
+            - img [ref=e458]
+      - generic "Playback position" [ref=e460]:
+        - generic [ref=e461]: 0:00
+        - slider "Seek position" [disabled] [ref=e463]: "0"
+        - generic [ref=e464]: 0:00
+    - generic [ref=e465]:
+      - button "Sleep Timer" [ref=e467] [cursor=pointer]:
+        - img [ref=e468]
+      - button "显示迷你播放器" [disabled] [ref=e471]:
+        - img [ref=e472]
+      - button "Volume" [ref=e475] [cursor=pointer]:
+        - img [ref=e476]
+      - button "Playback speed" [ref=e481] [cursor=pointer]:
+        - img [ref=e482]

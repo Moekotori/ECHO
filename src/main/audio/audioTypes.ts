@@ -16,7 +16,6 @@ import type {
 import type { PlaybackProbeHint, PlaybackTrackMetadataHint } from '../../shared/types/playback';
 import type { ReplayGainTrackData } from '../../shared/utils/replayGain';
 import type { FfmpegToolchainInfo } from './FfmpegToolchain';
-import type { AutomixTransitionPlan, AutomixTransitionMode, TrackTransitionAnalysis } from './AutomixPlanner';
 
 export type {
   AudioDeviceInfo,
@@ -31,6 +30,53 @@ export type {
   AudioPlaybackState,
   AudioStatus,
 };
+
+// ---------------------------------------------------------------------------
+// Inline types formerly from AutomixPlanner (deleted; daemon handles automix)
+// ---------------------------------------------------------------------------
+
+export type TrackTransitionAnalysis = {
+  status: 'complete' | 'estimated' | 'unavailable';
+  durationSeconds: number;
+  introStartSeconds: number;
+  introEndSeconds: number;
+  outroStartSeconds: number;
+  outroEndSeconds: number;
+  leadingSilenceSeconds: number;
+  trailingSilenceSeconds: number;
+  rmsDb: number | null;
+  lufsDb: number | null;
+  introRmsDb?: number | null;
+  outroRmsDb?: number | null;
+  energyCurve: number[];
+  bpm: number | null;
+  beatOffsetMs: number | null;
+  beatConfidence: number | null;
+  analyzedAt?: string;
+};
+
+export type AutomixTransitionMode = 'smartCrossfade' | 'beatAligned' | 'energyFade' | 'gaplessFallback';
+
+export type AutomixTransitionPlan = {
+  mode: AutomixTransitionMode;
+  currentStartSeconds: number;
+  currentEndSeconds: number;
+  currentFadeStartSeconds: number;
+  nextStartSeconds: number;
+  overlapSeconds: number;
+  curve: 'hsin' | 'qsin' | 'tri';
+  currentGainDb: number;
+  nextGainDb: number;
+  tempoRatio: number;
+  advanceAtSeconds: number;
+  skipIntroSilence: boolean;
+  beatAligned: boolean;
+  fallbackReason: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// Core types
+// ---------------------------------------------------------------------------
 
 export type LocalAudioSource = {
   filePath: string;
@@ -86,46 +132,6 @@ export type PcmDecodeRequest = {
   inputHeaders?: Record<string, string>;
   tempoRatio?: number;
   replayGainDb?: number;
-};
-
-export type PcmAutomixDecodeRequest = {
-  current: PcmDecodeRequest & {
-    durationSeconds: number;
-  };
-  next: PcmDecodeRequest & {
-    durationSeconds: number;
-  };
-  plan: AutomixTransitionPlan;
-  following?: Array<{
-    track: PcmDecodeRequest & {
-      durationSeconds: number;
-    };
-    plan: AutomixTransitionPlan;
-  }>;
-};
-
-export type PcmGaplessDecodeRequest = {
-  current: PcmDecodeRequest & {
-    durationSeconds: number;
-  };
-  next: PcmDecodeRequest & {
-    durationSeconds: number;
-  };
-  following?: Array<PcmDecodeRequest & {
-    durationSeconds: number;
-  }>;
-};
-
-export type DecoderRun = {
-  stream: Readable;
-  stop: () => void;
-  done: Promise<void>;
-  waitForExitOnStop?: boolean;
-  ready?: Promise<void>;
-  decoderBackendImpl?: string;
-  resamplerEngine?: AudioResamplerEngine;
-  resamplerFallbackActive?: boolean;
-  replayGainAppliedInStream?: boolean;
 };
 
 export type FfmpegToolchainDiagnostics = Pick<

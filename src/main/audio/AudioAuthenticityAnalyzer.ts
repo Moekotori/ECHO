@@ -6,11 +6,68 @@ import type {
   PluginAudioAnalysisReport,
   PluginAudioAnalysisVerdict,
 } from '../../shared/types/plugins';
-import {
-  isDsdCodec,
-  isDsdFilePath,
-  readDsdNativeSampleRate,
-} from './DsdProbe';
+import { open } from 'node:fs/promises';
+
+const DSD_DETECT_EXTENSIONS = new Set(['.dsf', '.dff']);
+
+const isDsdFilePath = (filePath: string | null | undefined): boolean => {
+  const ext = extname(filePath ?? '').toLowerCase();
+  return DSD_DETECT_EXTENSIONS.has(ext);
+};
+
+const isDsdCodec = (codec: string | null | undefined): boolean => {
+  const normalized = typeof codec === 'string' ? codec.toLowerCase() : '';
+  return normalized.includes('dsd') || normalized.includes('dsf') || normalized.includes('dff');
+};
+
+const readDsdNativeSampleRate = async (filePath: string): Promise<number | null> => {
+  const dsfMagic = Buffer.from('DSD ', 'ascii');
+  const dsfFormatHeader = Buffer.from('fmt ', 'ascii');
+  const dffRootMagic = Buffer.from('FRM8', 'ascii');
+  const dffSampleRateBuffer = Buffer.from('FS  ', 'ascii');
+  const HEADER_READ_BYTES = 1024 * 1024;
+  const MAX_REASONABLE_DSD_RATE = 100_000_000;
+  const DSD_RATE_FLOOR = 1_000_000;
+
+  const isLikelyDsdNativeSampleRate = (rate: number): boolean =>
+    Number.isInteger(rate) && rate >= DSD_RATE_FLOOR && rate <= MAX_REASONABLE_DSD_RATE;
+
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+
+  try {
+    handle = await open(filePath, 'r');
+    const stats = await handle.stat();
+    const bytesToRead = Math.min(Math.max(0, stats.size), HEADER_READ_BYTES);
+    if (bytesToRead <= 0) return null;
+
+    const buffer = Buffer.alloc(bytesToRead);
+    const { bytesRead } = await handle.read(buffer, 0, bytesToRead, 0);
+    const data = buffer.subarray(0, bytesRead);
+
+    // Try DSF format
+    if (data.subarray(0, 4).equals(dsfMagic)) {
+      const fmtOffset = data.indexOf(dsfFormatHeader);
+      if (fmtOffset >= 0 && fmtOffset + 32 <= data.length) {
+        const rate = data.readUInt32LE(fmtOffset + 28);
+        if (isLikelyDsdNativeSampleRate(rate)) return rate;
+      }
+    }
+
+    // Try DFF format
+    if (data.subarray(0, 4).equals(dffRootMagic) && data.subarray(12, 16).equals(dsfMagic)) {
+      const fsOffset = data.indexOf(dffSampleRateBuffer);
+      if (fsOffset >= 0 && fsOffset + 16 <= data.length) {
+        const rate = data.readUInt32BE(fsOffset + 12);
+        if (isLikelyDsdNativeSampleRate(rate)) return rate;
+      }
+    }
+  } catch { /* ignore */ }
+  finally {
+    await handle?.close().catch(() => undefined);
+  }
+
+  return null;
+};
 import {
   AudioAuthenticitySpectrumProbe,
   type AudioAuthenticitySpectrumProbeRequest,

@@ -184,6 +184,136 @@ static int runNullOutputMode() {
         return json{{"volume", vol}};
     });
 
+    // ── DSP State ──────────────────────────────────────────────────────────
+    auto dsp = std::make_shared<ead::DspPipeline>();
+    std::mutex dspMutex;
+
+    // ── eq.setBand ─────────────────────────────────────────────────────────
+    server.registerMethod("eq.setBand", [dsp, &dspMutex](const json& params) -> json {
+        int index           = params.value("index", 0);
+        double gainDb       = params.value("gainDb", 0.0);
+        double frequency    = params.value("frequency", 1000.0);
+        double q            = params.value("q", 1.0);
+        bool enabled        = params.value("enabled", true);
+        std::string typeStr = params.value("type", "peaking");
+
+        auto ft = ead::FilterType::Peaking;
+        if (typeStr == "lowpass")     ft = ead::FilterType::LowPass;
+        else if (typeStr == "highpass")   ft = ead::FilterType::HighPass;
+        else if (typeStr == "lowshelf")   ft = ead::FilterType::LowShelf;
+        else if (typeStr == "highshelf")  ft = ead::FilterType::HighShelf;
+        else if (typeStr == "bandpass")   ft = ead::FilterType::BandPass;
+        else if (typeStr == "notch")      ft = ead::FilterType::Notch;
+        else if (typeStr == "allpass")    ft = ead::FilterType::AllPass;
+
+        {
+            std::lock_guard<std::mutex> lock(dspMutex);
+            dsp->eq().setBand(index, ft, frequency, gainDb, q, enabled);
+        }
+        return json{{"band", index}, {"gainDb", gainDb}, {"enabled", enabled}};
+    });
+
+    // ── eq.setEnabled ──────────────────────────────────────────────────────
+    server.registerMethod("eq.setEnabled", [dsp, &dspMutex](const json& params) -> json {
+        bool enabled = params.value("enabled", true);
+        {
+            std::lock_guard<std::mutex> lock(dspMutex);
+            dsp->eq().setEnabled(enabled);
+        }
+        return json{{"enabled", enabled}};
+    });
+
+    // ── eq.reset ───────────────────────────────────────────────────────────
+    server.registerMethod("eq.reset", [dsp, &dspMutex](const json&) -> json {
+        {
+            std::lock_guard<std::mutex> lock(dspMutex);
+            dsp->eq().reset();
+        }
+        return json{{"reset", true}};
+    });
+
+    // ── eq.setPreset ───────────────────────────────────────────────────────
+    server.registerMethod("eq.setPreset", [dsp, &dspMutex](const json& params) -> json {
+        auto bands = params.value("bands", json::array());
+        int count = 0;
+        {
+            std::lock_guard<std::mutex> lock(dspMutex);
+            for (const auto& band : bands) {
+                int idx  = band.value("index", count);
+                double g = band.value("gainDb", 0.0);
+                double f = band.value("frequency", 1000.0);
+                double q = band.value("q", 1.0);
+                bool en  = band.value("enabled", true);
+                std::string t = band.value("type", "peaking");
+
+                auto ft = ead::FilterType::Peaking;
+                if (t == "lowpass")        ft = ead::FilterType::LowPass;
+                else if (t == "highpass")  ft = ead::FilterType::HighPass;
+                else if (t == "lowshelf")  ft = ead::FilterType::LowShelf;
+                else if (t == "highshelf") ft = ead::FilterType::HighShelf;
+                else if (t == "bandpass")  ft = ead::FilterType::BandPass;
+                else if (t == "notch")     ft = ead::FilterType::Notch;
+                else if (t == "allpass")   ft = ead::FilterType::AllPass;
+
+                dsp->eq().setBand(idx, ft, f, g, q, en);
+                ++count;
+            }
+        }
+        return json{{"bandsApplied", count}};
+    });
+
+    // ── convolution.loadIr ─────────────────────────────────────────────────
+    server.registerMethod("convolution.loadIr", [dsp, &dspMutex](const json& params) -> json {
+        std::string path = params.value("path", "");
+        bool loaded;
+        {
+            std::lock_guard<std::mutex> lock(dspMutex);
+            loaded = dsp->conv().loadIr(path);
+        }
+        if (!loaded) {
+            throw std::runtime_error("Failed to load IR file: " + path);
+        }
+        return json{{"loaded", true}};
+    });
+
+    // ── convolution.setEnabled ────────────────────────────────────────────
+    server.registerMethod("convolution.setEnabled", [dsp, &dspMutex](const json& params) -> json {
+        bool enabled = params.value("enabled", true);
+        {
+            std::lock_guard<std::mutex> lock(dspMutex);
+            dsp->conv().setEnabled(enabled);
+        }
+        return json{{"enabled", enabled}};
+    });
+
+    // ── channelBalance.setState ────────────────────────────────────────────
+    server.registerMethod("channelBalance.setState", [dsp, &dspMutex](const json& params) -> json {
+        {
+            std::lock_guard<std::mutex> lock(dspMutex);
+            double balance  = params.value("balance", 0.0);
+            double leftGain = params.value("leftGainDb", 0.0);
+            double rightGain = params.value("rightGainDb", 0.0);
+            dsp->balance().setBalance(balance);
+            dsp->balance().setChannelGain(0, leftGain);
+            dsp->balance().setChannelGain(1, rightGain);
+        }
+        json out = {{"applied", true}};
+        if (params.contains("balance"))      out["balance"] = params["balance"];
+        if (params.contains("leftGainDb"))   out["leftGainDb"] = params["leftGainDb"];
+        if (params.contains("rightGainDb"))  out["rightGainDb"] = params["rightGainDb"];
+        return out;
+    });
+
+    // ── levelMeter.subscribe ───────────────────────────────────────────────
+    server.registerMethod("levelMeter.subscribe", [](const json& params) -> json {
+        return json{{"subscribed", true}};
+    });
+
+    // ── levelMeter.unsubscribe ─────────────────────────────────────────────
+    server.registerMethod("levelMeter.unsubscribe", [](const json&) -> json {
+        return json{{"subscribed", false}};
+    });
+
     // ── Run ────────────────────────────────────────────────────────────────
     server.start();
     return 0;

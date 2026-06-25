@@ -1,0 +1,524 @@
+- generic [ref=e3]:
+  - banner "ECHO Next" [ref=e4]:
+    - generic [ref=e5]:
+      - strong [ref=e6]: ECHO
+      - generic [ref=e7]: Next
+    - generic "Quick actions" [ref=e8]:
+      - button "Audio Settings" [ref=e9] [cursor=pointer]:
+        - img [ref=e10]
+      - button "Lyrics Settings" [ref=e12] [cursor=pointer]:
+        - img [ref=e13]
+      - button "MV Settings" [ref=e16] [cursor=pointer]:
+        - img [ref=e17]
+      - button "Settings" [ref=e19] [cursor=pointer]:
+        - img [ref=e20]
+    - generic "Window controls" [ref=e23]:
+      - button "Fullscreen" [ref=e24] [cursor=pointer]:
+        - img [ref=e25]
+      - button "Minimize" [ref=e30] [cursor=pointer]:
+        - img [ref=e31]
+      - button "Maximize" [ref=e32] [cursor=pointer]:
+        - img [ref=e33]
+      - button "Close" [ref=e35] [cursor=pointer]:
+        - img [ref=e36]
+  - complementary "Main navigation" [ref=e39]:
+    - navigation [ref=e40]:
+      - button "Home" [ref=e41] [cursor=pointer]:
+        - img [ref=e43]
+        - generic [ref=e48]: Home
+      - button "Songs" [ref=e49] [cursor=pointer]:
+        - img [ref=e51]
+        - generic [ref=e55]: Songs
+      - button "Albums" [ref=e56] [cursor=pointer]:
+        - img [ref=e58]
+        - generic [ref=e61]: Albums
+      - button "Artists" [ref=e62] [cursor=pointer]:
+        - img [ref=e64]
+        - generic [ref=e69]: Artists
+      - button "Folders" [ref=e70] [cursor=pointer]:
+        - img [ref=e72]
+        - generic [ref=e74]: Folders
+      - button "Cloud / Remote" [ref=e75] [cursor=pointer]:
+        - img [ref=e77]
+        - generic [ref=e81]: Cloud / Remote
+      - button "Connect" [ref=e82] [cursor=pointer]:
+        - img [ref=e84]
+        - generic [ref=e86]: Connect
+      - button "DSP" [active] [ref=e87] [cursor=pointer]:
+        - img [ref=e89]
+        - generic [ref=e93]: DSP
+      - button "Queue" [ref=e94] [cursor=pointer]:
+        - img [ref=e96]
+        - generic [ref=e97]: Queue
+      - button "History" [ref=e98] [cursor=pointer]:
+        - img [ref=e100]
+        - generic [ref=e104]: History
+      - button "Playlists" [ref=e105] [cursor=pointer]:
+        - img [ref=e107]
+        - generic [ref=e110]: Playlists
+      - button "Plugins" [ref=e111] [cursor=pointer]:
+        - img [ref=e113]
+        - generic [ref=e118]: Plugins
+    - navigation "Utility navigation" [ref=e120]:
+      - button "Liked" [ref=e121] [cursor=pointer]:
+        - img [ref=e123]
+        - generic [ref=e125]: Liked
+      - button "Settings" [ref=e126] [cursor=pointer]:
+        - img [ref=e128]
+        - generic [ref=e132]: Settings
+      - button "Audio Settings" [ref=e133] [cursor=pointer]:
+        - img [ref=e135]
+        - generic [ref=e140]: Audio Settings
+  - main [ref=e485]:
+    - generic [ref=e487]:
+      - complementary "DSP modules" [ref=e488]:
+        - generic [ref=e489]:
+          - generic [ref=e490]: DSP
+          - strong [ref=e491]: ECHO
+          - emphasis [ref=e492]: Signal Control
+        - generic [ref=e493]:
+          - img [ref=e494]
+          - generic [ref=e501]:
+            - generic [ref=e502]: Output
+            - strong [ref=e503]: System output
+            - generic [ref=e504]: Auto / shared
+        - navigation "DSP module chain" [ref=e505]:
+          - generic [ref=e506]:
+            - generic [ref=e507]: Input
+            - button "Headroom Reserve DSP headroom" [ref=e508] [cursor=pointer]:
+              - img [ref=e510]
+              - generic [ref=e513]:
+                - strong [ref=e514]: Headroom
+                - generic [ref=e515]: Reserve DSP headroom
+          - generic [ref=e516]:
+            - generic [ref=e517]: Sample rate
+            - button "SRC / Upsampling PCM sample-rate conversion" [ref=e518] [cursor=pointer]:
+              - img [ref=e520]
+              - generic [ref=e527]:
+                - strong [ref=e528]: SRC / Upsampling
+                - generic [ref=e529]: PCM sample-rate conversion
+          - generic [ref=e530]:
+            - generic [ref=e531]: Shape
+            - button "Parametric EQ Bands, preamp, presets" [ref=e532] [cursor=pointer]:
+              - img [ref=e534]
+              - generic [ref=e535]:
+                - strong [ref=e536]: Parametric EQ
+                - generic [ref=e537]: Bands, preamp, presets
+          - button "Headphone correction OPRA headphone curves" [ref=e539] [cursor=pointer]:
+            - img [ref=e541]
+            - generic [ref=e543]:
+              - strong [ref=e544]: Headphone correction
+              - generic [ref=e545]: OPRA headphone curves
+          - generic [ref=e546]:
+            - generic [ref=e547]: Space
+            - button "FIR / Room correction IR convolution only" [ref=e548] [cursor=pointer]:
+              - img [ref=e550]
+              - generic [ref=e554]:
+                - strong [ref=e555]: FIR / Room correction
+                - generic [ref=e556]: IR convolution only
+          - generic [ref=e557]:
+            - generic [ref=e558]: Stereo
+            - button "Channel tools Balance, delay, mono" [ref=e559] [cursor=pointer]:
+              - img [ref=e561]
+              - generic [ref=e563]:
+                - strong [ref=e564]: Channel tools
+                - generic [ref=e565]: Balance, delay, mono
+          - generic [ref=e566]:
+            - generic [ref=e567]: Output
+            - button "Output safety Final output monitor" [ref=e568] [cursor=pointer]:
+              - img [ref=e570]
+              - generic [ref=e573]:
+                - strong [ref=e574]: Output safety
+                - generic [ref=e575]: Final output monitor
+      - region "DSP workspace" [ref=e576]:
+        - paragraph [ref=e577]: Desktop bridge unavailable
+        - region "ECHO Next EQ panel" [ref=e579]:
+          - generic [ref=e580]:
+            - generic [ref=e581]:
+              - img [ref=e583]
+              - generic [ref=e585]:
+                - heading "EQ" [level=2] [ref=e586]
+                - paragraph [ref=e587]: Sound curve, safe headroom, and advanced tuning
+            - generic [ref=e588]:
+              - generic [ref=e589]:
+                - checkbox "EQ Enabled" [checked] [ref=e590]
+                - generic [ref=e591]: EQ Enabled
+              - group "EQ view mode" [ref=e592]:
+                - button "Simple" [ref=e593] [cursor=pointer]
+                - button "Pro" [ref=e594] [cursor=pointer]
+              - generic [ref=e595]:
+                - generic [ref=e596]:
+                  - img [ref=e597]
+                  - textbox "Search presets" [ref=e600]
+                - group "Preset filter" [ref=e601]:
+                  - button "All" [ref=e602] [cursor=pointer]
+                  - button "Built-in" [ref=e603] [cursor=pointer]
+                  - button "User" [ref=e604] [cursor=pointer]
+                  - button "Target curves" [ref=e605] [cursor=pointer]
+                  - button "Genre" [ref=e606] [cursor=pointer]
+                  - button "Utility" [ref=e607] [cursor=pointer]
+                - button "EQ preset" [ref=e609] [cursor=pointer]:
+                  - generic [ref=e610]: Flat
+                  - img [ref=e611]
+              - button "Reset EQ" [ref=e613] [cursor=pointer]:
+                - img [ref=e614]
+          - generic [ref=e617]:
+            - button "EQ Enabled" [ref=e618] [cursor=pointer]:
+              - img [ref=e619]
+              - generic [ref=e620]: EQ
+              - strong [ref=e621]: Enabled
+            - button "Hold original" [ref=e622] [cursor=pointer]:
+              - img [ref=e623]
+              - generic [ref=e629]: Hold original
+              - strong [ref=e630]: Bit-perfect path
+            - generic [ref=e631]:
+              - generic [ref=e632]: Preset
+              - strong [ref=e633]: Flat
+            - generic [ref=e634]:
+              - generic [ref=e635]: Preamp
+              - slider "Quick EQ preamp" [ref=e636]: "0"
+              - strong [ref=e637]: 0.0 dB
+            - button "Quick Auto Gain" [ref=e638] [cursor=pointer]:
+              - img [ref=e639]
+              - generic [ref=e642]: Auto Gain
+              - strong [ref=e643]: 0.0 dB
+          - region "Simple tone quick tweaks" [ref=e644]:
+            - button "Bass lift Fuller kick" [ref=e645] [cursor=pointer]:
+              - img [ref=e646]
+              - generic [ref=e650]: Bass lift
+              - strong [ref=e651]: Fuller kick
+            - button "Vocal focus Clearer lyrics" [ref=e652] [cursor=pointer]:
+              - img [ref=e653]
+              - generic [ref=e655]: Vocal focus
+              - strong [ref=e656]: Clearer lyrics
+            - button "Air Brighter space" [ref=e657] [cursor=pointer]:
+              - img [ref=e658]
+              - generic [ref=e660]: Air
+              - strong [ref=e661]: Brighter space
+            - button "Warmth Softer listen" [ref=e662] [cursor=pointer]:
+              - img [ref=e663]
+              - generic [ref=e666]: Warmth
+              - strong [ref=e667]: Softer listen
+            - button "Flat reset Back to neutral" [ref=e668] [cursor=pointer]:
+              - img [ref=e669]
+              - generic [ref=e672]: Flat reset
+              - strong [ref=e673]: Back to neutral
+          - region "Simple current vibe summary" [ref=e674]:
+            - generic [ref=e675]:
+              - emphasis [ref=e676]: Current vibe
+              - strong [ref=e677]: Neutral
+            - generic [ref=e678]:
+              - emphasis [ref=e679]: Main change
+              - strong [ref=e680]: Neutral
+            - generic [ref=e681]:
+              - emphasis [ref=e682]: Amount
+              - strong [ref=e683]: Ready
+          - region "Simple listening zone changes" [ref=e684]:
+            - button "Apply Low end tone, current Neutral" [ref=e685] [cursor=pointer]:
+              - generic [ref=e686]:
+                - generic [ref=e687]: Low end
+                - strong [ref=e688]: Neutral
+              - generic [ref=e690]: Kick and weight
+            - button "Apply Vocal tone, current Neutral" [ref=e691] [cursor=pointer]:
+              - generic [ref=e692]:
+                - generic [ref=e693]: Vocal
+                - strong [ref=e694]: Neutral
+              - generic [ref=e696]: Lyrics and presence
+            - button "Apply Air tone, current Neutral" [ref=e697] [cursor=pointer]:
+              - generic [ref=e698]:
+                - generic [ref=e699]: Air
+                - strong [ref=e700]: Neutral
+              - generic [ref=e702]: Shine and space
+          - region "Simple safe headroom" [ref=e703]:
+            - img [ref=e705]
+            - generic [ref=e708]:
+              - strong [ref=e709]: Headroom ready
+              - generic [ref=e710]: Peak 0.0 dB / preamp 0.0 dB
+            - button "Make safe 0.0 dB" [disabled] [ref=e711]:
+              - generic [ref=e712]: Make safe
+              - strong [ref=e713]: 0.0 dB
+          - generic [ref=e714]:
+            - button "Next vibe" [ref=e715] [cursor=pointer]:
+              - img [ref=e716]
+              - generic [ref=e718]: Next vibe
+              - strong [ref=e719]: Explore
+            - button "Save vibe" [disabled] [ref=e720]:
+              - img [ref=e721]
+              - generic [ref=e725]: Save vibe
+              - strong [ref=e726]: Save current
+            - button "Undo Last tweak" [disabled] [ref=e727]:
+              - img [ref=e728]
+              - generic [ref=e731]: Undo
+              - strong [ref=e732]: Last tweak
+          - generic [ref=e733]:
+            - generic [ref=e734]:
+              - emphasis [ref=e735]: Preset
+              - strong [ref=e736]: Flat
+            - generic [ref=e737]:
+              - emphasis [ref=e738]: Headroom
+              - strong [ref=e739]: "--"
+            - generic [ref=e740]:
+              - emphasis [ref=e741]: Bit-perfect
+              - strong [ref=e742]: DSP signal path active
+            - generic [ref=e743]:
+              - emphasis [ref=e744]: Mode
+              - strong [ref=e745]: Simple
+          - generic "Signal Path" [ref=e746]:
+            - generic [ref=e747]:
+              - img [ref=e748]
+              - generic [ref=e750]: Signal Path
+              - strong [ref=e751]: DSP signal path active
+            - generic [ref=e752]:
+              - generic [ref=e753]:
+                - img [ref=e754]
+                - emphasis [ref=e761]: Input
+                - strong [ref=e762]: "--"
+              - generic [ref=e763]:
+                - img [ref=e764]
+                - emphasis [ref=e767]: Preamp
+                - strong [ref=e768]: 0.0 dB
+              - generic [ref=e769]:
+                - img [ref=e770]
+                - emphasis [ref=e771]: PEQ
+                - strong [ref=e772]: 31/31
+              - generic [ref=e773]:
+                - img [ref=e774]
+                - emphasis [ref=e777]: Guard
+                - strong [ref=e778]: Armed
+              - generic [ref=e779]:
+                - img [ref=e780]
+                - emphasis [ref=e784]: Output
+                - strong [ref=e785]: DSP output
+          - generic [ref=e787]:
+            - generic [ref=e788]:
+              - generic [ref=e789]:
+                - generic [ref=e790]: Headroom Management
+                - strong [ref=e791]: 0.0 dB
+              - generic "Headroom safety metrics" [ref=e792]:
+                - generic [ref=e793]: Recommended
+                - strong [ref=e794]: 0.0 dB
+                - generic [ref=e795]: Max boost
+                - strong [ref=e796]: 0.0 dB
+                - generic [ref=e797]: Estimated Peak
+                - strong [ref=e798]: 0.0 dB
+              - generic [ref=e799]:
+                - generic [ref=e800]:
+                  - emphasis [ref=e801]: Input peak
+                  - strong [ref=e802]: "--"
+                - generic [ref=e803]:
+                  - emphasis [ref=e804]: Input RMS
+                  - strong [ref=e805]: "--"
+                - generic [ref=e806]:
+                  - emphasis [ref=e807]: Est. output peak
+                  - strong [ref=e808]: "--"
+                - generic [ref=e809]:
+                  - emphasis [ref=e810]: Headroom
+                  - strong [ref=e811]: "--"
+                - paragraph [ref=e812]: pre-native + DSP estimate
+              - slider "EQ preamp" [ref=e813]: "0"
+              - button "Auto 0.0 dB" [disabled] [ref=e814]
+              - generic [ref=e815]:
+                - button "Auto Gain" [ref=e816] [cursor=pointer]:
+                  - img [ref=e817]
+                  - text: Auto Gain
+                - generic [ref=e820]:
+                  - generic [ref=e821]: Status
+                  - strong [ref=e822]: Idle
+                  - emphasis [ref=e823]: Auto 0.0 dB
+            - img "Draggable 31-band EQ frequency response" [ref=e825]:
+              - generic [ref=e827]: +18 dB
+              - generic [ref=e829]: +12 dB
+              - generic [ref=e831]: +6 dB
+              - generic [ref=e833]: 0 dB
+              - generic [ref=e835]: "-6 dB"
+              - generic [ref=e837]: "-12 dB"
+              - generic [ref=e839]: "-18 dB"
+              - generic "Drag 20 EQ band" [ref=e840]:
+                - generic: P
+                - generic: "20"
+              - generic "Drag 25 EQ band" [ref=e843]:
+                - generic: P
+                - generic: "25"
+              - generic "Drag 31.5 EQ band" [ref=e846]:
+                - generic: P
+                - generic: "31.5"
+              - generic "Drag 40 EQ band" [ref=e849]:
+                - generic: P
+                - generic: "40"
+              - generic "Drag 50 EQ band" [ref=e852]:
+                - generic: P
+                - generic: "50"
+              - generic "Drag 63 EQ band" [ref=e855]:
+                - generic: P
+                - generic: "63"
+              - generic "Drag 80 EQ band" [ref=e858]:
+                - generic: P
+                - generic: "80"
+              - generic "Drag 100 EQ band" [ref=e861]:
+                - generic: P
+                - generic: "100"
+              - generic "Drag 125 EQ band" [ref=e864]:
+                - generic: P
+                - generic: "125"
+              - generic "Drag 160 EQ band" [ref=e867]:
+                - generic: P
+                - generic: "160"
+              - generic "Drag 200 EQ band" [ref=e870]:
+                - generic: P
+                - generic: "200"
+              - generic "Drag 250 EQ band" [ref=e873]:
+                - generic: P
+                - generic: "250"
+              - generic "Drag 315 EQ band" [ref=e876]:
+                - generic: P
+                - generic: "315"
+              - generic "Drag 400 EQ band" [ref=e879]:
+                - generic: P
+                - generic: "400"
+              - generic "Drag 500 EQ band" [ref=e882]:
+                - generic: P
+                - generic: "500"
+              - generic "Drag 630 EQ band" [ref=e885]:
+                - generic: P
+                - generic: "630"
+              - generic "Drag 800 EQ band" [ref=e888]:
+                - generic: P
+                - generic: "800"
+              - generic "Drag 1k EQ band" [ref=e891]:
+                - generic: P
+                - generic: 1k
+              - generic "Drag 1.3k EQ band" [ref=e894]:
+                - generic: P
+                - generic: 1.3k
+              - generic "Drag 1.6k EQ band" [ref=e897]:
+                - generic: P
+                - generic: 1.6k
+              - generic "Drag 2k EQ band" [ref=e900]:
+                - generic: P
+                - generic: 2k
+              - generic "Drag 2.5k EQ band" [ref=e903]:
+                - generic: P
+                - generic: 2.5k
+              - generic "Drag 3.1k EQ band" [ref=e906]:
+                - generic: P
+                - generic: 3.1k
+              - generic "Drag 4k EQ band" [ref=e909]:
+                - generic: P
+                - generic: 4k
+              - generic "Drag 5k EQ band" [ref=e912]:
+                - generic: P
+                - generic: 5k
+              - generic "Drag 6.3k EQ band" [ref=e915]:
+                - generic: P
+                - generic: 6.3k
+              - generic "Drag 8k EQ band" [ref=e918]:
+                - generic: P
+                - generic: 8k
+              - generic "Drag 10k EQ band" [ref=e921]:
+                - generic: P
+                - generic: 10k
+              - generic "Drag 12.5k EQ band" [ref=e924]:
+                - generic: P
+                - generic: 12.5k
+              - generic "Drag 16k EQ band" [ref=e927]:
+                - generic: P
+                - generic: 16k
+              - generic "Drag 20k EQ band" [ref=e930]:
+                - generic: P
+                - generic: 20k
+              - generic [ref=e933]: "20"
+              - generic [ref=e934]: "31.5"
+              - generic [ref=e935]: "50"
+              - generic [ref=e936]: "80"
+              - generic [ref=e937]: "125"
+              - generic [ref=e938]: "200"
+              - generic [ref=e939]: "315"
+              - generic [ref=e940]: "500"
+              - generic [ref=e941]: "800"
+              - generic [ref=e942]: 1.3k
+              - generic [ref=e943]: 2k
+              - generic [ref=e944]: 3.1k
+              - generic [ref=e945]: 5k
+              - generic [ref=e946]: 8k
+              - generic [ref=e947]: 12.5k
+              - generic [ref=e948]: 20k
+              - generic [ref=e949]:
+                - generic [ref=e950]: 20 / Q 1.0 / Peaking
+                - generic [ref=e951]: 0.0 dB
+          - generic [ref=e952]:
+            - generic [ref=e953]:
+              - generic [ref=e954]:
+                - generic [ref=e955]: Preset name
+                - textbox "Preset name" [ref=e956]:
+                  - /placeholder: Save as user preset
+              - generic [ref=e957]:
+                - button "Save as" [ref=e958] [cursor=pointer]:
+                  - img [ref=e959]
+                  - text: Save as
+                - button "Export APO" [ref=e963] [cursor=pointer]
+                - button "Export GraphicEQ" [ref=e964] [cursor=pointer]
+                - button "Duplicate current" [ref=e965] [cursor=pointer]:
+                  - img [ref=e966]
+                  - text: Duplicate current
+                - button "Import preset / APO" [ref=e969] [cursor=pointer]
+                - button "Paste APO" [ref=e970] [cursor=pointer]:
+                  - img [ref=e971]
+                  - text: Paste APO
+                - button "Overwrite" [disabled] [ref=e974]:
+                  - img [ref=e975]
+                  - text: Overwrite
+                - button "Revert user preset" [disabled] [ref=e979]:
+                  - img [ref=e980]
+                  - text: Revert user preset
+                - button "Delete" [disabled] [ref=e983]:
+                  - img [ref=e984]
+                  - text: Delete
+            - generic [ref=e987]: Built-in presets are read-only.
+  - button
+  - button
+  - contentinfo "播放控制" [ref=e400]:
+    - generic [ref=e401]:
+      - button "打开歌词" [ref=e402] [cursor=pointer]
+      - generic [ref=e406]:
+        - strong [ref=e407]:
+          - generic [ref=e408]: No local file
+        - generic "Ready" [ref=e409]:
+          - generic [ref=e410]: Ready
+        - generic "Audio specifications" [ref=e411]:
+          - generic [ref=e412]: Ready
+    - generic [ref=e413]:
+      - generic [ref=e414]:
+        - 'button "Open audio chain: Waiting for playback, Signal" [ref=e416] [cursor=pointer]':
+          - img [ref=e418]
+        - generic [ref=e423]:
+          - button "Like current track" [disabled] [ref=e424]:
+            - img [ref=e425]
+          - button "Playback queue" [ref=e427] [cursor=pointer]:
+            - img [ref=e428]
+          - button "Shuffle" [ref=e430] [cursor=pointer]:
+            - img [ref=e431]
+          - button "Previous" [disabled] [ref=e437]:
+            - img [ref=e438]
+          - button "Play" [ref=e440] [cursor=pointer]:
+            - img [ref=e441]
+          - button "Next" [disabled] [ref=e443]:
+            - img [ref=e444]
+          - button "Repeat" [ref=e446] [cursor=pointer]:
+            - img [ref=e447]
+          - button "Lyrics" [ref=e452] [cursor=pointer]:
+            - img [ref=e453]
+          - button "MV" [ref=e457] [cursor=pointer]:
+            - img [ref=e458]
+      - generic "Playback position" [ref=e460]:
+        - generic [ref=e461]: 0:00
+        - slider "Seek position" [disabled] [ref=e463]: "0"
+        - generic [ref=e464]: 0:00
+    - generic [ref=e465]:
+      - button "Sleep Timer" [ref=e467] [cursor=pointer]:
+        - img [ref=e468]
+      - button "显示迷你播放器" [disabled] [ref=e471]:
+        - img [ref=e472]
+      - button "Volume" [ref=e475] [cursor=pointer]:
+        - img [ref=e476]
+      - button "Playback speed" [ref=e481] [cursor=pointer]:
+        - img [ref=e482]
