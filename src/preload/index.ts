@@ -719,7 +719,7 @@ const echoApi: EchoApi & {
         dspClippingRisk: false, dspLimiterProtecting: false,
         eqEnabled: false, eqPresetName: null, warnings: [],
         underrunCallbacks: 0, bitPerfectCandidate: false,
-      } as AudioStatus);
+      } as unknown as AudioStatus);
       const listener = (_event: Electron.IpcRendererEvent, status: unknown): void => {
         handler(status as AudioStatus);
       };

@@ -42,7 +42,11 @@ const nonActionableAudioStatusErrorPatterns = [
 ];
 
 let snapshot: PlaybackStatusSnapshot = {
-  audioStatus: null,
+  audioStatus: {
+    state: 'idle', positionSeconds: 0, durationSeconds: 0, volume: 1,
+    outputMode: 'shared', deviceName: '', sampleRate: 0,
+    warnings: [],
+  } as unknown as AudioStatus,
   playbackStatus: null,
   playbackVisualIntent: null,
   error: null,
