@@ -259,10 +259,17 @@ void SessionManager::playbackLoop() {
         if (framesDecoded == 0) {
             // End of file — attempt gapless / automix transition
             if (tryGaplessTransition()) {
-                // gaplessBuffer_ has been consumed; continue the loop
-                // (current path/format already updated)
                 dsp_.prepare(outputSampleRate_, kBlockSize, outputChannels_);
                 continue;
+            }
+            // Wait for output to drain remaining buffered data
+            for (int drainWait = 0; drainWait < 50; ++drainWait) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                // Try writing silence — if it succeeds, output is still consuming
+                std::vector<float> silence(static_cast<size_t>(kBlockSize) * outputChannels_, 0.0f);
+                if (output_.write(silence.data(), kBlockSize)) {
+                    continue; // output still alive, keep waiting
+                }
             }
             // No next track — track ended naturally
             transitionTo(PlaybackState::Ended);
@@ -289,10 +296,9 @@ void SessionManager::playbackLoop() {
         }
 
         // ── Write to Output ─────────────────────────────────────────────
-        if (!output_.write(buffer.data(), framesDecoded)) {
+        while (!output_.write(buffer.data(), framesDecoded)) {
             ++underrunCount_;
-            // Output buffer full — wait for device to consume
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
 
         // ── Position Tracking ──────────────────────────────────────────

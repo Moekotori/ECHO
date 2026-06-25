@@ -220,8 +220,8 @@ bool MiniaudioBackend::write(const float* samples, int frameCount) {
                                                  &framesToWrite,
                                                  &pWriteBuffer);
         if (res != MA_SUCCESS || framesToWrite == 0) {
-            // Ring buffer full; drop this chunk silently.
-            break;
+            // Ring buffer full — indicate backpressure to caller
+            return totalWritten > 0;
         }
 
         std::memcpy(pWriteBuffer,
@@ -243,6 +243,9 @@ void MiniaudioBackend::dataCallback(ma_device* pDevice,
                                     void* pOutput,
                                     const void* /*pInput*/,
                                     ma_uint32 frameCount) {
+    static std::atomic<int> cbCnt{0};
+    if (++cbCnt % 100 == 0) std::cerr << "[miniaudio] callback #" << cbCnt << "\n";
+
     auto* self = static_cast<MiniaudioBackend*>(pDevice->pUserData);
     auto* output = static_cast<float*>(pOutput);
     const int channels = self->channels_;
