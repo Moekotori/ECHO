@@ -54,6 +54,7 @@ static int runDaemonMode() {
     sessionManager.init();
 
     std::cerr << "[echo-audio-daemon] ready" << std::endl;
+    server.sendEvent("event.ready", json::object());
 
     // Blocks until shutdown request is received.
     server.start();

@@ -97,7 +97,7 @@ export class DaemonClient extends EventEmitter {
   ): Promise<void> {
     this.autoReconnect = autoRestart ?? false;
     const bin = binaryPath ?? resolveBinary();
-    const argv = args ?? (binaryPath ? [] : ['--null-output']);
+    const argv = args ?? [];
 
     return new Promise<void>((resolveReady, rejectReady) => {
       try {
@@ -239,16 +239,16 @@ export const getDaemonClient = (): DaemonClient => {
   return defaultDaemonClient;
 };
 
-/** Resolve the daemon binary path (prod: resourcesPath, dev: cwd/build/...). */
+/** Resolve the daemon binary path (prod: resourcesPath, dev: electron-app/build/...). */
 function resolveBinary(): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require('electron') as { app?: { isPackaged?: boolean } };
-    if (electron?.app?.isPackaged) {
-      return join(process.resourcesPath, 'echo-audio-daemon');
-    }
-  } catch { /* not in electron */ }
-  return join(process.cwd(), 'build', 'src', 'echo-audio-daemon');
+  if (process.resourcesPath) {
+    return join(process.resourcesPath, 'echo-audio-daemon');
+  }
+  // Dev: look in electron-app/build/ (where ensure-audio-daemon copies it)
+  const devPath = join(process.cwd(), 'electron-app', 'build', 'echo-audio-daemon');
+  if (existsSync(devPath)) return devPath;
+  // Fallback: direct build output
+  return join(process.cwd(), 'native', 'echo-audio-daemon', 'build', 'src', 'echo-audio-daemon');
 }
 
 // =========================================================================
