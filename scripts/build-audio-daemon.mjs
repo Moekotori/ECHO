@@ -9,7 +9,7 @@ const sourceDir = join(projectRoot, 'native', 'echo-audio-daemon');
 const targetDir = join(projectRoot, 'electron-app', 'build');
 const isWindows = process.platform === 'win32';
 const targetExe = join(targetDir, isWindows ? 'echo-audio-daemon.exe' : 'echo-audio-daemon');
-const sourceExe = join(sourceDir, 'build', 'src', isWindows ? 'echo-audio-daemon.exe' : 'echo-audio-daemon');
+const sourceExe = join(sourceDir, 'build', 'src', isWindows ? 'Release/echo-audio-daemon.exe' : 'echo-audio-daemon');
 
 const run = (cmd, args, cwd) => {
   const result = spawnSync(cmd, args, { cwd, stdio: 'inherit', shell: false });
@@ -21,7 +21,7 @@ try {
   console.log('[build:audio-daemon] Configuring CMake...');
   run('cmake', [
     '-B', 'build', '-S', '.',
-    `-DECHO_ENABLE_ASIO=OFF`,
+    `-DECHO_ENABLE_ASIO=${isWindows ? 'ON' : 'OFF'}`,
     `-DECHO_ENABLE_WASAPI_EXCLUSIVE=${isWindows ? 'ON' : 'OFF'}`,
   ], sourceDir);
 
