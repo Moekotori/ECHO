@@ -715,6 +715,10 @@ const echoApi: EchoApi & {
         handler(status as AudioStatus);
       };
       ipcRenderer.on(IpcChannels.AudioStatus, listener);
+      // Immediately fetch current status (prevents null status crash on first render)
+      ipcRenderer.invoke(IpcChannels.AudioGetStatus).then(s => {
+        if (s) handler(s as AudioStatus);
+      }).catch(() => {});
       return () => ipcRenderer.off(IpcChannels.AudioStatus, listener);
     },
     onSessionReset: (handler) => {
