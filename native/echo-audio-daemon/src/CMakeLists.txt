@@ -1,5 +1,7 @@
 set(ECHO_AUDIO_DAEMON_SOURCES
     main.cpp
+    ipc/JsonRpcServer.cpp
+    output/NullBackend.cpp
 )
 
 add_executable(echo-audio-daemon
@@ -13,6 +15,7 @@ target_link_libraries(echo-audio-daemon
 
 target_include_directories(echo-audio-daemon
     PRIVATE
+        ${CMAKE_SOURCE_DIR}
         ${FFMPEG_INCLUDE_DIRS}
         ${CMAKE_SOURCE_DIR}/third_party
 )
