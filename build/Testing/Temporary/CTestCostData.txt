@@ -1,0 +1,23 @@
+echo-daemon-miniaudio 1 0.145086
+echo-daemon-types 1 0.00177387
+echo-daemon-ipc 1 0.806907
+echo-daemon-null-output 1 0.00183139
+echo-daemon-harness 1 0.859705
+echo-daemon-device-enumerator 1 0.0148518
+echo-daemon-device-watcher 1 2.00277
+echo-daemon-harness-runner 2 0.0543184
+echo-daemon-wasapi-exclusive 1 0.0017051
+echo-daemon-decoder 0 0
+echo-daemon-biquad 1 0.193065
+echo-daemon-eq 1 0.00780668
+echo-daemon-session-manager 0 0
+echo-daemon-convolution 0 0
+echo-daemon-channel-balance 0 0
+echo-daemon-limiter 0 0
+echo-daemon-dsp-pipeline 0 0
+---
+echo-daemon-decoder
+echo-daemon-convolution
+echo-daemon-channel-balance
+echo-daemon-limiter
+echo-daemon-dsp-pipeline

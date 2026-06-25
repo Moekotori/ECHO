@@ -1,0 +1,701 @@
+{
+  "task": "F3: Manual QA \u2014 Full Daemon Integration Test",
+  "timestamp": "2026-06-25T15:01:26+0800",
+  "daemon_binary": "/home/uright/ECHO/native/echo-audio-daemon/build/src/echo-audio-daemon",
+  "test_file": "/tmp/test_tone.flac",
+  "mode": "--null-output",
+  "execution_time_seconds": 0.08,
+  "daemon_exit_code": 0,
+  "summary": {
+    "total_tests": 33,
+    "passed": 33,
+    "failed": 0,
+    "protocol_spec_methods_total": 23,
+    "protocol_spec_methods_tested": 22,
+    "protocol_spec_methods_not_covered": [
+      "play"
+    ],
+    "protocol_method_coverage_pct": 95.7,
+    "edge_cases_tested": 14,
+    "verdict": "PASS"
+  },
+  "results": [
+    {
+      "name": "device.list returns devices array",
+      "method": "device.list",
+      "params": {},
+      "req_id": 1,
+      "response": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "result": {
+          "devices": [
+            {
+              "channels": 2,
+              "id": "null",
+              "isDefault": true,
+              "name": "Null Output Device",
+              "outputMode": "shared",
+              "sampleRate": 0
+            }
+          ]
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "probe audio file (daemon-mode only)",
+      "method": "probe",
+      "params": {
+        "path": "/tmp/test_tone.flac"
+      },
+      "req_id": 2,
+      "expected_error": true,
+      "error_code": -32601,
+      "error_message": "Method not found: probe",
+      "response": {
+        "error": {
+          "code": -32601,
+          "message": "Method not found: probe"
+        },
+        "id": 2,
+        "jsonrpc": "2.0"
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "test.play with path",
+      "method": "test.play",
+      "params": {
+        "path": "/tmp/test_tone.flac",
+        "sampleRate": 44100,
+        "channels": 2,
+        "frames": 44100
+      },
+      "req_id": 3,
+      "response": {
+        "id": 3,
+        "jsonrpc": "2.0",
+        "result": {
+          "framesWritten": 44100,
+          "path": "/tmp/test_tone.flac",
+          "status": "playing",
+          "writeCount": 1
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "test.getStatus shows playing",
+      "method": "test.getStatus",
+      "params": {},
+      "req_id": 4,
+      "response": {
+        "id": 4,
+        "jsonrpc": "2.0",
+        "result": {
+          "framesWritten": 44100,
+          "isOpen": true,
+          "state": "playing",
+          "volume": 1.0,
+          "writeCount": 1
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "pause sets paused",
+      "method": "pause",
+      "params": {},
+      "req_id": 5,
+      "response": {
+        "id": 5,
+        "jsonrpc": "2.0",
+        "result": {
+          "status": "paused"
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "verify paused via getStatus",
+      "method": "test.getStatus",
+      "params": {},
+      "req_id": 6,
+      "response": {
+        "id": 6,
+        "jsonrpc": "2.0",
+        "result": {
+          "framesWritten": 44100,
+          "isOpen": true,
+          "state": "paused",
+          "volume": 1.0,
+          "writeCount": 1
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "resume sets playing",
+      "method": "resume",
+      "params": {},
+      "req_id": 7,
+      "response": {
+        "id": 7,
+        "jsonrpc": "2.0",
+        "result": {
+          "status": "playing"
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "verify playing via getStatus",
+      "method": "test.getStatus",
+      "params": {},
+      "req_id": 8,
+      "response": {
+        "id": 8,
+        "jsonrpc": "2.0",
+        "result": {
+          "framesWritten": 44100,
+          "isOpen": true,
+          "state": "playing",
+          "volume": 1.0,
+          "writeCount": 1
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "setVolume 0.5",
+      "method": "setVolume",
+      "params": {
+        "volume": 0.5
+      },
+      "req_id": 9,
+      "response": {
+        "id": 9,
+        "jsonrpc": "2.0",
+        "result": {
+          "volume": 0.5
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "setVolume 1.0",
+      "method": "setVolume",
+      "params": {
+        "volume": 1.0
+      },
+      "req_id": 10,
+      "response": {
+        "id": 10,
+        "jsonrpc": "2.0",
+        "result": {
+          "volume": 1.0
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "setVolume 0.0 (min boundary)",
+      "method": "setVolume",
+      "params": {
+        "volume": 0.0
+      },
+      "req_id": 11,
+      "response": {
+        "id": 11,
+        "jsonrpc": "2.0",
+        "result": {
+          "volume": 0.0
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "seek (daemon-mode only)",
+      "method": "seek",
+      "params": {
+        "seconds": 1.5
+      },
+      "req_id": 12,
+      "expected_error": true,
+      "error_code": -32601,
+      "error_message": "Method not found: seek",
+      "response": {
+        "error": {
+          "code": -32601,
+          "message": "Method not found: seek"
+        },
+        "id": 12,
+        "jsonrpc": "2.0"
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "setOutput (daemon-mode only)",
+      "method": "setOutput",
+      "params": {
+        "mode": "shared"
+      },
+      "req_id": 13,
+      "expected_error": true,
+      "error_code": -32601,
+      "error_message": "Method not found: setOutput",
+      "response": {
+        "error": {
+          "code": -32601,
+          "message": "Method not found: setOutput"
+        },
+        "id": 13,
+        "jsonrpc": "2.0"
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "next (daemon-mode only)",
+      "method": "next",
+      "params": {},
+      "req_id": 14,
+      "expected_error": true,
+      "error_code": -32601,
+      "error_message": "Method not found: next",
+      "response": {
+        "error": {
+          "code": -32601,
+          "message": "Method not found: next"
+        },
+        "id": 14,
+        "jsonrpc": "2.0"
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "previous (daemon-mode only)",
+      "method": "previous",
+      "params": {},
+      "req_id": 15,
+      "expected_error": true,
+      "error_code": -32601,
+      "error_message": "Method not found: previous",
+      "response": {
+        "error": {
+          "code": -32601,
+          "message": "Method not found: previous"
+        },
+        "id": 15,
+        "jsonrpc": "2.0"
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "eq.setBand band=3 gainDb=3 freq=1000",
+      "method": "eq.setBand",
+      "params": {
+        "index": 3,
+        "gainDb": 3.0,
+        "frequency": 1000.0,
+        "q": 1.0
+      },
+      "req_id": 16,
+      "response": {
+        "id": 16,
+        "jsonrpc": "2.0",
+        "result": {
+          "band": 3,
+          "enabled": true,
+          "gainDb": 3.0
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "eq.setBand band=0 gainDb=-5 lowpass",
+      "method": "eq.setBand",
+      "params": {
+        "index": 0,
+        "gainDb": -5.0,
+        "frequency": 200.0,
+        "q": 0.7,
+        "type": "lowpass",
+        "enabled": true
+      },
+      "req_id": 17,
+      "response": {
+        "id": 17,
+        "jsonrpc": "2.0",
+        "result": {
+          "band": 0,
+          "enabled": true,
+          "gainDb": -5.0
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "eq.setEnabled true",
+      "method": "eq.setEnabled",
+      "params": {
+        "enabled": true
+      },
+      "req_id": 18,
+      "response": {
+        "id": 18,
+        "jsonrpc": "2.0",
+        "result": {
+          "enabled": true
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "eq.setEnabled false (toggle)",
+      "method": "eq.setEnabled",
+      "params": {
+        "enabled": false
+      },
+      "req_id": 19,
+      "response": {
+        "id": 19,
+        "jsonrpc": "2.0",
+        "result": {
+          "enabled": false
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "eq.reset",
+      "method": "eq.reset",
+      "params": {},
+      "req_id": 20,
+      "response": {
+        "id": 20,
+        "jsonrpc": "2.0",
+        "result": {
+          "reset": true
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "eq.setPreset with 2 bands",
+      "method": "eq.setPreset",
+      "params": {
+        "bands": [
+          {
+            "index": 0,
+            "gainDb": 2.0,
+            "frequency": 60,
+            "q": 1.0,
+            "type": "peaking",
+            "enabled": true
+          },
+          {
+            "index": 1,
+            "gainDb": -1.0,
+            "frequency": 250,
+            "q": 1.0,
+            "type": "peaking",
+            "enabled": true
+          }
+        ]
+      },
+      "req_id": 21,
+      "response": {
+        "id": 21,
+        "jsonrpc": "2.0",
+        "result": {
+          "bandsApplied": 2
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "convolution.loadIr nonexistent (expect error)",
+      "method": "convolution.loadIr",
+      "params": {
+        "path": "/tmp/nonexistent_ir.wav"
+      },
+      "req_id": 22,
+      "expected_error": true,
+      "error_code": -32000,
+      "error_message": "Handler error: Failed to load IR file: /tmp/nonexistent_ir.wav",
+      "response": {
+        "error": {
+          "code": -32000,
+          "message": "Handler error: Failed to load IR file: /tmp/nonexistent_ir.wav"
+        },
+        "id": 22,
+        "jsonrpc": "2.0"
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "convolution.setEnabled true",
+      "method": "convolution.setEnabled",
+      "params": {
+        "enabled": true
+      },
+      "req_id": 23,
+      "response": {
+        "id": 23,
+        "jsonrpc": "2.0",
+        "result": {
+          "enabled": true
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "channelBalance.setState balance=-0.5",
+      "method": "channelBalance.setState",
+      "params": {
+        "balance": -0.5,
+        "leftGainDb": 2.0,
+        "rightGainDb": 0.0
+      },
+      "req_id": 24,
+      "response": {
+        "id": 24,
+        "jsonrpc": "2.0",
+        "result": {
+          "applied": true,
+          "balance": -0.5,
+          "leftGainDb": 2.0,
+          "rightGainDb": 0.0
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "levelMeter.subscribe interval=200",
+      "method": "levelMeter.subscribe",
+      "params": {
+        "intervalMs": 200
+      },
+      "req_id": 25,
+      "response": {
+        "id": 25,
+        "jsonrpc": "2.0",
+        "result": {
+          "subscribed": true
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "levelMeter.unsubscribe",
+      "method": "levelMeter.unsubscribe",
+      "params": {},
+      "req_id": 26,
+      "response": {
+        "id": 26,
+        "jsonrpc": "2.0",
+        "result": {
+          "subscribed": false
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "test.echo roundtrip",
+      "method": "test.echo",
+      "params": {
+        "foo": "bar",
+        "num": 42,
+        "nested": {
+          "a": 1
+        }
+      },
+      "req_id": 27,
+      "response": {
+        "id": 27,
+        "jsonrpc": "2.0",
+        "result": {
+          "foo": "bar",
+          "nested": {
+            "a": 1
+          },
+          "num": 42
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "prepareAutomix (daemon-mode only)",
+      "method": "prepareAutomix",
+      "params": {
+        "fadeStartSeconds": 8
+      },
+      "req_id": 28,
+      "expected_error": true,
+      "error_code": -32601,
+      "error_message": "Method not found: prepareAutomix",
+      "response": {
+        "error": {
+          "code": -32601,
+          "message": "Method not found: prepareAutomix"
+        },
+        "id": 28,
+        "jsonrpc": "2.0"
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "queueNext (daemon-mode only)",
+      "method": "queueNext",
+      "params": {
+        "path": "/tmp/test_tone.flac"
+      },
+      "req_id": 29,
+      "expected_error": true,
+      "error_code": -32601,
+      "error_message": "Method not found: queueNext",
+      "response": {
+        "error": {
+          "code": -32601,
+          "message": "Method not found: queueNext"
+        },
+        "id": 29,
+        "jsonrpc": "2.0"
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "stop sets stopped",
+      "method": "stop",
+      "params": {},
+      "req_id": 30,
+      "response": {
+        "id": 30,
+        "jsonrpc": "2.0",
+        "result": {
+          "status": "stopped"
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "verify stopped via getStatus",
+      "method": "test.getStatus",
+      "params": {},
+      "req_id": 31,
+      "response": {
+        "id": 31,
+        "jsonrpc": "2.0",
+        "result": {
+          "framesWritten": 44100,
+          "isOpen": true,
+          "state": "stopped",
+          "volume": 0.0,
+          "writeCount": 1
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "nonexistent method returns -32601",
+      "method": "nonexistent",
+      "params": {},
+      "req_id": 32,
+      "expected_error": true,
+      "error_code": -32601,
+      "error_message": "Method not found: nonexistent",
+      "response": {
+        "error": {
+          "code": -32601,
+          "message": "Method not found: nonexistent"
+        },
+        "id": 32,
+        "jsonrpc": "2.0"
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    },
+    {
+      "name": "shutdown returns shutdown and exits",
+      "method": "shutdown",
+      "params": {},
+      "req_id": 33,
+      "response": {
+        "id": 33,
+        "jsonrpc": "2.0",
+        "result": {
+          "status": "shutdown"
+        }
+      },
+      "passed": true,
+      "errors": [],
+      "verdict": "PASS"
+    }
+  ],
+  "events": [],
+  "stderr": "[echo-audio-daemon] null-output mode"
+}

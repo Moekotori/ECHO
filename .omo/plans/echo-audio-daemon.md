@@ -2120,7 +2120,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews):
   - Message: `refactor(electron): delete old audio stack replaced by daemon`
   - Files: Multiple deletions across `src/main/audio/`, plus import fixes
 
-- [ ] 24. Nix Flake Update — Remove JUCE, Add Daemon Build
+- [x] 24. Nix Flake Update — Remove JUCE, Add Daemon Build
 
   **What to do**:
   - Edit `shell.nix`:
@@ -2190,7 +2190,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews):
   - Message: `build(nix): remove JUCE deps, add daemon build to flake`
   - Files: `shell.nix`, `package.nix`, `flake.nix`
 
-- [ ] 25. Linux ALSA Output via Miniaudio
+- [x] 25. Linux ALSA Output via Miniaudio
 
   **What to do**:
   - Verify that `MiniaudioBackend` (Task 8) already works on Linux via ALSA

@@ -1,5 +1,6 @@
 set(ECHO_AUDIO_DAEMON_SOURCES
     main.cpp
+    null_output/NullModeRunner.cpp
     decoder/AvDecoder.cpp
     decoder/ReplayGain.cpp
     dsp/BiquadFilter.cpp

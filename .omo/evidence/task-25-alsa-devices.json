@@ -1,0 +1,44 @@
+{
+  "daemon_device_list": [
+    {
+      "channels": 2,
+      "id": "miniaudio::f9e0da5e00f21279",
+      "isDefault": false,
+      "name": "ECHO_TEST_DUMMY",
+      "outputMode": "shared",
+      "sampleRate": 0,
+      "sharedSampleRate": 0
+    },
+    {
+      "channels": 2,
+      "id": "miniaudio::8b40c529630b421c",
+      "isDefault": true,
+      "name": "FreeDSP Pro",
+      "outputMode": "shared",
+      "sampleRate": 0,
+      "sharedSampleRate": 0
+    }
+  ],
+  "system_alsa_devices": {
+    "card0": { "name": "FreeDSP", "driver": "USB-Audio", "device0": "USB Audio" },
+    "card1": { "name": "PCH", "driver": "HDA-Intel", "device0": "ALC256 Analog" },
+    "card2": { "name": "NVidia", "driver": "HDA-Intel", "devices": ["HDMI 0 (R27Q71)", "HDMI 1", "HDMI 2", "HDMI 3"] }
+  },
+  "playback_test": {
+    "file": "/tmp/test_play_quiet.wav",
+    "sequence": [
+      {"type": "device.list", "result": "2 devices returned"},
+      {"type": "play", "events": ["event.trackStarted", "event.state(playing)", "event.trackEnded", "event.position(1.0/1.0)"], "result": "playing"},
+      {"type": "stop", "events": ["event.state(stopped)"], "result": "stopped"}
+    ],
+    "status": "PASS"
+  },
+  "notes": {
+    "backend": "miniaudio (default backend priority: PulseAudio via PipeWire)",
+    "missing_devices": ["HDA Intel PCH (ALC256 Analog)", "NVidia HDMI outputs"],
+    "missing_reason": "PipeWire does not expose these ALSA devices. Miniaudio uses PulseAudio backend by default on this system. Raw ALSA would require forcing ma_backend_alsa.",
+    "echo_test_dummy": "PipeWire virtual test sink (echo_test_sink), not real hardware",
+    "outputMode": "shared for all devices",
+    "date_tested": "2026-06-25"
+  }
+}

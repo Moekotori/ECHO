@@ -1,5 +1,4 @@
-# TODO(nix-fod): native/audio-host (JUCE via cmake FetchContent) 仍未在 sandbox 中产出；
-# 需要时进入 `nix develop` 后手动 `npm run build:audio-host`。
+# echo-audio-daemon (CMake + pkg-config, no network) 在 buildPhase 内构建。
 # better-sqlite3 native ABI 已在 buildPhase 中用 nixpkgs 提供的 ${electron.headers} 离线 rebuild。
 {
   lib,
@@ -17,16 +16,9 @@
   electron_42,
 
   alsa-lib,
-  freetype,
-  fontconfig,
-  libX11,
-  libXcomposite,
-  libXcursor,
-  libXext,
-  libXinerama,
-  libXrandr,
-  libXrender,
-  gtk3,
+  cmake,
+  ffmpeg,
+  libebur128,
   nss,
   nspr,
   libxscrnsaver,
@@ -57,18 +49,8 @@ let
 
   runtimeLibs = [
     alsa-lib
-    freetype
-    fontconfig
-
-    libX11
-    libXcomposite
-    libXcursor
-    libXext
-    libXinerama
-    libXrandr
-    libXrender
-
-    gtk3
+    ffmpeg
+    libebur128
     nss
     nspr
 
@@ -132,6 +114,7 @@ buildNpmPackage {
     python3
     pkg-config
     stdenv.cc
+    cmake
   ];
 
   buildInputs = runtimeLibs;
@@ -167,6 +150,10 @@ buildNpmPackage {
     # 阶段只能走 glibc 路径。
     rm -rf node_modules/@img/sharp-linuxmusl-x64 node_modules/@img/sharp-libvips-linuxmusl-x64
 
+    # echo-audio-daemon: 标准 CMake + pkg-config，无网络依赖。
+    cmake -B build native/echo-audio-daemon
+    cmake --build build
+
     runHook postBuild
   '';
 
@@ -197,6 +184,9 @@ buildNpmPackage {
       --add-flags "$appDir" \
       --set-default LD_LIBRARY_PATH "${runtimeLibPath}"
 
+    # Install echo-audio-daemon binary
+    install -Dm755 build/src/echo-audio-daemon "$out/lib/echo-next/echo-audio-daemon"
+
     runHook postInstall
   '';
 
@@ -209,7 +199,7 @@ buildNpmPackage {
       fi
     done < <(
       find "$out" \
-        \( -name "*.node" -o -name "*.so" \) \
+        \( -name "*.node" -o -name "*.so" -o -name "echo-audio-daemon" \) \
         -print0
     )
   '';

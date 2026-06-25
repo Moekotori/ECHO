@@ -20,18 +20,8 @@ mkShell {
     makeWrapper
     jq
 
-    # JUCE audio host deps
+    # Audio system
     alsa-lib
-    freetype
-    fontconfig
-    libX11
-    libXcomposite
-    libXcursor
-    libXext
-    libXinerama
-    libXrandr
-    libXrender
-    gtk3
 
     # Electron runtime deps
     nss

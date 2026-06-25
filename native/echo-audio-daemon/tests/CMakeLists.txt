@@ -277,6 +277,11 @@ add_executable(echo-daemon-session-manager-tests
     ../src/ipc/JsonRpcServer.cpp
     ../src/dsp/BiquadFilter.cpp
     ../src/dsp/EqProcessor.cpp
+    ../src/dsp/ConvolutionProcessor.cpp
+    ../src/dsp/ChannelBalanceProcessor.cpp
+    ../src/dsp/Limiter.cpp
+    ../src/dsp/DspPipeline.cpp
+    ../third_party/kissfft/kiss_fft.c
 )
 target_compile_features(echo-daemon-session-manager-tests PRIVATE cxx_std_17)
 target_include_directories(echo-daemon-session-manager-tests PRIVATE
@@ -287,6 +292,7 @@ target_include_directories(echo-daemon-session-manager-tests PRIVATE
 target_link_libraries(echo-daemon-session-manager-tests PRIVATE
     ${FFMPEG_LIBRARIES}
     pthread
+    m
 )
 set_target_properties(echo-daemon-session-manager-tests PROPERTIES
     EXCLUDE_FROM_ALL TRUE
