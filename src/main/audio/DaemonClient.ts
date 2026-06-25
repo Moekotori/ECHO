@@ -241,14 +241,17 @@ export const getDaemonClient = (): DaemonClient => {
 
 /** Resolve the daemon binary path (prod: resourcesPath, dev: electron-app/build/...). */
 function resolveBinary(): string {
-  if (process.resourcesPath) {
-    return join(process.resourcesPath, 'echo-audio-daemon');
-  }
-  // Dev: look in electron-app/build/ (where ensure-audio-daemon copies it)
+  // Dev: look in electron-app/build/ first (where ensure-audio-daemon copies it)
   const devPath = join(process.cwd(), 'electron-app', 'build', 'echo-audio-daemon');
   if (existsSync(devPath)) return devPath;
   // Fallback: direct build output
-  return join(process.cwd(), 'native', 'echo-audio-daemon', 'build', 'src', 'echo-audio-daemon');
+  const nativeDevPath = join(process.cwd(), 'native', 'echo-audio-daemon', 'build', 'src', 'echo-audio-daemon');
+  if (existsSync(nativeDevPath)) return nativeDevPath;
+  // Production: resourcesPath
+  if (process.resourcesPath) {
+    return join(process.resourcesPath, 'echo-audio-daemon');
+  }
+  return devPath;
 }
 
 // =========================================================================
