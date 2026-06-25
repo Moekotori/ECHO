@@ -66,22 +66,37 @@ async function downloadAndExtract() {
       } catch {}
     }
   } else {
-    // Linux: use system FFmpeg or download static build
-    const systemCheck = spawnSync('ffmpeg', ['-version'], { stdio: 'pipe' });
-    if (systemCheck.status === 0) {
-      log('System FFmpeg detected, copying...');
-      const which = spawnSync('which', ['ffmpeg'], { stdio: 'pipe' });
-      const systemPath = which.stdout.toString().trim();
-      if (systemPath) {
-        const { copyFileSync } = await import('node:fs');
-        copyFileSync(systemPath, join(toolsDir, 'ffmpeg'));
+    // Linux: download static build from johnvansickle.com
+    const url = 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz';
+    const tarball = join(toolsDir, 'ffmpeg.tar.xz');
+    log(`Downloading Linux FFmpeg static build...`);
+
+    // Download using curl or Node.js https
+    const dl = spawnSync('curl', ['-#L', '-o', tarball, url], { stdio: 'inherit', shell: true });
+    if (dl.status !== 0) {
+      log('Downloading via Node.js...');
+      const https = await import('node:https');
+      const fs = await import('node:fs');
+      await new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(tarball);
+        https.get(url, res => res.pipe(file));
+        file.on('finish', resolve);
+        file.on('error', reject);
+      });
+    }
+
+    // Extract
+    log('Extracting ffmpeg...');
+    spawnSync('tar', ['xf', tarball, '-C', toolsDir], { stdio: 'inherit' });
+    // Find ffmpeg binary in extracted directory
+    const name = spawnSync('ls', [toolsDir]).stdout.toString().split('\n').find(s => s.startsWith('ffmpeg-'));
+    if (name) {
+      const bin = join(toolsDir, name, 'ffmpeg');
+      if (existsSync(bin)) {
+        spawnSync('cp', [bin, join(toolsDir, 'ffmpeg')]);
         spawnSync('chmod', ['+x', join(toolsDir, 'ffmpeg')]);
-        log(`Copied system FFmpeg from ${systemPath}`);
-        return;
       }
     }
-    log('No system FFmpeg found. Please install FFmpeg or download manually.');
-    process.exit(1);
   }
 }
 
