@@ -9,6 +9,7 @@
   "private": true,
   "scripts": {
     "dev": "npm run rebuild:native && npm run ensure:audio-daemon && electron-vite dev",
+    "dev:debug": "npm run rebuild:native && npm run ensure:audio-daemon && electron-vite dev -- --remote-debugging-port=9222",
     "dev:full": "npm run rebuild:native && npm run ensure:audio-daemon && npm run build:smtc-host && electron-vite dev",
     "build:audio-host": "node scripts/build-audio-host.mjs",
     "build:audio-daemon": "node scripts/build-audio-daemon.mjs",
@@ -37,8 +38,8 @@
     "rebuild:native:node": "npm rebuild better-sqlite3",
     "sync:audio-host": "node scripts/sync-audio-host.mjs",
     "build": "npm run typecheck && electron-vite build",
-    "build:win": "npm run rebuild:native && npm run verify:ffmpeg && npm run build:audio-host && npm run build:smtc-host && npm run build:native-scanner && npm run build && npm run ensure:nsis-resources && electron-builder --win && npm run verify:airplay-package",
-    "build:win:unsigned": "npm run rebuild:native && npm run verify:ffmpeg && npm run build:audio-host && npm run build:smtc-host && npm run build:native-scanner && npm run build && npm run ensure:nsis-resources && node scripts/build-win-unsigned.mjs && npm run verify:airplay-package",
+    "build:win": "npm run rebuild:native && npm run verify:ffmpeg && npm run build:audio-host && npm run build:audio-daemon && npm run build:smtc-host && npm run build:native-scanner && npm run build && npm run ensure:nsis-resources && electron-builder --win && npm run verify:airplay-package",
+    "build:win:unsigned": "npm run rebuild:native && npm run verify:ffmpeg && npm run build:audio-host && npm run build:audio-daemon && npm run build:smtc-host && npm run build:native-scanner && npm run build && npm run ensure:nsis-resources && node scripts/build-win-unsigned.mjs && npm run verify:airplay-package",
     "build:linux": "node scripts/build-linux.mjs",
     "check:encoding": "node scripts/check-encoding.mjs",
     "check:theme-colors": "node scripts/check-theme-colors.mjs",
@@ -141,6 +142,10 @@
           "to": "echo-audio-host.exe"
         },
         {
+          "from": "electron-app/build/echo-audio-daemon.exe",
+          "to": "echo-audio-daemon.exe"
+        },
+        {
           "from": "electron-app/build/echo-smtc-host.exe",
           "to": "echo-smtc-host.exe"
         },
@@ -239,6 +244,10 @@
         {
           "from": "electron-app/build/echo-audio-host",
           "to": "echo-audio-host"
+        },
+        {
+          "from": "electron-app/build/echo-audio-daemon",
+          "to": "echo-audio-daemon"
         },
         {
           "from": "electron-app/build/echo-native-scanner",

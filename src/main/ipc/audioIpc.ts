@@ -46,4 +46,16 @@ export const registerAudioIpc = async (): Promise<void> => {
   ipcMain.handle(IpcChannels.DaemonCommand, async (_event, { method, params }: { method: string; params?: unknown }) => {
     return daemonClient.command(method, params);
   });
+
+  // ── Backward-compat shims for old IPC channels ──
+  ipcMain.handle(IpcChannels.AudioGetStatus, async () => daemonClient.command('getStatus'));
+  ipcMain.handle(IpcChannels.AudioSetOutput, async (_event, params: unknown) => daemonClient.command('setOutput', params));
+  ipcMain.handle(IpcChannels.AudioListDevices, async () => daemonClient.command('device.list'));
+  ipcMain.handle(IpcChannels.AudioResetEngine, async () => daemonClient.command('stop'));
+  ipcMain.handle(IpcChannels.AudioForceRestart, async () => {
+    await daemonClient.command('stop');
+    daemonClient.shutdown();
+    return daemonClient.spawn();
+  });
+  ipcMain.handle(IpcChannels.AudioOpenAsioControlPanel, async () => daemonClient.command('openAsioControlPanel'));
 };
