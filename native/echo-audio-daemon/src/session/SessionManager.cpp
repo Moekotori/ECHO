@@ -247,6 +247,12 @@ void SessionManager::playbackLoop() {
             continue;
         }
 
+        // ── Throttle: back off if output buffer has been full ──────────
+        if (underrunCount_ > 10) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            underrunCount_ = 0;
+        }
+
         // ── Decode ──────────────────────────────────────────────────────
         int framesDecoded = decoder_.decode(buffer.data(), kBlockSize);
 
@@ -285,6 +291,8 @@ void SessionManager::playbackLoop() {
         // ── Write to Output ─────────────────────────────────────────────
         if (!output_.write(buffer.data(), framesDecoded)) {
             ++underrunCount_;
+            // Output buffer full — wait for device to consume
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
 
         // ── Position Tracking ──────────────────────────────────────────
