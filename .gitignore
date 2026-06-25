@@ -87,3 +87,4 @@ prd-sleep-timer.md
 *.license
 !src/main/plugins/MachineIdentity.ts
 !src/main/plugins/EchoProLicensePlugin.ts
+*.webm
