@@ -110,7 +110,7 @@ const getDefaultLyricsService = async (): Promise<LyricsServiceLike> => {
 
 const isDefaultPlaybackActive = async (): Promise<boolean> => {
   try {
-    const { getAudioSession } = await import('../audio/AudioSession');
+    const { getAudioSession } = await import('../audio/DaemonClient');
     const state = getAudioSession().getStatus().state;
     return state === 'loading' || state === 'playing';
   } catch {

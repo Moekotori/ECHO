@@ -28,7 +28,7 @@ import { app } from 'electron';
 import type { AudioOutputSettings, AudioStatus } from '../../shared/types/audio';
 import type { AirPlayReceiverProtocol } from '../../shared/types/appSettings';
 import type { AirPlayReceiverStatus, ConnectMetadata, ConnectReceiverClient, ConnectReceiverDebugEvent } from '../../shared/types/connect';
-import { getAudioSession } from '../audio/AudioSession';
+import { getAudioSession } from '../audio/DaemonClient';
 import { getAppSettings } from '../app/appSettings';
 import { AirPlayMdnsAdvertiser, airPlay2FeatureMask, createAirPlay2PairingUuid } from './AirPlayMdnsAdvertiser';
 

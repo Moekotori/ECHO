@@ -33,7 +33,7 @@ vi.mock('../library/TagWriter', () => ({
   writeEmbeddedLyricsTag: tagWriterMock.writeEmbeddedLyricsTag,
 }));
 
-vi.mock('../audio/AudioSession', () => ({
+vi.mock('../audio/DaemonClient', () => ({
   getAudioSession: () => ({
     getStatus: audioSessionMock.getStatus,
   }),

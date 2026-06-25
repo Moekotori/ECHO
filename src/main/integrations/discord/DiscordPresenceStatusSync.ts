@@ -1,5 +1,5 @@
 import type { AudioStatus } from '../../../shared/types/audio';
-import { getAudioSession } from '../../audio/AudioSession';
+import { getAudioSession } from '../../audio/DaemonClient';
 import { getCrashReportService } from '../../diagnostics/CrashReportService';
 import { getDiscordPresenceService } from './getDiscordPresenceService';
 

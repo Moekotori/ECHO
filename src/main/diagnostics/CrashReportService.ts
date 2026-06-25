@@ -21,7 +21,7 @@ import type {
 } from '../../shared/types/diagnostics';
 import { getAppSettings } from '../app/appSettings';
 import { getLastDataProtectionResult, getLibraryDatabaseMaintenanceReport } from '../app/dataProtection';
-import { getAudioSession } from '../audio/AudioSession';
+import { getAudioSession } from '../audio/DaemonClient';
 import { getLibraryService } from '../library/LibraryService';
 import { hashText, Logger, sanitizeLogPayload } from './Logger';
 import { getAccountService } from '../accounts/AccountService';

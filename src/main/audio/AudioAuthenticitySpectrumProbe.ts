@@ -2,7 +2,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcessByStdio, SpawnOptionsWithStdioTuple } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import readline from 'node:readline';
-import { resolveFfmpegToolchainPath } from './FfmpegToolchain';
+import { resolveFfmpegToolchainPath } from './DaemonClient';
 
 export type AudioAuthenticitySpectrumProbeStatus = 'ready' | 'skipped' | 'unavailable' | 'too_short' | 'too_quiet' | 'error';
 

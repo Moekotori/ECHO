@@ -24,7 +24,7 @@ import type { AudioStatus } from '../../shared/types/audio';
 import type { LibraryAlbum, LibraryPage, LibraryPageQuery, LibraryTrack } from '../../shared/types/library';
 import type { TrackLyrics } from '../../shared/types/lyrics';
 import type { PersistedPlaybackSessionV1, PersistedQueueItem } from '../../shared/types/playback';
-import { getAudioSession } from '../audio/AudioSession';
+import { getAudioSession } from '../audio/DaemonClient';
 import { getLibraryService } from '../library/LibraryService';
 import { getLyricsService } from '../lyrics/LyricsService';
 import type { CoverVariant } from '../library/libraryTypes';

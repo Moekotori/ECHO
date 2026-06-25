@@ -2,7 +2,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcessByStdio, SpawnOptionsWithStdioTuple } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import readline from 'node:readline';
-import { resolveFfmpegToolchainPath } from '../../audio/FfmpegToolchain';
+import { resolveFfmpegToolchainPath } from '../../audio/DaemonClient';
 
 type AnalyzerProcess = ChildProcessByStdio<null, Readable, Readable>;
 type AnalyzerSpawnOptions = SpawnOptionsWithStdioTuple<'ignore', 'pipe', 'pipe'> & {

@@ -1,5 +1,5 @@
 import { getAppSettings, setAppSettings } from '../../app/appSettings';
-import { getAudioSession } from '../../audio/AudioSession';
+import { getAudioSession } from '../../audio/DaemonClient';
 import { getCrashReportService } from '../../diagnostics/CrashReportService';
 import { NoopDiscordPresenceService } from './NoopDiscordPresenceService';
 import type { DiscordPresenceService, DiscordPresenceStatus } from './DiscordPresenceService';

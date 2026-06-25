@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { unzip } from 'fflate';
-import { resolveFfmpegToolchain, type FfmpegToolchainInfo } from '../audio/FfmpegToolchain';
+import { resolveFfmpegToolchain, type FfmpegToolchainInfo } from '../audio/DaemonClient';
 import type { EditableTrackTags } from '../../shared/types/library';
 import { decodeTextFileBytes } from '../../shared/utils/decodeTextFile';
 import { writeEmbeddedTrackTags } from './TagWriter';

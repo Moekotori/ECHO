@@ -15,7 +15,7 @@ import type {
 } from '../../shared/types/audio';
 import type { PlaybackProbeHint, PlaybackTrackMetadataHint } from '../../shared/types/playback';
 import type { ReplayGainTrackData } from '../../shared/utils/replayGain';
-import type { FfmpegToolchainInfo } from './FfmpegToolchain';
+import type { FfmpegToolchainInfo } from './DaemonClient';
 
 export type {
   AudioDeviceInfo,

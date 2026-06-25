@@ -6,7 +6,7 @@ import { networkInterfaces, hostname } from 'node:os';
 import type { AddressInfo } from 'node:net';
 import type { AudioStatus } from '../../shared/types/audio';
 import type { ConnectReceiverClient, ConnectReceiverDebugEvent, ConnectReceiverState, ConnectReceiverStatus } from '../../shared/types/connect';
-import { getAudioSession } from '../audio/AudioSession';
+import { getAudioSession } from '../audio/DaemonClient';
 import { chooseLocalAddressForRemote } from './ConnectHttpServer';
 import {
   avTransportServiceType,

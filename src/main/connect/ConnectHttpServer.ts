@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
 import sharp from 'sharp';
 import type { ConnectHttpDebugEvent } from '../../shared/types/connect';
-import { resolveFfmpegToolchain } from '../audio/FfmpegToolchain';
+import { resolveFfmpegToolchain } from '../audio/DaemonClient';
 import { defaultCoverSvg } from '../library/workers/TsCoverExtractor';
 
 type DirectAudioToken = {

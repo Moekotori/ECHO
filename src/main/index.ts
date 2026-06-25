@@ -35,7 +35,7 @@ recordStartupPersistentStateSnapshot({
 markStartupStage('main:persistent-state-snapshot-recorded');
 initializePerformanceStallMonitor(async () => {
   try {
-    const { getAudioSession } = await import('./audio/AudioSession');
+    const { getAudioSession } = await import('./audio/DaemonClient');
     return getAudioSession().getDiagnostics() as unknown as Record<string, unknown>;
   } catch {
     return null;

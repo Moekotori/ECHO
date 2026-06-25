@@ -8,7 +8,7 @@ import { createDownloadAuthorizationToken, protectedMusicDownloadBlockedMessage 
 
 let playbackState: 'idle' | 'loading' | 'playing' | 'paused' | 'stopped' = 'idle';
 
-vi.mock('../audio/AudioSession', () => ({
+vi.mock('../audio/DaemonClient', () => ({
   getAudioSession: () => ({
     getStatus: () => ({
       state: playbackState,

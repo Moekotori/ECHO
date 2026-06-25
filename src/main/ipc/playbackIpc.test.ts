@@ -86,7 +86,7 @@ describe('playback media prepare IPC', () => {
         }),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => ({
           state: 'playing',
@@ -293,7 +293,7 @@ describe('playback media prepare IPC', () => {
         handle: vi.fn(),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => ({
           state: 'idle',
@@ -379,7 +379,7 @@ describe('playback media prepare IPC', () => {
         }),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => ({
           state: 'stopped',
@@ -470,7 +470,7 @@ describe('playback media prepare IPC', () => {
         }),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => ({
           state: 'paused',
@@ -558,7 +558,7 @@ describe('playback media prepare IPC', () => {
     vi.doMock('../library/LibraryService', () => ({
       getLibraryService: () => ({ startReplayGainAnalysis }),
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => ({
           state: 'playing',
@@ -639,7 +639,7 @@ describe('playback media prepare IPC', () => {
     vi.doMock('../library/LibraryService', () => ({
       getLibraryService: () => ({ startReplayGainAnalysis }),
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => ({
           state: 'playing',
@@ -750,7 +750,7 @@ describe('playback media prepare IPC', () => {
         }),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => status,
         on: vi.fn(),
@@ -880,7 +880,7 @@ describe('playback media prepare IPC', () => {
         }),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => status,
         on: vi.fn(),
@@ -994,7 +994,7 @@ describe('playback media prepare IPC', () => {
         }),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => ({
           state: 'playing',
@@ -1146,7 +1146,7 @@ describe('playback media prepare IPC', () => {
         }),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => audioSession,
     }));
     vi.doMock('../audio/PlaybackMemoryStore', () => ({
@@ -1252,7 +1252,7 @@ describe('playback media prepare IPC', () => {
         }),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => ({
           state: 'playing',
@@ -1370,7 +1370,7 @@ describe('playback media prepare IPC', () => {
         }),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => ({
           state: 'idle',
@@ -1450,7 +1450,7 @@ describe('playback media prepare IPC', () => {
         }),
       },
     }));
-    vi.doMock('../audio/AudioSession', () => ({
+    vi.doMock('../audio/DaemonClient', () => ({
       getAudioSession: () => ({
         getStatus: () => status,
         on: vi.fn(),

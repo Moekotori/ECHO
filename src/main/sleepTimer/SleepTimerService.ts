@@ -1,5 +1,5 @@
 import { app, BrowserWindow } from 'electron';
-import { getAudioSession } from '../audio/AudioSession';
+import { getAudioSession } from '../audio/DaemonClient';
 import { noteDataProtectionPlaybackActivity } from '../app/dataProtection';
 import { syncSmtcStatus } from '../integrations/smtc/SmtcStatusSync';
 import { savePlaybackMemoryNow } from '../ipc/playbackIpc';

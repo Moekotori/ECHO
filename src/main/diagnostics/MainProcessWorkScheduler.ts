@@ -15,7 +15,7 @@ export const runMainBackgroundTask = async <T>(name: string, work: () => Promise
 
 export const isPlaybackActiveForMainWork = async (): Promise<boolean> => {
   try {
-    const { getAudioSession } = await import('../audio/AudioSession');
+    const { getAudioSession } = await import('../audio/DaemonClient');
     const state = getAudioSession().getStatus().state;
     return playbackPressureStates.has(state);
   } catch {

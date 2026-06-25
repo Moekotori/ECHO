@@ -4,7 +4,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import { app, dialog, type BrowserWindow } from 'electron';
 import type { AudioExportRequest, AudioExportResult } from '../../shared/types/audio';
 import { resolveCueTrack } from './CueSheet';
-import { resolveFfmpegToolchain } from './FfmpegToolchain';
+import { resolveFfmpegToolchain } from './DaemonClient';
 import {
   appendAudioExportExtension,
   buildAudioExportFfmpegArgs,

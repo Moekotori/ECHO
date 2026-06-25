@@ -8,7 +8,7 @@ const { mockPause, mockStop, mockQuit } = vi.hoisted(() => ({
   mockQuit: vi.fn(),
 }));
 
-vi.mock('../audio/AudioSession', () => ({
+vi.mock('../audio/DaemonClient', () => ({
   getAudioSession: () => ({
     pause: mockPause,
     stop: mockStop,

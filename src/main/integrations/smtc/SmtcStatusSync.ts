@@ -7,7 +7,7 @@ import type { SmtcCommand, SmtcDiagnosticEvent, SmtcDiagnostics, SmtcEnabledActi
 import type { SmtcLyricsProgress } from '../../../shared/types/smtc';
 import { getMainWindow } from '../../app/windowManager';
 import { getAppSettings } from '../../app/appSettings';
-import { getAudioSession } from '../../audio/AudioSession';
+import { getAudioSession } from '../../audio/DaemonClient';
 import { getCrashReportService } from '../../diagnostics/CrashReportService';
 import { getLibraryService } from '../../library/LibraryService';
 import type { CoverVariant } from '../../library/libraryTypes';

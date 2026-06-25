@@ -5,7 +5,7 @@ import type { AppSettings } from '../../shared/types/appSettings';
 import type { AudioStatus } from '../../shared/types/audio';
 import type { SmtcButtonCommand } from '../../shared/types/smtc';
 import type { TaskbarPlaybackStatus } from '../../shared/types/taskbarPlayback';
-import { getAudioSession } from '../audio/AudioSession';
+import { getAudioSession } from '../audio/DaemonClient';
 import { getLibraryService } from '../library/LibraryService';
 import { getAppSettings } from './appSettings';
 import { getMainWindow } from './windowManager';

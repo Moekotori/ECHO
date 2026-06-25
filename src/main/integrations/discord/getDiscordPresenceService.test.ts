@@ -7,7 +7,7 @@ vi.mock('../../app/appSettings', () => ({
   setAppSettings: vi.fn(),
 }));
 
-vi.mock('../../audio/AudioSession', () => ({
+vi.mock('../../audio/DaemonClient', () => ({
   getAudioSession: () => ({
     getStatus: vi.fn(),
   }),

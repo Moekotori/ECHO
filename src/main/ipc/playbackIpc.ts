@@ -23,7 +23,7 @@ import { defaultStreamingAudioQuality, streamingProviderNames, type StreamingAud
 import type { HqPlayerPlaybackHandoffRequest } from '../../shared/types/hqplayer';
 import type { ReplayGainTrackData } from '../../shared/utils/replayGain';
 import type { AudioSessionAutomixRequest, AudioSessionGaplessRequest } from '../audio/audioTypes';
-import { getAudioSession, type AudioErrorRecoveryHandler } from '../audio/AudioSession';
+import { getAudioSession, type AudioErrorRecoveryHandler } from '../audio/DaemonClient';
 import { getPlaybackMemoryStore, type PlaybackMemory } from '../audio/PlaybackMemoryStore';
 import { getPlaybackSessionStore, normalizePersistedPlaybackSession } from '../audio/PlaybackSessionStore';
 import { getCrashReportService } from '../diagnostics/CrashReportService';

@@ -13,7 +13,7 @@ import type { LibraryTrack } from '../../shared/types/library';
 import type { PlayableTrack } from '../../shared/types/remoteSources';
 import { streamingProviderNames, type StreamingProviderName } from '../../shared/types/streaming';
 import { defaultHqPlayerSettings } from '../app/appSettings';
-import { getAudioSession } from '../audio/AudioSession';
+import { getAudioSession } from '../audio/DaemonClient';
 import { getHqPlayerService, type HqPlayerService } from '../integrations/hqplayer/HqPlayerService';
 import { getLibraryService } from '../library/LibraryService';
 import type { CoverVariant } from '../library/libraryTypes';

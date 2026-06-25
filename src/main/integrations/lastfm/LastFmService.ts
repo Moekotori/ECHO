@@ -3,7 +3,7 @@ import type { AppSettings } from '../../../shared/types/appSettings';
 import type { LastFmAuthStartResult, LastFmStatus, LastFmTrackPayload } from '../../../shared/types/lastfm';
 import type { LibraryTrack } from '../../../shared/types/library';
 import { getAppSettings, setAppSettings } from '../../app/appSettings';
-import { getAudioSession } from '../../audio/AudioSession';
+import { getAudioSession } from '../../audio/DaemonClient';
 import { getCrashReportService } from '../../diagnostics/CrashReportService';
 import { getLibraryService } from '../../library/LibraryService';
 import { LastFmClient, type LastFmApiResult } from './LastFmClient';

@@ -14,7 +14,7 @@ import {
   recordPerformanceStall,
   recordRendererRuntimeError,
 } from '../diagnostics/DevConsoleService';
-import { getAudioSession } from '../audio/AudioSession';
+import { getAudioSession } from '../audio/DaemonClient';
 
 const normalizeRendererError = (value: unknown): RendererErrorPayload => {
   const input = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};

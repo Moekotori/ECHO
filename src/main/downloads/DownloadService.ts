@@ -26,7 +26,7 @@ import type { AppSettings } from '../../shared/types/appSettings';
 import { streamingProviderNames, type StreamingProviderName } from '../../shared/types/streaming';
 import { isSupportedAudioExtension } from '../../shared/constants/audioExtensions';
 import { getAccountService } from '../accounts/AccountService';
-import { resolveFfmpegToolchain, type FfmpegToolchainInfo } from '../audio/FfmpegToolchain';
+import { resolveFfmpegToolchain, type FfmpegToolchainInfo } from '../audio/DaemonClient';
 import { getLibraryService } from '../library/LibraryService';
 import { getNcmConverter } from '../library/NcmConverter';
 import { importOsuArchiveAsMp3Queued } from '../library/OsuArchiveImport';
@@ -1858,7 +1858,7 @@ export class DownloadService extends EventEmitter {
 
   private async shouldDelayDeferredImportForPlayback(): Promise<boolean> {
     try {
-      const { getAudioSession } = await import('../audio/AudioSession');
+      const { getAudioSession } = await import('../audio/DaemonClient');
       const state = getAudioSession().getStatus().state;
       return state === 'loading' || state === 'playing';
     } catch {

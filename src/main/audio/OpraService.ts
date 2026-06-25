@@ -26,7 +26,7 @@ import type {
   OpraHeadphoneCorrectionSearchResult,
   OpraHeadphoneCorrectionVendorResult,
 } from '../../shared/types/opra';
-import { getEqBridge } from './EqBridge';
+import { getEqBridge } from './DaemonClient';
 
 type OpraEntryType = 'vendor' | 'product' | 'eq';
 

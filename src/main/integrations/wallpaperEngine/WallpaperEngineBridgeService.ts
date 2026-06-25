@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import type { AudioStatus } from '../../../shared/types/audio';
 import { createMusicReactiveScene, type MusicReactiveScene } from '../../../shared/utils/musicReactiveScene';
-import { getAudioSession } from '../../audio/AudioSession';
+import { getAudioSession } from '../../audio/DaemonClient';
 import {
   decrementWallpaperEngineBridgeClients,
   getWallpaperEngineBridgeClientCount,

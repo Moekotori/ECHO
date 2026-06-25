@@ -2381,7 +2381,7 @@ export class LibraryService {
       return;
     }
 
-    void import('../audio/AudioSession')
+    void import('../audio/DaemonClient')
       .then(({ getAudioSession }) => {
         if (this.closed || !this.artistImageCacheService) {
           return;
@@ -2687,7 +2687,7 @@ export class LibraryService {
 
   private async shouldDelayWatcherRescanForLowLoadPlayback(): Promise<boolean> {
     try {
-      const { getAudioSession } = await import('../audio/AudioSession');
+      const { getAudioSession } = await import('../audio/DaemonClient');
       const state = getAudioSession().getStatus().state;
       return state === 'loading' || state === 'playing';
     } catch {
@@ -2875,7 +2875,7 @@ export class LibraryService {
 
 const shouldDelayEmbeddedTagWriteForAudio = async (filePath: string): Promise<boolean> => {
   try {
-    const { getAudioSession } = await import('../audio/AudioSession');
+    const { getAudioSession } = await import('../audio/DaemonClient');
     const status = getAudioSession().getStatus();
     const audioPipelineBusy = status.state === 'loading' || status.state === 'playing';
     const currentFileHeld =

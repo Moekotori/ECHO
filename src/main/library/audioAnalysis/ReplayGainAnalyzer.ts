@@ -4,7 +4,7 @@ import type { Readable } from 'node:stream';
 import readline from 'node:readline';
 import { DEFAULT_REPLAY_GAIN_TARGET_LUFS } from '../../../shared/constants/replayGain';
 import { dbToLinearGain } from '../../../shared/utils/replayGain';
-import { resolveFfmpegToolchainPath } from '../../audio/FfmpegToolchain';
+import { resolveFfmpegToolchainPath } from '../../audio/DaemonClient';
 
 type AnalyzerProcess = ChildProcessByStdio<null, Readable, Readable>;
 type AnalyzerSpawnOptions = SpawnOptionsWithStdioTuple<'ignore', 'ignore', 'pipe'> & {

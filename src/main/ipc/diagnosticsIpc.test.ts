@@ -40,7 +40,7 @@ vi.mock('../diagnostics/DevConsoleService', () => ({
   recordRendererRuntimeError: vi.fn(),
 }));
 
-vi.mock('../audio/AudioSession', () => ({
+vi.mock('../audio/DaemonClient', () => ({
   getAudioSession: () => ({
     getDiagnostics: vi.fn(),
   }),

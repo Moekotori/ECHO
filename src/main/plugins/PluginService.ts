@@ -62,7 +62,7 @@ import type {
 } from '../../shared/types/plugins';
 import { getAppSettings, setAppSettings } from '../app/appSettings';
 import { AudioAuthenticityAnalyzer } from '../audio/AudioAuthenticityAnalyzer';
-import { getAudioSession } from '../audio/AudioSession';
+import { getAudioSession } from '../audio/DaemonClient';
 import { getLibraryService } from '../library/LibraryService';
 import { fetchWithNetworkProxy } from '../network/networkFetch';
 import { normalizePluginManifest } from './PluginManifest';

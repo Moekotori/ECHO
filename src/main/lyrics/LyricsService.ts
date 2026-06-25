@@ -474,7 +474,7 @@ const sidecarLyricsExtensions = ['.lrc', '.ttml', '.txt'] as const;
 
 const shouldDelayEmbeddedLyricsWriteForAudio = async (filePath: string): Promise<boolean> => {
   try {
-    const { getAudioSession } = await import('../audio/AudioSession');
+    const { getAudioSession } = await import('../audio/DaemonClient');
     const status = getAudioSession().getStatus();
     const currentFilePath = status.currentFilePath ? resolve(status.currentFilePath) : null;
     const targetPath = resolve(filePath);

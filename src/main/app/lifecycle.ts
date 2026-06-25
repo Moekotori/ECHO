@@ -32,7 +32,7 @@ import { closeDefaultRemoteSourceService } from '../library/remote/RemoteSourceS
 import { closeDefaultLyricsService } from '../lyrics/LyricsService';
 import { closeDefaultMvService } from '../mv/MvService';
 import { closeDefaultStreamingService } from '../streaming/StreamingService';
-import { disposeDefaultAudioSessionGracefully } from '../audio/AudioSession';
+import { disposeDefaultAudioSessionGracefully } from '../audio/DaemonClient';
 import { closeDefaultLibraryDatabaseManager, getLibraryDatabaseManager } from '../database/LibraryDatabaseManager';
 import { getSleepTimerService } from '../sleepTimer/SleepTimerService';
 import { isLibraryRecoveryMode } from './libraryRecoveryMode';

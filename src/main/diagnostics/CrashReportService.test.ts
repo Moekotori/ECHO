@@ -27,7 +27,7 @@ vi.mock('../app/appSettings', () => ({
   }),
 }));
 
-vi.mock('../audio/AudioSession', () => ({
+vi.mock('../audio/DaemonClient', () => ({
   getAudioSession: () => ({
     getStatus: () => ({
       host: 'ready',

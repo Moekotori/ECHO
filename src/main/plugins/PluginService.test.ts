@@ -107,7 +107,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-vi.mock('../audio/AudioSession', () => ({
+vi.mock('../audio/DaemonClient', () => ({
   getAudioSession: () => mocks.fakeAudioSession,
 }));
 

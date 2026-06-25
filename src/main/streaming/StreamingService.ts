@@ -98,7 +98,7 @@ type StreamingFavoritePlaylistUrlTarget = {
 
 const defaultPlaybackActivityProvider: StreamingPlaybackActivityProvider = async () => {
   try {
-    const { getAudioSession } = await import('../audio/AudioSession');
+    const { getAudioSession } = await import('../audio/DaemonClient');
     const state = getAudioSession().getStatus().state;
     return state === 'loading' || state === 'playing';
   } catch {

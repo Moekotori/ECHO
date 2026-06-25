@@ -3,7 +3,7 @@ import { runNonCriticalMainWork } from './MainProcessWorkScheduler';
 
 const audioState = vi.hoisted(() => ({ current: 'idle' }));
 
-vi.mock('../audio/AudioSession', () => ({
+vi.mock('../audio/DaemonClient', () => ({
   getAudioSession: () => ({
     getStatus: () => ({ state: audioState.current }),
   }),

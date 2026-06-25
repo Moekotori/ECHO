@@ -196,7 +196,7 @@ export class BpmAnalysisJobQueue {
 
 const shouldDelayBpmTagWriteForAudio = async (filePath: string): Promise<boolean> => {
   try {
-    const { getAudioSession } = await import('../../audio/AudioSession');
+    const { getAudioSession } = await import('../../audio/DaemonClient');
     const status = getAudioSession().getStatus();
     const currentFileHeld =
       resolve(status.currentFilePath ?? '') === resolve(filePath) &&

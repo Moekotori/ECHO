@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { getAudioSession } from '../audio/AudioSession';
+import { getAudioSession } from '../audio/DaemonClient';
 import { getAirPlayReceiverSpikeService } from '../connect/AirPlayReceiverSpikeService';
 import { getStreamingService } from '../streaming/StreamingService';
 
