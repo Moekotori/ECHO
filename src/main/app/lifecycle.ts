@@ -3,7 +3,6 @@ import { createMainWindow } from './createMainWindow';
 import { requestAppQuit } from './tray';
 import { getMainWindow } from './windowManager';
 import { getCrashReportService } from '../diagnostics/CrashReportService';
-import { registerAudioProtocolHandler } from '../protocol/audioProtocol';
 import { registerCoverProtocolHandler } from '../protocol/coverProtocol';
 import { registerVideoProtocolHandler } from '../protocol/videoProtocol';
 import { disposeSmtcIntegration, initializeSmtcIntegration } from '../integrations/smtc/SmtcStatusSync';
@@ -256,7 +255,6 @@ export const registerAppLifecycle = (): void => {
       });
     });
     markStartupStage('protocols:register:start');
-    registerAudioProtocolHandler();
     registerCoverProtocolHandler();
     registerVideoProtocolHandler();
     markStartupStage('protocols:register:complete');

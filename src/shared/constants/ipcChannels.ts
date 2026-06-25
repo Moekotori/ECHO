@@ -519,6 +519,9 @@ export const IpcChannels = {
   SleepTimerCancel: 'sleep-timer:cancel',
   SleepTimerGetStatus: 'sleep-timer:get-status',
   SleepTimerOnTick: 'sleep-timer:on-tick',
+
+  DaemonCommand: 'daemon:command',
+  DaemonEvent: 'daemon:event',
 } as const;
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels];
