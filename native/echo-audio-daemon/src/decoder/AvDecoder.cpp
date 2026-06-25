@@ -195,7 +195,6 @@ int ead::AvDecoder::decode(float* output, int maxFrames) {
 
     int totalFrames = 0;
     int samplesPerFrame = channels_;
-    std::cerr << "[decode] start: buf=" << sampleBuf_.size() << " pos=" << sampleBufPos_ << " eof=" << eof_ << " max=" << maxFrames << "\n";
 
     while (totalFrames < maxFrames) {
         // Consume from internal buffer first
