@@ -1,5 +1,5 @@
 #include <algorithm>
-#include <atomic>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -9,10 +9,67 @@
 #include <nlohmann/json.hpp>
 
 #include "src/ipc/JsonRpcServer.h"
+#include "src/decoder/AvDecoder.h"
+#include "src/dsp/DspPipeline.h"
+#include "src/output/OutputDevice.h"
 #include "src/output/NullBackend.h"
+#include "src/output/MiniaudioBackend.h"
+#include "src/device/DeviceEnumerator.h"
+#include "src/session/SessionManager.h"
 
 using json = nlohmann::json;
 namespace ead = echo_audio_daemon;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+static std::string modeStr(ead::OutputMode m) {
+    switch (m) {
+        case ead::OutputMode::Shared:    return "shared";
+        case ead::OutputMode::Exclusive: return "exclusive";
+        case ead::OutputMode::Asio:      return "asio";
+    }
+    return "unknown";
+}
+
+static json deviceJson(const ead::DeviceInfo& d) {
+    json j = {
+        {"id",          d.id},
+        {"name",        d.name},
+        {"outputMode",  modeStr(d.outputMode)},
+        {"sampleRate",  d.sampleRate},
+        {"channels",    d.channels},
+        {"isDefault",   d.isDefault},
+    };
+    if (d.outputMode == ead::OutputMode::Shared)
+        j["sharedSampleRate"] = d.sharedSampleRate;
+    if (d.outputMode == ead::OutputMode::Asio)
+        j["asioOutputChannels"] = d.asioOutputChannels;
+    return j;
+}
+
+static json formatJson(const ead::AudioFormat& f) {
+    return json{
+        {"format",     f.format},
+        {"sampleRate", f.sampleRate},
+        {"channels",   f.channels},
+        {"duration",   f.duration},
+        {"bitRate",    f.bitRate},
+        {"codec",      f.codec},
+        {"dsd",        f.isDsd},
+    };
+}
+
+static void usage(const char* prog) {
+    std::cerr << "ECHO Audio Daemon \u2014 JSON-RPC 2.0 audio playback daemon\n"
+              << "Usage: " << (prog ? prog : "echo-audio-daemon") << " [options]\n"
+              << "Options:\n"
+              << "  --null-output       Null backend for testing\n"
+              << "  --device-id <id>    Output device ID\n"
+              << "  --sample-rate <hz>  Sample rate (default: 44100)\n"
+              << "  --channels <n>      Channel count (default: 2)\n"
+              << "  --buffer <frames>   Buffer frames (default: 512)\n"
+              << "  --help              Show this help\n";
+}
 
 // ── Null-Output Mode ─────────────────────────────────────────────────────────
 // Runs JsonRpcServer with NullBackend handlers for testing without real audio
@@ -132,64 +189,86 @@ static int runNullOutputMode() {
     return 0;
 }
 
-// ── Original Simple Mode ──────────────────────────────────────────────────────
-// Basic stdin/stdout JSON-RPC loop without any backend. Used when no flags
-// are passed (backward-compatible stub).
-static int runSimpleMode() {
-    std::cerr << "echo-audio-daemon ready" << std::endl;
+// ── Normal Daemon Mode ───────────────────────────────────────────────────────
+// Full daemon: wires JsonRpcServer + AvDecoder + DspPipeline + OutputDevice
+// + SessionManager for real audio playback.
+static int runDaemonMode() {
+    ead::JsonRpcServer server;
+    ead::AvDecoder decoder;
+    ead::DspPipeline dsp;
+    ead::MiniaudioBackend output;
 
-    std::string line;
-    while (std::getline(std::cin, line)) {
-        if (line.empty()) continue;
+    ead::SessionManager sessionManager(server, decoder, dsp, output);
 
-        try {
-            auto request = json::parse(line);
-            auto method  = request.value("method", "");
-
-            if (method == "shutdown") {
-                json response = {
-                    {"jsonrpc", "2.0"},
-                    {"id",      request.value("id", json())},
-                    {"result",  {{"status", "shutting_down"}}},
-                };
-                std::cout << response.dump() << std::endl;
-                break;
-            }
-
-            // Default: method not found
-            json errorResp = {
-                {"jsonrpc", "2.0"},
-                {"id",      request.value("id", json())},
-                {"error",   {{"code", -32601}, {"message", "Method not found"}}},
-            };
-            std::cout << errorResp.dump() << std::endl;
-
-        } catch (const json::parse_error& e) {
-            json errorResp = {
-                {"jsonrpc", "2.0"},
-                {"id",      nullptr},
-                {"error",   {{"code", -32700}, {"message", "Parse error"}, {"data", e.what()}}},
-            };
-            std::cout << errorResp.dump() << std::endl;
+    // ── Register handlers NOT in SessionManager ────────────────────────────
+    server.registerMethod("device.list", [](const json&) -> json {
+        auto devices = ead::DeviceEnumerator::enumerateAll();
+        json arr = json::array();
+        for (const auto& d : devices) {
+            arr.push_back(deviceJson(d));
         }
-    }
+        return json{{"devices", std::move(arr)}};
+    });
 
+    server.registerMethod("probe", [](const json& params) -> json {
+        std::string path = params.value("path", "");
+        auto fmt = ead::AvDecoder::probe(path);
+        return formatJson(fmt);
+    });
+
+    server.registerMethod("echo.ping", [](const json&) -> json {
+        return json{{"pong", true}};
+    });
+
+    // SessionManager registers its own handlers: play, pause, resume, stop,
+    // seek, setVolume, queueNext, prepareAutomix, levelMeter.subscribe, etc.
+    sessionManager.init();
+
+    std::cerr << "[echo-audio-daemon] ready" << std::endl;
+
+    // Blocks until shutdown request is received.
+    server.start();
+
+    // Clean shutdown: stop playback, release resources.
+    sessionManager.shutdown();
+    std::cerr << "[echo-audio-daemon] shutdown complete" << std::endl;
     return 0;
 }
 
+// ── Main ─────────────────────────────────────────────────────────────────────
 int main(int argc, char* argv[]) {
-    // Parse CLI arguments
     bool nullOutputMode = false;
+    bool showHelp = false;
+    std::string deviceId;      // accepted; consumed by SessionManager internally
+    int sampleRate = 44100;    // accepted; consumed by SessionManager internally
+    int channels = 2;          // accepted; consumed by SessionManager internally
+    int bufferFrames = 512;    // accepted; consumed by SessionManager internally
+
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
         if (arg == "--null-output") {
             nullOutputMode = true;
+        } else if (arg == "--help") {
+            showHelp = true;
+        } else if (arg == "--device-id" && i + 1 < argc) {
+            deviceId = argv[++i];
+        } else if (arg == "--sample-rate" && i + 1 < argc) {
+            sampleRate = std::stoi(argv[++i]);
+        } else if (arg == "--channels" && i + 1 < argc) {
+            channels = std::stoi(argv[++i]);
+        } else if (arg == "--buffer" && i + 1 < argc) {
+            bufferFrames = std::stoi(argv[++i]);
         }
+    }
+
+    if (showHelp) {
+        usage(argv[0]);
+        return 0;
     }
 
     if (nullOutputMode) {
         return runNullOutputMode();
     }
 
-    return runSimpleMode();
+    return runDaemonMode();
 }

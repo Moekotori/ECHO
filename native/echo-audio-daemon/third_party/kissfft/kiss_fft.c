@@ -6,6 +6,7 @@
  *  See COPYING file for more information.
  */
 
+#include <stdint.h>
 #include "kiss_fft.h"
 #include "_kiss_fft_guts.h"
 

@@ -261,3 +261,103 @@ set_target_properties(echo-daemon-eq-tests PROPERTIES
     EXCLUDE_FROM_ALL TRUE
 )
 add_test(NAME echo-daemon-eq COMMAND echo-daemon-eq-tests)
+
+# ── Session Manager Tests ──────────────────────────────────────────────────
+# Tests the playback state machine with real AvDecoder (needs FFmpeg) and
+# NullBackend via pipe-based IPC.
+if(PkgConfig_FOUND)
+    pkg_check_modules(FFMPEG_SESSION libavformat libavcodec libavutil libswresample)
+endif()
+
+add_executable(echo-daemon-session-manager-tests
+    test_session_manager.cpp
+    ../src/session/SessionManager.cpp
+    ../src/decoder/AvDecoder.cpp
+    ../src/output/NullBackend.cpp
+    ../src/ipc/JsonRpcServer.cpp
+    ../src/dsp/BiquadFilter.cpp
+    ../src/dsp/EqProcessor.cpp
+)
+target_compile_features(echo-daemon-session-manager-tests PRIVATE cxx_std_17)
+target_include_directories(echo-daemon-session-manager-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/third_party
+    ${FFMPEG_INCLUDE_DIRS}
+)
+target_link_libraries(echo-daemon-session-manager-tests PRIVATE
+    ${FFMPEG_LIBRARIES}
+    pthread
+)
+set_target_properties(echo-daemon-session-manager-tests PROPERTIES
+    EXCLUDE_FROM_ALL TRUE
+)
+add_test(NAME echo-daemon-session-manager
+    COMMAND echo-daemon-session-manager-tests
+)
+
+# ── ConvolutionProcessor Tests ────────────────────────────────────────────
+add_executable(echo-daemon-convolution-tests
+    test_convolution.cpp
+    ../src/dsp/ConvolutionProcessor.cpp
+    ../third_party/kissfft/kiss_fft.c
+)
+target_compile_features(echo-daemon-convolution-tests PRIVATE cxx_std_17)
+target_include_directories(echo-daemon-convolution-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/third_party
+)
+target_link_libraries(echo-daemon-convolution-tests PRIVATE m)
+set_target_properties(echo-daemon-convolution-tests PROPERTIES
+    EXCLUDE_FROM_ALL TRUE
+)
+add_test(NAME echo-daemon-convolution COMMAND echo-daemon-convolution-tests)
+
+# ── ChannelBalanceProcessor Tests ──────────────────────────────────────────
+add_executable(echo-daemon-channel-balance-tests
+    test_channel_balance.cpp
+    ../src/dsp/ChannelBalanceProcessor.cpp
+)
+target_compile_features(echo-daemon-channel-balance-tests PRIVATE cxx_std_17)
+target_include_directories(echo-daemon-channel-balance-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}
+)
+set_target_properties(echo-daemon-channel-balance-tests PROPERTIES
+    EXCLUDE_FROM_ALL TRUE
+)
+add_test(NAME echo-daemon-channel-balance COMMAND echo-daemon-channel-balance-tests)
+
+# ── Limiter Tests ──────────────────────────────────────────────────────────
+add_executable(echo-daemon-limiter-tests
+    test_limiter.cpp
+    ../src/dsp/Limiter.cpp
+)
+target_compile_features(echo-daemon-limiter-tests PRIVATE cxx_std_17)
+target_include_directories(echo-daemon-limiter-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}
+)
+set_target_properties(echo-daemon-limiter-tests PROPERTIES
+    EXCLUDE_FROM_ALL TRUE
+)
+add_test(NAME echo-daemon-limiter COMMAND echo-daemon-limiter-tests)
+
+# ── DspPipeline Tests ─────────────────────────────────────────────────────
+add_executable(echo-daemon-dsp-pipeline-tests
+    test_dsp_pipeline.cpp
+    ../src/dsp/BiquadFilter.cpp
+    ../src/dsp/ChannelBalanceProcessor.cpp
+    ../src/dsp/ConvolutionProcessor.cpp
+    ../src/dsp/DspPipeline.cpp
+    ../src/dsp/EqProcessor.cpp
+    ../src/dsp/Limiter.cpp
+    ../third_party/kissfft/kiss_fft.c
+)
+target_compile_features(echo-daemon-dsp-pipeline-tests PRIVATE cxx_std_17)
+target_include_directories(echo-daemon-dsp-pipeline-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/third_party
+)
+target_link_libraries(echo-daemon-dsp-pipeline-tests PRIVATE m)
+set_target_properties(echo-daemon-dsp-pipeline-tests PROPERTIES
+    EXCLUDE_FROM_ALL TRUE
+)
+add_test(NAME echo-daemon-dsp-pipeline COMMAND echo-daemon-dsp-pipeline-tests)

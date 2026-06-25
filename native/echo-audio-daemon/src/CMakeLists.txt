@@ -3,14 +3,24 @@ set(ECHO_AUDIO_DAEMON_SOURCES
     decoder/AvDecoder.cpp
     decoder/ReplayGain.cpp
     dsp/BiquadFilter.cpp
+    dsp/ChannelBalanceProcessor.cpp
+    dsp/ConvolutionProcessor.cpp
+    dsp/DspPipeline.cpp
     dsp/EqProcessor.cpp
+    dsp/Limiter.cpp
+    device/DeviceEnumerator.cpp
+    device/DeviceWatcher.cpp
     ipc/JsonRpcServer.cpp
+    output/MiniaudioBackend.cpp
     output/NullBackend.cpp
     output/WasapiExclusiveBackend.cpp
+    session/SessionManager.cpp
 )
 
 add_executable(echo-audio-daemon
     ${ECHO_AUDIO_DAEMON_SOURCES}
+    ${CMAKE_SOURCE_DIR}/third_party/kissfft/kiss_fft.c
+    ${CMAKE_SOURCE_DIR}/third_party/miniaudio/miniaudio.c
 )
 
 # Find ebur128 for ReplayGain (check via pkg-config)
@@ -22,6 +32,8 @@ target_link_libraries(echo-audio-daemon
     PRIVATE
         ${FFMPEG_LIBRARIES}
         ${EBUR128_LIBRARIES}
+        dl
+        m
         pthread
         $<$<AND:$<BOOL:${ECHO_ENABLE_WASAPI_EXCLUSIVE}>,$<PLATFORM_ID:Windows>>:ole32>
         $<$<AND:$<BOOL:${ECHO_ENABLE_WASAPI_EXCLUSIVE}>,$<PLATFORM_ID:Windows>>:oleaut32>

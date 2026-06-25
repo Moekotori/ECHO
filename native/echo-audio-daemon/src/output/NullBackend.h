@@ -32,7 +32,7 @@ public:
 
     // ── State Queries ─────────────────────────────────────────────────────
 
-    bool isOpen() const override { return isOpen_; }
+    bool isOpen() const override { return isOpen_.load(); }
     int getSampleRate() const override { return sampleRate_; }
     int getChannels() const override { return channels_; }
     int getBufferFrames() const override { return bufferFrames_; }
@@ -50,7 +50,7 @@ public:
     const std::vector<float>& lastSamples() const { return lastSamples_; }
 
 private:
-    bool isOpen_ = false;
+    std::atomic<bool> isOpen_{false};
     int sampleRate_ = 0;
     int channels_ = 0;
     int bufferFrames_ = 0;
