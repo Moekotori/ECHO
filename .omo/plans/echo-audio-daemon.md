@@ -2252,7 +2252,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews):
   - Message: `feat(daemon): verify and configure Linux ALSA output via miniaudio`
   - Files: `src/output/MiniaudioBackend.cpp` (updates only)
 
-- [ ] 26. Final Integration Smoke Test
+- [x] 26. Final Integration Smoke Test
 
   **What to do**:
   - Run full ECHO NEXT application with daemon:
@@ -2324,19 +2324,19 @@ Wave FINAL (After ALL tasks — 4 parallel reviews):
 
 ## Final Verification Wave
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, curl endpoint, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in .omo/evidence/. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `ctest` + `nix build` for daemon. Run `tsc --noEmit` + `vitest run` for TS. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names.
   Output: `Build [PASS/FAIL] | CTest [N pass/N fail] | Vitest [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
-- [ ] F3. **Real Manual QA** — `unspecified-high` (+ `playwright` skill)
+- [x] F3. **Real Manual QA** — `unspecified-high` (+ `playwright` skill)
   Start from clean state. Run daemon. Send each JSON-RPC method from protocol spec via Bash — verify responses against schema. Test cross-task integration: play → pause → seek → resume → track end. Test edge cases: invalid file path, device unplugged during playback, rapid seek spamming.
   Output: `Methods [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff. Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. Detect cross-task contamination. Flag unaccounted changes.
   Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 
