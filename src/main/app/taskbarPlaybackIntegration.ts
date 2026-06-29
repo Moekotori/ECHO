@@ -256,7 +256,6 @@ export class TaskbarPlaybackIntegration {
     }
 
     this.audioSession.on('status', this.handleStatus);
-    this.sync(this.audioSession.getStatus());
   }
 
   dispose(): void {

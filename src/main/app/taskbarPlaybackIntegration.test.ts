@@ -122,6 +122,7 @@ describe('TaskbarPlaybackIntegration', () => {
     });
 
     integration.initialize();
+    integration.refresh();
 
     expect(window.setProgressBar).toHaveBeenCalledWith(0.25, { mode: 'normal' });
     expect(window.setTitle).toHaveBeenCalledWith('Song A - Artist A | ECHO Next');
@@ -153,6 +154,7 @@ describe('TaskbarPlaybackIntegration', () => {
     });
 
     integration.initialize();
+    integration.refresh();
 
     expect(window.setTitle).toHaveBeenCalledWith('Streaming Song - Streaming Artist | ECHO Next');
     expect(window.setThumbnailToolTip).toHaveBeenCalledWith('Streaming Song - Streaming Artist | ECHO Next');
@@ -174,6 +176,7 @@ describe('TaskbarPlaybackIntegration', () => {
     });
 
     integration.initialize();
+    integration.refresh();
 
     expect(window.setProgressBar).toHaveBeenCalledWith(0.5, { mode: 'paused' });
     expect(window.setTitle).toHaveBeenCalledWith('Paused Song | ECHO Next');
@@ -195,6 +198,7 @@ describe('TaskbarPlaybackIntegration', () => {
     });
 
     integration.initialize();
+    integration.refresh();
 
     expect(window.setProgressBar).toHaveBeenCalledWith(-1);
     expect(window.setThumbarButtons).toHaveBeenCalledWith([]);
@@ -217,6 +221,7 @@ describe('TaskbarPlaybackIntegration', () => {
     });
 
     integration.initialize();
+    integration.refresh();
 
     expect(window.setProgressBar).toHaveBeenCalledWith(-1);
     expect(window.setThumbarButtons).toHaveBeenCalledWith([]);
@@ -238,6 +243,7 @@ describe('TaskbarPlaybackIntegration', () => {
     });
 
     integration.initialize();
+    integration.refresh();
     const buttons = window.setThumbarButtons.mock.calls.at(-1)?.[0] ?? [];
     buttons[0].click();
     buttons[1].click();
@@ -276,6 +282,7 @@ describe('TaskbarPlaybackIntegration', () => {
     });
 
     integration.initialize();
+    integration.refresh();
     let buttons = window.setThumbarButtons.mock.calls.at(-1)?.[0] ?? [];
     expect(buttons).toEqual(expect.arrayContaining([expect.objectContaining({ tooltip: 'Like' })]));
 
@@ -292,3 +299,4 @@ describe('TaskbarPlaybackIntegration', () => {
     integration.dispose();
   });
 });
+
