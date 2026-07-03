@@ -1,8 +1,8 @@
 // echo-taskbar-thumbnail-helper
 //
 // In-process N-API addon that makes the Electron main window present the
-// current album cover as its DWM iconic thumbnail while keeping the live
-// preview pointed at the real Electron window.
+// current album cover as its DWM iconic thumbnail while supplying a refreshed
+// window bitmap for DWM's live-preview surface.
 //
 // Exposed to JS:
 //   attach(hwndBuffer)            -> bool   subclass the window, enable iconic
@@ -39,14 +39,18 @@ struct HelperState {
   long lastThumbnailHr = 0;    // HRESULT from DwmSetIconicThumbnail
   long lastLivePreviewHr = 0;  // HRESULT from DwmSetIconicLivePreviewBitmap
   bool lastLivePreviewCaptured = false;  // did PrintWindow succeed last time
+  unsigned long long livePreviewRefreshUntil = 0;
 };
 
 HelperState g_state;
 constexpr UINT_PTR kSubclassId = 1;
+constexpr UINT_PTR kLivePreviewRefreshTimerId = 2;
+constexpr UINT kLivePreviewRefreshIntervalMs = 125;
+constexpr unsigned long long kLivePreviewRefreshTtlMs = 30000;
 
 void SetIconicEnabled(HWND hwnd, bool enabled);
 void DisableForcedIconic(HWND hwnd);
-bool CaptureWindowPreviewBitmap(HWND hwnd, HBITMAP* bitmapOut);
+bool RefreshLivePreviewBitmap(HWND hwnd);
 
 // Create a 32bpp top-down DIB section; returns the bitmap and its pixel bits.
 HBITMAP CreateBgraDib(int width, int height, void** bitsOut) {
@@ -130,8 +134,8 @@ HBITMAP RenderScaledBitmap(const std::vector<uint8_t>& source, int sourceWidth, 
   return dstBitmap;
 }
 
-bool CaptureWindowPreviewBitmap(HWND hwnd, HBITMAP* bitmapOut) {
-  if (!bitmapOut || !IsWindow(hwnd)) {
+bool RefreshLivePreviewBitmap(HWND hwnd) {
+  if (!IsWindow(hwnd)) {
     return false;
   }
 
@@ -153,11 +157,10 @@ bool CaptureWindowPreviewBitmap(HWND hwnd, HBITMAP* bitmapOut) {
   HDC memDc = CreateCompatibleDC(screenDc);
   HGDIOBJ old = SelectObject(memDc, bitmap);
 
-  BOOL captured = FALSE;
 #ifndef PW_RENDERFULLCONTENT
 #define PW_RENDERFULLCONTENT 0x00000002
 #endif
-  captured = PrintWindow(hwnd, memDc, PW_RENDERFULLCONTENT);
+  const BOOL captured = PrintWindow(hwnd, memDc, PW_RENDERFULLCONTENT);
 
   SelectObject(memDc, old);
   DeleteDC(memDc);
@@ -165,11 +168,21 @@ bool CaptureWindowPreviewBitmap(HWND hwnd, HBITMAP* bitmapOut) {
 
   if (!captured) {
     DeleteObject(bitmap);
+    g_state.lastLivePreviewCaptured = false;
+    g_state.lastLivePreviewHr = -1;
     return false;
   }
 
-  *bitmapOut = bitmap;
-  return true;
+  auto* pixels = static_cast<uint8_t*>(bits);
+  const size_t pixelCount = static_cast<size_t>(width) * height;
+  for (size_t i = 0; i < pixelCount; ++i) {
+    pixels[i * 4 + 3] = 0xFF;
+  }
+
+  g_state.lastLivePreviewCaptured = true;
+  g_state.lastLivePreviewHr = DwmSetIconicLivePreviewBitmap(hwnd, bitmap, nullptr, 0);
+  DeleteObject(bitmap);
+  return SUCCEEDED(g_state.lastLivePreviewHr);
 }
 
 // Window subclass procedure. DWM sends these messages when it needs a fresh
@@ -197,20 +210,24 @@ LRESULT CALLBACK SubclassProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
     }
     case WM_DWMSENDICONICLIVEPREVIEWBITMAP: {
       g_state.livePreviewRequests++;
-      HBITMAP bitmap = nullptr;
-      g_state.lastLivePreviewCaptured = CaptureWindowPreviewBitmap(hWnd, &bitmap);
-      if (g_state.lastLivePreviewCaptured && bitmap) {
-        g_state.lastLivePreviewHr = DwmSetIconicLivePreviewBitmap(hWnd, bitmap, nullptr, 0);
-        DeleteObject(bitmap);
-      } else {
-        g_state.lastLivePreviewHr = -1;
-        if (bitmap) {
-          DeleteObject(bitmap);
-        }
-      }
+      g_state.livePreviewRefreshUntil = GetTickCount64() + kLivePreviewRefreshTtlMs;
+      RefreshLivePreviewBitmap(hWnd);
+      SetTimer(hWnd, kLivePreviewRefreshTimerId, kLivePreviewRefreshIntervalMs, nullptr);
       return 0;
     }
+    case WM_TIMER: {
+      if (wParam == kLivePreviewRefreshTimerId) {
+        if (GetTickCount64() > g_state.livePreviewRefreshUntil) {
+          KillTimer(hWnd, kLivePreviewRefreshTimerId);
+          return 0;
+        }
+        RefreshLivePreviewBitmap(hWnd);
+        return 0;
+      }
+      break;
+    }
     case WM_NCDESTROY:
+      KillTimer(hWnd, kLivePreviewRefreshTimerId);
       RemoveWindowSubclass(hWnd, SubclassProc, kSubclassId);
       g_state.subclassed = false;
       break;
