@@ -96,6 +96,8 @@ const createAudioSession = (status = makeStatus()) => {
 
 const createWindow = () => ({
   destroyed: false,
+  visible: true,
+  minimized: false,
   sent: [] as Array<[string, unknown]>,
   setProgressBar: vi.fn(),
   setThumbarButtons: vi.fn<(buttons: Array<{ click: () => void }>) => boolean>(() => true),
@@ -105,6 +107,12 @@ const createWindow = () => ({
   setTitle: vi.fn(),
   isDestroyed() {
     return this.destroyed;
+  },
+  isVisible() {
+    return this.visible;
+  },
+  isMinimized() {
+    return this.minimized;
   },
   webContents: {
     send: vi.fn((channel: string, payload: unknown) => {
@@ -119,6 +127,7 @@ const createCoverControllerStub = (available = true) => {
   const controller = {
     isAvailable: vi.fn(() => available),
     setCover: vi.fn(async (coverPath: string | null) => coverPath !== null),
+    setButtons: vi.fn(() => true),
     clear: vi.fn(),
     dispose: vi.fn(),
     getDiagnostics: vi.fn(() => null),
@@ -387,6 +396,12 @@ describe('TaskbarPlaybackIntegration', () => {
     integration.refresh();
 
     expect(coverController.setCover).toHaveBeenCalledWith('D:\\covers\\a.png');
+    expect(coverController.setButtons).toHaveBeenCalledWith({
+      playing: true,
+      canLike: false,
+      liked: false,
+      visible: true,
+    });
     expect(window.setThumbnailClip).not.toHaveBeenCalled();
     expect(integration.getStatus()).toMatchObject({ thumbnailCover: 'album-cover', thumbnailClip: null });
     integration.dispose();
@@ -443,6 +458,34 @@ describe('TaskbarPlaybackIntegration', () => {
     expect(coverController.setCover).toHaveBeenCalledWith('D:\\covers\\a.png');
     expect(coverController.clear).not.toHaveBeenCalled();
     expect(integration.getStatus()).toMatchObject({ thumbnailCover: 'album-cover', thumbnailClip: null });
+    integration.dispose();
+  });
+
+  it('hides the proxy thumbnail when the main window is hidden for mini player mode', async () => {
+    const { TaskbarPlaybackIntegration } = await import('./taskbarPlaybackIntegration');
+    const audioSession = createAudioSession();
+    const coverController = createCoverControllerStub();
+    window.visible = false;
+    const integration = new TaskbarPlaybackIntegration({
+      window,
+      audioSession,
+      platform: 'win32',
+      getSettings: () => ({ taskbarPlaybackControlsEnabled: true }),
+      getLibrary: () => ({
+        getTrack: () => ({ title: 'Song A', artist: 'Artist A', coverId: 'cover-1' }),
+        resolveCoverAsset: (_coverId: string, variant: string) =>
+          variant === 'large' ? { filePath: 'D:\\covers\\a.png' } : null,
+      }),
+      createIcon: () => ({ isEmpty: () => false }) as never,
+      createCoverController: () => coverController,
+    });
+
+    integration.initialize();
+    integration.refresh();
+
+    expect(coverController.clear).toHaveBeenCalled();
+    expect(coverController.setCover).not.toHaveBeenCalled();
+    expect(integration.getStatus()).toMatchObject({ thumbnailCover: null, thumbnailClip: null });
     integration.dispose();
   });
 

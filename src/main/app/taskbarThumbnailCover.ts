@@ -5,8 +5,8 @@ import { app } from 'electron';
 import sharp from 'sharp';
 
 // Thin wrapper around the native echo-taskbar-thumbnail-helper.node addon.
-// The addon makes the Electron main window present a supplied bitmap as its
-// DWM iconic thumbnail while the native side keeps live preview on the window.
+// The addon registers a lightweight taskbar tab/proxy HWND for the album-cover
+// thumbnail while leaving the Electron main window on DWM's native live preview.
 
 const addonFileName = 'echo-taskbar-thumbnail-helper.node';
 
@@ -15,18 +15,21 @@ const addonFileName = 'echo-taskbar-thumbnail-helper.node';
 const coverRenderSize = 512;
 
 export type TaskbarThumbnailDiagnostics = {
-  forced: boolean;
   hasMaster: boolean;
-  thumbnailRequests: number;
-  livePreviewRequests: number;
-  lastThumbnailHr: number;
-  lastLivePreviewHr: number;
-  lastLivePreviewCaptured: boolean;
+  proxyPlacementMode?: number;
+  mainSubclassed?: boolean;
+  proxyTaskbarButtonCreated?: boolean;
+  buttonsAdded?: boolean;
+  buttonsVisible?: boolean;
+  buttonClicks?: number;
+  lastButtonsHr?: number;
 };
 
 type TaskbarThumbnailAddon = {
   attach: (hwnd: Buffer) => boolean;
   setCover: (rgba: Buffer, width: number, height: number) => boolean;
+  setButtonHandler?: (callback: (buttonId: number) => void) => boolean;
+  setButtons?: (playing: boolean, canLike: boolean, liked: boolean, visible: boolean) => boolean;
   refresh: () => boolean;
   clear: () => boolean;
   detach: () => void;
@@ -83,6 +86,7 @@ export type TaskbarThumbnailCoverDeps = {
   getNativeWindowHandle: () => Buffer;
   loadAddon?: () => TaskbarThumbnailAddon | null;
   decodeCover?: (coverPath: string) => Promise<{ data: Buffer; width: number; height: number } | null>;
+  onButtonClick?: (buttonId: number) => void;
 };
 
 const decodeCoverToRgba = async (
@@ -101,7 +105,7 @@ const decodeCoverToRgba = async (
 };
 
 /**
- * Drives the native iconic-thumbnail addon for one window. Safe to construct
+ * Drives the native taskbar proxy-thumbnail addon for one window. Safe to construct
  * even when the addon is missing: `isAvailable()` reports false and all
  * mutating calls become no-ops so the caller can fall back to clip mode.
  */
@@ -111,14 +115,17 @@ export class TaskbarThumbnailCoverController {
   private readonly decodeCover: (
     coverPath: string,
   ) => Promise<{ data: Buffer; width: number; height: number } | null>;
+  private readonly onButtonClick: ((buttonId: number) => void) | null;
   private attached = false;
   private lastCoverPath: string | null = null;
   private applyToken = 0;
+  private buttonHandlerAttached = false;
 
   constructor(deps: TaskbarThumbnailCoverDeps) {
     this.getNativeWindowHandle = deps.getNativeWindowHandle;
     this.addon = (deps.loadAddon ?? loadAddon)();
     this.decodeCover = deps.decodeCover ?? decodeCoverToRgba;
+    this.onButtonClick = deps.onButtonClick ?? null;
   }
 
   isAvailable(): boolean {
@@ -134,10 +141,26 @@ export class TaskbarThumbnailCoverController {
     }
     try {
       this.attached = this.addon.attach(this.getNativeWindowHandle());
+      if (this.attached) {
+        this.ensureButtonHandler();
+      }
     } catch {
       this.attached = false;
     }
     return this.attached;
+  }
+
+  private ensureButtonHandler(): void {
+    if (this.buttonHandlerAttached || !this.addon?.setButtonHandler || !this.onButtonClick) {
+      return;
+    }
+    try {
+      this.buttonHandlerAttached = this.addon.setButtonHandler((buttonId: number) => {
+        this.onButtonClick?.(buttonId);
+      });
+    } catch {
+      this.buttonHandlerAttached = false;
+    }
   }
 
   /**
@@ -173,6 +196,17 @@ export class TaskbarThumbnailCoverController {
         this.lastCoverPath = coverPath;
       }
       return applied;
+    } catch {
+      return false;
+    }
+  }
+
+  setButtons(input: { playing: boolean; canLike: boolean; liked: boolean; visible: boolean }): boolean {
+    if (!this.addon?.setButtons || !this.ensureAttached()) {
+      return false;
+    }
+    try {
+      return this.addon.setButtons(input.playing, input.canLike, input.liked, input.visible);
     } catch {
       return false;
     }
@@ -217,5 +251,6 @@ export class TaskbarThumbnailCoverController {
       // ignore detach failures during teardown
     }
     this.attached = false;
+    this.buttonHandlerAttached = false;
   }
 }

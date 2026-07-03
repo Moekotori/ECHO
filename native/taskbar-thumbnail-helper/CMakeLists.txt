@@ -40,10 +40,10 @@ target_include_directories(echo-taskbar-thumbnail-helper PRIVATE
 
 target_link_libraries(echo-taskbar-thumbnail-helper PRIVATE
   ${CMAKE_JS_LIB}
-  dwmapi
   gdi32
   user32
   comctl32
+  ole32
 )
 
 # On Windows, cmake-js provides a delay-load hook so the addon can load into

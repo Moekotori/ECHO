@@ -1,13 +1,13 @@
 import type { AudioPlaybackState } from './audio';
 
 export type TaskbarThumbnailDiagnostics = {
-  forced: boolean;
   hasMaster: boolean;
-  thumbnailRequests: number;
-  livePreviewRequests: number;
-  lastThumbnailHr: number;
-  lastLivePreviewHr: number;
-  lastLivePreviewCaptured: boolean;
+  proxyPlacementMode?: number;
+  mainSubclassed?: boolean;
+  buttonsAdded?: boolean;
+  buttonsVisible?: boolean;
+  buttonClicks?: number;
+  lastButtonsHr?: number;
 };
 
 export type TaskbarPlaybackStatus = {

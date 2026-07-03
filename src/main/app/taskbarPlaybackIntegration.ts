@@ -21,6 +21,8 @@ const taskbarPlayerBarThumbnailHeight = 96;
 const coverVariantPriority: readonly CoverVariant[] = ['large', 'album', 'thumb'];
 
 type TaskbarWindow = Pick<BrowserWindow, 'isDestroyed' | 'setProgressBar' | 'setThumbarButtons' | 'setTitle'> & {
+  isVisible?: () => boolean;
+  isMinimized?: () => boolean;
   getContentBounds?: () => Electron.Rectangle;
   setThumbnailClip?: (region: Electron.Rectangle) => void;
   setThumbnailToolTip?: (toolTip: string) => void;
@@ -51,6 +53,7 @@ type LibraryLike = {
 type ThumbnailCoverController = {
   isAvailable: () => boolean;
   setCover: (coverPath: string | null) => Promise<boolean>;
+  setButtons?: (input: { playing: boolean; canLike: boolean; liked: boolean; visible: boolean }) => boolean;
   clear: () => void;
   dispose: () => void;
   getDiagnostics?: () => TaskbarThumbnailDiagnostics | null;
@@ -61,9 +64,20 @@ const defaultCreateCoverController = (window: TaskbarWindow): ThumbnailCoverCont
     return null;
   }
   const getHandle = window.getNativeWindowHandle.bind(window);
-  const controller = new TaskbarThumbnailCoverController({ getNativeWindowHandle: getHandle });
+  const controller = new TaskbarThumbnailCoverController({
+    getNativeWindowHandle: getHandle,
+    onButtonClick: (buttonId) => {
+      const current = getCurrentTaskbarPlaybackIntegration();
+      if (!current || !current.isBoundToWindow(window)) {
+        return;
+      }
+      current.handleNativeThumbnailButton(buttonId);
+    },
+  });
   return controller.isAvailable() ? controller : null;
 };
+
+const getCurrentTaskbarPlaybackIntegration = (): TaskbarPlaybackIntegration | null => currentIntegration;
 
 type TaskbarPlaybackIntegrationOptions = {
   window: TaskbarWindow;
@@ -382,6 +396,7 @@ export class TaskbarPlaybackIntegration {
 
     this.window.setProgressBar(-1);
     this.window.setThumbarButtons([]);
+    this.coverController?.setButtons?.({ playing: false, canLike: false, liked: false, visible: false });
     this.window.setTitle(defaultWindowTitle);
     this.window.setThumbnailToolTip?.(defaultWindowTitle);
     this.lastThumbarKey = null;
@@ -392,6 +407,19 @@ export class TaskbarPlaybackIntegration {
       thumbarButtons: null,
       lastClearedAt: new Date().toISOString(),
     };
+  }
+
+  private isWindowPreviewEligible(): boolean {
+    if (this.window.isDestroyed()) {
+      return false;
+    }
+    if (this.window.isVisible && !this.window.isVisible()) {
+      return false;
+    }
+    if (this.window.isMinimized && this.window.isMinimized()) {
+      return false;
+    }
+    return true;
   }
 
   private clearPlaybackControls(): void {
@@ -452,6 +480,16 @@ export class TaskbarPlaybackIntegration {
   }
 
   private updateThumbnailCover(status: AudioStatus, visible: boolean): void {
+    if (!this.isWindowPreviewEligible()) {
+      this.coverController?.clear();
+      this.status = {
+        ...this.status,
+        thumbnailClip: null,
+        thumbnailCover: null,
+      };
+      return;
+    }
+
     const coverPath = this.resolveCoverPath(status);
     this.status = {
       ...this.status,
@@ -581,6 +619,12 @@ export class TaskbarPlaybackIntegration {
   private updateThumbarButtons(status: AudioStatus): void {
     const isPlaying = status.state === 'playing' || status.state === 'loading';
     const likeState = this.resolveCurrentTrackLikeState(status);
+    this.coverController?.setButtons?.({
+      playing: isPlaying,
+      canLike: likeState.canLike,
+      liked: likeState.liked,
+      visible: true,
+    });
     const key = [
       isPlaying ? 'playing' : 'paused',
       likeState.canLike ? (likeState.liked ? 'liked' : 'unliked') : 'no-like',
@@ -658,6 +702,31 @@ export class TaskbarPlaybackIntegration {
     }
 
     this.window.webContents.send(IpcChannels.SmtcCommand, command);
+  }
+
+  isBoundToWindow(window: TaskbarWindow): boolean {
+    return this.window === window;
+  }
+
+  handleNativeThumbnailButton(buttonId: number): void {
+    if (this.disposed || this.window.isDestroyed()) {
+      return;
+    }
+    if (buttonId === 1) {
+      this.sendCommand('previous');
+      return;
+    }
+    if (buttonId === 2) {
+      this.sendCommand('playPause');
+      return;
+    }
+    if (buttonId === 3) {
+      this.sendCommand('next');
+      return;
+    }
+    if (buttonId === 4) {
+      this.toggleCurrentTrackLiked(this.audioSession.getStatus());
+    }
   }
 
   private resolveCurrentTrackLikeState(status: AudioStatus): CurrentTrackLikeState {
@@ -750,6 +819,15 @@ export const bindTaskbarPlaybackIntegration = (window: BrowserWindow): void => {
     integration.dispose();
   });
   window.on('show', () => {
+    integration.refresh();
+  });
+  window.on('hide', () => {
+    integration.refresh();
+  });
+  window.on('minimize', () => {
+    integration.refresh();
+  });
+  window.on('restore', () => {
     integration.refresh();
   });
 };
