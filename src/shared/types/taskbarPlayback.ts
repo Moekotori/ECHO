@@ -1,5 +1,15 @@
 import type { AudioPlaybackState } from './audio';
 
+export type TaskbarThumbnailDiagnostics = {
+  forced: boolean;
+  hasMaster: boolean;
+  thumbnailRequests: number;
+  livePreviewRequests: number;
+  lastThumbnailHr: number;
+  lastLivePreviewHr: number;
+  lastLivePreviewCaptured: boolean;
+};
+
 export type TaskbarPlaybackStatus = {
   platform: NodeJS.Platform;
   supported: boolean;
@@ -12,8 +22,10 @@ export type TaskbarPlaybackStatus = {
   progress: number | null;
   thumbarButtons: 'playing' | 'paused' | null;
   thumbnailClip: 'player-bar' | null;
+  thumbnailCover: 'album-cover' | null;
   lastSyncAt: string | null;
   lastAppliedAt: string | null;
   lastClearedAt: string | null;
   lastError: string | null;
+  thumbnailDiagnostics: TaskbarThumbnailDiagnostics | null;
 };

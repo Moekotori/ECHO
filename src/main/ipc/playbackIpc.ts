@@ -32,6 +32,7 @@ import { getRemoteSourceService } from '../library/remote/RemoteSourceService';
 import { requirePrivateFeature } from '../plugins/privateEntitlements';
 import { getAppSettings } from '../app/appSettings';
 import { noteDataProtectionPlaybackActivity, setDataProtectionPlaybackStateProvider } from '../app/dataProtection';
+import { refreshTaskbarPlaybackIntegration } from '../app/taskbarPlaybackIntegration';
 import { resolveLocalAudioFiles } from '../app/localFileOpen';
 import { getMainWindow } from '../app/windowManager';
 import { getAirPlayReceiverSpikeService } from '../connect/AirPlayReceiverSpikeService';
@@ -1554,11 +1555,13 @@ export const registerPlaybackIpc = (): void => {
     }, () => getPlaybackSessionStore().saveWithAudioStatus(snapshot as PersistedPlaybackSessionV1, status));
     const saveOptions = normalizeQueueSessionSaveOptions(options);
     broadcastPlaybackQueueSessionChanged(event.sender, saveOptions.broadcastSnapshot ?? saved);
+    refreshTaskbarPlaybackIntegration();
     return saved;
   });
   ipcMain.handle(IpcChannels.PlaybackClearQueueSession, (event): void => {
     getPlaybackSessionStore().clear();
     broadcastPlaybackQueueSessionChanged(event.sender, null);
+    refreshTaskbarPlaybackIntegration();
   });
   ipcMain.handle(IpcChannels.PlaybackPlayLocalFile, async (_event, request: unknown): Promise<PlaybackStatus> => enqueuePlaybackStatusCommand(async () => {
     const postTaskGeneration = beginPlaybackSwitchDiagnostics();

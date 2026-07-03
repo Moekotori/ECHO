@@ -1,7 +1,9 @@
 import { EventEmitter } from 'node:events';
+import type * as NodeFs from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
 import type { AudioStatus } from '../../shared/types/audio';
+import type { PersistedPlaybackSessionV1 } from '../../shared/types/playback';
 
 vi.mock('electron', () => ({
   nativeImage: {
@@ -10,8 +12,20 @@ vi.mock('electron', () => ({
   },
 }));
 
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeFs>();
+  return { ...actual, existsSync: vi.fn(() => true) };
+});
+
 vi.mock('../audio/AudioSession', () => ({
   getAudioSession: vi.fn(),
+}));
+
+const loadPlaybackSessionMock = vi.fn(() => null);
+vi.mock('../audio/PlaybackSessionStore', () => ({
+  getPlaybackSessionStore: vi.fn(() => ({
+    load: loadPlaybackSessionMock,
+  })),
 }));
 
 vi.mock('../library/LibraryService', () => ({
@@ -84,7 +98,7 @@ const createWindow = () => ({
   destroyed: false,
   sent: [] as Array<[string, unknown]>,
   setProgressBar: vi.fn(),
-  setThumbarButtons: vi.fn((_buttons: Array<{ click: () => void }>) => true),
+  setThumbarButtons: vi.fn<(buttons: Array<{ click: () => void }>) => boolean>(() => true),
   getContentBounds: vi.fn(() => ({ x: 0, y: 0, width: 1280, height: 720 })),
   setThumbnailClip: vi.fn(),
   setThumbnailToolTip: vi.fn(),
@@ -101,9 +115,61 @@ const createWindow = () => ({
 
 let window: ReturnType<typeof createWindow>;
 
+const createCoverControllerStub = (available = true) => {
+  const controller = {
+    isAvailable: vi.fn(() => available),
+    setCover: vi.fn(async (coverPath: string | null) => coverPath !== null),
+    clear: vi.fn(),
+    dispose: vi.fn(),
+    getDiagnostics: vi.fn(() => null),
+  };
+  return controller;
+};
+
+const createPlaybackSession = (track: { id: string; coverId: string | null }): PersistedPlaybackSessionV1 =>
+  ({
+    version: 1,
+    items: [],
+    currentQueueId: null,
+    currentTrackId: track.id,
+    lastPlayedTrack: {
+      id: track.id,
+      path: 'D:\\Music\\Loose.flac',
+      title: 'Song A',
+      artist: 'Artist A',
+      album: 'Album A',
+      albumArtist: 'Artist A',
+      trackNo: null,
+      discNo: null,
+      year: null,
+      genre: null,
+      duration: 200,
+      codec: null,
+      sampleRate: null,
+      bitDepth: null,
+      bitrate: null,
+      coverId: track.coverId,
+      coverThumb: null,
+      fieldSources: {},
+    },
+    history: [],
+    mode: {
+      isShuffleEnabled: false,
+      repeatMode: 'off',
+      automixEnabled: false,
+      autoFillQueueEnabled: false,
+    },
+    resume: null,
+    updatedAt: '2025-01-01T00:00:00.000Z',
+  }) as PersistedPlaybackSessionV1;
+
+const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 describe('TaskbarPlaybackIntegration', () => {
   beforeEach(() => {
     vi.resetModules();
+    loadPlaybackSessionMock.mockReset();
+    loadPlaybackSessionMock.mockReturnValue(null);
     window = createWindow();
   });
 
@@ -296,6 +362,115 @@ describe('TaskbarPlaybackIntegration', () => {
     buttons[3].click();
 
     expect(unlikeTrack).toHaveBeenCalledWith('track-1');
+    integration.dispose();
+  });
+
+  it('shows the album cover as the iconic thumbnail instead of clipping when the addon is available', async () => {
+    const { TaskbarPlaybackIntegration } = await import('./taskbarPlaybackIntegration');
+    const audioSession = createAudioSession();
+    const coverController = createCoverControllerStub();
+    const integration = new TaskbarPlaybackIntegration({
+      window,
+      audioSession,
+      platform: 'win32',
+      getSettings: () => ({ taskbarPlaybackControlsEnabled: true }),
+      getLibrary: () => ({
+        getTrack: () => ({ title: 'Song A', artist: 'Artist A', coverId: 'cover-1' }),
+        resolveCoverAsset: (_coverId: string, variant: string) =>
+          variant === 'large' ? { filePath: 'D:\\covers\\a.png' } : null,
+      }),
+      createIcon: () => ({ isEmpty: () => false }) as never,
+      createCoverController: () => coverController,
+    });
+
+    integration.initialize();
+    integration.refresh();
+
+    expect(coverController.setCover).toHaveBeenCalledWith('D:\\covers\\a.png');
+    expect(window.setThumbnailClip).not.toHaveBeenCalled();
+    expect(integration.getStatus()).toMatchObject({ thumbnailCover: 'album-cover', thumbnailClip: null });
+    integration.dispose();
+    expect(coverController.dispose).toHaveBeenCalled();
+  });
+
+  it('restores the live window preview via the addon when playback stops and no cover is available', async () => {
+    const { TaskbarPlaybackIntegration } = await import('./taskbarPlaybackIntegration');
+    const audioSession = createAudioSession(makeStatus({ state: 'stopped', currentTrackId: null, currentFilePath: null }));
+    const coverController = createCoverControllerStub();
+    const integration = new TaskbarPlaybackIntegration({
+      window,
+      audioSession,
+      platform: 'win32',
+      getSettings: () => ({ taskbarPlaybackControlsEnabled: true }),
+      getLibrary: () => ({
+        getTrack: () => ({ title: 'Song A', artist: 'Artist A', coverId: null }),
+        resolveCoverAsset: () => null,
+      }),
+      createIcon: () => ({ isEmpty: () => false }) as never,
+      createCoverController: () => coverController,
+    });
+
+    integration.initialize();
+    integration.refresh();
+
+    expect(coverController.clear).toHaveBeenCalled();
+    expect(coverController.setCover).not.toHaveBeenCalled();
+  });
+
+  it('keeps the thumbnail synced to the persisted queue cover even when playback is stopped', async () => {
+    const { TaskbarPlaybackIntegration } = await import('./taskbarPlaybackIntegration');
+    const audioSession = createAudioSession(makeStatus({ state: 'stopped', currentTrackId: null, currentFilePath: null }));
+    const coverController = createCoverControllerStub();
+    const session = createPlaybackSession({ id: 'track-1', coverId: 'cover-1' });
+    const integration = new TaskbarPlaybackIntegration({
+      window,
+      audioSession,
+      platform: 'win32',
+      getPlaybackSession: () => session,
+      getSettings: () => ({ taskbarPlaybackControlsEnabled: true }),
+      getLibrary: () => ({
+        getTrack: () => ({ title: 'Song A', artist: 'Artist A', coverId: 'cover-1' }),
+        resolveCoverAsset: (_coverId: string, variant: string) =>
+          variant === 'large' ? { filePath: 'D:\\covers\\a.png' } : null,
+      }),
+      createIcon: () => ({ isEmpty: () => false }) as never,
+      createCoverController: () => coverController,
+    });
+
+    integration.initialize();
+    integration.refresh();
+
+    expect(coverController.setCover).toHaveBeenCalledWith('D:\\covers\\a.png');
+    expect(coverController.clear).not.toHaveBeenCalled();
+    expect(integration.getStatus()).toMatchObject({ thumbnailCover: 'album-cover', thumbnailClip: null });
+    integration.dispose();
+  });
+
+  it('falls back to clipping the thumbnail when no cover can be resolved', async () => {
+    const { TaskbarPlaybackIntegration } = await import('./taskbarPlaybackIntegration');
+    const audioSession = createAudioSession();
+    const coverController = createCoverControllerStub();
+    const integration = new TaskbarPlaybackIntegration({
+      window,
+      audioSession,
+      platform: 'win32',
+      getSettings: () => ({ taskbarPlaybackControlsEnabled: true }),
+      getLibrary: () => ({
+        // No coverId => no cover path resolvable.
+        getTrack: () => ({ title: 'Song A', artist: 'Artist A', coverId: null }),
+        resolveCoverAsset: () => null,
+      }),
+      createIcon: () => ({ isEmpty: () => false }) as never,
+      createCoverController: () => coverController,
+    });
+
+    integration.initialize();
+    integration.refresh();
+
+    expect(coverController.setCover).toHaveBeenCalledWith(null);
+    await flushMicrotasks();
+    expect(window.setThumbnailClip).toHaveBeenCalledWith({ x: 0, y: 624, width: 1280, height: 96 });
+    expect(integration.getStatus()).toMatchObject({ thumbnailCover: null });
     integration.dispose();
   });
 });
