@@ -6,7 +6,7 @@ import type { AppSettings } from '../../shared/types/appSettings';
 import type { AudioStatus } from '../../shared/types/audio';
 import type { PersistedPlaybackSessionV1 } from '../../shared/types/playback';
 import type { SmtcButtonCommand } from '../../shared/types/smtc';
-import type { TaskbarPlaybackStatus, TaskbarThumbnailDiagnostics } from '../../shared/types/taskbarPlayback';
+import type { TaskbarPlaybackStatus } from '../../shared/types/taskbarPlayback';
 import type { CoverVariant } from '../library/libraryTypes';
 import { getAudioSession } from '../audio/AudioSession';
 import { getPlaybackSessionStore } from '../audio/PlaybackSessionStore';
@@ -56,7 +56,6 @@ type ThumbnailCoverController = {
   setButtons?: (input: { playing: boolean; canLike: boolean; liked: boolean; visible: boolean }) => boolean;
   clear: () => void;
   dispose: () => void;
-  getDiagnostics?: () => TaskbarThumbnailDiagnostics | null;
 };
 
 const defaultCreateCoverController = (window: TaskbarWindow): ThumbnailCoverController | null => {
@@ -273,7 +272,6 @@ const createEmptyStatus = (platform: NodeJS.Platform, bound: boolean, windowAvai
   lastAppliedAt: null,
   lastClearedAt: null,
   lastError: null,
-  thumbnailDiagnostics: null,
 });
 
 export class TaskbarPlaybackIntegration {
@@ -341,7 +339,6 @@ export class TaskbarPlaybackIntegration {
       ...this.status,
       bound: !this.disposed,
       windowAvailable: !this.window.isDestroyed(),
-      thumbnailDiagnostics: this.coverController?.getDiagnostics?.() ?? null,
     };
   }
 

@@ -1086,21 +1086,6 @@ Napi::Value Detach(const Napi::CallbackInfo& info) {
   return env.Undefined();
 }
 
-// getState() -> Object  (diagnostics: how many messages, HRESULTs, etc.)
-Napi::Value GetState(const Napi::CallbackInfo& info) {
-  Napi::Env env = info.Env();
-  Napi::Object obj = Napi::Object::New(env);
-  obj.Set("hasMaster", Napi::Boolean::New(env, !g_state.master.empty()));
-  obj.Set("proxyPlacementMode", Napi::Number::New(env, g_state.proxyPlacementMode));
-  obj.Set("mainSubclassed", Napi::Boolean::New(env, g_state.mainSubclassed));
-  obj.Set("proxyTaskbarButtonCreated", Napi::Boolean::New(env, g_state.proxyTaskbarButtonCreated));
-  obj.Set("buttonsAdded", Napi::Boolean::New(env, g_state.buttonsAdded));
-  obj.Set("buttonsVisible", Napi::Boolean::New(env, g_state.buttonsVisible));
-  obj.Set("buttonClicks", Napi::Number::New(env, g_state.buttonClicks));
-  obj.Set("lastButtonsHr", Napi::Number::New(env, g_state.lastButtonsHr));
-  return obj;
-}
-
 }  // namespace
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
@@ -1111,7 +1096,6 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("refresh", Napi::Function::New(env, Refresh));
   exports.Set("clear", Napi::Function::New(env, Clear));
   exports.Set("detach", Napi::Function::New(env, Detach));
-  exports.Set("getState", Napi::Function::New(env, GetState));
   return exports;
 }
 

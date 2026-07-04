@@ -2,17 +2,14 @@ import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { createRequire } from 'node:module';
 
 // Builds the in-process DWM iconic-bitmap addon (echo-taskbar-thumbnail-helper.node)
 // that renders the album cover into the Windows taskbar hover thumbnail.
-// Mirrors scripts/build-smtc-host.mjs, but produces a Node-API .node addon via
-// cmake-js instead of a standalone .exe.
+// Uses node-gyp from the existing Electron native rebuild toolchain.
 
 const scriptPath = fileURLToPath(import.meta.url);
 const projectRoot = resolve(dirname(scriptPath), '..');
 const sourceDir = join(projectRoot, 'native', 'taskbar-thumbnail-helper');
-const buildDir = join(projectRoot, 'out', 'native', 'taskbar-thumbnail-helper');
 const targetDir = join(projectRoot, 'electron-app', 'build');
 const targetNode = join(targetDir, 'echo-taskbar-thumbnail-helper.node');
 const packagedResource = join(
@@ -23,15 +20,7 @@ const packagedResource = join(
   'echo-taskbar-thumbnail-helper.node',
 );
 const config = process.env.ECHO_TASKBAR_HELPER_CONFIG || 'Release';
-
-// N-API is ABI-stable, so a single build works across Electron/Node versions.
-// We still build against the addon-api headers resolved from the project root.
-const require = createRequire(import.meta.url);
-const addonApiInclude = dirname(require.resolve('node-addon-api/napi.h'));
-
-// Run cmake-js via its JS entry with the current node binary. Spawning the
-// .cmd shim with shell:false throws EINVAL on modern Windows, so we avoid it.
-const cmakeJsEntry = require.resolve('cmake-js/bin/cmake-js');
+const nodeGypCli = join(projectRoot, 'node_modules', 'node-gyp', 'bin', 'node-gyp.js');
 
 const run = (command, args) => {
   const result = spawnSync(command, args, {
@@ -70,9 +59,9 @@ const copyBuiltAddon = (source, destination) => {
 
 const findBuiltAddon = () => {
   const candidates = [
-    join(buildDir, config, 'echo-taskbar-thumbnail-helper.node'),
-    join(buildDir, 'echo-taskbar-thumbnail-helper.node'),
-    join(buildDir, 'Release', 'echo-taskbar-thumbnail-helper.node'),
+    join(sourceDir, 'build', config, 'echo-taskbar-thumbnail-helper.node'),
+    join(sourceDir, 'build', 'Release', 'echo-taskbar-thumbnail-helper.node'),
+    join(sourceDir, 'build', 'Debug', 'echo-taskbar-thumbnail-helper.node'),
   ];
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 };
@@ -83,24 +72,21 @@ try {
     process.exit(0);
   }
 
-  // cmake-js configures + builds the addon, wiring node headers, the import lib
-  // and the Windows delay-load hook. We pass our addon-api include dir through
-  // to CMake as NODE_ADDON_API_INC.
+  if (!existsSync(nodeGypCli)) {
+    throw new Error(`node-gyp was not found at ${nodeGypCli}`);
+  }
+
   run(process.execPath, [
-    cmakeJsEntry,
-    'compile',
+    nodeGypCli,
+    'rebuild',
     '--directory',
     sourceDir,
-    '--out',
-    buildDir,
-    '--config',
-    config,
-    '--CDNODE_ADDON_API_INC=' + addonApiInclude,
+    config.toLowerCase() === 'debug' ? '--debug' : '--release',
   ]);
 
   const builtAddon = findBuiltAddon();
   if (!builtAddon) {
-    throw new Error(`Built taskbar thumbnail helper addon was not found under ${buildDir}`);
+    throw new Error(`Built taskbar thumbnail helper addon was not found under ${join(sourceDir, 'build')}`);
   }
 
   mkdirSync(targetDir, { recursive: true });
@@ -114,7 +100,7 @@ try {
   }
 } catch (error) {
   console.error('[build:taskbar-helper] Failed to build Windows taskbar thumbnail helper.');
-  console.error('[build:taskbar-helper] Requirements: CMake, Visual Studio 2022 Build Tools, and Windows SDK 10.0.19041 or newer.');
+  console.error('[build:taskbar-helper] Requirements: Visual Studio 2022 Build Tools and Windows SDK 10.0.19041 or newer.');
   console.error(`[build:taskbar-helper] ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 }

@@ -130,7 +130,6 @@ const createCoverControllerStub = (available = true) => {
     setButtons: vi.fn(() => true),
     clear: vi.fn(),
     dispose: vi.fn(),
-    getDiagnostics: vi.fn(() => null),
   };
   return controller;
 };

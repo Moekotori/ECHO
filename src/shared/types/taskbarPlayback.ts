@@ -1,15 +1,5 @@
 import type { AudioPlaybackState } from './audio';
 
-export type TaskbarThumbnailDiagnostics = {
-  hasMaster: boolean;
-  proxyPlacementMode?: number;
-  mainSubclassed?: boolean;
-  buttonsAdded?: boolean;
-  buttonsVisible?: boolean;
-  buttonClicks?: number;
-  lastButtonsHr?: number;
-};
-
 export type TaskbarPlaybackStatus = {
   platform: NodeJS.Platform;
   supported: boolean;
@@ -27,5 +17,4 @@ export type TaskbarPlaybackStatus = {
   lastAppliedAt: string | null;
   lastClearedAt: string | null;
   lastError: string | null;
-  thumbnailDiagnostics: TaskbarThumbnailDiagnostics | null;
 };

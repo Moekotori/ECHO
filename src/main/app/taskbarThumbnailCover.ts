@@ -3,7 +3,6 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from 'electron';
 import sharp from 'sharp';
-import type { TaskbarThumbnailDiagnostics } from '../../shared/types/taskbarPlayback';
 
 // Thin wrapper around the native echo-taskbar-thumbnail-helper.node addon.
 // The addon registers a lightweight taskbar tab/proxy HWND for the album-cover
@@ -23,7 +22,6 @@ type TaskbarThumbnailAddon = {
   refresh: () => boolean;
   clear: () => boolean;
   detach: () => void;
-  getState?: () => TaskbarThumbnailDiagnostics;
 };
 
 const resolveAddonPath = (): string => {
@@ -217,18 +215,6 @@ export class TaskbarThumbnailCoverController {
       this.addon.clear();
     } catch {
       // ignore failures restoring the default preview
-    }
-  }
-
-  /** Read native-side diagnostic counters, or null if unavailable. */
-  getDiagnostics(): TaskbarThumbnailDiagnostics | null {
-    if (!this.addon || typeof this.addon.getState !== 'function') {
-      return null;
-    }
-    try {
-      return this.addon.getState();
-    } catch {
-      return null;
     }
   }
 
