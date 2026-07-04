@@ -485,6 +485,43 @@ describe('TaskbarPlaybackIntegration', () => {
 
     expect(coverController.clear).toHaveBeenCalled();
     expect(coverController.setCover).not.toHaveBeenCalled();
+    expect(coverController.setButtons).toHaveBeenCalledWith(expect.objectContaining({ visible: false }));
+    expect(integration.getStatus()).toMatchObject({ thumbnailCover: null, thumbnailClip: null });
+    integration.dispose();
+  });
+
+  it('ignores stale cover failures after the window becomes ineligible for preview', async () => {
+    const { TaskbarPlaybackIntegration } = await import('./taskbarPlaybackIntegration');
+    const audioSession = createAudioSession();
+    let resolveSetCover: (applied: boolean) => void = () => undefined;
+    const coverController = {
+      ...createCoverControllerStub(),
+      setCover: vi.fn(() => new Promise<boolean>((resolve) => {
+        resolveSetCover = resolve;
+      })),
+    };
+    const integration = new TaskbarPlaybackIntegration({
+      window,
+      audioSession,
+      platform: 'win32',
+      getSettings: () => ({ taskbarPlaybackControlsEnabled: true }),
+      getLibrary: () => ({
+        getTrack: () => ({ title: 'Song A', artist: 'Artist A', coverId: 'cover-1' }),
+        resolveCoverAsset: (_coverId: string, variant: string) =>
+          variant === 'large' ? { filePath: 'D:\\covers\\a.png' } : null,
+      }),
+      createIcon: () => ({ isEmpty: () => false }) as never,
+      createCoverController: () => coverController,
+    });
+
+    integration.initialize();
+    integration.refresh();
+    window.visible = false;
+    integration.refresh();
+    resolveSetCover(false);
+    await flushMicrotasks();
+
+    expect(window.setThumbnailClip).not.toHaveBeenCalledWith({ x: 0, y: 624, width: 1280, height: 96 });
     expect(integration.getStatus()).toMatchObject({ thumbnailCover: null, thumbnailClip: null });
     integration.dispose();
   });
@@ -517,4 +554,3 @@ describe('TaskbarPlaybackIntegration', () => {
     integration.dispose();
   });
 });
-

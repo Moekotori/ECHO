@@ -287,6 +287,7 @@ export class TaskbarPlaybackIntegration {
   private readonly coverController: ThumbnailCoverController | null;
   private disposed = false;
   private lastThumbarKey: string | null = null;
+  private thumbnailCoverRequestId = 0;
   private progressTimer: ReturnType<typeof setInterval> | null = null;
   private status: TaskbarPlaybackStatus;
   private readonly handleStatus = (status: AudioStatus): void => {
@@ -481,6 +482,7 @@ export class TaskbarPlaybackIntegration {
 
   private updateThumbnailCover(status: AudioStatus, visible: boolean): void {
     if (!this.isWindowPreviewEligible()) {
+      this.thumbnailCoverRequestId += 1;
       this.coverController?.clear();
       this.status = {
         ...this.status,
@@ -491,6 +493,7 @@ export class TaskbarPlaybackIntegration {
     }
 
     const coverPath = this.resolveCoverPath(status);
+    const requestId = ++this.thumbnailCoverRequestId;
     this.status = {
       ...this.status,
       thumbnailClip: null,
@@ -507,8 +510,11 @@ export class TaskbarPlaybackIntegration {
     void this.coverController
       ?.setCover(coverPath)
       .then((applied) => {
-        if (!applied && !this.disposed && !this.window.isDestroyed()) {
-          if (visible) {
+        if (requestId !== this.thumbnailCoverRequestId || this.disposed || this.window.isDestroyed()) {
+          return;
+        }
+        if (!applied) {
+          if (visible && this.isWindowPreviewEligible()) {
             this.updateThumbnailClip();
           } else {
             this.coverController?.clear();
@@ -623,7 +629,7 @@ export class TaskbarPlaybackIntegration {
       playing: isPlaying,
       canLike: likeState.canLike,
       liked: likeState.liked,
-      visible: true,
+      visible: this.isWindowPreviewEligible(),
     });
     const key = [
       isPlaying ? 'playing' : 'paused',

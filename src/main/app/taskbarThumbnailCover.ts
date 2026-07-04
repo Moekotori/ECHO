@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from 'electron';
 import sharp from 'sharp';
+import type { TaskbarThumbnailDiagnostics } from '../../shared/types/taskbarPlayback';
 
 // Thin wrapper around the native echo-taskbar-thumbnail-helper.node addon.
 // The addon registers a lightweight taskbar tab/proxy HWND for the album-cover
@@ -13,17 +14,6 @@ const addonFileName = 'echo-taskbar-thumbnail-helper.node';
 // Covers are decoded to this square size and handed to the native side; DWM
 // scales down from here for the small hover thumbnail.
 const coverRenderSize = 512;
-
-export type TaskbarThumbnailDiagnostics = {
-  hasMaster: boolean;
-  proxyPlacementMode?: number;
-  mainSubclassed?: boolean;
-  proxyTaskbarButtonCreated?: boolean;
-  buttonsAdded?: boolean;
-  buttonsVisible?: boolean;
-  buttonClicks?: number;
-  lastButtonsHr?: number;
-};
 
 type TaskbarThumbnailAddon = {
   attach: (hwnd: Buffer) => boolean;
@@ -79,8 +69,6 @@ const loadAddon = (): TaskbarThumbnailAddon | null => {
 
   return addon;
 };
-
-// __CHUNK_MARKER__
 
 export type TaskbarThumbnailCoverDeps = {
   getNativeWindowHandle: () => Buffer;
@@ -202,7 +190,13 @@ export class TaskbarThumbnailCoverController {
   }
 
   setButtons(input: { playing: boolean; canLike: boolean; liked: boolean; visible: boolean }): boolean {
-    if (!this.addon?.setButtons || !this.ensureAttached()) {
+    if (!this.addon?.setButtons) {
+      return false;
+    }
+    if (!input.visible && !this.attached) {
+      return true;
+    }
+    if (!this.ensureAttached()) {
       return false;
     }
     try {
