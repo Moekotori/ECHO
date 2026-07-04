@@ -45,7 +45,7 @@ import {
   subscribeDataBackupProgress,
 } from '../app/dataBackup';
 import { exportEchoDataPackage } from '../app/dataPackage';
-import { getTaskbarPlaybackStatus, refreshTaskbarPlaybackIntegration } from '../app/taskbarPlaybackIntegration';
+import { getTaskbarPlaybackStatus, refreshTaskbarPlaybackIntegration, setTaskbarThumbnailArtworkUrl } from '../app/taskbarPlaybackIntegration';
 import { showWindowsTouchKeyboard } from '../app/touchKeyboard';
 import { ensureTray, requestAppQuit } from '../app/tray';
 import { ensureCoverCacheDirectory } from '../library/CoverCacheManager';
@@ -519,6 +519,9 @@ export const registerIpc = (): void => {
     ipcMain.handle(IpcChannels.AppGetTaskbarPlaybackStatus, (): TaskbarPlaybackStatus => {
       refreshTaskbarPlaybackIntegration();
       return getTaskbarPlaybackStatus();
+    });
+    ipcMain.on(IpcChannels.AppSetTaskbarThumbnailArtwork, (_event, artworkUrl: unknown): void => {
+      setTaskbarThumbnailArtworkUrl(typeof artworkUrl === 'string' ? artworkUrl : null);
     });
     ipcMain.handle(IpcChannels.AppExportSettings, async (): Promise<string | null> => {
       const result = await dialog.showSaveDialog({

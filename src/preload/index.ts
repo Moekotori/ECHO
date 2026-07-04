@@ -1665,6 +1665,9 @@ const echoApi: EchoApi = {
     getSettings: () => ipcRenderer.invoke(IpcChannels.AppGetSettings),
     setSettings: (patch) => ipcRenderer.invoke(IpcChannels.AppSetSettings, patch),
     getTaskbarPlaybackStatus: () => ipcRenderer.invoke(IpcChannels.AppGetTaskbarPlaybackStatus),
+    setTaskbarThumbnailArtwork: (artworkUrl) => {
+      ipcRenderer.send(IpcChannels.AppSetTaskbarThumbnailArtwork, artworkUrl);
+    },
     resetSettings: () => ipcRenderer.invoke(IpcChannels.AppResetSettings),
     exportSettings: () => ipcRenderer.invoke(IpcChannels.AppExportSettings),
     importSettings: () => ipcRenderer.invoke(IpcChannels.AppImportSettings),

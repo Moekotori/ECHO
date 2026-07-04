@@ -14,6 +14,7 @@ export const IpcChannels = {
   AppGetSettings: 'app:get-settings',
   AppSetSettings: 'app:set-settings',
   AppGetTaskbarPlaybackStatus: 'app:get-taskbar-playback-status',
+  AppSetTaskbarThumbnailArtwork: 'app:set-taskbar-thumbnail-artwork',
   AppResetSettings: 'app:reset-settings',
   AppExportSettings: 'app:export-settings',
   AppImportSettings: 'app:import-settings',

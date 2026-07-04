@@ -1146,6 +1146,10 @@ export const PlayerBar = ({
   }, [currentLibraryArtistName]);
 
   useEffect(() => {
+    window.echo?.app?.setTaskbarThumbnailArtwork?.(artworkUrl);
+  }, [artworkUrl]);
+
+  useEffect(() => {
     const audio = window.echo?.audio;
     if (!audio) {
       return;

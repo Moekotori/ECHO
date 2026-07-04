@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { app } from 'electron';
+import { app, net } from 'electron';
 import sharp from 'sharp';
 
 // Thin wrapper around the native echo-taskbar-thumbnail-helper.node addon.
@@ -71,15 +71,20 @@ const loadAddon = (): TaskbarThumbnailAddon | null => {
 export type TaskbarThumbnailCoverDeps = {
   getNativeWindowHandle: () => Buffer;
   loadAddon?: () => TaskbarThumbnailAddon | null;
-  decodeCover?: (coverPath: string) => Promise<{ data: Buffer; width: number; height: number } | null>;
+  decodeCover?: (coverUrl: string) => Promise<{ data: Buffer; width: number; height: number } | null>;
   onButtonClick?: (buttonId: number) => void;
 };
 
 const decodeCoverToRgba = async (
-  coverPath: string,
+  coverUrl: string,
 ): Promise<{ data: Buffer; width: number; height: number } | null> => {
   try {
-    const { data, info } = await sharp(coverPath, { animated: false })
+    const response = await net.fetch(coverUrl);
+    if (!response.ok) {
+      return null;
+    }
+    const input = Buffer.from(await response.arrayBuffer());
+    const { data, info } = await sharp(input, { animated: false })
       .resize(coverRenderSize, coverRenderSize, { fit: 'inside', withoutEnlargement: true })
       .ensureAlpha()
       .raw()
@@ -99,11 +104,11 @@ export class TaskbarThumbnailCoverController {
   private readonly getNativeWindowHandle: () => Buffer;
   private readonly addon: TaskbarThumbnailAddon | null;
   private readonly decodeCover: (
-    coverPath: string,
+    coverUrl: string,
   ) => Promise<{ data: Buffer; width: number; height: number } | null>;
   private readonly onButtonClick: ((buttonId: number) => void) | null;
   private attached = false;
-  private lastCoverPath: string | null = null;
+  private lastCoverUrl: string | null = null;
   private applyToken = 0;
   private buttonHandlerAttached = false;
 
@@ -150,27 +155,27 @@ export class TaskbarThumbnailCoverController {
   }
 
   /**
-   * Show `coverPath` (a jpg/jpeg/png file) as the taskbar thumbnail. Decoding
-   * is async; the most recent call wins. Returns true if the addon accepted a
+   * Show `coverUrl` as the taskbar thumbnail. Decoding is async; the most
+   * recent call wins. Returns true if the addon accepted a
    * cover (or the same cover was already applied), false if unavailable.
    */
-  async setCover(coverPath: string | null): Promise<boolean> {
+  async setCover(coverUrl: string | null): Promise<boolean> {
     if (!this.addon) {
       return false;
     }
-    if (!coverPath || !existsSync(coverPath)) {
+    if (!coverUrl) {
       this.clear();
       return false;
     }
     if (!this.ensureAttached()) {
       return false;
     }
-    if (coverPath === this.lastCoverPath) {
+    if (coverUrl === this.lastCoverUrl) {
       return true;
     }
 
     const token = ++this.applyToken;
-    const decoded = await this.decodeCover(coverPath);
+    const decoded = await this.decodeCover(coverUrl);
     if (!decoded || token !== this.applyToken) {
       // A newer setCover/clear superseded this decode; drop the stale result.
       return false;
@@ -179,7 +184,7 @@ export class TaskbarThumbnailCoverController {
     try {
       const applied = this.addon.setCover(decoded.data, decoded.width, decoded.height);
       if (applied) {
-        this.lastCoverPath = coverPath;
+        this.lastCoverUrl = coverUrl;
       }
       return applied;
     } catch {
@@ -207,7 +212,7 @@ export class TaskbarThumbnailCoverController {
   /** Restore the live window preview (drop the cover bitmap). */
   clear(): void {
     this.applyToken += 1;
-    this.lastCoverPath = null;
+    this.lastCoverUrl = null;
     if (!this.addon || !this.attached) {
       return;
     }
@@ -221,7 +226,7 @@ export class TaskbarThumbnailCoverController {
   /** Detach the window subclass. Call before the window is destroyed. */
   dispose(): void {
     this.applyToken += 1;
-    this.lastCoverPath = null;
+    this.lastCoverUrl = null;
     if (!this.addon || !this.attached) {
       return;
     }

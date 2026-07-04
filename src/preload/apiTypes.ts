@@ -322,6 +322,7 @@ export type EchoApi = {
     getSettings: () => Promise<AppSettings>;
     setSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>;
     getTaskbarPlaybackStatus: () => Promise<TaskbarPlaybackStatus>;
+    setTaskbarThumbnailArtwork: (artworkUrl: string | null) => void;
     resetSettings: () => Promise<AppSettings>;
     exportSettings: () => Promise<string | null>;
     importSettings: () => Promise<SettingsImportResult | null>;

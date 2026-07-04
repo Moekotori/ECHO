@@ -1841,6 +1841,15 @@ describe('preload SMTC API', () => {
     expect(listeners.get(IpcChannels.PlaybackQueueSessionChanged)).toBeUndefined();
   });
 
+  it('sends taskbar thumbnail artwork updates to IPC', () => {
+    exposedApi!.app.setTaskbarThumbnailArtwork('echo-cover://original/cover-1');
+
+    expect(ipcRenderer.send).toHaveBeenCalledWith(
+      IpcChannels.AppSetTaskbarThumbnailArtwork,
+      'echo-cover://original/cover-1',
+    );
+  });
+
   it('exposes lyrics wallpaper picker through IPC', async () => {
     await exposedApi!.app.chooseLyricsWallpaper();
 
