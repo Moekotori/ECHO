@@ -13,7 +13,7 @@
 
 <p align="center">
   <img alt="Status" src="https://img.shields.io/badge/status-actively%20maintained-7c5cff?style=flat-square" />
-  <img alt="Development" src="https://img.shields.io/badge/development-closed%20source-f59e0b?style=flat-square" />
+  <img alt="Development" src="https://img.shields.io/badge/development-reopening%20source-22c55e?style=flat-square" />
   <img alt="Focus" src="https://img.shields.io/badge/focus-local%20music%20%26%20HiFi-0ea5e9?style=flat-square" />
 </p>
 
@@ -51,7 +51,7 @@ ECHO NEXT 是面向本地大曲库、原生音频输出和专业 DSP 打造的�
 | 文件夹扫描、SQLite 曲库、标签、封面、专辑墙与播放列表 | 参数 EQ、Headroom、FIR、OPRA、声道工具与输出安全 | WASAPI Shared / Exclusive、ASIO、DSD / DoP 与 HQPlayer |
 
 > [!IMPORTANT]
-> ECHO NEXT 目前采用闭源开发，但项目仍在持续维护和发布。闭源不等于停止更新，也不影响用户通过官方渠道下载和使用发行版本。
+> ECHO NEXT 已决定重新开源。源码、协作说明与许可安排会逐步恢复到公开仓库；在相关内容正式发布前，请仍以仓库当前文件和许可证为准。
 
 ## ECHO Audio Engine
 
@@ -198,20 +198,35 @@ DSD 播放时，数字音量、EQ、ReplayGain 和普通 PCM DSP 会破坏直出
 | 第一次使用 ECHO NEXT | [使用文档](https://echonext.moe/zh/docs/) |
 | 了解最近发生了什么 | [更新日志](https://echonext.moe/zh/changelog/) |
 | 报告问题或提出建议 | [GitHub Issues](https://github.com/Moekotori/ECHO/issues) |
-| 支持项目长期开发 | [ECHO Pro](https://afdian.com/a/echonext) |
+| 支持项目长期开发 | [ECHO Pro](https://www.ifdian.net/a/echonext) |
+| 提交你期待的新功能 | [ECHO 许愿池](https://docs.qq.com/form/page/DYkt1UVNuaEpHcFB5) |
 | 参与更深入的项目协作 | [ECHO Developer Plan](https://echonext.moe/zh/developer/) |
 
-## 项目状态
+## 关于 ECHO 重新开源
 
-ECHO NEXT 的核心开发已转入私有仓库和内部协作环境。这个公开仓库不再提供源码、项目架构、构建流程、内部文档、实现细节或完整开发路线，曾经公开的内容也不再代表当前项目结构。
+前段时间，我们曾迫不得已将 ECHO 闭源。
 
-公开仓库将继续承担以下职责：
+在此之前，项目维护者遭到某位用户持续数月的辱骂与精神压迫，仓库也曾两次遭到破坏。与此同时，甚至有人指责我们开源是为了“骗钱”。这些事情让我们非常心寒，也让原本单纯的开源与分享变成了沉重的负担，因此我们一度选择关闭源码，保护项目和维护者。
 
-- 提供清晰、稳定的项目与维护状态说明；
-- 引导用户前往官方下载、文档和更新日志；
-- 集中接收可复现的问题反馈与产品建议；
-- 介绍 ECHO Pro 与 Developer Plan；
-- 保留必要的许可文件和 Issue 模板。
+但现在，我们改变主意了。
+
+我们仍然相信开源、分享和社区的价值，也不希望少数人的恶意让所有真正喜欢 ECHO、愿意使用和共同建设它的人失去参与的机会。因此，**ECHO 将重新面向大家开源**。源码、开发文档和贡献方式会逐步整理并恢复到公开仓库。
+
+感谢每一位善意使用、认真反馈、帮助测试和参与贡献的朋友。希望这一次，我们可以一起让 ECHO 走得更远。
+
+## ECHO 即将上架 Steam
+
+ECHO 要上架 Steam 啦！
+
+在 **2026 年 8 月 15 日前**购入 ECHO Pro，可享受以下权益：
+
+- 免费获得 Steam CD Key；
+- 加入 ECHO 贡献者名单；
+- 支付邮费即可获赠 ECHO 周边。
+
+购买地址：[爱发电 ECHO NEXT](https://www.ifdian.net/a/echonext)
+
+大家想要什么功能，也欢迎填写 [ECHO 许愿池](https://docs.qq.com/form/page/DYkt1UVNuaEpHcFB5)，告诉我们你的想法。
 
 ## 我们仍在持续更新
 
@@ -233,7 +248,7 @@ ECHO Pro 是面向长期支持者的进阶计划。你的支持会帮助 ECHO NE
 Pro 权益、实验功能和可用范围可能随版本调整，请以官方页面显示的信息为准。
 
 <p align="center">
-  <a href="https://afdian.com/a/echonext"><strong>支持 ECHO NEXT · 了解 ECHO Pro →</strong></a>
+  <a href="https://www.ifdian.net/a/echonext"><strong>支持 ECHO NEXT · 了解 ECHO Pro →</strong></a>
 </p>
 
 ## ECHO Developer Plan
@@ -268,7 +283,7 @@ Developer Plan 面向愿意长期、认真参与 ECHO NEXT 建设的协作者。
 
 ## License
 
-本仓库中的项目材料受 [ECHO NEXT Source-Available License](./LICENSE) 约束；第三方材料仍遵循各自的许可条款。该许可不是开源软件许可证，请在使用、转载或分发前阅读完整条款。
+在新的开源许可与源码正式发布前，本仓库当前材料仍受 [ECHO NEXT Source-Available License](./LICENSE) 约束；第三方材料仍遵循各自的许可条款。请在使用、转载或分发前阅读完整条款。
 
 ---
 
