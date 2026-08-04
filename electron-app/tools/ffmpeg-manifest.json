@@ -1,0 +1,14 @@
+{
+  "name": "ffmpeg",
+  "version": "8.1.1-full_build-www.gyan.dev",
+  "source": "gyan.dev release full static",
+  "sourceUrl": "https://github.com/GyanD/codexffmpeg/releases/download/8.1.1/ffmpeg-8.1.1-full_build.zip",
+  "projectUrl": "https://www.gyan.dev/ffmpeg/builds/",
+  "downloadPage": "https://ffmpeg.org/download.html",
+  "releaseDate": "2026-05-04T11:10:06Z",
+  "artifact": "electron-app/tools/ffmpeg.exe",
+  "sha256": "09948D4CDD0650DA6FF5A87577469F2A218DC2615AE379F8F734D24C49DE0F73",
+  "requiresSoxr": true,
+  "requiredFilters": ["aresample"],
+  "licenseFamily": "GPLv3"
+}

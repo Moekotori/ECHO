@@ -1,0 +1,104 @@
+node_modules/
+.cache/
+out/
+dist/
+result
+.electron-cache/
+*.log
+.DS_Store
+
+# Local Codex workspace state
+/.codex/
+/.codex-pet-runs/
+/.codex-run/
+/.codex-screenshots/
+/.codex-temp/
+/.codex-tmp/
+/.codex-backups/
+
+# Native/Electron build outputs
+electron-app/build/
+native/**/build/
+native/**/cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Local binary tools downloaded outside source control
+electron-app/tools/ffmpeg.exe
+electron-app/tools/ffprobe.exe
+electron-app/tools/*.exe
+electron-app/tools-linux/ffmpeg
+electron-app/tools-linux/ffprobe
+electron-app/tools-linux/yt-dlp
+
+# Electron Builder artifacts
+dist-packaged*/
+*.blockmap
+*.AppImage
+*.deb
+*.rpm
+*.dmg
+
+# Local media/lyrics scratch files
+*.lrc
+/tmp-*
+/*.patch
+
+# Local runtime state
+/room-correction-state.json
+/eq-state.json
+/eq-backups/
+/sessions/
+
+# Local agent/tool scratch state
+/.reasonix/
+/.omo/
+/.playwright-mcp/
+
+# Root-level duplicate image drops; canonical app artwork lives in build-resources/icons/.
+/logo.png
+/logo1.png
+/lmao.jpeg
+/software.ico
+/software.png
+/softwarelogo.png
+
+# Local config files (not for upstream)
+CLAUDE.md
+FORK.md
+docs/agents/
+docs/security/*.private.md
+prd-sleep-timer.md
+
+# Local signing keys for private packaging only. Do not commit or publish these.
+/.echo-local/keys/
+
+# ECHODev is a private development repo, so source files for Pro/cloud can be
+# tracked for deploy builds. Keep secrets, generated bundles, databases, and
+# runtime artifacts ignored below.
+
+# Keep generated credentials, runtime databases, deploy bundles, and local machine artifacts out of git.
+/echo-pro-cloud*.zip
+/echo-pro-cloud*.tar.gz
+/echo-pro-cloud.env
+/.echo-pro-cloud.env
+/private/**/*.env
+/private/**/*.db
+/private/**/*.db-*
+/private/**/*.sqlite
+/private/**/*.sqlite-*
+/private/**/data/
+/private/**/runtime/
+/private/**/*deploy*.zip
+/private/**/*deploy*.tar.gz
+
+# Local test media; do not publish copyrighted sample tracks.
+/test/tt/*.mp3
+/.codex-qa/
+*.echo-pro-secret
+*.echo-pro-token
+*.echo-pro-session
+*.machine-license
+*.license

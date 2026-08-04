@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily ECHO Pro cloud database backup
+
+[Timer]
+OnCalendar=*-*-* 03:25:00
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

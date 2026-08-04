@@ -1,0 +1,313 @@
+{
+  "name": "echo-next",
+  "version": "26.8.4",
+  "description": "ECHO Next Phase 0 desktop music app shell.",
+  "author": "Moekotori",
+  "license": "SEE LICENSE IN LICENSE",
+  "main": "out/main/index.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/ensure-native-abi.mjs electron && node scripts/ensure-airplay-raop.mjs && node scripts/ensure-audio-host.mjs && node scripts/build-taskbar-host.mjs && electron-vite dev",
+    "dev:full": "node scripts/ensure-native-abi.mjs electron && node scripts/ensure-airplay-raop.mjs && node scripts/ensure-audio-host.mjs && node scripts/build-smtc-host.mjs && node scripts/build-taskbar-host.mjs && electron-vite dev",
+    "build:audio-host": "node scripts/build-audio-host.mjs",
+    "build:src-cuda-worker": "node scripts/build-src-cuda-worker.mjs",
+    "build:taskbar-host": "node scripts/build-taskbar-host.mjs",
+    "build:native-scanner": "node scripts/build-native-scanner.mjs",
+    "ensure:src-cuda-worker": "node scripts/ensure-src-cuda-worker.mjs",
+    "ensure:native-scanner": "node scripts/ensure-native-scanner.mjs",
+    "ensure:audio-host": "node scripts/ensure-audio-host.mjs",
+    "build:smtc-host": "node scripts/build-smtc-host.mjs",
+    "ensure:smtc-host": "node scripts/ensure-smtc-host.mjs",
+    "ensure:nsis-resources": "node scripts/ensure-nsis-resources.mjs",
+    "ensure:package-integrity-key": "node scripts/ensure-package-integrity-key.mjs",
+    "echo-admin": "node scripts/echo-admin.mjs",
+    "prepare:win-ffmpeg": "node scripts/prepare-win-ffmpeg.mjs",
+    "verify:ffmpeg": "node scripts/verify-ffmpeg-toolchain.mjs",
+    "verify:airplay-package": "node scripts/verify-airplay-package.mjs",
+    "pro:status": "node scripts/echo-private-overlay.mjs status",
+    "pro:pull": "node scripts/echo-private-overlay.mjs pull",
+    "pro:generate-plugin": "node scripts/echo-pro-generate-plugin.mjs",
+    "pro:decrypt-watermark": "node scripts/echo-pro-decrypt-watermark.mjs",
+    "test:audio-engine": "node scripts/test-audio-engine.mjs",
+    "smoke:audio-host": "node scripts/smoke-audio-host.mjs",
+    "presmoke:native-scanner": "node scripts/build-native-scanner.mjs",
+    "smoke:native-scanner": "node scripts/smoke-native-scanner.mjs",
+    "smoke:dsd-direct": "node scripts/smoke-dsd-direct.mjs",
+    "smoke:smtc-host": "node scripts/smoke-smtc-host.mjs",
+    "ensure:native:electron": "node scripts/ensure-native-abi.mjs electron",
+    "ensure:native:node": "node scripts/ensure-native-abi.mjs node",
+    "ensure:airplay-raop": "node scripts/ensure-airplay-raop.mjs",
+    "build:airplay-raop": "node scripts/build-airplay-raop.mjs",
+    "rebuild:native": "node scripts/ensure-native-abi.mjs electron && node scripts/ensure-airplay-raop.mjs",
+    "rebuild:native:node": "npm rebuild better-sqlite3",
+    "sync:audio-host": "node scripts/sync-audio-host.mjs",
+    "build": "npm run typecheck && electron-vite build",
+    "build:quick": "node scripts/build-renderer-main.mjs",
+    "build:win": "npm run rebuild:native && npm run prepare:win-ffmpeg && npm run verify:ffmpeg && npm run ensure:audio-host && npm run ensure:smtc-host && npm run ensure:native-scanner && npm run ensure:src-cuda-worker && npm run build && npm run ensure:nsis-resources && node scripts/build-win-base.mjs && npm run verify:airplay-package",
+    "build:win:dir": "npm run rebuild:native && npm run prepare:win-ffmpeg && npm run verify:ffmpeg && npm run ensure:audio-host && npm run ensure:smtc-host && npm run ensure:native-scanner && npm run ensure:src-cuda-worker && npm run build && node scripts/build-win-dir.mjs && npm run verify:airplay-package",
+    "build:win:dir:quick": "npm run rebuild:native && npm run prepare:win-ffmpeg && npm run verify:ffmpeg && npm run ensure:audio-host && npm run ensure:smtc-host && npm run ensure:native-scanner && npm run ensure:src-cuda-worker && npm run build:quick && node scripts/build-win-dir.mjs && npm run verify:airplay-package",
+    "build:win:release": "npm run ensure:package-integrity-key && npm run rebuild:native && npm run prepare:win-ffmpeg && npm run verify:ffmpeg && npm run build:audio-host && npm run build:smtc-host && npm run build:native-scanner && npm run build:src-cuda-worker && npm run build && npm run ensure:nsis-resources && electron-builder --win && npm run verify:airplay-package",
+    "build:win:unsigned": "npm run ensure:package-integrity-key && npm run rebuild:native && npm run prepare:win-ffmpeg && npm run verify:ffmpeg && npm run build:audio-host && npm run build:smtc-host && npm run build:native-scanner && npm run build:src-cuda-worker && npm run build && npm run ensure:nsis-resources && node scripts/build-win-unsigned.mjs && npm run verify:airplay-package",
+    "build:linux": "node scripts/build-linux.mjs",
+    "check:encoding": "node scripts/check-encoding.mjs",
+    "check:theme-colors": "node scripts/check-theme-colors.mjs",
+    "lint": "npm run check:encoding && npm run check:theme-colors && eslint .",
+    "test": "vitest run",
+    "test:kill": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/kill-vitest.ps1",
+    "posttest": "node scripts/ensure-native-abi.mjs electron",
+    "typecheck": "tsc --noEmit",
+    "prebenchmark:library": "node scripts/ensure-native-abi.mjs node",
+    "benchmark:library": "node scripts/benchmark-library.mjs",
+    "prebenchmark:file-scanner": "node scripts/build-native-scanner.mjs",
+    "benchmark:file-scanner": "node scripts/benchmark-file-scanner.mjs",
+    "prebenchmark:metadata-reader": "node scripts/build-native-scanner.mjs",
+    "benchmark:metadata-reader": "node scripts/benchmark-native-metadata.mjs",
+    "benchmark:scan-concurrency": "node scripts/benchmark-scan-concurrency.mjs",
+    "postbenchmark:library": "node scripts/ensure-native-abi.mjs electron",
+    "repair:electron": "node scripts/install-electron.cjs",
+    "postinstall": "node scripts/ensure-native-abi.mjs electron"
+  },
+  "dependencies": {
+    "@clamber_l/crypto": "^0.1.12",
+    "@fontsource/outfit": "^5.2.8",
+    "@neteasecloudmusicapienhanced/api": "^4.31.0",
+    "@tanstack/react-virtual": "^3.13.24",
+    "@vitejs/plugin-react": "^5.1.4",
+    "better-sqlite3": "^12.10.0",
+    "discord-rpc": "^4.0.1",
+    "electron-updater": "^6.8.3",
+    "electron-vite": "^5.0.0",
+    "fflate": "^0.8.3",
+    "iconv-lite": "^0.6.3",
+    "kuroshiro": "^1.2.0",
+    "kuroshiro-analyzer-kuromoji": "^1.1.0",
+    "lucide-react": "^0.468.0",
+    "motion": "^12.40.0",
+    "music-metadata": "^11.12.3",
+    "node-addon-api": "^8.9.0",
+    "opencc-js": "^1.3.1",
+    "pinyin-pro": "^3.28.1",
+    "punycode": "^2.3.1",
+    "qrcode": "^1.5.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "shaka-player": "^4.16.31",
+    "sharp": "^0.34.5",
+    "taglib-wasm": "^1.1.2"
+  },
+  "optionalDependencies": {
+    "@lox-audioserver/node-libraop": "0.3.3"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "@testing-library/react": "^16.3.2",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.13.1",
+    "@types/react": "^18.2.61",
+    "@types/react-dom": "^18.2.19",
+    "@typescript-eslint/eslint-plugin": "^7.1.0",
+    "@typescript-eslint/parser": "^7.1.0",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.8.1",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "jsdom": "^29.1.1",
+    "playwright": "^1.60.0",
+    "typescript": "^5.3.3",
+    "vite": "^7.3.3",
+    "vitest": "^4.1.6"
+  },
+  "build": {
+    "appId": "app.echo.next",
+    "productName": "ECHO NEXT",
+    "executableName": "ECHO NEXT",
+    "npmRebuild": false,
+    "afterPack": "scripts/after-pack-integrity.mjs",
+    "icon": "build-resources/icons/software.ico",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/main/**",
+      "out/preload/**",
+      "out/renderer/**",
+      "build-resources/icons/software.ico",
+      "build-resources/icons/software.png",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/@clamber_l/crypto/dist/*",
+      "node_modules/better-sqlite3/build/Release/*.node",
+      "node_modules/@lox-audioserver/node-libraop/**/*",
+      "node_modules/kuromoji/dict/**/*",
+      "node_modules/sharp/**/*",
+      "node_modules/taglib-wasm/dist/*.wasm"
+    ],
+    "win": {
+      "icon": "build-resources/icons/software.ico",
+      "extraResources": [
+        {
+          "from": "electron-app/build/echo-audio-host.exe",
+          "to": "echo-audio-host.exe"
+        },
+        {
+          "from": "electron-app/build/echo-smtc-host.exe",
+          "to": "echo-smtc-host.exe"
+        },
+        {
+          "from": "electron-app/build/echo-native-scanner.exe",
+          "to": "echo-native-scanner.exe"
+        },
+        {
+          "from": "electron-app/build/echo-src-cuda-worker.exe",
+          "to": "echo-src-cuda-worker.exe"
+        },
+        {
+          "from": "electron-app/build/echo-taskbar-host.exe",
+          "to": "echo-taskbar-host.exe"
+        },
+        {
+          "from": "src/main/connect/airplayRaopHelper.cjs",
+          "to": "airplayRaopHelper.cjs"
+        },
+        {
+          "from": "electron-app/tools",
+          "to": "tools",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ],
+      "publish": [
+        {
+          "provider": "github",
+          "owner": "moekotori",
+          "repo": "echo"
+        }
+      ],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "fileAssociations": [
+        {
+          "name": "Audio file",
+          "description": "Open local audio files with ECHO Next",
+          "ext": [
+            "mp3",
+            "flac",
+            "wav",
+            "m4a",
+            "m4p",
+            "aac",
+            "ogg",
+            "opus",
+            "wma",
+            "alac",
+            "aiff",
+            "aif",
+            "ape",
+            "wv",
+            "tta",
+            "tak",
+            "caf",
+            "dsf",
+            "dff",
+            "mka",
+            "mkv",
+            "mp4",
+            "mov",
+            "webm",
+            "mp2",
+            "mp1",
+            "mpc",
+            "ofr",
+            "ofs",
+            "spx",
+            "amr",
+            "ac3",
+            "eac3",
+            "ec3",
+            "dd",
+            "ddp",
+            "thd",
+            "truehd",
+            "mlp",
+            "ac4",
+            "dts",
+            "cue"
+          ],
+          "role": "Viewer"
+        }
+      ]
+    },
+    "linux": {
+      "icon": "build-resources/icons/software.png",
+      "extraResources": [
+        {
+          "from": "electron-app/build/echo-audio-host",
+          "to": "echo-audio-host"
+        },
+        {
+          "from": "electron-app/build/echo-native-scanner",
+          "to": "echo-native-scanner"
+        },
+        {
+          "from": "electron-app/tools-linux",
+          "to": "tools",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ],
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "AudioVideo"
+    },
+    "nsis": {
+      "artifactName": "ECHO-NEXT-Setup-${version}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": false,
+      "shortcutName": "ECHO",
+      "runAfterFinish": true,
+      "installerIcon": "build-resources/icons/software.ico",
+      "uninstallerIcon": "build-resources/icons/software.ico"
+    },
+    "portable": {
+      "artifactName": "ECHO-NEXT-Portable-${version}.${ext}"
+    }
+  },
+  "allowScripts": {
+    "better-sqlite3@12.10.0": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.27.7": true,
+    "github:devsnek/node-register-scheme#e7cc9a63a1f512565da44cb57316d9fb10750e17": true,
+    "sharp@0.34.5": true
+  }
+}

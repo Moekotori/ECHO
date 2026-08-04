@@ -1,0 +1,206 @@
+import type { IpcRenderer, WebUtils } from 'electron';
+import type { EchoApi } from '../apiTypes';
+
+export function createLibraryApi(
+  ipcRenderer: IpcRenderer,
+  IpcChannels: typeof import('../../shared/constants/ipcChannels').IpcChannels,
+  webUtils: WebUtils | undefined,
+): EchoApi['library'] {
+  return {
+    chooseFolder: () => ipcRenderer.invoke(IpcChannels.LibraryChooseFolder),
+    chooseImportFiles: () => ipcRenderer.invoke(IpcChannels.LibraryChooseImportFiles),
+    addFolder: (path) => ipcRenderer.invoke(IpcChannels.LibraryAddFolder, path),
+    classifyImportPaths: (paths) => ipcRenderer.invoke(IpcChannels.LibraryClassifyImportPaths, paths),
+    importDroppedFiles: async (files) => {
+      const payload = await Promise.all(
+        Array.from(files ?? []).map(async (file) => {
+          const path = webUtils?.getPathForFile(file) || null;
+          return {
+            name: file.name,
+            type: file.type,
+            path,
+            bytes: path ? null : new Uint8Array(await file.arrayBuffer()),
+          };
+        }),
+      );
+      return ipcRenderer.invoke(IpcChannels.LibraryImportDroppedFiles, payload);
+    },
+    getFolders: () => ipcRenderer.invoke(IpcChannels.LibraryGetFolders),
+    importAudioFiles: (paths) => ipcRenderer.invoke(IpcChannels.LibraryImportAudioFiles, paths),
+    getFolderOverviews: () => ipcRenderer.invoke(IpcChannels.LibraryGetFolderOverviews),
+    getFolderChildren: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetFolderChildren, query),
+    getFolderTracks: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetFolderTracks, query),
+    openLibraryFolderPath: (request) => ipcRenderer.invoke(IpcChannels.LibraryOpenLibraryFolderPath, request),
+    removeFolder: (folderId) => ipcRenderer.invoke(IpcChannels.LibraryRemoveFolder, folderId),
+    scanFolder: (folderId, options) => ipcRenderer.invoke(IpcChannels.LibraryScanFolder, folderId, options),
+    scanFolderChanges: (folderId) => ipcRenderer.invoke(IpcChannels.LibraryScanFolderChanges, folderId),
+    rescanEmbeddedTags: (mode, options) => ipcRenderer.invoke(IpcChannels.LibraryRescanEmbeddedTags, mode, options),
+    getScanStatus: (jobId) => ipcRenderer.invoke(IpcChannels.LibraryGetScanStatus, jobId),
+    cancelScan: (jobId) => ipcRenderer.invoke(IpcChannels.LibraryCancelScan, jobId),
+    getTrack: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryGetTrack, trackId),
+    getTracks: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetTracks, query),
+    getLibraryQualityOverview: () => ipcRenderer.invoke(IpcChannels.LibraryGetQualityOverview),
+    getLibraryQualityIssues: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetQualityIssues, query),
+    getLibraryInboxBatches: () => ipcRenderer.invoke(IpcChannels.LibraryGetInboxBatches),
+    getLibraryInboxTracks: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetInboxTracks, query),
+    createPlaylistFromLibraryInbox: (request) => ipcRenderer.invoke(IpcChannels.LibraryCreateInboxPlaylist, request),
+    addLibraryInboxToQueue: (query) => ipcRenderer.invoke(IpcChannels.LibraryAddInboxToQueue, query),
+    updateLibraryInboxItemState: (request) => ipcRenderer.invoke(IpcChannels.LibraryUpdateInboxItemState, request),
+    getHealthReport: () => ipcRenderer.invoke(IpcChannels.LibraryGetHealthReport),
+    exportHealthReport: () => ipcRenderer.invoke(IpcChannels.LibraryExportHealthReport),
+    refreshDuplicateTracks: (mode) => ipcRenderer.invoke(IpcChannels.LibraryRefreshDuplicateTracks, mode),
+    getDuplicateTrackVersions: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryGetDuplicateTrackVersions, trackId),
+    getDuplicateHiddenCounts: (trackIds, mode) => ipcRenderer.invoke(IpcChannels.LibraryGetDuplicateHiddenCounts, trackIds, mode),
+    getDuplicateIndexSummary: (mode) => ipcRenderer.invoke(IpcChannels.LibraryGetDuplicateIndexSummary, mode),
+    previewDuplicateTrackCleanup: (mode) => ipcRenderer.invoke(IpcChannels.LibraryPreviewDuplicateTrackCleanup, mode),
+    applyDuplicateTrackCleanup: (request) => ipcRenderer.invoke(IpcChannels.LibraryApplyDuplicateTrackCleanup, request),
+    getPlaylists: () => ipcRenderer.invoke(IpcChannels.LibraryGetPlaylists),
+    createPlaylist: (request) => ipcRenderer.invoke(IpcChannels.LibraryCreatePlaylist, request),
+    createSmartPlaylist: (request) => ipcRenderer.invoke(IpcChannels.LibraryCreateSmartPlaylist, request),
+    updatePlaylist: (request) => ipcRenderer.invoke(IpcChannels.LibraryUpdatePlaylist, request),
+    deletePlaylist: (playlistId) => ipcRenderer.invoke(IpcChannels.LibraryDeletePlaylist, playlistId),
+    getPlaylist: (playlistId) => ipcRenderer.invoke(IpcChannels.LibraryGetPlaylist, playlistId),
+    getPlaylistItems: (playlistId, query) => ipcRenderer.invoke(IpcChannels.LibraryGetPlaylistItems, playlistId, query),
+    importPlaylistFile: () => ipcRenderer.invoke(IpcChannels.LibraryImportPlaylistFile),
+    exportPlaylist: (request) => ipcRenderer.invoke(IpcChannels.LibraryExportPlaylist, request),
+    addTrackToPlaylist: (playlistId, trackId) => ipcRenderer.invoke(IpcChannels.LibraryAddTrackToPlaylist, playlistId, trackId),
+    addStreamingTrackToPlaylist: (playlistId, track) => ipcRenderer.invoke(IpcChannels.LibraryAddStreamingTrackToPlaylist, playlistId, track),
+    addTracksToPlaylist: (playlistId, trackIds) => ipcRenderer.invoke(IpcChannels.LibraryAddTracksToPlaylist, playlistId, trackIds),
+    addLocalAudioFilesToPlaylist: (playlistId, paths) => ipcRenderer.invoke(IpcChannels.LibraryAddLocalAudioFilesToPlaylist, playlistId, paths),
+    removePlaylistItem: (itemId) => ipcRenderer.invoke(IpcChannels.LibraryRemovePlaylistItem, itemId),
+    movePlaylistItem: (playlistId, itemId, targetPosition) =>
+      ipcRenderer.invoke(IpcChannels.LibraryMovePlaylistItem, playlistId, itemId, targetPosition),
+    clearPlaylist: (playlistId) => ipcRenderer.invoke(IpcChannels.LibraryClearPlaylist, playlistId),
+    getLikedSongsPlaylist: () => ipcRenderer.invoke(IpcChannels.LibraryGetLikedSongsPlaylist),
+    getLikedAlbumsPlaylist: () => ipcRenderer.invoke(IpcChannels.LibraryGetLikedAlbumsPlaylist),
+    getLikedTracks: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetLikedTracks, query),
+    getLikedAlbums: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetLikedAlbums, query),
+    isTrackLiked: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryIsTrackLiked, trackId),
+    isAlbumLiked: (albumId) => ipcRenderer.invoke(IpcChannels.LibraryIsAlbumLiked, albumId),
+    getLikedTrackIds: (trackIds) => ipcRenderer.invoke(IpcChannels.LibraryGetLikedTrackIds, trackIds),
+    getLikedAlbumIds: (albumIds) => ipcRenderer.invoke(IpcChannels.LibraryGetLikedAlbumIds, albumIds),
+    likeTrack: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryLikeTrack, trackId),
+    unlikeTrack: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryUnlikeTrack, trackId),
+    toggleTrackLiked: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryToggleTrackLiked, trackId),
+    likeAlbum: (albumId) => ipcRenderer.invoke(IpcChannels.LibraryLikeAlbum, albumId),
+    unlikeAlbum: (albumId) => ipcRenderer.invoke(IpcChannels.LibraryUnlikeAlbum, albumId),
+    toggleAlbumLiked: (albumId) => ipcRenderer.invoke(IpcChannels.LibraryToggleAlbumLiked, albumId),
+    clearLikedTracks: (query) => ipcRenderer.invoke(IpcChannels.LibraryClearLikedTracks, query),
+    clearLikedAlbums: (query) => ipcRenderer.invoke(IpcChannels.LibraryClearLikedAlbums, query),
+    getAlbums: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetAlbums, query),
+    getAlbum: (albumId) => ipcRenderer.invoke(IpcChannels.LibraryGetAlbum, albumId),
+    getAlbumOnlineInfo: (albumId, options) => ipcRenderer.invoke(IpcChannels.LibraryGetAlbumOnlineInfo, albumId, options),
+    getAlbumForTrack: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryGetAlbumForTrack, trackId),
+    getArtists: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetArtists, query),
+    getArtist: (artistId) => ipcRenderer.invoke(IpcChannels.LibraryGetArtist, artistId),
+    getArtistInsights: (artistId, options) => ipcRenderer.invoke(IpcChannels.LibraryGetArtistInsights, artistId, options),
+    getArtistTracks: (artistId, query) => ipcRenderer.invoke(IpcChannels.LibraryGetArtistTracks, artistId, query),
+    getArtistAlbums: (artistId, query) => ipcRenderer.invoke(IpcChannels.LibraryGetArtistAlbums, artistId, query),
+    clearArtistOnlineInfoCache: () => ipcRenderer.invoke(IpcChannels.LibraryArtistOnlineInfoClearCache),
+    enqueueMissingArtistImages: (request) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesEnqueueMissing, request),
+    refreshArtistImage: (artistId, force) =>
+      ipcRenderer.invoke(IpcChannels.LibraryArtistImagesRefreshOne, { artistId, force }),
+    refreshVisibleArtistImages: (artists) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesRefreshVisible, artists),
+    getArtistImageStatus: (artistId) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesGetStatus, artistId),
+    getArtistImageCacheSummary: () => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesGetSummary),
+    getArtistImageJobStatus: () => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesGetJobStatus),
+    setArtistImageJobsPaused: (paused) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesSetPaused, paused),
+    kickoffArtistImageBackfill: (options) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesKickoff, options),
+    clearArtistImageCache: () => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesClearCache),
+    chooseArtistAvatar: (artistId) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesChooseCustom, artistId),
+    setArtistAvatarFromUrl: (artistId, url) =>
+      ipcRenderer.invoke(IpcChannels.LibraryArtistImagesSetCustomUrl, { artistId, url }),
+    clearCustomArtistAvatar: (artistId) => ipcRenderer.invoke(IpcChannels.LibraryArtistImagesClearCustom, artistId),
+    onArtistImagesUpdated: (handler) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: unknown): void => {
+        handler(payload as { artistId: string | null; artistKey: string; status: string });
+      };
+      ipcRenderer.on(IpcChannels.LibraryArtistImagesUpdated, listener);
+      return () => ipcRenderer.off(IpcChannels.LibraryArtistImagesUpdated, listener);
+    },
+    onLibraryChanged: (handler) => {
+      const listener = (): void => {
+        handler();
+      };
+      ipcRenderer.on(IpcChannels.LibraryChanged, listener);
+      return () => ipcRenderer.off(IpcChannels.LibraryChanged, listener);
+    },
+    onLikedTracksChanged: (handler) => {
+      const listener = (): void => {
+        handler();
+      };
+      ipcRenderer.on(IpcChannels.LibraryLikedTracksChanged, listener);
+      return () => ipcRenderer.off(IpcChannels.LibraryLikedTracksChanged, listener);
+    },
+    getAlbumTracks: (albumId, query) => ipcRenderer.invoke(IpcChannels.LibraryGetAlbumTracks, albumId, query),
+    getSummary: () => ipcRenderer.invoke(IpcChannels.LibraryGetSummary),
+    refreshAlbumGrouping: () => ipcRenderer.invoke(IpcChannels.LibraryRefreshAlbumGrouping),
+    getDiagnostics: () => ipcRenderer.invoke(IpcChannels.LibraryGetDiagnostics),
+    getMoveCandidates: (options) => ipcRenderer.invoke(IpcChannels.LibraryGetMoveCandidates, options),
+    chooseTrackCover: () => ipcRenderer.invoke(IpcChannels.LibraryChooseTrackCover),
+    loadEmbeddedTrackTags: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryLoadEmbeddedTrackTags, trackId),
+    updateTrackTags: (request) => ipcRenderer.invoke(IpcChannels.LibraryUpdateTrackTags, request),
+    updateAlbumTags: (request) => ipcRenderer.invoke(IpcChannels.LibraryUpdateAlbumTags, request),
+    recordTrackPlayback: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryRecordTrackPlayback, trackId),
+    getPlaybackHistory: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetPlaybackHistory, query),
+    getPlaybackHistorySummary: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetPlaybackHistorySummary, query),
+    getPlaybackStatsDashboard: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetPlaybackStatsDashboard, query),
+    getPlaybackMemoryGraph: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetPlaybackMemoryGraph, query),
+    refreshInvalidPlaybackHistory: () => ipcRenderer.invoke(IpcChannels.LibraryRefreshInvalidPlaybackHistory),
+    deletePlaybackHistoryEntry: (id) => ipcRenderer.invoke(IpcChannels.LibraryDeletePlaybackHistoryEntry, id),
+    clearPlaybackHistory: () => ipcRenderer.invoke(IpcChannels.LibraryClearPlaybackHistory),
+    startPlaybackHistory: (request) => ipcRenderer.invoke(IpcChannels.LibraryStartPlaybackHistory, request),
+    finishPlaybackHistory: (request) => ipcRenderer.invoke(IpcChannels.LibraryFinishPlaybackHistory, request),
+    openTrackInFolder: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryOpenTrackInFolder, trackId),
+    openPathInFolder: (path) => ipcRenderer.invoke(IpcChannels.LibraryOpenPathInFolder, path),
+    openTrackWithSystem: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryOpenTrackWithSystem, trackId),
+    copyTrackPath: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryCopyTrackPath, trackId),
+    copyTrackNameArtist: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryCopyTrackNameArtist, trackId),
+    copyTrackCover: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryCopyTrackCover, trackId),
+    copyTrackOriginalCover: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryCopyTrackOriginalCover, trackId),
+    saveTrackCover: (trackId) => ipcRenderer.invoke(IpcChannels.LibrarySaveTrackCover, trackId),
+    deleteTrackFile: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryDeleteTrackFile, trackId),
+    copyAlbumInfo: (albumId) => ipcRenderer.invoke(IpcChannels.LibraryCopyAlbumInfo, albumId),
+    copyAlbumCover: (albumId) => ipcRenderer.invoke(IpcChannels.LibraryCopyAlbumCover, albumId),
+    saveAlbumCover: (albumId) => ipcRenderer.invoke(IpcChannels.LibrarySaveAlbumCover, albumId),
+    deleteAlbumFiles: (albumId) => ipcRenderer.invoke(IpcChannels.LibraryDeleteAlbumFiles, albumId),
+    pruneMissingTracks: () => ipcRenderer.invoke(IpcChannels.LibraryPruneMissingTracks),
+    pruneInvalidTracks: () => ipcRenderer.invoke(IpcChannels.LibraryPruneInvalidTracks),
+    clearTracks: () => ipcRenderer.invoke(IpcChannels.LibraryClearTracks),
+    clearCache: () => ipcRenderer.invoke(IpcChannels.LibraryClearCache),
+    repairDatabase: () => ipcRenderer.invoke(IpcChannels.LibraryRepairDatabase),
+    deleteDatabase: () => ipcRenderer.invoke(IpcChannels.LibraryDeleteDatabase),
+    deleteAllUserData: () => ipcRenderer.invoke(IpcChannels.LibraryDeleteAllUserData),
+    getDatabaseProtectionStatus: (options) => ipcRenderer.invoke(IpcChannels.LibraryGetDatabaseProtectionStatus, options),
+    createDatabaseSnapshot: () => ipcRenderer.invoke(IpcChannels.LibraryCreateDatabaseSnapshot),
+    restoreDatabaseSnapshot: (snapshotId) => ipcRenderer.invoke(IpcChannels.LibraryRestoreDatabaseSnapshot, snapshotId),
+    scrubQuarantinedDatabase: () => ipcRenderer.invoke(IpcChannels.LibraryScrubQuarantinedDatabase),
+    discardQuarantinedProblemTracks: () => ipcRenderer.invoke(IpcChannels.LibraryDiscardQuarantinedProblemTracks),
+    relaunchRecoveryMode: () => ipcRenderer.invoke(IpcChannels.LibraryRelaunchRecoveryMode),
+    openDataProtectionFolder: () => ipcRenderer.invoke(IpcChannels.LibraryOpenDataProtectionFolder),
+    repairMissingMetadata: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryNetworkRepairMissingMetadata, trackId),
+    scanMissingMetadata: (options) => ipcRenderer.invoke(IpcChannels.LibraryNetworkScanMissingMetadata, options),
+    startMissingMetadataScan: (options) => ipcRenderer.invoke(IpcChannels.LibraryNetworkStartMissingMetadataScan, options),
+    getMissingMetadataScanStatus: (jobId) => ipcRenderer.invoke(IpcChannels.LibraryNetworkGetMissingMetadataScanStatus, jobId),
+    startMissingCoverBackfill: (options) => ipcRenderer.invoke(IpcChannels.LibraryNetworkStartMissingCoverBackfill, options),
+    getMissingCoverBackfillStatus: (jobId) => ipcRenderer.invoke(IpcChannels.LibraryNetworkGetMissingCoverBackfillStatus, jobId),
+    getActiveMissingCoverBackfillStatus: () => ipcRenderer.invoke(IpcChannels.LibraryNetworkGetActiveMissingCoverBackfillStatus),
+    showNetworkCandidates: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryNetworkShowCandidates, trackId),
+    searchNetworkTagCandidates: (trackId, options) =>
+      ipcRenderer.invoke(IpcChannels.LibrarySearchNetworkTagCandidates, { trackId, ...options }),
+    resolveLyricsBackgroundCover: (trackId) => ipcRenderer.invoke(IpcChannels.LibraryResolveLyricsBackgroundCover, trackId),
+    applyNetworkMissingOnly: (candidateId, options) =>
+      ipcRenderer.invoke(IpcChannels.LibraryNetworkApplyMissingOnly, { candidateId, ...options }),
+    applyNetworkSelected: (candidateId, options) =>
+      ipcRenderer.invoke(IpcChannels.LibraryNetworkApplySelected, { candidateId, ...options }),
+    rejectNetworkCandidate: (candidateId) => ipcRenderer.invoke(IpcChannels.LibraryNetworkRejectCandidate, candidateId),
+    startBpmAnalysis: (options) => ipcRenderer.invoke(IpcChannels.LibraryStartBpmAnalysis, options),
+    getBpmAnalysisStatus: (jobId) => ipcRenderer.invoke(IpcChannels.LibraryGetBpmAnalysisStatus, jobId),
+    startReplayGainAnalysis: (options) => ipcRenderer.invoke(IpcChannels.LibraryStartReplayGainAnalysis, options),
+    getReplayGainAnalysisStatus: (jobId) => ipcRenderer.invoke(IpcChannels.LibraryGetReplayGainAnalysisStatus, jobId),
+    startLyricsBackfill: (options) => ipcRenderer.invoke(IpcChannels.LibraryStartLyricsBackfill, options),
+    getLyricsBackfillStatus: (jobId) => ipcRenderer.invoke(IpcChannels.LibraryGetLyricsBackfillStatus, jobId),
+    getCurrentLyricsBackfillStatus: () => ipcRenderer.invoke(IpcChannels.LibraryGetCurrentLyricsBackfillStatus),
+    cancelLyricsBackfill: (jobId) => ipcRenderer.invoke(IpcChannels.LibraryCancelLyricsBackfill, jobId),
+  };
+}

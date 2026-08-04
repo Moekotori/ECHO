@@ -1,0 +1,45 @@
+:root {
+  --echo-motion-page-ms: 180ms;
+  --echo-motion-panel-ms: 160ms;
+  --echo-motion-hover-ms: 100ms;
+  --echo-motion-icon-hover-ms: 150ms;
+  --echo-motion-mini-player-ms: 320ms;
+  --echo-motion-ease-standard: cubic-bezier(0.2, 0.82, 0.18, 1);
+  --echo-motion-ease-quick: cubic-bezier(0.22, 0.68, 0.18, 1);
+  --echo-motion-ease-icon: cubic-bezier(0.18, 0.9, 0.22, 1);
+}
+
+.nav-item {
+  transition:
+    color var(--echo-motion-hover-ms) var(--echo-motion-ease-quick),
+    border-color var(--echo-motion-hover-ms) var(--echo-motion-ease-quick),
+    background-color var(--echo-motion-hover-ms) var(--echo-motion-ease-quick),
+    box-shadow var(--echo-motion-hover-ms) var(--echo-motion-ease-quick);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --echo-motion-page-ms: 1ms;
+    --echo-motion-panel-ms: 1ms;
+    --echo-motion-hover-ms: 1ms;
+    --echo-motion-icon-hover-ms: 1ms;
+    --echo-motion-mini-player-ms: 1ms;
+  }
+
+  .nav-item,
+  .nav-icon-shell,
+  .nav-icon-shell svg,
+  .player-bar .icon-button,
+  .player-bar .icon-button::before,
+  .player-bar .icon-button::after,
+  .player-bar .icon-button > svg:not(.spinning-icon),
+  .lyrics-player-drawer-host,
+  .lyrics-mv-panel,
+  .lyrics-queue-drawer__scrim,
+  .lyrics-queue-drawer__panel {
+    transform: none !important;
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+
+}

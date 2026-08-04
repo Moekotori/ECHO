@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ECHO</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        background: #edf5f1;
+      }
+
+      html,
+      body,
+      #root {
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: #edf5f1;
+        color: #162032;
+        font-family:
+          "Microsoft YaHei",
+          "Segoe UI",
+          system-ui,
+          sans-serif;
+      }
+
+      .echo-startup-shell {
+        position: relative;
+        isolation: isolate;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 32px;
+        box-sizing: border-box;
+        background:
+          radial-gradient(circle at 50% 32%, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0) 34%),
+          radial-gradient(circle at 33% 38%, rgba(251, 182, 214, 0.28), rgba(251, 182, 214, 0) 26%),
+          radial-gradient(circle at 68% 35%, rgba(141, 198, 255, 0.26), rgba(141, 198, 255, 0) 28%),
+          linear-gradient(135deg, rgba(246, 251, 248, 0.98), rgba(228, 242, 236, 0.98) 52%, rgba(255, 242, 214, 0.98));
+        -webkit-app-region: drag;
+        user-select: none;
+      }
+
+      .echo-startup-shell::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background:
+          linear-gradient(90deg, rgba(15, 118, 110, 0.055) 1px, transparent 1px),
+          linear-gradient(rgba(27, 56, 86, 0.045) 1px, transparent 1px);
+        background-size: 42px 42px;
+        -webkit-mask-image: radial-gradient(circle at center, black 0%, transparent 68%);
+        mask-image: radial-gradient(circle at center, black 0%, transparent 68%);
+      }
+
+      .echo-startup-panel {
+        position: relative;
+        width: min(430px, 100%);
+        display: grid;
+        justify-items: center;
+        gap: 24px;
+        text-align: center;
+        transform: translateY(-10px);
+      }
+
+      .echo-startup-mark {
+        position: relative;
+        width: 150px;
+        height: 150px;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        border-radius: 36px;
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.22)),
+          radial-gradient(circle at 20% 15%, rgba(251, 182, 214, 0.34), transparent 44%),
+          radial-gradient(circle at 78% 22%, rgba(141, 198, 255, 0.3), transparent 42%);
+        box-shadow:
+          0 28px 80px rgba(39, 65, 91, 0.18),
+          0 12px 42px rgba(15, 118, 110, 0.1),
+          inset 0 1px 0 rgba(255, 255, 255, 0.86),
+          inset 0 -5px 0 rgba(217, 154, 43, 0.12);
+        animation: echoStartupFloat 3200ms ease-in-out infinite;
+      }
+
+      .echo-startup-mark::before,
+      .echo-startup-mark::after {
+        content: "";
+        position: absolute;
+        inset: -12px;
+        border: 1px solid rgba(15, 118, 110, 0.14);
+        border-radius: 38px;
+        animation: echoStartupRing 2400ms ease-out infinite;
+      }
+
+      .echo-startup-mark::after {
+        animation-delay: 900ms;
+      }
+
+      .echo-startup-logo {
+        width: 126px;
+        height: 126px;
+        display: block;
+        border-radius: 32px;
+        object-fit: contain;
+        filter: drop-shadow(0 18px 24px rgba(39, 65, 91, 0.14));
+        pointer-events: none;
+      }
+
+      .echo-startup-copy {
+        display: grid;
+        gap: 10px;
+      }
+
+      .echo-startup-title {
+        margin: 0;
+        color: #172033;
+        font-size: 42px;
+        line-height: 1;
+        font-weight: 900;
+        text-shadow: 0 14px 38px rgba(39, 65, 91, 0.14);
+      }
+
+      .echo-startup-status {
+        margin: 0;
+        color: #607084;
+        font-size: 14px;
+        line-height: 1.6;
+        font-weight: 700;
+      }
+
+      .echo-startup-meter {
+        width: min(270px, 100%);
+        height: 28px;
+        display: grid;
+        grid-template-columns: repeat(18, 1fr);
+        gap: 5px;
+        align-items: end;
+        padding: 9px 11px;
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.48);
+        box-shadow:
+          0 18px 42px rgba(39, 65, 91, 0.1),
+          inset 0 1px 0 rgba(255, 255, 255, 0.84);
+        backdrop-filter: blur(16px);
+      }
+
+      .echo-startup-meter span {
+        height: 100%;
+        border-radius: 999px;
+        background: #0f766e;
+        opacity: 0.35;
+        transform: scaleY(0.34);
+        transform-origin: center bottom;
+        animation: echoStartupMeter 1200ms ease-in-out infinite;
+      }
+
+      .echo-startup-note {
+        position: absolute;
+        left: clamp(20px, 3.2vw, 42px);
+        bottom: clamp(18px, 3vw, 34px);
+        max-width: min(420px, calc(100vw - 40px));
+        margin: 0;
+        padding: 11px 13px;
+        border: 1px solid rgba(255, 255, 255, 0.66);
+        border-radius: 8px;
+        color: rgba(44, 57, 74, 0.78);
+        background: rgba(255, 255, 255, 0.52);
+        box-shadow: 0 16px 38px rgba(39, 65, 91, 0.08);
+        backdrop-filter: blur(14px);
+        font-size: 12px;
+        font-weight: 760;
+        line-height: 1.55;
+      }
+
+      .echo-startup-note strong {
+        color: #0f766e;
+        font-weight: 900;
+      }
+
+      @keyframes echoStartupFloat {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+
+        50% {
+          transform: translateY(-5px);
+        }
+      }
+
+      .echo-startup-meter span:nth-child(2n) {
+        background: #d99a2b;
+        animation-delay: -180ms;
+      }
+
+      .echo-startup-meter span:nth-child(3n) {
+        background: #1d4ed8;
+        animation-delay: -360ms;
+      }
+
+      .echo-startup-meter span:nth-child(4n) {
+        animation-delay: -540ms;
+      }
+
+      .echo-startup-meter span:nth-child(5n) {
+        animation-delay: -720ms;
+      }
+
+      @keyframes echoStartupRing {
+        0% {
+          opacity: 0.54;
+          transform: scale(0.86);
+        }
+
+        72%,
+        100% {
+          opacity: 0;
+          transform: scale(1.22);
+        }
+      }
+
+      @keyframes echoStartupMeter {
+        0%,
+        100% {
+          opacity: 0.34;
+          transform: scaleY(0.34);
+        }
+
+        50% {
+          opacity: 0.94;
+          transform: scaleY(1);
+        }
+      }
+
+      @media (max-width: 520px) {
+        .echo-startup-shell {
+          padding: 24px;
+        }
+
+        .echo-startup-mark {
+          width: 118px;
+          height: 118px;
+          border-radius: 28px;
+        }
+
+        .echo-startup-logo {
+          width: 98px;
+          height: 98px;
+          border-radius: 24px;
+        }
+
+        .echo-startup-title {
+          font-size: 36px;
+        }
+
+        .echo-startup-note {
+          right: 18px;
+          left: 18px;
+          bottom: 16px;
+          max-width: none;
+          text-align: center;
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root,
+        body {
+          background: #101722;
+          color: #e8eef7;
+        }
+
+        .echo-startup-shell {
+          background:
+            radial-gradient(circle at 50% 32%, rgba(94, 234, 212, 0.12), rgba(94, 234, 212, 0) 34%),
+            radial-gradient(circle at 33% 38%, rgba(251, 182, 214, 0.16), rgba(251, 182, 214, 0) 26%),
+            radial-gradient(circle at 68% 35%, rgba(96, 165, 250, 0.18), rgba(96, 165, 250, 0) 28%),
+            linear-gradient(135deg, rgba(16, 23, 34, 0.98), rgba(13, 33, 32, 0.98) 52%, rgba(39, 30, 12, 0.98)),
+            linear-gradient(90deg, rgba(94, 234, 212, 0.08) 1px, transparent 1px),
+            linear-gradient(rgba(232, 238, 247, 0.06) 1px, transparent 1px);
+          background-size: auto, 38px 38px, 38px 38px;
+        }
+
+        .echo-startup-mark {
+          border-color: rgba(94, 234, 212, 0.24);
+          background:
+            linear-gradient(145deg, rgba(15, 23, 42, 0.62), rgba(15, 23, 42, 0.28)),
+            radial-gradient(circle at 20% 15%, rgba(251, 182, 214, 0.14), transparent 44%),
+            radial-gradient(circle at 78% 22%, rgba(96, 165, 250, 0.16), transparent 42%);
+          box-shadow:
+            0 22px 54px rgba(0, 0, 0, 0.38),
+            inset 0 -5px 0 rgba(217, 154, 43, 0.22);
+        }
+
+        .echo-startup-mark::before,
+        .echo-startup-mark::after {
+          border-color: rgba(94, 234, 212, 0.2);
+        }
+
+        .echo-startup-title {
+          color: #f8fafc;
+        }
+
+        .echo-startup-status {
+          color: #a8b3c5;
+        }
+
+        .echo-startup-meter,
+        .echo-startup-note {
+          border-color: rgba(255, 255, 255, 0.12);
+          background: rgba(15, 23, 42, 0.5);
+          box-shadow: 0 18px 42px rgba(0, 0, 0, 0.24);
+        }
+
+        .echo-startup-note {
+          color: rgba(226, 232, 240, 0.76);
+        }
+
+        .echo-startup-note strong {
+          color: #5eead4;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .echo-startup-mark::before,
+        .echo-startup-mark::after,
+        .echo-startup-mark,
+        .echo-startup-meter span {
+          animation: none;
+        }
+
+        .echo-startup-meter span {
+          opacity: 0.72;
+          transform: scaleY(0.7);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <main class="echo-startup-shell" role="status" aria-live="polite" aria-label="ECHO 正在启动">
+        <section class="echo-startup-panel" aria-hidden="true">
+          <div class="echo-startup-mark">
+            <img class="echo-startup-logo" src="./assets/echo-startup-logo.png" alt="" />
+          </div>
+          <div class="echo-startup-copy">
+            <h1 class="echo-startup-title">ECHO</h1>
+            <p class="echo-startup-status">正在启动 ECHO...</p>
+          </div>
+          <div class="echo-startup-meter">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </section>
+        <p class="echo-startup-note">
+          <strong>小提示</strong>：ECHO 的名字来源于 Pink Floyd 的 Meddle 专辑
+        </p>
+      </main>
+    </div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>
