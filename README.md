@@ -131,21 +131,21 @@ DAC
 
 ### 新播放架构：让播放留在该待的地方
 
-ECHO 的 daemon 不是“后台再起一个进程”这么简单。`echo-audio-host` 会常驻接手本地文件读取、libav 解码、预取、FIFO、DSP、设备输出和播放收尾；主进程通过 JSON-RPC 发出明确的打开、播放、暂停、seek、停止和队列命令，界面只负责控制和显示。
+`echo-audio-host` 会常驻接手本地文件读取、libav 解码、预取、FIFO、DSP、设备输出和播放收尾；主进程通过 JSON-RPC 发出明确的打开、播放、暂停、seek、停止和队列命令，界面只负责控制和显示。
 
-这样做最实际的好处是：扫封面、写数据库、React 重渲染，甚至主进程偶尔忙一下，都不该把正在播放的 PCM 一起拖住。输出时钟、缓冲尾部和 `ended` 都由 host 说了算，自动下一首不用再靠前端猜时间。我们不是为了“上原生”才上原生，而是一首无损大文件和真实 DAC 都不该拿浏览器定时器赌命。
+这样做最实际的好处是：扫封面、写数据库、React 重渲染，甚至主进程偶尔忙一下，都不该把正在播放的 PCM 一起拖住。输出时钟、缓冲尾部和 `ended` 都由 host 说了算，自动下一首不用再靠前端猜时间。
 
-### Native Scanner：大曲库别来折磨 UI
+### Native Scanner：大曲库性能高手
 
-`echo-native-scanner` 是随应用打包的 C++ 扫描器，负责目录扫描和音频元数据读取，再把结果以结构化数据交回曲库；扫描、重扫、基准和 smoke 都有独立入口。
+`echo-native-scanner` 是随应用打包的 C++  Scanner，负责目录扫描和音频元数据读取，再把结果以结构化数据交回曲库；扫描、重扫、基准和 smoke 都有独立入口。
 
-它的意义不只是“更快”三个字：导入几万首歌时，界面不必替重 I/O 和格式探测硬抗。现有兼容路径仍在，遇到不适用的格式或环境会回退或报出原因；但能交给 scanner 的重活，就不该让前端假装没事。
+它的意义不只是“更快”三个字：导入几万首歌时，界面不必替重 I/O 和格式探测硬抗。现有兼容路径仍在，遇到不适用的格式或环境会回退或报出原因；
 
-### Electron 不是原罪
+### Electron 不是犯罪
 
 ECHO 不是浏览器播放器，也不是网页端套个窗口。Electron 是我们的桌面壳和前端运行时：React 的组件化、可视化、热更新、跨平台窗口和迭代速度，都让播放器界面可以认真做。
 
-真正吃重的部分已经不在网页里：音频 daemon、native scanner、WASAPI / ASIO、DSD、DSP 和系统集成各做各的事。用 Electron 不是杀人；它给前端带来的收益很大，而该下沉到原生的活，我们也确实下沉了。
+真正吃重的部分已经不在网页里：音频 daemon、native scanner、WASAPI / ASIO、DSD、DSP 和系统集成各做各的事。用 Electron 不是杀人；不要在说为什么不用Tauri了，它给前端带来的收益很大，对个人开发者很有帮助。此外，轻量化并不是我们的主要路线。
 
 ## DSP Center
 
@@ -327,7 +327,7 @@ ECHO Android 是 ECHO 的 Android 客户端项目。想参与移动端播放器�
 
 <p align="center">
   <a href="https://www.star-history.com/#Moekotori/ECHO&Date">
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Moekotori/ECHO&type=Date" />
+    <img alt="ECHO Star History Chart (through 2026-08-05)" src="./examples/star-history.svg" width="860" />
   </a>
 </p>
 

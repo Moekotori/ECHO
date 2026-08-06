@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="290" viewBox="0 0 900 290" role="img" aria-labelledby="title desc">
+  <title id="title">ECHO GitHub Star History</title>
+  <desc id="desc">ECHO grew from 1 star on April 5, 2026 to 863 stars on August 5, 2026.</desc>
+  <defs>
+    <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7c5cff" stop-opacity=".30" />
+      <stop offset="1" stop-color="#7c5cff" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <rect width="900" height="290" rx="16" fill="#0d1117" />
+  <text x="42" y="43" fill="#f0f6fc" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="20" font-weight="700">ECHO Star History</text>
+  <text x="42" y="68" fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">GitHub stars · snapshot through 2026-08-05</text>
+  <g fill="none" stroke="#30363d" stroke-width="1">
+    <path d="M72 94H846" />
+    <path d="M72 139H846" />
+    <path d="M72 184H846" />
+    <path d="M72 229H846" />
+  </g>
+  <g fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12" text-anchor="end">
+    <text x="62" y="98">900</text>
+    <text x="62" y="143">600</text>
+    <text x="62" y="188">300</text>
+    <text x="62" y="233">0</text>
+  </g>
+  <path d="M72 229 L104 225 L167 219 L198 215 L230 204 L255 193 L286 172 L317 156 L349 141 L381 127 L412 118 L444 112 L475 106 L506 103 L538 99 L569 96 L601 93 L632 90 L664 87 L695 85 L727 83 L758 81 L790 79 L821 77 L846 75 L846 229 Z" fill="url(#fill)" />
+  <path d="M72 229 L104 225 L167 219 L198 215 L230 204 L255 193 L286 172 L317 156 L349 141 L381 127 L412 118 L444 112 L475 106 L506 103 L538 99 L569 96 L601 93 L632 90 L664 87 L695 85 L727 83 L758 81 L790 79 L821 77 L846 75" fill="none" stroke="#a78bfa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="846" cy="75" r="6" fill="#a78bfa" stroke="#f0f6fc" stroke-width="3" />
+  <text x="834" y="61" fill="#f0f6fc" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="16" font-weight="700" text-anchor="end">863 ★</text>
+  <g fill="#8b949e" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">
+    <text x="72" y="258">Apr 05</text>
+    <text x="311" y="258">May 15</text>
+    <text x="551" y="258">Jun 24</text>
+    <text x="786" y="258">Aug 05</text>
+  </g>
+</svg>
