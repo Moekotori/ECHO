@@ -23,22 +23,11 @@ describe('UserNoticeGate', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'https://echonext.moe/zh/docs/' }));
     fireEvent.click(screen.getByRole('button', { name: 'https://echonext.moe/zh/docs/community-boundaries/' }));
-    fireEvent.click(screen.getByRole('button', { name: 'https://openai.com/zh-Hans-CN/business/partners/' }));
 
     await waitFor(() => {
       expect(openExternalUrl).toHaveBeenCalledWith('https://echonext.moe/zh/docs/');
       expect(openExternalUrl).toHaveBeenCalledWith('https://echonext.moe/zh/docs/community-boundaries/');
-      expect(openExternalUrl).toHaveBeenCalledWith('https://openai.com/zh-Hans-CN/business/partners/');
     });
-  });
-
-  it('shows the AI-written-code notice', () => {
-    render(<UserNoticeGate onAccepted={vi.fn()} />);
-
-    expect(screen.getByText(/Codex 5\.5/u)).toBeTruthy();
-    expect(screen.getByText(/Claude Fable/u)).toBeTruthy();
-    expect(screen.getByText(/ICPC World Final Winner/u)).toBeTruthy();
-    expect(screen.getByText(/vibe coding/u)).toBeTruthy();
   });
 
   it('persists the accepted notice version before entering', async () => {

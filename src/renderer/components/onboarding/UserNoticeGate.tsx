@@ -13,7 +13,6 @@ type NoticeLinkProps = {
 
 const echoDocumentationUrl = 'https://echonext.moe/zh/docs/';
 const echoCommunityBoundariesUrl = 'https://echonext.moe/zh/docs/community-boundaries/';
-const openAiPartnersUrl = 'https://openai.com/zh-Hans-CN/business/partners/';
 
 const copy = {
   title: 'ECHO \u7528\u6237\u987b\u77e5',
@@ -27,12 +26,6 @@ const copy = {
     '\u8be5\u4e8b\u4ef6\u8ba9 ECHO \u9501\u5b9a\u4e86\u7f51\u76d8\u3001\u8fde\u63a5\u529f\u80fd\uff08AirPlay / DLNA / \u7535\u53f0 / HQPlayer\uff09\u548c\u90e8\u5206\u4e3b\u9898\u3002',
   dmca:
     'ECHO \u9075\u5b88 DMCA\uff0c\u4e0d\u63d0\u4f9b\u4e0b\u8f7d\uff0c\u4e5f\u4e0d\u4f1a\u534f\u52a9\u7ed5\u8fc7\u4f1a\u5458\u3001\u7248\u6743\u3001DRM \u6216\u5e73\u53f0\u9650\u5236\u3002',
-  aiNotice:
-    'ECHO \u4f7f\u7528\u4e86 AI\uff08Codex 5.5\u3001Claude Fable\uff09\u6765\u5199\u4ee3\u7801\u3002\u5982\u679c\u60a8\u65e0\u6cd5\u63a5\u53d7\u6216\u8ba4\u4e3a\u667a\u5546\u5927\u4e8e\u5b83\u4eec\uff0c\u8bf7\u7acb\u523b\u9000\u51fa\u5e76\u62ff\u4e0b ICPC World Final Winner \u6765\u8bc1\u660e\u81ea\u5df1\u7684\u5b9e\u529b~',
-  partnersPrefix:
-    '\u53e6\u5916\uff0c\u4ee5\u4e0b\u662f OpenAI \u7684\u5408\u4f5c\u4f19\u4f34\u7f51\u7edc\uff1a',
-  partnersSuffix:
-    '\u3002\u5982\u679c\u60a8\u65e0\u6cd5\u5fcd\u53d7 vibe coding\uff0c\u8bf7\u7acb\u523b\u505c\u7528\u5e76\u4e25\u8083\u62b5\u5236\u3002',
   antiCrack:
     'ECHO \u4f1a\u6301\u7eed\u52a0\u5f3a\u53cd\u7834\u89e3\u548c\u5b8c\u6574\u6027\u4fdd\u62a4\uff1b\u7834\u89e3\u3001\u7ed5\u8fc7\u9501\u5b9a\u3001\u4f20\u64ad\u89e3\u9501\u65b9\u5f0f\u90fd\u4e0d\u88ab\u63a5\u53d7\u3002',
   bridgeError:
@@ -131,15 +124,7 @@ export const UserNoticeGate = ({ onAccepted }: UserNoticeGateProps): JSX.Element
                 {copy.boundariesSuffix}
               </span>
             </li>
-            <li>
-              <ShieldCheck size={15} aria-hidden="true" />
-              <span>
-                {copy.partnersPrefix}
-                <NoticeLink url={openAiPartnersUrl}>{openAiPartnersUrl}</NoticeLink>
-                {copy.partnersSuffix}
-              </span>
-            </li>
-            {[copy.locked, copy.dmca, copy.aiNotice, copy.antiCrack].map((item) => (
+            {[copy.locked, copy.dmca, copy.antiCrack].map((item) => (
               <li key={item}>
                 <ShieldCheck size={15} aria-hidden="true" />
                 <span>{item}</span>

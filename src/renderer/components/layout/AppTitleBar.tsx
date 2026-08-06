@@ -122,6 +122,7 @@ export const AppTitleBar = ({
       <div className="app-titlebar-brand">
         <strong>ECHO</strong>
         <span>Next</span>
+        <span className="app-titlebar-developer-badge">Developer</span>
         {isProUnlocked ? (
           <span className="app-titlebar-pro-badge" aria-label="ECHO Pro unlocked">
             Pro

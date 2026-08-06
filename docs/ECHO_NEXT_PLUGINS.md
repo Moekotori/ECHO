@@ -4,8 +4,6 @@
 
 这份文档写给插件作者。目标不是教插件突破宿主限制，而是教你在 ECHO 的安全边界内做出稳定、轻量、不会拖慢播放的扩展。
 
-如果你正在让 AI 帮你写插件，建议先把 [ForAIReadme](./plugin-sdk/ForAIReadme.md) 发给它。那份文档把插件类型、权限、manifest、运行边界和 AI 常见错误整理成了更适合模型执行的清单。
-
 ## 一句话模型
 
 ECHO 插件是放在用户数据目录 `plugins/` 下的本地文件夹。宿主读取 `echo.plugin.json`，在受控 VM 沙箱里运行 `plugin.js`，按用户确认的权限暴露一个有限的全局 `echo` API，并把 `panel.html` 当作 sandbox iframe 显示。
@@ -303,32 +301,6 @@ console.log('simple theme plugin loaded');
 3. 再做读取曲库的命令。
 4. 再做 provider。
 5. 最后再做面板。
-
-## 让 AI 帮你写插件时怎么说
-
-你可以直接把下面这段发给 AI，然后把你的需求补进去：
-
-```text
-请按 ECHO Next 插件系统写一个本地插件。
-先阅读 docs/ECHO_NEXT_PLUGINS.md 和 docs/plugin-sdk/ForAIReadme.md。
-不要修改 ECHO 主程序源码，只生成插件文件夹内的文件。
-使用 apiVersion: 2。
-权限最小化，不要申请无关权限。
-插件目录名和 id 使用 echo.my-plugin 这种格式。
-需要提供 echo.plugin.json、plugin.js、README.md。
-如果需要面板，再提供 panel.html，并通过 plugin:runCommand 调用命令。
-不要使用 require/import/process/window/document/fetch。
-网络访问必须通过 echo.net，并声明 network 权限。
-我的需求是：在这里写你的需求。
-```
-
-如果 AI 生成了代码，你要检查：
-
-- 它有没有让你改 `src/main/...` 或 `src/renderer/...`。普通插件不应该改这些。
-- 它有没有写 `require`、`import`、`process`、`window`、`document`、`fetch`。
-- 它有没有一次申请很多权限。
-- 它有没有告诉你把文件放进 ECHO 插件页打开的目录。
-- 它有没有写清楚怎么刷新、启用、看日志。
 
 ## 常见新手错误
 

@@ -33,6 +33,7 @@ describe('AppTitleBar', () => {
     expect(screen.queryByRole('button', { name: 'Albums' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Import File' })).toBeNull();
     expect(screen.queryByLabelText('ECHO Pro unlocked')).toBeNull();
+    expect(screen.getByText('Developer')).toBeTruthy();
     expect(onRouteChange).not.toHaveBeenCalled();
   });
 

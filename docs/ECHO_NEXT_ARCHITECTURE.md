@@ -9,7 +9,6 @@ ECHO NEXT 不是旧 ECHO 上继续堆功能的补丁层，而是一套重新拆�
 - [ECHO_NEXT_LIBRARY_CORE.md](./ECHO_NEXT_LIBRARY_CORE.md)
 - [ECHO_NEXT_AUDIO_CORE.md](./ECHO_NEXT_AUDIO_CORE.md)
 - [ECHO_NEXT_EQ.md](./ECHO_NEXT_EQ.md)
-- [ECHO_NEXT_UI_GUIDE.md](./ECHO_NEXT_UI_GUIDE.md)
 
 ## 核心原则
 

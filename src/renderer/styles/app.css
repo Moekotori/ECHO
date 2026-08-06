@@ -35,6 +35,21 @@
   text-transform: uppercase;
 }
 
+.app-titlebar-brand .app-titlebar-developer-badge {
+  display: inline-flex;
+  height: 18px;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--theme-subtle-text) 30%, transparent);
+  border-radius: 999px;
+  color: var(--theme-muted-text);
+  background: color-mix(in srgb, var(--theme-panel-bg-muted) 78%, transparent);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
 .app-titlebar-update {
   display: inline-flex;
   min-width: 0;
@@ -244,6 +259,10 @@
 }
 
 @media (max-width: 640px) {
+  .app-titlebar-brand .app-titlebar-developer-badge {
+    display: inline-flex;
+  }
+
   .app-titlebar-update {
     width: 28px;
     max-width: 28px;

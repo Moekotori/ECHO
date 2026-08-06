@@ -303,7 +303,7 @@ For playback issues, also include the source format, output mode, selected devic
 
 ## License
 
-Materials in this repository are covered by the [ECHO NEXT Source-Available License](./LICENSE); third-party material remains subject to its own license terms. This is not an open-source software license. Read the complete terms before using, reproducing, or redistributing repository material.
+ECHO NEXT is licensed under the [GNU Lesser General Public License v3.0](./LICENSE), using the SPDX identifier `LGPL-3.0-only`. Third-party components and assets remain subject to their own license terms.
 
 ---
 
