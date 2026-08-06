@@ -1492,7 +1492,7 @@ const pendingSettingsSectionStorageKey = 'echo-next.settings.pending-section';
 const pendingRouteStorageKey = 'echo-next.pending-route';
 const settingsBackNavigationEvent = 'app:navigate:settings-back';
 const settingsSectionNavigationEvent = 'app:navigate:settings-section';
-const pluginsDocumentationUrl = 'https://github.com/moekotori/echo/blob/main/docs/ECHO_NEXT_PLUGINS.md';
+const pluginsDocumentationUrl = 'https://echonext.moe/zh/docs/';
 const settingsNavKeys = new Set<SettingsNavKey>(settingsNavItems.map((item) => item.key));
 
 const getSettingsNavIndex = (key: SettingsNavKey): number => settingsNavItems.findIndex((item) => item.key === key);

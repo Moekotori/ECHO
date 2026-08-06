@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SettingsPage, resetEchoProDisplayStatusSnapshotForTests } from './SettingsPage';
 import type { AppSettings, AppThemeToneOverride } from '../../shared/types/appSettings';
@@ -1874,18 +1872,8 @@ describe('SettingsPage', () => {
     expect(navigatePlugins).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(openPluginDirectoryMock).toHaveBeenCalledTimes(1));
     expect(createPluginExampleMock).toHaveBeenCalledWith('playback-panel');
-    expect(openExternalUrlMock).toHaveBeenCalledWith('https://github.com/moekotori/echo/blob/main/docs/ECHO_NEXT_PLUGINS.md');
+    expect(openExternalUrlMock).toHaveBeenCalledWith('https://echonext.moe/zh/docs/');
     window.removeEventListener('app:navigate:plugins', navigatePlugins);
-  });
-
-  it('documents the v1 plugin manifest, permissions, API, examples, and security boundaries', () => {
-    const documentText = readFileSync(join(process.cwd(), 'docs', 'ECHO_NEXT_PLUGINS.md'), 'utf8');
-
-    expect(documentText).toContain('echo.plugin.json');
-    expect(documentText).toContain('## 权限');
-    expect(documentText).toContain('## 公开 API');
-    expect(documentText).toContain('## 完整示例');
-    expect(documentText).toContain('## 性能与播放安全');
   });
 
   it('finds lyrics settings when searching for translation', async () => {

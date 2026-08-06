@@ -20,6 +20,7 @@ result
 electron-app/build/
 native/**/build/
 native/**/cmake-build-*/
+/build/native-host/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
