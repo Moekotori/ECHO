@@ -58,7 +58,7 @@
 
 ### 给开发者的话
 
-欢迎开发者参考、学习和借鉴 ECHO 的设计思路与实现。如果 ECHO 对你的项目有所帮助，我们希望你能在项目、文档或相关页面中注明来源并提及 ECHO。即使没有注明，我们现实中也很难逐一追究，但对来源的尊重会让开源社区变得更好。具体使用、复制和分发仍请遵守仓库中的许可证。
+欢迎开发者参考、学习和借鉴 ECHO 的设计思路与实现。参考了 ECHO 的代码或设计，给项目留个名字或链接就好~ 这点小小的尊重会让开源社区更舒服。具体使用、复制和分发仍请遵守仓库中的许可证。
 
 同时请注意：**任何大型 PR 都不会被合并。** 如果你希望参与贡献，请先通过 Issue 沟通，并将改动拆分成范围清晰、容易审查和验证的小型 PR。
 
@@ -314,7 +314,25 @@ ECHO Android 是 ECHO 的 Android 客户端项目。想参与移动端播放器�
 
 ## License
 
-本仓库采用 [GNU Lesser General Public License v3.0](./LICENSE)，对应 SPDX 标识 `LGPL-3.0-only`；第三方材料仍遵循各自的许可条款。请在使用、修改或分发前阅读完整条款。
+本仓库采用 [GNU Lesser General Public License v3.0](./LICENSE)，对应 SPDX 标识 `LGPL-3.0-only`；第三方材料仍遵循各自的许可条款。
+
+简单说：你可以使用、学习、修改和分发 ECHO；如果分发了修改过的 ECHO，则需要保留 LGPL 许可，并让接收者能取得对应的 ECHO 源码与修改内容。别把改过的 ECHO 锁成闭源黑盒就好。参考了 ECHO 的代码或设计，也请在项目里留个名字或链接~ 完整权利与义务仍以 [LICENSE](./LICENSE) 为准。
+
+## 技术致敬
+
+ECHO 的很多能力不是凭空出现的，向这些优秀的开源项目、音频技术与标准致敬：
+
+| 项目 / 技术 | 在 ECHO 中做什么 |
+| :--- | :--- |
+| [FFmpeg](https://ffmpeg.org/) / libav | 音频解码与媒体处理基础设施 |
+| [SoX Resampler / libsoxr](https://sourceforge.net/projects/soxr/) | 高质量 PCM 重采样的参考与可用后端 |
+| [SQLite](https://sqlite.org/) / [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) | 本地曲库与索引存储 |
+| [TagLib](https://taglib.org/) / [music-metadata](https://github.com/Borewit/music-metadata) | 音频标签、封面与元数据读取 |
+| [Electron](https://www.electronjs.org/) / [React](https://react.dev/) | 桌面壳、界面与交互开发体验 |
+| [WASAPI](https://learn.microsoft.com/windows/win32/coreaudio/wasapi) / [ASIO](https://www.steinberg.net/asio/) | Windows 音频设备与低延迟输出能力 |
+| [NVIDIA CUDA](https://developer.nvidia.com/cuda-toolkit) | ECHO SRC 的可选计算路径 |
+
+ECHO SRC、ECHO SDM、dither、噪声整形、FIFO 与输出调度是项目自己的实现和取舍；它们也站在长期音频工程经验与这些技术基础之上。谢谢每一位把工具、标准和知识留给后来者的人。
 
 ---
 
@@ -346,8 +364,8 @@ ECHO Android 是 ECHO 的 Android 客户端项目。想参与移动端播放器�
 - Email: [nyafairy233@gmail.com](mailto:nyafairy233@gmail.com)
 - Discord: `Moekotori`
 
-### 流媒体与 DMCA
+### 流媒体免责声明
 
-ECHO 是播放器，不是盗版分发工具。我们不会提供超出合法使用范围、侵害音乐人、版权方或平台权益的功能，也不会提供绕过平台限制、破解访问控制、未授权下载歌曲或规避付费权益的能力。
+ECHO 是本地优先的音乐播放器，不是盗版分发工具，也不替任何第三方流媒体平台提供内容或授权。涉及第三方服务时，账号、内容与使用权限均由用户自行依法取得并遵守对应平台的规则。
 
-如果你是权利人或其授权代理，认为 ECHO 项目中的内容侵犯了你的权利，请通过上述邮箱联系我，并附上作品信息、涉及内容的位置、权利关系和有效联系方式。我会认真核实并在合理范围内处理。这个邮箱是项目联系渠道，不代表 ECHO 已作为在线服务向美国版权局登记 DMCA designated agent。
+ECHO 不会提供超出合法使用范围、侵害音乐人、版权方或平台权益的功能：不绕过访问控制，不破解平台限制，不提供未授权下载歌曲、规避付费权益或其他侵权能力。
