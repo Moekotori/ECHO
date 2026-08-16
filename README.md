@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<h1 align="center">ECHO NEXT</h1>
+<h1 align="center">ECHO Community</h1>
 
 <p align="center">
   <strong>为本地音乐而生的桌面播放器</strong><br />
@@ -67,7 +67,9 @@
 ## ECHO 即将上架 Steam
 
 ECHO 要上架 Steam 啦！不过上架Steam也意味着砍掉流媒体沦为纯本地播放器
+虽然说我们的重心会转向 steam 版本，该仓库发布的版本转为社区版，由大家共同维护，但是如果有任何严重问题的话，我们依旧会提供永久更新
 
+届时 steam 版本会支持 Linux 和 macOS
 综合为了回本（圈钱）以及ECHO的生态（个人的梦想就是打造强生态 也就是创意工坊）遂打算上架Steam!
 
 在 **2026 年 8 月 15 日前**购入 ECHO Pro，可享受以下权益：
