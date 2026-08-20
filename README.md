@@ -1,9 +1,3 @@
-<p align="center">
-  <a href="https://echonext.moe/zh/">
-    <img src="./examples/exp.gif" width="360" alt="ECHO NEXT" />
-  </a>
-</p>
-
 <h1 align="center">ECHO Community</h1>
 
 <p align="center">
