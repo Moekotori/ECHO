@@ -13,6 +13,11 @@ Please fill this template as completely as possible. The more context you give, 
 
 ## Pre-flight Checklist
 
+Unchecked, edited, or fake confirmations are closed automatically under the [Issue Policy](../ISSUE_POLICY.md) and will not receive a reply.
+
+- [ ] I have publicly starred this repository
+- [ ] This is not about streaming or third-party music platforms
+- [ ] This is a real bug or feature request, not nitpicking, mockery, or venting
 - [ ] 1. I have confirmed that search engines cannot solve my problem
 - [ ] 2. I have confirmed that existing issues cannot solve my problem
 - [ ] 3. I will follow this template carefully

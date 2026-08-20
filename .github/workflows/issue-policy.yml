@@ -1,0 +1,32 @@
+name: Enforce issue policy
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+concurrency:
+  group: issue-policy-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  enforce:
+    if: ${{ !github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out policy script
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts/enforce-issue-policy.cjs
+          sparse-checkout-cone-mode: false
+
+      - name: Close issues that break the policy
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const enforce = require('./.github/scripts/enforce-issue-policy.cjs');
+            await enforce({ github, context, core });

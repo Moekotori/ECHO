@@ -8,6 +8,11 @@ assignees: ''
 
 ## Pre-flight Checklist
 
+Unchecked, edited, or fake confirmations are closed automatically under the [Issue Policy](../ISSUE_POLICY.md) and will not receive a reply.
+
+- [ ] I have publicly starred this repository
+- [ ] This is not about streaming or third-party music platforms
+- [ ] This is a real bug or feature request, not nitpicking, mockery, or venting
 - [ ] 1. I confirm this feature aligns with ECHO's main product direction
 - [ ] 2. I have read the [ECHO documentation](https://echonext.moe/zh/docs/)
 - [ ] 3. I have searched existing issues and did not find the same or highly similar request

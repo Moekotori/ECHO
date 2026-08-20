@@ -17,7 +17,8 @@
 
 <p align="center">
   <img alt="Status" src="https://img.shields.io/badge/status-actively%20maintained-7c5cff?style=flat-square" />
-  <img alt="Development" src="https://img.shields.io/badge/development-reopening%20source-22c55e?style=flat-square" />
+  <img alt="Edition" src="https://img.shields.io/badge/edition-community-22c55e?style=flat-square" />
+  <img alt="License" src="https://img.shields.io/badge/license-LGPL--3.0-7c5cff?style=flat-square" />
   <img alt="Focus" src="https://img.shields.io/badge/focus-local%20music%20%26%20HiFi-0ea5e9?style=flat-square" />
 </p>
 
@@ -35,7 +36,9 @@
   ·
   <a href="https://echonext.moe/zh/">官方网站</a>
   ·
-  <a href="https://echonext.moe/zh/download/">下载 ECHO NEXT</a>
+  <a href="https://echonext.moe/zh/download/">下载社区版</a>
+  ·
+  <a href="https://store.steampowered.com/app/5105090/ECHO/">Steam</a>
   ·
   <a href="https://echonext.moe/zh/docs/">使用文档</a>
   ·
@@ -54,7 +57,7 @@
 
 但现在，我们改变主意了。
 
-我们仍然相信开源、分享和社区的价值，也不希望少数人的恶意让所有真正喜欢 ECHO、愿意使用和共同建设它的人失去参与的机会。因此，**ECHO 将重新面向大家开源**。源码、开发文档和贡献方式会逐步整理并恢复到公开仓库。
+我们仍然相信开源、分享和社区的价值，也不希望少数人的恶意让所有真正喜欢 ECHO、愿意使用和共同建设它的人失去参与的机会。因此，**ECHO 已经重新开源**。源码在本仓库；开发文档和贡献方式还会继续整理。
 
 ### 给开发者的话
 
@@ -64,21 +67,25 @@
 
 感谢每一位善意使用、认真反馈、帮助测试和参与贡献的朋友。希望这一次，我们可以一起让 ECHO 走得更远。
 
-## ECHO 即将上架 Steam
+## 社区版和 Steam 版
 
-ECHO 要上架 Steam 啦！不过上架Steam也意味着砍掉流媒体沦为纯本地播放器
-虽然说我们的重心会转向 steam 版本，该仓库发布的版本转为社区版，由大家共同维护，但是如果有任何严重问题的话，我们依旧会提供永久更新
+这个仓库是 **ECHO Community**。Steam 版是另一条独立发行线：上架 Steam 意味着砍掉第三方流媒体平台能力，做成更干净的本地播放器，再把创意工坊做成生态。开发重心会更多放在 Steam，但社区版不是弃坑——有严重问题我们依旧会修，也会继续发版。
 
-届时 steam 版本会支持 Linux 和 macOS
-综合为了回本（圈钱）以及ECHO的生态（个人的梦想就是打造强生态 也就是创意工坊）遂打算上架Steam!
+别把两份东西混成同一个仓库。社区版功能更全；Steam 版更克制，换来创意工坊和一条能长期养的发行线。至于回本（圈钱）……对，就是这个意思。个人的梦想还是强生态，也就是创意工坊。
 
-在 **2026 年 8 月 15 日前**购入 ECHO Pro，可享受以下权益：
+| | Community（本仓库） | Steam 版 |
+| :--- | :--- | :--- |
+| 定位 | 开源社区版，功能更全 | 本地优先的 Steam 发行版 |
+| 许可 / 源码 | 本仓库，`LGPL-3.0-only` | 独立装配，按 Steam 发布边界裁剪 |
+| 本地曲库 / DSP / HiFi 输出 | 有 | 有 |
+| 远程曲库 | 有 | 有（用户自己的网盘 / NAS / 媒体库） |
+| 第三方音乐平台 / 下载器 / 在线 MV | 社区版可保留既有能力 | 不提供 |
+| 创意工坊 | 无 | 主题、歌词场景、可视化、DSP 等 |
+| 当前平台 | 以本仓库发布说明为准 | 当前发布主线是 Windows；Linux / macOS 还不能当成 Steam 已支持 |
 
-- 免费获得 Steam CD Key；
-- 加入 ECHO 贡献者名单；
-- 支付邮费即可获赠 ECHO 周边。
+Steam 商店还在准备上架，尚未公开开售。想先看的话去 [Steam 商店页](https://store.steampowered.com/app/5105090/ECHO/)。
 
-购买地址：[爱发电 ECHO NEXT](https://www.ifdian.net/a/echonext)
+支持项目请走 [爱发电 ECHO NEXT](https://www.ifdian.net/a/echonext)。2026 年 8 月 15 日前购入 ECHO Pro 的朋友，仍按当时承诺处理 Steam CD Key、贡献者名单和周边；这档限时权益已经结束，不再对新购买开放。
 
 大家想要什么功能，也欢迎填写 [ECHO 许愿池](https://docs.qq.com/form/page/DYkt1UVNuaEpHcFB5)，告诉我们你的想法。
 
@@ -268,7 +275,8 @@ DSD 播放时，数字音量、EQ、ReplayGain 和普通 PCM DSP 会破坏直出
 
 | 你想要…… | 前往 |
 | :--- | :--- |
-| 获取最新稳定版本 | [官方下载页](https://echonext.moe/zh/download/) · [GitHub Releases](https://github.com/Moekotori/ECHO/releases/latest) |
+| 获取最新社区版 | [官方下载页](https://echonext.moe/zh/download/) · [GitHub Releases](https://github.com/Moekotori/ECHO/releases/latest) |
+| 了解 Steam 版 | [Steam 商店页](https://store.steampowered.com/app/5105090/ECHO/) |
 | 第一次使用 ECHO NEXT | [使用文档](https://echonext.moe/zh/docs/) |
 | 了解最近发生了什么 | [更新日志](https://echonext.moe/zh/changelog/) |
 | 报告问题或提出建议 | [GitHub Issues](https://github.com/Moekotori/ECHO/issues) |
@@ -303,6 +311,8 @@ ECHO Android 是 ECHO 的 Android 客户端项目。想参与移动端播放器�
 </p>
 
 ## 反馈问题
+
+提 Issue 前先读 [Issue 规范](./.github/ISSUE_POLICY.md)。**必须先公开 Star 本仓库**；流媒体 / 第三方音乐平台相关内容和找茬内容会被自动关闭，也不会回复。
 
 如果你遇到异常，请先确认正在使用最新版本，再通过 [GitHub Issues](https://github.com/Moekotori/ECHO/issues) 提交反馈。信息越完整，问题通常越容易被定位：
 

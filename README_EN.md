@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<h1 align="center">ECHO NEXT</h1>
+<h1 align="center">ECHO Community</h1>
 
 <p align="center">
   <strong>A desktop player built for music you actually own.</strong><br />
@@ -13,7 +13,8 @@
 
 <p align="center">
   <img alt="Status" src="https://img.shields.io/badge/status-actively%20maintained-7c5cff?style=flat-square" />
-  <img alt="Development" src="https://img.shields.io/badge/development-closed%20source-f59e0b?style=flat-square" />
+  <img alt="Edition" src="https://img.shields.io/badge/edition-community-22c55e?style=flat-square" />
+  <img alt="License" src="https://img.shields.io/badge/license-LGPL--3.0-7c5cff?style=flat-square" />
   <img alt="Focus" src="https://img.shields.io/badge/focus-local%20music%20%26%20HiFi-0ea5e9?style=flat-square" />
 </p>
 
@@ -31,7 +32,9 @@
   ·
   <a href="https://echonext.moe/zh/">Official site</a>
   ·
-  <a href="https://echonext.moe/zh/download/">Download</a>
+  <a href="https://echonext.moe/zh/download/">Download Community</a>
+  ·
+  <a href="https://store.steampowered.com/app/5105090/ECHO/">Steam</a>
   ·
   <a href="https://echonext.moe/zh/docs/">Documentation</a>
   ·
@@ -42,6 +45,34 @@
 
 ---
 
+## Why the project reopened
+
+ECHO was briefly closed after months of harassment, two repository-vandalism incidents, and accusations that the project was “open source only to sell something.” Those events made sharing feel unsafe, so the source was taken down to protect the project and its maintainer.
+
+That decision has been reversed. **ECHO is open again.** The source lives in this repository. Docs and contribution paths will keep being cleaned up.
+
+If you learn from ECHO’s design or code, leaving a name or a link is enough. Use, copy, and distribute the project under the repository license. **Large PRs will not be merged.** Open an Issue first, then send a small, reviewable change.
+
+## Community edition and Steam
+
+This repository is **ECHO Community**. The Steam edition is a separate distribution: local playback first, no third-party streaming-platform features, and a Workshop ecosystem around themes, lyric scenes, visualizers, and DSP. Development focus will lean toward Steam, but Community is not abandoned—serious bugs still get fixed, and Community releases continue.
+
+Do not treat the two trees as the same product.
+
+| | Community (this repo) | Steam |
+| :--- | :--- | :--- |
+| Role | Broader open-source edition | Local-first Steam release |
+| License / source | This repo, `LGPL-3.0-only` | Assembled separately under Steam distribution rules |
+| Local library / DSP / HiFi output | Yes | Yes |
+| Remote libraries | Yes | Yes (user-owned NAS / servers / media libraries) |
+| Third-party music platforms / downloaders / online MV | Community may keep existing capabilities | Not provided |
+| Steam Workshop | No | Themes, lyric scenes, visualizers, DSP, and related content |
+| Platforms | Follow this repo’s release notes | Windows is the current Steam mainline; Linux / macOS are not Steam-supported claims yet |
+
+The Steam store page is being prepared and is **not publicly on sale**. The [Steam store page](https://store.steampowered.com/app/5105090/ECHO/) is the public listing.
+
+Support the project on [Afdian / ECHO Pro](https://www.ifdian.net/a/echonext). Anyone who purchased ECHO Pro before **15 August 2026** still receives the Steam CD Key, contributor-list, and merch benefits promised at that time. That limited offer has ended and does not apply to new purchases.
+
 ## Meet ECHO NEXT
 
 ECHO NEXT is a desktop music player engineered for large local libraries, native audio output, and professional DSP. It is not a web player wrapped in Electron, and it does not stop at “the file plays.” Scanning, metadata, covers, queues, decoding, DSP, device routing, and playback truth are treated as separate systems with explicit ownership.
@@ -50,8 +81,8 @@ ECHO NEXT is a desktop music player engineered for large local libraries, native
 | :--- | :--- | :--- |
 | Folder scanning, SQLite, tags, covers, album wall, playlists | Parametric EQ, headroom, FIR, OPRA, channel tools, output safety | WASAPI Shared / Exclusive, ASIO, DSD / DoP, HQPlayer |
 
-> [!IMPORTANT]
-> ECHO NEXT is currently developed in a private repository, but it remains actively maintained and released. This public repository is the project home for release information, product documentation, feedback, and community updates.
+> [!NOTE]
+> Source is public again. License terms and third-party material follow the files currently in this repository.
 
 ## Recent engineering highlights — July 2026
 
@@ -246,24 +277,24 @@ External devices receive a sanitized playback snapshot and semantic events rathe
 
 | I want to… | Go to |
 | :--- | :--- |
-| Download the latest stable version | [Official downloads](https://echonext.moe/zh/download/) · [GitHub Releases](https://github.com/Moekotori/ECHO/releases/latest) |
+| Download the latest Community build | [Official downloads](https://echonext.moe/zh/download/) · [GitHub Releases](https://github.com/Moekotori/ECHO/releases/latest) |
+| Learn about the Steam edition | [Steam store page](https://store.steampowered.com/app/5105090/ECHO/) |
 | Start using ECHO NEXT | [Documentation](https://echonext.moe/zh/docs/) |
 | See the latest user-facing changes | [Changelog](https://echonext.moe/zh/changelog/) |
 | Report a problem or suggest a feature | [GitHub Issues](https://github.com/Moekotori/ECHO/issues) |
-| Support long-term development | [ECHO Pro](https://afdian.com/a/echonext) |
-| Join deeper project collaboration | [ECHO Developer Plan](https://echonext.moe/zh/developer/) |
+| Support long-term development | [ECHO Pro](https://www.ifdian.net/a/echonext) |
+| Join ECHO Android | [ECHO Android](https://github.com/Moekotori/ECHOAndroid) |
 
 ## Project status
 
-Core development now takes place in private repositories and internal collaboration environments. This public repository no longer publishes the current source tree, internal architecture documents, build workflow, or full implementation roadmap.
+This public repository is the Community source tree again. Steam has its own assembly and release boundary; do not expect every Community feature to appear there.
 
-It remains the public home for:
+This repo remains the public home for:
 
-- clear project and maintenance status;
-- official downloads, documentation, changelogs, and release notes;
+- Community source, issues, and small reviewable PRs;
+- official Community downloads, documentation, changelogs, and release notes;
 - reproducible bug reports and product suggestions;
-- ECHO Pro and the ECHO Developer Plan;
-- required licensing material and issue templates.
+- licensing material and the files that define the current public contract.
 
 ## ECHO Pro
 
@@ -273,23 +304,19 @@ ECHO Pro is an advanced plan for long-term supporters. Support helps fund infras
   <a href="https://afdian.com/a/echonext"><strong>Support ECHO NEXT · Explore ECHO Pro →</strong></a>
 </p>
 
-## ECHO Developer Plan
+## Contributing
 
-The Developer Plan is for people who want to contribute seriously over time. It is not limited to code: development, visual design, testing, documentation, community feedback, and product experience are all valuable.
+Open an Issue first. Then send a **small, reviewable PR**. Large catch-all PRs will not be merged.
 
-| Area | Example contributions |
-| :--- | :--- |
-| Frontend / interaction | Player UI, library, lyrics, MV, settings, and workflow refinement |
-| Desktop / engineering | Desktop integration, data management, diagnostics, stability, and platform support |
-| Native / audio | Audio output, device compatibility, performance, playback stability, and validation |
-| Art / visual design | UI visuals, icons, illustration, motion, and brand assets |
-| Testing / documentation | Reproduction, release validation, tutorials, feedback triage, and documentation |
+Useful contributions are not limited to code: reproduction, device testing, documentation, and focused UI or audio fixes all help. If you want a longer-term collaboration path, the [Developer Plan](https://echonext.moe/zh/developer/) is still there.
 
 <p align="center">
-  <a href="https://echonext.moe/zh/developer/"><strong>Read about the Developer Plan and apply →</strong></a>
+  <a href="https://echonext.moe/zh/developer/"><strong>Read about the Developer Plan →</strong></a>
 </p>
 
 ## Reporting issues
+
+Read the [Issue Policy](./.github/ISSUE_POLICY.md) first. **Star this repository publicly before opening an issue.** Streaming / third-party music-platform topics and nitpicking are closed automatically and will not receive a reply.
 
 Before opening an issue, confirm that you are using the latest release. A useful report includes:
 
@@ -303,11 +330,19 @@ For playback issues, also include the source format, output mode, selected devic
 
 ## License
 
-ECHO NEXT is licensed under the [GNU Lesser General Public License v3.0](./LICENSE), using the SPDX identifier `LGPL-3.0-only`. Third-party components and assets remain subject to their own license terms.
+This repository uses the [GNU Lesser General Public License v3.0](./LICENSE), SPDX `LGPL-3.0-only`. Third-party components and assets remain under their own terms.
+
+In short: you may use, study, modify, and distribute ECHO. If you distribute a modified ECHO, keep the LGPL license and give recipients the corresponding ECHO source and your changes. Do not lock a modified ECHO into a closed black box. If you learned from the code or design, leave a name or a link. The [LICENSE](./LICENSE) is authoritative.
+
+## Streaming disclaimer
+
+ECHO is a local-first music player. It is not a piracy tool, and it does not supply content or licenses for third-party streaming platforms. When a third-party service is involved, accounts, content, and usage rights are the user’s responsibility.
+
+ECHO will not ship features that go beyond lawful use or that harm artists, rights holders, or platforms: no access-control bypass, no cracking of platform restrictions, and no unauthorized song downloads or paywall evasion.
 
 ---
 
 <p align="center">
   Thank you to everyone who keeps listening, testing, reporting, and supporting ECHO NEXT.<br />
-  <strong>The project is moving forward—and the foundations are getting serious.</strong>
+  <strong>The project is moving forward—in more than one edition.</strong>
 </p>
