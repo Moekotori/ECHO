@@ -38,7 +38,7 @@
   ·
   <a href="https://echonext.moe/zh/download/">下载社区版</a>
   ·
-  <a href="https://store.steampowered.com/app/5105090/ECHO/">Steam</a>
+  <a href="https://www.ifdian.net/a/echonext">购买 Steam Ver.</a>
   ·
   <a href="https://echonext.moe/zh/docs/">使用文档</a>
   ·
@@ -78,7 +78,7 @@
 想体验完整生态（创意工坊、主题、歌词场景、可视化、DSP 预设，以及持续的官方更新），请购买 **ECHO Steam Ver.**：
 
 <p align="center">
-  <a href="https://store.steampowered.com/app/5105090/ECHO/"><strong>购买 ECHO Steam Ver. →</strong></a>
+  <a href="https://www.ifdian.net/a/echonext"><strong>购买 ECHO Steam Ver. →</strong></a>
 </p>
 
 别把两份东西混成同一个仓库。社区版功能更全、节奏更慢、靠 PR 养活；Steam 版更克制，但有工坊生态和官方更新主线。至于回本（圈钱）……对，完整生态请走 Steam。
@@ -94,7 +94,7 @@
 | 创意工坊 | 无 | 主题、歌词场景、可视化、DSP 等 |
 | 当前平台 | 以本仓库发布说明为准 | 当前发布主线是 Windows；Linux / macOS 还不能当成 Steam 已支持 |
 
-2026 年 8 月 15 日前购入 ECHO Pro 的朋友，仍按当时承诺处理 Steam CD Key、贡献者名单和周边；这档限时权益已经结束。现在请直接买 [ECHO Steam Ver.](https://store.steampowered.com/app/5105090/ECHO/)，或继续通过 [爱发电](https://www.ifdian.net/a/echonext) 支持项目。
+2026 年 8 月 15 日前购入 ECHO Pro 的朋友，仍按当时承诺处理 Steam CD Key、贡献者名单和周边；这档限时权益已经结束。Steam 商店页还没公开，购买入口暂时走 [爱发电](https://www.ifdian.net/a/echonext)。
 
 ---
 
@@ -283,7 +283,7 @@ DSD 播放时，数字音量、EQ、ReplayGain 和普通 PCM DSP 会破坏直出
 | 你想要…… | 前往 |
 | :--- | :--- |
 | 获取最新社区版 | [官方下载页](https://echonext.moe/zh/download/) · [GitHub Releases](https://github.com/Moekotori/ECHO/releases/latest) |
-| 体验完整生态 | [购买 ECHO Steam Ver.](https://store.steampowered.com/app/5105090/ECHO/) |
+| 体验完整生态 | [购买 ECHO Steam Ver.](https://www.ifdian.net/a/echonext) |
 | 第一次使用 ECHO NEXT | [使用文档](https://echonext.moe/zh/docs/) |
 | 了解最近发生了什么 | [更新日志](https://echonext.moe/zh/changelog/) |
 | 报告问题或提出建议 | [GitHub Issues](https://github.com/Moekotori/ECHO/issues) |

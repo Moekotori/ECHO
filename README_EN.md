@@ -34,7 +34,7 @@
   ·
   <a href="https://echonext.moe/zh/download/">Download Community</a>
   ·
-  <a href="https://store.steampowered.com/app/5105090/ECHO/">Steam</a>
+  <a href="https://www.ifdian.net/a/echonext">Buy Steam Ver.</a>
   ·
   <a href="https://echonext.moe/zh/docs/">Documentation</a>
   ·
@@ -64,7 +64,7 @@ We will **slow down Community releases**. Official effort moves to Steam. Commun
 Want the full ecosystem (Workshop themes, lyric scenes, visualizers, DSP presets, and ongoing official updates)? Buy **ECHO Steam Ver.**:
 
 <p align="center">
-  <a href="https://store.steampowered.com/app/5105090/ECHO/"><strong>Get ECHO Steam Ver. →</strong></a>
+  <a href="https://www.ifdian.net/a/echonext"><strong>Get ECHO Steam Ver. →</strong></a>
 </p>
 
 Do not treat the two trees as the same product. Community is broader, slower, and PR-driven. Steam is narrower, with Workshop and the official update line.
@@ -80,7 +80,7 @@ Do not treat the two trees as the same product. Community is broader, slower, an
 | Steam Workshop | No | Themes, lyric scenes, visualizers, DSP, and related content |
 | Platforms | Follow this repo’s release notes | Windows is the current Steam mainline; Linux / macOS are not Steam-supported claims yet |
 
-Anyone who purchased ECHO Pro before **15 August 2026** still receives the Steam CD Key, contributor-list, and merch benefits promised at that time. That limited offer has ended. Buy [ECHO Steam Ver.](https://store.steampowered.com/app/5105090/ECHO/) for the full ecosystem, or support the project on [Afdian](https://www.ifdian.net/a/echonext).
+Anyone who purchased ECHO Pro before **15 August 2026** still receives the Steam CD Key, contributor-list, and merch benefits promised at that time. That limited offer has ended. The Steam store page is not public yet; buy through [Afdian](https://www.ifdian.net/a/echonext) for now.
 
 ## Meet ECHO NEXT
 
@@ -287,7 +287,7 @@ External devices receive a sanitized playback snapshot and semantic events rathe
 | I want to… | Go to |
 | :--- | :--- |
 | Download the latest Community build | [Official downloads](https://echonext.moe/zh/download/) · [GitHub Releases](https://github.com/Moekotori/ECHO/releases/latest) |
-| Get the full ecosystem | [Buy ECHO Steam Ver.](https://store.steampowered.com/app/5105090/ECHO/) |
+| Get the full ecosystem | [Buy ECHO Steam Ver.](https://www.ifdian.net/a/echonext) |
 | Start using ECHO NEXT | [Documentation](https://echonext.moe/zh/docs/) |
 | See the latest user-facing changes | [Changelog](https://echonext.moe/zh/changelog/) |
 | Report a problem or suggest a feature | [GitHub Issues](https://github.com/Moekotori/ECHO/issues) |
