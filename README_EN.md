@@ -51,17 +51,28 @@ ECHO was briefly closed after months of harassment, two repository-vandalism inc
 
 That decision has been reversed. **ECHO is open again.** The source lives in this repository. Docs and contribution paths will keep being cleaned up.
 
-If you learn from ECHO’s design or code, leaving a name or a link is enough. Use, copy, and distribute the project under the repository license. **Large PRs will not be merged.** Open an Issue first, then send a small, reviewable change.
+If you learn from ECHO’s design or code, leaving a name or a link is enough. Use, copy, and distribute the project under the repository license. **Large PRs will not be merged.** Community development is now mostly in your hands: if you find a bug, try to fix it and open a small, reviewable Pull Request.
 
-## Community edition and Steam
+## What Community edition is
 
-This repository is **ECHO Community**. The Steam edition is a separate distribution: local playback first, no third-party streaming-platform features, and a Workshop ecosystem around themes, lyric scenes, visualizers, and DSP. Development focus will lean toward Steam, but Community is not abandoned—serious bugs still get fixed, and Community releases continue.
+This repository is **ECHO Community**.
 
-Do not treat the two trees as the same product.
+It is the open-source desktop player: local library, playback, HiFi output, DSP, and the extra Community capabilities that already exist here. It is **not** a full copy of the Steam edition and does not include the Workshop ecosystem.
 
-| | Community (this repo) | Steam |
+We will **slow down Community releases**. Official effort moves to Steam. Community is maintained together: if you hit a bug, try fixing it and send a Pull Request. Serious issues can still be reported, but Community is no longer the weekly official train.
+
+Want the full ecosystem (Workshop themes, lyric scenes, visualizers, DSP presets, and ongoing official updates)? Buy **ECHO Steam Ver.**:
+
+<p align="center">
+  <a href="https://store.steampowered.com/app/5105090/ECHO/"><strong>Get ECHO Steam Ver. →</strong></a>
+</p>
+
+Do not treat the two trees as the same product. Community is broader, slower, and PR-driven. Steam is narrower, with Workshop and the official update line.
+
+| | Community (this repo) | ECHO Steam Ver. |
 | :--- | :--- | :--- |
-| Role | Broader open-source edition | Local-first Steam release |
+| Role | Open-source edition, maintained together | Full-ecosystem Steam release |
+| Updates | Lower frequency; fix bugs via PR | Official update line |
 | License / source | This repo, `LGPL-3.0-only` | Assembled separately under Steam distribution rules |
 | Local library / DSP / HiFi output | Yes | Yes |
 | Remote libraries | Yes | Yes (user-owned NAS / servers / media libraries) |
@@ -69,9 +80,7 @@ Do not treat the two trees as the same product.
 | Steam Workshop | No | Themes, lyric scenes, visualizers, DSP, and related content |
 | Platforms | Follow this repo’s release notes | Windows is the current Steam mainline; Linux / macOS are not Steam-supported claims yet |
 
-The Steam store page is being prepared and is **not publicly on sale**. The [Steam store page](https://store.steampowered.com/app/5105090/ECHO/) is the public listing.
-
-Support the project on [Afdian / ECHO Pro](https://www.ifdian.net/a/echonext). Anyone who purchased ECHO Pro before **15 August 2026** still receives the Steam CD Key, contributor-list, and merch benefits promised at that time. That limited offer has ended and does not apply to new purchases.
+Anyone who purchased ECHO Pro before **15 August 2026** still receives the Steam CD Key, contributor-list, and merch benefits promised at that time. That limited offer has ended. Buy [ECHO Steam Ver.](https://store.steampowered.com/app/5105090/ECHO/) for the full ecosystem, or support the project on [Afdian](https://www.ifdian.net/a/echonext).
 
 ## Meet ECHO NEXT
 
@@ -278,7 +287,7 @@ External devices receive a sanitized playback snapshot and semantic events rathe
 | I want to… | Go to |
 | :--- | :--- |
 | Download the latest Community build | [Official downloads](https://echonext.moe/zh/download/) · [GitHub Releases](https://github.com/Moekotori/ECHO/releases/latest) |
-| Learn about the Steam edition | [Steam store page](https://store.steampowered.com/app/5105090/ECHO/) |
+| Get the full ecosystem | [Buy ECHO Steam Ver.](https://store.steampowered.com/app/5105090/ECHO/) |
 | Start using ECHO NEXT | [Documentation](https://echonext.moe/zh/docs/) |
 | See the latest user-facing changes | [Changelog](https://echonext.moe/zh/changelog/) |
 | Report a problem or suggest a feature | [GitHub Issues](https://github.com/Moekotori/ECHO/issues) |
@@ -306,7 +315,7 @@ ECHO Pro is an advanced plan for long-term supporters. Support helps fund infras
 
 ## Contributing
 
-Open an Issue first. Then send a **small, reviewable PR**. Large catch-all PRs will not be merged.
+Open an Issue first if you need to discuss scope. Then send a **small, reviewable PR**—especially for bugs you already reproduced. Large catch-all PRs will not be merged. Community updates will be less frequent; Steam Ver. is where the full ecosystem moves.
 
 Useful contributions are not limited to code: reproduction, device testing, documentation, and focused UI or audio fixes all help. If you want a longer-term collaboration path, the [Developer Plan](https://echonext.moe/zh/developer/) is still there.
 

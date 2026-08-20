@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: 先读 Issue 规范 / Read the Issue Policy
+  - name: 提问前必须先 Star
     url: https://github.com/Moekotori/ECHO/blob/main/.github/ISSUE_POLICY.md
-    about: 未公开 Star、流媒体相关或找茬的 Issue 会被自动关闭且不回复。
-  - name: 使用文档 / Documentation
-    url: https://echonext.moe/zh/docs/
-    about: 先查文档，再决定还要不要开 Issue。
-  - name: 官方下载 / Downloads
-    url: https://echonext.moe/zh/download/
-    about: 请先确认用的是最新社区版。
+    about: 未公开 Star 本仓库的 Issue 会自动关闭，不会回复。
+  - name: 无权反馈流媒体问题
+    url: https://github.com/Moekotori/ECHO/blob/main/.github/ISSUE_POLICY.md
+    about: 网易云 / QQ 音乐 / Spotify / YouTube 等第三方平台相关内容一律关闭且不回复。
+  - name: 禁止许愿奇葩功能
+    url: https://github.com/Moekotori/ECHO/blob/main/.github/ISSUE_POLICY.md
+    about: 离谱许愿、找茬、嘲讽、发泄会自动关闭，不会回复。

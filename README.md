@@ -63,19 +63,30 @@
 
 欢迎开发者参考、学习和借鉴 ECHO 的设计思路与实现。参考了 ECHO 的代码或设计，给项目留个名字或链接就好~ 这点小小的尊重会让开源社区更舒服。具体使用、复制和分发仍请遵守仓库中的许可证。
 
-同时请注意：**任何大型 PR 都不会被合并。** 如果你希望参与贡献，请先通过 Issue 沟通，并将改动拆分成范围清晰、容易审查和验证的小型 PR。
+同时请注意：**任何大型 PR 都不会被合并。** 社区版现在主要靠大家一起养。发现 bug 可以自己修，先开 Issue 说清楚，再发范围小、能审查的 Pull Request。
 
 感谢每一位善意使用、认真反馈、帮助测试和参与贡献的朋友。希望这一次，我们可以一起让 ECHO 走得更远。
 
-## 社区版和 Steam 版
+## 社区版是什么
 
-这个仓库是 **ECHO Community**。Steam 版是另一条独立发行线：上架 Steam 意味着砍掉第三方流媒体平台能力，做成更干净的本地播放器，再把创意工坊做成生态。开发重心会更多放在 Steam，但社区版不是弃坑——有严重问题我们依旧会修，也会继续发版。
+这个仓库是 **ECHO Community**，也就是社区版。
 
-别把两份东西混成同一个仓库。社区版功能更全；Steam 版更克制，换来创意工坊和一条能长期养的发行线。至于回本（圈钱）……对，就是这个意思。个人的梦想还是强生态，也就是创意工坊。
+它是开源、可自行构建和分发的桌面播放器：本地曲库、稳定播放、HiFi 输出、DSP，以及社区版里已经有的远程库、插件等能力，都还在。它**不是** Steam 版的完整拷贝，也没有创意工坊那套生态。
 
-| | Community（本仓库） | Steam 版 |
+接下来我们会**降低社区版的更新频率**。官方重心转向 Steam 版；社区版交给大家一起维护。遇到 bug，欢迎自己动手修，然后提交 Pull Request。严重问题我们仍会看，但不要再把社区版当成每周必更的官方主线。
+
+想体验完整生态（创意工坊、主题、歌词场景、可视化、DSP 预设，以及持续的官方更新），请购买 **ECHO Steam Ver.**：
+
+<p align="center">
+  <a href="https://store.steampowered.com/app/5105090/ECHO/"><strong>购买 ECHO Steam Ver. →</strong></a>
+</p>
+
+别把两份东西混成同一个仓库。社区版功能更全、节奏更慢、靠 PR 养活；Steam 版更克制，但有工坊生态和官方更新主线。至于回本（圈钱）……对，完整生态请走 Steam。
+
+| | Community（本仓库） | ECHO Steam Ver. |
 | :--- | :--- | :--- |
-| 定位 | 开源社区版，功能更全 | 本地优先的 Steam 发行版 |
+| 定位 | 开源社区版，由大家维护 | 本地优先的完整生态发行版 |
+| 更新 | 降低频率；修 bug 请自己 PR | 官方更新主线 |
 | 许可 / 源码 | 本仓库，`LGPL-3.0-only` | 独立装配，按 Steam 发布边界裁剪 |
 | 本地曲库 / DSP / HiFi 输出 | 有 | 有 |
 | 远程曲库 | 有 | 有（用户自己的网盘 / NAS / 媒体库） |
@@ -83,11 +94,7 @@
 | 创意工坊 | 无 | 主题、歌词场景、可视化、DSP 等 |
 | 当前平台 | 以本仓库发布说明为准 | 当前发布主线是 Windows；Linux / macOS 还不能当成 Steam 已支持 |
 
-Steam 商店还在准备上架，尚未公开开售。想先看的话去 [Steam 商店页](https://store.steampowered.com/app/5105090/ECHO/)。
-
-支持项目请走 [爱发电 ECHO NEXT](https://www.ifdian.net/a/echonext)。2026 年 8 月 15 日前购入 ECHO Pro 的朋友，仍按当时承诺处理 Steam CD Key、贡献者名单和周边；这档限时权益已经结束，不再对新购买开放。
-
-大家想要什么功能，也欢迎填写 [ECHO 许愿池](https://docs.qq.com/form/page/DYkt1UVNuaEpHcFB5)，告诉我们你的想法。
+2026 年 8 月 15 日前购入 ECHO Pro 的朋友，仍按当时承诺处理 Steam CD Key、贡献者名单和周边；这档限时权益已经结束。现在请直接买 [ECHO Steam Ver.](https://store.steampowered.com/app/5105090/ECHO/)，或继续通过 [爱发电](https://www.ifdian.net/a/echonext) 支持项目。
 
 ---
 
@@ -276,7 +283,7 @@ DSD 播放时，数字音量、EQ、ReplayGain 和普通 PCM DSP 会破坏直出
 | 你想要…… | 前往 |
 | :--- | :--- |
 | 获取最新社区版 | [官方下载页](https://echonext.moe/zh/download/) · [GitHub Releases](https://github.com/Moekotori/ECHO/releases/latest) |
-| 了解 Steam 版 | [Steam 商店页](https://store.steampowered.com/app/5105090/ECHO/) |
+| 体验完整生态 | [购买 ECHO Steam Ver.](https://store.steampowered.com/app/5105090/ECHO/) |
 | 第一次使用 ECHO NEXT | [使用文档](https://echonext.moe/zh/docs/) |
 | 了解最近发生了什么 | [更新日志](https://echonext.moe/zh/changelog/) |
 | 报告问题或提出建议 | [GitHub Issues](https://github.com/Moekotori/ECHO/issues) |
@@ -286,7 +293,7 @@ DSD 播放时，数字音量、EQ、ReplayGain 和普通 PCM DSP 会破坏直出
 
 ## 还在做什么
 
-接下来会继续收拾曲库扫描、播放稳定性、设备兼容、歌词/MV 和桌面细节，也会继续填插件、远程来源和 Connect 的坑。没有把它们写成“宏大路线图”，因为很多事情要等真实设备和真实曲库来打脸；进度以[更新日志](https://echonext.moe/zh/changelog/)和发布说明为准。
+社区版会降低更新频率，日常修 bug 请尽量自己改并发 Pull Request。官方主线在 Steam 版。没有把社区版写成宏大路线图；进度以[更新日志](https://echonext.moe/zh/changelog/)和发布说明为准。
 
 ## ECHO Pro
 

@@ -3,8 +3,8 @@
 提 Issue 前先读完这一页。下面三条是硬规则，**不遵守会自动关闭，并且不会回复**。
 
 1. **提 Issue 前必须先给本仓库点 Star**，而且必须公开可见。
-2. **流媒体、第三方音乐平台相关内容不回复**，Issue 会直接关掉。
-3. **找茬、嘲讽、发泄、对人不对事的内容不回复**，Issue 会直接关掉。
+2. **无权反馈流媒体问题。** 第三方音乐平台相关内容不回复，Issue 会直接关掉。
+3. **禁止许愿奇葩功能。** 找茬、嘲讽、发泄、离谱许愿不回复，Issue 会直接关掉。
 
 维护者、有写权限的协作者不受这条自动关闭约束。
 
@@ -28,20 +28,20 @@ ECHO Community 是本地优先的播放器。下面这些内容会被当成流�
 - WASAPI / ASIO / DSP / SRC / SDM / DSD
 - 用户自己的 WebDAV / SMB / Jellyfin / Emby / Subsonic / Navidrome / 网盘
 
-## 找茬一律关闭
+## 找茬和奇葩许愿一律关闭
 
-下面这些会被当成找茬并自动关闭：
+下面这些会被当成找茬或离谱许愿并自动关闭：
 
 - 人身攻击、辱骂、阴阳怪气、纯发泄
 - 空喊“垃圾 / 骗子 / 骗钱 / 割韭菜 / 一眼 AI”，没有可复现的问题
 - 为骂而骂、为抬杠而抬杠，而不是报告缺陷或提出可执行的功能请求
+- 和 ECHO 主线无关的奇葩许愿、整活需求、纯玩梗功能请求
 
 作者吃软不吃硬：带着复现步骤、日志和正常语气来，会认真看。用喷人的语气来，Issue 会被关掉，也不会回复。
 
 ## 还要遵守的提交方式
 
 - 使用「错误报告」或「功能请求」模板，中英文都可以。
-- 不要用「不要用这个模板」那一项。
 - 不要删改规范确认项。
 - 提交前把模板里的规范复选框勾上。
 - 先确认最新版本、文档和已有 Issue。
@@ -67,8 +67,8 @@ ECHO Community 是本地优先的播放器。下面这些内容会被当成流�
 Issues that break these rules are closed automatically and will not receive a reply:
 
 1. **Star this repository publicly before opening an issue.**
-2. **Streaming / third-party music-platform topics are not answered.**
-3. **Nitpicking, mockery, and venting are not answered.**
+2. **Streaming / third-party music-platform topics are not accepted.**
+3. **Bizarre feature wishes, nitpicking, mockery, and venting are not answered.**
 
 Maintainers and collaborators with write access are exempt.
 
