@@ -38,8 +38,8 @@ body:
   - type: input
     id: env
     attributes:
-      label: Environment
-      description: OS / ECHO version / output mode / device
+      label: Environment (optional)
+      description: Optional. OS / ECHO version / output mode / device
     validations:
       required: false
   - type: textarea

@@ -40,8 +40,8 @@ body:
   - type: input
     id: env
     attributes:
-      label: 环境
-      description: 系统 / ECHO 版本 / 输出模式 / 设备
+      label: 环境（选填）
+      description: 可选。系统 / ECHO 版本 / 输出模式 / 设备
       placeholder: Windows 11 · 26.8.20 · WASAPI Exclusive · 设备名
     validations:
       required: false
