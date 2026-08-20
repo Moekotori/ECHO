@@ -2,7 +2,7 @@ name: Enforce issue policy
 
 on:
   issues:
-    types: [opened, edited, reopened]
+    types: [opened]
 
 concurrency:
   group: issue-policy-${{ github.event.issue.number }}

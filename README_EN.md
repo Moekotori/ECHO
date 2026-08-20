@@ -325,7 +325,7 @@ Useful contributions are not limited to code: reproduction, device testing, docu
 
 ## Reporting issues
 
-Read the [Issue Policy](./.github/ISSUE_POLICY.md) first. **Star this repository publicly before opening an issue.** Streaming / third-party music-platform topics and nitpicking are closed automatically and will not receive a reply.
+Read the [Issue Policy](./.github/ISSUE_POLICY.md) first. Please star publicly. Auto-close is conservative: only a missing public star, a clear streaming-platform request, or clear abuse. Mentioning where a local file came from will not trip it.
 
 Before opening an issue, confirm that you are using the latest release. A useful report includes:
 

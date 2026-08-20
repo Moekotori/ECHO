@@ -1,0 +1,54 @@
+name: "[CN] 错误报告（BUG报告）"
+description: 先 Star。无权反馈流媒体。禁止奇葩许愿。下面有可直接点选的勾选框。
+title: "[错误报告] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请点选下面的方框（不是改文字）。规范见 [Issue 规范](../ISSUE_POLICY.md)。
+        自动关闭只打：没公开 Star、明确的流媒体功能请求、明确辱骂。
+  - type: checkboxes
+    id: policy
+    attributes:
+      label: 提交前确认（点选即可）
+      options:
+        - label: 我已经给本仓库点了公开可见的 Star
+          required: true
+        - label: 这不是流媒体或第三方音乐平台相关内容
+          required: true
+        - label: 这是真实的缺陷或功能请求，不是找茬、嘲讽或发泄
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题
+      description: 用几句话说明发生了什么。
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现
+      description: 按顺序列出步骤。
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: false
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      description: 系统 / ECHO 版本 / 输出模式 / 设备
+      placeholder: Windows 11 · 26.8.20 · WASAPI Exclusive · 设备名
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 可直接粘贴日志，或拖图片进来。
+    validations:
+      required: false

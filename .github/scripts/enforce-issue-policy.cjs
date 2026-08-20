@@ -4,121 +4,92 @@ const POLICY_URL = 'https://github.com/Moekotori/ECHO/blob/main/.github/ISSUE_PO
 const POLICY_LABEL = 'policy-closed';
 const EXEMPT_LABEL = 'policy-exempt';
 
-const REQUIRED_CHECKS = [
-  ['我已经给本仓库点了公开可见的 Star', 'I have publicly starred this repository'],
-  ['这不是流媒体或第三方音乐平台相关内容', 'This is not about streaming or third-party music platforms'],
-  ['这是真实的缺陷或功能请求，不是找茬、嘲讽或发泄', 'This is a real bug or feature request, not nitpicking, mockery, or venting'],
-];
-
-const STREAMING_PATTERNS = [
+const STREAMING_PLATFORMS = [
   /网易云/,
   /qq\s*音乐/i,
-  /酷狗/,
-  /酷我/,
+  /酷狗音乐/,
+  /酷我音乐/,
   /汽水音乐/,
-  /咪咕/,
+  /咪咕音乐/,
   /\bspotify\b/i,
   /youtube\s*music/i,
-  /youtube\.com/i,
-  /油管/,
-  /\byt-?dlp\b/i,
-  /\bytdl\b/i,
   /\bsoundcloud\b/i,
-  /\btidal\b/i,
   /\bqobuz\b/i,
   /apple\s*music/i,
   /苹果音乐/,
   /\bdeezer\b/i,
   /哔哩哔哩/,
   /\bbilibili\b/i,
-  /b\s*站/,
-  /扫码登录/,
-  /导入\s*cookie/i,
-  /cookie\s*导入/i,
-  /歌单下载/,
-  /下载歌曲/,
-  /解析下载/,
-  /流媒体平台/,
-  /第三方音乐平台/,
-  /在线听歌平台/,
-  /streaming\s+platform/i,
-  /third[-\s]*party\s+music\s+platform/i,
 ];
 
-const NITPICK_PATTERNS = [
+const EXPLICIT_STREAMING_TOOLS = [
+  /\byt-?dlp\b/i,
+  /歌单下载/,
+  /解析下载/,
+];
+
+const STREAMING_INTENT = [
+  /(请|希望|想要|求)\s*支持/,
+  /登录/,
+  /解析/,
+  /在线播放/,
+  /搜歌/,
+  /下载歌曲/,
+  /导入\s*cookie/i,
+  /cookie\s*导入/i,
+  /第三方音乐平台/,
+  /流媒体平台/,
+];
+
+const ABUSE_PATTERNS = [
   /垃圾软件/,
   /垃圾项目/,
-  /辣鸡/,
-  /骗子/,
-  /骗钱/,
-  /割韭菜/,
   /傻逼/,
   /傻b/i,
   /智障/,
-  /废物/,
   /脑残/,
   /弱智/,
-  /答辩/,
-  /一眼\s*ai/i,
+  /割韭菜/,
   /闭源骗钱/,
 ];
 
 const CLOSE_COMMENTS = {
-  'no-star': `这个 Issue 已按 [Issue 规范](${POLICY_URL}) 自动关闭并锁定。
+  'no-star': `这个 Issue 已按 [Issue 规范](${POLICY_URL}) 自动关闭。
 
-**原因：提交前没有公开 Star 本仓库。**
+**原因：没有检测到你对本仓库的公开 Star。**
 
-请先给本仓库点公开可见的 Star，再使用「错误报告」或「功能请求」模板重新提交。隐藏 Star 列表会检查失败。补 Star 不会让本 Issue 自动重开。
+请先公开 Star，再用模板重开。如果你其实已经 Star、只是隐藏了 Star 列表，在下面留一句即可，维护者会重开。
 
-This issue was closed because the author has not publicly starred the repository. Star it publicly, then open a new issue with the correct template.`,
+This was closed because a public star was not detected. If you already starred privately, comment here and a maintainer can reopen it.`,
 
-  streaming: `这个 Issue 已按 [Issue 规范](${POLICY_URL}) 自动关闭并锁定。
+  streaming: `这个 Issue 已按 [Issue 规范](${POLICY_URL}) 自动关闭。
 
-**原因：流媒体 / 第三方音乐平台相关内容不会被回复。**
+**原因：这看起来是在反馈第三方流媒体平台能力。**
 
-网易云、QQ 音乐、Spotify、YouTube、yt-dlp、Cookie / 扫码登录、歌单下载等内容请不要再开。本地文件、曲库、DSP 和用户自己的网盘 / NAS / Jellyfin 不在此列。
+本地文件、曲库、DSP，以及用户自己的网盘 / NAS / Jellyfin 不在此列。若只是提到某平台、实际在说本地文件，请评论说明，维护者会重开。
 
-Streaming and third-party music-platform topics are out of scope and will not receive a reply.`,
+Streaming-platform feature requests are out of scope. If this was a local-playback bug, comment and a maintainer can reopen it.`,
 
-  nitpick: `这个 Issue 已按 [Issue 规范](${POLICY_URL}) 自动关闭并锁定。
+  nitpick: `这个 Issue 已按 [Issue 规范](${POLICY_URL}) 自动关闭。
 
-**原因：找茬、嘲讽或发泄内容不会被回复。**
+**原因：包含明确的辱骂或人身攻击。**
 
-有真实缺陷请换正常语气，带上复现步骤和日志重新开。对着人喷、空骂、抬杠的 Issue 会直接关掉。
+有真实缺陷请换正常语气、带上复现步骤重开。若这是误判，请评论说明。
 
-Nitpicking, mockery, and venting will not receive a reply.`,
-
-  template: `这个 Issue 已按 [Issue 规范](${POLICY_URL}) 自动关闭并锁定。
-
-**原因：没有使用规定模板，或删改了必须勾选的规范项。**
-
-请使用「错误报告」或「功能请求」模板，勾选全部规范确认项后重新提交。不要使用「不要用这个模板」那一项。
-
-Use the Bug Report or Feature Request template and check every required policy box.`,
+Clear abuse is not answered. If this was a false positive, comment and a maintainer can reopen it.`,
 };
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function hasStreamingRequest(text) {
+  if (EXPLICIT_STREAMING_TOOLS.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+  const hasPlatform = STREAMING_PLATFORMS.some((pattern) => pattern.test(text));
+  const hasIntent = STREAMING_INTENT.some((pattern) => pattern.test(text));
+  return hasPlatform && hasIntent;
 }
 
-function isChecked(body, label) {
-  return new RegExp(`- \\[[xX]\\][^\\n]*${escapeRegExp(label)}`, 'i').test(body);
-}
-
-function hasStreamingContent(text) {
-  return STREAMING_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-function hasNitpickContent(text) {
-  return NITPICK_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-function missingPolicyChecks(body) {
-  return REQUIRED_CHECKS.some((variants) => !variants.some((label) => isChecked(body, label)));
-}
-
-function usedDummyTemplate(text) {
-  return /不要用这个模板/.test(text);
+function hasAbuseContent(text) {
+  return ABUSE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function contentForScan(title, body) {
@@ -130,19 +101,15 @@ function contentForScan(title, body) {
 }
 
 function classifyIssue({ title, body, starred }) {
-  const safeBody = body || '';
-  const scanned = contentForScan(title, safeBody);
-  if (hasNitpickContent(scanned)) {
+  const scanned = contentForScan(title, body || '');
+  if (hasAbuseContent(scanned)) {
     return 'nitpick';
   }
-  if (hasStreamingContent(scanned)) {
+  if (hasStreamingRequest(scanned)) {
     return 'streaming';
   }
   if (starred === false) {
     return 'no-star';
-  }
-  if (usedDummyTemplate(scanned) || missingPolicyChecks(safeBody)) {
-    return 'template';
   }
   return null;
 }
@@ -216,23 +183,15 @@ async function closeForPolicy(github, owner, repo, issueNumber, reason) {
     state: 'closed',
     state_reason: 'not_planned',
   });
-  try {
-    await github.rest.issues.lock({
-      owner,
-      repo,
-      issue_number: issueNumber,
-      lock_reason: reason === 'nitpick' ? 'too heated' : 'off-topic',
-    });
-  } catch (error) {
-    if (error.status !== 400 && error.status !== 403) {
-      throw error;
-    }
-  }
 }
 
 module.exports = async function enforceIssuePolicy({ github, context, core }) {
   const issue = context.payload.issue;
   if (!issue || context.payload.pull_request) {
+    return;
+  }
+  if (context.payload.action && context.payload.action !== 'opened') {
+    core.info(`Skip action ${context.payload.action}`);
     return;
   }
 
@@ -276,3 +235,4 @@ module.exports = async function enforceIssuePolicy({ github, context, core }) {
 };
 
 module.exports.classifyIssue = classifyIssue;
+module.exports.hasStreamingRequest = hasStreamingRequest;

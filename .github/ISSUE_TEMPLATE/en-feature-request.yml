@@ -1,0 +1,33 @@
+name: "[EN] Feature request"
+description: Star first. No streaming feature requests. No bizarre wishes. Use the clickable checkboxes below.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Click the checkboxes below (do not edit Markdown). See the [Issue Policy](../ISSUE_POLICY.md).
+        Auto-close only covers: no public star, a clear streaming-platform request, or clear abuse.
+  - type: checkboxes
+    id: policy
+    attributes:
+      label: Before you submit (click to check)
+      options:
+        - label: I have publicly starred this repository
+          required: true
+        - label: This is not about streaming or third-party music platforms
+          required: true
+        - label: This is a real bug or feature request, not nitpicking, mockery, or venting
+          required: true
+  - type: textarea
+    id: want
+    attributes:
+      label: What do you want
+    validations:
+      required: true
+  - type: textarea
+    id: scene
+    attributes:
+      label: Why / which scenario
+    validations:
+      required: false

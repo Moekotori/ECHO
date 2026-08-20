@@ -319,7 +319,7 @@ ECHO Android 是 ECHO 的 Android 客户端项目。想参与移动端播放器�
 
 ## 反馈问题
 
-提 Issue 前先读 [Issue 规范](./.github/ISSUE_POLICY.md)。**必须先公开 Star 本仓库**；流媒体 / 第三方音乐平台相关内容和找茬内容会被自动关闭，也不会回复。
+提 Issue 前先读 [Issue 规范](./.github/ISSUE_POLICY.md)。请先公开 Star。明确的流媒体功能请求和明确辱骂会自动关闭；漏勾选、随口提到文件来源、奇葩许愿都不会被机器人误关。
 
 如果你遇到异常，请先确认正在使用最新版本，再通过 [GitHub Issues](https://github.com/Moekotori/ECHO/issues) 提交反馈。信息越完整，问题通常越容易被定位：
 

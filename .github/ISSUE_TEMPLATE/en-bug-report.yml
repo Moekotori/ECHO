@@ -1,0 +1,50 @@
+name: "[EN] Bug Report"
+description: Star first. No streaming feature requests. No bizarre wishes. Use the clickable checkboxes below.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Click the checkboxes below (do not edit Markdown). See the [Issue Policy](../ISSUE_POLICY.md).
+        Auto-close only covers: no public star, a clear streaming-platform request, or clear abuse.
+  - type: checkboxes
+    id: policy
+    attributes:
+      label: Before you submit (click to check)
+      options:
+        - label: I have publicly starred this repository
+          required: true
+        - label: This is not about streaming or third-party music platforms
+          required: true
+        - label: This is a real bug or feature request, not nitpicking, mockery, or venting
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: false
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS / ECHO version / output mode / device
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+    validations:
+      required: false

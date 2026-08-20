@@ -2,10 +2,10 @@ blank_issues_enabled: false
 contact_links:
   - name: 提问前必须先 Star
     url: https://github.com/Moekotori/ECHO/blob/main/.github/ISSUE_POLICY.md
-    about: 未公开 Star 本仓库的 Issue 会自动关闭，不会回复。
+    about: 检测不到公开 Star 时会关闭；隐藏 Star 列表可评论说明，维护者会重开。
   - name: 无权反馈流媒体问题
     url: https://github.com/Moekotori/ECHO/blob/main/.github/ISSUE_POLICY.md
-    about: 网易云 / QQ 音乐 / Spotify / YouTube 等第三方平台相关内容一律关闭且不回复。
+    about: 明确要求登录 / 解析 / 下载第三方平台时才会关。只提本地文件来源不会关。
   - name: 禁止许愿奇葩功能
     url: https://github.com/Moekotori/ECHO/blob/main/.github/ISSUE_POLICY.md
-    about: 离谱许愿、找茬、嘲讽、发泄会自动关闭，不会回复。
+    about: 请不要提离谱许愿。只有明确辱骂才会自动关闭，其余由维护者人工看。
