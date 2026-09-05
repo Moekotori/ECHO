@@ -2,6 +2,7 @@
   "name": "echo-next",
   "version": "26.8.4",
   "description": "ECHO Next Phase 0 desktop music app shell.",
+  "homepage": "https://echonext.moe/zh/",
   "author": "Moekotori",
   "license": "LGPL-3.0-only",
   "main": "out/main/index.js",
@@ -142,6 +143,7 @@
       "node_modules/@lox-audioserver/node-libraop/**/*",
       "node_modules/kuromoji/dict/**/*",
       "node_modules/sharp/**/*",
+      "node_modules/@img/**/*",
       "node_modules/taglib-wasm/dist/*.wasm"
     ],
     "win": {
@@ -254,6 +256,7 @@
     },
     "linux": {
       "icon": "build-resources/icons/software.png",
+      "maintainer": "Moekotori <nyafairy233@gmail.com>",
       "extraResources": [
         {
           "from": "electron-app/build/echo-audio-host",
