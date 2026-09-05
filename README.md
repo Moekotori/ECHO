@@ -3,6 +3,9 @@
 <p align="center">
   <strong>为本地音乐而生的桌面播放器</strong><br />
   专注曲库管理、稳定播放、HiFi 输出与长期使用体验
+  
+  
+  
   <img width="390" height="101" alt="image" src="https://github.com/user-attachments/assets/d70162d8-fe28-4f55-a41c-26b8b08730bf" />
 
 "沙币@我不是作者，不要找我 把你的码全抄了，自己开发一个去" powered by qq:2819397477
