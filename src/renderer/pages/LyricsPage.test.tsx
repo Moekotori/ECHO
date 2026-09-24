@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -28,8 +28,13 @@ import {
   beginPlaybackSeekSnapshot,
   setPlaybackStatusSnapshot,
 } from "../stores/playbackStatusStore";
-import { __lyricsPageSessionMemoryForTests, LyricsPage } from "./LyricsPage";
+import {
+  __lyricsPageSessionMemoryForTests,
+  __lyricsWindowLayoutForTests,
+  LyricsPage,
+} from "./LyricsPage";
 import type { LyricLine } from "../components/lyrics/lyricsTypes";
+import { clearReadableColorSampleCache } from "../components/lyrics/lyricsReadableColor";
 import { albumDetailNavigationEvent } from "../utils/albumNavigation";
 
 const originalClipboard = window.navigator.clipboard;
@@ -333,6 +338,11 @@ const makeLyricsCandidate = (
   score: 0.96,
   sourceLabel: "LRCLIB",
   risk: "low",
+  confidence: "high",
+  autoAcceptEligible: true,
+  durationDeltaSeconds: 0,
+  previewLines: ["Preview line"],
+  matchedSources: [{ provider: "lrclib", sourceLabel: "LRCLIB" }],
   reasons: ["duration_close", "synced_duration_safe"],
   ...overrides,
 });
@@ -466,6 +476,7 @@ const installClipboardTextMock = (): ReturnType<typeof vi.fn> => {
 
 afterEach(() => {
   cleanup();
+  clearReadableColorSampleCache();
   Object.defineProperty(window.navigator, "clipboard", {
     configurable: true,
     value: originalClipboard,
@@ -477,6 +488,14 @@ afterEach(() => {
 });
 
 describe("LyricsPage", () => {
+  it("keeps the expanded lyrics layout in F11 fullscreen", () => {
+    const { isExpandedWindowBounds } = __lyricsWindowLayoutForTests;
+
+    expect(isExpandedWindowBounds(2048, 1094, 2048, 1152, 2048, 1094)).toBe(true);
+    expect(isExpandedWindowBounds(2048, 1152, 2048, 1152, 2048, 1094)).toBe(true);
+    expect(isExpandedWindowBounds(1600, 900, 2048, 1152, 2048, 1094)).toBe(false);
+  });
+
   it("bounds remembered lyrics session state", () => {
     const { maxChars, maxEntries, prefix, readRememberedLyricsState, rememberLyricsState } =
       __lyricsPageSessionMemoryForTests;
@@ -533,6 +552,30 @@ describe("LyricsPage", () => {
     expect(css).not.toMatch(/\.lyrics-page:has\(\.lyrics-mv-background\) \.lyrics-line(?:\[data-active="true"\])? \{\s*color: var\(--lyrics-color\);/);
   });
 
+  it("applies the configured context opacity to every lyric distance", () => {
+    const css = readFileSync("src/renderer/styles/lyrics.css", "utf8");
+
+    for (const distance of [1, 2, 3, 4]) {
+      expect(css).toMatch(new RegExp(
+        `\\.lyrics-line\\[data-focus-distance="${distance}"\\] \\{[^}]*opacity: var\\(--lyrics-context-opacity\\);`,
+      ));
+    }
+
+    expect(css).not.toMatch(/--lyrics-context-opacity:\s*max\(/);
+    expect(css).not.toMatch(/\.lyrics-line\[data-focus-distance="[1-4]"\][^{]*\{[^}]*opacity:\s*(?:0\.\d+|max\()/);
+  });
+
+  it("keeps resting lyric lines on a two-dimensional transform", () => {
+    const css = readFileSync("src/renderer/styles/lyrics.css", "utf8");
+
+    expect(css).toMatch(
+      /\.lyrics-line \{[\s\S]*?transform: translateY\(var\(--lyrics-line-y\)\) scale\(var\(--lyrics-line-scale\)\);/,
+    );
+    expect(css).not.toMatch(
+      /\.lyrics-line \{[\s\S]*?transform: translate3d\(0, var\(--lyrics-line-y\), 0\) scale\(var\(--lyrics-line-scale\)\);/,
+    );
+  });
+
   it("keeps the lyrics surface visible if MV fails while AirPlay is active", () => {
     const css = readFileSync("src/renderer/styles/lyrics.css", "utf8");
 
@@ -554,10 +597,10 @@ describe("LyricsPage", () => {
     expect(css).toContain(".lyrics-page:has(.lyrics-mv-background) .lyrics-track-album,");
     expect(css).toContain("color: var(--lyrics-mv-muted-color);");
     expect(css).toContain(".lyrics-page:has(.lyrics-mv-background) .lyrics-back-button:hover");
-    expect(polishCss).toContain('html[data-theme="dark"] .app-shell:has(.lyrics-page) .player-tags .hifi-tag');
+    expect(polishCss).toContain('html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-tags .hifi-tag');
     expect(polishCss).toContain("color: var(--theme-page-text);");
-    expect(polishCss).toContain('html[data-theme="dark"] .app-shell:has(.lyrics-page) .player-tags .tag-hires');
-    expect(polishCss).not.toMatch(/html\[data-theme="dark"\] \.app-shell:has\(\.lyrics-page\) \.player-tags \.hifi-tag \{[^}]*color: var\(--theme-button-text\);/);
+    expect(polishCss).toContain('html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-tags .tag-hires');
+    expect(polishCss).not.toMatch(/html\[data-theme="dark"\] \.app-shell\.app-shell--lyrics:has\(\.lyrics-page\) \.player-tags \.hifi-tag \{[^}]*color: var\(--theme-button-text\);/);
   });
 
   it("keeps MV immersive lyrics on the normal lyrics size scale", () => {
@@ -595,7 +638,7 @@ describe("LyricsPage", () => {
     expect(layoutCss).toMatch(/\.lyrics-player-drawer-host \{[\s\S]*?left: 0;[\s\S]*?right: 0;[\s\S]*?margin-inline: auto;/);
     expect(layoutCss).not.toContain('transform: translate3d(-50%,');
     expect(layoutCss).toMatch(/\.lyrics-player-drawer-host \{[\s\S]*?opacity: var\(--lyrics-mini-player-visual-opacity, 1\);/);
-    expect(css).toMatch(/\.app-shell--lyrics-player-drawer \.lyrics-player-drawer-host \.player-bar \{[\s\S]*?grid-template-columns: auto auto;[\s\S]*?justify-content: center;[\s\S]*?min-height: 54px;[\s\S]*?border-radius: 999px;[\s\S]*?background: var\(--lyrics-mini-player-background, rgba\(35, 33, 32, 0\.78\)\);/);
+    expect(layoutCss).toMatch(/\.app-shell--lyrics-player-drawer \.lyrics-player-drawer-host \.player-bar \{[\s\S]*?grid-template-columns: auto auto;[\s\S]*?justify-content: center;[\s\S]*?min-height: 54px;[\s\S]*?border-radius: 999px;[\s\S]*?background: var\(--lyrics-mini-player-background, rgba\(35, 33, 32, 0\.78\)\);/);
     expect(css).toMatch(/\.app-shell--lyrics-player-drawer \.lyrics-player-drawer-host \.player-center \{[\s\S]*?grid-template-columns: auto auto;[\s\S]*?justify-content: center;/);
     expect(css).toMatch(/\.lyrics-network-load-notice \{[\s\S]*?position: absolute;[\s\S]*?top: clamp\(18px, 2\.8vh, 30px\);[\s\S]*?left: clamp\(18px, 2\.4vw, 30px\);/);
     expect(css).toMatch(/\.lyrics-network-load-notice \{[\s\S]*?width: min\(330px, calc\(100vw - 36px\)\);[\s\S]*?border-radius: 8px;/);
@@ -613,8 +656,13 @@ describe("LyricsPage", () => {
     expect(css).toMatch(/\.lyrics-page\[data-immersive-cover-style="true"\]\[data-background="cover"\]\[data-view-mode="lyrics"\] \.lyrics-track-copy h1 \{[\s\S]*?color: rgba\(238, 243, 248, 0\.9\);/);
     expect(css).toContain('.lyrics-candidate-copy,');
     expect(css).toMatch(/\.lyrics-match-panel \.lyrics-candidate \{[\s\S]*?--lyrics-candidate-title-color: #23324a;[\s\S]*?--lyrics-candidate-meta-color: rgba\(66, 84, 107, 0\.76\);/);
-    expect(css).toMatch(/\.lyrics-match-panel \.lyrics-candidate \{[\s\S]*?min-height: 96px;[\s\S]*?padding: 14px 16px;/);
-    expect(css).toMatch(/\.lyrics-match-panel \.lyrics-candidate:has\(\.lyrics-candidate-next-step\) \{\s*min-height: 132px;/);
+    expect(css).toMatch(/\.lyrics-match-panel \.lyrics-candidate \{[\s\S]*?grid-template-areas:[\s\S]*?"copy footer"[\s\S]*?min-height: 0;[\s\S]*?padding: 8px 9px;/);
+    expect(css).toMatch(/\.lyrics-match-panel__results \{[\s\S]*?display: flex;[\s\S]*?min-height: 0;[\s\S]*?overflow: hidden;/);
+    expect(css).toMatch(/\.lyrics-match-panel__results > :not\(\.lyrics-candidate-list\) \{[\s\S]*?flex: 0 0 auto;/);
+    expect(css).toMatch(/\.lyrics-match-panel__results \.lyrics-candidate-list \{[\s\S]*?grid-auto-rows: max-content;[\s\S]*?align-content: start;/);
+    expect(css).toMatch(/\.lyrics-match-panel \.lyrics-candidate-next-step \{[\s\S]*?display: none;/);
+    expect(css).toMatch(/\.lyrics-match-panel \.lyrics-candidate-footer \{[\s\S]*?grid-area: footer;/);
+    expect(css).not.toContain('.lyrics-candidate:has(.lyrics-candidate-next-step)');
     expect(css).toMatch(/\.lyrics-settings-drawer \.lyrics-drawer-candidates \.lyrics-source-filters button \{[\s\S]*?min-height: 36px;[\s\S]*?color: rgba\(238, 244, 255, 0\.9\);/);
     expect(css).toMatch(/\.lyrics-settings-drawer \.lyrics-drawer-candidates \.lyrics-source-filters button\[data-active="true"\] \{[\s\S]*?color: #2f3650;[\s\S]*?background: rgba\(248, 250, 255, 0\.94\);/);
     expect(css).toMatch(/\.lyrics-page \.lyrics-match-panel \.lyrics-candidate strong \{[\s\S]*?--lyrics-candidate-title-color: #23324a;[\s\S]*?color: var\(--lyrics-candidate-title-color\);/);
@@ -628,19 +676,21 @@ describe("LyricsPage", () => {
     expect(css).toMatch(/\.lyrics-page\[data-immersive-cover-style="true"\]:not\(\[data-lyrics-page-style="roseVinyl"\]\)\[data-background="cover"\]\[data-immersive-cover-glass="true"\]\[data-view-mode="lyrics"\]::after \{[\s\S]*?inset: 0;[\s\S]*?backdrop-filter: blur\(var\(--lyrics-immersive-glass-blur, 16px\)\) saturate\(1\.16\);/);
     expect(css).not.toContain('.lyrics-page[data-lyrics-page-style="roseVinyl"][data-background="cover"][data-immersive-cover-glass="true"][data-view-mode="lyrics"]::after');
     expect(css).not.toContain('[data-lyrics-page-style="roseVinyl"][data-background="cover"][data-immersive-cover-glass="true"][data-view-mode="lyrics"] .lyrics-left-panel::before');
-    expect(css).toMatch(/\.lyrics-page\[data-lyrics-page-style="roseVinyl"\]\[data-view-mode="lyrics"\]\[data-background="cover"\] \.lyrics-backdrop::after \{[\s\S]*?filter: blur\(var\(--lyrics-rose-vinyl-background-blur, 18px\)\) brightness\(0\.48\) saturate\(1\.22\);/);
+    expect(css).toMatch(/\.lyrics-page\[data-lyrics-page-style="roseVinyl"\]\[data-view-mode="lyrics"\]\[data-background="cover"\] \.lyrics-backdrop::after \{[\s\S]*?filter: blur\(var\(--lyrics-rose-vinyl-effective-background-blur\)\) brightness\(0\.48\) saturate\(1\.22\);/);
     expect(css).toMatch(/\.lyrics-page\[data-track-transition="true"\]\[data-lyrics-page-style="roseVinyl"\]\[data-view-mode="lyrics"\]\[data-background="cover"\] \.lyrics-backdrop::after \{[\s\S]*?animation: none !important;/);
+    expect(css).toMatch(/\.lyrics-page\[data-track-transition="true"\]\[data-lyrics-page-style="roseVinyl"\]\[data-view-mode="lyrics"\]\[data-background="cover"\]::after \{[\s\S]*?z-index: 3;[\s\S]*?background: #100b10;[\s\S]*?animation: lyrics-track-rose-vinyl-dark-settle 420ms cubic-bezier\(0\.2, 0, 0\.2, 1\) both;/);
     expect(css).toMatch(/\.lyrics-page\[data-lyrics-page-style="roseVinyl"\]\[data-view-mode="lyrics"\]\[data-background="cover"\] \.lyrics-backdrop-previous-cover \{[\s\S]*?display: none;/);
-    expect(css).toMatch(/\.lyrics-page\[data-lyrics-page-style="roseVinyl"\]\[data-background="cover"\]\[data-immersive-cover-glass="true"\]\[data-view-mode="lyrics"\] \.lyrics-backdrop::after \{[\s\S]*?filter: blur\(calc\(var\(--lyrics-rose-vinyl-background-blur, 18px\) \+ var\(--lyrics-immersive-glass-blur, 16px\)\)\) brightness\(0\.48\) saturate\(1\.22\);/);
-    expect(css).not.toContain('lyrics-track-rose-vinyl-cover-in');
-    expect(css).not.toContain('lyrics-track-previous-rose-vinyl-cover-out');
-    expect(css).not.toContain('lyrics-track-rose-vinyl-card-in');
+    expect(css).toMatch(/\.lyrics-page\[data-lyrics-page-style="roseVinyl"\]\[data-background="cover"\]\[data-immersive-cover-glass="true"\]\[data-view-mode="lyrics"\] \.lyrics-backdrop \{[\s\S]*?--lyrics-rose-vinyl-effective-background-blur: calc\(var\(--lyrics-rose-vinyl-background-blur, 18px\) \+ var\(--lyrics-immersive-glass-blur, 16px\)\);/);
+    expect(css).not.toContain('@keyframes lyrics-track-rose-vinyl-cover-in');
+    expect(css).not.toContain('@keyframes lyrics-track-previous-rose-vinyl-cover-out');
+    expect(css).toContain('@keyframes lyrics-track-rose-vinyl-card-image-in');
+    expect(css).toContain('@keyframes lyrics-track-rose-vinyl-dark-settle');
     expect(css).not.toContain('.app-shell--lyrics-player-drawer:has(.lyrics-page[data-track-transition="true"][data-lyrics-page-style="roseVinyl"]) .lyrics-player-drawer-host .player-bar[data-compact-away="true"]');
-    expect(css).toMatch(/\.lyrics-page\[data-track-transition="true"\]\[data-lyrics-page-style="roseVinyl"\]\[data-view-mode="lyrics"\]\[data-background="cover"\] \.lyrics-style-cover-card \{[\s\S]*?animation: none !important;/);
+    expect(css).toMatch(/\.lyrics-page\[data-lyrics-page-style="roseVinyl"\]\[data-view-mode="lyrics"\]\[data-background="cover"\] \.lyrics-style-cover-card-image \{[\s\S]*?animation: lyrics-track-rose-vinyl-card-image-in 420ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both;/);
     expect(css).toMatch(/\.lyrics-visual-settings-drawer \.lyrics-page-style-panel \{[\s\S]*?background:[\s\S]*?rgba\(255, 255, 255, 0\.025\);/);
     expect(css).toMatch(/\.lyrics-visual-settings-drawer \.lyrics-page-style-panel__rose-controls \{[\s\S]*?border-top: 1px solid rgba\(255, 255, 255, 0\.07\);/);
-    expect(css).toMatch(/\.lyrics-visual-settings-drawer \.lyrics-page-style-select \.sort-menu \{[\s\S]*?left: 0;[\s\S]*?background: rgba\(34, 38, 56, 0\.96\);/);
-    expect(css).toMatch(/\.lyrics-visual-settings-drawer \.lyrics-page-style-select \.sort-option \{[\s\S]*?color: rgba\(246, 242, 255, 0\.94\);/);
+    expect(css).toMatch(/\.lyrics-visual-settings-drawer \.lyrics-page-style-chooser \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
+    expect(css).toMatch(/\.lyrics-visual-settings-drawer \.lyrics-page-style-choice\[data-selected="true"\] \{[\s\S]*?border-color: rgba\(178, 167, 255, 0\.52\);/);
     expect(css).not.toContain('.lyrics-style-cover-card::after');
     expect(css).not.toMatch(/data-lyrics-page-style="roseVinyl"[\s\S]*?\.lyrics-track-copy h1 \{[\s\S]*?text-shadow: 0 3px 22px/);
     expect(css).toMatch(/data-lyrics-page-style="roseVinyl"[\s\S]*?\.lyrics-track-copy h1 \{[\s\S]*?display: -webkit-box;[\s\S]*?width: min\(100%, 760px\);[\s\S]*?white-space: normal;[\s\S]*?-webkit-line-clamp: 2;[\s\S]*?animation: none !important;/);
@@ -836,7 +886,7 @@ describe("LyricsPage", () => {
       fieldSources: { title: "airplay", artist: "airplay", album: "airplay" },
     });
     mockEcho(track, 12, { lyricsCandidatePanelAutoOpenEnabled: false });
-    const searchCandidatesForSnapshot = vi.fn().mockResolvedValue([
+    const storedCandidates = [
       makeLyricsCandidate({
         id: "netease-otona-survivor",
         provider: "netease",
@@ -848,12 +898,14 @@ describe("LyricsPage", () => {
         score: 0.42,
         risk: "high",
       }),
-    ]);
+    ];
+    const searchCandidatesForSnapshot = vi.fn().mockResolvedValue(storedCandidates);
     window.echo = {
       ...window.echo,
       lyrics: {
         getForTrack: vi.fn(),
         getForSnapshot: vi.fn().mockResolvedValue(null),
+        getStoredCandidates: vi.fn().mockResolvedValue(storedCandidates),
         searchCandidates: vi.fn(),
         searchCandidatesForSnapshot,
         applyCandidate: vi.fn(),
@@ -900,7 +952,8 @@ describe("LyricsPage", () => {
       </PlaybackQueueProvider>,
     );
 
-    await waitFor(() => expect(searchCandidatesForSnapshot).toHaveBeenCalled());
+    await waitFor(() => expect(window.echo.lyrics.getStoredCandidates).toHaveBeenCalledWith(track.id, 265));
+    expect(searchCandidatesForSnapshot).not.toHaveBeenCalled();
     expect(container.querySelector(".lyrics-match-panel")).toBeTruthy();
     expect(container.querySelector(".lyrics-candidate-list")?.textContent).toContain("大人サバイバー");
     expect(window.echo.lyrics.applyCandidateForSnapshot).not.toHaveBeenCalled();
@@ -1886,7 +1939,7 @@ describe("LyricsPage", () => {
     expect(video.currentTime).toBeCloseTo(9.2, 3);
   });
 
-  it("does not seek when a synced lyric line is clicked", async () => {
+  it("seeks once when a valid synced lyric line is clicked", async () => {
     const track = makeTrack();
     const { seek } = mockEcho(track, 0);
     const { container } = render(
@@ -1901,17 +1954,23 @@ describe("LyricsPage", () => {
     const secondLineButton = Array.from(container.querySelectorAll<HTMLButtonElement>(".lyrics-line"))
       .find((line) => line.querySelector(".lyrics-line-primary")?.textContent === "Second line");
     expect(secondLineButton).toBeTruthy();
+    await waitFor(() => expect(secondLineButton?.getAttribute("data-seekable")).toBe("true"));
+    fireEvent.click(secondLineButton!);
     fireEvent.click(secondLineButton!);
 
-    expect(seek).not.toHaveBeenCalled();
-    expect(document.querySelector('.lyrics-line[data-seekable="true"]')).toBeNull();
+    await waitFor(() => expect(seek).toHaveBeenCalledTimes(1));
+    expect(seek).toHaveBeenCalledWith(10);
+    expect(document.querySelector('.lyrics-line[data-seekable="true"]')).toBeTruthy();
     expect(container.querySelector(".lyrics-page")?.getAttribute("data-lyrics-text-direction")).toBe("horizontal");
     expect(container.querySelector(".lyrics-scroll")?.getAttribute("data-text-direction")).toBe("horizontal");
   });
 
-  it("ignores legacy vertical lyrics text direction without restoring lyric seek", async () => {
+  it("applies the configured timeline correction when seeking from lyrics", async () => {
     const track = makeTrack();
-    const { seek } = mockEcho(track, 0, { lyricsTextDirection: "vertical" });
+    const { seek } = mockEcho(track, 0, {
+      lyricsGlobalSyncOffsetMs: 500,
+      lyricsTextDirection: "vertical",
+    });
     const { container } = render(
       <PlaybackQueueProvider>
         <QueueSeed track={track}>
@@ -1924,10 +1983,11 @@ describe("LyricsPage", () => {
     const secondLineButton = Array.from(container.querySelectorAll<HTMLButtonElement>(".lyrics-line"))
       .find((line) => line.querySelector(".lyrics-line-primary")?.textContent === "Second line");
     expect(secondLineButton).toBeTruthy();
+    await waitFor(() => expect(secondLineButton?.getAttribute("data-seekable")).toBe("true"));
     fireEvent.click(secondLineButton!);
 
-    expect(seek).not.toHaveBeenCalled();
-    expect(document.querySelector('.lyrics-line[data-seekable="true"]')).toBeNull();
+    await waitFor(() => expect(seek).toHaveBeenCalledWith(9.5));
+    expect(document.querySelector('.lyrics-line[data-seekable="true"]')).toBeTruthy();
     expect(container.querySelector(".lyrics-page")?.getAttribute("data-lyrics-text-direction")).toBe("horizontal");
     expect(container.querySelector(".lyrics-scroll")?.getAttribute("data-text-direction")).toBe("horizontal");
   });
@@ -1986,7 +2046,7 @@ describe("LyricsPage", () => {
     await screen.findByRole("heading", { name: "Test Song" });
     expect(
       container.querySelector(".lyrics-track-cover img")?.getAttribute("src"),
-    ).toBe("echo-cover://original/test");
+    ).toBe("echo-cover://large/test");
     expect(
       container
         .querySelector('.lyrics-mv-card[data-cover="true"] img')
@@ -2044,7 +2104,7 @@ describe("LyricsPage", () => {
     ).toBe(inlineCover);
   });
 
-  it("uses the original cover for the lyrics header and cover-following background", async () => {
+  it("uses the static large cover for the lyrics header and cover-following background", async () => {
     window.sessionStorage.setItem("echo:lyrics:view-mode", "mv");
     const track = makeTrack({ coverId: "cover 1" });
     mockEcho(track);
@@ -2059,7 +2119,7 @@ describe("LyricsPage", () => {
     await screen.findByRole("heading", { name: "Test Song" });
     expect(
       container.querySelector(".lyrics-track-cover img")?.getAttribute("src"),
-    ).toBe("echo-cover://original/cover%201");
+    ).toBe("echo-cover://large/cover%201");
     expect(
       container
         .querySelector('.lyrics-mv-card[data-cover="true"] img')
@@ -2077,7 +2137,7 @@ describe("LyricsPage", () => {
     const page = container.querySelector(".lyrics-page") as HTMLElement;
     await waitFor(() => expect(page.dataset.background).toBe("cover"));
     expect(page.style.getPropertyValue("--lyrics-cover")).toBe(
-      'url("echo-cover://original/cover%201")',
+      'url("echo-cover://large/cover%201")',
     );
     expect(window.echo.library.resolveLyricsBackgroundCover).not.toHaveBeenCalled();
   });
@@ -2129,17 +2189,97 @@ describe("LyricsPage", () => {
     expect(page.dataset.immersiveCoverGlass).toBe("true");
     expect(page.dataset.background).toBe("cover");
     expect(page.style.getPropertyValue("--lyrics-cover")).toBe(
-      'url("echo-cover://original/cover%201")',
+      'url("echo-cover://large/cover%201")',
     );
     expect(page.style.getPropertyValue("--lyrics-immersive-glass-blur")).toBe("19px");
     expect(page.style.getPropertyValue("--lyrics-rose-vinyl-background-blur")).toBe("18px");
     expect(container.querySelector(".lyrics-style-cover-card img")?.getAttribute("src")).toBe(
-      "echo-cover://original/cover%201",
+      "echo-cover://large/cover%201",
     );
     expect(container.querySelector(".lyrics-style-cover-card span")).toBeNull();
     expect(container.querySelector(".lyrics-style-status-pill")).toBeNull();
     expect(container.querySelector(".lyrics-page > .lyrics-track-header-floating")).toBeNull();
     expect(container.querySelector(".lyrics-mv-panel")?.getAttribute("data-lyrics-readability")).toBe("true");
+  });
+
+  it("supports an immersive cover in the editorial layout without adding a lyrics progress control", async () => {
+    const track = makeTrack({ coverId: "cover 1", album: "Test Album" });
+    mockEcho(track, 0, {
+      lyricsBackgroundMode: "cover",
+      lyricsPageStyle: "editorial",
+      lyricsImmersiveCoverStyleEnabled: true,
+      lyricsImmersiveCoverGlassEnabled: true,
+    });
+
+    const { container } = render(
+      <PlaybackQueueProvider>
+        <QueueSeed track={track}>
+          <LyricsPage initialLyrics={lyrics} usePlayerDrawerHeader />
+        </QueueSeed>
+      </PlaybackQueueProvider>,
+    );
+
+    await screen.findAllByRole("heading", { name: "Test Song" });
+    const page = container.querySelector(".lyrics-page") as HTMLElement;
+
+    expect(page.dataset.lyricsPageStyle).toBe("editorial");
+    expect(page.dataset.immersiveCoverStyle).toBe("true");
+    expect(page.dataset.immersiveCoverGlass).toBe("true");
+    expect(page.dataset.background).toBe("cover");
+    expect(page.style.getPropertyValue("--lyrics-cover")).toBe(
+      'url("echo-cover://large/cover%201")',
+    );
+    expect(container.querySelector(".lyrics-page > .lyrics-track-header-floating")).toBeNull();
+    expect(
+      Array.from(container.querySelectorAll(".lyrics-line-time")).map((node) => node.textContent),
+    ).toEqual(["0:00", "0:10", "0:20"]);
+    expect(page.querySelector(".progress-track")).toBeNull();
+    expect(page.querySelector('[role="progressbar"]')).toBeNull();
+    expect(page.querySelector('input[type="range"]')).toBeNull();
+
+    const css = readFileSync("src/renderer/styles/lyrics.css", "utf8");
+    expect(css).toMatch(
+      /\.lyrics-page\[data-lyrics-page-style="editorial"\]\[data-view-mode="lyrics"\] \.lyrics-scroll,[\s\S]*?padding: max\(190px, calc\(50vh - 96px\)\) 0;/,
+    );
+    expect(css).toMatch(
+      /\.app-shell--lyrics-player-drawer:has\(\.lyrics-page\[data-lyrics-page-style="editorial"\]\)[\s\S]*?\.lyrics-player-drawer-host--auto-hide:not\(\.lyrics-player-drawer-host--shortcut-toggle\) \{[\s\S]*?opacity: var\(--lyrics-mini-player-visual-opacity, 1\);[\s\S]*?transform: translate3d\(0, 0, 0\) scale\(1\);/,
+    );
+    expect(css).toMatch(
+      /\.app-shell--lyrics-player-drawer\s+\.lyrics-page\[data-lyrics-page-style="editorial"\]\[data-view-mode="lyrics"\]\s+> \.lyrics-left-panel \{[\s\S]*?grid-template-columns: clamp\(250px, 21vw, 312px\) minmax\(0, 1fr\);[\s\S]*?grid-template-rows: minmax\(0, 1fr\);/,
+    );
+    expect(css).toMatch(
+      /\.lyrics-page\[data-lyrics-page-style="editorial"\]\[data-immersive-cover-style="true"\]\[data-background="cover"\]\[data-view-mode="lyrics"\]:has\(\.lyrics-mv-panel\[data-mv-enabled="false"\]\) \{[\s\S]*?--lyrics-editorial-ink: #f7f9ff;[\s\S]*?background: #080b12;/,
+    );
+    expect(css).toMatch(
+      /\.lyrics-visual-settings-drawer \.lyrics-page-style-choice__check \{[\s\S]*?opacity: 0;[\s\S]*?transform: scale\(0\.72\);/,
+    );
+  });
+
+  it("keeps the rose vinyl surface active while a track cover is unavailable", async () => {
+    const track = makeTrack({
+      coverId: null,
+      coverThumb: null,
+      embeddedCoverStatus: "missing",
+    });
+    mockEcho(track, 0, {
+      lyricsBackgroundMode: "theme",
+      lyricsPageStyle: "roseVinyl",
+    });
+
+    const { container } = render(
+      <PlaybackQueueProvider>
+        <QueueSeed track={track}>
+          <LyricsPage initialLyrics={lyrics} />
+        </QueueSeed>
+      </PlaybackQueueProvider>,
+    );
+
+    await screen.findAllByRole("heading", { name: "Test Song" });
+    const page = container.querySelector(".lyrics-page") as HTMLElement;
+
+    expect(page.dataset.lyricsPageStyle).toBe("roseVinyl");
+    expect(page.dataset.background).toBe("cover");
+    expect(page.style.getPropertyValue("--lyrics-cover")).toBe("none");
   });
 
   it("keeps the music reactive lyrics visual layer disabled even if old settings enabled it", async () => {
@@ -2212,7 +2352,7 @@ describe("LyricsPage", () => {
     expect(page.dataset.immersiveCoverGlass).toBeUndefined();
     expect(page.dataset.background).toBe("cover");
     expect(page.style.getPropertyValue("--lyrics-cover")).toBe(
-      'url("echo-cover://original/cover%201")',
+      'url("echo-cover://large/cover%201")',
     );
     expect(container.querySelector(".lyrics-mv-panel")?.getAttribute("data-lyrics-readability")).toBe("true");
     expect(window.echo.library.resolveLyricsBackgroundCover).not.toHaveBeenCalled();
@@ -2245,7 +2385,7 @@ describe("LyricsPage", () => {
     expect(page.dataset.immersiveCoverStyle).toBe("true");
     expect(page.dataset.background).toBe("cover");
     expect(page.style.getPropertyValue("--lyrics-cover")).toBe(
-      'url("echo-cover://original/cover%201")',
+      'url("echo-cover://large/cover%201")',
     );
     expect(window.echo.library.resolveLyricsBackgroundCover).not.toHaveBeenCalled();
   });
@@ -2272,7 +2412,7 @@ describe("LyricsPage", () => {
     expect(page.dataset.immersiveCoverStyle).toBe("true");
     expect(page.dataset.background).toBe("cover");
     expect(page.style.getPropertyValue("--lyrics-cover")).toBe(
-      'url("echo-cover://original/cover%201")',
+      'url("echo-cover://large/cover%201")',
     );
     expect(container.querySelector(".lyrics-mv-panel")?.getAttribute("data-lyrics-readability")).toBe("true");
   });
@@ -2470,7 +2610,7 @@ describe("LyricsPage", () => {
     const page = container.querySelector(".lyrics-page") as HTMLElement;
 
     expect(page.style.getPropertyValue("--lyrics-cover")).toBe(
-      'url("echo-cover://original/cover%201")',
+      'url("echo-cover://large/cover%201")',
     );
     resolveNetworkCover({
       coverUrl: "https://p.music.126.net/cover.jpg",
@@ -2922,12 +3062,13 @@ describe("LyricsPage", () => {
     expect(await screen.findByText("已自动校准 -200ms")).toBeTruthy();
   });
 
-  it("auto-saves high-confidence candidate timeline alignment and supports undo", async () => {
+  it("auto-saves high-confidence candidate timeline alignment", async () => {
     const track = makeTrack();
     mockEcho(track, 10.2, { lyricsSmartAlignmentEnabled: true });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(makeTrackLyrics()),
-      searchCandidates: vi.fn().mockResolvedValue([makeLyricsCandidate({ id: "candidate-shifted", providerLyricsId: "shifted" })]),
+      getStoredCandidates: vi.fn().mockResolvedValue([makeLyricsCandidate({ id: "candidate-shifted", providerLyricsId: "shifted" })]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       previewCandidate: vi.fn().mockResolvedValue(
         makeTrackLyrics({
           id: "preview-1",
@@ -2957,20 +3098,12 @@ describe("LyricsPage", () => {
       </PlaybackQueueProvider>,
     );
     expect(await screen.findByText("Second line")).toBeTruthy();
-    window.dispatchEvent(new Event("lyrics:search-requested"));
 
     await waitFor(() =>
       expect(window.echo.lyrics.previewCandidate).toHaveBeenCalledWith("track-1", "candidate-shifted"),
     );
     await waitFor(() =>
       expect(window.echo.lyrics.setOffset).toHaveBeenCalledWith("track-1", -200),
-    );
-    expect(await screen.findByText("已自动校准 -200ms")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: /撤销/ }));
-
-    await waitFor(() =>
-      expect(window.echo.lyrics.setOffset).toHaveBeenLastCalledWith("track-1", 0),
     );
   });
 
@@ -2979,12 +3112,8 @@ describe("LyricsPage", () => {
     mockEcho(track, 10.2, { lyricsSmartAlignmentEnabled: true });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(makeTrackLyrics()),
-      searchCandidates: vi.fn().mockImplementation(
-        async (_trackId: string, _query?: string, provider?: string) =>
-          provider === "lrclib"
-            ? [makeLyricsCandidate({ id: "candidate-shifted", providerLyricsId: "shifted" })]
-            : [],
-      ),
+      getStoredCandidates: vi.fn().mockResolvedValue([makeLyricsCandidate({ id: "candidate-shifted", providerLyricsId: "shifted" })]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       previewCandidate: vi.fn().mockResolvedValue(
         makeTrackLyrics({
           id: "preview-1",
@@ -3013,7 +3142,7 @@ describe("LyricsPage", () => {
 
     expect(await screen.findByText("Second line")).toBeTruthy();
     await waitFor(() =>
-      expect(window.echo.lyrics.searchCandidates).toHaveBeenCalledWith("track-1", undefined, "lrclib"),
+      expect(window.echo.lyrics.getStoredCandidates).toHaveBeenCalledWith("track-1", 180),
     );
     await waitFor(() =>
       expect(window.echo.lyrics.previewCandidate).toHaveBeenCalledWith("track-1", "candidate-shifted"),
@@ -3036,19 +3165,17 @@ describe("LyricsPage", () => {
     });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(makeTrackLyrics({ lines: driftedLines })),
-      searchCandidates: vi.fn().mockImplementation(
-        async (_trackId: string, _query?: string, provider?: string) =>
-          provider === "lrclib"
-            ? [
-                makeLyricsCandidate({
-                  id: "candidate-drifted",
-                  title: "Drifted candidate",
-                  risk: "high",
-                  score: 0.95,
-                }),
-              ]
-            : [],
-      ),
+      getStoredCandidates: vi.fn().mockResolvedValue([
+        makeLyricsCandidate({
+          id: "candidate-drifted",
+          title: "Drifted candidate",
+          risk: "high",
+          confidence: "blocked",
+          autoAcceptEligible: false,
+          score: 0.95,
+        }),
+      ]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       previewCandidate: vi.fn().mockResolvedValue(
         makeTrackLyrics({
           id: "preview-drifted",
@@ -3302,7 +3429,7 @@ describe("LyricsPage", () => {
       expect(window.echo.lyrics.previewCandidate).toHaveBeenCalledWith("track-1", "candidate-drifted"),
     );
     await waitFor(() =>
-      expect(window.echo.lyrics.applyCandidate).toHaveBeenCalledWith("track-1", "candidate-drifted"),
+      expect(window.echo.lyrics.applyCandidate).toHaveBeenCalledWith("track-1", "candidate-drifted", "auto"),
     );
     expect(window.echo.lyrics.setOffset).not.toHaveBeenCalled();
   });
@@ -3414,14 +3541,14 @@ describe("LyricsPage", () => {
     await waitFor(() => expect(container.querySelector(".lyrics-candidate-list")).toBeNull());
   });
 
-  it("auto-applies a high scoring candidate when the initial lyrics lookup misses", async () => {
+  it("does not re-apply stored candidates after the main lyrics lookup finishes", async () => {
     const track = makeTrack();
-    mockEcho(track);
+    mockEcho(track, 0, { lyricsCandidatePanelAutoOpenEnabled: true });
+    const storedCandidate = makeLyricsCandidate({ id: "candidate-97", score: 0.97 });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
-      searchCandidates: vi.fn().mockResolvedValue([
-        makeLyricsCandidate({ id: "candidate-97", score: 0.97 }),
-      ]),
+      getStoredCandidates: vi.fn().mockResolvedValue([storedCandidate]),
+      searchCandidates: vi.fn().mockResolvedValue([storedCandidate]),
       applyCandidate: vi.fn().mockResolvedValue(
         makeTrackLyrics({
           lines: [{ timeMs: 0, text: "Auto applied line" }],
@@ -3443,11 +3570,10 @@ describe("LyricsPage", () => {
       </PlaybackQueueProvider>,
     );
 
-    expect(await screen.findByText("Auto applied line")).toBeTruthy();
-    expect(window.echo.lyrics.applyCandidate).toHaveBeenCalledWith(
-      "track-1",
-      "candidate-97",
-    );
+    expect(await screen.findByText("使用此歌词")).toBeTruthy();
+    expect(window.echo.lyrics.getStoredCandidates).toHaveBeenCalledWith("track-1", 180);
+    expect(window.echo.lyrics.searchCandidates).not.toHaveBeenCalled();
+    expect(window.echo.lyrics.applyCandidate).not.toHaveBeenCalled();
   });
 
   it("keeps the initial automatic lyrics lookup panel hidden while it is loading", async () => {
@@ -3483,9 +3609,10 @@ describe("LyricsPage", () => {
     mockEcho(track);
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
-      searchCandidates: vi.fn().mockResolvedValue([
-        makeLyricsCandidate({ id: "candidate-low-score", score: 0.42 }),
+      getStoredCandidates: vi.fn().mockResolvedValue([
+        makeLyricsCandidate({ id: "candidate-low-score", score: 0.42, confidence: "blocked", autoAcceptEligible: false }),
       ]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       applyCandidate: vi.fn(),
       markInstrumental: vi.fn(),
       rejectCandidate: vi.fn(),
@@ -3501,15 +3628,9 @@ describe("LyricsPage", () => {
       </PlaybackQueueProvider>,
     );
 
-    await waitFor(() =>
-      expect(window.echo.lyrics.searchCandidates).toHaveBeenCalledWith(
-        "track-1",
-        undefined,
-        "lrclib",
-        "missing-lyrics",
-      ),
-    );
+    await waitFor(() => expect(window.echo.lyrics.getStoredCandidates).toHaveBeenCalledWith("track-1", 180));
     expect(container.querySelector(".lyrics-match-panel")).toBeNull();
+    expect(window.echo.lyrics.searchCandidates).not.toHaveBeenCalled();
     expect(window.echo.lyrics.applyCandidate).not.toHaveBeenCalled();
   });
 
@@ -3518,6 +3639,7 @@ describe("LyricsPage", () => {
     mockEcho(track, 0, { lyricsCandidatePanelAutoOpenEnabled: true });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
+      getStoredCandidates: vi.fn().mockResolvedValue([]),
       searchCandidates: vi.fn().mockResolvedValue([]),
       applyCandidate: vi.fn(),
       markInstrumental: vi.fn(),
@@ -3534,26 +3656,8 @@ describe("LyricsPage", () => {
       </PlaybackQueueProvider>,
     );
 
-    await waitFor(() =>
-      expect(window.echo.lyrics.searchCandidates).toHaveBeenCalledWith(
-        "track-1",
-        undefined,
-        "lrclib",
-        "missing-lyrics",
-      ),
-    );
-    expect(window.echo.lyrics.searchCandidates).not.toHaveBeenCalledWith(
-      "track-1",
-      undefined,
-      "netease",
-      "missing-lyrics",
-    );
-    expect(window.echo.lyrics.searchCandidates).not.toHaveBeenCalledWith(
-      "track-1",
-      undefined,
-      "qqmusic",
-      "missing-lyrics",
-    );
+    await waitFor(() => expect(window.echo.lyrics.getStoredCandidates).toHaveBeenCalledWith("track-1", 180));
+    expect(window.echo.lyrics.searchCandidates).not.toHaveBeenCalled();
 
     vi.mocked(window.echo.lyrics.searchCandidates).mockClear();
     window.dispatchEvent(new Event("lyrics:search-requested"));
@@ -3634,9 +3738,10 @@ describe("LyricsPage", () => {
     window.echo.app.setSettings = setSettings;
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
-      searchCandidates: vi.fn().mockResolvedValue([
-        makeLyricsCandidate({ id: "candidate-low-score", score: 0.42 }),
+      getStoredCandidates: vi.fn().mockResolvedValue([
+        makeLyricsCandidate({ id: "candidate-low-score", score: 0.42, confidence: "blocked", autoAcceptEligible: false }),
       ]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       applyCandidate: vi.fn(),
       markInstrumental: vi.fn(),
       rejectCandidate: vi.fn(),
@@ -3662,32 +3767,15 @@ describe("LyricsPage", () => {
     expect(setSettings).toHaveBeenCalledWith({ lyricsCandidatePanelAutoOpenEnabled: false });
   });
 
-  it("uses current track metadata when a lyrics candidate has no visible title or artist", async () => {
-    const track = makeTrack({
-      title: "Nobody Sleeps",
-      artist: "Figure Classic",
-      album: "Sleepless Cover",
-      duration: 234,
-    });
+  it("keeps an automatic lyrics candidate panel closed after the close button is clicked", async () => {
+    const track = makeTrack();
     mockEcho(track, 0, { lyricsCandidatePanelAutoOpenEnabled: true });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
-      searchCandidates: vi.fn().mockResolvedValue([
-        makeLyricsCandidate({
-          id: "candidate-empty-instrumental",
-          provider: "netease",
-          sourceLabel: "NetEase",
-          title: "",
-          artist: "",
-          album: null,
-          durationSeconds: null,
-          instrumental: true,
-          hasSynced: false,
-          hasPlain: false,
-          score: 0.15,
-          risk: "medium",
-        }),
+      getStoredCandidates: vi.fn().mockResolvedValue([
+        makeLyricsCandidate({ id: "candidate-low-score", score: 0.42, confidence: "blocked", autoAcceptEligible: false }),
       ]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       applyCandidate: vi.fn(),
       markInstrumental: vi.fn(),
       rejectCandidate: vi.fn(),
@@ -3704,8 +3792,100 @@ describe("LyricsPage", () => {
     );
 
     await waitFor(() => expect(container.querySelector(".lyrics-match-panel")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Close lyrics candidates" }));
+
+    await waitFor(() => expect(container.querySelector(".lyrics-match-panel")).toBeNull());
+    act(() => {
+      window.dispatchEvent(new CustomEvent("lyrics:display-settings-changed", {
+        detail: { lyricsCandidatePanelAutoOpenEnabled: true },
+      }));
+    });
+    expect(container.querySelector(".lyrics-match-panel")).toBeNull();
+  });
+
+  it("uses current track metadata when a lyrics candidate has no visible title or artist", async () => {
+    const track = makeTrack({
+      title: "Nobody Sleeps",
+      artist: "Figure Classic",
+      album: "Sleepless Cover",
+      duration: 234,
+    });
+    const echo = mockEcho(track, 0, { lyricsCandidatePanelAutoOpenEnabled: true });
+    window.echo.lyrics = {
+      getForTrack: vi.fn().mockResolvedValue(null),
+      getStoredCandidates: vi.fn().mockResolvedValue([
+        makeLyricsCandidate({
+          id: "candidate-empty-instrumental",
+          provider: "netease",
+          sourceLabel: "NetEase",
+          title: "",
+          artist: "",
+          album: null,
+          durationSeconds: null,
+          instrumental: true,
+          hasSynced: false,
+          hasPlain: false,
+          score: 0.15,
+          risk: "medium",
+          confidence: "blocked",
+          autoAcceptEligible: false,
+        }),
+      ]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
+      applyCandidate: vi.fn(),
+      markInstrumental: vi.fn(),
+      rejectCandidate: vi.fn(),
+      setOffset: vi.fn(),
+      clearCache: vi.fn(),
+    };
+
+    const { container, rerender } = render(
+      <PlaybackQueueProvider>
+        <QueueSeed track={track}>
+          <LyricsPage />
+        </QueueSeed>
+      </PlaybackQueueProvider>,
+    );
+
+    await waitFor(() => expect(container.querySelector(".lyrics-match-panel")).toBeTruthy());
     expect(container.querySelector(".lyrics-candidate-list")?.textContent).toContain("Nobody Sleeps");
     expect(container.querySelector(".lyrics-candidate-list")?.textContent).toContain("Figure Classic");
+    const candidateCard = container.querySelector(".lyrics-candidate");
+    const candidateFooter = candidateCard?.querySelector(":scope > .lyrics-candidate-footer");
+    const candidateNextStep = candidateFooter?.querySelector(":scope > .lyrics-candidate-next-step");
+    const candidateActions = candidateFooter?.querySelector(":scope > .lyrics-candidate-actions");
+    expect(candidateCard?.querySelector(".lyrics-candidate-badges .lyrics-candidate-next-step")).toBeNull();
+    expect(candidateFooter).toBeTruthy();
+    expect(candidateNextStep).toBeTruthy();
+    expect(candidateActions).toBeTruthy();
+    expect(candidateNextStep!.compareDocumentPosition(candidateActions!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const nextTrack = makeTrack({
+      id: "track-next",
+      path: "C:\\Music\\track-next.flac",
+      title: "Next Song",
+      artist: "Next Artist",
+      album: "Next Album",
+      duration: 321,
+    });
+    rerender(
+      <PlaybackQueueProvider>
+        <QueueSeed track={nextTrack}>
+          <LyricsPage />
+        </QueueSeed>
+      </PlaybackQueueProvider>,
+    );
+    act(() => echo.emitAudioStatus(makeAudioStatus(nextTrack, 0)));
+
+    await waitFor(() => {
+      const candidateText = container.querySelector(".lyrics-candidate-list")?.textContent ?? "";
+      const currentTrackText = container.querySelector(".lyrics-match-current")?.textContent ?? "";
+      expect(candidateText).toContain("Next Song");
+      expect(candidateText).toContain("Next Artist");
+      expect(candidateText).toContain("候选时长 未知");
+      expect(currentTrackText).toContain("5:21");
+      expect(candidateText).not.toContain("Nobody Sleeps");
+    });
   });
 
   it("does not auto-apply medium risk candidates", async () => {
@@ -3713,9 +3893,10 @@ describe("LyricsPage", () => {
     mockEcho(track, 0, { lyricsCandidatePanelAutoOpenEnabled: true });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
-      searchCandidates: vi.fn().mockResolvedValue([
-        makeLyricsCandidate({ id: "candidate-medium", score: 0.97, risk: "medium" }),
+      getStoredCandidates: vi.fn().mockResolvedValue([
+        makeLyricsCandidate({ id: "candidate-medium", score: 0.97, risk: "medium", confidence: "blocked", autoAcceptEligible: false }),
       ]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       applyCandidate: vi.fn(),
       markInstrumental: vi.fn(),
       rejectCandidate: vi.fn(),
@@ -3731,29 +3912,31 @@ describe("LyricsPage", () => {
       </PlaybackQueueProvider>,
     );
 
-    await waitFor(() =>
-      expect(window.echo.lyrics.searchCandidates).toHaveBeenCalledWith("track-1", undefined, "lrclib"),
-    );
+    await waitFor(() => expect(window.echo.lyrics.getStoredCandidates).toHaveBeenCalledWith("track-1", 180));
     expect(window.echo.lyrics.applyCandidate).not.toHaveBeenCalled();
     expect(container.querySelector(".lyrics-risk-badge--medium")).toBeTruthy();
   });
 
-  it("auto-applies exact identity candidates above the threshold when only duration differs", async () => {
+  it("requires two clicks before applying a high-risk duration mismatch", async () => {
     const track = makeTrack();
     mockEcho(track, 0, { lyricsAutoAcceptScore: 0.56 });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
-      searchCandidates: vi.fn().mockResolvedValue([
+      getStoredCandidates: vi.fn().mockResolvedValue([
         makeLyricsCandidate({
           id: "candidate-duration-mismatch",
           score: 0.7,
           risk: "high",
+          confidence: "blocked",
+          autoAcceptEligible: false,
+          durationDeltaSeconds: 45,
           reasons: ["title_exact", "artist_exact", "duration_mismatch"],
           titleScore: 1,
           artistScore: 1,
           durationScore: 0.04,
         }),
       ]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       applyCandidate: vi.fn().mockResolvedValue(
         makeTrackLyrics({
           lines: [{ timeMs: 0, text: "Duration mismatch auto applied" }],
@@ -3775,6 +3958,10 @@ describe("LyricsPage", () => {
       </PlaybackQueueProvider>,
     );
 
+    fireEvent.click(await screen.findByRole("button", { name: "使用此歌词" }));
+    expect(window.echo.lyrics.applyCandidate).not.toHaveBeenCalled();
+    expect(await screen.findByText(/时长差异/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "确认使用高风险歌词" }));
     expect(await screen.findByText("Duration mismatch auto applied")).toBeTruthy();
     expect(window.echo.lyrics.applyCandidate).toHaveBeenCalledWith(
       "track-1",
@@ -3791,7 +3978,7 @@ describe("LyricsPage", () => {
     });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
-      searchCandidates: vi.fn().mockResolvedValue([
+      getStoredCandidates: vi.fn().mockResolvedValue([
         makeLyricsCandidate({
           id: "candidate-duration-mismatch",
           title: "Candidate Song",
@@ -3802,6 +3989,7 @@ describe("LyricsPage", () => {
           artistScore: 1,
         }),
       ]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       applyCandidate: vi.fn(),
       markInstrumental: vi.fn(),
       rejectCandidate: vi.fn(),
@@ -3826,9 +4014,10 @@ describe("LyricsPage", () => {
     mockEcho(track, 0, { lyricsCandidatePanelAutoOpenEnabled: true });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
-      searchCandidates: vi.fn().mockResolvedValue([
-        makeLyricsCandidate({ id: "candidate-low-score", score: 0.42 }),
+      getStoredCandidates: vi.fn().mockResolvedValue([
+        makeLyricsCandidate({ id: "candidate-low-score", score: 0.42, confidence: "blocked", autoAcceptEligible: false }),
       ]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       applyCandidate: vi.fn().mockResolvedValue(
         makeTrackLyrics({
           lines: [{ timeMs: 0, text: "Manually selected line" }],
@@ -3853,7 +4042,8 @@ describe("LyricsPage", () => {
     await waitFor(() => expect(container.querySelector(".lyrics-candidate")).toBeTruthy());
     expect(window.echo.lyrics.applyCandidate).not.toHaveBeenCalled();
 
-    fireEvent.click(container.querySelector<HTMLButtonElement>(".lyrics-candidate")!);
+    fireEvent.click(screen.getByRole("button", { name: "使用此歌词" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认使用高风险歌词" }));
 
     await waitFor(() =>
       expect(window.echo.lyrics.applyCandidate).toHaveBeenCalledWith(
@@ -3870,6 +4060,9 @@ describe("LyricsPage", () => {
     mockEcho(track, 0, { lyricsCandidatePanelAutoOpenEnabled: true });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
+      getStoredCandidates: vi.fn().mockResolvedValue([
+        makeLyricsCandidate({ id: "old-local", title: "Old Page Result", score: 0.42 }),
+      ]),
       searchCandidates: vi.fn().mockImplementation(
         (_trackId: string, searchText: string | undefined, provider: string) => Promise.resolve([
           makeLyricsCandidate({
@@ -3894,8 +4087,8 @@ describe("LyricsPage", () => {
       </PlaybackQueueProvider>,
     );
 
-    const oldCandidate = await screen.findByText("Old Page Result");
-    fireEvent.click(oldCandidate.closest("button")!);
+    await screen.findByText("Old Page Result");
+    fireEvent.click(screen.getByRole("button", { name: "使用此歌词" }));
 
     window.dispatchEvent(new CustomEvent("lyrics:search-requested", { detail: { query: "fresh query" } }));
     expect(await screen.findByText("Fresh Page Result")).toBeTruthy();
@@ -3909,14 +4102,15 @@ describe("LyricsPage", () => {
     expect(container.querySelector(".lyrics-candidate-list")?.textContent).not.toContain("Old Page Result");
   });
 
-  it("auto-closes the lyrics candidate panel after ten seconds without interaction", async () => {
+  it("keeps the lyrics candidate panel open until the user closes it", async () => {
     const track = makeTrack();
     mockEcho(track, 0, { lyricsCandidatePanelAutoOpenEnabled: true });
     window.echo.lyrics = {
       getForTrack: vi.fn().mockResolvedValue(null),
-      searchCandidates: vi.fn().mockResolvedValue([
-        makeLyricsCandidate({ id: "candidate-low-score", score: 0.42 }),
+      getStoredCandidates: vi.fn().mockResolvedValue([
+        makeLyricsCandidate({ id: "candidate-low-score", score: 0.42, confidence: "blocked", autoAcceptEligible: false }),
       ]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
       applyCandidate: vi.fn(),
       markInstrumental: vi.fn(),
       rejectCandidate: vi.fn(),
@@ -3934,17 +4128,10 @@ describe("LyricsPage", () => {
 
     await waitFor(() => expect(container.querySelector(".lyrics-match-panel")).toBeTruthy());
     vi.useFakeTimers();
-    fireEvent.pointerEnter(container.querySelector<HTMLElement>(".lyrics-match-panel")!);
-
     act(() => {
-      vi.advanceTimersByTime(9999);
+      vi.advanceTimersByTime(10000);
     });
     expect(container.querySelector(".lyrics-match-panel")).toBeTruthy();
-
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-    expect(container.querySelector(".lyrics-match-panel")).toBeNull();
   });
 
   it("auto-applies a high scoring candidate after rematching lyrics", async () => {
@@ -3990,7 +4177,60 @@ describe("LyricsPage", () => {
     expect(window.echo.lyrics.applyCandidate).toHaveBeenCalledWith(
       "track-1",
       "candidate-94",
+      "auto",
     );
+  });
+
+  it("shows a safe late provider result as soon as the main process auto-applies it", async () => {
+    const track = makeTrack();
+    mockEcho(track);
+    let lyricsChangedHandler:
+      | ((trackId: string, reason?: "manual" | "auto-apply") => void)
+      | null = null;
+    const getForTrack = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(
+        makeTrackLyrics({
+          providerLyricsId: "late-safe",
+          lines: [{ timeMs: 0, text: "Late provider line" }],
+          syncedText: "[00:00.00]Late provider line",
+          plainText: "Late provider line",
+        }),
+      );
+    window.echo.lyrics = {
+      getForTrack,
+      getStoredCandidates: vi.fn().mockResolvedValue([]),
+      searchCandidates: vi.fn().mockResolvedValue([]),
+      applyCandidate: vi.fn(),
+      markInstrumental: vi.fn(),
+      rejectCandidate: vi.fn(),
+      setOffset: vi.fn(),
+      clearCache: vi.fn(),
+      onChanged: vi.fn((handler) => {
+        lyricsChangedHandler = handler;
+        return () => {
+          lyricsChangedHandler = null;
+        };
+      }),
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <QueueSeed track={track}>
+          <LyricsPage />
+        </QueueSeed>
+      </PlaybackQueueProvider>,
+    );
+
+    await waitFor(() => expect(window.echo.lyrics.getStoredCandidates).toHaveBeenCalled());
+    act(() => {
+      lyricsChangedHandler?.("track-1", "auto-apply");
+    });
+
+    expect(await screen.findByText("Late provider line")).toBeTruthy();
+    expect(getForTrack).toHaveBeenCalledTimes(2);
+    expect(window.echo.lyrics.applyCandidate).not.toHaveBeenCalled();
   });
 
   it("clears the previous lyrics immediately when the track changes", async () => {
@@ -4103,6 +4343,117 @@ describe("LyricsPage", () => {
     resolveSecondLyrics(null);
   });
 
+  it("does not reuse remembered lyrics when the track identity changes under the same id", async () => {
+    const firstTrack = makeTrack({
+      id: "reused-track-id",
+      title: "First Song",
+      path: "D:\\Music\\first.flac",
+    });
+    const secondTrack = makeTrack({
+      id: "reused-track-id",
+      title: "Second Song",
+      path: "D:\\Music\\second.flac",
+    });
+    let activeTrack = firstTrack;
+
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue(makeAppSettings()),
+        setSettings: vi.fn(),
+        chooseLyricsWallpaper: vi.fn(),
+      },
+      playback: {
+        getStatus: vi.fn().mockImplementation(() =>
+          Promise.resolve({
+            state: "playing",
+            currentTrackId: activeTrack.id,
+            positionMs: 0,
+            durationMs: activeTrack.duration * 1000,
+            filePath: activeTrack.path,
+          }),
+        ),
+        playLocalFile: vi.fn(),
+        play: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(),
+        seek: vi.fn(),
+        openLocalAudioFile: vi.fn(),
+      },
+      audio: {
+        getStatus: vi.fn().mockImplementation(() => Promise.resolve(makeAudioStatus(activeTrack))),
+        listDevices: vi.fn(),
+        setOutput: vi.fn(),
+        onStatus: vi.fn(() => vi.fn()),
+      },
+      lyrics: {
+        getForTrack: vi.fn().mockImplementation(() =>
+          activeTrack.path === firstTrack.path
+            ? Promise.resolve(
+                makeTrackLyrics({
+                  trackId: activeTrack.id,
+                  title: activeTrack.title,
+                  lines: [{ timeMs: 0, text: "First reused-id lyric" }],
+                }),
+              )
+            : Promise.resolve(null),
+        ),
+        getStoredCandidates: vi.fn().mockResolvedValue([]),
+        searchCandidates: vi.fn().mockResolvedValue([]),
+        applyCandidate: vi.fn(),
+        markInstrumental: vi.fn(),
+        rejectCandidate: vi.fn(),
+        setOffset: vi.fn(),
+        clearCache: vi.fn(),
+      },
+      mv: {
+        getSelected: vi.fn().mockResolvedValue(null),
+      },
+    } as unknown as Window["echo"];
+
+    const SwitchTrack = (): JSX.Element => {
+      const { replaceQueue, setCurrentTrackId } = usePlaybackQueue();
+      const seededRef = useRef(false);
+
+      useEffect(() => {
+        if (seededRef.current) {
+          return;
+        }
+        seededRef.current = true;
+        replaceQueue([firstTrack]);
+        setCurrentTrackId(firstTrack.id);
+      }, [replaceQueue, setCurrentTrackId]);
+
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              activeTrack = secondTrack;
+              replaceQueue([secondTrack], { startTrackId: secondTrack.id });
+            }}
+          >
+            switch
+          </button>
+          <LyricsPage />
+        </>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <SwitchTrack />
+      </PlaybackQueueProvider>,
+    );
+
+    expect(await screen.findByText("First reused-id lyric")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "switch" }));
+
+    await waitFor(() => expect(screen.queryByText("First reused-id lyric")).toBeNull());
+    await waitFor(() => expect(window.echo.lyrics.getStoredCandidates).toHaveBeenCalledWith("reused-track-id", 180));
+    expect(screen.queryByText("First reused-id lyric")).toBeNull();
+  });
+
   it("uses only the centered empty lyrics state when no lyrics are found", async () => {
     const track = makeTrack();
     mockEcho(track, 0, { lyricsEmptyStateHidden: false });
@@ -4210,7 +4561,7 @@ describe("LyricsPage", () => {
     expect(container.textContent).not.toContain("\u6b64\u6b4c\u66f2\u4e3a\u6ca1\u6709\u586b\u8bcd\u7684\u7eaf\u97f3\u4e50");
   });
 
-  it("auto-applies candidate lyrics for QQ Music streaming tracks when exact lookup is missing", async () => {
+  it("renders lyrics already auto-applied by the main process for QQ Music streaming tracks", async () => {
     const track = makeTrack({
       id: "streaming:qqmusic:123456",
       path: "streaming:qqmusic:123456",
@@ -4269,7 +4620,18 @@ describe("LyricsPage", () => {
     } as unknown as Window["echo"]["streaming"];
     window.echo.lyrics = {
       getForTrack: vi.fn(),
-      getForSnapshot: vi.fn().mockResolvedValue(null),
+      getForSnapshot: vi.fn().mockResolvedValue(
+        makeTrackLyrics({
+          provider: "qqmusic",
+          providerLyricsId: "qqmusic:normalized-song-mid",
+          title: "QQ Song",
+          artist: "QQ Artist",
+          album: "QQ Album",
+          lines: [{ timeMs: 0, text: "Auto applied QQ lyric" }],
+          syncedText: "[00:00.00]Auto applied QQ lyric",
+        }),
+      ),
+      getStoredCandidates: vi.fn().mockResolvedValue([]),
       searchCandidates: vi.fn().mockResolvedValue([]),
       searchCandidatesForSnapshot,
       applyCandidate: vi.fn(),
@@ -4294,24 +4656,9 @@ describe("LyricsPage", () => {
         providerTrackId: "123456",
       }),
     );
-    await waitFor(() => expect(searchCandidatesForSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({
-        trackId: "streaming:qqmusic:123456",
-        mediaType: "streaming",
-        sourceId: "123456",
-      }),
-      undefined,
-      "qqmusic",
-    ));
-    await waitFor(() => expect(applyCandidateForSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({
-        trackId: "streaming:qqmusic:123456",
-        mediaType: "streaming",
-        sourceId: "123456",
-      }),
-      "qq-candidate",
-    ));
     expect(await screen.findByText("Auto applied QQ lyric")).toBeTruthy();
+    expect(searchCandidatesForSnapshot).not.toHaveBeenCalled();
+    expect(applyCandidateForSnapshot).not.toHaveBeenCalled();
   });
 
   it("does not show no-lyrics while QQ Music streaming lyrics are still loading", async () => {
@@ -4505,6 +4852,7 @@ describe("LyricsPage", () => {
     window.echo.lyrics = {
       getForTrack: vi.fn(),
       getForSnapshot: vi.fn().mockResolvedValue(null),
+      getStoredCandidates: vi.fn().mockResolvedValue([]),
       searchCandidates: vi.fn().mockResolvedValue([]),
       searchCandidatesForSnapshot,
       applyCandidate: vi.fn(),
@@ -4543,6 +4891,7 @@ describe("LyricsPage", () => {
       }),
       undefined,
       "qqmusic",
+      "manual",
     ));
     await waitFor(() => expect(screen.getAllByText("QQ Song").length).toBeGreaterThan(1));
   });
@@ -4688,7 +5037,7 @@ describe("LyricsPage", () => {
     expect(screen.getByText("QQ Song")).toBeTruthy();
     expect(window.echo.lyrics.clearCache).not.toHaveBeenCalled();
     expect(window.echo.lyrics.searchCandidates).toHaveBeenCalledWith("track-1", undefined, "lrclib");
-    expect(window.echo.lyrics.searchCandidates).toHaveBeenCalledWith("track-1", undefined, "qqmusic");
+    expect(window.echo.lyrics.searchCandidates).toHaveBeenCalledWith("track-1", undefined, "qqmusic", "manual");
 
     const qqSourceButton = Array.from(container.querySelectorAll<HTMLButtonElement>(".lyrics-source-filters button"))
       .find((button) => button.textContent?.includes("QQ"));
@@ -4749,7 +5098,7 @@ describe("LyricsPage", () => {
       .find((button) => button.textContent?.includes("QQ"));
 
     expect(qqSource?.textContent).toContain("0");
-    expect(window.echo.lyrics.searchCandidates).toHaveBeenCalledWith("track-1", undefined, "qqmusic");
+    expect(window.echo.lyrics.searchCandidates).toHaveBeenCalledWith("track-1", undefined, "qqmusic", "manual");
   });
 
   it("does not load lyrics while lyrics display is disabled", async () => {
@@ -5047,10 +5396,10 @@ describe("LyricsPage", () => {
     expect(window.echo.library.resolveLyricsBackgroundCover).not.toHaveBeenCalled();
   });
 
-  it("only enters session graphics pressure mode after the general guard is enabled", async () => {
+  it("enters session graphics pressure mode at the hard threshold even when the general guard is disabled", async () => {
     const track = makeTrack({ coverId: "cover 1" });
     const { emitMemoryPressure } = mockEcho(track, 0, {
-      lyricsMvGraphicsPressureGuardEnabled: true,
+      lyricsMvGraphicsPressureGuardEnabled: false,
       lyricsBackgroundMode: "cover",
       lyricsImmersiveCoverStyleEnabled: true,
     });
@@ -5092,7 +5441,7 @@ describe("LyricsPage", () => {
     expect(page.dataset.immersiveCoverStyle).toBeUndefined();
   });
 
-  it("falls back to cached cover variants when cover color sampling cannot load the original artwork", async () => {
+  it("falls back to smaller cached cover variants without sampling original artwork", async () => {
     const requestedSources: string[] = [];
     class FakeImage {
       onload: (() => void) | null = null;
@@ -5104,7 +5453,7 @@ describe("LyricsPage", () => {
 
       set src(value: string) {
         requestedSources.push(value);
-        if (value === "echo-cover://original/cover%201") {
+        if (value === "echo-cover://thumb/cover%201") {
           queueMicrotask(() => this.onerror?.());
         }
       }
@@ -5138,8 +5487,9 @@ describe("LyricsPage", () => {
 
       expect(page.dataset.background).toBe("coverColor");
       await waitFor(() => {
-        expect(requestedSources).toContain("echo-cover://original/cover%201");
-        expect(requestedSources).toContain("echo-cover://large/cover%201");
+        expect(requestedSources).toContain("echo-cover://thumb/cover%201");
+        expect(requestedSources).toContain("echo-cover://album/cover%201");
+        expect(requestedSources).not.toContain("echo-cover://original/cover%201");
       });
     } finally {
       Object.defineProperty(window, "Image", {

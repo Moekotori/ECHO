@@ -189,7 +189,16 @@ export const OsuTimingPanel = ({ track, isOpen, onClose, onTrackUpdated }: OsuTi
   const lowConfidence =
     activeTrack?.analysisStatus === 'low_confidence' ||
     (isFiniteNumber(activeTrack?.bpmConfidence) && activeTrack.bpmConfidence < BPM_CONFIDENCE_THRESHOLD);
-  const bpmSourceLabel = invalidManualBpm ? '输入无效' : hasManualBpm ? '手动' : '检测';
+  const bpmSourceLabel = invalidManualBpm
+    ? '输入无效'
+    : hasManualBpm
+      ? '手动'
+      : activeTrack?.fieldSources?.bpm === 'osu' ||
+          (activeTrack?.fieldSources?.osu === 'osu' && activeTrack?.fieldSources?.bpm !== 'audio_analysis')
+        ? 'osu! 谱面'
+        : activeTrack?.fieldSources?.bpm === 'audio_analysis'
+          ? '音频估算'
+          : '文件标签';
   const offsetSourceLabel = invalidManualOffset ? '输入无效' : hasManualOffset ? '手动' : hasDetectedOffset ? '检测' : '默认 0';
   const beatLengthMs = isFinitePositive(bpm) ? getBeatLengthMs(bpm) : null;
   const measureLengthMs = isFinitePositive(bpm) ? getMeasureLengthMs(bpm, meter) : null;

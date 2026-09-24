@@ -62,7 +62,6 @@ const numberOrNull = (value: string): number | null => {
   return trimmed ? Number(trimmed) : null;
 };
 
-const hasFormValue = (value: string): boolean => value.trim().length > 0;
 const hasCandidateText = (value: string | null | undefined): boolean => (value ?? '').trim().length > 0;
 const candidateNumberText = (value: number | null | undefined): string => (typeof value === 'number' && Number.isFinite(value) ? String(value) : '');
 const fieldValue = (value: string | number | null | undefined, t: Translate): string => {

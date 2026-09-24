@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import {
   AudioLines,
+  Bluetooth,
   Cable,
   Check,
   ChevronDown,
@@ -28,17 +29,21 @@ import type { LucideIcon } from 'lucide-react';
 import type { AudioDeviceInfo, AudioLatencyProfile, AudioOutputMode, AudioOutputSettings, AudioSharedBackend, AudioStatus } from '../../../shared/types/audio';
 import { hqPlayerConnectDeviceId } from '../../../shared/types/connect';
 import type { AppSettings, RememberedAudioOutput } from '../../../shared/types/appSettings';
+import { safeAudioDspAppSettingsPatch, safeAudioResetOutputSettings } from '../../../shared/audioSafeBaseline';
 import type { LibraryTrack } from '../../../shared/types/library';
 import {
   detectRendererPlatform,
   isAdvancedNativeOutputPlatform,
+  isExclusiveNativeOutputPlatform,
   normalizeAudioSharedBackendForPlatform,
 } from '../../../shared/utils/audioPlatformCapabilities';
 import { formatAudioChannelLayout } from '../../../shared/utils/audioChannels';
 import { isHiResAudioSpec } from '../../../shared/utils/audioQuality';
 import { useI18n } from '../../i18n/I18nProvider';
 import type { TranslationKey } from '../../i18n/locales';
-import { dispatchAudioOutputRouteStatusChanged } from '../../utils/audioOutputRouteEvents';
+import { dispatchAudioErrorNotice } from '../../utils/audioErrorNotice';
+import { dispatchAudioOutputRouteStatusChanged, markAudioOutputRouteMutationStarted } from '../../utils/audioOutputRouteEvents';
+import { formatUserFacingError } from '../../utils/userFacingError';
 import { DrawerSmartSearch } from '../common/DrawerSmartSearch';
 import { createOutputSettings, normalizeSharedBackend, readRememberedAudioOutput, resolveSupportedLatencyProfile, writeRememberedAudioOutput } from './audioOutputMemory';
 import { AudioProfessionalStatusPanel } from './AudioProfessionalStatusPanel';
@@ -173,45 +178,27 @@ const defaultDrawerRememberedAudioOutput: RememberedAudioOutput = {
 };
 const resetAllAudioSettingsPatch: Partial<AppSettings> = {
   rememberedAudioOutput: defaultDrawerRememberedAudioOutput,
+  audioAutomaticOutputEnabled: false,
   hiddenAudioDeviceKeys: [],
   audioUseNativeOutput: false,
   audioUseMiniaudioOutput: false,
   audioUseLibavDecode: false,
   audioMiniaudioOutputExperimentalEnabled: false,
   audioNativeDirectLocalPlaybackEnabled: false,
-  audioDsdOutputMode: 'pcm',
+  ...safeAudioDspAppSettingsPatch,
   audioDsdAutoVolumeLockEnabled: false,
   audioExclusiveInstabilityFallbackEnabled: false,
   audioSoxrFallbackEnabled: true,
-  audioEchoSrcMode: 'off',
-  audioEchoSrcQualityProfile: 'transparent',
-  audioEchoSrcAdvancedModeEnabled: false,
-  audioEchoSrcFilterProfile: 'poly-sinc-gauss-long',
-  audioEchoSrcComputeBackend: 'cpu',
   audioReleaseExclusiveOnPauseExperimentalEnabled: false,
   fixedVolumeEnabled: false,
   lowLoadPlaybackModeEnabled: false,
   lowLoadPlaybackEnhancementsEnabled: false,
 };
-const resetAllAudioOutputSettings: AudioOutputSettings = {
-  outputMode: 'shared',
-  sharedBackend: 'auto',
-  latencyProfile: 'balanced',
-  bufferSizeFrames: null,
-  useNativeOutput: false,
-  useMiniaudioOutput: false,
-  useLibavDecode: false,
-  nativeDirectLocalPlaybackEnabled: false,
-  dsdOutputMode: 'pcm',
-  exclusiveInstabilityFallbackEnabled: false,
-  soxrFallbackEnabled: true,
-  echoSrcMode: 'off',
-  echoSrcQualityProfile: 'transparent',
-  echoSrcAdvancedModeEnabled: false,
-  echoSrcFilterProfile: 'poly-sinc-gauss-long',
-  echoSrcComputeBackend: 'cpu',
-  releaseExclusiveOnPauseExperimentalEnabled: false,
-};
+const resetAllAudioOutputSettings: AudioOutputSettings = safeAudioResetOutputSettings;
+const createResetSettingsRollbackPatch = (previous: AppSettings): Partial<AppSettings> =>
+  Object.fromEntries(
+    Object.keys(resetAllAudioSettingsPatch).map((key) => [key, previous[key as keyof AppSettings]]),
+  ) as Partial<AppSettings>;
 const latencyProfileOptionDefinitions: Array<{ id: AudioLatencyProfile; labelKey: TranslationKey; detailKey: TranslationKey }> = [
   { id: 'lowLatency', labelKey: 'audioDrawer.latency.lowLatency', detailKey: 'audioDrawer.latency.lowLatencyDetail' },
   { id: 'balanced', labelKey: 'audioDrawer.latency.balanced', detailKey: 'audioDrawer.latency.balancedDetail' },
@@ -334,6 +321,10 @@ const formatBitrate = (value: number | null | undefined): string | null => {
 };
 
 const formatMode = (mode: AudioOutputMode | null | undefined, copy: AudioDrawerCopy): string => {
+  if (mode === 'asio') {
+    return 'ASIO';
+  }
+
   if (mode === 'exclusive') {
     return copy.exclusive;
   }
@@ -345,7 +336,12 @@ const formatMode = (mode: AudioOutputMode | null | undefined, copy: AudioDrawerC
   return copy.shared;
 };
 
-const formatWasapiDeviceMode = (exclusive: boolean): string => (exclusive ? 'WASAPI Exclusive' : 'WASAPI Shared');
+const formatNativeDeviceMode = (exclusive: boolean, platform: NodeJS.Platform | 'unknown'): string => {
+  if (platform === 'darwin') {
+    return exclusive ? 'CoreAudio Exclusive' : 'CoreAudio Shared';
+  }
+  return exclusive ? 'WASAPI Exclusive' : 'WASAPI Shared';
+};
 
 const shouldHighlightCurrentOutput = (mode: AudioOutputMode | null | undefined, backend: string | null | undefined): boolean =>
   mode === 'exclusive' || backend === 'wasapi-exclusive';
@@ -408,9 +404,9 @@ const writeAdvancedOutputOpen = (enabled: boolean): void => {
 
 const readAudioEngineMeterOpen = (): boolean => {
   try {
-    return window.localStorage.getItem(audioEngineMeterOpenStorageKey) !== 'false';
+    return window.localStorage.getItem(audioEngineMeterOpenStorageKey) === 'true';
   } catch {
-    return true;
+    return false;
   }
 };
 
@@ -681,25 +677,6 @@ const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: 
   }
 };
 
-const getFramesLatencyMs = (frames: number | null | undefined, status: AudioStatus | null): number | null => {
-  const sampleRate = getOutputSampleRate(status, null);
-
-  if (!frames || !sampleRate) {
-    return null;
-  }
-
-  return Math.round((frames / sampleRate) * 1000);
-};
-
-const formatFramesWithLatency = (frames: number | null | undefined, status: AudioStatus | null, fallback: string): string => {
-  if (!frames) {
-    return fallback;
-  }
-
-  const latencyMs = getFramesLatencyMs(frames, status);
-  return latencyMs === null ? String(frames) : `${frames} (~${latencyMs} ms)`;
-};
-
 const deviceMatchesStatus = (device: AudioDeviceInfo, status: AudioStatus | null, mode: AudioOutputMode): boolean => {
   if (!status || status.outputMode !== mode) {
     return false;
@@ -708,8 +685,21 @@ const deviceMatchesStatus = (device: AudioDeviceInfo, status: AudioStatus | null
   return status.outputDeviceId === device.id || status.outputDeviceName === device.name;
 };
 
-const getDeviceIcon = (deviceName: string, outputMode: AudioOutputMode | AudioDeviceInfo['outputMode']): LucideIcon => {
+const isBluetoothDevice = (device: AudioDeviceInfo | null | undefined, deviceName = device?.name ?? ''): boolean => {
   const name = deviceName.toLocaleLowerCase();
+  return device?.connectionType === 'bluetooth' || name.includes('bluetooth') || name.includes('蓝牙');
+};
+
+const getDeviceIcon = (
+  deviceName: string,
+  _outputMode: AudioOutputMode | AudioDeviceInfo['outputMode'],
+  device?: AudioDeviceInfo | null,
+): LucideIcon => {
+  const name = deviceName.toLocaleLowerCase();
+
+  if (isBluetoothDevice(device, deviceName)) {
+    return Bluetooth;
+  }
 
   if (name.includes('asio')) {
     return Zap;
@@ -719,15 +709,22 @@ const getDeviceIcon = (deviceName: string, outputMode: AudioOutputMode | AudioDe
     return Waves;
   }
 
-  if (name.includes('hdmi') || name.includes('monitor') || name.includes('display')) {
+  if (device?.formFactor === 'display' || name.includes('hdmi') || name.includes('monitor') || name.includes('display')) {
     return Monitor;
   }
 
-  if (name.includes('headphone') || name.includes('headset') || name.includes('earphone') || name.includes('earbud')) {
+  if (
+    device?.formFactor === 'headphones' ||
+    device?.formFactor === 'headset' ||
+    name.includes('headphone') ||
+    name.includes('headset') ||
+    name.includes('earphone') ||
+    name.includes('earbud')
+  ) {
     return Headphones;
   }
 
-  if (name.includes('speaker') || name.includes('realtek')) {
+  if (device?.formFactor === 'speakers' || name.includes('speaker') || name.includes('realtek')) {
     return Volume2;
   }
 
@@ -823,14 +820,20 @@ export const AudioSettingsDrawer = ({
   const [outputMode, setOutputMode] = useState<AudioOutputMode>(status?.outputMode ?? 'shared');
   const [sharedBackend, setSharedBackend] = useState<AudioSharedBackend>(() => readRememberedAudioOutput().sharedBackend ?? 'auto');
   const [rememberOutput, setRememberOutput] = useState(() => readRememberedAudioOutput().enabled);
+  const [automaticOutputEnabled, setAutomaticOutputEnabled] = useState(false);
   const [shouldRender, setShouldRender] = useState(isOpen);
   const [isMotionOpen, setIsMotionOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+
+  useEffect(() => {
+    if (error) {
+      dispatchAudioErrorNotice(error);
+    }
+  }, [error]);
   const [hqPlayerTakeoverBusy, setHqPlayerTakeoverBusy] = useState(false);
   const [useMiniaudioOutput, setUseMiniaudioOutput] = useState(status?.useMiniaudioOutputRequested === true);
   const [nativeDirectLocalPlaybackEnabled, setNativeDirectLocalPlaybackEnabled] = useState(false);
-  const [useDsdDop, setUseDsdDop] = useState(status?.dsdOutputModeRequested === 'dop');
   const [dsdAutoVolumeLockEnabled, setDsdAutoVolumeLockEnabled] = useState(false);
   const [exclusiveInstabilityFallbackEnabled, setExclusiveInstabilityFallbackEnabled] = useState(false);
   const [soxrFallbackEnabled, setSoxrFallbackEnabled] = useState(true);
@@ -866,13 +869,17 @@ export const AudioSettingsDrawer = ({
   const allSharedDevices = useMemo(() => devices.filter((device) => device.outputMode === 'shared'), [devices]);
   const defaultSharedDevice = useMemo(() => allSharedDevices.find((device) => device.isDefault) ?? null, [allSharedDevices]);
   const sharedDevices = useMemo(() => visibleDevices.filter((device) => device.outputMode === 'shared'), [visibleDevices]);
+  const asioDevices = useMemo(() => visibleDevices.filter((device) => device.outputMode === 'asio'), [visibleDevices]);
   const advancedNativeOutputAvailable = useMemo(() => isAdvancedNativeOutputPlatform(rendererPlatform), [rendererPlatform]);
+  const exclusiveNativeOutputAvailable = useMemo(() => isExclusiveNativeOutputPlatform(rendererPlatform), [rendererPlatform]);
+  const routeDeviceCount = sharedDevices.length + (advancedNativeOutputAvailable ? asioDevices.length : 0);
   const sharedBackendOptions = useMemo(() => getSharedBackendOptionsForPlatform(rendererPlatform), [rendererPlatform]);
   const windowsAudioServiceRestartAvailable = rendererPlatform === 'win32';
   const systemAudioPlatformLabel = useMemo(() => getSystemAudioPlatformLabel(rendererPlatform), [rendererPlatform]);
-  const wasapiExclusive = outputMode === 'exclusive';
+  const asioRouteActive = outputMode === 'asio' || status?.outputBackend === 'asio';
+  const exclusiveRouteActive = outputMode === 'exclusive' || asioRouteActive;
   const systemAudioActive = !hqPlayerTakeoverEnabled && (outputMode === 'system' || status?.outputMode === 'system');
-  const lockWasapiExclusive = !advancedNativeOutputAvailable || outputMode === 'system';
+  const lockWasapiExclusive = !exclusiveNativeOutputAvailable || outputMode === 'system' || asioRouteActive;
   const statusDevice = useMemo(() => {
     if (!status) {
       return null;
@@ -882,10 +889,10 @@ export const AudioSettingsDrawer = ({
       return null;
     }
 
-    return devices.find((device) => {
-      const modeMatches = device.outputMode === 'shared';
-      return modeMatches && (status.outputDeviceId === device.id || status.outputDeviceName === device.name);
-    }) ?? null;
+    return devices.find((device) =>
+      device.outputMode === status.outputMode &&
+      (status.outputDeviceId === device.id || status.outputDeviceName === device.name),
+    ) ?? null;
   }, [devices, status]);
   const effectiveSharedSampleRate = status?.outputMode === 'shared' ? statusDevice?.sharedDeviceSampleRate ?? statusDevice?.sampleRate ?? null : null;
 
@@ -1015,6 +1022,7 @@ export const AudioSettingsDrawer = ({
         sampleRate: formatRate(hqPlayerTrack?.sampleRate),
         bitPerfect: '由 HQPlayer 负责输出',
         highlight: true,
+        connectionLabel: null,
         Icon: Cable,
       };
     }
@@ -1031,14 +1039,24 @@ export const AudioSettingsDrawer = ({
           ? 'ECHO SRC'
           : status?.bitPerfectDisabledReason ?? copy.standardPath,
       highlight: shouldHighlightCurrentOutput(currentMode, status?.outputBackend),
-      Icon: getDeviceIcon(name, currentMode),
+      connectionLabel: isBluetoothDevice(statusDevice, name) ? 'Bluetooth' : null,
+      Icon: getDeviceIcon(name, currentMode, statusDevice),
     };
-  }, [copy, currentOutputMode, currentOutputName, currentOutputSampleRate, hqPlayerTakeoverEnabled, hqPlayerTrack?.sampleRate, status]);
+  }, [copy, currentOutputMode, currentOutputName, currentOutputSampleRate, hqPlayerTakeoverEnabled, hqPlayerTrack?.sampleRate, status, statusDevice]);
   const currentLatencyProfile = status?.latencyProfile ?? readRememberedAudioOutput().latencyProfile ?? 'lowLatency';
+  const automaticOutputStageMessage =
+    status?.automaticOutputStage === 'safe-shared'
+      ? t('audioDrawer.option.automaticOutputStage.safeShared')
+      : status?.automaticOutputStage === 'directsound'
+        ? t('audioDrawer.option.automaticOutputStage.directSound')
+        : status?.automaticOutputStage === 'system-required'
+          ? t('audioDrawer.option.automaticOutputStage.systemRequired')
+          : status?.automaticOutputStage === 'failed'
+            ? t('audioDrawer.option.automaticOutputStage.failed')
+            : null;
   const supportedLatencyProfile = resolveSupportedLatencyProfile(outputMode, currentLatencyProfile);
   const optionActiveLabel = t('audioDrawer.option.active');
   const optionSetLabel = t('audioDrawer.option.set');
-  const unknownValue = t('settings.playback.stability.value.unknown');
   const latencyProfileOptions = useMemo(
     () => latencyProfileOptionDefinitions.map((option) => ({
       id: option.id,
@@ -1065,7 +1083,7 @@ export const AudioSettingsDrawer = ({
       setDevices(nextDevices);
       setError(null);
     } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : String(refreshError));
+      setError(formatUserFacingError(refreshError, { context: 'audio' }));
     }
   }, [copy.desktopBridgeUnavailable, onStatusChange]);
 
@@ -1104,12 +1122,12 @@ export const AudioSettingsDrawer = ({
       .getSettings()
       .then((settings) => {
         setRememberOutput(settings.rememberedAudioOutput?.enabled === true);
+        setAutomaticOutputEnabled(settings.audioAutomaticOutputEnabled === true);
         setSharedBackend(
           normalizeAudioSharedBackendForPlatform(settings.rememberedAudioOutput?.sharedBackend ?? remembered.sharedBackend ?? 'auto', rendererPlatform),
         );
           setUseMiniaudioOutput(settings.audioUseMiniaudioOutput === true || settings.audioMiniaudioOutputExperimentalEnabled === true);
           setNativeDirectLocalPlaybackEnabled(settings.audioNativeDirectLocalPlaybackEnabled === true);
-        setUseDsdDop(settings.audioDsdOutputMode === 'dop');
         setDsdAutoVolumeLockEnabled(settings.audioDsdAutoVolumeLockEnabled === true);
         setExclusiveInstabilityFallbackEnabled(settings.audioExclusiveInstabilityFallbackEnabled === true);
         setSoxrFallbackEnabled(settings.audioSoxrFallbackEnabled !== false);
@@ -1122,13 +1140,23 @@ export const AudioSettingsDrawer = ({
     void loadPersistedHiddenDeviceKeys().then(setHiddenDeviceKeys).catch(() => setHiddenDeviceKeys(readHiddenDeviceKeys()));
     void refresh();
 
+    const handleDeviceChange = (): void => {
+      void refresh();
+    };
+    navigator.mediaDevices?.addEventListener?.('devicechange', handleDeviceChange);
+    const deviceRefreshTimer = window.setInterval(handleDeviceChange, 5000);
+
     const handleSettingsChanged = (event: Event): void => {
       const detail = (event as CustomEvent<{
+        audioAutomaticOutputEnabled?: unknown;
         lowLoadPlaybackEnhancementsEnabled?: unknown;
         lowLoadPlaybackModeEnabled?: unknown;
       } | null | undefined>).detail;
       if (!detail) {
         return;
+      }
+      if (Object.prototype.hasOwnProperty.call(detail, 'audioAutomaticOutputEnabled')) {
+        setAutomaticOutputEnabled(detail.audioAutomaticOutputEnabled === true);
       }
       if (Object.prototype.hasOwnProperty.call(detail, 'lowLoadPlaybackModeEnabled')) {
         setLowLoadPlaybackModeEnabled(detail.lowLoadPlaybackModeEnabled === true);
@@ -1139,7 +1167,11 @@ export const AudioSettingsDrawer = ({
     };
 
     window.addEventListener('settings:changed', handleSettingsChanged);
-    return () => window.removeEventListener('settings:changed', handleSettingsChanged);
+    return () => {
+      window.clearInterval(deviceRefreshTimer);
+      navigator.mediaDevices?.removeEventListener?.('devicechange', handleDeviceChange);
+      window.removeEventListener('settings:changed', handleSettingsChanged);
+    };
   }, [isOpen, refresh, rendererPlatform]);
 
   useEffect(() => {
@@ -1154,11 +1186,13 @@ export const AudioSettingsDrawer = ({
         ),
       );
     }
+    if (status?.automaticOutputEnabled !== undefined) {
+      setAutomaticOutputEnabled(status.automaticOutputEnabled === true);
+    }
     setUseMiniaudioOutput(status?.useMiniaudioOutputRequested === true);
-    setUseDsdDop(status?.dsdOutputModeRequested === 'dop');
   }, [
     rendererPlatform,
-    status?.dsdOutputModeRequested,
+    status?.automaticOutputEnabled,
     status?.outputBackend,
     status?.outputMode,
     status?.sharedBackend,
@@ -1267,6 +1301,7 @@ export const AudioSettingsDrawer = ({
         if (rememberOutput) {
           persistOutput(settingsWithFallback);
         }
+        markAudioOutputRouteMutationStarted();
         const nextStatus = await withTimeout(audio.setOutput(settingsWithFallback), outputApplyTimeoutMs, 'Audio output switch timed out');
         setOutputMode(nextStatus.outputMode);
         setSharedBackend(
@@ -1283,7 +1318,7 @@ export const AudioSettingsDrawer = ({
           onHqPlayerTakeoverEnabledChange(false);
         }
       } catch (applyError) {
-        setError(applyError instanceof Error ? applyError.message : String(applyError));
+        setError(formatUserFacingError(applyError, { context: 'audio' }));
         try {
           const latestStatus = await withTimeout(audio.getStatus(), 2_500, 'Audio status refresh timed out');
           setOutputMode(latestStatus.outputMode);
@@ -1347,7 +1382,11 @@ export const AudioSettingsDrawer = ({
   );
 
   const applyDevice = (mode: AudioOutputMode, device: AudioDeviceInfo | null): void => {
-    const nextMode = mode === 'system' || advancedNativeOutputAvailable ? mode : 'shared';
+    const nextMode = mode === 'system'
+      || advancedNativeOutputAvailable
+      || (mode === 'exclusive' && exclusiveNativeOutputAvailable)
+      ? mode
+      : 'shared';
     const remembered = readRememberedAudioOutput();
     const settings = createOutputSettings(
       nextMode,
@@ -1381,7 +1420,7 @@ export const AudioSettingsDrawer = ({
       const connectStatus = await connect?.getStatus?.().catch(() => null);
       if (connectStatus?.protocol === 'hqplayer' && connectStatus.deviceId === hqPlayerConnectDeviceId && connect?.disconnect) {
         await withTimeout(connect.disconnect(), 3_500, 'HQPlayer stop timed out').catch((disconnectError) => {
-          setError(disconnectError instanceof Error ? disconnectError.message : String(disconnectError));
+          setError(formatUserFacingError(disconnectError, { context: 'audio' }));
         });
       }
       onHqPlayerTakeoverEnabledChange(false);
@@ -1399,7 +1438,7 @@ export const AudioSettingsDrawer = ({
       await onActivateHqPlayerTakeover();
       onHqPlayerTakeoverEnabledChange(true);
     } catch (takeoverError) {
-      setError(takeoverError instanceof Error ? takeoverError.message : String(takeoverError));
+      setError(formatUserFacingError(takeoverError, { context: 'audio' }));
     } finally {
       setHqPlayerTakeoverBusy(false);
     }
@@ -1467,6 +1506,59 @@ export const AudioSettingsDrawer = ({
     );
   };
 
+  const toggleAutomaticOutput = async (enabled: boolean): Promise<boolean> => {
+    const app = window.echo?.app;
+    const audio = window.echo?.audio;
+    const previous = automaticOutputEnabled;
+    if (!app?.getSettings || !app.setSettings || !audio?.setOutput) {
+      setError(copy.desktopBridgeUnavailable);
+      return false;
+    }
+
+    setAutomaticOutputEnabled(enabled);
+    setIsBusy(true);
+    setError(null);
+    try {
+      const nextSettings = await app.setSettings({ audioAutomaticOutputEnabled: enabled });
+      try {
+        markAudioOutputRouteMutationStarted();
+        const nextStatus = await withTimeout(
+          audio.setOutput({ automaticOutputEnabled: enabled }),
+          outputApplyTimeoutMs,
+          'Automatic audio output switch timed out',
+        );
+        setOutputMode(nextStatus.outputMode);
+        setSharedBackend(normalizeAudioSharedBackendForPlatform(nextStatus.sharedBackend ?? 'auto', rendererPlatform));
+        onStatusChange(nextStatus);
+        dispatchAudioOutputRouteStatusChanged(nextStatus);
+        window.dispatchEvent(new CustomEvent('settings:changed', { detail: nextSettings }));
+        return true;
+      } catch (audioError) {
+        await app.setSettings({ audioAutomaticOutputEnabled: previous });
+        throw audioError;
+      }
+    } catch (automaticOutputError) {
+      setAutomaticOutputEnabled(previous);
+      setError(formatUserFacingError(automaticOutputError, { context: 'audio' }));
+      return false;
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const selectManualOutputMode = async (mode: 'shared' | 'exclusive'): Promise<void> => {
+    if (automaticOutputEnabled && !(await toggleAutomaticOutput(false))) {
+      return;
+    }
+
+    if (mode === 'exclusive') {
+      toggleExclusive(true);
+      return;
+    }
+
+    applyDevice('shared', null);
+  };
+
   const toggleFixedVolume = async (enabled: boolean): Promise<void> => {
     const app = window.echo?.app;
     const audio = window.echo?.audio;
@@ -1483,7 +1575,7 @@ export const AudioSettingsDrawer = ({
       }
     } catch (fixedVolumeError) {
       setFixedVolumeEnabled(!enabled);
-      setError(fixedVolumeError instanceof Error ? fixedVolumeError.message : String(fixedVolumeError));
+      setError(formatUserFacingError(fixedVolumeError, { context: 'audio' }));
     }
   };
 
@@ -1506,7 +1598,7 @@ export const AudioSettingsDrawer = ({
       })
       .catch((settingsError) => {
         setLowLoadPlaybackModeEnabled(previous);
-        setError(settingsError instanceof Error ? settingsError.message : String(settingsError));
+        setError(formatUserFacingError(settingsError, { context: 'audio' }));
       });
   };
 
@@ -1529,7 +1621,7 @@ export const AudioSettingsDrawer = ({
       })
       .catch((settingsError) => {
         setLowLoadPlaybackEnhancementsEnabled(previous);
-        setError(settingsError instanceof Error ? settingsError.message : String(settingsError));
+        setError(formatUserFacingError(settingsError, { context: 'audio' }));
       });
   };
 
@@ -1544,38 +1636,13 @@ export const AudioSettingsDrawer = ({
       })
       .catch((settingsError) => {
         setUseMiniaudioOutput(previous);
-        setError(settingsError instanceof Error ? settingsError.message : String(settingsError));
+        setError(formatUserFacingError(settingsError, { context: 'audio' }));
       });
     void applyOutput({
       useNativeOutput: enabled,
       useMiniaudioOutput: enabled,
     }).catch(() => {
       setUseMiniaudioOutput(previous);
-    });
-  };
-
-  const toggleNativeDirectLocalPlayback = (enabled: boolean): void => {
-    const previous = nativeDirectLocalPlaybackEnabled;
-    setNativeDirectLocalPlaybackEnabled(enabled);
-    void window.echo?.app.setSettings({ audioNativeDirectLocalPlaybackEnabled: enabled }).catch(() => undefined);
-    void applyOutput({ nativeDirectLocalPlaybackEnabled: enabled }).catch(() => {
-      setNativeDirectLocalPlaybackEnabled(previous);
-    });
-  };
-
-  const toggleDsdDop = (enabled: boolean): void => {
-    const previousDsdDop = useDsdDop;
-    const dsdOutputMode = enabled ? 'dop' : 'pcm';
-    setUseDsdDop(enabled);
-    void window.echo?.app
-      .setSettings({
-        audioDsdOutputMode: dsdOutputMode,
-      })
-      .catch(() => undefined);
-    void applyOutput({
-      dsdOutputMode,
-    }).catch(() => {
-      setUseDsdDop(previousDsdDop);
     });
   };
 
@@ -1589,7 +1656,7 @@ export const AudioSettingsDrawer = ({
       })
       .catch((volumeLockError) => {
         setDsdAutoVolumeLockEnabled(previous);
-        setError(volumeLockError instanceof Error ? volumeLockError.message : String(volumeLockError));
+        setError(formatUserFacingError(volumeLockError, { context: 'audio' }));
       });
   };
 
@@ -1671,7 +1738,7 @@ export const AudioSettingsDrawer = ({
       window.setTimeout(() => setDiagnosticsCopied(false), 1800);
       setError(null);
     } catch (copyError) {
-      setError(copyError instanceof Error ? copyError.message : String(copyError));
+      setError(formatUserFacingError(copyError, { context: 'audio' }));
     }
   }, [copy.desktopBridgeUnavailable]);
 
@@ -1694,7 +1761,7 @@ export const AudioSettingsDrawer = ({
       window.setTimeout(() => setResetMessage(null), 2200);
       void refresh();
     } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : String(resetError));
+      setError(formatUserFacingError(resetError, { context: 'audio' }));
     } finally {
       setResetBusy(false);
     }
@@ -1719,7 +1786,7 @@ export const AudioSettingsDrawer = ({
       window.setTimeout(() => setTroubleshootingMessage(null), 2400);
       void refresh();
     } catch (restartError) {
-      setError(restartError instanceof Error ? restartError.message : String(restartError));
+      setError(formatUserFacingError(restartError, { context: 'audio' }));
     } finally {
       setForceRestartBusy(false);
     }
@@ -1752,7 +1819,7 @@ export const AudioSettingsDrawer = ({
       window.setTimeout(() => setTroubleshootingMessage(null), 2800);
       void refresh();
     } catch (restartError) {
-      setError(restartError instanceof Error ? restartError.message : String(restartError));
+      setError(formatUserFacingError(restartError, { context: 'audio' }));
     } finally {
       setWindowsAudioRestartBusy(false);
     }
@@ -1771,13 +1838,23 @@ export const AudioSettingsDrawer = ({
     setResetAllAudioSettingsMessage(null);
     setError(null);
     try {
+      const previousSettings = await app.getSettings();
       const nextSettings = await app.setSettings(resetAllAudioSettingsPatch);
+      let nextStatus: AudioStatus;
+      try {
+        markAudioOutputRouteMutationStarted();
+        nextStatus = await withTimeout(audio.setOutput(resetAllAudioOutputSettings), outputApplyTimeoutMs, 'Audio settings reset timed out');
+      } catch (audioError) {
+        await app.setSettings(createResetSettingsRollbackPatch(previousSettings)).catch(() => undefined);
+        throw audioError;
+      }
+
       writeRememberedAudioOutput(defaultDrawerRememberedAudioOutput, { persistApp: false });
       writeHiddenDeviceKeys([], { persistApp: false });
       setRememberOutput(defaultDrawerRememberedAudioOutput.enabled);
+      setAutomaticOutputEnabled(false);
       setSharedBackend('auto');
       setUseMiniaudioOutput(false);
-      setUseDsdDop(false);
       setDsdAutoVolumeLockEnabled(false);
       setExclusiveInstabilityFallbackEnabled(false);
       setSoxrFallbackEnabled(true);
@@ -1788,7 +1865,6 @@ export const AudioSettingsDrawer = ({
       setHiddenDeviceKeys([]);
       setOutputMode('shared');
 
-      const nextStatus = await withTimeout(audio.setOutput(resetAllAudioOutputSettings), outputApplyTimeoutMs, 'Audio settings reset timed out');
       setOutputMode(nextStatus.outputMode);
       setSharedBackend(normalizeAudioSharedBackendForPlatform(normalizeSharedBackend(nextStatus.sharedBackend ?? 'auto'), rendererPlatform));
       onStatusChange(nextStatus);
@@ -1805,7 +1881,7 @@ export const AudioSettingsDrawer = ({
       window.setTimeout(() => setResetAllAudioSettingsMessage(null), 2400);
       void refresh();
     } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : String(resetError));
+      setError(formatUserFacingError(resetError, { context: 'audio' }));
     } finally {
       setResetAllAudioSettingsBusy(false);
     }
@@ -1826,7 +1902,7 @@ export const AudioSettingsDrawer = ({
   return (
     <div className="audio-drawer-root no-drag" role="presentation" data-open={isMotionOpen}>
       <button className="audio-drawer-scrim" type="button" aria-label={copy.close} onClick={onClose} />
-      <aside className="audio-drawer" aria-label={t('audioDrawer.title')}>
+      <aside className="audio-drawer audio-settings-drawer" aria-label={t('audioDrawer.title')}>
         <div className="audio-drawer-scroll" ref={drawerScrollRef}>
           <header className="audio-drawer-header">
             <div>
@@ -1853,7 +1929,7 @@ export const AudioSettingsDrawer = ({
           />
 
         <section
-          className={['audio-engine-meter', isAudioEngineMeterOpen ? 'audio-engine-meter--open' : ''].filter(Boolean).join(' ')}
+          className={['audio-engine-meter', 'audio-route-signal-chain', isAudioEngineMeterOpen ? 'audio-engine-meter--open' : ''].filter(Boolean).join(' ')}
           aria-label="HiFi Engine"
         >
           <div className="audio-engine-meter__top">
@@ -1867,8 +1943,8 @@ export const AudioSettingsDrawer = ({
               <Zap size={17} />
             </span>
             <div>
-              <span>HiFi Engine</span>
-              <strong>{hqPlayerTakeoverEnabled ? formatHqPlayerTrackLine(hqPlayerTrack, 'HQPlayer 接管中') : formatCodecLine(status, copy)}</strong>
+              <span>{t('audioDrawer.meter.chain')}</span>
+              <strong>{hqPlayerTakeoverEnabled ? formatHqPlayerTrackLine(hqPlayerTrack, 'HQPlayer') : `${formatCodecLine(status, copy)} → ${engineRatePath} → ${currentOutputName}`}</strong>
             </div>
               <ChevronDown size={16} aria-hidden="true" />
             </button>
@@ -1930,6 +2006,7 @@ export const AudioSettingsDrawer = ({
             className={[
               'audio-current-output-card',
               currentOutput.highlight ? 'audio-current-output-card--gold' : '',
+              currentOutput.connectionLabel ? 'audio-current-output-card--bluetooth' : '',
             ].filter(Boolean).join(' ')}
           >
             <span className="audio-current-output-card__icon">
@@ -1944,7 +2021,7 @@ export const AudioSettingsDrawer = ({
                 {[currentOutput.backend, currentOutput.bitPerfect].filter(Boolean).join(' / ')}
               </span>
             </div>
-            <em>{t('audioDrawer.device.selected')}</em>
+            <em>{currentOutput.connectionLabel ?? t('audioDrawer.device.selected')}</em>
           </div>
           {showHighOutputSampleRateWarning ? (
             <p className="audio-current-output-warning" role="alert">
@@ -1954,7 +2031,21 @@ export const AudioSettingsDrawer = ({
           ) : null}
         </section>
 
-        <section className="audio-drawer-section">
+        <section className="audio-drawer-section audio-route-quick-controls">
+          <label className="audio-toggle-row">
+            <span>
+              <Monitor size={17} />
+              <strong>{t('audioDrawer.option.automaticOutput')}</strong>
+            </span>
+            <input
+              type="checkbox"
+              checked={automaticOutputEnabled}
+              disabled={isBusy}
+              onChange={(event) => void toggleAutomaticOutput(event.currentTarget.checked)}
+            />
+          </label>
+          <p className="audio-section-note">{t('audioDrawer.option.automaticOutputDescription')}</p>
+          {automaticOutputStageMessage ? <p className="audio-section-note">{automaticOutputStageMessage}</p> : null}
           <label className="audio-toggle-row">
             <span>
               <Gauge size={17} />
@@ -1981,12 +2072,12 @@ export const AudioSettingsDrawer = ({
           <p className="audio-section-note">{t('audioDrawer.option.lowLoadPlaybackEnhancementsDescription')}</p>
         </section>
 
-        <section className="audio-drawer-section">
+        <section className="audio-drawer-section audio-route-hqplayer">
           <button
             className={`audio-device-pill ${hqPlayerTakeoverEnabled ? 'active' : ''}`}
             type="button"
             title="HQPlayer 接管"
-            disabled={hqPlayerTakeoverBusy}
+            disabled={hqPlayerTakeoverBusy || automaticOutputEnabled}
             onClick={() => void handleHqPlayerTakeover()}
           >
             <Cable size={15} />
@@ -1999,16 +2090,55 @@ export const AudioSettingsDrawer = ({
           </button>
         </section>
 
-        <section className="audio-drawer-section">
+        <section className="audio-drawer-section audio-route-system-devices">
           <div className="audio-drawer-section-title">
             <Waves size={17} />
             <h3>{t('audioDrawer.section.systemDevices')}</h3>
+            <span className="audio-device-section-meta">
+              <em>{routeDeviceCount}</em>
+              <button
+                type="button"
+                aria-label={`${t('audioProfessional.action.refresh')} · ${t('audioDrawer.section.systemDevices')}`}
+                title={t('audioProfessional.action.refresh')}
+                disabled={isBusy}
+                onClick={() => void refresh()}
+              >
+                <RefreshCw size={13} />
+              </button>
+            </span>
+          </div>
+          <div className="audio-route-mode-tabs" aria-label={t('audioDrawer.option.automaticOutput')}>
+            <button
+              className={automaticOutputEnabled ? 'active' : ''}
+              type="button"
+              aria-label={t('audioDrawer.option.automaticOutputDescription')}
+              disabled={isBusy}
+              onClick={() => void toggleAutomaticOutput(true)}
+            >
+              {t('audioDrawer.option.automaticOutput')}
+            </button>
+            <button
+              className={!automaticOutputEnabled && !exclusiveRouteActive ? 'active' : ''}
+              type="button"
+              disabled={isBusy}
+              onClick={() => void selectManualOutputMode('shared')}
+            >
+              {copy.shared}
+            </button>
+            <button
+              className={!automaticOutputEnabled && exclusiveRouteActive ? 'active' : ''}
+              type="button"
+              disabled={isBusy || lockWasapiExclusive}
+              onClick={() => void selectManualOutputMode('exclusive')}
+            >
+              {copy.exclusive}
+            </button>
           </div>
           <button
             className={`audio-device-pill ${systemAudioActive ? 'active' : ''}`}
             type="button"
             title={copy.systemAudio}
-            disabled={isBusy}
+            disabled={isBusy || automaticOutputEnabled}
             onClick={applySystemAudio}
           >
             <Waves size={15} />
@@ -2023,45 +2153,72 @@ export const AudioSettingsDrawer = ({
             className={`audio-device-pill ${!systemAudioActive && !hqPlayerTakeoverEnabled && !status?.outputDeviceName && outputMode !== 'system' ? 'active' : ''}`}
             type="button"
             title={copy.systemDefaultOutput}
-            disabled={isBusy}
-            onClick={() => applyDevice(wasapiExclusive ? 'exclusive' : 'shared', null)}
+            disabled={isBusy || automaticOutputEnabled}
+            onClick={() => applyDevice(exclusiveRouteActive ? 'exclusive' : 'shared', null)}
           >
             <Waves size={15} />
             <span>
               <strong>{t('audioDrawer.device.systemDefault')}</strong>
-              <small>{formatWasapiDeviceMode(wasapiExclusive)} / {t('audioDrawer.device.systemSelectedRoute')}</small>
+              <small>{formatNativeDeviceMode(exclusiveRouteActive, rendererPlatform)} / {t('audioDrawer.device.systemSelectedRoute')}</small>
             </span>
             <em>WASAPI</em>
             {!systemAudioActive && !hqPlayerTakeoverEnabled && outputMode !== 'system' && !status?.outputDeviceName ? <Check size={15} /> : null}
           </button>
-          {sharedDevices.length === 0 ? <p className="audio-drawer-empty">{t('audioDrawer.empty.systemDevices')}</p> : null}
           {sharedDevices.map((device) => {
             const isActive = !hqPlayerTakeoverEnabled && deviceMatchesStatus(device, status, outputMode);
-            const DeviceIcon = getDeviceIcon(device.name, wasapiExclusive ? 'exclusive' : 'shared');
+            const bluetooth = isBluetoothDevice(device);
+            const DeviceIcon = getDeviceIcon(device.name, exclusiveRouteActive ? 'exclusive' : 'shared', device);
             const sampleRate = formatRate(device.sharedDeviceSampleRate ?? device.sampleRate);
 
             return (
               <button
                 className={`audio-device-pill ${isActive ? 'active' : ''}`}
+                data-connection-type={bluetooth ? 'bluetooth' : 'unknown'}
                 key={device.id}
                 type="button"
                 title={device.name}
-                disabled={isBusy}
+                disabled={isBusy || automaticOutputEnabled}
                 onMouseDown={suppressNativeDeviceMenu}
                 onContextMenu={(event) => openDeviceMenu(event, device)}
-                onClick={() => applyDevice(wasapiExclusive ? 'exclusive' : 'shared', device)}
+                onClick={() => applyDevice(exclusiveRouteActive ? 'exclusive' : 'shared', device)}
               >
                 <DeviceIcon size={15} />
                 <span>
                   <strong>{device.name}</strong>
-                  <small>{formatWasapiDeviceMode(wasapiExclusive)} / {sampleRate || t('audioDrawer.status.sampleRatePending')}</small>
+                  <small>{bluetooth ? 'Bluetooth / ' : ''}{formatNativeDeviceMode(exclusiveRouteActive, rendererPlatform)} / {sampleRate || t('audioDrawer.status.sampleRatePending')}</small>
                 </span>
-                <em>WASAPI</em>
+                <em>{bluetooth ? 'Bluetooth' : device.isDefault ? 'DEFAULT' : rendererPlatform === 'darwin' ? 'CoreAudio' : 'WASAPI'}</em>
                 {isActive ? <Check size={15} /> : null}
               </button>
             );
           })}
-          {advancedNativeOutputAvailable ? (
+          {advancedNativeOutputAvailable ? asioDevices.map((device) => {
+            const isActive = !hqPlayerTakeoverEnabled && deviceMatchesStatus(device, status, 'asio');
+            const sampleRate = formatRate(device.sampleRate);
+
+            return (
+              <button
+                className={`audio-device-pill ${isActive ? 'active' : ''}`}
+                data-output-mode="asio"
+                key={device.id}
+                type="button"
+                title={device.name}
+                disabled={isBusy || automaticOutputEnabled}
+                onMouseDown={suppressNativeDeviceMenu}
+                onContextMenu={(event) => openDeviceMenu(event, device)}
+                onClick={() => applyDevice('asio', device)}
+              >
+                <Zap size={15} />
+                <span>
+                  <strong>{device.name}</strong>
+                  <small>{t('audioDrawer.device.asioDriver')} / {sampleRate || t('audioDrawer.status.sampleRatePending')}</small>
+                </span>
+                <em>ASIO</em>
+                {isActive ? <Check size={15} /> : null}
+              </button>
+            );
+          }) : null}
+          {exclusiveNativeOutputAvailable ? (
             <>
               <label className="audio-toggle-row audio-toggle-row--section-control">
                 <span>
@@ -2070,8 +2227,8 @@ export const AudioSettingsDrawer = ({
                 </span>
                 <input
                   type="checkbox"
-                  checked={wasapiExclusive}
-                  disabled={lockWasapiExclusive || isBusy}
+                  checked={exclusiveRouteActive}
+                  disabled={lockWasapiExclusive || isBusy || automaticOutputEnabled}
                   onChange={(event) => toggleExclusive(event.currentTarget.checked)}
                 />
               </label>
@@ -2079,7 +2236,6 @@ export const AudioSettingsDrawer = ({
             </>
           ) : null}
         </section>
-
 
         <section
           className={`audio-drawer-section audio-drawer-options${isAdvancedOutputOpen ? ' audio-drawer-options--open' : ''}`}
@@ -2128,56 +2284,12 @@ export const AudioSettingsDrawer = ({
 
               {advancedNativeOutputAvailable ? (
                 <AdvancedOutputGroup
-                  icon={Music2}
-                  title={t('audioDrawer.advancedGroup.decodePath.title')}
-                  description={t('audioDrawer.advancedGroup.decodePath.description')}
-                  isOpen={advancedOutputGroupOpen.decodePath}
-                  onToggle={() => toggleAdvancedOutputGroup('decodePath')}
-                >
-
-              <label className="audio-toggle-row">
-                <span>
-                  <AudioLines size={17} />
-                  <strong>{t('audioDrawer.option.nativeDirectLocalPlayback')}</strong>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={nativeDirectLocalPlaybackEnabled}
-                  disabled={isBusy}
-                  onChange={(event) => toggleNativeDirectLocalPlayback(event.currentTarget.checked)}
-                />
-              </label>
-              <p>{t('audioDrawer.note.nativeDirectLocalPlayback')}</p>
-
-                </AdvancedOutputGroup>
-              ) : null}
-
-              {advancedNativeOutputAvailable ? (
-                <AdvancedOutputGroup
                   icon={Route}
                   title={t('audioDrawer.advancedGroup.dsdTransport.title')}
                   description={t('audioDrawer.advancedGroup.dsdTransport.description')}
                   isOpen={advancedOutputGroupOpen.dsdTransport}
                   onToggle={() => toggleAdvancedOutputGroup('dsdTransport')}
                 >
-
-              <label className="audio-toggle-row">
-                <span>
-                  <Route size={17} />
-                  <strong>{t('audioDrawer.option.dsdDop')}</strong>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={useDsdDop}
-                  disabled={isBusy}
-                  onChange={(event) => toggleDsdDop(event.currentTarget.checked)}
-                />
-              </label>
-              <p>
-                {t('audioDrawer.note.dsdDop')}
-                <span className="audio-section-note-inline-warning">{t('settings.playback.dsdDop.requiresAsio')}</span>
-              </p>
-
 
               <label className="audio-toggle-row">
                 <span>
@@ -2265,7 +2377,7 @@ export const AudioSettingsDrawer = ({
                       className={`audio-device-pill ${outputMode === 'shared' && sharedBackend === option.id ? 'active' : ''}`}
                       type="button"
                       key={option.id}
-                      disabled={isBusy}
+                      disabled={isBusy || automaticOutputEnabled}
                       onClick={() => applySharedBackend(option.id)}
                     >
                       <Waves size={15} />
@@ -2302,7 +2414,7 @@ export const AudioSettingsDrawer = ({
                       className={`audio-device-pill ${supportedLatencyProfile === option.id ? 'active' : ''}`}
                       type="button"
                       key={option.id}
-                      disabled={isBusy}
+                      disabled={isBusy || automaticOutputEnabled}
                       onClick={() => applyLatencyProfile(option.id)}
                     >
                       <Gauge size={15} />
@@ -2368,8 +2480,6 @@ export const AudioSettingsDrawer = ({
           ) : null}
         </section>
 
-        {error ? <p className="audio-drawer-error">{error}</p> : null}
-
           <details className="audio-drawer-section audio-hidden-devices">
             <summary>
               <EyeOff size={17} />
@@ -2378,7 +2488,7 @@ export const AudioSettingsDrawer = ({
             </summary>
             {hiddenDevices.length === 0 ? <p className="audio-drawer-empty">{t('audioDrawer.empty.hiddenDevices')}</p> : null}
             {hiddenDevices.map((device) => {
-              const DeviceIcon = getDeviceIcon(device.name, device.outputMode);
+              const DeviceIcon = getDeviceIcon(device.name, device.outputMode, device);
               const sampleRate = formatRate(device.sharedDeviceSampleRate ?? device.sampleRate);
 
               return (

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import '../styles/home.css';
 import type { CSSProperties } from 'react';
 import type { AudioStatus } from '../../shared/types/audio';
 import type { AppSettings } from '../../shared/types/appSettings';
+import { resolveEffectivePerformancePolicy } from '../../shared/utils/performancePolicy';
 import {
   Album,
   ChevronLeft,
@@ -50,6 +52,10 @@ const homeNowMetaMarqueeOverflowPx = 8;
 const homeNowMetaMarqueeExitOverflowPx = 3;
 const weeklyHeatmapWeeks = 12;
 const signalBarCount = 48;
+const signalVisualFrameIntervalMs = 1000 / 30;
+const signalVisualScaleSettleThreshold = 0.0005;
+const signalVisualMotionSettleThreshold = 0.0005;
+const signalVisualOpacitySettleThreshold = 0.001;
 const playbackHistoryChangedEvent = 'playback-history:changed';
 const restoreHomeScrollEvent = 'app:restore-home-scroll';
 const visualActiveStates = new Set<AudioStatus['state']>(['loading', 'playing']);
@@ -124,6 +130,28 @@ export const homeHeroTitleOptions = [
   '今天加训了吗',
   '让收藏开始发声。',
   '专辑封面已经排好队。',
+  '發自我的手機',
+  '丘成桐（國內）',
+  '一起學習',
+  '壞消息：我們的教育確有問題！',
+  '好消息：不會受到任何處分！',
+  '我剛到洛杉磯，不熟地方。',
+  '我剛到港科大，不熟地方。',
+  '這種食堂，令人汗顏！',
+  '北大完勝清華。',
+  '誰的責任？',
+  '羞也不羞！',
+  '這種成績，使人汗顏。',
+  '已經到了無恥的地步。',
+  '我宣布他已經不再是我的學生了。',
+  '朋比為奸。',
+  '獎一個華為手錶。',
+  '我們的教育確有問題，罰華為手錶一塊！',
+  '章台柳，章台柳。',
+  '我宣布你們已經出師了。',
+  '把大字報貼到天上去。',
+  '求真的同學不許不拿特獎。',
+  '求真的同學不許不拿特獎——發自我的手機（國內）。',
 ] as const;
 
 const homeHeroIpFallbackOptions = ['192.168.1.1', '223.42.34.22'] as const;
@@ -439,8 +467,8 @@ const emptyHomePageData: HomePageData = {
   historySummary: null,
   stats: null,
 };
-const homePageCacheStorageKey = 'echo-next.home-page-cache.v1';
-const homePageCacheVersion = 1;
+const homePageCacheStorageKey = 'echo-next.home-page-cache.v2';
+const homePageCacheVersion = 2;
 const isHomePageTestRuntime = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
 const homeInitialPlaybackPulseDelayMs = isHomePageTestRuntime ? 0 : 2600;
 const homePlaybackHistoryRefreshDelayMs = isHomePageTestRuntime ? 0 : 900;
@@ -748,13 +776,15 @@ let cachedHomeWaveformVisualizerSettings = {
   homeWaveformVisualizerEnabled: true,
   audioVisualSpectrumEnabled: false,
   lowLoadPlaybackModeEnabled: false,
+  lowSpecModeEnabled: false,
 };
 let cachedHomeRandomHeroTitleEnabled: boolean | null = null;
 let cachedHomeHeroTitle: string | null = null;
 
-const pickHomeHeroTitle = (): string => {
-  const index = Math.min(homeHeroTitleOptions.length - 1, Math.floor(Math.random() * homeHeroTitleOptions.length));
-  return homeHeroTitleOptions[index];
+const pickHomeHeroTitle = (previousTitle: string | null = null): string => {
+  const availableTitles = homeHeroTitleOptions.filter((title) => title !== previousTitle);
+  const index = Math.min(availableTitles.length - 1, Math.floor(Math.random() * availableTitles.length));
+  return availableTitles[index] ?? homeHeroTitleOptions[0];
 };
 
 export const resetHomePageCacheForTest = (): void => {
@@ -765,6 +795,7 @@ export const resetHomePageCacheForTest = (): void => {
     homeWaveformVisualizerEnabled: true,
     audioVisualSpectrumEnabled: false,
     lowLoadPlaybackModeEnabled: false,
+    lowSpecModeEnabled: false,
   };
   cachedHomeRandomHeroTitleEnabled = null;
   cachedHomeHeroTitle = null;
@@ -1068,6 +1099,7 @@ const loadRecommendedAlbums = async (library: LibraryBridge, albumCount: number,
       page: 1,
       pageSize: recommendedAlbumPageSize,
       sort,
+      excludeOsuAlbums: true,
     });
     return Array.from(new Map(result.items.map((album) => [album.id, album])).values());
   } catch {
@@ -1085,6 +1117,7 @@ const loadRecentAddedAlbums = async (library: LibraryBridge, albumCount: number)
       page: 1,
       pageSize: recentPageSize,
       sort: 'recent',
+      excludeOsuAlbums: true,
     });
     return Array.from(new Map(result.items.map((album) => [album.id, album])).values());
   } catch {
@@ -1191,10 +1224,12 @@ const navigateHomeRoute = (routeId: HomeRouteId): void => {
   window.dispatchEvent(new CustomEvent('app:navigate:route', { detail: routeId }));
 };
 
-const readHomeWaveformVisualizerEnabled = (settings: Partial<AppSettings> | null | undefined): boolean =>
-  settings?.homeWaveformVisualizerEnabled !== false &&
-  settings?.audioVisualSpectrumEnabled === true &&
-  settings?.lowLoadPlaybackModeEnabled !== true;
+const readHomeWaveformVisualizerEnabled = (settings: Partial<AppSettings> | null | undefined): boolean => {
+  const performancePolicy = resolveEffectivePerformancePolicy(settings);
+  return performancePolicy.homeWaveformVisualizerEnabled &&
+    performancePolicy.audioVisualSpectrumEnabled &&
+    settings?.lowLoadPlaybackModeEnabled !== true;
+};
 
 const readHomeRandomHeroTitleEnabled = (settings: Partial<AppSettings> | null | undefined): boolean =>
   settings?.homeRandomHeroTitleEnabled === true;
@@ -1209,7 +1244,8 @@ const useHomeWaveformVisualizerEnabled = (): boolean => {
         !settings ||
         (!Object.prototype.hasOwnProperty.call(settings, 'homeWaveformVisualizerEnabled') &&
           !Object.prototype.hasOwnProperty.call(settings, 'audioVisualSpectrumEnabled') &&
-          !Object.prototype.hasOwnProperty.call(settings, 'lowLoadPlaybackModeEnabled'))
+          !Object.prototype.hasOwnProperty.call(settings, 'lowLoadPlaybackModeEnabled') &&
+          !Object.prototype.hasOwnProperty.call(settings, 'lowSpecModeEnabled'))
       ) {
         return;
       }
@@ -1227,6 +1263,10 @@ const useHomeWaveformVisualizerEnabled = (): boolean => {
           typeof settings.lowLoadPlaybackModeEnabled === 'boolean'
             ? settings.lowLoadPlaybackModeEnabled
             : cachedHomeWaveformVisualizerSettings.lowLoadPlaybackModeEnabled,
+        lowSpecModeEnabled:
+          typeof settings.lowSpecModeEnabled === 'boolean'
+            ? settings.lowSpecModeEnabled
+            : cachedHomeWaveformVisualizerSettings.lowSpecModeEnabled,
       };
       const nextEnabled = readHomeWaveformVisualizerEnabled(cachedHomeWaveformVisualizerSettings);
       cachedHomeWaveformVisualizerEnabled = nextEnabled;
@@ -1375,12 +1415,18 @@ const SignalVisualizer = ({ seed, status }: { seed: string; status: AudioStatus 
     motion: number[];
     opacity: number[];
     scale: number[];
+    writtenMotion: string[];
+    writtenOpacity: string[];
+    writtenScale: string[];
   }>({
     frameId: null,
     lastTime: 0,
     motion: [],
     opacity: [],
     scale: [],
+    writtenMotion: [],
+    writtenOpacity: [],
+    writtenScale: [],
   });
   const [isAnimationVisible, setIsAnimationVisible] = useState(() =>
     typeof document === 'undefined' ? true : document.visibilityState === 'visible',
@@ -1570,15 +1616,29 @@ const SignalVisualizer = ({ seed, status }: { seed: string; status: AudioStatus 
   useEffect(() => {
     const state = smoothedSignalRef.current;
 
+    const writeStyleIfChanged = (
+      element: HTMLElement | null,
+      property: string,
+      value: string,
+      writtenValues: string[],
+      index: number,
+    ): void => {
+      if (!element || writtenValues[index] === value) {
+        return;
+      }
+      element.style.setProperty(property, value);
+      writtenValues[index] = value;
+    };
+
     const applyImmediateTargets = (): void => {
       targetBarsRef.current.forEach((bar, index) => {
         state.scale[index] = bar.targetScale;
         state.motion[index] = bar.targetMotion;
         state.opacity[index] = bar.targetOpacity;
         const element = barElementsRef.current[index];
-        element?.style.setProperty('--home-signal-display-scale', bar.targetScale.toFixed(4));
-        element?.style.setProperty('--home-signal-display-motion', bar.targetMotion.toFixed(4));
-        element?.style.setProperty('--home-signal-display-opacity', bar.targetOpacity.toFixed(3));
+        writeStyleIfChanged(element, '--home-signal-display-scale', bar.targetScale.toFixed(4), state.writtenScale, index);
+        writeStyleIfChanged(element, '--home-signal-display-motion', bar.targetMotion.toFixed(4), state.writtenMotion, index);
+        writeStyleIfChanged(element, '--home-signal-display-opacity', bar.targetOpacity.toFixed(3), state.writtenOpacity, index);
       });
     };
 
@@ -1593,8 +1653,15 @@ const SignalVisualizer = ({ seed, status }: { seed: string; status: AudioStatus 
     }
 
     const tick = (timestamp: number): void => {
-      const elapsedMs = state.lastTime > 0 ? Math.min(48, timestamp - state.lastTime) : 16.7;
+      const elapsedSincePaintMs = state.lastTime > 0 ? timestamp - state.lastTime : signalVisualFrameIntervalMs;
+      if (elapsedSincePaintMs + 0.5 < signalVisualFrameIntervalMs) {
+        state.frameId = window.requestAnimationFrame(tick);
+        return;
+      }
+
+      const elapsedMs = Math.min(48, elapsedSincePaintMs);
       state.lastTime = timestamp;
+      let settled = true;
 
       targetBarsRef.current.forEach((bar, index) => {
         const currentScale = state.scale[index] ?? bar.targetScale;
@@ -1605,13 +1672,27 @@ const SignalVisualizer = ({ seed, status }: { seed: string; status: AudioStatus 
         const nextOpacity = signalVisualStep(currentOpacity, bar.targetOpacity, elapsedMs, signalVisualOpacityMs, signalVisualOpacityMs);
         const element = barElementsRef.current[index];
 
+        if (
+          Math.abs(nextScale - bar.targetScale) > signalVisualScaleSettleThreshold ||
+          Math.abs(nextMotion - bar.targetMotion) > signalVisualMotionSettleThreshold ||
+          Math.abs(nextOpacity - bar.targetOpacity) > signalVisualOpacitySettleThreshold
+        ) {
+          settled = false;
+        }
+
         state.scale[index] = nextScale;
         state.motion[index] = nextMotion;
         state.opacity[index] = nextOpacity;
-        element?.style.setProperty('--home-signal-display-scale', nextScale.toFixed(4));
-        element?.style.setProperty('--home-signal-display-motion', nextMotion.toFixed(4));
-        element?.style.setProperty('--home-signal-display-opacity', nextOpacity.toFixed(3));
+        writeStyleIfChanged(element, '--home-signal-display-scale', nextScale.toFixed(4), state.writtenScale, index);
+        writeStyleIfChanged(element, '--home-signal-display-motion', nextMotion.toFixed(4), state.writtenMotion, index);
+        writeStyleIfChanged(element, '--home-signal-display-opacity', nextOpacity.toFixed(3), state.writtenOpacity, index);
       });
+
+      if (settled) {
+        state.frameId = null;
+        state.lastTime = 0;
+        return;
+      }
 
       state.frameId = window.requestAnimationFrame(tick);
     };
@@ -1625,7 +1706,7 @@ const SignalVisualizer = ({ seed, status }: { seed: string; status: AudioStatus 
       }
       state.lastTime = 0;
     };
-  }, [isActive, isAnimationVisible, meterReady, signalSeed]);
+  }, [audioLevels, isActive, isAnimationVisible, meterReady, signalSeed]);
 
   return (
     <div
@@ -1849,6 +1930,7 @@ export const HomePage = (): JSX.Element => {
   const [recentShelfPage, setRecentShelfPage] = useState(0);
   const requestIdRef = useRef(0);
   const pulseRequestIdRef = useRef(0);
+  const summaryRequestIdRef = useRef(0);
   const playbackPulseRequestIdRef = useRef(0);
   const playbackPulseInFlightRef = useRef(false);
   const currentPlayedAlbumRequestIdRef = useRef(0);
@@ -1870,7 +1952,7 @@ export const HomePage = (): JSX.Element => {
   const homeWaveformVisualizerEnabled = useHomeWaveformVisualizerEnabled();
   const homeRandomHeroTitleEnabled = useHomeRandomHeroTitleEnabled();
   const [randomHomeHeroTitle, setRandomHomeHeroTitle] = useState(() => {
-    cachedHomeHeroTitle ??= pickHomeHeroTitle();
+    cachedHomeHeroTitle = pickHomeHeroTitle(cachedHomeHeroTitle);
     return cachedHomeHeroTitle;
   });
   const homeHeroTitle = homeRandomHeroTitleEnabled ? randomHomeHeroTitle : t('home.hero.defaultTitle');
@@ -2190,6 +2272,7 @@ export const HomePage = (): JSX.Element => {
     const library = window.echo?.library;
     const requestId = pulseRequestIdRef.current + 1;
     pulseRequestIdRef.current = requestId;
+    summaryRequestIdRef.current += 1;
 
     if (!library?.getSummary || !library.getTracks) {
       return;
@@ -2226,10 +2309,33 @@ export const HomePage = (): JSX.Element => {
     }
   }, []);
 
+  const loadLibrarySummary = useCallback(async (): Promise<void> => {
+    const library = window.echo?.library;
+    const requestId = summaryRequestIdRef.current + 1;
+    summaryRequestIdRef.current = requestId;
+
+    if (!library?.getSummary) {
+      return;
+    }
+
+    try {
+      const nextSummary = await library.getSummary();
+      if (summaryRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      mergeCachedHomePageData({ summary: nextSummary });
+      setSummary(nextSummary);
+    } catch {
+      // The full home refresh reports bridge/database errors when playback is no longer busy.
+    }
+  }, []);
+
   const loadHome = useCallback(async (): Promise<void> => {
     const library = window.echo?.library;
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    summaryRequestIdRef.current += 1;
     setIsLoading(true);
     setError(null);
 
@@ -2310,6 +2416,14 @@ export const HomePage = (): JSX.Element => {
   }, [isPlaybackPriorityBlocking, isRefreshingRecentActivity, loadLibraryPulse, loadPlaybackPulse]);
 
   useEffect(() => {
+    if (!isPlaybackPriorityBlocking) {
+      return;
+    }
+
+    void loadLibrarySummary();
+  }, [isPlaybackPriorityBlocking, loadLibrarySummary]);
+
+  useEffect(() => {
     const scheduleStartupPlaybackPulse = (delayMs: number): (() => void) => {
       let hasStarted = false;
       startupPlaybackPulseActiveRef.current = true;
@@ -2365,6 +2479,7 @@ export const HomePage = (): JSX.Element => {
       if (isPlaybackPriorityBlocking) {
         libraryChangedRefreshCancelRef.current = null;
         pendingLibraryPulseRefreshRef.current = true;
+        void loadLibrarySummary();
         return;
       }
 
@@ -2393,7 +2508,7 @@ export const HomePage = (): JSX.Element => {
       libraryChangedRefreshCancelRef.current = null;
       libraryOnlyRefreshActiveRef.current = false;
     };
-  }, [isPlaybackPriorityBlocking, loadLibraryPulse]);
+  }, [isPlaybackPriorityBlocking, loadLibraryPulse, loadLibrarySummary]);
 
   useEffect(() => {
     if (isPlaybackPriorityBlocking) {

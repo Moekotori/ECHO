@@ -4,6 +4,7 @@
 #include "../../audio-engine/third_party/nlohmann_json.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -42,11 +43,16 @@ public:
     FifoBlock prepareToWrite(int requested) const
     {
         FifoBlock block;
-        const int writable = std::min(std::max(0, requested), capacity - readyCount);
+        const uint64_t write = writeSequence.load(std::memory_order_relaxed);
+        const uint64_t read = readSequence.load(std::memory_order_acquire);
+        const int ready = static_cast<int>(std::min<uint64_t>(
+            static_cast<uint64_t>(capacity),
+            write >= read ? write - read : 0));
+        const int writable = std::min(std::max(0, requested), capacity - ready);
         if (writable <= 0 || capacity <= 0)
             return block;
 
-        block.start1 = (readPosition + readyCount) % capacity;
+        block.start1 = static_cast<int>(write % static_cast<uint64_t>(capacity));
         block.size1 = std::min(writable, capacity - block.start1);
         block.start2 = 0;
         block.size2 = writable - block.size1;
@@ -55,7 +61,8 @@ public:
 
     void finishedWrite(int written)
     {
-        readyCount = std::min(capacity, readyCount + std::max(0, written));
+        if (written > 0)
+            writeSequence.fetch_add(static_cast<uint64_t>(written), std::memory_order_release);
     }
 
     void prepareToRead(int requested, int& start1, int& size1, int& start2, int& size2) const
@@ -70,11 +77,16 @@ public:
     FifoBlock prepareToRead(int requested) const
     {
         FifoBlock block;
-        const int readable = std::min(std::max(0, requested), readyCount);
+        const uint64_t read = readSequence.load(std::memory_order_relaxed);
+        const uint64_t write = writeSequence.load(std::memory_order_acquire);
+        const int ready = static_cast<int>(std::min<uint64_t>(
+            static_cast<uint64_t>(capacity),
+            write >= read ? write - read : 0));
+        const int readable = std::min(std::max(0, requested), ready);
         if (readable <= 0 || capacity <= 0)
             return block;
 
-        block.start1 = readPosition;
+        block.start1 = static_cast<int>(read % static_cast<uint64_t>(capacity));
         block.size1 = std::min(readable, capacity - block.start1);
         block.start2 = 0;
         block.size2 = readable - block.size1;
@@ -83,26 +95,31 @@ public:
 
     void finishedRead(int read)
     {
-        const int consumed = std::min(readyCount, std::max(0, read));
-        if (capacity > 0)
-            readPosition = (readPosition + consumed) % capacity;
-        readyCount -= consumed;
+        if (read > 0)
+            readSequence.fetch_add(static_cast<uint64_t>(read), std::memory_order_release);
     }
 
     void reset()
     {
-        readPosition = 0;
-        readyCount = 0;
+        readSequence.store(0, std::memory_order_release);
+        writeSequence.store(0, std::memory_order_release);
     }
 
-    int getNumReady() const { return readyCount; }
-    int getFreeSpace() const { return capacity - readyCount; }
+    int getNumReady() const
+    {
+        const uint64_t read = readSequence.load(std::memory_order_acquire);
+        const uint64_t write = writeSequence.load(std::memory_order_acquire);
+        return static_cast<int>(std::min<uint64_t>(
+            static_cast<uint64_t>(capacity),
+            write >= read ? write - read : 0));
+    }
+    int getFreeSpace() const { return capacity - getNumReady(); }
     int getTotalSize() const { return capacity; }
 
 private:
     int capacity = 0;
-    int readPosition = 0;
-    int readyCount = 0;
+    std::atomic<uint64_t> readSequence { 0 };
+    std::atomic<uint64_t> writeSequence { 0 };
 };
 
 struct FloatInterleavedRenderTarget

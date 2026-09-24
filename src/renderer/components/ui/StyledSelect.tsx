@@ -1,10 +1,11 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { Check, ChevronDown, ListFilter } from 'lucide-react';
 
 export type StyledSelectOption<T extends string> = {
   value: T;
   label: string;
+  group?: string;
   disabled?: boolean;
 };
 
@@ -46,6 +47,15 @@ export function StyledSelect<T extends string>({
     const selectedIndex = enabledOptions.findIndex((option) => option.value === value);
     setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0);
   }, [enabledOptions, isOpen, value]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const activeOption = rootRef.current?.querySelector<HTMLElement>('.sort-option[data-active="true"]');
+    activeOption?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex, isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -150,31 +160,35 @@ export function StyledSelect<T extends string>({
         <ChevronDown className="sort-button-chevron" size={15} aria-hidden="true" />
       </button>
       {isOpen ? (
-        <div id={menuId} className="sort-menu" role="listbox" aria-label={ariaLabel}>
-          {options.map((option) => {
+        <div id={menuId} className="sort-menu" role="listbox" aria-label={ariaLabel} data-state="open">
+          {options.map((option, optionIndex) => {
             const enabledIndex = enabledOptions.findIndex((enabledOption) => enabledOption.value === option.value);
             const isActive = enabledIndex === activeIndex;
             const isSelected = option.value === value;
+            const startsGroup = Boolean(option.group) && option.group !== options[optionIndex - 1]?.group;
 
             return (
-              <button
-                key={option.value}
-                className="sort-option"
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                disabled={option.disabled}
-                data-active={isActive ? 'true' : undefined}
-                onMouseEnter={() => {
-                  if (enabledIndex >= 0) {
-                    setActiveIndex(enabledIndex);
-                  }
-                }}
-                onClick={() => selectOption(option)}
-              >
-                <span>{option.label}</span>
-                {isSelected ? <Check size={14} /> : null}
-              </button>
+              <Fragment key={option.value}>
+                {startsGroup && optionIndex > 0 ? <div className="sort-menu-divider" role="presentation" /> : null}
+                {startsGroup ? <div className="sort-menu-section-title" role="presentation">{option.group}</div> : null}
+                <button
+                  className="sort-option"
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  disabled={option.disabled}
+                  data-active={isActive ? 'true' : undefined}
+                  onMouseEnter={() => {
+                    if (enabledIndex >= 0) {
+                      setActiveIndex(enabledIndex);
+                    }
+                  }}
+                  onClick={() => selectOption(option)}
+                >
+                  <span>{option.label}</span>
+                  {isSelected ? <Check size={14} /> : null}
+                </button>
+              </Fragment>
             );
           })}
         </div>

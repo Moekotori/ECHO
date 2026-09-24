@@ -2,6 +2,7 @@ import { createCipheriv, createHash, createHmac, randomBytes, sign, timingSafeEq
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { basename, dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const loadLocalEnv = (filePath = resolve('.env')) => {
   if (!existsSync(filePath)) {
@@ -118,7 +119,11 @@ const readJsonBody = async (request) => {
       throw Object.assign(new Error('request_too_large'), { status: 413 });
     }
   }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+  } catch {
+    throw Object.assign(new Error('request_invalid'), { status: 400 });
+  }
 };
 
 const readBindings = () => {
@@ -157,7 +162,9 @@ const writeCloudDatabase = (state) => {
 
 const writeBindings = (state) => {
   mkdirSync(dirname(bindingsPath), { recursive: true });
-  writeFileSync(bindingsPath, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  const tempPath = `${bindingsPath}.${process.pid}.tmp`;
+  writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  renameSync(tempPath, bindingsPath);
 };
 
 const normalizeOrderEntry = (state, orderId) => {
@@ -196,10 +203,49 @@ const assertSelfUnbindCooldown = (entry) => {
 };
 
 const allActivationRecords = (state) =>
-  Object.entries(state.activations ?? {}).flatMap(([orderId, entry]) => {
+  Object.entries(state.activations ?? {}).flatMap(([orderId]) => {
     const normalized = normalizeOrderEntry(state, orderId);
     return normalized.activations.map((record) => ({ orderId, record }));
   });
+
+export const findActiveOrderActivationByHwid = (orderEntry, machineCodeHash) =>
+  orderEntry.activations.find((record) =>
+    record.revoked !== true && record.machineCodeHash === machineCodeHash,
+  ) ?? null;
+
+export const selectOrderActivationsForSelfUnbind = (orderEntry) =>
+  orderEntry.activations.filter((record) => record.revoked !== true);
+
+export const findActivationForDeviceRelease = (
+  state,
+  { licenseId, activationId, machineCodeHash },
+) =>
+  allActivationRecords(state).find(({ record }) =>
+    record.licenseId === licenseId &&
+    record.activationId === activationId &&
+    record.machineCodeHash === machineCodeHash,
+  ) ?? null;
+
+export const findExplicitActivationReplacement = (
+  orderEntry,
+  { replaceMachineBinding, replaceLicenseId, replaceActivationId, qq },
+) => {
+  if (replaceMachineBinding !== true || !replaceLicenseId || !replaceActivationId) {
+    return null;
+  }
+  return orderEntry.activations.find((record) =>
+    record.revoked !== true &&
+    record.licenseId === replaceLicenseId &&
+    record.activationId === replaceActivationId &&
+    record.qq === qq,
+  ) ?? null;
+};
+
+const revokeActivationForIdentityMigration = (record, revokedAt = new Date().toISOString()) => {
+  record.revoked = true;
+  record.revokedAt = revokedAt;
+  record.revokedReason = 'machine_identity_migration';
+};
 
 const createActivationRecord = ({ orderId, qq, machineCodeHash, activationKeyHash, bindingProof }) => {
   const nonce = randomBytes(8).toString('hex');
@@ -361,7 +407,7 @@ const assertOrderEligible = (order) => {
   }
 };
 
-const buildPluginPackage = ({
+const buildSignedLicense = ({
   orderId,
   qq,
   machineCodeHash,
@@ -407,6 +453,14 @@ const buildPluginPackage = ({
     expiresAt: null,
     encryptedWatermark: encryptWatermark(watermark),
   };
+  return {
+    license,
+    licenseSignature: signText(canonicalizeLicense(license)),
+  };
+};
+
+const buildPluginPackage = (record) => {
+  const signedLicense = buildSignedLicense(record);
   const pluginMessage = [...Buffer.from('ECHO Pro license plugin is verified by the host.', 'utf8')].join(',');
   const pluginScript = `(()=>{const m=String.fromCharCode(${pluginMessage});echo?.ui?.notify?.(m).catch?.(()=>{});})();`;
   const pluginPackage = {
@@ -422,8 +476,8 @@ const buildPluginPackage = ({
       permissions: [],
       contributes: {},
     },
-    license,
-    licenseSignature: signText(canonicalizeLicense(license)),
+    license: signedLicense.license,
+    licenseSignature: signedLicense.licenseSignature,
     files: [{ path: 'plugin.js', content: pluginScript }],
   };
   return {
@@ -445,7 +499,26 @@ const normalizeActivationRequest = (body) => {
   if (!/^[a-f0-9]{32,128}$/iu.test(machineCode)) {
     throw Object.assign(new Error('machine_code_invalid'), { status: 400 });
   }
-  return { orderId, qq, machineCode, machineCodeHash: hashText(machineCode) };
+  const replaceLicenseId = String(body.replaceLicenseId ?? '').trim();
+  const replaceActivationId = String(body.replaceActivationId ?? '').trim();
+  const replaceMachineBinding = body.replaceMachineBinding === true;
+  if (
+    Boolean(replaceLicenseId) !== Boolean(replaceActivationId) ||
+    Boolean(replaceLicenseId) !== replaceMachineBinding ||
+    (replaceLicenseId && !/^lic_[a-f0-9]{16}$/iu.test(replaceLicenseId)) ||
+    (replaceActivationId && !/^act_[a-f0-9]{16}$/iu.test(replaceActivationId))
+  ) {
+    throw Object.assign(new Error('replacement_proof_invalid'), { status: 400 });
+  }
+  return {
+    orderId,
+    qq,
+    machineCode,
+    machineCodeHash: hashText(machineCode),
+    replaceMachineBinding,
+    replaceLicenseId: replaceLicenseId || null,
+    replaceActivationId: replaceActivationId || null,
+  };
 };
 
 const normalizeProKeyActivationRequest = (body) => {
@@ -461,7 +534,25 @@ const normalizeProKeyActivationRequest = (body) => {
   if (!/^[a-f0-9]{64}$/u.test(machineCodeHash)) {
     throw Object.assign(new Error('invalid_hwid'), { status: 400 });
   }
-  return { key, qq, machineCodeHash };
+  const replaceLicenseId = String(body.replaceLicenseId ?? '').trim();
+  const replaceActivationId = String(body.replaceActivationId ?? '').trim();
+  const replaceMachineBinding = body.replaceMachineBinding === true;
+  if (
+    Boolean(replaceLicenseId) !== Boolean(replaceActivationId) ||
+    Boolean(replaceLicenseId) !== replaceMachineBinding ||
+    (replaceLicenseId && !/^lic_[a-f0-9]{16}$/iu.test(replaceLicenseId)) ||
+    (replaceActivationId && !/^act_[a-f0-9]{16}$/iu.test(replaceActivationId))
+  ) {
+    throw Object.assign(new Error('replacement_proof_invalid'), { status: 400 });
+  }
+  return {
+    key,
+    qq,
+    machineCodeHash,
+    replaceMachineBinding,
+    replaceLicenseId: replaceLicenseId || null,
+    replaceActivationId: replaceActivationId || null,
+  };
 };
 
 const corsHeaders = (origin) => {
@@ -494,7 +585,7 @@ const requireAdmin = (request) => {
   }
 };
 
-const handleProKeyRedeem = async (request, response, headers, meta) => {
+const handleProKeyRedeem = async (request, response, headers, meta, nativeLicenseOnly = false) => {
   const input = normalizeProKeyActivationRequest(await readJsonBody(request));
   const keyHash = activationKeyHash(input.key);
   const cloudState = readCloudDatabase();
@@ -512,17 +603,37 @@ const handleProKeyRedeem = async (request, response, headers, meta) => {
 
   const activeRecords = orderEntry.activations.filter((record) => record.revoked !== true);
   let record = activeRecords.find((item) => item.machineCodeHash === input.machineCodeHash && item.qq === input.qq) ?? null;
-  if (!record && activeRecords.length >= Math.max(1, Number(activationKey.maxRedemptions || 1))) {
+  const replacement = findExplicitActivationReplacement(orderEntry, input);
+  if (input.replaceMachineBinding && !replacement) {
+    throw Object.assign(new Error('replacement_proof_rejected'), { status: 403 });
+  }
+  if (!record && activeRecords.length >= Math.max(1, Number(activationKey.maxRedemptions || 1)) && !replacement) {
     throw Object.assign(new Error('key_already_used'), { status: 403 });
   }
 
   const redemptions = Array.isArray(activationKey.redemptions) ? activationKey.redemptions : [];
   const activeRedemptions = redemptions.filter((item) => item.revoked !== true);
   let redemption = activeRedemptions.find((item) => item.hwidHash === input.machineCodeHash && item.qq === input.qq) ?? null;
-  if (!redemption && activeRedemptions.length >= Math.max(1, Number(activationKey.maxRedemptions || 1))) {
+  const replacementRedemption = replacement
+    ? activeRedemptions.find((item) =>
+      item.licenseId === replacement.licenseId &&
+      item.activationId === replacement.activationId &&
+      item.qq === input.qq,
+    ) ?? null
+    : null;
+  if (!redemption && activeRedemptions.length >= Math.max(1, Number(activationKey.maxRedemptions || 1)) && !replacementRedemption) {
     throw Object.assign(new Error('key_already_used'), { status: 403 });
   }
 
+  const now = new Date().toISOString();
+  if (replacement && replacement !== record) {
+    revokeActivationForIdentityMigration(replacement, now);
+  }
+  if (replacementRedemption && replacementRedemption !== redemption) {
+    replacementRedemption.revoked = true;
+    replacementRedemption.revokedAt = now;
+    replacementRedemption.revokedReason = 'machine_identity_migration';
+  }
   if (!record) {
     record = createProKeyActivationRecord({
       keyId: activationKey.id,
@@ -534,10 +645,9 @@ const handleProKeyRedeem = async (request, response, headers, meta) => {
     orderEntry.activations.push(record);
   }
 
-  const now = new Date().toISOString();
   if (!redemption) {
     redemption = {
-      source: 'web-plugin',
+      source: nativeLicenseOnly ? 'native-license' : 'web-plugin',
       qq: input.qq,
       hwidHash: input.machineCodeHash,
       licenseId: record.licenseId,
@@ -557,10 +667,11 @@ const handleProKeyRedeem = async (request, response, headers, meta) => {
   writeBindings(state);
   writeCloudDatabase(cloudState);
 
-  const pluginPackage = buildPluginPackage(record);
+  const signedLicense = nativeLicenseOnly ? buildSignedLicense(record) : null;
+  const pluginPackage = nativeLicenseOnly ? null : buildPluginPackage(record);
   const fileName = `echo-pro-key-${String(activationKey.keyPrefix ?? activationKey.id).replace(/[^a-z0-9-]/giu, '').toLowerCase()}.echo`;
   auditActivation({
-    event: 'pro_key_package_issued',
+    event: nativeLicenseOnly ? 'pro_key_native_license_issued' : 'pro_key_package_issued',
     status: 200,
     ip: meta.ip,
     userAgent: meta.userAgent,
@@ -571,10 +682,22 @@ const handleProKeyRedeem = async (request, response, headers, meta) => {
     machineCodeHash: input.machineCodeHash,
     licenseId: record.licenseId,
     activationId: record.activationId,
+    replacedLicenseId: replacement?.licenseId ?? null,
+    replacedActivationId: replacement?.activationId ?? null,
     activeCount: orderEntry.activations.filter((item) => item.revoked !== true).length,
     maxActivations: Math.max(1, Number(activationKey.maxRedemptions || 1)),
     fileName,
   });
+  if (signedLicense) {
+    sendJson(response, 200, {
+      ok: true,
+      mode: 'key',
+      ...signedLicense,
+      activeCount: orderEntry.activations.filter((item) => item.revoked !== true).length,
+      maxActivations: Math.max(1, Number(activationKey.maxRedemptions || 1)),
+    }, headers);
+    return;
+  }
   response.writeHead(200, {
     ...headers,
     'content-type': 'application/octet-stream',
@@ -629,6 +752,87 @@ const handleActivationVerify = async (request, response, headers, meta) => {
     reason,
     revokedAt: record?.revokedAt ?? null,
     cacheSeconds: valid ? 3600 : 60,
+  }, headers);
+};
+
+const handleCurrentDeviceRelease = async (request, response, headers, meta) => {
+  const body = await readJsonBody(request);
+  const licenseId = String(body.licenseId ?? '').trim();
+  const activationId = String(body.activationId ?? '').trim();
+  const machineCode = String(body.machineCode ?? '').trim();
+  if (
+    !/^lic_[a-f0-9]{16}$/iu.test(licenseId) ||
+    !/^act_[a-f0-9]{16}$/iu.test(activationId) ||
+    !/^[a-f0-9]{32,128}$/iu.test(machineCode)
+  ) {
+    throw Object.assign(new Error('request_invalid'), { status: 400 });
+  }
+
+  const machineCodeHash = hashText(machineCode);
+  const state = readBindings();
+  const match = findActivationForDeviceRelease(state, {
+    licenseId,
+    activationId,
+    machineCodeHash,
+  });
+  if (!match) {
+    throw Object.assign(new Error('proof_rejected'), { status: 403 });
+  }
+
+  const { orderId, record } = match;
+  const alreadyReleased = record.revoked === true;
+  const releasedAt = record.revokedAt ?? new Date().toISOString();
+  if (!alreadyReleased) {
+    record.revoked = true;
+    record.revokedAt = releasedAt;
+    record.revokedReason = 'current_device_release';
+  }
+
+  if (record.source === 'pro-key' && record.proKeyId) {
+    const cloudState = readCloudDatabase();
+    const activationKey = cloudState.activationKeys.find((item) => item.id === record.proKeyId) ?? null;
+    if (activationKey) {
+      const redemptions = Array.isArray(activationKey.redemptions) ? activationKey.redemptions : [];
+      let redemptionsChanged = false;
+      for (const redemption of redemptions) {
+        if (
+          redemption.revoked !== true &&
+          (redemption.activationId === activationId || redemption.hwidHash === machineCodeHash)
+        ) {
+          redemption.revoked = true;
+          redemption.revokedAt = releasedAt;
+          redemption.revokedReason = 'current_device_release';
+          redemptionsChanged = true;
+        }
+      }
+      if (redemptionsChanged) {
+        activationKey.redemptions = redemptions;
+        activationKey.updatedAt = releasedAt;
+        writeCloudDatabase(cloudState);
+      }
+    }
+  }
+  if (!alreadyReleased) {
+    writeBindings(state);
+  }
+
+  if (!alreadyReleased) {
+    auditActivation({
+      event: 'activation_current_device_released',
+      status: 200,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      origin: meta.origin,
+      orderId,
+      licenseId,
+      activationId,
+      machineCodeHash,
+    });
+  }
+  sendJson(response, 200, {
+    ok: true,
+    releasedAt,
+    alreadyReleased,
   }, headers);
 };
 
@@ -697,7 +901,6 @@ const handleSelfUnbind = async (request, response, headers, meta) => {
   const proKey = normalizeProKey(body.key ?? body.proKey);
   const proKeyQq = String(body.qq ?? '').trim();
   const orderId = String(body.orderId ?? '').trim();
-  const qq = String(body.qq ?? '').trim();
   if (proKey) {
     if (!activationKeyPattern.test(proKey)) {
       throw Object.assign(new Error('invalid_key'), { status: 400 });
@@ -775,17 +978,38 @@ const handleSelfUnbind = async (request, response, headers, meta) => {
   if (!/^[0-9A-Za-z_-]{12,80}$/u.test(orderId)) {
     throw Object.assign(new Error('order_id_invalid'), { status: 400 });
   }
-  if (!/^[1-9][0-9]{4,11}$/u.test(qq)) {
-    throw Object.assign(new Error('qq_invalid'), { status: 400 });
-  }
 
   const state = readBindings();
   const orderEntry = normalizeOrderEntry(state, orderId);
-  assertSelfUnbindCooldown(orderEntry);
-  const matches = orderEntry.activations.filter((record) => record.revoked !== true && record.qq === qq);
-  if (matches.length === 0) {
+  if (orderEntry.activations.length === 0) {
     throw Object.assign(new Error('activation_not_found'), { status: 404 });
   }
+  const matches = selectOrderActivationsForSelfUnbind(orderEntry);
+  if (matches.length === 0) {
+    const releasedAt = orderEntry.lastSelfUnbindAt ?? new Date().toISOString();
+    auditActivation({
+      event: 'activation_self_unbind_already_released',
+      status: 200,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      origin: meta.origin,
+      orderId,
+    });
+    sendJson(response, 200, {
+      ok: true,
+      alreadyReleased: true,
+      orderId,
+      releasedAt,
+      revokedCount: 0,
+      releasedCount: 0,
+      releasedLicenseIds: [...new Set(orderEntry.activations.map((record) => record.licenseId).filter(Boolean))],
+      activeCount: 0,
+      maxActivations: maxActivationsPerOrder,
+      cooldownSeconds: Math.round(selfUnbindCooldownMs / 1000),
+    }, headers);
+    return;
+  }
+  assertSelfUnbindCooldown(orderEntry);
 
   const revokedAt = new Date().toISOString();
   for (const record of matches) {
@@ -802,7 +1026,7 @@ const handleSelfUnbind = async (request, response, headers, meta) => {
     userAgent: meta.userAgent,
     origin: meta.origin,
     orderId,
-    qq,
+    qqs: [...new Set(matches.map((record) => record.qq))],
     revokedCount: matches.length,
     licenseIds: matches.map((record) => record.licenseId),
     activationIds: matches.map((record) => record.activationId),
@@ -811,8 +1035,11 @@ const handleSelfUnbind = async (request, response, headers, meta) => {
   sendJson(response, 200, {
     ok: true,
     orderId,
+    releasedAt: revokedAt,
     revokedAt,
     revokedCount: matches.length,
+    releasedCount: matches.length,
+    releasedLicenseIds: [...new Set(matches.map((record) => record.licenseId).filter(Boolean))],
     activeCount: orderEntry.activations.filter((record) => record.revoked !== true).length,
     maxActivations: maxActivationsPerOrder,
     cooldownSeconds: Math.round(selfUnbindCooldownMs / 1000),
@@ -894,7 +1121,7 @@ const listPluginMarketPackages = () => {
 };
 
 const sendPluginMarketList = (response, headers) => {
-  const plugins = listPluginMarketPackages().map(({ filePath, fileName, ...entry }) => entry);
+  const plugins = listPluginMarketPackages().map(({ filePath: _filePath, fileName: _fileName, ...entry }) => entry);
   sendJson(response, 200, {
     ok: true,
     generatedAt: new Date().toISOString(),
@@ -948,8 +1175,12 @@ const server = createServer(async (request, response) => {
   }
   if (request.method !== 'POST' || ![
     '/api/echo-pro/activate',
+    '/api/echo-pro/license/activate',
     '/api/echo-pro/keys/redeem',
+    '/api/echo-pro/license/keys/redeem',
+    '/api/echo-pro/license/keys/activate',
     '/api/echo-pro/license/verify',
+    '/api/echo-pro/license/release-device',
     '/api/echo-pro/unbind',
     '/api/echo-pro/admin/unbind',
   ].includes(path)) {
@@ -965,8 +1196,22 @@ const server = createServer(async (request, response) => {
       await handleActivationVerify(request, response, headers, meta);
       return;
     }
-    if (path === '/api/echo-pro/keys/redeem') {
-      await handleProKeyRedeem(request, response, headers, meta);
+    if (path === '/api/echo-pro/license/release-device') {
+      await handleCurrentDeviceRelease(request, response, headers, meta);
+      return;
+    }
+    if (
+      path === '/api/echo-pro/keys/redeem' ||
+      path === '/api/echo-pro/license/keys/redeem' ||
+      path === '/api/echo-pro/license/keys/activate'
+    ) {
+      await handleProKeyRedeem(
+        request,
+        response,
+        headers,
+        meta,
+        path === '/api/echo-pro/license/keys/activate',
+      );
       return;
     }
     if (path === '/api/echo-pro/unbind') {
@@ -988,15 +1233,22 @@ const server = createServer(async (request, response) => {
     });
     const state = readBindings();
     const orderEntry = normalizeOrderEntry(state, input.orderId);
-    const existing = orderEntry.activations.find((item) => item.revoked !== true && item.bindingProof === bindingProof) ?? null;
+    const existing = findActiveOrderActivationByHwid(orderEntry, input.machineCodeHash);
+    const replacement = findExplicitActivationReplacement(orderEntry, input);
+    if (input.replaceMachineBinding && !replacement) {
+      throw Object.assign(new Error('replacement_proof_rejected'), { status: 403 });
+    }
     const activeCount = orderEntry.activations.filter((item) => item.revoked !== true).length;
-    if (!existing && activeCount >= maxActivationsPerOrder) {
+    if (!existing && activeCount >= maxActivationsPerOrder && !replacement) {
       throw Object.assign(new Error('order_activation_limit_exceeded'), { status: 409 });
     }
 
     const order = await queryAfdianOrder(input.orderId);
     assertOrderEligible(order);
 
+    if (replacement && replacement !== existing) {
+      revokeActivationForIdentityMigration(replacement);
+    }
     record = existing ?? createActivationRecord({
       orderId: input.orderId,
       qq: input.qq,
@@ -1007,6 +1259,11 @@ const server = createServer(async (request, response) => {
     if (record.revoked) {
       throw Object.assign(new Error('license_revoked'), { status: 403 });
     }
+    if (existing && record.qq !== input.qq) {
+      record.qq = input.qq;
+      record.bindingProof = bindingProof;
+      record.updatedAt = new Date().toISOString();
+    }
     record.downloadCount = (record.downloadCount ?? 0) + 1;
     record.lastDownloadAt = new Date().toISOString();
     if (!existing) {
@@ -1014,11 +1271,13 @@ const server = createServer(async (request, response) => {
     }
     writeBindings(state);
 
-    const pluginPackage = buildPluginPackage(record);
+    const nativeLicenseOnly = path === '/api/echo-pro/license/activate';
+    const signedLicense = nativeLicenseOnly ? buildSignedLicense(record) : null;
+    const pluginPackage = nativeLicenseOnly ? null : buildPluginPackage(record);
     const fileName = `echo-pro-${input.orderId}.echo`;
     const activeCountAfterIssue = orderEntry.activations.filter((item) => item.revoked !== true).length;
     auditActivation({
-      event: 'activation_package_issued',
+      event: nativeLicenseOnly ? 'activation_native_license_issued' : 'activation_package_issued',
       status: 200,
       ip,
       userAgent,
@@ -1028,11 +1287,23 @@ const server = createServer(async (request, response) => {
       machineCodeHash: input.machineCodeHash,
       licenseId: record.licenseId,
       activationId: record.activationId,
+      replacedLicenseId: replacement?.licenseId ?? null,
+      replacedActivationId: replacement?.activationId ?? null,
       downloadCount: record.downloadCount,
       activeCount: activeCountAfterIssue,
       maxActivations: maxActivationsPerOrder,
       fileName,
     });
+    if (signedLicense) {
+      sendJson(response, 200, {
+        ok: true,
+        mode: 'afdian',
+        ...signedLicense,
+        activeCount: activeCountAfterIssue,
+        maxActivations: maxActivationsPerOrder,
+      }, headers);
+      return;
+    }
     response.writeHead(200, {
       ...headers,
       'content-type': 'application/octet-stream',
@@ -1077,6 +1348,12 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, host, () => {
-  console.log(`ECHO Pro activation server listening on http://${host}:${port}/api/echo-pro/activate`);
-});
+const isMainModule = process.argv[1]
+  ? import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+  : false;
+
+if (isMainModule) {
+  server.listen(port, host, () => {
+    console.log(`ECHO Pro activation server listening on http://${host}:${port}/api/echo-pro/activate`);
+  });
+}

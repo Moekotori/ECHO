@@ -121,6 +121,14 @@ describe('getRecommendedScanConcurrency', () => {
     expect(performance.coverConcurrency).toBe(4);
   });
 
+  it('uses aggressive but bounded concurrency in ultra mode', () => {
+    expect(getRecommendedScanConcurrency({ mode: 'ultra', cpuCount: 16 })).toMatchObject({
+      metadataConcurrency: 12,
+      coverConcurrency: 6,
+      mode: 'ultra',
+    });
+  });
+
   it('clamps custom concurrency to the safe range', () => {
     expect(
       getRecommendedScanConcurrency({
@@ -137,6 +145,23 @@ describe('getRecommendedScanConcurrency', () => {
 });
 
 describe('LibraryService scan concurrency', () => {
+  it('uses low scan concurrency while low spec mode is enabled without rewriting the saved scan preference', () => {
+    const root = makeTempRoot();
+    const savedSettings = testSettings({ lowSpecModeEnabled: true, scanPerformanceMode: 'performance' });
+    const service = createLibraryService(join(root, 'library.sqlite'), {
+      appSettings: () => savedSettings,
+    });
+
+    try {
+      const diagnostics = service.getDiagnostics();
+
+      expect(diagnostics.scanPerformanceMode).toBe('low');
+      expect(savedSettings.scanPerformanceMode).toBe('performance');
+    } finally {
+      service.close();
+    }
+  });
+
   it('keeps explicit dependency concurrency ahead of recommended settings', () => {
     const root = makeTempRoot();
     const service = createLibraryService(join(root, 'library.sqlite'), {
@@ -170,6 +195,31 @@ describe('LibraryService scan concurrency', () => {
       expect(diagnostics.scanPerformanceMode).toBe('balanced');
       expect(diagnostics.metadataConcurrency).toBeGreaterThan(0);
       expect(diagnostics.coverConcurrency).toBeGreaterThan(0);
+    } finally {
+      service.close();
+    }
+  });
+
+  it('applies a changed scan performance mode to the next scan without recreating the service', () => {
+    const root = makeTempRoot();
+    let settings = testSettings({ scanPerformanceMode: 'low' });
+    const service = createLibraryService(join(root, 'library.sqlite'), {
+      appSettings: () => settings,
+    });
+
+    try {
+      expect(service.getDiagnostics()).toMatchObject({
+        scanPerformanceMode: 'low',
+        metadataConcurrency: 2,
+        coverConcurrency: 1,
+      });
+
+      settings = testSettings({ scanPerformanceMode: 'ultra' });
+      expect(service.getDiagnostics()).toMatchObject({
+        scanPerformanceMode: 'ultra',
+        metadataConcurrency: 12,
+        coverConcurrency: 6,
+      });
     } finally {
       service.close();
     }

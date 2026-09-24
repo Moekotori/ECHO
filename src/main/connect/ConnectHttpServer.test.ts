@@ -78,6 +78,12 @@ describe('Connect HTTP server', () => {
       statusCode: 200,
       message: 'image/jpeg',
     });
+
+    expect(server.releaseSoftMemoryPressure()).toMatchObject({
+      task: 'connect-http-cover-cache',
+      removedEntries: 1,
+      details: { clearedCoverBodies: 1 },
+    });
   });
 
   it('returns a cacheable default cover when no local cover exists', async () => {

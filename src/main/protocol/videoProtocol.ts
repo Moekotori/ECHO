@@ -1,4 +1,5 @@
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { protocol } from 'electron';
 import { getMvService } from '../mv/MvService';
@@ -16,7 +17,19 @@ const parseRange = (rangeHeader: string | null, size: number): { start: number; 
 
   const startText = match[1];
   const endText = match[2];
-  const start = startText ? Number(startText) : 0;
+  if (!startText && !endText) {
+    return null;
+  }
+
+  if (!startText) {
+    const suffixLength = Number(endText);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0 || size <= 0) {
+      return null;
+    }
+    return { start: Math.max(0, size - suffixLength), end: size - 1 };
+  }
+
+  const start = Number(startText);
   const end = endText ? Number(endText) : size - 1;
 
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= size) {
@@ -85,6 +98,7 @@ const fetchUpstreamVariant = async (
   let upstream: Response;
   try {
     upstream = await fetch(variant.url, {
+      method: request.method === 'HEAD' ? 'HEAD' : 'GET',
       headers,
       redirect: 'follow',
     });
@@ -103,7 +117,7 @@ const fetchUpstreamVariant = async (
     return null;
   }
 
-  return new Response(upstream.body, {
+  return new Response(request.method === 'HEAD' ? null : upstream.body, {
     status: upstream.status,
     headers: passthroughHeaders(upstream, variant.mimeType),
   });
@@ -120,30 +134,37 @@ export const registerVideoProtocolHandler = (): void => {
       }
 
       const video = getMvService().getVideoFileForProtocol(videoId);
-      if (!video?.filePath || !video.playableInApp || !existsSync(video.filePath)) {
+      if (!video?.filePath || !video.playableInApp) {
         return new Response('', { status: 404 });
       }
 
-      const fileStat = statSync(video.filePath);
+      const fileStat = await stat(video.filePath);
       if (!fileStat.isFile()) {
         return new Response('', { status: 404 });
       }
 
-      const range = parseRange(request.headers.get('range'), fileStat.size);
+      const rangeHeader = request.headers.get('range');
+      const range = parseRange(rangeHeader, fileStat.size);
       const headers = new Headers({
         'Accept-Ranges': 'bytes',
         'Content-Type': video.mimeType ?? 'application/octet-stream',
         'Cache-Control': 'no-store',
       });
 
+      if (rangeHeader && !range) {
+        headers.set('Content-Length', '0');
+        headers.set('Content-Range', `bytes */${fileStat.size}`);
+        return new Response('', { status: 416, headers });
+      }
+
       if (range) {
         headers.set('Content-Length', String(range.end - range.start + 1));
         headers.set('Content-Range', `bytes ${range.start}-${range.end}/${fileStat.size}`);
-        return new Response(streamBody(video.filePath, range), { status: 206, headers });
+        return new Response(request.method === 'HEAD' ? null : streamBody(video.filePath, range), { status: 206, headers });
       }
 
       headers.set('Content-Length', String(fileStat.size));
-      return new Response(streamBody(video.filePath, null), { headers });
+      return new Response(request.method === 'HEAD' ? null : streamBody(video.filePath, null), { headers });
     } catch {
       return new Response('', { status: 404 });
     }

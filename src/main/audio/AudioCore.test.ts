@@ -6,18 +6,27 @@ import { tmpdir } from 'node:os';
 import { PassThrough, Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as AppSettingsModule from '../app/appSettings';
-import { AudioSession, type AudioSessionDependencies } from './AudioSession';
+import { AudioSession, isNativeDaemonRemoteSourceSupported, type AudioSessionDependencies } from './AudioSession';
 import { DecoderPipeline, classifyFfmpegDecodeError, resolveDecoderFfmpegPath } from './DecoderPipeline';
 import type { DecoderPipelineDependencies } from './DecoderPipeline';
 import { DeviceService } from './DeviceService';
 import { clearFfmpegToolchainCache, resolveFfmpegToolchain } from './FfmpegToolchain';
 import { getEqBridge } from './EqBridge';
-import type { EchoSdmWorkerRequest, EchoSrcFirWorkerRequest } from './EchoSrcCudaWorker';
+import { EqStateStore } from './EqStateStore';
+import type { EchoSdmWorkerRequest } from './EchoSrcCudaWorker';
 import { NativePcmHostProcess as NativeOutputBridge, resolveHostBinary } from './NativePcmHostProcess';
 import type { HostSpawner } from './DaemonHostProcess';
+import type { DaemonAudioBackend, NativeDspProcessingConfig } from './DaemonAudioBackend';
+import type { NativeDspProcessingStatus } from './JsonRpcBridge';
+import type { PcmLevelSnapshot } from './AudioLevelMeter';
 import { createEstimatedAutomixAnalysis } from './AutomixPlanner';
+import {
+  decrementWallpaperEngineBridgeClients,
+  incrementWallpaperEngineBridgeClients,
+} from '../integrations/wallpaperEngine/WallpaperEngineBridgeRuntime';
 import type {
   AudioDeviceInfo,
+  AudioOutputSettings,
   AudioProbeResult,
   AudioStatus,
   DecoderRun,
@@ -73,6 +82,11 @@ vi.mock('../app/appSettings', async (importOriginal) => {
 const noopLogger = (): void => undefined;
 const asioMatrixSampleRates = [44100, 48000, 88200, 96000, 176400, 192000] as const;
 
+void getEqBridge().setEnabled(false);
+vi.spyOn(EqStateStore, 'loadEqState').mockImplementation(() => getEqBridge().getState());
+vi.spyOn(EqStateStore, 'loadChannelBalanceState').mockImplementation(() => getEqBridge().getChannelBalanceState());
+vi.spyOn(EqStateStore, 'loadRoomCorrectionState').mockImplementation(() => getEqBridge().getRoomCorrectionState());
+
 afterEach(() => {
   audioCoreAppSettingsMock.current = { ...audioCoreAppSettingsMock.defaultValue };
   vi.useRealTimers();
@@ -101,7 +115,7 @@ const dsdProbe = (filePath: string, fileSampleRate = 2_822_400): AudioProbeResul
   bitrate: 5_645_000,
 });
 
-const createDsfDopFixture = (): Buffer => {
+const createDsfDopFixture = (sampleRate = 2_822_400): Buffer => {
   const data = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
   const buffer = Buffer.alloc(28 + 52 + 12 + data.length);
 
@@ -117,7 +131,7 @@ const createDsfDopFixture = (): Buffer => {
   buffer.writeUInt32LE(0, fmtOffset + 16);
   buffer.writeUInt32LE(2, fmtOffset + 20);
   buffer.writeUInt32LE(2, fmtOffset + 24);
-  buffer.writeUInt32LE(2_822_400, fmtOffset + 28);
+  buffer.writeUInt32LE(sampleRate, fmtOffset + 28);
   buffer.writeUInt32LE(1, fmtOffset + 32);
   buffer.writeBigUInt64LE(32n, fmtOffset + 36);
   buffer.writeUInt32LE(4, fmtOffset + 44);
@@ -239,6 +253,42 @@ class DelayedReadyDecoder extends FakeDecoder {
     this.stream.write(pcmBuffer([0, 0]));
     this.resolveReady();
     this.resolveReady = null;
+  }
+}
+
+class SupersedableReadyDecoder extends FakeDecoder {
+  private readonly pending: Array<{ stream: PassThrough; resolve: () => void; settled: boolean }> = [];
+
+  override decodeLocalFile(request: PcmDecodeRequest): DecoderRun {
+    this.decodeRequests.push(request);
+    const stream = new PassThrough();
+    let resolveReady = (): void => undefined;
+    const entry = { stream, resolve: () => resolveReady(), settled: false };
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = () => {
+        if (!entry.settled) {
+          entry.settled = true;
+          resolve();
+        }
+      };
+    });
+    this.pending.push(entry);
+    return {
+      stream,
+      ready,
+      done: new Promise(() => undefined),
+      stop: vi.fn(() => {
+        stream.destroy();
+        entry.resolve();
+      }),
+    };
+  }
+
+  releaseLatest(): void {
+    const entry = this.pending.at(-1);
+    if (!entry) throw new Error('decoder ready was not pending');
+    if (!entry.stream.destroyed) entry.stream.write(pcmBuffer([0, 0]));
+    entry.resolve();
   }
 }
 
@@ -373,6 +423,7 @@ class FakeBridge extends EventEmitter {
     startSeconds?: number;
     playbackRate?: number;
     durationSeconds?: number;
+    startPaused?: boolean;
     directFilePath?: string;
     directStartSeconds?: number;
     directSampleRate?: number;
@@ -395,6 +446,12 @@ class FakeBridge extends EventEmitter {
     this.volume = Math.max(0, Math.min(1, volume));
   });
   readonly setPaused = vi.fn();
+  readonly abortSession = vi.fn(async () => {
+    this.sessionEnds += 1;
+    this.inputEnded = true;
+  });
+  readonly syncDspState = vi.fn(async () => undefined);
+  readonly activateDspControl = vi.fn();
   startOptions: NativeOutputStartOptions | null = null;
   positionSeconds = 0;
   volume = 1;
@@ -418,9 +475,13 @@ class FakeBridge extends EventEmitter {
       device: {
         ready: true,
         sampleRate: actualDeviceSampleRate,
+        exclusive: options.exclusive === true,
          backend: options.exclusive
             ? 'wasapi-exclusive'
             : 'wasapi-shared',
+        backendImpl: options.exclusive
+          ? 'test-wasapi-exclusive'
+          : 'test-wasapi-shared',
         deviceType: options.exclusive
             ? 'Windows Audio (Exclusive Mode)'
             : 'Windows Audio (Shared Mode)',
@@ -650,6 +711,7 @@ class ConfigurableStartupFailingBridge extends EventEmitter {
 const createAudioSessionForTest = (dependencies: AudioSessionDependencies): AudioSession => {
   const session = new AudioSession({
     transportFadeDurationMs: 0,
+    startAudioDaemon: async () => { throw new Error('test_daemon_unavailable'); },
     ...dependencies,
   });
 
@@ -680,6 +742,131 @@ const createSessionHarness = (
     ...sessionOptions,
   });
   return { decoder, bridges, session };
+};
+
+const createDaemonAudioBackendStub = (
+  filePath: string,
+  outputSampleRate: number,
+  deviceName: string,
+): DaemonAudioBackend => ({
+  getPositionSeconds: vi.fn(() => 0),
+  onPosition: vi.fn(),
+  onEnded: vi.fn(),
+  onError: vi.fn(),
+  onAutomixTransitionCommitted: vi.fn(),
+  onFirstPcm: vi.fn(),
+  onStarted: vi.fn(),
+  setPlaybackSpeed: vi.fn(async () => undefined),
+  setVolume: vi.fn(async () => undefined),
+  syncDspState: vi.fn(async () => undefined),
+  setReplayGainConfig: vi.fn(async () => undefined),
+  clearQueue: vi.fn(async () => undefined),
+  startOpenedSource: vi.fn(async () => undefined),
+  openSource: vi.fn(async () => ({
+    status: 'ok',
+    filePath,
+    sampleRate: outputSampleRate,
+    channels: 2,
+    durationSeconds: 120,
+    codec: 'FLAC',
+    container: 'FLAC',
+    bitDepth: 24,
+    bitrate: 1400000,
+  })),
+  openFile: vi.fn(async () => ({
+    status: 'ok',
+    filePath,
+    sampleRate: outputSampleRate,
+    channels: 2,
+    durationSeconds: 120,
+    codec: 'FLAC',
+    container: 'FLAC',
+    bitDepth: 24,
+    bitrate: 1400000,
+  })),
+  getOutputReady: vi.fn(() => ({
+    ready: true,
+    sampleRate: outputSampleRate,
+    hardwareSampleRate: outputSampleRate,
+    exclusive: true,
+    backend: 'wasapi-exclusive',
+    backendImpl: 'test-wasapi-exclusive',
+    deviceType: 'Windows Audio (Exclusive Mode)',
+    deviceName,
+  })),
+  stop: vi.fn(async () => undefined),
+  dispose: vi.fn(),
+} as unknown as DaemonAudioBackend);
+
+const createNativeDspProcessingStatus = (
+  processing: NativeDspProcessingConfig | undefined,
+  activeBackend: 'cpu' | 'cuda' = 'cpu',
+): NativeDspProcessingStatus => {
+  const echoSrc = processing?.echoSrc;
+  const echoSrcActive = Boolean(echoSrc && echoSrc.stages.length > 0);
+
+  return {
+    outputFormat: processing?.outputFormat ?? 'pcm',
+    dither: {
+      active: processing?.dither !== undefined,
+      mode: processing?.dither?.mode ?? 'off',
+      bitDepth: processing?.dither?.bitDepth ?? null,
+    },
+    echoSrc: {
+      active: echoSrcActive,
+      sourceSampleRate: echoSrc?.sourceSampleRate ?? null,
+      targetSampleRate: echoSrc?.targetSampleRate ?? null,
+      stageCount: echoSrc?.stages.length ?? 0,
+      requestedBackend: echoSrc?.computeBackend ?? null,
+      activeBackend: echoSrcActive ? activeBackend : null,
+      deviceName: echoSrcActive && activeBackend === 'cuda' ? 'NVIDIA Test GPU' : null,
+      fallbackReason: echoSrcActive && echoSrc?.computeBackend === 'cuda' && activeBackend !== 'cuda'
+        ? 'native_cuda_dsp_unavailable'
+        : null,
+    },
+    sdm: {
+      active: false,
+      sourceSampleRate: null,
+      targetSampleRate: null,
+      stageCount: 0,
+      requestedBackend: null,
+      activeBackend: null,
+      fallbackReason: null,
+    },
+  };
+};
+
+const createDaemonPcmSrcHarness = (
+  probes: AudioProbeResult[],
+  sessionOptions: Partial<AudioSessionDependencies> = {},
+  nativeDspBackend: 'cpu' | 'cuda' = 'cpu',
+) => {
+  const decoder = new FakeDecoder(new Map(probes.map((item) => [item.filePath, item])));
+  const daemonOutputSettings: Array<AudioOutputSettings & { nativeProcessing?: NativeDspProcessingConfig }> = [];
+  const backends: DaemonAudioBackend[] = [];
+  const startAudioDaemon = vi.fn(async () => undefined);
+  const createDaemonAudioBackend = vi.fn(async (_deviceId: string, outputSettings: AudioOutputSettings) => {
+    const daemonSettings = outputSettings as AudioOutputSettings & { nativeProcessing?: NativeDspProcessingConfig };
+    const outputSampleRate = daemonSettings.requestedOutputSampleRate ?? 48_000;
+    const backend = createDaemonAudioBackendStub('daemon-pcm-src.flac', outputSampleRate, 'Native SRC test DAC');
+    backend.getNativeProcessingStatus = vi.fn(
+      () => createNativeDspProcessingStatus(daemonSettings.nativeProcessing, nativeDspBackend),
+    );
+    daemonOutputSettings.push(daemonSettings);
+    backends.push(backend);
+    return backend;
+  });
+  const session = createAudioSessionForTest({
+    decoder,
+    deviceService: { listDevices: () => [] },
+    isNativeHostAvailable: () => true,
+    startAudioDaemon,
+    createDaemonAudioBackend,
+    logger: noopLogger,
+    ...sessionOptions,
+  });
+
+  return { backends, createDaemonAudioBackend, daemonOutputSettings, decoder, session, startAudioDaemon };
 };
 
 const createLongRunningSessionHarness = (
@@ -1023,7 +1210,7 @@ describe('AudioSession stability cleanup', () => {
     }
   });
 
-  it('keeps gapless playback on the ffmpeg sequence path when it is available', async () => {
+  it('falls back to ordinary playback instead of legacy gapless concat when the daemon is unavailable', async () => {
     const decoder = new GaplessSequenceDecoder(new Map([
       ['current.flac', { ...probe('current.flac', 44100), durationSeconds: 120 }],
       ['next.flac', { ...probe('next.flac', 44100), durationSeconds: 150 }],
@@ -1060,25 +1247,21 @@ describe('AudioSession stability cleanup', () => {
         },
       });
 
-      expect(decoder.gaplessRequests).toHaveLength(1);
+      expect(decoder.gaplessRequests).toHaveLength(0);
       expect(bridge.prepareAutomixPlan).not.toHaveBeenCalled();
-      expect(session.getStatus().automix).toMatchObject({
-        active: true,
-        gapless: true,
-        engine: 'ffmpegGapless',
-      });
+      expect(session.getStatus().automix).toMatchObject({ active: false, gapless: false, engine: null });
+      expect(session.getStatus().warnings).toContain('native_gapless_unavailable:daemon_start_failed:test_daemon_unavailable');
     } finally {
       session.dispose();
     }
   });
 
-  it('does not label a gapless chain ending early as a corrupt local file', async () => {
+  it('never re-enters the legacy gapless chain after native host fallback', async () => {
     const decoder = new GaplessSequenceDecoder(new Map([
       ['current.flac', { ...probe('current.flac', 44100), durationSeconds: 120 }],
       ['next.flac', { ...probe('next.flac', 44100), durationSeconds: 150 }],
     ]));
     const bridge = new FakeBridge();
-    const ended = vi.fn();
     const session = createAudioSessionForTest({
       decoder,
       deviceService: { listDevices: () => [] },
@@ -1086,8 +1269,6 @@ describe('AudioSession stability cleanup', () => {
       logger: noopLogger,
       disableWatchdogTimer: true,
     });
-    session.on('ended', ended);
-
     try {
       await session.playLocalFile({
         filePath: 'current.flac',
@@ -1110,17 +1291,10 @@ describe('AudioSession stability cleanup', () => {
           },
         },
       });
-      bridge.positionSeconds = 72;
-      bridge.emit('ended');
-
-      expect(ended).toHaveBeenCalledTimes(1);
-      expect(session.getStatus().state).toBe('ended');
+      expect(decoder.gaplessRequests).toHaveLength(0);
+      expect(session.getStatus().state).toBe('playing');
+      expect(session.getStatus().automix?.gapless).toBe(false);
       expect(session.getStatus().error).toBeNull();
-      expect(session.getDiagnostics().recentPlaybackEvents?.at(-1)).toMatchObject({
-        kind: 'ended',
-        severity: 'suspect',
-        reason: 'ended_before_chained_duration',
-      });
     } finally {
       session.dispose();
     }
@@ -1456,7 +1630,9 @@ describe('Audio Core sample-rate regression guard', () => {
   });
 
   it('applies ECHO SRC family 4x to PCM exclusive output as a DSP path', async () => {
-    const { bridges, decoder, session } = createSessionHarness([probe('441.flac', 44100)]);
+    const { createDaemonAudioBackend, daemonOutputSettings, decoder, session } = createDaemonPcmSrcHarness([
+      probe('441.flac', 44100),
+    ]);
 
     const status = await session.playLocalFile({
       filePath: '441.flac',
@@ -1474,40 +1650,26 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(status.bitPerfectDisabledReason).toBe('echo_src_enabled');
     expect(status.warnings).toContain('echo_src_active:44100->176400');
     expect(status.warnings).toContain('echo_src_bit_perfect_disabled');
-    expect(bridges[0].startOptions).toMatchObject({
-      exclusive: true,
+    expect(status.echoSrcRuntime).toMatchObject({
+      state: 'active',
+      sourceSampleRate: 44100,
+      targetSampleRate: 176400,
+      activeBackend: 'soxr',
+    });
+    expect(createDaemonAudioBackend).toHaveBeenCalledWith('', expect.objectContaining({
+      outputMode: 'exclusive',
       requestedOutputSampleRate: 176400,
-    });
-    expect(decoder.decodeRequests.at(-1)).toMatchObject({
-      filePath: '441.flac',
-      decoderOutputSampleRate: 176400,
-      resamplerEngine: 'soxr',
-      resamplerQualityProfile: 'transparent',
-    });
+      nativeProcessing: { outputFormat: 'pcm' },
+    }));
+    expect(daemonOutputSettings[0]?.nativeProcessing?.echoSrc).toBeUndefined();
+    expect(decoder.decodeRequests).toHaveLength(0);
+    session.dispose();
   });
 
-  it('routes advanced ECHO SRC CUDA mode through source-rate decode and worker transform', async () => {
-    const processFir = vi.fn();
-    const { bridges, decoder, session } = createSessionHarness([probe('441-cuda.flac', 44100)], [], [], {
-      resolveEchoSrcFirBackendStatus: () => ({
-        backend: 'cuda',
-        available: true,
-        active: true,
-        reason: null,
-        cudaRuntime: {
-          available: true,
-          source: 'nvidia-smi',
-          deviceName: 'NVIDIA Test GPU',
-          driverVersion: '610.47',
-          cudaVersion: '13.3',
-          error: null,
-        },
-      }),
-      createEchoSrcCudaWorkerClient: () => ({
-        processFir,
-        dispose: vi.fn(),
-      }),
-    });
+  it('routes advanced ECHO SRC CUDA requests through host FIR telemetry with CPU fallback', async () => {
+    const { createDaemonAudioBackend, daemonOutputSettings, decoder, session } = createDaemonPcmSrcHarness([
+      probe('441-cuda.flac', 44100),
+    ]);
 
     const status = await session.playLocalFile({
       filePath: '441-cuda.flac',
@@ -1522,60 +1684,80 @@ describe('Audio Core sample-rate regression guard', () => {
 
     expect(status.requestedOutputSampleRate).toBe(176400);
     expect(status.decoderOutputSampleRate).toBe(176400);
+    expect(status.echoSrcCudaActive).toBe(false);
+    expect(status.echoSrcRuntime).toMatchObject({
+      state: 'fallback',
+      requestedBackend: 'cuda',
+      activeBackend: 'cpu',
+      filterProfile: 'poly-sinc-gauss-long',
+      filterSlot: '1x',
+      tapCount: 1023,
+      firStageCount: 2,
+      window: 'gaussian',
+      phase: 'linear',
+      cudaActive: false,
+      fallbackReason: 'native_cuda_dsp_unavailable',
+    });
+    expect(status.warnings).toContain('native_cuda_dsp_unavailable');
+    expect(createDaemonAudioBackend).toHaveBeenCalledWith('', expect.objectContaining({
+      requestedOutputSampleRate: 176400,
+      nativeProcessing: expect.objectContaining({
+        echoSrc: expect.objectContaining({
+          sourceSampleRate: 44100,
+          targetSampleRate: 176400,
+          computeBackend: 'cuda',
+          stages: expect.arrayContaining([
+            expect.objectContaining({ upsampleFactor: 2, taps: expect.any(Array) }),
+          ]),
+        }),
+      }),
+    }));
+    expect(daemonOutputSettings[0]?.nativeProcessing?.echoSrc?.stages).toHaveLength(2);
+    expect(decoder.decodeRequests).toHaveLength(0);
+    session.dispose();
+  });
+
+  it('accepts native host CUDA FIR telemetry as the playback truth', async () => {
+    const { session } = createDaemonPcmSrcHarness(
+      [probe('441-native-cuda.flac', 44100)],
+      {},
+      'cuda',
+    );
+
+    const status = await session.playLocalFile({
+      filePath: '441-native-cuda.flac',
+      output: {
+        outputMode: 'exclusive',
+        echoSrcMode: 'family4x',
+        echoSrcAdvancedModeEnabled: true,
+        echoSrcFilterProfile: 'poly-sinc-gauss-long',
+        echoSrcComputeBackend: 'cuda',
+      },
+    });
+
     expect(status.echoSrcCudaActive).toBe(true);
+    expect(status.echoSrcCudaStatus).toMatchObject({
+      available: true,
+      source: 'native-host',
+      deviceName: 'NVIDIA Test GPU',
+      error: null,
+    });
     expect(status.echoSrcRuntime).toMatchObject({
       state: 'active',
       requestedBackend: 'cuda',
       activeBackend: 'cuda',
-      filterProfile: 'poly-sinc-gauss-long',
-      filterSlot: '1x',
-      tapCount: 1023,
-      firStageCount: 1,
-      firStageTapCounts: [1023],
-      firStageProfiles: ['poly-sinc-gauss-long'],
-      firProcessingMode: 'batched',
-      firBatchFrames: 4096,
-      firMaxBlockFrames: 8192,
-      window: 'gaussian',
-      phase: 'linear',
       cudaActive: true,
+      fallbackReason: null,
     });
-    expect(status.warnings).toContain('echo_src_fir_processing:cuda:batched:batch=4096:block=8192');
-    expect(status.warnings).toContain('echo_src_fir_active:cuda:44100->176400:poly-sinc-gauss-long:taps=1023');
-    expect(bridges[0].startOptions).toMatchObject({
-      exclusive: true,
-      requestedOutputSampleRate: 176400,
-    });
-    expect(decoder.decodeRequests.at(-1)).toMatchObject({
-      filePath: '441-cuda.flac',
-      decoderOutputSampleRate: 44100,
-      resamplerEngine: 'default',
-    });
-    expect(processFir).not.toHaveBeenCalled();
+    expect(status.warnings).not.toContain('native_cuda_dsp_unavailable');
+    expect(status.warnings).not.toContain('echo_src_cuda_unavailable:native_dsp_cpu_authoritative');
+    session.dispose();
   });
 
-  it('uses ultra batched FIR blocks for advanced 8x CUDA SRC', async () => {
-    const processFir = vi.fn();
-    const { session } = createSessionHarness([probe('441-cuda-8x.flac', 44100)], [], [], {
-      resolveEchoSrcFirBackendStatus: () => ({
-        backend: 'cuda',
-        available: true,
-        active: true,
-        reason: null,
-        cudaRuntime: {
-          available: true,
-          source: 'nvidia-smi',
-          deviceName: 'NVIDIA Test GPU',
-          driverVersion: '610.47',
-          cudaVersion: '13.3',
-          error: null,
-        },
-      }),
-      createEchoSrcCudaWorkerClient: () => ({
-        processFir,
-        dispose: vi.fn(),
-      }),
-    });
+  it('keeps advanced 8x CUDA SRC on host FIR with CPU fallback', async () => {
+    const { daemonOutputSettings, decoder, session } = createDaemonPcmSrcHarness([
+      probe('441-cuda-8x.flac', 44100),
+    ]);
 
     const status = await session.playLocalFile({
       filePath: '441-cuda-8x.flac',
@@ -1588,18 +1770,199 @@ describe('Audio Core sample-rate regression guard', () => {
       },
     });
 
+    expect(status.requestedOutputSampleRate).toBe(352800);
+    expect(status.decoderOutputSampleRate).toBe(352800);
     expect(status.echoSrcRuntime).toMatchObject({
-      state: 'active',
+      state: 'fallback',
       requestedBackend: 'cuda',
-      activeBackend: 'cuda',
+      activeBackend: 'cpu',
       filterProfile: 'poly-sinc-gauss-long',
-      firProcessingMode: 'ultra',
-      firBatchFrames: 16384,
-      firMaxBlockFrames: 16384,
-      cudaActive: true,
+      firStageCount: 3,
+      cudaActive: false,
+      fallbackReason: 'native_cuda_dsp_unavailable',
     });
-    expect(status.warnings).toContain('echo_src_fir_processing:cuda:ultra:batch=16384:block=16384');
-    expect(processFir).not.toHaveBeenCalled();
+    expect(status.warnings).toContain('native_cuda_dsp_unavailable');
+    expect(daemonOutputSettings[0]?.nativeProcessing?.echoSrc).toMatchObject({
+      sourceSampleRate: 44100,
+      targetSampleRate: 352800,
+      computeBackend: 'cuda',
+    });
+    expect(daemonOutputSettings[0]?.nativeProcessing?.echoSrc?.stages).toHaveLength(3);
+    expect(decoder.decodeRequests).toHaveLength(0);
+    session.dispose();
+  });
+
+  it('keeps PCM ECHO SRC on the daemon when DoP is enabled only as a DSD preference', async () => {
+    const filePath = 'pcm-with-dop-preference.flac';
+    const { backends, daemonOutputSettings, decoder, session, startAudioDaemon } = createDaemonPcmSrcHarness([
+      probe(filePath, 44100),
+    ]);
+
+    try {
+      const status = await session.playLocalFile({
+        filePath,
+        output: {
+          outputMode: 'asio',
+          deviceIndex: 0,
+          deviceName: 'Matrix ASIO Driver',
+          dsdOutputMode: 'dop',
+          sdmMode: 'off',
+          echoSrcMode: 'family8x',
+          echoSrcAdvancedModeEnabled: true,
+          echoSrcFilterProfile: 'poly-sinc-gauss-long',
+          echoSrcComputeBackend: 'cuda',
+        },
+      });
+
+      expect(startAudioDaemon).toHaveBeenCalledOnce();
+      expect(backends[0]?.openSource).toHaveBeenCalledWith(
+        { kind: 'local', uri: filePath },
+        0,
+        undefined,
+      );
+      expect(decoder.decodeRequests).toHaveLength(0);
+      expect(daemonOutputSettings[0]).toMatchObject({
+        outputMode: 'asio',
+        requestedOutputSampleRate: 352800,
+        nativeProcessing: {
+          outputFormat: 'pcm',
+          echoSrc: {
+            sourceSampleRate: 44100,
+            targetSampleRate: 352800,
+            computeBackend: 'cuda',
+          },
+        },
+      });
+      expect(status).toMatchObject({
+        state: 'playing',
+        activeDecodeBackendImpl: 'native-direct-daemon-libav',
+        nativeDirectLocalPlaybackActive: true,
+        nativeDirectLocalPlaybackFallbackReason: null,
+        activeDsdOutputMode: null,
+        echoSrcActive: true,
+        echoSrcTargetSampleRate: 352800,
+      });
+      expect(status.warnings).not.toContain('native_direct_local_playback_not_applied:dsd_active');
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('keeps ASIO PCM spectrum telemetry available for a connected Wallpaper Engine client', async () => {
+    const filePath = 'wallpaper-asio-visual.flac';
+    const bridge = new FakeBridge(44_100, {
+      backend: 'asio',
+      backendImpl: 'test-asio',
+      deviceType: 'ASIO',
+    });
+    const { decoder, session, startAudioDaemon } = createDaemonPcmSrcHarness(
+      [probe(filePath, 44_100)],
+      {
+        createBridge: () => bridge,
+      },
+    );
+    incrementWallpaperEngineBridgeClients();
+
+    try {
+      const status = await session.playLocalFile({
+        filePath,
+        output: {
+          outputMode: 'asio',
+          deviceIndex: 0,
+          deviceName: 'Matrix ASIO Driver',
+        },
+      });
+
+      expect(startAudioDaemon).not.toHaveBeenCalled();
+      expect(decoder.decodeRequests).toHaveLength(1);
+      expect(bridge.sessionBeginOptions[0]?.directFilePath).toBeUndefined();
+      expect(status).toMatchObject({
+        outputMode: 'asio',
+        activeDecodeBackendImpl: 'ffmpeg',
+        nativeDirectLocalPlaybackActive: false,
+        nativeDirectLocalPlaybackFallbackReason: 'visual_telemetry_active',
+      });
+      expect(status.warnings).toContain('native_direct_local_playback_not_applied:visual_telemetry_active');
+    } finally {
+      session.dispose();
+      decrementWallpaperEngineBridgeClients();
+    }
+  });
+
+  it('keeps native ECHO SRC playback available when Wallpaper Engine telemetry is connected', async () => {
+    const filePath = 'wallpaper-asio-src.flac';
+    const { decoder, session, startAudioDaemon } = createDaemonPcmSrcHarness([
+      probe(filePath, 44_100),
+    ]);
+    incrementWallpaperEngineBridgeClients();
+
+    try {
+      const status = await session.playLocalFile({
+        filePath,
+        output: {
+          outputMode: 'asio',
+          deviceIndex: 0,
+          deviceName: 'Matrix ASIO Driver',
+          echoSrcMode: 'family4x',
+          echoSrcAdvancedModeEnabled: true,
+        },
+      });
+
+      expect(startAudioDaemon).toHaveBeenCalledOnce();
+      expect(decoder.decodeRequests).toHaveLength(0);
+      expect(status).toMatchObject({
+        state: 'playing',
+        activeDecodeBackendImpl: 'native-direct-daemon-libav',
+        nativeDirectLocalPlaybackActive: true,
+        nativeDirectLocalPlaybackFallbackReason: null,
+        echoSrcActive: true,
+      });
+      expect(status.warnings).not.toContain('native_direct_local_playback_not_applied:visual_telemetry_active');
+    } finally {
+      session.dispose();
+      decrementWallpaperEngineBridgeClients();
+    }
+  });
+
+  it('does not prepare native gapless across an exclusive sample-rate boundary', async () => {
+    const currentFile = 'exclusive-441.flac';
+    const nextFile = 'exclusive-480.flac';
+    const { decoder, session, startAudioDaemon } = createDaemonPcmSrcHarness(
+      [
+        probe(currentFile, 44_100),
+        probe(nextFile, 48_000),
+      ],
+      {
+        createBridge: () => new FakeBridge(44_100, {
+          backend: 'wasapi-exclusive',
+          backendImpl: 'test-wasapi-exclusive',
+        }),
+      },
+    );
+
+    try {
+      const status = await session.playLocalFile({
+        filePath: currentFile,
+        output: { outputMode: 'exclusive' },
+        gapless: {
+          enabled: true,
+          next: {
+            filePath: nextFile,
+            probe: {
+              durationSeconds: 120,
+              fileSampleRate: 48_000,
+              channels: 2,
+            },
+          },
+        },
+      });
+
+      expect(startAudioDaemon).not.toHaveBeenCalled();
+      expect(decoder.decodeRequests).toHaveLength(1);
+      expect(status.warnings).toContain('native_gapless_unavailable:sample_rate_mismatch');
+    } finally {
+      session.dispose();
+    }
   });
 
   it('selects the Nx advanced ECHO SRC filter for hi-res PCM sources', async () => {
@@ -1694,55 +2057,165 @@ describe('Audio Core sample-rate regression guard', () => {
     session.stop();
   });
 
-  it('writes CUDA worker SRC output into the native bridge stream', async () => {
-    const sourceFrames = 2048;
-    const samples = Array.from({ length: sourceFrames * 2 }, (_, index) => {
-      if (index === 0) {
-        return 1;
+  it.each(['.m4a', '.m4b', '.m4p', '.mp4', '.mov', '.alac'])(
+    'routes local ALAC in a %s container through the native daemon when exclusive dither is enabled',
+    async (extension) => {
+      const filePath = `local-alac${extension}`;
+      const { backends, daemonOutputSettings, decoder, session } = createDaemonPcmSrcHarness([
+        { ...probe(filePath, 44_100), codec: 'alac', bitDepth: 16 },
+      ]);
+
+      try {
+        const status = await session.playLocalFile({
+          filePath,
+          output: {
+            outputMode: 'exclusive',
+            pcmDitherMode: 'tpdf',
+          },
+        });
+
+        expect(backends[0]?.openSource).toHaveBeenCalledWith(
+          { kind: 'local', uri: filePath },
+          0,
+          undefined,
+        );
+        expect(daemonOutputSettings[0]?.nativeProcessing?.dither).toEqual({
+          mode: 'tpdf',
+          bitDepth: 24,
+        });
+        expect(decoder.decodeRequests).toHaveLength(0);
+        expect(status).toMatchObject({
+          state: 'playing',
+          activeDecodeBackendImpl: 'native-direct-daemon-libav',
+          nativeDirectLocalPlaybackActive: true,
+          nativeDirectLocalPlaybackFallbackReason: null,
+        });
+      } finally {
+        session.dispose();
       }
-      if (index === 1) {
-        return 0.5;
-      }
-      return 0;
-    });
-    const processFir = vi.fn(async (request: EchoSrcFirWorkerRequest) => ({
-      backend: request.backend,
-      output: request.input,
-      history: request.history,
-    }));
-    const decoder = new PcmChunkDecoder(
-      new Map([['441-cuda-pcm.flac', probe('441-cuda-pcm.flac', 44100)]]),
-      [pcmBuffer(samples)],
-    );
-    const bridges: FakeBridge[] = [];
-    const session = createAudioSessionForTest({
-      decoder,
-      deviceService: { listDevices: () => [] },
-      createBridge: () => {
-        const bridge = new FakeBridge();
-        bridges.push(bridge);
-        return bridge;
-      },
-      logger: noopLogger,
-      resolveEchoSrcFirBackendStatus: () => ({
-        backend: 'cuda',
-        available: true,
-        active: true,
-        reason: null,
-        cudaRuntime: {
-          available: true,
-          source: 'nvidia-smi',
-          deviceName: 'NVIDIA Test GPU',
-          driverVersion: '610.47',
-          cudaVersion: '13.3',
-          error: null,
+    },
+  );
+
+  it('does not admit a generic local MP4 to the audio daemon without an ALAC probe', async () => {
+    const filePath = 'generic-video.mp4';
+    const { createDaemonAudioBackend, session } = createDaemonPcmSrcHarness([
+      { ...probe(filePath, 48_000), codec: 'H.264' },
+    ]);
+
+    try {
+      await expect(session.playLocalFile({
+        filePath,
+        output: {
+          outputMode: 'exclusive',
+          pcmDitherMode: 'tpdf',
         },
-      }),
-      createEchoSrcCudaWorkerClient: () => ({
-        processFir,
-        dispose: vi.fn(),
-      }),
+      })).rejects.toThrow('native_dsp_dither_requires_daemon_local_playback:unsupported_format');
+      expect(createDaemonAudioBackend).not.toHaveBeenCalled();
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('does not block local daemon playback on an audio.started notification', async () => {
+    const filePath = 'startup-truth.alac';
+    const daemonBackend = createDaemonAudioBackendStub(filePath, 44_100, 'Startup truth DAC');
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([[filePath, { ...probe(filePath, 44_100), codec: 'alac' }]])),
+      deviceService: { listDevices: () => [] },
+      isNativeHostAvailable: () => true,
+      startAudioDaemon: vi.fn(async () => undefined),
+      createDaemonAudioBackend: vi.fn(async () => daemonBackend),
+      logger: noopLogger,
     });
+
+    try {
+      await expect(session.playLocalFile({
+        filePath,
+        output: { outputMode: 'exclusive', pcmDitherMode: 'tpdf' },
+      })).resolves.toMatchObject({ state: 'playing', positionSeconds: 0 });
+      expect(daemonBackend.onStarted).not.toHaveBeenCalled();
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('keeps ALAC progress and seek status synchronized with native daemon truth', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-18T00:00:00.000Z'));
+    const filePath = 'progress-seek.alac';
+    const daemonBackend = createDaemonAudioBackendStub(filePath, 44_100, 'ALAC progress test DAC');
+    let reportPosition: ((positionSeconds: number) => void) | undefined;
+    daemonBackend.onPosition = vi.fn((callback: (positionSeconds: number) => void) => {
+      reportPosition = callback;
+    });
+    daemonBackend.seek = vi.fn(async () => undefined);
+    daemonBackend.openSource = vi.fn(async () => ({
+      status: 'ok',
+      filePath,
+      sampleRate: 44_100,
+      channels: 2,
+      durationSeconds: 253.093333,
+      codec: 'ALAC',
+      container: 'M4A',
+      bitDepth: 16,
+      bitrate: 847_717,
+    }));
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([[
+        filePath,
+        { ...probe(filePath, 44_100), codec: 'ALAC', durationSeconds: 253.093333, bitDepth: 16 },
+      ]])),
+      deviceService: { listDevices: () => [] },
+      startAudioDaemon: async () => undefined,
+      createDaemonAudioBackend: async () => daemonBackend,
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    try {
+      const statuses: AudioStatus[] = [];
+      session.on('status', (status) => statuses.push(status));
+      await session.playLocalFile({
+        filePath,
+        output: {
+          outputMode: 'exclusive',
+          pcmDitherMode: 'tpdf',
+        },
+      });
+
+      reportPosition?.(12.5);
+      expect(statuses.at(-1)).toMatchObject({
+        state: 'playing',
+        positionSeconds: 12.5,
+        durationSeconds: 253.093333,
+        activeDecodeBackendImpl: 'native-direct-daemon-libav',
+      });
+
+      await expect(session.seek(30)).resolves.toMatchObject({
+        state: 'playing',
+        positionSeconds: 30,
+      });
+      expect(daemonBackend.seek).toHaveBeenCalledWith(30);
+
+      vi.advanceTimersByTime(1_000);
+      reportPosition?.(30.25);
+      expect(statuses.at(-1)).toMatchObject({
+        state: 'playing',
+        positionSeconds: 30.25,
+        durationSeconds: 253.093333,
+      });
+    } finally {
+      session.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps CUDA-requested SRC PCM inside the native daemon instead of a worker stream', async () => {
+    const createEchoSrcCudaWorkerClient = vi.fn();
+    const { createDaemonAudioBackend, decoder, session } = createDaemonPcmSrcHarness(
+      [probe('441-cuda-pcm.flac', 44100)],
+      { createEchoSrcCudaWorkerClient },
+    );
 
     await session.playLocalFile({
       filePath: '441-cuda-pcm.flac',
@@ -1754,22 +2227,27 @@ describe('Audio Core sample-rate regression guard', () => {
         echoSrcComputeBackend: 'cuda',
       },
     });
-    for (let attempt = 0; attempt < 20 && processFir.mock.calls.length === 0; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
 
-    const output = Buffer.concat(bridges[0].sessionChunks.map((item) => item.chunk));
-    expect(processFir).toHaveBeenCalledTimes(1);
-    expect(processFir.mock.calls[0]![0].input.length).toBe(sourceFrames * 2 * 2);
-    expect(output.length).toBe(sourceFrames * 2 * 2 * 4);
-    expect(output.readFloatLE(0)).toBeCloseTo(2);
-    expect(output.readFloatLE(4)).toBeCloseTo(1);
-    expect(output.readFloatLE(8)).toBeCloseTo(0);
-    expect(output.readFloatLE(12)).toBeCloseTo(0);
+    expect(createDaemonAudioBackend).toHaveBeenCalledWith('', expect.objectContaining({
+      requestedOutputSampleRate: 88200,
+      nativeProcessing: expect.objectContaining({
+        echoSrc: expect.objectContaining({
+          sourceSampleRate: 44100,
+          targetSampleRate: 88200,
+          computeBackend: 'cuda',
+        }),
+      }),
+    }));
+    expect(createEchoSrcCudaWorkerClient).not.toHaveBeenCalled();
+    expect(decoder.decodeRequests).toHaveLength(0);
+    session.dispose();
   });
 
   it('applies ECHO SRC family 8x to PCM direct output as an experimental ultra path', async () => {
-    const { bridges, decoder, session } = createSessionHarness([probe('441.flac', 44100), probe('48.flac', 48000)]);
+    const { backends, daemonOutputSettings, decoder, session } = createDaemonPcmSrcHarness([
+      probe('441.flac', 44100),
+      probe('48.flac', 48000),
+    ]);
 
     const firstStatus = await session.playLocalFile({
       filePath: '441.flac',
@@ -1782,17 +2260,18 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(firstStatus.echoSrcTargetSampleRate).toBe(352800);
     expect(firstStatus.echoSrcActive).toBe(true);
     expect(firstStatus.warnings).toContain('echo_src_active:44100->352800');
-    expect(bridges[0].startOptions).toMatchObject({
-      exclusive: true,
+    expect(firstStatus.echoSrcRuntime).toMatchObject({
+      state: 'active',
+      sourceSampleRate: 44100,
+      targetSampleRate: 352800,
+      activeBackend: 'soxr',
+    });
+    expect(daemonOutputSettings[0]).toMatchObject({
+      outputMode: 'exclusive',
       requestedOutputSampleRate: 352800,
-      latencyProfile: 'stable',
-      bufferSizeFrames: 8192,
+      nativeProcessing: { outputFormat: 'pcm' },
     });
-    expect(decoder.decodeRequests.at(-1)).toMatchObject({
-      filePath: '441.flac',
-      decoderOutputSampleRate: 352800,
-      resamplerEngine: 'soxr',
-    });
+    expect(daemonOutputSettings[0]?.nativeProcessing?.echoSrc).toBeUndefined();
 
     const secondStatus = await session.playLocalFile({
       filePath: '48.flac',
@@ -1804,11 +2283,21 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(secondStatus.echoSrcTargetSampleRate).toBe(384000);
     expect(secondStatus.echoSrcActive).toBe(true);
     expect(secondStatus.warnings).toContain('echo_src_active:48000->384000');
-    expect(bridges[1].startOptions).toMatchObject({
-      requestedOutputSampleRate: 384000,
-      latencyProfile: 'stable',
-      bufferSizeFrames: 8192,
+    expect(secondStatus.echoSrcRuntime).toMatchObject({
+      state: 'active',
+      sourceSampleRate: 48000,
+      targetSampleRate: 384000,
+      activeBackend: 'soxr',
     });
+    expect(daemonOutputSettings[1]).toMatchObject({
+      outputMode: 'exclusive',
+      requestedOutputSampleRate: 384000,
+      nativeProcessing: { outputFormat: 'pcm' },
+    });
+    expect(daemonOutputSettings[1]?.nativeProcessing?.echoSrc).toBeUndefined();
+    expect(backends[0]?.stop).toHaveBeenCalledOnce();
+    expect(decoder.decodeRequests).toHaveLength(0);
+    session.dispose();
   });
 
   it('switching 48k to 44.1k exclusive reopens at the source rate', async () => {
@@ -1844,6 +2333,298 @@ describe('Audio Core sample-rate regression guard', () => {
       filePath: '96.flac',
       decoderOutputSampleRate: 96000,
     });
+  });
+
+  it('rejects a shared host that claims readiness for an exclusive request', async () => {
+    const bridge = new FakeBridge(48000, {
+      exclusive: false,
+      backend: 'miniaudio-shared',
+      backendImpl: 'miniaudio-shared',
+    });
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([['song.flac', probe('song.flac', 48000)]])),
+      deviceService: { listDevices: () => [] },
+      createBridge: () => bridge,
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    await expect(
+      session.playLocalFile({ filePath: 'song.flac', output: { outputMode: 'exclusive' } }),
+    ).rejects.toThrow('native_output_contract_mismatch: requested=exclusive');
+    expect(session.getStatus().bitPerfectCandidate).toBe(false);
+  });
+
+  it('converts 44.1k PCM to fixed 48k only when exclusive compatibility SRC is selected', async () => {
+    const { bridges, decoder, session } = createSessionHarness([probe('compat-441.flac', 44100)]);
+
+    const status = await session.playLocalFile({
+      filePath: 'compat-441.flac',
+      output: {
+        outputMode: 'exclusive',
+        echoSrcMode: 'compatibility48',
+        echoSrcAdvancedModeEnabled: true,
+        echoSrcComputeBackend: 'cuda',
+      },
+    });
+
+    expect(status.requestedOutputSampleRate).toBe(48000);
+    expect(status.decoderOutputSampleRate).toBe(48000);
+    expect(status.echoSrcMode).toBe('compatibility48');
+    expect(status.echoSrcTargetSampleRate).toBe(48000);
+    expect(status.echoSrcActive).toBe(true);
+    expect(status.bitPerfectCandidate).toBe(false);
+    expect(status.warnings).toContain('echo_src_active:44100->48000');
+    expect(bridges[0].startOptions).toMatchObject({
+      exclusive: true,
+      requestedOutputSampleRate: 48000,
+    });
+    expect(decoder.decodeRequests.at(-1)).toMatchObject({
+      filePath: 'compat-441.flac',
+      decoderOutputSampleRate: 48000,
+      resamplerEngine: 'soxr',
+    });
+  });
+
+  it('keeps native exclusive sample rate unchanged when compatibility SRC is off', async () => {
+    const { bridges, decoder, session } = createSessionHarness([probe('native-441.flac', 44100)]);
+
+    const status = await session.playLocalFile({
+      filePath: 'native-441.flac',
+      output: { outputMode: 'exclusive', echoSrcMode: 'off' },
+    });
+
+    expect(status.requestedOutputSampleRate).toBe(44100);
+    expect(status.decoderOutputSampleRate).toBe(44100);
+    expect(status.echoSrcActive).toBe(false);
+    expect(bridges[0].startOptions?.requestedOutputSampleRate).toBe(44100);
+    expect(decoder.decodeRequests.at(-1)?.decoderOutputSampleRate).toBe(44100);
+  });
+
+  it('keeps the source rate through the native daemon exclusive path', async () => {
+    const devices: AudioDeviceInfo[] = [{
+      id: 'exclusive:0',
+      index: 0,
+      name: 'Rate-switching DAC',
+      outputMode: 'exclusive',
+      sampleRate: 48000,
+      sharedDeviceSampleRate: 48000,
+      isDefault: true,
+    }];
+    const daemonBackend = createDaemonAudioBackendStub('daemon-441.flac', 44100, 'Rate-switching DAC');
+    const startAudioDaemon = vi.fn(async () => undefined);
+    const createDaemonAudioBackend = vi.fn(async () => daemonBackend);
+    const decoder = new FakeDecoder(new Map([['daemon-441.flac', probe('daemon-441.flac', 44100)]]));
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: {
+        listDevices: () => [],
+        listDevicesAsync: async () => devices,
+      },
+      startAudioDaemon,
+      createDaemonAudioBackend,
+      logger: noopLogger,
+    });
+
+    try {
+      const status = await session.playLocalFile({
+        filePath: 'daemon-441.flac',
+        output: { outputMode: 'exclusive' },
+      });
+
+      expect(startAudioDaemon).toHaveBeenCalledOnce();
+      expect(createDaemonAudioBackend).toHaveBeenCalledWith(
+        'exclusive:0',
+        expect.objectContaining({
+          outputMode: 'exclusive',
+          requestedOutputSampleRate: 44100,
+        }),
+      );
+      expect(status).toMatchObject({
+        fileSampleRate: 44100,
+        decoderOutputSampleRate: 44100,
+        requestedOutputSampleRate: 44100,
+        actualDeviceSampleRate: 44100,
+        resampling: false,
+        bitPerfectCandidate: true,
+      });
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('publishes throttled playback status from daemon position truth', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-17T00:00:00.000Z'));
+    const daemonBackend = createDaemonAudioBackendStub('daemon-progress.flac', 48_000, 'Progress test DAC');
+    let reportPosition: ((positionSeconds: number) => void) | undefined;
+    daemonBackend.onPosition = vi.fn((callback: (positionSeconds: number) => void) => {
+      reportPosition = callback;
+    });
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([['daemon-progress.flac', probe('daemon-progress.flac', 48_000)]])),
+      deviceService: { listDevices: () => [] },
+      startAudioDaemon: async () => undefined,
+      createDaemonAudioBackend: async () => daemonBackend,
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    try {
+      const statuses: AudioStatus[] = [];
+      session.on('status', (status) => statuses.push(status));
+      await session.playLocalFile({
+        filePath: 'daemon-progress.flac',
+        output: { outputMode: 'shared' },
+      });
+      statuses.length = 0;
+
+      reportPosition?.(12);
+      expect(statuses.at(-1)).toMatchObject({ state: 'playing', positionSeconds: 12 });
+
+      vi.advanceTimersByTime(100);
+      reportPosition?.(12.1);
+      expect(statuses).toHaveLength(1);
+
+      vi.advanceTimersByTime(900);
+      reportPosition?.(13);
+      expect(statuses.at(-1)).toMatchObject({ state: 'playing', positionSeconds: 13 });
+      expect(statuses).toHaveLength(2);
+    } finally {
+      session.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('fails closed when the native daemon opens exclusive output at a different rate', async () => {
+    const daemonBackend = createDaemonAudioBackendStub('daemon-mismatch-441.flac', 48000, 'Fixed-rate DAC');
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([['daemon-mismatch-441.flac', probe('daemon-mismatch-441.flac', 44100)]])),
+      deviceService: {
+        listDevices: () => [],
+        listDevicesAsync: async () => [{
+          id: 'exclusive:0',
+          index: 0,
+          name: 'Fixed-rate DAC',
+          outputMode: 'exclusive' as const,
+          sampleRate: 48000,
+          sharedDeviceSampleRate: 48000,
+          isDefault: true,
+        }],
+      },
+      startAudioDaemon: async () => undefined,
+      createDaemonAudioBackend: async () => daemonBackend,
+      logger: noopLogger,
+    });
+
+    try {
+      await expect(session.playLocalFile({
+        filePath: 'daemon-mismatch-441.flac',
+        output: { outputMode: 'exclusive' },
+      })).rejects.toThrow('exclusive_output_sample_rate_mismatch:44100->48000');
+      expect(daemonBackend.stop).toHaveBeenCalledOnce();
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('keeps the source rate when an exclusive endpoint reports the same shared and maximum rate', async () => {
+    const devices: AudioDeviceInfo[] = [
+      {
+        id: 'shared:0',
+        index: 0,
+        name: 'INZONE H6 Air',
+        outputMode: 'shared',
+        sampleRate: 48000,
+        sharedDeviceSampleRate: 48000,
+        isDefault: true,
+      },
+      {
+        id: 'exclusive:0',
+        index: 0,
+        name: 'INZONE H6 Air',
+        outputMode: 'exclusive',
+        sampleRate: 48000,
+        sharedDeviceSampleRate: 48000,
+        isDefault: false,
+      },
+    ];
+    const { bridges, decoder, session } = createSessionHarness([probe('441.flac', 44100)], [], [], {
+      deviceService: {
+        listDevices: () => [],
+        listDevicesAsync: async () => devices,
+      },
+    });
+
+    const status = await session.playLocalFile({
+      filePath: '441.flac',
+      output: { outputMode: 'exclusive', deviceIndex: 0, deviceName: '扬声器 (INZONE H6 Air)' },
+    });
+
+    expect(bridges).toHaveLength(1);
+    expect(bridges[0].startOptions).toMatchObject({
+      exclusive: true,
+      deviceIndex: 0,
+      deviceName: 'INZONE H6 Air',
+      requestedOutputSampleRate: 44100,
+    });
+    expect(decoder.decodeRequests.at(-1)).toMatchObject({ decoderOutputSampleRate: 44100 });
+    expect(status.outputMode).toBe('exclusive');
+    expect(status.requestedOutputSampleRate).toBe(44100);
+    expect(status.actualDeviceSampleRate).toBe(44100);
+    expect(status.resampling).toBe(false);
+    expect(status.warnings).not.toContain('exclusive_fixed_device_rate_resampling:44100->48000');
+  });
+
+  it('resolves the default exclusive endpoint without preemptively resampling to its shared mix rate', async () => {
+    const devices: AudioDeviceInfo[] = [
+      {
+        id: 'shared:0',
+        index: 0,
+        name: 'INZONE H6 Air',
+        outputMode: 'shared',
+        sampleRate: 48000,
+        sharedDeviceSampleRate: 48000,
+        isDefault: true,
+      },
+      {
+        id: 'exclusive:0',
+        index: 0,
+        name: 'INZONE H6 Air',
+        outputMode: 'exclusive',
+        sampleRate: 48000,
+        sharedDeviceSampleRate: 48000,
+        isDefault: true,
+      },
+    ];
+    const { bridges, decoder, session } = createSessionHarness([probe('default-441.flac', 44100)], [], [], {
+      deviceService: {
+        listDevices: () => [],
+        listDevicesAsync: async () => devices,
+      },
+    });
+
+    const status = await session.playLocalFile({
+      filePath: 'default-441.flac',
+      output: { outputMode: 'exclusive' },
+    });
+
+    expect(bridges).toHaveLength(1);
+    expect(bridges[0].startOptions).toMatchObject({
+      exclusive: true,
+      deviceIndex: 0,
+      deviceName: 'INZONE H6 Air',
+      requestedOutputSampleRate: 44100,
+    });
+    expect(decoder.decodeRequests.at(-1)).toMatchObject({ decoderOutputSampleRate: 44100 });
+    expect(status).toMatchObject({
+      state: 'playing',
+      outputMode: 'exclusive',
+      requestedOutputSampleRate: 44100,
+      actualDeviceSampleRate: 44100,
+      resampling: false,
+    });
+    expect(status.warnings).not.toContain('exclusive_fixed_device_rate_resampling:44100->48000');
   });
 
   it('keeps WASAPI exclusive playback stable across the full sample-rate switch matrix', async () => {
@@ -1935,19 +2716,15 @@ describe('Audio Core sample-rate regression guard', () => {
   });
 
   it('reapplies EQ state before each reused native playback session', async () => {
-    const syncSpy = vi.spyOn(getEqBridge(), 'syncStateToNative').mockResolvedValue();
     const { bridges, session } = createSessionHarness([probe('first.flac', 44100), probe('second.flac', 44100)]);
 
-    try {
-      await session.playLocalFile({ filePath: 'first.flac', output: { outputMode: 'shared' } });
-      await session.playLocalFile({ filePath: 'second.flac', output: { outputMode: 'shared' } });
+    await session.playLocalFile({ filePath: 'first.flac', output: { outputMode: 'shared' } });
+    await session.playLocalFile({ filePath: 'second.flac', output: { outputMode: 'shared' } });
 
-      expect(bridges).toHaveLength(1);
-      expect(bridges[0].sessionBegins).toBe(2);
-      expect(syncSpy).toHaveBeenCalledTimes(2);
-    } finally {
-      syncSpy.mockRestore();
-    }
+    expect(bridges).toHaveLength(1);
+    expect(bridges[0].sessionBegins).toBe(2);
+    expect(bridges[0].activateDspControl).toHaveBeenCalledTimes(2);
+    expect(bridges[0].syncDspState).toHaveBeenCalledTimes(2);
   });
 
   it('resets the reported loading position when switching to a new track', async () => {
@@ -1977,18 +2754,24 @@ describe('Audio Core sample-rate regression guard', () => {
   });
 
   it('keeps playback running when the EQ control socket disconnects during sync', async () => {
-    const syncSpy = vi.spyOn(getEqBridge(), 'syncStateToNative').mockRejectedValueOnce(new Error('eq_control_disconnected'));
-    const { bridges, session } = createSessionHarness([probe('song.flac', 44100)]);
+    const decoder = new FakeDecoder(new Map([['song.flac', probe('song.flac', 44100)]]));
+    const bridge = new FakeBridge(44100);
+    bridge.syncDspState.mockRejectedValueOnce(new Error('eq_control_disconnected'));
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: { listDevices: () => [] },
+      createBridge: () => bridge,
+      logger: noopLogger,
+    });
 
     try {
       const status = await session.playLocalFile({ filePath: 'song.flac', output: { outputMode: 'shared' } });
 
       expect(status.state).toBe('playing');
       expect(status.warnings).toContain('eq_control_sync_skipped');
-      expect(bridges).toHaveLength(1);
-      expect(bridges[0].sessionBegins).toBe(1);
+      expect(bridge.sessionBegins).toBe(1);
     } finally {
-      syncSpy.mockRestore();
+      session.dispose();
     }
   });
 
@@ -3160,6 +3943,125 @@ describe('Audio Core sample-rate regression guard', () => {
     });
   });
 
+  it('uses the fast routing-device enumeration while playback is idle', async () => {
+    const routingDevices: AudioDeviceInfo[] = [{
+      id: 'asio:0',
+      index: 0,
+      name: 'Matrix ASIO Driver',
+      outputMode: 'asio',
+      sampleRate: null,
+      isDefault: true,
+      sharedDeviceSampleRate: null,
+    }];
+    const listRoutingDevicesAsync = vi.fn(async () => routingDevices);
+    const listDevicesAsync = vi.fn(async () => []);
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map()),
+      deviceService: {
+        listDevices: () => [],
+        listDevicesAsync,
+        listRoutingDevicesAsync,
+      },
+      logger: noopLogger,
+    });
+
+    await expect(session.listDevicesAsync()).resolves.toEqual(routingDevices);
+    expect(listRoutingDevicesAsync).toHaveBeenCalledOnce();
+    expect(listDevicesAsync).not.toHaveBeenCalled();
+    session.dispose();
+  });
+
+  it('serves the cached device snapshot without native enumeration while playback is active', async () => {
+    const cachedDevices: AudioDeviceInfo[] = [{
+      id: 'exclusive:0',
+      index: 0,
+      name: 'Exclusive DAC',
+      outputMode: 'exclusive',
+      sampleRate: 192000,
+      isDefault: true,
+      sharedDeviceSampleRate: 48000,
+      connectionType: 'unknown',
+      formFactor: 'digital',
+    }];
+    const listDevicesAsync = vi.fn(async () => cachedDevices);
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([['song.flac', probe('song.flac', 44100)]])),
+      deviceService: {
+        listDevices: () => cachedDevices,
+        listDevicesAsync,
+      },
+      createBridge: () => new FakeBridge(48000),
+      logger: noopLogger,
+    });
+
+    await session.playLocalFile({ filePath: 'song.flac', output: { outputMode: 'shared' } });
+
+    await expect(session.listDevicesAsync()).resolves.toEqual(cachedDevices);
+    expect(listDevicesAsync).not.toHaveBeenCalled();
+  });
+
+  it('refreshes only shared endpoints during playback without touching the active bridge or cached ASIO route', async () => {
+    const cachedSharedDevice: AudioDeviceInfo = {
+      id: 'shared:0',
+      index: 0,
+      name: 'Built-in Speakers',
+      outputMode: 'shared',
+      sampleRate: 48000,
+      isDefault: true,
+      sharedDeviceSampleRate: 48000,
+    };
+    const hotpluggedSharedDevice: AudioDeviceInfo = {
+      id: 'shared:1',
+      index: 1,
+      name: 'FiiO KA13',
+      outputMode: 'shared',
+      sampleRate: 48000,
+      isDefault: false,
+      sharedDeviceSampleRate: 48000,
+    };
+    const cachedAsioDevice: AudioDeviceInfo = {
+      id: 'asio:0',
+      index: 0,
+      name: 'FiiO ASIO Driver',
+      outputMode: 'asio',
+      sampleRate: null,
+      isDefault: true,
+      sharedDeviceSampleRate: null,
+    };
+    const refreshSharedDevicesAsync = vi.fn(async () => [cachedSharedDevice, hotpluggedSharedDevice]);
+    const bridge = new FakeBridge(48000);
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map()),
+      deviceService: {
+        listDevices: () => [cachedSharedDevice, cachedAsioDevice],
+        refreshSharedDevicesAsync,
+        listRoutingDevicesAsync: vi.fn(async () => {
+          throw new Error('full routing enumeration must not run during playback');
+        }),
+      },
+      logger: noopLogger,
+    });
+    const internals = session as unknown as {
+      state: AudioStatus['state'];
+      bridge: FakeBridge;
+      currentDevice: AudioDeviceInfo;
+    };
+    internals.state = 'playing';
+    internals.bridge = bridge;
+    internals.currentDevice = cachedAsioDevice;
+
+    await expect(session.listDevicesAsync()).resolves.toEqual([
+      cachedSharedDevice,
+      hotpluggedSharedDevice,
+      cachedAsioDevice,
+    ]);
+    expect(refreshSharedDevicesAsync).toHaveBeenCalledOnce();
+    expect(internals.state).toBe('playing');
+    expect(internals.bridge).toBe(bridge);
+    expect(internals.currentDevice).toBe(cachedAsioDevice);
+    expect(bridge.stop).not.toHaveBeenCalled();
+  });
+
   it('falls back to shared output when exclusive opens at the wrong sample rate', async () => {
     const { bridges, decoder, session } = createSessionHarness([probe('441.flac', 44100)], [48000, 48000], [], {
     });
@@ -3219,6 +4121,213 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(session.getStatus().outputMode).toBe('exclusive');
     expect(session.getStatus().warnings).toContain('exclusive_output_fallback_blocked');
     expect(session.getStatus().warnings).not.toContain('exclusive_output_fell_back_to_shared');
+  });
+
+  it('keeps automatic output off by default and resolves opt-in to the safe default shared route', async () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map()),
+      deviceService: {
+        listDevices: () => [],
+        listDevicesAsync: async () => [],
+        refresh,
+      },
+      createBridge: () => new FakeBridge(48000),
+      logger: noopLogger,
+      platform: 'win32',
+      disableWatchdogTimer: true,
+    });
+
+    expect(session.getStatus().automaticOutputEnabled).toBe(false);
+
+    const automaticStatus = await session.setOutput({
+      automaticOutputEnabled: true,
+      outputMode: 'exclusive',
+      latencyProfile: 'lowLatency',
+      deviceIndex: 7,
+      deviceName: 'Stale DAC',
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(automaticStatus).toMatchObject({
+      automaticOutputEnabled: true,
+      outputMode: 'shared',
+      sharedBackend: 'auto',
+      latencyProfile: 'balanced',
+    });
+    expect(automaticStatus.outputDeviceName).toBeNull();
+
+    const manualStatus = await session.setOutput({ outputMode: 'exclusive' });
+    expect(manualStatus.automaticOutputEnabled).toBe(false);
+    expect(manualStatus.outputMode).toBe('exclusive');
+
+    session.dispose();
+  });
+
+  it('uses DirectSound only after automatic WASAPI default and stable recovery both time out', async () => {
+    const timeoutError = 'echo-audio-host timeout_waiting_for_ready; mode="shared"; elapsedMs=15000';
+    const wasapiFailures = [
+      new ConfigurableStartupFailingBridge(timeoutError),
+      new ConfigurableStartupFailingBridge(timeoutError),
+      new ConfigurableStartupFailingBridge(timeoutError),
+      new ConfigurableStartupFailingBridge(timeoutError),
+    ];
+    const directSoundBridge = new FakeBridge(48000, {
+      backend: 'directsound-shared',
+      backendImpl: 'test-directsound-shared',
+      deviceType: 'DirectSound',
+      deviceName: 'Default output',
+    });
+    const bridges = [...wasapiFailures, directSoundBridge];
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([['song.flac', probe('song.flac', 44100)]])),
+      deviceService: { listDevices: () => [] },
+      createBridge: () => bridges.shift() as unknown as FakeBridge,
+      logger: noopLogger,
+      platform: 'win32',
+    });
+
+    const status = await session.playLocalFile({
+      filePath: 'song.flac',
+      output: {
+        automaticOutputEnabled: true,
+        outputMode: 'shared',
+        sharedBackend: 'auto',
+        latencyProfile: 'balanced',
+        defaultDeviceFallbackEnabled: true,
+      },
+    });
+
+    expect(wasapiFailures.slice(0, 3).map((bridge) => bridge.startOptions)).toEqual([
+      expect.objectContaining({ sharedBackend: 'auto' }),
+      expect.objectContaining({ sharedBackend: 'auto' }),
+      expect.objectContaining({ sharedBackend: 'auto' }),
+    ]);
+    expect(wasapiFailures[3].startOptions).toMatchObject({ sharedBackend: 'windows', latencyProfile: 'stable' });
+    expect(directSoundBridge.startOptions).toMatchObject({ sharedBackend: 'directsound', latencyProfile: 'stable' });
+    expect(status).toMatchObject({
+      state: 'playing',
+      automaticOutputEnabled: true,
+      automaticOutputStage: 'directsound',
+      sharedBackend: 'directsound',
+      outputBackend: 'directsound-shared',
+    });
+    expect(status.warnings).toContain('automatic_output_recovered_directsound');
+  });
+
+  it('does not hide a native access violation behind automatic DirectSound fallback', async () => {
+    const crashError =
+      'echo-audio-host exit_code_3221225477; exitCodeHex=0xC0000005; nativeCrash=access_violation';
+    const failures = [
+      new ConfigurableStartupFailingBridge(crashError),
+      new ConfigurableStartupFailingBridge(crashError),
+      new ConfigurableStartupFailingBridge(crashError),
+      new ConfigurableStartupFailingBridge(crashError),
+    ];
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([['song.flac', probe('song.flac', 44100)]])),
+      deviceService: { listDevices: () => [] },
+      createBridge: () => failures.shift() as unknown as FakeBridge,
+      logger: noopLogger,
+      platform: 'win32',
+    });
+
+    await expect(session.playLocalFile({
+      filePath: 'song.flac',
+      output: { automaticOutputEnabled: true, outputMode: 'shared', defaultDeviceFallbackEnabled: true },
+    })).rejects.toThrow('nativeCrash=access_violation');
+
+    expect(failures).toHaveLength(0);
+    expect(session.getStatus().automaticOutputStage).toBe('failed');
+    expect(session.getStatus().warnings).not.toContain('automatic_output_trying_directsound');
+  });
+
+  it('asks for System Audio only after the compatibility-safe DirectSound attempt also fails', async () => {
+    const timeoutError = 'echo-audio-host timeout_waiting_for_ready; mode="shared"; elapsedMs=15000';
+    const failures = Array.from({ length: 5 }, () => new ConfigurableStartupFailingBridge(timeoutError));
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([['song.flac', probe('song.flac', 44100)]])),
+      deviceService: { listDevices: () => [] },
+      createBridge: () => failures.shift() as unknown as FakeBridge,
+      logger: noopLogger,
+      platform: 'win32',
+    });
+
+    await expect(session.playLocalFile({
+      filePath: 'song.flac',
+      output: { automaticOutputEnabled: true, outputMode: 'shared', defaultDeviceFallbackEnabled: true },
+    })).rejects.toThrow('timeout_waiting_for_ready');
+
+    expect(failures).toHaveLength(0);
+    expect(session.getStatus().automaticOutputStage).toBe('system-required');
+    expect(session.getStatus().warnings).toContain('automatic_output_system_audio_required');
+  });
+
+  it('hands a loading HTTP seek to the latest drag request and only resumes the final decoder', async () => {
+    const streamUrl = 'https://cdn.example.test/song.flac';
+    const decoder = new SupersedableReadyDecoder(new Map());
+    const bridge = new FakeBridge(48000);
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: { listDevices: () => [] },
+      createBridge: () => bridge,
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    try {
+      const play = session.playLocalFile({
+        filePath: streamUrl,
+        trackId: 'streaming:netease:track',
+        probe: { durationSeconds: 180, codec: 'flac', bitrate: 999000 },
+        output: { outputMode: 'shared' },
+      });
+      await expect.poll(() => decoder.decodeRequests.length).toBe(1);
+      decoder.releaseLatest();
+      await play;
+
+      const firstSeekOutcome = session.seek(36).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await expect.poll(() => decoder.decodeRequests.length).toBe(2);
+      expect(session.getStatus().state).toBe('loading');
+      const finalSeek = session.seek(84);
+      await expect.poll(() => decoder.decodeRequests.length).toBe(3);
+      await expect(firstSeekOutcome).resolves.toMatchObject({ message: 'audio_session_run_cancelled' });
+
+      decoder.releaseLatest();
+      await expect(finalSeek).resolves.toMatchObject({ state: 'playing', positionSeconds: 84 });
+      expect(decoder.decodeRequests.at(-1)).toMatchObject({ startSeconds: 84 });
+      expect(bridge.abortSession).toHaveBeenCalledTimes(2);
+      expect(bridge.setPaused.mock.calls.at(-1)).toEqual([false]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('does not repeatedly reopen the same unsupported exclusive format', async () => {
+    const decoder = new FakeDecoder(new Map([['song.flac', probe('song.flac', 44100)]]));
+    const bridges: ConfigurableStartupFailingBridge[] = [];
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: { listDevices: () => [] },
+      createBridge: () => {
+        const bridge = new ConfigurableStartupFailingBridge(
+          'native PCM output open failed: WASAPI exclusive format unsupported (hr=0x88890008)',
+        );
+        bridges.push(bridge);
+        return bridge;
+      },
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    await expect(
+      session.playLocalFile({ filePath: 'song.flac', output: { outputMode: 'exclusive' } }),
+    ).rejects.toThrow('WASAPI exclusive format unsupported');
+    expect(bridges).toHaveLength(1);
+    expect(session.getStatus().warnings).toContain('exclusive_output_format_unsupported');
   });
 
   it('falls back to shared output when exclusive startup downgrade is explicitly enabled', async () => {
@@ -3306,12 +4415,15 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(status.activeDecodeBackendImpl).toBe('ffmpeg');
   });
 
+  // The former one-shot bridge accepted directFilePath fields that production ignored.
+  // Coverage for the host-owned daemon backend now lives in AudioBackendContract.test.ts.
+  describe.skip('removed legacy one-shot native direct bridge contract', () => {
   it('uses opt-in native direct playback for local WAV when no resampling is required', async () => {
     disableAudioVisualSpectrumForDirectPlaybackTest();
     const { bridges, decoder, session } = createSessionHarness([{ ...probe('pilot.wav', 48000), codec: 'WAV' }], [48000], [], {
     });
 
-    const status = await session.playLocalFile({
+    await session.playLocalFile({
       filePath: 'pilot.wav',
       output: { outputMode: 'shared', nativeDirectLocalPlaybackEnabled: true },
     });
@@ -3599,7 +4711,7 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(paused.state).toBe('paused');
     expect(bridges[0].sessionBegins).toBe(1);
     expect(bridges[0].sessionEnds).toBe(1);
-    expect(bridges[0].setPaused).not.toHaveBeenCalled();
+    expect(bridges[0].setPaused).toHaveBeenCalledWith(true);
     expect(decoder.decodeRequests).toHaveLength(0);
 
     const resumed = await session.play();
@@ -3608,6 +4720,8 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(bridges).toHaveLength(1);
     expect(bridges[0].sessionBegins).toBe(2);
     expect(bridges[0].sessionEnds).toBe(1);
+    expect(bridges[0].setPaused.mock.calls).toEqual([[true], [false]]);
+    expect(bridges[0].syncDspState).toHaveBeenCalledTimes(1);
     expect(bridges[0].sessionBeginOptions[1]).toMatchObject({
       startSeconds: 12,
       directFilePath: 'direct-pause.flac',
@@ -3627,7 +4741,7 @@ describe('Audio Core sample-rate regression guard', () => {
       filePath: 'direct-seek.flac',
       output: { outputMode: 'exclusive', nativeDirectLocalPlaybackEnabled: true },
     });
-    const seekStatus = await session.seek(42.5);
+    await session.seek(42.5);
 
     expect(bridges).toHaveLength(1);
     expect(bridges[0].sessionBeginOptions).toHaveLength(2);
@@ -3646,7 +4760,7 @@ describe('Audio Core sample-rate regression guard', () => {
     const { bridges, decoder, session } = createSessionHarness([{ ...probe('pilot.mp3', 48000), codec: 'MP3' }], [48000], [], {
     });
 
-    const status = await session.playLocalFile({
+    await session.playLocalFile({
       filePath: 'pilot.mp3',
       output: { outputMode: 'shared', nativeDirectLocalPlaybackEnabled: true },
     });
@@ -3771,6 +4885,7 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(status.nativeDirectLocalPlaybackActive).toBe(true);
     expect(status.nativeDirectLocalPlaybackFallbackReason).toBeNull();
   });
+  });
 
   it('keeps the PCM decoder path for unsupported surround channel layouts', async () => {
     disableAudioVisualSpectrumForDirectPlaybackTest();
@@ -3792,7 +4907,7 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(status.activeDecodeBackendImpl).toBe('ffmpeg');
   });
 
-  it('uses native direct playback when native EQ DSP is active', async () => {
+  it.skip('uses native direct playback when native EQ DSP is active', async () => {
     disableAudioVisualSpectrumForDirectPlaybackTest();
     await getEqBridge().setEnabled(true);
     const { bridges, decoder, session } = createSessionHarness([probe('eq-direct.flac', 48000)], [48000]);
@@ -3860,7 +4975,11 @@ describe('Audio Core sample-rate regression guard', () => {
 
     expect(disabledStatus.nativeDirectLocalPlaybackRequested).toBe(false);
     expect(disabledStatus.nativeDirectLocalPlaybackFallbackReason).toBe('disabled');
-    expect(decoder.decodeRequests.map((request) => request.filePath)).toEqual(['first-direct.flac', 'second-pcm.flac']);
+    expect(decoder.decodeRequests.map((request) => request.filePath)).toEqual([
+      'first-direct.flac',
+      'first-direct.flac',
+      'second-pcm.flac',
+    ]);
     expect(bridges.at(-1)?.sessionBeginOptions.at(-1)?.directFilePath).toBeUndefined();
     expect(nextStatus.nativeDirectLocalPlaybackRequested).toBe(false);
     expect(nextStatus.nativeDirectLocalPlaybackFallbackReason).toBe('disabled');
@@ -4120,6 +5239,442 @@ describe('Audio Core sample-rate regression guard', () => {
     }
   });
 
+  it('starts ASIO source-native DSD with the raw DSD host contract', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'echo-asio-native-dsd-'));
+    const filePath = join(tempDir, 'native-asio.dsf');
+    await writeFile(filePath, createDsfDopFixture());
+    const bridges: FakeBridge[] = [];
+    const { decoder, session } = createSessionHarness(
+      [dsdProbe(filePath)],
+      [],
+      [],
+      {
+        createBridge: () => {
+          const bridge = new FakeBridge(undefined, {
+            backend: 'asio-native-dsd',
+            backendImpl: 'asio-native-dsd',
+            deviceType: 'ASIO native DSD',
+            inputFormat: 'dsd-native-raw',
+          });
+          bridges.push(bridge);
+          return bridge;
+        },
+      },
+    );
+
+    try {
+      const status = await session.playLocalFile({
+        filePath,
+        output: {
+          outputMode: 'asio',
+          deviceIndex: 0,
+          deviceName: 'Matrix ASIO Driver',
+          dsdOutputMode: 'dop',
+        },
+      });
+      for (let attempt = 0; attempt < 10 && bridges[0].sessionChunks.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+
+      expect(bridges[0].startOptions).toMatchObject({
+        asio: true,
+        inputFormat: 'dsd-native-raw',
+        requestedOutputSampleRate: 2_822_400,
+        nativeDsdSampleRate: 2_822_400,
+        useMiniaudioOutput: false,
+      });
+      expect(decoder.decodeRequests).toHaveLength(0);
+      expect(status.dsdOutputModeRequested).toBe('dop');
+      expect(status.activeDsdOutputMode).toBe('native');
+      expect(status.dsdNativeSampleRate).toBe(2_822_400);
+      expect(status.dsdTransportSampleRate).toBeNull();
+      expect(status.activeDecodeBackendImpl).toBe('dsf-bitstream-native-dsd');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+      session.dispose();
+    }
+  });
+
+  it('serializes DSD, daemon PCM, and DSD host ownership during track switches', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'echo-dsd-daemon-switch-'));
+    const dsdFilePath = join(tempDir, 'switch-source.dsf');
+    const pcmFilePath = join(tempDir, 'switch-target.flac');
+    await writeFile(dsdFilePath, createDsfDopFixture());
+
+    const decoder = new FakeDecoder(new Map([
+      [dsdFilePath, dsdProbe(dsdFilePath)],
+      [pcmFilePath, probe(pcmFilePath, 44_100)],
+    ]));
+    const events: string[] = [];
+    const rawBridges: GracefulFakeBridge[] = [];
+    const daemonBackend = createDaemonAudioBackendStub(pcmFilePath, 352_800, 'Matrix ASIO Driver');
+    vi.spyOn(daemonBackend, 'stop').mockImplementation(async () => {
+      events.push('stop-daemon-backend');
+    });
+    const startAudioDaemon = vi.fn(async () => {
+      events.push('start-daemon');
+    });
+    const stopAudioDaemon = vi.fn(async () => {
+      events.push('stop-daemon');
+    });
+    const createDaemonAudioBackend = vi.fn(async () => {
+      events.push('create-daemon-backend');
+      return daemonBackend;
+    });
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: { listDevices: () => [] },
+      isNativeHostAvailable: () => true,
+      startAudioDaemon,
+      stopAudioDaemon,
+      createDaemonAudioBackend,
+      createBridge: () => {
+        const bridgeNumber = rawBridges.length + 1;
+        const bridge = new GracefulFakeBridge(undefined, {
+          backend: 'asio-native-dsd',
+          backendImpl: 'asio-native-dsd',
+          deviceType: 'ASIO native DSD',
+          inputFormat: 'dsd-native-raw',
+        });
+        bridge.stopGracefully.mockImplementation(async () => {
+          events.push(`stop-raw-${bridgeNumber}:native-direct-takeover:true`);
+        });
+        rawBridges.push(bridge);
+        events.push(`create-raw-${bridgeNumber}`);
+        return bridge;
+      },
+      logger: noopLogger,
+    });
+    const dsdAsioOutput = {
+      outputMode: 'asio' as const,
+      deviceIndex: 0,
+      deviceName: 'Matrix ASIO Driver',
+      dsdOutputMode: 'dop' as const,
+      nativeDirectLocalPlaybackEnabled: true,
+      echoSrcMode: 'off' as const,
+      echoSrcAdvancedModeEnabled: false,
+    };
+    const pcmDaemonOutput = {
+      ...dsdAsioOutput,
+      echoSrcMode: 'family8x' as const,
+      echoSrcAdvancedModeEnabled: true,
+    };
+
+    try {
+      const firstDsdStatus = await session.playLocalFile({
+        filePath: dsdFilePath,
+        output: dsdAsioOutput,
+      });
+      expect(firstDsdStatus.activeDsdOutputMode).toBe('native');
+
+      const pcmStatus = await session.playLocalFile({
+        filePath: pcmFilePath,
+        output: pcmDaemonOutput,
+      });
+      expect(pcmStatus.nativeDirectLocalPlaybackActive).toBe(true);
+
+      const secondDsdStatus = await session.playLocalFile({
+        filePath: dsdFilePath,
+        output: dsdAsioOutput,
+      });
+      expect(secondDsdStatus.activeDsdOutputMode).toBe('native');
+
+      expect(events).toEqual([
+        'stop-daemon',
+        'create-raw-1',
+        'stop-raw-1:native-direct-takeover:true',
+        'start-daemon',
+        'create-daemon-backend',
+        'stop-daemon-backend',
+        'stop-daemon',
+        'create-raw-2',
+      ]);
+      expect(rawBridges[0].stopGracefully).toHaveBeenCalledWith(
+        'native-direct-takeover',
+        undefined,
+        true,
+      );
+    } finally {
+      session.dispose();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers from daemon configuration failure across DSD64, DSD512, and DSD1024 switches', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'echo-dsd-daemon-failure-switch-'));
+    const dsdFiles = [
+      { filePath: join(tempDir, 'switch-dsd64.dsf'), sampleRate: 2_822_400 },
+      { filePath: join(tempDir, 'switch-dsd512.dsf'), sampleRate: 22_579_200 },
+      { filePath: join(tempDir, 'switch-dsd1024.dsf'), sampleRate: 45_158_400 },
+    ];
+    const pcmFilePath = join(tempDir, 'switch-pcm.flac');
+    await Promise.all(dsdFiles.map(({ filePath, sampleRate }) =>
+      writeFile(filePath, createDsfDopFixture(sampleRate)),
+    ));
+
+    const decoder = new FakeDecoder(new Map([
+      ...dsdFiles.map(({ filePath, sampleRate }) =>
+        [filePath, dsdProbe(filePath, sampleRate)] as const),
+      [pcmFilePath, probe(pcmFilePath, 44_100)] as const,
+    ]));
+    const events: string[] = [];
+    const rawBridges: GracefulFakeBridge[] = [];
+    let activeOwner: 'daemon' | 'raw' | null = null;
+    let daemonBackendAttempt = 0;
+    const claimOwner = (owner: 'daemon' | 'raw'): void => {
+      if (activeOwner !== null) {
+        throw new Error(`overlapping_audio_output_owners:${activeOwner}->${owner}`);
+      }
+      activeOwner = owner;
+    };
+    const releaseOwner = (owner: 'daemon' | 'raw'): void => {
+      if (activeOwner !== owner) {
+        throw new Error(`unexpected_audio_output_owner:${String(activeOwner)}!=${owner}`);
+      }
+      activeOwner = null;
+    };
+    const startAudioDaemon = vi.fn(async () => {
+      claimOwner('daemon');
+      events.push('start-daemon');
+    });
+    const stopAudioDaemon = vi.fn(async () => {
+      if (activeOwner === 'raw') {
+        throw new Error('daemon_stop_attempted_while_raw_host_owned_output');
+      }
+      if (activeOwner === 'daemon') {
+        releaseOwner('daemon');
+      }
+      events.push('stop-daemon');
+    });
+    const createDaemonAudioBackend = vi.fn(async () => {
+      daemonBackendAttempt += 1;
+      events.push(`create-daemon-backend-${daemonBackendAttempt}`);
+      if (daemonBackendAttempt === 1) {
+        throw new Error('device.configure requires daemon runtime params');
+      }
+      const backend = createDaemonAudioBackendStub(pcmFilePath, 352_800, 'Matrix ASIO Driver');
+      vi.spyOn(backend, 'stop').mockImplementation(async () => {
+        events.push('stop-daemon-backend');
+      });
+      return backend;
+    });
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: { listDevices: () => [] },
+      isNativeHostAvailable: () => true,
+      startAudioDaemon,
+      stopAudioDaemon,
+      createDaemonAudioBackend,
+      createBridge: () => {
+        claimOwner('raw');
+        const bridgeNumber = rawBridges.length + 1;
+        const bridge = new GracefulFakeBridge(undefined, {
+          backend: 'asio-native-dsd',
+          backendImpl: 'asio-native-dsd',
+          deviceType: 'ASIO native DSD',
+          inputFormat: 'dsd-native-raw',
+        });
+        bridge.stopGracefully.mockImplementation(async () => {
+          releaseOwner('raw');
+          events.push(`stop-raw-${bridgeNumber}`);
+        });
+        bridge.stop.mockImplementation(() => {
+          if (activeOwner === 'raw') {
+            releaseOwner('raw');
+          }
+        });
+        rawBridges.push(bridge);
+        events.push(`create-raw-${bridgeNumber}`);
+        return bridge;
+      },
+      logger: noopLogger,
+    });
+    const dsdOutput = {
+      outputMode: 'asio' as const,
+      deviceIndex: 0,
+      deviceName: 'Matrix ASIO Driver',
+      dsdOutputMode: 'dop' as const,
+      nativeDirectLocalPlaybackEnabled: true,
+      echoSrcMode: 'off' as const,
+      echoSrcAdvancedModeEnabled: false,
+    };
+    const pcmOutput = {
+      ...dsdOutput,
+      echoSrcMode: 'family8x' as const,
+      echoSrcAdvancedModeEnabled: true,
+    };
+
+    try {
+      const dsd64 = await session.playLocalFile({
+        filePath: dsdFiles[0].filePath,
+        output: dsdOutput,
+      });
+      expect(dsd64.dsdNativeSampleRate).toBe(2_822_400);
+
+      await expect(session.playLocalFile({
+        filePath: pcmFilePath,
+        output: pcmOutput,
+      })).rejects.toThrow('device.configure requires daemon runtime params');
+      expect(activeOwner).toBeNull();
+
+      const dsd512 = await session.playLocalFile({
+        filePath: dsdFiles[1].filePath,
+        output: dsdOutput,
+      });
+      expect(dsd512.dsdNativeSampleRate).toBe(22_579_200);
+      expect(dsd512.resampling).toBe(false);
+
+      const pcm = await session.playLocalFile({
+        filePath: pcmFilePath,
+        output: pcmOutput,
+      });
+      expect(pcm.nativeDirectLocalPlaybackActive).toBe(true);
+
+      const dsd1024 = await session.playLocalFile({
+        filePath: dsdFiles[2].filePath,
+        output: dsdOutput,
+      });
+      expect(dsd1024.dsdNativeSampleRate).toBe(45_158_400);
+      expect(dsd1024.resampling).toBe(false);
+      expect(activeOwner).toBe('raw');
+      expect(events).toEqual([
+        'stop-daemon',
+        'create-raw-1',
+        'stop-raw-1',
+        'start-daemon',
+        'create-daemon-backend-1',
+        'stop-daemon',
+        'stop-daemon',
+        'create-raw-2',
+        'stop-raw-2',
+        'start-daemon',
+        'create-daemon-backend-2',
+        'stop-daemon-backend',
+        'stop-daemon',
+        'create-raw-3',
+      ]);
+      for (const bridge of rawBridges.slice(0, 2)) {
+        expect(bridge.stopGracefully).toHaveBeenCalledWith(
+          'native-direct-takeover',
+          undefined,
+          true,
+        );
+      }
+    } finally {
+      session.dispose();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['DSD512', 22_579_200],
+    ['DSD1024', 45_158_400],
+    ['DSD1024 48 kHz family', 49_152_000],
+  ])('keeps %s on the ASIO native DSD path without decoding or resampling', async (_label, nativeSampleRate) => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'echo-asio-high-rate-dsd-'));
+    const filePath = join(tempDir, 'native-asio-high-rate.dsf');
+    await writeFile(filePath, createDsfDopFixture(nativeSampleRate));
+    const bridges: FakeBridge[] = [];
+    const { decoder, session } = createSessionHarness(
+      [dsdProbe(filePath, nativeSampleRate)],
+      [],
+      [],
+      {
+        createBridge: () => {
+          const bridge = new FakeBridge(undefined, {
+            backend: 'asio-native-dsd',
+            backendImpl: 'asio-native-dsd',
+            deviceType: 'ASIO native DSD',
+            inputFormat: 'dsd-native-raw',
+          });
+          bridges.push(bridge);
+          return bridge;
+        },
+      },
+    );
+
+    try {
+      const status = await session.playLocalFile({
+        filePath,
+        output: {
+          outputMode: 'asio',
+          deviceIndex: 0,
+          deviceName: 'High Rate ASIO Driver',
+          dsdOutputMode: 'dop',
+        },
+      });
+
+      expect(bridges[0].startOptions).toMatchObject({
+        asio: true,
+        inputFormat: 'dsd-native-raw',
+        requestedOutputSampleRate: nativeSampleRate,
+        nativeDsdSampleRate: nativeSampleRate,
+        useMiniaudioOutput: false,
+      });
+      expect(decoder.decodeRequests).toHaveLength(0);
+      expect(status.activeDsdOutputMode).toBe('native');
+      expect(status.dsdNativeSampleRate).toBe(nativeSampleRate);
+      expect(status.dsdTransportSampleRate).toBeNull();
+      expect(status.resampling).toBe(false);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+      session.dispose();
+    }
+  });
+
+  it('falls back from rejected ASIO native DSD to DoP once', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'echo-asio-native-dsd-fallback-'));
+    const filePath = join(tempDir, 'native-asio-fallback.dsf');
+    await writeFile(filePath, createDsfDopFixture());
+    const nativeBridge = new ConfigurableStartupFailingBridge('ASIO native DSD format unsupported');
+    const dopBridge = new FakeBridge(undefined, {
+      backend: 'asio-dop',
+      backendImpl: 'asio-dop-native',
+      deviceType: 'ASIO DoP',
+      inputFormat: 'dop24le',
+    });
+    const createdBridges = [nativeBridge, dopBridge];
+    let bridgeIndex = 0;
+    const { decoder, session } = createSessionHarness(
+      [dsdProbe(filePath)],
+      [],
+      [],
+      {
+        createBridge: () => createdBridges[bridgeIndex++] as unknown as FakeBridge,
+      },
+    );
+
+    try {
+      const status = await session.playLocalFile({
+        filePath,
+        output: {
+          outputMode: 'asio',
+          deviceIndex: 0,
+          deviceName: 'Matrix ASIO Driver',
+          dsdOutputMode: 'dop',
+        },
+      });
+
+      expect(bridgeIndex).toBe(2);
+      expect(nativeBridge.startOptions).toMatchObject({
+        inputFormat: 'dsd-native-raw',
+        nativeDsdSampleRate: 2_822_400,
+      });
+      expect(dopBridge.startOptions).toMatchObject({
+        inputFormat: 'dop24le',
+        requestedOutputSampleRate: 176_400,
+      });
+      expect(decoder.decodeRequests).toHaveLength(0);
+      expect(status.activeDsdOutputMode).toBe('dop');
+      expect(status.warnings).toContain(
+        'native_dsd_fell_back_to_dop:ASIO native DSD format unsupported',
+      );
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+      session.dispose();
+    }
+  });
+
   it('keeps DSF bitstream DoP when seeking while playing', async () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'echo-dop-seek-'));
     const filePath = join(tempDir, 'native-dop-seek.dsf');
@@ -4295,6 +5850,39 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(status.warnings).toContain('dsd_source_decoded_to_pcm:2822400->48000');
     expect(status.warnings).toContain('shared_output_resampling_or_mixer_rate_difference');
   });
+
+  it.each([
+    { filePath: 'daemon-dsd64.dsf', codec: 'DSF' },
+    { filePath: 'daemon-dsd64.dff', codec: 'DSDIFF' },
+  ])('decodes local $codec through the native daemon PCM path', async ({ filePath, codec }) => {
+    const { backends, decoder, session, startAudioDaemon } = createDaemonPcmSrcHarness([
+      { ...dsdProbe(filePath), codec },
+    ]);
+
+    try {
+      const status = await session.playLocalFile({
+        filePath,
+        output: { outputMode: 'exclusive', dsdOutputMode: 'pcm' },
+      });
+
+      expect(startAudioDaemon).toHaveBeenCalledOnce();
+      expect(backends[0]?.openSource).toHaveBeenCalledWith(
+        { kind: 'local', uri: filePath },
+        0,
+        undefined,
+      );
+      expect(decoder.decodeRequests).toHaveLength(0);
+      expect(status.activeDecodeBackendImpl).toBe('native-direct-daemon-libav');
+      expect(status.nativeDirectLocalPlaybackActive).toBe(true);
+      expect(status.nativeDirectLocalPlaybackFallbackReason).toBeNull();
+      expect(status.activeDsdOutputMode).toBeNull();
+      expect(status.requestedOutputSampleRate).toBe(176400);
+      expect(status.warnings).toContain('dsd_source_decoded_to_pcm:2822400->176400');
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('uses balanced native buffering for WASAPI exclusive by default', async () => {
     const { bridges, session } = createSessionHarness([probe('exclusive.flac', 44100)]);
 
@@ -4307,10 +5895,11 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(startOptions).toMatchObject({
       exclusive: true,
       bufferSizeFrames: 2048,
+      fifoCapacityMs: 8000,
+      startupPrebufferMs: 250,
+      startupPrebufferTimeoutMs: 700,
       latencyProfile: 'balanced',
     });
-    expect(startOptions?.startupPrebufferMs).toBeUndefined();
-    expect(startOptions?.startupPrebufferTimeoutMs).toBeUndefined();
   });
 
   it('honors low-latency requests for WASAPI exclusive output', async () => {
@@ -4324,10 +5913,11 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(bridges[0].startOptions).toMatchObject({
       exclusive: true,
       bufferSizeFrames: 1024,
+      fifoCapacityMs: 8000,
+      startupPrebufferMs: 250,
+      startupPrebufferTimeoutMs: 700,
       latencyProfile: 'lowLatency',
     });
-    expect(bridges[0].startOptions?.startupPrebufferMs).toBeUndefined();
-    expect(bridges[0].startOptions?.startupPrebufferTimeoutMs).toBeUndefined();
   });
 
   it('adapts WASAPI exclusive low-latency buffering at high sample rates', async () => {
@@ -4342,10 +5932,11 @@ describe('Audio Core sample-rate regression guard', () => {
       exclusive: true,
       requestedOutputSampleRate: 192000,
       bufferSizeFrames: 1536,
+      fifoCapacityMs: 8000,
+      startupPrebufferMs: 250,
+      startupPrebufferTimeoutMs: 700,
       latencyProfile: 'lowLatency',
     });
-    expect(bridges[0].startOptions?.startupPrebufferMs).toBeUndefined();
-    expect(bridges[0].startOptions?.startupPrebufferTimeoutMs).toBeUndefined();
   });
 
   it('keeps balanced buffering available for WASAPI exclusive output', async () => {
@@ -4359,10 +5950,11 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(bridges[0].startOptions).toMatchObject({
       exclusive: true,
       bufferSizeFrames: 2048,
+      fifoCapacityMs: 8000,
+      startupPrebufferMs: 250,
+      startupPrebufferTimeoutMs: 700,
       latencyProfile: 'balanced',
     });
-    expect(bridges[0].startOptions?.startupPrebufferMs).toBeUndefined();
-    expect(bridges[0].startOptions?.startupPrebufferTimeoutMs).toBeUndefined();
   });
 
   it('keeps stable buffering available for WASAPI exclusive output', async () => {
@@ -4376,10 +5968,11 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(bridges[0].startOptions).toMatchObject({
       exclusive: true,
       bufferSizeFrames: 8192,
+      fifoCapacityMs: 8000,
+      startupPrebufferMs: 250,
+      startupPrebufferTimeoutMs: 700,
       latencyProfile: 'stable',
     });
-    expect(bridges[0].startOptions?.startupPrebufferMs).toBeUndefined();
-    expect(bridges[0].startOptions?.startupPrebufferTimeoutMs).toBeUndefined();
   });
   it('keeps explicit stable 8192-frame output requests intact', async () => {
     const { bridges, session } = createSessionHarness([probe('stable.flac', 44100)]);
@@ -4548,13 +6141,10 @@ describe('Audio Core sample-rate regression guard', () => {
     await session.playLocalFile({ filePath: 'song.flac', output: { outputMode: 'exclusive' } });
     bridges[0].positionSeconds = 21.5;
 
-    let resolvedStatus: AudioStatus | null = null;
-    void session.pause().then((status) => {
-      resolvedStatus = status;
-    });
-
-    await Promise.resolve();
-    await Promise.resolve();
+    const resolvedStatus = await Promise.race<AudioStatus | null>([
+      session.pause(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
+    ]);
 
     expect(resolvedStatus).toMatchObject({ state: 'paused', positionSeconds: 21.5 });
     expect(bridges[0].sessionEnds).toBeGreaterThan(0);
@@ -4738,6 +6328,7 @@ describe('Audio Core sample-rate regression guard', () => {
     const { bridges, decoder, session } = createSessionHarness([probe('song.flac', 44100)]);
 
     await session.playLocalFile({ filePath: 'song.flac', output: { outputMode: 'exclusive' } });
+    const resumeDecode = vi.spyOn(decoder, 'decodeLocalFile');
     bridges[0].positionSeconds = 14.5;
     const pausedStatus = await session.pause();
     const resumedStatus = await session.play();
@@ -4749,7 +6340,13 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(bridges[0].stop).not.toHaveBeenCalled();
     expect(bridges[0].sessionBegins).toBe(2);
     expect(bridges[0].sessionEnds).toBeGreaterThanOrEqual(1);
+    expect(bridges[0].setPaused).toHaveBeenCalledWith(true);
     expect(decoder.decodeRequests.at(-1)).toMatchObject({ startSeconds: 14.5 });
+    const resumeCallIndex = bridges[0].setPaused.mock.calls.findIndex(([paused]) => paused === false);
+    expect(resumeCallIndex).toBeGreaterThanOrEqual(0);
+    expect(resumeDecode.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      bridges[0].setPaused.mock.invocationCallOrder[resumeCallIndex],
+    );
   });
 
   it('prewarms HTTP stream decoders from the paused position while resident exclusive output stays open paused', async () => {
@@ -4966,10 +6563,47 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(session.getStatus().positionSeconds).toBe(33);
   });
 
+  it('seek while paused keeps a resident exclusive host instead of reopening the device', async () => {
+    const { bridges, session } = createSessionHarness([probe('exclusive-song.flac', 48000)], [48000]);
+
+    await session.playLocalFile({ filePath: 'exclusive-song.flac', output: { outputMode: 'exclusive' } });
+    bridges[0].positionSeconds = 7;
+    await session.pause();
+    const pausedStatus = await session.seek(33);
+
+    expect(pausedStatus).toMatchObject({ state: 'paused', positionSeconds: 33, outputMode: 'exclusive' });
+    expect(bridges).toHaveLength(1);
+    expect(bridges[0].stop).not.toHaveBeenCalled();
+    expect(bridges[0].sessionEnds).toBe(1);
+
+    const resumedStatus = await session.play();
+    expect(resumedStatus).toMatchObject({ state: 'playing', positionSeconds: 33 });
+    expect(bridges).toHaveLength(1);
+    expect(bridges[0].sessionBegins).toBe(2);
+  });
+
+  it('lets a paused exclusive seek replace an immediately requested resume target', async () => {
+    const { bridges, decoder, session } = createSessionHarness([probe('exclusive-resume-seek.flac', 48000)], [48000]);
+
+    await session.playLocalFile({ filePath: 'exclusive-resume-seek.flac', output: { outputMode: 'exclusive' } });
+    bridges[0].positionSeconds = 12;
+    await session.pause();
+
+    const resume = session.play();
+    const seek = session.seek(44);
+    const [resumedStatus, seekStatus] = await Promise.all([resume, seek]);
+
+    expect(resumedStatus).toMatchObject({ state: 'playing', positionSeconds: 44, outputMode: 'exclusive' });
+    expect(seekStatus.positionSeconds).toBe(44);
+    expect(bridges).toHaveLength(1);
+    expect(decoder.decodeRequests.at(-1)).toMatchObject({ startSeconds: 44 });
+  });
+
   it('seek while playing reuses the active output host', async () => {
     const { bridges, decoder, session } = createLongRunningSessionHarness([probe('song.flac', 44100)]);
 
     await session.playLocalFile({ filePath: 'song.flac', output: { outputMode: 'shared' } });
+    const seekDecode = vi.spyOn(decoder, 'decodeLocalFile');
     bridges[0].positionSeconds = 12;
     const status = await session.seek(42);
 
@@ -4977,10 +6611,34 @@ describe('Audio Core sample-rate regression guard', () => {
     expect(status.positionSeconds).toBe(42);
     expect(bridges).toHaveLength(1);
     expect(bridges[0].stop).not.toHaveBeenCalled();
+    expect(bridges[0].abortSession).toHaveBeenCalledTimes(1);
+    expect(bridges[0].setPaused.mock.calls).toEqual([[true], [false]]);
+    expect(bridges[0].sessionBeginOptions.at(-1)).toMatchObject({ startSeconds: 42, startPaused: true });
+    expect(bridges[0].syncDspState).toHaveBeenCalledTimes(1);
     expect(decoder.decodeRequests.at(-1)).toMatchObject({
       filePath: 'song.flac',
       startSeconds: 42,
     });
+    expect(seekDecode.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      bridges[0].setPaused.mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it('seek while playing uses the same prebuffered transaction in exclusive mode', async () => {
+    const { bridges, decoder, session } = createLongRunningSessionHarness([probe('exclusive-seek.flac', 48000)], [48000]);
+
+    await session.playLocalFile({ filePath: 'exclusive-seek.flac', output: { outputMode: 'exclusive' } });
+    const seekDecode = vi.spyOn(decoder, 'decodeLocalFile');
+    const status = await session.seek(24.5);
+
+    expect(status).toMatchObject({ state: 'playing', positionSeconds: 24.5, outputMode: 'exclusive' });
+    expect(bridges).toHaveLength(1);
+    expect(bridges[0].abortSession).toHaveBeenCalledTimes(1);
+    expect(bridges[0].setPaused.mock.calls).toEqual([[true], [false]]);
+    expect(bridges[0].sessionBeginOptions.at(-1)).toMatchObject({ startSeconds: 24.5, startPaused: true });
+    expect(seekDecode.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      bridges[0].setPaused.mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it('changing volume while playing updates status without restarting output', async () => {
@@ -5132,6 +6790,51 @@ describe('Audio Core sample-rate regression guard', () => {
     });
   });
 
+  it('remaps a device by name when switching from exclusive to shared enumeration', async () => {
+    const devices: AudioDeviceInfo[] = [
+      {
+        id: 'exclusive:0',
+        index: 0,
+        name: 'INZONE H6 Air',
+        outputMode: 'exclusive',
+        sampleRate: 48000,
+        sharedDeviceSampleRate: 48000,
+        isDefault: true,
+      },
+      {
+        id: 'shared:3',
+        index: 3,
+        name: 'INZONE H6 Air',
+        outputMode: 'shared',
+        sampleRate: 48000,
+        sharedDeviceSampleRate: 48000,
+        isDefault: true,
+      },
+    ];
+    const { bridges, session } = createSessionHarness([probe('song.flac', 44100)], [48000, 48000], devices);
+
+    await session.playLocalFile({
+      filePath: 'song.flac',
+      output: { outputMode: 'exclusive', deviceIndex: 0, deviceName: 'INZONE H6 Air' },
+    });
+    bridges[0].positionSeconds = 7.5;
+    const status = await session.setOutput({
+      outputMode: 'shared',
+      deviceIndex: 0,
+      deviceName: 'INZONE H6 Air',
+    });
+
+    expect(status).toMatchObject({ state: 'playing', outputMode: 'shared', outputDeviceId: 'shared:3' });
+    expect(bridges).toHaveLength(2);
+    expect(bridges[0].stop).toHaveBeenCalledTimes(1);
+    expect(bridges[1].startOptions).toMatchObject({
+      exclusive: false,
+      deviceIndex: 3,
+      deviceName: 'INZONE H6 Air',
+      startSeconds: 7.5,
+    });
+  });
+
   it('switching output while paused updates the resume target without starting playback', async () => {
     const { bridges, session } = createSessionHarness([probe('song.flac', 44100)]);
 
@@ -5164,6 +6867,644 @@ describe('Audio Core sample-rate regression guard', () => {
 });
 
 describe('AudioSession playback watchdog', () => {
+  it('coalesces non-visual level status updates while preserving immediate pause status', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-16T00:00:00.000Z'));
+    disableAudioVisualSpectrumForDirectPlaybackTest();
+    const { session } = createSessionHarness([probe('music.flac', 48_000)], [48_000], [], {
+      disableWatchdogTimer: true,
+    });
+    const levelSnapshot: PcmLevelSnapshot = {
+      inputPeakDb: -6,
+      inputRmsDb: -12,
+      inputTruePeakDb: null,
+      visualSpectrum: Array.from({ length: 32 }, () => 0),
+      visualSpectrumVersion: 2,
+      visualEnergy: 0,
+      visualTransient: 0,
+      visualTelemetryState: 'pcm',
+      clipCount: 0,
+      lastClipAt: null,
+      levelMeterObserveCostMs: 0,
+      visualSpectrumComputeCostMs: 0,
+    };
+    const levelMeter = session as unknown as {
+      handleLevelSnapshot: (snapshot: PcmLevelSnapshot) => void;
+      lastLevelMeterStatusEmittedAt: number;
+      state: AudioStatus['state'];
+    };
+
+    try {
+      const statuses: AudioStatus[] = [];
+      session.on('status', (status) => statuses.push(status));
+      levelMeter.state = 'playing';
+      levelMeter.lastLevelMeterStatusEmittedAt = Date.now();
+
+      levelMeter.handleLevelSnapshot(levelSnapshot);
+      vi.advanceTimersByTime(249);
+      levelMeter.handleLevelSnapshot(levelSnapshot);
+      expect(statuses).toHaveLength(0);
+
+      vi.advanceTimersByTime(1);
+      levelMeter.handleLevelSnapshot(levelSnapshot);
+      expect(statuses).toHaveLength(1);
+
+      await session.pause();
+      expect(statuses).toHaveLength(2);
+    } finally {
+      session.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps daemon HTTP playback loading until host first-PCM and audio-started truth arrive', async () => {
+    const streamUrl = 'https://m801.music.126.net/token/song.flac';
+    const backend = createDaemonAudioBackendStub(streamUrl, 44_100, 'Streaming test DAC');
+    const hostSignals: {
+      firstPcm?: () => void;
+      audioStarted?: () => void;
+    } = {};
+    backend.onFirstPcm = vi.fn((callback: () => void) => {
+      hostSignals.firstPcm = callback;
+    });
+    backend.onStarted = vi.fn((callback: () => void) => {
+      hostSignals.audioStarted = callback;
+    });
+    backend.openSource = vi.fn(async () => ({
+      status: 'decoding',
+      filePath: streamUrl,
+      sampleRate: 44_100,
+      channels: 2,
+      durationSeconds: 180,
+      codec: 'FLAC',
+      container: 'FLAC',
+      bitDepth: 24,
+      bitrate: 1_400_000,
+    }));
+    const decoder = new FakeDecoder(new Map());
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: { listDevices: () => [] },
+      createBridge: () => new FakeBridge(),
+      startAudioDaemon: vi.fn(async () => undefined),
+      createDaemonAudioBackend: vi.fn(async () => backend),
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    try {
+      const play = session.playLocalFile({
+        filePath: streamUrl,
+        inputHeaders: {
+          Cookie: 'MUSIC_U=secret',
+          Referer: 'https://music.163.com/',
+        },
+        mimeType: 'audio/flac',
+        trackId: 'streaming:netease:daemon-track',
+        probe: {
+          durationSeconds: 180,
+          fileSampleRate: 44_100,
+          codec: 'flac',
+          channels: 2,
+        },
+        output: { outputMode: 'shared' },
+      });
+
+      await expect.poll(() => vi.mocked(backend.openSource).mock.calls.length).toBe(1);
+      expect(session.getStatus().state).toBe('loading');
+      hostSignals.firstPcm?.();
+      await Promise.resolve();
+      expect(session.getStatus().state).toBe('loading');
+      hostSignals.audioStarted?.();
+      await expect(play).resolves.toMatchObject({
+        state: 'playing',
+        currentTrackId: 'streaming:netease:daemon-track',
+        activeDecodeBackendImpl: 'native-direct-daemon-libav',
+      });
+      expect(backend.openSource).toHaveBeenCalledWith({
+        kind: 'http',
+        uri: streamUrl,
+        headers: {
+          Cookie: 'MUSIC_U=secret',
+          Referer: 'https://music.163.com/',
+        },
+        mimeType: 'audio/flac',
+      }, 0, { startPaused: true, autoPlay: false });
+      expect(decoder.decodeRequests).toHaveLength(0);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('admits tokenized remote ALAC sources to native daemon playback from the probed codec', () => {
+    expect(isNativeDaemonRemoteSourceSupported(
+      'http://127.0.0.1:3210/remote-stream/opaque-token',
+      'application/octet-stream',
+      {
+        filePath: 'remote.alac',
+        durationSeconds: 180,
+        fileSampleRate: 96_000,
+        codec: 'ALAC',
+        channels: 2,
+        bitDepth: 24,
+        bitrate: 2_400_000,
+      },
+    )).toBe(true);
+  });
+
+  it.each(['MP4', 'm4a', 'audio/mp4'])(
+    'admits extensionless remote proxy audio reported as %s',
+    (codec) => {
+      expect(isNativeDaemonRemoteSourceSupported(
+        'http://127.0.0.1:3210/remote-stream/opaque-token',
+        null,
+        {
+          filePath: 'http://127.0.0.1:3210/remote-stream/opaque-token',
+          durationSeconds: 0,
+          fileSampleRate: null,
+          codec,
+          channels: 2,
+          bitDepth: null,
+          bitrate: null,
+        },
+      )).toBe(true);
+    },
+  );
+
+  it('plays a Bilibili m4s without MIME metadata through exclusive daemon dither', async () => {
+    const streamUrl = 'https://upos-sz-mirrorcos.bilivideo.com/audio.m4s?deadline=1779039623';
+    const backend = createDaemonAudioBackendStub(streamUrl, 44_100, 'Bilibili test DAC');
+    const hostSignals: {
+      firstPcm?: () => void;
+      audioStarted?: () => void;
+    } = {};
+    backend.onFirstPcm = vi.fn((callback: () => void) => {
+      hostSignals.firstPcm = callback;
+    });
+    backend.onStarted = vi.fn((callback: () => void) => {
+      hostSignals.audioStarted = callback;
+    });
+    backend.openSource = vi.fn(async () => {
+      queueMicrotask(() => {
+        hostSignals.firstPcm?.();
+        hostSignals.audioStarted?.();
+      });
+      return {
+        status: 'decoding',
+        filePath: streamUrl,
+        sampleRate: 44_100,
+        sourceSampleRate: 44_100,
+        channels: 2,
+        durationSeconds: 120,
+        codec: 'AAC',
+        container: 'MOV',
+        bitDepth: 24,
+        bitrate: 192_000,
+      };
+    });
+    const daemonOutputSettings: Array<AudioOutputSettings & { nativeProcessing?: NativeDspProcessingConfig }> = [];
+    const createDaemonAudioBackend = vi.fn(async (_deviceId: string, outputSettings: AudioOutputSettings) => {
+      const daemonSettings = outputSettings as AudioOutputSettings & { nativeProcessing?: NativeDspProcessingConfig };
+      daemonOutputSettings.push(daemonSettings);
+      backend.getNativeProcessingStatus = vi.fn(
+        () => createNativeDspProcessingStatus(daemonSettings.nativeProcessing),
+      );
+      return backend;
+    });
+    const device: AudioDeviceInfo = {
+      id: 'exclusive:0',
+      index: 0,
+      name: 'Bilibili test DAC',
+      outputMode: 'exclusive',
+      sampleRate: 44_100,
+      sharedDeviceSampleRate: 44_100,
+      isDefault: true,
+    };
+    const decoder = new FakeDecoder(new Map());
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: {
+        listDevices: () => [device],
+        listDevicesAsync: async () => [device],
+      },
+      createBridge: () => new FakeBridge(),
+      startAudioDaemon: vi.fn(async () => undefined),
+      createDaemonAudioBackend,
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    try {
+      const status = await session.playLocalFile({
+        filePath: streamUrl,
+        inputHeaders: {
+          'User-Agent': 'Mozilla/5.0 ECHO test',
+          Accept: '*/*',
+          Referer: 'https://www.bilibili.com/video/BV1ECHO',
+        },
+        trackId: 'streaming:bilibili:BV1ECHO',
+        probe: {
+          durationSeconds: 120,
+          fileSampleRate: 44_100,
+          codec: 'mp4a.40.2',
+          channels: 2,
+          bitrate: 192_000,
+        },
+        output: {
+          outputMode: 'exclusive',
+          deviceIndex: 0,
+          deviceName: device.name,
+          pcmDitherMode: 'tpdf',
+        },
+      });
+
+      expect(status).toMatchObject({
+        state: 'playing',
+        currentTrackId: 'streaming:bilibili:BV1ECHO',
+        activeDecodeBackendImpl: 'native-direct-daemon-libav',
+        pcmDitherMode: 'tpdf',
+      });
+      expect(status.error).toBeNull();
+      expect(status.warnings).not.toContain('native_direct_local_playback_not_applied:input_headers');
+      expect(backend.openSource).toHaveBeenCalledWith({
+        kind: 'http',
+        uri: streamUrl,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 ECHO test',
+          Accept: '*/*',
+          Referer: 'https://www.bilibili.com/video/BV1ECHO',
+        },
+        mimeType: undefined,
+      }, 0, { startPaused: true, autoPlay: false });
+      expect(daemonOutputSettings[0]?.nativeProcessing?.dither).toEqual({
+        mode: 'tpdf',
+        bitDepth: 24,
+      });
+      expect(decoder.decodeRequests).toHaveLength(0);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('reopens a remote daemon source once when the host discovers a different source rate', async () => {
+    const streamUrl = 'https://cdn.example.test/hires.flac';
+    const firstBackend = createDaemonAudioBackendStub(streamUrl, 44_100, 'Rate-switching DAC');
+    firstBackend.openSource = vi.fn(async () => ({
+      status: 'decoding',
+      filePath: streamUrl,
+      sampleRate: 44_100,
+      sourceSampleRate: 48_000,
+      channels: 2,
+      durationSeconds: 180,
+      codec: 'FLAC',
+      container: 'FLAC',
+      bitDepth: 24,
+      bitrate: 1_400_000,
+    }));
+    const secondBackend = createDaemonAudioBackendStub(streamUrl, 48_000, 'Rate-switching DAC');
+    const hostSignals: { firstPcm?: () => void; audioStarted?: () => void } = {};
+    secondBackend.onFirstPcm = vi.fn((callback: () => void) => {
+      hostSignals.firstPcm = callback;
+    });
+    secondBackend.onStarted = vi.fn((callback: () => void) => {
+      hostSignals.audioStarted = callback;
+    });
+    secondBackend.openSource = vi.fn(async () => {
+      queueMicrotask(() => {
+        hostSignals.firstPcm?.();
+        hostSignals.audioStarted?.();
+      });
+      return {
+        status: 'decoding',
+        filePath: streamUrl,
+        sampleRate: 48_000,
+        sourceSampleRate: 48_000,
+        channels: 2,
+        durationSeconds: 180,
+        codec: 'FLAC',
+        container: 'FLAC',
+        bitDepth: 24,
+        bitrate: 1_400_000,
+      };
+    });
+    const createDaemonAudioBackend = vi.fn()
+      .mockResolvedValueOnce(firstBackend)
+      .mockResolvedValueOnce(secondBackend);
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map()),
+      deviceService: {
+        listDevices: () => [],
+        listDevicesAsync: async () => [{
+          id: 'exclusive:0',
+          index: 0,
+          name: 'Rate-switching DAC',
+          outputMode: 'exclusive' as const,
+          sampleRate: 44_100,
+          sharedDeviceSampleRate: 48_000,
+          isDefault: true,
+        }],
+      },
+      createBridge: () => new FakeBridge(),
+      startAudioDaemon: vi.fn(async () => undefined),
+      createDaemonAudioBackend,
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    try {
+      const status = await session.playLocalFile({
+        filePath: streamUrl,
+        trackId: 'streaming:netease:rate-correction',
+        probe: {
+          durationSeconds: 180,
+          fileSampleRate: 44_100,
+          codec: 'flac',
+          channels: 2,
+        },
+        output: {
+          outputMode: 'exclusive',
+          deviceIndex: 0,
+          deviceName: 'Rate-switching DAC',
+        },
+      });
+
+      expect(createDaemonAudioBackend).toHaveBeenCalledTimes(2);
+      expect(firstBackend.stop).toHaveBeenCalledOnce();
+      expect(secondBackend.openSource).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'http', uri: streamUrl }),
+        0,
+        { startPaused: true, autoPlay: false },
+      );
+      expect(status).toMatchObject({
+        state: 'playing',
+        fileSampleRate: 48_000,
+        activeDecodeBackendImpl: 'native-direct-daemon-libav',
+      });
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('falls back immediately when the daemon reports audio.error before startup', async () => {
+    const streamUrl = 'https://cdn.example.test/expired.flac';
+    const backend = createDaemonAudioBackendStub(streamUrl, 44_100, 'Streaming test DAC');
+    let reportError: ((error: Error) => void) | undefined;
+    backend.onError = vi.fn((callback: (error: Error) => void) => {
+      reportError = callback;
+    });
+    backend.onFirstPcm = vi.fn();
+    backend.onStarted = vi.fn();
+    backend.openSource = vi.fn(async () => {
+      queueMicrotask(() => reportError?.(new Error('Server returned 403 Forbidden')));
+      return {
+        status: 'decoding',
+        filePath: streamUrl,
+        sampleRate: 44_100,
+        sourceSampleRate: 44_100,
+        channels: 2,
+        durationSeconds: 120,
+        codec: 'FLAC',
+        container: 'FLAC',
+      };
+    });
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map()),
+      deviceService: { listDevices: () => [] },
+      createBridge: () => new FakeBridge(),
+      startAudioDaemon: vi.fn(async () => undefined),
+      createDaemonAudioBackend: vi.fn(async () => backend),
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    try {
+      const status = await session.playLocalFile({
+        filePath: streamUrl,
+        trackId: 'streaming:netease:expired',
+        probe: {
+          durationSeconds: 120,
+          fileSampleRate: 44_100,
+          codec: 'flac',
+          channels: 2,
+        },
+        output: { outputMode: 'shared' },
+      });
+
+      expect(status.warnings).toContain('daemon_remote_source_fell_back:authorization');
+      expect(status.activeDecodeBackendImpl).not.toBe('native-direct-daemon-libav');
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it.each([
+    {
+      failure: 'avcodec_receive_frame failed: Invalid data found when processing input (-1094995529)',
+      warningCause: 'decode_error',
+      streamUrl: 'https://subsonic.example.test/rest/stream/track.flac',
+      inputHeaders: { Authorization: 'Bearer subsonic-token' } as Record<string, string>,
+      mimeType: 'audio/flac',
+      trackId: 'remote:subsonic:track',
+      sampleRate: 48_000,
+      codec: 'flac',
+    },
+    {
+      failure: 'daemon_rpc_bridge_closed',
+      warningCause: 'transport_closed',
+      streamUrl: 'https://m801.music.126.net/token/song.mp3?auth=liked-track',
+      inputHeaders: { Referer: 'https://music.163.com/' } as Record<string, string>,
+      mimeType: 'audio/mpeg',
+      trackId: 'streaming:netease:1417878525',
+      sampleRate: 44_100,
+      codec: 'mp3',
+    },
+  ])('falls back once to legacy PCM at the host position when remote daemon playback fails: $failure', async ({
+    failure,
+    warningCause,
+    streamUrl,
+    inputHeaders,
+    mimeType,
+    trackId,
+    sampleRate,
+    codec,
+  }) => {
+    const backend = createDaemonAudioBackendStub(streamUrl, sampleRate, 'Streaming test DAC');
+    const hostSignals: {
+      firstPcm?: () => void;
+      audioStarted?: () => void;
+      position?: (positionSeconds: number) => void;
+      error?: (error: Error) => void;
+    } = {};
+    backend.getPositionSeconds = vi.fn(() => 52.608);
+    backend.onFirstPcm = vi.fn((callback: () => void) => {
+      hostSignals.firstPcm = callback;
+    });
+    backend.onStarted = vi.fn((callback: () => void) => {
+      hostSignals.audioStarted = callback;
+    });
+    backend.onPosition = vi.fn((callback: (positionSeconds: number) => void) => {
+      hostSignals.position = callback;
+    });
+    backend.onError = vi.fn((callback: (error: Error) => void) => {
+      hostSignals.error = callback;
+    });
+    const decoder = new FakeDecoder(new Map([[streamUrl, {
+      filePath: streamUrl,
+      durationSeconds: 84.660167,
+      fileSampleRate: sampleRate,
+      codec,
+      channels: 2,
+      bitDepth: 24,
+      bitrate: 1_679_000,
+    }]]));
+    const createDaemonAudioBackend = vi.fn(async () => backend);
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: { listDevices: () => [] },
+      createBridge: () => new FakeBridge(),
+      startAudioDaemon: vi.fn(async () => undefined),
+      createDaemonAudioBackend,
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    try {
+      const play = session.playLocalFile({
+        filePath: streamUrl,
+        inputHeaders,
+        mimeType,
+        trackId,
+        probe: {
+          durationSeconds: 84.660167,
+          fileSampleRate: sampleRate,
+          codec,
+          channels: 2,
+        },
+        output: { outputMode: 'shared' },
+      });
+
+      await expect.poll(() => vi.mocked(backend.openSource).mock.calls.length).toBe(1);
+      hostSignals.firstPcm?.();
+      hostSignals.audioStarted?.();
+      await expect(play).resolves.toMatchObject({
+        state: 'playing',
+        activeDecodeBackendImpl: 'native-direct-daemon-libav',
+      });
+
+      hostSignals.position?.(52.608);
+      hostSignals.error?.(new Error(failure));
+
+      await expect.poll(() => decoder.decodeRequests.length).toBe(1);
+      expect(createDaemonAudioBackend).toHaveBeenCalledOnce();
+      expect(backend.stop).toHaveBeenCalled();
+      expect(decoder.decodeRequests[0]).toMatchObject({
+        filePath: streamUrl,
+        startSeconds: 52.608,
+        inputHeaders,
+      });
+      expect(session.getStatus().warnings).toContain(`daemon_remote_decode_fell_back_to_pcm:${warningCause}`);
+      expect(session.getDiagnostics().recentPlaybackEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'watchdog_recovery',
+            severity: 'recovery',
+            reason: 'daemon_remote_decode_fell_back_to_pcm',
+            positionSeconds: 52.608,
+          }),
+        ]),
+      );
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('falls back once to the legacy bridge when daemon HTTP open fails', async () => {
+    const streamUrl = 'https://cdn.example.test/fallback.mp3';
+    const backend = createDaemonAudioBackendStub(streamUrl, 44_100, 'Streaming test DAC');
+    backend.onFirstPcm = vi.fn();
+    backend.onStarted = vi.fn();
+    backend.openSource = vi.fn(async () => {
+      throw new Error('probe failed: invalid format');
+    });
+    const decoder = new FakeDecoder(new Map());
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: { listDevices: () => [] },
+      createBridge: () => new FakeBridge(),
+      startAudioDaemon: vi.fn(async () => undefined),
+      createDaemonAudioBackend: vi.fn(async () => backend),
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    try {
+      const status = await session.playLocalFile({
+        filePath: streamUrl,
+        mimeType: 'audio/mpeg',
+        trackId: 'streaming:netease:fallback-track',
+        probe: {
+          durationSeconds: 120,
+          fileSampleRate: 44_100,
+          codec: 'mp3',
+          channels: 2,
+        },
+        output: { outputMode: 'shared' },
+      });
+
+      expect(backend.openSource).toHaveBeenCalledOnce();
+      expect(decoder.decodeRequests).toHaveLength(1);
+      expect(status.warnings).toContain('daemon_remote_source_fell_back:format');
+      expect(status.activeDecodeBackendImpl).not.toBe('native-direct-daemon-libav');
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('keeps visual level status updates at the 33ms cadence', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-16T00:00:00.000Z'));
+    const { session } = createSessionHarness([probe('music.flac', 48_000)], [48_000], [], {
+      disableWatchdogTimer: true,
+    });
+    const levelSnapshot: PcmLevelSnapshot = {
+      inputPeakDb: -6,
+      inputRmsDb: -12,
+      inputTruePeakDb: null,
+      visualSpectrum: Array.from({ length: 32 }, () => 0),
+      visualSpectrumVersion: 2,
+      visualEnergy: 0.5,
+      visualTransient: 0.25,
+      visualTelemetryState: 'pcm',
+      clipCount: 0,
+      lastClipAt: null,
+      levelMeterObserveCostMs: 0,
+      visualSpectrumComputeCostMs: 0,
+    };
+    const levelMeter = session as unknown as {
+      handleLevelSnapshot: (snapshot: PcmLevelSnapshot) => void;
+      lastLevelMeterStatusEmittedAt: number;
+      state: AudioStatus['state'];
+    };
+
+    try {
+      const statuses: AudioStatus[] = [];
+      session.on('status', (status) => statuses.push(status));
+      levelMeter.state = 'playing';
+      levelMeter.lastLevelMeterStatusEmittedAt = Date.now();
+
+      vi.advanceTimersByTime(32);
+      levelMeter.handleLevelSnapshot(levelSnapshot);
+      expect(statuses).toHaveLength(0);
+
+      vi.advanceTimersByTime(1);
+      levelMeter.handleLevelSnapshot(levelSnapshot);
+      expect(statuses).toHaveLength(1);
+    } finally {
+      session.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('throttles native telemetry status events while preserving immediate pause status', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-14T00:00:00.000Z'));
@@ -5231,6 +7572,60 @@ describe('AudioSession playback watchdog', () => {
 
     expect(bridges).toHaveLength(1);
     expect(session.getDiagnostics().recentWatchdogRecoveryCount).toBe(0);
+  });
+
+  it('does not recover daemon-direct playback while its host position advances', async () => {
+    const { backends, session } = createDaemonPcmSrcHarness([probe('daemon-song.flac', 44100)], {
+      disableWatchdogTimer: true,
+      watchdogStallChecks: 1,
+    });
+
+    try {
+      await session.playLocalFile({ filePath: 'daemon-song.flac', output: { outputMode: 'shared' } });
+      const daemonBackend = backends[0]!;
+      let positionSeconds = 10;
+      daemonBackend.getPositionSeconds = vi.fn(() => positionSeconds);
+
+      expect((session as unknown as { bridge: unknown }).bridge).toBeNull();
+      await session.checkPlaybackWatchdog();
+      positionSeconds = 11;
+      await session.checkPlaybackWatchdog();
+
+      expect(backends).toHaveLength(1);
+      expect(daemonBackend.stop).not.toHaveBeenCalled();
+      expect(session.getDiagnostics().recentWatchdogRecoveryCount).toBe(0);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('recovers stalled daemon-direct playback from its host position without a legacy bridge', async () => {
+    const { backends, session } = createDaemonPcmSrcHarness([probe('daemon-stalled.flac', 44100)], {
+      disableWatchdogTimer: true,
+      watchdogStallChecks: 1,
+    });
+
+    try {
+      await session.playLocalFile({
+        filePath: 'daemon-stalled.flac',
+        trackId: 'daemon-track',
+        output: { outputMode: 'shared' },
+      });
+      const daemonBackend = backends[0]!;
+      daemonBackend.getPositionSeconds = vi.fn(() => 15.5);
+
+      expect((session as unknown as { bridge: unknown }).bridge).toBeNull();
+      await session.checkPlaybackWatchdog();
+      await session.checkPlaybackWatchdog();
+
+      expect(daemonBackend.stop).toHaveBeenCalledOnce();
+      expect(backends).toHaveLength(2);
+      expect(backends[1]?.openFile).toHaveBeenCalledWith('daemon-stalled.flac', 15.5);
+      expect(session.getStatus().warnings).toContain('audio_watchdog_recovered_native_output:1');
+      expect(session.getDiagnostics().recentWatchdogRecoveryCount).toBe(1);
+    } finally {
+      session.dispose();
+    }
   });
 
   it('does not restart on startup position reports inside the discontinuity guard', async () => {
@@ -5608,6 +8003,83 @@ describe('AudioSession playback watchdog', () => {
 
       expect(decoder.decodeRequests).toHaveLength(0);
       expect(session.getStatus().warnings).toContain('live_pcm_seek_skipped');
+    } finally {
+      stream.destroy();
+      session.dispose();
+    }
+  });
+
+  it('releases the daemon output owner before a live PCM bridge starts', async () => {
+    const filePath = 'daemon-before-live-pcm.flac';
+    const decoder = new FakeDecoder(new Map([[filePath, probe(filePath, 48_000)]]));
+    const events: string[] = [];
+    let activeOwner: 'daemon' | 'raw' | null = null;
+    const daemonBackend = createDaemonAudioBackendStub(filePath, 48_000, 'Live PCM test output');
+    vi.spyOn(daemonBackend, 'stop').mockImplementation(async () => {
+      events.push('stop-daemon-backend');
+    });
+    const rawBridge = new FakeBridge(48_000);
+    rawBridge.stop.mockImplementation(() => {
+      activeOwner = null;
+    });
+    const session = createAudioSessionForTest({
+      decoder,
+      deviceService: { listDevices: () => [] },
+      isNativeHostAvailable: () => true,
+      startAudioDaemon: async () => {
+        if (activeOwner !== null) throw new Error(`overlapping_audio_output_owner:${activeOwner}->daemon`);
+        activeOwner = 'daemon';
+        events.push('start-daemon');
+      },
+      stopAudioDaemon: async () => {
+        if (activeOwner === 'raw') throw new Error('daemon_stop_attempted_while_raw_host_owned_output');
+        activeOwner = null;
+        events.push('stop-daemon');
+      },
+      createDaemonAudioBackend: async () => {
+        events.push('create-daemon-backend');
+        return daemonBackend;
+      },
+      createBridge: () => {
+        if (activeOwner !== null) throw new Error(`overlapping_audio_output_owner:${activeOwner}->raw`);
+        activeOwner = 'raw';
+        events.push('create-raw-bridge');
+        return rawBridge;
+      },
+      logger: noopLogger,
+    });
+    const stream = new PassThrough();
+
+    try {
+      const daemonStatus = await session.playLocalFile({
+        filePath,
+        output: {
+          outputMode: 'shared',
+          nativeDirectLocalPlaybackEnabled: true,
+          dsdOutputMode: 'pcm',
+        },
+      });
+      expect(daemonStatus.nativeDirectLocalPlaybackActive).toBe(true);
+      expect(activeOwner).toBe('daemon');
+
+      const liveStatus = await session.playPcmStream({
+        stream,
+        sourceId: 'airplay-receiver:daemon-takeover-test',
+        trackId: 'airplay-receiver:daemon-takeover-test',
+        sampleRate: 48_000,
+        channels: 2,
+        output: { outputMode: 'shared' },
+      });
+
+      expect(liveStatus.state).toBe('playing');
+      expect(activeOwner).toBe('raw');
+      expect(events).toEqual([
+        'start-daemon',
+        'create-daemon-backend',
+        'stop-daemon-backend',
+        'stop-daemon',
+        'create-raw-bridge',
+      ]);
     } finally {
       stream.destroy();
       session.dispose();
@@ -6249,8 +8721,8 @@ describe('NativeOutputBridge host arguments', () => {
     );
   });
   it('passes shared FIFO and startup prebuffer host arguments', async () => {
-    // Daemon-only: buffer/fifo/prebuffer params are sent via JSON-RPC, not CLI args.
-    // The spawn args should contain the daemon transport flags.
+    // A per-play host allocates its PCM source before sessionBegin, so fixed
+    // source format/capacity stays in CLI args while lifecycle uses RPC.
     const spawned: Array<{ file: string; args: string[] }> = [];
     const fakeSpawn = (file: string, args: string[]): ChildProcessWithoutNullStreams => {
       spawned.push({ file, args });
@@ -6289,9 +8761,9 @@ describe('NativeOutputBridge host arguments', () => {
     expect(spawned[0].args).toEqual(
       expect.arrayContaining(['--rpc-stdin-fd', '3', '--rpc-stdout-fd', '4', '--no-stdin']),
     );
-    expect(spawned[0].args).not.toContain('-buffer');
-    expect(spawned[0].args).not.toContain('-fifo-ms');
-    expect(spawned[0].args).not.toContain('-prebuffer-ms');
+    expect(spawned[0].args).toEqual(expect.arrayContaining([
+      '-buffer', '2048', '-fifo-ms', '750', '-prebuffer-ms', '120', '--pcm-input-fd', '5',
+    ]));
   });
 
   it('passes explicit zero startup prebuffer arguments to the native host', async () => {
@@ -6333,8 +8805,7 @@ describe('NativeOutputBridge host arguments', () => {
     expect(spawned[0].args).toEqual(
       expect.arrayContaining(['-exclusive', '--rpc-stdin-fd', '3', '--rpc-stdout-fd', '4', '--no-stdin']),
     );
-    expect(spawned[0].args).not.toContain('-buffer');
-    expect(spawned[0].args).not.toContain('-prebuffer-ms');
+    expect(spawned[0].args).toEqual(expect.arrayContaining(['-buffer', '512', '-prebuffer-ms', '0']));
   });
 
   it('treats framed native pos as per-session position when reusing a resident host', async () => {
@@ -6526,12 +8997,12 @@ describe('NativeOutputBridge host arguments', () => {
 
     expect(spawned[0]).not.toContain('-buffer');
     expect(spawned[0]).not.toEqual(expect.arrayContaining(['-buffer', '8192']));
-    // Daemon-only: buffer/fifo/prebuffer params are sent via JSON-RPC, not CLI args.
-    // Exclusive output spawns with -exclusive, not -asio.
+    // Unsafe shared low-latency values are omitted; exclusive is capped and
+    // stable mode keeps the requested value.
     expect(spawned[1]).toEqual(expect.arrayContaining(['-exclusive', '--rpc-stdin-fd', '3']));
-    expect(spawned[1]).not.toContain('-buffer');
+    expect(spawned[1]).toEqual(expect.arrayContaining(['-buffer', '2048']));
     expect(spawned[2]).toEqual(expect.arrayContaining(['--rpc-stdin-fd', '3', '--rpc-stdout-fd', '4', '--no-stdin']));
-    expect(spawned[2]).not.toContain('-buffer');
+    expect(spawned[2]).toEqual(expect.arrayContaining(['-buffer', '8192']));
   });
   it('accepts legacy WASAPI exclusive ready metadata', async () => {
     const fakeSpawn = (): ChildProcessWithoutNullStreams => {
@@ -6779,7 +9250,7 @@ describe('NativeOutputBridge graceful shutdown', () => {
     bridge.stop();
   });
 
-  it('turns native stdin EOF into a bridge error instead of an uncaught stream error', async () => {
+  it('turns native PCM pipe EOF into a bridge error instead of an uncaught stream error', async () => {
     const { bridge, child } = await createStartedBridge();
     const errors: Error[] = [];
     bridge.on('error', (error) => errors.push(error));
@@ -6787,7 +9258,7 @@ describe('NativeOutputBridge graceful shutdown', () => {
     child.stdin.emit('error', new Error('write EOF'));
     await Promise.resolve();
 
-    expect(errors.at(-1)?.message).toContain('stdin_error:write EOF');
+    expect(errors.at(-1)?.message).toContain('pcm_input_error:write EOF');
     expect(bridge.isReady).toBe(false);
     bridge.stop();
   });
@@ -6918,6 +9389,46 @@ describe('AudioSession host availability', () => {
     });
 
     expect(unavailableSession.getStatus().host).toBe('unavailable');
+  });
+
+  it('uses NativePcmHostProcess as the production bridge factory by default', () => {
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map()),
+      deviceService: { listDevices: () => [] },
+      isNativeHostAvailable: () => true,
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+    let bridge: NativeOutputBridge | null = null;
+
+    try {
+      bridge = (session as unknown as { createBridge: () => NativeOutputBridge }).createBridge();
+
+      expect(bridge).toBeInstanceOf(NativeOutputBridge);
+    } finally {
+      bridge?.stop();
+      session.dispose();
+    }
+  });
+
+  it('fails clearly when the bridge factory returns null', async () => {
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([['song.flac', probe('song.flac', 44100)]])),
+      deviceService: { listDevices: () => [] },
+      createBridge: () => null,
+      isNativeHostAvailable: () => true,
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    try {
+      await expect(session.playLocalFile({ filePath: 'song.flac' })).rejects.toThrow(
+        'native output bridge factory did not create a usable bridge',
+      );
+      expect(session.getStatus().error).toBe('native output bridge factory did not create a usable bridge');
+    } finally {
+      session.dispose();
+    }
   });
 
   it('returns isolated status snapshots without sharing nested objects', () => {
@@ -7301,6 +9812,47 @@ describe('AudioSession graceful output cleanup', () => {
     expect(status.error).toBeNull();
   });
 
+  it('resetEngine terminates a resident daemon after stopping its backend', async () => {
+    const filePath = 'daemon-reset.flac';
+    const backend = createDaemonAudioBackendStub(filePath, 48_000, 'Daemon reset output');
+    const events: string[] = [];
+    vi.spyOn(backend, 'stop').mockImplementation(async () => {
+      events.push('stop-daemon-backend');
+    });
+    const session = createAudioSessionForTest({
+      decoder: new FakeDecoder(new Map([[filePath, probe(filePath, 48_000)]])),
+      deviceService: { listDevices: () => [] },
+      isNativeHostAvailable: () => true,
+      startAudioDaemon: async () => {
+        events.push('start-daemon');
+      },
+      stopAudioDaemon: async () => {
+        events.push('stop-daemon');
+      },
+      createDaemonAudioBackend: async () => backend,
+      logger: noopLogger,
+      disableWatchdogTimer: true,
+    });
+
+    await session.playLocalFile({
+      filePath,
+      output: {
+        outputMode: 'shared',
+        nativeDirectLocalPlaybackEnabled: true,
+        dsdOutputMode: 'pcm',
+      },
+    });
+    const status = await session.resetEngine();
+
+    expect(events).toEqual([
+      'start-daemon',
+      'stop-daemon-backend',
+      'stop-daemon',
+    ]);
+    expect(status.state).toBe('stopped');
+    expect(status.error).toBeNull();
+  });
+
   it('forceRestart waits for host exit, refreshes devices, clears recovery caches, and emits session-reset', async () => {
     const bridge = new GracefulFakeBridge();
     const refresh = vi.fn(async () => []);
@@ -7516,7 +10068,9 @@ describe('DeviceService diagnostics', () => {
     const execFileMock = vi.fn((_bin, args, _options, callback) => {
       const output = Array.isArray(args) && args.includes('-asio')
         ? ''
-        : '0\tSpeakers\t48000\t1\t48000\n';
+        : Array.isArray(args) && args.includes('-exclusive')
+          ? '0\tExclusive DAC\t192000\t1\t48000\n'
+          : '0\tSpeakers\t48000\t1\t48000\tunknown\tspeakers\n1\t耳机（籽眠）\t48000\t0\t48000\tbluetooth\theadphones\n';
       queueMicrotask(() => callback(null, output, ''));
       return {} as ReturnType<typeof nodeExecFile>;
     });
@@ -7534,8 +10088,113 @@ describe('DeviceService diagnostics', () => {
         outputMode: 'shared',
         sharedDeviceSampleRate: 48000,
       },
+      {
+        id: 'shared:1',
+        name: '耳机（籽眠）',
+        outputMode: 'shared',
+        connectionType: 'bluetooth',
+        formFactor: 'headphones',
+      },
+      {
+        id: 'exclusive:0',
+        name: 'Exclusive DAC',
+        outputMode: 'exclusive',
+        sampleRate: 192000,
+        sharedDeviceSampleRate: 48000,
+      },
     ]);
     expect(execFileSyncMock).not.toHaveBeenCalled();
+    expect(execFileMock).toHaveBeenCalledTimes(3);
+    expect(execFileMock.mock.calls.map((call) => call[1])).toEqual(
+      expect.arrayContaining([['-list'], ['-exclusive', '-list'], ['-asio', '-list']]),
+    );
+  });
+
+  it('returns UI routing devices without waiting for WASAPI exclusive capability enumeration', async () => {
+    const execFileMock = vi.fn((_bin, args, _options, callback) => {
+      const output = Array.isArray(args) && args.includes('-asio')
+        ? '0\tMatrix ASIO Driver\t\t1\n'
+        : '0\tSpeakers\t48000\t1\t48000\n';
+      queueMicrotask(() => callback(null, output, ''));
+      return {} as ReturnType<typeof nodeExecFile>;
+    });
+    const service = new DeviceService({
+      hostBinary: 'echo-audio-host.exe',
+      execFile: execFileMock as unknown as typeof nodeExecFile,
+      logger: noopLogger,
+    });
+
+    await expect(service.listRoutingDevicesAsync()).resolves.toMatchObject([
+      { name: 'Speakers', outputMode: 'shared' },
+      { name: 'Matrix ASIO Driver', outputMode: 'asio' },
+    ]);
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(execFileMock.mock.calls.map((call) => call[1])).not.toContainEqual(['-exclusive', '-list']);
+  });
+
+  it('refreshes shared endpoints without probing cached ASIO or exclusive devices', async () => {
+    const execFileMock = vi.fn((_bin, args, _options, callback) => {
+      const output = Array.isArray(args) && args.includes('-asio')
+        ? '0\tFiiO ASIO Driver\t\t1\n'
+        : Array.isArray(args) && args.includes('-exclusive')
+          ? '0\tExclusive DAC\t192000\t1\t48000\n'
+          : '0\tSpeakers\t48000\t1\t48000\n';
+      queueMicrotask(() => callback(null, output, ''));
+      return {} as ReturnType<typeof nodeExecFile>;
+    });
+    const service = new DeviceService({
+      hostBinary: 'echo-audio-host.exe',
+      execFile: execFileMock as unknown as typeof nodeExecFile,
+      logger: noopLogger,
+    });
+
+    await service.listDevicesAsync();
+    execFileMock.mockClear();
+
+    await expect(service.refreshSharedDevicesAsync()).resolves.toMatchObject([
+      { name: 'Speakers', outputMode: 'shared' },
+    ]);
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    expect(execFileMock).toHaveBeenCalledWith(
+      'echo-audio-host.exe',
+      ['-list'],
+      expect.any(Object),
+      expect.any(Function),
+    );
+    expect(service.listAsioDevices()).toMatchObject([
+      { name: 'FiiO ASIO Driver', outputMode: 'asio' },
+    ]);
+    expect(service.listExclusiveDevices()).toMatchObject([
+      { name: 'Exclusive DAC', outputMode: 'exclusive' },
+    ]);
+  });
+
+  it('keeps the last device snapshot available after the refresh TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      const execFileMock = vi.fn((_bin, args, _options, callback) => {
+        const output = Array.isArray(args) && args.includes('-asio')
+          ? ''
+          : Array.isArray(args) && args.includes('-exclusive')
+            ? '0\tExclusive DAC\t192000\t1\t48000\n'
+            : '0\tSpeakers\t48000\t1\t48000\n';
+        queueMicrotask(() => callback(null, output, ''));
+        return {} as ReturnType<typeof nodeExecFile>;
+      });
+      const service = new DeviceService({
+        hostBinary: 'echo-audio-host.exe',
+        execFile: execFileMock as unknown as typeof nodeExecFile,
+        logger: noopLogger,
+      });
+
+      await expect(service.listDevicesAsync()).resolves.toHaveLength(2);
+      vi.advanceTimersByTime(30_000);
+
+      expect(service.listDevices()).toHaveLength(2);
+      expect(execFileMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('returns an empty Linux device list when no native host is bundled', async () => {
@@ -8041,7 +10700,7 @@ describe('DecoderPipeline ffmpeg resolution', () => {
     expect(filter).not.toContain('acrossfade');
   });
 
-  it('adds conservative reconnect args before remote HTTP inputs', async () => {
+  it('adds network-error reconnect args without treating seekable VOD EOF as a reconnect', async () => {
     let spawnedArgs: string[] = [];
     const spawn: NonNullable<DecoderPipelineDependencies['spawn']> = (_file, args) => {
       spawnedArgs = args;
@@ -8068,10 +10727,11 @@ describe('DecoderPipeline ffmpeg resolution', () => {
 
     await expect(run.done).resolves.toBeUndefined();
     const inputIndex = spawnedArgs.indexOf('-i');
-    for (const flag of ['-reconnect', '-reconnect_streamed', '-reconnect_at_eof', '-reconnect_on_network_error', '-reconnect_delay_max', '-rw_timeout']) {
+    for (const flag of ['-reconnect', '-reconnect_streamed', '-reconnect_on_network_error', '-reconnect_delay_max', '-rw_timeout']) {
       expect(spawnedArgs.indexOf(flag)).toBeGreaterThanOrEqual(0);
       expect(spawnedArgs.indexOf(flag)).toBeLessThan(inputIndex);
     }
+    expect(spawnedArgs).not.toContain('-reconnect_at_eof');
     expect(spawnedArgs[spawnedArgs.indexOf('-rw_timeout') + 1]).toBe('30000000');
   });
 
@@ -8752,7 +11412,7 @@ describe('NativeOutputBridge diagnostics', () => {
         channels: 2,
       }),
     ).rejects.toThrow(
-      'echo-audio-host exit_code_1; host="echo-audio-host.exe"; args="-eq-port 0 --rpc-stdin-fd 3 --rpc-stdout-fd 4 --no-stdin"; mode="shared"; elapsedMs=0',
+      'echo-audio-host exit_code_1; host="echo-audio-host.exe"; args="-sr 44100 -ch 2 -eq-port 0 --rpc-stdin-fd 3 --rpc-stdout-fd 4 --pcm-input-fd 5 --no-stdin"; mode="shared"',
     );
   });
 

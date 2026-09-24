@@ -1,9 +1,13 @@
 import type { LibraryTrack } from '../../../shared/types/library';
 import type { PlaybackStatus } from '../../../shared/types/playback';
-import { translateCurrentLocale } from '../../i18n/I18nProvider';
+import { translateStatic } from '../../i18n/translateStatic';
 
 type SpotifyError = {
   message?: string;
+};
+
+type SpotifyPlayerEvent = SpotifyError & {
+  device_id?: string;
 };
 
 type SpotifyPlayerState = {
@@ -13,7 +17,7 @@ type SpotifyPlayerState = {
 };
 
 type SpotifyPlayer = {
-  addListener: (event: string, callback: (payload: any) => void) => boolean;
+  addListener: (event: string, callback: (payload: SpotifyPlayerEvent) => void) => boolean;
   activateElement?: () => Promise<void>;
   connect: () => Promise<boolean>;
   disconnect: () => void;
@@ -132,16 +136,16 @@ const spotifyPlaybackError = (error: SpotifyError | null | undefined, fallback: 
   }
 
   if (/premium|account/iu.test(message)) {
-    return new Error('Spotify Premium is required for playback.');
+    return new Error(translateStatic('error.spotify.premiumRequired'));
   }
   if (/auth|token/iu.test(message)) {
-    return new Error('Spotify sign-in expired. Sign in again from Settings.');
+    return new Error(translateStatic('error.spotify.signInExpired'));
   }
   if (/device|connect|not[_ ]?ready/iu.test(message)) {
-    return new Error('Spotify playback device is not ready yet. Try again in a moment.');
+    return new Error(translateStatic('error.spotify.deviceNotReady'));
   }
   if (/failed to initialize player/iu.test(message) && /Electron/iu.test(navigator.userAgent)) {
-    return new Error(translateCurrentLocale('spotifyPlayback.error.noDrmKeysystem'));
+    return new Error(translateStatic('spotifyPlayback.error.noDrmKeysystem'));
   }
 
   return new Error(message);
@@ -160,7 +164,7 @@ const loadSpotifySdk = (): Promise<void> => {
     const existing = document.querySelector<HTMLScriptElement>(`script[src="${spotifySdkUrl}"]`);
     const timeout = window.setTimeout(() => {
       reportSpotifyDiagnostic('sdk-load-timeout', {}, 'error');
-      reject(new Error('Spotify Web Playback SDK load timed out.'));
+      reject(new Error(translateStatic('error.spotify.sdkTimeout')));
     }, spotifySdkLoadTimeoutMs);
 
     window.onSpotifyWebPlaybackSDKReady = () => {
@@ -181,7 +185,7 @@ const loadSpotifySdk = (): Promise<void> => {
     script.onerror = () => {
       window.clearTimeout(timeout);
       reportSpotifyDiagnostic('sdk-script-error', {}, 'error');
-      reject(new Error('Unable to load Spotify Web Playback SDK. Check the network connection.'));
+      reject(new Error(translateStatic('error.spotify.sdkLoadFailed')));
     };
     document.head.appendChild(script);
   }).catch((error) => {
@@ -251,7 +255,7 @@ const chooseSpotifyConnectDevice = async (uri: string, webUrl: string): Promise<
 
   const sdkHint = lastSdkFailureMessage ? ` SDK failed: ${lastSdkFailureMessage}` : '';
   if (!(await shouldAutoLaunchSpotifyOfficialPlayer()) || !window.echo.spotify.ensureConnectDevice) {
-    throw new Error(translateCurrentLocale('spotifyPlayback.error.noDevice', { hint: sdkHint }));
+    throw new Error(translateStatic('spotifyPlayback.error.noDevice', { hint: sdkHint }));
   }
 
   reportSpotifyDiagnostic('connect-autolaunch-start', { webUrl, preferredDeviceId: lastConnectDeviceId });
@@ -287,12 +291,12 @@ const ensureSpotifyPlayer = async (): Promise<SpotifyPlayer> => {
   playerPromise = (async () => {
     const spotifyApi = window.echo?.spotify;
     if (!spotifyApi?.getAccessToken || !spotifyApi.startPlayback || !spotifyApi.transferPlayback) {
-      throw new Error('Spotify desktop bridge is unavailable. Open ECHO Next in Electron.');
+      throw new Error(translateStatic('error.bridge.spotify'));
     }
 
     await loadSpotifySdk();
     if (!window.Spotify?.Player) {
-      throw new Error('Spotify Web Playback SDK is not ready.');
+      throw new Error(translateStatic('error.spotify.sdkNotReady'));
     }
 
     return withTimeout(
@@ -342,7 +346,7 @@ const ensureSpotifyPlayer = async (): Promise<SpotifyPlayer> => {
           lastSdkFailureMessage = nextError.message;
           reportSpotifyDiagnostic('playback-error', { message: nextError.message }, 'warn');
         });
-        nextPlayer.addListener('ready', ({ device_id: readyDeviceId }: { device_id?: string }) => {
+        nextPlayer.addListener('ready', ({ device_id: readyDeviceId }) => {
           if (!isCurrentGeneration()) {
             resetSpotifyPlayer(nextPlayer);
             if (!settled) {
@@ -367,7 +371,7 @@ const ensureSpotifyPlayer = async (): Promise<SpotifyPlayer> => {
             resolve(nextPlayer);
           }
         });
-        nextPlayer.addListener('not_ready', ({ device_id: staleDeviceId }: { device_id?: string }) => {
+        nextPlayer.addListener('not_ready', ({ device_id: staleDeviceId }) => {
           reportSpotifyDiagnostic('player-not-ready', { sameDevice: Boolean(staleDeviceId && staleDeviceId === deviceId) }, 'warn');
           if (!staleDeviceId || staleDeviceId === deviceId) {
             deviceId = null;
@@ -455,12 +459,13 @@ const statusForTrack = (track: LibraryTrack, state: PlaybackStatus['state'], pos
   positionMs: Math.round(Math.max(0, positionSeconds) * 1000),
   durationMs: Math.round(Math.max(0, track.duration) * 1000),
   filePath: track.stableKey ?? track.path ?? `spotify:${track.providerTrackId ?? track.id}`,
+  volume: lastVolume,
 });
 
 const spotifyUriForTrack = (track: LibraryTrack): string => {
   const providerTrackId = track.providerTrackId?.trim();
   if (track.mediaType !== 'streaming' || track.provider !== 'spotify' || !providerTrackId) {
-    throw new Error('The current track is not a playable Spotify track.');
+    throw new Error(translateStatic('error.spotify.notPlayableTrack'));
   }
 
   return `spotify:track:${providerTrackId}`;
@@ -469,7 +474,7 @@ const spotifyUriForTrack = (track: LibraryTrack): string => {
 const spotifyWebUrlForTrack = (track: LibraryTrack): string => {
   const providerTrackId = track.providerTrackId?.trim();
   if (track.mediaType !== 'streaming' || track.provider !== 'spotify' || !providerTrackId) {
-    throw new Error('The current track is not a playable Spotify track.');
+    throw new Error(translateStatic('error.spotify.notPlayableTrack'));
   }
 
   return `https://open.spotify.com/track/${encodeURIComponent(providerTrackId)}`;
@@ -503,10 +508,10 @@ const waitForSpotifyPlaying = async (
   const lastState = await window.echo.spotify.getPlaybackState().catch(() => null);
   const deviceName = lastState?.deviceName ? ` (device: ${lastState.deviceName})` : '';
   if (lastState?.itemUri === expectedUri || !lastState?.itemUri) {
-    throw new Error(`Spotify accepted the command, but the official player stayed paused${deviceName}.`);
+    throw new Error(translateStatic('error.spotify.stayedPaused', { device: deviceName }));
   }
 
-  throw new Error(`Spotify did not switch to the requested track${deviceName}. Try again in a moment.`);
+  throw new Error(translateStatic('error.spotify.didNotSwitch', { device: deviceName }));
 };
 
 const readSpotifyPlaybackSnapshot = async (
@@ -523,6 +528,9 @@ const readSpotifyPlaybackSnapshot = async (
 
   const apiState = await window.echo.spotify.getPlaybackState().catch(() => null);
   if (apiState?.itemUri === expectedUri) {
+    if (typeof apiState.volumePercent === 'number') {
+      lastVolume = Math.max(0, Math.min(1, apiState.volumePercent / 100));
+    }
     return statusForTrack(
       track,
       apiState.isPlaying ? 'playing' : fallbackState,
@@ -558,7 +566,7 @@ export const playSpotifyTrack = async (track: LibraryTrack, startSeconds = 0): P
   const nextPlayer = target.player;
   const currentDeviceId = target.deviceId;
   if (!currentDeviceId) {
-    throw new Error('Spotify playback device is not ready.');
+    throw new Error(translateStatic('error.spotify.deviceNotReady'));
   }
 
   const positionMs = Math.round(Math.max(0, startSeconds) * 1000);

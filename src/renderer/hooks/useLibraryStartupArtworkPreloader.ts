@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
+import type { AudioPlaybackState } from '../../shared/types/audio';
 import type { LibraryAlbum, LibraryArtist, LibrarySort, LibraryTrack } from '../../shared/types/library';
+import { useSharedPlaybackActivityState } from '../stores/playbackStatusStore';
 import { readStoredLibrarySort } from '../utils/librarySortMemory';
 import { readStoredLibrarySourceMode } from '../utils/librarySourceMode';
 
@@ -10,6 +12,7 @@ const startupSongsPageSize = 100;
 const startupAlbumsPageSize = 90;
 const startupArtistsPageSize = 96;
 const maxRememberedStartupArtworkUrls = 1600;
+const startupArtworkPreloadAllowedStates = new Set<AudioPlaybackState>(['idle', 'stopped', 'ended']);
 
 const songsSortStorageKey = 'echo-next.songs.sort';
 const songsHideDuplicatesStorageKey = 'echo-next.songs.hide-duplicates';
@@ -60,6 +63,9 @@ const artistSortValues = new Set<LibrarySort>([
 ]);
 
 const rememberedStartupArtworkUrls = new Set<string>();
+
+export const isStartupArtworkPreloadAllowed = (state: AudioPlaybackState): boolean =>
+  startupArtworkPreloadAllowedStates.has(state);
 
 const readStoredSongsHideDuplicates = (): boolean => {
   try {
@@ -208,11 +214,22 @@ export const preloadStartupArtworkUrls = (
 };
 
 export const useLibraryStartupArtworkPreloader = (): void => {
+  const playbackState = useSharedPlaybackActivityState();
+
   useEffect(() => {
+    if (!isStartupArtworkPreloadAllowed(playbackState)) {
+      return undefined;
+    }
+
     let cancelled = false;
     let cancelPreload: (() => void) | null = null;
+    let idleCallbackId: number | null = null;
 
-    const timer = window.setTimeout(() => {
+    const loadStartupArtwork = (): void => {
+      if (cancelled) {
+        return;
+      }
+
       const library = window.echo?.library;
       if (!library) {
         return;
@@ -258,12 +275,24 @@ export const useLibraryStartupArtworkPreloader = (): void => {
         });
         cancelPreload = preloadStartupArtworkUrls(urls);
       });
+    };
+
+    const timer = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleCallbackId = window.requestIdleCallback(loadStartupArtwork, { timeout: 1_200 });
+        return;
+      }
+
+      loadStartupArtwork();
     }, startupArtworkPreloadDelayMs);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      if (idleCallbackId !== null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleCallbackId);
+      }
       cancelPreload?.();
     };
-  }, []);
+  }, [playbackState]);
 };

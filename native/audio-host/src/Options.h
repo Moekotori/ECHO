@@ -7,6 +7,8 @@ struct Options
     bool list = false;
     bool asio = false;
     bool exclusive = false;
+    bool dopOutput = false;
+    bool asioNativeDsdOutput = false;
     int sampleRate = 44100;
     int channels = 2;
     int deviceIndex = -1;
@@ -22,6 +24,7 @@ struct Options
     int eqControlPort = 0;
     int rpcStdinFd = -1;
     int rpcStdoutFd = -1;
+    int pcmInputFd = -1;
     bool noStdin = false;
     bool deviceOpenDeferred = false;
     double volume = 1.0;

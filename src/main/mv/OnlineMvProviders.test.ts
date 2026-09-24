@@ -27,6 +27,9 @@ const track: LibraryTrack = {
 const settings: MvSettings = {
   autoSearch: true,
   autoPreload: true,
+  autoApplyThreshold: 0.7,
+  titleOnlySearch: false,
+  preferHighestViewCount: true,
   restartAudioOnLoad: false,
   enabledProviders: ['bilibili', 'youtube'],
   providerOrder: ['bilibili', 'youtube'],
@@ -73,6 +76,45 @@ afterEach(() => {
 });
 
 describe('BilibiliMvProvider', () => {
+  it('reuses and deduplicates the WBI key request across searches', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.includes('/x/web-interface/nav')) {
+        return jsonResponse({
+          data: {
+            wbi_img: {
+              img_url: 'https://i0.hdslb.com/bfs/wbi/abcdefghijklmnopqrstuvwxyzABCDEF.png',
+              sub_url: 'https://i0.hdslb.com/bfs/wbi/0123456789abcdefghijklmnopqrstuvwxyzABCDEF.png',
+            },
+          },
+        });
+      }
+
+      return jsonResponse({
+        data: {
+          result: [{
+            bvid: 'BV1cached-key',
+            title: 'Echo Artist - Echo Song Official MV',
+            author: 'Echo Artist',
+            duration: '02:00',
+          }],
+        },
+      });
+    }) as typeof fetch;
+    const provider = new BilibiliMvProvider({
+      fetchImpl,
+      getCredentials: () => ({ provider: 'bilibili' }),
+    });
+
+    await Promise.all([
+      provider.search(track, settings, 'Echo Song Echo Artist MV'),
+      provider.search(track, settings, 'Echo Song Echo Artist official video'),
+    ]);
+
+    const urls = vi.mocked(fetchImpl).mock.calls.map(([url]) => String(url));
+    expect(urls.filter((url) => url.includes('/x/web-interface/nav'))).toHaveLength(1);
+    expect(urls.filter((url) => url.includes('/search/type'))).toHaveLength(2);
+  });
+
   it('maps search results and sends account cookie only from main dependencies', async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
@@ -117,7 +159,7 @@ describe('BilibiliMvProvider', () => {
         }),
       }),
     );
-    expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining('order=click'), expect.anything());
+    expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining('order=totalrank'), expect.anything());
   });
 
   it('uses signed WBI search when Bilibili exposes WBI keys', async () => {
@@ -458,17 +500,19 @@ describe('BilibiliMvProvider', () => {
     expect(candidates[1]!.score).toBeGreaterThan(candidates[2]!.score);
   });
 
-  it('sorts Bilibili search results by play count first when popularity matching is enabled', async () => {
+  it('never lets popularity outrank a better title match', async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
         data: {
           result: [
             {
               bvid: 'BV1accurate',
+              mid: 123456,
               title: 'Echo Song Official MV',
-              author: 'Echo Channel',
+              author: 'Echo Artist',
               pic: '//i.example/accurate.jpg',
               play: 1200,
+              duration: '02:00',
             },
             {
               bvid: 'BV1popular',
@@ -488,8 +532,10 @@ describe('BilibiliMvProvider', () => {
 
     const candidates = await provider.search(track, { ...settings, preferHighestViewCount: true }, 'Echo Song Echo Artist');
 
-    expect(candidates.map((candidate) => candidate.id)).toEqual(['bilibili:BV1popular', 'bilibili:BV1accurate']);
-    expect(candidates.map((candidate) => candidate.viewCount)).toEqual([250000, 1200]);
+    expect(candidates.map((candidate) => candidate.id)).toEqual(['bilibili:BV1accurate', 'bilibili:BV1popular']);
+    expect(candidates.map((candidate) => candidate.viewCount)).toEqual([1200, 250000]);
+    expect(candidates[0]).toMatchObject({ autoEligible: true, durationSeconds: 120, uploaderId: '123456' });
+    expect(candidates[0]?.decision).toMatchObject({ autoAccept: true, risk: 'low' });
   });
 
   it('resolves the first playable direct MP4 stream within the quality cap', async () => {
@@ -1240,7 +1286,39 @@ describe('BilibiliMvProvider', () => {
 });
 
 describe('YouTubeMvProvider', () => {
-  it('requests YouTube results ordered by view count when an API key is configured', async () => {
+  it('keeps the stable uploader id and structured match decision', async () => {
+    const originalEchoKey = process.env.ECHO_YOUTUBE_API_KEY;
+    process.env.ECHO_YOUTUBE_API_KEY = 'test-key';
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      items: [{
+        id: { videoId: 'video-1' },
+        snippet: {
+          title: 'Echo Artist - Echo Song Official MV',
+          channelTitle: 'Echo Artist',
+          channelId: 'channel-1',
+          thumbnails: {},
+        },
+      }],
+    })) as typeof fetch;
+    const provider = new YouTubeMvProvider({ fetchImpl });
+
+    try {
+      const candidates = await provider.search(track, settings);
+
+      expect(candidates[0]).toMatchObject({
+        uploaderId: 'channel-1',
+        decision: { autoAccept: true, risk: 'low' },
+      });
+    } finally {
+      if (originalEchoKey === undefined) {
+        delete process.env.ECHO_YOUTUBE_API_KEY;
+      } else {
+        process.env.ECHO_YOUTUBE_API_KEY = originalEchoKey;
+      }
+    }
+  });
+
+  it('requests YouTube results ordered by relevance when an API key is configured', async () => {
     const originalEchoKey = process.env.ECHO_YOUTUBE_API_KEY;
     process.env.ECHO_YOUTUBE_API_KEY = 'test-key';
     const fetchImpl = vi.fn(async () => jsonResponse({ items: [] })) as typeof fetch;
@@ -1249,7 +1327,7 @@ describe('YouTubeMvProvider', () => {
     try {
       await provider.search(track, settings);
 
-      expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining('order=viewCount'), expect.anything());
+      expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining('order=relevance'), expect.anything());
     } finally {
       if (originalEchoKey === undefined) {
         delete process.env.ECHO_YOUTUBE_API_KEY;

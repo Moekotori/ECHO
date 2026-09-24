@@ -145,37 +145,59 @@ const mergeSecondaryLines = (
   return changed ? nextLines : lines;
 };
 
+const karaokeLineTimingToleranceMs = 400;
+
 const mergeKaraokeWordTimings = (primaryLines: LyricLine[], karaokeLines: LyricLine[]): LyricLine[] => {
-  const karaokeByTime = new Map<number, LyricLine[]>();
-  for (const line of karaokeLines) {
-    if (!line.words?.length) {
-      continue;
-    }
-
-    const bucket = karaokeByTime.get(line.timeMs) ?? [];
-    bucket.push(line);
-    karaokeByTime.set(line.timeMs, bucket);
-  }
-
-  if (karaokeByTime.size === 0) {
+  const timedKaraokeLines = karaokeLines.filter((line) => line.words?.length);
+  if (timedKaraokeLines.length === 0) {
     return primaryLines;
   }
 
+  const usedKaraokeIndexes = new Set<number>();
   let changed = false;
   const mergedLines = primaryLines.map((line) => {
     if (line.words?.length) {
       return line;
     }
 
-    const match = (karaokeByTime.get(line.timeMs) ?? []).find(
-      (candidate) => normalizeCompactLyricsIdentity(candidate.text) === normalizeCompactLyricsIdentity(line.text),
-    );
+    const normalizedLineText = normalizeCompactLyricsIdentity(line.text);
+    let closestIndex = -1;
+    let closestDeltaMs = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < timedKaraokeLines.length; index += 1) {
+      if (usedKaraokeIndexes.has(index)) {
+        continue;
+      }
+
+      const candidate = timedKaraokeLines[index];
+      if (normalizeCompactLyricsIdentity(candidate.text) !== normalizedLineText) {
+        continue;
+      }
+
+      const deltaMs = Math.abs(candidate.timeMs - line.timeMs);
+      if (deltaMs <= karaokeLineTimingToleranceMs && deltaMs < closestDeltaMs) {
+        closestIndex = index;
+        closestDeltaMs = deltaMs;
+      }
+    }
+
+    const match = closestIndex >= 0 ? timedKaraokeLines[closestIndex] : null;
     if (!match?.words?.length) {
       return line;
     }
 
+    const timingOffsetMs = line.timeMs - match.timeMs;
+    const alignedWords = match.words.map((word) => ({
+      ...word,
+      startMs: word.startMs + timingOffsetMs,
+      endMs: word.endMs === null ? null : word.endMs + timingOffsetMs,
+    }));
+    if (alignedWords.some((word) => word.startMs < 0 || (word.endMs !== null && word.endMs <= word.startMs))) {
+      return line;
+    }
+
+    usedKaraokeIndexes.add(closestIndex);
     changed = true;
-    return { ...line, words: match.words };
+    return { ...line, words: alignedWords };
   });
 
   return changed ? mergedLines : primaryLines;

@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { NativePcmHostProcess } from './NativePcmHostProcess';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NativePcmHostProcess, resolveHostBinary } from './NativePcmHostProcess';
 import type { NativeOutputStartOptions } from './audioTypes';
 
 interface TestablePcmHostProcess {
@@ -88,15 +91,18 @@ describe('NativePcmHostProcess.createSpawnArgs', () => {
     expect(args).toContain('--no-stdin');
   });
 
-  it('createSpawnArgs includes --rpc-stdin-fd 3 and --rpc-stdout-fd 4 at end', () => {
+  it('createSpawnArgs separates fd3/fd4 RPC from fd5 PCM input', () => {
     const host = makeHost();
     const args = exposeHost(host).createSpawnArgs({ ...minimalOptions });
 
     const len = args.length;
-    expect(args[len - 4]).toBe('--rpc-stdin-fd');
-    expect(args[len - 3]).toBe('3');
-    expect(args[len - 2]).toBe('--rpc-stdout-fd');
-    expect(args[len - 1]).toBe('4');
+    expect(args.slice(len - 7)).toEqual([
+      '--rpc-stdin-fd', '3',
+      '--rpc-stdout-fd', '4',
+      '--pcm-input-fd', '5',
+      '--no-stdin',
+    ]);
+    expect(args).not.toContain('--defer-device-open');
   });
 
   it('createSpawnArgs does NOT include exclusive flag when exclusive is false', () => {
@@ -108,5 +114,75 @@ describe('NativePcmHostProcess.createSpawnArgs', () => {
     const args = exposeHost(host).createSpawnArgs(options);
 
     expect(args).not.toContain('-exclusive');
+  });
+
+  it('passes miniaudio only when the experimental output is explicitly requested', () => {
+    const host = makeHost();
+    const defaultArgs = exposeHost(host).createSpawnArgs({
+      ...minimalOptions,
+      useMiniaudioOutput: false,
+    });
+    const experimentalArgs = exposeHost(host).createSpawnArgs({
+      ...minimalOptions,
+      useMiniaudioOutput: true,
+    });
+
+    expect(defaultArgs).not.toContain('miniaudio');
+    expect(experimentalArgs).toContain('-shared-backend');
+    expect(experimentalArgs).toContain('miniaudio');
+  });
+
+  it('uses the native host ASIO DSD switch for raw DSD input', () => {
+    const host = makeHost();
+    const args = exposeHost(host).createSpawnArgs({
+      requestedOutputSampleRate: 5_644_800,
+      channels: 2,
+      asio: true,
+      inputFormat: 'dsd-native-raw',
+      nativeDsdSampleRate: 5_644_800,
+    });
+
+    expect(args).toContain('-dop-output');
+    expect(args).toContain('-asio-native-dsd-output');
+    expect(args).not.toContain('-native-dsd-sr');
+  });
+});
+
+describe('resolveHostBinary Windows runtime closure', () => {
+  it('accepts the packaged host only when all four required libav DLLs are present', () => {
+    if (process.platform !== 'win32') {
+      return;
+    }
+
+    const root = mkdtempSync(join(tmpdir(), 'echo-host-runtime-'));
+    const resources = join(root, 'resources');
+    const hostPath = join(resources, 'echo-audio-host.exe');
+    const requiredDlls = ['avcodec-62.dll', 'avformat-62.dll', 'avutil-60.dll', 'swresample-6.dll'];
+    try {
+      mkdirSync(resources, { recursive: true });
+      writeFileSync(hostPath, Buffer.from('MZ-host'));
+      for (const name of requiredDlls) {
+        writeFileSync(join(resources, name), Buffer.from(`MZ-${name}`));
+      }
+
+      expect(resolveHostBinary({
+        appPath: null,
+        cwd: join(root, 'empty'),
+        resourcesPath: resources,
+        userDataPath: null,
+        includeMigrationFallback: false,
+      })).toBe(hostPath);
+
+      rmSync(join(resources, 'avcodec-62.dll'));
+      expect(resolveHostBinary({
+        appPath: null,
+        cwd: join(root, 'empty'),
+        resourcesPath: resources,
+        userDataPath: null,
+        includeMigrationFallback: false,
+      })).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

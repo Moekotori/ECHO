@@ -4,7 +4,12 @@ import { createPortal } from 'react-dom';
 import { Check, CloudDownload, Disc3, FileAudio, FileText, ImagePlus, ListChecks, RefreshCw, Save, Search, Tag, X } from 'lucide-react';
 import type { EditableTrackTags, LibraryTrack, NetworkTagCandidate, TrackCoverSelection } from '../../../shared/types/library';
 import type { LyricsEmbedToTrackResult, LyricsProviderId, LyricsSearchCandidate, TrackLyrics } from '../../../shared/types/lyrics';
-import type { PluginLogEntry, PluginMetadataLookupResult, PluginMetadataProvider } from '../../../shared/types/plugins';
+import type {
+  PluginCoverLookupResult,
+  PluginLogEntry,
+  PluginMetadataLookupResult,
+  PluginMetadataProvider,
+} from '../../../shared/types/plugins';
 
 type TrackTagEditorDrawerProps = {
   track: LibraryTrack | null;
@@ -232,6 +237,32 @@ const pluginMetadataCandidatesToNetworkCandidates = (
     },
   }));
 
+const pluginCoverCandidatesToNetworkCandidates = (
+  result: PluginCoverLookupResult,
+  track: LibraryTrack,
+): NetworkTagCandidate[] =>
+  result.candidates.map((candidate, index) => ({
+    id: `plugin-cover:${candidate.pluginId}:${candidate.providerId}:${index}`,
+    provider: 'mock',
+    confidence: typeof candidate.confidence === 'number' ? candidate.confidence : 0.7,
+    title: candidate.title ?? track.title ?? '',
+    artist: track.artist ?? '',
+    album: track.album ?? '',
+    albumArtist: track.albumArtist ?? '',
+    trackNo: track.trackNo ?? null,
+    discNo: track.discNo ?? null,
+    year: track.year ?? null,
+    genre: track.genre ?? null,
+    duration: track.duration ?? null,
+    coverUrl: candidate.imageUrl,
+    coverPreviewUrl: candidate.imageUrl,
+    coverMimeType: null,
+    raw: {
+      ...candidate,
+      pluginSourceLabel: candidate.source || `${candidate.pluginId}/${candidate.providerId}`,
+    },
+  }));
+
 const networkCandidateProviderLabel = (candidate: NetworkTagCandidate): string => {
   const raw = candidate.raw;
   if (raw && typeof raw === 'object' && 'pluginSourceLabel' in raw) {
@@ -375,6 +406,7 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
   const [applyingLyricsCandidateId, setApplyingLyricsCandidateId] = useState<string | null>(null);
   const [embeddingLyricsCandidateId, setEmbeddingLyricsCandidateId] = useState<string | null>(null);
   const lyricsSearchRequestIdRef = useRef(0);
+  const pluginLyricsContentRef = useRef(new Map<string, { text: string; fileName: string }>());
 
   const fileName = useMemo(() => track?.path.split(/[\\/]/).pop() ?? '', [track?.path]);
   const previewCover =
@@ -434,6 +466,7 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
       setApplyingLyricsCandidateId(null);
       setEmbeddingLyricsCandidateId(null);
       lyricsSearchRequestIdRef.current += 1;
+      pluginLyricsContentRef.current.clear();
 
       const lyricsApi = window.echo?.lyrics;
       if (lyricsApi?.getForTrack) {
@@ -676,8 +709,8 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
 
   const handleSearchPluginMetadata = async (): Promise<void> => {
     const plugins = window.echo?.plugins;
-    if (!plugins?.queryMetadata) {
-      setLocalError('当前运行环境不支持插件元数据候选。');
+    if (!plugins?.queryMetadata && !plugins?.queryCovers) {
+      setLocalError('当前运行环境不支持插件元数据或封面候选。');
       return;
     }
     const selectedProvider = pluginMetadataProviders.find((provider) => pluginMetadataProviderKey(provider) === selectedPluginMetadataProviderKey);
@@ -691,30 +724,45 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
     setNetworkFieldSelection(emptyNetworkSelection());
 
     try {
-      const result = await plugins.queryMetadata({
-        track: {
-          id: track.id,
-          title: form.title || track.title,
-          artist: form.artist || track.artist,
-          album: form.album || track.album,
-          albumArtist: form.albumArtist || track.albumArtist,
-          duration: track.duration ?? undefined,
-        },
-        ...(selectedProvider
-          ? { provider: { pluginId: selectedProvider.pluginId, providerId: selectedProvider.id } }
-          : {}),
-      });
-      const candidates = pluginMetadataCandidatesToNetworkCandidates(result, track);
+      const pluginTrack = {
+        id: track.id,
+        title: form.title || track.title,
+        artist: form.artist || track.artist,
+        album: form.album || track.album,
+        albumArtist: form.albumArtist || track.albumArtist,
+        duration: track.duration ?? undefined,
+      };
+      const [metadataResult, coverResult] = await Promise.all([
+        plugins.queryMetadata
+          ? plugins.queryMetadata({
+              track: pluginTrack,
+              ...(selectedProvider
+                ? { provider: { pluginId: selectedProvider.pluginId, providerId: selectedProvider.id } }
+                : {}),
+            })
+          : Promise.resolve({ providers: [], candidates: [] } satisfies PluginMetadataLookupResult),
+        !selectedProvider && plugins.queryCovers
+          ? plugins.queryCovers({ track: pluginTrack })
+          : Promise.resolve({ providers: [], candidates: [] } satisfies PluginCoverLookupResult),
+      ]);
+      const candidates = [
+        ...pluginMetadataCandidatesToNetworkCandidates(metadataResult, track),
+        ...pluginCoverCandidatesToNetworkCandidates(coverResult, track),
+      ];
       setNetworkCandidates(candidates);
-      if (!candidates.length && result.providers.length) {
-        await loadPluginMetadataLogs(result.providers.map((provider) => provider.pluginId));
+      const providerPluginIds = [
+        ...metadataResult.providers.map((provider) => provider.pluginId),
+        ...coverResult.providers.map((provider) => provider.pluginId),
+      ];
+      if (!candidates.length && providerPluginIds.length) {
+        await loadPluginMetadataLogs(providerPluginIds);
       }
       setNetworkMessage(
         candidates.length
           ? null
-          : result.providers.length
-            ? '插件没有返回合适的元数据候选。'
-            : '没有可用的插件元数据 provider。',
+          : providerPluginIds.length
+            ? '插件没有返回合适的元数据或封面候选。'
+            : '没有可用的插件元数据或封面 provider。',
       );
     } catch (searchError) {
       setNetworkCandidates([]);
@@ -786,7 +834,8 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
 
   const handleSearchLyrics = async (): Promise<void> => {
     const lyricsApi = window.echo?.lyrics;
-    if (!lyricsApi?.searchCandidates) {
+    const plugins = window.echo?.plugins;
+    if (!lyricsApi?.searchCandidates && !plugins?.queryLyrics) {
       setLocalError('当前运行环境不支持歌词搜索。');
       return;
     }
@@ -802,9 +851,26 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
     setLyricsMessage('正在搜索歌词候选...');
 
     try {
-      const results = await Promise.allSettled(
-        providers.map((providerId) => lyricsApi.searchCandidates(track.id, searchText, providerId)),
-      );
+      pluginLyricsContentRef.current.clear();
+      const [results, pluginResult] = await Promise.all([
+        lyricsApi?.searchCandidates
+          ? Promise.allSettled(
+              providers.map((providerId) => lyricsApi.searchCandidates(track.id, searchText, providerId)),
+            )
+          : Promise.resolve([]),
+        lyricsProviderFilter === 'all' && plugins?.queryLyrics
+          ? plugins.queryLyrics({
+              track: {
+                id: track.id,
+                title: form.title || track.title,
+                artist: form.artist || track.artist,
+                album: form.album || track.album,
+                albumArtist: form.albumArtist || track.albumArtist,
+                duration: track.duration ?? undefined,
+              },
+            }).catch(() => null)
+          : Promise.resolve(null),
+      ]);
       if (lyricsSearchRequestIdRef.current !== requestId) {
         return;
       }
@@ -812,6 +878,36 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
       const candidateLists = results
         .filter((result): result is PromiseFulfilledResult<LyricsSearchCandidate[]> => result.status === 'fulfilled')
         .map((result) => result.value);
+      if (pluginResult) {
+        const pluginCandidates = pluginResult.candidates.flatMap((candidate, index): LyricsSearchCandidate[] => {
+          const text = candidate.lrc?.trim() || candidate.text?.trim() || '';
+          if (!text) {
+            return [];
+          }
+          const id = `plugin:${candidate.pluginId}:${candidate.providerId}:${index}`;
+          pluginLyricsContentRef.current.set(id, {
+            text,
+            fileName: `${candidate.source || candidate.providerId}.lrc`,
+          });
+          return [{
+            id,
+            provider: 'manual',
+            providerLyricsId: id,
+            title: candidate.title || form.title || track.title,
+            artist: form.artist || track.artist || '',
+            album: form.album || track.album || null,
+            durationSeconds: track.duration ?? null,
+            instrumental: false,
+            hasSynced: Boolean(candidate.lrc?.trim()),
+            hasPlain: Boolean(candidate.text?.trim()),
+            score: typeof candidate.confidence === 'number' ? candidate.confidence : 0.7,
+            sourceLabel: candidate.source || `${candidate.pluginId}/${candidate.providerId}`,
+            risk: typeof candidate.confidence === 'number' && candidate.confidence < 0.55 ? 'medium' : 'low',
+            previewLines: text.split(/\r?\n/u).filter(Boolean).slice(0, 3),
+          }];
+        });
+        candidateLists.push(pluginCandidates);
+      }
       const nextCandidates = dedupeLyricsCandidates(candidateLists).slice(0, 12);
       setLyricsCandidates(nextCandidates);
       setLyricsMessage(nextCandidates.length ? null : '没有找到合适的歌词候选。');
@@ -830,7 +926,8 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
 
   const handleApplyLyricsCandidate = async (candidate: LyricsSearchCandidate): Promise<void> => {
     const lyricsApi = window.echo?.lyrics;
-    if (!lyricsApi?.applyCandidate) {
+    const pluginLyricsContent = pluginLyricsContentRef.current.get(candidate.id);
+    if ((!pluginLyricsContent && !lyricsApi?.applyCandidate) || (pluginLyricsContent && !lyricsApi?.applyCustomLrc)) {
       setLocalError('当前运行环境不支持应用歌词。');
       return;
     }
@@ -840,7 +937,9 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
     setLyricsMessage(null);
 
     try {
-      const lyrics = await lyricsApi.applyCandidate(track.id, candidate.id);
+      const lyrics = pluginLyricsContent
+        ? await lyricsApi.applyCustomLrc!(track.id, pluginLyricsContent.text, pluginLyricsContent.fileName)
+        : await lyricsApi.applyCandidate(track.id, candidate.id);
       setCurrentLyrics(lyrics);
       setLyricsMessage('已应用到歌词库，不会写入源音频文件。');
       window.dispatchEvent(new CustomEvent('lyrics:candidate-applied', { detail: { trackId: track.id, lyrics } }));
@@ -1281,7 +1380,10 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
                     <div className="tag-editor-lyrics-candidates">
                       {visibleLyricsCandidates.map((candidate) => {
                         const candidateKind = lyricsCandidateDisplayKind(candidate);
-                        const canEmbedCandidate = canEmbedLyrics && !candidate.instrumental && (candidate.hasSynced || candidate.hasPlain);
+                        const canEmbedCandidate = canEmbedLyrics &&
+                          !pluginLyricsContentRef.current.has(candidate.id) &&
+                          !candidate.instrumental &&
+                          (candidate.hasSynced || candidate.hasPlain);
                         return (
                           <article
                             key={candidate.id}

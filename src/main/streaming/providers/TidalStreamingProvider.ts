@@ -184,12 +184,6 @@ const relatedResources = (index: Map<string, JsonApiResource>, resource: JsonApi
     .map((ref) => index.get(jsonApiKey(ref) ?? ''))
     .filter((item): item is JsonApiResource => Boolean(item));
 
-const relationResourcesFromResponse = (value: unknown, name: string): JsonApiResource[] => {
-  const root = dataResources(value)[0];
-  const index = resourceIndex(value);
-  return root ? relatedResources(index, root, name) : [];
-};
-
 const attributesOf = (resource: JsonApiResource): JsonApiResource => asRecord(resource.attributes);
 
 const number = (value: unknown): number | null => {
@@ -371,8 +365,6 @@ const playlistFrom = (resource: JsonApiResource, index: Map<string, JsonApiResou
     trackCount: number(attributes.numberOfItems) ?? number(attributes.trackCount),
   };
 };
-
-const hasNextPage = (value: unknown): boolean => Boolean(text(asRecord(asRecord(value).links).next));
 
 const resourceIds = (value: unknown, type: string, limit: number): string[] =>
   Array.from(new Set(dataResources(value)

@@ -3,10 +3,16 @@ import { join } from 'node:path';
 
 const projectRoot = process.cwd();
 const electronBuilderCli = join(projectRoot, 'node_modules', 'electron-builder', 'cli.js');
+const unsignedArtifactArgs = [
+  '--config.nsis.artifactName=ECHO-NEXT-UNSIGNED-DEV-Setup-${version}.${ext}',
+  '--config.portable.artifactName=ECHO-NEXT-UNSIGNED-DEV-Portable-${version}.${ext}',
+];
+
+console.warn('[build:win:unsigned] producing unsigned developer artifacts; these files must never be published.');
 
 const child = spawn(
   process.execPath,
-  [electronBuilderCli, '--win', '--publish', 'never'],
+  [electronBuilderCli, '--win', '--publish', 'never', ...unsignedArtifactArgs],
   {
     cwd: projectRoot,
     env: {

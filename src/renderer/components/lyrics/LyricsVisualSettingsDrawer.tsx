@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
+  BookOpenText,
   Captions,
   Check,
   ChevronDown,
+  Disc3,
   EyeOff,
   FolderOpen,
   Image as ImageIcon,
-  MonitorPlay,
+  LayoutTemplate,
   Palette,
   RotateCcw,
   Search,
@@ -37,8 +39,7 @@ type LyricsVisualGroupKey =
   | 'display'
   | 'miniPlayer'
   | 'typography'
-  | 'background'
-  | 'mv';
+  | 'background';
 
 type LyricsVisualGroupProps = {
   children: ReactNode;
@@ -57,7 +58,6 @@ const defaultLyricsVisualGroupOpen: Record<LyricsVisualGroupKey, boolean> = {
   miniPlayer: false,
   typography: false,
   background: false,
-  mv: false,
 };
 
 const LyricsVisualGroup = ({ children, description, icon, isOpen, onToggle, title }: LyricsVisualGroupProps): JSX.Element => {
@@ -122,21 +122,11 @@ type LyricsVisualAppSettings = Pick<
 
 type LyricsVisualMvSettings = Pick<
   MvSettings,
-  | 'immersiveBackground'
-  | 'immersiveBackgroundAutoScale'
-  | 'immersiveBackgroundScalePercent'
-  | 'immersiveBackgroundOffsetXPercent'
-  | 'immersiveBackgroundOffsetYPercent'
-  | 'immersiveBackgroundBlurPx'
-  | 'immersiveBackgroundBrightnessPercent'
-  | 'immersiveBackgroundOverlayOpacityPercent'
-  | 'hideLyrics'
-  | 'lyricsReadabilityEnhanced'
+  'lyricsReadabilityEnhanced'
 >;
 
 const drawerExitAnimationMs = 480;
 const lyricsBackgroundTuningOpenStorageKey = 'echo-next.lyrics.background-tuning-open';
-const mvImmersiveControlsOpenStorageKey = 'echo-next.mv.immersive-controls-open';
 
 const fallbackAppSettings: LyricsVisualAppSettings = {
   lyricsSmartReadableColorsEnabled: false,
@@ -203,20 +193,7 @@ type NavigatorWithLocalFonts = Navigator & {
   queryLocalFonts?: () => Promise<LocalFontData[]>;
 };
 
-const mvImmersiveBackgroundDefaults = {
-  immersiveBackgroundAutoScale: true,
-  immersiveBackgroundScalePercent: 115,
-  immersiveBackgroundOffsetXPercent: 50,
-  immersiveBackgroundOffsetYPercent: 50,
-  immersiveBackgroundBlurPx: 0,
-  immersiveBackgroundBrightnessPercent: 100,
-  immersiveBackgroundOverlayOpacityPercent: 0,
-} satisfies Partial<LyricsVisualMvSettings>;
-
 const fallbackMvSettings: LyricsVisualMvSettings = {
-  immersiveBackground: true,
-  ...mvImmersiveBackgroundDefaults,
-  hideLyrics: false,
   lyricsReadabilityEnhanced: false,
 };
 
@@ -355,17 +332,6 @@ const selectAppSettings = (settings: AppSettings): LyricsVisualAppSettings => ({
 });
 
 const selectMvSettings = (settings: MvSettings | null | undefined): LyricsVisualMvSettings => ({
-  immersiveBackground: settings?.immersiveBackground !== false,
-  immersiveBackgroundAutoScale: settings?.immersiveBackgroundAutoScale !== false,
-  immersiveBackgroundScalePercent: settings?.immersiveBackgroundScalePercent ?? fallbackMvSettings.immersiveBackgroundScalePercent,
-  immersiveBackgroundOffsetXPercent: settings?.immersiveBackgroundOffsetXPercent ?? fallbackMvSettings.immersiveBackgroundOffsetXPercent,
-  immersiveBackgroundOffsetYPercent: settings?.immersiveBackgroundOffsetYPercent ?? fallbackMvSettings.immersiveBackgroundOffsetYPercent,
-  immersiveBackgroundBlurPx: settings?.immersiveBackgroundBlurPx ?? fallbackMvSettings.immersiveBackgroundBlurPx,
-  immersiveBackgroundBrightnessPercent:
-    settings?.immersiveBackgroundBrightnessPercent ?? fallbackMvSettings.immersiveBackgroundBrightnessPercent,
-  immersiveBackgroundOverlayOpacityPercent:
-    settings?.immersiveBackgroundOverlayOpacityPercent ?? fallbackMvSettings.immersiveBackgroundOverlayOpacityPercent,
-  hideLyrics: settings?.hideLyrics === true,
   lyricsReadabilityEnhanced: settings?.lyricsReadabilityEnhanced === true,
 });
 
@@ -380,7 +346,6 @@ export const LyricsVisualSettingsDrawer = ({ isOpen, onClose }: LyricsVisualSett
   const [isBackgroundControlsOpen, setIsBackgroundControlsOpen] = useState(true);
   const [isBackgroundModeMenuOpen, setIsBackgroundModeMenuOpen] = useState(false);
   const [isBackgroundTuningOpen, setIsBackgroundTuningOpen] = useState(() => readStorageFlag(lyricsBackgroundTuningOpenStorageKey));
-  const [isMvImmersiveControlsOpen, setIsMvImmersiveControlsOpen] = useState(() => readStorageFlag(mvImmersiveControlsOpenStorageKey));
   const [openVisualGroups, setOpenVisualGroups] = useState(defaultLyricsVisualGroupOpen);
   const [isFontPickerOpen, setIsFontPickerOpen] = useState(false);
   const [fontPickerQuery, setFontPickerQuery] = useState('');
@@ -410,6 +375,7 @@ export const LyricsVisualSettingsDrawer = ({ isOpen, onClose }: LyricsVisualSett
   const miniPlayerColorModeOptions = useMemo(
     () => [
       { mode: 'default', label: t('lyricsSettings.display.miniPlayerDefaultDark') },
+      { mode: 'light', label: t('lyricsSettings.display.miniPlayerDefaultLight') },
       { mode: 'custom', label: t('lyricsSettings.font.custom') },
       { mode: 'cover', label: t('lyricsSettings.background.mode.cover') },
     ] satisfies Array<{ mode: LyricsMiniPlayerColorMode; label: string }>,
@@ -420,7 +386,6 @@ export const LyricsVisualSettingsDrawer = ({ isOpen, onClose }: LyricsVisualSett
   const miniPlayerColorModeLabel =
     miniPlayerColorModeOptions.find((option) => option.mode === miniPlayerColorMode)?.label ??
     t('lyricsSettings.display.miniPlayerDefaultDark');
-  const immersiveBackground = mvSettings.immersiveBackground !== false;
   const miniPlayerOpacityPercent =
     appSettings.lyricsPlayerBarDrawerOpacityPercent ?? fallbackAppSettings.lyricsPlayerBarDrawerOpacityPercent;
   const miniPlayerColor =
@@ -433,6 +398,7 @@ export const LyricsVisualSettingsDrawer = ({ isOpen, onClose }: LyricsVisualSett
   const lyricsPageStyleOptions = useMemo(
     () => [
       { mode: 'default', label: t('lyricsSettings.visual.pageStyleDefault') },
+      { mode: 'editorial', label: t('lyricsSettings.visual.pageStyleEditorial') },
       { mode: 'roseVinyl', label: t('lyricsSettings.visual.pageStyleRoseVinyl') },
     ] satisfies Array<{ mode: LyricsPageStyle; label: string }>,
     [t],
@@ -754,14 +720,6 @@ export const LyricsVisualSettingsDrawer = ({ isOpen, onClose }: LyricsVisualSett
     });
   }, []);
 
-  const toggleMvImmersiveControls = useCallback((): void => {
-    setIsMvImmersiveControlsOpen((current) => {
-      const next = !current;
-      writeStorageFlag(mvImmersiveControlsOpenStorageKey, next);
-      return next;
-    });
-  }, []);
-
   const toggleVisualGroup = useCallback((group: LyricsVisualGroupKey): void => {
     setOpenVisualGroups((current) => ({ ...current, [group]: !current[group] }));
   }, []);
@@ -857,15 +815,39 @@ export const LyricsVisualSettingsDrawer = ({ isOpen, onClose }: LyricsVisualSett
                 </span>
                 <em>{lyricsPageStyleLabel}</em>
               </div>
-              <StyledSelect<LyricsPageStyle>
-                className="lyrics-page-style-select"
-                ariaLabel={t('lyricsSettings.visual.pageStyle')}
-                value={lyricsPageStyle}
-                options={lyricsPageStyleOptions.map((option) => ({ value: option.mode, label: option.label }))}
-                disabled={isBusy}
-                showFilterIcon={false}
-                onChange={(style) => void patchAppSettings({ lyricsPageStyle: style })}
-              />
+              <div
+                className="lyrics-page-style-chooser"
+                role="radiogroup"
+                aria-label={t('lyricsSettings.visual.pageStyle')}
+              >
+                {lyricsPageStyleOptions.map((option) => {
+                  const isSelected = option.mode === lyricsPageStyle;
+                  const icon = option.mode === 'editorial'
+                    ? <BookOpenText size={19} aria-hidden="true" />
+                    : option.mode === 'roseVinyl'
+                      ? <Disc3 size={19} aria-hidden="true" />
+                      : <LayoutTemplate size={19} aria-hidden="true" />;
+
+                  return (
+                    <button
+                      key={option.mode}
+                      className="lyrics-page-style-choice"
+                      type="button"
+                      role="radio"
+                      aria-checked={isSelected}
+                      data-selected={isSelected ? 'true' : undefined}
+                      disabled={isBusy}
+                      onClick={() => void patchAppSettings({ lyricsPageStyle: option.mode })}
+                    >
+                      <span className="lyrics-page-style-choice__icon">{icon}</span>
+                      <span className="lyrics-page-style-choice__label">{option.label}</span>
+                      <span className="lyrics-page-style-choice__check" aria-hidden="true">
+                        <Check size={12} />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
               <p>{t('lyricsSettings.visual.pageStyleDescription')}</p>
               {lyricsPageStyle === 'roseVinyl' ? (
                 <div className="lyrics-page-style-panel__rose-controls">
@@ -1637,162 +1619,6 @@ export const LyricsVisualSettingsDrawer = ({ isOpen, onClose }: LyricsVisualSett
                 </p>
               ) : null}
             </div>
-            </LyricsVisualGroup>
-          </section>
-
-          <section className="audio-drawer-section audio-drawer-options audio-drawer-options--open">
-            <LyricsVisualGroup
-              icon={<MonitorPlay size={17} />}
-              title={t('lyricsSettings.visual.group.mv.title')}
-              description={t('lyricsSettings.visual.group.mv.description')}
-              isOpen={openVisualGroups.mv}
-              onToggle={() => toggleVisualGroup('mv')}
-            >
-            <button
-              type="button"
-              className="mv-source-toggle mv-auto-apply-toggle"
-              aria-pressed={immersiveBackground}
-              onClick={() => void patchMvSettings({ immersiveBackground: !immersiveBackground })}
-            >
-              <span className="mv-switch-track" aria-hidden="true">
-                <span />
-              </span>
-              <span className="mv-toggle-copy">
-                <strong>{t('mvSettings.immersive.title')}</strong>
-                <em>{t('mvSettings.immersive.description')}</em>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="mv-source-toggle mv-auto-apply-toggle"
-              aria-pressed={mvSettings.hideLyrics === true}
-              onClick={() => void patchMvSettings({ hideLyrics: mvSettings.hideLyrics !== true })}
-            >
-              <span className="mv-switch-track" aria-hidden="true">
-                <span />
-              </span>
-              <span className="mv-toggle-copy">
-                <strong>{t('mvSettings.immersive.hideLyrics')}</strong>
-                <em>{t('mvSettings.immersive.hideLyricsDescription')}</em>
-              </span>
-            </button>
-
-            {immersiveBackground ? (
-              <div className={`mv-immersive-controls${isMvImmersiveControlsOpen ? ' mv-immersive-controls--open' : ''}`}>
-                <button
-                  type="button"
-                  className="mv-immersive-collapse"
-                  aria-expanded={isMvImmersiveControlsOpen}
-                  onClick={toggleMvImmersiveControls}
-                >
-                  <span>
-                    <MonitorPlay size={15} />
-                    <strong>{t('mvSettings.immersive.tuning')}</strong>
-                    <em>{t('mvSettings.immersive.visualHint')}</em>
-                  </span>
-                  <ChevronDown size={16} aria-hidden="true" />
-                </button>
-
-                {isMvImmersiveControlsOpen ? (
-                  <div className="mv-immersive-controls-body">
-                    <button
-                      type="button"
-                      className="mv-immersive-reset"
-                      onClick={() => void patchMvSettings(mvImmersiveBackgroundDefaults)}
-                    >
-                      <RotateCcw size={15} />
-                      {t('mvSettings.immersive.reset')}
-                    </button>
-                    <button
-                      type="button"
-                      className="mv-source-toggle mv-auto-apply-toggle"
-                      aria-pressed={mvSettings.immersiveBackgroundAutoScale !== false}
-                      onClick={() => void patchMvSettings({ immersiveBackgroundAutoScale: mvSettings.immersiveBackgroundAutoScale === false })}
-                    >
-                      <span className="mv-switch-track" aria-hidden="true">
-                        <span />
-                      </span>
-                      <span className="mv-toggle-copy">
-                        <strong>{t('mvSettings.immersive.autoScale')}</strong>
-                        <em>{t('mvSettings.immersive.autoScaleDescription')}</em>
-                      </span>
-                    </button>
-                    <label className="mv-threshold-control">
-                      <span className="mv-threshold-copy">
-                        <strong>{t('mvSettings.immersive.zoom')}</strong>
-                        <em>{mvSettings.immersiveBackgroundScalePercent ?? 115}%</em>
-                      </span>
-                      <span className="mv-threshold-slider">
-                        <input
-                          type="range"
-                          min="70"
-                          max="220"
-                          step="1"
-                          value={mvSettings.immersiveBackgroundScalePercent ?? 115}
-                          aria-label={t('mvSettings.immersive.zoom')}
-                          onChange={(event) => void patchMvSettings({ immersiveBackgroundScalePercent: Number(event.currentTarget.value) })}
-                        />
-                        <strong>{mvSettings.immersiveBackgroundScalePercent ?? 115}%</strong>
-                      </span>
-                    </label>
-                    <label className="mv-threshold-control">
-                      <span className="mv-threshold-copy">
-                        <strong>{t('mvSettings.immersive.blur')}</strong>
-                        <em>{t('mvSettings.immersive.visualHint')}</em>
-                      </span>
-                      <span className="mv-threshold-slider">
-                        <input
-                          type="range"
-                          min="0"
-                          max="32"
-                          step="1"
-                          value={mvSettings.immersiveBackgroundBlurPx ?? 0}
-                          aria-label={t('mvSettings.immersive.blur')}
-                          onChange={(event) => void patchMvSettings({ immersiveBackgroundBlurPx: Number(event.currentTarget.value) })}
-                        />
-                        <strong>{mvSettings.immersiveBackgroundBlurPx ?? 0}px</strong>
-                      </span>
-                    </label>
-                    <label className="mv-threshold-control">
-                      <span className="mv-threshold-copy">
-                        <strong>{t('mvSettings.immersive.brightness')}</strong>
-                        <em>{t('mvSettings.immersive.visualHint')}</em>
-                      </span>
-                      <span className="mv-threshold-slider">
-                        <input
-                          type="range"
-                          min="60"
-                          max="140"
-                          step="1"
-                          value={mvSettings.immersiveBackgroundBrightnessPercent ?? 100}
-                          aria-label={t('mvSettings.immersive.brightness')}
-                          onChange={(event) => void patchMvSettings({ immersiveBackgroundBrightnessPercent: Number(event.currentTarget.value) })}
-                        />
-                        <strong>{mvSettings.immersiveBackgroundBrightnessPercent ?? 100}%</strong>
-                      </span>
-                    </label>
-                    <label className="mv-threshold-control">
-                      <span className="mv-threshold-copy">
-                        <strong>{t('mvSettings.immersive.overlay')}</strong>
-                        <em>{t('mvSettings.immersive.overlayHint')}</em>
-                      </span>
-                      <span className="mv-threshold-slider">
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          step="1"
-                          value={mvSettings.immersiveBackgroundOverlayOpacityPercent ?? 0}
-                          aria-label={t('mvSettings.immersive.overlay')}
-                          onChange={(event) => void patchMvSettings({ immersiveBackgroundOverlayOpacityPercent: Number(event.currentTarget.value) })}
-                        />
-                        <strong>{mvSettings.immersiveBackgroundOverlayOpacityPercent ?? 0}%</strong>
-                      </span>
-                    </label>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
             </LyricsVisualGroup>
           </section>
 

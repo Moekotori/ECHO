@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { RemoteSourcesPanel, resetRemoteSourcesProUnlockCacheForTests } from './RemoteSourcesPanel';
 import type * as I18nProviderModule from '../../i18n/I18nProvider';
 import type {
@@ -10,6 +10,7 @@ import type {
   RemoteDirectoryItem,
   RemoteSource,
   RemoteSourceOverview,
+  RemoteSyncPreview,
   RemoteSyncStatus,
   RemoteTrackLookupItem,
 } from '../../../shared/types/remoteSources';
@@ -25,6 +26,7 @@ const remoteApiMocks = vi.hoisted(() => ({
   delete: vi.fn(),
   test: vi.fn(),
   browse: vi.fn(),
+  previewSync: vi.fn(),
   sync: vi.fn(),
   cancelSync: vi.fn(),
   getSyncStatus: vi.fn(),
@@ -48,6 +50,7 @@ const appApiMocks = vi.hoisted(() => ({
   setSettings: vi.fn(),
   openExternalUrl: vi.fn(),
   getEchoProAccountStatus: vi.fn(),
+  getEchoProLocalEntitlementStatus: vi.fn(),
 }));
 
 const pluginApiMocks = vi.hoisted(() => ({
@@ -228,10 +231,16 @@ const overviewFor = (items: RemoteSource[]): RemoteSourceOverview => {
 };
 
 describe('RemoteSourcesPanel', () => {
+  const openMaintenanceTools = async (): Promise<void> => {
+    fireEvent.click(await screen.findByRole('button', { name: '管理与诊断' }));
+    await screen.findByText('远程库控制台');
+  };
+
   let sources: RemoteSource[] = [];
 
   beforeEach(() => {
     resetRemoteSourcesProUnlockCacheForTests();
+    window.localStorage.clear();
     sources = [];
     remoteApiMocks.startBaiduOAuthLogin = vi.fn();
     for (const mock of Object.values(remoteApiMocks)) {
@@ -297,6 +306,19 @@ describe('RemoteSourcesPanel', () => {
       testedAt: '2026-01-01T00:00:00.000Z',
     });
     remoteApiMocks.browse.mockResolvedValue([directoryItem()]);
+    remoteApiMocks.previewSync.mockResolvedValue({
+      sourceId: 'source-1',
+      rootPath: null,
+      discoveredCount: 12,
+      addedCount: 4,
+      updatedCount: 2,
+      unchangedCount: 6,
+      missingCount: 1,
+      failedCount: 0,
+      complete: true,
+      errors: [],
+      previewedAt: '2026-07-11T00:00:00.000Z',
+    } satisfies RemoteSyncPreview);
     remoteApiMocks.sync.mockResolvedValue(syncStatus('created-source'));
     remoteApiMocks.cancelSync.mockResolvedValue(syncStatus());
     remoteApiMocks.getSyncStatus.mockImplementation((sourceId) => Promise.resolve(syncStatus(sourceId)));
@@ -329,7 +351,9 @@ describe('RemoteSourcesPanel', () => {
     appApiMocks.getSettings.mockResolvedValue({ remoteCoverLoadPerformanceMode: 'balanced' });
     appApiMocks.setSettings.mockImplementation(async (patch) => patch);
     appApiMocks.openExternalUrl.mockResolvedValue(undefined);
-    appApiMocks.getEchoProAccountStatus.mockResolvedValue({ pro: true });
+    appApiMocks.getEchoProAccountStatus.mockResolvedValue({ loggedIn: true, pro: true, status: 'active' });
+    appApiMocks.getEchoProLocalEntitlementStatus.mockReset();
+    appApiMocks.getEchoProLocalEntitlementStatus.mockResolvedValue(null);
     pluginApiMocks.list.mockResolvedValue({ directory: 'D:\\Echo\\plugins', plugins: [] });
     playbackQueueMocks.playTrack.mockResolvedValue(undefined);
     vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -340,85 +364,79 @@ describe('RemoteSourcesPanel', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows the ECHO Pro lock before loading remote sources', async () => {
+  it('lightly blocks remote sources for non-Pro users', async () => {
     appApiMocks.getEchoProAccountStatus.mockResolvedValueOnce({ pro: false });
     pluginApiMocks.list.mockResolvedValueOnce({ directory: 'D:\\Echo\\plugins', plugins: [] });
 
     render(<RemoteSourcesPanel />);
 
-    expect(await screen.findByText('网盘功能已升级为 ECHO Pro Only')).toBeTruthy();
+    expect(await screen.findByText('网盘功能需要 ECHO Pro')).toBeTruthy();
     expect(remoteApiMocks.list).not.toHaveBeenCalled();
-
-    const navigateHome = vi.fn();
-    window.addEventListener('app:navigate:route', navigateHome);
-    fireEvent.click(screen.getByRole('button', { name: '从侧栏隐藏' }));
-    await waitFor(() => expect(appApiMocks.setSettings).toHaveBeenCalledWith(expect.objectContaining({
-      sidebarHiddenRouteIds: expect.arrayContaining(['remote']),
-    })));
-    expect(navigateHome).toHaveBeenCalledWith(expect.objectContaining({ detail: 'home' }));
-    window.removeEventListener('app:navigate:route', navigateHome);
   });
 
-  it('loads remote sources when the ECHO Pro unlock plugin is active', async () => {
-    appApiMocks.getEchoProAccountStatus.mockResolvedValueOnce({ pro: false });
-    pluginApiMocks.list.mockResolvedValueOnce({
-      directory: 'D:\\Echo\\plugins',
-      plugins: [{
-        id: 'echo.pro-unlock',
-        name: 'ECHO Pro Unlock',
-        version: '1.0.0',
-        description: '',
-        author: '',
-        enabled: true,
-        installed: true,
-        status: 'running',
-        permissions: [],
-        trustedPermissions: [],
-        requiredTrustedPermissions: [],
-        optionalTrustedPermissions: [],
-        trustedPermissionStatus: [],
-        panel: null,
-        commands: [],
-        capabilities: {},
-        privateCapabilities: {},
-        sourcePath: 'D:\\Echo\\plugins\\echo.pro-unlock',
-        logs: [],
-        configSchema: null,
-        settings: {},
-        disabledByHost: false,
-      }],
-    });
-
+  it('loads remote sources for a locally known Pro account without online feature verification', async () => {
     render(<RemoteSourcesPanel />);
 
     await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
-    expect(screen.queryByText('网盘功能已升级为 ECHO Pro Only')).toBeNull();
-  });
-
-  it('reuses the ECHO Pro unlock check across remote panel remounts', async () => {
-    const first = render(<RemoteSourcesPanel />);
-    await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
-    await waitFor(() => expect(appApiMocks.getEchoProAccountStatus).toHaveBeenCalledTimes(1));
-    expect(pluginApiMocks.list).toHaveBeenCalledTimes(1);
-
-    first.unmount();
-    render(<RemoteSourcesPanel />);
-
-    await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
+    expect(screen.queryByText('网盘功能需要 ECHO Pro')).toBeNull();
     expect(appApiMocks.getEchoProAccountStatus).toHaveBeenCalledTimes(1);
-    expect(pluginApiMocks.list).toHaveBeenCalledTimes(1);
   });
 
-  it('tests and saves a WebDAV source with the configured root path', async () => {
+  it('loads remote sources for an ordinary user with the included entitlement', async () => {
+    appApiMocks.getEchoProAccountStatus.mockResolvedValueOnce({ loggedIn: false, pro: false });
+    appApiMocks.getEchoProLocalEntitlementStatus.mockResolvedValueOnce({ unlocked: true, source: 'included', dspUnlocked: false });
+
+    render(<RemoteSourcesPanel />);
+
+    await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
+    expect(screen.queryByText('网盘功能需要 ECHO Pro')).toBeNull();
+  });
+
+  it('keeps the redesigned connection flow when a provider is selected', async () => {
     const { container } = render(<RemoteSourcesPanel />);
     await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
 
-    const inputs = container.querySelectorAll('input');
-    fireEvent.change(inputs[0], { target: { value: 'Mock AList' } });
-    fireEvent.change(inputs[1], { target: { value: 'http://127.0.0.1:18080/dav' } });
-    fireEvent.change(inputs[2], { target: { value: 'user' } });
-    fireEvent.change(inputs[3], { target: { value: 'secret' } });
-    fireEvent.change(inputs[4], { target: { value: '/音乐 Space/' } });
+    fireEvent.click(screen.getByRole('button', { name: /网盘 \/ WebDAV/u }));
+
+    expect(screen.getByRole('region', { name: '网盘 / WebDAV 连接设置' })).toBeTruthy();
+    expect(screen.getByText('连接向导 · 网盘 / WebDAV')).toBeTruthy();
+    expect(screen.getByText('来源位置')).toBeTruthy();
+    expect(screen.getByText('登录与授权')).toBeTruthy();
+    expect(screen.getByText('同步计划')).toBeTruthy();
+    expect(container.querySelector('.remote-source-form')).toBeNull();
+    expect(container.querySelector('.remote-connection-flow')).toBeTruthy();
+  });
+
+  it('opens the redesigned connection flow from an existing remote library', async () => {
+    sources = [remoteSource()];
+    const { container } = render(<RemoteSourcesPanel />);
+
+    await screen.findAllByText('Mock AList');
+    expect(container.querySelector('.remote-connection-flow')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '添加音乐库' }));
+    fireEvent.click(screen.getByRole('button', { name: /网盘 \/ WebDAV/u }));
+
+    expect(screen.getByRole('region', { name: '网盘 / WebDAV 连接设置' })).toBeTruthy();
+    expect(container.querySelector('.remote-source-form')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '暂不连接' }));
+    expect(container.querySelector('.remote-connection-flow')).toBeNull();
+  });
+
+  it('tests and saves a WebDAV source with the configured root path', async () => {
+    render(<RemoteSourcesPanel />);
+    await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: /网盘 \/ WebDAV/u }));
+
+    const displayNameInput = screen.getByLabelText('显示名称') as HTMLInputElement;
+    const serverUrlInput = screen.getByLabelText('服务器 URL') as HTMLInputElement;
+    const usernameInput = screen.getByLabelText('用户名') as HTMLInputElement;
+    const passwordInput = screen.getByLabelText('密码') as HTMLInputElement;
+    fireEvent.change(displayNameInput, { target: { value: 'Mock AList' } });
+    fireEvent.change(serverUrlInput, { target: { value: 'http://127.0.0.1:18080/dav' } });
+    fireEvent.change(usernameInput, { target: { value: 'user' } });
+    fireEvent.change(passwordInput, { target: { value: 'secret' } });
+    fireEvent.change(screen.getByLabelText('根目录'), { target: { value: '/音乐 Space/' } });
 
     fireEvent.click(screen.getByRole('button', { name: /测试连接/u }));
     await waitFor(() => expect(screen.getAllByText(/连接成功/u).length).toBeGreaterThan(0));
@@ -434,19 +452,19 @@ describe('RemoteSourcesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /保存并同步/u }));
     await waitFor(() => expect(remoteApiMocks.create).toHaveBeenCalled());
     expect(remoteApiMocks.sync).toHaveBeenCalledWith('created-source');
-    await waitFor(() => expect((inputs[0] as HTMLInputElement).value).toBe('Mock AList'));
-    expect((inputs[1] as HTMLInputElement).value).toBe('http://127.0.0.1:18080/dav');
-    expect((inputs[2] as HTMLInputElement).value).toBe('user');
-    expect((inputs[3] as HTMLInputElement).value).toBe('secret');
+    await waitFor(() => expect(displayNameInput.value).toBe('Mock AList'));
+    expect(serverUrlInput.value).toBe('http://127.0.0.1:18080/dav');
+    expect(usernameInput.value).toBe('user');
+    expect(passwordInput.value).toBe('secret');
   });
 
   it('submits unauthenticated WebDAV when credentials are blank', async () => {
-    const { container } = render(<RemoteSourcesPanel />);
+    render(<RemoteSourcesPanel />);
     await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: /网盘 \/ WebDAV/u }));
 
-    const inputs = container.querySelectorAll('input');
-    fireEvent.change(inputs[0], { target: { value: 'Open WebDAV' } });
-    fireEvent.change(inputs[1], { target: { value: 'http://127.0.0.1:18080/dav' } });
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Open WebDAV' } });
+    fireEvent.change(screen.getByLabelText('服务器 URL'), { target: { value: 'http://127.0.0.1:18080/dav' } });
 
     fireEvent.click(screen.getByRole('button', { name: /测试连接/u }));
     await waitFor(() => expect(remoteApiMocks.test).toHaveBeenCalled());
@@ -462,26 +480,26 @@ describe('RemoteSourcesPanel', () => {
   });
 
   it('keeps a provider draft while switching between remote source types', async () => {
-    const { container } = render(<RemoteSourcesPanel />);
+    render(<RemoteSourcesPanel />);
     await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: /网盘 \/ WebDAV/u }));
 
-    const currentInputs = (): HTMLInputElement[] => Array.from(container.querySelectorAll('input'));
-    fireEvent.change(currentInputs()[0], { target: { value: 'My WebDAV' } });
-    fireEvent.change(currentInputs()[1], { target: { value: 'https://music.example.test/dav' } });
-    fireEvent.change(currentInputs()[2], { target: { value: 'alice' } });
-    fireEvent.change(currentInputs()[3], { target: { value: 'password-1' } });
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'My WebDAV' } });
+    fireEvent.change(screen.getByLabelText('服务器 URL'), { target: { value: 'https://music.example.test/dav' } });
+    fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'alice' } });
+    fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'password-1' } });
 
     fireEvent.click(screen.getByRole('button', { name: /百度网盘/u }));
-    fireEvent.change(currentInputs()[0], { target: { value: 'My Baidu' } });
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'My Baidu' } });
     fireEvent.click(screen.getByRole('button', { name: /WebDAV/u }));
 
-    expect(currentInputs()[0].value).toBe('My WebDAV');
-    expect(currentInputs()[1].value).toBe('https://music.example.test/dav');
-    expect(currentInputs()[2].value).toBe('alice');
-    expect(currentInputs()[3].value).toBe('password-1');
+    expect((screen.getByLabelText('显示名称') as HTMLInputElement).value).toBe('My WebDAV');
+    expect((screen.getByLabelText('服务器 URL') as HTMLInputElement).value).toBe('https://music.example.test/dav');
+    expect((screen.getByLabelText('用户名') as HTMLInputElement).value).toBe('alice');
+    expect((screen.getByLabelText('密码') as HTMLInputElement).value).toBe('password-1');
 
     fireEvent.click(screen.getByRole('button', { name: /百度网盘/u }));
-    expect(currentInputs()[0].value).toBe('My Baidu');
+    expect((screen.getByLabelText('显示名称') as HTMLInputElement).value).toBe('My Baidu');
   });
 
   it('opens Baidu OAuth and stores the exchanged token secret for testing', async () => {
@@ -541,6 +559,29 @@ describe('RemoteSourcesPanel', () => {
     expect(screen.getByPlaceholderText('授权完成后把 code 粘贴到这里')).toBeTruthy();
   });
 
+  it('automatically exchanges a pending Baidu authorization code before testing', async () => {
+    render(<RemoteSourcesPanel />);
+    await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /百度网盘/u }));
+    fireEvent.change(screen.getByLabelText('授权码'), { target: { value: 'pending-auth-code' } });
+    fireEvent.click(screen.getByRole('button', { name: /测试连接/u }));
+
+    await waitFor(() => expect(remoteApiMocks.exchangeBaiduAuthCode).toHaveBeenCalledWith({
+      clientId: null,
+      clientSecret: null,
+      redirectUri: 'oob',
+      code: 'pending-auth-code',
+    }));
+    expect(remoteApiMocks.test).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'baidu',
+      authType: 'token',
+      secret: '{"type":"baidu-oauth-token","accessToken":"access-token","refreshToken":"refresh-token"}',
+      config: expect.objectContaining({ credentialMode: 'oauth-refresh' }),
+    }));
+    expect(await screen.findByText('已换取 Token，百度网盘连接测试通过。')).toBeTruthy();
+  });
+
   it('falls back to an auth URL when the running preload has no auto login bridge', async () => {
     (remoteApiMocks as { startBaiduOAuthLogin?: unknown }).startBaiduOAuthLogin = undefined;
     render(<RemoteSourcesPanel />);
@@ -594,8 +635,8 @@ describe('RemoteSourcesPanel', () => {
       config: expect.objectContaining({ credentialMode: 'oauth-refresh' }),
     }));
 
-    fireEvent.click(screen.getByRole('button', { name: /WebDAV/u }));
-    fireEvent.click(screen.getByRole('button', { name: /百度网盘/u }));
+    fireEvent.click(screen.getAllByRole('button', { name: /WebDAV/u })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /百度网盘/u })[0]);
     fireEvent.click(screen.getByRole('button', { name: /测试连接/u }));
     await waitFor(() => expect(remoteApiMocks.test).toHaveBeenCalledWith(expect.objectContaining({
       provider: 'baidu',
@@ -672,6 +713,7 @@ describe('RemoteSourcesPanel', () => {
     ];
 
     render(<RemoteSourcesPanel />);
+    await openMaintenanceTools();
     fireEvent.click(await screen.findByRole('button', { name: /百度网盘.*2 个/u }));
 
     await waitFor(() => expect(screen.getAllByText('Baidu OAuth').length).toBeGreaterThan(0));
@@ -680,14 +722,14 @@ describe('RemoteSourcesPanel', () => {
   });
 
   it('keeps Basic WebDAV auth when username has an empty password', async () => {
-    const { container } = render(<RemoteSourcesPanel />);
+    render(<RemoteSourcesPanel />);
     await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: /网盘 \/ WebDAV/u }));
 
-    const inputs = container.querySelectorAll('input');
-    fireEvent.change(inputs[0], { target: { value: 'Empty Password WebDAV' } });
-    fireEvent.change(inputs[1], { target: { value: 'http://127.0.0.1:18080/dav' } });
-    fireEvent.change(inputs[2], { target: { value: 'user-no-pass' } });
-    fireEvent.change(inputs[3], { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Empty Password WebDAV' } });
+    fireEvent.change(screen.getByLabelText('服务器 URL'), { target: { value: 'http://127.0.0.1:18080/dav' } });
+    fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'user-no-pass' } });
+    fireEvent.change(screen.getByLabelText('密码'), { target: { value: '' } });
 
     fireEvent.click(screen.getByRole('button', { name: /测试连接/u }));
     await waitFor(() => expect(remoteApiMocks.test).toHaveBeenCalled());
@@ -761,10 +803,45 @@ describe('RemoteSourcesPanel', () => {
 
     await screen.findAllByText('Mock AList');
     fireEvent.click(screen.getByRole('button', { name: /打开根目录/u }));
-    expect((await screen.findAllByText(/远程来源连接失败/u)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/现在连接不上/u)).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/network down/u).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /^重试$/u })).toBeTruthy();
     expect(remoteApiMocks.lookupTracks).not.toHaveBeenCalled();
+  });
+
+  it('retries an errored source once when the network comes back', async () => {
+    sources = [remoteSource({ status: 'error', lastError: 'network down' })];
+    render(<RemoteSourcesPanel />);
+
+    expect((await screen.findAllByText(/现在连接不上/u)).length).toBeGreaterThan(0);
+    remoteApiMocks.test.mockClear();
+    window.dispatchEvent(new Event('online'));
+
+    await waitFor(() => expect(remoteApiMocks.test).toHaveBeenCalledTimes(1));
+    expect(remoteApiMocks.test).toHaveBeenCalledWith('source-1');
+    await screen.findByText(/已恢复连接/u);
+  });
+
+  it('previews sync changes before starting the real sync', async () => {
+    sources = [remoteSource()];
+    render(<RemoteSourcesPanel />);
+
+    const libraryHome = await screen.findByRole('region', { name: '已连接的远程音乐库' });
+    expect(within(libraryHome).getByText(/还没有同步/u)).toBeTruthy();
+    fireEvent.click(within(libraryHome).getByRole('button', { name: '预览同步' }));
+
+    await waitFor(() => expect(remoteApiMocks.previewSync).toHaveBeenCalledWith('source-1', { rootPath: null, markMissing: true }));
+    const preview = await screen.findByRole('region', { name: 'Mock AList 同步预览' });
+    expect(within(preview).getByText('4')).toBeTruthy();
+    expect(within(preview).getByText('2')).toBeTruthy();
+    expect(within(preview).getByText('不会立即删除')).toBeTruthy();
+
+    fireEvent.click(within(preview).getByRole('button', { name: '确认并同步' }));
+    await waitFor(() => expect(remoteApiMocks.sync).toHaveBeenCalledWith('source-1', {
+      rootPath: null,
+      markMissing: true,
+      includeCover: true,
+    }));
   });
 
   it('uses indexed remote tracks when browser files are already in the library', async () => {
@@ -908,6 +985,7 @@ describe('RemoteSourcesPanel', () => {
     render(<RemoteSourcesPanel />);
 
     await screen.findAllByText('Mock AList');
+    await openMaintenanceTools();
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
     expect(remoteApiMocks.delete).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
@@ -920,6 +998,7 @@ describe('RemoteSourcesPanel', () => {
     render(<RemoteSourcesPanel />);
 
     await screen.findAllByText('Mock AList');
+    await openMaintenanceTools();
     fireEvent.click(screen.getByRole('button', { name: /断开/u }));
     expect(remoteApiMocks.disconnect).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /断开/u }));
@@ -932,6 +1011,7 @@ describe('RemoteSourcesPanel', () => {
 
     await screen.findAllByText('Mock AList');
     expect(remoteApiMocks.list).toHaveBeenCalledTimes(1);
+    await openMaintenanceTools();
 
     fireEvent.click(screen.getByRole('button', { name: /加载封面/u }));
 
@@ -947,6 +1027,7 @@ describe('RemoteSourcesPanel', () => {
     render(<RemoteSourcesPanel />);
 
     await screen.findAllByText('Mock AList');
+    await openMaintenanceTools();
     fireEvent.click(screen.getByRole('button', { name: /展开高级维护/u }));
     fireEvent.click(screen.getByRole('button', { name: /局域网极速/u }));
     await waitFor(() => expect(appApiMocks.setSettings).toHaveBeenCalledWith({ remoteCoverLoadPerformanceMode: 'lan' }));
@@ -965,6 +1046,7 @@ describe('RemoteSourcesPanel', () => {
     });
     render(<RemoteSourcesPanel />);
 
+    await openMaintenanceTools();
     fireEvent.click(await screen.findByRole('button', { name: /展开高级维护/u }));
     const coverInput = await screen.findByLabelText('后台封面并发') as HTMLInputElement;
     expect(coverInput.value).toBe('6');
@@ -1033,6 +1115,7 @@ describe('RemoteSourcesPanel', () => {
 
     render(<RemoteSourcesPanel />);
 
+    await openMaintenanceTools();
     await screen.findByText(/已加载 2 \/ 8/u);
     const progressbar = screen.getByRole('progressbar', { name: 'Mock AList 封面加载进度' });
     expect(progressbar.querySelector('.remote-scan-progress-track span')?.getAttribute('style')).toContain('25%');
@@ -1049,10 +1132,12 @@ describe('RemoteSourcesPanel', () => {
   });
 
   it('previews and applies the selected remote album merge strategy', async () => {
+    sources = [remoteSource()];
     appApiMocks.getSettings.mockResolvedValue({ remoteCoverLoadPerformanceMode: 'balanced', remoteAlbumMergeStrategy: 'conservative' });
     appApiMocks.setSettings.mockImplementation(async (patch) => ({ remoteAlbumMergeStrategy: patch.remoteAlbumMergeStrategy }));
     render(<RemoteSourcesPanel />);
 
+    await openMaintenanceTools();
     fireEvent.click(await screen.findByRole('button', { name: /展开高级维护/u }));
     fireEvent.click(await screen.findByRole('button', { name: /普通合并/u }));
     await waitFor(() => expect(remoteApiMocks.previewAlbumGrouping).toHaveBeenCalledWith('standard'));
@@ -1076,7 +1161,8 @@ describe('RemoteSourcesPanel', () => {
     render(<RemoteSourcesPanel />);
 
     await screen.findAllByText('Mock AList');
-    expect(screen.getByText('\u4f4e\u8d1f\u8f7d\u8fd0\u884c')).toBeTruthy();
+    expect(screen.getByText('播放中低负载')).toBeTruthy();
+    await openMaintenanceTools();
     fireEvent.click(screen.getByRole('button', { name: /展开高级维护/u }));
     expect(screen.getByText(/\u64ad\u653e\u4e2d\uff0c\u540e\u53f0\u4efb\u52a1\u5df2\u964d\u4f4e\u8d1f\u8f7d/u)).toBeTruthy();
     expect(screen.getByText(/\u64ad\u653e\u4e2d\uff0c\u5c01\u9762\u548c\u6b4c\u8bcd\u7b49\u540e\u53f0\u4efb\u52a1/u)).toBeTruthy();
@@ -1127,6 +1213,7 @@ describe('RemoteSourcesPanel', () => {
     render(<RemoteSourcesPanel />);
 
     await screen.findAllByText('Mock AList');
+    await openMaintenanceTools();
     expect(screen.getAllByText('已索引歌曲').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/8/u).length).toBeGreaterThan(0);
     expect(screen.getByText(/有 2 首元数据异常/u)).toBeTruthy();
@@ -1136,7 +1223,7 @@ describe('RemoteSourcesPanel', () => {
     await screen.findByText('Echo Song');
   });
 
-  it('summarizes provider tabs and per-source health for the remote console', async () => {
+  it('keeps the redesigned landing and summarizes provider tabs for existing sources', async () => {
     sources = [
       remoteSource({ indexedTrackCount: 4 }),
       remoteSource({
@@ -1150,6 +1237,10 @@ describe('RemoteSourcesPanel', () => {
     render(<RemoteSourcesPanel />);
 
     await screen.findAllByText('Mock AList');
+    expect(screen.getByText('打开音乐、检查更新或添加来源；日常操作都在这里完成。')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '添加音乐库' })).toBeTruthy();
+    expect(screen.queryByText('远程库控制台')).toBeNull();
+    await openMaintenanceTools();
     expect(screen.getByText('远程库控制台')).toBeTruthy();
     expect(screen.getByRole('button', { name: /网盘 \/ WebDAV.*1 个.*4 首/u })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Subsonic \/ Navidrome.*1 个.*12 首/u })).toBeTruthy();
@@ -1162,6 +1253,7 @@ describe('RemoteSourcesPanel', () => {
     render(<RemoteSourcesPanel />);
 
     await screen.findAllByText('Mock AList');
+    await openMaintenanceTools();
 
     fireEvent.click(screen.getByRole('button', { name: /\u5339\u914d\u6b4c\u8bcd/u }));
     await waitFor(() => expect(remoteApiMocks.startBackgroundJobs).toHaveBeenCalledWith('source-1', ['lyrics']));
@@ -1185,6 +1277,7 @@ describe('RemoteSourcesPanel', () => {
     render(<RemoteSourcesPanel />);
 
     await screen.findAllByText('Mock AList');
+    await openMaintenanceTools();
     const coverButton = screen.getByRole('button', { name: /加载封面/u });
     expect(coverButton.getAttribute('data-state')).toBe('active');
     expect(coverButton.getAttribute('aria-pressed')).toBe('true');
@@ -1212,6 +1305,7 @@ describe('RemoteSourcesPanel', () => {
     await screen.findAllByText('Mock AList');
     fireEvent.click(screen.getByRole('button', { name: /打开根目录/u }));
     await screen.findByText('Indexed Echo Song');
+    await openMaintenanceTools();
 
     fireEvent.click(screen.getByRole('button', { name: /断开/u }));
 
@@ -1235,7 +1329,7 @@ describe('RemoteSourcesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除来源 Mock AList' }));
 
     await waitFor(() => expect(remoteApiMocks.delete).toHaveBeenCalledWith('source-1'));
-    await screen.findByText('还没有 网盘 / WebDAV 来源');
+    await screen.findByText('连接你的远程音乐源，统一浏览、播放与同步。');
     expect(screen.queryByText('Indexed Echo Song')).toBeNull();
   });
 });

@@ -49,6 +49,16 @@ const makeConstantTone = (seconds: number): Float32Array => {
   return samples;
 };
 
+const concatenateSamples = (...parts: Float32Array[]): Float32Array => {
+  const samples = new Float32Array(parts.reduce((total, part) => total + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    samples.set(part, offset);
+    offset += part.length;
+  }
+  return samples;
+};
+
 const pcmFromSamples = (samples: Float32Array): Buffer => {
   const buffer = Buffer.alloc(samples.length * 2);
   for (let index = 0; index < samples.length; index += 1) {
@@ -79,6 +89,18 @@ const analyzeSamples = async (samples: Float32Array) => {
 };
 
 describe('BpmAnalyzer tempo estimation', () => {
+  it('uses osu-style playable tempo for bundled real tracks instead of half-time aliases', async () => {
+    const analyzer = new BpmAnalyzer({ logger: () => undefined });
+    for (const [name, expectedBpm] of [
+      ['majiko - 狂おしいほど僕には美しい.mp3', 193.5],
+      ['三省 - 毕竟我是一条鱼.mp3', 170],
+      ['森羅万象,あよ - Toge.mp3', 218],
+      ['邱有句 - 夏の喚く.mp3', 144],
+    ] as const) {
+      const result = await analyzer.analyze(join(process.cwd(), 'test', 'tt', name), 90);
+      expect(Math.abs(result.bpm - expectedBpm), `${name}: ${result.bpm} BPM`).toBeLessThanOrEqual(0.5);
+    }
+  });
   it('asks FFmpeg to decode only the first audio stream for analysis', async () => {
     let spawnedArgs: string[] = [];
     const pcm = pcmFromSamples(makePulseTrack(128, 40));
@@ -126,5 +148,12 @@ describe('BpmAnalyzer tempo estimation', () => {
     const result = await analyzeSamples(makeConstantTone(40));
 
     expect(result.confidence).toBeLessThan(BPM_CONFIDENCE_THRESHOLD);
+  });
+
+  it('uses segment consensus when a misleading intro has a different pulse', async () => {
+    const samples = concatenateSamples(makePulseTrack(100, 24), makePulseTrack(144, 48));
+    const result = await analyzeSamples(samples);
+
+    expect(Math.abs(result.bpm - 144)).toBeLessThanOrEqual(1);
   });
 });

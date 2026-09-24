@@ -57,9 +57,20 @@ import type { PlayableTrack } from '../../shared/types/remoteSources';
 import { streamingProviderNames, streamingStableKey, type StreamingLiveResolveResult, type StreamingProviderName } from '../../shared/types/streaming';
 import { useI18n } from '../i18n/I18nProvider';
 import type { TranslationKey } from '../i18n/locales';
+import { ConnectWorkspaceTabs, type ConnectWorkspaceMode } from '../components/connect/ConnectWorkspaceTabs';
+import {
+  connectBrowserPreviewDevices,
+  connectBrowserPreviewEchoLinkBridge,
+  connectBrowserPreviewMqttBridge,
+  connectBrowserPreviewStatus,
+  isConnectBrowserPreview,
+} from '../components/connect/connectBrowserPreview';
+import { EchoLinkBasicPanel } from '../components/settings/EchoLinkBasicPanel';
+import { MqttIntegrationPanel } from '../components/settings/MqttIntegrationPanel';
 import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
 import { useSharedPlaybackStatus } from '../stores/playbackStatusStore';
 import { hideSidebarRouteEntry } from '../utils/sidebarRouteVisibility';
+import '../styles/connect-workspace.css';
 
 type Translate = ReturnType<typeof useI18n>['t'];
 
@@ -153,18 +164,6 @@ type WallpaperEngineBridgeStatus = {
   eventClients: number;
 };
 
-type ListeningRoomNodeState = 'active' | 'online' | 'warning' | 'idle';
-
-type ListeningRoomNode = {
-  id: string;
-  state: ListeningRoomNodeState;
-  eyebrow: string;
-  title: string;
-  detail: string;
-  metric: string;
-  icon: JSX.Element;
-};
-
 const defaultWallpaperEngineBridgeStatus: WallpaperEngineBridgeStatus = {
   running: false,
   host: '127.0.0.1',
@@ -244,13 +243,14 @@ const defaultHqPlayerSettings: HqPlayerSettings = {
 const hqPlayerLocalHost = '127.0.0.1';
 const hqPlayerDefaultPort = 4321;
 const hiddenConnectDevicesStorageKey = 'echo.connect.hiddenDevices.v1';
-const connectCommandCenterCollapsedStorageKey = 'echo.connect.commandCenterCollapsed.v1';
 const connectEchoLinkPanelCollapsedStorageKey = 'echo.connect.echoLinkPanelCollapsed.v1';
 const connectDeviceSectionCollapsedStorageKey = 'echo.connect.deviceSectionCollapsed.v1';
 const connectRadioPanelCollapsedStorageKey = 'echo.connect.radioPanelCollapsed.v1';
 const connectLivePanelCollapsedStorageKey = 'echo.connect.livePanelCollapsed.v1';
 const connectHqPlayerPanelCollapsedStorageKey = 'echo.connect.hqPlayerPanelCollapsed.v1';
-const connectListeningRoomCollapsedStorageKey = 'echo.connect.listeningRoomCollapsed.v1';
+const connectSettingsPendingSectionStorageKey = 'echo-next.settings.pending-section';
+const connectEchoProAccountPanelStorageKey = 'echo:settings:general:echo-pro-account-panel-expanded';
+const connectEchoProAccountTargetId = 'settings-row-echo-pro-account';
 const legacyRadioStationsStorageKey = 'echo.connect.radioStations.v1';
 const radioStationsStorageKey = 'echo.connect.radioStations.v2';
 const maxStoredRadioStations = 40;
@@ -281,23 +281,17 @@ export const resetConnectDonatorUnlockStatusCacheForTests = (): void => {
   connectDonatorUnlockStatusRequest = null;
 };
 
-const invalidateConnectDonatorUnlockStatusCache = (): void => {
-  connectDonatorUnlockStatusCache = null;
-};
-
 const loadConnectDonatorUnlockStatus = (
   connect: ConnectBridge,
   force = false,
 ): Promise<ConnectDonatorUnlockStatus> => {
-  if (force) {
-    invalidateConnectDonatorUnlockStatusCache();
-  } else if (connectDonatorUnlockStatusCache?.bridge === connect) {
+  if (!force && connectDonatorUnlockStatusCache?.bridge === connect) {
     return Promise.resolve(connectDonatorUnlockStatusCache.status);
   } else if (connectDonatorUnlockStatusRequest?.bridge === connect) {
     return connectDonatorUnlockStatusRequest.promise;
   }
 
-  const promise = (connect.getDonatorUnlockStatus?.() ?? Promise.resolve(defaultDonatorUnlockStatus)).then((status) => {
+  const promise = (connect.getDonatorUnlockStatus?.(force ? { force: true } : undefined) ?? Promise.resolve(defaultDonatorUnlockStatus)).then((status) => {
     const nextStatus = status ?? defaultDonatorUnlockStatus;
     connectDonatorUnlockStatusCache = {
       bridge: connect,
@@ -1025,22 +1019,6 @@ const createHqPlayerConnectSettings = (settings: HqPlayerSettings): HqPlayerSett
   enabled: true,
 });
 
-const createHqPlayerStatusFromConnectionTest = (
-  settings: HqPlayerSettings,
-  result: HqPlayerConnectionTestResult,
-): HqPlayerStatus => ({
-  enabled: settings.enabled,
-  state: result.state,
-  endpoint: result.endpoint,
-  mediaServerEnabled: settings.mediaServerEnabled,
-  defaultPlaybackBackend: settings.defaultPlaybackBackend,
-  profileName: settings.profileName,
-  lastCheckedAt: result.checkedAt,
-  lastError: result.error,
-  controlInfo: result.controlInfo ?? null,
-  playbackStatus: result.playbackStatus ?? null,
-});
-
 const formatHqPlayerSendMessage = (plan: HqPlayerPlaybackControlPlan | null, t: Translate): string => {
   const send = plan?.send ?? null;
   if (!send) {
@@ -1229,8 +1207,9 @@ export const ConnectPage = (): JSX.Element => {
   const { t } = useI18n();
   const queue = usePlaybackQueue();
   const playbackStatus = useSharedPlaybackStatus();
-  const [devices, setDevices] = useState<ConnectDevice[]>([]);
-  const [status, setStatus] = useState<ConnectSessionStatus>(defaultStatus);
+  const [devices, setDevices] = useState<ConnectDevice[]>(isConnectBrowserPreview ? connectBrowserPreviewDevices : []);
+  const [workspaceMode, setWorkspaceMode] = useState<ConnectWorkspaceMode>('output');
+  const [status, setStatus] = useState<ConnectSessionStatus>(isConnectBrowserPreview ? connectBrowserPreviewStatus : defaultStatus);
   const [receiverStatus, setReceiverStatus] = useState<ConnectReceiverStatus>(defaultReceiverStatus);
   const [airPlayReceiverStatus, setAirPlayReceiverStatus] = useState<AirPlayReceiverStatus>(defaultAirPlayReceiverStatus);
   const [error, setError] = useState<string | null>(null);
@@ -1253,12 +1232,14 @@ export const ConnectPage = (): JSX.Element => {
   const [autoStartReceiversEnabled, setAutoStartReceiversEnabled] = useState(false);
   const [airPlayReceiverProtocol, setAirPlayReceiverProtocol] = useState<AirPlayReceiverProtocol>('airplay1');
   const [donatorUnlockStatus, setDonatorUnlockStatus] = useState<ConnectDonatorUnlockStatus>(() =>
-    connectDonatorUnlockStatusCache?.bridge === window.echo?.connect
-      ? connectDonatorUnlockStatusCache.status
-      : defaultDonatorUnlockStatus,
+    isConnectBrowserPreview
+      ? { ...defaultDonatorUnlockStatus, unlocked: true, pluginInstalled: true, pluginEnabled: true, reason: 'unlocked' }
+      : connectDonatorUnlockStatusCache && connectDonatorUnlockStatusCache.bridge === window.echo?.connect
+        ? connectDonatorUnlockStatusCache.status
+        : defaultDonatorUnlockStatus,
   );
   const [isDonatorUnlockLoading, setIsDonatorUnlockLoading] = useState(() =>
-    connectDonatorUnlockStatusCache?.bridge !== window.echo?.connect,
+    !isConnectBrowserPreview && (!connectDonatorUnlockStatusCache || connectDonatorUnlockStatusCache.bridge !== window.echo?.connect),
   );
   const [isSidebarHideBusy, setIsSidebarHideBusy] = useState(false);
   const [busyDeviceId, setBusyDeviceId] = useState<string | null>(null);
@@ -1279,11 +1260,8 @@ export const ConnectPage = (): JSX.Element => {
   const [hqPlayerLastHandoff, setHqPlayerLastHandoff] = useState<HqPlayerPlaybackHandoffPlan | null>(null);
   const [hqPlayerLastControl, setHqPlayerLastControl] = useState<HqPlayerPlaybackControlPlan | null>(null);
   const [hqPlayerBusy, setHqPlayerBusy] = useState<'settings' | 'test' | null>(null);
-  const [shouldRenderHqPlayerDetails, setShouldRenderHqPlayerDetails] = useState(defaultHqPlayerSettings.enabled);
+  const [shouldRenderHqPlayerDetails, setShouldRenderHqPlayerDetails] = useState(isConnectBrowserPreview || defaultHqPlayerSettings.enabled);
   const [hiddenDeviceIds, setHiddenDeviceIds] = useState<Set<string>>(() => readStoredStringSet(hiddenConnectDevicesStorageKey));
-  const [isCommandCenterCollapsed, setIsCommandCenterCollapsed] = useState(() =>
-    readStoredBoolean(connectCommandCenterCollapsedStorageKey, false),
-  );
   const [isEchoLinkPanelCollapsed, setIsEchoLinkPanelCollapsed] = useState(() =>
     readStoredBoolean(connectEchoLinkPanelCollapsedStorageKey, false),
   );
@@ -1298,9 +1276,6 @@ export const ConnectPage = (): JSX.Element => {
   );
   const [isHqPlayerPanelCollapsed, setIsHqPlayerPanelCollapsed] = useState(() =>
     readStoredBoolean(connectHqPlayerPanelCollapsedStorageKey, false),
-  );
-  const [isListeningRoomCollapsed, setIsListeningRoomCollapsed] = useState(() =>
-    readStoredBoolean(connectListeningRoomCollapsedStorageKey, true),
   );
 
   const activeDevice = useMemo(
@@ -1443,166 +1418,14 @@ export const ConnectPage = (): JSX.Element => {
     : echoLinkStatus.token
       ? `${echoLinkStatus.token.slice(0, 6)}...${echoLinkStatus.token.slice(-6)}`
       : '-';
-  const lanStreamerCount = visibleDevices.filter((device) => device.protocol === 'dlna').length;
-  const airPlayOutputCount = visibleDevices.filter((device) => device.protocol === 'airplay').length;
-  const hqPlayerOutputCount = visibleDevices.filter((device) => device.protocol === 'hqplayer').length;
-  const echoLinkStatusLabel = echoLinkStatus.running ? t('connectPage.echoLink.state.running') : echoLinkStatus.error ? t('connectPage.echoLink.state.error') : echoLinkStatus.enabled ? t('connectPage.echoLink.state.starting') : t('connectPage.common.disabled');
-  const echoLinkWebStatusLabel = echoLinkWebControlUrl ? t('connectPage.echoLink.webReady') : t('connectPage.echoLink.webWaiting');
   const echoLinkWebBackground = echoLinkStatus.webBackground ?? defaultEchoLinkWebBackground;
   const echoLinkWebBackgroundConfigured = echoLinkWebBackground.type !== 'none' && echoLinkWebBackground.url.trim().length > 0;
   const echoLinkWebBackgroundSaveDisabled = isEchoLinkBackgroundBusy || (echoLinkWebBackgroundDraft.type !== 'none' && echoLinkWebBackgroundDraft.url.trim().length === 0);
-  const receiverCommandLabel = receiverStatus.enabled ? t(receiverStateLabel[receiverStatus.state]) : t('connectPage.common.disabled');
-  const airPlayCommandLabel = airPlayReceiverStatus.enabled ? t(airPlayStateLabel[airPlayReceiverStatus.state]) : t('connectPage.common.disabled');
-  const latestEchoLinkHttpError = echoLinkStatus.diagnostics.recentHttpErrors[0] ?? null;
-  const commandCenterIssues = [
-    error ? { source: 'Connect', detail: error } : null,
-    status.error ? { source: 'Output', detail: status.error } : null,
-    receiverStatus.error ? { source: 'DLNA Receiver', detail: receiverStatus.error } : null,
-    airPlayReceiverStatus.error ? { source: 'AirPlay', detail: airPlayReceiverStatus.error } : null,
-    echoLinkStatus.error ? { source: 'ECHO Link', detail: echoLinkStatus.error } : null,
-    echoLinkStatus.mdns.error ? { source: 'mDNS', detail: echoLinkStatus.mdns.error } : null,
-    latestEchoLinkHttpError ? { source: 'Web Remote', detail: latestEchoLinkHttpError.message } : null,
-    hqPlayerStatus?.lastError ? { source: 'HQPlayer', detail: hqPlayerStatus.lastError } : null,
-  ].filter((issue): issue is { source: string; detail: string } => Boolean(issue?.detail?.trim())).slice(0, 4);
-  const commandCenterHealth =
-    commandCenterIssues.length > 0
-      ? 'warning'
-      : status.state === 'playing' || receiverStatus.state === 'playing' || airPlayReceiverStatus.state === 'playing'
-        ? 'active'
-        : echoLinkStatus.running || visibleDevices.length > 0 || hqPlayerState === 'available'
-          ? 'online'
-          : 'idle';
-  const commandCenterHealthLabel =
-    commandCenterHealth === 'warning'
-      ? t('connectPage.commandCenter.health.warning')
-      : commandCenterHealth === 'active'
-        ? t('connectPage.commandCenter.health.active')
-        : commandCenterHealth === 'online'
-          ? t('connectPage.commandCenter.health.online')
-          : t('connectPage.state.idle');
-  const commandCenterRouteLabel = status.deviceId
-    ? t('connectPage.commandCenter.route.output', { target: activeTargetLabel })
-    : receiverStatus.state === 'playing'
-      ? `Phone / ${receiverStatus.advertisedName}`
-      : airPlayReceiverStatus.state === 'playing'
-        ? `AirPlay / ${airPlayReceiverStatus.advertisedName}`
-        : t('connectPage.commandCenter.route.waiting');
-  const commandCenterErrorLabel = commandCenterIssues[0]
-    ? `${commandCenterIssues[0].source}: ${commandCenterIssues[0].detail}`
-    : t('connectPage.commandCenter.noRecentFailures');
-
-  const echoLinkRoomState: ListeningRoomNodeState = echoLinkStatus.error
-    ? 'warning'
-    : echoLinkStatus.activeMediaTokens > 0
-      ? 'active'
-      : echoLinkStatus.running
-        ? 'online'
-        : 'idle';
-  const dlnaReceiverRoomState: ListeningRoomNodeState = receiverStatus.error
-    ? 'warning'
-    : receiverStatus.state === 'playing' || receiverStatus.state === 'loading'
-      ? 'active'
-      : receiverStatus.enabled
-        ? 'online'
-        : 'idle';
-  const airPlayRoomState: ListeningRoomNodeState = airPlayReceiverStatus.error
-    ? 'warning'
-    : airPlayReceiverStatus.state === 'playing' || airPlayReceiverStatus.state === 'starting'
-      ? 'active'
-      : airPlayReceiverStatus.enabled
-        ? 'online'
-        : 'idle';
-  const hqPlayerRoomState: ListeningRoomNodeState = hqPlayerStatus?.lastError
-    ? 'warning'
-    : hqPlayerPlaybackStatus?.state === 'playing'
-      ? 'active'
-      : hqPlayerState === 'available'
-        ? 'online'
-        : hqPlayerState === 'unavailable' || hqPlayerState === 'not-configured'
-          ? 'warning'
-          : 'idle';
-  const outputRoomState: ListeningRoomNodeState = status.error
-    ? 'warning'
-    : status.deviceId
-      ? 'active'
-      : visibleDevices.length > 0
-        ? 'online'
-        : 'idle';
-  const wallpaperRoomState: ListeningRoomNodeState = wallpaperEngineBridgeStatus.eventClients > 0
-    ? 'active'
-    : wallpaperEngineBridgeStatus.running
-      ? 'online'
-      : 'idle';
-  const wallpaperEndpointLabel = wallpaperEngineBridgeStatus.url ??
-    (wallpaperEngineBridgeStatus.port === null
-      ? '127.0.0.1:47668'
-      : `${wallpaperEngineBridgeStatus.host}:${wallpaperEngineBridgeStatus.port}`);
-  const listeningRoomNodes: ListeningRoomNode[] = [
-    {
-      id: 'echo-link',
-      state: echoLinkRoomState,
-      eyebrow: 'Mobile',
-      title: t('connectPage.room.phone.title'),
-      detail: echoLinkStatus.running ? t('connectPage.room.phone.available') : t('connectPage.room.phone.offline'),
-      metric: echoLinkStatus.diagnostics.lastPhoneConnectionAt
-        ? t('connectPage.room.phone.last', { time: new Date(echoLinkStatus.diagnostics.lastPhoneConnectionAt).toLocaleTimeString() })
-        : echoLinkAddressLabel,
-      icon: <Smartphone size={19} />,
-    },
-    {
-      id: 'outputs',
-      state: outputRoomState,
-      eyebrow: 'Outputs',
-      title: status.deviceId ? t('connectPage.room.outputs.current') : t('connectPage.room.outputs.available'),
-      detail: status.deviceId ? t(stateLabel[status.state]) : t('connectPage.room.outputs.discovered', { count: visibleDevices.length }),
-      metric: status.deviceId
-        ? t('connectPage.room.outputs.target', { target: activeTargetLabel })
-        : t('connectPage.room.outputs.summary', { dlna: lanStreamerCount, airplay: airPlayOutputCount, hqplayer: hqPlayerOutputCount }),
-      icon: <SlidersHorizontal size={19} />,
-    },
-    {
-      id: 'dlna',
-      state: dlnaReceiverRoomState,
-      eyebrow: 'Inbound',
-      title: t('connectPage.room.dlna.title'),
-      detail: receiverCommandLabel,
-      metric: receiverStatus.currentClient?.address ?? t('connectPage.room.dlna.addressCount', { count: receiverStatus.addresses.length }),
-      icon: <Radio size={19} />,
-    },
-    {
-      id: 'hqplayer',
-      state: hqPlayerRoomState,
-      eyebrow: 'External DSP',
-      title: 'HQPlayer',
-      detail: t(hqPlayerStateLabel[hqPlayerState]),
-      metric: hqPlayerPlaybackStatus?.state ? t('connectPage.room.hqplayer.remote', { state: hqPlayerPlaybackStatus.state }) : hqPlayerEndpointLabel,
-      icon: <Cable size={19} />,
-    },
-    {
-      id: 'airplay',
-      state: airPlayRoomState,
-      eyebrow: 'Inbound',
-      title: t('connectPage.room.airplay.title'),
-      detail: airPlayCommandLabel,
-      metric: airPlayReceiverStatus.currentClient?.address ?? (airPlayReceiverProtocol === 'airplay2' ? t('connectPage.airplay.protocol.airplay2') : t('connectPage.airplay.protocol.airplay1')),
-      icon: <Cast size={19} />,
-    },
-    {
-      id: 'wallpaper',
-      state: wallpaperRoomState,
-      eyebrow: 'Visual layer',
-      title: 'Wallpaper Engine',
-      detail: wallpaperEngineBridgeStatus.eventClients > 0
-        ? t('connectPage.room.wallpaper.liveClients', { count: wallpaperEngineBridgeStatus.eventClients })
-        : wallpaperEngineBridgeStatus.running
-          ? t('connectPage.room.wallpaper.ready')
-          : t('connectPage.room.wallpaper.offline'),
-      metric: wallpaperEndpointLabel,
-      icon: <Volume2 size={19} />,
-    },
-  ];
 
   const refreshDonatorUnlockStatus = useCallback(async (options: { force?: boolean } = {}): Promise<void> => {
+    if (isConnectBrowserPreview) {
+      return;
+    }
     const connect = window.echo?.connect;
     if (!connect) {
       setDonatorUnlockStatus(defaultDonatorUnlockStatus);
@@ -1616,7 +1439,9 @@ export const ConnectPage = (): JSX.Element => {
     try {
       setDonatorUnlockStatus(await loadConnectDonatorUnlockStatus(connect, options.force === true));
     } catch {
-      setDonatorUnlockStatus(defaultDonatorUnlockStatus);
+      // A transient IPC/network failure must not visually revoke a previously trusted status.
+      // Paid feature operations remain guarded by the main process.
+      setDonatorUnlockStatus((current) => current);
     } finally {
       setIsDonatorUnlockLoading(false);
     }
@@ -1651,6 +1476,12 @@ export const ConnectPage = (): JSX.Element => {
   const refreshDevices = useCallback(async (options: { force?: boolean } = {}): Promise<void> => {
     const connect = window.echo?.connect;
     if (!connect) {
+      if (isConnectBrowserPreview) {
+        setDevices(connectBrowserPreviewDevices);
+        setStatus(connectBrowserPreviewStatus);
+        setError(null);
+        return;
+      }
       setError(t('connectPage.error.desktopBridgeConnect'));
       return;
     }
@@ -1755,7 +1586,6 @@ export const ConnectPage = (): JSX.Element => {
   useEffect(() => {
     void refreshDonatorUnlockStatus();
     const handleUnlockChanged = (): void => {
-      invalidateConnectDonatorUnlockStatusCache();
       void refreshDonatorUnlockStatus({ force: true });
     };
     window.addEventListener('plugins:changed', handleUnlockChanged);
@@ -1906,7 +1736,7 @@ export const ConnectPage = (): JSX.Element => {
     } finally {
       setHqPlayerBusy(null);
     }
-  }, [hqPlayerEffectiveDraft, saveHqPlayerSettings]);
+  }, [hqPlayerEffectiveDraft, saveHqPlayerSettings, t]);
 
   const toggleHqPlayerEnabled = useCallback(async (): Promise<void> => {
     const nextSettings = hqPlayerDraft.enabled
@@ -2537,14 +2367,6 @@ export const ConnectPage = (): JSX.Element => {
     });
   }, []);
 
-  const toggleCommandCenterCollapsed = useCallback((): void => {
-    setIsCommandCenterCollapsed((current) => {
-      const next = !current;
-      writeStoredBoolean(connectCommandCenterCollapsedStorageKey, next);
-      return next;
-    });
-  }, []);
-
   const toggleEchoLinkPanelCollapsed = useCallback((): void => {
     setIsEchoLinkPanelCollapsed((current) => {
       const next = !current;
@@ -2577,16 +2399,21 @@ export const ConnectPage = (): JSX.Element => {
     });
   }, []);
 
-  const toggleListeningRoomCollapsed = useCallback((): void => {
-    setIsListeningRoomCollapsed((current) => {
-      const next = !current;
-      writeStoredBoolean(connectListeningRoomCollapsedStorageKey, next);
-      return next;
-    });
-  }, []);
-
   const openEchoProAccountSettings = useCallback((): void => {
-    window.dispatchEvent(new CustomEvent('app:navigate:settings-section', { detail: { section: 'general', targetId: 'settings-row-echo-pro-account' } }));
+    try {
+      window.sessionStorage?.setItem(connectSettingsPendingSectionStorageKey, 'general');
+      window.localStorage?.setItem(connectSettingsPendingSectionStorageKey, 'general');
+      window.localStorage?.setItem(connectEchoProAccountPanelStorageKey, 'true');
+    } catch {
+      // Navigation events below still guide the user when storage is unavailable.
+    }
+
+    window.dispatchEvent(new Event('app:navigate:settings'));
+    const detail = { section: 'general', targetId: connectEchoProAccountTargetId };
+    window.dispatchEvent(new CustomEvent('app:navigate:settings-section', { detail }));
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('app:navigate:settings-section', { detail }));
+    }, 0);
   }, []);
 
   const hideConnectFromSidebar = useCallback(async (): Promise<void> => {
@@ -2623,8 +2450,12 @@ export const ConnectPage = (): JSX.Element => {
           </div>
           {isDonatorUnlockLoading ? <Loader2 className="spinning-icon" size={28} /> : <LockKeyhole size={28} />}
         </section>
-        <section className="remote-source-guardrail connect-pro-guardrail" aria-label="ECHO Pro required">
-          <strong>{isDonatorUnlockLoading ? '正在检查 ECHO Pro 状态' : '需要 ECHO Pro'}</strong>
+        <section className="remote-source-guardrail connect-pro-guardrail" aria-label="ECHO Pro authorization status">
+          <strong>
+            {isDonatorUnlockLoading
+              ? '正在检查 ECHO Pro 状态'
+              : '需要 ECHO Pro'}
+          </strong>
           <span>{t(connectDonatorUnlockReasonLabel[donatorUnlockStatus.reason])}</span>
         </section>
         <div className="remote-source-actions connect-pro-actions">
@@ -2652,7 +2483,7 @@ export const ConnectPage = (): JSX.Element => {
   }
 
   return (
-    <div className="connect-page">
+    <div className="connect-page connect-page--session" data-mode={workspaceMode}>
       <header className="connect-header">
         <div>
           <p className="section-kicker">{t('connectPage.header.kicker')}</p>
@@ -2660,19 +2491,21 @@ export const ConnectPage = (): JSX.Element => {
           <p>{t('connectPage.header.description')}</p>
         </div>
         <div className="connect-header-actions">
-          <div className="settings-inline-toggle connect-autostart-toggle">
-            <span>{t('connectPage.header.autoStart')}</span>
-            <button
-              aria-label={t('connectPage.header.autoStart')}
-              aria-pressed={autoStartReceiversEnabled}
-              className={`toggle-btn ${autoStartReceiversEnabled ? 'active' : ''}`}
-              disabled={isAutoStartBusy}
-              type="button"
-              onClick={() => void toggleAutoStartReceivers()}
-            >
-              <span />
-            </button>
-          </div>
+          {workspaceMode === 'receive' ? (
+            <div className="settings-inline-toggle connect-autostart-toggle">
+              <span>{t('connectPage.header.autoStart')}</span>
+              <button
+                aria-label={t('connectPage.header.autoStart')}
+                aria-pressed={autoStartReceiversEnabled}
+                className={`toggle-btn ${autoStartReceiversEnabled ? 'active' : ''}`}
+                disabled={isAutoStartBusy}
+                type="button"
+                onClick={() => void toggleAutoStartReceivers()}
+              >
+                <span />
+              </button>
+            </div>
+          ) : null}
           <button className="settings-action-button" type="button" onClick={refreshCommandCenter} disabled={isRefreshing}>
             {isRefreshing ? <Loader2 className="spinning-icon" size={16} /> : <RefreshCw size={16} />}
             {t('connectPage.header.refresh')}
@@ -2687,169 +2520,35 @@ export const ConnectPage = (): JSX.Element => {
         </div>
       ) : null}
 
-      <section
-        className="connect-command-center"
-        data-state={commandCenterHealth}
-        data-collapsed={isCommandCenterCollapsed ? 'true' : undefined}
-        aria-label={t('connectPage.commandCenter.aria')}
-      >
-        <div className="connect-command-center__headline">
-          <div className="connect-command-center__title">
-            <span className="connect-command-center__badge" data-state={commandCenterHealth}>{commandCenterHealthLabel}</span>
-            <p className="section-kicker">LAN AUDIO HUB</p>
-            <h2>Connect Command Center</h2>
-            <p>{commandCenterRouteLabel}</p>
-          </div>
-          <div className="connect-command-center__actions">
-            <button className="settings-action-button" type="button" onClick={() => void openEchoLinkWebControl()} disabled={!echoLinkWebControlUrl}>
-              <Smartphone size={15} />
-              {t('connectPage.commandCenter.webRemote')}
-            </button>
-            <button className="settings-action-button" type="button" onClick={() => void copyEchoLinkPairing()} disabled={!echoLinkPairingUri}>
-              {copiedEchoLinkPairing ? <Check size={15} /> : <Copy size={15} />}
-              {t('connectPage.commandCenter.phonePairing')}
-            </button>
-            <button className="settings-action-button" type="button" onClick={refreshCommandCenter} disabled={isRefreshing}>
-              {isRefreshing ? <Loader2 className="spinning-icon" size={15} /> : <RefreshCw size={15} />}
-              {t('connectPage.commandCenter.refreshAll')}
-            </button>
-            <button
-              className="icon-button connect-collapse-button"
-              type="button"
-              aria-label={isCommandCenterCollapsed ? t('connectPage.commandCenter.expand') : t('connectPage.commandCenter.collapse')}
-              title={isCommandCenterCollapsed ? t('connectPage.commandCenter.expand') : t('connectPage.commandCenter.collapse')}
-              aria-expanded={!isCommandCenterCollapsed}
-              onClick={toggleCommandCenterCollapsed}
-            >
-              <ChevronDown size={16} />
-            </button>
-          </div>
-        </div>
+      <ConnectWorkspaceTabs
+        mode={workspaceMode}
+        onModeChange={setWorkspaceMode}
+        labels={{
+          output: '播放到设备',
+          receive: '从设备接收',
+          mobile: '手机控制',
+          radio: '电台 / 直播',
+        }}
+      />
 
-        <div className="connect-collapsible-content" data-expanded={!isCommandCenterCollapsed}>
-          <div className="connect-collapsible-content__inner">
-        <div className="connect-command-center__body">
-          <div className="connect-command-center__qr-card">
-            <div className="connect-command-center__qr" data-empty={echoLinkQrDataUrl ? 'false' : 'true'}>
-              {echoLinkQrDataUrl ? <img src={echoLinkQrDataUrl} alt="" /> : <Smartphone size={34} />}
-            </div>
-            <div>
-              <span>PHONE PAIRING</span>
-              <strong>{echoLinkStatus.running ? t('connectPage.commandCenter.qrReady') : t('connectPage.commandCenter.qrWaiting')}</strong>
-              <small>{echoLinkPairingUri ?? t('connectPage.echoLink.pairDisabled')}</small>
-            </div>
+      {workspaceMode === 'output' && radioStations.length > 0 ? (
+        <section className="connect-radio-resume" aria-label="继续收听电台">
+          <span className="connect-radio-resume__icon"><Radio size={18} /></span>
+          <div>
+            <strong>继续收听：{activeRadioStation?.name ?? radioStations[0].name}</strong>
+            <small>电台与直播</small>
           </div>
-
-          <div className="connect-command-center__status-grid">
-            <article data-state={echoLinkStatus.running ? 'online' : echoLinkStatus.error ? 'warning' : 'idle'}>
-              <Server size={18} />
-              <span>ECHO Link</span>
-              <strong>{echoLinkStatusLabel}</strong>
-              <small>{echoLinkAddressLabel}</small>
-            </article>
-            <article data-state={echoLinkWebControlUrl ? 'online' : 'idle'}>
-              <Smartphone size={18} />
-              <span>Web Remote</span>
-              <strong>{echoLinkWebStatusLabel}</strong>
-              <small>{echoLinkWebControlUrl ?? 'http://LAN-IP:26789/echo-link/web'}</small>
-            </article>
-            <article data-state={receiverStatus.enabled ? 'online' : 'idle'}>
-              <Radio size={18} />
-              <span>DLNA Receiver</span>
-              <strong>{receiverCommandLabel}</strong>
-              <small>{receiverStatus.currentClient?.address ?? t('connectPage.room.dlna.addressCount', { count: receiverStatus.addresses.length })}</small>
-            </article>
-            <article data-state={airPlayReceiverStatus.error ? 'warning' : airPlayReceiverStatus.enabled ? 'online' : 'idle'}>
-              <Cast size={18} />
-              <span>AirPlay</span>
-              <strong>{airPlayCommandLabel}</strong>
-              <small>{airPlayReceiverProtocol === 'airplay2' ? t('connectPage.airplay.protocol.airplay2') : t('connectPage.airplay.protocol.airplay1')}</small>
-            </article>
-            <article data-state={hqPlayerState === 'available' ? 'online' : hqPlayerState === 'unavailable' || hqPlayerState === 'not-configured' ? 'warning' : 'idle'}>
-              <Cable size={18} />
-              <span>HQPlayer</span>
-              <strong>{t(hqPlayerStateLabel[hqPlayerState])}</strong>
-              <small>{hqPlayerEndpointLabel}</small>
-            </article>
-            <article data-state={visibleDevices.length > 0 ? 'online' : 'idle'}>
-              <SlidersHorizontal size={18} />
-              <span>Outputs</span>
-              <strong>{t('connectPage.commandCenter.entryCount', { count: visibleDevices.length })}</strong>
-              <small>{lanStreamerCount} DLNA / {airPlayOutputCount} AirPlay / {hqPlayerOutputCount} HQPlayer</small>
-            </article>
-          </div>
-        </div>
-
-        <div className="connect-command-center__route" aria-label={t('connectPage.commandCenter.routeAria')}>
-          <span>ECHO</span>
-          <strong>{previewTitle}</strong>
-          <span>{status.deviceId ? `Output / ${activeTargetLabel}` : t('connectPage.nowPlaying.noOutput')}</span>
-          <strong>{status.state === 'idle' ? t('connectPage.state.idle') : t(stateLabel[status.state])}</strong>
-        </div>
-
-        <div
-          className="connect-listening-room"
-          role="region"
-          aria-label={t('connectPage.room.aria')}
-          data-collapsed={isListeningRoomCollapsed ? 'true' : undefined}
-        >
-          <div className="connect-listening-room__header">
-            <div>
-              <span>LISTENING ROOM</span>
-              <strong>{t('connectPage.room.title')}</strong>
-            </div>
-            <div className="connect-listening-room__header-actions">
-              <small>{commandCenterRouteLabel}</small>
-              <button
-                className="connect-listening-room__toggle"
-                type="button"
-                aria-expanded={!isListeningRoomCollapsed}
-                aria-label={isListeningRoomCollapsed ? t('connectPage.room.expand') : t('connectPage.room.collapse')}
-                title={isListeningRoomCollapsed ? t('connectPage.room.expand') : t('connectPage.room.collapse')}
-                onClick={toggleListeningRoomCollapsed}
-              >
-                <ChevronDown size={16} />
-              </button>
-            </div>
-          </div>
-          {!isListeningRoomCollapsed ? (
-            <div className="connect-listening-room__canvas" data-state={commandCenterHealth}>
-              <div className="connect-listening-room__mesh" aria-hidden="true" />
-              <article className="connect-listening-room__hub" data-state={commandCenterHealth}>
-                <span className="connect-listening-room__icon">
-                  <Server size={24} />
-                </span>
-                <span>ECHO Hub</span>
-                <strong>{previewTitle}</strong>
-                <small>{commandCenterHealthLabel} / {commandCenterErrorLabel}</small>
-              </article>
-              {listeningRoomNodes.map((node) => (
-                <article
-                  className="connect-listening-room__node"
-                  data-node={node.id}
-                  data-state={node.state}
-                  key={node.id}
-                  aria-label={t('connectPage.room.nodeAria', { title: node.title })}
-                >
-                  <span className="connect-listening-room__icon">{node.icon}</span>
-                  <span>{node.eyebrow}</span>
-                  <strong>{node.title}</strong>
-                  <small>{node.detail}</small>
-                  <em>{node.metric}</em>
-                </article>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="connect-command-center__issues" data-empty={commandCenterIssues.length === 0 ? 'true' : undefined}>
-          <AlertTriangle size={16} />
-          <strong>{commandCenterErrorLabel}</strong>
-          {commandCenterIssues.length > 1 ? <small>{t('connectPage.commandCenter.moreIssues', { count: commandCenterIssues.length - 1 })}</small> : null}
-        </div>
-          </div>
-        </div>
-      </section>
+          <button
+            className="settings-action-button"
+            type="button"
+            disabled={isRadioBusy}
+            onClick={() => void playRadioStation(activeRadioStation ?? radioStations[0])}
+          >
+            {isRadioBusy ? <Loader2 className="spinning-icon" size={15} /> : <Play size={15} />}
+            播放
+          </button>
+        </section>
+      ) : null}
 
       <section className="connect-stage" aria-label={t('connectPage.stage.aria')}>
         <section className="connect-now connect-now--stage" aria-label={t('connectPage.nowPlaying.aria')}>
@@ -2923,6 +2622,13 @@ export const ConnectPage = (): JSX.Element => {
             )}
           </div>
         </details>
+
+        {workspaceMode === 'mobile' ? (
+          <div className="connect-mobile-integrations" aria-label="移动设备与智能家居联动">
+            <EchoLinkBasicPanel bridgeOverride={isConnectBrowserPreview ? connectBrowserPreviewEchoLinkBridge : undefined} />
+            <MqttIntegrationPanel bridgeOverride={isConnectBrowserPreview ? connectBrowserPreviewMqttBridge : undefined} />
+          </div>
+        ) : null}
 
         <section
           className="connect-echo-link-panel"

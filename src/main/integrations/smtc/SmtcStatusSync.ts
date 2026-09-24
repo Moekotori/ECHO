@@ -76,6 +76,9 @@ let lyricsProgressSyncTimer: ReturnType<typeof setTimeout> | null = null;
 let lastLyricsProgressSyncStartedAt = 0;
 let hasPendingLyricsProgress = false;
 let pendingLyricsProgress: SmtcLyricsProgress | null = null;
+let requestedEnabledActions: SmtcEnabledActions | null = null;
+let smtcStatusSyncTail: Promise<void> = Promise.resolve();
+let smtcLifecycleTail: Promise<void> = Promise.resolve();
 
 const recordSmtcDiagnosticError = (source: SmtcDiagnosticEvent['source'], message: string): void => {
   const event: SmtcDiagnosticEvent = {
@@ -259,10 +262,45 @@ export const createSmtcMetadataFromStatus = (status: AudioStatus): SmtcTrackMeta
   };
 };
 
-const metadataKeyForStatus = (status: AudioStatus): string => `${status.currentTrackId ?? ''}|${status.currentFilePath ?? ''}`;
+const metadataKeyForStatus = (status: AudioStatus): string =>
+  [
+    status.currentTrackId ?? '',
+    status.currentFilePath ?? '',
+    status.currentTrackTitle ?? '',
+    status.currentTrackArtist ?? '',
+    status.currentTrackAlbum ?? '',
+    status.currentTrackAlbumArtist ?? '',
+    status.currentTrackCoverUrl ?? '',
+    safeNumber(status.durationSeconds),
+    lyricsProgressKey(state.lyricsProgress) ?? '',
+  ].join('|');
 
-const smtcPlaybackStateForStatus = (status: AudioStatus): SmtcPlaybackState =>
-  status.state === 'loading' && (status.currentTrackId || status.currentFilePath) ? 'playing' : status.state;
+const smtcPlaybackStateForStatus = (status: AudioStatus): SmtcPlaybackState => status.state;
+
+const hasActiveSmtcMedia = (status: AudioStatus): boolean =>
+  Boolean(status.currentTrackId || status.currentFilePath || status.currentTrackTitle);
+
+const enabledActionsForStatus = (status: AudioStatus): SmtcEnabledActions => {
+  const hasMedia = hasActiveSmtcMedia(status);
+  const isPlaying = status.state === 'playing' || status.state === 'loading';
+  return {
+    play: hasMedia && !isPlaying && (requestedEnabledActions?.play ?? true),
+    pause: hasMedia && isPlaying && (requestedEnabledActions?.pause ?? true),
+    previous: hasMedia && (requestedEnabledActions?.previous ?? false),
+    next: hasMedia && (requestedEnabledActions?.next ?? false),
+    seek: hasMedia && safeNumber(status.durationSeconds) > 0 && (requestedEnabledActions?.seek ?? true),
+  };
+};
+
+const sameEnabledActions = (left: SmtcEnabledActions | null, right: SmtcEnabledActions): boolean =>
+  Boolean(
+    left &&
+      left.play === right.play &&
+      left.pause === right.pause &&
+      left.previous === right.previous &&
+      left.next === right.next &&
+      (left.seek ?? false) === (right.seek ?? false),
+  );
 
 const isRecoverableHostState = (hostState: SmtcDiagnostics['hostState']): boolean =>
   hostState === 'unavailable' || hostState === 'error' || hostState === 'stopped';
@@ -283,7 +321,7 @@ export const bindSmtcCommandBridge = (
     getCrashReportService().getLogger()?.info('main', '[SMTC] command forwarded to renderer', { command });
   });
 
-export const syncSmtcStatus = async (status: AudioStatus = getAudioSession().getStatus()): Promise<void> => {
+const syncSmtcStatusNow = async (status: AudioStatus): Promise<void> => {
   const service = getSmtcService();
   const metadataKey = metadataKeyForStatus(status);
 
@@ -314,6 +352,17 @@ export const syncSmtcStatus = async (status: AudioStatus = getAudioSession().get
     }
   }
 
+  const enabledActions = enabledActionsForStatus(status);
+  if (!sameEnabledActions(state.enabledActions, enabledActions)) {
+    state.enabledActions = enabledActions;
+    try {
+      await service.setEnabledActions(enabledActions);
+    } catch (error) {
+      logWarn('[SMTC] Failed to sync enabled actions', { error: error instanceof Error ? error.message : String(error) });
+      recordSmtcDiagnosticError('sync', `Failed to sync enabled actions: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   const now = Date.now();
   if (now - state.lastTimelineSyncAt >= 1000 || status.state !== 'playing') {
     state.lastTimelineSyncAt = now;
@@ -334,6 +383,22 @@ export const syncSmtcStatus = async (status: AudioStatus = getAudioSession().get
   }
 };
 
+export const syncSmtcStatus = (status: AudioStatus = getAudioSession().getStatus()): Promise<void> => {
+  const run = smtcStatusSyncTail
+    .catch(() => undefined)
+    .then(() => syncSmtcStatusNow(status));
+  smtcStatusSyncTail = run.catch(() => undefined);
+  return run;
+};
+
+export const syncSmtcEnabledActions = async (actions: SmtcEnabledActions): Promise<void> => {
+  requestedEnabledActions = { ...actions };
+  if (!state.initialized) {
+    return;
+  }
+  await syncSmtcStatus(getAudioSession().getStatus());
+};
+
 export const initializeSmtcIntegration = async (): Promise<void> => {
   if (state.initialized) {
     return;
@@ -341,17 +406,23 @@ export const initializeSmtcIntegration = async (): Promise<void> => {
 
   const service = getSmtcService();
   await service.initialize();
-  state.enabledActions = { play: true, pause: true, previous: true, next: true, seek: true };
-  await service.setEnabledActions(state.enabledActions);
   state.unsubscribeCommand = bindSmtcCommandBridge(service);
   state.statusListener = (status: AudioStatus) => {
-    void syncSmtcStatus(status);
+    void syncSmtcStatus(status).catch((error) => {
+      logWarn('[SMTC] Failed to process audio status', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   };
   getAudioSession().on('status', state.statusListener);
   state.initialized = true;
   const initialStatus = getAudioSession().getStatus();
-  if (initialStatus.state === 'playing' || initialStatus.state === 'loading') {
+  if (hasActiveSmtcMedia(initialStatus) || initialStatus.state === 'playing' || initialStatus.state === 'loading') {
     await syncSmtcStatus(initialStatus);
+  } else {
+    const enabledActions = enabledActionsForStatus(initialStatus);
+    state.enabledActions = enabledActions;
+    await service.setEnabledActions(enabledActions);
   }
 };
 
@@ -368,6 +439,7 @@ export const disposeSmtcIntegration = async (): Promise<void> => {
   lyricsProgressSyncInFlight = false;
   hasPendingLyricsProgress = false;
   pendingLyricsProgress = null;
+  requestedEnabledActions = null;
   if (state.statusListener) {
     getAudioSession().off('status', state.statusListener);
   }
@@ -395,6 +467,23 @@ export const disposeSmtcIntegration = async (): Promise<void> => {
   state.lastError = null;
   state.recentErrors = [];
 };
+
+const runSmtcLifecycleOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+  const run = smtcLifecycleTail
+    .catch(() => undefined)
+    .then(operation);
+  smtcLifecycleTail = run.then(() => undefined, () => undefined);
+  return run;
+};
+
+export const syncSmtcIntegrationFromSettings = (): Promise<void> =>
+  runSmtcLifecycleOperation(async () => {
+    await disposeSmtcIntegration();
+    await disposeAndResetSmtcService();
+    if (isSmtcSettingEnabled()) {
+      await initializeSmtcIntegration();
+    }
+  });
 
 export const syncSmtcLyricsProgress = async (progress: SmtcLyricsProgress | null): Promise<void> => {
   const normalized = normalizeSmtcLyricsProgress(progress);
@@ -497,11 +586,23 @@ export const recoverSmtcIntegration = async (reason = 'runtime-recovery'): Promi
   state.lastRecoveryAt = new Date().toISOString();
   try {
     logInfo('[SMTC] attempting lightweight integration recovery', { reason });
-    await disposeSmtcIntegration();
-    await disposeAndResetSmtcService();
-    await initializeSmtcIntegration();
-    logInfo('[SMTC] lightweight integration recovery completed', { reason });
-    return true;
+    return await runSmtcLifecycleOperation(async () => {
+      if (!state.initialized || !isSmtcSettingEnabled()) {
+        logInfo('[SMTC] recovery cancelled because the integration is disabled or no longer initialized', { reason });
+        return false;
+      }
+
+      await disposeSmtcIntegration();
+      await disposeAndResetSmtcService();
+      if (!isSmtcSettingEnabled()) {
+        logInfo('[SMTC] recovery cancelled because the integration was disabled during restart', { reason });
+        return false;
+      }
+
+      await initializeSmtcIntegration();
+      logInfo('[SMTC] lightweight integration recovery completed', { reason });
+      return true;
+    });
   } catch (error) {
     logWarn('[SMTC] lightweight integration recovery failed', {
       reason,
@@ -514,16 +615,17 @@ export const recoverSmtcIntegration = async (reason = 'runtime-recovery'): Promi
   }
 };
 
-export const restartSmtcIntegration = async (reason = 'manual-restart'): Promise<SmtcDiagnostics> => {
-  state.lastRecoveryAt = new Date().toISOString();
-  logInfo('[SMTC] manual integration restart requested', { reason });
-  await disposeSmtcIntegration();
-  await disposeAndResetSmtcService();
-  if (isSmtcSettingEnabled()) {
-    await initializeSmtcIntegration();
-  }
-  return getSmtcDiagnostics();
-};
+export const restartSmtcIntegration = (reason = 'manual-restart'): Promise<SmtcDiagnostics> =>
+  runSmtcLifecycleOperation(async () => {
+    state.lastRecoveryAt = new Date().toISOString();
+    logInfo('[SMTC] manual integration restart requested', { reason });
+    await disposeSmtcIntegration();
+    await disposeAndResetSmtcService();
+    if (isSmtcSettingEnabled()) {
+      await initializeSmtcIntegration();
+    }
+    return getSmtcDiagnostics();
+  });
 
 export const resetSmtcRecoveryStateForTests = (): void => {
   smtcRecoveryAttempts.length = 0;

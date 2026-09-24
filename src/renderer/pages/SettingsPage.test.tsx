@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { SettingsPage, resetEchoProDisplayStatusSnapshotForTests } from './SettingsPage';
+import { SettingsPage, deviceMatchesAudioStatus, resetEchoProDisplayStatusSnapshotForTests } from './SettingsPage';
 import type { AppSettings, AppThemeToneOverride } from '../../shared/types/appSettings';
+import type { AudioDeviceInfo, AudioOutputSettings, AudioStatus } from '../../shared/types/audio';
 import type { PluginSummary } from '../../shared/types/plugins';
 import { defaultSidebarHiddenRouteIds, defaultSidebarRouteOrder } from '../../shared/types/sidebar';
 import type { DownloadSettings } from '../../shared/types/downloads';
@@ -105,6 +108,7 @@ const settings: AppSettings = {
   lastFmAuthToken: null,
   smtcEnabled: true,
   smtcLyricsEnabled: false,
+  taskbarMiniPlayerEnabled: false,
   taskbarPlaybackControlsEnabled: false,
 };
 
@@ -218,6 +222,7 @@ const kickoffArtistImageBackfillMock = vi.fn();
 const getArtistImageJobStatusMock = vi.fn();
 const clearArtistOnlineInfoCacheMock = vi.fn();
 const getLibraryDiagnosticsMock = vi.fn();
+const getLibraryLabStateMock = vi.fn();
 const previewDuplicateTrackCleanupMock = vi.fn();
 const applyDuplicateTrackCleanupMock = vi.fn();
 const getFoldersMock = vi.fn();
@@ -236,7 +241,12 @@ const openDevConsoleMock = vi.fn();
 const relaunchAppMock = vi.fn();
 const getDonatorUnlockStatusMock = vi.fn();
 const releaseEchoProDevicesMock = vi.fn();
+const activateEchoProPluginMock = vi.fn();
+const releaseEchoProCurrentDeviceMock = vi.fn();
+const logoutEchoProAccountMock = vi.fn();
 const getEchoProAccountStatusMock = vi.fn();
+const getAccountStatusesMock = vi.fn();
+const taskbarMiniPlayerSetEnabledMock = vi.fn();
 
 const downloadSettings: DownloadSettings = {
   audioStrategy: 'best_available',
@@ -338,7 +348,7 @@ vi.mock('../i18n/I18nProvider', () => ({
   }),
   useI18n: () => ({
     locale: 'zh-CN',
-    localeOptions: [{ label: '简体中文', value: 'zh-CN' }],
+    localeOptions: [{ label: '简体中文', locale: 'zh-CN' }],
     setLocale: vi.fn(),
     t: translateKey,
   }),
@@ -361,6 +371,9 @@ vi.mock('../utils/echoBridge', () => ({
     setCoverCacheDirectory: vi.fn(),
     setSettings: setSettingsMock,
     getEchoProAccountStatus: getEchoProAccountStatusMock,
+    logoutEchoProAccount: logoutEchoProAccountMock,
+    activateEchoProPlugin: activateEchoProPluginMock,
+    releaseEchoProCurrentDevice: releaseEchoProCurrentDeviceMock,
     releaseEchoProDevices: releaseEchoProDevicesMock,
   }),
   getAudioBridge: () => ({
@@ -377,7 +390,7 @@ vi.mock('../utils/echoBridge', () => ({
     setChannelBalanceState: setChannelBalanceStateMock,
   }),
   getAccountsBridge: () => ({
-    getStatuses: vi.fn().mockResolvedValue([]),
+    getStatuses: getAccountStatusesMock,
     getStatus: vi.fn((provider) => Promise.resolve({ provider, connected: false })),
     saveCookie: vi.fn(),
     startLogin: vi.fn(),
@@ -409,6 +422,8 @@ vi.mock('../utils/echoBridge', () => ({
   getConnectBridge: () => ({
     getDonatorUnlockStatus: getDonatorUnlockStatusMock,
   }),
+  getEchoLinkBridge: () => null,
+  getMqttIntegrationBridge: () => null,
   getDiscordPresenceBridge: () => ({
     getStatus: vi.fn().mockResolvedValue({ available: true, connected: false, enabled: false, lastError: null }),
     setEnabled: vi.fn().mockResolvedValue({ available: true, connected: false, enabled: true, lastError: null }),
@@ -464,6 +479,9 @@ vi.mock('../utils/echoBridge', () => ({
     getReplayGainAnalysisStatus: getReplayGainAnalysisStatusMock,
     getDiagnostics: getLibraryDiagnosticsMock,
   }),
+  getLibraryLabBridge: () => ({
+    getState: getLibraryLabStateMock,
+  }),
 }));
 
 vi.mock('../components/audio/EqPanel', () => ({
@@ -518,11 +536,18 @@ const setNavigatorPlatform = (platform: string, userAgent: string): void => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  Element.prototype.scrollIntoView = vi.fn();
   resetEchoProDisplayStatusSnapshotForTests();
   resetLibraryScanSessionForTests();
   setNavigatorPlatform('Win32', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
   getDownloadSettingsMock.mockResolvedValue(downloadSettings);
   getLibraryDiagnosticsMock.mockResolvedValue(libraryDiagnostics);
+  getLibraryLabStateMock.mockResolvedValue({
+    watcherEnabled: false,
+    watcherRunning: false,
+    watchedFolderCount: 0,
+    watcherLastError: null,
+  });
   chooseDownloadOutputDirectoryMock.mockResolvedValue({ ...downloadSettings, outputDirectory: 'E:\\Music Downloads' });
   hqPlayerGetSettingsMock.mockResolvedValue(hqPlayerSettings);
   hqPlayerSetSettingsMock.mockImplementation(async (patch: Partial<HqPlayerSettings>) => ({ ...hqPlayerSettings, ...patch }));
@@ -546,7 +571,38 @@ beforeEach(() => {
   });
   listPluginsMock.mockResolvedValue({ directory: 'D:\\Echo\\plugins', plugins: [] });
   getDonatorUnlockStatusMock.mockResolvedValue({ unlocked: false });
+  activateEchoProPluginMock.mockResolvedValue({
+    ok: true,
+    mode: 'afdian',
+    pluginId: echoProUnlockPluginId,
+    enabled: true,
+    licenseId: 'lic_newmachine0001',
+    activationId: 'act_newmachine0001',
+    qq: '3584569199',
+    activatedAt: '2026-07-18T00:00:00.000Z',
+    importedFileCount: 5,
+    checksum: 'checksum',
+  });
+  releaseEchoProCurrentDeviceMock.mockResolvedValue({
+    ok: true,
+    pluginId: echoProUnlockPluginId,
+    releasedAt: '2026-07-18T00:00:00.000Z',
+    alreadyReleased: false,
+    removedLocalPlugin: false,
+    releasedCount: 2,
+    activeCount: 0,
+  });
   getEchoProAccountStatusMock.mockResolvedValue({ pro: false, loggedIn: false });
+  logoutEchoProAccountMock.mockResolvedValue({ pro: false, loggedIn: false });
+  getAccountStatusesMock.mockResolvedValue([]);
+  taskbarMiniPlayerSetEnabledMock.mockImplementation(async (enabled: boolean) => ({
+    visible: enabled,
+    supported: true,
+    unsupportedReason: null,
+    bounds: null,
+    edge: 'bottom',
+    settings: { taskbarMiniPlayerEnabled: enabled },
+  }));
   getUpdateStatusMock.mockResolvedValue(null);
   getDatabaseProtectionStatusMock.mockResolvedValue(healthyDatabaseProtectionStatus);
   createDatabaseSnapshotMock.mockResolvedValue(healthyDatabaseProtectionStatus);
@@ -744,6 +800,9 @@ beforeEach(() => {
     diagnostics: {
       relaunchApp: relaunchAppMock,
     },
+    taskbarMiniPlayer: {
+      setEnabled: taskbarMiniPlayerSetEnabledMock,
+    },
   } as unknown as Window['echo'];
 });
 
@@ -903,6 +962,123 @@ afterEach(() => {
 });
 
 describe('SettingsPage', () => {
+  it('shows the real live-library watcher status and labels its toggle', async () => {
+    getSettingsMock.mockResolvedValue({ ...settings, liveLibraryUpdatesEnabled: true });
+    setSettingsMock.mockResolvedValue({ ...settings, liveLibraryUpdatesEnabled: true });
+    getLibraryLabStateMock.mockResolvedValue({
+      watcherEnabled: true,
+      watcherRunning: true,
+      watchedFolderCount: 2,
+      watcherLastError: null,
+    });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    clickSettingsNav('settings\\.nav\\.library\\.label');
+    const row = screen.getByRole('heading', { name: 'mediaLibrary.settings.liveUpdates.title' }).closest('.setting-row') as HTMLElement;
+
+    expect(await within(row).findByText('运行中 · 2 个文件夹')).toBeTruthy();
+    expect(within(row).getByRole('button', { name: 'mediaLibrary.settings.liveUpdates.title' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('changes scan speed to Ultra from Experimental', async () => {
+    getSettingsMock.mockResolvedValue(settings);
+    setSettingsMock.mockResolvedValue({ ...settings, scanPerformanceMode: 'ultra' });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    clickSettingsNav('settings\\.nav\\.experimental\\.label');
+    const row = document.getElementById('settings-row-scan-performance') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: 'mediaLibrary.settings.scanPerformance.ultra' }));
+
+    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ scanPerformanceMode: 'ultra' }));
+  });
+
+  it('keeps DSD passthrough enabled by default and controls it from Experimental', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const initialSettings = { ...settings, audioDsdOutputMode: 'dop' as const };
+    getSettingsMock.mockResolvedValue(initialSettings);
+    setSettingsMock.mockResolvedValue({ ...initialSettings, audioDsdOutputMode: 'pcm' });
+    audioGetStatusMock.mockResolvedValue(playbackStatus);
+    audioSetOutputMock.mockResolvedValue({ ...playbackStatus, dsdOutputModeRequested: 'pcm' });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    clickSettingsNav('settings\\.nav\\.experimental\\.label');
+    const row = document.getElementById('settings-row-dsd-passthrough') as HTMLElement;
+    const toggle = within(row).getByRole('button');
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ audioDsdOutputMode: 'pcm' }));
+    await waitFor(() => expect(audioSetOutputMock).toHaveBeenCalledWith({ dsdOutputMode: 'pcm' }));
+  });
+
+  it('does not offer DSD passthrough activation without a current Pro entitlement', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue({ ...settings, audioDsdOutputMode: 'pcm' });
+    getEchoProAccountStatusMock.mockResolvedValue({ pro: false, loggedIn: false });
+    listPluginsMock.mockResolvedValue({ directory: 'D:\\Echo\\plugins', plugins: [] });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    clickSettingsNav('settings\\.nav\\.experimental\\.label');
+    const row = document.getElementById('settings-row-dsd-passthrough') as HTMLElement;
+    const toggle = within(row).getByRole('button');
+
+    await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(true));
+    fireEvent.click(toggle);
+    expect(audioSetOutputMock).not.toHaveBeenCalledWith({ dsdOutputMode: 'dop' });
+  });
+
+  it('keeps local direct playback in Experimental and off by default', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const initialSettings = { ...settings, audioNativeDirectLocalPlaybackEnabled: false };
+    getSettingsMock.mockResolvedValue(initialSettings);
+    setSettingsMock.mockResolvedValue({ ...initialSettings, audioNativeDirectLocalPlaybackEnabled: true });
+    audioGetStatusMock.mockResolvedValue(playbackStatus);
+    audioSetOutputMock.mockResolvedValue({ ...playbackStatus, nativeDirectLocalPlaybackRequested: true });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    clickSettingsNav('settings\\.nav\\.experimental\\.label');
+    const row = document.getElementById('settings-row-native-direct-local-playback') as HTMLElement;
+    expect(within(row).getByText('本地直读播放')).toBeTruthy();
+    const toggle = within(row).getByRole('button');
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ audioNativeDirectLocalPlaybackEnabled: true }));
+    await waitFor(() => expect(audioSetOutputMock).toHaveBeenCalledWith({ nativeDirectLocalPlaybackEnabled: true }));
+  });
+
+  it('groups native experiments after the performance controls in the Lab', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    clickSettingsNav('settings\\.nav\\.experimental\\.label');
+
+    const performanceRow = document.getElementById('settings-row-native-direct-local-playback') as HTMLElement;
+    const dsdPassthroughRow = document.getElementById('settings-row-dsd-passthrough') as HTMLElement;
+    const nativeScannerRow = document.getElementById('settings-row-native-file-scanner') as HTMLElement;
+    const featureHeading = dsdPassthroughRow.previousElementSibling as HTMLElement;
+
+    expect(featureHeading.classList.contains('settings-subsection-title')).toBe(true);
+    expect(performanceRow.compareDocumentPosition(featureHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(featureHeading.compareDocumentPosition(dsdPassthroughRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dsdPassthroughRow.compareDocumentPosition(nativeScannerRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('jumps from global settings search to a matching section', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
@@ -937,6 +1113,30 @@ describe('SettingsPage', () => {
     expect(screen.getByText('settings.appearance.theme.title')).toBeTruthy();
   });
 
+  it('supports keyboard selection and clearing in global settings search', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    const searchInput = screen.getByPlaceholderText('settings.header.searchPlaceholder') as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: 'settings' } });
+
+    const options = screen.getAllByRole('option');
+    expect(options.length).toBeGreaterThan(1);
+    expect(options[0].getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.keyDown(searchInput, { key: 'ArrowDown' });
+    expect(options[1].getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.keyDown(searchInput, { key: 'Escape' });
+    expect(searchInput.value).toBe('');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
   it('opens concrete settings rows from natural search aliases', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
@@ -964,6 +1164,136 @@ describe('SettingsPage', () => {
     expect(document.getElementById('settings-row-output-device')?.dataset.searchHighlight).toBe('true');
   });
 
+  it('confirms an HWID reset and automatically activates Pro on the current device', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+    listPluginsMock.mockResolvedValue({
+      directory: 'D:\\Echo\\plugins',
+      plugins: [{
+        ...createEchoProUnlockPluginSummary(),
+        enabled: false,
+        status: 'error',
+        disabledByHost: true,
+        error: 'echo_pro_license_machine-mismatch',
+      }],
+    });
+    window.localStorage.setItem('echo:settings:general:echo-pro-activation-panel-expanded', 'true');
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    activateEchoProPluginMock
+      .mockRejectedValueOnce(new Error('echo_pro_activation_machine_binding_confirmation_required'))
+      .mockResolvedValueOnce({
+        ok: true,
+        mode: 'afdian',
+        pluginId: echoProUnlockPluginId,
+        enabled: true,
+        licenseId: 'lic_newmachine0001',
+        activationId: 'act_newmachine0001',
+        qq: '3584569199',
+        activatedAt: '2026-07-18T00:00:00.000Z',
+        importedFileCount: 5,
+        checksum: 'checksum',
+      });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    await waitFor(() => expect(listPluginsMock).toHaveBeenCalled());
+
+    const row = document.getElementById('settings-row-echo-pro-activation') as HTMLElement;
+    const [qqInput, credentialInput] = Array.from(row.querySelectorAll('input'));
+    fireEvent.change(qqInput, { target: { value: '3584569199' } });
+    fireEvent.change(credentialInput, { target: { value: '202607140857551985310505' } });
+    fireEvent.click(within(row).getByRole('button', { name: '激活此设备' }));
+
+    await waitFor(() => expect(activateEchoProPluginMock).toHaveBeenNthCalledWith(1, {
+      mode: 'afdian',
+      qq: '3584569199',
+      orderId: '202607140857551985310505',
+    }));
+    expect(activateEchoProPluginMock).toHaveBeenNthCalledWith(2, {
+      mode: 'afdian',
+      qq: '3584569199',
+      orderId: '202607140857551985310505',
+      replaceMachineBinding: true,
+    });
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining('确认换绑到这台电脑吗'));
+    expect(await within(row).findByText(/换绑完成/)).toBeTruthy();
+  });
+
+  it('does not reset or rebind an HWID when the user declines confirmation', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+    window.localStorage.setItem('echo:settings:general:echo-pro-activation-panel-expanded', 'true');
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    activateEchoProPluginMock.mockRejectedValueOnce(
+      new Error('echo_pro_activation_machine_binding_confirmation_required'),
+    );
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    const row = document.getElementById('settings-row-echo-pro-activation') as HTMLElement;
+    const [qqInput, credentialInput] = Array.from(row.querySelectorAll('input'));
+    fireEvent.change(qqInput, { target: { value: '3584569199' } });
+    fireEvent.change(credentialInput, { target: { value: '202607140857551985310505' } });
+    fireEvent.click(within(row).getByRole('button', { name: '激活此设备' }));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalled());
+    expect(activateEchoProPluginMock).toHaveBeenCalledTimes(1);
+    expect(activateEchoProPluginMock).toHaveBeenCalledWith({
+      mode: 'afdian',
+      qq: '3584569199',
+      orderId: '202607140857551985310505',
+    });
+    expect(await within(row).findByText(/这份授权记录的是另一台设备/)).toBeTruthy();
+  });
+
+  it('releases every Afdian order HWID with the order ID only', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+    window.localStorage.setItem('echo:settings:general:echo-pro-activation-panel-expanded', 'true');
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    const row = document.getElementById('settings-row-echo-pro-activation') as HTMLElement;
+    const [qqInput, credentialInput] = Array.from(row.querySelectorAll('input'));
+    expect((qqInput as HTMLInputElement).value).toBe('');
+    fireEvent.change(credentialInput, { target: { value: '202607140857551985310505' } });
+    fireEvent.click(within(row).getByRole('button', { name: '解绑此订单的设备' }));
+
+    await waitFor(() => expect(releaseEchoProCurrentDeviceMock).toHaveBeenCalledWith(
+      '202607140857551985310505',
+    ));
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining('只会提交爱发电订单号'));
+    expect(await within(row).findByText(/已释放这个订单的 2 个设备名额/)).toBeTruthy();
+  });
+
+  it('routes account credential searches to the standalone accounts section', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    const searchInput = screen.getByPlaceholderText('settings.header.searchPlaceholder');
+    fireEvent.change(searchInput, { target: { value: 'Spotify Client ID' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Spotify OAuth 配置/u }));
+
+    expect(document.getElementById('settings-sec-accounts')?.dataset.visible).toBe('true');
+    expect(document.getElementById('settings-row-spotify-auth-config')?.dataset.searchHighlight).toBe('true');
+    expect(screen.queryByText('settings.integrations.discord.title')).toBeNull();
+  });
+
   it('keeps ECHO Pro status chips stable across settings remounts and section switches', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
@@ -974,8 +1304,8 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    await screen.findByText('插件已启用');
-    await screen.findByText('已使用插件解锁');
+    await screen.findByText('本机 Pro 已启用');
+    await screen.findByText('settings.general.echoProAccount.status.pluginUnlocked');
     await waitFor(() => expect(listPluginsMock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(getEchoProAccountStatusMock).toHaveBeenCalledTimes(1));
 
@@ -986,16 +1316,67 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    expect(screen.getByText('插件已启用')).toBeTruthy();
-    expect(screen.getByText('已使用插件解锁')).toBeTruthy();
+    expect(screen.getByText('本机 Pro 已启用')).toBeTruthy();
+    expect(screen.getByText('settings.general.echoProAccount.status.pluginUnlocked')).toBeTruthy();
 
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
     await screen.findByText('settings.appearance.theme.title');
     clickSettingsNav('settings\\.nav\\.general\\.label');
-    await screen.findByText('插件已启用');
+    await screen.findByText('本机 Pro 已启用');
 
     expect(listPluginsMock).toHaveBeenCalledTimes(2);
     expect(getEchoProAccountStatusMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not show settings cloud sync in the expanded Pro account panel', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    fireEvent.click(screen.getByRole('button', { name: 'settings.general.echoProAccount.expandAria' }));
+    expect(screen.getByRole('button', { name: 'settings.general.echoProAccount.collapseAria' })).toBeTruthy();
+    expect(screen.queryByText('settings.general.echoProAccount.cloudSyncNote')).toBeNull();
+    expect(screen.queryByText('settings.general.echoProAccount.action.saveCloud')).toBeNull();
+    expect(screen.queryByText('settings.general.echoProAccount.action.syncCloud')).toBeNull();
+  });
+
+  it('signs out of local Pro from the activation header and releases only this computer', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+    listPluginsMock.mockResolvedValue({ directory: 'D:\\Echo\\plugins', plugins: [createEchoProUnlockPluginSummary()] });
+    getEchoProAccountStatusMock.mockResolvedValue({ pro: true, loggedIn: true });
+    releaseEchoProCurrentDeviceMock.mockImplementationOnce(async () => {
+      listPluginsMock.mockResolvedValue({ directory: 'D:\\Echo\\plugins', plugins: [] });
+      getEchoProAccountStatusMock.mockResolvedValue({ pro: false, loggedIn: false });
+      return {
+        ok: true,
+        pluginId: echoProUnlockPluginId,
+        releasedAt: '2026-07-18T00:00:00.000Z',
+        alreadyReleased: false,
+        removedLocalPlugin: false,
+        releasedCount: 1,
+        activeCount: 0,
+      };
+    });
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<SettingsPage />);
+
+    const signOutButton = await screen.findByRole('button', { name: '登出 Pro' });
+    await waitFor(() => expect(getEchoProAccountStatusMock).toHaveBeenCalled());
+    fireEvent.click(signOutButton);
+
+    await waitFor(() => expect(releaseEchoProCurrentDeviceMock).toHaveBeenCalledTimes(1));
+    expect(releaseEchoProCurrentDeviceMock).toHaveBeenCalledWith();
+    expect(logoutEchoProAccountMock).toHaveBeenCalledTimes(1);
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining('释放当前电脑'));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '登出 Pro' })).toBeNull());
   });
 
   it('offers lyrics sub-settings from lyrics search aliases', async () => {
@@ -1008,15 +1389,41 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
 
-    const expectSearchResult = async (query: string, optionName: RegExp): Promise<void> => {
+    const expectSearchResult = async (query: string, optionName: RegExp): Promise<HTMLElement> => {
       const searchInput = screen.getByPlaceholderText('settings.header.searchPlaceholder') as HTMLInputElement;
       fireEvent.change(searchInput, { target: { value: query } });
-      expect(await screen.findByRole('option', { name: optionName })).toBeTruthy();
+      return screen.findByRole('option', { name: optionName });
     };
 
-    await expectSearchResult('歌词颜色', /lyricsSettings\.style\.lyricsColor/);
+    const colorResult = await expectSearchResult('歌词颜色', /lyricsSettings\.style\.lyricsColor/);
+    fireEvent.click(colorResult);
+    await waitFor(() => {
+      const colorRow = document.getElementById('settings-row-lyrics-color');
+      expect(colorRow?.hidden).toBe(false);
+      expect(colorRow?.closest('.lyrics-collapsible-section')?.getAttribute('data-collapsed')).toBe('false');
+      expect(colorRow?.dataset.searchHighlight).toBe('true');
+    });
+
     await expectSearchResult('罗马音', /lyricsSettings\.display\.showRomanization/);
     await expectSearchResult('翻译', /lyricsSettings\.display\.showTranslation/);
+  });
+
+  it('scrolls externally requested settings targets into view', async () => {
+    getSettingsMock.mockResolvedValue(settings);
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    window.dispatchEvent(new CustomEvent('app:navigate:settings-section', {
+      detail: { section: 'general', targetId: 'settings-row-echo-pro-account' },
+    }));
+
+    await waitFor(() => {
+      expect(document.getElementById('settings-row-echo-pro-account')?.dataset.searchHighlight).toBe('true');
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
+    });
   });
 
   it('dispatches home navigation when Escape is pressed in settings', async () => {
@@ -1058,24 +1465,6 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ onboardingCompleted: false }));
     expect(settingsChanged).toHaveBeenCalledWith(expect.objectContaining({ detail: nextSettings }));
-  });
-
-  it('opens the user notice from the general settings notice button', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const openUserNotice = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-    window.addEventListener('app:open-user-notice', openUserNotice, { once: true });
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    const row = screen.getByText('settings.general.userNotice.title').closest('.setting-row') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button', { name: 'settings.general.userNotice.action' }));
-
-    expect(openUserNotice).toHaveBeenCalledTimes(1);
-    expect(setSettingsMock).not.toHaveBeenCalledWith({ userNoticeAcceptedVersion: expect.any(Number) });
   });
 
   it('saves sidebar auto-hide from the general settings toggle', async () => {
@@ -1150,7 +1539,7 @@ describe('SettingsPage', () => {
     );
   });
 
-  it('enables the osu downloader entry from general settings and reveals the sidebar route', async () => {
+  it('enables the osu downloader entry from experimental settings and reveals the sidebar route', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     const currentSettings = {
       ...settings,
@@ -1170,6 +1559,7 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
+    fireEvent.click(screen.getAllByText('settings.nav.experimental.label')[0]);
     const row = screen.getByText('settings.general.osuDownloaderFeature.title').closest('.setting-row') as HTMLElement;
     fireEvent.click(within(row).getByRole('button'));
 
@@ -1234,24 +1624,6 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ settingsOptionalSectionsVisible: true }));
   });
 
-  it('saves hidden feature comments from advanced customization settings', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const nextSettings = { ...settings, featureCommentsHidden: true };
-    getSettingsMock.mockResolvedValue(settings);
-    setSettingsMock.mockResolvedValue(nextSettings);
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    fireEvent.click(screen.getAllByText('settings.nav.advancedCustom.label')[0]);
-    const row = screen.getByText('settings.general.featureCommentsHidden.title').closest('.setting-row') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button'));
-
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ featureCommentsHidden: true }));
-  });
-
   it('saves the upcoming track notice setting from advanced customization settings', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     const nextSettings = { ...settings, upcomingTrackNoticeEnabled: true };
@@ -1268,6 +1640,20 @@ describe('SettingsPage', () => {
     fireEvent.click(within(row).getByRole('button'));
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ upcomingTrackNoticeEnabled: true }));
+  });
+
+  it('does not expose the removed feature comments setting', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    const { container } = render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    fireEvent.click(screen.getAllByText('settings.nav.advancedCustom.label')[0]);
+    expect(container.querySelector('#settings-row-feature-comments-hidden')).toBeNull();
+    expect(screen.queryByText('settings.general.featureCommentsHidden.title')).toBeNull();
   });
 
   it('saves track context menu extra actions from the advanced customization settings toggle', async () => {
@@ -1512,7 +1898,7 @@ describe('SettingsPage', () => {
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.about\\.label');
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.pro\.action/ }));
-    fireEvent.click(screen.getByRole('button', { name: /settings\.about\.links\.officialWebsite/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /settings\.about\.links\.officialWebsite/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.links\.documentation/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.links\.baiduPan/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.links\.bilibili/ }));
@@ -1520,6 +1906,8 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.updates\.action\.history/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.updates\.action\.qq/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.updates\.action\.discord/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'BUG反馈' }));
+    fireEvent.click(screen.getByRole('button', { name: '联系作者' }));
 
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://afdian.com/a/echonext');
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://echonext.moe');
@@ -1530,6 +1918,8 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(openExternalUrlMock).toHaveBeenCalledWith('https://github.com/moekotori/echo/releases'));
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://qm.qq.com/q/KrJE8PIqSQ');
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://discord.gg/g7v4WMRq3K');
+    expect(openExternalUrlMock).toHaveBeenCalledWith('https://github.com/Moekotori/ECHO/issues');
+    expect(openExternalUrlMock).toHaveBeenCalledWith('mailto:nyafairy233@gmail.com');
   });
 
   it('thanks users in About when ECHO Pro is already unlocked', async () => {
@@ -1603,6 +1993,20 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ safeModeEnabled: true }));
   });
 
+  it('toggles low spec mode from General without rewriting individual performance settings', async () => {
+    getSettingsMock.mockResolvedValue({ ...settings, lowSpecModeEnabled: false, scanPerformanceMode: 'performance' });
+    setSettingsMock.mockResolvedValue({ ...settings, lowSpecModeEnabled: true, scanPerformanceMode: 'performance' });
+
+    render(<SettingsPage />);
+
+    const title = await screen.findByText(/Low-spec mode|低配置模式/);
+    const row = title.closest('.setting-row') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { pressed: false }));
+
+    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ lowSpecModeEnabled: true }));
+    expect(setSettingsMock).not.toHaveBeenCalledWith(expect.objectContaining({ scanPerformanceMode: 'low' }));
+  });
+
   it('exports user settings from the About diagnostics section', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
@@ -1662,7 +2066,7 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('option', { name: /settings\.integrations\.discord\.title/ }));
 
     expect(searchInput.value).toBe('');
-    const row = screen.getByText('settings.integrations.discord.title').closest('.setting-row') as HTMLElement;
+    const row = screen.getByText('settings.integrations.discord.title').closest('.settings-integrations-service-row') as HTMLElement;
     expect(row.id).toBe('settings-row-discord-presence');
     expect(row.getAttribute('data-search-highlight')).toBe('true');
   });
@@ -1726,7 +2130,7 @@ describe('SettingsPage', () => {
     );
   });
 
-  it('saves online artist info provider settings from integrations', async () => {
+  it('saves online artist info provider settings from accounts', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
@@ -1736,7 +2140,7 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    clickSettingsNav('settings\\.nav\\.integrations\\.label');
+    clickSettingsNav('settings\\.nav\\.accounts\\.label');
     fireEvent.click(screen.getByRole('button', { name: 'settings.integrations.credentialPanel.expand' }));
     await screen.findByText('settings.integrations.onlineArtist.title');
     fireEvent.change(screen.getByLabelText('Bandsintown app_id'), { target: { value: ' echo-next ' } });
@@ -1756,7 +2160,7 @@ describe('SettingsPage', () => {
     expect(screen.getByText('settings.integrations.onlineArtist.message.saved')).toBeTruthy();
   });
 
-  it('saves Discogs album rating token from integrations', async () => {
+  it('saves Discogs album rating token from accounts', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue({ ...settings, onlineAlbumInfoDiscogsUserToken: 'old-token' });
     setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
@@ -1766,7 +2170,7 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    clickSettingsNav('settings\\.nav\\.integrations\\.label');
+    clickSettingsNav('settings\\.nav\\.accounts\\.label');
     fireEvent.click(screen.getByRole('button', { name: 'settings.integrations.credentialPanel.expand' }));
     await screen.findByText('settings.integrations.onlineAlbum.title');
     fireEvent.change(screen.getByLabelText('settings.integrations.onlineAlbum.token'), { target: { value: ' discogs-token ' } });
@@ -1780,7 +2184,7 @@ describe('SettingsPage', () => {
     expect(screen.getByText('settings.integrations.onlineAlbum.message.saved')).toBeTruthy();
   });
 
-  it('remembers the account login panel collapse state from integrations', async () => {
+  it('keeps the music service account list visible and switches the selected platform detail', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     resetSettingsMock.mockResolvedValue(settings);
@@ -1789,19 +2193,20 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    clickSettingsNav('settings\\.nav\\.integrations\\.label');
+    clickSettingsNav('settings\\.nav\\.accounts\\.label');
 
-    expect(screen.queryByLabelText('Spotify')).toBeNull();
+    const serviceList = screen.getByRole('navigation', { name: 'settings.integrations.accountPanel.title' });
+    const serviceButtons = within(serviceList).getAllByRole('button');
+    expect(serviceButtons).toHaveLength(9);
+    expect(serviceList.querySelectorAll('img')).toHaveLength(9);
+    expect(screen.queryByRole('button', { name: 'settings.integrations.accountPanel.collapse' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'settings.integrations.accountPanel.expand' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'settings.integrations.accountPanel.expand' }));
+    const spotifyButton = within(serviceList).getByRole('button', { name: /Spotify/u });
+    fireEvent.click(spotifyButton);
 
-    expect(window.localStorage.getItem('echo:settings:integrations:account-panel-expanded')).toBe('true');
-    expect(screen.getByLabelText('Spotify')).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: 'settings.integrations.accountPanel.collapse' }));
-
-    expect(window.localStorage.getItem('echo:settings:integrations:account-panel-expanded')).toBe('false');
-    expect(screen.queryByLabelText('Spotify')).toBeNull();
+    expect(spotifyButton.getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('region', { name: 'Spotify' })).toBeTruthy();
   });
 
   it('keeps developer API settings collapsed by default and remembers expansion', async () => {
@@ -1813,7 +2218,7 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    clickSettingsNav('settings\\.nav\\.integrations\\.label');
+    clickSettingsNav('settings\\.nav\\.accounts\\.label');
 
     expect(screen.queryByText('settings.integrations.onlineAlbum.title')).toBeNull();
     expect(screen.queryByText('settings.integrations.spotifyAuth.title')).toBeNull();
@@ -1834,7 +2239,7 @@ describe('SettingsPage', () => {
     expect(screen.queryByText('settings.integrations.lastfm.title')).toBeNull();
   });
 
-  it('clears online artist info cache from integrations', async () => {
+  it('clears online artist info cache from accounts', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     resetSettingsMock.mockResolvedValue(settings);
@@ -1843,7 +2248,7 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    clickSettingsNav('settings\\.nav\\.integrations\\.label');
+    clickSettingsNav('settings\\.nav\\.accounts\\.label');
     fireEvent.click(screen.getByRole('button', { name: 'settings.integrations.credentialPanel.expand' }));
     await screen.findByText('settings.integrations.onlineArtist.title');
     fireEvent.click(screen.getByRole('button', { name: /settings\.integrations\.onlineArtist\.clearCache/ }));
@@ -1872,8 +2277,18 @@ describe('SettingsPage', () => {
     expect(navigatePlugins).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(openPluginDirectoryMock).toHaveBeenCalledTimes(1));
     expect(createPluginExampleMock).toHaveBeenCalledWith('playback-panel');
-    expect(openExternalUrlMock).toHaveBeenCalledWith('https://echonext.moe/zh/docs/');
+    expect(openExternalUrlMock).toHaveBeenCalledWith('https://github.com/moekotori/echo/blob/main/docs/ECHO_NEXT_PLUGINS.md');
     window.removeEventListener('app:navigate:plugins', navigatePlugins);
+  });
+
+  it('documents the v1 plugin manifest, permissions, API, examples, and security boundaries', () => {
+    const documentText = readFileSync(join(process.cwd(), 'docs', 'ECHO_NEXT_PLUGINS.md'), 'utf8');
+
+    expect(documentText).toContain('echo.plugin.json');
+    expect(documentText).toContain('## 权限');
+    expect(documentText).toContain('## 公开 API');
+    expect(documentText).toContain('## 完整示例');
+    expect(documentText).toContain('## 性能与播放安全');
   });
 
   it('finds lyrics settings when searching for translation', async () => {
@@ -2374,16 +2789,16 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    clickSettingsNav('settings\\.nav\\.appearance\\.label');
-    const row = screen
-      .getByText('settings.appearance.windowAcrylic.title · settings.appearance.windowAcrylic.experimental')
-      .closest('.setting-row') as HTMLElement;
-    expect(within(row).getByText('settings.appearance.windowAcrylic.themeWarning')).toBeTruthy();
+    clickSettingsNav('settings\\.nav\\.experimental\\.label');
+    const row = screen.getByRole('heading', { name: 'settings.appearance.windowAcrylic.title' }).closest('.setting-row') as HTMLElement;
+    expect(within(row).getByText('ECHO Pro')).toBeTruthy();
+    expect(within(row).queryByText('settings.appearance.windowAcrylic.themeWarning')).toBeNull();
     const acrylicToggle = within(row).getByRole('button');
     await waitFor(() => expect(getEchoProAccountStatusMock).toHaveBeenCalled());
     fireEvent.click(acrylicToggle);
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appWindowAcrylicEnabled: true }));
+    await waitFor(() => expect(within(row).getByText('settings.appearance.windowAcrylic.themeWarning')).toBeTruthy());
     expect(confirmSpy).toHaveBeenCalledWith('settings.appearance.windowAcrylic.restartConfirm');
     expect(relaunchAppMock).toHaveBeenCalledTimes(1);
 
@@ -2780,7 +3195,7 @@ describe('SettingsPage', () => {
     window.removeEventListener('settings:changed', settingsChanged);
   });
 
-  it('saves the native file scanner experiment toggle from library settings', async () => {
+  it('saves the native file scanner toggle from the Lab settings section', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue({ ...settings, nativeFileScannerEnabled: false });
     setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
@@ -2791,8 +3206,8 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    clickSettingsNav('settings\\.nav\\.library\\.label');
-    const row = screen.getByRole('heading', { name: 'mediaLibrary.settings.nativeFileScanner.title' }).closest('.setting-row') as HTMLElement;
+    clickSettingsNav('settings\\.nav\\.experimental\\.label');
+    const row = document.getElementById('settings-row-native-file-scanner') as HTMLElement;
     expect(within(row).getByText('mediaLibrary.settings.nativeStatus.unavailable')).toBeTruthy();
     expect(within(row).getByText('mediaLibrary.settings.nativeStatus.diagnosticsPending')).toBeTruthy();
     fireEvent.click(within(row).getByRole('button'));
@@ -2801,7 +3216,7 @@ describe('SettingsPage', () => {
     expect(scanFolderMock).not.toHaveBeenCalled();
   });
 
-  it('saves the native metadata reader experiment toggle from library settings', async () => {
+  it('saves the native metadata reader toggle from the Lab settings section', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue({ ...settings, nativeMetadataReaderEnabled: false });
     setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
@@ -2812,8 +3227,8 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    clickSettingsNav('settings\\.nav\\.library\\.label');
-    const row = screen.getByRole('heading', { name: 'mediaLibrary.settings.nativeMetadataReader.title' }).closest('.setting-row') as HTMLElement;
+    clickSettingsNav('settings\\.nav\\.experimental\\.label');
+    const row = document.getElementById('settings-row-native-metadata-reader') as HTMLElement;
     expect(within(row).getByText('mediaLibrary.settings.nativeStatus.unavailable')).toBeTruthy();
     expect(within(row).getByText('mediaLibrary.settings.nativeStatus.diagnosticsPending')).toBeTruthy();
     fireEvent.click(within(row).getByRole('button'));
@@ -3080,7 +3495,7 @@ describe('SettingsPage', () => {
     const titleOnlyToggle = screen.getByText('mvSettings.network.titleOnlySearch').closest('.settings-inline-toggle') as HTMLElement;
     fireEvent.click(within(titleOnlyToggle).getByRole('button'));
 
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ mvTitleOnlySearch: false }));
+    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ mvTitleOnlySearch: true }));
 
     fireEvent.click(screen.getByRole('button', { name: '4K' }));
 
@@ -3111,7 +3526,7 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('button', { name: '4K' }).className).toContain('active');
   });
 
-  it('shows volume balancing controls and starts missing loudness analysis', async () => {
+  it('offers Spotify-style volume normalization as one safe toggle', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue({
       ...settings,
@@ -3127,46 +3542,35 @@ describe('SettingsPage', () => {
     setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
     resetSettingsMock.mockResolvedValue(settings);
     clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-    startReplayGainAnalysisMock.mockResolvedValue({
-      id: 'replay-gain-job',
-      status: 'running',
-      totalTracks: 2,
-      processedTracks: 0,
-      updatedTracks: 0,
-      errorCount: 0,
-    });
-    getReplayGainAnalysisStatusMock.mockResolvedValue({
-      id: 'replay-gain-job',
-      status: 'completed',
-      totalTracks: 2,
-      processedTracks: 2,
-      updatedTracks: 2,
-      errorCount: 0,
-    });
 
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
     fireEvent.click(screen.getAllByText('settings.nav.playback.label')[0]);
-    fireEvent.click(screen.getByRole('button', { name: /settings\.playback\.advancedPanel\.action\.expand/u }));
 
     const gaplessRow = document.querySelector('#settings-row-gapless-playback') as HTMLElement;
     fireEvent.click(within(gaplessRow).getByRole('button'));
 
     const row = document.querySelector('#settings-row-volume-balance') as HTMLElement;
-    fireEvent.click(row.querySelector('.settings-replay-gain-toggle button') as HTMLButtonElement);
-    fireEvent.click(row.querySelector('.settings-replay-gain-advanced-toggle') as HTMLButtonElement);
-    fireEvent.click(row.querySelectorAll('.settings-replay-gain-toggles .settings-inline-toggle button')[1] as HTMLButtonElement);
-    fireEvent.click(row.querySelectorAll('.settings-replay-gain-mode button')[1] as HTMLButtonElement);
+    expect(within(row).getAllByRole('button')).toHaveLength(1);
+    fireEvent.click(within(row).getByRole('button'));
     fireEvent.click(document.querySelector('#settings-row-mono-audio button') as HTMLButtonElement);
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ gaplessPlaybackEnabled: true }));
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ replayGainEnabled: true, replayGainAnalyzeOnPlay: true }));
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ replayGainAnalyzeOnPlay: false }));
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ replayGainMode: 'album' }));
+    await waitFor(() =>
+      expect(setSettingsMock).toHaveBeenCalledWith({
+        replayGainEnabled: true,
+        replayGainMode: 'track',
+        replayGainTargetLufs: -14,
+        replayGainPreampDb: 0,
+        replayGainPreventClipping: true,
+        replayGainAnalyzeOnPlay: true,
+        replayGainAnalyzeMissingOnScan: false,
+        replayGainAnalyzeMissingOnScanOptIn: false,
+      }),
+    );
     await waitFor(() => expect(setChannelBalanceStateMock).toHaveBeenCalledWith({ enabled: true, monoMode: 'sum' }));
     await waitFor(() => expect(startReplayGainAnalysisMock).toHaveBeenCalledWith({ limit: 500 }));
-    expect(await within(row).findByText('2/2')).toBeTruthy();
   });
 
   it('keeps HQPlayer controls out of Playback settings because Connect owns that surface', async () => {
@@ -3560,6 +3964,26 @@ describe('SettingsPage', () => {
     expect(await screen.findByText('1 - USB DAC B')).toBeTruthy();
   });
 
+  it('matches an active ASIO device in playback settings', () => {
+    const asioDevice = {
+      id: 'asio-b',
+      index: 3,
+      name: 'FiiO ASIO Driver B',
+      outputMode: 'asio',
+      sampleRate: 192000,
+      isDefault: false,
+    } as AudioDeviceInfo;
+    const asioStatus = {
+      ...playbackStatus,
+      outputMode: 'asio',
+      outputDeviceId: null,
+      outputDeviceName: 'FiiO ASIO Driver B',
+    } as AudioStatus;
+
+    expect(deviceMatchesAudioStatus(asioDevice, asioStatus)).toBe(true);
+    expect(deviceMatchesAudioStatus({ ...asioDevice, outputMode: 'shared' }, asioStatus)).toBe(false);
+  });
+
   it('restores remembered safe mode in playback settings', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue({
@@ -3581,6 +4005,36 @@ describe('SettingsPage', () => {
 
     expect(screen.getByText('settings.playback.outputMode.system').closest('button')?.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByText('settings.playback.outputMode.shared').closest('button')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('keeps automatic output off by default and enables it explicitly from playback settings', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue({ ...settings, audioAutomaticOutputEnabled: false });
+    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
+    audioSetOutputMock.mockResolvedValue({
+      ...playbackStatus,
+      automaticOutputEnabled: true,
+      outputMode: 'shared',
+      sharedBackend: 'auto',
+      latencyProfile: 'balanced',
+    });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    fireEvent.click(screen.getAllByText('settings.nav.playback.label')[0]);
+    const automaticRow = screen.getByText('settings.playback.automaticOutput.title').closest('.setting-row');
+    expect(automaticRow).toBeTruthy();
+    const automaticToggle = within(automaticRow as HTMLElement).getByRole('button');
+    expect(automaticToggle.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(automaticToggle);
+
+    await waitFor(() =>
+      expect(setSettingsMock).toHaveBeenCalledWith({ audioAutomaticOutputEnabled: true }),
+    );
+    await waitFor(() =>
+      expect(audioSetOutputMock).toHaveBeenCalledWith({ automaticOutputEnabled: true }),
+    );
   });
 
   it('persists safe mode output from playback settings', async () => {
@@ -3605,6 +4059,9 @@ describe('SettingsPage', () => {
     await waitFor(() =>
       expect(audioSetOutputMock).toHaveBeenCalledWith(expect.objectContaining({ outputMode: 'system', sharedBackend: 'auto' })),
     );
+    const outputRequest = audioSetOutputMock.mock.calls.at(-1)?.[0] as AudioOutputSettings;
+    expect(outputRequest).not.toHaveProperty('dsdOutputMode');
+    expect(outputRequest).not.toHaveProperty('echoSrcMode');
     await waitFor(() =>
       expect(setSettingsMock).toHaveBeenCalledWith({
         rememberedAudioOutput: expect.objectContaining({
@@ -3619,6 +4076,76 @@ describe('SettingsPage', () => {
       outputMode: 'system',
       sharedBackend: 'auto',
     });
+  });
+
+  it('preserves the saved latency profile when changing playback output', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue({
+      ...settings,
+      rememberedAudioOutput: {
+        enabled: true,
+        outputMode: 'shared',
+        sharedBackend: 'auto',
+        latencyProfile: 'stable',
+      },
+    });
+    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
+    audioSetOutputMock.mockResolvedValue({
+      ...playbackStatus,
+      outputMode: 'system',
+      outputBackend: 'system',
+      sharedBackend: 'auto',
+    });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    fireEvent.click(screen.getAllByText('settings.nav.playback.label')[0]);
+    fireEvent.click(screen.getByText('settings.playback.outputMode.system'));
+
+    await waitFor(() =>
+      expect(audioSetOutputMock).toHaveBeenCalledWith(expect.objectContaining({ latencyProfile: 'stable' })),
+    );
+    await waitFor(() =>
+      expect(setSettingsMock).toHaveBeenCalledWith({
+        rememberedAudioOutput: expect.objectContaining({ latencyProfile: 'stable' }),
+      }),
+    );
+  });
+
+  it('uses balanced latency when no saved latency profile exists', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue({
+      ...settings,
+      rememberedAudioOutput: {
+        enabled: true,
+        outputMode: 'shared',
+        sharedBackend: 'auto',
+        latencyProfile: undefined,
+      },
+    });
+    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
+    audioSetOutputMock.mockResolvedValue({
+      ...playbackStatus,
+      outputMode: 'system',
+      outputBackend: 'system',
+      sharedBackend: 'auto',
+    });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    fireEvent.click(screen.getAllByText('settings.nav.playback.label')[0]);
+    fireEvent.click(screen.getByText('settings.playback.outputMode.system'));
+
+    await waitFor(() =>
+      expect(audioSetOutputMock).toHaveBeenCalledWith(expect.objectContaining({ latencyProfile: 'balanced' })),
+    );
+    await waitFor(() =>
+      expect(setSettingsMock).toHaveBeenCalledWith({
+        rememberedAudioOutput: expect.objectContaining({ latencyProfile: 'balanced' }),
+      }),
+    );
   });
 
   it('shows the recommended playback path and save feedback in playback settings', async () => {
@@ -3667,7 +4194,6 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     fireEvent.click(screen.getAllByText('settings.nav.playback.label')[0]);
-    fireEvent.click(screen.getByRole('button', { name: /settings\.playback\.advancedPanel\.action\.expand/u }));
 
     fireEvent.click(screen.getByRole('button', { name: 'audioProfessional.action.showDetails' }));
 
@@ -3678,7 +4204,7 @@ describe('SettingsPage', () => {
     expect(screen.queryByText(/^fileSampleRate$/u)).toBeNull();
   });
 
-  it('keeps advanced playback settings collapsed by default and remembers expansion', async () => {
+  it('keeps advanced playback settings expanded by default and remembers collapse state', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     resetSettingsMock.mockResolvedValue(settings);
@@ -3689,17 +4215,17 @@ describe('SettingsPage', () => {
     await screen.findByText('route.settings.label');
     fireEvent.click(screen.getAllByText('settings.nav.playback.label')[0]);
 
-    expect(screen.queryByText('settings.playback.troubleshooting.title')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: /settings\.playback\.advancedPanel\.action\.expand/u }));
-
-    expect(window.localStorage.getItem('echo:settings:playback:advanced-panel-expanded')).toBe('true');
     expect(screen.getByText('settings.playback.troubleshooting.title')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /settings\.playback\.advancedPanel\.action\.collapse/u }));
 
     expect(window.localStorage.getItem('echo:settings:playback:advanced-panel-expanded')).toBe('false');
     expect(screen.queryByText('settings.playback.troubleshooting.title')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /settings\.playback\.advancedPanel\.action\.expand/u }));
+
+    expect(window.localStorage.getItem('echo:settings:playback:advanced-panel-expanded')).toBe('true');
+    expect(screen.getByText('settings.playback.troubleshooting.title')).toBeTruthy();
   });
 
   it('copies audio diagnostics from playback settings', async () => {
@@ -3712,7 +4238,6 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     fireEvent.click(screen.getAllByText('settings.nav.playback.label')[0]);
-    fireEvent.click(screen.getByRole('button', { name: /settings\.playback\.advancedPanel\.action\.expand/u }));
     fireEvent.click(screen.getByRole('button', { name: 'audioProfessional.action.showDetails' }));
     fireEvent.click(await screen.findByRole('button', { name: /audioDrawer\.action\.copyDiagnostics/ }));
 
@@ -3730,7 +4255,6 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     fireEvent.click(screen.getAllByText('settings.nav.playback.label')[0]);
-    fireEvent.click(screen.getByRole('button', { name: /settings\.playback\.advancedPanel\.action\.expand/u }));
     const resetButton = await screen.findByRole('button', { name: 'settings.playback.troubleshooting.softAction' });
     fireEvent.click(resetButton);
 
@@ -3749,7 +4273,6 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     fireEvent.click(screen.getAllByText('settings.nav.playback.label')[0]);
-    fireEvent.click(screen.getByRole('button', { name: /settings\.playback\.advancedPanel\.action\.expand/u }));
     const restartButton = await screen.findByRole('button', { name: 'settings.playback.troubleshooting.hardAction' });
     fireEvent.click(restartButton);
 
@@ -3779,6 +4302,24 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getAllByText('settings.nav.integrations.label')[0]);
     expect(screen.queryByText('settings.integrations.smtc.title')).toBeNull();
     expect(screen.queryByText('settings.integrations.taskbarPlayback.title')).toBeNull();
+    expect(screen.queryByText('settings.integrations.taskbarMiniPlayer.title')).toBeNull();
+  });
+
+  it('enables the taskbar mini player through its dedicated Settings switch', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue({ ...settings, taskbarMiniPlayerEnabled: false });
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    fireEvent.click(screen.getAllByText('settings.nav.integrations.label')[0]);
+    const row = screen.getByText('settings.integrations.taskbarMiniPlayer.title').closest('.settings-integrations-service-row') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button'));
+
+    await waitFor(() => expect(taskbarMiniPlayerSetEnabledMock).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(within(row).getByRole('button').getAttribute('aria-pressed')).toBe('true'));
   });
 
   it('saves the startup account check setting from Settings', async () => {
@@ -3791,28 +4332,40 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    fireEvent.click(screen.getAllByText('settings.nav.integrations.label')[0]);
+    fireEvent.click(screen.getAllByText('settings.nav.accounts.label')[0]);
     const row = screen.getByText('settings.integrations.accountStartupRefresh.title').closest('.setting-row') as HTMLElement;
     fireEvent.click(within(row).getByRole('button'));
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ autoAccountCheckOnStartup: false }));
   });
 
-  it('saves the account expiry notice suppression setting from Settings', async () => {
+  it('loads account statuses when the Accounts section opens', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
-    setSettingsMock.mockResolvedValue({ ...settings, suppressAccountExpiryNotices: true });
     resetSettingsMock.mockResolvedValue(settings);
     clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
 
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    fireEvent.click(screen.getAllByText('settings.nav.integrations.label')[0]);
-    const row = screen.getByText('settings.integrations.accountExpiryNotices.title').closest('.setting-row') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button'));
+    expect(getAccountStatusesMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByText('settings.nav.accounts.label')[0]);
 
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ suppressAccountExpiryNotices: true }));
+    await waitFor(() => expect(getAccountStatusesMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not expose an account expiry reminder setting', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue({ ...settings, suppressAccountExpiryNotices: false });
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    const { container } = render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    fireEvent.click(screen.getAllByText('settings.nav.accounts.label')[0]);
+    expect(container.querySelector('#settings-row-account-expiry-notices')).toBeNull();
+    expect(screen.queryByText('settings.integrations.accountExpiryNotices.title')).toBeNull();
   });
 
   it('saves the global notification mute setting from advanced customization settings', async () => {
@@ -3854,10 +4407,17 @@ describe('SettingsPage', () => {
 
     await waitFor(() =>
       expect(setSettingsMock).toHaveBeenCalledWith({
+        appWallpaperScalePercent: 100,
+        appWallpaperBlurPx: 0,
+        appWallpaperBrightnessPercent: 92,
+        appWallpaperUiOpacityPercent: 76,
+        appWallpaperVisualProtectionEnabled: true,
+        appWallpaperUnifiedOpacityEnabled: false,
         appCustomWallpaperPath: wallpaperPath,
         appWallpaperMediaType: 'image',
       }),
     );
+    expect(await screen.findByRole('button', { name: /settings\.appearance\.wallpaper\.effect\.balanced/ })).toBeTruthy();
     expect(await screen.findByText('settings.appearance.wallpaper.scale')).toBeTruthy();
     expect(screen.getByText('settings.appearance.wallpaper.blur')).toBeTruthy();
     expect(screen.getByText('settings.appearance.wallpaper.brightness')).toBeTruthy();
@@ -3910,7 +4470,7 @@ describe('SettingsPage', () => {
       }));
       expect(setSettingsMock).not.toHaveBeenCalled();
 
-      vi.advanceTimersByTime(420);
+      vi.advanceTimersByTime(280);
       await Promise.resolve();
       expect(setSettingsMock).toHaveBeenCalledWith({
         appWallpaperScalePercent: 130,
@@ -3922,13 +4482,61 @@ describe('SettingsPage', () => {
     }
   });
 
+  it('flushes the latest wallpaper tuning change when leaving settings', async () => {
+    const wallpaperPath = 'D:\\Echo\\app-wallpapers\\wallpaper.png';
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue({
+      ...settings,
+      appCustomWallpaperPath: wallpaperPath,
+      appWallpaperMediaType: 'image',
+    });
+    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({
+      ...settings,
+      appCustomWallpaperPath: wallpaperPath,
+      ...patch,
+    }));
+    resetSettingsMock.mockResolvedValue(settings);
+    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
+
+    const { unmount } = render(<SettingsPage />);
+
+    await screen.findByText('route.settings.label');
+    clickSettingsNav('settings\\.nav\\.appearance\\.label');
+    fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.advanced\.expand/ }));
+    vi.useFakeTimers();
+
+    try {
+      const opacityInput = screen
+        .getByText('settings.appearance.wallpaper.uiOpacity')
+        .closest('.settings-wallpaper-control')
+        ?.querySelector('input') as HTMLInputElement;
+
+      fireEvent.change(opacityInput, { target: { value: '62' } });
+      expect(setSettingsMock).not.toHaveBeenCalled();
+
+      unmount();
+      await Promise.resolve();
+
+      expect(setSettingsMock).toHaveBeenCalledWith({ appWallpaperUiOpacityPercent: 62 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('saves a portrait app wallpaper separately from the landscape background', async () => {
     const wallpaperPath = 'D:\\Echo\\app-wallpapers\\portrait.webp';
+    const landscapeWallpaperPath = 'D:\\Echo\\app-wallpapers\\landscape.png';
     Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
+    getSettingsMock.mockResolvedValue({
+      ...settings,
+      appCustomWallpaperPath: landscapeWallpaperPath,
+      appWallpaperMediaType: 'image',
+    });
     chooseAppWallpaperMock.mockResolvedValue(wallpaperPath);
     setSettingsMock.mockResolvedValue({
       ...settings,
+      appCustomWallpaperPath: landscapeWallpaperPath,
+      appWallpaperMediaType: 'image',
       appPortraitWallpaperPath: wallpaperPath,
       appPortraitWallpaperMediaType: 'image',
     });
@@ -3939,6 +4547,7 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
+    fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.advanced\.expand/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.portraitChoose/ }));
 
     await waitFor(() =>
@@ -3947,20 +4556,26 @@ describe('SettingsPage', () => {
         appPortraitWallpaperMediaType: 'image',
       }),
     );
-    expect(await screen.findByText('settings.appearance.wallpaper.portraitPath')).toBeTruthy();
-    expect(screen.queryByText('settings.appearance.wallpaper.landscapePath')).toBeNull();
+    expect(await screen.findByText('portrait.webp')).toBeTruthy();
   });
 
   it('enables video wallpaper controls after choosing a portrait video background', async () => {
     const wallpaperPath = 'D:\\Echo\\app-wallpapers\\portrait-motion.webm';
+    const landscapeWallpaperPath = 'D:\\Echo\\app-wallpapers\\landscape.png';
     Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
+    getSettingsMock.mockResolvedValue({
+      ...settings,
+      appCustomWallpaperPath: landscapeWallpaperPath,
+      appWallpaperMediaType: 'image',
+      appVideoWallpaperPauseMode: 'smart',
+    });
     chooseAppWallpaperMock.mockResolvedValue(wallpaperPath);
     setSettingsMock.mockResolvedValue({
       ...settings,
+      appCustomWallpaperPath: landscapeWallpaperPath,
       appPortraitWallpaperPath: wallpaperPath,
       appPortraitWallpaperMediaType: 'video',
-      appVideoWallpaperPauseMode: 'never',
+      appVideoWallpaperPauseMode: 'smart',
     });
     resetSettingsMock.mockResolvedValue(settings);
     clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
@@ -3969,17 +4584,19 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
+    fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.advanced\.expand/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.portraitChoose/ }));
 
     await waitFor(() =>
       expect(setSettingsMock).toHaveBeenCalledWith({
         appPortraitWallpaperPath: wallpaperPath,
         appPortraitWallpaperMediaType: 'video',
-        appVideoWallpaperPauseMode: 'never',
       }),
     );
     expect(await screen.findByText('settings.appearance.wallpaper.videoStatus')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.videoPause\.never/ })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.videoPause\.smart/ }).getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 
   it('shows video wallpaper performance mode after choosing a local video background', async () => {
@@ -3991,7 +4608,7 @@ describe('SettingsPage', () => {
       ...settings,
       appCustomWallpaperPath: wallpaperPath,
       appWallpaperMediaType: 'video',
-      appVideoWallpaperPauseMode: 'never',
+      appVideoWallpaperPauseMode: 'smart',
     });
     resetSettingsMock.mockResolvedValue(settings);
     clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
@@ -4004,9 +4621,14 @@ describe('SettingsPage', () => {
 
     await waitFor(() =>
       expect(setSettingsMock).toHaveBeenCalledWith({
+        appWallpaperScalePercent: 100,
+        appWallpaperBlurPx: 0,
+        appWallpaperBrightnessPercent: 92,
+        appWallpaperUiOpacityPercent: 76,
+        appWallpaperVisualProtectionEnabled: true,
+        appWallpaperUnifiedOpacityEnabled: false,
         appCustomWallpaperPath: wallpaperPath,
         appWallpaperMediaType: 'video',
-        appVideoWallpaperPauseMode: 'never',
       }),
     );
     expect(await screen.findByText('settings.appearance.wallpaper.videoStatus')).toBeTruthy();

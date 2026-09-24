@@ -110,11 +110,44 @@ describe('JsonRpcBridge', () => {
     await expect(bridge.call('eq.getState')).rejects.toThrow('rpc_bridge_not_open');
   });
 
+  it('removes transport listeners when closed', async () => {
+    const installedListeners = streams.writable.listeners('error');
+    expect(installedListeners).toHaveLength(1);
+
+    await bridge.close();
+
+    expect(streams.writable.listeners('error')).not.toEqual(expect.arrayContaining(installedListeners));
+  });
+
   it('openFile sends filePath, sampleRate, and startSeconds in one params object', () => {
     bridge.openFile('/music/song.flac', 96000, 12.25).catch(() => {});
     const msg = JSON.parse(streams.chunks[0]);
     expect(msg.method).toBe('audio.openFile');
     expect(msg.params).toEqual([{ filePath: '/music/song.flac', sampleRate: 96000, startSeconds: 12.25 }]);
+  });
+
+  it('openSource sends an exact audio.openSource request with normalized HTTP headers', () => {
+    bridge.openSource({
+      kind: 'http',
+      uri: 'https://media.example.test/song.flac',
+      headers: { cookie: 'MUSIC_U=secret', referer: 'https://music.163.com/' },
+      mimeType: 'audio/flac',
+    }, 44_100, 1.5).catch(() => {});
+    const msg = JSON.parse(streams.chunks[0]);
+    expect(msg.method).toBe('audio.openSource');
+    expect(msg.params).toEqual([{
+      source: {
+        kind: 'http',
+        uri: 'https://media.example.test/song.flac',
+        headers: {
+          Cookie: 'MUSIC_U=secret',
+          Referer: 'https://music.163.com/',
+        },
+        mimeType: 'audio/flac',
+      },
+      sampleRate: 44_100,
+      startSeconds: 1.5,
+    }]);
   });
 
   it('prefetch sends filePath and optional sampleRate via audio.prefetch', () => {
@@ -129,6 +162,82 @@ describe('JsonRpcBridge', () => {
     const msg = JSON.parse(streams.chunks[0]);
     expect(msg.method).toBe('audio.prefetch');
     expect(msg.params).toEqual([{ filePath: '/music/song.mp3' }]);
+  });
+
+  it('primes the native next deck through the exact gapless method', () => {
+    bridge.prepareGapless({
+      filePath: '/music/next.flac',
+      trackId: 'next-track',
+      sampleRate: 48_000,
+      following: [{ filePath: '/music/third.flac', trackId: 'third-track' }],
+    }).catch(() => {});
+    const msg = JSON.parse(streams.chunks[0]);
+    expect(msg.method).toBe('audio.gaplessPrepare');
+    expect(msg.params).toEqual({
+      filePath: '/music/next.flac',
+      trackId: 'next-track',
+      sampleRate: 48_000,
+      following: [{ filePath: '/music/third.flac', trackId: 'third-track' }],
+    });
+  });
+
+  it('uses acknowledged AutoMix V2 RPC methods with the exact plan identity', async () => {
+    const request = {
+      plan: {
+        version: 2 as const,
+        planId: 'plan-12',
+        queueRevision: 12,
+        fromItemId: 'item-a',
+        fromTrackId: 'track-a',
+        toItemId: 'item-b',
+        toTrackId: 'track-b',
+        mixSampleRate: 48_000,
+        mode: 'short_crossfade' as const,
+        currentStartSeconds: 0,
+        currentEndSeconds: 120,
+        fadeStartOutputFrame: 5_000_000,
+        fadeEndOutputFrame: 5_096_000,
+        commitOutputFrame: 5_048_000,
+        nextStartSeconds: 0,
+        overlapFrames: 96_000,
+        currentGainDb: 0,
+        nextGainDb: 0,
+        tempoRatio: 1,
+        fallbackReason: 'analysis_unavailable',
+      },
+      nextSource: {
+        kind: 'local' as const,
+        uri: 'C:\\Music\\next.flac',
+      },
+    };
+
+    const prepare = bridge.prepareAutomixV2(request);
+    expect(JSON.parse(streams.chunks[0])).toMatchObject({
+      method: 'automix.prepare',
+      params: request,
+    });
+    streams.readable.write(`${JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        acknowledged: true,
+        state: 'armed',
+        planId: 'plan-12',
+        operationId: 9,
+        reason: null,
+      },
+    })}\n`);
+    await expect(prepare).resolves.toMatchObject({ acknowledged: true, state: 'armed' });
+
+    bridge.cancelAutomixV2('plan-12').catch(() => undefined);
+    bridge.getAutomixStateV2().catch(() => undefined);
+    expect(JSON.parse(streams.chunks[1])).toMatchObject({
+      method: 'automix.cancel',
+      params: { planId: 'plan-12' },
+    });
+    expect(JSON.parse(streams.chunks[2])).toMatchObject({
+      method: 'automix.state',
+    });
   });
 
   it('sends playback-rate updates through JSON-RPC', () => {
@@ -190,6 +299,13 @@ describe('DaemonAudioBackend openFile offsets', () => {
   function createBackend(result: Partial<typeof openFileResult> = {}) {
     const listeners = new Map<string, (params: Record<string, unknown>) => void>();
     const jrpc = {
+      sessionBegin: vi.fn().mockImplementation(async (params?: { sessionId?: number }) => ({
+        accepted: true,
+        // The resident daemon may allocate the authoritative generation when
+        // no session id is supplied. Model both valid protocol forms here.
+        sessionId: params?.sessionId ?? 1,
+        ready: { ready: true, readyLevel: 'device', sampleRate: 48_000 },
+      })),
       openFile: vi.fn().mockResolvedValue({ ...openFileResult, ...result }),
       play: vi.fn().mockResolvedValue(undefined),
       seek: vi.fn().mockResolvedValue(undefined),
@@ -237,7 +353,7 @@ describe('DaemonAudioBackend openFile offsets', () => {
 
     await backend.openFile('/music/song.flac', 999999);
 
-    expect(jrpc.openFile).toHaveBeenCalledWith('/music/song.flac', undefined, 999999);
+    expect(jrpc.openFile).toHaveBeenCalledWith('/music/song.flac', 48_000, 999999);
     expect(jrpc.play).toHaveBeenCalledTimes(1);
     expect(jrpc.openFile.mock.invocationCallOrder[0]).toBeLessThan(jrpc.play.mock.invocationCallOrder[0]);
     expect(backend.getPositionSeconds()).toBe(29.75);
@@ -246,6 +362,11 @@ describe('DaemonAudioBackend openFile offsets', () => {
   it('does not call play when openFile rejects', async () => {
     const listeners = new Map<string, (params: Record<string, unknown>) => void>();
     const jrpc = {
+      sessionBegin: vi.fn().mockImplementation(async (params?: { sessionId?: number }) => ({
+        accepted: true,
+        sessionId: params?.sessionId ?? 1,
+        ready: { ready: true, readyLevel: 'device', sampleRate: 48_000 },
+      })),
       openFile: vi.fn().mockRejectedValue(new Error('native_open_failed')),
       play: vi.fn().mockResolvedValue(undefined),
       seek: vi.fn().mockResolvedValue(undefined),
@@ -381,7 +502,7 @@ describe('DaemonAudioBackend openFile offsets', () => {
     await backend.openFile('/music/song.flac', -5);
     listeners.get('audio.position')?.({ framesPlayed: 24000, operationId: 1 });
 
-    expect(jrpc.openFile).toHaveBeenCalledWith('/music/song.flac', undefined, -5);
+    expect(jrpc.openFile).toHaveBeenCalledWith('/music/song.flac', 48_000, -5);
     expect(jrpc.play).toHaveBeenCalledTimes(1);
     expect(positions).toEqual([0.5]);
     expect(backend.getPositionSeconds()).toBe(0.5);
@@ -434,6 +555,11 @@ describe('DaemonAudioBackend openFile offsets', () => {
     };
     const calls: string[] = [];
     const jrpc = {
+      sessionBegin: vi.fn().mockImplementation(async (params?: { sessionId?: number }) => ({
+        accepted: true,
+        sessionId: params?.sessionId ?? 1,
+        ready: { ready: true, readyLevel: 'device', sampleRate: 48_000 },
+      })),
       openFile: vi.fn(async (filePath: string) => {
         calls.push(`open:${filePath}`);
         return { ...openFileResult, filePath, operationId: filePath.endsWith('one.flac') ? 1 : 3 };
@@ -511,6 +637,19 @@ describe('JsonRpcBridge lifecycle', () => {
     expect(bridge.isClosed).toBe(true);
   });
 
+  it('emits close exactly once when close() is requested explicitly', async () => {
+    const bridge = new JsonRpcBridge({ heartbeatInterval: 5000 });
+    const { readable, writable } = createStreamPair();
+    const onClose = vi.fn();
+    bridge.open(readable, writable);
+    bridge.on('close', onClose);
+
+    await bridge.close();
+    await bridge.close();
+
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it('close() rejects all pending RPC calls', async () => {
     const bridge = new JsonRpcBridge({ defaultTimeout: 5000, heartbeatInterval: 5000 });
     const { readable, writable } = createStreamPair();
@@ -564,7 +703,7 @@ describe('JsonRpcBridge lifecycle', () => {
     bridge.open(readable, writable);
 
     // Close synchronously-like
-    const closePromise = bridge.close();
+    void bridge.close();
 
     expect(() => bridge.notify('audio.ended', {})).not.toThrow();
   });

@@ -1,4 +1,5 @@
 import { AlertTriangle, Disc3, Loader2, Play, RefreshCw } from 'lucide-react';
+import '../styles/audio-cd.css';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AudioCdDrive, AudioCdStatus, AudioCdTrack } from '../../shared/types/audioCd';
 import type { Locale } from '../i18n/locales';
@@ -117,6 +118,30 @@ const audioCdCopyByLocale: Record<Locale, AudioCdCopy> = {
       no_cd_drive: 'No CD drive detected.',
       no_cd_drive_selected: 'Select a CD drive.',
       no_disc_loaded: 'No loaded Audio CD detected.',
+    },
+  },
+  'ko-KR': {
+    title: 'Audio CD',
+    subtitle: '디스크 트랙 직접 재생',
+    refresh: '새로고침',
+    drive: '드라이브',
+    tracks: '트랙',
+    cdInput: 'CD 입력',
+    available: '사용 가능',
+    unavailable: '사용할 수 없음',
+    loading: '읽는 중',
+    play: '재생',
+    playing: '트랙을 여는 중...',
+    direct: '직접',
+    noDuration: '길이 알 수 없음',
+    errors: {
+      audio_cd_bridge_unavailable: '데스크톱 브리지를 사용할 수 없습니다.',
+      audio_cd_tracks_unavailable: '재생 가능한 트랙을 읽을 수 없습니다.',
+      ffmpeg_unavailable: 'FFmpeg를 사용할 수 없습니다.',
+      libcdio_unavailable: '현재 FFmpeg 빌드는 CD 입력을 지원하지 않습니다.',
+      no_cd_drive: 'CD 드라이브를 찾을 수 없습니다.',
+      no_cd_drive_selected: 'CD 드라이브를 선택하세요.',
+      no_disc_loaded: '로드된 Audio CD를 찾을 수 없습니다.',
     },
   },
 };

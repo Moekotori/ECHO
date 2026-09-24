@@ -585,7 +585,7 @@ describe('StreamingService playlist imports', () => {
   it('keeps Bilibili favlist URLs intact for provider requests and stores the canonical media id', async () => {
     const favlistUrl = 'https://space.bilibili.com/25265128/favlist?fid=2433003328&ftype=create';
     const registry = new StreamingProviderRegistry();
-    const getPlaylist = vi.fn(async (input: { providerPlaylistId: string; page?: number; pageSize?: number }): Promise<StreamingPlaylistDetail> => ({
+    const getPlaylist = vi.fn(async (_input: { providerPlaylistId: string; page?: number; pageSize?: number }): Promise<StreamingPlaylistDetail> => ({
       id: 'streaming:bilibili:playlist:2433003328',
       provider: 'bilibili',
       providerPlaylistId: '2433003328',
@@ -791,6 +791,39 @@ describe('StreamingService playlist imports', () => {
         url: 'https://isure.stream.qqmusic.qq.com/song.flac',
       }),
     ).toBe(true);
+  });
+
+  it('refreshes protected download authorization when playback comes from memory cache', async () => {
+      const resolvePlayback = vi.fn(async (): Promise<StreamingPlaybackSource> => ({
+        provider: 'netease',
+        providerTrackId: 'cached-song',
+        url: 'https://m801.music.126.net/cached-song.flac',
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        mimeType: 'audio/flac',
+        bitrate: 999000,
+        sampleRate: null,
+        bitDepth: 16,
+        codec: 'flac',
+        headers: {},
+        requiresProxy: false,
+        supportsRange: true,
+      }));
+      const registry = new StreamingProviderRegistry();
+      registry.register({ name: 'netease', search: vi.fn(), getTrack: vi.fn(), resolvePlayback });
+      const service = new StreamingService(registry, fakeCacheStore());
+      const request = { provider: 'netease' as const, providerTrackId: 'cached-song', quality: 'lossless' as const };
+
+      const first = await service.resolvePlayback(request);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const second = await service.resolvePlayback(request);
+
+      expect(resolvePlayback).toHaveBeenCalledTimes(1);
+      expect(second.downloadAuthorizationToken).not.toBe(first.downloadAuthorizationToken);
+      expect(verifyDownloadAuthorizationToken(second.downloadAuthorizationToken, {
+        provider: 'netease',
+        providerTrackId: 'cached-song',
+        url: second.url,
+      })).toBe(true);
   });
 
   it('normalizes omitted playback quality to lossless before resolving sources', async () => {

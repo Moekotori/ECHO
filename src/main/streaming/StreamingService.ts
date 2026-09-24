@@ -2,7 +2,7 @@ import type { EchoDatabase } from '../database/createDatabase';
 import { getLibraryDatabaseManager, type LibraryDatabaseConnection } from '../database/LibraryDatabaseManager';
 import { getAppSettings } from '../app/appSettings';
 import { assertProtectedLibraryAvailable } from '../app/dataProtection';
-import { BPM_CONFIDENCE_THRESHOLD, BPM_DISPLAY_CONFIDENCE_THRESHOLD } from '../../shared/constants/audioAnalysis';
+import { BPM_CONFIDENCE_THRESHOLD } from '../../shared/constants/audioAnalysis';
 import type { BpmAnalysisResult } from '../../shared/types/library';
 import type {
   StreamingAccountPlaylistsResult,
@@ -56,6 +56,7 @@ import { PluginStreamingProvider } from './providers/PluginStreamingProvider';
 import { QobuzStreamingProvider } from './providers/QobuzStreamingProvider';
 import { buildM3u8StreamingPlaylistDetail } from './M3u8Playlist';
 import { enrichStreamingPlaybackSourceMetadata } from './StreamingAudioMetadataProbe';
+import { runPlaybackPerformanceStep } from '../diagnostics/PlaybackPerformanceDiagnostics';
 
 const searchTtlMs = 5 * 60 * 1000;
 const trackDetailTtlMs = 30 * 60 * 1000;
@@ -496,7 +497,7 @@ export class StreamingService {
   releaseSoftMemoryPressure(): SoftMemoryCleanupTaskResult {
     return {
       task: 'streaming-memory-cache',
-      ...this.memoryCache.pruneExpired(),
+      ...this.memoryCache.clearValues(),
     };
   }
 
@@ -717,23 +718,52 @@ export class StreamingService {
     const key = playbackCacheKey(normalizedRequest);
     const memoryHit = this.memoryCache.get<StreamingPlaybackSource>(key);
     if (memoryHit) {
-      return memoryHit;
+      // Download authorizations are deliberately shorter-lived than many playback
+      // URLs. Never return the token cached with the source: mint a fresh one after
+      // re-checking the current account state.
+      return this.attachDownloadAuthorization(normalizedRequest, memoryHit);
     }
 
     return this.memoryCache.getOrCreateInflight(key, async () => {
       const provider = this.registry.get(normalizedRequest.provider);
-      const source = await this.callProviderWithTimeout(
-        provider,
-        () => this.playbackResolver.resolve(normalizedRequest),
-        'Streaming playback',
-        playbackProviderTimeoutMs,
+      const perfDetails = {
+        trackId: streamingStableKey(normalizedRequest.provider, normalizedRequest.providerTrackId),
+        outputMode: null,
+        provider: normalizedRequest.provider,
+        quality: normalizedRequest.quality ?? null,
+      };
+      const source = await runPlaybackPerformanceStep(
+        'StreamingService.resolvePlayback',
+        'provider resolve',
+        perfDetails,
+        () => this.callProviderWithTimeout(
+          provider,
+          () => this.playbackResolver.resolve(normalizedRequest),
+          'Streaming playback',
+          playbackProviderTimeoutMs,
+        ),
       );
-      const enrichedSource = await enrichStreamingPlaybackSourceMetadata(source);
-      const authorizedSource = this.attachDownloadAuthorization(normalizedRequest, enrichedSource);
-      const ttlMs = playableTtlMs(enrichedSource);
+      const authorizedSource = this.attachDownloadAuthorization(normalizedRequest, source);
+      const ttlMs = playableTtlMs(source);
       if (ttlMs > 0) {
         this.memoryCache.set(key, authorizedSource, ttlMs);
       }
+
+      void runPlaybackPerformanceStep(
+        'StreamingService.resolvePlayback',
+        'metadata',
+        perfDetails,
+        () => enrichStreamingPlaybackSourceMetadata(source),
+      ).then((enrichedSource) => {
+        const enrichedTtlMs = playableTtlMs(enrichedSource);
+        if (enrichedTtlMs > 0) {
+          this.memoryCache.set(
+            key,
+            this.attachDownloadAuthorization(normalizedRequest, enrichedSource),
+            enrichedTtlMs,
+          );
+        }
+      }).catch(() => undefined);
 
       return authorizedSource;
     });
@@ -752,13 +782,12 @@ export class StreamingService {
       const track = await this.getTrack(request.provider, request.providerTrackId).catch(() => null);
       const result = await this.bpmAnalyzer.analyze(source.url, track?.duration ?? undefined, { headers: source.headers });
       const status = result.confidence >= BPM_CONFIDENCE_THRESHOLD ? 'complete' : 'low_confidence';
-      const displayable = result.confidence >= BPM_DISPLAY_CONFIDENCE_THRESHOLD;
 
       return {
         trackId,
-        bpm: result.bpm > 0 && displayable ? result.bpm : null,
+        bpm: result.bpm > 0 ? result.bpm : null,
         confidence: result.confidence,
-        beatOffsetMs: result.beatOffsetMs >= 0 && displayable ? result.beatOffsetMs : null,
+        beatOffsetMs: result.beatOffsetMs >= 0 && result.bpm > 0 ? result.beatOffsetMs : null,
         status,
         error: null,
         updatedAt,
@@ -1109,15 +1138,17 @@ export class StreamingService {
   }
 
   private attachDownloadAuthorization(request: StreamingPlaybackRequest, source: StreamingPlaybackSource): StreamingPlaybackSource {
+    const sourceWithoutAuthorization = { ...source };
+    delete sourceWithoutAuthorization.downloadAuthorizationToken;
     if (!isProtectedMusicDownloadProvider(request.provider)) {
-      return source;
+      return sourceWithoutAuthorization;
     }
     if (!canAuthorizeProtectedMusicDownload(request.provider)) {
-      return source;
+      return sourceWithoutAuthorization;
     }
 
     return {
-      ...source,
+      ...sourceWithoutAuthorization,
       downloadAuthorizationToken: createDownloadAuthorizationToken({
         provider: request.provider,
         providerTrackId: request.providerTrackId,

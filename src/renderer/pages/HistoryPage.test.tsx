@@ -255,7 +255,7 @@ describe('HistoryPage', () => {
           total: 1,
         },
         savedAt: '2026-05-25T10:00:00.000Z',
-        version: 1,
+        version: 2,
       }),
     );
     installLibraryMock({
@@ -330,7 +330,7 @@ describe('HistoryPage', () => {
           total: 0,
         },
         savedAt: '2026-05-25T10:00:00.000Z',
-        version: 1,
+        version: 2,
       }),
     );
     installLibraryMock({
@@ -380,6 +380,72 @@ describe('HistoryPage', () => {
       pageSize: 8,
       sort: 'recent',
     }));
+  });
+
+  it('shows history from every source by default and only filters after an explicit source choice', async () => {
+    const getPlaybackHistory = vi.fn().mockResolvedValue(historyPage([historyEntry('all-sources')]));
+    const library = installLibraryMock({ getPlaybackHistory });
+
+    renderHistoryPage();
+
+    await screen.findAllByText('History all-sources');
+    expect(screen.getByRole('button', { name: 'All sources' }).className).toContain('active');
+    expect(library.getPlaybackHistory).toHaveBeenCalledWith(
+      expect.not.objectContaining({ mediaType: expect.anything() }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Streaming' }));
+
+    await waitFor(() => expect(library.getPlaybackHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaType: 'streaming' }),
+    ));
+  });
+
+  it('uses the static large local cover for recently played artwork', async () => {
+    installLibraryMock({
+      getPlaybackHistory: vi.fn().mockResolvedValue(historyPage([
+        historyEntry('large-cover', {
+          coverId: 'cover large',
+          coverThumb: 'echo-cover://thumb/cover%20large',
+        }),
+      ])),
+    });
+
+    const { container } = renderHistoryPage();
+
+    await screen.findAllByText('History large-cover');
+    expect(container.querySelector('.history-recent-cover img')?.getAttribute('src')).toBe(
+      'echo-cover://large/cover%20large',
+    );
+  });
+
+  it('plays recent and ranked history entries on double click through the playback queue', async () => {
+    installLibraryMock({
+      getPlaybackHistory: vi.fn().mockResolvedValue(historyPage([historyEntry('double-click')])),
+    });
+
+    const { container } = renderHistoryPage();
+
+    await screen.findAllByText('History double-click');
+    const recentRow = container.querySelector('.history-recent-row');
+    const rankedRow = container.querySelector('.history-row');
+    expect(recentRow).toBeTruthy();
+    expect(rankedRow).toBeTruthy();
+
+    fireEvent.doubleClick(recentRow as HTMLElement);
+    await waitFor(() => expect(playbackQueueMock.playTrack).toHaveBeenCalledTimes(1));
+    expect(playbackQueueMock.playTrack).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'double-click', path: 'D:\\Music\\double-click.flac' }),
+      expect.objectContaining({
+        replaceQueueWith: [
+          expect.objectContaining({ id: 'double-click', path: 'D:\\Music\\double-click.flac' }),
+        ],
+        source: expect.objectContaining({ type: 'manual' }),
+      }),
+    );
+
+    fireEvent.doubleClick(rankedRow as HTMLElement);
+    await waitFor(() => expect(playbackQueueMock.playTrack).toHaveBeenCalledTimes(2));
   });
 
   it('restores the stats dashboard after the first history page renders', async () => {

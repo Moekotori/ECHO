@@ -45,6 +45,7 @@ const PUSH_ONLY_CHANNELS = new Set<string>([
   IpcChannels.AppUpdateStatusChanged,
   IpcChannels.DesktopLyricsStateChanged,
   IpcChannels.MiniPlayerStateChanged,
+  IpcChannels.TaskbarMiniPlayerStateChanged,
   IpcChannels.LibraryLikedTracksChanged,
   IpcChannels.DesktopLyricsAudioStatus,
   IpcChannels.DesktopLyricsPlaybackStatus,
@@ -65,6 +66,8 @@ const IPC_SOURCE_FILES = [
   'diagnosticsIpc.ts',
   'discordPresenceIpc.ts',
   'downloadsIpc.ts',
+  'echoLinkIpc.ts',
+  'mqttIntegrationIpc.ts',
   'hqPlayerIpc.ts',
   'lastFmIpc.ts',
   'libraryIpc.ts',
@@ -79,6 +82,7 @@ const IPC_SOURCE_FILES = [
   'smtcIpc.ts',
   'stageBridgeIpc.ts',
   'streamingIpc.ts',
+  'taskbarMiniPlayerIpc.ts',
 ];
 
 /**
@@ -140,8 +144,6 @@ function findActualPushChannels(): Set<string> {
     // Use a sliding-window approach: find lines with ipcMain.handle/on and
     // capture IpcChannels references that appear nearby.
     const lines = content.split('\n');
-    let inHandlerContext = false;
-
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 

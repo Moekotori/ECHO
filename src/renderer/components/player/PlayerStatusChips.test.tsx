@@ -77,6 +77,14 @@ describe('PlayerStatusChips', () => {
     expect(screen.getByText('Hi-Res')).toBeTruthy();
   });
 
+  it('shows MQA independently from the container codec and Hi-Res heuristic', () => {
+    render(<PlayerStatusChips status={null} state="playing" track={track({ mqa: true })} />);
+
+    expect(getChip('MQA').className).toContain('tag-mqa');
+    expect(screen.getByText('FLAC')).toBeTruthy();
+    expect(screen.queryByText('Hi-Res')).toBeNull();
+  });
+
   it('adds restrained HQPlayer output chips when HQPlayer upsamples the source', () => {
     render(<PlayerStatusChips hqPlayerActiveRate={22579200} status={null} state="playing" track={track({ sampleRate: 48000 })} />);
 
@@ -90,6 +98,61 @@ describe('PlayerStatusChips', () => {
     render(<PlayerStatusChips hqPlayerActiveRate={48000} status={null} state="playing" track={track({ sampleRate: 48000 })} />);
 
     expect(screen.queryByText('HQPlayer')).toBeNull();
+  });
+
+  it('shows the active native PCM-to-SDM target without confusing the source rate with the DoP carrier', () => {
+    const { rerender } = render(
+      <PlayerStatusChips
+        status={{
+          sdmActive: true,
+          sdmMode: 'pcmToDsd',
+          sdmRuntimeState: 'pcm_to_sdm_not_routed',
+          sdmTargetRate: 'dsd256',
+          sdmRuntime: {
+            state: 'fallback',
+            targetRate: 'dsd256',
+            nativeSampleRate: 11289600,
+            transportSampleRate: 705600,
+          },
+        } as never}
+        state="playing"
+        track={track({ sampleRate: 44100, bitDepth: 16 })}
+      />,
+    );
+
+    expect(screen.queryByText('ECHO SDM · DSD256')).toBeNull();
+
+    rerender(
+      <PlayerStatusChips
+        status={{
+          sdmActive: true,
+          sdmMode: 'pcmToDsd',
+          sdmRuntimeState: 'pcm_to_sdm_active',
+          sdmTargetRate: 'dsd256',
+          sdmNativeSampleRate: 11289600,
+          sdmTransportSampleRate: 705600,
+          sdmRuntime: {
+            state: 'fallback',
+            targetRate: 'dsd256',
+            nativeSampleRate: 11289600,
+            transportSampleRate: 705600,
+            activeBackend: 'cpu',
+            oversamplingRuntime: {
+              state: 'active',
+              activeBackend: 'cuda',
+            },
+          },
+        } as never}
+        state="playing"
+        track={track({ sampleRate: 44100, bitDepth: 16 })}
+      />,
+    );
+
+    const sdmChip = getChip('ECHO SDM · DSD256');
+    expect(sdmChip.className).toContain('tag-sdm');
+    expect(sdmChip.getAttribute('title')).toBe('ECHO SDM DSD256 · 11.2896MHz 1-bit · DoP 705.6kHz · CUDA FIR + CPU SDM');
+    expect(screen.getByText('16bit / 44.1kHz')).toBeTruthy();
+    expect(screen.queryByText('16bit / 705.6kHz')).toBeNull();
   });
 
   it('shows playback path tags for bit-perfect, upsampling, and EQ', () => {
@@ -223,31 +286,31 @@ describe('PlayerStatusChips', () => {
       <PlayerStatusChips
         status={null}
         state="playing"
-        track={track({ bpm: 128, bpmConfidence: 0.9, analysisStatus: 'complete' })}
+        track={track({ bpm: 128, bpmConfidence: 0.9, analysisStatus: 'complete', fieldSources: { bpm: 'audio_analysis' } })}
       />,
     );
 
-    expect(screen.getByText('128 BPM')).toBeTruthy();
+    expect(screen.getByText('≈128 BPM')).toBeTruthy();
 
     rerender(
       <PlayerStatusChips
         status={null}
         state="playing"
-        track={track({ bpm: 121, bpmConfidence: 0.51, analysisStatus: 'low_confidence' })}
+        track={track({ bpm: 121, bpmConfidence: 0.51, analysisStatus: 'low_confidence', fieldSources: { bpm: 'audio_analysis' } })}
       />,
     );
 
-    expect(screen.getByText('121 BPM')).toBeTruthy();
+    expect(screen.getByText('≈121 BPM')).toBeTruthy();
 
     rerender(
       <PlayerStatusChips
         status={null}
         state="playing"
-        track={track({ bpm: 128, bpmConfidence: 0.2, analysisStatus: 'low_confidence' })}
+        track={track({ bpm: 128, bpmConfidence: 0.2, analysisStatus: 'low_confidence', fieldSources: { bpm: 'audio_analysis' } })}
       />,
     );
 
-    expect(screen.queryByText('128 BPM')).toBeNull();
+    expect(screen.getByText('≈128 BPM')).toBeTruthy();
 
     rerender(<PlayerStatusChips status={null} state="playing" track={track({ bpm: 128, analysisStatus: 'analyzing' })} />);
 
@@ -326,7 +389,7 @@ describe('PlayerStatusChips', () => {
     expect(screen.getByText('FIR')).toBeTruthy();
   });
 
-  it('shows an Automix chip only when the engine has an active transition plan', () => {
+  it('shows an Intelligent Transition chip only when the engine has an active transition plan', () => {
     const { rerender } = render(
       <PlayerStatusChips
         status={{
@@ -345,7 +408,7 @@ describe('PlayerStatusChips', () => {
       />,
     );
 
-    expect(screen.queryByText(/Automix/u)).toBeNull();
+    expect(screen.queryByText(/智能过渡/u)).toBeNull();
 
     rerender(
       <PlayerStatusChips
@@ -369,7 +432,7 @@ describe('PlayerStatusChips', () => {
       />,
     );
 
-    expect(screen.queryByText(/Automix/u)).toBeNull();
+    expect(screen.queryByText(/智能过渡/u)).toBeNull();
 
     rerender(
       <PlayerStatusChips
@@ -392,6 +455,6 @@ describe('PlayerStatusChips', () => {
       />,
     );
 
-    expect(screen.getByText('Automix beat 16s')).toBeTruthy();
+    expect(screen.getByText('智能过渡 beat 16s')).toBeTruthy();
   });
 });

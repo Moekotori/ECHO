@@ -48,6 +48,23 @@ describe('CoverCacheManager', () => {
     expect(existsSync(join(newDir, 'ab', 'abcdef', 'thumb.webp'))).toBe(true);
   });
 
+  it('rejects a destination nested inside the source cache before creating it', async () => {
+    const root = makeTempRoot();
+    const oldDir = join(root, 'cache');
+    const newDir = join(oldDir, 'cache');
+    mkdirSync(oldDir, { recursive: true });
+    writeFileSync(join(oldDir, 'thumb.webp'), 'thumb');
+
+    const result = await migrateCoverCache({ oldDir, newDir });
+
+    expect(result.errors).toEqual([
+      `${resolve(newDir)}: destination cache directory must not be inside the source cache directory ${resolve(oldDir)}`,
+    ]);
+    expect(result.copiedFiles).toBe(0);
+    expect(result.updatedCoverRows).toBe(0);
+    expect(existsSync(newDir)).toBe(false);
+  });
+
   it('updates covers table paths from the old cache directory to the new one', async () => {
     const root = makeTempRoot();
     const oldDir = join(root, 'old-cache');

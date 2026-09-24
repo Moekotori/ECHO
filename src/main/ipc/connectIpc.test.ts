@@ -49,11 +49,19 @@ const mocks = vi.hoisted(() => {
       connectAutoStartReceiversEnabled: false,
     },
   };
+  const getConnectService = vi.fn(() => connectService);
+  const getConnectReceiverService = vi.fn(() => receiverService);
+  const getAirPlayReceiverSpikeService = vi.fn(() => airPlayReceiverService);
+  const getEchoLinkService = vi.fn(() => echoLinkService);
 
   return {
     airPlayReceiverService,
     connectService,
     echoLinkService,
+    getAirPlayReceiverSpikeService,
+    getConnectReceiverService,
+    getConnectService,
+    getEchoLinkService,
     handle,
     handlers,
     receiverService,
@@ -80,20 +88,20 @@ vi.mock('../app/appSettings', () => ({
 }));
 
 vi.mock('../connect/ConnectService', () => ({
-  getConnectService: () => mocks.connectService,
+  getConnectService: mocks.getConnectService,
   normalizeConnectStartRequest: (request: unknown) => request,
 }));
 
 vi.mock('../connect/ConnectReceiverService', () => ({
-  getConnectReceiverService: () => mocks.receiverService,
+  getConnectReceiverService: mocks.getConnectReceiverService,
 }));
 
 vi.mock('../connect/AirPlayReceiverSpikeService', () => ({
-  getAirPlayReceiverSpikeService: () => mocks.airPlayReceiverService,
+  getAirPlayReceiverSpikeService: mocks.getAirPlayReceiverSpikeService,
 }));
 
 vi.mock('../connect/EchoLinkService', () => ({
-  getEchoLinkService: () => mocks.echoLinkService,
+  getEchoLinkService: mocks.getEchoLinkService,
 }));
 
 vi.mock('../plugins/ConnectDonatorUnlockService', () => ({
@@ -123,6 +131,10 @@ describe('connect IPC receiver autostart', () => {
     expect(mocks.handle).toHaveBeenCalledWith(IpcChannels.ConnectReceiverSetEnabled, expect.any(Function));
     expect(mocks.receiverService.setEnabled).not.toHaveBeenCalled();
     expect(mocks.airPlayReceiverService.setEnabled).not.toHaveBeenCalled();
+    expect(mocks.getConnectService).not.toHaveBeenCalled();
+    expect(mocks.getConnectReceiverService).not.toHaveBeenCalled();
+    expect(mocks.getAirPlayReceiverSpikeService).not.toHaveBeenCalled();
+    expect(mocks.getEchoLinkService).not.toHaveBeenCalled();
   });
 
   it('starts DLNA and AirPlay receivers when startup autostart is enabled', async () => {
@@ -137,6 +149,28 @@ describe('connect IPC receiver autostart', () => {
 
     expect(mocks.receiverService.setEnabled).toHaveBeenCalledWith(true);
     expect(mocks.airPlayReceiverService.setEnabled).toHaveBeenCalledWith(true);
+    expect(mocks.getConnectReceiverService).toHaveBeenCalledTimes(1);
+    expect(mocks.getAirPlayReceiverSpikeService).toHaveBeenCalledTimes(1);
+    expect(mocks.getConnectService).not.toHaveBeenCalled();
+    expect(mocks.getEchoLinkService).not.toHaveBeenCalled();
+  });
+
+  it('initializes each service only when its IPC surface is first used', async () => {
+    const { registerConnectIpc } = await import('./connectIpc');
+
+    registerConnectIpc();
+
+    expect(mocks.getConnectService).not.toHaveBeenCalled();
+    expect(mocks.getEchoLinkService).not.toHaveBeenCalled();
+
+    mocks.handlers[IpcChannels.ConnectGetStatus]!(null);
+    mocks.handlers[IpcChannels.ConnectGetStatus]!(null);
+    expect(mocks.getConnectService).toHaveBeenCalledTimes(1);
+    expect(mocks.connectService.on).toHaveBeenCalledTimes(1);
+
+    mocks.handlers[IpcChannels.EchoLinkGetStatus]!(null);
+    mocks.handlers[IpcChannels.EchoLinkGetStatus]!(null);
+    expect(mocks.getEchoLinkService).toHaveBeenCalledTimes(1);
   });
 
   it('blocks active connect handlers when the donator unlock is missing', async () => {
@@ -147,9 +181,20 @@ describe('connect IPC receiver autostart', () => {
 
     registerConnectIpc();
 
-    expect(mocks.handlers[IpcChannels.ConnectGetDonatorUnlockStatus]!(null)).toEqual({ unlocked: true });
+    await expect(mocks.handlers[IpcChannels.ConnectGetDonatorUnlockStatus]!(null)).resolves.toEqual({ unlocked: true });
+    expect(mocks.unlockService.refreshStatus).toHaveBeenCalledWith(undefined);
     expect(() => mocks.handlers[IpcChannels.ConnectListDevices]!(null)).toThrow('echo_authorization_required');
     expect(mocks.connectService.listDevices).not.toHaveBeenCalled();
+  });
+
+  it('forces a fresh entitlement check when requested by the renderer', async () => {
+    const { registerConnectIpc } = await import('./connectIpc');
+    registerConnectIpc();
+
+    await expect(mocks.handlers[IpcChannels.ConnectGetDonatorUnlockStatus]!(null, { force: true }))
+      .resolves.toEqual({ unlocked: true });
+
+    expect(mocks.unlockService.refreshStatus).toHaveBeenCalledWith({ force: true });
   });
 
   it('returns lightweight receiver statuses when the donator unlock is missing', async () => {

@@ -5,21 +5,28 @@ import {
   Disc3,
   ExternalLink,
   GripVertical,
-  ListPlus,
   ListMusic,
   Music2,
   Play,
+  Radio,
   Repeat1,
   Repeat2,
   Shuffle,
+  SlidersHorizontal,
   Trash2,
   X,
 } from 'lucide-react';
-import type { LibraryTrack } from '../../../shared/types/library';
+import type {
+  ContinuousPlayMode,
+  ContinuousPlayPreferenceKind,
+  ContinuousPlayReason,
+  LibraryTrack,
+} from '../../../shared/types/library';
 import type { QueueItem, RepeatMode } from '../../stores/PlaybackQueueProvider';
 import { usePlaybackQueue } from '../../stores/PlaybackQueueProvider';
 import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
 import type { TranslationKey } from '../../i18n/locales';
+import { dispatchAudioErrorNotice } from '../../utils/audioErrorNotice';
 
 type PlaybackQueueDrawerProps = {
   isOpen: boolean;
@@ -38,6 +45,7 @@ type QueueDrawerRowProps = {
   onDrop: (event: DragEvent<HTMLElement>, item: QueueItem) => void;
   onPlay: (queueId: string) => void;
   onRemove: (queueId: string) => void;
+  onReduceFrequency: (kind: ContinuousPlayPreferenceKind, value: string) => void;
   t: (key: TranslationKey, options?: Record<string, string | number>) => string;
 };
 
@@ -119,6 +127,19 @@ const nextRepeatMode = (mode: RepeatMode): RepeatMode => {
   return 'off';
 };
 
+const continuousPlayModes: ContinuousPlayMode[] = ['similar', 'deep-cuts', 'recently-added', 'night', 'headphone-test'];
+
+const continuousPlayModeLabel = (mode: ContinuousPlayMode, t: (key: TranslationKey) => string): string =>
+  t(`queue.continuousPlay.mode.${mode}` as TranslationKey);
+
+const recommendationReasonLabel = (
+  reason: ContinuousPlayReason,
+  t: (key: TranslationKey, options?: Record<string, string | number>) => string,
+): string => {
+  const value = reason.value ?? '';
+  return t(`queue.continuousPlay.reason.${reason.code}` as TranslationKey, { value });
+};
+
 const PlaybackQueueDrawerRow = memo(
   ({
     item,
@@ -131,6 +152,7 @@ const PlaybackQueueDrawerRow = memo(
     onDrop,
     onPlay,
     onRemove,
+    onReduceFrequency,
     t,
   }: QueueDrawerRowProps): JSX.Element => (
     <article
@@ -160,12 +182,35 @@ const PlaybackQueueDrawerRow = memo(
       >
         <strong>{item.track.title}</strong>
         <span>{trackArtist(item.track, t)}</span>
+        {item.recommendation ? (
+          <small className="lyrics-queue-row-reason">
+            {item.recommendation.reasons.map((reason) => recommendationReasonLabel(reason, t)).join(' · ')}
+          </small>
+        ) : null}
       </button>
       <span className="lyrics-queue-row-source" title={item.source.label}>
         {item.source.label}
       </span>
       <span className="lyrics-queue-row-duration">{formatDuration(item.track.duration)}</span>
       <div className="lyrics-queue-row-actions" aria-label={t('queue.drawer.rowActions', { title: item.track.title })}>
+        {item.recommendation ? (
+          <details className="lyrics-queue-frequency-menu">
+            <summary aria-label={t('queue.continuousPlay.reduce.title')} title={t('queue.continuousPlay.reduce.title')}>
+              <SlidersHorizontal size={14} />
+            </summary>
+            <div>
+              <button type="button" onClick={() => onReduceFrequency('artist', item.track.artist || item.track.albumArtist)}>
+                {t('queue.continuousPlay.reduce.artist')}
+              </button>
+              <button type="button" disabled={!item.track.album} onClick={() => onReduceFrequency('album', item.track.album)}>
+                {t('queue.continuousPlay.reduce.album')}
+              </button>
+              <button type="button" disabled={!item.track.genre} onClick={() => onReduceFrequency('genre', item.track.genre ?? '')}>
+                {t('queue.continuousPlay.reduce.genre')}
+              </button>
+            </div>
+          </details>
+        ) : null}
         <button type="button" aria-label={t('queue.action.remove', { title: item.track.title })} title={t('queue.drawer.removeTitle')} onClick={() => onRemove(item.queueId)}>
           <X size={15} />
         </button>
@@ -183,7 +228,12 @@ export const PlaybackQueueDrawer = ({ isOpen, onClose, onOpenFullQueue }: Playba
   const [actionError, setActionError] = useState<string | null>(null);
   const [shouldRender, setShouldRender] = useState(isOpen);
   const [isListReady, setIsListReady] = useState(false);
-  const [isFillingQueue, setIsFillingQueue] = useState(false);
+
+  useEffect(() => {
+    if (actionError) {
+      dispatchAudioErrorNotice(actionError);
+    }
+  }, [actionError]);
   const [draggedQueueId, setDraggedQueueId] = useState<string | null>(null);
   const [dropTargetQueueId, setDropTargetQueueId] = useState<string | null>(null);
 
@@ -282,17 +332,6 @@ export const PlaybackQueueDrawer = ({ isOpen, onClose, onOpenFullQueue }: Playba
     onOpenFullQueue();
   }, [onClose, onOpenFullQueue]);
 
-  const handleFillQueue = useCallback((): void => {
-    setActionError(null);
-    setIsFillingQueue(true);
-    void queue
-      .fillQueue()
-      .catch((error) => {
-        setActionError(error instanceof Error ? error.message : String(error));
-      })
-      .finally(() => setIsFillingQueue(false));
-  }, [queue]);
-
   if (!shouldRender) {
     return null;
   }
@@ -348,15 +387,51 @@ export const PlaybackQueueDrawer = ({ isOpen, onClose, onOpenFullQueue }: Playba
             <Trash2 size={15} />
             <span>{t('queue.drawer.clear')}</span>
           </button>
-          <button type="button" disabled={isFillingQueue} onClick={handleFillQueue}>
-            <ListPlus size={15} />
-            <span>{t('queue.action.autoFill')}</span>
+          <button
+            className={queue.autoFillQueueEnabled ? 'is-active' : ''}
+            type="button"
+            aria-pressed={queue.autoFillQueueEnabled}
+            onClick={() => queue.setAutoFillQueueEnabled(!queue.autoFillQueueEnabled)}
+          >
+            <Radio size={15} />
+            <span>{t('queue.continuousPlay.toggle')}</span>
           </button>
           <button type="button" onClick={handleOpenFullQueue}>
             <ExternalLink size={15} />
             <span>{t('queue.drawer.fullQueue')}</span>
           </button>
         </div>
+
+        {queue.autoFillQueueEnabled ? (
+          <section className="lyrics-queue-continuous" aria-label={t('queue.continuousPlay.toggle')}>
+            <div className="lyrics-queue-continuous__modes">
+              {continuousPlayModes.map((mode) => (
+                <button
+                  className={queue.continuousPlayMode === mode ? 'is-active' : ''}
+                  type="button"
+                  key={mode}
+                  aria-pressed={queue.continuousPlayMode === mode}
+                  onClick={() => queue.setContinuousPlayMode(mode)}
+                >
+                  {continuousPlayModeLabel(mode, t)}
+                </button>
+              ))}
+            </div>
+            <div className="lyrics-queue-continuous__status">
+              <span>{queue.isContinuousPlayFilling ? t('queue.continuousPlay.filling') : t('queue.continuousPlay.local')}</span>
+              {queue.continuousPlayPreferences.length > 0 ? (
+                <button type="button" onClick={queue.clearContinuousPlayPreferences}>
+                  {t('queue.continuousPlay.clearPreferences', { count: queue.continuousPlayPreferences.length })}
+                </button>
+              ) : null}
+              {queue.items.some((item) => item.source.type === 'continuous-play') ? (
+                <button type="button" onClick={queue.removeContinuousPlayItems}>
+                  {t('queue.continuousPlay.removeRecommendations')}
+                </button>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
         <div className="lyrics-queue-notices" aria-live="polite">
         {queue.lastQueueFeedback ? (
@@ -402,6 +477,7 @@ export const PlaybackQueueDrawer = ({ isOpen, onClose, onOpenFullQueue }: Playba
                       onDrop={handleDrop}
                       onPlay={playQueueItem}
                       onRemove={removeQueueItem}
+                      onReduceFrequency={queue.reduceContinuousPlayFrequency}
                       t={t}
                     />
                   </div>
@@ -417,7 +493,6 @@ export const PlaybackQueueDrawer = ({ isOpen, onClose, onOpenFullQueue }: Playba
           </div>
         )}
 
-        {actionError ? <p className="lyrics-queue-error">{actionError}</p> : null}
       </section>
     </aside>
   );

@@ -1,9 +1,10 @@
 import { execFileSync as nodeExecFileSync, spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcessByStdio, SpawnOptionsWithStdioTuple } from 'node:child_process';
-import { existsSync as nodeExistsSync, readFileSync } from 'node:fs';
+import { existsSync as nodeExistsSync } from 'node:fs';
 import { join } from 'node:path';
 import readline from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
+import { hasPortableExecutableHeader } from '../app/fileHeader';
 
 export type EchoSrcCudaWorkerStatus = {
   available: boolean;
@@ -104,12 +105,7 @@ const isLikelyExecutableWorkerBinary = (path: string): boolean => {
     return true;
   }
 
-  try {
-    const header = readFileSync(path).subarray(0, 2);
-    return header.length === 2 && header[0] === 0x4d && header[1] === 0x5a;
-  } catch {
-    return false;
-  }
+  return hasPortableExecutableHeader(path);
 };
 
 export const resolveEchoSrcCudaWorkerBinary = (options: EchoSrcCudaWorkerResolveOptions = {}): string | null => {

@@ -102,6 +102,33 @@ describe('InfiniteScrollSentinel', () => {
     expect(onLoadMore).not.toHaveBeenCalled();
   });
 
+  it('uses the nearest explicit scroll root instead of the outer page', () => {
+    const onLoadMore = vi.fn();
+    const { container } = render(
+      <main className="page-surface">
+        <section data-infinite-scroll-root="true">
+          <InfiniteScrollSentinel canLoadMore isLoading={false} onLoadMore={onLoadMore} />
+        </section>
+      </main>,
+    );
+    const page = container.querySelector('.page-surface')!;
+    const root = container.querySelector('[data-infinite-scroll-root="true"]')!;
+    const sentinel = container.querySelector('.infinite-scroll-sentinel')!;
+
+    setRect(page, { bottom: 2000, height: 2000 });
+    setRect(root, { bottom: 500, height: 500 });
+    setRect(sentinel, { top: 1500 });
+    runNextFrame();
+
+    expect(onLoadMore).not.toHaveBeenCalled();
+
+    setRect(sentinel, { top: 1300 });
+    fireEvent.scroll(root);
+    runNextFrame();
+
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
   it('does not load again while loading', () => {
     const onLoadMore = vi.fn();
     const { container } = renderSentinel({ isLoading: true, onLoadMore });

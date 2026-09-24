@@ -17,6 +17,8 @@ struct DeviceDescriptor
     int asioOutputChannels = 0;
     std::string asioOutputChannelNames;
     std::string stableId;
+    std::string connectionType = "unknown";
+    std::string formFactor = "unknown";
 };
 
 enum class DeviceListMode

@@ -2,14 +2,22 @@ import type { AudioOutputMode, AudioSharedBackend } from '../types/audio';
 
 export const isAdvancedNativeOutputPlatform = (platform: string): boolean => platform === 'win32';
 
-export const isNativeSharedOutputPlatform = (platform: string): boolean => platform === 'win32' || platform === 'linux';
+export const isExclusiveNativeOutputPlatform = (platform: string): boolean =>
+  platform === 'win32' || platform === 'darwin';
+
+export const isNativeSharedOutputPlatform = (platform: string): boolean =>
+  platform === 'win32' || platform === 'linux' || platform === 'darwin';
 
 export const normalizeAudioOutputModeForPlatform = (
   outputMode: AudioOutputMode,
   platform: string,
 ): AudioOutputMode => {
   if (outputMode === 'system') {
-    return 'system';
+    return platform === 'darwin' ? 'shared' : 'system';
+  }
+
+  if (outputMode === 'exclusive' && isExclusiveNativeOutputPlatform(platform)) {
+    return outputMode;
   }
 
   return isAdvancedNativeOutputPlatform(platform) ? outputMode : 'shared';

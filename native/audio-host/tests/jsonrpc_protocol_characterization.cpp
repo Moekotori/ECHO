@@ -2,15 +2,25 @@
 #include "../../audio-engine/EqTypes.h"
 
 #include <cmath>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "HostCommon.h"
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace
 {
@@ -33,8 +43,11 @@ struct ProtocolFixture
     echo::ConvolutionProcessor convolution;
     echo::DspHeadroomProcessor headroom;
     echo::ReplayGainProcessor replayGain;
+    echo::CompressorProcessor compressor;
+    echo::SpatialDspProcessor spatialDsp;
     echo::PlaybackRateProcessor playbackRate;
     echo::LevelMeterProcessor levelMeter;
+    echo::DspRackOrder dspRackOrder;
     echo::EqPresetStore presets;
     int nextId = 1;
 
@@ -45,15 +58,23 @@ struct ProtocolFixture
         convolution.prepare(48000.0, 512, 2);
         headroom.prepare(48000.0, 512, 2);
         replayGain.prepare(48000.0, 512, 2);
+        compressor.prepare(48000.0, 512, 2);
+        spatialDsp.prepare(48000.0, 512, 2);
         playbackRate.prepare(48000.0, 512, 2);
         levelMeter.prepare(48000.0, 512, 2);
 
         echo::JsonRpcProtocol::setOpenFileCallback(nullptr);
+        echo::JsonRpcProtocol::setOpenSourceCallback(nullptr);
         echo::JsonRpcProtocol::setPauseCallback(nullptr);
         echo::JsonRpcProtocol::setSeekCallback(nullptr);
         echo::JsonRpcProtocol::setStopCallback(nullptr);
         echo::JsonRpcProtocol::setPrefetchCallback(nullptr);
         echo::JsonRpcProtocol::setVolumeCallback(nullptr);
+        echo::JsonRpcProtocol::setQueueSetCallback(nullptr);
+        echo::JsonRpcProtocol::setQueueClearCallback(nullptr);
+        echo::JsonRpcProtocol::setAutomixPrepareCallback(nullptr);
+        echo::JsonRpcProtocol::setAutomixCancelCallback(nullptr);
+        echo::JsonRpcProtocol::setAutomixStateCallback(nullptr);
         echo::JsonRpcProtocol::setWriteCallback(nullptr);
     }
 
@@ -66,8 +87,11 @@ struct ProtocolFixture
             convolution,
             headroom,
             replayGain,
+            compressor,
+            spatialDsp,
             playbackRate,
             levelMeter,
+            dspRackOrder,
             presets);
     }
 
@@ -202,6 +226,7 @@ void testJsonRpcPlaybackMethodNamesStayStable()
 
     const std::vector<std::string> controlMethods {
         "audio.openFile",
+        "audio.openSource",
         "audio.play",
         "audio.pause",
         "audio.resume",
@@ -220,6 +245,111 @@ void testJsonRpcPlaybackMethodNamesStayStable()
         if (response.contains("error"))
             require(response["error"].value("code", 0) != -32601, method + " is registered, not method-not-found");
     }
+}
+
+void testOpenSourceObjectContract()
+{
+    ProtocolFixture fixture;
+    nlohmann::json receivedSource;
+    int receivedSampleRate = 0;
+    double receivedStartSeconds = 0.0;
+    echo::JsonRpcProtocol::setOpenSourceCallback(
+        [&](const nlohmann::json& source, int sampleRate, double startSeconds, nlohmann::json& result) {
+            receivedSource = source;
+            receivedSampleRate = sampleRate;
+            receivedStartSeconds = startSeconds;
+            result = {
+                {"status", "decoding"},
+                {"operationId", 7},
+                {"filePath", source.value("uri", "")},
+            };
+            return true;
+        });
+
+    const nlohmann::json source = {
+        {"kind", "http"},
+        {"uri", "https://media.example.test/song.flac"},
+        {"headers", {
+            {"Cookie", "MUSIC_U=secret"},
+            {"Referer", "https://music.163.com/"},
+        }},
+        {"mimeType", "audio/flac"},
+    };
+    const auto result = resultFor(fixture, "audio.openSource", nlohmann::json::array({{
+        {"source", source},
+        {"sampleRate", 44100},
+        {"startSeconds", 12.5},
+    }}));
+
+    require(result.value("operationId", 0) == 7, "audio.openSource returns callback result");
+    require(receivedSource == source, "audio.openSource forwards the exact source object");
+    require(receivedSampleRate == 44100, "audio.openSource forwards sample rate");
+    require(std::abs(receivedStartSeconds - 12.5) < 0.0001, "audio.openSource forwards start offset");
+}
+
+void testQueueSnapshotObjectContract()
+{
+    ProtocolFixture fixture;
+    nlohmann::json receivedItems;
+    std::string receivedRepeatMode;
+    std::string receivedCurrentItemId;
+    uint64_t receivedRevision = 0;
+    echo::JsonRpcProtocol::setQueueSetCallback(
+        [&](const nlohmann::json& items, const std::string& repeatMode, uint64_t revision,
+            const std::string& currentItemId) {
+            receivedItems = items;
+            receivedRepeatMode = repeatMode;
+            receivedRevision = revision;
+            receivedCurrentItemId = currentItemId;
+            return true;
+        });
+
+    const nlohmann::json snapshot = {
+        {"revision", 7},
+        {"currentItemId", "queue-1"},
+        {"repeatMode", "all"},
+        {"items", nlohmann::json::array({{
+            {"itemId", "queue-1"},
+            {"trackId", "track-1"},
+            {"filePath", "track.flac"},
+            {"sampleRate", 48000},
+            {"startSeconds", 0.0},
+        }})},
+    };
+    const auto result = resultFor(fixture, "queue.set", snapshot);
+
+    require(result.value("queueRevision", 0) == 7, "queue.set acknowledges the applied revision");
+    require(receivedRevision == 7, "queue.set forwards revision");
+    require(receivedRepeatMode == "all", "queue.set forwards repeat mode");
+    require(receivedCurrentItemId == "queue-1", "queue.set forwards current item identity");
+    require(receivedItems.size() == 1 && receivedItems[0].value("trackId", "") == "track-1",
+        "queue.set forwards atomic queue items");
+}
+
+void testGaplessPrepareContract()
+{
+    ProtocolFixture fixture;
+    nlohmann::json received;
+    echo::JsonRpcProtocol::setGaplessPrepareCallback(
+        [&](const nlohmann::json& request, nlohmann::json& result) {
+            received = request;
+            result = {{"prepared", true}, {"operationId", 9}};
+            return true;
+        });
+
+    const nlohmann::json request = {
+        {"filePath", "next.flac"},
+        {"trackId", "track-next"},
+        {"sampleRate", 48000},
+        {"following", nlohmann::json::array({
+            {{"filePath", "third.flac"}, {"trackId", "track-third"}},
+        })},
+    };
+    const auto result = resultFor(fixture, "audio.gaplessPrepare", request);
+
+    require(result.value("prepared", false), "audio.gaplessPrepare acknowledges a primed next deck");
+    require(result.value("operationId", 0) == 9, "audio.gaplessPrepare returns the current operation identity");
+    require(received == request, "audio.gaplessPrepare forwards the exact request object");
 }
 
 void testEqMethodsReturnDocumentedStateShapes()
@@ -259,6 +389,68 @@ void testDspAndPlaybackControlMethodShapes()
     require(dsp["headroomDb"].is_number(), "dsp.setHeadroom returns headroom");
     dsp = resultFor(fixture, "dsp.setSafetyLimiter", nlohmann::json::array({ true }));
     require(dsp["safetyLimiterEnabled"].is_boolean(), "dsp.setSafetyLimiter returns limiter flag");
+
+    auto rack = resultFor(fixture, "dspRack.getState");
+    require(rack.value("schemaVersion", 0) == 3, "dspRack.getState returns schema version");
+    require(rack["order"] == nlohmann::json::array({
+        "equalizer", "convolution", "replayGain", "compressor",
+        "crossfeed", "stereoField", "channelMatrix", "channelBalance" }),
+        "dspRack.getState returns the default order");
+    require(rack["fixedPostStages"] == nlohmann::json::array({ "headroom", "truePeakLimiter", "playbackRate", "levelMeter" }),
+        "dspRack.getState identifies fixed output safety stages");
+
+    const auto reordered = nlohmann::json::array({
+        "replayGain", "crossfeed", "compressor", "equalizer",
+        "channelMatrix", "channelBalance", "stereoField", "convolution" });
+    rack = resultFor(fixture, "dspRack.setState", nlohmann::json::array({ nlohmann::json::object({ {"order", reordered} }) }));
+    require(rack["order"] == reordered, "dspRack.setState applies a complete unique order");
+
+    const auto invalidRack = errorFor(fixture, "dspRack.setState", nlohmann::json::array({ nlohmann::json::object({
+        {"order", nlohmann::json::array({
+            "equalizer", "equalizer", "replayGain", "compressor",
+            "crossfeed", "stereoField", "channelMatrix", "channelBalance" })}
+    }) }));
+    require(invalidRack.value("code", 0) == -32004, "dspRack.setState rejects duplicate modules");
+    require(resultFor(fixture, "dspRack.getState")["order"] == reordered,
+        "an invalid DSP rack update preserves the last valid order");
+
+    auto compressor = resultFor(fixture, "compressor.getState");
+    for (const auto* key : { "enabled", "thresholdDb", "ratio", "attackMs", "releaseMs", "kneeDb", "makeupDb", "mix", "gainReductionDb", "clippingRisk" })
+        requireHasKey(compressor, key, "compressor.getState");
+    compressor = resultFor(fixture, "compressor.setState", nlohmann::json::array({ nlohmann::json::object({
+        {"enabled", true}, {"thresholdDb", -200.0}, {"ratio", 100.0}, {"attackMs", 0.0},
+        {"releaseMs", 9000.0}, {"kneeDb", 40.0}, {"makeupDb", 30.0}, {"mix", 2.0}
+    }) }));
+    require(compressor.value("enabled", false), "compressor.setState enables processing");
+    require(compressor.value("thresholdDb", 0.0f) == -72.0f, "compressor threshold is clamped");
+    require(compressor.value("ratio", 0.0f) == 40.0f, "compressor ratio is clamped");
+    require(compressor.value("attackMs", 0.0f) == 0.1f, "compressor attack is clamped");
+    require(compressor.value("releaseMs", 0.0f) == 5000.0f, "compressor release is clamped");
+    require(compressor.value("kneeDb", 0.0f) == 24.0f, "compressor knee is clamped");
+    require(compressor.value("makeupDb", 0.0f) == 24.0f, "compressor makeup is clamped");
+    require(compressor.value("mix", 0.0f) == 1.0f, "compressor mix is clamped");
+
+    auto crossfeed = resultFor(fixture, "crossfeed.setState", nlohmann::json::array({ nlohmann::json::object({
+        {"enabled", true}, {"amount", 2.0}, {"cutoffHz", 20.0}
+    }) }));
+    require(crossfeed.value("enabled", false), "crossfeed.setState enables processing");
+    require(crossfeed.value("amount", 0.0f) == 1.0f, "crossfeed amount is clamped");
+    require(crossfeed.value("cutoffHz", 0.0f) == 100.0f, "crossfeed cutoff is clamped");
+
+    auto stereoField = resultFor(fixture, "stereoField.setState", nlohmann::json::array({ nlohmann::json::object({
+        {"enabled", true}, {"width", 3.0}, {"centerGainDb", 30.0}, {"sideGainDb", -30.0}
+    }) }));
+    require(stereoField.value("width", 0.0f) == 2.0f, "stereo field width is clamped");
+    require(stereoField.value("centerGainDb", 0.0f) == 18.0f, "stereo field center gain is clamped");
+    require(stereoField.value("sideGainDb", 0.0f) == -18.0f, "stereo field side gain is clamped");
+
+    auto matrix = resultFor(fixture, "channelMatrix.setState", nlohmann::json::array({ nlohmann::json::object({
+        {"enabled", true}, {"leftToLeft", 3.0}, {"rightToLeft", -3.0},
+        {"leftToRight", 0.25}, {"rightToRight", 0.75}
+    }) }));
+    require(matrix.value("leftToLeft", 0.0f) == 2.0f, "channel matrix coefficient is clamped");
+    require(matrix.value("rightToLeft", 0.0f) == -2.0f, "negative channel matrix coefficient is clamped");
+    require(matrix.value("clippingRisk", false), "channel matrix reports row-sum clipping risk");
 
     require(resultFor(fixture, "playbackRate.setRate", nlohmann::json::array({ 1.25 })).value("rate", 0.0f) > 1.0f, "playbackRate.setRate returns rate");
     require(resultFor(fixture, "playbackRate.setMode", nlohmann::json::array({ "speed" })).value("mode", "") == "speed", "playbackRate.setMode returns mode");
@@ -337,6 +529,265 @@ void testRawStdinEofLifecycleDrainsSource()
     require(source.isDrained(), "raw stdin EOF markInputEnded lets main loop observe isDrained");
 }
 
+void testRawPcmPipePreservesPartialFrames()
+{
+    int pipeFds[2] { -1, -1 };
+#ifdef _WIN32
+    require(_pipe(pipeFds, 4096, _O_BINARY) == 0, "raw PCM test pipe opens");
+#else
+    require(pipe(pipeFds) == 0, "raw PCM test pipe opens");
+#endif
+
+    std::mutex mutex;
+    std::condition_variable receivedSignal;
+    std::vector<float> received;
+    std::string readerError;
+    RawPcmInputReader reader(
+        pipeFds[0],
+        2,
+        [&](const float* samples, int frames)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            received.insert(received.end(), samples, samples + frames * 2);
+            receivedSignal.notify_all();
+            return true;
+        },
+        [&](const std::string& error)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            readerError = error;
+            receivedSignal.notify_all();
+        });
+    reader.start();
+
+    const float expected[] { 0.25f, -0.5f, 0.75f, -1.0f };
+    const auto* bytes = reinterpret_cast<const char*>(expected);
+#ifdef _WIN32
+    require(_write(pipeFds[1], bytes, 3) == 3, "raw PCM partial prefix writes");
+    require(_write(pipeFds[1], bytes + 3, static_cast<unsigned int>(sizeof(expected) - 3)) == sizeof(expected) - 3,
+        "raw PCM partial suffix writes");
+#else
+    require(write(pipeFds[1], bytes, 3) == 3, "raw PCM partial prefix writes");
+    require(write(pipeFds[1], bytes + 3, sizeof(expected) - 3) == static_cast<ssize_t>(sizeof(expected) - 3),
+        "raw PCM partial suffix writes");
+#endif
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        require(receivedSignal.wait_for(lock, std::chrono::seconds(2), [&] { return received.size() == 4 || ! readerError.empty(); }),
+            "raw PCM reader accepts complete frames");
+        require(readerError.empty(), "raw PCM reader reports no error");
+        require(received == std::vector<float>(std::begin(expected), std::end(expected)),
+            "raw PCM reader preserves samples across partial reads");
+        require(reader.bytesConsumed() == sizeof(expected), "raw PCM reader reports consumed byte barrier");
+        require(reader.waitUntilBytesConsumed(sizeof(expected), std::chrono::milliseconds(1)),
+            "raw PCM consumed byte barrier resolves");
+        require(! reader.waitUntilBytesConsumed(sizeof(expected) + 8, std::chrono::milliseconds(1)),
+            "raw PCM consumed byte barrier does not acknowledge missing bytes");
+    }
+
+    reader.stop();
+#ifdef _WIN32
+    _close(pipeFds[0]);
+    _close(pipeFds[1]);
+#else
+    close(pipeFds[0]);
+    close(pipeFds[1]);
+#endif
+}
+
+void testAutomixV2Contracts()
+{
+    ProtocolFixture fixture;
+    nlohmann::json receivedPrepare;
+    std::string receivedCancel;
+    echo::JsonRpcProtocol::setAutomixPrepareCallback(
+        [&](const nlohmann::json& request, nlohmann::json& result) {
+            receivedPrepare = request;
+            result = {
+                {"acknowledged", true},
+                {"state", "armed"},
+                {"planId", request["plan"].value("planId", "")},
+                {"operationId", 9},
+                {"reason", nullptr},
+            };
+            return true;
+        });
+    echo::JsonRpcProtocol::setAutomixCancelCallback(
+        [&](const std::string& planId, nlohmann::json& result) {
+            receivedCancel = planId;
+            result = {
+                {"acknowledged", true},
+                {"state", "idle"},
+                {"planId", planId},
+            };
+            return true;
+        });
+    echo::JsonRpcProtocol::setAutomixStateCallback([] {
+        return nlohmann::json{
+            {"state", "armed"},
+            {"planId", "plan-12"},
+            {"queueRevision", 12},
+            {"operationId", 9},
+            {"reason", nullptr},
+        };
+    });
+
+    const nlohmann::json request = {
+        {"plan", {
+            {"version", 2},
+            {"planId", "plan-12"},
+            {"queueRevision", 12},
+        }},
+        {"nextSource", {
+            {"kind", "local"},
+            {"uri", "next.flac"},
+        }},
+    };
+    const auto prepare = resultFor(fixture, "automix.prepare", request);
+    require(prepare.value("acknowledged", false), "automix.prepare must return an acknowledgement");
+    require(prepare.value("planId", "") == "plan-12", "automix.prepare must preserve plan identity");
+    require(receivedPrepare == request, "automix.prepare forwards the exact immutable request");
+
+    const auto cancel = resultFor(fixture, "automix.cancel", {{"planId", "plan-12"}});
+    require(cancel.value("acknowledged", false), "automix.cancel must return an acknowledgement");
+    require(receivedCancel == "plan-12", "automix.cancel must target the exact plan");
+
+    const auto state = resultFor(fixture, "automix.state");
+    require(state.value("state", "") == "armed", "automix.state returns daemon-owned state");
+    require(state.value("queueRevision", 0) == 12, "automix.state returns queue identity");
+}
+
+void testRawDsdPipePreservesByteFrames()
+{
+    int pipeFds[2] { -1, -1 };
+#ifdef _WIN32
+    require(_pipe(pipeFds, 4096, _O_BINARY) == 0, "raw DSD test pipe opens");
+#else
+    require(pipe(pipeFds) == 0, "raw DSD test pipe opens");
+#endif
+
+    std::mutex mutex;
+    std::condition_variable receivedSignal;
+    std::vector<uint8_t> received;
+    std::string readerError;
+    RawPcmInputReader reader(
+        pipeFds[0],
+        2,
+        1,
+        [&](const uint8_t* samples, int frames)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            received.insert(received.end(), samples, samples + frames * 2);
+            receivedSignal.notify_all();
+            return true;
+        },
+        [&](const std::string& error)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            readerError = error;
+            receivedSignal.notify_all();
+        });
+    reader.start();
+
+    const uint8_t expected[] { 0x69u, 0x96u, 0xa5u, 0x5au };
+#ifdef _WIN32
+    require(_write(pipeFds[1], expected, 1) == 1, "raw DSD partial prefix writes");
+    require(_write(pipeFds[1], expected + 1, static_cast<unsigned int>(sizeof(expected) - 1)) == sizeof(expected) - 1,
+        "raw DSD partial suffix writes");
+#else
+    require(write(pipeFds[1], expected, 1) == 1, "raw DSD partial prefix writes");
+    require(write(pipeFds[1], expected + 1, sizeof(expected) - 1) == static_cast<ssize_t>(sizeof(expected) - 1),
+        "raw DSD partial suffix writes");
+#endif
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        require(receivedSignal.wait_for(lock, std::chrono::seconds(2), [&] { return received.size() == 4 || ! readerError.empty(); }),
+            "raw DSD reader accepts complete byte frames");
+        require(readerError.empty(), "raw DSD reader reports no error");
+        require(received == std::vector<uint8_t>(std::begin(expected), std::end(expected)),
+            "raw DSD reader preserves bytes across partial reads");
+        require(reader.bytesConsumed() == sizeof(expected), "raw DSD reader reports consumed byte barrier");
+    }
+
+    reader.stop();
+#ifdef _WIN32
+    _close(pipeFds[0]);
+    _close(pipeFds[1]);
+#else
+    close(pipeFds[0]);
+    close(pipeFds[1]);
+#endif
+}
+
+void testRawPcmAbortDiscardUnblocksPendingPush()
+{
+    int pipeFds[2] { -1, -1 };
+#ifdef _WIN32
+    require(_pipe(pipeFds, 4096, _O_BINARY) == 0, "raw PCM abort test pipe opens");
+#else
+    require(pipe(pipeFds) == 0, "raw PCM abort test pipe opens");
+#endif
+
+    std::mutex mutex;
+    std::condition_variable pushSignal;
+    bool pushEntered = false;
+    bool releasePush = false;
+    std::string readerError;
+    RawPcmInputReader reader(
+        pipeFds[0],
+        2,
+        [&](const float*, int)
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            pushEntered = true;
+            pushSignal.notify_all();
+            pushSignal.wait(lock, [&] { return releasePush; });
+            return false;
+        },
+        [&](const std::string& error)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            readerError = error;
+            pushSignal.notify_all();
+        });
+    reader.start();
+
+    const float samples[] { 0.1f, -0.1f, 0.2f, -0.2f };
+#ifdef _WIN32
+    require(_write(pipeFds[1], reinterpret_cast<const char*>(samples), sizeof(samples)) == sizeof(samples),
+        "raw PCM abort payload writes");
+#else
+    require(write(pipeFds[1], reinterpret_cast<const char*>(samples), sizeof(samples)) == static_cast<ssize_t>(sizeof(samples)),
+        "raw PCM abort payload writes");
+#endif
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        require(pushSignal.wait_for(lock, std::chrono::seconds(2), [&] { return pushEntered; }),
+            "raw PCM push blocks before abort");
+    }
+    reader.discardThrough(sizeof(samples));
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        releasePush = true;
+    }
+    pushSignal.notify_all();
+    require(reader.waitUntilBytesConsumed(sizeof(samples), std::chrono::seconds(1)),
+        "raw PCM abort establishes discard barrier without a later pipe write");
+    require(readerError.empty(), "raw PCM abort does not report a stopped-input error");
+
+    reader.stop();
+#ifdef _WIN32
+    _close(pipeFds[0]);
+    _close(pipeFds[1]);
+#else
+    close(pipeFds[0]);
+    close(pipeFds[1]);
+#endif
+}
+
 }
 
 int main()
@@ -345,12 +796,19 @@ int main()
         { "no-id notifications return empty", testNoIdNotificationsReturnEmpty },
         { "outbound notifications omit id", testOutboundNotificationHasNoId },
         { "JSON-RPC playback method names stay stable", testJsonRpcPlaybackMethodNamesStayStable },
+        { "audio.openSource object contract", testOpenSourceObjectContract },
+        { "queue snapshot object contract", testQueueSnapshotObjectContract },
+        { "gapless prepare contract", testGaplessPrepareContract },
+        { "AutoMix V2 contracts", testAutomixV2Contracts },
         { "EQ methods return documented state shapes", testEqMethodsReturnDocumentedStateShapes },
         { "DSP and playback-rate method shapes", testDspAndPlaybackControlMethodShapes },
         { "channel balance room correction replay gain presets", testChannelBalanceRoomCorrectionReplayGainAndPresets },
         { "profile stubs and lifecycle", testProfileStubsAndLifecycle },
         { "audio playback control without callbacks", testAudioPlaybackControlWithoutCallbacks },
         { "raw stdin EOF lifecycle drains source", testRawStdinEofLifecycleDrainsSource },
+        { "raw PCM pipe preserves partial frames", testRawPcmPipePreservesPartialFrames },
+        { "raw DSD pipe preserves byte frames", testRawDsdPipePreservesByteFrames },
+        { "raw PCM abort discard unblocks pending push", testRawPcmAbortDiscardUnblocksPendingPush },
     };
 
     try

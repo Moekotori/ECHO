@@ -1,0 +1,125 @@
+:root {
+  --echo-accessibility-ui-scale: 1;
+}
+
+body {
+  width: calc(100% / var(--echo-accessibility-ui-scale));
+  height: calc(100% / var(--echo-accessibility-ui-scale));
+  zoom: var(--echo-accessibility-ui-scale);
+}
+
+html[data-accessibility-reduce-motion='true'] *,
+html[data-accessibility-reduce-motion='true'] *::before,
+html[data-accessibility-reduce-motion='true'] *::after {
+  scroll-behavior: auto !important;
+  animation-delay: 0s !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-delay: 0s !important;
+  transition-duration: 0.01ms !important;
+}
+
+html[data-accessibility-reduce-motion='true'] :is(video, .app-video-wallpaper, .lyrics-mv-video) {
+  visibility: hidden !important;
+}
+
+html[data-accessibility-high-contrast='true'] {
+  --theme-focus-ring: #ffd43b !important;
+  --theme-panel-blur: 0px !important;
+  --echo-polish-panel-blur: 0px !important;
+}
+
+html[data-accessibility-high-contrast='true'][data-theme='dark'] {
+  --theme-page-text: #ffffff !important;
+  --theme-heading-text: #ffffff !important;
+  --theme-muted-text: #e5e7eb !important;
+  --theme-subtle-text: #cbd5e1 !important;
+  --theme-app-bg: #05070b !important;
+  --theme-panel-bg: #0b0f16 !important;
+  --theme-panel-bg-strong: #111827 !important;
+  --theme-panel-bg-muted: #111827 !important;
+  --theme-panel-border: #94a3b8 !important;
+  --theme-panel-border-strong: #ffffff !important;
+  --theme-field-bg: #05070b !important;
+  --theme-field-border: #cbd5e1 !important;
+  --theme-button-bg: #111827 !important;
+  --theme-button-border: #cbd5e1 !important;
+  --theme-button-text: #ffffff !important;
+}
+
+html[data-accessibility-high-contrast='true'][data-theme='light'] {
+  --theme-page-text: #000000 !important;
+  --theme-heading-text: #000000 !important;
+  --theme-muted-text: #1f2937 !important;
+  --theme-subtle-text: #374151 !important;
+  --theme-app-bg: #ffffff !important;
+  --theme-panel-bg: #ffffff !important;
+  --theme-panel-bg-strong: #ffffff !important;
+  --theme-panel-bg-muted: #f3f4f6 !important;
+  --theme-panel-border: #374151 !important;
+  --theme-panel-border-strong: #000000 !important;
+  --theme-field-bg: #ffffff !important;
+  --theme-field-border: #111827 !important;
+  --theme-button-bg: #ffffff !important;
+  --theme-button-border: #111827 !important;
+  --theme-button-text: #000000 !important;
+}
+
+html[data-accessibility-high-contrast='true'] body,
+html[data-accessibility-high-contrast='true'] #root {
+  background: var(--theme-app-bg) !important;
+}
+
+html[data-accessibility-high-contrast='true'] :is(.app-shell, .sidebar, .player-bar, .setting-row, .settings-section--panel) {
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+html[data-accessibility-always-show-focus='true'] :where(
+  button,
+  input,
+  textarea,
+  select,
+  summary,
+  a[href],
+  [role='button'],
+  [role='slider'],
+  [tabindex]:not([tabindex='-1'])
+):focus {
+  outline: 3px solid var(--theme-focus-ring, #ffd43b) !important;
+  outline-offset: 3px !important;
+}
+
+.echo-screen-reader-only {
+  position: fixed !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.accessibility-skip-link {
+  position: fixed;
+  z-index: 100000;
+  top: 8px;
+  left: 12px;
+  padding: 10px 14px;
+  color: var(--theme-button-text);
+  background: var(--theme-button-bg);
+  border: 2px solid var(--theme-focus-ring, #ffd43b);
+  border-radius: 10px;
+  box-shadow: var(--theme-shadow-panel);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-150%);
+}
+
+.accessibility-skip-link:focus {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}

@@ -184,18 +184,26 @@ afterEach(() => {
 describe('PlaybackSessionStore', () => {
   it('saves and loads a queue session with playback mode', () => {
     const { store } = makeStore();
+    const session = makeSession();
+    session.items[0].source = { type: 'continuous-play', label: '本地智能电台', mode: 'night' };
+    session.mode.autoFillQueueEnabled = true;
+    session.mode.continuousPlayMode = 'night';
+    session.mode.continuousPlayPreferences = [{ kind: 'artist', value: 'Artist 1', weight: 0.35 }];
 
-    store.save(makeSession());
+    store.save(session);
     store.close();
 
     expect(store.load()).toMatchObject({
-      items: [{ queueId: 'queue-1', track: { id: 'track-1' } }],
+      items: [{ queueId: 'queue-1', track: { id: 'track-1' }, source: { type: 'continuous-play', mode: 'night' } }],
       currentQueueId: 'queue-1',
       currentTrackId: 'track-1',
       mode: {
         isShuffleEnabled: true,
         repeatMode: 'one',
         automixEnabled: true,
+        autoFillQueueEnabled: true,
+        continuousPlayMode: 'night',
+        continuousPlayPreferences: [{ kind: 'artist', value: 'Artist 1', weight: 0.35 }],
       },
     });
   });
@@ -216,11 +224,12 @@ describe('PlaybackSessionStore', () => {
 
   it('merges audio resume status without replacing queue contents', () => {
     const { store } = makeStore();
-    store.save(makeSession());
+    const queueSave = store.save(makeSession());
 
     const saved = store.saveResumeFromAudioStatus(makeStatus());
 
     expect(saved).toMatchObject({
+      revision: queueSave.revision,
       items: [{ queueId: 'queue-1' }],
       resume: {
         queueId: 'queue-1',
@@ -230,6 +239,19 @@ describe('PlaybackSessionStore', () => {
         state: 'paused',
       },
     });
+  });
+
+  it('rejects stale queue writes without treating resume updates as queue revisions', () => {
+    const { store } = makeStore();
+    const initial = store.save(makeSession());
+
+    expect(initial.revision).toBe(1);
+    expect(store.saveResumeFromAudioStatus(makeStatus())?.revision).toBe(1);
+    expect(() => store.saveWithAudioStatus(makeSession(), makeStatus(), 0))
+      .toThrow('playback_queue_session_conflict');
+
+    const saved = store.saveWithAudioStatus(makeSession(), makeStatus(), 1);
+    expect(saved.revision).toBe(2);
   });
 
   it('clears resume on stopped playback but keeps the queue', () => {

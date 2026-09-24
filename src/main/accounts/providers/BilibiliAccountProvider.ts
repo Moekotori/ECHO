@@ -26,6 +26,7 @@ export class BilibiliAccountProvider extends AccountProviderBase {
         ...record,
         lastCheckedAt: now,
         error: 'Bilibili Cookie is empty.',
+        authInvalid: true,
       };
     }
 
@@ -42,7 +43,11 @@ export class BilibiliAccountProvider extends AccountProviderBase {
       const code = isRecord(payload) ? number(payload.code) : null;
       const isLogin = data?.isLogin === true;
 
-      if (code !== 0 || !isLogin) {
+      if (!response.ok) {
+        throw new Error(`Bilibili login check failed with HTTP ${response.status}.`);
+      }
+
+      if (code === -101 || (code === 0 && !isLogin)) {
         return {
           ...record,
           username: null,
@@ -50,16 +55,26 @@ export class BilibiliAccountProvider extends AccountProviderBase {
           avatarUrl: null,
           lastCheckedAt: now,
           error: 'Bilibili login is invalid or expired. Please sign in again.',
+          authInvalid: true,
+        };
+      }
+
+      if (code !== 0) {
+        return {
+          ...record,
+          lastCheckedAt: now,
+          error: `Bilibili login check was temporarily rejected (code ${code ?? 'unknown'}).`,
         };
       }
 
       return {
         ...record,
-        username: text(data.uname) ?? text(data.mid),
-        displayName: text(data.uname),
-        avatarUrl: text(data.face),
+        username: text(data?.uname) ?? text(data?.mid),
+        displayName: text(data?.uname),
+        avatarUrl: text(data?.face),
         lastCheckedAt: now,
         error: null,
+        authInvalid: false,
       };
     } catch (error) {
       return {
@@ -71,6 +86,6 @@ export class BilibiliAccountProvider extends AccountProviderBase {
   }
 
   protected override isConnected(record: StoredAccountRecord | null | undefined): boolean {
-    return super.isConnected(record) && !record?.error;
+    return super.isConnected(record) && record?.authInvalid !== true;
   }
 }

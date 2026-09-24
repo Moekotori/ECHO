@@ -17,9 +17,12 @@ type AnimatedBackNavigationOptions = {
   rootRef?: RefObject<HTMLElement | null>;
 };
 
-const isVisibleRouteSurface = (element: HTMLElement | null | undefined): boolean => {
+const isVisibleRouteSurface = (
+  element: HTMLElement | null | undefined,
+  isRootScoped: boolean,
+): boolean => {
   if (!element) {
-    return true;
+    return !isRootScoped;
   }
 
   return !element.closest('[hidden], [aria-hidden="true"]');
@@ -42,6 +45,10 @@ export const useAnimatedBackNavigation = (
 
   useEffect(() => {
     if (!enabled) {
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
       setIsReturning(false);
     }
   }, [enabled]);
@@ -72,7 +79,7 @@ export const useAnimatedBackNavigation = (
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (!enabled || !isVisibleRouteSurface(rootRef?.current)) {
+      if (!enabled || !isVisibleRouteSurface(rootRef?.current, Boolean(rootRef))) {
         return;
       }
 

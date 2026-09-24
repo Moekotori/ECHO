@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { Readable } from 'node:stream';
+import { Readable, Transform, type TransformCallback } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { RemoteStreamUrlResult } from '../../../shared/types/remoteSources';
 import { fetchWithNetworkProxy } from '../../network/networkFetch';
@@ -19,6 +19,7 @@ type TokenRecord = {
 const defaultTokenTtlMs = 6 * 60 * 60 * 1000;
 const playbackTokenTtlMs = 24 * 60 * 60 * 1000;
 const upstreamResponseTimeoutMs = 15_000;
+const defaultMaxTokenRecords = 4096;
 
 const safeHeader = (value: string | string[] | undefined): string | undefined => (typeof value === 'string' ? value : undefined);
 const abortError = (): Error => {
@@ -38,11 +39,55 @@ const timeoutSignal = (timeoutMs: number): { signal: AbortSignal; abort: () => v
   };
 };
 
+class StreamIdleTimeout extends Transform {
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly timeoutMs: number,
+    private readonly onTimeout: () => void,
+  ) {
+    super();
+    this.arm();
+  }
+
+  override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
+    this.arm();
+    callback(null, chunk);
+  }
+
+  override _flush(callback: TransformCallback): void {
+    this.clear();
+    callback();
+  }
+
+  override _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
+    this.clear();
+    callback(error);
+  }
+
+  private arm(): void {
+    this.clear();
+    this.timer = setTimeout(() => {
+      const error = abortError();
+      this.onTimeout();
+      this.destroy(error);
+    }, this.timeoutMs);
+    this.timer.unref?.();
+  }
+
+  private clear(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+}
+
 const contentTypeFor = (filePath: string): string => {
   const lower = filePath.toLowerCase();
   if (lower.endsWith('.flac')) return 'audio/flac';
   if (lower.endsWith('.mp3')) return 'audio/mpeg';
-  if (lower.endsWith('.m4a') || lower.endsWith('.m4p') || lower.endsWith('.mp4')) return 'audio/mp4';
+  if (lower.endsWith('.m4a') || lower.endsWith('.m4p') || lower.endsWith('.mp4') || lower.endsWith('.alac')) return 'audio/mp4';
   if (lower.endsWith('.wav')) return 'audio/wav';
   if (lower.endsWith('.ogg') || lower.endsWith('.opus')) return 'audio/ogg';
   if (lower.endsWith('.aac')) return 'audio/aac';
@@ -54,10 +99,16 @@ export class RemoteStreamProxyService {
   private server: Server | null = null;
   private port: number | null = null;
   private readonly tokens = new Map<string, TokenRecord>();
+  private readonly activeUpstreamAborts = new Set<() => void>();
 
   constructor(
     private readonly getAdapter: (provider: string) => RemoteSourceAdapter,
-    private readonly options: { upstreamResponseTimeoutMs?: number; fetch?: typeof fetch } = {},
+    private readonly options: {
+      upstreamResponseTimeoutMs?: number;
+      maxTokenRecords?: number;
+      fetch?: typeof fetch;
+      directFetch?: typeof fetch;
+    } = {},
   ) {}
 
   async createStreamUrl(source: RemoteSourceSecret, remotePath: string, stableKey?: string | null, expiresInSeconds?: number): Promise<RemoteStreamUrlResult> {
@@ -66,12 +117,14 @@ export class RemoteStreamProxyService {
     const ttlMs = expiresInSeconds === undefined ? playbackTokenTtlMs : Math.max(1, Math.round(expiresInSeconds * 1000));
     const expiresAtMs = Date.now() + ttlMs;
 
+    this.pruneTokens();
     this.tokens.set(token, {
       source,
       remotePath: normalizeRemotePath(remotePath),
       stableKey: stableKey ?? null,
       expiresAtMs,
     });
+    this.enforceTokenLimit();
 
     return {
       url: `http://127.0.0.1:${this.port}/remote-stream/${token}`,
@@ -87,8 +140,31 @@ export class RemoteStreamProxyService {
     }
   }
 
+  private pruneTokens(now = Date.now()): void {
+    for (const [token, record] of this.tokens) {
+      if (record.expiresAtMs <= now) {
+        this.tokens.delete(token);
+      }
+    }
+  }
+
+  private enforceTokenLimit(): void {
+    const configured = Number(this.options.maxTokenRecords ?? defaultMaxTokenRecords);
+    const limit = Number.isFinite(configured) ? Math.max(1, Math.min(65_536, Math.round(configured))) : defaultMaxTokenRecords;
+    while (this.tokens.size > limit) {
+      const oldest = this.tokens.keys().next().value;
+      if (typeof oldest !== 'string') {
+        return;
+      }
+      this.tokens.delete(oldest);
+    }
+  }
+
   async close(): Promise<void> {
     this.tokens.clear();
+    for (const abort of this.activeUpstreamAborts) {
+      abort();
+    }
     if (!this.server) {
       return;
     }
@@ -146,6 +222,8 @@ export class RemoteStreamProxyService {
       }
 
       record.expiresAtMs = Math.max(record.expiresAtMs, Date.now() + defaultTokenTtlMs);
+      this.tokens.delete(token);
+      this.tokens.set(token, record);
       await this.forward(record, request, response);
     } catch (error) {
       if (!response.headersSent) {
@@ -190,64 +268,71 @@ export class RemoteStreamProxyService {
     }
 
     const timeout = timeoutSignal(this.options.upstreamResponseTimeoutMs ?? upstreamResponseTimeoutMs);
+    const abortUpstream = (): void => timeout.abort();
+    this.activeUpstreamAborts.add(abortUpstream);
     let responseClosed = false;
     const abortOnClose = (): void => {
       responseClosed = true;
       if (!response.writableEnded) {
         timeout.clear();
-        timeout.abort();
+        abortUpstream();
       }
     };
     response.once('close', abortOnClose);
 
-    let upstream: Response;
     try {
-      upstream = await (this.options.fetch ?? fetchWithNetworkProxy)(proxyRequest.url, {
+      const upstreamFetch = this.options.fetch
+        ?? (proxyRequest.fetchTransport === 'node' ? this.options.directFetch ?? fetch : fetchWithNetworkProxy);
+      const upstream = await upstreamFetch(proxyRequest.url, {
         method: request.method,
         headers,
         signal: timeout.signal,
-      }).finally(timeout.clear);
-    } catch (error) {
-      response.off('close', abortOnClose);
-      throw error;
-    }
-    if (responseClosed || response.destroyed) {
-      upstream.body?.cancel().catch(() => undefined);
-      response.off('close', abortOnClose);
-      return;
-    }
-
-    const status = upstream.status === 416 ? 416 : upstream.status === 206 ? 206 : upstream.ok ? 200 : upstream.status;
-    const acceptRanges = upstream.headers.get('accept-ranges') ?? (upstream.status === 206 || upstream.headers.has('content-range') ? 'bytes' : 'none');
-    const responseHeaders: Record<string, string> = {
-      'Accept-Ranges': acceptRanges,
-      'Cache-Control': 'private, max-age=0, no-store',
-    };
-
-    for (const [source, target] of [
-      ['content-type', 'Content-Type'],
-      ['content-length', 'Content-Length'],
-      ['content-range', 'Content-Range'],
-      ['last-modified', 'Last-Modified'],
-      ['etag', 'ETag'],
-    ] as const) {
-      const value = upstream.headers.get(source);
-      if (value) {
-        responseHeaders[target] = value;
+      });
+      timeout.clear();
+      if (responseClosed || response.destroyed) {
+        upstream.body?.cancel().catch(() => undefined);
+        return;
       }
-    }
 
-    response.writeHead(status, responseHeaders);
-    if (request.method === 'HEAD' || !upstream.body) {
-      response.end();
-      response.off('close', abortOnClose);
-      return;
-    }
+      const status = upstream.status === 416 ? 416 : upstream.status === 206 ? 206 : upstream.ok ? 200 : upstream.status;
+      const acceptRanges = upstream.headers.get('accept-ranges') ?? (upstream.status === 206 || upstream.headers.has('content-range') ? 'bytes' : 'none');
+      const responseHeaders: Record<string, string> = {
+        'Accept-Ranges': acceptRanges,
+        'Cache-Control': 'private, max-age=0, no-store',
+      };
 
-    try {
-      await pipeline(Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]), response);
+      for (const [source, target] of [
+        ['content-type', 'Content-Type'],
+        ['content-length', 'Content-Length'],
+        ['content-range', 'Content-Range'],
+        ['last-modified', 'Last-Modified'],
+        ['etag', 'ETag'],
+      ] as const) {
+        const value = upstream.headers.get(source);
+        if (value) {
+          responseHeaders[target] = value;
+        }
+      }
+
+      response.writeHead(status, responseHeaders);
+      if (request.method === 'HEAD' || !upstream.body) {
+        response.end();
+        return;
+      }
+
+      const idleTimeout = new StreamIdleTimeout(
+        this.options.upstreamResponseTimeoutMs ?? upstreamResponseTimeoutMs,
+        abortUpstream,
+      );
+      await pipeline(
+        Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]),
+        idleTimeout,
+        response,
+      );
     } finally {
+      timeout.clear();
       response.off('close', abortOnClose);
+      this.activeUpstreamAborts.delete(abortUpstream);
     }
   }
 

@@ -39,6 +39,14 @@ export type SmtcEnabledActions = {
   seek?: boolean;
 };
 
+export type SmtcHostCapabilities = {
+  metadata: boolean;
+  timeline: boolean;
+  enabledActions: boolean;
+  seekCommands: boolean;
+  localArtwork: boolean;
+};
+
 export type SmtcHostState =
   | 'disabled'
   | 'unsupported'
@@ -63,6 +71,8 @@ export type SmtcDiagnostics = {
   hostState: SmtcHostState;
   initialized: boolean;
   hostPath: string | null;
+  hostProtocolVersion?: number | null;
+  hostCapabilities?: SmtcHostCapabilities | null;
   lastMetadataAt: string | null;
   lastMetadataTrackId: string | null;
   lastMetadataTitle: string | null;

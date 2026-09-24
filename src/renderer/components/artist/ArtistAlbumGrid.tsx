@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { Disc3 } from 'lucide-react';
 import type { LibraryAlbum, LibraryPage } from '../../../shared/types/library';
 import { useI18n } from '../../i18n/I18nProvider';
+import { localCoverDisplayUrl } from '../../utils/coverDisplayUrl';
 import { InfiniteScrollSentinel } from '../ui/InfiniteScrollSentinel';
 import { MediaWallScrollSpacer, useMediaWallScrollSpacer } from '../ui/MediaWallScrollSpacer';
 
@@ -17,8 +18,8 @@ const pageSize = 12;
 const showAllPageSize = 500;
 const initialSkeletonCount = 6;
 
-const albumOriginalCoverUrl = (album: LibraryAlbum): string | null =>
-  album.coverId ? `echo-cover://original/${encodeURIComponent(album.coverId)}` : null;
+const albumDisplayCoverUrl = (album: LibraryAlbum): string | null =>
+  localCoverDisplayUrl(album.coverId);
 
 const coverFailureKey = (album: LibraryAlbum, coverUrl: string): string => `${album.id}\n${coverUrl}`;
 
@@ -236,7 +237,7 @@ export const ArtistAlbumGrid = ({ artistId, artistName, albumCount, onAlbumSelec
             </div>
           </article>
         )) : albums.map((album) => {
-          const originalCover = albumOriginalCoverUrl(album);
+          const originalCover = albumDisplayCoverUrl(album);
           const coverUrl = originalCover && !failedCoverUrls[coverFailureKey(album, originalCover)]
             ? originalCover
             : album.coverThumb && !failedCoverUrls[coverFailureKey(album, album.coverThumb)]

@@ -4,6 +4,21 @@ import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AccountService } from './AccountService';
 
+const electronMocks = vi.hoisted(() => ({ encryptionAvailable: true }));
+
+vi.mock('electron', () => ({
+  app: { getPath: () => tmpdir() },
+  safeStorage: {
+    isEncryptionAvailable: () => electronMocks.encryptionAvailable,
+    encryptString: (value: string) => Buffer.from(`sealed:${value}`, 'utf8'),
+    decryptString: (value: Buffer) => {
+      const raw = value.toString('utf8');
+      if (!raw.startsWith('sealed:')) throw new Error('bad seal');
+      return raw.slice('sealed:'.length);
+    },
+  },
+}));
+
 const tempDirs: string[] = [];
 
 const createService = (): { service: AccountService; storagePath: string } => {
@@ -17,6 +32,7 @@ const createService = (): { service: AccountService; storagePath: string } => {
 };
 
 afterEach(() => {
+  electronMocks.encryptionAvailable = true;
   vi.unstubAllGlobals();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
@@ -47,8 +63,9 @@ describe('AccountService', () => {
 
     expect(status).toEqual(expect.objectContaining({ provider: 'netease', connected: true }));
     expect(JSON.stringify(service.getStatuses())).not.toContain('MUSIC_U');
-    expect(readFileSync(storagePath, 'utf8')).toContain('MUSIC_U=secret');
-    expect(readFileSync(`${storagePath}.bak`, 'utf8')).toContain('MUSIC_U=secret');
+    expect(readFileSync(storagePath, 'utf8')).not.toContain('MUSIC_U=secret');
+    expect(readFileSync(`${storagePath}.bak`, 'utf8')).not.toContain('MUSIC_U=secret');
+    expect(readFileSync(storagePath, 'utf8')).toContain('encryptedCookie');
   });
 
   it('rejects cookies that cannot be sent as HTTP header values', () => {
@@ -98,6 +115,39 @@ describe('AccountService', () => {
     const restarted = new AccountService(storagePath);
 
     expect(restarted.getStatus('netease')).toEqual(expect.objectContaining({ provider: 'netease', connected: true }));
+  });
+
+  it('migrates legacy plaintext account secrets to OS-encrypted envelopes', () => {
+    const { storagePath } = createService();
+    writeFileSync(storagePath, JSON.stringify({
+      netease: { cookie: 'MUSIC_U=legacy-secret' },
+      spotify: { accessToken: 'legacy-access', refreshToken: 'legacy-refresh' },
+    }), 'utf8');
+
+    const migrated = new AccountService(storagePath);
+    const persisted = readFileSync(storagePath, 'utf8');
+
+    expect(migrated.getCredentials('netease').cookie).toBe('MUSIC_U=legacy-secret');
+    expect(migrated.getSpotifyTokenRecord()).toMatchObject({ accessToken: 'legacy-access', refreshToken: 'legacy-refresh' });
+    expect(persisted).not.toContain('legacy-secret');
+    expect(persisted).not.toContain('legacy-access');
+    expect(persisted).not.toContain('legacy-refresh');
+    expect(persisted).toContain('encryptedAccessToken');
+    expect(readFileSync(`${storagePath}.bak`, 'utf8')).not.toContain('legacy-secret');
+  });
+
+  it('does not erase an encrypted credential when the OS key store is temporarily unreadable', () => {
+    const { storagePath } = createService();
+    const unreadableEnvelope = `safe:${Buffer.from('encrypted-for-another-temporary-context', 'utf8').toString('base64')}`;
+    writeFileSync(storagePath, JSON.stringify({ bilibili: { encryptedCookie: unreadableEnvelope } }), 'utf8');
+
+    const service = new AccountService(storagePath);
+    service.saveCookie('netease', 'MUSIC_U=other-account');
+
+    const persisted = JSON.parse(readFileSync(storagePath, 'utf8')) as {
+      bilibili?: { encryptedCookie?: string };
+    };
+    expect(persisted.bilibili?.encryptedCookie).toBe(unreadableEnvelope);
   });
 
   it('persists YouTube browser auth state', () => {
@@ -150,7 +200,7 @@ describe('AccountService', () => {
     const restored = new AccountService(storagePath);
 
     expect(restored.getStatus('netease')).toEqual(expect.objectContaining({ provider: 'netease', connected: true }));
-    expect(readFileSync(storagePath, 'utf8')).toContain('MUSIC_U=secret');
+    expect(readFileSync(storagePath, 'utf8')).not.toContain('MUSIC_U=secret');
   });
 
   it('sanitizes account records for diagnostics', () => {
@@ -198,6 +248,18 @@ describe('AccountService', () => {
       displayName: 'Moe',
       error: null,
     });
+  });
+
+  it('keeps Bilibili login connected during a transient status-check network failure', async () => {
+    const { service } = createService();
+    service.saveCookie('bilibili', 'SESSDATA=valid; DedeUserID=1; bili_jct=csrf');
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network temporarily unavailable'); }));
+
+    const status = await service.checkAccount('bilibili');
+
+    expect(status.connected).toBe(true);
+    expect(status.error).toContain('network temporarily unavailable');
+    expect(service.getCredentials('bilibili').cookie).toContain('SESSDATA=valid');
   });
 
   it('marks QQ Music cookies disconnected when the login-status API rejects them', async () => {

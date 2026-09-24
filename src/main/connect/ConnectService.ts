@@ -23,6 +23,7 @@ import {
   discoverDlnaDevices,
   getDlnaPositionInfo,
   getDlnaTransportInfo,
+  getDlnaVolume,
   pauseDlna,
   playDlna,
   seekDlna,
@@ -77,6 +78,7 @@ const idleStatus = (): ConnectSessionStatus => ({
   metadata: null,
   positionSeconds: 0,
   durationSeconds: 0,
+  volume: null,
   latencyMs: null,
   error: null,
   updatedAt: new Date().toISOString(),
@@ -423,8 +425,9 @@ export class ConnectService extends EventEmitter<ConnectEvents> {
 
   async setVolume(volume: number): Promise<ConnectSessionStatus> {
     const device = this.requireActiveDlnaDevice();
-    await setDlnaVolume(device, volume);
-    this.setSession({ ...this.getStatus(), error: null, updatedAt: new Date().toISOString() });
+    const safeVolume = Math.max(0, Math.min(100, volume));
+    await setDlnaVolume(device, safeVolume);
+    this.setSession({ ...this.getStatus(), volume: safeVolume, error: null, updatedAt: new Date().toISOString() });
     return this.getStatus();
   }
 
@@ -909,11 +912,12 @@ export class ConnectService extends EventEmitter<ConnectEvents> {
     this.dlnaStatusSyncInFlight = true;
     try {
       const previous = this.withInterpolatedPosition(this.session);
-      const [transportResult, positionResult] = await Promise.allSettled([
+      const [transportResult, positionResult, volumeResult] = await Promise.allSettled([
         getDlnaTransportInfo(device),
         getDlnaPositionInfo(device),
+        getDlnaVolume(device),
       ]);
-      if (transportResult.status === 'rejected' && positionResult.status === 'rejected') {
+      if (transportResult.status === 'rejected' && positionResult.status === 'rejected' && volumeResult.status === 'rejected') {
         return;
       }
 
@@ -925,12 +929,14 @@ export class ConnectService extends EventEmitter<ConnectEvents> {
         ? this.mapDlnaTransportState(transportResult.value.state)
         : null;
       const position = positionResult.status === 'fulfilled' ? positionResult.value : null;
+      const volume = volumeResult.status === 'fulfilled' ? volumeResult.value : null;
       const nextState = transportState ?? previous.state;
       this.setSession({
         ...previous,
         state: nextState,
         positionSeconds: position?.positionSeconds ?? previous.positionSeconds,
         durationSeconds: position?.durationSeconds ?? previous.durationSeconds,
+        volume: volume ?? previous.volume ?? null,
         error: null,
         updatedAt: new Date().toISOString(),
       });

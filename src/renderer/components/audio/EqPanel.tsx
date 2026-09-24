@@ -1,4 +1,5 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import '../../styles/eq.css';
 import { Activity, AudioWaveform, Copy, Gauge, Headphones, Plus, RadioTower, Redo2, RotateCcw, Save, ShieldCheck, Shuffle, SlidersHorizontal, Sparkles, Trash2, Undo2, Waves } from 'lucide-react';
 import type { AudioStatus, ChannelBalanceMonoMode, ChannelBalanceState } from '../../../shared/types/audio';
 import {
@@ -12,6 +13,7 @@ import { dspHeadroomMaxDb, dspHeadroomMinDb, eqFilterTypes, eqFrequenciesHz, eqM
 import { parseEqualizerApoPreset } from '../../../shared/utils/equalizerApoPreset';
 import { useI18n } from '../../i18n/I18nProvider';
 import type { TranslationKey } from '../../i18n/locales';
+import { dispatchAudioErrorNotice } from '../../utils/audioErrorNotice';
 import { getEqBridge } from '../../utils/echoBridge';
 import { EqCurveView } from './EqCurveView';
 import { EqPresetSelector } from './EqPresetSelector';
@@ -456,6 +458,12 @@ export const EqPanel = ({ audioStatus, onAudioStatusRefresh, surface = 'full' }:
   const [importPreview, setImportPreview] = useState<EqPresetImportPreviewResult | null>(null);
   const [importReport, setImportReport] = useState<{ presetName: string; preampDb: number; metadata: EqPresetImportMetadata } | null>(null);
   const [importAuditionSnapshot, setImportAuditionSnapshot] = useState<EqImportAuditionSnapshot | null>(null);
+
+  useEffect(() => {
+    if (error) {
+      dispatchAudioErrorNotice(error);
+    }
+  }, [error]);
   const [apoPasteOpen, setApoPasteOpen] = useState(false);
   const [apoPasteText, setApoPasteText] = useState('');
   const [selectedBandIndex, setSelectedBandIndex] = useState(0);
@@ -583,14 +591,21 @@ export const EqPanel = ({ audioStatus, onAudioStatusRefresh, surface = 'full' }:
         : roomCorrection.status === 'error'
           ? t('settings.eq.room.error')
           : t('settings.eq.room.empty');
-  const currentOutputTarget: EqProfileBindingTarget = {
+  const currentOutputTarget = useMemo<EqProfileBindingTarget>(() => ({
     outputMode: audioStatus?.outputMode ?? 'shared',
     outputBackend: audioStatus?.outputBackend ?? null,
     sharedBackend: audioStatus?.sharedBackend ?? null,
     outputDeviceId: audioStatus?.outputDeviceId ?? null,
     outputDeviceName: audioStatus?.outputDeviceName ?? null,
     outputDeviceType: audioStatus?.outputDeviceType ?? null,
-  };
+  }), [
+    audioStatus?.outputBackend,
+    audioStatus?.outputDeviceId,
+    audioStatus?.outputDeviceName,
+    audioStatus?.outputDeviceType,
+    audioStatus?.outputMode,
+    audioStatus?.sharedBackend,
+  ]);
   const currentOutputLabel = profileBinding?.label ?? `${(currentOutputTarget.outputMode ?? 'shared').toUpperCase()} / ${currentOutputTarget.outputDeviceName ?? t('settings.eq.profile.noOutput')}`;
   const importPreviewRelevantBands = importPreview
     ? importPreview.request.bands
@@ -649,7 +664,7 @@ export const EqPanel = ({ audioStatus, onAudioStatusRefresh, surface = 'full' }:
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : String(refreshError));
     }
-  }, [currentOutputTarget.outputBackend, currentOutputTarget.outputDeviceId, currentOutputTarget.outputDeviceName, currentOutputTarget.outputDeviceType, currentOutputTarget.outputMode, currentOutputTarget.sharedBackend, selectedProfileId, t]);
+  }, [currentOutputTarget, selectedProfileId, t]);
 
   useEffect(() => {
     void refresh();
@@ -3698,7 +3713,6 @@ export const EqPanel = ({ audioStatus, onAudioStatusRefresh, surface = 'full' }:
         </span>
       </footer>
 
-      {error ? <p className="eq-panel-error">{error}</p> : null}
       {!error && exportNotice ? <p className="eq-panel-success" role="status">{exportNotice}</p> : null}
       {apoPasteOpen ? (
         <section className="eq-apo-paste">

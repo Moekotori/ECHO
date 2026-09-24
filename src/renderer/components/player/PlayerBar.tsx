@@ -4,10 +4,11 @@ import { createPortal } from 'react-dom';
 import { Cable, Captions, CircleAlert, Download, FileDown, Loader2, Monitor, X } from 'lucide-react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { audioExportFormats, type AudioExportFormat, type AudioOutputMode, type AudioStatus } from '../../../shared/types/audio';
-import { isReliableBpmAnalysis } from '../../../shared/constants/audioAnalysis';
+import { isReliableBpmAnalysis, shouldAnalyzeBpm } from '../../../shared/constants/audioAnalysis';
 import type { AirPlayReceiverStatus, ConnectMetadata, ConnectReceiverStatus, ConnectSessionStatus } from '../../../shared/types/connect';
 import type { DownloadJob, DownloadJobStatus } from '../../../shared/types/downloads';
 import { playerBarButtonIds, type AppSettings, type PlayerBarButtonId } from '../../../shared/types/appSettings';
+import { resolveEffectivePerformancePolicy } from '../../../shared/utils/performancePolicy';
 import type { LibraryTrack } from '../../../shared/types/library';
 import type { PlaybackStatus } from '../../../shared/types/playback';
 import type { MiniPlayerState } from '../../../shared/types/miniPlayer';
@@ -27,6 +28,7 @@ import { beginPlaybackSeekSnapshot, getVisualPlaybackState, refreshPlaybackStatu
 import { isActiveConnectPlaybackStatus, isHqPlayerConnectStatus, playbackStatusFromConnectStatus } from '../../utils/connectPlayback';
 import { audioOutputRouteStatusChangedEvent, type AudioOutputRouteStatusChangedDetail } from '../../utils/audioOutputRouteEvents';
 import { recordAudioRouteFlightObservation } from '../../utils/audioRouteFlightRecorder';
+import { largeCoverUrlFromCachedVariant, localCoverDisplayUrl } from '../../utils/coverDisplayUrl';
 import { getDacCapabilityAtlasProfile, recordDacCapabilityObservation, type DacCapabilityAtlasProfile } from '../../utils/dacCapabilityAtlas';
 import { openArtistDetailByName } from '../../utils/artistNavigation';
 import { logLyricsConsole } from '../../diagnostics/lyricsConsole';
@@ -41,6 +43,7 @@ import { PlayerVolumeControl } from './PlayerVolumeControl';
 import { SleepTimerButton } from './SleepTimerButton';
 import { formatAudioHostError, shouldSuppressAudioHostError } from './audioErrorFormat';
 import { applyMediaSessionSnapshot } from './mediaSession';
+import { startPlaybackProgressUpdates } from './playbackProgressScheduler';
 import { formatTime, titleFromPath } from './playerFormat';
 
 type PlayerBarProps = {
@@ -56,7 +59,6 @@ type PlayerBarProps = {
   onRevealDesktopLyricsMenu?: () => void;
 };
 
-const lowLoadProgressRenderIntervalMs = 1000;
 const minRealtimeProgressStepSeconds = 0.004;
 const bpmAnalysisStatusPollMs = 1500;
 const playbackSeekedEvent = 'playback:seeked';
@@ -125,19 +127,22 @@ const activeDownloadStatuses = new Set<DownloadJobStatus>([
 const terminalDownloadStatuses = new Set<DownloadJobStatus>(['completed', 'failed', 'cancelled']);
 const unsupportedPlayerDownloadProviders = new Set<StreamingProviderName>(['mock', 'spotify', 'tidal', 'bilibili']);
 const unsupportedStreamingBpmAnalysisProviders = new Set<StreamingProviderName>(['spotify', 'tidal', 'soundcloud']);
-const downloadStatusLabels: Record<DownloadJobStatus, string> = {
-  queued: '排队中',
-  probing: '解析链接',
-  downloading: '下载中',
-  extracting_audio: '提取音频',
-  importing: '导入曲库',
-  binding_mv: '绑定 MV',
-  completed: '下载完成',
-  failed: '下载失败',
-  cancelled: '已取消',
+const downloadStatusLabelKeys: Record<DownloadJobStatus, TranslationKey> = {
+  queued: 'playerBar.download.status.queued',
+  probing: 'playerBar.download.status.probing',
+  downloading: 'playerBar.download.status.downloading',
+  extracting_audio: 'playerBar.download.status.extracting_audio',
+  importing: 'playerBar.download.status.importing',
+  binding_mv: 'playerBar.download.status.binding_mv',
+  completed: 'playerBar.download.status.completed',
+  failed: 'playerBar.download.status.failed',
+  cancelled: 'playerBar.download.status.cancelled',
 };
-const isVerifiedAudioAnalysisBpm = (track: { bpm?: number | null; bpmConfidence?: number | null; analysisStatus?: string | null; fieldSources?: Record<string, string> } | null): boolean =>
-  Boolean(track?.fieldSources?.bpm === 'audio_analysis' && isReliableBpmAnalysis(track.bpm, track.bpmConfidence, track.analysisStatus));
+
+type PlayerBarTranslate = (key: TranslationKey, options?: Record<string, string | number>) => string;
+
+const downloadStatusLabel = (status: DownloadJobStatus, t: PlayerBarTranslate): string =>
+  t(downloadStatusLabelKeys[status]);
 const readAudioAnalysisEnabled = (settings: unknown): boolean => {
   if (!settings || typeof settings !== 'object') {
     return true;
@@ -184,7 +189,7 @@ const readPlayerWaveformProgressEnabled = (settings: unknown): boolean => {
     return false;
   }
 
-  return (settings as { playerWaveformProgressEnabled?: unknown }).playerWaveformProgressEnabled === true;
+  return resolveEffectivePerformancePolicy(settings as Partial<AppSettings>).playerWaveformProgressEnabled;
 };
 
 const readPlayerWaveformProgressEnabledPatch = (patch: unknown): boolean | null => {
@@ -416,6 +421,9 @@ const clampDownloadProgress = (progress: number): number => Math.max(0, Math.min
 
 const dacArrivalAutoHideMs = 2600;
 const dacArrivalOutputModes = new Set<AudioOutputMode>(['exclusive']);
+// Route changes are already visible in the player status surfaces. Do not cover
+// the library with a celebratory takeover card for a successful output change.
+const dacArrivalCeremonyEnabled = false;
 
 const sanitizeDacArrivalText = (value: string | null | undefined): string | null => {
   const text = value?.trim();
@@ -529,15 +537,19 @@ const buildDacArrivalCeremonyNotice = (
   };
 };
 
-const downloadNoticeFromJob = (job: DownloadJob, fallbackTitle: string | null): PlayerDownloadNotice => {
-  const trackTitle = job.title ?? fallbackTitle ?? '当前流媒体';
+const downloadNoticeFromJob = (
+  job: DownloadJob,
+  fallbackTitle: string | null,
+  t: PlayerBarTranslate,
+): PlayerDownloadNotice => {
+  const trackTitle = job.title ?? fallbackTitle ?? t('playerBar.download.currentStreaming');
   const progress = clampDownloadProgress(job.progress);
 
   if (job.status === 'completed') {
     return {
       tone: 'success',
-      title: `下载完成：${trackTitle}`,
-      detail: job.outputPath ?? '已保存到下载文件夹',
+      title: t('playerBar.download.notice.completed', { title: trackTitle }),
+      detail: job.outputPath ?? t('playerBar.download.savedToFolder'),
       progress: 100,
     };
   }
@@ -545,8 +557,8 @@ const downloadNoticeFromJob = (job: DownloadJob, fallbackTitle: string | null): 
   if (job.status === 'failed') {
     return {
       tone: 'error',
-      title: `下载失败：${trackTitle}`,
-      detail: job.error ?? '请稍后重试',
+      title: t('playerBar.download.notice.failed', { title: trackTitle }),
+      detail: job.error ?? t('playerBar.download.retryLater'),
       progress: null,
     };
   }
@@ -554,16 +566,16 @@ const downloadNoticeFromJob = (job: DownloadJob, fallbackTitle: string | null): 
   if (job.status === 'cancelled') {
     return {
       tone: 'error',
-      title: `下载已取消：${trackTitle}`,
-      detail: '任务已停止',
+      title: t('playerBar.download.notice.cancelled', { title: trackTitle }),
+      detail: t('playerBar.download.taskStopped'),
       progress: null,
     };
   }
 
   return {
     tone: 'info',
-    title: `正在下载：${trackTitle}`,
-    detail: `${downloadStatusLabels[job.status]} · ${progress}%`,
+    title: t('playerBar.download.notice.progress', { title: trackTitle }),
+    detail: `${downloadStatusLabel(job.status, t)} · ${progress}%`,
     progress,
   };
 };
@@ -608,11 +620,8 @@ const deferNonCriticalPlaybackTask = (callback: () => void): (() => void) => {
   };
 };
 
-const originalCoverUrlFromThumb = (coverUrl: string | null): string | null =>
-  coverUrl?.replace(/^echo-cover:\/\/(?:thumb|album|large)\//u, 'echo-cover://original/') ?? null;
-
 const playerArtworkUrl = (track: { coverId: string | null; coverThumb: string | null } | null): string | null =>
-  track?.coverId ? `echo-cover://original/${encodeURIComponent(track.coverId)}` : originalCoverUrlFromThumb(track?.coverThumb ?? null);
+  localCoverDisplayUrl(track?.coverId, track?.coverThumb);
 
 const positiveDurationSeconds = (value: number | null | undefined): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
@@ -752,7 +761,7 @@ const PlayerMarqueeText = ({
   ) : (
     <span
       {...commonProps}
-      aria-label={onClick ? `打开艺人详情：${text}` : undefined}
+      aria-label={onClick ? translateFallback('playerBar.openArtistDetail', { name: text }) : undefined}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       role={onClick ? 'button' : undefined}
@@ -802,6 +811,7 @@ export const PlayerBar = ({
   const [dsdAutoVolumeLocked, setDsdAutoVolumeLocked] = useState(false);
   const [audioExportFormat, setAudioExportFormat] = useState<AudioExportFormat>('mp3');
   const [hiddenPlayerBarButtonIds, setHiddenPlayerBarButtonIds] = useState<PlayerBarButtonId[]>(defaultHiddenPlayerBarButtonIds);
+  const [isInitialLayoutReady, setIsInitialLayoutReady] = useState(false);
   const [isAudioExporting, setIsAudioExporting] = useState(false);
   const [miniPlayerState, setMiniPlayerState] = useState<MiniPlayerState | null>(null);
   const [isMiniPlayerBusy, setIsMiniPlayerBusy] = useState(false);
@@ -809,6 +819,8 @@ export const PlayerBar = ({
   const [streamingDownloadNotice, setStreamingDownloadNotice] = useState<PlayerDownloadNotice | null>(null);
   const [dacArrivalNotice, setDacArrivalNotice] = useState<DacArrivalCeremonyNotice | null>(null);
   const [notificationsDisabled, setNotificationsDisabled] = useState(false);
+  const [screenReaderAnnouncementsEnabled, setScreenReaderAnnouncementsEnabled] = useState(false);
+  const [playbackAnnouncement, setPlaybackAnnouncement] = useState('');
   const [isStreamingDownloadResolving, setIsStreamingDownloadResolving] = useState(false);
   const signalPathAnchorRef = useRef<HTMLDivElement | null>(null);
   const hydratedTrackIdsRef = useRef(new Set<string>());
@@ -818,6 +830,7 @@ export const PlayerBar = ({
   const streamingDownloadNoticeTimerRef = useRef<number | null>(null);
   const dacArrivalNoticeTimerRef = useRef<number | null>(null);
   const notificationsDisabledRef = useRef(false);
+  const lastPlaybackAnnouncementKeyRef = useRef<string | null>(null);
   const lastDacArrivalRouteRef = useRef<string | null>(null);
   const explicitDacArrivalRouteRef = useRef<string | null>(null);
   const mvPreloadTrackRef = useRef<string | null>(null);
@@ -1057,13 +1070,15 @@ export const PlayerBar = ({
   const isStreamingPlaybackLoading = currentTrack?.mediaType === 'streaming' && state === 'loading';
   const isLiveStreamPlayback = currentTrack?.isLiveStream === true;
   const isNetworkPlaybackLoading = isRemotePlaybackLoading || isStreamingPlaybackLoading;
-  const networkPlaybackLoadingLabel = isStreamingPlaybackLoading ? '正在加载流媒体' : '正在加载网盘音频';
+  const networkPlaybackLoadingLabel = isStreamingPlaybackLoading
+    ? t('playerBar.loading.streaming')
+    : t('playerBar.loading.remote');
   const isDirectLocalPlayback = !activeReceiverStatus && currentTrackIsDirectLocal;
   const isPlaybackPreparing = visualState === 'loading' && !isDirectLocalPlayback;
   const playbackLoadingLabel = isNetworkPlaybackLoading
     ? networkPlaybackLoadingLabel
     : isPlaybackPreparing
-      ? '正在准备音频'
+      ? t('playerBar.loading.preparing')
       : null;
   const sourcePositionSeconds = activeReceiverStatus
     ? activeReceiverStatus.positionSeconds ?? playbackAudioStatus?.positionSeconds ?? (currentPlaybackStatus?.positionMs ?? 0) / 1000
@@ -1092,7 +1107,11 @@ export const PlayerBar = ({
     '--player-compact-progress-percent': `${compactProgressPercent}%`,
   } as CSSProperties;
   const receiverMetadata = activeReceiverStatus ? activeReceiverStatus.metadata ?? null : null;
-  const title = receiverMetadata?.title ?? currentTrack?.title ?? playbackAudioStatus?.currentTrackTitle ?? titleFromPath(filePath);
+  const title =
+    receiverMetadata?.title ??
+    currentTrack?.title ??
+    playbackAudioStatus?.currentTrackTitle ??
+    (filePath ? titleFromPath(filePath) : 'ECHO Next');
   const artist =
     receiverMetadata?.artist ??
     currentTrack?.artist ??
@@ -1100,7 +1119,41 @@ export const PlayerBar = ({
     playbackAudioStatus?.currentTrackArtist ??
     playbackAudioStatus?.currentTrackAlbumArtist ??
     (filePath ? (isAirPlayReceiverPlaybackActive ? 'AirPlay stream' : 'DLNA stream') : 'Ready');
-  const artworkUrl = receiverMetadata?.coverHttpUrl || playerArtworkUrl(currentTrack) || playbackAudioStatus?.currentTrackCoverUrl || null;
+
+  useEffect(() => {
+    if (!screenReaderAnnouncementsEnabled || !playbackProgressKey || (state !== 'playing' && state !== 'paused')) {
+      if (!screenReaderAnnouncementsEnabled) {
+        lastPlaybackAnnouncementKeyRef.current = null;
+        setPlaybackAnnouncement('');
+      }
+      return;
+    }
+
+    const announcementKey = `${playbackProgressKey}|${state}`;
+    if (lastPlaybackAnnouncementKeyRef.current === announcementKey) {
+      return;
+    }
+    lastPlaybackAnnouncementKeyRef.current = announcementKey;
+
+    const language = document.documentElement.lang.toLowerCase();
+    if (language.startsWith('zh')) {
+      setPlaybackAnnouncement(`${state === 'playing' ? '正在播放' : '已暂停'}：${title}，${artist}`);
+    } else if (language.startsWith('ja')) {
+      setPlaybackAnnouncement(`${state === 'playing' ? '再生中' : '一時停止'}：${title}、${artist}`);
+    } else {
+      setPlaybackAnnouncement(`${state === 'playing' ? 'Now playing' : 'Paused'}: ${title}, ${artist}`);
+    }
+  }, [artist, playbackProgressKey, screenReaderAnnouncementsEnabled, state, title]);
+
+  const statusArtworkUrl = playbackAudioStatus?.currentTrackCoverUrl ?? null;
+  const artworkUrl = receiverMetadata?.coverHttpUrl
+    || playerArtworkUrl(currentTrack)
+    || largeCoverUrlFromCachedVariant(statusArtworkUrl)
+    || statusArtworkUrl;
+
+  useEffect(() => {
+    window.echo?.app?.setTaskbarThumbnailArtwork?.(artworkUrl);
+  }, [artworkUrl]);
   const isLibraryCurrentTrack = Boolean(currentTrack && !currentTrack.isTemporary && currentTrack.mediaType !== 'streaming');
   const streamingTrackId = currentTrack?.id ?? null;
   const streamingTrackMediaType = currentTrack?.mediaType ?? null;
@@ -1142,12 +1195,15 @@ export const PlayerBar = ({
       !isAirPlayReceiverPlaybackActive,
   );
   const audioExportButtonTitle = !filePath
-    ? '没有可导出的本地文件'
+    ? t('playerBar.export.noLocalFile')
     : !canExportCurrentAudio
-      ? '当前来源不支持文件导出'
+      ? t('playerBar.export.sourceUnsupported')
       : isAudioExporting
-        ? '正在导出当前文件'
-        : `导出当前文件为 ${audioExportFormatLabel}（${formatPlaybackRate(currentExportPlaybackRate)}）`;
+        ? t('playerBar.export.exporting')
+        : t('playerBar.export.exportAs', {
+            format: audioExportFormatLabel,
+            rate: formatPlaybackRate(currentExportPlaybackRate),
+          });
   const hiddenPlayerBarButtonIdSet = new Set(hiddenPlayerBarButtonIds);
   const isPlayerBarButtonVisible = (id: PlayerBarButtonId): boolean => !hiddenPlayerBarButtonIdSet.has(id);
   const handleOpenCurrentArtist = useCallback((): void => {
@@ -1248,7 +1304,7 @@ export const PlayerBar = ({
 
   const showDacArrivalNotice = useCallback(
     (notice: DacArrivalCeremonyNotice): void => {
-      if (notificationsDisabledRef.current) {
+      if (!dacArrivalCeremonyEnabled || notificationsDisabledRef.current) {
         return;
       }
 
@@ -1271,19 +1327,25 @@ export const PlayerBar = ({
     let cancelled = false;
 
     const applySettings = (settings: Partial<AppSettings> | null | undefined): void => {
-      if (!settings || !Object.hasOwn(settings, 'notificationsDisabled')) {
+      if (!settings) {
         return;
       }
 
-      const disabled = settings.notificationsDisabled === true;
-      notificationsDisabledRef.current = disabled;
-      setNotificationsDisabled(disabled);
+      if (Object.hasOwn(settings, 'accessibilityPreferences')) {
+        setScreenReaderAnnouncementsEnabled(settings.accessibilityPreferences?.screenReaderAnnouncementsEnabled === true);
+      }
 
-      if (disabled) {
-        clearStreamingDownloadNoticeTimer();
-        clearDacArrivalNoticeTimer();
-        setStreamingDownloadNotice(null);
-        setDacArrivalNotice(null);
+      if (Object.hasOwn(settings, 'notificationsDisabled')) {
+        const disabled = settings.notificationsDisabled === true;
+        notificationsDisabledRef.current = disabled;
+        setNotificationsDisabled(disabled);
+
+        if (disabled) {
+          clearStreamingDownloadNoticeTimer();
+          clearDacArrivalNoticeTimer();
+          setStreamingDownloadNotice(null);
+          setDacArrivalNotice(null);
+        }
       }
     };
 
@@ -1391,7 +1453,7 @@ export const PlayerBar = ({
         return;
       }
 
-      const notice = downloadNoticeFromJob(job, streamingDownloadTitleRef.current);
+      const notice = downloadNoticeFromJob(job, streamingDownloadTitleRef.current, t);
       const isTerminal = terminalDownloadStatuses.has(job.status);
       const isActive = activeDownloadStatuses.has(job.status);
       showStreamingDownloadNotice(notice, isTerminal ? (job.status === 'completed' ? 4500 : 7000) : undefined);
@@ -1402,7 +1464,7 @@ export const PlayerBar = ({
 
     void downloads.getJobs?.().then(applyJobsSnapshot).catch(() => undefined);
     return downloads.onJobsUpdated(applyJobsSnapshot);
-  }, [showStreamingDownloadNotice, streamingDownloadJobId]);
+  }, [showStreamingDownloadNotice, streamingDownloadJobId, t]);
 
   const handleDownloadCurrentStreamingTrack = useCallback(async (): Promise<void> => {
     if (!currentTrack || !currentStreamingDownloadProvider || !streamingTrackProviderTrackId) {
@@ -1412,12 +1474,12 @@ export const PlayerBar = ({
     if (unsupportedPlayerDownloadProviders.has(currentStreamingDownloadProvider)) {
       const detail =
         currentStreamingDownloadProvider === 'spotify'
-          ? 'Spotify 由官方播放器播放，不提供可下载音频 URL。'
-          : 'Mock 流媒体用于开发预览，不写入下载任务。';
+          ? t('playerBar.download.spotifyDetail')
+          : t('playerBar.download.mockDetail');
       showStreamingDownloadNotice(
         {
           tone: 'error',
-          title: '当前平台不支持下载',
+          title: t('playerBar.download.unsupportedPlatform'),
           detail,
           progress: null,
         },
@@ -1432,8 +1494,8 @@ export const PlayerBar = ({
       showStreamingDownloadNotice(
         {
           tone: 'error',
-          title: '下载服务不可用',
-          detail: '请在 ECHO Next 桌面端中使用下载功能。',
+          title: t('playerBar.download.serviceUnavailable'),
+          detail: t('playerBar.download.serviceDetail'),
           progress: null,
         },
         6500,
@@ -1441,13 +1503,13 @@ export const PlayerBar = ({
       return;
     }
 
-    const trackTitle = currentTrack.title || '当前流媒体';
+    const trackTitle = currentTrack.title || t('playerBar.download.currentStreaming');
     streamingDownloadTitleRef.current = trackTitle;
     setIsStreamingDownloadResolving(true);
     showStreamingDownloadNotice({
       tone: 'info',
-      title: `准备下载：${trackTitle}`,
-      detail: '正在解析流媒体地址...',
+      title: t('playerBar.download.notice.preparing', { title: trackTitle }),
+      detail: t('playerBar.download.notice.resolving'),
       progress: 0,
     });
 
@@ -1479,13 +1541,13 @@ export const PlayerBar = ({
         downloadAuthorizationToken: source.downloadAuthorizationToken,
       });
       setStreamingDownloadJobId(job.id);
-      showStreamingDownloadNotice(downloadNoticeFromJob(job, trackTitle));
+      showStreamingDownloadNotice(downloadNoticeFromJob(job, trackTitle, t));
     } catch (downloadError) {
       setStreamingDownloadJobId(null);
       showStreamingDownloadNotice(
         {
           tone: 'error',
-          title: `下载失败：${trackTitle}`,
+          title: t('playerBar.download.notice.failed', { title: trackTitle }),
           detail: downloadError instanceof Error ? downloadError.message : String(downloadError),
           progress: null,
         },
@@ -1494,7 +1556,7 @@ export const PlayerBar = ({
     } finally {
       setIsStreamingDownloadResolving(false);
     }
-  }, [currentStreamingDownloadProvider, currentTrack, showStreamingDownloadNotice, streamingTrackProviderTrackId]);
+  }, [currentStreamingDownloadProvider, currentTrack, showStreamingDownloadNotice, streamingTrackProviderTrackId, t]);
 
   const handleExportCurrentAudio = useCallback(async (): Promise<void> => {
     const sourcePath = filePath;
@@ -1506,8 +1568,8 @@ export const PlayerBar = ({
       showStreamingDownloadNotice(
         {
           tone: 'error',
-          title: '无法导出当前文件',
-          detail: sourcePath ? '当前来源不是本地音频文件。' : '还没有正在播放的本地音频文件。',
+          title: t('playerBar.export.cannotExport'),
+          detail: sourcePath ? t('playerBar.export.notLocal') : t('playerBar.export.noPlayingLocal'),
           progress: null,
         },
         5500,
@@ -1519,8 +1581,8 @@ export const PlayerBar = ({
       showStreamingDownloadNotice(
         {
           tone: 'error',
-          title: '导出服务不可用',
-          detail: '请在 ECHO Next 桌面端中导出音频文件。',
+          title: t('playerBar.export.serviceUnavailable'),
+          detail: t('playerBar.export.serviceDetail'),
           progress: null,
         },
         5500,
@@ -1531,7 +1593,7 @@ export const PlayerBar = ({
     setIsAudioExporting(true);
     showStreamingDownloadNotice({
       tone: 'info',
-      title: `准备导出：${exportTitle}`,
+      title: t('playerBar.export.preparing', { title: exportTitle }),
       detail: `${audioExportFormatLabel} · ${formatPlaybackRate(currentExportPlaybackRate)}`,
       progress: null,
     });
@@ -1555,7 +1617,7 @@ export const PlayerBar = ({
       showStreamingDownloadNotice(
         {
           tone: 'success',
-          title: `导出完成：${exportTitle}`,
+          title: t('playerBar.download.notice.completed', { title: exportTitle }),
           detail: result.filePath,
           progress: 100,
         },
@@ -1565,7 +1627,7 @@ export const PlayerBar = ({
       showStreamingDownloadNotice(
         {
           tone: 'error',
-          title: `导出失败：${exportTitle}`,
+          title: t('playerBar.download.notice.failed', { title: exportTitle }),
           detail: exportError instanceof Error ? exportError.message : String(exportError),
           progress: null,
         },
@@ -1589,6 +1651,7 @@ export const PlayerBar = ({
     playbackAudioStatus?.currentTrackArtist,
     playbackAudioStatus?.currentTrackTitle,
     showStreamingDownloadNotice,
+    t,
   ]);
 
   // NOTE: Spotify auto-advance stays in renderer because Spotify SDK runs here.
@@ -1599,10 +1662,16 @@ export const PlayerBar = ({
     }
 
     let cancelled = false;
+    let syncInFlight = false;
     const expectedUri = `spotify:track:${currentTrack.providerTrackId}`;
     const track = currentTrack;
 
     const syncSpotifyProgress = async (): Promise<void> => {
+      if (syncInFlight) {
+        return;
+      }
+
+      syncInFlight = true;
       try {
         const spotifyState = await window.echo.spotify.getPlaybackState();
         if (cancelled || spotifyState.itemUri !== expectedUri) {
@@ -1622,11 +1691,17 @@ export const PlayerBar = ({
           positionMs: endedAtTrackTail ? durationMs : progressMs,
           durationMs,
           filePath: track.stableKey ?? track.path,
+          volume:
+            typeof spotifyState.volumePercent === 'number'
+              ? Math.max(0, Math.min(1, spotifyState.volumePercent / 100))
+              : undefined,
         };
         setPlaybackStatusSnapshot({ playbackStatus: status, audioStatus: null, error: null });
         window.echo?.desktopLyrics?.publishPlaybackStatus?.(status);
       } catch {
         // Spotify progress polling is best-effort; transport actions surface actionable errors.
+      } finally {
+        syncInFlight = false;
       }
     };
 
@@ -1659,6 +1734,7 @@ export const PlayerBar = ({
         setDsdAutoVolumeLockEnabled(false);
         setAudioExportFormat('mp3');
         setHiddenPlayerBarButtonIds([...defaultHiddenPlayerBarButtonIds]);
+        setIsInitialLayoutReady(true);
         return;
       }
 
@@ -1673,6 +1749,7 @@ export const PlayerBar = ({
             setDsdAutoVolumeLockEnabled(readDsdAutoVolumeLockEnabled(settings));
             setAudioExportFormat(readAudioExportFormat(settings));
             setHiddenPlayerBarButtonIds(readHiddenPlayerBarButtonIds(settings));
+            setIsInitialLayoutReady(true);
           }
         })
         .catch(() => {
@@ -1685,6 +1762,7 @@ export const PlayerBar = ({
             setDsdAutoVolumeLockEnabled(false);
             setAudioExportFormat('mp3');
             setHiddenPlayerBarButtonIds([...defaultHiddenPlayerBarButtonIds]);
+            setIsInitialLayoutReady(true);
           }
         });
     };
@@ -1768,7 +1846,9 @@ export const PlayerBar = ({
 
     setIsMiniPlayerBusy(true);
     try {
-      const nextState = miniPlayerState?.visible ? await miniPlayer.hide() : await miniPlayer.show();
+      const nextState = miniPlayerState?.visible
+        ? await miniPlayer.hide({ restoreMainWindow: true })
+        : await miniPlayer.show();
       setMiniPlayerState(nextState);
     } catch (miniPlayerError) {
       setError(miniPlayerError instanceof Error ? miniPlayerError.message : String(miniPlayerError));
@@ -1892,48 +1972,32 @@ export const PlayerBar = ({
       );
     };
 
-    if (lowLoadPlaybackModeEnabled) {
-      const timer = window.setInterval(updateRealtimePosition, lowLoadProgressRenderIntervalMs);
-      return () => window.clearInterval(timer);
-    }
-
-    let frameId: number | null = null;
-    let backgroundTimerId: number | null = null;
-    const stopRealtimeFrame = (): void => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-        frameId = null;
-      }
-    };
-    const stopBackgroundTimer = (): void => {
-      if (backgroundTimerId !== null) {
-        window.clearInterval(backgroundTimerId);
-        backgroundTimerId = null;
-      }
-    };
-    const tick = (): void => {
-      updateRealtimePosition();
-      frameId = window.requestAnimationFrame(tick);
-    };
+    let stopProgressUpdates: (() => void) | null = null;
 
     const syncProgressLoop = (): void => {
-      stopRealtimeFrame();
-      stopBackgroundTimer();
+      stopProgressUpdates?.();
+      stopProgressUpdates = null;
 
-      if (document.visibilityState === 'visible') {
-        frameId = window.requestAnimationFrame(tick);
-      } else {
-        updateRealtimePosition();
-        backgroundTimerId = window.setInterval(updateRealtimePosition, lowLoadProgressRenderIntervalMs);
+      if (document.visibilityState !== 'visible') {
+        return;
       }
+
+      stopProgressUpdates = startPlaybackProgressUpdates(
+        updateRealtimePosition,
+        lowLoadPlaybackModeEnabled,
+        document.hasFocus(),
+      );
     };
 
     syncProgressLoop();
     document.addEventListener('visibilitychange', syncProgressLoop);
+    window.addEventListener('focus', syncProgressLoop);
+    window.addEventListener('blur', syncProgressLoop);
     return () => {
       document.removeEventListener('visibilitychange', syncProgressLoop);
-      stopRealtimeFrame();
-      stopBackgroundTimer();
+      window.removeEventListener('focus', syncProgressLoop);
+      window.removeEventListener('blur', syncProgressLoop);
+      stopProgressUpdates?.();
     };
   }, [lowLoadPlaybackModeEnabled, seekPreviewSeconds, state, visualState]);
 
@@ -1973,8 +2037,7 @@ export const PlayerBar = ({
       analysisTrack &&
       !analysisTrack.isTemporary &&
       (analysisTrack.mediaType ?? 'local') === 'local' &&
-      analysisTrack.analysisStatus !== 'analyzing' &&
-      !isVerifiedAudioAnalysisBpm(analysisTrack);
+      shouldAnalyzeBpm(analysisTrack);
     const shouldStartAnalysis = isPlaying;
     const canStartAnalysis = audioAnalysisEnabled === true && !lowLoadPlaybackModeEnabled;
     const shouldContinueAnalysis = Boolean(existingJobId && existingJobId !== 'done');
@@ -2207,7 +2270,7 @@ export const PlayerBar = ({
       void (async () => {
         try {
           const settings = await mv.getSettings();
-          if (cancelled || settings.enabled === false || !settings.autoPreload) {
+          if (cancelled || settings.enabled === false || settings.autoSearch === false || !settings.autoPreload) {
             return;
           }
 
@@ -2230,7 +2293,7 @@ export const PlayerBar = ({
               durationSeconds: currentTrack?.duration && currentTrack.duration > 0 ? currentTrack.duration : null,
               coverThumb: currentTrack?.coverThumb ?? artworkUrl ?? null,
               mediaType: currentTrack?.mediaType ?? 'remote',
-              query: [currentTrack?.title || title, currentTrack?.artist || currentTrack?.albumArtist || artist].filter(Boolean).join(' '),
+              autoSelect: true,
             });
           } else {
             await mv.searchNetworkCandidates(trackId);
@@ -2341,12 +2404,30 @@ export const PlayerBar = ({
         .catch(() => undefined);
     };
 
-    refreshHqPlayerStatus();
-    const interval = window.setInterval(refreshHqPlayerStatus, 2500);
+    let interval: number | null = null;
+    const stopPolling = (): void => {
+      if (interval !== null) {
+        window.clearInterval(interval);
+        interval = null;
+      }
+    };
+    const syncPolling = (): void => {
+      stopPolling();
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
+      refreshHqPlayerStatus();
+      interval = window.setInterval(refreshHqPlayerStatus, 2500);
+    };
+
+    syncPolling();
+    document.addEventListener('visibilitychange', syncPolling);
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', syncPolling);
+      stopPolling();
     };
   }, [connectStatus]);
 
@@ -2898,9 +2979,18 @@ export const PlayerBar = ({
       )
     : null;
 
+  // The regular footer and the lyrics/MV pill use radically different layout
+  // contexts. Projecting between them briefly applies the full-width footer's
+  // old coordinates to the pill on first entry, so let CSS place the pill
+  // atomically while retaining layout projection for the regular footer.
+  const playerBarLayout = lyricsMiniPlayer ? false : 'position';
+
   return (
     <>
       {dacArrivalCeremony}
+      <div className="echo-screen-reader-only" role="status" aria-live="polite" aria-atomic="true">
+        {playbackAnnouncement}
+      </div>
       <motion.footer
         className="player-bar"
         data-compact-away={lyricsMiniPlayer && lyricsCompactOnIdle ? 'true' : undefined}
@@ -2908,9 +2998,11 @@ export const PlayerBar = ({
         data-network-loading={isNetworkPlaybackLoading ? 'true' : undefined}
         data-playback-loading={isPlaybackPreparing ? 'true' : undefined}
         data-playback-state={visualState}
+        data-initial-layout-ready={isInitialLayoutReady ? 'true' : 'false'}
+        data-layout-projection={playerBarLayout || 'disabled'}
         aria-busy={isPlaybackPreparing}
-        aria-label="播放控制"
-        layout="position"
+        aria-label={t('playerBar.aria.playbackControls')}
+        layout={playerBarLayout}
         transition={miniPlayerTransition}
       >
       {!notificationsDisabled && streamingDownloadNotice ? (
@@ -2923,7 +3015,7 @@ export const PlayerBar = ({
             <div
               className="player-download-notice-progress"
               role="progressbar"
-              aria-label="流媒体下载进度"
+              aria-label={t('playerBar.download.ariaProgress')}
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={streamingDownloadNotice.progress}
@@ -2935,7 +3027,7 @@ export const PlayerBar = ({
       ) : null}
       {lyricsMiniPlayer && lyricsCompactOnIdle ? (
         <div className="player-compact-progress" aria-hidden="true" style={compactProgressStyle}>
-          <span>{isPlaybackPreparing ? '加载中' : formatTime(boundedCompactPositionSeconds)}</span>
+          <span>{isPlaybackPreparing ? t('playerBar.loading.short') : formatTime(boundedCompactPositionSeconds)}</span>
           <span className="player-compact-progress__track">
             <span />
           </span>
@@ -2947,8 +3039,8 @@ export const PlayerBar = ({
           className="player-cover"
           data-empty={!artworkUrl}
           type="button"
-          aria-label="打开歌词"
-          title="打开歌词"
+          aria-label={t('playerBar.aria.openLyrics')}
+          title={t('playerBar.aria.openLyrics')}
           data-loading={isPlaybackPreparing ? 'true' : undefined}
           layoutId={playerCoverLayoutId(trackId)}
           transition={springSoft}
@@ -2970,7 +3062,7 @@ export const PlayerBar = ({
           <PlayerStatusChips
             hqPlayerActiveRate={hqPlayerOutputRate}
             showSecondarySpecs={false}
-            status={audioStatus}
+            status={playbackAudioStatus}
             state={state}
             track={currentTrack}
           />
@@ -3046,8 +3138,8 @@ export const PlayerBar = ({
           <button
             className={`icon-button ${desktopLyricsVisible ? 'is-soft-active' : ''}`}
             type="button"
-            aria-label={desktopLyricsVisible ? '隐藏桌面歌词' : '显示桌面歌词'}
-            title={desktopLyricsVisible ? '隐藏桌面歌词，右键自动解锁并常驻或隐藏设置栏' : '显示桌面歌词，右键自动解锁并常驻或隐藏设置栏'}
+            aria-label={desktopLyricsVisible ? t('playerBar.aria.hideDesktopLyrics') : t('playerBar.aria.showDesktopLyrics')}
+            title={desktopLyricsVisible ? t('playerBar.title.hideDesktopLyrics') : t('playerBar.title.showDesktopLyrics')}
             aria-pressed={desktopLyricsVisible}
             onClick={() => onToggleDesktopLyrics?.()}
             onContextMenu={(event) => {
@@ -3066,8 +3158,8 @@ export const PlayerBar = ({
           <button
             className={`icon-button ${miniPlayerState?.visible ? 'is-soft-active' : ''}`}
             type="button"
-            aria-label={miniPlayerState?.visible ? '隐藏迷你播放器' : '显示迷你播放器'}
-            title={miniPlayerState?.visible ? '隐藏迷你播放器' : '显示迷你播放器'}
+            aria-label={miniPlayerState?.visible ? t('playerBar.aria.hideMiniPlayer') : t('playerBar.aria.showMiniPlayer')}
+            title={miniPlayerState?.visible ? t('playerBar.aria.hideMiniPlayer') : t('playerBar.aria.showMiniPlayer')}
             disabled={!window.echo?.miniPlayer || isMiniPlayerBusy}
             onClick={() => void handleToggleMiniPlayer()}
           >
@@ -3100,15 +3192,15 @@ export const PlayerBar = ({
           <button
             className="icon-button"
             type="button"
-            aria-label="下载当前流媒体"
+            aria-label={t('playerBar.download.ariaDownload')}
             title={
               canDownloadCurrentStreamingTrack
                 ? isCurrentStreamingDownloadBusy
-                  ? '正在准备或下载'
-                  : '下载当前流媒体'
+                  ? t('playerBar.download.title.preparing')
+                  : t('playerBar.download.title.download')
                 : currentStreamingDownloadProvider === 'spotify'
-                  ? 'Spotify 不支持下载'
-                  : '当前流媒体源不支持下载'
+                  ? t('playerBar.download.title.spotifyUnsupported')
+                  : t('playerBar.download.title.sourceUnsupported')
             }
             disabled={!canDownloadCurrentStreamingTrack || isCurrentStreamingDownloadBusy}
             onClick={() => void handleDownloadCurrentStreamingTrack()}

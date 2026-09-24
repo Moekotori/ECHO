@@ -10,6 +10,9 @@ export function createAppApi(
 ): EchoApi['app'] {
   return {
     getVersion: () => ipcRenderer.invoke(IpcChannels.AppGetVersion),
+    getRuntimeAudioComponentStatus: () => ipcRenderer.invoke(IpcChannels.AppGetRuntimeAudioComponentStatus),
+    importRuntimeAudioComponent: () => ipcRenderer.invoke(IpcChannels.AppImportRuntimeAudioComponent),
+    openRuntimeAudioComponentDownloadPage: () => ipcRenderer.invoke(IpcChannels.AppOpenRuntimeAudioComponentDownloadPage),
     minimize: () => ipcRenderer.invoke(IpcChannels.AppWindowMinimize),
     toggleMaximize: () => ipcRenderer.invoke(IpcChannels.AppWindowToggleMaximize),
     isMaximized: () => ipcRenderer.invoke(IpcChannels.AppWindowIsMaximized),
@@ -36,6 +39,7 @@ export function createAppApi(
     getSettings: () => ipcRenderer.invoke(IpcChannels.AppGetSettings),
     setSettings: (patch) => ipcRenderer.invoke(IpcChannels.AppSetSettings, patch),
     getTaskbarPlaybackStatus: () => ipcRenderer.invoke(IpcChannels.AppGetTaskbarPlaybackStatus),
+    setTaskbarThumbnailArtwork: (artworkUrl) => ipcRenderer.send(IpcChannels.AppSetTaskbarThumbnailArtwork, artworkUrl),
     resetSettings: () => ipcRenderer.invoke(IpcChannels.AppResetSettings),
     exportSettings: () => ipcRenderer.invoke(IpcChannels.AppExportSettings),
     importSettings: () => ipcRenderer.invoke(IpcChannels.AppImportSettings),
@@ -65,6 +69,7 @@ export function createAppApi(
     getUpdateStatus: () => ipcRenderer.invoke(IpcChannels.AppGetUpdateStatus),
     checkForUpdates: () => ipcRenderer.invoke(IpcChannels.AppCheckForUpdates),
     downloadUpdate: () => ipcRenderer.invoke(IpcChannels.AppDownloadUpdate),
+    installUpdate: () => ipcRenderer.invoke(IpcChannels.AppInstallUpdate),
     onUpdateStatus: (handler) => {
       const listener = (_event: Electron.IpcRendererEvent, status: unknown): void => {
         handler(status as UpdateStatus);
@@ -85,7 +90,12 @@ export function createAppApi(
     registerEchoProAccount: (credentials) => ipcRenderer.invoke(IpcChannels.AppEchoProAccountRegister, credentials),
     logoutEchoProAccount: () => ipcRenderer.invoke(IpcChannels.AppEchoProAccountLogout),
     redeemEchoProKey: (key) => ipcRenderer.invoke(IpcChannels.AppEchoProAccountRedeemKey, key),
+    getEchoProLocalEntitlementStatus: () => ipcRenderer.invoke(IpcChannels.AppEchoProLocalEntitlementGetStatus),
     activateEchoProPlugin: (request) => ipcRenderer.invoke(IpcChannels.AppEchoProPluginActivate, request),
+    releaseEchoProCurrentDevice: (orderId) =>
+      orderId === undefined
+        ? ipcRenderer.invoke(IpcChannels.AppEchoProPluginReleaseCurrentDevice)
+        : ipcRenderer.invoke(IpcChannels.AppEchoProPluginReleaseCurrentDevice, orderId),
     releaseEchoProDevices: (password) => ipcRenderer.invoke(IpcChannels.AppEchoProAccountReleaseDevices, password),
     getEchoProMachineCode: () => ipcRenderer.invoke(IpcChannels.AppEchoProMachineCodeGet),
     getEchoProSettingsCloudStatus: () => ipcRenderer.invoke(IpcChannels.AppEchoProSettingsCloudGetStatus),

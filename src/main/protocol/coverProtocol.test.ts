@@ -7,6 +7,9 @@ const handleMock = vi.fn();
 const registerSchemesAsPrivilegedMock = vi.fn();
 const getAppSettingsMock = vi.fn();
 const readRemoteCoverMock = vi.fn();
+const readSubsonicCoverByIdentityMock = vi.fn();
+const resolveCoverAssetMock = vi.fn();
+const resolveArtistImageAssetMock = vi.fn();
 let wallpaperDirectory = '';
 let coverCacheDirectory = '';
 let userDataPath = '';
@@ -31,13 +34,15 @@ vi.mock('../app/appSettings', () => ({
 vi.mock('../library/LibraryService', () => ({
   getLibraryService: () => ({
     getCoverCacheDir: () => coverCacheDirectory,
-    resolveCoverAsset: vi.fn(),
+    resolveCoverAsset: resolveCoverAssetMock,
+    resolveArtistImageAsset: resolveArtistImageAssetMock,
   }),
 }));
 
 vi.mock('../library/remote/RemoteSourceService', () => ({
   getRemoteSourceService: () => ({
     readRemoteCover: readRemoteCoverMock,
+    readSubsonicCoverByIdentity: readSubsonicCoverByIdentityMock,
   }),
 }));
 
@@ -62,7 +67,18 @@ const getImageHandler = (): ((request: Request) => Promise<Response>) => {
   return call?.[1] as (request: Request) => Promise<Response>;
 };
 
+const getCoverHandler = (): ((request: Request) => Promise<Response>) => {
+  const call = handleMock.mock.calls.find(([scheme]) => scheme === 'echo-cover');
+  return call?.[1] as (request: Request) => Promise<Response>;
+};
+
+const getArtistImageHandler = (): ((request: Request) => Promise<Response>) => {
+  const call = handleMock.mock.calls.find(([scheme]) => scheme === 'echo-artist-image');
+  return call?.[1] as (request: Request) => Promise<Response>;
+};
+
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of tempRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
@@ -101,6 +117,9 @@ describe('echo-wallpaper protocol', () => {
     handleMock.mockClear();
     getAppSettingsMock.mockReset();
     readRemoteCoverMock.mockReset();
+    readSubsonicCoverByIdentityMock.mockReset();
+    resolveCoverAssetMock.mockReset();
+    resolveArtistImageAssetMock.mockReset();
     wallpaperDirectory = makeTempRoot();
     coverCacheDirectory = join(wallpaperDirectory, 'cover-cache');
     userDataPath = join(wallpaperDirectory, 'user-data');
@@ -122,6 +141,81 @@ describe('echo-wallpaper protocol', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('image/png');
     expect(await response.text()).toBe('wallpaper');
+  });
+
+  it('serves image wallpaper metadata without reading a body for HEAD requests', async () => {
+    const wallpaperPath = join(wallpaperDirectory, 'custom.png');
+    writeFileSync(wallpaperPath, 'wallpaper');
+    getAppSettingsMock.mockReturnValue({ lyricsCustomWallpaperPath: wallpaperPath });
+
+    const response = await getWallpaperHandler()(new Request('echo-wallpaper://lyrics/custom', { method: 'HEAD' }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('image/png');
+    expect(response.headers.get('Content-Length')).toBe('9');
+    expect(await response.text()).toBe('');
+  });
+
+  it('streams a local cover while preserving its MIME type and immutable cache policy', async () => {
+    mkdirSync(coverCacheDirectory, { recursive: true });
+    const coverPath = join(coverCacheDirectory, 'cover.webp');
+    writeFileSync(coverPath, 'cover-body');
+    resolveCoverAssetMock.mockReturnValue({ filePath: coverPath, mimeType: 'image/webp' });
+
+    const response = await getCoverHandler()(new Request('echo-cover://thumb/cover-1'));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('image/webp');
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+    expect(await response.text()).toBe('cover-body');
+    expect(resolveCoverAssetMock).toHaveBeenCalledWith('cover-1', 'thumb');
+  });
+
+  it('serves the static large asset for legacy original renderer requests', async () => {
+    mkdirSync(coverCacheDirectory, { recursive: true });
+    const coverPath = join(coverCacheDirectory, 'large.webp');
+    writeFileSync(coverPath, 'static-cover');
+    resolveCoverAssetMock.mockReturnValue({ filePath: coverPath, mimeType: 'image/webp' });
+
+    const response = await getCoverHandler()(new Request('echo-cover://original/cover-1'));
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('static-cover');
+    expect(resolveCoverAssetMock).toHaveBeenCalledWith('cover-1', 'large');
+  });
+
+  it('streams a local artist image while preserving its MIME type and immutable cache policy', async () => {
+    mkdirSync(coverCacheDirectory, { recursive: true });
+    const artistImagePath = join(coverCacheDirectory, 'artist.jpg');
+    writeFileSync(artistImagePath, 'artist-body');
+    resolveArtistImageAssetMock.mockReturnValue({ filePath: artistImagePath, mimeType: 'image/jpeg' });
+
+    const response = await getArtistImageHandler()(new Request('echo-artist-image://large/artist-1'));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('image/jpeg');
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+    expect(await response.text()).toBe('artist-body');
+  });
+
+  it('preserves missing-cover fallbacks for thumbnails and originals', async () => {
+    resolveCoverAssetMock.mockReturnValue(null);
+
+    const thumbnail = await getCoverHandler()(new Request('echo-cover://thumb/missing'));
+    const original = await getCoverHandler()(new Request('echo-cover://original/missing'));
+
+    expect(thumbnail.status).toBe(200);
+    expect(await thumbnail.text()).toContain('<svg');
+    expect(original.status).toBe(404);
+  });
+
+  it('does not stream a directory returned as an artist image asset', async () => {
+    mkdirSync(coverCacheDirectory, { recursive: true });
+    resolveArtistImageAssetMock.mockReturnValue({ filePath: coverCacheDirectory, mimeType: 'image/jpeg' });
+
+    const response = await getArtistImageHandler()(new Request('echo-artist-image://large/not-a-file'));
+
+    expect(response.status).toBe(404);
   });
 
   it('serves the configured app wallpaper from the app wallpaper directory', async () => {
@@ -229,15 +323,31 @@ describe('echo-wallpaper protocol', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('image/jpeg');
     expect(await response.text()).toBe('image');
-    expect(fetchMock).toHaveBeenCalledWith(
-      imageUrl,
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          referer: 'https://www.bilibili.com/',
-        }),
-        redirect: 'follow',
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(requestInit.redirect).toBe('follow');
+    expect(new Headers(requestInit.headers).get('referer')).toBe('https://www.bilibili.com/');
+  });
+
+  it('rejects remote images whose declared body exceeds the memory-safe limit', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('oversized', {
+        headers: {
+          'Content-Length': String(16 * 1024 * 1024 + 1),
+          'Content-Type': 'image/jpeg',
+        },
       }),
     );
+    const imageUrl = 'https://i0.hdslb.com/bfs/archive/oversized-cover.jpg';
+
+    const response = await getImageHandler()(new Request(`echo-image://remote/${encodeURIComponent(imageUrl)}`));
+
+    expect(response.status).toBe(413);
+    const diagnostics = await import('../diagnostics/CoverProtocolDiagnostics');
+    expect(diagnostics.getCoverProtocolDiagnosticsSnapshot().recentRequests[0]).toMatchObject({
+      outcome: 'blocked',
+      source: 'remote-image-too-large',
+    });
   });
 
   it('records safe diagnostics for image protocol requests', async () => {
@@ -289,15 +399,10 @@ describe('echo-wallpaper protocol', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('image/jpeg');
-    expect(fetchMock).toHaveBeenCalledWith(
-      imageUrl,
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          referer: 'https://osu.ppy.sh/',
-        }),
-        redirect: 'follow',
-      }),
-    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(requestInit.redirect).toBe('follow');
+    expect(new Headers(requestInit.headers).get('referer')).toBe('https://osu.ppy.sh/');
   });
 
   it('proxies Subsonic covers by track id without exposing source credentials', async () => {
@@ -341,5 +446,26 @@ describe('echo-wallpaper protocol', () => {
     expect(second.headers.get('Content-Type')).toBe('image/jpeg');
     expect(await second.text()).toBe('cached-cover');
     expect(readRemoteCoverMock).not.toHaveBeenCalled();
+  });
+
+  it('coalesces concurrent Subsonic album-cover requests by canonical identity', async () => {
+    readSubsonicCoverByIdentityMock.mockResolvedValue({
+      status: 'ok',
+      data: new Uint8Array(Buffer.from('shared-cover')),
+      mimeType: 'image/png',
+      fieldSources: { cover: 'subsonic' },
+      warnings: [],
+      errors: [],
+    });
+    const query = 'size=512&cacheKey=subsonic%3Asource%3Asource-1%3Acover-art%3Acover-1&sourceId=source-1&coverArt=cover-1';
+
+    const [first, second] = await Promise.all([
+      getImageHandler()(new Request(`echo-image://subsonic-cover/track-1?${query}`)),
+      getImageHandler()(new Request(`echo-image://subsonic-cover/track-2?${query}`)),
+    ]);
+
+    expect(await first.text()).toBe('shared-cover');
+    expect(await second.text()).toBe('shared-cover');
+    expect(readSubsonicCoverByIdentityMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -224,10 +224,10 @@ buildNpmPackage {
   ];
 
   meta = {
-    description = "Desktop music player for local libraries and HiFi output";
+    description = "Source-available desktop music player for local libraries and HiFi output";
     homepage = "https://echonagi.com";
     mainProgram = "echo-next";
     platforms = lib.platforms.linux;
-    license = lib.licenses.lgpl3Only;
+    license = lib.licenses.unfree;
   };
 }

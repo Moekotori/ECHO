@@ -73,6 +73,14 @@ import type {
   PlaybackMemoryTimeBucketId,
   PlaybackMemoryTrackInsight,
   PlaybackStatsDashboard,
+  ContinuousPlayMode,
+  ContinuousPlayPreference,
+  ContinuousPlayPreferenceKind,
+  ContinuousPlayReason,
+  ContinuousPlayReasonCode,
+  ContinuousPlayRecommendation,
+  ContinuousPlayRecommendationRequest,
+  ContinuousPlayRecommendationResult,
   StartPlaybackHistoryRequest,
   StartPlaybackHistoryResult,
   FinishPlaybackHistoryRequest,
@@ -174,6 +182,14 @@ export type {
   PlaybackMemoryTimeBucketId,
   PlaybackMemoryTrackInsight,
   PlaybackStatsDashboard,
+  ContinuousPlayMode,
+  ContinuousPlayPreference,
+  ContinuousPlayPreferenceKind,
+  ContinuousPlayReason,
+  ContinuousPlayReasonCode,
+  ContinuousPlayRecommendation,
+  ContinuousPlayRecommendationRequest,
+  ContinuousPlayRecommendationResult,
   StartPlaybackHistoryRequest,
   StartPlaybackHistoryResult,
   FinishPlaybackHistoryRequest,
@@ -242,6 +258,7 @@ export type MetadataFields = {
   genre: string | null;
   duration: number;
   codec: string | null;
+  mqa?: boolean;
   sampleRate: number | null;
   bitDepth: number | null;
   bitrate: number | null;
@@ -348,11 +365,21 @@ export type StoredTrackCoverState = StoredTrackFingerprint & {
   identityStatus?: string | null;
   identityUpdatedAt?: string | null;
   identityError?: string | null;
+  scanMetadata?: {
+    fields: MetadataFields;
+    fieldSources: FieldSources;
+    metadataStatus: MetadataStatus | string | null;
+    embeddedMetadataStatus: EmbeddedReadinessStatus | string | null;
+    embeddedCoverStatus: EmbeddedReadinessStatus | string | null;
+  };
 };
 
 export type ScanDirectorySnapshotEntry = {
   name: string;
   kind: 'directory' | 'file';
+  /** Cached for diagnostics and snapshot refresh; replay must re-stat files before trusting it. */
+  sizeBytes?: number;
+  mtimeMs?: number;
 };
 
 export type ScanDirectorySnapshot = {
@@ -417,6 +444,7 @@ export type LibraryScanMode = 'normal' | 'embedded-tags-all' | 'embedded-tags-mi
 export type LibraryScanOptions = {
   mode?: LibraryScanMode;
   changesOnly?: boolean;
+  markMissing?: boolean;
   deferGroupingRefresh?: boolean;
   skipDeferredGroupingRefresh?: boolean;
   reduceScanPressure?: boolean;

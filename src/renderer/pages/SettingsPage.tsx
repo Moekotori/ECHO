@@ -1,10 +1,10 @@
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
+import { lazy, Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import {
+  Accessibility,
   BookOpen,
   Captions,
   Check,
-  Clock3,
   Clapperboard,
   Code2,
   Clipboard,
@@ -19,44 +19,39 @@ import {
   Gauge,
   Github,
   Globe2,
-  GripVertical,
   Headphones,
-  History,
   Info,
   Keyboard,
   KeyRound,
   Link2,
-  Lock,
   LogIn,
+  LogOut,
+  Mail,
   MessageSquare,
   Monitor,
   Palette,
   Pause,
   Play,
-  Power,
   QrCode,
   RefreshCw,
   RotateCcw,
   RotateCw,
   Search,
   Save,
+  Sparkles,
   ShieldCheck,
   ShieldAlert,
-  SlidersHorizontal,
   Trash2,
   User,
-  Volume2,
+  UsersRound,
   VolumeX,
   X,
   Zap,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import type {
   AudioDeviceInfo,
-  AudioExportFormat,
   AudioOutputMode,
   AudioOutputSettings,
   AudioSharedBackend,
@@ -64,23 +59,21 @@ import type {
   ChannelBalanceState,
   PlaybackSpeedMode,
 } from '../../shared/types/audio';
-import { QUIET_REPLAY_GAIN_TARGET_LUFS, SPOTIFY_NORMAL_REPLAY_GAIN_TARGET_LUFS } from '../../shared/constants/replayGain';
-import { echoProUnlockPluginId, finalThemeUnlockVersion, isDownloadFeatureUnlockCode, proOnlyThemePresets } from '../../shared/constants/featureUnlocks';
-import { defaultArtistOnlineInfoSources, defaultArtistStreamingAlbumsProvider, playerBarButtonIds } from '../../shared/types/appSettings';
+import { SPOTIFY_NORMAL_REPLAY_GAIN_TARGET_LUFS } from '../../shared/constants/replayGain';
+import { finalThemeUnlockVersion, isDownloadFeatureUnlockCode } from '../../shared/constants/featureUnlocks';
+import { defaultArtistOnlineInfoSources, defaultArtistStreamingAlbumsProvider } from '../../shared/types/appSettings';
 import {
   defaultSidebarHiddenRouteIds,
   defaultSidebarRouteOrder,
-  lockedHiddenSidebarRouteIds,
-  lockedVisibleSidebarRouteIds,
   normalizeSidebarHiddenRouteIds,
   normalizeSidebarRouteOrder,
   type SidebarRouteId,
 } from '../../shared/types/sidebar';
-import type { AccountBrowser, AccountProvider, AccountStatus, NeteaseQrLoginState, YouTubeBrowser } from '../../shared/types/accounts';
-import type { EchoProAccountStatus, EchoProPluginActivationMode, EchoProSettingsCloudStatus } from '../../shared/types/privateEntitlements';
+import type { AccountBrowser, AccountProvider, AccountStatus, YouTubeBrowser } from '../../shared/types/accounts';
+import type { EchoProAccountStatus, EchoProPluginActivationMode } from '../../shared/types/privateEntitlements';
 import type {
+  AccessibilityPreferences,
   ArtistOnlineInfoSource,
-  ArtistStreamingAlbumsProvider,
   AppSettings,
   AppThemeCustomTheme,
   AppThemeMode,
@@ -93,8 +86,18 @@ import type {
   PlayerBarButtonId,
   RememberedAudioOutput,
 } from '../../shared/types/appSettings';
+import {
+  defaultAccessibilityPreferences,
+  normalizeAccessibilityPreferences,
+} from '../preferences/accessibilityPreferences';
 import type { MvSettings, NetworkMvProviderId } from '../../shared/types/mv';
 import type { MiniPlayerState } from '../../shared/types/miniPlayer';
+import {
+  defaultPetScalePercent,
+  petScalePercentMax,
+  petScalePercentMin,
+  type PetState,
+} from '../../shared/types/pet';
 import {
   createDefaultGlobalShortcuts,
   createDefaultLocalShortcuts,
@@ -113,21 +116,18 @@ import type { DownloadSettings } from '../../shared/types/downloads';
 import type { DataBackupProgress, DataBackupStatus } from '../../shared/types/settingsBackup';
 import type { LastFmStatus } from '../../shared/types/lastfm';
 import type { PlaybackStatus } from '../../shared/types/playback';
-import type { PluginSummary, PluginThemePresetContribution } from '../../shared/types/plugins';
 import type { SmtcDiagnostics } from '../../shared/types/smtc';
 import type { StageBridgeServerStatus } from '../../shared/types/stage';
 import type { TaskbarPlaybackStatus } from '../../shared/types/taskbarPlayback';
 import type {
-  ArtistImageCacheSummary,
-  ArtistImageJobStatus,
   BpmAnalysisJobStatus,
   DuplicateTrackCleanupPreview,
   DuplicateTrackIndexSummary,
   LibraryDatabaseProtectionStatus,
   LibraryDiagnostics,
+  LibraryLabState,
   LibraryScanStatus,
   LyricsBackfillJobStatus,
-  ReplayGainAnalysisJobStatus,
 } from '../../shared/types/library';
 import type { UpdateStatus } from '../../shared/types/updates';
 import { LibraryDiagnosticsPanel } from '../components/library/LibraryDiagnosticsPanel';
@@ -135,7 +135,6 @@ import { LibraryHealthReportPanel } from '../components/library/LibraryHealthRep
 import { LibraryFoldersPanel } from '../components/library/LibraryFoldersPanel';
 import { LibraryQualityPanel } from '../components/library/LibraryQualityPanel';
 import { NetworkMetadataPanel } from '../components/library/NetworkMetadataPanel';
-import { LyricsSettingsPanel } from '../components/lyrics/LyricsSettingsDrawer';
 import { AudioProfessionalStatusPanel } from '../components/player/AudioProfessionalStatusPanel';
 import { PlaybackStabilityDiagnosticsPanel } from '../components/player/PlaybackStabilityDiagnosticsPanel';
 import { SegmentLoopPanel } from '../components/player/SegmentLoopPanel';
@@ -143,15 +142,14 @@ import { formatAudioDiagnostics } from '../components/player/audioDiagnosticsFor
 import { writeRememberedAudioOutput } from '../components/player/audioOutputMemory';
 import { titleFromPath } from '../components/player/playerFormat';
 import { DiagnosticsAssistantPanel } from '../components/settings/DiagnosticsAssistantPanel';
-import { RemoteSourcesPanel } from '../components/settings/RemoteSourcesPanel';
+import { EchoLinkBasicPanel } from '../components/settings/EchoLinkBasicPanel';
+import { MqttIntegrationPanel } from '../components/settings/MqttIntegrationPanel';
 import { StreamingConsentNoticeModal } from '../components/streaming/StreamingConsentNoticeModal';
 import { StyledSelect } from '../components/ui/StyledSelect';
 import { useI18n } from '../i18n/I18nProvider';
-import type { Locale, TranslationKey } from '../i18n/locales';
+import type { TranslationKey } from '../i18n/locales';
 import {
-  detectRendererPlatform,
   isAdvancedNativeOutputPlatform,
-  isNativeSharedOutputPlatform,
   normalizeAudioSharedBackendForPlatform,
 } from '../../shared/utils/audioPlatformCapabilities';
 import {
@@ -169,7 +167,6 @@ import {
   normalizeThemeCustomTheme,
   normalizeThemeCustomThemes,
   normalizeThemeHexColor,
-  normalizeThemePreset,
   normalizeThemePresetOverrides,
   normalizeThemeScheduleTime,
   readThemeCustomId,
@@ -193,5032 +190,292 @@ import {
   getAccountsBridge,
   getAppBridge,
   getAudioBridge,
-  getConnectBridge,
   getDiagnosticsBridge,
   getDiscordPresenceBridge,
   getDownloadsBridge,
   getEqBridge,
   getLastFmBridge,
   getLibraryBridge,
+  getLibraryLabBridge,
   getPluginsBridge,
   getQobuzBridge,
   getSmtcBridge,
   getStageBridge,
 } from '../utils/echoBridge';
 import { isImeComposingKeyEvent } from '../utils/imeInput';
+import { formatUserFacingError } from '../utils/userFacingError';
+import {
+  dispatchAudioOutputRouteStatusChanged,
+  markAudioOutputRouteMutationStarted,
+} from '../utils/audioOutputRouteEvents';
 import {
   buildLibraryScanStages,
   summarizeLibraryScanStatuses,
-  type LibraryScanStageId,
-  type LibraryScanTotals,
 } from '../utils/libraryScanProgress';
-
-const automixTemporarilyDisabled = false;
-const echoProActivationUrl = 'https://echonext.moe/zh/activate/';
-
-type EchoProDisplayStatusSnapshot = {
-  accountStatus: EchoProAccountStatus | null;
-  pluginUnlocked: boolean | null;
-};
-
-let echoProDisplayStatusSnapshot: EchoProDisplayStatusSnapshot = {
-  accountStatus: null,
-  pluginUnlocked: null,
-};
-
-const rememberEchoProDisplayStatus = (patch: Partial<EchoProDisplayStatusSnapshot>): EchoProDisplayStatusSnapshot => {
-  echoProDisplayStatusSnapshot = {
-    ...echoProDisplayStatusSnapshot,
-    ...patch,
-  };
-  return echoProDisplayStatusSnapshot;
-};
-
-export const resetEchoProDisplayStatusSnapshotForTests = (): void => {
-  echoProDisplayStatusSnapshot = {
-    accountStatus: null,
-    pluginUnlocked: null,
-  };
-};
-
-const deviceMatchesAudioStatus = (device: AudioDeviceInfo, status: AudioStatus | null): boolean => {
-  if (!status) {
-    return false;
-  }
-
-  if (status.outputMode === 'system') {
-    return false;
-  }
-
-  const modeMatches = device.outputMode === 'shared';
-  if (!modeMatches) {
-    return false;
-  }
-
-  return status.outputDeviceId === device.id || status.outputDeviceName === device.name;
-};
-
-const playbackSpeedModes: Array<{ mode: PlaybackSpeedMode; label: string }> = [
-  { mode: 'nightcore', label: 'Nightcore' },
-  { mode: 'daycore', label: 'Daycore' },
-  { mode: 'speed', label: '普通变速' },
-];
-
-const playbackNoSoundGuideSteps: Array<{
-  id: string;
-  icon: LucideIcon;
-  titleKey: TranslationKey;
-  bodyKey: TranslationKey;
-}> = [
-  {
-    id: 'output-mode',
-    icon: Zap,
-    titleKey: 'settings.playback.noSoundGuide.step.outputMode.title',
-    bodyKey: 'settings.playback.noSoundGuide.step.outputMode',
-  },
-  {
-    id: 'backend',
-    icon: SlidersHorizontal,
-    titleKey: 'settings.playback.noSoundGuide.step.backend.title',
-    bodyKey: 'settings.playback.noSoundGuide.step.backend',
-  },
-  {
-    id: 'device',
-    icon: Headphones,
-    titleKey: 'settings.playback.noSoundGuide.step.device.title',
-    bodyKey: 'settings.playback.noSoundGuide.step.device',
-  },
-  {
-    id: 'windows-volume',
-    icon: Volume2,
-    titleKey: 'settings.playback.noSoundGuide.step.windowsVolume.title',
-    bodyKey: 'settings.playback.noSoundGuide.step.windowsVolume',
-  },
-  {
-    id: 'sample-rate',
-    icon: Gauge,
-    titleKey: 'settings.playback.noSoundGuide.step.sampleRate.title',
-    bodyKey: 'settings.playback.noSoundGuide.warningSampleRate',
-  },
-  {
-    id: 'drivers',
-    icon: ShieldAlert,
-    titleKey: 'settings.playback.noSoundGuide.step.drivers.title',
-    bodyKey: 'settings.playback.noSoundGuide.warningDrivers',
-  },
-  {
-    id: 'restart',
-    icon: RotateCw,
-    titleKey: 'settings.playback.noSoundGuide.step.restart.title',
-    bodyKey: 'settings.playback.noSoundGuide.step.restart',
-  },
-  {
-    id: 'streaming',
-    icon: Globe2,
-    titleKey: 'settings.playback.noSoundGuide.step.streaming.title',
-    bodyKey: 'settings.playback.noSoundGuide.streamingNote',
-  },
-];
-
-
-type ShufflePlaybackModeOption = {
-  id: 'library' | 'avoid-recent' | 'pseudo-random';
-  avoidRecentCount: number;
-  labelKey: TranslationKey;
-  descriptionKey: TranslationKey;
-};
-
-const shufflePlaybackModeOptions: ShufflePlaybackModeOption[] = [
-  {
-    id: 'library',
-    avoidRecentCount: 0,
-    labelKey: 'settings.playback.shuffleCredibility.mode.library',
-    descriptionKey: 'settings.playback.shuffleCredibility.mode.library.description',
-  },
-  {
-    id: 'avoid-recent',
-    avoidRecentCount: 25,
-    labelKey: 'settings.playback.shuffleCredibility.mode.avoidRecent',
-    descriptionKey: 'settings.playback.shuffleCredibility.mode.avoidRecent.description',
-  },
-  {
-    id: 'pseudo-random',
-    avoidRecentCount: 100,
-    labelKey: 'settings.playback.shuffleCredibility.mode.pseudoRandom',
-    descriptionKey: 'settings.playback.shuffleCredibility.mode.pseudoRandom.description',
-  },
-];
-
-const getShufflePlaybackModeId = (avoidRecentCount: number): ShufflePlaybackModeOption['id'] => {
-  if (avoidRecentCount <= 0) {
-    return 'library';
-  }
-  if (avoidRecentCount >= 50) {
-    return 'pseudo-random';
-  }
-  return 'avoid-recent';
-};
-
-const audioExportFormatOptions: Array<{ format: AudioExportFormat; label: string }> = [
-  { format: 'mp3', label: 'MP3' },
-  { format: 'wav', label: 'WAV' },
-  { format: 'flac', label: 'FLAC' },
-  { format: 'ogg', label: 'OGG' },
-];
-
-const globalShortcutActionMeta: Array<{
-  action: GlobalShortcutAction;
-  titleKey: TranslationKey;
-  descriptionKey: TranslationKey;
-}> = [
-  { action: 'playPause', titleKey: 'settings.shortcuts.action.playPause.title', descriptionKey: 'settings.shortcuts.action.playPause.description' },
-  { action: 'previousTrack', titleKey: 'settings.shortcuts.action.previousTrack.title', descriptionKey: 'settings.shortcuts.action.previousTrack.description' },
-  { action: 'nextTrack', titleKey: 'settings.shortcuts.action.nextTrack.title', descriptionKey: 'settings.shortcuts.action.nextTrack.description' },
-  { action: 'stop', titleKey: 'settings.shortcuts.action.stop.title', descriptionKey: 'settings.shortcuts.action.stop.description' },
-  { action: 'volumeUp', titleKey: 'settings.shortcuts.action.volumeUp.title', descriptionKey: 'settings.shortcuts.action.volumeUp.description' },
-  { action: 'volumeDown', titleKey: 'settings.shortcuts.action.volumeDown.title', descriptionKey: 'settings.shortcuts.action.volumeDown.description' },
-  { action: 'seekBackward', titleKey: 'settings.shortcuts.action.seekBackward.title', descriptionKey: 'settings.shortcuts.action.seekBackward.description' },
-  { action: 'seekForward', titleKey: 'settings.shortcuts.action.seekForward.title', descriptionKey: 'settings.shortcuts.action.seekForward.description' },
-  { action: 'toggleCurrentTrackLiked', titleKey: 'settings.shortcuts.action.toggleCurrentTrackLiked.title', descriptionKey: 'settings.shortcuts.action.toggleCurrentTrackLiked.description' },
-  { action: 'openPlaybackQueue', titleKey: 'settings.shortcuts.action.openPlaybackQueue.title', descriptionKey: 'settings.shortcuts.action.openPlaybackQueue.description' },
-  { action: 'openSearch', titleKey: 'settings.shortcuts.action.openSearch.title', descriptionKey: 'settings.shortcuts.action.openSearch.description' },
-  { action: 'toggleShuffle', titleKey: 'settings.shortcuts.action.toggleShuffle.title', descriptionKey: 'settings.shortcuts.action.toggleShuffle.description' },
-  { action: 'cycleRepeatMode', titleKey: 'settings.shortcuts.action.cycleRepeatMode.title', descriptionKey: 'settings.shortcuts.action.cycleRepeatMode.description' },
-  { action: 'toggleMute', titleKey: 'settings.shortcuts.action.toggleMute.title', descriptionKey: 'settings.shortcuts.action.toggleMute.description' },
-  { action: 'toggleMiniPlayer', titleKey: 'settings.shortcuts.action.toggleMiniPlayer.title', descriptionKey: 'settings.shortcuts.action.toggleMiniPlayer.description' },
-  { action: 'showMainWindow', titleKey: 'settings.shortcuts.action.showMainWindow.title', descriptionKey: 'settings.shortcuts.action.showMainWindow.description' },
-  { action: 'bossKey', titleKey: 'settings.shortcuts.action.bossKey.title', descriptionKey: 'settings.shortcuts.action.bossKey.description' },
-  { action: 'speedUp', titleKey: 'settings.shortcuts.action.speedUp.title', descriptionKey: 'settings.shortcuts.action.speedUp.description' },
-  { action: 'speedDown', titleKey: 'settings.shortcuts.action.speedDown.title', descriptionKey: 'settings.shortcuts.action.speedDown.description' },
-  { action: 'openAudioSettings', titleKey: 'settings.shortcuts.action.openAudioSettings.title', descriptionKey: 'settings.shortcuts.action.openAudioSettings.description' },
-  { action: 'openMvSettings', titleKey: 'settings.shortcuts.action.openMvSettings.title', descriptionKey: 'settings.shortcuts.action.openMvSettings.description' },
-  { action: 'openLyricsSettings', titleKey: 'settings.shortcuts.action.openLyricsSettings.title', descriptionKey: 'settings.shortcuts.action.openLyricsSettings.description' },
-  { action: 'locateCurrentTrack', titleKey: 'settings.shortcuts.action.locateCurrentTrack.title', descriptionKey: 'settings.shortcuts.action.locateCurrentTrack.description' },
-  { action: 'toggleDesktopLyrics', titleKey: 'settings.shortcuts.action.toggleDesktopLyrics.title', descriptionKey: 'settings.shortcuts.action.toggleDesktopLyrics.description' },
-  { action: 'toggleDesktopLyricsLock', titleKey: 'settings.shortcuts.action.toggleDesktopLyricsLock.title', descriptionKey: 'settings.shortcuts.action.toggleDesktopLyricsLock.description' },
-];
-
-type ShortcutScope = 'local' | 'global';
-type ShortcutFilter = 'all' | 'enabled' | 'unbound' | 'issues';
-type RecordingShortcutTarget = {
-  action: GlobalShortcutAction;
-  scope: ShortcutScope;
-};
-type ShortcutMessageKey = `${ShortcutScope}:${GlobalShortcutAction}`;
-
-const shortcutMessageKey = (scope: ShortcutScope, action: GlobalShortcutAction): ShortcutMessageKey => `${scope}:${action}`;
-const localShortcutUnavailableActions = new Set<GlobalShortcutAction>(['showMainWindow']);
-const shortcutFilterOptions: Array<{ filter: ShortcutFilter; labelKey: TranslationKey }> = [
-  { filter: 'all', labelKey: 'settings.shortcuts.filter.all' },
-  { filter: 'enabled', labelKey: 'settings.shortcuts.filter.enabled' },
-  { filter: 'unbound', labelKey: 'settings.shortcuts.filter.unbound' },
-  { filter: 'issues', labelKey: 'settings.shortcuts.filter.issues' },
-];
-
-const shortcutKeyAliases = new Map<string, string>([
-  [' ', 'Space'],
-  ['Spacebar', 'Space'],
-  ['ArrowLeft', 'Left'],
-  ['ArrowRight', 'Right'],
-  ['ArrowUp', 'Up'],
-  ['ArrowDown', 'Down'],
-  ['Escape', 'Esc'],
-  ['+', 'Plus'],
-  ['Add', 'Plus'],
-  ['NumpadAdd', 'numadd'],
-  ['Subtract', '-'],
-  ['NumpadSubtract', 'numsub'],
-  ['Multiply', '*'],
-  ['NumpadMultiply', 'nummult'],
-  ['Divide', '/'],
-  ['NumpadDivide', 'numdiv'],
-  ['Decimal', '.'],
-  ['NumpadDecimal', 'numdec'],
-  ['MediaPlayPause', 'MediaPlayPause'],
-  ['MediaNextTrack', 'MediaNextTrack'],
-  ['MediaPreviousTrack', 'MediaPreviousTrack'],
-  ['MediaStop', 'MediaStop'],
-]);
-
-const normalizeShortcutEventKey = (event: KeyboardEvent): string | null => {
-  const code = event.code;
-  const aliasedCode = shortcutKeyAliases.get(code);
-  if (aliasedCode) {
-    return aliasedCode;
-  }
-
-  if (/^Key[A-Z]$/u.test(code)) {
-    return code.slice(3);
-  }
-
-  if (/^Digit[0-9]$/u.test(code)) {
-    return code.slice(5);
-  }
-
-  if (/^Numpad[0-9]$/u.test(code)) {
-    return `num${code.slice(6)}`;
-  }
-
-  const aliased = shortcutKeyAliases.get(event.key);
-  if (aliased) {
-    return aliased;
-  }
-
-  if (event.key === 'Control' || event.key === 'Alt' || event.key === 'Shift' || event.key === 'Meta') {
-    return null;
-  }
-
-  return event.key.length === 1 ? event.key.toUpperCase() : event.key;
-};
-
-const acceleratorFromKeyboardEvent = (event: KeyboardEvent): string | null => {
-  const key = normalizeShortcutEventKey(event);
-  if (!key) {
-    return null;
-  }
-
-  const modifiers = [
-    event.ctrlKey ? 'Ctrl' : null,
-    event.altKey ? 'Alt' : null,
-    event.shiftKey ? 'Shift' : null,
-    event.metaKey ? 'Command' : null,
-  ].filter((item): item is string => Boolean(item));
-
-  return [...modifiers, key].join('+');
-};
-
-const acceleratorFromMouseEvent = (event: MouseEvent): string | null => {
-  switch (event.button) {
-    case 1:
-      return 'MouseButton3';
-    case 3:
-      return 'MouseButton4';
-    case 4:
-      return 'MouseButton5';
-    default:
-      return null;
-  }
-};
-
-const formatAcceleratorForDisplay = (accelerator: string | null | undefined, emptyLabel: string): string =>
-  accelerator ? accelerator.split('+').join(' + ') : emptyLabel;
-
-const findDuplicateShortcutAction = (
-  shortcuts: GlobalShortcutSettings | LocalShortcutSettings,
-  action: GlobalShortcutAction,
-  accelerator: string,
-): GlobalShortcutAction | null => {
-  const normalized = accelerator.toLowerCase();
-  return (
-    globalShortcutActions.find(
-      (candidate) => candidate !== action && shortcuts[candidate]?.accelerator?.toLowerCase() === normalized,
-    ) ?? null
-  );
-};
-
-const mergeShortcutSettings = <T extends GlobalShortcutSettings | LocalShortcutSettings>(
-  defaults: T,
-  saved: Partial<T> | null | undefined,
-): T =>
-  Object.fromEntries(
-    globalShortcutActions.map((action) => [
-      action,
-      {
-        ...defaults[action],
-        ...(saved?.[action] ?? {}),
-      },
-    ]),
-  ) as T;
-
-const normalizeSharedBackend = (value: unknown): AudioSharedBackend =>
-  value === 'windows' || value === 'directsound' || value === 'alsa' ? value : 'auto';
-
-const defaultSpotifyRedirectUri = 'http://127.0.0.1:43879/spotify/callback';
-const defaultTidalRedirectUri = 'http://127.0.0.1:43880/tidal/callback';
-const spotifyDeveloperDashboardUrl = 'https://developer.spotify.com/dashboard';
-const tidalDeveloperDashboardUrl = 'https://developer.tidal.com/dashboard';
-const discogsDeveloperSettingsUrl = 'https://www.discogs.com/settings/developers';
-const officialWebsiteUrl = 'https://echonext.moe';
-const userDocumentationUrl = 'https://echonext.moe/zh/docs/';
-const baiduPanShareUrl = 'https://pan.baidu.com/s/1ta0McyhY9knaD6FT5xW3Og?pwd=echo';
-const bilibiliSpaceUrl = 'https://space.bilibili.com/25265128';
-const afdianSponsorUrl = 'https://afdian.com/a/echonext';
-const autoUpdateSourceOptions: Array<{ source: AutoUpdateSource; label: string; description: string }> = [
-  { source: 'official', label: 'GitHub', description: '官方直连' },
-  { source: 'ghfast', label: 'ghfast.top', description: '实测可读 latest.yml' },
-  { source: 'ghproxyVip', label: 'ghproxy.vip', description: '实测可读 API 和文件' },
-  { source: 'ghproxyCxkpro', label: 'cxkpro', description: '实测可读 latest.yml' },
-  { source: 'custom', label: 'Custom', description: '自定义 generic 源' },
-];
-const playbackAdvancedPanelExpandedStorageKey = 'echo:settings:playback:advanced-panel-expanded';
-const integrationsAccountPanelExpandedStorageKey = 'echo:settings:integrations:account-panel-expanded';
-const generalEchoProActivationPanelExpandedStorageKey = 'echo:settings:general:echo-pro-activation-panel-expanded';
-const generalEchoProAccountPanelExpandedStorageKey = 'echo:settings:general:echo-pro-account-panel-expanded';
-const openUserNoticeEvent = 'app:open-user-notice';
-const integrationsCredentialPanelExpandedStorageKey = 'echo:settings:integrations:credential-panel-expanded';
-const integrationCredentialSettingIds = new Set([
-  'settings-row-spotify-auth-config',
-  'settings-row-tidal-auth-config',
-  'settings-row-online-album-info',
-  'settings-row-online-artist-info',
-  'settings-row-lastfm',
-  'settings-row-lastfm-connection',
-  'settings-row-lastfm-now-playing',
-  'settings-row-lastfm-scrobbling',
-]);
-
-const isIntegrationCredentialSettingId = (value: string | null | undefined): boolean =>
-  typeof value === 'string' && integrationCredentialSettingIds.has(value);
-
-const readBooleanStoragePreference = (key: string, fallback: boolean): boolean => {
-  if (typeof window === 'undefined') {
-    return fallback;
-  }
-
-  try {
-    const value = window.localStorage.getItem(key);
-    if (value === 'true') {
-      return true;
-    }
-    if (value === 'false') {
-      return false;
-    }
-  } catch {
-    return fallback;
-  }
-
-  return fallback;
-};
-
-const isSpotifyClientIdInputValid = (value: string): boolean => {
-  const trimmed = value.trim();
-  return /^[A-Za-z0-9]{8,128}$/u.test(trimmed);
-};
-
-const isSpotifyRedirectUriInputValid = (value: string): boolean => {
-  const trimmed = value.trim();
-  try {
-    const url = new URL(trimmed);
-    const port = Number.parseInt(url.port, 10);
-    return (
-      url.protocol === 'http:' &&
-      url.hostname === '127.0.0.1' &&
-      Number.isInteger(port) &&
-      port >= 1 &&
-      port <= 65535 &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash
-    );
-  } catch {
-    return false;
-  }
-};
-
-const isTidalClientIdInputValid = (value: string): boolean => /^[A-Za-z0-9_-]{8,128}$/u.test(value.trim());
-
-const isTidalClientSecretInputValid = (value: string): boolean => /^[A-Za-z0-9._~+/=-]{8,256}$/u.test(value.trim());
-
-const isTidalCountryCodeInputValid = (value: string): boolean => /^[A-Za-z]{2}$/u.test(value.trim());
-
-const playbackOutputModes: AudioOutputMode[] = ['system', 'shared', 'exclusive'];
-
-const isPlaybackOutputMode = (value: unknown): value is AudioOutputMode =>
-  playbackOutputModes.includes(value as AudioOutputMode);
-
-const detectSettingsPlatform = (): NodeJS.Platform | 'unknown' =>
-  typeof window !== 'undefined' ? detectRendererPlatform(window.navigator) : 'unknown';
-
-const getPlaybackOutputModesForPlatform = (platform: NodeJS.Platform | 'unknown'): AudioOutputMode[] =>
-  playbackOutputModes.filter((mode) => {
-    if (mode === 'system') {
-      return true;
-    }
-
-    if (mode === 'shared') {
-      return isNativeSharedOutputPlatform(platform);
-    }
-
-    return isAdvancedNativeOutputPlatform(platform);
-  });
-
-const getPlaybackOutputModeLabel = (mode: AudioOutputMode, translate: (key: TranslationKey) => string): string =>
-  translate(`settings.playback.outputMode.${mode}` as TranslationKey);
-
-const getSharedBackendOptionsForPlatform = (
-  platform: NodeJS.Platform | 'unknown',
-): Array<[AudioSharedBackend, TranslationKey]> => {
-  if (platform === 'linux') {
-    return [
-      ['auto', 'settings.playback.sharedBackend.auto'],
-      ['alsa', 'settings.playback.sharedBackend.alsa'],
-    ];
-  }
-
-  if (platform === 'win32') {
-    return [
-      ['auto', 'settings.playback.sharedBackend.wasapi'],
-      ['directsound', 'settings.playback.sharedBackend.directSound'],
-    ];
-  }
-
-  return [];
-};
-
-const getSharedBackendDescriptionKey = (platform: NodeJS.Platform | 'unknown'): TranslationKey =>
-  platform === 'linux' ? 'settings.playback.sharedBackend.linuxDescription' : 'settings.playback.sharedBackend.description';
-
-const getCompatiblePlaybackDevices = (devices: AudioDeviceInfo[], outputMode: AudioOutputMode): AudioDeviceInfo[] => {
-  if (outputMode === 'system') {
-    return [];
-  }
-
-  return devices.filter((device) => device.outputMode === 'shared');
-};
-
-const networkProviderLabels: Record<AppSettings['networkMetadataProviders'][number], string> = {
-  'netease-cloud-music': '网易云音乐',
-  'qq-music': 'QQ 音乐',
-  'kugou-music': '酷狗音乐',
-  musicbrainz: 'MusicBrainz',
-  'cover-art-archive': 'Cover Art Archive',
-  mock: 'Mock',
-};
-const visibleNetworkMetadataProviders: AppSettings['networkMetadataProviders'] = ['netease-cloud-music', 'qq-music', 'musicbrainz'];
-const defaultNetworkMetadataProviders: AppSettings['networkMetadataProviders'] = ['netease-cloud-music', 'qq-music'];
-const artistOnlineInfoSourceOptions: Array<{ source: ArtistOnlineInfoSource; label: string; description: string }> = [
-  { source: 'baidu-baike', label: '百度百科', description: '中文艺人和大众歌手优先' },
-  { source: 'wikipedia', label: 'Wikipedia', description: '国际艺人兜底' },
-];
-const artistStreamingAlbumProviderOptions: Array<{ provider: ArtistStreamingAlbumsProvider; label: string; description: string }> = [
-  { provider: 'netease', label: '网易云', description: '默认来源，优先减少额外搜索压力' },
-  { provider: 'qqmusic', label: 'QQ音乐', description: '艺人详情专辑页改用 QQ 音乐搜索' },
-];
-const mvNetworkProviders: NetworkMvProviderId[] = ['bilibili', 'youtube'];
-const mvProviderLabels: Record<NetworkMvProviderId, string> = {
-  bilibili: 'Bilibili',
-  youtube: 'YouTube',
-};
-const mvQualityCaps: MvSettings['maxQuality'][] = ['720p', '1080p', '1440p', '2160p', 'max'];
-const mvSyncModes = ['stable', 'balanced', 'precise'] satisfies Array<NonNullable<MvSettings['syncMode']>>;
-const mvImmersiveBackgroundDefaults = {
-  immersiveBackgroundScalePercent: 115,
-  immersiveBackgroundOffsetXPercent: 50,
-  immersiveBackgroundOffsetYPercent: 50,
-  immersiveBackgroundBlurPx: 0,
-  immersiveBackgroundBrightnessPercent: 100,
-  immersiveBackgroundOverlayOpacityPercent: 0,
-} satisfies Partial<MvSettings>;
-const appVideoWallpaperPauseModes = ['smart', 'minimized', 'never'] satisfies Array<NonNullable<AppSettings['appVideoWallpaperPauseMode']>>;
-const appVideoWallpaperPauseModeLabels: Record<NonNullable<AppSettings['appVideoWallpaperPauseMode']>, TranslationKey> = {
-  smart: 'settings.appearance.wallpaper.videoPause.smart',
-  minimized: 'settings.appearance.wallpaper.videoPause.minimized',
-  never: 'settings.appearance.wallpaper.videoPause.never',
-};
-
-const inferAppWallpaperMediaType = (filePath: string): NonNullable<AppSettings['appWallpaperMediaType']> =>
-  /\.(?:mp4|m4v|webm)$/iu.test(filePath.trim()) ? 'video' : 'image';
-
-const hasOwn = <T extends object>(value: T, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
-
-const formatMvThreshold = (threshold: number | undefined): string => `${Math.round((threshold ?? 0.7) * 100)}%`;
-const mvThresholdFromPercent = (value: number): number => Math.max(30, Math.min(100, Math.round(value))) / 100;
-
-const normalizeMvProviderOrder = (value: NetworkMvProviderId[] | undefined): NetworkMvProviderId[] => {
-  const ordered = (value ?? mvNetworkProviders).filter((provider): provider is NetworkMvProviderId => mvNetworkProviders.includes(provider));
-  const missing = mvNetworkProviders.filter((provider) => !ordered.includes(provider));
-  return [...ordered, ...missing];
-};
-
-const appSettingsPatchFromMvSettingsPatch = (patch: Partial<MvSettings>): Partial<AppSettings> => {
-  const appPatch: Partial<AppSettings> = {};
-
-  if (hasOwn(patch, 'enabled')) {
-    appPatch.mvEnabled = patch.enabled;
-  }
-  if (hasOwn(patch, 'enabledProviders') && patch.enabledProviders) {
-    appPatch.mvEnabledProviders = patch.enabledProviders;
-  }
-  if (hasOwn(patch, 'providerOrder') && patch.providerOrder) {
-    appPatch.mvProviderOrder = patch.providerOrder;
-  }
-  if (hasOwn(patch, 'autoSearch') && patch.autoSearch !== undefined) {
-    appPatch.mvAutoSearch = patch.autoSearch;
-  }
-  if (hasOwn(patch, 'autoPreload')) {
-    appPatch.mvAutoPreload = patch.autoPreload;
-  }
-  if (hasOwn(patch, 'autoApplyThreshold')) {
-    appPatch.mvAutoApplyThreshold = patch.autoApplyThreshold;
-  }
-  if (hasOwn(patch, 'titleOnlySearch')) {
-    appPatch.mvTitleOnlySearch = patch.titleOnlySearch;
-  }
-  if (hasOwn(patch, 'preferHighestViewCount')) {
-    appPatch.mvPreferHighestViewCount = patch.preferHighestViewCount;
-  }
-  if (hasOwn(patch, 'immersiveBackground')) {
-    appPatch.mvImmersiveBackground = patch.immersiveBackground;
-  }
-  if (hasOwn(patch, 'immersiveBackgroundScalePercent')) {
-    appPatch.mvImmersiveBackgroundScalePercent = patch.immersiveBackgroundScalePercent;
-  }
-  if (hasOwn(patch, 'immersiveBackgroundOffsetXPercent')) {
-    appPatch.mvImmersiveBackgroundOffsetXPercent = patch.immersiveBackgroundOffsetXPercent;
-  }
-  if (hasOwn(patch, 'immersiveBackgroundOffsetYPercent')) {
-    appPatch.mvImmersiveBackgroundOffsetYPercent = patch.immersiveBackgroundOffsetYPercent;
-  }
-  if (hasOwn(patch, 'immersiveBackgroundBlurPx')) {
-    appPatch.mvImmersiveBackgroundBlurPx = patch.immersiveBackgroundBlurPx;
-  }
-  if (hasOwn(patch, 'immersiveBackgroundBrightnessPercent')) {
-    appPatch.mvImmersiveBackgroundBrightnessPercent = patch.immersiveBackgroundBrightnessPercent;
-  }
-  if (hasOwn(patch, 'immersiveBackgroundOverlayOpacityPercent')) {
-    appPatch.mvImmersiveBackgroundOverlayOpacityPercent = patch.immersiveBackgroundOverlayOpacityPercent;
-  }
-  if (hasOwn(patch, 'lyricsReadabilityEnhanced')) {
-    appPatch.mvLyricsReadabilityEnhanced = patch.lyricsReadabilityEnhanced;
-  }
-  if (hasOwn(patch, 'restartAudioOnLoad')) {
-    appPatch.mvRestartAudioOnLoad = patch.restartAudioOnLoad;
-  }
-  if (hasOwn(patch, 'syncMode')) {
-    appPatch.mvSyncMode = patch.syncMode;
-  }
-  if (hasOwn(patch, 'replayAudioOnChange')) {
-    appPatch.mvReplayAudioOnChange = patch.replayAudioOnChange;
-  }
-  if (hasOwn(patch, 'maxQuality') && patch.maxQuality) {
-    appPatch.mvMaxQuality = patch.maxQuality;
-  }
-  if (hasOwn(patch, 'allow60fps') && patch.allow60fps !== undefined) {
-    appPatch.mvAllow60fps = patch.allow60fps;
-  }
-
-  return appPatch;
-};
-
-const normalizeExternalAppSettingsPatch = (patch: Partial<AppSettings> | Partial<MvSettings>): Partial<AppSettings> => ({
-  ...(patch as Partial<AppSettings>),
-  ...appSettingsPatchFromMvSettingsPatch(patch as Partial<MvSettings>),
-});
-
-type SettingsNavKey = 'general' | 'experimental' | 'advancedCustom' | 'playback' | 'shortcuts' | 'lyrics' | 'mv' | 'integrations' | 'plugins' | 'remote' | 'eq' | 'appearance' | 'library' | 'about' | 'danger';
-
-type SettingsNavItem = {
-  key: SettingsNavKey;
-  labelKey: TranslationKey;
-  descriptionKey: TranslationKey;
-  icon: LucideIcon;
-};
-
-type SettingsNavGroup = {
-  id: 'common' | 'experience' | 'services' | 'advanced';
-  label: Record<Locale, string>;
-  itemKeys: SettingsNavKey[];
-};
-
-type SettingsSearchResult = {
-  id: string;
-  sectionKey: SettingsNavKey;
-  title: string;
-  path: string;
-  description: string;
-  targetId?: string;
-  score: number;
-};
+import {
+  AccountCookieCard,
+  NeteaseQrLoginDialog,
+  QobuzAccountCard,
+  SpotifyAccountCard,
+  TidalAccountCard,
+  YouTubeAccountCard,
+  accountProviderLabels,
+  buildYouTubeBrowserOptions,
+  getAccountBadgeClass,
+  getAccountStatusLabel,
+} from './settings/components/AccountCards';
+import { FontPickerModal } from './settings/components/FontPickerModal';
+import {
+  ChipButton,
+  NumberRangeField,
+  SettingRow,
+  SettingSection,
+  SettingSubsectionTitle,
+  StatusText,
+  ToggleButton,
+  type SettingSubsectionTitleProps,
+} from './settings/components/SettingsPrimitives';
+import {
+  SettingsHeader,
+  SettingsHorizontalPager,
+  SettingsNavigation,
+  SettingsSectionIndex,
+} from './settings/components/SettingsPageShell';
+import {
+  initialNeteaseQrLoginState,
+  type AccountBusyAction,
+  type NeteaseQrLoginUiState,
+  type SettingsNavKey,
+} from './settings/settingsTypes';
+import {
+  getSettingsNavIndex,
+  isSettingsEscapeBackEditableTarget,
+  pendingRouteStorageKey,
+  pendingSettingsSectionStorageKey,
+  readInitialSettingsSection,
+  settingsBackNavigationEvent,
+  settingsNavGroups,
+  settingsNavItems,
+  settingsNavKeys,
+  settingsSectionNavigationEvent,
+  shouldShowSettingsNavItem,
+  type SettingsNavItem,
+} from './settings/settingsNavigation';
+import {
+  normalizeSettingsSearchText,
+  rankSettingsSearch,
+  settingsSearchAliases,
+  type SettingsSearchResult,
+} from './settings/settingsSearch';
+import {
+  experimentalLabCopy,
+  settingsLocaleCopy,
+  settingsSearchSubsectionByTargetId,
+  settingsSubsectionCopy,
+  type SettingsSubsectionCopyKey,
+} from './settings/settingsSubsections';
+import {
+  bestReadableColor,
+  buildPluginThemeCustomTheme,
+  buildRandomThemeDraft,
+  buildThemeCustomTheme,
+  buildThemePresetOverrides,
+  collectPluginThemeOptions,
+  createThemeCustomId,
+  createThemeExportPayload,
+  downloadTextFile,
+  duplicateThemeCustomTheme,
+  getRelativeLuminance,
+  getThemeContrastWarnings,
+  getThemeEditorDefaults,
+  isEchoProUnlockPluginActive,
+  isProOnlyThemePreset,
+  isThemeExportPayload,
+  mergeThemeToneValues,
+  numberThemeFields,
+  defaultThemeScheduleDarkAt,
+  defaultThemeScheduleLightAt,
+  randomThemePresetOption,
+  readThemeExportPreset,
+  renameThemeCustomTheme,
+  themePresetOptions,
+  updateThemeCustomThemeTone,
+  type GeneratedRandomThemeDraft,
+  type PluginThemeOption,
+  type ThemeColorField,
+  type ThemeNumberField,
+  type ThemeTone,
+} from './settings/appearance/themeSettingsModel';
+import {
+  automixTemporarilyDisabled,
+  audioExportFormatOptions,
+  defaultSettingsChannelBalance,
+  detectSettingsPlatform,
+  deviceMatchesAudioStatus,
+  dispatchPlaybackSeeked,
+  getCompatiblePlaybackDevices,
+  getPlaybackOutputModeLabel,
+  getPlaybackOutputModesForPlatform,
+  getSharedBackendDescriptionKey,
+  getSharedBackendOptionsForPlatform,
+  getShufflePlaybackModeId,
+  hasNonMonoChannelBalanceEffect,
+  isPlaybackOutputMode,
+  normalizeLatencyProfile,
+  normalizeSharedBackend,
+  playbackNoSoundGuideSteps,
+  playbackAdvancedPanelExpandedStorageKey,
+  playbackSpeedModes,
+  shufflePlaybackModeOptions,
+} from './settings/playback/playbackSettingsModel';
+import { PlaybackNoSoundGuideDialog } from './settings/playback/PlaybackNoSoundGuideDialog';
+import {
+  acceleratorFromKeyboardEvent,
+  acceleratorFromMouseEvent,
+  findDuplicateShortcutAction,
+  formatAcceleratorForDisplay,
+  globalShortcutActionMeta,
+  localShortcutUnavailableActions,
+  mergeShortcutSettings,
+  shortcutActionIcons,
+  shortcutFilterOptions,
+  shortcutMessageKey,
+  type RecordingShortcutTarget,
+  type ShortcutFilter,
+  type ShortcutMessageKey,
+  type ShortcutScope,
+} from './settings/shortcuts/shortcutSettingsModel';
+import {
+  formatCacheBytes,
+  formatDiagnosticsDuration,
+  formatDiagnosticsPercent,
+  formatDiagnosticsTimestampDuration,
+  formatProtectionTimestamp,
+  formatRate,
+  formatUpdateBytes,
+  getDatabaseHealthLabel,
+} from './settings/diagnostics/settingsDiagnosticsFormat';
+import {
+  accountLoginUrls,
+  accountProviderLogoUrls,
+  cookieAccountProviders,
+  echoProActivationUrl,
+  generalEchoProAccountPanelExpandedStorageKey,
+  generalEchoProActivationPanelExpandedStorageKey,
+  readEchoProDisplayStatusSnapshot,
+  rememberEchoProDisplayStatus,
+  resetEchoProDisplayStatusSnapshotForTests,
+  settingsAccountProviders,
+  type EchoProDisplayStatusSnapshot,
+} from './settings/accounts/accountSettingsModel';
+import {
+  formatEchoProError,
+  normalizeEchoProErrorCode,
+} from './settings/accounts/echoProErrorFormat';
+import {
+  fallbackFontFamilies,
+  type FontPickerTarget,
+  type NavigatorWithLocalFonts,
+} from './settings/appearance/fontSettingsModel';
+import {
+  defaultHiddenPlayerBarButtonIds,
+  lockedHiddenSidebarRouteIdSet,
+  lockedVisibleSidebarRouteIdSet,
+  normalizeHiddenPlayerBarButtonIdsForRenderer,
+  sidebarSettingsRouteItemById,
+  type SidebarSettingsRouteItem,
+} from './settings/appearance/navigationCustomizationModel';
+import {
+  PlayerBarButtonSettings,
+  SidebarLayoutSettings,
+} from './settings/appearance/NavigationCustomizationSettings';
+import { ThemeModeSettings } from './settings/appearance/ThemeModeSettings';
+import { ThemePresetSettings } from './settings/appearance/ThemePresetSettings';
+import { ThemeCustomEditor } from './settings/appearance/ThemeCustomEditor';
+import { TypographySettings } from './settings/appearance/TypographySettings';
+import { AppWallpaperSettings } from './settings/appearance/AppWallpaperSettings';
+import {
+  appWallpaperEffectPresets,
+  inferAppWallpaperMediaType,
+} from './settings/appearance/wallpaperSettingsModel';
+import {
+  afdianSponsorUrl,
+  authorEmailUrl,
+  bugFeedbackUrl,
+  dataBackupProgressPhaseLabels,
+} from './settings/general/generalSettingsModel';
+import { DatabaseProtectionPanel } from './settings/danger/DatabaseProtectionPanel';
+import { DuplicateCleanupSettings } from './settings/danger/DuplicateCleanupSettings';
+import { DangerMaintenanceSettings } from './settings/danger/DangerMaintenanceSettings';
+import {
+  buildNetworkProxyModeOptions,
+  defaultNetworkProxyBypassRules,
+  defaultSpotifyRedirectUri,
+  defaultTidalRedirectUri,
+  discogsDeveloperSettingsUrl,
+  integrationsCredentialPanelExpandedStorageKey,
+  isIntegrationCredentialSettingId,
+  isSpotifyClientIdInputValid,
+  isSpotifyRedirectUriInputValid,
+  isTidalClientIdInputValid,
+  isTidalClientSecretInputValid,
+  isTidalCountryCodeInputValid,
+  spotifyDeveloperDashboardUrl,
+  tidalDeveloperDashboardUrl,
+} from './settings/integrations/integrationSettingsModel';
+import {
+  artistOnlineInfoSourceOptions,
+  artistStreamingAlbumProviderOptions,
+  defaultNetworkMetadataProviders,
+  emptyArtistImageSummary,
+  formatLibraryScanProgressMessage,
+  libraryScanResultMetrics,
+  libraryScanRunningStatuses,
+  libraryScanStageLabelKeys,
+  libraryScanStageMetricLabelKeys,
+  networkProviderLabels,
+  visibleNetworkMetadataProviders,
+  type ArtistImageProgress,
+} from './settings/library/librarySettingsModel';
+import {
+  appSettingsPatchFromMvSettingsPatch,
+  formatMvThreshold,
+  mvImmersiveBackgroundDefaults,
+  mvNetworkProviders,
+  mvProviderLabels,
+  mvQualityCaps,
+  mvSyncModes,
+  mvThresholdFromPercent,
+  normalizeExternalAppSettingsPatch,
+  normalizeMvProviderOrder,
+} from './settings/mv/mvSettingsModel';
+import { LyricsSettingsSection } from './settings/lyrics/LyricsSettingsSection';
+import {
+  readBooleanStoragePreference,
+  scheduleSettingsIdleTask,
+  yieldToSettingsPaint,
+} from './settings/settingsRuntime';
+import { PluginsSettingsSection } from './settings/plugins/PluginsSettingsSection';
+import { RemoteSettingsSection } from './settings/remote/RemoteSettingsSection';
+import { EqSettingsSection } from './settings/playback/EqSettingsSection';
+
+export { deviceMatchesAudioStatus };
+export { resetEchoProDisplayStatusSnapshotForTests };
 
 type SettingsSectionMotionDirection = 'initial' | 'forward' | 'backward';
 
-type FontPickerTarget = 'main' | 'chinese' | 'fallback';
 type AlbumMergeStrategy = AppSettings['albumMergeStrategy'];
 type ArtistMergeStrategy = NonNullable<AppSettings['artistMergeStrategy']>;
-type AccountBusyAction = 'save' | 'check' | 'clear' | 'browser' | 'login';
 
-type NeteaseQrLoginUiState = {
-  open: boolean;
-  busy: boolean;
-  key: string | null;
-  qrUrl: string | null;
-  qrDataUrl: string | null;
-  expiresAt: string | null;
-  state: NeteaseQrLoginState | 'idle' | 'creating';
-  message: string | null;
-  error: string | null;
-};
-
-const initialNeteaseQrLoginState: NeteaseQrLoginUiState = {
-  open: false,
-  busy: false,
-  key: null,
-  qrUrl: null,
-  qrDataUrl: null,
-  expiresAt: null,
-  state: 'idle',
-  message: null,
-  error: null,
-};
-
-type LocalFontData = {
-  family: string;
-};
-
-type NavigatorWithLocalFonts = Navigator & {
-  queryLocalFonts?: () => Promise<LocalFontData[]>;
-};
-
-const fallbackFontFamilies = [
-  'Outfit',
-  'Inter',
-  'Segoe UI',
-  'Arial',
-  'Helvetica Neue',
-  'Microsoft YaHei',
-  'Microsoft JhengHei',
-  'PingFang SC',
-  'PingFang TC',
-  'Noto Sans SC',
-  'Noto Sans TC',
-  'Source Han Sans SC',
-  'Source Han Sans TC',
-  'SimHei',
-  'SimSun',
-  'Hiragino Sans',
-  'Yu Gothic',
-  'Meiryo',
-];
-
-const accountProviderLabels: Record<AccountProvider, string> = {
-  kugou: '酷狗音乐',
-  netease: '网易云音乐',
-  qqmusic: 'QQ 音乐',
-  bilibili: 'Bilibili',
-  youtube: 'YouTube',
-  soundcloud: 'SoundCloud',
-  spotify: 'Spotify',
-  tidal: 'TIDAL',
-  qobuz: 'Qobuz',
-  osu: 'osu!',
-};
-
-type ArtistImageProgress = ArtistImageJobStatus & {
-  startedAt: number;
-};
-
-const libraryScanRunningStatuses = new Set<LibraryScanStatus['status']>(['queued', 'running']);
-
-const libraryScanPhaseLabelKeys: Record<LibraryScanStatus['phase'], TranslationKey> = {
-  queued: 'mediaLibrary.folders.status.queued',
-  discovering: 'mediaLibrary.folders.phase.discovering',
-  checking_cache: 'mediaLibrary.folders.phase.checkingCache',
-  reading_metadata: 'mediaLibrary.folders.phase.readingMetadata',
-  extracting_covers: 'mediaLibrary.folders.phase.extractingCovers',
-  grouping_albums: 'mediaLibrary.settings.scan.phase.grouping',
-  writing_database: 'mediaLibrary.folders.phase.writingDatabase',
-  finished: 'mediaLibrary.folders.phase.finished',
-  failed: 'mediaLibrary.folders.phase.failed',
-  cancelled: 'mediaLibrary.folders.status.cancelled',
-};
-
-const libraryScanStageLabelKeys: Record<LibraryScanStageId, TranslationKey> = {
-  discovering: 'mediaLibrary.scanProgress.stage.discovering',
-  checking_cache: 'mediaLibrary.scanProgress.stage.checkingCache',
-  reading_metadata: 'mediaLibrary.scanProgress.stage.readingMetadata',
-  extracting_covers: 'mediaLibrary.scanProgress.stage.extractingCovers',
-  grouping_albums: 'mediaLibrary.scanProgress.stage.groupingAlbums',
-  writing_database: 'mediaLibrary.scanProgress.stage.writingDatabase',
-};
-
-const libraryScanStageMetricLabelKeys: Record<LibraryScanStageId, TranslationKey> = {
-  discovering: 'mediaLibrary.scanProgress.metric.files',
-  checking_cache: 'mediaLibrary.scanProgress.metric.skipped',
-  reading_metadata: 'mediaLibrary.scanProgress.metric.metadata',
-  extracting_covers: 'mediaLibrary.scanProgress.metric.covers',
-  grouping_albums: 'mediaLibrary.scanProgress.metric.albums',
-  writing_database: 'mediaLibrary.scanProgress.metric.written',
-};
-
-const libraryScanResultMetrics: Array<{
-  id: string;
-  labelKey: TranslationKey;
-  getValue: (totals: LibraryScanTotals) => number;
-}> = [
-  { id: 'added', labelKey: 'mediaLibrary.scanProgress.result.added', getValue: (totals) => totals.addedTracks },
-  { id: 'updated', labelKey: 'mediaLibrary.scanProgress.result.updated', getValue: (totals) => totals.updatedTracks },
-  { id: 'removed', labelKey: 'mediaLibrary.scanProgress.result.removed', getValue: (totals) => totals.removedTracks },
-  { id: 'skipped', labelKey: 'mediaLibrary.scanProgress.result.skipped', getValue: (totals) => totals.skippedFiles },
-  { id: 'covers', labelKey: 'mediaLibrary.scanProgress.result.covers', getValue: (totals) => totals.coverCount },
-  { id: 'errors', labelKey: 'mediaLibrary.scanProgress.result.errors', getValue: (totals) => totals.errorCount },
-];
-
-const formatLibraryScanProgressMessage = (statuses: LibraryScanStatus[], t: (key: TranslationKey, options?: Record<string, string | number>) => string): string | null => {
-  if (statuses.length === 0) {
-    return null;
-  }
-
-  const active = statuses.filter((status) => libraryScanRunningStatuses.has(status.status));
-  const failed = statuses.filter((status) => status.status === 'failed').length;
-  const completed = statuses.filter((status) => status.status === 'completed').length;
-  const cancelled = statuses.filter((status) => status.status === 'cancelled').length;
-  const totalFiles = statuses.reduce((total, status) => total + status.totalFiles, 0);
-  const processedFiles = statuses.reduce((total, status) => total + status.processedFiles, 0);
-  const skippedFiles = statuses.reduce((total, status) => total + status.skippedFiles, 0);
-  const errorCount = statuses.reduce((total, status) => total + status.errorCount, 0);
-
-  if (active.length > 0) {
-    const current = active.find((status) => status.status === 'running') ?? active[0];
-    const phase = current ? t(libraryScanPhaseLabelKeys[current.phase] ?? 'mediaLibrary.folders.status.running') : t('mediaLibrary.folders.status.running');
-    return t('mediaLibrary.settings.scan.progressMessage.running', {
-      processed: processedFiles,
-      total: totalFiles || '?',
-      skipped: skippedFiles,
-      errors: errorCount,
-      phase,
-      active: active.length,
-    });
-  }
-
-  return t('mediaLibrary.settings.scan.progressMessage.finished', {
-    completed,
-    cancelled,
-    failed,
-    processed: processedFiles,
-    total: totalFiles || 0,
-    skipped: skippedFiles,
-    errors: errorCount,
-  });
-};
-
-const emptyArtistImageSummary: ArtistImageCacheSummary = {
-  total: 0,
-  matched: 0,
-  pending: 0,
-  loading: 0,
-  notFound: 0,
-  error: 0,
-  rateLimited: 0,
-};
-
-const accountLoginUrls: Record<AccountProvider, string> = {
-  netease: 'https://music.163.com/',
-  qqmusic: 'https://y.qq.com/',
-  kugou: 'https://www.kugou.com/',
-  bilibili: 'https://www.bilibili.com/',
-  youtube: 'https://www.youtube.com/',
-  soundcloud: 'https://soundcloud.com/',
-  spotify: 'https://accounts.spotify.com/',
-  tidal: 'https://login.tidal.com/',
-  qobuz: 'https://play.qobuz.com/login',
-  osu: 'https://osu.ppy.sh/',
-};
-
-const cookieAccountProviders: AccountProvider[] = ['netease', 'qqmusic', 'bilibili', 'soundcloud', 'osu'];
-const buildYouTubeBrowserOptions = (t: (key: TranslationKey, params?: Record<string, string | number>) => string): Array<{ value: YouTubeBrowser; label: string }> => [
-  { value: 'edge', label: 'Edge' },
-  { value: 'chrome', label: 'Chrome' },
-  { value: 'firefox', label: 'Firefox' },
-  { value: 'none', label: t('settings.integrations.accounts.youtube.browserNone') },
-];
-
-const defaultNetworkProxyBypassRules =
-  '<local>;localhost;127.0.0.1;::1;*.local;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*';
-const buildNetworkProxyModeOptions = (t: (key: TranslationKey, params?: Record<string, string | number>) => string): Array<{ value: NetworkProxyMode; label: string }> => [
-  { value: 'off', label: t('settings.integrations.networkProxy.mode.off') },
-  { value: 'system', label: t('settings.integrations.networkProxy.mode.system') },
-  { value: 'manual', label: t('settings.integrations.networkProxy.mode.manual') },
-  { value: 'pac', label: 'PAC' },
-];
-
-const dataBackupProgressPhaseLabels: Record<DataBackupProgress['phase'], TranslationKey> = {
-  preparing: 'settings.general.dataBackup.progress.preparing',
-  snapshot: 'settings.general.dataBackup.progress.snapshot',
-  scanning: 'settings.general.dataBackup.progress.scanning',
-  writing: 'settings.general.dataBackup.progress.writing',
-  finalizing: 'settings.general.dataBackup.progress.finalizing',
-  completed: 'settings.general.dataBackup.progress.completed',
-  failed: 'settings.general.dataBackup.progress.failed',
-};
-
-type SettingSectionProps = {
-  id: SettingsNavKey;
-  activeKey: SettingsNavKey;
-  icon: LucideIcon;
-  title: string;
-  children: ReactNode;
-};
-
-type SettingSubsectionTitleProps = {
-  title: string;
-  description?: string;
-};
-
-type SettingRowProps = {
-  className?: string;
-  id?: string;
-  highlighted?: boolean;
-  title: string;
-  description?: ReactNode;
-  children: ReactNode;
-};
-
-const playbackSeekedEvent = 'playback:seeked';
-
-const dispatchPlaybackSeeked = (positionSeconds: number, trackId: string | null): void => {
-  window.dispatchEvent(new CustomEvent(playbackSeekedEvent, { detail: { positionSeconds, trackId } }));
-};
-
-const defaultSettingsChannelBalance: ChannelBalanceState = {
-  enabled: false,
-  balance: 0,
-  leftGainDb: 0,
-  rightGainDb: 0,
-  leftDelayMs: 0,
-  rightDelayMs: 0,
-  swapLeftRight: false,
-  monoMode: 'off',
-  invertLeft: false,
-  invertRight: false,
-  constantPower: true,
-  clippingRisk: false,
-};
-
-const hasNonMonoChannelBalanceEffect = (state: ChannelBalanceState): boolean =>
-  Math.abs(state.balance) > 0.001 ||
-  Math.abs(state.leftGainDb) > 0.001 ||
-  Math.abs(state.rightGainDb) > 0.001 ||
-  Math.abs(state.leftDelayMs ?? 0) > 0.001 ||
-  Math.abs(state.rightDelayMs ?? 0) > 0.001 ||
-  state.swapLeftRight ||
-  state.invertLeft ||
-  state.invertRight ||
-  state.constantPower === false;
-
-const scheduleSettingsIdleTask = (callback: () => void): (() => void) => {
-  let cancelled = false;
-  let idleId: number | null = null;
-  let timeoutId: number | null = null;
-  const requestIdleCallback = window.requestIdleCallback;
-  const cancelIdleCallback = window.cancelIdleCallback;
-
-  const frameId = window.requestAnimationFrame(() => {
-    if (cancelled) {
-      return;
-    }
-
-    if (typeof requestIdleCallback === 'function') {
-      idleId = requestIdleCallback(() => {
-        if (!cancelled) {
-          callback();
-        }
-      }, { timeout: 1200 });
-      return;
-    }
-
-    timeoutId = window.setTimeout(() => {
-      if (!cancelled) {
-        callback();
-      }
-    }, 120);
-  });
-
-  return () => {
-    cancelled = true;
-    window.cancelAnimationFrame(frameId);
-    if (idleId !== null && typeof cancelIdleCallback === 'function') {
-      cancelIdleCallback(idleId);
-    }
-    if (timeoutId !== null) {
-      window.clearTimeout(timeoutId);
-    }
-  };
-};
-
-const yieldToSettingsPaint = (): Promise<void> =>
-  new Promise((resolve) => {
-    if (typeof window.requestAnimationFrame !== 'function') {
-      window.setTimeout(resolve, 0);
-      return;
-    }
-
-    window.requestAnimationFrame(() => {
-      window.setTimeout(resolve, 0);
-    });
-  });
-
-const settingsNavItems: SettingsNavItem[] = [
-  { key: 'general', labelKey: 'settings.nav.general.label', descriptionKey: 'settings.nav.general.description', icon: MessageSquare },
-  { key: 'experimental', labelKey: 'settings.nav.experimental.label', descriptionKey: 'settings.nav.experimental.description', icon: FlaskConical },
-  { key: 'advancedCustom', labelKey: 'settings.nav.advancedCustom.label', descriptionKey: 'settings.nav.advancedCustom.description', icon: Gauge },
-  { key: 'playback', labelKey: 'settings.nav.playback.label', descriptionKey: 'settings.nav.playback.description', icon: Zap },
-  { key: 'appearance', labelKey: 'settings.nav.appearance.label', descriptionKey: 'settings.nav.appearance.description', icon: Palette },
-  { key: 'library', labelKey: 'settings.nav.library.label', descriptionKey: 'settings.nav.library.description', icon: Download },
-  { key: 'lyrics', labelKey: 'route.lyricsSettings.label', descriptionKey: 'route.lyricsSettings.description', icon: Captions },
-  { key: 'mv', labelKey: 'route.mvSettings.label', descriptionKey: 'route.mvSettings.description', icon: Clapperboard },
-  { key: 'shortcuts', labelKey: 'settings.nav.shortcuts.label', descriptionKey: 'settings.nav.shortcuts.description', icon: Keyboard },
-  { key: 'integrations', labelKey: 'settings.nav.integrations.label', descriptionKey: 'settings.nav.integrations.description', icon: Link2 },
-  { key: 'remote', labelKey: 'settings.nav.remote.label', descriptionKey: 'settings.nav.remote.description', icon: Globe2 },
-  { key: 'plugins', labelKey: 'settings.nav.plugins.label', descriptionKey: 'settings.nav.plugins.description', icon: Code2 },
-  { key: 'eq', labelKey: 'settings.nav.eq.label', descriptionKey: 'settings.nav.eq.description', icon: SlidersHorizontal },
-  { key: 'about', labelKey: 'settings.nav.about.label', descriptionKey: 'settings.nav.about.description', icon: Info },
-  { key: 'danger', labelKey: 'settings.nav.danger.label', descriptionKey: 'settings.nav.danger.description', icon: Trash2 },
-];
-
-const settingsNavGroups: SettingsNavGroup[] = [
-  {
-    id: 'common',
-    label: { 'zh-CN': '常用', 'zh-TW': '常用', 'ja-JP': 'よく使う', 'en-US': 'Common' },
-    itemKeys: ['general', 'experimental', 'playback', 'appearance', 'library'],
-  },
-  {
-    id: 'experience',
-    label: { 'zh-CN': '内容体验', 'zh-TW': '內容體驗', 'ja-JP': '体験', 'en-US': 'Experience' },
-    itemKeys: ['lyrics', 'mv', 'shortcuts'],
-  },
-  {
-    id: 'services',
-    label: { 'zh-CN': '连接与服务', 'zh-TW': '連接與服務', 'ja-JP': '接続とサービス', 'en-US': 'Services' },
-    itemKeys: ['integrations', 'remote', 'plugins'],
-  },
-  {
-    id: 'advanced',
-    label: { 'zh-CN': '高级', 'zh-TW': '進階', 'ja-JP': '詳細', 'en-US': 'Advanced' },
-    itemKeys: ['advancedCustom', 'eq', 'about', 'danger'],
-  },
-];
-
-const settingsSubsectionCopy = {
-  generalBasics: {
-    title: { 'zh-CN': '语言、引导与 Pro', 'zh-TW': '語言、引導與 Pro', 'ja-JP': '言語、ガイド、Pro', 'en-US': 'Language, Guide, Pro' },
-    description: { 'zh-CN': '首次使用、须知和激活入口放在最前面。', 'zh-TW': '首次使用、須知和啟用入口放在最前面。', 'ja-JP': '初回ガイド、通知、Pro の入口を先頭にまとめます。', 'en-US': 'First-run, notices, and Pro entry points stay up front.' },
-  },
-  generalWindow: {
-    title: { 'zh-CN': '窗口与启动', 'zh-TW': '視窗與啟動', 'ja-JP': 'ウィンドウと起動', 'en-US': 'Window And Startup' },
-  },
-  generalFeatures: {
-    title: { 'zh-CN': '功能入口', 'zh-TW': '功能入口', 'ja-JP': '機能入口', 'en-US': 'Feature Entry Points' },
-  },
-  generalAdvancedCustom: {
-    title: { 'zh-CN': '高级自定义', 'zh-TW': '進階自訂', 'ja-JP': '高度なカスタマイズ', 'en-US': 'Advanced Customization' },
-    description: {
-      'zh-CN': '低频使用、调试取向或会改变界面密度的开关集中放在这里。',
-      'zh-TW': '低頻使用、偏調試或會改變介面密度的開關集中放在這裡。',
-      'ja-JP': '使用頻度が低い項目、調整向けの項目、画面密度を変える項目をここにまとめます。',
-      'en-US': 'Low-frequency, tuning-oriented, or interface-density switches are grouped here.',
-    },
-  },
-  generalData: {
-    title: { 'zh-CN': '数据与备份', 'zh-TW': '資料與備份', 'ja-JP': 'データとバックアップ', 'en-US': 'Data And Backups' },
-  },
-  playbackOutput: {
-    title: { 'zh-CN': '输出与无声排查', 'zh-TW': '輸出與無聲排查', 'ja-JP': '出力と無音診断', 'en-US': 'Output And No-Sound Help' },
-  },
-  playbackAdvanced: {
-    title: { 'zh-CN': '高级播放控制', 'zh-TW': '進階播放控制', 'ja-JP': '詳細再生制御', 'en-US': 'Advanced Playback Controls' },
-  },
-  shortcutsMain: {
-    title: { 'zh-CN': '快捷键方案', 'zh-TW': '快捷鍵方案', 'ja-JP': 'ショートカット設定', 'en-US': 'Shortcut Profiles' },
-  },
-  lyricsMain: {
-    title: { 'zh-CN': '歌词显示与行为', 'zh-TW': '歌詞顯示與行為', 'ja-JP': '歌詞表示と動作', 'en-US': 'Lyrics Display And Behavior' },
-  },
-  mvOverview: {
-    title: { 'zh-CN': 'MV 基础体验', 'zh-TW': 'MV 基礎體驗', 'ja-JP': 'MV 基本体験', 'en-US': 'MV Basics' },
-  },
-  mvNetwork: {
-    title: { 'zh-CN': '网络匹配与沉浸背景', 'zh-TW': '網路匹配與沉浸背景', 'ja-JP': 'ネットワーク照合と没入背景', 'en-US': 'Network Match And Immersive Background' },
-  },
-  integrationsNetwork: {
-    title: { 'zh-CN': '网络代理', 'zh-TW': '網路代理', 'ja-JP': 'ネットワークプロキシ', 'en-US': 'Network Proxy' },
-  },
-  integrationsExternal: {
-    title: { 'zh-CN': '外部展示与系统联动', 'zh-TW': '外部展示與系統整合', 'ja-JP': '外部表示とシステム連携', 'en-US': 'External Display And System Links' },
-  },
-  integrationsAccounts: {
-    title: { 'zh-CN': '账号与凭据', 'zh-TW': '帳號與憑證', 'ja-JP': 'アカウントと認証情報', 'en-US': 'Accounts And Credentials' },
-  },
-  pluginsLocal: {
-    title: { 'zh-CN': '本地插件管理', 'zh-TW': '本機外掛管理', 'ja-JP': 'ローカルプラグイン管理', 'en-US': 'Local Plugin Management' },
-  },
-  remoteSources: {
-    title: { 'zh-CN': '远程音乐源', 'zh-TW': '遠端音樂來源', 'ja-JP': 'リモート音楽ソース', 'en-US': 'Remote Music Sources' },
-  },
-  eqWorkbench: {
-    title: { 'zh-CN': '音效处理入口', 'zh-TW': '音效處理入口', 'ja-JP': '音響処理入口', 'en-US': 'Audio Processing Entry' },
-  },
-  appearanceTheme: {
-    title: { 'zh-CN': '主题与布局', 'zh-TW': '主題與佈局', 'ja-JP': 'テーマとレイアウト', 'en-US': 'Theme And Layout' },
-  },
-  appearanceWindow: {
-    title: { 'zh-CN': '窗口材质与播放栏', 'zh-TW': '視窗材質與播放列', 'ja-JP': 'ウィンドウ表現とプレイヤーバー', 'en-US': 'Window Material And Player Bar' },
-  },
-  appearanceWallpaper: {
-    title: { 'zh-CN': '背景与封面', 'zh-TW': '背景與封面', 'ja-JP': '背景とカバー', 'en-US': 'Wallpaper And Covers' },
-  },
-  libraryImport: {
-    title: { 'zh-CN': '导入与扫描', 'zh-TW': '匯入與掃描', 'ja-JP': '取り込みとスキャン', 'en-US': 'Import And Scan' },
-  },
-  libraryQuality: {
-    title: { 'zh-CN': '质量、补全与健康', 'zh-TW': '品質、補全與健康', 'ja-JP': '品質、補完、ヘルス', 'en-US': 'Quality, Backfill, Health' },
-  },
-  libraryMaintenance: {
-    title: { 'zh-CN': '整理与缓存', 'zh-TW': '整理與快取', 'ja-JP': '整理とキャッシュ', 'en-US': 'Organization And Cache' },
-  },
-  libraryMetadata: {
-    title: { 'zh-CN': '网络元数据', 'zh-TW': '網路中繼資料', 'ja-JP': 'ネットワークメタデータ', 'en-US': 'Network Metadata' },
-  },
-  aboutVersion: {
-    title: { 'zh-CN': '版本与更新', 'zh-TW': '版本與更新', 'ja-JP': 'バージョンと更新', 'en-US': 'Version And Updates' },
-  },
-  aboutDiagnostics: {
-    title: { 'zh-CN': '诊断与安全模式', 'zh-TW': '診斷與安全模式', 'ja-JP': '診断とセーフモード', 'en-US': 'Diagnostics And Safe Mode' },
-  },
-  dangerRecovery: {
-    title: { 'zh-CN': '数据库恢复', 'zh-TW': '資料庫復原', 'ja-JP': 'データベース復旧', 'en-US': 'Database Recovery' },
-  },
-  dangerCleanup: {
-    title: { 'zh-CN': '清理与重置', 'zh-TW': '清理與重設', 'ja-JP': 'クリーンアップとリセット', 'en-US': 'Cleanup And Reset' },
-  },
-} as const satisfies Record<string, { title: Record<Locale, string>; description?: Record<Locale, string> }>;
-
-type SettingsSubsectionCopyKey = keyof typeof settingsSubsectionCopy;
-
-const settingsLocaleCopy = (locale: Locale, copy: Record<Locale, string>): string => copy[locale] ?? copy['en-US'];
-
-const settingsSearchSubsectionByTargetId: Partial<Record<string, SettingsSubsectionCopyKey>> = {
-  'settings-row-first-run-wizard': 'generalBasics',
-  'settings-row-user-notice': 'generalBasics',
-  'settings-row-echo-pro-activation': 'generalBasics',
-  'settings-row-echo-pro-account': 'generalBasics',
-  'settings-row-close-to-tray': 'generalWindow',
-  'settings-row-launch-at-login': 'generalWindow',
-  'settings-row-sidebar-auto-hide': 'generalWindow',
-  'settings-row-sidebar-icon-only': 'generalWindow',
-  'settings-row-streaming-feature': 'generalFeatures',
-  'settings-row-track-context-menu-extra-actions': 'generalAdvancedCustom',
-  'settings-row-sqlite-balanced-durability': 'generalFeatures',
-  'settings-row-sidebar-layout': 'generalFeatures',
-  'settings-row-player-waveform-progress': 'generalFeatures',
-  'settings-row-artist-streaming-albums': 'generalFeatures',
-  'settings-row-artist-online-info-sources': 'generalFeatures',
-  'settings-row-data-backup': 'generalData',
-  'settings-row-output-device': 'playbackOutput',
-  'settings-row-low-load-playback-enhancements': 'playbackOutput',
-  'settings-row-audio-status': 'playbackAdvanced',
-  'settings-row-automix': 'playbackAdvanced',
-  'settings-row-fixed-volume': 'playbackAdvanced',
-  'settings-row-transport-fade': 'playbackAdvanced',
-  'settings-row-mini-player': 'playbackAdvanced',
-  'settings-row-gapless-playback': 'playbackAdvanced',
-  'settings-row-shuffle-credibility': 'playbackAdvanced',
-  'settings-row-volume-balance': 'playbackAdvanced',
-  'settings-row-mono-audio': 'playbackAdvanced',
-  'settings-row-soxr-fallback': 'playbackAdvanced',
-  'settings-row-discord-presence': 'integrationsExternal',
-  'settings-row-smtc': 'integrationsExternal',
-  'settings-row-obs-browser-source': 'integrationsExternal',
-  'settings-row-stage-api': 'integrationsExternal',
-  'settings-row-taskbar-playback': 'integrationsExternal',
-  'settings-row-lastfm': 'integrationsAccounts',
-  'settings-row-account-startup-refresh': 'integrationsAccounts',
-  'settings-row-account-expiry-notices': 'integrationsAccounts',
-  'settings-row-theme': 'appearanceTheme',
-  'settings-row-now-playing-cover-color': 'appearanceWindow',
-  'settings-row-wallpaper': 'appearanceWallpaper',
-  'settings-row-album-cover-shape': 'appearanceWallpaper',
-  'settings-row-library-folders': 'libraryImport',
-  'settings-row-live-library-updates': 'libraryImport',
-  'settings-row-native-file-scanner': 'libraryImport',
-  'settings-row-native-metadata-reader': 'libraryImport',
-  'settings-row-library-quality': 'libraryQuality',
-  'settings-row-library-lyrics-backfill': 'libraryQuality',
-  'settings-row-library-health-report': 'libraryQuality',
-  'settings-row-library-performance-diagnostics': 'libraryQuality',
-  'settings-row-artist-wall-artwork': 'libraryMaintenance',
-  'settings-row-artist-avatars': 'libraryMaintenance',
-  'settings-row-library-merge-strategy': 'libraryMaintenance',
-  'settings-row-online-album-info': 'libraryMetadata',
-  'settings-row-online-artist-info': 'libraryMetadata',
-  'settings-row-safe-mode': 'aboutDiagnostics',
-  'settings-row-dev-console': 'aboutDiagnostics',
-  'settings-row-settings-export': 'generalData',
-  'settings-row-diagnostics-assistant': 'aboutDiagnostics',
-  'settings-row-diagnostics': 'aboutDiagnostics',
-};
-
-const shouldShowSettingsNavItem = (key: SettingsNavKey, settings: Partial<AppSettings> | null | undefined): boolean => {
-  if (key === 'plugins' || key === 'remote' || key === 'eq') {
-    return settings?.settingsOptionalSectionsVisible === true;
-  }
-
-  return true;
-};
-
-type SidebarSettingsRouteItem = {
-  id: SidebarRouteId;
-  labelKey: TranslationKey;
-  placement: 'main' | 'utility';
-};
-
-const sidebarSettingsCopy = {
-  titleKey: 'settings.appearance.sidebar.title',
-  descriptionKey: 'settings.appearance.sidebar.description',
-  mainGroupKey: 'settings.appearance.sidebar.mainGroup',
-  utilityGroupKey: 'settings.appearance.sidebar.utilityGroup',
-  resetKey: 'settings.appearance.sidebar.reset',
-  expandKey: 'settings.appearance.sidebar.expand',
-  collapseKey: 'settings.appearance.sidebar.collapse',
-  visibleKey: 'settings.appearance.sidebar.visible',
-  hiddenKey: 'settings.appearance.sidebar.hidden',
-  fixedKey: 'settings.appearance.sidebar.fixed',
-  proLockedKey: 'settings.appearance.sidebar.proLocked',
-  noItemsKey: 'settings.appearance.sidebar.noItems',
-} as const satisfies Record<string, TranslationKey>;
-
-const sidebarSettingsRouteItems: SidebarSettingsRouteItem[] = [
-  { id: 'home', labelKey: 'route.home.label', placement: 'main' },
-  { id: 'songs', labelKey: 'route.songs.label', placement: 'main' },
-  { id: 'downloads', labelKey: 'route.downloads.label', placement: 'main' },
-  { id: 'osu-downloader', labelKey: 'route.osuDownloader.label', placement: 'main' },
-  { id: 'albums', labelKey: 'route.albums.label', placement: 'main' },
-  { id: 'artists', labelKey: 'route.artists.label', placement: 'main' },
-  { id: 'folders', labelKey: 'route.folders.label', placement: 'main' },
-  { id: 'audio-cd', labelKey: 'route.audioCd.label', placement: 'main' },
-  { id: 'remote', labelKey: 'route.remote.label', placement: 'main' },
-  { id: 'connect', labelKey: 'route.connect.label', placement: 'main' },
-  { id: 'dsp', labelKey: 'route.dsp.label', placement: 'main' },
-  { id: 'streaming', labelKey: 'route.streaming.label', placement: 'main' },
-  { id: 'queue', labelKey: 'route.queue.label', placement: 'main' },
-  { id: 'history', labelKey: 'route.history.label', placement: 'main' },
-  { id: 'playlists', labelKey: 'route.playlists.label', placement: 'main' },
-  { id: 'inbox', labelKey: 'route.inbox.label', placement: 'main' },
-  { id: 'plugins', labelKey: 'route.plugins.label', placement: 'main' },
-  { id: 'liked', labelKey: 'route.liked.label', placement: 'utility' },
-  { id: 'settings', labelKey: 'route.settings.label', placement: 'utility' },
-  { id: 'audio-settings', labelKey: 'route.audioSettings.label', placement: 'utility' },
-  { id: 'lyrics-settings', labelKey: 'route.lyricsSettings.label', placement: 'utility' },
-  { id: 'import-folder', labelKey: 'route.importFolder.label', placement: 'utility' },
-  { id: 'import-file', labelKey: 'route.importFile.label', placement: 'utility' },
-];
-
-const sidebarSettingsRouteItemById = new Map(sidebarSettingsRouteItems.map((item) => [item.id, item]));
-const lockedVisibleSidebarRouteIdSet = new Set<SidebarRouteId>(lockedVisibleSidebarRouteIds);
-const lockedHiddenSidebarRouteIdSet = new Set<SidebarRouteId>(lockedHiddenSidebarRouteIds);
-
-type PlayerBarButtonSettingsItem = {
-  id: PlayerBarButtonId;
-  labelKey: TranslationKey;
-  descriptionKey: TranslationKey;
-  icon: LucideIcon;
-};
-
-const defaultHiddenPlayerBarButtonIds: PlayerBarButtonId[] = ['audioExport'];
-const playerBarButtonIdSet = new Set<PlayerBarButtonId>(playerBarButtonIds);
-
-const playerBarButtonSettingsCopy = {
-  titleKey: 'settings.appearance.playerBarButtons.title',
-  descriptionKey: 'settings.appearance.playerBarButtons.description',
-  countKey: 'settings.appearance.playerBarButtons.count',
-  resetKey: 'settings.appearance.playerBarButtons.reset',
-  visibleKey: 'settings.appearance.playerBarButtons.visible',
-  hiddenKey: 'settings.appearance.playerBarButtons.hidden',
-} as const satisfies Record<string, TranslationKey>;
-
-const playerBarButtonSettingsItems: PlayerBarButtonSettingsItem[] = [
-  {
-    id: 'sleepTimer',
-    labelKey: 'settings.appearance.playerBarButtons.sleepTimer',
-    descriptionKey: 'settings.appearance.playerBarButtons.sleepTimer.description',
-    icon: Clock3,
-  },
-  {
-    id: 'desktopLyrics',
-    labelKey: 'settings.appearance.playerBarButtons.desktopLyrics',
-    descriptionKey: 'settings.appearance.playerBarButtons.desktopLyrics.description',
-    icon: Captions,
-  },
-  {
-    id: 'miniPlayer',
-    labelKey: 'settings.appearance.playerBarButtons.miniPlayer',
-    descriptionKey: 'settings.appearance.playerBarButtons.miniPlayer.description',
-    icon: Monitor,
-  },
-  {
-    id: 'volume',
-    labelKey: 'settings.appearance.playerBarButtons.volume',
-    descriptionKey: 'settings.appearance.playerBarButtons.volume.description',
-    icon: Volume2,
-  },
-  {
-    id: 'speed',
-    labelKey: 'settings.appearance.playerBarButtons.speed',
-    descriptionKey: 'settings.appearance.playerBarButtons.speed.description',
-    icon: Gauge,
-  },
-  {
-    id: 'streamingDownload',
-    labelKey: 'settings.appearance.playerBarButtons.streamingDownload',
-    descriptionKey: 'settings.appearance.playerBarButtons.streamingDownload.description',
-    icon: Download,
-  },
-  {
-    id: 'audioExport',
-    labelKey: 'settings.appearance.playerBarButtons.audioExport',
-    descriptionKey: 'settings.appearance.playerBarButtons.audioExport.description',
-    icon: FileDown,
-  },
-];
-
-const normalizeHiddenPlayerBarButtonIdsForRenderer = (value: unknown): PlayerBarButtonId[] => {
-  if (!Array.isArray(value)) {
-    return [...defaultHiddenPlayerBarButtonIds];
-  }
-
-  const output: PlayerBarButtonId[] = [];
-  const seen = new Set<PlayerBarButtonId>();
-  for (const item of value) {
-    if (!playerBarButtonIdSet.has(item as PlayerBarButtonId) || seen.has(item as PlayerBarButtonId)) {
-      continue;
-    }
-    output.push(item as PlayerBarButtonId);
-    seen.add(item as PlayerBarButtonId);
-  }
-  return output;
-};
-
-const pendingSettingsSectionStorageKey = 'echo-next.settings.pending-section';
-const pendingRouteStorageKey = 'echo-next.pending-route';
-const settingsBackNavigationEvent = 'app:navigate:settings-back';
-const settingsSectionNavigationEvent = 'app:navigate:settings-section';
-const pluginsDocumentationUrl = 'https://echonext.moe/zh/docs/';
-const settingsNavKeys = new Set<SettingsNavKey>(settingsNavItems.map((item) => item.key));
-
-const getSettingsNavIndex = (key: SettingsNavKey): number => settingsNavItems.findIndex((item) => item.key === key);
-
-const isSettingsEscapeBackEditableTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-
-  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'));
-};
-
-const readInitialSettingsSection = (): SettingsNavKey => {
-  if (typeof window === 'undefined') {
-    return 'general';
-  }
-
-  try {
-    const pendingSection = window.sessionStorage.getItem(pendingSettingsSectionStorageKey) ?? window.localStorage.getItem(pendingSettingsSectionStorageKey);
-    if (pendingSection && settingsNavKeys.has(pendingSection as SettingsNavKey)) {
-      window.sessionStorage.removeItem(pendingSettingsSectionStorageKey);
-      window.localStorage.removeItem(pendingSettingsSectionStorageKey);
-      return pendingSection as SettingsNavKey;
-    }
-  } catch {
-    // Fall through to the default section when browser storage is unavailable.
-  }
-
-  return 'general';
-};
-
-const settingsSearchAliases: Record<SettingsNavKey, string[]> = {
-  general: ['general', 'language', 'locale', 'tray', 'window size', 'backup', 'settings backup', 'data backup', 'auto backup', 'restore backup', '通用', '语言', '简繁', '繁简', '托盘', '窗口尺寸', '备份', '自动备份', '数据备份', '导入备份'],
-  experimental: [
-    'experimental',
-    'experiments',
-    'lab',
-    'feature flags',
-    'performance',
-    'bug',
-    'low load',
-    'album wall virtualization',
-    'osu downloader',
-    'native direct',
-    'local direct read',
-    '实验性功能',
-    '实验功能',
-    '低负载播放',
-    '专辑墙虚拟化',
-    '本地直读',
-  ],
-  advancedCustom: [
-    'advanced custom',
-    'advanced customization',
-    'customization',
-    'low frequency',
-    'window size',
-    'signal path',
-    'home waveform',
-    'lyrics mv graphics',
-    'feature comments',
-    'notifications',
-    'upcoming track',
-    'fast startup',
-    'data protection',
-    'random title',
-    'visual spectrum',
-    '高级自定义',
-    '進階自訂',
-    '低频开关',
-    '低頻開關',
-    '记住窗口尺寸',
-    '信号路径',
-    '主頁波形圖',
-    '主页波形图',
-    '歌词 MV 图形',
-    '关闭功能注释',
-    '关闭所有通知',
-    '下一首预告',
-    '快速启动',
-    '关闭数据保护',
-    '首页随机标题',
-    '实时频谱分析',
-  ],
-  playback: [
-    'playback',
-    'audio',
-    'output',
-    'device',
-    'wasapi',
-    'exclusive',
-    'juce',
-    'dsd',
-    'dop',
-    'soxr',
-    'speed',
-    'hqplayer',
-    'hq player',
-    'network audio adapter',
-    'external playback',
-    'naa',
-    '播放',
-    '音频',
-    '输出',
-    '设备',
-    '独占',
-    '采样率',
-    '重启音频',
-    '变速',
-    '当前播放',
-  ],
-  shortcuts: ['shortcuts', 'hotkeys', 'keyboard', 'local shortcut', 'global shortcut', 'record shortcut', '快捷键', '热键', '键盘', '普通快捷键', '局部快捷键', '全局快捷键'],
-  lyrics: [
-    'lyrics',
-    'lrc',
-    'karaoke',
-    'offset',
-    'provider',
-    'romaji',
-    'utaten',
-    'UtaTen',
-    'kana',
-    'furigana',
-    '假名',
-    'ふりがな',
-    '注音',
-    'translation',
-    'translate',
-    'translated lyrics',
-    'bilingual lyrics',
-    'font',
-    'lyrics font',
-    'custom font',
-    '字体',
-    '歌词字体',
-    '自定义字体',
-    '歌词',
-    '逐字',
-    '偏移',
-    '音译',
-    '罗马音',
-    '歌词源',
-    '翻译',
-    '译文',
-    '中文翻译',
-    '双语歌词',
-    '歌詞',
-    '翻譯',
-    '譯文',
-    '雙語歌詞',
-  ],
-  mv: ['mv', 'music video', 'video', 'bilibili', 'youtube', 'auto search', 'preload', 'quality', 'immersive', 'background'],
-  integrations: [
-    'integrations',
-    'account',
-    'login',
-    'last.fm',
-    'discord',
-    'smtc',
-    'youtube',
-    'spotify',
-    'bilibili',
-    'netease',
-    'qq music',
-    '集成',
-    '账号',
-    '登录',
-    '账户',
-    '网易云',
-    'QQ 音乐',
-    '哔哩哔哩',
-    '会员',
-  ],
-  plugins: ['插件', 'plugin', 'plugins', '扩展', '脚本', 'manifest', '权限', '本地插件', '开发者', 'developer', 'sandbox', 'echo.plugin.json'],
-  remote: ['remote', 'webdav', 'baidu', 'subsonic', 'jellyfin', 'emby', 'navidrome', 'server', '远程', '网盘', '百度网盘', '服务器', '媒体库', '云端'],
-  eq: ['eq', 'equalizer', 'balance', 'preamp', 'channel', '均衡器', '均衡', '声道', '平衡', '预放大'],
-  appearance: [
-    'appearance',
-    'theme',
-    'dark',
-    'light',
-    'system',
-    'wallpaper',
-    'font',
-    'sidebar',
-    'side bar',
-    'left sidebar',
-    'navigation order',
-    'hide navigation',
-    'artist avatar',
-    'artist image',
-    'cover',
-    'transparent',
-    '\u5de6\u4fa7\u680f',
-    '\u4fa7\u680f',
-    '\u5bfc\u822a\u6392\u5e8f',
-    '\u9690\u85cf\u680f\u76ee',
-    '外观',
-    '主题',
-    '深色',
-    '浅色',
-    '跟随系统',
-    '壁纸',
-    '字体',
-    '密度',
-    '艺术家头像',
-    '艺术家封面',
-    '封面',
-    '透明',
-    '背景',
-  ],
-  library: [
-    'library',
-    'folder',
-    'scan',
-    'cache',
-    'download',
-    'metadata',
-    'duplicate',
-    'bpm',
-    'embedded tags',
-    'artist images',
-    '曲库',
-    '资料库',
-    '文件夹',
-    '扫描',
-    '缓存',
-    '下载',
-    '元数据',
-    '重复歌曲',
-    '内嵌标签',
-    'BPM',
-    '\u7f13\u5b58',
-    '\u6062\u590d',
-    '\u6570\u636e\u5e93',
-    '\u7f51\u76d8',
-    '\u5b9e\u65f6\u66f4\u65b0',
-    '\u6b4c\u8bcd',
-    'MV',
-    '\u66f2\u5e93\u4f53\u68c0',
-    '\u5065\u5eb7\u62a5\u544a',
-    '\u5bfc\u51fa\u62a5\u544a',
-    'health report',
-    'library health',
-  ],
-  about: ['about', 'version', 'update', 'diagnostics', 'crash', 'repository', 'safe mode', 'startup', '关于', '版本', '更新', '诊断', '崩溃', '仓库', '慢启动'],
-  danger: ['danger', 'reset', 'clear cache', 'delete cache', 'restore defaults', 'rebuild database', 'repair database', 'delete database', 'database recovery', 'database snapshot', 'database health', 'duplicate cleanup', 'duplicate songs', '危险', '重置', '清空缓存', '恢复默认', '重建数据库', '修复数据库', '删除数据库', '数据库恢复', '曲库恢复', '健康快照', '重复歌曲', '清理重复', '重复清理'],
-};
-
-const normalizeSettingsSearchText = (value: string): string => value.trim().toLocaleLowerCase();
-
-const compactSettingsSearchText = (value: string): string => normalizeSettingsSearchText(value).replace(/\s+/gu, '');
-
-const settingsSearchKeywordAliases: Record<string, string[]> = {
-  status: ['state', 'connected', 'connection', 'presence', 'running', 'enabled', 'disabled', 'error', 'login', '健康', '状态', '狀態', '连接', '連線', '在线', '启用', '啟用'],
-  状态: ['status', 'state', 'presence', 'connected', 'connection', 'running', 'enabled', 'disabled', 'error', '狀態', '连接', '在线', '启用'],
-  狀態: ['status', 'state', 'presence', 'connected', 'connection', 'running', 'enabled', 'disabled', 'error', '状态', '連線', '在線', '啟用'],
-  presence: ['discord', 'rich presence', 'status', '状态', '狀態'],
-};
-
-const expandSettingsSearchQuery = (query: string): string[] => {
-  const normalized = normalizeSettingsSearchText(query);
-  const compact = compactSettingsSearchText(query);
-  const expansions = new Set([normalized, compact]);
-
-  [normalized, compact].forEach((token) => {
-    settingsSearchKeywordAliases[token]?.forEach((alias) => {
-      expansions.add(normalizeSettingsSearchText(alias));
-      expansions.add(compactSettingsSearchText(alias));
-    });
-  });
-
-  return [...expansions].filter(Boolean);
-};
-
-const rankSettingsSearch = (query: string, terms: string[]): number => {
-  const queries = expandSettingsSearchQuery(query);
-  const normalizedTerms = terms.flatMap((term) => [normalizeSettingsSearchText(term), compactSettingsSearchText(term)]).filter(Boolean);
-
-  let bestScore = 0;
-  queries.forEach((candidateQuery, queryIndex) => {
-    normalizedTerms.forEach((term, termIndex) => {
-      if (!candidateQuery || !term) {
-        return;
-      }
-
-      const aliasPenalty = queryIndex === 0 ? 0 : 8;
-      const termPenalty = Math.min(termIndex, 8);
-      if (term === candidateQuery) {
-        bestScore = Math.max(bestScore, 120 - aliasPenalty - termPenalty);
-      } else if (term.startsWith(candidateQuery)) {
-        bestScore = Math.max(bestScore, 95 - aliasPenalty - termPenalty);
-      } else if (term.includes(candidateQuery)) {
-        bestScore = Math.max(bestScore, 75 - aliasPenalty - termPenalty);
-      } else if (candidateQuery.length >= 2 && candidateQuery.includes(term)) {
-        bestScore = Math.max(bestScore, 45 - aliasPenalty - termPenalty);
-      }
-    });
-  });
-
-  return bestScore;
-};
-
-const isSafeMarkdownHref = (href: string): boolean => {
-  const trimmed = href.trim();
-  return /^(https?:\/\/|mailto:|#|\/(?!\/))/iu.test(trimmed);
-};
-
-const looksLikeReleaseNotesHtml = (value: string): boolean => /<\/?[a-z][\s\S]*>/iu.test(value);
-
-const parseMarkdownInline = (text: string, keyPrefix: string): ReactNode[] => {
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  let textBuffer = '';
-
-  const flushText = (): void => {
-    if (textBuffer) {
-      nodes.push(textBuffer);
-      textBuffer = '';
-    }
-  };
-
-  while (cursor < text.length) {
-    if (text.startsWith('`', cursor)) {
-      const end = text.indexOf('`', cursor + 1);
-      if (end > cursor + 1) {
-        flushText();
-        nodes.push(<code key={`${keyPrefix}-code-${cursor}`}>{text.slice(cursor + 1, end)}</code>);
-        cursor = end + 1;
-        continue;
-      }
-    }
-
-    if (text.startsWith('**', cursor)) {
-      const end = text.indexOf('**', cursor + 2);
-      if (end > cursor + 2) {
-        flushText();
-        nodes.push(<strong key={`${keyPrefix}-strong-${cursor}`}>{parseMarkdownInline(text.slice(cursor + 2, end), `${keyPrefix}-strong-${cursor}`)}</strong>);
-        cursor = end + 2;
-        continue;
-      }
-    }
-
-    if (text[cursor] === '[') {
-      const labelEnd = text.indexOf(']', cursor + 1);
-      const hrefStart = labelEnd >= 0 && text[labelEnd + 1] === '(' ? labelEnd + 2 : -1;
-      const hrefEnd = hrefStart >= 0 ? text.indexOf(')', hrefStart) : -1;
-
-      if (labelEnd > cursor + 1 && hrefStart >= 0 && hrefEnd > hrefStart) {
-        const label = text.slice(cursor + 1, labelEnd);
-        const href = text.slice(hrefStart, hrefEnd).trim();
-        flushText();
-        nodes.push(
-          isSafeMarkdownHref(href) ? (
-            <a key={`${keyPrefix}-link-${cursor}`} href={href} target="_blank" rel="noreferrer">
-              {parseMarkdownInline(label, `${keyPrefix}-link-${cursor}`)}
-            </a>
-          ) : (
-            <span key={`${keyPrefix}-link-${cursor}`}>{parseMarkdownInline(label, `${keyPrefix}-link-${cursor}`)}</span>
-          ),
-        );
-        cursor = hrefEnd + 1;
-        continue;
-      }
-    }
-
-    textBuffer += text[cursor];
-    cursor += 1;
-  }
-
-  flushText();
-  return nodes;
-};
-
-const renderReleaseNotesHtmlInline = (node: ChildNode, keyPrefix: string): ReactNode => {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return node.textContent ?? '';
-  }
-
-  if (node.nodeType !== Node.ELEMENT_NODE) {
-    return null;
-  }
-
-  const element = node as HTMLElement;
-  const tagName = element.tagName.toLowerCase();
-  const children = Array.from(element.childNodes).map((child, childIndex) =>
-    renderReleaseNotesHtmlInline(child, `${keyPrefix}-${childIndex}`),
-  );
-
-  if (tagName === 'br') {
-    return <br key={keyPrefix} />;
-  }
-
-  if (tagName === 'strong' || tagName === 'b') {
-    return <strong key={keyPrefix}>{children}</strong>;
-  }
-
-  if (tagName === 'em' || tagName === 'i') {
-    return <em key={keyPrefix}>{children}</em>;
-  }
-
-  if (tagName === 'code') {
-    return <code key={keyPrefix}>{element.textContent ?? ''}</code>;
-  }
-
-  if (tagName === 'a') {
-    const href = element.getAttribute('href') ?? '';
-    if (!isSafeMarkdownHref(href)) {
-      return <span key={keyPrefix}>{children}</span>;
-    }
-    return (
-      <a key={keyPrefix} href={href} target="_blank" rel="noreferrer">
-        {children.length ? children : href}
-      </a>
-    );
-  }
-
-  if (tagName === 'img') {
-    const src = element.getAttribute('src') ?? '';
-    if (!isSafeMarkdownHref(src)) {
-      return null;
-    }
-    return <img key={keyPrefix} src={src} alt={element.getAttribute('alt') ?? ''} loading="lazy" />;
-  }
-
-  return <span key={keyPrefix}>{children}</span>;
-};
-
-const renderReleaseNotesHtmlBlock = (node: ChildNode, keyPrefix: string): ReactNode => {
-  if (node.nodeType === Node.TEXT_NODE) {
-    const text = node.textContent?.trim();
-    return text ? <p key={keyPrefix}>{text}</p> : null;
-  }
-
-  if (node.nodeType !== Node.ELEMENT_NODE) {
-    return null;
-  }
-
-  const element = node as HTMLElement;
-  const tagName = element.tagName.toLowerCase();
-  const children = Array.from(element.childNodes).map((child, childIndex) =>
-    renderReleaseNotesHtmlInline(child, `${keyPrefix}-inline-${childIndex}`),
-  );
-
-  if (tagName === 'h1' || tagName === 'h2') {
-    return <h3 key={keyPrefix}>{children}</h3>;
-  }
-
-  if (tagName === 'h3') {
-    return <h4 key={keyPrefix}>{children}</h4>;
-  }
-
-  if (tagName === 'h4' || tagName === 'h5' || tagName === 'h6') {
-    return <h5 key={keyPrefix}>{children}</h5>;
-  }
-
-  if (tagName === 'p') {
-    return <p key={keyPrefix}>{children}</p>;
-  }
-
-  if (tagName === 'ul' || tagName === 'ol') {
-    const items = Array.from(element.children)
-      .filter((child) => child.tagName.toLowerCase() === 'li')
-      .map((child, childIndex) => (
-        <li key={`${keyPrefix}-item-${childIndex}`}>
-          {Array.from(child.childNodes).map((grandChild, grandChildIndex) =>
-            renderReleaseNotesHtmlInline(grandChild, `${keyPrefix}-item-${childIndex}-${grandChildIndex}`),
-          )}
-        </li>
-      ));
-    return tagName === 'ol' ? <ol key={keyPrefix}>{items}</ol> : <ul key={keyPrefix}>{items}</ul>;
-  }
-
-  if (tagName === 'blockquote') {
-    return <blockquote key={keyPrefix}>{children}</blockquote>;
-  }
-
-  if (tagName === 'pre') {
-    return (
-      <pre key={keyPrefix}>
-        <code>{element.textContent ?? ''}</code>
-      </pre>
-    );
-  }
-
-  if (tagName === 'hr') {
-    return <hr key={keyPrefix} />;
-  }
-
-  if (tagName === 'img' || tagName === 'a') {
-    return <p key={keyPrefix}>{renderReleaseNotesHtmlInline(element, `${keyPrefix}-inline`)}</p>;
-  }
-
-  return (
-    <div key={keyPrefix}>
-      {Array.from(element.childNodes).map((child, childIndex) => renderReleaseNotesHtmlBlock(child, `${keyPrefix}-${childIndex}`))}
-    </div>
-  );
-};
-
-const ReleaseNotesMarkdown = ({ markdown }: { markdown: string }): JSX.Element => {
-  const rendered = useMemo(() => {
-    if (looksLikeReleaseNotesHtml(markdown) && typeof DOMParser !== 'undefined') {
-      const document = new DOMParser().parseFromString(markdown, 'text/html');
-      const blocks = Array.from(document.body.childNodes)
-        .map((child, childIndex) => renderReleaseNotesHtmlBlock(child, `html-${childIndex}`))
-        .filter(Boolean);
-
-      return { blocks, isHtml: true };
-    }
-
-  const lines = markdown.replace(/\r\n?/gu, '\n').split('\n');
-  const blocks: ReactNode[] = [];
-  let index = 0;
-
-  const pushParagraph = (paragraphLines: string[], key: string): void => {
-    const paragraph = paragraphLines.join(' ').trim();
-    if (paragraph) {
-      blocks.push(<p key={key}>{parseMarkdownInline(paragraph, key)}</p>);
-    }
-  };
-
-  while (index < lines.length) {
-    const line = lines[index];
-    const trimmed = line.trim();
-
-    if (!trimmed) {
-      index += 1;
-      continue;
-    }
-
-    if (trimmed.startsWith('```')) {
-      const codeLines: string[] = [];
-      const blockKey = `code-${index}`;
-      index += 1;
-      while (index < lines.length && !lines[index].trim().startsWith('```')) {
-        codeLines.push(lines[index]);
-        index += 1;
-      }
-      if (index < lines.length) {
-        index += 1;
-      }
-      blocks.push(
-        <pre key={blockKey}>
-          <code>{codeLines.join('\n')}</code>
-        </pre>,
-      );
-      continue;
-    }
-
-    const headingMatch = /^(#{1,3})\s+(.+)$/u.exec(trimmed);
-    if (headingMatch) {
-      const headingLevel = headingMatch[1].length;
-      const headingText = headingMatch[2].trim();
-      const headingKey = `heading-${index}`;
-      blocks.push(
-        headingLevel === 1 ? (
-          <h3 key={headingKey}>{parseMarkdownInline(headingText, headingKey)}</h3>
-        ) : headingLevel === 2 ? (
-          <h4 key={headingKey}>{parseMarkdownInline(headingText, headingKey)}</h4>
-        ) : (
-          <h5 key={headingKey}>{parseMarkdownInline(headingText, headingKey)}</h5>
-        ),
-      );
-      index += 1;
-      continue;
-    }
-
-    const listMatch = /^(\s*)([-*+]|\d+\.)\s+(.+)$/u.exec(line);
-    if (listMatch) {
-      const ordered = /\d+\./u.test(listMatch[2]);
-      const items: ReactNode[] = [];
-      const listKey = `list-${index}`;
-      while (index < lines.length) {
-        const itemMatch = /^(\s*)([-*+]|\d+\.)\s+(.+)$/u.exec(lines[index]);
-        if (!itemMatch || /\d+\./u.test(itemMatch[2]) !== ordered) {
-          break;
-        }
-        items.push(<li key={`${listKey}-item-${index}`}>{parseMarkdownInline(itemMatch[3].trim(), `${listKey}-item-${index}`)}</li>);
-        index += 1;
-      }
-      blocks.push(ordered ? <ol key={listKey}>{items}</ol> : <ul key={listKey}>{items}</ul>);
-      continue;
-    }
-
-    if (trimmed.startsWith('>')) {
-      const quoteLines: string[] = [];
-      const quoteKey = `quote-${index}`;
-      while (index < lines.length && lines[index].trim().startsWith('>')) {
-        quoteLines.push(lines[index].trim().replace(/^>\s?/u, ''));
-        index += 1;
-      }
-      blocks.push(<blockquote key={quoteKey}>{parseMarkdownInline(quoteLines.join(' '), quoteKey)}</blockquote>);
-      continue;
-    }
-
-    const paragraphLines = [line.trim()];
-    const paragraphKey = `paragraph-${index}`;
-    index += 1;
-    while (
-      index < lines.length &&
-      lines[index].trim() &&
-      !lines[index].trim().startsWith('```') &&
-      !/^(#{1,3})\s+(.+)$/u.test(lines[index].trim()) &&
-      !/^(\s*)([-*+]|\d+\.)\s+(.+)$/u.test(lines[index]) &&
-      !lines[index].trim().startsWith('>')
-    ) {
-      paragraphLines.push(lines[index].trim());
-      index += 1;
-    }
-    pushParagraph(paragraphLines, paragraphKey);
-  }
-
-    return { blocks, isHtml: false };
-  }, [markdown]);
-
-  return <div className={`settings-update-markdown${rendered.isHtml ? ' settings-update-markdown--html' : ''}`}>{rendered.blocks}</div>;
-};
-
-const formatRate = (value: number | null): string => {
-  if (!value) {
-    return 'n/a';
-  }
-
-  return `${value} Hz`;
-};
-
-const formatDiagnosticsDuration = (valueMs: number | null | undefined): string => {
-  if (!Number.isFinite(valueMs) || valueMs === null || valueMs === undefined || valueMs < 0) {
-    return 'n/a';
-  }
-
-  if (valueMs < 1000) {
-    return `${Math.round(valueMs)} ms`;
-  }
-
-  const seconds = valueMs / 1000;
-  if (seconds < 60) {
-    return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} s`;
-  }
-
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = Math.round(seconds % 60);
-  return `${minutes}m ${remainingSeconds}s`;
-};
-
-const formatDiagnosticsTimestampDuration = (startedAt: string | null | undefined, finishedAt: string | null | undefined): string => {
-  if (!startedAt || !finishedAt) {
-    return 'n/a';
-  }
-
-  const startedMs = Date.parse(startedAt);
-  const finishedMs = Date.parse(finishedAt);
-  if (!Number.isFinite(startedMs) || !Number.isFinite(finishedMs) || finishedMs < startedMs) {
-    return 'n/a';
-  }
-
-  return formatDiagnosticsDuration(finishedMs - startedMs);
-};
-
-const formatDiagnosticsPercent = (value: number | null | undefined): string => {
-  if (!Number.isFinite(value) || value === null || value === undefined) {
-    return 'n/a';
-  }
-
-  return `${Math.round(value * 1000) / 10}%`;
-};
-
-const themeModeOptions: Array<{ mode: AppThemeMode; labelKey: TranslationKey }> = [
-  { mode: 'light', labelKey: 'settings.appearance.theme.light' },
-  { mode: 'dark', labelKey: 'settings.appearance.theme.dark' },
-  { mode: 'system', labelKey: 'settings.appearance.theme.followSystem' },
-  { mode: 'ambient', labelKey: 'settings.appearance.theme.ambient' },
-];
-const defaultThemeScheduleDarkAt = '19:00';
-const defaultThemeScheduleLightAt = '07:00';
-
-const themePresetOptions: Array<{
-  preset: AppThemePreset;
-  labelKey: TranslationKey;
-  descriptionKey: TranslationKey;
-  preview: string;
-  swatches: string[];
-}> = [
-  {
-    preset: 'classic',
-    labelKey: 'settings.appearance.themePreset.classic',
-    descriptionKey: 'settings.appearance.themePreset.classic.description',
-    preview: 'linear-gradient(135deg, #ffffff 0%, #f6f6f7 52%, #e6e7ea 100%)',
-    swatches: ['#f6f6f7', '#4b55e8', '#727987'],
-  },
-  {
-    preset: 'echoTwilight',
-    labelKey: 'settings.appearance.themePreset.echoTwilight',
-    descriptionKey: 'settings.appearance.themePreset.echoTwilight.description',
-    preview: 'linear-gradient(135deg, #fff4ef 0%, #f3d7cf 48%, #efe5f2 100%)',
-    swatches: ['#fff4ef', '#df6b5f', '#8ccfc8'],
-  },
-  {
-    preset: 'sakuraMilk',
-    labelKey: 'settings.appearance.themePreset.sakuraMilk',
-    descriptionKey: 'settings.appearance.themePreset.sakuraMilk.description',
-    preview: 'linear-gradient(135deg, #fff6f9 0%, #f7d9e7 48%, #f0eefc 100%)',
-    swatches: ['#fff6f9', '#cf5d7d', '#7fc8d6'],
-  },
-  {
-    preset: 'peachSoda',
-    labelKey: 'settings.appearance.themePreset.peachSoda',
-    descriptionKey: 'settings.appearance.themePreset.peachSoda.description',
-    preview: 'linear-gradient(135deg, #fff2e8 0%, #ffd6bd 44%, #d7f4ee 100%)',
-    swatches: ['#fff2e8', '#d96d4c', '#5eb9ad'],
-  },
-  {
-    preset: 'mintCandy',
-    labelKey: 'settings.appearance.themePreset.mintCandy',
-    descriptionKey: 'settings.appearance.themePreset.mintCandy.description',
-    preview: 'linear-gradient(135deg, #f6fff8 0%, #d7f2df 46%, #ffe5ec 100%)',
-    swatches: ['#f6fff8', '#3f9274', '#dd6e86'],
-  },
-  {
-    preset: 'berryDream',
-    labelKey: 'settings.appearance.themePreset.berryDream',
-    descriptionKey: 'settings.appearance.themePreset.berryDream.description',
-    preview: 'linear-gradient(135deg, #f8f5ff 0%, #e2d9fb 46%, #ffddec 100%)',
-    swatches: ['#f8f5ff', '#7657b8', '#cf5f95'],
-  },
-  {
-    preset: 'matchaCream',
-    labelKey: 'settings.appearance.themePreset.matchaCream',
-    descriptionKey: 'settings.appearance.themePreset.matchaCream.description',
-    preview: 'linear-gradient(135deg, #fbfaeb 0%, #e1edc9 48%, #f6d9d7 100%)',
-    swatches: ['#fbfaeb', '#6e8f49', '#c8757a'],
-  },
-  {
-    preset: 'lemonMochi',
-    labelKey: 'settings.appearance.themePreset.lemonMochi',
-    descriptionKey: 'settings.appearance.themePreset.lemonMochi.description',
-    preview: 'linear-gradient(135deg, #fffbe6 0%, #f6e7ad 48%, #eaf4fb 100%)',
-    swatches: ['#fffbe6', '#c99a26', '#86bdd4'],
-  },
-  {
-    preset: 'cottonCloud',
-    labelKey: 'settings.appearance.themePreset.cottonCloud',
-    descriptionKey: 'settings.appearance.themePreset.cottonCloud.description',
-    preview: 'linear-gradient(135deg, #f8fbff 0%, #dfe9ff 48%, #ffe5f0 100%)',
-    swatches: ['#f8fbff', '#6c88d8', '#dc6f9b'],
-  },
-  {
-    preset: 'melonCream',
-    labelKey: 'settings.appearance.themePreset.melonCream',
-    descriptionKey: 'settings.appearance.themePreset.melonCream.description',
-    preview: 'linear-gradient(135deg, #f8fff0 0%, #dff0c9 48%, #ffe2d8 100%)',
-    swatches: ['#f8fff0', '#6ca344', '#db7b62'],
-  },
-  {
-    preset: 'seaSaltJelly',
-    labelKey: 'settings.appearance.themePreset.seaSaltJelly',
-    descriptionKey: 'settings.appearance.themePreset.seaSaltJelly.description',
-    preview: 'linear-gradient(135deg, #f1fffb 0%, #cfeeea 48%, #ffe3dd 100%)',
-    swatches: ['#f1fffb', '#3c9a92', '#d66d5e'],
-  },
-  {
-    preset: 'caramelPudding',
-    labelKey: 'settings.appearance.themePreset.caramelPudding',
-    descriptionKey: 'settings.appearance.themePreset.caramelPudding.description',
-    preview: 'linear-gradient(135deg, #fff7e8 0%, #f5d29b 46%, #ffdce6 100%)',
-    swatches: ['#fff7e8', '#b7772f', '#d56f86'],
-  },
-  {
-    preset: 'neonCandy',
-    labelKey: 'settings.appearance.themePreset.neonCandy',
-    descriptionKey: 'settings.appearance.themePreset.neonCandy.description',
-    preview: 'linear-gradient(135deg, #f6f7ff 0%, #e7dcff 45%, #d8fff7 100%)',
-    swatches: ['#f6f7ff', '#8b5cf6', '#ff6fb1'],
-  },
-  {
-    preset: 'nyanCat',
-    labelKey: 'settings.appearance.themePreset.nyanCat',
-    descriptionKey: 'settings.appearance.themePreset.nyanCat.description',
-    preview: 'linear-gradient(135deg, #fff7fb 0%, #d7f3ff 24%, #ffe6a8 44%, #d9ffd8 64%, #eadcff 84%, #ffd7ee 100%)',
-    swatches: ['#fff7fb', '#ff5f93', '#ffd84f', '#44c765', '#28b8f0'],
-  },
-  {
-    preset: 'childrenDoodle',
-    labelKey: 'settings.appearance.themePreset.childrenDoodle',
-    descriptionKey: 'settings.appearance.themePreset.childrenDoodle.description',
-    preview: 'linear-gradient(135deg, #fff4dc 0%, #ffd9ec 26%, #d6f7ff 50%, #ede0ff 73%, #fff1a8 100%)',
-    swatches: ['#fff4dc', '#ff6fa8', '#566fda', '#66cdb7', '#f4c746'],
-  },
-  {
-    preset: 'wisteriaBubble',
-    labelKey: 'settings.appearance.themePreset.wisteriaBubble',
-    descriptionKey: 'settings.appearance.themePreset.wisteriaBubble.description',
-    preview: 'linear-gradient(135deg, #fbf7ff 0%, #e8d9ff 46%, #dcfff4 100%)',
-    swatches: ['#fbf7ff', '#8f6ed5', '#67cdb3'],
-  },
-  {
-    preset: 'strawberryCookie',
-    labelKey: 'settings.appearance.themePreset.strawberryCookie',
-    descriptionKey: 'settings.appearance.themePreset.strawberryCookie.description',
-    preview: 'linear-gradient(135deg, #fff8f0 0%, #f7dcc6 46%, #ffe3ee 100%)',
-    swatches: ['#fff8f0', '#d75a72', '#c5924f'],
-  },
-  {
-    preset: 'graphiteAurora',
-    labelKey: 'settings.appearance.themePreset.graphiteAurora',
-    descriptionKey: 'settings.appearance.themePreset.graphiteAurora.description',
-    preview: 'linear-gradient(135deg, #f5f7f8 0%, #dfe6e8 48%, #d8f3ec 100%)',
-    swatches: ['#f5f7f8', '#2f7f73', '#496a9f'],
-  },
-  {
-    preset: 'amberNoir',
-    labelKey: 'settings.appearance.themePreset.amberNoir',
-    descriptionKey: 'settings.appearance.themePreset.amberNoir.description',
-    preview: 'linear-gradient(135deg, #fbf7ee 0%, #ead9bb 48%, #f3e7d4 100%)',
-    swatches: ['#fbf7ee', '#9a6a24', '#37302b'],
-  },
-  {
-    preset: 'oceanStudio',
-    labelKey: 'settings.appearance.themePreset.oceanStudio',
-    descriptionKey: 'settings.appearance.themePreset.oceanStudio.description',
-    preview: 'linear-gradient(135deg, #f4f8fb 0%, #d8e8ef 48%, #dce3f2 100%)',
-    swatches: ['#f4f8fb', '#2f7390', '#596b9a'],
-  },
-  {
-    preset: 'rosewoodVinyl',
-    labelKey: 'settings.appearance.themePreset.rosewoodVinyl',
-    descriptionKey: 'settings.appearance.themePreset.rosewoodVinyl.description',
-    preview: 'linear-gradient(135deg, #fbf3ee 0%, #ead3c7 48%, #f0dfe7 100%)',
-    swatches: ['#fbf3ee', '#8f4d48', '#6d4f2c'],
-  },
-  {
-    preset: 'darkSideMoon',
-    labelKey: 'settings.appearance.themePreset.darkSideMoon',
-    descriptionKey: 'settings.appearance.themePreset.darkSideMoon.description',
-    preview: 'linear-gradient(135deg, #10111a 0%, #202638 42%, #f6f0d8 49%, #ed2f3b 55%, #f68e20 62%, #ffd84f 69%, #44c765 76%, #28b8f0 84%, #8d63c7 100%)',
-    swatches: ['#10111a', '#f6f0d8', '#ed2f3b', '#ffd84f', '#28b8f0'],
-  },
-  {
-    preset: 'shibuyaNight',
-    labelKey: 'settings.appearance.themePreset.shibuyaNight',
-    descriptionKey: 'settings.appearance.themePreset.shibuyaNight.description',
-    preview: 'linear-gradient(135deg, #1b0d2b 0%, #3a185e 46%, #073449 100%)',
-    swatches: ['#1b0d2b', '#ff3b9d', '#23d0ee'],
-  },
-  {
-    preset: 'kyotoKurenai',
-    labelKey: 'settings.appearance.themePreset.kyotoKurenai',
-    descriptionKey: 'settings.appearance.themePreset.kyotoKurenai.description',
-    preview: 'linear-gradient(135deg, #fff1df 0%, #e8b99b 48%, #f7d989 100%)',
-    swatches: ['#fff1df', '#a92f26', '#c08a1e'],
-  },
-  {
-    preset: 'ukiyoIndigo',
-    labelKey: 'settings.appearance.themePreset.ukiyoIndigo',
-    descriptionKey: 'settings.appearance.themePreset.ukiyoIndigo.description',
-    preview: 'linear-gradient(135deg, #eaf1ed 0%, #9fbccb 48%, #d8c094 100%)',
-    swatches: ['#eaf1ed', '#174f7f', '#b06d1f'],
-  },
-  {
-    preset: 'fujiSnow',
-    labelKey: 'settings.appearance.themePreset.fujiSnow',
-    descriptionKey: 'settings.appearance.themePreset.fujiSnow.description',
-    preview: 'linear-gradient(135deg, #edf8ff 0%, #badcff 48%, #f5d1e6 100%)',
-    swatches: ['#edf8ff', '#246fc8', '#c74786'],
-  },
-  {
-    preset: 'matsuriLantern',
-    labelKey: 'settings.appearance.themePreset.matsuriLantern',
-    descriptionKey: 'settings.appearance.themePreset.matsuriLantern.description',
-    preview: 'linear-gradient(135deg, #fff0d8 0%, #efae67 48%, #ffd35f 100%)',
-    swatches: ['#fff0d8', '#c23c28', '#d88409'],
-  },
-  {
-    preset: 'ginzaNoir',
-    labelKey: 'settings.appearance.themePreset.ginzaNoir',
-    descriptionKey: 'settings.appearance.themePreset.ginzaNoir.description',
-    preview: 'linear-gradient(135deg, #090a0d 0%, #111219 48%, #1b1712 100%)',
-    swatches: ['#090a0d', '#d6b158', '#66a8d4'],
-  },
-  {
-    preset: 'frostJazz',
-    labelKey: 'settings.appearance.themePreset.frostJazz',
-    descriptionKey: 'settings.appearance.themePreset.frostJazz.description',
-    preview: 'linear-gradient(135deg, #eaf2fb 0%, #aac2df 48%, #d4c0dc 100%)',
-    swatches: ['#eaf2fb', '#245f9e', '#7f3e70'],
-  },
-  {
-    preset: 'FINAL',
-    labelKey: 'settings.appearance.themePreset.FINAL',
-    descriptionKey: 'settings.appearance.themePreset.FINAL.description',
-    preview: 'repeating-linear-gradient(90deg, rgb(124 133 136 / 0.22) 0 1px, transparent 1px 22px), linear-gradient(135deg, #f4f5f4 0%, #dde0df 46%, #101214 47%, #30363a 100%)',
-    swatches: ['#f4f5f4', '#30363a', '#7c8588', '#b08a56'],
-  },
-];
-
-const randomThemePresetOption = {
-  labelKey: 'settings.appearance.themePreset.random',
-  descriptionKey: 'settings.appearance.themePreset.random.description',
-  preview: 'linear-gradient(135deg, #f7f8fb 0%, #e4ecea 44%, #f2e2d8 100%)',
-  swatches: ['#f7f8fb', '#3f6f9e', '#6f9a8d', '#b47b68'],
-} satisfies {
-  labelKey: TranslationKey;
-  descriptionKey: TranslationKey;
-  preview: string;
-  swatches: string[];
-};
-
-type GeneratedRandomThemeDraft = {
-  dark: AppThemeToneOverride;
-  light: AppThemeToneOverride;
-};
-
-type PluginThemeOption = PluginThemePresetContribution & {
-  pluginId: string;
-  pluginName: string;
-  pluginVersion: string;
-  customThemeId: string;
-};
-
-const pluginThemeStableHash = (value: string): string => {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(36).padStart(7, '0').slice(0, 8);
-};
-
-const pluginThemeCustomId = (pluginId: string, themeId: string): string => {
-  const readableThemeId = themeId.replace(/[^a-zA-Z0-9_.:-]/g, '-').slice(0, 40) || 'theme';
-  return `plugin:${pluginThemeStableHash(`${pluginId}:${themeId}`)}:${readableThemeId}`;
-};
-
-const collectPluginThemeOptions = (plugins: PluginSummary[]): PluginThemeOption[] =>
-  plugins.flatMap((plugin) => {
-    if (!plugin.enabled || plugin.disabledByHost || plugin.error) {
-      return [];
-    }
-
-    return (plugin.contributes.themePresets ?? [])
-      .filter((theme) => theme.basePreset !== 'FINAL')
-      .map((theme) => ({
-        ...theme,
-        pluginId: plugin.id,
-        pluginName: plugin.name,
-        pluginVersion: plugin.version,
-        customThemeId: pluginThemeCustomId(plugin.id, theme.id),
-      }));
-  });
-
-const isEchoProUnlockPluginActive = (plugin: Pick<PluginSummary, 'id' | 'enabled' | 'status' | 'disabledByHost'>): boolean =>
-  plugin.id === echoProUnlockPluginId && plugin.enabled === true && plugin.disabledByHost !== true && plugin.status !== 'error';
-
-const proOnlyThemePresetSet = new Set<AppThemePreset>(proOnlyThemePresets);
-
-const isProOnlyThemePreset = (preset: AppThemePreset): boolean => proOnlyThemePresetSet.has(preset);
-
-type ThemeTone = 'light' | 'dark';
-type ThemeColorField = keyof Pick<
-  AppThemeToneOverride,
-  | 'appBg'
-  | 'appBg2'
-  | 'appBg3'
-  | 'panel'
-  | 'panelSoft'
-  | 'accent'
-  | 'accentStrong'
-  | 'secondary'
-  | 'heading'
-  | 'text'
-  | 'muted'
-  | 'border'
-  | 'onAccent'
-  | 'buttonText'
-  | 'titlebar'
-  | 'sidebar'
-  | 'player'
-  | 'field'
-  | 'row'
-  | 'rowHover'
-  | 'rowActive'
-  | 'chip'
-  | 'focus'
-  | 'danger'
-  | 'success'
-  | 'warning'
->;
-type ThemeNumberField = keyof Pick<
-  AppThemeToneOverride,
-  'panelOpacityPercent' | 'glassPercent' | 'shadowPercent' | 'cornerRadiusPx' | 'panelBlurPx' | 'saturationPercent' | 'motionSpeedSeconds' | 'motionIntensityPercent'
->;
-type ThemeBooleanField = keyof Pick<AppThemeToneOverride, 'motionEnabled'>;
-type ThemeEditorDefaults = Required<Pick<AppThemeToneOverride, ThemeColorField | ThemeNumberField | ThemeBooleanField>>;
-type ThemeLegacyExportPayload = {
-  exportedAt: string;
-  overrides: AppThemePresetOverrides;
-  preset: AppThemePreset;
-  schema: 'echo-next.theme-preset';
-  version: 1;
-};
-type ThemeCustomExportPayload = {
-  exportedAt: string;
-  schema: 'echo-next.custom-theme';
-  theme: AppThemeCustomTheme;
-  version: 2;
-};
-type ThemeExportPayload = ThemeLegacyExportPayload | ThemeCustomExportPayload;
-
-const baseThemeEditorDefaults: Record<ThemeTone, ThemeEditorDefaults> = {
-  light: {
-    appBg: '#f6f6f7',
-    appBg2: '#edeef0',
-    appBg3: '#e6e7ea',
-    panel: '#ffffff',
-    panelSoft: '#eff0f2',
-    accent: '#4b55e8',
-    accentStrong: '#3239c7',
-    secondary: '#727987',
-    heading: '#1e2025',
-    text: '#2d3036',
-    muted: '#6c7179',
-    border: '#26282e',
-    onAccent: '#ffffff',
-    buttonText: '#3c4048',
-    titlebar: '#ffffff',
-    sidebar: '#eff0f2',
-    player: '#fafafb',
-    field: '#ffffff',
-    row: '#ffffff',
-    rowHover: '#f8f8f9',
-    rowActive: '#eceeff',
-    chip: '#ffffff',
-    focus: '#4b55e8',
-    danger: '#d64545',
-    success: '#2f8f72',
-    warning: '#c98a16',
-    panelOpacityPercent: 72,
-    glassPercent: 18,
-    shadowPercent: 100,
-    cornerRadiusPx: 14,
-    panelBlurPx: 15,
-    saturationPercent: 100,
-    motionEnabled: true,
-    motionSpeedSeconds: 0.22,
-    motionIntensityPercent: 100,
-  },
-  dark: {
-    appBg: '#101318',
-    appBg2: '#151a22',
-    appBg3: '#111827',
-    panel: '#1c222b',
-    panelSoft: '#161b23',
-    accent: '#75b7ff',
-    accentStrong: '#cce6ff',
-    secondary: '#7dd7cb',
-    heading: '#f8fbff',
-    text: '#d8e0ea',
-    muted: '#a8b5c4',
-    border: '#647c96',
-    onAccent: '#0f1720',
-    buttonText: '#d8e0ea',
-    titlebar: '#1c222b',
-    sidebar: '#161b23',
-    player: '#1c222b',
-    field: '#1c222b',
-    row: '#1c222b',
-    rowHover: '#253040',
-    rowActive: '#75b7ff',
-    chip: '#1c222b',
-    focus: '#75b7ff',
-    danger: '#ff7575',
-    success: '#7dd7a4',
-    warning: '#f0b84a',
-    panelOpacityPercent: 86,
-    glassPercent: 22,
-    shadowPercent: 100,
-    cornerRadiusPx: 14,
-    panelBlurPx: 16,
-    saturationPercent: 100,
-    motionEnabled: true,
-    motionSpeedSeconds: 0.22,
-    motionIntensityPercent: 100,
-  },
-};
-
-const themeEditorDefaults: Record<AppThemePreset, Record<ThemeTone, Partial<ThemeEditorDefaults>>> = {
-  classic: {
-    light: {
-      appBg: '#f6f6f7',
-      appBg2: '#edeef0',
-      appBg3: '#e6e7ea',
-      panel: '#ffffff',
-      panelSoft: '#eff0f2',
-      accent: '#4b55e8',
-      accentStrong: '#3239c7',
-      secondary: '#727987',
-      heading: '#1e2025',
-      text: '#2d3036',
-      muted: '#6c7179',
-      border: '#26282e',
-      onAccent: '#ffffff',
-      buttonText: '#344540',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#101318',
-      appBg2: '#151a22',
-      appBg3: '#111827',
-      panel: '#1c222b',
-      panelSoft: '#161b23',
-      accent: '#75b7ff',
-      accentStrong: '#cce6ff',
-      secondary: '#7dd7cb',
-      heading: '#f8fbff',
-      text: '#d8e0ea',
-      muted: '#a8b5c4',
-      border: '#647c96',
-      onAccent: '#0f1720',
-      buttonText: '#d8e0ea',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  echoTwilight: {
-    light: {
-      appBg: '#fff4ef',
-      appBg2: '#f3d7cf',
-      appBg3: '#efe5f2',
-      panel: '#fffcf9',
-      panelSoft: '#fbe9e4',
-      accent: '#df6b5f',
-      accentStrong: '#a83e37',
-      secondary: '#8ccfc8',
-      heading: '#352321',
-      text: '#4f3833',
-      muted: '#765d57',
-      border: '#b87065',
-      onAccent: '#ffffff',
-      buttonText: '#4f3833',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#151012',
-      appBg2: '#211719',
-      appBg3: '#171320',
-      panel: '#271e21',
-      panelSoft: '#1f181b',
-      accent: '#e2776d',
-      accentStrong: '#ffd0ca',
-      secondary: '#8fd4ce',
-      heading: '#fff7f4',
-      text: '#f3e3de',
-      muted: '#d2b9b2',
-      border: '#df8479',
-      onAccent: '#2b1513',
-      buttonText: '#f3e3de',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  sakuraMilk: {
-    light: {
-      appBg: '#fff6f9',
-      appBg2: '#f7d9e7',
-      appBg3: '#f0eefc',
-      panel: '#fffdfe',
-      panelSoft: '#fce8f0',
-      accent: '#cf5d7d',
-      accentStrong: '#9a3157',
-      secondary: '#7fc8d6',
-      heading: '#361f29',
-      text: '#55333f',
-      muted: '#765b66',
-      border: '#b05d7c',
-      onAccent: '#ffffff',
-      buttonText: '#55333f',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#151015',
-      appBg2: '#231722',
-      appBg3: '#171627',
-      panel: '#271e26',
-      panelSoft: '#201820',
-      accent: '#e17599',
-      accentStrong: '#ffd0df',
-      secondary: '#8acdda',
-      heading: '#fff6fb',
-      text: '#f4e2ea',
-      muted: '#d4b7c3',
-      border: '#da7797',
-      onAccent: '#2c131d',
-      buttonText: '#f4e2ea',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  peachSoda: {
-    light: {
-      appBg: '#fff2e8',
-      appBg2: '#ffd6bd',
-      appBg3: '#d7f4ee',
-      panel: '#fffdf9',
-      panelSoft: '#faeadc',
-      accent: '#d96d4c',
-      accentStrong: '#9c3e26',
-      secondary: '#5eb9ad',
-      heading: '#33231d',
-      text: '#50392f',
-      muted: '#745d54',
-      border: '#b3684c',
-      onAccent: '#ffffff',
-      buttonText: '#50392f',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#15110f',
-      appBg2: '#241915',
-      appBg3: '#10201f',
-      panel: '#271f1b',
-      panelSoft: '#201916',
-      accent: '#e27b58',
-      accentStrong: '#ffd2c1',
-      secondary: '#78c9be',
-      heading: '#fff5ef',
-      text: '#f4e3d8',
-      muted: '#d2b8ac',
-      border: '#da7e56',
-      onAccent: '#2c1710',
-      buttonText: '#f4e3d8',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  mintCandy: {
-    light: {
-      appBg: '#f6fff8',
-      appBg2: '#d7f2df',
-      appBg3: '#ffe5ec',
-      panel: '#fdfffa',
-      panelSoft: '#e6f5e6',
-      accent: '#3f9274',
-      accentStrong: '#27664f',
-      secondary: '#dd6e86',
-      heading: '#1f3029',
-      text: '#33493e',
-      muted: '#556f63',
-      border: '#5c896f',
-      onAccent: '#ffffff',
-      buttonText: '#33493e',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#101512',
-      appBg2: '#17231c',
-      appBg3: '#23151b',
-      panel: '#1d2721',
-      panelSoft: '#17201b',
-      accent: '#6bc09b',
-      accentStrong: '#c3f5df',
-      secondary: '#e28aa0',
-      heading: '#f5fff8',
-      text: '#e0f0e7',
-      muted: '#b7d0c3',
-      border: '#61b991',
-      onAccent: '#10261c',
-      buttonText: '#e0f0e7',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  berryDream: {
-    light: {
-      appBg: '#f8f5ff',
-      appBg2: '#e2d9fb',
-      appBg3: '#ffddec',
-      panel: '#fffdff',
-      panelSoft: '#efe8fa',
-      accent: '#7657b8',
-      accentStrong: '#563995',
-      secondary: '#cf5f95',
-      heading: '#2d2440',
-      text: '#45395b',
-      muted: '#655878',
-      border: '#725ba6',
-      onAccent: '#ffffff',
-      buttonText: '#45395b',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#11101a',
-      appBg2: '#1b1730',
-      appBg3: '#241421',
-      panel: '#201d2e',
-      panelSoft: '#1a1726',
-      accent: '#9a79dd',
-      accentStrong: '#ddd0ff',
-      secondary: '#e48ab5',
-      heading: '#fbf8ff',
-      text: '#e9e4f7',
-      muted: '#c4badd',
-      border: '#9277d4',
-      onAccent: '#1d1233',
-      buttonText: '#e9e4f7',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  matchaCream: {
-    light: {
-      appBg: '#fbfaeb',
-      appBg2: '#e1edc9',
-      appBg3: '#f6d9d7',
-      panel: '#fffef6',
-      panelSoft: '#ecefd4',
-      accent: '#6e8f49',
-      accentStrong: '#4d6b2f',
-      secondary: '#c8757a',
-      heading: '#2b301d',
-      text: '#42452d',
-      muted: '#62664a',
-      border: '#7c8e4f',
-      onAccent: '#ffffff',
-      buttonText: '#42452d',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#12140e',
-      appBg2: '#1d2215',
-      appBg3: '#241716',
-      panel: '#22261c',
-      panelSoft: '#1c2017',
-      accent: '#95b766',
-      accentStrong: '#e5f5bd',
-      secondary: '#dd8d91',
-      heading: '#fbffe9',
-      text: '#e8eddb',
-      muted: '#c6d0ad',
-      border: '#8ba658',
-      onAccent: '#1d250f',
-      buttonText: '#e8eddb',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  lemonMochi: {
-    light: {
-      appBg: '#fffbe6',
-      appBg2: '#f6e7ad',
-      appBg3: '#eaf4fb',
-      panel: '#fffef5',
-      panelSoft: '#f7eecb',
-      accent: '#c99a26',
-      accentStrong: '#8a6113',
-      secondary: '#86bdd4',
-      heading: '#332a10',
-      text: '#4c3f1c',
-      muted: '#706133',
-      border: '#b28d37',
-      onAccent: '#241800',
-      buttonText: '#4c3f1c',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#15140f',
-      appBg2: '#221f13',
-      appBg3: '#111b23',
-      panel: '#262319',
-      panelSoft: '#201d15',
-      accent: '#d5aa3a',
-      accentStrong: '#ffe59a',
-      secondary: '#8bc8df',
-      heading: '#fff9df',
-      text: '#f5eed2',
-      muted: '#d5c99a',
-      border: '#cfa93f',
-      onAccent: '#2a1d05',
-      buttonText: '#f5eed2',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  cottonCloud: {
-    light: {
-      appBg: '#f8fbff',
-      appBg2: '#dfe9ff',
-      appBg3: '#ffe5f0',
-      panel: '#fdfeff',
-      panelSoft: '#e7eefd',
-      accent: '#6c88d8',
-      accentStrong: '#3f5fb5',
-      secondary: '#dc6f9b',
-      heading: '#20283c',
-      text: '#3a435c',
-      muted: '#5c6680',
-      border: '#6980bc',
-      onAccent: '#ffffff',
-      buttonText: '#3a435c',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#10131d',
-      appBg2: '#171d31',
-      appBg3: '#241521',
-      panel: '#1d2231',
-      panelSoft: '#171c2a',
-      accent: '#8ba5f0',
-      accentStrong: '#dae3ff',
-      secondary: '#e58db3',
-      heading: '#fbfdff',
-      text: '#e8eefc',
-      muted: '#c2cce8',
-      border: '#7e96e4',
-      onAccent: '#11192c',
-      buttonText: '#e8eefc',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  melonCream: {
-    light: {
-      appBg: '#f8fff0',
-      appBg2: '#dff0c9',
-      appBg3: '#ffe2d8',
-      panel: '#fdfff8',
-      panelSoft: '#e7f1d8',
-      accent: '#6ca344',
-      accentStrong: '#47752a',
-      secondary: '#db7b62',
-      heading: '#213218',
-      text: '#354827',
-      muted: '#596f45',
-      border: '#6d9348',
-      onAccent: '#ffffff',
-      buttonText: '#354827',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#10160f',
-      appBg2: '#172415',
-      appBg3: '#251814',
-      panel: '#1d281c',
-      panelSoft: '#172116',
-      accent: '#8cc76a',
-      accentStrong: '#d8f6bf',
-      secondary: '#e18d78',
-      heading: '#f8ffe9',
-      text: '#e8f3dc',
-      muted: '#c3d8ad',
-      border: '#7bb852',
-      onAccent: '#14270e',
-      buttonText: '#e8f3dc',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  seaSaltJelly: {
-    light: {
-      appBg: '#f1fffb',
-      appBg2: '#cfeeea',
-      appBg3: '#ffe3dd',
-      panel: '#fafffd',
-      panelSoft: '#dbf1ee',
-      accent: '#3c9a92',
-      accentStrong: '#226f68',
-      secondary: '#d66d5e',
-      heading: '#183633',
-      text: '#2b4d49',
-      muted: '#4f716d',
-      border: '#48948d',
-      onAccent: '#ffffff',
-      buttonText: '#2b4d49',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#0f1718',
-      appBg2: '#152525',
-      appBg3: '#241714',
-      panel: '#1a292a',
-      panelSoft: '#152223',
-      accent: '#67c9c0',
-      accentStrong: '#c2f5ef',
-      secondary: '#e28b7d',
-      heading: '#f2fffc',
-      text: '#dcf1ee',
-      muted: '#b1d8d2',
-      border: '#50bdb5',
-      onAccent: '#0d2826',
-      buttonText: '#dcf1ee',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  caramelPudding: {
-    light: {
-      appBg: '#fff7e8',
-      appBg2: '#f5d29b',
-      appBg3: '#ffdce6',
-      panel: '#fffaf0',
-      panelSoft: '#f4dfb8',
-      accent: '#b7772f',
-      accentStrong: '#7f4b18',
-      secondary: '#d56f86',
-      heading: '#3a2511',
-      text: '#5a3a20',
-      muted: '#7a5940',
-      border: '#b98245',
-      onAccent: '#ffffff',
-      buttonText: '#5a3a20',
-      panelOpacityPercent: 74,
-      glassPercent: 16,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#18110b',
-      appBg2: '#2a1b10',
-      appBg3: '#2a1019',
-      panel: '#2b1c12',
-      panelSoft: '#21160f',
-      accent: '#e0a45c',
-      accentStrong: '#ffd79a',
-      secondary: '#f18aa7',
-      heading: '#fff3db',
-      text: '#f1d8b7',
-      muted: '#d5b58a',
-      border: '#d68f45',
-      onAccent: '#29170a',
-      buttonText: '#f1d8b7',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  neonCandy: {
-    light: {
-      appBg: '#f6f7ff',
-      appBg2: '#e7dcff',
-      appBg3: '#d8fff7',
-      panel: '#ffffff',
-      panelSoft: '#efe9ff',
-      accent: '#8b5cf6',
-      accentStrong: '#5b39b4',
-      secondary: '#ff6fb1',
-      heading: '#241a3f',
-      text: '#46385f',
-      muted: '#6a5a82',
-      border: '#9275e8',
-      onAccent: '#ffffff',
-      buttonText: '#46385f',
-      panelOpacityPercent: 72,
-      glassPercent: 20,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#101021',
-      appBg2: '#1b1640',
-      appBg3: '#102b2b',
-      panel: '#1f1b39',
-      panelSoft: '#16162b',
-      accent: '#a989ff',
-      accentStrong: '#e1d7ff',
-      secondary: '#ff84be',
-      heading: '#f7f2ff',
-      text: '#e7dcff',
-      muted: '#c4b5e8',
-      border: '#9b7cff',
-      onAccent: '#181033',
-      buttonText: '#e7dcff',
-      panelOpacityPercent: 86,
-      glassPercent: 24,
-      shadowPercent: 100,
-    },
-  },
-  nyanCat: {
-    light: {
-      appBg: '#fff7fb',
-      appBg2: '#d7f3ff',
-      appBg3: '#eadcff',
-      panel: '#ffffff',
-      panelSoft: '#eef8ff',
-      accent: '#ff5f93',
-      accentStrong: '#cf3f75',
-      secondary: '#28b8f0',
-      heading: '#2b2f5f',
-      text: '#475072',
-      muted: '#697392',
-      border: '#7aa7d9',
-      onAccent: '#ffffff',
-      buttonText: '#475072',
-      panelOpacityPercent: 76,
-      glassPercent: 24,
-      shadowPercent: 90,
-    },
-    dark: {
-      appBg: '#11132d',
-      appBg2: '#172959',
-      appBg3: '#35164b',
-      panel: '#1d2348',
-      panelSoft: '#161a38',
-      accent: '#ff7fb0',
-      accentStrong: '#ffd1e5',
-      secondary: '#59d9ff',
-      heading: '#fff6fb',
-      text: '#eaf1ff',
-      muted: '#bfc9ee',
-      border: '#7aa7ff',
-      onAccent: '#2b0f24',
-      buttonText: '#eaf1ff',
-      panelOpacityPercent: 88,
-      glassPercent: 28,
-      shadowPercent: 100,
-    },
-  },
-  childrenDoodle: {
-    light: {
-      appBg: '#fff4dc',
-      appBg2: '#ffd9ec',
-      appBg3: '#d6f7ff',
-      panel: '#fffaf0',
-      panelSoft: '#f9e7d0',
-      accent: '#566fda',
-      accentStrong: '#244caa',
-      secondary: '#ff6fa8',
-      heading: '#203f83',
-      text: '#42537a',
-      muted: '#6f7897',
-      border: '#5f82c6',
-      onAccent: '#ffffff',
-      buttonText: '#42537a',
-      panelOpacityPercent: 82,
-      glassPercent: 10,
-      shadowPercent: 56,
-      cornerRadiusPx: 8,
-      panelBlurPx: 4,
-      saturationPercent: 112,
-      motionSpeedSeconds: 0.18,
-      motionIntensityPercent: 78,
-    },
-    dark: {
-      appBg: '#17142a',
-      appBg2: '#241f42',
-      appBg3: '#12313a',
-      panel: '#292540',
-      panelSoft: '#1f1b34',
-      accent: '#ff8dbc',
-      accentStrong: '#ffd2e4',
-      secondary: '#7be5d1',
-      heading: '#fff4fb',
-      text: '#eee5ff',
-      muted: '#cbbfe6',
-      border: '#a68cf1',
-      onAccent: '#321020',
-      buttonText: '#eee5ff',
-      panelOpacityPercent: 88,
-      glassPercent: 14,
-      shadowPercent: 72,
-      cornerRadiusPx: 8,
-      panelBlurPx: 6,
-      saturationPercent: 118,
-      motionSpeedSeconds: 0.18,
-      motionIntensityPercent: 78,
-    },
-  },
-  wisteriaBubble: {
-    light: {
-      appBg: '#fbf7ff',
-      appBg2: '#e8d9ff',
-      appBg3: '#dcfff4',
-      panel: '#fffaff',
-      panelSoft: '#eee2ff',
-      accent: '#8f6ed5',
-      accentStrong: '#6043a6',
-      secondary: '#67cdb3',
-      heading: '#2c2144',
-      text: '#4c3c68',
-      muted: '#6f5f8c',
-      border: '#9c82df',
-      onAccent: '#ffffff',
-      buttonText: '#4c3c68',
-      panelOpacityPercent: 72,
-      glassPercent: 18,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#13101d',
-      appBg2: '#211a36',
-      appBg3: '#10251f',
-      panel: '#211a32',
-      panelSoft: '#171423',
-      accent: '#b99cff',
-      accentStrong: '#eee6ff',
-      secondary: '#7be0c5',
-      heading: '#fbf7ff',
-      text: '#e7dcfb',
-      muted: '#c9b9e8',
-      border: '#a88aff',
-      onAccent: '#1c1230',
-      buttonText: '#e7dcfb',
-      panelOpacityPercent: 86,
-      glassPercent: 24,
-      shadowPercent: 100,
-    },
-  },
-  strawberryCookie: {
-    light: {
-      appBg: '#fff8f0',
-      appBg2: '#f7dcc6',
-      appBg3: '#ffe3ee',
-      panel: '#fffaf4',
-      panelSoft: '#f4dfcf',
-      accent: '#d75a72',
-      accentStrong: '#9f3449',
-      secondary: '#c5924f',
-      heading: '#3b211c',
-      text: '#5b3a32',
-      muted: '#7c5d52',
-      border: '#c9798a',
-      onAccent: '#ffffff',
-      buttonText: '#5b3a32',
-      panelOpacityPercent: 74,
-      glassPercent: 16,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#19100f',
-      appBg2: '#2a1915',
-      appBg3: '#291018',
-      panel: '#2b1b18',
-      panelSoft: '#211412',
-      accent: '#f08aa0',
-      accentStrong: '#ffd0da',
-      secondary: '#e0b66c',
-      heading: '#fff0e8',
-      text: '#f1d2c9',
-      muted: '#d9b2a4',
-      border: '#e18196',
-      onAccent: '#321017',
-      buttonText: '#f1d2c9',
-      panelOpacityPercent: 86,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  graphiteAurora: {
-    light: {
-      appBg: '#f5f7f8',
-      appBg2: '#dfe6e8',
-      appBg3: '#d8f3ec',
-      panel: '#fbfcfc',
-      panelSoft: '#e8eef0',
-      accent: '#2f7f73',
-      accentStrong: '#1f5d55',
-      secondary: '#496a9f',
-      heading: '#1f292b',
-      text: '#3f5053',
-      muted: '#637174',
-      border: '#7a9698',
-      onAccent: '#ffffff',
-      buttonText: '#3f5053',
-      panelOpacityPercent: 76,
-      glassPercent: 18,
-      shadowPercent: 80,
-    },
-    dark: {
-      appBg: '#101416',
-      appBg2: '#182123',
-      appBg3: '#10241f',
-      panel: '#20292b',
-      panelSoft: '#171f21',
-      accent: '#5ec4b5',
-      accentStrong: '#b2efe6',
-      secondary: '#86a8e7',
-      heading: '#edf6f5',
-      text: '#d4e3e1',
-      muted: '#a8bcba',
-      border: '#5fb4aa',
-      onAccent: '#0b2824',
-      buttonText: '#d4e3e1',
-      panelOpacityPercent: 88,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  amberNoir: {
-    light: {
-      appBg: '#fbf7ee',
-      appBg2: '#ead9bb',
-      appBg3: '#f3e7d4',
-      panel: '#fffaf1',
-      panelSoft: '#efe1c9',
-      accent: '#9a6a24',
-      accentStrong: '#624015',
-      secondary: '#6a4b3a',
-      heading: '#33291e',
-      text: '#584737',
-      muted: '#7a6a59',
-      border: '#b99662',
-      onAccent: '#ffffff',
-      buttonText: '#584737',
-      panelOpacityPercent: 76,
-      glassPercent: 14,
-      shadowPercent: 90,
-    },
-    dark: {
-      appBg: '#11100e',
-      appBg2: '#211a12',
-      appBg3: '#2a2118',
-      panel: '#2a241c',
-      panelSoft: '#1d1914',
-      accent: '#d4a64c',
-      accentStrong: '#f5d78f',
-      secondary: '#b88763',
-      heading: '#fff3d8',
-      text: '#ead9bd',
-      muted: '#c3ad8d',
-      border: '#c89a4b',
-      onAccent: '#221405',
-      buttonText: '#ead9bd',
-      panelOpacityPercent: 88,
-      glassPercent: 20,
-      shadowPercent: 100,
-    },
-  },
-  oceanStudio: {
-    light: {
-      appBg: '#f4f8fb',
-      appBg2: '#d8e8ef',
-      appBg3: '#dce3f2',
-      panel: '#fbfdff',
-      panelSoft: '#e5eef4',
-      accent: '#2f7390',
-      accentStrong: '#1d526a',
-      secondary: '#596b9a',
-      heading: '#202d3a',
-      text: '#415363',
-      muted: '#607486',
-      border: '#7da3b7',
-      onAccent: '#ffffff',
-      buttonText: '#415363',
-      panelOpacityPercent: 78,
-      glassPercent: 20,
-      shadowPercent: 80,
-    },
-    dark: {
-      appBg: '#0f151b',
-      appBg2: '#132332',
-      appBg3: '#17203a',
-      panel: '#1e2a34',
-      panelSoft: '#16212b',
-      accent: '#68b4d4',
-      accentStrong: '#c2eaff',
-      secondary: '#9aa7e8',
-      heading: '#edf7ff',
-      text: '#d4e5ef',
-      muted: '#a9bfce',
-      border: '#6cb1cf',
-      onAccent: '#0c2531',
-      buttonText: '#d4e5ef',
-      panelOpacityPercent: 88,
-      glassPercent: 24,
-      shadowPercent: 100,
-    },
-  },
-  rosewoodVinyl: {
-    light: {
-      appBg: '#fbf3ee',
-      appBg2: '#ead3c7',
-      appBg3: '#f0dfe7',
-      panel: '#fff8f4',
-      panelSoft: '#efdcd3',
-      accent: '#8f4d48',
-      accentStrong: '#66312d',
-      secondary: '#8b6a3e',
-      heading: '#35211f',
-      text: '#5c4240',
-      muted: '#7e6662',
-      border: '#b27a73',
-      onAccent: '#ffffff',
-      buttonText: '#5c4240',
-      panelOpacityPercent: 76,
-      glassPercent: 16,
-      shadowPercent: 90,
-    },
-    dark: {
-      appBg: '#140f10',
-      appBg2: '#251717',
-      appBg3: '#201821',
-      panel: '#2a1d1d',
-      panelSoft: '#1e1516',
-      accent: '#d4827b',
-      accentStrong: '#f3b8ae',
-      secondary: '#d2a45c',
-      heading: '#fff0eb',
-      text: '#ebd1cb',
-      muted: '#c7aaa3',
-      border: '#d18279',
-      onAccent: '#2f1210',
-      buttonText: '#ebd1cb',
-      panelOpacityPercent: 88,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  darkSideMoon: {
-    light: {
-      appBg: '#171722',
-      appBg2: '#202638',
-      appBg3: '#151827',
-      panel: '#232635',
-      panelSoft: '#181b28',
-      accent: '#f6f0d8',
-      accentStrong: '#8fdcff',
-      secondary: '#ffd84f',
-      heading: '#fff7df',
-      text: '#eef2fb',
-      muted: '#cad4e7',
-      border: '#c5d2e8',
-      onAccent: '#121521',
-      buttonText: '#eef2fb',
-      panelOpacityPercent: 88,
-      glassPercent: 24,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#10111a',
-      appBg2: '#181d2b',
-      appBg3: '#202337',
-      panel: '#1e212f',
-      panelSoft: '#131622',
-      accent: '#f7f1dc',
-      accentStrong: '#93dcff',
-      secondary: '#28b8f0',
-      heading: '#fff8df',
-      text: '#eef3ff',
-      muted: '#cbd7ec',
-      border: '#cddaf0',
-      onAccent: '#10131d',
-      buttonText: '#eef3ff',
-      panelOpacityPercent: 92,
-      glassPercent: 28,
-      shadowPercent: 100,
-    },
-  },
-  shibuyaNight: {
-    light: {
-      appBg: '#1b0d2b',
-      appBg2: '#3a185e',
-      appBg3: '#073449',
-      panel: '#2a1f3a',
-      panelSoft: '#1d142d',
-      accent: '#ff3b9d',
-      accentStrong: '#ffd4ee',
-      secondary: '#23d0ee',
-      heading: '#fff6ff',
-      text: '#f1e8ff',
-      muted: '#cdbde8',
-      border: '#da3796',
-      onAccent: '#26001a',
-      buttonText: '#f1e8ff',
-      panelOpacityPercent: 90,
-      glassPercent: 30,
-      shadowPercent: 100,
-    },
-    dark: {
-      appBg: '#070411',
-      appBg2: '#120824',
-      appBg3: '#061a24',
-      panel: '#170f26',
-      panelSoft: '#10091c',
-      accent: '#ff2f98',
-      accentStrong: '#ffd3ed',
-      secondary: '#18d5f4',
-      heading: '#fff4ff',
-      text: '#f0e5ff',
-      muted: '#c7b5e4',
-      border: '#f03aa4',
-      onAccent: '#240018',
-      buttonText: '#f0e5ff',
-      panelOpacityPercent: 92,
-      glassPercent: 30,
-      shadowPercent: 100,
-    },
-  },
-  kyotoKurenai: {
-    light: {
-      appBg: '#fff1df',
-      appBg2: '#e8b99b',
-      appBg3: '#f7d989',
-      panel: '#fff8ed',
-      panelSoft: '#f0d5b7',
-      accent: '#a92f26',
-      accentStrong: '#6e1d17',
-      secondary: '#c08a1e',
-      heading: '#30170f',
-      text: '#543124',
-      muted: '#755040',
-      border: '#a64d36',
-      onAccent: '#ffffff',
-      buttonText: '#543124',
-      panelOpacityPercent: 76,
-      glassPercent: 16,
-      shadowPercent: 90,
-    },
-    dark: {
-      appBg: '#120807',
-      appBg2: '#27100d',
-      appBg3: '#241806',
-      panel: '#2a1914',
-      panelSoft: '#1d100d',
-      accent: '#ff5f4a',
-      accentStrong: '#ffd2c4',
-      secondary: '#e3b23c',
-      heading: '#fff4e8',
-      text: '#f4d8c6',
-      muted: '#d5b39b',
-      border: '#e6644f',
-      onAccent: '#310b06',
-      buttonText: '#f4d8c6',
-      panelOpacityPercent: 88,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  ukiyoIndigo: {
-    light: {
-      appBg: '#eaf1ed',
-      appBg2: '#9fbccb',
-      appBg3: '#d8c094',
-      panel: '#fbfbf3',
-      panelSoft: '#d6e1df',
-      accent: '#174f7f',
-      accentStrong: '#0d3659',
-      secondary: '#b06d1f',
-      heading: '#10283a',
-      text: '#314655',
-      muted: '#536b78',
-      border: '#4f7893',
-      onAccent: '#ffffff',
-      buttonText: '#314655',
-      panelOpacityPercent: 78,
-      glassPercent: 18,
-      shadowPercent: 82,
-    },
-    dark: {
-      appBg: '#07101a',
-      appBg2: '#0a2540',
-      appBg3: '#211d15',
-      panel: '#172b40',
-      panelSoft: '#0d1d2e',
-      accent: '#4aa6dd',
-      accentStrong: '#c5e7ff',
-      secondary: '#d59b43',
-      heading: '#edf8ff',
-      text: '#d8e8f4',
-      muted: '#abc1d1',
-      border: '#5eb3e2',
-      onAccent: '#041b2f',
-      buttonText: '#d8e8f4',
-      panelOpacityPercent: 88,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  fujiSnow: {
-    light: {
-      appBg: '#edf8ff',
-      appBg2: '#badcff',
-      appBg3: '#f5d1e6',
-      panel: '#fbfdff',
-      panelSoft: '#d8ecff',
-      accent: '#246fc8',
-      accentStrong: '#174b90',
-      secondary: '#c74786',
-      heading: '#12233d',
-      text: '#344860',
-      muted: '#536983',
-      border: '#5b89d0',
-      onAccent: '#ffffff',
-      buttonText: '#344860',
-      panelOpacityPercent: 76,
-      glassPercent: 20,
-      shadowPercent: 82,
-    },
-    dark: {
-      appBg: '#08111f',
-      appBg2: '#10244a',
-      appBg3: '#2a1430',
-      panel: '#182438',
-      panelSoft: '#0f192b',
-      accent: '#6b9beb',
-      accentStrong: '#d7e7ff',
-      secondary: '#f07db7',
-      heading: '#f8fbff',
-      text: '#e2ecff',
-      muted: '#b7c9e6',
-      border: '#6b9beb',
-      onAccent: '#071936',
-      buttonText: '#e2ecff',
-      panelOpacityPercent: 88,
-      glassPercent: 24,
-      shadowPercent: 100,
-    },
-  },
-  matsuriLantern: {
-    light: {
-      appBg: '#fff0d8',
-      appBg2: '#efae67',
-      appBg3: '#ffd35f',
-      panel: '#fff7e9',
-      panelSoft: '#f2d4a7',
-      accent: '#c23c28',
-      accentStrong: '#842116',
-      secondary: '#d88409',
-      heading: '#35180d',
-      text: '#553323',
-      muted: '#77513d',
-      border: '#b75a2f',
-      onAccent: '#ffffff',
-      buttonText: '#553323',
-      panelOpacityPercent: 76,
-      glassPercent: 16,
-      shadowPercent: 94,
-    },
-    dark: {
-      appBg: '#120706',
-      appBg2: '#2d100b',
-      appBg3: '#2a1a05',
-      panel: '#311c15',
-      panelSoft: '#21100c',
-      accent: '#ff5a3c',
-      accentStrong: '#ffd0bf',
-      secondary: '#ffb72e',
-      heading: '#fff1e2',
-      text: '#f5d5c2',
-      muted: '#d8ad91',
-      border: '#f67c48',
-      onAccent: '#340c05',
-      buttonText: '#f5d5c2',
-      panelOpacityPercent: 88,
-      glassPercent: 22,
-      shadowPercent: 100,
-    },
-  },
-  ginzaNoir: {
-    light: {
-      appBg: '#ebe5da',
-      appBg2: '#c7bca8',
-      appBg3: '#c2cbd5',
-      panel: '#faf7ef',
-      panelSoft: '#e0d8c7',
-      accent: '#72530e',
-      accentStrong: '#4a3507',
-      secondary: '#2f668e',
-      heading: '#1c1c1d',
-      text: '#413b33',
-      muted: '#665d50',
-      border: '#8a7650',
-      onAccent: '#ffffff',
-      buttonText: '#413b33',
-      panelOpacityPercent: 78,
-      glassPercent: 20,
-      shadowPercent: 86,
-    },
-    dark: {
-      appBg: '#090a0d',
-      appBg2: '#111219',
-      appBg3: '#1b1712',
-      panel: '#1d1d24',
-      panelSoft: '#111218',
-      accent: '#d6b158',
-      accentStrong: '#ffe1a0',
-      secondary: '#66a8d4',
-      heading: '#fff5e5',
-      text: '#e8dfce',
-      muted: '#c2b5a1',
-      border: '#d6b158',
-      onAccent: '#1f1604',
-      buttonText: '#e8dfce',
-      panelOpacityPercent: 92,
-      glassPercent: 30,
-      shadowPercent: 100,
-    },
-  },
-  frostJazz: {
-    light: {
-      appBg: '#eaf2fb',
-      appBg2: '#aac2df',
-      appBg3: '#d4c0dc',
-      panel: '#fbfdff',
-      panelSoft: '#d9e5f2',
-      accent: '#245f9e',
-      accentStrong: '#163f70',
-      secondary: '#7f3e70',
-      heading: '#142234',
-      text: '#34495f',
-      muted: '#546a80',
-      border: '#5c7da9',
-      onAccent: '#ffffff',
-      buttonText: '#34495f',
-      panelOpacityPercent: 78,
-      glassPercent: 20,
-      shadowPercent: 82,
-    },
-    dark: {
-      appBg: '#080d15',
-      appBg2: '#101b2c',
-      appBg3: '#201426',
-      panel: '#182434',
-      panelSoft: '#0e1724',
-      accent: '#5c8fd3',
-      accentStrong: '#d1e4ff',
-      secondary: '#c06a9e',
-      heading: '#f5f9ff',
-      text: '#deebfb',
-      muted: '#b1c4dc',
-      border: '#5c8fd3',
-      onAccent: '#07182d',
-      buttonText: '#deebfb',
-      panelOpacityPercent: 88,
-      glassPercent: 24,
-      shadowPercent: 100,
-    },
-  },
-  FINAL: {
-    light: {
-      appBg: '#f4f5f4',
-      appBg2: '#dde0df',
-      appBg3: '#fbfbf8',
-      panel: '#fcfcf9',
-      panelSoft: '#e8eae8',
-      accent: '#30363a',
-      accentStrong: '#121416',
-      secondary: '#7c8588',
-      heading: '#101214',
-      text: '#333638',
-      muted: '#62686a',
-      border: '#81898b',
-      onAccent: '#f8f8f3',
-      buttonText: '#333638',
-      panelOpacityPercent: 82,
-      glassPercent: 12,
-      shadowPercent: 62,
-      cornerRadiusPx: 8,
-      panelBlurPx: 10,
-      saturationPercent: 96,
-      motionSpeedSeconds: 0.18,
-      motionIntensityPercent: 64,
-    },
-    dark: {
-      appBg: '#08090a',
-      appBg2: '#111315',
-      appBg3: '#171819',
-      panel: '#181a1c',
-      panelSoft: '#101214',
-      accent: '#c3c7c3',
-      accentStrong: '#f1f2ee',
-      secondary: '#89969b',
-      heading: '#fbfbf8',
-      text: '#dce1e1',
-      muted: '#aeb7b9',
-      border: '#767f84',
-      onAccent: '#08090a',
-      buttonText: '#dce1e1',
-      panelOpacityPercent: 90,
-      glassPercent: 18,
-      shadowPercent: 92,
-      cornerRadiusPx: 8,
-      panelBlurPx: 12,
-      saturationPercent: 96,
-      motionSpeedSeconds: 0.18,
-      motionIntensityPercent: 64,
-    },
-  },
-};
-
-const coreThemeColorFields: Array<{ field: ThemeColorField; labelKey: TranslationKey; descriptionKey: TranslationKey }> = [
-  { field: 'appBg', labelKey: 'settings.appearance.themeCustom.field.appBg', descriptionKey: 'settings.appearance.themeCustom.field.appBg.description' },
-  { field: 'accent', labelKey: 'settings.appearance.themeCustom.field.accent', descriptionKey: 'settings.appearance.themeCustom.field.accent.description' },
-  { field: 'accentStrong', labelKey: 'settings.appearance.themeCustom.field.accentStrong', descriptionKey: 'settings.appearance.themeCustom.field.accentStrong.description' },
-  { field: 'secondary', labelKey: 'settings.appearance.themeCustom.field.secondary', descriptionKey: 'settings.appearance.themeCustom.field.secondary.description' },
-  { field: 'heading', labelKey: 'settings.appearance.themeCustom.field.heading', descriptionKey: 'settings.appearance.themeCustom.field.heading.description' },
-  { field: 'muted', labelKey: 'settings.appearance.themeCustom.field.muted', descriptionKey: 'settings.appearance.themeCustom.field.muted.description' },
-  { field: 'panel', labelKey: 'settings.appearance.themeCustom.field.panel', descriptionKey: 'settings.appearance.themeCustom.field.panel.description' },
-];
-
-const gradientThemeColorFields: Array<{ field: ThemeColorField; labelKey: TranslationKey; descriptionKey: TranslationKey }> = [
-  { field: 'appBg2', labelKey: 'settings.appearance.themeCustom.field.appBg2', descriptionKey: 'settings.appearance.themeCustom.field.appBg2.description' },
-  { field: 'appBg3', labelKey: 'settings.appearance.themeCustom.field.appBg3', descriptionKey: 'settings.appearance.themeCustom.field.appBg3.description' },
-];
-
-const advancedThemeColorFields: Array<{ field: ThemeColorField; labelKey: TranslationKey; descriptionKey: TranslationKey }> = [
-  { field: 'panelSoft', labelKey: 'settings.appearance.themeCustom.field.panelSoft', descriptionKey: 'settings.appearance.themeCustom.field.panelSoft.description' },
-  { field: 'text', labelKey: 'settings.appearance.themeCustom.field.text', descriptionKey: 'settings.appearance.themeCustom.field.text.description' },
-  { field: 'border', labelKey: 'settings.appearance.themeCustom.field.border', descriptionKey: 'settings.appearance.themeCustom.field.border.description' },
-  { field: 'onAccent', labelKey: 'settings.appearance.themeCustom.field.onAccent', descriptionKey: 'settings.appearance.themeCustom.field.onAccent.description' },
-  { field: 'buttonText', labelKey: 'settings.appearance.themeCustom.field.buttonText', descriptionKey: 'settings.appearance.themeCustom.field.buttonText.description' },
-];
-
-const surfaceThemeColorFields: Array<{ field: ThemeColorField; labelKey: TranslationKey; descriptionKey: TranslationKey }> = [
-  { field: 'titlebar', labelKey: 'settings.appearance.themeCustom.field.titlebar', descriptionKey: 'settings.appearance.themeCustom.field.titlebar.description' },
-  { field: 'sidebar', labelKey: 'settings.appearance.themeCustom.field.sidebar', descriptionKey: 'settings.appearance.themeCustom.field.sidebar.description' },
-  { field: 'player', labelKey: 'settings.appearance.themeCustom.field.player', descriptionKey: 'settings.appearance.themeCustom.field.player.description' },
-  { field: 'field', labelKey: 'settings.appearance.themeCustom.field.field', descriptionKey: 'settings.appearance.themeCustom.field.field.description' },
-  { field: 'row', labelKey: 'settings.appearance.themeCustom.field.row', descriptionKey: 'settings.appearance.themeCustom.field.row.description' },
-  { field: 'rowHover', labelKey: 'settings.appearance.themeCustom.field.rowHover', descriptionKey: 'settings.appearance.themeCustom.field.rowHover.description' },
-  { field: 'rowActive', labelKey: 'settings.appearance.themeCustom.field.rowActive', descriptionKey: 'settings.appearance.themeCustom.field.rowActive.description' },
-  { field: 'chip', labelKey: 'settings.appearance.themeCustom.field.chip', descriptionKey: 'settings.appearance.themeCustom.field.chip.description' },
-];
-
-const stateThemeColorFields: Array<{ field: ThemeColorField; labelKey: TranslationKey; descriptionKey: TranslationKey }> = [
-  { field: 'success', labelKey: 'settings.appearance.themeCustom.field.success', descriptionKey: 'settings.appearance.themeCustom.field.success.description' },
-  { field: 'warning', labelKey: 'settings.appearance.themeCustom.field.warning', descriptionKey: 'settings.appearance.themeCustom.field.warning.description' },
-  { field: 'danger', labelKey: 'settings.appearance.themeCustom.field.danger', descriptionKey: 'settings.appearance.themeCustom.field.danger.description' },
-  { field: 'focus', labelKey: 'settings.appearance.themeCustom.field.focus', descriptionKey: 'settings.appearance.themeCustom.field.focus.description' },
-];
-
-const numberThemeFields: Array<{ field: ThemeNumberField; labelKey: TranslationKey; descriptionKey: TranslationKey; min: number; max: number; step?: number; suffix: string }> = [
-  { field: 'panelOpacityPercent', labelKey: 'settings.appearance.themeCustom.field.panelOpacity', descriptionKey: 'settings.appearance.themeCustom.field.panelOpacity.description', min: 40, max: 100, suffix: '%' },
-  { field: 'glassPercent', labelKey: 'settings.appearance.themeCustom.field.glass', descriptionKey: 'settings.appearance.themeCustom.field.glass.description', min: 0, max: 80, suffix: '%' },
-  { field: 'shadowPercent', labelKey: 'settings.appearance.themeCustom.field.shadow', descriptionKey: 'settings.appearance.themeCustom.field.shadow.description', min: 0, max: 100, suffix: '%' },
-  { field: 'cornerRadiusPx', labelKey: 'settings.appearance.themeCustom.field.cornerRadius', descriptionKey: 'settings.appearance.themeCustom.field.cornerRadius.description', min: 0, max: 28, suffix: 'px' },
-  { field: 'panelBlurPx', labelKey: 'settings.appearance.themeCustom.field.panelBlur', descriptionKey: 'settings.appearance.themeCustom.field.panelBlur.description', min: 0, max: 32, suffix: 'px' },
-  { field: 'saturationPercent', labelKey: 'settings.appearance.themeCustom.field.saturation', descriptionKey: 'settings.appearance.themeCustom.field.saturation.description', min: 60, max: 140, suffix: '%' },
-  { field: 'motionSpeedSeconds', labelKey: 'settings.appearance.themeCustom.field.motionSpeed', descriptionKey: 'settings.appearance.themeCustom.field.motionSpeed.description', min: 0.12, max: 8, step: 0.01, suffix: 's' },
-  { field: 'motionIntensityPercent', labelKey: 'settings.appearance.themeCustom.field.motionIntensity', descriptionKey: 'settings.appearance.themeCustom.field.motionIntensity.description', min: 0, max: 160, suffix: '%' },
-];
-
-const hexToRgb = (value: string): { r: number; g: number; b: number } | null => {
-  const color = normalizeThemeHexColor(value);
-  if (!color) {
-    return null;
-  }
-
-  return {
-    r: Number.parseInt(color.slice(1, 3), 16),
-    g: Number.parseInt(color.slice(3, 5), 16),
-    b: Number.parseInt(color.slice(5, 7), 16),
-  };
-};
-
-const getRelativeLuminance = (value: string): number => {
-  const rgb = hexToRgb(value);
-  if (!rgb) {
-    return 0;
-  }
-
-  const channel = (component: number): number => {
-    const normalized = component / 255;
-    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
-  };
-
-  return channel(rgb.r) * 0.2126 + channel(rgb.g) * 0.7152 + channel(rgb.b) * 0.0722;
-};
-
-const getContrastRatio = (foreground: string, background: string): number => {
-  const foregroundLuminance = getRelativeLuminance(foreground);
-  const backgroundLuminance = getRelativeLuminance(background);
-  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
-  const darker = Math.min(foregroundLuminance, backgroundLuminance);
-  return (lighter + 0.05) / (darker + 0.05);
-};
-
-const bestReadableColor = (background: string): string => (getContrastRatio('#ffffff', background) >= getContrastRatio('#241a17', background) ? '#ffffff' : '#241a17');
-
-const clampNumber = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
-
-const randomNumber = (min: number, max: number): number => min + Math.random() * (max - min);
-
-const randomInteger = (min: number, max: number): number => Math.round(randomNumber(min, max));
-
-const hslToHex = (hue: number, saturation: number, lightness: number): string => {
-  const normalizedHue = (((hue % 360) + 360) % 360) / 360;
-  const normalizedSaturation = clampNumber(saturation, 0, 100) / 100;
-  const normalizedLightness = clampNumber(lightness, 0, 100) / 100;
-
-  const hueToRgb = (p: number, q: number, t: number): number => {
-    let nextT = t;
-    if (nextT < 0) {
-      nextT += 1;
-    }
-    if (nextT > 1) {
-      nextT -= 1;
-    }
-    if (nextT < 1 / 6) {
-      return p + (q - p) * 6 * nextT;
-    }
-    if (nextT < 1 / 2) {
-      return q;
-    }
-    if (nextT < 2 / 3) {
-      return p + (q - p) * (2 / 3 - nextT) * 6;
-    }
-    return p;
-  };
-
-  const q = normalizedLightness < 0.5
-    ? normalizedLightness * (1 + normalizedSaturation)
-    : normalizedLightness + normalizedSaturation - normalizedLightness * normalizedSaturation;
-  const p = 2 * normalizedLightness - q;
-  const channels = normalizedSaturation === 0
-    ? [normalizedLightness, normalizedLightness, normalizedLightness]
-    : [
-        hueToRgb(p, q, normalizedHue + 1 / 3),
-        hueToRgb(p, q, normalizedHue),
-        hueToRgb(p, q, normalizedHue - 1 / 3),
-      ];
-
-  return `#${channels.map((channel) => Math.round(channel * 255).toString(16).padStart(2, '0')).join('')}`;
-};
-
-const readableCandidate = (background: string, candidates: string[], minimumRatio: number): string => {
-  const ranked = candidates
-    .map((color) => ({ color, ratio: getContrastRatio(color, background) }))
-    .sort((left, right) => right.ratio - left.ratio);
-
-  return ranked.find((item) => item.ratio >= minimumRatio)?.color ?? ranked[0]?.color ?? bestReadableColor(background);
-};
-
-const buildRandomThemeTone = (tone: ThemeTone, hue: number, secondaryHue: number, warmHue: number): AppThemeToneOverride => {
-  const tertiaryHue = secondaryHue + randomInteger(42, 86);
-
-  if (tone === 'dark') {
-    const appBg = hslToHex(hue, randomInteger(16, 30), randomInteger(8, 12));
-    const appBg2 = hslToHex(secondaryHue, randomInteger(18, 34), randomInteger(13, 17));
-    const appBg3 = hslToHex(tertiaryHue, randomInteger(16, 30), randomInteger(11, 15));
-    const panel = hslToHex(hue, randomInteger(14, 24), randomInteger(17, 21));
-    const panelSoft = hslToHex(hue, randomInteger(12, 22), randomInteger(13, 17));
-    const accent = hslToHex(hue, randomInteger(46, 60), randomInteger(58, 66));
-    const accentStrong = hslToHex(hue, randomInteger(38, 54), randomInteger(74, 82));
-    const secondary = hslToHex(secondaryHue, randomInteger(38, 54), randomInteger(56, 66));
-    const text = readableCandidate(appBg, ['#eef4ff', '#f8fbff', '#e6edf7'], 4.5);
-    const heading = readableCandidate(appBg, ['#ffffff', '#f8fbff', text], 4.5);
-    const buttonText = readableCandidate(panel, [text, heading, '#ffffff'], 4.5);
-
-    return {
-      appBg,
-      appBg2,
-      appBg3,
-      panel,
-      panelSoft,
-      accent,
-      accentStrong,
-      secondary,
-      heading,
-      text,
-      muted: readableCandidate(appBg, ['#b8c5d6', '#c5cfdd', '#d2d9e6'], 4.5),
-      border: hslToHex(hue, randomInteger(36, 56), randomInteger(46, 56)),
-      onAccent: readableCandidate(accent, ['#101318', '#ffffff'], 3),
-      buttonText,
-      titlebar: panel,
-      sidebar: panelSoft,
-      player: panel,
-      field: panel,
-      row: panel,
-      rowHover: hslToHex(hue, randomInteger(16, 28), randomInteger(22, 27)),
-      rowActive: hslToHex(hue, randomInteger(34, 48), randomInteger(26, 32)),
-      chip: panel,
-      focus: accent,
-      danger: '#ff7676',
-      success: secondary,
-      warning: hslToHex(warmHue, randomInteger(52, 66), randomInteger(60, 68)),
-      panelOpacityPercent: randomInteger(86, 92),
-      glassPercent: randomInteger(16, 24),
-      shadowPercent: randomInteger(82, 100),
-      cornerRadiusPx: randomInteger(8, 14),
-      panelBlurPx: randomInteger(10, 18),
-      saturationPercent: randomInteger(88, 106),
-      motionEnabled: true,
-      motionSpeedSeconds: Math.round(randomNumber(0.2, 0.36) * 100) / 100,
-      motionIntensityPercent: randomInteger(54, 88),
-    };
-  }
-
-  const appBg = hslToHex(hue, randomInteger(18, 34), randomInteger(94, 97));
-  const appBg2 = hslToHex(secondaryHue, randomInteger(20, 38), randomInteger(86, 91));
-  const appBg3 = hslToHex(tertiaryHue, randomInteger(18, 34), randomInteger(88, 93));
-  const panel = hslToHex(hue, randomInteger(10, 22), randomInteger(98, 100));
-  const panelSoft = hslToHex(secondaryHue, randomInteger(16, 30), randomInteger(91, 95));
-  const accent = hslToHex(hue, randomInteger(42, 58), randomInteger(36, 44));
-  const accentStrong = hslToHex(hue, randomInteger(46, 62), randomInteger(26, 34));
-  const secondary = hslToHex(secondaryHue, randomInteger(34, 50), randomInteger(36, 46));
-  const text = readableCandidate(appBg, ['#26313f', '#1e2430', '#343846'], 4.5);
-  const heading = readableCandidate(appBg, ['#101722', '#1d2430', text], 4.5);
-  const buttonText = readableCandidate(panel, [text, heading, '#111827'], 4.5);
-
-  return {
-    appBg,
-    appBg2,
-    appBg3,
-    panel,
-    panelSoft,
-    accent,
-    accentStrong,
-    secondary,
-    heading,
-    text,
-    muted: readableCandidate(appBg, ['#566171', '#626b78', '#4b5563'], 4.5),
-    border: hslToHex(hue, randomInteger(30, 48), randomInteger(52, 62)),
-    onAccent: readableCandidate(accent, ['#ffffff', '#101318'], 3),
-    buttonText,
-    titlebar: panel,
-    sidebar: panelSoft,
-    player: panel,
-    field: panel,
-    row: panel,
-    rowHover: hslToHex(hue, randomInteger(12, 24), randomInteger(95, 98)),
-    rowActive: hslToHex(hue, randomInteger(26, 40), randomInteger(89, 93)),
-    chip: panel,
-    focus: accent,
-    danger: '#d64545',
-    success: secondary,
-    warning: hslToHex(warmHue, randomInteger(44, 60), randomInteger(38, 48)),
-    panelOpacityPercent: randomInteger(72, 82),
-    glassPercent: randomInteger(12, 20),
-    shadowPercent: randomInteger(70, 100),
-    cornerRadiusPx: randomInteger(8, 14),
-    panelBlurPx: randomInteger(10, 18),
-    saturationPercent: randomInteger(88, 104),
-    motionEnabled: true,
-    motionSpeedSeconds: Math.round(randomNumber(0.2, 0.36) * 100) / 100,
-    motionIntensityPercent: randomInteger(50, 84),
-  };
-};
-
-const buildRandomThemeDraft = (): GeneratedRandomThemeDraft => {
-  const hue = randomInteger(0, 359);
-  const secondaryHue = hue + randomInteger(82, 148);
-  const warmHue = hue + randomInteger(24, 52);
-
-  return {
-    light: buildRandomThemeTone('light', hue, secondaryHue, warmHue),
-    dark: buildRandomThemeTone('dark', hue + randomInteger(8, 28), secondaryHue, warmHue),
-  };
-};
-
-const getThemeEditorDefaults = (preset: AppThemePreset, tone: ThemeTone): ThemeEditorDefaults => ({
-  ...baseThemeEditorDefaults[tone],
-  ...(themeEditorDefaults[preset]?.[tone] ?? {}),
+const AboutUpdateSettings = lazy(async () => {
+  const module = await import('./settings/about/AboutUpdateSettings');
+  return { default: module.AboutUpdateSettings };
 });
 
-const mergeThemeToneValues = (preset: AppThemePreset, tone: ThemeTone, draft: AppThemeToneOverride): ThemeEditorDefaults => ({
-  ...getThemeEditorDefaults(preset, tone),
-  ...draft,
+const ContributorsPage = lazy(async () => {
+  const module = await import('./settings/about/ContributorsPage');
+  return { default: module.ContributorsPage };
 });
-
-const buildThemePresetOverrides = (
-  current: AppThemePresetOverrides,
-  preset: AppThemePreset,
-  tone: ThemeTone,
-  draft: AppThemeToneOverride | null,
-): AppThemePresetOverrides => {
-  const next: AppThemePresetOverrides = { ...current };
-  const currentPresetOverride = { ...(next[preset] ?? {}) };
-
-  if (!draft || Object.keys(draft).length === 0) {
-    delete currentPresetOverride[tone];
-  } else {
-    currentPresetOverride[tone] = draft;
-  }
-
-  if (currentPresetOverride.light || currentPresetOverride.dark) {
-    next[preset] = currentPresetOverride;
-  } else {
-    delete next[preset];
-  }
-
-  return next;
-};
-
-const isThemeExportPayload = (value: unknown): value is Partial<ThemeExportPayload> =>
-  Boolean(value && typeof value === 'object' && !Array.isArray(value));
-
-const readThemeExportPreset = (value: unknown): AppThemePreset | null => {
-  if (value === 'FINAL') {
-    return null;
-  }
-  if (!themePresetOptions.some((option) => option.preset === value)) {
-    return null;
-  }
-  return normalizeThemePreset(value);
-};
-
-const createThemeCustomId = (): string => `theme-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-const getNextThemeCustomName = (themes: AppThemeCustomTheme[]): string => {
-  const usedNames = new Set(themes.map((theme) => theme.name));
-  let index = themes.length + 1;
-  while (usedNames.has(`我的主题 ${index}`)) {
-    index += 1;
-  }
-  return `我的主题 ${index}`;
-};
-
-const buildThemeCustomTheme = (
-  themes: AppThemeCustomTheme[],
-  basePreset: AppThemePreset,
-  tone: ThemeTone,
-  draft: AppThemeToneOverride = {},
-  name = getNextThemeCustomName(themes),
-): AppThemeCustomTheme => {
-  const timestamp = new Date().toISOString();
-  const theme: AppThemeCustomTheme = {
-    id: createThemeCustomId(),
-    name,
-    basePreset,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
-
-  if (Object.keys(draft).length > 0) {
-    theme[tone] = draft;
-  }
-
-  return theme;
-};
-
-const buildPluginThemeCustomTheme = (pluginTheme: PluginThemeOption, existing?: AppThemeCustomTheme): AppThemeCustomTheme => {
-  const timestamp = new Date().toISOString();
-  const theme: AppThemeCustomTheme = {
-    id: pluginTheme.customThemeId,
-    name: `${pluginTheme.title} · ${pluginTheme.pluginName}`.slice(0, 48),
-    basePreset: pluginTheme.basePreset,
-    createdAt: existing?.createdAt ?? timestamp,
-    updatedAt: timestamp,
-  };
-
-  if (pluginTheme.light) {
-    theme.light = { ...pluginTheme.light };
-  }
-  if (pluginTheme.dark) {
-    theme.dark = { ...pluginTheme.dark };
-  }
-
-  return theme;
-};
-
-const updateThemeCustomThemeTone = (
-  themes: AppThemeCustomTheme[],
-  themeId: string,
-  tone: ThemeTone,
-  draft: AppThemeToneOverride | null,
-): AppThemeCustomTheme[] => {
-  const timestamp = new Date().toISOString();
-  return normalizeThemeCustomThemes(
-    themes.map((theme) => {
-      if (theme.id !== themeId) {
-        return theme;
-      }
-
-      const next: AppThemeCustomTheme = { ...theme, updatedAt: timestamp };
-      if (!draft || Object.keys(draft).length === 0) {
-        delete next[tone];
-      } else {
-        next[tone] = draft;
-      }
-      return next;
-    }),
-  );
-};
-
-const renameThemeCustomTheme = (themes: AppThemeCustomTheme[], themeId: string, name: string): AppThemeCustomTheme[] => {
-  const normalized = name.replace(/[\r\n;]/g, '').trim().slice(0, 48);
-  if (!normalized) {
-    return themes;
-  }
-
-  const timestamp = new Date().toISOString();
-  return normalizeThemeCustomThemes(themes.map((theme) => (theme.id === themeId ? { ...theme, name: normalized, updatedAt: timestamp } : theme)));
-};
-
-const duplicateThemeCustomTheme = (themes: AppThemeCustomTheme[], themeId: string): AppThemeCustomTheme[] => {
-  const source = themes.find((theme) => theme.id === themeId);
-  if (!source) {
-    return themes;
-  }
-
-  const timestamp = new Date().toISOString();
-  return normalizeThemeCustomThemes([
-    ...themes,
-    {
-      ...source,
-      id: createThemeCustomId(),
-      name: `${source.name} Copy`.slice(0, 48),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    },
-  ]);
-};
-
-const createThemeExportPayload = (
-  themes: AppThemeCustomTheme[],
-  selectedTheme: AppThemeCustomTheme | undefined,
-  selectedPreset: AppThemePreset,
-  tone: ThemeTone,
-  draft: AppThemeToneOverride,
-): ThemeCustomExportPayload => {
-  const theme = selectedTheme ?? buildThemeCustomTheme(themes, selectedPreset, tone, draft, getNextThemeCustomName(themes));
-  return {
-    exportedAt: new Date().toISOString(),
-    schema: 'echo-next.custom-theme',
-    theme,
-    version: 2,
-  };
-};
-
-const downloadTextFile = (filename: string, content: string): void => {
-  const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.rel = 'noopener';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-};
-
-const getThemeContrastWarnings = (values: ThemeEditorDefaults): string[] => {
-  const warnings: string[] = [];
-
-  if (getContrastRatio(values.text, values.appBg) < 4.5) {
-    warnings.push('body');
-  }
-  if (getContrastRatio(values.heading, values.appBg) < 4.5) {
-    warnings.push('heading');
-  }
-  if (getContrastRatio(values.buttonText, values.panel) < 4.5) {
-    warnings.push('button');
-  }
-  if (getContrastRatio(values.onAccent, values.accent) < 3) {
-    warnings.push('accent');
-  }
-
-  return warnings;
-};
-
-const getUpdateStateLabel = (state: UpdateStatus['state']): TranslationKey => {
-  switch (state) {
-    case 'checking':
-      return 'settings.about.updates.state.checking';
-    case 'available':
-      return 'settings.about.updates.state.available';
-    case 'downloading':
-      return 'settings.about.updates.state.downloading';
-    case 'downloaded':
-      return 'settings.about.updates.state.downloaded';
-    case 'not-available':
-      return 'settings.about.updates.state.notAvailable';
-    case 'error':
-      return 'settings.about.updates.state.error';
-    case 'disabled':
-      return 'settings.about.updates.state.disabled';
-    default:
-      return 'settings.about.updates.state.idle';
-  }
-};
-
-const formatUpdateBytes = (bytes: number | null | undefined): string => {
-  if (!Number.isFinite(bytes) || !bytes || bytes <= 0) {
-    return 'n/a';
-  }
-
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let value = bytes;
-  let unitIndex = 0;
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-
-  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
-};
-
-type DuplicateCleanupMember = DuplicateTrackCleanupPreview['groups'][number]['keep'];
-
-const formatDuplicateCleanupTrackQuality = (member: DuplicateCleanupMember): string => {
-  const { track } = member;
-  const parts: string[] = [];
-
-  if (track.codec) {
-    parts.push(track.codec.toUpperCase());
-  }
-  if (track.bitDepth && track.sampleRate) {
-    parts.push(`${track.bitDepth}bit / ${formatRate(track.sampleRate)}`);
-  } else if (track.sampleRate) {
-    parts.push(formatRate(track.sampleRate));
-  }
-  if (track.bitrate && track.bitrate > 0) {
-    parts.push(`${Math.round(track.bitrate / 1000)} kbps`);
-  }
-  if (member.sizeBytes && member.sizeBytes > 0) {
-    parts.push(formatUpdateBytes(member.sizeBytes));
-  }
-  parts.push(`评分 ${member.qualityScore}`);
-
-  return parts.join(' · ');
-};
-
-const formatCacheBytes = (bytes: number | null | undefined): string => {
-  if (!Number.isFinite(bytes) || bytes === null || bytes === undefined || bytes <= 0) {
-    return '0 B';
-  }
-
-  return formatUpdateBytes(bytes);
-};
-
-const formatProtectionTimestamp = (value: string | null | undefined): string => {
-  if (!value) {
-    return '暂无';
-  }
-
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) {
-    return value;
-  }
-
-  return new Date(timestamp).toLocaleString();
-};
-
-const getDatabaseHealthLabel = (status: LibraryDatabaseProtectionStatus['health']['status'] | undefined): TranslationKey => {
-  switch (status) {
-    case 'ok':
-      return 'settings.danger.database.health.ok';
-    case 'corrupt':
-      return 'settings.danger.database.health.corrupt';
-    case 'unreadable':
-      return 'settings.danger.database.health.unreadable';
-    default:
-      return 'settings.danger.database.health.idle';
-  }
-};
-
-const SettingSection = ({ id, activeKey, icon: Icon, title, children }: SettingSectionProps): JSX.Element => {
-  const isActive = activeKey === id;
-
-  return (
-    <section className="settings-section settings-section--panel" id={`settings-sec-${id}`} data-visible={isActive}>
-      <div className="section-title">
-        <span className="section-title-icon">
-          <Icon size={18} />
-        </span>
-        <h2>{title}</h2>
-      </div>
-      {isActive ? children : null}
-    </section>
-  );
-};
-
-const SettingRow = ({ className, highlighted, id, title, description, children }: SettingRowProps): JSX.Element => (
-  <div className={`setting-row ${className ?? ''}`.trim()} id={id} data-search-highlight={highlighted ? 'true' : undefined}>
-    <div className="setting-info">
-      <h3>{title}</h3>
-      {description ? <p>{description}</p> : null}
-    </div>
-    {children}
-  </div>
-);
-
-const SettingSubsectionTitle = ({ title, description }: SettingSubsectionTitleProps): JSX.Element => (
-  <div className="settings-subsection-title">
-    <span>{title}</span>
-    {description ? <small>{description}</small> : null}
-  </div>
-);
-
-const ChipButton = ({
-  active,
-  children,
-  disabled,
-  onClick,
-  title,
-}: {
-  active?: boolean;
-  children: string;
-  disabled?: boolean;
-  onClick?: () => void;
-  title?: string;
-}): JSX.Element => (
-  <button className={`list-filter-chip ${active ? 'active' : ''}`} type="button" aria-pressed={active} disabled={disabled} title={title} onClick={onClick}>
-    {children}
-    {active ? <Check size={13} /> : null}
-  </button>
-);
-
-const StatusText = ({
-  children,
-  tone = 'neutral',
-}: {
-  children: string;
-  tone?: 'neutral' | 'good' | 'muted';
-}): JSX.Element => <span className={`settings-status-text settings-status-text--${tone}`}>{children}</span>;
-
-const ToggleButton = ({
-  active,
-  disabled,
-  onClick,
-}: {
-  active?: boolean;
-  disabled?: boolean;
-  onClick?: () => void;
-}): JSX.Element => (
-  <button className={`toggle-btn ${active ? 'active' : ''}`} type="button" aria-pressed={active} disabled={disabled} onClick={onClick}>
-    <span />
-  </button>
-);
-
-const getAccountStatusLabel = (t: ReturnType<typeof useI18n>['t'], status: AccountStatus | undefined): string => {
-  if (!status) {
-    return t('settings.integrations.accounts.status.checking');
-  }
-
-  if (status.connected && status.error) {
-    return t('settings.integrations.accounts.status.expired');
-  }
-
-  return status.connected ? t('settings.integrations.accounts.status.loggedIn') : t('settings.integrations.accounts.status.loggedOut');
-};
-
-const getAccountBadgeClass = (status: AccountStatus | undefined): string => {
-  if (!status || !status.connected) {
-    return 'list-filter-chip';
-  }
-
-  return status.error ? 'list-filter-chip settings-account-badge-error active' : 'list-filter-chip active';
-};
-
-const renderAccountStatusBadge = (
-  t: ReturnType<typeof useI18n>['t'],
-  status: AccountStatus | undefined,
-  onOpenLogin: () => void,
-): JSX.Element => {
-  if (status && !status.connected) {
-    return (
-      <button className={`${getAccountBadgeClass(status)} settings-account-status-link`} type="button" onClick={onOpenLogin}>
-        {t('settings.integrations.accounts.clickToLogin')}
-      </button>
-    );
-  }
-
-  return <span className={getAccountBadgeClass(status)}>{getAccountStatusLabel(t, status)}</span>;
-};
-
-const NeteaseQrLoginDialog = ({
-  onClose,
-  onRetry,
-  state,
-}: {
-  onClose: () => void;
-  onRetry: () => void;
-  state: NeteaseQrLoginUiState;
-}): JSX.Element | null => {
-  const { t } = useI18n();
-  if (!state.open) {
-    return null;
-  }
-
-  const canRetry = state.state === 'expired' || state.state === 'failed';
-  const statusText = state.error ?? state.message ?? t('settings.integrations.accounts.neteaseQr.waiting');
-
-  return (
-    <div className="settings-qr-login-backdrop">
-      <section
-        className="settings-qr-login-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-netease-qr-title"
-        data-state={state.state}
-      >
-        <header className="settings-qr-login-header">
-          <div>
-            <h3 id="settings-netease-qr-title">{t('settings.integrations.accounts.neteaseQr.title')}</h3>
-            <p>{t('settings.integrations.accounts.neteaseQr.subtitle')}</p>
-          </div>
-          <button
-            className="settings-icon-button settings-qr-login-close"
-            type="button"
-            aria-label={t('settings.integrations.accounts.neteaseQr.close')}
-            onClick={onClose}
-          >
-            <X size={16} />
-          </button>
-        </header>
-        <div className="settings-qr-login-code" data-empty={!state.qrDataUrl}>
-          {state.qrDataUrl ? (
-            <img src={state.qrDataUrl} alt={t('settings.integrations.accounts.neteaseQr.title')} draggable={false} />
-          ) : (
-            <QrCode size={46} aria-hidden="true" />
-          )}
-        </div>
-        <p className="settings-qr-login-status">{statusText}</p>
-        <div className="settings-qr-login-actions">
-          {canRetry ? (
-            <button className="settings-action-button" type="button" onClick={onRetry}>
-              <RefreshCw size={15} />
-              {t('settings.integrations.accounts.neteaseQr.retry')}
-            </button>
-          ) : null}
-          <button className="settings-action-button" type="button" onClick={onClose}>
-            {t('settings.integrations.accounts.neteaseQr.close')}
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-};
-
-const AccountCookieCard = ({
-  browser,
-  busyAction,
-  cookieValue,
-  error,
-  message,
-  onBrowserChange,
-  onChangeCookie,
-  onCheck,
-  onClear,
-  onOpenLogin,
-  onOpenQrLogin,
-  onSave,
-  provider,
-  status,
-}: {
-  browser?: AccountBrowser;
-  busyAction?: AccountBusyAction;
-  cookieValue: string;
-  error?: string | null;
-  message?: string | null;
-  onBrowserChange?: (browser: AccountBrowser) => void;
-  onChangeCookie: (value: string) => void;
-  onCheck: () => void;
-  onClear: () => void;
-  onOpenLogin: () => void;
-  onOpenQrLogin?: () => void;
-  onSave: () => void;
-  provider: AccountProvider;
-  status?: AccountStatus;
-}): JSX.Element => {
-  const { t } = useI18n();
-  const browserOptions = buildYouTubeBrowserOptions(t);
-  const showQrLogin = provider === 'netease' && typeof onOpenQrLogin === 'function';
-  const loginBusy = busyAction === 'login' || busyAction === 'browser';
-  const browserLoginLabel = loginBusy
-    ? t('settings.integrations.accounts.loginBusy')
-    : showQrLogin
-      ? t('settings.integrations.accounts.neteaseQr.webLogin')
-      : t('settings.integrations.accounts.saveBrowser');
-  const qrLoginLabel = loginBusy
-    ? t('settings.integrations.accounts.neteaseQr.starting')
-    : t('settings.integrations.accounts.neteaseQr.action');
-  return (
-    <article className="settings-account-row" aria-label={accountProviderLabels[provider]}>
-      <div className="settings-account-summary">
-        {renderAccountStatusBadge(t, status, onOpenLogin)}
-        <div>
-          <h3>{accountProviderLabels[provider]}</h3>
-          <p>{provider === 'bilibili' ? t('settings.integrations.accounts.description.bilibili') : t('settings.integrations.accounts.description.default')}</p>
-        </div>
-      </div>
-      <label className="settings-account-cookie-field">
-        <input
-          type="password"
-          value={cookieValue}
-          placeholder={t('settings.integrations.accounts.cookiePlaceholder')}
-          onChange={(event) => onChangeCookie(event.target.value)}
-          autoComplete="off"
-        />
-      </label>
-      {provider === 'soundcloud' && browser && onBrowserChange ? (
-        <label className="settings-select-field settings-account-browser-field">
-          <span>{t('settings.integrations.accounts.youtube.browser')}</span>
-          <select value={browser} onChange={(event) => onBrowserChange(event.target.value as AccountBrowser)} disabled={busyAction === 'browser'}>
-            {browserOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-      <div className="settings-account-actions">
-        <button className="settings-action-button" type="button" disabled={busyAction === 'save' || cookieValue.trim().length === 0} onClick={onSave}>
-          <Save size={15} />
-          {busyAction === 'save' ? t('settings.integrations.accounts.manualSaveBusy') : t('settings.integrations.accounts.manualSave')}
-        </button>
-        <button className="settings-action-button" type="button" disabled={busyAction === 'check'} onClick={onCheck}>
-          {busyAction === 'check' ? t('settings.integrations.accounts.checkBusy') : t('settings.integrations.accounts.check')}
-        </button>
-        <button
-          className="settings-action-button settings-account-login-button"
-          type="button"
-          disabled={loginBusy}
-          onClick={onOpenLogin}
-        >
-          <LogIn size={15} />
-          {browserLoginLabel}
-        </button>
-        {showQrLogin ? (
-          <button
-            className="settings-action-button settings-account-login-button"
-            type="button"
-            disabled={loginBusy}
-            onClick={() => {
-              onOpenQrLogin?.();
-            }}
-          >
-            <QrCode size={15} />
-            {qrLoginLabel}
-          </button>
-        ) : null}
-        <button className="settings-danger-button" type="button" disabled={busyAction === 'clear'} onClick={onClear}>
-          {busyAction === 'clear' ? t('settings.integrations.accounts.logoutBusy') : t('settings.integrations.accounts.logout')}
-        </button>
-      </div>
-      <div className="settings-account-meta">
-        <span>{t('settings.integrations.accounts.cookieFallback')}</span>
-        <span>{t('settings.integrations.accounts.loginMeta', { loginAt: status?.lastLoginAt ?? 'n/a', checkedAt: status?.lastCheckedAt ?? 'n/a' })}</span>
-      </div>
-      {provider === 'soundcloud' ? <p className="settings-inline-note settings-account-note">{t('settings.integrations.accounts.soundcloudNote')}</p> : null}
-      {provider === 'osu' ? <p className="settings-inline-note settings-account-note">{t('settings.integrations.accounts.osuNote')}</p> : null}
-      {message ? <p className="settings-inline-note settings-account-note">{message}</p> : null}
-      {error ? <p className="settings-inline-error settings-account-note">{error}</p> : null}
-    </article>
-  );
-};
-
-const YouTubeAccountCard = ({
-  browser,
-  busyAction,
-  error,
-  message,
-  onBrowserChange,
-  onCheck,
-  onClear,
-  onOpenLogin,
-  status,
-}: {
-  browser: YouTubeBrowser;
-  busyAction?: AccountBusyAction;
-  error?: string | null;
-  message?: string | null;
-  onBrowserChange: (browser: YouTubeBrowser) => void;
-  onCheck: () => void;
-  onClear: () => void;
-  onOpenLogin: () => void;
-  status?: AccountStatus;
-}): JSX.Element => {
-  const { t } = useI18n();
-  const youtubeBrowserOptions = buildYouTubeBrowserOptions(t);
-  return (
-    <article className="settings-account-row" aria-label="YouTube">
-      <div className="settings-account-summary">
-        {renderAccountStatusBadge(t, status, onOpenLogin)}
-        <div>
-          <h3>YouTube</h3>
-          <p>{t('settings.integrations.accounts.youtube.description')}</p>
-        </div>
-      </div>
-      <label className="settings-select-field settings-account-browser-field">
-        <span>{t('settings.integrations.accounts.youtube.browser')}</span>
-        <select value={browser} onChange={(event) => onBrowserChange(event.target.value as YouTubeBrowser)} disabled={busyAction === 'browser'}>
-          {youtubeBrowserOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="settings-account-actions">
-        <button className="settings-action-button" type="button" disabled={busyAction === 'check'} onClick={onCheck}>
-          {busyAction === 'check' ? t('settings.integrations.accounts.checkBusy') : t('settings.integrations.accounts.check')}
-        </button>
-        <button className="settings-action-button settings-account-login-button" type="button" disabled={busyAction === 'login' || busyAction === 'browser'} onClick={onOpenLogin}>
-          <ExternalLink size={15} />
-          {busyAction === 'login' || busyAction === 'browser' ? t('settings.integrations.accounts.loginBusy') : t('settings.integrations.accounts.openBrowserLogin')}
-        </button>
-        <button className="settings-danger-button" type="button" disabled={busyAction === 'clear'} onClick={onClear}>
-          {busyAction === 'clear' ? t('settings.integrations.accounts.logoutBusy') : t('settings.integrations.accounts.logout')}
-        </button>
-      </div>
-      <div className="settings-account-meta">
-        <span>{status?.displayName ?? t('settings.integrations.accounts.youtube.savedStatus')}</span>
-        <span>{t('settings.integrations.accounts.check')} {status?.lastCheckedAt ?? 'n/a'}</span>
-      </div>
-      {message ? <p className="settings-inline-note settings-account-note">{message}</p> : null}
-      {error ? <p className="settings-inline-error settings-account-note">{error}</p> : null}
-    </article>
-  );
-};
-
-const SpotifyAccountCard = ({
-  busyAction,
-  error,
-  message,
-  onCheck,
-  onClear,
-  onOpenDashboard,
-  onOpenLogin,
-  status,
-}: {
-  busyAction?: AccountBusyAction;
-  error?: string | null;
-  message?: string | null;
-  onCheck: () => void;
-  onClear: () => void;
-  onOpenDashboard: () => void;
-  onOpenLogin: () => void;
-  status?: AccountStatus;
-}): JSX.Element => {
-  const { t } = useI18n();
-  return (
-    <article className="settings-account-row" aria-label="Spotify">
-      <div className="settings-account-summary">
-        {renderAccountStatusBadge(t, status, onOpenLogin)}
-        <div>
-          <h3>Spotify</h3>
-          <p>{t('settings.integrations.accounts.spotify.description')}</p>
-        </div>
-      </div>
-      <div className="settings-account-actions">
-        <button className="settings-action-button" type="button" onClick={onOpenDashboard}>
-          <ExternalLink size={15} />
-          {t('settings.integrations.common.openDashboard', { service: 'Spotify' })}
-        </button>
-        <button className="settings-action-button" type="button" disabled={busyAction === 'check'} onClick={onCheck}>
-          {busyAction === 'check' ? t('settings.integrations.accounts.checkBusy') : t('settings.integrations.accounts.check')}
-        </button>
-        <button className="settings-action-button settings-account-login-button" type="button" disabled={busyAction === 'login'} onClick={onOpenLogin}>
-          <ExternalLink size={15} />
-          {busyAction === 'login' ? t('settings.integrations.accounts.spotify.loginBusy') : t('settings.integrations.accounts.spotify.login')}
-        </button>
-        <button className="settings-danger-button" type="button" disabled={busyAction === 'clear'} onClick={onClear}>
-          {busyAction === 'clear' ? t('settings.integrations.accounts.logoutBusy') : t('settings.integrations.accounts.logout')}
-        </button>
-      </div>
-      <div className="settings-account-meta">
-        <span>{status?.displayName ?? status?.username ?? t('settings.integrations.accounts.spotify.savedStatus')}</span>
-        <span>{t('settings.integrations.accounts.loginMeta', { loginAt: status?.lastLoginAt ?? 'n/a', checkedAt: status?.lastCheckedAt ?? 'n/a' })}</span>
-      </div>
-      {message ? <p className="settings-inline-note settings-account-note">{message}</p> : null}
-      {error ? <p className="settings-inline-error settings-account-note">{error}</p> : null}
-    </article>
-  );
-};
-
-const TidalAccountCard = ({
-  busyAction,
-  error,
-  message,
-  onCheck,
-  onClear,
-  onOpenDashboard,
-  onOpenLogin,
-  status,
-}: {
-  busyAction?: AccountBusyAction;
-  error?: string | null;
-  message?: string | null;
-  onCheck: () => void;
-  onClear: () => void;
-  onOpenDashboard: () => void;
-  onOpenLogin: () => void;
-  status?: AccountStatus;
-}): JSX.Element => {
-  const { t } = useI18n();
-  return (
-    <article className="settings-account-row" aria-label="TIDAL">
-      <div className="settings-account-summary">
-        {renderAccountStatusBadge(t, status, onOpenLogin)}
-        <div>
-          <h3>TIDAL</h3>
-          <p>{t('settings.integrations.accounts.tidal.description')}</p>
-        </div>
-      </div>
-      <div className="settings-account-actions">
-        <button className="settings-action-button" type="button" onClick={onOpenDashboard}>
-          <ExternalLink size={15} />
-          {t('settings.integrations.common.openDashboard', { service: 'TIDAL' })}
-        </button>
-        <button className="settings-action-button" type="button" disabled={busyAction === 'check'} onClick={onCheck}>
-          {busyAction === 'check' ? t('settings.integrations.accounts.checkBusy') : t('settings.integrations.accounts.check')}
-        </button>
-        <button className="settings-action-button settings-account-login-button" type="button" disabled={busyAction === 'login'} onClick={onOpenLogin}>
-          <ExternalLink size={15} />
-          {busyAction === 'login' ? t('settings.integrations.accounts.tidal.loginBusy') : t('settings.integrations.accounts.tidal.login')}
-        </button>
-        <button className="settings-danger-button" type="button" disabled={busyAction === 'clear'} onClick={onClear}>
-          {busyAction === 'clear' ? t('settings.integrations.accounts.logoutBusy') : t('settings.integrations.accounts.logout')}
-        </button>
-      </div>
-      <div className="settings-account-meta">
-        <span>{status?.displayName ?? status?.username ?? t('settings.integrations.accounts.tidal.savedStatus')}</span>
-        <span>{t('settings.integrations.accounts.loginMeta', { loginAt: status?.lastLoginAt ?? 'n/a', checkedAt: status?.lastCheckedAt ?? 'n/a' })}</span>
-      </div>
-      <p className="settings-inline-note settings-account-note">
-        {t('settings.integrations.accounts.tidal.callbackNote')}
-      </p>
-      {message ? <p className="settings-inline-note settings-account-note">{message}</p> : null}
-      {error ? <p className="settings-inline-error settings-account-note">{error}</p> : null}
-    </article>
-  );
-};
-
-const QobuzAccountCard = ({
-  busyAction,
-  error,
-  message,
-  onCheck,
-  onClear,
-  onLogin,
-  status,
-  tokenValue,
-  onTokenChange,
-}: {
-  busyAction?: AccountBusyAction;
-  error?: string | null;
-  message?: string | null;
-  onCheck: () => void;
-  onClear: () => void;
-  onLogin: () => void;
-  status?: AccountStatus;
-  tokenValue: string;
-  onTokenChange: (value: string) => void;
-}): JSX.Element => {
-  const { t } = useI18n();
-  const connected = status?.connected === true;
-  const displayName = status?.displayName ?? status?.username;
-  return (
-    <article className="settings-account-row" aria-label="Qobuz">
-      <div className="settings-account-summary">
-        {renderAccountStatusBadge(t, status, onLogin)}
-        <div>
-          <h3>Qobuz</h3>
-          <p>{t('settings.integrations.accounts.qobuz.description')}</p>
-        </div>
-      </div>
-      {!connected ? (
-        <>
-          <label className="settings-account-cookie-field">
-            <input
-              type="password"
-              value={tokenValue}
-              placeholder={t('settings.integrations.accounts.qobuz.tokenPlaceholder')}
-              onChange={(e) => onTokenChange(e.target.value)}
-              autoComplete="off"
-            />
-          </label>
-          <p className="settings-inline-note settings-account-note">{t('settings.integrations.accounts.qobuz.tokenHint')}</p>
-        </>
-      ) : null}
-      <div className="settings-account-actions">
-        <button className="settings-action-button" type="button" disabled={busyAction === 'check'} onClick={onCheck}>
-          {busyAction === 'check' ? t('settings.integrations.accounts.checkBusy') : t('settings.integrations.accounts.check')}
-        </button>
-        {!connected ? (
-          <button className="settings-action-button settings-account-login-button" type="button" disabled={busyAction === 'login' || !tokenValue.trim()} onClick={onLogin}>
-            {busyAction === 'login' ? t('settings.integrations.accounts.qobuz.loginBusy') : t('settings.integrations.accounts.qobuz.login')}
-          </button>
-        ) : null}
-        <button className="settings-danger-button" type="button" disabled={busyAction === 'clear'} onClick={onClear}>
-          {busyAction === 'clear' ? t('settings.integrations.accounts.logoutBusy') : t('settings.integrations.accounts.logout')}
-        </button>
-      </div>
-      {connected ? (
-        <div className="settings-account-meta">
-          <span>{displayName ?? t('settings.integrations.accounts.qobuz.connected')}</span>
-          <span>{t('settings.integrations.accounts.loginMeta', { loginAt: status?.lastLoginAt ?? 'n/a', checkedAt: status?.lastCheckedAt ?? 'n/a' })}</span>
-        </div>
-      ) : null}
-      {message ? <p className="settings-inline-note settings-account-note">{message}</p> : null}
-      {error ? <p className="settings-inline-error settings-account-note">{error}</p> : null}
-    </article>
-  );
-};
-
-const NumberRangeField = ({
-  disabled = false,
-  max,
-  min,
-  onChange,
-  step,
-  suffix,
-  value,
-}: {
-  disabled?: boolean;
-  max: number;
-  min: number;
-  onChange: (value: number) => void;
-  step: number;
-  suffix: string;
-  value: number;
-}): JSX.Element => (
-  <label className="settings-range-field">
-    <input disabled={disabled} min={min} max={max} step={step} type="range" value={value} onChange={(event) => onChange(Number(event.target.value))} />
-    <span>
-      {value}
-      {suffix}
-    </span>
-  </label>
-);
-
-const normalizeEchoProErrorCode = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : String(error);
-  const lowered = message.toLowerCase();
-  const knownCodes = [
-    'invalid_credentials',
-    'registration_disabled',
-    'username_taken',
-    'device_limit_reached',
-    'session_required',
-    'pro_required',
-    'invalid_key',
-    'key_rejected',
-    'key_already_used',
-    'release_cooldown',
-    'echo_pro_activation_qq_invalid',
-    'echo_pro_activation_order_id_invalid',
-    'echo_pro_activation_key_invalid',
-    'echo_pro_activation_order_activation_limit_exceeded',
-    'echo_pro_activation_order_not_found',
-    'echo_pro_activation_order_not_paid',
-    'echo_pro_activation_order_plan_not_allowed',
-    'echo_pro_activation_order_amount_too_low',
-    'echo_pro_activation_order_not_eligible',
-    'echo_pro_activation_invalid_key',
-    'echo_pro_activation_key_rejected',
-    'echo_pro_activation_key_already_used',
-    'echo_pro_activation_timeout',
-    'echo_pro_activation_package_invalid',
-    'echo_pro_activation_package_plugin_mismatch',
-    'echo_pro_activation_http_403',
-    'echo_pro_activation_http_409',
-    'echo_pro_activation_http_500',
-    'echo_pro_register_unavailable',
-    'echo_pro_http_400',
-    'echo_pro_http_401',
-    'echo_pro_http_403',
-    'echo_pro_http_405',
-    'echo_pro_http_409',
-    'echo_pro_http_500',
-  ];
-  const matchedCode = knownCodes.find((code) => lowered.includes(code));
-  if (matchedCode) {
-    return matchedCode;
-  }
-  if (lowered.includes('405') && lowered.includes('register')) {
-    return 'echo_pro_register_unavailable';
-  }
-  if (lowered.includes('405')) {
-    return 'echo_pro_http_405';
-  }
-  if (lowered.includes('username') && lowered.includes('3-40')) {
-    return 'echo_pro_username_use_qq';
-  }
-  if (lowered.includes('password') && (lowered.includes('8-200') || lowered.includes('10-200'))) {
-    return 'echo_pro_password_length';
-  }
-  if (lowered.includes('password') && lowered.includes('releasing')) {
-    return 'echo_pro_release_password_required';
-  }
-  if (lowered.includes('endpoint') && lowered.includes('not configured')) {
-    return 'echo_pro_endpoint_missing';
-  }
-  return message;
-};
-
-const formatEchoProError = (error: unknown, locale: Locale): string => {
-  const code = normalizeEchoProErrorCode(error);
-  const zh = locale === 'zh-CN';
-  const messages: Record<string, { zh: string; en: string }> = {
-    invalid_credentials: {
-      zh: '账号或密码不正确。注册/登录账号建议直接填写你的 QQ 号，密码至少 8 位。',
-      en: 'The account or password is incorrect. Use your QQ number as the account name, with a password of at least 8 characters.',
-    },
-    registration_disabled: {
-      zh: '服务器暂时关闭公开注册。请使用已授权账号登录，或联系管理员。',
-      en: 'Public registration is currently disabled. Sign in with an authorized account or contact the administrator.',
-    },
-    username_taken: {
-      zh: '这个账号已注册。请直接用你的 QQ 号登录，或换另一个 QQ 号注册。',
-      en: 'This account is already registered. Sign in with your QQ number, or register with another QQ number.',
-    },
-    device_limit_reached: {
-      zh: '这个账号已绑定 2 台设备。请在已登录设备里点击“解绑所有设备”，然后再登录本机。',
-      en: 'This account has already bound 2 devices. Use "Release all devices" on a signed-in device, then sign in here again.',
-    },
-    session_required: {
-      zh: '登录已失效，请重新登录 ECHO Pro。',
-      en: 'Your session expired. Please sign in to ECHO Pro again.',
-    },
-    pro_required: {
-      zh: '此功能需要 ECHO Pro。请先登录并兑换 ECHO Pro Key。',
-      en: 'This feature requires ECHO Pro. Sign in and redeem an ECHO Pro key first.',
-    },
-    invalid_key: {
-      zh: 'ECHO Pro Key 格式不正确，请检查后再兑换。',
-      en: 'The ECHO Pro key format is invalid. Check it and try again.',
-    },
-    key_rejected: {
-      zh: '这个 ECHO Pro Key 无效、已禁用或已过期。',
-      en: 'This ECHO Pro key is invalid, disabled, or expired.',
-    },
-    key_already_used: {
-      zh: '这个 ECHO Pro Key 已被使用。',
-      en: 'This ECHO Pro key has already been used.',
-    },
-    release_cooldown: {
-      zh: '设备解绑太频繁。为了保护授权，5 小时内只能自助解绑一次。',
-      en: 'Device releases are too frequent. Self-service release is limited to once every 5 hours.',
-    },
-    echo_pro_activation_qq_invalid: {
-      zh: 'QQ 号格式不正确，请填写用于核对授权的 QQ 号。',
-      en: 'The QQ number format is invalid. Enter the QQ number used for authorization.',
-    },
-    echo_pro_activation_order_id_invalid: {
-      zh: '爱发电订单号格式不正确，请检查后再激活。',
-      en: 'The Afdian order ID format is invalid. Check it and try again.',
-    },
-    echo_pro_activation_key_invalid: {
-      zh: 'ECHO Pro Key 格式不正确，请检查后再激活。',
-      en: 'The ECHO Pro key format is invalid. Check it and try again.',
-    },
-    echo_pro_activation_order_activation_limit_exceeded: {
-      zh: '这个爱发电订单已达到设备激活上限。解绑 HWID 需要去官方网页。',
-      en: 'This Afdian order has reached its device activation limit. Release HWID on the official web page.',
-    },
-    echo_pro_activation_order_not_found: {
-      zh: '没有找到这个爱发电订单，请确认订单号和 QQ 号。',
-      en: 'This Afdian order was not found. Check the order ID and QQ number.',
-    },
-    echo_pro_activation_order_not_paid: {
-      zh: '这个爱发电订单还不是已支付状态。',
-      en: 'This Afdian order is not marked as paid yet.',
-    },
-    echo_pro_activation_order_plan_not_allowed: {
-      zh: '这个爱发电订单不属于可激活 ECHO Pro 的档位。',
-      en: 'This Afdian order is not from an ECHO Pro eligible tier.',
-    },
-    echo_pro_activation_order_amount_too_low: {
-      zh: '这个爱发电订单金额必须大于 40 元才能激活 ECHO Pro。',
-      en: 'This Afdian order must be greater than RMB 40 to activate ECHO Pro.',
-    },
-    echo_pro_activation_order_not_eligible: {
-      zh: '这个订单暂不满足 ECHO Pro 激活条件。',
-      en: 'This order is not eligible for ECHO Pro activation.',
-    },
-    echo_pro_activation_invalid_key: {
-      zh: 'ECHO Pro Key 格式不正确，请检查后再激活。',
-      en: 'The ECHO Pro key format is invalid. Check it and try again.',
-    },
-    echo_pro_activation_key_rejected: {
-      zh: '这个 ECHO Pro Key 无效、已禁用或已过期。',
-      en: 'This ECHO Pro key is invalid, disabled, or expired.',
-    },
-    echo_pro_activation_key_already_used: {
-      zh: '这个 ECHO Pro Key 已达到可激活设备上限。解绑 HWID 需要去官方网页。',
-      en: 'This ECHO Pro key has reached its device activation limit. Release HWID on the official web page.',
-    },
-    echo_pro_activation_timeout: {
-      zh: '激活请求超时，请检查网络后重试。',
-      en: 'The activation request timed out. Check the network and try again.',
-    },
-    echo_pro_activation_package_invalid: {
-      zh: '服务器返回的插件包无效，已拒绝导入。',
-      en: 'The plugin package returned by the server is invalid and was not imported.',
-    },
-    echo_pro_activation_package_plugin_mismatch: {
-      zh: '服务器返回的不是 ECHO Pro Unlock 插件包，已拒绝导入。',
-      en: 'The server did not return an ECHO Pro Unlock package, so it was not imported.',
-    },
-    echo_pro_activation_http_403: {
-      zh: '服务器拒绝激活。可能是订单/Key 无效、已过期或设备数已满。',
-      en: 'The server rejected activation. The order/key may be invalid, expired, or at its device limit.',
-    },
-    echo_pro_activation_http_409: {
-      zh: '激活冲突：这个授权已达到设备绑定上限。解绑 HWID 仍需要去官方网页。',
-      en: 'Activation conflict: this entitlement has reached its device limit. HWID unbinding stays on the official web page.',
-    },
-    echo_pro_activation_http_500: {
-      zh: '激活服务器内部错误，请稍后再试或联系管理员。',
-      en: 'The activation server hit an internal error. Try again later or contact the administrator.',
-    },
-    echo_pro_register_unavailable: {
-      zh: '注册接口暂不可用。请确认服务器已部署最新版，并建议使用 QQ 号作为账号注册。',
-      en: 'Registration is temporarily unavailable. Make sure the latest server is deployed, and use your QQ number as the account name.',
-    },
-    echo_pro_http_400: {
-      zh: '提交的信息格式不正确。账号建议填写 QQ 号，密码至少 8 位。',
-      en: 'The submitted information is invalid. Use your QQ number as the account name and a password of at least 8 characters.',
-    },
-    echo_pro_http_401: {
-      zh: '认证失败。请检查账号、密码，或重新登录。',
-      en: 'Authentication failed. Check your account and password, or sign in again.',
-    },
-    echo_pro_http_403: {
-      zh: '服务器拒绝了请求。可能是账号未授权、设备数已满或 Key 不可用。',
-      en: 'The server rejected the request. The account may not be authorized, the device limit may be reached, or the key may be unavailable.',
-    },
-    echo_pro_http_405: {
-      zh: '服务器接口方法不匹配，通常是线上 nginx/服务端还没更新。请重新部署最新版 ECHO Pro 云端服务。',
-      en: 'The server route does not accept this method, usually because nginx or the cloud service is outdated. Redeploy the latest ECHO Pro cloud service.',
-    },
-    echo_pro_http_409: {
-      zh: '账号冲突。这个 QQ 号可能已经注册，请直接登录。',
-      en: 'Account conflict. This QQ number may already be registered, so try signing in.',
-    },
-    echo_pro_http_500: {
-      zh: '服务器内部错误，请稍后再试或联系管理员。',
-      en: 'The server hit an internal error. Try again later or contact the administrator.',
-    },
-    echo_pro_username_use_qq: {
-      zh: '账号建议填写 QQ 号，只能包含字母、数字、点、下划线、@ 或短横线，长度 3-40。',
-      en: 'Use your QQ number as the account name. It must be 3-40 characters and may contain letters, numbers, dot, underscore, @, or dash.',
-    },
-    echo_pro_password_length: {
-      zh: '密码长度需要 8-200 位。',
-      en: 'Password length must be 8-200 characters.',
-    },
-    echo_pro_release_password_required: {
-      zh: '解绑所有设备前，请输入当前 ECHO Pro 账号密码。',
-      en: 'Enter your current ECHO Pro password before releasing all devices.',
-    },
-    echo_pro_endpoint_missing: {
-      zh: 'ECHO Pro 服务器地址未配置或不安全。',
-      en: 'The ECHO Pro server endpoint is not configured or is not secure.',
-    },
-  };
-  const known = messages[code];
-  if (known) {
-    return zh ? known.zh : known.en;
-  }
-  return code.replace(/^Error invoking remote method '[^']+': Error:\s*/u, '');
-};
-
-const FontPickerModal = ({
-  currentFont,
-  fonts,
-  onClose,
-  onChooseFile,
-  onSelect,
-  query,
-  setQuery,
-  title,
-}: {
-  currentFont: string;
-  fonts: string[];
-  onClose: () => void;
-  onChooseFile: () => void;
-  onSelect: (fontFamily: string) => void;
-  query: string;
-  setQuery: (query: string) => void;
-  title: string;
-}): JSX.Element => {
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredFonts = normalizedQuery ? fonts.filter((font) => font.toLowerCase().includes(normalizedQuery)) : fonts;
-
-  return (
-    <div className="settings-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="settings-font-modal" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
-        <header className="settings-font-modal-header">
-          <h3>{title}</h3>
-          <button className="settings-icon-button" type="button" onClick={onClose} aria-label="Close">
-            <X size={15} />
-          </button>
-        </header>
-        <label className="settings-font-search">
-          <Search size={15} aria-hidden="true" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} autoFocus />
-        </label>
-        <button className="settings-font-file-button" type="button" onClick={onChooseFile}>
-          <FolderOpen size={15} aria-hidden="true" />
-          从资源管理器选择
-        </button>
-        <div className="settings-font-list">
-          {filteredFonts.map((font) => (
-            <button
-              className={`settings-font-option ${font === currentFont ? 'active' : ''}`}
-              key={font}
-              type="button"
-              style={{ fontFamily: `"${font}", var(--echo-font-family)` }}
-              onClick={() => onSelect(font)}
-            >
-              <span>{font}</span>
-              <em>Echo font preview Aa 你好</em>
-            </button>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-};
 
 export const SettingsPage = (): JSX.Element => {
   const { locale, localeOptions, setLocale, t } = useI18n();
@@ -5227,6 +484,7 @@ export const SettingsPage = (): JSX.Element => {
     'zh-TW': '可能會大幅度提高 ECHO 效能，也可能出現奇怪的 BUG。',
     'ja-JP': 'ECHO の性能を大きく改善する可能性がありますが、奇妙な不具合が出る場合もあります。',
     'en-US': 'May significantly improve ECHO performance, but may also cause strange bugs.',
+    'ko-KR': 'ECHO 성능을 크게 높일 수 있지만 이상한 버그가 생길 수도 있습니다.',
   });
   const playbackQueue = usePlaybackQueue();
   const sharedPlaybackStatus = useSharedPlaybackStatus();
@@ -5235,14 +493,19 @@ export const SettingsPage = (): JSX.Element => {
   const sharedBackendOptionsForPlatform = useMemo(() => getSharedBackendOptionsForPlatform(rendererPlatform), [rendererPlatform]);
   const advancedNativeOutputAvailable = isAdvancedNativeOutputPlatform(rendererPlatform);
   const settingsScrollShellRef = useRef<HTMLDivElement | null>(null);
+  const settingsSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [settingsHorizontalScroll, setSettingsHorizontalScroll] = useState({
     available: false,
     canLeft: false,
     canRight: false,
   });
   const [activeSection, setActiveSection] = useState<SettingsNavKey>(() => readInitialSettingsSection());
+  const [aboutPage, setAboutPage] = useState<'overview' | 'contributors'>('overview');
   const [settingsSectionMotionDirection, setSettingsSectionMotionDirection] = useState<SettingsSectionMotionDirection>('initial');
+  const [settingsSectionIndexItems, setSettingsSectionIndexItems] = useState<Array<{ id: string; label: string }>>([]);
+  const [activeSettingsSectionIndexId, setActiveSettingsSectionIndexId] = useState<string | null>(null);
   const [settingsQuery, setSettingsQuery] = useState('');
+  const [activeSettingsSearchResultIndex, setActiveSettingsSearchResultIndex] = useState(0);
   const [highlightedSettingId, setHighlightedSettingId] = useState<string | null>(null);
   const [mysteriousKeyVisible, setMysteriousKeyVisible] = useState(false);
   const mysteriousKeyUnlockNoticeShownRef = useRef(false);
@@ -5253,12 +516,12 @@ export const SettingsPage = (): JSX.Element => {
   const [status, setStatus] = useState<AudioStatus | null>(null);
   const [audioDiagnosticsCopied, setAudioDiagnosticsCopied] = useState(false);
   const [devices, setDevices] = useState<AudioDeviceInfo[]>([]);
-  const [audioDevicesChecked, setAudioDevicesChecked] = useState(false);
   const [outputMode, setOutputMode] = useState<AudioOutputMode>('shared');
   const [sharedBackend, setSharedBackend] = useState<AudioSharedBackend>('auto');
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [appearancePreferences, setAppearancePreferences] = useState<AppearancePreferences>(() => readAppearancePreferences());
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [liveLibraryState, setLiveLibraryState] = useState<LibraryLabState | null>(null);
   const [signalPathControlSaving, setSignalPathControlSaving] = useState(false);
   const signalPathControlSaveRequestRef = useRef(0);
   const [streamingNoticeOpen, setStreamingNoticeOpen] = useState(false);
@@ -5271,10 +534,19 @@ export const SettingsPage = (): JSX.Element => {
     [appSettings?.hiddenPlayerBarButtonIds],
   );
   const hiddenPlayerBarButtonIdSet = useMemo(() => new Set(hiddenPlayerBarButtonIds), [hiddenPlayerBarButtonIds]);
-  const visiblePlayerBarButtonCount = playerBarButtonSettingsItems.length - hiddenPlayerBarButtonIds.length;
   const sidebarLayoutExpanded = appSettings?.appearanceSidebarLayoutExpanded === true;
   const connectSidebarProLocked = !finalThemeUnlocked;
   const sidebarLayoutSummary = sidebarHiddenRouteIds.length > 0 ? t('settings.appearance.sidebar.summary.hidden', { count: sidebarHiddenRouteIds.length }) : t('settings.appearance.sidebar.summary.allVisible');
+  const automaticOutputStageMessage =
+    status?.automaticOutputStage === 'safe-shared'
+      ? t('audioDrawer.option.automaticOutputStage.safeShared')
+      : status?.automaticOutputStage === 'directsound'
+        ? t('audioDrawer.option.automaticOutputStage.directSound')
+        : status?.automaticOutputStage === 'system-required'
+          ? t('audioDrawer.option.automaticOutputStage.systemRequired')
+          : status?.automaticOutputStage === 'failed'
+            ? t('audioDrawer.option.automaticOutputStage.failed')
+            : t('settings.playback.automaticOutput.recommended');
   const sidebarSettingsGroups = useMemo(() => {
     const groups: Record<SidebarSettingsRouteItem['placement'], SidebarSettingsRouteItem[]> = {
       main: [],
@@ -5317,6 +589,7 @@ export const SettingsPage = (): JSX.Element => {
   const [themeCustomDraft, setThemeCustomDraft] = useState<AppThemeToneOverride>({});
   const [themeCustomPanelOpen, setThemeCustomPanelOpen] = useState(false);
   const [themeCustomAdvancedOpen, setThemeCustomAdvancedOpen] = useState(false);
+  const [appearanceWallpaperAdvancedOpen, setAppearanceWallpaperAdvancedOpen] = useState(false);
   const [appearanceTypographyOpen, setAppearanceTypographyOpen] = useState(false);
   const [themeCustomMessage, setThemeCustomMessage] = useState<string | null>(null);
   const pendingThemeCopyDraftRef = useRef<{ draft: AppThemeToneOverride; tone: ThemeTone } | null>(null);
@@ -5326,6 +599,10 @@ export const SettingsPage = (): JSX.Element => {
   const wallpaperPreviewFrameRef = useRef<number | null>(null);
   const pendingWallpaperPreviewPatchRef = useRef<Partial<AppSettings> | null>(null);
   const pendingWallpaperPersistPatchRef = useRef<Partial<AppSettings> | null>(null);
+  const mvTuningPersistTimerRef = useRef<number | null>(null);
+  const mvTuningPreviewFrameRef = useRef<number | null>(null);
+  const pendingMvTuningPreviewPatchRef = useRef<Partial<MvSettings> | null>(null);
+  const pendingMvTuningPersistPatchRef = useRef<Partial<MvSettings> | null>(null);
   const [discordPresenceStatus, setDiscordPresenceStatus] = useState<DiscordPresenceStatus | null>(null);
   const [smtcDiagnostics, setSmtcDiagnostics] = useState<SmtcDiagnostics | null>(null);
   const [stageBridgeStatus, setStageBridgeStatus] = useState<StageBridgeServerStatus | null>(null);
@@ -5358,7 +635,9 @@ export const SettingsPage = (): JSX.Element => {
   );
   const [echoProAccountStatus, setEchoProAccountStatus] = useState<EchoProAccountStatus | null>(null);
   const [echoProAccountStatusChecked, setEchoProAccountStatusChecked] = useState(false);
-  const [echoProStatusSnapshot, setEchoProStatusSnapshot] = useState<EchoProDisplayStatusSnapshot>(() => echoProDisplayStatusSnapshot);
+  const [echoProStatusSnapshot, setEchoProStatusSnapshot] = useState<EchoProDisplayStatusSnapshot>(
+    readEchoProDisplayStatusSnapshot,
+  );
   const [echoProUsername, setEchoProUsername] = useState('');
   const [echoProPassword, setEchoProPassword] = useState('');
   const [echoProPasswordVisible, setEchoProPasswordVisible] = useState(false);
@@ -5368,16 +647,17 @@ export const SettingsPage = (): JSX.Element => {
   const [echoProActivationQq, setEchoProActivationQq] = useState('');
   const [echoProActivationOrderId, setEchoProActivationOrderId] = useState('');
   const [echoProActivationKey, setEchoProActivationKey] = useState('');
-  const [echoProActivationBusy, setEchoProActivationBusy] = useState(false);
+  const [echoProActivationSecretVisible, setEchoProActivationSecretVisible] = useState(false);
+  const [echoProActivationBusyAction, setEchoProActivationBusyAction] = useState<'activate' | 'release' | null>(null);
+  const echoProActivationBusy = echoProActivationBusyAction !== null;
   const [echoProActivationPanelExpanded, setEchoProActivationPanelExpanded] = useState(() =>
     readBooleanStoragePreference(generalEchoProActivationPanelExpandedStorageKey, false),
   );
   const [echoProBusyAction, setEchoProBusyAction] = useState<'login' | 'register' | 'logout' | 'refresh' | 'redeem' | 'release-devices' | null>(null);
-  const [echoProSettingsCloudStatus, setEchoProSettingsCloudStatus] = useState<EchoProSettingsCloudStatus | null>(null);
-  const [echoProSettingsCloudBusyAction, setEchoProSettingsCloudBusyAction] = useState<'status' | 'save' | 'pull' | null>(null);
   const [echoProMachineCode, setEchoProMachineCode] = useState<string | null>(null);
   const [echoProMachineCodeCopied, setEchoProMachineCodeCopied] = useState(false);
   const [echoProPluginUnlocked, setEchoProPluginUnlocked] = useState(false);
+  const [echoProDspUnlocked, setEchoProDspUnlocked] = useState(false);
   const [echoProPluginStatusChecked, setEchoProPluginStatusChecked] = useState(false);
   const echoProUnlockedForDisplay = echoProAccountStatus?.pro === true || echoProPluginUnlocked || finalThemeUnlocked;
   const echoProPluginUnlockedForStatus =
@@ -5385,6 +665,7 @@ export const SettingsPage = (): JSX.Element => {
   const echoProAccountStatusForStatus =
     echoProAccountStatus ?? (!echoProAccountStatusChecked ? echoProStatusSnapshot.accountStatus : null);
   const echoProUnlockedForStatus = echoProUnlockedForDisplay || echoProPluginUnlockedForStatus || echoProAccountStatusForStatus?.pro === true;
+  const echoProAudioUnlocked = echoProDspUnlocked;
   const [echoProMessage, setEchoProMessage] = useState<string | null>(null);
   const [echoProError, setEchoProError] = useState<string | null>(null);
   const echoProActivationReady = useMemo(() => {
@@ -5397,6 +678,9 @@ export const SettingsPage = (): JSX.Element => {
     }
     return /^ECHO-[A-Z2-9]{5}(?:-[A-Z2-9]{5}){3}$/u.test(echoProActivationKey.trim().toUpperCase().replace(/\s+/gu, ''));
   }, [echoProActivationKey, echoProActivationMode, echoProActivationOrderId, echoProActivationQq]);
+  const echoProOrderReleaseReady =
+    echoProActivationMode === 'afdian' &&
+    /^[0-9A-Za-z_-]{12,80}$/u.test(echoProActivationOrderId.trim());
   const [youtubeBrowser, setYoutubeBrowser] = useState<YouTubeBrowser>('none');
   const [soundCloudBrowser, setSoundCloudBrowser] = useState<AccountBrowser>('none');
   const [lastFmAuthToken, setLastFmAuthToken] = useState<string | null>(null);
@@ -5445,25 +729,22 @@ export const SettingsPage = (): JSX.Element => {
   const [bpmAnalysisJob, setBpmAnalysisJob] = useState<BpmAnalysisJobStatus | null>(null);
   const [bpmAnalysisBusy, setBpmAnalysisBusy] = useState(false);
   const [bpmAnalysisMessage, setBpmAnalysisMessage] = useState<string | null>(null);
-  const [replayGainAnalysisJob, setReplayGainAnalysisJob] = useState<ReplayGainAnalysisJobStatus | null>(null);
-  const [replayGainAnalysisBusy, setReplayGainAnalysisBusy] = useState(false);
-  const [replayGainAnalysisMessage, setReplayGainAnalysisMessage] = useState<string | null>(null);
   const [lyricsBackfillJob, setLyricsBackfillJob] = useState<LyricsBackfillJobStatus | null>(null);
   const [lyricsBackfillBusy, setLyricsBackfillBusy] = useState(false);
   const [lyricsBackfillMessage, setLyricsBackfillMessage] = useState<string | null>(null);
   const lyricsBackfillPollGenerationRef = useRef(0);
   const [playbackAdvancedPanelExpanded, setPlaybackAdvancedPanelExpanded] = useState(() =>
-    readBooleanStoragePreference(playbackAdvancedPanelExpandedStorageKey, false),
+    readBooleanStoragePreference(playbackAdvancedPanelExpandedStorageKey, true),
   );
   const [playbackNoSoundGuideOpen, setPlaybackNoSoundGuideOpen] = useState(false);
   const [playbackNoSoundGuideStepIndex, setPlaybackNoSoundGuideStepIndex] = useState(0);
-  const [replayGainAdvancedOpen, setReplayGainAdvancedOpen] = useState(false);
   const [audioStatusPanelOpen, setAudioStatusPanelOpen] = useState(false);
   const [channelBalanceState, setChannelBalanceState] = useState<ChannelBalanceState>(defaultSettingsChannelBalance);
   const [audioResetBusy, setAudioResetBusy] = useState(false);
   const [windowsAudioRestartBusy, setWindowsAudioRestartBusy] = useState(false);
   const [audioResetMessage, setAudioResetMessage] = useState<string | null>(null);
   const [playbackSettingsMessage, setPlaybackSettingsMessage] = useState<string | null>(null);
+  const [automaticOutputBusy, setAutomaticOutputBusy] = useState(false);
   const [settingsBackupBusy, setSettingsBackupBusy] = useState<'export' | 'import' | 'dataPackage' | null>(null);
   const [settingsBackupMessage, setSettingsBackupMessage] = useState<string | null>(null);
   const [dataBackupStatus, setDataBackupStatus] = useState<DataBackupStatus | null>(null);
@@ -5519,9 +800,7 @@ export const SettingsPage = (): JSX.Element => {
   const [onlineArtistInfoMessage, setOnlineArtistInfoMessage] = useState<string | null>(null);
   const [onlineAlbumInfoBusyAction, setOnlineAlbumInfoBusyAction] = useState<'save' | null>(null);
   const [onlineAlbumInfoMessage, setOnlineAlbumInfoMessage] = useState<string | null>(null);
-  const [accountPanelExpanded, setAccountPanelExpanded] = useState(() =>
-    readBooleanStoragePreference(integrationsAccountPanelExpandedStorageKey, false),
-  );
+  const [selectedAccountProvider, setSelectedAccountProvider] = useState<AccountProvider>('netease');
   const [credentialPanelExpanded, setCredentialPanelExpanded] = useState(() =>
     readBooleanStoragePreference(integrationsCredentialPanelExpandedStorageKey, false),
   );
@@ -5555,7 +834,7 @@ export const SettingsPage = (): JSX.Element => {
 
   const settingsNavigationItems = useMemo(
     () => settingsNavItems.filter((item) => shouldShowSettingsNavItem(item.key, appSettings)),
-    [appSettings?.settingsOptionalSectionsVisible],
+    [appSettings],
   );
 
   const setAnimatedActiveSection = useCallback((nextSection: SettingsNavKey): void => {
@@ -5602,6 +881,13 @@ export const SettingsPage = (): JSX.Element => {
         }
       }
       setHighlightedSettingId(targetId);
+      if (targetId) {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          });
+        });
+      }
     };
 
     window.addEventListener(settingsSectionNavigationEvent, handleSettingsSectionNavigation);
@@ -5615,6 +901,12 @@ export const SettingsPage = (): JSX.Element => {
       setHighlightedSettingId(null);
     }
   }, [activeSection, setAnimatedActiveSection, settingsNavigationItems]);
+
+  useEffect(() => {
+    if (activeSection !== 'about' && aboutPage !== 'overview') {
+      setAboutPage('overview');
+    }
+  }, [aboutPage, activeSection]);
 
   const settingsSearchEntries = useMemo(() => {
     const visibleSectionKeys = new Set(settingsNavigationItems.map((item) => item.key));
@@ -5668,23 +960,6 @@ export const SettingsPage = (): JSX.Element => {
         title: t('settings.general.firstRunWizard.title'),
         description: t('settings.general.firstRunWizard.description'),
         terms: [t('settings.general.firstRunWizard.title'), t('settings.general.firstRunWizard.description'), '首次启动指引', '新手教程', '新手指引', '新手引导', '向导', '引导', '標準輸出', '標準出力', '标准输出', '系统音频', 'システムオーディオ', 'guide', 'beginner guide', 'onboarding', 'first run', 'welcome', 'system audio'],
-      },
-      {
-        id: 'row-user-notice',
-        sectionKey: 'general',
-        targetId: 'settings-row-user-notice',
-        title: t('settings.general.userNotice.title'),
-        description: t('settings.general.userNotice.description'),
-        terms: [
-          t('settings.general.userNotice.title'),
-          t('settings.general.userNotice.description'),
-          '用户须知',
-          '用戶須知',
-          'user notice',
-          'terms',
-          'DMCA',
-          'community boundaries',
-        ],
       },
       {
         id: 'row-echo-pro-activation',
@@ -5758,6 +1033,26 @@ export const SettingsPage = (): JSX.Element => {
           t('settings.general.echoProAccount.copyHwid'),
           t('settings.general.echoProAccount.showHwid'),
         ],
+      },
+      {
+        id: 'row-low-spec-mode',
+        sectionKey: 'general',
+        targetId: 'settings-row-low-spec-mode',
+        title: settingsLocaleCopy(locale, {
+    'zh-CN': '低配置模式',
+    'zh-TW': '低配置模式',
+    'ja-JP': '低スペックモード',
+    'en-US': 'Low-spec mode',
+    'ko-KR': 'Low-spec mode',
+  }),
+        description: settingsLocaleCopy(locale, {
+    'zh-CN': '降低动画、模糊、可视化、视频壁纸、扫描和后台任务占用。',
+    'zh-TW': '降低動畫、模糊、視覺化、影片桌布、掃描和背景工作佔用。',
+    'ja-JP': 'アニメーション、ぼかし、視覚化、動画壁紙、スキャン、バックグラウンド処理の負荷を抑えます。',
+    'en-US': 'Reduces animation, blur, visualizers, video wallpaper, scanning, and background work.',
+    'ko-KR': '애니메이션, 블러, 시각화, 동영상 배경, 스캔, 백그라운드 작업 부하를 줄입니다.',
+  }),
+        terms: ['低配', '低配置', '低内存', '低占用', '流畅模式', '性能模式', '省资源', 'low spec', 'low memory', 'performance mode'],
       },
       {
         id: 'row-close-to-tray',
@@ -5862,25 +1157,6 @@ export const SettingsPage = (): JSX.Element => {
         ],
       },
       {
-        id: 'row-feature-comments-hidden',
-        sectionKey: 'advancedCustom',
-        targetId: 'settings-row-feature-comments-hidden',
-        title: t('settings.general.featureCommentsHidden.title'),
-        description: t('settings.general.featureCommentsHidden.description'),
-        terms: [
-          t('settings.general.featureCommentsHidden.title'),
-          t('settings.general.featureCommentsHidden.description'),
-          '\u5173\u95ed\u529f\u80fd\u6ce8\u91ca',
-          '\u9690\u85cf\u529f\u80fd\u8bf4\u660e',
-          '\u5173\u95ed\u8bf4\u660e',
-          '\u7b80\u6d01\u754c\u9762',
-          'hide comments',
-          'hide descriptions',
-          'feature comments',
-          'minimal ui',
-        ],
-      },
-      {
         id: 'row-streaming-feature',
         sectionKey: 'general',
         targetId: 'settings-row-streaming-feature',
@@ -5941,6 +1217,64 @@ export const SettingsPage = (): JSX.Element => {
           'performance',
           'mouse freeze',
           'BUG',
+        ],
+      },
+      {
+        id: 'row-scan-performance',
+        sectionKey: 'experimental',
+        targetId: 'settings-row-scan-performance',
+        title: t('mediaLibrary.settings.scanPerformance.title'),
+        description: t('mediaLibrary.settings.scanPerformance.description'),
+        terms: [
+          t('mediaLibrary.settings.scanPerformance.title'),
+          t('mediaLibrary.settings.scanPerformance.description'),
+          t('mediaLibrary.settings.scanPerformance.low'),
+          t('mediaLibrary.settings.scanPerformance.balanced'),
+          t('mediaLibrary.settings.scanPerformance.performance'),
+          t('mediaLibrary.settings.scanPerformance.ultra'),
+          '扫描速度',
+          '扫描并发',
+          '极速扫描',
+          'scan speed',
+          'scan concurrency',
+          'ultra scan',
+        ],
+      },
+      {
+        id: 'row-dsd-passthrough',
+        sectionKey: 'experimental',
+        targetId: 'settings-row-dsd-passthrough',
+        title: t('settings.playback.dsdDop.title'),
+        description: t('settings.playback.dsdDop.description'),
+        terms: [
+          t('settings.playback.dsdDop.title'),
+          t('settings.playback.dsdDop.description'),
+          'DSD',
+          'DSF',
+          'Native DSD',
+          'DoP',
+          'ASIO',
+          'bit perfect',
+          'passthrough',
+          '直通',
+          '直出',
+          '不重采样',
+        ],
+      },
+      {
+        id: 'row-window-acrylic',
+        sectionKey: 'experimental',
+        targetId: 'settings-row-window-acrylic',
+        title: t('settings.appearance.windowAcrylic.title'),
+        description: t('settings.appearance.windowAcrylic.description'),
+        terms: [
+          t('settings.appearance.windowAcrylic.title'),
+          t('settings.appearance.windowAcrylic.description'),
+          t('settings.appearance.windowAcrylic.experimental'),
+          '窗口亚克力',
+          '窗口透明',
+          'acrylic',
+          'window transparency',
         ],
       },
       {
@@ -6125,7 +1459,7 @@ export const SettingsPage = (): JSX.Element => {
       },
       {
         id: 'row-home-random-hero-title',
-        sectionKey: 'advancedCustom',
+        sectionKey: 'general',
         targetId: 'settings-row-home-random-hero-title',
         title: t('settings.general.homeRandomHeroTitle.title'),
         description: t('settings.general.homeRandomHeroTitle.description'),
@@ -6210,7 +1544,7 @@ export const SettingsPage = (): JSX.Element => {
       },
       {
         id: 'row-spotify-auth-config',
-        sectionKey: 'integrations',
+        sectionKey: 'accounts',
         targetId: 'settings-row-spotify-auth-config',
         title: 'Spotify OAuth 配置',
         description: '必须使用用户自己的 Spotify Client ID 和本机回调地址登录。',
@@ -6218,7 +1552,7 @@ export const SettingsPage = (): JSX.Element => {
       },
       {
         id: 'row-online-album-info',
-        sectionKey: 'integrations',
+        sectionKey: 'accounts',
         targetId: 'settings-row-online-album-info',
         title: 'Discogs 专辑评分',
         description: '给专辑页评分做兜底；不填也会尝试公开 API，填入 Personal access token 后更稳定。',
@@ -6226,7 +1560,7 @@ export const SettingsPage = (): JSX.Element => {
       },
       {
         id: 'row-online-artist-info',
-        sectionKey: 'integrations',
+        sectionKey: 'accounts',
         targetId: 'settings-row-online-artist-info',
         title: '在线歌手信息',
         description: '配置演出和歌手补强数据源；不配置时歌手页只显示本地关系。',
@@ -6287,6 +1621,21 @@ export const SettingsPage = (): JSX.Element => {
         terms: [t('settings.integrations.stage.title'), t('settings.integrations.stage.description'), 'stage api', 'stage', 'http api', 'eventsource', 'sse', 'obs api'],
       },
       {
+        id: 'row-taskbar-mini-player',
+        sectionKey: 'integrations',
+        targetId: 'settings-row-taskbar-mini-player',
+        title: t('settings.integrations.taskbarMiniPlayer.title'),
+        description: t('settings.integrations.taskbarMiniPlayer.description'),
+        terms: [
+          t('settings.integrations.taskbarMiniPlayer.title'),
+          t('settings.integrations.taskbarMiniPlayer.description'),
+          'taskbar mini player',
+          'windows taskbar overlay',
+          '任务栏迷你播放器',
+          '工作列迷你播放器',
+        ],
+      },
+      {
         id: 'row-taskbar-playback',
         sectionKey: 'integrations',
         targetId: 'settings-row-taskbar-playback',
@@ -6308,7 +1657,7 @@ export const SettingsPage = (): JSX.Element => {
       },
       {
         id: 'row-lastfm',
-        sectionKey: 'integrations',
+        sectionKey: 'accounts',
         targetId: 'settings-row-lastfm',
         title: t('settings.integrations.lastfm.title'),
         description: t('settings.integrations.lastfm.description'),
@@ -6316,7 +1665,7 @@ export const SettingsPage = (): JSX.Element => {
       },
       {
         id: 'row-account-startup-refresh',
-        sectionKey: 'integrations',
+        sectionKey: 'accounts',
         targetId: 'settings-row-account-startup-refresh',
         title: t('settings.integrations.accountStartupRefresh.title'),
         description: t('settings.integrations.accountStartupRefresh.description'),
@@ -6331,14 +1680,6 @@ export const SettingsPage = (): JSX.Element => {
           'bilibili',
           'spotify',
         ],
-      },
-      {
-        id: 'row-account-expiry-notices',
-        sectionKey: 'integrations',
-        targetId: 'settings-row-account-expiry-notices',
-        title: '关闭账号失效通知',
-        description: '开启后，账号失效时不再弹出左上角提醒；账号状态仍可在这里查看。',
-        terms: ['关闭账号失效通知', '账号失效通知', '左上角通知', '消息推送', 'account notice', 'account expiry notice', 'login expired', 'notification'],
       },
       {
         id: 'row-audio-status',
@@ -6365,6 +1706,22 @@ export const SettingsPage = (): JSX.Element => {
           '智能过渡',
           '连续播放',
         ],
+      },
+      {
+        id: 'row-prevent-sleep-while-playing',
+        sectionKey: 'playback',
+        targetId: 'settings-row-prevent-sleep-while-playing',
+        title: t('settings.playback.preventSleepWhilePlaying.title'),
+        description: t('settings.playback.preventSleepWhilePlaying.description'),
+        terms: [t('settings.playback.preventSleepWhilePlaying.title'), '防止休眠', '禁止息屏', 'keep awake', 'prevent sleep'],
+      },
+      {
+        id: 'row-auto-play-on-startup',
+        sectionKey: 'playback',
+        targetId: 'settings-row-auto-play-on-startup',
+        title: t('settings.playback.autoPlayOnStartup.title'),
+        description: t('settings.playback.autoPlayOnStartup.description'),
+        terms: [t('settings.playback.autoPlayOnStartup.title'), '启动播放', '开机播放', 'startup autoplay', 'launch playback'],
       },
       {
         id: 'row-fixed-volume',
@@ -6401,6 +1758,14 @@ export const SettingsPage = (): JSX.Element => {
         title: t('settings.playback.miniPlayer.title'),
         description: t('settings.playback.miniPlayer.description'),
         terms: [t('settings.playback.miniPlayer.title'), t('settings.playback.miniPlayer.description'), '迷你播放器', '迷你播放器', 'ミニプレイヤー', 'mini player', 'overlay', 'always on top', '置顶', '游戏', '进度条', '封面', '隐藏主界面', '托盘'],
+      },
+      {
+        id: 'row-pet',
+        sectionKey: 'general',
+        targetId: 'settings-row-pet',
+        title: t('settings.playback.pet.title'),
+        description: t('settings.playback.pet.description'),
+        terms: [t('settings.playback.pet.title'), t('settings.playback.pet.description'), '宠物', '桌面宠物', 'pet', 'mascot', '悬浮', '像素角色', 'always on top'],
       },
       {
         id: 'row-gapless-playback',
@@ -6657,7 +2022,7 @@ export const SettingsPage = (): JSX.Element => {
       },
       {
         id: 'row-native-file-scanner',
-        sectionKey: 'library',
+        sectionKey: 'experimental',
         targetId: 'settings-row-native-file-scanner',
         title: 'Native File Scanner\uff08\u5b9e\u9a8c\uff09',
         description: '\u4f7f\u7528 C++ \u72ec\u7acb\u8fdb\u7a0b\u53d1\u73b0\u97f3\u9891\u6587\u4ef6\uff1b\u4e0d\u8bfb\u53d6\u5143\u6570\u636e\u3001\u4e0d\u63d0\u53d6\u5c01\u9762\u3001\u4e0d\u5199\u5165\u66f2\u5e93\u6570\u636e\u5e93\u3002',
@@ -6675,23 +2040,21 @@ export const SettingsPage = (): JSX.Element => {
       },
       {
         id: 'row-native-metadata-reader',
-        sectionKey: 'library',
+        sectionKey: 'experimental',
         targetId: 'settings-row-native-metadata-reader',
         title: 'Native Metadata Reader\uff08\u5b9e\u9a8c\uff09',
-        description: '\u4f7f\u7528 C++ \u72ec\u7acb\u8fdb\u7a0b\u8bfb\u53d6 FLAC\u3001MP3\u3001M4A \u57fa\u7840\u5143\u6570\u636e\uff1b\u4e0d\u63d0\u53d6\u5c01\u9762\u3001\u4e0d\u5199\u5165\u66f2\u5e93\u6570\u636e\u5e93\uff0c\u5931\u8d25\u65f6\u56de\u9000 TypeScript\u3002',
+        description: '\u4f7f\u7528 C++ \u72ec\u7acb\u8fdb\u7a0b\u8bfb\u53d6\u5143\u6570\u636e\uff1b\u9ed8\u8ba4\u5173\u95ed\uff0c\u5173\u95ed\u65f6\u7ee7\u7eed\u4f7f\u7528 TypeScript\u3002',
         terms: [
           'Native Metadata Reader',
           'native metadata',
           'C++ metadata',
+          'metadata pool',
           'FLAC',
           'MP3',
           'M4A',
-          'ID3',
-          'Vorbis Comment',
-          'MP4 atoms',
           '\u539f\u751f\u5143\u6570\u636e',
           '\u5143\u6570\u636e\u8bfb\u53d6',
-          '\u5927\u66f2\u5e93',
+          '\u5b9e\u9a8c\u5ba4',
         ],
       },
       {
@@ -6988,7 +2351,7 @@ export const SettingsPage = (): JSX.Element => {
     : null;
   const nativeMetadataReaderCapabilitiesText = nativeMetadataReaderDiagnostics
     ? t('mediaLibrary.settings.nativeMetadataReader.capabilities', {
-        protocol: nativeMetadataReaderDiagnostics.protocolVersion ?? 1,
+        protocol: nativeMetadataReaderDiagnostics.protocolVersion ?? 2,
         formats: nativeMetadataReaderDiagnostics.supportedFormats.join(', ') || '-',
       })
     : null;
@@ -7067,9 +2430,15 @@ export const SettingsPage = (): JSX.Element => {
     return settingsNavigationItems.filter((item) => resultKeys.has(item.key));
   }, [settingsNavigationItems, settingsQuery, settingsSearchResults]);
 
+  const visibleSettingsSearchResults = settingsSearchResults.slice(0, 6);
+
+  useEffect(() => {
+    setActiveSettingsSearchResultIndex(0);
+  }, [settingsQuery]);
+
   const compatibleDevices = useMemo(
-    () => getCompatiblePlaybackDevices(devices, outputMode),
-    [devices, outputMode],
+    () => getCompatiblePlaybackDevices(devices, outputMode, rendererPlatform),
+    [devices, outputMode, rendererPlatform],
   );
   const effectiveAudioStatus = sharedPlaybackStatus.audioStatus ?? status;
   const libraryAutoRefreshPlaybackBusy = effectiveAudioStatus?.state === 'loading' || effectiveAudioStatus?.state === 'playing';
@@ -7171,6 +2540,15 @@ export const SettingsPage = (): JSX.Element => {
     () => Object.fromEntries(accountStatuses.map((item) => [item.provider, item])) as Partial<Record<AccountProvider, AccountStatus>>,
     [accountStatuses],
   );
+  const accountOverview = useMemo(() => {
+    const connected = settingsAccountProviders.filter((provider) => accountStatusByProvider[provider]?.connected).length;
+    const checking = settingsAccountProviders.filter((provider) => !accountStatusByProvider[provider]).length;
+    return {
+      connected,
+      checking,
+      disconnected: settingsAccountProviders.length - connected - checking,
+    };
+  }, [accountStatusByProvider]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -7233,18 +2611,15 @@ export const SettingsPage = (): JSX.Element => {
 
       if (!audio) {
         setDevices([]);
-        setAudioDevicesChecked(true);
         return;
       }
 
       const nextDevices = await audio.listDevices();
       setDevices(nextDevices);
-      setAudioDevicesChecked(true);
       setError(null);
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : String(refreshError));
       setDevices([]);
-      setAudioDevicesChecked(true);
     }
   }, []);
 
@@ -7416,34 +2791,6 @@ export const SettingsPage = (): JSX.Element => {
     }
   }, [locale]);
 
-  const refreshEchoProSettingsCloudStatus = useCallback(async (): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.getEchoProSettingsCloudStatus) {
-      setEchoProSettingsCloudStatus(null);
-      return;
-    }
-
-    setEchoProSettingsCloudBusyAction('status');
-    try {
-      setEchoProSettingsCloudStatus(await app.getEchoProSettingsCloudStatus());
-    } catch (cloudError) {
-      setEchoProSettingsCloudStatus((current) => ({
-        available: current?.available ?? false,
-        lastSavedAt: current?.lastSavedAt ?? null,
-        lastPulledAt: current?.lastPulledAt ?? null,
-        lastAppliedAt: current?.lastAppliedAt ?? null,
-        appVersion: current?.appVersion ?? null,
-        deviceName: current?.deviceName ?? null,
-        settingsCount: current?.settingsCount ?? 0,
-        librarySyncPlaylistCount: current?.librarySyncPlaylistCount ?? 0,
-        librarySyncFavoriteTrackCount: current?.librarySyncFavoriteTrackCount ?? 0,
-        lastError: cloudError instanceof Error ? cloudError.message : String(cloudError),
-      }));
-    } finally {
-      setEchoProSettingsCloudBusyAction(null);
-    }
-  }, []);
-
   const copyTextToClipboard = useCallback(async (value: string): Promise<void> => {
     if (window.navigator?.clipboard?.writeText) {
       await window.navigator.clipboard.writeText(value);
@@ -7487,10 +2834,9 @@ export const SettingsPage = (): JSX.Element => {
   useEffect(() => {
     if (echoProAccountPanelExpanded) {
       void refreshEchoProAccountStatus();
-      void refreshEchoProSettingsCloudStatus();
       void getAppBridge()?.getEchoProMachineCode?.().then(setEchoProMachineCode).catch(() => undefined);
     }
-  }, [echoProAccountPanelExpanded, refreshEchoProAccountStatus, refreshEchoProSettingsCloudStatus]);
+  }, [echoProAccountPanelExpanded, refreshEchoProAccountStatus]);
 
   const refreshLibraryDiagnostics = useCallback(async () => {
     try {
@@ -7619,7 +2965,7 @@ export const SettingsPage = (): JSX.Element => {
       unsubscribeDataBackupProgress?.();
       unsubscribeUpdateStatus?.();
     };
-  }, []);
+  }, [rendererPlatform]);
 
   useEffect(() => {
     let disposed = false;
@@ -7630,24 +2976,27 @@ export const SettingsPage = (): JSX.Element => {
       void Promise.all([
         plugins?.list().catch(() => null) ?? Promise.resolve(null),
         app?.getEchoProAccountStatus?.().catch(() => null) ?? Promise.resolve(null),
+        app?.getEchoProLocalEntitlementStatus?.().catch(() => null) ?? Promise.resolve(null),
       ])
-        .then(([pluginResult, echoProStatus]) => {
+        .then(([pluginResult, echoProStatus, localEntitlement]) => {
           if (!disposed) {
-            const pluginUnlocked = pluginResult?.plugins.some(isEchoProUnlockPluginActive) === true;
-            if (pluginResult) {
+            const pluginUnlocked = localEntitlement?.unlocked ??
+              (pluginResult?.plugins.some(isEchoProUnlockPluginActive) === true);
+            if (pluginResult || localEntitlement) {
               setEchoProPluginUnlocked(pluginUnlocked);
               setEchoProPluginStatusChecked(true);
             }
+            setEchoProDspUnlocked(localEntitlement?.dspUnlocked === true);
             if (echoProStatus) {
               setEchoProAccountStatus(echoProStatus);
               setEchoProAccountStatusChecked(true);
             }
             setEchoProStatusSnapshot(rememberEchoProDisplayStatus({
               ...(echoProStatus ? { accountStatus: echoProStatus } : {}),
-              ...(pluginResult ? { pluginUnlocked } : {}),
+              ...(pluginResult || localEntitlement ? { pluginUnlocked } : {}),
             }));
             setFinalThemeUnlocked((current) =>
-              echoProStatus?.pro === true || (pluginResult ? pluginUnlocked : current) || finalThemeMarkerUnlockedRef.current,
+              echoProStatus?.pro === true || (pluginResult || localEntitlement ? pluginUnlocked : current) || finalThemeMarkerUnlockedRef.current,
             );
             setFinalThemeUnlockChecked(true);
             setPluginThemeOptions(pluginResult ? collectPluginThemeOptions(pluginResult.plugins) : []);
@@ -7694,17 +3043,21 @@ export const SettingsPage = (): JSX.Element => {
   }, [activeSection, refreshDevices, refreshStatus]);
 
   useEffect(() => {
-    if (activeSection !== 'integrations') {
+    if (activeSection !== 'integrations' && activeSection !== 'accounts') {
       return undefined;
     }
 
     return scheduleSettingsIdleTask(() => {
+      if (activeSection === 'accounts') {
+        void refreshAccountStatuses();
+        return;
+      }
+
       void refreshDiscordPresenceStatus();
       void refreshSmtcDiagnostics();
       void refreshStageBridgeStatus();
       void refreshTaskbarPlaybackStatus();
       void refreshLastFmStatus();
-      void refreshAccountStatuses();
     });
   }, [activeSection, refreshAccountStatuses, refreshDiscordPresenceStatus, refreshLastFmStatus, refreshSmtcDiagnostics, refreshStageBridgeStatus, refreshTaskbarPlaybackStatus]);
 
@@ -7767,7 +3120,7 @@ export const SettingsPage = (): JSX.Element => {
   }, [activeSection]);
 
   useEffect(() => {
-    if (activeSection !== 'library' || !libraryDeferredRefreshReady || libraryAutoRefreshPlaybackBusy) {
+    if ((activeSection !== 'library' && activeSection !== 'experimental') || !libraryDeferredRefreshReady || libraryAutoRefreshPlaybackBusy) {
       return undefined;
     }
 
@@ -7957,6 +3310,7 @@ export const SettingsPage = (): JSX.Element => {
     [activeThemeCustomId, appSettings?.appearanceThemeCustomId, savedThemeCustomThemes],
   );
   const currentAppearanceTheme = appSettings?.appearanceTheme ?? defaultThemeMode;
+  const accessibilityPreferences = normalizeAccessibilityPreferences(appSettings?.accessibilityPreferences);
   const ambientThemeActive = currentAppearanceTheme === 'ambient';
   const ambientThemePresetLockMessage = t('settings.appearance.themePreset.ambientLocked');
   const ambientThemeCustomLockMessage = t('settings.appearance.themeCustom.ambientLocked');
@@ -8013,7 +3367,7 @@ export const SettingsPage = (): JSX.Element => {
       customThemeId: activeThemeCustom?.id ?? null,
       customThemes: previewThemes,
     });
-  }, [activeSection, activeThemeCustom, ambientThemeActive, currentAppearanceTheme, echoProUnlockedForDisplay, savedThemeCustomThemes, savedThemePresetOverrides, selectedThemePreset, themeCustomDraft, themeCustomTone]);
+  }, [activeSection, activeThemeCustom, ambientThemeActive, appSettings, currentAppearanceTheme, echoProUnlockedForDisplay, savedThemeCustomThemes, savedThemePresetOverrides, selectedThemePreset, themeCustomDraft, themeCustomTone]);
 
   useEffect(() => {
     const handleSettingsChanged = (event: Event): void => {
@@ -8087,18 +3441,33 @@ export const SettingsPage = (): JSX.Element => {
 
     window.addEventListener('settings:changed', handleSettingsChanged);
     return () => window.removeEventListener('settings:changed', handleSettingsChanged);
-  }, []);
+  }, [echoProUnlockedForDisplay]);
 
   useEffect(
     () => () => {
       if (wallpaperPersistTimerRef.current !== null) {
         window.clearTimeout(wallpaperPersistTimerRef.current);
+        wallpaperPersistTimerRef.current = null;
       }
       if (wallpaperPreviewFrameRef.current !== null) {
         window.cancelAnimationFrame(wallpaperPreviewFrameRef.current);
+        wallpaperPreviewFrameRef.current = null;
+      }
+      const pendingWallpaperPatch = pendingWallpaperPersistPatchRef.current;
+      const app = getAppBridge();
+      if (pendingWallpaperPatch && app) {
+        void app.setSettings(pendingWallpaperPatch).catch(() => undefined);
       }
       pendingWallpaperPreviewPatchRef.current = null;
       pendingWallpaperPersistPatchRef.current = null;
+      if (mvTuningPersistTimerRef.current !== null) {
+        window.clearTimeout(mvTuningPersistTimerRef.current);
+      }
+      if (mvTuningPreviewFrameRef.current !== null) {
+        window.cancelAnimationFrame(mvTuningPreviewFrameRef.current);
+      }
+      pendingMvTuningPreviewPatchRef.current = null;
+      pendingMvTuningPersistPatchRef.current = null;
     },
     [],
   );
@@ -8296,27 +3665,20 @@ export const SettingsPage = (): JSX.Element => {
   const applyOutputSettings = useCallback(
     async (nextOutputMode = outputMode, nextDeviceId = selectedDeviceId, nextSharedBackend = sharedBackend) => {
       const nextDevice =
-        getCompatiblePlaybackDevices(devices, nextOutputMode).find((device) => device.id === nextDeviceId) ?? null;
+        getCompatiblePlaybackDevices(devices, nextOutputMode, rendererPlatform).find((device) => device.id === nextDeviceId) ?? null;
       const normalizedSharedBackend = nextOutputMode === 'shared'
         ? normalizeAudioSharedBackendForPlatform(normalizeSharedBackend(nextSharedBackend), rendererPlatform)
         : 'auto';
+      const rememberedLatencyProfile = normalizeLatencyProfile(appSettings?.rememberedAudioOutput?.latencyProfile);
       const output: AudioOutputSettings = {
         outputMode: nextOutputMode,
         sharedBackend: normalizedSharedBackend,
-        latencyProfile: 'lowLatency',
+        latencyProfile: rememberedLatencyProfile,
         useNativeOutput: appSettings?.audioUseMiniaudioOutput === true || appSettings?.audioMiniaudioOutputExperimentalEnabled === true,
         useMiniaudioOutput: appSettings?.audioUseMiniaudioOutput === true || appSettings?.audioMiniaudioOutputExperimentalEnabled === true,
         useLibavDecode: appSettings?.audioUseLibavDecode === true,
-        dsdOutputMode: appSettings?.audioDsdOutputMode === 'dop' ? 'dop' : 'pcm',
         exclusiveInstabilityFallbackEnabled: appSettings?.audioExclusiveInstabilityFallbackEnabled === true,
         soxrFallbackEnabled: appSettings?.audioSoxrFallbackEnabled !== false,
-        echoSrcMode: appSettings?.audioEchoSrcMode ?? 'off',
-        echoSrcQualityProfile: appSettings?.audioEchoSrcQualityProfile ?? 'transparent',
-        echoSrcAdvancedModeEnabled: appSettings?.audioEchoSrcAdvancedModeEnabled === true,
-        echoSrcFilterProfile: appSettings?.audioEchoSrcFilterProfile ?? 'poly-sinc-gauss-long',
-        echoSrcFilterProfile1x: appSettings?.audioEchoSrcFilterProfile1x ?? appSettings?.audioEchoSrcFilterProfile ?? 'poly-sinc-gauss-long',
-        echoSrcFilterProfileNx: appSettings?.audioEchoSrcFilterProfileNx ?? 'poly-sinc-hb',
-        echoSrcComputeBackend: appSettings?.audioEchoSrcComputeBackend === 'cuda' ? 'cuda' : 'cpu',
       };
 
       if (nextDevice) {
@@ -8338,27 +3700,29 @@ export const SettingsPage = (): JSX.Element => {
       let nextStatus: AudioStatus;
 
       try {
+        markAudioOutputRouteMutationStarted();
         nextStatus = await audio.setOutput(output);
       } catch (audioError) {
-        const message = audioError instanceof Error ? audioError.message : String(audioError);
+        const message = formatUserFacingError(audioError, { context: 'audio' });
         setPlaybackSettingsMessage(t('settings.playback.outputStatus.failed', { reason: message }));
         setError(message);
         return;
       }
 
       setStatus(nextStatus);
+      dispatchAudioOutputRouteStatusChanged(nextStatus);
       if (nextStatus.outputMode !== nextOutputMode) {
         setOutputMode(nextStatus.outputMode);
         if (nextStatus.sharedBackend) {
           setSharedBackend(normalizeAudioSharedBackendForPlatform(nextStatus.sharedBackend, rendererPlatform));
         }
         setPlaybackSettingsMessage(t('settings.playback.outputStatus.fallback', {
-          requested: getPlaybackOutputModeLabel(nextOutputMode, t),
-          actual: getPlaybackOutputModeLabel(nextStatus.outputMode, t),
+          requested: getPlaybackOutputModeLabel(nextOutputMode, t, rendererPlatform),
+          actual: getPlaybackOutputModeLabel(nextStatus.outputMode, t, rendererPlatform),
         }));
       } else {
         setPlaybackSettingsMessage(t('settings.playback.outputStatus.saved', {
-          mode: getPlaybackOutputModeLabel(nextOutputMode, t),
+          mode: getPlaybackOutputModeLabel(nextOutputMode, t, rendererPlatform),
         }));
       }
 
@@ -8366,7 +3730,7 @@ export const SettingsPage = (): JSX.Element => {
         enabled: true,
         outputMode: nextStatus.outputMode,
         sharedBackend: normalizedSharedBackend,
-        latencyProfile: output.latencyProfile ?? 'lowLatency',
+        latencyProfile: rememberedLatencyProfile,
         deviceIndex: nextDevice && normalizedSharedBackend !== 'directsound' ? nextDevice.index : undefined,
         deviceName: nextDevice?.name,
       };
@@ -8388,17 +3752,10 @@ export const SettingsPage = (): JSX.Element => {
     [
       appSettings?.audioExclusiveInstabilityFallbackEnabled,
       appSettings?.audioSoxrFallbackEnabled,
-      appSettings?.audioEchoSrcMode,
-      appSettings?.audioEchoSrcQualityProfile,
-      appSettings?.audioEchoSrcAdvancedModeEnabled,
-      appSettings?.audioEchoSrcFilterProfile,
-      appSettings?.audioEchoSrcFilterProfile1x,
-      appSettings?.audioEchoSrcFilterProfileNx,
-      appSettings?.audioEchoSrcComputeBackend,
-      appSettings?.audioDsdOutputMode,
       appSettings?.audioMiniaudioOutputExperimentalEnabled,
       appSettings?.audioUseLibavDecode,
       appSettings?.audioUseMiniaudioOutput,
+      appSettings?.rememberedAudioOutput?.latencyProfile,
       devices,
       outputMode,
       rendererPlatform,
@@ -8466,6 +3823,11 @@ export const SettingsPage = (): JSX.Element => {
 
       event.preventDefault();
       event.stopPropagation();
+      if (activeSection === 'about' && aboutPage === 'contributors') {
+        setAboutPage('overview');
+        scrollSettingsSectionIntoView('about');
+        return;
+      }
       window.dispatchEvent(new Event(settingsBackNavigationEvent));
     };
 
@@ -8473,7 +3835,7 @@ export const SettingsPage = (): JSX.Element => {
     return () => {
       window.removeEventListener('keydown', handleSettingsEscapeBack);
     };
-  }, []);
+  }, [aboutPage, activeSection, scrollSettingsSectionIntoView]);
 
   useEffect(() => {
     const handleOpenSettingsSection = (event: Event): void => {
@@ -8499,10 +3861,7 @@ export const SettingsPage = (): JSX.Element => {
       clientId: appSettings.spotifyClientId ?? '',
       redirectUri: appSettings.spotifyRedirectUri ?? defaultSpotifyRedirectUri,
     });
-  }, [
-    appSettings?.spotifyClientId,
-    appSettings?.spotifyRedirectUri,
-  ]);
+  }, [appSettings]);
 
   useEffect(() => {
     if (!appSettings) {
@@ -8515,12 +3874,7 @@ export const SettingsPage = (): JSX.Element => {
       redirectUri: appSettings.tidalRedirectUri ?? defaultTidalRedirectUri,
       countryCode: appSettings.tidalCountryCode ?? 'US',
     });
-  }, [
-    appSettings?.tidalClientId,
-    appSettings?.tidalClientSecret,
-    appSettings?.tidalCountryCode,
-    appSettings?.tidalRedirectUri,
-  ]);
+  }, [appSettings]);
 
   useEffect(() => {
     if (!appSettings) {
@@ -8530,7 +3884,7 @@ export const SettingsPage = (): JSX.Element => {
     setOnlineAlbumInfoDraft({
       discogsUserToken: appSettings.onlineAlbumInfoDiscogsUserToken ?? '',
     });
-  }, [appSettings?.onlineAlbumInfoDiscogsUserToken]);
+  }, [appSettings]);
 
   useEffect(() => {
     if (!appSettings) {
@@ -8543,29 +3897,54 @@ export const SettingsPage = (): JSX.Element => {
       seatGeekClientId: appSettings.onlineArtistInfoSeatGeekClientId ?? '',
       region: appSettings.onlineArtistInfoRegion ?? '',
     });
-  }, [
-    appSettings?.onlineArtistInfoBandsintownAppId,
-    appSettings?.onlineArtistInfoRegion,
-    appSettings?.onlineArtistInfoSeatGeekClientId,
-    appSettings?.onlineArtistInfoTicketmasterApiKey,
-  ]);
+  }, [appSettings]);
 
   const handleNavClick = (key: SettingsNavKey): void => {
+    if (key === 'about') {
+      setAboutPage('overview');
+    }
     jumpToSettingsSection(key);
   };
 
+  const handleSectionIndexClick = (id: string): void => {
+    setActiveSettingsSectionIndexId(id);
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const handleSettingsSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
-    if (isImeComposingKeyEvent(event) || event.key !== 'Enter' || settingsSearchResults.length === 0) {
+    if (isImeComposingKeyEvent(event)) {
       return;
     }
 
-    event.preventDefault();
-    jumpToSettingsSection(settingsSearchResults[0].sectionKey, { clearSearch: true, targetId: settingsSearchResults[0].targetId });
+    if (event.key === 'Escape' && settingsQuery) {
+      event.preventDefault();
+      setSettingsQuery('');
+      return;
+    }
+
+    if (visibleSettingsSearchResults.length === 0) {
+      return;
+    }
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      setActiveSettingsSearchResultIndex((current) =>
+        (current + direction + visibleSettingsSearchResults.length) % visibleSettingsSearchResults.length,
+      );
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const result = visibleSettingsSearchResults[activeSettingsSearchResultIndex] ?? visibleSettingsSearchResults[0];
+      jumpToSettingsSection(result.sectionKey, { clearSearch: true, targetId: result.targetId });
+    }
   };
 
   const handleOutputModeChange = (nextMode: AudioOutputMode): void => {
     setOutputMode(nextMode);
-    const nextDevices = getCompatiblePlaybackDevices(devices, nextMode);
+    const nextDevices = getCompatiblePlaybackDevices(devices, nextMode, rendererPlatform);
     const nextDeviceId = nextDevices.find((device) => device.isDefault)?.id ?? nextDevices[0]?.id ?? '';
     setSelectedDeviceId(nextDeviceId);
     void applyOutputSettings(nextMode, nextDeviceId, nextMode === 'shared' ? sharedBackend : 'auto');
@@ -8582,74 +3961,157 @@ export const SettingsPage = (): JSX.Element => {
     void applyOutputSettings('shared', selectedDeviceId, nextSharedBackend);
   };
 
+  const handleAutomaticOutputToggle = async (): Promise<void> => {
+    const audio = getAudioBridge();
+    const app = getAppBridge();
+    if (!audio || !app?.setSettings || !appSettings) {
+      setError('Desktop bridge unavailable. Open ECHO Next in Electron to change audio output.');
+      return;
+    }
+
+    const previousEnabled = appSettings.audioAutomaticOutputEnabled === true;
+    const nextEnabled = !previousEnabled;
+    setAutomaticOutputBusy(true);
+    setError(null);
+    setPlaybackSettingsMessage(null);
+
+    try {
+      const nextSettings = await app.setSettings({ audioAutomaticOutputEnabled: nextEnabled });
+      setAppSettings(nextSettings);
+      try {
+        const nextStatus = await audio.setOutput({ automaticOutputEnabled: nextEnabled });
+        setStatus(nextStatus);
+        setOutputMode(nextStatus.outputMode);
+        setSharedBackend(normalizeAudioSharedBackendForPlatform(nextStatus.sharedBackend ?? 'auto', rendererPlatform));
+        setPlaybackSettingsMessage(t(nextEnabled
+          ? 'settings.playback.automaticOutput.statusEnabled'
+          : 'settings.playback.automaticOutput.statusDisabled'));
+      } catch (audioError) {
+        const restoredSettings = await app.setSettings({ audioAutomaticOutputEnabled: previousEnabled });
+        setAppSettings(restoredSettings);
+        throw audioError;
+      }
+    } catch (toggleError) {
+      const message = toggleError instanceof Error ? toggleError.message : String(toggleError);
+      setPlaybackSettingsMessage(t('settings.playback.outputStatus.failed', { reason: message }));
+      setError(message);
+    } finally {
+      setAutomaticOutputBusy(false);
+    }
+  };
+
 const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     const nextEnabled = appSettings?.audioNativeDirectLocalPlaybackEnabled !== true;
-    patchAppSettings({ audioNativeDirectLocalPlaybackEnabled: nextEnabled });
 
     const audio = getAudioBridge();
-    if (!audio) {
+    const app = getAppBridge();
+    if (!audio || !app?.setSettings) {
       setError('Desktop bridge unavailable. Open ECHO Next in Electron to change audio output.');
       return;
     }
 
     try {
-      setStatus(await audio.setOutput({ nativeDirectLocalPlaybackEnabled: nextEnabled }));
+      const nextStatus = await audio.setOutput({ nativeDirectLocalPlaybackEnabled: nextEnabled });
+      try {
+        const nextSettings = await app.setSettings({ audioNativeDirectLocalPlaybackEnabled: nextEnabled });
+        setAppSettings(nextSettings);
+        dispatchSettingsChanged(nextSettings);
+        setStatus(nextStatus);
+        setError(null);
+      } catch (settingsError) {
+        await audio.setOutput({ nativeDirectLocalPlaybackEnabled: !nextEnabled }).catch(() => undefined);
+        throw settingsError;
+      }
     } catch (audioError) {
-      setError(audioError instanceof Error ? audioError.message : String(audioError));
+      setError(formatUserFacingError(audioError, { context: 'audio' }));
     }
   };
 
   const handleDsdDopToggle = async (): Promise<void> => {
-    const nextEnabled = appSettings?.audioDsdOutputMode !== 'dop';
+    const nextEnabled = appSettings?.audioDsdOutputMode === 'pcm';
     const nextDsdOutputMode = nextEnabled ? 'dop' : 'pcm';
-    patchAppSettings({
-      audioDsdOutputMode: nextDsdOutputMode,
-    });
+
+    if (nextEnabled && !echoProAudioUnlocked) {
+      setError(formatUserFacingError(new Error('echo_pro_required'), { context: 'audio' }));
+      return;
+    }
 
     const audio = getAudioBridge();
-    if (!audio) {
+    const app = getAppBridge();
+    if (!audio || !app?.setSettings) {
       setError('Desktop bridge unavailable. Open ECHO Next in Electron to change audio output.');
       return;
     }
 
+    const previousDsdOutputMode = appSettings?.audioDsdOutputMode === 'dop' ? 'dop' : 'pcm';
     try {
-      setStatus(await audio.setOutput({ dsdOutputMode: nextDsdOutputMode }));
+      const nextStatus = await audio.setOutput({ dsdOutputMode: nextDsdOutputMode });
+      try {
+        const nextSettings = await app.setSettings({ audioDsdOutputMode: nextDsdOutputMode });
+        setAppSettings(nextSettings);
+        window.dispatchEvent(new CustomEvent('settings:changed', { detail: nextSettings }));
+        setStatus(nextStatus);
+        setError(null);
+      } catch (settingsError) {
+        await audio.setOutput({ dsdOutputMode: previousDsdOutputMode }).catch(() => undefined);
+        throw settingsError;
+      }
     } catch (audioError) {
-      setError(audioError instanceof Error ? audioError.message : String(audioError));
+      setError(formatUserFacingError(audioError, { context: 'audio' }));
     }
   };
 
   const handleExclusiveInstabilityFallbackToggle = async (): Promise<void> => {
     const nextEnabled = !(appSettings?.audioExclusiveInstabilityFallbackEnabled ?? false);
-    patchAppSettings({ audioExclusiveInstabilityFallbackEnabled: nextEnabled });
 
     const audio = getAudioBridge();
-    if (!audio) {
+    const app = getAppBridge();
+    if (!audio || !app?.setSettings) {
       setError('Desktop bridge unavailable. Open ECHO Next in Electron to change audio output.');
       return;
     }
 
     try {
-      setStatus(await audio.setOutput({ exclusiveInstabilityFallbackEnabled: nextEnabled }));
+      const nextStatus = await audio.setOutput({ exclusiveInstabilityFallbackEnabled: nextEnabled });
+      try {
+        const nextSettings = await app.setSettings({ audioExclusiveInstabilityFallbackEnabled: nextEnabled });
+        setAppSettings(nextSettings);
+        dispatchSettingsChanged(nextSettings);
+        setStatus(nextStatus);
+        setError(null);
+      } catch (settingsError) {
+        await audio.setOutput({ exclusiveInstabilityFallbackEnabled: !nextEnabled }).catch(() => undefined);
+        throw settingsError;
+      }
     } catch (audioError) {
-      setError(audioError instanceof Error ? audioError.message : String(audioError));
+      setError(formatUserFacingError(audioError, { context: 'audio' }));
     }
   };
 
   const handleSoxrFallbackToggle = async (): Promise<void> => {
     const nextEnabled = !(appSettings?.audioSoxrFallbackEnabled ?? true);
-    patchAppSettings({ audioSoxrFallbackEnabled: nextEnabled });
 
     const audio = getAudioBridge();
-    if (!audio) {
+    const app = getAppBridge();
+    if (!audio || !app?.setSettings) {
       setError('Desktop bridge unavailable. Open ECHO Next in Electron to change audio output.');
       return;
     }
 
     try {
-      setStatus(await audio.setOutput({ soxrFallbackEnabled: nextEnabled }));
+      const nextStatus = await audio.setOutput({ soxrFallbackEnabled: nextEnabled });
+      try {
+        const nextSettings = await app.setSettings({ audioSoxrFallbackEnabled: nextEnabled });
+        setAppSettings(nextSettings);
+        dispatchSettingsChanged(nextSettings);
+        setStatus(nextStatus);
+        setError(null);
+      } catch (settingsError) {
+        await audio.setOutput({ soxrFallbackEnabled: !nextEnabled }).catch(() => undefined);
+        throw settingsError;
+      }
     } catch (audioError) {
-      setError(audioError instanceof Error ? audioError.message : String(audioError));
+      setError(formatUserFacingError(audioError, { context: 'audio' }));
     }
   };
 
@@ -8669,7 +4131,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       setAudioResetMessage(t('settings.playback.troubleshooting.softDone'));
       void refreshDevices();
     } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : String(resetError));
+      setError(formatUserFacingError(resetError, { context: 'audio' }));
     } finally {
       setAudioResetBusy(false);
     }
@@ -8699,7 +4161,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       setAudioResetMessage(t('settings.playback.troubleshooting.hardDone'));
       void refreshDevices();
     } catch (restartError) {
-      setError(restartError instanceof Error ? restartError.message : String(restartError));
+      setError(formatUserFacingError(restartError, { context: 'audio' }));
     } finally {
       setWindowsAudioRestartBusy(false);
     }
@@ -8860,12 +4322,10 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
   const themeCustomValues = mergeThemeToneValues(selectedThemePreset, themeCustomTone, themeCustomDraft);
   const themeCustomWarnings = getThemeContrastWarnings(themeCustomValues);
   const selectedThemePresetOption = themePresetOptions.find((option) => option.preset === selectedThemePreset) ?? themePresetOptions[0];
-  const visibleThemePresetOptions = themePresetOptions;
   const themePresetsExpanded = appSettings?.appearanceThemePresetsExpanded === true;
   const ambientThemePreview = 'linear-gradient(135deg, #070910 0%, #151a27 48%, #f4f6fb 100%)';
   const themePresetSummaryPreview = ambientThemeActive ? ambientThemePreview : selectedThemePresetOption.preview;
   const themePresetSummaryLabel = ambientThemeActive ? t('settings.appearance.theme.ambient') : activeThemeCustom?.name ?? t(selectedThemePresetOption.labelKey);
-  const themeCustomGradientPreview = `linear-gradient(135deg, ${themeCustomValues.appBg} 0%, ${themeCustomValues.appBg2} 52%, ${themeCustomValues.appBg3} 100%)`;
   const blockAmbientThemeEdit = (): boolean => {
     if (!ambientThemeActive) {
       return false;
@@ -9459,6 +4919,26 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     window.dispatchEvent(new CustomEvent('settings:changed', { detail: patch }));
   }, []);
 
+  const applyTaskbarMiniPlayerEnabled = useCallback((enabled: boolean): void => {
+    const taskbarMiniPlayer = window.echo?.taskbarMiniPlayer;
+    if (!taskbarMiniPlayer?.setEnabled) {
+      setError('Taskbar mini player bridge is unavailable.');
+      return;
+    }
+
+    setError(null);
+    void taskbarMiniPlayer
+      .setEnabled(enabled)
+      .then((state) => {
+        const nextEnabled = state.settings.taskbarMiniPlayerEnabled === true;
+        setAppSettings((current) => current ? { ...current, taskbarMiniPlayerEnabled: nextEnabled } : current);
+        dispatchSettingsChanged({ taskbarMiniPlayerEnabled: nextEnabled });
+      })
+      .catch((taskbarError) => {
+        setError(taskbarError instanceof Error ? taskbarError.message : String(taskbarError));
+      });
+  }, [dispatchSettingsChanged]);
+
   const patchAppSettings = useCallback((patch: Partial<AppSettings>, options: { announce?: boolean; mvSettingsPatch?: Partial<MvSettings> } = {}): void => {
     const app = getAppBridge();
 
@@ -9492,6 +4972,51 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
         setError(settingsError instanceof Error ? settingsError.message : String(settingsError));
       });
   }, [dispatchSettingsChanged, refreshDataBackupStatus, refreshTaskbarPlaybackStatus]);
+
+  useEffect(() => {
+    if (activeSection !== 'library') {
+      return;
+    }
+
+    const libraryLab = getLibraryLabBridge();
+    if (!libraryLab) {
+      setLiveLibraryState(null);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = (): void => {
+      void libraryLab
+        .getState()
+        .then((state) => {
+          if (!cancelled) {
+            setLiveLibraryState(state);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setLiveLibraryState(null);
+          }
+        });
+    };
+
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeSection, appSettings?.liveLibraryUpdatesEnabled, appSettings?.lowSpecModeEnabled]);
+
+  const handleAccessibilityChange = useCallback((patch: Partial<AccessibilityPreferences>): void => {
+    const current = normalizeAccessibilityPreferences(appSettings?.accessibilityPreferences);
+    patchAppSettings({
+      accessibilityPreferences: {
+        ...current,
+        ...patch,
+      },
+    });
+  }, [appSettings?.accessibilityPreferences, patchAppSettings]);
 
   useEffect(() => {
     if (
@@ -9529,8 +5054,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     );
     patchAppSettings({ appearanceThemePreset: fallbackPreset, appearanceThemeCustomId: null, finalThemeUnlockVersion: null });
   }, [
-    appSettings?.appearanceTheme,
-    appSettings?.appearanceThemePreset,
+    appSettings,
     finalThemeUnlockChecked,
     echoProUnlockedForDisplay,
     patchAppSettings,
@@ -9736,7 +5260,9 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       }
 
       try {
-        const state = visible ? await miniPlayer.show() : await miniPlayer.hide();
+        const state = visible
+          ? await miniPlayer.show()
+          : await miniPlayer.hide({ restoreMainWindow: true });
         applyMiniPlayerState(state);
       } catch (miniPlayerError) {
         setError(miniPlayerError instanceof Error ? miniPlayerError.message : String(miniPlayerError));
@@ -9758,6 +5284,60 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       setError(miniPlayerError instanceof Error ? miniPlayerError.message : String(miniPlayerError));
     }
   }, [applyMiniPlayerState]);
+
+  const applyPetState = useCallback(
+    (state: PetState): void => {
+      setAppSettings((current) => (current ? { ...current, ...state.settings } : current));
+      dispatchSettingsChanged(state.settings);
+      setError(null);
+    },
+    [dispatchSettingsChanged],
+  );
+
+  useEffect(() => window.echo?.pet?.onStateChanged?.(applyPetState), [applyPetState]);
+
+  const handlePetVisibleChange = useCallback(
+    async (visible: boolean): Promise<void> => {
+      const pet = window.echo?.pet;
+      if (!pet) {
+        patchAppSettings({ petEnabled: visible });
+        return;
+      }
+
+      try {
+        applyPetState(await (visible ? pet.show() : pet.hide()));
+      } catch (petError) {
+        setError(petError instanceof Error ? petError.message : String(petError));
+      }
+    },
+    [applyPetState, patchAppSettings],
+  );
+
+  const handlePetResetBounds = useCallback(async (): Promise<void> => {
+    try {
+      const pet = window.echo?.pet;
+      if (pet) {
+        applyPetState(await pet.resetBounds());
+      }
+    } catch (petError) {
+      setError(petError instanceof Error ? petError.message : String(petError));
+    }
+  }, [applyPetState]);
+
+  const handlePetScaleChange = useCallback(async (scalePercent: number): Promise<void> => {
+    const normalizedScalePercent = Math.round(Math.max(petScalePercentMin, Math.min(petScalePercentMax, scalePercent)));
+    const pet = window.echo?.pet;
+    if (!pet) {
+      patchAppSettings({ petScalePercent: normalizedScalePercent });
+      return;
+    }
+
+    try {
+      applyPetState(await pet.setScale(normalizedScalePercent));
+    } catch (petError) {
+      setError(petError instanceof Error ? petError.message : String(petError));
+    }
+  }, [applyPetState, patchAppSettings]);
 
   const handleSpotifyAuthConfigSave = useCallback((): void => {
     const app = getAppBridge();
@@ -9980,18 +5560,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     });
   }, []);
 
-  const toggleAccountPanelExpanded = useCallback((): void => {
-    setAccountPanelExpanded((expanded) => {
-      const next = !expanded;
-      try {
-        window.localStorage.setItem(integrationsAccountPanelExpandedStorageKey, next ? 'true' : 'false');
-      } catch {
-        // Local storage can be unavailable in privacy-restricted shells; the in-memory toggle still works.
-      }
-      return next;
-    });
-  }, []);
-
   const toggleEchoProAccountPanelExpanded = useCallback((): void => {
     setEchoProAccountPanelExpanded((expanded) => {
       const next = !expanded;
@@ -10046,9 +5614,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       setEchoProAccountStatus(status);
       setEchoProAccountStatusChecked(true);
       setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ accountStatus: status }));
-      if (status.pro === true) {
-        void refreshEchoProSettingsCloudStatus();
-      }
       setEchoProPassword('');
       window.dispatchEvent(new Event('echo-pro:status-changed'));
       setEchoProMessage(action === 'login' ? '已登录 ECHO Pro 账号。下次启动会自动保持登录。' : '账号已创建。下次启动会自动保持登录，Pro 资格需要服务器授权或兑换 Key 后生效。');
@@ -10057,7 +5622,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     } finally {
       setEchoProBusyAction(null);
     }
-  }, [echoProPassword, echoProUsername, locale, refreshEchoProSettingsCloudStatus]);
+  }, [echoProPassword, echoProUsername, locale]);
 
   const logoutEchoProAccount = useCallback(async (): Promise<void> => {
     const app = getAppBridge();
@@ -10074,7 +5639,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       setEchoProAccountStatus(status);
       setEchoProAccountStatusChecked(true);
       setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ accountStatus: status }));
-      setEchoProSettingsCloudStatus(null);
       window.dispatchEvent(new Event('echo-pro:status-changed'));
       setEchoProMessage('已退出 ECHO Pro 账号。');
     } catch (accountError) {
@@ -10091,23 +5655,44 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       return;
     }
 
-    setEchoProActivationBusy(true);
+    setEchoProActivationBusyAction('activate');
     setEchoProError(null);
     setEchoProMessage(null);
     try {
-      const result = await app.activateEchoProPlugin(
+      const submitActivation = (replaceMachineBinding: boolean) => app.activateEchoProPlugin(
         echoProActivationMode === 'afdian'
           ? {
               mode: 'afdian',
               qq: echoProActivationQq,
               orderId: echoProActivationOrderId,
+              ...(replaceMachineBinding ? { replaceMachineBinding: true } : {}),
             }
           : {
               mode: 'key',
               qq: echoProActivationQq,
               key: echoProActivationKey,
+              ...(replaceMachineBinding ? { replaceMachineBinding: true } : {}),
             },
       );
+      let replaceMachineBinding = false;
+      let result;
+      try {
+        result = await submitActivation(false);
+      } catch (activationError) {
+        if (normalizeEchoProErrorCode(activationError) !== 'echo_pro_activation_machine_binding_confirmation_required') {
+          throw activationError;
+        }
+        if (!window.confirm(
+          locale === 'zh-CN'
+            ? '这份 Pro 授权目前绑定在另一台设备上。\n\n继续后，ECHO 只会释放这份授权对应的旧设备，并立即绑定到当前电脑；其他授权和订单不会受影响。\n\n确认换绑到这台电脑吗？'
+            : 'This Pro license is currently bound to another device.\n\nContinuing releases only the old device proven by this license and immediately binds this computer. Other licenses and orders are unaffected.\n\nMove Pro to this computer?',
+        )) {
+          setEchoProError(formatEchoProError(new Error('echo_pro_license_machine-mismatch'), locale));
+          return;
+        }
+        replaceMachineBinding = true;
+        result = await submitActivation(true);
+      }
       setEchoProPluginUnlocked(result.enabled);
       setEchoProPluginStatusChecked(true);
       setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ pluginUnlocked: result.enabled }));
@@ -10119,18 +5704,125 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       } else {
         setEchoProActivationKey('');
       }
+      setEchoProActivationSecretVisible(false);
       window.dispatchEvent(new Event('plugins:changed'));
       window.dispatchEvent(new Event('echo-pro:status-changed'));
-      const activationLabel = result.licenseId ?? result.activationId ?? result.pluginId;
       setEchoProMessage(locale === 'zh-CN'
-        ? `ECHO Pro 插件已联网激活并启用：${activationLabel}。解绑 HWID 仍需要打开官方网页。`
-        : `ECHO Pro plugin activated online and enabled: ${activationLabel}. HWID unbinding still happens on the official web page.`);
+        ? replaceMachineBinding
+          ? '换绑完成：旧设备名额已释放，ECHO Pro 已在这台电脑启用。以后无需安装授权插件。'
+          : '激活完成：ECHO Pro 已在这台电脑启用。以后启动会自动识别，无需安装授权插件。'
+        : replaceMachineBinding
+          ? 'Transfer complete: the old device slot was released and ECHO Pro is enabled on this computer. No license plugin is required.'
+          : 'Activation complete: ECHO Pro is enabled on this computer and will be recognized automatically. No license plugin is required.');
     } catch (activationError) {
       setEchoProError(formatEchoProError(activationError, locale));
     } finally {
-      setEchoProActivationBusy(false);
+      setEchoProActivationBusyAction(null);
     }
   }, [echoProActivationKey, echoProActivationMode, echoProActivationOrderId, echoProActivationQq, locale]);
+
+  const releaseEchoProCurrentDevice = useCallback(async (): Promise<void> => {
+    const app = getAppBridge();
+    if (!app?.releaseEchoProCurrentDevice) {
+      setEchoProError('ECHO Pro device release bridge unavailable.');
+      return;
+    }
+    const releaseByOrder = echoProActivationMode === 'afdian';
+    const orderId = echoProActivationOrderId.trim();
+    if (releaseByOrder && !/^[0-9A-Za-z_-]{12,80}$/u.test(orderId)) {
+      setEchoProError(locale === 'zh-CN'
+        ? '请填写完整的爱发电订单号；订单解绑不需要 QQ。'
+        : 'Enter the complete Afdian order ID. QQ is not required for order release.');
+      return;
+    }
+    if (!window.confirm(
+      locale === 'zh-CN'
+        ? releaseByOrder
+          ? '解绑这个订单下的全部设备？\n\n只会提交爱发电订单号，不需要 QQ。该订单当前占用的所有设备名额都会释放，之后可重新激活。'
+          : '解绑当前电脑？\n\n只会释放这台电脑占用的设备名额，并删除本机授权；其他设备不会受影响。之后仍可重新激活。'
+        : releaseByOrder
+          ? 'Release every device for this order?\n\nOnly the Afdian order ID is submitted; QQ is not required. All occupied slots for this order will be released and can be activated again later.'
+          : 'Release this computer?\n\nOnly this computer’s slot and local license are removed. Other devices are unaffected, and you can activate again later.',
+    )) {
+      return;
+    }
+
+    setEchoProActivationBusyAction('release');
+    setEchoProError(null);
+    setEchoProMessage(null);
+    try {
+      const result = await app.releaseEchoProCurrentDevice(releaseByOrder ? orderId : undefined);
+      setEchoProPluginUnlocked(false);
+      setEchoProPluginStatusChecked(true);
+      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ pluginUnlocked: false }));
+      if (releaseByOrder) {
+        setEchoProActivationOrderId('');
+        setEchoProActivationSecretVisible(false);
+      }
+      window.dispatchEvent(new Event('plugins:changed'));
+      window.dispatchEvent(new Event('echo-pro:status-changed'));
+      setEchoProMessage(locale === 'zh-CN'
+        ? releaseByOrder
+          ? result.alreadyReleased
+            ? '这个订单已经没有已绑定设备，无需重复解绑。'
+            : `解绑完成：已释放这个订单的 ${result.releasedCount ?? 0} 个设备名额，现在可以重新激活。`
+          : '解绑完成：这台电脑的设备名额已释放，本机 Pro 已关闭；其他设备不受影响。'
+        : releaseByOrder
+          ? result.alreadyReleased
+            ? 'This order already has no active HWIDs. All device slots are released.'
+            : `Released ${result.releasedCount ?? 0} HWIDs for this order at ${formatProtectionTimestamp(result.releasedAt)}.`
+          : `This device was securely released at ${formatProtectionTimestamp(result.releasedAt)}.`);
+    } catch (releaseError) {
+      setEchoProError(formatEchoProError(releaseError, locale));
+    } finally {
+      setEchoProActivationBusyAction(null);
+    }
+  }, [echoProActivationMode, echoProActivationOrderId, locale]);
+
+  const logoutEchoProFromThisComputer = useCallback(async (): Promise<void> => {
+    const app = getAppBridge();
+    if (!app?.releaseEchoProCurrentDevice) {
+      setEchoProError('ECHO Pro device release bridge unavailable.');
+      return;
+    }
+    if (!window.confirm(
+      locale === 'zh-CN'
+        ? '登出 ECHO Pro？\n\n这会释放当前电脑占用的设备名额并删除本机授权；其他设备不受影响，之后仍可重新激活。'
+        : 'Sign out of ECHO Pro?\n\nThis releases only this computer’s device slot and removes its local license. Other devices are unaffected, and you can activate again later.',
+    )) {
+      return;
+    }
+
+    setEchoProActivationBusyAction('release');
+    setEchoProError(null);
+    setEchoProMessage(null);
+    try {
+      await app.releaseEchoProCurrentDevice();
+      setEchoProPluginUnlocked(false);
+      setEchoProPluginStatusChecked(true);
+      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ pluginUnlocked: false }));
+
+      if (echoProAccountStatusForStatus?.loggedIn && app.logoutEchoProAccount) {
+        const accountStatus = await app.logoutEchoProAccount();
+        setEchoProAccountStatus(accountStatus);
+        setEchoProAccountStatusChecked(true);
+        setEchoProStatusSnapshot(rememberEchoProDisplayStatus({
+          accountStatus,
+          pluginUnlocked: false,
+        }));
+      }
+
+      window.dispatchEvent(new Event('plugins:changed'));
+      window.dispatchEvent(new Event('echo-pro:status-changed'));
+      setEchoProMessage(locale === 'zh-CN'
+        ? '已登出 ECHO Pro：当前电脑的设备名额已释放，本机授权已移除；之后可随时重新激活。'
+        : 'Signed out of ECHO Pro. This computer’s device slot and local license were released; you can activate again anytime.');
+    } catch (logoutError) {
+      setEchoProError(formatEchoProError(logoutError, locale));
+    } finally {
+      setEchoProActivationBusyAction(null);
+    }
+  }, [echoProAccountStatusForStatus?.loggedIn, locale]);
 
   const redeemEchoProKey = useCallback(async (): Promise<void> => {
     const app = getAppBridge();
@@ -10150,15 +5842,12 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       setEchoProRedeemKey('');
       window.dispatchEvent(new Event('echo-pro:status-changed'));
       setEchoProMessage(`ECHO Pro key redeemed at ${formatProtectionTimestamp(result.redeemedAt)}.`);
-      if (result.status.pro === true) {
-        void refreshEchoProSettingsCloudStatus();
-      }
     } catch (redeemError) {
       setEchoProError(formatEchoProError(redeemError, locale));
     } finally {
       setEchoProBusyAction(null);
     }
-  }, [echoProRedeemKey, locale, refreshEchoProSettingsCloudStatus]);
+  }, [echoProRedeemKey, locale]);
 
   const releaseEchoProDevices = useCallback(async (): Promise<void> => {
     const app = getAppBridge();
@@ -10199,55 +5888,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
   const updateEchoProCapsLock = useCallback((event: ReactKeyboardEvent<HTMLInputElement>): void => {
     setEchoProCapsLockEnabled(event.getModifierState('CapsLock'));
   }, []);
-
-  const saveEchoProSettingsCloud = useCallback(async (): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.saveEchoProSettingsCloud) {
-      setEchoProError('ECHO Pro cloud settings bridge unavailable.');
-      return;
-    }
-
-    setEchoProSettingsCloudBusyAction('save');
-    setEchoProError(null);
-    setEchoProMessage(null);
-    try {
-      const status = await app.saveEchoProSettingsCloud();
-      setEchoProSettingsCloudStatus(status);
-      setEchoProMessage(locale === 'zh-CN'
-        ? `ECHO 设置、网络歌单和流媒体收藏已保存到云端：${formatProtectionTimestamp(status.savedAt)}。`
-        : `ECHO settings, online playlists, and streaming favorites were saved to cloud at ${formatProtectionTimestamp(status.savedAt)}.`);
-    } catch (cloudError) {
-      setEchoProError(formatEchoProError(cloudError, locale));
-    } finally {
-      setEchoProSettingsCloudBusyAction(null);
-    }
-  }, [locale]);
-
-  const applyEchoProSettingsCloud = useCallback(async (): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.applyEchoProSettingsCloud || !app.getSettings) {
-      setEchoProError('ECHO Pro cloud settings bridge unavailable.');
-      return;
-    }
-
-    setEchoProSettingsCloudBusyAction('pull');
-    setEchoProError(null);
-    setEchoProMessage(null);
-    try {
-      const status = await app.applyEchoProSettingsCloud();
-      setEchoProSettingsCloudStatus(status);
-      const settings = await app.getSettings();
-      setAppSettings(settings);
-      dispatchSettingsChanged(settings);
-      setEchoProMessage(locale === 'zh-CN'
-        ? `ECHO 设置、网络歌单和流媒体收藏已从云端同步：${formatProtectionTimestamp(status.appliedAt)}。`
-        : `ECHO settings, online playlists, and streaming favorites were synced from cloud at ${formatProtectionTimestamp(status.appliedAt)}.`);
-    } catch (cloudError) {
-      setEchoProError(formatEchoProError(cloudError, locale));
-    } finally {
-      setEchoProSettingsCloudBusyAction(null);
-    }
-  }, [dispatchSettingsChanged, locale]);
 
   const handleOnlineAlbumInfoSave = useCallback((): void => {
     const patch: Partial<AppSettings> = {
@@ -10411,6 +6051,42 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     [patchAppSettings],
   );
 
+  const previewAndPersistMvTuning = useCallback((patch: Partial<MvSettings>): void => {
+    pendingMvTuningPreviewPatchRef.current = {
+      ...(pendingMvTuningPreviewPatchRef.current ?? {}),
+      ...patch,
+    };
+    pendingMvTuningPersistPatchRef.current = {
+      ...(pendingMvTuningPersistPatchRef.current ?? {}),
+      ...patch,
+    };
+
+    if (mvTuningPreviewFrameRef.current === null) {
+      mvTuningPreviewFrameRef.current = window.requestAnimationFrame(() => {
+        mvTuningPreviewFrameRef.current = null;
+        const previewPatch = pendingMvTuningPreviewPatchRef.current;
+        pendingMvTuningPreviewPatchRef.current = null;
+        if (!previewPatch) {
+          return;
+        }
+
+        const appPatch = appSettingsPatchFromMvSettingsPatch(previewPatch);
+        setAppSettings((current) => (current ? { ...current, ...appPatch } : current));
+        dispatchSettingsChanged(previewPatch);
+      });
+    }
+
+    if (mvTuningPersistTimerRef.current !== null) {
+      window.clearTimeout(mvTuningPersistTimerRef.current);
+    }
+    mvTuningPersistTimerRef.current = window.setTimeout(() => {
+      mvTuningPersistTimerRef.current = null;
+      const persistPatch = pendingMvTuningPersistPatchRef.current ?? patch;
+      pendingMvTuningPersistPatchRef.current = null;
+      patchAppSettings(appSettingsPatchFromMvSettingsPatch(persistPatch), { announce: false });
+    }, 420);
+  }, [dispatchSettingsChanged, patchAppSettings]);
+
   const handleMvProviderToggle = useCallback(
     (provider: NetworkMvProviderId): void => {
       const current = appSettings?.mvEnabledProviders ?? mvNetworkProviders;
@@ -10566,7 +6242,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       const persistPatch = pendingWallpaperPersistPatchRef.current ?? patch;
       pendingWallpaperPersistPatchRef.current = null;
       patchAppSettings(persistPatch, { announce: false });
-    }, 420);
+    }, 280);
   };
 
   const handleAppWallpaperChoose = async (): Promise<void> => {
@@ -10584,10 +6260,13 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       }
 
       const mediaType = inferAppWallpaperMediaType(wallpaperPath);
+      const isFirstAppWallpaper =
+        !appSettings?.appCustomWallpaperPath &&
+        !appSettings?.appPortraitWallpaperPath;
       patchAppSettings({
+        ...(isFirstAppWallpaper ? appWallpaperEffectPresets[0].patch : {}),
         appCustomWallpaperPath: wallpaperPath,
         appWallpaperMediaType: mediaType,
-        ...(mediaType === 'video' ? { appVideoWallpaperPauseMode: 'never' } : {}),
       });
       setError(null);
     } catch (wallpaperError) {
@@ -10596,7 +6275,12 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
   };
 
   const handleAppWallpaperClear = (): void => {
-    patchAppSettings({ appCustomWallpaperPath: null, appWallpaperMediaType: 'image' });
+    patchAppSettings({
+      appCustomWallpaperPath: null,
+      appPortraitWallpaperPath: null,
+      appWallpaperMediaType: 'image',
+      appPortraitWallpaperMediaType: 'image',
+    });
   };
 
   const handleAppPortraitWallpaperChoose = async (): Promise<void> => {
@@ -10617,7 +6301,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       patchAppSettings({
         appPortraitWallpaperPath: wallpaperPath,
         appPortraitWallpaperMediaType: mediaType,
-        ...(mediaType === 'video' ? { appVideoWallpaperPauseMode: 'never' } : {}),
       });
       setError(null);
     } catch (wallpaperError) {
@@ -11690,10 +7373,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     patchAppSettings({ onboardingCompleted: false });
   };
 
-  const handleOpenUserNotice = (): void => {
-    window.dispatchEvent(new Event(openUserNoticeEvent));
-  };
-
   const handleLiveLibraryUpdatesToggle = (): void => {
     const nextEnabled = !(appSettings?.liveLibraryUpdatesEnabled ?? false);
     patchAppSettings({
@@ -11701,6 +7380,71 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       liveLibraryAutoHideDeletedEnabled: false,
     });
   };
+
+  const liveLibraryStatus = (() => {
+    if (liveLibraryState?.watcherEnabled && liveLibraryState.watcherLastError) {
+      return {
+        text: settingsLocaleCopy(locale, {
+          'zh-CN': liveLibraryState.watchedFolderCount > 0
+            ? `部分监听异常，正在自动重试 · ${liveLibraryState.watchedFolderCount} 个文件夹可用`
+            : '监听异常，正在自动重试',
+          'zh-TW': liveLibraryState.watchedFolderCount > 0
+            ? `部分監聽異常，正在自動重試 · ${liveLibraryState.watchedFolderCount} 個資料夾可用`
+            : '監聽異常，正在自動重試',
+          'ja-JP': liveLibraryState.watchedFolderCount > 0
+            ? `一部の監視でエラー、自動再試行中 · ${liveLibraryState.watchedFolderCount} フォルダー利用可能`
+            : '監視エラー、自動再試行中',
+          'en-US': liveLibraryState.watchedFolderCount > 0
+            ? `Watcher error · retrying · ${liveLibraryState.watchedFolderCount} folders available`
+            : 'Watcher error · retrying',
+          'ko-KR': liveLibraryState.watchedFolderCount > 0
+            ? `일부 감시 오류 · 자동 재시도 중 · 폴더 ${liveLibraryState.watchedFolderCount}개 사용 가능`
+            : '감시 오류 · 자동 재시도 중',
+        }),
+        tone: 'muted' as const,
+      };
+    }
+    if (liveLibraryState?.watcherRunning) {
+      return {
+        text: settingsLocaleCopy(locale, {
+          'zh-CN': `运行中 · ${liveLibraryState.watchedFolderCount} 个文件夹`,
+          'zh-TW': `運行中 · ${liveLibraryState.watchedFolderCount} 個資料夾`,
+          'ja-JP': `実行中 · ${liveLibraryState.watchedFolderCount} フォルダー`,
+          'en-US': `Running · ${liveLibraryState.watchedFolderCount} folders`,
+          'ko-KR': `실행 중 · 폴더 ${liveLibraryState.watchedFolderCount}개`,
+        }),
+        tone: 'good' as const,
+      };
+    }
+    if (appSettings?.liveLibraryUpdatesEnabled && appSettings.lowSpecModeEnabled) {
+      return {
+        text: settingsLocaleCopy(locale, {
+          'zh-CN': '已由低配置模式暂停',
+          'zh-TW': '已由低配置模式暫停',
+          'ja-JP': '低スペックモードで一時停止',
+          'en-US': 'Paused by low-spec mode',
+          'ko-KR': '저사양 모드로 일시 중지됨',
+        }),
+        tone: 'muted' as const,
+      };
+    }
+    if (liveLibraryState?.watcherEnabled && liveLibraryState.watchedFolderCount === 0) {
+      return {
+        text: settingsLocaleCopy(locale, {
+          'zh-CN': '没有可监听的文件夹',
+          'zh-TW': '沒有可監聽的資料夾',
+          'ja-JP': '監視できるフォルダーがありません',
+          'en-US': 'No folders available to watch',
+          'ko-KR': '감시할 폴더가 없음',
+        }),
+        tone: 'muted' as const,
+      };
+    }
+    if (appSettings?.liveLibraryUpdatesEnabled && !liveLibraryState) {
+      return { text: t('common.checking'), tone: 'neutral' as const };
+    }
+    return { text: t('common.disabled'), tone: 'muted' as const };
+  })();
 
   const handleArtistWallAlbumArtworkToggle = (): void => {
     const nextArtistWallAlbumArtwork = !(appSettings?.artistWallAlbumArtwork ?? false);
@@ -12387,90 +8131,33 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     }
   };
 
-  const pollReplayGainAnalysisJob = async (jobId: string): Promise<void> => {
-    const library = getLibraryBridge();
-    if (!library) {
-      return;
-    }
-
-    for (;;) {
-      const status = await library.getReplayGainAnalysisStatus(jobId);
-      setReplayGainAnalysisJob(status);
-      setReplayGainAnalysisMessage(
-        status.status === 'completed'
-          ? `音量分析完成：${status.updatedTracks}/${status.totalTracks} 首已更新`
-          : `音量分析中：${status.processedTracks}/${status.totalTracks}`,
-      );
-
-      if (status.status === 'completed' || status.status === 'failed') {
-        setReplayGainAnalysisBusy(false);
-        window.dispatchEvent(new Event('library:changed'));
-        return;
-      }
-
-      await new Promise((resolve) => {
-        window.setTimeout(resolve, 700);
-      });
-    }
-  };
-
-  const handleStartReplayGainAnalysis = async (): Promise<void> => {
-    if (replayGainAnalysisBusy) {
-      return;
-    }
-
-    const library = getLibraryBridge();
-
-    if (!library) {
-      setError('桌面桥接不可用，无法分析音量。');
-      return;
-    }
-
-    try {
-      setReplayGainAnalysisBusy(true);
-      setReplayGainAnalysisMessage(null);
-      setError(null);
-      const job = await library.startReplayGainAnalysis({ limit: 500 });
-      setReplayGainAnalysisJob(job);
-      setReplayGainAnalysisMessage(job.totalTracks > 0 ? `音量分析已开始：0/${job.totalTracks}` : '没有需要分析音量的歌曲');
-      if (job.totalTracks === 0) {
-        setReplayGainAnalysisBusy(false);
-        return;
-      }
-      void pollReplayGainAnalysisJob(job.id).catch((analysisError) => {
-        setReplayGainAnalysisBusy(false);
-        setError(analysisError instanceof Error ? analysisError.message : String(analysisError));
-      });
-    } catch (analysisError) {
-      setReplayGainAnalysisBusy(false);
-      setReplayGainAnalysisMessage(null);
-      setError(analysisError instanceof Error ? analysisError.message : String(analysisError));
-    }
-  };
-
   const handleReplayGainEnabledChange = (enabled: boolean): void => {
     patchAppSettings({
       replayGainEnabled: enabled,
-      ...(enabled ? { replayGainAnalyzeOnPlay: true } : {}),
+      ...(enabled
+        ? {
+            replayGainMode: 'track',
+            replayGainTargetLufs: SPOTIFY_NORMAL_REPLAY_GAIN_TARGET_LUFS,
+            replayGainPreampDb: 0,
+            replayGainPreventClipping: true,
+            replayGainAnalyzeOnPlay: true,
+            replayGainAnalyzeMissingOnScan: false,
+            replayGainAnalyzeMissingOnScanOptIn: false,
+          }
+        : {}),
     });
 
     if (enabled) {
-      void handleStartReplayGainAnalysis();
+      const library = getLibraryBridge();
+      if (library) {
+        void library.startReplayGainAnalysis({ limit: 500 }).catch((analysisError) => {
+          setError(analysisError instanceof Error ? analysisError.message : String(analysisError));
+        });
+      }
     }
   };
 
-  const handleReplayGainPresetSelect = (targetLufs: number): void => {
-    patchAppSettings({
-      replayGainEnabled: true,
-      replayGainMode: 'track',
-      replayGainTargetLufs: targetLufs,
-      replayGainPreventClipping: true,
-      replayGainAnalyzeOnPlay: true,
-    });
-    void handleStartReplayGainAnalysis();
-  };
-
-  const formatLyricsBackfillMessage = (status: LyricsBackfillJobStatus): string => {
+  const formatLyricsBackfillMessage = useCallback((status: LyricsBackfillJobStatus): string => {
     if (status.phase === 'collecting') {
       return t('mediaLibrary.settings.lyrics.message.collecting', { scanned: status.scannedTracks });
     }
@@ -12500,9 +8187,9 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       total: status.totalTracks,
       matched: status.matchedTracks,
     });
-  };
+  }, [t]);
 
-  const pollLyricsBackfillJob = async (jobId: string, generation: number): Promise<void> => {
+  const pollLyricsBackfillJob = useCallback(async (jobId: string, generation: number): Promise<void> => {
     const library = getLibraryBridge();
     if (!library?.getLyricsBackfillStatus) {
       return;
@@ -12531,9 +8218,9 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
         window.setTimeout(resolve, 700);
       });
     }
-  };
+  }, [formatLyricsBackfillMessage]);
 
-  const startLyricsBackfillPolling = (jobId: string): void => {
+  const startLyricsBackfillPolling = useCallback((jobId: string): void => {
     const generation = lyricsBackfillPollGenerationRef.current + 1;
     lyricsBackfillPollGenerationRef.current = generation;
     void pollLyricsBackfillJob(jobId, generation).catch((lyricsError) => {
@@ -12544,7 +8231,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       setLyricsBackfillBusy(false);
       setError(lyricsError instanceof Error ? lyricsError.message : String(lyricsError));
     });
-  };
+  }, [pollLyricsBackfillJob]);
 
   useEffect(() => {
     let disposed = false;
@@ -12583,7 +8270,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       disposed = true;
       lyricsBackfillPollGenerationRef.current += 1;
     };
-  }, []);
+  }, [formatLyricsBackfillMessage, startLyricsBackfillPolling]);
 
   const handleStartLyricsBackfill = async (mode: 'quick' | 'complete'): Promise<void> => {
     const library = getLibraryBridge();
@@ -13402,7 +9089,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     [activeNavItemsByKey],
   );
   const activeNavItem = settingsNavItems.find((item) => item.key === activeSection) ?? settingsNavItems[0];
-  const ActiveNavIcon = activeNavItem.icon;
   const getSettingsSubsection = useCallback((key: SettingsSubsectionCopyKey): SettingSubsectionTitleProps => {
     const copy = settingsSubsectionCopy[key];
     return {
@@ -13410,6 +9096,120 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       description: 'description' in copy ? settingsLocaleCopy(locale, copy.description) : undefined,
     };
   }, [locale]);
+  useEffect(() => {
+    const section = document.getElementById(`settings-sec-${activeSection}`);
+    if (!section) {
+      setSettingsSectionIndexItems([]);
+      return undefined;
+    }
+    let frame = 0;
+    const refreshSectionIndex = (): void => {
+      const subsectionElements = Array.from(
+        section.querySelectorAll<HTMLElement>(
+          '.settings-subsection-title, .lyrics-collapsible-section > .lyrics-section-collapse-button, .remote-section-heading > div > h3',
+        ),
+      );
+      const seenLabels = new Set<string>();
+      const nextItems = subsectionElements.flatMap((element, index) => {
+        const label = element.matches('.settings-subsection-title')
+          ? element.querySelector('span')?.textContent?.trim()
+          : element.matches('.lyrics-section-collapse-button')
+            ? element.querySelector('strong')?.textContent?.trim()
+            : element.textContent?.trim();
+        if (!label || seenLabels.has(label)) {
+          return [];
+        }
+        seenLabels.add(label);
+        const id = element.id || `settings-subsection-${activeSection}-${index + 1}`;
+        element.id = id;
+        return [{ id, label }];
+      });
+
+      if (nextItems.length === 0) {
+        const title = section.querySelector<HTMLElement>(':scope > .section-title h2')?.textContent?.trim();
+        if (title) {
+          nextItems.push({ id: section.id, label: title });
+        }
+      }
+
+      setSettingsSectionIndexItems(nextItems);
+      setActiveSettingsSectionIndexId((current) => nextItems.some((item) => item.id === current) ? current : (nextItems[0]?.id ?? null));
+    };
+    const scheduleRefresh = (): void => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(refreshSectionIndex);
+    };
+    const observer = new MutationObserver(scheduleRefresh);
+    observer.observe(section, { childList: true, subtree: true, characterData: true });
+    scheduleRefresh();
+
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [activeSection, locale]);
+  useEffect(() => {
+    const scrollShell = settingsScrollShellRef.current;
+    if (!scrollShell || settingsSectionIndexItems.length < 2) {
+      return;
+    }
+
+    const updateActiveIndexItem = (): void => {
+      const shellTop = scrollShell.getBoundingClientRect().top + 96;
+      let nextActiveId = settingsSectionIndexItems[0]?.id ?? null;
+      for (const item of settingsSectionIndexItems) {
+        const element = document.getElementById(item.id);
+        if (element && element.getBoundingClientRect().top <= shellTop) {
+          nextActiveId = item.id;
+        }
+      }
+      setActiveSettingsSectionIndexId(nextActiveId);
+    };
+
+    updateActiveIndexItem();
+    scrollShell.addEventListener('scroll', updateActiveIndexItem, { passive: true });
+    return () => scrollShell.removeEventListener('scroll', updateActiveIndexItem);
+  }, [settingsSectionIndexItems]);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const nav = document.querySelector<HTMLElement>('.settings-page .settings-nav');
+      const activeItem = nav?.querySelector<HTMLElement>('.settings-nav-item.active');
+      if (!nav || !activeItem || nav.scrollHeight <= nav.clientHeight) {
+        return;
+      }
+
+      const navRect = nav.getBoundingClientRect();
+      const itemRect = activeItem.getBoundingClientRect();
+      if (itemRect.top < navRect.top + 8 || itemRect.bottom > navRect.bottom - 8) {
+        nav.scrollTo({
+          top: nav.scrollTop + itemRect.top - navRect.top - 12,
+          behavior: 'smooth',
+        });
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeSection]);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const index = document.querySelector<HTMLElement>('.settings-page .settings-section-index');
+      const activeItem = index?.querySelector<HTMLElement>('.settings-section-index-item[data-active="true"]');
+      if (!index || !activeItem || index.scrollWidth <= index.clientWidth) {
+        return;
+      }
+
+      const indexRect = index.getBoundingClientRect();
+      const itemRect = activeItem.getBoundingClientRect();
+      if (itemRect.left < indexRect.left + 8 || itemRect.right > indexRect.right - 8) {
+        index.scrollTo({
+          left: index.scrollLeft + itemRect.left - indexRect.left - 12,
+          behavior: 'smooth',
+        });
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeSettingsSectionIndexId]);
   const activeFontValue =
     fontPickerTarget === 'chinese'
       ? appearancePreferences.chineseFontFamily
@@ -13542,6 +9342,89 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       minute: '2-digit',
     }).format(date);
   };
+  const integrationsOverviewTitle = settingsLocaleCopy(locale, {
+    'zh-CN': '连接概览',
+    'zh-TW': '連接概覽',
+    'ja-JP': '接続の概要',
+    'en-US': 'Connection Overview',
+    'ko-KR': '연결 개요',
+  });
+  const integrationsCommonTitle = settingsLocaleCopy(locale, {
+    'zh-CN': '常用联动',
+    'zh-TW': '常用聯動',
+    'ja-JP': 'よく使う連携',
+    'en-US': 'Common Integrations',
+    'ko-KR': '자주 쓰는 연동',
+  });
+  const integrationsNeedsAttention = settingsLocaleCopy(locale, {
+    'zh-CN': '个服务需要处理',
+    'zh-TW': '個服務需要處理',
+    'ja-JP': '件のサービスを確認',
+    'en-US': 'services need attention',
+    'ko-KR': '개 서비스 확인 필요',
+  });
+  const integrationsConfigure = settingsLocaleCopy(locale, {
+    'zh-CN': '配置',
+    'zh-TW': '設定',
+    'ja-JP': '設定',
+    'en-US': 'Configure',
+    'ko-KR': '구성',
+  });
+  const integrationsAdvancedSettings = settingsLocaleCopy(locale, {
+    'zh-CN': '高级设置',
+    'zh-TW': '進階設定',
+    'ja-JP': '詳細設定',
+    'en-US': 'Advanced settings',
+    'ko-KR': '고급 설정',
+  });
+  const integrationsAdditionalTitle = settingsLocaleCopy(locale, {
+    'zh-CN': '其他联动',
+    'zh-TW': '其他聯動',
+    'ja-JP': 'その他の連携',
+    'en-US': 'Other integrations',
+    'ko-KR': '기타 연동',
+  });
+  const integrationsMobileSummary = settingsLocaleCopy(locale, {
+    'zh-CN': '免费 · 局域网联动',
+    'zh-TW': '免費 · 區域網路聯動',
+    'ja-JP': '無料 · LAN 連携',
+    'en-US': 'Free · Local network',
+    'ko-KR': '무료 · 로컬 네트워크',
+  });
+  const integrationsProxyUnchecked = settingsLocaleCopy(locale, {
+    'zh-CN': '尚未测试',
+    'zh-TW': '尚未測試',
+    'ja-JP': '未テスト',
+    'en-US': 'Not tested',
+    'ko-KR': '아직 테스트하지 않음',
+  });
+  const integrationsNormal = settingsLocaleCopy(locale, {
+    'zh-CN': '正常',
+    'zh-TW': '正常',
+    'ja-JP': '正常',
+    'en-US': 'Normal',
+    'ko-KR': '정상',
+  });
+  const integrationsEnabledCount = (count: number): string => settingsLocaleCopy(locale, {
+    'zh-CN': `${count} 项已启用`,
+    'zh-TW': `${count} 項已啟用`,
+    'ja-JP': `${count} 件が有効`,
+    'en-US': `${count} enabled`,
+    'ko-KR': `${count}개 사용 중`,
+  });
+  const discordPresenceEnabled = discordPresenceStatus?.enabled ?? appSettings?.discordRichPresenceEnabled ?? false;
+  const obsBrowserSourceEnabled = appSettings?.obsBrowserSourceEnabled === true;
+  const windowsIntegrationEnabledCount = [
+    appSettings?.smtcEnabled ?? true,
+    appSettings?.taskbarMiniPlayerEnabled ?? false,
+    appSettings?.taskbarPlaybackControlsEnabled ?? false,
+  ].filter(Boolean).length;
+  const integrationsAttentionCount = Number(!discordPresenceEnabled) + Number(!obsBrowserSourceEnabled);
+  const networkProxyModeLabel = buildNetworkProxyModeOptions(t).find((option) => option.value === networkProxyDraft.mode)?.label
+    ?? t('settings.integrations.networkProxy.mode.off');
+  const networkProxyOverviewLabel = networkProxyDraft.mode === 'off'
+    ? networkProxyModeLabel
+    : `${networkProxyModeLabel} · ${networkProxyTestResult?.ok ? integrationsNormal : integrationsProxyUnchecked}`;
   const discordPresenceLabel = !discordPresenceStatus?.enabled
     ? t('common.disabled')
     : discordPresenceStatus.connected
@@ -13591,28 +9474,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     : scheduledThemeMode === 'dark'
       ? t('settings.appearance.theme.dark')
       : t('settings.appearance.theme.light');
-  const sidebarSettingsText = {
-    title: t(sidebarSettingsCopy.titleKey),
-    description: t(sidebarSettingsCopy.descriptionKey),
-    mainGroup: t(sidebarSettingsCopy.mainGroupKey),
-    utilityGroup: t(sidebarSettingsCopy.utilityGroupKey),
-    reset: t(sidebarSettingsCopy.resetKey),
-    expand: t(sidebarSettingsCopy.expandKey),
-    collapse: t(sidebarSettingsCopy.collapseKey),
-    visible: t(sidebarSettingsCopy.visibleKey),
-    hidden: t(sidebarSettingsCopy.hiddenKey),
-    fixed: t(sidebarSettingsCopy.fixedKey),
-    proLocked: t(sidebarSettingsCopy.proLockedKey),
-    noItems: t(sidebarSettingsCopy.noItemsKey),
-  };
-  const playerBarButtonSettingsText = {
-    title: t(playerBarButtonSettingsCopy.titleKey),
-    description: t(playerBarButtonSettingsCopy.descriptionKey),
-    count: t(playerBarButtonSettingsCopy.countKey, { count: visiblePlayerBarButtonCount }),
-    reset: t(playerBarButtonSettingsCopy.resetKey),
-    visible: t(playerBarButtonSettingsCopy.visibleKey),
-    hidden: t(playerBarButtonSettingsCopy.hiddenKey),
-  };
   const themeScheduleStatus = themeScheduleLockedByAmbient
     ? t('settings.appearance.themeSchedule.status.ambient')
     : themeScheduleEnabled
@@ -13640,23 +9501,9 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     mode: t(shufflePlaybackMode.labelKey),
     detail: shufflePlaybackModeDetail,
   });
-  const replayGainMode = appSettings?.replayGainMode ?? 'track';
-  const replayGainTargetLufs = appSettings?.replayGainTargetLufs ?? SPOTIFY_NORMAL_REPLAY_GAIN_TARGET_LUFS;
-  const replayGainModeLabel = replayGainMode === 'album'
-    ? t('settings.playback.replayGain.mode.album')
-    : replayGainMode === 'off'
-      ? t('settings.playback.replayGain.mode.off')
-      : t('settings.playback.replayGain.mode.track');
-  const replayGainAppliedLabel = Number.isFinite(status?.replayGainAppliedDb) ? `${status?.replayGainAppliedDb?.toFixed(2)} dB` : '0 dB';
-  const replayGainProgressLabel = replayGainAnalysisJob ? `${replayGainAnalysisJob.processedTracks}/${replayGainAnalysisJob.totalTracks}` : t('settings.playback.replayGain.notRun');
-
-
   const noSoundGuideStepCount = playbackNoSoundGuideSteps.length;
   const activeNoSoundGuideStepIndex = Math.min(playbackNoSoundGuideStepIndex, noSoundGuideStepCount - 1);
   const activeNoSoundGuideStep = playbackNoSoundGuideSteps[activeNoSoundGuideStepIndex] ?? playbackNoSoundGuideSteps[0]!;
-  const ActiveNoSoundGuideIcon = activeNoSoundGuideStep.icon;
-  const noSoundGuideProgressPercent = Math.round(((activeNoSoundGuideStepIndex + 1) / noSoundGuideStepCount) * 100);
-  const noSoundGuideProgressLabel = `${activeNoSoundGuideStepIndex + 1} / ${noSoundGuideStepCount}`;
   const openNoSoundGuide = (): void => {
     setPlaybackNoSoundGuideStepIndex(0);
     setPlaybackNoSoundGuideOpen(true);
@@ -13672,7 +9519,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
             <div className="settings-chip-row">
               {playbackOutputModesForPlatform.map((mode) => (
                 <ChipButton active={outputMode === mode} key={mode} onClick={() => handleOutputModeChange(mode)}>
-                  {getPlaybackOutputModeLabel(mode, t)}
+                  {getPlaybackOutputModeLabel(mode, t, rendererPlatform)}
                 </ChipButton>
               ))}
             </div>
@@ -13744,106 +9591,73 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
         onClose={handleCloseNeteaseQrLogin}
         onRetry={() => void handleNeteaseQrLogin()}
       />
-      <header className="settings-header">
-        <div className="settings-header-copy">
-          <h1>{t('route.settings.label')}</h1>
-          <div className="settings-header-context">
-            <span className="settings-header-context-icon">
-              <ActiveNavIcon size={14} aria-hidden="true" />
-            </span>
-            <span>{t(activeNavItem.labelKey)}</span>
-            <em>{t(activeNavItem.descriptionKey)}</em>
-          </div>
-        </div>
-        <label className="settings-search">
-          <Search size={16} aria-hidden="true" />
-          <input
-            type="search"
-            value={settingsQuery}
-            onChange={(event) => setSettingsQuery(event.target.value)}
-            onKeyDown={handleSettingsSearchKeyDown}
-            placeholder={t('settings.header.searchPlaceholder')}
-          />
-          {settingsQuery.trim() ? (
-            <div className="settings-search-results" role="listbox" aria-label={t('settings.header.searchPlaceholder')}>
-              {settingsSearchResults.length ? (
-                settingsSearchResults.slice(0, 6).map((result, index) => (
-                  <button
-                    className="settings-search-result"
-                    key={result.id}
-                    type="button"
-                    role="option"
-                    aria-selected={index === 0}
-                    onClick={() => jumpToSettingsSection(result.sectionKey, { clearSearch: true, targetId: result.targetId })}
-                  >
-                    <span>{result.path}</span>
-                    <small>{result.description}</small>
-                  </button>
-                ))
-              ) : (
-                <p className="settings-search-empty">{t('settings.header.searchEmpty')}</p>
-              )}
-            </div>
-          ) : null}
-        </label>
-      </header>
+      <SettingsHeader
+        activeNavItem={activeNavItem}
+        activeResultIndex={activeSettingsSearchResultIndex}
+        inputRef={settingsSearchInputRef}
+        onActiveResultIndexChange={setActiveSettingsSearchResultIndex}
+        onQueryChange={setSettingsQuery}
+        onResultSelect={(result) =>
+          jumpToSettingsSection(result.sectionKey, {
+            clearSearch: true,
+            targetId: result.targetId,
+          })
+        }
+        onSearchKeyDown={handleSettingsSearchKeyDown}
+        query={settingsQuery}
+        searchResults={settingsSearchResults}
+        t={t}
+        visibleSearchResults={visibleSettingsSearchResults}
+      />
 
       <div className="settings-body">
-        <nav className="settings-nav" aria-label={t('route.settings.label')}>
-          {activeNavGroups.map((group) => (
-            <div className="settings-nav-group" key={group.id}>
-              <span className="settings-nav-group-label">{settingsLocaleCopy(locale, group.label)}</span>
-              {group.items.map((item) => {
-                const Icon = item.icon;
-                const isActive = activeSection === item.key;
-                const isDanger = item.key === 'danger';
-
-                return (
-                  <button
-                    className={`settings-nav-item ${isActive ? 'active' : ''} ${isDanger ? 'is-danger' : ''}`}
-                    key={item.key}
-                    type="button"
-                    aria-current={isActive ? 'page' : undefined}
-                    onClick={() => handleNavClick(item.key)}
-                  >
-                    <span className="settings-nav-icon">
-                      <Icon size={17} />
-                    </span>
-                    <span className="settings-nav-copy">
-                      <span className="settings-nav-label">{t(item.labelKey)}</span>
-                      <span className="settings-nav-desc">{t(item.descriptionKey)}</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
+        <SettingsNavigation
+          activeSection={activeSection}
+          groups={activeNavGroups}
+          locale={locale}
+          onNavigate={handleNavClick}
+          t={t}
+        />
 
         <div className={`settings-scroll-frame ${settingsHorizontalScroll.available ? 'has-horizontal-overflow' : ''}`}>
-          <button
-            className="settings-horizontal-pager settings-horizontal-pager--left"
-            type="button"
-            aria-label="向左翻动设置内容"
-            disabled={!settingsHorizontalScroll.canLeft}
-            onClick={() => handleSettingsHorizontalScroll(-1)}
-          >
-            <ChevronLeft size={18} aria-hidden="true" />
-          </button>
-          <button
-            className="settings-horizontal-pager settings-horizontal-pager--right"
-            type="button"
-            aria-label="向右翻动设置内容"
-            disabled={!settingsHorizontalScroll.canRight}
-            onClick={() => handleSettingsHorizontalScroll(1)}
-          >
-            <ChevronRight size={18} aria-hidden="true" />
-          </button>
+          <SettingsHorizontalPager
+            canLeft={settingsHorizontalScroll.canLeft}
+            canRight={settingsHorizontalScroll.canRight}
+            onScroll={handleSettingsHorizontalScroll}
+          />
 
           <div className="settings-scroll-shell" ref={settingsScrollShellRef}>
             <div className="settings-content" data-transition-direction={settingsSectionMotionDirection}>
             <SettingSection activeKey={activeSection} icon={MessageSquare} id="general" title={t('settings.nav.general.label')}>
-              <SettingSubsectionTitle {...getSettingsSubsection('generalBasics')} />
+              <SettingSubsectionTitle {...getSettingsSubsection('generalPerformance')} />
+              <SettingRow
+                id="settings-row-low-spec-mode"
+                highlighted={highlightedSettingId === 'settings-row-low-spec-mode'}
+                title={settingsLocaleCopy(locale, {
+    'zh-CN': '低配置模式',
+    'zh-TW': '低配置模式',
+    'ja-JP': '低スペックモード',
+    'en-US': 'Low-spec mode',
+    'ko-KR': 'Low-spec mode',
+  })}
+                description={settingsLocaleCopy(locale, {
+    'zh-CN': '降低动画、模糊、可视化、视频壁纸、扫描和后台任务占用。保留原设置，关闭后自动恢复；不会改变音质、音频后端或硬件加速。',
+    'zh-TW': '降低動畫、模糊、視覺化、影片桌布、掃描和背景工作佔用。保留原設定，關閉後自動恢復；不會改變音質、音訊後端或硬體加速。',
+    'ja-JP': 'アニメーション、ぼかし、視覚化、動画壁紙、スキャン、バックグラウンド処理の負荷を抑えます。元の設定は保持され、音質やオーディオバックエンド、ハードウェアアクセラレーションは変更しません。',
+    'en-US': 'Reduces animation, blur, visualizers, video wallpaper, scanning, and background work. Original preferences are preserved; audio quality, audio backends, and hardware acceleration are unchanged.',
+    'ko-KR': 'Reduces animation, blur, visualizers, video wallpaper, scanning, and background work. Original preferences are preserved; audio quality, audio backends, and hardware acceleration are unchanged.',
+  })}
+              >
+                <div className="settings-inline-toggle">
+                  <span>{appSettings?.lowSpecModeEnabled === true ? t('common.enabled') : t('common.disabled')}</span>
+                  <ToggleButton
+                    active={appSettings?.lowSpecModeEnabled === true}
+                    disabled={!appSettings}
+                    onClick={() => patchAppSettings({ lowSpecModeEnabled: appSettings?.lowSpecModeEnabled !== true })}
+                  />
+                </div>
+              </SettingRow>
+              <SettingSubsectionTitle id="settings-subsection-language" {...getSettingsSubsection('generalBasics')} />
               <SettingRow title={t('settings.general.language.title')} description={t('settings.general.language.description')}>
                 <div className="settings-chip-row">
                   {localeOptions.map((option) => (
@@ -13870,20 +9684,31 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 </button>
               </SettingRow>
               <SettingRow
-                id="settings-row-user-notice"
-                highlighted={highlightedSettingId === 'settings-row-user-notice'}
-                title={t('settings.general.userNotice.title')}
-                description={t('settings.general.userNotice.description')}
+                id="settings-row-home-random-hero-title"
+                highlighted={highlightedSettingId === 'settings-row-home-random-hero-title'}
+                title={t('settings.general.homeRandomHeroTitle.title')}
+                description={t('settings.general.homeRandomHeroTitle.description')}
               >
-                <button
-                  className="settings-action-button settings-user-notice-button"
-                  type="button"
-                  onClick={handleOpenUserNotice}
-                >
-                  <ShieldCheck size={15} />
-                  {t('settings.general.userNotice.action')}
-                </button>
+                <ToggleButton
+                  active={appSettings?.homeRandomHeroTitleEnabled === true}
+                  disabled={!appSettings}
+                  onClick={() =>
+                    patchAppSettings({
+                      homeRandomHeroTitleEnabled: !(appSettings?.homeRandomHeroTitleEnabled ?? false),
+                    })
+                  }
+                />
               </SettingRow>
+              <SettingSubsectionTitle
+                id="settings-subsection-account"
+                title={settingsLocaleCopy(locale, {
+    'zh-CN': '账户与 Pro',
+    'zh-TW': '帳戶與 Pro',
+    'ja-JP': 'アカウントと Pro',
+    'en-US': 'Account & Pro',
+    'ko-KR': 'Account & Pro',
+  })}
+              />
               <SettingRow
                 id="settings-row-echo-pro-activation"
                 className="setting-row--credential setting-row--pro-activation"
@@ -13898,10 +9723,23 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                         解锁Pro
                       </span>
                       <span className={`list-filter-chip ${echoProUnlockedForStatus ? 'active' : ''}`.trim()}>
-                        {echoProPluginUnlockedForStatus ? '插件已启用' : echoProAccountStatusForStatus?.pro ? '账号 Pro 已启用' : '待激活'}
+                        {echoProPluginUnlockedForStatus ? '本机 Pro 已启用' : echoProAccountStatusForStatus?.pro ? '账号 Pro 已启用' : '待激活'}
                       </span>
                     </div>
                     <div className="settings-pro-activation-header-actions">
+                      {echoProPluginUnlockedForStatus ? (
+                        <button
+                          className="settings-danger-button"
+                          type="button"
+                          disabled={echoProActivationBusy}
+                          onClick={() => void logoutEchoProFromThisComputer()}
+                        >
+                          <LogOut size={14} aria-hidden="true" />
+                          {echoProActivationBusyAction === 'release'
+                            ? (locale === 'zh-CN' ? '正在登出…' : 'Signing out…')
+                            : (locale === 'zh-CN' ? '登出 Pro' : 'Sign out of Pro')}
+                        </button>
+                      ) : null}
                       <button
                         className="settings-action-button"
                         type="button"
@@ -13931,7 +9769,10 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                           className={`list-filter-chip ${echoProActivationMode === 'afdian' ? 'active' : ''}`.trim()}
                           type="button"
                           disabled={echoProActivationBusy}
-                          onClick={() => setEchoProActivationMode('afdian')}
+                          onClick={() => {
+                            setEchoProActivationMode('afdian');
+                            setEchoProActivationSecretVisible(false);
+                          }}
                         >
                           <MessageSquare size={14} aria-hidden="true" />
                           {locale === 'zh-CN' ? '爱发电订单' : 'Afdian Order'}
@@ -13940,7 +9781,10 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                           className={`list-filter-chip ${echoProActivationMode === 'key' ? 'active' : ''}`.trim()}
                           type="button"
                           disabled={echoProActivationBusy}
-                          onClick={() => setEchoProActivationMode('key')}
+                          onClick={() => {
+                            setEchoProActivationMode('key');
+                            setEchoProActivationSecretVisible(false);
+                          }}
                         >
                           <KeyRound size={14} aria-hidden="true" />
                           Pro Key
@@ -13950,6 +9794,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                         <label className="settings-account-cookie-field">
                           <input
                             type="text"
+                            aria-label={locale === 'zh-CN' ? '用于核对授权的 QQ 号' : 'QQ number used for verification'}
                             value={echoProActivationQq}
                             autoComplete="off"
                             placeholder={locale === 'zh-CN' ? 'QQ 号' : 'QQ number'}
@@ -13958,22 +9803,44 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                           />
                         </label>
                         <label className="settings-account-cookie-field">
-                          <input
-                            type="text"
-                            value={echoProActivationMode === 'afdian' ? echoProActivationOrderId : echoProActivationKey}
-                            autoComplete="off"
-                            placeholder={echoProActivationMode === 'afdian'
-                              ? (locale === 'zh-CN' ? '爱发电订单号' : 'Afdian order ID')
-                              : 'ECHO Pro Key'}
-                            disabled={echoProActivationBusy}
-                            onChange={(event) => {
-                              if (echoProActivationMode === 'afdian') {
-                                setEchoProActivationOrderId(event.target.value);
-                              } else {
-                                setEchoProActivationKey(event.target.value);
-                              }
-                            }}
-                          />
+                          <span className="settings-account-field-wrap">
+                            <input
+                              type={echoProActivationSecretVisible ? 'text' : 'password'}
+                              aria-label={echoProActivationMode === 'afdian'
+                                ? (locale === 'zh-CN' ? '爱发电订单号' : 'Afdian order ID')
+                                : 'ECHO Pro Key'}
+                              value={echoProActivationMode === 'afdian' ? echoProActivationOrderId : echoProActivationKey}
+                              autoComplete="off"
+                              placeholder={echoProActivationMode === 'afdian'
+                                ? (locale === 'zh-CN' ? '爱发电订单号' : 'Afdian order ID')
+                                : 'ECHO Pro Key'}
+                              disabled={echoProActivationBusy}
+                              onChange={(event) => {
+                                if (echoProActivationMode === 'afdian') {
+                                  setEchoProActivationOrderId(event.target.value);
+                                } else {
+                                  setEchoProActivationKey(event.target.value);
+                                }
+                              }}
+                            />
+                            <button
+                              className="settings-account-password-toggle"
+                              type="button"
+                              aria-label={echoProActivationSecretVisible
+                                ? t('settings.general.echoProAccount.passwordHide')
+                                : t('settings.general.echoProAccount.passwordShow')}
+                              aria-pressed={echoProActivationSecretVisible}
+                              title={echoProActivationSecretVisible
+                                ? t('settings.general.echoProAccount.passwordHide')
+                                : t('settings.general.echoProAccount.passwordShow')}
+                              disabled={echoProActivationBusy}
+                              onClick={() => setEchoProActivationSecretVisible((visible) => !visible)}
+                            >
+                              {echoProActivationSecretVisible
+                                ? <EyeOff size={14} aria-hidden="true" />
+                                : <Eye size={14} aria-hidden="true" />}
+                            </button>
+                          </span>
                         </label>
                       </div>
                       <div className="settings-account-actions settings-pro-activation-actions">
@@ -13984,15 +9851,40 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                           onClick={() => void activateEchoProPluginInApp()}
                         >
                           <ShieldCheck size={14} aria-hidden="true" />
-                          {echoProActivationBusy
-                            ? (locale === 'zh-CN' ? '激活中' : 'Activating')
-                            : (locale === 'zh-CN' ? '联网激活并启用' : 'Activate online')}
+                          {echoProActivationBusyAction === 'activate'
+                            ? (locale === 'zh-CN' ? '正在激活…' : 'Activating…')
+                            : echoProActivationBusy
+                              ? (locale === 'zh-CN' ? '请稍候…' : 'Please wait…')
+                              : (locale === 'zh-CN' ? '激活此设备' : 'Activate this device')}
+                        </button>
+                        <button
+                          className="settings-danger-button"
+                          type="button"
+                          disabled={echoProActivationBusy || (
+                            echoProActivationMode === 'afdian'
+                              ? !echoProOrderReleaseReady
+                              : !echoProPluginUnlockedForStatus
+                          )}
+                          onClick={() => void releaseEchoProCurrentDevice()}
+                        >
+                          <Trash2 size={14} aria-hidden="true" />
+                          {echoProActivationBusyAction === 'release'
+                            ? (locale === 'zh-CN' ? '正在解绑…' : 'Releasing…')
+                            : echoProActivationBusy
+                              ? (locale === 'zh-CN' ? '请稍候…' : 'Please wait…')
+                            : echoProActivationMode === 'afdian'
+                              ? (locale === 'zh-CN' ? '解绑此订单的设备' : 'Release order devices')
+                              : (locale === 'zh-CN' ? '解绑当前电脑' : 'Release this computer')}
                         </button>
                       </div>
                       <p className="settings-inline-note settings-pro-activation-note">
                         {locale === 'zh-CN'
-                          ? '激活、签发、插件包下载和启用校验都走官方服务器；解绑 HWID 仍需要打开网页完成。'
-                          : 'Activation, package issuance, download, and enable verification all go through the official server. HWID unbinding still requires the web page.'}
+                          ? echoProActivationMode === 'afdian'
+                            ? '激活需要 QQ 和订单号；解绑只需要订单号，会释放该订单当前绑定的全部设备。'
+                            : '激活需要 QQ 和 Pro Key；解绑只释放当前电脑，其他设备不会受影响。'
+                          : echoProActivationMode === 'afdian'
+                            ? 'Activation requires QQ and the order ID. Release uses only the order ID and releases every active HWID for that order.'
+                            : 'Pro Key release proves the native signed license and raw machine code, releases only this HWID, and permanently removes the local license.'}
                       </p>
                       {echoProMessage ? <p className="settings-inline-note settings-pro-activation-note">{echoProMessage}</p> : null}
                       {echoProError ? <p className="settings-inline-error settings-pro-activation-note">{echoProError}</p> : null}
@@ -14138,52 +10030,13 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                           {echoProMachineCodeCopied ? t('settings.general.echoProAccount.hwidCopied') : t('settings.general.echoProAccount.copyHwid')}
                         </button>
                       </div>
-                      <div className="settings-account-meta">
-                        <span>{t('settings.general.echoProAccount.cloudSettings', { status: echoProSettingsCloudStatus?.available ? t('settings.general.echoProAccount.cloudSaved') : t('settings.general.echoProAccount.cloudEmpty') })}</span>
-                        <span>{t('settings.general.echoProAccount.syncDate', { date: formatProtectionTimestamp(echoProSettingsCloudStatus?.lastSavedAt) })}</span>
-                        <span>{t('settings.general.echoProAccount.cloudLibrary', { playlists: echoProSettingsCloudStatus?.librarySyncPlaylistCount ?? 0, favorites: echoProSettingsCloudStatus?.librarySyncFavoriteTrackCount ?? 0 })}</span>
-                        {echoProSettingsCloudStatus?.appVersion ? <span>{t('settings.general.echoProAccount.sourceVersion', { version: echoProSettingsCloudStatus.appVersion })}</span> : null}
-                        {echoProSettingsCloudStatus?.lastError ? <span>{t('settings.general.echoProAccount.syncStatus', { status: echoProSettingsCloudStatus.lastError })}</span> : null}
-                      </div>
-                      <p className="settings-inline-note settings-account-note">
-                        {t('settings.general.echoProAccount.cloudSyncNote')}
-                      </p>
-                      <div className="settings-account-actions">
-                        <button
-                          className="settings-action-button"
-                          type="button"
-                          disabled={echoProSettingsCloudBusyAction !== null || echoProAccountStatus?.pro !== true}
-                          onClick={() => void saveEchoProSettingsCloud()}
-                        >
-                          <Save size={14} aria-hidden="true" />
-                          {echoProSettingsCloudBusyAction === 'save' ? t('settings.general.echoProAccount.action.saving') : t('settings.general.echoProAccount.action.saveCloud')}
-                        </button>
-                        <button
-                          className="settings-action-button"
-                          type="button"
-                          disabled={echoProSettingsCloudBusyAction !== null || echoProAccountStatus?.pro !== true || echoProSettingsCloudStatus?.available !== true}
-                          onClick={() => void applyEchoProSettingsCloud()}
-                        >
-                          <Download size={14} aria-hidden="true" />
-                          {echoProSettingsCloudBusyAction === 'pull' ? t('settings.general.echoProAccount.action.syncing') : t('settings.general.echoProAccount.action.syncCloud')}
-                        </button>
-                        <button
-                          className="settings-action-button"
-                          type="button"
-                          disabled={echoProSettingsCloudBusyAction !== null || echoProAccountStatus?.pro !== true}
-                          onClick={() => void refreshEchoProSettingsCloudStatus()}
-                        >
-                          <RefreshCw size={14} aria-hidden="true" />
-                          {echoProSettingsCloudBusyAction === 'status' ? t('settings.general.echoProAccount.action.refreshing') : t('settings.general.echoProAccount.action.refreshSyncDate')}
-                        </button>
-                      </div>
                       {echoProMessage ? <p className="settings-inline-note settings-account-note">{echoProMessage}</p> : null}
                       {echoProError ? <p className="settings-inline-error settings-account-note">{echoProError}</p> : null}
                     </article>
                   </div>
                 ) : null}
               </div>
-              <SettingSubsectionTitle {...getSettingsSubsection('generalWindow')} />
+              <SettingSubsectionTitle id="settings-subsection-window" {...getSettingsSubsection('generalWindow')} />
               <SettingRow
                 id="settings-row-close-to-tray"
                 highlighted={highlightedSettingId === 'settings-row-close-to-tray'}
@@ -14206,6 +10059,50 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   disabled={!appSettings}
                   onClick={() => patchAppSettings({ launchAtLoginEnabled: !(appSettings?.launchAtLoginEnabled ?? false) })}
                 />
+              </SettingRow>
+              <SettingRow
+                id="settings-row-pet"
+                highlighted={highlightedSettingId === 'settings-row-pet'}
+                title={t('settings.playback.pet.title')}
+                description={t('settings.playback.pet.description')}
+              >
+                <div className="settings-pet-control">
+                  <div className="settings-chip-row">
+                    <StatusText tone={appSettings?.petEnabled ? 'good' : 'muted'}>
+                      {appSettings?.petEnabled ? t('settings.playback.pet.status.visible') : t('settings.playback.pet.status.hidden')}
+                    </StatusText>
+                    <button
+                      className="settings-action-button"
+                      type="button"
+                      disabled={!appSettings || !window.echo?.pet}
+                      onClick={() => void handlePetVisibleChange(!(appSettings?.petEnabled ?? false))}
+                    >
+                      <Sparkles size={15} />
+                      {appSettings?.petEnabled ? t('settings.playback.pet.action.hide') : t('settings.playback.pet.action.show')}
+                    </button>
+                    <button
+                      className="settings-action-button"
+                      type="button"
+                      disabled={!appSettings || !window.echo?.pet}
+                      onClick={() => void handlePetResetBounds()}
+                    >
+                      <RotateCcw size={15} />
+                      {t('pet.action.resetPosition')}
+                    </button>
+                  </div>
+                  <div className="settings-pet-size">
+                    <span>{t('settings.playback.pet.size')}</span>
+                    <NumberRangeField
+                      min={petScalePercentMin}
+                      max={petScalePercentMax}
+                      step={10}
+                      suffix="%"
+                      value={appSettings?.petScalePercent ?? defaultPetScalePercent}
+                      disabled={!appSettings}
+                      onChange={(value) => void handlePetScaleChange(value)}
+                    />
+                  </div>
+                </div>
               </SettingRow>
               <SettingRow
                 id="settings-row-touch-keyboard"
@@ -14257,7 +10154,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   }
                 />
               </SettingRow>
-              <SettingSubsectionTitle {...getSettingsSubsection('generalFeatures')} />
+              <SettingSubsectionTitle id="settings-subsection-features" {...getSettingsSubsection('generalFeatures')} />
               <SettingRow
                 id="settings-row-streaming-feature"
                 highlighted={highlightedSettingId === 'settings-row-streaming-feature'}
@@ -14426,7 +10323,310 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               </SettingRow>
             </SettingSection>
 
-            <SettingSection activeKey={activeSection} icon={FlaskConical} id="experimental" title={t('settings.nav.experimental.label')}>
+            <SettingSection
+              activeKey={activeSection}
+              description={settingsLocaleCopy(locale, {
+    'zh-CN': '让界面在低视力、键盘操作和读屏环境下更清晰、更可控。',
+    'zh-TW': '讓介面在低視力、鍵盤操作和螢幕閱讀器環境下更清晰、更可控。',
+    'ja-JP': '弱視、キーボード操作、スクリーンリーダー環境で画面を見やすく、操作しやすくします。',
+    'en-US': 'Make ECHO clearer and easier to control with low vision, keyboard navigation, and screen readers.',
+    'ko-KR': 'Make ECHO clearer and easier to control with low vision, keyboard navigation, and screen readers.',
+  })}
+              icon={Accessibility}
+              id="accessibility"
+              title={t('settings.nav.accessibility.label')}
+            >
+              <SettingRow
+                id="settings-row-accessibility-preset"
+                title={settingsLocaleCopy(locale, {
+    'zh-CN': '一键无障碍预设',
+    'zh-TW': '一鍵無障礙預設',
+    'ja-JP': 'アクセシビリティプリセット',
+    'en-US': 'Accessibility preset',
+    'ko-KR': 'Accessibility preset',
+  })}
+                description={settingsLocaleCopy(locale, {
+    'zh-CN': '开启减少动画、高对比、130% 界面缩放、强化键盘焦点和播放状态播报。',
+    'zh-TW': '開啟減少動畫、高對比、130% 介面縮放、強化鍵盤焦點和播放狀態播報。',
+    'ja-JP': 'モーション軽減、高コントラスト、130% 表示、強調フォーカス、再生状態の読み上げを有効にします。',
+    'en-US': 'Enables reduced motion, high contrast, 130% UI scale, strong keyboard focus, and playback announcements.',
+    'ko-KR': 'Enables reduced motion, high contrast, 130% UI scale, strong keyboard focus, and playback announcements.',
+  })}
+              >
+                <div className="settings-chip-row">
+                  <button
+                    className="settings-action-button"
+                    type="button"
+                    disabled={!appSettings}
+                    onClick={() => handleAccessibilityChange({
+                      reduceMotionEnabled: true,
+                      highContrastEnabled: true,
+                      uiScalePercent: 130,
+                      alwaysShowFocusEnabled: true,
+                      screenReaderAnnouncementsEnabled: true,
+                    })}
+                  >
+                    <Accessibility size={15} aria-hidden="true" />
+                    {settingsLocaleCopy(locale, {
+    'zh-CN': '启用推荐预设',
+    'zh-TW': '啟用建議預設',
+    'ja-JP': '推奨設定を有効化',
+    'en-US': 'Enable recommended preset',
+    'ko-KR': 'Enable recommended preset',
+  })}
+                  </button>
+                  <button
+                    className="settings-action-button"
+                    type="button"
+                    disabled={!appSettings}
+                    onClick={() => handleAccessibilityChange(defaultAccessibilityPreferences)}
+                  >
+                    <RotateCcw size={15} aria-hidden="true" />
+                    {settingsLocaleCopy(locale, {
+    'zh-CN': '恢复默认',
+    'zh-TW': '恢復預設',
+    'ja-JP': '既定値に戻す',
+    'en-US': 'Restore defaults',
+    'ko-KR': 'Restore defaults',
+  })}
+                  </button>
+                </div>
+              </SettingRow>
+
+              <SettingRow
+                id="settings-row-accessibility-reduce-motion"
+                title={settingsLocaleCopy(locale, {
+    'zh-CN': '减少动态效果',
+    'zh-TW': '減少動態效果',
+    'ja-JP': 'モーションを減らす',
+    'en-US': 'Reduce motion',
+    'ko-KR': 'Reduce motion',
+  })}
+                description={settingsLocaleCopy(locale, {
+    'zh-CN': '关闭界面转场、滚动动画和动态视频背景；不影响音频播放。',
+    'zh-TW': '關閉介面轉場、捲動動畫和動態影片背景；不影響音訊播放。',
+    'ja-JP': '画面遷移、スクロールアニメーション、動画背景を停止します。音声再生には影響しません。',
+    'en-US': 'Stops transitions, animated scrolling, and video backgrounds without changing audio playback.',
+    'ko-KR': 'Stops transitions, animated scrolling, and video backgrounds without changing audio playback.',
+  })}
+              >
+                <ToggleButton
+                  active={accessibilityPreferences.reduceMotionEnabled}
+                  ariaLabel={settingsLocaleCopy(locale, {
+    'zh-CN': '减少动态效果',
+    'zh-TW': '減少動態效果',
+    'ja-JP': 'モーションを減らす',
+    'en-US': 'Reduce motion',
+    'ko-KR': 'Reduce motion',
+  })}
+                  disabled={!appSettings}
+                  onClick={() => handleAccessibilityChange({ reduceMotionEnabled: !accessibilityPreferences.reduceMotionEnabled })}
+                />
+              </SettingRow>
+
+              <SettingRow
+                id="settings-row-accessibility-high-contrast"
+                title={settingsLocaleCopy(locale, {
+    'zh-CN': '高对比度',
+    'zh-TW': '高對比度',
+    'ja-JP': '高コントラスト',
+    'en-US': 'High contrast',
+    'ko-KR': 'High contrast',
+  })}
+                description={settingsLocaleCopy(locale, {
+    'zh-CN': '增强文字、边框和面板对比，并移除主要区域的透明模糊效果。',
+    'zh-TW': '增強文字、邊框和面板對比，並移除主要區域的透明模糊效果。',
+    'ja-JP': '文字、境界線、パネルのコントラストを高め、主要部分の透明ぼかしを除去します。',
+    'en-US': 'Strengthens text, borders, and panels while removing translucent blur from key areas.',
+    'ko-KR': 'Strengthens text, borders, and panels while removing translucent blur from key areas.',
+  })}
+              >
+                <ToggleButton
+                  active={accessibilityPreferences.highContrastEnabled}
+                  ariaLabel={settingsLocaleCopy(locale, {
+    'zh-CN': '高对比度',
+    'zh-TW': '高對比度',
+    'ja-JP': '高コントラスト',
+    'en-US': 'High contrast',
+    'ko-KR': 'High contrast',
+  })}
+                  disabled={!appSettings}
+                  onClick={() => handleAccessibilityChange({ highContrastEnabled: !accessibilityPreferences.highContrastEnabled })}
+                />
+              </SettingRow>
+
+              <SettingRow
+                id="settings-row-accessibility-scale"
+                title={settingsLocaleCopy(locale, {
+    'zh-CN': '界面缩放',
+    'zh-TW': '介面縮放',
+    'ja-JP': 'UI の拡大率',
+    'en-US': 'UI scale',
+    'ko-KR': 'UI scale',
+  })}
+                description={settingsLocaleCopy(locale, {
+    'zh-CN': '同时放大文字、按钮和点击区域。',
+    'zh-TW': '同時放大文字、按鈕和點擊區域。',
+    'ja-JP': '文字、ボタン、クリック領域をまとめて拡大します。',
+    'en-US': 'Scales text, controls, and hit targets together.',
+    'ko-KR': 'Scales text, controls, and hit targets together.',
+  })}
+              >
+                <div className="settings-chip-row" role="group" aria-label={settingsLocaleCopy(locale, {
+    'zh-CN': '界面缩放比例',
+    'zh-TW': '介面縮放比例',
+    'ja-JP': 'UI の拡大率',
+    'en-US': 'UI scale percentage',
+    'ko-KR': 'UI scale percentage',
+  })}>
+                  {([100, 115, 130, 150] as const).map((uiScalePercent) => (
+                    <ChipButton
+                      active={accessibilityPreferences.uiScalePercent === uiScalePercent}
+                      disabled={!appSettings}
+                      key={uiScalePercent}
+                      onClick={() => handleAccessibilityChange({ uiScalePercent })}
+                    >
+                      {`${uiScalePercent}%`}
+                    </ChipButton>
+                  ))}
+                </div>
+              </SettingRow>
+
+              <SettingRow
+                id="settings-row-accessibility-focus"
+                title={settingsLocaleCopy(locale, {
+    'zh-CN': '始终显示键盘焦点',
+    'zh-TW': '永遠顯示鍵盤焦點',
+    'ja-JP': 'キーボードフォーカスを常に表示',
+    'en-US': 'Always show keyboard focus',
+    'ko-KR': 'Always show keyboard focus',
+  })}
+                description={settingsLocaleCopy(locale, {
+    'zh-CN': '用高亮轮廓明确显示 Tab 键当前所在位置。',
+    'zh-TW': '用醒目輪廓明確顯示 Tab 鍵目前所在位置。',
+    'ja-JP': 'Tab キーで現在選択されている場所を強い輪郭で示します。',
+    'en-US': 'Uses a strong outline to show exactly where Tab navigation is focused.',
+    'ko-KR': 'Uses a strong outline to show exactly where Tab navigation is focused.',
+  })}
+              >
+                <ToggleButton
+                  active={accessibilityPreferences.alwaysShowFocusEnabled}
+                  ariaLabel={settingsLocaleCopy(locale, {
+    'zh-CN': '始终显示键盘焦点',
+    'zh-TW': '永遠顯示鍵盤焦點',
+    'ja-JP': 'キーボードフォーカスを常に表示',
+    'en-US': 'Always show keyboard focus',
+    'ko-KR': 'Always show keyboard focus',
+  })}
+                  disabled={!appSettings}
+                  onClick={() => handleAccessibilityChange({ alwaysShowFocusEnabled: !accessibilityPreferences.alwaysShowFocusEnabled })}
+                />
+              </SettingRow>
+
+              <SettingRow
+                id="settings-row-accessibility-announcements"
+                title={settingsLocaleCopy(locale, {
+    'zh-CN': '播报播放状态',
+    'zh-TW': '播報播放狀態',
+    'ja-JP': '再生状態を読み上げる',
+    'en-US': 'Announce playback status',
+    'ko-KR': 'Announce playback status',
+  })}
+                description={settingsLocaleCopy(locale, {
+    'zh-CN': '让读屏器播报切歌、播放和暂停；不会逐句朗读歌词。',
+    'zh-TW': '讓螢幕閱讀器播報切歌、播放和暫停；不會逐句朗讀歌詞。',
+    'ja-JP': '曲の切り替え、再生、一時停止を読み上げます。歌詞は一行ずつ読み上げません。',
+    'en-US': 'Lets screen readers announce track changes, play, and pause without reading every lyric line.',
+    'ko-KR': 'Lets screen readers announce track changes, play, and pause without reading every lyric line.',
+  })}
+              >
+                <ToggleButton
+                  active={accessibilityPreferences.screenReaderAnnouncementsEnabled}
+                  ariaLabel={settingsLocaleCopy(locale, {
+    'zh-CN': '播报播放状态',
+    'zh-TW': '播報播放狀態',
+    'ja-JP': '再生状態を読み上げる',
+    'en-US': 'Announce playback status',
+    'ko-KR': 'Announce playback status',
+  })}
+                  disabled={!appSettings}
+                  onClick={() => handleAccessibilityChange({ screenReaderAnnouncementsEnabled: !accessibilityPreferences.screenReaderAnnouncementsEnabled })}
+                />
+              </SettingRow>
+            </SettingSection>
+
+            <SettingSection
+              activeKey={activeSection}
+              description={settingsLocaleCopy(locale, {
+    'zh-CN': '预览仍在验证中的功能；每项都可单独关闭并安全回退。',
+    'zh-TW': '預覽仍在驗證中的功能；每項都可單獨關閉並安全回退。',
+    'ja-JP': '検証中の機能を試せます。各機能は個別に無効化でき、安全にフォールバックします。',
+    'en-US': 'Preview features still under validation. Each can be disabled independently with a safe fallback.',
+    'ko-KR': 'Preview features still under validation. Each can be disabled independently with a safe fallback.',
+  })}
+              icon={FlaskConical}
+              id="experimental"
+              title={t('settings.nav.experimental.label')}
+            >
+              <SettingSubsectionTitle {...getSettingsSubsection('experimentalVisual')} />
+              <SettingRow
+                id="settings-row-window-acrylic"
+                highlighted={highlightedSettingId === 'settings-row-window-acrylic'}
+                title={
+                  <span className="settings-title-with-badge">
+                    <span>{t('settings.appearance.windowAcrylic.title')}</span>
+                    <small aria-hidden="true">ECHO Pro</small>
+                  </span>
+                }
+                description={
+                  <span className="settings-experimental-description">
+                    <span>{settingsLocaleCopy(locale, experimentalLabCopy.windowAcrylicDescription)}</span>
+                    {appSettings?.appWindowAcrylicEnabled === true ? <em>{t('settings.appearance.windowAcrylic.themeWarning')}</em> : null}
+                  </span>
+                }
+              >
+                <div className="settings-acrylic-control">
+                  <ToggleButton
+                    active={appSettings?.appWindowAcrylicEnabled === true}
+                    disabled={!appSettings || (appSettings.appWindowAcrylicEnabled !== true && !echoProUnlockedForDisplay)}
+                    onClick={handleWindowAcrylicToggle}
+                  />
+                  {appSettings?.appWindowAcrylicEnabled === true ? (
+                    <div className="settings-acrylic-options">
+                      <div className="settings-acrylic-subtoggle">
+                        <span>{t('settings.appearance.windowAcrylic.keepWhenUnfocused')}</span>
+                        <ToggleButton
+                          active={appSettings.appWindowAcrylicKeepWhenUnfocusedEnabled === true}
+                          disabled={!echoProUnlockedForDisplay}
+                          onClick={handleWindowAcrylicKeepWhenUnfocusedToggle}
+                        />
+                      </div>
+                      <div className="settings-acrylic-slider">
+                        <span>{t('settings.appearance.windowAcrylic.transparency')}</span>
+                        <NumberRangeField
+                          min={0}
+                          max={100}
+                          step={1}
+                          suffix="%"
+                          value={appSettings.appWindowAcrylicTransparencyPercent ?? 70}
+                          disabled={!echoProUnlockedForDisplay}
+                          onChange={handleWindowAcrylicTransparencyChange}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </SettingRow>
+              <div className="settings-experimental-subsection-heading">
+                <SettingSubsectionTitle {...getSettingsSubsection('experimentalPerformance')} />
+                <span>{settingsLocaleCopy(locale, {
+    'zh-CN': '实验功能可能影响稳定性',
+    'zh-TW': '實驗功能可能影響穩定性',
+    'ja-JP': '実験機能は安定性に影響する場合があります',
+    'en-US': 'Experimental features may affect stability',
+    'ko-KR': 'Experimental features may affect stability',
+  })}</span>
+              </div>
               <div
                 className="settings-performance-group"
                 id="settings-row-performance"
@@ -14439,17 +10639,11 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                     : undefined
                 }
               >
-                <div className="settings-performance-heading">
-                  <h3>{t('settings.performance.title')}</h3>
-                  <p>
-                    <span>{t('settings.performance.description')}</span>
-                    <span className="settings-inline-warning-text">{experimentalPerformanceBugNote}</span>
-                  </p>
-                </div>
                 <div className="settings-performance-toggle-list">
                   <div className="settings-performance-toggle" id="settings-row-low-load-playback">
                     <span>
                       <strong>{t('audioDrawer.option.lowLoadPlaybackMode')}</strong>
+                      <small>{settingsLocaleCopy(locale, experimentalLabCopy.lowLoadDescription)}</small>
                     </span>
                     <ToggleButton
                       active={appSettings?.lowLoadPlaybackModeEnabled === true}
@@ -14463,7 +10657,8 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   </div>
                   <div className="settings-performance-toggle" id="settings-row-album-wall-virtualization">
                     <span>
-                      <strong>{t('mediaLibrary.settings.albumWallVirtualization.title')}</strong>
+                      <strong>{settingsLocaleCopy(locale, experimentalLabCopy.albumWallTitle)}</strong>
+                      <small>{settingsLocaleCopy(locale, experimentalLabCopy.albumWallDescription)}</small>
                     </span>
                     <ToggleButton
                       active={appSettings?.albumWallVirtualizationEnabled ?? false}
@@ -14473,7 +10668,8 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   </div>
                   <div className="settings-performance-toggle" id="settings-row-native-direct-local-playback">
                     <span>
-                      <strong>{t('audioDrawer.option.nativeDirectLocalPlayback')}</strong>
+                      <strong>{settingsLocaleCopy(locale, experimentalLabCopy.nativeDirectTitle)}</strong>
+                      <small>{settingsLocaleCopy(locale, experimentalLabCopy.nativeDirectDescription)}</small>
                     </span>
                     <ToggleButton
                       active={appSettings?.audioNativeDirectLocalPlaybackEnabled === true}
@@ -14483,6 +10679,101 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   </div>
                 </div>
               </div>
+              <SettingRow
+                id="settings-row-scan-performance"
+                highlighted={highlightedSettingId === 'settings-row-scan-performance'}
+                title={t('mediaLibrary.settings.scanPerformance.title')}
+                description={t('mediaLibrary.settings.scanPerformance.description')}
+              >
+                <div className="settings-chip-row">
+                  {[
+                    ['low', t('mediaLibrary.settings.scanPerformance.low')],
+                    ['balanced', t('mediaLibrary.settings.scanPerformance.balanced')],
+                    ['performance', t('mediaLibrary.settings.scanPerformance.performance')],
+                    ['ultra', t('mediaLibrary.settings.scanPerformance.ultra')],
+                  ].map(([mode, label]) => (
+                    <ChipButton
+                      active={(appSettings?.scanPerformanceMode ?? 'balanced') === mode}
+                      disabled={!appSettings}
+                      key={mode}
+                      onClick={() => patchAppSettings({ scanPerformanceMode: mode as AppSettings['scanPerformanceMode'] })}
+                    >
+                      {label}
+                    </ChipButton>
+                  ))}
+                </div>
+              </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('experimentalFeatures')} />
+              {advancedNativeOutputAvailable ? (
+                <SettingRow
+                  id="settings-row-dsd-passthrough"
+                  highlighted={highlightedSettingId === 'settings-row-dsd-passthrough'}
+                  title={t('settings.playback.dsdDop.title')}
+                  description={t('settings.playback.dsdDop.description')}
+                >
+                  <ToggleButton
+                    active={appSettings?.audioDsdOutputMode !== 'pcm'}
+                    disabled={!appSettings || (appSettings.audioDsdOutputMode === 'pcm' && !echoProAudioUnlocked)}
+                    onClick={() => void handleDsdDopToggle()}
+                  />
+                </SettingRow>
+              ) : null}
+              <SettingRow
+                id="settings-row-native-file-scanner"
+                highlighted={highlightedSettingId === 'settings-row-native-file-scanner'}
+                title={
+                  <span className="settings-title-with-badge">
+                    <span>Native File Scanner</span>
+                    <small aria-hidden="true" className="settings-title-status">{appSettings?.nativeFileScannerEnabled ? t('common.enabled') : t('common.disabled')}</small>
+                  </span>
+                }
+                description={settingsLocaleCopy(locale, experimentalLabCopy.nativeFileScannerDescription)}
+              >
+                <div className="settings-native-experiment-control">
+                  <div
+                    className="settings-native-experiment-status"
+                    data-state={nativeFileScannerState}
+                    title={nativeFileScannerDiagnostics?.binaryPath ?? undefined}
+                  >
+                    <span>{nativeFileScannerStatusText}</span>
+                    <em>{nativeFileScannerStatsText}</em>
+                    {nativeFileScannerCapabilitiesText ? <em>{nativeFileScannerCapabilitiesText}</em> : null}
+                  </div>
+                  <ToggleButton
+                    active={appSettings?.nativeFileScannerEnabled === true}
+                    disabled={!appSettings}
+                    onClick={() => patchAppSettings({ nativeFileScannerEnabled: !(appSettings?.nativeFileScannerEnabled ?? false) })}
+                  />
+                </div>
+              </SettingRow>
+              <SettingRow
+                id="settings-row-native-metadata-reader"
+                highlighted={highlightedSettingId === 'settings-row-native-metadata-reader'}
+                title={
+                  <span className="settings-title-with-badge">
+                    <span>Native Metadata Reader</span>
+                    <small aria-hidden="true" className="settings-title-status">{appSettings?.nativeMetadataReaderEnabled ? t('common.enabled') : t('common.disabled')}</small>
+                  </span>
+                }
+                description={settingsLocaleCopy(locale, experimentalLabCopy.nativeMetadataReaderDescription)}
+              >
+                <div className="settings-native-experiment-control">
+                  <div
+                    className="settings-native-experiment-status"
+                    data-state={nativeMetadataReaderState}
+                    title={nativeMetadataReaderDiagnostics?.binaryPath ?? undefined}
+                  >
+                    <span>{nativeMetadataReaderStatusText}</span>
+                    <em>{nativeMetadataReaderStatsText}</em>
+                    {nativeMetadataReaderCapabilitiesText ? <em>{nativeMetadataReaderCapabilitiesText}</em> : null}
+                  </div>
+                  <ToggleButton
+                    active={appSettings?.nativeMetadataReaderEnabled === true}
+                    disabled={!appSettings}
+                    onClick={() => patchAppSettings({ nativeMetadataReaderEnabled: !(appSettings?.nativeMetadataReaderEnabled ?? false) })}
+                  />
+                </div>
+              </SettingRow>
               <SettingRow
                 id="settings-row-osu-downloader-feature"
                 highlighted={highlightedSettingId === 'settings-row-osu-downloader-feature'}
@@ -14505,6 +10796,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
             </SettingSection>
 
             <SettingSection activeKey={activeSection} icon={Gauge} id="advancedCustom" title={t('settings.nav.advancedCustom.label')}>
+              <SettingSubsectionTitle {...getSettingsSubsection('advancedInterface')} />
               <SettingRow
                 id="settings-row-settings-optional-sections"
                 highlighted={highlightedSettingId === 'settings-row-settings-optional-sections'}
@@ -14536,26 +10828,8 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   />
                 </div>
               </SettingRow>
-              <SettingRow
-                title={t('mediaLibrary.settings.scanPerformance.title')}
-                description={t('mediaLibrary.settings.scanPerformance.description')}
-              >
-                <div className="settings-chip-row">
-                  {[
-                    ['low', t('mediaLibrary.settings.scanPerformance.low')],
-                    ['balanced', t('mediaLibrary.settings.scanPerformance.balanced')],
-                    ['performance', t('mediaLibrary.settings.scanPerformance.performance')],
-                  ].map(([mode, label]) => (
-                    <ChipButton
-                      active={(appSettings?.scanPerformanceMode ?? 'balanced') === mode}
-                      key={mode}
-                      onClick={() => patchAppSettings({ scanPerformanceMode: mode as AppSettings['scanPerformanceMode'] })}
-                    >
-                      {label}
-                    </ChipButton>
-                  ))}
-                </div>
-              </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('advancedPerformance')} />
+              <SettingSubsectionTitle {...getSettingsSubsection('advancedVisuals')} />
               <SettingRow
                 id="settings-row-remember-window-size"
                 highlighted={highlightedSettingId === 'settings-row-remember-window-size'}
@@ -14616,18 +10890,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   }
                 />
               </SettingRow>
-              <SettingRow
-                id="settings-row-feature-comments-hidden"
-                highlighted={highlightedSettingId === 'settings-row-feature-comments-hidden'}
-                title={t('settings.general.featureCommentsHidden.title')}
-                description={t('settings.general.featureCommentsHidden.description')}
-              >
-                <ToggleButton
-                  active={appSettings?.featureCommentsHidden === true}
-                  disabled={!appSettings}
-                  onClick={() => patchAppSettings({ featureCommentsHidden: !(appSettings?.featureCommentsHidden ?? false) })}
-                />
-              </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('advancedFeedback')} />
               <SettingRow
                 id="settings-row-notifications-disabled"
                 highlighted={highlightedSettingId === 'settings-row-notifications-disabled'}
@@ -14664,32 +10927,17 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   onClick={() => patchAppSettings({ fastStartupEnabled: !(appSettings?.fastStartupEnabled ?? false) })}
                 />
               </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('advancedSafety')} />
               <SettingRow
                 id="settings-row-data-protection-disabled"
                 highlighted={highlightedSettingId === 'settings-row-data-protection-disabled'}
                 title="关闭数据保护"
-                description="打开后不再执行启动、后台、扫描完成和更新前的数据保护快照。默认关闭。"
+                description="默认开启此开关：不执行启动、后台、扫描完成和更新前的数据保护快照；仍保留只读健康检查，异常曲库会停止写入。"
               >
                 <ToggleButton
                   active={appSettings?.dataProtectionDisabled === true}
                   disabled={!appSettings}
-                  onClick={() => patchAppSettings({ dataProtectionDisabled: !(appSettings?.dataProtectionDisabled ?? false) })}
-                />
-              </SettingRow>
-              <SettingRow
-                id="settings-row-home-random-hero-title"
-                highlighted={highlightedSettingId === 'settings-row-home-random-hero-title'}
-                title={t('settings.general.homeRandomHeroTitle.title')}
-                description={t('settings.general.homeRandomHeroTitle.description')}
-              >
-                <ToggleButton
-                  active={appSettings?.homeRandomHeroTitleEnabled === true}
-                  disabled={!appSettings}
-                  onClick={() =>
-                    patchAppSettings({
-                      homeRandomHeroTitleEnabled: !(appSettings?.homeRandomHeroTitleEnabled ?? false),
-                    })
-                  }
+                  onClick={() => patchAppSettings({ dataProtectionDisabled: !(appSettings?.dataProtectionDisabled ?? true) })}
                 />
               </SettingRow>
               <SettingRow
@@ -14712,6 +10960,22 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
 
             <SettingSection activeKey={activeSection} icon={Zap} id="playback" title={t('settings.nav.playback.label')}>
               <SettingSubsectionTitle {...getSettingsSubsection('playbackOutput')} />
+              <SettingRow
+                className="setting-row--full setting-row--compact-panel"
+                title={t('settings.playback.automaticOutput.title')}
+                description={t('settings.playback.automaticOutput.description')}
+              >
+                <div className="settings-output-mode-control">
+                  <ToggleButton
+                    active={appSettings?.audioAutomaticOutputEnabled === true}
+                    disabled={!appSettings || automaticOutputBusy}
+                    onClick={() => void handleAutomaticOutputToggle()}
+                  />
+                  <StatusText tone={status?.automaticOutputStage === 'system-required' || status?.automaticOutputStage === 'failed' ? 'muted' : 'good'}>
+                    {automaticOutputStageMessage}
+                  </StatusText>
+                </div>
+              </SettingRow>
               <SettingRow
                 id="settings-row-no-sound-guide"
                 highlighted={highlightedSettingId === 'settings-row-no-sound-guide'}
@@ -14755,8 +11019,8 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 <div className="settings-output-mode-control">
                   <div className="settings-chip-row">
                     {playbackOutputModesForPlatform.map((mode) => (
-                      <ChipButton active={outputMode === mode} key={mode} onClick={() => handleOutputModeChange(mode)}>
-                        {getPlaybackOutputModeLabel(mode, t)}
+                      <ChipButton active={outputMode === mode} disabled={appSettings?.audioAutomaticOutputEnabled === true} key={mode} onClick={() => handleOutputModeChange(mode)}>
+                        {getPlaybackOutputModeLabel(mode, t, rendererPlatform)}
                       </ChipButton>
                     ))}
                   </div>
@@ -14767,7 +11031,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 <SettingRow title={t('settings.playback.sharedBackend.title')} description={t(getSharedBackendDescriptionKey(rendererPlatform))}>
                   <div className="settings-chip-row">
                     {sharedBackendOptionsForPlatform.map(([backend, labelKey]) => (
-                      <ChipButton active={outputMode === 'shared' && sharedBackend === backend} key={backend} onClick={() => handleSharedBackendChange(backend)}>
+                      <ChipButton active={outputMode === 'shared' && sharedBackend === backend} disabled={appSettings?.audioAutomaticOutputEnabled === true} key={backend} onClick={() => handleSharedBackendChange(backend)}>
                         {t(labelKey)}
                       </ChipButton>
                     ))}
@@ -14786,10 +11050,11 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   options={outputDeviceOptions}
                   onChange={handleDeviceChange}
                   ariaLabel={t('settings.playback.outputDevice.title')}
-                  disabled={compatibleDevices.length === 0}
+                  disabled={compatibleDevices.length === 0 || appSettings?.audioAutomaticOutputEnabled === true}
                   showFilterIcon={false}
                 />
               </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('playbackPerformance')} />
               <SettingRow
                 id="settings-row-low-load-playback-enhancements"
                 highlighted={highlightedSettingId === 'settings-row-low-load-playback-enhancements'}
@@ -14806,6 +11071,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   }
                 />
               </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('playbackMore')} />
               <SettingRow
                 className={`setting-row--full setting-row--compact-panel setting-row--playback-advanced${playbackAdvancedPanelExpanded ? ' is-expanded' : ''}`}
                 title={t('settings.playback.advancedPanel.title')}
@@ -14826,7 +11092,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               </SettingRow>
               {playbackAdvancedPanelExpanded ? (
                 <div className="settings-expanded-panel settings-expanded-panel--playback">
-              <SettingSubsectionTitle {...getSettingsSubsection('playbackAdvanced')} />
+              <SettingSubsectionTitle {...getSettingsSubsection('playbackRecovery')} />
               <SettingRow title={t('settings.playback.troubleshooting.title')} description={t('settings.playback.troubleshooting.description')}>
                 <div className="settings-chip-row">
                   <button
@@ -14866,22 +11132,9 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   }
                 />
               </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('playbackCompatibility')} />
               {advancedNativeOutputAvailable ? (
                 <>
-              <SettingRow
-                title={t('settings.playback.dsdDop.title')}
-                description={
-                  <>
-                    {t('settings.playback.dsdDop.description')}
-                  </>
-                }
-              >
-                <ToggleButton
-                  active={appSettings?.audioDsdOutputMode === 'dop'}
-                  disabled={!appSettings}
-                  onClick={() => void handleDsdDopToggle()}
-                />
-              </SettingRow>
               <SettingRow title={t('audioDrawer.guard.exclusiveInstability.title')} description={t('audioDrawer.guard.exclusiveInstability.description')}>
                 <ToggleButton
                   active={appSettings?.audioExclusiveInstabilityFallbackEnabled ?? false}
@@ -14901,6 +11154,31 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   active={appSettings?.audioSoxrFallbackEnabled ?? true}
                   disabled={!appSettings}
                   onClick={() => void handleSoxrFallbackToggle()}
+                />
+              </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('playbackControls')} />
+              <SettingRow
+                id="settings-row-prevent-sleep-while-playing"
+                highlighted={highlightedSettingId === 'settings-row-prevent-sleep-while-playing'}
+                title={t('settings.playback.preventSleepWhilePlaying.title')}
+                description={t('settings.playback.preventSleepWhilePlaying.description')}
+              >
+                <ToggleButton
+                  active={appSettings?.preventSleepWhilePlaying ?? false}
+                  disabled={!appSettings}
+                  onClick={() => patchAppSettings({ preventSleepWhilePlaying: !(appSettings?.preventSleepWhilePlaying ?? false) })}
+                />
+              </SettingRow>
+              <SettingRow
+                id="settings-row-auto-play-on-startup"
+                highlighted={highlightedSettingId === 'settings-row-auto-play-on-startup'}
+                title={t('settings.playback.autoPlayOnStartup.title')}
+                description={t('settings.playback.autoPlayOnStartup.description')}
+              >
+                <ToggleButton
+                  active={appSettings?.autoPlayOnStartup ?? false}
+                  disabled={!appSettings}
+                  onClick={() => patchAppSettings({ autoPlayOnStartup: !(appSettings?.autoPlayOnStartup ?? false) })}
                 />
               </SettingRow>
               <SettingRow title={t('settings.playback.speedMode.title')} description={t('settings.playback.speedMode.description')}>
@@ -14984,6 +11262,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   </label>
                 </div>
               </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('playbackInterface')} />
               <SettingRow
                 id="settings-row-mini-player"
                 highlighted={highlightedSettingId === 'settings-row-mini-player'}
@@ -15022,6 +11301,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   />
                 </div>
               </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('playbackTransitions')} />
               <SettingRow
                 className="setting-row--full setting-row--compact-panel"
                 id="settings-row-segment-loop"
@@ -15100,145 +11380,18 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   </StatusText>
                 </div>
               </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('playbackLoudness')} />
               <SettingRow
-                className="setting-row--full setting-row--compact-panel"
                 id="settings-row-volume-balance"
                 highlighted={highlightedSettingId === 'settings-row-volume-balance'}
                 title={t('settings.playback.replayGain.title')}
                 description={t('settings.playback.replayGain.description')}
               >
-                <div className="settings-cache-panel settings-cache-panel--replay-gain">
-                  <div className="settings-replay-gain-simple">
-                    <div className="settings-inline-toggle settings-replay-gain-toggle">
-                      <span>{appSettings?.replayGainEnabled ? t('settings.playback.replayGain.status.enabled') : t('settings.playback.replayGain.status.disabled')}</span>
-                      <ToggleButton
-                        active={appSettings?.replayGainEnabled ?? false}
-                        disabled={!appSettings}
-                        onClick={() => handleReplayGainEnabledChange(!(appSettings?.replayGainEnabled ?? false))}
-                      />
-                    </div>
-                    <div className="settings-chip-row settings-chip-row--left settings-replay-gain-presets">
-                      <ChipButton
-                        active={replayGainTargetLufs === SPOTIFY_NORMAL_REPLAY_GAIN_TARGET_LUFS}
-                        onClick={() => handleReplayGainPresetSelect(SPOTIFY_NORMAL_REPLAY_GAIN_TARGET_LUFS)}
-                      >
-                        {t('settings.playback.replayGain.preset.standard')}
-                      </ChipButton>
-                      <ChipButton
-                        active={replayGainTargetLufs === QUIET_REPLAY_GAIN_TARGET_LUFS}
-                        onClick={() => handleReplayGainPresetSelect(QUIET_REPLAY_GAIN_TARGET_LUFS)}
-                      >
-                        {t('settings.playback.replayGain.preset.quiet')}
-                      </ChipButton>
-                    </div>
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      disabled={replayGainAnalysisBusy}
-                      onClick={() => void handleStartReplayGainAnalysis()}
-                    >
-                      <RotateCw className={replayGainAnalysisBusy ? 'spinning-icon' : undefined} size={15} />
-                      {replayGainAnalysisBusy ? t('settings.playback.replayGain.action.analyzing') : t('settings.playback.replayGain.action.analyzeMissing')}
-                    </button>
-                    <button
-                      className="settings-action-button settings-replay-gain-advanced-toggle"
-                      type="button"
-                      onClick={() => setReplayGainAdvancedOpen((open) => !open)}
-                    >
-                      <SlidersHorizontal size={15} />
-                      {t('settings.playback.replayGain.action.advanced')}
-                    </button>
-                  </div>
-                  <div className="settings-replay-gain-summary">
-                    <span>
-                      <em>{t('settings.playback.replayGain.field.mode')}</em>
-                      <strong>{replayGainModeLabel}</strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.playback.replayGain.field.target')}</em>
-                      <strong>{replayGainTargetLufs} LUFS</strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.playback.replayGain.field.applied')}</em>
-                      <strong>{replayGainAppliedLabel}</strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.playback.replayGain.field.progress')}</em>
-                      <strong>{replayGainProgressLabel}</strong>
-                    </span>
-                  </div>
-                  {replayGainAdvancedOpen ? (
-                    <div className="settings-replay-gain-advanced">
-                      <div className="settings-chip-row settings-chip-row--left settings-replay-gain-mode">
-                        {(['track', 'album', 'off'] as const).map((mode) => (
-                          <ChipButton
-                            active={(appSettings?.replayGainMode ?? 'track') === mode}
-                            key={mode}
-                            onClick={() => patchAppSettings({ replayGainMode: mode })}
-                          >
-                            {mode === 'track' ? t('settings.playback.replayGain.mode.track') : mode === 'album' ? t('settings.playback.replayGain.mode.album') : t('settings.playback.replayGain.mode.off')}
-                          </ChipButton>
-                        ))}
-                      </div>
-                      <div className="settings-chip-row settings-chip-row--left settings-chip-row--actions settings-replay-gain-toggles">
-                        <div className="settings-inline-toggle">
-                          <span>{t('settings.playback.replayGain.toggle.preventClipping')}</span>
-                          <ToggleButton
-                            active={appSettings?.replayGainPreventClipping ?? true}
-                            disabled={!appSettings}
-                            onClick={() => patchAppSettings({ replayGainPreventClipping: !(appSettings?.replayGainPreventClipping ?? true) })}
-                          />
-                        </div>
-                        <div className="settings-inline-toggle">
-                          <span>{t('settings.playback.replayGain.toggle.analyzeOnPlay')}</span>
-                          <ToggleButton
-                            active={appSettings?.replayGainAnalyzeOnPlay ?? true}
-                            disabled={!appSettings}
-                            onClick={() => patchAppSettings({ replayGainAnalyzeOnPlay: !(appSettings?.replayGainAnalyzeOnPlay ?? true) })}
-                          />
-                        </div>
-                        <div className="settings-inline-toggle">
-                          <span>{t('settings.playback.replayGain.toggle.analyzeOnScan')}</span>
-                          <ToggleButton
-                            active={appSettings?.replayGainAnalyzeMissingOnScan ?? false}
-                            disabled={!appSettings}
-                            onClick={() => {
-                              const nextAnalyzeOnScan = !(appSettings?.replayGainAnalyzeMissingOnScan ?? false);
-                              patchAppSettings({
-                                replayGainAnalyzeMissingOnScan: nextAnalyzeOnScan,
-                                replayGainAnalyzeMissingOnScanOptIn: nextAnalyzeOnScan,
-                              });
-                            }}
-                          />
-                        </div>
-                        <label className="settings-number-field">
-                          <span>{t('settings.playback.replayGain.field.target')} LUFS</span>
-                          <input
-                            type="number"
-                            min={-24}
-                            max={-11}
-                            step={0.5}
-                            value={appSettings?.replayGainTargetLufs ?? SPOTIFY_NORMAL_REPLAY_GAIN_TARGET_LUFS}
-                            onChange={(event) => patchAppSettings({ replayGainTargetLufs: Number(event.currentTarget.value) })}
-                          />
-                        </label>
-                        <label className="settings-number-field">
-                          <span>{t('settings.playback.replayGain.field.preamp')} dB</span>
-                          <input
-                            type="number"
-                            min={-12}
-                            max={12}
-                            step={0.5}
-                            value={appSettings?.replayGainPreampDb ?? 0}
-                            onChange={(event) => patchAppSettings({ replayGainPreampDb: Number(event.currentTarget.value) })}
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  ) : null}
-                  {replayGainAnalysisMessage ? <p className="settings-inline-note">{replayGainAnalysisMessage}</p> : null}
-                  {replayGainAnalysisJob?.errorCount ? <p className="settings-inline-error">{t('settings.playback.replayGain.error', { count: replayGainAnalysisJob.errorCount })}</p> : null}
-                </div>
+                <ToggleButton
+                  active={appSettings?.replayGainEnabled ?? false}
+                  disabled={!appSettings}
+                  onClick={() => handleReplayGainEnabledChange(!(appSettings?.replayGainEnabled ?? false))}
+                />
               </SettingRow>
               <SettingRow
                 id="settings-row-mono-audio"
@@ -15252,6 +11405,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   onClick={() => handleMonoAudioToggle(!(channelBalanceState.enabled && channelBalanceState.monoMode === 'sum'))}
                 />
               </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('playbackDiagnostics')} />
               <SettingRow
                 className="setting-row--full setting-row--audio-status"
                 id="settings-row-audio-status"
@@ -15293,13 +11447,52 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               ) : null}
             </SettingSection>
 
-            <SettingSection activeKey={activeSection} icon={Keyboard} id="shortcuts" title={t('settings.nav.shortcuts.label')}>
-              <SettingRow
-                className="setting-row--full setting-row--compact-panel"
-                title={t('settings.shortcuts.title')}
-                description={t('settings.shortcuts.description')}
-              >
-                <div className="settings-shortcut-toolbar">
+            <SettingSection
+              activeKey={activeSection}
+              context={settingsLocaleCopy(locale, {
+    'zh-CN': '设置 / 高级',
+    'zh-TW': '設定 / 進階',
+    'ja-JP': '設定 / 詳細',
+    'en-US': 'Settings / Advanced',
+    'ko-KR': 'Settings / Advanced',
+  })}
+              description={settingsLocaleCopy(locale, {
+    'zh-CN': '配置播放器在窗口内与系统全局的按键操作。',
+    'zh-TW': '設定播放器在視窗內與系統全域的按鍵操作。',
+    'ja-JP': 'アプリ内とシステム全体のキーボード操作を設定します。',
+    'en-US': 'Configure in-app and system-wide player controls.',
+    'ko-KR': 'Configure in-app and system-wide player controls.',
+  })}
+              icon={Keyboard}
+              id="shortcuts"
+              title={t('settings.nav.shortcuts.label')}
+            >
+              <SettingSubsectionTitle id="settings-shortcuts-profile" {...getSettingsSubsection('shortcutsMain')} />
+              <div className="settings-shortcut-profile">
+                <span className="settings-shortcut-profile-icon" aria-hidden="true">
+                  <Keyboard size={19} />
+                </span>
+                <div className="settings-shortcut-profile-copy">
+                  <div>
+                    <strong>
+                      {settingsLocaleCopy(locale, {
+    'zh-CN': '默认方案',
+    'zh-TW': '預設方案',
+    'ja-JP': 'デフォルト',
+    'en-US': 'Default profile',
+    'ko-KR': 'Default profile',
+  })}
+                    </strong>
+                    <span>
+                      {settingsLocaleCopy(locale, {
+    'zh-CN': '当前方案',
+    'zh-TW': '目前方案',
+    'ja-JP': '使用中',
+    'en-US': 'Current',
+    'ko-KR': 'Current',
+  })}
+                    </span>
+                  </div>
                   <div className="settings-shortcut-toolbar-actions">
                     <button className="settings-action-button" type="button" disabled={!appSettings} onClick={() => handleShortcutRecommendedReset('local')}>
                       {t('settings.shortcuts.action.restoreLocalRecommended')}
@@ -15319,6 +11512,9 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                       {t('settings.shortcuts.summary.issues', { count: shortcutSummary.issues })}
                     </span>
                   </div>
+                </div>
+              </div>
+              <div className="settings-shortcut-toolbar">
                   <div className="settings-shortcut-filter" role="group" aria-label={t('settings.shortcuts.filter.aria')}>
                     {shortcutFilterOptions.map((option) => (
                       <ChipButton
@@ -15331,8 +11527,8 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                     ))}
                   </div>
                   <p className="settings-inline-note">{t('settings.shortcuts.note')}</p>
-                </div>
-              </SettingRow>
+              </div>
+              <SettingSubsectionTitle id="settings-shortcuts-bindings" {...getSettingsSubsection('shortcutsBindings')} />
               <div className="setting-row setting-row--shortcut setting-row--shortcut-header">
                 <span>{t('settings.shortcuts.column.function')}</span>
                 <span>{t('settings.shortcuts.column.local')}</span>
@@ -15395,6 +11591,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   <SettingRow
                     className="setting-row--shortcut"
                     key={item.action}
+                    leadingIcon={shortcutActionIcons[item.action] ?? KeyRound}
                     title={t(item.titleKey)}
                     description={t(item.descriptionKey)}
                   >
@@ -15410,11 +11607,20 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               })}
             </SettingSection>
 
-            <SettingSection activeKey={activeSection} icon={Captions} id="lyrics" title={t('route.lyricsSettings.label')}>
-              <LyricsSettingsPanel className="settings-lyrics-panel" highlightedSettingId={highlightedSettingId} variant="settings" />
-            </SettingSection>
+            <LyricsSettingsSection
+              activeKey={activeSection}
+              getSubsection={getSettingsSubsection}
+              highlightedSettingId={highlightedSettingId}
+              t={t}
+            />
 
             <SettingSection activeKey={activeSection} icon={Clapperboard} id="mv" title={t('route.mvSettings.label')}>
+              <div className="settings-mv-workspace">
+                <div className="settings-mv-primary-column">
+              <SettingSubsectionTitle
+                {...getSettingsSubsection('mvOverview')}
+                title={settingsLocaleCopy(locale, { 'zh-CN': '基础与画质', 'zh-TW': '基礎與畫質', 'ja-JP': '基本と画質', 'en-US': 'Basics and quality', 'ko-KR': 'Basics and quality' })}
+              />
               <SettingRow
                 className="setting-row--full setting-row--compact-panel setting-row--mv-overview"
                 title={t('route.mvSettings.label')}
@@ -15451,6 +11657,10 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   </div>
                 </div>
               </SettingRow>
+              <SettingSubsectionTitle
+                {...getSettingsSubsection('mvNetwork')}
+                title={settingsLocaleCopy(locale, { 'zh-CN': '网络匹配', 'zh-TW': '網路匹配', 'ja-JP': 'ネットワーク一致', 'en-US': 'Network matching', 'ko-KR': 'Network matching' })}
+              />
               <SettingRow
                 className="setting-row--full setting-row--compact-panel"
                 title={t('mvSettings.network.title')}
@@ -15477,9 +11687,9 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                     <div className="settings-inline-toggle">
                       <span>{t('mvSettings.network.titleOnlySearch')}</span>
                       <ToggleButton
-                        active={appSettings?.mvTitleOnlySearch !== false}
+                        active={appSettings?.mvTitleOnlySearch === true}
                         disabled={!appSettings}
-                        onClick={() => patchMvSettings({ titleOnlySearch: appSettings?.mvTitleOnlySearch === false })}
+                        onClick={() => patchMvSettings({ titleOnlySearch: !(appSettings?.mvTitleOnlySearch === true) })}
                       />
                     </div>
                     <div className="settings-inline-toggle">
@@ -15537,41 +11747,81 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                       step={1}
                       suffix="%"
                       value={Math.round((appSettings?.mvAutoApplyThreshold ?? 0.7) * 100)}
-                      onChange={(value) => patchMvSettings({ autoApplyThreshold: mvThresholdFromPercent(value) })}
+                      onChange={(value) => previewAndPersistMvTuning({ autoApplyThreshold: mvThresholdFromPercent(value) })}
                     />
-                  </div>
-                  <div className="settings-chip-row settings-chip-row--left settings-chip-row--actions settings-mv-provider-grid">
-                    {mvProviderOrder.map((provider, index) => (
-                      <div className="settings-inline-toggle" key={provider}>
-                        <span>{`${index + 1}. ${mvProviderLabels[provider]}`}</span>
-                        <ToggleButton
-                          active={mvEnabledProviders.has(provider)}
-                          disabled={!appSettings}
-                          onClick={() => handleMvProviderToggle(provider)}
-                        />
-                        <button
-                          className="settings-icon-button"
-                          type="button"
-                          aria-label={`Move ${mvProviderLabels[provider]} up`}
-                          disabled={!appSettings || index === 0}
-                          onClick={() => handleMvProviderMove(provider, -1)}
-                        >
-                          <ChevronDown size={14} style={{ transform: 'rotate(180deg)' }} />
-                        </button>
-                        <button
-                          className="settings-icon-button"
-                          type="button"
-                          aria-label={`Move ${mvProviderLabels[provider]} down`}
-                          disabled={!appSettings || index === mvProviderOrder.length - 1}
-                          onClick={() => handleMvProviderMove(provider, 1)}
-                        >
-                          <ChevronDown size={14} />
-                        </button>
-                      </div>
-                    ))}
                   </div>
                 </div>
               </SettingRow>
+                </div>
+
+                <aside className="settings-mv-side-column">
+                  <section className="settings-mv-side-panel settings-mv-side-panel--providers">
+                    <header className="settings-mv-side-heading">
+                      <strong>{settingsLocaleCopy(locale, { 'zh-CN': '来源优先级', 'zh-TW': '來源優先級', 'ja-JP': 'ソース優先度', 'en-US': 'Source priority', 'ko-KR': 'Source priority' })}</strong>
+                      <Info size={14} aria-hidden="true" />
+                    </header>
+                    <div className="settings-mv-provider-list">
+                      {mvProviderOrder.map((provider, index) => (
+                        <div className="settings-mv-provider-row" key={provider}>
+                          <span className="settings-mv-provider-rank">{index + 1}</span>
+                          <strong>{mvProviderLabels[provider]}</strong>
+                          <ToggleButton
+                            active={mvEnabledProviders.has(provider)}
+                            disabled={!appSettings}
+                            onClick={() => handleMvProviderToggle(provider)}
+                          />
+                          <button
+                            className="settings-icon-button"
+                            type="button"
+                            aria-label={`Move ${mvProviderLabels[provider]} up`}
+                            disabled={!appSettings || index === 0}
+                            onClick={() => handleMvProviderMove(provider, -1)}
+                          >
+                            <ChevronDown size={14} style={{ transform: 'rotate(180deg)' }} />
+                          </button>
+                          <button
+                            className="settings-icon-button"
+                            type="button"
+                            aria-label={`Move ${mvProviderLabels[provider]} down`}
+                            disabled={!appSettings || index === mvProviderOrder.length - 1}
+                            onClick={() => handleMvProviderMove(provider, 1)}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="settings-mv-side-panel settings-mv-side-panel--summary">
+                    <header className="settings-mv-side-heading">
+                      <strong>{settingsLocaleCopy(locale, { 'zh-CN': '当前配置', 'zh-TW': '目前設定', 'ja-JP': '現在の設定', 'en-US': 'Current configuration', 'ko-KR': 'Current configuration' })}</strong>
+                    </header>
+                    <dl className="settings-mv-summary-list">
+                      <div>
+                        <dt>{t('mvSettings.general.enabled')}</dt>
+                        <dd>{(appSettings?.mvEnabled ?? true) ? t('mvSettings.status.on') : t('mvSettings.status.off')}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('mvSettings.network.maxQuality')}</dt>
+                        <dd>{mvQualityLabels[appSettings?.mvMaxQuality ?? 'max']}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('mvSettings.network.autoApplyThreshold')}</dt>
+                        <dd>{formatMvThreshold(appSettings?.mvAutoApplyThreshold)}</dd>
+                      </div>
+                      <div>
+                        <dt>{settingsLocaleCopy(locale, { 'zh-CN': '来源数量', 'zh-TW': '來源數量', 'ja-JP': 'ソース数', 'en-US': 'Sources', 'ko-KR': 'Sources' })}</dt>
+                        <dd>{mvEnabledProviders.size}</dd>
+                      </div>
+                      <div>
+                        <dt>{settingsLocaleCopy(locale, { 'zh-CN': '当前来源', 'zh-TW': '目前來源', 'ja-JP': '現在のソース', 'en-US': 'Active sources', 'ko-KR': 'Active sources' })}</dt>
+                        <dd>{mvProviderOrder.filter((provider) => mvEnabledProviders.has(provider)).map((provider) => mvProviderLabels[provider]).join(', ') || t('mvSettings.status.none')}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                </aside>
+
               <SettingRow
                 className="setting-row--full setting-row--compact-panel"
                 title={t('mvSettings.immersive.title')}
@@ -15600,7 +11850,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                       step={1}
                       suffix="%"
                       value={appSettings?.mvImmersiveBackgroundScalePercent ?? 115}
-                      onChange={(value) => patchMvSettings({ immersiveBackgroundScalePercent: value })}
+                      onChange={(value) => previewAndPersistMvTuning({ immersiveBackgroundScalePercent: value })}
                     />
                   </div>
                   <div className="settings-wallpaper-control">
@@ -15611,7 +11861,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                       step={1}
                       suffix="px"
                       value={appSettings?.mvImmersiveBackgroundBlurPx ?? 0}
-                      onChange={(value) => patchMvSettings({ immersiveBackgroundBlurPx: value })}
+                      onChange={(value) => previewAndPersistMvTuning({ immersiveBackgroundBlurPx: value })}
                     />
                   </div>
                   <div className="settings-wallpaper-control">
@@ -15622,7 +11872,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                       step={1}
                       suffix="%"
                       value={appSettings?.mvImmersiveBackgroundBrightnessPercent ?? 100}
-                      onChange={(value) => patchMvSettings({ immersiveBackgroundBrightnessPercent: value })}
+                      onChange={(value) => previewAndPersistMvTuning({ immersiveBackgroundBrightnessPercent: value })}
                     />
                   </div>
                   <div className="settings-wallpaper-control">
@@ -15633,101 +11883,386 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                       step={1}
                       suffix="%"
                       value={appSettings?.mvImmersiveBackgroundOverlayOpacityPercent ?? 0}
-                      onChange={(value) => patchMvSettings({ immersiveBackgroundOverlayOpacityPercent: value })}
+                      onChange={(value) => previewAndPersistMvTuning({ immersiveBackgroundOverlayOpacityPercent: value })}
                     />
                   </div>
                 </div>
               </SettingRow>
+              </div>
             </SettingSection>
 
-            <SettingSection activeKey={activeSection} icon={Link2} id="integrations" title={t('settings.nav.integrations.label')}>
-              <SettingRow
-                className="setting-row--full"
-                id="settings-row-network-proxy"
-                highlighted={highlightedSettingId === 'settings-row-network-proxy'}
-                title={t('settings.integrations.networkProxy.title')}
-                description={t('settings.integrations.networkProxy.description')}
-              >
-                <div className={`settings-cache-panel settings-cache-panel--bare settings-cache-panel--network-proxy settings-cache-panel--network-proxy-${networkProxyDraft.mode}`}>
-                  <div className="settings-proxy-grid">
-                    <label className="settings-proxy-field settings-proxy-field--mode">
-                      <span>{t('settings.integrations.networkProxy.mode')}</span>
-                      <StyledSelect
-                        className="settings-select-control"
-                        value={networkProxyDraft.mode}
-                        options={buildNetworkProxyModeOptions(t)}
-                        onChange={(mode) => {
-                          setNetworkProxyDraft((current) => ({ ...current, mode }));
-                          setNetworkProxyTestResult(null);
+            <SettingSection
+              activeKey={activeSection}
+              icon={activeSection === 'accounts' ? User : Link2}
+              id={activeSection === 'accounts' ? 'accounts' : 'integrations'}
+              title={t(activeSection === 'accounts' ? 'settings.nav.accounts.label' : 'settings.nav.integrations.label')}
+            >
+              {activeSection === 'integrations' ? (
+                <div className="settings-integrations-workspace">
+                  <div className="settings-integrations-toolbar">
+                    <p>{t('settings.nav.integrations.description')}</p>
+                    <div>
+                      <button
+                        className="settings-action-button"
+                        type="button"
+                        onClick={() => {
+                          void Promise.all([
+                            refreshDiscordPresenceStatus(),
+                            refreshStageBridgeStatus(),
+                            refreshSmtcDiagnostics(),
+                            refreshTaskbarPlaybackStatus(),
+                          ]);
                         }}
-                        ariaLabel={t('settings.integrations.networkProxy.modeAria')}
-                        disabled={!appSettings || networkProxyBusy !== null}
-                        showFilterIcon={false}
-                      />
-                    </label>
-                    <label className={`settings-proxy-field settings-proxy-field--manual${networkProxyDraft.mode === 'manual' ? ' is-active' : ''}`}>
-                      <span>{t('settings.integrations.networkProxy.manualUrl')}</span>
-                      <input
-                        type="text"
-                        value={networkProxyDraft.proxyUrl}
-                        placeholder={t('settings.integrations.networkProxy.manualPlaceholder')}
-                        disabled={networkProxyDraft.mode !== 'manual' || networkProxyBusy !== null}
-                        onChange={(event) => {
-                          setNetworkProxyDraft((current) => ({ ...current, proxyUrl: event.target.value }));
-                          setNetworkProxyTestResult(null);
-                        }}
-                      />
-                    </label>
-                    <label className={`settings-proxy-field settings-proxy-field--pac${networkProxyDraft.mode === 'pac' ? ' is-active' : ''}`}>
-                      <span>{t('settings.integrations.networkProxy.pacUrl')}</span>
-                      <input
-                        type="text"
-                        value={networkProxyDraft.pacUrl}
-                        placeholder="https://example.com/proxy.pac"
-                        disabled={networkProxyDraft.mode !== 'pac' || networkProxyBusy !== null}
-                        onChange={(event) => {
-                          setNetworkProxyDraft((current) => ({ ...current, pacUrl: event.target.value }));
-                          setNetworkProxyTestResult(null);
-                        }}
-                      />
-                    </label>
-                    <label className="settings-proxy-field settings-proxy-field--wide settings-proxy-field--bypass">
-                      <span>{t('settings.integrations.networkProxy.bypass')}</span>
-                      <input
-                        type="text"
-                        value={networkProxyDraft.bypassRules}
-                        disabled={networkProxyDraft.mode === 'off' || networkProxyDraft.mode === 'system' || networkProxyBusy !== null}
-                        onChange={(event) => {
-                          setNetworkProxyDraft((current) => ({ ...current, bypassRules: event.target.value }));
-                          setNetworkProxyTestResult(null);
-                        }}
-                      />
-                    </label>
+                      >
+                        <RefreshCw size={15} />
+                        {t('settings.integrations.accountPanel.refreshAll')}
+                      </button>
+                      <span className="settings-integrations-attention">
+                        <i aria-hidden="true" />
+                        {integrationsAttentionCount} {integrationsNeedsAttention}
+                      </span>
+                    </div>
                   </div>
-                  <p className="settings-inline-note settings-proxy-note">
-                    {t('settings.integrations.networkProxy.note')}
-                  </p>
-                  <div className="settings-proxy-footer">
-                    <div className="settings-chip-row settings-chip-row--left settings-proxy-actions">
-                      <button className="settings-action-button" type="button" disabled={!appSettings || networkProxyBusy !== null} onClick={handleNetworkProxySave}>
+
+                  <section className="settings-integrations-overview" aria-labelledby="settings-integrations-overview-title">
+                    <h3 id="settings-integrations-overview-title">{integrationsOverviewTitle}</h3>
+                    <div className="settings-integrations-overview-grid">
+                      <button type="button" onClick={() => handleSectionIndexClick('settings-row-network-proxy')}>
+                        <span className="settings-integrations-overview-icon"><Globe2 size={20} /></span>
+                        <span><strong>{t('settings.integrations.networkProxy.title')}</strong><small>{networkProxyOverviewLabel}</small></span>
+                        <em>{integrationsConfigure}</em>
+                      </button>
+                      <button type="button" onClick={() => handleSectionIndexClick('settings-row-discord-presence')}>
+                        <span className="settings-integrations-overview-icon"><MessageSquare size={20} /></span>
+                        <span><strong>{getSettingsSubsection('integrationsExternal').title}</strong><small>{discordPresenceEnabled ? discordPresenceLabel : t('common.disabled')}</small></span>
+                        <em>{integrationsConfigure}</em>
+                      </button>
+                      <button type="button" onClick={() => handleSectionIndexClick('settings-row-smtc')} disabled={!windowsIntegrationAvailable}>
+                        <span className="settings-integrations-overview-icon"><Monitor size={20} /></span>
+                        <span><strong>{getSettingsSubsection('integrationsWindows').title}</strong><small>{integrationsEnabledCount(windowsIntegrationEnabledCount)}</small></span>
+                        <em>{integrationsConfigure}</em>
+                      </button>
+                      <button type="button" onClick={() => handleSectionIndexClick('settings-row-mobile-integration')}>
+                        <span className="settings-integrations-overview-icon"><QrCode size={20} /></span>
+                        <span><strong>{getSettingsSubsection('integrationsMobile').title}</strong><small>{integrationsMobileSummary}</small></span>
+                        <em>{integrationsConfigure}</em>
+                      </button>
+                    </div>
+                  </section>
+
+                  <div className="settings-integrations-main-grid">
+                    <section className="settings-integrations-common" aria-labelledby="settings-integrations-common-title">
+                      <h3 id="settings-integrations-common-title">{integrationsCommonTitle}</h3>
+                      <div className="settings-integrations-service-list">
+                        <div className="settings-integrations-service-row" id="settings-row-discord-presence" data-search-highlight={highlightedSettingId === 'settings-row-discord-presence' ? 'true' : undefined}>
+                          <span className="settings-integrations-service-icon is-discord"><MessageSquare size={20} /></span>
+                          <div className="settings-integrations-service-copy">
+                            <h4>{t('settings.integrations.discord.title')}</h4>
+                            <p>{t('settings.integrations.discord.description')}</p>
+                          </div>
+                          <StatusText tone={discordPresenceEnabled ? 'good' : 'muted'}>{discordPresenceEnabled ? discordPresenceLabel : t('common.disabled')}</StatusText>
+                          <ToggleButton active={discordPresenceEnabled} disabled={!appSettings} onClick={() => void handleDiscordPresenceToggle()} />
+                          <button className="settings-action-button" type="button" onClick={() => void refreshDiscordPresenceStatus()}>
+                            {t('settings.integrations.discord.action.refresh')}
+                          </button>
+                        </div>
+                        <div className="settings-integrations-service-row" id="settings-row-obs-browser-source" data-search-highlight={highlightedSettingId === 'settings-row-obs-browser-source' ? 'true' : undefined}>
+                          <span className="settings-integrations-service-icon is-obs"><Clapperboard size={20} /></span>
+                          <div className="settings-integrations-service-copy">
+                            <h4>{t('settings.integrations.obs.title')}</h4>
+                            <p>{t('settings.integrations.obs.description')}</p>
+                          </div>
+                          <StatusText tone={obsBrowserSourceEnabled && stageBridgeRunning ? 'good' : 'muted'}>
+                            {obsBrowserSourceEnabled ? obsBrowserSourceUrl : t('common.disabled')}
+                          </StatusText>
+                          <ToggleButton active={obsBrowserSourceEnabled} disabled={!appSettings} onClick={() => void handleStageBridgeToggle('obsBrowserSourceEnabled')} />
+                          <button
+                            className="settings-action-button"
+                            type="button"
+                            disabled={!stageBridgeStatus?.obsUrl}
+                            onClick={() => stageBridgeStatus?.obsUrl && void copyTextToClipboard(stageBridgeStatus.obsUrl)}
+                          >
+                            {t('settings.integrations.stage.action.copyUrl')}
+                          </button>
+                        </div>
+                        {windowsIntegrationAvailable ? (
+                          <div className="settings-integrations-service-row" id="settings-row-smtc" data-search-highlight={highlightedSettingId === 'settings-row-smtc' ? 'true' : undefined}>
+                            <span className="settings-integrations-service-icon is-windows"><Monitor size={20} /></span>
+                            <div className="settings-integrations-service-copy">
+                              <h4>{t('settings.integrations.smtc.title')}</h4>
+                              <p>{t('settings.integrations.smtc.description')}</p>
+                            </div>
+                            <StatusText tone={(appSettings?.smtcEnabled ?? true) ? 'good' : 'muted'}>{smtcLabel}</StatusText>
+                            <ToggleButton active={appSettings?.smtcEnabled ?? true} disabled={!appSettings} onClick={() => patchAppSettings({ smtcEnabled: !(appSettings?.smtcEnabled ?? true) })} />
+                            <button
+                              className="settings-action-button"
+                              type="button"
+                              disabled={smtcRestarting || !(appSettings?.smtcEnabled ?? true)}
+                              onClick={() => void restartSmtcSupport()}
+                            >
+                              {smtcRestarting ? t('settings.integrations.smtc.action.restarting') : t('settings.integrations.smtc.action.restart')}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </section>
+
+                    <section className="settings-integrations-proxy" id="settings-row-network-proxy" data-search-highlight={highlightedSettingId === 'settings-row-network-proxy' ? 'true' : undefined} aria-labelledby="settings-integrations-proxy-title">
+                      <h3 id="settings-integrations-proxy-title">{t('settings.integrations.networkProxy.title')}</h3>
+                      <label className="settings-integrations-proxy-control">
+                        <span>{t('settings.integrations.networkProxy.mode')}</span>
+                        <StyledSelect
+                          className="settings-select-control"
+                          value={networkProxyDraft.mode}
+                          options={buildNetworkProxyModeOptions(t)}
+                          onChange={(mode) => {
+                            setNetworkProxyDraft((current) => ({ ...current, mode }));
+                            setNetworkProxyTestResult(null);
+                          }}
+                          ariaLabel={t('settings.integrations.networkProxy.modeAria')}
+                          disabled={!appSettings || networkProxyBusy !== null}
+                          showFilterIcon={false}
+                        />
+                      </label>
+                      <label className="settings-integrations-proxy-control">
+                        <span>{t('settings.integrations.networkProxy.manualUrl')}</span>
+                        <input
+                          type="text"
+                          value={networkProxyDraft.proxyUrl}
+                          placeholder={t('settings.integrations.networkProxy.manualPlaceholder')}
+                          disabled={networkProxyDraft.mode !== 'manual' || networkProxyBusy !== null}
+                          onChange={(event) => {
+                            setNetworkProxyDraft((current) => ({ ...current, proxyUrl: event.target.value }));
+                            setNetworkProxyTestResult(null);
+                          }}
+                        />
+                      </label>
+                      {networkProxyTestResult ? (
+                        <p className={`settings-integrations-proxy-result ${networkProxyTestResult.ok ? 'is-ok' : 'is-error'}`}>
+                          <i aria-hidden="true" />
+                          {networkProxyTestResult.message}
+                          {networkProxyTestResult.elapsedMs ? ` · ${networkProxyTestResult.elapsedMs} ms` : ''}
+                        </p>
+                      ) : (
+                        <p className="settings-integrations-proxy-result"><i aria-hidden="true" />{integrationsProxyUnchecked}</p>
+                      )}
+                      <button className="settings-action-button settings-integrations-proxy-save" type="button" disabled={!appSettings || networkProxyBusy !== null} onClick={handleNetworkProxySave}>
                         <Save size={15} />
                         {networkProxyBusy === 'save' ? t('settings.integrations.networkProxy.saveBusy') : t('settings.integrations.networkProxy.save')}
                       </button>
-                      <button className="settings-action-button" type="button" disabled={!appSettings || networkProxyBusy !== null} onClick={handleNetworkProxyTest}>
-                        <RotateCw size={15} />
-                        {networkProxyBusy === 'test' ? t('settings.integrations.networkProxy.testBusy') : t('settings.integrations.networkProxy.test')}
-                      </button>
-                    </div>
+                      <details className="settings-integrations-proxy-advanced">
+                        <summary>{integrationsAdvancedSettings}<ChevronRight size={15} /></summary>
+                        <label className="settings-integrations-proxy-control">
+                          <span>{t('settings.integrations.networkProxy.pacUrl')}</span>
+                          <input
+                            type="text"
+                            value={networkProxyDraft.pacUrl}
+                            placeholder="https://example.com/proxy.pac"
+                            disabled={networkProxyDraft.mode !== 'pac' || networkProxyBusy !== null}
+                            onChange={(event) => {
+                              setNetworkProxyDraft((current) => ({ ...current, pacUrl: event.target.value }));
+                              setNetworkProxyTestResult(null);
+                            }}
+                          />
+                        </label>
+                        <label className="settings-integrations-proxy-control">
+                          <span>{t('settings.integrations.networkProxy.bypass')}</span>
+                          <input
+                            type="text"
+                            value={networkProxyDraft.bypassRules}
+                            disabled={networkProxyDraft.mode === 'off' || networkProxyDraft.mode === 'system' || networkProxyBusy !== null}
+                            onChange={(event) => {
+                              setNetworkProxyDraft((current) => ({ ...current, bypassRules: event.target.value }));
+                              setNetworkProxyTestResult(null);
+                            }}
+                          />
+                        </label>
+                        <p>{t('settings.integrations.networkProxy.note')}</p>
+                        <button className="settings-action-button" type="button" disabled={!appSettings || networkProxyBusy !== null} onClick={handleNetworkProxyTest}>
+                          <RotateCw size={15} />
+                          {networkProxyBusy === 'test' ? t('settings.integrations.networkProxy.testBusy') : t('settings.integrations.networkProxy.test')}
+                        </button>
+                      </details>
+                    </section>
                   </div>
-                  {networkProxyTestResult ? (
-                    <p className={`settings-inline-note settings-proxy-result ${networkProxyTestResult.ok ? 'is-ok' : 'is-error'}`}>
-                      {networkProxyTestResult.message}
-                      {networkProxyTestResult.resolvedProxy ? `${t('settings.integrations.networkProxy.result.separator')}${networkProxyTestResult.resolvedProxy}` : ''}
-                      {networkProxyTestResult.elapsedMs ? `${t('settings.integrations.networkProxy.result.separator')}${networkProxyTestResult.elapsedMs}ms` : ''}
-                    </p>
-                  ) : null}
+
+                  <EchoLinkBasicPanel />
+                  <MqttIntegrationPanel />
+
+                  <section className="settings-integrations-additional" aria-labelledby="settings-integrations-additional-title">
+                    <h3 id="settings-integrations-additional-title">{integrationsAdditionalTitle}</h3>
+                    <div className="settings-integrations-service-list">
+                      <div className="settings-integrations-service-row" id="settings-row-stage-api" data-search-highlight={highlightedSettingId === 'settings-row-stage-api' ? 'true' : undefined}>
+                        <span className="settings-integrations-service-icon"><Link2 size={20} /></span>
+                        <div className="settings-integrations-service-copy"><h4>{t('settings.integrations.stage.title')}</h4><p>{t('settings.integrations.stage.description')}</p></div>
+                        <StatusText tone={appSettings?.stageApiEnabled && stageBridgeRunning ? 'good' : 'muted'}>{appSettings?.stageApiEnabled ? stageBridgeUrl : t('common.disabled')}</StatusText>
+                        <ToggleButton active={appSettings?.stageApiEnabled === true} disabled={!appSettings} onClick={() => void handleStageBridgeToggle('stageApiEnabled')} />
+                        <button className="settings-action-button" type="button" disabled={!stageBridgeStatus?.url} onClick={() => stageBridgeStatus?.url && void copyTextToClipboard(stageBridgeStatus.url)}>{t('settings.integrations.stage.action.copyUrl')}</button>
+                      </div>
+                      {windowsIntegrationAvailable ? (
+                        <>
+                          <div className="settings-integrations-service-row" id="settings-row-smtc-lyrics" data-search-highlight={highlightedSettingId === 'settings-row-smtc-lyrics' ? 'true' : undefined}>
+                            <span className="settings-integrations-service-icon"><Captions size={20} /></span>
+                            <div className="settings-integrations-service-copy"><h4>{t('settings.integrations.smtcLyrics.title')}</h4><p>{t('settings.integrations.smtcLyrics.description')}</p></div>
+                            <span />
+                            <ToggleButton active={appSettings?.smtcLyricsEnabled ?? false} disabled={!appSettings || !(appSettings?.smtcEnabled ?? true)} onClick={() => patchAppSettings({ smtcLyricsEnabled: !(appSettings?.smtcLyricsEnabled ?? false) })} />
+                          </div>
+                          <div className="settings-integrations-service-row" id="settings-row-taskbar-mini-player" data-search-highlight={highlightedSettingId === 'settings-row-taskbar-mini-player' ? 'true' : undefined}>
+                            <span className="settings-integrations-service-icon"><Monitor size={20} /></span>
+                            <div className="settings-integrations-service-copy"><h4>{t('settings.integrations.taskbarMiniPlayer.title')}</h4><p>{t('settings.integrations.taskbarMiniPlayer.description')}</p></div>
+                            <span />
+                            <ToggleButton active={appSettings?.taskbarMiniPlayerEnabled ?? false} disabled={!appSettings || !window.echo?.taskbarMiniPlayer?.setEnabled} onClick={() => applyTaskbarMiniPlayerEnabled(!(appSettings?.taskbarMiniPlayerEnabled ?? false))} />
+                          </div>
+                          <div className="settings-integrations-service-row" id="settings-row-taskbar-playback" data-search-highlight={highlightedSettingId === 'settings-row-taskbar-playback' ? 'true' : undefined}>
+                            <span className="settings-integrations-service-icon"><Play size={20} /></span>
+                            <div className="settings-integrations-service-copy"><h4>{t('settings.integrations.taskbarPlayback.title')}</h4><p>{t('settings.integrations.taskbarPlayback.description')}</p></div>
+                            <StatusText tone={taskbarPlaybackStatus?.visible ? 'good' : 'muted'}>{taskbarPlaybackLabel}</StatusText>
+                            <ToggleButton active={appSettings?.taskbarPlaybackControlsEnabled ?? false} disabled={!appSettings} onClick={() => patchAppSettings({ taskbarPlaybackControlsEnabled: !(appSettings?.taskbarPlaybackControlsEnabled ?? false) })} />
+                            <button className="settings-action-button" type="button" onClick={() => void refreshTaskbarPlaybackStatus()}>{t('settings.integrations.discord.action.refresh')}</button>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                  </section>
                 </div>
-              </SettingRow>
+              ) : null}
+              {activeSection === 'accounts' ? (
+                <>
+              <SettingSubsectionTitle id="settings-subsection-service-accounts" {...getSettingsSubsection('integrationsServiceAccounts')} />
+              <div className="settings-account-panel settings-service-account-panel" id="settings-service-account-panel">
+                <header className="settings-service-account-header">
+                  <div>
+                    <h3>{t('settings.integrations.accountPanel.title')}</h3>
+                    <p>{t('settings.integrations.accountPanel.description')}</p>
+                  </div>
+                  <div className="settings-service-account-header-side">
+                    <div className="settings-account-overview" aria-label={t('settings.integrations.accountPanel.title')}>
+                      <span className="settings-account-overview-stat is-connected">
+                        {accountOverview.connected} {t('settings.integrations.accounts.status.loggedIn')}
+                      </span>
+                      <span className="settings-account-overview-stat is-checking">
+                        {accountOverview.checking} {t('settings.integrations.accounts.status.checking')}
+                      </span>
+                      <span className="settings-account-overview-stat">
+                        {accountOverview.disconnected} {t('settings.integrations.accounts.status.loggedOut')}
+                      </span>
+                    </div>
+                    <button className="settings-action-button" type="button" onClick={() => void refreshAccountStatuses()}>
+                      <RefreshCw size={15} />
+                      {t('settings.integrations.accountPanel.refreshAll')}
+                    </button>
+                  </div>
+                </header>
+                <div className="settings-account-workspace">
+                  <nav className="settings-account-service-list" aria-label={t('settings.integrations.accountPanel.title')}>
+                    {settingsAccountProviders.map((provider) => {
+                      const status = accountStatusByProvider[provider];
+                      const active = provider === selectedAccountProvider;
+                      const state = !status ? 'checking' : status.connected ? (status.error ? 'expired' : 'connected') : 'disconnected';
+                      return (
+                        <button
+                          className={`settings-account-service-button${active ? ' is-active' : ''}`}
+                          type="button"
+                          key={provider}
+                          aria-current={active ? 'page' : undefined}
+                          onClick={() => setSelectedAccountProvider(provider)}
+                        >
+                          <span className="settings-account-service-logo">
+                            <img src={accountProviderLogoUrls[provider]} alt="" draggable={false} />
+                          </span>
+                          <span className="settings-account-service-copy">
+                            <strong>{accountProviderLabels[provider]}</strong>
+                            <span className={`settings-account-service-state is-${state}`}>
+                              {getAccountStatusLabel(t, status)}
+                            </span>
+                          </span>
+                          <ChevronRight size={16} aria-hidden="true" />
+                        </button>
+                      );
+                    })}
+                  </nav>
+                  <section className="settings-account-detail" aria-label={accountProviderLabels[selectedAccountProvider]}>
+                    <header className="settings-account-detail-header">
+                      <span className="settings-account-detail-logo">
+                        <img src={accountProviderLogoUrls[selectedAccountProvider]} alt="" draggable={false} />
+                      </span>
+                      <div>
+                        <h3>{accountProviderLabels[selectedAccountProvider]}</h3>
+                        <span className={getAccountBadgeClass(accountStatusByProvider[selectedAccountProvider])}>
+                          {getAccountStatusLabel(t, accountStatusByProvider[selectedAccountProvider])}
+                        </span>
+                      </div>
+                    </header>
+                    <div className="settings-account-detail-body">
+                      {cookieAccountProviders.includes(selectedAccountProvider) ? (
+                        <AccountCookieCard
+                          provider={selectedAccountProvider}
+                          status={accountStatusByProvider[selectedAccountProvider]}
+                          browser={selectedAccountProvider === 'soundcloud' ? soundCloudBrowser : undefined}
+                          cookieValue={accountCookies[selectedAccountProvider]}
+                          busyAction={accountBusy[selectedAccountProvider]}
+                          error={accountErrors[selectedAccountProvider]}
+                          message={accountMessages[selectedAccountProvider]}
+                          onBrowserChange={selectedAccountProvider === 'soundcloud' ? (browser) => void handleSoundCloudBrowserChange(browser) : undefined}
+                          onChangeCookie={(value) => setAccountCookies((current) => ({ ...current, [selectedAccountProvider]: value }))}
+                          onSave={() => void handleAccountSaveCookie(selectedAccountProvider)}
+                          onCheck={() => void handleAccountCheck(selectedAccountProvider)}
+                          onOpenLogin={() => void handleAccountOpenLogin(selectedAccountProvider)}
+                          onOpenQrLogin={selectedAccountProvider === 'netease' ? () => void handleNeteaseQrLogin() : undefined}
+                          onClear={() => void handleAccountClear(selectedAccountProvider)}
+                        />
+                      ) : selectedAccountProvider === 'youtube' ? (
+                        <YouTubeAccountCard
+                          status={accountStatusByProvider.youtube}
+                          browser={youtubeBrowser}
+                          busyAction={accountBusy.youtube}
+                          error={accountErrors.youtube}
+                          message={accountMessages.youtube}
+                          onBrowserChange={(browser) => void handleYouTubeBrowserChange(browser)}
+                          onCheck={() => void handleAccountCheck('youtube')}
+                          onOpenLogin={() => void handleAccountOpenLogin('youtube')}
+                          onClear={() => void handleAccountClear('youtube')}
+                        />
+                      ) : selectedAccountProvider === 'spotify' ? (
+                        <SpotifyAccountCard
+                          status={accountStatusByProvider.spotify}
+                          busyAction={accountBusy.spotify}
+                          error={accountErrors.spotify}
+                          message={accountMessages.spotify}
+                          onCheck={() => void handleAccountCheck('spotify')}
+                          onOpenDashboard={() => void handleOpenExternalUrl(spotifyDeveloperDashboardUrl)}
+                          onOpenLogin={() => void handleAccountOpenLogin('spotify')}
+                          onClear={() => void handleAccountClear('spotify')}
+                        />
+                      ) : selectedAccountProvider === 'tidal' ? (
+                        <TidalAccountCard
+                          status={accountStatusByProvider.tidal}
+                          busyAction={accountBusy.tidal}
+                          error={accountErrors.tidal}
+                          message={accountMessages.tidal}
+                          onCheck={() => void handleAccountCheck('tidal')}
+                          onOpenDashboard={() => void handleOpenExternalUrl(tidalDeveloperDashboardUrl)}
+                          onOpenLogin={() => void handleAccountOpenLogin('tidal')}
+                          onClear={() => void handleAccountClear('tidal')}
+                        />
+                      ) : selectedAccountProvider === 'qobuz' ? (
+                        <QobuzAccountCard
+                          status={accountStatusByProvider.qobuz}
+                          busyAction={accountBusy.qobuz}
+                          error={accountErrors.qobuz}
+                          message={accountMessages.qobuz}
+                          onCheck={() => void handleAccountCheck('qobuz')}
+                          onLogin={() => void handleAccountOpenLogin('qobuz')}
+                          onClear={() => void handleAccountClear('qobuz')}
+                          tokenValue={qobuzTokenValue}
+                          onTokenChange={setQobuzTokenValue}
+                        />
+                      ) : null}
+                    </div>
+                  </section>
+                </div>
+              </div>
+              <SettingSubsectionTitle {...getSettingsSubsection('integrationsAdvanced')} />
               <div className="settings-credential-panel" data-expanded={credentialPanelVisible}>
                 <header className="settings-credential-panel-header">
                   <div>
@@ -15746,6 +12281,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   </button>
                 </header>
               </div>
+              {credentialPanelVisible ? <SettingSubsectionTitle {...getSettingsSubsection('integrationsMetadata')} /> : null}
               {credentialPanelVisible ? (
               <SettingRow
                 className="setting-row--full setting-row--credential"
@@ -15868,149 +12404,11 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 </div>
               </SettingRow>
               ) : null}
-              <SettingSubsectionTitle {...getSettingsSubsection('integrationsExternal')} />
-              <SettingRow
-                id="settings-row-discord-presence"
-                highlighted={highlightedSettingId === 'settings-row-discord-presence'}
-                title={t('settings.integrations.discord.title')}
-                description={t('settings.integrations.discord.description')}
-              >
-                <div className="settings-chip-row">
-                  <StatusText tone={discordPresenceStatus?.enabled ? 'good' : 'muted'}>{discordPresenceLabel}</StatusText>
-                  <button className="settings-action-button" type="button" onClick={() => void refreshDiscordPresenceStatus()}>
-                    {t('settings.integrations.discord.action.refresh')}
-                  </button>
-                  <ToggleButton
-                    active={discordPresenceStatus?.enabled ?? appSettings?.discordRichPresenceEnabled ?? false}
-                    disabled={!appSettings}
-                    onClick={() => void handleDiscordPresenceToggle()}
-                  />
-                </div>
-              </SettingRow>
-              <SettingRow
-                id="settings-row-obs-browser-source"
-                highlighted={highlightedSettingId === 'settings-row-obs-browser-source'}
-                title={t('settings.integrations.obs.title')}
-                description={t('settings.integrations.obs.description')}
-              >
-                <div className="settings-chip-row">
-                  <StatusText tone={appSettings?.obsBrowserSourceEnabled && stageBridgeRunning ? 'good' : 'muted'}>
-                    {appSettings?.obsBrowserSourceEnabled ? obsBrowserSourceUrl : t('common.disabled')}
-                  </StatusText>
-                  <button
-                    className="settings-action-button"
-                    type="button"
-                    disabled={!stageBridgeStatus?.obsUrl}
-                    onClick={() => stageBridgeStatus?.obsUrl && void copyTextToClipboard(stageBridgeStatus.obsUrl)}
-                  >
-                    <Clipboard size={15} />
-                    {t('settings.integrations.stage.action.copyUrl')}
-                  </button>
-                  <button className="settings-action-button" type="button" onClick={() => void refreshStageBridgeStatus()}>
-                    <RefreshCw size={15} />
-                    {t('settings.integrations.discord.action.refresh')}
-                  </button>
-                  <ToggleButton
-                    active={appSettings?.obsBrowserSourceEnabled === true}
-                    disabled={!appSettings}
-                    onClick={() => void handleStageBridgeToggle('obsBrowserSourceEnabled')}
-                  />
-                </div>
-              </SettingRow>
-              <SettingRow
-                id="settings-row-stage-api"
-                highlighted={highlightedSettingId === 'settings-row-stage-api'}
-                title={t('settings.integrations.stage.title')}
-                description={t('settings.integrations.stage.description')}
-              >
-                <div className="settings-chip-row">
-                  <StatusText tone={appSettings?.stageApiEnabled && stageBridgeRunning ? 'good' : 'muted'}>
-                    {appSettings?.stageApiEnabled ? stageBridgeUrl : t('common.disabled')}
-                  </StatusText>
-                  <button
-                    className="settings-action-button"
-                    type="button"
-                    disabled={!stageBridgeStatus?.url}
-                    onClick={() => stageBridgeStatus?.url && void copyTextToClipboard(stageBridgeStatus.url)}
-                  >
-                    <Clipboard size={15} />
-                    {t('settings.integrations.stage.action.copyUrl')}
-                  </button>
-                  <ToggleButton
-                    active={appSettings?.stageApiEnabled === true}
-                    disabled={!appSettings}
-                    onClick={() => void handleStageBridgeToggle('stageApiEnabled')}
-                  />
-                </div>
-              </SettingRow>
-              {windowsIntegrationAvailable ? (
-                <>
-              <SettingRow
-                id="settings-row-smtc"
-                highlighted={highlightedSettingId === 'settings-row-smtc'}
-                title={t('settings.integrations.smtc.title')}
-                description={t('settings.integrations.smtc.description')}
-              >
-                <div className="settings-chip-row">
-                  <StatusText tone={smtcDiagnostics?.hostState === 'running' ? 'good' : 'muted'}>{smtcLabel}</StatusText>
-                  <button className="settings-action-button" type="button" onClick={() => void refreshSmtcDiagnostics()}>
-                    <RefreshCw size={15} />
-                    {t('settings.integrations.discord.action.refresh')}
-                  </button>
-                  <button
-                    className="settings-action-button"
-                    type="button"
-                    disabled={smtcRestarting || !(appSettings?.smtcEnabled ?? true)}
-                    onClick={() => void restartSmtcSupport()}
-                  >
-                    <RotateCw size={15} />
-                    {smtcRestarting ? t('settings.integrations.smtc.action.restarting') : t('settings.integrations.smtc.action.restart')}
-                  </button>
-                  <ToggleButton
-                    active={appSettings?.smtcEnabled ?? true}
-                    disabled={!appSettings}
-                    onClick={() => patchAppSettings({ smtcEnabled: !(appSettings?.smtcEnabled ?? true) })}
-                  />
-                </div>
-              </SettingRow>
-              <SettingRow
-                id="settings-row-smtc-lyrics"
-                highlighted={highlightedSettingId === 'settings-row-smtc-lyrics'}
-                title={t('settings.integrations.smtcLyrics.title')}
-                description={t('settings.integrations.smtcLyrics.description')}
-              >
-                <ToggleButton
-                  active={appSettings?.smtcLyricsEnabled ?? false}
-                  disabled={!appSettings || !(appSettings?.smtcEnabled ?? true)}
-                  onClick={() => patchAppSettings({ smtcLyricsEnabled: !(appSettings?.smtcLyricsEnabled ?? false) })}
-                />
-              </SettingRow>
-              <SettingRow
-                id="settings-row-taskbar-playback"
-                highlighted={highlightedSettingId === 'settings-row-taskbar-playback'}
-                title={t('settings.integrations.taskbarPlayback.title')}
-                description={t('settings.integrations.taskbarPlayback.description')}
-              >
-                <div className="settings-chip-row">
-                  <StatusText tone={taskbarPlaybackStatus?.visible ? 'good' : 'muted'}>
-                    {taskbarPlaybackLabel}
-                  </StatusText>
-                  <button className="settings-action-button" type="button" onClick={() => void refreshTaskbarPlaybackStatus()}>
-                    {t('settings.integrations.discord.action.refresh')}
-                  </button>
-                  <ToggleButton
-                    active={appSettings?.taskbarPlaybackControlsEnabled ?? false}
-                    disabled={!appSettings}
-                    onClick={() =>
-                      patchAppSettings({
-                        taskbarPlaybackControlsEnabled: !(appSettings?.taskbarPlaybackControlsEnabled ?? false),
-                      })
-                    }
-                  />
-                </div>
-              </SettingRow>
                 </>
               ) : null}
+              {activeSection === 'accounts' ? (
+                <>
+              {credentialPanelVisible ? <SettingSubsectionTitle id="settings-subsection-lastfm" {...getSettingsSubsection('integrationsLastFm')} /> : null}
               {credentialPanelVisible ? (
               <SettingRow
                 className="setting-row--full setting-row--credential"
@@ -16091,6 +12489,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 <ToggleButton active={lastFmStatus?.scrobbleEnabled ?? true} disabled={!lastFmStatus} onClick={() => void handleLastFmScrobbleToggle()} />
               </SettingRow>
               ) : null}
+              <SettingSubsectionTitle id="settings-subsection-account-automation" {...getSettingsSubsection('integrationsAutomation')} />
               <SettingRow
                 id="settings-row-account-startup-refresh"
                 highlighted={highlightedSettingId === 'settings-row-account-startup-refresh'}
@@ -16104,18 +12503,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 />
               </SettingRow>
               <SettingRow
-                id="settings-row-account-expiry-notices"
-                highlighted={highlightedSettingId === 'settings-row-account-expiry-notices'}
-                title={t('settings.integrations.accountExpiryNotices.title')}
-                description={t('settings.integrations.accountExpiryNotices.description')}
-              >
-                <ToggleButton
-                  active={appSettings?.suppressAccountExpiryNotices === true}
-                  disabled={!appSettings}
-                  onClick={() => patchAppSettings({ suppressAccountExpiryNotices: appSettings?.suppressAccountExpiryNotices !== true })}
-                />
-              </SettingRow>
-              <SettingRow
                 title={t('settings.integrations.spotifyAutoLaunchOfficialPlayer.title')}
                 description={t('settings.integrations.spotifyAutoLaunchOfficialPlayer.description')}
               >
@@ -16125,7 +12512,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   onClick={() => patchAppSettings({ spotifyAutoLaunchOfficialPlayer: !(appSettings?.spotifyAutoLaunchOfficialPlayer ?? true) })}
                 />
               </SettingRow>
-              <SettingSubsectionTitle {...getSettingsSubsection('integrationsAccounts')} />
+              {credentialPanelVisible ? <SettingSubsectionTitle {...getSettingsSubsection('integrationsAccounts')} /> : null}
               {credentialPanelVisible ? (
               <SettingRow
                 className="setting-row--full setting-row--credential"
@@ -16260,892 +12647,118 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 </div>
               </SettingRow>
               ) : null}
-              <div className="settings-account-panel" data-expanded={accountPanelExpanded}>
-                <header className="settings-account-panel-header">
-                  <div>
-                    <h3>{t('settings.integrations.accountPanel.title')}</h3>
-                    <p>{t('settings.integrations.accountPanel.description')}</p>
-                  </div>
-                  <div className="settings-account-panel-actions">
-                    <button className="settings-action-button" type="button" onClick={() => void refreshAccountStatuses()}>
-                      {t('settings.integrations.accountPanel.refreshAll')}
-                    </button>
-                    <button
-                      className="settings-action-button settings-account-panel-toggle"
-                      type="button"
-                      aria-controls="settings-account-list"
-                      aria-expanded={accountPanelExpanded}
-                      aria-label={accountPanelExpanded ? t('settings.integrations.accountPanel.collapse') : t('settings.integrations.accountPanel.expand')}
-                      onClick={toggleAccountPanelExpanded}
-                    >
-                      {accountPanelExpanded ? t('settings.integrations.accountPanel.collapse') : t('settings.integrations.accountPanel.expand')}
-                      <ChevronDown size={15} />
-                    </button>
-                  </div>
-                </header>
-                {accountPanelExpanded ? (
-                  <div className="settings-account-list" id="settings-account-list">
-                    {cookieAccountProviders.map((provider) => (
-                      <AccountCookieCard
-                        key={provider}
-                        provider={provider}
-                        status={accountStatusByProvider[provider]}
-                        browser={provider === 'soundcloud' ? soundCloudBrowser : undefined}
-                        cookieValue={accountCookies[provider]}
-                        busyAction={accountBusy[provider]}
-                        error={accountErrors[provider]}
-                        message={accountMessages[provider]}
-                        onBrowserChange={provider === 'soundcloud' ? (browser) => void handleSoundCloudBrowserChange(browser) : undefined}
-                        onChangeCookie={(value) => setAccountCookies((current) => ({ ...current, [provider]: value }))}
-                        onSave={() => void handleAccountSaveCookie(provider)}
-                        onCheck={() => void handleAccountCheck(provider)}
-                        onOpenLogin={() => void handleAccountOpenLogin(provider)}
-                        onOpenQrLogin={provider === 'netease' ? () => void handleNeteaseQrLogin() : undefined}
-                        onClear={() => void handleAccountClear(provider)}
-                      />
-                    ))}
-                    <YouTubeAccountCard
-                      status={accountStatusByProvider.youtube}
-                      browser={youtubeBrowser}
-                      busyAction={accountBusy.youtube}
-                      error={accountErrors.youtube}
-                      message={accountMessages.youtube}
-                      onBrowserChange={(browser) => void handleYouTubeBrowserChange(browser)}
-                      onCheck={() => void handleAccountCheck('youtube')}
-                      onOpenLogin={() => void handleAccountOpenLogin('youtube')}
-                      onClear={() => void handleAccountClear('youtube')}
-                    />
-                    <SpotifyAccountCard
-                      status={accountStatusByProvider.spotify}
-                      busyAction={accountBusy.spotify}
-                      error={accountErrors.spotify}
-                      message={accountMessages.spotify}
-                      onCheck={() => void handleAccountCheck('spotify')}
-                      onOpenDashboard={() => void handleOpenExternalUrl(spotifyDeveloperDashboardUrl)}
-                      onOpenLogin={() => void handleAccountOpenLogin('spotify')}
-                      onClear={() => void handleAccountClear('spotify')}
-                    />
-                    <TidalAccountCard
-                      status={accountStatusByProvider.tidal}
-                      busyAction={accountBusy.tidal}
-                      error={accountErrors.tidal}
-                      message={accountMessages.tidal}
-                      onCheck={() => void handleAccountCheck('tidal')}
-                      onOpenDashboard={() => void handleOpenExternalUrl(tidalDeveloperDashboardUrl)}
-                      onOpenLogin={() => void handleAccountOpenLogin('tidal')}
-                      onClear={() => void handleAccountClear('tidal')}
-                    />
-                    <QobuzAccountCard
-                      status={accountStatusByProvider.qobuz}
-                      busyAction={accountBusy.qobuz}
-                      error={accountErrors.qobuz}
-                      message={accountMessages.qobuz}
-                      onCheck={() => void handleAccountCheck('qobuz')}
-                      onLogin={() => void handleAccountOpenLogin('qobuz')}
-                      onClear={() => void handleAccountClear('qobuz')}
-                      tokenValue={qobuzTokenValue}
-                      onTokenChange={setQobuzTokenValue}
-                    />
-                  </div>
-                ) : null}
-              </div>
-              <SettingRow title={t('settings.integrations.mobile.title')} description={t('settings.integrations.mobile.description')}>
-                <ToggleButton />
-              </SettingRow>
+                </>
+              ) : null}
             </SettingSection>
 
-            <SettingSection activeKey={activeSection} icon={Code2} id="plugins" title={t('settings.nav.plugins.label')}>
-              <SettingRow
-                className="setting-row--full setting-row--compact-panel"
-                id="settings-row-plugins"
-                highlighted={highlightedSettingId === 'settings-row-plugins'}
-                title={t('settings.plugins.card.title')}
-                description={t('settings.plugins.card.description')}
-              >
-                <div className="settings-cache-panel settings-cache-panel--bare settings-cache-panel--plugins">
-                  <div className="settings-status-grid">
-                    <span>
-                      <em>{t('settings.plugins.meta.runtime')}</em>
-                      <strong>{t('settings.plugins.meta.runtimeValue')}</strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.plugins.meta.defaultState')}</em>
-                      <strong>{t('settings.plugins.meta.defaultStateValue')}</strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.plugins.meta.permissions')}</em>
-                      <strong>{t('settings.plugins.meta.permissionsValue')}</strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.plugins.meta.playbackSafety')}</em>
-                      <strong>{t('settings.plugins.meta.playbackSafetyValue')}</strong>
-                    </span>
-                  </div>
-                  <div className="settings-chip-row settings-chip-row--left">
-                    <button className="settings-action-button" type="button" onClick={handleOpenPluginsPage}>
-                      <Code2 size={15} />
-                      {t('settings.plugins.action.openPage')}
-                    </button>
-                    <button className="settings-action-button" type="button" onClick={() => void handleOpenPluginDirectory()}>
-                      <FolderOpen size={15} />
-                      {t('settings.plugins.action.openDirectory')}
-                    </button>
-                    <button className="settings-action-button" type="button" onClick={() => void handleCreatePlaybackPanelExample()}>
-                      <FileText size={15} />
-                      {t('settings.plugins.action.createExample')}
-                    </button>
-                    <button className="settings-action-button" type="button" onClick={() => void handleOpenExternalUrl(pluginsDocumentationUrl)}>
-                      <ExternalLink size={15} />
-                      {t('settings.plugins.action.openDocs')}
-                    </button>
-                  </div>
-                  <p className="settings-inline-note">
-                    {t('settings.plugins.note')}
-                  </p>
-                  {pluginSettingsMessage ? <p className="settings-inline-note">{pluginSettingsMessage}</p> : null}
-                </div>
-              </SettingRow>
-            </SettingSection>
+            <PluginsSettingsSection
+              activeKey={activeSection}
+              getSubsection={getSettingsSubsection}
+              highlightedSettingId={highlightedSettingId}
+              message={pluginSettingsMessage}
+              onCreatePlaybackPanelExample={handleCreatePlaybackPanelExample}
+              onOpenDirectory={handleOpenPluginDirectory}
+              onOpenExternalUrl={handleOpenExternalUrl}
+              onOpenPage={handleOpenPluginsPage}
+              t={t}
+            />
 
-            <SettingSection activeKey={activeSection} icon={Globe2} id="remote" title={t('settings.nav.remote.label')}>
-              <RemoteSourcesPanel />
-            </SettingSection>
+            <RemoteSettingsSection
+              activeKey={activeSection}
+              getSubsection={getSettingsSubsection}
+              t={t}
+            />
 
-            <SettingSection activeKey={activeSection} icon={SlidersHorizontal} id="eq" title={t('settings.nav.eq.label')}>
-              <SettingRow
-                title="音效处理工作台"
-                description="EQ、余量、声道与输出保护已经搬到侧栏里的音效处理工作区。"
-              >
-                <div className="settings-cache-panel settings-cache-panel--bare settings-cache-panel--dsp-workbench">
-                  <div className="settings-status-grid settings-status-grid--audio">
-                    <span>
-                      <em>Signal path</em>
-                      <strong>{status?.dspActive ? 'DSP path' : 'Native direct'}</strong>
-                    </span>
-                    <span>
-                      <em>EQ</em>
-                      <strong>{status?.eqEnabled ? 'Enabled' : 'Bypassed'}</strong>
-                    </span>
-                    <span>
-                      <em>Preset</em>
-                      <strong>{status?.eqPresetName ?? 'Flat'}</strong>
-                    </span>
-                    <span>
-                      <em>Safety</em>
-                      <strong>{status?.clippingRisk ? 'Headroom risk' : 'Protected'}</strong>
-                    </span>
-                  </div>
-                  <div className="settings-chip-row settings-chip-row--left">
-                    <button className="settings-action-button" type="button" onClick={handleOpenDspPage}>
-                      <SlidersHorizontal size={15} />
-                      打开音效处理
-                    </button>
-                    <button className="settings-action-button" type="button" onClick={() => void refreshStatus()}>
-                      <RefreshCw size={15} />
-                      刷新状态
-                    </button>
-                  </div>
-                  <p className="settings-inline-note">
-                    这里保留状态摘要；具体调音请从左侧音效处理进入，布局更接近 Roon 的链路式工作流。
-                  </p>
-                </div>
-              </SettingRow>
-            </SettingSection>
+            <EqSettingsSection
+              activeKey={activeSection}
+              getSubsection={getSettingsSubsection}
+              onOpenDspPage={handleOpenDspPage}
+              onRefreshStatus={refreshStatus}
+              status={status}
+              t={t}
+            />
 
             <SettingSection activeKey={activeSection} icon={Palette} id="appearance" title={t('settings.nav.appearance.label')}>
-              <SettingSubsectionTitle {...getSettingsSubsection('appearanceTheme')} />
-              <SettingRow
-                id="settings-row-theme"
+              <ThemeModeSettings
+                currentMode={appSettings?.appearanceTheme ?? defaultThemeMode}
+                darkAt={themeScheduleDarkAt}
+                getSubsection={getSettingsSubsection}
                 highlighted={highlightedSettingId === 'settings-row-theme'}
-                title={t('settings.appearance.theme.title')}
-                description={t('settings.appearance.theme.description')}
-              >
-                <div className="settings-chip-row">
-                  {themeModeOptions.map((option) => (
-                    <ChipButton
-                      active={(appSettings?.appearanceTheme ?? defaultThemeMode) === option.mode}
-                      key={option.mode}
-                      onClick={() => handleThemeModeChange(option.mode)}
-                    >
-                      {t(option.labelKey)}
-                    </ChipButton>
-                  ))}
-                </div>
-              </SettingRow>
-              <SettingRow
-                title={t('settings.appearance.themeSchedule.title')}
-                description={t('settings.appearance.themeSchedule.description')}
-              >
-                <div className="settings-chip-row settings-chip-row--left settings-chip-row--actions settings-theme-schedule">
-                  <div className="settings-inline-toggle">
-                    <span>{t('settings.appearance.themeSchedule.toggle')}</span>
-                    <button
-                      aria-label={t('settings.appearance.themeSchedule.toggleAria')}
-                      aria-pressed={themeScheduleEnabled}
-                      className={`toggle-btn ${themeScheduleEnabled ? 'active' : ''}`}
-                      type="button"
-                      onClick={() => handleThemeScheduleChange({ appearanceThemeScheduleEnabled: !themeScheduleEnabled })}
-                    >
-                      <span />
-                    </button>
-                  </div>
-                  <label className="settings-time-field">
-                    <span>{t('settings.appearance.themeSchedule.darkAt')}</span>
-                    <input
-                      type="time"
-                      value={themeScheduleDarkAt}
-                      disabled={!themeScheduleEnabled}
-                      onChange={(event) => handleThemeScheduleChange({ appearanceThemeScheduleDarkAt: normalizeThemeScheduleTime(event.currentTarget.value, defaultThemeScheduleDarkAt) })}
-                    />
-                  </label>
-                  <label className="settings-time-field">
-                    <span>{t('settings.appearance.themeSchedule.lightAt')}</span>
-                    <input
-                      type="time"
-                      value={themeScheduleLightAt}
-                      disabled={!themeScheduleEnabled}
-                      onChange={(event) => handleThemeScheduleChange({ appearanceThemeScheduleLightAt: normalizeThemeScheduleTime(event.currentTarget.value, defaultThemeScheduleLightAt) })}
-                    />
-                  </label>
-                  <p className="settings-inline-note">{themeScheduleStatus}</p>
-                </div>
-              </SettingRow>
-              <SettingRow
-                className="setting-row--full"
-                id="settings-row-sidebar-layout"
+                lightAt={themeScheduleLightAt}
+                onModeChange={handleThemeModeChange}
+                onScheduleChange={handleThemeScheduleChange}
+                scheduleEnabled={themeScheduleEnabled}
+                scheduleStatus={themeScheduleStatus}
+                t={t}
+              />
+              <SidebarLayoutSettings
+                available={Boolean(appSettings)}
+                connectProLocked={connectSidebarProLocked}
+                draggingRouteId={draggingSidebarRouteId}
+                expanded={sidebarLayoutExpanded}
+                groups={sidebarSettingsGroups}
+                hiddenRouteIds={sidebarHiddenRouteIdSet}
                 highlighted={highlightedSettingId === 'settings-row-sidebar-layout'}
-                title={sidebarSettingsText.title}
-                description={sidebarSettingsText.description}
-              >
-                <div className="settings-sidebar-layout-panel">
-                  <div className="settings-sidebar-layout-toolbar">
-                    <button
-                      aria-expanded={sidebarLayoutExpanded}
-                      className="settings-sidebar-layout-toggle"
-                      type="button"
-                      disabled={!appSettings}
-                      onClick={handleSidebarLayoutToggle}
-                    >
-                      <ChevronDown size={16} />
-                      <span>{sidebarLayoutSummary}</span>
-                      <em>{sidebarLayoutExpanded ? sidebarSettingsText.collapse : sidebarSettingsText.expand}</em>
-                    </button>
-                    <button className="settings-action-button" type="button" disabled={!appSettings} onClick={handleSidebarRoutesReset}>
-                      <RotateCcw size={15} />
-                      {sidebarSettingsText.reset}
-                    </button>
-                  </div>
-                  {sidebarLayoutExpanded
-                    ? (['main', 'utility'] as const).map((placement) => {
-                        const groupItems = sidebarSettingsGroups[placement];
-
-                        return (
-                          <section className="settings-sidebar-layout-group" key={placement}>
-                            <div className="settings-sidebar-layout-group-title">
-                              <strong>{placement === 'main' ? sidebarSettingsText.mainGroup : sidebarSettingsText.utilityGroup}</strong>
-                              <span>{t('settings.appearance.sidebar.count', { count: groupItems.length })}</span>
-                            </div>
-                            <div className="settings-sidebar-route-list">
-                              {groupItems.length > 0 ? (
-                                groupItems.map((item) => {
-                                  const label = t(item.labelKey);
-                                  const isLockedVisible = lockedVisibleSidebarRouteIdSet.has(item.id);
-                                  const isLockedHidden = lockedHiddenSidebarRouteIdSet.has(item.id);
-                                  const isProLocked = item.id === 'connect' && connectSidebarProLocked;
-                                  const isVisible = isLockedVisible || (!isLockedHidden && !sidebarHiddenRouteIdSet.has(item.id));
-                                  const isEffectivelyVisible = isVisible && !isProLocked;
-                                  const isFixed = isLockedVisible || isLockedHidden || isProLocked;
-                                  const statusLabel = isProLocked ? sidebarSettingsText.proLocked : isFixed ? sidebarSettingsText.fixed : isVisible ? sidebarSettingsText.visible : sidebarSettingsText.hidden;
-                                  const visibilityAriaLabel = isProLocked
-                                    ? t('settings.appearance.sidebar.proLockedAria', { label })
-                                    : isVisible
-                                      ? t('settings.appearance.sidebar.hideAria', { label })
-                                      : t('settings.appearance.sidebar.showAria', { label });
-
-                                  return (
-                                    <div
-                                      className="settings-sidebar-route-item"
-                                      data-dragging={draggingSidebarRouteId === item.id ? 'true' : undefined}
-                                      data-hidden={isEffectivelyVisible ? undefined : 'true'}
-                                      draggable={Boolean(appSettings)}
-                                      key={item.id}
-                                      onDragEnd={handleSidebarRouteDragEnd}
-                                      onDragOver={handleSidebarRouteDragOver}
-                                      onDragStart={(event) => handleSidebarRouteDragStart(event, item.id)}
-                                      onDrop={(event) => handleSidebarRouteDrop(event, item.id, placement)}
-                                    >
-                                      <span className="settings-sidebar-route-drag-handle" aria-hidden="true">
-                                        <GripVertical size={15} />
-                                      </span>
-                                      <span className="settings-sidebar-route-copy">
-                                        <strong>{label}</strong>
-                                        <em>{statusLabel}</em>
-                                      </span>
-                                      <span className="settings-sidebar-route-actions">
-                                        <button
-                                          aria-label={visibilityAriaLabel}
-                                          aria-pressed={isEffectivelyVisible}
-                                          className="settings-icon-button settings-sidebar-visibility-button"
-                                          disabled={!appSettings || isFixed}
-                                          title={statusLabel}
-                                          type="button"
-                                          onClick={() => handleSidebarRouteVisibilityToggle(item.id)}
-                                        >
-                                          {isProLocked ? <Lock size={15} /> : isVisible ? <Eye size={15} /> : <EyeOff size={15} />}
-                                        </button>
-                                      </span>
-                                    </div>
-                                  );
-                                })
-                              ) : (
-                                <p className="settings-sidebar-layout-empty">{sidebarSettingsText.noItems}</p>
-                              )}
-                            </div>
-                          </section>
-                        );
-                      })
-                    : null}
-                </div>
-              </SettingRow>
-              <SettingRow
-                className="setting-row--full setting-row--theme-presets"
-                title={t('settings.appearance.themePreset.title')}
-                description={t('settings.appearance.themePreset.description')}
-              >
-                <div className="settings-theme-preset-panel">
-                  <button
-                    aria-expanded={themePresetsExpanded}
-                    aria-disabled={ambientThemeActive}
-                    className={`settings-theme-preset-summary${ambientThemeActive ? ' locked' : ''}`}
-                    disabled={ambientThemeActive}
-                    title={ambientThemeActive ? ambientThemePresetLockMessage : undefined}
-                    type="button"
-                    onClick={() => patchAppSettings({ appearanceThemePresetsExpanded: !themePresetsExpanded })}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="settings-theme-preset-summary-preview"
-                      style={{ background: themePresetSummaryPreview } as CSSProperties}
-                    />
-                    <span>
-                      <strong>{themePresetSummaryLabel}</strong>
-                      <em>{ambientThemeActive ? ambientThemePresetLockMessage : themePresetsExpanded ? '收起主题预设' : '展开主题预设'}</em>
-                    </span>
-                    <ChevronDown size={16} />
-                  </button>
-                  {ambientThemeActive ? <p className="settings-inline-note">{ambientThemePresetLockMessage}</p> : null}
-                  {themePresetsExpanded ? (
-                    <div className="settings-theme-preset-grid settings-expandable-content">
-                      <button
-                        aria-disabled={ambientThemeActive}
-                        aria-pressed="false"
-                        className={`settings-theme-preset-card${ambientThemeActive ? ' locked' : ''}`}
-                        data-preset="random"
-                        disabled={ambientThemeActive}
-                        onClick={handleRandomThemeCreate}
-                        title={ambientThemeActive ? ambientThemePresetLockMessage : t(randomThemePresetOption.descriptionKey)}
-                        type="button"
-                      >
-                        <span
-                          aria-hidden="true"
-                          className="settings-theme-preset-preview"
-                          style={{ background: randomThemePresetOption.preview } as CSSProperties}
-                        >
-                          <RefreshCw size={16} />
-                        </span>
-                        <span className="settings-theme-preset-copy">
-                          <strong>{t(randomThemePresetOption.labelKey)}</strong>
-                          <em>{t(randomThemePresetOption.descriptionKey)}</em>
-                        </span>
-                        <span aria-hidden="true" className="settings-theme-preset-swatches">
-                          {randomThemePresetOption.swatches.map((swatch) => (
-                            <span key={swatch} style={{ background: swatch } as CSSProperties} />
-                          ))}
-                        </span>
-                      </button>
-                      {visibleThemePresetOptions.map((option) => {
-                        const activePreset = selectedThemePreset;
-                        const isActive = !ambientThemeActive && activePreset === option.preset;
-                        const isProThemeLocked = isProOnlyThemePreset(option.preset) && !echoProUnlockedForDisplay;
-                        const isThemeCardLocked = ambientThemeActive || isProThemeLocked;
-
-                        return (
-                          <button
-                            aria-disabled={isThemeCardLocked}
-                            aria-pressed={isActive}
-                            className={`settings-theme-preset-card${isActive ? ' active' : ''}${isThemeCardLocked ? ' locked' : ''}`}
-                            data-preset={option.preset}
-                            disabled={isThemeCardLocked}
-                            key={option.preset}
-                            onClick={() => handleThemePresetChange(option.preset)}
-                            title={ambientThemeActive ? ambientThemePresetLockMessage : isProThemeLocked ? 'Pro Only' : t(option.descriptionKey)}
-                            type="button"
-                          >
-                            <span
-                              aria-hidden="true"
-                              className="settings-theme-preset-preview"
-                              style={{ background: option.preview } as CSSProperties}
-                            >
-                              {isActive ? <Check size={16} /> : null}
-                            </span>
-                            <span className="settings-theme-preset-copy">
-                              <strong>{t(option.labelKey)}</strong>
-                              <em>{t(option.descriptionKey)}</em>
-                              {isProThemeLocked ? <small>Pro Only</small> : null}
-                            </span>
-                            <span aria-hidden="true" className="settings-theme-preset-swatches">
-                              {option.swatches.map((swatch) => (
-                                <span key={swatch} style={{ background: swatch } as CSSProperties} />
-                              ))}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              </SettingRow>
-              <SettingRow
-                className="setting-row--full setting-row--theme-custom"
-                title={t('settings.appearance.themeCustom.title')}
-                description={t('settings.appearance.themeCustom.description')}
-              >
-                <div className="settings-theme-custom-panel">
-                  <div className="settings-theme-custom-header">
-                    <div className="settings-theme-custom-heading">
-                      <span>{t('settings.appearance.themeCustom.preview.title')}</span>
-                      <strong>{ambientThemeActive ? t('settings.appearance.theme.ambient') : activeThemeCustom ? activeThemeCustom.name : t(selectedThemePresetOption.labelKey)}</strong>
-                      <em>{ambientThemeActive ? ambientThemeCustomLockMessage : t('settings.appearance.themeCustom.preview.description')}</em>
-                    </div>
-                    <div className="settings-theme-custom-toolbar">
-                      <div className="settings-chip-row settings-chip-row--left">
-                        <ChipButton active={themeCustomTone === 'light'} disabled={ambientThemeActive} onClick={() => setThemeCustomTone('light')}>
-                          {t('settings.appearance.theme.light')}
-                        </ChipButton>
-                        <ChipButton active={themeCustomTone === 'dark'} disabled={ambientThemeActive} onClick={() => setThemeCustomTone('dark')}>
-                          {t('settings.appearance.theme.dark')}
-                        </ChipButton>
-                      </div>
-                      <div className="settings-theme-custom-preview" aria-hidden="true" style={{ background: themeCustomGradientPreview }}>
-                        <span style={{ background: themeCustomValues.accent }} />
-                        <span style={{ background: themeCustomValues.accentStrong }} />
-                        <span style={{ background: themeCustomValues.secondary }} />
-                        <strong style={{ background: themeCustomValues.accent, color: themeCustomValues.onAccent }}>Aa</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    aria-expanded={themeCustomPanelOpen}
-                    aria-disabled={ambientThemeActive}
-                    className="settings-theme-custom-advanced-toggle"
-                    disabled={ambientThemeActive}
-                    title={ambientThemeActive ? ambientThemeCustomLockMessage : undefined}
-                    type="button"
-                    onClick={() => setThemeCustomPanelOpen((current) => !current)}
-                  >
-                    <ChevronDown size={15} />
-                    {themeCustomPanelOpen ? t('settings.appearance.themeCustom.collapse') : t('settings.appearance.themeCustom.expand')}
-                  </button>
-                  {ambientThemeActive ? <p className="settings-inline-note">{ambientThemeCustomLockMessage}</p> : null}
-
-                  <div className="settings-expandable-content" hidden={!themeCustomPanelOpen || ambientThemeActive}>
-                  <div className="settings-theme-custom-section settings-theme-custom-library">
-                    <div className="settings-theme-custom-section-title">
-                      <strong>{t('settings.appearance.themeCustom.myThemes.title')}</strong>
-                      <span>{t('settings.appearance.themeCustom.myThemes.description')}</span>
-                    </div>
-                    <div className="settings-theme-custom-library-actions">
-                      <button className="settings-action-button" type="button" onClick={handleThemeCustomCreate}>
-                        <Palette size={15} />
-                        {t('settings.appearance.themeCustom.action.create')}
-                      </button>
-                      <button className="settings-action-button" type="button" onClick={handleThemeCustomRename} disabled={!activeThemeCustom}>
-                        <FileText size={15} />
-                        {t('settings.appearance.themeCustom.action.rename')}
-                      </button>
-                      <button className="settings-action-button" type="button" onClick={handleThemeCustomDuplicate} disabled={!activeThemeCustom}>
-                        <History size={15} />
-                        {t('settings.appearance.themeCustom.action.duplicate')}
-                      </button>
-                      <button className="settings-danger-button" type="button" onClick={handleThemeCustomDelete} disabled={!activeThemeCustom}>
-                        <Trash2 size={15} />
-                        {t('settings.appearance.themeCustom.action.delete')}
-                      </button>
-                    </div>
-                    <div className="settings-theme-custom-theme-list">
-                      {savedThemeCustomThemes.length > 0 ? (
-                        savedThemeCustomThemes.map((theme) => (
-                          <button
-                            className={`settings-theme-custom-theme-card${theme.id === savedThemeCustomId ? ' active' : ''}`}
-                            key={theme.id}
-                            type="button"
-                            onClick={() => handleThemeCustomSelect(theme)}
-                          >
-                            <span>
-                              <strong>{theme.name}</strong>
-                              <em>{t(themePresetOptions.find((option) => option.preset === theme.basePreset)?.labelKey ?? selectedThemePresetOption.labelKey)}</em>
-                            </span>
-                            {theme.id === savedThemeCustomId ? <Check size={15} /> : null}
-                          </button>
-                        ))
-                      ) : (
-                        <p className="settings-theme-custom-empty">{t('settings.appearance.themeCustom.myThemes.empty')}</p>
-                      )}
-                    </div>
-                    {pluginThemeOptions.length > 0 ? (
-                      <div className="settings-theme-plugin-presets">
-                        <div className="settings-theme-custom-section-title">
-                          <strong>插件主题</strong>
-                          <span>已启用插件贡献的主题会导入到“我的主题”，之后仍可继续微调。</span>
-                        </div>
-                        <div className="settings-theme-custom-theme-list">
-                          {pluginThemeOptions.map((theme) => {
-                            const installed = savedThemeCustomThemes.some((item) => item.id === theme.customThemeId);
-                            const active = savedThemeCustomId === theme.customThemeId;
-                            const preview = theme.preview ?? `linear-gradient(135deg, ${theme.swatches?.[0] ?? '#f6f6f7'} 0%, ${theme.swatches?.[1] ?? '#4b55e8'} 52%, ${theme.swatches?.[2] ?? '#727987'} 100%)`;
-
-                            return (
-                              <button
-                                className={`settings-theme-custom-theme-card settings-theme-plugin-card${active ? ' active' : ''}`}
-                                key={`${theme.pluginId}:${theme.id}`}
-                                type="button"
-                                onClick={() => handlePluginThemeApply(theme)}
-                              >
-                                <span>
-                                  <strong>{theme.title}</strong>
-                                  <em>{theme.pluginName} v{theme.pluginVersion} · {installed ? '更新并应用' : '导入并应用'}</em>
-                                </span>
-                                <span className="settings-theme-plugin-preview" aria-hidden="true" style={{ background: preview } as CSSProperties}>
-                                  {(theme.swatches ?? []).slice(0, 4).map((swatch) => (
-                                    <i key={swatch} style={{ background: swatch } as CSSProperties} />
-                                  ))}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="settings-theme-custom-copy-actions">
-                      <button className="settings-action-button" type="button" onClick={() => handleThemeCustomCopyTone('light', 'dark')}>
-                        {t('settings.appearance.themeCustom.action.copyLightToDark')}
-                      </button>
-                      <button className="settings-action-button" type="button" onClick={() => handleThemeCustomCopyTone('dark', 'light')}>
-                        {t('settings.appearance.themeCustom.action.copyDarkToLight')}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="settings-theme-custom-mock-preview" aria-hidden="true">
-                    <div className="settings-theme-custom-mock-titlebar" style={{ background: themeCustomValues.titlebar }} />
-                    <div className="settings-theme-custom-mock-body" style={{ background: themeCustomValues.panel }}>
-                      <aside style={{ background: themeCustomValues.sidebar }}>
-                        <span style={{ background: themeCustomValues.chip, color: themeCustomValues.text }}>曲库</span>
-                        <span style={{ background: themeCustomValues.rowActive, color: themeCustomValues.heading }}>外观</span>
-                        <span style={{ background: themeCustomValues.chip, color: themeCustomValues.muted }}>歌词</span>
-                      </aside>
-                      <main>
-                        <div className="settings-theme-custom-mock-card" style={{ background: themeCustomValues.field, color: themeCustomValues.text }}>
-                          <strong style={{ color: themeCustomValues.heading }}>Aa 主题预览</strong>
-                          <em style={{ color: themeCustomValues.muted }}>标题、正文和弱化文字</em>
-                        </div>
-                        <div className="settings-theme-custom-mock-row" style={{ background: themeCustomValues.row, color: themeCustomValues.text }}>
-                          <span>播放列表</span>
-                          <strong style={{ color: themeCustomValues.accentStrong }}>128</strong>
-                        </div>
-                        <div className="settings-theme-custom-mock-row" style={{ background: themeCustomValues.rowHover, color: themeCustomValues.text }}>
-                          <span>悬停状态</span>
-                          <strong style={{ color: themeCustomValues.secondary }}>ON</strong>
-                        </div>
-                        <div className="settings-theme-custom-mock-accent" style={{ background: themeCustomValues.accent, color: themeCustomValues.onAccent }}>
-                          主要按钮
-                        </div>
-                      </main>
-                    </div>
-                    <div className="settings-theme-custom-mock-player" style={{ background: themeCustomValues.player }}>
-                      <strong style={{ color: themeCustomValues.heading }}>Now Playing</strong>
-                      <span style={{ background: themeCustomValues.success }} />
-                      <span style={{ background: themeCustomValues.warning }} />
-                      <span style={{ background: themeCustomValues.danger }} />
-                    </div>
-                  </div>
-
-                  <div className="settings-theme-custom-section">
-                    <div className="settings-theme-custom-section-title">
-                      <strong>{t('settings.appearance.themeCustom.group.core')}</strong>
-                      <span>{t('settings.appearance.themeCustom.group.core.description')}</span>
-                    </div>
-                    <div className="settings-theme-custom-card-grid">
-                      {coreThemeColorFields.map((option) => (
-                        <label className="settings-theme-custom-color-card" key={option.field}>
-                          <span className="settings-theme-custom-color-copy">
-                            <strong>{t(option.labelKey)}</strong>
-                            <em>{t(option.descriptionKey)}</em>
-                          </span>
-                          <span className="settings-theme-custom-color-control">
-                            <code>{themeCustomValues[option.field].toUpperCase()}</code>
-                            <input
-                              aria-label={t(option.labelKey)}
-                              type="color"
-                              value={themeCustomValues[option.field]}
-                              onChange={(event) => updateThemeCustomColor(option.field, event.currentTarget.value)}
-                            />
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="settings-theme-custom-section settings-theme-custom-section--gradient">
-                    <div className="settings-theme-custom-section-title">
-                      <strong>{t('settings.appearance.themeCustom.group.gradient')}</strong>
-                      <span>{t('settings.appearance.themeCustom.group.gradient.description')}</span>
-                    </div>
-                    <div className="settings-theme-custom-gradient-card" style={{ background: themeCustomGradientPreview }}>
-                      {gradientThemeColorFields.map((option) => (
-                        <label className="settings-theme-custom-color-card settings-theme-custom-color-card--compact" key={option.field}>
-                          <span className="settings-theme-custom-color-copy">
-                            <strong>{t(option.labelKey)}</strong>
-                            <em>{t(option.descriptionKey)}</em>
-                          </span>
-                          <span className="settings-theme-custom-color-control">
-                            <code>{themeCustomValues[option.field].toUpperCase()}</code>
-                            <input
-                              aria-label={t(option.labelKey)}
-                              type="color"
-                              value={themeCustomValues[option.field]}
-                              onChange={(event) => updateThemeCustomColor(option.field, event.currentTarget.value)}
-                            />
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <button className="settings-theme-custom-advanced-toggle" type="button" onClick={() => setThemeCustomAdvancedOpen((current) => !current)}>
-                    <SlidersHorizontal size={15} />
-                    {themeCustomAdvancedOpen ? t('settings.appearance.themeCustom.advanced.hide') : t('settings.appearance.themeCustom.advanced.show')}
-                  </button>
-
-                  <div className="settings-theme-custom-section" hidden={!themeCustomAdvancedOpen}>
-                    <div className="settings-theme-custom-section-title">
-                      <strong>{t('settings.appearance.themeCustom.group.surface')}</strong>
-                      <span>{t('settings.appearance.themeCustom.group.surface.description')}</span>
-                    </div>
-                    <div className="settings-theme-custom-card-grid">
-                      {surfaceThemeColorFields.map((option) => (
-                        <label className="settings-theme-custom-color-card" key={option.field}>
-                          <span className="settings-theme-custom-color-copy">
-                            <strong>{t(option.labelKey)}</strong>
-                            <em>{t(option.descriptionKey)}</em>
-                          </span>
-                          <span className="settings-theme-custom-color-control">
-                            <code>{themeCustomValues[option.field].toUpperCase()}</code>
-                            <input
-                              aria-label={t(option.labelKey)}
-                              type="color"
-                              value={themeCustomValues[option.field]}
-                              onChange={(event) => updateThemeCustomColor(option.field, event.currentTarget.value)}
-                            />
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="settings-theme-custom-section" hidden={!themeCustomAdvancedOpen}>
-                    <div className="settings-theme-custom-section-title">
-                      <strong>{t('settings.appearance.themeCustom.group.state')}</strong>
-                      <span>{t('settings.appearance.themeCustom.group.state.description')}</span>
-                    </div>
-                    <div className="settings-theme-custom-card-grid settings-theme-custom-card-grid--advanced">
-                      {stateThemeColorFields.map((option) => (
-                        <label className="settings-theme-custom-color-card" key={option.field}>
-                          <span className="settings-theme-custom-color-copy">
-                            <strong>{t(option.labelKey)}</strong>
-                            <em>{t(option.descriptionKey)}</em>
-                          </span>
-                          <span className="settings-theme-custom-color-control">
-                            <code>{themeCustomValues[option.field].toUpperCase()}</code>
-                            <input
-                              aria-label={t(option.labelKey)}
-                              type="color"
-                              value={themeCustomValues[option.field]}
-                              onChange={(event) => updateThemeCustomColor(option.field, event.currentTarget.value)}
-                            />
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="settings-theme-custom-sliders" hidden={!themeCustomAdvancedOpen}>
-                    {numberThemeFields
-                      .filter((option) => option.field !== 'motionSpeedSeconds' && option.field !== 'motionIntensityPercent')
-                      .map((option) => (
-                      <label className="settings-theme-custom-slider" key={option.field}>
-                        <span>
-                          <em>
-                            <strong>{t(option.labelKey)}</strong>
-                            {t(option.descriptionKey)}
-                          </em>
-                          <strong>
-                            {themeCustomValues[option.field]}
-                            {option.suffix}
-                          </strong>
-                        </span>
-                        <input
-                          aria-label={t(option.labelKey)}
-                          min={option.min}
-                          max={option.max}
-                          step={option.step ?? 1}
-                          type="range"
-                          value={themeCustomValues[option.field]}
-                          onChange={(event) => updateThemeCustomPercent(option.field, Number(event.currentTarget.value))}
-                        />
-                      </label>
-                    ))}
-                  </div>
-
-                  <div className="settings-theme-custom-section" hidden={!themeCustomAdvancedOpen}>
-                    <div className="settings-theme-custom-section-title">
-                      <strong>{t('settings.appearance.themeCustom.group.motion')}</strong>
-                      <span>{t('settings.appearance.themeCustom.group.motion.description')}</span>
-                    </div>
-                    <div className="settings-theme-custom-motion-row">
-                      <span>
-                        <strong>{t('settings.appearance.themeCustom.field.motionEnabled')}</strong>
-                        <em>{t('settings.appearance.themeCustom.field.motionEnabled.description')}</em>
-                      </span>
-                      <ToggleButton active={themeCustomValues.motionEnabled} onClick={() => updateThemeCustomMotionEnabled(!themeCustomValues.motionEnabled)} />
-                    </div>
-                    <div className="settings-theme-custom-sliders settings-theme-custom-sliders--motion">
-                      {numberThemeFields
-                        .filter((option) => option.field === 'motionSpeedSeconds' || option.field === 'motionIntensityPercent')
-                        .map((option) => (
-                          <label className="settings-theme-custom-slider" key={option.field}>
-                            <span>
-                              <em>
-                                <strong>{t(option.labelKey)}</strong>
-                                {t(option.descriptionKey)}
-                              </em>
-                              <strong>
-                                {themeCustomValues[option.field]}
-                                {option.suffix}
-                              </strong>
-                            </span>
-                            <input
-                              aria-label={t(option.labelKey)}
-                              min={option.min}
-                              max={option.max}
-                              step={option.step ?? 1}
-                              type="range"
-                              value={themeCustomValues[option.field]}
-                              onChange={(event) => updateThemeCustomPercent(option.field, Number(event.currentTarget.value))}
-                            />
-                          </label>
-                        ))}
-                    </div>
-                  </div>
-
-                  <div className="settings-theme-custom-section" hidden={!themeCustomAdvancedOpen}>
-                    <div className="settings-theme-custom-section-title">
-                      <strong>{t('settings.appearance.themeCustom.group.advanced')}</strong>
-                      <span>{t('settings.appearance.themeCustom.group.advanced.description')}</span>
-                    </div>
-                    <div className="settings-theme-custom-card-grid settings-theme-custom-card-grid--advanced">
-                      {advancedThemeColorFields.map((option) => (
-                        <label className="settings-theme-custom-color-card" key={option.field}>
-                          <span className="settings-theme-custom-color-copy">
-                            <strong>{t(option.labelKey)}</strong>
-                            <em>{t(option.descriptionKey)}</em>
-                          </span>
-                          <span className="settings-theme-custom-color-control">
-                            <code>{themeCustomValues[option.field].toUpperCase()}</code>
-                            <input
-                              aria-label={t(option.labelKey)}
-                              type="color"
-                              value={themeCustomValues[option.field]}
-                              onChange={(event) => updateThemeCustomColor(option.field, event.currentTarget.value)}
-                            />
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  {themeCustomWarnings.length > 0 ? (
-                    <p className="settings-theme-custom-warning">{t('settings.appearance.themeCustom.message.lowContrast')}</p>
-                  ) : null}
-                  {themeCustomMessage ? <p className="settings-theme-custom-message">{themeCustomMessage}</p> : null}
-
-                  <div className="settings-theme-custom-actions">
-                    <button className="settings-action-button" type="button" onClick={handleThemeCustomAutoFix}>
-                      <Palette size={15} />
-                      {t('settings.appearance.themeCustom.action.autoFix')}
-                    </button>
-                    <button className="settings-action-button" type="button" onClick={handleThemeCustomSave}>
-                      <Save size={15} />
-                      {t('settings.appearance.themeCustom.action.save')}
-                    </button>
-                    <button className="settings-action-button" type="button" onClick={handleThemeCustomExport}>
-                      <Download size={15} />
-                      {t('settings.appearance.themeCustom.action.export')}
-                    </button>
-                    <button className="settings-action-button" type="button" onClick={handleThemeCustomImport}>
-                      <FolderOpen size={15} />
-                      {t('settings.appearance.themeCustom.action.import')}
-                    </button>
-                    <button className="settings-danger-button" type="button" onClick={handleThemeCustomReset}>
-                      <RotateCw size={15} />
-                      {t('settings.appearance.themeCustom.action.reset')}
-                    </button>
-                  </div>
-                  </div>
-                </div>
-              </SettingRow>
+                onDragEnd={handleSidebarRouteDragEnd}
+                onDragOver={handleSidebarRouteDragOver}
+                onDragStart={handleSidebarRouteDragStart}
+                onDrop={handleSidebarRouteDrop}
+                onExpandedToggle={handleSidebarLayoutToggle}
+                onReset={handleSidebarRoutesReset}
+                onVisibilityToggle={handleSidebarRouteVisibilityToggle}
+                summary={sidebarLayoutSummary}
+                t={t}
+              />
+              <ThemePresetSettings
+                ambientActive={ambientThemeActive}
+                ambientLockMessage={ambientThemePresetLockMessage}
+                echoProUnlocked={echoProUnlockedForDisplay}
+                expanded={themePresetsExpanded}
+                onExpandedChange={(expanded) =>
+                  patchAppSettings({ appearanceThemePresetsExpanded: expanded })
+                }
+                onPresetChange={handleThemePresetChange}
+                onRandomCreate={handleRandomThemeCreate}
+                selectedPreset={selectedThemePreset}
+                summaryLabel={themePresetSummaryLabel}
+                summaryPreview={themePresetSummaryPreview}
+                t={t}
+              />
+              <ThemeCustomEditor
+                activeTheme={activeThemeCustom}
+                advancedOpen={themeCustomAdvancedOpen}
+                ambientActive={ambientThemeActive}
+                ambientLockMessage={ambientThemeCustomLockMessage}
+                message={themeCustomMessage}
+                onAdvancedOpenChange={setThemeCustomAdvancedOpen}
+                onAutoFix={handleThemeCustomAutoFix}
+                onColorChange={updateThemeCustomColor}
+                onCopyTone={handleThemeCustomCopyTone}
+                onCreate={handleThemeCustomCreate}
+                onDelete={handleThemeCustomDelete}
+                onDuplicate={handleThemeCustomDuplicate}
+                onExport={handleThemeCustomExport}
+                onImport={handleThemeCustomImport}
+                onMotionEnabledChange={updateThemeCustomMotionEnabled}
+                onNumberChange={updateThemeCustomPercent}
+                onPanelOpenChange={setThemeCustomPanelOpen}
+                onPluginApply={handlePluginThemeApply}
+                onRename={handleThemeCustomRename}
+                onReset={handleThemeCustomReset}
+                onSave={handleThemeCustomSave}
+                onSelect={handleThemeCustomSelect}
+                onToneChange={setThemeCustomTone}
+                panelOpen={themeCustomPanelOpen}
+                pluginThemes={pluginThemeOptions}
+                presetLabelKey={selectedThemePresetOption.labelKey}
+                savedThemeId={savedThemeCustomId}
+                savedThemes={savedThemeCustomThemes}
+                t={t}
+                tone={themeCustomTone}
+                values={themeCustomValues}
+                warningCount={themeCustomWarnings.length}
+              />
               <SettingSubsectionTitle {...getSettingsSubsection('appearanceWindow')} />
-              <SettingRow
-                id="settings-row-window-acrylic"
-                highlighted={highlightedSettingId === 'settings-row-window-acrylic'}
-                title={`${t('settings.appearance.windowAcrylic.title')} · ${t('settings.appearance.windowAcrylic.experimental')}`}
-                description={t('settings.appearance.windowAcrylic.description')}
-              >
-                <div className="settings-acrylic-control">
-                  <ToggleButton
-                    active={appSettings?.appWindowAcrylicEnabled === true}
-                    disabled={!appSettings || (appSettings.appWindowAcrylicEnabled !== true && !echoProUnlockedForDisplay)}
-                    onClick={handleWindowAcrylicToggle}
-                  />
-                  {appSettings?.appWindowAcrylicEnabled === true ? (
-                    <div className="settings-acrylic-options">
-                      <div className="settings-acrylic-subtoggle">
-                        <span>{t('settings.appearance.windowAcrylic.keepWhenUnfocused')}</span>
-                        <ToggleButton
-                          active={appSettings.appWindowAcrylicKeepWhenUnfocusedEnabled === true}
-                          disabled={!echoProUnlockedForDisplay}
-                          onClick={handleWindowAcrylicKeepWhenUnfocusedToggle}
-                        />
-                      </div>
-                      <div className="settings-acrylic-slider">
-                        <span>{t('settings.appearance.windowAcrylic.transparency')}</span>
-                        <NumberRangeField
-                          min={0}
-                          max={100}
-                          step={1}
-                          suffix="%"
-                          value={appSettings.appWindowAcrylicTransparencyPercent ?? 70}
-                          disabled={!echoProUnlockedForDisplay}
-                          onChange={handleWindowAcrylicTransparencyChange}
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-                  {!echoProUnlockedForDisplay ? <p className="settings-acrylic-warning">ECHO Pro Only：登录、兑换 ECHO Pro 或导入有效 Pro 插件后可开启窗口亚克力。</p> : null}
-                  <p className="settings-acrylic-warning">{t('settings.appearance.windowAcrylic.themeWarning')}</p>
-                </div>
-              </SettingRow>
               <SettingRow
                 id="settings-row-now-playing-cover-color"
                 highlighted={highlightedSettingId === 'settings-row-now-playing-cover-color'}
@@ -17162,290 +12775,108 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   }
                 />
               </SettingRow>
-              <SettingRow
-                className="setting-row--full setting-row--compact-panel"
-                id="settings-row-player-bar-buttons"
+              <PlayerBarButtonSettings
+                available={Boolean(appSettings)}
+                hiddenButtonIds={hiddenPlayerBarButtonIdSet}
                 highlighted={highlightedSettingId === 'settings-row-player-bar-buttons'}
-                title={playerBarButtonSettingsText.title}
-                description={playerBarButtonSettingsText.description}
-              >
-                <div className="settings-sidebar-layout-editor">
-                  <div className="settings-sidebar-layout-toolbar">
-                    <span className="settings-inline-note">{playerBarButtonSettingsText.count}</span>
-                    <button className="settings-action-button" type="button" disabled={!appSettings} onClick={handlePlayerBarButtonsReset}>
-                      <RotateCcw size={15} />
-                      {playerBarButtonSettingsText.reset}
-                    </button>
-                  </div>
-                  <div className="settings-sidebar-route-list">
-                    {playerBarButtonSettingsItems.map((item) => {
-                      const label = t(item.labelKey);
-                      const isVisible = !hiddenPlayerBarButtonIdSet.has(item.id);
-                      const Icon = item.icon;
-
-                      return (
-                        <div className="settings-sidebar-route-item" data-hidden={isVisible ? undefined : 'true'} key={item.id}>
-                          <span className="settings-sidebar-route-drag-handle" aria-hidden="true">
-                            <Icon size={15} />
-                          </span>
-                          <span className="settings-sidebar-route-copy">
-                            <strong>{label}</strong>
-                            <em>{t(item.descriptionKey)}</em>
-                          </span>
-                          <span className="settings-sidebar-route-actions">
-                            <button
-                              aria-label={`${label} ${isVisible ? playerBarButtonSettingsText.visible : playerBarButtonSettingsText.hidden}`}
-                              aria-pressed={isVisible}
-                              className="settings-icon-button settings-sidebar-visibility-button"
-                              disabled={!appSettings}
-                              title={isVisible ? playerBarButtonSettingsText.visible : playerBarButtonSettingsText.hidden}
-                              type="button"
-                              onClick={() => handlePlayerBarButtonVisibilityToggle(item.id)}
-                            >
-                              {isVisible ? <Eye size={15} /> : <EyeOff size={15} />}
-                            </button>
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </SettingRow>
+                onReset={handlePlayerBarButtonsReset}
+                onVisibilityToggle={handlePlayerBarButtonVisibilityToggle}
+                t={t}
+              />
               <SettingSubsectionTitle {...getSettingsSubsection('appearanceWallpaper')} />
-              <SettingRow
-                className="setting-row--full setting-row--compact-panel"
-                id="settings-row-wallpaper"
+              <AppWallpaperSettings
+                advancedOpen={appearanceWallpaperAdvancedOpen}
                 highlighted={highlightedSettingId === 'settings-row-wallpaper'}
-                title={t('settings.appearance.wallpaper.title')}
-                description={t('settings.appearance.wallpaper.description')}
-              >
-                {appSettings?.appCustomWallpaperPath || appSettings?.appPortraitWallpaperPath ? (
-                  <div className="settings-cache-panel settings-cache-panel--app-wallpaper">
-                    <div className="settings-chip-row settings-chip-row--left settings-chip-row--actions">
-                      <button className="settings-action-button" type="button" disabled={!appSettings} onClick={() => void handleAppWallpaperChoose()}>
-                        <FolderOpen size={15} />
-                        {t('settings.appearance.wallpaper.choose')}
-                      </button>
-                      <button className="settings-action-button" type="button" disabled={!appSettings} onClick={() => void handleAppPortraitWallpaperChoose()}>
-                        <FolderOpen size={15} />
-                        {t('settings.appearance.wallpaper.portraitChoose')}
-                      </button>
-                      {appSettings.appCustomWallpaperPath ? (
-                        <button className="settings-danger-button" type="button" onClick={handleAppWallpaperClear}>
-                          <Trash2 size={15} />
-                          {t('settings.appearance.wallpaper.clear')}
-                        </button>
-                      ) : null}
-                      {appSettings.appPortraitWallpaperPath ? (
-                        <button className="settings-danger-button" type="button" onClick={handleAppPortraitWallpaperClear}>
-                          <Trash2 size={15} />
-                          {t('settings.appearance.wallpaper.portraitClear')}
-                        </button>
-                      ) : null}
-                    </div>
-                    {appSettings.appCustomWallpaperPath ? (
-                      <p className="settings-wallpaper-path" title={appSettings.appCustomWallpaperPath}>
-                        <span>{t('settings.appearance.wallpaper.landscapePath')}</span>
-                        {appSettings.appCustomWallpaperPath}
-                      </p>
-                    ) : null}
-                    {appSettings.appPortraitWallpaperPath ? (
-                      <p className="settings-wallpaper-path" title={appSettings.appPortraitWallpaperPath}>
-                        <span>{t('settings.appearance.wallpaper.portraitPath')}</span>
-                        {appSettings.appPortraitWallpaperPath}
-                      </p>
-                    ) : null}
-                    {appSettings.appWallpaperMediaType === 'video' || appSettings.appPortraitWallpaperMediaType === 'video' ? (
-                      <div className="settings-chip-row settings-chip-row--left">
-                        <StatusText tone="good">{t('settings.appearance.wallpaper.videoStatus')}</StatusText>
-                        {appVideoWallpaperPauseModes.map((mode) => (
-                          <ChipButton
-                            active={(appSettings.appVideoWallpaperPauseMode ?? 'smart') === mode}
-                            key={mode}
-                            onClick={() => previewAndPersistAppWallpaperSettings({ appVideoWallpaperPauseMode: mode })}
-                          >
-                            {t(appVideoWallpaperPauseModeLabels[mode])}
-                          </ChipButton>
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="settings-wallpaper-controls">
-                        <div className="settings-wallpaper-control">
-                          <span>{t('settings.appearance.wallpaper.scale')}</span>
-                          <NumberRangeField
-                            min={100}
-                            max={220}
-                            step={1}
-                            suffix="%"
-                            value={appSettings.appWallpaperScalePercent ?? 100}
-                            onChange={(appWallpaperScalePercent) => previewAndPersistAppWallpaperSettings({ appWallpaperScalePercent })}
-                          />
-                        </div>
-                        <div className="settings-wallpaper-control">
-                          <span>{t('settings.appearance.wallpaper.blur')}</span>
-                          <NumberRangeField
-                            min={0}
-                            max={40}
-                            step={1}
-                            suffix="px"
-                            value={appSettings.appWallpaperBlurPx ?? 0}
-                            onChange={(appWallpaperBlurPx) => previewAndPersistAppWallpaperSettings({ appWallpaperBlurPx })}
-                          />
-                        </div>
-                        <div className="settings-wallpaper-control">
-                          <span>{t('settings.appearance.wallpaper.brightness')}</span>
-                          <NumberRangeField
-                            min={40}
-                            max={140}
-                            step={1}
-                            suffix="%"
-                            value={appSettings.appWallpaperBrightnessPercent ?? 100}
-                            onChange={(appWallpaperBrightnessPercent) => previewAndPersistAppWallpaperSettings({ appWallpaperBrightnessPercent })}
-                          />
-                        </div>
-                        <div className="settings-wallpaper-control">
-                          <span>{t('settings.appearance.wallpaper.uiOpacity')}</span>
-                          <NumberRangeField
-                            min={0}
-                            max={100}
-                            step={1}
-                            suffix="%"
-                            value={appSettings.appWallpaperUiOpacityPercent ?? 100}
-                            onChange={(appWallpaperUiOpacityPercent) => previewAndPersistAppWallpaperSettings({ appWallpaperUiOpacityPercent })}
-                          />
-                        </div>
-                        <div className="settings-wallpaper-control settings-wallpaper-control--toggle">
-                          <span>{t('settings.appearance.wallpaper.visualProtection')}</span>
-                          <ToggleButton
-                            active={appSettings.appWallpaperVisualProtectionEnabled !== false}
-                            onClick={() =>
-                              previewAndPersistAppWallpaperSettings({
-                                appWallpaperVisualProtectionEnabled: !(appSettings.appWallpaperVisualProtectionEnabled !== false),
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="settings-wallpaper-control settings-wallpaper-control--toggle">
-                          <span>{t('settings.appearance.wallpaper.unifiedOpacity')}</span>
-                          <ToggleButton
-                            active={appSettings.appWallpaperUnifiedOpacityEnabled ?? false}
-                            onClick={() =>
-                              previewAndPersistAppWallpaperSettings({
-                                appWallpaperUnifiedOpacityEnabled: !(appSettings.appWallpaperUnifiedOpacityEnabled ?? false),
-                              })
-                            }
-                          />
-                        </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="settings-chip-row settings-chip-row--left settings-chip-row--actions settings-wallpaper-empty-actions">
-                    <button className="settings-action-button" type="button" disabled={!appSettings} onClick={() => void handleAppWallpaperChoose()}>
-                      <FolderOpen size={15} />
-                      {t('settings.appearance.wallpaper.choose')}
-                    </button>
-                    <button className="settings-action-button" type="button" disabled={!appSettings} onClick={() => void handleAppPortraitWallpaperChoose()}>
-                      <FolderOpen size={15} />
-                      {t('settings.appearance.wallpaper.portraitChoose')}
-                    </button>
-                  </div>
-                )}
-              </SettingRow>
-              <button
-                aria-expanded={appearanceTypographyOpen}
-                className="settings-theme-custom-advanced-toggle"
-                type="button"
-                onClick={() => setAppearanceTypographyOpen((current) => !current)}
-              >
-                <ChevronDown size={15} />
-                {appearanceTypographyOpen ? t('settings.appearance.typography.collapse') : t('settings.appearance.typography.expand')}
-              </button>
-              <div className="settings-expandable-content settings-expandable-content--typography" hidden={!appearanceTypographyOpen}>
-              <SettingRow title={t('settings.appearance.font.main.title')} description={t('settings.appearance.font.main.description')}>
-                <button className="settings-font-picker-button" type="button" onClick={() => handleFontPickerOpen('main')}>
-                  <span style={{ fontFamily: `"${appearancePreferences.mainFontFamily}", var(--echo-font-family)` }}>{appearancePreferences.mainFontFamily}</span>
-                  <em>{t('settings.appearance.font.choose')}</em>
-                </button>
-              </SettingRow>
-              <SettingRow title={t('settings.appearance.font.chinese.title')} description={t('settings.appearance.font.chinese.description')}>
-                <button className="settings-font-picker-button" type="button" onClick={() => handleFontPickerOpen('chinese')}>
-                  <span style={{ fontFamily: `"${appearancePreferences.chineseFontFamily}", var(--echo-font-family)` }}>
-                    {appearancePreferences.chineseFontFamily}
-                  </span>
-                  <em>{t('settings.appearance.font.choose')}</em>
-                </button>
-              </SettingRow>
-              <SettingRow title={t('settings.appearance.font.fallback.title')} description={t('settings.appearance.font.fallback.description')}>
-                <button className="settings-font-picker-button" type="button" onClick={() => handleFontPickerOpen('fallback')}>
-                  <span style={{ fontFamily: `"${appearancePreferences.fallbackFontFamily}", var(--echo-font-family)` }}>
-                    {appearancePreferences.fallbackFontFamily}
-                  </span>
-                  <em>{t('settings.appearance.font.choose')}</em>
-                </button>
-              </SettingRow>
-              <SettingRow title={t('settings.appearance.fontSize.title')} description={t('settings.appearance.fontSize.description')}>
-                <NumberRangeField
-                  min={12}
-                  max={18}
-                  step={1}
-                  suffix="px"
-                  value={appearancePreferences.baseFontSize}
-                  onChange={(baseFontSize) => handleAppearanceChange({ ...appearancePreferences, baseFontSize })}
-                />
-              </SettingRow>
-              <SettingRow title={t('settings.appearance.lineHeight.title')} description={t('settings.appearance.lineHeight.description')}>
-                <NumberRangeField
-                  min={1.1}
-                  max={1.8}
-                  step={0.05}
-                  suffix=""
-                  value={appearancePreferences.lineHeight}
-                  onChange={(lineHeight) => handleAppearanceChange({ ...appearancePreferences, lineHeight })}
-                />
-              </SettingRow>
-              <SettingRow title={t('settings.appearance.textDepth.title')} description={t('settings.appearance.textDepth.description')}>
-                <NumberRangeField
-                  min={35}
-                  max={100}
-                  step={1}
-                  suffix="%"
-                  value={appearancePreferences.textDepth}
-                  onChange={(textDepth) => handleAppearanceChange({ ...appearancePreferences, textDepth })}
-                />
-              </SettingRow>
-              </div>
-              <SettingRow
-                id="settings-row-album-cover-shape"
-                highlighted={highlightedSettingId === 'settings-row-album-cover-shape'}
-                title={t('settings.appearance.albumCoverShape.title')}
-                description={t('settings.appearance.albumCoverShape.description')}
-              >
-                <div className="settings-chip-row settings-chip-row--left">
-                  <ChipButton
-                    active={appearancePreferences.albumCoverShape !== 'square'}
-                    onClick={() => handleAppearanceChange({ ...appearancePreferences, albumCoverShape: 'rounded' })}
-                  >
-                    {t('settings.appearance.albumCoverShape.rounded')}
-                  </ChipButton>
-                  <ChipButton
-                    active={appearancePreferences.albumCoverShape === 'square'}
-                    onClick={() => handleAppearanceChange({ ...appearancePreferences, albumCoverShape: 'square' })}
-                  >
-                    {t('settings.appearance.albumCoverShape.square')}
-                  </ChipButton>
-                </div>
-              </SettingRow>
-              <SettingRow title={t('settings.appearance.reset.title')} description={t('settings.appearance.reset.description')}>
-                <button className="settings-action-button" type="button" onClick={handleAppearanceReset}>
-                  {t('settings.appearance.reset.action')}
-                </button>
-              </SettingRow>
+                onAdvancedOpenChange={setAppearanceWallpaperAdvancedOpen}
+                onChoose={() => void handleAppWallpaperChoose()}
+                onClear={handleAppWallpaperClear}
+                onPatch={previewAndPersistAppWallpaperSettings}
+                onPortraitChoose={() => void handleAppPortraitWallpaperChoose()}
+                onPortraitClear={handleAppPortraitWallpaperClear}
+                settings={appSettings}
+                t={t}
+              />
+              <TypographySettings
+                highlightedAlbumCoverShape={highlightedSettingId === 'settings-row-album-cover-shape'}
+                onChange={handleAppearanceChange}
+                onFontPickerOpen={handleFontPickerOpen}
+                onOpenChange={setAppearanceTypographyOpen}
+                onReset={handleAppearanceReset}
+                open={appearanceTypographyOpen}
+                preferences={appearancePreferences}
+                t={t}
+              />
             </SettingSection>
 
-            <SettingSection activeKey={activeSection} icon={Download} id="library" title={t('settings.nav.library.label')}>
+            <SettingSection
+              activeKey={activeSection}
+              actions={(
+                <button
+                  className="settings-primary-button settings-library-scan-button"
+                  type="button"
+                  disabled={libraryScanActionDisabled}
+                  onClick={() => void handleScanLibraryFolders()}
+                >
+                  <RefreshCw className={libraryScanActionDisabled ? 'spinning-icon' : undefined} size={15} />
+                  {libraryScanActionDisabled
+                    ? t('mediaLibrary.settings.scan.action.queued')
+                    : settingsLocaleCopy(locale, {
+    'zh-CN': '扫描曲库',
+    'zh-TW': '掃描音樂庫',
+    'ja-JP': 'ライブラリをスキャン',
+    'en-US': 'Scan library',
+    'ko-KR': 'Scan library',
+  })}
+                </button>
+              )}
+              context={settingsLocaleCopy(locale, {
+    'zh-CN': '设置 / 内容与媒体',
+    'zh-TW': '設定 / 內容與媒體',
+    'ja-JP': '設定 / コンテンツとメディア',
+    'en-US': 'Settings / Content and media',
+    'ko-KR': 'Settings / Content and media',
+  })}
+              description={settingsLocaleCopy(locale, {
+    'zh-CN': '管理本地音乐的导入、修复与维护。',
+    'zh-TW': '管理本機音樂的匯入、修復與維護。',
+    'ja-JP': 'ローカル音楽の取り込み、修復、管理を行います。',
+    'en-US': 'Import, repair, and maintain your local music library.',
+    'ko-KR': 'Import, repair, and maintain your local music library.',
+  })}
+              icon={Download}
+              id="library"
+              title={t('settings.nav.library.label')}
+            >
+              <div className="settings-library-overview" role="status" aria-label={t('settings.nav.library.label')}>
+                <span className="settings-library-overview__status" data-busy={libraryScanRunningList.length > 0 ? 'true' : undefined}>
+                  <Check size={15} />
+                  <em>{settingsLocaleCopy(locale, { 'zh-CN': '曲库状态', 'zh-TW': '音樂庫狀態', 'ja-JP': 'ライブラリ状態', 'en-US': 'Library status', 'ko-KR': 'Library status' })}</em>
+                  <strong>
+                    {libraryScanRunningList.length > 0
+                      ? settingsLocaleCopy(locale, { 'zh-CN': '正在扫描', 'zh-TW': '正在掃描', 'ja-JP': 'スキャン中', 'en-US': 'Scanning', 'ko-KR': 'Scanning' })
+                      : settingsLocaleCopy(locale, { 'zh-CN': '良好', 'zh-TW': '良好', 'ja-JP': '良好', 'en-US': 'Healthy', 'ko-KR': 'Healthy' })}
+                  </strong>
+                </span>
+                <span>
+                  <em>{settingsLocaleCopy(locale, { 'zh-CN': '最近扫描', 'zh-TW': '最近掃描', 'ja-JP': '最近のスキャン', 'en-US': 'Latest scan', 'ko-KR': 'Latest scan' })}</em>
+                  <strong>{latestLibraryScanTotal > 0 ? latestLibraryScanTotal.toLocaleString(locale) : '—'}</strong>
+                </span>
+                <span>
+                  <em>{settingsLocaleCopy(locale, { 'zh-CN': '文件夹', 'zh-TW': '資料夾', 'ja-JP': 'フォルダー', 'en-US': 'Folders', 'ko-KR': 'Folders' })}</em>
+                  <strong>{libraryScanStatusList.length > 0 ? libraryScanStatusList.length : '—'}</strong>
+                </span>
+                <span>
+                  <em>{settingsLocaleCopy(locale, { 'zh-CN': '扫描耗时', 'zh-TW': '掃描耗時', 'ja-JP': 'スキャン時間', 'en-US': 'Scan duration', 'ko-KR': 'Scan duration' })}</em>
+                  <strong>{latestLibraryScan ? latestLibraryScanDurationText : '—'}</strong>
+                </span>
+                <span>
+                  <em>{settingsLocaleCopy(locale, { 'zh-CN': '缓存', 'zh-TW': '快取', 'ja-JP': 'キャッシュ', 'en-US': 'Cache', 'ko-KR': 'Cache' })}</em>
+                  <strong>{cacheInventory ? formatCacheBytes(cacheInventory.totalSizeBytes) : '—'}</strong>
+                </span>
+              </div>
               <SettingSubsectionTitle {...getSettingsSubsection('libraryImport')} />
               <div id="settings-row-library-folders" data-search-highlight={highlightedSettingId === 'settings-row-library-folders' ? 'true' : undefined}>
-                <LibraryFoldersPanel autoRefresh={libraryDeferredRefreshReady} defaultCollapsed pollScanStatuses={false} showOsuFolderImport />
+                <LibraryFoldersPanel autoRefresh={libraryDeferredRefreshReady} pollScanStatuses={false} showOsuFolderImport />
               </div>
               <SettingRow
                 id="settings-row-live-library-updates"
@@ -17453,62 +12884,14 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 title={t('mediaLibrary.settings.liveUpdates.title')}
                 description={t('mediaLibrary.settings.liveUpdates.description')}
               >
-                <ToggleButton
-                  active={appSettings?.liveLibraryUpdatesEnabled ?? false}
-                  disabled={!appSettings}
-                  onClick={handleLiveLibraryUpdatesToggle}
-                />
-              </SettingRow>
-              <SettingRow
-                id="settings-row-native-file-scanner"
-                highlighted={highlightedSettingId === 'settings-row-native-file-scanner'}
-                title={t('mediaLibrary.settings.nativeFileScanner.title')}
-                description={t('mediaLibrary.settings.nativeFileScanner.description')}
-              >
-                <div className="settings-native-experiment-control">
-                  <div className="settings-inline-toggle settings-inline-toggle--compact">
-                    <span>{appSettings?.nativeFileScannerEnabled ? t('mediaLibrary.settings.nativeFileScanner.enabled') : t('mediaLibrary.settings.nativeFileScanner.typescript')}</span>
-                    <ToggleButton
-                      active={appSettings?.nativeFileScannerEnabled === true}
-                      disabled={!appSettings}
-                      onClick={() => patchAppSettings({ nativeFileScannerEnabled: !(appSettings?.nativeFileScannerEnabled ?? false) })}
-                    />
-                  </div>
-                  <div
-                    className="settings-native-experiment-status"
-                    data-state={nativeFileScannerState}
-                    title={nativeFileScannerDiagnostics?.binaryPath ?? undefined}
-                  >
-                    <span>{nativeFileScannerStatusText}</span>
-                    <em>{nativeFileScannerStatsText}</em>
-                    {nativeFileScannerCapabilitiesText ? <em>{nativeFileScannerCapabilitiesText}</em> : null}
-                  </div>
-                </div>
-              </SettingRow>
-              <SettingRow
-                id="settings-row-native-metadata-reader"
-                highlighted={highlightedSettingId === 'settings-row-native-metadata-reader'}
-                title={t('mediaLibrary.settings.nativeMetadataReader.title')}
-                description={t('mediaLibrary.settings.nativeMetadataReader.description')}
-              >
-                <div className="settings-native-experiment-control">
-                  <div className="settings-inline-toggle settings-inline-toggle--compact">
-                    <span>{appSettings?.nativeMetadataReaderEnabled ? t('mediaLibrary.settings.nativeMetadataReader.enabled') : t('mediaLibrary.settings.nativeMetadataReader.typescript')}</span>
-                    <ToggleButton
-                      active={appSettings?.nativeMetadataReaderEnabled === true}
-                      disabled={!appSettings}
-                      onClick={() => patchAppSettings({ nativeMetadataReaderEnabled: !(appSettings?.nativeMetadataReaderEnabled ?? false) })}
-                    />
-                  </div>
-                  <div
-                    className="settings-native-experiment-status"
-                    data-state={nativeMetadataReaderState}
-                    title={nativeMetadataReaderDiagnostics?.binaryPath ?? undefined}
-                  >
-                    <span>{nativeMetadataReaderStatusText}</span>
-                    <em>{nativeMetadataReaderStatsText}</em>
-                    {nativeMetadataReaderCapabilitiesText ? <em>{nativeMetadataReaderCapabilitiesText}</em> : null}
-                  </div>
+                <div className="settings-inline-toggle settings-inline-toggle--compact">
+                  <StatusText tone={liveLibraryStatus.tone}>{liveLibraryStatus.text}</StatusText>
+                  <ToggleButton
+                    active={appSettings?.liveLibraryUpdatesEnabled ?? false}
+                    ariaLabel={t('mediaLibrary.settings.liveUpdates.title')}
+                    disabled={!appSettings}
+                    onClick={handleLiveLibraryUpdatesToggle}
+                  />
                 </div>
               </SettingRow>
               <SettingSubsectionTitle {...getSettingsSubsection('libraryQuality')} />
@@ -18222,10 +13605,83 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               <NetworkMetadataPanel networkMetadataEnabled={networkMetadataEnabled} />
             </SettingSection>
 
-            <SettingSection activeKey={activeSection} icon={Info} id="about" title={t('settings.nav.about.label')}>
+            <SettingSection
+              activeKey={activeSection}
+              hideHeader={aboutPage === 'contributors'}
+              icon={Info}
+              id="about"
+              title={t('settings.nav.about.label')}
+            >
+              {aboutPage === 'contributors' ? (
+                <Suspense fallback={null}>
+                  <ContributorsPage
+                    locale={locale}
+                    onBack={() => {
+                      setAboutPage('overview');
+                      scrollSettingsSectionIntoView('about');
+                    }}
+                  />
+                </Suspense>
+              ) : (
+              <>
               <SettingSubsectionTitle {...getSettingsSubsection('aboutVersion')} />
               <SettingRow title={t('settings.about.version.title')} description={t('settings.about.version.description')}>
                 <StatusText tone={appVersion ? 'neutral' : 'muted'}>{appVersion ?? t('common.checking')}</StatusText>
+              </SettingRow>
+              <SettingRow
+                leadingIcon={UsersRound}
+                title={settingsLocaleCopy(locale, {
+                  'zh-CN': '贡献者',
+                  'zh-TW': '貢獻者',
+                  'ja-JP': 'コントリビューター',
+                  'en-US': 'Contributors',
+                  'ko-KR': '기여자',
+                })}
+                description={settingsLocaleCopy(locale, {
+                  'zh-CN': '查看让 ECHO 变得更好的每一位贡献者。',
+                  'zh-TW': '查看讓 ECHO 變得更好的每一位貢獻者。',
+                  'ja-JP': 'ECHO をより良くしてくれたすべての人を表示します。',
+                  'en-US': 'See everyone who helps make ECHO better.',
+                  'ko-KR': 'ECHO를 더 좋게 만드는 모든 기여자를 확인합니다.',
+                })}
+              >
+                <button
+                  className="settings-action-button"
+                  type="button"
+                  onClick={() => {
+                    setAboutPage('contributors');
+                    scrollSettingsSectionIntoView('about');
+                  }}
+                >
+                  <UsersRound size={15} />
+                  {settingsLocaleCopy(locale, {
+                    'zh-CN': '查看贡献者',
+                    'zh-TW': '查看貢獻者',
+                    'ja-JP': '一覧を見る',
+                    'en-US': 'View contributors',
+                    'ko-KR': '기여자 보기',
+                  })}
+                </button>
+              </SettingRow>
+              <SettingRow title="Powered by Moekotori" description="反馈问题或联系作者。">
+                <div className="settings-chip-row settings-chip-row--left settings-chip-row--actions">
+                  <button
+                    className="settings-action-button"
+                    type="button"
+                    onClick={() => void handleOpenExternalUrl(bugFeedbackUrl)}
+                  >
+                    <Github size={15} />
+                    BUG反馈
+                  </button>
+                  <button
+                    className="settings-action-button"
+                    type="button"
+                    onClick={() => void handleOpenExternalUrl(authorEmailUrl)}
+                  >
+                    <Mail size={15} />
+                    联系作者
+                  </button>
+                </div>
               </SettingRow>
               <SettingRow
                 title={t('settings.about.pro.title')}
@@ -18236,185 +13692,32 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   {echoProUnlockedForDisplay ? '已解锁 ECHO Pro' : t('settings.about.pro.action')}
                 </button>
               </SettingRow>
-              <SettingRow
-                className="setting-row--full setting-row--compact-panel"
-                title={t('settings.about.updates.title')}
-                description={t('settings.about.updates.description')}
-              >
-                <div className="settings-cache-panel settings-cache-panel--updates">
-                  <div className="settings-status-grid settings-status-grid--updates">
-                    <span>
-                      <em>{t('settings.about.updates.currentVersion')}</em>
-                      <strong>{appVersion ?? updateStatus?.currentVersion ?? t('common.checking')}</strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.about.updates.latestVersion')}</em>
-                      <strong>{updateStatus?.latestVersion ?? 'n/a'}</strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.about.updates.status')}</em>
-                      <strong>{t(getUpdateStateLabel(updateStatus?.state ?? (appSettings?.autoUpdateEnabled === false ? 'disabled' : 'idle')))}</strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.about.updates.lastChecked')}</em>
-                      <strong>{updateStatus?.checkedAt ? new Date(updateStatus.checkedAt).toLocaleString() : 'n/a'}</strong>
-                    </span>
-                  </div>
-                  {showUpdateDownloadProgress ? (
-                    <div className="settings-update-progress" role="status" aria-live="polite">
-                      <div className="settings-update-progress-label">
-                        <span>{updateStatus?.state === 'downloaded' ? t('settings.about.updates.progress.ready') : t('settings.about.updates.progress.downloading')}</span>
-                        <strong>{updateDownloadPercent}%</strong>
-                      </div>
-                      <div
-                        aria-label={t('settings.about.updates.progress.aria', { percent: updateDownloadPercent })}
-                        aria-valuemax={100}
-                        aria-valuemin={0}
-                        aria-valuenow={updateDownloadPercent}
-                        className="settings-update-progress-track"
-                        role="progressbar"
-                      >
-                        <span style={{ width: `${updateDownloadPercent}%` }} />
-                      </div>
-                      <div className="settings-update-progress-meta">
-                        <span>{updateDownloadSizeLabel}</span>
-                        <span>{updateDownloadSpeedLabel}</span>
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="settings-chip-row settings-chip-row--left settings-chip-row--actions">
-                    <div className="settings-inline-toggle">
-                      <span>{t('settings.about.updates.autoCheck')}</span>
-                      <ToggleButton
-                        active={appSettings?.autoUpdateEnabled ?? true}
-                        disabled={!appSettings}
-                        onClick={() => patchAppSettings({ autoUpdateEnabled: !(appSettings?.autoUpdateEnabled ?? true) })}
-                      />
-                    </div>
-                    <div className="settings-update-source-picker">
-                      <span>{t('settings.about.updates.downloadSource')}</span>
-                      <StyledSelect
-                        ariaLabel={t('settings.about.updates.downloadSourceAria')}
-                        className="settings-update-source-select"
-                        disabled={!appSettings}
-                        options={autoUpdateSourceOptions.map((option) => ({
-                          value: option.source,
-                          label: `${option.label} · ${option.description}`,
-                        }))}
-                        showFilterIcon={false}
-                        value={currentAutoUpdateSource}
-                        onChange={handleAutoUpdateSourceSelect}
-                      />
-                    </div>
-                    {currentAutoUpdateSource === 'custom' ? (
-                      <div className="settings-update-custom-source">
-                        <span>{t('settings.about.updates.customGenericSource')}</span>
-                        <input
-                          disabled={!appSettings}
-                          placeholder="https://example.com/echo/releases/latest/download"
-                          type="url"
-                          value={autoUpdateCustomUrlDraft}
-                          onChange={(event) => setAutoUpdateCustomUrlDraft(event.target.value)}
-                        />
-                        <button className="settings-action-button" type="button" disabled={!appSettings} onClick={handleAutoUpdateCustomUrlSave}>
-                          <Save size={15} />
-                          {t('settings.about.updates.action.save')}
-                        </button>
-                      </div>
-                    ) : null}
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      disabled={updateBusy || appSettings?.autoUpdateEnabled === false}
-                      onClick={() => void handleCheckForUpdates()}
-                    >
-                      <RotateCw className={updateBusy ? 'spinning-icon' : undefined} size={15} />
-                      {updateBusy ? t('settings.about.updates.action.checking') : t('settings.about.updates.action.check')}
-                    </button>
-                    <button className="settings-action-button" type="button" onClick={() => void handleOpenRepository()}>
-                      <Github size={15} />
-                      ECHO NEXT
-                    </button>
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      onClick={() => void handleOpenExternalUrl(officialWebsiteUrl)}
-                    >
-                      <Globe2 size={15} />
-                      {t('settings.about.links.officialWebsite')}
-                    </button>
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      onClick={() => void handleOpenExternalUrl(userDocumentationUrl)}
-                    >
-                      <ExternalLink size={15} />
-                      {t('settings.about.links.documentation')}
-                    </button>
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      onClick={() => void handleOpenExternalUrl(baiduPanShareUrl)}
-                    >
-                      <ExternalLink size={15} />
-                      {t('settings.about.links.baiduPan')}
-                    </button>
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      onClick={() => void handleOpenExternalUrl(bilibiliSpaceUrl)}
-                    >
-                      <ExternalLink size={15} />
-                      {t('settings.about.links.bilibili')}
-                    </button>
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      onClick={() => void handleOpenExternalUrl(afdianSponsorUrl)}
-                    >
-                      <ExternalLink size={15} />
-                      {t('settings.about.updates.action.afdian')}
-                    </button>
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      onClick={() => void handleOpenExternalUrl('https://github.com/moekotori/echo/releases')}
-                    >
-                      <History size={15} />
-                      {t('settings.about.updates.action.history')}
-                    </button>
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      onClick={() => void handleOpenExternalUrl('https://qm.qq.com/q/KrJE8PIqSQ')}
-                    >
-                      <ExternalLink size={15} />
-                      {t('settings.about.updates.action.qq')}
-                    </button>
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      onClick={() => void handleOpenExternalUrl('https://discord.gg/g7v4WMRq3K')}
-                    >
-                      <ExternalLink size={15} />
-                      {t('settings.about.updates.action.discord')}
-                    </button>
-                  </div>
-                  {updateStatus?.releaseNotes ? (
-                    <div className="settings-update-notes">
-                      <em>{t('settings.about.updates.releaseNotes')}</em>
-                      {deferredAboutReleaseNotes === updateStatus.releaseNotes ? (
-                        <ReleaseNotesMarkdown markdown={updateStatus.releaseNotes} />
-                      ) : (
-                        <p className="settings-inline-note">{t('settings.about.updates.releaseNotesPending')}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="settings-inline-note">{t('settings.about.updates.releaseNotesEmpty')}</p>
-                  )}
-                  {updateStatus?.error ? <p className="settings-inline-error">{updateStatus.error}</p> : null}
-                </div>
-              </SettingRow>
+              <Suspense fallback={null}>
+                <AboutUpdateSettings
+                  appVersion={appVersion}
+                  autoUpdateAvailable={Boolean(appSettings)}
+                  autoUpdateEnabled={appSettings?.autoUpdateEnabled ?? true}
+                  busy={updateBusy}
+                  currentSource={currentAutoUpdateSource}
+                  customUrlDraft={autoUpdateCustomUrlDraft}
+                  deferredReleaseNotes={deferredAboutReleaseNotes}
+                  downloadPercent={updateDownloadPercent}
+                  downloadSizeLabel={updateDownloadSizeLabel}
+                  downloadSpeedLabel={updateDownloadSpeedLabel}
+                  onAutoUpdateEnabledChange={(autoUpdateEnabled) =>
+                    patchAppSettings({ autoUpdateEnabled })
+                  }
+                  onCheck={() => void handleCheckForUpdates()}
+                  onCustomUrlChange={setAutoUpdateCustomUrlDraft}
+                  onCustomUrlSave={handleAutoUpdateCustomUrlSave}
+                  onOpenRepository={() => void handleOpenRepository()}
+                  onOpenUrl={(url) => void handleOpenExternalUrl(url)}
+                  onSourceChange={handleAutoUpdateSourceSelect}
+                  showDownloadProgress={showUpdateDownloadProgress}
+                  status={updateStatus}
+                  t={t}
+                />
+              </Suspense>
               <SettingSubsectionTitle {...getSettingsSubsection('generalData')} />
               <SettingRow
                 id="settings-row-settings-export"
@@ -18713,263 +14016,67 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   {diagnosticsMessage ? <p className="settings-inline-note">{diagnosticsMessage}</p> : null}
                 </div>
               </SettingRow>
+              </>
+              )}
             </SettingSection>
 
             <SettingSection activeKey={activeSection} icon={Trash2} id="danger" title={t('settings.nav.danger.label')}>
-              <div className="settings-database-protection" data-health={databaseHealthStatus ?? 'unknown'}>
-                <header>
-                  <div>
-                    <span className="section-kicker">{t('settings.danger.database.kicker')}</span>
-                    <h3>{t('settings.danger.database.title')}</h3>
-                    <p>{databaseProtectionDescription}</p>
-                  </div>
-                  <span className={`settings-database-health settings-database-health--${databaseHealthStatus ?? 'unknown'}`}>
-                    {databaseHealthBadgeLabel}
-                  </span>
-                </header>
-                <div className="settings-database-grid">
-                  <span>
-                    <em>{t('settings.danger.database.meta.current')}</em>
-                    <strong>{formatUpdateBytes(databaseProtectionStatus?.databaseSizeBytes)}</strong>
-                    <small title={databasePathLabel}>{databasePathLabel}</small>
-                  </span>
-                  <span>
-                    <em>{t('settings.danger.database.meta.snapshot')}</em>
-                    <strong>{databaseSnapshotLabel}</strong>
-                    <small>{latestHealthySnapshot?.id ?? t('settings.danger.database.meta.snapshotHint')}</small>
-                  </span>
-                  <span>
-                    <em>{t('settings.danger.database.meta.archive')}</em>
-                    <strong>{databaseArchiveLabel}</strong>
-                    <small>{databaseProtectionStatus?.latestArchive?.id ?? t('settings.danger.database.meta.archiveHint')}</small>
-                  </span>
-                </div>
-                {databaseQuarantined || (databaseHealthStatus && databaseHealthStatus !== 'ok') ? (
-                  <ol className="settings-database-steps">
-                    {databaseRecoverySteps.map((step) => (
-                      <li key={step}>{step}</li>
-                    ))}
-                  </ol>
-                ) : null}
-                {databaseUnrecoverable && databaseProtectionStatus?.unrecoverableReason ? (
-                  <p className="settings-inline-error">{databaseProtectionStatus.unrecoverableReason}</p>
-                ) : null}
-                <div className="settings-database-actions">
-                  <button className="settings-action-button" type="button" disabled={databaseProtectionBusyAction === 'refresh'} onClick={() => void handleRefreshDatabaseProtectionStatus()}>
-                    <RotateCw size={15} />
-                    {databaseProtectionBusyAction === 'refresh' ? t('settings.danger.database.action.checking') : t('settings.danger.database.action.check')}
-                  </button>
-                  <button className="settings-action-button" type="button" disabled={databaseProtectionBusy || appSettings?.dataProtectionDisabled === true} onClick={() => void handleCreateDatabaseSnapshot()}>
-                    <Save size={15} />
-                    {databaseProtectionBusyAction === 'snapshot' ? t('settings.danger.database.action.creating') : t('settings.danger.database.action.create')}
-                  </button>
-                  <button
-                    className="settings-danger-button"
-                    type="button"
-                    disabled={databasePrimaryActionDisabled}
-                    onClick={() => void handleDatabasePrimaryRecoveryAction()}
-                  >
-                    <ShieldAlert size={15} />
-                    {databaseProtectionBusyAction === 'restore' || databaseProtectionBusyAction === 'scrub' ? databasePrimaryActionBusyLabel : databasePrimaryActionLabel}
-                  </button>
-                  {databaseQuarantined ? (
-                    <button
-                      className="settings-danger-button"
-                      type="button"
-                      disabled={databaseProtectionBusy || databaseProtectionStatus?.hasRunningScan || !databaseProtectionStatus?.canScrubQuarantinedDatabase}
-                      onClick={() => void handleDiscardQuarantinedProblemTracks()}
-                    >
-                      <Trash2 size={15} />
-                      {databaseProtectionBusyAction === 'discard' ? t('settings.danger.database.action.discarding') : t('settings.danger.database.action.discard')}
-                    </button>
-                  ) : null}
-                  <button className="settings-danger-button" type="button" disabled={databaseProtectionBusy} onClick={() => void handleRelaunchLibraryRecoveryMode()}>
-                    <Power size={15} />
-                    {databaseProtectionBusyAction === 'relaunch' ? t('settings.danger.database.action.relaunching') : t('settings.danger.database.action.relaunch')}
-                  </button>
-                  <button className="settings-action-button" type="button" disabled={databaseProtectionBusyAction === 'open'} onClick={() => void handleOpenDataProtectionFolder()}>
-                    <FolderOpen size={15} />
-                    {t('settings.danger.database.action.open')}
-                  </button>
-                  <button className="settings-action-button" type="button" disabled={diagnosticsBusy} onClick={() => void handleDiagnosticsExport()}>
-                    <FileText size={15} />
-                    {diagnosticsBusy ? t('settings.danger.database.action.exporting') : t('settings.danger.database.action.export')}
-                  </button>
-                </div>
-                <label className="settings-danger-confirm-field" htmlFor="settings-danger-confirm-word">
-                  <span>{t('settings.danger.database.confirmWord')}</span>
-                  <input
-                    id="settings-danger-confirm-word"
-                    type="text"
-                    value={dangerConfirmWord}
-                    placeholder={t('settings.danger.database.confirmPlaceholder')}
-                    autoComplete="off"
-                    onChange={(event) => setDangerConfirmWord(event.target.value)}
-                  />
-                </label>
-                {databasePrimaryActionUnavailableReason ? <p className="settings-inline-note">{databasePrimaryActionUnavailableReason}</p> : null}
-                {databaseProtectionError ? <p className="settings-inline-error" role="alert">{databaseProtectionError}</p> : null}
-                {databaseProtectionMessage ? <p className="settings-inline-note" role="status">{databaseProtectionMessage}</p> : null}
-                {databaseProtectionStatus?.hasRunningScan ? <p className="settings-inline-error">{t('settings.danger.database.scanRunning')}</p> : null}
-                {databaseProtectionStatus?.maintenanceEvents.length ? (
-                  <div className="settings-database-events">
-                    {databaseProtectionStatus.maintenanceEvents.slice(0, 3).map((event) => (
-                      <span key={`${event.createdAt}-${event.action}`}>
-                        <em>{formatProtectionTimestamp(event.createdAt)}</em>
-                        <strong>{event.action}</strong>
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <SettingRow
-                className="setting-row--full setting-row--compact-panel"
-                title={t('settings.danger.duplicates.title')}
-                description={t('settings.danger.duplicates.description')}
-              >
-                <div className="settings-cache-panel settings-cache-panel--duplicates">
-                  <div className="settings-status-grid">
-                    <span>
-                      <em>{t('settings.danger.duplicates.meta.result')}</em>
-                      <strong>
-                        {duplicateCleanupBusyAction === 'scan'
-                          ? t('settings.danger.duplicates.action.scanning')
-                          : duplicateCleanupPreview
-                          ? t('settings.danger.duplicates.meta.resultValue', { groups: duplicateCleanupPreview.groups.length, tracks: duplicateCleanupPreview.totalTracksToRemove })
-                          : t('settings.danger.duplicates.meta.notScanned')}
-                      </strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.danger.duplicates.meta.release')}</em>
-                      <strong>{duplicateCleanupPreview ? formatUpdateBytes(duplicateCleanupPreview.totalBytesToRemove) : 'n/a'}</strong>
-                    </span>
-                    <span>
-                      <em>{t('settings.danger.duplicates.meta.scanTime')}</em>
-                      <strong>{duplicateCleanupPreview?.generatedAt ? new Date(duplicateCleanupPreview.generatedAt).toLocaleString() : t('settings.danger.duplicates.meta.notScanned')}</strong>
-                    </span>
-                  </div>
-                  <div className="settings-chip-row settings-chip-row--left settings-chip-row--actions">
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      disabled={duplicateCleanupBusyAction !== null || dangerBusy}
-                      onClick={() => void handleScanDuplicateTrackCleanup()}
-                    >
-                      <RotateCw className={duplicateCleanupBusyAction === 'scan' ? 'spinning-icon' : undefined} size={15} />
-                      {duplicateCleanupBusyAction === 'scan' ? t('settings.danger.duplicates.action.scanning') : t('settings.danger.duplicates.action.scan')}
-                    </button>
-                    <button
-                      className="settings-danger-button"
-                      type="button"
-                      disabled={
-                        duplicateCleanupBusyAction !== null ||
-                        dangerBusy ||
-                        !duplicateCleanupPreview ||
-                        duplicateCleanupPreview.removeTrackIds.length === 0
-                      }
-                      onClick={() => void handleApplyDuplicateTrackCleanup()}
-                    >
-                      <Trash2 size={15} />
-                      {duplicateCleanupBusyAction === 'clean' ? t('settings.danger.duplicates.action.cleaning') : t('settings.danger.duplicates.action.clean')}
-                    </button>
-                  </div>
-                  {duplicateCleanupBusyAction ? (
-                    <div className="settings-update-progress settings-duplicate-cleanup-progress" role="status" aria-live="polite">
-                      <div className="settings-update-progress-label">
-                        <strong>{duplicateCleanupBusyAction === 'scan' ? t('settings.danger.duplicates.progress.scan.title') : t('settings.danger.duplicates.progress.clean.title')}</strong>
-                        <span>{duplicateCleanupBusyAction === 'scan' ? t('settings.danger.duplicates.progress.scan.description') : t('settings.danger.duplicates.progress.clean.description')}</span>
-                      </div>
-                      <div
-                        className="settings-update-progress-track"
-                        data-indeterminate="true"
-                        role="progressbar"
-                        aria-label={duplicateCleanupBusyAction === 'scan' ? t('settings.danger.duplicates.progress.scan.aria') : t('settings.danger.duplicates.progress.clean.aria')}
-                      >
-                        <span />
-                      </div>
-                    </div>
-                  ) : null}
-                  {duplicateCleanupMessage ? <p className="settings-inline-note">{duplicateCleanupMessage}</p> : null}
-                  {duplicateCleanupPreview?.groups.length ? (
-                    <>
-                      <button
-                        aria-expanded={duplicateCleanupResultsExpanded}
-                        className="settings-library-quality-summary settings-duplicate-cleanup-summary"
-                        type="button"
-                        onClick={() => setDuplicateCleanupResultsExpanded((expanded) => !expanded)}
-                      >
-                        <span>
-                          <strong>{t('settings.danger.duplicates.preview.title')}</strong>
-                          <em>{t('settings.danger.duplicates.preview.summary', { groups: duplicateCleanupPreview.groups.length, tracks: duplicateCleanupPreview.totalTracksToRemove })}</em>
-                        </span>
-                        <ChevronDown size={16} />
-                      </button>
-                      {duplicateCleanupResultsExpanded ? (
-                        <div className="settings-library-quality-list">
-                          {duplicateCleanupPreview.groups.map((group) => (
-                            <div className="settings-library-quality-row" key={group.id}>
-                              <div>
-                                <strong>{group.keep.track.title} - {group.keep.track.artist}</strong>
-                                <small title={group.keep.track.path}>{t('settings.danger.duplicates.preview.keep', { quality: formatDuplicateCleanupTrackQuality(group.keep), path: group.keep.track.path })}</small>
-                                {group.remove.map((member) => (
-                                  <small title={member.track.path} key={member.track.id}>
-                                    {t('settings.danger.duplicates.preview.cleanTrack', {
-                                      title: member.track.title,
-                                      artist: member.track.artist,
-                                      quality: formatDuplicateCleanupTrackQuality(member),
-                                      path: member.track.path,
-                                    })}
-                                  </small>
-                                ))}
-                              </div>
-                              <div className="settings-library-quality-actions">
-                                <em>{t('settings.danger.duplicates.preview.cleanCount', { count: group.remove.length })}</em>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </>
-                  ) : null}
-                </div>
-              </SettingRow>
+              <SettingSubsectionTitle {...getSettingsSubsection('dangerRecovery')} />
+              <DatabaseProtectionPanel
+                archiveLabel={databaseArchiveLabel}
+                badgeLabel={databaseHealthBadgeLabel}
+                busy={databaseProtectionBusy}
+                busyAction={databaseProtectionBusyAction}
+                confirmWord={dangerConfirmWord}
+                dataProtectionDisabled={appSettings?.dataProtectionDisabled === true}
+                description={databaseProtectionDescription}
+                diagnosticsBusy={diagnosticsBusy}
+                error={databaseProtectionError}
+                message={databaseProtectionMessage}
+                onConfirmWordChange={setDangerConfirmWord}
+                onCreateSnapshot={() => void handleCreateDatabaseSnapshot()}
+                onDiscardQuarantinedTracks={() => void handleDiscardQuarantinedProblemTracks()}
+                onExportDiagnostics={() => void handleDiagnosticsExport()}
+                onOpenFolder={() => void handleOpenDataProtectionFolder()}
+                onPrimaryRecovery={() => void handleDatabasePrimaryRecoveryAction()}
+                onRefresh={() => void handleRefreshDatabaseProtectionStatus()}
+                onRelaunchRecovery={() => void handleRelaunchLibraryRecoveryMode()}
+                pathLabel={databasePathLabel}
+                primaryActionBusyLabel={databasePrimaryActionBusyLabel}
+                primaryActionDisabled={databasePrimaryActionDisabled}
+                primaryActionLabel={databasePrimaryActionLabel}
+                primaryActionUnavailableReason={databasePrimaryActionUnavailableReason}
+                quarantined={databaseQuarantined}
+                recoverySteps={databaseRecoverySteps}
+                snapshotLabel={databaseSnapshotLabel}
+                status={databaseProtectionStatus}
+                t={t}
+                unrecoverable={databaseUnrecoverable}
+              />
+              <DuplicateCleanupSettings
+                busyAction={duplicateCleanupBusyAction}
+                dangerBusy={dangerBusy}
+                expanded={duplicateCleanupResultsExpanded}
+                message={duplicateCleanupMessage}
+                onApply={() => void handleApplyDuplicateTrackCleanup()}
+                onExpandedChange={setDuplicateCleanupResultsExpanded}
+                onScan={() => void handleScanDuplicateTrackCleanup()}
+                preview={duplicateCleanupPreview}
+                t={t}
+              />
               <SettingSubsectionTitle {...getSettingsSubsection('dangerCleanup')} />
-              <SettingRow title={t('settings.danger.clearCache.title')} description={t('settings.danger.clearCache.description')}>
-                <button className="settings-danger-button" type="button" disabled={dangerBusy} onClick={() => void handleClearLibraryCache()}>
-                  {dangerBusy ? t('settings.danger.action.processing') : t('settings.danger.clearCache.action')}
-                </button>
-              </SettingRow>
-              <SettingRow title={t('settings.danger.hardwareAcceleration.title')} description={t('settings.danger.hardwareAcceleration.description')}>
-                <button className="settings-danger-button" type="button" disabled={dangerBusy} onClick={() => void handleHardwareAccelerationToggle()}>
-                  <Zap size={15} />
-                  {dangerBusy
-                    ? t('settings.danger.action.processing')
-                    : appSettings?.hardwareAccelerationDisabled === true
-                      ? t('settings.danger.hardwareAcceleration.action.enable')
-                      : t('settings.danger.hardwareAcceleration.action.disable')}
-                </button>
-              </SettingRow>
-              <SettingRow title={t('settings.danger.reset.title')} description={t('settings.danger.reset.description')}>
-                <button className="settings-danger-button" type="button" disabled={dangerBusy} onClick={() => void handleResetDefaultSettings()}>
-                  {dangerBusy ? t('settings.danger.action.processing') : t('settings.danger.reset.action')}
-                </button>
-              </SettingRow>
-              <SettingRow title={t('settings.danger.repair.title')} description={t('settings.danger.repair.description')}>
-                <button className="settings-danger-button" type="button" disabled={dangerBusy} onClick={() => void handleRepairLibraryDatabase()}>
-                  {dangerBusy ? t('settings.danger.action.processing') : t('settings.danger.repair.action')}
-                </button>
-              </SettingRow>
-              <SettingRow title={t('settings.danger.deleteDatabase.title')} description={t('settings.danger.deleteDatabase.description')}>
-                <button className="settings-danger-button" type="button" disabled={dangerBusy} onClick={() => void handleDeleteLibraryDatabase()}>
-                  {dangerBusy ? t('settings.danger.action.processing') : t('settings.danger.deleteDatabase.action')}
-                </button>
-              </SettingRow>
-              <SettingRow title={t('settings.danger.deleteAll.title')} description={t('settings.danger.deleteAll.description')}>
-                <button className="settings-danger-button" type="button" disabled={dangerBusy} onClick={() => void handleDeleteAllUserData()}>
-                  {dangerBusy ? t('settings.danger.action.processing') : t('settings.danger.deleteAll.action')}
-                </button>
-              </SettingRow>
-              {dangerMessage ? <p className="settings-inline-note">{dangerMessage}</p> : null}
+              <DangerMaintenanceSettings
+                busy={dangerBusy}
+                hardwareAccelerationDisabled={appSettings?.hardwareAccelerationDisabled === true}
+                message={dangerMessage}
+                onClearLibraryCache={() => void handleClearLibraryCache()}
+                onDeleteAllUserData={() => void handleDeleteAllUserData()}
+                onDeleteLibraryDatabase={() => void handleDeleteLibraryDatabase()}
+                onHardwareAccelerationToggle={() => void handleHardwareAccelerationToggle()}
+                onRepairLibraryDatabase={() => void handleRepairLibraryDatabase()}
+                onResetDefaultSettings={() => void handleResetDefaultSettings()}
+                t={t}
+              />
             </SettingSection>
 
             <details className="settings-section settings-section--devices settings-collapsible-section" data-visible={activeSection === 'playback'}>
@@ -19002,94 +14109,25 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               )}
             </details>
           </div>
+          {activeSection !== 'integrations' && settingsSectionIndexItems.length > 0 ? (
+            <SettingsSectionIndex
+              activeId={activeSettingsSectionIndexId}
+              ariaLabel={t(activeNavItem.labelKey)}
+              items={settingsSectionIndexItems}
+              onSelect={handleSectionIndexClick}
+            />
+          ) : null}
         </div>
       </div>
       </div>
-      {playbackNoSoundGuideOpen ? (
-        <div className="settings-no-sound-wizard-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-no-sound-wizard-title" aria-describedby="settings-no-sound-wizard-description">
-          <section className="settings-no-sound-wizard">
-            <header className="settings-no-sound-wizard__header">
-              <div>
-                <span className="section-kicker">ECHO Next</span>
-                <h3 id="settings-no-sound-wizard-title">{t('settings.playback.noSoundGuide.title')}</h3>
-                <p id="settings-no-sound-wizard-description">{t('settings.playback.noSoundGuide.description')}</p>
-              </div>
-              <button className="queue-icon-button" type="button" aria-label={t('settings.playback.noSoundGuide.actionCollapse')} title={t('settings.playback.noSoundGuide.actionCollapse')} onClick={closeNoSoundGuide}>
-                <X size={16} />
-              </button>
-            </header>
-
-            <div className="settings-no-sound-wizard__progress" aria-hidden="true">
-              <div>
-                <span>{noSoundGuideProgressLabel}</span>
-                <strong>{t(activeNoSoundGuideStep.titleKey)}</strong>
-              </div>
-              <span>
-                <i style={{ width: `${noSoundGuideProgressPercent}%` }} />
-              </span>
-            </div>
-
-            <nav className="settings-no-sound-wizard__stepper" aria-label={t('firstRun.aria.steps')}>
-              {playbackNoSoundGuideSteps.map((step, index) => {
-                const StepIcon = step.icon;
-                const isActive = index === activeNoSoundGuideStepIndex;
-                const isDone = index < activeNoSoundGuideStepIndex;
-
-                return (
-                  <button
-                    className={`${isActive ? 'is-active' : ''} ${isDone ? 'is-done' : ''}`.trim()}
-                    key={step.id}
-                    type="button"
-                    aria-current={isActive ? 'step' : undefined}
-                    onClick={() => setPlaybackNoSoundGuideStepIndex(index)}
-                  >
-                    <span>{isDone ? <Check size={13} /> : <StepIcon size={13} />}</span>
-                    {t(step.titleKey)}
-                  </button>
-                );
-              })}
-            </nav>
-
-            <main className="settings-no-sound-wizard__stage" key={activeNoSoundGuideStep.id}>
-              <div className="settings-no-sound-wizard__stage-icon">
-                <ActiveNoSoundGuideIcon size={24} />
-              </div>
-              <div className="settings-no-sound-wizard__stage-copy">
-                <span>{noSoundGuideProgressLabel}</span>
-                <h4>{t(activeNoSoundGuideStep.titleKey)}</h4>
-                <p>{t(activeNoSoundGuideStep.bodyKey)}</p>
-                {renderNoSoundGuideStepControl()}
-              </div>
-            </main>
-
-            <footer className="settings-no-sound-wizard__actions">
-              <button
-                className="settings-action-button"
-                type="button"
-                disabled={activeNoSoundGuideStepIndex === 0}
-                onClick={() => setPlaybackNoSoundGuideStepIndex((index) => Math.max(0, index - 1))}
-              >
-                <ChevronLeft size={14} />
-                {t('firstRun.action.previous')}
-              </button>
-              <button
-                className="settings-action-button"
-                type="button"
-                onClick={() => {
-                  if (activeNoSoundGuideStepIndex >= noSoundGuideStepCount - 1) {
-                    closeNoSoundGuide();
-                    return;
-                  }
-                  setPlaybackNoSoundGuideStepIndex((index) => Math.min(noSoundGuideStepCount - 1, index + 1));
-                }}
-              >
-                {activeNoSoundGuideStepIndex >= noSoundGuideStepCount - 1 ? t('firstRun.action.finish') : t('firstRun.action.next')}
-                {activeNoSoundGuideStepIndex >= noSoundGuideStepCount - 1 ? <Check size={14} /> : <ChevronRight size={14} />}
-              </button>
-            </footer>
-          </section>
-        </div>
-      ) : null}
+      <PlaybackNoSoundGuideDialog
+        activeStepIndex={activeNoSoundGuideStepIndex}
+        control={playbackNoSoundGuideOpen ? renderNoSoundGuideStepControl() : null}
+        onClose={closeNoSoundGuide}
+        onStepChange={setPlaybackNoSoundGuideStepIndex}
+        open={playbackNoSoundGuideOpen}
+        t={t}
+      />
       {fontPickerTarget ? (
         <FontPickerModal
           currentFont={activeFontValue}

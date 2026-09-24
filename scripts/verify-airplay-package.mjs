@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { delimiter, join, resolve } from 'node:path';
@@ -20,10 +20,14 @@ const requiredFiles = [
   join(resourcesRoot, 'airplayRaopHelper.cjs'),
   join(nodeLibraopRoot, 'package.json'),
   join(prebuildRoot, 'raop_addon.node.napi.node'),
-  join(prebuildRoot, 'libssl-3-x64.dll'),
-  join(prebuildRoot, 'libcrypto-3-x64.dll'),
-  join(prebuildRoot, 'pthreadVC3.dll'),
+  join(prebuildRoot, 'pthreadVC2.dll'),
 ];
+
+if (existsSync(prebuildRoot)) {
+  const prebuildNames = readdirSync(prebuildRoot);
+  if (!prebuildNames.some((name) => /^libssl-\d+-x64\.dll$/iu.test(name))) requiredFiles.push(join(prebuildRoot, 'libssl-<major>-x64.dll'));
+  if (!prebuildNames.some((name) => /^libcrypto-\d+-x64\.dll$/iu.test(name))) requiredFiles.push(join(prebuildRoot, 'libcrypto-<major>-x64.dll'));
+}
 
 const missing = requiredFiles.filter((filePath) => !existsSync(filePath));
 

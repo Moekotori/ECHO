@@ -190,6 +190,19 @@ describe('TsMetadataReader WAV INFO text decoding', () => {
     expect(decodeWaveInfoText(Buffer.from('\u8349\u4e1c\u6ca1\u6709\u6d3e\u5bf9\0', 'utf8'))).toBe('\u8349\u4e1c\u6ca1\u6709\u6d3e\u5bf9');
   });
 
+  it.each([
+    ['Cyrillic', '\u043c\u0430\u043d\u0433\u043e \u043d\u0435\u043a\u0442\u0430\u0440'],
+    ['Greek', '\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1 \u03ba\u03cc\u03c3\u03bc\u03b5'],
+    ['Turkish', '\u0130stanbul \u015fark\u0131s\u0131'],
+    ['Hebrew', '\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd'],
+    ['Arabic', '\u0645\u0631\u062d\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645'],
+    ['Thai', '\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e35\u0e0a\u0e32\u0e27\u0e42\u0e25\u0e01'],
+    ['Korean', '\uc548\ub155\ud558\uc138\uc694 \uc138\uacc4'],
+    ['Vietnamese', 'Ti\u1ebfng Vi\u1ec7t tuy\u1ec7t v\u1eddi'],
+  ])('keeps valid UTF-8 %s WAV INFO text unchanged', (_language, text) => {
+    expect(decodeWaveInfoText(Buffer.from(`${text}\0`, 'utf8'))).toBe(text);
+  });
+
   it('decodes UTF-16 WAV INFO text with or without a BOM', () => {
     expect(decodeWaveInfoText(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('\u5c71\u6d77\0', 'utf16le')]))).toBe('\u5c71\u6d77');
     expect(decodeWaveInfoText(Buffer.from('Wave Title\0', 'utf16le'))).toBe('Wave Title');
@@ -199,6 +212,33 @@ describe('TsMetadataReader WAV INFO text decoding', () => {
     expect(repairMojibakeText(Buffer.from('Fran\u00e7oise Hardy', 'utf8').toString('latin1'))).toBe('Fran\u00e7oise Hardy');
     expect(repairMojibakeText(Buffer.from('\u591c\u306b\u99c6\u3051\u308b', 'utf8').toString('latin1'))).toBe('\u591c\u306b\u99c6\u3051\u308b');
     expect(repairMojibakeText('\u9093\u7d2b\u68cb - \u540e\u4f1a\u65e0\u671f')).toBe('\u9093\u7d2b\u68cb - \u540e\u4f1a\u65e0\u671f');
+  });
+
+  it('repairs GBK bytes mislabeled as Latin-1 in legacy ID3 text frames', () => {
+    expect(repairMojibakeText('06 \u00b9\u00c2\u00b6\u00c0\u00a4\u00ca\u00d1\u00b2\u00c0\u00f1')).toBe('06 \u5b64\u72ec\u306a\u5de1\u793c');
+    expect(repairMojibakeText('\u00a5\u00a2\u00a5\u00cb\u00a5\u00e1')).toBe('\u30a2\u30cb\u30e1');
+    expect(repairMojibakeText('Compilation - \u00d6\u00d0\u00ce\u00c4')).toBe('Compilation - \u4e2d\u6587');
+  });
+
+  it.each([
+    ['Shift_JIS', '\u591c\u306b\u99c6\u3051\u308b', 'shift_jis'],
+    ['EUC-JP', '\u591c\u306b\u99c6\u3051\u308b', 'euc-jp'],
+    ['CP949', '\uc548\ub155\ud558\uc138\uc694', 'cp949'],
+  ])('repairs %s bytes mislabeled as Latin-1 when the decoded script is unambiguous', (_label, text, encoding) => {
+    const mojibake = iconv.decode(iconv.encode(text, encoding), 'latin1');
+    expect(repairMojibakeText(mojibake)).toBe(text);
+  });
+
+  it.each([
+    ['Central European', 'Za\u017c\u00f3\u0142\u0107 g\u0119\u015bl\u0105 ja\u017a\u0144', 'win1250'],
+    ['Cyrillic', '\u043c\u0430\u043d\u0433\u043e \u043d\u0435\u043a\u0442\u0430\u0440', 'win1251'],
+    ['Turkish', '\u0130stanbul \u015fark\u0131s\u0131', 'win1254'],
+    ['Arabic', '\u0645\u0631\u062d\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645', 'win1256'],
+    ['Vietnamese', 'Ti\u1ebfng Vi\u1ec7t tuy\u1ec7t v\u1eddi', 'win1258'],
+  ])('repairs UTF-8 %s text misdecoded as %s', (_language, text, encoding) => {
+    const mojibake = iconv.decode(Buffer.from(text, 'utf8'), encoding);
+    expect(repairMojibakeText(mojibake)).toBe(text);
+    expect(repairMojibakeText(text)).toBe(text);
   });
 });
 
@@ -263,6 +303,63 @@ describe('TsMetadataReader parser fallbacks', () => {
     expect(result.embeddedMetadataStatus).toBe('present');
     expect(result.embeddedCoverStatus).toBe('present');
     expect(Array.from(result.embeddedCover?.data ?? [])).toEqual([1, 2, 3]);
+  });
+
+  it('omits cover data when a metadata-only read is requested', async () => {
+    parseFileMock.mockResolvedValue(emptyMetadata());
+    readTagLibMetadataMock.mockResolvedValue({
+      tags: { title: ['Metadata Only'] },
+      properties: undefined,
+      hasCoverArt: true,
+    } as never);
+    readTagLibPicturesMock.mockResolvedValue([
+      { type: 'FrontCover', mimeType: 'image/jpeg', data: new Uint8Array([1, 2, 3]) },
+    ] as never);
+
+    const result = await new TsMetadataReader().read('D:\\Music\\Track.dsf', { readCover: false });
+
+    expect(parseFileMock).toHaveBeenCalledWith('D:\\Music\\Track.dsf', {
+      duration: true,
+      skipCovers: true,
+    });
+    expect(result.embeddedCoverStatus).toBe('present');
+    expect(result.embeddedCover).toBeUndefined();
+  });
+
+  it('detects MQA from embedded encoder metadata without changing the FLAC codec', async () => {
+    parseFileMock.mockResolvedValue(emptyMetadata({
+      format: {
+        codec: 'FLAC',
+        sampleRate: 48000,
+        bitsPerSample: 24,
+      },
+      native: {
+        vorbis: [
+          { id: 'MQAENCODER', value: 'MQAEncode v1.1' },
+        ],
+      },
+    }));
+
+    const result = await new TsMetadataReader().read('D:\\Music\\MQA Track.flac');
+
+    expect(result.fields.codec).toBe('FLAC');
+    expect(result.fields.mqa).toBe(true);
+    expect(result.fieldSources.mqa).toBe('embedded');
+  });
+
+  it('does not infer MQA from FLAC resolution alone', async () => {
+    parseFileMock.mockResolvedValue(emptyMetadata({
+      format: {
+        codec: 'FLAC',
+        sampleRate: 96000,
+        bitsPerSample: 24,
+      },
+    }));
+
+    const result = await new TsMetadataReader().read('D:\\Music\\Hi Res.flac');
+
+    expect(result.fields.mqa).toBe(false);
+    expect(result.fieldSources.mqa).toBe('unknown');
   });
 
   it('recovers APE tags and avoids TagLib low bitrate when music-metadata cannot parse the file', async () => {
@@ -448,6 +545,59 @@ describe('TsMetadataReader parser fallbacks', () => {
       bitrate: 5400000,
     });
     expect(result.embeddedCoverStatus).toBe('missing');
+    expect(readTagLibMetadataMock).not.toHaveBeenCalled();
+    expect(readTagLibPicturesMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves all distinct embedded artists using the native reader separator', async () => {
+    parseFileMock.mockResolvedValue(emptyMetadata({
+      common: {
+        title: 'Collaboration',
+        artist: 'First Artist',
+        artists: ['First Artist', 'Second Artist', 'First Artist'],
+      },
+      format: {
+        duration: 180,
+        codec: 'FLAC',
+        sampleRate: 48000,
+        bitsPerSample: 24,
+        bitrate: 1800000,
+      },
+    }));
+
+    const result = await new TsMetadataReader().read('D:\\Music\\Album\\Collaboration.flac');
+    const mp3Result = await new TsMetadataReader().read('D:\\Music\\Album\\Collaboration.mp3');
+
+    expect(result.fields.artist).toBe('First Artist; Second Artist');
+    expect(result.fieldSources.artist).toBe('embedded');
+    expect(mp3Result.fields.artist).toBe('First Artist/Second Artist');
+  });
+
+  it('does not invoke TagLib for MP3 solely because compressed audio has no bit depth', async () => {
+    parseFileMock.mockResolvedValue(emptyMetadata({
+      common: {
+        title: 'Complete MP3',
+        artist: 'Complete Artist',
+      },
+      format: {
+        duration: 196,
+        codec: 'MPEG 1 Layer 3',
+        sampleRate: 44100,
+        bitrate: 320000,
+      },
+    }));
+
+    const result = await new TsMetadataReader().read('D:\\Music\\Complete.mp3');
+
+    expect(result.fields).toMatchObject({
+      title: 'Complete MP3',
+      artist: 'Complete Artist',
+      duration: 196,
+      codec: 'MP3',
+      sampleRate: 44100,
+      bitDepth: null,
+      bitrate: 320000,
+    });
     expect(readTagLibMetadataMock).not.toHaveBeenCalled();
     expect(readTagLibPicturesMock).not.toHaveBeenCalled();
   });
@@ -687,6 +837,37 @@ describe('TsMetadataReader parser fallbacks', () => {
     expect(result.fieldSources.trackNo).toBe('embedded');
   });
 
+  it('recovers common RIFF INFO aliases when the primary WAV parser fails', async () => {
+    const root = makeTempRoot();
+    const wavePath = join(root, 'RIFF aliases.wav');
+    writeWaveWithRawInfo(wavePath, {
+      TITL: Buffer.from('Alias Title\0', 'utf8'),
+      IART: Buffer.from('Alias Artist\0', 'utf8'),
+      IRPD: Buffer.from('Alias Album\0', 'utf8'),
+      GNRE: Buffer.from('Ambient\0', 'utf8'),
+      IPRT: Buffer.from('07\0', 'utf8'),
+      YEAR: Buffer.from('2025\0', 'utf8'),
+    });
+    parseFileMock.mockRejectedValue(new Error('unsupported RIFF variant'));
+
+    const result = await new TsMetadataReader().read(wavePath);
+
+    expect(result.fields).toMatchObject({
+      title: 'Alias Title',
+      artist: 'Alias Artist',
+      album: 'Alias Album',
+      genre: 'Ambient',
+      trackNo: 7,
+      year: 2025,
+    });
+    expect(result.embeddedMetadataStatus).toBe('present');
+    expect(result.status).toBe('ok');
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining('music_metadata_unavailable: unsupported RIFF variant'),
+    ]));
+  });
+
   it('reads RF64 INFO tags after a ds64-sized data chunk', async () => {
     const root = makeTempRoot();
     const wavePath = join(root, 'RF64 Info.wav');
@@ -730,6 +911,31 @@ describe('TsMetadataReader parser fallbacks', () => {
     expect(result.fieldSources.title).toBe('embedded');
     expect(result.fieldSources.artist).toBe('embedded');
     expect(result.fieldSources.year).toBe('embedded');
+  });
+
+  it('recovers BW64 bext metadata when the primary WAV parser rejects the container', async () => {
+    const root = makeTempRoot();
+    const wavePath = join(root, 'BW64 parser fallback.wav');
+    writeWaveContainerWithChunks(wavePath, 'BW64', [
+      ds64Chunk(),
+      riffChunk('bext', bextChunkData({
+        description: 'Recovered Broadcast Title',
+        originator: 'Recovered Originator',
+        originationDate: '2024-11-09',
+      })),
+    ]);
+    parseFileMock.mockRejectedValue(new Error('unsupported BW64 container'));
+
+    const result = await new TsMetadataReader().read(wavePath);
+
+    expect(result.fields).toMatchObject({
+      title: 'Recovered Broadcast Title',
+      artist: 'Recovered Originator',
+      year: 2024,
+    });
+    expect(result.embeddedMetadataStatus).toBe('present');
+    expect(result.status).toBe('ok');
+    expect(result.errors).toEqual([]);
   });
 
   it('keeps ordinary common WAV tags ahead of bext metadata', async () => {
@@ -793,6 +999,62 @@ describe('TsMetadataReader parser fallbacks', () => {
     expect(result.fieldSources.title).toBe('embedded');
     expect(result.fieldSources.artist).toBe('embedded');
     expect(result.fieldSources.album).toBe('embedded');
+  });
+
+  it('prefers valid UTF-8 WAV INFO text when the common parser misdecodes Cyrillic as GBK', async () => {
+    const root = makeTempRoot();
+    const wavePath = join(root, 'Corn Wave - \u043c\u0430\u043d\u0433\u043e \u043d\u0435\u043a\u0442\u0430\u0440.wav');
+    const title = '\u043c\u0430\u043d\u0433\u043e \u043d\u0435\u043a\u0442\u0430\u0440';
+    writeWaveWithRawInfo(wavePath, {
+      IART: Buffer.from('Corn Wave\0', 'utf8'),
+      INAM: Buffer.from(`${title}\0`, 'utf8'),
+    });
+    parseFileMock.mockResolvedValue(emptyMetadata({
+      common: {
+        title: iconv.decode(Buffer.from(title, 'utf8'), 'gbk'),
+        artist: 'Corn Wave',
+      },
+      format: {
+        duration: 180,
+        codec: 'PCM',
+      },
+    }));
+
+    const result = await new TsMetadataReader().read(wavePath);
+
+    expect(result.fields.title).toBe(title);
+    expect(result.fields.artist).toBe('Corn Wave');
+  });
+
+  it.each([
+    ['Central European', 'Za\u017c\u00f3\u0142\u0107 g\u0119\u015bl\u0105 ja\u017a\u0144', 'win1250'],
+    ['Cyrillic', '\u043c\u0430\u043d\u0433\u043e \u043d\u0435\u043a\u0442\u0430\u0440', 'win1251'],
+    ['Greek', '\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1 \u03ba\u03cc\u03c3\u03bc\u03b5', 'win1253'],
+    ['Turkish', '\u0130stanbul \u015fark\u0131s\u0131', 'win1254'],
+    ['Hebrew', '\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd', 'win1255'],
+    ['Arabic', '\u0645\u0631\u062d\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645', 'win1256'],
+    ['Thai', '\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e35\u0e0a\u0e32\u0e27\u0e42\u0e25\u0e01', 'windows-874'],
+    ['Korean', '\uc548\ub155\ud558\uc138\uc694 \uc138\uacc4', 'cp949'],
+    ['Vietnamese', 'Ti\u1ebfng Vi\u1ec7t tuy\u1ec7t v\u1eddi', 'win1258'],
+  ])('recovers valid UTF-8 %s WAV INFO text misdecoded as %s', async (language, title, encoding) => {
+    const root = makeTempRoot();
+    const wavePath = join(root, `${language}.wav`);
+    writeWaveWithRawInfo(wavePath, {
+      INAM: Buffer.from(`${title}\0`, 'utf8'),
+    });
+    parseFileMock.mockResolvedValue(emptyMetadata({
+      common: {
+        title: iconv.decode(Buffer.from(title, 'utf8'), encoding),
+      },
+      format: {
+        duration: 180,
+        codec: 'PCM',
+      },
+    }));
+
+    const result = await new TsMetadataReader().read(wavePath);
+
+    expect(result.fields.title).toBe(title);
   });
 
   it('prefers valid ID3/common WAV tags over corrupted RIFF INFO text', async () => {

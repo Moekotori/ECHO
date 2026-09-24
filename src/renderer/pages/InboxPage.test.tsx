@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { LibraryInboxTrackPage, LibraryPage, LibraryTrack, PlaybackMemoryGraph, PlaybackMemoryTrackInsight } from '../../shared/types/library';
-import { translations, isLocale, localeOptions } from '../i18n/locales';
+import { translations, isLocale, localeOptions } from '../i18n/locales.testing';
 import { InboxPage } from './InboxPage';
 
 let libraryBridge: Record<string, unknown> | null = null;

@@ -1,4 +1,5 @@
 import { Component, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import "../styles/lyrics.css";
 import type { CSSProperties, DragEvent, MouseEvent, ReactNode, WheelEvent as ReactWheelEvent } from "react";
 import {
   ArrowLeft,
@@ -14,10 +15,12 @@ import {
 } from "lucide-react";
 import type { AudioStatus } from "../../shared/types/audio";
 import type { AppSettings } from "../../shared/types/appSettings";
-import type { AirPlayReceiverStatus } from "../../shared/types/connect";
+import { resolveEffectivePerformancePolicy } from "../../shared/utils/performancePolicy";
+import type { AirPlayReceiverStatus, ConnectSessionStatus } from "../../shared/types/connect";
 import type { DiagnosticMemoryPressureEvent } from "../../shared/types/diagnostics";
 import type { LibraryTrack } from "../../shared/types/library";
 import type {
+  LyricsCandidateApplyOrigin,
   LyricsProviderId,
   LyricsSearchCandidate,
   LyricsSearchTrigger,
@@ -60,7 +63,10 @@ import { titleFromPath } from "../components/player/playerFormat";
 import { usePlaybackQueue } from "../stores/PlaybackQueueProvider";
 import { beginPlaybackSeekSnapshot, refreshPlaybackStatus, useSharedPlaybackStatus } from "../stores/playbackStatusStore";
 import { logLyricsConsole } from "../diagnostics/lyricsConsole";
+import { isSpotifyTrack, seekSpotifyPlayback } from "../integrations/spotify/spotifyPlayback";
 import { openAlbumDetailForTrack } from "../utils/albumNavigation";
+import { isActiveConnectPlaybackStatus, playbackStatusFromConnectStatus } from "../utils/connectPlayback";
+import { largeCoverUrlFromCachedVariant, localCoverDisplayUrl } from "../utils/coverDisplayUrl";
 import { registerAppearanceFontFile, serializeFontList } from "../preferences/appearancePreferences";
 import {
   createMusicReactiveScene,
@@ -70,6 +76,7 @@ import {
 
 type LyricsPageProps = {
   initialLyrics?: LyricLine[];
+  isActive?: boolean;
   usePlayerDrawerHeader?: boolean;
 };
 
@@ -85,6 +92,13 @@ const isConnectDonatorUnlocked = async (): Promise<boolean> => {
     return false;
   }
 };
+
+const getActiveConnectPlaybackStatus = async (): Promise<ConnectSessionStatus | null> => {
+  const status = await window.echo?.connect?.getStatus?.().catch(() => null);
+  return isActiveConnectPlaybackStatus(status) ? status : null;
+};
+
+const lyricSeekPlaybackStates = new Set<AudioStatus["state"]>(["playing", "paused", "stopped"]);
 
 type LyricsSmartAlignmentAutoState = {
   trackId: string;
@@ -260,7 +274,7 @@ const fallbackLyricsDisplaySettings: LyricsDisplaySettings = {
   lyricsWordHighlightClarityPercent: 70,
   lyricsAutoSearch: true,
   lyricsAutoApplyEnabled: true,
-  lyricsAutoAcceptScore: 0.5,
+  lyricsAutoAcceptScore: 0.78,
   lyricsRestartOnApplyEnabled: false,
   lyricsGlobalSyncOffsetMs: 0,
   lyricsTimelineCorrectionEnabled: true,
@@ -491,6 +505,9 @@ const rememberLyricsState = (key: string | null, lyrics: LyricsState): void => {
   }
 };
 
+const normalizeLyricsMemoryKeyPart = (value: string | number | null | undefined): string =>
+  String(value ?? "").trim().toLowerCase();
+
 export const __lyricsPageSessionMemoryForTests = {
   maxChars: lyricsPageSessionMemoryMaxChars,
   maxEntries: lyricsPageSessionMemoryMaxEntries,
@@ -706,10 +723,35 @@ const rememberLyricsViewMode = (mode: LyricsViewMode): void => {
   }
 };
 
-const isWindowApproximatelyMaximized = (): boolean => {
-  const widthDelta = Math.abs(window.outerWidth - window.screen.availWidth);
-  const heightDelta = Math.abs(window.outerHeight - window.screen.availHeight);
-  return widthDelta <= 24 && heightDelta <= 24;
+const windowBoundsTolerancePx = 24;
+
+const isExpandedWindowBounds = (
+  outerWidth: number,
+  outerHeight: number,
+  screenWidth: number,
+  screenHeight: number,
+  availableWidth: number,
+  availableHeight: number,
+): boolean => {
+  const approximatelyMatches = (targetWidth: number, targetHeight: number): boolean =>
+    Math.abs(outerWidth - targetWidth) <= windowBoundsTolerancePx
+    && Math.abs(outerHeight - targetHeight) <= windowBoundsTolerancePx;
+
+  return approximatelyMatches(availableWidth, availableHeight)
+    || approximatelyMatches(screenWidth, screenHeight);
+};
+
+const isWindowApproximatelyMaximized = (): boolean => isExpandedWindowBounds(
+  window.outerWidth,
+  window.outerHeight,
+  window.screen.width,
+  window.screen.height,
+  window.screen.availWidth,
+  window.screen.availHeight,
+);
+
+export const __lyricsWindowLayoutForTests = {
+  isExpandedWindowBounds,
 };
 
 const formatDuration = (durationSeconds: number | null): string => {
@@ -722,7 +764,6 @@ const formatDuration = (durationSeconds: number | null): string => {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 };
 
-const lyricsMatchAutoCloseMs = 10000;
 const lyricsTrackMarqueeOverflowPx = 4;
 const lyricsTrackTransitionMs = 760;
 const lyricsNetworkLoadNoticeDismissMs = 4200;
@@ -863,9 +904,25 @@ const LyricsTrackMarqueeText = ({
 };
 
 const riskLabel = (risk: LyricsSearchCandidate["risk"]): string => {
-  if (risk === "low") return "精准匹配";
-  if (risk === "medium") return "可能匹配";
-  return "需确认";
+  if (risk === "low") return "较可能";
+  if (risk === "medium") return "需确认";
+  return "差异较大";
+};
+
+const confidenceLabel = (candidate: LyricsSearchCandidate): string => {
+  if (candidate.confidence === "high") return "较可能";
+  if (candidate.confidence === "balanced") return "需确认";
+  return "差异较大";
+};
+
+const formatDurationDelta = (deltaSeconds: number | null | undefined): string | null => {
+  if (typeof deltaSeconds !== "number" || !Number.isFinite(deltaSeconds)) {
+    return null;
+  }
+
+  const roundedDelta = Math.round(deltaSeconds);
+  if (roundedDelta === 0) return "时长一致";
+  return `相差 ${roundedDelta > 0 ? "+" : ""}${roundedDelta} 秒`;
 };
 
 type LyricsCandidateDisplayKind = "instrumental" | "synced" | "plain" | "lyrics";
@@ -891,6 +948,7 @@ const reasonLabels: Record<string, string> = {
   album_match: "专辑匹配",
   duration_exact: "时长精准",
   duration_close: "时长接近",
+  duration_tolerated: "时长差可接受",
   duration_mismatch: "时长不同",
   artist_mismatch: "艺人不同",
   cover_intent: "可能翻唱",
@@ -987,6 +1045,31 @@ const networkLyricsProviderIds = new Set<LyricsProviderId>([
   "genius",
 ]);
 
+const runLyricsProviderPool = async (
+  providers: LyricsProviderId[],
+  search: (provider: LyricsProviderId) => Promise<void>,
+): Promise<void> => {
+  const localProviders = providers.filter((provider) => !networkLyricsProviderIds.has(provider));
+  await Promise.allSettled(localProviders.map(search));
+
+  const networkProviders = providers.filter((provider) => networkLyricsProviderIds.has(provider));
+  let nextProviderIndex = 0;
+  const workerCount = Math.min(4, networkProviders.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextProviderIndex < networkProviders.length) {
+        const provider = networkProviders[nextProviderIndex];
+        nextProviderIndex += 1;
+        try {
+          await search(provider);
+        } catch {
+          // One provider must not delay or hide candidates from the others.
+        }
+      }
+    }),
+  );
+};
+
 const isNetworkLyricsSource = (source: TrackLyrics["provider"] | LyricsProviderId | null | undefined): boolean =>
   Boolean(source && networkLyricsProviderIds.has(source as LyricsProviderId));
 
@@ -1034,14 +1117,49 @@ const mergeLyricsCandidates = (
 ): LyricsSearchCandidate[] => {
   const merged = new Map<string, LyricsSearchCandidate>();
   for (const candidate of [...current, ...next]) {
-    const key = `${candidate.provider}:${candidate.providerLyricsId ?? candidate.id}`;
+    const key = candidate.contentFingerprint
+      ? `content:${candidate.contentFingerprint}`
+      : `${candidate.provider}:${candidate.providerLyricsId ?? candidate.id}`;
     const existing = merged.get(key);
-    if (!existing || candidate.score > existing.score) {
+    if (!existing) {
       merged.set(key, candidate);
+      continue;
     }
+
+    const existingRisk = existing.risk === "low" ? 0 : existing.risk === "medium" ? 1 : 2;
+    const candidateRisk = candidate.risk === "low" ? 0 : candidate.risk === "medium" ? 1 : 2;
+    const best = candidateRisk < existingRisk || (candidateRisk === existingRisk && candidate.score > existing.score)
+      ? candidate
+      : existing;
+    const matchedSources = Array.from(
+      new Map(
+        [...(existing.matchedSources ?? []), ...(candidate.matchedSources ?? [])]
+          .map((source) => [`${source.provider}:${source.sourceLabel}`, source]),
+      ).values(),
+    );
+    merged.set(key, { ...best, matchedSources });
   }
 
-  return Array.from(merged.values()).sort((left, right) => right.score - left.score);
+  return Array.from(merged.values()).sort((left, right) => {
+    const riskRank = (value: LyricsSearchCandidate["risk"]): number => value === "low" ? 0 : value === "medium" ? 1 : 2;
+    const confidenceRank = (value: LyricsSearchCandidate["confidence"]): number =>
+      value === "high" ? 0 : value === "balanced" ? 1 : 2;
+    const riskDelta = riskRank(left.risk) - riskRank(right.risk);
+    if (riskDelta !== 0) return riskDelta;
+    const confidenceDelta = confidenceRank(left.confidence) - confidenceRank(right.confidence);
+    if (confidenceDelta !== 0) return confidenceDelta;
+    const titleDelta = (right.titleScore ?? 0) - (left.titleScore ?? 0);
+    if (titleDelta !== 0) return titleDelta;
+    const artistDelta = (right.artistScore ?? 0) - (left.artistScore ?? 0);
+    if (artistDelta !== 0) return artistDelta;
+    const durationDelta = (left.durationDeltaSeconds ?? Number.MAX_SAFE_INTEGER) -
+      (right.durationDeltaSeconds ?? Number.MAX_SAFE_INTEGER);
+    if (durationDelta !== 0) return durationDelta;
+    const versionDelta = (right.versionScore ?? 0) - (left.versionScore ?? 0);
+    if (versionDelta !== 0) return versionDelta;
+    if (right.hasSynced !== left.hasSynced) return right.hasSynced ? 1 : -1;
+    return right.score - left.score;
+  });
 };
 
 const isAudioStatusForPlayback = (
@@ -1098,20 +1216,6 @@ const lyricsClockUnderrunBufferThresholdMs = 40;
 const lyricsClockStallDetectionMs = 900;
 const lyricsClockStallProgressRatio = 0.25;
 const smartAlignmentBackgroundCandidateLimit = 3;
-const automaticMissingLyricsNetworkProviderLimit = 1;
-
-const automaticMissingLyricsCandidateProviders = (
-  providers: readonly LyricsProviderId[],
-): LyricsProviderId[] => {
-  const orderedProviders = providers.length ? providers : (["local"] satisfies LyricsProviderId[]);
-  const networkProviders = orderedProviders.filter((provider) => provider !== "local");
-  if (networkProviders.length > 0) {
-    return networkProviders.slice(0, automaticMissingLyricsNetworkProviderLimit);
-  }
-
-  return orderedProviders.includes("local") ? ["local"] : orderedProviders.slice(0, 1);
-};
-
 const isLyricsAutomaticWorkUnderPlaybackPressure = (
   status: AudioStatus | null | undefined,
   trackId: string | null | undefined,
@@ -1222,36 +1326,13 @@ const selectAutoApplyCandidate = (
     return null;
   }
 
-  const threshold = Number.isFinite(settings.lyricsAutoAcceptScore)
-    ? Math.max(0.3, Math.min(1, settings.lyricsAutoAcceptScore))
-    : fallbackLyricsDisplaySettings.lyricsAutoAcceptScore;
-
   return candidates.find(
     (candidate) =>
-      candidate.score >= threshold &&
-      isAutoApplyRiskAllowed(candidate) &&
+      candidate.autoAcceptEligible === true &&
+      candidate.confidence !== "blocked" &&
+      candidate.risk !== "high" &&
       (candidate.hasSynced || candidate.hasPlain || candidate.instrumental),
   ) ?? null;
-};
-
-const isAutoApplyRiskAllowed = (candidate: LyricsSearchCandidate): boolean => {
-  const risk = candidate.risk ?? "low";
-  if (risk === "low") {
-    return true;
-  }
-
-  const reasons = new Set(candidate.reasons ?? []);
-  const titleScore = candidate.titleScore ?? (reasons.has("title_exact") ? 1 : 0);
-  const artistScore = candidate.artistScore ?? (reasons.has("artist_exact") ? 1 : 0);
-  const hasOnlyDurationMismatch =
-    reasons.has("duration_mismatch") &&
-    !reasons.has("artist_mismatch") &&
-    !reasons.has("version_conflict") &&
-    !reasons.has("rejected_by_user") &&
-    !reasons.has("candidate_only_cover") &&
-    !reasons.has("cover_intent");
-
-  return hasOnlyDurationMismatch && titleScore >= 0.98 && artistScore >= 0.98;
 };
 
 const safeCoverUrl = (track: LibraryTrack | null): string | null => {
@@ -1276,18 +1357,9 @@ const safeReducedCoverUrl = (track: LibraryTrack | null): string | null => {
   return coverUrl && (allowInlineCover || !coverUrl.startsWith("data:")) ? coverUrl : null;
 };
 
-const originalCoverUrlFromCachedVariant = (coverUrl: string | null | undefined): string | null => {
-  const originalUrl = coverUrl?.replace(
-    /^echo-cover:\/\/(?:thumb|album|large)\//u,
-    "echo-cover://original/",
-  ) ?? null;
+type CoverColorSampleVariant = "large" | "album" | "thumb";
 
-  return originalUrl?.startsWith("echo-cover://original/") ? originalUrl : null;
-};
-
-type CoverColorSampleVariant = "original" | "large" | "album" | "thumb";
-
-const coverColorSampleVariants: CoverColorSampleVariant[] = ["original", "large", "album", "thumb"];
+const coverColorSampleVariants: CoverColorSampleVariant[] = ["thumb", "album", "large"];
 const emptyLyricsImageUrls: readonly string[] = [];
 
 const coverVariantUrlFromCachedVariant = (
@@ -1442,7 +1514,7 @@ const scheduleLyricsImageSampling = (callback: () => void): (() => void) => {
   return () => window.clearTimeout(timer);
 };
 
-const safeOriginalCoverUrl = (track: LibraryTrack | null): string | null => {
+const safeDisplayCoverUrl = (track: LibraryTrack | null): string | null => {
   const allowInlineCover = isSnapshotLyricsTrack(track, track?.id ?? null);
   const coverLarge = (track as TrackWithLargeCover | null)?.coverLarge ?? null;
   const coverThumb = track?.coverThumb ?? null;
@@ -1454,10 +1526,9 @@ const safeOriginalCoverUrl = (track: LibraryTrack | null): string | null => {
     : isStreamBackedTrack(track) && isRemoteArtworkUrl(coverThumb)
       ? highResolutionRemoteArtworkUrl(coverThumb) ?? coverThumb
       : null;
-  const coverUrl = track?.coverId
-    ? `echo-cover://original/${encodeURIComponent(track.coverId)}`
-    : originalCoverUrlFromCachedVariant(coverLarge)
-      ?? originalCoverUrlFromCachedVariant(coverThumb)
+  const coverUrl = localCoverDisplayUrl(track?.coverId)
+    ?? largeCoverUrlFromCachedVariant(coverLarge)
+      ?? largeCoverUrlFromCachedVariant(coverThumb)
       ?? streamCover
       ?? inlineCover;
 
@@ -1509,7 +1580,9 @@ const rememberCandidateSource = (source: CandidateSourceFilter): void => {
 
 const selectLyricsDisplaySettings = (
   settings: AppSettings,
-): LyricsDisplaySettings => ({
+): LyricsDisplaySettings => {
+  const performancePolicy = resolveEffectivePerformancePolicy(settings);
+  return ({
   lyricsEnabled: settings.lyricsEnabled,
   lyricsNetworkEnabled: settings.lyricsNetworkEnabled !== false,
   lyricsEnabledProviders: settings.lyricsEnabledProviders?.length
@@ -1537,7 +1610,7 @@ const selectLyricsDisplaySettings = (
   lyricsWordHighlightClarityPercent:
     settings.lyricsWordHighlightClarityPercent ?? fallbackLyricsDisplaySettings.lyricsWordHighlightClarityPercent,
   lowLoadPlaybackModeEnabled: settings.lowLoadPlaybackModeEnabled === true,
-  lyricsMvGraphicsPressureGuardEnabled: settings.lyricsMvGraphicsPressureGuardEnabled === true,
+  lyricsMvGraphicsPressureGuardEnabled: performancePolicy.lyricsMvGraphicsPressureGuardEnabled,
   lyricsAutoSearch: settings.lowLoadPlaybackModeEnabled === true ? false : settings.lyricsAutoSearch,
   lyricsAutoApplyEnabled: settings.lyricsAutoApplyEnabled !== false,
   lyricsAutoAcceptScore: settings.lyricsAutoAcceptScore,
@@ -1557,12 +1630,13 @@ const selectLyricsDisplaySettings = (
   lyricsImmersiveCoverGlassEnabled: settings.lyricsImmersiveCoverGlassEnabled === true,
   lyricsImmersiveCoverGlassBlurPx: settings.lyricsImmersiveCoverGlassBlurPx ?? fallbackLyricsDisplaySettings.lyricsImmersiveCoverGlassBlurPx,
   lyricsRoseVinylBackgroundBlurPx: settings.lyricsRoseVinylBackgroundBlurPx ?? fallbackLyricsDisplaySettings.lyricsRoseVinylBackgroundBlurPx,
-  lyricsHighResolutionNetworkCoverEnabled: settings.lyricsHighResolutionNetworkCoverEnabled === true,
-  lyricsMusicReactiveVisualsEnabled: settings.lyricsMusicReactiveVisualsEnabled === true,
+  lyricsHighResolutionNetworkCoverEnabled: performancePolicy.lyricsHighResolutionNetworkCoverEnabled,
+  lyricsMusicReactiveVisualsEnabled: performancePolicy.lyricsMusicReactiveVisualsEnabled,
   lyricsCoverBlurPx: settings.lyricsCoverBlurPx,
   lyricsCoverBrightnessPercent: settings.lyricsCoverBrightnessPercent,
   lyricsBackgroundScalePercent: settings.lyricsBackgroundScalePercent,
-});
+  });
+};
 
 const cssUrl = (value: string): string =>
   `url("${value.replace(/["\\]/g, "\\$&")}")`;
@@ -1994,7 +2068,7 @@ const useLyricsDisplayPosition = (
   return { audioClock };
 };
 
-export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: LyricsPageProps): JSX.Element => {
+export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHeader = false }: LyricsPageProps): JSX.Element => {
   const queue = usePlaybackQueue();
   const sharedPlaybackStatus = useSharedPlaybackStatus();
   const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus | null>(
@@ -2036,6 +2110,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   const lyricsBackgroundScalePendingPercentRef = useRef<number | null>(null);
   const trackTransitionSnapshotRef = useRef<LyricsTrackVisualSnapshot | null>(null);
   const trackTransitionTimerRef = useRef<number | null>(null);
+  const lyricSeekInFlightRef = useRef(false);
   const lyricsCandidateSearchGenerationRef = useRef(0);
   const [isWindowMaximized, setIsWindowMaximized] = useState(isWindowApproximatelyMaximized);
   const [areCornerControlsVisible, setAreCornerControlsVisible] = useState(true);
@@ -2045,17 +2120,27 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   const [lyricsNetworkLoadNotice, setLyricsNetworkLoadNotice] = useState<LyricsNetworkLoadNotice | null>(null);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
   const [candidates, setCandidates] = useState<LyricsSearchCandidate[]>([]);
-  const [sourceQualityMemoryVersion, setSourceQualityMemoryVersion] = useState(0);
+  const [rememberedSourceQualityByProvider, setRememberedSourceQualityByProvider] = useState(
+    () =>
+      new Map<LyricsProviderId, LyricsSourceQualityProviderSummary>(
+        readLyricsSourceQualitySummaries().map((summary) => [summary.provider, summary]),
+      ),
+  );
   const [activeCandidateSource, setActiveCandidateSource] =
     useState<CandidateSourceFilter>(() => readRememberedCandidateSource());
   const [isLyricsMatchPanelClosed, setIsLyricsMatchPanelClosed] = useState(false);
+  const isLyricsMatchPanelClosedRef = useRef(false);
+  const lyricsMatchPanelTrackIdRef = useRef<string | null>(null);
   const [isLyricsMatchPanelRevealed, setIsLyricsMatchPanelRevealed] = useState(false);
-  const [lyricsMatchPanelActivityToken, setLyricsMatchPanelActivityToken] = useState(0);
+  const [showAllLyricsCandidates, setShowAllLyricsCandidates] = useState(false);
+  const [candidateSearchText, setCandidateSearchText] = useState("");
   const [isCandidateLoading, setIsCandidateLoading] = useState(false);
   const [isAlbumNavigating, setIsAlbumNavigating] = useState(false);
   const [applyingCandidateId, setApplyingCandidateId] = useState<string | null>(
     null,
   );
+  const [confirmingCandidateId, setConfirmingCandidateId] = useState<string | null>(null);
+  const [rejectingCandidateId, setRejectingCandidateId] = useState<string | null>(null);
   const [isLyricsOffsetSaving, setIsLyricsOffsetSaving] = useState(false);
   const [isSmartAlignmentSessionActive, setIsSmartAlignmentSessionActive] = useState(false);
   const [smartAlignmentAnchors, setSmartAlignmentAnchors] = useState<LyricsSmartAlignmentAnchor[]>([]);
@@ -2106,6 +2191,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   const [, setIsCustomLyricsApplying] = useState(false);
   const [isCustomLyricsDragging, setIsCustomLyricsDragging] = useState(false);
   const lyricsRequestRef = useRef(0);
+  const storedCandidateRefreshTimersRef = useRef<number[]>([]);
   const lyricsCandidateSearchesInFlightRef = useRef(new Map<string, Promise<LyricsSearchCandidate[]>>());
   const smartAlignmentCandidateRequestRef = useRef(0);
   const smartAlignmentBackgroundSearchKeyRef = useRef<string | null>(null);
@@ -2119,7 +2205,11 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   const currentLyricsProviderDetailRef = useRef<CurrentLyricsProviderDetail | null>(null);
   const seekPreviewTimerRef = useRef<number | null>(null);
   const noteSourceQualityMemoryChanged = useCallback((): void => {
-    setSourceQualityMemoryVersion((version) => (version + 1) % 1000000);
+    setRememberedSourceQualityByProvider(
+      new Map(
+        readLyricsSourceQualitySummaries().map((summary) => [summary.provider, summary]),
+      ),
+    );
   }, []);
 
   const publishCurrentLyricsProvider = useCallback((trackLyrics: TrackLyrics | null, fallback?: CurrentLyricsProviderDetail | null): void => {
@@ -2306,6 +2396,8 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     shouldPreferAudioTrackId
       ? statusTrackId
       : queue.currentTrackId ?? statusTrackId ?? airPlaySourceId;
+  const lyricSeekTrackIdRef = useRef(trackId);
+  lyricSeekTrackIdRef.current = trackId;
   const shouldPauseAutomaticLyricsWork = isLyricsAutomaticWorkUnderPlaybackPressure(activeAudioStatus, trackId);
   const queuedCurrentTrack =
     !trackId || queue.currentTrack?.id === trackId ? queue.currentTrack : null;
@@ -2424,10 +2516,10 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     lyricsDisplaySettings.lowLoadPlaybackModeEnabled === true ||
     sessionGraphicsPressureReduced;
   const coverUrl = safeCoverUrl(currentTrack) ?? airPlayArtworkUrl;
-  const headerCoverUrl = safeOriginalCoverUrl(currentTrack) ?? airPlayArtworkUrl;
+  const headerCoverUrl = safeDisplayCoverUrl(currentTrack) ?? airPlayArtworkUrl;
   const backgroundCoverUrl = lyricsRenderPressureReduced
     ? safeReducedCoverUrl(currentTrack) ?? airPlayArtworkUrl
-    : safeOriginalCoverUrl(currentTrack) ?? airPlayArtworkUrl;
+    : safeDisplayCoverUrl(currentTrack) ?? airPlayArtworkUrl;
   const coverColorSampleUrls = useMemo(
     () => collectCoverColorSampleUrls(currentTrack, airPlayArtworkUrl),
     [airPlayArtworkUrl, currentTrack],
@@ -2474,9 +2566,14 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
             trackId,
             currentTrack?.stableKey ?? "",
             isStreamingTrack(currentTrack) ? currentTrack.providerTrackId : "",
-          ].join("|")
+            filePath ?? "",
+            title,
+            artist,
+            album ?? "",
+            currentTrack?.duration ?? airPlayDurationSeconds ?? "",
+          ].map(normalizeLyricsMemoryKeyPart).join("|")
         : null,
-    [currentTrack, trackId],
+    [airPlayDurationSeconds, album, artist, currentTrack, filePath, title, trackId],
   );
   const isCurrentAirPlayReceiverTrack =
     Boolean(airPlaySourceId) ||
@@ -2649,19 +2746,23 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   );
   const activeLyricsPageStyle =
     !lyricsRenderPressureReduced &&
-    lyricsDisplaySettings.lyricsPageStyle === "roseVinyl" &&
-    lyricsViewMode === "lyrics"
-      ? "roseVinyl"
+    lyricsViewMode === "lyrics" &&
+    (lyricsDisplaySettings.lyricsPageStyle === "editorial" ||
+      lyricsDisplaySettings.lyricsPageStyle === "roseVinyl")
+      ? lyricsDisplaySettings.lyricsPageStyle
       : "default";
+  const shouldUseEditorialStyle = activeLyricsPageStyle === "editorial";
   const shouldUseRoseVinylStyle = activeLyricsPageStyle === "roseVinyl";
   const shouldUseImmersiveCoverStyle =
     !lyricsRenderPressureReduced &&
-    !shouldUseRoseVinylStyle &&
+    activeLyricsPageStyle !== "roseVinyl" &&
     lyricsDisplaySettings.lyricsImmersiveCoverStyleEnabled === true &&
     lyricsViewMode === "lyrics";
   const requestedLyricsBackgroundMode = shouldUseImmersiveCoverStyle || shouldUseRoseVinylStyle
-    ? "cover"
-    : lyricsDisplaySettings.lyricsBackgroundMode;
+      ? "cover"
+      : shouldUseEditorialStyle
+        ? "theme"
+        : lyricsDisplaySettings.lyricsBackgroundMode;
   const shouldRequestNetworkBackgroundCover =
     !lyricsRenderPressureReduced &&
     lyricsDisplaySettings.lyricsHighResolutionNetworkCoverEnabled === true &&
@@ -2675,7 +2776,10 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     requestedLyricsBackgroundMode === "customWallpaper" &&
     !lyricsDisplaySettings.lyricsCustomWallpaperPath
       ? "theme"
-      : requestedLyricsBackgroundMode === "cover" && !backgroundCoverUrl && !shouldRequestNetworkBackgroundCover
+      : requestedLyricsBackgroundMode === "cover" &&
+          !backgroundCoverUrl &&
+          !shouldRequestNetworkBackgroundCover &&
+          !shouldUseRoseVinylStyle
         ? "theme"
         : requestedLyricsBackgroundMode === "coverColor" && coverColorSampleUrls.length === 0
           ? "theme"
@@ -2689,6 +2793,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     [activeAudioStatus],
   );
   const shouldUseMusicReactiveVisuals =
+    isActive &&
     musicReactiveVisualsFeatureEnabled &&
     lyricsDisplaySettings.lyricsMusicReactiveVisualsEnabled === true &&
     !lyricsRenderPressureReduced &&
@@ -2801,6 +2906,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   const lyricsSampleImageUrls = lyricsSmartReadableImageUrls.length > 0
     ? lyricsSmartReadableImageUrls
     : lyricsCoverColorImageUrls;
+  const lyricsSampleImageKey = lyricsSampleImageUrls.join("\u0000");
   const coverColorCssVars = useMemo<CoverColorCssVars | null>(
     () =>
       effectiveLyricsBackgroundMode === "coverColor"
@@ -2844,7 +2950,6 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       "var(--echo-font-family)",
     ].join(", ");
   }, [
-    fallbackLyricsDisplaySettings.lyricsFontFamily,
     lyricsDisplaySettings.lyricsFontFamily,
     lyricsDisplaySettings.lyricsFontFilePath,
   ]);
@@ -2992,15 +3097,16 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   ]);
 
   useEffect(() => {
-    if (lyricsSampleImageUrls.length === 0) {
+    if (!lyricsSampleImageKey) {
       setImageReadableSample(null);
       return undefined;
     }
 
     let disposed = false;
+    const sampleImageUrls = lyricsSampleImageKey.split("\u0000");
     setImageReadableSample(null);
     const cancelSampling = scheduleLyricsImageSampling(() => {
-      void sampleFirstImageUrl(lyricsSampleImageUrls).then((sample) => {
+      void sampleFirstImageUrl(sampleImageUrls).then((sample) => {
         if (!disposed) {
           setImageReadableSample(sample);
         }
@@ -3011,7 +3117,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       disposed = true;
       cancelSampling();
     };
-  }, [lyricsSampleImageUrls]);
+  }, [lyricsSampleImageKey]);
 
   useEffect(() => {
     setMvReadableSample(null);
@@ -3101,6 +3207,20 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     baseMvAudioClock,
   ]);
   const lyricsPositionSeconds = seekPreviewSeconds ?? mvAudioClock.positionSeconds;
+  const lyricsSeekTimelineOffsetMs =
+    effectiveDisplayedLyrics.offsetMs +
+    (lyricsDisplaySettings.lyricsTimelineCorrectionEnabled !== false
+      ? lyricsDisplaySettings.lyricsGlobalSyncOffsetMs
+      : 0);
+  const lyricsLineSeekEnabled =
+    isActive &&
+    !trackTransition &&
+    seekPreviewSeconds === null &&
+    effectiveDisplayedLyrics.kind === "synced" &&
+    Number.isFinite(displayDurationSeconds) &&
+    displayDurationSeconds > 0 &&
+    !isCurrentAirPlayReceiverTrack &&
+    lyricSeekPlaybackStates.has(state);
   const smtcLyricsProgress = useMemo(() => {
     if (!lyricsDisplaySettings.lyricsEnabled || effectiveDisplayedLyrics.lines.length === 0) {
       return null;
@@ -3235,21 +3355,18 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       ),
     ];
   }, [activeSearchProviders, candidates]);
-  const visibleCandidates = useMemo(
-    () =>
-      activeCandidateSource === "all"
-        ? candidates
-        : candidates.filter(
-            (candidate) => sourceFilterKey(candidate) === activeCandidateSource,
-          ),
+  const filteredCandidates = useMemo(
+    () => activeCandidateSource === "all"
+      ? candidates
+      : candidates.filter(
+          (candidate) => sourceFilterKey(candidate) === activeCandidateSource,
+        ),
     [activeCandidateSource, candidates],
   );
-  const rememberedSourceQualityByProvider = useMemo(() => {
-    const summaries = readLyricsSourceQualitySummaries();
-    return new Map<LyricsProviderId, LyricsSourceQualityProviderSummary>(
-      summaries.map((summary) => [summary.provider, summary]),
-    );
-  }, [sourceQualityMemoryVersion]);
+  const visibleCandidates = useMemo(
+    () => showAllLyricsCandidates ? filteredCandidates : filteredCandidates.slice(0, 5),
+    [filteredCandidates, showAllLyricsCandidates],
+  );
   const candidateSourceQualitySummaries = useMemo<CandidateSourceQualitySummary[]>(() => {
     const sourceMap = new Map<LyricsProviderId, CandidateSourceQualitySummary & { scoreTotal: number }>();
 
@@ -3343,7 +3460,6 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       if (nextTrackId) {
         queue.setCurrentTrackId(nextTrackId);
       }
-      setError(snapshot.error ?? snapshotAudioStatus?.error ?? null);
     },
     [queue],
   );
@@ -3441,17 +3557,12 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   });
 
   useEffect(() => {
-    if (lyricsDisplaySettings.lyricsMvGraphicsPressureGuardEnabled !== true) {
-      setSessionGraphicsPressureReduced(false);
-      return undefined;
-    }
-
     return window.echo?.diagnostics?.onMemoryPressure?.((event) => {
       if (shouldReduceLyricsMvGraphicsForMemoryPressure(event)) {
         setSessionGraphicsPressureReduced(true);
       }
     });
-  }, [lyricsDisplaySettings.lyricsMvGraphicsPressureGuardEnabled]);
+  }, []);
 
   const persistLyricsBackgroundScalePercent = useCallback(
     (scalePercent: number): void => {
@@ -3725,13 +3836,39 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   }, []);
 
   useEffect(() => {
+    isLyricsMatchPanelClosedRef.current = isLyricsMatchPanelClosed;
+  }, [isLyricsMatchPanelClosed]);
+
+  const clearStoredCandidateRefreshTimers = useCallback(() => {
+    for (const timerId of storedCandidateRefreshTimersRef.current) {
+      window.clearTimeout(timerId);
+    }
+    storedCandidateRefreshTimersRef.current = [];
+  }, []);
+
+  useEffect(() => clearStoredCandidateRefreshTimers, [clearStoredCandidateRefreshTimers]);
+
+  useEffect(() => {
+    if (!trackId || lyricsMatchPanelTrackIdRef.current === trackId) {
+      return;
+    }
+
+    lyricsMatchPanelTrackIdRef.current = trackId;
+    clearStoredCandidateRefreshTimers();
+    isLyricsMatchPanelClosedRef.current = false;
     setIsLyricsMatchPanelClosed(false);
     setIsLyricsMatchPanelRevealed(false);
-    setLyricsMatchPanelActivityToken(0);
-  }, [trackId]);
+    setShowAllLyricsCandidates(false);
+    setCandidateSearchText("");
+    setConfirmingCandidateId(null);
+    setRejectingCandidateId(null);
+  }, [clearStoredCandidateRefreshTimers, trackId]);
 
-  const noteLyricsMatchPanelActivity = useCallback((): void => {
-    setLyricsMatchPanelActivityToken((token) => (token + 1) % 1000000);
+  const closeLyricsMatchPanel = useCallback((): void => {
+    isLyricsMatchPanelClosedRef.current = true;
+    setIsLyricsMatchPanelClosed(true);
+    setIsLyricsMatchPanelRevealed(false);
+    setConfirmingCandidateId(null);
   }, []);
 
   const getLyricsForActiveTrack = useCallback(async (): Promise<TrackLyrics | null> => {
@@ -3746,6 +3883,60 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
 
     return lyricsApi.getForTrack(trackId);
   }, [lyricsSnapshotRequest, trackId]);
+
+  const getStoredLyricsCandidatesForActiveTrack = useCallback(async (): Promise<LyricsSearchCandidate[]> => {
+    const lyricsApi = window.echo?.lyrics;
+    if (!lyricsApi?.getStoredCandidates || !trackId) {
+      return [];
+    }
+
+    const durationSeconds = lyricsSnapshotRequest?.durationSeconds
+      ?? (currentTrack?.duration && currentTrack.duration > 0 ? currentTrack.duration : null)
+      ?? airPlayDurationSeconds;
+    return lyricsApi.getStoredCandidates(trackId, durationSeconds);
+  }, [airPlayDurationSeconds, currentTrack?.duration, lyricsSnapshotRequest?.durationSeconds, trackId]);
+
+  const scheduleStoredCandidateRefresh = useCallback((requestId: number): void => {
+    clearStoredCandidateRefreshTimers();
+    if (!window.echo?.lyrics?.getStoredCandidates) {
+      return;
+    }
+
+    // The main process may keep slow providers alive until the 8 second background
+    // deadline. Poll only the read-only candidate cache so late results can enrich
+    // the panel without launching another search or replacing the active lyrics.
+    for (const delayMs of [1_500, 3_500]) {
+      const timerId = window.setTimeout(() => {
+        storedCandidateRefreshTimersRef.current = storedCandidateRefreshTimersRef.current.filter(
+          (currentTimerId) => currentTimerId !== timerId,
+        );
+        if (lyricsRequestRef.current !== requestId) {
+          return;
+        }
+
+        void getStoredLyricsCandidatesForActiveTrack()
+          .then((nextCandidates) => {
+            if (lyricsRequestRef.current !== requestId || nextCandidates.length === 0) {
+              return;
+            }
+            setCandidates((currentCandidates) => mergeLyricsCandidates(currentCandidates, nextCandidates));
+            setActiveCandidateSource(readRememberedCandidateSource());
+            setLyricsStatus(null);
+            if (shouldRevealAutomaticLyricsCandidates && !isLyricsMatchPanelClosedRef.current) {
+              setIsLyricsMatchPanelRevealed(true);
+            }
+          })
+          .catch(() => {
+            // Background enrichment is best-effort. The foreground result remains valid.
+          });
+      }, delayMs);
+      storedCandidateRefreshTimersRef.current.push(timerId);
+    }
+  }, [
+    clearStoredCandidateRefreshTimers,
+    getStoredLyricsCandidatesForActiveTrack,
+    shouldRevealAutomaticLyricsCandidates,
+  ]);
 
   const searchLyricsCandidatesForProvider = useCallback(
     async (
@@ -3791,43 +3982,27 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   );
 
   const applyLyricsCandidateForActiveTrack = useCallback(
-    async (candidateId: string): Promise<TrackLyrics> => {
+    async (
+      candidateId: string,
+      origin?: LyricsCandidateApplyOrigin,
+    ): Promise<TrackLyrics> => {
       const lyricsApi = window.echo?.lyrics;
       if (!lyricsApi || !trackId) {
         throw new Error("Desktop bridge unavailable");
       }
 
       if (lyricsSnapshotRequest && lyricsApi.applyCandidateForSnapshot) {
-        return lyricsApi.applyCandidateForSnapshot(lyricsSnapshotRequest, candidateId);
+        return origin === undefined
+          ? lyricsApi.applyCandidateForSnapshot(lyricsSnapshotRequest, candidateId)
+          : lyricsApi.applyCandidateForSnapshot(lyricsSnapshotRequest, candidateId, origin);
       }
 
-      return lyricsApi.applyCandidate(trackId, candidateId);
+      return origin === undefined
+        ? lyricsApi.applyCandidate(trackId, candidateId)
+        : lyricsApi.applyCandidate(trackId, candidateId, origin);
     },
     [lyricsSnapshotRequest, trackId],
   );
-
-  useEffect(() => {
-    if (
-      isLyricsMatchPanelClosed ||
-      !isLyricsMatchPanelRevealed ||
-      candidates.length === 0 ||
-      applyingCandidateId
-    ) {
-      return undefined;
-    }
-
-    const timer = window.setTimeout(() => {
-      setIsLyricsMatchPanelClosed(true);
-    }, lyricsMatchAutoCloseMs);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    applyingCandidateId,
-    candidates.length,
-    isLyricsMatchPanelClosed,
-    isLyricsMatchPanelRevealed,
-    lyricsMatchPanelActivityToken,
-  ]);
 
   const tryAutoApplyCandidate = useCallback(
     async (
@@ -3854,7 +4029,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       const applySearchGeneration = lyricsCandidateSearchGenerationRef.current;
       setApplyingCandidateId(autoCandidate.id);
       try {
-        const trackLyrics = await applyLyricsCandidateForActiveTrack(autoCandidate.id);
+        const trackLyrics = await applyLyricsCandidateForActiveTrack(autoCandidate.id, "auto");
         if (shouldApplyResult && !shouldApplyResult()) {
           return true;
         }
@@ -3903,6 +4078,58 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       title,
     ],
   );
+
+  useEffect(() => {
+    const lyricsApi = window.echo?.lyrics;
+    if (!trackId || !lyricsApi?.onChanged) {
+      return;
+    }
+
+    let disposed = false;
+    const unsubscribe = lyricsApi.onChanged((changedTrackId, reason) => {
+      if (changedTrackId !== trackId || reason !== "auto-apply") {
+        return;
+      }
+
+      const requestId = lyricsRequestRef.current;
+      void getLyricsForActiveTrack()
+        .then((trackLyrics) => {
+          if (disposed || lyricsRequestRef.current !== requestId || !trackLyrics) {
+            return;
+          }
+
+          clearStoredCandidateRefreshTimers();
+          setLyrics(trackLyricsToState(trackLyrics));
+          publishCurrentLyricsProvider(trackLyrics);
+          setCandidates([]);
+          setActiveCandidateSource(readRememberedCandidateSource());
+          setLyricsStatus(null);
+          setIsLyricsLoading(false);
+          setIsCandidateLoading(false);
+          setError(null);
+          if (isNetworkLyricsSource(trackLyrics.provider)) {
+            showLyricsNetworkLoadedNotice(
+              lyricsResultDisplayTitle(trackLyrics, title),
+              lyricsSourceDisplayLabel(trackLyrics.provider),
+            );
+          }
+        })
+        .catch(() => {
+          // The next normal refresh can retry; keep the current lyrics visible.
+        });
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [
+    clearStoredCandidateRefreshTimers,
+    getLyricsForActiveTrack,
+    publishCurrentLyricsProvider,
+    showLyricsNetworkLoadedNotice,
+    title,
+    trackId,
+  ]);
 
   useEffect(() => {
     if (!isLyricsDisplaySettingsReady) {
@@ -4044,33 +4271,9 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
           }
 
           setIsCandidateLoading(true);
-          if (canLoadNetworkLyrics) {
-            showLyricsNetworkLoadingNotice();
-          }
-          setLyricsStatus("Searching lyrics candidates...");
-          let nextCandidates: LyricsSearchCandidate[] = [];
-          const providers = automaticMissingLyricsCandidateProviders(activeSearchProviders);
-          await Promise.allSettled(
-            providers.map(async (provider) => {
-              const providerCandidates = await searchLyricsCandidatesForProvider(provider, null, "missing-lyrics");
-              if (lyricsRequestRef.current !== requestId) {
-                return;
-              }
-
-              nextCandidates = mergeLyricsCandidates(nextCandidates, providerCandidates);
-              setCandidates(nextCandidates);
-              setActiveCandidateSource(readRememberedCandidateSource());
-            }),
-          );
+          setLyricsStatus("正在整理候选歌词...");
+          const nextCandidates = await getStoredLyricsCandidatesForActiveTrack();
           if (lyricsRequestRef.current !== requestId) {
-            return;
-          }
-
-          const autoApplied = await tryAutoApplyCandidate(
-            nextCandidates,
-            () => lyricsRequestRef.current === requestId,
-          );
-          if (lyricsRequestRef.current !== requestId || autoApplied) {
             return;
           }
 
@@ -4080,6 +4283,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
             nextCandidates.length > 0 &&
               shouldRevealAutomaticLyricsCandidates,
           );
+          scheduleStoredCandidateRefresh(requestId);
           hideLyricsNetworkLoadNotice();
           setLyricsStatus(nextCandidates.length ? null : "No lyrics found");
         })
@@ -4141,33 +4345,11 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
         }
 
         if (!trackLyrics && lyricsDisplaySettings.lyricsAutoSearch && !shouldPauseAutomaticLyricsWork) {
+          setLyrics(emptyLyrics(rememberedLyrics?.offsetMs ?? 0));
+          publishCurrentLyricsProvider(null);
           setIsCandidateLoading(true);
-          if (canLoadNetworkLyrics) {
-            showLyricsNetworkLoadingNotice();
-          }
-          let nextCandidates: LyricsSearchCandidate[] = [];
-          const providers = automaticMissingLyricsCandidateProviders(activeSearchProviders);
-          await Promise.allSettled(
-            providers.map(async (provider) => {
-              const providerCandidates = await searchLyricsCandidatesForProvider(provider, null, "missing-lyrics");
-              if (lyricsRequestRef.current !== requestId) {
-                return;
-              }
-
-              nextCandidates = mergeLyricsCandidates(nextCandidates, providerCandidates);
-              setCandidates(nextCandidates);
-              setActiveCandidateSource(readRememberedCandidateSource());
-            }),
-          );
+          const nextCandidates = await getStoredLyricsCandidatesForActiveTrack();
           if (lyricsRequestRef.current !== requestId) {
-            return;
-          }
-
-          const autoApplied = await tryAutoApplyCandidate(
-            nextCandidates,
-            () => lyricsRequestRef.current === requestId,
-          );
-          if (lyricsRequestRef.current !== requestId || autoApplied) {
             return;
           }
 
@@ -4177,6 +4359,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
             nextCandidates.length > 0 &&
               shouldRevealAutomaticLyricsCandidates,
           );
+          scheduleStoredCandidateRefresh(requestId);
           hideLyricsNetworkLoadNotice();
           setLyricsStatus(nextCandidates.length ? null : "No lyrics found");
           return;
@@ -4219,7 +4402,9 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       });
   }, [
     activeSearchProviders,
+    canLoadNetworkLyrics,
     getLyricsForActiveTrack,
+    hideLyricsNetworkLoadNotice,
     initialLyrics,
     isLyricsDisplaySettingsReady,
     isCurrentNeteaseDjRadioTrack,
@@ -4231,8 +4416,11 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     lyricsMemoryKey,
     publishCurrentLyricsProvider,
     searchLyricsCandidatesForProvider,
+    scheduleStoredCandidateRefresh,
     shouldRevealAutomaticLyricsCandidates,
     shouldPauseAutomaticLyricsWork,
+    showLyricsNetworkLoadedNotice,
+    showLyricsNetworkLoadingNotice,
     streamingTarget,
     title,
     trackId,
@@ -4247,6 +4435,8 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
 
     setIsLyricsMatchPanelClosed(false);
     setIsLyricsMatchPanelRevealed(true);
+    setShowAllLyricsCandidates(false);
+    setConfirmingCandidateId(null);
 
     const isNeteaseDjRadioForSearch = await resolveCurrentNeteaseDjRadioTrack();
     if (streamingTarget && !isNeteaseDjRadioForSearch && !searchText?.trim()) {
@@ -4308,8 +4498,9 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     setActiveCandidateSource(readRememberedCandidateSource());
     setLyricsStatus("Searching lyrics candidates...");
     try {
-      await Promise.allSettled(
-        providers.map(async (provider) => {
+      await runLyricsProviderPool(
+        providers,
+        async (provider) => {
           const providerCandidates = await searchLyricsCandidatesForProvider(provider, searchText, "manual");
           if (lyricsRequestRef.current !== requestId) {
             return;
@@ -4321,7 +4512,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
           if (collectedCandidates.length > 0) {
             setLyricsStatus(null);
           }
-        }),
+        },
       );
 
       if (lyricsRequestRef.current !== requestId) {
@@ -4359,7 +4550,6 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     streamingTarget,
     trackId,
     title,
-    tryAutoApplyCandidate,
   ]);
 
   const handleRematchLyrics = useCallback(async (): Promise<void> => {
@@ -4370,6 +4560,8 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
 
     setIsLyricsMatchPanelClosed(false);
     setIsLyricsMatchPanelRevealed(true);
+    setShowAllLyricsCandidates(false);
+    setConfirmingCandidateId(null);
 
     const isNeteaseDjRadioForRematch = await resolveCurrentNeteaseDjRadioTrack();
     if (streamingTarget && !isNeteaseDjRadioForRematch) {
@@ -4404,8 +4596,9 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       }
 
       await lyricsApi.clearCache(trackId);
-      await Promise.allSettled(
-        providers.map(async (provider) => {
+      await runLyricsProviderPool(
+        providers,
+        async (provider) => {
           const providerCandidates = await searchLyricsCandidatesForProvider(provider, null, "rematch");
           if (lyricsRequestRef.current !== requestId) {
             return;
@@ -4417,7 +4610,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
           if (collectedCandidates.length > 0) {
             setLyricsStatus(null);
           }
-        }),
+        },
       );
 
       if (lyricsRequestRef.current !== requestId) {
@@ -4542,6 +4735,8 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
           setCandidates([]);
           setActiveCandidateSource(readRememberedCandidateSource());
           setLyricsStatus(null);
+          setConfirmingCandidateId(null);
+          setIsLyricsMatchPanelClosed(true);
         }
         setError(null);
         if (lyricsDisplaySettings.lyricsRestartOnApplyEnabled === true) {
@@ -4566,6 +4761,35 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       trackId,
       title,
     ],
+  );
+
+  const handleRejectCandidate = useCallback(
+    async (candidateId: string): Promise<void> => {
+      const lyricsApi = window.echo?.lyrics;
+      if (!lyricsApi?.rejectCandidate) {
+        setError("Desktop bridge unavailable");
+        return;
+      }
+
+      setRejectingCandidateId(candidateId);
+      try {
+        await lyricsApi.rejectCandidate(candidateId);
+        const rejectedCandidate = candidates.find((candidate) => candidate.id === candidateId);
+        if (recordLyricsSourceQualityOutcome(rejectedCandidate, "rejected")) {
+          noteSourceQualityMemoryChanged();
+        }
+        setCandidates((currentCandidates) =>
+          currentCandidates.filter((candidate) => candidate.id !== candidateId),
+        );
+        setConfirmingCandidateId((current) => current === candidateId ? null : current);
+        setError(null);
+      } catch (rejectError) {
+        setError(rejectError instanceof Error ? rejectError.message : String(rejectError));
+      } finally {
+        setRejectingCandidateId(null);
+      }
+    },
+    [candidates, noteSourceQualityMemoryChanged],
   );
 
   const applyCustomLyricsFile = useCallback(
@@ -4654,64 +4878,139 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
 
   const handleLyricSeek = useCallback(
     async (timeMs: number): Promise<void> => {
-      const playback = window.echo?.playback;
-
-      if (!playback) {
-        setError("Desktop bridge unavailable");
+      const durationMs = displayDurationSeconds * 1000;
+      const rawTargetMs = timeMs - lyricsSeekTimelineOffsetMs;
+      if (
+        !lyricsLineSeekEnabled ||
+        lyricSeekInFlightRef.current ||
+        !Number.isFinite(timeMs) ||
+        timeMs < 0 ||
+        !Number.isFinite(rawTargetMs) ||
+        !Number.isFinite(durationMs) ||
+        durationMs <= 0 ||
+        rawTargetMs >= durationMs
+      ) {
         return;
       }
 
-      const nextSeconds = Math.max(0, timeMs / 1000);
+      const nextSeconds = Math.max(0, rawTargetMs / 1000);
+      const requestedTrackId = trackId;
+      lyricSeekInFlightRef.current = true;
       logLyricsConsole("page.seek-request", {
-        trackId,
+        trackId: requestedTrackId,
+        lyricTimeMs: Math.round(timeMs),
+        timelineOffsetMs: Math.round(lyricsSeekTimelineOffsetMs),
         targetPositionMs: Math.round(nextSeconds * 1000),
         currentPlaybackMs: Math.round(Math.max(0, lyricsPositionSeconds * 1000)),
         source: "lyrics-line",
       });
       try {
         showSeekPreview(nextSeconds);
-        const status = await playback.seek(nextSeconds);
-        const nextStatus = {
+        let status: PlaybackStatus;
+        let seekSource: "connect" | "local" | "spotify" = "local";
+
+        if (isSpotifyTrack(currentTrack)) {
+          seekSource = "spotify";
+          status = await seekSpotifyPlayback(currentTrack, nextSeconds);
+        } else {
+          const activeConnectStatus = await getActiveConnectPlaybackStatus();
+          if (requestedTrackId !== lyricSeekTrackIdRef.current) {
+            return;
+          }
+
+          if (activeConnectStatus) {
+            const connect = window.echo?.connect;
+            if (!connect?.seek) {
+              throw new Error("Connect 投送中，远端 seek 不可用。");
+            }
+
+            seekSource = "connect";
+            const connectStatus = await connect.seek(nextSeconds);
+            status = playbackStatusFromConnectStatus(connectStatus, {
+              currentTrackId: requestedTrackId,
+              durationMs,
+              filePath,
+            });
+          } else {
+            const playback = window.echo?.playback;
+            if (!playback) {
+              throw new Error("Desktop bridge unavailable");
+            }
+            status = await playback.seek(nextSeconds);
+          }
+        }
+
+        if (
+          requestedTrackId !== lyricSeekTrackIdRef.current ||
+          (requestedTrackId && status.currentTrackId && status.currentTrackId !== requestedTrackId)
+        ) {
+          logLyricsConsole("page.seek-result-ignored", {
+            requestedTrackId,
+            activeTrackId: lyricSeekTrackIdRef.current,
+            statusTrackId: status.currentTrackId,
+            source: seekSource,
+          }, { level: "warn", dedupeKey: "lyrics-page-stale-seek-result", dedupeMs: 1000 });
+          return;
+        }
+
+        const nextStatus: PlaybackStatus = {
           ...status,
           positionMs: Math.round(nextSeconds * 1000),
         };
         setPlaybackStatus(nextStatus);
-        setAudioStatus((current) =>
-          current
-            ? {
-                ...current,
-                state: status.state,
-                currentTrackId: status.currentTrackId,
-                currentFilePath: status.filePath,
-                positionSeconds: nextSeconds,
-                durationSeconds: status.durationMs / 1000,
-              }
-            : current,
-        );
+        if (seekSource === "local") {
+          setAudioStatus((current) =>
+            current
+              ? {
+                  ...current,
+                  state: status.state,
+                  currentTrackId: status.currentTrackId,
+                  currentFilePath: status.filePath,
+                  positionSeconds: nextSeconds,
+                  durationSeconds: status.durationMs / 1000,
+                }
+              : current,
+          );
+        } else {
+          setAudioStatus(null);
+        }
         beginPlaybackSeekSnapshot(nextStatus);
-        dispatchPlaybackSeeked(nextSeconds, status.currentTrackId ?? trackId ?? null);
-        clearSeekPreview();
+        dispatchPlaybackSeeked(nextSeconds, status.currentTrackId ?? requestedTrackId ?? null);
         logLyricsConsole("page.seek-committed", {
-          trackId: status.currentTrackId ?? trackId ?? null,
+          source: seekSource,
+          trackId: status.currentTrackId ?? requestedTrackId ?? null,
           state: status.state,
           targetPositionMs: Math.round(nextSeconds * 1000),
           statusPositionMs: nextStatus.positionMs,
           durationMs: nextStatus.durationMs,
         });
-        void refreshStatus();
       } catch (seekError) {
-        clearSeekPreview();
         logLyricsConsole("page.seek-failed", {
-          trackId,
+          trackId: requestedTrackId,
           targetPositionMs: Math.round(nextSeconds * 1000),
           error: seekError instanceof Error ? seekError.message : String(seekError),
         }, { level: "warn", dedupeKey: `lyrics-page-seek-failed:${trackId ?? "unknown"}`, dedupeMs: 1000 });
         setError(
           seekError instanceof Error ? seekError.message : String(seekError),
         );
+      } finally {
+        lyricSeekInFlightRef.current = false;
+        clearSeekPreview();
+        void refreshStatus();
       }
     },
-    [clearSeekPreview, lyricsPositionSeconds, refreshStatus, showSeekPreview, trackId],
+    [
+      clearSeekPreview,
+      currentTrack,
+      displayDurationSeconds,
+      filePath,
+      lyricsLineSeekEnabled,
+      lyricsPositionSeconds,
+      lyricsSeekTimelineOffsetMs,
+      refreshStatus,
+      showSeekPreview,
+      trackId,
+    ],
   );
 
   const handleLyricsOffsetChange = useCallback(
@@ -4777,7 +5076,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   );
 
   useEffect(() => {
-    const canSearchBackgroundCandidates =
+    const canReadBackgroundCandidates =
       lyricsDisplaySettings.lyricsSmartAlignmentEnabled === true &&
       lyricsDisplaySettings.lyricsAutoSearch !== false &&
       !shouldPauseAutomaticLyricsWork &&
@@ -4790,10 +5089,9 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       !isCandidateLoading &&
       !isLyricsLoading &&
       !shouldPauseAutomaticLyricsWork &&
-      activeSearchProviders.length > 0 &&
-      Boolean(window.echo?.lyrics?.searchCandidates);
+      Boolean(window.echo?.lyrics?.getStoredCandidates);
 
-    if (!canSearchBackgroundCandidates || !trackId) {
+    if (!canReadBackgroundCandidates || !trackId) {
       return;
     }
 
@@ -4804,26 +5102,12 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     smartAlignmentBackgroundSearchKeyRef.current = searchKey;
 
     let isCancelled = false;
-    const providers = activeSearchProviders
-      .filter((provider) => provider === "local")
-      .slice(0, smartAlignmentBackgroundCandidateLimit);
-    if (providers.length === 0) {
-      return;
-    }
-
-    void Promise.allSettled(
-      providers.map(async (provider) => searchLyricsCandidatesForProvider(provider, null, "smart-alignment")),
-    ).then((results) => {
+    void getStoredLyricsCandidatesForActiveTrack().then((storedCandidates) => {
       if (isCancelled) {
         return;
       }
 
-      const nextCandidates = results.reduce<LyricsSearchCandidate[]>((merged, result) => {
-        if (result.status !== "fulfilled") {
-          return merged;
-        }
-        return mergeLyricsCandidates(merged, result.value);
-      }, []);
+      const nextCandidates = storedCandidates.slice(0, smartAlignmentBackgroundCandidateLimit);
 
       if (nextCandidates.length === 0) {
         return;
@@ -4840,6 +5124,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     activeSearchProviders,
     audioStatus?.currentTrackId,
     candidates.length,
+    getStoredLyricsCandidatesForActiveTrack,
     isCandidateLoading,
     isLyricsLoading,
     lyrics.kind,
@@ -4848,7 +5133,6 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     lyrics.source,
     lyricsDisplaySettings.lyricsAutoSearch,
     lyricsDisplaySettings.lyricsSmartAlignmentEnabled,
-    searchLyricsCandidatesForProvider,
     shouldPauseAutomaticLyricsWork,
     trackId,
   ]);
@@ -4982,6 +5266,7 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
   useEffect(() => {
     if (
       lyricsDisplaySettings.lyricsCandidatePanelAutoOpenEnabled !== true ||
+      isLyricsMatchPanelClosed ||
       lyricsDisplaySettings.lyricsSmartAlignmentEnabled !== true ||
       !smartAlignmentEvaluation ||
       smartAlignmentEvaluation.evidenceCount === 0 ||
@@ -4991,9 +5276,9 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       return;
     }
 
-    setIsLyricsMatchPanelClosed(false);
     setIsLyricsMatchPanelRevealed(true);
   }, [
+    isLyricsMatchPanelClosed,
     lyricsDisplaySettings.lyricsCandidatePanelAutoOpenEnabled,
     lyricsDisplaySettings.lyricsSmartAlignmentEnabled,
     smartAlignmentEvaluation,
@@ -5325,14 +5610,18 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
       <section
         className="lyrics-match-panel"
         aria-label="Lyrics matching"
-        onFocusCapture={noteLyricsMatchPanelActivity}
-        onKeyDown={noteLyricsMatchPanelActivity}
-        onPointerDown={noteLyricsMatchPanelActivity}
-        onPointerEnter={noteLyricsMatchPanelActivity}
-        onWheel={noteLyricsMatchPanelActivity}
       >
         <div className="lyrics-match-panel__bar">
-          {statusText ? <p className="lyrics-match-status">{statusText}</p> : <span />}
+          {candidates.length ? (
+            <p className="lyrics-match-status">
+              歌词候选
+              <small>{filteredCandidates.length} 个结果</small>
+            </p>
+          ) : statusText ? (
+            <p className="lyrics-match-status">{statusText}</p>
+          ) : (
+            <span />
+          )}
           <div className="lyrics-match-panel__actions">
             <label className="lyrics-match-auto-open">
               <input
@@ -5347,14 +5636,34 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
               type="button"
               aria-label="Close lyrics candidates"
               title="Close lyrics candidates"
-              onClick={() => setIsLyricsMatchPanelClosed(true)}
+              onClick={closeLyricsMatchPanel}
             >
               <X size={14} />
             </button>
           </div>
         </div>
         {candidates.length ? (
-          <>
+          <div className="lyrics-match-panel__results">
+            <div className="lyrics-match-current" aria-label="当前歌曲信息">
+              <span>
+                <small>当前歌曲</small>
+                <strong>{title || "未知标题"}</strong>
+              </span>
+              <span>
+                <small>歌手</small>
+                <strong>{artist || "未知歌手"}</strong>
+              </span>
+              <span>
+                <small>时长</small>
+                <strong>
+                  {formatDuration(
+                    currentTrack?.duration && currentTrack.duration > 0
+                      ? currentTrack.duration
+                      : airPlayDurationSeconds,
+                  )}
+                </strong>
+              </span>
+            </div>
             {candidateSourceQualitySummaries.length ? (
               <div className="lyrics-source-quality" aria-label="Lyrics source quality">
                 {candidateSourceQualitySummaries.map((summary) => (
@@ -5387,76 +5696,187 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
                 </button>
               ))}
             </div>
-            <div className="lyrics-candidate-list">
+            <div className="lyrics-candidate-list" aria-live="polite" aria-busy={isCandidateLoading}>
               {visibleCandidates.map((candidate) => {
                 const candidateKind = lyricsCandidateDisplayKind(candidate);
                 const nextStep = lyricsCandidateNextStep(candidate);
                 const displayTitle = (candidate.title ?? "").trim() || title;
                 const displayArtist = (candidate.artist ?? "").trim() || artist;
                 const displayAlbum = candidate.album?.trim() || album;
-                const displayDurationSeconds =
-                  candidate.durationSeconds && candidate.durationSeconds > 0
-                    ? candidate.durationSeconds
-                    : currentTrack?.duration && currentTrack.duration > 0
-                      ? currentTrack.duration
-                      : airPlayDurationSeconds;
+                const displayDurationSeconds = candidate.durationSeconds && candidate.durationSeconds > 0
+                  ? candidate.durationSeconds
+                  : null;
+                const targetDurationSeconds = currentTrack?.duration && currentTrack.duration > 0
+                  ? currentTrack.duration
+                  : airPlayDurationSeconds;
+                const durationDelta = candidate.durationDeltaSeconds
+                  ?? (displayDurationSeconds && targetDurationSeconds
+                    ? displayDurationSeconds - targetDurationSeconds
+                    : null);
+                const durationDeltaLabel = formatDurationDelta(durationDelta);
+                const isHighRisk = candidate.risk === "high" || candidate.confidence === "blocked";
+                const isConfirming = confirmingCandidateId === candidate.id;
+                const matchedSources = candidate.matchedSources?.length
+                  ? candidate.matchedSources
+                  : [{ provider: candidate.provider, sourceLabel: candidate.sourceLabel }];
+                const matchedSourceLabels = Array.from(new Set(
+                  matchedSources.map((source) => source.sourceLabel || lyricsProviderLabels[source.provider]),
+                )).filter(Boolean);
                 return (
-                  <button
+                  <article
                     className={`lyrics-candidate lyrics-candidate--${candidateKind}`}
-                    type="button"
                     key={candidate.id}
                     data-lyrics-kind={candidateKind}
-                    disabled={Boolean(applyingCandidateId)}
-                    onClick={() => void handleApplyCandidate(candidate.id)}
+                    data-confidence={candidate.confidence ?? "blocked"}
                   >
                     <span className="lyrics-candidate-copy">
                       <strong>{displayTitle}</strong>
                       <em>
                         {displayArtist}
-                        {displayAlbum ? ` / ${displayAlbum}` : ""} /{" "}
-                        {formatDuration(displayDurationSeconds)}
+                        {displayAlbum ? ` / ${displayAlbum}` : ""}
+                        {" · 候选时长 "}
+                        {displayDurationSeconds ? formatDuration(displayDurationSeconds) : "未知"}
+                        {durationDeltaLabel ? ` · ${durationDeltaLabel}` : ""}
                       </em>
                     </span>
                     <span className="lyrics-candidate-badges">
                       <small
                         className={`lyrics-risk-badge lyrics-risk-badge--${candidate.risk ?? "high"}`}
                       >
-                        {riskLabel(candidate.risk)}
+                        {candidate.confidence ? confidenceLabel(candidate) : riskLabel(candidate.risk)}
                       </small>
                       <small className={`lyrics-kind-badge lyrics-kind-badge--${candidateKind}`}>
                         {lyricsCandidateDisplayLabel(candidateKind)}
                       </small>
-                      <small>{candidate.sourceLabel}</small>
-                      <small>{formatScore(candidate.score)}</small>
+                      <small>
+                        {matchedSourceLabels.length > 1
+                          ? `${matchedSourceLabels.join("、")} 等多个来源均找到`
+                          : matchedSourceLabels[0] ?? candidate.sourceLabel}
+                      </small>
                       {visibleReasons(candidate).map((reason) => (
                         <small className="lyrics-reason-badge" key={reason}>
                           {reason}
                         </small>
                       ))}
-                      {nextStep ? (
-                        <small className="lyrics-candidate-next-step">
-                          {nextStep}
-                        </small>
-                      ) : null}
                       {applyingCandidateId === candidate.id ? (
                         <small>Applying</small>
                       ) : null}
                     </span>
-                  </button>
+                    {candidate.previewLines?.length ? (
+                      <blockquote className="lyrics-candidate-preview" aria-label="歌词预览">
+                        {candidate.previewLines.slice(0, 4).map((line, index) => (
+                          <span key={`${candidate.id}-preview-${index}`}>{line}</span>
+                        ))}
+                      </blockquote>
+                    ) : null}
+                    {isHighRisk && isConfirming ? (
+                      <p className="lyrics-candidate-warning" role="status">
+                        此候选存在明显的
+                        {durationDeltaLabel ? `时长差异（${durationDeltaLabel}）` : "版本差异"}
+                        ，请再次确认后使用。
+                      </p>
+                    ) : null}
+                    <div className="lyrics-candidate-footer">
+                      {nextStep ? (
+                        <p className="lyrics-candidate-next-step" title={nextStep}>
+                          {nextStep}
+                        </p>
+                      ) : (
+                        <span aria-hidden="true" />
+                      )}
+                      <div className="lyrics-candidate-actions">
+                        <button
+                          type="button"
+                          disabled={Boolean(applyingCandidateId || rejectingCandidateId)}
+                          onClick={() => {
+                            if (isHighRisk && !isConfirming) {
+                              setConfirmingCandidateId(candidate.id);
+                              return;
+                            }
+                            void handleApplyCandidate(candidate.id);
+                          }}
+                        >
+                          {applyingCandidateId === candidate.id
+                            ? "正在应用…"
+                            : isHighRisk && isConfirming
+                              ? "确认使用"
+                              : "使用"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(applyingCandidateId || rejectingCandidateId)}
+                          onClick={() => void handleRejectCandidate(candidate.id)}
+                        >
+                          {rejectingCandidateId === candidate.id ? "记录中…" : "忽略"}
+                        </button>
+                      </div>
+                    </div>
+                  </article>
                 );
               })}
             </div>
-          </>
+            {filteredCandidates.length > 5 ? (
+              <button
+                className="lyrics-candidate-show-all"
+                type="button"
+                onClick={() => setShowAllLyricsCandidates((current) => !current)}
+              >
+                {showAllLyricsCandidates ? "收起候选" : `展开全部 ${filteredCandidates.length} 个候选`}
+              </button>
+            ) : null}
+            <div className="lyrics-match-entry-actions">
+              <input
+                type="search"
+                value={candidateSearchText}
+                aria-label="修改歌词搜索关键词"
+                placeholder={`${title} ${artist}`.trim()}
+                onChange={(event) => setCandidateSearchText(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    void handleSearchLyrics(candidateSearchText);
+                  }
+                }}
+              />
+              <button type="button" onClick={() => void handleSearchLyrics(candidateSearchText)}>
+                搜索
+              </button>
+              <label className="lyrics-match-import-action">
+                <input
+                  type="file"
+                  accept=".lrc,.ttml,text/plain,application/ttml+xml"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    if (file) {
+                      void applyCustomLyricsFile(file);
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                />
+                <span>导入 LRC</span>
+              </label>
+            </div>
+          </div>
         ) : null}
       </section>
     );
   }, [
     activeCandidateSource,
+    airPlayDurationSeconds,
+    album,
     applyingCandidateId,
+    artist,
     candidates,
     candidateSourceOptions,
     candidateSourceQualitySummaries,
+    candidateSearchText,
+    confirmingCandidateId,
+    closeLyricsMatchPanel,
+    currentTrack?.duration,
+    filteredCandidates.length,
     handleApplyCandidate,
+    handleRejectCandidate,
+    handleSearchLyrics,
+    applyCustomLyricsFile,
     isLyricsMatchPanelClosed,
     isLyricsMatchPanelRevealed,
     isCandidateLoading,
@@ -5465,10 +5885,12 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
     lyricsDisplaySettings.lyricsEnabled,
     lyrics.lines.length,
     lyricsStatus,
-    noteLyricsMatchPanelActivity,
+    rejectingCandidateId,
     selectCandidateSource,
     setLyricsCandidatePanelAutoOpenEnabled,
+    showAllLyricsCandidates,
     trackId,
+    title,
     visibleCandidates,
   ]);
 
@@ -5662,7 +6084,10 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
           <strong>Drop lyrics to apply</strong>
         </div>
       ) : null}
-      {usePlayerDrawerHeader && !lyricsDisplaySettings.lyricsHeaderHidden && !shouldUseRoseVinylStyle ? (
+      {usePlayerDrawerHeader &&
+      !lyricsDisplaySettings.lyricsHeaderHidden &&
+      !shouldUseEditorialStyle &&
+      !shouldUseRoseVinylStyle ? (
         <header className="lyrics-track-header lyrics-track-header-floating">
           <div
             className="lyrics-track-cover"
@@ -5775,15 +6200,18 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
               (lyricsDisplaySettings.lyricsTimelineCorrectionEnabled !== false ? lyricsDisplaySettings.lyricsGlobalSyncOffsetMs : 0)
             }
             playbackRate={mvAudioClock.playbackRate}
-            playbackState={seekPreviewSeconds === null ? mvAudioClock.state : "paused"}
+            playbackState={isActive && seekPreviewSeconds === null ? mvAudioClock.state : "paused"}
             positionUpdatedAtMs={seekPreviewSeconds === null ? mvAudioClock.updatedAtMs : performance.now()}
             wordHighlightEnabled={lyricsDisplaySettings.lyricsWordHighlightEnabled !== false && !lyricsRenderPressureReduced}
-            highFrequencyUpdatesEnabled={!lyricsRenderPressureReduced}
+            highFrequencyUpdatesEnabled={isActive && !lyricsRenderPressureReduced}
             textDirection="horizontal"
             showRomanization={isLyricsDisplaySettingsReady && lyricsDisplaySettings.lyricsRomanizationEnabled}
             preferKanaPronunciation={lyricsDisplaySettings.lyricsUtatenKanaEnabled === true}
             showTranslation={isLyricsDisplaySettingsReady && lyricsDisplaySettings.lyricsTranslationEnabled}
+            showTimestamps={shouldUseEditorialStyle}
             onContextMenu={handleLyricsContextMenu}
+            seekEnabled={lyricsLineSeekEnabled}
+            seekTimelineOffsetMs={lyricsSeekTimelineOffsetMs}
             onSeek={(timeMs) => void handleLyricSeek(timeMs)}
           />
         ) : null}
@@ -5804,8 +6232,8 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
             }
             smartReadableColorsEnabled={lyricsSmartReadableEnabled}
             renderPressureReduced={lyricsRenderPressureReduced}
-            allowLiveStreamVideo={lyricsViewMode === "mv"}
-            isAudioPlaying={state === "playing"}
+            allowLiveStreamVideo={isActive && lyricsViewMode === "mv"}
+            isAudioPlaying={isActive && state === "playing"}
             audioClock={mvAudioClock}
           />
         </LyricsMvPanelBoundary>
@@ -5819,7 +6247,13 @@ export const LyricsPage = ({ initialLyrics, usePlayerDrawerHeader = false }: Lyr
         >
           {shouldUseRoseVinylStyle && headerCoverUrl ? (
             <div className="lyrics-style-cover-card" aria-hidden="true">
-              <img alt="" draggable={false} src={headerCoverUrl} />
+              <img
+                key={headerCoverUrl}
+                alt=""
+                className="lyrics-style-cover-card-image"
+                draggable={false}
+                src={headerCoverUrl}
+              />
             </div>
           ) : null}
         </section>

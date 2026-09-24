@@ -2,8 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { Context } from 'react';
 import type { PropsWithChildren } from 'react';
 import { getAppBridge } from '../utils/echoBridge';
-import { isLocale, localeOptions, translations } from './locales';
-import type { Locale, TranslationKey } from './locales';
+import {
+  fallbackTranslations,
+  getLoadedTranslations,
+  isLocale,
+  loadTranslations,
+  localeOptions,
+} from './locales';
+import type { Locale, TranslationDictionary, TranslationKey } from './locales';
 
 const storageKey = 'echo-next.locale';
 const fallbackLocale: Locale = 'zh-CN';
@@ -55,6 +61,10 @@ const readInitialLocale = (): Locale => {
     return 'ja-JP';
   }
 
+  if (browserLocale.startsWith('ko')) {
+    return 'ko-KR';
+  }
+
   if (browserLocale.startsWith('en')) {
     return 'en-US';
   }
@@ -74,18 +84,55 @@ const interpolate = (text: string, options?: TranslateOptions): string => {
 };
 
 export const translateFallback = (key: TranslationKey, options?: TranslateOptions): string => {
-  const text = translations[fallbackLocale][key] ?? key;
+  const text = fallbackTranslations[key] ?? key;
   return interpolate(text, options);
 };
 
 export const translateCurrentLocale = (key: TranslationKey, options?: TranslateOptions): string => {
   const locale = readInitialLocale();
-  const text = translations[locale][key] ?? translations[fallbackLocale][key] ?? key;
+  const text = getLoadedTranslations(locale)?.[key] ?? fallbackTranslations[key] ?? key;
   return interpolate(text, options);
 };
 
+type LocaleState = {
+  locale: Locale;
+  translations: TranslationDictionary;
+};
+
 export const I18nProvider = ({ children }: PropsWithChildren): JSX.Element => {
-  const [locale, setLocaleState] = useState<Locale>(readInitialLocale);
+  const [localeState, setLocaleState] = useState<LocaleState>(() => {
+    const locale = readInitialLocale();
+    return {
+      locale,
+      translations: getLoadedTranslations(locale) ?? fallbackTranslations,
+    };
+  });
+  const { locale, translations } = localeState;
+
+  const applyLocale = useCallback((nextLocale: Locale): void => {
+    setLocaleState({
+      locale: nextLocale,
+      translations: getLoadedTranslations(nextLocale) ?? fallbackTranslations,
+    });
+  }, []);
+
+  useEffect(() => {
+    let isCurrent = true;
+    void loadTranslations(locale)
+      .then((loadedTranslations) => {
+        if (!isCurrent) {
+          return;
+        }
+        setLocaleState((current) => current.locale === locale
+          ? { locale, translations: loadedTranslations }
+          : current);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [locale]);
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -120,7 +167,7 @@ export const I18nProvider = ({ children }: PropsWithChildren): JSX.Element => {
         const nextLocale = shouldMigrateLocalLocale ? localLocale : (settings.locale ?? fallbackLocale);
 
         if (isLocale(nextLocale)) {
-          setLocaleState(nextLocale);
+          applyLocale(nextLocale);
           window.localStorage.setItem(storageKey, nextLocale);
         }
 
@@ -133,20 +180,20 @@ export const I18nProvider = ({ children }: PropsWithChildren): JSX.Element => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [applyLocale]);
 
   const setLocale = useCallback((nextLocale: Locale): void => {
-    setLocaleState(nextLocale);
+    applyLocale(nextLocale);
     window.localStorage.setItem(storageKey, nextLocale);
     void getAppBridge()?.setSettings({ locale: nextLocale }).catch(() => undefined);
-  }, []);
+  }, [applyLocale]);
 
   const t = useCallback(
     (key: TranslationKey, options?: TranslateOptions): string => {
-      const text = translations[locale][key] ?? translations[fallbackLocale][key] ?? key;
+      const text = translations[key] ?? fallbackTranslations[key] ?? key;
       return interpolate(text, options);
     },
-    [locale],
+    [translations],
   );
 
   const value = useMemo<I18nContextValue>(

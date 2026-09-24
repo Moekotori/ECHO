@@ -105,7 +105,10 @@ class FakeStore {
 const createService = (store = new FakeStore(), liveLibraryUpdatesEnabled = false): LibraryService =>
   new LibraryService(
     store as never,
-    { hasRunningJobs: () => false } as never,
+    {
+      hasRunningJobs: () => false,
+      getConfiguredConcurrency: () => ({ metadataConcurrency: 1, coverConcurrency: 1 }),
+    } as never,
     {} as never,
     {
       exec: () => undefined,
@@ -146,6 +149,7 @@ const createFakeWatcher = () => ({
   isRunning: vi.fn(() => true),
   restart: vi.fn(),
   start: vi.fn(),
+  syncFolders: vi.fn(),
   stop: vi.fn(),
   getDiagnostics: vi.fn(() => ({
     enabled: true,
@@ -273,8 +277,8 @@ describe('LibraryService grouping refresh scheduling', () => {
       expect(store.addedFolders).toEqual([root]);
       expect(watcher.setEnabled).toHaveBeenCalledWith(true);
       expect(watcher.setAutoRescanEnabled).toHaveBeenCalledWith(true);
-      expect(watcher.restart).toHaveBeenCalledTimes(1);
-      expect(watcher.start).not.toHaveBeenCalled();
+      expect(watcher.syncFolders).toHaveBeenCalledTimes(1);
+      expect(watcher.restart).not.toHaveBeenCalled();
     } finally {
       service.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
@@ -292,8 +296,8 @@ describe('LibraryService grouping refresh scheduling', () => {
     expect(store.removeFolderCalls).toBe(1);
     expect(watcher.setEnabled).toHaveBeenCalledWith(true);
     expect(watcher.setAutoRescanEnabled).toHaveBeenCalledWith(true);
-    expect(watcher.restart).toHaveBeenCalledTimes(1);
-    expect(watcher.start).not.toHaveBeenCalled();
+    expect(watcher.syncFolders).toHaveBeenCalledTimes(1);
+    expect(watcher.restart).not.toHaveBeenCalled();
     service.close();
   });
 

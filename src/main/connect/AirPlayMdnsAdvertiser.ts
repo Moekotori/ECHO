@@ -139,6 +139,12 @@ export class AirPlayMdnsAdvertiser {
   private advertisement: AirPlayMdnsAdvertisement | null = null;
   private announceTimers: NodeJS.Timeout[] = [];
 
+  constructor(
+    private readonly onRuntimeError: (error: Error) => void = (error) => {
+      console.warn(`[AirPlayMdnsAdvertiser] ${error.message}`);
+    },
+  ) {}
+
   async start(advertisement: AirPlayMdnsAdvertisement): Promise<void> {
     await this.stop(false);
     this.advertisement = advertisement;
@@ -163,6 +169,7 @@ export class AirPlayMdnsAdvertiser {
           reject(error instanceof Error ? error : new Error(String(error)));
           return;
         }
+        socket.on('error', this.onRuntimeError);
         resolve();
       };
       socket.once('error', onError);
@@ -188,7 +195,10 @@ export class AirPlayMdnsAdvertiser {
     if (!socket) {
       return;
     }
-    await new Promise<void>((resolve) => socket.close(() => resolve()));
+    await new Promise<void>((resolve) => socket.close(() => {
+      socket.removeListener('error', this.onRuntimeError);
+      resolve();
+    }));
   }
 
   private handleMessage(message: Buffer, remote: RemoteInfo): void {

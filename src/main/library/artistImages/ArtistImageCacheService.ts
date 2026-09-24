@@ -5,6 +5,7 @@ import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import sharp from 'sharp';
 import type { EchoDatabase } from '../../database/createDatabase';
 import { fetchWithNetworkProxy } from '../../network/networkFetch';
+import { readResponseBodyLimited, ResponseBodyTooLargeError } from '../../network/readResponseBodyLimited';
 import type {
   ArtistImageCacheClearResult,
   ArtistImageCacheEntry,
@@ -1203,21 +1204,13 @@ export class ArtistImageCacheService {
         throw new ArtistImageDownloadError(`artist_image_request_failed:${response.status}`, 'error');
       }
 
-      const contentLength = Number(response.headers.get('content-length') ?? 0);
-      if (Number.isFinite(contentLength) && contentLength > maxImageBytes) {
-        throw new ArtistImageDownloadError('artist_image_too_large', 'error');
-      }
-
       const contentType = response.headers.get('content-type');
       const mimeType = isSupportedImageMimeType(contentType) ? contentType.split(';')[0] : mimeTypeForImageUrl(url);
       if (!mimeType || !isSupportedImageMimeType(mimeType)) {
         throw new ArtistImageDownloadError('artist_image_unsupported_type', 'error');
       }
 
-      const data = new Uint8Array(await response.arrayBuffer());
-      if (data.byteLength > maxImageBytes) {
-        throw new ArtistImageDownloadError('artist_image_too_large', 'error');
-      }
+      const data = await readResponseBodyLimited(response, maxImageBytes, { signal: controller.signal });
 
       const contentHash = createHash('sha256').update(data).digest('hex');
       return {
@@ -1228,6 +1221,9 @@ export class ArtistImageCacheService {
     } catch (error) {
       if (error instanceof ArtistImageDownloadError) {
         throw error;
+      }
+      if (error instanceof ResponseBodyTooLargeError) {
+        throw new ArtistImageDownloadError('artist_image_too_large', 'error');
       }
       throw new ArtistImageDownloadError(error instanceof Error ? error.message : String(error), 'error');
     } finally {

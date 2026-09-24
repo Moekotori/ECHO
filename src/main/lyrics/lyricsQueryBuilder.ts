@@ -30,7 +30,7 @@ export type NormalizedLyricsQuery = {
 
 const maxSearchVariants = 8;
 const bracketedFeaturePattern =
-  /\s*[\(\[\uFF08\u3010]\s*(?:feat\.?|ft\.?|featuring|with)\s+[^\)\]\uFF09\u3011]+[\)\]\uFF09\u3011]\s*/giu;
+  /\s*[\u0028\u005b\uFF08\u3010]\s*(?:feat\.?|ft\.?|featuring|with)\s+[^\u0029\u005d\uFF09\u3011]+[\u0029\u005d\uFF09\u3011]\s*/giu;
 const trailingFeaturePattern = /\s+(?:feat\.?|ft\.?|featuring)\s+.+$/iu;
 const artistFeaturePattern = /\s+(?:feat\.?|ft\.?|featuring|with)\s+/iu;
 const leadingFeaturePattern = /^(?:feat\.?|ft\.?|featuring|with)\s+/iu;

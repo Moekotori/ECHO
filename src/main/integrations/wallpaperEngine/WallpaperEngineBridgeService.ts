@@ -1,4 +1,4 @@
-import { EventEmitter } from 'node:events';
+import type { EventEmitter } from 'node:events';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { AudioStatus } from '../../../shared/types/audio';
@@ -62,13 +62,14 @@ export type WallpaperEngineBridgeSnapshot = {
     estimatedOutputPeakDb: number | null;
     estimatedOutputRmsDb: number | null;
     headroomDb: number | null;
-    meterSource: 'pre_native_estimated_post_dsp' | null;
+    meterSource: 'pre_native_estimated_post_dsp' | 'native_post_dsp' | null;
   };
   scene: MusicReactiveScene;
   capabilities: {
     preNativeAudioTelemetry: true;
     supportsWasapiShared: true;
     supportsWasapiExclusive: true;
+    supportsAsio: true;
   };
 };
 
@@ -196,6 +197,7 @@ export const createWallpaperEngineBridgeSnapshot = (status: AudioStatus): Wallpa
       preNativeAudioTelemetry: true,
       supportsWasapiShared: true,
       supportsWasapiExclusive: true,
+      supportsAsio: true,
     },
   };
 };

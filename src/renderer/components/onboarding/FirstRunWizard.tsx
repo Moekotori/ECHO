@@ -1,14 +1,18 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, BookOpen, CheckCircle2, FolderOpen, Gauge, Gift, HardDrive, Headphones, Languages, Loader2, LogIn, Palette, ScanLine, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Blocks, BookOpen, Cable, CheckCircle2, FolderOpen, Gamepad2, Gauge, Gift, HardDrive, Headphones, Languages, Loader2, LogIn, Palette, RadioTower, ScanLine, Sparkles, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AudioOutputMode } from '../../../shared/types/audio';
 import type { AppSettings, AppThemeMode, AppThemePreset, ScanPerformanceMode } from '../../../shared/types/appSettings';
-import { detectRendererPlatform, isAdvancedNativeOutputPlatform, isNativeSharedOutputPlatform } from '../../../shared/utils/audioPlatformCapabilities';
+import { detectRendererPlatform, isAdvancedNativeOutputPlatform, isExclusiveNativeOutputPlatform, isNativeSharedOutputPlatform } from '../../../shared/utils/audioPlatformCapabilities';
 import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
 import { localeOptions } from '../../i18n/locales';
 import type { Locale, TranslationKey } from '../../i18n/locales';
 import { updateThemePreferences } from '../../preferences/themePreferences';
 import { rememberLibraryScanStatus } from '../../stores/libraryScanSession';
+import '../../styles/first-run-immersive.css';
+import '../../styles/first-run-mascot.css';
+
+const mascotArtworkUrl = new URL('../../assets/echo-mascot-lemon-rabbit-q.png', import.meta.url).href;
 
 type FirstRunWizardProps = {
   initialSettings: AppSettings | null;
@@ -17,7 +21,7 @@ type FirstRunWizardProps = {
   presentationState?: 'open' | 'closing';
 };
 
-type FirstRunStepId = 'language' | 'library' | 'cache' | 'scan' | 'audio' | 'performance' | 'appearance' | 'accounts' | 'summary';
+type FirstRunStepId = 'language' | 'library' | 'cache' | 'scan' | 'audio' | 'performance' | 'appearance' | 'osu' | 'accounts' | 'pro' | 'summary';
 
 type FirstRunStep = {
   id: FirstRunStepId;
@@ -25,6 +29,14 @@ type FirstRunStep = {
   eyebrowKey?: TranslationKey;
   titleKey: TranslationKey;
   descriptionKey: TranslationKey;
+  icon: LucideIcon;
+};
+
+type FirstRunPhase = {
+  id: 'basics' | 'library' | 'playback' | 'personalize' | 'pro' | 'summary';
+  labelKey: TranslationKey;
+  subtitleKeys?: TranslationKey[];
+  stepIds: FirstRunStepId[];
   icon: LucideIcon;
 };
 
@@ -38,7 +50,7 @@ type FirstRunOption<T extends string> = {
   hintKey: TranslationKey;
 };
 
-type FirstRunFeatureToggleId = 'lowLoadPlayback' | 'albumWallVirtualization' | 'osuDownloader' | 'nativeDirectLocalPlayback';
+type FirstRunFeatureToggleId = 'lowLoadPlayback' | 'albumWallVirtualization';
 
 type FirstRunFeatureToggle = {
   id: FirstRunFeatureToggleId;
@@ -75,6 +87,40 @@ const themePresets: Array<{ preset: AppThemePreset; labelKey: TranslationKey; de
   { preset: 'darkSideMoon', labelKey: 'settings.appearance.themePreset.darkSideMoon', descriptionKey: 'settings.appearance.themePreset.darkSideMoon.description' },
 ];
 
+const proFeatureCards: Array<{
+  id: 'dsp' | 'connect' | 'network' | 'customize';
+  icon: LucideIcon;
+  titleKey: TranslationKey;
+  descriptionKeys: TranslationKey[];
+  featured?: boolean;
+}> = [
+  {
+    id: 'dsp',
+    icon: Gauge,
+    titleKey: 'firstRun.pro.feature.dsp.title',
+    descriptionKeys: ['firstRun.pro.benefit.dsp'],
+    featured: true,
+  },
+  {
+    id: 'connect',
+    icon: Cable,
+    titleKey: 'firstRun.pro.feature.connect.title',
+    descriptionKeys: ['firstRun.pro.benefit.connect'],
+  },
+  {
+    id: 'network',
+    icon: RadioTower,
+    titleKey: 'firstRun.pro.feature.network.title',
+    descriptionKeys: ['firstRun.pro.benefit.network', 'firstRun.pro.benefit.mobile'],
+  },
+  {
+    id: 'customize',
+    icon: Blocks,
+    titleKey: 'firstRun.pro.feature.customize.title',
+    descriptionKeys: ['firstRun.pro.benefit.themes', 'firstRun.pro.benefit.plugins'],
+  },
+];
+
 const featureToggles: FirstRunFeatureToggle[] = [
   {
     id: 'lowLoadPlayback',
@@ -88,19 +134,71 @@ const featureToggles: FirstRunFeatureToggle[] = [
     descriptionKey: 'firstRun.feature.albumWall.description',
     hintKey: 'firstRun.feature.albumWall.hint',
   },
-  {
-    id: 'osuDownloader',
-    labelKey: 'firstRun.feature.osuDownloader.label',
-    descriptionKey: 'firstRun.feature.osuDownloader.description',
-    hintKey: 'firstRun.feature.osuDownloader.hint',
-  },
-  {
-    id: 'nativeDirectLocalPlayback',
-    labelKey: 'firstRun.feature.localDirect.label',
-    descriptionKey: 'firstRun.feature.localDirect.description',
-    hintKey: 'firstRun.feature.localDirect.hint',
-  },
 ];
+
+type OsuOnboardingCopy = {
+  title: string;
+  description: string;
+  yesLabel: string;
+  yesDescription: string;
+  noLabel: string;
+  noDescription: string;
+  enabledStatus: string;
+  disabledStatus: string;
+};
+
+const osuOnboardingCopy: Record<Locale, OsuOnboardingCopy> = {
+  'zh-CN': {
+    title: '你是 osu! 玩家吗？',
+    description: '如果你玩 osu!，我们会开启专属页面，用来搜索 beatmap、浏览收藏并提取音频。',
+    yesLabel: '是，我玩 osu!',
+    yesDescription: '开启侧栏中的 osu! 页面和 beatmap 搜索入口。',
+    noLabel: '暂时不是',
+    noDescription: '保持关闭，不影响其他音乐功能，之后也能在设置中开启。',
+    enabledStatus: 'osu! 页面将在完成引导后显示',
+    disabledStatus: 'osu! 页面将保持隐藏',
+  },
+  'zh-TW': {
+    title: '你是 osu! 玩家嗎？',
+    description: '如果你玩 osu!，我們會開啟專屬頁面，用來搜尋 beatmap、瀏覽收藏並擷取音訊。',
+    yesLabel: '是，我玩 osu!',
+    yesDescription: '開啟側欄中的 osu! 頁面和 beatmap 搜尋入口。',
+    noLabel: '暫時不是',
+    noDescription: '保持關閉，不影響其他音樂功能，之後也能在設定中開啟。',
+    enabledStatus: 'osu! 頁面將在完成引導後顯示',
+    disabledStatus: 'osu! 頁面將保持隱藏',
+  },
+  'ja-JP': {
+    title: 'osu! をプレイしますか？',
+    description: 'osu! プレイヤー向けに、beatmap の検索、コレクションの閲覧、音声抽出ができる専用ページを有効にします。',
+    yesLabel: 'はい、osu! をプレイします',
+    yesDescription: 'サイドバーに osu! ページと beatmap 検索を表示します。',
+    noLabel: '今は使いません',
+    noDescription: '他の音楽機能には影響しません。設定からいつでも有効にできます。',
+    enabledStatus: 'セットアップ完了後に osu! ページを表示します',
+    disabledStatus: 'osu! ページは非表示のままです',
+  },
+  'en-US': {
+    title: 'Do you play osu!?',
+    description: 'Enable a dedicated page for beatmap search, collection browsing, and audio extraction.',
+    yesLabel: 'Yes, I play osu!',
+    yesDescription: 'Show the osu! page and beatmap search in the sidebar.',
+    noLabel: 'Not right now',
+    noDescription: 'Keep it hidden without affecting other music features. You can enable it later in Settings.',
+    enabledStatus: 'The osu! page will appear after setup',
+    disabledStatus: 'The osu! page will stay hidden',
+  },
+  'ko-KR': {
+    title: 'osu!를 플레이하시나요?',
+    description: 'beatmap 검색, 컬렉션 탐색, 오디오 추출을 위한 전용 osu! 페이지를 활성화합니다.',
+    yesLabel: '네, osu!를 플레이해요',
+    yesDescription: '사이드바에 osu! 페이지와 beatmap 검색을 표시합니다.',
+    noLabel: '지금은 사용하지 않아요',
+    noDescription: '다른 음악 기능에는 영향이 없으며 설정에서 나중에 켤 수 있습니다.',
+    enabledStatus: '설정 완료 후 osu! 페이지가 표시됩니다',
+    disabledStatus: 'osu! 페이지가 숨겨진 상태로 유지됩니다',
+  },
+};
 
 const detectFirstRunPlatform = (): NodeJS.Platform | 'unknown' =>
   typeof window !== 'undefined' ? detectRendererPlatform(window.navigator) : 'unknown';
@@ -118,7 +216,9 @@ const getSupportedFirstRunOutputModes = (
         return isNativeSharedOutputPlatform(platform);
       }
 
-      return isAdvancedNativeOutputPlatform(platform);
+      return item.mode === 'exclusive'
+        ? isExclusiveNativeOutputPlatform(platform)
+        : isAdvancedNativeOutputPlatform(platform);
     })
     .map((item) =>
       platform === 'linux' && item.mode === 'shared'
@@ -188,6 +288,13 @@ const firstRunSteps: FirstRunStep[] = [
     icon: Palette,
   },
   {
+    id: 'osu',
+    labelKey: 'firstRun.feature.osuDownloader.label',
+    titleKey: 'firstRun.feature.osuDownloader.label',
+    descriptionKey: 'firstRun.feature.osuDownloader.description',
+    icon: Gamepad2,
+  },
+  {
     id: 'accounts',
     labelKey: 'firstRun.step.accounts.label',
     eyebrowKey: 'firstRun.step.accounts.eyebrow',
@@ -196,11 +303,61 @@ const firstRunSteps: FirstRunStep[] = [
     icon: LogIn,
   },
   {
+    id: 'pro',
+    labelKey: 'firstRun.pro.title',
+    titleKey: 'firstRun.pro.title',
+    descriptionKey: 'firstRun.pro.description',
+    icon: Gift,
+  },
+  {
     id: 'summary',
     labelKey: 'firstRun.step.summary.label',
     eyebrowKey: 'firstRun.step.summary.eyebrow',
     titleKey: 'firstRun.step.summary.title',
     descriptionKey: 'firstRun.step.summary.description',
+    icon: CheckCircle2,
+  },
+];
+
+const firstRunPhases: FirstRunPhase[] = [
+  {
+    id: 'basics',
+    labelKey: 'firstRun.step.language.label',
+    stepIds: ['language'],
+    icon: Languages,
+  },
+  {
+    id: 'library',
+    labelKey: 'firstRun.step.library.label',
+    subtitleKeys: ['firstRun.library.chooseFolder', 'firstRun.step.cache.label', 'firstRun.step.scan.label'],
+    stepIds: ['library', 'cache', 'scan'],
+    icon: FolderOpen,
+  },
+  {
+    id: 'playback',
+    labelKey: 'firstRun.step.audio.label',
+    subtitleKeys: ['firstRun.step.audio.label', 'firstRun.step.performance.label'],
+    stepIds: ['audio', 'performance'],
+    icon: Headphones,
+  },
+  {
+    id: 'personalize',
+    labelKey: 'firstRun.step.appearance.label',
+    subtitleKeys: ['firstRun.step.appearance.label', 'firstRun.feature.osuDownloader.label', 'firstRun.step.accounts.label'],
+    stepIds: ['appearance', 'osu', 'accounts'],
+    icon: Palette,
+  },
+  {
+    id: 'pro',
+    labelKey: 'firstRun.pro.title',
+    subtitleKeys: ['firstRun.pro.kicker'],
+    stepIds: ['pro'],
+    icon: Gift,
+  },
+  {
+    id: 'summary',
+    labelKey: 'firstRun.step.summary.label',
+    stepIds: ['summary'],
     icon: CheckCircle2,
   },
 ];
@@ -213,7 +370,9 @@ const firstRunStepNotes: Record<FirstRunStepId, TranslationKey[]> = {
   audio: ['firstRun.detail.audio.shared', 'firstRun.detail.audio.advanced'],
   performance: ['firstRun.detail.performance.optional', 'firstRun.detail.performance.changeLater'],
   appearance: ['firstRun.detail.appearance.preview', 'firstRun.detail.appearance.system'],
+  osu: ['firstRun.feature.osuDownloader.hint', 'firstRun.detail.performance.changeLater'],
   accounts: ['firstRun.detail.accounts.later', 'firstRun.detail.accounts.local'],
+  pro: ['firstRun.pro.kicker'],
   summary: ['firstRun.detail.summary.save', 'firstRun.detail.summary.docs'],
 };
 
@@ -233,7 +392,6 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
   const [lowLoadPlaybackModeEnabled, setLowLoadPlaybackModeEnabled] = useState(initialSettings?.lowLoadPlaybackModeEnabled === true);
   const [albumWallVirtualizationEnabled, setAlbumWallVirtualizationEnabled] = useState(initialSettings?.albumWallVirtualizationEnabled === true);
   const [osuDownloaderFeatureEnabled, setOsuDownloaderFeatureEnabled] = useState(initialSettings?.osuDownloaderFeatureEnabled === true);
-  const [nativeDirectLocalPlaybackEnabled, setNativeDirectLocalPlaybackEnabled] = useState(initialSettings?.audioNativeDirectLocalPlaybackEnabled === true);
   const [outputMode, setOutputMode] = useState<AudioOutputMode>(() => {
     const supportedModes = getSupportedFirstRunOutputModes(rendererPlatform);
     const fallbackMode = supportedModes.some((item) => item.mode === 'shared') ? 'shared' : 'system';
@@ -247,12 +405,25 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
 
   const activeStepIndex = Math.max(0, firstRunSteps.findIndex((step) => step.id === activeStepId));
   const activeStep = firstRunSteps[activeStepIndex] ?? firstRunSteps[0]!;
+  const activeOsuCopy = osuOnboardingCopy[activeLocale] ?? osuOnboardingCopy['en-US'];
   const ActiveIcon = activeStep.icon;
   const isFinalStep = activeStep.id === 'summary';
-  const progressPercent = ((activeStepIndex + 1) / firstRunSteps.length) * 100;
-  const progressPercentLabel = `${Math.round(progressPercent)}%`;
   const stepNumberLabel = `${activeStepIndex + 1} / ${firstRunSteps.length}`;
   const activeStepNotes = firstRunStepNotes[activeStep.id];
+  const activePhaseIndex = Math.max(0, firstRunPhases.findIndex((phase) => phase.stepIds.includes(activeStep.id)));
+  const activePhase = firstRunPhases[activePhaseIndex] ?? firstRunPhases[0]!;
+  const activeSubStepIndex = Math.max(0, activePhase.stepIds.indexOf(activeStep.id));
+  const nextStep = firstRunSteps[Math.min(firstRunSteps.length - 1, activeStepIndex + 1)] ?? activeStep;
+  const activeStepTitle = activeStep.id === 'osu'
+    ? activeOsuCopy.title
+    : activeStep.id === 'summary'
+      ? t('firstRun.summary.readyTitle')
+      : t(activeStep.titleKey);
+  const activeStepDescription = activeStep.id === 'osu'
+    ? activeOsuCopy.description
+    : activeStep.id === 'summary'
+      ? t('firstRun.summary.readyDescription')
+      : t(activeStep.descriptionKey);
 
   const cacheDirectoryLabel = useMemo(() => {
     if (cacheDirectory === undefined) {
@@ -272,12 +443,11 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
   const featureEnabledById: Record<FirstRunFeatureToggleId, boolean> = {
     lowLoadPlayback: lowLoadPlaybackModeEnabled,
     albumWallVirtualization: albumWallVirtualizationEnabled,
-    osuDownloader: osuDownloaderFeatureEnabled,
-    nativeDirectLocalPlayback: nativeDirectLocalPlaybackEnabled,
   };
-  const enabledFeatureLabels = featureToggles
-    .filter((item) => featureEnabledById[item.id])
-    .map((item) => t(item.labelKey));
+  const enabledFeatureLabels = [
+    ...featureToggles.filter((item) => featureEnabledById[item.id]).map((item) => t(item.labelKey)),
+    ...(osuDownloaderFeatureEnabled ? [t('firstRun.feature.osuDownloader.label')] : []),
+  ];
   const featureSummaryLabel = enabledFeatureLabels.length ? enabledFeatureLabels.join(', ') : t('firstRun.summary.featuresDefault');
 
   const setFeatureToggleEnabled = (id: FirstRunFeatureToggleId, enabled: boolean): void => {
@@ -287,12 +457,6 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
         return;
       case 'albumWallVirtualization':
         setAlbumWallVirtualizationEnabled(enabled);
-        return;
-      case 'osuDownloader':
-        setOsuDownloaderFeatureEnabled(enabled);
-        return;
-      case 'nativeDirectLocalPlayback':
-        setNativeDirectLocalPlaybackEnabled(enabled);
         return;
       default:
         return;
@@ -389,7 +553,6 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
         lowLoadPlaybackModeEnabled,
         albumWallVirtualizationEnabled,
         osuDownloaderFeatureEnabled,
-        audioNativeDirectLocalPlaybackEnabled: nativeDirectLocalPlaybackEnabled,
         rememberedAudioOutput,
       });
       updateThemePreferences(appearanceTheme, effectiveAppearanceThemePreset, nextSettings.appearanceThemePresetOverrides ?? {}, {
@@ -398,7 +561,7 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
         customThemes: nextSettings.appearanceCustomThemes ?? [],
       });
 
-      await window.echo?.audio?.setOutput?.({ outputMode, nativeDirectLocalPlaybackEnabled }).catch(() => undefined);
+      await window.echo?.audio?.setOutput?.({ outputMode }).catch(() => undefined);
 
       if (musicFolderPath && library?.addFolder) {
         const folder = await library.addFolder(musicFolderPath);
@@ -425,7 +588,6 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
     initialSettings,
     lowLoadPlaybackModeEnabled,
     musicFolderPath,
-    nativeDirectLocalPlaybackEnabled,
     onClose,
     onCompleted,
     osuDownloaderFeatureEnabled,
@@ -571,10 +733,15 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
         );
       case 'appearance':
         return (
-          <div className="first-run-appearance-guide">
-            <div>
-              <p className="first-run-selection-label">{t('firstRun.theme.modeTitle')}</p>
-              <div className="first-run-options first-run-options--cards first-run-options--compact">
+          <div className="first-run-appearance-panel">
+            <section className="first-run-appearance-section">
+              <header>
+                <div>
+                  <span>{t('firstRun.theme.modeTitle')}</span>
+                  <strong>{appearanceThemeLabel}</strong>
+                </div>
+              </header>
+              <div className="first-run-appearance-mode-grid">
                 {themeModes.map((item) => (
                   <button
                     className={appearanceTheme === item.mode ? 'is-active' : undefined}
@@ -583,17 +750,24 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
                     aria-pressed={appearanceTheme === item.mode}
                     onClick={() => setAppearanceTheme(item.mode)}
                   >
-                    <strong>{t(item.labelKey)}</strong>
-                    <span>{t(item.descriptionKey)}</span>
-                    <em>{t(item.hintKey)}</em>
+                    <span>
+                      <strong>{t(item.labelKey)}</strong>
+                      <small>{t(item.hintKey)}</small>
+                    </span>
+                    {appearanceTheme === item.mode ? <CheckCircle2 size={17} aria-hidden="true" /> : null}
                   </button>
                 ))}
               </div>
-            </div>
-            <div>
-              <p className="first-run-selection-label">{t('firstRun.theme.presetTitle')}</p>
-              {ambientThemeSelected ? <p className="settings-inline-note">{t('settings.appearance.themePreset.ambientLocked')}</p> : null}
-              <div className="first-run-theme-presets">
+            </section>
+            <section className="first-run-appearance-section">
+              <header>
+                <div>
+                  <span>{t('firstRun.theme.presetTitle')}</span>
+                  <strong>{appearancePresetLabel}</strong>
+                </div>
+                {ambientThemeSelected ? <small>{t('settings.appearance.themePreset.ambientLocked')}</small> : null}
+              </header>
+              <div className="first-run-appearance-preset-grid">
                 {themePresets.map((item) => (
                   <button
                     className={!ambientThemeSelected && appearanceThemePreset === item.preset ? 'is-active' : undefined}
@@ -606,11 +780,51 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
                     onClick={() => setAppearanceThemePreset(item.preset)}
                   >
                     <span className="first-run-theme-swatch" data-preset={item.preset} aria-hidden="true" />
-                    <strong>{t(item.labelKey)}</strong>
-                    <span>{t(item.descriptionKey)}</span>
+                    <span className="first-run-appearance-preset-copy">
+                      <strong>{t(item.labelKey)}</strong>
+                      <small>{t(item.descriptionKey)}</small>
+                    </span>
+                    {!ambientThemeSelected && appearanceThemePreset === item.preset ? <CheckCircle2 size={16} aria-hidden="true" /> : null}
                   </button>
                 ))}
               </div>
+            </section>
+          </div>
+        );
+      case 'osu':
+        return (
+          <div className="first-run-osu-question">
+            <div className="first-run-osu-choices">
+              <button
+                className={`first-run-osu-choice first-run-osu-choice--yes ${osuDownloaderFeatureEnabled ? 'is-active' : ''}`.trim()}
+                type="button"
+                aria-pressed={osuDownloaderFeatureEnabled}
+                onClick={() => setOsuDownloaderFeatureEnabled(true)}
+              >
+                <span className="first-run-osu-choice-icon"><Gamepad2 size={22} aria-hidden="true" /></span>
+                <span>
+                  <strong>{activeOsuCopy.yesLabel}</strong>
+                  <small>{activeOsuCopy.yesDescription}</small>
+                </span>
+                {osuDownloaderFeatureEnabled ? <CheckCircle2 size={20} aria-hidden="true" /> : null}
+              </button>
+              <button
+                className={`first-run-osu-choice first-run-osu-choice--no ${!osuDownloaderFeatureEnabled ? 'is-active' : ''}`.trim()}
+                type="button"
+                aria-pressed={!osuDownloaderFeatureEnabled}
+                onClick={() => setOsuDownloaderFeatureEnabled(false)}
+              >
+                <span className="first-run-osu-choice-icon"><X size={22} aria-hidden="true" /></span>
+                <span>
+                  <strong>{activeOsuCopy.noLabel}</strong>
+                  <small>{activeOsuCopy.noDescription}</small>
+                </span>
+                {!osuDownloaderFeatureEnabled ? <CheckCircle2 size={20} aria-hidden="true" /> : null}
+              </button>
+            </div>
+            <div className={`first-run-osu-status ${osuDownloaderFeatureEnabled ? 'is-enabled' : ''}`} role="status">
+              {osuDownloaderFeatureEnabled ? <Gamepad2 size={17} aria-hidden="true" /> : <X size={17} aria-hidden="true" />}
+              <span>{osuDownloaderFeatureEnabled ? activeOsuCopy.enabledStatus : activeOsuCopy.disabledStatus}</span>
             </div>
           </div>
         );
@@ -638,40 +852,111 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
             <p>{t('firstRun.accounts.note')}</p>
           </div>
         );
-      case 'summary':
+      case 'pro':
         return (
-          <div className="first-run-summary-stack">
-            <div className="first-run-final-card">
-              <Sparkles size={24} aria-hidden="true" />
-              <div>
-                <h3>{t('firstRun.summary.readyTitle')}</h3>
-                <p>{t('firstRun.summary.readyDescription')}</p>
+          <div className="first-run-pro-page">
+            <div className="first-run-pro-story">
+              <span>{t('firstRun.pro.kicker')}</span>
+              <div className="first-run-pro-story-copy">
+                <p>{t('firstRun.pro.freeNotice')}</p>
+              </div>
+              <p className="first-run-pro-contributor-note"><Sparkles size={14} aria-hidden="true" />{t('firstRun.pro.contributors')}</p>
+              <button className="settings-action-button first-run-pro-purchase" type="button" onClick={openSponsorChannel}>
+                <Gift size={16} />
+                <span>
+                  <strong>{t('firstRun.pro.action')}</strong>
+                  <small>afdian.com/a/echonext</small>
+                </span>
+                <ArrowRight size={16} />
+              </button>
+            </div>
+            <div className="first-run-pro-benefits">
+              <header>
+                <strong>{t('firstRun.pro.benefitsTitle')}</strong>
+                <span>{t('firstRun.pro.kicker')}</span>
+              </header>
+              <div className="first-run-pro-feature-grid">
+                {proFeatureCards.map((feature) => {
+                  const FeatureIcon = feature.icon;
+                  return (
+                    <article className={feature.featured ? 'is-featured' : undefined} key={feature.id}>
+                      <span className="first-run-pro-feature-icon"><FeatureIcon size={18} aria-hidden="true" /></span>
+                      <div>
+                        <strong>{t(feature.titleKey)}</strong>
+                        {feature.descriptionKeys.map((key) => <p key={key}>{t(key)}</p>)}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+              <div className="first-run-pro-extras">
+                <strong>{t('firstRun.pro.extrasTitle')}</strong>
+                <ul>
+                  <li><CheckCircle2 size={13} aria-hidden="true" />{t('firstRun.pro.benefit.donators')}</li>
+                  <li><CheckCircle2 size={13} aria-hidden="true" />{t('firstRun.pro.benefit.storeKey')}</li>
+                </ul>
               </div>
             </div>
-            <div className="first-run-pro-card">
-              <div className="first-run-pro-heading">
-                <Gift size={22} aria-hidden="true" />
-                <div>
-                  <span>{t('firstRun.pro.kicker')}</span>
-                  <h3>{t('firstRun.pro.title')}</h3>
-                </div>
-              </div>
-              <p>{t('firstRun.pro.description')}</p>
-              <p>{t('firstRun.pro.freeNotice')}</p>
-              <p>{t('firstRun.pro.contributors')}</p>
-              <strong>{t('firstRun.pro.benefitsTitle')}</strong>
-              <ul>
-                <li>{t('firstRun.pro.benefit.connect')}</li>
-                <li>{t('firstRun.pro.benefit.mobile')}</li>
-                <li>{t('firstRun.pro.benefit.themes')}</li>
-                <li>{t('firstRun.pro.benefit.plugins')}</li>
-                <li>{t('firstRun.pro.benefit.donators')}</li>
-                <li>{t('firstRun.pro.benefit.network')}</li>
-                <li>{t('firstRun.pro.benefit.storeKey')}</li>
-              </ul>
-              <button className="settings-action-button" type="button" onClick={openSponsorChannel}>
-                <Gift size={15} />
-                {t('firstRun.pro.action')}
+          </div>
+        );
+      case 'summary':
+        return (
+          <div className="first-run-summary-review">
+            <div className="first-run-summary-launch-grid">
+              <section className="first-run-summary-after">
+                <header>
+                  <span>{stepNumberLabel}</span>
+                  <strong>{t('firstRun.summary.afterTitle')}</strong>
+                </header>
+                <ol>
+                  <li>
+                    <span>1</span>
+                    <strong>{t('firstRun.summary.after.save')}</strong>
+                  </li>
+                  <li>
+                    <span>2</span>
+                    <div>
+                      <strong>{t('firstRun.summary.after.scan')}</strong>
+                      <small>{scanNow && musicFolderPath ? t('firstRun.summary.scanWithFolder', { mode: scanModeLabel }) : t('firstRun.summary.addLater')}</small>
+                    </div>
+                  </li>
+                  <li className="is-final">
+                    <span><ArrowRight size={15} aria-hidden="true" /></span>
+                    <strong>{t('firstRun.summary.after.enter')}</strong>
+                  </li>
+                </ol>
+              </section>
+              <section className="first-run-summary-configuration">
+                <header>
+                  <strong>{t('firstRun.summary.configurationTitle')}</strong>
+                  <CheckCircle2 size={17} aria-hidden="true" />
+                </header>
+                <dl>
+                  <div>
+                    <dt>{t('firstRun.summary.music')}</dt>
+                    <dd>{musicFolderPath ?? t('firstRun.summary.addLater')}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('firstRun.summary.output')}</dt>
+                    <dd>{outputModeLabel}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('firstRun.summary.theme')}</dt>
+                    <dd>{t('firstRun.summary.themeValue', { mode: appearanceThemeLabel, preset: appearancePresetLabel })}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('firstRun.summary.features')}</dt>
+                    <dd>{featureSummaryLabel}</dd>
+                  </div>
+                </dl>
+              </section>
+            </div>
+            <div className="first-run-summary-support">
+              <span><CheckCircle2 size={14} />{t('firstRun.summary.noFileMove')}</span>
+              <button className="first-run-doc-card" type="button" title={t('firstRun.docs.description')} onClick={openDocumentation}>
+                <BookOpen size={16} />
+                <strong>{t('firstRun.docs.title')}</strong>
+                <ArrowRight size={15} />
               </button>
             </div>
           </div>
@@ -682,64 +967,103 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
   };
 
   return (
-    <div className="first-run-backdrop" data-state={presentationState} role="dialog" aria-modal="true" aria-labelledby="first-run-title" aria-describedby="first-run-description">
-      <section className="first-run-panel">
-        <header className="first-run-header">
-          <div className="first-run-heading">
-            <span className="section-kicker">ECHO Next</span>
+    <div className="first-run-backdrop first-run-backdrop--immersive" data-state={presentationState} role="dialog" aria-modal="true" aria-labelledby="first-run-title" aria-describedby="first-run-description">
+      <section className="first-run-immersive-shell">
+        <aside className="first-run-immersive-journey">
+          <div className="first-run-journey-brand" aria-label="ECHO Next">
+            <strong>ECHO</strong>
+            <span>Next</span>
+          </div>
+          <div className="first-run-journey-copy">
             <h2 id="first-run-title">{t('firstRun.title')}</h2>
             <p id="first-run-description">{t('firstRun.description')}</p>
-            <button className="first-run-doc-button" type="button" onClick={openDocumentation}>
-              <BookOpen size={15} />
-              <span>{t('firstRun.docs.action')}</span>
-              <ArrowRight size={14} />
-            </button>
           </div>
-          <button className="queue-icon-button" type="button" aria-label={t('firstRun.action.skipWizard')} title={t('firstRun.action.skipWizard')} disabled={busy !== null} onClick={() => void skip()}>
-            <X size={17} />
+          <div className="first-run-mascot" aria-hidden="true">
+            <img src={mascotArtworkUrl} alt="" />
+          </div>
+          <nav className="first-run-phase-nav" aria-label={t('firstRun.aria.steps')}>
+            {firstRunPhases.map((phase, phaseIndex) => {
+              const PhaseIcon = phase.icon;
+              const isActive = phase.id === activePhase.id;
+              const isDone = phaseIndex < activePhaseIndex;
+              return (
+                <button
+                  className={`${isActive ? 'is-active' : ''} ${isDone ? 'is-done' : ''}`.trim()}
+                  key={phase.id}
+                  type="button"
+                  aria-current={isActive ? 'step' : undefined}
+                  disabled={busy !== null}
+                  onClick={() => setActiveStepId(phase.stepIds[0]!)}
+                >
+                  <span className="first-run-phase-marker">
+                    {isDone ? <CheckCircle2 size={17} /> : <PhaseIcon size={16} />}
+                  </span>
+                  <span className="first-run-phase-copy">
+                    <strong>{t(phase.labelKey)}</strong>
+                    {phase.subtitleKeys?.length ? <small>{phase.subtitleKeys.map((key) => t(key)).join(' · ')}</small> : null}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+          <button className="first-run-journey-docs" type="button" onClick={openDocumentation}>
+            <BookOpen size={15} />
+            <span>{t('firstRun.docs.action')}</span>
+            <ArrowRight size={14} />
           </button>
-        </header>
+        </aside>
 
-        <div className="first-run-progress-shell" aria-hidden="true">
-          <div className="first-run-progress-meta">
-            <span>{stepNumberLabel} &middot; {progressPercentLabel}</span>
-            <strong>{t(activeStep.labelKey)}</strong>
-          </div>
-          <div className="first-run-progress">
-            <span style={{ width: `${progressPercent}%` }} />
-          </div>
-        </div>
-
-        <nav className="first-run-stepper" aria-label={t('firstRun.aria.steps')}>
-          {firstRunSteps.map((step, index) => {
-            const StepIcon = step.icon;
-            const isActive = step.id === activeStep.id;
-            const isDone = index < activeStepIndex;
-            return (
-              <button
-                className={`${isActive ? 'is-active' : ''} ${isDone ? 'is-done' : ''}`.trim()}
-                key={step.id}
-                type="button"
-                aria-current={isActive ? 'step' : undefined}
-                disabled={busy !== null}
-                onClick={() => setActiveStepId(step.id)}
-              >
-                <span>{isDone ? <CheckCircle2 size={14} /> : <StepIcon size={14} />}</span>
-                {t(step.labelKey)}
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="first-run-layout">
-          <main className="first-run-stage" data-step={activeStep.id} key={activeStep.id}>
-            <div className="first-run-stage-icon">
-              <ActiveIcon size={26} />
+        <main className="first-run-immersive-workspace">
+          <header className="first-run-workspace-header">
+            <div>
+              <span>{t(activePhase.labelKey)}</span>
+              <strong>{activePhaseIndex + 1} / {firstRunPhases.length}</strong>
             </div>
-            <div className="first-run-stage-copy">
-              <span>{stepNumberLabel}</span>
-              <h3>{t(activeStep.titleKey)}</h3>
-              <p>{t(activeStep.descriptionKey)}</p>
+          </header>
+
+          <div className="first-run-substep-slot">
+            {activePhase.stepIds.length > 1 ? (
+              <nav
+                className="first-run-substep-nav"
+                aria-label={t('firstRun.aria.steps')}
+                style={{ gridTemplateColumns: `repeat(${activePhase.stepIds.length}, minmax(0, 1fr))` }}
+              >
+                {activePhase.stepIds.map((stepId, index) => {
+                  const step = firstRunSteps.find((item) => item.id === stepId)!;
+                  const isActive = stepId === activeStep.id;
+                  const isDone = index < activeSubStepIndex;
+                  return (
+                    <button
+                      className={`${isActive ? 'is-active' : ''} ${isDone ? 'is-done' : ''}`.trim()}
+                      key={stepId}
+                      type="button"
+                      aria-current={isActive ? 'step' : undefined}
+                      disabled={busy !== null}
+                      onClick={() => setActiveStepId(stepId)}
+                    >
+                      <span>{isDone ? <CheckCircle2 size={13} /> : index + 1}</span>
+                      <strong>{t(step.labelKey)}</strong>
+                    </button>
+                  );
+                })}
+              </nav>
+            ) : (
+              <div className="first-run-substep-single" aria-hidden="true">
+                <span>{t(activeStep.labelKey)}</span>
+              </div>
+            )}
+          </div>
+
+          <section className="first-run-immersive-stage" data-step={activeStep.id} key={activeStep.id}>
+            <div className="first-run-immersive-stage-heading">
+              <div className="first-run-immersive-stage-icon"><ActiveIcon size={22} /></div>
+              <div>
+                <span>{stepNumberLabel}</span>
+                <h3>{activeStepTitle}</h3>
+                <p>{activeStepDescription}</p>
+              </div>
+            </div>
+            {activeStep.id !== 'summary' ? (
               <div className="first-run-step-notes" aria-label={t('firstRun.aria.stepNotes')}>
                 {activeStepNotes.map((noteKey) => (
                   <span key={noteKey}>
@@ -748,83 +1072,40 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
                   </span>
                 ))}
               </div>
-            </div>
+            ) : null}
             {renderStepBody()}
-          </main>
+            {error ? <p className="settings-inline-error first-run-workspace-message">{error}</p> : null}
+            {message ? <p className="settings-inline-note first-run-workspace-message">{message}</p> : null}
+          </section>
 
-          <aside className="first-run-summary" aria-label={t('firstRun.aria.summary')}>
-            <span className="first-run-summary-kicker">{t('firstRun.summary.kicker')}</span>
-            <div className="first-run-summary-current">
-              <span>{stepNumberLabel}</span>
-              <strong>{t(activeStep.titleKey)}</strong>
-              <em>{progressPercentLabel}</em>
+          <footer className="first-run-immersive-actions">
+            <button className="settings-action-button first-run-skip-button" type="button" disabled={busy !== null} onClick={() => void skip()}>
+              {t('firstRun.action.skip')}
+            </button>
+            <span className="first-run-phase-progress">
+              {activePhaseIndex + 1} / {firstRunPhases.length}
+              {activePhase.stepIds.length > 1 ? ` · ${activeSubStepIndex + 1} / ${activePhase.stepIds.length}` : ''}
+            </span>
+            <div className="first-run-action-cluster">
+              <button className="settings-action-button" type="button" disabled={busy !== null || activeStepIndex === 0} onClick={goToPreviousStep}>
+                <ArrowLeft size={15} />
+                {t('firstRun.action.previous')}
+              </button>
+              {isFinalStep ? (
+                <button className="settings-action-button first-run-primary" type="button" disabled={busy !== null} onClick={() => void finish()}>
+                  {busy === 'finish' ? <Loader2 className="spinning-icon" size={15} /> : <CheckCircle2 size={15} />}
+                  {t('firstRun.action.finish')}
+                </button>
+              ) : (
+                <button className="settings-action-button first-run-primary" type="button" disabled={busy !== null} onClick={goToNextStep}>
+                  <span>{t('firstRun.action.next')}</span>
+                  <small>{t(nextStep.labelKey)}</small>
+                  <ArrowRight size={15} />
+                </button>
+              )}
             </div>
-            <dl>
-              <div>
-                <dt>{t('firstRun.summary.music')}</dt>
-                <dd>{musicFolderPath ?? t('firstRun.summary.addLater')}</dd>
-              </div>
-              <div>
-                <dt>{t('firstRun.summary.scan')}</dt>
-                <dd>{scanNow && musicFolderPath ? t('firstRun.summary.scanWithFolder', { mode: scanModeLabel }) : scanModeLabel}</dd>
-              </div>
-              <div>
-                <dt>{t('firstRun.summary.cache')}</dt>
-                <dd>{cacheDirectoryLabel}</dd>
-              </div>
-              <div>
-                <dt>{t('firstRun.summary.output')}</dt>
-                <dd>{outputModeLabel}</dd>
-              </div>
-              <div>
-                <dt>{t('firstRun.summary.features')}</dt>
-                <dd>{featureSummaryLabel}</dd>
-              </div>
-              <div>
-                <dt>{t('firstRun.summary.theme')}</dt>
-                <dd>{t('firstRun.summary.themeValue', { mode: appearanceThemeLabel, preset: appearancePresetLabel })}</dd>
-              </div>
-              <div>
-                <dt>{t('firstRun.summary.accounts')}</dt>
-                <dd>{t('firstRun.summary.accountsLater')}</dd>
-              </div>
-            </dl>
-            <p>{t('firstRun.summary.noFileMove')}</p>
-            <button className="first-run-doc-card" type="button" title={t('firstRun.docs.description')} onClick={openDocumentation}>
-              <BookOpen size={16} />
-              <span>
-                <strong>{t('firstRun.docs.title')}</strong>
-              </span>
-              <ArrowRight size={15} />
-            </button>
-          </aside>
-        </div>
-
-        {error ? <p className="settings-inline-error">{error}</p> : null}
-        {message ? <p className="settings-inline-note">{message}</p> : null}
-
-        <footer className="first-run-actions">
-          <button className="settings-action-button" type="button" disabled={busy !== null} onClick={() => void skip()}>
-            {t('firstRun.action.skip')}
-          </button>
-          <div className="first-run-action-cluster">
-            <button className="settings-action-button" type="button" disabled={busy !== null || activeStepIndex === 0} onClick={goToPreviousStep}>
-              <ArrowLeft size={15} />
-              {t('firstRun.action.previous')}
-            </button>
-            {isFinalStep ? (
-              <button className="settings-action-button first-run-primary" type="button" disabled={busy !== null} onClick={() => void finish()}>
-                {busy === 'finish' ? <Loader2 className="spinning-icon" size={15} /> : <CheckCircle2 size={15} />}
-                {t('firstRun.action.finish')}
-              </button>
-            ) : (
-              <button className="settings-action-button first-run-primary" type="button" disabled={busy !== null} onClick={goToNextStep}>
-                {t('firstRun.action.next')}
-                <ArrowRight size={15} />
-              </button>
-            )}
-          </div>
-        </footer>
+          </footer>
+        </main>
       </section>
     </div>
   );

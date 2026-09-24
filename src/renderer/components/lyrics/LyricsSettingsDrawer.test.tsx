@@ -235,6 +235,65 @@ afterEach(() => {
 });
 
 describe('LyricsSettingsDrawer', () => {
+  it('keeps the loaded panel mounted while closed without hijacking Ctrl+F, then refreshes on reopen', async () => {
+    const getSettings = vi.fn().mockResolvedValue(makeSettings());
+    window.echo = {
+      app: {
+        getSettings,
+        setSettings: vi.fn(),
+        chooseLyricsWallpaper: vi.fn(),
+      },
+    } as unknown as Window['echo'];
+
+    const { container, rerender } = render(<LyricsSettingsDrawer isOpen onClose={vi.fn()} />);
+    await waitFor(() => expect(getSettings).toHaveBeenCalledTimes(1));
+
+    const panel = container.querySelector('.lyrics-settings-panel');
+    expect(panel).toBeTruthy();
+
+    rerender(<LyricsSettingsDrawer isOpen={false} onClose={vi.fn()} />);
+
+    const drawerRoot = container.querySelector('.lyrics-settings-drawer-root');
+    expect(drawerRoot?.getAttribute('aria-hidden')).toBe('true');
+    expect(drawerRoot?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('.lyrics-settings-panel')).toBe(panel);
+
+    const outsideInput = document.createElement('input');
+    document.body.appendChild(outsideInput);
+    outsideInput.focus();
+    expect(fireEvent.keyDown(window, { key: 'f', ctrlKey: true })).toBe(true);
+    expect(document.activeElement).toBe(outsideInput);
+    outsideInput.remove();
+
+    rerender(<LyricsSettingsDrawer isOpen onClose={vi.fn()} />);
+    await waitFor(() => expect(getSettings).toHaveBeenCalledTimes(2));
+    expect(container.querySelector('.lyrics-settings-panel')).toBe(panel);
+  });
+
+  it('stops global shortcut capture when the persistent drawer closes', async () => {
+    const setSettings = vi.fn((patch: Partial<AppSettings>) => Promise.resolve(makeSettings(patch)));
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue(makeSettings({
+          lyricsPlayerBarDrawerEnabled: true,
+          lyricsPlayerBarDrawerShortcutEnabled: true,
+        })),
+        setSettings,
+        chooseLyricsWallpaper: vi.fn(),
+      },
+    } as unknown as Window['echo'];
+
+    const { rerender } = render(<LyricsSettingsDrawer isOpen onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '录制' }));
+    expect(document.body.dataset.echoShortcutRecording).toBe('true');
+
+    rerender(<LyricsSettingsDrawer isOpen={false} onClose={vi.fn()} />);
+    await waitFor(() => expect(document.body.dataset.echoShortcutRecording).toBeUndefined());
+
+    fireEvent.keyDown(window, { key: 'k', code: 'KeyK', ctrlKey: true });
+    expect(setSettings).not.toHaveBeenCalledWith({ lyricsPlayerBarDrawerShortcutAccelerator: 'Ctrl+K' });
+  });
+
   it('keeps range sliders interactive while settings are saving', async () => {
     const setSettings = vi.fn(() => new Promise<AppSettings>(() => undefined));
     window.echo = {
@@ -327,6 +386,44 @@ describe('LyricsSettingsDrawer', () => {
     await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ lyricsEnabledProviders: ['local', 'lrclib', 'qqmusic'] }));
   });
 
+  it('uses progressive mini-player groups in the Settings variant', async () => {
+    const setSettings = vi.fn().mockImplementation(async (patch: Partial<AppSettings>) => makeSettings(patch));
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue(makeSettings({ lyricsPlayerBarDrawerEnabled: true })),
+        setSettings,
+        chooseLyricsWallpaper: vi.fn(),
+      },
+    } as unknown as Window['echo'];
+
+    const { container } = render(<LyricsSettingsPanel className="settings-lyrics-panel" variant="settings" />);
+
+    const progressive = await waitFor(() => {
+      const element = container.querySelector('.lyrics-settings-progressive');
+      expect(element).toBeTruthy();
+      return element as HTMLElement;
+    });
+    const trigger = progressive.querySelector('.lyrics-settings-progressive-section--trigger') as HTMLElement;
+    const behaviorButton = within(progressive).getByRole('button', { name: /自动行为/ });
+    const miniPlayer = progressive.querySelector('.lyrics-settings-mini-player') as HTMLElement;
+    const miniPlayerToggle = within(miniPlayer).getByRole('checkbox', { name: '迷你底栏' });
+    const categoryTitles = Array.from(container.querySelectorAll('.lyrics-settings-category-header h3')).map(
+      (heading) => heading.textContent,
+    );
+
+    await waitFor(() => expect((miniPlayerToggle as HTMLInputElement).checked).toBe(true));
+
+    expect(categoryTitles).toEqual(['基础显示', '显示与外观', '来源与同步']);
+    expect(within(trigger).getByRole('button', { name: /触发方式/ }).getAttribute('aria-expanded')).toBe('true');
+    expect(behaviorButton.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(behaviorButton);
+    expect(behaviorButton.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.click(miniPlayerToggle);
+    await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ lyricsPlayerBarDrawerEnabled: false }));
+  });
+
   it('remembers the lyrics display panel collapse state', async () => {
     window.echo = {
       app: {
@@ -388,6 +485,8 @@ describe('LyricsSettingsDrawer', () => {
 
     const { container } = render(<LyricsSettingsDrawer isOpen onClose={vi.fn()} />);
 
+    fireEvent.click(screen.getByRole('button', { name: '桌面' }));
+
     const desktopLyricsToggle = (await screen.findByRole('checkbox', { name: '桌面歌词' })) as HTMLInputElement;
     expect(desktopLyricsToggle.checked).toBe(false);
 
@@ -417,7 +516,9 @@ describe('LyricsSettingsDrawer', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '桌面歌词显示翻译' }));
     await waitFor(() => expect(setStyle).toHaveBeenCalledWith({ desktopLyricsTranslationEnabled: false }));
 
-    fireEvent.click(within(screen.getByLabelText('桌面歌词排版')).getByRole('button', { name: '竖排' }));
+    const desktopDirectionSelect = container.querySelector('.lyrics-desktop-direction-select') as HTMLElement;
+    fireEvent.click(within(desktopDirectionSelect).getByRole('button', { name: '横排' }));
+    fireEvent.click(within(desktopDirectionSelect).getByRole('option', { name: '竖排' }));
     await waitFor(() => expect(setStyle).toHaveBeenCalledWith({ desktopLyricsTextDirection: 'vertical' }));
 
     const primarySizeSlider = container.querySelector<HTMLInputElement>('.lyrics-desktop-primary-size-control input[type="range"]');
@@ -485,7 +586,7 @@ describe('LyricsSettingsDrawer', () => {
     await waitFor(() => expect(secondRender.container.querySelector('.lyrics-desktop-font-panel-body')).toBeTruthy());
   });
 
-  it('updates the lyrics match threshold from 30 to 100 percent with a 50 percent default', async () => {
+  it('keeps the lyrics match threshold between 78 and 100 percent with a 78 percent default', async () => {
     const setSettings = vi.fn((patch: Partial<AppSettings>) => Promise.resolve(makeSettings(patch)));
     window.echo = {
       app: {
@@ -498,15 +599,15 @@ describe('LyricsSettingsDrawer', () => {
     render(<LyricsSettingsDrawer isOpen onClose={vi.fn()} />);
 
     const slider = (await screen.findByRole('slider', { name: '歌词匹配度设置' })) as HTMLInputElement;
-    expect(slider.min).toBe('30');
+    expect(slider.min).toBe('78');
     expect(slider.max).toBe('100');
-    expect(slider.value).toBe('50');
+    expect(slider.value).toBe('78');
 
     vi.useFakeTimers();
-    fireEvent.change(slider, { target: { value: '30' } });
+    fireEvent.change(slider, { target: { value: '78' } });
 
     expect(slider.disabled).toBe(false);
-    expect(slider.value).toBe('30');
+    expect(slider.value).toBe('78');
     expect(setSettings).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -514,7 +615,7 @@ describe('LyricsSettingsDrawer', () => {
       await Promise.resolve();
     });
 
-    expect(setSettings).toHaveBeenCalledWith({ lyricsAutoAcceptScore: 0.3 });
+    expect(setSettings).toHaveBeenCalledWith({ lyricsAutoAcceptScore: 0.78 });
   });
 
   it('toggles auto replay after applying lyrics from the current-track tools', async () => {
@@ -898,6 +999,38 @@ describe('LyricsSettingsDrawer', () => {
     await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ lyricsPlayerBarDrawerEnabled: true }));
   });
 
+  it('records a shortcut after shortcut-only mini player control is enabled', async () => {
+    const setSettings = vi.fn((patch: Partial<AppSettings>) => Promise.resolve(makeSettings(patch)));
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue(makeSettings({
+          lyricsPlayerBarDrawerEnabled: true,
+          lyricsPlayerBarDrawerShortcutEnabled: false,
+          lyricsPlayerBarDrawerShortcutAccelerator: null,
+        })),
+        setSettings,
+        chooseLyricsWallpaper: vi.fn(),
+      },
+    } as unknown as Window['echo'];
+
+    render(<LyricsSettingsDrawer isOpen onClose={vi.fn()} />);
+
+    const shortcutToggle = (await screen.findByRole('checkbox', {
+      name: '使用快捷键显示/隐藏迷你底栏',
+    })) as HTMLInputElement;
+    fireEvent.click(shortcutToggle);
+
+    await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ lyricsPlayerBarDrawerShortcutEnabled: true }));
+    const recordButton = screen.getByRole('button', { name: '录制' });
+    fireEvent.click(recordButton);
+    expect(document.body.dataset.echoShortcutRecording).toBe('true');
+
+    fireEvent.keyDown(window, { key: 'k', code: 'KeyK', ctrlKey: true });
+
+    await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ lyricsPlayerBarDrawerShortcutAccelerator: 'Ctrl+K' }));
+    expect(document.body.dataset.echoShortcutRecording).toBeUndefined();
+  });
+
   it('shows mini player tuning only after the mini player is enabled', async () => {
     window.echo = {
       app: {
@@ -963,6 +1096,9 @@ describe('LyricsSettingsDrawer', () => {
     fireEvent.click(within(miniColorPanel).getByRole('option', { name: '跟随封面' }));
 
     await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ lyricsPlayerBarDrawerColorMode: 'cover' }));
+    fireEvent.click(miniColorPanel.querySelector('.lyrics-mini-player-color-mode-select .sort-button') as HTMLButtonElement);
+    fireEvent.click(within(miniColorPanel).getByRole('option', { name: '默认浅色' }));
+    await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ lyricsPlayerBarDrawerColorMode: 'light' }));
     expect(container.querySelector('.lyrics-mini-player-color-panel')).toBeTruthy();
   });
 

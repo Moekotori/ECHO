@@ -4,20 +4,14 @@ import { BrowserWindow, dialog, ipcMain } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
 import { startLyricsProgressTracking } from '../lyrics/LyricsProgressTracker';
-import { normalizeAudioOutputModeForPlatform, normalizeAudioSharedBackendForPlatform } from '../../shared/utils/audioPlatformCapabilities';
 import { expandEqualizerApoIncludes, formatEqualizerApoGraphicEqPreset, formatEqualizerApoPreset, parseEqualizerApoPreset } from '../../shared/utils/equalizerApoPreset';
 import type {
   AudioDiagnostics,
   AudioDeviceInfo,
   AudioExportRequest,
   AudioExportResult,
-  AudioLatencyProfile,
-  AudioOutputMode,
-  AudioOutputSettings,
-  AudioSharedBackend,
   AudioStatus,
   ChannelBalanceState,
-  PlaybackSpeedMode,
 } from '../../shared/types/audio';
 import type {
   OpraHeadphoneCorrectionApplyRequest,
@@ -50,22 +44,35 @@ import type {
 import { getAudioSession } from '../audio/AudioSession';
 import { exportAudioFile } from '../audio/AudioExportService';
 import { EqStateStore } from '../audio/EqStateStore';
-import { JsonRpcBridge } from '../audio/JsonRpcBridge';
+import { syncPersistedDspStateToNative } from '../audio/DspStateSync';
+import type { JsonRpcBridge } from '../audio/JsonRpcBridge';
+import type { AudioBackendQueueItem } from '../audio/AudioBackend';
 import { activeJsonRpcBridge } from '../audio/HostBridgeRegistry';
 import { getOpraService } from '../audio/OpraService';
+import { requireLocalPro } from '../plugins/LocalProEntitlements';
 import { restartWindowsAudioService } from '../audio/WindowsAudioServiceManager';
 import { getCrashReportService } from '../diagnostics/CrashReportService';
 import { createSystemAudioStreamUrl } from '../protocol/audioProtocol';
 import { enqueueAudioCommand, isAudioCommandTimeoutError } from './audioCommandQueue';
+import { requireEchoProForAudioDspPatch } from './audioProFeatureGate';
+import { requireAudioOutputSettings } from './normalizeAudioOutputSettings';
+import { isAuthorizationFailure } from '../../shared/ipcAuthorizationFailure';
+import {
+  normalizeDspRackState,
+  type ChannelMatrixState,
+  type CompressorState,
+  type CrossfeedState,
+  type DspRackState,
+  type StereoFieldState,
+} from '../../shared/types/dspRack';
 
-const outputModes = new Set<AudioOutputMode>(['shared', 'exclusive', 'system']);
-const sharedBackends = new Set<AudioSharedBackend>(['auto', 'windows', 'directsound', 'alsa']);
-const latencyProfiles = new Set<AudioLatencyProfile>(['stable', 'balanced', 'lowLatency']);
-const playbackSpeedModes = new Set<PlaybackSpeedMode>(['nightcore', 'daycore', 'speed']);
-const echoSrcModes = new Set(['off', 'family2x', 'family4x', 'family8x']);
-const echoSrcQualityProfiles = new Set(['transparent', 'balanced', 'lowLatency']);
 const systemAudioOutputBackend = 'system-audio';
 const systemAudioBackendImpl = 'electron-html-audio';
+
+const withDspPro = <Result>(action: () => Result): Result => {
+  requireLocalPro('dsp');
+  return action();
+};
 
 const safeExportFileName = (value: string): string => {
   // eslint-disable-next-line no-control-regex -- Control chars are illegal in Windows file names.
@@ -271,9 +278,9 @@ const previewImportEqPreset = async (): Promise<EqPresetImportPreviewResult | nu
   const result = await dialog.showOpenDialog({
     title: 'Import EQ Preset',
     filters: [
-      { name: 'EQ Preset / Equalizer APO', extensions: ['json', 'txt', 'cfg', 'apo'] },
+      { name: 'EQ Preset / REW / Equalizer APO / AutoEq', extensions: ['json', 'txt', 'cfg', 'apo'] },
       { name: 'ECHO Next EQ Preset', extensions: ['json'] },
-      { name: 'Equalizer APO', extensions: ['txt', 'cfg', 'apo'] },
+      { name: 'REW / Equalizer APO / AutoEq', extensions: ['txt', 'cfg', 'apo'] },
     ],
     properties: ['openFile'],
   });
@@ -315,97 +322,13 @@ const importRoomCorrectionIr = async (window: BrowserWindow | null): Promise<Roo
   return getDspBridge().importRoomCorrectionIr(result.filePaths[0]);
 };
 
-const normalizeOutputSettings = (value: unknown): AudioOutputSettings => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('audio output settings must be an object');
-  }
-
-  const input = value as Record<string, unknown>;
-  const output: AudioOutputSettings = {};
-
-  if (typeof input.outputMode === 'string' && outputModes.has(input.outputMode as AudioOutputMode)) {
-    output.outputMode = normalizeAudioOutputModeForPlatform(input.outputMode as AudioOutputMode, process.platform);
-  }
-
-  if (typeof input.sharedBackend === 'string' && sharedBackends.has(input.sharedBackend as AudioSharedBackend)) {
-    output.sharedBackend = normalizeAudioSharedBackendForPlatform(input.sharedBackend as AudioSharedBackend, process.platform);
-  }
-
-  if (Object.prototype.hasOwnProperty.call(input, 'deviceIndex') && input.deviceIndex == null) {
-    output.deviceIndex = undefined;
-  } else if (typeof input.deviceIndex === 'number' && Number.isInteger(input.deviceIndex)) {
-    output.deviceIndex = input.deviceIndex;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(input, 'deviceName') && input.deviceName == null) {
-    output.deviceName = undefined;
-  } else if (typeof input.deviceName === 'string' && input.deviceName.trim()) {
-    output.deviceName = input.deviceName;
-  }
-
-  if (
-    typeof input.requestedOutputSampleRate === 'number' &&
-    Number.isFinite(input.requestedOutputSampleRate) &&
-    input.requestedOutputSampleRate > 0
-  ) {
-    output.requestedOutputSampleRate = Math.round(input.requestedOutputSampleRate);
-  }
-
-  if (typeof input.latencyProfile === 'string' && latencyProfiles.has(input.latencyProfile as AudioLatencyProfile)) {
-    output.latencyProfile = input.latencyProfile as AudioLatencyProfile;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(input, 'bufferSizeFrames')) {
-    output.bufferSizeFrames =
-      typeof input.bufferSizeFrames === 'number' && Number.isFinite(input.bufferSizeFrames) && input.bufferSizeFrames > 0
-        ? Math.round(input.bufferSizeFrames)
-        : null;
-  }
-
-  if (input.dsdOutputMode === 'dop' || input.dsdOutputMode === 'pcm') {
-    output.dsdOutputMode = input.dsdOutputMode;
-  }
-
-  if (typeof input.exclusiveInstabilityFallbackEnabled === 'boolean') {
-    output.exclusiveInstabilityFallbackEnabled = input.exclusiveInstabilityFallbackEnabled;
-  }
-
-  if (typeof input.defaultDeviceFallbackEnabled === 'boolean') {
-    output.defaultDeviceFallbackEnabled = input.defaultDeviceFallbackEnabled;
-  }
-
-  if (typeof input.soxrFallbackEnabled === 'boolean') {
-    output.soxrFallbackEnabled = input.soxrFallbackEnabled;
-  }
-
-  if (typeof input.echoSrcMode === 'string' && echoSrcModes.has(input.echoSrcMode)) {
-    output.echoSrcMode = input.echoSrcMode as AudioOutputSettings['echoSrcMode'];
-  }
-
-  if (typeof input.echoSrcQualityProfile === 'string' && echoSrcQualityProfiles.has(input.echoSrcQualityProfile)) {
-    output.echoSrcQualityProfile = input.echoSrcQualityProfile as AudioOutputSettings['echoSrcQualityProfile'];
-  }
-
-  if (typeof input.releaseExclusiveOnPauseExperimentalEnabled === 'boolean') {
-    output.releaseExclusiveOnPauseExperimentalEnabled = input.releaseExclusiveOnPauseExperimentalEnabled;
-  }
-
-  if (typeof input.volume === 'number' && Number.isFinite(input.volume)) {
-    output.volume = Math.max(0, Math.min(1, input.volume));
-  }
-
-  if (typeof input.playbackRate === 'number' && Number.isFinite(input.playbackRate)) {
-    output.playbackRate = Math.max(0.5, Math.min(2, input.playbackRate));
-  }
-
-  if (typeof input.playbackSpeedMode === 'string' && playbackSpeedModes.has(input.playbackSpeedMode as PlaybackSpeedMode)) {
-    output.playbackSpeedMode = input.playbackSpeedMode as PlaybackSpeedMode;
-  }
-
-  return output;
-};
+const normalizeOutputSettings = requireAudioOutputSettings;
 
 const reportAudioIpcError = (error: unknown, phase: string, details?: unknown): void => {
+  if (isAuthorizationFailure(error)) {
+    return;
+  }
+
   const normalized = error instanceof Error ? error : new Error(String(error));
   const status = getAudioSession().getStatus();
 
@@ -593,6 +516,10 @@ const reportSystemPlaybackError = (rawReport: unknown): void => {
 };
 
 type DaemonDspNativeBridge = Pick<JsonRpcBridge,
+  | 'getCompressorState'
+  | 'getCrossfeedState'
+  | 'getStereoFieldState'
+  | 'getChannelMatrixState'
   | 'setEnabled'
   | 'setBandGain'
   | 'setBandFrequency'
@@ -602,6 +529,11 @@ type DaemonDspNativeBridge = Pick<JsonRpcBridge,
   | 'setPreamp'
   | 'setDspHeadroom'
   | 'setDspSafetyLimiterEnabled'
+  | 'setDspRackState'
+  | 'setCompressorState'
+  | 'setCrossfeedState'
+  | 'setStereoFieldState'
+  | 'setChannelMatrixState'
   | 'setPreset'
   | 'setState'
   | 'reset'
@@ -618,6 +550,11 @@ type DaemonDspBridge = {
   getEqState: () => Promise<EqState>;
   getChannelBalanceState: () => ChannelBalanceState;
   getRoomCorrectionState: () => RoomCorrectionState;
+  getDspRackState: () => DspRackState;
+  getCompressorState: () => Promise<CompressorState>;
+  getCrossfeedState: () => Promise<CrossfeedState>;
+  getStereoFieldState: () => Promise<StereoFieldState>;
+  getChannelMatrixState: () => Promise<ChannelMatrixState>;
   setEnabled: (enabled: boolean) => Promise<EqState>;
   setBandGain: (request: EqSetBandGainRequest) => Promise<EqState>;
   setBandFrequency: (request: EqSetBandFrequencyRequest) => Promise<EqState>;
@@ -627,6 +564,11 @@ type DaemonDspBridge = {
   setPreamp: (preampDb: number) => Promise<EqState>;
   setDspHeadroom: (headroomDb: number) => Promise<EqState>;
   setDspSafetyLimiterEnabled: (enabled: boolean) => Promise<EqState>;
+  setDspRackState: (state: Pick<DspRackState, 'order'>) => Promise<DspRackState>;
+  setCompressorState: (state: Partial<CompressorState>) => Promise<CompressorState>;
+  setCrossfeedState: (state: Partial<CrossfeedState>) => Promise<CrossfeedState>;
+  setStereoFieldState: (state: Partial<StereoFieldState>) => Promise<StereoFieldState>;
+  setChannelMatrixState: (state: Partial<ChannelMatrixState>) => Promise<ChannelMatrixState>;
   setPreset: (presetId: string) => Promise<EqState>;
   reset: () => Promise<EqState>;
   listPresets: () => EqPreset[];
@@ -651,6 +593,11 @@ const noopDspBridge: DaemonDspBridge = {
   getEqState: async (): Promise<EqState> => EqStateStore.loadEqState(),
   getChannelBalanceState: (): ChannelBalanceState => EqStateStore.loadChannelBalanceState(),
   getRoomCorrectionState: (): RoomCorrectionState => EqStateStore.loadRoomCorrectionState(),
+  getDspRackState: (): DspRackState => EqStateStore.loadDspRackState(),
+  getCompressorState: async (): Promise<CompressorState> => EqStateStore.loadDspRackState().compressor,
+  getCrossfeedState: async (): Promise<CrossfeedState> => EqStateStore.loadDspRackState().crossfeed,
+  getStereoFieldState: async (): Promise<StereoFieldState> => EqStateStore.loadDspRackState().stereoField,
+  getChannelMatrixState: async (): Promise<ChannelMatrixState> => EqStateStore.loadDspRackState().channelMatrix,
   setEnabled: async (enabled: boolean): Promise<EqState> => {
     const state = EqStateStore.loadEqState();
     state.enabled = enabled;
@@ -680,7 +627,36 @@ const noopDspBridge: DaemonDspBridge = {
     EqStateStore.saveEqState(state);
     return state;
   },
-  setPreset: async (presetId: string): Promise<EqState> => EqStateStore.loadEqState(),
+  setDspRackState: async (state: Pick<DspRackState, 'order'>): Promise<DspRackState> => {
+    const normalized = normalizeDspRackState({ ...EqStateStore.loadDspRackState(), ...state });
+    EqStateStore.saveDspRackState(normalized);
+    return normalized;
+  },
+  setCompressorState: async (patch: Partial<CompressorState>): Promise<CompressorState> => {
+    const current = EqStateStore.loadDspRackState();
+    const normalized = normalizeDspRackState({ ...current, compressor: { ...current.compressor, ...patch } });
+    EqStateStore.saveDspRackState(normalized);
+    return normalized.compressor;
+  },
+  setCrossfeedState: async (patch: Partial<CrossfeedState>): Promise<CrossfeedState> => {
+    const current = EqStateStore.loadDspRackState();
+    const normalized = normalizeDspRackState({ ...current, crossfeed: { ...current.crossfeed, ...patch } });
+    EqStateStore.saveDspRackState(normalized);
+    return normalized.crossfeed;
+  },
+  setStereoFieldState: async (patch: Partial<StereoFieldState>): Promise<StereoFieldState> => {
+    const current = EqStateStore.loadDspRackState();
+    const normalized = normalizeDspRackState({ ...current, stereoField: { ...current.stereoField, ...patch } });
+    EqStateStore.saveDspRackState(normalized);
+    return normalized.stereoField;
+  },
+  setChannelMatrixState: async (patch: Partial<ChannelMatrixState>): Promise<ChannelMatrixState> => {
+    const current = EqStateStore.loadDspRackState();
+    const normalized = normalizeDspRackState({ ...current, channelMatrix: { ...current.channelMatrix, ...patch } });
+    EqStateStore.saveDspRackState(normalized);
+    return normalized.channelMatrix;
+  },
+  setPreset: async (_presetId: string): Promise<EqState> => EqStateStore.loadEqState(),
   reset: async (): Promise<EqState> => EqStateStore.loadEqState(),
   listPresets: (): EqPreset[] => EqStateStore.listPresets(),
   savePreset: (request: EqSavePresetRequest): EqPreset => EqStateStore.savePreset(request),
@@ -749,19 +725,26 @@ const noopDspBridge: DaemonDspBridge = {
 /**
  * Create a DSP bridge wrapper that persists EQ/DSP/balance/room-correction
  * mutations to EqStateStore before forwarding to the native JsonRpcBridge.
- * Native call failures are logged and do not roll back persisted state.
+ * The persisted copy remains the desired state for a later host rehydrate, but
+ * a live daemon mutation resolves only after the native host acknowledges it.
  */
 function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
   const logNativeFailure = (tag: string, error: unknown): void => {
     console.warn(`[dsp-bridge] nativeApplyFailed:${tag}`, error instanceof Error ? error.message : String(error));
   };
 
-  const forwardNative = (tag: string, apply: () => Promise<unknown>): void => {
+  const forwardNative = async (tag: string, apply: () => Promise<unknown>): Promise<void> => {
     if (jrpc.isClosed === true) {
-      logNativeFailure(tag, new Error('rpc_bridge_not_open'));
-      return;
+      const error = new Error('rpc_bridge_not_open');
+      logNativeFailure(tag, error);
+      throw error;
     }
-    apply().catch((e) => logNativeFailure(tag, e));
+    try {
+      await apply();
+    } catch (error) {
+      logNativeFailure(tag, error);
+      throw error;
+    }
   };
 
   // ── EQ state helpers ──
@@ -806,12 +789,30 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
     getEqState: async (): Promise<EqState> => EqStateStore.loadEqState(),
     getChannelBalanceState: (): ChannelBalanceState => EqStateStore.loadChannelBalanceState(),
     getRoomCorrectionState: (): RoomCorrectionState => EqStateStore.loadRoomCorrectionState(),
+    getDspRackState: (): DspRackState => EqStateStore.loadDspRackState(),
+    getCompressorState: async (): Promise<CompressorState> => {
+      const current = EqStateStore.loadDspRackState();
+      const applied = await jrpc.getCompressorState();
+      return normalizeDspRackState({ ...current, compressor: applied }).compressor;
+    },
+    getCrossfeedState: async (): Promise<CrossfeedState> => {
+      const current = EqStateStore.loadDspRackState();
+      return normalizeDspRackState({ ...current, crossfeed: await jrpc.getCrossfeedState() }).crossfeed;
+    },
+    getStereoFieldState: async (): Promise<StereoFieldState> => {
+      const current = EqStateStore.loadDspRackState();
+      return normalizeDspRackState({ ...current, stereoField: await jrpc.getStereoFieldState() }).stereoField;
+    },
+    getChannelMatrixState: async (): Promise<ChannelMatrixState> => {
+      const current = EqStateStore.loadDspRackState();
+      return normalizeDspRackState({ ...current, channelMatrix: await jrpc.getChannelMatrixState() }).channelMatrix;
+    },
 
     // ── EQ enabled ──
 
     setEnabled: async (enabled: boolean): Promise<EqState> => {
       const state = mutateEqState((s) => { s.enabled = enabled; });
-      forwardNative('setEnabled', () => jrpc.setEnabled(enabled));
+      await forwardNative('setEnabled', () => jrpc.setEnabled(enabled));
       return state;
     },
 
@@ -819,31 +820,31 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
 
     setBandGain: async (request: EqSetBandGainRequest): Promise<EqState> => {
       const state = mutateBand(request.band, (band) => { band.gainDb = request.gainDb; });
-      forwardNative('setBandGain', () => jrpc.setBandGain(request));
+      await forwardNative('setBandGain', () => jrpc.setBandGain(request));
       return state;
     },
 
     setBandFrequency: async (request: EqSetBandFrequencyRequest): Promise<EqState> => {
       const state = mutateBand(request.band, (band) => { band.frequencyHz = request.frequencyHz; });
-      forwardNative('setBandFrequency', () => jrpc.setBandFrequency(request));
+      await forwardNative('setBandFrequency', () => jrpc.setBandFrequency(request));
       return state;
     },
 
     setBandQ: async (request: EqSetBandQRequest): Promise<EqState> => {
       const state = mutateBand(request.band, (band) => { band.q = request.q; });
-      forwardNative('setBandQ', () => jrpc.setBandQ(request));
+      await forwardNative('setBandQ', () => jrpc.setBandQ(request));
       return state;
     },
 
     setBandFilterType: async (request: EqSetBandFilterTypeRequest): Promise<EqState> => {
       const state = mutateBand(request.band, (band) => { band.filterType = request.filterType; });
-      forwardNative('setBandFilterType', () => jrpc.setBandFilterType(request));
+      await forwardNative('setBandFilterType', () => jrpc.setBandFilterType(request));
       return state;
     },
 
     setBandEnabled: async (request: EqSetBandEnabledRequest): Promise<EqState> => {
       const state = mutateBand(request.band, (band) => { band.enabled = request.enabled; });
-      forwardNative('setBandEnabled', () => jrpc.setBandEnabled(request));
+      await forwardNative('setBandEnabled', () => jrpc.setBandEnabled(request));
       return state;
     },
 
@@ -851,7 +852,7 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
 
     setPreamp: async (preampDb: number): Promise<EqState> => {
       const state = mutateEqState((s) => { s.preampDb = preampDb; });
-      forwardNative('setPreamp', () => jrpc.setPreamp(preampDb));
+      await forwardNative('setPreamp', () => jrpc.setPreamp(preampDb));
       return state;
     },
 
@@ -859,14 +860,59 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
 
     setDspHeadroom: async (headroomDb: number): Promise<EqState> => {
       const state = mutateEqState((s) => { s.dspHeadroomDb = headroomDb; });
-      forwardNative('setDspHeadroom', () => jrpc.setDspHeadroom(headroomDb));
+      await forwardNative('setDspHeadroom', () => jrpc.setDspHeadroom(headroomDb));
       return state;
     },
 
     setDspSafetyLimiterEnabled: async (enabled: boolean): Promise<EqState> => {
       const state = mutateEqState((s) => { s.dspSafetyLimiterEnabled = enabled; });
-      forwardNative('setDspSafetyLimiter', () => jrpc.setDspSafetyLimiterEnabled(enabled));
+      await forwardNative('setDspSafetyLimiter', () => jrpc.setDspSafetyLimiterEnabled(enabled));
       return state;
+    },
+
+    setDspRackState: async (state: Pick<DspRackState, 'order'>): Promise<DspRackState> => {
+      const normalized = normalizeDspRackState({ ...EqStateStore.loadDspRackState(), ...state });
+      const applied = await jrpc.setDspRackState(normalized);
+      const persisted = normalizeDspRackState({ ...applied, compressor: normalized.compressor });
+      EqStateStore.saveDspRackState(persisted);
+      return persisted;
+    },
+
+    setCompressorState: async (patch: Partial<CompressorState>): Promise<CompressorState> => {
+      const current = EqStateStore.loadDspRackState();
+      const normalized = normalizeDspRackState({ ...current, compressor: { ...current.compressor, ...patch } });
+      EqStateStore.saveDspRackState(normalized);
+      const applied = await jrpc.setCompressorState(normalized.compressor);
+      const persisted = normalizeDspRackState({ ...normalized, compressor: applied });
+      EqStateStore.saveDspRackState(persisted);
+      return persisted.compressor;
+    },
+    setCrossfeedState: async (patch: Partial<CrossfeedState>): Promise<CrossfeedState> => {
+      const current = EqStateStore.loadDspRackState();
+      const normalized = normalizeDspRackState({ ...current, crossfeed: { ...current.crossfeed, ...patch } });
+      EqStateStore.saveDspRackState(normalized);
+      const applied = await jrpc.setCrossfeedState(normalized.crossfeed);
+      const persisted = normalizeDspRackState({ ...normalized, crossfeed: applied });
+      EqStateStore.saveDspRackState(persisted);
+      return persisted.crossfeed;
+    },
+    setStereoFieldState: async (patch: Partial<StereoFieldState>): Promise<StereoFieldState> => {
+      const current = EqStateStore.loadDspRackState();
+      const normalized = normalizeDspRackState({ ...current, stereoField: { ...current.stereoField, ...patch } });
+      EqStateStore.saveDspRackState(normalized);
+      const applied = await jrpc.setStereoFieldState(normalized.stereoField);
+      const persisted = normalizeDspRackState({ ...normalized, stereoField: applied });
+      EqStateStore.saveDspRackState(persisted);
+      return persisted.stereoField;
+    },
+    setChannelMatrixState: async (patch: Partial<ChannelMatrixState>): Promise<ChannelMatrixState> => {
+      const current = EqStateStore.loadDspRackState();
+      const normalized = normalizeDspRackState({ ...current, channelMatrix: { ...current.channelMatrix, ...patch } });
+      EqStateStore.saveDspRackState(normalized);
+      const applied = await jrpc.setChannelMatrixState(normalized.channelMatrix);
+      const persisted = normalizeDspRackState({ ...normalized, channelMatrix: applied });
+      EqStateStore.saveDspRackState(persisted);
+      return persisted.channelMatrix;
     },
 
     // ── Preset apply ──
@@ -881,7 +927,7 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
           s.presetId = preset.id;
           s.presetName = preset.name;
         });
-        forwardNative('setPreset', () => jrpc.setState(state));
+        await forwardNative('setPreset', () => jrpc.setState(state));
         return state;
       }
       return EqStateStore.loadEqState();
@@ -890,21 +936,11 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
     // ── EQ reset ──
 
     reset: async (): Promise<EqState> => {
-      const defaultState: EqState = {
-        enabled: false,
-        preampDb: 0,
-        dspHeadroomDb: 0,
-        dspSafetyLimiterEnabled: true,
-        bands: [],
-        presetId: 'flat',
-        presetName: 'Flat',
-        clippingRisk: false,
-      };
       // Rebuild flat bands using EqStateStore's internal default
       const fresh = EqStateStore.loadEqState(); // reloads default if corrupt
       EqStateStore.saveEqState({ ...fresh, enabled: false, preampDb: 0 });
       const state = EqStateStore.loadEqState();
-      forwardNative('reset', () => jrpc.reset());
+      await forwardNative('reset', () => jrpc.reset());
       return state;
     },
 
@@ -912,7 +948,7 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
 
     setChannelBalanceState: async (patch: Partial<ChannelBalanceState>): Promise<ChannelBalanceState> => {
       const merged = mutateChannelBalance((current) => ({ ...current, ...patch }));
-      forwardNative('channelBalance', () => jrpc.setChannelBalanceState(patch));
+      await forwardNative('channelBalance', () => jrpc.setChannelBalanceState(patch));
       return merged;
     },
 
@@ -930,7 +966,7 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
         constantPower: true, clippingRisk: false,
       };
       EqStateStore.saveChannelBalanceState(defaultState);
-      forwardNative('resetChannelBalance', () => jrpc.resetChannelBalance());
+      await forwardNative('resetChannelBalance', () => jrpc.resetChannelBalance());
       return defaultState;
     },
 
@@ -939,19 +975,19 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
     importRoomCorrectionIr: async (sourcePath: string): Promise<RoomCorrectionState> => {
       EqStateStore.importRoomCorrectionIr(sourcePath);
       const state = EqStateStore.loadRoomCorrectionState();
-      forwardNative('roomCorrection:importIr', () => jrpc.importRoomCorrectionIr(sourcePath));
+      await forwardNative('roomCorrection:importIr', () => jrpc.importRoomCorrectionIr(sourcePath));
       return state;
     },
 
     setRoomCorrectionEnabled: async (enabled: boolean): Promise<RoomCorrectionState> => {
       const state = mutateRoomCorrection((s) => ({ ...s, enabled }));
-      forwardNative('roomCorrection', () => jrpc.setRoomCorrectionEnabled(enabled));
+      await forwardNative('roomCorrection', () => jrpc.setRoomCorrectionEnabled(enabled));
       return state;
     },
 
     setRoomCorrectionTrim: async (trimDb: number): Promise<RoomCorrectionState> => {
       const state = mutateRoomCorrection((s) => ({ ...s, trimDb }));
-      forwardNative('roomCorrection:trim', () => jrpc.setRoomCorrectionTrim(trimDb));
+      await forwardNative('roomCorrection:trim', () => jrpc.setRoomCorrectionTrim(trimDb));
       return state;
     },
 
@@ -959,7 +995,7 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
       const current = EqStateStore.loadRoomCorrectionState();
       const cleared: RoomCorrectionState = { ...current, enabled: false, status: 'empty', irId: null, irName: null };
       EqStateStore.saveRoomCorrectionState(cleared);
-      forwardNative('roomCorrection:clear', () => jrpc.clearRoomCorrection());
+      await forwardNative('roomCorrection:clear', () => jrpc.clearRoomCorrection());
       return EqStateStore.loadRoomCorrectionState();
     },
 
@@ -978,7 +1014,7 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
       const profile = profiles.find((p: EqProfile) => p.id === profileId);
       if (profile) {
         EqStateStore.saveEqState(profile.state);
-        forwardNative('applyProfile', () => jrpc.setState(profile.state));
+        await forwardNative('applyProfile', () => jrpc.setState(profile.state));
         return profile.state;
       }
       return EqStateStore.loadEqState();
@@ -994,7 +1030,7 @@ function createDaemonDspBridge(jrpc: DaemonDspNativeBridge): DaemonDspBridge {
   };
 }
 
-function getDspBridge(): any {
+function getDspBridge(): DaemonDspBridge {
   try {
     const jrpc = activeJsonRpcBridge;
     if (jrpc) return createDaemonDspBridge(jrpc);
@@ -1032,6 +1068,7 @@ export const registerAudioIpc = (): void => {
   ipcMain.handle(IpcChannels.AudioSetOutput, async (_event, settings: unknown): Promise<AudioStatus> => enqueueAudioStatusCommand(async () => {
     try {
       const normalized = normalizeOutputSettings(settings);
+      await requireEchoProForAudioDspPatch(normalized);
       return await getAudioSession().setOutput(normalized);
     } catch (error) {
       reportAudioIpcError(error, 'set-output-ipc', { settings });
@@ -1069,87 +1106,154 @@ export const registerAudioIpc = (): void => {
       throw error;
     }
   }));
-  ipcMain.handle(IpcChannels.EqGetState, (): EqState => getDspBridge().getState());
+  ipcMain.handle(IpcChannels.EqGetState, (): EqState => withDspPro(() => getDspBridge().getState()));
   ipcMain.handle(IpcChannels.EqSetEnabled, async (_event, enabled: unknown): Promise<EqState> =>
-    getDspBridge().setEnabled(Boolean(enabled)),
+    withDspPro(() => getDspBridge().setEnabled(Boolean(enabled))),
   );
   ipcMain.handle(IpcChannels.EqSetBandGain, async (_event, request: EqSetBandGainRequest): Promise<EqState> =>
-    getDspBridge().setBandGain(request),
+    withDspPro(() => getDspBridge().setBandGain(request)),
   );
   ipcMain.handle(IpcChannels.EqSetBandFrequency, async (_event, request: EqSetBandFrequencyRequest): Promise<EqState> =>
-    getDspBridge().setBandFrequency(request),
+    withDspPro(() => getDspBridge().setBandFrequency(request)),
   );
   ipcMain.handle(IpcChannels.EqSetBandQ, async (_event, request: EqSetBandQRequest): Promise<EqState> =>
-    getDspBridge().setBandQ(request),
+    withDspPro(() => getDspBridge().setBandQ(request)),
   );
   ipcMain.handle(IpcChannels.EqSetBandFilterType, async (_event, request: EqSetBandFilterTypeRequest): Promise<EqState> =>
-    getDspBridge().setBandFilterType(request),
+    withDspPro(() => getDspBridge().setBandFilterType(request)),
   );
   ipcMain.handle(IpcChannels.EqSetBandEnabled, async (_event, request: EqSetBandEnabledRequest): Promise<EqState> =>
-    getDspBridge().setBandEnabled(request),
+    withDspPro(() => getDspBridge().setBandEnabled(request)),
   );
   ipcMain.handle(IpcChannels.EqSetPreamp, async (_event, preampDb: unknown): Promise<EqState> =>
-    getDspBridge().setPreamp(Number(preampDb)),
+    withDspPro(() => getDspBridge().setPreamp(Number(preampDb))),
   );
   ipcMain.handle(IpcChannels.EqSetDspHeadroom, async (_event, headroomDb: unknown): Promise<EqState> =>
-    getDspBridge().setDspHeadroom(Number(headroomDb)),
+    withDspPro(() => getDspBridge().setDspHeadroom(Number(headroomDb))),
   );
   ipcMain.handle(IpcChannels.EqSetDspSafetyLimiterEnabled, async (_event, enabled: unknown): Promise<EqState> =>
-    getDspBridge().setDspSafetyLimiterEnabled(enabled !== false),
+    withDspPro(() => getDspBridge().setDspSafetyLimiterEnabled(enabled !== false)),
+  );
+  ipcMain.handle(IpcChannels.EqGetDspRackState, (): DspRackState =>
+    withDspPro(() => getDspBridge().getDspRackState()),
+  );
+  ipcMain.handle(IpcChannels.EqSetDspRackState, async (_event, state: Pick<DspRackState, 'order'>): Promise<DspRackState> =>
+    withDspPro(() => getDspBridge().setDspRackState(state)),
+  );
+  ipcMain.handle(IpcChannels.EqGetCompressorState, async (): Promise<CompressorState> =>
+    withDspPro(() => getDspBridge().getCompressorState()),
+  );
+  ipcMain.handle(IpcChannels.EqSetCompressorState, async (_event, state: Partial<CompressorState>): Promise<CompressorState> =>
+    withDspPro(() => getDspBridge().setCompressorState(state)),
+  );
+  ipcMain.handle(IpcChannels.EqGetCrossfeedState, async (): Promise<CrossfeedState> =>
+    withDspPro(() => getDspBridge().getCrossfeedState()),
+  );
+  ipcMain.handle(IpcChannels.EqSetCrossfeedState, async (_event, state: Partial<CrossfeedState>): Promise<CrossfeedState> =>
+    withDspPro(() => getDspBridge().setCrossfeedState(state)),
+  );
+  ipcMain.handle(IpcChannels.EqGetStereoFieldState, async (): Promise<StereoFieldState> =>
+    withDspPro(() => getDspBridge().getStereoFieldState()),
+  );
+  ipcMain.handle(IpcChannels.EqSetStereoFieldState, async (_event, state: Partial<StereoFieldState>): Promise<StereoFieldState> =>
+    withDspPro(() => getDspBridge().setStereoFieldState(state)),
+  );
+  ipcMain.handle(IpcChannels.EqGetChannelMatrixState, async (): Promise<ChannelMatrixState> =>
+    withDspPro(() => getDspBridge().getChannelMatrixState()),
+  );
+  ipcMain.handle(IpcChannels.EqSetChannelMatrixState, async (_event, state: Partial<ChannelMatrixState>): Promise<ChannelMatrixState> =>
+    withDspPro(() => getDspBridge().setChannelMatrixState(state)),
   );
   ipcMain.handle(IpcChannels.EqSetPreset, async (_event, presetId: unknown): Promise<EqState> =>
-    getDspBridge().setPreset(String(presetId)),
+    withDspPro(() => getDspBridge().setPreset(String(presetId))),
   );
-  ipcMain.handle(IpcChannels.EqReset, async (): Promise<EqState> => getDspBridge().reset());
-  ipcMain.handle(IpcChannels.EqListPresets, () => getDspBridge().listPresets());
-  ipcMain.handle(IpcChannels.EqSavePreset, (_event, request: EqSavePresetRequest) => getDspBridge().savePreset(request));
-  ipcMain.handle(IpcChannels.EqExportPreset, (_event, request: EqSavePresetRequest) => exportEqPreset(request));
-  ipcMain.handle(IpcChannels.EqExportApoPreset, (_event, request: EqSavePresetRequest) => exportEqualizerApoPreset(request));
-  ipcMain.handle(IpcChannels.EqExportApoGraphicEqPreset, (_event, request: EqSavePresetRequest) => exportEqualizerApoGraphicEqPreset(request));
-  ipcMain.handle(IpcChannels.EqPreviewImportPreset, () => previewImportEqPreset());
-  ipcMain.handle(IpcChannels.EqImportPreset, () => importEqPreset());
-  ipcMain.handle(IpcChannels.EqDeletePreset, (_event, presetId: unknown) => getDspBridge().deletePreset(String(presetId)));
+  ipcMain.handle(IpcChannels.EqReset, async (): Promise<EqState> => withDspPro(() => getDspBridge().reset()));
+  ipcMain.handle(IpcChannels.EqListPresets, () => withDspPro(() => getDspBridge().listPresets()));
+  ipcMain.handle(IpcChannels.EqSavePreset, (_event, request: EqSavePresetRequest) => withDspPro(() => getDspBridge().savePreset(request)));
+  ipcMain.handle(IpcChannels.EqExportPreset, (_event, request: EqSavePresetRequest) => withDspPro(() => exportEqPreset(request)));
+  ipcMain.handle(IpcChannels.EqExportApoPreset, (_event, request: EqSavePresetRequest) => withDspPro(() => exportEqualizerApoPreset(request)));
+  ipcMain.handle(IpcChannels.EqExportApoGraphicEqPreset, (_event, request: EqSavePresetRequest) => withDspPro(() => exportEqualizerApoGraphicEqPreset(request)));
+  ipcMain.handle(IpcChannels.EqPreviewImportPreset, () => withDspPro(() => previewImportEqPreset()));
+  ipcMain.handle(IpcChannels.EqImportPreset, () => withDspPro(() => importEqPreset()));
+  ipcMain.handle(IpcChannels.EqDeletePreset, (_event, presetId: unknown) => withDspPro(() => getDspBridge().deletePreset(String(presetId))));
   ipcMain.handle(IpcChannels.EqBrowseHeadphoneCorrections, (_event, request: OpraHeadphoneCorrectionBrowseRequest): Promise<OpraHeadphoneCorrectionBrowseResult> =>
-    getOpraService().browse(request),
+    withDspPro(() => getOpraService().browse(request)),
   );
   ipcMain.handle(IpcChannels.EqSearchHeadphoneCorrections, (_event, request: OpraHeadphoneCorrectionSearchRequest): Promise<OpraHeadphoneCorrectionSearchResult> =>
-    getOpraService().search(request),
+    withDspPro(() => getOpraService().search(request)),
   );
-  ipcMain.handle(IpcChannels.EqApplyHeadphoneCorrection, (_event, request: OpraHeadphoneCorrectionApplyRequest): Promise<OpraHeadphoneCorrectionApplyResult> =>
-    getOpraService().apply(request),
-  );
-  ipcMain.handle(IpcChannels.EqListProfiles, () => getDspBridge().listProfiles());
-  ipcMain.handle(IpcChannels.EqSaveProfile, (_event, request: EqSaveProfileRequest) => getDspBridge().saveProfile(request));
-  ipcMain.handle(IpcChannels.EqApplyProfile, (_event, profileId: unknown) => getDspBridge().applyProfile(String(profileId)));
-  ipcMain.handle(IpcChannels.EqDeleteProfile, (_event, profileId: unknown) => getDspBridge().deleteProfile(String(profileId)));
-  ipcMain.handle(IpcChannels.EqBindProfileToOutput, (_event, request: EqBindProfileRequest) => getDspBridge().bindProfileToOutput(request));
-  ipcMain.handle(IpcChannels.EqGetProfileBinding, (_event, target: EqProfileBindingTarget) => getDspBridge().getProfileBinding(target));
-  ipcMain.handle(IpcChannels.ChannelBalanceGetState, (): ChannelBalanceState => getDspBridge().getChannelBalanceState());
+  ipcMain.handle(IpcChannels.EqApplyHeadphoneCorrection, async (_event, request: OpraHeadphoneCorrectionApplyRequest): Promise<OpraHeadphoneCorrectionApplyResult> => withDspPro(async () => {
+    const result = await getOpraService().apply(request);
+    const bridge = activeJsonRpcBridge;
+    if (bridge && !bridge.isClosed) {
+      await syncPersistedDspStateToNative(bridge);
+    }
+    return result;
+  }));
+  ipcMain.handle(IpcChannels.EqListProfiles, () => withDspPro(() => getDspBridge().listProfiles()));
+  ipcMain.handle(IpcChannels.EqSaveProfile, (_event, request: EqSaveProfileRequest) => withDspPro(() => getDspBridge().saveProfile(request)));
+  ipcMain.handle(IpcChannels.EqApplyProfile, (_event, profileId: unknown) => withDspPro(() => getDspBridge().applyProfile(String(profileId))));
+  ipcMain.handle(IpcChannels.EqDeleteProfile, (_event, profileId: unknown) => withDspPro(() => getDspBridge().deleteProfile(String(profileId))));
+  ipcMain.handle(IpcChannels.EqBindProfileToOutput, (_event, request: EqBindProfileRequest) => withDspPro(() => getDspBridge().bindProfileToOutput(request)));
+  ipcMain.handle(IpcChannels.EqGetProfileBinding, (_event, target: EqProfileBindingTarget) => withDspPro(() => getDspBridge().getProfileBinding(target)));
+  ipcMain.handle(IpcChannels.ChannelBalanceGetState, (): ChannelBalanceState => withDspPro(() => getDspBridge().getChannelBalanceState()));
   ipcMain.handle(IpcChannels.ChannelBalanceSetState, async (_event, patch: Partial<ChannelBalanceState>): Promise<ChannelBalanceState> =>
-    getDspBridge().setChannelBalanceState(patch),
+    withDspPro(() => getDspBridge().setChannelBalanceState(patch)),
   );
-  ipcMain.handle(IpcChannels.ChannelBalanceReset, async (): Promise<ChannelBalanceState> => getDspBridge().resetChannelBalance());
-  ipcMain.handle(IpcChannels.RoomCorrectionGetState, (): RoomCorrectionState => getDspBridge().getRoomCorrectionState());
+  ipcMain.handle(IpcChannels.ChannelBalanceReset, async (): Promise<ChannelBalanceState> => withDspPro(() => getDspBridge().resetChannelBalance()));
+  ipcMain.handle(IpcChannels.RoomCorrectionGetState, (): RoomCorrectionState => withDspPro(() => getDspBridge().getRoomCorrectionState()));
   ipcMain.handle(IpcChannels.RoomCorrectionImportIr, (event): Promise<RoomCorrectionState | null> =>
-    importRoomCorrectionIr(BrowserWindow.fromWebContents(event.sender)),
+    withDspPro(() => importRoomCorrectionIr(BrowserWindow.fromWebContents(event.sender))),
   );
   ipcMain.handle(IpcChannels.RoomCorrectionSetEnabled, async (_event, enabled: unknown): Promise<RoomCorrectionState> =>
-    getDspBridge().setRoomCorrectionEnabled(Boolean(enabled)),
+    withDspPro(() => getDspBridge().setRoomCorrectionEnabled(Boolean(enabled))),
   );
   ipcMain.handle(IpcChannels.RoomCorrectionSetTrim, async (_event, trimDb: unknown): Promise<RoomCorrectionState> =>
-    getDspBridge().setRoomCorrectionTrim(Number(trimDb)),
+    withDspPro(() => getDspBridge().setRoomCorrectionTrim(Number(trimDb))),
   );
-  ipcMain.handle(IpcChannels.RoomCorrectionClear, async (): Promise<RoomCorrectionState> => getDspBridge().clearRoomCorrection());
+  ipcMain.handle(IpcChannels.RoomCorrectionClear, async (): Promise<RoomCorrectionState> => withDspPro(() => getDspBridge().clearRoomCorrection()));
   ipcMain.handle(IpcChannels.PlaybackSetRepeatMode, (_event, mode: unknown): void => {
     if (mode === 'off' || mode === 'one' || mode === 'all') {
       getAudioSession().setRepeatMode(mode);
     }
   });
-  ipcMain.handle(IpcChannels.PlaybackSyncQueueToBackend, async (_event, items: unknown, repeatMode: unknown): Promise<void> => {
+  ipcMain.handle(IpcChannels.PlaybackSyncQueueToBackend, async (_event, items: unknown, repeatMode: unknown, currentItemId: unknown): Promise<void> => {
     if (Array.isArray(items) && (repeatMode === 'off' || repeatMode === 'one' || repeatMode === 'all')) {
+      const normalizedItems = items.flatMap((item): AudioBackendQueueItem[] => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+        const candidate = item as Record<string, unknown>;
+        if (
+          typeof candidate.itemId !== 'string' || !candidate.itemId ||
+          typeof candidate.trackId !== 'string' || !candidate.trackId ||
+          typeof candidate.filePath !== 'string' || !candidate.filePath
+        ) {
+          return [];
+        }
+        return [{
+          itemId: candidate.itemId,
+          trackId: candidate.trackId,
+          filePath: candidate.filePath,
+          sampleRate: typeof candidate.sampleRate === 'number' && Number.isFinite(candidate.sampleRate)
+            ? candidate.sampleRate
+            : undefined,
+          startSeconds: typeof candidate.startSeconds === 'number' && Number.isFinite(candidate.startSeconds)
+            ? Math.max(0, candidate.startSeconds)
+            : undefined,
+          metadata: candidate.metadata && typeof candidate.metadata === 'object' && !Array.isArray(candidate.metadata)
+            ? Object.fromEntries(
+              Object.entries(candidate.metadata as Record<string, unknown>)
+                .filter(([key, value]) =>
+                  ['title', 'artist', 'album', 'albumArtist', 'coverUrl'].includes(key) &&
+                  (typeof value === 'string' || value === null),
+                ),
+            )
+            : undefined,
+        }];
+      });
       await getAudioSession().syncQueueToBackend(
-        items as Array<{ filePath: string; sampleRate?: number; startSeconds?: number }>,
+        normalizedItems,
         repeatMode,
+        typeof currentItemId === 'string' && currentItemId ? currentItemId : null,
       );
     }
   });

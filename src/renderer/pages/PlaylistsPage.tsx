@@ -7,6 +7,7 @@ import type { AppSettings } from '../../shared/types/appSettings';
 import type { DownloadJob, DownloadJobStatus } from '../../shared/types/downloads';
 import type { LibraryPage, LibraryPlaylist, LibraryPlaylistItem, LibraryTrack, PlaylistExportFormat, PlaylistSortMode } from '../../shared/types/library';
 import type { StreamingAccountPlaylist, StreamingAudioQuality, StreamingFavoriteCollection, StreamingFavoriteProviderName, StreamingFavoritesSnapshot, StreamingFavoriteTrack, StreamingProviderName } from '../../shared/types/streaming';
+import { streamingProviderNames, streamingStableKey } from '../../shared/types/streaming';
 import { TrackList } from '../components/library/TrackList';
 import { TrackContextMenu, type TrackMenuAction } from '../components/library/TrackContextMenu';
 import { StreamingConsentNoticeModal } from '../components/streaming/StreamingConsentNoticeModal';
@@ -18,6 +19,10 @@ import { panelTransition, panelVariants, springFast } from '../ui/motion/presets
 import { resolvePlaylistForTrackAdd } from '../utils/appPrompt';
 import { getDownloadsBridge, getStreamingBridge } from '../utils/echoBridge';
 import { getMouseSideButtonDirection, shouldIgnoreMouseSideButtonTarget } from '../utils/mouseSideButtons';
+import { openAlbumDetailForTrack } from '../utils/albumNavigation';
+import { openArtistDetailForTrack } from '../utils/artistNavigation';
+import { requestStreamingAlbumDetailNavigation, requestStreamingArtistDetailNavigation } from '../utils/streamingDetailNavigation';
+import '../styles/playlists-cinematic.css';
 
 const pageSize = 100;
 const playlistSortOptions: Array<{ value: PlaylistSortMode; label: string }> = [
@@ -427,13 +432,8 @@ const streamingTrackWebUrl = (track: LibraryTrack): string | null => {
 };
 
 const streamingProviderFromTrack = (track: LibraryTrack): StreamingProviderName | null =>
-  track.provider === 'netease' ||
-  track.provider === 'qqmusic' ||
-  track.provider === 'kugou' ||
-  track.provider === 'mock' ||
-  track.provider === 'bilibili' ||
-  track.provider === 'spotify'
-    ? track.provider
+  streamingProviderNames.includes(track.provider as StreamingProviderName)
+    ? track.provider as StreamingProviderName
     : null;
 
 const defaultFavoriteSelectionId = 'provider:youtube';
@@ -700,7 +700,10 @@ export const PlaylistsPage = (): JSX.Element => {
   const selectedFavoriteProvider = selectedFavoriteCollection?.provider ?? favoriteProviderFromSelectionId(selectedFavoriteListId);
   const selectedFavoriteProviderLabel = streamingFavoriteProviders.find((item) => item.value === selectedFavoriteProvider)?.label ?? selectedFavoriteProvider;
   const selectedFavoriteListName = selectedFavoriteCollection?.name ?? `${selectedFavoriteProviderLabel} 收藏`;
-  const favoriteItems = selectedFavoriteCollection?.tracks ?? streamingFavorites.providers[selectedFavoriteProvider] ?? [];
+  const favoriteItems = useMemo(
+    () => selectedFavoriteCollection?.tracks ?? streamingFavorites.providers[selectedFavoriteProvider] ?? [],
+    [selectedFavoriteCollection?.tracks, selectedFavoriteProvider, streamingFavorites.providers],
+  );
   const favoriteDisplayTracks = useMemo(
     () => favoriteItems.map((item) => favoriteToTrack(item, streamingQuality)),
     [favoriteItems, streamingQuality],
@@ -1629,33 +1632,33 @@ export const PlaylistsPage = (): JSX.Element => {
 
   const handleAddAllToQueue = (): void => {
     appendTracksToQueue(playableTracks, queueSource);
-    setStatusMessage(`已添加 ${playableTracks.length} 首可用歌曲到队列`);
+    setStatusMessage(t('playlists.message.addedToQueue', { count: playableTracks.length }));
   };
 
   const createDownloadJobForTrack = useCallback(
     async (track: LibraryTrack, options: CreateTrackDownloadOptions = {}): Promise<DownloadJob> => {
       const provider = streamingProviderFromTrack(track);
       if (track.mediaType !== 'streaming' || !provider || !track.providerTrackId) {
-        throw new Error('只有网络歌单中的流媒体歌曲可以直接下载。');
+        throw new Error(t('playlists.error.streamingOnlyDownload'));
       }
 
       if (provider === 'spotify') {
-        throw new Error('Spotify 由官方播放器播放，下载功能不适用于 Spotify。');
+        throw new Error(t('playlists.error.spotifyNoDownload'));
       }
 
       const webpageUrl = streamingTrackWebUrl(track);
       if (!webpageUrl) {
-        throw new Error('这个平台暂不支持从网络歌单直接下载。');
+        throw new Error(t('playlists.error.providerNoDownload'));
       }
 
       const downloads = getDownloadsBridge();
       if (!downloads?.createUrlJob) {
-        throw new Error('桌面下载服务不可用。');
+        throw new Error(t('playlists.error.downloadService'));
       }
 
       const streaming = getStreamingBridge();
       if (!streaming?.resolvePlayback) {
-        throw new Error('桌面流媒体服务不可用，无法解析下载地址。');
+        throw new Error(t('playlists.error.streamingService'));
       }
 
       const [source, detailTrack] = await Promise.all([
@@ -1687,7 +1690,7 @@ export const PlaylistsPage = (): JSX.Element => {
         downloadAuthorizationToken: source.downloadAuthorizationToken,
       });
     },
-    [streamingQuality],
+    [streamingQuality, t],
   );
 
   const handleDownloadTrack = useCallback(
@@ -1699,22 +1702,22 @@ export const PlaylistsPage = (): JSX.Element => {
         const job = await createDownloadJobForTrack(track);
         setDownloadJobs((current) => (current.some((item) => item.id === job.id) ? current : [job, ...current]));
         setDownloadJobIdsByTrackId((current) => ({ ...current, [track.id]: job.id }));
-        setStatusMessage(`已加入下载队列：${track.title}`);
+        setStatusMessage(t('playlists.message.downloadQueued', { title: track.title }));
       } catch (downloadError) {
-        setError(downloadError instanceof Error ? downloadError.message : '添加下载任务失败');
+        setError(downloadError instanceof Error ? downloadError.message : t('playlists.error.downloadJobFailed'));
         setStatusMessage(null);
       } finally {
         setDownloadingTrackId((current) => (current === track.id ? null : current));
       }
     },
-    [createDownloadJobForTrack],
+    [createDownloadJobForTrack, t],
   );
 
   const loadTracksForPlaylistDownload = useCallback(
     async (playlistId: string): Promise<LibraryTrack[]> => {
       const library = window.echo?.library;
       if (!library?.getPlaylistItems) {
-        throw new Error('桌面歌单服务不可用。');
+        throw new Error(t('playlists.error.playlistService'));
       }
 
       const tracks: LibraryTrack[] = [];
@@ -1730,7 +1733,7 @@ export const PlaylistsPage = (): JSX.Element => {
 
       return tracks;
     },
-    [streamingQuality],
+    [streamingQuality, t],
   );
 
   const handleDownloadPlaylist = useCallback(async (playlistOverride?: LibraryPlaylist): Promise<void> => {
@@ -1740,14 +1743,14 @@ export const PlaylistsPage = (): JSX.Element => {
     }
 
     if (!canDownloadPlaylist(playlist, downloadsFeatureUnlocked)) {
-      setError('只有可下载的网络歌单支持整歌单下载。');
+      setError(t('playlists.error.playlistDownloadOnlyOnline'));
       setStatusMessage(null);
       return;
     }
 
     const downloads = getDownloadsBridge();
     if (!downloads?.createUrlJob) {
-      setError('桌面下载服务不可用。');
+      setError(t('playlists.error.downloadService'));
       setStatusMessage(null);
       return;
     }
@@ -1755,7 +1758,7 @@ export const PlaylistsPage = (): JSX.Element => {
     try {
       const settings = downloads.getSettings ? await downloads.getSettings() : null;
       if (!settings?.outputDirectory) {
-        setError('请先在下载页选择下载文件夹。');
+        setError(t('playlists.error.chooseDownloadFolder'));
         setStatusMessage(null);
         return;
       }
@@ -1764,7 +1767,7 @@ export const PlaylistsPage = (): JSX.Element => {
       playlistDownloadRunIdRef.current = runId;
       setSelectedPlaylistId(playlist.id);
       setError(null);
-      setStatusMessage(`正在按歌单顺序加入下载队列：${playlist.name}`);
+      setStatusMessage(t('playlists.message.enqueueingPlaylist', { name: playlist.name }));
       setPlaylistDownloadSession({
         runId,
         playlistId: playlist.id,
@@ -1784,7 +1787,7 @@ export const PlaylistsPage = (): JSX.Element => {
       if (tracks.length === 0) {
         setPlaylistDownloadSession((current) => current && current.runId === runId ? { ...current, total: 0, active: false } : current);
         setStatusMessage(null);
-        setError('这个歌单里没有可下载的网络歌曲。');
+        setError(t('playlists.error.noDownloadableTracks'));
         return;
       }
 
@@ -1832,12 +1835,16 @@ export const PlaylistsPage = (): JSX.Element => {
       setPlaylistDownloadSession((current) => current && current.runId === runId ? { ...current, active: false } : current);
       setStatusMessage(
         failedToQueue > 0
-          ? `已按歌单顺序加入下载队列：${enqueued} 首，${failedToQueue} 首未能解析。`
-          : `已按歌单顺序加入下载队列：${enqueued} 首`,
+          ? t('playlists.message.playlistQueuedPartial', { enqueued, failed: failedToQueue })
+          : t('playlists.message.playlistQueued', { count: enqueued }),
       );
     } catch (downloadPlaylistError) {
       setPlaylistDownloadSession((current) => current ? { ...current, active: false } : current);
-      setError(downloadPlaylistError instanceof Error ? downloadPlaylistError.message : '添加歌单下载任务失败');
+      setError(
+        downloadPlaylistError instanceof Error
+          ? downloadPlaylistError.message
+          : t('playlists.error.playlistDownloadJobFailed'),
+      );
       setStatusMessage(null);
     } finally {
       setDownloadingTrackId(null);
@@ -1847,6 +1854,7 @@ export const PlaylistsPage = (): JSX.Element => {
     downloadsFeatureUnlocked,
     loadTracksForPlaylistDownload,
     selectedPlaylist,
+    t,
   ]);
 
   const importStreamingPlaylistUrl = async (url: string): Promise<void> => {
@@ -2608,6 +2616,82 @@ export const PlaylistsPage = (): JSX.Element => {
     }
   };
 
+  const loadStreamingTrackForDetail = useCallback(async (track: LibraryTrack) => {
+    const provider = streamingProviderFromTrack(track);
+    const providerTrackId = track.providerTrackId?.trim();
+    const streaming = getStreamingBridge();
+    if (track.mediaType !== 'streaming' || !provider || !providerTrackId || !streaming?.getTrack) {
+      return null;
+    }
+
+    return streaming.getTrack({ provider, providerTrackId });
+  }, []);
+
+  const handleOpenTrackArtist = useCallback(async (track: LibraryTrack): Promise<void> => {
+    setError(null);
+    try {
+      if (track.mediaType !== 'streaming') {
+        const artist = await openArtistDetailForTrack(track, { returnTo: 'playlists' });
+        if (!artist) {
+          setError(`未找到艺人详情：${track.artist}`);
+        }
+        return;
+      }
+
+      const detailTrack = await loadStreamingTrackForDetail(track);
+      const artistRef = detailTrack?.artists.find((artist) => artist.name.trim() === track.artist.trim()) ?? detailTrack?.artists[0] ?? null;
+      if (!detailTrack || !artistRef) {
+        setError(`该流媒体曲目没有可用的艺人详情：${track.artist}`);
+        return;
+      }
+
+      requestStreamingArtistDetailNavigation({
+        id: artistRef.id || streamingStableKey(detailTrack.provider, `artist:${artistRef.providerArtistId}`),
+        provider: detailTrack.provider,
+        providerArtistId: artistRef.providerArtistId,
+        name: artistRef.name,
+        avatarUrl: null,
+        coverUrl: null,
+      }, { returnTo: 'playlists' });
+    } catch (detailError) {
+      setError(detailError instanceof Error ? detailError.message : String(detailError));
+    }
+  }, [loadStreamingTrackForDetail]);
+
+  const handleOpenTrackAlbum = useCallback(async (track: LibraryTrack): Promise<void> => {
+    setError(null);
+    try {
+      if (track.mediaType !== 'streaming') {
+        const album = await openAlbumDetailForTrack(track, { returnTo: 'playlists' });
+        if (!album) {
+          setError(`未找到专辑详情：${track.album}`);
+        }
+        return;
+      }
+
+      const detailTrack = await loadStreamingTrackForDetail(track);
+      if (!detailTrack?.albumId) {
+        setError(`该流媒体曲目没有可用的专辑详情：${track.album}`);
+        return;
+      }
+
+      requestStreamingAlbumDetailNavigation({
+        id: streamingStableKey(detailTrack.provider, `album:${detailTrack.albumId}`),
+        provider: detailTrack.provider,
+        providerAlbumId: detailTrack.albumId,
+        title: detailTrack.album,
+        artist: detailTrack.albumArtist ?? detailTrack.artist,
+        artists: detailTrack.artists,
+        coverUrl: detailTrack.coverUrl,
+        coverThumb: detailTrack.coverThumb,
+        releaseDate: null,
+        trackCount: null,
+      }, { returnTo: 'playlists' });
+    } catch (detailError) {
+      setError(detailError instanceof Error ? detailError.message : String(detailError));
+    }
+  }, [loadStreamingTrackForDetail]);
+
   const handleToggleLiked = useCallback(async (track: LibraryTrack): Promise<void> => {
     if (playlistPanelView === 'streamingFavorites') {
       const favorite = favoriteItems.find((item) => item.stableKey === track.stableKey || item.providerTrackId === track.providerTrackId);
@@ -3171,7 +3255,12 @@ export const PlaylistsPage = (): JSX.Element => {
               transition={panelTransition}
               variants={panelVariants}
             >
-            <header className="playlist-detail-header">
+            <header className="playlist-detail-header" data-has-art={favoriteDisplayTracks[0]?.coverThumb ? 'true' : undefined}>
+              {favoriteDisplayTracks[0]?.coverThumb ? (
+                <div className="playlist-detail-hero-art" aria-hidden="true">
+                  <img alt="" draggable={false} src={favoriteDisplayTracks[0].coverThumb} />
+                </div>
+              ) : null}
               <div className="playlist-cover" data-empty={favoriteDisplayTracks.length === 0}>
                 {favoriteDisplayTracks[0]?.coverThumb ? <img alt="" src={favoriteDisplayTracks[0].coverThumb} /> : <Heart size={34} />}
               </div>
@@ -3277,7 +3366,12 @@ export const PlaylistsPage = (): JSX.Element => {
               transition={panelTransition}
               variants={panelVariants}
             >
-            <header className="playlist-detail-header">
+            <header className="playlist-detail-header" data-has-art={selectedPlaylist.coverThumb ? 'true' : undefined}>
+              {selectedPlaylist.coverThumb ? (
+                <div className="playlist-detail-hero-art" aria-hidden="true">
+                  <img alt="" draggable={false} src={selectedPlaylist.coverThumb} />
+                </div>
+              ) : null}
               <div className="playlist-cover" data-empty={!selectedPlaylist.coverThumb}>
                 {selectedPlaylist.coverThumb ? <img alt="" src={selectedPlaylist.coverThumb} /> : <Music2 size={34} />}
                 <button
@@ -3530,6 +3624,8 @@ export const PlaylistsPage = (): JSX.Element => {
               onTrackDrop={handlePlaylistItemDrop}
               onTrackDragEnd={handlePlaylistItemDragEnd}
               onOpenTrackMenu={handleOpenTrackMenu}
+              onOpenArtist={(track) => void handleOpenTrackArtist(track)}
+              onOpenAlbum={(track) => void handleOpenTrackAlbum(track)}
               onPlay={handleTrackPlay}
             />
             </motion.div>

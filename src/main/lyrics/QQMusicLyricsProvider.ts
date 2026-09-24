@@ -5,6 +5,7 @@ import { fetchWithNetworkProxy } from '../network/networkFetch';
 import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, LyricsProviderSearchRequest } from './LyricsProvider';
 import { isInstrumentalLyricsText } from './instrumentalPlaceholders';
 import { parseSyncedLyrics } from './lyricsParser';
+import { providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
 
 const qqHeaders = {
   Referer: 'https://y.qq.com/',
@@ -141,7 +142,10 @@ export class QQMusicLyricsProvider implements LyricsProvider {
       }
 
       const songs = await this.searchSongs(request);
-      const results = await Promise.all(songs.slice(0, 5).map((song) => this.fetchLyrics(song, request)));
+      const rankedSongs = rankLyricsProviderItems(request, songs);
+      const results = await Promise.all(
+        rankedSongs.slice(0, providerLyricsFetchLimit(request)).map((song) => this.fetchLyrics(song, request)),
+      );
       return results.filter((result): result is LyricsProviderResult => Boolean(result));
     } catch {
       return [];
@@ -221,6 +225,9 @@ export class QQMusicLyricsProvider implements LyricsProvider {
       }
 
       if (nextSongs.length > 0) {
+        if (!request.collectAllCandidates) {
+          break;
+        }
         continue;
       }
 
@@ -254,6 +261,10 @@ export class QQMusicLyricsProvider implements LyricsProvider {
 
         seen.add(song.mid);
         songs.push(song);
+      }
+
+      if (!request.collectAllCandidates && songs.length > 0) {
+        break;
       }
     }
 

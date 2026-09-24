@@ -1,10 +1,23 @@
-export type AudioOutputMode = 'shared' | 'exclusive' | 'system';
+import type {
+  AutomixRuntimePhase,
+  AutomixRuntimeState,
+  AutomixTransitionModeV2,
+} from './automix';
+
+export type AudioOutputMode = 'shared' | 'exclusive' | 'asio' | 'system';
 export type AudioSharedBackend = 'auto' | 'windows' | 'directsound' | 'alsa';
 
 export type AudioPlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'stopped' | 'ended' | 'error';
 
 export type PlaybackSpeedMode = 'nightcore' | 'daycore' | 'speed';
 export type AudioLatencyProfile = 'stable' | 'balanced' | 'lowLatency';
+export type AutomaticAudioOutputStage =
+  | 'disabled'
+  | 'default-shared'
+  | 'safe-shared'
+  | 'directsound'
+  | 'system-required'
+  | 'failed';
 export type NativeDirectLocalPlaybackFallbackReason =
   | 'disabled'
   | 'unsupported_format'
@@ -19,14 +32,18 @@ export type NativeDirectLocalPlaybackFallbackReason =
   | 'echo_src_active'
   | 'dsp_active'
   | 'replaygain_active'
+  | 'visual_telemetry_active'
   | 'chained_playback'
+  | 'unsupported_output_mode'
+  | 'custom_device_not_supported'
+  | 'daemon_unavailable'
   | 'reader_failed';
 export type AudioBackendContractVersion = 2;
 export type ChannelBalanceMonoMode = 'off' | 'sum' | 'left' | 'right';
 export type ChannelBalanceBandId = 'low' | 'mid' | 'high';
 export type SharedStabilityTier = 'standard' | 'recovery' | 'emergency';
 export type AudioResamplerEngine = 'default' | 'soxr';
-export const audioEchoSrcModes = ['off', 'family2x', 'family4x', 'family8x'] as const;
+export const audioEchoSrcModes = ['off', 'compatibility48', 'family2x', 'family4x', 'family8x'] as const;
 export type AudioEchoSrcMode = (typeof audioEchoSrcModes)[number];
 export const audioEchoSrcQualityProfiles = ['transparent', 'balanced', 'lowLatency'] as const;
 export type AudioEchoSrcQualityProfile = (typeof audioEchoSrcQualityProfiles)[number];
@@ -106,6 +123,11 @@ export type AudioEchoSrcRuntimeStatus = {
   firWorkerAverageMs: number | null;
   firWorkerLastMs: number | null;
   firRealtimeRatio: number | null;
+  nominalLatencyFrames?: number | null;
+  nominalLatencyMilliseconds?: number | null;
+  limiterCeilingDb?: number | null;
+  limiterGainReductionDb?: number | null;
+  limiterProtecting?: boolean;
   window: AudioEchoSrcFirWindow | null;
   phase: AudioEchoSrcFirPhase | null;
   normalizedCutoff: number | null;
@@ -138,6 +160,9 @@ export type AudioSdmModulatorProfile = {
   order: number;
   noiseShaper: string;
   feedbackCoefficients: number[];
+  feedbackDenominatorCoefficients: number[];
+  ntfPeakGain: number;
+  poleRadius: number;
   ditherAmplitude: number;
   inputLimit: number;
   stabilityLimit: number;
@@ -201,7 +226,13 @@ export type AudioAutomixStatus = {
   transitionSeconds: number | null;
   transitionStartedAtSeconds: number | null;
   nextTrackId: string | null;
-  transitionMode?: 'smartCrossfade' | 'beatAligned' | 'energyFade' | 'gaplessFallback' | null;
+  transitionMode?:
+    | 'smartCrossfade'
+    | 'beatAligned'
+    | 'energyFade'
+    | 'gaplessFallback'
+    | AutomixTransitionModeV2
+    | null;
   fallbackReason?: string | null;
   beatAligned?: boolean;
   gapless?: boolean;
@@ -213,11 +244,17 @@ export type AudioAutomixStatus = {
   advanceAtSeconds?: number | null;
   plannedTrackCount?: number;
   nextTransitionIndex?: number;
+  phase?: AutomixRuntimePhase;
+  runtimeState?: AutomixRuntimeState;
+  planId?: string | null;
+  analysisVersion?: number | null;
+  bitPerfectDisabled?: boolean;
+  automixBypassed?: string | null;
 };
 
 export type AudioCudaRuntimeStatus = {
   available: boolean;
-  source: 'nvidia-smi' | 'missing' | 'error';
+  source: 'native-host' | 'nvidia-smi' | 'missing' | 'error';
   deviceName: string | null;
   memoryTotalMiB?: number | null;
   driverVersion: string | null;
@@ -263,7 +300,7 @@ export type AudioLevelTelemetry = {
   headroomDb: number | null;
   clipCount: number;
   lastClipAt: string | null;
-  meterSource: 'pre_native_estimated_post_dsp';
+  meterSource: 'pre_native_estimated_post_dsp' | 'native_post_dsp';
 };
 
 export const channelBalanceMinBalance = -1;
@@ -280,14 +317,17 @@ export type AudioDeviceInfo = {
   id: string;
   index: number;
   name: string;
-  outputMode: Exclude<AudioOutputMode, 'exclusive' | 'system'>;
+  outputMode: Exclude<AudioOutputMode, 'system'>;
   sampleRate: number | null;
   sharedDeviceSampleRate: number | null;
   isDefault: boolean;
+  connectionType?: 'bluetooth' | 'unknown';
+  formFactor?: 'headphones' | 'headset' | 'speakers' | 'display' | 'digital' | 'unknown';
 };
 
 export type AudioOutputSettings = {
   backendContractVersion?: AudioBackendContractVersion;
+  automaticOutputEnabled?: boolean;
   outputMode?: AudioOutputMode;
   sharedBackend?: AudioSharedBackend;
   deviceIndex?: number;
@@ -334,6 +374,8 @@ export type AudioStatus = {
   activeOutputBackendImpl: string | null;
   nativeOutputFormat?: string | null;
   outputMode: AudioOutputMode;
+  automaticOutputEnabled?: boolean;
+  automaticOutputStage?: AutomaticAudioOutputStage;
   sharedBackend?: AudioSharedBackend | null;
   backendContractVersion?: AudioBackendContractVersion;
   useNativeOutputRequested?: boolean;
@@ -370,9 +412,12 @@ export type AudioStatus = {
   replayGainMode?: 'off' | 'track' | 'album';
   replayGainAppliedDb?: number;
   replayGainPreventedClipping?: boolean;
+  gaplessPlaybackEnabled?: boolean;
   automix?: AudioAutomixStatus;
   currentFilePath: string | null;
   currentTrackId: string | null;
+  currentQueueItemId?: string | null;
+  queueRevision?: number | null;
   currentTrackTitle?: string | null;
   currentTrackArtist?: string | null;
   currentTrackAlbum?: string | null;

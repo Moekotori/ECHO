@@ -17,14 +17,17 @@ import type {
   PlaybackStatsTrack,
 } from '../../shared/types/library';
 import { useI18n } from '../i18n/I18nProvider';
+import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
 import { openAlbumDetailForTrack } from '../utils/albumNavigation';
 import { openArtistDetailByName } from '../utils/artistNavigation';
+import { localCoverDisplayUrl } from '../utils/coverDisplayUrl';
 import { useImeAwareDebouncedSearch } from '../utils/imeInput';
+import '../styles/history-redesign.css';
 
 const pageSize = 10;
 const recentPlaybackPageSize = 8;
 const historyPageCacheStorageKey = 'echo-next.history-page-cache.v1';
-const historyPageCacheVersion = 1;
+const historyPageCacheVersion = 2;
 const isHistoryPageTestRuntime = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
 const historyCachedRefreshDelayMs = isHistoryPageTestRuntime ? 0 : 900;
 const historyStatsRefreshDelayMs = isHistoryPageTestRuntime ? 0 : 1600;
@@ -34,6 +37,7 @@ const recentPlaybackCardMinWidthPx = 220;
 const recentPlaybackCardGapPx = 10;
 
 type HistoryFilter = 'all' | 'today' | 'week' | 'month' | 'completed';
+type HistorySourceFilter = 'all' | 'local' | 'streaming';
 
 type HistoryPageData = {
   filter: HistoryFilter;
@@ -123,6 +127,7 @@ const historyStatsQueryFrom = (query: PlaybackHistoryQuery): PlaybackHistoryQuer
   from: query.from,
   to: query.to,
   completedOnly: query.completedOnly,
+  mediaType: query.mediaType,
   statsMode: 'activity',
 });
 
@@ -588,8 +593,37 @@ const trackFromStatsTrack = (track: PlaybackStatsTrack): LibraryTrack => ({
   fieldSources: {},
 });
 
+const largeHistoryCoverUrl = (entry: PlaybackHistoryEntry): string | null =>
+  localCoverDisplayUrl(entry.coverId, entry.coverSnapshot ?? entry.coverThumb);
+
+const trackFromHistoryEntry = (entry: PlaybackHistoryEntry): LibraryTrack => ({
+  id: entry.stableKey ?? entry.trackId ?? entry.id,
+  mediaType: entry.mediaType,
+  path: entry.mediaType === 'streaming' ? entry.stableKey ?? entry.trackPath : entry.trackPath,
+  provider: entry.provider,
+  providerTrackId: entry.providerTrackId,
+  stableKey: entry.stableKey,
+  title: entry.title,
+  artist: entry.artist,
+  album: entry.album,
+  albumArtist: entry.albumArtist,
+  trackNo: null,
+  discNo: null,
+  year: null,
+  genre: null,
+  duration: entry.durationSnapshot ?? entry.durationSeconds,
+  codec: null,
+  sampleRate: null,
+  bitDepth: null,
+  bitrate: null,
+  coverId: entry.coverId,
+  coverThumb: entry.coverSnapshot ?? entry.coverThumb,
+  fieldSources: {},
+});
+
 export const HistoryPage = (): JSX.Element => {
   const { t } = useI18n();
+  const { playTrack } = usePlaybackQueue();
   const initialHistoryDataRef = useRef<HistoryPageData | null>(null);
   if (initialHistoryDataRef.current === null) {
     initialHistoryDataRef.current = getInitialHistoryPageData();
@@ -605,6 +639,7 @@ export const HistoryPage = (): JSX.Element => {
   const [hasMore, setHasMore] = useState(initialHistoryData.hasMore);
   const { search, searchInputProps } = useImeAwareDebouncedSearch(250);
   const [filter, setFilter] = useState<HistoryFilter>('all');
+  const [sourceFilter, setSourceFilter] = useState<HistorySourceFilter>('all');
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshingInvalid, setIsRefreshingInvalid] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -634,7 +669,7 @@ export const HistoryPage = (): JSX.Element => {
 
   useEffect(() => {
     setRefreshResultMessage(null);
-  }, [filter, search]);
+  }, [filter, search, sourceFilter]);
 
   const scheduleStatsRefresh = useCallback(
     (historyQuery: PlaybackHistoryQuery, shouldCacheSnapshot: boolean): void => {
@@ -738,6 +773,7 @@ export const HistoryPage = (): JSX.Element => {
           pageSize,
           sort: 'plays' as const,
           search,
+          ...(sourceFilter === 'all' ? {} : { mediaType: sourceFilter }),
           ...rangeQuery,
         };
         const recentHistoryQuery = {
@@ -791,7 +827,7 @@ export const HistoryPage = (): JSX.Element => {
         }
       }
     },
-    [filter, invalidateStatsRefresh, scheduleStatsRefresh, search, t],
+    [filter, invalidateStatsRefresh, scheduleStatsRefresh, search, sourceFilter, t],
   );
 
   useEffect(() => {
@@ -799,13 +835,14 @@ export const HistoryPage = (): JSX.Element => {
       isDefaultHistoryQuery(filter, search) && hasHistoryPageData(cachedHistoryPageData) ? historyCachedRefreshDelayMs : 0;
 
     return scheduleHistoryWork(() => void loadHistory(1, 'replace'), delayMs);
-  }, [filter, loadHistory, search]);
+  }, [filter, loadHistory, search, sourceFilter]);
 
   const summaryLabels = useMemo(() => {
     const keys = filterSummaryLabelKeys[filter];
     return {
       count: t(keys.count),
       duration: t(keys.duration),
+      group: t(keys.group),
       tracks: t(keys.tracks),
       latest: t(keys.latest),
     };
@@ -952,6 +989,22 @@ export const HistoryPage = (): JSX.Element => {
     }
   }, []);
 
+  const handlePlayHistoryEntry = useCallback(async (
+    entry: PlaybackHistoryEntry,
+    playbackOrder: PlaybackHistoryEntry[],
+  ): Promise<void> => {
+    try {
+      setError(null);
+      const orderedTracks = playbackOrder.map(trackFromHistoryEntry);
+      await playTrack(trackFromHistoryEntry(entry), {
+        replaceQueueWith: orderedTracks,
+        source: { type: 'manual', label: t('historyPage.header.title') },
+      });
+    } catch (playbackError) {
+      setError(playbackError instanceof Error ? playbackError.message : String(playbackError));
+    }
+  }, [playTrack, t]);
+
   return (
     <div className="history-page">
       <header className="history-header">
@@ -976,20 +1029,33 @@ export const HistoryPage = (): JSX.Element => {
           <Search size={17} />
           <input type="search" placeholder={t('historyPage.search.placeholder')} {...searchInputProps} />
         </label>
-        <div className="history-filter-tabs">
-          {(Object.keys(filterLabelKeys) as HistoryFilter[]).map((value) => (
-            <button key={value} className={filter === value ? 'active' : ''} type="button" onClick={() => setFilter(value)}>
-              {t(filterLabelKeys[value])}
+        <div className="history-filter-groups">
+          <div className="history-source-tabs" aria-label={t('historyPage.source.aria')}>
+            <button className={sourceFilter === 'all' ? 'active' : ''} type="button" onClick={() => setSourceFilter('all')}>
+              {t('historyPage.source.all')}
             </button>
-          ))}
+            <button className={sourceFilter === 'local' ? 'active' : ''} type="button" onClick={() => setSourceFilter('local')}>
+              {t('historyPage.source.local')}
+            </button>
+            <button className={sourceFilter === 'streaming' ? 'active' : ''} type="button" onClick={() => setSourceFilter('streaming')}>
+              {t('historyPage.source.streaming')}
+            </button>
+          </div>
+          <div className="history-filter-tabs">
+            {(Object.keys(filterLabelKeys) as HistoryFilter[]).map((value) => (
+              <button key={value} className={filter === value ? 'active' : ''} type="button" onClick={() => setFilter(value)}>
+                {t(filterLabelKeys[value])}
+              </button>
+            ))}
+          </div>
         </div>
-      </section>
-
-      <section className="history-summary-grid" aria-label={t('historyPage.summary.aria')}>
-        <HistoryMetric icon={<CalendarDays size={18} />} label={summaryLabels.count} value={t('historyPage.metric.plays', { count: summary?.rangeCount ?? 0 })} />
-        <HistoryMetric icon={<Clock3 size={18} />} label={summaryLabels.duration} value={formatLongDuration(summary?.rangePlayedSeconds ?? 0, t)} />
-        <HistoryMetric icon={<Music2 size={18} />} label={summaryLabels.tracks} value={t('historyPage.metric.tracks', { count: total.toLocaleString() })} />
-        <HistoryMetric icon={<Clock3 size={18} />} label={summaryLabels.latest} value={formatDate(summary?.rangeLatestPlayedAt ?? null, t)} />
+        <div className="history-toolbar-meta">
+          <section className="history-summary-grid" aria-label={t('historyPage.summary.aria')}>
+            <HistoryMetric icon={<CalendarDays size={16} />} label={summaryLabels.count} value={t('historyPage.metric.plays', { count: summary?.rangeCount ?? 0 })} />
+            <HistoryMetric icon={<Clock3 size={16} />} label={summaryLabels.duration} value={formatLongDuration(summary?.rangePlayedSeconds ?? 0, t)} />
+            <HistoryMetric icon={<Music2 size={16} />} label={summaryLabels.tracks} value={t('historyPage.metric.tracks', { count: total.toLocaleString() })} />
+          </section>
+        </div>
       </section>
 
       <section className="history-recent-section" aria-label={t('historyPage.recent.aria')}>
@@ -1003,9 +1069,17 @@ export const HistoryPage = (): JSX.Element => {
         {visibleRecentItems.length > 0 ? (
           <div className="history-recent-list" ref={recentListRef}>
             {visibleRecentItems.map((entry) => (
-              <article className="history-recent-row" key={entry.id}>
-                <div className="history-recent-cover" data-empty={!entry.coverThumb}>
-                  {entry.coverThumb ? <img alt="" src={entry.coverThumb} /> : <Music2 size={17} />}
+              <article
+                className="history-recent-row"
+                key={entry.id}
+                title={t('historyPage.list.doubleClick')}
+                onDoubleClick={() => void handlePlayHistoryEntry(entry, visibleRecentItems)}
+              >
+                <div className="history-recent-cover" data-empty={!largeHistoryCoverUrl(entry)}>
+                  {largeHistoryCoverUrl(entry) ? <img alt="" decoding="async" draggable={false} src={largeHistoryCoverUrl(entry) ?? undefined} /> : <Music2 size={17} />}
+                  <span className="history-recent-replay" aria-hidden="true">
+                    <RefreshCw size={17} />
+                  </span>
                 </div>
                 <div className="history-recent-copy">
                   <strong>{entry.title}</strong>
@@ -1020,11 +1094,15 @@ export const HistoryPage = (): JSX.Element => {
         )}
       </section>
 
-      <EchoMemoryPanel memory={memory} />
-
-      <PlaybackStatsDashboardView stats={stats} onOpenArtist={handleOpenTopArtist} onOpenTrack={handleOpenTopTrack} />
-
-      <section className="history-list-section" aria-label={t('historyPage.list.aria')}>
+      <div className="history-workspace">
+        <section className="history-list-section" aria-label={t('historyPage.list.aria')}>
+          <header className="history-list-header">
+            <div>
+              <span className="section-kicker">{summaryLabels.group}</span>
+              <h2>{t('historyPage.list.aria')}</h2>
+            </div>
+            <span>{formatDate(summary?.rangeLatestPlayedAt ?? null, t)}</span>
+          </header>
         {groupedItems.length > 0 ? (
           groupedItems.map(([label, entries]) => (
             <div className="history-day-group" key={label}>
@@ -1035,13 +1113,15 @@ export const HistoryPage = (): JSX.Element => {
                     className="history-row"
                     key={entry.id}
                     role="listitem"
+                    title={t('historyPage.list.doubleClick')}
+                    onDoubleClick={() => void handlePlayHistoryEntry(entry, items)}
                   >
                     <div className="history-cover" data-empty={!entry.coverThumb}>
                       {entry.coverThumb ? <img alt="" src={entry.coverThumb} /> : <Music2 size={20} />}
                     </div>
                     <div className="history-copy">
                       <strong>{entry.title}</strong>
-                      <span>{entry.artist || t('historyPage.list.unknownArtist')} - {entry.album || t('historyPage.list.unknownAlbum')}</span>
+                      <span>{entry.artist || t('historyPage.list.unknownArtist')} · {entry.album || t('historyPage.list.unknownAlbum')}</span>
                     </div>
                     <span className="history-time">{formatTime(entry.startedAt)}</span>
                     <span className="history-duration">{formatDuration(entry.playedSeconds)} / {formatDuration(entry.durationSeconds)}</span>
@@ -1066,7 +1146,12 @@ export const HistoryPage = (): JSX.Element => {
             <span>{t('historyPage.empty.description')}</span>
           </div>
         )}
-      </section>
+        </section>
+
+        <EchoMemoryPanel memory={memory} />
+      </div>
+
+      <PlaybackStatsDashboardView stats={stats} onOpenArtist={handleOpenTopArtist} onOpenTrack={handleOpenTopTrack} />
 
       {hasMore ? (
         <div className="history-load-more-sentinel">

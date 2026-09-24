@@ -16,7 +16,11 @@ const sharedPlaybackState = vi.hoisted(() => ({
 }));
 
 vi.mock('../stores/playbackStatusStore', () => ({
-  useSharedPlaybackStatus: () => sharedPlaybackState.value,
+  beginPlaybackSwitchSnapshot: vi.fn(),
+  setPlaybackStatusSnapshot: vi.fn(),
+  useSharedPlaybackStatusOnly: () => sharedPlaybackState.value.playbackStatus ?? null,
+  useSharedPlaybackActivityState: () =>
+    sharedPlaybackState.value.audioStatus?.state ?? sharedPlaybackState.value.playbackStatus?.state ?? 'idle',
 }));
 
 vi.mock('../components/artist/ArtistDetailView', () => ({

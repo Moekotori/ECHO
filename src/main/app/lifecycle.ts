@@ -27,6 +27,8 @@ import { getAccountService } from '../accounts/AccountService';
 import { disposeAirPlayReceiverSpikeService } from '../connect/AirPlayReceiverSpikeService';
 import { disposeConnectReceiverService } from '../connect/ConnectReceiverService';
 import { disposeConnectService } from '../connect/ConnectService';
+import { disposeEchoLinkService } from '../connect/EchoLinkService';
+import { initializeEchoLinkBasicIntegration } from '../connect/EchoLinkBasicIntegration';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
 import type { AccountStatus } from '../../shared/types/accounts';
 import { closeDefaultLibraryService } from '../library/LibraryService';
@@ -44,9 +46,15 @@ import { closeDevConsoleWindow } from '../diagnostics/DevConsoleService';
 import { startMemoryPressureMonitor, stopMemoryPressureMonitor } from '../diagnostics/MemoryPressureMonitor';
 import { closeDesktopLyricsWindow, restoreDesktopLyricsWindowOnStartup } from './desktopLyricsWindow';
 import { closeMiniPlayerWindow, restoreMiniPlayerWindowOnStartup } from './miniPlayerWindow';
-import { runPackageIntegrityGuard } from './packageIntegrity';
 import { syncLaunchAtLoginSetting } from './launchAtLogin';
 import { syncNativeThemeSource } from './nativeThemePreference';
+import { disposeIntegrationEventHub, getIntegrationEventHub } from '../integrations/core/IntegrationEventHub';
+import {
+  disposeMqttIntegration,
+  initializeMqttIntegration,
+} from '../integrations/mqtt/MqttIntegrationService';
+import { disposeMainWindowPlaybackCommandRelay } from '../playback/MainWindowPlaybackCommandRelay';
+import { disposePlaybackPowerSaveBlocker, initializePlaybackPowerSaveBlocker } from './playbackPowerSaveBlocker';
 
 const sendAccountStatusesChanged = (statuses: AccountStatus[]): void => {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -77,8 +85,8 @@ const notifyLibraryDatabaseProtected = (): void => {
   void dialog.showMessageBox({
     type: 'warning',
     title: '曲库数据库进入保护模式',
-    message: 'ECHO Next 检测到音乐库数据库未通过健康检查，已先归档副本并停止继续写入。',
-    detail: '你的音乐文件不会被删除。请打开设置里的数据库恢复工具，选择恢复健康快照或归档后重建曲库索引。',
+    message: 'SQLite 明确报告音乐库数据库损坏，ECHO Next 已停止继续写入。',
+    detail: '你的音乐文件不会被删除。请打开设置里的数据库恢复工具，先查看具体检查结果，再选择恢复健康快照或归档后重建曲库索引。',
     buttons: ['知道了'],
     defaultId: 0,
     noLink: true,
@@ -187,8 +195,6 @@ export const registerAppLifecycle = (): void => {
     markStartupStage('hardware-acceleration:disabled-by-setting');
   }
 
-  app.commandLine.appendSwitch('disable-renderer-backgrounding');
-  app.commandLine.appendSwitch('disable-background-timer-throttling');
   app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
   if (process.platform === 'win32') {
     app.setAppUserModelId(app.isPackaged ? 'app.echo.next' : 'app.echo.next.dev');
@@ -236,9 +242,6 @@ export const registerAppLifecycle = (): void => {
     markStartupStage('diagnostics:init:start');
     getCrashReportService().initialize();
     markStartupStage('diagnostics:init:complete');
-    markStartupStage('package-integrity:verify:start');
-    const packageIntegrityOk = await runPackageIntegrityGuard();
-    markStartupStage(packageIntegrityOk ? 'package-integrity:verify:complete' : 'package-integrity:verify:failed');
     const dataProtectionDisabled = appSettings.dataProtectionDisabled === true;
     markStartupStage(dataProtectionDisabled ? 'data-protection:startup:skipped' : 'data-protection:startup:start', {
       reason: dataProtectionDisabled ? 'disabled-by-setting' : undefined,
@@ -271,6 +274,14 @@ export const registerAppLifecycle = (): void => {
     registerVideoProtocolHandler();
     markStartupStage('protocols:register:complete');
     void initializeWallpaperEngineBridgeIntegration();
+    getIntegrationEventHub();
+    void initializeMqttIntegration().catch((error) => {
+      getCrashReportService().getLogger()?.warn('main', '[Lifecycle] MQTT integration failed to initialize', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    initializePlaybackPowerSaveBlocker();
+    await initializeEchoLinkBasicIntegration();
     markStartupStage('startup-integrations:init:start', {
       libraryRecoveryMode,
       libraryHealth: dataProtection.libraryHealth.status,
@@ -280,7 +291,7 @@ export const registerAppLifecycle = (): void => {
       initializeLastFmIntegration();
       void initializeDiscordPresenceIntegration();
       void initializeStageBridgeIntegration();
-      markStartupStage('startup-integrations:init:scheduled', { smtc: true, lastfm: true, discord: true, stage: true });
+      markStartupStage('startup-integrations:init:scheduled', { eventHub: true, echoLinkBasic: true, smtc: true, lastfm: true, discord: true, stage: true });
     } else if (libraryRecoveryMode) {
       getCrashReportService().getLogger()?.info?.('main', '[Lifecycle] library recovery mode is active; skipping library-backed startup integrations');
       markStartupStage('startup-integrations:init:skipped', { reason: 'library-recovery-mode' });
@@ -306,6 +317,9 @@ export const registerAppLifecycle = (): void => {
     }
     restoreDesktopLyricsWindowOnStartup();
     restoreMiniPlayerWindowOnStartup();
+    void import('./petWindow')
+      .then(({ restorePetWindowOnStartup }) => restorePetWindowOnStartup())
+      .catch(() => undefined);
     if (libraryRecoveryMode) {
       notifyLibraryRecoveryMode();
       markStartupStage('library-recovery:dialog-scheduled');
@@ -373,6 +387,9 @@ export const registerAppLifecycle = (): void => {
     closeDevConsoleWindow();
     closeDesktopLyricsWindow();
     closeMiniPlayerWindow();
+    await import('./petWindow')
+      .then(({ closePetWindow }) => closePetWindow())
+      .catch(() => undefined);
     savePlaybackMemoryNow();
     disposeLastFmIntegration();
     disposeDiscordPresenceIntegration();
@@ -380,7 +397,12 @@ export const registerAppLifecycle = (): void => {
     await disposeConnectReceiverService();
     await disposeConnectService();
     await disposeWallpaperEngineBridgeIntegration();
+    await disposeEchoLinkService();
     await disposeStageBridgeIntegration();
+    await disposeMqttIntegration();
+    disposeIntegrationEventHub();
+    disposeMainWindowPlaybackCommandRelay();
+    disposePlaybackPowerSaveBlocker();
     await disposeSmtcIntegration();
     await disposeDefaultAudioSessionGracefully('app-quit');
     getSleepTimerService().dispose();
@@ -405,6 +427,8 @@ export const registerAppLifecycle = (): void => {
     requestAppQuit();
   };
 
+  const gracefulShutdownTimeoutMs = 7_500;
+
   const cleanupBeforeQuitWithTimeout = async (): Promise<void> => {
     let timeout: NodeJS.Timeout | null = null;
     let timedOut = false;
@@ -415,7 +439,7 @@ export const registerAppLifecycle = (): void => {
           timeout = setTimeout(() => {
             timedOut = true;
             resolve();
-          }, 2000);
+          }, gracefulShutdownTimeoutMs);
         }),
       ]);
     } finally {

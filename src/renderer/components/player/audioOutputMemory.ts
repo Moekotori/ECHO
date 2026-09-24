@@ -58,7 +58,7 @@ const normalizeRememberedAudioOutput = (
 ): RememberedAudioOutput => {
   const raw = value ?? fallback;
   const outputMode =
-    raw.outputMode === 'shared' || raw.outputMode === 'exclusive' || raw.outputMode === 'system'
+    raw.outputMode === 'shared' || raw.outputMode === 'exclusive' || raw.outputMode === 'asio' || raw.outputMode === 'system'
       ? raw.outputMode
       : fallback.outputMode;
   const sharedBackend = normalizeSharedBackend(raw.sharedBackend);

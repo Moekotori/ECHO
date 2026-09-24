@@ -71,10 +71,12 @@ export const registerAccountIpc = (): void => {
   ipcMain.handle(IpcChannels.AccountGetStatus, (_event, provider: unknown): AccountStatus =>
     getAccountService().getStatus(requireProvider(provider)),
   );
-  ipcMain.handle(IpcChannels.AccountSaveCookie, (_event, provider: unknown, cookie: unknown): AccountStatus =>
-    getAccountService().saveCookie(requireProvider(provider), requireCookie(cookie)),
-  );
-  ipcMain.handle(IpcChannels.AccountStartLogin, (_event, provider: unknown): Promise<AccountLoginStartResult> => {
+  ipcMain.handle(IpcChannels.AccountSaveCookie, (_event, provider: unknown, cookie: unknown): AccountStatus => {
+    const status = getAccountService().saveCookie(requireProvider(provider), requireCookie(cookie));
+    sendAccountStatusesChanged();
+    return status;
+  });
+  ipcMain.handle(IpcChannels.AccountStartLogin, async (_event, provider: unknown): Promise<AccountLoginStartResult> => {
     const accountProvider = requireProvider(provider);
     if (accountProvider === 'spotify') {
       return getSpotifyAuthService().startLoginWindow();
@@ -89,7 +91,11 @@ export const registerAccountIpc = (): void => {
       return openSystemBrowserAccount('soundcloud');
     }
 
-    return startAccountLoginWindow(accountProvider, getAccountService());
+    const result = await startAccountLoginWindow(accountProvider, getAccountService());
+    if (result.saved) {
+      sendAccountStatusesChanged();
+    }
+    return result;
   });
   ipcMain.handle(IpcChannels.AccountStartNeteaseQrLogin, (): Promise<NeteaseQrLoginStartResult> =>
     getNeteaseQrLoginService().startLogin(),
@@ -101,10 +107,12 @@ export const registerAccountIpc = (): void => {
     }
     return result;
   });
-  ipcMain.handle(IpcChannels.AccountClear, (_event, provider: unknown): AccountStatus =>
-    getAccountService().clearAccount(requireProvider(provider)),
-  );
-  ipcMain.handle(IpcChannels.AccountCheck, (_event, provider: unknown): Promise<AccountStatus> => {
+  ipcMain.handle(IpcChannels.AccountClear, (_event, provider: unknown): AccountStatus => {
+    const status = getAccountService().clearAccount(requireProvider(provider));
+    sendAccountStatusesChanged();
+    return status;
+  });
+  ipcMain.handle(IpcChannels.AccountCheck, async (_event, provider: unknown): Promise<AccountStatus> => {
     const accountProvider = requireProvider(provider);
     if (accountProvider === 'spotify') {
       return getSpotifyAuthService().checkAccount();
@@ -113,7 +121,9 @@ export const registerAccountIpc = (): void => {
       return getTidalAuthService().checkAccount();
     }
 
-    return getAccountService().checkAccount(accountProvider);
+    const status = await getAccountService().checkAccount(accountProvider);
+    sendAccountStatusesChanged();
+    return status;
   });
   ipcMain.handle(IpcChannels.AccountCheckAll, async (): Promise<AccountStatus[]> => {
     await getAccountService().checkAllAccounts();
@@ -123,14 +133,18 @@ export const registerAccountIpc = (): void => {
     if (getAccountService().getStatus('tidal').connected) {
       await getTidalAuthService().checkAccount();
     }
-    return getAccountService().getStatuses();
+    const statuses = getAccountService().getStatuses();
+    sendAccountStatusesChanged();
+    return statuses;
   });
   ipcMain.handle(IpcChannels.AccountSetYouTubeBrowser, (_event, browser: unknown): AccountStatus => {
     if (!isYouTubeBrowser(browser)) {
       throw new Error('browser must be edge, chrome, firefox, or none');
     }
 
-    return getAccountService().setYouTubeBrowser(browser);
+    const status = getAccountService().setYouTubeBrowser(browser);
+    sendAccountStatusesChanged();
+    return status;
   });
   ipcMain.handle(IpcChannels.AccountSetBrowser, (_event, provider: unknown, browser: unknown): AccountStatus => {
     const accountProvider = requireProvider(provider);
@@ -141,7 +155,9 @@ export const registerAccountIpc = (): void => {
       throw new Error('browser must be edge, chrome, firefox, or none');
     }
 
-    return getAccountService().setAccountBrowser(accountProvider, browser);
+    const status = getAccountService().setAccountBrowser(accountProvider, browser);
+    sendAccountStatusesChanged();
+    return status;
   });
   ipcMain.handle(IpcChannels.SpotifyGetAccessToken, (): Promise<string> => getSpotifyAuthService().getAccessToken());
   ipcMain.handle(IpcChannels.SpotifyGetDevices, () => getSpotifyAuthService().getDevices());

@@ -11,7 +11,13 @@ import type { PlaybackStatus } from '../../shared/types/playback';
 import type { StreamingLyricsResult, StreamingProviderName } from '../../shared/types/streaming';
 import { streamingProviderNames } from '../../shared/types/streaming';
 import { shouldShowRomanizationForLyrics } from '../../shared/utils/lyricsLanguage';
-import { getActiveLyricIndex } from '../components/lyrics/LyricsView';
+import { getRenderableLyricWords } from '../components/lyrics/LyricsLine';
+import {
+  getActiveLyricIndex,
+  getLinePlaybackPositionMs,
+  getWordPlaybackState,
+  getWordProgress,
+} from '../components/lyrics/LyricsView';
 import { VerticalText, tokenizeVerticalText } from '../components/lyrics/VerticalText';
 import { titleFromPath } from '../components/player/playerFormat';
 import { logLyricsConsole } from '../diagnostics/lyricsConsole';
@@ -114,7 +120,6 @@ const desktopLyricsOverflowTolerancePx = 4;
 const desktopLyricsHorizontalMinFitScale = 0.62;
 const desktopLyricsPlaybackCommandPriorityMs = 1400;
 const desktopLyricsMenuRevealSelector = '.desktop-lyrics-lines, .desktop-lyrics-menu';
-const desktopLyricsMouseInteractiveSelector = '.desktop-lyrics-lines, .desktop-lyrics-menu';
 const desktopLyricsMenuHideDelayMs = 320;
 const desktopLyricsMenuIdleHideDelayMs = 1800;
 const desktopLyricsPointerHitPaddingPx = 12;
@@ -630,6 +635,59 @@ export const getDesktopLyricsLineProgress = (
   return clampUnit((getInterpolatedPositionMs(clock) - lineStartMs) / durationMs);
 };
 
+export const syncDesktopLyricsWordHighlight = (
+  lineTextElement: HTMLElement | null,
+  lines: LyricLine[],
+  activeIndex: number,
+  clock: PlaybackClock | null,
+  offsetMs: number,
+): void => {
+  const primaryElement = lineTextElement?.querySelector<HTMLElement>('.desktop-lyrics-primary-text') ?? null;
+  const line = lines[activeIndex];
+  const words = line ? getRenderableLyricWords(line) : null;
+  const wordElements = primaryElement
+    ? Array.from(primaryElement.querySelectorAll<HTMLElement>('.desktop-lyrics-word'))
+    : [];
+
+  if (!primaryElement || !clock || !words || wordElements.length !== words.length) {
+    primaryElement?.removeAttribute('data-word-highlight');
+    return;
+  }
+
+  primaryElement.dataset.wordHighlight = 'true';
+  const adjustedPositionMs = getLinePlaybackPositionMs(
+    words,
+    lines[activeIndex + 1],
+    getInterpolatedPositionMs(clock) + offsetMs,
+  );
+  const fallbackLineEndMs = lines[activeIndex + 1]?.timeMs;
+  const { completedCount, currentIndex } = getWordPlaybackState(
+    words,
+    adjustedPositionMs,
+    fallbackLineEndMs,
+  );
+  const reducedMotion =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  wordElements.forEach((element, index) => {
+    const state = index < completedCount
+      ? 'passed'
+      : index === currentIndex
+        ? 'current'
+        : 'future';
+    const progress = state === 'passed'
+      ? 1
+      : state === 'current'
+        ? reducedMotion
+          ? 1
+          : getWordProgress(words, index, adjustedPositionMs, fallbackLineEndMs)
+        : 0;
+    element.dataset.wordState = state;
+    element.style.setProperty('--desktop-lyrics-word-progress', progress.toFixed(4));
+  });
+};
+
 const clockIdentity = (clock: PlaybackClock | null): string | null =>
   clock?.currentTrackId ?? clock?.filePath ?? null;
 
@@ -696,8 +754,34 @@ const renderDesktopLyricsText = (
               : <VerticalText className="desktop-lyrics-upright-character" text={text} />}
           </span>
         </span>
-      )
+    )
     : text;
+
+const renderDesktopLyricsWords = (
+  words: readonly NonNullable<LyricLine['words']>[number][],
+  isVerticalText: boolean,
+): JSX.Element => {
+  const wordElements = words.map((word, index) => (
+    <span
+      aria-hidden="true"
+      className="desktop-lyrics-word"
+      data-word-state="future"
+      key={`${index}-${word.startMs}-${word.text}`}
+    >
+      {isVerticalText
+        ? <VerticalText className="desktop-lyrics-upright-character" text={word.text} />
+        : word.text}
+    </span>
+  ));
+
+  return isVerticalText
+    ? (
+        <span className="desktop-lyrics-scroll-clip">
+          <span className="desktop-lyrics-scroll-track">{wordElements}</span>
+        </span>
+      )
+    : <>{wordElements}</>;
+};
 
 const applyDesktopLyricsVerticalScrollProgress = (
   lineTextElement: HTMLElement | null,
@@ -776,17 +860,18 @@ export const DesktopLyricsApp = (): JSX.Element => {
     }
 
     return null;
-  }, [
-    activeClock?.currentTrackId,
-    activeClock?.filePath,
-    forwardedLyricsMetadata?.album,
-    forwardedLyricsMetadata?.albumArtist,
-    forwardedLyricsMetadata?.artist,
-    forwardedLyricsMetadata?.durationSeconds,
-    forwardedLyricsMetadata?.filePath,
-    forwardedLyricsMetadata?.title,
-    forwardedLyricsMetadata?.trackId,
-  ]);
+  }, [activeClock, forwardedLyricsMetadata]);
+  const activeLyricsFilePath = activeClock?.filePath ?? null;
+  const hasActiveForwardedLyricsMetadata = activeForwardedLyricsMetadata !== null;
+  const activeLyricsMetadataTrackId = activeForwardedLyricsMetadata?.trackId ?? null;
+  const activeLyricsMetadataFilePath = activeForwardedLyricsMetadata?.filePath ?? null;
+  const activeLyricsMetadataTitle = activeForwardedLyricsMetadata?.title ?? null;
+  const activeLyricsMetadataArtist = activeForwardedLyricsMetadata?.artist ?? null;
+  const activeLyricsMetadataAlbum = activeForwardedLyricsMetadata?.album ?? null;
+  const activeLyricsMetadataAlbumArtist = activeForwardedLyricsMetadata?.albumArtist ?? null;
+  const activeLyricsMetadataDurationSeconds = activeForwardedLyricsMetadata?.durationSeconds ?? null;
+  const activeClockRef = useRef(activeClock);
+  activeClockRef.current = activeClock;
 
   useEffect(() => {
     if (!activeClock) {
@@ -932,6 +1017,10 @@ export const DesktopLyricsApp = (): JSX.Element => {
   }, []);
 
   const currentLine = activeIndex >= 0 ? lyrics.lines[activeIndex] : lyrics.lines[0];
+  const currentLineWords =
+    lyrics.kind === 'synced' && activeIndex >= 0 && currentLine
+      ? getRenderableLyricWords(currentLine)
+      : null;
   const shouldHideForMissingLyrics =
     settings.desktopLyricsHideWhenNoLyricsEnabled === true &&
     (
@@ -1025,7 +1114,7 @@ export const DesktopLyricsApp = (): JSX.Element => {
       clearHideMenuTimer();
       setMenuVisible((current) => (current === visible ? current : visible));
     };
-    const updatePassthrough = (event: MouseEvent): void => {
+    const updatePointerState = (event: MouseEvent): void => {
       const target = document.elementFromPoint(event.clientX, event.clientY);
       const overMenuRevealSurface =
         Boolean(target?.closest(desktopLyricsMenuRevealSelector)) ||
@@ -1035,40 +1124,31 @@ export const DesktopLyricsApp = (): JSX.Element => {
           desktopLyricsMenuRevealSelector,
           desktopLyricsPointerHitPaddingPx,
         );
-      const overInteractiveSurface =
-        Boolean(target?.closest(desktopLyricsMouseInteractiveSelector)) ||
-        isPointInsideAnyElementRect(
-          event.clientX,
-          event.clientY,
-          desktopLyricsMouseInteractiveSelector,
-          desktopLyricsPointerHitPaddingPx,
-        );
       updateMenuVisible(overMenuRevealSurface, !overMenuRevealSurface);
-      setPassthrough(!overInteractiveSurface);
     };
     const passthroughOnLeave = (): void => {
       if (menuPinnedVisible) {
         clearHideMenuTimer();
         clearIdleHideMenuTimer();
         setMenuVisible(true);
-        setPassthrough(true);
+        setPassthrough(false);
         return;
       }
 
       updateMenuVisible(false);
-      setPassthrough(true);
+      setPassthrough(false);
     };
 
-    window.addEventListener('mousemove', updatePassthrough);
+    window.addEventListener('mousemove', updatePointerState);
     window.addEventListener('mouseleave', passthroughOnLeave);
     window.addEventListener('blur', passthroughOnLeave);
     document.addEventListener('visibilitychange', passthroughOnLeave);
-    setPassthrough(true);
+    setPassthrough(false);
 
     return () => {
       clearHideMenuTimer();
       clearIdleHideMenuTimer();
-      window.removeEventListener('mousemove', updatePassthrough);
+      window.removeEventListener('mousemove', updatePointerState);
       window.removeEventListener('mouseleave', passthroughOnLeave);
       window.removeEventListener('blur', passthroughOnLeave);
       document.removeEventListener('visibilitychange', passthroughOnLeave);
@@ -1097,7 +1177,7 @@ export const DesktopLyricsApp = (): JSX.Element => {
       setMenuPinnedVisible((current) => {
         const next = !current;
         setMenuVisible(next);
-        desktopLyrics.setMousePassthrough?.(!next);
+        desktopLyrics.setMousePassthrough?.(false);
         return next;
       });
     });
@@ -1221,6 +1301,17 @@ export const DesktopLyricsApp = (): JSX.Element => {
   useEffect(() => {
     const requestId = lyricsRequestRef.current + 1;
     lyricsRequestRef.current = requestId;
+    const requestMetadata: ForwardedLyricsMetadata | null = hasActiveForwardedLyricsMetadata
+      ? {
+          trackId: activeLyricsMetadataTrackId,
+          filePath: activeLyricsMetadataFilePath,
+          title: activeLyricsMetadataTitle,
+          artist: activeLyricsMetadataArtist,
+          album: activeLyricsMetadataAlbum,
+          albumArtist: activeLyricsMetadataAlbumArtist,
+          durationSeconds: activeLyricsMetadataDurationSeconds,
+        }
+      : null;
 
     if (!activeTrackId) {
       setLyrics(emptyLyrics());
@@ -1245,7 +1336,7 @@ export const DesktopLyricsApp = (): JSX.Element => {
 
       const streamingTarget = isStreamingTrack(track)
         ? { provider: track.provider, providerTrackId: track.providerTrackId }
-        : parseStreamingTrackId(activeTrackId) ?? parseStreamingTrackId(activeClock?.filePath ?? null);
+        : parseStreamingTrackId(activeTrackId) ?? parseStreamingTrackId(activeLyricsFilePath);
 
       try {
         if (streamingTarget && streamingApi?.getLyrics) {
@@ -1265,10 +1356,10 @@ export const DesktopLyricsApp = (): JSX.Element => {
         }
 
         if (
-          shouldUseDesktopLyricsSnapshot(activeTrackId, track, activeForwardedLyricsMetadata) &&
+          shouldUseDesktopLyricsSnapshot(activeTrackId, track, requestMetadata) &&
           lyricsApi?.getForSnapshot
         ) {
-          const snapshotRequest = buildDesktopLyricsSnapshotRequest(activeTrackId, track, activeForwardedLyricsMetadata);
+          const snapshotRequest = buildDesktopLyricsSnapshotRequest(activeTrackId, track, requestMetadata);
           if (snapshotRequest) {
             const snapshotLyrics = await lyricsApi.getForSnapshot(snapshotRequest);
             if (lyricsRequestRef.current === requestId) {
@@ -1302,7 +1393,7 @@ export const DesktopLyricsApp = (): JSX.Element => {
         if (lyricsRequestRef.current === requestId) {
           logLyricsConsole('desktop.lyrics-load-failed', {
             trackId: activeTrackId,
-            clock: summarizeClockForLyricsLog(activeClock),
+            clock: summarizeClockForLyricsLog(activeClockRef.current),
           }, { level: 'warn', dedupeKey: `desktop-lyrics-load-failed:${activeTrackId}`, dedupeMs: 2000 });
           setLyrics(emptyLyrics());
         }
@@ -1311,7 +1402,19 @@ export const DesktopLyricsApp = (): JSX.Element => {
 
     setLyrics(emptyLyrics());
     void loadLyrics();
-  }, [activeClock?.filePath, activeForwardedLyricsMetadata, activeTrackId, lyricsRefreshToken]);
+  }, [
+    activeLyricsFilePath,
+    activeLyricsMetadataAlbum,
+    activeLyricsMetadataAlbumArtist,
+    activeLyricsMetadataArtist,
+    activeLyricsMetadataDurationSeconds,
+    activeLyricsMetadataFilePath,
+    activeLyricsMetadataTitle,
+    activeLyricsMetadataTrackId,
+    activeTrackId,
+    hasActiveForwardedLyricsMetadata,
+    lyricsRefreshToken,
+  ]);
 
   useEffect(() => {
     const stopAnimationFrame = (): void => {
@@ -1333,6 +1436,13 @@ export const DesktopLyricsApp = (): JSX.Element => {
       applyDesktopLyricsVerticalScrollProgress(
         lineTextRef.current,
         getDesktopLyricsLineProgress(lyrics.lines, nextIndex, activeClock, lyrics.offsetMs),
+      );
+      syncDesktopLyricsWordHighlight(
+        lineTextRef.current,
+        lyrics.lines,
+        nextIndex,
+        activeClock,
+        lyrics.offsetMs,
       );
       setActiveIndex((current) => {
         if (current === nextIndex) {
@@ -1561,6 +1671,22 @@ export const DesktopLyricsApp = (): JSX.Element => {
   const visibleSecondaryTextKey = visibleFittingSecondaryTexts
     .map(({ kind, text }) => `${kind}:${text}`)
     .join('\n');
+  const desktopLyricsLineAnimationKey = [
+    clockIdentity(activeClock) ?? 'idle',
+    lyrics.kind,
+    activeIndex,
+    primaryText,
+    visibleSecondaryTextKey,
+  ].join('\u0000');
+  useLayoutEffect(() => {
+    syncDesktopLyricsWordHighlight(
+      lineTextRef.current,
+      lyrics.lines,
+      activeIndex,
+      activeClock,
+      lyrics.offsetMs,
+    );
+  }, [activeClock, activeIndex, currentLineWords, lyrics.lines, lyrics.offsetMs]);
   useLayoutEffect(() => {
     if (!isVerticalText) {
       return undefined;
@@ -1675,12 +1801,7 @@ export const DesktopLyricsApp = (): JSX.Element => {
       Boolean(forwardedAudioStatus.currentTrackId && forwardedAudioStatus.currentTrackId === activeClock.currentTrackId) ||
       Boolean(forwardedAudioStatus.currentFilePath && forwardedAudioStatus.currentFilePath === activeClock.filePath);
     return sameTrack ? forwardedAudioStatus : null;
-  }, [
-    activeClock?.currentTrackId,
-    activeClock?.filePath,
-    forwardedAudioStatus,
-    shouldUseDesktopMusicReactiveVisuals,
-  ]);
+  }, [activeClock, forwardedAudioStatus, shouldUseDesktopMusicReactiveVisuals]);
   const musicReactiveScene = useMemo(
     () => createMusicReactiveScene(musicReactiveAudioStatus),
     [musicReactiveAudioStatus],
@@ -1696,6 +1817,7 @@ export const DesktopLyricsApp = (): JSX.Element => {
     '--desktop-lyrics-scale': (settings.desktopLyricsScalePercent / 100).toFixed(2),
     '--desktop-lyrics-font-family': desktopLyricsFontFamily,
     '--desktop-lyrics-color': desktopLyricsColor,
+    '--desktop-lyrics-word-fill-color': desktopLyricsColor,
     '--desktop-lyrics-stroke-color': desktopLyricsStrokeColor,
     '--desktop-lyrics-custom-gradient': desktopLyricsGradient,
     '--desktop-lyrics-opacity': (settings.desktopLyricsOpacityPercent / 100).toFixed(2),
@@ -1724,13 +1846,19 @@ export const DesktopLyricsApp = (): JSX.Element => {
         <div className="desktop-lyrics-cluster">
           <div className="desktop-lyrics-lines" onContextMenu={(event) => void unlockFromContextMenu(event)}>
             <div className="desktop-lyrics-line-text" ref={lineTextRef} style={lineTextStyle}>
-              <strong aria-label={isVerticalText ? primaryText : undefined}>
-                {renderDesktopLyricsText(primaryText, isVerticalText)}
+              <strong
+                aria-label={isVerticalText || currentLineWords ? primaryText : undefined}
+                className="desktop-lyrics-primary-text"
+                key={`primary-${desktopLyricsLineAnimationKey}`}
+              >
+                {currentLineWords
+                  ? renderDesktopLyricsWords(currentLineWords, isVerticalText)
+                  : renderDesktopLyricsText(primaryText, isVerticalText)}
               </strong>
               {visibleFittingSecondaryTexts.map(({ kind, text }, index) => (
                 <span
                   data-secondary-kind={kind}
-                  key={`${kind}-${index}-${text}`}
+                  key={`secondary-${desktopLyricsLineAnimationKey}-${kind}-${index}-${text}`}
                   aria-label={isVerticalText ? text : undefined}
                 >
                   {renderDesktopLyricsText(text, isVerticalText, kind)}

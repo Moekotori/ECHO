@@ -184,6 +184,16 @@ public:
         controls.PlaybackStatus(MediaPlaybackStatus::Closed);
     }
 
+    void emitReady()
+    {
+        std::lock_guard lock(outputMutex);
+        std::cout
+            << "{\"type\":\"ready\",\"protocolVersion\":1,\"capabilities\":{"
+            << "\"metadata\":true,\"timeline\":true,\"enabledActions\":true,"
+            << "\"seekCommands\":true,\"localArtwork\":true}}"
+            << std::endl;
+    }
+
     void enqueue(std::string line)
     {
         {
@@ -527,6 +537,7 @@ int main()
     try
     {
         host.initialize(hwnd);
+        host.emitReady();
     }
     catch (hresult_error const& error)
     {

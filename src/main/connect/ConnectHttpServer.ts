@@ -8,7 +8,9 @@ import { Readable } from 'node:stream';
 import sharp from 'sharp';
 import type { ConnectHttpDebugEvent } from '../../shared/types/connect';
 import { resolveFfmpegToolchain } from '../audioPublicApi';
+import { registerSoftMemoryCleanupTask, type SoftMemoryCleanupTaskResult } from '../diagnostics/SoftMemoryJanitor';
 import { defaultCoverSvg } from '../library/workers/TsCoverExtractor';
+import { readResponseBodyLimited } from '../network/readResponseBodyLimited';
 
 type DirectAudioToken = {
   kind: 'audio';
@@ -52,6 +54,8 @@ type TokenUrlOptions = {
 };
 
 const defaultTokenTtlMs = 8 * 60 * 60 * 1000;
+const maximumTokenRecords = 512;
+const maximumRemoteCoverBytes = 16 * 1024 * 1024;
 
 const safeHeader = (value: string | string[] | undefined): string | undefined => (typeof value === 'string' ? value : undefined);
 
@@ -239,6 +243,10 @@ export class ConnectHttpServer {
   private readonly tokens = new Map<string, TokenRecord>();
   private readonly debugEvents: ConnectHttpDebugEvent[] = [];
   private readonly debugListeners = new Set<(event: ConnectHttpDebugEvent) => void>();
+  private readonly unregisterSoftMemoryCleanup = registerSoftMemoryCleanupTask(
+    'connect-http-cover-cache',
+    () => this.releaseSoftMemoryPressure(),
+  );
 
   onRequestEvent(listener: (event: ConnectHttpDebugEvent) => void): () => void {
     this.debugListeners.add(listener);
@@ -252,6 +260,7 @@ export class ConnectHttpServer {
   }
 
   async close(): Promise<void> {
+    this.unregisterSoftMemoryCleanup();
     this.tokens.clear();
     this.debugEvents.length = 0;
     if (!this.server) {
@@ -361,10 +370,40 @@ export class ConnectHttpServer {
     }
   }
 
+  releaseSoftMemoryPressure(now = Date.now()): SoftMemoryCleanupTaskResult {
+    const beforeEntries = this.tokens.size;
+    this.clearExpiredTokens(now);
+    let clearedCoverBodies = 0;
+    for (const record of this.tokens.values()) {
+      if (record.kind === 'cover' && record.cachedBody) {
+        delete record.cachedBody;
+        clearedCoverBodies += 1;
+      }
+    }
+    const afterEntries = this.tokens.size;
+    return {
+      task: 'connect-http-cover-cache',
+      beforeEntries,
+      afterEntries,
+      removedEntries: beforeEntries - afterEntries + clearedCoverBodies,
+      details: {
+        clearedCoverBodies,
+        tokenLimit: maximumTokenRecords,
+      },
+    };
+  }
+
   private createToken(record: TokenRecord): string {
     this.clearExpiredTokens();
     const token = randomBytes(24).toString('base64url');
     this.tokens.set(token, record);
+    while (this.tokens.size > maximumTokenRecords) {
+      const oldestToken = this.tokens.keys().next().value;
+      if (typeof oldestToken !== 'string') {
+        break;
+      }
+      this.tokens.delete(oldestToken);
+    }
     return token;
   }
 
@@ -663,9 +702,9 @@ export class ConnectHttpServer {
       if (!response.ok) {
         throw new Error(`remote cover HTTP ${response.status}`);
       }
-      source = Buffer.from(await response.arrayBuffer());
+      source = Buffer.from(await readResponseBodyLimited(response, maximumRemoteCoverBytes));
     }
-    const body = await sharp(source, { animated: false })
+    const body = await sharp(source, { animated: false, limitInputPixels: 40_000_000 })
       .rotate()
       .resize(600, 600, { fit: 'inside', withoutEnlargement: true })
       .flatten({ background: '#ffffff' })

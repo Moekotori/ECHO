@@ -22,7 +22,12 @@ uint32_t DopRingSource::renderInterleaved(uint32_t* output, uint32_t frameCount,
     if (output == nullptr || frameCount == 0 || outputChannels == 0)
         return 0;
 
-    fillDopSilence(output, frameCount, outputChannels);
+    const uint64_t startFrameIndex =
+        renderedDopFrames.fetch_add(frameCount, std::memory_order_relaxed);
+    fillDopSilence(output, frameCount, outputChannels, startFrameIndex);
+
+    if (paused.load(std::memory_order_acquire))
+        return 0;
 
     if (shouldHoldForStartupPrebuffer())
         return 0;
@@ -72,19 +77,28 @@ uint32_t DopRingSource::renderInterleaved(uint32_t* output, uint32_t frameCount,
     if (framesReadTotal > 0)
         framesPlayed.fetch_add(framesReadTotal, std::memory_order_relaxed);
 
-    normalizeDopMarkers(output, frameCount, outputChannels);
+    normalizeDopMarkers(output, frameCount, outputChannels, startFrameIndex);
 
     return framesReadTotal;
 }
 
 bool DopRingSource::push(const uint32_t* samples, int frameCount)
 {
-    if (frameCount > 0)
-        sessionHasAudio.store(true, std::memory_order_release);
+    return pushForGeneration(samples, frameCount, generation());
+}
+
+bool DopRingSource::pushForGeneration(const uint32_t* samples, int frameCount, uint64_t expectedGeneration)
+{
+    if (samples == nullptr || frameCount <= 0)
+        return frameCount == 0 && expectedGeneration == generation();
+    if (expectedGeneration != generation() || stopRequested.load(std::memory_order_acquire))
+        return false;
 
     int written = 0;
 
-    while (written < frameCount && ! stopRequested.load(std::memory_order_relaxed))
+    while (written < frameCount
+        && expectedGeneration == generation()
+        && ! stopRequested.load(std::memory_order_acquire))
     {
         int start1 = 0;
         int size1 = 0;
@@ -92,11 +106,15 @@ bool DopRingSource::push(const uint32_t* samples, int frameCount)
         int size2 = 0;
         {
             std::lock_guard<std::mutex> lock(fifoMutex);
+            if (expectedGeneration != generation()
+                || stopRequested.load(std::memory_order_acquire))
+                break;
             fifo.prepareToWrite(frameCount - written, start1, size1, start2, size2);
 
             const int framesWritable = size1 + size2;
             if (framesWritable > 0)
             {
+                sessionHasAudio.store(true, std::memory_order_release);
                 copyFromInput(samples + written * channels, start1, size1);
                 copyFromInput(samples + (written + size1) * channels, start2, size2);
                 fifo.finishedWrite(framesWritable);
@@ -108,11 +126,35 @@ bool DopRingSource::push(const uint32_t* samples, int frameCount)
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
 
-    return written == frameCount;
+    return written == frameCount
+        && expectedGeneration == generation()
+        && ! stopRequested.load(std::memory_order_acquire);
+}
+
+int DopRingSource::replaceBufferedAudio(const uint32_t* samples, int frameCount, bool pausedAfterReplace)
+{
+    // Invalidate a producer that encoded a block before seek/replace but has
+    // not acquired the FIFO yet. The second generation check inside
+    // pushForGeneration() prevents that block entering this new session.
+    sessionGeneration.fetch_add(1, std::memory_order_acq_rel);
+    std::lock_guard<std::mutex> lock(fifoMutex);
+    fifo.reset();
+    stopRequested.store(false, std::memory_order_release);
+    inputEnded.store(false, std::memory_order_release);
+    sessionHasAudio.store(frameCount > 0, std::memory_order_release);
+    prebuffering.store(false, std::memory_order_release);
+    int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+    fifo.prepareToWrite(frameCount, start1, size1, start2, size2);
+    copyFromInput(samples, start1, size1);
+    copyFromInput(samples + static_cast<size_t>(size1) * channels, start2, size2);
+    fifo.finishedWrite(size1 + size2);
+    paused.store(pausedAfterReplace, std::memory_order_release);
+    return size1 + size2;
 }
 
 void DopRingSource::beginSession()
 {
+    sessionGeneration.fetch_add(1, std::memory_order_acq_rel);
     {
         std::lock_guard<std::mutex> lock(fifoMutex);
         fifo.reset();
@@ -125,6 +167,8 @@ void DopRingSource::beginSession()
     inputEnded.store(false, std::memory_order_release);
     sessionHasAudio.store(false, std::memory_order_release);
     prebuffering.store(startupPrebufferFrames > 0, std::memory_order_release);
+    paused.store(false, std::memory_order_release);
+    stopRequested.store(false, std::memory_order_release);
 }
 
 void DopRingSource::markInputEnded()
@@ -135,6 +179,11 @@ void DopRingSource::markInputEnded()
 void DopRingSource::requestStop()
 {
     stopRequested.store(true, std::memory_order_release);
+}
+
+void DopRingSource::setPaused(bool shouldPause)
+{
+    paused.store(shouldPause, std::memory_order_release);
 }
 
 bool DopRingSource::isDrained() const
@@ -169,27 +218,38 @@ uint64_t DopRingSource::getUnderrunFrames() const
     return underrunFrames.load(std::memory_order_relaxed);
 }
 
-uint32_t DopRingSource::makeDopSample(uint32_t frameIndex, uint32_t dsdLow16)
+uint32_t DopRingSource::makeDopSample(uint64_t frameIndex, uint32_t dsdLow16)
 {
     const uint32_t marker = (frameIndex & 1u) == 0 ? 0x05u : 0xfau;
     return (dsdLow16 & 0x0000ffffu) | (marker << 16);
 }
 
-void DopRingSource::fillDopSilence(uint32_t* output, uint32_t frameCount, uint32_t outputChannels)
+void DopRingSource::fillDopSilence(
+    uint32_t* output,
+    uint32_t frameCount,
+    uint32_t outputChannels,
+    uint64_t startFrameIndex)
 {
     for (uint32_t frame = 0; frame < frameCount; ++frame)
     {
-        const uint32_t sample = makeDopSample(frame, 0u);
+        // 0x69 is the standard balanced DSD idle pattern. All-zero payloads
+        // represent full negative density and can create a large transient
+        // when an SDM producer underruns or the device is being prebuffered.
+        const uint32_t sample = makeDopSample(startFrameIndex + frame, 0x6969u);
         for (uint32_t channel = 0; channel < outputChannels; ++channel)
             output[static_cast<size_t>(frame) * outputChannels + channel] = sample;
     }
 }
 
-void DopRingSource::normalizeDopMarkers(uint32_t* output, uint32_t frameCount, uint32_t outputChannels)
+void DopRingSource::normalizeDopMarkers(
+    uint32_t* output,
+    uint32_t frameCount,
+    uint32_t outputChannels,
+    uint64_t startFrameIndex)
 {
     for (uint32_t frame = 0; frame < frameCount; ++frame)
     {
-        const uint32_t marker = (frame & 1u) == 0 ? 0x05u : 0xfau;
+        const uint32_t marker = ((startFrameIndex + frame) & 1u) == 0 ? 0x05u : 0xfau;
         for (uint32_t channel = 0; channel < outputChannels; ++channel)
         {
             auto& sample = output[static_cast<size_t>(frame) * outputChannels + channel];

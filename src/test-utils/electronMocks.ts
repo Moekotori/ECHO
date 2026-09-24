@@ -10,7 +10,7 @@ export function createMockIpcMain() {
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
       handlers.set(channel, handler);
     }),
-    on: vi.fn((channel: string, _handler: (...args: unknown[]) => void) => {
+    on: vi.fn((_channel: string, _handler: (...args: unknown[]) => void) => {
       // fire-and-forget, tracked for test assertions
     }),
     handlers,

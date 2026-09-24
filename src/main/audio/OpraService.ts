@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { app } from 'electron';
-import type { EqBand, EqFilterType, EqSavePresetRequest } from '../../shared/types/eq';
+import type { EqBand, EqFilterType } from '../../shared/types/eq';
 import {
   eqBandCount,
   eqFrequenciesHz,

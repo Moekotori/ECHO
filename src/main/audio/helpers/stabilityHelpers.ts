@@ -74,6 +74,15 @@ export const nativeAdaptiveOutputProfiles: Record<'recovery' | 'emergency', Shar
   },
 };
 
+// WASAPI exclusive output still receives PCM through the main-process pipe.
+// Keep the hardware buffer small for latency, but maintain a deep native FIFO
+// so temporary Electron/main-thread stalls cannot starve the audio callback.
+export const nativeExclusiveFeedProfile: SharedOutputProfile = {
+  fifoCapacityMs: 8000,
+  startupPrebufferMs: 250,
+  startupPrebufferTimeoutMs: 700,
+};
+
 export const httpStreamingSharedProfile: SharedOutputProfile = {
   bufferSizeFrames: 8192,
   fifoCapacityMs: 3000,

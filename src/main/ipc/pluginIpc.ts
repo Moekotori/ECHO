@@ -12,7 +12,7 @@ import type {
   PluginSourceSearchRequest,
 } from '../../shared/types/plugins';
 import { createPrivateFeatureError, getPrivatePluginOperations } from '../plugins/privateEntitlements';
-import { requirePrivateFeatureThen } from './entitlementIpcGuards';
+import { requireLocalProFeatureThen } from './entitlementIpcGuards';
 
 const requireText = (value: unknown, field: string): string => {
   if (typeof value !== 'string' || !value.trim()) {
@@ -35,8 +35,8 @@ export const registerPluginIpc = (): void => {
   getPrivatePluginOperations()?.scheduleAutoStart?.();
 
   ipcMain.handle(IpcChannels.PluginsList, () => getPrivatePluginOperations()?.list() ?? { plugins: [], directory: '' });
-  ipcMain.handle(IpcChannels.PluginsListMarket, requirePrivateFeatureThen('plugins', () => requirePluginOperations().listMarket()));
-  ipcMain.handle(IpcChannels.PluginsInstallMarket, requirePrivateFeatureThen('plugins', async (_event, pluginId: unknown) =>
+  ipcMain.handle(IpcChannels.PluginsListMarket, requireLocalProFeatureThen('plugins', () => requirePluginOperations().listMarket()));
+  ipcMain.handle(IpcChannels.PluginsInstallMarket, requireLocalProFeatureThen('plugins', async (_event, pluginId: unknown) =>
     requirePluginOperations().installMarket(requireText(pluginId, 'pluginId')),
   ));
   ipcMain.handle(IpcChannels.PluginsCreateExample, async (_event, kind: unknown) => {
@@ -60,7 +60,7 @@ export const registerPluginIpc = (): void => {
   ipcMain.handle(IpcChannels.PluginsOpenDirectory, (_event, pluginId: unknown) =>
     requirePluginOperations().openDirectory(typeof pluginId === 'string' && pluginId.trim() ? pluginId.trim() : undefined),
   );
-  ipcMain.handle(IpcChannels.PluginsExportPackage, requirePrivateFeatureThen('plugins', async (_event, pluginId: unknown) => {
+  ipcMain.handle(IpcChannels.PluginsExportPackage, requireLocalProFeatureThen('plugins', async (_event, pluginId: unknown) => {
     const id = requireText(pluginId, 'pluginId');
     return requirePluginOperations().exportPackage(id);
   }));

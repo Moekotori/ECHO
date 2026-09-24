@@ -4,6 +4,8 @@ type PlaybackPerformanceContext = {
   startedAtMs: number;
   trackId?: string | null;
   outputMode?: string | null;
+  provider?: string | null;
+  quality?: string | null;
 };
 
 type PlaybackPerformanceCompletedStep = {
@@ -13,6 +15,8 @@ type PlaybackPerformanceCompletedStep = {
   endedAtMs: number;
   trackId?: string | null;
   outputMode?: string | null;
+  provider?: string | null;
+  quality?: string | null;
 };
 
 export type PlaybackPerformanceBreadcrumb = {
@@ -41,6 +45,13 @@ export type PlaybackPerformanceSnapshot = {
   lastSlowIpcDurationMs: number | null;
   lastSlowIpcAgeMs: number | null;
   lastSlowIpcFailed: boolean | null;
+  activeIpcChannel: string | null;
+  activeIpcElapsedMs: number | null;
+  activeIpcCount: number;
+  lastIpcChannel: string | null;
+  lastIpcDurationMs: number | null;
+  lastIpcAgeMs: number | null;
+  lastIpcFailed: boolean | null;
   breadcrumbs: PlaybackPerformanceBreadcrumb[];
 };
 
@@ -57,12 +68,16 @@ const slowIpcWarnThresholdByChannelMs: Record<string, number> = {
 const slowIpcWarnCooldownMs = 10_000;
 const recentBackgroundTaskTtlMs = 30_000;
 const recentSlowIpcTtlMs = 30_000;
+const recentIpcTtlMs = 30_000;
 let activeContext: PlaybackPerformanceContext | null = null;
 let lastCompletedStep: PlaybackPerformanceCompletedStep | null = null;
 let pendingBackgroundTask: string | null = null;
 let pendingBackgroundTaskStartedAtMs: number | null = null;
 let lastCompletedBackgroundTask: { name: string; durationMs: number; endedAtMs: number } | null = null;
 let lastSlowIpc: { channel: string; durationMs: number; endedAtMs: number; failed: boolean } | null = null;
+let nextActiveIpcId = 1;
+const activeIpcHandlers = new Map<number, { channel: string; startedAtMs: number }>();
+let lastCompletedIpc: { channel: string; durationMs: number; endedAtMs: number; failed: boolean } | null = null;
 let breadcrumbs: Omit<PlaybackPerformanceBreadcrumb, 'ageMs'>[] = [];
 const lastSlowPlaybackStepWarnAtByKey = new Map<string, number>();
 const lastSlowIpcWarnAtByKey = new Map<string, number>();
@@ -77,6 +92,8 @@ const logStep = (context: PlaybackPerformanceContext, durationMs: number): void 
   const details = formatDetails({
     trackId: context.trackId,
     outputMode: context.outputMode,
+    provider: context.provider,
+    quality: context.quality,
   });
   const baseMessage = `[playback-perf] ${context.operation}:${context.phase} ${roundedDurationMs}ms${details}`;
   if (roundedDurationMs >= slowPlaybackStepWarnThresholdMs) {
@@ -116,7 +133,12 @@ export const markPlaybackBreadcrumb = (
 export const runPlaybackPerformanceStep = async <T>(
   operation: string,
   phase: string,
-  details: { trackId?: string | null; outputMode?: string | null },
+  details: {
+    trackId?: string | null;
+    outputMode?: string | null;
+    provider?: string | null;
+    quality?: string | null;
+  },
   run: () => Promise<T>,
 ): Promise<T> => {
   const previous = activeContext;
@@ -126,6 +148,8 @@ export const runPlaybackPerformanceStep = async <T>(
     startedAtMs: Date.now(),
     trackId: details.trackId,
     outputMode: details.outputMode,
+    provider: details.provider,
+    quality: details.quality,
   };
   activeContext = context;
   markPlaybackBreadcrumb(`${operation}:${phase}:start`, details);
@@ -140,6 +164,8 @@ export const runPlaybackPerformanceStep = async <T>(
       endedAtMs: Date.now(),
       trackId: details.trackId,
       outputMode: details.outputMode,
+      provider: details.provider,
+      quality: details.quality,
     };
     logStep(context, durationMs);
     markPlaybackBreadcrumb(`${operation}:${phase}:end:${Math.max(0, Math.round(durationMs))}ms`, details);
@@ -150,7 +176,12 @@ export const runPlaybackPerformanceStep = async <T>(
 export const runPlaybackPerformanceStepSync = <T>(
   operation: string,
   phase: string,
-  details: { trackId?: string | null; outputMode?: string | null },
+  details: {
+    trackId?: string | null;
+    outputMode?: string | null;
+    provider?: string | null;
+    quality?: string | null;
+  },
   run: () => T,
 ): T => {
   const previous = activeContext;
@@ -160,6 +191,8 @@ export const runPlaybackPerformanceStepSync = <T>(
     startedAtMs: Date.now(),
     trackId: details.trackId,
     outputMode: details.outputMode,
+    provider: details.provider,
+    quality: details.quality,
   };
   activeContext = context;
   markPlaybackBreadcrumb(`${operation}:${phase}:start`, details);
@@ -174,6 +207,8 @@ export const runPlaybackPerformanceStepSync = <T>(
       endedAtMs: Date.now(),
       trackId: details.trackId,
       outputMode: details.outputMode,
+      provider: details.provider,
+      quality: details.quality,
     };
     logStep(context, durationMs);
     markPlaybackBreadcrumb(`${operation}:${phase}:end:${Math.max(0, Math.round(durationMs))}ms`, details);
@@ -233,6 +268,26 @@ export const recordIpcMainHandlerDuration = (
   );
 };
 
+export const beginIpcMainHandler = (channel: string): ((failed?: boolean) => void) => {
+  const id = nextActiveIpcId;
+  nextActiveIpcId += 1;
+  const startedAtMs = Date.now();
+  activeIpcHandlers.set(id, { channel, startedAtMs });
+  let completed = false;
+
+  return (failed = false): void => {
+    if (completed) {
+      return;
+    }
+    completed = true;
+    activeIpcHandlers.delete(id);
+    const endedAtMs = Date.now();
+    const durationMs = Math.max(0, endedAtMs - startedAtMs);
+    lastCompletedIpc = { channel, durationMs, endedAtMs, failed };
+    recordIpcMainHandlerDuration(channel, durationMs, { failed });
+  };
+};
+
 export const getPlaybackPerformanceSnapshot = (nowMs = Date.now()): PlaybackPerformanceSnapshot => {
   const recent = lastCompletedStep && nowMs - lastCompletedStep.endedAtMs <= recentStepTtlMs ? lastCompletedStep : null;
   const recentBackgroundTask =
@@ -242,6 +297,11 @@ export const getPlaybackPerformanceSnapshot = (nowMs = Date.now()): PlaybackPerf
   const recentSlowIpc =
     lastSlowIpc && nowMs - lastSlowIpc.endedAtMs <= recentSlowIpcTtlMs
       ? lastSlowIpc
+      : null;
+  const oldestActiveIpc = activeIpcHandlers.values().next().value as { channel: string; startedAtMs: number } | undefined;
+  const recentIpc =
+    lastCompletedIpc && nowMs - lastCompletedIpc.endedAtMs >= 0 && nowMs - lastCompletedIpc.endedAtMs <= recentIpcTtlMs
+      ? lastCompletedIpc
       : null;
   const recentBreadcrumbs = breadcrumbs
     .filter((entry) => nowMs - entry.timestampMs <= breadcrumbTtlMs)
@@ -268,6 +328,13 @@ export const getPlaybackPerformanceSnapshot = (nowMs = Date.now()): PlaybackPerf
     lastSlowIpcDurationMs: recentSlowIpc?.durationMs ?? null,
     lastSlowIpcAgeMs: recentSlowIpc ? Math.max(0, nowMs - recentSlowIpc.endedAtMs) : null,
     lastSlowIpcFailed: recentSlowIpc?.failed ?? null,
+    activeIpcChannel: oldestActiveIpc?.channel ?? null,
+    activeIpcElapsedMs: oldestActiveIpc ? Math.max(0, nowMs - oldestActiveIpc.startedAtMs) : null,
+    activeIpcCount: activeIpcHandlers.size,
+    lastIpcChannel: recentIpc?.channel ?? null,
+    lastIpcDurationMs: recentIpc?.durationMs ?? null,
+    lastIpcAgeMs: recentIpc ? Math.max(0, nowMs - recentIpc.endedAtMs) : null,
+    lastIpcFailed: recentIpc?.failed ?? null,
     breadcrumbs: recentBreadcrumbs,
   };
 };

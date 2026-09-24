@@ -19,6 +19,15 @@ namespace echo
 namespace
 {
 
+bool isRegularFile(const struct stat& fileStats)
+{
+#ifdef _WIN32
+    return (fileStats.st_mode & _S_IFMT) == _S_IFREG;
+#else
+    return S_ISREG(fileStats.st_mode);
+#endif
+}
+
 float dbToGain(float db)
 {
     return std::pow(10.0f, db / 20.0f);
@@ -55,7 +64,7 @@ FloatAudioBuffer decodeAudioFile(const std::string& path)
 {
     // Check file existence
     struct stat st {};
-    if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+    if (stat(path.c_str(), &st) != 0 || !isRegularFile(st))
         return {};
 
     AVFormatContext* fmtCtx = nullptr;
@@ -245,15 +254,33 @@ void ConvolutionProcessor::prepare(double sampleRate, int maximumBlockSize, int 
     preparedBlockSize = std::max(1, maximumBlockSize);
     history.assign(static_cast<size_t>(preparedChannels), std::vector<float>(static_cast<size_t>(roomCorrectionMaxTaps), 0.0f));
     historyWriteIndex = 0;
+    processedImpulse = std::atomic_load_explicit(&activeImpulse, std::memory_order_acquire);
+    appliedResetEpoch = resetEpoch.load(std::memory_order_acquire);
     clippingRisk.store(false, std::memory_order_release);
 }
 
 void ConvolutionProcessor::reset()
 {
+    // reset() is also called by the JSON-RPC control thread after an IR swap.
+    // The audio/decode side owns history, so clearing it here would race with
+    // processBlock(). Publish a reset request instead; the sole processing
+    // thread applies it at the next block boundary.
+    resetEpoch.fetch_add(1, std::memory_order_release);
+    clippingRisk.store(false, std::memory_order_release);
+}
+
+void ConvolutionProcessor::applyRequestedReset(const std::shared_ptr<const PreparedImpulse>& impulse)
+{
+    const uint64_t requestedEpoch = resetEpoch.load(std::memory_order_acquire);
+    if (requestedEpoch == appliedResetEpoch && processedImpulse.get() == impulse.get())
+        return;
+
     for (auto& channelHistory : history)
         std::fill(channelHistory.begin(), channelHistory.end(), 0.0f);
 
     historyWriteIndex = 0;
+    processedImpulse = impulse;
+    appliedResetEpoch = requestedEpoch;
     clippingRisk.store(false, std::memory_order_release);
 }
 
@@ -263,6 +290,7 @@ void ConvolutionProcessor::processBlock(echo::FloatAudioBuffer& buffer, int star
         return;
 
     auto impulse = std::atomic_load_explicit(&activeImpulse, std::memory_order_acquire);
+    applyRequestedReset(impulse);
     const bool enabled = targetEnabled.load(std::memory_order_acquire);
     const int channelCount = std::min(buffer.getNumChannels(), preparedChannels);
     if (! enabled || impulse == nullptr || impulse->tapCount <= 0 || channelCount <= 0)
@@ -329,7 +357,7 @@ bool ConvolutionProcessor::loadImpulseResponse(const std::string& path, const st
         hasError.store(true, std::memory_order_release);
         // Differentiate missing file from invalid audio
         struct stat st {};
-        if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+        if (stat(path.c_str(), &st) != 0 || !isRegularFile(st))
             errorMessage = "missing_file";
         else
             errorMessage = "invalid_audio";

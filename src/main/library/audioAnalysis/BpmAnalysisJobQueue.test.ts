@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BPM_ANALYSIS_VERSION, BPM_ANALYSIS_VERSION_FIELD } from '../../../shared/constants/audioAnalysis';
 import type { LibraryTrack } from '../libraryTypes';
 import type { LibraryStore } from '../LibraryStore';
 import type { BpmAnalyzer } from './BpmAnalyzer';
@@ -105,7 +106,7 @@ describe('BpmAnalysisJobQueue', () => {
     expect(writeBpmTag).toHaveBeenCalledWith(track.path, 127.6);
   });
 
-  it('stores low-confidence analysis without writing BPM tags', async () => {
+  it('stores low-confidence BPM estimates for display without writing tags', async () => {
     const track = makeTrack(makeTempAudioPath());
     const store = makeStore(track);
     const writeBpmTag = vi.fn().mockResolvedValue(undefined);
@@ -127,12 +128,12 @@ describe('BpmAnalysisJobQueue', () => {
     await waitForCondition(() => queue.getStatus(job.id).status === 'completed', 'job completion');
 
     expect(store.updateTrackBpmAnalysis).toHaveBeenCalledWith(track.id, {
-      bpm: null,
+      bpm: 128.2,
       confidence: 0.2,
-      beatOffsetMs: null,
+      beatOffsetMs: 18,
       status: 'low_confidence',
     });
-    expect(queue.getStatus(job.id).updatedTracks).toBe(0);
+    expect(queue.getStatus(job.id).updatedTracks).toBe(1);
     expect(writeBpmTag).not.toHaveBeenCalled();
   });
 
@@ -167,6 +168,43 @@ describe('BpmAnalysisJobQueue', () => {
     expect(writeBpmTag).not.toHaveBeenCalled();
   });
 
+  it('preserves BPM read from an osu timing point when offset analysis is forced', async () => {
+    const track = {
+      ...makeTrack(makeTempAudioPath()),
+      bpm: 210,
+      bpmConfidence: 1,
+      analysisStatus: 'complete' as const,
+      fieldSources: { bpm: 'osu', osu: 'osu' },
+    };
+    const store = makeStore(track);
+    const writeBpmTag = vi.fn().mockResolvedValue(undefined);
+    const analyzer = {
+      analyze: vi.fn().mockResolvedValue({ bpm: 105, confidence: 0.59, beatOffsetMs: 24 }),
+    } as unknown as BpmAnalyzer;
+    const queue = new BpmAnalysisJobQueue(store, {
+      analyzer,
+      writeBpmTag,
+      shouldDelayTagWrite: vi.fn().mockResolvedValue(false),
+    });
+
+    const job = queue.start({ trackIds: [track.id], force: true });
+    await waitForCondition(() => queue.getStatus(job.id).status === 'completed', 'job completion');
+
+    expect(store.updateTrackBpmAnalysis).toHaveBeenCalledWith(track.id, {
+      bpm: 210,
+      confidence: 1,
+      beatOffsetMs: 24,
+      status: 'complete',
+      fieldSources: {
+        bpm: 'osu',
+        osu: 'osu',
+        beatOffsetMs: 'audio_analysis',
+        [BPM_ANALYSIS_VERSION_FIELD]: String(BPM_ANALYSIS_VERSION),
+      },
+    });
+    expect(writeBpmTag).not.toHaveBeenCalled();
+  });
+
   it('retries BPM tag writes when the audio file is still busy', async () => {
     const track = makeTrack(makeTempAudioPath());
     const writeBpmTag = vi.fn().mockResolvedValue(undefined);
@@ -187,5 +225,36 @@ describe('BpmAnalysisJobQueue', () => {
 
     expect(shouldDelayTagWrite).toHaveBeenCalledTimes(2);
     expect(writeBpmTag).toHaveBeenCalledWith(track.path, 127.6);
+  });
+
+  it('keeps queued jobs serialized and waits for the whole queue', async () => {
+    const track = makeTrack(makeTempAudioPath());
+    let releaseFirst!: () => void;
+    const firstAnalysis = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const analyze = vi.fn()
+      .mockImplementationOnce(async () => {
+        await firstAnalysis;
+        return { bpm: 126, confidence: 0.9, beatOffsetMs: 10 };
+      })
+      .mockResolvedValue({ bpm: 128, confidence: 0.9, beatOffsetMs: 20 });
+    const analyzer = { analyze } as unknown as BpmAnalyzer;
+    const queue = new BpmAnalysisJobQueue(makeStore(track), {
+      analyzer,
+      writeBpmTag: vi.fn().mockResolvedValue(undefined),
+      shouldDelayTagWrite: vi.fn().mockResolvedValue(false),
+    });
+
+    const first = queue.start({ trackIds: [track.id] });
+    const second = queue.start({ trackIds: [track.id] });
+    await waitForCondition(() => analyze.mock.calls.length === 1, 'first analysis');
+
+    releaseFirst();
+    await queue.waitForIdle();
+
+    expect(analyze).toHaveBeenCalledTimes(2);
+    expect(queue.getStatus(first.id).status).toBe('completed');
+    expect(queue.getStatus(second.id).status).toBe('completed');
   });
 });

@@ -1,15 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Disc3, Mic2, Music2 } from 'lucide-react';
-import type { AudioStatus } from '../../shared/types/audio';
 import type { AppSettings } from '../../shared/types/appSettings';
-import type { PlaybackStatus } from '../../shared/types/playback';
 import { PlayerStatusChips } from '../components/player/PlayerStatusChips';
 import { titleFromPath } from '../components/player/playerFormat';
 import { useI18n } from '../i18n/I18nProvider';
 import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
+import { useSharedPlaybackStatus } from '../stores/playbackStatusStore';
+import { dispatchAudioErrorNotice } from '../utils/audioErrorNotice';
 
-const idlePollingStates = new Set(['paused', 'stopped', 'idle', 'error']);
 const nowPlayingMarqueeOverflowPx = 4;
 const coverColorSampleSize = 32;
 const maxCachedCoverPalettes = 48;
@@ -193,15 +192,14 @@ const NowPlayingMarqueeText = ({
 export const NowPlayingPage = (): JSX.Element => {
   const { t } = useI18n();
   const queue = usePlaybackQueue();
-  const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus | null>(null);
-  const [audioStatus, setAudioStatus] = useState<AudioStatus | null>(null);
+  const setQueueCurrentTrackId = queue.setCurrentTrackId;
+  const sharedPlaybackStatus = useSharedPlaybackStatus();
+  const { audioStatus, playbackStatus } = sharedPlaybackStatus;
   const [lowLoadPlaybackModeEnabled, setLowLoadPlaybackModeEnabled] = useState(false);
   const [nowPlayingCoverColorEnabled, setNowPlayingCoverColorEnabled] = useState(false);
   const [coverPalette, setCoverPalette] = useState<NowPlayingCoverPalette | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const state = audioStatus?.state ?? playbackStatus?.state ?? 'idle';
-  const pollIntervalMs = lowLoadPlaybackModeEnabled || idlePollingStates.has(state) ? 1800 : 500;
-  const statusTrackId = playbackStatus?.currentTrackId ?? audioStatus?.currentTrackId ?? null;
+  const statusTrackId = audioStatus?.currentTrackId ?? playbackStatus?.currentTrackId ?? null;
   const currentTrack =
     queue.currentTrack ??
     (statusTrackId ? queue.tracks.find((track) => track.id === statusTrackId) ?? null : null) ??
@@ -221,40 +219,18 @@ export const NowPlayingPage = (): JSX.Element => {
     [coverPalette, shouldUseCoverColor],
   );
 
-  const refreshStatus = useCallback(async (): Promise<void> => {
-    const echo = window.echo;
-
-    if (!echo) {
-      setError('Desktop bridge unavailable');
-      return;
-    }
-
-    try {
-      const [nextPlaybackStatus, nextAudioStatus] = await Promise.all([
-        echo.playback.getStatus(),
-        echo.audio.getStatus(),
-      ]);
-
-      setPlaybackStatus(nextPlaybackStatus);
-      setAudioStatus(nextAudioStatus);
-      const nextTrackId = nextPlaybackStatus.currentTrackId ?? nextAudioStatus.currentTrackId ?? null;
-      if (nextTrackId) {
-        queue.setCurrentTrackId(nextTrackId);
-      }
-      setError(nextAudioStatus.error);
-    } catch (statusError) {
-      setError(statusError instanceof Error ? statusError.message : String(statusError));
-    }
-  }, [queue]);
-
   useEffect(() => {
-    void refreshStatus();
-    const timer = window.setInterval(() => {
-      void refreshStatus();
-    }, pollIntervalMs);
+    if (statusTrackId) {
+      setQueueCurrentTrackId(statusTrackId);
+    }
+  }, [setQueueCurrentTrackId, statusTrackId]);
 
-    return () => window.clearInterval(timer);
-  }, [pollIntervalMs, refreshStatus]);
+  const playbackError = audioStatus?.error ?? sharedPlaybackStatus.error;
+  useEffect(() => {
+    if (playbackError) {
+      dispatchAudioErrorNotice(playbackError);
+    }
+  }, [playbackError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -363,7 +339,6 @@ export const NowPlayingPage = (): JSX.Element => {
           <NowPlayingMarqueeText as="h2" text={currentTrack || filePath ? title : t('nowPlaying.emptyTitle')} />
           <NowPlayingMarqueeText as="p" text={artist} />
           <PlayerStatusChips status={audioStatus} state={state} track={currentTrack} />
-          {error ? <strong className="now-playing-error">{error}</strong> : null}
         </div>
       </section>
 

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TrackLyrics } from '../../shared/types/lyrics';
 import type { LibraryPage, LibraryPageQuery, LibraryTrack, LyricsBackfillJobStatus } from './libraryTypes';
-import { LyricsBackfillJobPersistence, LyricsBackfillJobQueue } from './LyricsBackfillJobQueue';
+import type { LyricsBackfillJobPersistence} from './LyricsBackfillJobQueue';
+import { LyricsBackfillJobQueue } from './LyricsBackfillJobQueue';
 
 const track = (id: string, title = id): LibraryTrack => ({
   id,
@@ -80,18 +81,21 @@ describe('LyricsBackfillJobQueue', () => {
     const getLyricsForTrack = vi.fn(async (trackId: string) => (trackId === 'hit' ? syncedLyrics(trackId) : null));
     const queue = new LyricsBackfillJobQueue(
       (query) => pageFor(tracks, query),
-      async () => ({
-        hasCachedLyricsForTrack,
-        hasCachedLyricsForTrackIds,
-        getLyricsForTrack,
-      }),
+      {
+        getLyricsService: async () => ({
+          hasCachedLyricsForTrack,
+          hasCachedLyricsForTrackIds,
+          getLyricsForTrack,
+        }),
+        isPlaybackActive: async () => false,
+      },
     );
 
     const started = queue.start({ mode: 'quick', limit: 10, concurrency: 2, autoAcceptScore: 0.62 });
     const finished = await waitForTerminalStatus(queue, started.id);
 
     expect(finished.status).toBe('completed');
-    expect(finished.autoAcceptScore).toBe(0.62);
+    expect(finished.autoAcceptScore).toBe(0.78);
     expect(finished.scannedTracks).toBe(3);
     expect(finished.totalTracks).toBe(2);
     expect(finished.processedTracks).toBe(2);
@@ -106,7 +110,8 @@ describe('LyricsBackfillJobQueue', () => {
       deepSearchEnabled: true,
       providerTimeoutMs: 2300,
       totalMatchTimeoutMs: 4200,
-      autoAcceptScore: 0.62,
+      autoAcceptScore: 0.78,
+      autoApply: true,
       preferPrimaryProvider: false,
       relaxedAutoAccept: true,
     }));

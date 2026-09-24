@@ -184,6 +184,12 @@ describe('LibraryDiagnosticsPanel', () => {
         binaryFound: true,
         binaryPath: 'G:\\ECHO-main\\electron-app\\build\\echo-native-scanner.exe',
         willUseNative: true,
+        protocolVersion: 2,
+        poolSize: 4,
+        activeProcesses: 2,
+        hitRate: 0.98,
+        fallbackToTs: 3,
+        lastError: 'damaged tag',
         supportedFormats: ['WAV/PCM', 'AIFF/AIFC', 'Ogg Vorbis', 'Opus', 'FLAC', 'MP3', 'M4A/MP4/ALAC'],
       },
     });
@@ -194,6 +200,10 @@ describe('LibraryDiagnosticsPanel', () => {
     expect(await screen.findByText('nativeMetadataReader.enabled')).toBeTruthy();
     expect(screen.getByText('nativeMetadataReader.supportedFormats')).toBeTruthy();
     expect(screen.getByText('WAV/PCM, AIFF/AIFC, Ogg Vorbis, Opus, FLAC, MP3, M4A/MP4/ALAC')).toBeTruthy();
+    expect(screen.getByText('nativeMetadataReader.pool')).toBeTruthy();
+    expect(screen.getByText('2/4')).toBeTruthy();
+    expect(screen.getByText('98%')).toBeTruthy();
+    expect(screen.getByText('damaged tag')).toBeTruthy();
   });
 
   it('allows Start Watcher after the watcher toggle is enabled', async () => {

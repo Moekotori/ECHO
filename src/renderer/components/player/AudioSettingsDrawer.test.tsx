@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { AudioSettingsDrawer } from './AudioSettingsDrawer';
 import type { AudioDeviceInfo, AudioStatus } from '../../../shared/types/audio';
 import { audioOutputRouteStatusChangedEvent } from '../../utils/audioOutputRouteEvents';
@@ -33,6 +33,8 @@ const testTranslations: Record<string, string> = {
   'audioDrawer.latency.stable': 'Stable',
   'audioDrawer.latency.stableDetail': '8192 frames',
   'audioDrawer.option.active': 'On',
+  'audioDrawer.option.automaticOutput': 'Automatic Output (Recommended)',
+  'audioDrawer.option.automaticOutputDescription': 'Follows the system default device with safe shared output.',
   'audioDrawer.option.nativeDirectLocalPlayback': 'Local Direct Playback Experiment',
   'audioDrawer.note.nativeDirectLocalPlayback': 'Off by default.',
   'audioDrawer.option.dsdDop': 'DSD DoP Direct Pilot',
@@ -234,6 +236,16 @@ const asioDevice: AudioDeviceInfo = {
   isDefault: true,
 };
 
+const nativeAsioDevice: AudioDeviceInfo = {
+  id: 'asio:0',
+  index: 0,
+  name: 'TEAC ASIO',
+  outputMode: 'asio',
+  sampleRate: null,
+  sharedDeviceSampleRate: null,
+  isDefault: true,
+};
+
 const renderDrawer = (
   status: AudioStatus,
   setOutput = vi.fn().mockResolvedValue(status),
@@ -241,16 +253,17 @@ const renderDrawer = (
   forceRestart = vi.fn().mockResolvedValue({ ...status, state: 'stopped' }),
   restartWindowsAudioService = vi.fn().mockResolvedValue({ ...status, state: 'stopped' }),
   extraProps: Partial<ComponentProps<typeof AudioSettingsDrawer>> = {},
-  devices: AudioDeviceInfo[] = [asioDevice],
+  devices: AudioDeviceInfo[] = [asioDevice, nativeAsioDevice],
 ): void => {
   window.echo = {
     app: {
       getSettings: vi.fn().mockResolvedValue({
         rememberedAudioOutput: { enabled: false },
+        audioAutomaticOutputEnabled: status.automaticOutputEnabled === true,
         audioUseLibavDecode: status.useLibavDecodeRequested,
         audioUseMiniaudioOutput: status.useMiniaudioOutputRequested,
         audioNativeDirectLocalPlaybackEnabled: false,
-        audioDsdOutputMode: status.dsdOutputModeRequested ?? 'pcm',
+        audioDsdOutputMode: status.dsdOutputModeRequested ?? 'dop',
         audioReleaseExclusiveOnPauseExperimentalEnabled: false,
         lowLoadPlaybackModeEnabled: false,
         lowLoadPlaybackEnhancementsEnabled: false,
@@ -346,10 +359,6 @@ const openAdvancedGroup = (name: RegExp): void => {
   }
 };
 
-const openDecodeControls = (): void => {
-  openAdvancedGroup(/Decode And Direct Playback/);
-};
-
 const openDsdControls = (): void => {
   openAdvancedGroup(/DSD Direct Output/);
 };
@@ -376,6 +385,7 @@ const openBufferControls = (): void => {
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.localStorage.setItem('echo-next.audio-engine-meter-open', 'true');
   setNavigatorUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
   Object.defineProperty(window, 'requestAnimationFrame', {
     configurable: true,
@@ -439,9 +449,24 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
 
     await waitFor(() => expect(screen.getAllByText('TEAC Device').length).toBeGreaterThan(0));
 
-    expect(screen.getByRole('heading', { name: 'asioDevices' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'asioDevices' })).toBeNull();
     expect(screen.getByRole('checkbox', { name: /wasapiExclusive/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /TEAC ASIO/ })).toBeTruthy();
+    const exclusiveDeviceSection = screen.getByRole('heading', { name: 'systemDevices' }).closest('section') as HTMLElement;
+    expect(within(exclusiveDeviceSection).getByRole('button', { name: /TEAC ASIO/ })).toBeTruthy();
+  });
+
+  it('keeps the exclusive route tab active for an ASIO selection', async () => {
+    renderDrawer({
+      ...baseStatus,
+      outputMode: 'asio',
+      outputBackend: 'asio',
+      outputDeviceName: 'TEAC ASIO',
+    });
+
+    await screen.findByRole('button', { name: /TEAC ASIO/ });
+
+    expect(screen.getByRole('button', { name: 'exclusive' }).className).toContain('active');
+    expect(screen.getByRole('button', { name: 'shared' }).className).not.toContain('active');
   });
 
   it('renders unknown shared devices with the fallback icon', async () => {
@@ -456,6 +481,29 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
     }]);
 
     expect(await screen.findByRole('button', { name: /Mystery Output/ })).toBeTruthy();
+  });
+
+  it('labels Bluetooth devices from host metadata even when the device name has no Bluetooth keyword', async () => {
+    renderDrawerWithDevices(baseStatus, [{
+      id: 'shared:bluetooth-headphones',
+      index: 3,
+      name: '耳机（籽眠）',
+      outputMode: 'shared',
+      sampleRate: 48000,
+      sharedDeviceSampleRate: 48000,
+      isDefault: true,
+      connectionType: 'bluetooth',
+      formFactor: 'headphones',
+    }]);
+
+    const deviceButton = await waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>('.audio-device-pill[data-connection-type="bluetooth"]');
+      expect(button).not.toBeNull();
+      return button as HTMLButtonElement;
+    });
+    expect(deviceButton.dataset.connectionType).toBe('bluetooth');
+    expect(within(deviceButton).getAllByText('Bluetooth').length).toBeGreaterThan(0);
+    expect(within(deviceButton).getByText(/Bluetooth \/ WASAPI Shared \/ 48 kHz/)).toBeTruthy();
   });
 
   it('shows advanced channel routes for ASIO4ALL devices', async () => {
@@ -638,26 +686,31 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
   });
 
   it('remembers the HiFi engine meter collapse state', () => {
+    window.localStorage.removeItem('echo-next.audio-engine-meter-open');
     renderDrawer(baseStatus);
 
-    const engineToggle = screen.getByRole('button', { name: /HiFi Engine/ });
-    expect(engineToggle.getAttribute('aria-expanded')).toBe('true');
-    expect(document.querySelector('.audio-engine-meter__grid')).toBeTruthy();
+    const engineToggle = screen.getByRole('region', { name: /HiFi Engine/ }).querySelector('.audio-engine-meter__summary');
+    if (!(engineToggle instanceof HTMLButtonElement)) {
+      throw new Error('Playback chain toggle was not rendered');
+    }
+    expect(engineToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('.audio-engine-meter__grid')).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Refresh status' }).some((button) =>
       button.className.includes('audio-engine-meter__refresh'),
     )).toBe(true);
 
     fireEvent.click(engineToggle);
 
-    expect(engineToggle.getAttribute('aria-expanded')).toBe('false');
-    expect(document.querySelector('.audio-engine-meter__grid')).toBeNull();
-    expect(window.localStorage.getItem('echo-next.audio-engine-meter-open')).toBe('false');
+    expect(engineToggle.getAttribute('aria-expanded')).toBe('true');
+    expect(document.querySelector('.audio-engine-meter__grid')).toBeTruthy();
+    expect(window.localStorage.getItem('echo-next.audio-engine-meter-open')).toBe('true');
 
     cleanup();
     renderDrawer(baseStatus);
 
-    expect(screen.getByRole('button', { name: /HiFi Engine/ }).getAttribute('aria-expanded')).toBe('false');
-    expect(document.querySelector('.audio-engine-meter__grid')).toBeNull();
+    const rememberedToggle = screen.getByRole('region', { name: /HiFi Engine/ }).querySelector('.audio-engine-meter__summary');
+    expect(rememberedToggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(document.querySelector('.audio-engine-meter__grid')).toBeTruthy();
   });
 
   it('shows professional playback status badges without opening advanced output', () => {
@@ -734,7 +787,7 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
     });
     openDsdControls();
 
-    expect(screen.getByRole('checkbox', { name: /DSD DoP Direct Pilot/ })).toHaveProperty('checked', true);
+    expect(screen.queryByRole('checkbox', { name: /DSD DoP Direct Pilot/ })).toBeNull();
     expect(screen.getByText('DSF bitstream -> DoP -> exclusive')).toBeTruthy();
     expect(screen.getByText('DSF bitstream -> DoP')).toBeTruthy();
     expect(screen.getAllByText('2822 kHz -> DoP 176 kHz').length).toBeGreaterThan(0);
@@ -754,18 +807,11 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
     expect(screen.getByText('DSD DoP fallback')).toBeTruthy();
   });
 
-  it('persists manual DSD DoP enablement', async () => {
-    const setOutput = vi.fn().mockResolvedValue({
-      ...baseStatus,
-      dsdOutputModeRequested: 'dop',
-    });
-    renderDrawer(baseStatus, setOutput);
+  it('keeps the DSD passthrough switch out of the playback drawer', () => {
+    renderDrawer(baseStatus);
     openDsdControls();
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /DSD DoP Direct Pilot/ }));
-
-    await waitFor(() => expect(window.echo?.app?.setSettings).toHaveBeenCalledWith(expect.objectContaining({ audioDsdOutputMode: 'dop' })));
-    await waitFor(() => expect(setOutput).toHaveBeenCalledWith(expect.objectContaining({ dsdOutputMode: 'dop' })));
+    expect(screen.queryByRole('checkbox', { name: /DSD DoP Direct Pilot/ })).toBeNull();
   });
 
   it('persists release-exclusive-on-pause experiment enablement', async () => {
@@ -828,13 +874,64 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
     window.removeEventListener('settings:changed', settingsChanged);
   });
 
+  it('keeps automatic output off by default and applies it only after opt-in', async () => {
+    const automaticStatus: AudioStatus = {
+      ...baseStatus,
+      automaticOutputEnabled: true,
+      outputMode: 'shared',
+      sharedBackend: 'auto',
+      latencyProfile: 'balanced',
+    };
+    const setOutput = vi.fn().mockResolvedValue(automaticStatus);
+    renderDrawer(baseStatus, setOutput);
+
+    const automaticToggle = await screen.findByRole('checkbox', { name: 'Automatic Output (Recommended)' });
+    expect((automaticToggle as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(automaticToggle);
+
+    await waitFor(() =>
+      expect(window.echo?.app?.setSettings).toHaveBeenCalledWith({ audioAutomaticOutputEnabled: true }),
+    );
+    await waitFor(() =>
+      expect(setOutput).toHaveBeenCalledWith({ automaticOutputEnabled: true }),
+    );
+    expect((automaticToggle as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('lets the mode tabs leave automatic output and select shared output', async () => {
+    const automaticStatus: AudioStatus = {
+      ...baseStatus,
+      automaticOutputEnabled: true,
+      outputMode: 'shared',
+      sharedBackend: 'auto',
+      latencyProfile: 'balanced',
+    };
+    const manualStatus: AudioStatus = {
+      ...automaticStatus,
+      automaticOutputEnabled: false,
+    };
+    const setOutput = vi.fn()
+      .mockResolvedValueOnce(manualStatus)
+      .mockResolvedValueOnce(manualStatus);
+    renderDrawer(automaticStatus, setOutput);
+
+    const automaticMode = await screen.findByRole('button', { name: 'Follows the system default device with safe shared output.' });
+    await waitFor(() => expect(automaticMode.className).toContain('active'));
+    const sharedMode = await screen.findByRole('button', { name: 'shared' });
+    expect((sharedMode as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(sharedMode);
+
+    await waitFor(() => expect(setOutput).toHaveBeenNthCalledWith(1, { automaticOutputEnabled: false }));
+    await waitFor(() => expect(setOutput).toHaveBeenNthCalledWith(2, expect.objectContaining({ outputMode: 'shared' })));
+  });
+
   it('resets all audio settings from the drawer bottom', async () => {
     const resetStatus: AudioStatus = {
       ...baseStatus,
       outputMode: 'shared',
       sharedBackend: 'auto',
       latencyProfile: 'balanced',
-      dsdOutputModeRequested: 'pcm',
+      dsdOutputModeRequested: 'dop',
     };
     const setOutput = vi.fn().mockResolvedValue(resetStatus);
     const settingsChanged = vi.fn();
@@ -877,6 +974,12 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
         useMiniaudioOutput: false,
         useNativeOutput: false,
         dsdOutputMode: 'pcm',
+        sdmMode: 'off',
+        sdmTargetRate: 'dsd128',
+        echoSrcMode: 'off',
+        echoSrcFilterProfile1x: 'poly-sinc-gauss-long',
+        echoSrcFilterProfileNx: 'poly-sinc-hb',
+        pcmDitherMode: 'off',
       })),
     );
     expect(window.localStorage.getItem('echo-next.hidden-audio-devices')).toBe('[]');
@@ -892,17 +995,11 @@ describe('AudioSettingsDrawer ASIO buffer controls', () => {
   });
 
 
-  it('persists opt-in local direct playback separately from resident decode', async () => {
+  it('keeps the local direct experiment out of the playback drawer', () => {
     const setOutput = vi.fn().mockResolvedValue(baseStatus);
     renderDrawer(baseStatus, setOutput);
-    openDecodeControls();
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Local Direct Playback Experiment/ }));
-
-    await waitFor(() =>
-      expect(window.echo?.app?.setSettings).toHaveBeenCalledWith({ audioNativeDirectLocalPlaybackEnabled: true }),
-    );
-    await waitFor(() => expect(setOutput).toHaveBeenCalledWith({ nativeDirectLocalPlaybackEnabled: true }));
+    expect(screen.queryByRole('checkbox', { name: /Local Direct Playback Experiment/ })).toBeNull();
   });
 
   it('hides ASIO panel buttons until the bottom visibility setting is enabled', async () => {

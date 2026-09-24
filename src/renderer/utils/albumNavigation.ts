@@ -1,8 +1,9 @@
 import type { LibraryAlbum, LibraryTrack } from '../../shared/types/library';
+import { translateStatic } from '../i18n/translateStatic';
 
 export const albumDetailNavigationEvent = 'app:navigate:album-detail';
 
-export type DetailReturnTarget = 'albums' | 'folders' | 'history' | 'home' | 'songs';
+export type DetailReturnTarget = 'albums' | 'folders' | 'history' | 'home' | 'playlists' | 'songs';
 
 export type AlbumDetailNavigationRequest = {
   album: LibraryAlbum;
@@ -187,7 +188,7 @@ export const openAlbumDetailForTrack = async (track: LibraryTrack, options: { re
   const library = window.echo?.library;
 
   if (!library?.getAlbumForTrack) {
-    throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to locate this album.');
+    throw new Error(translateStatic('error.bridge.locateAlbum'));
   }
 
   const album = await library.getAlbumForTrack(track.id);

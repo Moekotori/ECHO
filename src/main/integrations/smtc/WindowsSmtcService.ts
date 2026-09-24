@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process';
 import { app } from 'electron';
+import type { SmtcHostCapabilities } from '../../../shared/types/smtc';
 import type {
   SmtcCommand,
   SmtcDiagnosticEvent,
@@ -35,10 +36,12 @@ export type WindowsSmtcServiceOptions = {
   resolveHostPath?: () => string;
   hostExists?: (hostPath: string) => boolean;
   coverCache?: CoverCacheLike;
+  readyTimeoutMs?: number;
 };
 
 const helperName = 'echo-smtc-host.exe';
 const maxRecentDiagnosticErrors = 8;
+const smtcHostProtocolVersion = 1;
 
 export const resolveDefaultSmtcHostPath = (): string => {
   if (app.isPackaged) {
@@ -55,6 +58,7 @@ export class WindowsSmtcService implements SmtcService {
   private readonly resolveHostPath: () => string;
   private readonly hostExists: (hostPath: string) => boolean;
   private readonly coverCache: CoverCacheLike;
+  private readonly readyTimeoutMs: number;
   private host: SmtcHostProcess | null = null;
   private initialized = false;
   private disposed = false;
@@ -79,6 +83,16 @@ export class WindowsSmtcService implements SmtcService {
   private lastCommandAt: string | null = null;
   private lastError: SmtcDiagnosticEvent | null = null;
   private readonly recentErrors: SmtcDiagnosticEvent[] = [];
+  private initializationPromise: Promise<void> | null = null;
+  private pendingHostReady: {
+    host: SmtcHostProcess;
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  } | null = null;
+  private hostProtocolVersion: number | null = null;
+  private hostCapabilities: SmtcHostCapabilities | null = null;
+  private metadataGeneration = 0;
 
   constructor(options: WindowsSmtcServiceOptions | SmtcLogger = {}) {
     if ('info' in options && 'warn' in options) {
@@ -87,6 +101,7 @@ export class WindowsSmtcService implements SmtcService {
       this.resolveHostPath = resolveDefaultSmtcHostPath;
       this.hostExists = existsSync;
       this.coverCache = new SmtcCoverCache();
+      this.readyTimeoutMs = 2_500;
       return;
     }
 
@@ -95,13 +110,30 @@ export class WindowsSmtcService implements SmtcService {
     this.resolveHostPath = options.resolveHostPath ?? resolveDefaultSmtcHostPath;
     this.hostExists = options.hostExists ?? existsSync;
     this.coverCache = options.coverCache ?? new SmtcCoverCache();
+    this.readyTimeoutMs = Math.max(100, options.readyTimeoutMs ?? 2_500);
   }
 
   async initialize(): Promise<void> {
+    if (this.initializationPromise) {
+      return this.initializationPromise;
+    }
+
     if (this.initialized || this.unavailable || this.disposed) {
       return;
     }
 
+    const pending = this.initializeHost();
+    this.initializationPromise = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.initializationPromise === pending) {
+        this.initializationPromise = null;
+      }
+    }
+  }
+
+  private async initializeHost(): Promise<void> {
     const hostPath = this.resolveHostPath();
     this.currentHostPath = hostPath;
     if (!this.hostExists(hostPath)) {
@@ -120,13 +152,26 @@ export class WindowsSmtcService implements SmtcService {
         stdio: 'pipe',
       });
       this.currentHostPath = hostPath;
-      this.hostState = 'running';
+      const ready = this.waitForHostReady(this.host);
       this.bindHostProcess(this.host, hostPath);
+      await ready;
+      if (this.host !== null && !this.disposed) {
+        this.hostState = 'running';
+      }
       this.logger.info('[SMTC] Windows SMTC host initialized', { hostPath });
     } catch (error) {
       this.initialized = false;
       this.unavailable = true;
-      this.hostState = 'error';
+      this.hostState = this.disposed ? 'stopped' : 'error';
+      const host = this.host;
+      this.host = null;
+      if (host && !host.killed && host.exitCode === null) {
+        try {
+          host.kill('SIGKILL');
+        } catch {
+          // Best-effort cleanup after a failed readiness handshake.
+        }
+      }
       this.logger.warn('[SMTC] Failed to start Windows SMTC host; using no-op bridge mode', {
         hostPath,
         error: error instanceof Error ? error.message : String(error),
@@ -137,6 +182,8 @@ export class WindowsSmtcService implements SmtcService {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.metadataGeneration += 1;
+    this.rejectPendingHostReady(new Error('Windows SMTC host disposed before readiness.'));
     await this.stopGracefullyImpl();
     this.commands.removeAllListeners();
     this.initialized = false;
@@ -211,7 +258,8 @@ export class WindowsSmtcService implements SmtcService {
   }
 
   async setMetadata(metadata: SmtcTrackMetadata): Promise<void> {
-    const coverPath = await this.coverCache.resolve(metadata.coverPath);
+    const generation = ++this.metadataGeneration;
+    const pendingCoverPath = Promise.resolve().then(() => this.coverCache.resolve(metadata.coverPath, metadata.coverUrl));
     this.lastMetadataAt = new Date().toISOString();
     this.lastMetadataTrackId = metadata.trackId;
     this.lastMetadataTitle = metadata.title;
@@ -219,8 +267,29 @@ export class WindowsSmtcService implements SmtcService {
     await this.writeMessage({
       type: 'setMetadata',
       ...metadata,
-      coverPath,
+      coverPath: null,
     });
+
+    void pendingCoverPath
+      .then(async (coverPath) => {
+        if (!coverPath || generation !== this.metadataGeneration || this.disposed) {
+          return;
+        }
+        await this.writeMessage({
+          type: 'setMetadata',
+          ...metadata,
+          coverPath,
+        });
+      })
+      .catch((error) => {
+        if (generation !== this.metadataGeneration || this.disposed) {
+          return;
+        }
+        this.logger.warn('[SMTC] Failed to resolve cover artwork', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        this.recordError('service', `Failed to resolve cover artwork: ${error instanceof Error ? error.message : String(error)}`);
+      });
   }
 
   async setTimeline(positionSeconds: number, durationSeconds: number): Promise<void> {
@@ -264,6 +333,8 @@ export class WindowsSmtcService implements SmtcService {
       hostState: this.hostState,
       initialized: this.initialized,
       hostPath: this.currentHostPath,
+      hostProtocolVersion: this.hostProtocolVersion,
+      hostCapabilities: this.hostCapabilities ? { ...this.hostCapabilities } : null,
       lastMetadataAt: this.lastMetadataAt,
       lastMetadataTrackId: this.lastMetadataTrackId,
       lastMetadataTitle: this.lastMetadataTitle,
@@ -304,6 +375,7 @@ export class WindowsSmtcService implements SmtcService {
     });
 
     host.on('error', (error: Error) => {
+      this.rejectPendingHostReady(error, host);
       this.unavailable = true;
       this.hostState = 'error';
       this.logger.warn('[SMTC] Windows SMTC host process error', {
@@ -314,6 +386,10 @@ export class WindowsSmtcService implements SmtcService {
     });
 
     host.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+      this.rejectPendingHostReady(
+        new Error(`Windows SMTC host exited before readiness: code=${code ?? 'null'} signal=${signal ?? 'null'}`),
+        host,
+      );
       if (this.host === host) {
         this.host = null;
         this.currentHostPath = null;
@@ -347,9 +423,18 @@ export class WindowsSmtcService implements SmtcService {
     }
 
     try {
-      const message = JSON.parse(line) as { type?: unknown; command?: unknown; message?: unknown; positionSeconds?: unknown };
+      const message = JSON.parse(line) as {
+        type?: unknown;
+        command?: unknown;
+        message?: unknown;
+        positionSeconds?: unknown;
+        protocolVersion?: unknown;
+        capabilities?: unknown;
+      };
       const command = this.parseCommandMessage(message);
-      if (message.type === 'command' && command) {
+      if (message.type === 'ready') {
+        this.handleHostReady(message);
+      } else if (message.type === 'command' && command) {
         this.emitCommand(command);
       } else if (message.type === 'error') {
         this.logger.warn('[SMTC] Windows SMTC host reported an error', { message: String(message.message ?? '') });
@@ -367,6 +452,64 @@ export class WindowsSmtcService implements SmtcService {
   private async writeMessage(message: Record<string, unknown>): Promise<void> {
     await this.initialize();
     this.writeRaw(message);
+  }
+
+  private waitForHostReady(host: SmtcHostProcess): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (this.pendingHostReady?.host !== host) {
+          return;
+        }
+        this.pendingHostReady = null;
+        reject(new Error(`Windows SMTC host readiness timed out after ${this.readyTimeoutMs}ms.`));
+      }, this.readyTimeoutMs);
+      timeout.unref?.();
+      this.pendingHostReady = { host, resolve, reject, timeout };
+    });
+  }
+
+  private handleHostReady(message: { protocolVersion?: unknown; capabilities?: unknown }): void {
+    const protocolVersion = message.protocolVersion;
+    if (protocolVersion !== smtcHostProtocolVersion) {
+      this.rejectPendingHostReady(
+        new Error(`Unsupported Windows SMTC host protocol version: ${String(protocolVersion)}.`),
+      );
+      return;
+    }
+
+    const rawCapabilities = message.capabilities;
+    if (!rawCapabilities || typeof rawCapabilities !== 'object' || Array.isArray(rawCapabilities)) {
+      this.rejectPendingHostReady(new Error('Windows SMTC host readiness message is missing capabilities.'));
+      return;
+    }
+
+    const capabilities = rawCapabilities as Record<string, unknown>;
+    this.hostProtocolVersion = protocolVersion;
+    this.hostCapabilities = {
+      metadata: capabilities.metadata === true,
+      timeline: capabilities.timeline === true,
+      enabledActions: capabilities.enabledActions === true,
+      seekCommands: capabilities.seekCommands === true,
+      localArtwork: capabilities.localArtwork === true,
+    };
+
+    const pending = this.pendingHostReady;
+    if (!pending) {
+      return;
+    }
+    clearTimeout(pending.timeout);
+    this.pendingHostReady = null;
+    pending.resolve();
+  }
+
+  private rejectPendingHostReady(error: Error, host?: SmtcHostProcess): void {
+    const pending = this.pendingHostReady;
+    if (!pending || (host && pending.host !== host)) {
+      return;
+    }
+    clearTimeout(pending.timeout);
+    this.pendingHostReady = null;
+    pending.reject(error);
   }
 
   private writeRaw(message: Record<string, unknown>): void {

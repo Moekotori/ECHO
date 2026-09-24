@@ -13,6 +13,7 @@ import { getLibraryService } from '../library/LibraryService';
 import { getAppSettings } from './appSettings';
 import { getMainWindow } from './windowManager';
 import { updateTaskbarHostState } from './taskbarHostProcess';
+import { TaskbarThumbnailCoverController, type TaskbarThumbnailButtons } from './taskbarThumbnailCover';
 import { getCurrentLyricsProgress } from '../lyrics/LyricsProgressTracker';
 
 const defaultWindowTitle = 'ECHO NEXT';
@@ -21,6 +22,9 @@ const taskbarPlayerBarThumbnailHeight = 96;
 
 type TaskbarWindow = Pick<BrowserWindow, 'isDestroyed' | 'setProgressBar' | 'setThumbarButtons' | 'setTitle'> & {
   getContentBounds?: () => Electron.Rectangle;
+  getNativeWindowHandle?: () => Buffer;
+  isMinimized?: () => boolean;
+  isVisible?: () => boolean;
   setThumbnailClip?: (region: Electron.Rectangle) => void;
   setThumbnailToolTip?: (toolTip: string) => void;
   webContents: Pick<BrowserWindow['webContents'], 'send'>;
@@ -44,6 +48,15 @@ type TaskbarPlaybackIntegrationOptions = {
   getLibrary?: () => LibraryLike;
   platform?: NodeJS.Platform;
   createIcon?: (name: TaskbarIconName) => NativeImage | null;
+  coverController?: TaskbarThumbnailCoverLike | null;
+};
+
+type TaskbarThumbnailCoverLike = {
+  isAvailable: () => boolean;
+  setCover: (url: string | null) => Promise<boolean>;
+  setButtons: (buttons: TaskbarThumbnailButtons) => boolean;
+  clear: () => void;
+  dispose: () => void;
 };
 
 type TaskbarIconName = 'previous' | 'play' | 'pause' | 'next' | 'heart' | 'heartFilled';
@@ -237,9 +250,12 @@ export class TaskbarPlaybackIntegration {
   private readonly getLibrary: () => LibraryLike;
   private readonly platform: NodeJS.Platform;
   private readonly createIcon: (name: TaskbarIconName) => NativeImage | null;
+  private readonly coverController: TaskbarThumbnailCoverLike | null;
   private disposed = false;
   private lastThumbarKey: string | null = null;
   private progressTimer: ReturnType<typeof setInterval> | null = null;
+  private thumbnailArtworkUrl: string | null = null;
+  private thumbnailCoverRequestId = 0;
   private status: TaskbarPlaybackStatus;
   private readonly handleStatus = (status: AudioStatus): void => {
     this.sync(status);
@@ -252,6 +268,9 @@ export class TaskbarPlaybackIntegration {
     this.getLibrary = options.getLibrary ?? getLibraryService;
     this.platform = options.platform ?? process.platform;
     this.createIcon = options.createIcon ?? createTaskbarIcon;
+    this.coverController = options.coverController === undefined
+      ? this.createCoverController()
+      : options.coverController;
     this.status = createEmptyStatus(this.platform, true, !this.window.isDestroyed());
   }
 
@@ -272,6 +291,7 @@ export class TaskbarPlaybackIntegration {
     this.audioSession.off('status', this.handleStatus);
     this.stopProgressTimer();
     this.clear();
+    this.coverController?.dispose();
   }
 
   refresh(): void {
@@ -289,6 +309,13 @@ export class TaskbarPlaybackIntegration {
       bound: !this.disposed,
       windowAvailable: !this.window.isDestroyed(),
     };
+  }
+
+  setThumbnailArtworkUrl(artworkUrl: string | null): void {
+    const nextUrl = typeof artworkUrl === 'string' && artworkUrl.trim() ? artworkUrl.trim() : null;
+    if (nextUrl === this.thumbnailArtworkUrl) return;
+    this.thumbnailArtworkUrl = nextUrl;
+    this.refresh();
   }
 
   private sync(status: AudioStatus): void {
@@ -317,7 +344,7 @@ export class TaskbarPlaybackIntegration {
       if (visible) {
         this.updateProgress(status, progress);
         this.updateTitle(this.status.title);
-        this.updateThumbnailClip();
+        this.updateThumbnailPreview();
         this.updateThumbarButtons(status);
       } else {
         this.clear();
@@ -435,6 +462,9 @@ export class TaskbarPlaybackIntegration {
 
     this.window.setProgressBar(-1);
     this.window.setThumbarButtons([]);
+    this.coverController?.setButtons({ playing: false, canLike: false, liked: false, visible: false });
+    this.coverController?.clear();
+    this.thumbnailCoverRequestId += 1;
     this.window.setTitle(defaultWindowTitle);
     this.clearThumbnailClip();
     this.window.setThumbnailToolTip?.(defaultWindowTitle);
@@ -492,6 +522,51 @@ export class TaskbarPlaybackIntegration {
     this.window.setThumbnailToolTip?.(title);
   }
 
+  private createCoverController(): TaskbarThumbnailCoverLike | null {
+    if (this.platform !== 'win32' || !this.window.getNativeWindowHandle) return null;
+    return new TaskbarThumbnailCoverController({
+      getNativeWindowHandle: () => this.window.getNativeWindowHandle?.() ?? Buffer.alloc(0),
+      onButtonClick: (buttonId) => this.handleNativeThumbnailButton(buttonId),
+    });
+  }
+
+  private isWindowPreviewEligible(): boolean {
+    if (this.window.isDestroyed()) return false;
+    if (this.window.isVisible && !this.window.isVisible()) return false;
+    if (this.window.isMinimized?.()) return false;
+    return true;
+  }
+
+  private updateThumbnailPreview(): void {
+    if (!this.isWindowPreviewEligible()) {
+      this.thumbnailCoverRequestId += 1;
+      this.coverController?.clear();
+      this.clearThumbnailClip();
+      this.status = { ...this.status, thumbnailClip: null };
+      return;
+    }
+
+    const artworkUrl = this.thumbnailArtworkUrl;
+    if (!artworkUrl || !this.coverController?.isAvailable()) {
+      this.thumbnailCoverRequestId += 1;
+      this.coverController?.clear();
+      this.updateThumbnailClip();
+      return;
+    }
+
+    const requestId = ++this.thumbnailCoverRequestId;
+    this.clearThumbnailClip();
+    this.status = { ...this.status, thumbnailClip: null };
+    void this.coverController.setCover(artworkUrl).then((applied) => {
+      if (applied || requestId !== this.thumbnailCoverRequestId || this.disposed) return;
+      if (this.isWindowPreviewEligible()) this.updateThumbnailClip();
+    }).catch(() => {
+      if (requestId === this.thumbnailCoverRequestId && !this.disposed && this.isWindowPreviewEligible()) {
+        this.updateThumbnailClip();
+      }
+    });
+  }
+
   private updateThumbnailClip(): void {
     if (!this.window.setThumbnailClip || !this.window.getContentBounds) {
       this.status = {
@@ -534,6 +609,12 @@ export class TaskbarPlaybackIntegration {
   private updateThumbarButtons(status: AudioStatus): void {
     const isPlaying = status.state === 'playing' || status.state === 'loading';
     const likeState = this.resolveCurrentTrackLikeState(status);
+    this.coverController?.setButtons({
+      playing: isPlaying,
+      canLike: likeState.canLike,
+      liked: likeState.liked,
+      visible: this.isWindowPreviewEligible(),
+    });
     const key = [
       isPlaying ? 'playing' : 'paused',
       likeState.canLike ? (likeState.liked ? 'liked' : 'unliked') : 'no-like',
@@ -611,6 +692,13 @@ export class TaskbarPlaybackIntegration {
     }
 
     this.window.webContents.send(IpcChannels.SmtcCommand, command);
+  }
+
+  private handleNativeThumbnailButton(buttonId: number): void {
+    if (buttonId === 1) this.sendCommand('previous');
+    else if (buttonId === 2) this.sendCommand('playPause');
+    else if (buttonId === 3) this.sendCommand('next');
+    else if (buttonId === 4) this.toggleCurrentTrackLiked(this.audioSession.getStatus());
   }
 
   private resolveCurrentTrackLikeState(status: AudioStatus): CurrentTrackLikeState {
@@ -693,6 +781,7 @@ export class TaskbarPlaybackIntegration {
   }
 }
 
+let currentThumbnailArtworkUrl: string | null = null;
 let currentIntegration: TaskbarPlaybackIntegration | null = null;
 
 export const bindTaskbarPlaybackIntegration = (window: BrowserWindow): void => {
@@ -700,6 +789,7 @@ export const bindTaskbarPlaybackIntegration = (window: BrowserWindow): void => {
   const integration = new TaskbarPlaybackIntegration({ window });
   currentIntegration = integration;
   integration.initialize();
+  integration.setThumbnailArtworkUrl(currentThumbnailArtworkUrl);
   window.on('closed', () => {
     if (currentIntegration === integration) {
       currentIntegration = null;
@@ -709,6 +799,14 @@ export const bindTaskbarPlaybackIntegration = (window: BrowserWindow): void => {
   window.on('show', () => {
     integration.refresh();
   });
+  window.on('hide', () => integration.refresh());
+  window.on('minimize', () => integration.refresh());
+  window.on('restore', () => integration.refresh());
+};
+
+export const setTaskbarThumbnailArtworkUrl = (artworkUrl: string | null): void => {
+  currentThumbnailArtworkUrl = typeof artworkUrl === 'string' && artworkUrl.trim() ? artworkUrl.trim() : null;
+  currentIntegration?.setThumbnailArtworkUrl(currentThumbnailArtworkUrl);
 };
 
 export const refreshTaskbarPlaybackIntegration = (): void => {
@@ -737,4 +835,5 @@ export const getTaskbarPlaybackStatus = (): TaskbarPlaybackStatus => {
 export const disposeTaskbarPlaybackIntegrationForTests = (): void => {
   currentIntegration?.dispose();
   currentIntegration = null;
+  currentThumbnailArtworkUrl = null;
 };

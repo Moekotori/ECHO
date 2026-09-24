@@ -295,6 +295,36 @@ export const createAudioLevelTelemetry = (
   };
 };
 
+export const createNativeAudioLevelTelemetry = (
+  peakDb: number,
+  rmsDb: number,
+): AudioLevelEstimate => {
+  const normalizedPeakDb = Number.isFinite(peakDb) ? Math.max(-60, Math.min(0, peakDb)) : -60;
+  const normalizedRmsDb = Number.isFinite(rmsDb) ? Math.max(-60, Math.min(0, rmsDb)) : -60;
+
+  return {
+    inputPeakDb: normalizedPeakDb,
+    inputRmsDb: normalizedRmsDb,
+    estimatedOutputPeakDb: normalizedPeakDb,
+    estimatedOutputRmsDb: normalizedRmsDb,
+    inputTruePeakDb: null,
+    estimatedOutputTruePeakDb: null,
+    truePeakHeadroomDb: null,
+    intersamplePeakDb: null,
+    visualSpectrum: emptyVisualSpectrum(),
+    visualSpectrumVersion,
+    visualEnergy: 0,
+    visualTransient: 0,
+    visualTelemetryState: 'fallback',
+    levelMeterObserveCostMs: 0,
+    visualSpectrumComputeCostMs: 0,
+    headroomDb: Math.round(-normalizedPeakDb * 10) / 10,
+    clipCount: 0,
+    lastClipAt: null,
+    meterSource: 'native_post_dsp',
+  };
+};
+
 export class PcmLevelMeterTransform extends Transform {
   private readonly intervalMs: number;
   private readonly onSnapshot: (snapshot: PcmLevelSnapshot) => void;

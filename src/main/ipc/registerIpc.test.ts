@@ -36,6 +36,13 @@ const activateEchoProPluginMock = vi.fn(async () => ({
   importedFileCount: 4,
   checksum: '0'.repeat(64),
 }));
+const releaseEchoProCurrentDeviceMock = vi.fn(async () => ({
+  ok: true,
+  pluginId: 'echo.pro-unlock',
+  releasedAt: '2026-07-17T00:00:00.000Z',
+  alreadyReleased: false,
+  removedLocalPlugin: true,
+}));
 const getEchoProLicenseStatusMock = vi.fn(() => ({ valid: false, enabled: false, features: [] as string[] }));
 const connectDonatorUnlockStatusMock = vi.fn(() => ({ unlocked: false }));
 const downloadFeatureUnlockStatusMock = vi.fn(() => ({ unlocked: false }));
@@ -166,8 +173,8 @@ vi.mock('../app/appSettings', () => ({
     smtcEnabled: true,
   },
   getAppSettings: getAppSettingsMock,
-  getAppWallpaperDirectory: vi.fn(() => 'D:\\Echo\\app-wallpapers'),
-  getLyricsWallpaperDirectory: vi.fn(() => 'D:\\Echo\\lyrics-wallpapers'),
+  getAppWallpaperDirectory: vi.fn(() => join(appPathMock('userData'), 'app-wallpapers')),
+  getLyricsWallpaperDirectory: vi.fn(() => join(appPathMock('userData'), 'lyrics-wallpapers')),
   normalizeSettings: vi.fn((value) => ({ coverCacheDir: null, hideToTrayOnClose: false, ...(value as Record<string, unknown>) })),
   setAppSettings: setAppSettingsMock,
   setFinalThemeUnlockAvailable: vi.fn(),
@@ -265,6 +272,10 @@ vi.mock('./connectIpc', () => ({
   registerConnectIpc: vi.fn(),
 }));
 
+vi.mock('./echoLinkIpc', () => ({
+  registerEchoLinkIpc: vi.fn(),
+}));
+
 vi.mock('./discordPresenceIpc', () => ({
   registerDiscordPresenceIpc: vi.fn(),
 }));
@@ -281,6 +292,7 @@ vi.mock('../plugins/PluginService', () => ({
   getPluginService: () => ({
     list: pluginListMock,
     activateEchoProPlugin: activateEchoProPluginMock,
+    releaseEchoProCurrentDevice: releaseEchoProCurrentDeviceMock,
     getEchoProLicenseStatus: getEchoProLicenseStatusMock,
   }),
 }));
@@ -338,6 +350,15 @@ vi.mock('../integrations/stage/getStageBridgeService', () => ({
   syncStageBridgeIntegrationFromSettings: vi.fn(),
 }));
 
+vi.mock('../integrations/smtc/SmtcStatusSync', () => ({
+  syncSmtcIntegrationFromSettings: vi.fn(),
+  syncSmtcStatus: vi.fn(),
+}));
+
+vi.mock('../connect/EchoLinkBasicIntegration', () => ({
+  syncEchoLinkBasicIntegrationFromSettings: vi.fn(),
+}));
+
 const resetHandlers = (): void => {
   for (const key of Object.keys(handlers)) {
     delete handlers[key];
@@ -357,6 +378,7 @@ describe('app IPC cover cache directory', () => {
     pluginListMock.mockReset();
     pluginListMock.mockReturnValue({ directory: 'D:\\Echo\\plugins', plugins: [] });
     activateEchoProPluginMock.mockClear();
+    releaseEchoProCurrentDeviceMock.mockClear();
     getEchoProLicenseStatusMock.mockReset();
     getEchoProLicenseStatusMock.mockReturnValue({ valid: false, enabled: false, features: [] });
     connectDonatorUnlockStatusMock.mockReset();
@@ -494,6 +516,20 @@ describe('app IPC cover cache directory', () => {
     expect(setAppSettingsMock).toHaveBeenCalledWith({ launchAtLoginEnabled: true }, lockedFeatureSettingsOptions);
   });
 
+  it('resynchronizes background library work when low spec mode changes', async () => {
+    const service = {
+      syncArtistImageBackfillState: vi.fn(),
+      syncLiveLibraryWatcherFromSettings: vi.fn(),
+    };
+    getLibraryServiceMock.mockReturnValue(service);
+    setAppSettingsMock.mockReturnValue({ coverCacheDir: null, hideToTrayOnClose: false, lowSpecModeEnabled: true });
+
+    await handlers[IpcChannels.AppSetSettings]!(null, { lowSpecModeEnabled: true });
+
+    expect(service.syncArtistImageBackfillState).toHaveBeenCalledTimes(1);
+    expect(service.syncLiveLibraryWatcherFromSettings).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the tray icon resident when close-to-tray is disabled', async () => {
     setAppSettingsMock.mockReturnValue({ coverCacheDir: null, hideToTrayOnClose: false });
 
@@ -619,25 +655,26 @@ describe('app IPC cover cache directory', () => {
     );
   });
 
-  it('requires ECHO Pro before saving cloud settings', async () => {
+  it('lets the cloud service authorize settings saves without a duplicate local Pro check', async () => {
     await expect(handlers[IpcChannels.AppEchoProSettingsCloudSave]!()).resolves.toMatchObject({ saved: true });
 
-    expect(requirePrivateFeatureMock).toHaveBeenCalledWith('echo-pro');
+    expect(requirePrivateFeatureMock).not.toHaveBeenCalled();
     expect(saveEchoProSettingsCloudMock).toHaveBeenCalledTimes(1);
   });
 
-  it('blocks cloud settings sync before reaching the provider when ECHO Pro is missing', async () => {
-    requirePrivateFeatureMock.mockRejectedValue(new Error('echo_pro_required'));
+  it('surfaces cloud-service authorization failures without a duplicate local Pro check', async () => {
+    pullEchoProSettingsCloudMock.mockRejectedValueOnce(new Error('pro_required'));
 
-    await expect(handlers[IpcChannels.AppEchoProSettingsCloudPull]!()).rejects.toThrow('echo_authorization_required');
+    await expect(handlers[IpcChannels.AppEchoProSettingsCloudPull]!()).rejects.toThrow('pro_required');
 
-    expect(pullEchoProSettingsCloudMock).not.toHaveBeenCalled();
+    expect(requirePrivateFeatureMock).not.toHaveBeenCalled();
+    expect(pullEchoProSettingsCloudMock).toHaveBeenCalledTimes(1);
   });
 
-  it('requires ECHO Pro before applying cloud settings', async () => {
+  it('lets the cloud service authorize settings apply without a duplicate local Pro check', async () => {
     await expect(handlers[IpcChannels.AppEchoProSettingsCloudApply]!()).resolves.toMatchObject({ applied: true });
 
-    expect(requirePrivateFeatureMock).toHaveBeenCalledWith('echo-pro');
+    expect(requirePrivateFeatureMock).not.toHaveBeenCalled();
     expect(applyEchoProSettingsCloudMock).toHaveBeenCalledTimes(1);
   });
 
@@ -676,7 +713,8 @@ describe('app IPC cover cache directory', () => {
   it('copies browser-playable video files for app wallpaper selection', async () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'echo-app-video-wallpaper-'));
     const videoPath = join(tempRoot, 'motion.webm');
-    writeFileSync(videoPath, 'video');
+    const videoBytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x00, 0x00, 0x00]);
+    writeFileSync(videoPath, videoBytes);
     showOpenDialogMock.mockResolvedValue({ canceled: false, filePaths: [videoPath] });
 
     try {
@@ -685,7 +723,7 @@ describe('app IPC cover cache directory', () => {
       expect(typeof result).toBe('string');
       expect(String(result)).toMatch(/\.webm$/u);
       expect(existsSync(String(result))).toBe(true);
-      expect(readFileSync(String(result), 'utf8')).toBe('video');
+      expect(readFileSync(String(result))).toEqual(videoBytes);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
       if (typeof appPathMock('userData') === 'string') {
@@ -694,12 +732,63 @@ describe('app IPC cover cache directory', () => {
     }
   });
 
-  it('opens external http links through the system browser only', async () => {
+  it('rejects a wallpaper whose contents do not match its extension', async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'echo-invalid-app-wallpaper-'));
+    const videoPath = join(tempRoot, 'renamed.webm');
+    writeFileSync(videoPath, 'not-a-video');
+    showOpenDialogMock.mockResolvedValue({ canceled: false, filePaths: [videoPath] });
+
+    try {
+      await expect(handlers[IpcChannels.AppChooseAppWallpaper]!()).rejects.toThrow(
+        'selected file content is not a valid image or video',
+      );
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+      rmSync(appPathMock('userData'), { recursive: true, force: true });
+    }
+  });
+
+  it('removes a replaced managed wallpaper only after settings save succeeds', async () => {
+    const wallpaperDirectory = join(appPathMock('userData'), 'app-wallpapers');
+    const oldLandscapePath = join(wallpaperDirectory, 'old-landscape.png');
+    const portraitPath = join(wallpaperDirectory, 'portrait.png');
+    mkdirSync(wallpaperDirectory, { recursive: true });
+    writeFileSync(oldLandscapePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(portraitPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    getAppSettingsMock.mockReturnValueOnce({
+      coverCacheDir: null,
+      hideToTrayOnClose: false,
+      appCustomWallpaperPath: oldLandscapePath,
+      appPortraitWallpaperPath: portraitPath,
+    });
+    setAppSettingsMock.mockReturnValueOnce({
+      coverCacheDir: null,
+      hideToTrayOnClose: false,
+      appCustomWallpaperPath: null,
+      appPortraitWallpaperPath: portraitPath,
+    });
+
+    try {
+      await handlers[IpcChannels.AppSetSettings]!(null, { appCustomWallpaperPath: null });
+
+      expect(existsSync(oldLandscapePath)).toBe(false);
+      expect(existsSync(portraitPath)).toBe(true);
+    } finally {
+      rmSync(appPathMock('userData'), { recursive: true, force: true });
+    }
+  });
+
+  it('opens safe external web and email links through the system handler only', async () => {
     await handlers[IpcChannels.AppOpenExternalUrl]!(null, 'https://discord.gg/g7v4WMRq3K');
+    await handlers[IpcChannels.AppOpenExternalUrl]!(null, 'mailto:nyafairy233@gmail.com');
 
     expect(openExternalMock).toHaveBeenCalledWith('https://discord.gg/g7v4WMRq3K');
+    expect(openExternalMock).toHaveBeenCalledWith('mailto:nyafairy233@gmail.com');
     await expect(handlers[IpcChannels.AppOpenExternalUrl]!(null, 'file:///C:/Windows/System32/calc.exe')).rejects.toThrow(
-      'external URL must use http or https',
+      'external URL must use http, https, or a plain mailto address',
+    );
+    await expect(handlers[IpcChannels.AppOpenExternalUrl]!(null, 'mailto:test@example.com?subject=unsafe')).rejects.toThrow(
+      'external URL must use http, https, or a plain mailto address',
     );
   });
 
@@ -713,6 +802,17 @@ describe('app IPC cover cache directory', () => {
     });
 
     expect(activateEchoProPluginMock).toHaveBeenCalledWith(request);
+    expect(requirePrivateFeatureMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the current ECHO Pro device through the plugin service', async () => {
+    await expect(handlers[IpcChannels.AppEchoProPluginReleaseCurrentDevice]!(null)).resolves.toMatchObject({
+      ok: true,
+      pluginId: 'echo.pro-unlock',
+      removedLocalPlugin: true,
+    });
+
+    expect(releaseEchoProCurrentDeviceMock).toHaveBeenCalledTimes(1);
     expect(requirePrivateFeatureMock).not.toHaveBeenCalled();
   });
 
@@ -848,7 +948,6 @@ describe('app IPC cover cache directory', () => {
       sidebarAutoHideEnabled: true,
       sidebarIconOnlyEnabled: true,
       settingsOptionalSectionsVisible: true,
-      featureCommentsHidden: true,
       trackContextMenuExtraActionsEnabled: true,
       touchOnScreenKeyboardEnabled: true,
       songsSort: 'title',

@@ -89,13 +89,14 @@ export type SpotifyPlaybackState = {
   itemUri: string | null;
   deviceId: string | null;
   deviceName: string | null;
+  volumePercent: number | null;
 };
 
 type SpotifyPlaybackStateResponse = {
   is_playing?: boolean;
   progress_ms?: number | null;
   item?: { uri?: string | null } | null;
-  device?: { id?: string | null; name?: string | null } | null;
+  device?: { id?: string | null; name?: string | null; volume_percent?: number | null } | null;
 };
 
 type SpotifyFetchOptions = {
@@ -533,6 +534,7 @@ export class SpotifyAuthService {
         itemUri: null,
         deviceId: null,
         deviceName: null,
+        volumePercent: null,
       };
     }
 
@@ -542,6 +544,10 @@ export class SpotifyAuthService {
       itemUri: data.item?.uri?.trim() || null,
       deviceId: data.device?.id?.trim() || null,
       deviceName: data.device?.name?.trim() || null,
+      volumePercent:
+        typeof data.device?.volume_percent === 'number' && Number.isFinite(data.device.volume_percent)
+          ? Math.max(0, Math.min(100, data.device.volume_percent))
+          : null,
     };
   }
 

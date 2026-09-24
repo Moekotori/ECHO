@@ -247,6 +247,19 @@ export const PlayerSpeedControl = ({
       setPlaybackRate(safeRate);
       holdPendingCommit({ playbackRate: safeRate, mode });
 
+      // Persist the user's intent before touching the native host. A crashed
+      // daemon cannot acknowledge setOutput, but the reset must still survive
+      // the next daemon/app start instead of replaying the failing speed.
+      const setSettings = window.echo?.app?.setSettings;
+      if (typeof setSettings === 'function') {
+        try {
+          await setSettings({ playbackSpeed: safeRate });
+        } catch {
+          // Runtime speed updates remain usable when settings storage is
+          // temporarily unavailable.
+        }
+      }
+
       if (!audio) {
         onError('Desktop bridge unavailable');
         return;
@@ -254,10 +267,6 @@ export const PlayerSpeedControl = ({
 
       try {
         const nextStatus = await audio.setOutput({ playbackRate: safeRate, playbackSpeedMode: mode });
-        const setSettings = window.echo?.app?.setSettings;
-        if (typeof setSettings === 'function') {
-          void setSettings({ playbackSpeed: safeRate }).catch(() => undefined);
-        }
         const pending = pendingCommitRef.current;
         if (pending && speedsMatch(pending.playbackRate, safeRate) && pending.mode === mode) {
           holdCommittedSpeedGuard({ playbackRate: safeRate, mode }, staleCommit);

@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DownloadFeatureUnlockStatus } from '../../shared/constants/featureUnlocks';
+import type { EchoProAccountStatus } from '../../shared/types/privateEntitlements';
 
 const mocks = vi.hoisted(() => ({
+  localProUnlocked: false,
+  accountStatus: { loggedIn: false, pro: false, status: 'anonymous', checkedAt: null as string | null },
   downloadStatus: null as DownloadFeatureUnlockStatus | null,
   proLicenseStatus: {
     valid: false,
@@ -15,6 +18,28 @@ const mocks = vi.hoisted(() => ({
     status: 'disabled' | 'enabled' | 'running' | 'error';
     disabledByHost?: boolean;
   }>,
+}));
+
+vi.mock('./LocalProEntitlements', () => ({
+  getLocalProEntitlementSnapshot: () => ({
+    unlocked: mocks.localProUnlocked || mocks.accountStatus.pro === true,
+    source: mocks.localProUnlocked ? 'included' : mocks.accountStatus.pro === true ? 'account-cache' : 'none',
+    checkedAt: null,
+  }),
+}));
+
+vi.mock('./EchoProAccountService', () => ({
+  isEchoProAccountStatusWithinOfflineGrace: (status: EchoProAccountStatus) => {
+    const checkedAt = status.checkedAt ? Date.parse(status.checkedAt) : Number.NaN;
+    const ageMs = Date.now() - checkedAt;
+    return status.loggedIn &&
+      status.pro === true &&
+      status.status !== 'disabled' &&
+      Number.isFinite(checkedAt) &&
+      ageMs >= 0 &&
+      ageMs <= 7 * 24 * 60 * 60 * 1000;
+  },
+  getEchoProAccountService: () => ({ getStatus: () => mocks.accountStatus }),
 }));
 
 vi.mock('./PluginService', () => ({
@@ -32,6 +57,8 @@ vi.mock('./privateEntitlements', () => ({
 
 describe('DownloadFeatureUnlockService', () => {
   beforeEach(() => {
+    mocks.localProUnlocked = false;
+    mocks.accountStatus = { loggedIn: false, pro: false, status: 'anonymous', checkedAt: null };
     mocks.downloadStatus = null;
     mocks.proLicenseStatus = {
       valid: false,
@@ -55,6 +82,15 @@ describe('DownloadFeatureUnlockService', () => {
       pluginEnabled: false,
       reason: 'plugin-missing',
     });
+  });
+
+  it('allows downloads by default when included in the base app', async () => {
+    mocks.localProUnlocked = true;
+    const { DownloadFeatureUnlockService } = await import('./DownloadFeatureUnlockService');
+    const service = new DownloadFeatureUnlockService();
+
+    expect(service.getStatus()).toMatchObject({ unlocked: true, reason: 'unlocked' });
+    expect(() => service.assertUnlocked()).not.toThrow();
   });
 
   it('unlocks when the dedicated downloads plugin is enabled', async () => {
@@ -115,6 +151,14 @@ describe('DownloadFeatureUnlockService', () => {
       pluginEnabled: true,
       reason: 'unlocked',
     });
+  });
+
+  it('unlocks downloads from a cached active Pro account without online verification', async () => {
+    mocks.accountStatus = { loggedIn: true, pro: true, status: 'active', checkedAt: '2026-07-12T00:00:00.000Z' };
+    const { DownloadFeatureUnlockService } = await import('./DownloadFeatureUnlockService');
+    const service = new DownloadFeatureUnlockService();
+
+    expect(service.getStatus()).toMatchObject({ unlocked: true, reason: 'unlocked' });
   });
 
   it('unlocks only when the private overlay reports Pro plus plugin authorization', async () => {

@@ -3,9 +3,11 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string>
@@ -48,8 +50,18 @@ struct NativeMetadataResult {
   std::optional<int> sampleRate;
   std::optional<int> bitDepth;
   std::optional<int> bitrate;
+  bool mqa = false;
+  std::optional<double> bpm;
+  std::optional<double> replayGainTrackGainDb;
+  std::optional<double> replayGainAlbumGainDb;
+  std::optional<double> replayGainTrackPeak;
+  std::optional<double> replayGainAlbumPeak;
+  std::optional<double> replayGainIntegratedLufs;
+  std::vector<unsigned char> embeddedCover;
+  std::string embeddedCoverMimeType;
   std::string codec = "FLAC";
   bool hasVorbisComments = false;
+  bool hasEmbeddedMetadata = false;
   std::map<std::string, std::string> sources;
 };
 
@@ -58,6 +70,8 @@ struct Mp3StreamInfo {
   int sampleRate = 0;
   int bitrate = 0;
 };
+
+static std::string asciiLower(std::string value);
 
 static std::string jsonEscape(const std::string& value) {
   std::string escaped;
@@ -98,6 +112,23 @@ static std::string jsonEscape(const std::string& value) {
     }
   }
   return escaped;
+}
+
+static std::string base64Encode(const std::vector<unsigned char>& bytes) {
+  static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string encoded;
+  encoded.reserve(((bytes.size() + 2U) / 3U) * 4U);
+  for (std::size_t index = 0; index < bytes.size(); index += 3U) {
+    const std::uint32_t a = bytes[index];
+    const std::uint32_t b = index + 1U < bytes.size() ? bytes[index + 1U] : 0U;
+    const std::uint32_t c = index + 2U < bytes.size() ? bytes[index + 2U] : 0U;
+    const std::uint32_t packed = (a << 16U) | (b << 8U) | c;
+    encoded += alphabet[(packed >> 18U) & 0x3fU];
+    encoded += alphabet[(packed >> 12U) & 0x3fU];
+    encoded += index + 1U < bytes.size() ? alphabet[(packed >> 6U) & 0x3fU] : '=';
+    encoded += index + 2U < bytes.size() ? alphabet[packed & 0x3fU] : '=';
+  }
+  return encoded;
 }
 
 static std::optional<std::string> parseJsonStringAt(const std::string& input, std::size_t quoteIndex, std::size_t* endIndex = nullptr) {
@@ -168,20 +199,6 @@ static std::optional<std::size_t> findFieldValue(const std::string& input, const
   return valueIndex;
 }
 
-static std::string trimAsciiWhitespace(const std::string& value) {
-  std::size_t begin = 0;
-  while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin]))) {
-    begin += 1;
-  }
-
-  std::size_t end = value.size();
-  while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
-    end -= 1;
-  }
-
-  return value.substr(begin, end - begin);
-}
-
 static bool isSafeMetadataText(const std::string& value) {
   if (value.empty() || value.size() > 512) {
     return false;
@@ -196,14 +213,90 @@ static bool isSafeMetadataText(const std::string& value) {
   return controlCount == 0;
 }
 
+static std::size_t metadataWhitespaceLength(const std::string& value, std::size_t offset) {
+  const auto byte = static_cast<unsigned char>(value[offset]);
+  if (byte < 0x80U) {
+    return std::isspace(byte) ? 1U : 0U;
+  }
+  if (
+    offset + 1 < value.size() &&
+    byte == 0xc2U &&
+    (static_cast<unsigned char>(value[offset + 1]) == 0x85U ||
+      static_cast<unsigned char>(value[offset + 1]) == 0xa0U)
+  ) {
+    return 2U;
+  }
+  if (
+    offset + 2 < value.size() &&
+    (
+      (byte == 0xe1U &&
+        static_cast<unsigned char>(value[offset + 1]) == 0x9aU &&
+        static_cast<unsigned char>(value[offset + 2]) == 0x80U) ||
+      (byte == 0xe2U &&
+        static_cast<unsigned char>(value[offset + 1]) == 0x80U &&
+        (
+          (static_cast<unsigned char>(value[offset + 2]) >= 0x80U &&
+            static_cast<unsigned char>(value[offset + 2]) <= 0x8aU) ||
+          static_cast<unsigned char>(value[offset + 2]) == 0xa8U ||
+          static_cast<unsigned char>(value[offset + 2]) == 0xa9U ||
+          static_cast<unsigned char>(value[offset + 2]) == 0xafU
+        )) ||
+      (byte == 0xe2U &&
+        static_cast<unsigned char>(value[offset + 1]) == 0x81U &&
+        static_cast<unsigned char>(value[offset + 2]) == 0x9fU) ||
+      (byte == 0xe3U &&
+        static_cast<unsigned char>(value[offset + 1]) == 0x80U &&
+        static_cast<unsigned char>(value[offset + 2]) == 0x80U)
+    )
+  ) {
+    return 3U;
+  }
+  return 0U;
+}
+
+static std::string normalizeMetadataWhitespace(const std::string& value) {
+  std::string normalized;
+  normalized.reserve(value.size());
+  bool pendingSpace = false;
+  for (std::size_t offset = 0; offset < value.size();) {
+    const std::size_t whitespaceLength = metadataWhitespaceLength(value, offset);
+    if (whitespaceLength > 0) {
+      pendingSpace = !normalized.empty();
+      offset += whitespaceLength;
+      continue;
+    }
+    if (pendingSpace) {
+      normalized += ' ';
+      pendingSpace = false;
+    }
+    normalized += value[offset];
+    offset += 1;
+  }
+  return normalized;
+}
+
 static std::optional<std::string> cleanMetadataText(const std::string& value) {
-  const std::string trimmed = trimAsciiWhitespace(value);
-  return isSafeMetadataText(trimmed) ? std::optional<std::string>(trimmed) : std::nullopt;
+  const std::string normalized = normalizeMetadataWhitespace(value);
+  return isSafeMetadataText(normalized) ? std::optional<std::string>(normalized) : std::nullopt;
 }
 
 static std::optional<std::string> parseStringField(const std::string& input, const std::string& fieldName) {
   const auto valueIndex = findFieldValue(input, fieldName);
   return valueIndex ? parseJsonStringAt(input, *valueIndex) : std::nullopt;
+}
+
+static bool parseBoolField(const std::string& input, const std::string& fieldName, bool fallback) {
+  const auto valueIndex = findFieldValue(input, fieldName);
+  if (!valueIndex) {
+    return fallback;
+  }
+  if (input.compare(*valueIndex, 4, "true") == 0) {
+    return true;
+  }
+  if (input.compare(*valueIndex, 5, "false") == 0) {
+    return false;
+  }
+  return fallback;
 }
 
 static std::vector<std::string> parseStringArrayField(const std::string& input, const std::string& fieldName) {
@@ -318,6 +411,77 @@ static std::uint64_t readBe64(const unsigned char* bytes) {
   return value;
 }
 
+static std::optional<std::vector<unsigned char>> base64Decode(const std::string& value) {
+  static constexpr signed char invalid = -1;
+  static const std::vector<signed char> lookup = [] {
+    std::vector<signed char> table(256, invalid);
+    const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for (std::size_t index = 0; index < alphabet.size(); index += 1) {
+      table[static_cast<unsigned char>(alphabet[index])] = static_cast<signed char>(index);
+    }
+    return table;
+  }();
+  std::vector<unsigned char> decoded;
+  decoded.reserve((value.size() / 4U) * 3U);
+  std::uint32_t accumulator = 0;
+  int bits = 0;
+  for (unsigned char ch : value) {
+    if (ch == '=') {
+      break;
+    }
+    if (std::isspace(ch)) {
+      continue;
+    }
+    const signed char digit = lookup[ch];
+    if (digit == invalid) {
+      return std::nullopt;
+    }
+    accumulator = (accumulator << 6U) | static_cast<std::uint32_t>(digit);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      decoded.push_back(static_cast<unsigned char>((accumulator >> bits) & 0xffU));
+    }
+  }
+  return decoded;
+}
+
+static bool parseFlacPictureBlock(const std::vector<unsigned char>& block, NativeMetadataResult& result) {
+  constexpr std::size_t maxNativeCoverBytes = 4U * 1024U * 1024U;
+  if (block.size() < 32U) {
+    return false;
+  }
+  std::size_t offset = 4U;
+  const std::uint32_t mimeLength = readBe32(block.data() + offset);
+  offset += 4U;
+  if (mimeLength > 255U || mimeLength > block.size() - offset) {
+    return false;
+  }
+  const std::string mime(reinterpret_cast<const char*>(block.data() + offset), mimeLength);
+  offset += mimeLength;
+  if (block.size() - offset < 4U) {
+    return false;
+  }
+  const std::uint32_t descriptionLength = readBe32(block.data() + offset);
+  offset += 4U;
+  if (descriptionLength > block.size() - offset) {
+    return false;
+  }
+  offset += descriptionLength;
+  if (block.size() - offset < 20U) {
+    return false;
+  }
+  offset += 16U;
+  const std::uint32_t dataLength = readBe32(block.data() + offset);
+  offset += 4U;
+  if (dataLength == 0U || dataLength > maxNativeCoverBytes || dataLength > block.size() - offset) {
+    return false;
+  }
+  result.embeddedCover.assign(block.begin() + static_cast<std::ptrdiff_t>(offset), block.begin() + static_cast<std::ptrdiff_t>(offset + dataLength));
+  result.embeddedCoverMimeType = mime.empty() ? "application/octet-stream" : mime;
+  return true;
+}
+
 static std::optional<int> parseLeadingPositiveInt(const std::string& value) {
   int parsed = 0;
   bool hasDigit = false;
@@ -352,6 +516,18 @@ static std::optional<int> parseYear(const std::string& value) {
     }
   }
   return std::nullopt;
+}
+
+static std::optional<double> parseFiniteDouble(const std::string& value, bool positiveOnly = false) {
+  if (value.empty()) {
+    return std::nullopt;
+  }
+  char* end = nullptr;
+  const double parsed = std::strtod(value.c_str(), &end);
+  if (end == value.c_str() || !std::isfinite(parsed) || (positiveOnly && parsed <= 0.0)) {
+    return std::nullopt;
+  }
+  return parsed;
 }
 
 static std::string firstTagValue(const std::map<std::string, std::vector<std::string>>& tags, const std::string& key) {
@@ -443,14 +619,17 @@ static std::optional<std::string> decodeId3TextFrame(const std::vector<unsigned 
   const unsigned char encoding = frame[0];
   const unsigned char* bytes = frame.data() + 1;
   std::size_t size = frame.size() - 1;
-  while (size > 0 && bytes[size - 1] == 0) {
-    size -= 1;
-  }
 
   std::string decoded;
   if (encoding == 0) {
+    while (size > 0 && bytes[size - 1] == 0) {
+      size -= 1;
+    }
     decoded = latin1ToUtf8(bytes, size);
   } else if (encoding == 3) {
+    while (size > 0 && bytes[size - 1] == 0) {
+      size -= 1;
+    }
     decoded.assign(reinterpret_cast<const char*>(bytes), size);
   } else if (encoding == 1 || encoding == 2) {
     bool littleEndian = false;
@@ -476,6 +655,101 @@ static std::optional<std::string> decodeId3TextFrame(const std::vector<unsigned 
     decoded.resize(nullIndex);
   }
   return cleanMetadataText(decoded);
+}
+
+static bool parseId3AttachedPicture(
+  const std::vector<unsigned char>& frame,
+  std::vector<unsigned char>& cover,
+  std::string& mimeType
+) {
+  constexpr std::size_t maxNativeCoverBytes = 4U * 1024U * 1024U;
+  if (frame.size() < 5U) {
+    return false;
+  }
+  const unsigned char encoding = frame[0];
+  std::size_t offset = 1U;
+  const auto mimeEnd = std::find(frame.begin() + static_cast<std::ptrdiff_t>(offset), frame.end(), 0U);
+  if (mimeEnd == frame.end()) {
+    return false;
+  }
+  mimeType.assign(reinterpret_cast<const char*>(frame.data() + offset), static_cast<std::size_t>(mimeEnd - (frame.begin() + static_cast<std::ptrdiff_t>(offset))));
+  if (mimeType.size() > 255U) {
+    return false;
+  }
+  offset = static_cast<std::size_t>(mimeEnd - frame.begin()) + 1U;
+  if (offset >= frame.size()) {
+    return false;
+  }
+  offset += 1U;
+  if (encoding == 1U || encoding == 2U) {
+    bool foundTerminator = false;
+    while (offset + 1U < frame.size()) {
+      if (frame[offset] == 0U && frame[offset + 1U] == 0U) {
+        offset += 2U;
+        foundTerminator = true;
+        break;
+      }
+      offset += 2U;
+    }
+    if (!foundTerminator) {
+      return false;
+    }
+  } else {
+    const auto descriptionEnd = std::find(frame.begin() + static_cast<std::ptrdiff_t>(offset), frame.end(), 0U);
+    if (descriptionEnd == frame.end()) {
+      return false;
+    }
+    offset = static_cast<std::size_t>(descriptionEnd - frame.begin()) + 1U;
+  }
+  if (offset >= frame.size() || frame.size() - offset > maxNativeCoverBytes) {
+    return false;
+  }
+  cover.assign(frame.begin() + static_cast<std::ptrdiff_t>(offset), frame.end());
+  if (mimeType.empty()) {
+    mimeType = "application/octet-stream";
+  }
+  return !cover.empty();
+}
+
+static bool parseId3UserTextFrame(
+  const std::vector<unsigned char>& frame,
+  std::map<std::string, std::vector<std::string>>& tags
+) {
+  if (frame.size() < 3U || (frame[0] != 0U && frame[0] != 3U)) {
+    return false;
+  }
+  const auto descriptionEnd = std::find(frame.begin() + 1, frame.end(), 0U);
+  if (descriptionEnd == frame.end()) {
+    return false;
+  }
+  std::string description(
+    reinterpret_cast<const char*>(frame.data() + 1U),
+    static_cast<std::size_t>(descriptionEnd - (frame.begin() + 1))
+  );
+  description = asciiLower(description);
+  const std::size_t valueOffset = static_cast<std::size_t>(descriptionEnd - frame.begin()) + 1U;
+  if (valueOffset >= frame.size()) {
+    return true;
+  }
+  const auto value = cleanMetadataText(std::string(
+    reinterpret_cast<const char*>(frame.data() + valueOffset),
+    frame.size() - valueOffset
+  ));
+  if (!value) {
+    return true;
+  }
+  static const std::map<std::string, std::string> supportedDescriptions = {
+    { "replaygain_track_gain", "replaygain_track_gain" },
+    { "replaygain_album_gain", "replaygain_album_gain" },
+    { "replaygain_track_peak", "replaygain_track_peak" },
+    { "replaygain_album_peak", "replaygain_album_peak" },
+    { "replaygain_integrated_lufs", "replaygain_integrated_lufs" },
+  };
+  const auto supported = supportedDescriptions.find(description);
+  if (supported != supportedDescriptions.end()) {
+    tags[supported->second].push_back(*value);
+  }
+  return true;
 }
 
 static void addTextTag(std::map<std::string, std::vector<std::string>>& tags, const std::string& key, const std::optional<std::string>& value) {
@@ -636,10 +910,31 @@ static std::string extensionFromFileName(const std::string& fileName) {
 
 static std::optional<WIN32_FILE_ATTRIBUTE_DATA> getFileAttributes(const std::wstring& path) {
   WIN32_FILE_ATTRIBUTE_DATA data;
-  if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data) == 0) {
+  std::wstring apiPath = path;
+  if (apiPath.rfind(L"\\\\?\\", 0) != 0) {
+    if (apiPath.rfind(L"\\\\", 0) == 0) {
+      apiPath = L"\\\\?\\UNC\\" + apiPath.substr(2);
+    } else if (apiPath.size() >= 3 && apiPath[1] == L':' && (apiPath[2] == L'\\' || apiPath[2] == L'/')) {
+      apiPath = L"\\\\?\\" + apiPath;
+    }
+  }
+  if (GetFileAttributesExW(apiPath.c_str(), GetFileExInfoStandard, &data) == 0) {
     return std::nullopt;
   }
   return data;
+}
+
+static std::wstring toExtendedLengthPath(const std::wstring& path) {
+  if (path.rfind(L"\\\\?\\", 0) == 0) {
+    return path;
+  }
+  if (path.rfind(L"\\\\", 0) == 0) {
+    return L"\\\\?\\UNC\\" + path.substr(2);
+  }
+  if (path.size() >= 3 && path[1] == L':' && (path[2] == L'\\' || path[2] == L'/')) {
+    return L"\\\\?\\" + path;
+  }
+  return path;
 }
 
 static std::wstring appendChildPath(const std::wstring& directory, const std::wstring& childName) {
@@ -660,7 +955,7 @@ static void scanWindowsDirectory(
   directoryCount += 1;
   const auto directoryAttributes = getFileAttributes(directory);
   std::vector<SnapshotEntry> snapshotEntries;
-  const std::wstring searchPath = appendChildPath(directory, L"*");
+  const std::wstring searchPath = appendChildPath(toExtendedLengthPath(directory), L"*");
 
   WIN32_FIND_DATAW data;
   HANDLE handle = FindFirstFileW(searchPath.c_str(), &data);
@@ -708,7 +1003,12 @@ static void scanWindowsDirectory(
     }
   } while (FindNextFileW(handle, &data) != 0);
 
+  const DWORD enumerationError = GetLastError();
   FindClose(handle);
+  if (enumerationError != ERROR_NO_MORE_FILES) {
+    writeError("directory", fs::path(directory), "FindNextFileW failed: " + win32ErrorMessage(enumerationError));
+    return;
+  }
   if (directoryAttributes) {
     writeDirectorySnapshot(fs::path(directory), fileTimeToUnixMs(directoryAttributes->ftLastWriteTime), snapshotEntries);
   }
@@ -893,6 +1193,11 @@ static std::optional<NativeMetadataResult> readWaveMetadata(const std::string& f
     const std::string id(reinterpret_cast<const char*>(chunkHeader), 4);
     const std::uint32_t size = readLe32(chunkHeader + 4);
 
+    if (id == "id3 " || id == "ID3 ") {
+      unsupportedReason = "native metadata reader delegates WAV ID3 metadata to TypeScript";
+      return std::nullopt;
+    }
+
     if (id == "fmt " && size <= maxSmallWaveChunkBytes) {
       std::vector<unsigned char> chunk(size);
       if (!readExact(stream, chunk)) {
@@ -1010,6 +1315,11 @@ static std::optional<NativeMetadataResult> readAiffMetadata(const std::string& f
     }
     const std::string id(reinterpret_cast<const char*>(chunkHeader), 4);
     const std::uint32_t size = readBe32(chunkHeader + 4);
+
+    if (id == "ID3 ") {
+      unsupportedReason = "native metadata reader delegates AIFF ID3 metadata to TypeScript";
+      return std::nullopt;
+    }
 
     if (id == "COMM" && size <= maxSmallAiffChunkBytes) {
       std::vector<unsigned char> chunk(size);
@@ -1141,6 +1451,14 @@ static std::string fileStemFromPath(const std::string& filePath) {
   return stem.empty() ? "Untitled" : stem;
 }
 
+static std::string parentFolderNameFromPath(const std::string& filePath) {
+  const fs::path parent = pathFromUtf8(filePath).parent_path();
+  if (parent.empty()) {
+    return "";
+  }
+  return pathToUtf8(parent.filename());
+}
+
 static void applyVorbisTags(
   const std::map<std::string, std::vector<std::string>>& tags,
   const std::string& filePath,
@@ -1154,6 +1472,24 @@ static void applyVorbisTags(
   const std::string trackNumber = firstTagValue(tags, "tracknumber");
   const std::string discNumber = firstTagValue(tags, "discnumber");
   const std::string date = firstTagValue(tags, "date").empty() ? firstTagValue(tags, "year") : firstTagValue(tags, "date");
+  const std::string bpm = firstTagValue(tags, "bpm").empty() ? firstTagValue(tags, "tempo") : firstTagValue(tags, "bpm");
+  for (const auto& [key, values] : tags) {
+    std::string normalizedKey;
+    normalizedKey.reserve(key.size());
+    for (const unsigned char ch : key) {
+      if (std::isalnum(ch)) {
+        normalizedKey += static_cast<char>(std::tolower(ch));
+      }
+    }
+    if ((normalizedKey == "mqaencoder" || normalizedKey == "mqaencoderversion") && !values.empty()) {
+      const std::string value = asciiLower(values.front());
+      if (!value.empty() && value != "0" && value != "false" && value != "no" && value != "off" && value != "none") {
+        result.mqa = true;
+        break;
+      }
+    }
+  }
+  result.sources["mqa"] = result.mqa ? "embedded" : "unknown";
 
   result.title = title.empty() ? fileStemFromPath(filePath) : title;
   result.sources["title"] = title.empty() ? "filename_fallback" : "embedded";
@@ -1180,6 +1516,20 @@ static void applyVorbisTags(
   result.sources["discNo"] = result.discNo ? "embedded" : "unknown";
   result.year = parseYear(date);
   result.sources["year"] = result.year ? "embedded" : "unknown";
+
+  result.bpm = parseFiniteDouble(bpm, true);
+  result.sources["bpm"] = result.bpm ? "embedded" : "unknown";
+  result.replayGainTrackGainDb = parseFiniteDouble(firstTagValue(tags, "replaygain_track_gain"));
+  result.replayGainAlbumGainDb = parseFiniteDouble(firstTagValue(tags, "replaygain_album_gain"));
+  result.replayGainTrackPeak = parseFiniteDouble(firstTagValue(tags, "replaygain_track_peak"), true);
+  result.replayGainAlbumPeak = parseFiniteDouble(firstTagValue(tags, "replaygain_album_peak"), true);
+  result.replayGainIntegratedLufs = parseFiniteDouble(firstTagValue(tags, "replaygain_integrated_lufs"));
+  result.sources["replayGainTrackGainDb"] = result.replayGainTrackGainDb ? "embedded" : "unknown";
+  result.sources["replayGainAlbumGainDb"] = result.replayGainAlbumGainDb ? "embedded" : "unknown";
+  result.sources["replayGainTrackPeak"] = result.replayGainTrackPeak ? "embedded" : "unknown";
+  result.sources["replayGainAlbumPeak"] = result.replayGainAlbumPeak ? "embedded" : "unknown";
+  result.sources["replayGainIntegratedLufs"] = result.replayGainIntegratedLufs ? "embedded" : "unknown";
+  result.hasEmbeddedMetadata = !tags.empty();
 }
 
 static bool packetStartsWith(const std::vector<unsigned char>& packet, const char* marker, std::size_t markerSize, std::size_t offset = 0) {
@@ -1335,6 +1685,32 @@ static std::optional<NativeMetadataResult> readOggMetadata(const std::string& fi
     result.sources["duration"] = "technical";
   }
 
+  const std::string pictureTag = firstTagValue(tags, "metadata_block_picture");
+  if (!pictureTag.empty()) {
+    const auto pictureBlock = base64Decode(pictureTag);
+    if (!pictureBlock || !parseFlacPictureBlock(*pictureBlock, result)) {
+      unsupportedReason = "native metadata reader could not parse Ogg embedded cover";
+      return std::nullopt;
+    }
+  } else {
+    const std::string coverArt = firstTagValue(tags, "coverart");
+    if (!coverArt.empty()) {
+      const auto coverBytes = base64Decode(coverArt);
+      if (!coverBytes || coverBytes->empty() || coverBytes->size() > 4U * 1024U * 1024U) {
+        unsupportedReason = "native metadata reader could not parse Ogg embedded cover";
+        return std::nullopt;
+      }
+      result.embeddedCover = *coverBytes;
+      result.embeddedCoverMimeType = firstTagValue(tags, "coverartmime");
+      if (result.embeddedCoverMimeType.empty()) {
+        result.embeddedCoverMimeType = "application/octet-stream";
+      } else if (result.embeddedCoverMimeType.size() > 255U) {
+        unsupportedReason = "native metadata reader found invalid Ogg cover MIME type";
+        return std::nullopt;
+      }
+    }
+  }
+
   applyVorbisTags(tags, filePath, result);
   result.hasVorbisComments = !tags.empty();
   return result;
@@ -1366,7 +1742,7 @@ static std::optional<NativeMetadataResult> readFlacMetadata(const std::string& f
   result.sources["replayGainAlbumPeak"] = "unknown";
   result.sources["replayGainIntegratedLufs"] = "unknown";
 
-  constexpr std::uint32_t maxNativeMetadataBlockBytes = 2U * 1024U * 1024U;
+  constexpr std::uint32_t maxNativeMetadataBlockBytes = 4U * 1024U * 1024U + 1024U;
   for (int blockIndex = 0; blockIndex < 256; blockIndex += 1) {
     unsigned char header[4] = {};
     if (!readExact(stream, header, sizeof(header))) {
@@ -1381,19 +1757,22 @@ static std::optional<NativeMetadataResult> readFlacMetadata(const std::string& f
       return std::nullopt;
     }
 
-    if (blockType == 0 || blockType == 4) {
+    if (blockType == 0 || blockType == 4 || blockType == 6) {
       std::vector<unsigned char> block(length);
       if (!readExact(stream, block)) {
         break;
       }
       if (blockType == 0) {
         parseFlacStreamInfo(block, result);
-      } else {
+      } else if (blockType == 4) {
         const auto tags = parseVorbisCommentBlock(block);
         if (!tags.empty()) {
           result.hasVorbisComments = true;
           applyVorbisTags(tags, filePath, result);
         }
+      } else if (!parseFlacPictureBlock(block, result)) {
+        unsupportedReason = "native metadata reader could not parse FLAC embedded cover";
+        return std::nullopt;
       }
     } else {
       stream.seekg(static_cast<std::streamoff>(length), std::ios::cur);
@@ -1406,6 +1785,7 @@ static std::optional<NativeMetadataResult> readFlacMetadata(const std::string& f
       break;
     }
   }
+  const std::streampos audioStartPosition = stream.tellg();
 
   if (!result.hasVorbisComments) {
     unsupportedReason = "native metadata reader found no FLAC Vorbis comments";
@@ -1423,6 +1803,21 @@ static std::optional<NativeMetadataResult> readFlacMetadata(const std::string& f
   if (result.albumArtist.empty()) {
     result.albumArtist = result.artist;
     result.sources["albumArtist"] = "artist_fallback";
+  }
+  if (result.duration > 0.001) {
+    std::error_code sizeError;
+    const std::uintmax_t fileSize = fs::file_size(pathFromUtf8(filePath), sizeError);
+    const std::uintmax_t audioStart =
+      audioStartPosition >= std::streampos(0)
+        ? static_cast<std::uintmax_t>(audioStartPosition)
+        : 0U;
+    const double averageBitrate = sizeError || fileSize <= audioStart
+      ? 0.0
+      : (static_cast<double>(fileSize - audioStart) * 8.0 / result.duration);
+    if (averageBitrate > 0.0 && averageBitrate <= static_cast<double>((std::numeric_limits<int>::max)())) {
+      result.bitrate = static_cast<int>(std::llround(averageBitrate));
+      result.sources["bitrate"] = "technical";
+    }
   }
 
   return result;
@@ -1644,20 +2039,26 @@ static std::optional<NativeMetadataResult> readMp3Id3Metadata(const std::string&
   const std::uintmax_t audioStart = 10U + static_cast<std::uintmax_t>(*tagSize) + (((flags & 0x10U) != 0) ? 10U : 0U);
 
   std::map<std::string, std::vector<std::string>> tags;
+  std::vector<unsigned char> embeddedCover;
+  std::string embeddedCoverMimeType;
+  bool unsupportedExtendedMetadata = false;
   for (std::size_t offset = 0; offset + 10 <= tag.size();) {
     if (tag[offset] == 0 && tag[offset + 1] == 0 && tag[offset + 2] == 0 && tag[offset + 3] == 0) {
       break;
     }
     if (!isValidId3FrameId(tag.data() + offset)) {
+      unsupportedExtendedMetadata = true;
       break;
     }
 
     const std::string frameId(reinterpret_cast<const char*>(tag.data() + offset), 4);
     const auto frameSize = majorVersion == 4 ? readSynchsafe32(tag.data() + offset + 4) : std::optional<std::uint32_t>(readBe32(tag.data() + offset + 4));
     if (!frameSize || *frameSize == 0) {
+      unsupportedExtendedMetadata = true;
       break;
     }
     if (offset + 10 + *frameSize > tag.size()) {
+      unsupportedExtendedMetadata = true;
       break;
     }
 
@@ -1668,7 +2069,9 @@ static std::optional<NativeMetadataResult> readMp3Id3Metadata(const std::string&
       (majorVersion == 4 && ((flagB & 0x08U) != 0 || (flagB & 0x04U) != 0 || (flagB & 0x02U) != 0 || (flagB & 0x01U) != 0));
     (void)flagA;
 
-    if (!complexFrame) {
+    if (complexFrame) {
+      unsupportedExtendedMetadata = true;
+    } else {
       std::vector<unsigned char> frame(tag.begin() + static_cast<std::ptrdiff_t>(offset + 10), tag.begin() + static_cast<std::ptrdiff_t>(offset + 10 + *frameSize));
       if (frameId == "TIT2") {
         addTextTag(tags, "title", decodeId3TextFrame(frame));
@@ -1686,10 +2089,21 @@ static std::optional<NativeMetadataResult> readMp3Id3Metadata(const std::string&
         addTextTag(tags, "date", decodeId3TextFrame(frame));
       } else if (frameId == "TCON") {
         addTextTag(tags, "genre", decodeId3TextFrame(frame));
+      } else if (frameId == "TBPM") {
+        addTextTag(tags, "bpm", decodeId3TextFrame(frame));
+      } else if (frameId == "TXXX") {
+        unsupportedExtendedMetadata = !parseId3UserTextFrame(frame, tags) || unsupportedExtendedMetadata;
+      } else if (frameId == "APIC" && embeddedCover.empty()) {
+        unsupportedExtendedMetadata = !parseId3AttachedPicture(frame, embeddedCover, embeddedCoverMimeType) || unsupportedExtendedMetadata;
       }
     }
 
     offset += 10 + *frameSize;
+  }
+
+  if (unsupportedExtendedMetadata) {
+    unsupportedReason = "native metadata reader found unsupported extended ID3 metadata";
+    return std::nullopt;
   }
 
   if (tags.empty()) {
@@ -1719,6 +2133,8 @@ static std::optional<NativeMetadataResult> readMp3Id3Metadata(const std::string&
   result.sources["replayGainAlbumPeak"] = "unknown";
   result.sources["replayGainIntegratedLufs"] = "unknown";
   applyVorbisTags(tags, filePath, result);
+  result.embeddedCover = std::move(embeddedCover);
+  result.embeddedCoverMimeType = std::move(embeddedCoverMimeType);
   result.hasVorbisComments = true;
   return result;
 }
@@ -1780,6 +2196,73 @@ static std::optional<Mp4Box> findMp4Box(
   return std::nullopt;
 }
 
+static std::optional<std::string> readMp4AudioCodec(const std::vector<unsigned char>& moov) {
+  for (const Mp4Box& trak : parseMp4Boxes(moov, 0, moov.size())) {
+    if (trak.type != "trak") {
+      continue;
+    }
+    const auto mdia = findMp4Box(
+      moov,
+      trak.start + trak.headerSize,
+      trak.start + trak.size,
+      "mdia"
+    );
+    if (!mdia) {
+      continue;
+    }
+    const auto minf = findMp4Box(
+      moov,
+      mdia->start + mdia->headerSize,
+      mdia->start + mdia->size,
+      "minf"
+    );
+    if (!minf) {
+      continue;
+    }
+    const auto stbl = findMp4Box(
+      moov,
+      minf->start + minf->headerSize,
+      minf->start + minf->size,
+      "stbl"
+    );
+    if (!stbl) {
+      continue;
+    }
+    const auto stsd = findMp4Box(
+      moov,
+      stbl->start + stbl->headerSize,
+      stbl->start + stbl->size,
+      "stsd"
+    );
+    if (!stsd) {
+      continue;
+    }
+    const std::size_t firstEntry = stsd->start + stsd->headerSize + 8U;
+    const std::size_t stsdEnd = stsd->start + stsd->size;
+    if (firstEntry + 8U > stsdEnd || firstEntry + 8U > moov.size()) {
+      continue;
+    }
+    const std::uint32_t entrySize = readBe32(moov.data() + firstEntry);
+    if (entrySize < 8U || entrySize > stsdEnd - firstEntry) {
+      continue;
+    }
+    const std::string sampleEntry = mp4Type(moov.data() + firstEntry + 4U);
+    if (sampleEntry == "alac") {
+      return "ALAC";
+    }
+    if (sampleEntry == "mp4a") {
+      return "AAC";
+    }
+    if (sampleEntry == "fLaC") {
+      return "FLAC";
+    }
+    if (sampleEntry == "Opus") {
+      return "Opus";
+    }
+  }
+  return std::nullopt;
+}
+
 static std::optional<std::string> parseMp4TextDataAtom(const std::vector<unsigned char>& data, const Mp4Box& dataBox) {
   const std::size_t payloadStart = dataBox.start + dataBox.headerSize + 8;
   const std::size_t payloadEnd = dataBox.start + dataBox.size;
@@ -1806,7 +2289,9 @@ static std::optional<int> parseMp4PairDataAtom(const std::vector<unsigned char>&
 static void applyMp4IlstItem(
   const std::vector<unsigned char>& data,
   const Mp4Box& item,
-  std::map<std::string, std::vector<std::string>>& tags
+  std::map<std::string, std::vector<std::string>>& tags,
+  NativeMetadataResult& result,
+  bool& unsupportedExtendedMetadata
 ) {
   const std::size_t contentStart = item.start + item.headerSize;
   const std::size_t contentEnd = item.start + item.size;
@@ -1837,6 +2322,29 @@ static void applyMp4IlstItem(
     if (value) {
       tags["discnumber"].push_back(std::to_string(*value));
     }
+  } else if (item.type == "tmpo") {
+    const std::size_t payloadStart = dataBox->start + dataBox->headerSize + 8U;
+    const std::size_t payloadEnd = dataBox->start + dataBox->size;
+    if (payloadStart + 2U <= payloadEnd && payloadEnd <= data.size()) {
+      tags["bpm"].push_back(std::to_string(readBe16(data.data() + payloadStart)));
+    }
+  } else if (item.type == "covr" && result.embeddedCover.empty()) {
+    const std::size_t payloadStart = dataBox->start + dataBox->headerSize + 8U;
+    const std::size_t payloadEnd = dataBox->start + dataBox->size;
+    if (payloadStart >= payloadEnd || payloadEnd > data.size() || payloadEnd - payloadStart > 4U * 1024U * 1024U) {
+      unsupportedExtendedMetadata = true;
+      return;
+    }
+    result.embeddedCover.assign(
+      data.begin() + static_cast<std::ptrdiff_t>(payloadStart),
+      data.begin() + static_cast<std::ptrdiff_t>(payloadEnd)
+    );
+    result.embeddedCoverMimeType =
+      result.embeddedCover.size() >= 8U && result.embeddedCover[0] == 0x89U && result.embeddedCover[1] == 'P' && result.embeddedCover[2] == 'N' && result.embeddedCover[3] == 'G'
+        ? "image/png"
+        : "image/jpeg";
+  } else if (item.type == "----") {
+    unsupportedExtendedMetadata = true;
   }
 }
 
@@ -1938,10 +2446,11 @@ static std::optional<NativeMetadataResult> readMp4Metadata(const std::string& fi
   }
 
   NativeMetadataResult result;
-  result.codec = "AAC";
+  const auto audioCodec = readMp4AudioCodec(moov);
+  result.codec = audioCodec.value_or("AAC");
   result.duration = 0;
   result.sources["duration"] = "unknown";
-  result.sources["codec"] = "filename_fallback";
+  result.sources["codec"] = audioCodec ? "technical" : "filename_fallback";
   result.sources["sampleRate"] = "unknown";
   result.sources["bitDepth"] = "unknown";
   result.sources["bitrate"] = "unknown";
@@ -1974,8 +2483,13 @@ static std::optional<NativeMetadataResult> readMp4Metadata(const std::string& fi
   }
 
   std::map<std::string, std::vector<std::string>> tags;
+  bool unsupportedExtendedMetadata = false;
   for (const Mp4Box& item : parseMp4Boxes(moov, ilst->start + ilst->headerSize, ilst->start + ilst->size)) {
-    applyMp4IlstItem(moov, item, tags);
+    applyMp4IlstItem(moov, item, tags, result, unsupportedExtendedMetadata);
+  }
+  if (unsupportedExtendedMetadata) {
+    unsupportedReason = "native metadata reader found unsupported extended MP4 metadata";
+    return std::nullopt;
   }
   if (tags.empty()) {
     unsupportedReason = "native metadata reader found no supported MP4 metadata items";
@@ -1989,27 +2503,32 @@ static std::optional<NativeMetadataResult> readMp4Metadata(const std::string& fi
 
 static std::optional<NativeMetadataResult> readNativeMetadata(const std::string& filePath, std::string& unsupportedReason) {
   const std::string extension = asciiLower(pathToUtf8(pathFromUtf8(filePath).extension()));
+  std::optional<NativeMetadataResult> result;
   if (extension == ".wav") {
-    return readWaveMetadata(filePath, unsupportedReason);
-  }
-  if (extension == ".aiff" || extension == ".aif") {
-    return readAiffMetadata(filePath, unsupportedReason);
-  }
-  if (extension == ".ogg" || extension == ".opus") {
-    return readOggMetadata(filePath, unsupportedReason);
-  }
-  if (extension == ".flac" || extension == ".fla") {
-    return readFlacMetadata(filePath, unsupportedReason);
-  }
-  if (extension == ".mp3") {
-    return readMp3Id3Metadata(filePath, unsupportedReason);
-  }
-  if (extension == ".m4a" || extension == ".mp4" || extension == ".m4b" || extension == ".m4p") {
-    return readMp4Metadata(filePath, unsupportedReason);
+    result = readWaveMetadata(filePath, unsupportedReason);
+  } else if (extension == ".aiff" || extension == ".aif") {
+    result = readAiffMetadata(filePath, unsupportedReason);
+  } else if (extension == ".ogg" || extension == ".opus") {
+    result = readOggMetadata(filePath, unsupportedReason);
+  } else if (extension == ".flac" || extension == ".fla") {
+    result = readFlacMetadata(filePath, unsupportedReason);
+  } else if (extension == ".mp3") {
+    result = readMp3Id3Metadata(filePath, unsupportedReason);
+  } else if (extension == ".m4a" || extension == ".mp4" || extension == ".m4b" || extension == ".m4p" || extension == ".alac") {
+    result = readMp4Metadata(filePath, unsupportedReason);
+  } else {
+    unsupportedReason = "native metadata reader currently supports WAV, AIFF, Ogg/Opus, FLAC, MP3, and M4A/MP4/ALAC only";
+    return std::nullopt;
   }
 
-  unsupportedReason = "native metadata reader currently supports WAV, AIFF, Ogg/Opus, FLAC, MP3, and M4A/MP4 only";
-  return std::nullopt;
+  if (result && result->album.empty()) {
+    const std::string folderAlbum = parentFolderNameFromPath(filePath);
+    if (!folderAlbum.empty()) {
+      result->album = folderAlbum;
+      result->sources["album"] = "folder_structure";
+    }
+  }
+  return result;
 }
 
 static void writeJsonStringField(const std::string& name, const std::string& value, bool& wroteField) {
@@ -2046,22 +2565,38 @@ static void writeJsonNullableIntField(const std::string& name, const std::option
   }
 }
 
+static void writeJsonNullableDoubleField(const std::string& name, const std::optional<double>& value, bool& wroteField) {
+  if (wroteField) {
+    std::cout << ',';
+  }
+  wroteField = true;
+  std::cout << "\"" << jsonEscape(name) << "\":";
+  if (value) {
+    std::cout << *value;
+  } else {
+    std::cout << "null";
+  }
+}
+
 static void writeNativeCapabilities() {
   std::cout
     << "{\"type\":\"capabilities\""
-    << ",\"protocolVersion\":1"
+    << ",\"protocolVersion\":2"
     << ",\"supportedRequests\":[\"scan\",\"metadata\"]"
-    << ",\"features\":[\"batching\",\"progress\",\"directorySnapshots\",\"persistentMetadata\"]"
+    << ",\"features\":[\"batching\",\"progress\",\"directorySnapshots\",\"persistentMetadata\",\"requestIds\",\"singleMetadataResponse\",\"embeddedCoverBase64\"]"
     << ",\"metadataFormats\":[\"WAV/PCM\",\"AIFF/AIFC\",\"Ogg Vorbis\",\"Opus\",\"FLAC\",\"MP3\",\"M4A/MP4/ALAC\"]"
     << ",\"metadataExtensions\":[\".wav\",\".aiff\",\".aif\",\".ogg\",\".opus\",\".flac\",\".fla\",\".mp3\",\".m4a\",\".mp4\",\".m4b\",\".m4p\",\".alac\"]"
     << "}" << std::endl;
 }
 
-static void writeNativeMetadataResponse(const std::string& path, const NativeMetadataResult& result) {
-  writeNativeCapabilities();
-  std::cout << "{\"type\":\"ready\"}" << std::endl;
-  std::cout << "{\"type\":\"started\",\"mode\":\"metadata\",\"path\":\"" << jsonEscape(path) << "\"}" << std::endl;
-  std::cout << "{\"type\":\"metadata\",\"path\":\"" << jsonEscape(path) << "\",\"result\":{\"fields\":{";
+static void writeNativeMetadataResponse(
+  const std::string& requestId,
+  const std::string& path,
+  const NativeMetadataResult& result,
+  bool readCover
+) {
+  std::cout << "{\"type\":\"metadata\",\"status\":\"ok\",\"requestId\":\"" << jsonEscape(requestId)
+    << "\",\"path\":\"" << jsonEscape(path) << "\",\"result\":{\"fields\":{";
 
   bool wroteField = false;
   writeJsonStringField("title", result.title, wroteField);
@@ -2074,6 +2609,7 @@ static void writeNativeMetadataResponse(const std::string& path, const NativeMet
   writeJsonNullableStringField("genre", result.genre, wroteField);
   std::cout << ",\"duration\":" << result.duration;
   std::cout << ",\"codec\":\"" << jsonEscape(result.codec) << "\"";
+  std::cout << ",\"mqa\":" << (result.mqa ? "true" : "false");
   std::cout << ",\"sampleRate\":";
   if (result.sampleRate) {
     std::cout << *result.sampleRate;
@@ -2092,9 +2628,12 @@ static void writeNativeMetadataResponse(const std::string& path, const NativeMet
   } else {
     std::cout << "null";
   }
-  std::cout << ",\"bpm\":null";
-  std::cout << ",\"replayGainTrackGainDb\":null,\"replayGainAlbumGainDb\":null";
-  std::cout << ",\"replayGainTrackPeak\":null,\"replayGainAlbumPeak\":null,\"replayGainIntegratedLufs\":null";
+  writeJsonNullableDoubleField("bpm", result.bpm, wroteField);
+  writeJsonNullableDoubleField("replayGainTrackGainDb", result.replayGainTrackGainDb, wroteField);
+  writeJsonNullableDoubleField("replayGainAlbumGainDb", result.replayGainAlbumGainDb, wroteField);
+  writeJsonNullableDoubleField("replayGainTrackPeak", result.replayGainTrackPeak, wroteField);
+  writeJsonNullableDoubleField("replayGainAlbumPeak", result.replayGainAlbumPeak, wroteField);
+  writeJsonNullableDoubleField("replayGainIntegratedLufs", result.replayGainIntegratedLufs, wroteField);
   std::cout << "},\"fieldSources\":{";
 
   bool wroteSource = false;
@@ -2103,21 +2642,34 @@ static void writeNativeMetadataResponse(const std::string& path, const NativeMet
   }
 
   std::cout
-    << "},\"embeddedMetadataStatus\":\"present\",\"embeddedCoverStatus\":\"missing\""
-    << ",\"warnings\":[],\"errors\":[],\"status\":\"ok\"}}" << std::endl;
+    << "},\"embeddedMetadataStatus\":\"" << (result.hasEmbeddedMetadata ? "present" : "missing") << "\""
+    << ",\"embeddedCoverStatus\":\"" << (result.embeddedCover.empty() ? "missing" : "present") << "\"";
+  if (readCover && !result.embeddedCover.empty()) {
+    std::cout << ",\"embeddedCoverBase64\":\"" << base64Encode(result.embeddedCover) << "\""
+      << ",\"embeddedCoverMimeType\":\"" << jsonEscape(result.embeddedCoverMimeType) << "\"";
+  }
+  std::cout << ",\"warnings\":[],\"errors\":[],\"status\":\"ok\"}}" << std::endl;
 }
 
-static void writeUnsupportedMetadataResponse(const std::string& path, const std::string& message) {
-  writeNativeCapabilities();
-  std::cout << "{\"type\":\"ready\"}" << std::endl;
-  std::cout << "{\"type\":\"started\",\"mode\":\"metadata\",\"path\":\"" << jsonEscape(path) << "\"}" << std::endl;
+static void writeUnsupportedMetadataResponse(const std::string& requestId, const std::string& path, const std::string& message) {
   std::cout
-    << "{\"type\":\"unsupported\",\"path\":\"" << jsonEscape(path)
+    << "{\"type\":\"unsupported\",\"status\":\"unsupported\",\"requestId\":\"" << jsonEscape(requestId)
+    << "\",\"path\":\"" << jsonEscape(path)
+    << "\",\"message\":\"" << jsonEscape(message) << "\"}" << std::endl;
+}
+
+static void writeMetadataErrorResponse(const std::string& requestId, const std::string& path, const std::string& message) {
+  std::cout
+    << "{\"type\":\"error\",\"status\":\"error\",\"requestId\":\"" << jsonEscape(requestId)
+    << "\",\"path\":\"" << jsonEscape(path)
     << "\",\"message\":\"" << jsonEscape(message) << "\"}" << std::endl;
 }
 
 int main() {
   std::ios::sync_with_stdio(false);
+
+  writeNativeCapabilities();
+  std::cout << "{\"type\":\"ready\"}" << std::endl;
 
   std::string line;
   if (!std::getline(std::cin, line)) {
@@ -2128,17 +2680,23 @@ int main() {
   do {
     const std::string requestType = parseRequestType(line);
     if (requestType == "metadata") {
+      const std::string requestId = parseStringField(line, "requestId").value_or("");
       const std::string path = parseStringField(line, "path").value_or("");
+      const bool readCover = parseBoolField(line, "readCover", true);
+      if (requestId.empty()) {
+        writeMetadataErrorResponse("", path, "missing requestId in metadata request");
+        continue;
+      }
       if (path.empty()) {
-        std::cerr << "[echo-native-scanner] Missing path in metadata request." << std::endl;
-        return 2;
+        writeMetadataErrorResponse(requestId, path, "missing path in metadata request");
+        continue;
       }
       std::string unsupportedReason;
       const auto metadata = readNativeMetadata(path, unsupportedReason);
       if (metadata) {
-        writeNativeMetadataResponse(path, *metadata);
+        writeNativeMetadataResponse(requestId, path, *metadata, readCover);
       } else {
-        writeUnsupportedMetadataResponse(path, unsupportedReason.empty() ? "native metadata reader unsupported" : unsupportedReason);
+        writeUnsupportedMetadataResponse(requestId, path, unsupportedReason.empty() ? "native metadata reader unsupported" : unsupportedReason);
       }
       continue;
     }
@@ -2154,8 +2712,6 @@ int main() {
       return 2;
     }
 
-    writeNativeCapabilities();
-    std::cout << "{\"type\":\"ready\"}" << std::endl;
     std::cout << "{\"type\":\"started\",\"root\":\"" << jsonEscape(request.root) << "\"}" << std::endl;
 
 #ifdef _WIN32

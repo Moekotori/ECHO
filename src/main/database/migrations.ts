@@ -1309,6 +1309,62 @@ export const migrations: Migration[] = [
       addColumnIfMissing(database, 'folders', 'import_profile', "import_profile TEXT NOT NULL DEFAULT 'normal'");
     },
   },
+  {
+    id: 44,
+    apply: (database) => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS remote_provider_scan_cache (
+          source_id TEXT NOT NULL,
+          namespace TEXT NOT NULL,
+          cache_key TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          verified_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (source_id, namespace, cache_key),
+          FOREIGN KEY (source_id) REFERENCES remote_sources(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_remote_provider_scan_cache_updated
+          ON remote_provider_scan_cache(source_id, namespace, updated_at);
+      `);
+    },
+  },
+  {
+    id: 45,
+    apply: (database) => {
+      addColumnIfMissing(database, 'track_videos', 'selection_origin', "selection_origin TEXT NOT NULL DEFAULT 'unknown'");
+    },
+  },
+  {
+    id: 46,
+    apply: (database) => {
+      addColumnIfMissing(database, 'lyrics_cache', 'acceptance_origin', "acceptance_origin TEXT NOT NULL DEFAULT 'legacy'");
+      addColumnIfMissing(database, 'lyrics_cache', 'match_policy_version', 'match_policy_version INTEGER NOT NULL DEFAULT 1');
+    },
+  },
+  {
+    id: 47,
+    apply: (database) => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS audio_transition_analysis (
+          track_id TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          analyzer_version INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          analysis_json TEXT NOT NULL,
+          error TEXT,
+          analyzed_at TEXT,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (track_id, fingerprint, analyzer_version),
+          FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_audio_transition_analysis_status
+          ON audio_transition_analysis(status, updated_at);
+      `);
+    },
+  },
 ];
 
 export const runMigrations = (database: EchoDatabase): MigrationRunResult => {

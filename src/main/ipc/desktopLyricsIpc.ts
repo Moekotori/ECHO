@@ -53,6 +53,9 @@ const normalizeStylePatch = (value: unknown): DesktopLyricsStylePatch => {
     ...(typeof input.desktopLyricsTranslationEnabled === 'boolean'
       ? { desktopLyricsTranslationEnabled: input.desktopLyricsTranslationEnabled }
       : {}),
+    ...(typeof input.desktopLyricsHideWhenNoLyricsEnabled === 'boolean'
+      ? { desktopLyricsHideWhenNoLyricsEnabled: input.desktopLyricsHideWhenNoLyricsEnabled }
+      : {}),
   };
 };
 

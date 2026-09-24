@@ -6,6 +6,9 @@ export type EchoLinkMdnsAdvertisement = {
   address: string;
   port: number;
   version: number;
+  versions?: number[];
+  auth?: 'pairing' | 'token';
+  apiPath?: string;
 };
 
 const mdnsAddress = '224.0.0.251';
@@ -139,7 +142,14 @@ export class EchoLinkMdnsAdvertiser {
       ptrRecord(serviceEnumerator, serviceType, ttl),
       ptrRecord(serviceType, instance, ttl),
       srvRecord(instance, host, advertisement.port, ttl),
-      txtRecord(instance, [`name=${advertisement.name}`, `version=${advertisement.version}`, `deviceId=${advertisement.deviceId}`], ttl),
+      txtRecord(instance, [
+        `name=${advertisement.name}`,
+        `version=${advertisement.version}`,
+        `versions=${advertisement.versions?.join(',') ?? advertisement.version}`,
+        `deviceId=${advertisement.deviceId}`,
+        ...(advertisement.auth ? [`auth=${advertisement.auth}`] : []),
+        ...(advertisement.apiPath ? [`apiPath=${advertisement.apiPath}`] : []),
+      ], ttl),
       aRecord(host, advertisement.address, ttl),
       aRecord(`${safeDnsLabel(advertisement.name)}.local`, advertisement.address, ttl),
     ]);

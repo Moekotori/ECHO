@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { LyricsView, getActiveLyricIndex } from './LyricsView';
 import type { LyricsState } from './lyricsTypes';
 
@@ -50,15 +50,53 @@ const wordLyrics: LyricsState = {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('LyricsView', () => {
+  it('only enables bounded timestamps for explicitly seekable synced lyrics', () => {
+    const onSeek = vi.fn();
+    const { container } = render(
+      <LyricsView
+        durationMs={1500}
+        hideEmptyState={false}
+        lyrics={{
+          ...lyrics,
+          lines: [
+            { timeMs: -1, text: 'Untimed' },
+            { timeMs: 1000, text: 'Valid' },
+            { timeMs: 2000, text: 'Past duration' },
+          ],
+        }}
+        positionMs={0}
+        seekEnabled
+        onSeek={onSeek}
+      />,
+    );
+    const lineButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('.lyrics-line'));
+
+    expect(lineButtons.map((line) => line.dataset.seekable)).toEqual(['false', 'true', 'false']);
+    fireEvent.click(lineButtons[0]);
+    fireEvent.click(lineButtons[1]);
+    fireEvent.click(lineButtons[2]);
+    expect(onSeek).toHaveBeenCalledOnce();
+    expect(onSeek).toHaveBeenCalledWith(1000);
+  });
+
   it('keeps active line lookup stable when synced lines include untimed rows', () => {
     expect(getActiveLyricIndex([
       { timeMs: 1000, text: 'First' },
       { timeMs: -1, text: 'Untimed note' },
       { timeMs: 2000, text: 'Second' },
     ], 1500, 0)).toBe(0);
+  });
+
+  it('finds the latest eligible line when synced line timestamps are out of order', () => {
+    expect(getActiveLyricIndex([
+      { timeMs: 1400, text: 'Future line' },
+      { timeMs: 1200, text: 'Current line' },
+      { timeMs: 1800, text: 'Later line' },
+    ], 1250, 0)).toBe(1);
   });
 
   it('aligns word highlight immediately after seeking', async () => {
@@ -173,6 +211,87 @@ describe('LyricsView', () => {
       const words = Array.from(container.querySelectorAll<HTMLElement>('.lyrics-word'));
       expect(words.map((word) => word.dataset.wordState)).toEqual(['future', 'future']);
       expect(words.map((word) => word.style.getPropertyValue('--lyrics-word-progress'))).toEqual(['0', '0']);
+    });
+  });
+
+  it('does not highlight the next word before its start time during a timing gap', async () => {
+    const lyricsWithGap: LyricsState = {
+      kind: 'synced',
+      source: 'placeholder',
+      offsetMs: 0,
+      lines: [
+        {
+          timeMs: 1000,
+          text: 'Hello world',
+          words: [
+            { text: 'Hello ', startMs: 1000, endMs: 1300 },
+            { text: 'world', startMs: 1500, endMs: 1800 },
+          ],
+        },
+      ],
+    };
+    const { container } = render(
+      <LyricsView
+        durationMs={3000}
+        hideEmptyState={false}
+        lyrics={lyricsWithGap}
+        playbackState="paused"
+        positionMs={1400}
+        positionUpdatedAtMs={0}
+        onSeek={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector('.lyrics-word[data-word-state="current"]')).toBeNull();
+      const words = Array.from(container.querySelectorAll<HTMLElement>('.lyrics-word'));
+      expect(words.map((word) => word.dataset.wordState)).toEqual(['passed', 'future']);
+      expect(words.map((word) => word.style.getPropertyValue('--lyrics-word-progress'))).toEqual(['1', '0']);
+    });
+  });
+
+  it('marks the final word as passed after its timing ends', async () => {
+    const { container } = render(
+      <LyricsView
+        durationMs={3000}
+        hideEmptyState={false}
+        lyrics={wordLyrics}
+        playbackState="paused"
+        positionMs={2200}
+        positionUpdatedAtMs={0}
+        onSeek={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector('.lyrics-word[data-word-state="current"]')).toBeNull();
+      const words = Array.from(container.querySelectorAll<HTMLElement>('.lyrics-word'));
+      expect(words.map((word) => word.dataset.wordState)).toEqual(['passed', 'passed']);
+    });
+  });
+
+  it('keeps static word highlighting when reduced motion is enabled', async () => {
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const { container } = render(
+      <LyricsView
+        durationMs={3000}
+        hideEmptyState={false}
+        lyrics={wordLyrics}
+        playbackState="playing"
+        positionMs={1250}
+        positionUpdatedAtMs={performance.now()}
+        onSeek={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      const currentWord = container.querySelector<HTMLElement>('.lyrics-word[data-word-state="current"]');
+      expect(currentWord?.textContent).toBe('Hello ');
+      expect(currentWord?.style.getPropertyValue('--lyrics-word-progress')).toBe('1');
     });
   });
 
@@ -325,14 +444,9 @@ describe('LyricsView', () => {
     expect(container.querySelector('.lyrics-line[data-active="true"]')).toBe(activeLine);
   });
 
-  it('uses low-frequency word sync while the document is hidden', () => {
+  it('pauses word sync while the document is hidden', () => {
     const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState');
-    const intervalSpy = vi.spyOn(window, 'setInterval').mockImplementation((handler, timeout): ReturnType<typeof window.setInterval> => {
-      void handler;
-      void timeout;
-      return 1 as unknown as ReturnType<typeof window.setInterval>;
-    });
-    vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined);
+    const intervalSpy = vi.spyOn(window, 'setInterval');
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
 
     try {
@@ -349,7 +463,7 @@ describe('LyricsView', () => {
         />,
       );
 
-      expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 500);
+      expect(intervalSpy).not.toHaveBeenCalledWith(expect.any(Function), 500);
     } finally {
       if (visibilityDescriptor) {
         Object.defineProperty(document, 'visibilityState', visibilityDescriptor);
@@ -571,6 +685,49 @@ describe('LyricsView', () => {
     });
 
     expect(scrollContainer.scrollTop).toBe(216);
+    expect(frames.size).toBe(0);
+  });
+
+  it('uses the editorial reading axis instead of the default lyric center', () => {
+    let frameId = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frameId += 1;
+      frames.set(frameId, callback);
+      return frameId;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+      frames.delete(id);
+    });
+
+    const { container } = render(
+      <div className="lyrics-page" data-lyrics-page-style="editorial">
+        <LyricsView
+          durationMs={3000}
+          hideEmptyState={false}
+          lyrics={lyrics}
+          playbackState="paused"
+          positionMs={1000}
+          onSeek={vi.fn()}
+        />
+      </div>,
+    );
+    const scrollContainer = container.querySelector('.lyrics-scroll') as HTMLElement;
+    const activeLine = container.querySelector('.lyrics-line[data-active="true"]') as HTMLButtonElement;
+
+    setLayoutNumber(scrollContainer, 'clientHeight', 200);
+    setLayoutNumber(scrollContainer, 'scrollHeight', 1000);
+    setLayoutNumber(activeLine, 'offsetTop', 300);
+    setLayoutNumber(activeLine, 'offsetHeight', 40);
+
+    act(() => {
+      for (const [id, callback] of Array.from(frames.entries())) {
+        frames.delete(id);
+        callback(16);
+      }
+    });
+
+    expect(scrollContainer.scrollTop).toBe(228);
     expect(frames.size).toBe(0);
   });
 

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { JsonRpcBridge } from './JsonRpcBridge';
 import type { NativeOutputStartOptions } from './audioTypes';
@@ -98,7 +98,8 @@ class FakeChildProcess extends EventEmitter {
   readonly stderr = new PassThrough();
   readonly rpcIn = new CapturingWritable();
   readonly rpcOut = new PassThrough();
-  readonly stdio = [this.stdin, this.stdout, this.stderr, this.rpcIn, this.rpcOut] as const;
+  readonly pcmInput = new CapturingWritable();
+  readonly stdio = [this.stdin, this.stdout, this.stderr, this.rpcIn, this.rpcOut, this.pcmInput] as const;
   readonly kill = vi.fn((signal?: NodeJS.Signals | number) => {
     this.killSignals.push(signal ?? 'SIGTERM');
     if (signal === 'SIGKILL') this.killed = true;
@@ -114,12 +115,23 @@ class FakeChildProcess extends EventEmitter {
     this.emit('exit', code, signal);
   }
 
-  emitReadyLine(line = JSON.stringify({ ready: true, sampleRate: 48000, backend: 'wasapi-shared' })): void {
+  emitReadyLine(line = JSON.stringify({
+    ready: true,
+    readyLevel: 'device',
+    protocolVersion: 1,
+    backendContractVersion: 2,
+    capabilities: { deviceReadyV2: true, wasapiExclusive: true, asio: false },
+    sampleRate: 48000,
+    backend: 'wasapi-shared',
+  })): void {
     this.stdout.write(`${line}\n`);
   }
 
   emitDaemonReady(): void {
-    this.stdout.emit('data', '{"ready":true}\n');
+    this.stdout.emit(
+      'data',
+      '{"ready":true,"readyLevel":"process","protocolVersion":1,"backendContractVersion":2,"capabilities":{"deviceReadyV2":true,"runtimeDeviceConfigureV1":true,"hostOwnedLocalPlaybackV1":true,"nativeDspV1":true}}\n',
+    );
   }
 }
 
@@ -167,6 +179,15 @@ const settleStreamCallbacks = async (): Promise<void> => {
 
 const respondToSessionBegin = (proc: FakeChildProcess, chunkIndex = proc.rpcIn.chunks.length - 1): void => {
   const request = JSON.parse(proc.rpcIn.chunks[chunkIndex].toString('utf8'));
+  proc.rpcOut.write(`${JSON.stringify({ jsonrpc: '2.0', result: true, id: request.id })}\n`);
+};
+
+const respondToRpcMethod = (proc: FakeChildProcess, method: string): void => {
+  const request = [...proc.rpcIn.chunks]
+    .reverse()
+    .map((chunk) => JSON.parse(chunk.toString('utf8')))
+    .find((message: { method?: string }) => message.method === method);
+  if (!request) throw new Error(`missing RPC request: ${method}`);
   proc.rpcOut.write(`${JSON.stringify({ jsonrpc: '2.0', result: true, id: request.id })}\n`);
 };
 
@@ -279,7 +300,7 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
     expect(messages).toEqual([
       expect.objectContaining({
         method: 'audio.sessionBegin',
-        params: [{ sessionId, sr: 48000, ch: 2 }],
+        params: { sessionId, sr: 48000, ch: 2, startPaused: false },
       }),
       expect.objectContaining({
         method: 'audio.automixPrepare',
@@ -338,7 +359,7 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
     expect(messages).toEqual([
       expect.objectContaining({
         method: 'audio.sessionBegin',
-        params: [{ sessionId: firstSessionId, sr: 48000, ch: 2 }],
+        params: { sessionId: firstSessionId, sr: 48000, ch: 2, startPaused: false },
       }),
       expect.objectContaining({
         method: 'audio.automixPrepare',
@@ -346,7 +367,7 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
       }),
       expect.objectContaining({
         method: 'audio.sessionBegin',
-        params: [{ sessionId: secondSessionId, sr: 48000, ch: 2 }],
+        params: { sessionId: secondSessionId, sr: 48000, ch: 2, startPaused: false },
       }),
     ]);
   });
@@ -396,8 +417,8 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
       'audio.automixNext',
       'audio.automixNextEnd',
     ]);
-    expect(messages[0].params).toEqual([{ sessionId: firstSessionId, sr: 48000, ch: 2 }]);
-    expect(messages[1].params).toEqual([{ sessionId: secondSessionId, sr: 48000, ch: 2 }]);
+    expect(messages[0].params).toEqual({ sessionId: firstSessionId, sr: 48000, ch: 2, startPaused: false });
+    expect(messages[1].params).toEqual({ sessionId: secondSessionId, sr: 48000, ch: 2, startPaused: false });
     expect(messages.slice(2).every((message) => message.params.sessionId === secondSessionId)).toBe(true);
   });
 
@@ -408,7 +429,7 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
     const proc = new FakeChildProcess();
     Object.defineProperty(proc, 'stdout', { value: stdoutRef, configurable: true });
     Object.defineProperty(proc, 'stdio', {
-      value: [proc.stdin, stdoutRef, proc.stderr, proc.rpcIn, proc.rpcOut],
+      value: [proc.stdin, stdoutRef, proc.stderr, proc.rpcIn, proc.rpcOut, proc.pcmInput],
       configurable: true,
     });
     const spawn = vi.fn<HostSpawner>(() => proc as unknown as ChildProcessWithoutNullStreams);
@@ -537,12 +558,12 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
 
     const messages = Buffer.concat(proc.rpcIn.chunks).toString('utf8').trim().split('\n').map((line) => JSON.parse(line));
     expect(messages.map((message) => ({ jsonrpc: message.jsonrpc, method: message.method, hasId: Object.hasOwn(message, 'id') }))).toEqual([
-      { jsonrpc: '2.0', method: 'audio.sessionBegin', hasId: false },
+      { jsonrpc: '2.0', method: 'audio.sessionBegin', hasId: true },
       { jsonrpc: '2.0', method: 'audio.automixPrepare', hasId: false },
       { jsonrpc: '2.0', method: 'audio.automixNext', hasId: false },
       { jsonrpc: '2.0', method: 'audio.automixNextEnd', hasId: false },
     ]);
-    expect(messages[0].params).toEqual([{ sessionId, sr: 48000, ch: 2 }]);
+    expect(messages[0].params).toEqual({ sessionId, sr: 48000, ch: 2, startPaused: false });
     expect(messages[1].params).toEqual({
       sessionId,
       fadeStartSeconds: 12,
@@ -562,7 +583,7 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
     const proc = new FakeChildProcess();
     const failingRpcIn = new ThrowingWritable();
     Object.defineProperty(proc, 'stdio', {
-      value: [proc.stdin, proc.stdout, proc.stderr, failingRpcIn, proc.rpcOut],
+      value: [proc.stdin, proc.stdout, proc.stderr, failingRpcIn, proc.rpcOut, proc.pcmInput],
       configurable: true,
     });
     const spawn = vi.fn<HostSpawner>(() => proc as unknown as ChildProcessWithoutNullStreams);
@@ -586,7 +607,7 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
     const proc = new FakeChildProcess();
     const delayedRpcIn = new DeferredWritable();
     Object.defineProperty(proc, 'stdio', {
-      value: [proc.stdin, proc.stdout, proc.stderr, delayedRpcIn, proc.rpcOut],
+      value: [proc.stdin, proc.stdout, proc.stderr, delayedRpcIn, proc.rpcOut, proc.pcmInput],
       configurable: true,
     });
     const spawn = vi.fn<HostSpawner>(() => proc as unknown as ChildProcessWithoutNullStreams);
@@ -606,19 +627,27 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
     await settleMicrotasks();
 
     expect(delayedRpcIn.chunks.map((chunk) => JSON.parse(chunk.toString('utf8')).method)).toEqual(['audio.sessionBegin']);
-    expect(proc.stdin.chunks).toEqual([]);
+    expect(proc.pcmInput.chunks).toEqual([]);
     expect(writeCompleted).toBe(false);
 
     delayedRpcIn.flush();
+    await settleMicrotasks();
+    const sessionBeginRequest = JSON.parse(delayedRpcIn.chunks[0].toString('utf8'));
+    proc.rpcOut.write(`${JSON.stringify({ jsonrpc: '2.0', result: true, id: sessionBeginRequest.id })}\n`);
     await settleStreamCallbacks();
 
-    expect(proc.stdin.chunks).toEqual([Buffer.from([9, 10, 11, 12])]);
+    expect(proc.pcmInput.chunks).toEqual([Buffer.from([9, 10, 11, 12])]);
     expect(writeCompleted).toBe(true);
   });
 
-  it('startAudioDaemon reuses the module daemonBridge until stopAudioDaemon clears it', async () => {
+  it('startAudioDaemon restores its RPC bridge after a one-shot host owns DSP control', async () => {
     vi.useFakeTimers();
-    const { startAudioDaemon, stopAudioDaemon, getActiveJsonRpcBridge } = await importFreshNativePcmHostProcess();
+    const {
+      NativePcmHostProcess,
+      startAudioDaemon,
+      stopAudioDaemon,
+      getActiveJsonRpcBridge,
+    } = await importFreshNativePcmHostProcess();
     const procs: FakeChildProcess[] = [];
     spawnMock.mockImplementation(() => {
       const proc = new FakeChildProcess();
@@ -631,9 +660,21 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
     await firstStart;
     const active = getActiveJsonRpcBridge();
 
+    const output = new NativePcmHostProcess({
+      hostBinary: '/bin/echo-audio-host',
+      spawn: spawnMock,
+      logger: () => undefined,
+    });
+    const outputStart = output.start(sharedOptions());
+    procs[1].emitReadyLine();
+    await outputStart;
+    expect(output.activateDspControl()).toBe(true);
+    expect(getActiveJsonRpcBridge()).not.toBe(active);
+
     await startAudioDaemon();
-    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock).toHaveBeenCalledTimes(2);
     expect(getActiveJsonRpcBridge()).toBe(active);
+    output.stop();
 
     const stopped = stopAudioDaemon();
     await vi.advanceTimersByTimeAsync(2000);
@@ -645,9 +686,9 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
     expect(getActiveJsonRpcBridge()).toBeNull();
 
     const secondStart = startAudioDaemon();
-    procs[1].emitDaemonReady();
+    procs[2].emitDaemonReady();
     await secondStart;
-    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).toHaveBeenCalledTimes(3);
   });
 
   it('stopDaemon closes JSON-RPC, clears active bridge, sends SIGTERM, then SIGKILL on timeout', async () => {
@@ -674,7 +715,45 @@ describe('NativeOutputBridge module globals and daemon process lifecycle', () =>
 });
 
 describe('NativeOutputBridge raw PCM process lifecycle and reuse', () => {
-  it('writes raw Float32 PCM to stdin, ends stdin for session EOF, and exit flips readiness', async () => {
+  it('keeps one JSON-RPC bridge across process-ready and device-ready events', async () => {
+    const { NativePcmHostProcess } = await importFreshNativePcmHostProcess();
+    const { spawn, procs } = createSpawn();
+    const bridge = new NativePcmHostProcess({ hostBinary: '/bin/echo-audio-host', spawn, logger: () => undefined });
+    const start = bridge.start(sharedOptions());
+    let startSettled = false;
+    void start.then(
+      () => { startSettled = true; },
+      () => { startSettled = true; },
+    );
+    procs[0].emitReadyLine(JSON.stringify({
+      ready: true,
+      readyLevel: 'process',
+      protocolVersion: 1,
+      backendContractVersion: 2,
+      capabilities: { deviceReadyV2: true, wasapiExclusive: true, asio: false },
+    }));
+    await settleMicrotasks();
+    expect(startSettled).toBe(false);
+
+    const testable = bridge as unknown as { jsonRpcBridge: JsonRpcBridge | null };
+    const processReadyBridge = testable.jsonRpcBridge;
+    procs[0].emitReadyLine(JSON.stringify({
+      ready: true,
+      readyLevel: 'device',
+      protocolVersion: 1,
+      backendContractVersion: 2,
+      capabilities: { deviceReadyV2: true, wasapiExclusive: true, asio: false },
+      sampleRate: 48000,
+      backend: 'wasapi-shared',
+    }));
+    await start;
+
+    expect(processReadyBridge).not.toBeNull();
+    expect(testable.jsonRpcBridge).toBe(processReadyBridge);
+    bridge.stop();
+  });
+
+  it('writes raw Float32 PCM to fd5, acknowledges EOF over RPC, and exit flips readiness', async () => {
     const { NativePcmHostProcess, getActiveJsonRpcBridge } = await importFreshNativePcmHostProcess();
     const { spawn, procs } = createSpawn();
     const bridge = new NativePcmHostProcess({ hostBinary: '/bin/echo-audio-host', spawn, logger: () => undefined });
@@ -689,10 +768,17 @@ describe('NativeOutputBridge raw PCM process lifecycle and reuse', () => {
     const writable = bridge.createSessionWritable(sessionId);
     const pcm = Buffer.from(new Float32Array([0, 0.25, -0.5, 1]).buffer);
     writable.write(pcm);
-    await new Promise<void>((resolve) => writable.end(resolve));
+    const ended = new Promise<void>((resolve, reject) => writable.end((error?: Error | null) => error ? reject(error) : resolve()));
+    await settleStreamCallbacks();
+    respondToRpcMethod(procs[0], 'audio.inputEnd');
+    await ended;
 
-    expect(Buffer.concat(procs[0].stdin.chunks)).toEqual(pcm);
-    expect(procs[0].stdin.endSpy).toHaveBeenCalledTimes(1);
+    expect(Buffer.concat(procs[0].pcmInput.chunks)).toEqual(pcm);
+    expect(procs[0].pcmInput.endSpy).not.toHaveBeenCalled();
+    const inputEndRequest = procs[0].rpcIn.chunks
+      .map((chunk) => JSON.parse(chunk.toString('utf8')))
+      .find((message) => message.method === 'audio.inputEnd');
+    expect(inputEndRequest.params).toEqual({ sessionId, pcmBytes: pcm.length });
     procs[0].emitExit(0, null);
     expect(bridge.isReady).toBe(false);
   });
@@ -718,7 +804,7 @@ describe('NativeOutputBridge raw PCM process lifecycle and reuse', () => {
       currentWritable.write(Buffer.from([5, 6, 7, 8]), (error) => error ? reject(error) : resolve());
     });
 
-    expect(Buffer.concat(procs[0].stdin.chunks)).toEqual(Buffer.from([5, 6, 7, 8]));
+    expect(Buffer.concat(procs[0].pcmInput.chunks)).toEqual(Buffer.from([5, 6, 7, 8]));
   });
 
   it('does not let raw PCM output bridges replace or clear the active daemon JSON-RPC bridge', async () => {
@@ -756,7 +842,7 @@ describe('NativeOutputBridge raw PCM process lifecycle and reuse', () => {
     expect(bridge.canReuseFor({ ...original })).toBe(true);
     expect(bridge.canReuseFor({ ...original, deviceIndex: 999 })).toBe(false);
     expect(bridge.canReuseFor({ ...original, deviceIndex: 3 })).toBe(false);
-    procs[0].stdin.destroy();
+    procs[0].pcmInput.destroy();
     expect(bridge.canReuseFor({ ...original })).toBe(false);
   });
 
@@ -787,7 +873,7 @@ describe('NativeOutputBridge raw PCM process lifecycle and reuse', () => {
     const proc = new FakeChildProcess();
     const delayedRpcIn = new DeferredWritable();
     Object.defineProperty(proc, 'stdio', {
-      value: [proc.stdin, proc.stdout, proc.stderr, delayedRpcIn, proc.rpcOut],
+      value: [proc.stdin, proc.stdout, proc.stderr, delayedRpcIn, proc.rpcOut, proc.pcmInput],
       configurable: true,
     });
     const spawn = vi.fn<HostSpawner>(() => proc as unknown as ChildProcessWithoutNullStreams);
@@ -804,13 +890,49 @@ describe('NativeOutputBridge raw PCM process lifecycle and reuse', () => {
     writable.write(Buffer.from([1, 2, 3, 4]));
     await settleMicrotasks();
 
-    expect(proc.stdin.chunks).toEqual([]);
+    expect(proc.pcmInput.chunks).toEqual([]);
     expect(bridge.canReuseFor({ ...original })).toBe(false);
 
     delayedRpcIn.flush();
+    await settleMicrotasks();
+    const sessionBeginRequest = JSON.parse(delayedRpcIn.chunks[0].toString('utf8'));
+    proc.rpcOut.write(`${JSON.stringify({ jsonrpc: '2.0', result: true, id: sessionBeginRequest.id })}\n`);
     await settleStreamCallbacks();
 
-    expect(proc.stdin.chunks).toEqual([Buffer.from([1, 2, 3, 4])]);
+    expect(proc.pcmInput.chunks).toEqual([Buffer.from([1, 2, 3, 4])]);
+  });
+
+  it('keeps a closed PCM pipe bridge error authoritative over its queued write callback', async () => {
+    const { NativePcmHostProcess } = await importFreshNativePcmHostProcess();
+    const proc = new FakeChildProcess();
+    const delayedPcmInput = new DeferredWritable();
+    Object.defineProperty(proc, 'stdio', {
+      value: [proc.stdin, proc.stdout, proc.stderr, proc.rpcIn, proc.rpcOut, delayedPcmInput],
+      configurable: true,
+    });
+    const spawn = vi.fn<HostSpawner>(() => proc as unknown as ChildProcessWithoutNullStreams);
+    const bridge = new NativePcmHostProcess({ hostBinary: '/bin/echo-audio-host', spawn, platform: 'linux', logger: () => undefined });
+    const bridgeErrors: Error[] = [];
+    bridge.on('error', (error: Error) => bridgeErrors.push(error));
+
+    const start = bridge.start(sharedOptions());
+    proc.emitReadyLine();
+    await start;
+    const sessionId = bridge.beginSession();
+    respondToSessionBegin(proc);
+    await settleMicrotasks();
+    const writable = bridge.createSessionWritable(sessionId);
+    const writeResult = new Promise<Error | null>((resolve) => {
+      writable.write(Buffer.from([1, 2, 3, 4]), (error?: Error | null) => resolve(error ?? null));
+    });
+    await settleMicrotasks();
+
+    delayedPcmInput.emit('error', new Error('write EOF'));
+    delayedPcmInput.flush(new Error('write EOF'));
+
+    await expect(writeResult).resolves.toBeNull();
+    expect(bridgeErrors).toHaveLength(1);
+    expect(bridgeErrors[0]?.message).toContain('pcm_input_error:write EOF');
   });
 });
 
@@ -833,6 +955,19 @@ describe('DaemonAudioBackend bridge binding and stale bridge detection', () => {
       durationSeconds: 120, startSeconds: 5, codec: 'flac', container: 'flac', operationId: 7,
     });
     vi.spyOn(one, 'play').mockResolvedValue(undefined);
+    vi.spyOn(one, 'sessionBegin').mockResolvedValue({
+      accepted: true,
+      sessionId: 1,
+      ready: {
+        ready: true,
+        readyLevel: 'device',
+        sampleRate: 48000,
+        channels: 2,
+        deviceBufferFrames: 512,
+        fifoCapacityFrames: 384000,
+        startupPrebufferFrames: 2880,
+      },
+    });
 
     const backend = new DaemonAudioBackend(one);
     expect(backend.isBoundToBridge(one)).toBe(true);

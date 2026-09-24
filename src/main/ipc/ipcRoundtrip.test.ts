@@ -38,6 +38,7 @@ const playbackStatus = (state: PlaybackStatus['state']): PlaybackStatus => ({
 function createMockSystemAudioEngine(): SystemAudioEngine {
   return {
     systemAudioModeActive: false,
+    ownsSystemAudioPlayback: true,
     lastNativeAudioStatus: null,
     refreshSystemAudioModeActive: vi.fn().mockResolvedValue(false),
     isExplicitNativeOutputRequest: vi.fn().mockReturnValue(true),

@@ -61,6 +61,7 @@ describe('desktop lyrics IPC', () => {
     handlers[IpcChannels.DesktopLyricsSetStyle]!(null, {
       desktopLyricsRomanizationEnabled: false,
       desktopLyricsTranslationEnabled: false,
+      desktopLyricsHideWhenNoLyricsEnabled: true,
       desktopLyricsSecondaryFontSizePx: '24',
       desktopLyricsColorMode: 'gradient',
       desktopLyricsGradientStartColor: '#4f46e5',
@@ -71,6 +72,7 @@ describe('desktop lyrics IPC', () => {
     expect(setDesktopLyricsStyleMock).toHaveBeenCalledWith({
       desktopLyricsRomanizationEnabled: false,
       desktopLyricsTranslationEnabled: false,
+      desktopLyricsHideWhenNoLyricsEnabled: true,
       desktopLyricsSecondaryFontSizePx: 24,
       desktopLyricsColorMode: 'gradient',
       desktopLyricsGradientStartColor: '#4f46e5',

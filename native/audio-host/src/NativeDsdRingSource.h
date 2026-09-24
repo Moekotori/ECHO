@@ -19,9 +19,12 @@ public:
 
     uint32_t renderInterleaved(uint8_t* output, uint32_t byteFrameCount, uint32_t outputChannels);
     bool push(const uint8_t* samples, int byteFrameCount);
+    bool pushForGeneration(const uint8_t* samples, int byteFrameCount, uint64_t generation);
+    int replaceBufferedAudio(const uint8_t* samples, int byteFrameCount, bool pausedAfterReplace);
     void beginSession();
     void markInputEnded();
     void requestStop();
+    void setPaused(bool paused);
     bool isDrained() const;
     bool hasInputEnded() const;
     int getReadyByteFrames() const;
@@ -29,6 +32,7 @@ public:
     uint64_t getFramesPlayed() const;
     uint64_t getUnderrunCallbacks() const;
     uint64_t getUnderrunFrames() const;
+    uint64_t generation() const noexcept { return sessionGeneration.load(std::memory_order_acquire); }
 
 private:
     void copyFromInput(const uint8_t* source, int startByteFrame, int byteFrameCount);
@@ -45,6 +49,8 @@ private:
     std::atomic<bool> sessionHasAudio { false };
     std::atomic<bool> prebuffering { false };
     std::atomic<bool> stopRequested { false };
+    std::atomic<bool> paused { false };
+    std::atomic<uint64_t> sessionGeneration { 0 };
     std::atomic<uint64_t> framesPlayed { 0 };
     std::atomic<uint64_t> underrunCallbacks { 0 };
     std::atomic<uint64_t> underrunFrames { 0 };

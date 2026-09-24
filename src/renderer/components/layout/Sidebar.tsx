@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { EyeOff, GripVertical, SlidersHorizontal, X } from 'lucide-react';
-import type { AppRoute, AppRouteId } from '../../app/routes';
+import { ChevronsLeft, Eye, EyeOff, GripVertical, LockKeyhole, SlidersHorizontal, X } from 'lucide-react';
+import { preloadAppRoute, type AppRoute, type AppRouteId } from '../../app/routes';
 import { useI18n } from '../../i18n/I18nProvider';
-import { isSidebarRouteId, type SidebarRouteId } from '../../../shared/types/sidebar';
+import { isSidebarRouteId, lockedVisibleSidebarRouteIds, type SidebarRouteId } from '../../../shared/types/sidebar';
 
 type SidebarProps = {
   routes: AppRoute[];
@@ -15,7 +15,10 @@ type SidebarProps = {
   onImportFolder: () => void;
   onImportFile: () => void;
   iconOnly?: boolean;
+  hiddenRouteIds?: SidebarRouteId[];
+  onToggleIconOnly?: () => void;
   onHideRoute?: (routeId: SidebarRouteId) => void;
+  onShowRoute?: (routeId: SidebarRouteId) => void;
   onReorderRoutes?: (routeIds: SidebarRouteId[], placement: AppRoute['placement']) => void;
 };
 
@@ -25,6 +28,40 @@ type SidebarMenuState = {
   position: { x: number; y: number };
 };
 
+type SidebarGroupId = 'library' | 'sources' | 'playback' | 'preferences';
+
+type SidebarGroup = {
+  id: SidebarGroupId;
+  labelKey: 'sidebar.group.library' | 'sidebar.group.sources' | 'sidebar.group.playback' | 'sidebar.group.preferences';
+  routes: AppRoute[];
+  utility?: boolean;
+};
+
+const libraryRouteIds = new Set<AppRouteId>([
+  'home',
+  'songs',
+  'downloads',
+  'osu-downloader',
+  'albums',
+  'artists',
+  'folders',
+  'audio-cd',
+]);
+const sourceRouteIds = new Set<AppRouteId>(['remote', 'connect', 'dsp', 'streaming']);
+const lockedVisibleRouteIdSet = new Set<SidebarRouteId>(lockedVisibleSidebarRouteIds);
+
+const resolveMainGroupId = (routeId: AppRouteId): Exclude<SidebarGroupId, 'preferences'> => {
+  if (libraryRouteIds.has(routeId)) {
+    return 'library';
+  }
+
+  if (sourceRouteIds.has(routeId)) {
+    return 'sources';
+  }
+
+  return 'playback';
+};
+
 const viewportPadding = 8;
 const pointerOffset = 6;
 
@@ -32,7 +69,7 @@ const clamp = (value: number, min: number, max: number): number => Math.max(min,
 
 const renderNavIcon = (Icon: AppRoute['icon'], size: number): JSX.Element => (
   <span className="nav-icon-shell" aria-hidden="true">
-    <Icon size={size} strokeWidth={1.35} aria-hidden="true" focusable="false" />
+    <Icon size={size} strokeWidth={1.55} aria-hidden="true" focusable="false" />
   </span>
 );
 
@@ -45,7 +82,10 @@ export const Sidebar = ({
   onImportFolder,
   onImportFile,
   iconOnly = false,
+  hiddenRouteIds = [],
+  onToggleIconOnly,
   onHideRoute,
+  onShowRoute,
   onReorderRoutes,
 }: SidebarProps): JSX.Element => {
   const { t } = useI18n();
@@ -54,10 +94,33 @@ export const Sidebar = ({
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [isEditing, setIsEditing] = useState(false);
   const [draggingRouteId, setDraggingRouteId] = useState<SidebarRouteId | null>(null);
-  const visibleRoutes = routes.filter((route) => !route.hideFromSidebar);
-  const mainRoutes = visibleRoutes.filter((route) => route.placement === 'main');
-  const utilityRoutes = visibleRoutes.filter((route) => route.placement === 'utility');
-  const routeById = useMemo(() => new Map(visibleRoutes.map((route) => [route.id, route])), [visibleRoutes]);
+  const hiddenRouteIdSet = useMemo(() => new Set(hiddenRouteIds), [hiddenRouteIds]);
+  const renderedRoutes = routes.filter(
+    (route) => !route.hideFromSidebar || (isEditing && isSidebarRouteId(route.id) && hiddenRouteIdSet.has(route.id)),
+  );
+  const mainRoutes = renderedRoutes.filter((route) => route.placement === 'main');
+  const utilityRoutes = renderedRoutes.filter((route) => route.placement === 'utility');
+  const groups = useMemo<SidebarGroup[]>(() => {
+    const groupedMainRoutes: Record<Exclude<SidebarGroupId, 'preferences'>, AppRoute[]> = {
+      library: [],
+      sources: [],
+      playback: [],
+    };
+
+    for (const route of mainRoutes) {
+      groupedMainRoutes[resolveMainGroupId(route.id)].push(route);
+    }
+
+    const nextGroups: SidebarGroup[] = [
+      { id: 'library', labelKey: 'sidebar.group.library', routes: groupedMainRoutes.library },
+      { id: 'sources', labelKey: 'sidebar.group.sources', routes: groupedMainRoutes.sources },
+      { id: 'playback', labelKey: 'sidebar.group.playback', routes: groupedMainRoutes.playback },
+      { id: 'preferences', labelKey: 'sidebar.group.preferences', routes: utilityRoutes, utility: true },
+    ];
+
+    return nextGroups.filter((group) => group.routes.length > 0);
+  }, [mainRoutes, utilityRoutes]);
+  const routeById = useMemo(() => new Map(renderedRoutes.map((route) => [route.id, route])), [renderedRoutes]);
   const handleUtilityRouteClick = (routeId: AppRouteId): void => {
     if (routeId === 'audio-settings') {
       onOpenAudioSettings();
@@ -169,7 +232,7 @@ export const Sidebar = ({
       return;
     }
 
-    const groupIds = visibleRoutes
+    const groupIds = renderedRoutes
       .filter((route) => route.placement === targetRoute.placement && isSidebarRouteId(route.id))
       .map((route) => route.id as SidebarRouteId);
     const draggedIndex = groupIds.indexOf(draggedRouteId);
@@ -203,6 +266,9 @@ export const Sidebar = ({
     const isDirectAction = isAudioSettings || isLyricsSettings || isImportFolder || isImportFile;
     const label = route.labelKey ? t(route.labelKey) : route.label;
     const isDragging = isSidebarRouteId(route.id) && draggingRouteId === route.id;
+    const isHidden = isSidebarRouteId(route.id) && hiddenRouteIdSet.has(route.id);
+    const visibilityLocked = isSidebarRouteId(route.id) && lockedVisibleRouteIdSet.has(route.id);
+    const editActionLabel = visibilityLocked ? `${label}（固定显示）` : `${isHidden ? '显示' : '隐藏'}${label}`;
 
     return (
       <button
@@ -210,10 +276,19 @@ export const Sidebar = ({
         data-active={isUtilityRoute && isDirectAction ? false : isActive}
         data-dragging={isDragging ? 'true' : undefined}
         data-editing={isEditing ? 'true' : undefined}
+        data-hidden={isHidden ? 'true' : undefined}
+        data-visibility-locked={visibilityLocked ? 'true' : undefined}
         draggable={isEditing && isSidebarRouteId(route.id)}
         key={route.id}
         onClick={() => {
           if (isEditing) {
+            if (isSidebarRouteId(route.id) && !visibilityLocked) {
+              if (isHidden) {
+                onShowRoute?.(route.id);
+              } else {
+                onHideRoute?.(route.id);
+              }
+            }
             return;
           }
 
@@ -229,9 +304,11 @@ export const Sidebar = ({
         onDragOver={handleDragOver}
         onDragStart={(event) => handleDragStart(event, route.id)}
         onDrop={(event) => handleDrop(event, route)}
+        onFocus={() => void preloadAppRoute(route.id)}
+        onPointerEnter={() => void preloadAppRoute(route.id)}
         type="button"
-        title={label}
-        aria-label={label}
+        title={isEditing ? editActionLabel : label}
+        aria-label={isEditing ? editActionLabel : label}
       >
         {isEditing && isSidebarRouteId(route.id) ? (
           <span className="nav-drag-handle" aria-hidden="true">
@@ -240,29 +317,56 @@ export const Sidebar = ({
         ) : null}
         {renderNavIcon(Icon, 21)}
         <span className="nav-item-label">{label}</span>
+        {isEditing && isSidebarRouteId(route.id) ? (
+          <span className="nav-visibility-indicator" aria-hidden="true">
+            {visibilityLocked ? <LockKeyhole size={15} /> : isHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+            {visibilityLocked ? <span>固定</span> : isHidden ? <span>已关闭</span> : null}
+          </span>
+        ) : null}
       </button>
     );
   };
 
   return (
     <aside className="sidebar" aria-label={t('app.navigation.main')} data-icon-only={iconOnly ? 'true' : undefined}>
+      <div className="sidebar-header">
+        <span className="sidebar-header-label">{t('sidebar.group.library')}</span>
+        <button
+          className="sidebar-collapse-button"
+          type="button"
+          aria-label={t(iconOnly ? 'settings.appearance.sidebar.expand' : 'settings.appearance.sidebar.collapse')}
+          title={t(iconOnly ? 'settings.appearance.sidebar.expand' : 'settings.appearance.sidebar.collapse')}
+          onClick={onToggleIconOnly}
+        >
+          <span className="sidebar-collapse-icon" aria-hidden="true">
+            <ChevronsLeft size={16} />
+          </span>
+        </button>
+      </div>
       {isEditing ? (
         <div className="sidebar-edit-bar">
           <GripVertical size={15} aria-hidden="true" />
-          <span>拖动排序</span>
+          <span>排序与显示</span>
           <button type="button" onClick={() => setIsEditing(false)}>
             <X size={14} aria-hidden="true" />
             退出
           </button>
         </div>
       ) : null}
-      <nav className="nav-list">
-        {mainRoutes.map((route) => renderRouteButton(route))}
-      </nav>
-      <div className="sidebar-spacer" aria-hidden="true" />
-      <nav className="nav-list utility-nav" aria-label={t('app.navigation.utility')}>
-        {utilityRoutes.map((route) => renderRouteButton(route, true))}
-      </nav>
+      <div className="sidebar-groups">
+        {groups.map((group, index) => (
+          <section
+            className={`sidebar-group${group.utility ? ' sidebar-group--utility' : ''}`}
+            data-group={group.id}
+            key={group.id}
+          >
+            {index === 0 ? null : <h2 className="sidebar-group-label">{t(group.labelKey)}</h2>}
+            <nav className={`nav-list${group.utility ? ' utility-nav' : ''}`} aria-label={group.utility ? t('app.navigation.utility') : t(group.labelKey)}>
+              {group.routes.map((route) => renderRouteButton(route, group.utility))}
+            </nav>
+          </section>
+        ))}
+      </div>
       {menuState
         ? createPortal(
             <div className="sidebar-context-menu-layer" role="presentation">
@@ -289,6 +393,9 @@ export const Sidebar = ({
                   type="button"
                   role="menuitem"
                   onClick={() => {
+                    if (iconOnly) {
+                      onToggleIconOnly?.();
+                    }
                     setIsEditing(true);
                     closeMenu();
                   }}

@@ -4,15 +4,19 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { TrackList } from './TrackList';
 import type { LibraryTrack } from '../../../shared/types/library';
 
-vi.mock('../../i18n/I18nProvider', () => ({
-  useI18n: () => ({
-    t: (key: string) =>
-      ({
-        'songs.trackList.aria': '歌曲列表',
-        'songs.trackList.empty': '没有可显示的歌曲。导入音乐文件夹后，这里会显示曲库列表。',
-      }[key] ?? key),
-  }),
-}));
+vi.mock('../../i18n/I18nProvider', () => {
+  const t = (key: string) =>
+    ({
+      'songs.trackList.aria': '歌曲列表',
+      'songs.trackList.empty': '没有可显示的歌曲。导入音乐文件夹后，这里会显示曲库列表。',
+    })[key] ?? key;
+
+  return {
+    useI18n: () => ({ t }),
+    useOptionalI18n: () => ({ t }),
+    translateFallback: t,
+  };
+});
 
 const track = (index: number): LibraryTrack => ({
   id: `track-${index}`,
@@ -50,6 +54,13 @@ describe('TrackList', () => {
     expect(screen.getByText(/没有可显示的歌曲/)).toBeTruthy();
     expect(screen.queryByText('专辑艺术家')).toBeNull();
     expect(screen.queryByText('发行年份')).toBeNull();
+  });
+
+  it('uses compact virtual rows when requested', () => {
+    render(<TrackList currentTrackId={null} density="compact" tracks={[track(1)]} />);
+
+    expect(screen.getByRole('list').getAttribute('data-estimated-row-height')).toBe('60');
+    expect(screen.getByRole('list').closest('.track-list-shell')?.getAttribute('data-density')).toBe('compact');
   });
 
   it('keeps virtualization enabled for large track sets', () => {

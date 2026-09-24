@@ -13,6 +13,7 @@
 #include "Options.h"
 #include "DopRingSource.h"
 #include "NativeDsdRingSource.h"
+#include "NativePlaybackPipeline.h"
 
 // ----- Audio-engine modules -----
 #include "../../audio-engine/EqMessageProtocol.h"
@@ -75,6 +76,8 @@
 #include <mmsystem.h>
 #include <shellapi.h>
 #include <audioclient.h>
+#include <cfgmgr32.h>
+#include <devpropdef.h>
 #include <mmdeviceapi.h>
 #include <propsys.h>
 #include <wrl/client.h>
@@ -85,4 +88,5 @@
 #include "DeviceTypes.h"
 #include "PlaybackSession.h"
 #include "PcmRingAudioSource.h"
+#include "RawPcmInputReader.h"
 #include "AudioDaemon.h"

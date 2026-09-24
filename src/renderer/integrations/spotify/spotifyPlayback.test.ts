@@ -30,7 +30,7 @@ const makeSpotifyTrack = (): LibraryTrack => ({
 const expectedUri = 'spotify:track:abc123';
 
 type MockSpotifyPlayer = {
-  addListener: (event: string, callback: (payload?: any) => void) => boolean;
+  addListener: (event: string, callback: (payload?: MockSpotifyPlayerEvent) => void) => boolean;
   activateElement: () => Promise<void>;
   connect: () => Promise<boolean>;
   disconnect: () => void;
@@ -39,6 +39,11 @@ type MockSpotifyPlayer = {
   resume: () => Promise<void>;
   seek: (positionMs: number) => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
+};
+
+type MockSpotifyPlayerEvent = {
+  device_id?: string;
+  message?: string;
 };
 
 const installEchoSpotifyApi = (overrides: Partial<Window['echo']['spotify']> = {}): Window['echo']['spotify'] => {
@@ -89,10 +94,10 @@ const installEchoSpotifyApi = (overrides: Partial<Window['echo']['spotify']> = {
   return spotify;
 };
 
-const installSpotifySdk = (player: Partial<MockSpotifyPlayer>): Record<string, (payload?: any) => void> => {
-  const listeners: Record<string, (payload?: any) => void> = {};
+const installSpotifySdk = (player: Partial<MockSpotifyPlayer>): Record<string, (payload?: MockSpotifyPlayerEvent) => void> => {
+  const listeners: Record<string, (payload?: MockSpotifyPlayerEvent) => void> = {};
   const nextPlayer = {
-    addListener: vi.fn((event: string, callback: (payload?: any) => void) => {
+    addListener: vi.fn((event: string, callback: (payload?: MockSpotifyPlayerEvent) => void) => {
       listeners[event] = callback;
       return true;
     }),

@@ -15,6 +15,7 @@ import {
   hqPlayerConnectStatusToDesktopLyricsClock,
   selectDesktopLyricsActiveClock,
   shouldShowDesktopLyricsText,
+  syncDesktopLyricsWordHighlight,
 } from './DesktopLyricsApp';
 
 const makeDesktopLyricsSettingsBase = (locked: boolean) => ({
@@ -169,8 +170,10 @@ const renderDesktopLyricsApp = (
   connectPlay: ReturnType<typeof vi.fn>;
   playbackPause: ReturnType<typeof vi.fn>;
   playbackPlay: ReturnType<typeof vi.fn>;
+  getForTrack: ReturnType<typeof vi.fn>;
   setMousePassthrough: ReturnType<typeof vi.fn>;
   setStyle: ReturnType<typeof vi.fn>;
+  triggerAudioStatus: (status: AudioStatus) => void;
   triggerRevealMenu: () => void;
 } => {
   const settings = makeDesktopLyricsSettings(locked, options.settings);
@@ -189,7 +192,9 @@ const renderDesktopLyricsApp = (
   const playbackPlay = vi.fn().mockResolvedValue({ ...playbackStatus, state: 'playing' });
   const playbackPause = vi.fn().mockResolvedValue({ ...playbackStatus, state: 'paused' });
   const setMousePassthrough = vi.fn();
+  const audioStatusHandlers: Array<(status: AudioStatus) => void> = [];
   const revealMenuHandlers: Array<() => void> = [];
+  const getForTrack = vi.fn().mockResolvedValue(lyrics);
   const setStyle = vi.fn((patch: Partial<ReturnType<typeof makeDesktopLyricsSettingsBase>>) =>
     Promise.resolve({
       visible: true,
@@ -221,7 +226,15 @@ const renderDesktopLyricsApp = (
         bounds: null,
         settings,
       }),
-      onAudioStatus: vi.fn(() => () => undefined),
+      onAudioStatus: vi.fn((handler: (status: AudioStatus) => void) => {
+        audioStatusHandlers.push(handler);
+        return () => {
+          const index = audioStatusHandlers.indexOf(handler);
+          if (index >= 0) {
+            audioStatusHandlers.splice(index, 1);
+          }
+        };
+      }),
       onRevealMenu: vi.fn((handler: () => void) => {
         revealMenuHandlers.push(handler);
         return () => {
@@ -248,7 +261,7 @@ const renderDesktopLyricsApp = (
   }
   if (lyrics) {
     window.echo.lyrics = {
-      getForTrack: vi.fn().mockResolvedValue(lyrics),
+      getForTrack,
     } as unknown as typeof window.echo.lyrics;
   }
 
@@ -258,10 +271,12 @@ const renderDesktopLyricsApp = (
     container,
     connectPause,
     connectPlay,
+    getForTrack,
     playbackPause,
     playbackPlay,
     setMousePassthrough,
     setStyle,
+    triggerAudioStatus: (status) => audioStatusHandlers.forEach((handler) => handler(status)),
     triggerRevealMenu: () => revealMenuHandlers.forEach((handler) => handler()),
   };
 };
@@ -287,6 +302,25 @@ describe('desktop lyrics text fitting', () => {
 
     expect(css).toMatch(/\.desktop-lyrics-menu \{[\s\S]*?max-width: none;[\s\S]*?overflow: visible;/);
     expect(css).not.toContain('overflow-x: auto;');
+  });
+
+  it('reserves ink space for horizontal lyric descenders', () => {
+    const css = readFileSync('src/renderer/styles/desktop-lyrics.css', 'utf8');
+
+    expect(css).toMatch(
+      /\.desktop-lyrics-app\[data-text-direction="horizontal"\] \.desktop-lyrics-lines strong,[\s\S]*?padding-block: 0\.06em 0\.14em;/,
+    );
+  });
+
+  it('animates new desktop lyric lines and respects reduced-motion preferences', () => {
+    const css = readFileSync('src/renderer/styles/desktop-lyrics.css', 'utf8');
+
+    expect(css).toMatch(/\.desktop-lyrics-primary-text \{[\s\S]*?animation: desktop-lyrics-primary-enter 320ms/);
+    expect(css).toMatch(/\.desktop-lyrics-line-text > span \{[\s\S]*?animation: desktop-lyrics-secondary-enter 280ms 50ms/);
+    expect(css).toContain('@keyframes desktop-lyrics-vertical-primary-enter');
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.desktop-lyrics-primary-text,[\s\S]*?animation: none;/,
+    );
   });
 
   it('hides text that would overflow the desktop lyrics window', () => {
@@ -409,6 +443,78 @@ describe('desktop lyrics text fitting', () => {
     performanceNow.mockRestore();
   });
 
+  it('syncs desktop word highlighting from the forwarded playback clock', () => {
+    const performanceNow = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    const lineTextElement = document.createElement('div');
+    lineTextElement.innerHTML = [
+      '<strong class="desktop-lyrics-primary-text">',
+      '<span class="desktop-lyrics-word"></span>',
+      '<span class="desktop-lyrics-word"></span>',
+      '</strong>',
+    ].join('');
+
+    syncDesktopLyricsWordHighlight(
+      lineTextElement,
+      [{
+        timeMs: 1_000,
+        text: 'Hello world',
+        words: [
+          { text: 'Hello ', startMs: 1_000, endMs: 1_200 },
+          { text: 'world', startMs: 1_200, endMs: 1_500 },
+        ],
+      }],
+      0,
+      {
+        source: 'forwarded',
+        currentTrackId: 'track-1',
+        filePath: 'D:\\Music\\Song.flac',
+        state: 'playing',
+        positionMs: 1_300,
+        durationMs: 180_000,
+        playbackRate: 1,
+        updatedAtMs: 1_000,
+      },
+      0,
+    );
+
+    const words = lineTextElement.querySelectorAll<HTMLElement>('.desktop-lyrics-word');
+    expect(words[0].dataset.wordState).toBe('passed');
+    expect(words[0].style.getPropertyValue('--desktop-lyrics-word-progress')).toBe('1.0000');
+    expect(words[1].dataset.wordState).toBe('current');
+    expect(words[1].style.getPropertyValue('--desktop-lyrics-word-progress')).toBe('0.3333');
+    performanceNow.mockRestore();
+  });
+
+  it('keeps horizontal word-timed desktop lyrics available to assistive technology', async () => {
+    const { container } = renderDesktopLyricsApp(false, {
+      track: makeDesktopLyricsTrack(),
+      lyrics: makeDesktopTrackLyrics([{
+        timeMs: 1_000,
+        text: 'Hello world',
+        words: [
+          { text: 'Hello ', startMs: 1_000, endMs: 1_500 },
+          { text: 'world', startMs: 1_500, endMs: 2_000 },
+        ],
+      }]),
+      playbackStatus: {
+        currentTrackId: 'track-1',
+        filePath: 'D:\\Music\\Song.flac',
+        state: 'playing',
+        positionMs: 1_250,
+        durationMs: 188_000,
+      },
+    });
+
+    const primary = await waitFor(() => {
+      const element = container.querySelector<HTMLElement>('.desktop-lyrics-primary-text');
+      expect(element?.querySelectorAll('.desktop-lyrics-word')).toHaveLength(2);
+      return element!;
+    });
+
+    expect(primary.getAttribute('aria-label')).toBe('Hello world');
+    expect(primary.querySelectorAll('[aria-hidden="true"]')).toHaveLength(2);
+  });
+
   it('uses the horizontal width when fitting horizontal desktop lyrics', () => {
     const fitScale = getDesktopLyricsTextFitScale({
       text: 'Wonderland '.repeat(10),
@@ -521,6 +627,33 @@ describe('desktop lyrics text fitting', () => {
     }
   });
 
+  it('does not reload or clear lyrics when telemetry updates for the same track', async () => {
+    const track = makeDesktopLyricsTrack();
+    const { container, getForTrack, triggerAudioStatus } = renderDesktopLyricsApp(false, {
+      audioStatus: makeDesktopAudioStatus(track),
+      track,
+      lyrics: makeDesktopTrackLyrics([{ timeMs: 0, text: 'Stable lyric' }]),
+      playbackStatus: {
+        currentTrackId: track.id,
+        filePath: track.path,
+        state: 'playing',
+        positionMs: 12_000,
+        durationMs: track.duration * 1000,
+      },
+    });
+
+    await waitFor(() => expect(container.querySelector('.desktop-lyrics-lines strong')?.textContent).toBe('Stable lyric'));
+    const initialLoadCount = getForTrack.mock.calls.length;
+
+    await act(async () => {
+      triggerAudioStatus(makeDesktopAudioStatus(track, { positionSeconds: 13 }));
+      await Promise.resolve();
+    });
+
+    expect(getForTrack).toHaveBeenCalledTimes(initialLoadCount);
+    expect(container.querySelector('.desktop-lyrics-lines strong')?.textContent).toBe('Stable lyric');
+  });
+
   it('keeps mouse passthrough enabled when locked even after mouse movement', async () => {
     const { setMousePassthrough } = renderDesktopLyricsApp(true);
 
@@ -616,20 +749,24 @@ describe('desktop lyrics text fitting', () => {
   });
 
   it('toggles a pinned desktop lyrics menu from the footer context-menu command', async () => {
-    const { container, triggerRevealMenu } = renderDesktopLyricsApp(false);
+    const { container, setMousePassthrough, triggerRevealMenu } = renderDesktopLyricsApp(false);
     const app = container.querySelector<HTMLElement>('.desktop-lyrics-app');
 
     expect(app).toBeTruthy();
     expect(app?.getAttribute('data-menu-visible')).toBe('false');
+    await waitFor(() => expect(setMousePassthrough).toHaveBeenLastCalledWith(false));
 
     triggerRevealMenu();
     await waitFor(() => expect(app?.getAttribute('data-menu-visible')).toBe('true'));
+    await waitFor(() => expect(setMousePassthrough).toHaveBeenLastCalledWith(false));
 
     window.dispatchEvent(new MouseEvent('mouseleave'));
     await waitFor(() => expect(app?.getAttribute('data-menu-visible')).toBe('true'));
+    expect(setMousePassthrough).toHaveBeenLastCalledWith(false);
 
     triggerRevealMenu();
     await waitFor(() => expect(app?.getAttribute('data-menu-visible')).toBe('false'));
+    await waitFor(() => expect(setMousePassthrough).toHaveBeenLastCalledWith(false));
   });
 
   it('toggles the desktop lyrics text direction from the floating menu', async () => {
@@ -1098,12 +1235,12 @@ describe('desktop lyrics text fitting', () => {
     })).toBe(playbackClock);
   });
 
-  it('does not reveal the desktop lyrics menu over transparent window space', async () => {
+  it('keeps unlocked desktop lyrics interactive over transparent window space', async () => {
     const { container, setMousePassthrough } = renderDesktopLyricsApp(false);
     const app = container.querySelector<HTMLElement>('.desktop-lyrics-app');
 
     expect(app).toBeTruthy();
-    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(false));
     setMousePassthrough.mockClear();
 
     Object.defineProperty(document, 'elementFromPoint', {
@@ -1113,7 +1250,10 @@ describe('desktop lyrics text fitting', () => {
     window.dispatchEvent(new MouseEvent('mousemove', { clientX: 12, clientY: 12 }));
 
     expect(app?.getAttribute('data-menu-visible')).toBe('false');
-    expect(setMousePassthrough).not.toHaveBeenCalledWith(false);
+    expect(setMousePassthrough).not.toHaveBeenCalledWith(true);
+
+    window.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(setMousePassthrough).not.toHaveBeenCalledWith(true);
   });
 
   it('reveals the desktop lyrics menu when hovering the lyrics text', async () => {
@@ -1125,8 +1265,7 @@ describe('desktop lyrics text fitting', () => {
     expect(app).toBeTruthy();
     expect(lines).toBeTruthy();
     expect(primaryText).toBeTruthy();
-    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(true));
-    setMousePassthrough.mockClear();
+    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(false));
 
     Object.defineProperty(document, 'elementFromPoint', {
       configurable: true,
@@ -1135,7 +1274,7 @@ describe('desktop lyrics text fitting', () => {
     window.dispatchEvent(new MouseEvent('mousemove', { clientX: 120, clientY: 40 }));
 
     await waitFor(() => expect(app?.getAttribute('data-menu-visible')).toBe('true'));
-    expect(setMousePassthrough).toHaveBeenCalledWith(false);
+    expect(setMousePassthrough).not.toHaveBeenCalledWith(true);
   });
 
   it('auto-hides the desktop lyrics menu after hover idle without a mouse leave event', async () => {
@@ -1145,7 +1284,7 @@ describe('desktop lyrics text fitting', () => {
 
     expect(app).toBeTruthy();
     expect(primaryText).toBeTruthy();
-    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(false));
     setMousePassthrough.mockClear();
 
     Object.defineProperty(document, 'elementFromPoint', {
@@ -1159,7 +1298,7 @@ describe('desktop lyrics text fitting', () => {
     });
 
     expect(app?.getAttribute('data-menu-visible')).toBe('true');
-    expect(setMousePassthrough).toHaveBeenCalledWith(false);
+    expect(setMousePassthrough).not.toHaveBeenCalledWith(true);
 
     act(() => {
       vi.advanceTimersByTime(1799);
@@ -1179,7 +1318,7 @@ describe('desktop lyrics text fitting', () => {
     act(() => {
       window.dispatchEvent(new MouseEvent('mousemove', { clientX: 12, clientY: 12 }));
     });
-    expect(setMousePassthrough).toHaveBeenCalledWith(true);
+    expect(setMousePassthrough).not.toHaveBeenCalledWith(true);
   });
 
   it('reveals the desktop lyrics menu from the host reveal event', async () => {
@@ -1187,7 +1326,7 @@ describe('desktop lyrics text fitting', () => {
     const app = container.querySelector<HTMLElement>('.desktop-lyrics-app');
 
     expect(app).toBeTruthy();
-    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(false));
     setMousePassthrough.mockClear();
 
     act(() => {
@@ -1205,8 +1344,7 @@ describe('desktop lyrics text fitting', () => {
 
     expect(app).toBeTruthy();
     expect(lines).toBeTruthy();
-    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(true));
-    setMousePassthrough.mockClear();
+    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(false));
 
     Object.defineProperty(document, 'elementFromPoint', {
       configurable: true,
@@ -1215,7 +1353,7 @@ describe('desktop lyrics text fitting', () => {
     window.dispatchEvent(new MouseEvent('mousemove', { clientX: 120, clientY: 40 }));
 
     await waitFor(() => expect(app?.getAttribute('data-menu-visible')).toBe('true'));
-    expect(setMousePassthrough).toHaveBeenCalledWith(false);
+    expect(setMousePassthrough).not.toHaveBeenCalledWith(true);
   });
 
   it('reveals the desktop lyrics menu from the vertical lyrics hit rectangle', async () => {
@@ -1227,8 +1365,7 @@ describe('desktop lyrics text fitting', () => {
 
     expect(app).toBeTruthy();
     expect(lines).toBeTruthy();
-    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(true));
-    setMousePassthrough.mockClear();
+    await waitFor(() => expect(setMousePassthrough).toHaveBeenCalledWith(false));
 
     Object.defineProperty(lines, 'getBoundingClientRect', {
       configurable: true,
@@ -1251,7 +1388,7 @@ describe('desktop lyrics text fitting', () => {
     window.dispatchEvent(new MouseEvent('mousemove', { clientX: 250, clientY: 320 }));
 
     await waitFor(() => expect(app?.getAttribute('data-menu-visible')).toBe('true'));
-    expect(setMousePassthrough).toHaveBeenCalledWith(false);
+    expect(setMousePassthrough).not.toHaveBeenCalledWith(true);
   });
 
   it('loads lyrics through snapshot metadata for temporary remote tracks', async () => {

@@ -1,3 +1,5 @@
+import { formatUserFacingError } from './userFacingError';
+
 export const showAudioErrorNoticeEvent = 'app:show-audio-error-notice';
 
 export type AudioErrorNoticeEventDetail =
@@ -7,11 +9,7 @@ export type AudioErrorNoticeEventDetail =
     };
 
 export const getErrorNoticeMessage = (value: unknown): string => {
-  if (value instanceof Error) {
-    return value.message;
-  }
-
-  return String(value);
+  return formatUserFacingError(value, { context: 'audio' });
 };
 
 export const dispatchAudioErrorNotice = (value: unknown): void => {

@@ -51,6 +51,7 @@ describe('createSystemAudioEngine DI', () => {
 
     // State access properties
     expect(engine.systemAudioModeActive).toBeTypeOf('boolean');
+    expect(engine.ownsSystemAudioPlayback).toBeTypeOf('boolean');
     expect(engine.lastNativeAudioStatus).toBeNull();
 
     // Playback lifecycle (6)
@@ -131,6 +132,26 @@ describe('createSystemAudioEngine DI', () => {
 
     const engine = createSystemAudioEngine(ipcRenderer, IpcChannels);
     expect(engine.systemAudioModeActive).toBe(true);
+  });
+
+  it('does not let the mini player own remembered system audio playback', () => {
+    vi.stubGlobal('window', {
+      localStorage,
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
+      location: { search: '?miniPlayer=1' },
+    });
+    window.localStorage.setItem(
+      'echo-next.audio-output-memory',
+      JSON.stringify({ enabled: true, outputMode: 'system' }),
+    );
+
+    const engine = createSystemAudioEngine(ipcRenderer, IpcChannels);
+    expect(engine.ownsSystemAudioPlayback).toBe(false);
+    expect(engine.systemAudioModeActive).toBe(false);
+
+    engine.systemAudioModeActive = true;
+    expect(engine.systemAudioModeActive).toBe(false);
   });
 
   it('readPersistedSystemAudioMode() returns false when no localStorage entry', () => {

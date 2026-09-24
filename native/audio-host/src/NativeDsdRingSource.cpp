@@ -24,6 +24,9 @@ uint32_t NativeDsdRingSource::renderInterleaved(uint8_t* output, uint32_t byteFr
 
     std::memset(output, 0x69, static_cast<size_t>(byteFrameCount) * outputChannels);
 
+    if (paused.load(std::memory_order_acquire))
+        return 0;
+
     if (shouldHoldForStartupPrebuffer())
         return 0;
 
@@ -77,12 +80,24 @@ uint32_t NativeDsdRingSource::renderInterleaved(uint8_t* output, uint32_t byteFr
 
 bool NativeDsdRingSource::push(const uint8_t* samples, int byteFrameCount)
 {
-    if (byteFrameCount > 0)
-        sessionHasAudio.store(true, std::memory_order_release);
+    return pushForGeneration(samples, byteFrameCount, generation());
+}
+
+bool NativeDsdRingSource::pushForGeneration(
+    const uint8_t* samples,
+    int byteFrameCount,
+    uint64_t expectedGeneration)
+{
+    if (samples == nullptr || byteFrameCount <= 0)
+        return byteFrameCount == 0 && expectedGeneration == generation();
+    if (expectedGeneration != generation() || stopRequested.load(std::memory_order_acquire))
+        return false;
 
     int written = 0;
 
-    while (written < byteFrameCount && ! stopRequested.load(std::memory_order_relaxed))
+    while (written < byteFrameCount
+        && expectedGeneration == generation()
+        && ! stopRequested.load(std::memory_order_acquire))
     {
         int start1 = 0;
         int size1 = 0;
@@ -90,11 +105,15 @@ bool NativeDsdRingSource::push(const uint8_t* samples, int byteFrameCount)
         int size2 = 0;
         {
             std::lock_guard<std::mutex> lock(fifoMutex);
+            if (expectedGeneration != generation()
+                || stopRequested.load(std::memory_order_acquire))
+                break;
             fifo.prepareToWrite(byteFrameCount - written, start1, size1, start2, size2);
 
             const int byteFramesWritable = size1 + size2;
             if (byteFramesWritable > 0)
             {
+                sessionHasAudio.store(true, std::memory_order_release);
                 copyFromInput(samples + static_cast<size_t>(written) * channels, start1, size1);
                 copyFromInput(samples + static_cast<size_t>(written + size1) * channels, start2, size2);
                 fifo.finishedWrite(byteFramesWritable);
@@ -106,11 +125,32 @@ bool NativeDsdRingSource::push(const uint8_t* samples, int byteFrameCount)
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
 
-    return written == byteFrameCount;
+    return written == byteFrameCount
+        && expectedGeneration == generation()
+        && ! stopRequested.load(std::memory_order_acquire);
+}
+
+int NativeDsdRingSource::replaceBufferedAudio(const uint8_t* samples, int byteFrameCount, bool pausedAfterReplace)
+{
+    sessionGeneration.fetch_add(1, std::memory_order_acq_rel);
+    std::lock_guard<std::mutex> lock(fifoMutex);
+    fifo.reset();
+    stopRequested.store(false, std::memory_order_release);
+    inputEnded.store(false, std::memory_order_release);
+    sessionHasAudio.store(byteFrameCount > 0, std::memory_order_release);
+    prebuffering.store(false, std::memory_order_release);
+    int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+    fifo.prepareToWrite(byteFrameCount, start1, size1, start2, size2);
+    copyFromInput(samples, start1, size1);
+    copyFromInput(samples + static_cast<size_t>(size1) * channels, start2, size2);
+    fifo.finishedWrite(size1 + size2);
+    paused.store(pausedAfterReplace, std::memory_order_release);
+    return size1 + size2;
 }
 
 void NativeDsdRingSource::beginSession()
 {
+    sessionGeneration.fetch_add(1, std::memory_order_acq_rel);
     {
         std::lock_guard<std::mutex> lock(fifoMutex);
         fifo.reset();
@@ -123,6 +163,8 @@ void NativeDsdRingSource::beginSession()
     inputEnded.store(false, std::memory_order_release);
     sessionHasAudio.store(false, std::memory_order_release);
     prebuffering.store(startupPrebufferByteFrames > 0, std::memory_order_release);
+    paused.store(false, std::memory_order_release);
+    stopRequested.store(false, std::memory_order_release);
 }
 
 void NativeDsdRingSource::markInputEnded()
@@ -133,6 +175,11 @@ void NativeDsdRingSource::markInputEnded()
 void NativeDsdRingSource::requestStop()
 {
     stopRequested.store(true, std::memory_order_release);
+}
+
+void NativeDsdRingSource::setPaused(bool shouldPause)
+{
+    paused.store(shouldPause, std::memory_order_release);
 }
 
 bool NativeDsdRingSource::isDrained() const

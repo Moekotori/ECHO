@@ -86,6 +86,7 @@ export type ConnectSessionStatus = {
   metadata: ConnectMetadata | null;
   positionSeconds: number;
   durationSeconds: number;
+  volume?: number | null;
   latencyMs: number | null;
   error: string | null;
   updatedAt: string;

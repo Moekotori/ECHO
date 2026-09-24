@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, DragEvent, MouseEvent as ReactMouseEvent } from 'react';
+import '../styles/queue.css';
+import type {
+  ChangeEvent,
+  DragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+} from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
+  AudioLines,
   Disc3,
   FolderOpen,
   GripVertical,
   Heart,
   History,
-  ListPlus,
+  LocateFixed,
   MinusCircle,
   MoreHorizontal,
   Music2,
@@ -16,23 +26,40 @@ import {
   Repeat2,
   RotateCcw,
   Save,
+  Search,
   Shuffle,
+  SkipForward,
   Trash2,
-  Wand2,
   X,
 } from 'lucide-react';
-import type { EditableTrackTags, LibraryPlaylist, LibraryTrack, PlaybackHistoryEntry } from '../../shared/types/library';
+import type {
+  ContinuousPlayReason,
+  EditableTrackTags,
+  LibraryPlaylist,
+  LibraryTrack,
+  PlaybackHistoryEntry,
+} from '../../shared/types/library';
 import { likedChangedEvent, likedTracksChangedEvent, useLikedTrackIds } from '../hooks/useLikedMedia';
 import type { QueueItem, RepeatMode } from '../stores/PlaybackQueueProvider';
 import { useI18n } from '../i18n/I18nProvider';
+import type { TranslationKey } from '../i18n/locales';
 import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
+import { useSharedPlaybackStatus } from '../stores/playbackStatusStore';
 import { openAlbumDetailForTrack } from '../utils/albumNavigation';
 import { resolvePlaylistForTrackAdd } from '../utils/appPrompt';
+import { localCoverDisplayUrl } from '../utils/coverDisplayUrl';
 import { OsuTimingPanel } from '../components/library/OsuTimingPanel';
 import { TrackContextMenu } from '../components/library/TrackContextMenu';
 import type { TrackMenuAction } from '../components/library/TrackContextMenu';
 import { TrackTagEditorDrawer } from '../components/library/TrackTagEditorDrawer';
 import { getPageScrollContainer } from '../components/ui/InfiniteScrollSentinel';
+import {
+  EchoContinueIcon,
+  EchoGaplessIcon,
+  EchoSequenceIcon,
+  EchoShuffleIcon,
+  EchoSmartTransitionIcon,
+} from '../components/player/QueueControlIcons';
 
 const automixTemporarilyDisabled = false;
 const randomQueuePageSize = 96;
@@ -41,9 +68,14 @@ const queuePageDragItemsMime = 'application/x-echo-next-queue-items';
 const queuePagePerfWarnThresholdMs = 120;
 const queuePageFirstPaintWarnThresholdMs = 250;
 const queuePageDeferredTaskDelayMs = 120;
+const recommendationReasonLabel = (
+  reason: ContinuousPlayReason,
+  t: (key: TranslationKey, options?: Record<string, string | number>) => string,
+): string => t(`queue.continuousPlay.reason.${reason.code}` as TranslationKey, { value: reason.value ?? '' });
 const queuePageDeferredTaskTimeoutMs = 800;
 
 type QueuePagePerfValue = string | number | boolean | null | undefined;
+type QueueTransitionMode = 'normal' | 'gapless' | 'smart';
 type QueuePageIdleWindow = Window & {
   requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
   cancelIdleCallback?: (handle: number) => void;
@@ -168,11 +200,8 @@ const qualityTags = (track: LibraryTrack | null): string[] =>
       ].filter((tag): tag is string => Boolean(tag))
     : [];
 
-const originalCoverUrlFromThumb = (coverUrl: string | null): string | null =>
-  coverUrl?.replace(/^echo-cover:\/\/(?:thumb|album|large)\//u, 'echo-cover://original/') ?? null;
-
 const queueNowCoverUrl = (track: Pick<LibraryTrack, 'coverId' | 'coverThumb'> | null): string | null =>
-  track?.coverId ? `echo-cover://original/${encodeURIComponent(track.coverId)}` : originalCoverUrlFromThumb(track?.coverThumb ?? null);
+  localCoverDisplayUrl(track?.coverId, track?.coverThumb);
 
 const trackFromHistory = (entry: PlaybackHistoryEntry): LibraryTrack => ({
   id: entry.stableKey ?? entry.trackId ?? entry.id,
@@ -218,7 +247,6 @@ type QueueUndoSnapshot = {
   currentQueueId: string | null;
   currentTrackId: string | null;
   selectedQueueIds: string[];
-  removeAfterPlayQueueIds: string[];
 };
 
 type QueueActionNotice = {
@@ -248,9 +276,18 @@ const createQueueActionNotice = (
 const queueActionTrackTitles = (items: QueueItem[], limit = 4): string[] =>
   items.slice(0, limit).map((item) => item.track.title);
 
-const queueActionTrackDetail = (items: QueueItem[], label = '首'): string | undefined => {
+const queueActionTrackDetail = (
+  items: QueueItem[],
+  unitLabel: string,
+  formatHidden?: (count: number, unit: string) => string,
+): string | undefined => {
   const hiddenCount = Math.max(0, items.length - 4);
-  return hiddenCount > 0 ? `还有 ${hiddenCount} ${label}` : undefined;
+  if (hiddenCount <= 0) {
+    return undefined;
+  }
+  return formatHidden
+    ? formatHidden(hiddenCount, unitLabel)
+    : `还有 ${hiddenCount} ${unitLabel}`;
 };
 
 const isSavedQueueSnapshot = (value: unknown): value is SavedQueueSnapshot => {
@@ -312,15 +349,23 @@ const buildQueuePlaylistTrackIds = (items: QueueItem[]): string[] =>
 export const QueuePage = (): JSX.Element => {
   const { t } = useI18n();
   const queue = usePlaybackQueue();
+  const sharedPlaybackStatus = useSharedPlaybackStatus();
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<QueueActionNotice | null>(null);
   const [savedQueues, setSavedQueues] = useState<SavedQueueSnapshot[]>([]);
   const [isGeneratingRandomQueue, setIsGeneratingRandomQueue] = useState(false);
   const [isGeneratingHistoryQueue, setIsGeneratingHistoryQueue] = useState(false);
+  const [isTransitionSettingPending, setIsTransitionSettingPending] = useState(false);
+  const [isQueueActionsMenuOpen, setIsQueueActionsMenuOpen] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [queueSearchQuery, setQueueSearchQuery] = useState('');
+  const [shouldLocateCurrentTrack, setShouldLocateCurrentTrack] = useState(false);
   const [selectedQueueIds, setSelectedQueueIds] = useState<Set<string>>(() => new Set());
   const [lastSelectedQueueId, setLastSelectedQueueId] = useState<string | null>(null);
-  const [removeAfterPlayQueueIds, setRemoveAfterPlayQueueIds] = useState<Set<string>>(() => new Set());
+  const removeAfterPlayQueueIds = useMemo(
+    () => new Set(queue.items.filter((item) => item.removeAfterPlay === true).map((item) => item.queueId)),
+    [queue.items],
+  );
   const [undoSnapshot, setUndoSnapshot] = useState<QueueUndoSnapshot | null>(null);
   const [recentQueueIds, setRecentQueueIds] = useState<Set<string>>(() => new Set());
   const [draggedQueueIds, setDraggedQueueIds] = useState<string[]>([]);
@@ -332,11 +377,11 @@ export const QueuePage = (): JSX.Element => {
   const [tagEditorError, setTagEditorError] = useState<string | null>(null);
   const [isSavingTags, setIsSavingTags] = useState(false);
   const queueVirtualSpacerRef = useRef<HTMLDivElement | null>(null);
+  const queueActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
   const scrollMarginRef = useRef(0);
   const mountStartedAtRef = useRef(performance.now());
   const tagEditorCloseTimerRef = useRef<number | null>(null);
-  const previousCurrentQueueIdRef = useRef<string | null>(null);
   const recentQueueTimerRef = useRef<number | null>(null);
   const currentIndex = useMemo(
     () =>
@@ -347,7 +392,7 @@ export const QueuePage = (): JSX.Element => {
       ),
     [queue.currentQueueId, queue.items],
   );
-  const rows = useMemo(() => {
+  const unfilteredRows = useMemo(() => {
     return measureQueuePageWork(
       'computeRows',
       () => {
@@ -360,7 +405,26 @@ export const QueuePage = (): JSX.Element => {
       (computedRows) => ({ currentIndex, items: queue.items.length, rows: computedRows.length }),
     );
   }, [currentIndex, queue.items]);
-  const upNextCount = currentIndex >= 0 ? Math.max(0, queue.items.length - currentIndex - 1) : queue.items.length;
+  const rows = useMemo(() => {
+    const query = queueSearchQuery.trim().toLocaleLowerCase();
+    if (!query) {
+      return unfilteredRows;
+    }
+
+    return unfilteredRows.filter((item) =>
+      [
+        item.track.title,
+        item.track.artist,
+        item.track.album,
+        item.track.albumArtist,
+        item.source.label,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .join('\n')
+        .toLocaleLowerCase()
+        .includes(query),
+    );
+  }, [queueSearchQuery, unfilteredRows]);
   const selectedItems = useMemo(
     () => queue.items.filter((item) => selectedQueueIds.has(item.queueId)),
     [queue.items, selectedQueueIds],
@@ -371,12 +435,35 @@ export const QueuePage = (): JSX.Element => {
   const canMoveSelectedAfterCurrent = selectedItems.some((item) => item.queueId !== queue.currentQueueId);
   const selectedRemoveAfterPlayCount = selectedItems.filter((item) => removeAfterPlayQueueIds.has(item.queueId)).length;
   const shouldUnmarkSelectedAfterPlay = selectedCount > 0 && selectedRemoveAfterPlayCount === selectedCount;
-  const isRowSelectionVisible = isSelectionMode || selectedCount > 0;
+  const isRowSelectionVisible = isSelectionMode && rows.length > 0;
+  const isSelectionBarVisible = selectedCount > 0;
   const nowPlaying = queue.currentTrack;
   const isNowPlayingTemporary = nowPlaying?.isTemporary === true;
   const nowPlayingTags = qualityTags(nowPlaying);
   const nowPlayingCoverUrl = queueNowCoverUrl(nowPlaying);
   const sourceLabel = queue.currentItem?.source.label ?? t('queue.now.sourceFallback');
+  const playbackAudioStatus = sharedPlaybackStatus.audioStatus;
+  const playbackStatus = sharedPlaybackStatus.playbackStatus;
+  const playbackIdentityMatches =
+    !nowPlaying ||
+    playbackAudioStatus?.currentTrackId === nowPlaying.id ||
+    playbackStatus?.currentTrackId === nowPlaying.id;
+  const playbackPositionSeconds = playbackIdentityMatches
+    ? Math.max(0, playbackAudioStatus?.positionSeconds ?? (playbackStatus?.positionMs ?? 0) / 1000)
+    : 0;
+  const playbackDurationSeconds = playbackIdentityMatches
+      ? Math.max(
+        0,
+        playbackAudioStatus?.durationSeconds ??
+          (playbackStatus?.durationMs != null
+            ? playbackStatus.durationMs / 1000
+            : nowPlaying?.duration ?? 0),
+      )
+    : Math.max(0, nowPlaying?.duration ?? 0);
+  const playbackProgress =
+    playbackDurationSeconds > 0
+      ? Math.min(1, playbackPositionSeconds / playbackDurationSeconds)
+      : 0;
   const queueMenuSource = useMemo(() => ({ type: 'manual' as const, label: t('queue.header.title') }), [t]);
   const nextQueuePreview = useMemo(() => {
     if (queue.repeatMode === 'one' && nowPlaying) {
@@ -384,6 +471,8 @@ export const QueuePage = (): JSX.Element => {
         kind: 'repeat-one',
         title: nowPlaying.title,
         detail: t('queue.nextPreview.repeatOneDetail'),
+        track: nowPlaying,
+        queueItemId: queue.currentQueueId,
       };
     }
 
@@ -395,6 +484,8 @@ export const QueuePage = (): JSX.Element => {
           scope: queue.shuffleScopeLabel,
           count: queue.playbackShuffleAvoidRecentCount,
         }),
+        track: null,
+        queueItemId: null,
       };
     }
 
@@ -406,6 +497,8 @@ export const QueuePage = (): JSX.Element => {
       return {
         kind: 'empty',
         title: t('queue.nextPreview.empty'),
+        track: null,
+        queueItemId: null,
       };
     }
 
@@ -416,10 +509,13 @@ export const QueuePage = (): JSX.Element => {
         artist: nextItem.track.artist || nextItem.track.albumArtist || t('queue.unknownArtist'),
         source: nextItem.source.label,
       }),
+      track: nextItem.track,
+      queueItemId: nextItem.queueId,
     };
   }, [
     currentIndex,
     nowPlaying,
+    queue.currentQueueId,
     queue.isShuffleEnabled,
     queue.items,
     queue.playbackShuffleAvoidRecentCount,
@@ -427,6 +523,36 @@ export const QueuePage = (): JSX.Element => {
     queue.shuffleScopeLabel,
     t,
   ]);
+  const nextQueueCoverUrl = queueNowCoverUrl(nextQueuePreview.track);
+  const transitionMode: QueueTransitionMode = queue.automixEnabled
+    ? 'smart'
+    : queue.gaplessPlaybackEnabled
+      ? 'gapless'
+      : 'normal';
+
+  useEffect(() => {
+    if (!isQueueActionsMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (!queueActionsMenuRef.current?.contains(event.target as Node)) {
+        setIsQueueActionsMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setIsQueueActionsMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isQueueActionsMenuOpen]);
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => getPageScrollContainer(queueVirtualSpacerRef.current),
@@ -538,28 +664,38 @@ export const QueuePage = (): JSX.Element => {
 
   useEffect(() => {
     const handleLocateCurrentTrack = (): void => {
-      const currentRowIndex = rows.findIndex((item) =>
-        queue.currentQueueId ? item.queueId === queue.currentQueueId : item.track.id === queue.currentTrackId,
-      );
-      if (currentRowIndex < 0) {
-        return;
-      }
-
-      rowVirtualizer.scrollToIndex(currentRowIndex, { align: 'center' });
+      setQueueSearchQuery('');
+      setShouldLocateCurrentTrack(true);
     };
 
     window.addEventListener(locateCurrentTrackEvent, handleLocateCurrentTrack);
     return () => window.removeEventListener(locateCurrentTrackEvent, handleLocateCurrentTrack);
-  }, [queue.currentQueueId, queue.currentTrackId, rowVirtualizer, rows]);
+  }, []);
+
+  useEffect(() => {
+    if (!shouldLocateCurrentTrack) {
+      return;
+    }
+
+    const currentRowIndex = rows.findIndex((item) =>
+      queue.currentQueueId ? item.queueId === queue.currentQueueId : item.track.id === queue.currentTrackId,
+    );
+    if (currentRowIndex < 0) {
+      setShouldLocateCurrentTrack(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      rowVirtualizer.scrollToIndex(currentRowIndex, { align: 'center' });
+      setShouldLocateCurrentTrack(false);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [queue.currentQueueId, queue.currentTrackId, rowVirtualizer, rows, shouldLocateCurrentTrack]);
 
   useEffect(() => {
     const validQueueIds = new Set(queue.items.map((item) => item.queueId));
 
     setSelectedQueueIds((current) => {
-      const next = new Set(Array.from(current).filter((queueId) => validQueueIds.has(queueId)));
-      return next.size === current.size ? current : next;
-    });
-    setRemoveAfterPlayQueueIds((current) => {
       const next = new Set(Array.from(current).filter((queueId) => validQueueIds.has(queueId)));
       return next.size === current.size ? current : next;
     });
@@ -570,27 +706,6 @@ export const QueuePage = (): JSX.Element => {
       setIsSelectionMode(false);
     }
   }, [isSelectionMode, rows.length]);
-
-  useEffect(() => {
-    const previousQueueId = previousCurrentQueueIdRef.current;
-    const currentQueueId = queue.currentQueueId;
-    previousCurrentQueueIdRef.current = currentQueueId;
-
-    if (!previousQueueId || previousQueueId === currentQueueId || !removeAfterPlayQueueIds.has(previousQueueId)) {
-      return;
-    }
-
-    const removedItem = queue.items.find((item) => item.queueId === previousQueueId) ?? null;
-    setRemoveAfterPlayQueueIds((current) => {
-      const next = new Set(current);
-      next.delete(previousQueueId);
-      return next;
-    });
-    queue.removeQueueItem(previousQueueId);
-    setActionNotice(createQueueActionNotice('已移除播放完成的队列项', {
-      trackTitles: removedItem ? [removedItem.track.title] : undefined,
-    }));
-  }, [queue.currentQueueId, queue.items, queue.removeQueueItem, removeAfterPlayQueueIds]);
 
   const repeatLabels: Record<RepeatMode, string> = useMemo(
     () => ({
@@ -638,14 +753,59 @@ export const QueuePage = (): JSX.Element => {
     });
   }, []);
 
+  const handleSetTransitionMode = useCallback((mode: QueueTransitionMode): void => {
+    if (mode === transitionMode || isTransitionSettingPending) {
+      return;
+    }
+
+    setActionError(null);
+    setIsTransitionSettingPending(true);
+    void (async () => {
+      if (mode === 'normal') {
+        if (queue.gaplessPlaybackEnabled) {
+          await queue.setGaplessPlaybackEnabled(false);
+        }
+        if (queue.automixEnabled) {
+          queue.setAutomixEnabled(false);
+        }
+        return;
+      }
+
+      if (mode === 'gapless') {
+        if (!queue.gaplessPlaybackEnabled) {
+          await queue.setGaplessPlaybackEnabled(true);
+        }
+        if (queue.automixEnabled) {
+          queue.setAutomixEnabled(false);
+        }
+        return;
+      }
+
+      if (queue.gaplessPlaybackEnabled) {
+        await queue.setGaplessPlaybackEnabled(false);
+      }
+      if (!queue.automixEnabled) {
+        queue.setAutomixEnabled(true);
+      }
+    })()
+      .catch((error) => {
+        setActionError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        setIsTransitionSettingPending(false);
+      });
+  }, [isTransitionSettingPending, queue, transitionMode]);
+
   const handleSaveQueueSnapshot = useCallback((): void => {
     if (queue.items.length === 0) {
-      setActionError('当前队列为空，暂时没有可保存的内容。');
+      setActionError(t('queue.page.error.emptySave'));
       return;
     }
 
     const createdAt = new Date().toISOString();
-    const name = nowPlaying?.title ? `${nowPlaying.title} 等 ${queue.items.length} 首` : `队列 ${formatSavedQueueDate(createdAt)}`;
+    const name = nowPlaying?.title
+      ? t('queue.page.saved.nameWithTitle', { title: nowPlaying.title, count: queue.items.length })
+      : t('queue.page.saved.nameQueue', { date: formatSavedQueueDate(createdAt) });
     const snapshot: SavedQueueSnapshot = {
       id: `queue-${Date.now()}`,
       name,
@@ -656,13 +816,13 @@ export const QueuePage = (): JSX.Element => {
 
     updateSavedQueues((current) => [snapshot, ...current]);
     setActionError(null);
-    setActionNotice(createQueueActionNotice('已保存队列', { detail: name }));
-  }, [nowPlaying?.title, queue.currentTrackId, queue.items, updateSavedQueues]);
+    setActionNotice(createQueueActionNotice(t('queue.page.notice.savedQueue'), { detail: name }));
+  }, [nowPlaying?.title, queue.currentTrackId, queue.items, t, updateSavedQueues]);
 
   const handleRestoreSavedQueue = useCallback(
     (snapshot: SavedQueueSnapshot): void => {
       if (snapshot.tracks.length === 0) {
-        setActionError('这个队列快照没有可恢复的歌曲。');
+        setActionError(t('queue.page.error.emptySnapshot'));
         return;
       }
 
@@ -671,21 +831,21 @@ export const QueuePage = (): JSX.Element => {
       setIsSelectionMode(false);
       queue.replaceQueue(snapshot.tracks, {
         startTrackId: snapshot.currentTrackId ?? snapshot.tracks[0]?.id,
-        source: { type: 'manual', label: `保存队列：${snapshot.name}` },
+        source: { type: 'manual', label: t('queue.page.saved.sourceLabel', { name: snapshot.name }) },
       });
       setActionError(null);
-      setActionNotice(createQueueActionNotice('已恢复队列', { detail: snapshot.name }));
+      setActionNotice(createQueueActionNotice(t('queue.page.notice.restoredQueue'), { detail: snapshot.name }));
     },
-    [queue],
+    [queue, t],
   );
 
   const handleDeleteSavedQueue = useCallback(
     (snapshotId: string): void => {
       updateSavedQueues((current) => current.filter((snapshot) => snapshot.id !== snapshotId));
       setActionError(null);
-      setActionNotice(createQueueActionNotice('已删除队列快照'));
+      setActionNotice(createQueueActionNotice(t('queue.page.notice.deletedSnapshot')));
     },
-    [updateSavedQueues],
+    [t, updateSavedQueues],
   );
 
   const captureQueueUndo = useCallback(
@@ -696,10 +856,9 @@ export const QueuePage = (): JSX.Element => {
         currentQueueId: queue.currentQueueId,
         currentTrackId: queue.currentTrackId,
         selectedQueueIds: Array.from(selectedQueueIds),
-        removeAfterPlayQueueIds: Array.from(removeAfterPlayQueueIds),
       });
     },
-    [queue.currentQueueId, queue.currentTrackId, queue.items, removeAfterPlayQueueIds, selectedQueueIds],
+    [queue.currentQueueId, queue.currentTrackId, queue.items, selectedQueueIds],
   );
 
   const handleUndoQueueAction = useCallback((): void => {
@@ -713,16 +872,14 @@ export const QueuePage = (): JSX.Element => {
     });
     setSelectedQueueIds(new Set(undoSnapshot.selectedQueueIds));
     setIsSelectionMode(undoSnapshot.selectedQueueIds.length > 0);
-    setRemoveAfterPlayQueueIds(new Set(undoSnapshot.removeAfterPlayQueueIds));
     setUndoSnapshot(null);
     setActionError(null);
     flashQueueItems(undoSnapshot.selectedQueueIds.length > 0 ? undoSnapshot.selectedQueueIds : undoSnapshot.items.map((item) => item.queueId));
-    setActionNotice(createQueueActionNotice('已撤销', { detail: undoSnapshot.label }));
-  }, [flashQueueItems, queue, undoSnapshot]);
+    setActionNotice(createQueueActionNotice(t('queue.page.notice.undone'), { detail: undoSnapshot.label }));
+  }, [flashQueueItems, queue, t, undoSnapshot]);
 
   const handleToggleVisibleSelection = useCallback((): void => {
     if (!isRowSelectionVisible) {
-      setIsSelectionMode(true);
       return;
     }
 
@@ -735,9 +892,19 @@ export const QueuePage = (): JSX.Element => {
       }
       return next;
     });
-    setIsSelectionMode(!areAllRowsSelected);
     setLastSelectedQueueId(null);
   }, [areAllRowsSelected, isRowSelectionVisible, rows]);
+
+  const handleToggleSelectionMode = useCallback((): void => {
+    if (isSelectionMode) {
+      setSelectedQueueIds(new Set());
+      setLastSelectedQueueId(null);
+      setIsSelectionMode(false);
+      return;
+    }
+
+    setIsSelectionMode(true);
+  }, [isSelectionMode]);
 
   const handleToggleQueueSelection = useCallback(
     (event: ChangeEvent<HTMLInputElement>, item: QueueItem): void => {
@@ -772,6 +939,46 @@ export const QueuePage = (): JSX.Element => {
     [lastSelectedQueueId, rows],
   );
 
+  const handleQueueRowSelect = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>, item: QueueItem): void => {
+      if (!isRowSelectionVisible) {
+        return;
+      }
+
+      const target = event.target as HTMLElement;
+      if (target.closest('button, input, label, a')) {
+        return;
+      }
+
+      const checked = !selectedQueueIds.has(item.queueId);
+      const rowIds = rows.map((row) => row.queueId);
+      setSelectedQueueIds((current) => {
+        const next = new Set(current);
+        const lastIndex = lastSelectedQueueId ? rowIds.indexOf(lastSelectedQueueId) : -1;
+        const currentIndex = rowIds.indexOf(item.queueId);
+
+        if (event.shiftKey && lastIndex >= 0 && currentIndex >= 0) {
+          const [start, end] = lastIndex < currentIndex ? [lastIndex, currentIndex] : [currentIndex, lastIndex];
+          for (const queueId of rowIds.slice(start, end + 1)) {
+            if (checked) {
+              next.add(queueId);
+            } else {
+              next.delete(queueId);
+            }
+          }
+        } else if (checked) {
+          next.add(item.queueId);
+        } else {
+          next.delete(item.queueId);
+        }
+
+        return next;
+      });
+      setLastSelectedQueueId(item.queueId);
+    },
+    [isRowSelectionVisible, lastSelectedQueueId, rows, selectedQueueIds],
+  );
+
   const handleClearSelection = useCallback((): void => {
     setSelectedQueueIds(new Set());
     setLastSelectedQueueId(null);
@@ -792,46 +999,21 @@ export const QueuePage = (): JSX.Element => {
     }
 
     const removedItems = queue.items;
-    captureQueueUndo(`清空 ${removedItems.length} 首`);
+    const hiddenDetail = queueActionTrackDetail(removedItems, t('queue.page.unit.tracks'), (count, unit) =>
+      t('queue.page.notice.hiddenMore', { count, unit }),
+    );
+    captureQueueUndo(t('queue.page.undo.clear', { count: removedItems.length }));
     queue.clearQueue();
     setSelectedQueueIds(new Set());
     setLastSelectedQueueId(null);
     setIsSelectionMode(false);
-    setRemoveAfterPlayQueueIds(new Set());
     setActionError(null);
-    setActionNotice(createQueueActionNotice(`已清空 ${removedItems.length} 首`, {
-      detail: queueActionTrackDetail(removedItems) ?? '可撤销',
+    setActionNotice(createQueueActionNotice(t('queue.page.notice.clearedCount', { count: removedItems.length }), {
+      detail: hiddenDetail ?? t('queue.page.notice.canUndo'),
       trackTitles: queueActionTrackTitles(removedItems),
       canUndo: true,
     }));
   }, [captureQueueUndo, queue, t]);
-
-  const handleRemoveQueueItem = useCallback(
-    (item: QueueItem): void => {
-      captureQueueUndo(`移除 ${item.track.title}`);
-      queue.removeQueueItem(item.queueId);
-      setSelectedQueueIds((current) => {
-        const next = new Set(current);
-        next.delete(item.queueId);
-        if (next.size === 0) {
-          setIsSelectionMode(false);
-        }
-        return next;
-      });
-      setRemoveAfterPlayQueueIds((current) => {
-        const next = new Set(current);
-        next.delete(item.queueId);
-        return next;
-      });
-      setLastSelectedQueueId((current) => (current === item.queueId ? null : current));
-      setActionError(null);
-      setActionNotice(createQueueActionNotice('已从队列移除', {
-        trackTitles: [item.track.title],
-        canUndo: true,
-      }));
-    },
-    [captureQueueUndo, queue],
-  );
 
   const handleRemoveSelected = useCallback((): void => {
     if (selectedCount === 0) {
@@ -839,18 +1021,51 @@ export const QueuePage = (): JSX.Element => {
     }
 
     const removedItems = selectedItems;
-    captureQueueUndo(`移除 ${selectedCount} 首`);
+    const hiddenDetail = queueActionTrackDetail(removedItems, t('queue.page.unit.tracks'), (count, unit) =>
+      t('queue.page.notice.hiddenMore', { count, unit }),
+    );
+    captureQueueUndo(t('queue.page.undo.removeCount', { count: selectedCount }));
     queue.removeQueueItems(selectedQueueIdList);
     setSelectedQueueIds(new Set());
     setLastSelectedQueueId(null);
     setIsSelectionMode(false);
     setActionError(null);
-    setActionNotice(createQueueActionNotice(`已移除 ${selectedCount} 首`, {
-      detail: queueActionTrackDetail(removedItems) ?? '可撤销',
+    setActionNotice(createQueueActionNotice(t('queue.page.notice.removedCount', { count: selectedCount }), {
+      detail: hiddenDetail ?? t('queue.page.notice.canUndo'),
       trackTitles: queueActionTrackTitles(removedItems),
       canUndo: true,
     }));
-  }, [captureQueueUndo, queue, selectedCount, selectedItems, selectedQueueIdList]);
+  }, [captureQueueUndo, queue, selectedCount, selectedItems, selectedQueueIdList, t]);
+
+  const handlePlaySelectedNow = useCallback((): void => {
+    const firstSelected = selectedItems[0];
+    if (!firstSelected) {
+      return;
+    }
+
+    void runQueueAction(() => queue.playQueueItem(firstSelected.queueId));
+  }, [queue, runQueueAction, selectedItems]);
+
+  const handleToggleSelectedRemoveAfterPlay = useCallback((): void => {
+    if (selectedCount === 0) {
+      return;
+    }
+
+    queue.setQueueItemsRemoveAfterPlay(selectedQueueIdList, !shouldUnmarkSelectedAfterPlay);
+    flashQueueItems(selectedQueueIdList);
+    setActionError(null);
+    setActionNotice(createQueueActionNotice(
+      shouldUnmarkSelectedAfterPlay
+        ? t('queue.page.notice.unmarkedAfterPlay')
+        : t('queue.page.notice.markedAfterPlay', { count: selectedCount }),
+      {
+        detail: queueActionTrackDetail(selectedItems, t('queue.page.unit.tracks'), (count, unit) =>
+          t('queue.page.notice.hiddenMore', { count, unit }),
+        ),
+        trackTitles: queueActionTrackTitles(selectedItems),
+      },
+    ));
+  }, [flashQueueItems, queue, selectedCount, selectedItems, selectedQueueIdList, shouldUnmarkSelectedAfterPlay, t]);
 
   const handleMoveSelectedAfterCurrent = useCallback((): void => {
     if (selectedCount === 0 || !canMoveSelectedAfterCurrent) {
@@ -858,58 +1073,34 @@ export const QueuePage = (): JSX.Element => {
     }
 
     const movedItems = selectedItems;
-    captureQueueUndo(`临时插播 ${selectedCount} 首`);
+    const hiddenDetail = queueActionTrackDetail(movedItems, t('queue.page.unit.tracks'), (count, unit) =>
+      t('queue.page.notice.hiddenMore', { count, unit }),
+    );
+    captureQueueUndo(t('queue.page.undo.moveCount', { count: selectedCount }));
     queue.moveQueueItemsAfterCurrent(selectedQueueIdList);
     setSelectedQueueIds(new Set());
     setLastSelectedQueueId(null);
     setIsSelectionMode(false);
     flashQueueItems(selectedQueueIdList);
     setActionError(null);
-    setActionNotice(createQueueActionNotice(`已临时插播 ${selectedCount} 首`, {
-      detail: queueActionTrackDetail(movedItems) ?? '已经排到当前播放后面',
+    setActionNotice(createQueueActionNotice(t('queue.page.notice.movedCount', { count: selectedCount }), {
+      detail: hiddenDetail ?? t('queue.page.notice.movedAfterCurrent'),
       trackTitles: queueActionTrackTitles(movedItems),
       canUndo: true,
     }));
-  }, [canMoveSelectedAfterCurrent, captureQueueUndo, flashQueueItems, queue, selectedCount, selectedItems, selectedQueueIdList]);
-
-  const handleToggleSelectedRemoveAfterPlay = useCallback((): void => {
-    if (selectedCount === 0) {
-      return;
-    }
-
-    setRemoveAfterPlayQueueIds((current) => {
-      const next = new Set(current);
-      for (const queueId of selectedQueueIdList) {
-        if (shouldUnmarkSelectedAfterPlay) {
-          next.delete(queueId);
-        } else {
-          next.add(queueId);
-        }
-      }
-      return next;
-    });
-    flashQueueItems(selectedQueueIdList);
-    setActionError(null);
-    setActionNotice(createQueueActionNotice(
-      shouldUnmarkSelectedAfterPlay ? '已取消播放后移除' : `已标记 ${selectedCount} 首播放后移除`,
-      {
-        detail: queueActionTrackDetail(selectedItems),
-        trackTitles: queueActionTrackTitles(selectedItems),
-      },
-    ));
-  }, [flashQueueItems, selectedCount, selectedItems, selectedQueueIdList, shouldUnmarkSelectedAfterPlay]);
+  }, [canMoveSelectedAfterCurrent, captureQueueUndo, flashQueueItems, queue, selectedCount, selectedItems, selectedQueueIdList, t]);
 
   const handleSaveQueueAsPlaylist = useCallback(async (): Promise<void> => {
     const library = window.echo?.library;
     if (!library?.createPlaylist || !library.addTracksToPlaylist) {
-      setActionError('桌面桥接不可用，暂时不能保存为歌单。');
+      setActionError(t('queue.page.error.bridgePlaylist'));
       return;
     }
 
     const trackIds = buildQueuePlaylistTrackIds(queue.items);
 
     if (trackIds.length === 0) {
-      setActionError('当前队列没有可保存到本地歌单的已入库歌曲。');
+      setActionError(t('queue.page.error.noLibraryTracks'));
       return;
     }
 
@@ -918,26 +1109,28 @@ export const QueuePage = (): JSX.Element => {
       setActionError(null);
       setActionNotice(null);
       const playlist = await library.createPlaylist({
-        name: `队列 ${formatSavedQueueDate(new Date().toISOString())}`,
-        description: '从播放队列保存。',
+        name: t('queue.page.saved.nameQueue', { date: formatSavedQueueDate(new Date().toISOString()) }),
+        description: t('queue.page.playlist.description'),
       });
       createdPlaylistId = playlist.id;
       const items = await library.addTracksToPlaylist(playlist.id, trackIds);
       const savedCount = items.length;
 
       if (savedCount === 0) {
-        throw new Error('没有歌曲被写入歌单。');
+        throw new Error(t('queue.page.error.noneWritten'));
       }
 
       window.dispatchEvent(new Event('library:playlists-changed'));
-      setActionNotice(createQueueActionNotice('已保存为歌单', { detail: `${playlist.name}（${savedCount} 首）` }));
+      setActionNotice(createQueueActionNotice(t('queue.page.notice.savedPlaylist'), {
+        detail: t('queue.page.notice.savedPlaylistDetail', { name: playlist.name, count: savedCount }),
+      }));
     } catch (error) {
       if (createdPlaylistId && library.deletePlaylist) {
         await library.deletePlaylist(createdPlaylistId).catch(() => undefined);
       }
       setActionError(error instanceof Error ? error.message : String(error));
     }
-  }, [queue.items]);
+  }, [queue.items, t]);
 
   const handleOpenCurrentFolder = useCallback((): void => {
     if (!nowPlaying) {
@@ -1174,18 +1367,21 @@ export const QueuePage = (): JSX.Element => {
               setActionError('No cover art was saved for this track.');
             }
             return;
-          case 'delete-song':
-            if (!window.confirm(`Delete the music file?\n${track.title}`)) {
+          case 'delete-song': {
+              if (!window.confirm(`Delete the music file?\n${track.title}`)) {
+                return;
+              }
+              const result = await library?.deleteTrackFile(track.id);
+              for (const removedTrackId of result?.removedTrackIds ?? [track.id]) {
+                queue.removeTrackFromQueue(removedTrackId);
+              }
+              window.dispatchEvent(new Event('library:changed'));
               return;
             }
-            await library?.deleteTrackFile(track.id);
-            queue.removeTrackFromQueue(track.id);
-            window.dispatchEvent(new Event('library:changed'));
-            return;
           case 'add-to-playlist':
             {
               if (track.mediaType === 'streaming') {
-                setActionError('流媒体歌曲不能加入本地歌单，请在流媒体歌单中单独管理。');
+                setActionError(t('queue.page.error.streamingPlaylist'));
                 return;
               }
 
@@ -1206,27 +1402,6 @@ export const QueuePage = (): JSX.Element => {
       }
     },
     [captureQueueUndo, editingTrack, queue, queueMenuSource, t],
-  );
-
-  const handlePlayItemNext = useCallback(
-    (item: QueueItem): void => {
-      const fromIndex = queue.items.findIndex((queuedItem) => queuedItem.queueId === item.queueId);
-      const activeIndex = queue.currentQueueId ? queue.items.findIndex((queuedItem) => queuedItem.queueId === queue.currentQueueId) : -1;
-
-      if (fromIndex < 0 || fromIndex === activeIndex) {
-        return;
-      }
-
-      captureQueueUndo(`插播 ${item.track.title}`);
-      queue.moveQueueItem(fromIndex, activeIndex >= 0 ? (fromIndex < activeIndex ? activeIndex : activeIndex + 1) : 0);
-      flashQueueItems([item.queueId]);
-      setActionError(null);
-      setActionNotice(createQueueActionNotice('已插到下一首', {
-        trackTitles: [item.track.title],
-        canUndo: true,
-      }));
-    },
-    [captureQueueUndo, flashQueueItems, queue],
   );
 
   const handleGenerateRandomQueue = useCallback(async (): Promise<void> => {
@@ -1311,7 +1486,7 @@ export const QueuePage = (): JSX.Element => {
   }, [queue, t]);
 
   const handleDragStart = useCallback(
-    (event: DragEvent<HTMLDivElement>, item: QueueItem): void => {
+    (event: DragEvent<HTMLElement>, item: QueueItem): void => {
       const queueIds = selectedQueueIds.has(item.queueId) && selectedCount > 1
         ? selectedQueueIdList
         : [item.queueId];
@@ -1369,17 +1544,19 @@ export const QueuePage = (): JSX.Element => {
       }
 
       const movedItems = queue.items.filter((item) => movableQueueIds.includes(item.queueId));
-      captureQueueUndo(`移动 ${movableQueueIds.length} 首`);
+      captureQueueUndo(t('queue.page.undo.moveCount', { count: movableQueueIds.length }));
       queue.moveQueueItemsToIndex(movableQueueIds, toIndex);
       flashQueueItems(movableQueueIds);
       setActionError(null);
-      setActionNotice(createQueueActionNotice(`已移动 ${movableQueueIds.length} 首`, {
-        detail: queueActionTrackDetail(movedItems),
+      setActionNotice(createQueueActionNotice(t('queue.page.notice.movedCount', { count: movableQueueIds.length }), {
+        detail: queueActionTrackDetail(movedItems, t('queue.page.unit.tracks'), (count, unit) =>
+          t('queue.page.notice.hiddenMore', { count, unit }),
+        ),
         trackTitles: queueActionTrackTitles(movedItems),
         canUndo: true,
       }));
     },
-    [captureQueueUndo, draggedQueueIds, flashQueueItems, queue],
+    [captureQueueUndo, draggedQueueIds, flashQueueItems, queue, t],
   );
 
   const handleDragEnd = useCallback((): void => {
@@ -1387,176 +1564,296 @@ export const QueuePage = (): JSX.Element => {
     setDropTargetQueueId(null);
   }, []);
 
+  const handleKeyboardQueueMove = useCallback(
+    (item: QueueItem, direction: 'up' | 'down' | 'next'): void => {
+      const fromIndex = queue.items.findIndex((candidate) => candidate.queueId === item.queueId);
+      if (fromIndex < 0) {
+        return;
+      }
+
+      if (direction === 'up' && fromIndex === 0) {
+        return;
+      }
+      if (direction === 'down' && fromIndex === queue.items.length - 1) {
+        return;
+      }
+      if (direction === 'next' && item.queueId === queue.currentQueueId) {
+        return;
+      }
+
+      captureQueueUndo(t('queue.page.undo.moveCount', { count: 1 }));
+      if (direction === 'next') {
+        queue.moveQueueItemsAfterCurrent([item.queueId]);
+      } else {
+        queue.moveQueueItem(fromIndex, direction === 'up' ? fromIndex - 1 : fromIndex + 1);
+      }
+      flashQueueItems([item.queueId]);
+      setActionError(null);
+      setActionNotice(createQueueActionNotice('已调整队列顺序', {
+        detail: direction === 'up'
+          ? `已上移《${item.track.title}》`
+          : direction === 'down'
+            ? `已下移《${item.track.title}》`
+            : t('queue.page.notice.movedAfterCurrent'),
+        trackTitles: [item.track.title],
+        canUndo: true,
+      }));
+    },
+    [captureQueueUndo, flashQueueItems, queue, t],
+  );
+
+  const handleQueueMoveKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>, item: QueueItem): void => {
+      if (!event.altKey || event.ctrlKey || event.metaKey) {
+        return;
+      }
+
+      const key = event.key.toLocaleLowerCase();
+      const direction = key === 'arrowup'
+        ? 'up'
+        : key === 'arrowdown'
+          ? 'down'
+          : key === 'n'
+            ? 'next'
+            : null;
+      if (!direction) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      handleKeyboardQueueMove(item, direction);
+    },
+    [handleKeyboardQueueMove],
+  );
+
   return (
     <div className="queue-page">
-      <header className="queue-page-header">
-        <div>
-          <span className="queue-kicker">{t('queue.header.kicker')}</span>
+      <section className="queue-session-hero">
+        {nowPlayingCoverUrl || nextQueueCoverUrl ? (
+          <div className="queue-session-backdrop" aria-hidden="true">
+            <div className="queue-session-backdrop-pane queue-session-backdrop-current">
+              {nowPlayingCoverUrl ? <img alt="" src={nowPlayingCoverUrl} /> : null}
+            </div>
+            <div className="queue-session-backdrop-pane queue-session-backdrop-next">
+              {nextQueueCoverUrl ? <img alt="" src={nextQueueCoverUrl} /> : null}
+            </div>
+          </div>
+        ) : null}
+
+        <header className="queue-page-header">
           <h1>{t('queue.header.title')}</h1>
-        </div>
-        <span className="queue-count">{t('queue.count', { count: queue.items.length })}</span>
-      </header>
+          <span className="queue-count">{t('queue.count', { count: queue.items.length })}</span>
+        </header>
 
-      <section className="queue-now-card" aria-label={t('queue.now.kicker')}>
-        <div className="queue-now-cover" data-empty={!nowPlayingCoverUrl}>
-          {nowPlayingCoverUrl ? <img alt="" src={nowPlayingCoverUrl} /> : <Disc3 size={54} />}
-        </div>
-
-        <div className="queue-now-main">
-          <span className="queue-kicker">{t('queue.now.kicker')}</span>
-          <h2>{nowPlaying?.title ?? t('queue.now.emptyTitle')}</h2>
-          <p>{nowPlaying ? `${nowPlaying.artist || t('queue.unknownArtist')} - ${nowPlaying.album || t('queue.unknownAlbum')}` : t('queue.now.emptyDescription')}</p>
-
-          <div className="queue-quality-row" aria-label={t('queue.now.quality')}>
-            {nowPlayingTags.length > 0 ? nowPlayingTags.map((tag) => <span key={tag}>{tag}</span>) : <span>{t('queue.now.waitingAudio')}</span>}
+        <section className="queue-now-card" aria-label={t('queue.now.kicker')}>
+          <div className="queue-now-cover" data-empty={!nowPlayingCoverUrl}>
+            {nowPlayingCoverUrl ? <img alt="" src={nowPlayingCoverUrl} /> : <Disc3 size={54} />}
           </div>
 
-          <div className="queue-now-meta">
-            <span>{nowPlaying ? formatDuration(nowPlaying.duration) : '--:--'}</span>
-            <span>{sourceLabel}</span>
+          <div className="queue-now-main">
+            <span className="queue-kicker">{t('queue.now.kicker')}</span>
+            <h2>{nowPlaying?.title ?? t('queue.now.emptyTitle')}</h2>
+            <p>{nowPlaying ? nowPlaying.artist || t('queue.unknownArtist') : t('queue.now.emptyDescription')}</p>
+
+            <div className="queue-quality-row" aria-label={t('queue.now.quality')}>
+              {nowPlayingTags.length > 0 ? nowPlayingTags.map((tag) => <span key={tag}>{tag}</span>) : <span>{t('queue.now.waitingAudio')}</span>}
+              <span>{sourceLabel}</span>
+            </div>
+
+            <div className="queue-progress">
+              <span>{formatDuration(playbackPositionSeconds)}</span>
+              <div className="queue-progress-track" aria-hidden="true">
+                <i style={{ width: `${playbackProgress * 100}%` }} />
+              </div>
+              <span>{nowPlaying ? formatDuration(playbackDurationSeconds || nowPlaying.duration) : '--:--'}</span>
+            </div>
+
+            <div className="queue-now-actions" aria-label={t('queue.now.actions')}>
+              <button
+                className={`queue-icon-button ${isNowPlayingLiked ? 'is-liked' : ''}`}
+                type="button"
+                aria-label={t('queue.action.like')}
+                aria-pressed={isNowPlayingLiked}
+                title={t('queue.action.like')}
+                disabled={!nowPlaying || isNowPlayingTemporary}
+                onClick={handleToggleNowPlayingLiked}
+              >
+                <Heart size={17} fill={isNowPlayingLiked ? 'currentColor' : 'none'} />
+              </button>
+              <button className="queue-icon-button" type="button" aria-label={t('queue.action.openFolder')} title={t('queue.action.openFolder')} disabled={!nowPlaying} onClick={handleOpenCurrentFolder}>
+                <FolderOpen size={17} />
+              </button>
+              <button className="queue-icon-button" type="button" aria-label={t('queue.action.more')} title={t('queue.action.more')} disabled={!nowPlaying} onClick={handleNowPlayingMoreClick}>
+                <MoreHorizontal size={18} />
+              </button>
+            </div>
           </div>
 
           <div className="queue-next-preview" data-kind={nextQueuePreview.kind} aria-label={t('queue.nextPreview.kicker')}>
-            <span>{t('queue.nextPreview.kicker')}</span>
-            <strong>{nextQueuePreview.title}</strong>
-            {nextQueuePreview.detail ? <small>{nextQueuePreview.detail}</small> : null}
+            <span className="queue-next-arrow" aria-hidden="true"><ArrowRight size={18} strokeWidth={1.8} /></span>
+            <div className="queue-next-cover" data-empty={!nextQueueCoverUrl}>
+              {nextQueueCoverUrl ? <img alt="" src={nextQueueCoverUrl} /> : <Disc3 size={28} />}
+            </div>
+            <div className="queue-next-copy">
+              <span>{t('queue.nextPreview.kicker')}</span>
+              <strong>{nextQueuePreview.title}</strong>
+              {nextQueuePreview.detail ? <small>{nextQueuePreview.detail}</small> : null}
+              {nextQueuePreview.track ? <small>{formatDuration(nextQueuePreview.track.duration)}</small> : null}
+            </div>
+          </div>
+
+        </section>
+      </section>
+
+      <section className="queue-control-dock" aria-label={t('queue.tools')}>
+        <div className="queue-playback-strategy">
+          <span className="queue-control-label">播放策略</span>
+          <div className="queue-strategy-groups">
+            <div className="queue-order-segment" role="group" aria-label="播放顺序">
+              <button className={!queue.isShuffleEnabled ? 'is-active' : ''} type="button" aria-pressed={!queue.isShuffleEnabled} onClick={() => queue.isShuffleEnabled && queue.toggleShuffle()}>
+                <EchoSequenceIcon size={17} />
+                顺序
+              </button>
+              <button className={queue.isShuffleEnabled ? 'is-active' : ''} type="button" aria-pressed={queue.isShuffleEnabled} onClick={() => !queue.isShuffleEnabled && queue.toggleShuffle()}>
+                <EchoShuffleIcon size={17} />
+                随机
+              </button>
+            </div>
+            <span className="queue-strategy-separator" aria-hidden="true" />
+            <div className="queue-order-segment queue-repeat-segment" role="group" aria-label={t('queue.repeat.mode')}>
+              {(['off', 'one', 'all'] as RepeatMode[]).map((mode) => (
+                <button
+                  className={queue.repeatMode === mode ? 'is-active' : ''}
+                  key={mode}
+                  type="button"
+                  aria-pressed={queue.repeatMode === mode}
+                  onClick={() => queue.setRepeatMode(mode)}
+                >
+                  {mode === 'off' ? <MinusCircle size={15} /> : mode === 'one' ? <Repeat1 size={15} /> : <Repeat2 size={15} />}
+                  {repeatLabels[mode]}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="queue-now-actions" aria-label={t('queue.now.actions')}>
+        <span className="queue-control-divider" aria-hidden="true" />
+
+        <div className="queue-continuous-control">
+          <span className="queue-control-label">队列补充</span>
           <button
-            className={`queue-icon-button ${isNowPlayingLiked ? 'is-liked' : ''}`}
+            className="queue-feature-switch"
             type="button"
-            aria-label={t('queue.action.like')}
-            aria-pressed={isNowPlayingLiked}
-            title={t('queue.action.like')}
-            disabled={!nowPlaying || isNowPlayingTemporary}
-            onClick={handleToggleNowPlayingLiked}
+            role="switch"
+            aria-checked={queue.autoFillQueueEnabled}
+            onClick={() => queue.setAutoFillQueueEnabled(!queue.autoFillQueueEnabled)}
           >
-            <Heart size={17} fill={isNowPlayingLiked ? 'currentColor' : 'none'} />
-          </button>
-          <button
-            className="queue-icon-button"
-            type="button"
-            aria-label={t('queue.action.openFolder')}
-            title={t('queue.action.openFolder')}
-            disabled={!nowPlaying}
-            onClick={handleOpenCurrentFolder}
-          >
-            <FolderOpen size={17} />
-          </button>
-          <button
-            className="queue-icon-button"
-            type="button"
-            aria-label={t('queue.action.more')}
-            title={t('queue.action.more')}
-            disabled={!nowPlaying}
-            onClick={handleNowPlayingMoreClick}
-          >
-            <MoreHorizontal size={18} />
+            <span className="queue-feature-icon"><EchoContinueIcon size={20} /></span>
+            <span className="queue-feature-copy">
+              <strong>{t('queue.continuousPlay.toggle')}</strong>
+              <small>{queue.isContinuousPlayFilling ? t('queue.continuousPlay.filling') : '基于本机音乐库继续推荐'}</small>
+            </span>
+            <span className="queue-switch-track" data-enabled={queue.autoFillQueueEnabled}><i /></span>
           </button>
         </div>
-      </section>
 
-      <section className="queue-toolbar" aria-label={t('queue.tools')}>
-        <button className={`queue-tool-button ${queue.isShuffleEnabled ? 'is-active' : ''}`} type="button" aria-pressed={queue.isShuffleEnabled} onClick={queue.toggleShuffle}>
-          <Shuffle size={16} />
-          {t('queue.action.shuffle')}
-        </button>
-        <button className="queue-tool-button" type="button" disabled={isGeneratingRandomQueue} onClick={() => void handleGenerateRandomQueue()}>
-          <Shuffle size={16} />
-          {isGeneratingRandomQueue ? t('queue.action.generatingRandom') : t('queue.action.generateRandom')}
-        </button>
-        <button className="queue-tool-button" type="button" disabled={isGeneratingHistoryQueue} onClick={() => void handleGenerateHistoryQueue()}>
-          <History size={16} />
-          {isGeneratingHistoryQueue ? t('queue.action.generatingHistory') : t('queue.action.generateFromHistory')}
-        </button>
-        <button
-          className={`queue-tool-button ${queue.autoFillQueueEnabled ? 'is-active' : ''}`}
-          type="button"
-          aria-pressed={queue.autoFillQueueEnabled}
-          onClick={() => queue.setAutoFillQueueEnabled(!queue.autoFillQueueEnabled)}
-        >
-          <ListPlus size={16} />
-          {t('queue.action.autoFill')}
-        </button>
-        <button
-          className={`queue-tool-button ${!automixTemporarilyDisabled && queue.automixEnabled ? 'is-active' : ''}`}
-          type="button"
-          aria-pressed={!automixTemporarilyDisabled && queue.automixEnabled}
-          disabled={automixTemporarilyDisabled}
-          title={automixTemporarilyDisabled ? 'Automix 暂时禁用' : undefined}
-          onClick={() => queue.setAutomixEnabled(!queue.automixEnabled)}
-        >
-          <Wand2 size={16} />
-          Automix 实验
-        </button>
-        <button className="queue-tool-button" type="button" disabled={queue.items.length === 0} onClick={handleSaveQueueSnapshot}>
-          <Save size={16} />
-          保存队列
-        </button>
-        <button className="queue-tool-button" type="button" disabled={savedQueues.length === 0} onClick={() => savedQueues[0] ? handleRestoreSavedQueue(savedQueues[0]) : undefined}>
-          <RotateCcw size={16} />
-          恢复上次队列
-        </button>
-        <button className="queue-tool-button" type="button" disabled={queue.items.length === 0} onClick={() => void handleSaveQueueAsPlaylist()}>
-          <Music2 size={16} />
-          保存为歌单
-        </button>
-        <div className="queue-repeat-group" aria-label={t('queue.repeat.mode')}>
-          {(['off', 'one', 'all'] as RepeatMode[]).map((mode) => (
+        <div className="queue-transition-control">
+          <span className="queue-control-label">衔接方式</span>
+          <div className="queue-transition-segment" role="radiogroup" aria-label="歌曲衔接方式" aria-busy={isTransitionSettingPending}>
             <button
-              className={queue.repeatMode === mode ? 'is-active' : ''}
-              key={mode}
+              className={transitionMode === 'normal' ? 'is-active' : ''}
               type="button"
-              aria-pressed={queue.repeatMode === mode}
-              onClick={() => queue.setRepeatMode(mode)}
+              role="radio"
+              aria-checked={transitionMode === 'normal'}
+              disabled={isTransitionSettingPending || (queue.gaplessPlaybackEnabled && !window.echo?.app?.setSettings)}
+              onClick={() => handleSetTransitionMode('normal')}
             >
-              {mode === 'off' ? <MinusCircle size={15} /> : mode === 'one' ? <Repeat1 size={15} /> : <Repeat2 size={15} />}
-              {repeatLabels[mode]}
+              <AudioLines size={17} />
+              普通
             </button>
-          ))}
+            <button
+              className={transitionMode === 'gapless' ? 'is-active' : ''}
+              type="button"
+              role="radio"
+              aria-checked={transitionMode === 'gapless'}
+              aria-description="符合条件的本地同专辑相邻曲目将在 1 倍速下无缝衔接"
+              disabled={isTransitionSettingPending || !window.echo?.app?.setSettings}
+              onClick={() => handleSetTransitionMode('gapless')}
+            >
+              <EchoGaplessIcon size={17} />
+              无缝
+            </button>
+            <button
+              className={transitionMode === 'smart' ? 'is-active' : ''}
+              type="button"
+              role="radio"
+              aria-checked={transitionMode === 'smart'}
+              disabled={automixTemporarilyDisabled || isTransitionSettingPending || (queue.gaplessPlaybackEnabled && !window.echo?.app?.setSettings)}
+              onClick={() => handleSetTransitionMode('smart')}
+            >
+              <EchoSmartTransitionIcon size={17} />
+              智能
+            </button>
+          </div>
         </div>
-        <button className="queue-tool-button danger" type="button" disabled={queue.items.length === 0} onClick={handleClearQueue}>
-          <Trash2 size={16} />
-          {t('queue.action.clear')}
-        </button>
-      </section>
 
-      <section className="queue-selection-bar" aria-label="队列批量操作">
-        <button className="queue-tool-button" type="button" disabled={rows.length === 0} onClick={handleToggleVisibleSelection}>
-          {!isRowSelectionVisible ? '选择列表' : areAllRowsSelected ? '取消选择列表' : '全选列表'}
-        </button>
-        <span>{selectedCount > 0 ? `已选择 ${selectedCount} 首` : '未选择歌曲'}</span>
-        <button className="queue-tool-button" type="button" disabled={selectedCount === 0 || !canMoveSelectedAfterCurrent} onClick={handleMoveSelectedAfterCurrent}>
-          <ListPlus size={16} />
-          临时插播
-        </button>
-        <button className="queue-tool-button" type="button" disabled={selectedCount === 0} onClick={handleToggleSelectedRemoveAfterPlay}>
-          {shouldUnmarkSelectedAfterPlay ? '取消播完移除' : '播放后移除'}
-        </button>
-        <button className="queue-tool-button danger" type="button" disabled={selectedCount === 0} onClick={handleRemoveSelected}>
-          <Trash2 size={16} />
-          移除所选
-        </button>
-        <button className="queue-tool-button" type="button" disabled={!isRowSelectionVisible} onClick={handleClearSelection}>
-          <X size={15} />
-          清除选择
-        </button>
-        <button className="queue-tool-button queue-undo-button" type="button" disabled={!undoSnapshot} onClick={handleUndoQueueAction}>
-          <RotateCcw size={16} />
-          撤销
-        </button>
+        <div className="queue-actions-menu queue-management-menu" ref={queueActionsMenuRef}>
+          <button
+            className={`queue-tool-button ${isQueueActionsMenuOpen ? 'is-active' : ''}`}
+            type="button"
+            aria-expanded={isQueueActionsMenuOpen}
+            aria-haspopup="menu"
+            onClick={() => setIsQueueActionsMenuOpen((open) => !open)}
+          >
+            <MoreHorizontal size={17} />
+            队列管理
+          </button>
+          {isQueueActionsMenuOpen ? (
+            <div className="queue-actions-popover" role="menu">
+              <button type="button" role="menuitem" disabled={queue.items.length === 0} onClick={() => { setIsQueueActionsMenuOpen(false); handleSaveQueueSnapshot(); }}>
+                <Save size={16} />
+                保存当前队列
+              </button>
+              <button type="button" role="menuitem" disabled={savedQueues.length === 0} onClick={() => { setIsQueueActionsMenuOpen(false); if (savedQueues[0]) handleRestoreSavedQueue(savedQueues[0]); }}>
+                <RotateCcw size={16} />
+                恢复最近队列
+              </button>
+              <button type="button" role="menuitem" disabled={isGeneratingRandomQueue} onClick={() => { setIsQueueActionsMenuOpen(false); void handleGenerateRandomQueue(); }}>
+                <Shuffle size={16} />
+                {isGeneratingRandomQueue ? t('queue.action.generatingRandom') : t('queue.action.generateRandom')}
+              </button>
+              <button type="button" role="menuitem" disabled={isGeneratingHistoryQueue} onClick={() => { setIsQueueActionsMenuOpen(false); void handleGenerateHistoryQueue(); }}>
+                <History size={16} />
+                {isGeneratingHistoryQueue ? t('queue.action.generatingHistory') : t('queue.action.generateFromHistory')}
+              </button>
+              <button type="button" role="menuitem" disabled={queue.items.length === 0} onClick={() => { setIsQueueActionsMenuOpen(false); void handleSaveQueueAsPlaylist(); }}>
+                <Music2 size={16} />
+                保存为歌单
+              </button>
+              {selectedCount > 0 ? (
+                <button type="button" role="menuitem" onClick={() => { setIsQueueActionsMenuOpen(false); handleToggleSelectedRemoveAfterPlay(); }}>
+                  <Trash2 size={16} />
+                  {shouldUnmarkSelectedAfterPlay ? t('queue.page.selection.clearAfterPlay') : t('queue.page.selection.markAfterPlay')}
+                </button>
+              ) : null}
+              <button className="danger" type="button" role="menuitem" disabled={queue.items.length === 0} onClick={() => { setIsQueueActionsMenuOpen(false); handleClearQueue(); }}>
+                <Trash2 size={16} />
+                {t('queue.action.clear')}
+              </button>
+            </div>
+          ) : null}
+        </div>
       </section>
 
       {actionNotice ? (
         <section className="queue-action-receipt" aria-live="polite" key={actionNotice.id}>
           <div className="queue-action-receipt__copy">
-            <span>刚刚完成</span>
+            <span>{t('queue.page.receipt.justDone')}</span>
             <strong>{actionNotice.title}</strong>
             {actionNotice.detail ? <p>{actionNotice.detail}</p> : null}
             {actionNotice.trackTitles && actionNotice.trackTitles.length > 0 ? (
-              <div className="queue-action-receipt__tracks" aria-label="受影响歌曲">
+              <div className="queue-action-receipt__tracks" aria-label={t('queue.page.receipt.affectedTracks')}>
                 {actionNotice.trackTitles.map((title, index) => (
                   <em key={`${title}-${index}`}>{title}</em>
                 ))}
@@ -1567,10 +1864,10 @@ export const QueuePage = (): JSX.Element => {
             {actionNotice.canUndo && undoSnapshot ? (
               <button className="queue-tool-button queue-undo-button" type="button" onClick={handleUndoQueueAction}>
                 <RotateCcw size={16} />
-                撤销这次操作
+                {t('queue.page.receipt.undoThis')}
               </button>
             ) : null}
-            <button className="queue-icon-button" type="button" aria-label="关闭队列操作回执" title="关闭" onClick={handleDismissActionNotice}>
+            <button className="queue-icon-button" type="button" aria-label={t('queue.page.receipt.closeAria')} title={t('queue.page.receipt.close')} onClick={handleDismissActionNotice}>
               <X size={15} />
             </button>
           </div>
@@ -1578,26 +1875,26 @@ export const QueuePage = (): JSX.Element => {
       ) : null}
 
       {savedQueues.length > 0 ? (
-        <section className="queue-saved-panel" aria-label="已保存队列">
+        <section className="queue-saved-panel" aria-label={t('queue.page.saved.aria')}>
           <div className="queue-section-heading">
             <div>
               <span className="queue-kicker">Saved Queues</span>
-              <h2>已保存队列</h2>
+              <h2>{t('queue.page.saved.heading')}</h2>
             </div>
-            <span>{savedQueues.length} 个快照</span>
+            <span>{t('queue.page.saved.snapshotCount', { count: savedQueues.length })}</span>
           </div>
           <div className="queue-saved-list">
             {savedQueues.slice(0, 4).map((snapshot) => (
               <article className="queue-saved-item" key={snapshot.id}>
                 <div>
                   <strong>{snapshot.name}</strong>
-                  <span>{snapshot.tracks.length} 首 / {formatSavedQueueDate(snapshot.createdAt)}</span>
+                  <span>{t('queue.page.saved.trackMeta', { count: snapshot.tracks.length, date: formatSavedQueueDate(snapshot.createdAt) })}</span>
                 </div>
                 <button className="queue-tool-button" type="button" onClick={() => handleRestoreSavedQueue(snapshot)}>
                   <RotateCcw size={15} />
-                  恢复
+                  {t('queue.page.saved.restore')}
                 </button>
-                <button className="queue-icon-button danger" type="button" aria-label={`删除队列快照 ${snapshot.name}`} title="删除队列快照" onClick={() => handleDeleteSavedQueue(snapshot.id)}>
+                <button className="queue-icon-button danger" type="button" aria-label={t('queue.page.saved.deleteAria', { name: snapshot.name })} title={t('queue.page.saved.deleteTitle')} onClick={() => handleDeleteSavedQueue(snapshot.id)}>
                   <X size={15} />
                 </button>
               </article>
@@ -1609,14 +1906,85 @@ export const QueuePage = (): JSX.Element => {
       <section className="queue-list-section" aria-label={t('queue.upNext.kicker')}>
         <div className="queue-section-heading">
           <div>
-            <span className="queue-kicker">{t('queue.upNext.kicker')}</span>
             <h2>{t('queue.upNext.title')}</h2>
+            <span aria-live="polite">
+              {queueSearchQuery
+                ? `${rows.length} / ${unfilteredRows.length} 首`
+                : t('queue.count', { count: queue.items.length })}
+            </span>
           </div>
-          <span>{t('queue.upNext.waitingCount', { count: upNextCount })}</span>
+          <div className="queue-list-heading-actions">
+            <div className="queue-list-query-tools">
+              <label className="queue-search-field">
+                <Search size={15} aria-hidden="true" />
+                <input
+                  type="search"
+                  value={queueSearchQuery}
+                  aria-label="搜索队列"
+                  placeholder={t('songs.search.placeholder')}
+                  onChange={(event) => setQueueSearchQuery(event.target.value)}
+                />
+                {queueSearchQuery ? (
+                  <button type="button" aria-label="清除队列搜索" onClick={() => setQueueSearchQuery('')}>
+                    <X size={14} />
+                  </button>
+                ) : null}
+              </label>
+              <button
+                className="queue-tool-button queue-locate-button"
+                type="button"
+                disabled={!queue.currentQueueId && !queue.currentTrackId}
+                onClick={() => {
+                  setQueueSearchQuery('');
+                  setShouldLocateCurrentTrack(true);
+                }}
+              >
+                <LocateFixed size={15} />
+                定位当前播放
+              </button>
+              <span className="queue-keyboard-hint">Alt+↑/↓ 调整顺序，Alt+N 移到下一首</span>
+            </div>
+            <section className="queue-selection-bar" data-visible={isSelectionBarVisible ? 'true' : 'false'} aria-label={t('queue.page.selection.aria')}>
+              <strong>{t('queue.page.selection.selectedCount', { count: selectedCount })}</strong>
+              <button className="queue-tool-button queue-selection-primary" type="button" disabled={selectedCount === 0} onClick={handlePlaySelectedNow}>
+                <Play size={15} fill="currentColor" />
+                立即播放
+              </button>
+              <button className="queue-tool-button" type="button" disabled={selectedCount === 0 || !canMoveSelectedAfterCurrent} onClick={handleMoveSelectedAfterCurrent}>
+                <SkipForward size={15} />
+                下一首播放
+              </button>
+              <button className="queue-tool-button danger" type="button" disabled={selectedCount === 0} onClick={handleRemoveSelected}>
+                <Trash2 size={15} />
+                移出队列
+              </button>
+              <button className="queue-icon-button" type="button" aria-label={t('queue.page.action.clearSelection')} onClick={handleClearSelection}>
+                <X size={15} />
+              </button>
+            </section>
+            {isSelectionMode ? (
+              <button className="queue-tool-button queue-select-trigger" type="button" disabled={rows.length === 0} onClick={handleToggleVisibleSelection}>
+                {areAllRowsSelected ? t('queue.page.selection.deselectList') : t('queue.page.selection.selectAll')}
+              </button>
+            ) : null}
+            <button className="queue-tool-button queue-select-trigger" type="button" disabled={rows.length === 0} onClick={handleToggleSelectionMode}>
+              {isSelectionMode ? t('queue.page.selection.done') : t('queue.page.selection.select')}
+            </button>
+          </div>
         </div>
 
         {rows.length > 0 ? (
-          <div className="queue-list" role="list" data-virtualized="true">
+          <div className="queue-list" role="list" data-virtualized="true" aria-label={t('queue.upNext.title')}>
+            <div
+              className="queue-list-columns"
+              data-selection-mode={isRowSelectionVisible ? 'true' : undefined}
+              aria-hidden="true"
+            >
+              <span className="queue-list-column-title">标题 / 艺术家</span>
+              <span className="queue-list-column-quality">音质</span>
+              <span className="queue-list-column-source">来源</span>
+              <span className="queue-list-column-duration">时长</span>
+            </div>
             <div className="queue-virtual-spacer" ref={queueVirtualSpacerRef} style={{ height: rowVirtualizer.getTotalSize() }}>
               {virtualRows.map((virtualRow) => {
                 const item = rows[virtualRow.index];
@@ -1642,18 +2010,31 @@ export const QueuePage = (): JSX.Element => {
                       data-recent-change={isRecent ? 'true' : undefined}
                       data-dragging={draggedQueueIds.includes(item.queueId)}
                       data-drop-target={dropTargetQueueId === item.queueId && !draggedQueueIds.includes(item.queueId)}
-                      draggable
                       role="listitem"
+                      aria-current={isCurrent ? 'true' : undefined}
+                      aria-posinset={virtualRow.index + 1}
+                      aria-setsize={rows.length}
                       onContextMenu={(event) => handleTrackContextMenu(event, item.track)}
-                      onDragEnd={handleDragEnd}
                       onDragOver={(event) => handleDragOver(event, item)}
-                      onDragStart={(event) => handleDragStart(event, item)}
                       onDrop={(event) => handleDrop(event, item)}
+                      onClick={(event) => handleQueueRowSelect(event, item)}
                       onDoubleClick={() => void runQueueAction(() => queue.playQueueItem(item.queueId))}
                     >
-                      <span className="queue-drag-handle" aria-label={t('queue.action.dragLabel', { title: item.track.title })} title={t('queue.action.dragTitle')}>
+                      <button
+                        className="queue-drag-handle"
+                        type="button"
+                        draggable
+                        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+N"
+                        aria-label={`调整 ${item.track.title} 的位置`}
+                        title="拖动排序；Alt+↑ 上移；Alt+↓ 下移；Alt+N 移到下一首"
+                        onClick={(event) => event.stopPropagation()}
+                        onDoubleClick={(event) => event.stopPropagation()}
+                        onDragEnd={handleDragEnd}
+                        onDragStart={(event) => handleDragStart(event, item)}
+                        onKeyDown={(event) => handleQueueMoveKeyDown(event, item)}
+                      >
                         <GripVertical size={17} />
-                      </span>
+                      </button>
                       {isRowSelectionVisible ? (
                         <label className="queue-row-select" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
                           <input
@@ -1664,13 +2045,21 @@ export const QueuePage = (): JSX.Element => {
                           />
                         </label>
                       ) : null}
+                      <span className="queue-row-index" aria-hidden="true">
+                        {isCurrent ? <AudioLines size={15} strokeWidth={2.2} /> : virtualRow.index + 1}
+                      </span>
                       <div className="queue-row-cover" data-empty={!item.track.coverThumb}>
                         {item.track.coverThumb ? <img alt="" src={item.track.coverThumb} /> : <Music2 size={19} />}
                       </div>
                       <div className="queue-row-copy">
                         <strong>{item.track.title}</strong>
                         <span>{item.track.artist || item.track.albumArtist || t('queue.unknownArtist')}</span>
-                        {removeAfterPlay ? <em className="queue-row-chip">播完移除</em> : null}
+                        {item.recommendation ? (
+                          <small className="queue-row-reason">
+                            {item.recommendation.reasons.map((reason) => recommendationReasonLabel(reason, t)).join(' · ')}
+                          </small>
+                        ) : null}
+                        {removeAfterPlay ? <em className="queue-row-chip">{t('queue.page.selection.markAfterPlay')}</em> : null}
                       </div>
                       <div className="queue-row-quality" aria-label={t('queue.now.quality')}>
                         {rowQualityTags.length > 0 ? rowQualityTags.map((tag) => <span key={`${item.queueId}-${tag}`}>{tag}</span>) : <span>{t('queue.quality.unknown')}</span>}
@@ -1681,32 +2070,28 @@ export const QueuePage = (): JSX.Element => {
                         <button
                           className="queue-row-start-button"
                           type="button"
-                          aria-label={isCurrent ? t('queue.action.currentItem') : t('queue.action.startFromHere', { title: item.track.title })}
-                          title={isCurrent ? t('queue.action.currentItem') : t('queue.action.startFromHere', { title: item.track.title })}
-                          disabled={isCurrent}
-                          onClick={() => void runQueueAction(() => queue.playQueueItem(item.queueId))}
+                          aria-label={t('queue.action.startFromHere', { title: item.track.title })}
+                          title={t('queue.action.startFromHereShort')}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void runQueueAction(() => queue.playQueueItem(item.queueId));
+                          }}
                         >
-                          <Play size={16} fill="currentColor" />
-                          <span>{isCurrent ? t('queue.action.currentItem') : t('queue.action.startFromHereShort')}</span>
+                          <Play size={15} fill="currentColor" />
+                          <span>{t('queue.action.startFromHereShort')}</span>
                         </button>
                         <button
-                          className="queue-icon-button"
+                          className="queue-icon-button queue-row-more-button"
                           type="button"
-                          aria-label={t('queue.action.playNext', { title: item.track.title })}
-                          title={t('queue.action.playNext', { title: item.track.title })}
-                          disabled={isCurrent}
-                          onClick={() => handlePlayItemNext(item)}
+                          aria-label={`${t('queue.action.more')} ${item.track.title}`}
+                          title={t('queue.action.more')}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            handleOpenTrackMenu(item.track, { x: rect.right - 8, y: rect.bottom + 6 });
+                          }}
                         >
-                          <Shuffle size={15} />
-                        </button>
-                        <button
-                          className="queue-icon-button danger"
-                          type="button"
-                          aria-label={t('queue.action.remove', { title: item.track.title })}
-                          title={t('queue.action.remove', { title: item.track.title })}
-                          onClick={() => handleRemoveQueueItem(item)}
-                        >
-                          <X size={16} />
+                          <MoreHorizontal size={18} />
                         </button>
                       </div>
                     </div>
@@ -1717,9 +2102,9 @@ export const QueuePage = (): JSX.Element => {
           </div>
         ) : (
           <div className="queue-empty-state">
-            <ListMusicFallback />
-            <strong>{t('queue.empty.title')}</strong>
-            <span>{t('queue.empty.description')}</span>
+            {queueSearchQuery ? <Search size={28} /> : <ListMusicFallback />}
+            <strong>{queueSearchQuery ? '没有匹配的队列曲目' : t('queue.empty.title')}</strong>
+            <span>{queueSearchQuery ? '换一个曲名、艺人或专辑关键词试试。' : t('queue.empty.description')}</span>
           </div>
         )}
 

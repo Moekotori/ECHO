@@ -11,7 +11,7 @@ import {
   type MetadataResult,
   type ParsedTrackMetadata,
 } from '../libraryTypes';
-import type { CoverExtractor } from './CoverExtractor';
+import { getEmbeddedCoverSourceHash, type CoverExtractor } from './CoverExtractor';
 
 type CoverCandidate = {
   source: CoverResult['source'];
@@ -47,7 +47,7 @@ export const defaultCoverSourceHash = createHash('sha256').update(defaultCoverBy
 
 const toBuffer = (data: Uint8Array): Buffer => (Buffer.isBuffer(data) ? data : Buffer.from(data));
 
-const hashBytes = (data: Uint8Array): string => createHash('sha256').update(data).digest('hex');
+const hashBytes = getEmbeddedCoverSourceHash;
 
 const extensionToMimeType = (extension: string): string | null => {
   switch (extension.toLocaleLowerCase()) {

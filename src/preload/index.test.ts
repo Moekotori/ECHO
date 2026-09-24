@@ -180,6 +180,15 @@ describe('preload SMTC API', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.SmtcGetDiagnostics);
   });
 
+  it('sends the current taskbar thumbnail artwork through typed IPC', () => {
+    exposedApi!.app.setTaskbarThumbnailArtwork('echo-cover://original/cover-1');
+
+    expect(ipcRenderer.send).toHaveBeenCalledWith(
+      IpcChannels.AppSetTaskbarThumbnailArtwork,
+      'echo-cover://original/cover-1',
+    );
+  });
+
   it('exposes SMTC restart through IPC', async () => {
     await exposedApi!.smtc.restart();
 
@@ -706,6 +715,63 @@ describe('preload SMTC API', () => {
     expect(fakeAudioInstances).toHaveLength(0);
   });
 
+  it('keeps mini-player system audio status external instead of creating a local HTMLAudio state', async () => {
+    vi.resetModules();
+    exposedApi = null;
+    fakeAudioInstances = [];
+    vi.stubGlobal('window', {
+      localStorage: createTestLocalStorage(),
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
+      location: { search: '?miniPlayer=1' },
+    });
+    window.localStorage.setItem('echo-next.audio-output-memory', JSON.stringify({ enabled: true, outputMode: 'system' }));
+    const nativeSystemStatus = {
+      state: 'playing',
+      outputMode: 'system',
+      currentTrackId: 'track-live',
+      currentFilePath: 'D:\\Music\\live.flac',
+      positionSeconds: 12,
+      durationSeconds: 180,
+    };
+    vi.mocked(ipcRenderer.invoke).mockImplementation((channel: string) => {
+      if (channel === IpcChannels.AudioGetStatus) {
+        return Promise.resolve(nativeSystemStatus);
+      }
+      return Promise.resolve(null);
+    });
+    await import('./index');
+
+    await expect(exposedApi!.audio.getStatus()).resolves.toBe(nativeSystemStatus);
+    expect(fakeAudioInstances).toHaveLength(0);
+
+    const handler = vi.fn();
+    exposedApi!.audio.onStatus(handler);
+    listeners.get(IpcChannels.AudioStatus)?.({}, nativeSystemStatus);
+
+    expect(handler).toHaveBeenCalledWith(nativeSystemStatus);
+  });
+
+  it('routes mini-player queue controls to the main renderer', async () => {
+    vi.resetModules();
+    exposedApi = null;
+    vi.stubGlobal('window', {
+      localStorage: createTestLocalStorage(),
+      setInterval: globalThis.setInterval,
+      clearInterval: globalThis.clearInterval,
+      location: { search: '?miniPlayer=1' },
+    });
+    vi.mocked(ipcRenderer.invoke).mockResolvedValue(undefined);
+    await import('./index');
+
+    await exposedApi!.playback.controlMainWindow({ type: 'playQueueItem', queueId: 'queue-2' });
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PlaybackMainWindowCommand, {
+      command: 'control',
+      args: [{ type: 'playQueueItem', queueId: 'queue-2' }],
+    });
+  });
+
   it('executes proxied playback commands in the main renderer', async () => {
     vi.resetModules();
     exposedApi = null;
@@ -748,6 +814,28 @@ describe('preload SMTC API', () => {
         }),
       }),
     );
+  });
+
+  it('executes proxied mini-player controls through the registered main controller', async () => {
+    vi.resetModules();
+    exposedApi = null;
+    await import('./index');
+    const controlHandler = vi.fn().mockResolvedValue(undefined);
+    exposedApi!.playback.onMainWindowControl?.(controlHandler);
+
+    listeners.get(IpcChannels.PlaybackMainWindowCommandRequest)?.({}, {
+      id: 'control-1',
+      command: 'control',
+      args: [{ type: 'seek', positionSeconds: 42 }],
+    });
+    await flushPromises();
+
+    expect(controlHandler).toHaveBeenCalledWith({ type: 'seek', positionSeconds: 42 });
+    expect(ipcRenderer.send).toHaveBeenCalledWith(IpcChannels.PlaybackMainWindowCommandResult, {
+      id: 'control-1',
+      ok: true,
+      value: null,
+    });
   });
 
   it('resets reused system audio playback to the beginning for a new track', async () => {
@@ -1033,6 +1121,73 @@ describe('preload SMTC API', () => {
       IpcChannels.AudioCreateSystemStreamUrl,
       expect.anything(),
     );
+  });
+
+  it('preserves the active exclusive output for native Automix requests without an explicit output mode', async () => {
+    vi.resetModules();
+    exposedApi = null;
+    fakeAudioInstances = [];
+    window.localStorage.setItem('echo-next.audio-output-memory', JSON.stringify({ enabled: true, outputMode: 'exclusive' }));
+    vi.mocked(ipcRenderer.invoke).mockImplementation((channel: string) => {
+      if (channel === IpcChannels.AudioGetStatus) {
+        return Promise.resolve({ state: 'paused', outputMode: 'exclusive' });
+      }
+      if (channel === IpcChannels.PlaybackPlayLocalFile || channel === IpcChannels.PlaybackPlayMediaItem) {
+        return Promise.resolve({
+          state: 'playing',
+          currentTrackId: 'track-1',
+          positionMs: 0,
+          durationMs: 180_000,
+          filePath: 'D:\\Music\\song.flac',
+        });
+      }
+      return Promise.resolve(null);
+    });
+    await import('./index');
+
+    const automix = {
+      enabled: true,
+      nextItem: {
+        mediaType: 'local' as const,
+        trackId: 'track-2',
+        path: 'D:\\Music\\next.flac',
+        title: 'Next',
+        artist: 'Artist',
+        album: 'Album',
+        duration: 180,
+      },
+    };
+    await exposedApi!.playback.playLocalFile({
+      filePath: 'D:\\Music\\song.flac',
+      trackId: 'track-1',
+      output: { playbackRate: 1 },
+      automix,
+    });
+    await exposedApi!.playback.playMediaItem({
+      item: {
+        mediaType: 'remote',
+        trackId: 'remote-track',
+        sourceId: 'source-1',
+        stableKey: 'remote:source-1:track',
+        remotePath: '/music/song.flac',
+        title: 'Remote',
+        artist: 'Artist',
+        album: 'Album',
+        duration: 180,
+      },
+      output: { playbackRate: 1 },
+      automix,
+    });
+
+    const localRequest = vi.mocked(ipcRenderer.invoke).mock.calls.find(([channel]) => channel === IpcChannels.PlaybackPlayLocalFile)?.[1] as {
+      output?: { outputMode?: string; playbackRate?: number };
+    };
+    const mediaRequest = vi.mocked(ipcRenderer.invoke).mock.calls.find(([channel]) => channel === IpcChannels.PlaybackPlayMediaItem)?.[1] as {
+      output?: { outputMode?: string; playbackRate?: number };
+    };
+    expect(localRequest.output).toEqual({ playbackRate: 1 });
+    expect(mediaRequest.output).toEqual({ playbackRate: 1 });
+    expect(fakeAudioInstances).toHaveLength(0);
   });
 
   it('ignores stale system audio pause events after playback has resumed', async () => {
@@ -1866,6 +2021,7 @@ describe('preload SMTC API', () => {
     await exposedApi!.app.getUpdateStatus();
     await exposedApi!.app.checkForUpdates();
     await exposedApi!.app.downloadUpdate();
+    await exposedApi!.app.installUpdate();
     const unsubscribe = exposedApi!.app.onUpdateStatus(handler);
     const listener = listeners.get(IpcChannels.AppUpdateStatusChanged);
     const status = { state: 'downloading', downloadPercent: 42 };
@@ -1879,6 +2035,7 @@ describe('preload SMTC API', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AppGetUpdateStatus);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AppCheckForUpdates);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AppDownloadUpdate);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AppInstallUpdate);
     expect(handler).toHaveBeenCalledWith(status);
     expect(listeners.has(IpcChannels.AppUpdateStatusChanged)).toBe(false);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AppOpenRepository);
@@ -1897,6 +2054,17 @@ describe('preload SMTC API', () => {
     await exposedApi!.app.activateEchoProPlugin(request);
 
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AppEchoProPluginActivate, request);
+  });
+
+  it('exposes current ECHO Pro device release through IPC', async () => {
+    await exposedApi!.app.releaseEchoProCurrentDevice();
+    await exposedApi!.app.releaseEchoProCurrentDevice('202607140857551985310505');
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AppEchoProPluginReleaseCurrentDevice);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      IpcChannels.AppEchoProPluginReleaseCurrentDevice,
+      '202607140857551985310505',
+    );
   });
 
   it('exposes app window maximized state through IPC', async () => {
@@ -1955,6 +2123,7 @@ describe('preload SMTC API', () => {
     const state = {
       visible: true,
       locked: true,
+      queueOpen: false,
       bounds: null,
       settings: {
         miniPlayerEnabled: true,
@@ -2100,27 +2269,40 @@ describe('preload SMTC API', () => {
   });
 
   it('exposes lyrics APIs through IPC', async () => {
+    const changedHandler = vi.fn();
     await exposedApi!.lyrics.getForTrack('track-1');
+    await exposedApi!.lyrics.getStoredCandidates!('track-1', 120);
     await exposedApi!.lyrics.searchCandidates('track-1');
     await exposedApi!.lyrics.previewCandidate?.('track-1', 'candidate-1');
     await exposedApi!.lyrics.applyCandidate('track-1', 'candidate-1');
+    await exposedApi!.lyrics.applyCandidate('track-1', 'candidate-auto', 'auto');
     await exposedApi!.lyrics.embedToTrack?.('track-1', { candidateId: 'candidate-1' });
     await exposedApi!.lyrics.applyCustomLrc?.('track-1', '[00:01.00]Line', 'custom.lrc');
     await exposedApi!.lyrics.markInstrumental('track-1');
     await exposedApi!.lyrics.rejectCandidate('candidate-1');
     await exposedApi!.lyrics.setOffset('track-1', 500);
     await exposedApi!.lyrics.clearCache('track-1');
+    const unsubscribe = exposedApi!.lyrics.onChanged?.(changedHandler);
+    listeners.get(IpcChannels.LyricsChanged)?.({}, {
+      trackId: 'track-1',
+      reason: 'auto-apply',
+    });
+    unsubscribe?.();
 
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsGetForTrack, 'track-1');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsGetStoredCandidates, 'track-1', 120);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsSearchCandidates, 'track-1', undefined, undefined);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsPreviewCandidate, 'track-1', 'candidate-1');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsApplyCandidate, 'track-1', 'candidate-1');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsApplyCandidate, 'track-1', 'candidate-auto', 'auto');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsEmbedToTrack, 'track-1', { candidateId: 'candidate-1' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsApplyCustomLrc, 'track-1', '[00:01.00]Line', 'custom.lrc');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsMarkInstrumental, 'track-1');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsRejectCandidate, 'candidate-1');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsSetOffset, 'track-1', 500);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.LyricsClearCache, 'track-1');
+    expect(changedHandler).toHaveBeenCalledWith('track-1', 'auto-apply');
+    expect(listeners.has(IpcChannels.LyricsChanged)).toBe(false);
   });
 
   it('exposes MV APIs through IPC', async () => {

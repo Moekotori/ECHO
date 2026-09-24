@@ -1,5 +1,5 @@
 import { setImmediate as yieldToMainLoop } from 'node:timers/promises';
-import type { RemoteSyncOptions, RemoteSyncStatus } from '../../../shared/types/remoteSources';
+import type { RemoteSyncOptions, RemoteSyncPreview, RemoteSyncStatus } from '../../../shared/types/remoteSources';
 import type { RemoteLibraryStore } from './RemoteLibraryStore';
 import type { RemoteSourceAdapter, RemoteTrackWrite } from './remoteTypes';
 import { remoteTrackIdFor } from './remoteIdentity';
@@ -29,6 +29,8 @@ const initialStatus = (sourceId: string): RemoteSyncStatus => ({
 export class RemoteLibrarySyncService {
   private readonly statuses = new Map<string, RemoteSyncStatus>();
   private readonly controllers = new Map<string, AbortController>();
+  private readonly running = new Set<Promise<void>>();
+  private disposing = false;
 
   constructor(
     private readonly store: RemoteLibraryStore,
@@ -38,6 +40,9 @@ export class RemoteLibrarySyncService {
   ) {}
 
   syncSource(sourceId: string, options: RemoteSyncOptions = {}): RemoteSyncStatus {
+    if (this.disposing) {
+      return this.getSyncStatus(sourceId);
+    }
     if (this.controllers.has(sourceId)) {
       return this.getSyncStatus(sourceId);
     }
@@ -51,9 +56,11 @@ export class RemoteLibrarySyncService {
       startedAt: nowIso(),
     });
 
-    void this.runSync(sourceId, controller, options).finally(() => {
+    const running = this.runSync(sourceId, controller, options).finally(() => {
       this.controllers.delete(sourceId);
+      this.running.delete(running);
     });
+    this.running.add(running);
 
     return this.getSyncStatus(sourceId);
   }
@@ -63,8 +70,91 @@ export class RemoteLibrarySyncService {
     return this.getSyncStatus(sourceId);
   }
 
+  async dispose(): Promise<void> {
+    this.disposing = true;
+    for (const controller of this.controllers.values()) {
+      controller.abort();
+    }
+    await Promise.allSettled(Array.from(this.running));
+  }
+
   getSyncStatus(sourceId: string): RemoteSyncStatus {
     return this.statuses.get(sourceId) ?? initialStatus(sourceId);
+  }
+
+  async previewSync(sourceId: string, options: RemoteSyncOptions = {}): Promise<RemoteSyncPreview> {
+    if (this.controllers.has(sourceId)) {
+      throw new Error('A sync is already running for this source.');
+    }
+    const source = this.store.getSourceWithSecret(sourceId);
+    if (!source) {
+      throw new Error(`Unknown remote source ${sourceId}`);
+    }
+
+    const controller = new AbortController();
+    const adapter = this.getAdapter(source.provider);
+    const test = await adapter.testConnection({ source, signal: controller.signal });
+    if (!test.ok) {
+      throw new Error(test.message);
+    }
+
+    const fingerprints = this.store.getComparableFingerprints(sourceId);
+    const seenPaths = new Set<string>();
+    const errors: string[] = [];
+    const scanCache = new Map<string, { fingerprint: string; payload: string; verifiedAt: string }>();
+    let discoveredCount = 0;
+    let addedCount = 0;
+    let updatedCount = 0;
+    let unchangedCount = 0;
+
+    for await (const item of adapter.scan({
+      source,
+      signal: controller.signal,
+      rootPath: options.rootPath ?? null,
+      scanCache: {
+        get: (namespace, key) => scanCache.get(`${namespace}\0${key}`) ?? this.store.getProviderScanCache(sourceId, namespace, key),
+        set: (namespace, key, fingerprint, payload, verifiedAt) => {
+          scanCache.set(`${namespace}\0${key}`, { fingerprint, payload, verifiedAt: verifiedAt ?? nowIso() });
+        },
+      },
+      onError: (path, error) => errors.push(`${path}: ${error.message}`),
+    })) {
+      seenPaths.add(item.path);
+      discoveredCount += 1;
+      const existing = fingerprints.get(item.path);
+      if (!existing) {
+        addedCount += 1;
+      } else if (
+        existing.etag === item.etag
+        && existing.modifiedAt === item.modifiedAt
+        && existing.sizeBytes === item.sizeBytes
+      ) {
+        unchangedCount += 1;
+      } else {
+        updatedCount += 1;
+      }
+      if (discoveredCount % scanYieldItemDelta === 0) {
+        await yieldToMainLoop();
+      }
+    }
+
+    const complete = errors.length === 0;
+    const missingCount = complete && !options.rootPath
+      ? Array.from(fingerprints.keys()).filter((path) => !seenPaths.has(path)).length
+      : null;
+    return {
+      sourceId,
+      rootPath: options.rootPath ?? null,
+      discoveredCount,
+      addedCount,
+      updatedCount,
+      unchangedCount,
+      missingCount,
+      failedCount: errors.length,
+      complete,
+      errors: errors.slice(-20),
+      previewedAt: nowIso(),
+    };
   }
 
   rescanChanged(sourceId: string): RemoteSyncStatus {
@@ -96,6 +186,24 @@ export class RemoteLibrarySyncService {
     let lastDiscoveredCount = 0;
     let lastWrittenCount = 0;
     let itemsSinceYield = 0;
+    let unchangedSeenPaths: string[] = [];
+    const pendingScanCache = new Map<string, { namespace: string; key: string; fingerprint: string; payload: string; verifiedAt?: string }>();
+
+    const flushUnchangedSeenPaths = (): void => {
+      if (unchangedSeenPaths.length === 0) {
+        return;
+      }
+      this.store.markTracksSeen(sourceId, unchangedSeenPaths);
+      unchangedSeenPaths = [];
+    };
+
+    const flushScanCache = (): void => {
+      if (pendingScanCache.size === 0) {
+        return;
+      }
+      this.store.setProviderScanCaches(sourceId, Array.from(pendingScanCache.values()));
+      pendingScanCache.clear();
+    };
 
     const publishProgress = (force = false, patch: Partial<RemoteSyncStatus> = {}): void => {
       const now = Date.now();
@@ -137,6 +245,20 @@ export class RemoteLibrarySyncService {
         source,
         signal: controller.signal,
         rootPath: options.rootPath ?? null,
+        scanCache: {
+          get: (namespace, key) => {
+            const pending = pendingScanCache.get(`${namespace}\0${key}`);
+            return pending
+              ? { fingerprint: pending.fingerprint, payload: pending.payload, verifiedAt: pending.verifiedAt ?? nowIso() }
+              : this.store.getProviderScanCache(sourceId, namespace, key);
+          },
+          set: (namespace, key, fingerprint, payload, verifiedAt) => {
+            pendingScanCache.set(`${namespace}\0${key}`, { namespace, key, fingerprint, payload, verifiedAt });
+            if (pendingScanCache.size >= 100) {
+              flushScanCache();
+            }
+          },
+        },
         onProgress: (entry) => {
           publishProgress(false, { currentPath: entry.path });
         },
@@ -148,6 +270,7 @@ export class RemoteLibrarySyncService {
         },
       })) {
         if (controller.signal.aborted) {
+          flushUnchangedSeenPaths();
           this.cancelled(sourceId, options);
           return;
         }
@@ -164,7 +287,11 @@ export class RemoteLibrarySyncService {
           existing.modifiedAt === item.modifiedAt &&
           existing.sizeBytes === item.sizeBytes;
 
-        if (unchanged && existing.coverId) {
+        if (unchanged) {
+          unchangedSeenPaths.push(item.path);
+          if (unchangedSeenPaths.length >= batchSize) {
+            flushUnchangedSeenPaths();
+          }
           skippedCount += 1;
           publishProgress();
           if (itemsSinceYield >= scanYieldItemDelta) {
@@ -221,15 +348,18 @@ export class RemoteLibrarySyncService {
         }
       }
 
+      flushUnchangedSeenPaths();
+      flushScanCache();
       publishProgress(true, { phase: 'writing_database' });
       writtenCount += await this.flush(sourceId, batch);
       await yieldToMainLoop();
       publishProgress(true, { phase: 'marking_missing' });
-      const shouldMarkMissing = options.markMissing !== false && !options.rootPath;
+      const enumerationComplete = failedCount === 0 && !controller.signal.aborted;
+      const shouldMarkMissing = enumerationComplete && options.markMissing !== false && !options.rootPath;
       const missingCount = shouldMarkMissing ? this.store.markMissingExcept(sourceId, seenPaths) : 0;
       const finishedAt = nowIso();
       this.patchStatus(sourceId, {
-        status: 'completed',
+        status: enumerationComplete ? 'completed' : 'partial',
         phase: 'finished',
         discoveredCount,
         parsedCount,
@@ -241,9 +371,15 @@ export class RemoteLibrarySyncService {
         currentPath: null,
         finishedAt,
       });
-      this.store.updateSourceSyncResult(sourceId, failedCount === 0, errors[0] ?? null, finishedAt);
+      this.store.updateSourceSyncResult(sourceId, enumerationComplete, errors[0] ?? null, finishedAt);
       this.notifySyncSettled(sourceId, options);
     } catch (error) {
+      try {
+        flushUnchangedSeenPaths();
+        flushScanCache();
+      } catch {
+        // Provider scan caches are an optimization; sync failure reporting remains authoritative.
+      }
       if (controller.signal.aborted) {
         this.cancelled(sourceId, options);
         return;

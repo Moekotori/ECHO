@@ -1,12 +1,36 @@
 import type { IpcRenderer } from 'electron';
 import type { EchoApi } from '../apiTypes';
 import type { AudioStatus } from '../../shared/types/audio';
-import type { PlaybackStatus } from '../../shared/types/playback';
 
 export function createDesktopLyricsApi(
   ipcRenderer: IpcRenderer,
   IpcChannels: typeof import('../../shared/constants/ipcChannels').IpcChannels,
 ): EchoApi['desktopLyrics'] {
+  let lastHandledRevealRequestId = 0;
+  let pendingRevealMenuToggle = false;
+  const revealMenuHandlers = new Set<() => void>();
+  ipcRenderer.on(IpcChannels.DesktopLyricsRevealMenu, (_event, requestId: unknown) => {
+    const normalizedRequestId =
+      typeof requestId === 'number' && Number.isSafeInteger(requestId) && requestId > 0
+        ? requestId
+        : null;
+    if (normalizedRequestId !== null) {
+      if (normalizedRequestId <= lastHandledRevealRequestId) {
+        return;
+      }
+      lastHandledRevealRequestId = normalizedRequestId;
+    }
+
+    if (revealMenuHandlers.size === 0) {
+      pendingRevealMenuToggle = !pendingRevealMenuToggle;
+      return;
+    }
+
+    for (const handler of revealMenuHandlers) {
+      handler();
+    }
+  });
+
   return {
     show: () => ipcRenderer.invoke(IpcChannels.DesktopLyricsShow),
     hide: () => ipcRenderer.invoke(IpcChannels.DesktopLyricsHide),
@@ -34,11 +58,14 @@ export function createDesktopLyricsApi(
       return () => ipcRenderer.off(IpcChannels.DesktopLyricsStateChanged, listener);
     },
     onRevealMenu: (handler) => {
-      const listener = (): void => {
+      revealMenuHandlers.add(handler);
+      if (pendingRevealMenuToggle) {
+        pendingRevealMenuToggle = false;
         handler();
+      }
+      return () => {
+        revealMenuHandlers.delete(handler);
       };
-      ipcRenderer.on(IpcChannels.DesktopLyricsRevealMenu, listener);
-      return () => ipcRenderer.off(IpcChannels.DesktopLyricsRevealMenu, listener);
     },
     onAudioStatus: (handler) => {
       const listener = (_event: Electron.IpcRendererEvent, status: unknown): void => {

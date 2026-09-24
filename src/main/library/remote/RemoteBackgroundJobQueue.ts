@@ -10,6 +10,7 @@ import type { CoverService } from '../CoverService';
 import type { FieldSources, MetadataStatus, ParsedTrackMetadata } from '../libraryTypes';
 import type { RemoteLibraryStore } from './RemoteLibraryStore';
 import { remoteCoverCacheKeyFor } from './remoteCoverUrls';
+import { readSubsonicCoverDiskCache, writeSubsonicCoverDiskCache } from './SubsonicCoverDiskCache';
 import type { RemoteSourceAdapter, RemoteTrackWrite } from './remoteTypes';
 
 type QueueJob = {
@@ -147,10 +148,12 @@ export class RemoteBackgroundJobQueue {
   private readonly sourceContinuations = new Map<string, SourceContinuation>();
   private readonly coverIdsByKey = new Map<string, string | null>();
   private readonly coverPromisesByKey = new Map<string, Promise<string | null>>();
+  private readonly runningPromises = new Set<Promise<void>>();
   private globalPaused = false;
   private playbackActive = false;
   private playbackLowLoadEnhancedActive = false;
   private scheduling = false;
+  private disposing = false;
   private updatedAt: string | null = null;
 
   constructor(
@@ -158,9 +161,11 @@ export class RemoteBackgroundJobQueue {
     private readonly getAdapter: (provider: string) => RemoteSourceAdapter,
     private readonly coverService: CoverService | null = null,
     private readonly getDefaultRuntimeLimits: () => RemoteRuntimeLimits = () => ({}),
+    private readonly subsonicCoverCacheDir: string | null = null,
   ) {}
 
   enqueueSource(sourceId: string, kinds: RemoteBackgroundJobKind[] = ['metadata', 'lyrics'], options: { failedOnly?: boolean; priority?: number } = {}): RemoteBackgroundJobStatus {
+    if (this.disposing) return this.getStatus(sourceId);
     const normalizedKinds = this.normalizeKinds(kinds);
     this.resume(sourceId);
     this.sourceContinuations.set(this.sourceContinuationKey(sourceId, normalizedKinds, options), {
@@ -173,6 +178,7 @@ export class RemoteBackgroundJobQueue {
   }
 
   enqueueTrack(track: QueueableTrack, kinds: RemoteBackgroundJobKind[] = ['metadata'], priority = 0): void {
+    if (this.disposing) return;
     const jobs = this.kindsForTrack(track, this.normalizeKinds(kinds), false).map((kind) => ({
       sourceId: track.sourceId,
       kind,
@@ -191,6 +197,7 @@ export class RemoteBackgroundJobQueue {
   }
 
   enqueueTrackWrites(tracks: RemoteTrackWrite[], kinds: RemoteBackgroundJobKind[] = ['metadata'], priority = 0): void {
+    if (this.disposing) return;
     const normalizedKinds = this.normalizeKinds(kinds);
     const jobs: QueueJob[] = [];
     for (const track of tracks) {
@@ -213,6 +220,39 @@ export class RemoteBackgroundJobQueue {
     }
     this.touch();
     return this.getStatus(sourceId);
+  }
+
+  cancelSource(sourceId: string): RemoteBackgroundJobStatus {
+    this.pausedSources.add(sourceId);
+    this.abortRunningJobs((job) => job.sourceId === sourceId);
+    for (const kind of jobKinds) {
+      const retained = this.pendingByKind[kind].filter((job) => job.sourceId !== sourceId);
+      this.pendingByKind[kind].splice(0, this.pendingByKind[kind].length, ...retained);
+    }
+    for (const key of Array.from(this.queuedKeys)) {
+      if (key.startsWith(`${sourceId}:`)) this.queuedKeys.delete(key);
+    }
+    this.pendingBySource.delete(sourceId);
+    for (const key of Array.from(this.sourceContinuations.keys())) {
+      if (key.startsWith(`${sourceId}:`)) this.sourceContinuations.delete(key);
+    }
+    this.touch();
+    return this.getStatus(sourceId);
+  }
+
+  async dispose(): Promise<void> {
+    if (this.disposing) {
+      await Promise.allSettled(Array.from(this.runningPromises));
+      return;
+    }
+    this.disposing = true;
+    this.globalPaused = true;
+    for (const kind of jobKinds) this.pendingByKind[kind].splice(0);
+    this.queuedKeys.clear();
+    this.pendingBySource.clear();
+    this.sourceContinuations.clear();
+    this.abortRunningJobs(() => true);
+    await Promise.allSettled(Array.from(this.runningPromises));
   }
 
   setGlobalPaused(paused: boolean): RemoteBackgroundGlobalStatus {
@@ -338,6 +378,7 @@ export class RemoteBackgroundJobQueue {
     kinds: RemoteBackgroundJobKind[],
     options: { failedOnly?: boolean; priority?: number },
   ): void {
+    if (this.disposing) return;
     const key = this.sourceContinuationKey(sourceId, kinds, options);
     if (this.sourceEnqueueingKeys.has(key)) {
       return;
@@ -346,6 +387,10 @@ export class RemoteBackgroundJobQueue {
     this.sourceEnqueueingKeys.add(key);
     this.touch();
     setImmediate(() => {
+      if (this.disposing) {
+        this.sourceEnqueueingKeys.delete(key);
+        return;
+      }
       let enqueuedCount = 0;
       void this.enqueueSourceInChunks(sourceId, kinds, options)
         .then((count) => {
@@ -441,7 +486,7 @@ export class RemoteBackgroundJobQueue {
   }
 
   private scheduleSourceContinuation(sourceId: string): void {
-    if (this.pausedSources.has(sourceId)) {
+    if (this.disposing || this.pausedSources.has(sourceId)) {
       return;
     }
 
@@ -519,13 +564,14 @@ export class RemoteBackgroundJobQueue {
   }
 
   private schedule(): void {
-    if (this.scheduling) {
+    if (this.disposing || this.scheduling) {
       return;
     }
 
     this.scheduling = true;
     setImmediate(() => {
       this.scheduling = false;
+      if (this.disposing) return;
       this.drain();
     });
   }
@@ -567,11 +613,11 @@ export class RemoteBackgroundJobQueue {
         };
         this.running.set(this.jobKey(job), runningJob);
         this.adjust(this.runningBySource, job.sourceId, job.kind, 1);
-        void (async () => {
+        const runningPromise = (async () => {
           const outcome = await this.run(job, track, controller.signal);
           this.running.delete(this.jobKey(job));
           this.adjust(this.runningBySource, job.sourceId, job.kind, -1);
-          if (outcome === 'aborted') {
+          if (outcome === 'aborted' && !this.disposing) {
             this.enqueueMany([job]);
           }
           this.touch();
@@ -579,7 +625,8 @@ export class RemoteBackgroundJobQueue {
           if (!this.hasPendingOrRunningForSource(job.sourceId)) {
             this.scheduleSourceContinuation(job.sourceId);
           }
-        })();
+        })().finally(() => this.runningPromises.delete(runningPromise));
+        this.runningPromises.add(runningPromise);
         startedCount += 1;
       }
 
@@ -740,7 +787,18 @@ export class RemoteBackgroundJobQueue {
       return null;
     }
 
-    const result = await adapter.readCover({
+    const coverKey = this.coverCacheKey(track);
+    const cached = track.provider === 'subsonic' && coverKey && this.subsonicCoverCacheDir
+      ? await readSubsonicCoverDiskCache(this.subsonicCoverCacheDir, coverKey, 512)
+      : null;
+    const result = cached ? {
+      status: 'ok' as const,
+      data: cached.data,
+      mimeType: cached.mimeType,
+      fieldSources: { cover: 'subsonic-cache' },
+      warnings: [],
+      errors: [],
+    } : await adapter.readCover({
       source,
       signal,
       item: {
@@ -777,6 +835,10 @@ export class RemoteBackgroundJobQueue {
         },
       },
     });
+
+    if (!cached && track.provider === 'subsonic' && coverKey && this.subsonicCoverCacheDir && result.data && result.mimeType) {
+      await writeSubsonicCoverDiskCache(this.subsonicCoverCacheDir, coverKey, 512, result.mimeType, result.data);
+    }
 
     if (!result.data) {
       return null;
@@ -815,8 +877,8 @@ export class RemoteBackgroundJobQueue {
     return coverId;
   }
 
-  private coverCacheKey(track: Pick<RemoteLibraryTrack, 'provider' | 'remotePath' | 'stableKey' | 'fieldSources'>): string | null {
-    return remoteCoverCacheKeyFor(track);
+  private coverCacheKey(track: Pick<RemoteLibraryTrack, 'sourceId' | 'provider' | 'remotePath' | 'stableKey' | 'fieldSources'>): string | null {
+    return remoteCoverCacheKeyFor({ ...track, sourceId: track.sourceId });
   }
 
   private async runMetadataJob(track: RemoteLibraryTrack, kind: RemoteBackgroundJobKind, signal?: AbortSignal): Promise<RemoteLibraryTrack | null> {

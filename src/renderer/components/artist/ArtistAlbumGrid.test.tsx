@@ -91,7 +91,7 @@ describe('ArtistAlbumGrid', () => {
     expect(selected).toHaveBeenCalledWith(expect.objectContaining({ id: 'album-1', title: 'Refrain' }));
   });
 
-  it('uses original album artwork for artist album cards', async () => {
+  it('uses static large album artwork for artist album cards', async () => {
     installLibrary(vi.fn().mockResolvedValue(page([album({
       coverId: 'cover 1',
       coverThumb: 'echo-cover://album/cover%201',
@@ -100,7 +100,7 @@ describe('ArtistAlbumGrid', () => {
     const { container } = renderAlbumGrid();
 
     await screen.findByRole('button', { name: /Refrain/i });
-    expect((container.querySelector('.artist-album-cover img') as HTMLImageElement | null)?.getAttribute('src')).toBe('echo-cover://original/cover%201');
+    expect((container.querySelector('.artist-album-cover img') as HTMLImageElement | null)?.getAttribute('src')).toBe('echo-cover://large/cover%201');
   });
 
   it('reserves scroll height for unloaded artist albums', async () => {

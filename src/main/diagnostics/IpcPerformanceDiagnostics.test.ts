@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installIpcPerformanceDiagnostics } from './IpcPerformanceDiagnostics';
+import { getPlaybackPerformanceSnapshot } from './PlaybackPerformanceDiagnostics';
 
 describe('IpcPerformanceDiagnostics', () => {
   afterEach(() => {
@@ -48,5 +49,38 @@ describe('IpcPerformanceDiagnostics', () => {
 
     await expect(handlers.get('library:scan-folder')?.({})).rejects.toThrow('scan failed');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('[ipc-perf] library:scan-folder 500ms SLOW failed=true'));
+  });
+
+  it('exposes an async IPC handler as active until its promise settles', async () => {
+    let now = 3_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    const ipcMain = {
+      handle: vi.fn((channel: string, handler: (event: unknown, ...args: unknown[]) => unknown) => {
+        handlers.set(channel, handler);
+      }),
+    };
+    let resolveHandler!: (value: string) => void;
+    const pending = new Promise<string>((resolve) => {
+      resolveHandler = resolve;
+    });
+
+    installIpcPerformanceDiagnostics(ipcMain);
+    ipcMain.handle('library:get-playback-stats-dashboard', () => pending);
+    const result = handlers.get('library:get-playback-stats-dashboard')?.({});
+    now = 4_250;
+
+    expect(getPlaybackPerformanceSnapshot()).toMatchObject({
+      activeIpcChannel: 'library:get-playback-stats-dashboard',
+      activeIpcElapsedMs: 1250,
+      activeIpcCount: 1,
+    });
+
+    resolveHandler('stats');
+    await expect(result).resolves.toBe('stats');
+    expect(getPlaybackPerformanceSnapshot()).toMatchObject({
+      activeIpcChannel: null,
+      activeIpcCount: 0,
+    });
   });
 });

@@ -62,7 +62,7 @@ const routesWithOsuDownloader: AppRoute[] = [
   ...routesWithHome,
   {
     id: 'osu-downloader',
-    label: 'osu downloader',
+    label: 'osu!',
     description: 'osu downloader',
     icon: Music2,
     placement: 'main',
@@ -185,11 +185,70 @@ afterEach(() => {
   window.localStorage.removeItem('echo:diagnostics:crash-notice-enabled');
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   setViewportSize(1024, 768);
   (window as unknown as { echo?: Window['echo'] }).echo = undefined;
 });
 
 describe('AppLayout standalone routes', () => {
+  it('restores a safe non-Pro audio baseline without requesting gated DSP modes', async () => {
+    const idleAudioStatus = {
+      state: 'idle',
+      currentTrackId: null,
+      currentFilePath: null,
+      positionSeconds: 0,
+      durationSeconds: 0,
+      error: null,
+      warnings: [],
+    } as unknown as AudioStatus;
+    const setOutput = vi.fn().mockResolvedValue(idleAudioStatus);
+
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({
+          audioDsdOutputMode: 'dop',
+          audioSdmMode: 'dsd256',
+          audioEchoSrcMode: 'family4x',
+        }),
+        getEchoProLocalEntitlementStatus: vi.fn().mockResolvedValue({ unlocked: true, dspUnlocked: false }),
+      },
+      playback: {
+        getStatus: vi.fn().mockResolvedValue({
+          state: 'idle',
+          currentTrackId: null,
+          positionMs: 0,
+          durationMs: 0,
+          filePath: null,
+        }),
+      },
+      audio: {
+        getStatus: vi.fn().mockResolvedValue(idleAudioStatus),
+        onStatus: vi.fn(() => () => undefined),
+        setOutput,
+      },
+      diagnostics: {
+        getLastCrashSummary: vi.fn().mockResolvedValue(null),
+      },
+      library: {
+        getTrack: vi.fn().mockResolvedValue(null),
+        getLikedTrackIds: vi.fn().mockResolvedValue({}),
+      },
+    } as unknown as Window['echo'];
+
+    render(
+      <AppProviders>
+        <AppLayout routes={routes} />
+      </AppProviders>,
+    );
+
+    await waitFor(() => expect(setOutput).toHaveBeenCalled());
+    expect(setOutput).toHaveBeenCalledWith(expect.objectContaining({
+      dsdOutputMode: 'pcm',
+      sdmMode: 'off',
+      echoSrcMode: 'off',
+    }));
+  });
+
   it('forwards one shared playback clock to desktop lyrics', async () => {
     const publishPlaybackStatus = vi.fn();
     const publishAudioStatus = vi.fn();
@@ -346,6 +405,118 @@ describe('AppLayout standalone routes', () => {
     await waitFor(() => expect(screen.getByText('Standalone lyrics page')).toBeTruthy());
     expect(onSongsUnmount).not.toHaveBeenCalled();
     expect(container.querySelector('[data-route-id="songs"]')?.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('releases inactive persistent routes in low spec mode while preserving the lyrics source', async () => {
+    window.localStorage.clear();
+    const onSongsMount = vi.fn();
+    const onSongsUnmount = vi.fn();
+    const SongsProbe = (): JSX.Element => {
+      useEffect(() => {
+        onSongsMount();
+        return () => onSongsUnmount();
+      }, []);
+
+      return <div>Songs low spec probe</div>;
+    };
+    const localRoutes: AppRoute[] = [
+      routesWithHome[0],
+      { ...routes[0], element: <SongsProbe /> },
+      routes[1],
+    ];
+
+    const { container } = render(
+      <AppProviders>
+        <AppLayout routes={localRoutes} />
+      </AppProviders>,
+    );
+
+    const sidebar = await screen.findByRole('complementary', { name: 'Main navigation' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Songs' }));
+    await waitFor(() => expect(onSongsMount).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('settings:changed', { detail: { lowSpecModeEnabled: true } }));
+    });
+    await waitFor(() => expect((container.querySelector('.app-shell') as HTMLElement | null)?.dataset.lowSpecMode).toBe('true'));
+
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Lyrics' }));
+    await waitFor(() => expect(screen.getByText('Standalone lyrics page')).toBeTruthy());
+    expect(onSongsUnmount).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new Event('app:navigate:lyrics-back'));
+    await waitFor(() => expect(container.querySelector('[data-route-id="songs"]')?.hasAttribute('hidden')).toBe(false));
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Main navigation' })).getByRole('button', { name: 'Home' }));
+
+    await waitFor(() => expect(onSongsUnmount).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('[data-route-id="songs"]')).toBeNull();
+  });
+
+  it('keeps a transient source page and the lyrics page mounted across lyrics round trips', async () => {
+    window.localStorage.clear();
+    const onFoldersMount = vi.fn();
+    const onFoldersUnmount = vi.fn();
+    const onLyricsMount = vi.fn();
+    const onLyricsUnmount = vi.fn();
+    const FoldersProbe = (): JSX.Element => {
+      useEffect(() => {
+        onFoldersMount();
+        return () => onFoldersUnmount();
+      }, []);
+
+      return <div>Folders round-trip probe</div>;
+    };
+    const LyricsProbe = (): JSX.Element => {
+      useEffect(() => {
+        onLyricsMount();
+        return () => onLyricsUnmount();
+      }, []);
+
+      return <div>Lyrics round-trip probe</div>;
+    };
+    const localRoutes: AppRoute[] = [
+      routesWithHome[0],
+      {
+        id: 'folders',
+        label: 'Folders',
+        labelKey: 'route.folders.label',
+        description: 'Folders',
+        icon: ListMusic,
+        placement: 'main',
+        element: <FoldersProbe />,
+      },
+      {
+        ...routes[1],
+        element: <LyricsProbe />,
+      },
+    ];
+
+    const { container } = render(
+      <AppProviders>
+        <AppLayout routes={localRoutes} />
+      </AppProviders>,
+    );
+
+    const sidebar = screen.getByRole('complementary', { name: 'Main navigation' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Folders' }));
+    await waitFor(() => expect(onFoldersMount).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Lyrics' }));
+    await waitFor(() => expect(onLyricsMount).toHaveBeenCalledTimes(1));
+    expect(onFoldersUnmount).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new Event('app:navigate:lyrics-back'));
+    await waitFor(() => expect(container.querySelector('[data-route-id="folders"]')?.hasAttribute('hidden')).toBe(false));
+    expect(container.querySelector('.app-shell')?.classList.contains('app-shell--lyrics')).toBe(false);
+    expect(onFoldersMount).toHaveBeenCalledTimes(1);
+    expect(onFoldersUnmount).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-route-id="lyrics"]')?.hasAttribute('hidden')).toBe(true);
+    expect(onLyricsUnmount).not.toHaveBeenCalled();
+
+    const restoredSidebar = screen.getByRole('complementary', { name: 'Main navigation' });
+    fireEvent.click(within(restoredSidebar).getByRole('button', { name: 'Lyrics' }));
+    await waitFor(() => expect(container.querySelector('[data-route-id="lyrics"]')?.hasAttribute('hidden')).toBe(false));
+    expect(onLyricsMount).toHaveBeenCalledTimes(1);
   });
 
   it('returns from Settings to Home by default', async () => {
@@ -1383,6 +1554,52 @@ describe('AppLayout standalone routes', () => {
     });
   });
 
+  it('reveals hidden routes in edit mode and persists show and hide changes', async () => {
+    window.localStorage.clear();
+    const getSettings = vi.fn().mockResolvedValue({
+      sidebarRouteOrder: ['home', 'songs'],
+      sidebarHiddenRouteIds: ['songs'],
+    });
+    const setSettings = vi.fn().mockImplementation(async (patch) => patch);
+    window.echo = {
+      app: {
+        getSettings,
+        setSettings,
+      },
+    } as unknown as Window['echo'];
+
+    render(
+      <AppProviders>
+        <AppLayout routes={routesWithHome} />
+      </AppProviders>,
+    );
+
+    const sidebar = screen.getByRole('complementary', { name: 'Main navigation' });
+    await waitFor(() => {
+      expect(within(sidebar).queryByRole('button', { name: 'Songs' })).toBeNull();
+    });
+
+    fireEvent.contextMenu(within(sidebar).getByRole('button', { name: 'Home' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '进入编辑模式' }));
+
+    const hiddenSongs = await within(sidebar).findByRole('button', { name: '显示Songs' });
+    expect(hiddenSongs.getAttribute('data-hidden')).toBe('true');
+    fireEvent.click(hiddenSongs);
+
+    await waitFor(() => {
+      expect(setSettings).toHaveBeenCalledWith(expect.objectContaining({ sidebarHiddenRouteIds: [] }));
+      expect(within(sidebar).getByRole('button', { name: '隐藏Songs' })).toBeTruthy();
+    });
+
+    fireEvent.click(within(sidebar).getByRole('button', { name: '隐藏Songs' }));
+    await waitFor(() => {
+      expect(setSettings).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sidebarHiddenRouteIds: expect.arrayContaining(['songs']) }),
+      );
+      expect(within(sidebar).getByRole('button', { name: '显示Songs' }).getAttribute('data-hidden')).toBe('true');
+    });
+  });
+
   it('keeps the Streaming sidebar entry hidden while the manual switch is off', async () => {
     window.localStorage.clear();
     const getSettings = vi.fn().mockResolvedValue({
@@ -1530,9 +1747,9 @@ describe('AppLayout standalone routes', () => {
       </AppProviders>,
     );
 
-    const sidebar = screen.getByRole('complementary', { name: 'Main navigation' });
+    const sidebar = screen.getByRole('complementary', { name: /Main navigation|主导航/ });
     await waitFor(() => expect(getSettings).toHaveBeenCalled());
-    expect(await within(sidebar).findByRole('button', { name: 'osu downloader' })).toBeTruthy();
+    expect(await within(sidebar).findByRole('button', { name: 'osu!' })).toBeTruthy();
   });
 
   it('keeps legacy osu downloader marker packages hidden until the built-in feature is enabled', async () => {
@@ -1571,12 +1788,12 @@ describe('AppLayout standalone routes', () => {
       </AppProviders>,
     );
 
-    const sidebar = screen.getByRole('complementary', { name: 'Main navigation' });
+    const sidebar = screen.getByRole('complementary', { name: /Main navigation|主导航/ });
     await waitFor(() => expect(listPlugins).toHaveBeenCalled());
-    expect(within(sidebar).queryByRole('button', { name: 'osu downloader' })).toBeNull();
+    expect(within(sidebar).queryByRole('button', { name: 'osu!' })).toBeNull();
   });
 
-  it('does not expose generic plugin html panels in the sidebar before the host supports them', async () => {
+  it('exposes enabled generic plugin html panels in the sidebar', async () => {
     window.localStorage.clear();
     const getSettings = vi.fn().mockResolvedValue({
       sidebarRouteOrder: ['home', 'songs'],
@@ -1619,9 +1836,9 @@ describe('AppLayout standalone routes', () => {
       </AppProviders>,
     );
 
-    const sidebar = screen.getByRole('complementary', { name: 'Main navigation' });
+    const sidebar = screen.getByRole('complementary', { name: /Main navigation|主导航/ });
     await waitFor(() => expect(listPlugins).toHaveBeenCalled());
-    expect(within(sidebar).queryByRole('button', { name: '播放状态' })).toBeNull();
+    expect(await within(sidebar).findByRole('button', { name: '播放状态' })).toBeTruthy();
   });
 
   it('hides a sidebar route from the route context menu', async () => {
@@ -1700,28 +1917,6 @@ describe('AppLayout standalone routes', () => {
     await waitFor(() => {
       expect(container.querySelector('.app-shell--sidebar-icon-only')).toBeTruthy();
       expect(container.querySelector('.sidebar')?.getAttribute('data-icon-only')).toBe('true');
-    });
-  });
-
-  it('applies saved hidden feature comments from settings', async () => {
-    window.localStorage.clear();
-    const getSettings = vi.fn().mockResolvedValue({
-      featureCommentsHidden: true,
-    });
-    window.echo = {
-      app: {
-        getSettings,
-      },
-    } as unknown as Window['echo'];
-
-    const { container } = render(
-      <AppProviders>
-        <AppLayout routes={routesWithHome} />
-      </AppProviders>,
-    );
-
-    await waitFor(() => {
-      expect(container.querySelector('.app-shell')?.getAttribute('data-feature-comments-hidden')).toBe('true');
     });
   });
 
@@ -1959,7 +2154,7 @@ describe('AppLayout standalone routes', () => {
     );
 
     await screen.findByText('Queue setup ready');
-    expect(await screen.findByRole('button', { name: /鎵撳紑闊抽閾捐矾|Open audio chain/u })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /打开音频链路|Open audio chain/u })).toBeTruthy();
   });
 
   it('opens the lightweight queue drawer from the lyrics player bar', async () => {
@@ -2142,6 +2337,35 @@ describe('AppLayout standalone routes', () => {
     expect(screen.getByRole('contentinfo')).toBeTruthy();
   });
 
+  it('uses a readable light surface for the lyrics mini player bar', async () => {
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({
+          lyricsPlayerBarDrawerEnabled: true,
+          lyricsPlayerBarDrawerOpacityPercent: 80,
+          lyricsPlayerBarDrawerColorMode: 'light',
+          smtcEnabled: true,
+        }),
+      },
+    } as unknown as Window['echo'];
+
+    const { container } = render(
+      <AppProviders>
+        <AppLayout routes={routes} />
+      </AppProviders>,
+    );
+
+    const sidebar = screen.getByRole('complementary', { name: 'Main navigation' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Lyrics' }));
+
+    await waitFor(() => expect(container.querySelector('.app-shell--lyrics-player-drawer')).toBeTruthy());
+    const miniHost = container.querySelector('.lyrics-player-drawer-host') as HTMLElement;
+    expect(miniHost.dataset.miniPlayerColorMode).toBe('light');
+    expect(miniHost.style.getPropertyValue('--lyrics-mini-player-background')).toBe('rgba(244, 247, 251, 0.80)');
+    expect(miniHost.style.getPropertyValue('--lyrics-mini-player-border')).toBe('rgba(17, 24, 39, 0.11)');
+    expect(miniHost.style.getPropertyValue('--lyrics-mini-player-readable-text')).toBe('rgb(17, 24, 39)');
+  });
+
   it('applies low lyrics mini player visual transparency without requiring auto-hide', async () => {
     window.echo = {
       app: {
@@ -2168,6 +2392,9 @@ describe('AppLayout standalone routes', () => {
     expect(miniHost.dataset.autoHide).toBeUndefined();
     expect(miniHost.style.getPropertyValue('--lyrics-mini-player-background')).toBe('rgba(35, 33, 32, 0.20)');
     expect(miniHost.style.getPropertyValue('--lyrics-mini-player-visual-opacity')).toBe('0.78');
+    expect(miniHost.style.getPropertyValue('--lyrics-mini-player-readable-text')).toBe('rgb(17, 24, 39)');
+    expect(miniHost.style.getPropertyValue('--lyrics-mini-player-time-text')).toBe('rgb(17, 24, 39)');
+    expect(miniHost.style.getPropertyValue('--lyrics-mini-player-progress-fill')).toBe('rgba(17, 24, 39, 0.86)');
   });
 
   it('auto-hides the lyrics mini player bar only after the pointer moves away', async () => {
@@ -2225,6 +2452,50 @@ describe('AppLayout standalone routes', () => {
       vi.advanceTimersByTime(20);
     });
     expect(miniHost.dataset.autoHideState).toBe('visible');
+  });
+
+  it('uses only the bound shortcut to show or hide the lyrics mini player bar', async () => {
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({
+          lyricsPlayerBarDrawerEnabled: true,
+          lyricsPlayerBarDrawerAutoHideEnabled: true,
+          lyricsPlayerBarDrawerCompactOnIdleEnabled: true,
+          lyricsPlayerBarDrawerShortcutEnabled: true,
+          lyricsPlayerBarDrawerShortcutAccelerator: 'Ctrl+B',
+          smtcEnabled: true,
+        }),
+      },
+    } as unknown as Window['echo'];
+
+    const { container } = render(
+      <AppProviders>
+        <AppLayout routes={routes} />
+      </AppProviders>,
+    );
+
+    const sidebar = screen.getByRole('complementary', { name: 'Main navigation' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Lyrics' }));
+
+    const miniHost = await waitFor(() => {
+      const host = container.querySelector('.lyrics-player-drawer-host') as HTMLElement | null;
+      expect(host?.dataset.shortcutToggle).toBe('true');
+      return host as HTMLElement;
+    });
+    expect(miniHost.dataset.autoHide).toBeUndefined();
+    expect(miniHost.dataset.shortcutToggleState).toBe('visible');
+    expect(miniHost.querySelector('.player-bar')?.getAttribute('data-compact-away')).toBeNull();
+
+    fireEvent.mouseMove(window, { clientX: 1, clientY: 1 });
+    expect(miniHost.dataset.shortcutToggleState).toBe('visible');
+
+    fireEvent.keyDown(window, { key: 'b', code: 'KeyB', ctrlKey: true });
+    expect(miniHost.dataset.shortcutToggleState).toBe('hidden');
+    expect(miniHost.classList.contains('lyrics-player-drawer-host--auto-hidden')).toBe(true);
+
+    fireEvent.keyDown(window, { key: 'b', code: 'KeyB', ctrlKey: true });
+    expect(miniHost.dataset.shortcutToggleState).toBe('visible');
+    expect(miniHost.classList.contains('lyrics-player-drawer-host--auto-hidden')).toBe(false);
   });
 
   it('uses the lyrics mini player bar automatically on the MV page', async () => {
@@ -2634,17 +2905,15 @@ describe('AppLayout standalone routes', () => {
     expect(notice.textContent).toContain('播放没有成功');
     expect(notice.textContent).not.toContain('echo-audio-host runtime_error');
     expect(document.querySelector('.chrome-notice--audio-error')).toBeTruthy();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('alert')).toBeTruthy();
   });
 
-  it('shows an upper-left notice when an account login expires', async () => {
-    let accountStatusHandler:
-      | ((statuses: Array<{ provider: 'bilibili'; connected: boolean; error: string | null }>) => void)
-      | undefined;
-    const accountsOnStatusesChanged = vi.fn((handler) => {
-      accountStatusHandler = handler as typeof accountStatusHandler;
-      return vi.fn();
-    });
-
+  it('never subscribes the app chrome to account expiry reminders', async () => {
+    const accountsOnStatusesChanged = vi.fn();
     window.echo = {
       app: {
         getSettings: vi.fn().mockResolvedValue({ lyricsPlayerBarDrawerEnabled: false, smtcEnabled: true }),
@@ -2660,38 +2929,25 @@ describe('AppLayout standalone routes', () => {
       </AppProviders>,
     );
 
-    await waitFor(() => expect(accountStatusHandler).toBeTruthy());
-    const emitAccountStatuses = accountStatusHandler;
-    if (!emitAccountStatuses) {
-      throw new Error('account status handler was not registered');
-    }
-    emitAccountStatuses([{ provider: 'bilibili', connected: false, error: 'Bilibili login is invalid or expired.' }]);
-
-    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
-    expect(screen.getByText(/账号登录失效|Account Login Expired/i)).toBeTruthy();
-    expect(screen.getByText(/Bilibili/)).toBeTruthy();
-    expect(screen.getByText(/设置 > 集成|Settings > Integrations/i)).toBeTruthy();
+    await waitFor(() => expect(window.echo?.app?.getSettings).toHaveBeenCalled());
+    expect(accountsOnStatusesChanged).not.toHaveBeenCalled();
+    expect(screen.queryByText(/账号登录失效|Account Login Expired/i)).toBeNull();
   });
 
-  it('suppresses account expiry notices when the setting is enabled', async () => {
-    let accountStatusHandler:
-      | ((statuses: Array<{ provider: 'bilibili'; connected: boolean; error: string | null }>) => void)
-      | undefined;
-    const accountsOnStatusesChanged = vi.fn((handler) => {
-      accountStatusHandler = handler as typeof accountStatusHandler;
-      return vi.fn();
+  it('offers optional manual audio component actions without downloading automatically', async () => {
+    const openRuntimeAudioComponentDownloadPage = vi.fn().mockResolvedValue(undefined);
+    const importRuntimeAudioComponent = vi.fn().mockResolvedValue({
+      outcome: 'installed',
+      status: { installed: true, state: 'installed', version: '26.7.4' },
     });
-
     window.echo = {
       app: {
-        getSettings: vi.fn().mockResolvedValue({
-          lyricsPlayerBarDrawerEnabled: false,
-          smtcEnabled: true,
-          suppressAccountExpiryNotices: true,
-        }),
+        getSettings: vi.fn().mockResolvedValue({ lyricsPlayerBarDrawerEnabled: false, smtcEnabled: true }),
+        openRuntimeAudioComponentDownloadPage,
+        importRuntimeAudioComponent,
       },
-      accounts: {
-        onStatusesChanged: accountsOnStatusesChanged,
+      diagnostics: {
+        getLastCrashSummary: vi.fn().mockResolvedValue(null),
       },
     } as unknown as Window['echo'];
 
@@ -2701,19 +2957,48 @@ describe('AppLayout standalone routes', () => {
       </AppProviders>,
     );
 
-    await waitFor(() => expect(accountStatusHandler).toBeTruthy());
-    await waitFor(() => expect(window.echo?.app?.getSettings).toHaveBeenCalled());
-    await act(async () => {
-      await Promise.resolve();
+    act(() => {
+      window.dispatchEvent(new CustomEvent(showAudioErrorNoticeEvent, {
+        detail: { message: 'echo-audio-host binary not found' },
+      }));
     });
-    const emitAccountStatuses = accountStatusHandler;
-    if (!emitAccountStatuses) {
-      throw new Error('account status handler was not registered');
-    }
-    emitAccountStatuses([{ provider: 'bilibili', connected: false, error: 'Bilibili login is invalid or expired.' }]);
 
-    expect(screen.queryByText(/账号登录失效|Account Login Expired/i)).toBeNull();
-    expect(screen.queryByText(/设置 > 集成|Settings > Integrations/i)).toBeNull();
+    expect(await screen.findByText(/需要可选音频组件|Optional audio component needed/i)).toBeTruthy();
+    expect(openRuntimeAudioComponentDownloadPage).not.toHaveBeenCalled();
+    expect(importRuntimeAudioComponent).not.toHaveBeenCalled();
+
+    const downloadButton = await screen.findByRole('button', { name: /前往官方下载|Open official download/i });
+    fireEvent.click(downloadButton);
+    await waitFor(() => expect(openRuntimeAudioComponentDownloadPage).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /选择已下载组件|Choose downloaded component/i }));
+    await waitFor(() => expect(importRuntimeAudioComponent).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText(/需要可选音频组件|Optional audio component needed/i)).toBeNull());
+  });
+
+  it('recognizes a missing ffmpeg executable as the same optional component gap', async () => {
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({ lyricsPlayerBarDrawerEnabled: false, smtcEnabled: true }),
+      },
+      diagnostics: {
+        getLastCrashSummary: vi.fn().mockResolvedValue(null),
+      },
+    } as unknown as Window['echo'];
+
+    render(
+      <AppProviders>
+        <AppLayout routes={routes} />
+      </AppProviders>,
+    );
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(showAudioErrorNoticeEvent, {
+        detail: { message: 'decoder_pipeline ffmpeg_error: spawn ffmpeg.exe ENOENT' },
+      }));
+    });
+
+    expect(await screen.findByText(/需要可选音频组件|Optional audio component needed/i)).toBeTruthy();
   });
 
   it('hides the app wallpaper layer on the standalone lyrics and MV page without unmounting it', async () => {
@@ -2846,6 +3131,89 @@ describe('AppLayout standalone routes', () => {
     expect(shell.dataset.windowAcrylicKeepUnfocused).toBeUndefined();
   });
 
+  it('suppresses acrylic and marks the shell while low spec mode is enabled', async () => {
+    const requestIdleCallback = vi.fn(
+      (_callback: IdleRequestCallback, _options?: IdleRequestOptions) => 1,
+    );
+    vi.stubGlobal('requestIdleCallback', requestIdleCallback);
+    vi.stubGlobal('cancelIdleCallback', vi.fn());
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({
+          lyricsPlayerBarDrawerEnabled: false,
+          appWindowAcrylicEnabled: true,
+          appWindowAcrylicKeepWhenUnfocusedEnabled: true,
+          appWallpaperBlurPx: 24,
+          lowSpecModeEnabled: true,
+          smtcEnabled: true,
+        }),
+      },
+    } as unknown as Window['echo'];
+
+    const { container } = render(
+      <AppProviders>
+        <AppLayout routes={routes} />
+      </AppProviders>,
+    );
+
+    const shell = await waitFor(() => {
+      const element = container.querySelector('.app-shell') as HTMLElement | null;
+      expect(element?.dataset.lowSpecMode).toBe('true');
+      return element as HTMLElement;
+    });
+    expect(shell.classList.contains('app-shell--acrylic')).toBe(false);
+    expect(shell.dataset.windowAcrylic).toBeUndefined();
+    expect(requestIdleCallback.mock.calls.some(([, options]) => options?.timeout === 8_000)).toBe(false);
+  });
+
+  it('warms the settings route only after normal performance settings are ready', async () => {
+    const requestIdleCallback = vi.fn(
+      (_callback: IdleRequestCallback, _options?: IdleRequestOptions) => 1,
+    );
+    vi.stubGlobal('requestIdleCallback', requestIdleCallback);
+    vi.stubGlobal('cancelIdleCallback', vi.fn());
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({ lowSpecModeEnabled: false }),
+      },
+    } as unknown as Window['echo'];
+
+    render(
+      <AppProviders>
+        <AppLayout routes={routes} />
+      </AppProviders>,
+    );
+
+    await waitFor(() => {
+      expect(requestIdleCallback.mock.calls.some(([, options]) => options?.timeout === 8_000)).toBe(true);
+    });
+  });
+
+  it('does not mount a video wallpaper while low spec mode is enabled', async () => {
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({
+          lyricsPlayerBarDrawerEnabled: false,
+          appCustomWallpaperPath: 'D:\\Echo\\app-wallpapers\\motion.mp4',
+          appWallpaperMediaType: 'video',
+          appWallpaperBlurPx: 24,
+          lowSpecModeEnabled: true,
+          smtcEnabled: true,
+        }),
+      },
+    } as unknown as Window['echo'];
+
+    const { container } = render(
+      <AppProviders>
+        <AppLayout routes={routes} />
+      </AppProviders>,
+    );
+
+    await waitFor(() => expect((container.querySelector('.app-shell') as HTMLElement | null)?.dataset.lowSpecMode).toBe('true'));
+    expect(container.querySelector('.app-wallpaper-layer')).toBeNull();
+    expect(container.querySelector('video')).toBeNull();
+  });
+
   it('applies the portrait app wallpaper only while the viewport is portrait', async () => {
     setViewportSize(1280, 720);
     window.echo = {
@@ -2892,6 +3260,42 @@ describe('AppLayout standalone routes', () => {
       return element as HTMLImageElement;
     });
     expect(portraitImage.getAttribute('src')).toContain(encodeURIComponent('D:\\Echo\\app-wallpapers\\portrait.webp'));
+    expect((container.querySelector('.app-shell') as HTMLElement | null)?.dataset.wallpaperOrientation).toBe('portrait');
+  });
+
+  it('reuses the main app wallpaper in portrait view when no portrait override exists', async () => {
+    setViewportSize(390, 844);
+    const wallpaperPath = 'D:\\Echo\\app-wallpapers\\landscape.png';
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({
+          lyricsPlayerBarDrawerEnabled: false,
+          appCustomWallpaperPath: wallpaperPath,
+          appPortraitWallpaperPath: null,
+          appWallpaperMediaType: 'image',
+          appWallpaperScalePercent: 100,
+          appWallpaperBlurPx: 0,
+          appWallpaperBrightnessPercent: 100,
+          appWallpaperUiOpacityPercent: 100,
+          appWallpaperVisualProtectionEnabled: true,
+          appWallpaperUnifiedOpacityEnabled: false,
+          smtcEnabled: true,
+        }),
+      },
+    } as unknown as Window['echo'];
+
+    const { container } = render(
+      <AppProviders>
+        <AppLayout routes={routes} />
+      </AppProviders>,
+    );
+
+    const portraitImage = await waitFor(() => {
+      const element = container.querySelector('.app-wallpaper-layer img') as HTMLImageElement | null;
+      expect(element?.getAttribute('src')).toContain('echo-wallpaper://app/custom');
+      return element as HTMLImageElement;
+    });
+    expect(portraitImage.getAttribute('src')).toContain(encodeURIComponent(wallpaperPath));
     expect((container.querySelector('.app-shell') as HTMLElement | null)?.dataset.wallpaperOrientation).toBe('portrait');
   });
 
@@ -3104,7 +3508,7 @@ describe('AppLayout standalone routes', () => {
     playSpy.mockRestore();
   });
 
-  it('keeps ready video app wallpaper visible after a late media error', async () => {
+  it('falls back to readable chrome after a late video wallpaper error', async () => {
     const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
     window.echo = {
       app: {
@@ -3140,8 +3544,8 @@ describe('AppLayout standalone routes', () => {
 
     fireEvent.error(video);
 
-    expect(container.querySelector('.app-shell--wallpaper-ready')).toBeTruthy();
-    expect((container.querySelector('.app-wallpaper-layer') as HTMLElement | null)?.dataset.loaded).toBe('true');
+    await waitFor(() => expect(container.querySelector('.app-shell--wallpaper-ready')).toBeNull());
+    expect((container.querySelector('.app-wallpaper-layer') as HTMLElement | null)?.dataset.error).toBe('true');
     playSpy.mockRestore();
   });
 

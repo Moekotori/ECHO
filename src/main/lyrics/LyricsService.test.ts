@@ -7,7 +7,7 @@ import type { AppSettings } from '../../shared/types/appSettings';
 import type { LibraryTrack } from '../../shared/types/library';
 import type { LyricsQuery, LyricsSearchCandidate, TrackLyrics } from '../../shared/types/lyrics';
 import { defaultChannelBalanceSettings } from '../app/appSettings';
-import { LyricsService } from './LyricsService';
+import { LyricsService, onLyricsServiceChanged } from './LyricsService';
 import type { LyricsProvider, LyricsProviderResult } from './LyricsProvider';
 import { LocalLyricsProvider } from './LocalLyricsProvider';
 
@@ -217,6 +217,12 @@ const createHarness = ({
   return { database, library, local, online, service };
 };
 
+const markLyricsCacheAsCurrentAuto = (database: ReturnType<typeof createDatabase>): void => {
+  database.prepare(
+    'UPDATE lyrics_cache SET acceptance_origin = ?, match_policy_version = ?',
+  ).run('auto', 3);
+};
+
 describe('LyricsService', () => {
   it('returns cached lyrics without requesting providers', async () => {
     const { database, local, online, service } = createHarness({
@@ -227,8 +233,8 @@ describe('LyricsService', () => {
         `INSERT INTO lyrics_cache (
           id, cache_key, track_id, provider, provider_lyrics_id, title, artist, album,
           duration_seconds, kind, plain_lyrics, synced_lyrics, lines_json, offset_ms, score,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          acceptance_origin, match_policy_version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         'cached-1',
@@ -246,15 +252,210 @@ describe('LyricsService', () => {
         JSON.stringify([{ timeMs: 1000, text: 'Cached' }]),
         0,
         0.99,
+        'auto',
+        3,
         new Date().toISOString(),
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
 
     expect(lyrics?.lines[0].text).toBe('Cached');
     expect(local.getLyrics).not.toHaveBeenCalled();
     expect(online.getLyrics).not.toHaveBeenCalled();
+  });
+
+  it('demotes safe V2 network cache rows and rematches them under the V3 ambiguity policy', async () => {
+    const onlineProvider = {
+      getLyrics: vi.fn(async () => trackLyrics({
+        providerLyricsId: 'fresh-v3',
+        lines: [{ timeMs: 1000, text: 'Fresh V3 line' }],
+        plainText: 'Fresh V3 line',
+        syncedText: '[00:01.00]Fresh V3 line',
+      })),
+      searchCandidates: vi.fn(async () => []),
+    };
+    const { database, service } = createHarness({
+      onlineProvider,
+      appSettings: settings({ lyricsRomanizationEnabled: false, lyricsTranslationEnabled: false }),
+    });
+    const now = new Date().toISOString();
+    database.prepare(
+      `INSERT INTO lyrics_cache (
+        id, cache_key, track_id, provider, provider_lyrics_id, title, artist, album,
+        duration_seconds, kind, plain_lyrics, synced_lyrics, lines_json, offset_ms, score,
+        acceptance_origin, match_policy_version, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'safe-v2',
+      'lrclib|echo song|echo artist|echo album|120',
+      'track-1',
+      'lrclib',
+      'old-v2',
+      'Echo Song',
+      'Echo Artist',
+      'Echo Album',
+      120,
+      'synced',
+      'Old V2 line',
+      '[00:01.00]Old V2 line',
+      JSON.stringify([{ timeMs: 1000, text: 'Old V2 line' }]),
+      0,
+      0.99,
+      'auto',
+      2,
+      now,
+      now,
+    );
+
+    const lyrics = await service.getLyricsForTrack('track-1');
+    const staleRow = database.prepare<[string], { id: string }>(
+      'SELECT id FROM lyrics_cache WHERE id = ?',
+    ).get('safe-v2');
+    const staleCandidate = database.prepare<[string], { status: string; reasons_json: string }>(
+      'SELECT status, reasons_json FROM lyrics_candidates WHERE provider_lyrics_id = ?',
+    ).get('old-v2');
+
+    expect(lyrics?.lines[0].text).toBe('Fresh V3 line');
+    expect(staleRow).toBeUndefined();
+    expect(staleCandidate?.status).toBe('pending');
+    expect(JSON.parse(staleCandidate?.reasons_json ?? '[]')).toContain('match_policy_revalidation_required');
+    expect(onlineProvider.getLyrics).toHaveBeenCalled();
+  });
+
+  it('keeps automatic network matches as candidates when auto apply is disabled', async () => {
+    const onlineProvider = {
+      getLyrics: vi.fn(async () => trackLyrics()),
+      searchCandidates: vi.fn(async () => []),
+    };
+    const { database, service } = createHarness({
+      onlineProvider,
+      appSettings: settings({
+        lyricsAutoApplyEnabled: false,
+        lyricsRomanizationEnabled: false,
+        lyricsTranslationEnabled: false,
+      }),
+    });
+
+    const lyrics = await service.getLyricsForTrack('track-1');
+    const cacheCount = database.prepare<[], { count: number }>(
+      'SELECT COUNT(*) AS count FROM lyrics_cache',
+    ).get()?.count ?? 0;
+    const storedCandidate = database.prepare<[], { provider_lyrics_id: string }>(
+      'SELECT provider_lyrics_id FROM lyrics_candidates LIMIT 1',
+    ).get();
+
+    expect(lyrics).toBeNull();
+    expect(cacheCount).toBe(0);
+    expect(storedCandidate?.provider_lyrics_id).toBe('lrclib-1');
+  });
+
+  it('prefers the latest manually selected provider over older automatic cache rows', async () => {
+    const { database, local, online, service } = createHarness({
+      appSettings: settings({ lyricsRomanizationEnabled: false, lyricsTranslationEnabled: false }),
+    });
+    const insertCache = database.prepare(
+      `INSERT INTO lyrics_cache (
+        id, cache_key, track_id, provider, provider_lyrics_id, title, artist, album,
+        duration_seconds, kind, plain_lyrics, synced_lyrics, lines_json, offset_ms, score,
+        acceptance_origin, match_policy_version, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insertCache.run(
+      'auto-lrclib',
+      'lrclib|echo song|echo artist|echo album|120|',
+      'track-1',
+      'lrclib',
+      'lrclib-auto',
+      'Echo Song',
+      'Echo Artist',
+      'Echo Album',
+      120,
+      'synced',
+      'Old automatic line',
+      '[00:01.00]Old automatic line',
+      JSON.stringify([{ timeMs: 1000, text: 'Old automatic line' }]),
+      0,
+      0.99,
+      'auto',
+      2,
+      '2026-05-13T00:00:00.000Z',
+      '2026-05-15T00:00:00.000Z',
+    );
+    insertCache.run(
+      'manual-qqmusic',
+      'qqmusic|echo song|echo artist|echo album|120|',
+      'track-1',
+      'qqmusic',
+      'qqmusic-selected',
+      'Echo Song',
+      'Echo Artist',
+      'Echo Album',
+      120,
+      'synced',
+      'User selected line',
+      '[00:01.00]User selected line',
+      JSON.stringify([{ timeMs: 1000, text: 'User selected line' }]),
+      0,
+      0.98,
+      'manual',
+      2,
+      '2026-05-14T00:00:00.000Z',
+      '2026-05-14T00:00:00.000Z',
+    );
+
+    const lyrics = await service.getLyricsForTrack('track-1');
+
+    expect(lyrics?.provider).toBe('qqmusic');
+    expect(lyrics?.lines[0].text).toBe('User selected line');
+    expect(local.getLyrics).not.toHaveBeenCalled();
+    expect(online.getLyrics).not.toHaveBeenCalled();
+  });
+
+  it('demotes unsafe legacy cache rows to candidates and searches again', async () => {
+    const { database, online, service } = createHarness({
+      appSettings: settings({ lyricsRomanizationEnabled: false, lyricsTranslationEnabled: false }),
+    });
+    const now = new Date().toISOString();
+    database.prepare(
+      `INSERT INTO lyrics_cache (
+        id, cache_key, track_id, provider, provider_lyrics_id, title, artist, album,
+        duration_seconds, kind, plain_lyrics, synced_lyrics, lines_json, offset_ms, score,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'unsafe-legacy',
+      'lrclib|echo song|echo artist|echo album|120',
+      'track-1',
+      'lrclib',
+      'unsafe-adaptation',
+      'Echo Song',
+      'Echo Artist / Guest',
+      'Echo Album',
+      60,
+      'plain',
+      'Wrong adaptation',
+      null,
+      JSON.stringify([{ timeMs: -1, text: 'Wrong adaptation' }]),
+      0,
+      0.99,
+      now,
+      now,
+    );
+
+    const lyrics = await service.getLyricsForTrack('track-1');
+    const cacheRow = database.prepare<[string], { id: string }>(
+      'SELECT id FROM lyrics_cache WHERE id = ?',
+    ).get('unsafe-legacy');
+    const candidateRow = database.prepare<[string], { status: string }>(
+      'SELECT status FROM lyrics_candidates WHERE provider_lyrics_id = ?',
+    ).get('unsafe-adaptation');
+
+    expect(lyrics).toBeNull();
+    expect(cacheRow).toBeUndefined();
+    expect(candidateRow?.status).toBe('pending');
+    expect(online.getLyrics).toHaveBeenCalled();
   });
 
   it('returns cached lyrics before secondary network refresh finishes', async () => {
@@ -299,10 +500,13 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
+    const duplicateLyrics = await service.getLyricsForTrack('track-1');
 
     expect(lyrics?.lines[0].text).toBe('Cached');
     expect(lyrics?.lines[0].translation).toBeUndefined();
+    expect(duplicateLyrics?.lines[0].text).toBe('Cached');
     await vi.advanceTimersByTimeAsync(0);
     expect(onlineProvider.getLyrics).toHaveBeenCalledOnce();
 
@@ -341,6 +545,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForSnapshot({
       trackId: 'remote-browser:webdav:/music/Remote Song.flac',
       mediaType: 'remote',
@@ -388,6 +593,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
 
     expect(lyrics?.lines[0].romanization).toBe('kimi ga suki');
@@ -432,6 +638,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
     const cached = database
       .prepare<[string], { lines_json: string }>('SELECT lines_json FROM lyrics_cache WHERE id = ? LIMIT 1')
@@ -476,6 +683,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
 
     expect(utatenKanaProvider.enrichLines).toHaveBeenCalledOnce();
@@ -512,6 +720,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
 
     expect(lyrics?.lines).toEqual([
@@ -550,6 +759,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
 
     expect(lyrics?.lines).toEqual([
@@ -596,6 +806,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
 
     expect(lyrics?.lines).toEqual([
@@ -645,6 +856,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
 
     expect(lyrics?.lines).toEqual([
@@ -658,6 +870,64 @@ describe('LyricsService', () => {
         ],
       },
     ]);
+  });
+
+  it('restores only missing word timings when an old cache is partially populated', async () => {
+    const { database, service } = createHarness();
+    database
+      .prepare(
+        `INSERT INTO lyrics_cache (
+          id, cache_key, track_id, provider, provider_lyrics_id, title, artist, album,
+          duration_seconds, kind, plain_lyrics, synced_lyrics, lines_json, offset_ms, score,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'cached-partial-word-restore-1',
+        'lrclib|echo song|echo artist|echo album|120',
+        'track-1',
+        'lrclib',
+        'lrclib-partial-word-1',
+        'Echo Song',
+        'Echo Artist',
+        'Echo Album',
+        120,
+        'synced',
+        null,
+        [
+          '[00:01.00]<00:01.00>Hello <00:01.50>world',
+          '[00:03.00]<00:03.00>Second <00:03.60>line',
+        ].join('\n'),
+        JSON.stringify([
+          {
+            timeMs: 1000,
+            text: 'Hello world',
+            words: [
+              { text: 'Hello ', startMs: 1000, endMs: 1500 },
+              { text: 'world', startMs: 1500, endMs: null },
+            ],
+          },
+          { timeMs: 3000, text: 'Second line', translation: '第二行' },
+        ]),
+        0,
+        1,
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+
+    markLyricsCacheAsCurrentAuto(database);
+    const lyrics = await service.getLyricsForTrack('track-1');
+
+    expect(lyrics?.lines[0].words).toHaveLength(2);
+    expect(lyrics?.lines[1]).toEqual({
+      timeMs: 3000,
+      text: 'Second line',
+      translation: '第二行',
+      words: [
+        { text: 'Second ', startMs: 3000, endMs: 3600 },
+        { text: 'line', startMs: 3600, endMs: null },
+      ],
+    });
   });
 
   it('rebuilds old cached bracket-style word lyrics from synced source text', async () => {
@@ -697,6 +967,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
 
     expect(lyrics?.lines).toEqual([
@@ -806,6 +1077,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
 
     expect(lyrics?.provider).toBe('lrclib');
@@ -884,9 +1156,7 @@ describe('LyricsService', () => {
 
     const firstLookup = service.getLyricsForTrack('track-1');
     const secondLookup = service.getLyricsForTrack('track-1');
-    await Promise.resolve();
-
-    expect(online.getLyrics).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(online.getLyrics).toHaveBeenCalledOnce());
 
     resolveLyrics(trackLyrics());
     const [first, second] = await Promise.all([firstLookup, secondLookup]);
@@ -895,7 +1165,7 @@ describe('LyricsService', () => {
     expect(second?.providerLyricsId).toBe('lrclib-1');
   });
 
-  it('returns recent stored candidates without repeating the provider search', async () => {
+  it('returns stored candidates through the read-only path without repeating the provider search', async () => {
     const lrclibResult: LyricsProviderResult = {
       provider: 'lrclib',
       providerLyricsId: 'lrclib-candidate',
@@ -934,11 +1204,24 @@ describe('LyricsService', () => {
     });
 
     const first = await service.searchLyricsCandidates('track-1', undefined, 'lrclib');
-    const second = await service.searchLyricsCandidates('track-1', undefined, 'lrclib');
+    const second = await service.getStoredLyricsCandidates('track-1', 120);
 
     expect(lrclibProvider.search).toHaveBeenCalledOnce();
     expect(first).toHaveLength(1);
-    expect(second).toEqual(first);
+    expect(first[0]).toMatchObject({
+      autoAcceptEligible: true,
+      confidence: 'high',
+      previewLines: ['Candidate line'],
+    });
+    expect(second).toHaveLength(1);
+    expect(second[0]).toMatchObject({
+      id: first[0].id,
+      provider: first[0].provider,
+      providerLyricsId: first[0].providerLyricsId,
+      title: first[0].title,
+      artist: first[0].artist,
+    });
+    expect(second[0].previewLines).toEqual(['Candidate line']);
   });
 
   it('gives manual LRCLIB candidate search enough time for slow public responses', async () => {
@@ -1159,6 +1442,7 @@ describe('LyricsService', () => {
         new Date().toISOString(),
       );
 
+    markLyricsCacheAsCurrentAuto(database);
     const lyrics = await service.getLyricsForTrack('track-1');
     const cachedRow = database
       .prepare<[string], { cache_key: string; lines_json: string }>(
@@ -1368,6 +1652,79 @@ describe('LyricsService', () => {
     expect(lyrics.lines[0].text).toBe('Applied');
   });
 
+  it('records renderer automatic candidate applications as automatic decisions', async () => {
+    const { database, service } = createHarness({
+      onlineProvider: {
+        getLyrics: vi.fn(async () => null),
+        searchCandidates: vi.fn(async () => [{
+          ...candidate(),
+          raw: {
+            id: 'lrclib-auto',
+            trackName: 'Echo Song',
+            artistName: 'Echo Artist',
+            albumName: 'Echo Album',
+            duration: 120,
+            syncedLyrics: '[00:01.00]Automatically applied',
+            plainLyrics: 'Automatically applied',
+            instrumental: false,
+          },
+        }]),
+      },
+    });
+    const [found] = await service.searchLyricsCandidates('track-1');
+
+    const lyrics = await service.applyLyricsCandidate('track-1', found.id, 'auto');
+    const cachePolicy = database.prepare<[], { acceptance_origin: string }>(
+      'SELECT acceptance_origin FROM lyrics_cache LIMIT 1',
+    ).get();
+
+    expect(lyrics.lines[0].text).toBe('Automatically applied');
+    expect(cachePolicy?.acceptance_origin).toBe('auto');
+  });
+
+  it('automatically applies a safe provider result that arrives after the foreground deadline', async () => {
+    const onlineProvider = {
+      getLyrics: vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        return trackLyrics({
+          providerLyricsId: 'late-safe',
+          lines: [{ timeMs: 1000, text: 'Late safe line' }],
+          plainText: 'Late safe line',
+          syncedText: '[00:01.00]Late safe line',
+        });
+      }),
+      searchCandidates: vi.fn(async () => []),
+    };
+    const { service } = createHarness({
+      onlineProvider,
+      appSettings: settings({
+        lyricsRomanizationEnabled: false,
+        lyricsTranslationEnabled: false,
+      }),
+    });
+    const changes: Array<{ trackId: string; reason: string }> = [];
+    const unsubscribe = onLyricsServiceChanged((trackId, reason) => {
+      changes.push({ trackId, reason });
+    });
+
+    try {
+      const foreground = await service.getLyricsForTrack('track-1', {
+        providerTimeoutMs: 200,
+        totalMatchTimeoutMs: 20,
+      });
+      expect(foreground).toBeNull();
+
+      await vi.waitFor(() => {
+        expect(changes).toContainEqual({ trackId: 'track-1', reason: 'auto-apply' });
+      });
+      const cached = await service.getLyricsForTrack('track-1');
+      expect(cached?.lines[0].text).toBe('Late safe line');
+      expect(onlineProvider.getLyrics).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it('applies stored Kuwo and KuGou provider candidates', async () => {
     const { database, service } = createHarness();
     const now = '2026-05-26T00:00:00.000Z';
@@ -1462,7 +1819,7 @@ describe('LyricsService', () => {
   });
 
   it('applies custom LRC text as manual cached lyrics', async () => {
-    const { service } = createHarness();
+    const { database, service } = createHarness();
 
     const lyrics = await service.applyCustomLrc(
       'track-1',
@@ -1470,6 +1827,9 @@ describe('LyricsService', () => {
       'custom.lrc',
     );
     const cached = await service.getLyricsForTrack('track-1');
+    const cachePolicy = database.prepare<[], { acceptance_origin: string; match_policy_version: number }>(
+      'SELECT acceptance_origin, match_policy_version FROM lyrics_cache LIMIT 1',
+    ).get();
 
     expect(lyrics.provider).toBe('manual');
     expect(lyrics.kind).toBe('synced');
@@ -1479,6 +1839,7 @@ describe('LyricsService', () => {
     ]);
     expect(cached?.provider).toBe('manual');
     expect(cached?.lines[0].text).toBe('Custom first');
+    expect(cachePolicy).toEqual({ acceptance_origin: 'manual', match_policy_version: 3 });
   });
 
   it('queues cached synced lyrics for worker embedding', async () => {

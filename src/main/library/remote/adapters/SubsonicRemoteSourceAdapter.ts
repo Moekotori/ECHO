@@ -18,6 +18,7 @@ import type {
   RemoteStreamInput,
 } from '../remoteTypes';
 import { remoteUrlHashFor, sha1Hex } from '../remoteIdentity';
+import { fetchWithNetworkProxy } from '../../../network/networkFetch';
 
 type SubsonicResponse<T> = {
   'subsonic-response'?: {
@@ -52,6 +53,14 @@ type SubsonicSong = {
 type SubsonicAlbum = {
   id?: string;
   name?: string;
+  title?: string;
+  artist?: string;
+  coverArt?: string;
+  songCount?: number;
+  duration?: number;
+  created?: string;
+  year?: number;
+  genre?: string;
   song?: SubsonicSong[];
 };
 
@@ -69,6 +78,8 @@ const provider: RemoteSourceProvider = 'subsonic';
 const defaultApiVersion = '1.16.1';
 const defaultClientName = 'ECHO-Next';
 const maxCoverBytes = 4 * 1024 * 1024;
+const albumCacheNamespace = 'subsonic-album-detail-v1';
+const defaultAlbumFullRefreshDays = 7;
 const subsonicRequestLimiter = new class {
   private active = 0;
   private readonly queue: Array<QueuedRequest<unknown>> = [];
@@ -148,12 +159,35 @@ const clampCoverSize = (value: unknown, fallback = 512): number => {
 };
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const timeoutSignal = (timeoutMs: number, signal?: AbortSignal): AbortSignal => {
+class SubsonicServerScanActiveError extends Error {}
+
+const timeoutSignal = (timeoutMs: number, signal?: AbortSignal): { signal: AbortSignal; dispose: () => void } => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   timer.unref?.();
-  signal?.addEventListener('abort', () => controller.abort(), { once: true });
-  return controller.signal;
+  const onAbort = (): void => controller.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  return { signal: controller.signal, dispose: () => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); } };
+};
+
+const readBodyWithLimit = async (response: Response, limit: number): Promise<Uint8Array | null> => {
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) { await reader.cancel('response body exceeds limit'); return null; }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const result = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength; }
+  return result;
 };
 
 const baseUrlFor = (value: string | null): string => {
@@ -222,6 +256,7 @@ export class SubsonicRemoteSourceAdapter implements RemoteSourceAdapter {
   }
 
   async *scan(input: RemoteScanInput): AsyncGenerator<RemoteScanItem> {
+    await this.ensureServerScanIdle(input);
     const configuredFolderIds = Array.isArray(input.source.config.musicFolderIds)
       ? input.source.config.musicFolderIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
       : [undefined];
@@ -284,19 +319,22 @@ export class SubsonicRemoteSourceAdapter implements RemoteSourceAdapter {
     const url = this.buildUrl(input, '/rest/getCoverArt.view', { id, size: String(clampCoverSize(input.size)) });
     const response = await this.fetch(input, url, 8000);
     if (response.status === 404) {
+      await response.body?.cancel();
       return this.emptyCover('cover_not_found');
     }
     if (!response.ok) {
+      await response.body?.cancel();
       return { ...this.emptyCover('cover_read_failed'), errors: [`Subsonic 封面请求失败：HTTP ${response.status}`] };
     }
 
     const mimeType = response.headers.get('content-type');
     if (mimeType && !mimeType.toLocaleLowerCase().startsWith('image/')) {
+      await response.body?.cancel();
       return { ...this.emptyCover('cover_read_failed'), errors: ['Subsonic cover returned a non-image response.'] };
     }
 
-    const data = new Uint8Array(await response.arrayBuffer());
-    if (data.byteLength > maxCoverBytes) {
+    const data = await readBodyWithLimit(response, maxCoverBytes);
+    if (!data) {
       return { ...this.emptyCover('cover_read_failed'), errors: ['Subsonic cover response is too large.'] };
     }
 
@@ -313,7 +351,7 @@ export class SubsonicRemoteSourceAdapter implements RemoteSourceAdapter {
   createProxyRequest(input: RemoteStreamInput): { url: string; headers: Record<string, string> } {
     const id = parseSongId(input.remotePath);
     return {
-      url: this.buildUrl(input, '/rest/stream.view', { id }),
+      url: this.buildUrl(input, '/rest/stream.view', { id, format: 'raw', maxBitRate: '0' }),
       headers: {},
     };
   }
@@ -331,14 +369,32 @@ export class SubsonicRemoteSourceAdapter implements RemoteSourceAdapter {
       return null;
     }
 
+    const fingerprint = this.albumSummaryFingerprint(album);
+    const cached = input.scanCache?.get(albumCacheNamespace, albumId) ?? null;
+    const cachedAlbum = this.parseCachedAlbum(cached?.payload);
+    const refreshDays = clampInt(input.source.config.albumFullRefreshDays, defaultAlbumFullRefreshDays, 1, 30);
+    const verifiedAtMs = cached?.verifiedAt ? Date.parse(cached.verifiedAt) : Number.NaN;
+    if (
+      cachedAlbum &&
+      cached?.fingerprint === fingerprint &&
+      Number.isFinite(verifiedAtMs) &&
+      Date.now() - verifiedAtMs < refreshDays * 24 * 60 * 60 * 1000
+    ) {
+      return cachedAlbum;
+    }
+
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const detail = await this.request<{ album?: SubsonicAlbum }>(input, '/rest/getAlbum.view', { id: albumId });
-        return detail.album ? { ...detail.album, id: cleanText(detail.album.id) ?? albumId } : null;
+        const normalized = detail.album ? { ...detail.album, id: cleanText(detail.album.id) ?? albumId } : null;
+        if (normalized) {
+          input.scanCache?.set(albumCacheNamespace, albumId, fingerprint, JSON.stringify(normalized));
+        }
+        return normalized;
       } catch (error) {
         if (input.signal?.aborted || attempt === 1) {
           input.onError?.(`subsonic:album:${albumId}`, error instanceof Error ? error : new Error(String(error)));
-          return null;
+          return cachedAlbum;
         }
 
         await delay(250);
@@ -346,6 +402,47 @@ export class SubsonicRemoteSourceAdapter implements RemoteSourceAdapter {
     }
 
     return null;
+  }
+
+  private async ensureServerScanIdle(input: RemoteScanInput): Promise<void> {
+    try {
+      const response = await this.request<{ scanStatus?: { scanning?: boolean } }>(input, '/rest/getScanStatus.view');
+      if (response.scanStatus?.scanning) {
+        throw new SubsonicServerScanActiveError('Subsonic / Navidrome 正在扫描媒体库，请在服务器扫描完成后重试。');
+      }
+    } catch (error) {
+      if (error instanceof SubsonicServerScanActiveError) {
+        throw error;
+      }
+      // Older Subsonic-compatible servers may not implement getScanStatus.
+    }
+  }
+
+  private albumSummaryFingerprint(album: SubsonicAlbum): string {
+    return sha1Hex(JSON.stringify({
+      id: album.id,
+      name: album.name,
+      title: album.title,
+      artist: album.artist,
+      coverArt: album.coverArt,
+      songCount: album.songCount,
+      duration: album.duration,
+      created: album.created,
+      year: album.year,
+      genre: album.genre,
+    }));
+  }
+
+  private parseCachedAlbum(payload: string | undefined): SubsonicAlbum | null {
+    if (!payload) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(payload) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as SubsonicAlbum : null;
+    } catch {
+      return null;
+    }
   }
 
   private async request<T>(input: RemoteAdapterInput, path: string, params: Record<string, string> = {}): Promise<T> {
@@ -366,10 +463,14 @@ export class SubsonicRemoteSourceAdapter implements RemoteSourceAdapter {
   }
 
   private fetch(input: RemoteAdapterInput, url: string, timeoutMs: number): Promise<Response> {
-    return subsonicRequestLimiter.run(() =>
-      fetch(url, {
-        signal: timeoutSignal(timeoutMs, input.signal),
-      }), input.signal);
+    return subsonicRequestLimiter.run(async () => {
+      const deadline = timeoutSignal(timeoutMs, input.signal);
+      try {
+        return await fetchWithNetworkProxy(url, { signal: deadline.signal });
+      } finally {
+        deadline.dispose();
+      }
+    }, input.signal);
   }
 
   private buildUrl(input: Pick<RemoteAdapterInput, 'source'>, path: string, params: Record<string, string> = {}): string {

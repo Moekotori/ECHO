@@ -1,0 +1,152 @@
+/* The primary play action is the only shaped control in the main player transport. */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-transport-shell {
+  gap: 10px;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport {
+  gap: 8px;
+  padding-inline: 2px;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control {
+  width: 38px !important;
+  height: 38px !important;
+  color: color-mix(in srgb, var(--theme-muted-text) 88%, var(--theme-heading-text)) !important;
+  border: 0 !important;
+  border-radius: 9px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button::before,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control::before {
+  display: none !important;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button::after {
+  right: auto !important;
+  bottom: 0 !important;
+  left: 50% !important;
+  width: 12px !important;
+  height: 2px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: currentColor !important;
+  box-shadow: none !important;
+  opacity: 0 !important;
+  transform: translateX(-50%) scaleX(0.45) !important;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:hover,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:focus-visible,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control:hover,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control:focus-visible,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control[aria-expanded='true'] {
+  color: var(--theme-heading-text) !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--theme-accent-bg) 54%, transparent) !important;
+  box-shadow: none !important;
+  transform: translateY(-1px);
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button.is-soft-active,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button[aria-pressed='true'] {
+  color: var(--theme-accent-text-strong) !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button.is-soft-active::after,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button[aria-pressed='true']::after {
+  opacity: 0.72 !important;
+  transform: translateX(-50%) scaleX(1) !important;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button > svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.8;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .transport-skip-button {
+  width: 40px !important;
+  height: 40px !important;
+  color: color-mix(in srgb, var(--theme-heading-text) 78%, var(--theme-muted-text)) !important;
+  border: 0 !important;
+  border-radius: 9px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .transport-skip-button > svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.9;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport-shuffle-button {
+  margin-left: 10px;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport-repeat-button {
+  margin-right: 10px;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport-lyrics-button {
+  margin-left: 0;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport-media-button {
+  color: color-mix(in srgb, var(--theme-muted-text) 78%, var(--theme-accent-text-strong)) !important;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control__mark {
+  width: 22px;
+  height: 22px;
+  color: color-mix(in srgb, var(--theme-muted-text) 72%, var(--theme-accent-text-strong));
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control__mark > svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.8;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control__status-dot {
+  right: 5px;
+  bottom: 5px;
+  width: 5px;
+  height: 5px;
+  border-width: 1px;
+  box-shadow: none;
+}
+
+/* Keep theme-specific rules from restoring circular frames around transport glyphs. */
+html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button,
+html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button,
+html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:hover,
+html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:focus-visible,
+html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:hover,
+html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:focus-visible,
+html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:hover,
+html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:focus-visible {
+  border: 0 !important;
+  background: color-mix(in srgb, var(--theme-accent-bg) 54%, transparent) !important;
+  box-shadow: none !important;
+}
+
+html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:disabled,
+html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:disabled,
+html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:disabled {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}

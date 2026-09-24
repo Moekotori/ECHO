@@ -9,6 +9,7 @@ type InfiniteScrollSentinelProps = {
 };
 
 export const getPageScrollContainer = (element: Element | null): HTMLElement | null =>
+  (element?.closest('[data-infinite-scroll-root="true"]') as HTMLElement | null) ??
   (element?.closest('.page-scroll-container') as HTMLElement | null) ??
   (element?.closest('.page-surface') as HTMLElement | null) ??
   null;

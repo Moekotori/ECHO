@@ -114,7 +114,7 @@ const installLibrary = (
       openLocalAudioFile: vi.fn(),
     },
     audio: {
-      getStatus: vi.fn(),
+      getStatus: vi.fn().mockResolvedValue(null),
       listDevices: vi.fn(),
       setOutput: vi.fn(),
     },
@@ -230,6 +230,30 @@ describe('AlbumsPage', () => {
     await waitFor(() => expect(getAlbums).toHaveBeenCalledTimes(1));
     expect(getAlbums).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 90, search: '', sort: 'default' }));
     expect(getTracks).not.toHaveBeenCalled();
+  });
+
+  it('keeps the stable grid while a hidden virtualized wall has no measurable width', async () => {
+    const getAlbums = vi.fn().mockResolvedValue(page([album('1'), album('2')]));
+    let resolveSettings!: (settings: { albumWallVirtualizationEnabled: boolean }) => void;
+    const settingsPromise = new Promise<{ albumWallVirtualizationEnabled: boolean }>((resolve) => {
+      resolveSettings = resolve;
+    });
+    installLibrary(getAlbums);
+    Object.assign(window.echo!, {
+      app: {
+        getSettings: vi.fn().mockReturnValue(settingsPromise),
+      },
+    });
+
+    const { container } = renderAlbumsPage();
+
+    await screen.findByText('Album 1');
+    await act(async () => {
+      resolveSettings({ albumWallVirtualizationEnabled: true });
+      await settingsPromise;
+    });
+    expect(container.querySelector('.album-wall--virtualized')).toBeNull();
+    expect(container.querySelectorAll('.album-wall > .album-card')).toHaveLength(2);
   });
 
   it('does not list remote sources while opening the local albums page', async () => {
@@ -397,6 +421,30 @@ describe('AlbumsPage', () => {
     expect(getAlbums).toHaveBeenNthCalledWith(3, expect.objectContaining({ page: 1, pageSize: 90, search: 'search', sort: 'artist' }));
   });
 
+  it('offers album discovery sorts and sends the selected sort to the paged query', async () => {
+    const getAlbums = vi
+      .fn()
+      .mockResolvedValueOnce(page([album('1')]))
+      .mockResolvedValueOnce(page([album('year-sort')]));
+    installLibrary(getAlbums);
+
+    renderAlbumsPage();
+    await waitFor(() => expect(getAlbums).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /默认|Default/ }));
+    expect(screen.getByText(/常规|General/)).toBeTruthy();
+    expect(screen.getByText(/聆听|Listening/)).toBeTruthy();
+    expect(screen.getByText(/曲库|Library/)).toBeTruthy();
+    expect(screen.getByRole('option', { name: /发行年份最新|Release year, newest/ })).toBeTruthy();
+    expect(screen.getByRole('option', { name: /最近播放|Recently played/ })).toBeTruthy();
+    expect(screen.getByRole('option', { name: /播放次数最多|Most played/ })).toBeTruthy();
+    expect(screen.getByRole('option', { name: /曲目数量最多|Most tracks/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('option', { name: /发行年份最新|Release year, newest/ }));
+    await waitFor(() => expect(getAlbums).toHaveBeenCalledTimes(2));
+    expect(getAlbums).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: 90, sort: 'yearDesc' }));
+  });
+
   it('search and sort reset the album wall scroll position', async () => {
     const getAlbums = vi
       .fn()
@@ -502,6 +550,26 @@ describe('AlbumsPage', () => {
 
     await waitFor(() => expect(getAlbums).toHaveBeenCalledTimes(2));
     expect(screen.getByText('Album fresh')).toBeTruthy();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(outerPageSurface.scrollTop).toBe(640);
+  });
+
+  it('does not reset album detail scroll when the hidden album wall refreshes', async () => {
+    const getAlbums = vi.fn().mockResolvedValue(page([album('1')], { page: 1, total: 1, hasMore: false }));
+    installLibrary(getAlbums);
+
+    const { container } = renderAlbumsPage();
+    await screen.findByText('Album 1');
+    fireEvent.click(screen.getByText('Album 1'));
+    await screen.findByLabelText('Album 1 album details');
+
+    const outerPageSurface = container.querySelector('.page-surface') as HTMLElement;
+    setScrollablePageSurface(outerPageSurface);
+    outerPageSurface.scrollTop = 640;
+
+    window.dispatchEvent(new CustomEvent('library:changed', { detail: { preserveScroll: true } }));
+
+    await waitFor(() => expect(getAlbums.mock.calls.length).toBeGreaterThanOrEqual(2));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(outerPageSurface.scrollTop).toBe(640);
   });
@@ -772,7 +840,15 @@ describe('AlbumsPage', () => {
       .fn()
       .mockResolvedValueOnce(page([album('1', { trackCount: 2 })]))
       .mockResolvedValueOnce(page([]));
-    const deleteAlbumFiles = vi.fn().mockResolvedValue(undefined);
+    const deleteAlbumFiles = vi.fn().mockResolvedValue({
+      items: [{
+        physicalPath: 'D:\\Music\\Album 1',
+        trackIds: ['track-1', 'track-2'],
+        status: 'success',
+        cueSharedSource: false,
+      }],
+      removedTrackIds: ['track-1', 'track-2'],
+    });
     installLibrary(getAlbums);
     window.echo.library.deleteAlbumFiles = deleteAlbumFiles;
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -793,7 +869,15 @@ describe('AlbumsPage', () => {
       .fn()
       .mockResolvedValueOnce(page([album('1', { trackCount: 2 })]))
       .mockResolvedValueOnce(page([]));
-    const deleteAlbumFiles = vi.fn().mockResolvedValue(undefined);
+    const deleteAlbumFiles = vi.fn().mockResolvedValue({
+      items: [{
+        physicalPath: 'D:\\Music\\Album 1',
+        trackIds: ['track-1', 'track-2'],
+        status: 'success',
+        cueSharedSource: false,
+      }],
+      removedTrackIds: ['track-1', 'track-2'],
+    });
     installLibrary(getAlbums);
     window.echo.library.deleteAlbumFiles = deleteAlbumFiles;
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -829,7 +913,7 @@ describe('AlbumsPage', () => {
     await screen.findByLabelText('Album 1 album details');
     expect(container.querySelector('.album-cover img')).toBe(wallImage);
     expect(getAlbumTracks).toHaveBeenCalledWith('1', { page: 1, pageSize: 100 });
-    expect(container.querySelector('.album-detail-cover img')?.getAttribute('src')).toBe('echo-cover://original/cover-1');
+    expect(container.querySelector('.album-detail-cover img')?.getAttribute('src')).toBe('echo-cover://large/cover-1');
 
     fireEvent.click(screen.getByRole('listitem'));
     await waitFor(() => expect(window.echo.playback.playLocalFile).toHaveBeenCalledWith(

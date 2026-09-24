@@ -25,7 +25,7 @@ type SleepTimerPopoverProps = {
  * 样式由外部 `.sleep-timer-popover` CSS 类控制（定义在 app.css）
  */
 export const SleepTimerPopover = forwardRef<HTMLDivElement, SleepTimerPopoverProps>(
-  ({ onClose, isVisible }, ref): JSX.Element => {
+  ({ onClose: _onClose, isVisible }, ref): JSX.Element => {
   const { t } = useI18n();
   const [status, setStatus] = useState<SleepTimerStatus | null>(null);
   const [selectedAction, setSelectedAction] = useState<SleepTimerAction>('pause');
@@ -125,12 +125,19 @@ export const SleepTimerPopover = forwardRef<HTMLDivElement, SleepTimerPopoverPro
           </div>
 
           {/* 渐弱开关 */}
-          <label className="st-fade-row">
+          <div className="st-fade-row">
             <span className="st-label">{t('sleepTimer.fadeOut.label')}</span>
-            <div className={`st-toggle ${fadeOutEnabled ? 'is-on' : ''}`} onClick={() => setFadeOutEnabled((prev) => !prev)}>
-              <span className="st-toggle-knob" />
-            </div>
-          </label>
+            <button
+              className={`st-toggle ${fadeOutEnabled ? 'is-on' : ''}`}
+              type="button"
+              role="switch"
+              aria-checked={fadeOutEnabled}
+              aria-label={t('sleepTimer.fadeOut.label')}
+              onClick={() => setFadeOutEnabled((prev) => !prev)}
+            >
+              <span className="st-toggle-knob" aria-hidden="true" />
+            </button>
+          </div>
 
           {/* 预设时长网格 */}
           <div className="st-preset-grid">

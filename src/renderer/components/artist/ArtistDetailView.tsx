@@ -1,4 +1,5 @@
 import { startTransition, type KeyboardEvent, type MouseEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import '../../styles/artist-detail.css';
 import { ArrowLeft, ChevronDown, Disc3, Download, ExternalLink, ListPlus, Play, RefreshCw, Shuffle } from 'lucide-react';
 import { defaultArtistStreamingAlbumsProvider, type AppSettings, type ArtistStreamingAlbumsProvider } from '../../../shared/types/appSettings';
 import type { DownloadJob, DownloadJobStatus } from '../../../shared/types/downloads';
@@ -19,6 +20,7 @@ import { useI18n } from '../../i18n/I18nProvider';
 import { readStreamingQualityPreference } from '../../preferences/streamingQualityPreference';
 import { isPlaybackCancellationError, usePlaybackQueue } from '../../stores/PlaybackQueueProvider';
 import { requestArtistDetailNavigation } from '../../utils/artistNavigation';
+import { localCoverDisplayUrl } from '../../utils/coverDisplayUrl';
 import { AlbumDetailView } from '../album/AlbumDetailView';
 import { readPageScrollTop, writePageScrollTop } from '../ui/InfiniteScrollSentinel';
 import { ArtistAlbumGrid } from './ArtistAlbumGrid';
@@ -791,7 +793,7 @@ export const ArtistDetailView = ({ artist, onBack }: ArtistDetailViewProps): JSX
   const source = useMemo(() => ({ type: 'artist' as const, label: artist.name, artistId: artist.id }), [artist.id, artist.name]);
   const displayArtist = verifiedArtist?.id === artist.id ? verifiedArtist : artist;
   const displayedTrackCount = Math.max(displayArtist.trackCount, loadedTrackTotal);
-  const heroImageUrl = displayArtist.avatarUrl ?? (displayArtist.coverId ? `echo-cover://original/${encodeURIComponent(displayArtist.coverId)}` : null);
+  const heroImageUrl = displayArtist.avatarUrl ?? localCoverDisplayUrl(displayArtist.coverId);
   const shouldShowHeroImage = Boolean(heroImageUrl && failedHeroImageUrl !== heroImageUrl);
   const selectedStreamingAlbumTrackRenderLimit = useProgressiveRenderLimit({
     identityKey: selectedStreamingAlbumDetail?.id ?? selectedStreamingAlbum?.id ?? null,
@@ -1462,6 +1464,7 @@ export const ArtistDetailView = ({ artist, onBack }: ArtistDetailViewProps): JSX
     const albumSubdirectory = [detail.artist, detail.title].filter(Boolean).join(' - ') || detail.title;
     let queuedCount = 0;
     let failedToQueueCount = 0;
+    let lastQueueError: string | null = null;
 
     setStreamingAlbumDetailError(null);
     setStreamingAlbumDownload({
@@ -1531,12 +1534,13 @@ export const ArtistDetailView = ({ artist, onBack }: ArtistDetailViewProps): JSX
         );
       } catch (error) {
         failedToQueueCount += 1;
+        lastQueueError = error instanceof Error ? error.message : '添加专辑下载任务失败';
         setStreamingAlbumDownload((current) =>
           current?.albumId === detail.id
             ? { ...current, failedToQueue: failedToQueueCount }
             : current,
         );
-        setStreamingAlbumDetailError(error instanceof Error ? error.message : '添加专辑下载任务失败');
+        setStreamingAlbumDetailError(lastQueueError);
       }
 
       await sleep(streamingAlbumDownloadQueueYieldMs);
@@ -1546,7 +1550,9 @@ export const ArtistDetailView = ({ artist, onBack }: ArtistDetailViewProps): JSX
       return;
     }
 
-    const finalNotice = failedToQueueCount > 0
+    const finalNotice = queuedCount === 0
+      ? `专辑下载未能加入队列：${detail.title}${lastQueueError ? `。${lastQueueError}` : ''}`
+      : failedToQueueCount > 0
       ? `专辑已加入下载队列：${detail.title}，成功 ${queuedCount}/${downloadableTracks.length}，失败 ${failedToQueueCount}`
       : `专辑已加入下载队列：${detail.title}（${queuedCount}/${downloadableTracks.length}）`;
     showChromeNotice(finalNotice);

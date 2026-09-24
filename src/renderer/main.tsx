@@ -1,51 +1,25 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { dismissStartupOverlayAfterStablePaint } from './startupOverlay';
 import type { Root } from 'react-dom/client';
 import { AlertTriangle, Download, FileText, Power, RefreshCw, RotateCcw, ShieldCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import '@fontsource/outfit/400.css';
-import '@fontsource/outfit/500.css';
-import '@fontsource/outfit/600.css';
-import '@fontsource/outfit/700.css';
-import '@fontsource/outfit/800.css';
-import '@fontsource/outfit/900.css';
-import { App } from './app/App';
-import { DesktopLyricsApp } from './desktop-lyrics/DesktopLyricsApp';
-import { I18nProvider } from './i18n/I18nProvider';
-import { MiniPlayerApp } from './mini-player/MiniPlayerApp';
-import { startPerformanceStallMonitor } from './diagnostics/performanceStallMonitor';
-import { startMemoryInteractionDiagnostics } from './diagnostics/memoryInteractionDiagnostics';
+import { I18nProvider, translateCurrentLocale } from './i18n/I18nProvider';
+import type { TranslationKey } from './i18n/locales';
+import { shouldStartHeavyRendererDiagnostics } from './diagnostics/rendererDiagnosticsMode';
 import {
   applyAppearancePreferences,
   loadPersistedAppearancePreferences,
   readAppearancePreferences,
   registerAppearanceFontFile,
 } from './preferences/appearancePreferences';
+import {
+  applyAccessibilityPreferences,
+  defaultAccessibilityPreferences,
+} from './preferences/accessibilityPreferences';
 import { applyThemeMode, loadPersistedThemeMode, readThemeMode, watchSystemThemeMode, watchThemeSettings } from './preferences/themePreferences';
 import type { AppearancePreferences, AppSettings } from '../shared/types/appSettings';
-import { PlaybackQueueProvider } from './stores/PlaybackQueueProvider';
 import { getAppBridge } from './utils/echoBridge';
-import './styles/tokens.css';
-import './styles/theme.css';
-import './styles/layout.css';
-import './styles/motion.css';
-import './styles/app.css';
-import './styles/songs.css';
-import './styles/folders.css';
-import './styles/audio-cd.css';
-import './styles/home.css';
-import './styles/dsp.css';
-import './styles/eq.css';
-import './styles/album-detail.css';
-import './styles/artist-detail.css';
-import './styles/queue.css';
-import './styles/lyrics.css';
-import './styles/legacy-theme-bridge.css';
-import './styles/ui-polish.css';
-import './styles/theme-presets.css';
-import './styles/desktop-lyrics.css';
-import './styles/mini-player.css';
-import './styles/scrollbars.css';
 
 declare global {
   interface Window {
@@ -56,9 +30,15 @@ declare global {
 const appearancePreferences = readAppearancePreferences();
 const themeMode = readThemeMode();
 const appBridge = getAppBridge();
+const heavyRendererDiagnosticsEnabled = shouldStartHeavyRendererDiagnostics();
 applyThemeMode(themeMode);
 applyAppearancePreferences(appearancePreferences);
-startMemoryInteractionDiagnostics();
+applyAccessibilityPreferences(defaultAccessibilityPreferences);
+if (heavyRendererDiagnosticsEnabled) {
+  void import('./diagnostics/memoryInteractionDiagnostics')
+    .then(({ startMemoryInteractionDiagnostics }) => startMemoryInteractionDiagnostics())
+    .catch(() => undefined);
+}
 
 const loadAppearanceFontFiles = (preferences: AppearancePreferences): void => {
   if (preferences.mainFontFilePath && appBridge) {
@@ -124,18 +104,21 @@ type CrashGuardStepItem = {
   title: string;
 };
 
-const crashGuardSteps: CrashGuardStepItem[] = [
+const crashT = (key: TranslationKey, options?: Record<string, string | number>): string =>
+  translateCurrentLocale(key, options);
+
+const buildCrashGuardSteps = (): CrashGuardStepItem[] => [
   {
-    title: '先导出诊断包',
-    description: '保留日志、窗口状态和错误栈，后续排查最有用。',
+    title: crashT('crashGuard.step.export.title'),
+    description: crashT('crashGuard.step.export.description'),
   },
   {
-    title: '再打开崩溃报告',
-    description: '把报告给开发者或 AI 看，通常比反复重启更快定位。',
+    title: crashT('crashGuard.step.report.title'),
+    description: crashT('crashGuard.step.report.description'),
   },
   {
-    title: '最后再重载或重启',
-    description: '如果只是一次临时状态抖动，重载界面可能就能恢复。',
+    title: crashT('crashGuard.step.reload.title'),
+    description: crashT('crashGuard.step.reload.description'),
   },
 ];
 
@@ -145,50 +128,50 @@ const crashGuardActionButtonStyleByVariant = (
 ): React.CSSProperties => {
   const baseStyle: React.CSSProperties = {
     minHeight: 44,
-    minWidth: 136,
+    minWidth: 142,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    border: '1px solid rgba(29, 78, 216, 0.16)',
-    borderRadius: 8,
+    border: '1px solid #343b47',
+    borderRadius: 7,
     padding: '0 15px',
-    color: '#17324d',
-    background: '#ffffff',
+    color: '#f3f5f7',
+    background: '#11151a',
     font: 'inherit',
     fontSize: 14,
     fontWeight: 800,
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.5 : 1,
-    boxShadow: '0 10px 22px rgba(39, 65, 91, 0.08)',
-    transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease',
+    boxShadow: 'none',
+    transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease, color 160ms ease',
   };
 
   if (variant === 'primary') {
     return {
       ...baseStyle,
-      borderColor: '#0f766e',
+      borderColor: '#7186b8',
       color: '#ffffff',
-      background: 'linear-gradient(135deg, #0f766e 0%, #12817a 100%)',
-      boxShadow: '0 16px 34px rgba(15, 118, 110, 0.24)',
+      background: '#7186b8',
+      boxShadow: '0 10px 28px rgba(113, 134, 184, 0.2)',
     };
   }
 
   if (variant === 'danger') {
     return {
       ...baseStyle,
-      borderColor: '#b42318',
-      color: '#ffffff',
-      background: '#b42318',
-      boxShadow: '0 16px 28px rgba(180, 35, 24, 0.2)',
+      borderColor: 'rgba(225, 88, 88, 0.76)',
+      color: '#ef6b6b',
+      background: 'rgba(225, 88, 88, 0.04)',
+      boxShadow: 'none',
     };
   }
 
   if (variant === 'quiet') {
     return {
       ...baseStyle,
-      color: '#53606f',
-      background: '#f8fafc',
+      color: '#a3aab5',
+      background: '#0f1217',
       boxShadow: 'none',
     };
   }
@@ -231,8 +214,8 @@ const CrashGuardStep = ({ description, index, title }: CrashGuardStepItem & { in
 
 const crashGuardMotionCss = `
 @keyframes echoCrashGuardPanelIn {
-  from { opacity: 0; transform: translateY(18px) scale(0.985); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes echoCrashGuardFadeUp {
@@ -241,22 +224,22 @@ const crashGuardMotionCss = `
 }
 
 @keyframes echoCrashGuardBreathe {
-  0%, 100% { transform: scale(1); box-shadow: 0 18px 44px rgba(15, 118, 110, 0.18); }
-  50% { transform: scale(1.035); box-shadow: 0 22px 54px rgba(15, 118, 110, 0.26); }
+  0%, 100% { color: #7186b8; border-color: #343b47; }
+  50% { color: #8fa5d6; border-color: #4b5872; }
 }
 
 @keyframes echoCrashGuardRing {
-  0% { opacity: 0.42; transform: scale(0.82); }
-  70%, 100% { opacity: 0; transform: scale(1.55); }
+  0% { opacity: 0.32; transform: scale(0.88); }
+  70%, 100% { opacity: 0; transform: scale(1.34); }
 }
 
 @keyframes echoCrashGuardScan {
-  from { transform: translateX(-38%); }
-  to { transform: translateX(118%); }
+  from { transform: scaleX(0.18); opacity: 0.55; }
+  to { transform: scaleX(1); opacity: 1; }
 }
 
 .echo-crash-guard-panel {
-  animation: echoCrashGuardPanelIn 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: echoCrashGuardPanelIn 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .echo-crash-guard-hero,
@@ -286,15 +269,24 @@ const crashGuardMotionCss = `
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
-  width: 42%;
+  width: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, transparent, rgba(15, 118, 110, 0.24), transparent);
-  animation: echoCrashGuardScan 2600ms ease-in-out infinite;
+  background: #7186b8;
+  transform-origin: left center;
+  animation: echoCrashGuardScan 900ms 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .echo-crash-guard-action:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 16px 30px rgba(39, 65, 91, 0.12);
+  border-color: #7186b8;
+  background: #171c24;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.echo-crash-guard-action:focus-visible,
+.echo-crash-guard-step:focus-within {
+  outline: 2px solid #8fa5d6;
+  outline-offset: 3px;
 }
 
 .echo-crash-guard-action:not(:disabled):active {
@@ -314,6 +306,19 @@ const crashGuardMotionCss = `
 
   .echo-crash-guard-action {
     transition: none !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .echo-crash-guard-body {
+    grid-template-columns: 1fr !important;
+  }
+
+  .echo-crash-guard-rail {
+    min-height: auto !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid #292f38;
+    padding: 0 0 32px !important;
   }
 }
 `;
@@ -345,10 +350,14 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
   };
 
   private exportDiagnostics = (): void => {
-    this.setActionMessage('正在准备诊断包...');
+    this.setActionMessage(crashT('crashGuard.action.exporting'));
     void window.echo?.diagnostics.exportDiagnosticsZip()
       .then((outputPath) => {
-        this.setActionMessage(outputPath ? `诊断包已导出: ${outputPath}` : '已取消导出。');
+        this.setActionMessage(
+          outputPath
+            ? crashT('crashGuard.action.exported', { path: outputPath })
+            : crashT('crashGuard.action.exportCancelled'),
+        );
       })
       .catch((error) => {
         this.setActionMessage(error instanceof Error ? error.message : String(error));
@@ -356,10 +365,14 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
   };
 
   private openCrashReport = (): void => {
-    this.setActionMessage('正在打开崩溃报告...');
+    this.setActionMessage(crashT('crashGuard.action.openingReport'));
     void window.echo?.diagnostics.openCrashReport()
       .then((outputPath) => {
-        this.setActionMessage(outputPath ? `已打开崩溃报告: ${outputPath}` : '未找到崩溃报告。');
+        this.setActionMessage(
+          outputPath
+            ? crashT('crashGuard.action.openedReport', { path: outputPath })
+            : crashT('crashGuard.action.reportMissing'),
+        );
       })
       .catch((error) => {
         this.setActionMessage(error instanceof Error ? error.message : String(error));
@@ -367,14 +380,14 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
   };
 
   private restartApp = (): void => {
-    this.setActionMessage('已请求重启 ECHO。若再次回到这里，请优先导出诊断包。');
+    this.setActionMessage(crashT('crashGuard.action.restartRequested'));
     void window.echo?.diagnostics.relaunchApp().catch((error) => {
       this.setActionMessage(error instanceof Error ? error.message : String(error));
     });
   };
 
   private quitApp = (): void => {
-    this.setActionMessage('正在关闭 ECHO...');
+    this.setActionMessage(crashT('crashGuard.action.quitting'));
     void window.echo?.app.quit().catch((error) => {
       this.setActionMessage(error instanceof Error ? error.message : String(error));
     });
@@ -391,15 +404,24 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
 
     const diagnosticsAvailable = Boolean(window.echo?.diagnostics);
     const appControlsAvailable = Boolean(window.echo?.app);
-    const bridgeStatus = diagnosticsAvailable ? '诊断桥在线' : '诊断桥不可用';
-    const bridgeHint = diagnosticsAvailable ? '可以导出诊断包' : '请先截图或手动重启';
+    const bridgeStatus = diagnosticsAvailable
+      ? crashT('crashGuard.bridge.online')
+      : crashT('crashGuard.bridge.offline');
+    const bridgeHint = diagnosticsAvailable
+      ? crashT('crashGuard.bridge.hintOnline')
+      : crashT('crashGuard.bridge.hintOffline');
     const statusMessage = this.state.actionMessage
-      || (diagnosticsAvailable ? '建议先导出诊断包，再打开报告；这些信息不会自动上传。' : '诊断桥不可用，请先截图保留这一页，再手动重启 ECHO。');
+      || (diagnosticsAvailable
+        ? crashT('crashGuard.status.defaultOnline')
+        : crashT('crashGuard.status.defaultOffline'));
     const windowLabel = this.props.label === 'main-window'
-      ? '主窗口'
+      ? crashT('crashGuard.window.main')
       : this.props.label === 'mini-player'
-        ? '迷你播放器'
-        : '桌面歌词';
+        ? crashT('crashGuard.window.miniPlayer')
+        : this.props.label === 'pet'
+          ? crashT('crashGuard.window.pet')
+          : crashT('crashGuard.window.desktopLyrics');
+    const crashGuardSteps = buildCrashGuardSteps();
 
     return (
       <main style={crashGuardShellStyle}>
@@ -412,13 +434,13 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
               </span>
               <div>
                 <p style={crashGuardEyebrowStyle}>ECHO Next</p>
-                <strong style={crashGuardBrandTitleStyle}>界面保护模式</strong>
+                <strong style={crashGuardBrandTitleStyle}>{crashT('crashGuard.brandTitle')}</strong>
               </div>
             </div>
             <span style={crashGuardChipStyle}>{bridgeStatus}</span>
           </div>
-          <div style={crashGuardBodyStyle}>
-            <aside className="echo-crash-guard-hero" style={crashGuardRailStyle}>
+          <div className="echo-crash-guard-body" style={crashGuardBodyStyle}>
+            <aside className="echo-crash-guard-hero echo-crash-guard-rail" style={crashGuardRailStyle}>
               <div style={crashGuardBeaconWrapStyle}>
                 <div className="echo-crash-guard-beacon" style={crashGuardWarningPlateStyle}>
                   <span className="echo-crash-guard-beacon-ring" style={crashGuardBeaconRingStyle} />
@@ -426,33 +448,33 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
                   <AlertTriangle size={38} strokeWidth={2.25} aria-hidden="true" />
                 </div>
                 <div>
-                  <p style={crashGuardRailKickerStyle}>已拦截一次界面错误</p>
-                  <strong style={crashGuardRailTitleStyle}>ECHO 还在，先把现场留下来。</strong>
+                  <p style={crashGuardRailKickerStyle}>{crashT('crashGuard.rail.kicker')}</p>
+                  <strong style={crashGuardRailTitleStyle}>{crashT('crashGuard.rail.title')}</strong>
                 </div>
               </div>
               <div className="echo-crash-guard-scan" style={crashGuardScanStyle} aria-hidden="true" />
               <dl style={crashGuardMetaListStyle}>
                 <div style={crashGuardMetaItemStyle}>
-                  <dt style={crashGuardMetaTermStyle}>窗口</dt>
+                  <dt style={crashGuardMetaTermStyle}>{crashT('crashGuard.meta.window')}</dt>
                   <dd style={crashGuardMetaValueStyle}>{windowLabel}</dd>
                 </div>
                 <div style={crashGuardMetaItemStyle}>
-                  <dt style={crashGuardMetaTermStyle}>诊断</dt>
+                  <dt style={crashGuardMetaTermStyle}>{crashT('crashGuard.meta.diagnostics')}</dt>
                   <dd style={crashGuardMetaValueStyle}>{bridgeHint}</dd>
                 </div>
                 <div style={crashGuardMetaItemStyle}>
-                  <dt style={crashGuardMetaTermStyle}>类型</dt>
-                  <dd style={crashGuardMetaValueStyle}>React 渲染错误</dd>
+                  <dt style={crashGuardMetaTermStyle}>{crashT('crashGuard.meta.type')}</dt>
+                  <dd style={crashGuardMetaValueStyle}>{crashT('crashGuard.meta.renderError')}</dd>
                 </div>
               </dl>
             </aside>
             <div className="echo-crash-guard-hero" style={crashGuardContentStyle}>
-              <p style={crashGuardSectionLabelStyle}>界面保护已启动</p>
+              <p style={crashGuardSectionLabelStyle}>{crashT('crashGuard.sectionLabel')}</p>
               <h1 id="echo-crash-guard-title" style={crashGuardTitleStyle}>
-                ECHO 的界面刚刚出错了。
+                {crashT('crashGuard.title')}
               </h1>
               <p style={crashGuardLeadStyle}>
-                这通常是当前窗口的界面渲染失败，不一定代表播放核心或音乐文件损坏。请先按下面顺序保留信息，再决定重载或重启。
+                {crashT('crashGuard.lead')}
               </p>
               <ol style={crashGuardStepListStyle}>
                 {crashGuardSteps.map((step, index) => (
@@ -462,39 +484,39 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
               <div className="echo-crash-guard-actions" style={crashGuardActionsStyle}>
                 <CrashGuardActionButton
                   icon={Download}
-                  label="导出诊断包"
+                  label={crashT('crashGuard.action.export')}
                   onClick={this.exportDiagnostics}
                   disabled={!diagnosticsAvailable}
-                  title="导出当前诊断信息和崩溃线索"
+                  title={crashT('crashGuard.action.exportTitle')}
                   variant="primary"
                 />
                 <CrashGuardActionButton
                   icon={FileText}
-                  label="打开报告"
+                  label={crashT('crashGuard.action.openReport')}
                   onClick={this.openCrashReport}
                   disabled={!diagnosticsAvailable}
-                  title="打开最近一次崩溃报告"
+                  title={crashT('crashGuard.action.openReportTitle')}
                 />
                 <CrashGuardActionButton
                   icon={RefreshCw}
-                  label="重载界面"
+                  label={crashT('crashGuard.action.reload')}
                   onClick={this.reloadRenderer}
-                  title="只刷新当前渲染窗口"
+                  title={crashT('crashGuard.action.reloadTitle')}
                 />
                 <CrashGuardActionButton
                   icon={RotateCcw}
-                  label="重启 ECHO"
+                  label={crashT('crashGuard.action.restart')}
                   onClick={this.restartApp}
                   disabled={!diagnosticsAvailable}
-                  title="重新启动 ECHO Next"
+                  title={crashT('crashGuard.action.restartTitle')}
                   variant="quiet"
                 />
                 <CrashGuardActionButton
                   icon={Power}
-                  label="关闭 ECHO"
+                  label={crashT('crashGuard.action.quit')}
                   onClick={this.quitApp}
                   disabled={!appControlsAvailable}
-                  title="退出 ECHO Next"
+                  title={crashT('crashGuard.action.quitTitle')}
                   variant="danger"
                 />
               </div>
@@ -505,7 +527,7 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
             </div>
           </div>
           <details style={crashGuardDetailsStyle}>
-            <summary style={crashGuardSummaryStyle}>开发者错误摘要</summary>
+            <summary style={crashGuardSummaryStyle}>{crashT('crashGuard.summary')}</summary>
             <pre style={crashGuardPreStyle}>{this.state.error.message}</pre>
             <pre style={crashGuardPreStyle}>{this.state.error.stack ?? 'No stack available.'}</pre>
           </details>
@@ -518,27 +540,21 @@ class CrashGuard extends React.Component<CrashGuardProps, CrashGuardState> {
 const crashGuardShellStyle: React.CSSProperties = {
   minHeight: '100vh',
   display: 'grid',
-  placeItems: 'center',
+  placeItems: 'stretch',
   overflow: 'auto',
-  padding: 'clamp(18px, 4vw, 42px)',
-  backgroundColor: '#f6f4ee',
-  backgroundImage:
-    'linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 248, 251, 0.98) 48%, rgba(252, 247, 236, 0.98) 100%), linear-gradient(90deg, rgba(15, 118, 110, 0.055) 1px, transparent 1px), linear-gradient(rgba(27, 56, 86, 0.05) 1px, transparent 1px)',
-  backgroundSize: 'auto, 38px 38px, 38px 38px',
-  color: '#172033',
-  fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif',
+  padding: 0,
+  background: '#0b0d10',
+  color: '#f3f5f7',
+  fontFamily: '"Segoe UI Variable", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif',
 };
 
 const crashGuardPanelStyle: React.CSSProperties = {
   position: 'relative',
   overflow: 'hidden',
-  width: 'min(1080px, 100%)',
-  border: '1px solid rgba(116, 132, 151, 0.22)',
-  borderRadius: 8,
-  padding: 'clamp(20px, 3.2vw, 34px)',
-  background: 'rgba(255, 254, 250, 0.98)',
-  boxShadow: '0 24px 70px rgba(39, 65, 91, 0.18)',
-  backdropFilter: 'blur(12px)',
+  width: '100%',
+  minHeight: '100vh',
+  padding: 'clamp(24px, 3vw, 42px)',
+  background: '#0b0d10',
 };
 
 const crashGuardHeaderStyle: React.CSSProperties = {
@@ -547,8 +563,8 @@ const crashGuardHeaderStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   gap: 16,
   flexWrap: 'wrap',
-  paddingBottom: 20,
-  borderBottom: '1px solid rgba(116, 132, 151, 0.18)',
+  paddingBottom: 24,
+  borderBottom: '1px solid #252a32',
 };
 
 const crashGuardBrandStyle: React.CSSProperties = {
@@ -563,15 +579,14 @@ const crashGuardSealStyle: React.CSSProperties = {
   display: 'inline-grid',
   placeItems: 'center',
   borderRadius: 8,
-  color: '#0f766e',
-  background: '#ecfdf5',
-  border: '1px solid rgba(15, 118, 110, 0.18)',
-  boxShadow: 'inset 0 -3px 0 rgba(15, 118, 110, 0.12)',
+  color: '#8fa5d6',
+  background: '#12161c',
+  border: '1px solid #303743',
 };
 
 const crashGuardEyebrowStyle: React.CSSProperties = {
   margin: 0,
-  color: '#6b7787',
+  color: '#8d96a4',
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: 0,
@@ -581,46 +596,45 @@ const crashGuardEyebrowStyle: React.CSSProperties = {
 const crashGuardBrandTitleStyle: React.CSSProperties = {
   display: 'block',
   marginTop: 2,
-  color: '#172033',
+  color: '#f3f5f7',
   fontSize: 17,
   fontWeight: 900,
 };
 
 const crashGuardChipStyle: React.CSSProperties = {
-  border: '1px solid rgba(15, 118, 110, 0.24)',
+  border: '1px solid #343b47',
   borderRadius: 8,
   padding: '8px 11px',
-  color: '#0f766e',
-  background: '#ecfdf5',
+  color: '#8fa5d6',
+  background: '#11151a',
   fontSize: 12,
   fontWeight: 800,
 };
 
 const crashGuardBodyStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
-  gap: 30,
+  gridTemplateColumns: 'minmax(280px, 0.82fr) minmax(420px, 1.38fr)',
+  gap: 'clamp(34px, 5vw, 72px)',
   alignItems: 'center',
-  marginTop: 28,
+  maxWidth: 1320,
+  width: '100%',
+  margin: 'clamp(38px, 6vh, 74px) auto 0',
 };
 
 const crashGuardRailStyle: React.CSSProperties = {
-  minHeight: 360,
+  minHeight: 470,
   display: 'flex',
   flexDirection: 'column',
-  justifyContent: 'space-between',
+  justifyContent: 'center',
   gap: 24,
-  border: '1px solid rgba(15, 118, 110, 0.14)',
-  borderRadius: 8,
-  padding: 24,
-  background: 'linear-gradient(180deg, #f4fbf8 0%, #fff8e9 100%)',
-  color: '#172033',
-  boxShadow: 'inset 0 -6px 0 rgba(217, 154, 43, 0.28)',
+  borderRight: '1px solid #292f38',
+  padding: '0 clamp(30px, 4vw, 64px) 0 0',
+  color: '#f3f5f7',
 };
 
 const crashGuardBeaconWrapStyle: React.CSSProperties = {
   display: 'grid',
-  gap: 22,
+  gap: 28,
 };
 
 const crashGuardWarningPlateStyle: React.CSSProperties = {
@@ -629,17 +643,16 @@ const crashGuardWarningPlateStyle: React.CSSProperties = {
   height: 92,
   display: 'grid',
   placeItems: 'center',
-  border: '1px solid rgba(15, 118, 110, 0.22)',
+  border: '1px solid #343b47',
   borderRadius: '50%',
-  color: '#0f766e',
-  background: '#ffffff',
-  boxShadow: '0 18px 44px rgba(15, 118, 110, 0.18)',
+  color: '#7186b8',
+  background: '#0f1217',
 };
 
 const crashGuardBeaconRingStyle: React.CSSProperties = {
   position: 'absolute',
   inset: 0,
-  border: '1px solid rgba(15, 118, 110, 0.26)',
+  border: '1px solid rgba(113, 134, 184, 0.5)',
   borderRadius: '50%',
   pointerEvents: 'none',
 };
@@ -647,14 +660,14 @@ const crashGuardBeaconRingStyle: React.CSSProperties = {
 const crashGuardScanStyle: React.CSSProperties = {
   position: 'relative',
   overflow: 'hidden',
-  height: 8,
+  height: 4,
   borderRadius: 999,
-  background: 'linear-gradient(90deg, rgba(15, 118, 110, 0.18), rgba(217, 154, 43, 0.24), rgba(29, 78, 216, 0.14))',
+  background: '#202631',
 };
 
 const crashGuardRailKickerStyle: React.CSSProperties = {
   margin: 0,
-  color: '#0f766e',
+  color: '#8fa5d6',
   fontSize: 13,
   fontWeight: 900,
 };
@@ -663,15 +676,15 @@ const crashGuardRailTitleStyle: React.CSSProperties = {
   display: 'block',
   maxWidth: 360,
   marginTop: 8,
-  color: '#172033',
-  fontSize: 30,
+  color: '#f3f5f7',
+  fontSize: 'clamp(27px, 2.2vw, 34px)',
   lineHeight: 1.18,
   fontWeight: 900,
 };
 
 const crashGuardMetaListStyle: React.CSSProperties = {
   display: 'grid',
-  gap: 10,
+  gap: 0,
   margin: 0,
 };
 
@@ -681,20 +694,20 @@ const crashGuardMetaItemStyle: React.CSSProperties = {
   gap: 10,
   alignItems: 'center',
   minHeight: 40,
-  borderTop: '1px solid rgba(116, 132, 151, 0.16)',
+  borderTop: '1px solid #252a32',
   paddingTop: 11,
 };
 
 const crashGuardMetaTermStyle: React.CSSProperties = {
   margin: 0,
-  color: '#6b7787',
+  color: '#7f8897',
   fontSize: 12,
   fontWeight: 800,
 };
 
 const crashGuardMetaValueStyle: React.CSSProperties = {
   margin: 0,
-  color: '#172033',
+  color: '#e9ecf1',
   fontSize: 13,
   fontWeight: 800,
   wordBreak: 'break-word',
@@ -707,7 +720,7 @@ const crashGuardContentStyle: React.CSSProperties = {
 
 const crashGuardSectionLabelStyle: React.CSSProperties = {
   margin: 0,
-  color: '#0f766e',
+  color: '#8fa5d6',
   fontSize: 13,
   fontWeight: 900,
 };
@@ -715,8 +728,8 @@ const crashGuardSectionLabelStyle: React.CSSProperties = {
 const crashGuardTitleStyle: React.CSSProperties = {
   maxWidth: 680,
   margin: '10px 0 0',
-  color: '#172033',
-  fontSize: 38,
+  color: '#f5f6f8',
+  fontSize: 'clamp(34px, 3.2vw, 48px)',
   lineHeight: 1.16,
   fontWeight: 900,
 };
@@ -724,7 +737,7 @@ const crashGuardTitleStyle: React.CSSProperties = {
 const crashGuardLeadStyle: React.CSSProperties = {
   maxWidth: 720,
   margin: '16px 0 0',
-  color: '#53606f',
+  color: '#9ba3af',
   fontSize: 15,
   lineHeight: 1.78,
 };
@@ -732,7 +745,7 @@ const crashGuardLeadStyle: React.CSSProperties = {
 const crashGuardStepListStyle: React.CSSProperties = {
   maxWidth: 720,
   display: 'grid',
-  gap: 10,
+  gap: 0,
   listStyle: 'none',
   margin: '24px 0 0',
   padding: 0,
@@ -743,11 +756,9 @@ const crashGuardStepStyle: React.CSSProperties = {
   gridTemplateColumns: '34px minmax(0, 1fr)',
   gap: 12,
   alignItems: 'start',
-  border: '1px solid rgba(116, 132, 151, 0.16)',
-  borderRadius: 8,
-  padding: '13px 14px',
-  background: '#ffffff',
-  boxShadow: '0 8px 20px rgba(39, 65, 91, 0.06)',
+  borderTop: '1px solid #292f38',
+  padding: '16px 0',
+  background: 'transparent',
 };
 
 const crashGuardStepIndexStyle: React.CSSProperties = {
@@ -756,9 +767,9 @@ const crashGuardStepIndexStyle: React.CSSProperties = {
   display: 'inline-grid',
   placeItems: 'center',
   borderRadius: 999,
-  color: '#0f766e',
-  background: '#ecfdf5',
-  border: '1px solid rgba(15, 118, 110, 0.18)',
+  color: '#8fa5d6',
+  background: '#10141a',
+  border: '1px solid #7186b8',
   fontSize: 13,
   fontWeight: 900,
 };
@@ -769,13 +780,13 @@ const crashGuardStepTextStyle: React.CSSProperties = {
 };
 
 const crashGuardStepTitleStyle: React.CSSProperties = {
-  color: '#172033',
+  color: '#f3f5f7',
   fontSize: 14,
   fontWeight: 900,
 };
 
 const crashGuardStepDescriptionStyle: React.CSSProperties = {
-  color: '#53606f',
+  color: '#949ca8',
   fontSize: 13,
   lineHeight: 1.58,
 };
@@ -793,7 +804,7 @@ const crashGuardStatusStyle: React.CSSProperties = {
   alignItems: 'flex-start',
   gap: 9,
   margin: '16px 0 0',
-  color: '#7a4d12',
+  color: '#939ca9',
   fontSize: 14,
   fontWeight: 800,
   wordBreak: 'break-word',
@@ -805,22 +816,23 @@ const crashGuardStatusDotStyle: React.CSSProperties = {
   flex: '0 0 auto',
   marginTop: 6,
   borderRadius: 999,
-  background: '#d99a2b',
-  boxShadow: '0 0 0 4px rgba(217, 154, 43, 0.16)',
+  background: '#7186b8',
+  boxShadow: '0 0 0 4px rgba(113, 134, 184, 0.14)',
 };
 
 const crashGuardDetailsStyle: React.CSSProperties = {
   marginTop: 24,
-  borderTop: '1px solid rgba(116, 132, 151, 0.18)',
-  paddingTop: 18,
-  color: '#3c4658',
+  border: '1px solid #292f38',
+  borderRadius: 7,
+  padding: '16px 18px',
+  color: '#a3aab5',
 };
 
 const crashGuardSummaryStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontWeight: 900,
   outline: 'none',
-  color: '#53606f',
+  color: '#a3aab5',
 };
 
 const crashGuardPreStyle: React.CSSProperties = {
@@ -828,9 +840,9 @@ const crashGuardPreStyle: React.CSSProperties = {
   overflow: 'auto',
   margin: '14px 0 0',
   padding: 14,
-  border: '1px solid rgba(20, 28, 42, 0.14)',
+  border: '1px solid #303743',
   borderRadius: 8,
-  background: '#0f1724',
+  background: '#080a0d',
   color: '#e9eef7',
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
@@ -858,7 +870,11 @@ window.addEventListener('unhandledrejection', (event) => {
   });
 });
 
-startPerformanceStallMonitor();
+if (heavyRendererDiagnosticsEnabled) {
+  void import('./diagnostics/performanceStallMonitor')
+    .then(({ startPerformanceStallMonitor }) => startPerformanceStallMonitor())
+    .catch(() => undefined);
+}
 loadAppearanceFontFiles(appearancePreferences);
 if (appBridge) {
   watchThemeSettings(() => appBridge.getSettings());
@@ -872,7 +888,12 @@ void loadPersistedAppearancePreferences()
     loadAppearanceFontFiles(preferences);
   })
   .catch(() => undefined);
-void appBridge?.getSettings().then(loadLyricsFontFiles).catch(() => undefined);
+void appBridge?.getSettings()
+  .then((settings) => {
+    applyAccessibilityPreferences(settings.accessibilityPreferences);
+    loadLyricsFontFiles(settings);
+  })
+  .catch(() => undefined);
 
 window.addEventListener('settings:changed', (event) => {
   const patch = event instanceof CustomEvent ? (event.detail as Partial<AppSettings> | null) : null;
@@ -883,10 +904,14 @@ window.addEventListener('settings:changed', (event) => {
   if ('lyricsFontFilePath' in patch || 'desktopLyricsFontFilePath' in patch) {
     void appBridge?.getSettings().then(loadLyricsFontFiles).catch(() => undefined);
   }
+  if ('accessibilityPreferences' in patch) {
+    applyAccessibilityPreferences(patch.accessibilityPreferences);
+  }
 });
 
 const isDesktopLyricsWindow = new URLSearchParams(window.location.search).get('desktopLyrics') === '1';
 const isMiniPlayerWindow = new URLSearchParams(window.location.search).get('miniPlayer') === '1';
+const isPetWindow = new URLSearchParams(window.location.search).get('pet') === '1';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -896,20 +921,80 @@ if (!rootElement) {
 const reactRoot = window.__echoReactRoot ?? ReactDOM.createRoot(rootElement);
 window.__echoReactRoot = reactRoot;
 
-reactRoot.render(
-  <React.StrictMode>
-    <CrashGuard label={isMiniPlayerWindow ? 'mini-player' : isDesktopLyricsWindow ? 'desktop-lyrics' : 'main-window'}>
-      {isMiniPlayerWindow ? (
-        <I18nProvider>
-          <PlaybackQueueProvider>
+const renderWindow = async (): Promise<void> => {
+  if (isPetWindow) {
+    const [{ PetApp }] = await Promise.all([
+      import('./pet/PetApp'),
+      import('./styles/petStyles'),
+    ]);
+    reactRoot.render(
+      <React.StrictMode>
+        <CrashGuard label="pet">
+          <I18nProvider>
+            <PetApp />
+          </I18nProvider>
+        </CrashGuard>
+      </React.StrictMode>,
+    );
+    return;
+  }
+
+  if (isMiniPlayerWindow) {
+    const [{ MiniPlayerApp }] = await Promise.all([
+      import('./mini-player/MiniPlayerApp'),
+      import('./styles/miniPlayerStyles'),
+    ]);
+    reactRoot.render(
+      <React.StrictMode>
+        <CrashGuard label="mini-player">
+          <I18nProvider>
             <MiniPlayerApp />
-          </PlaybackQueueProvider>
-        </I18nProvider>
-      ) : isDesktopLyricsWindow ? (
-        <I18nProvider>
-          <DesktopLyricsApp />
-        </I18nProvider>
-      ) : <App />}
-    </CrashGuard>
-  </React.StrictMode>,
-);
+          </I18nProvider>
+        </CrashGuard>
+      </React.StrictMode>,
+    );
+    return;
+  }
+
+  if (isDesktopLyricsWindow) {
+    const [{ DesktopLyricsApp }] = await Promise.all([
+      import('./desktop-lyrics/DesktopLyricsApp'),
+      import('./styles/desktopLyricsStyles'),
+    ]);
+    reactRoot.render(
+      <React.StrictMode>
+        <CrashGuard label="desktop-lyrics">
+          <I18nProvider>
+            <DesktopLyricsApp />
+          </I18nProvider>
+        </CrashGuard>
+      </React.StrictMode>,
+    );
+    return;
+  }
+
+  const [{ App, prepareAppStartup }] = await Promise.all([
+    import('./app/App'),
+    import('./styles/mainWindowStyles'),
+  ]);
+  const appStartupPreparation = prepareAppStartup();
+  reactRoot.render(
+    <React.StrictMode>
+      <CrashGuard label="main-window">
+        <App />
+      </CrashGuard>
+    </React.StrictMode>,
+  );
+  await appStartupPreparation;
+  await dismissStartupOverlayAfterStablePaint();
+};
+
+void renderWindow().catch((error) => {
+  reportRendererError({
+    message: `Renderer entry failed to load: ${error instanceof Error ? error.message : String(error)}`,
+    stack: error instanceof Error ? error.stack : undefined,
+    source: 'error',
+    timestamp: new Date().toISOString(),
+  });
+  throw error;
+});

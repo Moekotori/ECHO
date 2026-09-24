@@ -5,6 +5,7 @@ import {
   createAppApi,
   createDesktopLyricsApi,
   createMiniPlayerApi,
+  createPetApi,
   createLibraryApi,
   createLibraryLabApi,
   createPlaybackApi,
@@ -22,6 +23,7 @@ import {
   createPluginsApi,
   createAccountsApi,
   createSpotifyApi,
+  createEchoLinkApi,
 } from './ipc';
 
 // ---------------------------------------------------------------------------
@@ -33,6 +35,7 @@ const expectedNamespaces = [
   'app',
   'desktopLyrics',
   'miniPlayer',
+  'pet',
   'library',
   'libraryLab',
   'playback',
@@ -50,6 +53,7 @@ const expectedNamespaces = [
   'accounts',
   'spotify',
   'sleepTimer',
+  'echoLink',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -60,6 +64,7 @@ function buildEchoApi() {
   const ipcRenderer = createMockIpcRenderer() as any;
   const sa = {
     systemAudioModeActive: false,
+    ownsSystemAudioPlayback: true,
     getSystemAudioStatus: vi.fn(),
     getSystemPlaybackStatus: vi.fn(),
     setSystemOutputMode: vi.fn(),
@@ -88,6 +93,7 @@ function buildEchoApi() {
     app: createAppApi(ipcRenderer, IpcChannels),
     desktopLyrics: createDesktopLyricsApi(ipcRenderer, IpcChannels),
     miniPlayer: createMiniPlayerApi(ipcRenderer, IpcChannels),
+    pet: createPetApi(ipcRenderer, IpcChannels),
     library: createLibraryApi(ipcRenderer, IpcChannels, webUtils as any),
     libraryLab: createLibraryLabApi(ipcRenderer, IpcChannels),
     playback: createPlaybackApi(ipcRenderer, IpcChannels, sa as any, deps),
@@ -105,6 +111,7 @@ function buildEchoApi() {
     accounts: createAccountsApi(ipcRenderer, IpcChannels),
     spotify: createSpotifyApi(ipcRenderer, IpcChannels),
     sleepTimer: createSleepTimerApi(ipcRenderer, IpcChannels),
+    echoLink: createEchoLinkApi(ipcRenderer, IpcChannels),
   };
 }
 
@@ -130,6 +137,29 @@ describe('echoApi shape', () => {
       const methods = Object.values(ns as object).filter((v) => typeof v === 'function');
       expect(methods.length, `namespace "${key}" should have at least one method`).toBeGreaterThan(0);
     }
+  });
+
+  it('deduplicates desktop lyrics reveal retries by request id', () => {
+    const ipcRenderer = createMockIpcRenderer();
+    const desktopLyrics = createDesktopLyricsApi(ipcRenderer as any, IpcChannels);
+    const handler = vi.fn();
+
+    const listener = ipcRenderer.on.mock.calls.find(
+      ([channel]) => channel === IpcChannels.DesktopLyricsRevealMenu,
+    )?.[1] as ((event: unknown, requestId: unknown) => void) | undefined;
+    expect(listener).toBeTypeOf('function');
+
+    listener?.({}, 7);
+    listener?.({}, 7);
+    listener?.({}, 7);
+    expect(handler).not.toHaveBeenCalled();
+
+    desktopLyrics.onRevealMenu(handler);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    listener?.({}, 8);
+    listener?.({}, 7);
+    expect(handler).toHaveBeenCalledTimes(2);
   });
 
   it('audio has core methods: getStatus / onStatus / listDevices / setOutput', () => {

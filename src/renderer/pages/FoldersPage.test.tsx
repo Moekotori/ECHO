@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type {
-  LibraryFolder,
   LibraryFolderNode,
   LibraryFolderOverview,
   LibraryPage,
@@ -132,16 +131,6 @@ const summary = (overrides: Partial<LibrarySummary> = {}): LibrarySummary => ({
   folderCount: 1,
   totalDuration: 180,
   lastScanAt: null,
-  ...overrides,
-});
-
-const libraryFolder = (overrides: Partial<LibraryFolder> = {}): LibraryFolder => ({
-  id: 'folder-1',
-  path: 'D:\\Music',
-  name: 'Music',
-  status: 'active',
-  createdAt: '2026-01-01T00:00:00.000Z',
-  updatedAt: '2026-01-01T00:00:00.000Z',
   ...overrides,
 });
 
@@ -477,6 +466,52 @@ describe('FoldersPage', () => {
     );
   });
 
+  it('offers track-number sorting and forwards it to the folder query', async () => {
+    renderFoldersPage();
+
+    const sortButton = await screen.findByRole('button', { name: 'Song title (A-Z)' });
+    fireEvent.click(sortButton);
+    fireEvent.click(screen.getByRole('option', { name: 'Track number' }));
+
+    await waitFor(() =>
+      expect(libraryMock.getFolderTracks).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          folderId: 'folder-1',
+          path: 'D:\\Music',
+          sort: 'trackNumber',
+        }),
+      ),
+    );
+    expect(window.localStorage.getItem('echo-next.folders.sort')).toBe('trackNumber');
+  });
+
+  it('groups the expanded folder sorts and forwards listening-history sorting', async () => {
+    renderFoldersPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Song title (A-Z)' }));
+
+    const sortMenu = within(screen.getByRole('listbox'));
+    expect(sortMenu.getByText('Browse')).toBeTruthy();
+    expect(sortMenu.getByText('Library')).toBeTruthy();
+    expect(sortMenu.getByText('Listening')).toBeTruthy();
+    expect(sortMenu.getByText('Audio')).toBeTruthy();
+    expect(sortMenu.getByRole('option', { name: 'Release year, newest' })).toBeTruthy();
+    expect(sortMenu.getByRole('option', { name: 'Codec (A–Z)' })).toBeTruthy();
+    expect(sortMenu.getByRole('option', { name: 'Bitrate ↓' })).toBeTruthy();
+
+    fireEvent.click(sortMenu.getByRole('option', { name: 'Most played' }));
+
+    await waitFor(() =>
+      expect(libraryMock.getFolderTracks).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          folderId: 'folder-1',
+          path: 'D:\\Music',
+          sort: 'playCountDesc',
+        }),
+      ),
+    );
+  });
+
   it('plays the selected folder in folder order instead of random sort', async () => {
     window.localStorage.setItem('echo-next.folders.sort', 'random');
     libraryMock.getFolderTracks.mockResolvedValue(
@@ -489,7 +524,7 @@ describe('FoldersPage', () => {
     renderFoldersPage();
 
     await screen.findByText('First Folder Song');
-    fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Play all' }));
 
     await waitFor(() =>
       expect(libraryMock.getFolderTracks).toHaveBeenLastCalledWith(
@@ -524,7 +559,7 @@ describe('FoldersPage', () => {
     renderFoldersPage();
 
     await screen.findByText('First Folder Song');
-    fireEvent.click(screen.getByRole('button', { name: 'Random' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Shuffle play' }));
 
     await waitFor(() =>
       expect(libraryMock.getFolderTracks).toHaveBeenLastCalledWith(
@@ -624,6 +659,17 @@ describe('FoldersPage', () => {
     renderFoldersPage();
 
     await waitFor(() => expect(getFolderNames()).toEqual(['Music B', 'Music A', 'Music C']));
+  });
+
+  it('does not render a drag handle when there is only one root folder', async () => {
+    libraryMock.getFolderOverviews.mockResolvedValue([overview({ name: 'Downloads', path: 'C:\\Users\\mochi\\Downloads' })]);
+
+    const { container } = renderFoldersPage();
+
+    await waitFor(() => expect(container.querySelector('.folder-root-button')).toBeTruthy());
+    const rootButton = container.querySelector('.folder-root-button');
+    expect(rootButton?.getAttribute('draggable')).not.toBe('true');
+    expect(container.querySelector('.folder-root-drag-handle')).toBeNull();
   });
 
   it('marks a single folder cover so it can fill the cover tile', async () => {
@@ -908,6 +954,23 @@ describe('FoldersPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Album/ }));
     await waitFor(() => expect(remoteSourcesMock.browse).toHaveBeenLastCalledWith('remote-1', '/Music/Album'));
     expect(libraryMock.getFolderChildren).not.toHaveBeenCalled();
+  });
+
+  it('uses an idle backoff instead of polling remote progress every 900ms', async () => {
+    renderFoldersPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: '网盘' }));
+
+    await waitFor(() => expect(remoteSourcesMock.getSyncStatus).toHaveBeenCalled());
+    await screen.findByText('song');
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    const syncCallsAfterInitialRefresh = remoteSourcesMock.getSyncStatus.mock.calls.length;
+    const jobCallsAfterInitialRefresh = remoteSourcesMock.getJobStatus.mock.calls.length;
+
+    await new Promise((resolve) => window.setTimeout(resolve, 1_200));
+
+    expect(remoteSourcesMock.getSyncStatus).toHaveBeenCalledTimes(syncCallsAfterInitialRefresh);
+    expect(remoteSourcesMock.getJobStatus).toHaveBeenCalledTimes(jobCallsAfterInitialRefresh);
   });
 
   it('hydrates unindexed remote browser tracks with metadata and covers', async () => {

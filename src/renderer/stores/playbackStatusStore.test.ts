@@ -177,6 +177,10 @@ describe('playbackStatusStore', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-25T00:00:00.000Z'));
 
+    setPlaybackStatusSnapshot({
+      audioStatus: audioStatus({ positionSeconds: 181, bitPerfectCandidate: true }),
+    });
+
     beginPlaybackSeekSnapshot({
       state: 'playing',
       currentTrackId: 'track-b',
@@ -191,7 +195,8 @@ describe('playbackStatusStore', () => {
       audioStatus: audioStatus({ positionSeconds: 181 }),
       error: null,
     });
-    expect(staleBeforeSeekSnapshot.audioStatus).toBeNull();
+    expect(staleBeforeSeekSnapshot.audioStatus?.positionSeconds).toBe(240);
+    expect(staleBeforeSeekSnapshot.audioStatus?.bitPerfectCandidate).toBe(true);
     expect(staleBeforeSeekSnapshot.playbackStatus?.positionMs).toBe(240_000);
     expect(staleBeforeSeekSnapshot.playbackVisualIntent).not.toBeNull();
 
@@ -207,6 +212,10 @@ describe('playbackStatusStore', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-25T00:00:00.000Z'));
 
+    setPlaybackStatusSnapshot({
+      audioStatus: audioStatus({ positionSeconds: 182, bitPerfectCandidate: true }),
+    });
+
     beginPlaybackSeekSnapshot({
       state: 'playing',
       currentTrackId: 'track-b',
@@ -221,7 +230,8 @@ describe('playbackStatusStore', () => {
       audioStatus: audioStatus({ positionSeconds: 182 }),
       error: null,
     });
-    expect(snapshot.audioStatus).toBeNull();
+    expect(snapshot.audioStatus?.positionSeconds).toBe(60);
+    expect(snapshot.audioStatus?.bitPerfectCandidate).toBe(true);
     expect(snapshot.playbackStatus?.positionMs).toBe(60_000);
   });
 
@@ -260,13 +270,14 @@ describe('playbackStatusStore', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-25T00:00:00.000Z'));
 
-    beginPlaybackSeekSnapshot({
+    const intentSnapshot = beginPlaybackSeekSnapshot({
       state: 'paused',
       currentTrackId: 'track-b',
       filePath: 'D:\\Music\\song-b.flac',
       positionMs: 90_000,
       durationMs: 300_000,
     });
+    expect(intentSnapshot.playbackVisualIntent?.state).toBe('paused');
 
     vi.advanceTimersByTime(2500);
 
@@ -283,6 +294,37 @@ describe('playbackStatusStore', () => {
     });
     expect(settledSnapshot.audioStatus?.positionSeconds).toBe(90);
     expect(settledSnapshot.playbackVisualIntent).toBeNull();
+  });
+
+  it('keeps the last trustworthy audio telemetry when refresh sees a transient host error', async () => {
+    ensureTestWindow();
+    setPlaybackStatusSnapshot({
+      audioStatus: audioStatus({ bitPerfectCandidate: true, positionSeconds: 42 }),
+    });
+    window.echo = {
+      playback: {
+        getStatus: vi.fn().mockResolvedValue({
+          state: 'playing',
+          currentTrackId: 'track-b',
+          positionMs: 42_000,
+          durationMs: 180_000,
+          filePath: 'D:\\Music\\song-b.flac',
+        }),
+      },
+      audio: {
+        getStatus: vi.fn().mockResolvedValue(audioStatus({
+          state: 'error',
+          bitPerfectCandidate: false,
+          error: 'audio_session_run_cancelled',
+        })),
+      },
+    } as unknown as Window['echo'];
+
+    const refreshed = await refreshPlaybackStatus();
+
+    expect(refreshed.audioStatus?.bitPerfectCandidate).toBe(true);
+    expect(refreshed.audioStatus?.positionSeconds).toBe(42);
+    expect(refreshed.error).toBeNull();
   });
 
   it('treats an HQPlayer stopped status at the track tail as ended for auto-advance', async () => {

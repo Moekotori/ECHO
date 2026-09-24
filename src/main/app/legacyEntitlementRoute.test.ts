@@ -7,15 +7,15 @@ import {
 
 describe('legacy entitlement route', () => {
   it('returns the packaged compatibility response without destructive behavior', () => {
-    const signal = createLegacyEntitlementRouteSignal('package-integrity', 'signature');
+    const signal = createLegacyEntitlementRouteSignal('legacy-unlock-marker', 'signature');
 
     expect(signal).toMatchObject({
       class: 'legacy-entitlement-route',
-      source: 'package-integrity',
+      source: 'legacy-unlock-marker',
       returned: legacyEntitlementRouteResponse,
       destructive: false,
       action: 'paid-features-fail-closed',
-      reason: 'integrity-tamper-detected',
+      reason: 'decoy-unlock-marker-detected',
     });
     expect(signal.returned).toBe('MTgwNjQ5NzY5Nzc=');
   });

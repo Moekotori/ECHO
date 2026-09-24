@@ -561,6 +561,38 @@ describe('China streaming providers', () => {
     });
   });
 
+  it('uses raw HTTP without cold-loading the enhanced API package during playback', async () => {
+    setNeteaseApiForTests(undefined);
+    const fetchRunner = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: [
+          {
+            id: 123,
+            url: 'https://m701.music.126.net/raw/song.flac',
+            br: 999000,
+            type: 'flac',
+            level: 'lossless',
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchRunner);
+
+    const source = await new NeteaseStreamingProvider().resolvePlayback({
+      provider: 'netease',
+      providerTrackId: '123',
+      quality: 'lossless',
+    });
+
+    expect(fetchRunner).toHaveBeenCalledTimes(1);
+    expect(String(fetchRunner.mock.calls[0][0])).toContain('/api/song/enhance/player/url/v1');
+    expect(source).toMatchObject({
+      url: 'https://m701.music.126.net/raw/song.flac',
+      codec: 'flac',
+      bitrate: 999000,
+    });
+  });
+
   it('falls back to the NetEase bitrate song_url resolver when song_url_v1 returns no URL', async () => {
     const songUrlV1 = vi.fn().mockResolvedValue({
       body: {
@@ -632,6 +664,24 @@ describe('China streaming providers', () => {
       codec: 'flac',
       bitrate: 999000,
     });
+  });
+
+  it('enforces one five-second total budget across all NetEase playback fallbacks', async () => {
+    vi.useFakeTimers();
+    setNeteaseApiForTests(null);
+    const fetchRunner = vi.fn(() => new Promise<never>(() => undefined));
+    vi.stubGlobal('fetch', fetchRunner);
+
+    const pending = new NeteaseStreamingProvider().resolvePlayback({
+      provider: 'netease',
+      providerTrackId: '123',
+      quality: 'lossless',
+    });
+    const rejection = expect(pending).rejects.toThrow('netease_playback_resolve_timeout');
+    await vi.advanceTimersByTimeAsync(5_001);
+
+    await rejection;
+    expect(fetchRunner.mock.calls.length).toBeGreaterThan(0);
   });
 
   it('falls back to high quality when NetEase max quality returns no URL', async () => {

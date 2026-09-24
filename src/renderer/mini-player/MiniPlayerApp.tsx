@@ -1,50 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ChangeEvent, PointerEvent } from 'react';
-import { ListMusic, Pause, Play, RotateCcw, SkipBack, SkipForward, Volume1, Volume2, VolumeX, X } from 'lucide-react';
+import { AudioLines, ListMusic, Pause, Play, RotateCcw, SkipBack, SkipForward, Volume1, Volume2, VolumeX, X } from 'lucide-react';
 import type { AudioPlaybackState, AudioStatus } from '../../shared/types/audio';
-import type { AppSettings } from '../../shared/types/appSettings';
 import type { MiniPlayerState } from '../../shared/types/miniPlayer';
-import type { PlaybackStatus } from '../../shared/types/playback';
-import { isSpotifyTrack, pauseSpotifyPlayback, resumeSpotifyPlayback, seekSpotifyPlayback, setSpotifyVolume } from '../integrations/spotify/spotifyPlayback';
-import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
-import { beginPlaybackSeekSnapshot, getVisualPlaybackState, refreshPlaybackStatus, setPlaybackStatusSnapshot, useSharedPlaybackStatus } from '../stores/playbackStatusStore';
+import type { PersistedPlaybackSessionV1, PlaybackStatus } from '../../shared/types/playback';
+import { setPlaybackStatusSnapshot, useSharedPlaybackStatus } from '../stores/playbackStatusStore';
 import { formatPercent, formatTime, titleFromPath } from '../components/player/playerFormat';
 import { translateFallback, useOptionalI18n } from '../i18n/I18nProvider';
+import { translateStatic } from '../i18n/translateStatic';
 
 type ForwardedAudioStatus = {
   status: AudioStatus;
-  updatedAtMs: number;
+  expiresAtMs: number | null;
 };
 
-type MiniPlaybackClock = {
-  durationSeconds: number;
-  playbackRate: number;
-  positionSeconds: number;
-  sourcePositionSeconds: number;
-  state: AudioPlaybackState;
-  trackKey: string | null;
-  updatedAtMs: number;
+type ForwardedPlaybackStatus = {
+  status: PlaybackStatus;
+  expiresAtMs: number | null;
 };
 
-type PlaybackVisualIntentSnapshot = {
-  currentTrackId: string | null;
-  filePath: string | null;
-  expectedPositionMs: number;
-  startedAtMs: number;
-};
-
-const enhancedLowLoadProgressRenderIntervalMs = 1500;
-const minRealtimeProgressStepSeconds = 0.004;
 const forwardedSystemStatusMaxAgeMs = 30_000;
-const trackSwitchVisualIntentPositionToleranceMs = 1500;
-const seekAnchorMaxAgeSeconds = 3;
-const seekAnchorSettleToleranceSeconds = 0.25;
+const forwardedPlaybackStatusMaxAgeMs = 30_000;
 const activeStates = new Set<AudioPlaybackState>(['loading', 'playing']);
-const restartStates = new Set<AudioPlaybackState>(['idle', 'stopped', 'ended']);
 
 const defaultMiniPlayerState: MiniPlayerState = {
   visible: true,
   locked: false,
+  queueOpen: false,
   bounds: null,
   settings: {
     miniPlayerEnabled: true,
@@ -56,7 +38,10 @@ const defaultMiniPlayerState: MiniPlayerState = {
 
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
 
-const volumeFromStatus = (status: AudioStatus | null | undefined): number => clamp(status?.volume ?? 1, 0, 1);
+const volumeFromStatus = (
+  audioStatus: AudioStatus | null | undefined,
+  playbackStatus: PlaybackStatus | null | undefined,
+): number => clamp(audioStatus?.volume ?? playbackStatus?.volume ?? 1, 0, 1);
 
 const readFixedVolumeEnabled = (settings: unknown): boolean => {
   if (!settings || typeof settings !== 'object') {
@@ -75,12 +60,6 @@ const readFixedVolumeEnabledPatch = (patch: unknown): boolean | null => {
   return typeof value === 'boolean' ? value : null;
 };
 
-const readEnhancedLowLoadPlaybackActive = (settings: Partial<AppSettings> | null | undefined): boolean =>
-  settings?.lowLoadPlaybackModeEnabled === true && settings.lowLoadPlaybackEnhancementsEnabled === true;
-
-const playbackTrackKey = (audioStatus: AudioStatus | null, playbackStatus: PlaybackStatus | null, fallbackTrackId: string | null): string | null =>
-  audioStatus?.currentTrackId ?? playbackStatus?.currentTrackId ?? fallbackTrackId ?? audioStatus?.currentFilePath ?? playbackStatus?.filePath ?? null;
-
 const lightweightArtworkUrl = (track: { coverThumb: string | null } | null, audioStatus: AudioStatus | null): string | null =>
   track?.coverThumb ?? audioStatus?.currentTrackCoverUrl ?? null;
 
@@ -95,90 +74,126 @@ const audioStatusMatchesPlaybackStatus = (audioStatus: AudioStatus, playbackStat
   );
 };
 
-const audioStatusMatchesVisualIntent = (status: AudioStatus, intent: PlaybackVisualIntentSnapshot | null | undefined): boolean => {
-  if (!intent) {
-    return true;
-  }
-
-  const matchesIntent =
-    Boolean(intent.currentTrackId && status.currentTrackId === intent.currentTrackId) ||
-    Boolean(intent.filePath && status.currentFilePath === intent.filePath);
-  if (!matchesIntent) {
-    return false;
-  }
-
-  const playbackRate = Number.isFinite(status.playbackRate) ? Math.max(0.25, Math.min(4, status.playbackRate)) : 1;
-  const elapsedMs = status.state === 'playing' || status.state === 'paused' ? Math.max(0, Date.now() - intent.startedAtMs) : 0;
-  const expectedPositionMs = intent.expectedPositionMs + elapsedMs * playbackRate;
-  return Math.round(Math.max(0, status.positionSeconds) * 1000) <= expectedPositionMs + trackSwitchVisualIntentPositionToleranceMs;
-};
-
 const isUsableAudioStatus = (
   audioStatus: AudioStatus | null | undefined,
   playbackStatus: PlaybackStatus | null,
-  playbackVisualIntent: PlaybackVisualIntentSnapshot | null | undefined,
 ): audioStatus is AudioStatus =>
   Boolean(
     audioStatus &&
-      audioStatusMatchesPlaybackStatus(audioStatus, playbackStatus) &&
-      audioStatusMatchesVisualIntent(audioStatus, playbackVisualIntent),
+      audioStatusMatchesPlaybackStatus(audioStatus, playbackStatus),
   );
 
-const requestMiniPlayerQueueBounds = (open: boolean): void => {
-  void window.echo?.miniPlayer?.setQueueOpen?.(open).catch(() => undefined);
+const audioStatusesMatch = (a: AudioStatus, b: AudioStatus): boolean =>
+  Boolean(a.currentTrackId && a.currentTrackId === b.currentTrackId) ||
+  Boolean(a.currentFilePath && a.currentFilePath === b.currentFilePath);
 
-  try {
-    window.resizeTo(window.outerWidth || 388, open ? 324 : 74);
-  } catch {
-    // Electron IPC is the primary resize path; resizeTo is only a renderer fallback.
+const isNewerQueueSession = (
+  current: PersistedPlaybackSessionV1 | null,
+  next: PersistedPlaybackSessionV1 | null,
+): boolean => {
+  if (!current || !next) {
+    return true;
   }
+  if (typeof current.revision === 'number' && typeof next.revision === 'number' && current.revision !== next.revision) {
+    return next.revision > current.revision;
+  }
+  return Date.parse(next.updatedAt) >= Date.parse(current.updatedAt);
+};
+
+const ScrollingTrackTitle = ({ title }: { title: string }): JSX.Element => {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const textRef = useRef<HTMLElement | null>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const text = textRef.current;
+    if (!viewport || !text) {
+      return undefined;
+    }
+
+    const measure = (): void => {
+      setIsOverflowing(text.scrollWidth > viewport.clientWidth + 1);
+    };
+
+    measure();
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(measure);
+    resizeObserver?.observe(viewport);
+    resizeObserver?.observe(text);
+    window.addEventListener('resize', measure);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [title]);
+
+  return (
+    <div
+      className={`mini-player-title-marquee${isOverflowing ? ' is-overflowing' : ''}`}
+      ref={viewportRef}
+      title={title}
+    >
+      <div className="mini-player-title-marquee-track">
+        <strong ref={textRef}>{title}</strong>
+        {isOverflowing ? <strong aria-hidden="true">{title}</strong> : null}
+      </div>
+    </div>
+  );
 };
 
 export const MiniPlayerApp = (): JSX.Element => {
   const t = useOptionalI18n()?.t ?? translateFallback;
-  const queue = usePlaybackQueue();
-  const setQueueCurrentTrackId = queue.setCurrentTrackId;
-  const syncQueuePlaybackState = queue.syncPlaybackState;
   const sharedPlaybackStatus = useSharedPlaybackStatus();
   const [, setMiniPlayerState] = useState<MiniPlayerState>(defaultMiniPlayerState);
+  const [queueSession, setQueueSession] = useState<PersistedPlaybackSessionV1 | null>(null);
   const [forwardedAudioStatus, setForwardedAudioStatus] = useState<ForwardedAudioStatus | null>(null);
-  const [realtimePositionSeconds, setRealtimePositionSeconds] = useState(0);
+  const [forwardedPlaybackStatus, setForwardedPlaybackStatus] = useState<ForwardedPlaybackStatus | null>(null);
+  const [forwardedStatusClockMs, setForwardedStatusClockMs] = useState(() => Date.now());
   const [seekPreviewSeconds, setSeekPreviewSeconds] = useState<number | null>(null);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isVolumeOpen, setIsVolumeOpen] = useState(false);
   const [volumePreview, setVolumePreview] = useState(1);
   const [fixedVolumeEnabled, setFixedVolumeEnabled] = useState(false);
-  const [enhancedLowLoadPlaybackActive, setEnhancedLowLoadPlaybackActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const volumeInteractingRef = useRef(false);
   const pendingVolumeRef = useRef<number | null>(null);
-  const seekAnchorRef = useRef<{ positionSeconds: number; trackKey: string | null; updatedAtMs: number } | null>(null);
-  const clockRef = useRef<MiniPlaybackClock>({
-    durationSeconds: 0,
-    playbackRate: 1,
-    positionSeconds: 0,
-    sourcePositionSeconds: 0,
-    state: 'idle',
-    trackKey: null,
-    updatedAtMs: performance.now(),
-  });
+  const seekCommittingRef = useRef(false);
+  const pendingSeekTargetRef = useRef<number | null>(null);
+  const transportPendingRef = useRef(false);
+  const latestStatusVolumeRef = useRef(1);
+  const activeQueueItemRef = useRef<HTMLButtonElement | null>(null);
+  const [transportPending, setTransportPending] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    let receivedLiveState = false;
     const miniPlayer = window.echo?.miniPlayer;
     if (!miniPlayer) {
       return undefined;
     }
 
-    void miniPlayer.getState().then((state) => {
-      if (!cancelled) {
-        setMiniPlayerState(state);
+    const applyMiniPlayerState = (state: MiniPlayerState): void => {
+      if (cancelled) {
+        return;
       }
-    }).catch(() => undefined);
+      setMiniPlayerState(state);
+      if (typeof state.queueOpen === 'boolean') {
+        setIsQueueOpen(state.queueOpen);
+      }
+    };
 
     const unsubscribe = miniPlayer.onStateChanged?.((state) => {
-      setMiniPlayerState(state);
+      receivedLiveState = true;
+      applyMiniPlayerState(state);
     });
+    void miniPlayer.getState().then((state) => {
+      if (!receivedLiveState) {
+        applyMiniPlayerState(state);
+      }
+    }).catch(() => undefined);
 
     return () => {
       cancelled = true;
@@ -188,44 +203,153 @@ export const MiniPlayerApp = (): JSX.Element => {
 
   useEffect(() => {
     let cancelled = false;
-    const desktopLyrics = window.echo?.desktopLyrics;
-    if (!desktopLyrics) {
+    let receivedLiveQueueSession = false;
+    const playback = window.echo?.playback;
+    if (!playback) {
       return undefined;
     }
 
-    const getLastAudioStatus = desktopLyrics.getLastAudioStatus;
-    if (getLastAudioStatus) {
-      void getLastAudioStatus().then((status) => {
-        if (!cancelled && status) {
-          setForwardedAudioStatus({ status, updatedAtMs: Date.now() });
-        }
-      }).catch(() => undefined);
-    }
+    const applyQueueSession = (next: PersistedPlaybackSessionV1 | null): void => {
+      if (cancelled) {
+        return;
+      }
+      setQueueSession((current) => (isNewerQueueSession(current, next) ? next : current));
+    };
 
-    const unsubscribe = desktopLyrics.onAudioStatus?.((status) => {
-      setForwardedAudioStatus({ status, updatedAtMs: Date.now() });
+    const unsubscribe = playback.onQueueSessionChanged?.((next) => {
+      receivedLiveQueueSession = true;
+      applyQueueSession(next);
     });
-
+    void playback.getQueueSession().then((next) => {
+      if (!receivedLiveQueueSession) {
+        applyQueueSession(next);
+      }
+    }).catch(() => undefined);
     return () => {
       cancelled = true;
       unsubscribe?.();
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    let receivedLiveAudioStatus = false;
+    let receivedLivePlaybackStatus = false;
+    const desktopLyrics = window.echo?.desktopLyrics;
+    if (!desktopLyrics) {
+      return undefined;
+    }
+
+    const applyForwardedAudioStatus = (status: AudioStatus, expiresAtMs: number | null = null): void => {
+      setForwardedAudioStatus({ status, expiresAtMs });
+      if (expiresAtMs !== null) {
+        setForwardedStatusClockMs(Date.now());
+      }
+    };
+    const applyForwardedPlaybackStatus = (status: PlaybackStatus, expiresAtMs: number | null = null): void => {
+      setForwardedPlaybackStatus({ status, expiresAtMs });
+      if (expiresAtMs !== null) {
+        setForwardedStatusClockMs(Date.now());
+      }
+    };
+
+    const unsubscribeAudio = desktopLyrics.onAudioStatus?.((status) => {
+      if (cancelled) {
+        return;
+      }
+      receivedLiveAudioStatus = true;
+      applyForwardedAudioStatus(status);
+    });
+    const unsubscribePlayback = desktopLyrics.onPlaybackStatus?.((status) => {
+      if (cancelled) {
+        return;
+      }
+      receivedLivePlaybackStatus = true;
+      applyForwardedPlaybackStatus(status);
+    });
+
+    const getLastAudioStatus = desktopLyrics.getLastAudioStatus;
+    if (getLastAudioStatus) {
+      void getLastAudioStatus().then((status) => {
+        if (!cancelled && !receivedLiveAudioStatus && status) {
+          applyForwardedAudioStatus(status, Date.now() + forwardedSystemStatusMaxAgeMs);
+        }
+      }).catch(() => undefined);
+    }
+
+    const getLastPlaybackStatus = desktopLyrics.getLastPlaybackStatus;
+    if (getLastPlaybackStatus) {
+      void getLastPlaybackStatus().then((status) => {
+        if (!cancelled && !receivedLivePlaybackStatus && status) {
+          applyForwardedPlaybackStatus(status, Date.now() + forwardedPlaybackStatusMaxAgeMs);
+        }
+      }).catch(() => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+      unsubscribeAudio?.();
+      unsubscribePlayback?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const expiryTimes = [
+      forwardedAudioStatus?.expiresAtMs ?? null,
+      forwardedPlaybackStatus?.expiresAtMs ?? null,
+    ].filter((value): value is number => value !== null && value > forwardedStatusClockMs);
+    if (expiryTimes.length === 0) {
+      return undefined;
+    }
+
+    const nextExpiryMs = Math.min(...expiryTimes);
+    const timer = window.setTimeout(
+      () => setForwardedStatusClockMs(Date.now()),
+      Math.max(1, nextExpiryMs - Date.now() + 1),
+    );
+    return () => window.clearTimeout(timer);
+  }, [forwardedAudioStatus, forwardedPlaybackStatus, forwardedStatusClockMs]);
+
+  const forwardedPlaybackCandidate =
+    forwardedPlaybackStatus &&
+    (forwardedPlaybackStatus.expiresAtMs === null || forwardedStatusClockMs <= forwardedPlaybackStatus.expiresAtMs)
+      ? forwardedPlaybackStatus.status
+      : null;
+  const identifiedActiveSharedAudio =
+    sharedPlaybackStatus.audioStatus &&
+    (activeStates.has(sharedPlaybackStatus.audioStatus.state) || sharedPlaybackStatus.audioStatus.state === 'paused') &&
+    (sharedPlaybackStatus.audioStatus.currentTrackId || sharedPlaybackStatus.audioStatus.currentFilePath)
+      ? sharedPlaybackStatus.audioStatus
+      : null;
+  const playbackStatus =
+    forwardedPlaybackCandidate &&
+    (!identifiedActiveSharedAudio || audioStatusMatchesPlaybackStatus(identifiedActiveSharedAudio, forwardedPlaybackCandidate))
+      ? forwardedPlaybackCandidate
+      : sharedPlaybackStatus.playbackStatus;
+  const queueItems = queueSession?.items ?? [];
+  const queueTracks = queueItems.map((item) => item.track);
   const activeAudioStatus = useMemo(() => {
     const forwarded = forwardedAudioStatus;
-    const playbackVisualIntent = sharedPlaybackStatus.playbackVisualIntent;
     const sharedAudioStatus = isUsableAudioStatus(
       sharedPlaybackStatus.audioStatus,
-      sharedPlaybackStatus.playbackStatus,
-      playbackVisualIntent,
+      playbackStatus,
     )
       ? sharedPlaybackStatus.audioStatus
       : null;
     if (
       forwarded?.status.outputMode === 'system' &&
-      Date.now() - forwarded.updatedAtMs <= forwardedSystemStatusMaxAgeMs &&
-      (!sharedAudioStatus || sharedAudioStatus.outputMode === 'system')
+      (forwarded.expiresAtMs === null || forwardedStatusClockMs <= forwarded.expiresAtMs) &&
+      isUsableAudioStatus(forwarded.status, playbackStatus) &&
+      (
+        !sharedAudioStatus ||
+        (
+          sharedAudioStatus.outputMode === 'system' &&
+          (
+            (!sharedAudioStatus.currentTrackId && !sharedAudioStatus.currentFilePath) ||
+            audioStatusesMatch(forwarded.status, sharedAudioStatus)
+          )
+        )
+      )
     ) {
       return forwarded.status;
     }
@@ -233,64 +357,82 @@ export const MiniPlayerApp = (): JSX.Element => {
     return sharedAudioStatus;
   }, [
     forwardedAudioStatus,
+    forwardedStatusClockMs,
+    playbackStatus,
     sharedPlaybackStatus.audioStatus,
-    sharedPlaybackStatus.playbackStatus,
-    sharedPlaybackStatus.playbackVisualIntent,
   ]);
 
-  const statusVolume = volumeFromStatus(activeAudioStatus);
-  const playbackStatus = sharedPlaybackStatus.playbackStatus;
-  const visualState = getVisualPlaybackState({
-    audioStatus: activeAudioStatus,
-    playbackStatus,
-    playbackVisualIntent: sharedPlaybackStatus.playbackVisualIntent,
-  });
-  const realtimePlaybackState = activeAudioStatus?.state ?? playbackStatus?.state ?? 'idle';
+  const statusVolume = volumeFromStatus(activeAudioStatus, playbackStatus);
+  latestStatusVolumeRef.current = statusVolume;
+  const visualState = activeAudioStatus?.state ?? playbackStatus?.state ?? 'idle';
   const statusTrackId = activeAudioStatus?.currentTrackId ?? playbackStatus?.currentTrackId ?? null;
   const statusFilePath = activeAudioStatus?.currentFilePath ?? playbackStatus?.filePath ?? null;
   const statusMatchedTrack =
     (statusTrackId
-      ? queue.tracks.find((track) => track.id === statusTrackId) ??
-        (queue.currentTrack?.id === statusTrackId ? queue.currentTrack : null) ??
-        (queue.lastPlayedTrack?.id === statusTrackId ? queue.lastPlayedTrack : null)
+      ? queueTracks.find((track) => track.id === statusTrackId) ??
+        (queueSession?.lastPlayedTrack?.id === statusTrackId ? queueSession.lastPlayedTrack : null)
       : null) ??
     (statusFilePath
-      ? queue.tracks.find((track) => track.path === statusFilePath) ??
-        (queue.currentTrack?.path === statusFilePath ? queue.currentTrack : null) ??
-        (queue.lastPlayedTrack?.path === statusFilePath ? queue.lastPlayedTrack : null)
+      ? queueTracks.find((track) => track.path === statusFilePath) ??
+        (queueSession?.lastPlayedTrack?.path === statusFilePath ? queueSession.lastPlayedTrack : null)
       : null);
-  const trackId = statusTrackId ?? statusMatchedTrack?.id ?? queue.currentTrackId ?? null;
+  const trackId = statusTrackId ?? statusMatchedTrack?.id ?? queueSession?.currentTrackId ?? null;
   const currentTrack =
     statusMatchedTrack ??
     (!statusTrackId && !statusFilePath
-      ? queue.currentTrack ??
-        queue.tracks.find((track) => track.id === trackId) ??
-        (queue.lastPlayedTrack?.id === trackId ? queue.lastPlayedTrack : null)
+      ? queueTracks.find((track) => track.id === trackId) ??
+        (queueSession?.lastPlayedTrack?.id === trackId ? queueSession.lastPlayedTrack : null)
       : null);
   const filePath = currentTrack?.path ?? statusFilePath;
-  const title = currentTrack?.title?.trim() || activeAudioStatus?.currentTrackTitle?.trim() || titleFromPath(filePath);
+  const title =
+    currentTrack?.title?.trim() ||
+    activeAudioStatus?.currentTrackTitle?.trim() ||
+    (filePath ? titleFromPath(filePath) : t('miniPlayer.status.ready'));
   const artist =
     currentTrack?.artist?.trim() ||
     currentTrack?.albumArtist?.trim() ||
     activeAudioStatus?.currentTrackArtist?.trim() ||
     activeAudioStatus?.currentTrackAlbumArtist?.trim() ||
-    (filePath ? t('miniPlayer.artist.unknown') : t('miniPlayer.status.ready'));
+    (filePath ? t('miniPlayer.artist.unknown') : '');
   const artworkUrl = lightweightArtworkUrl(currentTrack, activeAudioStatus);
-  const isSpotifyCurrentTrack = isSpotifyTrack(currentTrack);
-  const playbackRate = activeAudioStatus?.playbackRate ?? 1;
   const durationSeconds = Math.max(
     0,
     activeAudioStatus?.durationSeconds ??
       (playbackStatus?.durationMs ? playbackStatus.durationMs / 1000 : currentTrack?.duration ?? 0),
   );
   const sourcePositionSeconds = Math.max(0, activeAudioStatus?.positionSeconds ?? (playbackStatus?.positionMs ?? 0) / 1000);
-  const progressTrackKey = playbackTrackKey(activeAudioStatus, playbackStatus, currentTrack?.id ?? trackId);
-  const positionSeconds = seekPreviewSeconds ?? realtimePositionSeconds;
+  const positionSeconds = seekPreviewSeconds ?? sourcePositionSeconds;
   const progress = durationSeconds > 0 ? clamp(positionSeconds / durationSeconds, 0, 1) : 0;
-  const hasPlayableTarget = Boolean(filePath || currentTrack || playbackStatus || activeAudioStatus);
-  const queueItems = queue.items;
-  const activeQueueId = queue.currentQueueId ?? queueItems.find((item) => item.track.id === trackId)?.queueId ?? null;
-  const hasQueuePreview = queueItems.length > 0 || Boolean(currentTrack || title);
+  const hasPlayableTarget = Boolean(filePath || currentTrack || statusTrackId || statusFilePath);
+  const statusMatchedQueueItems = queueItems.filter((item) =>
+    Boolean(statusTrackId && item.track.id === statusTrackId) ||
+    Boolean(statusFilePath && item.track.path === statusFilePath),
+  );
+  const statusMatchedQueueId =
+    statusMatchedQueueItems.find((item) => item.queueId === queueSession?.currentQueueId)?.queueId ??
+    statusMatchedQueueItems[0]?.queueId ??
+    null;
+  const activeQueueId = statusTrackId || statusFilePath
+    ? statusMatchedQueueId
+    : queueSession?.currentQueueId ?? queueItems.find((item) => item.track.id === trackId)?.queueId ?? null;
+  const hasQueuePreview = queueItems.length > 0 || Boolean(currentTrack || statusTrackId || statusFilePath);
+  const currentQueueIndex = activeQueueId ? queueItems.findIndex((item) => item.queueId === activeQueueId) : -1;
+  const canGoPrevious = Boolean(
+    queueSession?.history.length ||
+    currentQueueIndex > 0 ||
+    (queueSession?.mode.repeatMode === 'all' && queueItems.length > 1),
+  );
+  const canGoNext = Boolean(
+    queueItems.length > 0 &&
+    (
+      currentQueueIndex < 0 ||
+      currentQueueIndex < queueItems.length - 1 ||
+      queueSession?.mode.repeatMode === 'all' ||
+      queueSession?.mode.repeatMode === 'one' ||
+      queueSession?.mode.isShuffleEnabled ||
+      queueSession?.mode.autoFillQueueEnabled === true
+    ),
+  );
   const displayVolume = fixedVolumeEnabled ? 1 : volumePreview;
   const VolumeIcon = displayVolume <= 0 ? VolumeX : displayVolume < 0.5 ? Volume1 : Volume2;
 
@@ -301,7 +443,6 @@ export const MiniPlayerApp = (): JSX.Element => {
       const getSettings = window.echo?.app?.getSettings;
       if (typeof getSettings !== 'function') {
         setFixedVolumeEnabled(false);
-        setEnhancedLowLoadPlaybackActive(false);
         return;
       }
 
@@ -309,13 +450,11 @@ export const MiniPlayerApp = (): JSX.Element => {
         .then((settings) => {
           if (!cancelled) {
             setFixedVolumeEnabled(readFixedVolumeEnabled(settings));
-            setEnhancedLowLoadPlaybackActive(readEnhancedLowLoadPlaybackActive(settings));
           }
         })
         .catch(() => {
           if (!cancelled) {
             setFixedVolumeEnabled(false);
-            setEnhancedLowLoadPlaybackActive(false);
           }
         });
     };
@@ -333,10 +472,12 @@ export const MiniPlayerApp = (): JSX.Element => {
 
     refreshMiniPlayerAudioSettings();
     window.addEventListener('settings:changed', handleSettingsChanged);
+    document.addEventListener('visibilitychange', refreshMiniPlayerAudioSettings);
 
     return () => {
       cancelled = true;
       window.removeEventListener('settings:changed', handleSettingsChanged);
+      document.removeEventListener('visibilitychange', refreshMiniPlayerAudioSettings);
     };
   }, []);
 
@@ -349,154 +490,15 @@ export const MiniPlayerApp = (): JSX.Element => {
   }, [fixedVolumeEnabled, statusVolume]);
 
   useEffect(() => {
-    if (trackId) {
-      setQueueCurrentTrackId(trackId);
+    if (isQueueOpen) {
+      activeQueueItemRef.current?.scrollIntoView?.({ block: 'nearest' });
     }
-  }, [setQueueCurrentTrackId, trackId]);
+  }, [activeQueueId, isQueueOpen]);
 
-  useEffect(() => {
-    syncQueuePlaybackState(visualState);
-  }, [syncQueuePlaybackState, visualState]);
-
-  useEffect(() => {
-    const now = performance.now();
-    const previous = clockRef.current;
-    const samePlayback = previous.trackKey === progressTrackKey;
-    const boundedSourcePosition = durationSeconds > 0 ? clamp(sourcePositionSeconds, 0, durationSeconds) : Math.max(0, sourcePositionSeconds);
-    let nextPositionSeconds = boundedSourcePosition;
-    const seekAnchor = seekAnchorRef.current;
-
-    if (seekAnchor) {
-      if (seekAnchor.trackKey && progressTrackKey && seekAnchor.trackKey !== progressTrackKey) {
-        seekAnchorRef.current = null;
-      } else {
-        const elapsedSeconds = Math.max(0, (now - seekAnchor.updatedAtMs) / 1000);
-        const expectedSeekPosition = durationSeconds > 0
-          ? clamp(seekAnchor.positionSeconds + (visualState === 'playing' ? elapsedSeconds * playbackRate : 0), 0, durationSeconds)
-          : Math.max(0, seekAnchor.positionSeconds + (visualState === 'playing' ? elapsedSeconds * playbackRate : 0));
-        const sourceReachedSeekTarget = boundedSourcePosition >= seekAnchor.positionSeconds;
-        const isStaleStatusAfterSeek =
-          elapsedSeconds < seekAnchorMaxAgeSeconds &&
-          (!sourceReachedSeekTarget || Math.abs(boundedSourcePosition - expectedSeekPosition) > seekAnchorSettleToleranceSeconds);
-
-        if (isStaleStatusAfterSeek) {
-          nextPositionSeconds = expectedSeekPosition;
-        } else {
-          seekAnchorRef.current = null;
-        }
-      }
-    }
-
-    if (!seekAnchorRef.current && samePlayback && previous.state === 'playing' && visualState === 'playing') {
-      const estimatedPositionSeconds = previous.positionSeconds + ((now - previous.updatedAtMs) / 1000) * previous.playbackRate;
-      const boundedEstimate = durationSeconds > 0 ? clamp(estimatedPositionSeconds, 0, durationSeconds) : Math.max(0, estimatedPositionSeconds);
-      if (boundedSourcePosition + 1.25 < boundedEstimate) {
-        nextPositionSeconds = boundedEstimate;
-      }
-    }
-
-    clockRef.current = {
-      durationSeconds,
-      playbackRate,
-      positionSeconds: nextPositionSeconds,
-      sourcePositionSeconds: boundedSourcePosition,
-      state: visualState,
-      trackKey: progressTrackKey,
-      updatedAtMs: now,
-    };
-    setRealtimePositionSeconds(nextPositionSeconds);
-  }, [durationSeconds, playbackRate, progressTrackKey, sourcePositionSeconds, visualState]);
-
-  useEffect(() => {
-    if (visualState !== 'playing' || realtimePlaybackState !== 'playing' || seekPreviewSeconds !== null) {
-      return undefined;
-    }
-
-    const updateRealtimePosition = (): void => {
-      const clock = clockRef.current;
-      if (clock.state !== 'playing') {
-        return;
-      }
-      const elapsedSeconds = ((performance.now() - clock.updatedAtMs) / 1000) * clock.playbackRate;
-      const nextPosition = clock.positionSeconds + elapsedSeconds;
-      const nextPositionSeconds = clock.durationSeconds > 0 ? clamp(nextPosition, 0, clock.durationSeconds) : Math.max(0, nextPosition);
-      setRealtimePositionSeconds((currentPositionSeconds) =>
-        Math.abs(nextPositionSeconds - currentPositionSeconds) >= minRealtimeProgressStepSeconds
-          ? nextPositionSeconds
-          : currentPositionSeconds,
-      );
-    };
-
-    if (enhancedLowLoadPlaybackActive) {
-      const timer = window.setInterval(updateRealtimePosition, enhancedLowLoadProgressRenderIntervalMs);
-      return () => window.clearInterval(timer);
-    }
-
-    let frameId: number | null = null;
-    let backgroundTimerId: number | null = null;
-    const stopRealtimeFrame = (): void => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-        frameId = null;
-      }
-    };
-    const stopBackgroundTimer = (): void => {
-      if (backgroundTimerId !== null) {
-        window.clearInterval(backgroundTimerId);
-        backgroundTimerId = null;
-      }
-    };
-    const tick = (): void => {
-      updateRealtimePosition();
-      frameId = window.requestAnimationFrame(tick);
-    };
-
-    const syncProgressLoop = (): void => {
-      stopRealtimeFrame();
-      stopBackgroundTimer();
-
-      if (document.visibilityState === 'visible') {
-        frameId = window.requestAnimationFrame(tick);
-      } else {
-        updateRealtimePosition();
-        backgroundTimerId = window.setInterval(updateRealtimePosition, enhancedLowLoadProgressRenderIntervalMs);
-      }
-    };
-
-    syncProgressLoop();
-    document.addEventListener('visibilitychange', syncProgressLoop);
-    return () => {
-      document.removeEventListener('visibilitychange', syncProgressLoop);
-      stopRealtimeFrame();
-      stopBackgroundTimer();
-    };
-  }, [enhancedLowLoadPlaybackActive, realtimePlaybackState, seekPreviewSeconds, visualState]);
-
-  useEffect(() => {
-    requestMiniPlayerQueueBounds(isQueueOpen);
-
-    return () => {
-      if (isQueueOpen) {
-        requestMiniPlayerQueueBounds(false);
-      }
-    };
-  }, [isQueueOpen]);
-
-  const runPlaybackAction = useCallback(async (
-    action: () => Promise<PlaybackStatus | null | void>,
-    options: { applyStatusSnapshot?: (status: PlaybackStatus) => void } = {},
-  ): Promise<boolean> => {
+  const runPlaybackAction = useCallback(async (action: () => Promise<void>): Promise<boolean> => {
     try {
       setError(null);
-      const status = await action();
-      if (status) {
-        if (options.applyStatusSnapshot) {
-          options.applyStatusSnapshot(status);
-        } else {
-          setPlaybackStatusSnapshot({ playbackStatus: status, error: null });
-        }
-      }
-      void refreshPlaybackStatus();
+      await action();
       return true;
     } catch (actionError) {
       const message = actionError instanceof Error ? actionError.message : String(actionError);
@@ -507,113 +509,75 @@ export const MiniPlayerApp = (): JSX.Element => {
   }, []);
 
   const handlePlayPause = useCallback(async (): Promise<void> => {
-    const playback = window.echo?.playback;
+    const controlMainWindow = window.echo?.playback?.controlMainWindow;
+    if (!controlMainWindow) {
+      setError(translateStatic('error.bridge.desktopShort'));
+      return;
+    }
+    await runPlaybackAction(() => controlMainWindow({ type: 'playPause' }));
+  }, [runPlaybackAction]);
 
-    if (queue.hqPlayerTakeoverEnabled) {
-      if (activeStates.has(visualState)) {
-        setError(t('miniPlayer.status.hqPlayerTakeover'));
-        return;
-      }
-
-      await runPlaybackAction(queue.activateHqPlayerTakeover);
+  const runTransportAction = useCallback(async (type: 'previous' | 'next'): Promise<void> => {
+    if (transportPendingRef.current) {
       return;
     }
 
-    if (isSpotifyCurrentTrack && currentTrack) {
-      await runPlaybackAction(() => (activeStates.has(visualState) ? pauseSpotifyPlayback(currentTrack) : resumeSpotifyPlayback(currentTrack)));
+    const controlMainWindow = window.echo?.playback?.controlMainWindow;
+    if (!controlMainWindow) {
+      setError(translateStatic('error.bridge.desktopShort'));
       return;
     }
 
-    if (!playback) {
-      setError('Desktop bridge unavailable');
-      return;
+    transportPendingRef.current = true;
+    setTransportPending(true);
+    try {
+      await runPlaybackAction(() => controlMainWindow({ type }));
+    } finally {
+      transportPendingRef.current = false;
+      setTransportPending(false);
     }
-
-    await runPlaybackAction(async () => {
-      if (activeStates.has(visualState)) {
-        return playback.pause();
-      }
-
-      const latestStatus = await playback.getStatus();
-      if (activeStates.has(latestStatus.state)) {
-        return playback.pause();
-      }
-      if (restartStates.has(latestStatus.state) && queue.currentItem) {
-        return queue.playQueueItem(queue.currentItem.queueId);
-      }
-      if (restartStates.has(latestStatus.state) && currentTrack) {
-        return queue.playTrack(currentTrack);
-      }
-      return playback.play();
-    });
-  }, [currentTrack, isSpotifyCurrentTrack, queue, runPlaybackAction, t, visualState]);
+  }, [runPlaybackAction]);
 
   const handlePrevious = useCallback((): void => {
-    void runPlaybackAction(queue.playPrevious);
-  }, [queue.playPrevious, runPlaybackAction]);
+    void runTransportAction('previous');
+  }, [runTransportAction]);
 
   const handleNext = useCallback((): void => {
-    void runPlaybackAction(queue.playNext);
-  }, [queue.playNext, runPlaybackAction]);
+    void runTransportAction('next');
+  }, [runTransportAction]);
 
   const commitSeek = useCallback(
     async (nextPositionSeconds: number): Promise<void> => {
       const safePositionSeconds = durationSeconds > 0 ? clamp(nextPositionSeconds, 0, durationSeconds) : Math.max(0, nextPositionSeconds);
-      const previousPositionSeconds = durationSeconds > 0 ? clamp(sourcePositionSeconds, 0, durationSeconds) : Math.max(0, sourcePositionSeconds);
-      const now = performance.now();
-      seekAnchorRef.current = {
-        positionSeconds: safePositionSeconds,
-        trackKey: progressTrackKey,
-        updatedAtMs: now,
-      };
-      clockRef.current = {
-        durationSeconds,
-        playbackRate,
-        positionSeconds: safePositionSeconds,
-        sourcePositionSeconds: safePositionSeconds,
-        state: visualState,
-        trackKey: progressTrackKey,
-        updatedAtMs: now,
-      };
+      pendingSeekTargetRef.current = safePositionSeconds;
       setSeekPreviewSeconds(safePositionSeconds);
-      setRealtimePositionSeconds(safePositionSeconds);
-
-      const succeeded = await runPlaybackAction(async () => {
-        const targetPositionMs = Math.round(safePositionSeconds * 1000);
-        if (isSpotifyCurrentTrack && currentTrack) {
-          const status = await seekSpotifyPlayback(currentTrack, safePositionSeconds);
-          return { ...status, positionMs: targetPositionMs };
-        }
-
-        if (queue.hqPlayerTakeoverEnabled) {
-          const connectStatus = await window.echo?.connect?.seek?.(safePositionSeconds);
-          if (connectStatus) {
-            return {
-              state: connectStatus.state === 'playing' ? 'playing' : connectStatus.state === 'paused' ? 'paused' : 'loading',
-              currentTrackId: connectStatus.currentTrackId ?? trackId,
-              positionMs: targetPositionMs,
-              durationMs: Math.round(Math.max(0, connectStatus.durationSeconds) * 1000),
-              filePath,
-            };
-          }
-        }
-
-        const status = await window.echo?.playback?.seek?.(safePositionSeconds);
-        return status ? { ...status, positionMs: targetPositionMs } : status;
-      }, { applyStatusSnapshot: beginPlaybackSeekSnapshot });
-      if (!succeeded) {
-        seekAnchorRef.current = null;
-        clockRef.current = {
-          ...clockRef.current,
-          positionSeconds: previousPositionSeconds,
-          sourcePositionSeconds: previousPositionSeconds,
-          updatedAtMs: performance.now(),
-        };
-        setRealtimePositionSeconds(previousPositionSeconds);
+      if (seekCommittingRef.current) {
+        return;
       }
-      setSeekPreviewSeconds(null);
+
+      const controlMainWindow = window.echo?.playback?.controlMainWindow;
+      if (!controlMainWindow) {
+        setError(translateStatic('error.bridge.desktopShort'));
+        pendingSeekTargetRef.current = null;
+        setSeekPreviewSeconds(null);
+        return;
+      }
+
+      seekCommittingRef.current = true;
+      try {
+        while (pendingSeekTargetRef.current !== null) {
+          const targetPositionSeconds = pendingSeekTargetRef.current;
+          pendingSeekTargetRef.current = null;
+          await runPlaybackAction(() => controlMainWindow({ type: 'seek', positionSeconds: targetPositionSeconds }));
+        }
+      } finally {
+        seekCommittingRef.current = false;
+        if (pendingSeekTargetRef.current === null) {
+          setSeekPreviewSeconds(null);
+        }
+      }
     },
-    [currentTrack, durationSeconds, filePath, isSpotifyCurrentTrack, playbackRate, progressTrackKey, queue.hqPlayerTakeoverEnabled, runPlaybackAction, sourcePositionSeconds, trackId, visualState],
+    [durationSeconds, runPlaybackAction],
   );
 
   const handleProgressChange = (event: ChangeEvent<HTMLInputElement>): void => {
@@ -632,28 +596,11 @@ export const MiniPlayerApp = (): JSX.Element => {
 
       try {
         setError(null);
-        if (fixedVolumeEnabled) {
-          const nextStatus = await window.echo?.audio?.setOutput?.({ volume: 1 });
-          if (nextStatus) {
-            setPlaybackStatusSnapshot({ audioStatus: nextStatus, error: null });
-          }
-          return;
+        const controlMainWindow = window.echo?.playback?.controlMainWindow;
+        if (!controlMainWindow) {
+          throw new Error(translateStatic('error.bridge.desktopShort'));
         }
-
-        if (isSpotifyCurrentTrack && currentTrack) {
-          await setSpotifyVolume(safeVolume);
-        } else {
-          const audio = window.echo?.audio;
-          if (!audio) {
-            throw new Error('Desktop bridge unavailable');
-          }
-
-          const nextStatus = await audio.setOutput({ volume: safeVolume });
-          setPlaybackStatusSnapshot({ audioStatus: nextStatus, error: null });
-        }
-
-        void window.echo?.app?.setSettings?.({ playerVolume: safeVolume }).catch(() => undefined);
-        void refreshPlaybackStatus();
+        await controlMainWindow({ type: 'setVolume', volume: safeVolume });
       } catch (volumeError) {
         const message = volumeError instanceof Error ? volumeError.message : String(volumeError);
         setError(message);
@@ -661,10 +608,11 @@ export const MiniPlayerApp = (): JSX.Element => {
       } finally {
         if (pendingVolumeRef.current === safeVolume) {
           pendingVolumeRef.current = null;
+          setVolumePreview(fixedVolumeEnabled ? 1 : latestStatusVolumeRef.current);
         }
       }
     },
-    [currentTrack, fixedVolumeEnabled, isSpotifyCurrentTrack],
+    [fixedVolumeEnabled],
   );
 
   const handleVolumeChange = (event: ChangeEvent<HTMLInputElement>): void => {
@@ -682,18 +630,36 @@ export const MiniPlayerApp = (): JSX.Element => {
   }, []);
 
   const handleToggleQueue = useCallback((): void => {
-    setIsQueueOpen((open) => {
-      const nextOpen = !open;
-      requestMiniPlayerQueueBounds(nextOpen);
-      return nextOpen;
-    });
-  }, []);
+    const setQueueOpen = window.echo?.miniPlayer?.setQueueOpen;
+    const nextOpen = !isQueueOpen;
+    if (!setQueueOpen) {
+      setError(translateStatic('error.bridge.desktopShort'));
+      return;
+    }
+
+    setIsQueueOpen(nextOpen);
+    setError(null);
+    void setQueueOpen(nextOpen)
+      .then((state) => {
+        setMiniPlayerState(state);
+        if (typeof state.queueOpen === 'boolean') {
+          setIsQueueOpen(state.queueOpen);
+        }
+      })
+      .catch((queueError) => {
+        setIsQueueOpen(!nextOpen);
+        setError(queueError instanceof Error ? queueError.message : String(queueError));
+      });
+  }, [isQueueOpen]);
 
   const handlePlayQueueItem = useCallback(
     (queueId: string): void => {
-      void runPlaybackAction(() => queue.playQueueItem(queueId));
+      const controlMainWindow = window.echo?.playback?.controlMainWindow;
+      if (controlMainWindow) {
+        void runPlaybackAction(() => controlMainWindow({ type: 'playQueueItem', queueId }));
+      }
     },
-    [queue, runPlaybackAction],
+    [runPlaybackAction],
   );
 
   const style = {
@@ -720,14 +686,14 @@ export const MiniPlayerApp = (): JSX.Element => {
         <div className="mini-player-main">
           <div className="mini-player-title-row">
             <div className="mini-player-copy">
-              <strong title={title}>{title}</strong>
+              <ScrollingTrackTitle title={title} />
               <span title={artist}>{artist}</span>
             </div>
             <div className="mini-player-transport">
               <button
                 aria-label={t('miniPlayer.action.previous')}
                 className="mini-player-icon-button mini-player-icon-button--transport"
-                disabled={!queue.canGoPrevious}
+                disabled={!canGoPrevious || transportPending}
                 title={t('miniPlayer.action.previous')}
                 type="button"
                 onClick={handlePrevious}
@@ -747,7 +713,7 @@ export const MiniPlayerApp = (): JSX.Element => {
               <button
                 aria-label={t('miniPlayer.action.next')}
                 className="mini-player-icon-button mini-player-icon-button--transport"
-                disabled={!queue.canGoNext}
+                disabled={!canGoNext || transportPending}
                 title={t('miniPlayer.action.next')}
                 type="button"
                 onClick={handleNext}
@@ -841,6 +807,17 @@ export const MiniPlayerApp = (): JSX.Element => {
                 type="range"
                 value={clamp(positionSeconds, 0, Math.max(1, durationSeconds))}
                 onChange={handleProgressChange}
+                onBlur={(event) => {
+                  if (seekPreviewSeconds !== null && !seekCommittingRef.current) {
+                    void commitSeek(Number(event.currentTarget.value));
+                  }
+                }}
+                onKeyUp={(event) => {
+                  if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End' || event.key === 'Enter' || event.key === ' ') {
+                    void commitSeek(Number(event.currentTarget.value));
+                  }
+                }}
+                onPointerCancel={() => setSeekPreviewSeconds(null)}
                 onPointerUp={handleProgressPointerUp}
               />
               <span>{formatTime(durationSeconds)}</span>
@@ -849,10 +826,14 @@ export const MiniPlayerApp = (): JSX.Element => {
           {error ? <p className="mini-player-error" title={error}>{error}</p> : null}
         </div>
         {isQueueOpen ? (
-          <div className="mini-player-queue-panel" role="listbox" aria-label={t('miniPlayer.aria.queue')}>
+          <div className="mini-player-queue-panel" role="group" aria-label={t('miniPlayer.aria.queue')}>
+            <div className="mini-player-queue-header" aria-hidden="true">
+              <strong>{t('miniPlayer.aria.queue')}</strong>
+              <span>{queueItems.length}</span>
+            </div>
             {queueItems.length > 0 ? (
-              queueItems.map((item) => {
-                const isActive = item.queueId === activeQueueId || item.track.id === trackId;
+              queueItems.map((item, index) => {
+                const isActive = activeQueueId ? item.queueId === activeQueueId : item.track.id === trackId;
                 const itemTitle = item.track.title || titleFromPath(item.track.path);
                 const itemArtist = item.track.artist?.trim() || item.track.albumArtist?.trim();
 
@@ -861,21 +842,24 @@ export const MiniPlayerApp = (): JSX.Element => {
                     key={item.queueId}
                     aria-current={isActive ? 'true' : undefined}
                     className="mini-player-queue-item"
+                    ref={isActive ? activeQueueItemRef : undefined}
                     title={itemArtist ? `${itemTitle} - ${itemArtist}` : itemTitle}
                     type="button"
                     onClick={() => handlePlayQueueItem(item.queueId)}
                   >
                     <span className="mini-player-queue-playing" aria-hidden="true">
-                      {isActive ? '||' : ''}
+                      {isActive ? <AudioLines size={13} /> : index + 1}
                     </span>
                     <span className="mini-player-queue-title">{itemTitle}</span>
+                    <span className="mini-player-queue-duration">{formatTime(item.track.duration ?? 0)}</span>
                   </button>
                 );
               })
             ) : currentTrack || title ? (
               <div className="mini-player-queue-item mini-player-queue-item--static" aria-current="true">
-                <span className="mini-player-queue-playing" aria-hidden="true">||</span>
+                <span className="mini-player-queue-playing" aria-hidden="true"><AudioLines size={13} /></span>
                 <span className="mini-player-queue-title">{title}</span>
+                <span className="mini-player-queue-duration">{formatTime(durationSeconds)}</span>
               </div>
             ) : (
               <p className="mini-player-queue-empty">{t('miniPlayer.status.queueEmpty')}</p>

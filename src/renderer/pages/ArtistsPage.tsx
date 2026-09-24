@@ -13,7 +13,7 @@ import { InfiniteScrollSentinel, readPageScrollTop, writePageScrollTop } from '.
 import { MediaWallScrollSpacer, useMediaWallScrollSpacer } from '../components/ui/MediaWallScrollSpacer';
 import { useI18n } from '../i18n/I18nProvider';
 import type { TranslationKey } from '../i18n/locales';
-import { useSharedPlaybackStatus } from '../stores/playbackStatusStore';
+import { useSharedPlaybackActivityState } from '../stores/playbackStatusStore';
 import type { DetailReturnTarget } from '../utils/albumNavigation';
 import { artistDetailNavigationEvent, consumePendingArtistDetailNavigation } from '../utils/artistNavigation';
 import { getRemoteSourcesBridge } from '../utils/echoBridge';
@@ -187,10 +187,8 @@ export const ArtistsPage = (): JSX.Element => {
   const sourceRouteReturnCloseTimerRef = useRef<number | null>(null);
   const requestedArtistImageIdsRef = useRef(new Set<string>());
   const pauseDeferredArtistImages = useScrollImagePause(pageRootRef);
-  const playbackStatusSnapshot = useSharedPlaybackStatus();
-  const remoteSourceRefreshPlaybackBusy = isRemoteSourceRefreshPlaybackBusy(
-    playbackStatusSnapshot.audioStatus?.state ?? playbackStatusSnapshot.playbackStatus?.state,
-  );
+  const playbackActivityState = useSharedPlaybackActivityState();
+  const remoteSourceRefreshPlaybackBusy = isRemoteSourceRefreshPlaybackBusy(playbackActivityState);
   const { wallRef: artistWallRef, spacerHeight } = useMediaWallScrollSpacer<HTMLElement>({
     itemCount: artists.length,
     totalCount: total,
@@ -762,6 +760,12 @@ export const ArtistsPage = (): JSX.Element => {
 
     if (selectedArtistReturnTo === 'folders') {
       window.dispatchEvent(new CustomEvent('app:navigate:route', { detail: 'folders' }));
+      closeArtistDetailAfterSourceRouteSwitch();
+      return;
+    }
+
+    if (selectedArtistReturnTo === 'playlists') {
+      window.dispatchEvent(new CustomEvent('app:navigate:route', { detail: 'playlists' }));
       closeArtistDetailAfterSourceRouteSwitch();
       return;
     }

@@ -1,6 +1,6 @@
 # ECHO Pro Cloud 宝塔部署教程
 
-这个目录包含可公开的服务端源码。请勿把密码、令牌、数据库或其他运行时凭据提交到 GitHub。
+这个目录是私有目录，已经被 `.gitignore` 忽略。不要上传到 GitHub。
 
 ## 0. 先做安全处理
 
@@ -39,7 +39,7 @@ node -v
 当前本机部署包：
 
 ```text
-<PROJECT_ROOT>\private\echo-pro-cloud\echo-pro-cloud-deploy.zip
+G:\ECHO-main\private\echo-pro-cloud\echo-pro-cloud-deploy.zip
 ```
 
 推荐方式 A：宝塔文件管理器上传
@@ -62,7 +62,7 @@ node -v
 方式 B：本机 PowerShell 上传
 
 ```powershell
-scp <PROJECT_ROOT>/private/echo-pro-cloud/echo-pro-cloud-deploy.zip root@<YOUR_SERVER_IP>:/root/
+scp G:\ECHO-main\private\echo-pro-cloud\echo-pro-cloud-deploy.zip root@154.37.219.204:/root/
 ```
 
 然后 SSH 到服务器：

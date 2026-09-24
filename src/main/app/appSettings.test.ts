@@ -29,6 +29,8 @@ describe('app settings normalization', () => {
 
     expect(normalizeSystemLocale('zh-HK')).toBe('zh-TW');
     expect(normalizeSystemLocale('ja-JP')).toBe('ja-JP');
+    expect(normalizeSystemLocale('ko')).toBe('ko-KR');
+    expect(normalizeSystemLocale('ko-KR')).toBe('ko-KR');
     expect(normalizeSystemLocale('en-GB')).toBe('en-US');
     expect(normalizeSystemLocale('fr-FR')).toBe('zh-CN');
 
@@ -36,6 +38,53 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({}).locale).toBe('ja-JP');
     expect(normalizeSettings({ locale: 'en-US' }).locale).toBe('en-US');
     expect(normalizeSettings({ locale: 'bad' }).locale).toBe('ja-JP');
+  });
+
+  it('keeps only HTTPS custom update URLs', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+
+    expect(normalizeSettings({ autoUpdateCustomUrl: ' https://updates.example.com/releases/ ' }).autoUpdateCustomUrl)
+      .toBe('https://updates.example.com/releases');
+    expect(normalizeSettings({ autoUpdateCustomUrl: 'http://updates.example.com/releases' }).autoUpdateCustomUrl).toBeNull();
+    expect(normalizeSettings({ autoUpdateCustomUrl: 'file:///C:/updates' }).autoUpdateCustomUrl).toBeNull();
+  });
+
+  it('preserves the editorial lyrics page style', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+
+    expect(normalizeSettings({ lyricsPageStyle: 'editorial' }).lyricsPageStyle).toBe('editorial');
+    expect(normalizeSettings({ lyricsPageStyle: 'unsupported' }).lyricsPageStyle).toBe('default');
+  });
+
+  it('normalizes accessibility preferences and rejects unsupported UI scales', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+
+    expect(normalizeSettings({
+      accessibilityPreferences: {
+        reduceMotionEnabled: true,
+        highContrastEnabled: true,
+        uiScalePercent: 130,
+        alwaysShowFocusEnabled: true,
+        screenReaderAnnouncementsEnabled: true,
+      },
+    }).accessibilityPreferences).toEqual({
+      reduceMotionEnabled: true,
+      highContrastEnabled: true,
+      uiScalePercent: 130,
+      alwaysShowFocusEnabled: true,
+      screenReaderAnnouncementsEnabled: true,
+    });
+
+    expect(normalizeSettings({
+      accessibilityPreferences: { uiScalePercent: 999 },
+    }).accessibilityPreferences?.uiScalePercent).toBe(100);
+  });
+
+  it('keeps DSD passthrough off by default while preserving an explicit opt-in', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+
+    expect(normalizeSettings({}).audioDsdOutputMode).toBe('pcm');
+    expect(normalizeSettings({ audioDsdOutputMode: 'dop' }).audioDsdOutputMode).toBe('dop');
   });
 
   it('keeps old settings files compatible when coverCacheDir is missing', async () => {
@@ -68,13 +117,16 @@ describe('app settings normalization', () => {
     expect(settings.artistWallAlbumFallbackForMissingAvatars).toBe(false);
     expect(settings.autoFetchArtistImages).toBe(false);
     expect(settings.artistImageFetchPaused).toBe(false);
+    expect(settings.lowSpecModeEnabled).toBe(false);
     expect(settings.safeModeEnabled).toBe(false);
     expect(settings.launchAtLoginEnabled).toBe(false);
     expect(settings.fastStartupEnabled).toBe(false);
     expect(settings.hardwareAccelerationDisabled).toBe(false);
     expect(settings.lyricsMvGraphicsPressureGuardEnabled).toBe(false);
-    expect(settings.dataProtectionDisabled).toBe(false);
+    expect(settings.dataProtectionDisabled).toBe(true);
     expect(settings.autoAccountCheckOnStartup).toBe(true);
+    expect(settings.preventSleepWhilePlaying).toBe(false);
+    expect(settings.autoPlayOnStartup).toBe(false);
     expect(settings.spotifyAutoLaunchOfficialPlayer).toBe(true);
     expect(settings.connectAutoStartReceiversEnabled).toBe(false);
     expect(settings.airPlayReceiverProtocol).toBe('airplay1');
@@ -95,7 +147,6 @@ describe('app settings normalization', () => {
     expect(settings.sidebarAutoHideEnabled).toBe(false);
     expect(settings.sidebarIconOnlyEnabled).toBe(false);
     expect(settings.settingsOptionalSectionsVisible).toBe(false);
-    expect(settings.featureCommentsHidden).toBe(false);
     expect(settings.touchOnScreenKeyboardEnabled).toBe(false);
     expect(settings.rememberWindowSizeEnabled).toBe(true);
     expect(settings.rememberedWindowSize).toBeNull();
@@ -131,6 +182,7 @@ describe('app settings normalization', () => {
     expect(settings.hideToTrayOnClose).toBe(true);
     expect(settings.networkMetadataProviders).toEqual(['qq-music']);
     expect(settings.audioAnalysisEnabled).toBe(true);
+    expect(settings.audioDsdOutputMode).toBe('pcm');
     expect(settings.smtcLyricsEnabled).toBe(false);
     expect(settings.lyricsNetworkEnabled).toBe(true);
     expect(settings.lyricsEnabledProviders).toEqual(['local', 'lrclib', 'netease', 'qqmusic', 'kugou', 'kuwo']);
@@ -138,8 +190,8 @@ describe('app settings normalization', () => {
     expect(settings.lyricsDeepSearchEnabled).toBe(true);
     expect(settings.lyricsAutoSearch).toBe(true);
     expect(settings.lyricsAutoApplyEnabled).toBe(true);
-    expect(settings.lyricsAutoAcceptScore).toBe(0.5);
-    expect(settings.lyricsBackfillAutoAcceptScore).toBe(0.45);
+    expect(settings.lyricsAutoAcceptScore).toBe(0.78);
+    expect(settings.lyricsBackfillAutoAcceptScore).toBe(0.78);
     expect(settings.lyricsRestartOnApplyEnabled).toBe(false);
     expect(settings.lyricsAutoSaveSidecarEnabled).toBe(false);
     expect(settings.lyricsDefaultOffsetMs).toBe(0);
@@ -151,6 +203,7 @@ describe('app settings normalization', () => {
     expect(settings.lyricsHeaderHidden).toBe(false);
     expect(settings.lyricsCornerControlsAutoHideEnabled).toBe(false);
     expect(settings.lyricsMvAutoShowTrackInfoDisabled).toBe(true);
+    expect(settings.lyricsCandidatePanelAutoOpenEnabled).toBe(false);
     expect(settings.lyricsEmptyStateHidden).toBe(true);
     expect(settings.lyricsPlayerBarDrawerEnabled).toBe(true);
     expect(settings.lyricsPlayerBarDrawerAutoEnableForMv).toBe(true);
@@ -196,12 +249,15 @@ describe('app settings normalization', () => {
     expect(settings.miniPlayerEnabled).toBe(false);
     expect(settings.miniPlayerLocked).toBe(false);
     expect(settings.miniPlayerBounds).toBeNull();
+    expect(settings.petEnabled).toBe(false);
+    expect(settings.petBounds).toBeNull();
+    expect(settings.petScalePercent).toBe(100);
     expect(settings.mvEnabled).toBe(true);
     expect(settings.mvEnabledProviders).toEqual(['bilibili', 'youtube']);
     expect(settings.mvProviderOrder).toEqual(['bilibili', 'youtube']);
     expect(settings.mvAutoSearch).toBe(true);
     expect(settings.mvAutoApplyThreshold).toBe(0.7);
-    expect(settings.mvTitleOnlySearch).toBe(true);
+    expect(settings.mvTitleOnlySearch).toBe(false);
     expect(settings.mvPreferHighestViewCount).toBe(true);
     expect(settings.mvImmersiveBackground).toBe(true);
     expect(settings.mvImmersiveBackgroundAutoScale).toBe(true);
@@ -259,6 +315,14 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({ safeModeEnabled: 'true' }).safeModeEnabled).toBe(false);
   });
 
+  it('normalizes low spec mode as an explicit opt-in', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+
+    expect(normalizeSettings({}).lowSpecModeEnabled).toBe(false);
+    expect(normalizeSettings({ lowSpecModeEnabled: true }).lowSpecModeEnabled).toBe(true);
+    expect(normalizeSettings({ lowSpecModeEnabled: 'true' as never }).lowSpecModeEnabled).toBe(false);
+  });
+
   it('normalizes native file scanner as an explicit opt-in', async () => {
     const { normalizeSettings } = await import('./appSettings');
 
@@ -281,6 +345,9 @@ describe('app settings normalization', () => {
     const { normalizeSettings } = await import('./appSettings');
 
     expect(normalizeSettings({ songsSort: 'artistAlbum' }).songsSort).toBe('artistAlbum');
+    expect(normalizeSettings({ songsSort: 'lastPlayed' }).songsSort).toBe('lastPlayed');
+    expect(normalizeSettings({ songsSort: 'bpmDesc' }).songsSort).toBe('bpmDesc');
+    expect(normalizeSettings({ songsSort: 'audioSpecDesc' }).songsSort).toBe('audioSpecDesc');
   });
 
   it('normalizes fast startup as an explicit opt-in', async () => {
@@ -332,33 +399,11 @@ describe('app settings normalization', () => {
   });
 
   it('normalizes the upcoming track notice as an explicit opt-in', async () => {
-    const { currentUserNoticeVersion } = await import('../../shared/types/appSettings');
     const { normalizeSettings } = await import('./appSettings');
 
     expect(normalizeSettings({}).upcomingTrackNoticeEnabled).toBe(false);
     expect(normalizeSettings({ upcomingTrackNoticeEnabled: true }).upcomingTrackNoticeEnabled).toBe(true);
     expect(normalizeSettings({ upcomingTrackNoticeEnabled: 'true' as never }).upcomingTrackNoticeEnabled).toBe(false);
-    expect(normalizeSettings({}).userNoticeAcceptedVersion).toBe(0);
-    expect(normalizeSettings({ onboardingCompleted: true }).userNoticeAcceptedVersion).toBe(currentUserNoticeVersion);
-    expect(normalizeSettings({ userNoticeAcceptedVersion: currentUserNoticeVersion }).userNoticeAcceptedVersion).toBe(currentUserNoticeVersion);
-    expect(normalizeSettings({ userNoticeAcceptedVersion: currentUserNoticeVersion + 1 }).userNoticeAcceptedVersion).toBe(0);
-  });
-
-  it('persists migrated user notice acceptance for legacy completed onboarding', async () => {
-    vi.resetModules();
-    const { currentUserNoticeVersion } = await import('../../shared/types/appSettings');
-    userDataPath = join(tmpdir(), `echo-next-settings-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-    tempRoots.push(userDataPath);
-    mkdirSync(userDataPath, { recursive: true });
-    const settingsPath = join(userDataPath, 'echo-settings.json');
-    writeFileSync(settingsPath, `${JSON.stringify({ onboardingCompleted: true }, null, 2)}\n`, 'utf8');
-
-    const { getAppSettings } = await import('./appSettings');
-    const settings = getAppSettings();
-    const persisted = JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<string, unknown>;
-
-    expect(settings.userNoticeAcceptedVersion).toBe(currentUserNoticeVersion);
-    expect(persisted.userNoticeAcceptedVersion).toBe(currentUserNoticeVersion);
   });
 
   it('loads settings files that were saved with a UTF-8 BOM', async () => {
@@ -374,12 +419,13 @@ describe('app settings normalization', () => {
     expect(getAppSettings().playerVolume).toBe(0.42);
   });
 
-  it('normalizes data protection disable as an explicit opt-in', async () => {
+  it('keeps data protection disabled by default while preserving explicit choices', async () => {
     const { normalizeSettings } = await import('./appSettings');
 
-    expect(normalizeSettings({}).dataProtectionDisabled).toBe(false);
+    expect(normalizeSettings({}).dataProtectionDisabled).toBe(true);
     expect(normalizeSettings({ dataProtectionDisabled: true }).dataProtectionDisabled).toBe(true);
-    expect(normalizeSettings({ dataProtectionDisabled: 'true' }).dataProtectionDisabled).toBe(false);
+    expect(normalizeSettings({ dataProtectionDisabled: false }).dataProtectionDisabled).toBe(false);
+    expect(normalizeSettings({ dataProtectionDisabled: 'true' }).dataProtectionDisabled).toBe(true);
   });
 
   it('keeps the home waveform visualizer enabled unless explicitly disabled', async () => {
@@ -1045,6 +1091,18 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({ spotifyAutoLaunchOfficialPlayer: 'no' as never }).spotifyAutoLaunchOfficialPlayer).toBe(true);
   });
 
+  it('normalizes playback startup and sleep prevention settings safely', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+
+    expect(normalizeSettings({}).preventSleepWhilePlaying).toBe(false);
+    expect(normalizeSettings({ preventSleepWhilePlaying: true }).preventSleepWhilePlaying).toBe(true);
+    expect(normalizeSettings({ preventSleepWhilePlaying: false }).preventSleepWhilePlaying).toBe(false);
+    expect(normalizeSettings({ preventSleepWhilePlaying: 'no' as never }).preventSleepWhilePlaying).toBe(false);
+    expect(normalizeSettings({}).autoPlayOnStartup).toBe(false);
+    expect(normalizeSettings({ autoPlayOnStartup: true }).autoPlayOnStartup).toBe(true);
+    expect(normalizeSettings({ autoPlayOnStartup: 'yes' as never }).autoPlayOnStartup).toBe(false);
+  });
+
   it('normalizes optional Spotify OAuth app settings', async () => {
     const { normalizeSettings } = await import('./appSettings');
 
@@ -1126,14 +1184,6 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({ sidebarIconOnlyEnabled: true }).sidebarIconOnlyEnabled).toBe(true);
     expect(normalizeSettings({ sidebarIconOnlyEnabled: 'true' as never }).sidebarIconOnlyEnabled).toBe(false);
     expect(normalizeSettings({ sidebarAutoHideEnabled: true, sidebarIconOnlyEnabled: true }).sidebarIconOnlyEnabled).toBe(false);
-  });
-
-  it('normalizes hidden feature comments as a default-off display preference', async () => {
-    const { normalizeSettings } = await import('./appSettings');
-
-    expect(normalizeSettings({}).featureCommentsHidden).toBe(false);
-    expect(normalizeSettings({ featureCommentsHidden: true }).featureCommentsHidden).toBe(true);
-    expect(normalizeSettings({ featureCommentsHidden: 'true' as never }).featureCommentsHidden).toBe(false);
   });
 
   it('normalizes app wallpaper settings without accepting unsafe paths', async () => {
@@ -1256,6 +1306,7 @@ describe('app settings normalization', () => {
       lastFmAuthToken: null,
       taskbarPlaybackControlsEnabled: true,
       obsBrowserSourceEnabled: false,
+      echoLinkBasicEnabled: false,
       stageApiEnabled: false,
     });
     expect(
@@ -1269,6 +1320,7 @@ describe('app settings normalization', () => {
         lastFmAuthToken: ' token ',
         taskbarPlaybackControlsEnabled: true,
         obsBrowserSourceEnabled: true,
+        echoLinkBasicEnabled: true,
         stageApiEnabled: true,
       }),
     ).toMatchObject({
@@ -1281,6 +1333,7 @@ describe('app settings normalization', () => {
       lastFmAuthToken: 'token',
       taskbarPlaybackControlsEnabled: true,
       obsBrowserSourceEnabled: true,
+      echoLinkBasicEnabled: true,
       stageApiEnabled: true,
     });
     expect(normalizeSettings({ taskbarPlaybackControlsEnabled: false })).toMatchObject({
@@ -1292,26 +1345,37 @@ describe('app settings normalization', () => {
     const { normalizeSettings } = await import('./appSettings');
 
     expect(normalizeSettings({})).toMatchObject({
+      lyricsPlayerBarDrawerShortcutEnabled: false,
+      lyricsPlayerBarDrawerShortcutAccelerator: null,
       miniPlayerEnabled: false,
       miniPlayerLocked: false,
       miniPlayerAutoHideMainWindow: true,
       miniPlayerBounds: null,
+      petEnabled: false,
+      petBounds: null,
+      taskbarMiniPlayerEnabled: false,
     });
     expect(
       normalizeSettings({
         miniPlayerAutoHideMainWindow: false,
+        taskbarMiniPlayerEnabled: true,
       }),
     ).toMatchObject({
       miniPlayerAutoHideMainWindow: false,
+      taskbarMiniPlayerEnabled: true,
     });
     expect(
       normalizeSettings({
         lyricsPlayerBarDrawerAutoEnableForMv: false,
         lyricsPlayerBarDrawerAutoHideEnabled: true,
+        lyricsPlayerBarDrawerShortcutEnabled: true,
+        lyricsPlayerBarDrawerShortcutAccelerator: 'ctrl + alt + b',
       }),
     ).toMatchObject({
       lyricsPlayerBarDrawerAutoEnableForMv: false,
       lyricsPlayerBarDrawerAutoHideEnabled: true,
+      lyricsPlayerBarDrawerShortcutEnabled: true,
+      lyricsPlayerBarDrawerShortcutAccelerator: 'Ctrl+Alt+B',
     });
     expect(
       normalizeSettings({
@@ -1319,12 +1383,18 @@ describe('app settings normalization', () => {
         miniPlayerLocked: true,
         miniPlayerAutoHideMainWindow: true,
         miniPlayerBounds: { x: 12.4, y: 20.6, width: 1200, height: 40 },
+        petEnabled: true,
+        petScalePercent: 150,
+        petBounds: { x: 42.4, y: 60.6, width: 800, height: 900 },
       }),
     ).toMatchObject({
       miniPlayerEnabled: true,
       miniPlayerLocked: false,
       miniPlayerAutoHideMainWindow: true,
       miniPlayerBounds: { x: 12, y: 21, width: 388, height: 74 },
+      petEnabled: true,
+      petScalePercent: 150,
+      petBounds: { x: 42, y: 61, width: 294, height: 294 },
     });
   });
 
@@ -1334,6 +1404,7 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({}).scanPerformanceMode).toBe('balanced');
     expect(normalizeSettings({ scanPerformanceMode: 'low' }).scanPerformanceMode).toBe('low');
     expect(normalizeSettings({ scanPerformanceMode: 'performance' }).scanPerformanceMode).toBe('performance');
+    expect(normalizeSettings({ scanPerformanceMode: 'ultra' }).scanPerformanceMode).toBe('ultra');
     expect(normalizeSettings({ scanPerformanceMode: 'turbo' as never }).scanPerformanceMode).toBe('balanced');
   });
 
@@ -1476,6 +1547,8 @@ describe('app settings normalization', () => {
       sharedBackend: 'auto',
       latencyProfile: 'balanced',
     });
+    expect(normalizeSettings({}).audioAutomaticOutputEnabled).toBe(false);
+    expect(normalizeSettings({ audioAutomaticOutputEnabled: true }).audioAutomaticOutputEnabled).toBe(true);
   });
 
   it('preserves valid remembered audio output latency profiles', async () => {
@@ -1484,12 +1557,20 @@ describe('app settings normalization', () => {
     expect(
       normalizeSettings({
         appMemoryVersion: 5,
-        rememberedAudioOutput: { enabled: true, outputMode: 'asio', latencyProfile: 'balanced' },
+        rememberedAudioOutput: {
+          enabled: true,
+          outputMode: 'asio',
+          latencyProfile: 'balanced',
+          deviceIndex: 3,
+          deviceName: 'FiiO ASIO Driver',
+        },
       }).rememberedAudioOutput,
     ).toMatchObject({
       enabled: true,
       outputMode: 'asio',
       latencyProfile: 'balanced',
+      deviceIndex: 3,
+      deviceName: 'FiiO ASIO Driver',
     });
     expect(
       normalizeSettings({
@@ -1627,6 +1708,7 @@ describe('app settings normalization', () => {
     const { normalizeSettings } = await import('./appSettings');
 
     expect(normalizeSettings({}).audioEchoSrcMode).toBe('off');
+    expect(normalizeSettings({ audioEchoSrcMode: 'compatibility48' }).audioEchoSrcMode).toBe('compatibility48');
     expect(normalizeSettings({ audioEchoSrcMode: 'family2x' }).audioEchoSrcMode).toBe('family2x');
     expect(normalizeSettings({ audioEchoSrcMode: 'family4x' }).audioEchoSrcMode).toBe('family4x');
     expect(normalizeSettings({ audioEchoSrcMode: 'family8x' }).audioEchoSrcMode).toBe('family8x');
@@ -1672,12 +1754,12 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({ audioSdmQualityProfile: 'linear' as never }).audioSdmQualityProfile).toBe('safe');
     expect(normalizeSettings({ audioSdmComputeBackend: 'cuda' }).audioSdmComputeBackend).toBe('cuda');
     expect(normalizeSettings({ audioSdmComputeBackend: 'amd' as never }).audioSdmComputeBackend).toBe('cpu');
-    expect(normalizeSettings({}).audioSdmOversamplingFilterProfile1x).toBe('poly-sinc-ext2-long');
-    expect(normalizeSettings({}).audioSdmOversamplingFilterProfileNx).toBe('poly-sinc-ext2-hires-lp');
+    expect(normalizeSettings({}).audioSdmOversamplingFilterProfile1x).toBe('sinc-long');
+    expect(normalizeSettings({}).audioSdmOversamplingFilterProfileNx).toBe('poly-sinc-hb');
     expect(normalizeSettings({ audioSdmOversamplingFilterProfile1x: 'poly-sinc-gauss-long' }).audioSdmOversamplingFilterProfile1x).toBe('poly-sinc-gauss-long');
     expect(normalizeSettings({ audioSdmOversamplingFilterProfileNx: 'minringFIR-mp' }).audioSdmOversamplingFilterProfileNx).toBe('minringFIR-mp');
-    expect(normalizeSettings({ audioSdmOversamplingFilterProfile1x: 'not-a-filter' as never }).audioSdmOversamplingFilterProfile1x).toBe('poly-sinc-ext2-long');
-    expect(normalizeSettings({ audioSdmOversamplingFilterProfileNx: 'not-a-filter' as never }).audioSdmOversamplingFilterProfileNx).toBe('poly-sinc-ext2-hires-lp');
+    expect(normalizeSettings({ audioSdmOversamplingFilterProfile1x: 'not-a-filter' as never }).audioSdmOversamplingFilterProfile1x).toBe('sinc-long');
+    expect(normalizeSettings({ audioSdmOversamplingFilterProfileNx: 'not-a-filter' as never }).audioSdmOversamplingFilterProfileNx).toBe('poly-sinc-hb');
   });
 
   it('keeps release-exclusive-on-pause experiment disabled until explicitly enabled', async () => {
@@ -1778,6 +1860,7 @@ describe('app settings normalization', () => {
     const { normalizeSettings } = await import('./appSettings');
 
     expect(normalizeSettings({ downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(false);
+    expect(normalizeSettings({}, { downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(true);
     expect(normalizeSettings({ downloadsFeatureKeyAccepted: true }, { downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(true);
     expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, downloadsFeatureUnlocked: true }, { downloadsFeatureUnlocked: false }).downloadsFeatureUnlocked).toBe(false);
     expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, streamingDownloadActionsEnabled: true }, { downloadsFeatureUnlocked: true }).streamingDownloadActionsEnabled).toBe(true);
@@ -1950,8 +2033,8 @@ describe('app settings normalization', () => {
       lyricsLineSpacingPercent: 60,
       lyricsTextDirection: 'vertical',
       lyricsLineMaxChars: 0,
-      lyricsAutoAcceptScore: 0.3,
-      lyricsBackfillAutoAcceptScore: 0.3,
+      lyricsAutoAcceptScore: 0.78,
+      lyricsBackfillAutoAcceptScore: 0.78,
       lyricsContextOpacityPercent: 64,
       lyricsPlayerBarDrawerAutoHideEnabled: true,
       lyricsPlayerBarDrawerCompactOnIdleEnabled: true,
@@ -1988,6 +2071,9 @@ describe('app settings normalization', () => {
 
     expect(normalizeSettings({ lyricsBackgroundMode: 'coverColor' })).toMatchObject({
       lyricsBackgroundMode: 'coverColor',
+    });
+    expect(normalizeSettings({ lyricsPlayerBarDrawerColorMode: 'light' })).toMatchObject({
+      lyricsPlayerBarDrawerColorMode: 'light',
     });
   });
 
@@ -2034,6 +2120,24 @@ describe('app settings normalization', () => {
     })).toMatchObject({
       desktopLyricsFontSizePx: 20,
       desktopLyricsSecondaryFontSizePx: 48,
+    });
+  });
+
+  it('preserves the largest desktop lyrics window dimensions used at runtime', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+
+    expect(normalizeSettings({
+      desktopLyricsBounds: {
+        x: 400,
+        y: 196,
+        width: 1760,
+        height: 640,
+      },
+    }).desktopLyricsBounds).toEqual({
+      x: 400,
+      y: 196,
+      width: 1760,
+      height: 640,
     });
   });
 
@@ -2216,7 +2320,7 @@ describe('app settings normalization', () => {
     ).toMatchObject({
       mvAutoSearch: true,
       mvAutoApplyThreshold: 0.3,
-      mvTitleOnlySearch: true,
+      mvTitleOnlySearch: false,
       mvPreferHighestViewCount: true,
       mvImmersiveBackground: true,
       mvImmersiveBackgroundAutoScale: true,

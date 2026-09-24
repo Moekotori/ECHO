@@ -400,6 +400,20 @@ export const getDlnaPositionInfo = async (device: DlnaDevice): Promise<DlnaPosit
   };
 };
 
+export const getDlnaVolume = async (device: DlnaDevice): Promise<number | null> => {
+  if (!device.services.renderingControl) {
+    return null;
+  }
+
+  const response = await callDlnaAction(device.services.renderingControl, 'GetVolume', {
+    InstanceID: 0,
+    Channel: 'Master',
+  });
+  const rawVolume = xmlText(response, 'CurrentVolume');
+  const volume = rawVolume === null ? Number.NaN : Number(rawVolume);
+  return Number.isFinite(volume) ? Math.max(0, Math.min(100, volume)) : null;
+};
+
 export const seekDlna = (device: DlnaDevice, target: string): Promise<string> =>
   callDlnaAction(requireDlnaService(device.services.avTransport, 'AVTransport'), 'Seek', { InstanceID: 0, Unit: 'REL_TIME', Target: target });
 

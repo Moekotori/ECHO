@@ -1,6 +1,6 @@
-export const BPM_ANALYSIS_VERSION = 4;
+export const BPM_ANALYSIS_VERSION = 5;
 export const BPM_CONFIDENCE_THRESHOLD = 0.68;
-export const BPM_DISPLAY_CONFIDENCE_THRESHOLD = 0.45;
+export const BPM_ANALYSIS_VERSION_FIELD = 'bpmAnalysisVersion';
 
 const isFinitePositive = (value: number | null | undefined): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0;
@@ -28,15 +28,40 @@ export const isReliableBpmAnalysis = (
 export const isDisplayableBpmAnalysis = (
   bpm: number | null | undefined,
   status?: string | null,
-  confidence?: number | null,
+  _confidence?: number | null,
 ): bpm is number => {
   if (!isFinitePositive(bpm) || status === 'error' || status === 'analyzing') {
     return false;
   }
 
-  if (status === 'low_confidence') {
-    return typeof confidence === 'number' && Number.isFinite(confidence) && confidence >= BPM_DISPLAY_CONFIDENCE_THRESHOLD;
+  return true;
+};
+
+export const isCurrentBpmAnalysis = (fieldSources: Record<string, string> | null | undefined): boolean =>
+  fieldSources?.bpm === 'audio_analysis' &&
+  fieldSources[BPM_ANALYSIS_VERSION_FIELD] === String(BPM_ANALYSIS_VERSION);
+
+export const hasCurrentBpmAnalysisAttempt = (
+  fieldSources: Record<string, string> | null | undefined,
+): boolean => fieldSources?.[BPM_ANALYSIS_VERSION_FIELD] === String(BPM_ANALYSIS_VERSION);
+
+export const shouldAnalyzeBpm = (track: {
+  bpm?: number | null;
+  bpmConfidence?: number | null;
+  analysisStatus?: string | null;
+  fieldSources?: Record<string, string>;
+}): boolean => {
+  if (track.analysisStatus === 'analyzing') {
+    return false;
   }
 
-  return true;
+  if (hasCurrentBpmAnalysisAttempt(track.fieldSources)) {
+    return false;
+  }
+
+  if (track.fieldSources?.bpm === 'audio_analysis') {
+    return !isCurrentBpmAnalysis(track.fieldSources);
+  }
+
+  return !isReliableBpmAnalysis(track.bpm, track.bpmConfidence, track.analysisStatus);
 };

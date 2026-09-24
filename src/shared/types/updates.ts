@@ -13,3 +13,8 @@ export type UpdateStatus = {
   error: string | null;
   checkedAt: string | null;
 };
+
+export type UpdateInstallResult =
+  | { outcome: 'installing' }
+  | { outcome: 'blocked'; reasons: string[] }
+  | { outcome: 'error'; error: string };

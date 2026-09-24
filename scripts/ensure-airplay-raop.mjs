@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -13,9 +13,7 @@ const buildScriptPath = join(projectRoot, 'scripts', 'build-airplay-raop.mjs');
 const ensureScriptPath = fileURLToPath(import.meta.url);
 const prebuildNames = [
   'raop_addon.node.napi.node',
-  'libssl-3-x64.dll',
-  'libcrypto-3-x64.dll',
-  'pthreadVC3.dll',
+  'pthreadVC2.dll',
 ];
 
 const executable = (name) => (process.platform === 'win32' ? `${name}.cmd` : name);
@@ -96,9 +94,14 @@ const getPackageVersion = (packageRoot) => readJson(join(packageRoot, 'package.j
 
 const getPrebuildStats = (packageRoot) => {
   const prebuildRoot = join(packageRoot, 'prebuilds', `${process.platform}-${process.arch}`);
+  if (!existsSync(prebuildRoot)) return null;
+  const entries = readdirSync(prebuildRoot);
+  const sslDll = entries.find((name) => /^libssl-\d+-x64\.dll$/iu.test(name));
+  const cryptoDll = entries.find((name) => /^libcrypto-\d+-x64\.dll$/iu.test(name));
+  if (!sslDll || !cryptoDll) return null;
   const files = {};
 
-  for (const name of prebuildNames) {
+  for (const name of [...prebuildNames, sslDll, cryptoDll]) {
     const filePath = join(prebuildRoot, name);
     if (!existsSync(filePath)) {
       return null;

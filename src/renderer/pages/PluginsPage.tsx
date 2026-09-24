@@ -1,19 +1,19 @@
-import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, ChevronDown, Code2, Download, Eye, FolderOpen, LockKeyhole, PackagePlus, Play, Power, RefreshCw, ScrollText, ShieldCheck, ShoppingBag, TerminalSquare, Trash2, Upload } from 'lucide-react';
-import { pluginPanelBridgeActions, pluginPanelBridgeChannel, pluginPanelBridgeVersion, pluginPermissionDescriptors } from '../../shared/types/plugins';
+import { echoProUnlockPluginId } from '../../shared/constants/featureUnlocks';
+import { pluginPermissionDescriptors } from '../../shared/types/plugins';
 import type {
   PluginCreateExampleKind,
   PluginLogEntry,
   PluginMarketEntry,
-  PluginPanelBridgeAction,
-  PluginPanelBridgeRequest,
-  PluginPanelBridgeResponse,
   PluginPermission,
   PluginPermissionAvailability,
   PluginPermissionRisk,
   PluginSettingsPatch,
   PluginSummary,
 } from '../../shared/types/plugins';
+import { PluginCommandPalette } from '../components/plugins/PluginCommandPalette';
+import { PluginPanelFrame } from '../components/plugins/PluginPanelFrame';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useOptionalI18n } from '../i18n/I18nProvider';
 import type { Locale } from '../i18n/locales';
@@ -30,6 +30,7 @@ const pluginPageTextZhCN = {
   'action.importPackage': '导入插件包',
   'action.importEchoPackage': '导入 .echo',
   'action.openDirectory': '打开目录',
+  'action.openCommandPalette': '打开命令面板',
   'action.openPluginDirectory': '打开插件目录',
   'action.refresh': '刷新',
   'action.refreshLogs': '刷新日志',
@@ -54,6 +55,7 @@ const pluginPageTextZhCN = {
   'empty.unavailable.description': '请在 ECHO Next 桌面端打开插件管理。',
   'empty.unavailable.title': '插件系统不可用',
   'error.disabledByHost': '这个插件连续启动失败，ECHO 已自动隔离。修复插件文件后可手动重新启用。',
+  'error.echoProMachineMismatch': '检测到版本升级前的旧设备标识。请回到“设置 → 账号与 Pro”，保持原订单或 Pro Key 不变并重新联网激活；服务器会安全替换旧绑定，不会额外占用设备槽位。',
   'example.command.description': '注册一个手动执行的工具命令。',
   'example.command.label': '命令工具',
   'example.library.description': '读取曲库摘要，适合整理类脚本起步。',
@@ -65,7 +67,7 @@ const pluginPageTextZhCN = {
   'example.theme.description': '贡献可导入的高自定义主题参数。',
   'example.theme.label': '主题预设',
   'fallback.error': '插件操作失败',
-  'header.description': '插件默认关闭。启用后只通过受控 API 读取播放、曲库和设置，不会进入音频热路径。',
+  'header.description': '插件默认关闭。启用后可按授权读取曲库、控制播放、管理自身设置并扩展界面，但不会进入音频热路径。',
   'header.kicker': '本地插件',
   'header.title': '插件',
   'label.api': 'API v{version}',
@@ -167,6 +169,7 @@ const pluginPageTextEnUS: Record<PluginPageTextKey, string> = {
   'action.importPackage': 'Import package',
   'action.importEchoPackage': 'Import .echo',
   'action.openDirectory': 'Open folder',
+  'action.openCommandPalette': 'Open command palette',
   'action.openPluginDirectory': 'Open plugin folder',
   'action.refresh': 'Refresh',
   'action.refreshLogs': 'Refresh logs',
@@ -191,6 +194,7 @@ const pluginPageTextEnUS: Record<PluginPageTextKey, string> = {
   'empty.unavailable.description': 'Open plugin management in the ECHO Next desktop app.',
   'empty.unavailable.title': 'Plugin system unavailable',
   'error.disabledByHost': 'This plugin failed to start repeatedly, so ECHO isolated it automatically. Fix the plugin files, then enable it again manually.',
+  'error.echoProMachineMismatch': 'A device identity from before the update was detected. Open Settings → Account & Pro and activate again with the same order or Pro Key. The server will replace the stale binding without consuming another device slot.',
   'example.command.description': 'Register a manually executed tool command.',
   'example.command.label': 'Command tool',
   'example.library.description': 'Read library summaries, useful for organizer scripts.',
@@ -202,7 +206,7 @@ const pluginPageTextEnUS: Record<PluginPageTextKey, string> = {
   'example.theme.description': 'Contribute importable high-customization theme parameters.',
   'example.theme.label': 'Theme preset',
   'fallback.error': 'Plugin operation failed',
-  'header.description': 'Plugins are off by default. Once enabled, they only read playback, library, and settings through controlled APIs and never enter the audio hot path.',
+  'header.description': 'Plugins are off by default. Once enabled, trusted capabilities can read the library, control playback, manage plugin-owned settings, and extend the UI without entering the audio hot path.',
   'header.kicker': 'Local plugins',
   'header.title': 'Plugins',
   'label.api': 'API v{version}',
@@ -288,13 +292,361 @@ const pluginPageTextEnUS: Record<PluginPageTextKey, string> = {
   'status.isolated': 'Isolated',
   'status.running': 'Running',
   'time.none': 'None',
+}
+
+const pluginPageTextZhTW: Record<PluginPageTextKey, string> = {
+  // Traditional Chinese
+  'action.create': '新建',
+  'action.createExamplePlugin': '建立示例',
+  'action.delete': '刪除外掛',
+  'action.disable': '停用',
+  'action.enable': '啟用',
+  'action.exportPackage': '匯出外掛包',
+  'action.importPackage': '匯入外掛包',
+  'action.importEchoPackage': '匯入 .echo',
+  'action.openDirectory': '開啟目錄',
+  'action.openCommandPalette': '開啟命令面板',
+  'action.openPluginDirectory': '開啟外掛目錄',
+  'action.refresh': '重新整理',
+  'action.refreshLogs': '重新整理日誌',
+  'action.reload': '過載',
+  'action.saveSettings': '儲存設定',
+  'activity.command': '命令執行',
+  'activity.error': '錯誤',
+  'activity.event': '事件接收',
+  'activity.settingsWrite': '設定寫入',
+  'activity.storageWrite': '外掛儲存寫入',
+  'availability.active': '已開放',
+  'availability.limited': '受限',
+  'availability.reserved': '預留',
+  'confirm.delete': '刪除外掛“{name}”？\\n\\n這會停用外掛並刪除外掛目錄：\\n{directory}\\n\\n此操作不會刪除音樂檔案。',
+  'confirm.enable': '啟用外掛「{name}」？\\n\\n請求許可權：\\n{permissions}{highRisk}{reserved}\\n\\n外掛會在主程序受控沙盒和麵板 iframe 沙盒中執行，連續啟動失敗會自動隔離。',
+  'confirm.enable.highRisk': '\\n\\n包含高風險許可權，請確認外掛來源可信。',
+  'confirm.enable.reserved': '\\n\\n部分許可權在 v1 只是預留或受限能力，啟用不會額外開放 Node、Electron、SQLite、主介面 DOM 或音訊熱路徑。',
+  'empty.noPlugins.description': '新建一個示例外掛，或把外掛資料夾放進外掛目錄。',
+  'empty.noPlugins.title': '還沒有外掛',
+  'empty.noSelection.description': '選擇左側外掛檢視許可權、命令、日誌和麵板。',
+  'empty.noSelection.title': '選擇外掛',
+  'empty.unavailable.description': '請在 ECHO Next 桌面端開啟外掛管理。',
+  'empty.unavailable.title': '外掛系統不可用',
+  'error.disabledByHost': '這個外掛連續啟動失敗，ECHO 已自動隔離。修復外掛檔案後可手動重新啟用。',
+  'error.echoProMachineMismatch': '檢測到版本升級前的舊裝置標識。請回到“設定 → 賬號與 Pro”，保持原訂單或 Pro Key 不變並重新聯網啟用；伺服器會安全替換舊繫結，不會額外佔用裝置槽位。',
+  'example.command.description': '註冊一個手動執行的工具命令。',
+  'example.command.label': '命令工具',
+  'example.library.description': '讀取曲庫摘要，適合整理類指令碼起步。',
+  'example.library.label': '曲庫指令碼',
+  'example.playback.description': '監聽播放狀態，帶一個可編輯面板。',
+  'example.playback.label': '播放狀態面板',
+  'example.source.description': '返回搜尋候選，並在使用者觸發時解析音訊 URL。',
+  'example.source.label': '自定義音源',
+  'example.theme.description': '貢獻可匯入的高自定義主題引數。',
+  'example.theme.label': '主題預設',
+  'fallback.error': '外掛操作失敗',
+  'header.description': '外掛預設關閉。啟用後可依授權讀取曲庫、控制播放、管理自身設定並擴充介面，但不會進入音訊熱路徑。',
+  'header.kicker': '本地外掛',
+  'header.title': '外掛',
+  'label.api': 'API v{version}',
+  'label.apiWithMin': 'API v{version} / 最低 ECHO {minVersion}',
+  'label.coverProviders': '封面提供器',
+  'label.lyricsProviders': '歌詞提供器',
+  'label.metadataProviders': '後設資料提供器',
+  'label.networkOff': '網路 API 關閉',
+  'label.networkOn': '網路 API 已開啟',
+  'label.noLogs': '暫無日誌。',
+  'label.none': '暫無',
+  'label.panelSandboxed': '面板沙盒隔離',
+  'label.noPanelScript': '無面板指令碼',
+  'label.pluginSettings': '外掛設定',
+  'label.panelTitle': '{name} 面板',
+  'label.sourceProviders': '音源提供器',
+  'label.themePresets': '主題預設',
+  'message.cancelledExport': '已取消匯出。',
+  'message.cancelledImport': '已取消匯入。',
+  'message.commandRan': '命令已執行，詳情可檢視日誌。',
+  'message.createdExample': '已建立示例外掛，可開啟目錄編輯。',
+  'message.deleted': '已刪除外掛 {name}',
+  'message.disabled': '已停用 {name}',
+  'message.enabled': '已啟用 {name}',
+  'message.exported': '已匯出外掛包：{target}',
+  'message.imported': '已匯入外掛包：{pluginId}',
+  'message.invalidDrop': '請拖入 .echo 外掛包。',
+  'message.refreshed': '外掛列表已重新整理。',
+  'message.reloaded': '已過載 {name}',
+  'message.settingsSaved': '外掛設定已儲存。',
+  'overlay.dropPackage': '釋放匯入 .echo 外掛包',
+  'permission.audioAnalyze.description': '允許宿主按曲目 ID 執行受控音質和 DSD 置信度分析。',
+  'permission.audioAnalyze.label': '音訊分析',
+  'permission.fsPlugin.description': 'v1 僅通過 storage API 讀寫外掛自身儲存，不開放任意檔案 API。',
+  'permission.fsPlugin.label': '外掛目錄檔案（受限）',
+  'permission.libraryRead.description': '可分頁讀取曲庫摘要和公開曲目資訊。',
+  'permission.libraryRead.label': '讀取曲庫',
+  'permission.libraryWrite.description': '預留給未來曲庫寫入能力；v1 不提供實際寫入 API。',
+  'permission.libraryWrite.label': '修改曲庫（預留）',
+  'permission.network.description': '通過宿主受控 API 訪問 http/https；v2 起生效，受超時、大小、方法和 header 限制。',
+  'permission.network.label': '訪問網路',
+  'permission.playbackControl.description': '可觸發播放、暫停、停止和跳轉位置。',
+  'permission.playbackControl.label': '控制播放',
+  'permission.playbackRead.description': '可讀取當前播放狀態、曲目 id、進度和音訊狀態快照。',
+  'permission.playbackRead.label': '讀取播放狀態',
+  'permission.settingsRead.description': '可讀取應用設定快照。',
+  'permission.settingsRead.label': '讀取設定',
+  'permission.settingsWrite.description': '可寫入小型設定 patch，屬於高風險能力。',
+  'permission.settingsWrite.label': '修改設定',
+  'permission.sourcesProvide.description': '可註冊使用者自定義音源候選，並在使用者觸發播放時返回顯式音訊 URL。',
+  'permission.sourcesProvide.label': '提供自定義音源',
+  'permissions.none': '無需額外許可權',
+  'permissions.trusted': '已信任',
+  'permissions.untrusted': '未信任',
+  'risk.high': '高風險',
+  'risk.low': '低風險',
+  'risk.medium': '中風險',
+  'section.activity': '這個外掛幹了什麼',
+  'section.commands': '命令',
+  'section.commands.empty': '這個外掛還沒有註冊命令。',
+  'section.examples': '示例外掛',
+  'section.logs': '日誌',
+  'section.panelPreview': '面板預覽',
+  'section.pluginDetail': '外掛詳情',
+  'section.pluginList': '外掛列表',
+  'section.security': '安全邊界',
+  'security.commandCount': '{count} 個命令',
+  'security.coverAndLyricsProviders': '{lyrics} 個歌詞 / {cover} 個封面提供器',
+  'security.highRisk.none': '無高風險許可權',
+  'security.highRisk.some': '{count} 個高風險許可權',
+  'security.limited.none': '無受限許可權',
+  'security.limited.some': '{count} 個受限許可權',
+  'security.metadataProviders': '{count} 個後設資料提供器',
+  'security.permissionTrust': '{trusted}/{requested} 許可權已信任',
+  'security.pluginSettings': '{count} 個外掛設定',
+  'security.reserved.none': '無預留許可權',
+  'security.reserved.some': '{count} 個預留許可權',
+  'security.sourceProviders': '{count} 個音源提供器',
+  'security.themePresets': '{count} 個主題預設',
+  'status.disabled': '未啟用',
+  'status.error': '異常',
+  'status.enabled': '已啟用',
+  'status.isolated': '已隔離',
+  'status.running': '執行中',
+  'time.none': '暫無',
+};
+
+const pluginPageTextJaJP: Record<PluginPageTextKey, string> = {
+  // Japanese
+  'action.create': 'Create',
+  'action.createExamplePlugin': 'サンプルを作成',
+  'action.delete': 'プラグインを削除',
+  'action.disable': 'Disable',
+  'action.enable': 'Enable',
+  'action.exportPackage': 'パッケージを書き出し',
+  'action.importPackage': 'パッケージを取り込み',
+  'action.importEchoPackage': 'Import .echo',
+  'action.openDirectory': 'Open folder',
+  'action.openCommandPalette': 'Open command palette',
+  'action.openPluginDirectory': 'Open plugin folder',
+  'action.refresh': 'Refresh',
+  'action.refreshLogs': 'ログを更新',
+  'action.reload': '再読み込み',
+  'action.saveSettings': '設定を保存',
+  'activity.command': 'Command runs',
+  'activity.error': 'エラーs',
+  'activity.event': 'Events received',
+  'activity.settingsWrite': 'Settings writes',
+  'activity.storageWrite': 'Plugin storage writes',
+  'availability.active': 'Active',
+  'availability.limited': '制限付き',
+  'availability.reserved': 'Reserved',
+  'confirm.delete': 'プラグインを削除 "{name}"?\\n\\nThis 無効化s the plugin and 削除s its plugin directory:\\n{directory}\\n\\nMusic files will not be 削除d.',
+  'confirm.enable': 'Enable plugin "{name}"?\\n\\nRequested permissions:\\n{permissions}{highRisk}{reserved}\\n\\nThe plugin runs in a controlled main-process sandbox and sandboxed panel iframe. Repeated startup failures are isolated automatically.',
+  'confirm.enable.highRisk': '\\n\\nHigh-risk 権限 are included. Confirm the plugin source is 信頼済み.',
+  'confirm.enable.reserved': '\\n\\nSome 権限 are 予約 or 制限付き in v1. Enabling them does not grant Node, Electron, SQLite, main-window DOM, or audio hot-path access.',
+  'empty.noPlugins.description': 'Create an example plugin, or place a plugin folder in the plugin directory.',
+  'empty.noPlugins.title': 'プラグインはまだありません',
+  'empty.noSelection.description': 'プラグインを選択 on the left to view 権限, コマンド, ログ, and panel.',
+  'empty.noSelection.title': 'プラグインを選択',
+  'empty.unavailable.description': 'Open plugin management in the ECHO Next desktop app.',
+  'empty.unavailable.title': 'プラグインシステムを利用できません',
+  'error.disabledByHost': 'This plugin failed to start repeatedly, so ECHO isolated it automatically. Fix the plugin files, then enable it again manually.',
+  'error.echoProMachineMismatch': 'A device identity from before the update was detected. Open Settings → Account & Pro and activate again with the same order or Pro Key. The server will replace the stale binding without consuming another device slot.',
+  'example.command.description': 'Register a manually executed tool command.',
+  'example.command.label': 'Command tool',
+  'example.library.description': 'Read library summaries, useful for organizer scripts.',
+  'example.library.label': 'Library script',
+  'example.playback.description': 'Listen to playback state and show an editable panel.',
+  'example.playback.label': 'Playback status panel',
+  'example.source.description': 'Return search candidates and resolve audio URLs on user action.',
+  'example.source.label': 'Custom source',
+  'example.theme.description': 'Contribute importable high-customization theme parameters.',
+  'example.theme.label': 'Theme preset',
+  'fallback.error': 'プラグイン操作に失敗しました',
+  'header.description': 'Plugins are off by default. Once enabled, trusted capabilities can read the library, control playback, manage plugin-owned settings, and extend the UI without entering the audio hot path.',
+  'header.kicker': 'ローカルプラグイン',
+  'header.title': 'Plugins',
+  'label.api': 'API v{version}',
+  'label.apiWithMin': 'API v{version} / min ECHO {minVersion}',
+  'label.coverProviders': 'cover providers',
+  'label.lyricsProviders': 'lyrics providers',
+  'label.metadataProviders': 'metadata providers',
+  'label.networkOff': 'Network API off',
+  'label.networkOn': 'Network API on',
+  'label.noLogs': 'No ログ yet.',
+  'label.none': 'なし',
+  'label.panelSandboxed': 'Panel sandboxed',
+  'label.noPanelScript': 'No panel script',
+  'label.pluginSettings': 'Plugin settings',
+  'label.panelTitle': '{name} panel',
+  'label.sourceProviders': 'source providers',
+  'label.themePresets': 'theme presets',
+  'message.cancelledExport': 'Export cancelled.',
+  'message.cancelledImport': 'Import cancelled.',
+  'message.commandRan': 'Command ran. Check ログ for details.',
+  'message.createdExample': 'Example plugin created. Open the folder to edit it.',
+  'message.deleted': 'Deleted plugin {name}',
+  'message.disabled': 'Disabled {name}',
+  'message.enabled': 'Enabled {name}',
+  'message.exported': 'Exported plugin package: {target}',
+  'message.imported': 'Imported plugin package: {pluginId}',
+  'message.invalidDrop': 'Drop a .echo plugin package.',
+  'message.refreshed': 'Plugin list refreshed.',
+  'message.reloaded': '再読み込みed {name}',
+  'message.settingsSaved': 'Plugin settings saved.',
+  'overlay.dropPackage': 'Release to import .echo plugin package',
+  'permission.audioAnalyze.description': 'Allows host-controlled quality and DSD confidence analysis for library tracks by track ID.',
+  'permission.audioAnalyze.label': 'Audio analysis',
+  'permission.fsPlugin.description': 'In v1, only the storage API can read and write plugin-owned storage. Arbitrary file APIs are not exposed.',
+  'permission.fsPlugin.label': 'Plugin directory files (制限付き)',
+  'permission.libraryRead.description': 'Can page through library summaries and public track information.',
+  'permission.libraryRead.label': 'Read library',
+  'permission.libraryWrite.description': 'Reserved for future library write capabilities; v1 does not provide an actual write API.',
+  'permission.libraryWrite.label': 'Modify library (reserved)',
+  'permission.network.description': 'Access http/https through host-controlled APIs starting in v2, with timeout, size, method, and header limits.',
+  'permission.network.label': 'Network access',
+  'permission.playbackControl.description': 'Can trigger play, pause, stop, and seek.',
+  'permission.playbackControl.label': 'Control playback',
+  'permission.playbackRead.description': 'Can read current playback state, track ID, progress, and audio status snapshots.',
+  'permission.playbackRead.label': 'Read playback state',
+  'permission.settingsRead.description': 'Can read an app settings snapshot.',
+  'permission.settingsRead.label': 'Read settings',
+  'permission.settingsWrite.description': 'Can write small settings patches; this is a high-risk capability.',
+  'permission.settingsWrite.label': 'Modify settings',
+  'permission.sourcesProvide.description': 'Can register custom source candidates and return explicit audio URLs when the user starts playback.',
+  'permission.sourcesProvide.label': 'Provide custom sources',
+  'permissions.none': 'No extra permissions',
+  'permissions.trusted': '信頼済み',
+  'permissions.untrusted': 'Un信頼済み',
+  'risk.high': '高リスク',
+  'risk.low': '低リスク',
+  'risk.medium': '中リスク',
+  'section.activity': 'Plugin activity',
+  'section.commands': 'コマンド',
+  'section.commands.empty': 'This plugin has not registered any コマンド.',
+  'section.examples': 'Example plugins',
+  'section.logs': 'ログ',
+  'section.panelPreview': 'Panel preview',
+  'section.pluginDetail': 'Plugin details',
+  'section.pluginList': 'Plugin list',
+  'section.security': 'Security boundary',
+  'security.commandCount': '{count} コマンド',
+  'security.coverAndLyricsProviders': '{lyrics} lyrics / {cover} cover providers',
+  'security.highRisk.none': 'No high-risk permissions',
+  'security.highRisk.some': '{count} high-risk permissions',
+  'security.limited.none': 'No 制限付き 権限',
+  'security.limited.some': '{count} 制限付き 権限',
+  'security.metadataProviders': '{count} metadata providers',
+  'security.permissionTrust': '{信頼済み}/{requested} 権限 信頼済み',
+  'security.pluginSettings': '{count} plugin settings',
+  'security.reserved.none': 'No reserved permissions',
+  'security.reserved.some': '{count} reserved permissions',
+  'security.sourceProviders': '{count} source providers',
+  'security.themePresets': '{count} theme presets',
+  'status.disabled': 'Disabled',
+  'status.error': 'エラー',
+  'status.enabled': 'Enabled',
+  'status.isolated': 'Isolated',
+  'status.running': 'Running',
+  'time.none': 'なし',
+};
+
+const pluginPageTextKoKR: Record<PluginPageTextKey, string> = {
+  ...pluginPageTextEnUS,
+  'action.create': '만들기',
+  'action.createExamplePlugin': '예시 만들기',
+  'action.delete': '플러그인 삭제',
+  'action.disable': '사용 안 함',
+  'action.enable': '사용',
+  'action.exportPackage': '패키지 내보내기',
+  'action.importPackage': '패키지 가져오기',
+  'action.importEchoPackage': '.echo 가져오기',
+  'action.openDirectory': '폴더 열기',
+  'action.openCommandPalette': '명령 팔레트 열기',
+  'action.openPluginDirectory': '플러그인 폴더 열기',
+  'action.refresh': '새로고침',
+  'action.refreshLogs': '로그 새로고침',
+  'action.reload': '다시 로드',
+  'action.saveSettings': '설정 저장',
+  'activity.command': '명령 실행',
+  'activity.error': '오류',
+  'activity.event': '수신 이벤트',
+  'activity.settingsWrite': '설정 쓰기',
+  'activity.storageWrite': '플러그인 저장소 쓰기',
+  'availability.active': '활성',
+  'availability.limited': '제한됨',
+  'availability.reserved': '예약됨',
+  'empty.noPlugins.description': '예시 플러그인을 만들거나 플러그인 폴더에 플러그인을 넣으세요.',
+  'empty.noPlugins.title': '아직 플러그인이 없습니다',
+  'empty.noSelection.description': '왼쪽에서 플러그인을 선택해 권한, 명령, 로그, 패널을 확인하세요.',
+  'empty.noSelection.title': '플러그인 선택',
+  'empty.unavailable.description': 'ECHO Next 데스크톱 앱에서 플러그인 관리를 여세요.',
+  'empty.unavailable.title': '플러그인 시스템을 사용할 수 없습니다',
+  'fallback.error': '플러그인 작업 실패',
+  'header.description': '플러그인은 기본적으로 꺼져 있습니다. 사용하면 승인된 권한으로 라이브러리 읽기, 재생 제어, 플러그인 설정 관리와 UI 확장을 수행하지만 오디오 핫 패스에는 들어가지 않습니다.',
+  'header.kicker': '로컬 플러그인',
+  'header.title': '플러그인',
+  'label.none': '없음',
+  'label.noLogs': '아직 로그가 없습니다.',
+  'label.pluginSettings': '플러그인 설정',
+  'message.cancelledExport': '내보내기가 취소되었습니다.',
+  'message.cancelledImport': '가져오기가 취소되었습니다.',
+  'message.commandRan': '명령을 실행했습니다. 자세한 내용은 로그를 확인하세요.',
+  'message.createdExample': '예시 플러그인을 만들었습니다. 폴더를 열어 편집하세요.',
+  'message.deleted': '플러그인 {name} 삭제됨',
+  'message.disabled': '{name} 사용 안 함',
+  'message.enabled': '{name} 사용',
+  'message.exported': '플러그인 패키지 내보냄: {target}',
+  'message.imported': '플러그인 패키지 가져옴: {pluginId}',
+  'message.invalidDrop': '.echo 플러그인 패키지를 놓으세요.',
+  'message.refreshed': '플러그인 목록을 새로고침했습니다.',
+  'message.reloaded': '{name} 다시 로드됨',
+  'message.settingsSaved': '플러그인 설정을 저장했습니다.',
+  'overlay.dropPackage': '놓아서 .echo 플러그인 패키지 가져오기',
+  'permissions.none': '추가 권한 없음',
+  'permissions.trusted': '신뢰됨',
+  'permissions.untrusted': '신뢰되지 않음',
+  'risk.high': '고위험',
+  'risk.low': '저위험',
+  'risk.medium': '중위험',
+  'section.activity': '플러그인 활동',
+  'section.commands': '명령',
+  'section.commands.empty': '이 플러그인은 아직 명령을 등록하지 않았습니다.',
+  'section.examples': '예시 플러그인',
+  'section.logs': '로그',
+  'section.panelPreview': '패널 미리보기',
+  'section.pluginDetail': '플러그인 세부 정보',
+  'section.pluginList': '플러그인 목록',
+  'section.security': '보안 경계',
+  'status.disabled': '사용 안 함',
+  'status.error': '오류',
+  'status.enabled': '사용 중',
+  'status.isolated': '격리됨',
+  'status.running': '실행 중',
+  'time.none': '없음',
 };
 
 const pluginPageTexts: Record<Locale, Record<PluginPageTextKey, string>> = {
   'zh-CN': pluginPageTextZhCN,
-  'zh-TW': pluginPageTextZhCN,
-  'ja-JP': pluginPageTextEnUS,
+  'zh-TW': pluginPageTextZhTW,
+  'ja-JP': pluginPageTextJaJP,
   'en-US': pluginPageTextEnUS,
+  'ko-KR': pluginPageTextKoKR,
 };
 
 const permissionRiskLabelKeys = {
@@ -344,8 +696,6 @@ const interpolatePluginText = (text: string, options?: PluginPageTranslateOption
 const formatError = (error: unknown, fallback: string): string =>
   formatUserFacingError(error, { context: 'plugins', fallback });
 
-const fileUrlFromPath = (path: string): string => `file:///${path.replace(/\\/gu, '/')}`;
-
 const echoPackageExtension = '.echo';
 
 const hasFileDrag = (dataTransfer: DataTransfer): boolean =>
@@ -372,39 +722,6 @@ const formatPermissionForConfirm = (permission: PluginPermission, t: PluginPageT
 
 const formatPluginTime = (value: string | null, t: PluginPageTranslate): string => (value ? new Date(value).toLocaleString() : t('time.none'));
 
-const pluginPanelActionSet = new Set<PluginPanelBridgeAction>(pluginPanelBridgeActions);
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value && typeof value === 'object' && !Array.isArray(value));
-
-const normalizePanelRequest = (value: unknown): PluginPanelBridgeRequest | null => {
-  if (!isRecord(value) || value.channel !== pluginPanelBridgeChannel || value.type !== 'request') {
-    return null;
-  }
-  if (
-    typeof value.requestId !== 'string' ||
-    typeof value.pluginId !== 'string' ||
-    typeof value.action !== 'string' ||
-    !pluginPanelActionSet.has(value.action as PluginPanelBridgeAction)
-  ) {
-    return null;
-  }
-
-  return {
-    channel: pluginPanelBridgeChannel,
-    version: typeof value.version === 'number' ? value.version : undefined,
-    type: 'request',
-    requestId: value.requestId,
-    pluginId: value.pluginId,
-    action: value.action as PluginPanelBridgeAction,
-    payload: value.payload,
-  };
-};
-
-const postPanelResponse = (target: Window, response: PluginPanelBridgeResponse): void => {
-  target.postMessage(response, '*');
-};
-
 const StatusPill = ({ plugin, t }: { plugin: PluginSummary; t: PluginPageTranslate }): JSX.Element => {
   const label = plugin.disabledByHost
     ? t('status.isolated')
@@ -417,6 +734,10 @@ const StatusPill = ({ plugin, t }: { plugin: PluginSummary; t: PluginPageTransla
           : t('status.disabled');
   return <span className="plugin-status-pill" data-status={plugin.disabledByHost ? 'isolated' : plugin.error ? 'error' : plugin.status}>{label}</span>;
 };
+
+const isEchoProMachineMismatch = (plugin: Pick<PluginSummary, 'id' | 'error'>): boolean =>
+  plugin.id === echoProUnlockPluginId &&
+  (plugin.error === 'echo_pro_license_machine-mismatch' || plugin.error === 'echo_pro_license_machine_mismatch');
 
 const PermissionList = ({ plugin, t }: { plugin: PluginSummary; t: PluginPageTranslate }): JSX.Element => (
   <div className="plugin-permissions">
@@ -552,7 +873,6 @@ export const PluginsPage = (): JSX.Element => {
     return interpolatePluginText(localText[key], options);
   }, [localText]);
   const pluginsApi = getPluginsBridge();
-  const panelFrameRef = useRef<HTMLIFrameElement | null>(null);
   const [plugins, setPlugins] = useState<PluginSummary[]>([]);
   const [pluginDirectory, setPluginDirectory] = useState('');
   const [logs, setLogs] = useState<PluginLogEntry[]>([]);
@@ -565,6 +885,25 @@ export const PluginsPage = (): JSX.Element => {
   const [marketPlugins, setMarketPlugins] = useState<PluginMarketEntry[]>([]);
   const [marketError, setMarketError] = useState<string | null>(null);
   const [marketLoaded, setMarketLoaded] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    const handlePluginCommandShortcut = (event: KeyboardEvent): void => {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        !(event.ctrlKey || event.metaKey) ||
+        !event.shiftKey ||
+        event.key.toLocaleLowerCase() !== 'p'
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setIsCommandPaletteOpen((current) => !current);
+    };
+    window.addEventListener('keydown', handlePluginCommandShortcut);
+    return () => window.removeEventListener('keydown', handlePluginCommandShortcut);
+  }, []);
 
   const selectedPlugin = useMemo(
     () => plugins.find((plugin) => plugin.id === selectedPluginId) ?? plugins[0] ?? null,
@@ -863,77 +1202,6 @@ export const PluginsPage = (): JSX.Element => {
     );
   };
 
-  useEffect(() => {
-    if (!pluginsApi || !selectedPlugin) {
-      return undefined;
-    }
-
-    const handlePanelMessage = (event: MessageEvent): void => {
-      if (event.source !== panelFrameRef.current?.contentWindow) {
-        return;
-      }
-
-      const request = normalizePanelRequest(event.data);
-      if (!request || request.pluginId !== selectedPlugin.id) {
-        return;
-      }
-
-      const sourceWindow = event.source as Window | null;
-      if (!sourceWindow) {
-        return;
-      }
-
-      const respond = async (): Promise<void> => {
-        try {
-          let result: unknown;
-          if (request.action === 'plugin:getSummary') {
-            result = selectedPlugin;
-          } else if (request.action === 'plugin:getLogs') {
-            result = await pluginsApi.getLogs(selectedPlugin.id);
-          } else if (request.action === 'plugin:runCommand') {
-            const payload = isRecord(request.payload) ? request.payload : {};
-            const commandId = typeof payload.commandId === 'string' ? payload.commandId.trim() : '';
-            if (!commandId) {
-              throw new Error('plugin_panel_command_id_required');
-            }
-            result = await pluginsApi.runCommand({
-              pluginId: selectedPlugin.id,
-              commandId,
-              args: Array.isArray(payload.args) ? payload.args : undefined,
-            });
-            await refresh();
-            await refreshLogs(selectedPlugin.id);
-          }
-
-          postPanelResponse(sourceWindow, {
-            channel: pluginPanelBridgeChannel,
-            version: pluginPanelBridgeVersion,
-            type: 'response',
-            requestId: request.requestId,
-            pluginId: selectedPlugin.id,
-            ok: true,
-            result,
-          });
-        } catch (error) {
-          postPanelResponse(sourceWindow, {
-            channel: pluginPanelBridgeChannel,
-            version: pluginPanelBridgeVersion,
-            type: 'response',
-            requestId: request.requestId,
-            pluginId: selectedPlugin.id,
-            ok: false,
-            error: formatError(error, t('fallback.error')),
-          });
-        }
-      };
-
-      void respond();
-    };
-
-    window.addEventListener('message', handlePanelMessage);
-    return () => window.removeEventListener('message', handlePanelMessage);
-  }, [pluginsApi, refresh, refreshLogs, selectedPlugin, t]);
-
   if (!pluginsApi) {
     return (
       <div className="page-stack plugins-page">
@@ -958,6 +1226,10 @@ export const PluginsPage = (): JSX.Element => {
           {pluginDirectory ? <small title={pluginDirectory}>{pluginDirectory}</small> : null}
         </div>
         <div className="plugins-header-actions">
+          <button className="settings-action-button" type="button" onClick={() => setIsCommandPaletteOpen(true)}>
+            <TerminalSquare size={16} />
+            {t('action.openCommandPalette')}
+          </button>
           <button className="settings-action-button" type="button" onClick={() => void pluginsApi.openDirectory()}>
             <FolderOpen size={16} />
             {t('action.openPluginDirectory')}
@@ -1094,8 +1366,12 @@ export const PluginsPage = (): JSX.Element => {
                 <StatusPill plugin={selectedPlugin} t={t} />
               </div>
 
-              {selectedPlugin.error ? <p className="plugins-message plugins-message--error">{selectedPlugin.error}</p> : null}
-              {selectedPlugin.disabledByHost ? (
+              {selectedPlugin.error ? (
+                <p className="plugins-message plugins-message--error">
+                  {isEchoProMachineMismatch(selectedPlugin) ? t('error.echoProMachineMismatch') : selectedPlugin.error}
+                </p>
+              ) : null}
+              {selectedPlugin.disabledByHost && !isEchoProMachineMismatch(selectedPlugin) ? (
                 <p className="plugins-message plugins-message--error">{t('error.disabledByHost')}</p>
               ) : null}
               {selectedPlugin.echoProLicense ? (
@@ -1251,12 +1527,14 @@ export const PluginsPage = (): JSX.Element => {
                     <Code2 size={17} />
                     <strong>{t('section.panelPreview')}</strong>
                   </header>
-                  <iframe
-                    ref={panelFrameRef}
-                    key={`${selectedPlugin.id}:${selectedPlugin.panel}`}
+                  <PluginPanelFrame
+                    plugin={selectedPlugin}
+                    panelPath={selectedPlugin.panel}
                     title={t('label.panelTitle', { name: selectedPlugin.name })}
-                    sandbox="allow-scripts"
-                    src={fileUrlFromPath(selectedPlugin.panel)}
+                    onCommandComplete={async () => {
+                      await refresh();
+                      await refreshLogs(selectedPlugin.id);
+                    }}
                   />
                 </div>
               ) : null}
@@ -1287,6 +1565,10 @@ export const PluginsPage = (): JSX.Element => {
           )}
         </section>
       </main>
+      <PluginCommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+      />
     </div>
   );
 };

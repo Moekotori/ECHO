@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { LibraryAlbum, LibraryTrack } from '../../shared/types/library';
+import { translateStatic } from '../i18n/translateStatic';
 
 export const likedTracksChangedEvent = 'liked:tracks-changed';
 export const likedAlbumsChangedEvent = 'liked:albums-changed';
@@ -98,7 +99,7 @@ export const useToggleTrackLiked = (
     async (track: LibraryTrack): Promise<boolean> => {
       const library = window.echo?.library;
       if (!library) {
-        throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to like tracks.');
+        throw new Error(translateStatic('error.bridge.likeTracks'));
       }
 
       setLikedMap?.((current) => ({ ...current, [track.id]: !current[track.id] }));
@@ -123,7 +124,7 @@ export const useToggleAlbumLiked = (
     async (album: LibraryAlbum): Promise<boolean> => {
       const library = window.echo?.library;
       if (!library) {
-        throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to like albums.');
+        throw new Error(translateStatic('error.bridge.likeAlbums'));
       }
 
       setLikedMap?.((current) => ({ ...current, [album.id]: !current[album.id] }));

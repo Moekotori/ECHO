@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { LibraryAlbum, LibraryArtist, LibraryTrack } from '../../shared/types/library';
-import { collectStartupArtworkUrls, selectStartupArtworkUrls } from './useLibraryStartupArtworkPreloader';
+import {
+  collectStartupArtworkUrls,
+  isStartupArtworkPreloadAllowed,
+  selectStartupArtworkUrls,
+} from './useLibraryStartupArtworkPreloader';
 
 const track = (id: string, coverThumb: string | null): LibraryTrack => ({
   id,
@@ -54,6 +58,16 @@ const artist = (
 });
 
 describe('library startup artwork preloader helpers', () => {
+  it('only permits preload work while playback is fully inactive', () => {
+    expect(isStartupArtworkPreloadAllowed('idle')).toBe(true);
+    expect(isStartupArtworkPreloadAllowed('stopped')).toBe(true);
+    expect(isStartupArtworkPreloadAllowed('ended')).toBe(true);
+    expect(isStartupArtworkPreloadAllowed('loading')).toBe(false);
+    expect(isStartupArtworkPreloadAllowed('playing')).toBe(false);
+    expect(isStartupArtworkPreloadAllowed('paused')).toBe(false);
+    expect(isStartupArtworkPreloadAllowed('error')).toBe(false);
+  });
+
   it('interleaves page artwork so one surface cannot consume the startup budget', () => {
     expect(
       selectStartupArtworkUrls(

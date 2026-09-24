@@ -7,6 +7,7 @@ import type { EchoDatabase } from '../database/createDatabase';
 import type { LibraryTrack } from '../../shared/types/library';
 import type { MvMatchCandidate } from '../../shared/types/mv';
 import { MvService } from './MvService';
+import { MV_MATCH_ALGORITHM_VERSION } from './MvScoring';
 import type { MainMvOnlineProvider, ResolvedMvStreamVariant } from './OnlineMvProviders';
 
 const appSettingsMock = vi.hoisted(() => {
@@ -16,7 +17,7 @@ const appSettingsMock = vi.hoisted(() => {
     mvAutoSearch: true,
     mvAutoPreload: true,
     mvAutoApplyThreshold: 0.7,
-    mvTitleOnlySearch: true,
+    mvTitleOnlySearch: false,
     mvPreferHighestViewCount: true,
     mvImmersiveBackground: true,
     mvImmersiveBackgroundScalePercent: 115,
@@ -146,6 +147,46 @@ const makeResolvedVariant = (overrides: Partial<ResolvedMvStreamVariant> = {}): 
   url: 'https://cdn.example/echo-1080.mp4',
   headers: {},
   rawProviderJson: { provider: 'bilibili', resolver: 'test', qn: 80, qualityRank: 3 },
+  ...overrides,
+});
+
+const makeNetworkCandidate = (overrides: Partial<MvMatchCandidate> = {}): MvMatchCandidate => ({
+  id: 'bilibili:BV1candidate',
+  provider: 'bilibili',
+  sourceType: 'search_candidate',
+  title: 'Echo Artist - Echo Song Official MV',
+  artist: 'Echo Artist',
+  filePath: null,
+  url: 'https://www.bilibili.com/video/BV1candidate',
+  providerUrl: 'https://www.bilibili.com/video/BV1candidate',
+  thumbnailUrl: null,
+  uploader: 'Echo Artist',
+  uploaderId: 'echo-artist-uploader',
+  viewCount: 1_000,
+  availableQualities: [],
+  durationSeconds: 120,
+  score: 0.92,
+  autoEligible: true,
+  matchVersion: MV_MATCH_ALGORITHM_VERSION,
+  decision: {
+    score: 0.92,
+    autoAccept: true,
+    candidateOnly: false,
+    risk: 'low',
+    reasons: ['title exact', 'artist in title', 'duration within 5%'],
+    algorithmVersion: MV_MATCH_ALGORITHM_VERSION,
+    evidence: {
+      title: 'exact',
+      titleCoverage: 1,
+      artist: 'title',
+      duration: 'strong',
+      writingSystemAlias: false,
+      officialVideoSignal: true,
+      conflicts: [],
+    },
+  },
+  playableInApp: true,
+  reasons: ['title exact', 'artist in title', 'duration within 5%'],
   ...overrides,
 });
 
@@ -657,7 +698,7 @@ describe('MvService', () => {
     });
   });
 
-  it('skips auto candidates that only resolve to an external Bilibili link', async () => {
+  it('falls back to another candidate from the same uploader when the first only resolves externally', async () => {
     const externalCandidate: MvMatchCandidate = {
       id: 'bilibili:BV1external',
       provider: 'bilibili',
@@ -669,6 +710,7 @@ describe('MvService', () => {
       providerUrl: 'https://www.bilibili.com/video/BV1external',
       thumbnailUrl: null,
       uploader: 'Archive Channel',
+      uploaderId: 'archive-channel',
       availableQualities: [],
       durationSeconds: 120,
       score: 0.93,
@@ -881,7 +923,7 @@ describe('MvService', () => {
 
     const selected = await service.getSelectedOrAutoApplyVideo(track.id);
 
-    expect(provider.search).toHaveBeenCalledOnce();
+    expect(provider.search).toHaveBeenCalledTimes(2);
     expect(selected).toBeNull();
     expect(service.getSelectedVideo(track.id)).toBeNull();
     expect(service.getVideoCandidates(track.id)[0]).toMatchObject({
@@ -1571,23 +1613,15 @@ describe('MvService', () => {
   });
 
   it('uses the configured auto-apply threshold for network MV candidates', async () => {
-    const candidate: MvMatchCandidate = {
+    const candidate = makeNetworkCandidate({
       id: 'bilibili:BV1threshold',
-      provider: 'bilibili',
-      sourceType: 'search_candidate',
       title: 'Echo Song MV',
-      artist: 'Echo Artist',
-      filePath: null,
       url: 'https://www.bilibili.com/video/BV1threshold',
       providerUrl: 'https://www.bilibili.com/video/BV1threshold',
-      thumbnailUrl: null,
       uploader: 'Echo Channel',
-      availableQualities: [],
-      durationSeconds: 120,
       score: 0.82,
-      playableInApp: true,
       reasons: ['Bilibili search'],
-    };
+    });
     const provider: MainMvOnlineProvider = {
       id: 'bilibili',
       search: vi.fn(async () => [candidate]),
@@ -1608,7 +1642,118 @@ describe('MvService', () => {
     });
   });
 
-  it('auto applies the highest-view candidate with a title-only query by default', async () => {
+  it('never auto applies a candidate that the evidence model marks ineligible', async () => {
+    const candidate = makeNetworkCandidate({ score: 0.99, autoEligible: false, viewCount: 99_000_000 });
+    const provider: MainMvOnlineProvider = {
+      id: 'bilibili',
+      search: vi.fn(async () => [candidate]),
+      resolve: vi.fn(async () => [makeResolvedVariant()]),
+    };
+    const { service, track } = createHarness([provider]);
+
+    await service.searchNetworkCandidates(track.id);
+
+    expect(service.getSelectedVideo(track.id)).toBeNull();
+    expect(provider.resolve).not.toHaveBeenCalled();
+  });
+
+  it('does not auto bind a manual query and records an explicit selection as manual', async () => {
+    const candidate = makeNetworkCandidate();
+    const provider: MainMvOnlineProvider = {
+      id: 'bilibili',
+      search: vi.fn(async () => [candidate]),
+      resolve: vi.fn(async () => [makeResolvedVariant()]),
+    };
+    const { service, track } = createHarness([provider]);
+
+    const candidates = await service.searchNetworkCandidates(track.id, 'custom query');
+    expect(service.getSelectedVideo(track.id)).toBeNull();
+
+    const selected = await service.selectVideo(track.id, candidates[0]!.id);
+    expect(selected).toMatchObject({ selectionOrigin: 'manual', selected: true });
+  });
+
+  it('leaves close medium-confidence candidates unselected when there is no clear winner', async () => {
+    const provider: MainMvOnlineProvider = {
+      id: 'bilibili',
+      search: vi.fn(async () => [
+        makeNetworkCandidate({ id: 'bilibili:BV1first', score: 0.84, viewCount: 5_000 }),
+        makeNetworkCandidate({ id: 'bilibili:BV1second', score: 0.81, viewCount: 500_000 }),
+      ]),
+      resolve: vi.fn(async () => [makeResolvedVariant()]),
+    };
+    const { service, track } = createHarness([provider]);
+
+    await service.searchNetworkCandidates(track.id);
+
+    expect(service.getSelectedVideo(track.id)).toBeNull();
+    expect(provider.resolve).not.toHaveBeenCalled();
+  });
+
+  it('keeps candidates from an outdated scoring algorithm manual', async () => {
+    const candidate = makeNetworkCandidate({ matchVersion: MV_MATCH_ALGORITHM_VERSION - 1 });
+    const provider: MainMvOnlineProvider = {
+      id: 'bilibili',
+      search: vi.fn(async () => [candidate]),
+      resolve: vi.fn(async () => [makeResolvedVariant()]),
+    };
+    const { service, track } = createHarness([provider]);
+
+    await service.searchNetworkCandidates(track.id);
+
+    expect(service.getSelectedVideo(track.id)).toBeNull();
+    expect(provider.resolve).not.toHaveBeenCalled();
+  });
+
+  it('auto applies a high-confidence candidate even when another strong result is close behind', async () => {
+    const provider: MainMvOnlineProvider = {
+      id: 'bilibili',
+      search: vi.fn(async () => [
+        makeNetworkCandidate({ id: 'bilibili:BV1official', score: 0.89, viewCount: 50_000 }),
+        makeNetworkCandidate({ id: 'bilibili:BV1reupload', score: 0.87, viewCount: 500_000 }),
+      ]),
+      resolve: vi.fn(async () => [makeResolvedVariant()]),
+    };
+    const { service, track } = createHarness([provider]);
+
+    await service.searchNetworkCandidates(track.id);
+
+    expect(service.getSelectedVideo(track.id)).toMatchObject({
+      sourceId: 'BV1official',
+      score: 0.89,
+      selectionOrigin: 'auto',
+    });
+  });
+
+  it('does not auto-fallback across different uploaders when the first candidate cannot play in app', async () => {
+    const first = makeNetworkCandidate({
+      id: 'bilibili:BV1first-uploader',
+      uploaderId: 'uploader-1',
+      score: 0.93,
+    });
+    const second = makeNetworkCandidate({
+      id: 'bilibili:BV1second-uploader',
+      uploaderId: 'uploader-2',
+      score: 0.9,
+    });
+    const provider: MainMvOnlineProvider = {
+      id: 'bilibili',
+      search: vi.fn(async () => [first, second]),
+      resolve: vi.fn(async (video) =>
+        video.sourceId === 'BV1first-uploader'
+          ? [makeExternalVariant(video.providerUrl ?? video.url ?? undefined)]
+          : [makeResolvedVariant()]),
+    };
+    const { service, track } = createHarness([provider]);
+
+    await service.searchNetworkCandidates(track.id);
+
+    expect(vi.mocked(provider.resolve).mock.calls.every(([video]) => video.sourceId === 'BV1first-uploader')).toBe(true);
+    expect(service.getSelectedVideo(track.id)).toBeNull();
+    expect(service.getVideoCandidates(track.id)).toHaveLength(2);
+  });
+
+  it('auto applies the best matching candidate and uses popularity only as a score tie-breaker', async () => {
     const accurateCandidate: MvMatchCandidate = {
       id: 'bilibili:BV1accurate',
       provider: 'bilibili',
@@ -1647,17 +1792,18 @@ describe('MvService', () => {
 
     expect(provider.search).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Echo Song', artist: 'Echo Artist' }),
-      expect.objectContaining({ titleOnlySearch: true, preferHighestViewCount: true }),
-      'Echo Song',
+      expect.objectContaining({ titleOnlySearch: false, preferHighestViewCount: true }),
+      'Echo Song Echo Artist MV',
     );
     expect(candidates[0]).toMatchObject({
-      title: 'Echo Song Echo Artist Live',
-      viewCount: 250000,
+      title: 'Echo Song Official MV',
+      viewCount: 1200,
     });
     expect(service.getSelectedVideo(track.id)).toMatchObject({
       provider: 'bilibili',
-      sourceId: 'BV1popular',
-      score: 0.42,
+      sourceId: 'BV1accurate',
+      score: 0.96,
+      selectionOrigin: 'auto',
       selected: true,
     });
   });
@@ -1676,8 +1822,34 @@ describe('MvService', () => {
     expect(provider.search).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Echo Song', artist: 'Echo Artist' }),
       expect.objectContaining({ titleOnlySearch: false }),
+      'Echo Song Echo Artist MV',
+    );
+  });
+
+  it('falls back to a broader Bilibili query only when the MV query has no safe candidate', async () => {
+    const fallbackCandidate = makeNetworkCandidate({ id: 'bilibili:BV1fallback', score: 0.88 });
+    const provider: MainMvOnlineProvider = {
+      id: 'bilibili',
+      search: vi.fn(async (_track, _settings, query) => (query?.endsWith(' MV') ? [] : [fallbackCandidate])),
+      resolve: vi.fn(async () => [makeResolvedVariant()]),
+    };
+    const { service, track } = createHarness([provider]);
+
+    await service.searchNetworkCandidates(track.id);
+
+    expect(provider.search).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ title: 'Echo Song', artist: 'Echo Artist' }),
+      expect.any(Object),
+      'Echo Song Echo Artist MV',
+    );
+    expect(provider.search).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ title: 'Echo Song', artist: 'Echo Artist' }),
+      expect.any(Object),
       'Echo Song Echo Artist',
     );
+    expect(service.getSelectedVideo(track.id)).toMatchObject({ sourceId: 'BV1fallback', selectionOrigin: 'auto' });
   });
 
   it('returns echo-video mediaUrl only for playable local videos', () => {

@@ -20,6 +20,7 @@ import {
 import type { AppThemePreset, AppThemeToneOverride } from '../../shared/types/appSettings';
 
 const pluginIdPattern = /^[a-z0-9][a-z0-9._-]{1,63}$/u;
+// eslint-disable-next-line no-control-regex -- plugin paths must reject control characters.
 const safeRelativePathPattern = /^[^<>:"|?*\u0000-\u001f]+$/u;
 const permissionSet = new Set<PluginPermission>(pluginPermissions);
 const settingTypes = new Set<PluginSettingType>(['string', 'select', 'boolean', 'number', 'secret']);

@@ -1,7 +1,8 @@
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithStdioTuple } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
-import { Readable, Writable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import { JsonRpcBridge } from './JsonRpcBridge';
+import { nativeBackendContractVersion, nativeHostProtocolVersion } from './audioTypes';
 import {
   activeJsonRpcBridge,
   clearActiveJsonRpcBridge,
@@ -46,6 +47,7 @@ const daemonLog = (...args: unknown[]) => { if (DEBUG_AUDIO) console.log('[audio
 
 const DAEMON_TRANSPORT_ARGS: readonly string[] = [
   '--no-stdin',
+  '--defer-device-open',
   '--rpc-stdin-fd', '3',
   '--rpc-stdout-fd', '4',
 ];
@@ -223,11 +225,45 @@ export class DaemonHostProcess {
         for (const line of data.split('\n')) {
           if (line.includes('"ready":true')) {
             if (daemonSettled) return;
+            let ready: {
+              readyLevel?: unknown;
+              protocolVersion?: unknown;
+              backendContractVersion?: unknown;
+              capabilities?: {
+                deviceReadyV2?: unknown;
+                runtimeDeviceConfigureV1?: unknown;
+                hostOwnedLocalPlaybackV1?: unknown;
+                nativeDspV1?: unknown;
+              };
+            };
+            try {
+              ready = JSON.parse(line) as typeof ready;
+            } catch {
+              continue;
+            }
+            if (
+              ready.readyLevel !== 'process' ||
+              ready.protocolVersion !== nativeHostProtocolVersion ||
+              ready.backendContractVersion !== nativeBackendContractVersion ||
+              ready.capabilities?.deviceReadyV2 !== true ||
+              ready.capabilities?.runtimeDeviceConfigureV1 !== true ||
+              ready.capabilities?.hostOwnedLocalPlaybackV1 !== true ||
+              ready.capabilities?.nativeDspV1 !== true
+            ) {
+              daemonSettled = true;
+              clearTimeout(timer);
+              spawnedProc.stdout?.removeListener('data', onData);
+              try { spawnedProc.kill('SIGKILL'); } catch {}
+              reject(new Error(
+                `native_host_contract_mismatch: readyLevel=${String(ready.readyLevel)} ` +
+                `protocol=${String(ready.protocolVersion)} backendContract=${String(ready.backendContractVersion)}`,
+              ));
+              return;
+            }
             daemonSettled = true;
 
             const elapsedMs = Math.round(performance.now() - startedAtMs);
-            const readyLevel = line.includes('"readyLevel":"process"') ? 'process-ready (deferred)' : 'full-ready';
-            daemonLog('spawn: ready detected [pid=', daemonPid, ']', `elapsedMs=${elapsedMs}`, `level=${readyLevel}`, 'bridge alive=', !!this.ctx.getJsonRpcBridge());
+            daemonLog('spawn: ready detected [pid=', daemonPid, ']', `elapsedMs=${elapsedMs}`, 'level=process-ready (deferred)', 'bridge alive=', !!this.ctx.getJsonRpcBridge());
             clearTimeout(timer);
             spawnedProc.stdout?.removeListener('data', onData);
             resolve();

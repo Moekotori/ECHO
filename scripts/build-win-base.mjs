@@ -3,7 +3,6 @@ import { join } from 'node:path';
 
 const projectRoot = process.cwd();
 const electronBuilderCli = join(projectRoot, 'node_modules', 'electron-builder', 'cli.js');
-
 const child = spawn(
   process.execPath,
   [electronBuilderCli, '--win', '--publish', 'never'],
@@ -12,7 +11,6 @@ const child = spawn(
     env: {
       ...process.env,
       CSC_IDENTITY_AUTO_DISCOVERY: 'false',
-      ECHO_ALLOW_UNSIGNED_BASE_PACKAGE: '1',
     },
     stdio: 'inherit',
   },

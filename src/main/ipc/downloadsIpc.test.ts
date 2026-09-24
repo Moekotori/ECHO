@@ -13,6 +13,21 @@ const downloadUnlockAssertMock = vi.fn<() => unknown>(() => {
   throw new Error('downloads_plugin_unlock_required');
 });
 const searchMock = vi.fn(async () => ({ results: [], errors: [] }));
+const getOsuAccountProfileMock = vi.fn(async () => ({
+  userId: 12345,
+  username: 'EchoPlayer',
+  avatarUrl: null,
+  defaultRuleset: 'osu',
+  bestScoreCount: 100,
+  favouriteBeatmapsetCount: 2,
+  mostPlayedBeatmapCount: 2048,
+}));
+const getOsuAccountCollectionMock = vi.fn(async (request) => ({
+  profile: await getOsuAccountProfileMock(),
+  kind: request.kind,
+  items: [],
+  total: 0,
+}));
 const createUrlJobMock = vi.fn((url: string, _options?: Record<string, unknown>): DownloadJob => ({
   id: 'job-osu',
   sourceUrl: url,
@@ -41,6 +56,7 @@ const downloadServiceMock = {
   getJobs: vi.fn(() => []),
   createUrlJob: createUrlJobMock,
   cancelJob: vi.fn(() => null),
+  clearJobs: vi.fn(() => []),
   clearCompleted: vi.fn(() => []),
   getSettings: vi.fn(() => ({
     audioStrategy: 'best_available',
@@ -59,6 +75,8 @@ const downloadServiceMock = {
     osuDownloadMirror: typeof patch.osuDownloadMirror === 'string' ? patch.osuDownloadMirror : 'auto',
   })),
   search: searchMock,
+  getOsuAccountProfile: getOsuAccountProfileMock,
+  getOsuAccountCollection: getOsuAccountCollectionMock,
   checkTools: vi.fn(async () => ({
     ytDlpAvailable: false,
     ytDlpPath: null,
@@ -134,6 +152,51 @@ describe('downloads IPC osu downloader gate', () => {
       { providerLock: 'osu' },
     );
     expect(job).toEqual(expect.objectContaining({ provider: 'osu' }));
+  });
+
+  it('clears only the requested provider queue', () => {
+    const jobs = handlers[IpcChannels.DownloadsClearJobs]?.({}, 'osu');
+
+    expect(downloadServiceMock.clearJobs).toHaveBeenCalledWith('osu');
+    expect(jobs).toEqual([]);
+  });
+
+  it('clears only completed jobs for the requested provider', () => {
+    const jobs = handlers[IpcChannels.DownloadsClearCompleted]?.({}, 'osu');
+
+    expect(downloadServiceMock.clearCompleted).toHaveBeenCalledWith('osu');
+    expect(jobs).toEqual([]);
+  });
+
+  it('exposes signed-in osu account profile and collection data without the downloads unlock plugin', async () => {
+    await expect(handlers[IpcChannels.DownloadsGetOsuAccountProfile]?.({})).resolves.toEqual(
+      expect.objectContaining({ username: 'EchoPlayer' }),
+    );
+    await expect(
+      handlers[IpcChannels.DownloadsGetOsuAccountCollection]?.(
+        {},
+        { kind: 'best', ruleset: 'osu', start: 1, end: 25 },
+      ),
+    ).resolves.toEqual(expect.objectContaining({ kind: 'best' }));
+    await expect(
+      handlers[IpcChannels.DownloadsGetOsuAccountCollection]?.(
+        {},
+        { kind: 'most_played', offset: 100, limit: 50 },
+      ),
+    ).resolves.toEqual(expect.objectContaining({ kind: 'most_played' }));
+
+    expect(downloadUnlockAssertMock).not.toHaveBeenCalled();
+    expect(getOsuAccountCollectionMock).toHaveBeenNthCalledWith(1, {
+      kind: 'best',
+      ruleset: 'osu',
+      start: 1,
+      end: 25,
+    });
+    expect(getOsuAccountCollectionMock).toHaveBeenNthCalledWith(2, {
+      kind: 'most_played',
+      offset: 100,
+      limit: 50,
+    });
   });
 
   it('rejects non-osu searches from the osu downloader gate', () => {

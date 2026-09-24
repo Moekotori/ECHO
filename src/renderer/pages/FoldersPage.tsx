@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import '../styles/folders.css';
 import type { CSSProperties, DragEvent, SetStateAction } from 'react';
 import {
   AlertTriangle,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -13,6 +16,7 @@ import {
   RotateCw,
   Search,
   Shuffle,
+  Star,
   Trash2,
   XCircle,
 } from 'lucide-react';
@@ -26,11 +30,13 @@ import type {
   LibrarySort,
   LibraryTrack,
 } from '../../shared/types/library';
+import { isDisplayableBpmAnalysis } from '../../shared/constants/audioAnalysis';
 import type {
   RemoteBackgroundJobStatus,
   RemoteDirectoryItem,
   RemoteDirectoryPreviewItem,
   RemoteIndexedFolderStats,
+  RemoteIndexedTracksPage,
   RemoteSource,
   RemoteSyncStatus,
   RemoteTrackLookupItem,
@@ -83,6 +89,11 @@ type FolderTarget = {
 type TrackMenuState = {
   track: LibraryTrack;
   tracks: LibraryTrack[];
+  position: { x: number; y: number };
+};
+
+type FolderContextMenuState = {
+  target: FolderTarget;
   position: { x: number; y: number };
 };
 
@@ -314,24 +325,109 @@ const remoteStatusLabels = {
   error: '异常',
 } satisfies Record<RemoteSource['status'], string>;
 
-const sortOptions: Array<{ value: LibrarySort; labelKey: TranslationKey }> = [
-  { value: 'default', labelKey: 'folders.sort.title' },
-  { value: 'createdAsc', labelKey: 'library.sort.createdAsc' },
-  { value: 'createdDesc', labelKey: 'library.sort.createdDesc' },
-  { value: 'artist', labelKey: 'folders.sort.artist' },
-  { value: 'album', labelKey: 'folders.sort.album' },
-  { value: 'fileModifiedAsc', labelKey: 'library.sort.fileModifiedAsc' },
-  { value: 'fileModifiedDesc', labelKey: 'library.sort.fileModifiedDesc' },
-  { value: 'recent', labelKey: 'folders.sort.recent' },
-  { value: 'durationDesc', labelKey: 'folders.sort.duration' },
-  { value: 'qualityDesc', labelKey: 'folders.sort.quality' },
-  { value: 'random', labelKey: 'folders.sort.random' },
+type FolderSortOption = {
+  value: LibrarySort;
+  labelKey?: TranslationKey;
+  label?: (t: (key: TranslationKey) => string) => string;
+  groupKey: TranslationKey;
+  localOnly?: boolean;
+};
+
+const sortOptions: FolderSortOption[] = [
+  { value: 'titleAsc', labelKey: 'songs.sort.titleAsc', groupKey: 'songs.sort.group.browse' },
+  { value: 'titleDesc', labelKey: 'songs.sort.titleDesc', groupKey: 'songs.sort.group.browse' },
+  { value: 'artist', labelKey: 'songs.sort.artist', groupKey: 'songs.sort.group.browse' },
+  { value: 'album', labelKey: 'songs.sort.album', groupKey: 'songs.sort.group.browse' },
+  { value: 'trackNumber', labelKey: 'folders.sort.trackNumber', groupKey: 'songs.sort.group.browse' },
+  { value: 'yearDesc', labelKey: 'songs.sort.yearDesc', groupKey: 'songs.sort.group.browse' },
+  { value: 'yearAsc', labelKey: 'songs.sort.yearAsc', groupKey: 'songs.sort.group.browse' },
+
+  { value: 'createdDesc', labelKey: 'songs.sort.createdDesc', groupKey: 'songs.sort.group.library' },
+  { value: 'createdAsc', labelKey: 'songs.sort.createdAsc', groupKey: 'songs.sort.group.library' },
+  { value: 'fileModifiedDesc', labelKey: 'songs.sort.fileModifiedDesc', groupKey: 'songs.sort.group.library' },
+  { value: 'fileModifiedAsc', labelKey: 'songs.sort.fileModifiedAsc', groupKey: 'songs.sort.group.library' },
+  { value: 'recent', labelKey: 'songs.sort.recent', groupKey: 'songs.sort.group.library' },
+
+  { value: 'lastPlayed', labelKey: 'songs.sort.lastPlayed', groupKey: 'songs.sort.group.listening', localOnly: true },
+  { value: 'playCountDesc', labelKey: 'songs.sort.playCountDesc', groupKey: 'songs.sort.group.listening', localOnly: true },
+  { value: 'playCountAsc', labelKey: 'songs.sort.playCountAsc', groupKey: 'songs.sort.group.listening', localOnly: true },
+  { value: 'random', labelKey: 'songs.sort.random', groupKey: 'songs.sort.group.listening' },
+
+  { value: 'durationAsc', labelKey: 'songs.sort.durationAsc', groupKey: 'songs.sort.group.audio' },
+  { value: 'durationDesc', labelKey: 'songs.sort.durationDesc', groupKey: 'songs.sort.group.audio' },
+  { value: 'qualityDesc', labelKey: 'songs.sort.qualityDesc', groupKey: 'songs.sort.group.audio' },
+  { value: 'qualityAsc', labelKey: 'songs.sort.qualityAsc', groupKey: 'songs.sort.group.audio' },
+  {
+    value: 'codecAsc',
+    label: (t) => `${t('audioProfessional.row.codec')} (A–Z)`,
+    groupKey: 'songs.sort.group.audio',
+  },
+  {
+    value: 'codecDesc',
+    label: (t) => `${t('audioProfessional.row.codec')} (Z–A)`,
+    groupKey: 'songs.sort.group.audio',
+  },
+  { value: 'audioSpecDesc', labelKey: 'songs.sort.audioSpecDesc', groupKey: 'songs.sort.group.audio' },
+  { value: 'audioSpecAsc', labelKey: 'songs.sort.audioSpecAsc', groupKey: 'songs.sort.group.audio' },
+  {
+    value: 'bitrateDesc',
+    label: (t) => `${t('audioProfessional.row.bitrate')} ↓`,
+    groupKey: 'songs.sort.group.audio',
+  },
+  {
+    value: 'bitrateAsc',
+    label: (t) => `${t('audioProfessional.row.bitrate')} ↑`,
+    groupKey: 'songs.sort.group.audio',
+  },
+  { value: 'bpmAsc', labelKey: 'songs.sort.bpmAsc', groupKey: 'songs.sort.group.audio', localOnly: true },
+  { value: 'bpmDesc', labelKey: 'songs.sort.bpmDesc', groupKey: 'songs.sort.group.audio', localOnly: true },
+];
+const remoteUnsupportedFolderSortValues = new Set<LibrarySort>([
+  'lastPlayed',
+  'playCountAsc',
+  'playCountDesc',
+  'bpmAsc',
+  'bpmDesc',
+]);
+const folderColumnSortOptions: Array<{ value: LibrarySort; label: string }> = [
+  { value: 'titleAsc', label: '标题 ↑' },
+  { value: 'titleDesc', label: '标题 ↓' },
+  { value: 'codecAsc', label: '格式 ↑' },
+  { value: 'codecDesc', label: '格式 ↓' },
+  { value: 'audioSpecAsc', label: '音频规格 ↑' },
+  { value: 'audioSpecDesc', label: '音频规格 ↓' },
+  { value: 'bitrateAsc', label: '码率 ↑' },
+  { value: 'bitrateDesc', label: '码率 ↓' },
+  { value: 'bpmAsc', label: 'BPM ↑' },
+  { value: 'bpmDesc', label: 'BPM ↓' },
+  { value: 'durationAsc', label: '时长 ↑' },
 ];
 const foldersSortStorageKey = 'echo-next.folders.sort';
-const validFolderSortValues = new Set<LibrarySort>(sortOptions.map((option) => option.value));
+const validFolderSortValues = new Set<LibrarySort>([
+  'default',
+  'title',
+  ...sortOptions.map((option) => option.value),
+  ...folderColumnSortOptions.map((option) => option.value),
+]);
+
+const folderColumnSortDirection = (
+  sort: LibrarySort,
+  ascending: LibrarySort,
+  descending: LibrarySort,
+  ascendingAliases: LibrarySort[] = [],
+): 'ascending' | 'descending' | 'none' => {
+  if (sort === ascending || ascendingAliases.includes(sort)) {
+    return 'ascending';
+  }
+  return sort === descending ? 'descending' : 'none';
+};
 
 const remoteIndexedRefreshMinIntervalMs = 15_000;
+const remoteProgressActivePollIntervalMs = 900;
+const remoteProgressIdlePollIntervalMs = 5_000;
+const remoteProgressHiddenPollIntervalMs = 15_000;
 const targetKey = (folderId: string, path: string): string => `${folderId}::${path}`;
+const folderHeaderCoverUrl = (url: string): string => url.replace(/^echo-cover:\/\/thumb\//u, 'echo-cover://album/');
 const remoteTreeKey = (sourceId: string, path: string): string => `${sourceId}::${normalizeRemoteFolderPath(path)}`;
 
 const parseTargetKey = (key: string): { folderId: string; path: string } | null => {
@@ -748,22 +844,43 @@ export const FoldersPage = (): JSX.Element => {
   const [selectedTrackIds, setSelectedTrackIds] = useState<Record<string, boolean>>({});
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
-  const { search, searchInputProps } = useImeAwareDebouncedSearch(220);
+  const { searchInput, setSearchInput, search, setSearch, searchInputProps } = useImeAwareDebouncedSearch(220);
   const [sort, setSort] = useState<LibrarySort>(() => readStoredLibrarySort(foldersSortStorageKey, validFolderSortValues));
   const localizedSortOptions = useMemo(
-    () => sortOptions.map((option) => ({ value: option.value, label: t(option.labelKey) })),
-    [t],
+    () => sortOptions
+      .filter((option) => mode === 'local' || !option.localOnly)
+      .map((option) => ({
+        value: option.value,
+        label: option.label ? option.label(t) : t(option.labelKey!),
+        group: t(option.groupKey),
+      })),
+    [mode, t],
   );
+  const selectedSort = sort === 'default' || sort === 'title' || (mode === 'remote' && remoteUnsupportedFolderSortValues.has(sort))
+    ? 'titleAsc'
+    : sort;
+  const toggleColumnSort = useCallback((ascending: LibrarySort, descending: LibrarySort, ascendingAliases: LibrarySort[] = []): void => {
+    setSort((current) => current === ascending || ascendingAliases.includes(current) ? descending : ascending);
+  }, []);
   const [recursive, setRecursive] = useState(true);
   const [folderPath, setFolderPath] = useState('');
   const [scanStatuses, setScanStatuses] = useState<ScanStatusByFolder>(getLibraryScanStatuses);
   const [isLoadingOverviews, setIsLoadingOverviews] = useState(false);
+  const [isImportingFolder, setIsImportingFolder] = useState(false);
   const [isLoadingTracks, setIsLoadingTracks] = useState(false);
   const [isBulkLoading, setIsBulkLoading] = useState(false);
   const [isRepairingAlbumIndex, setIsRepairingAlbumIndex] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [trackMenu, setTrackMenu] = useState<TrackMenuState | null>(null);
+  const [folderContextMenu, setFolderContextMenu] = useState<FolderContextMenuState | null>(null);
+  const [pinnedFolders, setPinnedFolders] = useState<FolderTarget[]>(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem('echo-next.folders.pinned') ?? '[]') as FolderTarget[];
+    } catch {
+      return [];
+    }
+  });
   const [osuTimingTrack, setOsuTimingTrack] = useState<LibraryTrack | null>(null);
   const [editingTrack, setEditingTrack] = useState<LibraryTrack | null>(null);
   const [isTagEditorOpen, setIsTagEditorOpen] = useState(false);
@@ -778,6 +895,7 @@ export const FoldersPage = (): JSX.Element => {
   const [remoteFolderStats, setRemoteFolderStats] = useState<RemoteIndexedFolderStats | null>(null);
   const [remotePage, setRemotePage] = useState(1);
   const [remoteHasMore, setRemoteHasMore] = useState(false);
+  const [remoteNextCursor, setRemoteNextCursor] = useState<string | null>(null);
   const [remoteIndexedTracks, setRemoteIndexedTracks] = useState<Record<string, RemoteTrackLookupItem>>({});
   const [remotePreviewTracks, setRemotePreviewTracks] = useState<Record<string, RemoteDirectoryPreviewItem>>({});
   const [remoteVisibleTrackIds, setRemoteVisibleTrackIds] = useState<string[]>([]);
@@ -803,7 +921,38 @@ export const FoldersPage = (): JSX.Element => {
   const remoteVisibleHydrationInFlightRef = useRef<Set<string>>(new Set());
   const tagEditorCloseTimerRef = useRef<number | null>(null);
   const workbenchRef = useRef<HTMLDivElement | null>(null);
-  const { currentTrackId, isShuffleEnabled, playTrack, appendToQueue, appendTracksToQueue, playTrackNext, removeTrackFromQueue, toggleShuffle } = usePlaybackQueue();
+  const folderContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const folderViewMemoryKeyRef = useRef<string | null>(null);
+  const isRestoringFolderViewRef = useRef(false);
+  const { currentTrackId, isShuffleEnabled, playTrack, appendToQueue, appendTracksToQueue, playTrackNext, playTracksNext, removeTrackFromQueue, toggleShuffle } = usePlaybackQueue();
+
+  useEffect(() => {
+    if (!folderContextMenu) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (!folderContextMenuRef.current?.contains(event.target as Node)) {
+        setFolderContextMenu(null);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [folderContextMenu]);
+
+  const togglePinnedFolder = useCallback((target: FolderTarget): void => {
+    setPinnedFolders((current) => {
+      const key = targetKey(target.folderId, target.path);
+      const next = current.some((item) => targetKey(item.folderId, item.path) === key)
+        ? current.filter((item) => targetKey(item.folderId, item.path) !== key)
+        : [...current, target];
+      try {
+        window.localStorage.setItem('echo-next.folders.pinned', JSON.stringify(next));
+      } catch {
+        // Pinning remains available for the current session when storage is restricted.
+      }
+      return next;
+    });
+  }, []);
   const setChildrenByParent = useCallback((value: SetStateAction<Record<string, LibraryFolderNode[]>>): void => {
     setChildrenByParentState((current) => {
       const next = typeof value === 'function' ? value(current) : value;
@@ -838,6 +987,52 @@ export const FoldersPage = (): JSX.Element => {
     () => remoteSources.find((source) => source.id === selectedRemote?.sourceId) ?? null,
     [remoteSources, selectedRemote],
   );
+  const folderBreadcrumbs = useMemo(() => {
+    if (mode === 'remote' && selectedRemote && selectedRemoteSource) {
+      const rootPath = remoteRootPathForSource(selectedRemoteSource);
+      const relativeSegments = normalizeRemoteFolderPath(selectedRemote.path)
+        .slice(normalizeRemoteFolderPath(rootPath).length)
+        .split('/')
+        .filter(Boolean);
+      let currentPath = normalizeRemoteFolderPath(rootPath);
+      return [
+        {
+          label: selectedRemote.sourceName,
+          onSelect: () => setSelectedRemote({ ...selectedRemote, path: rootPath, name: selectedRemote.sourceName }),
+        },
+        ...relativeSegments.map((segment) => {
+          currentPath = normalizeRemoteFolderPath(`${currentPath}/${segment}`);
+          const path = currentPath;
+          return {
+            label: segment,
+            onSelect: () => setSelectedRemote({ ...selectedRemote, path, name: segment }),
+          };
+        }),
+      ];
+    }
+
+    if (mode === 'local' && selected && selectedOverview) {
+      const relativeSegments = selected.path.slice(selected.rootPath.length).split(/[\\/]/u).filter(Boolean);
+      let currentPath = trimLocalPathEnd(selected.rootPath);
+      return [
+        { label: selected.rootName, target: overviewToTarget(selectedOverview) as FolderTarget | null },
+        ...relativeSegments.map((segment, index) => {
+          currentPath = `${currentPath}\\${segment}`;
+          const path = currentPath;
+          const cachedNode = Object.values(childrenByParent).flat().find((node) => node.folderId === selected.folderId && isSameLocalPath(node.path, path));
+          return {
+            label: segment,
+            target: index === relativeSegments.length - 1 ? selected : cachedNode ? nodeToTarget(cachedNode, selectedOverview) : null,
+          };
+        }),
+      ].map((crumb) => ({
+        label: crumb.label,
+        onSelect: crumb.target ? () => setSelected(crumb.target) : undefined,
+      }));
+    }
+
+    return [];
+  }, [childrenByParent, mode, selected, selectedOverview, selectedRemote, selectedRemoteSource]);
   const remoteSyncRunning = remoteSyncStatus?.status === 'running';
   const remoteJobPendingCount = remoteJobStatus
     ? Object.values(remoteJobStatus.pending).reduce((total, count) => total + count, 0)
@@ -885,8 +1080,48 @@ export const FoldersPage = (): JSX.Element => {
     if (sort === 'album') {
       return nextTracks.sort((left, right) => `${left.album}\u0000${left.trackNo ?? 0}\u0000${left.title}`.localeCompare(`${right.album}\u0000${right.trackNo ?? 0}\u0000${right.title}`));
     }
+    if (sort === 'trackNumber') {
+      return nextTracks.sort((left, right) =>
+        Number(left.trackNo == null) - Number(right.trackNo == null)
+        || (left.discNo ?? 1) - (right.discNo ?? 1)
+        || (left.trackNo ?? 0) - (right.trackNo ?? 0)
+        || left.title.localeCompare(right.title)
+        || left.path.localeCompare(right.path),
+      );
+    }
+    if (sort === 'yearAsc' || sort === 'yearDesc') {
+      const direction = sort === 'yearAsc' ? 1 : -1;
+      return nextTracks.sort((left, right) =>
+        Number(left.year == null) - Number(right.year == null)
+        || direction * ((left.year ?? 0) - (right.year ?? 0))
+        || left.title.localeCompare(right.title),
+      );
+    }
     if (sort === 'qualityDesc') {
       return nextTracks.sort((left, right) => (right.bitrate ?? 0) - (left.bitrate ?? 0));
+    }
+    if (sort === 'codecAsc' || sort === 'codecDesc') {
+      const direction = sort === 'codecAsc' ? 1 : -1;
+      return nextTracks.sort((left, right) => direction * (left.codec ?? '').localeCompare(right.codec ?? '') || left.title.localeCompare(right.title));
+    }
+    if (sort === 'audioSpecAsc' || sort === 'audioSpecDesc') {
+      const direction = sort === 'audioSpecAsc' ? 1 : -1;
+      return nextTracks.sort((left, right) => direction * (((left.sampleRate ?? 0) - (right.sampleRate ?? 0)) || ((left.bitDepth ?? 0) - (right.bitDepth ?? 0))) || left.title.localeCompare(right.title));
+    }
+    if (sort === 'bitrateAsc' || sort === 'bitrateDesc' || sort === 'qualityAsc') {
+      const direction = sort === 'bitrateDesc' ? -1 : 1;
+      return nextTracks.sort((left, right) => direction * ((left.bitrate ?? 0) - (right.bitrate ?? 0)) || left.title.localeCompare(right.title));
+    }
+    if (sort === 'bpmAsc' || sort === 'bpmDesc') {
+      const direction = sort === 'bpmAsc' ? 1 : -1;
+      return nextTracks.sort((left, right) => direction * ((left.bpm ?? 0) - (right.bpm ?? 0)) || left.title.localeCompare(right.title));
+    }
+    if (sort === 'durationAsc' || sort === 'durationDesc') {
+      const direction = sort === 'durationAsc' ? 1 : -1;
+      return nextTracks.sort((left, right) => direction * ((left.duration ?? 0) - (right.duration ?? 0)) || left.title.localeCompare(right.title));
+    }
+    if (sort === 'titleDesc') {
+      return nextTracks.sort((left, right) => right.title.localeCompare(left.title));
     }
     if (sort === 'random') {
       return [...nextTracks].sort(() => Math.random() - 0.5);
@@ -894,6 +1129,53 @@ export const FoldersPage = (): JSX.Element => {
 
     return nextTracks.sort((left, right) => left.title.localeCompare(right.title));
   }, [remoteAudioItems, remoteCachedTracks, remoteFolderStats, remoteIndexedTracks, remotePreviewTracks, search, selectedRemoteSource, sort]);
+  const folderViewMemoryKey = mode === 'local' && selected
+    ? `local:${selected.folderId}:${normalizeLocalPathForCompare(selected.path)}`
+    : mode === 'remote' && selectedRemote
+      ? `remote:${selectedRemote.sourceId}:${normalizeRemoteFolderPath(selectedRemote.path)}`
+      : null;
+
+  useEffect(() => {
+    const memoryKey = folderViewMemoryKey;
+    folderViewMemoryKeyRef.current = memoryKey;
+    if (!memoryKey) {
+      return;
+    }
+
+    isRestoringFolderViewRef.current = true;
+    try {
+      const raw = window.localStorage.getItem(`echo-next.folder-view:${memoryKey}`);
+      const stored = raw ? JSON.parse(raw) as { search?: string; recursive?: boolean; sort?: LibrarySort } : null;
+      const nextSearch = stored?.search ?? '';
+      setSearchInput(nextSearch);
+      setSearch(nextSearch.trim());
+      setRecursive(stored?.recursive ?? true);
+      const storedSort = stored?.sort && validFolderSortValues.has(stored.sort) ? stored.sort : 'default';
+      setSort(mode === 'remote' && remoteUnsupportedFolderSortValues.has(storedSort) ? 'titleAsc' : storedSort);
+    } catch {
+      setSearchInput('');
+      setSearch('');
+      setRecursive(true);
+      setSort('default');
+    }
+    const timer = window.setTimeout(() => {
+      isRestoringFolderViewRef.current = false;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [folderViewMemoryKey, mode, setSearch, setSearchInput]);
+
+  useEffect(() => {
+    const memoryKey = folderViewMemoryKeyRef.current;
+    if (!memoryKey || isRestoringFolderViewRef.current) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(`echo-next.folder-view:${memoryKey}`, JSON.stringify({ search: searchInput, recursive, sort }));
+    } catch {
+      // Per-folder view memory is optional in restricted storage environments.
+    }
+  }, [recursive, searchInput, sort]);
+
   const folderSource = useMemo(
     () =>
       selected
@@ -920,6 +1202,10 @@ export const FoldersPage = (): JSX.Element => {
     [selectedRemote],
   );
   const activeTracks = mode === 'remote' ? remoteTracks : tracks;
+  const hasVisibleBpm = activeTracks.some((track) => isDisplayableBpmAnalysis(track.bpm, track.analysisStatus, track.bpmConfidence));
+  const selectedCovers = mode === 'local'
+    ? [...new Set((selected?.coverThumbs ?? []).map(folderHeaderCoverUrl))].slice(0, 4)
+    : [];
   const selectedTracks = useMemo(
     () => activeTracks.filter((track) => selectedTrackIds[track.id] === true && !track.unavailable),
     [activeTracks, selectedTrackIds],
@@ -986,7 +1272,7 @@ export const FoldersPage = (): JSX.Element => {
     } finally {
       setIsLoadingOverviews(false);
     }
-  }, []);
+  }, [setExpanded, t]);
 
   useEffect(() => {
     void refreshOverviews();
@@ -1027,11 +1313,12 @@ export const FoldersPage = (): JSX.Element => {
   }, [loadRemoteSources, mode]);
 
   const loadRemoteTrackPage = useCallback(
-    async (target: RemoteFolderTarget | null, nextPage: number, loadMode: 'replace' | 'append'): Promise<LibraryPage<LibraryTrack> | null> => {
+    async (target: RemoteFolderTarget | null, nextPage: number, loadMode: 'replace' | 'append'): Promise<RemoteIndexedTracksPage<LibraryTrack> | null> => {
       if (!target || !remoteApi?.listIndexedTracksPage) {
         setRemoteCachedTracks([]);
         setRemotePage(1);
         setRemoteHasMore(false);
+        setRemoteNextCursor(null);
         return null;
       }
 
@@ -1047,6 +1334,7 @@ export const FoldersPage = (): JSX.Element => {
           pageSize,
           search,
           sort,
+          cursor: loadMode === 'append' ? remoteNextCursor : null,
         });
 
         if (trackRequestIdRef.current !== requestId) {
@@ -1056,6 +1344,7 @@ export const FoldersPage = (): JSX.Element => {
         setRemoteCachedTracks((current) => (loadMode === 'append' ? [...current, ...result.items] : result.items));
         setRemotePage(result.page);
         setRemoteHasMore(result.hasMore);
+        setRemoteNextCursor(result.nextCursor);
         return result;
       } catch (tracksError) {
         if (trackRequestIdRef.current === requestId) {
@@ -1063,6 +1352,7 @@ export const FoldersPage = (): JSX.Element => {
           setRemoteCachedTracks((current) => (loadMode === 'append' ? current : []));
           setRemotePage(1);
           setRemoteHasMore(false);
+          setRemoteNextCursor(null);
         }
         return null;
       } finally {
@@ -1071,7 +1361,7 @@ export const FoldersPage = (): JSX.Element => {
         }
       }
     },
-    [remoteApi, search, sort],
+    [remoteApi, remoteNextCursor, search, sort],
   );
 
   const loadRemoteDirectory = useCallback(
@@ -1082,6 +1372,7 @@ export const FoldersPage = (): JSX.Element => {
         setRemoteFolderStats(null);
         setRemotePage(1);
         setRemoteHasMore(false);
+        setRemoteNextCursor(null);
         setRemoteIndexedTracks({});
         setRemotePreviewTracks({});
         return;
@@ -1115,6 +1406,7 @@ export const FoldersPage = (): JSX.Element => {
         setRemoteCachedTracks(cachedTracks);
         setRemotePage(pageResult?.page ?? 1);
         setRemoteHasMore(pageResult?.hasMore ?? false);
+        setRemoteNextCursor(pageResult?.nextCursor ?? null);
         setRemoteIndexedTracks(indexedByPath);
         setRemotePreviewTracks(Object.fromEntries(previews.map((item) => [item.remotePath, item])));
         setRemoteDirectoryChildrenByParent((current) => ({
@@ -1127,6 +1419,7 @@ export const FoldersPage = (): JSX.Element => {
         setRemoteFolderStats(null);
         setRemotePage(1);
         setRemoteHasMore(false);
+        setRemoteNextCursor(null);
         setRemoteIndexedTracks({});
         setRemotePreviewTracks({});
         setError(remoteError instanceof Error ? remoteError.message : '读取网盘目录失败。');
@@ -1181,6 +1474,22 @@ export const FoldersPage = (): JSX.Element => {
     }
 
     let disposed = false;
+    let timer: number | null = null;
+    let nextPollDelayMs = remoteProgressIdlePollIntervalMs;
+    const scheduleNextRefresh = (): void => {
+      if (disposed) {
+        return;
+      }
+
+      const delayMs =
+        document.visibilityState === 'hidden'
+          ? remoteProgressHiddenPollIntervalMs
+          : nextPollDelayMs;
+      timer = window.setTimeout(() => {
+        timer = null;
+        void refreshRemoteProgress();
+      }, delayMs);
+    };
     const refreshRemoteProgress = async (): Promise<void> => {
       try {
         const [syncStatus, jobStatus] = await Promise.all([
@@ -1193,6 +1502,14 @@ export const FoldersPage = (): JSX.Element => {
 
         setRemoteSyncStatus(syncStatus);
         setRemoteJobStatus(jobStatus);
+        const hasRunningJobs =
+          jobStatus.current.length > 0 ||
+          Object.values(jobStatus.running).some((count) => count > 0) ||
+          (!jobStatus.paused && Object.values(jobStatus.pending).some((count) => count > 0));
+        nextPollDelayMs =
+          syncStatus.status === 'running' || hasRunningJobs
+            ? remoteProgressActivePollIntervalMs
+            : remoteProgressIdlePollIntervalMs;
 
         if (selectedRemote) {
           const selectedKey = remoteTreeKey(selectedRemote.sourceId, selectedRemote.path);
@@ -1230,6 +1547,7 @@ export const FoldersPage = (): JSX.Element => {
                 setRemoteCachedTracks(pageResult.items);
                 setRemotePage(pageResult.page);
                 setRemoteHasMore(pageResult.hasMore);
+                setRemoteNextCursor(pageResult.nextCursor);
               }
             }
           }
@@ -1238,15 +1556,19 @@ export const FoldersPage = (): JSX.Element => {
         if (!disposed) {
           setRemoteSyncStatus(null);
           setRemoteJobStatus(null);
+          nextPollDelayMs = remoteProgressIdlePollIntervalMs;
         }
+      } finally {
+        scheduleNextRefresh();
       }
     };
 
     void refreshRemoteProgress();
-    const timer = window.setInterval(refreshRemoteProgress, 900);
     return () => {
       disposed = true;
-      window.clearInterval(timer);
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
     };
   }, [mode, remoteApi, search, selectedRemote, selectedRemoteSource, sort]);
 
@@ -1271,7 +1593,7 @@ export const FoldersPage = (): JSX.Element => {
         setLoadingChildren((current) => ({ ...current, [key]: false }));
       }
     },
-    [childrenByParent],
+    [childrenByParent, setChildrenByParent, t],
   );
 
   const toggleExpanded = useCallback(
@@ -1284,7 +1606,7 @@ export const FoldersPage = (): JSX.Element => {
         void loadChildren(folderId, path);
       }
     },
-    [expanded, loadChildren],
+    [expanded, loadChildren, setExpanded],
   );
 
   useEffect(() => {
@@ -1401,7 +1723,7 @@ export const FoldersPage = (): JSX.Element => {
         }
       }
     },
-    [mode, recursive, search, selected, sort],
+    [mode, recursive, search, selected, sort, t],
   );
 
   useEffect(() => {
@@ -1451,7 +1773,7 @@ export const FoldersPage = (): JSX.Element => {
   }, [refreshOverviews, scanStatuses]);
 
   const fetchBulkTracks = useCallback(
-    async (sortMode: LibrarySort): Promise<{ items: LibraryTrack[]; total: number }> => {
+    async (sortMode: LibrarySort): Promise<{ items: LibraryTrack[]; total: number; nextCursor?: string | null }> => {
       const library = window.echo?.library;
       const target = selected;
 
@@ -1466,7 +1788,8 @@ export const FoldersPage = (): JSX.Element => {
         const items: LibraryTrack[] = [];
         let nextPage = 1;
         let totalTracks = 0;
-        let result: LibraryPage<LibraryTrack> | null = null;
+        let result: RemoteIndexedTracksPage<LibraryTrack> | null = null;
+        let nextCursor: string | null = null;
 
         do {
           result = await remoteApi.listIndexedTracksPage(selectedRemote.sourceId, {
@@ -1475,6 +1798,7 @@ export const FoldersPage = (): JSX.Element => {
             pageSize: bulkPageSize,
             search,
             sort: sortMode,
+            cursor: nextCursor,
           });
 
           if (bulkRequestIdRef.current !== requestId) {
@@ -1483,10 +1807,11 @@ export const FoldersPage = (): JSX.Element => {
 
           totalTracks = result.total;
           items.push(...result.items);
+          nextCursor = result.nextCursor;
           nextPage += 1;
         } while (result.hasMore && items.length < maxBulkTracks);
 
-        return { items: items.slice(0, maxBulkTracks), total: totalTracks };
+        return { items: items.slice(0, maxBulkTracks), total: totalTracks, nextCursor };
       }
 
       if (!target || !library?.getFolderTracks) {
@@ -1548,6 +1873,7 @@ export const FoldersPage = (): JSX.Element => {
         setRemoteCachedTracks(result.items);
         setRemotePage(Math.max(1, Math.ceil(result.items.length / pageSize)));
         setRemoteHasMore(result.total > result.items.length);
+        setRemoteNextCursor(result.nextCursor ?? null);
       } else {
         setTracks(result.items);
         setPage(Math.max(1, Math.ceil(result.items.length / pageSize)));
@@ -1587,7 +1913,7 @@ export const FoldersPage = (): JSX.Element => {
   }, [activeTracks.length, editingTrack, handleSelectAllTracks, isBulkLoading, isTagEditorOpen, mode, osuTimingTrack, selected, selectedRemote, trackMenu]);
 
   const runBulkAction = useCallback(
-    async (action: 'play' | 'shuffle' | 'append'): Promise<void> => {
+    async (action: 'play' | 'shuffle' | 'append' | 'next'): Promise<void> => {
       const sortMode = action === 'shuffle' ? 'random' : sort === 'random' && action === 'play' ? 'default' : sort;
       const queueSource = mode === 'remote'
         ? remoteSource
@@ -1611,6 +1937,8 @@ export const FoldersPage = (): JSX.Element => {
 
         if (action === 'append') {
           appendTracksToQueue(result.items, queueSource);
+        } else if (action === 'next') {
+          playTracksNext(result.items, queueSource);
         } else {
           if (isShuffleEnabled) {
             toggleShuffle();
@@ -1627,7 +1955,14 @@ export const FoldersPage = (): JSX.Element => {
         setMessage(
           result.total > result.items.length
             ? t('folders.message.loadedPartial', { loaded: result.items.length, total: result.total })
-            : t(action === 'append' ? 'folders.message.queuedTracks' : 'folders.message.loadedTracks', { count: result.items.length }),
+            : t(
+                action === 'next'
+                  ? 'songs.message.addedPlayNext'
+                  : action === 'append'
+                    ? 'folders.message.queuedTracks'
+                    : 'folders.message.loadedTracks',
+                { count: result.items.length },
+              ),
         );
       } catch (bulkError) {
         setError(formatFolderError(bulkError, t));
@@ -1638,7 +1973,7 @@ export const FoldersPage = (): JSX.Element => {
         setIsBulkLoading(false);
       }
     },
-    [appendTracksToQueue, fetchBulkTracks, folderSource, isShuffleEnabled, mode, playTrack, remoteSource, search, selected, selectedRemote, sort, t, toggleShuffle],
+    [appendTracksToQueue, fetchBulkTracks, folderSource, isShuffleEnabled, mode, playTrack, playTracksNext, remoteSource, search, selected, selectedRemote, sort, t, toggleShuffle],
   );
 
   const handleChooseFolder = useCallback(async (): Promise<void> => {
@@ -1650,6 +1985,8 @@ export const FoldersPage = (): JSX.Element => {
     }
 
     try {
+      setIsImportingFolder(true);
+      setError(null);
       const chosenPath = await library.chooseFolder();
       if (!chosenPath) {
         return;
@@ -1662,6 +1999,8 @@ export const FoldersPage = (): JSX.Element => {
       await refreshOverviews();
     } catch (chooseError) {
       setError(formatFolderError(chooseError, t));
+    } finally {
+      setIsImportingFolder(false);
     }
   }, [refreshOverviews, t]);
 
@@ -1825,7 +2164,7 @@ export const FoldersPage = (): JSX.Element => {
     } catch (removeError) {
       setError(formatFolderError(removeError, t));
     }
-  }, [refreshOverviews, selected, selectedOverview, t]);
+  }, [refreshOverviews, selected, selectedOverview, setChildrenByParent, setExpanded, t]);
 
   const handleOpenSelectedPath = useCallback(async (): Promise<void> => {
     const library = window.echo?.library;
@@ -1885,7 +2224,7 @@ export const FoldersPage = (): JSX.Element => {
       setError(formatFolderError(upError, t));
       return false;
     }
-  }, [childrenByParent, overviews, selected, t]);
+  }, [childrenByParent, overviews, selected, setChildrenByParent, t]);
 
   const handleRemoteNavigate = useCallback((target: RemoteFolderTarget): void => {
     const parentPath = normalizeRemoteFolderPath(target.path).slice(0, normalizeRemoteFolderPath(target.path).lastIndexOf('/')) || '/';
@@ -2280,7 +2619,10 @@ export const FoldersPage = (): JSX.Element => {
             if (!window.confirm(t('folders.confirm.deleteTrack', { title: track.title }))) {
               return;
             }
-            await library?.deleteTrackFile(track.id);
+            const result = await library?.deleteTrackFile(track.id);
+            for (const removedTrackId of result?.removedTrackIds ?? [track.id]) {
+              removeTrackFromQueue(removedTrackId);
+            }
             setTracks((current) => current.filter((item) => item.id !== track.id));
             void refreshOverviews();
             window.dispatchEvent(new Event('library:changed'));
@@ -2450,6 +2792,12 @@ export const FoldersPage = (): JSX.Element => {
                 data-active={isSelected}
                 style={{ paddingLeft: 10 + node.depth * 14 }}
                 type="button"
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  const target = nodeToTarget(node, root);
+                  setSelected(target);
+                  setFolderContextMenu({ target, position: { x: event.clientX, y: event.clientY } });
+                }}
                 onClick={() => setSelected(nodeToTarget(node, root))}
                 onDoubleClick={() => {
                   if (node.childFolderCount > 0) {
@@ -2558,17 +2906,42 @@ export const FoldersPage = (): JSX.Element => {
           <div className="folders-header-tools">
             <div className="folder-source-switch" role="tablist" aria-label="文件夹来源">
               <button type="button" className={mode === 'local' ? 'active' : ''} onClick={() => setMode('local')}>本地</button>
-              <button type="button" className={mode === 'remote' ? 'active' : ''} onClick={() => setMode('remote')}>网盘</button>
+              <button
+                type="button"
+                className={mode === 'remote' ? 'active' : ''}
+                onClick={() => {
+                  if (remoteUnsupportedFolderSortValues.has(sort)) {
+                    setSort('titleAsc');
+                  }
+                  setMode('remote');
+                }}
+              >
+                网盘
+              </button>
             </div>
-            <button
-              className="tool-button"
-              type="button"
-              aria-label={t('folders.action.refresh')}
-              title={t('folders.action.refresh')}
-              onClick={() => mode === 'remote' ? void loadRemoteSources() : void refreshOverviews()}
-            >
-              <RefreshCw className={isLoadingOverviews || isLoadingRemoteSources ? 'spinning-icon' : undefined} size={17} />
-            </button>
+            <div className="folders-header-actions">
+              {mode === 'local' ? (
+                <button
+                  className="tool-button folder-quick-import"
+                  type="button"
+                  aria-label={t('folders.panel.addFolder')}
+                  title={t('folders.panel.addFolder')}
+                  disabled={isImportingFolder}
+                  onClick={() => void handleChooseFolder()}
+                >
+                  <FolderPlus size={17} />
+                </button>
+              ) : null}
+              <button
+                className="tool-button"
+                type="button"
+                aria-label={t('folders.action.refresh')}
+                title={t('folders.action.refresh')}
+                onClick={() => mode === 'remote' ? void loadRemoteSources() : void refreshOverviews()}
+              >
+                <RefreshCw className={isLoadingOverviews || isLoadingRemoteSources ? 'spinning-icon' : undefined} size={17} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -2580,6 +2953,17 @@ export const FoldersPage = (): JSX.Element => {
         ) : null}
 
         <div className="folders-root-list">
+          {mode === 'local' && pinnedFolders.length > 0 ? (
+            <section className="pinned-folders" aria-label="固定文件夹">
+              <span>固定</span>
+              {pinnedFolders.map((target) => (
+                <button type="button" key={targetKey(target.folderId, target.path)} onClick={() => setSelected(target)}>
+                  <Star size={13} fill="currentColor" />
+                  <strong>{target.name}</strong>
+                </button>
+              ))}
+            </section>
+          ) : null}
           {mode === 'remote' ? (
             remoteSources.length === 0 ? (
               <div className="folders-empty-state">
@@ -2648,6 +3032,12 @@ export const FoldersPage = (): JSX.Element => {
                     data-reorderable={canReorderFolderRoots ? 'true' : undefined}
                     draggable={canReorderFolderRoots}
                     type="button"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      const target = overviewToTarget(overview);
+                      setSelected(target);
+                      setFolderContextMenu({ target, position: { x: event.clientX, y: event.clientY } });
+                    }}
                     onDragEnd={handleFolderRootDragEnd}
                     onDragOver={(event) => handleFolderRootDragOver(event, overview)}
                     onDragStart={(event) => handleFolderRootDragStart(event, overview)}
@@ -2659,7 +3049,9 @@ export const FoldersPage = (): JSX.Element => {
                       }
                     }}
                   >
-                    <GripVertical className="folder-root-drag-handle" size={15} aria-hidden="true" />
+                    {canReorderFolderRoots ? (
+                      <GripVertical className="folder-root-drag-handle" size={15} aria-hidden="true" />
+                    ) : null}
                     <span
                       className="folder-expand-hit"
                       data-hidden={overview.childFolderCount === 0}
@@ -2687,26 +3079,52 @@ export const FoldersPage = (): JSX.Element => {
         </div>
       </aside>
 
-      <main className="folders-main">
-        <header className="folder-detail-header">
-          <div className="folder-cover-stack" data-cover-count={mode === 'remote' ? 0 : Math.min(selected?.coverThumbs.length ?? 0, 4)} aria-hidden="true">
-            {mode === 'local' ? (selected?.coverThumbs ?? []).slice(0, 4).map((cover, index) => (
+      {folderContextMenu ? (
+        <div className="folder-context-menu" ref={folderContextMenuRef} role="menu" style={{ left: folderContextMenu.position.x, top: folderContextMenu.position.y }}>
+          <button type="button" role="menuitem" onClick={() => { setFolderContextMenu(null); void runBulkAction('play'); }}><Play size={14} />{t('folders.action.play')}</button>
+          <button type="button" role="menuitem" onClick={() => { setFolderContextMenu(null); void runBulkAction('shuffle'); }}><Shuffle size={14} />{t('folders.action.random')}</button>
+          <button type="button" role="menuitem" onClick={() => { setFolderContextMenu(null); void runBulkAction('append'); }}><ListPlus size={14} />{t('folders.action.queue')}</button>
+          <span className="folder-context-menu-divider" />
+          <button type="button" role="menuitem" onClick={() => { setFolderContextMenu(null); void handleScanSelected(); }}><RefreshCw size={14} />{t('folders.action.scan')}</button>
+          <button type="button" role="menuitem" onClick={() => { setFolderContextMenu(null); void handleOpenSelectedPath(); }}><FolderOpen size={14} />{t('folders.action.open')}</button>
+          <button type="button" role="menuitem" onClick={() => { togglePinnedFolder(folderContextMenu.target); setFolderContextMenu(null); }}>
+            <Star size={14} />
+            {pinnedFolders.some((item) => targetKey(item.folderId, item.path) === targetKey(folderContextMenu.target.folderId, folderContextMenu.target.path)) ? '取消固定' : '固定文件夹'}
+          </button>
+        </div>
+      ) : null}
+
+      <main className="folders-main" data-has-bpm={hasVisibleBpm ? 'true' : 'false'}>
+        <header
+          className="folder-detail-header"
+          data-has-backdrop={selectedCovers.length > 0}
+        >
+          {selectedCovers[0] ? (
+            <img className="folder-detail-backdrop" alt="" src={selectedCovers[0]} aria-hidden="true" />
+          ) : null}
+          <div className="folder-cover-stack" data-cover-count={selectedCovers.length} aria-hidden="true">
+            {selectedCovers.map((cover, index) => (
               <img alt="" key={cover} src={cover} style={{ '--cover-index': index } as CSSProperties} />
-            )) : null}
-            {mode === 'local' && selected?.coverThumbs.length ? null : <FolderOpen size={34} />}
+            ))}
+            {selectedCovers.length > 0 ? null : <FolderOpen size={38} />}
           </div>
           <div className="folder-detail-title">
-            <span>
-              {mode === 'remote'
-                ? selectedRemote
-                  ? `${selectedRemote.sourceName} / ${selectedRemoteSource && selectedRemote.path === remoteRootPathForSource(selectedRemoteSource) ? '根目录' : '网盘文件夹'}`
-                  : '网盘文件夹'
-                : selected
-                  ? `${selected.rootName} / ${selected.path === selected.rootPath ? t('folders.detail.root') : t('folders.detail.subfolder')}`
-                  : t('folders.detail.libraryFolders')}
-            </span>
+            <nav className="folder-breadcrumbs" aria-label="文件夹路径">
+              {folderBreadcrumbs.length > 0 ? folderBreadcrumbs.map((crumb, index) => (
+                <span key={`${crumb.label}-${index}`}>
+                  {index > 0 ? <ChevronRight size={12} aria-hidden="true" /> : null}
+                  <button type="button" disabled={!crumb.onSelect || index === folderBreadcrumbs.length - 1} onClick={crumb.onSelect}>{crumb.label}</button>
+                </span>
+              )) : (mode === 'remote' ? '网盘文件夹' : t('folders.detail.libraryFolders'))}
+            </nav>
             <h2>{mode === 'remote' ? selectedRemote?.name ?? '选择网盘来源' : selected?.name ?? t('folders.detail.selectFolder')}</h2>
-            <p>{mode === 'remote' ? selectedRemote?.path ?? '添加网盘来源后，可以按目录浏览和播放。' : selected?.path ?? t('folders.detail.importHint')}</p>
+            <p title={mode === 'remote' ? selectedRemote?.path : selected?.path}>{mode === 'remote' ? selectedRemote?.path ?? '添加网盘来源后，可以按目录浏览和播放。' : selected?.path ?? t('folders.detail.importHint')}</p>
+            <section className="folder-metrics" aria-label={t('folders.metrics.label')}>
+              <span><strong>{mode === 'remote' ? remoteFolderStats?.trackCount ?? remoteTracks.length : selected?.trackCount ?? 0}</strong>{mode === 'remote' ? '可播放' : t('folders.metrics.tracks')}</span>
+              <span><strong>{mode === 'remote' ? remoteFolderStats?.artistCount ?? 0 : formatDuration(selected?.totalDuration ?? 0, t)}</strong>{mode === 'remote' ? '艺术家' : t('folders.metrics.duration')}</span>
+              <span><strong>{mode === 'remote' ? formatBytes(remoteFolderStats?.totalSizeBytes ?? remoteItems.reduce((total, item) => total + (item.sizeBytes ?? 0), 0)) : formatBytes(selected?.totalSizeBytes ?? 0)}</strong>{t('folders.metrics.size')}</span>
+              <span><strong>{mode === 'remote' ? remoteFolderStats?.albumCount ?? 0 : selected?.childFolderCount ?? 0}</strong>{mode === 'remote' ? '专辑' : t('folders.metrics.subfolders')}</span>
+            </section>
           </div>
           <div className="folder-detail-actions">
             <button className="primary-action" type="button" disabled={(mode === 'local' ? !selected : !selectedRemote || ((remoteFolderStats?.trackCount ?? remoteTracks.length) === 0)) || isBulkLoading} onClick={() => void runBulkAction('play')}>
@@ -2717,31 +3135,16 @@ export const FoldersPage = (): JSX.Element => {
               <Shuffle size={16} />
               {t('folders.action.random')}
             </button>
-            <button className="secondary-action" type="button" disabled={(mode === 'local' ? !selected : !selectedRemote || ((remoteFolderStats?.trackCount ?? remoteTracks.length) === 0)) || isBulkLoading} onClick={() => void runBulkAction('append')}>
+            <button className="secondary-action folder-play-next-action" type="button" disabled={(mode === 'local' ? !selected : !selectedRemote || ((remoteFolderStats?.trackCount ?? remoteTracks.length) === 0)) || isBulkLoading} onClick={() => void runBulkAction('next')}>
+              <Play size={15} />
+              {t('trackMenu.action.playNext')}
+            </button>
+            <button className="secondary-action folder-queue-tail-action" type="button" disabled={(mode === 'local' ? !selected : !selectedRemote || ((remoteFolderStats?.trackCount ?? remoteTracks.length) === 0)) || isBulkLoading} onClick={() => void runBulkAction('append')}>
               <ListPlus size={16} />
-              {t('folders.action.queue')}
+              {t('folders.action.queueTail')}
             </button>
           </div>
         </header>
-
-        <section className="folder-metrics" aria-label={t('folders.metrics.label')}>
-          <span>
-            <strong>{mode === 'remote' ? remoteFolderStats?.trackCount ?? remoteTracks.length : selected?.trackCount ?? 0}</strong>
-            {mode === 'remote' ? '可播放' : t('folders.metrics.tracks')}
-          </span>
-          <span>
-            <strong>{mode === 'remote' ? remoteFolderStats?.artistCount ?? 0 : formatDuration(selected?.totalDuration ?? 0, t)}</strong>
-            {mode === 'remote' ? '艺术家' : t('folders.metrics.duration')}
-          </span>
-          <span>
-            <strong>{mode === 'remote' ? formatBytes(remoteFolderStats?.totalSizeBytes ?? remoteItems.reduce((total, item) => total + (item.sizeBytes ?? 0), 0)) : formatBytes(selected?.totalSizeBytes ?? 0)}</strong>
-            {t('folders.metrics.size')}
-          </span>
-          <span>
-            <strong>{mode === 'remote' ? remoteFolderStats?.albumCount ?? 0 : selected?.childFolderCount ?? 0}</strong>
-            {mode === 'remote' ? '专辑' : t('folders.metrics.subfolders')}
-          </span>
-        </section>
 
         <section className="folder-track-toolbar" aria-label={t('folders.filters.label')}>
           <label className="search-box">
@@ -2761,14 +3164,41 @@ export const FoldersPage = (): JSX.Element => {
           )}
           <StyledSelect
             className="folder-sort-control"
-            value={sort}
+            value={selectedSort}
             options={localizedSortOptions}
             onChange={setSort}
             ariaLabel={t('folders.filters.label')}
           />
         </section>
 
+        <div className="folder-track-columns" aria-label="歌曲排序列">
+          {([
+            { label: t('folders.sort.title'), ascending: 'titleAsc', descending: 'titleDesc', aliases: ['default', 'title'] },
+            { label: '音频信息', ascending: 'qualityAsc', descending: 'qualityDesc' },
+            ...(hasVisibleBpm ? [{ label: 'BPM', ascending: 'bpmAsc' as LibrarySort, descending: 'bpmDesc' as LibrarySort }] : []),
+            { label: '时长', ascending: 'durationAsc', descending: 'durationDesc' },
+          ] as Array<{ label: string; ascending: LibrarySort; descending: LibrarySort; aliases?: LibrarySort[] }>).map((column) => {
+            const direction = folderColumnSortDirection(sort, column.ascending, column.descending, column.aliases);
+            return (
+              <button
+                className="folder-track-column-sort"
+                data-active={direction !== 'none'}
+                data-sort-direction={direction}
+                key={column.ascending}
+                type="button"
+                aria-label={`${column.label}排序`}
+                aria-pressed={direction !== 'none'}
+                onClick={() => toggleColumnSort(column.ascending, column.descending, column.aliases)}
+              >
+                <span>{column.label}</span>
+                {direction === 'ascending' ? <ChevronUp size={13} /> : direction === 'descending' ? <ChevronDown size={13} /> : null}
+              </button>
+            );
+          })}
+        </div>
+
         <TrackList
+          audioInfoLayout="combined"
           tracks={activeTracks}
           currentTrackId={currentTrackId}
           loadingTrackId={mode === 'remote' ? remoteLoadingTrackId : null}
@@ -2801,14 +3231,14 @@ export const FoldersPage = (): JSX.Element => {
 
       <aside className="folders-actions-panel">
         {mode === 'local' ? (
-          <section>
+          <section className="folder-import-section">
             <div className="folders-panel-heading">
               <span className="panel-kicker">{t('folders.panel.import')}</span>
               <h2>{t('folders.panel.addFolder')}</h2>
             </div>
             <div className="folder-import-box">
               <input type="text" placeholder="D:\\Music" value={folderPath} onChange={(event) => setFolderPath(event.target.value)} />
-              <button type="button" onClick={() => void handleChooseFolder()}>
+              <button type="button" disabled={isImportingFolder} onClick={() => void handleChooseFolder()}>
                 <FolderPlus size={16} />
                 {t('folders.action.browse')}
               </button>
@@ -2833,7 +3263,7 @@ export const FoldersPage = (): JSX.Element => {
           </section>
         )}
 
-        <section>
+        <section className="folder-manage-section">
           <div className="folders-panel-heading">
             <span className="panel-kicker">{mode === 'remote' ? '网盘' : t('folders.panel.manage')}</span>
             <h2>{mode === 'remote' ? '当前目录' : t('folders.panel.selectedRoot')}</h2>

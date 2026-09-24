@@ -260,9 +260,35 @@ describe('lyricsParser', () => {
     ]);
   });
 
+  it('keeps early absolute YRC word timings in the absolute time domain', () => {
+    expect(parseSyncedLyrics('[100,1200](100,300,0)Hello (400,400,0)world')).toEqual([
+      {
+        timeMs: 100,
+        text: 'Hello world',
+        words: [
+          { text: 'Hello ', startMs: 100, endMs: 400 },
+          { text: 'world', startMs: 400, endMs: 800 },
+        ],
+      },
+    ]);
+  });
+
   it('drops word timings with non-increasing timestamps but keeps the lyric line', () => {
     expect(parseSyncedLyrics('[00:01.00]<00:01.50>Hello <00:01.20>world')).toEqual([
       { timeMs: 1000, text: 'Hello world' },
+    ]);
+  });
+
+  it('locally merges one malformed word timing without dropping the rest of the line timing', () => {
+    expect(parseSyncedLyrics('[00:01.00]<00:01.00>Hello <00:00.80>broken <00:01.50>world')).toEqual([
+      {
+        timeMs: 1000,
+        text: 'Hello broken world',
+        words: [
+          { text: 'Hello broken ', startMs: 1000, endMs: 1500 },
+          { text: 'world', startMs: 1500, endMs: null },
+        ],
+      },
     ]);
   });
 
@@ -471,6 +497,64 @@ describe('lyricsParser', () => {
           { text: 'world', startMs: 1500, endMs: null },
         ],
       },
+    ]);
+  });
+
+  it('borrows karaoke word timings when matching line timestamps differ slightly', () => {
+    const lyrics = providerResultToTrackLyrics(
+      { title: 'Song', artist: 'Artist' },
+      {
+        provider: 'qqmusic',
+        providerLyricsId: 'qqmusic:karaoke-offset',
+        title: 'Song',
+        artist: 'Artist',
+        album: null,
+        durationSeconds: null,
+        instrumental: false,
+        plainLyrics: null,
+        syncedLyrics: '[00:01.08]Hello world',
+        karaokeLyrics: '[00:01.00]<00:01.00>Hello <00:01.50>world',
+      },
+      1,
+    );
+
+    expect(lyrics?.lines).toEqual([
+      {
+        timeMs: 1080,
+        text: 'Hello world',
+        words: [
+          { text: 'Hello ', startMs: 1080, endMs: 1580 },
+          { text: 'world', startMs: 1580, endMs: null },
+        ],
+      },
+    ]);
+  });
+
+  it('keeps primary lyric line ordering while aligning borrowed karaoke word timings', () => {
+    const lyrics = providerResultToTrackLyrics(
+      { title: 'Song', artist: 'Artist' },
+      {
+        provider: 'qqmusic',
+        providerLyricsId: 'qqmusic:karaoke-order',
+        title: 'Song',
+        artist: 'Artist',
+        album: null,
+        durationSeconds: null,
+        instrumental: false,
+        plainLyrics: null,
+        syncedLyrics: [
+          '[00:01.08]Hello world',
+          '[00:01.20]Next line',
+        ].join('\n'),
+        karaokeLyrics: '[00:01.00]<00:01.00>Hello <00:01.50>world',
+      },
+      1,
+    );
+
+    expect(lyrics?.lines.map((line) => line.timeMs)).toEqual([1080, 1200]);
+    expect(lyrics?.lines[0].words).toEqual([
+      { text: 'Hello ', startMs: 1080, endMs: 1580 },
+      { text: 'world', startMs: 1580, endMs: null },
     ]);
   });
 

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type { AudioStatus, ChannelBalanceState } from '../../../shared/types/audio';
 import { eqFrequenciesHz, type EqPreset, type EqState, type RoomCorrectionState } from '../../../shared/types/eq';
 import { I18nProvider } from '../../i18n/I18nProvider';
+import { showAudioErrorNoticeEvent } from '../../utils/audioErrorNotice';
 import { EqPanel } from './EqPanel';
 
 const bands = eqFrequenciesHz.map((frequencyHz) => ({
@@ -244,6 +245,26 @@ afterEach(() => {
 });
 
 describe('EqPanel', () => {
+  it('routes EQ failures to the upper-left notice without rendering an inline error', async () => {
+    const notices: Event[] = [];
+    const handleNotice = (event: Event): void => {
+      notices.push(event);
+    };
+    window.addEventListener(showAudioErrorNoticeEvent, handleNotice);
+    vi.mocked(window.echo.eq.getState).mockRejectedValueOnce(new Error('eq bridge failed'));
+
+    try {
+      const { container } = renderEqPanel();
+
+      await waitFor(() => expect(notices).toHaveLength(1));
+      expect((notices[0] as CustomEvent<{ message: string }>).detail.message).toBe('eq bridge failed');
+      expect(container.querySelector('.eq-panel-error')).toBeNull();
+      expect(screen.queryByText('eq bridge failed')).toBeNull();
+    } finally {
+      window.removeEventListener(showAudioErrorNoticeEvent, handleNotice);
+    }
+  });
+
   it('renders Simple mode with the core EQ workflow first', async () => {
     renderEqPanel();
 

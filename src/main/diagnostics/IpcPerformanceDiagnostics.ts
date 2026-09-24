@@ -1,4 +1,4 @@
-import { recordIpcMainHandlerDuration } from './PlaybackPerformanceDiagnostics';
+import { beginIpcMainHandler } from './PlaybackPerformanceDiagnostics';
 
 type IpcMainHandler = (event: unknown, ...args: unknown[]) => unknown;
 type IpcMainLike = {
@@ -12,30 +12,27 @@ const isThenable = (value: unknown): value is PromiseLike<unknown> =>
 
 const wrapIpcMainHandler = (channel: string, handler: IpcMainHandler): IpcMainHandler =>
   (event, ...args) => {
-    const startedAt = Date.now();
-    const record = (failed: boolean): void => {
-      recordIpcMainHandlerDuration(channel, Date.now() - startedAt, { failed });
-    };
+    const complete = beginIpcMainHandler(channel);
 
     try {
       const result = handler(event, ...args);
       if (isThenable(result)) {
         return Promise.resolve(result).then(
           (value) => {
-            record(false);
+            complete(false);
             return value;
           },
           (error) => {
-            record(true);
+            complete(true);
             throw error;
           },
         );
       }
 
-      record(false);
+      complete(false);
       return result;
     } catch (error) {
-      record(true);
+      complete(true);
       throw error;
     }
   };

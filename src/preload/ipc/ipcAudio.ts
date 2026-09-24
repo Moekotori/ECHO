@@ -16,7 +16,7 @@ export function createAudioApi(
       const status = await ipcRenderer.invoke(IpcChannels.AudioGetStatus) as AudioStatus;
       sa.lastNativeAudioStatus = status;
       sa.applySystemOutputSettings(null, status);
-      if (status.outputMode === 'system') {
+      if (status.outputMode === 'system' && sa.ownsSystemAudioPlayback) {
         sa.systemAudioModeActive = true;
         return sa.getSystemAudioStatus();
       }
@@ -29,7 +29,7 @@ export function createAudioApi(
         const nextStatus = status as AudioStatus;
         sa.lastNativeAudioStatus = nextStatus;
         sa.applySystemOutputSettings(null, nextStatus);
-        if (sa.systemAudioModeActive || nextStatus.outputMode === 'system') {
+        if (sa.ownsSystemAudioPlayback && (sa.systemAudioModeActive || nextStatus.outputMode === 'system')) {
           if (nextStatus.outputMode === 'system') {
             sa.systemAudioModeActive = true;
           }
@@ -62,15 +62,14 @@ export function createAudioApi(
 
       if (
         !sa.isExplicitNativeOutputRequest(settings) &&
+        sa.ownsSystemAudioPlayback &&
         (wasSystemAudioModeActive || (settings && typeof settings === 'object' && (settings as AudioOutputSettings).outputMode === 'system') || nextStatus.outputMode === 'system')
       ) {
         sa.systemAudioModeActive = true;
         const handoffStatus = await sa.handoffNativePlaybackToSystemAudio(
-          Boolean(
-            previousNativeAudioStatus &&
+          previousNativeAudioStatus &&
             previousNativeAudioStatus.currentFilePath &&
-            (previousNativeAudioStatus.state === 'playing' || previousNativeAudioStatus.state === 'loading'),
-          ) ? previousNativeAudioStatus : nextStatus,
+            (previousNativeAudioStatus.state === 'playing' || previousNativeAudioStatus.state === 'loading') ? previousNativeAudioStatus : nextStatus,
         );
         if (handoffStatus) {
           return handoffStatus;

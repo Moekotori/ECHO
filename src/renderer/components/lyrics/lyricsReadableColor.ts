@@ -625,9 +625,25 @@ const drawToSampleCanvas = (
   return analyzePixelBuffer(imageData.data, { width: sampleCanvasSize });
 };
 
-export const sampleImageUrl = async (url: string): Promise<ReadableColorSample | null> =>
+const readableColorSampleCacheLimit = 32;
+const readableColorSampleCache = new Map<string, ReadableColorSample>();
+const readableColorSampleInFlight = new Map<string, Promise<ReadableColorSample | null>>();
+
+const rememberReadableColorSample = (url: string, sample: ReadableColorSample): void => {
+  readableColorSampleCache.delete(url);
+  readableColorSampleCache.set(url, sample);
+  while (readableColorSampleCache.size > readableColorSampleCacheLimit) {
+    const oldestUrl = readableColorSampleCache.keys().next().value;
+    if (typeof oldestUrl !== 'string') {
+      break;
+    }
+    readableColorSampleCache.delete(oldestUrl);
+  }
+};
+
+const sampleImageUrlUncached = async (url: string): Promise<ReadableColorSample | null> =>
   new Promise((resolve) => {
-    if (!url || typeof Image === 'undefined' || typeof document === 'undefined') {
+    if (typeof Image === 'undefined' || typeof document === 'undefined') {
       resolve(null);
       return;
     }
@@ -639,6 +655,8 @@ export const sampleImageUrl = async (url: string): Promise<ReadableColorSample |
         return;
       }
       settled = true;
+      image.onload = null;
+      image.onerror = null;
       resolve(sample);
     };
 
@@ -666,6 +684,43 @@ export const sampleImageUrl = async (url: string): Promise<ReadableColorSample |
       });
     }
   });
+
+export const sampleImageUrl = (url: string): Promise<ReadableColorSample | null> => {
+  const normalizedUrl = url.trim();
+  if (!normalizedUrl) {
+    return Promise.resolve(null);
+  }
+
+  const cached = readableColorSampleCache.get(normalizedUrl);
+  if (cached) {
+    rememberReadableColorSample(normalizedUrl, cached);
+    return Promise.resolve(cached);
+  }
+
+  const existingRequest = readableColorSampleInFlight.get(normalizedUrl);
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const request = sampleImageUrlUncached(normalizedUrl)
+    .then((sample) => {
+      if (sample) {
+        rememberReadableColorSample(normalizedUrl, sample);
+      }
+      return sample;
+    })
+    .finally(() => {
+      if (readableColorSampleInFlight.get(normalizedUrl) === request) {
+        readableColorSampleInFlight.delete(normalizedUrl);
+      }
+    });
+  readableColorSampleInFlight.set(normalizedUrl, request);
+  return request;
+};
+
+export const clearReadableColorSampleCache = (): void => {
+  readableColorSampleCache.clear();
+};
 
 export const sampleVideoElement = async (video: HTMLVideoElement): Promise<ReadableColorSample | null> => {
   if (typeof document === 'undefined' || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {

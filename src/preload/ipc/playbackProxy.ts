@@ -1,10 +1,11 @@
 import type { IpcRenderer } from 'electron';
 import type { EchoApi } from '../apiTypes';
-import type { PlaybackStartRequest, PlaybackMediaStartRequest } from '../../shared/types/playback';
+import type { MainWindowPlaybackControlRequest, PlaybackStartRequest, PlaybackMediaStartRequest } from '../../shared/types/playback';
+import type { PlaybackDeps } from './playbackApi';
 
-type MainPlaybackCommand = 'playLocalFile' | 'playMediaItem' | 'play' | 'pause' | 'stop' | 'seek';
+type MainPlaybackCommand = 'playLocalFile' | 'playMediaItem' | 'play' | 'pause' | 'stop' | 'seek' | 'control';
 
-const playbackProxyCommands = new Set(['playLocalFile', 'playMediaItem', 'play', 'pause', 'stop', 'seek']);
+const playbackProxyCommands = new Set(['playLocalFile', 'playMediaItem', 'play', 'pause', 'stop', 'seek', 'control']);
 
 function isMainPlaybackRenderer(): boolean {
   const rendererSearchParams = new URLSearchParams(typeof window.location?.search === 'string' ? window.location.search : '');
@@ -18,6 +19,7 @@ export function setupPlaybackProxy(
   ipcRenderer: IpcRenderer,
   IpcChannels: typeof import('../../shared/constants/ipcChannels').IpcChannels,
   echoApi: EchoApi,
+  deps: PlaybackDeps,
 ): void {
   if (!isMainPlaybackRenderer()) {
     return;
@@ -60,6 +62,14 @@ export function setupPlaybackProxy(
         case 'seek':
           value = await echoApi.playback.seek(Number(args[0]));
           break;
+        case 'control': {
+          const handler = Array.from(deps.mainWindowControlHandlers ?? []).at(-1);
+          if (!handler) {
+            throw new Error('main_window_playback_controller_unavailable');
+          }
+          await handler(args[0] as MainWindowPlaybackControlRequest);
+          break;
+        }
       }
 
       ipcRenderer.send(IpcChannels.PlaybackMainWindowCommandResult, {

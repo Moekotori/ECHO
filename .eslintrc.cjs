@@ -18,6 +18,19 @@ module.exports = {
   ],
   ignorePatterns: ['out', 'dist', 'node_modules'],
   rules: {
-    '@typescript-eslint/consistent-type-imports': 'error',
+    '@typescript-eslint/consistent-type-imports': ['error', { disallowTypeAnnotations: false }],
+    '@typescript-eslint/no-unused-vars': ['error', {
+      argsIgnorePattern: '^_',
+      caughtErrorsIgnorePattern: '^_',
+    }],
+    'no-empty': ['error', { allowEmptyCatch: true }],
   },
+  overrides: [
+    {
+      files: ['**/*.test.ts', '**/*.test.tsx'],
+      rules: {
+        '@typescript-eslint/no-explicit-any': 'off',
+      },
+    },
+  ],
 };

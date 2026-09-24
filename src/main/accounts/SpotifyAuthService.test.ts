@@ -214,6 +214,23 @@ describe('SpotifyAuthService token refresh', () => {
   });
 });
 
+describe('SpotifyAuthService playback state', () => {
+  it('reports the active device volume with the playback snapshot', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      is_playing: true,
+      progress_ms: 12_000,
+      item: { uri: 'spotify:track:abc123' },
+      device: { id: 'device-1', name: 'Spotify Desktop', volume_percent: 37 },
+    })));
+
+    await expect(createSpotifyService().getPlaybackState()).resolves.toMatchObject({
+      isPlaying: true,
+      itemUri: 'spotify:track:abc123',
+      volumePercent: 37,
+    });
+  });
+});
+
 describe('SpotifyAuthService login', () => {
   it('requires a user-provided Spotify Client ID before login', async () => {
     await expect(new SpotifyAuthService().startLoginWindow()).rejects.toThrow('Spotify Client ID');

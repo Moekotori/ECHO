@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AudioStatus } from '../../shared/types/audio';
 import type { LibraryAlbum, LibraryPage, LibraryTrack } from '../../shared/types/library';
 import type { TrackLyrics } from '../../shared/types/lyrics';
+import type { IntegrationEventEnvelopeV1, IntegrationPlaybackSnapshotV1 } from '../../shared/types/integrationPlatform';
 import { EchoLinkService } from './EchoLinkService';
+import { EchoLinkV2ClientStore } from './EchoLinkV2ClientStore';
+import { EchoLinkV2Service } from './EchoLinkV2Service';
 
 const makeAudioStatus = (overrides: Partial<AudioStatus> = {}): AudioStatus => ({
   host: 'ready',
@@ -251,6 +254,44 @@ describe('EchoLinkService', () => {
       now: () => now,
       deviceId: 'pc-device-id',
       port: 0,
+      createV2Service: (getRuntime) => {
+        const getSnapshot = (): IntegrationPlaybackSnapshotV1 => ({
+          version: 1,
+          revision: 1,
+          observedAt: new Date(now).toISOString(),
+          state: audioSession.status.state,
+          track: null,
+          positionMs: Math.round(audioSession.status.positionSeconds * 1000),
+          durationMs: Math.round(audioSession.status.durationSeconds * 1000),
+          volume: audioSession.status.volume,
+          output: {
+            mode: audioSession.status.outputMode,
+            deviceName: audioSession.status.outputDeviceName,
+            backend: audioSession.status.outputBackend,
+          },
+        });
+        return new EchoLinkV2Service({
+          getRuntime,
+          eventHub: {
+            getSnapshot,
+            subscribe: (listener: (event: IntegrationEventEnvelopeV1) => void) => {
+              listener({
+                version: 1,
+                id: '1',
+                type: 'snapshot',
+                occurredAt: new Date(now).toISOString(),
+                snapshot: getSnapshot(),
+              });
+              return () => undefined;
+            },
+          },
+          actionRouter: {
+            execute: async (action) => ({ requestId: action.requestId, ok: true, completedAt: new Date(now).toISOString() }),
+          },
+          clientStore: new EchoLinkV2ClientStore({ filePath: join(tempRoot, 'v2-clients.json') }),
+          now: () => now,
+        });
+      },
     });
     await service.setEnabled(true);
   });
@@ -300,6 +341,22 @@ describe('EchoLinkService', () => {
     });
     expect(body.playback.track.artworkUrl).toContain('/echo-link/v1/artwork/');
     expect(body.playback.track.albumArtist).toBe('Artist');
+  });
+
+  it('reuses one artwork token across repeated status polls', async () => {
+    audioSession.status = makeAudioStatus({
+      state: 'playing',
+      currentTrackId: 'track-1',
+      currentFilePath: audioPath,
+      durationSeconds: 240,
+    });
+
+    const first = await (await fetch(`${baseUrl()}/echo-link/v1/status`, { headers: authHeaders() })).json();
+    now += 1_000;
+    const second = await (await fetch(`${baseUrl()}/echo-link/v1/status`, { headers: authHeaders() })).json();
+
+    expect(second.playback.track.artworkUrl).toBe(first.playback.track.artworkUrl);
+    expect(service.getServerStatus().activeArtworkTokens).toBe(1);
   });
 
   it('prefers live audio metadata over the library preview for current playback', async () => {
@@ -701,5 +758,22 @@ describe('EchoLinkService', () => {
     expect(mdnsStarts).toHaveLength(1);
     expect(JSON.stringify(mdnsStarts[0])).toContain('pc-device-id');
     expect(JSON.stringify(mdnsStarts[0])).not.toContain(service.getServerStatus().token);
+  });
+
+  it('keeps the shared server running while either v1 or v2 remains enabled', async () => {
+    await service.setBasicEnabled(true);
+    await service.setEnabled(false);
+
+    expect(service.getServerStatus()).toMatchObject({ enabled: false, running: true });
+    expect(service.getBasicStatus()).toMatchObject({ enabled: true, running: true });
+    const disabledV1 = await fetch(`${baseUrl()}/echo-link/v1/status`, { headers: authHeaders() });
+    expect(disabledV1.status).toBe(404);
+    const protectedV2 = await fetch(`${baseUrl()}/echo-link/v2/status`);
+    expect(protectedV2.status).toBe(401);
+
+    await service.setEnabled(true);
+    await service.setBasicEnabled(false);
+    expect(service.getServerStatus()).toMatchObject({ enabled: true, running: true });
+    expect(service.getBasicStatus()).toMatchObject({ enabled: false, running: true });
   });
 });

@@ -2,6 +2,7 @@ import { basename, extname } from 'node:path';
 import { parseBuffer } from 'music-metadata';
 import type { StreamingPlaybackSource } from '../../shared/types/streaming';
 import { fetchWithNetworkProxy } from '../network/networkFetch';
+import { readResponseBodyLimited } from '../network/readResponseBodyLimited';
 
 const metadataReadBytes = 256 * 1024;
 const mp3MetadataReadBytes = 256 * 1024;
@@ -107,15 +108,8 @@ const fetchMetadataHead = async (source: StreamingPlaybackSource, readBytes: num
     if (!response.ok && response.status !== 206) {
       return null;
     }
-    if (response.status !== 206) {
-      const length = Number(response.headers.get('content-length') ?? 0);
-      if (Number.isFinite(length) && length > readBytes * 2) {
-        return null;
-      }
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    return buffer.length > 0 && buffer.length <= readBytes * 2 ? buffer : null;
+    const buffer = Buffer.from(await readResponseBodyLimited(response, readBytes * 2, { signal: controller.signal }));
+    return buffer.length > 0 ? buffer : null;
   } catch {
     return null;
   } finally {

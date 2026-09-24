@@ -3,13 +3,26 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <thread>
 
-namespace { constexpr double halfPi = 1.57079632679489661923; }
+namespace
+{
+constexpr double halfPi = 1.57079632679489661923;
+
+int64_t steadyNowNs()
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+}
 
 #ifdef _WIN32
-#include <avrt.h>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
+#include <avrt.h>
 
 namespace pcm_detail {
 
@@ -62,18 +75,25 @@ PcmRingAudioSource::PcmRingAudioSource(
       buffer(static_cast<size_t>(capacityFrames * channelCount), 0.0f),
       automixFifo(capacityFrames),
       automixBuffer(static_cast<size_t>(capacityFrames * channelCount), 0.0f),
+      playbackRateInputBuffer(channelCount, capacityFrames),
+      dspRenderBuffer(channelCount, capacityFrames),
       ownedConvolutionProcessor(std::make_unique<echo::ConvolutionProcessor>()),
       convolutionProcessor(ownedConvolutionProcessor.get()),
       ownedHeadroomProcessor(std::make_unique<echo::DspHeadroomProcessor>()),
       headroomProcessor(ownedHeadroomProcessor.get()),
       ownedReplayGainProcessor(std::make_unique<echo::ReplayGainProcessor>()),
       replayGainProcessor(ownedReplayGainProcessor.get()),
+      ownedCompressorProcessor(std::make_unique<echo::CompressorProcessor>()),
+      compressorProcessor(ownedCompressorProcessor.get()),
+      ownedSpatialDspProcessor(std::make_unique<echo::SpatialDspProcessor>()),
+      spatialDspProcessor(ownedSpatialDspProcessor.get()),
       ownedRateProcessor(std::make_unique<echo::PlaybackRateProcessor>()),
       rateProcessor(ownedRateProcessor.get()),
       ownedMeterProcessor(std::make_unique<echo::LevelMeterProcessor>()),
       meterProcessor(ownedMeterProcessor.get()),
       dspChain(eqProcessorToUse, *convolutionProcessor, channelBalanceProcessorToUse, *headroomProcessor,
-               *ownedReplayGainProcessor, *ownedRateProcessor, *ownedMeterProcessor)
+               *ownedReplayGainProcessor, *ownedCompressorProcessor, *ownedSpatialDspProcessor,
+               *ownedRateProcessor, *ownedMeterProcessor)
 {
 }
 
@@ -88,8 +108,11 @@ PcmRingAudioSource::PcmRingAudioSource(
     echo::ChannelBalanceProcessor& channelBalanceProcessorToUse,
     echo::DspHeadroomProcessor& headroomProcessorToUse,
     echo::ReplayGainProcessor& replayGainProcessorToUse,
+    echo::CompressorProcessor& compressorProcessorToUse,
+    echo::SpatialDspProcessor& spatialDspProcessorToUse,
     echo::PlaybackRateProcessor& rateProcessorToUse,
-    echo::LevelMeterProcessor& meterProcessorToUse)
+    echo::LevelMeterProcessor& meterProcessorToUse,
+    echo::DspRackOrder* rackOrderToUse)
     : channels(channelCount),
       gain(static_cast<float>(std::max(0.0, std::min(1.0, gainToUse)))),
       startupPrebufferFrames(std::max(0, startupPrebufferFramesToUse)),
@@ -98,13 +121,18 @@ PcmRingAudioSource::PcmRingAudioSource(
       buffer(static_cast<size_t>(capacityFrames * channelCount), 0.0f),
       automixFifo(capacityFrames),
       automixBuffer(static_cast<size_t>(capacityFrames * channelCount), 0.0f),
+      playbackRateInputBuffer(channelCount, capacityFrames),
+      dspRenderBuffer(channelCount, capacityFrames),
       convolutionProcessor(&convolutionProcessorToUse),
       headroomProcessor(&headroomProcessorToUse),
       replayGainProcessor(&replayGainProcessorToUse),
+      compressorProcessor(&compressorProcessorToUse),
+      spatialDspProcessor(&spatialDspProcessorToUse),
       rateProcessor(&rateProcessorToUse),
       meterProcessor(&meterProcessorToUse),
       dspChain(eqProcessorToUse, *convolutionProcessor, channelBalanceProcessorToUse, *headroomProcessor,
-               *replayGainProcessor, *rateProcessor, *meterProcessor)
+               *replayGainProcessor, *compressorProcessor, *spatialDspProcessor,
+               *rateProcessor, *meterProcessor, rackOrderToUse)
 {
 }
 
@@ -129,7 +157,7 @@ void PcmRingAudioSource::releaseResources()
 
 bool PcmRingAudioSource::isDspActive() const
 {
-    return dspChain.isActive();
+    return dspChain.isActive() || ditherProcessor.active();
 }
 
 bool PcmRingAudioSource::hasDspClippingRisk() const
@@ -140,6 +168,26 @@ bool PcmRingAudioSource::hasDspClippingRisk() const
 bool PcmRingAudioSource::isDspLimiterProtecting() const
 {
     return dspChain.isSafetyLimiterProtecting();
+}
+
+bool PcmRingAudioSource::isDspLimiterEnabled() const
+{
+    return echo::DspChain::isSafetyLimiterEnabled();
+}
+
+float PcmRingAudioSource::getDspLimiterGainReductionDb() const
+{
+    return dspChain.safetyLimiterGainReductionDb();
+}
+
+float PcmRingAudioSource::getDspLimiterCeilingDb() const
+{
+    return dspChain.safetyLimiterCeilingDb();
+}
+
+void PcmRingAudioSource::setUpstreamPcmProcessingActive(bool active)
+{
+    dspChain.setUpstreamPcmProcessingActive(active);
 }
 
 uint32_t PcmRingAudioSource::renderInterleaved(float* output, uint32_t frameCount, uint32_t outputChannels)
@@ -176,7 +224,16 @@ uint32_t PcmRingAudioSource::renderInterleaved(echo_audio_host::FloatInterleaved
             output + static_cast<size_t>(renderedFrames) * outputChannels,
             framesThisChunk,
             static_cast<int>(outputChannels));
-        totalFramesRead += static_cast<uint32_t>(framesRead);
+        const auto boundedFramesRead = std::min<uint64_t>(
+            framesRead,
+            static_cast<uint64_t>(framesThisChunk));
+        if (boundedFramesRead > 0)
+        {
+            ditherProcessor.process(
+                output + static_cast<size_t>(renderedFrames) * outputChannels,
+                static_cast<size_t>(boundedFramesRead) * outputChannels);
+        }
+        totalFramesRead += static_cast<uint32_t>(boundedFramesRead);
         renderedFrames += static_cast<uint32_t>(framesThisChunk);
     }
 
@@ -197,7 +254,10 @@ uint64_t PcmRingAudioSource::renderPlanar(echo::FloatAudioBuffer& output, int st
         return 0;
 
     const uint64_t absoluteStartFrame = framesPlayed.load(std::memory_order_relaxed);
-    activateAutomixFadeIfReady(absoluteStartFrame, frameCount);
+    const bool gaplessActive = automixPlan.enabled.load(std::memory_order_acquire)
+        && automixPlan.gapless.load(std::memory_order_acquire);
+    if (! gaplessActive)
+        activateAutomixFadeIfReady(absoluteStartFrame, frameCount);
     const float playbackRate = rateProcessor != nullptr ? rateProcessor->getRate() : 1.0f;
     const bool playbackRateActive = std::abs(playbackRate - 1.0f) > 0.0001f;
     const int sourceFrameTarget = playbackRateActive
@@ -205,7 +265,8 @@ uint64_t PcmRingAudioSource::renderPlanar(echo::FloatAudioBuffer& output, int st
         : frameCount;
     if (playbackRateActive)
     {
-        playbackRateInputBuffer.setSize(output.getNumChannels(), sourceFrameTarget);
+        if (sourceFrameTarget > playbackRateInputBuffer.getNumSamples())
+            return 0;
         playbackRateInputBuffer.clear(0, sourceFrameTarget);
     }
 
@@ -215,94 +276,122 @@ uint64_t PcmRingAudioSource::renderPlanar(echo::FloatAudioBuffer& output, int st
     int outputOffset = 0;
     uint64_t framesReadTotal = 0;
 
+    while (framesNeeded > 0)
     {
-        std::unique_lock<std::mutex> lock(fifoMutex, std::try_to_lock);
-        if (!lock.owns_lock())
-        {
-            renderBuffer.clear(0, sourceFrameTarget);
-            return 0;
-        }
+        int start1 = 0;
+        int size1 = 0;
+        int start2 = 0;
+        int size2 = 0;
+        fifo.prepareToRead(framesNeeded, start1, size1, start2, size2);
 
-        while (framesNeeded > 0)
+        const int framesRead = size1 + size2;
+        if (framesRead <= 0)
         {
-            int start1 = 0;
-            int size1 = 0;
-            int start2 = 0;
-            int size2 = 0;
-            fifo.prepareToRead(framesNeeded, start1, size1, start2, size2);
-
-            const int framesRead = size1 + size2;
-            if (framesRead <= 0)
+            if (! session_.isInputEnded() && session_.hasAudio())
             {
-                if (! session_.isInputEnded() && session_.hasAudio())
-                {
-                    underrunCallbacks.fetch_add(1, std::memory_order_relaxed);
-                    underrunFrames.fetch_add(static_cast<uint64_t>(framesNeeded), std::memory_order_relaxed);
-                }
-                break;
+                underrunCallbacks.fetch_add(1, std::memory_order_relaxed);
+                underrunFrames.fetch_add(static_cast<uint64_t>(framesNeeded), std::memory_order_relaxed);
             }
-
-            copyToOutput(start1, size1, renderBuffer, renderStartSample + outputOffset, absoluteStartFrame + static_cast<uint64_t>(outputOffset));
-            copyToOutput(
-                start2,
-                size2,
-                renderBuffer,
-                renderStartSample + outputOffset + size1,
-                absoluteStartFrame + static_cast<uint64_t>(outputOffset + size1));
-            fifo.finishedRead(framesRead);
-
-            framesReadTotal += static_cast<uint64_t>(framesRead);
-            framesNeeded -= framesRead;
-            outputOffset += framesRead;
+            break;
         }
+
+        copyToOutput(start1, size1, renderBuffer, renderStartSample + outputOffset, absoluteStartFrame + static_cast<uint64_t>(outputOffset));
+        copyToOutput(
+            start2,
+            size2,
+            renderBuffer,
+            renderStartSample + outputOffset + size1,
+            absoluteStartFrame + static_cast<uint64_t>(outputOffset + size1));
+        fifo.finishedRead(framesRead);
+
+        framesReadTotal += static_cast<uint64_t>(framesRead);
+        framesNeeded -= framesRead;
+        outputOffset += framesRead;
     }
 
     const bool mainInputEnded = session_.isInputEnded();
     const int automixFrameBudget = mainInputEnded
         ? sourceFrameTarget
         : static_cast<int>(std::min<uint64_t>(static_cast<uint64_t>(sourceFrameTarget), framesReadTotal));
-    const uint64_t automixFramesRead = automixFrameBudget > 0
-        ? mixAutomixNext(renderBuffer, renderStartSample, automixFrameBudget, absoluteStartFrame)
-        : 0;
+    const uint64_t automixFramesRead = gaplessActive && mainInputEnded
+        ? mixGaplessNext(
+            renderBuffer,
+            renderStartSample,
+            sourceFrameTarget,
+            absoluteStartFrame,
+            framesReadTotal)
+        : automixFrameBudget > 0
+            ? mixAutomixNext(renderBuffer, renderStartSample, automixFrameBudget, absoluteStartFrame)
+            : 0;
     const uint64_t renderedFrames = automixPlan.enabled.load(std::memory_order_acquire)
-        ? (mainInputEnded ? std::max(framesReadTotal, automixFramesRead) : framesReadTotal)
+        ? (gaplessActive && mainInputEnded
+            ? framesReadTotal + automixFramesRead
+            : mainInputEnded ? std::max(framesReadTotal, automixFramesRead) : framesReadTotal)
         : framesReadTotal;
 
     if (renderedFrames > 0)
         framesPlayed.fetch_add(renderedFrames, std::memory_order_relaxed);
 
+    uint64_t outputFramesRendered = std::min<uint64_t>(
+        renderedFrames,
+        static_cast<uint64_t>(frameCount));
     if (playbackRateActive)
-        resamplePlaybackRate(renderBuffer, output, startSample, frameCount, static_cast<int>(framesReadTotal), playbackRate);
-
     {
-        echo::FloatAudioBuffer echoBuf(output.getNumChannels(), output.getNumSamples());
+        const int sourceFramesAvailable = static_cast<int>(std::min<uint64_t>(
+            renderedFrames,
+            static_cast<uint64_t>(std::numeric_limits<int>::max())));
+        outputFramesRendered = static_cast<uint64_t>(resamplePlaybackRate(
+            renderBuffer,
+            output,
+            startSample,
+            frameCount,
+            sourceFramesAvailable,
+            playbackRate));
+    }
+
+    if (frameCount <= dspRenderBuffer.getNumSamples())
+    {
         for (int c = 0; c < output.getNumChannels(); ++c)
         {
-            const float* src = output.getReadPointer(c);
-            float* dst = echoBuf.getWritePointer(c);
-            std::copy_n(src, static_cast<std::size_t>(output.getNumSamples()), dst);
+            const float* src = output.getReadPointer(c, startSample);
+            float* dst = dspRenderBuffer.getWritePointer(c);
+            std::copy_n(src, static_cast<std::size_t>(frameCount), dst);
         }
-        dspChain.processBlock(echoBuf, startSample, frameCount);
+        // The user DSP graph is deliberately downstream of the A/B sum so
+        // EQ, convolution, balance, headroom and metering each run once.
+        // Smart Transition applies ReplayGain per Deck, so the global
+        // ReplayGain stage must not apply it a second time to the sum.
+        const bool smartTransitionActive =
+            automixPlan.enabled.load(std::memory_order_acquire)
+            && ! automixPlan.gapless.load(std::memory_order_acquire);
+        dspChain.processBlock(dspRenderBuffer, 0, frameCount, ! smartTransitionActive);
         for (int c = 0; c < output.getNumChannels(); ++c)
         {
-            float* dst = output.getWritePointer(c);
-            const float* src = echoBuf.getReadPointer(c);
-            std::copy_n(src, static_cast<std::size_t>(output.getNumSamples()), dst);
+            float* dst = output.getWritePointer(c, startSample);
+            const float* src = dspRenderBuffer.getReadPointer(c);
+            std::copy_n(src, static_cast<std::size_t>(frameCount), dst);
         }
     }
     applyDeclickRamp(output, startSample, frameCount);
 
-    return renderedFrames;
+    return outputFramesRendered;
 }
 
 bool PcmRingAudioSource::push(const float* samples, int frameCount)
 {
-    if (frameCount > 0)
-        session_.markHasAudio();
+    return pushForGeneration(samples, frameCount, session_.generation());
+}
+
+bool PcmRingAudioSource::pushForGeneration(const float* samples, int frameCount, uint64_t generation)
+{
+    if (samples == nullptr || frameCount <= 0)
+        return frameCount == 0 && generation == session_.generation();
+    if (generation != session_.generation() || session_.isStopRequested())
+        return false;
 
     int written = 0;
 
-    while (written < frameCount && ! session_.isStopRequested())
+    while (written < frameCount && ! session_.isStopRequested() && session_.generation() == generation)
     {
         int start1 = 0;
         int size1 = 0;
@@ -310,11 +399,17 @@ bool PcmRingAudioSource::push(const float* samples, int frameCount)
         int size2 = 0;
         {
             std::lock_guard<std::mutex> lock(fifoMutex);
+            // beginSession()/replaceBufferedAudio() advance the generation
+            // before resetting this FIFO. Recheck after waiting for the FIFO
+            // lock so a stale decoder block cannot enter the new session.
+            if (generation != session_.generation() || session_.isStopRequested())
+                break;
             fifo.prepareToWrite(frameCount - written, start1, size1, start2, size2);
 
             const int framesWritable = size1 + size2;
             if (framesWritable > 0)
             {
+                session_.markHasAudio();
                 copyFromInput(samples + written * channels, start1, size1);
                 copyFromInput(samples + (written + size1) * channels, start2, size2);
                 fifo.finishedWrite(framesWritable);
@@ -326,7 +421,9 @@ bool PcmRingAudioSource::push(const float* samples, int frameCount)
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
 
-    return written == frameCount;
+    return written == frameCount
+        && session_.generation() == generation
+        && !session_.isStopRequested();
 }
 
 int PcmRingAudioSource::replaceBufferedAudio(const float* samples, int frameCount, bool pausedAfterReplace)
@@ -336,7 +433,9 @@ int PcmRingAudioSource::replaceBufferedAudio(const float* samples, int frameCoun
     {
         std::lock_guard<std::mutex> lock(fifoMutex);
         fifo.reset();
-        prebufferDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(startupPrebufferTimeoutMs);
+        prebufferDeadlineNs.store(
+            steadyNowNs() + static_cast<int64_t>(startupPrebufferTimeoutMs) * 1'000'000,
+            std::memory_order_release);
         if (samples != nullptr && frameCount > 0) {
             int start1 = 0;
             int size1 = 0;
@@ -365,12 +464,17 @@ int PcmRingAudioSource::replaceBufferedAudio(const float* samples, int frameCoun
 
 bool PcmRingAudioSource::pushAutomixNext(const float* samples, int frameCount)
 {
+    if (! automixPlan.enabled.load(std::memory_order_acquire))
+        return false;
+
     if (frameCount > 0)
         automixNextHasAudio.store(true, std::memory_order_release);
 
     int written = 0;
 
-    while (written < frameCount && ! session_.isStopRequested())
+    while (written < frameCount
+        && ! session_.isStopRequested()
+        && automixPlan.enabled.load(std::memory_order_acquire))
     {
         int start1 = 0;
         int size1 = 0;
@@ -394,7 +498,7 @@ bool PcmRingAudioSource::pushAutomixNext(const float* samples, int frameCount)
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
 
-    return written == frameCount;
+    return written == frameCount && automixPlan.enabled.load(std::memory_order_acquire);
 }
 
 void PcmRingAudioSource::prepareAutomix(double sampleRate, double fadeStartSeconds, double overlapSeconds, double currentGainDb, double nextGainDb)
@@ -405,19 +509,59 @@ void PcmRingAudioSource::prepareAutomix(double sampleRate, double fadeStartSecon
     const double releaseSeconds = std::clamp(std::max(0.001, overlapSeconds) * 0.5, 0.05, 4.0);
     const auto gainReleaseFrames = static_cast<uint64_t>(releaseSeconds * safeSampleRate);
 
+    prepareAutomixFrames(fadeStart, overlapFrames, currentGainDb, nextGainDb);
+    automixPlan.gainReleaseEndFrame.store(
+        fadeStart + std::max<uint64_t>(1, overlapFrames) + std::max<uint64_t>(1, gainReleaseFrames),
+        std::memory_order_release);
+}
+
+bool PcmRingAudioSource::prepareAutomixFrames(
+    uint64_t fadeStartFrame,
+    uint64_t overlapFrames,
+    double currentGainDb,
+    double nextGainDb,
+    double currentReplayGainDb,
+    double nextReplayGainDb)
+{
+    if (overlapFrames == 0 || session_.isStopRequested())
+        return false;
     {
         std::lock_guard<std::mutex> lock(automixMutex);
         automixFifo.reset();
         std::fill(automixBuffer.begin(), automixBuffer.end(), 0.0f);
     }
 
-    automixPlan.fadeStartFrame.store(fadeStart, std::memory_order_release);
-    automixPlan.fadeEndFrame.store(fadeStart + std::max<uint64_t>(1, overlapFrames), std::memory_order_release);
-    automixPlan.gainReleaseEndFrame.store(fadeStart + std::max<uint64_t>(1, overlapFrames) + std::max<uint64_t>(1, gainReleaseFrames), std::memory_order_release);
-    automixPlan.overlapFrames.store(std::max<uint64_t>(1, overlapFrames), std::memory_order_release);
+    const auto safeOverlapFrames = std::max<uint64_t>(1, overlapFrames);
+    const auto releaseFrames = std::max<uint64_t>(1, safeOverlapFrames / 2);
+    automixPlan.gapless.store(false, std::memory_order_release);
+    gaplessBoundaryFrame.store(UINT64_MAX, std::memory_order_release);
+    automixPlan.fadeStartFrame.store(fadeStartFrame, std::memory_order_release);
+    automixPlan.fadeEndFrame.store(fadeStartFrame + safeOverlapFrames, std::memory_order_release);
+    automixPlan.gainReleaseEndFrame.store(fadeStartFrame + safeOverlapFrames + releaseFrames, std::memory_order_release);
+    automixPlan.overlapFrames.store(safeOverlapFrames, std::memory_order_release);
     automixPlan.currentGain.store(dbToGain(currentGainDb), std::memory_order_release);
     automixPlan.nextGain.store(dbToGain(nextGainDb), std::memory_order_release);
+    automixPlan.currentReplayGain.store(dbToGain(currentReplayGainDb), std::memory_order_release);
+    automixPlan.nextReplayGain.store(dbToGain(nextReplayGainDb), std::memory_order_release);
     automixPlan.fadeActivated.store(false, std::memory_order_release);
+    automixPlan.nextDeckFaulted.store(false, std::memory_order_release);
+    automixNextInputEnded.store(false, std::memory_order_release);
+    automixNextHasAudio.store(false, std::memory_order_release);
+    automixPlan.enabled.store(true, std::memory_order_release);
+    return true;
+}
+
+void PcmRingAudioSource::prepareGapless()
+{
+    {
+        std::lock_guard<std::mutex> lock(automixMutex);
+        automixFifo.reset();
+        std::fill(automixBuffer.begin(), automixBuffer.end(), 0.0f);
+    }
+
+    gaplessBoundaryFrame.store(UINT64_MAX, std::memory_order_release);
+    automixPlan.fadeActivated.store(false, std::memory_order_release);
+    automixPlan.gapless.store(true, std::memory_order_release);
     automixPlan.enabled.store(true, std::memory_order_release);
     automixNextInputEnded.store(false, std::memory_order_release);
     automixNextHasAudio.store(false, std::memory_order_release);
@@ -428,33 +572,80 @@ void PcmRingAudioSource::markAutomixNextEnded()
     automixNextInputEnded.store(true, std::memory_order_release);
 }
 
+void PcmRingAudioSource::failAutomixNext(uint64_t fadeFrames)
+{
+    if (! automixPlan.enabled.load(std::memory_order_acquire)
+        || automixPlan.nextDeckFaulted.load(std::memory_order_acquire))
+        return;
+    const uint64_t startFrame = framesPlayed.load(std::memory_order_acquire);
+    automixPlan.faultCurrentStartGain.store(
+        currentAutomixEnvelope(startFrame),
+        std::memory_order_release);
+    automixPlan.faultNextStartGain.store(
+        nextAutomixEnvelope(startFrame),
+        std::memory_order_release);
+    automixPlan.faultFadeStartFrame.store(startFrame, std::memory_order_release);
+    automixPlan.faultFadeEndFrame.store(
+        startFrame + std::max<uint64_t>(1, fadeFrames),
+        std::memory_order_release);
+    automixPlan.nextDeckFaulted.store(true, std::memory_order_release);
+}
+
 void PcmRingAudioSource::cancelAutomix()
 {
     automixPlan.enabled.store(false, std::memory_order_release);
+    automixPlan.gapless.store(false, std::memory_order_release);
     automixPlan.fadeActivated.store(false, std::memory_order_release);
+    automixPlan.nextDeckFaulted.store(false, std::memory_order_release);
+    automixPlan.currentReplayGain.store(1.0f, std::memory_order_release);
+    automixPlan.nextReplayGain.store(1.0f, std::memory_order_release);
     automixNextInputEnded.store(false, std::memory_order_release);
     automixNextHasAudio.store(false, std::memory_order_release);
+    gaplessBoundaryFrame.store(UINT64_MAX, std::memory_order_release);
     {
         std::lock_guard<std::mutex> lock(automixMutex);
         automixFifo.reset();
     }
 }
 
-void PcmRingAudioSource::beginSession()
+void PcmRingAudioSource::beginSession(bool startPaused)
 {
+    ditherProcessor.reset();
     session_.begin();
     {
         std::lock_guard<std::mutex> lock(fifoMutex);
         fifo.reset();
-        prebufferDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(startupPrebufferTimeoutMs);
+        prebufferDeadlineNs.store(
+            steadyNowNs() + static_cast<int64_t>(startupPrebufferTimeoutMs) * 1'000'000,
+            std::memory_order_release);
     }
 
     framesPlayed.store(0, std::memory_order_relaxed);
     underrunCallbacks.store(0, std::memory_order_relaxed);
     underrunFrames.store(0, std::memory_order_relaxed);
-    sessionPaused.store(false, std::memory_order_release);
+    sessionPaused.store(startPaused, std::memory_order_release);
     stopFadeRequested.store(false, std::memory_order_release);
     declickFadeGeneration.fetch_add(1, std::memory_order_acq_rel);
+    prebuffering.store(startupPrebufferFrames > 0, std::memory_order_release);
+    cancelAutomix();
+}
+
+void PcmRingAudioSource::continueSessionAfterDrain()
+{
+    ditherProcessor.reset();
+    session_.continueAfterDrain();
+    {
+        std::lock_guard<std::mutex> lock(fifoMutex);
+        fifo.reset();
+        prebufferDeadlineNs.store(
+            steadyNowNs() + static_cast<int64_t>(startupPrebufferTimeoutMs) * 1'000'000,
+            std::memory_order_release);
+    }
+    framesPlayed.store(0, std::memory_order_relaxed);
+    underrunCallbacks.store(0, std::memory_order_relaxed);
+    underrunFrames.store(0, std::memory_order_relaxed);
+    sessionPaused.store(false, std::memory_order_release);
+    stopFadeRequested.store(false, std::memory_order_release);
     prebuffering.store(startupPrebufferFrames > 0, std::memory_order_release);
     cancelAutomix();
 }
@@ -482,6 +673,39 @@ void PcmRingAudioSource::setGain(float nextGain)
         return;
 
     gain.store(std::max(0.0f, std::min(1.0f, nextGain)), std::memory_order_release);
+}
+
+uint64_t PcmRingAudioSource::getGaplessBoundaryFrame() const
+{
+    return gaplessBoundaryFrame.load(std::memory_order_acquire);
+}
+
+uint64_t PcmRingAudioSource::getAutomixFadeStartFrame() const
+{
+    return automixPlan.fadeStartFrame.load(std::memory_order_acquire);
+}
+
+uint64_t PcmRingAudioSource::getAutomixFadeEndFrame() const
+{
+    return automixPlan.fadeEndFrame.load(std::memory_order_acquire);
+}
+
+bool PcmRingAudioSource::isAutomixActive() const
+{
+    return automixPlan.enabled.load(std::memory_order_acquire)
+        && ! automixPlan.gapless.load(std::memory_order_acquire)
+        && automixPlan.fadeActivated.load(std::memory_order_acquire)
+        && ! automixPlan.nextDeckFaulted.load(std::memory_order_acquire);
+}
+
+void PcmRingAudioSource::configureDither(echo::PcmDitherMode mode, int bitDepth)
+{
+    ditherProcessor.configure(mode, bitDepth, channels);
+}
+
+void PcmRingAudioSource::resetDither()
+{
+    ditherProcessor.reset();
 }
 
 bool PcmRingAudioSource::isDrained() const
@@ -513,6 +737,13 @@ int PcmRingAudioSource::getReadyFrames() const
         ready += automixFifo.getNumReady();
     }
     return ready;
+}
+
+bool PcmRingAudioSource::isReadyToResume() const
+{
+    std::lock_guard<std::mutex> lock(fifoMutex);
+    const int requiredFrames = std::max(1, startupPrebufferFrames);
+    return fifo.getNumReady() >= requiredFrames || session_.isInputEnded();
 }
 
 uint64_t PcmRingAudioSource::getFramesPlayed() const
@@ -573,11 +804,8 @@ void PcmRingAudioSource::activateAutomixFadeIfReady(uint64_t absoluteStartFrame,
     if (absoluteStartFrame + static_cast<uint64_t>(frameCount) <= plannedFadeStartFrame)
         return;
 
-    {
-        std::lock_guard<std::mutex> lock(automixMutex);
-        if (automixFifo.getNumReady() <= 0)
-            return;
-    }
+    if (automixFifo.getNumReady() <= 0)
+        return;
 
     const uint64_t effectiveFadeStartFrame = std::max(absoluteStartFrame, plannedFadeStartFrame);
     const uint64_t overlapFrames = std::max<uint64_t>(1, automixPlan.overlapFrames.load(std::memory_order_acquire));
@@ -613,14 +841,10 @@ void PcmRingAudioSource::applyDeclickRamp(echo::FloatAudioBuffer& output, int st
     const float step = 1.0f / static_cast<float>(std::max(1, declickRampFrames));
     const int outputChannels = output.getNumChannels();
 
-    std::vector<float*> chPtrs(static_cast<size_t>(outputChannels));
-    for (int ch = 0; ch < outputChannels; ++ch)
-        chPtrs[static_cast<size_t>(ch)] = output.getWritePointer(ch, startSample);
-
     for (int frame = 0; frame < frameCount; ++frame)
     {
         for (int ch = 0; ch < outputChannels; ++ch)
-            chPtrs[static_cast<size_t>(ch)][frame] *= declickGain;
+            output.getWritePointer(ch, startSample)[frame] *= declickGain;
 
         if (declickGain < targetGain)
             declickGain = std::min(targetGain, declickGain + step);
@@ -631,6 +855,20 @@ void PcmRingAudioSource::applyDeclickRamp(echo::FloatAudioBuffer& output, int st
 
 float PcmRingAudioSource::currentAutomixEnvelope(uint64_t absoluteFrame) const
 {
+    if (automixPlan.nextDeckFaulted.load(std::memory_order_acquire))
+    {
+        const uint64_t start = automixPlan.faultFadeStartFrame.load(std::memory_order_acquire);
+        const uint64_t end = automixPlan.faultFadeEndFrame.load(std::memory_order_acquire);
+        const float startGain = automixPlan.faultCurrentStartGain.load(std::memory_order_acquire);
+        if (absoluteFrame >= end)
+            return 1.0f;
+        if (absoluteFrame >= start)
+        {
+            const float progress = static_cast<float>(absoluteFrame - start)
+                / static_cast<float>(std::max<uint64_t>(1, end - start));
+            return startGain + (1.0f - startGain) * progress;
+        }
+    }
     const bool enabled = automixPlan.enabled.load(std::memory_order_acquire);
     const bool fadeActivated = automixPlan.fadeActivated.load(std::memory_order_acquire);
     const uint64_t fadeStartFrame = automixPlan.fadeStartFrame.load(std::memory_order_acquire);
@@ -654,6 +892,20 @@ float PcmRingAudioSource::currentAutomixEnvelope(uint64_t absoluteFrame) const
 
 float PcmRingAudioSource::nextAutomixEnvelope(uint64_t absoluteFrame) const
 {
+    if (automixPlan.nextDeckFaulted.load(std::memory_order_acquire))
+    {
+        const uint64_t start = automixPlan.faultFadeStartFrame.load(std::memory_order_acquire);
+        const uint64_t end = automixPlan.faultFadeEndFrame.load(std::memory_order_acquire);
+        const float startGain = automixPlan.faultNextStartGain.load(std::memory_order_acquire);
+        if (absoluteFrame >= end)
+            return 0.0f;
+        if (absoluteFrame >= start)
+        {
+            const float progress = static_cast<float>(absoluteFrame - start)
+                / static_cast<float>(std::max<uint64_t>(1, end - start));
+            return startGain * (1.0f - progress);
+        }
+    }
     const bool enabled = automixPlan.enabled.load(std::memory_order_acquire);
     const bool fadeActivated = automixPlan.fadeActivated.load(std::memory_order_acquire);
     const uint64_t fadeStartFrame = automixPlan.fadeStartFrame.load(std::memory_order_acquire);
@@ -686,6 +938,12 @@ void PcmRingAudioSource::copyToOutput(int startFrame, int frameCount, echo::Floa
 
     const float* source = buffer.data() + static_cast<size_t>(startFrame * channels);
     const float outputGain = gain.load(std::memory_order_acquire);
+    const bool smartTransitionActive =
+        automixPlan.enabled.load(std::memory_order_acquire)
+        && ! automixPlan.gapless.load(std::memory_order_acquire);
+    const float deckReplayGain = smartTransitionActive
+        ? automixPlan.currentReplayGain.load(std::memory_order_acquire)
+        : 1.0f;
     const int outputChannels = output.getNumChannels();
 
     for (int channel = 0; channel < outputChannels; ++channel)
@@ -696,6 +954,7 @@ void PcmRingAudioSource::copyToOutput(int startFrame, int frameCount, echo::Floa
         for (int frame = 0; frame < frameCount; ++frame)
             destination[frame] = source[frame * channels + sourceChannel]
                 * outputGain
+                * deckReplayGain
                 * currentAutomixEnvelope(absoluteStartFrame + static_cast<uint64_t>(frame));
     }
 }
@@ -717,6 +976,7 @@ void PcmRingAudioSource::addAutomixToOutput(int startFrame, int frameCount, echo
         return;
 
     const float* source = automixBuffer.data() + static_cast<size_t>(startFrame * channels);
+    const float deckReplayGain = automixPlan.nextReplayGain.load(std::memory_order_acquire);
     const int outputChannels = output.getNumChannels();
 
     for (int channel = 0; channel < outputChannels; ++channel)
@@ -727,9 +987,86 @@ void PcmRingAudioSource::addAutomixToOutput(int startFrame, int frameCount, echo
         for (int frame = 0; frame < frameCount; ++frame)
         {
             destination[frame] += source[frame * channels + sourceChannel]
+                * deckReplayGain
                 * nextAutomixEnvelope(absoluteStartFrame + static_cast<uint64_t>(frame));
         }
     }
+}
+
+void PcmRingAudioSource::copyGaplessToOutput(
+    int startFrame,
+    int frameCount,
+    echo::FloatAudioBuffer& output,
+    int outputStart)
+{
+    if (frameCount <= 0)
+        return;
+
+    const float* source = automixBuffer.data() + static_cast<size_t>(startFrame * channels);
+    const float outputGain = gain.load(std::memory_order_acquire);
+    const int outputChannels = output.getNumChannels();
+    for (int channel = 0; channel < outputChannels; ++channel)
+    {
+        float* destination = output.getWritePointer(channel, outputStart);
+        const int sourceChannel = std::min(channel, channels - 1);
+        for (int frame = 0; frame < frameCount; ++frame)
+            destination[frame] = source[frame * channels + sourceChannel] * outputGain;
+    }
+}
+
+uint64_t PcmRingAudioSource::mixGaplessNext(
+    echo::FloatAudioBuffer& output,
+    int startSample,
+    int frameCount,
+    uint64_t absoluteStartFrame,
+    uint64_t currentFramesRead)
+{
+    if (! automixPlan.enabled.load(std::memory_order_acquire)
+        || ! automixPlan.gapless.load(std::memory_order_acquire)
+        || frameCount <= 0)
+        return 0;
+
+    const int startOffset = static_cast<int>(std::min<uint64_t>(currentFramesRead, static_cast<uint64_t>(frameCount)));
+    int framesNeeded = frameCount - startOffset;
+    int outputOffset = startOffset;
+    uint64_t framesReadTotal = 0;
+
+    while (framesNeeded > 0)
+    {
+        int start1 = 0;
+        int size1 = 0;
+        int start2 = 0;
+        int size2 = 0;
+        automixFifo.prepareToRead(framesNeeded, start1, size1, start2, size2);
+        const int framesRead = size1 + size2;
+        if (framesRead <= 0)
+        {
+            if (! automixNextInputEnded.load(std::memory_order_acquire)
+                && automixNextHasAudio.load(std::memory_order_acquire))
+            {
+                underrunCallbacks.fetch_add(1, std::memory_order_relaxed);
+                underrunFrames.fetch_add(static_cast<uint64_t>(framesNeeded), std::memory_order_relaxed);
+            }
+            break;
+        }
+
+        const uint64_t boundary = absoluteStartFrame + currentFramesRead;
+        uint64_t unsetBoundary = UINT64_MAX;
+        gaplessBoundaryFrame.compare_exchange_strong(
+            unsetBoundary,
+            boundary,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire);
+        copyGaplessToOutput(start1, size1, output, startSample + outputOffset);
+        copyGaplessToOutput(start2, size2, output, startSample + outputOffset + size1);
+        automixFifo.finishedRead(framesRead);
+
+        framesReadTotal += static_cast<uint64_t>(framesRead);
+        framesNeeded -= framesRead;
+        outputOffset += framesRead;
+    }
+
+    return framesReadTotal;
 }
 
 uint64_t PcmRingAudioSource::mixAutomixNext(echo::FloatAudioBuffer& output, int startSample, int frameCount, uint64_t absoluteStartFrame)
@@ -748,60 +1085,57 @@ uint64_t PcmRingAudioSource::mixAutomixNext(echo::FloatAudioBuffer& output, int 
     int outputOffset = startOffset;
     uint64_t framesReadTotal = 0;
 
+    while (framesNeeded > 0)
     {
-        std::lock_guard<std::mutex> lock(automixMutex);
+        int start1 = 0;
+        int size1 = 0;
+        int start2 = 0;
+        int size2 = 0;
+        automixFifo.prepareToRead(framesNeeded, start1, size1, start2, size2);
 
-        while (framesNeeded > 0)
+        const int framesRead = size1 + size2;
+        if (framesRead <= 0)
         {
-            int start1 = 0;
-            int size1 = 0;
-            int start2 = 0;
-            int size2 = 0;
-            automixFifo.prepareToRead(framesNeeded, start1, size1, start2, size2);
-
-            const int framesRead = size1 + size2;
-            if (framesRead <= 0)
+            if (! automixNextInputEnded.load(std::memory_order_acquire) && automixNextHasAudio.load(std::memory_order_acquire))
             {
-                if (! automixNextInputEnded.load(std::memory_order_acquire) && automixNextHasAudio.load(std::memory_order_acquire))
-                {
-                    underrunCallbacks.fetch_add(1, std::memory_order_relaxed);
-                    underrunFrames.fetch_add(static_cast<uint64_t>(framesNeeded), std::memory_order_relaxed);
-                }
-                break;
+                underrunCallbacks.fetch_add(1, std::memory_order_relaxed);
+                underrunFrames.fetch_add(static_cast<uint64_t>(framesNeeded), std::memory_order_relaxed);
             }
-
-            addAutomixToOutput(
-                start1,
-                size1,
-                output,
-                startSample + outputOffset,
-                absoluteStartFrame + static_cast<uint64_t>(outputOffset));
-            addAutomixToOutput(
-                start2,
-                size2,
-                output,
-                startSample + outputOffset + size1,
-                absoluteStartFrame + static_cast<uint64_t>(outputOffset + size1));
-            automixFifo.finishedRead(framesRead);
-
-            framesReadTotal += static_cast<uint64_t>(framesRead);
-            framesNeeded -= framesRead;
-            outputOffset += framesRead;
+            break;
         }
+
+        addAutomixToOutput(
+            start1,
+            size1,
+            output,
+            startSample + outputOffset,
+            absoluteStartFrame + static_cast<uint64_t>(outputOffset));
+        addAutomixToOutput(
+            start2,
+            size2,
+            output,
+            startSample + outputOffset + size1,
+            absoluteStartFrame + static_cast<uint64_t>(outputOffset + size1));
+        automixFifo.finishedRead(framesRead);
+
+        framesReadTotal += static_cast<uint64_t>(framesRead);
+        framesNeeded -= framesRead;
+        outputOffset += framesRead;
     }
 
     return framesReadTotal > 0 ? framesReadTotal + static_cast<uint64_t>(startOffset) : 0;
 }
 
-void PcmRingAudioSource::resamplePlaybackRate(const echo::FloatAudioBuffer& source, echo::FloatAudioBuffer& output, int outputStart, int outputFrames, int sourceFrames, float playbackRate)
+int PcmRingAudioSource::resamplePlaybackRate(const echo::FloatAudioBuffer& source, echo::FloatAudioBuffer& output, int outputStart, int outputFrames, int sourceFrames, float playbackRate)
 {
     if (outputFrames <= 0 || sourceFrames <= 0 || playbackRate <= 0.0f)
-        return;
+        return 0;
 
     const int outputChannels = output.getNumChannels();
     const int sourceChannels = source.getNumChannels();
     const int channelsToCopy = std::min(outputChannels, sourceChannels);
 
+    int renderedFrames = 0;
     for (int frame = 0; frame < outputFrames; ++frame)
     {
         const int sourceFrame = static_cast<int>(static_cast<float>(frame) * playbackRate);
@@ -810,7 +1144,9 @@ void PcmRingAudioSource::resamplePlaybackRate(const echo::FloatAudioBuffer& sour
 
         for (int channel = 0; channel < channelsToCopy; ++channel)
             output.getWritePointer(channel, outputStart)[frame] = source.getReadPointer(channel)[sourceFrame];
+        ++renderedFrames;
     }
+    return renderedFrames;
 }
 
 void PcmRingAudioSource::copyPlanarToInterleaved(const echo::FloatAudioBuffer& source, float* output, int frameCount, int outputChannels) const
@@ -838,15 +1174,10 @@ bool PcmRingAudioSource::shouldHoldForStartupPrebuffer()
     if (! prebuffering.load(std::memory_order_acquire))
         return false;
 
-    int readyFrames = 0;
-    std::chrono::steady_clock::time_point deadline;
-    {
-        std::lock_guard<std::mutex> lock(fifoMutex);
-        readyFrames = fifo.getNumReady();
-        deadline = prebufferDeadline;
-    }
+    const int readyFrames = fifo.getNumReady();
+    const int64_t deadlineNs = prebufferDeadlineNs.load(std::memory_order_acquire);
     const bool enoughPcm = readyFrames >= startupPrebufferFrames;
-    const bool timedOut = startupPrebufferTimeoutMs <= 0 || std::chrono::steady_clock::now() >= deadline;
+    const bool timedOut = startupPrebufferTimeoutMs <= 0 || steadyNowNs() >= deadlineNs;
     const bool ended = session_.isInputEnded();
 
     if (enoughPcm || timedOut || ended)

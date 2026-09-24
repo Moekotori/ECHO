@@ -7,7 +7,9 @@ export type TaskbarMiniPlayerUnsupportedReason =
   | 'taskbar-not-found'
   | 'taskbar-autohide'
   | 'taskbar-too-small'
-  | 'display-unavailable';
+  | 'display-unavailable'
+  | 'host-missing'
+  | 'host-start-failed';
 
 export type TaskbarMiniPlayerState = {
   visible: boolean;
@@ -15,5 +17,7 @@ export type TaskbarMiniPlayerState = {
   unsupportedReason: TaskbarMiniPlayerUnsupportedReason | null;
   bounds: DesktopLyricsBounds | null;
   edge: TaskbarMiniPlayerEdge | null;
+  hostState?: 'unsupported' | 'missing' | 'stopped' | 'starting' | 'ready' | 'restarting' | 'stopping' | 'error';
+  lastError?: string | null;
   settings: Pick<AppSettings, 'taskbarMiniPlayerEnabled'>;
 };

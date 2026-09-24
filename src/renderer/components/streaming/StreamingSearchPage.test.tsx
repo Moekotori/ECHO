@@ -64,6 +64,42 @@ const kugouProvider: StreamingProviderDescriptor = {
   requiresAccount: false,
 };
 
+const bilibiliProvider: StreamingProviderDescriptor = {
+  name: 'bilibili',
+  displayName: 'Bilibili',
+  enabled: true,
+  supportsSearch: true,
+  supportedSearchMediaTypes: ['track'],
+  supportsPlayback: true,
+  supportsLyrics: false,
+  supportsMv: true,
+  requiresAccount: false,
+};
+
+const disconnectedSpotifyProvider: StreamingProviderDescriptor = {
+  name: 'spotify',
+  displayName: 'Spotify',
+  enabled: false,
+  supportsSearch: false,
+  supportsPlayback: true,
+  supportsLyrics: true,
+  supportsMv: false,
+  requiresAccount: true,
+  accountConnected: false,
+};
+
+const disconnectedSoundCloudProvider: StreamingProviderDescriptor = {
+  name: 'soundcloud',
+  displayName: 'SoundCloud',
+  enabled: false,
+  supportsSearch: true,
+  supportsPlayback: true,
+  supportsLyrics: false,
+  supportsMv: false,
+  requiresAccount: true,
+  accountConnected: false,
+};
+
 const artist: StreamingArtist = {
   id: 'streaming:netease:artist:jay',
   provider: 'netease',
@@ -200,10 +236,58 @@ const renderStreamingSearchPage = (): void => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   resetStreamingMemory();
   window.localStorage.clear();
   vi.restoreAllMocks();
   delete (window as Partial<Window>).echo;
+});
+
+describe('StreamingSearchPage playback prewarm', () => {
+  it('prepares a stable hovered result after 180ms and cancels before the threshold', async () => {
+    const prepareMediaItem = vi.fn().mockResolvedValue(undefined);
+    window.echo = {
+      playback: { prepareMediaItem },
+      streaming: {
+        getProviders: vi.fn().mockResolvedValue([provider]),
+        search: vi.fn().mockResolvedValue(trackSearchResult),
+      },
+      app: {
+        getSettings: vi.fn().mockResolvedValue({ streamingPlaylistImportNoticeAccepted: true }),
+      },
+    } as unknown as Window['echo'];
+    updateStreamingSearchMemory({
+      provider: 'netease',
+      quality: 'lossless',
+      activeTab: 'track',
+      input: '晴天',
+      query: '晴天',
+      resultKey: 'netease:track:晴天',
+      result: trackSearchResult,
+      failedCoverUrls: {},
+      scrollTop: 0,
+    });
+    renderStreamingSearchPage();
+    const row = (await screen.findByText('晴天')).closest('article');
+    expect(row).not.toBeNull();
+
+    fireEvent.mouseEnter(row!);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    fireEvent.mouseLeave(row!);
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    expect(prepareMediaItem).not.toHaveBeenCalled();
+
+    fireEvent.mouseEnter(row!);
+    await waitFor(() => expect(prepareMediaItem).toHaveBeenCalledWith({
+      item: expect.objectContaining({
+        mediaType: 'streaming',
+        trackId: track.stableKey,
+        provider: 'netease',
+        providerTrackId: track.providerTrackId,
+        quality: 'lossless',
+      }),
+    }));
+  });
 });
 
 describe('StreamingSearchPage artist detail', () => {
@@ -510,7 +594,7 @@ describe('StreamingSearchPage download visibility', () => {
       fireEvent.click(await screen.findByText(qqArtistAlbum.title));
       expect(await screen.findByText('Album Track 1')).toBeTruthy();
 
-      fireEvent.click(await screen.findByRole('button', { name: /下载专辑|涓嬭浇涓撹緫/u }));
+      fireEvent.click(await screen.findByRole('button', { name: /下载专辑/u }));
 
       await waitFor(() => expect(createUrlJob).toHaveBeenCalledTimes(2));
       expect(resolvePlayback).toHaveBeenCalledWith({
@@ -553,8 +637,10 @@ describe('StreamingSearchPage provider visibility', () => {
     renderStreamingSearchPage();
     (refreshProviders as (() => void) | null)?.();
 
-    expect(await screen.findByRole('button', { name: /NetEase Cloud Music/ })).toBeTruthy();
-    expect(await screen.findByRole('button', { name: /QQ Music/ })).toBeTruthy();
+    const neteaseButton = await screen.findByRole('button', { name: /NetEase Cloud Music/ });
+    const qqMusicButton = await screen.findByRole('button', { name: /QQ Music/ });
+    expect(neteaseButton.textContent).toContain('Not signed in');
+    expect(qqMusicButton.textContent).toContain('Not signed in');
     expect(screen.queryByRole('button', { name: /KuGou Music/ })).toBeNull();
   });
 
@@ -584,6 +670,89 @@ describe('StreamingSearchPage provider visibility', () => {
     await waitFor(() => expect(search).toHaveBeenCalled());
     expect(search).toHaveBeenCalledWith(expect.objectContaining({ provider: 'netease' }));
     expect(search).not.toHaveBeenCalledWith(expect.objectContaining({ provider: 'kugou' }));
+  });
+
+  it('shows only search categories supported by the selected provider', async () => {
+    updateStreamingSearchMemory({
+      provider: 'bilibili',
+      activeTab: 'album',
+      input: 'Aimer',
+      query: 'Aimer',
+      result: null,
+      resultKey: null,
+    });
+    const search = vi.fn().mockResolvedValue({ ...trackSearchResult, provider: 'bilibili', query: 'Aimer' });
+    window.echo = {
+      streaming: {
+        getProviders: vi.fn().mockResolvedValue([bilibiliProvider]),
+        search,
+      },
+    } as unknown as Window['echo'];
+
+    renderStreamingSearchPage();
+
+    expect(await screen.findByRole('button', { name: 'Tracks' })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Albums' })).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Artists' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Playlists' })).toBeNull();
+    await waitFor(() => expect(search).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'bilibili',
+      mediaTypes: ['track'],
+    })));
+    expect(search).not.toHaveBeenCalledWith(expect.objectContaining({ mediaTypes: ['album'] }));
+  });
+
+  it('keeps disconnected Spotify visible but prevents entering its search', async () => {
+    window.echo = {
+      streaming: {
+        getProviders: vi.fn().mockResolvedValue([provider, disconnectedSpotifyProvider]),
+        search: vi.fn().mockResolvedValue(trackSearchResult),
+      },
+    } as unknown as Window['echo'];
+
+    renderStreamingSearchPage();
+
+    const spotifyButton = await screen.findByRole('button', { name: /Spotify/u });
+    expect((spotifyButton as HTMLButtonElement).disabled).toBe(true);
+    expect(spotifyButton.textContent).toContain('Not signed in');
+  });
+
+  it('refreshes SoundCloud from signed out to signed in after account status changes', async () => {
+    let refreshProviders: (() => void) | null = null;
+    const getProviders = vi.fn()
+      .mockResolvedValueOnce([provider, disconnectedSoundCloudProvider])
+      .mockResolvedValue([
+        provider,
+        {
+          ...disconnectedSoundCloudProvider,
+          enabled: true,
+          accountConnected: true,
+          accountDisplayName: 'System browser: chrome',
+        },
+      ]);
+    window.echo = {
+      accounts: {
+        onStatusesChanged: vi.fn((handler: () => void) => {
+          refreshProviders = handler;
+          return vi.fn();
+        }),
+      },
+      streaming: {
+        getProviders,
+        search: vi.fn().mockResolvedValue(trackSearchResult),
+      },
+    } as unknown as Window['echo'];
+
+    renderStreamingSearchPage();
+
+    const signedOutButton = await screen.findByRole('button', { name: /SoundCloud/u });
+    expect((signedOutButton as HTMLButtonElement).disabled).toBe(true);
+    expect(signedOutButton.querySelector('i')?.getAttribute('data-status')).toBe('signedOut');
+
+    (refreshProviders as (() => void) | null)?.();
+
+    await waitFor(() => expect((screen.getByRole('button', { name: /SoundCloud/u }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByRole('button', { name: /SoundCloud/u }).querySelector('i')?.getAttribute('data-status')).toBe('signedIn');
   });
 });
 

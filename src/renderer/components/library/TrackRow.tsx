@@ -6,7 +6,7 @@ import type { LibraryTrack } from '../../../shared/types/library';
 import { isDsdCodec, isHiResAudioSpec } from '../../../shared/utils/audioQuality';
 import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
 
-export type HifiTagKind = 'flac' | 'lossless' | 'depth' | 'rate' | 'bitrate' | 'bpm' | 'dsf' | 'hires';
+export type HifiTagKind = 'flac' | 'lossless' | 'depth' | 'rate' | 'bitrate' | 'bpm' | 'dsf' | 'hires' | 'mqa';
 
 export type HifiTag = {
   label: string;
@@ -38,6 +38,7 @@ type TrackRowProps = {
   onDragOver?: (event: DragEvent<HTMLDivElement>, track: LibraryTrack) => void;
   onDrop?: (event: DragEvent<HTMLDivElement>, track: LibraryTrack) => void;
   onDragEnd?: (event: DragEvent<HTMLDivElement>, track: LibraryTrack) => void;
+  audioInfoLayout?: 'tags' | 'combined';
 };
 
 const formatDuration = (duration: number): string => {
@@ -54,6 +55,13 @@ const formatDuration = (duration: number): string => {
 const tagsFromTrack = (track: LibraryTrack): HifiTag[] => {
   const tags: HifiTag[] = [];
   const codec = track.codec?.toUpperCase();
+
+  if (track.mqa) {
+    tags.push({
+      label: 'MQA',
+      kind: 'mqa',
+    });
+  }
 
   if (codec) {
     tags.push({
@@ -82,8 +90,9 @@ const tagsFromTrack = (track: LibraryTrack): HifiTag[] => {
   }
 
   if (isDisplayableBpmAnalysis(track.bpm, track.analysisStatus, track.bpmConfidence)) {
+    const estimatedPrefix = track.fieldSources?.bpm === 'audio_analysis' ? '≈' : '';
     tags.push({
-      label: `${Math.round(track.bpm)} BPM`,
+      label: `${estimatedPrefix}${Math.round(track.bpm)} BPM`,
       kind: 'bpm',
     });
   }
@@ -100,17 +109,20 @@ const tagClassNameByKind: Record<HifiTagKind, string> = {
   bpm: 'tag-bpm',
   dsf: 'tag-flac',
   hires: 'tag-hires',
+  mqa: 'tag-mqa',
 };
 
 export const TrackRow = memo(
-  ({ track, isPlaying, isSelected = false, duplicateHiddenCount = 0, onPlay, onToggleSelected, onAddToQueue, onAddToPlaylist, onDownload, onOpenArtist, onOpenAlbum, isLoading = false, isDownloading = false, downloadProgress = null, onShowVersions, onOpenMenu, isDraggable = false, isDragging = false, isDropTarget = false, priorityCover = false, onDragStart, onDragOver, onDrop, onDragEnd }: TrackRowProps): JSX.Element => {
+  ({ track, isPlaying, isSelected = false, duplicateHiddenCount = 0, onPlay, onToggleSelected, onAddToQueue, onAddToPlaylist, onDownload, onOpenArtist, onOpenAlbum, isLoading = false, isDownloading = false, downloadProgress = null, onShowVersions, onOpenMenu, isDraggable = false, isDragging = false, isDropTarget = false, priorityCover = false, onDragStart, onDragOver, onDrop, onDragEnd, audioInfoLayout = 'tags' }: TrackRowProps): JSX.Element => {
     const t = useOptionalI18n()?.t ?? translateFallback;
     const tags = tagsFromTrack(track);
+    const audioInfoTags = tags.filter((tag) => tag.kind !== 'bpm');
+    const bpmTag = tags.find((tag) => tag.kind === 'bpm');
     const isUnavailable = track.unavailable === true;
     const remoteSourceLabel = track.mediaType === 'remote' ? track.sourceDisplayName ?? track.provider ?? t('library.source.remote') : null;
     const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
     const shouldShowCover = Boolean(track.coverThumb && track.coverThumb !== failedCoverUrl);
-    const coverLoading = priorityCover || track.coverThumb?.startsWith('echo-image://subsonic-cover/') ? 'eager' : 'lazy';
+    const coverLoading = priorityCover ? 'eager' : 'lazy';
     const canAdd = Boolean(onAddToPlaylist || onAddToQueue);
     const canDownload = Boolean(onDownload) && track.provider !== 'spotify';
     const hasRowActions = canAdd || canDownload || Boolean(onOpenMenu);
@@ -259,6 +271,9 @@ export const TrackRow = memo(
         data-unavailable={isUnavailable ? 'true' : undefined}
         draggable={isDraggable}
         role="listitem"
+        aria-current={isPlaying ? 'true' : undefined}
+        aria-label={onPlay && !isUnavailable ? `${track.title} - ${track.artist}` : undefined}
+        aria-roledescription={onPlay && !isUnavailable ? '可播放歌曲' : undefined}
         tabIndex={onPlay && !isUnavailable ? 0 : undefined}
         onClick={handleRowClick}
         onContextMenu={handleContextMenu}
@@ -312,10 +327,13 @@ export const TrackRow = memo(
             )}
           </div>
           <div className="tag-row track-tags" aria-label={t('library.trackRow.audioSpecifications')}>
-            {tags.map((tag) => (
-              <span className={`hifi-tag ${tagClassNameByKind[tag.kind]}`} key={`${track.id}-${tag.label}`}>
-                {tag.label}
-              </span>
+            {audioInfoLayout === 'combined' ? (
+              <>
+                <span className="track-audio-info">{audioInfoTags.length > 0 ? audioInfoTags.map((tag) => tag.label).join(' · ') : '—'}</span>
+                {bpmTag ? <span className="track-bpm-info">{bpmTag.label.replace(/\s+BPM$/u, '')}</span> : null}
+              </>
+            ) : tags.map((tag) => (
+              <span className={`hifi-tag ${tagClassNameByKind[tag.kind]}`} data-kind={tag.kind} key={`${track.id}-${tag.label}`}>{tag.label}</span>
             ))}
             {track.mediaType === 'remote' && track.provider !== 'subsonic' && track.remotePath ? <span className="hifi-tag tag-remote-path" title={track.remotePath}>{track.remotePath}</span> : null}
           </div>
@@ -392,7 +410,8 @@ export const TrackRow = memo(
     previous.onDragStart === next.onDragStart &&
     previous.onDragOver === next.onDragOver &&
     previous.onDrop === next.onDrop &&
-    previous.onDragEnd === next.onDragEnd,
+    previous.onDragEnd === next.onDragEnd &&
+    previous.audioInfoLayout === next.audioInfoLayout,
 );
 
 TrackRow.displayName = 'TrackRow';

@@ -30,8 +30,16 @@ export type LyricsProviderId =
 export type LyricsSource = 'none' | LyricsProviderId | 'cached';
 
 export type LyricsMatchRisk = 'low' | 'medium' | 'high';
+export type LyricsMatchConfidence = 'high' | 'balanced' | 'blocked';
+
+export type LyricsCandidateMatchedSource = {
+  provider: LyricsProviderId;
+  sourceLabel: string;
+};
 
 export type LyricsSearchTrigger = 'missing-lyrics' | 'smart-alignment' | 'manual' | 'rematch';
+export type LyricsCandidateApplyOrigin = 'manual' | 'auto';
+export type LyricsChangeReason = 'manual' | 'auto-apply';
 
 export type TrackLyrics = {
   id: string;
@@ -62,9 +70,16 @@ export type LyricsSearchCandidate = {
   durationSeconds: number | null;
   instrumental: boolean;
   hasSynced: boolean;
+  hasWordTiming?: boolean;
   hasPlain: boolean;
   score: number;
   sourceLabel: string;
+  confidence?: LyricsMatchConfidence;
+  autoAcceptEligible?: boolean;
+  durationDeltaSeconds?: number | null;
+  previewLines?: string[];
+  contentFingerprint?: string;
+  matchedSources?: LyricsCandidateMatchedSource[];
   risk?: LyricsMatchRisk;
   reasons?: string[];
   titleScore?: number;

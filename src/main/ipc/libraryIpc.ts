@@ -47,6 +47,9 @@ import type {
   NetworkTagCandidateSearchRequest,
   NetworkTagProvider,
   PlaybackHistoryQuery,
+  ContinuousPlayMode,
+  ContinuousPlayPreferenceKind,
+  ContinuousPlayRecommendationRequest,
   SmartPlaylistGenerateRequest,
   StartPlaybackHistoryRequest,
   BpmAnalysisStartOptions,
@@ -55,8 +58,11 @@ import type {
   AddLocalAudioFilesToPlaylistResult,
   LibraryScanMode,
   LibraryAllUserDataDeleteResult,
+  LibraryFileDeleteResult,
 } from '../../shared/types/library';
 import { getAppSettings } from '../app/appSettings';
+import { deleteTrackPhysicalFiles, removeCueVirtualTrack } from '../library/TrackFileDeletion';
+import { isCueTrackPath } from '../audio/CueSheet';
 import { getAppCacheInventory } from '../app/cacheInventory';
 import {
   createManualLibraryDatabaseSnapshot,
@@ -81,11 +87,14 @@ import { decodeM3u8ProviderTrackId } from '../streaming/M3u8Playlist';
 import { createLibraryRecoveryRelaunchArgs } from '../app/libraryRecoveryMode';
 import { runMainBackgroundTask } from '../diagnostics/MainProcessWorkScheduler';
 import { getDownloadService } from '../downloads/DownloadService';
+import { hasCoverCacheOwnershipMarker } from '../library/CoverCacheOwnership';
 
 const sortValues = new Set<LibrarySort>([
   'default',
   'createdAsc',
   'createdDesc',
+  'yearAsc',
+  'yearDesc',
   'titleAsc',
   'titleDesc',
   'durationAsc',
@@ -94,7 +103,19 @@ const sortValues = new Set<LibrarySort>([
   'fileModifiedDesc',
   'qualityAsc',
   'qualityDesc',
+  'codecAsc',
+  'codecDesc',
+  'audioSpecAsc',
+  'audioSpecDesc',
+  'bitrateAsc',
+  'bitrateDesc',
+  'bpmAsc',
+  'bpmDesc',
+  'trackNumber',
   'frequent',
+  'playCountAsc',
+  'playCountDesc',
+  'lastPlayed',
   'random',
   'title',
   'artist',
@@ -151,11 +172,6 @@ const isSameOrInside = (parentPath: string, candidatePath: string): boolean => {
   const parent = resolve(parentPath).toLowerCase();
   const candidate = resolve(candidatePath).toLowerCase();
   return candidate === parent || candidate.startsWith(`${parent}\\`) || candidate.startsWith(`${parent}/`);
-};
-
-const isSafeExternalCacheDirectory = (targetPath: string): boolean => {
-  const name = basename(resolve(targetPath)).toLowerCase();
-  return name.includes('echo') || name.includes('cover') || name.includes('cache');
 };
 
 const listExistingChildren = (directory: string): string[] => {
@@ -224,12 +240,12 @@ const deleteAllUserData = async (coverCachePath: string | null): Promise<Library
 
   let externalCoverCacheChildren: string[] = [];
   if (coverCachePath && !isSameOrInside(userDataPath, coverCachePath)) {
-    if (isSafeExternalCacheDirectory(coverCachePath)) {
+    if (hasCoverCacheOwnershipMarker(coverCachePath)) {
       externalCoverCacheChildren = listExistingChildren(coverCachePath);
     } else {
       failedPaths.push({
         path: coverCachePath,
-        error: 'Skipped external cover cache directory because its name does not look ECHO/cache-specific.',
+        error: 'Skipped external cover cache directory because it is not marked as owned by ECHO Next.',
       });
     }
   }
@@ -399,6 +415,10 @@ const normalizeQuery = (value: unknown): LibraryPageQuery => {
 
   if (typeof input.showOsuOnly === 'boolean') {
     query.showOsuOnly = input.showOsuOnly;
+  }
+
+  if (typeof input.excludeOsuAlbums === 'boolean') {
+    query.excludeOsuAlbums = input.excludeOsuAlbums;
   }
 
   if (typeof input.duplicateMode === 'string' && duplicateTrackModes.has(input.duplicateMode as DuplicateTrackMode)) {
@@ -767,6 +787,63 @@ const normalizeSmartPlaylistGenerateRequest = (value: unknown): SmartPlaylistGen
   };
 };
 
+const continuousPlayModes = new Set<ContinuousPlayMode>([
+  'similar',
+  'deep-cuts',
+  'recently-added',
+  'night',
+  'headphone-test',
+]);
+const continuousPlayPreferenceKinds = new Set<ContinuousPlayPreferenceKind>(['artist', 'album', 'genre']);
+
+const normalizeContinuousPlayRecommendationRequest = (value: unknown): ContinuousPlayRecommendationRequest => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('continuous play recommendation request must be an object');
+  }
+
+  const input = value as Record<string, unknown>;
+  if (typeof input.mode !== 'string' || !continuousPlayModes.has(input.mode as ContinuousPlayMode)) {
+    throw new Error('continuous play mode is invalid');
+  }
+
+  const excludeTrackIds = Array.isArray(input.excludeTrackIds)
+    ? input.excludeTrackIds.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 500)
+    : undefined;
+  const preferences = Array.isArray(input.preferences)
+    ? input.preferences.flatMap((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return [];
+      }
+      const preference = item as Record<string, unknown>;
+      if (
+        typeof preference.kind !== 'string' ||
+        !continuousPlayPreferenceKinds.has(preference.kind as ContinuousPlayPreferenceKind) ||
+        typeof preference.value !== 'string' ||
+        !preference.value.trim()
+      ) {
+        return [];
+      }
+      return [{
+        kind: preference.kind as ContinuousPlayPreferenceKind,
+        value: preference.value.trim().slice(0, 256),
+        weight: typeof preference.weight === 'number' && Number.isFinite(preference.weight)
+          ? Math.max(0.1, Math.min(1, preference.weight))
+          : 0.35,
+      }];
+    }).slice(0, 200)
+    : undefined;
+
+  return {
+    mode: input.mode as ContinuousPlayMode,
+    seedTrackId: typeof input.seedTrackId === 'string' && input.seedTrackId.trim() ? input.seedTrackId.trim() : null,
+    excludeTrackIds,
+    limit: typeof input.limit === 'number' && Number.isFinite(input.limit)
+      ? Math.max(1, Math.min(20, Math.floor(input.limit)))
+      : undefined,
+    preferences,
+  };
+};
+
 const normalizeUpdatePlaylistRequest = (
   value: unknown,
 ): { playlistId: string; name?: string; description?: string | null; coverId?: string | null; coverPath?: string | null; sortMode?: PlaylistSortMode } => {
@@ -906,6 +983,10 @@ const normalizePlaybackHistoryQuery = (value: unknown): PlaybackHistoryQuery => 
 
   if (typeof input.completedOnly === 'boolean') {
     query.completedOnly = input.completedOnly;
+  }
+
+  if (input.mediaType === 'local' || input.mediaType === 'streaming') {
+    query.mediaType = input.mediaType;
   }
 
   if (input.sort === 'plays' || input.sort === 'recent') {
@@ -2221,6 +2302,9 @@ export const registerLibraryIpc = (): void => {
   ipcMain.handle(IpcChannels.LibraryGetPlaybackMemoryGraph, (_event, query: unknown) =>
     getLibraryService().getPlaybackMemoryGraphPlaybackSafe(normalizePlaybackHistoryQuery(query)),
   );
+  ipcMain.handle(IpcChannels.LibraryGetContinuousPlayRecommendations, (_event, request: unknown) =>
+    getLibraryService().getContinuousPlayRecommendations(normalizeContinuousPlayRecommendationRequest(request)),
+  );
   ipcMain.handle(IpcChannels.LibraryRefreshInvalidPlaybackHistory, () =>
     getLibraryService().refreshInvalidPlaybackHistory(),
   );
@@ -2288,14 +2372,14 @@ export const registerLibraryIpc = (): void => {
     writeFileSync(result.filePath, card.pngBuffer);
     return result.filePath;
   });
-  ipcMain.handle(IpcChannels.LibraryDeleteTrackFile, async (_event, trackId: unknown): Promise<void> => {
+  ipcMain.handle(IpcChannels.LibraryDeleteTrackFile, async (_event, trackId: unknown): Promise<LibraryFileDeleteResult> => {
     const track = getExistingTrack(trackId);
-
-    if (existsSync(track.path)) {
-      await shell.trashItem(track.path);
-    }
-
-    getLibraryService().deleteTrack(track.id);
+    const service = getLibraryService();
+    const result = isCueTrackPath(track.path)
+      ? removeCueVirtualTrack(track)
+      : await deleteTrackPhysicalFiles([track], service.getActiveTracksForFileDeletion(), (path) => shell.trashItem(path));
+    service.deleteTracks(result.removedTrackIds);
+    return result;
   });
   ipcMain.handle(IpcChannels.LibraryCopyAlbumInfo, (_event, albumId: unknown): void => {
     const album = getExistingAlbum(albumId);
@@ -2329,18 +2413,19 @@ export const registerLibraryIpc = (): void => {
     writeFileSync(result.filePath, cover.image.toPNG());
     return result.filePath;
   });
-  ipcMain.handle(IpcChannels.LibraryDeleteAlbumFiles, async (_event, albumId: unknown): Promise<void> => {
+  ipcMain.handle(IpcChannels.LibraryDeleteAlbumFiles, async (_event, albumId: unknown): Promise<LibraryFileDeleteResult> => {
     const id = requireText(albumId, 'albumId');
     getExistingAlbum(id);
     const tracks = getLibraryService().getAllAlbumTracks(id);
 
-    for (const track of tracks) {
-      if (existsSync(track.path)) {
-        await shell.trashItem(track.path);
-      }
-    }
-
-    getLibraryService().deleteAlbumTracks(id);
+    const service = getLibraryService();
+    const result = await deleteTrackPhysicalFiles(
+      tracks,
+      service.getActiveTracksForFileDeletion(),
+      (path) => shell.trashItem(path),
+    );
+    service.deleteTracks(result.removedTrackIds);
+    return result;
   });
   ipcMain.handle(IpcChannels.LibraryPruneMissingTracks, () => getLibraryService().pruneMissingTracks());
   ipcMain.handle(IpcChannels.LibraryPruneInvalidTracks, () => getLibraryService().pruneInvalidTracks());

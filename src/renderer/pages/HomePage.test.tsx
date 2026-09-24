@@ -14,7 +14,7 @@ import type {
 import type * as I18nProviderModule from '../i18n/I18nProvider';
 import { albumDetailNavigationEvent } from '../utils/albumNavigation';
 import { artistDetailNavigationEvent } from '../utils/artistNavigation';
-import { translations, isLocale, localeOptions } from '../i18n/locales';
+import { translations, isLocale, localeOptions } from '../i18n/locales.testing';
 import { HomePage, defaultHomeHeroTitle, homeHeroTitleOptions, resetHomePageCacheForTest } from './HomePage';
 
 const queueState = vi.hoisted(() => ({
@@ -362,6 +362,7 @@ const installAppSettingsMock = (
     homeWaveformVisualizerEnabled?: boolean;
     audioVisualSpectrumEnabled?: boolean;
     lowLoadPlaybackModeEnabled?: boolean;
+    lowSpecModeEnabled?: boolean;
   } = {},
 ) => {
   const effectiveSettings = {
@@ -446,8 +447,8 @@ describe('HomePage', () => {
     expect(document.querySelectorAll('.home-favorite-album-panel .home-favorite-album-card')).toHaveLength(4);
     expect(document.querySelector('.home-favorite-album-panel .home-favorite-album-card img')?.getAttribute('src')).toBe('echo-cover://large/favorite-cover-1');
     expect(within(document.querySelector('.home-favorite-album-panel') as HTMLElement).queryByText('Favorite Album Five')).toBeNull();
-    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
-    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'default' });
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'default', excludeOsuAlbums: true });
     const contentGrid = document.querySelector('.home-content-grid');
     const recommendPanel = document.querySelector('.home-recommend-panel');
     expect(contentGrid && recommendPanel ? contentGrid.compareDocumentPosition(recommendPanel) & Node.DOCUMENT_POSITION_FOLLOWING : 0).toBeTruthy();
@@ -461,7 +462,7 @@ describe('HomePage', () => {
     expect(library.getPlaybackHistory).toHaveBeenCalledWith({ page: 1, pageSize: 12, sort: 'recent' });
   });
 
-  it('defers initial home library work while playback is loading', () => {
+  it('loads only the lightweight library summary while playback is loading', () => {
     vi.useFakeTimers();
     const library = installLibraryMock();
     sharedPlaybackState.value.audioStatus = { state: 'loading' } as AudioStatus;
@@ -469,8 +470,9 @@ describe('HomePage', () => {
     try {
       render(<HomePage />);
 
-      expect(library.getSummary).not.toHaveBeenCalled();
+      expect(library.getSummary).toHaveBeenCalledTimes(1);
       expect(library.getTracks).not.toHaveBeenCalled();
+      expect(library.getAlbums).not.toHaveBeenCalled();
       expect(library.getPlaybackHistory).not.toHaveBeenCalled();
     } finally {
       cleanup();
@@ -478,7 +480,7 @@ describe('HomePage', () => {
     }
   });
 
-  it('defers initial home library work while playback is already playing', () => {
+  it('loads only the lightweight library summary while playback is already playing', () => {
     vi.useFakeTimers();
     const library = installLibraryMock();
     sharedPlaybackState.value.audioStatus = { state: 'playing' } as AudioStatus;
@@ -486,13 +488,33 @@ describe('HomePage', () => {
     try {
       render(<HomePage />);
 
-      expect(library.getSummary).not.toHaveBeenCalled();
+      expect(library.getSummary).toHaveBeenCalledTimes(1);
       expect(library.getTracks).not.toHaveBeenCalled();
+      expect(library.getAlbums).not.toHaveBeenCalled();
       expect(library.getPlaybackHistory).not.toHaveBeenCalled();
     } finally {
       cleanup();
       vi.useRealTimers();
     }
+  });
+
+  it('keeps the home song count synchronized with library changes during playback', async () => {
+    const library = installLibraryMock();
+    sharedPlaybackState.value.audioStatus = { state: 'playing' } as AudioStatus;
+
+    render(<HomePage />);
+
+    await waitFor(() => expect(document.querySelector('.home-metric-tile strong')?.textContent).toBe('12'));
+    vi.mocked(library.getSummary).mockClear();
+    vi.mocked(library.getSummary).mockResolvedValue(summary({ songCount: 37 }));
+
+    window.dispatchEvent(new Event('library:changed'));
+
+    await waitFor(() => expect(document.querySelector('.home-metric-tile strong')?.textContent).toBe('37'));
+    expect(library.getSummary).toHaveBeenCalledTimes(1);
+    expect(library.getTracks).not.toHaveBeenCalled();
+    expect(library.getAlbums).not.toHaveBeenCalled();
+    expect(library.getPlaybackHistory).not.toHaveBeenCalled();
   });
 
   it('persists the loaded home snapshot for the next launch', async () => {
@@ -501,13 +523,13 @@ describe('HomePage', () => {
     render(<HomePage />);
 
     await waitForRecentPanelReady();
-    await waitFor(() => expect(window.localStorage.getItem('echo-next.home-page-cache.v1')).toBeTruthy());
-    const cached = JSON.parse(window.localStorage.getItem('echo-next.home-page-cache.v1') ?? '{}') as {
+    await waitFor(() => expect(window.localStorage.getItem('echo-next.home-page-cache.v2')).toBeTruthy());
+    const cached = JSON.parse(window.localStorage.getItem('echo-next.home-page-cache.v2') ?? '{}') as {
       data?: { recommendedAlbums?: unknown[]; summary?: Partial<LibrarySummary> };
       version?: number;
     };
 
-    expect(cached.version).toBe(1);
+    expect(cached.version).toBe(2);
     expect(cached.data?.summary?.songCount).toBe(12);
     expect(cached.data?.recommendedAlbums).toHaveLength(7);
   });
@@ -540,7 +562,7 @@ describe('HomePage', () => {
     render(<HomePage />);
 
     await waitFor(() => {
-      const cached = JSON.parse(window.localStorage.getItem('echo-next.home-page-cache.v1') ?? '{}') as {
+      const cached = JSON.parse(window.localStorage.getItem('echo-next.home-page-cache.v2') ?? '{}') as {
         data?: {
           recentHistory?: unknown[];
           recentPlayedAlbums?: Array<{ album?: Partial<LibraryAlbum> }>;
@@ -552,25 +574,30 @@ describe('HomePage', () => {
     expect(getAlbumForTrack).toHaveBeenCalledWith('history-pending');
   });
 
-  it('picks one random hero title and keeps it stable for the home session', async () => {
+  it('picks another random hero title whenever the home page mounts again', async () => {
     installLibraryMock();
     installAppSettingsMock({ homeRandomHeroTitleEnabled: true });
-    expect(homeHeroTitleOptions).toEqual(expect.arrayContaining(['#define int long long']));
+    expect(homeHeroTitleOptions).toEqual(expect.arrayContaining([
+      '#define int long long',
+      '發自我的手機',
+      '壞消息：我們的教育確有問題！',
+      '求真的同學不許不拿特獎——發自我的手機（國內）。',
+    ]));
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.62);
 
     render(<HomePage />);
 
     await waitForRecentPanelReady();
-    const expectedTitle = homeHeroTitleOptions[Math.floor(0.62 * homeHeroTitleOptions.length)];
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(expectedTitle);
+    const firstTitle = homeHeroTitleOptions[Math.floor(0.62 * homeHeroTitleOptions.length)];
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(firstTitle);
     expect(randomSpy).toHaveBeenCalledTimes(1);
     cleanup();
 
     render(<HomePage />);
 
     await waitForRecentPanelReady();
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(expectedTitle);
-    expect(randomSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).not.toBe(firstTitle);
+    expect(randomSpy).toHaveBeenCalledTimes(2);
   });
 
   it('uses the fixed home title when random hero titles are disabled', async () => {
@@ -696,7 +723,7 @@ describe('HomePage', () => {
     render(<HomePage />);
 
     await waitFor(() => expect(emptyLibrary.getSummary).toHaveBeenCalled());
-    await waitFor(() => expect(window.localStorage.getItem('echo-next.home-page-cache.v1')).toBeTruthy());
+    await waitFor(() => expect(window.localStorage.getItem('echo-next.home-page-cache.v2')).toBeTruthy());
     cleanup();
 
     const library = installLibraryMock();
@@ -706,8 +733,8 @@ describe('HomePage', () => {
     await waitFor(() => expect(screen.getAllByRole('button', { name: /Daily Album One/ }).length).toBeGreaterThan(0));
     expect(library.getSummary).toHaveBeenCalled();
     expect(library.getTracks).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
-    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
-    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'default' });
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'default', excludeOsuAlbums: true });
   });
 
   it('manually refreshes the lightweight home library snapshot from an empty page', async () => {
@@ -752,8 +779,8 @@ describe('HomePage', () => {
     expect(screen.getByRole('button', { name: /Manual Recommendation/ })).toBeTruthy();
     expect(getSummary).toHaveBeenCalledTimes(1);
     expect(getTracks).toHaveBeenLastCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
-    expect(getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
-    expect(getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'default' });
+    expect(getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
+    expect(getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'default', excludeOsuAlbums: true });
     expect(getPlaybackHistory).toHaveBeenCalledTimes(playbackHistoryCallsBeforeRefresh);
     expect(getPlaybackHistorySummary).toHaveBeenCalledTimes(playbackHistorySummaryCallsBeforeRefresh);
     expect(getPlaybackStatsDashboard).toHaveBeenCalledTimes(playbackStatsDashboardCallsBeforeRefresh);
@@ -796,7 +823,7 @@ describe('HomePage', () => {
     expect(await within(recentPanel).findByRole('button', { name: /Panel Played Album/ })).toBeTruthy();
     expect(library.getSummary).toHaveBeenCalledTimes(1);
     expect(library.getTracks).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
-    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
     expect(library.getPlaybackHistory).toHaveBeenCalledWith({ page: 1, pageSize: 12, sort: 'recent' });
     expect(library.getPlaybackHistorySummary).toHaveBeenCalledTimes(1);
     expect(library.getPlaybackStatsDashboard).toHaveBeenCalledTimes(2);
@@ -845,7 +872,7 @@ describe('HomePage', () => {
     fireEvent.click(recommendPanel.querySelector('.home-section-header button') as HTMLButtonElement);
 
     expect(await within(recommendPanel).findByRole('button', { name: /Random Recommendation/ })).toBeTruthy();
-    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'random' });
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'random', excludeOsuAlbums: true });
     expect(library.getSummary).not.toHaveBeenCalled();
     expect(library.getTracks).not.toHaveBeenCalled();
     expect(library.getPlaybackHistory).not.toHaveBeenCalled();
@@ -1432,6 +1459,22 @@ describe('HomePage', () => {
     expect(document.querySelectorAll('.home-signal-bars i')).toHaveLength(0);
   });
 
+  it('hides the home signal visualizer while low spec mode overrides saved visualizer settings', async () => {
+    installLibraryMock();
+    const app = installAppSettingsMock({
+      homeWaveformVisualizerEnabled: true,
+      audioVisualSpectrumEnabled: true,
+      lowSpecModeEnabled: true,
+    });
+
+    render(<HomePage />);
+
+    await waitForRecentPanelReady();
+    await waitFor(() => expect(app.getSettings).toHaveBeenCalled());
+    expect(document.querySelector('.home-signal-visualizer')).toBeNull();
+    expect(document.querySelector('.home-now-card')?.getAttribute('data-signal-enabled')).toBe('false');
+  });
+
   it('keeps the home signal visualizer hidden by default', async () => {
     installLibraryMock();
     installAppSettingsMock();
@@ -1846,7 +1889,7 @@ describe('HomePage', () => {
     expect(await screen.findByRole('button', { name: /Fresh Added Album/ })).toBeTruthy();
     expect(library.getSummary).toHaveBeenCalledTimes(1);
     expect(library.getTracks).toHaveBeenCalledTimes(1);
-    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
     expect(library.getPlaybackHistory).not.toHaveBeenCalled();
     expect(library.getPlaybackHistorySummary).not.toHaveBeenCalled();
     expect(library.getPlaybackStatsDashboard).not.toHaveBeenCalled();
@@ -2094,7 +2137,7 @@ describe('HomePage', () => {
   });
 
   it('keeps the now-playing album marquee stable around the overflow threshold', async () => {
-    let metaClientWidth = 260;
+    const metaClientWidth = 260;
     let metaInnerScrollWidth = 306;
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
       return this.classList.contains('home-now-meta') ? metaClientWidth : 0;

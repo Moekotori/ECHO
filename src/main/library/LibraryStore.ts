@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 import { setImmediate as yieldToMainLoop } from 'node:timers/promises';
 import type { EchoDatabase } from '../database/createDatabase';
-import { BPM_ANALYSIS_VERSION } from '../../shared/constants/audioAnalysis';
+import { BPM_ANALYSIS_VERSION, BPM_ANALYSIS_VERSION_FIELD } from '../../shared/constants/audioAnalysis';
 import { REPLAY_GAIN_ANALYSIS_VERSION } from '../../shared/constants/replayGain';
 import type { RemoteAlbumMergeStrategy } from '../../shared/types/appSettings';
 import { chineseSearchVariants } from './ChineseSearchVariants';
@@ -41,6 +41,7 @@ import type {
   CoverSource,
   CoverResult,
   CoverVariant,
+  FieldSources,
   LibraryAlbum,
   LibraryAlbumDetail,
   LibraryArtist,
@@ -91,6 +92,8 @@ import type {
   PlaybackMemoryTimeBucketId,
   PlaybackMemoryTrackInsight,
   PlaybackStatsDashboard,
+  ContinuousPlayRecommendationRequest,
+  ContinuousPlayRecommendationResult,
   LibraryScanStatus,
   LibrarySummary,
   LibraryTrack,
@@ -107,6 +110,7 @@ import type {
   ArtistOnlineInfo,
 } from './libraryTypes';
 import { COVER_CACHE_VERSION as currentCoverCacheVersion } from './libraryTypes';
+import { rankContinuousPlayCandidates } from './ContinuousPlayRecommendation';
 
 type DbRow = Record<string, unknown>;
 
@@ -316,6 +320,7 @@ const unknownArtist = 'Unknown Artist';
 const maxLibraryDisplayTextLength = 512;
 const maxLibraryTechnicalTextLength = 128;
 const maxLibraryJsonTextLength = 16 * 1024;
+// eslint-disable-next-line no-control-regex -- NUL identifies binary metadata embedded in text fields.
 const binaryLibraryTextPattern = /(?:APIC|image\/(?:jpeg|jpg|png|webp|gif)|JFIF|Exif|\u0000)/iu;
 
 const nowIso = (): string => new Date().toISOString();
@@ -334,6 +339,7 @@ const countLibraryControlCharacters = (text: string): number => {
 };
 
 const normalizeLibraryTextWhitespace = (text: string): string =>
+  // eslint-disable-next-line no-control-regex -- sanitization intentionally targets control characters.
   text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu, ' ').replace(/\s+/gu, ' ').trim();
 
 const isUnsafeLibraryText = (text: string, maxLength: number): boolean => {
@@ -349,7 +355,7 @@ const stripArtistSortPrefix = (value: string): string => {
   const trimmed = value.trim();
   const stripped = trimmed
     .replace(/^\d{1,3}\s*[.)\uff0e\u3002]\s*/u, '')
-    .replace(/^\d{1,3}\s*[-_]\s*(?=[^\d\s(\[\uff08])/u, '')
+    .replace(/^\d{1,3}\s*[-_]\s*(?=[^\d\s(\u005b\uff08])/u, '')
     .trim();
 
   return stripped || trimmed;
@@ -413,7 +419,7 @@ const sanitizeErrorText = (value: unknown): string => {
 const sanitizeErrorList = (errors: string[]): string[] =>
   errors.slice(0, 200).map((error) => sanitizeErrorText(error));
 
-const sanitizeTrackWrite = (track: TrackWrite): TrackWrite => {
+export const sanitizeTrackWriteForStorage = (track: TrackWrite): TrackWrite => {
   const filenameGuess = filenameTrackFallback(track.path);
   const fieldSources = { ...track.fieldSources };
   const title = sanitizeLibraryText(track.title, filenameGuess.title);
@@ -643,13 +649,14 @@ const pageFromInboxQuery = (
 
 const pageFromHistoryQuery = (
   query?: PlaybackHistoryQuery,
-): { page: number; pageSize: number; search: string; from: string | null; to: string | null; completedOnly: boolean; sort: 'plays' | 'recent' } => ({
+): { page: number; pageSize: number; search: string; from: string | null; to: string | null; completedOnly: boolean; mediaType: 'local' | 'streaming' | null; sort: 'plays' | 'recent' } => ({
   page: Math.max(1, Math.floor(Number(query?.page ?? 1))),
   pageSize: Math.min(maxPageSize, Math.max(1, Math.floor(Number(query?.pageSize ?? 50)))),
   search: typeof query?.search === 'string' ? query.search.trim() : '',
   from: typeof query?.from === 'string' && query.from.trim() ? query.from.trim() : null,
   to: typeof query?.to === 'string' && query.to.trim() ? query.to.trim() : null,
   completedOnly: query?.completedOnly === true,
+  mediaType: query?.mediaType === 'local' || query?.mediaType === 'streaming' ? query.mediaType : null,
   sort: query?.sort === 'recent' ? 'recent' : 'plays',
 });
 
@@ -847,7 +854,20 @@ const parseScanDirectorySnapshotEntries = (value: unknown): ScanDirectorySnapsho
 };
 
 const sanitizeScanDirectorySnapshotEntries = (entries: readonly ScanDirectorySnapshotEntry[]): ScanDirectorySnapshotEntry[] | null =>
-  entries.every(isSafeScanDirectorySnapshotEntry) ? entries.map((entry) => ({ name: entry.name, kind: entry.kind })) : null;
+  entries.every(isSafeScanDirectorySnapshotEntry)
+    ? entries.map((entry) => {
+        const sanitized: ScanDirectorySnapshotEntry = { name: entry.name, kind: entry.kind };
+        if (entry.kind === 'file') {
+          if (typeof entry.sizeBytes === 'number' && Number.isFinite(entry.sizeBytes) && entry.sizeBytes >= 0) {
+            sanitized.sizeBytes = Math.round(entry.sizeBytes);
+          }
+          if (typeof entry.mtimeMs === 'number' && Number.isFinite(entry.mtimeMs)) {
+            sanitized.mtimeMs = Math.round(entry.mtimeMs);
+          }
+        }
+        return sanitized;
+      })
+    : null;
 
 const textOrNull = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 ? value : null);
 const numberOrNull = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
@@ -1188,6 +1208,10 @@ export class LibraryStore {
     return buildTrackSearchTermsAsync(this.searchFieldsForTrackWrite(track));
   }
 
+  prepareTrackSearchFields(track: TrackWrite): SearchIndexTrackFields {
+    return this.searchFieldsForTrackWrite(track);
+  }
+
   async prepareTrackTagSearchTerms(trackId: string, update: TrackTagUpdateInput): Promise<string> {
     return buildTrackSearchTermsAsync(this.searchFieldsForTrackTagUpdate(trackId, update));
   }
@@ -1210,7 +1234,7 @@ export class LibraryStore {
   }
 
   private searchFieldsForTrackWrite(track: TrackWrite): SearchIndexTrackFields {
-    const safeTrack = sanitizeTrackWrite(track);
+    const safeTrack = sanitizeTrackWriteForStorage(track);
     return {
       title: safeTrack.title,
       artist: safeTrack.artist,
@@ -1267,7 +1291,7 @@ export class LibraryStore {
     let changed = 0;
     let lastRowId = 0;
 
-    while (true) {
+    for (;;) {
       const rows = selectRows.all(lastRowId, searchTermsBackfillBatchSize);
       if (rows.length === 0) {
         break;
@@ -1323,7 +1347,7 @@ export class LibraryStore {
     let changed = 0;
     let lastRowId = 0;
 
-    while (true) {
+    for (;;) {
       const rows = selectRows.all(lastRowId, searchTermsBackfillBatchSize);
       if (rows.length === 0) {
         break;
@@ -1560,7 +1584,7 @@ export class LibraryStore {
         childFolderCount: childFolderNames.size,
         coverThumbs: Array.from(coverIds)
           .slice(0, 4)
-          .map((coverId) => this.toCoverUrl(coverId, 'thumb'))
+          .map((coverId) => this.toCoverUrl(coverId, 'album'))
           .filter((value): value is string => Boolean(value)),
       }))
       .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
@@ -2024,11 +2048,16 @@ export class LibraryStore {
       finishedAt,
     );
 
-    const insertItem = this.database.prepare<[string, string, number, string]>(
-      `INSERT INTO library_inbox_items (batch_id, track_id, position, created_at)
-       VALUES (?, ?, ?, ?)`,
-    );
-    trackIds.forEach((trackId, index) => insertItem.run(batchId, trackId, index, timestamp));
+    for (let index = 0; index < trackIds.length; index += 100) {
+      const batch = trackIds.slice(index, index + 100);
+      const placeholders = batch.map(() => '(?, ?, ?, ?)').join(', ');
+      const params = batch.flatMap((trackId, offset) => [batchId, trackId, index + offset, timestamp]);
+      this.run(
+        `INSERT INTO library_inbox_items (batch_id, track_id, position, created_at)
+         VALUES ${placeholders}`,
+        ...params,
+      );
+    }
     const counts = this.countInboxIssueTracksForBatch(batchId);
     this.run(
       `UPDATE library_inbox_batches
@@ -2404,7 +2433,13 @@ export class LibraryStore {
     const rows = this.allRows(
       `SELECT
         tracks.path, tracks.id, tracks.size_bytes, tracks.mtime_ms, tracks.duration,
+        tracks.title, tracks.artist, tracks.album, tracks.album_artist,
+        tracks.track_no, tracks.disc_no, tracks.year, tracks.genre,
+        tracks.codec, tracks.sample_rate, tracks.bit_depth, tracks.bitrate, tracks.bpm,
+        tracks.replay_gain_track_gain_db, tracks.replay_gain_album_gain_db,
+        tracks.replay_gain_track_peak, tracks.replay_gain_album_peak, tracks.replay_gain_integrated_lufs,
         tracks.cover_id, tracks.metadata_status, tracks.embedded_metadata_status, tracks.embedded_cover_status,
+        tracks.field_sources_json,
         tracks.file_identity, tracks.file_identity_source, tracks.quick_hash, tracks.quick_hash_version,
         tracks.identity_status, tracks.identity_updated_at, tracks.identity_error,
         covers.source_type, covers.source_hash, covers.mime_type,
@@ -2442,6 +2477,7 @@ export class LibraryStore {
         identityStatus: textOrNull(row.identity_status),
         identityUpdatedAt: textOrNull(row.identity_updated_at),
         identityError: textOrNull(row.identity_error),
+        scanMetadata: this.toStoredScanMetadata(row),
       });
     }
 
@@ -2455,7 +2491,13 @@ export class LibraryStore {
     const rows = this.allRows(
       `SELECT
         tracks.path, tracks.id, tracks.size_bytes, tracks.mtime_ms, tracks.duration,
+        tracks.title, tracks.artist, tracks.album, tracks.album_artist,
+        tracks.track_no, tracks.disc_no, tracks.year, tracks.genre,
+        tracks.codec, tracks.sample_rate, tracks.bit_depth, tracks.bitrate, tracks.bpm,
+        tracks.replay_gain_track_gain_db, tracks.replay_gain_album_gain_db,
+        tracks.replay_gain_track_peak, tracks.replay_gain_album_peak, tracks.replay_gain_integrated_lufs,
         tracks.cover_id, tracks.metadata_status, tracks.embedded_metadata_status, tracks.embedded_cover_status,
+        tracks.field_sources_json,
         tracks.file_identity, tracks.file_identity_source, tracks.quick_hash, tracks.quick_hash_version,
         tracks.identity_status, tracks.identity_updated_at, tracks.identity_error,
         covers.source_type, covers.source_hash, covers.mime_type,
@@ -2493,10 +2535,42 @@ export class LibraryStore {
         identityStatus: textOrNull(row.identity_status),
         identityUpdatedAt: textOrNull(row.identity_updated_at),
         identityError: textOrNull(row.identity_error),
+        scanMetadata: this.toStoredScanMetadata(row),
       });
     }
 
     return states;
+  }
+
+  private toStoredScanMetadata(row: DbRow): NonNullable<StoredTrackCoverState['scanMetadata']> {
+    return {
+      fields: {
+        title: String(row.title ?? ''),
+        artist: String(row.artist ?? ''),
+        album: String(row.album ?? ''),
+        albumArtist: String(row.album_artist ?? ''),
+        trackNo: numberOrNull(row.track_no),
+        discNo: numberOrNull(row.disc_no),
+        year: numberOrNull(row.year),
+        genre: textOrNull(row.genre),
+        duration: Number(row.duration ?? 0),
+        codec: textOrNull(row.codec),
+        mqa: parseJsonObject(row.field_sources_json).mqa === 'embedded',
+        sampleRate: numberOrNull(row.sample_rate),
+        bitDepth: numberOrNull(row.bit_depth),
+        bitrate: numberOrNull(row.bitrate),
+        bpm: numberOrNull(row.bpm),
+        replayGainTrackGainDb: numberOrNull(row.replay_gain_track_gain_db),
+        replayGainAlbumGainDb: numberOrNull(row.replay_gain_album_gain_db),
+        replayGainTrackPeak: numberOrNull(row.replay_gain_track_peak),
+        replayGainAlbumPeak: numberOrNull(row.replay_gain_album_peak),
+        replayGainIntegratedLufs: numberOrNull(row.replay_gain_integrated_lufs),
+      },
+      fieldSources: parseJsonObject(row.field_sources_json) as FieldSources,
+      metadataStatus: textOrNull(row.metadata_status),
+      embeddedMetadataStatus: textOrNull(row.embedded_metadata_status),
+      embeddedCoverStatus: textOrNull(row.embedded_cover_status),
+    };
   }
 
   getTrackCacheStatesByPaths(folderId: string, paths: readonly string[], options: { batchSize?: number } = {}): Map<string, StoredTrackCoverState> {
@@ -2513,7 +2587,13 @@ export class LibraryStore {
       const rows = this.allRows(
         `SELECT
           tracks.path, tracks.id, tracks.size_bytes, tracks.mtime_ms, tracks.duration,
+          tracks.title, tracks.artist, tracks.album, tracks.album_artist,
+          tracks.track_no, tracks.disc_no, tracks.year, tracks.genre,
+          tracks.codec, tracks.sample_rate, tracks.bit_depth, tracks.bitrate, tracks.bpm,
+          tracks.replay_gain_track_gain_db, tracks.replay_gain_album_gain_db,
+          tracks.replay_gain_track_peak, tracks.replay_gain_album_peak, tracks.replay_gain_integrated_lufs,
           tracks.cover_id, tracks.metadata_status, tracks.embedded_metadata_status, tracks.embedded_cover_status,
+          tracks.field_sources_json,
           tracks.file_identity, tracks.file_identity_source, tracks.quick_hash, tracks.quick_hash_version,
           tracks.identity_status, tracks.identity_updated_at, tracks.identity_error,
           covers.source_type, covers.source_hash, covers.mime_type,
@@ -2551,6 +2631,7 @@ export class LibraryStore {
           identityStatus: textOrNull(row.identity_status),
           identityUpdatedAt: textOrNull(row.identity_updated_at),
           identityError: textOrNull(row.identity_error),
+          scanMetadata: this.toStoredScanMetadata(row),
         });
       }
     }
@@ -2627,8 +2708,16 @@ export class LibraryStore {
 
     let changed = 0;
 
-    for (const id of missingIds) {
-      const result = this.run('UPDATE tracks SET missing = 1, updated_at = ? WHERE id = ?', timestamp, id);
+    for (let index = 0; index < missingIds.length; index += 400) {
+      const batch = missingIds.slice(index, index + 400);
+      const placeholders = batch.map(() => '?').join(', ');
+      const result = this.run(
+        `UPDATE tracks
+         SET missing = 1, updated_at = ?
+         WHERE id IN (${placeholders})`,
+        timestamp,
+        ...batch,
+      );
       changed += Number(result.changes ?? 0);
     }
 
@@ -2739,7 +2828,7 @@ export class LibraryStore {
     const createdAt = textOrNull(existing?.created_at) ?? track.createdAt ?? track.updatedAt;
     const id = textOrNull(existing?.id) ?? track.id;
     const normalizedPath = resolve(track.path);
-    const safeTrack = sanitizeTrackWrite(track);
+    const safeTrack = sanitizeTrackWriteForStorage(track);
     const searchTerms = preparedSearchTerms ?? buildTrackSearchTerms({
       title: safeTrack.title,
       artist: safeTrack.artist,
@@ -3026,7 +3115,11 @@ export class LibraryStore {
           AND (
             ? = 1
             OR tracks.bpm IS NULL
-            OR tracks.analysis_status IN ('none', 'error')
+            OR tracks.analysis_status = 'none'
+            OR (
+              tracks.analysis_status = 'error'
+              AND tracks.analysis_version < ?
+            )
             OR (
               tracks.analysis_status = 'low_confidence'
               AND tracks.analysis_version < ?
@@ -3040,6 +3133,7 @@ export class LibraryStore {
        ORDER BY tracks.updated_at DESC, tracks.title COLLATE NOCASE
        LIMIT ?`,
       force ? 1 : 0,
+      BPM_ANALYSIS_VERSION,
       BPM_ANALYSIS_VERSION,
       BPM_ANALYSIS_VERSION,
       safeLimit,
@@ -3074,6 +3168,7 @@ export class LibraryStore {
       ...(current?.fieldSources ?? {}),
       bpm: update.bpm !== null ? 'audio_analysis' : current?.fieldSources.bpm ?? 'unknown',
       beatOffsetMs: update.beatOffsetMs !== null ? 'audio_analysis' : current?.fieldSources.beatOffsetMs ?? 'unknown',
+      [BPM_ANALYSIS_VERSION_FIELD]: String(BPM_ANALYSIS_VERSION),
     };
 
     this.run(
@@ -3427,7 +3522,7 @@ export class LibraryStore {
   }
 
   getPlaybackHistory(query?: PlaybackHistoryQuery): LibraryPage<PlaybackHistoryEntry> {
-    const { page, pageSize, search, from, to, completedOnly, sort } = pageFromHistoryQuery(query);
+    const { page, pageSize, search, from, to, completedOnly, mediaType, sort } = pageFromHistoryQuery(query);
     const searchOptions = this.readSearchOptions();
     const offset = (page - 1) * pageSize;
     const hasTimeRange = Boolean(from || to);
@@ -3461,6 +3556,11 @@ export class LibraryStore {
 
       if (completedOnly) {
         clauses.push('playback_history.completed > 0');
+      }
+
+      if (mediaType) {
+        clauses.push('playback_history.media_type = ?');
+        params.push(mediaType);
       }
 
       const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -3575,6 +3675,11 @@ export class LibraryStore {
 
     if (completedOnly) {
       clauses.push('playback_history_stats.completed_count > 0');
+    }
+
+    if (mediaType) {
+      clauses.push('playback_history_stats.media_type = ?');
+      params.push(mediaType);
     }
 
     const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -3699,7 +3804,7 @@ export class LibraryStore {
   }
 
   getPlaybackHistorySummary(query?: PlaybackHistoryQuery, now = new Date()): PlaybackHistorySummary {
-    const { search, from, to, completedOnly } = pageFromHistoryQuery(query);
+    const { search, from, to, completedOnly, mediaType } = pageFromHistoryQuery(query);
     const searchOptions = this.readSearchOptions();
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
@@ -3708,12 +3813,13 @@ export class LibraryStore {
     const todayRow = this.getRow(
       `SELECT COUNT(*) AS count, COALESCE(SUM(played_seconds), 0) AS played_seconds
        FROM playback_history
-       WHERE started_at >= ? AND started_at < ?`,
+       WHERE started_at >= ? AND started_at < ?${mediaType ? ' AND media_type = ?' : ''}`,
       startOfToday.toISOString(),
       endOfToday.toISOString(),
+      ...(mediaType ? [mediaType] : []),
     );
 
-    if (!search && !from && !to && !completedOnly) {
+    if (!search && !from && !to && !completedOnly && !mediaType) {
       const statsRow = this.getRow(
         `SELECT
            COALESCE(SUM(play_count), 0) AS count,
@@ -3765,6 +3871,11 @@ export class LibraryStore {
       clauses.push('playback_history.completed > 0');
     }
 
+    if (mediaType) {
+      clauses.push('playback_history.media_type = ?');
+      params.push(mediaType);
+    }
+
     const rangeWhereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rangeRow = this.getRow(
       `SELECT COUNT(*) AS count, COALESCE(SUM(played_seconds), 0) AS played_seconds, MAX(started_at) AS latest
@@ -3785,9 +3896,9 @@ export class LibraryStore {
   }
 
   getPlaybackStatsDashboard(query?: PlaybackHistoryQuery): PlaybackStatsDashboard {
-    const { search, from, to, completedOnly } = pageFromHistoryQuery(query);
+    const { search, from, to, completedOnly, mediaType } = pageFromHistoryQuery(query);
 
-    if (!search && !from && !to && !completedOnly) {
+    if (!search && !from && !to && !completedOnly && !mediaType) {
       return this.getPlaybackStatsDashboardFromHistoryStats();
     }
 
@@ -3820,6 +3931,11 @@ export class LibraryStore {
 
     if (completedOnly) {
       clauses.push('history.completed > 0');
+    }
+
+    if (mediaType) {
+      clauses.push('history.media_type = ?');
+      params.push(mediaType);
     }
 
     const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -4047,7 +4163,7 @@ export class LibraryStore {
   }
 
   getPlaybackMemoryGraph(query?: PlaybackHistoryQuery): PlaybackMemoryGraph {
-    const { search, from, to, completedOnly } = pageFromHistoryQuery(query);
+    const { search, from, to, completedOnly, mediaType } = pageFromHistoryQuery(query);
     const searchOptions = this.readSearchOptions();
     const searchFilter = buildSearchFilter(search, [
       likePredicate('history.title'),
@@ -4077,6 +4193,11 @@ export class LibraryStore {
 
     if (completedOnly) {
       clauses.push('history.completed > 0');
+    }
+
+    if (mediaType) {
+      clauses.push('history.media_type = ?');
+      params.push(mediaType);
     }
 
     const whereSql = `WHERE ${clauses.join(' AND ')}`;
@@ -4190,8 +4311,8 @@ export class LibraryStore {
   }
 
   getPlaybackStatsDashboardActivity(query?: PlaybackHistoryQuery): PlaybackStatsDashboard {
-    const { search, from, to, completedOnly } = pageFromHistoryQuery(query);
-    const canUseHistoryStatsTotals = !search && !from && !to && !completedOnly;
+    const { search, from, to, completedOnly, mediaType } = pageFromHistoryQuery(query);
+    const canUseHistoryStatsTotals = !search && !from && !to && !completedOnly && !mediaType;
     const searchOptions = this.readSearchOptions();
     const searchFilter = buildSearchFilter(search, [
       likePredicate('history.title'),
@@ -4221,6 +4342,11 @@ export class LibraryStore {
 
     if (completedOnly) {
       clauses.push('history.completed > 0');
+    }
+
+    if (mediaType) {
+      clauses.push('history.media_type = ?');
+      params.push(mediaType);
     }
 
     const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -6187,7 +6313,51 @@ export class LibraryStore {
     ].filter(Boolean);
     const mediaTypeWhereSql = libraryWhereParts.length > 0 ? `WHERE ${libraryWhereParts.join(' AND ')}` : '';
     const pageParams = [...allParams, ...(mediaTypeFilter ? [mediaTypeFilter] : []), ...(sourceId ? [sourceId] : []), ...excludeTrackIds];
-    const unifiedTracksSql = `WITH library_tracks AS (
+    const includePlaybackStats = sort === 'lastPlayed' || sort === 'playCountAsc' || sort === 'playCountDesc';
+    const buildUnifiedTracksSql = (withPlaybackStats: boolean): string => {
+      const playbackStatsCtes = withPlaybackStats
+        ? `local_playback_stats AS (
+      SELECT
+        track_id,
+        SUM(completed_count) AS play_count,
+        MAX(last_started_at) AS last_played_at
+      FROM playback_history_stats
+      WHERE media_type = 'local'
+        AND track_id IS NOT NULL
+      GROUP BY track_id
+    ),
+    remote_playback_stats AS (
+      SELECT
+        provider,
+        stable_key,
+        SUM(completed_count) AS play_count,
+        MAX(last_started_at) AS last_played_at
+      FROM playback_history_stats
+      WHERE media_type = 'remote'
+        AND stable_key IS NOT NULL
+      GROUP BY provider, stable_key
+    ),`
+        : '';
+      const localPlaybackColumns = withPlaybackStats
+        ? `COALESCE(local_playback_stats.play_count, 0) AS play_count,
+        local_playback_stats.last_played_at AS last_played_at`
+        : `tracks.play_count,
+        tracks.last_played_at`;
+      const localPlaybackJoin = withPlaybackStats
+        ? 'LEFT JOIN local_playback_stats ON local_playback_stats.track_id = tracks.id'
+        : '';
+      const remotePlaybackColumns = withPlaybackStats
+        ? `COALESCE(remote_playback_stats.play_count, 0) AS play_count,
+        remote_playback_stats.last_played_at AS last_played_at`
+        : `0 AS play_count,
+        NULL AS last_played_at`;
+      const remotePlaybackJoin = withPlaybackStats
+        ? `LEFT JOIN remote_playback_stats
+          ON remote_playback_stats.provider = remote_tracks.provider
+         AND remote_playback_stats.stable_key = remote_tracks.stable_key`
+        : '';
+
+      return `WITH ${playbackStatsCtes} library_tracks AS (
       SELECT
         tracks.id,
         'local' AS media_type,
@@ -6226,12 +6396,12 @@ export class LibraryStore {
         tracks.updated_at,
         tracks.mtime_ms,
         tracks.size_bytes,
-        tracks.play_count,
-        tracks.last_played_at,
+        ${localPlaybackColumns},
         ${localSearchRankSql} AS search_rank
       FROM tracks
       ${searchJoinSql}
       ${duplicateJoinSql}
+      ${localPlaybackJoin}
       ${whereSql}
       UNION ALL
       SELECT
@@ -6272,16 +6442,19 @@ export class LibraryStore {
         remote_tracks.updated_at,
         COALESCE(CAST(strftime('%s', remote_tracks.modified_at) AS INTEGER) * 1000, 0) AS mtime_ms,
         remote_tracks.size_bytes,
-        0 AS play_count,
-        NULL AS last_played_at,
+        ${remotePlaybackColumns},
         ${remoteSearchRankSql} AS search_rank
       FROM remote_tracks
       INNER JOIN remote_sources ON remote_sources.id = remote_tracks.source_id
+      ${remotePlaybackJoin}
       ${remoteSearchJoinSql}
       ${remoteWhereSql}
     )`;
+    };
+    const countUnifiedTracksSql = buildUnifiedTracksSql(false);
+    const unifiedTracksSql = includePlaybackStats ? buildUnifiedTracksSql(true) : countUnifiedTracksSql;
     const orderSql = this.unifiedTrackOrderSql(sort, Boolean(searchQuery));
-    const totalRow = this.getRow(`${unifiedTracksSql} SELECT COUNT(*) AS total FROM library_tracks ${mediaTypeWhereSql}`, ...pageParams);
+    const totalRow = this.getRow(`${countUnifiedTracksSql} SELECT COUNT(*) AS total FROM library_tracks ${mediaTypeWhereSql}`, ...pageParams);
     const total = Number(totalRow?.total ?? 0);
     const rows =
       randomWindow && sort === 'random'
@@ -6414,12 +6587,24 @@ export class LibraryStore {
       searchFilter.sql,
       mediaTypeFilter ? 'library_albums.media_type = ?' : '',
       sourceId ? 'library_albums.source_id = ?' : '',
+      query?.excludeOsuAlbums === true
+        ? `(library_albums.media_type != 'local' OR EXISTS (
+            SELECT 1
+            FROM album_tracks
+            INNER JOIN tracks ON tracks.id = album_tracks.track_id
+            WHERE album_tracks.album_id = library_albums.id
+              AND tracks.missing = 0
+              AND NOT ${osuImportedTrackSql}
+          ))`
+        : '',
     ].filter(Boolean);
     const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
     const whereParams = [...searchFilter.params, ...(mediaTypeFilter ? [mediaTypeFilter] : []), ...(sourceId ? [sourceId] : [])];
+    const includePlaybackStats = sort === 'lastPlayed' || sort === 'playCountAsc' || sort === 'playCountDesc';
     const orderSql = this.unifiedAlbumOrderSql(sort);
-    const albumsSql = this.unifiedAlbumsSql();
-    const totalRow = this.getRow(`${albumsSql} SELECT COUNT(*) AS total FROM library_albums ${whereSql}`, ...whereParams);
+    const countAlbumsSql = this.unifiedAlbumsSql();
+    const albumsSql = includePlaybackStats ? this.unifiedAlbumsSql(true) : countAlbumsSql;
+    const totalRow = this.getRow(`${countAlbumsSql} SELECT COUNT(*) AS total FROM library_albums ${whereSql}`, ...whereParams);
     const rows = this.allRows(
       `${albumsSql}
       SELECT
@@ -6481,10 +6666,62 @@ export class LibraryStore {
     END`;
   }
 
-  private unifiedAlbumsSql(): string {
+  private unifiedAlbumsSql(includePlaybackStats = false): string {
     const remoteAlbumIdentity = this.remoteAlbumIdentitySql('remote_tracks');
+    const playbackStatsCtes = includePlaybackStats
+      ? `local_track_playback_stats AS (
+      SELECT
+        track_id,
+        SUM(completed_count) AS play_count,
+        MAX(last_started_at) AS last_played_at
+      FROM playback_history_stats
+      WHERE media_type = 'local'
+        AND track_id IS NOT NULL
+      GROUP BY track_id
+    ),
+    local_album_playback_stats AS (
+      SELECT
+        album_tracks.album_id,
+        COALESCE(SUM(local_track_playback_stats.play_count), 0) AS play_count,
+        MAX(local_track_playback_stats.last_played_at) AS last_played_at
+      FROM album_tracks
+      INNER JOIN tracks ON tracks.id = album_tracks.track_id
+      LEFT JOIN local_track_playback_stats ON local_track_playback_stats.track_id = album_tracks.track_id
+      WHERE tracks.missing = 0
+      GROUP BY album_tracks.album_id
+    ),
+    remote_track_playback_stats AS (
+      SELECT
+        provider,
+        stable_key,
+        SUM(completed_count) AS play_count,
+        MAX(last_started_at) AS last_played_at
+      FROM playback_history_stats
+      WHERE media_type = 'remote'
+        AND stable_key IS NOT NULL
+      GROUP BY provider, stable_key
+    ),`
+      : '';
+    const remotePlaybackColumns = includePlaybackStats
+      ? `COALESCE(remote_track_playback_stats.play_count, 0) AS playback_play_count,
+        remote_track_playback_stats.last_played_at AS last_played_at`
+      : `0 AS playback_play_count,
+        NULL AS last_played_at`;
+    const remotePlaybackJoin = includePlaybackStats
+      ? `LEFT JOIN remote_track_playback_stats
+        ON remote_track_playback_stats.provider = remote_tracks.provider
+       AND remote_track_playback_stats.stable_key = remote_tracks.stable_key`
+      : '';
+    const localPlaybackColumns = includePlaybackStats
+      ? `COALESCE(local_album_playback_stats.play_count, 0) AS playback_play_count,
+        local_album_playback_stats.last_played_at AS last_played_at`
+      : `0 AS playback_play_count,
+        NULL AS last_played_at`;
+    const localPlaybackJoin = includePlaybackStats
+      ? 'LEFT JOIN local_album_playback_stats ON local_album_playback_stats.album_id = albums.id'
+      : '';
 
-    return `WITH remote_album_rows AS (
+    return `WITH ${playbackStatsCtes} remote_album_rows AS (
       SELECT
         remote_tracks.*,
         remote_sources.display_name AS source_display_name,
@@ -6492,9 +6729,11 @@ export class LibraryStore {
         ${this.remoteArtistIdSql('remote_tracks')} AS artist_id,
         COALESCE(NULLIF(TRIM(remote_tracks.album), ''), 'Unknown Album') AS album_title,
         COALESCE(NULLIF(TRIM(remote_tracks.album_artist), ''), NULLIF(TRIM(remote_tracks.artist), ''), 'Unknown Artist') AS album_artist_name,
-        COALESCE(CAST(strftime('%s', remote_tracks.modified_at) AS INTEGER) * 1000, 0) AS sort_mtime_ms
+        COALESCE(CAST(strftime('%s', remote_tracks.modified_at) AS INTEGER) * 1000, 0) AS sort_mtime_ms,
+        ${remotePlaybackColumns}
       FROM remote_tracks
       INNER JOIN remote_sources ON remote_sources.id = remote_tracks.source_id
+      ${remotePlaybackJoin}
       WHERE remote_tracks.availability != 'missing'
         AND remote_sources.status = 'enabled'
     ),
@@ -6528,6 +6767,7 @@ export class LibraryStore {
           WHERE album_tracks.album_id = albums.id
             AND tracks.missing = 0
         ), 0) AS sort_mtime_ms,
+        ${localPlaybackColumns},
         albums.title || ' ' || albums.album_artist || ' ' || COALESCE(CAST(albums.year AS TEXT), '') || ' ' || COALESCE((
           SELECT GROUP_CONCAT(tracks.search_terms || ' ' || tracks.title || ' ' || tracks.artist || ' ' || tracks.album_artist || ' ' || COALESCE(tracks.genre, '') || ' ' || tracks.path, ' ')
           FROM album_tracks
@@ -6536,6 +6776,7 @@ export class LibraryStore {
             AND tracks.missing = 0
         ), '') AS search_blob
       FROM albums
+      ${localPlaybackJoin}
       WHERE EXISTS (
         SELECT 1
         FROM album_tracks
@@ -6562,6 +6803,8 @@ export class LibraryStore {
         MAX(updated_at) AS updated_at,
         MAX(created_at) AS added_at,
         MAX(sort_mtime_ms) AS sort_mtime_ms,
+        COALESCE(SUM(playback_play_count), 0) AS playback_play_count,
+        MAX(last_played_at) AS last_played_at,
         GROUP_CONCAT(COALESCE(search_terms, '') || ' ' || title || ' ' || artist || ' ' || album_artist || ' ' || COALESCE(genre, '') || ' ' || remote_path, ' ') AS search_blob
       FROM remote_album_rows
       GROUP BY album_id, source_id, provider
@@ -6612,6 +6855,8 @@ export class LibraryStore {
         remote_albums.updated_at,
         remote_albums.added_at,
         remote_albums.sort_mtime_ms,
+        remote_albums.playback_play_count,
+        remote_albums.last_played_at,
         remote_albums.search_blob
       FROM remote_albums
       LEFT JOIN remote_album_artist_ranked
@@ -6627,6 +6872,20 @@ export class LibraryStore {
         return 'ORDER BY echo_library_sort_key(album_artist) COLLATE NOCASE, album_artist COLLATE NOCASE, title COLLATE NOCASE';
       case 'recent':
         return 'ORDER BY added_at DESC, updated_at DESC, title COLLATE NOCASE';
+      case 'lastPlayed':
+        return 'ORDER BY last_played_at IS NULL, last_played_at DESC, title COLLATE NOCASE';
+      case 'playCountAsc':
+        return 'ORDER BY playback_play_count ASC, last_played_at DESC, title COLLATE NOCASE';
+      case 'playCountDesc':
+        return 'ORDER BY playback_play_count DESC, last_played_at DESC, title COLLATE NOCASE';
+      case 'trackCountAsc':
+        return 'ORDER BY track_count ASC, title COLLATE NOCASE';
+      case 'trackCountDesc':
+        return 'ORDER BY track_count DESC, title COLLATE NOCASE';
+      case 'yearAsc':
+        return 'ORDER BY year IS NULL, year ASC, title COLLATE NOCASE';
+      case 'yearDesc':
+        return 'ORDER BY year IS NULL, year DESC, title COLLATE NOCASE';
       case 'createdDesc':
         return 'ORDER BY updated_at DESC, title COLLATE NOCASE';
       case 'createdAsc':
@@ -7397,6 +7656,83 @@ export class LibraryStore {
 
   getLikedAlbumsPlaylist(): LibraryPlaylist {
     return this.ensureSystemPlaylist(likedAlbumsSourcePlaylistId, 'Liked Albums', 'Albums you liked in ECHO Next.');
+  }
+
+  getContinuousPlayRecommendations(
+    request: ContinuousPlayRecommendationRequest,
+    timestamp = nowIso(),
+  ): ContinuousPlayRecommendationResult {
+    const excludeTrackIds = new Set(request.excludeTrackIds ?? []);
+    const limit = Math.max(1, Math.min(20, Math.floor(Number(request.limit) || 5)));
+    const rows = this.allRows(
+      `SELECT
+         tracks.*,
+         COALESCE(history.play_count, 0) AS history_play_count,
+         COALESCE(history.completed_count, 0) AS history_completed_count,
+         COALESCE(history.played_seconds, 0) AS history_played_seconds,
+         history.last_played_at AS history_last_played_at,
+         COALESCE(night.night_play_count, 0) AS night_play_count,
+         CASE WHEN EXISTS (
+           SELECT 1
+           FROM playlist_items AS liked_items
+           INNER JOIN playlists AS liked_playlist ON liked_playlist.id = liked_items.playlist_id
+           WHERE liked_playlist.kind = 'system'
+             AND liked_playlist.source_provider = 'local'
+             AND liked_playlist.source_playlist_id = ?
+             AND liked_items.media_type IN ('track', 'stream_track')
+             AND liked_items.media_id = tracks.id
+         ) THEN 1 ELSE 0 END AS is_liked
+       FROM tracks
+       LEFT JOIN (
+         SELECT
+           track_id,
+           SUM(play_count) AS play_count,
+           SUM(completed_count) AS completed_count,
+           SUM(total_played_seconds) AS played_seconds,
+           MAX(last_started_at) AS last_played_at
+         FROM playback_history_stats
+         WHERE media_type = 'local' AND track_id IS NOT NULL
+         GROUP BY track_id
+       ) AS history ON history.track_id = tracks.id
+       LEFT JOIN (
+         SELECT track_id, COUNT(*) AS night_play_count
+         FROM playback_history
+         WHERE media_type = 'local'
+           AND track_id IS NOT NULL
+           AND CAST(strftime('%H', started_at, 'localtime') AS INTEGER) IN (23, 0, 1, 2, 3, 4)
+         GROUP BY track_id
+       ) AS night ON night.track_id = tracks.id
+       WHERE tracks.missing = 0
+       ORDER BY COALESCE(history.last_played_at, tracks.created_at) DESC
+       LIMIT 1200`,
+      likedSongsSourcePlaylistId,
+    );
+
+    const candidates = rows
+      .filter((row) => !excludeTrackIds.has(String(row.id)))
+      .map((row) => ({
+        track: this.mapTrack(row),
+        createdAt: textOrNull(row.created_at),
+        playCount: Math.max(0, Number(row.history_play_count ?? 0)),
+        completedCount: Math.max(0, Number(row.history_completed_count ?? 0)),
+        playedSeconds: Math.max(0, Number(row.history_played_seconds ?? 0)),
+        lastPlayedAt: textOrNull(row.history_last_played_at),
+        nightPlayCount: Math.max(0, Number(row.night_play_count ?? 0)),
+        isLiked: Number(row.is_liked ?? 0) > 0,
+      }));
+    const seed = request.seedTrackId ? this.getTrack(request.seedTrackId) : null;
+
+    return {
+      mode: request.mode,
+      generatedAt: timestamp,
+      items: rankContinuousPlayCandidates(candidates, {
+        mode: request.mode,
+        seed,
+        preferences: request.preferences,
+        limit,
+        nowMs: Date.parse(timestamp),
+      }),
+    };
   }
 
   createSmartPlaylistFromListeningHistory(
@@ -8282,7 +8618,7 @@ export class LibraryStore {
        LIMIT 4`,
       ...scope.params,
     )
-      .map((row) => this.toCoverUrl(row.cover_id, 'thumb'))
+      .map((row) => this.toCoverUrl(row.cover_id, 'album'))
       .filter((value): value is string => Boolean(value));
   }
 
@@ -9441,6 +9777,16 @@ export class LibraryStore {
         return 'ORDER BY tracks.album COLLATE NOCASE, tracks.title COLLATE NOCASE';
       case 'recent':
         return 'ORDER BY tracks.updated_at DESC, tracks.title COLLATE NOCASE';
+      case 'lastPlayed':
+        return 'ORDER BY tracks.last_played_at IS NULL, tracks.last_played_at DESC, tracks.title COLLATE NOCASE';
+      case 'playCountAsc':
+        return 'ORDER BY COALESCE(tracks.play_count, 0) ASC, tracks.last_played_at DESC, tracks.title COLLATE NOCASE';
+      case 'playCountDesc':
+        return 'ORDER BY COALESCE(tracks.play_count, 0) DESC, tracks.last_played_at DESC, tracks.title COLLATE NOCASE';
+      case 'yearAsc':
+        return 'ORDER BY tracks.year IS NULL, tracks.year ASC, tracks.title COLLATE NOCASE';
+      case 'yearDesc':
+        return 'ORDER BY tracks.year IS NULL, tracks.year DESC, tracks.title COLLATE NOCASE';
       case 'createdAsc':
         return 'ORDER BY tracks.created_at ASC, tracks.title COLLATE NOCASE';
       case 'createdDesc':
@@ -9459,6 +9805,24 @@ export class LibraryStore {
         return 'ORDER BY COALESCE(tracks.bitrate, 0) ASC, tracks.size_bytes ASC, tracks.title COLLATE NOCASE';
       case 'qualityDesc':
         return 'ORDER BY COALESCE(tracks.bitrate, 0) DESC, tracks.size_bytes DESC, tracks.title COLLATE NOCASE';
+      case 'codecAsc':
+        return 'ORDER BY COALESCE(tracks.codec, \'\') COLLATE NOCASE ASC, tracks.title COLLATE NOCASE';
+      case 'codecDesc':
+        return 'ORDER BY COALESCE(tracks.codec, \'\') COLLATE NOCASE DESC, tracks.title COLLATE NOCASE';
+      case 'audioSpecAsc':
+        return 'ORDER BY tracks.sample_rate IS NULL OR tracks.sample_rate <= 0, tracks.sample_rate ASC, tracks.bit_depth IS NULL OR tracks.bit_depth <= 0, tracks.bit_depth ASC, tracks.title COLLATE NOCASE';
+      case 'audioSpecDesc':
+        return 'ORDER BY tracks.sample_rate IS NULL OR tracks.sample_rate <= 0, tracks.sample_rate DESC, tracks.bit_depth IS NULL OR tracks.bit_depth <= 0, tracks.bit_depth DESC, tracks.title COLLATE NOCASE';
+      case 'bitrateAsc':
+        return 'ORDER BY COALESCE(tracks.bitrate, 0) ASC, tracks.title COLLATE NOCASE';
+      case 'bitrateDesc':
+        return 'ORDER BY COALESCE(tracks.bitrate, 0) DESC, tracks.title COLLATE NOCASE';
+      case 'bpmAsc':
+        return 'ORDER BY tracks.bpm IS NULL OR tracks.bpm <= 0, tracks.bpm ASC, tracks.title COLLATE NOCASE';
+      case 'bpmDesc':
+        return 'ORDER BY tracks.bpm IS NULL OR tracks.bpm <= 0, tracks.bpm DESC, tracks.title COLLATE NOCASE';
+      case 'trackNumber':
+        return 'ORDER BY tracks.track_no IS NULL, COALESCE(tracks.disc_no, 1) ASC, COALESCE(tracks.track_no, 0) ASC, tracks.title COLLATE NOCASE, tracks.path COLLATE NOCASE';
       case 'frequent':
         return 'ORDER BY COALESCE(tracks.play_count, 0) DESC, tracks.last_played_at DESC, tracks.title COLLATE NOCASE';
       case 'random':
@@ -9504,6 +9868,9 @@ export class LibraryStore {
   }
 
   private likedItemsOrderSql(sort: string): string {
+    if (sort === 'frequent') {
+      return 'ORDER BY COALESCE(tracks.play_count, 0) DESC, tracks.last_played_at DESC, playlist_items.added_at DESC, playlist_items.position ASC';
+    }
     return this.playlistItemsOrderSql(sort);
   }
 
@@ -9740,6 +10107,7 @@ export class LibraryStore {
       genre: sanitizeNullableLibraryText(row.genre),
       duration: Number(row.duration ?? 0),
       codec: sanitizeNullableLibraryText(row.codec, maxLibraryTechnicalTextLength),
+      mqa: fieldSources.mqa === 'embedded' || fieldSources.mqa === 'technical',
       sampleRate: numberOrNull(row.sample_rate),
       bitDepth: numberOrNull(row.bit_depth),
       bitrate: numberOrNull(row.bitrate),
@@ -9758,7 +10126,7 @@ export class LibraryStore {
       replayGainUpdatedAt: textOrNull(row.replay_gain_updated_at),
       coverId: textOrNull(row.cover_id),
       coverThumb: this.toCoverUrl(row.cover_id, 'thumb')
-        ?? subsonicDirectCoverUrlFor(row.id, row.provider, row.cover_id, fieldSources, row.remote_path, row.stable_key),
+        ?? subsonicDirectCoverUrlFor(row.id, row.source_id, row.provider, row.cover_id, fieldSources, row.remote_path, row.stable_key),
       metadataStatus: textOrNull(row.metadata_status) ?? 'ok',
       embeddedMetadataStatus: this.mapEmbeddedStatus(row.embedded_metadata_status),
       embeddedCoverStatus: this.mapEmbeddedStatus(row.embedded_cover_status),

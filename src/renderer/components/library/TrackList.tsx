@@ -40,14 +40,17 @@ type TrackListProps = {
   onTrackDragOver?: (event: DragEvent<HTMLDivElement>, track: LibraryTrack) => void;
   onTrackDrop?: (event: DragEvent<HTMLDivElement>, track: LibraryTrack) => void;
   onTrackDragEnd?: (event: DragEvent<HTMLDivElement>, track: LibraryTrack) => void;
+  audioInfoLayout?: 'tags' | 'combined';
+  density?: 'comfortable' | 'compact';
 };
 
-const rowHeight = 76;
+const comfortableRowHeight = 76;
+const compactRowHeight = 60;
 const loadAheadRows = 12;
 const priorityTrackCoverCount = 24;
 const locateCurrentTrackEvent = 'app:locate-current-track';
 
-export const TrackList = memo(({ tracks, currentTrackId, loadingTrackId = null, canLoadMore = false, canLoadPrevious = false, totalCount, loadedCount = tracks.length, loadedStartIndex = 0, isLoadingMore = false, onEndReached, onStartReached, onPlay, selectedTrackIds = {}, onToggleSelected, onAddToQueue, onAddToPlaylist, onDownload, onOpenArtist, onOpenAlbum, downloadingTrackIds = {}, downloadProgressByTrackId = {}, duplicateHiddenCounts = {}, onShowVersions, onOpenTrackMenu, onVisibleTrackIdsChange, isTrackDraggable, draggedTrackId = null, dropTargetTrackId = null, onTrackDragStart, onTrackDragOver, onTrackDrop, onTrackDragEnd }: TrackListProps): JSX.Element => {
+export const TrackList = memo(({ tracks, currentTrackId, loadingTrackId = null, canLoadMore = false, canLoadPrevious = false, totalCount, loadedCount = tracks.length, loadedStartIndex = 0, isLoadingMore = false, onEndReached, onStartReached, onPlay, selectedTrackIds = {}, onToggleSelected, onAddToQueue, onAddToPlaylist, onDownload, onOpenArtist, onOpenAlbum, downloadingTrackIds = {}, downloadProgressByTrackId = {}, duplicateHiddenCounts = {}, onShowVersions, onOpenTrackMenu, onVisibleTrackIdsChange, isTrackDraggable, draggedTrackId = null, dropTargetTrackId = null, onTrackDragStart, onTrackDragOver, onTrackDrop, onTrackDragEnd, audioInfoLayout = 'tags', density = 'comfortable' }: TrackListProps): JSX.Element => {
   const { t } = useI18n();
   const scrollParentRef = useRef<HTMLDivElement | null>(null);
   const loadRequestedRef = useRef(false);
@@ -55,6 +58,7 @@ export const TrackList = memo(({ tracks, currentTrackId, loadingTrackId = null, 
   const visibleTrackIdsKeyRef = useRef('');
   const visibleTrackIdsTimerRef = useRef<number | null>(null);
   const pendingVisibleTrackIdsRef = useRef<{ key: string; trackIds: string[] } | null>(null);
+  const rowHeight = density === 'compact' ? compactRowHeight : comfortableRowHeight;
   const virtualCount = Math.max(totalCount ?? tracks.length, tracks.length);
   const safeLoadedStartIndex = Math.max(0, Math.min(loadedStartIndex, Math.max(0, virtualCount - tracks.length)));
   const loadedBoundary = Math.min(virtualCount, safeLoadedStartIndex + Math.min(loadedCount, tracks.length));
@@ -212,7 +216,7 @@ export const TrackList = memo(({ tracks, currentTrackId, loadingTrackId = null, 
   };
 
   return (
-    <section className="track-list-shell" aria-label={t('songs.trackList.aria')}>
+    <section className="track-list-shell" data-density={density} aria-label={t('songs.trackList.aria')}>
       <div
         className="track-list"
         ref={scrollParentRef}
@@ -240,6 +244,7 @@ export const TrackList = memo(({ tracks, currentTrackId, loadingTrackId = null, 
                 >
                   {track ? (
                     <TrackRow
+                      audioInfoLayout={audioInfoLayout}
                       isPlaying={track.id === currentTrackId}
                       isLoading={track.id === loadingTrackId}
                       isSelected={selectedTrackIds[track.id] === true}

@@ -5,7 +5,6 @@ import {
   isBridgeUsable,
   isDaemonBackendFresh,
   isRecoverableInEqSyncContext,
-  type LifecycleErrorContext,
 } from './BackendLifecycle';
 import { DaemonAudioBackend } from './DaemonAudioBackend';
 import { JsonRpcBridge } from './JsonRpcBridge';

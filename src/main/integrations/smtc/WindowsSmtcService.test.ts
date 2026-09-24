@@ -42,6 +42,15 @@ const createFakeHost = () => {
   return host;
 };
 
+const initializeReadyHost = async (
+  service: WindowsSmtcService,
+  host: ReturnType<typeof createFakeHost>,
+): Promise<void> => {
+  const initialized = service.initialize();
+  host.stdout.write('{"type":"ready","protocolVersion":1,"capabilities":{"metadata":true,"timeline":true,"enabledActions":true,"seekCommands":true,"localArtwork":true}}\n');
+  await initialized;
+};
+
 describe('WindowsSmtcService', () => {
   it('resolves the development helper path from the Electron app path', () => {
     expect(resolveDefaultSmtcHostPath()).toBe('D:\\Project\\ECHONext\\electron-app\\build\\echo-smtc-host.exe');
@@ -60,7 +69,7 @@ describe('WindowsSmtcService', () => {
       logger: { info: vi.fn(), warn: vi.fn() },
     });
 
-    await service.initialize();
+    await initializeReadyHost(service, host);
     await service.setEnabledActions({ play: true, pause: true, previous: true, next: true, seek: true });
     await service.setMetadata({
       trackId: 'track-1',
@@ -104,7 +113,7 @@ describe('WindowsSmtcService', () => {
     const handler = vi.fn();
     service.onCommand(handler);
 
-    await service.initialize();
+    await initializeReadyHost(service, host);
     host.stdout.write('{"type":"command","command":"next"}\n');
     host.stdout.write('{"type":"command","command":"seek","positionSeconds":42.5}\n');
 
@@ -149,7 +158,7 @@ describe('WindowsSmtcService', () => {
       logger,
     });
 
-    await service.initialize();
+    await initializeReadyHost(service, host);
     host.stdin.emit('error', new Error('write EPIPE'));
     await service.setPlaybackState('playing');
 
@@ -175,7 +184,7 @@ describe('WindowsSmtcService', () => {
       logger: { info: vi.fn(), warn: vi.fn() },
     });
 
-    await service.initialize();
+    await initializeReadyHost(service, host);
     const disposed = service.dispose();
     host.emit('exit', 0, null);
     await disposed;
@@ -196,7 +205,7 @@ describe('WindowsSmtcService', () => {
       logger,
     });
 
-    await service.initialize();
+    await initializeReadyHost(service, host);
     const stopped = service.stopGracefullyImpl(1000);
     await vi.advanceTimersByTimeAsync(1000);
     await stopped;
@@ -204,5 +213,53 @@ describe('WindowsSmtcService', () => {
     expect(host.kill).toHaveBeenCalledWith('SIGKILL');
     expect(logger.warn).toHaveBeenCalledWith('[SMTC] graceful shutdown timed out, force killing');
     vi.useRealTimers();
+  });
+
+  it('publishes metadata before remote artwork resolves and ignores stale artwork', async () => {
+    const host = createFakeHost();
+    const writes: string[] = [];
+    host.stdin.on('data', (chunk) => writes.push(chunk.toString()));
+    const coverResolvers: Array<(value: string | null) => void> = [];
+    const service = new WindowsSmtcService({
+      spawnHost: vi.fn(() => host as never),
+      hostExists: () => true,
+      resolveHostPath: () => 'D:\\Echo\\echo-smtc-host.exe',
+      coverCache: {
+        resolve: vi.fn(() => new Promise<string | null>((resolve) => coverResolvers.push(resolve))),
+      },
+      logger: { info: vi.fn(), warn: vi.fn() },
+    });
+
+    await initializeReadyHost(service, host);
+    const firstMetadata = {
+      trackId: 'track-1',
+      title: 'First',
+      artist: 'Artist',
+      album: null,
+      albumArtist: null,
+      durationSeconds: 120,
+      positionSeconds: 0,
+      coverPath: null,
+      coverUrl: 'https://example.com/first.jpg',
+    };
+    const secondMetadata = {
+      ...firstMetadata,
+      trackId: 'track-2',
+      title: 'Second',
+      coverUrl: 'https://example.com/second.jpg',
+    };
+
+    await service.setMetadata(firstMetadata);
+    await service.setMetadata(secondMetadata);
+    expect(writes.join('')).toContain('"title":"First"');
+    expect(writes.join('')).toContain('"title":"Second"');
+    expect(coverResolvers).toHaveLength(2);
+
+    coverResolvers[0]?.('D:\\Echo\\first.png');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(writes.join('')).not.toContain('first.png');
+    coverResolvers[1]?.('D:\\Echo\\second.png');
+    await vi.waitFor(() => expect(writes.join('')).toContain('second.png'));
   });
 });

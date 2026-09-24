@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AudioWaveform, CheckCircle2, Clock3, FileAudio, Gauge, Headphones, Info, Pencil, RadioTower, RotateCcw, Route, Save, ShieldCheck, SlidersHorizontal, Trash2, Waves, X, Zap } from 'lucide-react';
+import '../styles/dsp.css';
+import { Activity, AudioWaveform, CheckCircle2, Clock3, ExternalLink, EyeOff, FileAudio, Gauge, Headphones, Info, Loader2, LockKeyhole, Pencil, RadioTower, RefreshCw, RotateCcw, Route, Save, ShieldCheck, SlidersHorizontal, Trash2, UserRound, Waves, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type {
   AudioDsdOutputMode,
@@ -20,29 +21,53 @@ import type {
   ChannelBalanceState,
 } from '../../shared/types/audio';
 import type { EqState, RoomCorrectionState } from '../../shared/types/eq';
+import type { AppSettings } from '../../shared/types/appSettings';
+import { isAuthorizationFailure } from '../../shared/ipcAuthorizationFailure';
 import { channelBalanceBandIds, channelBalanceBandMaxGainDb, channelBalanceBandMinGainDb, channelBalanceMaxDelayMs, channelBalanceMaxGainDb, channelBalanceMinDelayMs, channelBalanceMinGainDb } from '../../shared/types/audio';
 import { dspHeadroomMaxDb, dspHeadroomMinDb, roomCorrectionMaxTrimDb, roomCorrectionMinTrimDb } from '../../shared/types/eq';
 import { EqPanel } from '../components/audio/EqPanel';
 import { HeadphoneCorrectionPanel } from '../components/audio/HeadphoneCorrectionPanel';
+import { DspRackPanel } from '../components/audio/DspRackPanel';
+import { CompressorPanel } from '../components/audio/CompressorPanel';
+import { ChannelMatrixPanel, CrossfeedPanel, StereoFieldPanel } from '../components/audio/SpatialDspPanel';
+import {
+  defaultDspRackState,
+  type ChannelMatrixState,
+  type CompressorState,
+  type CrossfeedState,
+  type StereoFieldState,
+} from '../../shared/types/dspRack';
 import { useI18n } from '../i18n/I18nProvider';
 import type { TranslationKey } from '../i18n/locales';
 import { refreshPlaybackStatus, useThrottledSharedPlaybackStatus } from '../stores/playbackStatusStore';
+import { dispatchAudioErrorNotice } from '../utils/audioErrorNotice';
 import { getEqBridge } from '../utils/echoBridge';
+import { formatUserFacingError } from '../utils/userFacingError';
+import { hideSidebarRouteEntry } from '../utils/sidebarRouteVisibility';
 
-type DspModuleId = 'headroom' | 'src' | 'sdm' | 'eq' | 'headphone' | 'room' | 'channel' | 'safety';
+type DspModuleId = 'rack' | 'headroom' | 'src' | 'sdm' | 'eq' | 'compressor' | 'crossfeed' | 'stereoField' | 'channelMatrix' | 'headphone' | 'room' | 'channel' | 'safety';
 
 const dspPlaybackStatusUiIntervalMs = 250;
 const dspSelectedModuleStorageKey = 'echo-next.dsp.selected-module';
 const dspSettingsPendingSectionStorageKey = 'echo-next.settings.pending-section';
 const dspEchoProActivationPanelStorageKey = 'echo:settings:general:echo-pro-activation-panel-expanded';
 const dspEchoProActivationTargetId = 'settings-row-echo-pro-activation';
-const dspModuleIds: readonly DspModuleId[] = ['headroom', 'src', 'sdm', 'eq', 'headphone', 'room', 'channel', 'safety'];
+const dspEchoProPurchaseUrl = 'https://afdian.com/a/echonext';
+const dspModuleIds: readonly DspModuleId[] = ['rack', 'headroom', 'src', 'sdm', 'eq', 'compressor', 'crossfeed', 'stereoField', 'channelMatrix', 'headphone', 'room', 'channel', 'safety'];
 
 const isDspModuleId = (value: unknown): value is DspModuleId =>
   typeof value === 'string' && (dspModuleIds as readonly string[]).includes(value);
 
 const isEchoProRequiredError = (message: string | null | undefined): boolean =>
-  /\becho_pro_required\b/iu.test(message ?? '');
+  isAuthorizationFailure(message ?? '');
+
+const formatDspActionError = (error: unknown): string =>
+  isAuthorizationFailure(error) ? 'echo_pro_required' : formatUserFacingError(error, { context: 'audio' });
+
+const createSettingsRollbackPatch = <T extends Partial<AppSettings>>(patch: T, previous: AppSettings): T =>
+  Object.fromEntries(
+    Object.keys(patch).map((key) => [key, previous[key as keyof AppSettings]]),
+  ) as T;
 
 const isEchoProDspModule = (moduleId: DspModuleId): boolean =>
   moduleId === 'src' || moduleId === 'sdm';
@@ -64,6 +89,10 @@ const openEchoProActivationSettings = (): void => {
   window.setTimeout(() => {
     window.dispatchEvent(new CustomEvent('app:navigate:settings-section', { detail }));
   }, 0);
+};
+
+const openEchoProPurchasePage = (): void => {
+  void window.echo?.app?.openExternalUrl(dspEchoProPurchaseUrl);
 };
 
 const readStoredDspModuleId = (): DspModuleId => {
@@ -184,6 +213,7 @@ type ChannelBalancePreset = {
 
 const echoSrcModeOptions: Array<{ mode: AudioEchoSrcMode; titleKey: string; detailKey: string }> = [
   { mode: 'off', titleKey: 'dsp.panel.src.mode.off', detailKey: 'dsp.panel.src.mode.offDetail' },
+  { mode: 'compatibility48', titleKey: 'dsp.panel.src.mode.compatibility48', detailKey: 'dsp.panel.src.mode.compatibility48Detail' },
   { mode: 'family2x', titleKey: 'dsp.panel.src.mode.family2x', detailKey: 'dsp.panel.src.mode.family2xDetail' },
   { mode: 'family4x', titleKey: 'dsp.panel.src.mode.family4x', detailKey: 'dsp.panel.src.mode.family4xDetail' },
   { mode: 'family8x', titleKey: 'dsp.panel.src.mode.family8x', detailKey: 'dsp.panel.src.mode.family8xDetail' },
@@ -624,7 +654,7 @@ const sdmComputeBackendOptions: Array<{ backend: AudioSdmComputeBackend; label: 
 ];
 
 const normalizeEchoSrcMode = (mode: unknown): AudioEchoSrcMode =>
-  mode === 'family2x' || mode === 'family4x' || mode === 'family8x' ? mode : 'off';
+  mode === 'compatibility48' || mode === 'family2x' || mode === 'family4x' || mode === 'family8x' ? mode : 'off';
 
 const normalizeEchoSrcQualityProfile = (profile: unknown): AudioEchoSrcQualityProfile =>
   profile === 'balanced' || profile === 'lowLatency' ? profile : 'transparent';
@@ -822,6 +852,8 @@ const dspLocalTextZhCN: Record<string, string> = {
   'dsp.panel.src.mode.family4xDetail': '44.1k 家族升到 176.4k，48k 家族升到 192k。',
   'dsp.panel.src.mode.family8x': '8x Ultra',
   'dsp.panel.src.mode.family8xDetail': '实验档：44.1k 家族升到 352.8k，48k 家族升到 384k。',
+  'dsp.panel.src.mode.compatibility48': '48 kHz 兼容',
+  'dsp.panel.src.mode.compatibility48Detail': '将 PCM 固定转换到 48 kHz，适合只接受 48 kHz 的独占耳机或声卡；默认关闭。',
   'dsp.panel.src.mode.off': '关闭',
   'dsp.panel.src.mode.offDetail': '保持源采样率，Bit-perfect 条件不受 ECHO SRC 影响。',
   'dsp.panel.src.modeSwitch': 'ECHO SRC 控制模式',
@@ -878,9 +910,9 @@ const dspLocalTextZhCN: Record<string, string> = {
   'dsp.module.safety.description': '只监控输出链',
   'dsp.module.safety.title': '输出安全',
   'dsp.module.sdm.description': 'DSD / SDM 真实链路',
-  'dsp.module.sdm.title': 'ECHO SDM / DSD（施工中，请勿使用）',
+  'dsp.module.sdm.title': 'ECHO SDM / DSD（测试版）',
   'dsp.panel.sdm.capability': 'Capability',
-  'dsp.panel.sdm.capabilityDetail': 'ECHO 现在可验证 DoP 及独立 PCM -> SDM；SDM 不依赖抽屉里的 DSD 直出开关。',
+  'dsp.panel.sdm.capabilityDetail': 'ECHO 现在可验证 Native DSD、DoP 及独立 PCM -> SDM；SDM 不依赖实验室里的 DSD 直通开关。',
   'dsp.panel.sdm.detail': '显示当前这首歌是否真的走 DSD/DoP/native DSD，或是否实际进入独立 PCM -> SDM 链路。',
   'dsp.panel.sdm.dop': 'DoP passthrough',
   'dsp.panel.sdm.dopDetail': '本地 DSF 在 Exclusive 下尝试 DoP，失败会明确 fallback 到 PCM。',
@@ -898,7 +930,7 @@ const dspLocalTextZhCN: Record<string, string> = {
   'dsp.panel.sdm.modulatorPending': '未路由，查看 Fallback',
   'dsp.panel.sdm.nativeDsd': 'Native DSD',
   'dsp.panel.sdm.noDsdSource': '当前不是 DSD 源',
-  'dsp.panel.sdm.note': 'PCM -> SDM 使用独立 ECHO SDM 链路；抽屉里的 DoP 只服务原生 DSD 直出。',
+  'dsp.panel.sdm.note': 'PCM -> SDM 使用独立 ECHO SDM 链路；实验室里的 DSD 直通只服务原生 DSD 源。',
   'dsp.panel.sdm.output': 'Actual output',
   'dsp.panel.sdm.oversampling': 'PCM oversampling',
   'dsp.panel.sdm.oversampling1x': 'Oversampling 1x',
@@ -918,14 +950,14 @@ const dspLocalTextZhCN: Record<string, string> = {
   'dsp.panel.sdm.badge.safe': '旁路安全',
   'dsp.panel.sdm.compute': 'SDM Compute',
   'dsp.panel.sdm.compute.cpuDetail': 'CPU 实时路径已接入第一版 PCM -> SDM DoP。',
-  'dsp.panel.sdm.compute.cudaDetail': 'NVIDIA CUDA 仍在接入中；当前会明确提示并回落 CPU。',
+  'dsp.panel.sdm.compute.cudaDetail': '包含原生 CUDA 递归调制器与真机性能准入；若 CPU 更快，CUDA 仍可加速 FIR 过采样。',
   'dsp.panel.sdm.mode': 'SDM 模式',
   'dsp.panel.sdm.mode.dsdPassthrough': 'DSD Passthrough',
   'dsp.panel.sdm.mode.dsdPassthroughDetail': '只处理原生 DSD 源，走 DoP，不经过 PCM 升频。',
   'dsp.panel.sdm.mode.off': '关闭 SDM',
   'dsp.panel.sdm.mode.offDetail': 'PCM 和 ECHO SRC 保持独立；不会启动 DSD/SDM 输出。',
   'dsp.panel.sdm.mode.pcmToDsd': 'PCM -> SDM',
-  'dsp.panel.sdm.mode.pcmToDsdDetail': '接管 PCM 并输出 ECHO SDM raw；不需要打开抽屉里的 DSD 直出开关。',
+  'dsp.panel.sdm.mode.pcmToDsdDetail': '接管 PCM 并输出 ECHO SDM raw；不需要打开实验室里的 DSD 直通开关。',
   'dsp.panel.sdm.quality': 'SDM Quality',
   'dsp.panel.sdm.quality.hifi': 'HiFi',
   'dsp.panel.sdm.quality.hifiDetail': '低电流声 EF1 核心，日常听感优先，减少周期性调制音。',
@@ -1299,6 +1331,8 @@ const dspLocalTextEnUS: Record<string, string> = {
   'dsp.panel.src.mode.family4xDetail': 'Upsample the 44.1k family to 176.4k and the 48k family to 192k.',
   'dsp.panel.src.mode.family8x': '8x Ultra',
   'dsp.panel.src.mode.family8xDetail': 'Experimental: upsample the 44.1k family to 352.8k and the 48k family to 384k.',
+  'dsp.panel.src.mode.compatibility48': '48 kHz compatibility',
+  'dsp.panel.src.mode.compatibility48Detail': 'Convert PCM to a fixed 48 kHz for exclusive headphones or audio devices that only accept 48 kHz. Off by default.',
   'dsp.panel.src.mode.off': 'Off',
   'dsp.panel.src.mode.offDetail': 'Keep the source sample rate. ECHO SRC does not affect bit-perfect conditions.',
   'dsp.panel.src.modeSwitch': 'ECHO SRC control mode',
@@ -1355,9 +1389,9 @@ const dspLocalTextEnUS: Record<string, string> = {
   'dsp.module.safety.description': 'Final output monitor',
   'dsp.module.safety.title': 'Output safety',
   'dsp.module.sdm.description': 'DSD / SDM truth path',
-  'dsp.module.sdm.title': 'ECHO SDM / DSD (Work in progress, do not use)',
+  'dsp.module.sdm.title': 'ECHO SDM / DSD (Beta)',
   'dsp.panel.sdm.capability': 'Capability',
-  'dsp.panel.sdm.capabilityDetail': 'ECHO can verify DoP and independent PCM -> SDM. SDM does not depend on the drawer DSD direct switches.',
+  'dsp.panel.sdm.capabilityDetail': 'ECHO can verify Native DSD, DoP, and independent PCM -> SDM. SDM does not depend on the Lab DSD passthrough switch.',
   'dsp.panel.sdm.detail': 'Shows whether the current track really uses DSD, DoP, native DSD, or the independent PCM -> SDM path.',
   'dsp.panel.sdm.dop': 'DoP passthrough',
   'dsp.panel.sdm.dopDetail': 'Local DSF attempts DoP under Exclusive; failures are explicit PCM fallback.',
@@ -1375,7 +1409,7 @@ const dspLocalTextEnUS: Record<string, string> = {
   'dsp.panel.sdm.modulatorPending': 'Not routed; check Fallback',
   'dsp.panel.sdm.nativeDsd': 'Native DSD',
   'dsp.panel.sdm.noDsdSource': 'Current source is not DSD',
-  'dsp.panel.sdm.note': 'PCM -> SDM uses the independent ECHO SDM path; drawer DoP is for native DSD passthrough only.',
+  'dsp.panel.sdm.note': 'PCM -> SDM uses the independent ECHO SDM path; the Lab DSD passthrough switch is only for native DSD sources.',
   'dsp.panel.sdm.output': 'Actual output',
   'dsp.panel.sdm.oversampling': 'PCM oversampling',
   'dsp.panel.sdm.oversampling1x': 'Oversampling 1x',
@@ -1395,14 +1429,14 @@ const dspLocalTextEnUS: Record<string, string> = {
   'dsp.panel.sdm.badge.safe': 'Bypass safe',
   'dsp.panel.sdm.compute': 'SDM Compute',
   'dsp.panel.sdm.compute.cpuDetail': 'CPU realtime path is routed for the first PCM -> SDM DoP implementation.',
-  'dsp.panel.sdm.compute.cudaDetail': 'NVIDIA CUDA is still being routed; this build warns and falls back to CPU.',
+  'dsp.panel.sdm.compute.cudaDetail': 'Includes a native CUDA recursive modulator with device admission; CUDA can still accelerate FIR oversampling when the CPU modulator is faster.',
   'dsp.panel.sdm.mode': 'SDM mode',
   'dsp.panel.sdm.mode.dsdPassthrough': 'DSD passthrough',
   'dsp.panel.sdm.mode.dsdPassthroughDetail': 'Handles native DSD sources through DoP without PCM upsampling.',
   'dsp.panel.sdm.mode.off': 'Off',
   'dsp.panel.sdm.mode.offDetail': 'PCM and ECHO SRC stay independent; no DSD/SDM output is requested.',
   'dsp.panel.sdm.mode.pcmToDsd': 'PCM -> SDM',
-  'dsp.panel.sdm.mode.pcmToDsdDetail': 'Takes over PCM and outputs ECHO SDM raw; drawer DSD direct switches are not required.',
+  'dsp.panel.sdm.mode.pcmToDsdDetail': 'Takes over PCM and outputs ECHO SDM raw; the Lab DSD passthrough switch is not required.',
   'dsp.panel.sdm.quality': 'SDM quality',
   'dsp.panel.sdm.quality.hifi': 'HiFi',
   'dsp.panel.sdm.quality.hifiDetail': 'Low-tonal EF1 core for daily listening with fewer periodic modulation tones.',
@@ -1624,11 +1658,971 @@ const dspLocalTextEnUS: Record<string, string> = {
   'dsp.status.systemOutput': 'System output',
 };
 
+const dspLocalTextZhTW: Record<string, string> = {
+  // Traditional Chinese (OpenCC from zh-CN)
+  'dsp.action.clear': '清除',
+  'dsp.action.disableChannel': '關閉聲道補償',
+  'dsp.action.disableFir': '關閉 FIR',
+  'dsp.action.enableChannel': '開啟聲道補償',
+  'dsp.action.enableFir': '啟用 FIR',
+  'dsp.action.enableFirSafely': '安全啟用',
+  'dsp.action.importIr': '匯入 IR',
+  'dsp.action.refresh': '重新整理狀態',
+  'dsp.action.reset': '重置',
+  'dsp.action.save': '儲存',
+  'dsp.aria.chain': 'DSP 模組鏈',
+  'dsp.aria.modules': 'DSP 模組',
+  'dsp.aria.pipeline': 'DSP 路徑',
+  'dsp.aria.workspace': 'DSP 工作區',
+  'dsp.brand.subtitle': 'Signal Control',
+  'dsp.module.src.description': 'PCM 取樣率轉換',
+  'dsp.module.src.title': 'ECHO SRC / 升頻',
+  'dsp.panel.src.abBypass': 'A/B 原生',
+  'dsp.panel.src.abRestore': '恢復升頻',
+  'dsp.panel.src.active': '正在升頻',
+  'dsp.panel.src.bypassDsd': 'DSD 輸出旁路',
+  'dsp.panel.src.bypassShared': '共享輸出旁路',
+  'dsp.panel.src.detail': '獨立於 HQPlayer 的本機 ECHO SRC。預設關閉；開啟後會進入 DSP 路徑並不再標記 bit-perfect。',
+  'dsp.panel.src.engine': '引擎',
+  'dsp.panel.src.advanced': '高階',
+  'dsp.panel.src.advancedSummary': '高階模式顯示 poly-sinc / FIR / GPU 計劃；播放時以即時 Signal Path 的 active/fallback 狀態為準。',
+  'dsp.panel.src.compute': 'Compute',
+  'dsp.panel.src.compute.cpuDetail': '預設即時路徑：穩定、低排程風險，先保證播放可靠。',
+  'dsp.panel.src.compute.cpuStatus': 'CPU 即時路徑，未請求 CUDA。',
+  'dsp.panel.src.compute.gpuBadge': '顯示卡',
+  'dsp.panel.src.compute.gpuDetail': '實驗路徑：給超長 filter / 大緩衝規劃，接入前必須單獨驗證延遲和掉幀。',
+  'dsp.panel.src.dither.activeStatus': '整數輸出已生效 / {bits}-bit',
+  'dsp.panel.src.dither.floatSafe': 'Float 輸出不處理',
+  'dsp.panel.src.dither.floatStatus': '當前是 float 輸出，dither 自動旁路',
+  'dsp.panel.src.dither.highpassDetail': '高通 TPDF：把抖動能量推離低頻，適合 16-bit 輸出和安靜尾音。',
+  'dsp.panel.src.dither.integerOnly': '僅整數輸出',
+  'dsp.panel.src.dither.ns5Detail': '5 階 noise shaping：輕量塑形，降低中低頻量化感。',
+  'dsp.panel.src.dither.ns9Detail': '9 階 noise shaping：更激進地推高頻噪聲，適合 24-bit/高餘量鏈路。',
+  'dsp.panel.src.dither.offDetail': '保持 Float32 PCM 鏈路原樣；預設關閉，避免無意義加噪。',
+  'dsp.panel.src.dither.offStatus': '關閉',
+  'dsp.panel.src.dither.pendingStatus': '等待整數輸出格式',
+  'dsp.panel.src.dither.title': 'PCM Dither / Noise Shaping',
+  'dsp.panel.src.dither.tpdfDetail': '標準 TPDF：最穩妥的量化抖動，適合 16-bit/24-bit 整數輸出。',
+  'dsp.panel.src.dither.ultraDetail': 'Ultra shaped：最高階塑形，尾音更乾淨但更挑輸出鏈路和餘量。',
+  'dsp.panel.src.ladder.hifi': 'HiFi',
+  'dsp.panel.src.ladder.hifiDetail': '4x / gauss-long 1x / hb Nx / CPU，聽感更柔和，即時壓力適中。',
+  'dsp.panel.src.ladder.insane': 'Insane / Offline-like',
+  'dsp.panel.src.ladder.insaneDetail': '8x / apod-long + ext2-xl / CUDA，超吃配置，用來衝擊接近離線的 PCM 體驗。',
+  'dsp.panel.src.ladder.latencyExtreme': '超高延遲',
+  'dsp.panel.src.ladder.latencyHigh': '高延遲',
+  'dsp.panel.src.ladder.latencyLow': '低延遲',
+  'dsp.panel.src.ladder.latencyMedium': '中等延遲',
+  'dsp.panel.src.ladder.realtimeSafe': 'Realtime Safe',
+  'dsp.panel.src.ladder.realtimeSafeDetail': '4x / hb 1x+Nx / CPU，優先不卡頓和 UI 可控。',
+  'dsp.panel.src.ladder.reference': 'Reference',
+  'dsp.panel.src.ladder.referenceDetail': '8x / apod-minring 1x / ext2-long Nx / CUDA，優先聽感差異和透明度。',
+  'dsp.panel.src.ladder.title': 'CPU/GPU Quality Ladder',
+  'dsp.panel.src.cuda.pending': 'CUDA runtime ready; FIR worker pending.',
+  'dsp.panel.src.cuda.ready': '{device} / {memory} / Driver {driver} / CUDA {cuda}',
+  'dsp.panel.src.cuda.lowUtilization': '即時音訊是小塊低延遲任務，GPU 佔用低不代表沒生效；以當前播放狀態裡的 CUDA FIR active 為準。',
+  'dsp.panel.src.cuda.unavailable': 'CUDA 不可用：{reason}',
+  'dsp.panel.src.cuda.guide.driverStep1': '安裝或更新 NVIDIA App / 官方 GeForce、Studio、RTX 驅動。',
+  'dsp.panel.src.cuda.guide.driverStep2': '安裝完成後重啟 Windows，再重新開啟 ECHO。',
+  'dsp.panel.src.cuda.guide.driverStep3': '回到這裡重新整理狀態；如果仍不可用，確認系統裡能執行 nvidia-smi。',
+  'dsp.panel.src.cuda.guide.driverTitle': '需要安裝 NVIDIA 驅動',
+  'dsp.panel.src.cuda.guide.genericStep1': '先更新 NVIDIA 官方驅動並重啟系統。',
+  'dsp.panel.src.cuda.guide.genericStep2': '重新開啟 ECHO 後重新整理狀態。',
+  'dsp.panel.src.cuda.guide.genericStep3': '若仍失敗，暫時使用 CPU FIR / SOXR 並檢視診斷原因。',
+  'dsp.panel.src.cuda.guide.genericTitle': 'CUDA 需要檢查',
+  'dsp.panel.src.cuda.guide.problem': '檢測結果：{reason}',
+  'dsp.panel.src.cuda.guide.runtimeStep1': '更新 NVIDIA 驅動後重啟系統。',
+  'dsp.panel.src.cuda.guide.runtimeStep2': '先改用較輕 filter 或降低升頻倍率測試穩定性。',
+  'dsp.panel.src.cuda.guide.runtimeStep3': '如果繼續失敗，ECHO 會自動回落 CPU FIR，不會靜默假裝 GPU 生效。',
+  'dsp.panel.src.cuda.guide.runtimeTitle': 'CUDA 執行時失敗',
+  'dsp.panel.src.cuda.guide.title': 'CUDA 安裝指引',
+  'dsp.panel.src.cuda.guide.workerStep1': '這通常不是使用者驅動問題，而是當前 ECHO 包內缺少 CUDA FIR 元件。',
+  'dsp.panel.src.cuda.guide.workerStep2': '安裝帶 CUDA FIR worker 的 ECHO 版本，或用 CUDA 構建配置重新打包。',
+  'dsp.panel.src.cuda.guide.workerStep3': '在元件補齊前會自動回落 CPU FIR / SOXR。',
+  'dsp.panel.src.cuda.guide.workerTitle': 'ECHO CUDA 元件缺失',
+  'dsp.panel.src.cuda.reason.driverMissing': '未檢測到 NVIDIA 驅動或 nvidia-smi',
+  'dsp.panel.src.cuda.reason.driverUnreadable': 'NVIDIA 驅動執行檔返回異常',
+  'dsp.panel.src.cuda.reason.workerCpuOnly': 'ECHO CUDA worker 不是 CUDA 構建',
+  'dsp.panel.src.cuda.reason.workerMissing': 'ECHO CUDA worker 未隨安裝包提供',
+  'dsp.panel.src.cuda.reason.workerRuntime': 'CUDA worker 播放中失敗或超時',
+  'dsp.panel.src.cuda.reason.workerStopped': 'CUDA worker 已隨暫停或切換停止，等待下一次播放狀態',
+  'dsp.panel.src.filter': 'Filter',
+  'dsp.panel.src.filter.apodFastDetail': 'apodizing 快速檔：較早 cutoff / 中等 taps，用來壓老錄音或 MP3 殘留 ringing。',
+  'dsp.panel.src.filter.apodGaussDetail': 'apodizing 高斯窗：更柔和的提前滾降，聲音會更順滑但高頻邊緣更剋制。',
+  'dsp.panel.src.filter.apodLongDetail': 'apodizing 長 taps：提前滾降 + 高 stopband，優先處理舊 ADC / brickwall 前振鈴。',
+  'dsp.panel.src.filter.apodMinringDetail': 'apodizing minimum phase：降低前振鈴並主動衰減原始檔 ringing，聽感變化最明顯。',
+  'dsp.panel.src.filter.closedFormDetail': '封閉形式 sinc 插值方向，後續做基準對照。',
+  'dsp.panel.src.filter.collapse': '收起精選',
+  'dsp.panel.src.filter.expand': '展開全部',
+  'dsp.panel.src.filter.gpuCpu': 'CPU / 入門 GPU',
+  'dsp.panel.src.filter.gpuRtx5060': '建議 RTX 5060+',
+  'dsp.panel.src.filter.gpuRtx5070': '建議 RTX 5070+',
+  'dsp.panel.src.filter.gpuRtx5070Ti': '建議 RTX 5070 Ti+',
+  'dsp.panel.src.filter.gpuRtx5080': '建議 RTX 5080+',
+  'dsp.panel.src.filter.gpuRtx5090': '建議 RTX 5090 / 32GB',
+  'dsp.panel.src.filter.loadHigh': '高負載',
+  'dsp.panel.src.filter.loadExtreme': '極高負載',
+  'dsp.panel.src.filter.loadLight': '輕負載',
+  'dsp.panel.src.filter.loadMedium': '中負載',
+  'dsp.panel.src.filter.loadResearch': '研究',
+  'dsp.panel.src.filter.loadVeryHigh': '很高',
+  'dsp.panel.src.filter.minringFirLpDetail': 'minimum-ringing FIR，低預振鈴，聲音更貼近。',
+  'dsp.panel.src.filter.minringFirMpDetail': 'minimum-ringing 中等精度檔，降低前振鈴並保留更多透明度。',
+  'dsp.panel.src.filter.minringFirXlaDetail': 'minimum-ringing 超長檔，偏自然聽感但計算量明顯更高。',
+  'dsp.panel.src.filter.minringFirSoftDetail': 'minimum-ringing soft：高斯窗 + minimum phase，偏柔和、靠前、少刺激。',
+  'dsp.panel.src.filter.minringFirExtremeDetail': 'minimum-ringing extreme：3071 taps minimum phase，衝聽感變化和瞬態自然感。',
+  'dsp.panel.src.filter.polySincExt2HiresLpDetail': 'ext2 高取樣率線性相位檔，給 Nx 路徑準備的高精度版本。',
+  'dsp.panel.src.filter.polySincExt2HiresMpDetail': 'ext2 高取樣率 minimum phase 檔，降低前振鈴並保留空氣感。',
+  'dsp.panel.src.filter.polySincExt3LongDetail': 'ext3 長 taps 線性相位：更窄 transition、更高 stopband，透明度優先但延遲明顯。',
+  'dsp.panel.src.filter.polySincExt3XlaDetail': 'ext3 4095 taps 極限線性相位：給 RTX 5090 / 離線感 A/B 的壓力檔。',
+  'dsp.panel.src.filter.polySincExt2ShortDetail': 'ext2 短 taps 檔，保留高精度方向但更適合即時。',
+  'dsp.panel.src.filter.polySincExt2LongDetail': '長 taps 線性相位，透明優先，接近 long 檔方向。',
+  'dsp.panel.src.filter.polySincExt2MediumDetail': 'ext2 中 taps 檔，透明度和負載更平衡。',
+  'dsp.panel.src.filter.polySincExt2XlDetail': 'ext2 3071 taps 極限檔，給高階 CUDA 和離線級聽感測試。',
+  'dsp.panel.src.filter.polySincExt2XlaDetail': '超長 taps，面向 8x / Ultra 的後續高精度檔。',
+  'dsp.panel.src.filter.polySincGaussHiresLpDetail': '高解析度線性相位高斯窗，柔和但保持定位。',
+  'dsp.panel.src.filter.polySincGaussHiresMpDetail': '高解析度 minimum phase 高斯窗，降低前振鈴感。',
+  'dsp.panel.src.filter.polySincGaussLongDetail': '高斯窗 poly-sinc，聽感更柔和，兼顧瞬態。',
+  'dsp.panel.src.filter.polySincGaussXlDetail': '高斯 3071 taps 極限檔，柔和取向但非常吃顯示卡。',
+  'dsp.panel.src.filter.polySincGaussXlaDetail': '高斯超長檔，給 A/B 和測量對照準備。',
+  'dsp.panel.src.filter.polySincGaussXtrLongDetail': 'gauss-xtr 長檔：更強高斯整形，聲音更順滑、邊緣更收。',
+  'dsp.panel.src.filter.polySincGaussXtrXlaDetail': 'gauss-xtr 4095 taps：極柔和超長檔，用來試“厚、順、暗一點”的方向。',
+  'dsp.panel.src.filter.polySincHbDetail': '半帶 poly-sinc，適合 2x/4x 先做穩定即時版。',
+  'dsp.panel.src.filter.polySincXtrLpDetail': 'xtr 線性相位長檔，透明取向，對即時效能要求更高。',
+  'dsp.panel.src.filter.polySincXtrShortLpDetail': 'xtr short 線性相位，給即時和透明度之間的折中。',
+  'dsp.panel.src.filter.polySincXtrShortMpDetail': 'xtr short minimum phase，偏自然聽感和低前振鈴。',
+  'dsp.panel.src.filter.polySincXtrXlaDetail': 'xtr xla minimum phase 極限檔，偏聽感但非常吃配置。',
+  'dsp.panel.src.filter.polySincXtrMpDetail': '中相位方向，減少前振鈴感，適合聽感取向。',
+  'dsp.panel.src.filter.apodXtrDetail': 'apodizing xtr：3071 taps 提前滾降，強力清理舊 brickwall/filter ringing。',
+  'dsp.panel.src.filter.apodExtremeDetail': 'apodizing extreme：4095 taps minimum phase，最大化“源 ringing 清理”聽感。',
+  'dsp.panel.src.filter.brickwallLongDetail': 'brickwall-long：高截止、窄 transition、強 stopband，用來對照最硬最透明方向。',
+  'dsp.panel.src.filter.softKneeLongDetail': 'soft-knee-long：提前緩慢滾降，犧牲一點邊緣換順滑和耐聽。',
+  'dsp.panel.src.filter.selected': '已選 Filter',
+  'dsp.panel.src.filter.sincLDetail': 'sinc 大檔，作為高精度基準和聽感對照。',
+  'dsp.panel.src.filter.sincLongHDetail': 'sinc-long 高精度版，作為更重的線性相位基準。',
+  'dsp.panel.src.filter.sincLongDetail': '長 sinc 基線，用來校準 FIR 設計和聽感差異。',
+  'dsp.panel.src.filter.sincMDetail': 'sinc 中檔，負載較低的基準參考。',
+  'dsp.panel.src.filter.sincXlaDetail': 'sinc xla 超長基準檔，用來壓力測試和對照極限 filter。',
+  'dsp.panel.src.kicker': '取樣率轉換',
+  'dsp.panel.src.mode': '模式',
+  'dsp.panel.src.mode.family2x': '2x PCM',
+  'dsp.panel.src.mode.family2xDetail': '44.1k 家族升到 88.2k，48k 家族升到 96k。',
+  'dsp.panel.src.mode.family4x': '4x PCM',
+  'dsp.panel.src.mode.family4xDetail': '44.1k 家族升到 176.4k，48k 家族升到 192k。',
+  'dsp.panel.src.mode.family8x': '8x Ultra',
+  'dsp.panel.src.mode.family8xDetail': '實驗檔：44.1k 家族升到 352.8k，48k 家族升到 384k。',
+  'dsp.panel.src.mode.compatibility48': '48 kHz 相容',
+  'dsp.panel.src.mode.compatibility48Detail': '將 PCM 固定轉換到 48 kHz，適合只接受 48 kHz 的獨佔耳機或音效卡；預設關閉。',
+  'dsp.panel.src.mode.off': '關閉',
+  'dsp.panel.src.mode.offDetail': '保持源取樣率，Bit-perfect 條件不受 ECHO SRC 影響。',
+  'dsp.panel.src.modeSwitch': 'ECHO SRC 控制模式',
+  'dsp.panel.src.native': '原生直通',
+  'dsp.panel.src.normal': '普通',
+  'dsp.panel.src.notConnected': '未接入播放鏈路',
+  'dsp.panel.src.note': '只處理 PCM。共享輸出、DSD 輸出或 HQPlayer 接管時不會疊加升頻。',
+  'dsp.panel.src.pending': '等待下一次播放規劃',
+  'dsp.panel.src.precision': '精度',
+  'dsp.panel.src.quality': '質量策略',
+  'dsp.panel.src.quality.balanced': 'Balanced',
+  'dsp.panel.src.quality.balancedDetail': '保持原有 SOXR 檔位，兼顧穩定和開銷。',
+  'dsp.panel.src.quality.lowLatency': 'Low latency',
+  'dsp.panel.src.quality.lowLatencyDetail': '降低 SRC 開銷，適合低延遲輸出。',
+  'dsp.panel.src.quality.transparent': 'Transparent',
+  'dsp.panel.src.quality.transparentDetail': '最高精度 SOXR，優先透明和低失真。',
+  'dsp.panel.src.recommended': '推薦',
+  'dsp.panel.src.route': '路徑',
+  'dsp.panel.src.sourceRate': '源取樣率',
+  'dsp.panel.src.targetRate': '目標取樣率',
+  'dsp.stage.src': '取樣率',
+  'dsp.error.channelBridge': '聲道工具不可用。',
+  'dsp.error.desktopBridge': '桌面橋接不可用。',
+  'dsp.error.dspBridge': 'DSP 橋接不可用。',
+  'dsp.error.firBridge': 'FIR 橋接不可用。',
+  'dsp.label.bitPerfect': 'Bit-perfect',
+  'dsp.label.currentModule': '當前模組',
+  'dsp.label.module': 'DSP 模組',
+  'dsp.label.moduleStatus': '模組狀態',
+  'dsp.label.output': '輸出',
+  'dsp.metric.bitPerfect': 'Bit-perfect',
+  'dsp.metric.clipping': '削波',
+  'dsp.metric.dsp': 'DSP',
+  'dsp.metric.inputPeak': '輸入峰值',
+  'dsp.metric.ir': 'IR',
+  'dsp.metric.latency': '延遲',
+  'dsp.metric.liveHeadroom': '即時餘量',
+  'dsp.metric.truePeak': 'True Peak',
+  'dsp.metric.mode': '模式',
+  'dsp.metric.outputEstimate': '輸出估算',
+  'dsp.metric.reason': '原因',
+  'dsp.metric.sampleRate': '取樣率',
+  'dsp.metric.taps': 'Taps',
+  'dsp.module.channel.description': '平衡、延遲、Mono',
+  'dsp.module.channel.title': '聲道工具',
+  'dsp.module.eq.description': '頻段、前級、預設',
+  'dsp.module.eq.title': '引數 EQ',
+  'dsp.module.headroom.description': 'DSP 前餘量預留',
+  'dsp.module.headroom.title': 'Headroom',
+  'dsp.module.headphone.description': 'OPRA 耳機曲線',
+  'dsp.module.headphone.title': '耳機校正',
+  'dsp.module.room.description': '只處理 IR 卷積',
+  'dsp.module.room.title': 'FIR / 房間校正',
+  'dsp.module.safety.description': '只監控輸出鏈',
+  'dsp.module.safety.title': '輸出安全',
+  'dsp.module.sdm.description': 'DSD / SDM 真實鏈路',
+  'dsp.module.sdm.title': 'ECHO SDM / DSD（測試版）',
+  'dsp.panel.sdm.capability': 'Capability',
+  'dsp.panel.sdm.capabilityDetail': 'ECHO 現在可驗證 Native DSD、DoP 及獨立 PCM -> SDM；SDM 不依賴實驗室裡的 DSD 直通開關。',
+  'dsp.panel.sdm.detail': '顯示當前這首歌是否真的走 DSD/DoP/native DSD，或是否實際進入獨立 PCM -> SDM 鏈路。',
+  'dsp.panel.sdm.dop': 'DoP passthrough',
+  'dsp.panel.sdm.dopDetail': '本地 DSF 在 Exclusive 下嘗試 DoP，失敗會明確 fallback 到 PCM。',
+  'dsp.panel.sdm.fallback': 'Fallback',
+  'dsp.panel.sdm.guard': 'Guard',
+  'dsp.panel.sdm.guardDetail': 'PCM -> SDM 會自動套用該檔位建議 headroom，並對極弱訊號進入 DSD idle 以壓低底噪。',
+  'dsp.panel.sdm.kicker': 'DSD / sigma-delta monitor',
+  'dsp.panel.sdm.modulator': 'PCM -> SDM modulator',
+  'dsp.panel.sdm.modulatorCoefficients': '反饋係數',
+  'dsp.panel.sdm.modulatorDither': 'Dither',
+  'dsp.panel.sdm.modulatorHeadroom': '建議餘量',
+  'dsp.panel.sdm.modulatorOrder': '階數',
+  'dsp.panel.sdm.modulatorProfile': 'Modulator 引數',
+  'dsp.panel.sdm.modulatorStability': '穩定限制',
+  'dsp.panel.sdm.modulatorPending': '未路由，檢視 Fallback',
+  'dsp.panel.sdm.nativeDsd': 'Native DSD',
+  'dsp.panel.sdm.noDsdSource': '當前不是 DSD 源',
+  'dsp.panel.sdm.note': 'PCM -> SDM 使用獨立 ECHO SDM 鏈路；實驗室裡的 DSD 直通只服務原生 DSD 源。',
+  'dsp.panel.sdm.output': 'Actual output',
+  'dsp.panel.sdm.oversampling': 'PCM oversampling',
+  'dsp.panel.sdm.oversampling1x': 'Oversampling 1x',
+  'dsp.panel.sdm.oversampling1xDetail': '低取樣率 PCM 入口濾波傾向；CUDA 4x/8x 會作為第一段 ECHO FIR 執行。',
+  'dsp.panel.sdm.oversamplingEffective': '當前槽位',
+  'dsp.panel.sdm.oversamplingNx': 'Oversampling Nx',
+  'dsp.panel.sdm.oversamplingNxDetail': '高取樣率或多倍頻階段濾波傾向；CUDA 4x/8x 會作為後續 ECHO FIR 階段執行。',
+  'dsp.panel.sdm.oversamplingRoute': '前端上取樣',
+  'dsp.panel.sdm.oversamplingTruth': '真實執行看 Engine；CPU 或 16x 路徑會安全回到 SOXR 28。',
+  'dsp.panel.sdm.pcmFallback': 'PCM fallback',
+  'dsp.panel.sdm.requested': 'Requested',
+  'dsp.panel.sdm.source': 'Source',
+  'dsp.panel.sdm.transport': 'Transport',
+  'dsp.panel.sdm.actual': '實際生效',
+  'dsp.panel.sdm.badge.planned': '實驗鏈路',
+  'dsp.panel.sdm.badge.real': '真實鏈路',
+  'dsp.panel.sdm.badge.safe': '旁路安全',
+  'dsp.panel.sdm.compute': 'SDM Compute',
+  'dsp.panel.sdm.compute.cpuDetail': 'CPU 即時路徑已接入第一版 PCM -> SDM DoP。',
+  'dsp.panel.sdm.compute.cudaDetail': '包含原生 CUDA 遞迴調變器與真機效能准入；若 CPU 更快，CUDA 仍可加速 FIR 過取樣。',
+  'dsp.panel.sdm.mode': 'SDM 模式',
+  'dsp.panel.sdm.mode.dsdPassthrough': 'DSD Passthrough',
+  'dsp.panel.sdm.mode.dsdPassthroughDetail': '只處理原生 DSD 源，走 DoP，不經過 PCM 升頻。',
+  'dsp.panel.sdm.mode.off': '關閉 SDM',
+  'dsp.panel.sdm.mode.offDetail': 'PCM 和 ECHO SRC 保持獨立；不會啟動 DSD/SDM 輸出。',
+  'dsp.panel.sdm.mode.pcmToDsd': 'PCM -> SDM',
+  'dsp.panel.sdm.mode.pcmToDsdDetail': '接管 PCM 並輸出 ECHO SDM raw；不需要開啟實驗室裡的 DSD 直通開關。',
+  'dsp.panel.sdm.quality': 'SDM Quality',
+  'dsp.panel.sdm.quality.hifi': 'HiFi',
+  'dsp.panel.sdm.quality.hifiDetail': '低電流聲 EF1 核心，日常聽感優先，減少週期性調變音。',
+  'dsp.panel.sdm.quality.insane': 'Insane',
+  'dsp.panel.sdm.quality.insaneDetail': '激進 EF2 核心，優先壓週期性電流聲，建議高餘量和高階 GPU。',
+  'dsp.panel.sdm.quality.reference': 'Reference',
+  'dsp.panel.sdm.quality.referenceDetail': 'EF2 參考調變，優先穩定和低週期性噪聲。',
+  'dsp.panel.sdm.quality.safe': 'Realtime Safe',
+  'dsp.panel.sdm.quality.safeDetail': '保守 EF1 即時安全檔，先壓電流聲和 idle tone。',
+  'dsp.panel.sdm.runtime.dsdPassthrough': '當前曲目正在走 DSD passthrough',
+  'dsp.panel.sdm.runtime.off': '當前曲目沒有走 SDM',
+  'dsp.panel.sdm.runtime.pcmToSdmActive': 'PCM -> SDM 正在實際生效',
+  'dsp.panel.sdm.runtime.pcmToSdmNotRouted': '當前鏈路未路由 PCM -> SDM，請看 Fallback 原因',
+  'dsp.panel.sdm.separateNote': 'SDM 與 PCM/ECHO SRC 分開儲存；只有當前播放鏈路滿足條件時才會實際接管 PCM。',
+  'dsp.panel.sdm.target': 'Target DSD rate',
+  'dsp.panel.sdm.target.dsd128Detail': '常用即時目標；PCM -> SDM 由 ECHO SDM 獨立鏈路實際接管。',
+  'dsp.panel.sdm.target.dsd256Detail': '高倍率即時 PCM -> SDM 目標；避免走普通 DoP 直出。',
+  'dsp.panel.sdm.target.dsd512Detail': '極限規劃檔，未來只建議 CUDA / 離線級路徑，當前會回落 PCM。',
+  'dsp.panel.sdm.target.dsd64Detail': '輕量目標；用於驗證 ECHO SDM 鏈路是否能穩定出聲。',
+  'dsp.panel.channel.advanced': '高階聲道',
+  'dsp.panel.channel.balance': '聲像平衡',
+  'dsp.panel.channel.bandCompensation': '分頻段左右補償',
+  'dsp.panel.channel.bandHigh': '高頻',
+  'dsp.panel.channel.bandLow': '低頻',
+  'dsp.panel.channel.bandMid': '中頻',
+  'dsp.panel.channel.centered': '中心穩定',
+  'dsp.panel.channel.compensationDetail': '預設只降低偏響一側，適合不可維修的耳機偏音補償。',
+  'dsp.panel.channel.compensationOff': '已關閉',
+  'dsp.panel.channel.compensationOn': '已開啟',
+  'dsp.panel.channel.compensationTitle': '偏音補償',
+  'dsp.panel.channel.constantPower': '恆功率',
+  'dsp.panel.channel.delaySkew': '延遲差',
+  'dsp.panel.channel.he90Hint': '建議從 0.25 dB 開始，邊聽居中人聲邊微調。',
+  'dsp.panel.channel.invertLeft': '左聲道反相',
+  'dsp.panel.channel.invertRight': '右聲道反相',
+  'dsp.panel.channel.kicker': '聲道工具',
+  'dsp.panel.channel.leansLeft': '偏左 {value}',
+  'dsp.panel.channel.leansRight': '偏右 {value}',
+  'dsp.panel.channel.leftDelay': '左聲道延遲',
+  'dsp.panel.channel.leftGain': '左聲道增益',
+  'dsp.panel.channel.leftOutput': '左輸出',
+  'dsp.panel.channel.leftTooLoud': '左側偏響',
+  'dsp.panel.channel.monoTools': 'Mono / 檢查',
+  'dsp.panel.channel.mono.left': '只聽左聲道',
+  'dsp.panel.channel.mono.off': '關閉 Mono',
+  'dsp.panel.channel.mono.right': '只聽右聲道',
+  'dsp.panel.channel.mono.sum': '合併 Mono',
+  'dsp.panel.channel.note': '聲道工具已從引數 EQ 中分離，適合檢查聲像、左右耳差異和單聲道相容。',
+  'dsp.panel.channel.modePro': 'Pro',
+  'dsp.panel.channel.modeSimple': 'Simple',
+  'dsp.panel.channel.presetDefaultName': '耳機偏音補償',
+  'dsp.panel.channel.presetEmpty': '還沒有儲存的聲道方案。',
+  'dsp.panel.channel.presetName': '方案名稱',
+  'dsp.panel.channel.presetPrompt': '給這個耳機方案起個名字',
+  'dsp.panel.channel.presets': '耳機方案',
+  'dsp.panel.channel.phaseTools': '相位 / 路由',
+  'dsp.panel.channel.removePreset': '移除',
+  'dsp.panel.channel.saveCurrent': '儲存當前引數',
+  'dsp.panel.channel.selectPreset': '選擇方案',
+  'dsp.panel.channel.switchPreset': '切換',
+  'dsp.panel.channel.renamePreset': '重新命名',
+  'dsp.panel.channel.renamePrompt': '重新命名這個耳機方案',
+  'dsp.panel.channel.rightDelay': '右聲道延遲',
+  'dsp.panel.channel.rightGain': '右聲道增益',
+  'dsp.panel.channel.rightOutput': '右輸出',
+  'dsp.panel.channel.rightTooLoud': '右側偏響',
+  'dsp.panel.channel.step': '步進',
+  'dsp.panel.channel.swap': '交換左右',
+  'dsp.panel.channel.swapCompensation': '交換補償方向',
+  'dsp.panel.channel.safeAttenuation': '靜電耳機建議使用衰減補償，避擴音高輸出電平。',
+  'dsp.panel.channel.compare': 'A/B 對比',
+  'dsp.panel.channel.compareActive': '正在旁路',
+  'dsp.panel.channel.compareHint': '臨時關閉聲道處理，用來對比補償前後的聲像。',
+  'dsp.panel.channel.monoHint': '合併 Mono 會兩邊都響；只聽左/右會靜音另一邊。',
+  'dsp.panel.channel.trimCenter': '偏音清零',
+  'dsp.panel.headroom.applyRecommended': '應用建議',
+  'dsp.panel.headroom.budgetAria': 'Headroom 預算',
+  'dsp.panel.headroom.clipCount': '削波次數',
+  'dsp.panel.headroom.clipCountValue': '{count} 次',
+  'dsp.panel.headroom.guardActive': '已啟用',
+  'dsp.panel.headroom.guardDirect': '直通',
+  'dsp.panel.headroom.guardStandby': '待命',
+  'dsp.panel.headroom.guardState': '保護狀態',
+  'dsp.panel.headroom.kicker': 'Headroom 管理',
+  'dsp.panel.headroom.lastClip': '最近削波',
+  'dsp.panel.headroom.makeConservative': '設為 -6 dB',
+  'dsp.panel.headroom.makeSafe': '設為 {value}',
+  'dsp.panel.headroom.modeAria': 'Headroom 模式',
+  'dsp.panel.headroom.modeDaily': '日常',
+  'dsp.panel.headroom.modeDailyDetail': '輕量 DSP 預留。',
+  'dsp.panel.headroom.modeDirect': '直通',
+  'dsp.panel.headroom.modeDirectDetail': '不額外降低電平。',
+  'dsp.panel.headroom.modeDsp': 'DSP',
+  'dsp.panel.headroom.modeDspDetail': '給 EQ/FIR 留出安全空間。',
+  'dsp.panel.headroom.nextDirect': '保持直通',
+  'dsp.panel.headroom.nextDirectDetail': '當前沒有需要預留的 DSP 風險。',
+  'dsp.panel.headroom.nextHoldRisk': '先降低餘量',
+  'dsp.panel.headroom.nextHoldRiskDetail': '檢測到削波風險，建議先預留 Headroom。',
+  'dsp.panel.headroom.nextProtect': '應用保護餘量',
+  'dsp.panel.headroom.nextProtectDetail': '當前輸出接近滿幅，建議立即降低。',
+  'dsp.panel.headroom.nextReady': '繼續監聽',
+  'dsp.panel.headroom.nextReadyDetail': 'DSP 已有安全餘量。',
+  'dsp.panel.headroom.nextStandby': '保持待命',
+  'dsp.panel.headroom.nextStandbyDetail': '有 DSP 模組開啟，但暫未檢測到風險。',
+  'dsp.panel.headroom.nextStep': '下一步',
+  'dsp.panel.headroom.nextWatch': '觀察輸出',
+  'dsp.panel.headroom.nextWatchDetail': '輸出接近上限，建議留意削波。',
+  'dsp.panel.headroom.noClip': '無記錄',
+  'dsp.panel.headroom.note': 'Headroom 只負責預留電平空間，不再混進 EQ 或 FIR 的具體調音。',
+  'dsp.panel.headroom.presetsAria': 'Headroom 預設',
+  'dsp.panel.headroom.primaryAction': '應用 {value}',
+  'dsp.panel.headroom.reasonChannel': '聲道工具可能提高電平。',
+  'dsp.panel.headroom.reasonClipping': '檢測到削波。',
+  'dsp.panel.headroom.reasonDirect': 'Headroom 只在 DSP 路徑生效；當前 EQ / FIR / 聲道工具都未啟用，原生直通不會被它處理。',
+  'dsp.panel.headroom.reasonEq': 'EQ 曲線可能提高電平。',
+  'dsp.panel.headroom.reasonLive': '即時餘量偏低。',
+  'dsp.panel.headroom.reasonOutput': '輸出估算接近滿幅。',
+  'dsp.panel.headroom.reasonSrcTruePeak': 'ECHO SRC / FIR 可能暴露 intersample peak，建議至少預留 -3 dB。',
+  'dsp.panel.headroom.reasonRoom': 'FIR / 房間校正可能提高電平。',
+  'dsp.panel.headroom.reasonSafe': '當前訊號安全。',
+  'dsp.panel.headroom.recommendation': '建議',
+  'dsp.panel.headroom.recommendationSafe': '安全',
+  'dsp.panel.headroom.reserve': '預留餘量',
+  'dsp.panel.headroom.safePolicy': '安全優先',
+  'dsp.panel.headroom.safetyActions': '快速保護',
+  'dsp.panel.headroom.status': '狀態',
+  'dsp.panel.headroom.statusClose': '接近上限',
+  'dsp.panel.headroom.statusRisk': '存在風險',
+  'dsp.panel.headroom.statusSafe': '安全',
+  'dsp.panel.room.future.recent': '最近 IR',
+  'dsp.panel.room.future.response': '響應預覽',
+  'dsp.panel.room.hero.activeDetail': '卷積正在參與輸出鏈。',
+  'dsp.panel.room.hero.activeTitle': 'FIR 已啟用',
+  'dsp.panel.room.hero.emptyDetail': '匯入 IR 後才能啟用房間校正。',
+  'dsp.panel.room.hero.emptyTitle': '未載入 IR',
+  'dsp.panel.room.hero.loadedDetail': 'IR 已載入，可以啟用。',
+  'dsp.panel.room.hero.loadedTitle': 'IR 已載入',
+  'dsp.panel.room.hero.state': '狀態',
+  'dsp.panel.room.kicker': '空間處理',
+  'dsp.panel.room.nextEnable': '啟用 FIR',
+  'dsp.panel.room.nextEnableDetail': 'IR 已準備好，可以試聽。',
+  'dsp.panel.room.nextImport': '匯入 IR',
+  'dsp.panel.room.nextImportDetail': '先選擇一個卷積檔案。',
+  'dsp.panel.room.nextListen': '繼續試聽',
+  'dsp.panel.room.nextListenDetail': '確認校正後音量和相位正常。',
+  'dsp.panel.room.nextTrim': '降低 Trim',
+  'dsp.panel.room.nextTrimDetail': 'FIR 輸出存在削波風險。',
+  'dsp.panel.room.note': 'FIR / 房間校正只處理卷積和 IR，不再和 EQ 預設混在一起。',
+  'dsp.panel.room.quickTrim': '快速 Trim',
+  'dsp.panel.room.routeTitle': '路徑',
+  'dsp.panel.room.safeEnableHint': '先預留 -6 dB Headroom，再啟用 FIR。',
+  'dsp.panel.room.safetyRisk': '請降低 Trim 或 Headroom。',
+  'dsp.panel.room.safetySafe': '輸出鏈當前安全。',
+  'dsp.panel.room.safetyTitle': '安全',
+  'dsp.panel.room.trim': 'Trim',
+  'dsp.panel.safety.kicker': '輸出安全',
+  'dsp.panel.safety.heroProtectedTitle': '輸出鏈路受保護',
+  'dsp.panel.safety.heroProtectedDetail': 'DSP 正在參與播放，輸出安全會持續監控削波、餘量和 bit-perfect 路徑。',
+  'dsp.panel.safety.heroRiskTitle': '檢測到輸出風險',
+  'dsp.panel.safety.heroRiskDetail': '當前鏈路有削波或餘量風險，先降低 Headroom、EQ 增益或 FIR Trim。',
+  'dsp.panel.safety.heroDirectTitle': '原生直通',
+  'dsp.panel.safety.heroDirectDetail': '沒有啟用 DSP 模組時，播放保持 bit-perfect 候選路徑，輸出安全只做狀態觀察。',
+  'dsp.panel.safety.chainTitle': '當前鏈路',
+  'dsp.panel.safety.checkTitle': '安全檢查',
+  'dsp.panel.safety.nextTitle': '建議動作',
+  'dsp.panel.safety.nextRisk': '先處理餘量',
+  'dsp.panel.safety.nextRiskDetail': '有風險時不要繼續疊加 EQ / FIR 增益，優先降 Headroom 或相關模組 Trim。',
+  'dsp.panel.safety.nextProtected': '繼續監聽',
+  'dsp.panel.safety.nextProtectedDetail': '鏈路處於 DSP 路徑但沒有發現削波風險，可以繼續觀察即時輸出。',
+  'dsp.panel.safety.nextDirect': '保持直通',
+  'dsp.panel.safety.nextDirectDetail': '當前沒有 DSP 處理，適合確認原始輸出、裝置取樣率和 bit-perfect 候選狀態。',
+  'dsp.panel.safety.routeInput': '輸入',
+  'dsp.panel.safety.routeHeadroom': '餘量',
+  'dsp.panel.safety.routeProcess': '處理',
+  'dsp.panel.safety.routeOutput': '輸出',
+  'dsp.panel.safety.checkBitPerfect': 'Bit-perfect',
+  'dsp.panel.safety.checkLimiter': '保護限制器',
+  'dsp.panel.safety.disableLimiter': '關閉保護限制器',
+  'dsp.panel.safety.enableLimiter': '啟用保護限制器',
+  'dsp.panel.safety.limiterBypassed': '已旁路',
+  'dsp.panel.safety.limiterBypassedDetail': '最終保護限制器已關閉，熱輸出可能削波或失真。',
+  'dsp.panel.safety.limiterToggleTitle': '保護限制器',
+  'dsp.panel.safety.checkRoom': 'FIR',
+  'dsp.panel.safety.checkChannel': '聲道工具',
+  'dsp.panel.safety.note': '削波保護顯示僅供參考；最終仍要用耳朵聽是否失真、刺耳或壓縮感過強。',
+  'dsp.room.status.active': '已啟用',
+  'dsp.room.status.empty': '未載入',
+  'dsp.room.status.error': '錯誤',
+  'dsp.room.status.loaded': '已載入',
+  'dsp.stage.input': '輸入',
+  'dsp.stage.output': '輸出',
+  'dsp.stage.shape': '塑形',
+  'dsp.stage.space': '空間',
+  'dsp.stage.stereo': '聲道',
+  'dsp.status.active': '已啟用',
+  'dsp.status.auto': '自動',
+  'dsp.status.balanceActive': '聲道處理中',
+  'dsp.status.bypassed': '已旁路',
+  'dsp.status.candidate': '候選',
+  'dsp.status.clear': '正常',
+  'dsp.status.direct': '直通',
+  'dsp.status.disabledByDsp': 'DSP 路徑',
+  'dsp.status.dspPath': 'DSP 路徑',
+  'dsp.status.flat': 'Flat',
+  'dsp.status.headroomRisk': '餘量風險',
+  'dsp.status.limiterArmed': '待命',
+  'dsp.status.limiting': '正在限幅',
+  'dsp.status.modulesActive': '{count} 個模組啟用',
+  'dsp.status.nativeDirect': 'Bit-perfect 路徑',
+  'dsp.status.noIr': '無 IR',
+  'dsp.status.none': '無',
+  'dsp.status.protected': '已保護',
+  'dsp.status.ready': '就緒',
+  'dsp.status.risk': '風險',
+  'dsp.status.riskDetected': '檢測到風險',
+  'dsp.status.shared': 'shared',
+  'dsp.status.signalProtected': '訊號安全',
+  'dsp.status.stereoDirect': '立體聲直通',
+  'dsp.status.systemOutput': '系統輸出',
+};
+
+const dspLocalTextJaJP: Record<string, string> = {
+  // Japanese local DSP strings
+  'dsp.action.clear': 'クリア',
+  'dsp.action.disableChannel': 'チャンネル補正をオフ',
+  'dsp.action.disableFir': 'FIR をオフ',
+  'dsp.action.enableChannel': 'チャンネル補正をオン',
+  'dsp.action.enableFir': 'FIR をオン',
+  'dsp.action.enableFirSafely': '安全に有効化',
+  'dsp.action.importIr': 'IR をインポート',
+  'dsp.action.refresh': '状態を更新',
+  'dsp.action.reset': 'リセット',
+  'dsp.action.save': '保存',
+  'dsp.aria.chain': 'DSP モジュールチェーン',
+  'dsp.aria.modules': 'DSP モジュール',
+  'dsp.aria.pipeline': 'DSP pipeline',
+  'dsp.aria.workspace': 'DSP ワークスペース',
+  'dsp.brand.subtitle': 'Signal Control',
+  'dsp.module.src.description': 'PCM サンプルレート変換',
+  'dsp.module.src.title': 'ECHO SRC / アップサンプリング',
+  'dsp.panel.src.abBypass': 'A/B ネイティブ',
+  'dsp.panel.src.abRestore': 'アップサンプリングを復元',
+  'dsp.panel.src.active': 'アップサンプリング中',
+  'dsp.panel.src.bypassDsd': 'DSD 出力バイパス',
+  'dsp.panel.src.bypassShared': '共有出力バイパス',
+  'dsp.panel.src.detail': 'A local ECHO SRC engine independent from HQPlayer. It is off by default; once enabled it enters the DSP path and no longer reports bit-perfect.',
+  'dsp.panel.src.engine': 'エンジン',
+  'dsp.panel.src.advanced': '詳細',
+  'dsp.panel.src.advancedSummary': 'Advanced mode shows poly-sinc / FIR / GPU planning; live playback follows the active/fallback state in Signal Path.',
+  'dsp.panel.src.compute': 'Compute',
+  'dsp.panel.src.compute.cpuDetail': 'Default realtime path: stable, low scheduling risk, and playback-safe first.',
+  'dsp.panel.src.compute.cpuStatus': 'CPU realtime path. CUDA is not requested.',
+  'dsp.panel.src.compute.gpuBadge': 'GPU',
+  'dsp.panel.src.compute.gpuDetail': 'Experimental path for very long filters and larger buffers; latency and underruns must be verified before engine hookup.',
+  'dsp.panel.src.dither.activeStatus': 'Active on integer output / {bits}-bit',
+  'dsp.panel.src.dither.floatSafe': 'バイパス float output',
+  'dsp.panel.src.dither.floatStatus': 'Current output is float, so dither is bypassed',
+  'dsp.panel.src.dither.highpassDetail': 'High-pass TPDF pushes dither energy away from low frequencies for 16-bit output and quiet tails.',
+  'dsp.panel.src.dither.integerOnly': 'Integer output only',
+  'dsp.panel.src.dither.ns5Detail': '5th-order noise shaping lowers mid/low-band quantization texture with modest risk.',
+  'dsp.panel.src.dither.ns9Detail': '9th-order noise shaping pushes more noise upward for 24-bit or high-headroom chains.',
+  'dsp.panel.src.dither.offDetail': 'Keep the Float32 PCM path untouched. Off by default to avoid pointless added noise.',
+  'dsp.panel.src.dither.offStatus': 'オフ',
+  'dsp.panel.src.dither.pendingStatus': 'Waiting for integer output format',
+  'dsp.panel.src.dither.title': 'PCM Dither / Noise Shaping',
+  'dsp.panel.src.dither.tpdfDetail': 'Standard TPDF, the safest quantization dither for 16-bit or 24-bit integer output.',
+  'dsp.panel.src.dither.ultraDetail': 'Ultra-shaped profile with the strongest shaping; cleaner tails, but more demanding of headroom and output chain.',
+  'dsp.panel.src.ladder.hifi': 'HiFi',
+  'dsp.panel.src.ladder.hifiDetail': '4x / gauss-long 1x / hb Nx / CPU. Softer presentation with moderate realtime pressure.',
+  'dsp.panel.src.ladder.insane': 'Insane / オフライン-like',
+  'dsp.panel.src.ladder.insaneDetail': '8x / apod-long plus ext2-xl / CUDA. Very heavy, meant for near-offline PCM experiments.',
+  'dsp.panel.src.ladder.latencyExtreme': 'Extreme latency',
+  'dsp.panel.src.ladder.latencyHigh': 'High latency',
+  'dsp.panel.src.ladder.latencyLow': 'Low latency',
+  'dsp.panel.src.ladder.latencyMedium': 'Medium latency',
+  'dsp.panel.src.ladder.realtimeSafe': 'リアルタイム Safe',
+  'dsp.panel.src.ladder.realtimeSafeDetail': '4x / hb 1x+Nx / CPU. Prioritizes no stutter and responsive UI.',
+  'dsp.panel.src.ladder.reference': 'Reference',
+  'dsp.panel.src.ladder.referenceDetail': '8x / apod-minring 1x / ext2-long Nx / CUDA. Prioritizes audible change and transparency.',
+  'dsp.panel.src.ladder.title': 'CPU/GPU Quality Ladder',
+  'dsp.panel.src.cuda.pending': 'CUDA runtime is ready; FIR worker is not active yet.',
+  'dsp.panel.src.cuda.ready': '{device} / {memory} / Driver {driver} / CUDA {cuda}',
+  'dsp.panel.src.cuda.lowUtilization': 'Real-time audio uses small low-latency blocks, so low GPU utilization does not mean CUDA is inactive; trust CUDA FIR active in the live playback state.',
+  'dsp.panel.src.cuda.unavailable': 'CUDA unavailable: {reason}',
+  'dsp.panel.src.cuda.guide.driverStep1': 'Install or update NVIDIA App / official GeForce, Studio, or RTX drivers.',
+  'dsp.panel.src.cuda.guide.driverStep2': 'Restart Windows after installation, then reopen ECHO.',
+  'dsp.panel.src.cuda.guide.driverStep3': '状態を更新 here; if it is still unavailable, confirm nvidia-smi runs in Windows.',
+  'dsp.panel.src.cuda.guide.driverTitle': 'NVIDIA driver required',
+  'dsp.panel.src.cuda.guide.genericStep1': 'Update the official NVIDIA driver first, then restart the system.',
+  'dsp.panel.src.cuda.guide.genericStep2': 'Reopen ECHO and refresh status.',
+  'dsp.panel.src.cuda.guide.genericStep3': 'If it still fails, use CPU FIR / SOXR and check the diagnostic reason.',
+  'dsp.panel.src.cuda.guide.genericTitle': 'CUDA needs attention',
+  'dsp.panel.src.cuda.guide.problem': 'Detected: {reason}',
+  'dsp.panel.src.cuda.guide.runtimeStep1': 'Update the NVIDIA driver and restart the system.',
+  'dsp.panel.src.cuda.guide.runtimeStep2': 'Try a lighter filter or a lower upsampling factor to verify stability.',
+  'dsp.panel.src.cuda.guide.runtimeStep3': 'If it keeps failing, ECHO falls back to CPU FIR instead of pretending GPU is active.',
+  'dsp.panel.src.cuda.guide.runtimeTitle': 'CUDA runtime failed',
+  'dsp.panel.src.cuda.guide.title': 'CUDA installation guide',
+  'dsp.panel.src.cuda.guide.workerStep1': 'This is usually not a user driver issue; the current ECHO package is missing the CUDA FIR component.',
+  'dsp.panel.src.cuda.guide.workerStep2': 'Install an ECHO build that includes the CUDA FIR worker, or rebuild with CUDA enabled.',
+  'dsp.panel.src.cuda.guide.workerStep3': 'Until the component exists, playback falls back to CPU FIR / SOXR.',
+  'dsp.panel.src.cuda.guide.workerTitle': 'ECHO CUDA component missing',
+  'dsp.panel.src.cuda.reason.driverMissing': 'NVIDIA driver or nvidia-smi was not detected',
+  'dsp.panel.src.cuda.reason.driverUnreadable': 'NVIDIA driver probe returned an unexpected result',
+  'dsp.panel.src.cuda.reason.workerCpuOnly': 'ECHO CUDA worker was built without CUDA',
+  'dsp.panel.src.cuda.reason.workerMissing': 'ECHO CUDA worker is not bundled',
+  'dsp.panel.src.cuda.reason.workerRuntime': 'CUDA worker failed or timed out during playback',
+  'dsp.panel.src.cuda.reason.workerStopped': 'CUDA worker stopped with pause or route switching; waiting for the next playback state',
+  'dsp.panel.src.filter': 'フィルター',
+  'dsp.panel.src.filter.apodFastDetail': 'Fast apodizing profile: earlier cutoff with medium taps to suppress ringing left by old filters or MP3 sources.',
+  'dsp.panel.src.filter.apodGaussDetail': 'Gaussian apodizing profile: softer early rolloff for a smoother presentation with calmer treble edges.',
+  'dsp.panel.src.filter.apodLongDetail': 'Long-tap apodizing profile: early rolloff plus high stopband rejection for old ADC / brickwall pre-ringing.',
+  'dsp.panel.src.filter.apodMinringDetail': 'Minimum-phase apodizing profile: lowers pre-ringing and attenuates source ringing for the most audible PCM change.',
+  'dsp.panel.src.filter.closedFormDetail': '閉じるd-form sinc interpolation direction for later baseline comparison.',
+  'dsp.panel.src.filter.collapse': 'Show curated',
+  'dsp.panel.src.filter.expand': 'Show all',
+  'dsp.panel.src.filter.gpuCpu': 'CPU / entry GPU',
+  'dsp.panel.src.filter.gpuRtx5060': 'RTX 5060+ suggested',
+  'dsp.panel.src.filter.gpuRtx5070': 'RTX 5070+ suggested',
+  'dsp.panel.src.filter.gpuRtx5070Ti': 'RTX 5070 Ti+ suggested',
+  'dsp.panel.src.filter.gpuRtx5080': 'RTX 5080+ suggested',
+  'dsp.panel.src.filter.gpuRtx5090': 'RTX 5090 / 32GB suggested',
+  'dsp.panel.src.filter.loadHigh': 'High load',
+  'dsp.panel.src.filter.loadExtreme': 'Extreme load',
+  'dsp.panel.src.filter.loadLight': 'Light load',
+  'dsp.panel.src.filter.loadMedium': 'Medium load',
+  'dsp.panel.src.filter.loadResearch': 'Research',
+  'dsp.panel.src.filter.loadVeryHigh': 'Very high',
+  'dsp.panel.src.filter.minringFirLpDetail': 'Minimum-ringing FIR with low pre-ringing and a closer presentation.',
+  'dsp.panel.src.filter.minringFirMpDetail': 'Minimum-ringing medium-precision profile with lower pre-ringing and more transparency.',
+  'dsp.panel.src.filter.minringFirXlaDetail': 'Extra-long minimum-ringing profile for natural presentation with much higher compute cost.',
+  'dsp.panel.src.filter.minringFirSoftDetail': 'Gaussian-windowed minimum-ringing profile for a softer, closer, less aggressive presentation.',
+  'dsp.panel.src.filter.minringFirExtremeDetail': '3071-tap minimum-ringing profile for stronger audible change and more natural transients.',
+  'dsp.panel.src.filter.polySincExt2HiresLpDetail': 'Hi-res ext2 linear-phase profile prepared for the Nx path.',
+  'dsp.panel.src.filter.polySincExt2HiresMpDetail': 'Hi-res ext2 minimum-phase profile that lowers pre-ringing while preserving air.',
+  'dsp.panel.src.filter.polySincExt3LongDetail': 'Long-tap ext3 linear-phase profile with a narrower transition band and stronger stopband rejection.',
+  'dsp.panel.src.filter.polySincExt3XlaDetail': '4095-tap ext3 extreme linear-phase profile for RTX 5090 or offline-like A/B stress tests.',
+  'dsp.panel.src.filter.polySincExt2ShortDetail': 'Short-tap ext2 profile that keeps the high-precision direction more realtime-friendly.',
+  'dsp.panel.src.filter.polySincExt2LongDetail': 'Long-tap linear-phase target, transparency first, close to a long profile direction.',
+  'dsp.panel.src.filter.polySincExt2MediumDetail': 'Medium-tap ext2 profile balancing transparency and compute cost.',
+  'dsp.panel.src.filter.polySincExt2XlDetail': '3071-tap ext2 extreme profile for high-end CUDA and offline-grade listening tests.',
+  'dsp.panel.src.filter.polySincExt2XlaDetail': 'Extra-long taps for future 8x / Ultra precision profiles.',
+  'dsp.panel.src.filter.polySincGaussHiresLpDetail': 'Hi-res linear-phase gaussian window with a smoother sound while preserving placement.',
+  'dsp.panel.src.filter.polySincGaussHiresMpDetail': 'Hi-res minimum-phase gaussian window aimed at lower pre-ringing feel.',
+  'dsp.panel.src.filter.polySincGaussLongDetail': 'Gaussian-windowed poly-sinc for a smoother presentation while preserving transients.',
+  'dsp.panel.src.filter.polySincGaussXlDetail': '3071-tap gaussian extreme profile with a smooth direction and very high GPU demand.',
+  'dsp.panel.src.filter.polySincGaussXlaDetail': 'Extra-long gaussian profile prepared for A/B and measurement comparison.',
+  'dsp.panel.src.filter.polySincGaussXtrLongDetail': 'Long gauss-xtr profile with stronger gaussian shaping for smoother edges.',
+  'dsp.panel.src.filter.polySincGaussXtrXlaDetail': '4095-tap gauss-xtr profile for a very smooth, thicker, less edgy direction.',
+  'dsp.panel.src.filter.polySincHbDetail': 'Halfband poly-sinc suited to a stable realtime 2x/4x first pass.',
+  'dsp.panel.src.filter.polySincXtrLpDetail': 'Long xtr linear-phase profile with a transparent target and higher realtime demands.',
+  'dsp.panel.src.filter.polySincXtrShortLpDetail': 'Short xtr linear-phase profile for realtime transparency tradeoffs.',
+  'dsp.panel.src.filter.polySincXtrShortMpDetail': 'Short xtr minimum-phase profile for natural feel and lower pre-ringing.',
+  'dsp.panel.src.filter.polySincXtrXlaDetail': 'Extreme xtr minimum-phase profile, listening-oriented and very hardware hungry.',
+  'dsp.panel.src.filter.polySincXtrMpDetail': 'Medium-phase direction that reduces pre-ringing feel for a listening-oriented profile.',
+  'dsp.panel.src.filter.apodXtrDetail': '3071-tap apodizing profile with early rolloff for stronger old-filter ringing cleanup.',
+  'dsp.panel.src.filter.apodExtremeDetail': '4095-tap minimum-phase apodizing profile for the strongest source-ringing cleanup direction.',
+  'dsp.panel.src.filter.brickwallLongDetail': 'Hard comparison profile: high cutoff, narrow transition, and strong stopband rejection.',
+  'dsp.panel.src.filter.softKneeLongDetail': 'Soft-knee comparison profile with earlier gentle rolloff for smoother long-session listening.',
+  'dsp.panel.src.filter.selected': 'Selected filter',
+  'dsp.panel.src.filter.sincLDetail': 'Large sinc baseline for high-precision reference and listening comparison.',
+  'dsp.panel.src.filter.sincLongHDetail': 'Higher-precision sinc-long variant for a heavier linear-phase baseline.',
+  'dsp.panel.src.filter.sincLongDetail': 'Long sinc baseline for calibrating FIR design and listening differences.',
+  'dsp.panel.src.filter.sincMDetail': 'Medium sinc baseline with lower compute cost.',
+  'dsp.panel.src.filter.sincXlaDetail': 'Extra-long sinc baseline for stress testing and comparing extreme filters.',
+  'dsp.panel.src.kicker': 'Sample-rate conversion',
+  'dsp.panel.src.mode': 'モード',
+  'dsp.panel.src.mode.family2x': '2x PCM',
+  'dsp.panel.src.mode.family2xDetail': 'Upsample the 44.1k family to 88.2k and the 48k family to 96k.',
+  'dsp.panel.src.mode.family4x': '4x PCM',
+  'dsp.panel.src.mode.family4xDetail': 'Upsample the 44.1k family to 176.4k and the 48k family to 192k.',
+  'dsp.panel.src.mode.family8x': '8x Ultra',
+  'dsp.panel.src.mode.family8xDetail': 'Experimental: upsample the 44.1k family to 352.8k and the 48k family to 384k.',
+  'dsp.panel.src.mode.compatibility48': '48 kHz compatibility',
+  'dsp.panel.src.mode.compatibility48Detail': 'Convert PCM to a fixed 48 kHz for exclusive headphones or audio devices that only accept 48 kHz. Off by default.',
+  'dsp.panel.src.mode.off': 'オフ',
+  'dsp.panel.src.mode.offDetail': 'Keep the source sample rate. ECHO SRC does not affect bit-perfect conditions.',
+  'dsp.panel.src.modeSwitch': 'ECHO SRC control mode',
+  'dsp.panel.src.native': 'ネイティブ direct',
+  'dsp.panel.src.normal': 'Normal',
+  'dsp.panel.src.notConnected': 'Not connected to playback',
+  'dsp.panel.src.note': 'PCM only. Upsampling is not stacked when shared output, DSD output, or HQPlayer takes over.',
+  'dsp.panel.src.pending': 'Waiting for the next playback plan',
+  'dsp.panel.src.precision': 'Precision',
+  'dsp.panel.src.quality': 'Quality profile',
+  'dsp.panel.src.quality.balanced': 'Balanced',
+  'dsp.panel.src.quality.balancedDetail': 'Keep the existing SOXR profile while balancing stability and cost.',
+  'dsp.panel.src.quality.lowLatency': 'Low latency',
+  'dsp.panel.src.quality.lowLatencyDetail': 'Reduce SRC cost for low-latency output.',
+  'dsp.panel.src.quality.transparent': 'Transparent',
+  'dsp.panel.src.quality.transparentDetail': 'Highest precision SOXR, prioritizing transparency and low distortion.',
+  'dsp.panel.src.recommended': 'Recommended',
+  'dsp.panel.src.route': 'Route',
+  'dsp.panel.src.sourceRate': 'Source rate',
+  'dsp.panel.src.targetRate': '目標レート',
+  'dsp.stage.src': 'サンプルレート',
+  'dsp.error.channelBridge': 'Channel tools are unavailable.',
+  'dsp.error.desktopBridge': 'Desktop bridge is unavailable.',
+  'dsp.error.dspBridge': 'DSP bridge is unavailable.',
+  'dsp.error.firBridge': 'FIR bridge is unavailable.',
+  'dsp.label.bitPerfect': 'Bit-perfect',
+  'dsp.label.currentModule': 'Current module',
+  'dsp.label.module': 'DSP module',
+  'dsp.label.moduleStatus': 'Module status',
+  'dsp.label.output': 'Output',
+  'dsp.metric.bitPerfect': 'Bit-perfect',
+  'dsp.metric.clipping': 'Clipping',
+  'dsp.metric.dsp': 'DSP',
+  'dsp.metric.inputPeak': 'Input peak',
+  'dsp.metric.ir': 'IR',
+  'dsp.metric.latency': 'Latency',
+  'dsp.metric.liveHeadroom': 'Live headroom',
+  'dsp.metric.truePeak': 'True Peak',
+  'dsp.metric.mode': 'モード',
+  'dsp.metric.outputEstimate': 'Output estimate',
+  'dsp.metric.reason': 'Reason',
+  'dsp.metric.sampleRate': 'サンプルレート',
+  'dsp.metric.taps': 'Taps',
+  'dsp.module.channel.description': 'Balance, delay, mono',
+  'dsp.module.channel.title': 'Channel tools',
+  'dsp.module.eq.description': 'Bands, preamp, presets',
+  'dsp.module.eq.title': 'Parametric EQ',
+  'dsp.module.headroom.description': 'Reserve DSP headroom',
+  'dsp.module.headroom.title': 'ヘッドルーム',
+  'dsp.module.headphone.description': 'OPRA headphone curves',
+  'dsp.module.headphone.title': 'Headphone correction',
+  'dsp.module.room.description': 'IR convolution only',
+  'dsp.module.room.title': 'FIR / ルーム補正',
+  'dsp.module.safety.description': 'Final output monitor',
+  'dsp.module.safety.title': 'Output safety',
+  'dsp.module.sdm.description': 'DSD / SDM truth path',
+  'dsp.module.sdm.title': 'ECHO SDM / DSD (Beta)',
+  'dsp.panel.sdm.capability': 'Capability',
+  'dsp.panel.sdm.capabilityDetail': 'ECHO can verify ネイティブ DSD, DoP, and independent PCM -> SDM. SDM does not depend on the Lab DSD passthrough switch.',
+  'dsp.panel.sdm.detail': 'Shows whether the current track really uses DSD, DoP, native DSD, or the independent PCM -> SDM path.',
+  'dsp.panel.sdm.dop': 'DoP passthrough',
+  'dsp.panel.sdm.dopDetail': 'Local DSF attempts DoP under Exclusive; failures are explicit PCM fallback.',
+  'dsp.panel.sdm.fallback': 'Fallback',
+  'dsp.panel.sdm.guard': 'Guard',
+  'dsp.panel.sdm.guardDetail': 'PCM -> SDM applies this tier headroom automatically and locks very low-level signals to DSD idle to reduce hiss.',
+  'dsp.panel.sdm.kicker': 'DSD / sigma-delta monitor',
+  'dsp.panel.sdm.modulator': 'PCM -> SDM modulator',
+  'dsp.panel.sdm.modulatorCoefficients': 'Feedback coefficients',
+  'dsp.panel.sdm.modulatorDither': 'Dither',
+  'dsp.panel.sdm.modulatorHeadroom': 'ヘッドルーム target',
+  'dsp.panel.sdm.modulatorOrder': 'Order',
+  'dsp.panel.sdm.modulatorProfile': 'Modulator profile',
+  'dsp.panel.sdm.modulatorStability': 'Stability limit',
+  'dsp.panel.sdm.modulatorPending': 'Not routed; check Fallback',
+  'dsp.panel.sdm.nativeDsd': 'ネイティブ DSD',
+  'dsp.panel.sdm.noDsdSource': 'Current source is not DSD',
+  'dsp.panel.sdm.note': 'PCM -> SDM uses the independent ECHO SDM path; the Lab DSD passthrough switch is only for native DSD sources.',
+  'dsp.panel.sdm.output': 'Actual output',
+  'dsp.panel.sdm.oversampling': 'PCM oversampling',
+  'dsp.panel.sdm.oversampling1x': 'Oversampling 1x',
+  'dsp.panel.sdm.oversampling1xDetail': 'Low-rate PCM entry filter intent; CUDA 4x/8x runs this as the first ECHO FIR stage.',
+  'dsp.panel.sdm.oversamplingEffective': 'Effective slot',
+  'dsp.panel.sdm.oversamplingNx': 'Oversampling Nx',
+  'dsp.panel.sdm.oversamplingNxDetail': 'High-rate or already-oversampled stage intent; CUDA 4x/8x runs this as later ECHO FIR stages.',
+  'dsp.panel.sdm.oversamplingRoute': 'Front-end upsample',
+  'dsp.panel.sdm.oversamplingTruth': 'Engine is the real active path; CPU or 16x paths safely stay on SOXR 28.',
+  'dsp.panel.sdm.pcmFallback': 'PCM fallback',
+  'dsp.panel.sdm.requested': 'Requested',
+  'dsp.panel.sdm.source': 'Source',
+  'dsp.panel.sdm.transport': 'Transport',
+  'dsp.panel.sdm.actual': 'Runtime',
+  'dsp.panel.sdm.badge.planned': 'Experimental',
+  'dsp.panel.sdm.badge.real': 'Real path',
+  'dsp.panel.sdm.badge.safe': 'バイパス safe',
+  'dsp.panel.sdm.compute': 'SDM Compute',
+  'dsp.panel.sdm.compute.cpuDetail': 'CPU realtime path is routed for the first PCM -> SDM DoP implementation.',
+  'dsp.panel.sdm.compute.cudaDetail': 'Includes a native CUDA recursive modulator with device admission; CUDA can still accelerate FIR oversampling when the CPU modulator is faster.',
+  'dsp.panel.sdm.mode': 'SDM mode',
+  'dsp.panel.sdm.mode.dsdPassthrough': 'DSD passthrough',
+  'dsp.panel.sdm.mode.dsdPassthroughDetail': 'Handles native DSD sources through DoP without PCM upsampling.',
+  'dsp.panel.sdm.mode.off': 'オフ',
+  'dsp.panel.sdm.mode.offDetail': 'PCM and ECHO SRC stay independent; no DSD/SDM output is requested.',
+  'dsp.panel.sdm.mode.pcmToDsd': 'PCM -> SDM',
+  'dsp.panel.sdm.mode.pcmToDsdDetail': 'Takes over PCM and outputs ECHO SDM raw; the Lab DSD passthrough switch is not required.',
+  'dsp.panel.sdm.quality': 'SDM quality',
+  'dsp.panel.sdm.quality.hifi': 'HiFi',
+  'dsp.panel.sdm.quality.hifiDetail': 'Low-tonal EF1 core for daily listening with fewer periodic modulation tones.',
+  'dsp.panel.sdm.quality.insane': 'Insane',
+  'dsp.panel.sdm.quality.insaneDetail': 'Aggressive EF2 core prioritizing low periodic current-like noise; high headroom and high-end GPU recommended.',
+  'dsp.panel.sdm.quality.reference': 'Reference',
+  'dsp.panel.sdm.quality.referenceDetail': 'EF2 reference modulation prioritizing stability and lower periodic noise.',
+  'dsp.panel.sdm.quality.safe': 'リアルタイム Safe',
+  'dsp.panel.sdm.quality.safeDetail': 'Conservative EF1 realtime-safe tier to suppress current-like idle tones first.',
+  'dsp.panel.sdm.runtime.dsdPassthrough': 'Current track is using DSD passthrough',
+  'dsp.panel.sdm.runtime.off': 'Current track is not using SDM',
+  'dsp.panel.sdm.runtime.pcmToSdmActive': 'PCM -> SDM is active in the current path',
+  'dsp.panel.sdm.runtime.pcmToSdmNotRouted': 'PCM -> SDM is not routed in the current path; check Fallback',
+  'dsp.panel.sdm.separateNote': 'SDM is saved separately from PCM/ECHO SRC; it takes over PCM only when the active playback path qualifies.',
+  'dsp.panel.sdm.target': 'Target DSD rate',
+  'dsp.panel.sdm.target.dsd128Detail': 'Common realtime target; PCM -> SDM is handled by the independent ECHO SDM path.',
+  'dsp.panel.sdm.target.dsd256Detail': 'Higher-rate realtime PCM -> SDM target; avoid regular DoP passthrough.',
+  'dsp.panel.sdm.target.dsd512Detail': 'Extreme plan, intended only for future CUDA or offline-like paths; falls back to PCM for now.',
+  'dsp.panel.sdm.target.dsd64Detail': 'Light target for validating whether the ECHO SDM path can output stably.',
+  'dsp.panel.channel.advanced': 'Advanced channel',
+  'dsp.panel.channel.balance': 'Stereo balance',
+  'dsp.panel.channel.bandCompensation': 'Band compensation',
+  'dsp.panel.channel.bandHigh': 'High',
+  'dsp.panel.channel.bandLow': 'Low',
+  'dsp.panel.channel.bandMid': 'Mid',
+  'dsp.panel.channel.centered': 'Centered',
+  'dsp.panel.channel.compensationDetail': 'Defaults to attenuating the louder side, useful for headphone channel imbalance that cannot be repaired.',
+  'dsp.panel.channel.compensationOff': 'オフ',
+  'dsp.panel.channel.compensationOn': 'On',
+  'dsp.panel.channel.compensationTitle': 'Imbalance compensation',
+  'dsp.panel.channel.constantPower': 'Constant power',
+  'dsp.panel.channel.delaySkew': 'Delay skew',
+  'dsp.panel.channel.he90Hint': 'Start from 0.25 dB and fine tune while listening to centered vocals.',
+  'dsp.panel.channel.invertLeft': 'Invert left',
+  'dsp.panel.channel.invertRight': 'Invert right',
+  'dsp.panel.channel.kicker': 'Channel tools',
+  'dsp.panel.channel.leansLeft': 'Left {value}',
+  'dsp.panel.channel.leansRight': 'Right {value}',
+  'dsp.panel.channel.leftDelay': 'Left delay',
+  'dsp.panel.channel.leftGain': 'Left gain',
+  'dsp.panel.channel.leftOutput': 'Left output',
+  'dsp.panel.channel.leftTooLoud': 'Left side louder',
+  'dsp.panel.channel.monoTools': 'Mono / Check',
+  'dsp.panel.channel.mono.left': 'Left only',
+  'dsp.panel.channel.mono.off': 'Mono off',
+  'dsp.panel.channel.mono.right': 'Right only',
+  'dsp.panel.channel.mono.sum': 'Sum mono',
+  'dsp.panel.channel.note': 'Channel tools are separated from Parametric EQ, for checking stereo image, left/right differences, and mono compatibility.',
+  'dsp.panel.channel.modePro': 'Pro',
+  'dsp.panel.channel.modeSimple': 'Simple',
+  'dsp.panel.channel.presetDefaultName': 'Headphone imbalance compensation',
+  'dsp.panel.channel.presetEmpty': 'No saved channel profiles yet.',
+  'dsp.panel.channel.presetName': 'プロファイル name',
+  'dsp.panel.channel.presetPrompt': 'Name this headphone profile',
+  'dsp.panel.channel.presets': 'Headphone profiles',
+  'dsp.panel.channel.phaseTools': 'Phase / Routing',
+  'dsp.panel.channel.removePreset': 'Remove',
+  'dsp.panel.channel.saveCurrent': 'Save current settings',
+  'dsp.panel.channel.selectPreset': 'Select profile',
+  'dsp.panel.channel.switchPreset': 'Switch',
+  'dsp.panel.channel.renamePreset': 'Rename',
+  'dsp.panel.channel.renamePrompt': 'Rename this headphone profile',
+  'dsp.panel.channel.rightDelay': 'Right delay',
+  'dsp.panel.channel.rightGain': 'Right gain',
+  'dsp.panel.channel.rightOutput': 'Right output',
+  'dsp.panel.channel.rightTooLoud': 'Right side louder',
+  'dsp.panel.channel.step': 'Step',
+  'dsp.panel.channel.swap': 'Swap left/right',
+  'dsp.panel.channel.swapCompensation': 'Swap compensation direction',
+  'dsp.panel.channel.safeAttenuation': 'For electrostatic headphones, prefer attenuation compensation to avoid raising output level.',
+  'dsp.panel.channel.compare': 'A/B compare',
+  'dsp.panel.channel.compareActive': 'バイパスing',
+  'dsp.panel.channel.compareHint': 'Temporarily bypass channel processing to compare the stereo image before and after compensation.',
+  'dsp.panel.channel.monoHint': 'Sum mono plays both sides; left-only or right-only mutes the other side.',
+  'dsp.panel.channel.trimCenter': 'Clear imbalance',
+  'dsp.panel.headroom.applyRecommended': 'Apply recommendation',
+  'dsp.panel.headroom.budgetAria': 'ヘッドルーム budget',
+  'dsp.panel.headroom.clipCount': 'Clip count',
+  'dsp.panel.headroom.clipCountValue': '{count} times',
+  'dsp.panel.headroom.guardActive': '有効',
+  'dsp.panel.headroom.guardDirect': 'ダイレクト',
+  'dsp.panel.headroom.guardStandby': 'Standby',
+  'dsp.panel.headroom.guardState': 'Guard state',
+  'dsp.panel.headroom.kicker': 'ヘッドルーム management',
+  'dsp.panel.headroom.lastClip': 'Last clip',
+  'dsp.panel.headroom.makeConservative': 'Set to -6 dB',
+  'dsp.panel.headroom.makeSafe': 'Set to {value}',
+  'dsp.panel.headroom.modeAria': 'ヘッドルーム mode',
+  'dsp.panel.headroom.modeDaily': 'Daily',
+  'dsp.panel.headroom.modeDailyDetail': 'Light DSP reserve.',
+  'dsp.panel.headroom.modeDirect': 'ダイレクト',
+  'dsp.panel.headroom.modeDirectDetail': 'No extra level reduction.',
+  'dsp.panel.headroom.modeDsp': 'DSP',
+  'dsp.panel.headroom.modeDspDetail': 'Leave safe space for EQ/FIR.',
+  'dsp.panel.headroom.nextDirect': 'Keep direct',
+  'dsp.panel.headroom.nextDirectDetail': 'No DSP reserve risk is currently needed.',
+  'dsp.panel.headroom.nextHoldRisk': 'Reduce headroom first',
+  'dsp.panel.headroom.nextHoldRiskDetail': 'Clipping risk detected. Reserve headroom first.',
+  'dsp.panel.headroom.nextProtect': 'Apply protection headroom',
+  'dsp.panel.headroom.nextProtectDetail': 'Output is near full scale. Reduce level immediately.',
+  'dsp.panel.headroom.nextReady': 'Keep monitoring',
+  'dsp.panel.headroom.nextReadyDetail': 'DSP already has safe headroom.',
+  'dsp.panel.headroom.nextStandby': 'Keep standby',
+  'dsp.panel.headroom.nextStandbyDetail': 'DSP モジュール are enabled, but no risk is detected yet.',
+  'dsp.panel.headroom.nextStep': 'Next step',
+  'dsp.panel.headroom.nextWatch': 'Watch output',
+  'dsp.panel.headroom.nextWatchDetail': 'Output is close to the limit. Watch for clipping.',
+  'dsp.panel.headroom.noClip': 'No record',
+  'dsp.panel.headroom.note': 'ヘッドルーム only reserves level space; it no longer mixes specific EQ or FIR tuning here.',
+  'dsp.panel.headroom.presetsAria': 'ヘッドルーム presets',
+  'dsp.panel.headroom.primaryAction': 'Apply {value}',
+  'dsp.panel.headroom.reasonChannel': 'Channel tools may increase level.',
+  'dsp.panel.headroom.reasonClipping': 'Clipping detected.',
+  'dsp.panel.headroom.reasonDirect': 'ヘッドルーム only works in the DSP path; when EQ, FIR, and channel tools are all off, native direct is not processed by it.',
+  'dsp.panel.headroom.reasonEq': 'EQ curves may increase level.',
+  'dsp.panel.headroom.reasonLive': 'Live headroom is low.',
+  'dsp.panel.headroom.reasonOutput': 'Estimated output is near full scale.',
+  'dsp.panel.headroom.reasonSrcTruePeak': 'ECHO SRC / FIR can reveal intersample peaks; reserve at least -3 dB.',
+  'dsp.panel.headroom.reasonRoom': 'FIR / room correction may increase level.',
+  'dsp.panel.headroom.reasonSafe': 'Current signal is safe.',
+  'dsp.panel.headroom.recommendation': 'Recommendation',
+  'dsp.panel.headroom.recommendationSafe': 'Safe',
+  'dsp.panel.headroom.reserve': 'Reserve headroom',
+  'dsp.panel.headroom.safePolicy': 'セーフティ first',
+  'dsp.panel.headroom.safetyActions': 'Quick protection',
+  'dsp.panel.headroom.status': 'Status',
+  'dsp.panel.headroom.statusClose': 'Near limit',
+  'dsp.panel.headroom.statusRisk': 'Risk detected',
+  'dsp.panel.headroom.statusSafe': 'Safe',
+  'dsp.panel.room.future.recent': 'Recent IR',
+  'dsp.panel.room.future.response': 'Response preview',
+  'dsp.panel.room.hero.activeDetail': 'Convolution is participating in the output chain.',
+  'dsp.panel.room.hero.activeTitle': 'FIR enabled',
+  'dsp.panel.room.hero.emptyDetail': 'インポート an IR before enabling room correction.',
+  'dsp.panel.room.hero.emptyTitle': 'No IR loaded',
+  'dsp.panel.room.hero.loadedDetail': 'IR is loaded and ready to enable.',
+  'dsp.panel.room.hero.loadedTitle': 'IR loaded',
+  'dsp.panel.room.hero.state': 'State',
+  'dsp.panel.room.kicker': 'Spatial processing',
+  'dsp.panel.room.nextEnable': 'FIR をオン',
+  'dsp.panel.room.nextEnableDetail': 'IR is ready. Try listening.',
+  'dsp.panel.room.nextImport': 'IR をインポート',
+  'dsp.panel.room.nextImportDetail': 'Choose a convolution file first.',
+  'dsp.panel.room.nextListen': 'Keep listening',
+  'dsp.panel.room.nextListenDetail': 'Confirm volume and phase are normal after correction.',
+  'dsp.panel.room.nextTrim': 'Lower trim',
+  'dsp.panel.room.nextTrimDetail': 'FIR output has clipping risk.',
+  'dsp.panel.room.note': 'FIR / room correction only handles convolution and IR; it is no longer mixed with EQ presets.',
+  'dsp.panel.room.quickTrim': 'Quick trim',
+  'dsp.panel.room.routeTitle': 'Route',
+  'dsp.panel.room.safeEnableHint': 'Reserve -6 dB headroom before enabling FIR.',
+  'dsp.panel.room.safetyRisk': 'Lower トリム or ヘッドルーム.',
+  'dsp.panel.room.safetySafe': 'The output chain is currently safe.',
+  'dsp.panel.room.safetyTitle': 'セーフティ',
+  'dsp.panel.room.trim': 'トリム',
+  'dsp.panel.safety.kicker': 'Output safety',
+  'dsp.panel.safety.heroProtectedTitle': 'Output chain protected',
+  'dsp.panel.safety.heroProtectedDetail': 'DSP is participating in playback, so output safety continues monitoring clipping, headroom, and bit-perfect route status.',
+  'dsp.panel.safety.heroRiskTitle': 'Output risk detected',
+  'dsp.panel.safety.heroRiskDetail': 'The current chain has clipping or headroom risk. Lower ヘッドルーム, EQ gain, or FIR トリム first.',
+  'dsp.panel.safety.heroDirectTitle': 'ネイティブ direct',
+  'dsp.panel.safety.heroDirectDetail': 'When no DSP module is enabled, playback stays on the bit-perfect candidate route and output safety only observes status.',
+  'dsp.panel.safety.chainTitle': 'Current chain',
+  'dsp.panel.safety.checkTitle': 'セーフティ check',
+  'dsp.panel.safety.nextTitle': 'Suggested action',
+  'dsp.panel.safety.nextRisk': 'Handle headroom first',
+  'dsp.panel.safety.nextRiskDetail': 'Do not keep stacking EQ / FIR gain while risk exists. Lower ヘッドルーム or the related module トリム first.',
+  'dsp.panel.safety.nextProtected': 'Keep monitoring',
+  'dsp.panel.safety.nextProtectedDetail': 'The chain is in the DSP path and no clipping risk was found. Continue watching live output.',
+  'dsp.panel.safety.nextDirect': 'Keep direct',
+  'dsp.panel.safety.nextDirectDetail': 'No DSP processing is active. This is suitable for checking original output, device sample rate, and bit-perfect candidate status.',
+  'dsp.panel.safety.routeInput': 'Input',
+  'dsp.panel.safety.routeHeadroom': 'ヘッドルーム',
+  'dsp.panel.safety.routeProcess': 'Process',
+  'dsp.panel.safety.routeOutput': 'Output',
+  'dsp.panel.safety.checkBitPerfect': 'Bit-perfect',
+  'dsp.panel.safety.checkLimiter': 'Protection limiter',
+  'dsp.panel.safety.disableLimiter': 'Disable protection limiter',
+  'dsp.panel.safety.enableLimiter': 'Enable protection limiter',
+  'dsp.panel.safety.limiterBypassed': 'バイパスed',
+  'dsp.panel.safety.limiterBypassedDetail': 'The final protection limiter is off. Hot output may clip or distort.',
+  'dsp.panel.safety.limiterToggleTitle': 'Protection limiter',
+  'dsp.panel.safety.checkRoom': 'FIR',
+  'dsp.panel.safety.checkChannel': 'Channel tools',
+  'dsp.panel.safety.note': 'Clipping-protection readouts are only a reference; trust your ears for distortion, harshness, or excessive compression.',
+  'dsp.room.status.active': '有効',
+  'dsp.room.status.empty': 'Not loaded',
+  'dsp.room.status.error': 'エラー',
+  'dsp.room.status.loaded': 'Loaded',
+  'dsp.stage.input': 'Input',
+  'dsp.stage.output': 'Output',
+  'dsp.stage.shape': 'Shape',
+  'dsp.stage.space': 'Space',
+  'dsp.stage.stereo': 'Stereo',
+  'dsp.status.active': 'Enabled',
+  'dsp.status.auto': 'Auto',
+  'dsp.status.balanceActive': 'Channel processing',
+  'dsp.status.bypassed': 'バイパスed',
+  'dsp.status.candidate': 'Candidate',
+  'dsp.status.clear': 'クリア',
+  'dsp.status.direct': 'ダイレクト',
+  'dsp.status.disabledByDsp': 'DSP path',
+  'dsp.status.dspPath': 'DSP path',
+  'dsp.status.flat': 'Flat',
+  'dsp.status.headroomRisk': 'ヘッドルーム risk',
+  'dsp.status.limiterArmed': 'Armed',
+  'dsp.status.limiting': 'Limiting',
+  'dsp.status.modulesActive': '{count} modules active',
+  'dsp.status.nativeDirect': 'Bit-perfect path',
+  'dsp.status.noIr': 'No IR',
+  'dsp.status.none': 'なし',
+  'dsp.status.protected': 'Protected',
+  'dsp.status.ready': 'Ready',
+  'dsp.status.risk': 'Risk',
+  'dsp.status.riskDetected': 'Risk detected',
+  'dsp.status.shared': 'shared',
+  'dsp.status.signalProtected': 'Signal protected',
+  'dsp.status.stereoDirect': 'Stereo direct',
+  'dsp.status.systemOutput': 'System output',
+};
+
+
 const dspLocalTexts = {
   'zh-CN': dspLocalTextZhCN,
-  'zh-TW': dspLocalTextZhCN,
+  'zh-TW': dspLocalTextZhTW,
   'en-US': dspLocalTextEnUS,
-  'ja-JP': dspLocalTextEnUS,
+  'ja-JP': dspLocalTextJaJP,
+  'ko-KR': dspLocalTextEnUS,
 } as const;
 
 type DspTranslate = (key: string, options?: Parameters<ReturnType<typeof useI18n>['t']>[1]) => string;
@@ -2084,6 +3078,12 @@ const formatDsdWarning = (warning: string | null, t: (key: string, params?: Reco
       return `SDM CUDA fell back to CPU${detailText}`;
     case 'sdm_cuda_runtime_fallback':
       return `SDM CUDA runtime fallback${detailText}`;
+    case 'native_cuda_sdm_not_faster':
+      return `CPU SDM selected by realtime admission${detailText}`;
+    case 'native_cuda_sdm_realtime_admission_failed':
+      return `CPU SDM selected to protect realtime playback${detailText}`;
+    case 'native_cuda_sdm_runtime_failure':
+      return `SDM CUDA runtime fallback${detailText}`;
     case 'sdm_pcm_to_dsd_fell_back_to_pcm':
       return `PCM -> SDM fell back to PCM${detailText}`;
     default:
@@ -2170,18 +3170,29 @@ const isActionableCudaInstallReason = (reason: string | null | undefined): boole
   const normalized = reason?.trim() ?? '';
   return normalized !== '' &&
     normalized !== 'src_cuda_worker_disposed' &&
-    normalized !== 'audio_session_run_cancelled';
+    normalized !== 'audio_session_run_cancelled' &&
+    normalized !== 'native_cuda_sdm_requires_fir_oversampling' &&
+    !normalized.startsWith('native_cuda_fir_not_faster:') &&
+    !normalized.startsWith('native_cuda_sdm_not_faster:') &&
+    !normalized.startsWith('native_cuda_sdm_realtime_admission_failed:');
 };
 
 const formatCudaUnavailableReason = (reason: string | null | undefined, t: DspTranslate): string => {
   const normalized = reason?.trim() ?? '';
+  if (normalized.startsWith('native_cuda_fir_not_faster:')) {
+    return `CPU FIR selected by device benchmark / ${normalized.split(':')[1] ?? ''}`;
+  }
   if (!normalized || normalized === 'nvidia_smi_missing' || normalized.includes('ENOENT') || normalized.includes('not recognized')) {
     return t('dsp.panel.src.cuda.reason.driverMissing');
   }
   if (normalized === 'nvidia_smi_parse_failed' || normalized.startsWith('Command failed')) {
     return t('dsp.panel.src.cuda.reason.driverUnreadable');
   }
-  if (normalized === 'src_cuda_worker_missing' || normalized === 'src_cuda_worker_unavailable') {
+  if (
+    normalized === 'src_cuda_worker_missing' ||
+    normalized === 'src_cuda_worker_unavailable' ||
+    normalized === 'native_cuda_dsp_not_built'
+  ) {
     return t('dsp.panel.src.cuda.reason.workerMissing');
   }
   if (normalized === 'src_cuda_worker_built_without_cuda') {
@@ -2190,7 +3201,8 @@ const formatCudaUnavailableReason = (reason: string | null | undefined, t: DspTr
   if (
     normalized === 'src_cuda_worker_request_timeout' ||
     normalized.startsWith('src_cuda_worker_exit:') ||
-    normalized.startsWith('echo_src_cuda_runtime_fallback:')
+    normalized.startsWith('echo_src_cuda_runtime_fallback:') ||
+    normalized.startsWith('native_cuda_dsp_runtime_failure:')
   ) {
     return t('dsp.panel.src.cuda.reason.workerRuntime');
   }
@@ -2217,7 +3229,8 @@ const buildCudaInstallGuide = (reason: string | null | undefined, t: DspTranslat
   if (
     normalized === 'src_cuda_worker_missing' ||
     normalized === 'src_cuda_worker_unavailable' ||
-    normalized === 'src_cuda_worker_built_without_cuda'
+    normalized === 'src_cuda_worker_built_without_cuda' ||
+    normalized === 'native_cuda_dsp_not_built'
   ) {
     return {
       title: t('dsp.panel.src.cuda.guide.workerTitle'),
@@ -2233,7 +3246,8 @@ const buildCudaInstallGuide = (reason: string | null | undefined, t: DspTranslat
   if (
     normalized === 'src_cuda_worker_request_timeout' ||
     normalized.startsWith('src_cuda_worker_exit:') ||
-    normalized.startsWith('echo_src_cuda_runtime_fallback:')
+    normalized.startsWith('echo_src_cuda_runtime_fallback:') ||
+    normalized.startsWith('native_cuda_dsp_runtime_failure:')
   ) {
     return {
       title: t('dsp.panel.src.cuda.guide.runtimeTitle'),
@@ -2283,7 +3297,6 @@ const EchoSrcPanel = ({
   const active = audioStatus?.echoSrcActive === true;
   const effectiveQualityProfile = normalizeEchoSrcQualityProfile(audioStatus?.echoSrcQualityProfile ?? echoSrcQualityProfile);
   const qualityOption = echoSrcQualityOptions.find((option) => option.profile === effectiveQualityProfile) ?? echoSrcQualityOptions[0];
-  const modeOption = echoSrcModeOptions.find((option) => option.mode === echoSrcMode) ?? echoSrcModeOptions[0];
   const sharedBypass = echoSrcMode !== 'off' && (audioStatus?.outputMode === 'shared' || warnings.includes('echo_src_bypassed_in_shared_output'));
   const dsdBypass =
     echoSrcMode !== 'off' &&
@@ -2351,6 +3364,8 @@ const EchoSrcPanel = ({
       ? `Fallback active / ${formatEchoSrcBackendLabel(runtimeBackend)} / ${formatCudaUnavailableReason(runtime?.fallbackReason, t)}`
       : runtime?.state === 'active'
         ? `${formatEchoSrcBackendLabel(runtimeBackend)} active / ${runtimePlanText}`
+        : runtime?.state === 'planned'
+          ? 'CUDA FIR planned / waiting for native host'
         : echoSrcComputeBackend !== 'cuda'
       ? t('dsp.panel.src.compute.cpuStatus')
       : cudaStatus?.available
@@ -2384,11 +3399,6 @@ const EchoSrcPanel = ({
 
   return (
     <section className="dsp-module-panel dsp-module-panel--src">
-      <p className="dsp-module-kicker">{t('dsp.panel.src.kicker')}</p>
-      <div className="dsp-module-heading">
-        <span><RadioTower size={18} />{t('dsp.module.src.title')}<DspProBadge /></span>
-        <strong>{echoSrcMode === 'off' ? t('dsp.panel.src.mode.off') : t(modeOption.titleKey)}</strong>
-      </div>
       <p className="dsp-module-note">{t('dsp.panel.src.detail')}</p>
 
       <div className="dsp-module-metrics">
@@ -2726,6 +3736,9 @@ const SdmPanel = ({
     'sdm_pcm_to_dsd_channels_unsupported',
     'sdm_cuda_backend_unavailable',
     'sdm_cuda_runtime_fallback',
+    'native_cuda_sdm_not_faster',
+    'native_cuda_sdm_realtime_admission_failed',
+    'native_cuda_sdm_runtime_failure',
     'sdm_pcm_to_dsd_fell_back_to_pcm',
   ]);
   const sourceRate = audioStatus?.dsdNativeSampleRate ?? audioStatus?.fileSampleRate ?? null;
@@ -2781,9 +3794,18 @@ const SdmPanel = ({
   const sdmRequestText = typeof sdmRuntime?.workerRequests === 'number'
     ? `${sdmRuntime.workerRequests} worker req`
     : null;
+  const oversamplingRuntime = sdmRuntime?.oversamplingRuntime ?? null;
+  const hybridCudaActive =
+    sdmRuntime?.activeBackend === 'cpu' &&
+    oversamplingRuntime?.activeBackend === 'cuda';
+  const sdmAdmissionFallback =
+    sdmRuntime?.fallbackReason?.startsWith('native_cuda_sdm_not_faster:') === true ||
+    sdmRuntime?.fallbackReason?.startsWith('native_cuda_sdm_realtime_admission_failed:') === true;
   const computeRuntimeText =
     sdmRuntime?.activeBackend === 'cuda'
       ? `CUDA SDM active / ${formatCudaRuntimeLabel(sdmCudaStatus)}`
+      : hybridCudaActive
+        ? 'Hybrid active / CUDA FIR + CPU SDM'
       : sdmRuntime?.requestedBackend === 'cuda' && sdmRuntime.activeBackend === 'cpu'
         ? `CPU fallback / ${sdmRuntime.fallbackReason ?? 'CUDA unavailable'}`
         : sdmRuntime?.activeBackend === 'cpu'
@@ -2799,6 +3821,14 @@ const SdmPanel = ({
         sdmRealtimeText,
         sdmRequestText,
       ].filter(Boolean).join(' / ') || t(statusComputeOption.detailKey)
+      : hybridCudaActive
+        ? [
+          'CUDA FIR oversampling',
+          'CPU recursive modulator',
+          sdmAdmissionFallback
+            ? `realtime admission / ${sdmRuntime?.fallbackReason?.split(':')[1] ?? ''}`
+            : sdmRuntime?.fallbackReason,
+        ].filter(Boolean).join(' / ')
       : sdmRuntime?.requestedBackend === 'cuda' && sdmRuntime.activeBackend === 'cpu'
         ? [
           sdmRuntime.fallbackReason ?? 'CUDA fallback active',
@@ -2807,7 +3837,6 @@ const SdmPanel = ({
           sdmBlockText,
         ].filter(Boolean).join(' / ') || t(statusComputeOption.detailKey)
         : t(statusComputeOption.detailKey);
-  const oversamplingRuntime = sdmRuntime?.oversamplingRuntime ?? null;
   const oversamplingRuntimeBackendText = oversamplingRuntime?.activeBackend
     ? String(oversamplingRuntime.activeBackend).toUpperCase()
     : oversamplingRuntime?.requestedBackend
@@ -2868,11 +3897,6 @@ const SdmPanel = ({
 
   return (
     <section className="dsp-module-panel dsp-module-panel--src">
-      <p className="dsp-module-kicker">{t('dsp.panel.sdm.kicker')}</p>
-      <div className="dsp-module-heading">
-        <span><AudioWaveform size={18} />{t('dsp.module.sdm.title')}<DspProBadge /></span>
-        <strong>{outputText}</strong>
-      </div>
       <p className="dsp-module-note">{t('dsp.panel.sdm.detail')}</p>
 
       <div className="dsp-module-metrics">
@@ -2883,7 +3907,7 @@ const SdmPanel = ({
         <DspMetric label={t('dsp.panel.sdm.transport')} value={transportText} tone={activeDsdMode || runtimeState === 'pcm_to_sdm_active' ? 'good' : undefined} />
         <DspMetric label={t('dsp.panel.sdm.oversampling')} value={oversamplingEngineText} tone={runtimeState === 'pcm_to_sdm_active' ? 'good' : undefined} />
         <DspMetric label={t('dsp.panel.sdm.modulator')} value={modulatorProfileText} tone={modulatorProfile ? 'good' : undefined} />
-        <DspMetric label={t('dsp.panel.sdm.compute')} value={computeRuntimeText} tone={sdmRuntime?.activeBackend === 'cuda' ? 'good' : sdmRuntime?.requestedBackend === 'cuda' && sdmRuntime.activeBackend === 'cpu' ? 'warn' : undefined} />
+        <DspMetric label={t('dsp.panel.sdm.compute')} value={computeRuntimeText} tone={sdmRuntime?.activeBackend === 'cuda' || hybridCudaActive ? 'good' : sdmRuntime?.requestedBackend === 'cuda' && sdmRuntime.activeBackend === 'cpu' ? 'warn' : undefined} />
         <DspMetric label={t('dsp.panel.sdm.capability')} value={capabilityText} />
         <DspMetric label={t('dsp.panel.sdm.fallback')} value={formatDsdWarning(fallbackWarning, t)} tone={fallbackWarning ? 'warn' : undefined} />
       </div>
@@ -3279,11 +4303,6 @@ const HeadroomPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, b
     <section className="dsp-module-panel dsp-module-panel--headroom">
       <div className="dsp-headroom-main">
         <div className="dsp-headroom-control">
-          <p className="dsp-module-kicker">{t('dsp.panel.headroom.kicker')}</p>
-          <div className="dsp-module-heading">
-            <span><Gauge size={18} />{t('dsp.module.headroom.title')}</span>
-            <strong>{formatDb(headroomDb)}</strong>
-          </div>
           <div className="dsp-headroom-status" data-tone={statusTone}>
             <span>
               <em>{t('dsp.panel.headroom.status')}</em>
@@ -3404,7 +4423,6 @@ const RoomCorrectionPanel = ({
   onRefresh,
 }: ModulePanelProps): JSX.Element => {
   const { t } = useDspI18n();
-  const status = roomCorrection.enabled ? t('dsp.status.active') : t(`dsp.room.status.${roomCorrection.status}` as TranslationKey);
   const hasIr = Boolean(roomCorrection.irId);
   const roomTone: HeadroomTone = roomCorrection.clippingRisk || roomCorrection.status === 'error' ? 'risk' : roomCorrection.enabled ? 'good' : hasIr ? 'warn' : 'good';
   const heroTitleKey: string =
@@ -3437,11 +4455,6 @@ const RoomCorrectionPanel = ({
     <section className="dsp-module-panel dsp-module-panel--room" data-enabled={roomCorrection.enabled} data-tone={roomTone}>
       <div className="dsp-room-main">
         <div className="dsp-room-hero">
-          <p className="dsp-module-kicker">{t('dsp.panel.room.kicker')}</p>
-          <div className="dsp-module-heading">
-            <span><Waves size={18} />{t('dsp.module.room.title')}</span>
-            <strong>{status}</strong>
-          </div>
           <p>{t(heroDetailKey)}</p>
           <div className="dsp-room-primary">
             <span>
@@ -3790,11 +4803,6 @@ const ChannelPanel = ({ channelBalance, busyKey, onChannelPatch, onChannelReset 
     <section className="dsp-module-panel dsp-module-panel--channel" data-enabled={channelBalance.enabled}>
       <div className="dsp-channel-main">
         <div className="dsp-channel-hero">
-          <p className="dsp-module-kicker">{t('dsp.panel.channel.kicker')}</p>
-          <div className="dsp-module-heading">
-            <span><Headphones size={18} />{t('dsp.module.channel.title')}</span>
-            <strong>{channelBalance.enabled ? t('dsp.status.active') : t('dsp.status.bypassed')}</strong>
-          </div>
           <div className="dsp-channel-primary">
             <span>
               <em>{t('dsp.panel.channel.compensationTitle')}</em>
@@ -4177,11 +5185,6 @@ const SafetyPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, bus
           <ShieldCheck size={28} aria-hidden="true" />
         </div>
         <div>
-          <p className="dsp-module-kicker">{t('dsp.panel.safety.kicker')}</p>
-          <div className="dsp-module-heading">
-            <span>{t('dsp.module.safety.title')}</span>
-            <strong>{limiterProtecting ? t('dsp.status.limiting') : clippingRisk ? t('dsp.status.risk') : dspActive ? t('dsp.status.ready') : t('dsp.status.direct')}</strong>
-          </div>
           <h2>{t(heroTitleKey)}</h2>
           <p>{t(heroDetailKey)}</p>
         </div>
@@ -4252,13 +5255,17 @@ const SafetyPanel = ({ audioStatus, eqState, roomCorrection, channelBalance, bus
   );
 };
 
-export const DspPage = (): JSX.Element => {
+const DspWorkbench = (): JSX.Element => {
   const { t } = useDspI18n();
   const { audioStatus, error } = useThrottledSharedPlaybackStatus(dspPlaybackStatusUiIntervalMs);
   const [selectedModuleId, setSelectedModuleId] = useState<DspModuleId>(() => readStoredDspModuleId());
   const [eqState, setEqState] = useState<EqState>(fallbackEqState);
   const [roomCorrection, setRoomCorrection] = useState<RoomCorrectionState>(fallbackRoomCorrection);
   const [channelBalance, setChannelBalance] = useState<ChannelBalanceState>(fallbackChannelBalance);
+  const [compressor, setCompressor] = useState<CompressorState>(() => defaultDspRackState().compressor);
+  const [crossfeed, setCrossfeed] = useState<CrossfeedState>(() => defaultDspRackState().crossfeed);
+  const [stereoField, setStereoField] = useState<StereoFieldState>(() => defaultDspRackState().stereoField);
+  const [channelMatrix, setChannelMatrix] = useState<ChannelMatrixState>(() => defaultDspRackState().channelMatrix);
   const [echoSrcMode, setEchoSrcMode] = useState<AudioEchoSrcMode>('off');
   const [echoSrcQualityProfile, setEchoSrcQualityProfile] = useState<AudioEchoSrcQualityProfile>('transparent');
   const [echoSrcAdvancedModeEnabled, setEchoSrcAdvancedModeEnabled] = useState(false);
@@ -4267,18 +5274,20 @@ export const DspPage = (): JSX.Element => {
   const [echoSrcFilterProfileNx, setEchoSrcFilterProfileNx] = useState<AudioEchoSrcFilterProfile>('poly-sinc-hb');
   const [echoSrcComputeBackend, setEchoSrcComputeBackend] = useState<AudioEchoSrcComputeBackend>('cpu');
   const [pcmDitherMode, setPcmDitherMode] = useState<AudioPcmDitherMode>('off');
-  const [dsdOutputMode, setDsdOutputMode] = useState<AudioDsdOutputMode>('pcm');
+  const [dsdOutputMode, setDsdOutputMode] = useState<AudioDsdOutputMode>('dop');
   const [sdmMode, setSdmMode] = useState<AudioSdmMode>('off');
   const [sdmTargetRate, setSdmTargetRate] = useState<AudioSdmTargetRate>('dsd128');
   const [sdmQualityProfile, setSdmQualityProfile] = useState<AudioSdmQualityProfile>('safe');
   const [sdmComputeBackend, setSdmComputeBackend] = useState<AudioSdmComputeBackend>('cpu');
-  const [sdmOversamplingFilterProfile1x, setSdmOversamplingFilterProfile1x] = useState<AudioEchoSrcFilterProfile>('poly-sinc-ext2-long');
-  const [sdmOversamplingFilterProfileNx, setSdmOversamplingFilterProfileNx] = useState<AudioEchoSrcFilterProfile>('poly-sinc-ext2-hires-lp');
+  const [sdmOversamplingFilterProfile1x, setSdmOversamplingFilterProfile1x] = useState<AudioEchoSrcFilterProfile>('sinc-long');
+  const [sdmOversamplingFilterProfileNx, setSdmOversamplingFilterProfileNx] = useState<AudioEchoSrcFilterProfile>('poly-sinc-hb');
   const [echoSrcCompareReturnMode, setEchoSrcCompareReturnMode] = useState<AudioEchoSrcMode | null>(null);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [proOnlyNoticeDismissed, setProOnlyNoticeDismissed] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const echoSrcActionGenerationRef = useRef(0);
+  const echoSrcActionQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const sdmActionQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     writeStoredDspModuleId(selectedModuleId);
@@ -4292,14 +5301,22 @@ export const DspPage = (): JSX.Element => {
     }
 
     try {
-      const [nextEqState, nextRoomCorrection, nextChannelBalance] = await Promise.all([
+      const [nextEqState, nextRoomCorrection, nextChannelBalance, nextCompressor, nextCrossfeed, nextStereoField, nextChannelMatrix] = await Promise.all([
         eq.getState(),
         eq.getRoomCorrectionState?.() ?? Promise.resolve(fallbackRoomCorrection),
         eq.getChannelBalanceState(),
+        eq.getCompressorState?.() ?? Promise.resolve(defaultDspRackState().compressor),
+        eq.getCrossfeedState?.() ?? Promise.resolve(defaultDspRackState().crossfeed),
+        eq.getStereoFieldState?.() ?? Promise.resolve(defaultDspRackState().stereoField),
+        eq.getChannelMatrixState?.() ?? Promise.resolve(defaultDspRackState().channelMatrix),
       ]);
       setEqState(nextEqState);
       setRoomCorrection(nextRoomCorrection);
       setChannelBalance(nextChannelBalance);
+      setCompressor(nextCompressor);
+      setCrossfeed(nextCrossfeed);
+      setStereoField(nextStereoField);
+      setChannelMatrix(nextChannelMatrix);
       setModuleError(null);
     } catch (stateError) {
       setModuleError(stateError instanceof Error ? stateError.message : String(stateError));
@@ -4439,7 +5456,7 @@ export const DspPage = (): JSX.Element => {
       await action();
       await refreshPlaybackStatus();
     } catch (actionError) {
-      setModuleError(actionError instanceof Error ? actionError.message : String(actionError));
+      setModuleError(formatDspActionError(actionError));
     } finally {
       setBusyKey(null);
     }
@@ -4452,7 +5469,7 @@ export const DspPage = (): JSX.Element => {
   ): void => {
     const app = window.echo?.app;
     const audio = window.echo?.audio;
-    if (!app?.setSettings || !audio?.setOutput) {
+    if (!app?.getSettings || !app.setSettings || !audio?.setOutput) {
       setModuleError(t('dsp.error.desktopBridge'));
       rollback();
       return;
@@ -4463,29 +5480,38 @@ export const DspPage = (): JSX.Element => {
     setBusyKey('src');
     setModuleError(null);
 
-    void (async () => {
+    const operation = echoSrcActionQueueRef.current.then(async () => {
+      let previousSettings: AppSettings | null = null;
+      let settingsPersisted = false;
       try {
+        previousSettings = await app.getSettings();
         const nextSettings = await app.setSettings(settingsPatch);
-        if (echoSrcActionGenerationRef.current !== generation) {
-          return;
-        }
-
-        window.dispatchEvent(new CustomEvent('settings:changed', { detail: nextSettings }));
+        settingsPersisted = true;
         await audio.setOutput(outputPatch);
         if (echoSrcActionGenerationRef.current === generation) {
+          window.dispatchEvent(new CustomEvent('settings:changed', { detail: nextSettings }));
           await refreshPlaybackStatus();
         }
       } catch (actionError) {
+        if (settingsPersisted && previousSettings) {
+          const rollbackPatch = createSettingsRollbackPatch(settingsPatch, previousSettings);
+          const restoredSettings = await app.setSettings(rollbackPatch).catch(() => null);
+          if (restoredSettings && echoSrcActionGenerationRef.current === generation) {
+            window.dispatchEvent(new CustomEvent('settings:changed', { detail: restoredSettings }));
+          }
+        }
         if (echoSrcActionGenerationRef.current === generation) {
           rollback();
-          setModuleError(actionError instanceof Error ? actionError.message : String(actionError));
+          setModuleError(formatDspActionError(actionError));
         }
       } finally {
         if (echoSrcActionGenerationRef.current === generation) {
           setBusyKey(null);
         }
       }
-    })();
+    });
+    echoSrcActionQueueRef.current = operation;
+    void operation;
   }, [t]);
 
   const runSdmAction = useCallback((
@@ -4495,22 +5521,36 @@ export const DspPage = (): JSX.Element => {
   ): void => {
     const app = window.echo?.app;
     const audio = window.echo?.audio;
-    if (!app?.setSettings || !audio?.setOutput) {
+    if (!app?.getSettings || !app.setSettings || !audio?.setOutput) {
       setModuleError(t('dsp.error.desktopBridge'));
       rollback();
       return;
     }
 
-    void runModuleAction('sdm', async () => {
+    const operation = sdmActionQueueRef.current.then(() => runModuleAction('sdm', async () => {
+      let previousSettings: AppSettings | null = null;
+      let settingsPersisted = false;
       try {
+        previousSettings = await app.getSettings();
         const nextSettings = await app.setSettings(settingsPatch);
-        window.dispatchEvent(new CustomEvent('settings:changed', { detail: nextSettings }));
+        settingsPersisted = true;
         await audio.setOutput(outputPatch);
+        window.dispatchEvent(new CustomEvent('settings:changed', { detail: nextSettings }));
       } catch (actionError) {
+        if (settingsPersisted && previousSettings) {
+          const restoredSettings = await app
+            .setSettings(createSettingsRollbackPatch(settingsPatch, previousSettings))
+            .catch(() => null);
+          if (restoredSettings) {
+            window.dispatchEvent(new CustomEvent('settings:changed', { detail: restoredSettings }));
+          }
+        }
         rollback();
         throw actionError;
       }
-    });
+    }));
+    sdmActionQueueRef.current = operation;
+    void operation;
   }, [runModuleAction, t]);
 
   const handleEchoSrcModeChange = useCallback(
@@ -4991,6 +6031,16 @@ export const DspPage = (): JSX.Element => {
   const modules = useMemo<DspModule[]>(
     () => [
       {
+        id: 'rack',
+        stageKey: 'dsp.stage.input',
+        title: 'DSP Rack',
+        subtitle: '8 个可重排模块',
+        description: '编排实际处理顺序',
+        icon: Route,
+        enabled: false,
+        accent: 'violet',
+      },
+      {
         id: 'headroom',
         stageKey: 'dsp.stage.input',
         title: t('dsp.module.headroom.title'),
@@ -5029,6 +6079,46 @@ export const DspPage = (): JSX.Element => {
         icon: SlidersHorizontal,
         enabled: eqEnabled,
         accent: 'violet',
+      },
+      {
+        id: 'compressor',
+        stageKey: 'dsp.stage.shape',
+        title: '压缩器',
+        subtitle: compressor.enabled ? `${compressor.ratio.toFixed(1)}:1 / ${compressor.thresholdDb.toFixed(1)} dB` : t('dsp.status.bypassed'),
+        description: '软拐点、并行混合与补偿增益',
+        icon: Gauge,
+        enabled: compressor.enabled,
+        accent: 'amber',
+      },
+      {
+        id: 'crossfeed',
+        stageKey: 'dsp.stage.stereo',
+        title: '交叉馈送',
+        subtitle: crossfeed.enabled ? `${Math.round(crossfeed.amount * 100)}% / ${Math.round(crossfeed.cutoffHz)} Hz` : t('dsp.status.bypassed'),
+        description: '耳机低频声像自然融合',
+        icon: Headphones,
+        enabled: crossfeed.enabled,
+        accent: 'blue',
+      },
+      {
+        id: 'stereoField',
+        stageKey: 'dsp.stage.stereo',
+        title: '立体声场',
+        subtitle: stereoField.enabled ? `${Math.round(stereoField.width * 100)}%` : t('dsp.status.bypassed'),
+        description: 'Mid / Side 宽度与增益',
+        icon: Waves,
+        enabled: stereoField.enabled,
+        accent: 'violet',
+      },
+      {
+        id: 'channelMatrix',
+        stageKey: 'dsp.stage.stereo',
+        title: '声道矩阵',
+        subtitle: channelMatrix.enabled ? '2 × 2' : t('dsp.status.bypassed'),
+        description: '左右声道任意路由与混合',
+        icon: Route,
+        enabled: channelMatrix.enabled,
+        accent: 'amber',
       },
       {
         id: 'headphone',
@@ -5071,16 +6161,15 @@ export const DspPage = (): JSX.Element => {
         accent: !safetyLimiterEnabled || audioStatus?.dspLimiterProtecting === true || clippingRisk || headroomWarning ? 'amber' : 'green',
       },
     ],
-    [activeDsdMode, activeEqPresetName, audioStatus?.dspLimiterProtecting, audioStatus?.eqPresetName, channelBalanceEnabled, clippingRisk, dsdOutputEnabled, dsdSourceActive, dspActive, dspHeadroomDb, echoSrcActive, echoSrcEnabled, echoSrcSubtitle, eqEnabled, eqState.presetName, headroomWarning, headphoneCorrectionActive, roomCorrection.enabled, roomCorrection.irName, safetyLimiterEnabled, sdmRuntimeState, sdmSubtitle, t],
+    [activeDsdMode, activeEqPresetName, audioStatus?.dspLimiterProtecting, audioStatus?.eqPresetName, channelBalanceEnabled, channelMatrix.enabled, clippingRisk, compressor.enabled, compressor.ratio, compressor.thresholdDb, crossfeed.amount, crossfeed.cutoffHz, crossfeed.enabled, dsdOutputEnabled, dsdSourceActive, dspActive, dspHeadroomDb, echoSrcActive, echoSrcEnabled, echoSrcSubtitle, eqEnabled, eqState.presetName, headroomWarning, headphoneCorrectionActive, roomCorrection.enabled, roomCorrection.irName, safetyLimiterEnabled, sdmRuntimeState, sdmSubtitle, stereoField.enabled, stereoField.width, t],
   );
 
-  const activeCount = modules.filter((module) => module.enabled).length;
+  const activeCount = modules.filter((module) => module.id !== 'rack' && module.enabled).length;
   const selectedModule = modules.find((module) => module.id === selectedModuleId) ?? modules[1];
   const SelectedIcon = selectedModule.icon;
-  const visibleError = moduleError ?? error ?? null;
-  const proOnlyError = isEchoProRequiredError(visibleError);
+  const proOnlyError = isEchoProRequiredError(moduleError ?? error ?? null);
   const showProOnlyNotice = proOnlyError && !proOnlyNoticeDismissed;
-  const pipelineNodes = modules.map((module) => ({
+  const pipelineNodes = modules.filter((module) => module.id !== 'rack').map((module) => ({
     id: module.id,
     label: t(module.stageKey),
     value: module.enabled ? module.subtitle : t('dsp.status.bypassed'),
@@ -5144,6 +6233,12 @@ export const DspPage = (): JSX.Element => {
     }
   }, [proOnlyError]);
 
+  useEffect(() => {
+    if (moduleError && !isEchoProRequiredError(moduleError)) {
+      dispatchAudioErrorNotice(moduleError);
+    }
+  }, [moduleError]);
+
   return (
     <div className="dsp-page">
       <div className="dsp-stage" data-module={selectedModuleId}>
@@ -5197,7 +6292,7 @@ export const DspPage = (): JSX.Element => {
                   <button
                     type="button"
                     className="dsp-chain-item"
-                    data-active={module.enabled}
+                    data-active={module.id === 'rack' || module.enabled}
                     data-selected={isSelected}
                     data-accent={module.accent}
                     onClick={() => setSelectedModuleId(module.id)}
@@ -5211,7 +6306,7 @@ export const DspPage = (): JSX.Element => {
                       <small>{module.description}</small>
                     </span>
                     <span className="dsp-chain-state" aria-hidden="true">
-                      {module.enabled ? <CheckCircle2 size={14} /> : null}
+                      {module.id === 'rack' ? <Route size={14} /> : module.enabled ? <CheckCircle2 size={14} /> : null}
                     </span>
                   </button>
                 </div>
@@ -5264,7 +6359,7 @@ export const DspPage = (): JSX.Element => {
             </span>
             <span>
               <em>{t('dsp.label.moduleStatus')}</em>
-              <strong>{selectedModule.enabled ? t('dsp.status.active') : t('dsp.status.bypassed')}</strong>
+              <strong>{selectedModule.id === 'rack' ? '可编辑' : selectedModule.enabled ? t('dsp.status.active') : t('dsp.status.bypassed')}</strong>
             </span>
             <span>
               <em>{t('dsp.label.bitPerfect')}</em>
@@ -5275,16 +6370,20 @@ export const DspPage = (): JSX.Element => {
             </button>
           </div>
 
-          {visibleError && !proOnlyError ? <p className="dsp-status-error">{visibleError}</p> : null}
-
           <div className="dsp-editor-shell" data-module={selectedModuleId}>
+            {selectedModuleId === 'rack' ? <DspRackPanel /> : null}
             {selectedModuleId === 'headroom' ? <HeadroomPanel {...panelProps} /> : null}
             {selectedModuleId === 'src' ? <EchoSrcPanel {...panelProps} /> : null}
             {selectedModuleId === 'sdm' ? <SdmPanel {...panelProps} /> : null}
             {selectedModuleId === 'eq' ? <EqPanel audioStatus={audioStatus} onAudioStatusRefresh={() => void refreshPlaybackStatus()} surface="eq-only" /> : null}
+            {selectedModuleId === 'compressor' ? <CompressorPanel state={compressor} onApplied={setCompressor} /> : null}
+            {selectedModuleId === 'crossfeed' ? <CrossfeedPanel state={crossfeed} onApplied={setCrossfeed} /> : null}
+            {selectedModuleId === 'stereoField' ? <StereoFieldPanel state={stereoField} onApplied={setStereoField} /> : null}
+            {selectedModuleId === 'channelMatrix' ? <ChannelMatrixPanel state={channelMatrix} onApplied={setChannelMatrix} /> : null}
             {selectedModuleId === 'headphone' ? (
               <HeadphoneCorrectionPanel
                 eqState={eqState}
+                showTitle={false}
                 onApplied={setEqState}
                 onAppliedStatusRefresh={() => {
                   void refreshPlaybackStatus();
@@ -5297,6 +6396,249 @@ export const DspPage = (): JSX.Element => {
           </div>
         </section>
       </div>
+    </div>
+  );
+};
+
+const dspProLockText = {
+  'zh-CN': {
+    aria: 'DSP 需要 ECHO Pro',
+    badge: 'ECHO Pro 专属',
+    title: '完整 DSP 工作台，专为认真听音打造',
+    description: '参数均衡器、耳机校正、房间校正、ECHO SRC / SDM、声道补偿与安全余量均包含在 ECHO Pro 中。',
+    configSafe: '你现有的 DSP 配置会安全保留，激活 Pro 后可继续使用。',
+    buyPro: '购买 ECHO Pro',
+    openPro: '账号与激活',
+    purchaseHint: 'afdian.com/a/echonext',
+    previewTitle: 'DSP 信号链预览',
+    previewDescription: '音频按以下顺序处理，所有模块在 Pro 激活前处于锁定状态。',
+    lockedState: 'Pro 未激活，所有模块已锁定',
+    recheck: '重新检查',
+    hide: '在侧边栏隐藏音效处理',
+    hideHint: '隐藏后可随时在“设置 → 外观 → 侧栏”中重新显示。',
+    loading: '正在检查 ECHO Pro 授权…',
+    error: '暂时无法读取授权状态，请重新检查。',
+  },
+  'zh-TW': {
+    aria: 'DSP 需要 ECHO Pro',
+    badge: 'ECHO Pro 專屬',
+    title: '完整 DSP 工作台，為認真聆聽而打造',
+    description: '參數等化器、耳機校正、房間校正、ECHO SRC / SDM、聲道補償與安全餘量均包含在 ECHO Pro 中。',
+    configSafe: '你現有的 DSP 設定會安全保留，啟用 Pro 後可繼續使用。',
+    buyPro: '購買 ECHO Pro',
+    openPro: '帳號與啟用',
+    purchaseHint: 'afdian.com/a/echonext',
+    previewTitle: 'DSP 訊號鏈預覽',
+    previewDescription: '音訊依以下順序處理，所有模組在 Pro 啟用前均為鎖定狀態。',
+    lockedState: 'Pro 未啟用，所有模組已鎖定',
+    recheck: '重新檢查',
+    hide: '在側邊欄隱藏音效處理',
+    hideHint: '隱藏後可隨時在「設定 → 外觀 → 側邊欄」中重新顯示。',
+    loading: '正在檢查 ECHO Pro 授權…',
+    error: '暫時無法讀取授權狀態，請重新檢查。',
+  },
+  'en-US': {
+    aria: 'DSP requires ECHO Pro',
+    badge: 'ECHO Pro exclusive',
+    title: 'A complete DSP workbench for serious listening',
+    description: 'Parametric EQ, headphone and room correction, ECHO SRC / SDM, channel tools, and safety headroom are included with ECHO Pro.',
+    configSafe: 'Your existing DSP configuration is kept safely and will be ready after Pro is activated.',
+    buyPro: 'Buy ECHO Pro',
+    openPro: 'Account & activation',
+    purchaseHint: 'afdian.com/a/echonext',
+    previewTitle: 'DSP signal-chain preview',
+    previewDescription: 'Audio follows this processing order. Every module stays locked until Pro is activated.',
+    lockedState: 'Pro inactive — all modules locked',
+    recheck: 'Check again',
+    hide: 'Hide DSP from the sidebar',
+    hideHint: 'You can show it again anytime in Settings → Appearance → Sidebar.',
+    loading: 'Checking ECHO Pro access…',
+    error: 'The authorization status is temporarily unavailable. Please check again.',
+  },
+  'ko-KR': {
+    aria: 'DSP에는 ECHO Pro가 필요합니다',
+    badge: 'ECHO Pro 전용',
+    title: '진지한 감상을 위한 완전한 DSP 작업대',
+    description: '파라메트릭 EQ, 헤드폰·룸 보정, ECHO SRC / SDM, 채널 도구, 안전 헤드룸이 ECHO Pro에 포함됩니다.',
+    configSafe: '기존 DSP 설정은 안전하게 유지되며 Pro 활성화 후 바로 사용할 수 있습니다.',
+    buyPro: 'ECHO Pro 구매',
+    openPro: '계정 및 활성화',
+    purchaseHint: 'afdian.com/a/echonext',
+    previewTitle: 'DSP 신호 체인 미리보기',
+    previewDescription: '오디오는 이 처리 순서를 따릅니다. Pro가 활성화될 때까지 모든 모듈이 잠깁니다.',
+    lockedState: 'Pro 비활성 — 모든 모듈 잠김',
+    recheck: '다시 확인',
+    hide: '사이드바에서 DSP 숨기기',
+    hideHint: '설정 → 모양 → 사이드바에서 언제든 다시 표시할 수 있습니다.',
+    loading: 'ECHO Pro 권한 확인 중…',
+    error: '권한 상태를 일시적으로 확인할 수 없습니다. 다시 확인해 주세요.',
+  },
+} as const;
+
+export const DspPage = (): JSX.Element => {
+  const { locale } = useI18n();
+  const copy = locale === 'zh-TW'
+    ? dspProLockText['zh-TW']
+    : locale === 'zh-CN'
+      ? dspProLockText['zh-CN']
+      : locale === 'ko-KR'
+        ? dspProLockText['ko-KR']
+        : dspProLockText['en-US'];
+  const [isProUnlocked, setIsProUnlocked] = useState<boolean | null>(null);
+  const [isChecking, setIsChecking] = useState(true);
+  const [isSidebarHideBusy, setIsSidebarHideBusy] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
+
+  const refreshProAccess = useCallback(async (preserveUnlocked = false): Promise<void> => {
+    const getStatus = window.echo?.app?.getEchoProLocalEntitlementStatus;
+    if (!getStatus) {
+      setIsProUnlocked(false);
+      setIsChecking(false);
+      setAccessError(copy.error);
+      return;
+    }
+
+    setIsChecking(true);
+    setAccessError(null);
+    try {
+      const status = await getStatus();
+      setIsProUnlocked(status.dspUnlocked === true);
+    } catch {
+      setIsProUnlocked((current) => preserveUnlocked && current === true ? true : false);
+      setAccessError(copy.error);
+    } finally {
+      setIsChecking(false);
+    }
+  }, [copy.error]);
+
+  useEffect(() => {
+    void refreshProAccess();
+    const handleStatusChanged = (): void => {
+      void refreshProAccess(true);
+    };
+    window.addEventListener('echo-pro:status-changed', handleStatusChanged);
+    return () => {
+      window.removeEventListener('echo-pro:status-changed', handleStatusChanged);
+    };
+  }, [refreshProAccess]);
+
+  const hideDspFromSidebar = useCallback(async (): Promise<void> => {
+    setIsSidebarHideBusy(true);
+    setAccessError(null);
+    try {
+      await hideSidebarRouteEntry('dsp');
+    } catch (error) {
+      setAccessError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSidebarHideBusy(false);
+    }
+  }, []);
+
+  if (isProUnlocked === true) {
+    return <DspWorkbench />;
+  }
+
+  if (isProUnlocked === null) {
+    return (
+      <div className="dsp-page dsp-page--pro-locked">
+        <main className="dsp-pro-lock" aria-label={copy.aria}>
+          <section className="dsp-pro-lock__loading" role="status">
+            <Loader2 className="spinning-icon" size={22} aria-hidden="true" />
+            <p>{copy.loading}</p>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="dsp-page dsp-page--pro-locked">
+      <main className="dsp-pro-lock" aria-label={copy.aria}>
+        <section className="dsp-pro-lock__layout">
+          <div className="dsp-pro-lock__copy">
+            <span className="dsp-pro-lock__badge">
+              <ShieldCheck size={14} aria-hidden="true" />
+              {copy.badge}
+            </span>
+            <h1>{copy.title}</h1>
+            <p className="dsp-pro-lock__description">{copy.description}</p>
+
+            <p className="dsp-pro-lock__safe-note">
+              <ShieldCheck size={16} aria-hidden="true" />
+              {isChecking ? copy.loading : copy.configSafe}
+            </p>
+
+            <div className="dsp-pro-lock__actions">
+              <div className="dsp-pro-lock__purchase">
+                <button className="dsp-pro-lock__primary" type="button" onClick={openEchoProPurchasePage}>
+                  <ShieldCheck size={17} aria-hidden="true" />
+                  {copy.buyPro}
+                  <ExternalLink size={14} aria-hidden="true" />
+                </button>
+                <small>{copy.purchaseHint}</small>
+              </div>
+              <button className="dsp-pro-lock__secondary" type="button" onClick={openEchoProActivationSettings}>
+                <UserRound size={16} aria-hidden="true" />
+                {copy.openPro}
+              </button>
+              <button
+                className="dsp-pro-lock__secondary"
+                type="button"
+                onClick={() => void refreshProAccess(true)}
+                disabled={isChecking}
+              >
+                {isChecking ? <Loader2 className="spinning-icon" size={16} /> : <RefreshCw size={16} />}
+                {copy.recheck}
+              </button>
+            </div>
+
+            {accessError ? <p className="dsp-pro-lock__error" role="alert">{accessError}</p> : null}
+
+            <footer className="dsp-pro-lock__footer">
+              <button type="button" onClick={() => void hideDspFromSidebar()} disabled={isSidebarHideBusy}>
+                {isSidebarHideBusy ? <Loader2 className="spinning-icon" size={15} /> : <EyeOff size={15} />}
+                {copy.hide}
+              </button>
+              <small>{copy.hideHint}</small>
+            </footer>
+          </div>
+
+          <aside className="dsp-pro-lock__preview" aria-label={copy.previewTitle}>
+            <header>
+              <h2>{copy.previewTitle}</h2>
+              <p>{copy.previewDescription}</p>
+            </header>
+            <div className="dsp-pro-lock__signal">
+              <div className="dsp-pro-lock__features">
+                <span>
+                  <i><SlidersHorizontal size={25} aria-hidden="true" /></i>
+                  <LockKeyhole size={13} aria-hidden="true" />
+                  <strong>EQ</strong>
+                </span>
+                <span>
+                  <i><Headphones size={25} aria-hidden="true" /></i>
+                  <LockKeyhole size={13} aria-hidden="true" />
+                  <strong>Headphone</strong>
+                </span>
+                <span>
+                  <i><Waves size={25} aria-hidden="true" /></i>
+                  <LockKeyhole size={13} aria-hidden="true" />
+                  <strong>Room</strong>
+                </span>
+                <span>
+                  <i><AudioWaveform size={25} aria-hidden="true" /></i>
+                  <LockKeyhole size={13} aria-hidden="true" />
+                  <strong>SRC / SDM</strong>
+                </span>
+              </div>
+              <p className="dsp-pro-lock__locked-state">
+                <LockKeyhole size={14} aria-hidden="true" />
+                {copy.lockedState}
+              </p>
+            </div>
+          </aside>
+        </section>
+      </main>
     </div>
   );
 };

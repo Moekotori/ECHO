@@ -13,6 +13,7 @@ import type {
   MvQualityTier,
   MvQualityVariant,
   MvResolvedStreams,
+  MvSelectionOrigin,
   MvSettings,
   MvTrackSnapshotSearchRequest,
   NetworkMvProviderId,
@@ -24,6 +25,7 @@ import { isBrowserPlayableVideo, isSupportedVideoExtension, mimeTypeForVideoPath
 import { clampMvOffsetMs } from '../../shared/constants/mvOffset';
 import { LocalMvProvider } from './LocalMvProvider';
 import { createOnlineMvProviders, type MainMvOnlineProvider, type ResolvedMvStreamVariant } from './OnlineMvProviders';
+import { MV_MATCH_ALGORITHM_VERSION } from './MvScoring';
 
 type LibraryLookup = {
   getTrack: (trackId: string) => LibraryTrack | null;
@@ -54,6 +56,7 @@ type TrackVideoRow = {
   raw_provider_json: string | null;
   score: number;
   selected: number;
+  selection_origin: string;
   created_at: string;
   updated_at: string;
 };
@@ -162,6 +165,8 @@ const resetMvStreamStorage = (database: EchoDatabase): void => {
 const networkProviders: NetworkMvProviderId[] = ['bilibili', 'youtube'];
 const streamingTrackIdPattern = /^streaming:([^:]+):(.+)$/;
 export const MV_AUTO_MATCH_THRESHOLD = 0.7;
+export const MV_AUTO_MATCH_MIN_MARGIN = 0.08;
+export const MV_AUTO_MATCH_HIGH_CONFIDENCE = 0.86;
 const normalizeAutoApplyThreshold = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) ? Math.max(0.3, Math.min(1, value)) : MV_AUTO_MATCH_THRESHOLD;
 const normalizePercent = (value: unknown, fallback: number, min: number, max: number): number => {
@@ -398,6 +403,9 @@ const sourceType = (value: string): MvSourceType => {
   return 'sidecar';
 };
 
+const selectionOrigin = (value: string): MvSelectionOrigin =>
+  value === 'auto' || value === 'manual' ? value : 'unknown';
+
 const qualityTier = (value: string): MvQualityTier => {
   if (value === 'auto' || value === '720p' || value === '1080p' || value === '1440p' || value === '2160p' || value === '4320p') {
     return value;
@@ -424,20 +432,79 @@ const titleOnlyTrackSearchQuery = (track: Pick<LibraryTrack, 'title'>): string |
   return query || undefined;
 };
 
-const networkSearchQueryOverride = (
+type NetworkSearchPlan = {
+  primaryQuery: string | undefined;
+  fallbackQuery: string | undefined;
+};
+
+const networkSearchPlan = (
   track: Pick<LibraryTrack, 'title' | 'artist' | 'albumArtist'>,
   settings: MvSettings,
   query?: string | null,
-): string | undefined => {
+): NetworkSearchPlan => {
   const explicitQuery = query?.trim();
   if (explicitQuery) {
-    return explicitQuery;
+    return { primaryQuery: explicitQuery, fallbackQuery: undefined };
   }
 
-  return settings.titleOnlySearch !== false ? titleOnlyTrackSearchQuery(track) : directTrackSearchQuery(track);
+  const baseQuery = settings.titleOnlySearch === true ? titleOnlyTrackSearchQuery(track) : directTrackSearchQuery(track);
+  return {
+    primaryQuery: baseQuery ? `${baseQuery} MV` : undefined,
+    fallbackQuery: baseQuery,
+  };
+};
+
+const mergeSearchCandidates = (primary: MvMatchCandidate[], fallback: MvMatchCandidate[]): MvMatchCandidate[] => {
+  const merged = new Map(primary.map((candidate) => [candidate.id, candidate]));
+  for (const candidate of fallback) {
+    if (!merged.has(candidate.id)) {
+      merged.set(candidate.id, candidate);
+    }
+  }
+  return [...merged.values()];
+};
+
+const hasCurrentAutoDecision = (candidate: MvMatchCandidate): boolean => {
+  if (candidate.autoEligible === false) {
+    return false;
+  }
+  if (candidate.matchVersion !== undefined && candidate.matchVersion !== MV_MATCH_ALGORITHM_VERSION) {
+    return false;
+  }
+  if (!candidate.decision) {
+    return true;
+  }
+
+  return candidate.decision.algorithmVersion === MV_MATCH_ALGORITHM_VERSION &&
+    candidate.decision.autoAccept &&
+    candidate.decision.risk === 'low';
+};
+
+const searchProviderWithFallback = async (
+  provider: MainMvOnlineProvider,
+  track: LibraryTrack,
+  settings: MvSettings,
+  plan: NetworkSearchPlan,
+): Promise<MvMatchCandidate[]> => {
+  const primary = await provider.search(track, settings, plan.primaryQuery);
+  const threshold = normalizeAutoApplyThreshold(settings.autoApplyThreshold);
+  const hasSafePrimaryCandidate = primary.some(
+    (candidate) => candidate.playableInApp && hasCurrentAutoDecision(candidate) && candidate.score >= threshold,
+  );
+  if (provider.id !== 'bilibili' || !plan.fallbackQuery || hasSafePrimaryCandidate) {
+    return primary;
+  }
+
+  const fallback = await provider.search(track, settings, plan.fallbackQuery);
+  return mergeSearchCandidates(primary, fallback);
 };
 
 const compareNetworkCandidates = (settings: MvSettings) => (left: MvMatchCandidate, right: MvMatchCandidate): number => {
+  const scoreDelta = right.score - left.score;
+  if (scoreDelta !== 0) {
+    return scoreDelta;
+  }
+
   if (settings.preferHighestViewCount) {
     const viewDelta = (right.viewCount ?? -1) - (left.viewCount ?? -1);
     if (viewDelta !== 0) {
@@ -445,12 +512,7 @@ const compareNetworkCandidates = (settings: MvSettings) => (left: MvMatchCandida
     }
   }
 
-  const scoreDelta = right.score - left.score;
-  if (scoreDelta !== 0) {
-    return scoreDelta;
-  }
-
-  return (right.viewCount ?? -1) - (left.viewCount ?? -1);
+  return 0;
 };
 
 const customMvFromUrl = (value: string): { provider: NetworkMvProviderId; sourceId: string; providerUrl: string; title: string } => {
@@ -625,7 +687,7 @@ const appSettingsToMvSettings = (): MvSettings => {
     autoSearch: settings.mvAutoSearch,
     autoPreload: settings.mvAutoPreload !== false,
     autoApplyThreshold: normalizeAutoApplyThreshold(settings.mvAutoApplyThreshold),
-    titleOnlySearch: settings.mvTitleOnlySearch !== false,
+    titleOnlySearch: settings.mvTitleOnlySearch === true,
     preferHighestViewCount: settings.mvPreferHighestViewCount !== false,
     immersiveBackground: settings.mvImmersiveBackground !== false,
     immersiveBackgroundAutoScale: settings.mvImmersiveBackgroundAutoScale !== false,
@@ -818,7 +880,7 @@ export class MvService {
       return [];
     }
 
-    const queryOverride = networkSearchQueryOverride(track, settings, query);
+    const searchPlan = networkSearchPlan(track, settings, query);
     const enabled = new Set(settings.enabledProviders);
     const orderedProviders = settings.providerOrder.filter((provider) => enabled.has(provider));
     const providerResults = await Promise.all(
@@ -829,7 +891,7 @@ export class MvService {
         }
 
         try {
-          return await provider.search(track, settings, queryOverride);
+          return await searchProviderWithFallback(provider, track, settings, searchPlan);
         } catch {
           return [];
         }
@@ -844,7 +906,7 @@ export class MvService {
         reasons: [...(candidate.reasons ?? []), `remote:${track.sourceId ?? 'unknown'}:${track.stableKey ?? track.id}`],
       }))
         : candidates;
-    return this.persistNetworkCandidatesWithRepair(track, normalizedCandidates, settings);
+    return this.persistNetworkCandidatesWithRepair(track, normalizedCandidates, settings, !query?.trim());
   }
 
   async searchNetworkCandidatesForSnapshot(request: MvTrackSnapshotSearchRequest): Promise<MvMatchCandidate[]> {
@@ -854,7 +916,7 @@ export class MvService {
     }
 
     const track = this.trackSnapshotToLibraryTrack(request);
-    const queryOverride = networkSearchQueryOverride(track, settings, request.query);
+    const searchPlan = networkSearchPlan(track, settings, request.query);
     const enabled = new Set(settings.enabledProviders);
     const orderedProviders = settings.providerOrder.filter((provider) => enabled.has(provider));
     const providerResults = await Promise.all(
@@ -865,7 +927,7 @@ export class MvService {
         }
 
         try {
-          return await provider.search(track, settings, queryOverride);
+          return await searchProviderWithFallback(provider, track, settings, searchPlan);
         } catch {
           return [];
         }
@@ -879,17 +941,17 @@ export class MvService {
         filePath: null,
         reasons: [...(candidate.reasons ?? []), `snapshot:${track.mediaType ?? 'streaming'}:${track.id}`],
       }));
-    return this.persistNetworkCandidatesWithRepair(track, candidates, settings);
+    return this.persistNetworkCandidatesWithRepair(track, candidates, settings, request.autoSelect === true);
   }
 
   async getTemporaryPlayableForSnapshot(request: MvTrackSnapshotSearchRequest): Promise<TrackVideo | null> {
     const settings = this.getSettings();
-    if (settings.enabled === false) {
+    if (settings.enabled === false || settings.autoSearch === false) {
       return null;
     }
 
     const track = this.trackSnapshotToLibraryTrack(request);
-    const queryOverride = networkSearchQueryOverride(track, settings, request.query);
+    const searchPlan = networkSearchPlan(track, settings, request.query);
     const enabled = new Set(settings.enabledProviders);
     const orderedProviders = settings.providerOrder.filter((provider) => enabled.has(provider));
     const providerResults = await Promise.all(
@@ -900,7 +962,7 @@ export class MvService {
         }
 
         try {
-          return await provider.search(track, settings, queryOverride);
+          return await searchProviderWithFallback(provider, track, settings, searchPlan);
         } catch {
           return [];
         }
@@ -915,7 +977,12 @@ export class MvService {
         reasons: [...(candidate.reasons ?? []), `temporary:${track.mediaType ?? 'local'}:${track.id}`],
       }));
 
-    for (const candidate of this.rankAutoCandidates(candidates, settings)) {
+    const rankedCandidates = this.sameUploaderAutoResolutionCandidates(this.rankAutoCandidates(candidates, settings));
+    if (!this.hasConfidentAutoMatchLead(rankedCandidates)) {
+      return null;
+    }
+
+    for (const candidate of rankedCandidates) {
       const providerId = providerName(candidate.provider);
       if (providerId !== 'bilibili' && providerId !== 'youtube') {
         continue;
@@ -1018,6 +1085,7 @@ export class MvService {
           timestamp,
           timestamp,
         );
+      this.database.prepare("UPDATE track_videos SET selection_origin = 'manual' WHERE id = ?").run(id);
 
       return this.mapRow(this.getRow(id)!);
     })();
@@ -1081,6 +1149,7 @@ export class MvService {
           existing?.created_at ?? timestamp,
           timestamp,
         );
+      this.database.prepare("UPDATE track_videos SET selection_origin = 'manual' WHERE id = ?").run(id);
 
       return this.mapRow(this.getRow(id)!);
     })();
@@ -1100,7 +1169,7 @@ export class MvService {
       }
     }
 
-    return this.commitSelectedVideo(trackId, videoId);
+    return this.commitSelectedVideo(trackId, videoId, 'manual');
   }
 
   clearSelectedVideo(trackId: string): void {
@@ -1470,6 +1539,7 @@ export class MvService {
       offsetMs: 0,
       score: Number(candidate.score ?? 0),
       selected: true,
+      selectionOrigin: 'auto',
       playableInApp: Boolean(token && variant?.url && variant.playableInApp && variant.protocol !== 'external'),
       temporary: true,
       rawProviderJson: {
@@ -1563,9 +1633,10 @@ export class MvService {
     track: LibraryTrack,
     candidates: MvMatchCandidate[],
     settings: MvSettings,
+    allowAutoSelect: boolean,
   ): Promise<MvMatchCandidate[]> {
     try {
-      return await this.persistNetworkCandidates(track, candidates, settings);
+      return await this.persistNetworkCandidates(track, candidates, settings, allowAutoSelect);
     } catch (error) {
       if (!isSqliteCorruptionError(error)) {
         throw error;
@@ -1576,10 +1647,15 @@ export class MvService {
     }
   }
 
-  private async persistNetworkCandidates(track: LibraryTrack, candidates: MvMatchCandidate[], settings: MvSettings): Promise<MvMatchCandidate[]> {
+  private async persistNetworkCandidates(
+    track: LibraryTrack,
+    candidates: MvMatchCandidate[],
+    settings: MvSettings,
+    allowAutoSelect: boolean,
+  ): Promise<MvMatchCandidate[]> {
     const upsertedCandidates = this.database.transaction(() => candidates.map((candidate) => this.upsertNetworkCandidate(track, candidate)))();
 
-    if (settings.autoSearch && this.shouldAutoSelectNetworkCandidate(track.id)) {
+    if (allowAutoSelect && settings.autoSearch && this.shouldAutoSelectNetworkCandidate(track.id)) {
       await this.selectFirstResolvedAutoCandidate(track.id, upsertedCandidates, settings);
     }
 
@@ -1722,8 +1798,12 @@ export class MvService {
         null,
         JSON.stringify({
           uploader: candidate.uploader,
+          uploaderId: candidate.uploaderId ?? null,
           reasons: candidate.reasons,
           viewCount: candidate.viewCount ?? null,
+          autoEligible: candidate.autoEligible ?? null,
+          matchVersion: candidate.matchVersion ?? null,
+          decision: candidate.decision ?? null,
         }),
         candidate.score,
         existing?.selected ?? 0,
@@ -1811,11 +1891,16 @@ export class MvService {
     candidates: MvMatchCandidate[],
     settings: MvSettings,
   ): Promise<TrackVideo | null> {
-    for (const candidate of this.rankAutoCandidates(candidates, settings)) {
+    const rankedCandidates = this.sameUploaderAutoResolutionCandidates(this.rankAutoCandidates(candidates, settings));
+    if (!this.hasConfidentAutoMatchLead(rankedCandidates)) {
+      return null;
+    }
+
+    for (const candidate of rankedCandidates) {
       try {
         const resolved = await this.resolvePlayableCandidateForSelection(candidate.id);
         if (resolved.video.playableInApp && resolved.video.mediaUrl) {
-          return this.commitSelectedVideo(trackId, candidate.id);
+          return this.commitSelectedVideo(trackId, candidate.id, 'auto');
         }
       } catch {
         // Try the next matching candidate; search results can include videos that only open externally.
@@ -1825,11 +1910,13 @@ export class MvService {
     return null;
   }
 
-  private commitSelectedVideo(trackId: string, videoId: string): TrackVideo {
+  private commitSelectedVideo(trackId: string, videoId: string, origin: MvSelectionOrigin): TrackVideo {
     const timestamp = nowIso();
     return this.database.transaction(() => {
       this.database.prepare('UPDATE track_videos SET selected = 0, updated_at = ? WHERE track_id = ?').run(timestamp, trackId);
-      this.database.prepare('UPDATE track_videos SET selected = 1, updated_at = ? WHERE id = ?').run(timestamp, videoId);
+      this.database
+        .prepare('UPDATE track_videos SET selected = 1, selection_origin = ?, updated_at = ? WHERE id = ?')
+        .run(origin, timestamp, videoId);
       return this.mapRow(this.getRow(videoId)!);
     })();
   }
@@ -2098,10 +2185,10 @@ export class MvService {
     return highestRequestedQn < maxBilibiliQnForSettings(settings);
   }
 
-  private rankAutoCandidates<T extends Pick<TrackVideo | MvMatchCandidate, 'id' | 'provider' | 'playableInApp' | 'score'> & { viewCount?: number | null }>(
-    candidates: T[],
+  private rankAutoCandidates(
+    candidates: MvMatchCandidate[],
     settings: MvSettings,
-  ): T[] {
+  ): MvMatchCandidate[] {
     const enabledProviders = new Set(settings.enabledProviders);
     const providerRank = (provider: MvProviderId): number => {
       if (provider === 'local') {
@@ -2115,8 +2202,14 @@ export class MvService {
     return [...candidates]
       .filter((candidate) => candidate.provider === 'local' || enabledProviders.has(candidate.provider as NetworkMvProviderId))
       .filter((candidate) => candidate.playableInApp)
-      .filter((candidate) => settings.preferHighestViewCount || candidate.score >= normalizeAutoApplyThreshold(settings.autoApplyThreshold))
+      .filter((candidate) => candidate.provider === 'local' || hasCurrentAutoDecision(candidate))
+      .filter((candidate) => candidate.score >= normalizeAutoApplyThreshold(settings.autoApplyThreshold))
       .sort((left, right) => {
+        const scoreDelta = right.score - left.score;
+        if (scoreDelta !== 0) {
+          return scoreDelta;
+        }
+
         if (settings.preferHighestViewCount) {
           const viewDelta = (right.viewCount ?? -1) - (left.viewCount ?? -1);
           if (viewDelta !== 0) {
@@ -2124,18 +2217,32 @@ export class MvService {
           }
         }
 
-        const scoreDelta = right.score - left.score;
-        if (scoreDelta !== 0) {
-          return scoreDelta;
-        }
-
-        const viewDelta = (right.viewCount ?? -1) - (left.viewCount ?? -1);
-        if (viewDelta !== 0) {
-          return viewDelta;
-        }
-
         return providerRank(left.provider) - providerRank(right.provider);
       });
+  }
+
+  private sameUploaderAutoResolutionCandidates(candidates: MvMatchCandidate[]): MvMatchCandidate[] {
+    const first = candidates[0];
+    if (!first) {
+      return [];
+    }
+    if (!first.uploaderId) {
+      return [first];
+    }
+
+    return candidates.filter((candidate) =>
+      candidate.id === first.id ||
+      (candidate.provider === first.provider && candidate.uploaderId === first.uploaderId));
+  }
+
+  private hasConfidentAutoMatchLead(candidates: Array<{ score: number }>): boolean {
+    const first = candidates[0];
+    if (!first) {
+      return false;
+    }
+
+    const second = candidates[1];
+    return !second || first.score >= MV_AUTO_MATCH_HIGH_CONFIDENCE || first.score - second.score >= MV_AUTO_MATCH_MIN_MARGIN;
   }
 
   private mapRow(row: TrackVideoRow): TrackVideo {
@@ -2172,6 +2279,7 @@ export class MvService {
       offsetMs: clampMvOffsetMs(Number(row.offset_ms ?? 0)),
       score: Number(row.score ?? 0),
       selected: row.selected === 1,
+      selectionOrigin: selectionOrigin(row.selection_origin),
       playableInApp: localPlayable || streamPlayable,
       rawProviderJson: mergeRawProviderJson(rawProviderJson, resolveIssue),
       createdAt: row.created_at,

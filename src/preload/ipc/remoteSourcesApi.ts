@@ -17,6 +17,7 @@ export function createRemoteSourcesApi(
     test: (sourceIdOrInput) => ipcRenderer.invoke(IpcChannels.RemoteSourcesTest, sourceIdOrInput),
     browse: (sourceId, path) => ipcRenderer.invoke(IpcChannels.RemoteSourcesBrowse, sourceId, path),
     sync: (sourceId, options) => ipcRenderer.invoke(IpcChannels.RemoteSourcesSync, sourceId, options),
+    previewSync: (sourceId, options) => ipcRenderer.invoke(IpcChannels.RemoteSourcesPreviewSync, sourceId, options),
     cancelSync: (sourceId) => ipcRenderer.invoke(IpcChannels.RemoteSourcesCancelSync, sourceId),
     getSyncStatus: (sourceId) => ipcRenderer.invoke(IpcChannels.RemoteSourcesGetSyncStatus, sourceId),
     createStreamUrl: (input) => ipcRenderer.invoke(IpcChannels.RemoteSourcesCreateStreamUrl, input),

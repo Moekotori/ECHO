@@ -44,7 +44,15 @@ describe('PlayerTransport', () => {
     const onOpenLyrics = vi.fn();
     render(<PlayerTransport {...defaultProps} onOpenLyrics={onOpenLyrics} onOpenMv={onOpenMv} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'MV' }));
+    const mvButton = screen.getByRole('button', { name: 'MV' });
+    const lyricsButton = screen.getByRole('button', { name: '歌词' });
+
+    expect(mvButton.className).toContain('transport-media-button');
+    expect(lyricsButton.className).toContain('transport-media-button');
+    expect(mvButton.querySelector('.lucide-clapperboard')).not.toBeNull();
+    expect(lyricsButton.querySelector('.lucide-mic-vocal')).not.toBeNull();
+
+    fireEvent.click(mvButton);
 
     expect(onOpenMv).toHaveBeenCalledTimes(1);
     expect(onOpenLyrics).not.toHaveBeenCalled();

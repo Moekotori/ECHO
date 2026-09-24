@@ -41,6 +41,8 @@ let rememberBoundsTimer: ReturnType<typeof setTimeout> | null = null;
 let lastForwardedAudioStatus: { status: AudioStatus; receivedAtMs: number } | null = null;
 let lastForwardedPlaybackStatus: { status: PlaybackStatus; receivedAtMs: number } | null = null;
 let desktopLyricsMousePassthrough = false;
+let desktopLyricsRendererReady = false;
+let desktopLyricsRevealRequestId = 0;
 
 const toDesktopLyricsSettings = (): DesktopLyricsState['settings'] => {
   const settings = getAppSettings();
@@ -231,13 +233,13 @@ const applyDesktopLyricsReadableBoundsForTextDirection = (window: BrowserWindow)
 
 const loadDesktopLyricsRenderer = (window: BrowserWindow): void => {
   if (process.env.ELECTRON_RENDERER_URL) {
-    const url = new URL(process.env.ELECTRON_RENDERER_URL);
+    const url = new URL('/auxiliary.html', process.env.ELECTRON_RENDERER_URL);
     url.searchParams.set('desktopLyrics', '1');
     void window.loadURL(url.toString());
     return;
   }
 
-  void window.loadFile(join(mainOutputDir, '../renderer/index.html'), {
+  void window.loadFile(join(mainOutputDir, '../renderer/auxiliary.html'), {
     query: { desktopLyrics: '1' },
   });
 };
@@ -247,6 +249,7 @@ export const createDesktopLyricsWindow = (): BrowserWindow => {
     return desktopLyricsWindow;
   }
 
+  desktopLyricsRendererReady = false;
   const bounds = resolveInitialDesktopLyricsBounds();
   const window = new BrowserWindow({
     ...bounds,
@@ -284,6 +287,16 @@ export const createDesktopLyricsWindow = (): BrowserWindow => {
       sourceId: preloadPath,
     });
   });
+  window.webContents.on('did-start-loading', () => {
+    if (desktopLyricsWindow === window) {
+      desktopLyricsRendererReady = false;
+    }
+  });
+  window.webContents.on('did-finish-load', () => {
+    if (desktopLyricsWindow === window) {
+      desktopLyricsRendererReady = true;
+    }
+  });
   applyDesktopLyricsAlwaysOnTop(window);
   applyDesktopLyricsLockState(window);
 
@@ -308,6 +321,7 @@ export const createDesktopLyricsWindow = (): BrowserWindow => {
     }
 
     desktopLyricsWindow = null;
+    desktopLyricsRendererReady = false;
     emitDesktopLyricsStateChanged();
   });
 
@@ -347,12 +361,22 @@ export const revealDesktopLyricsMenu = (): DesktopLyricsState => {
 
   if (window && !window.isDestroyed()) {
     window.setIgnoreMouseEvents(false, { forward: true });
-    for (const delayMs of desktopLyricsRevealMenuRetryDelaysMs) {
-      setTimeout(() => {
-        if (!window.isDestroyed()) {
-          window.webContents.send(IpcChannels.DesktopLyricsRevealMenu);
-        }
-      }, delayMs);
+    desktopLyricsRevealRequestId += 1;
+    const requestId = desktopLyricsRevealRequestId;
+    const sendRevealRetries = (): void => {
+      for (const delayMs of desktopLyricsRevealMenuRetryDelaysMs) {
+        setTimeout(() => {
+          if (!window.isDestroyed()) {
+            window.webContents.send(IpcChannels.DesktopLyricsRevealMenu, requestId);
+          }
+        }, delayMs);
+      }
+    };
+
+    if (desktopLyricsRendererReady) {
+      sendRevealRetries();
+    } else {
+      window.webContents.once('did-finish-load', sendRevealRetries);
     }
   }
 

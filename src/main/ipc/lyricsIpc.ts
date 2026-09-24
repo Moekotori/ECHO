@@ -1,7 +1,14 @@
 import { BrowserWindow, ipcMain } from 'electron';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
-import type { LyricsEmbedToTrackRequest, LyricsSearchTrigger, LyricsTrackSnapshotRequest, TrackLyrics } from '../../shared/types/lyrics';
-import { getLyricsService } from '../lyrics/LyricsService';
+import type {
+  LyricsCandidateApplyOrigin,
+  LyricsChangeReason,
+  LyricsEmbedToTrackRequest,
+  LyricsSearchTrigger,
+  LyricsTrackSnapshotRequest,
+  TrackLyrics,
+} from '../../shared/types/lyrics';
+import { getLyricsService, onLyricsServiceChanged } from '../lyrics/LyricsService';
 import type { LyricsLookupOptions } from '../lyrics/LyricsService';
 import { getAudioSession } from '../audioPublicApi';
 
@@ -29,6 +36,9 @@ const normalizeSearchTrigger = (value: unknown): LyricsSearchTrigger =>
   value === 'missing-lyrics' || value === 'smart-alignment' || value === 'rematch'
     ? value
     : 'manual';
+
+const normalizeApplyOrigin = (value: unknown): LyricsCandidateApplyOrigin =>
+  value === 'auto' ? 'auto' : 'manual';
 
 const normalizeSnapshotRequest = (value: unknown): LyricsTrackSnapshotRequest => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -62,10 +72,10 @@ const normalizeEmbedRequest = (value: unknown): LyricsEmbedToTrackRequest => {
   };
 };
 
-const emitLyricsChanged = (trackId: string): void => {
+const emitLyricsChanged = (trackId: string, reason: LyricsChangeReason = 'manual'): void => {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
-      window.webContents.send(IpcChannels.LyricsChanged, { trackId });
+      window.webContents.send(IpcChannels.LyricsChanged, { trackId, reason });
     }
   }
 };
@@ -127,7 +137,14 @@ const getLyricsForTrackCoalesced = (trackId: string, options?: LyricsLookupOptio
   return lookup;
 };
 
+let isLyricsServiceChangeForwardingRegistered = false;
+
 export const registerLyricsIpc = (): void => {
+  if (!isLyricsServiceChangeForwardingRegistered) {
+    isLyricsServiceChangeForwardingRegistered = true;
+    onLyricsServiceChanged(emitLyricsChanged);
+  }
+
   ipcMain.handle(IpcChannels.LyricsGetForTrack, (_event, trackId: unknown) => {
     const normalizedTrackId = requireText(trackId, 'trackId');
     const options = isCriticalPlaybackForLyricsLookup()
@@ -138,6 +155,13 @@ export const registerLyricsIpc = (): void => {
   ipcMain.handle(IpcChannels.LyricsGetForSnapshot, (_event, request: unknown) =>
     getLyricsService().getLyricsForSnapshot(normalizeSnapshotRequest(request)),
   );
+  ipcMain.handle(IpcChannels.LyricsGetStoredCandidates, (_event, trackId: unknown, durationSeconds?: unknown) => {
+    const parsedDuration = Number(durationSeconds);
+    return getLyricsService().getStoredLyricsCandidates(
+      requireText(trackId, 'trackId'),
+      Number.isFinite(parsedDuration) && parsedDuration > 0 ? parsedDuration : null,
+    );
+  });
   ipcMain.handle(IpcChannels.LyricsSearchCandidates, (_event, trackId: unknown, searchText?: unknown, providerId?: unknown, trigger?: unknown) =>
     getLyricsService().searchLyricsCandidates(
       requireText(trackId, 'trackId'),
@@ -157,18 +181,32 @@ export const registerLyricsIpc = (): void => {
   ipcMain.handle(IpcChannels.LyricsPreviewCandidate, (_event, trackId: unknown, candidateId: unknown) =>
     getLyricsService().previewLyricsCandidate(requireText(trackId, 'trackId'), requireText(candidateId, 'candidateId')),
   );
-  ipcMain.handle(IpcChannels.LyricsApplyCandidate, (_event, trackId: unknown, candidateId: unknown) => {
+  ipcMain.handle(IpcChannels.LyricsApplyCandidate, (
+    _event,
+    trackId: unknown,
+    candidateId: unknown,
+    origin?: unknown,
+  ) => {
     const normalizedTrackId = requireText(trackId, 'trackId');
     const normalizedCandidateId = requireText(candidateId, 'candidateId');
-    return runWithLyricsChanged(normalizedTrackId, () =>
-      getLyricsService().applyLyricsCandidate(normalizedTrackId, normalizedCandidateId),
+    return getLyricsService().applyLyricsCandidate(
+      normalizedTrackId,
+      normalizedCandidateId,
+      normalizeApplyOrigin(origin),
     );
   });
-  ipcMain.handle(IpcChannels.LyricsApplyCandidateForSnapshot, (_event, request: unknown, candidateId: unknown) => {
+  ipcMain.handle(IpcChannels.LyricsApplyCandidateForSnapshot, (
+    _event,
+    request: unknown,
+    candidateId: unknown,
+    origin?: unknown,
+  ) => {
     const normalizedRequest = normalizeSnapshotRequest(request);
     const normalizedCandidateId = requireText(candidateId, 'candidateId');
-    return runWithLyricsChanged(normalizedRequest.trackId, () =>
-      getLyricsService().applyLyricsCandidateForSnapshot(normalizedRequest, normalizedCandidateId),
+    return getLyricsService().applyLyricsCandidateForSnapshot(
+      normalizedRequest,
+      normalizedCandidateId,
+      normalizeApplyOrigin(origin),
     );
   });
   ipcMain.handle(IpcChannels.LyricsEmbedToTrack, (_event, trackId: unknown, request?: unknown) => {

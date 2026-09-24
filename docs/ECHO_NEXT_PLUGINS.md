@@ -4,6 +4,8 @@
 
 这份文档写给插件作者。目标不是教插件突破宿主限制，而是教你在 ECHO 的安全边界内做出稳定、轻量、不会拖慢播放的扩展。
 
+如果你正在让 AI 帮你写插件，建议先把 [ForAIReadme](./plugin-sdk/ForAIReadme.md) 发给它。那份文档把插件类型、权限、manifest、运行边界和 AI 常见错误整理成了更适合模型执行的清单。
+
 ## 一句话模型
 
 ECHO 插件是放在用户数据目录 `plugins/` 下的本地文件夹。宿主读取 `echo.plugin.json`，在受控 VM 沙箱里运行 `plugin.js`，按用户确认的权限暴露一个有限的全局 `echo` API，并把 `panel.html` 当作 sandbox iframe 显示。
@@ -301,6 +303,32 @@ console.log('simple theme plugin loaded');
 3. 再做读取曲库的命令。
 4. 再做 provider。
 5. 最后再做面板。
+
+## 让 AI 帮你写插件时怎么说
+
+你可以直接把下面这段发给 AI，然后把你的需求补进去：
+
+```text
+请按 ECHO Next 插件系统写一个本地插件。
+先阅读 docs/ECHO_NEXT_PLUGINS.md 和 docs/plugin-sdk/ForAIReadme.md。
+不要修改 ECHO 主程序源码，只生成插件文件夹内的文件。
+使用 apiVersion: 2。
+权限最小化，不要申请无关权限。
+插件目录名和 id 使用 echo.my-plugin 这种格式。
+需要提供 echo.plugin.json、plugin.js、README.md。
+如果需要面板，再提供 panel.html，并通过 plugin:runCommand 调用命令。
+不要使用 require/import/process/window/document/fetch。
+网络访问必须通过 echo.net，并声明 network 权限。
+我的需求是：在这里写你的需求。
+```
+
+如果 AI 生成了代码，你要检查：
+
+- 它有没有让你改 `src/main/...` 或 `src/renderer/...`。普通插件不应该改这些。
+- 它有没有写 `require`、`import`、`process`、`window`、`document`、`fetch`。
+- 它有没有一次申请很多权限。
+- 它有没有告诉你把文件放进 ECHO 插件页打开的目录。
+- 它有没有写清楚怎么刷新、启用、看日志。
 
 ## 常见新手错误
 
@@ -1184,7 +1212,7 @@ storage 适合保存缓存索引、上次操作状态、小型配置。不要保
 ```js
 parent.postMessage({
   channel: 'echo:plugin-panel',
-  version: 1,
+  version: 2,
   type: 'request',
   requestId: 'request-1',
   pluginId: 'echo.my-plugin',
@@ -1215,8 +1243,20 @@ window.addEventListener('message', (event) => {
 | `plugin:getSummary` | 无 | 返回当前插件摘要、权限、活动、安全信息 |
 | `plugin:getLogs` | 无 | 返回当前插件日志 |
 | `plugin:runCommand` | `{ "commandId": "...", "args": [] }` | 执行当前插件命令 |
+| `plugin:subscribe` | `{ "eventName": "playback:status" }` | 订阅已获权限的宿主事件，之后接收 `type: "event"` 推送 |
+| `plugin:unsubscribe` | `{ "eventName": "playback:status" }` | 取消面板事件订阅 |
+| `host:playback:getStatus` | 无 | 读取宿主播放事实，需要 `playback:read` |
+| `host:playback:play` | 无 | 恢复播放，需要 `playback:control` |
+| `host:playback:pause` | 无 | 暂停播放，需要 `playback:control` |
+| `host:playback:stop` | 无 | 停止播放，需要 `playback:control` |
+| `host:playback:seek` | `{ "positionSeconds": 30 }` | 跳转播放位置，需要 `playback:control` |
+| `host:library:getSummary` | 无 | 读取曲库摘要，需要 `library:read` |
+| `host:library:getTracks` | `{ "page": 1, "pageSize": 50, "fields": ["id", "title"] }` | 分页读取经过字段筛选的曲目，单页最多 200，需要 `library:read` |
+| `host:settings:get` | 无 | 读取当前插件设置；API v2 设置只属于插件自身 |
+| `host:settings:set` | `{ "patch": { "mode": "compact" } }` | 写入当前插件设置；API v2 不接触应用全局设置 |
+| `host:ui:notify` | `{ "message": "完成" }` | 在 ECHO 的通知区域显示短消息 |
 
-面板想做有权限的事，应在 `plugin.js` 里注册命令，再由面板触发 `plugin:runCommand`。不要假设面板可以直接读曲库或控制播放。
+面板可以直接使用以上受控宿主 action。网络访问、provider 调用或较复杂的业务逻辑仍应放在 `plugin.js`，通过 `plugin:runCommand` 触发。面板不会获得 Node、Electron、任意文件、SQLite、DSP 或音频输出访问权。
 
 最小面板：
 
@@ -1244,7 +1284,7 @@ function requestHost(action, payload) {
   return new Promise((resolve) => {
     const requestId = `${Date.now()}-${Math.random()}`;
     pending.set(requestId, resolve);
-    parent.postMessage({ channel, version: 1, type: 'request', requestId, pluginId, action, payload }, '*');
+    parent.postMessage({ channel, version: 2, type: 'request', requestId, pluginId, action, payload }, '*');
   });
 }
 
@@ -1561,7 +1601,7 @@ function requestHost(action, payload) {
   return new Promise((resolve) => {
     const requestId = `${Date.now()}-${Math.random()}`;
     pending.set(requestId, resolve);
-    parent.postMessage({ channel, version: 1, type: 'request', requestId, pluginId, action, payload }, '*');
+    parent.postMessage({ channel, version: 2, type: 'request', requestId, pluginId, action, payload }, '*');
   });
 }
 

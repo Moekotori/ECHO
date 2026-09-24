@@ -19,6 +19,9 @@ import {
   type DownloadSettings,
   type DownloadSourceProvider,
   type DownloadToolsStatus,
+  type OsuAccountCollectionRequest,
+  type OsuAccountCollectionResponse,
+  type OsuAccountProfile,
   type OsuDownloadMirror,
 } from '../../shared/types/downloads';
 import type { AccountCredentials, AccountProvider } from '../../shared/types/accounts';
@@ -29,19 +32,20 @@ import { getAccountService } from '../accounts/AccountService';
 import { resolveFfmpegToolchain, type FfmpegToolchainInfo } from '../audioPublicApi';
 import { getLibraryService } from '../library/LibraryService';
 import { getNcmConverter } from '../library/NcmConverter';
-import { importOsuArchiveAsMp3Queued } from '../library/OsuArchiveImport';
+import { importOsuArchiveTracksAsMp3Queued, type OsuArchiveImportResult } from '../library/OsuArchiveImport';
 import { writeEmbeddedCoverArt, writeEmbeddedTrackTags } from '../library/TagWriter';
 import { getMvService } from '../mv/MvService';
 import { getAppSettings } from '../app/appSettings';
 import { fetchWithNetworkProxy } from '../network/networkFetch';
+import { readResponseBodyLimited } from '../network/readResponseBodyLimited';
 import { buildNetworkProxyEnv, buildYtDlpProxyArgs } from '../network/proxyEnv';
-import { getDownloadFeatureUnlockService } from '../plugins/DownloadFeatureUnlockService';
 import {
   isProtectedMusicDownloadProvider,
   protectedMusicDownloadBlockedMessage,
   type ProtectedMusicDownloadProvider,
   verifyDownloadAuthorizationToken,
 } from './DownloadAuthorization';
+import { fetchOsuAccountCollection, fetchOsuAccountProfile } from './OsuAccountLibraryService';
 
 const defaultSettings: DownloadSettings = {
   audioStrategy: 'best_available',
@@ -58,6 +62,8 @@ const progressEmitIntervalMs = 500;
 const progressPersistIntervalMs = 15_000;
 const burstPersistDelayMs = 750;
 const maxCommandOutputBytes = 1024 * 1024 * 4;
+const maxDownloadCoverBytes = 16 * 1024 * 1024;
+const downloadCoverTimeoutMs = 10_000;
 const ytDlpFileName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
 const outputTemplate = '%(title).180B.%(ext)s';
 const browserUserAgent =
@@ -127,6 +133,16 @@ const parseOsuBeatmapsetId = (value: string): string | null => {
   }
 };
 
+const parseOsuBeatmapId = (value: string): string | null => {
+  try {
+    const url = new URL(value.trim());
+    const match = url.hash.match(/\/(\d+)$/u);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+};
+
 const isPlaybackOnlyDownloadUrl = (value: unknown): boolean => {
   if (typeof value !== 'string') {
     return false;
@@ -182,6 +198,7 @@ type YtDlpProbeResult = {
 };
 
 type DownloadJobOptions = Required<Pick<DownloadSettings, 'importToLibrary' | 'bindMvAfterImport'>> & {
+  osuDownloadMirror: OsuDownloadMirror;
   outputDirectory: string;
   requestHeaders: Record<string, string>;
   suggestedTitle: string | null;
@@ -202,9 +219,10 @@ type DownloadJobOptions = Required<Pick<DownloadSettings, 'importToLibrary' | 'b
   deferImportToLibrary: boolean;
 };
 
-type PersistedDownloadJobOptions = Omit<DownloadJobOptions, 'suggestedCoverData' | 'deferImportToLibrary'> & {
+type PersistedDownloadJobOptions = Omit<DownloadJobOptions, 'suggestedCoverData' | 'deferImportToLibrary' | 'osuDownloadMirror'> & {
   suggestedCoverData: null;
   deferImportToLibrary?: boolean;
+  osuDownloadMirror?: OsuDownloadMirror;
 };
 
 type PersistedDownloadState = {
@@ -228,6 +246,8 @@ type DownloadServiceDependencies = {
       coverUrl?: string | null;
       deferGroupingRefresh?: boolean;
       osuImport?: boolean;
+      osuBeatmapId?: string | null;
+      osuBeatmapsetId?: string | null;
     },
   ) => Promise<{ id: string }>;
   bindMvUrl?: (trackId: string, url: string) => unknown;
@@ -393,11 +413,14 @@ const resolveBundledYtDlpPath: ToolResolver = () => {
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 };
 
+const sanitizeOsuDownloadMirror = (value: unknown, fallback: OsuDownloadMirror): OsuDownloadMirror =>
+  osuDownloadMirrorValues.includes(value as OsuDownloadMirror) ? (value as OsuDownloadMirror) : fallback;
+
 const sanitizeSettings = (value: Partial<DownloadSettings> | null | undefined, fallback: DownloadSettings): DownloadSettings => ({
   audioStrategy: 'best_available',
   importToLibrary: typeof value?.importToLibrary === 'boolean' ? value.importToLibrary : fallback.importToLibrary,
   bindMvAfterImport: typeof value?.bindMvAfterImport === 'boolean' ? value.bindMvAfterImport : fallback.bindMvAfterImport,
-  osuDownloadMirror: osuDownloadMirrorValues.includes(value?.osuDownloadMirror as OsuDownloadMirror) ? (value?.osuDownloadMirror as OsuDownloadMirror) : fallback.osuDownloadMirror,
+  osuDownloadMirror: sanitizeOsuDownloadMirror(value?.osuDownloadMirror, fallback.osuDownloadMirror),
   outputDirectory:
     typeof value?.outputDirectory === 'string' && value.outputDirectory.trim().length > 0
       ? resolve(value.outputDirectory.trim())
@@ -729,6 +752,8 @@ export class DownloadService extends EventEmitter {
 
   private runningCommands = new Map<string, RunningCommand>();
 
+  private runningFetches = new Map<string, AbortController>();
+
   private queuedJobIds: string[] = [];
 
   private activeJobId: string | null = null;
@@ -736,6 +761,8 @@ export class DownloadService extends EventEmitter {
   private lastProgressEmitAt = new Map<string, number>();
 
   private jobOptions = new Map<string, DownloadJobOptions>();
+
+  private osuArchiveTracks = new Map<string, OsuArchiveImportResult[]>();
 
   private persistJobsTimer: NodeJS.Timeout | null = null;
 
@@ -759,6 +786,24 @@ export class DownloadService extends EventEmitter {
 
   getJobs(): DownloadJob[] {
     return this.jobs.map(cloneJob);
+  }
+
+  async getOsuAccountProfile(): Promise<OsuAccountProfile> {
+    const cookie = this.getCredentials('osu').cookie?.trim();
+    if (!cookie) {
+      throw new Error('osu_account_login_required');
+    }
+
+    return fetchOsuAccountProfile(cookie, this.dependencies.fetch ?? fetchWithNetworkProxy);
+  }
+
+  async getOsuAccountCollection(request: OsuAccountCollectionRequest): Promise<OsuAccountCollectionResponse> {
+    const cookie = this.getCredentials('osu').cookie?.trim();
+    if (!cookie) {
+      throw new Error('osu_account_login_required');
+    }
+
+    return fetchOsuAccountCollection(cookie, request, this.dependencies.fetch ?? fetchWithNetworkProxy);
   }
 
   createUrlJob(url: string, options: CreateDownloadUrlJobOptions = {}): DownloadJob {
@@ -785,6 +830,7 @@ export class DownloadService extends EventEmitter {
     const streamingProviderTrackId = sanitizeTextOption(options.streamingProviderTrackId, 512);
     const streamingStableKey = sanitizeTextOption(options.streamingStableKey, 768);
     const downloadAuthorizationToken = sanitizeTextOption(options.downloadAuthorizationToken, 4096);
+    const osuDownloadMirror = sanitizeOsuDownloadMirror(options.osuDownloadMirror, this.settings.osuDownloadMirror);
     const protectedMusicProvider = protectedMusicProviderFromDownloadRequest(sourceUrl, webpageUrl, streamingProvider);
     if (
       protectedMusicProvider &&
@@ -805,7 +851,7 @@ export class DownloadService extends EventEmitter {
 
     const outputStat = existsSync(baseOutputDirectory) ? statSync(baseOutputDirectory) : null;
     if (!outputStat?.isDirectory()) {
-      throw new Error(`涓嬭浇鏂囦欢澶逛笉鍙敤: ${baseOutputDirectory}`);
+      throw new Error(`下载文件夹不可用: ${baseOutputDirectory}`);
     }
     this.ensureOutputDirectoryInLibrary(baseOutputDirectory);
     const outputDirectory = this.prepareJobOutputDirectory(baseOutputDirectory, options.outputSubdirectory);
@@ -838,6 +884,7 @@ export class DownloadService extends EventEmitter {
     this.jobOptions.set(job.id, {
       importToLibrary: options.importToLibrary ?? this.settings.importToLibrary,
       bindMvAfterImport: provider === 'osu' ? false : (options.bindMvAfterImport ?? this.settings.bindMvAfterImport),
+      osuDownloadMirror,
       outputDirectory,
       requestHeaders,
       suggestedTitle,
@@ -890,19 +937,55 @@ export class DownloadService extends EventEmitter {
     return cloneJob(this.jobs.find((item) => item.id === jobId)!);
   }
 
-  clearCompleted(): DownloadJob[] {
+  clearCompleted(provider?: DownloadSourceProvider): DownloadJob[] {
+    const shouldRemove = (job: DownloadJob): boolean =>
+      terminalStatuses.has(job.status) && (!provider || job.provider === provider);
+
     for (const job of this.jobs) {
-      if (terminalStatuses.has(job.status)) {
+      if (shouldRemove(job)) {
         this.clearCommand(job.id);
       }
     }
 
-    const removedJobs = this.jobs.filter((job) => terminalStatuses.has(job.status));
-    this.jobs = this.jobs.filter((job) => !terminalStatuses.has(job.status));
+    const removedJobs = this.jobs.filter(shouldRemove);
+    this.jobs = this.jobs.filter((job) => !shouldRemove(job));
     for (const job of removedJobs) {
       this.jobOptions.delete(job.id);
+      this.osuArchiveTracks.delete(job.id);
     }
     this.emitJobsNow();
+    return this.getJobs();
+  }
+
+  clearJobs(provider?: DownloadSourceProvider): DownloadJob[] {
+    const removedJobs = this.jobs.filter((job) => !provider || job.provider === provider);
+    if (removedJobs.length === 0) {
+      return this.getJobs();
+    }
+
+    const removedJobIds = new Set(removedJobs.map((job) => job.id));
+    for (const job of removedJobs) {
+      this.clearCommand(job.id);
+      if (!terminalStatuses.has(job.status)) {
+        this.cleanupPartialFiles(job);
+      }
+      this.jobOptions.delete(job.id);
+      this.osuArchiveTracks.delete(job.id);
+      this.lastProgressEmitAt.delete(job.id);
+    }
+
+    this.jobs = this.jobs.filter((job) => !removedJobIds.has(job.id));
+    this.queuedJobIds = this.queuedJobIds.filter((jobId) => !removedJobIds.has(jobId));
+    this.deferredImportJobIds = this.deferredImportJobIds.filter((jobId) => !removedJobIds.has(jobId));
+    if (this.deferredImportJobIds.length === 0 && this.deferredImportTimer) {
+      clearTimeout(this.deferredImportTimer);
+      this.deferredImportTimer = null;
+    }
+
+    this.emitJobsNow();
+    if (!this.activeJobId) {
+      this.startNextJob();
+    }
     return this.getJobs();
   }
 
@@ -914,7 +997,7 @@ export class DownloadService extends EventEmitter {
     const nextSettings = sanitizeSettings(patch, this.settings);
 
     if (nextSettings.outputDirectory && (!existsSync(nextSettings.outputDirectory) || !statSync(nextSettings.outputDirectory).isDirectory())) {
-      throw new Error(`涓嬭浇鏂囦欢澶逛笉鍙敤: ${nextSettings.outputDirectory}`);
+      throw new Error(`下载文件夹不可用: ${nextSettings.outputDirectory}`);
     }
 
     if (nextSettings.osuOutputDirectory && (!existsSync(nextSettings.osuOutputDirectory) || !statSync(nextSettings.osuOutputDirectory).isDirectory())) {
@@ -1001,7 +1084,11 @@ export class DownloadService extends EventEmitter {
     for (const command of this.runningCommands.values()) {
       command.kill();
     }
+    for (const fetchController of this.runningFetches.values()) {
+      fetchController.abort();
+    }
     this.runningCommands.clear();
+    this.runningFetches.clear();
     this.queuedJobIds = [];
     this.activeJobId = null;
   }
@@ -1824,6 +1911,7 @@ export class DownloadService extends EventEmitter {
       if (options?.outputDirectory) {
         this.jobOptions.set(rawJob.id, {
           ...options,
+          osuDownloadMirror: sanitizeOsuDownloadMirror(options.osuDownloadMirror, this.settings.osuDownloadMirror),
           requestHeaders: sanitizeRequestHeaders(options.requestHeaders),
           suggestedComment: sanitizeTextOption(options.suggestedComment, 512),
           suggestedCoverData: null,
@@ -1910,6 +1998,7 @@ export class DownloadService extends EventEmitter {
         });
       }
     } finally {
+      this.osuArchiveTracks.delete(jobId);
       this.deferredImportRunning = false;
       if (this.deferredImportJobIds.length > 0) {
         this.scheduleDeferredImport(1500);
@@ -1931,6 +2020,7 @@ export class DownloadService extends EventEmitter {
         this.queueDeferredImport(jobId);
       } else {
         await this.importAndBind(jobId);
+        this.osuArchiveTracks.delete(jobId);
       }
       this.updateJob(jobId, {
         status: 'completed',
@@ -2146,6 +2236,7 @@ export class DownloadService extends EventEmitter {
 
   private async downloadOsuBeatmapAudio(jobId: string): Promise<void> {
     const job = this.requireJob(jobId);
+    const mirror = this.jobOptions.get(jobId)?.osuDownloadMirror ?? this.settings.osuDownloadMirror;
     const outputDirectory = this.getJobOutputDirectory(jobId);
     const fetchRunner = this.dependencies.fetch ?? fetchWithNetworkProxy;
     const beatmapsetId = parseOsuBeatmapsetId(job.sourceUrl);
@@ -2160,6 +2251,7 @@ export class DownloadService extends EventEmitter {
       throw new Error('osu! download URL must be a beatmapset link');
     }
 
+    const abortController = this.createFetchController(jobId);
     const archivePath = this.uniqueOutputPath(outputDirectory, `osu-${beatmapsetId}.osz`);
     const errors: string[] = [];
     this.updateJob(jobId, {
@@ -2169,65 +2261,99 @@ export class DownloadService extends EventEmitter {
       progress: Math.max(job.progress, 1),
     });
 
-    for (const source of this.osuDownloadSources(beatmapsetId)) {
-      try {
-        const response = await fetchRunner(source.url, { headers: source.headers });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        if (!this.isOsuArchiveResponse(response)) {
-          throw new Error(`unexpected response type ${response.headers.get('content-type') ?? 'unknown'}`);
-        }
+    try {
+      for (const source of this.osuDownloadSources(beatmapsetId, mirror)) {
+        try {
+          const response = await fetchRunner(source.url, { headers: source.headers, signal: abortController.signal });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          if (!this.isOsuArchiveResponse(response)) {
+            throw new Error(`unexpected response type ${response.headers.get('content-type') ?? 'unknown'}`);
+          }
 
-        this.updateJob(jobId, {
-          webpageUrl: job.webpageUrl ?? job.sourceUrl,
-          outputPath: archivePath,
-        });
-        await this.writeResponseBodyToFile(jobId, response, archivePath);
-        const extracted = await importOsuArchiveAsMp3Queued({
-          archivePath,
-          outputDirectory,
-          beatmapsetId,
-          writeEmbeddedTags: false,
-        });
-        const displayTitle = [extracted.tags.artist, extracted.tags.title].filter(Boolean).join(' - ') || extracted.tags.title || `osu! beatmapset ${beatmapsetId}`;
-        const options = this.jobOptions.get(jobId);
-        if (options) {
-          this.jobOptions.set(jobId, {
-            ...options,
-            suggestedTitle: extracted.tags.title,
-            suggestedArtist: extracted.tags.artist,
-            suggestedAlbum: extracted.tags.album,
-            suggestedAlbumArtist: extracted.tags.albumArtist,
-            suggestedComment: extracted.tags.comment ?? null,
-            suggestedCoverData: extracted.coverData,
+          this.updateJob(jobId, {
             webpageUrl: job.webpageUrl ?? job.sourceUrl,
+            outputPath: archivePath,
           });
-        }
+          await this.writeResponseBodyToFile(jobId, response, archivePath);
+          const extractedBatch = await importOsuArchiveTracksAsMp3Queued({
+            archivePath,
+            outputDirectory,
+            beatmapsetId,
+            writeEmbeddedTags: false,
+          });
+          const extracted = extractedBatch.tracks[0];
+          if (!extracted) {
+            throw new Error('osu! archive did not produce any usable songs');
+          }
+          const sourceBeatmapId = parseOsuBeatmapId(job.sourceUrl);
+          const extractedTracks = extractedBatch.tracks.map((track, index) =>
+            index === 0 && sourceBeatmapId && !track.metadata.beatmapId
+              ? {
+                  ...track,
+                  metadata: { ...track.metadata, beatmapId: sourceBeatmapId },
+                  tags: { ...track.tags, comment: `beatmap id: ${sourceBeatmapId}` },
+                }
+              : track,
+          );
+          const primaryTrack = extractedTracks[0];
+          this.osuArchiveTracks.set(jobId, extractedTracks);
+          const displayTitle = [primaryTrack.tags.artist, primaryTrack.tags.title].filter(Boolean).join(' - ') || primaryTrack.tags.title || `osu! beatmapset ${beatmapsetId}`;
+          const packSummary =
+            extractedBatch.tracks.length > 1 || extractedBatch.skippedSpeedVariantCount > 0
+              ? ` (${extractedBatch.tracks.length} 首${extractedBatch.skippedSpeedVariantCount > 0 ? `，已跳过 ${extractedBatch.skippedSpeedVariantCount} 个倍速版本` : ''})`
+              : '';
+          const options = this.jobOptions.get(jobId);
+          if (options) {
+            this.jobOptions.set(jobId, {
+              ...options,
+              suggestedTitle: primaryTrack.tags.title,
+              suggestedArtist: primaryTrack.tags.artist,
+              suggestedAlbum: primaryTrack.tags.album,
+              suggestedAlbumArtist: primaryTrack.tags.albumArtist,
+              suggestedComment:
+                primaryTrack.tags.comment?.startsWith('beatmap id: ') === true
+                  ? primaryTrack.tags.comment
+                  : parseOsuBeatmapId(job.sourceUrl)
+                    ? `beatmap id: ${parseOsuBeatmapId(job.sourceUrl)}`
+                    : primaryTrack.tags.comment ?? null,
+              suggestedCoverData: primaryTrack.coverData,
+              webpageUrl: job.webpageUrl ?? job.sourceUrl,
+            });
+          }
 
-        this.deleteTempFile(archivePath);
-        this.updateJob(jobId, {
-          title: displayTitle,
-          artist: extracted.tags.artist,
-          status: 'extracting_audio',
-          outputPath: extracted.outputPath,
-          progress: 96,
-          downloadedBytes: this.safeFileSize(extracted.outputPath),
-          totalBytes: null,
-          speedBytesPerSecond: null,
-          etaSeconds: null,
-        });
-        return;
-      } catch (error) {
-        this.deleteTempFile(archivePath);
-        errors.push(`${source.label}: ${error instanceof Error ? error.message : String(error)}`);
+          this.deleteTempFile(archivePath);
+          this.updateJob(jobId, {
+            title: `${displayTitle}${packSummary}`,
+            artist: primaryTrack.tags.artist,
+            status: 'extracting_audio',
+            outputPath: primaryTrack.outputPath,
+            progress: 96,
+            downloadedBytes: extractedBatch.tracks.reduce((total, track) => total + (this.safeFileSize(track.outputPath) ?? 0), 0),
+            totalBytes: null,
+            speedBytesPerSecond: null,
+            etaSeconds: null,
+          });
+          return;
+        } catch (error) {
+          if (abortController.signal.aborted) {
+            throw error;
+          }
+          this.deleteTempFile(archivePath);
+          errors.push(`${source.label}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      throw new Error(`osu! beatmap download failed: ${errors.join(' | ')}`);
+    } finally {
+      if (this.runningFetches.get(jobId) === abortController) {
+        this.runningFetches.delete(jobId);
       }
     }
-
-    throw new Error(`osu! beatmap download failed: ${errors.join(' | ')}`);
   }
 
-  private osuDownloadSources(beatmapsetId: string): OsuDownloadSource[] {
+  private osuDownloadSources(beatmapsetId: string, mirror: OsuDownloadMirror): OsuDownloadSource[] {
     const osuCookie = this.getCredentials('osu').cookie?.trim();
     const officialHeaders: Record<string, string> = {
       Accept: osuArchiveAccept,
@@ -2271,11 +2397,11 @@ export class DownloadService extends EventEmitter {
       },
     ];
 
-    if (this.settings.osuDownloadMirror === 'auto') {
+    if (mirror === 'auto') {
       return sources;
     }
 
-    return sources.filter((source) => source.mirror === this.settings.osuDownloadMirror);
+    return sources.filter((source) => source.mirror === mirror);
   }
 
   private isOsuArchiveResponse(response: Response): boolean {
@@ -2309,6 +2435,7 @@ export class DownloadService extends EventEmitter {
       throw new Error('fetch is not available for direct audio downloads');
     }
 
+    const abortController = this.createFetchController(jobId);
     this.updateJob(jobId, { status: 'downloading', progress: Math.max(job.progress, 1) });
     let outputPath = job.outputPath && existsSync(dirname(job.outputPath)) ? job.outputPath : null;
     let existingBytes = outputPath && existsSync(outputPath) ? (this.safeFileSize(outputPath) ?? 0) : 0;
@@ -2317,47 +2444,74 @@ export class DownloadService extends EventEmitter {
       resumableHeaders.Range = `bytes=${existingBytes}-`;
     }
 
-    const response = await fetchRunner(job.sourceUrl, { headers: resumableHeaders });
-    if (!response.ok) {
-      throw new Error(`Direct audio download failed: HTTP ${response.status}`);
-    }
-    const shouldAppend = Boolean(outputPath && existingBytes > 0 && response.status === 206);
-    if (!shouldAppend) {
-      existingBytes = 0;
-    }
+    try {
+      const response = await fetchRunner(job.sourceUrl, { headers: resumableHeaders, signal: abortController.signal });
+      if (!response.ok) {
+        throw new Error(`Direct audio download failed: HTTP ${response.status}`);
+      }
+      const shouldAppend = Boolean(outputPath && existingBytes > 0 && response.status === 206);
+      if (!shouldAppend) {
+        existingBytes = 0;
+      }
 
-    const contentType = response.headers.get('content-type');
-    const extension =
-      options.directAudioExtension ?? extensionFromMimeType(options.directAudioMimeType) ?? extensionFromMimeType(contentType) ?? extensionFromUrl(job.sourceUrl) ?? 'mp3';
-    const outputName = [options.suggestedArtist, options.suggestedTitle ?? job.title].filter(Boolean).join(' - ') || 'Streaming audio';
-    outputPath ??= this.uniqueOutputPath(outputDirectory, `${sanitizeFilePart(outputName)}.${extension}`);
-    const contentLength = Number(response.headers.get('content-length'));
-    const totalBytes =
-      parseContentRangeTotal(response.headers.get('content-range')) ??
-      (Number.isFinite(contentLength) && contentLength > 0 ? contentLength + existingBytes : null);
-    this.updateJob(jobId, {
-      outputPath,
-      downloadedBytes: existingBytes > 0 ? existingBytes : null,
-      totalBytes: totalBytes && totalBytes > 0 ? totalBytes : null,
-    });
+      const contentType = response.headers.get('content-type');
+      const extension =
+        options.directAudioExtension ?? extensionFromMimeType(options.directAudioMimeType) ?? extensionFromMimeType(contentType) ?? extensionFromUrl(job.sourceUrl) ?? 'mp3';
+      const outputName = [options.suggestedArtist, options.suggestedTitle ?? job.title].filter(Boolean).join(' - ') || 'Streaming audio';
+      outputPath ??= this.uniqueOutputPath(outputDirectory, `${sanitizeFilePart(outputName)}.${extension}`);
+      const contentLength = Number(response.headers.get('content-length'));
+      const totalBytes =
+        parseContentRangeTotal(response.headers.get('content-range')) ??
+        (Number.isFinite(contentLength) && contentLength > 0 ? contentLength + existingBytes : null);
+      this.updateJob(jobId, {
+        outputPath,
+        downloadedBytes: existingBytes > 0 ? existingBytes : null,
+        totalBytes: totalBytes && totalBytes > 0 ? totalBytes : null,
+      });
 
-    await this.writeResponseBodyToFile(jobId, response, outputPath, {
-      append: shouldAppend,
-      initialBytes: existingBytes,
-      totalBytesOverride: totalBytes,
-    });
-    const decodedOutputPath = await getNcmConverter().convertIfNeeded(outputPath);
-    this.updateJob(jobId, {
-      status: 'extracting_audio',
-      outputPath: decodedOutputPath,
-      progress: 96,
-      downloadedBytes: this.safeFileSize(decodedOutputPath),
-    });
+      await this.writeResponseBodyToFile(jobId, response, outputPath, {
+        append: shouldAppend,
+        initialBytes: existingBytes,
+        totalBytesOverride: totalBytes,
+      });
+      const decodedOutputPath = await getNcmConverter().convertIfNeeded(outputPath);
+      this.updateJob(jobId, {
+        status: 'extracting_audio',
+        outputPath: decodedOutputPath,
+        progress: 96,
+        downloadedBytes: this.safeFileSize(decodedOutputPath),
+      });
+    } finally {
+      if (this.runningFetches.get(jobId) === abortController) {
+        this.runningFetches.delete(jobId);
+      }
+    }
   }
 
   private async writeDownloadedEmbeddedTags(jobId: string): Promise<void> {
     const job = this.requireJob(jobId);
     const options = this.jobOptions.get(jobId);
+    const osuTracks = this.osuArchiveTracks.get(jobId);
+
+    if (osuTracks?.length) {
+      const writeTags = this.dependencies.writeEmbeddedTrackTags ?? writeEmbeddedTrackTags;
+      const failures: string[] = [];
+      for (const track of osuTracks) {
+        try {
+          await writeTags({
+            filePath: track.outputPath,
+            coverData: track.coverData,
+            tags: track.tags,
+          });
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+      if (failures.length > 0) {
+        this.updateJob(jobId, { error: `Embedded tag write failed: ${failures.join(' | ')}` });
+      }
+      return;
+    }
 
     if (!job.outputPath || !options) {
       return;
@@ -2428,23 +2582,30 @@ export class DownloadService extends EventEmitter {
       referer = proxied.searchParams.get('referer') ?? referer;
     }
 
-    const response = await fetchRunner(coverUrl, {
-      headers: {
-        Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*',
-        Referer: referer,
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      },
-    });
-    if (!response.ok) {
-      throw new Error(`Cover download failed: HTTP ${response.status}`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), downloadCoverTimeoutMs);
+    timeout.unref?.();
+    try {
+      const response = await fetchRunner(coverUrl, {
+        signal: controller.signal,
+        headers: {
+          Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*',
+          Referer: referer,
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Cover download failed: HTTP ${response.status}`);
+      }
+      const mimeType = supportedCoverMimeType(response.headers.get('content-type')) ?? mimeTypeForCoverUrl(coverUrl);
+      return {
+        data: await readResponseBodyLimited(response, maxDownloadCoverBytes, { signal: controller.signal }),
+        mimeType,
+      };
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const mimeType = supportedCoverMimeType(response.headers.get('content-type')) ?? mimeTypeForCoverUrl(coverUrl);
-    return {
-      data: new Uint8Array(await response.arrayBuffer()),
-      mimeType,
-    };
   }
 
   private async writeResponseBodyToFile(
@@ -2455,24 +2616,35 @@ export class DownloadService extends EventEmitter {
   ): Promise<void> {
     const writer = createWriteStream(outputPath, { flags: options.append ? 'a' : 'w' });
     let downloadedBytes = options.initialBytes ?? 0;
+    const transferStartedAt = Date.now();
+    const transferStartedBytes = downloadedBytes;
     const totalBytes = options.totalBytesOverride ?? Number(response.headers.get('content-length'));
     const safeTotalBytes = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : null;
+    const updateProgress = (): void => {
+      const elapsedSeconds = Math.max((Date.now() - transferStartedAt) / 1000, 0.001);
+      const transferredBytes = Math.max(0, downloadedBytes - transferStartedBytes);
+      const speedBytesPerSecond = transferredBytes > 0 ? Math.round(transferredBytes / elapsedSeconds) : null;
+      const etaSeconds =
+        safeTotalBytes && speedBytesPerSecond
+          ? Math.max(0, Math.ceil((safeTotalBytes - downloadedBytes) / speedBytesPerSecond))
+          : null;
+      this.updateJob(
+        jobId,
+        {
+          status: 'downloading',
+          progress: safeTotalBytes ? Math.min(95, Math.max(1, (downloadedBytes / safeTotalBytes) * 95)) : Math.max(1, this.requireJob(jobId).progress),
+          downloadedBytes,
+          totalBytes: safeTotalBytes,
+          speedBytesPerSecond,
+          etaSeconds,
+        },
+        false,
+      );
+    };
 
     try {
       if (!response.body) {
-        const buffer = Buffer.from(await response.arrayBuffer());
-        writer.write(buffer);
-        downloadedBytes += buffer.byteLength;
-        this.updateJob(
-          jobId,
-          {
-            status: 'downloading',
-            progress: safeTotalBytes ? Math.min(95, Math.max(1, (downloadedBytes / safeTotalBytes) * 95)) : Math.max(1, this.requireJob(jobId).progress),
-            downloadedBytes,
-            totalBytes: safeTotalBytes,
-          },
-          false,
-        );
+        throw new Error('download_response_body_missing');
       } else {
         const reader = response.body.getReader();
         try {
@@ -2508,16 +2680,7 @@ export class DownloadService extends EventEmitter {
               });
             }
 
-            this.updateJob(
-              jobId,
-              {
-                status: 'downloading',
-                progress: safeTotalBytes ? Math.min(95, Math.max(1, (downloadedBytes / safeTotalBytes) * 95)) : Math.max(1, this.requireJob(jobId).progress),
-                downloadedBytes,
-                totalBytes: safeTotalBytes,
-              },
-              false,
-            );
+            updateProgress();
           }
         } finally {
           reader.releaseLock();
@@ -2672,6 +2835,31 @@ export class DownloadService extends EventEmitter {
     const importFolderPath = options.outputDirectory || dirname(job.outputPath);
     this.ensureOutputDirectoryInLibrary(importFolderPath);
     const importAudioFile = this.dependencies.importAudioFile ?? ((filePath, importOptions) => getLibraryService().importAudioFile(filePath, importOptions));
+    const osuTracks = this.osuArchiveTracks.get(jobId);
+    if (osuTracks?.length) {
+      let firstImportedTrackId: string | null = null;
+      for (const osuTrack of osuTracks) {
+        const importedTrack = await importAudioFile(osuTrack.outputPath, {
+          folderPath: importFolderPath,
+          metadata: {
+            title: osuTrack.tags.title,
+            artist: osuTrack.tags.artist,
+            album: osuTrack.tags.album,
+            albumArtist: osuTrack.tags.albumArtist,
+          },
+          deferGroupingRefresh: true,
+          osuImport: true,
+          osuBeatmapId: osuTrack.metadata.beatmapId ?? parseOsuBeatmapId(job.sourceUrl),
+          osuBeatmapsetId: osuTrack.metadata.beatmapSetId ?? parseOsuBeatmapsetId(job.sourceUrl),
+        });
+        firstImportedTrackId ??= importedTrack.id;
+      }
+      if (firstImportedTrackId) {
+        this.updateJob(jobId, { importedTrackId: firstImportedTrackId });
+      }
+      return;
+    }
+
     const hasSuggestedMetadata =
       Boolean(options.suggestedTitle) ||
       Boolean(options.suggestedArtist) ||
@@ -2693,6 +2881,12 @@ export class DownloadService extends EventEmitter {
       coverUrl: coverUrl ?? undefined,
       deferGroupingRefresh: true,
       ...(isOsuImport ? { osuImport: true } : {}),
+      ...(isOsuImport
+        ? {
+            osuBeatmapId: options.suggestedComment?.match(/\bbeatmap id:\s*(\d+)\b/iu)?.[1] ?? parseOsuBeatmapId(job.sourceUrl),
+            osuBeatmapsetId: parseOsuBeatmapsetId(job.sourceUrl),
+          }
+        : {}),
     });
     this.updateJob(jobId, { importedTrackId: track.id });
     if (options.streamingProvider && options.streamingProviderTrackId) {
@@ -2836,11 +3030,23 @@ export class DownloadService extends EventEmitter {
 
   private clearCommand(jobId: string): void {
     const command = this.runningCommands.get(jobId);
+    const fetchController = this.runningFetches.get(jobId);
 
     if (command) {
       command.kill();
       this.runningCommands.delete(jobId);
     }
+    if (fetchController) {
+      fetchController.abort();
+      this.runningFetches.delete(jobId);
+    }
+  }
+
+  private createFetchController(jobId: string): AbortController {
+    this.runningFetches.get(jobId)?.abort();
+    const abortController = new AbortController();
+    this.runningFetches.set(jobId, abortController);
+    return abortController;
   }
 
   private requireJob(jobId: string): DownloadJob {
@@ -3058,6 +3264,12 @@ export class DownloadService extends EventEmitter {
   }
 
   private cleanupPartialFiles(job: DownloadJob): void {
+    const osuTracks = this.osuArchiveTracks.get(job.id) ?? [];
+    for (const track of osuTracks) {
+      rmSync(track.outputPath, { force: true, maxRetries: 3, retryDelay: 50 });
+    }
+    this.osuArchiveTracks.delete(job.id);
+
     const outputDirectory = this.jobOptions.get(job.id)?.outputDirectory ?? this.settings.outputDirectory;
     if (!outputDirectory || !existsSync(outputDirectory)) {
       return;

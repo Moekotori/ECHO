@@ -16,6 +16,22 @@ const parsePositiveInteger = (value: string | undefined): number | null => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
+const parseConnectionType = (value: string | undefined): AudioDeviceInfo['connectionType'] =>
+  value === 'bluetooth' ? 'bluetooth' : 'unknown';
+
+const parseFormFactor = (value: string | undefined): AudioDeviceInfo['formFactor'] => {
+  switch (value) {
+    case 'headphones':
+    case 'headset':
+    case 'speakers':
+    case 'display':
+    case 'digital':
+      return value;
+    default:
+      return 'unknown';
+  }
+};
+
 const parseDeviceListLine = (line: string, outputMode: AudioDeviceInfo['outputMode']): AudioDeviceInfo | null => {
   const parts = line.trim().split('\t');
 
@@ -36,6 +52,8 @@ const parseDeviceListLine = (line: string, outputMode: AudioDeviceInfo['outputMo
     sampleRate: parsePositiveInteger(parts[2]),
     isDefault: parts[3] === '1',
     sharedDeviceSampleRate: parsePositiveInteger(parts[4]),
+    connectionType: parseConnectionType(parts[5]),
+    formFactor: parseFormFactor(parts[6]),
   };
 
   return device;
@@ -61,11 +79,39 @@ export class DeviceService {
   }
 
   listDevices(): AudioDeviceInfo[] {
-    return this.listSharedDevices();
+    return [...this.listSharedDevices(), ...this.listExclusiveDevices(), ...this.listAsioDevices()];
   }
 
   async listDevicesAsync(): Promise<AudioDeviceInfo[]> {
+    const [shared, exclusive, asio] = await Promise.all([
+      this.listSharedDevicesAsync(),
+      this.listExclusiveDevicesAsync(),
+      this.listAsioDevicesAsync(),
+    ]);
+    return [...shared, ...exclusive, ...asio];
+  }
+
+  /**
+   * Devices needed by the output picker. WASAPI exclusive routes use the same
+   * physical endpoint list as shared mode, so the slower exclusive capability
+   * probe must not delay registered ASIO drivers from reaching the UI.
+   */
+  async listRoutingDevicesAsync(): Promise<AudioDeviceInfo[]> {
+    const [shared, asio] = await Promise.all([
+      this.listSharedDevicesAsync(),
+      this.listAsioDevicesAsync(),
+    ]);
+    return [...shared, ...asio];
+  }
+
+  async refreshSharedDevicesAsync(): Promise<AudioDeviceInfo[]> {
+    this.invalidateModeCache('shared');
     return this.listSharedDevicesAsync();
+  }
+
+  async refreshRoutingDevicesAsync(): Promise<AudioDeviceInfo[]> {
+    this.invalidateCache();
+    return this.listRoutingDevicesAsync();
   }
 
   async refresh(): Promise<AudioDeviceInfo[]> {
@@ -76,6 +122,12 @@ export class DeviceService {
   invalidateCache(): void {
     this.cacheGeneration += 1;
     this.sharedCache.clear();
+    this.sharedPending.clear();
+  }
+
+  private invalidateModeCache(outputMode: AudioDeviceInfo['outputMode']): void {
+    this.cacheGeneration += 1;
+    this.sharedCache.delete(this.createCacheKey(outputMode));
     this.sharedPending.clear();
   }
 
@@ -97,12 +149,37 @@ export class DeviceService {
     return this.getCachedDevicesAsync('shared');
   }
 
+  listExclusiveDevices(): AudioDeviceInfo[] {
+    if (this.platform !== 'win32') {
+      return [];
+    }
+    return this.getCachedDevices('exclusive');
+  }
+
+  listExclusiveDevicesAsync(): Promise<AudioDeviceInfo[]> {
+    if (this.platform !== 'win32') {
+      return Promise.resolve([]);
+    }
+    return this.getCachedDevicesAsync('exclusive');
+  }
+
+  listAsioDevices(): AudioDeviceInfo[] {
+    return this.platform === 'win32' ? this.getCachedDevices('asio') : [];
+  }
+
+  listAsioDevicesAsync(): Promise<AudioDeviceInfo[]> {
+    return this.platform === 'win32' ? this.getCachedDevicesAsync('asio') : Promise.resolve([]);
+  }
+
   private getCachedDevices(outputMode: AudioDeviceInfo['outputMode']): AudioDeviceInfo[] {
-    const now = Date.now();
-    const cacheKey = this.createCacheKey();
+    const cacheKey = this.createCacheKey(outputMode);
     const cache = this.sharedCache.get(cacheKey);
 
-    if (cache && now - cache.at < this.sharedCacheTtlMs) {
+    // The synchronous API is deliberately a stale-safe snapshot. Device
+    // enumeration launches native helper processes and can contend with an
+    // active WASAPI/ASIO session; callers on the playback hot path must never
+    // turn a cache expiry into fresh enumeration.
+    if (cache) {
       return [...cache.devices];
     }
 
@@ -111,7 +188,7 @@ export class DeviceService {
 
   private async getCachedDevicesAsync(outputMode: AudioDeviceInfo['outputMode']): Promise<AudioDeviceInfo[]> {
     const now = Date.now();
-    const cacheKey = this.createCacheKey();
+    const cacheKey = this.createCacheKey(outputMode);
     const cache = this.sharedCache.get(cacheKey);
     const generation = this.cacheGeneration;
 
@@ -125,7 +202,9 @@ export class DeviceService {
       return [...devices];
     }
 
-    const args = ['-list'];
+    const args = outputMode === 'asio'
+      ? ['-asio', '-list']
+      : outputMode === 'exclusive' ? ['-exclusive', '-list'] : ['-list'];
     const pending = this.runDeviceListAsync(args, outputMode)
       .then((devices) => {
         const nextCache = { at: Date.now(), devices };
@@ -146,8 +225,8 @@ export class DeviceService {
     return [...devices];
   }
 
-  private createCacheKey(): string {
-    return 'native';
+  private createCacheKey(outputMode: AudioDeviceInfo['outputMode']): string {
+    return `native:${outputMode}`;
   }
 
   private runDeviceListAsync(args: string[], outputMode: AudioDeviceInfo['outputMode']): Promise<AudioDeviceInfo[]> {

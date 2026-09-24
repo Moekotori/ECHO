@@ -1,7 +1,8 @@
 import type { DownloadJob } from '../../shared/types/downloads';
 import type { QobuzFormatId, QobuzDownloadOptions } from '../../shared/types/qobuz';
 import { QOBUZ_QUALITY_BY_FORMAT } from '../../shared/types/qobuz';
-import { NonStreamableError, QobuzApiClient } from './QobuzApiClient';
+import type { QobuzApiClient } from './QobuzApiClient';
+import { NonStreamableError } from './QobuzApiClient';
 import { QobuzAuthService } from './QobuzAuthService';
 import type { DownloadService } from '../downloads/DownloadService';
 
@@ -15,9 +16,6 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 
 const asArray = (value: unknown): unknown[] =>
   Array.isArray(value) ? value : [];
-
-const sanitizeFileName = (name: string): string =>
-  name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim().slice(0, 200);
 
 const formatFolderName = (
   template: string,
@@ -109,8 +107,6 @@ export class QobuzDownloadService {
       const trackNum = String(index + 1).padStart(2, '0');
       const trackTitle = text(track.title) || `Track ${trackNum}`;
       const ext = qualityInfo?.extension ?? 'flac';
-      const fileName = `${trackNum}. ${sanitizeFileName(trackTitle)}.${ext}`;
-
       const performer = asRecord(track.performer);
 
       const job: DownloadJob = this.downloadService.createUrlJob(fileUrl, {
@@ -142,16 +138,24 @@ export class QobuzDownloadService {
    * refresh-before-expiry logic to handle CDN URL expiration.
    */
   private async getOrRefreshTrackUrl(trackId: string, formatId: QobuzFormatId): Promise<string> {
-    const cached = this.resolvedUrls.get(trackId);
+    const now = Date.now();
+    for (const [key, entry] of this.resolvedUrls) {
+      if (entry.expiresAt <= now) {
+        this.resolvedUrls.delete(key);
+      }
+    }
+
+    const cacheKey = `${trackId}:${formatId}`;
+    const cached = this.resolvedUrls.get(cacheKey);
     // Refresh if URL will expire within 5 minutes
-    if (cached && Date.now() < cached.expiresAt - 5 * 60 * 1000) {
+    if (cached && now < cached.expiresAt - 5 * 60 * 1000) {
       return cached.url;
     }
 
     const fresh = await this.api.getTrackFileUrl(trackId, formatId);
-    this.resolvedUrls.set(trackId, {
+    this.resolvedUrls.set(cacheKey, {
       url: fresh.url,
-      expiresAt: Date.now() + this.URL_EXPIRY_MS,
+      expiresAt: now + this.URL_EXPIRY_MS,
     });
     return fresh.url;
   }

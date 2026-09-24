@@ -100,6 +100,72 @@ describe('PlaybackQueueProvider playback history session', () => {
     expect(isPlaybackCancellationError(new Error('native device failed'))).toBe(false);
   });
 
+  it('auto-plays the hydrated current track once at startup and resumes its saved position', async () => {
+    const track = makeTrack(1);
+    const session = makePersistedQueueSession([track], {
+      resume: {
+        queueId: 'queue-1',
+        trackId: track.id,
+        filePath: track.path,
+        positionMs: 42_000,
+        durationMs: 120_000,
+        state: 'paused',
+        updatedAt: '2026-05-21T00:00:00.000Z',
+      },
+    });
+    const playLocalFile = vi.fn().mockImplementation((request: { trackId: string; filePath: string; startSeconds?: number }) =>
+      Promise.resolve({
+        state: 'playing',
+        currentTrackId: request.trackId,
+        positionMs: Math.round((request.startSeconds ?? 0) * 1000),
+        durationMs: 120_000,
+        filePath: request.filePath,
+      }),
+    );
+
+    const getSettings = vi.fn().mockResolvedValue({ autoPlayOnStartup: true });
+    const getStatus = vi.fn().mockResolvedValue({ state: 'idle' });
+    window.echo = {
+      app: {
+        getSettings,
+      },
+      audio: {
+        getStatus,
+      },
+      playback: {
+        getQueueSession: vi.fn().mockResolvedValue(session),
+        saveQueueSession: vi.fn(async (snapshot) => snapshot),
+        playLocalFile,
+      },
+    } as unknown as Window['echo'];
+
+    const QueueProbe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      return <output aria-label="startup-current-track">{queue.currentTrackId ?? ''}</output>;
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <QueueProbe />
+      </PlaybackQueueProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('startup-current-track').textContent).toBe(track.id));
+    expect(getSettings).toHaveBeenCalled();
+    await waitFor(() => expect(getStatus).toHaveBeenCalled());
+    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
+    expect(playLocalFile).toHaveBeenCalledWith(expect.objectContaining({
+      trackId: track.id,
+      filePath: track.path,
+      startSeconds: 42,
+    }));
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('settings:changed', { detail: { autoPlayOnStartup: true } }));
+    });
+    expect(playLocalFile).toHaveBeenCalledTimes(1);
+  });
+
   it('hydrates queue changes pushed from another playback window', async () => {
     const first = makeTrack(1);
     const second = makeTrack(2);
@@ -296,7 +362,7 @@ describe('PlaybackQueueProvider playback history session', () => {
 
   it('keeps queue navigation on HQPlayer after takeover even when Connect status is idle', async () => {
     const first = makeTrack(1);
-    const second: LibraryTrack = { ...makeTrack(2), unavailable: true };
+    const second = makeTrack(2);
     const playLocalFile = vi.fn();
     const connectTrack = vi.fn().mockImplementation(async (request: { track: LibraryTrack }) => ({
       deviceId: hqPlayerConnectDeviceId,
@@ -585,10 +651,98 @@ describe('PlaybackQueueProvider playback history session', () => {
     finish();
   });
 
+  it('links a host queue advance to the exact queue item, history, and renderer playback state', async () => {
+    const repeatedTrack = makeTrack(1);
+    const audioStatusListeners: Array<(status: AudioStatus) => void> = [];
+    const startPlaybackHistory = vi
+      .fn()
+      .mockResolvedValueOnce({ historyId: 'history-first' })
+      .mockResolvedValueOnce({ historyId: 'history-repeat' });
+    const finishPlaybackHistory = vi.fn().mockResolvedValue(undefined);
+
+    window.echo = {
+      playback: {
+        playLocalFile: vi.fn().mockResolvedValue({
+          state: 'playing',
+          currentTrackId: repeatedTrack.id,
+          positionMs: 0,
+          durationMs: repeatedTrack.duration * 1000,
+          filePath: repeatedTrack.path,
+        }),
+        syncQueueToBackend: vi.fn(),
+      },
+      audio: {
+        onStatus: vi.fn((listener: (status: AudioStatus) => void) => {
+          audioStatusListeners.push(listener);
+          return () => {
+            const index = audioStatusListeners.indexOf(listener);
+            if (index >= 0) audioStatusListeners.splice(index, 1);
+          };
+        }),
+      },
+      library: {
+        startPlaybackHistory,
+        finishPlaybackHistory,
+      },
+    } as unknown as Window['echo'];
+
+    const HostAdvanceProbe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      const didStartRef = useRef(false);
+      useEffect(() => {
+        if (didStartRef.current) return;
+        didStartRef.current = true;
+        queue.replaceQueue([repeatedTrack, { ...repeatedTrack }]);
+        void queue.playTrack(repeatedTrack);
+      }, [queue]);
+      return (
+        <div>
+          <output aria-label="host-current-queue-item">{queue.currentQueueId ?? ''}</output>
+          <output aria-label="host-queue-items">{queue.items.map((item) => item.queueId).join(',')}</output>
+          <output aria-label="host-current-title">{queue.currentTrack?.title ?? ''}</output>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <HostAdvanceProbe />
+      </PlaybackQueueProvider>,
+    );
+
+    await waitForDeferredPlaybackTask(() => expect(startPlaybackHistory).toHaveBeenCalledTimes(1));
+    const queueIds = screen.getByLabelText('host-queue-items').textContent?.split(',') ?? [];
+    expect(queueIds).toHaveLength(2);
+    const secondQueueId = queueIds[1];
+    expect(secondQueueId).toBeTruthy();
+
+    act(() => {
+      for (const listener of audioStatusListeners) {
+        listener({
+          state: 'playing',
+          nativeDirectLocalPlaybackActive: true,
+          currentTrackId: repeatedTrack.id,
+          currentQueueItemId: secondQueueId,
+          queueRevision: 1,
+          currentFilePath: repeatedTrack.path,
+          positionSeconds: 0,
+          durationSeconds: repeatedTrack.duration,
+        } as AudioStatus);
+      }
+    });
+
+    await waitFor(() => expect(screen.getByLabelText('host-current-queue-item').textContent).toBe(secondQueueId));
+    await waitForDeferredPlaybackTask(() => expect(startPlaybackHistory).toHaveBeenCalledTimes(2));
+    await waitForDeferredPlaybackTask(() => expect(finishPlaybackHistory).toHaveBeenCalledWith(expect.objectContaining({
+      historyId: 'history-first',
+      completed: true,
+    })));
+    expect(screen.getByLabelText('host-current-title').textContent).toBe(repeatedTrack.title);
+  });
+
   it('keeps the current playback speed when advancing to the next local track', async () => {
     const first = makeTrack(1);
     const second = makeTrack(2);
-    const prepareLocalFile = vi.fn().mockResolvedValue(undefined);
     const playLocalFile = vi.fn().mockImplementation((request: { trackId: string; filePath: string }) =>
       Promise.resolve({
         state: 'playing',
@@ -773,10 +927,11 @@ describe('PlaybackQueueProvider playback history session', () => {
     expect(prepareMediaItem).not.toHaveBeenCalled();
   });
 
-  it('keeps long-track Automix deferred at playback start after opt-in', async () => {
+  it('attaches Automix to the initial long-track play request after opt-in', async () => {
     const first = makeTrack(1);
     const second = makeTrack(2);
     const third = makeTrack(3);
+    const syncQueueToBackend = vi.fn().mockResolvedValue(undefined);
     const playLocalFile = vi.fn().mockImplementation((request: { trackId: string; filePath: string }) =>
       Promise.resolve({
         state: 'playing',
@@ -790,6 +945,7 @@ describe('PlaybackQueueProvider playback history session', () => {
     window.echo = {
       playback: {
         playLocalFile,
+        syncQueueToBackend,
       },
     } as unknown as Window['echo'];
 
@@ -821,10 +977,32 @@ describe('PlaybackQueueProvider playback history session', () => {
 
     await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(2));
     expect(playLocalFile.mock.calls[0]?.[0].automix).toBeUndefined();
-    expect(playLocalFile.mock.calls[1]?.[0].automix).toBeUndefined();
+    expect(playLocalFile.mock.calls[1]?.[0].automix).toMatchObject({
+      enabled: true,
+      nextItem: {
+        trackId: second.id,
+        path: second.path,
+      },
+    });
+    expect(syncQueueToBackend).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ itemId: expect.any(String), trackId: first.id }),
+        expect.objectContaining({ itemId: expect.any(String), trackId: second.id }),
+      ]),
+      'off',
+      expect.any(String),
+    );
+    const armedQueueSyncs = syncQueueToBackend.mock.calls.filter(
+      ([queueItems, , currentItemId]) =>
+        typeof currentItemId === 'string' &&
+        queueItems.some((queueItem: { trackId: string }) => queueItem.trackId === first.id) &&
+        queueItems.some((queueItem: { trackId: string }) => queueItem.trackId === second.id),
+    );
+    expect(armedQueueSyncs).toHaveLength(1);
+    expect(syncQueueToBackend.mock.invocationCallOrder[0]).toBeLessThan(playLocalFile.mock.invocationCallOrder[1]!);
   });
 
-  it('keeps short-track Automix off the initial play request to avoid startup premix', async () => {
+  it('attaches Automix to the initial short-track play request', async () => {
     const first = { ...makeTrack(1), duration: 48 };
     const second = { ...makeTrack(2), duration: 48 };
     const playLocalFile = vi.fn().mockImplementation((request: { trackId: string; filePath: string }) =>
@@ -868,12 +1046,19 @@ describe('PlaybackQueueProvider playback history session', () => {
     );
 
     await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
-    expect(playLocalFile.mock.calls[0]?.[0].automix).toBeUndefined();
+    expect(playLocalFile.mock.calls[0]?.[0].automix).toMatchObject({
+      enabled: true,
+      nextItem: {
+        trackId: second.id,
+        path: second.path,
+      },
+    });
   });
 
-  it('keeps unknown-duration Automix off the initial play request', async () => {
+  it('fails Automix closed when its queue acknowledgement is rejected', async () => {
     const first = { ...makeTrack(1), duration: 0 };
     const second = makeTrack(2);
+    const syncQueueToBackend = vi.fn().mockRejectedValue(new Error('queue_sync_rejected'));
     const playLocalFile = vi.fn().mockImplementation((request: { trackId: string; filePath: string }) =>
       Promise.resolve({
         state: 'playing',
@@ -887,6 +1072,7 @@ describe('PlaybackQueueProvider playback history session', () => {
     window.echo = {
       playback: {
         playLocalFile,
+        syncQueueToBackend,
       },
     } as unknown as Window['echo'];
 
@@ -915,10 +1101,11 @@ describe('PlaybackQueueProvider playback history session', () => {
     );
 
     await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
+    expect(syncQueueToBackend).toHaveBeenCalled();
     expect(playLocalFile.mock.calls[0]?.[0].automix).toBeUndefined();
   });
 
-  it('uses audio status duration when arming Automix for an unknown-duration track', async () => {
+  it('does not replay an unknown-duration track when audio status later reports duration', async () => {
     const first = { ...makeTrack(1), duration: 0 };
     const second = makeTrack(2);
     const audioStatusHandlers: Array<(status: AudioStatus) => void> = [];
@@ -978,21 +1165,19 @@ describe('PlaybackQueueProvider playback history session', () => {
       automix: { enabled: false, active: false, mode: 'off', transitionSeconds: null, transitionStartedAtSeconds: null, nextTrackId: null },
     } as AudioStatus);
 
-    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByLabelText('current-duration').textContent).toBe('48'));
-    expect(playLocalFile.mock.calls[1]?.[0]).toMatchObject({
+    expect(playLocalFile).toHaveBeenCalledTimes(1);
+    expect(playLocalFile.mock.calls[0]?.[0]).toMatchObject({
       trackId: first.id,
-      startSeconds: 17,
-      probe: expect.objectContaining({
-        durationSeconds: 48,
-      }),
       automix: {
         enabled: true,
+        nextItem: {
+          trackId: second.id,
+        },
       },
     });
   });
 
-  it('arms short-track Automix after playback has started instead of blocking startup', async () => {
+  it('does not replay a short track while its initial Automix plan is pending', async () => {
     const first = { ...makeTrack(1), duration: 48 };
     const second = { ...makeTrack(2), duration: 48 };
     const audioStatusHandlers: Array<(status: AudioStatus) => void> = [];
@@ -1062,10 +1247,9 @@ describe('PlaybackQueueProvider playback history session', () => {
       automix: { enabled: false, active: false, mode: 'off', transitionSeconds: null, transitionStartedAtSeconds: null, nextTrackId: null },
     } as AudioStatus);
 
-    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(2));
-    expect(playLocalFile.mock.calls[1]?.[0]).toMatchObject({
+    expect(playLocalFile).toHaveBeenCalledTimes(1);
+    expect(playLocalFile.mock.calls[0]?.[0]).toMatchObject({
       trackId: first.id,
-      startSeconds: 17,
       automix: {
         enabled: true,
         nextItem: {
@@ -1280,7 +1464,7 @@ describe('PlaybackQueueProvider playback history session', () => {
     })));
   });
 
-  it('arms Automix near the end of a long local track', async () => {
+  it('does not replay a long local track near the Automix transition window', async () => {
     const first = makeTrack(1);
     const second = makeTrack(2);
     const third = makeTrack(3);
@@ -1338,7 +1522,16 @@ describe('PlaybackQueueProvider playback history session', () => {
     );
 
     await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
-    expect(playLocalFile.mock.calls[0]?.[0].automix).toBeUndefined();
+    expect(playLocalFile.mock.calls[0]?.[0].automix).toMatchObject({
+      enabled: true,
+      maxTransitionSeconds: 16,
+      beatAlignEnabled: true,
+      nextItem: {
+        mediaType: 'local',
+        trackId: second.id,
+        path: second.path,
+      },
+    });
     await waitFor(() => expect(screen.getByLabelText('visual-start').textContent).not.toBe(''));
     const initialVisualStart = screen.getByLabelText('visual-start').textContent;
 
@@ -1349,31 +1542,18 @@ describe('PlaybackQueueProvider playback history session', () => {
       currentFilePath: first.path,
       positionSeconds: 80,
       durationSeconds: first.duration,
+      outputMode: 'exclusive',
+      outputDeviceId: 'wasapi-exclusive:mini-i',
       automix: { enabled: false, active: false, mode: 'off', transitionSeconds: null, transitionStartedAtSeconds: null, nextTrackId: null },
     } as AudioStatus);
 
-    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(2));
+    expect(playLocalFile).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText('visual-state').textContent).toBe('playing');
     expect(screen.getByLabelText('visual-start').textContent).toBe(initialVisualStart);
-    expect(playLocalFile.mock.calls[1]?.[0]).toMatchObject({
-      trackId: first.id,
-      startSeconds: 80,
-      automix: {
-        enabled: true,
-        maxTransitionSeconds: 16,
-        beatAlignEnabled: true,
-        nextItem: {
-          mediaType: 'local',
-          trackId: second.id,
-          path: second.path,
-        },
-      },
-    });
-    expect(playLocalFile.mock.calls[1]?.[0].automixAnalyze).toBeUndefined();
-    expect(playLocalFile.mock.calls[1]?.[0].automix).not.toHaveProperty('upcomingItems');
+    expect(playLocalFile.mock.calls[0]?.[0].automixAnalyze).toBe(true);
   });
 
-  it('arms long-track Automix with enough prebuffer window before the transition', async () => {
+  it('keeps one play request across the long-track Automix prebuffer window', async () => {
     const first = makeTrack(1);
     const second = makeTrack(2);
     const audioStatusHandlers: Array<(status: AudioStatus) => void> = [];
@@ -1424,12 +1604,25 @@ describe('PlaybackQueueProvider playback history session', () => {
     );
 
     await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
+    expect(playLocalFile.mock.calls[0]?.[0]).toMatchObject({
+      trackId: first.id,
+      automix: {
+        enabled: true,
+        nextItem: {
+          mediaType: 'local',
+          trackId: second.id,
+          path: second.path,
+        },
+      },
+    });
     audioStatusHandlers.at(-1)?.({
       state: 'playing',
       currentTrackId: first.id,
       currentFilePath: first.path,
       positionSeconds: 59,
       durationSeconds: first.duration,
+      outputMode: 'asio',
+      outputDeviceId: 'asio:mini-i',
       automix: { enabled: false, active: false, mode: 'off', transitionSeconds: null, transitionStartedAtSeconds: null, nextTrackId: null },
     } as AudioStatus);
     expect(playLocalFile).toHaveBeenCalledTimes(1);
@@ -1440,25 +1633,15 @@ describe('PlaybackQueueProvider playback history session', () => {
       currentFilePath: first.path,
       positionSeconds: 60,
       durationSeconds: first.duration,
+      outputMode: 'asio',
+      outputDeviceId: 'asio:mini-i',
       automix: { enabled: false, active: false, mode: 'off', transitionSeconds: null, transitionStartedAtSeconds: null, nextTrackId: null },
     } as AudioStatus);
 
-    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(2));
-    expect(playLocalFile.mock.calls[1]?.[0]).toMatchObject({
-      trackId: first.id,
-      startSeconds: 60,
-      automix: {
-        enabled: true,
-        nextItem: {
-          mediaType: 'local',
-          trackId: second.id,
-          path: second.path,
-        },
-      },
-    });
+    expect(playLocalFile).toHaveBeenCalledTimes(1);
   });
 
-  it('arms Automix with a shuffled local next candidate instead of disabling it', async () => {
+  it('attaches the shuffled local Automix candidate without replaying the current track', async () => {
     const first = makeTrack(1);
     const second = makeTrack(2);
     const third = makeTrack(3);
@@ -1516,6 +1699,17 @@ describe('PlaybackQueueProvider playback history session', () => {
     );
 
     await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
+    expect(playLocalFile.mock.calls[0]?.[0]).toMatchObject({
+      trackId: first.id,
+      automix: {
+        enabled: true,
+        nextItem: {
+          mediaType: 'local',
+          trackId: third.id,
+          path: third.path,
+        },
+      },
+    });
     await waitForDeferredPlaybackTask(() => expect(prepareLocalFile).toHaveBeenCalledWith(expect.objectContaining({
       trackId: third.id,
       automixAnalyze: true,
@@ -1529,24 +1723,11 @@ describe('PlaybackQueueProvider playback history session', () => {
       automix: { enabled: false, active: false, mode: 'off', transitionSeconds: null, transitionStartedAtSeconds: null, nextTrackId: null },
     } as AudioStatus);
 
-    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(2));
-    expect(playLocalFile.mock.calls[1]?.[0]).toMatchObject({
-      trackId: first.id,
-      startSeconds: 80,
-      automix: {
-        enabled: true,
-        nextItem: {
-          mediaType: 'local',
-          trackId: third.id,
-          path: third.path,
-        },
-      },
-    });
-    expect(randomSpy).toHaveBeenCalled();
+    expect(playLocalFile).toHaveBeenCalledTimes(1);
     expect(randomSpy).toHaveBeenCalled();
   });
 
-  it('arms shuffled Automix with a streaming next candidate', async () => {
+  it('attaches a shuffled streaming Automix candidate without replaying the current track', async () => {
     const first = makeTrack(1);
     const second: LibraryTrack = { ...makeTrack(2), unavailable: true };
     const third: LibraryTrack = {
@@ -1610,6 +1791,15 @@ describe('PlaybackQueueProvider playback history session', () => {
     );
 
     await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
+    expect(playLocalFile.mock.calls[0]?.[0]).toMatchObject({
+      trackId: first.id,
+      automix: {
+        nextItem: {
+          mediaType: 'streaming',
+          trackId: third.id,
+        },
+      },
+    });
     await waitForDeferredPlaybackTask(() => expect(prepareMediaItem).toHaveBeenCalledWith(expect.objectContaining({
       automixAnalyze: true,
       item: expect.objectContaining({
@@ -1627,17 +1817,7 @@ describe('PlaybackQueueProvider playback history session', () => {
       automix: { enabled: false, active: false, mode: 'off', transitionSeconds: null, transitionStartedAtSeconds: null, nextTrackId: null },
     } as AudioStatus);
 
-    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(2));
-    expect(playLocalFile.mock.calls[1]?.[0]).toMatchObject({
-      trackId: first.id,
-      startSeconds: 80,
-      automix: {
-        nextItem: {
-          mediaType: 'streaming',
-          trackId: third.id,
-        },
-      },
-    });
+    expect(playLocalFile).toHaveBeenCalledTimes(1);
     expect(randomSpy).toHaveBeenCalled();
   });
 
@@ -1694,7 +1874,7 @@ describe('PlaybackQueueProvider playback history session', () => {
     })));
   });
 
-  it('re-arms Automix after a native dual-deck transition has advanced', async () => {
+  it('does not restart playback after a native dual-deck transition has advanced', async () => {
     const first = makeTrack(1);
     const second = makeTrack(2);
     const third = makeTrack(3);
@@ -1759,6 +1939,22 @@ describe('PlaybackQueueProvider playback history session', () => {
     );
 
     await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
+    expect(playLocalFile.mock.calls[0]?.[0]).toMatchObject({
+      trackId: first.id,
+      automix: {
+        enabled: true,
+        nextItem: {
+          trackId: second.id,
+          path: second.path,
+        },
+        upcomingItems: [
+          expect.objectContaining({
+            trackId: third.id,
+            path: third.path,
+          }),
+        ],
+      },
+    });
     audioStatusHandlers.at(-1)?.({
       state: 'playing',
       currentTrackId: first.id,
@@ -1767,7 +1963,7 @@ describe('PlaybackQueueProvider playback history session', () => {
       durationSeconds: first.duration,
       automix: { enabled: false, active: false, mode: 'off', transitionSeconds: null, transitionStartedAtSeconds: null, nextTrackId: null },
     } as AudioStatus);
-    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(2));
+    expect(playLocalFile).toHaveBeenCalledTimes(1);
 
     act(() => {
       automixAdvanceHandler?.({ toTrackId: second.id, nextStartSeconds: 4.25 });
@@ -1794,19 +1990,7 @@ describe('PlaybackQueueProvider playback history session', () => {
       },
     } as AudioStatus);
 
-    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(3));
-    expect(playLocalFile.mock.calls[2]?.[0]).toMatchObject({
-      trackId: second.id,
-      startSeconds: 82,
-      automix: {
-        enabled: true,
-        nextItem: {
-          mediaType: 'local',
-          trackId: third.id,
-          path: third.path,
-        },
-      },
-    });
+    expect(playLocalFile).toHaveBeenCalledTimes(1);
   });
 
   it('advances Automix to the next queue position when the same track appears twice', async () => {
@@ -1864,7 +2048,7 @@ describe('PlaybackQueueProvider playback history session', () => {
     await waitFor(() => expect(screen.getByLabelText('queue-index').textContent).toBe('1'));
   });
 
-  it('passes ReplayGain and only a gapless next-track plan after opt-in', async () => {
+  it('passes ReplayGain and the contiguous album gapless sequence after opt-in', async () => {
     const first = {
       ...makeTrack(1),
       replayGainTrackGainDb: -5,
@@ -1931,10 +2115,14 @@ describe('PlaybackQueueProvider playback history session', () => {
           trackId: second.id,
           path: second.path,
         },
+        upcomingItems: [{
+          mediaType: 'local',
+          trackId: third.id,
+          path: third.path,
+        }],
       },
     });
-    expect(playLocalFile.mock.calls[0]?.[0].gapless).not.toHaveProperty('upcomingItems');
-    expect(playLocalFile.mock.calls[0]?.[0].gapless).not.toHaveProperty('upcomingProbes');
+    expect(playLocalFile.mock.calls[0]?.[0].gapless.upcomingProbes).toHaveLength(1);
     expect(playLocalFile.mock.calls[0]?.[0].automix).toBeUndefined();
   });
 
@@ -3074,7 +3262,8 @@ describe('PlaybackQueueProvider playback history session', () => {
     });
     expect(screen.getByLabelText('shared-track').textContent).toBe(second.id);
     expect(screen.getByLabelText('shared-position').textContent).toBe('0');
-    expect(screen.getByLabelText('shared-audio-track').textContent).toBe('');
+    // The host becomes authoritative once the bounded switch guard expires.
+    expect(screen.getByLabelText('shared-audio-track').textContent).toBe(second.id);
 
     act(() => {
       emitAudioStatus({
@@ -4679,6 +4868,182 @@ describe('PlaybackQueueProvider playback modes', () => {
     expect(playLocalFile).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps the local smart radio buffered ahead with explained local recommendations', async () => {
+    const first = makeTrack(1);
+    const second = makeTrack(2);
+    const playLocalFile = vi.fn().mockImplementation((request: { trackId: string; filePath: string }) =>
+      Promise.resolve({
+        state: 'playing',
+        currentTrackId: request.trackId,
+        positionMs: 0,
+        durationMs: 120000,
+        filePath: request.filePath,
+      }),
+    );
+    const getContinuousPlayRecommendations = vi.fn().mockResolvedValue({
+      mode: 'similar',
+      generatedAt: '2026-07-22T00:00:00.000Z',
+      items: [{
+        track: second,
+        score: 80,
+        reasons: [{ code: 'same-artist' }],
+      }],
+    });
+
+    window.echo = {
+      playback: { playLocalFile },
+      library: { getContinuousPlayRecommendations },
+    } as unknown as Window['echo'];
+
+    const SmartRadioProbe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      const didStartRef = useRef(false);
+
+      useEffect(() => {
+        if (!didStartRef.current) {
+          didStartRef.current = true;
+          void queue.playTrack(first, { replaceQueueWith: [first] });
+        }
+      }, [queue]);
+
+      return (
+        <div>
+          <output aria-label="radio-state">{queue.autoFillQueueEnabled ? 'on' : 'off'}</output>
+          <output aria-label="radio-items">
+            {queue.items.map((item) => `${item.track.id}:${item.source.type}:${item.recommendation?.reasons[0]?.code ?? 'manual'}`).join(',')}
+          </output>
+          <button type="button" onClick={() => queue.setAutoFillQueueEnabled(true)}>enable radio</button>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <SmartRadioProbe />
+      </PlaybackQueueProvider>,
+    );
+
+    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText('radio-state').textContent).toBe('off');
+    fireEvent.click(screen.getByRole('button', { name: 'enable radio' }));
+
+    await waitFor(() => expect(screen.getByLabelText('radio-items').textContent).toContain('track-2:continuous-play:same-artist'));
+    expect(getContinuousPlayRecommendations).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'similar',
+      seedTrackId: first.id,
+    }));
+  });
+
+  it('keeps playing the sole local track when smart radio has no other candidate', async () => {
+    const first = makeTrack(1);
+    const playLocalFile = vi.fn().mockImplementation((request: { trackId: string; filePath: string }) =>
+      Promise.resolve({
+        state: 'playing',
+        currentTrackId: request.trackId,
+        positionMs: 0,
+        durationMs: 120000,
+        filePath: request.filePath,
+      }),
+    );
+    const getContinuousPlayRecommendations = vi.fn().mockResolvedValue({
+      mode: 'similar',
+      seedTrackId: first.id,
+      generatedAt: '2026-07-22T00:00:00.000Z',
+      items: [],
+    });
+    const getTracks = vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 96 });
+
+    window.echo = {
+      playback: { playLocalFile },
+      library: { getContinuousPlayRecommendations, getTracks },
+    } as unknown as Window['echo'];
+
+    const SoleTrackRadioProbe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      const didStartRef = useRef(false);
+
+      useEffect(() => {
+        if (!didStartRef.current) {
+          didStartRef.current = true;
+          void queue.playTrack(first, { replaceQueueWith: [first] });
+        }
+      }, [queue]);
+
+      return (
+        <div>
+          <button type="button" onClick={() => queue.setAutoFillQueueEnabled(true)}>enable radio</button>
+          <button type="button" onClick={() => void queue.playNext({ autoAdvance: true })}>auto next</button>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <SoleTrackRadioProbe />
+      </PlaybackQueueProvider>,
+    );
+
+    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'enable radio' }));
+    await waitFor(() => expect(getContinuousPlayRecommendations).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'auto next' }));
+
+    await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(2));
+    expect(getTracks).toHaveBeenCalledWith(expect.objectContaining({
+      excludeTrackIds: [first.id],
+      randomWindow: true,
+    }));
+    expect(playLocalFile).toHaveBeenLastCalledWith(expect.objectContaining({ trackId: first.id }));
+  });
+
+  it('starts from a local recommendation even when the queue has no seed track', async () => {
+    const first = makeTrack(1);
+    const playLocalFile = vi.fn().mockImplementation((request: { trackId: string; filePath: string }) =>
+      Promise.resolve({
+        state: 'playing',
+        currentTrackId: request.trackId,
+        positionMs: 0,
+        durationMs: 120000,
+        filePath: request.filePath,
+      }),
+    );
+    const getContinuousPlayRecommendations = vi.fn().mockResolvedValue({
+      mode: 'similar',
+      seedTrackId: null,
+      generatedAt: '2026-07-22T00:00:00.000Z',
+      items: [{ track: first, score: 50, reasons: [{ code: 'favorite' }] }],
+    });
+
+    window.echo = {
+      playback: { playLocalFile },
+      library: { getContinuousPlayRecommendations },
+    } as unknown as Window['echo'];
+
+    const EmptyQueueRadioProbe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      return (
+        <div>
+          <output aria-label="queue-track-ids">{queue.items.map((item) => item.track.id).join(',')}</output>
+          <button type="button" onClick={() => queue.setAutoFillQueueEnabled(true)}>enable radio</button>
+          <button type="button" onClick={() => void queue.playNext()}>play next</button>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <EmptyQueueRadioProbe />
+      </PlaybackQueueProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'enable radio' }));
+    await waitFor(() => expect(screen.getByLabelText('queue-track-ids').textContent).toBe(first.id));
+    expect(getContinuousPlayRecommendations).toHaveBeenCalledWith(expect.objectContaining({ seedTrackId: null }));
+    fireEvent.click(screen.getByRole('button', { name: 'play next' }));
+
+    await waitFor(() => expect(playLocalFile).toHaveBeenCalledWith(expect.objectContaining({ trackId: first.id })));
+  });
+
   it('remembers shuffle and repeat mode across provider restarts', async () => {
     const ModeProbe = (): JSX.Element => {
       const queue = usePlaybackQueue();
@@ -4808,6 +5173,147 @@ describe('PlaybackQueueProvider playback modes', () => {
 
     await waitFor(() => expect(screen.getByLabelText('queue-track-ids').textContent).toBe('track-2'));
   });
+
+  it('clears the current and last-played identity when the removed track is visible in the player', async () => {
+    const first = makeTrack(1);
+    const second = makeTrack(2);
+    const session = makePersistedQueueSession([first, second], {
+      currentQueueId: 'queue-1',
+      currentTrackId: first.id,
+      lastPlayedTrack: first,
+    });
+
+    window.echo = {
+      playback: {
+        getQueueSession: vi.fn().mockResolvedValue(session),
+        saveQueueSession: vi.fn(async (snapshot) => snapshot),
+      },
+    } as unknown as Window['echo'];
+
+    const RemoveCurrentTrackProbe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+
+      return (
+        <div>
+          <output aria-label="queue-track-ids">{queue.items.map((item) => item.track.id).join(',')}</output>
+          <output aria-label="current-track">{queue.currentTrackId ?? ''}</output>
+          <output aria-label="current-title">{queue.currentTrack?.title ?? ''}</output>
+          <button type="button" onClick={() => queue.removeTrackFromQueue(first.id)}>
+            remove current
+          </button>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <RemoveCurrentTrackProbe />
+      </PlaybackQueueProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('current-title').textContent).toBe(first.title));
+    fireEvent.click(screen.getByRole('button', { name: 'remove current' }));
+
+    await waitFor(() => expect(screen.getByLabelText('queue-track-ids').textContent).toBe(second.id));
+    expect(screen.getByLabelText('current-track').textContent).toBe('');
+    expect(screen.getByLabelText('current-title').textContent).toBe('');
+  });
+});
+
+describe('PlaybackQueueProvider sequential queue policy', () => {
+  const installPlaybackBridge = (): ReturnType<typeof vi.fn> => {
+    const playLocalFile = vi.fn().mockImplementation((request: { trackId: string; filePath: string }) =>
+      Promise.resolve({
+        state: 'playing',
+        currentTrackId: request.trackId,
+        positionMs: 0,
+        durationMs: 120000,
+        filePath: request.filePath,
+      }),
+    );
+    window.echo = {
+      playback: {
+        playLocalFile,
+      },
+    } as unknown as Window['echo'];
+    return playLocalFile;
+  };
+
+  it('skips unavailable items while advancing in the clicked-list order', async () => {
+    const first = makeTrack(1);
+    const unavailable = { ...makeTrack(2), unavailable: true };
+    const third = makeTrack(3);
+    const playLocalFile = installPlaybackBridge();
+
+    const Probe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      return (
+        <div>
+          <output aria-label="current-track">{queue.currentTrackId ?? ''}</output>
+          <button type="button" onClick={() => void queue.playTrack(first, { replaceQueueWith: [first, unavailable, third] })}>
+            start list
+          </button>
+          <button type="button" onClick={() => void queue.playNext()}>
+            next
+          </button>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <Probe />
+      </PlaybackQueueProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'start list' }));
+    await waitFor(() => expect(screen.getByLabelText('current-track').textContent).toBe(first.id));
+    fireEvent.click(screen.getByRole('button', { name: 'next' }));
+
+    await waitFor(() => expect(screen.getByLabelText('current-track').textContent).toBe(third.id));
+    expect(playLocalFile.mock.calls.map(([request]) => request.trackId)).toEqual([first.id, third.id]);
+  });
+
+  it('removes a globally marked item after playback leaves it', async () => {
+    const first = makeTrack(1);
+    const second = makeTrack(2);
+    installPlaybackBridge();
+
+    const Probe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      return (
+        <div>
+          <output aria-label="queue-order">{queue.items.map((item) => item.track.id).join(',')}</output>
+          <button type="button" onClick={() => void queue.playTrack(first, { replaceQueueWith: [first, second] })}>
+            start list
+          </button>
+          <button
+            type="button"
+            disabled={!queue.currentQueueId}
+            onClick={() => queue.setQueueItemsRemoveAfterPlay([queue.currentQueueId!], true)}
+          >
+            mark current
+          </button>
+          <button type="button" onClick={() => void queue.playNext()}>
+            next
+          </button>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <Probe />
+      </PlaybackQueueProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'start list' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'mark current' }).hasAttribute('disabled')).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'mark current' }));
+    fireEvent.click(screen.getByRole('button', { name: 'next' }));
+
+    await waitFor(() => expect(screen.getByLabelText('queue-order').textContent).toBe(second.id));
+  });
 });
 
 describe('PlaybackQueueProvider persisted queue session', () => {
@@ -4905,6 +5411,41 @@ describe('PlaybackQueueProvider persisted queue session', () => {
     });
 
     expect(saveQueueSession).not.toHaveBeenCalled();
+  });
+
+  it('does not mount queue consumers or sync an empty backend queue before hydration finishes', async () => {
+    const first = makeTrack(1);
+    let resolveSession: ((session: PersistedPlaybackSessionV1 | null) => void) | null = null;
+    const syncQueueToBackend = vi.fn().mockResolvedValue(undefined);
+    window.echo = {
+      playback: {
+        getQueueSession: vi.fn(() => new Promise<PersistedPlaybackSessionV1 | null>((resolve) => {
+          resolveSession = resolve;
+        })),
+        saveQueueSession: vi.fn(async (snapshot) => snapshot),
+        syncQueueToBackend,
+      },
+    } as unknown as Window['echo'];
+
+    render(
+      <PlaybackQueueProvider>
+        <output aria-label="queue-ready">ready</output>
+      </PlaybackQueueProvider>,
+    );
+
+    expect(screen.queryByLabelText('queue-ready')).toBeNull();
+    expect(syncQueueToBackend).not.toHaveBeenCalled();
+
+    act(() => {
+      resolveSession?.(makePersistedQueueSession([first]));
+    });
+
+    await waitFor(() => expect(screen.getByLabelText('queue-ready').textContent).toBe('ready'));
+    await waitFor(() => expect(syncQueueToBackend).toHaveBeenCalledWith(
+      [expect.objectContaining({ trackId: first.id })],
+      'off',
+      'queue-1',
+    ));
   });
 
   it('migrates the legacy localStorage active queue into the main process session once', async () => {

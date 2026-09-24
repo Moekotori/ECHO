@@ -2,8 +2,7 @@ import { BrowserWindow, dialog, ipcMain } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { SUPPORTED_AUDIO_DIALOG_EXTENSIONS } from '../../shared/constants/audioExtensions';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
-import { normalizeAudioOutputModeForPlatform, normalizeAudioSharedBackendForPlatform } from '../../shared/utils/audioPlatformCapabilities';
-import type { AudioLatencyProfile, AudioOutputMode, AudioOutputSettings, AudioSharedBackend, AudioStatus, PlaybackSpeedMode } from '../../shared/types/audio';
+import type { AudioStatus } from '../../shared/types/audio';
 import type {
   LocalFileResolveResult,
   PlaybackMediaStartRequest,
@@ -29,23 +28,19 @@ import { getPlaybackSessionStore, normalizePersistedPlaybackSession } from '../a
 import { getCrashReportService } from '../diagnostics/CrashReportService';
 import { syncSmtcStatus } from '../integrations/smtc/SmtcStatusSync';
 import { getRemoteSourceService } from '../library/remote/RemoteSourceService';
-import { requirePrivateFeature } from '../plugins/privateEntitlements';
+import { requireLocalPro } from '../plugins/LocalProEntitlements';
 import { getAppSettings } from '../app/appSettings';
 import { noteDataProtectionPlaybackActivity, setDataProtectionPlaybackStateProvider } from '../app/dataProtection';
 import { resolveLocalAudioFiles } from '../app/localFileOpen';
-import { getMainWindow } from '../app/windowManager';
+import { getMainWindowPlaybackCommandRelay } from '../playback/MainWindowPlaybackCommandRelay';
 import { getAirPlayReceiverSpikeService } from '../connect/AirPlayReceiverSpikeService';
 import { getStreamingService } from '../streaming/StreamingService';
 import { beginMainBackgroundTask, runPlaybackPerformanceStep, runPlaybackPerformanceStepSync } from '../diagnostics/PlaybackPerformanceDiagnostics';
+import { resolvePlaybackOutputForMediaItem } from '../playback/PlaybackMediaOutputPolicy';
 import { enqueueAudioCommand, isAudioCommandTimeoutError } from './audioCommandQueue';
-import { normalizePlaybackFilePath } from './playbackPath';
+import { normalizePlaybackFilePath, selectPlaybackRequestPath } from './playbackPath';
+import { normalizeAudioOutputSettings } from './normalizeAudioOutputSettings';
 
-const outputModes = new Set<AudioOutputMode>(['shared', 'exclusive', 'system']);
-const sharedBackends = new Set<AudioSharedBackend>(['auto', 'windows', 'directsound', 'alsa']);
-const latencyProfiles = new Set<AudioLatencyProfile>(['stable', 'balanced', 'lowLatency']);
-const playbackSpeedModes = new Set<PlaybackSpeedMode>(['nightcore', 'daycore', 'speed']);
-const echoSrcModes = new Set(['off', 'family2x', 'family4x', 'family8x']);
-const echoSrcQualityProfiles = new Set(['transparent', 'balanced', 'lowLatency']);
 const streamingProviders = new Set<StreamingProviderName>(streamingProviderNames);
 const preparedMediaTtlMs = 2 * 60 * 1000;
 const maxExpiredUrlRecoveryAttempts = 1;
@@ -169,86 +164,7 @@ const optionalNonNegativeNumber = (value: unknown): number | undefined => {
   return value;
 };
 
-const normalizeOutputSettings = (value: unknown): AudioOutputSettings | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-
-  const input = value as Record<string, unknown>;
-  const output: AudioOutputSettings = {};
-
-  if (typeof input.outputMode === 'string' && outputModes.has(input.outputMode as AudioOutputMode)) {
-    output.outputMode = normalizeAudioOutputModeForPlatform(input.outputMode as AudioOutputMode, process.platform);
-  }
-
-  if (typeof input.sharedBackend === 'string' && sharedBackends.has(input.sharedBackend as AudioSharedBackend)) {
-    output.sharedBackend = normalizeAudioSharedBackendForPlatform(input.sharedBackend as AudioSharedBackend, process.platform);
-  }
-
-  if (Object.prototype.hasOwnProperty.call(input, 'deviceIndex') && input.deviceIndex == null) {
-    output.deviceIndex = undefined;
-  } else if (typeof input.deviceIndex === 'number' && Number.isInteger(input.deviceIndex)) {
-    output.deviceIndex = input.deviceIndex;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(input, 'deviceName') && input.deviceName == null) {
-    output.deviceName = undefined;
-  } else if (typeof input.deviceName === 'string' && input.deviceName.trim()) {
-    output.deviceName = input.deviceName;
-  }
-
-  const requestedOutputSampleRate = optionalPositiveNumber(input.requestedOutputSampleRate);
-  if (requestedOutputSampleRate) {
-    output.requestedOutputSampleRate = Math.round(requestedOutputSampleRate);
-  }
-
-  if (typeof input.latencyProfile === 'string' && latencyProfiles.has(input.latencyProfile as AudioLatencyProfile)) {
-    output.latencyProfile = input.latencyProfile as AudioLatencyProfile;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(input, 'bufferSizeFrames')) {
-    const bufferSizeFrames = optionalPositiveNumber(input.bufferSizeFrames);
-    output.bufferSizeFrames = bufferSizeFrames ? Math.round(bufferSizeFrames) : null;
-  }
-
-  if (input.dsdOutputMode === 'dop' || input.dsdOutputMode === 'pcm') {
-    output.dsdOutputMode = input.dsdOutputMode;
-  }
-
-  if (typeof input.exclusiveInstabilityFallbackEnabled === 'boolean') {
-    output.exclusiveInstabilityFallbackEnabled = input.exclusiveInstabilityFallbackEnabled;
-  }
-
-  if (typeof input.defaultDeviceFallbackEnabled === 'boolean') {
-    output.defaultDeviceFallbackEnabled = input.defaultDeviceFallbackEnabled;
-  }
-
-  if (typeof input.soxrFallbackEnabled === 'boolean') {
-    output.soxrFallbackEnabled = input.soxrFallbackEnabled;
-  }
-
-  if (typeof input.echoSrcMode === 'string' && echoSrcModes.has(input.echoSrcMode)) {
-    output.echoSrcMode = input.echoSrcMode as AudioOutputSettings['echoSrcMode'];
-  }
-
-  if (typeof input.echoSrcQualityProfile === 'string' && echoSrcQualityProfiles.has(input.echoSrcQualityProfile)) {
-    output.echoSrcQualityProfile = input.echoSrcQualityProfile as AudioOutputSettings['echoSrcQualityProfile'];
-  }
-
-  if (typeof input.volume === 'number' && Number.isFinite(input.volume)) {
-    output.volume = Math.max(0, Math.min(1, input.volume));
-  }
-
-  if (typeof input.playbackRate === 'number' && Number.isFinite(input.playbackRate)) {
-    output.playbackRate = Math.max(0.5, Math.min(2, input.playbackRate));
-  }
-
-  if (typeof input.playbackSpeedMode === 'string' && playbackSpeedModes.has(input.playbackSpeedMode as PlaybackSpeedMode)) {
-    output.playbackSpeedMode = input.playbackSpeedMode as PlaybackSpeedMode;
-  }
-
-  return output;
-};
+const normalizeOutputSettings = normalizeAudioOutputSettings;
 
 const optionalText = (value: unknown): string | null | undefined => {
   if (value === null) {
@@ -541,9 +457,10 @@ const normalizePlayRequest = (value: unknown): PlaybackStartRequest => {
   }
 
   const input = value as Record<string, unknown>;
+  const filePath = selectPlaybackRequestPath(input);
 
   return {
-    filePath: normalizePlaybackFilePath(requireText(input.filePath, 'filePath')),
+    filePath: normalizePlaybackFilePath(requireText(filePath, 'filePath')),
     trackId: typeof input.trackId === 'string' && input.trackId.trim() ? input.trackId : undefined,
     metadata: normalizeTrackMetadataHint(input.metadata),
     startSeconds: optionalNonNegativeNumber(input.startSeconds),
@@ -679,6 +596,13 @@ const normalizeGaplessOptions = (value: unknown): PlaybackStartRequest['gapless'
     enabled: input.enabled === true,
     nextItem: input.nextItem ? normalizeMediaItem(input.nextItem) : null,
     nextProbe: normalizeProbeHint(input.nextProbe),
+    upcomingItems: Array.isArray(input.upcomingItems) ? input.upcomingItems.slice(0, 30).map(normalizeMediaItem) : [],
+    upcomingProbes: Array.isArray(input.upcomingProbes)
+      ? input.upcomingProbes
+          .slice(0, 30)
+          .map(normalizeProbeHint)
+          .filter((probe): probe is NonNullable<ReturnType<typeof normalizeProbeHint>> => Boolean(probe))
+      : [],
   };
 };
 
@@ -703,7 +627,7 @@ const resolveMediaItemForPlayback = async (
   let durationSeconds = item.duration && item.duration > 0 ? item.duration : null;
   let refreshedRemoteTrack: RemoteLibraryTrack | null = null;
   if (item.mediaType === 'remote') {
-    await requirePrivateFeature('cover-cache');
+    requireLocalPro('remote-sources');
   }
 
   if (item.mediaType === 'remote' && !durationSeconds) {
@@ -806,7 +730,7 @@ const resolveMediaItemForPlayback = async (
 
 const prepareMediaItem = async (request: PlaybackMediaStartRequest): Promise<void> => {
   const key = createPreparedMediaKey(request);
-  const prepared = await resolveMediaItemForPlayback(request, { forceRefresh: true });
+  const prepared = await resolveMediaItemForPlayback(request);
   preparedMediaCache.set(key, {
     prepared,
     expiresAt: Date.now() + preparedMediaTtlMs,
@@ -1044,6 +968,24 @@ const resolveGaplessRequest = async (
   }
 
   const prepared = await resolveMediaItemForPlayback({ item: gapless.nextItem });
+  const following = await Promise.all(
+    (gapless.upcomingItems ?? [])
+      .filter((item) => !(item.mediaType === 'streaming' && item.provider === 'spotify'))
+      .slice(0, 30)
+      .map(async (item, index) => {
+        const preparedItem = await resolveMediaItemForPlayback({ item });
+        return {
+          filePath: preparedItem.filePath,
+          inputHeaders: preparedItem.inputHeaders,
+          trackId: item.trackId,
+          replayGain: createReplayGainHintForMediaItem(item),
+          probe: createProbeHintForMediaItem(item, {
+            ...(gapless.upcomingProbes?.[index] ?? {}),
+            ...preparedItem.probe,
+          }),
+        };
+      }),
+  );
   return {
     enabled: true,
     next: {
@@ -1056,7 +998,7 @@ const resolveGaplessRequest = async (
         ...prepared.probe,
       }),
     },
-    following: [],
+    following,
   };
 };
 
@@ -1146,15 +1088,22 @@ const enqueuePlaybackStatusCommand = async (fn: () => Promise<PlaybackStatus> | 
 const runImmediatePlaybackStatusCommand = async (fn: () => Promise<PlaybackStatus> | PlaybackStatus): Promise<PlaybackStatus> => {
   let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
-    return await Promise.race([
-      Promise.resolve().then(fn),
-      new Promise<PlaybackStatus>((resolve) => {
-        timeout = setTimeout(() => {
-          console.warn('[playback] immediate audio command timed out; returning current playback status');
-          resolve(toPlaybackStatus());
-        }, 15_000);
-      }),
-    ]);
+    try {
+      return await Promise.race([
+        Promise.resolve().then(fn),
+        new Promise<PlaybackStatus>((resolve) => {
+          timeout = setTimeout(() => {
+            console.warn('[playback] immediate audio command timed out; returning current playback status');
+            resolve(toPlaybackStatus());
+          }, 15_000);
+        }),
+      ]);
+    } catch (error) {
+      if (isSupersededPlaybackRun(error)) {
+        return toPlaybackStatus();
+      }
+      throw error;
+    }
   } finally {
     if (timeout) {
       clearTimeout(timeout);
@@ -1165,6 +1114,10 @@ const runImmediatePlaybackStatusCommand = async (fn: () => Promise<PlaybackStatu
 const reportPlaybackAudioError = (error: unknown, phase: string, details?: unknown): void => {
   const normalized = error instanceof Error ? error : new Error(String(error));
   const status = getAudioSession().getStatus();
+
+  if (isSupersededPlaybackRun(normalized)) {
+    return;
+  }
 
   if (isStreamingPlaybackResolutionError(normalized)) {
     return;
@@ -1233,10 +1186,11 @@ const recoverActiveMediaPlaybackFromExpiredUrl = async (
     await runPlaybackPerformanceStep('PlaybackPlayMediaItem', 'playback.playLocalFile IPC', perfDetails, () => getAudioSession().playLocalFile({
       filePath: prepared.filePath,
       inputHeaders: prepared.inputHeaders,
+      mimeType: prepared.mimeType,
       trackId: request.item.trackId,
       replayGain: createReplayGainHintForMediaItem(request.item),
       startSeconds,
-      output: request.output,
+      output: resolvePlaybackOutputForMediaItem(request.item, request.output),
       probe: prepared.probe,
       gapless,
     }));
@@ -1402,95 +1356,60 @@ const registerPlaybackMemoryPersistence = (): void => {
   playbackMemoryRegistered = true;
   let storedQueueSession: PersistedPlaybackSessionV1 | null = null;
   try {
-    storedQueueSession = getPlaybackSessionStore().load();
+    storedQueueSession = runPlaybackPerformanceStepSync(
+      'PlaybackIpcRegistration',
+      'load queue session',
+      {},
+      () => getPlaybackSessionStore().load(),
+    );
   } catch (error) {
     console.warn(`[playback] Failed to load persisted queue session: ${error instanceof Error ? error.message : String(error)}`);
   }
   const storedQueueMemory = playbackMemoryFromQueueSession(storedQueueSession);
-  const storedMemory = storedQueueMemory ?? (shouldDeferQueueResumeToRenderer(storedQueueSession) ? null : getPlaybackMemoryStore().load());
+  const storedMemory = storedQueueMemory ?? (
+    shouldDeferQueueResumeToRenderer(storedQueueSession)
+      ? null
+      : runPlaybackPerformanceStepSync(
+          'PlaybackIpcRegistration',
+          'load legacy playback memory',
+          {},
+          () => getPlaybackMemoryStore().load(),
+        )
+  );
   if (storedMemory) {
-    getAudioSession().restorePlaybackMemory(storedMemory);
+    runPlaybackPerformanceStepSync(
+      'PlaybackIpcRegistration',
+      'initialize AudioSession and restore memory',
+      {},
+      () => getAudioSession().restorePlaybackMemory(storedMemory),
+    );
   }
 
-  getAudioSession().on('status', () => {
-    const now = Date.now();
-    if (now - lastPlaybackMemorySaveAt < playbackMemorySaveIntervalMs) {
-      return;
-    }
+  runPlaybackPerformanceStepSync(
+    'PlaybackIpcRegistration',
+    'initialize AudioSession and subscribe persistence',
+    {},
+    () => getAudioSession().on('status', () => {
+      const now = Date.now();
+      if (now - lastPlaybackMemorySaveAt < playbackMemorySaveIntervalMs) {
+        return;
+      }
 
-    lastPlaybackMemorySaveAt = now;
-    savePlaybackMemoryNow();
-  });
+      lastPlaybackMemorySaveAt = now;
+      savePlaybackMemoryNow();
+    }),
+  );
 };
-
-const mainWindowPlaybackCommands = new Set(['playLocalFile', 'playMediaItem', 'play', 'pause', 'stop', 'seek']);
-const mainWindowPlaybackCommandTimeoutMs = 15_000;
-let mainWindowPlaybackCommandId = 0;
-const pendingMainWindowPlaybackCommands = new Map<
-  string,
-  {
-    resolve: (value: unknown) => void;
-    reject: (reason?: unknown) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }
->();
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const relayPlaybackCommandToMainWindow = (event: IpcMainInvokeEvent, rawRequest: unknown): Promise<unknown> => {
-  const mainWindow = getMainWindow();
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    throw new Error('main_window_unavailable');
-  }
-  if (event.sender === mainWindow.webContents) {
-    throw new Error('main_window_playback_proxy_loop');
-  }
-  if (!isRecord(rawRequest) || typeof rawRequest.command !== 'string' || !mainWindowPlaybackCommands.has(rawRequest.command)) {
-    throw new Error('unsupported_main_window_playback_command');
-  }
-
-  const args = Array.isArray(rawRequest.args) ? rawRequest.args : [];
-  const id = `playback-main-window-${Date.now()}-${++mainWindowPlaybackCommandId}`;
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pendingMainWindowPlaybackCommands.delete(id);
-      reject(new Error('main_window_playback_command_timeout'));
-    }, mainWindowPlaybackCommandTimeoutMs);
-
-    pendingMainWindowPlaybackCommands.set(id, { resolve, reject, timer });
-    mainWindow.webContents.send(IpcChannels.PlaybackMainWindowCommandRequest, {
-      id,
-      command: rawRequest.command,
-      args,
-    });
-  });
+  return getMainWindowPlaybackCommandRelay().execute(rawRequest, event.sender);
 };
 
 const receiveMainWindowPlaybackCommandResult = (event: IpcMainEvent, rawResult: unknown): void => {
-  const mainWindow = getMainWindow();
-  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
-    return;
-  }
-  if (!isRecord(rawResult) || typeof rawResult.id !== 'string') {
-    return;
-  }
-
-  const pending = pendingMainWindowPlaybackCommands.get(rawResult.id);
-  if (!pending) {
-    return;
-  }
-
-  pendingMainWindowPlaybackCommands.delete(rawResult.id);
-  clearTimeout(pending.timer);
-
-  if (rawResult.ok === true) {
-    pending.resolve(rawResult.value);
-    return;
-  }
-
-  pending.reject(new Error(typeof rawResult.error === 'string' ? rawResult.error : 'main_window_playback_command_failed'));
+  getMainWindowPlaybackCommandRelay().receiveResult(event.sender, rawResult);
 };
 
 const broadcastPlaybackQueueSessionChanged = (
@@ -1516,6 +1435,10 @@ const normalizeQueueSessionSaveOptions = (value: unknown): PlaybackQueueSessionS
       value.broadcastSnapshot === null
         ? null
         : normalizePersistedPlaybackSession(value.broadcastSnapshot),
+    expectedRevision:
+      Number.isSafeInteger(value.expectedRevision) && Number(value.expectedRevision) >= 0
+        ? Number(value.expectedRevision)
+        : undefined,
   };
 };
 
@@ -1524,20 +1447,41 @@ export const registerPlaybackIpc = (): void => {
     const state = getAudioSession().getStatus().state;
     return state === 'loading' || state === 'playing' || state === 'paused';
   });
-  registerPlaybackMemoryPersistence();
-  registerExpiredUrlRecovery();
+  runPlaybackPerformanceStepSync(
+    'PlaybackIpcRegistration',
+    'register memory persistence',
+    {},
+    registerPlaybackMemoryPersistence,
+  );
+  runPlaybackPerformanceStepSync(
+    'PlaybackIpcRegistration',
+    'register expired URL recovery',
+    {},
+    registerExpiredUrlRecovery,
+  );
   ipcMain.handle(IpcChannels.PlaybackMainWindowCommand, relayPlaybackCommandToMainWindow);
   ipcMain.on(IpcChannels.PlaybackMainWindowCommandResult, receiveMainWindowPlaybackCommandResult);
   ipcMain.handle(IpcChannels.PlaybackGetStatus, (): PlaybackStatus => toPlaybackStatus());
   ipcMain.handle(IpcChannels.PlaybackGetQueueSession, (): PersistedPlaybackSessionV1 | null => getPlaybackSessionStore().load());
   ipcMain.handle(IpcChannels.PlaybackSaveQueueSession, (event, snapshot: unknown, options: unknown): PersistedPlaybackSessionV1 => {
     const status = getAudioSession().getStatus();
+    const saveOptions = normalizeQueueSessionSaveOptions(options);
     const saved = runPlaybackPerformanceStepSync('PlaybackSaveQueueSession', 'saveQueueSession', {
       trackId: status.currentTrackId,
       outputMode: status.outputMode,
-    }, () => getPlaybackSessionStore().saveWithAudioStatus(snapshot as PersistedPlaybackSessionV1, status));
-    const saveOptions = normalizeQueueSessionSaveOptions(options);
-    broadcastPlaybackQueueSessionChanged(event.sender, saveOptions.broadcastSnapshot ?? saved);
+    }, () => getPlaybackSessionStore().saveWithAudioStatus(
+      snapshot as PersistedPlaybackSessionV1,
+      status,
+      saveOptions.expectedRevision,
+    ));
+    const broadcastSnapshot = saveOptions.broadcastSnapshot
+      ? {
+          ...saveOptions.broadcastSnapshot,
+          revision: saved.revision,
+          updatedAt: saved.updatedAt,
+        }
+      : saved;
+    broadcastPlaybackQueueSessionChanged(event.sender, broadcastSnapshot);
     return saved;
   });
   ipcMain.handle(IpcChannels.PlaybackClearQueueSession, (event): void => {
@@ -1639,6 +1583,7 @@ export const registerPlaybackIpc = (): void => {
         await runPlaybackPerformanceStep('PlaybackPlayMediaItem', 'playback.playLocalFile IPC', perfDetails, () => getAudioSession().playLocalFile({
           filePath: prepared.filePath,
           inputHeaders: prepared.inputHeaders,
+          mimeType: prepared.mimeType,
           trackId: item.trackId,
           metadata: {
             title: item.title,
@@ -1649,7 +1594,7 @@ export const registerPlaybackIpc = (): void => {
           },
           replayGain: createReplayGainHintForMediaItem(item),
           startSeconds: request.startSeconds,
-          output: request.output,
+          output: resolvePlaybackOutputForMediaItem(item, request.output),
           probe: prepared.probe,
           automixAnalyze: request.automixAnalyze === true,
           automix,
@@ -1701,6 +1646,7 @@ export const registerPlaybackIpc = (): void => {
           await runPlaybackPerformanceStep('PlaybackPlayMediaItem', 'playback.playLocalFile IPC', perfDetails, () => getAudioSession().playLocalFile({
             filePath: prepared.filePath,
             inputHeaders: prepared.inputHeaders,
+            mimeType: prepared.mimeType,
             trackId: item.trackId,
             metadata: {
               title: item.title,
@@ -1793,6 +1739,19 @@ export const registerPlaybackIpc = (): void => {
     noteDataProtectionPlaybackActivity(false);
     clearActiveMediaPlayback();
     beginPlaybackStartRun();
+    const airPlayReceiver = getActiveAirPlayReceiverService();
+    if (airPlayReceiver) {
+      const status = await airPlayReceiver.stopPlayback();
+      setRemotePlaybackActive(false);
+      getPlaybackMemoryStore().clear();
+      try {
+        getPlaybackSessionStore().clearResume();
+      } catch (error) {
+        console.warn(`[playback] Failed to clear queue resume position: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      void syncSmtcStatus();
+      return airPlayReceiverStatusToPlaybackStatus(status);
+    }
     getAudioSession().stop();
     setRemotePlaybackActive(false);
     getPlaybackMemoryStore().clear();
@@ -1804,7 +1763,7 @@ export const registerPlaybackIpc = (): void => {
     void syncSmtcStatus();
     return toPlaybackStatus();
   }));
-  ipcMain.handle(IpcChannels.PlaybackSeek, async (_event, positionSeconds: unknown): Promise<PlaybackStatus> => enqueuePlaybackStatusCommand(async () => {
+  ipcMain.handle(IpcChannels.PlaybackSeek, async (_event, positionSeconds: unknown): Promise<PlaybackStatus> => runImmediatePlaybackStatusCommand(async () => {
     try {
       const seekSeconds = optionalNonNegativeNumber(positionSeconds) ?? 0;
       const airPlayReceiver = getActiveAirPlayReceiverService();

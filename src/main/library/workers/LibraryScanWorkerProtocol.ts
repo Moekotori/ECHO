@@ -1,5 +1,6 @@
 import type { FileIdentityObservation } from '../FileIdentityService';
 import type { CoverCacheRepairOptions, CoverExtractOptions, CoverResult, MetadataResult } from '../libraryTypes';
+import type { SearchIndexTrackFields } from '../SearchIndexTokens';
 
 export type LibraryScanWorkerRequest =
   | {
@@ -22,9 +23,18 @@ export type LibraryScanWorkerRequest =
       requestId: number;
       type: 'identity:observe';
       filePath: string;
+    }
+  | {
+      requestId: number;
+      type: 'search:preload';
+    }
+  | {
+      requestId: number;
+      type: 'search:terms';
+      fields: SearchIndexTrackFields;
     };
 
-export type LibraryScanWorkerResult = MetadataResult | CoverResult | FileIdentityObservation;
+export type LibraryScanWorkerResult = MetadataResult | CoverResult | FileIdentityObservation | string | boolean;
 
 export type LibraryScanWorkerResponse =
   | {
@@ -44,4 +54,12 @@ export type LibraryScanWorkerRequestForType<Type extends LibraryScanWorkerReques
 >;
 
 export type LibraryScanWorkerResultForType<Type extends LibraryScanWorkerRequest['type']> =
-  Type extends 'metadata:read' ? MetadataResult : Type extends 'identity:observe' ? FileIdentityObservation : CoverResult;
+  Type extends 'metadata:read'
+    ? MetadataResult
+    : Type extends 'identity:observe'
+      ? FileIdentityObservation
+      : Type extends 'search:preload'
+        ? boolean
+        : Type extends 'search:terms'
+          ? string
+          : CoverResult;

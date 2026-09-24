@@ -3,7 +3,7 @@
  *
  * Uses the fd3/fd4 JSON-RPC protocol (same pattern as smoke-jsonrpc-openfile.mjs).
  * Calls only: audio.openFile, audio.seek, audio.stop, audio.pause, audio.resume,
- *   audio.prefetch, eq.setState, eq.getState, rpc.shutdown, rpc.ping.
+ *   audio.prefetch, audio.gaplessPrepare, eq.setState, eq.getState, rpc.shutdown, rpc.ping.
  * MUST NOT use audio.playFile.
  *
  * Parses audio.position and audio.ended notifications from fd4.
@@ -11,8 +11,9 @@
  */
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const projectRoot = resolve(dirname(scriptPath), '..');
@@ -23,7 +24,11 @@ const defaultEvidenceDir = join(projectRoot, '.omo', 'evidence');
 // ── CLI parsing ──
 
 function parseArgs(argv) {
-  const args = { scenario: 'cold-open', file: defaultTestFile, host: defaultHostPath, evidenceDir: defaultEvidenceDir, offset: 0 };
+  const args = {
+    scenario: 'cold-open', file: defaultTestFile, host: defaultHostPath, evidenceDir: defaultEvidenceDir,
+    offset: 0, deviceIndex: -1, deviceName: '', alternateDeviceIndex: null,
+    alternateDeviceName: '', outputMode: 'shared', sampleRate: 48000, queueRates: null, queueFiles: null,
+  };
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
       case '--help': case '-h': args.help = true; break;
@@ -32,12 +37,28 @@ function parseArgs(argv) {
       case '--host': args.host = argv[++i] || ''; break;
       case '--evidence-dir': args.evidenceDir = argv[++i] || ''; break;
       case '--offset': args.offset = parseFloat(argv[++i]) || 0; break;
+      case '--device-index': args.deviceIndex = Number.parseInt(argv[++i] || '-1', 10); break;
+      case '--device-name': args.deviceName = argv[++i] || ''; break;
+      case '--alternate-device-index': args.alternateDeviceIndex = Number.parseInt(argv[++i] || '-1', 10); break;
+      case '--alternate-device-name': args.alternateDeviceName = argv[++i] || ''; break;
+      case '--output-mode': args.outputMode = argv[++i] || 'shared'; break;
+      case '--sample-rate': args.sampleRate = Number.parseInt(argv[++i] || '48000', 10); break;
+      case '--queue-rates': {
+        const value = argv[++i] || '';
+        args.queueRates = value.split(',').map((rate) => Number.parseInt(rate.trim(), 10));
+        break;
+      }
+      case '--queue-files': {
+        const value = argv[++i] || '';
+        args.queueFiles = value.split('|').map((file) => file.trim());
+        break;
+      }
     }
   }
   return args;
 }
 
-const VALID_SCENARIOS = ['cold-open', 'offset-open', 'rapid-open-stop-open', 'natural-ended', 'explicit-stop', 'eq-replay', 'prefetch-no-truncate', 'lifecycle', 'all'];
+const VALID_SCENARIOS = ['cold-open', 'remote-source', 'output-mode-cycle', 'hotplug-recovery', 'offset-open', 'rapid-open-stop-open', 'natural-ended', 'explicit-stop', 'eq-replay', 'prefetch-no-truncate', 'queue-advance', 'gapless-boundary', 'main-thread-stall', 'live-playback-rate', 'crash-exit', 'lifecycle', 'all'];
 
 function printHelp() {
   const exe = 'node scripts/smoke-daemon-playback.mjs';
@@ -55,15 +76,31 @@ Options:
   --host <path>               Path to echo-audio-host binary
   --evidence-dir <path>       Directory for evidence output
   --offset <seconds>          Start offset for offset-open and related scenarios
+  --device-index <number>     Device index for output-mode-cycle (default: system default)
+  --device-name <name>        Device name for output-mode-cycle (default: system default)
+  --alternate-device-index <number> Alternate shared-mode device for output-mode-cycle
+  --alternate-device-name <name> Alternate shared-mode device name for output-mode-cycle
+  --output-mode <mode>        Output mode for queue/gapless scenarios (shared, exclusive, or asio)
+  --sample-rate <hz>          Device/session rate for output-mode-cycle (default: 48000)
+  --queue-rates <hz,...>      Queue source rates for queue-advance (default: 48000,44100,96000)
+  --queue-files <a|b|c>       Existing queue fixtures matching --queue-rates (default: generated WAVs)
 
 Scenarios:
   cold-open              Open file on fresh daemon, observe position events, shutdown
+  remote-source          Serve a guarded HTTP Range fixture and verify open/seek/host truth
+  output-mode-cycle      Reopen playback across exclusive/shared/exclusive/shared output
+  hotplug-recovery       Verify playback recovery after the selected device is unplugged and reconnected
   offset-open            Open with start offset (requires later task support)
   rapid-open-stop-open   Open, stop, open again rapidly (requires later task support)
   natural-ended          Wait for natural EOF ended event
   explicit-stop          Open file, wait for position, stop, verify zero ended
   eq-replay              Set EQ state before opening file (requires later task support)
   prefetch-no-truncate   Prefetch then open, verify full duration (requires later task support)
+  queue-advance          Verify mixed-rate autonomous queue handoff on a resident 48 kHz device
+  gapless-boundary       Verify host-owned multi-track PCM-boundary handoff identities
+  main-thread-stall      Block the Node control plane and verify native playback keeps advancing
+  live-playback-rate     Change playback rate while native playback is active
+  crash-exit             Kill the daemon during playback and verify transport/process closure
   lifecycle              RPC shutdown and process exit cleanup
   all                    Run all scenarios sequentially
 `);
@@ -92,6 +129,7 @@ class DaemonRunner {
     this.rpcBuf = '';
     this.stderr = '';
     this.startTime = 0;
+    this.sessionId = 1;
     this.evidence = { rpcEvents: [], stderr: '', assertions: [], passed: null };
   }
 
@@ -115,7 +153,7 @@ class DaemonRunner {
     }
 
     this.startTime = Date.now();
-    this.child = spawn(this.hostPath, ['--no-stdin', '--rpc-stdin-fd', '3', '--rpc-stdout-fd', '4'], {
+    this.child = spawn(this.hostPath, ['--no-stdin', '--defer-device-open', '--rpc-stdin-fd', '3', '--rpc-stdout-fd', '4'], {
       cwd: projectRoot,
       stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'],
     });
@@ -149,10 +187,42 @@ class DaemonRunner {
     this.rpcOut = rpcOut;
   }
 
-  async waitReady(timeoutMs = 15000) {
+  async waitReady(timeoutMs = 15000, output = {}) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       if (this.stderr.includes('awaiting') || this.stderr.includes('ready') || this.stderr.includes('Listening')) {
+        const configureId = 8999;
+        this.sendRpc('device.configure', [{
+          outputMode: output.outputMode || 'shared',
+          deviceId: '',
+          deviceIndex: output.deviceIndex ?? -1,
+          deviceName: output.deviceName || '',
+          sampleRate: output.sampleRate ?? 48000,
+          channels: 2,
+          bufferSize: 2048,
+          latencyProfile: 'balanced',
+          sharedBackend: 'auto',
+          ...(output.processing ? { processing: output.processing } : {}),
+        }], configureId);
+        const configureResponse = await this.waitResponse(configureId, timeoutMs);
+        if (configureResponse.error || configureResponse.result?.accepted !== true) {
+          this.fail(`device.configure failed: ${JSON.stringify(configureResponse.error ?? configureResponse.result)}`);
+        }
+        this.evidence.deviceConfigure = configureResponse.result;
+        const sessionBeginId = 9000;
+        this.sendRpc('audio.sessionBegin', {
+          sessionId: this.sessionId,
+          sr: output.sampleRate ?? 48000,
+          ch: 2,
+          buffer: 256,
+          fifoMs: 200,
+          prebufferMs: 0,
+        }, sessionBeginId);
+        const response = await this.waitResponse(sessionBeginId, timeoutMs);
+        if (response.error) {
+          this.fail(`audio.sessionBegin failed: ${JSON.stringify(response.error)}`);
+        }
+        this.evidence.deviceReady = true;
         return;
       }
       if (this.child.exitCode !== null) {
@@ -245,16 +315,56 @@ class DaemonRunner {
       ]);
     } catch { /* best effort */ }
     try { this.rpcIn.end(); } catch { /* ignore */ }
-    this.child.kill('SIGTERM');
-    await new Promise((resolve) => {
-      const t = setTimeout(() => { this.child.kill('SIGKILL'); resolve(); }, 3000);
-      this.child.on('exit', () => { clearTimeout(t); resolve(); });
-    });
+
+    const waitForExit = async (timeoutMs) => {
+      if (this.child.exitCode !== null || this.child.signalCode !== null) return true;
+      return (await waitForEventOrTimeout(this.child, 'exit', timeoutMs)).occurred;
+    };
+
+    let forced = false;
+    if (!await waitForExit(3000)) {
+      forced = true;
+      this.child.kill('SIGTERM');
+      if (!await waitForExit(3000)) {
+        this.child.kill('SIGKILL');
+        await waitForExit(3000);
+      }
+    }
+
+    const result = {
+      exitCode: this.child.exitCode,
+      signalCode: this.child.signalCode,
+      forced,
+    };
+    this.evidence.shutdown = result;
+    if (this.evidence.deviceConfigure?.outputMode === 'asio') {
+      this.assert(
+        result.exitCode === 0 && result.signalCode === null && !result.forced,
+        `ASIO host exited cleanly after rpc.shutdown (exit=${result.exitCode}, signal=${result.signalCode}, forced=${result.forced})`,
+      );
+    }
+    return result;
   }
 }
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function waitForEventOrTimeout(emitter, eventName, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (occurred, args = []) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      emitter.removeListener(eventName, onEvent);
+      resolve({ occurred, args });
+    };
+    const onEvent = (...args) => finish(true, args);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    emitter.once(eventName, onEvent);
+  });
 }
 
 function validateStartSecondsForRpc(startSeconds) {
@@ -401,6 +511,369 @@ async function scenarioColdOpen(runner, filePath) {
     runner.assert(true, `Position advancing: ${positions.length} → ${morePositions.length}`);
   }
 
+  runner.evidence.passed = true;
+}
+
+async function scenarioRemoteSource(runner, filePath) {
+  const audio = readFileSync(filePath);
+  const requests = [];
+  const expectedCookie = 'MUSIC_U=daemon-remote-smoke';
+  const expectedReferer = 'https://music.163.com/';
+  const server = createServer((request, response) => {
+    if (request.url === '/stall') {
+      // Keep the socket open without headers. Native AVIO must interrupt this
+      // remote open without waiting for the generic 30-second read timeout.
+      return;
+    }
+    requests.push({
+      range: request.headers.range ?? null,
+      cookieAccepted: request.headers.cookie === expectedCookie,
+      refererAccepted: request.headers.referer === expectedReferer,
+    });
+    if (request.headers.cookie !== expectedCookie || request.headers.referer !== expectedReferer) {
+      response.writeHead(403);
+      response.end();
+      return;
+    }
+
+    const range = /^bytes=(\d+)-(\d*)$/u.exec(request.headers.range ?? '');
+    const start = range ? Math.min(audio.length - 1, Number(range[1])) : 0;
+    const requestedEnd = range?.[2] ? Number(range[2]) : audio.length - 1;
+    const end = Math.min(audio.length - 1, Math.max(start, requestedEnd));
+    const body = audio.subarray(start, end + 1);
+    response.writeHead(range ? 206 : 200, {
+      'Accept-Ranges': 'bytes',
+      'Content-Length': body.length,
+      'Content-Type': 'audio/mpeg',
+      ...(range ? { 'Content-Range': `bytes ${start}-${end}/${audio.length}` } : {}),
+    });
+    setTimeout(() => response.end(body), requests.length === 1 ? 120 : 0);
+  });
+
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(0, '127.0.0.1', resolveListen);
+  });
+  const address = server.address();
+  const uri = `http://127.0.0.1:${address.port}/guarded-track.mp3`;
+
+  try {
+    runner.spawn();
+    await runner.waitReady();
+    runner.markEventOffset();
+    const stalledOpenStartedAt = Date.now();
+    runner.sendRpc('audio.openSource', [{
+      source: {
+        kind: 'http',
+        uri: `http://127.0.0.1:${address.port}/stall`,
+        headers: {
+          Cookie: expectedCookie,
+          Referer: expectedReferer,
+        },
+        mimeType: 'audio/mpeg',
+      },
+      sampleRate: 48000,
+    }], 1);
+    const stalledResponse = await runner.waitResponse(1, 8000);
+    const stalledOpenDurationMs = Date.now() - stalledOpenStartedAt;
+    runner.assert(Boolean(stalledResponse.error), 'Stalled HTTP open was interrupted with an RPC error');
+    runner.assert(stalledOpenDurationMs < 7000, `Stalled HTTP open returned in ${stalledOpenDurationMs}ms`);
+
+    runner.sendRpc('audio.openSource', [{
+      source: {
+        kind: 'http',
+        uri,
+        headers: {
+          Cookie: expectedCookie,
+          Referer: expectedReferer,
+          Accept: 'audio/*',
+        },
+        mimeType: 'audio/mpeg',
+      },
+      sampleRate: 48000,
+    }], 2);
+    const response = await runner.waitResponse(2, 30000);
+    if (response.error) runner.fail(`openSource error: ${JSON.stringify(response.error)}`);
+    assertOpenFileResult(runner, response.result, uri, 'libav daemon openSource');
+    runner.assert(response.result.sourceSampleRate > 0, `openSource sourceSampleRate ${response.result.sourceSampleRate} > 0`);
+    await runner.waitNotifications('audio.firstPcm', 1, 20000);
+    await runner.waitNotifications('audio.started', 1, 20000);
+    await runner.waitNotifications('audio.position', 1, 20000);
+    runner.assert(requests.every((item) => item.cookieAccepted && item.refererAccepted), 'HTTP fixture accepted Cookie and Referer on every request');
+    const initialStartRequests = requests.filter((item) => item.range === null || /^bytes=0-/u.test(item.range)).length;
+    runner.assert(initialStartRequests === 1, `probe and decode reused one opened libav context (${initialStartRequests} start request)`);
+
+    runner.markEventOffset();
+    runner.sendRpc('audio.seek', [{ positionSeconds: 1 }], 3);
+    const seekResponse = await runner.waitResponse(3, 30000);
+    runner.assert(!seekResponse.error, 'HTTP Range seek succeeded');
+    await runner.waitNotifications('audio.position', 1, 20000);
+    runner.evidence.remoteSource = {
+      requestCount: requests.length,
+      requests,
+      stalledOpenDurationMs,
+      uri: '<redacted-local-fixture>',
+    };
+    runner.evidence.passed = true;
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+  }
+}
+
+async function scenarioOutputModeCycle(runner, filePath, outputTarget = {}) {
+  if (process.platform !== 'win32') {
+    runner.evidence.assertions.push({ type: 'note', message: 'WASAPI exclusive transition is Windows-only' });
+    runner.evidence.passed = true;
+    return;
+  }
+  if (!existsSync(filePath)) {
+    runner.fail(`File not found: ${filePath}`);
+  }
+
+  runner.spawn();
+  const sampleRate = outputTarget.sampleRate ?? 48000;
+  const sharedTarget = Number.isInteger(outputTarget.alternateDeviceIndex)
+    ? { deviceIndex: outputTarget.alternateDeviceIndex, deviceName: outputTarget.alternateDeviceName || '' }
+    : { deviceIndex: outputTarget.deviceIndex ?? -1, deviceName: outputTarget.deviceName || '' };
+  await runner.waitReady(15000, {
+    outputMode: 'exclusive',
+    deviceIndex: outputTarget.deviceIndex ?? -1,
+    deviceName: outputTarget.deviceName || '',
+    sampleRate,
+    processing: { outputFormat: 'pcm' },
+  });
+  runner.markEventOffset();
+  runner.sendRpc('audio.openFile', [{ filePath }], 1);
+  const response = await runner.waitResponse(1, 30000);
+  if (response.error) {
+    runner.fail(`exclusive openFile error: ${JSON.stringify(response.error)}`);
+  }
+  assertOpenFileResult(runner, response.result, filePath, 'exclusive daemon openFile');
+  const positions = await runner.waitNotifications('audio.position', 1, 20000);
+  runner.assert(positions.length >= 1, `Received ${positions.length} exclusive position notification(s)`);
+
+  runner.sendRpc('audio.stop', {}, 2);
+  const stopResponse = await runner.waitResponse(2, 10000);
+  runner.assert(!stopResponse.error, 'Exclusive playback stopped before output switch');
+
+  runner.sendRpc('device.configure', [{
+    outputMode: 'shared',
+    deviceId: '',
+    deviceIndex: sharedTarget.deviceIndex,
+    deviceName: sharedTarget.deviceName,
+    sampleRate,
+    channels: 2,
+    bufferSize: 2048,
+    latencyProfile: 'balanced',
+    sharedBackend: 'auto',
+    processing: { outputFormat: 'pcm' },
+  }], 3);
+  const configureResponse = await runner.waitResponse(3, 15000);
+  runner.assert(!configureResponse.error && configureResponse.result?.accepted === true,
+    'Shared output accepted after exclusive playback');
+
+  runner.sendRpc('audio.sessionBegin', {
+    sessionId: 2,
+    sr: sampleRate,
+    ch: 2,
+    buffer: 2048,
+    fifoMs: 8000,
+    prebufferMs: 60,
+  }, 4);
+  const sessionResponse = await runner.waitResponse(4, 15000);
+  runner.assert(!sessionResponse.error && sessionResponse.result?.accepted === true,
+    'Shared session opened after exclusive playback');
+
+  runner.markEventOffset();
+  runner.sendRpc('audio.openFile', [{ filePath }], 5);
+  const sharedResponse = await runner.waitResponse(5, 30000);
+  if (sharedResponse.error) {
+    runner.fail(`shared openFile after exclusive error: ${JSON.stringify(sharedResponse.error)}`);
+  }
+  assertOpenFileResult(runner, sharedResponse.result, filePath, 'shared daemon reopen');
+  const sharedPositions = await runner.waitNotifications('audio.position', 1, 20000);
+  runner.assert(sharedPositions.length >= 1, `Received ${sharedPositions.length} shared position notification(s)`);
+
+  runner.sendRpc('audio.stop', {}, 6);
+  const sharedStopResponse = await runner.waitResponse(6, 10000);
+  runner.assert(!sharedStopResponse.error, 'Shared playback stopped before switching back to exclusive');
+
+  runner.sendRpc('device.configure', [{
+    outputMode: 'exclusive',
+    deviceId: '',
+    deviceIndex: outputTarget.deviceIndex ?? -1,
+    deviceName: outputTarget.deviceName || '',
+    sampleRate,
+    channels: 2,
+    bufferSize: 2048,
+    latencyProfile: 'balanced',
+    sharedBackend: 'auto',
+    processing: { outputFormat: 'pcm' },
+  }], 7);
+  const exclusiveConfigureResponse = await runner.waitResponse(7, 15000);
+  runner.assert(!exclusiveConfigureResponse.error && exclusiveConfigureResponse.result?.accepted === true,
+    'Exclusive output accepted after shared playback');
+
+  runner.sendRpc('audio.sessionBegin', {
+    sessionId: 3,
+    sr: sampleRate,
+    ch: 2,
+    buffer: 2048,
+    fifoMs: 8000,
+    prebufferMs: 60,
+  }, 8);
+  const exclusiveSessionResponse = await runner.waitResponse(8, 15000);
+  runner.assert(!exclusiveSessionResponse.error && exclusiveSessionResponse.result?.accepted === true,
+    'Exclusive session reopened after shared playback');
+
+  runner.markEventOffset();
+  runner.sendRpc('audio.openFile', [{ filePath }], 9);
+  const exclusiveReopenResponse = await runner.waitResponse(9, 30000);
+  if (exclusiveReopenResponse.error) {
+    runner.fail(`exclusive reopen after shared error: ${JSON.stringify(exclusiveReopenResponse.error)}`);
+  }
+  assertOpenFileResult(runner, exclusiveReopenResponse.result, filePath, 'exclusive daemon reopen');
+  const exclusiveReopenPositions = await runner.waitNotifications('audio.position', 1, 20000);
+  runner.assert(exclusiveReopenPositions.length >= 1,
+    `Received ${exclusiveReopenPositions.length} exclusive reopen position notification(s)`);
+
+  runner.sendRpc('audio.stop', {}, 10);
+  const exclusiveStopResponse = await runner.waitResponse(10, 10000);
+  runner.assert(!exclusiveStopResponse.error, 'Reopened exclusive playback stopped before final shared switch');
+
+  runner.sendRpc('device.configure', [{
+    outputMode: 'shared',
+    deviceId: '',
+    deviceIndex: sharedTarget.deviceIndex,
+    deviceName: sharedTarget.deviceName,
+    sampleRate,
+    channels: 2,
+    bufferSize: 2048,
+    latencyProfile: 'balanced',
+    sharedBackend: 'auto',
+    processing: { outputFormat: 'pcm' },
+  }], 11);
+  const finalSharedConfigureResponse = await runner.waitResponse(11, 15000);
+  runner.assert(!finalSharedConfigureResponse.error && finalSharedConfigureResponse.result?.accepted === true,
+    'Final shared output accepted after exclusive playback');
+
+  runner.sendRpc('audio.sessionBegin', {
+    sessionId: 4,
+    sr: sampleRate,
+    ch: 2,
+    buffer: 2048,
+    fifoMs: 8000,
+    prebufferMs: 60,
+  }, 12);
+  const finalSharedSessionResponse = await runner.waitResponse(12, 15000);
+  runner.assert(!finalSharedSessionResponse.error && finalSharedSessionResponse.result?.accepted === true,
+    'Final shared session reopened after exclusive playback');
+
+  runner.markEventOffset();
+  runner.sendRpc('audio.openFile', [{ filePath }], 13);
+  const finalSharedResponse = await runner.waitResponse(13, 30000);
+  if (finalSharedResponse.error) {
+    runner.fail(`final shared reopen after exclusive error: ${JSON.stringify(finalSharedResponse.error)}`);
+  }
+  assertOpenFileResult(runner, finalSharedResponse.result, filePath, 'final shared daemon reopen');
+  const finalSharedPositions = await runner.waitNotifications('audio.position', 1, 20000);
+  runner.assert(finalSharedPositions.length >= 1,
+    `Received ${finalSharedPositions.length} final shared position notification(s)`);
+  runner.evidence.passed = true;
+}
+
+function isDeviceListed(hostPath, deviceName) {
+  const result = spawnSync(hostPath, ['-list'], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 5000,
+  });
+  return result.status === 0 && result.stdout.includes(deviceName);
+}
+
+async function waitForDevicePresence(runner, deviceName, expectedPresent, timeoutMs) {
+  const startedAt = Date.now();
+  let consecutiveMatches = 0;
+  while (Date.now() - startedAt < timeoutMs) {
+    if (runner.child.exitCode !== null) {
+      runner.fail(`Host exited during hotplug observation with code ${runner.child.exitCode}`);
+    }
+    const present = isDeviceListed(runner.hostPath, deviceName);
+    consecutiveMatches = present === expectedPresent ? consecutiveMatches + 1 : 0;
+    if (consecutiveMatches >= 2) return Date.now();
+    await sleep(750);
+  }
+  runner.fail(`Timeout waiting for device ${deviceName} to become ${expectedPresent ? 'present' : 'absent'}`);
+}
+
+async function scenarioHotplugRecovery(runner, filePath, outputTarget = {}) {
+  if (process.platform !== 'win32') {
+    runner.fail('hotplug-recovery currently requires Windows');
+  }
+  if (!existsSync(filePath)) runner.fail(`File not found: ${filePath}`);
+  if (!outputTarget.deviceName) runner.fail('hotplug-recovery requires --device-name');
+
+  const sampleRate = outputTarget.sampleRate ?? 48000;
+  const outputMode = outputTarget.outputMode === 'shared' ? 'shared' : 'exclusive';
+  runner.spawn();
+  await runner.waitReady(15000, {
+    outputMode,
+    deviceIndex: outputTarget.deviceIndex ?? -1,
+    deviceName: outputTarget.deviceName,
+    sampleRate,
+    processing: { outputFormat: 'pcm' },
+  });
+  runner.markEventOffset();
+  runner.sendRpc('audio.openFile', [{ filePath }], 1);
+  const initialOpen = await runner.waitResponse(1, 30000);
+  if (initialOpen.error) runner.fail(`initial hotplug openFile error: ${JSON.stringify(initialOpen.error)}`);
+  assertOpenFileResult(runner, initialOpen.result, filePath, 'pre-hotplug daemon openFile');
+  const initialPositions = await runner.waitNotifications('audio.position', 1, 20000);
+  runner.assert(initialPositions.length >= 1, 'Playback advanced before device removal');
+
+  console.log(`[smoke:daemon] ACTION: unplug ${outputTarget.deviceName}, wait 5 seconds, then reconnect it`);
+  const removedAt = await waitForDevicePresence(runner, outputTarget.deviceName, false, 60000);
+  runner.assert(true, `Detected ${outputTarget.deviceName} removal`);
+  const reconnectedAt = await waitForDevicePresence(runner, outputTarget.deviceName, true, 90000);
+  runner.assert(true, `Detected ${outputTarget.deviceName} reconnection after ${reconnectedAt - removedAt}ms`);
+
+  runner.sendRpc('audio.stop', {}, 2);
+  const stopResponse = await runner.waitResponse(2, 10000);
+  runner.assert(!stopResponse.error, 'Stopped invalidated playback before reopening the device');
+  runner.sendRpc('device.configure', [{
+    outputMode,
+    deviceId: '',
+    deviceIndex: outputTarget.deviceIndex ?? -1,
+    deviceName: outputTarget.deviceName,
+    sampleRate,
+    channels: 2,
+    bufferSize: 2048,
+    latencyProfile: 'balanced',
+    sharedBackend: 'auto',
+    processing: { outputFormat: 'pcm' },
+  }], 3);
+  const configureResponse = await runner.waitResponse(3, 15000);
+  runner.assert(!configureResponse.error && configureResponse.result?.accepted === true,
+    'Reconfigured the reconnected device');
+  runner.sendRpc('audio.sessionBegin', {
+    sessionId: 2,
+    sr: sampleRate,
+    ch: 2,
+    buffer: 2048,
+    fifoMs: 8000,
+    prebufferMs: 60,
+  }, 4);
+  const sessionResponse = await runner.waitResponse(4, 15000);
+  runner.assert(!sessionResponse.error && sessionResponse.result?.accepted === true,
+    'Opened a new session on the reconnected device');
+  runner.markEventOffset();
+  runner.sendRpc('audio.openFile', [{ filePath }], 5);
+  const reopenResponse = await runner.waitResponse(5, 30000);
+  if (reopenResponse.error) runner.fail(`post-hotplug openFile error: ${JSON.stringify(reopenResponse.error)}`);
+  assertOpenFileResult(runner, reopenResponse.result, filePath, 'post-hotplug daemon openFile');
+  const recoveredPositions = await runner.waitNotifications('audio.position', 1, 20000);
+  runner.assert(recoveredPositions.length >= 1, 'Playback advanced after device reconnection');
+  runner.evidence.hotplug = { deviceName: outputTarget.deviceName, outputMode, sampleRate, removedAt, reconnectedAt };
   runner.evidence.passed = true;
 }
 
@@ -820,12 +1293,13 @@ async function scenarioPrefetchNoTruncate(runner, filePath) {
   runner.evidence.passed = true;
 }
 
-function generateShortWavFixture(evidenceDir) {
-  const sampleRate = 48000;
+function generateShortWavFixture(evidenceDir, options = {}) {
+  const sampleRate = options.sampleRate ?? 48000;
   const channels = 2;
-  const durationSeconds = 0.1;
+  const durationSeconds = options.durationSeconds ?? 0.1;
+  const frequencyHz = options.frequencyHz ?? 440;
   const bitsPerSample = 16;
-  const numSamples = sampleRate * durationSeconds;
+  const numSamples = Math.round(sampleRate * durationSeconds);
   const dataSize = numSamples * channels * (bitsPerSample / 8);
   const headerSize = 44;
   const fileSize = headerSize + dataSize;
@@ -852,18 +1326,18 @@ function generateShortWavFixture(evidenceDir) {
   buffer.write('data', offset); offset += 4;
   buffer.writeUInt32LE(dataSize, offset); offset += 4;
 
-  // 440 Hz sine wave, stereo, decaying at the end
+  // Deterministic sine wave, stereo, decaying at the end.
   for (let i = 0; i < numSamples; i++) {
     const t = i / sampleRate;
     const envelope = Math.min(1, (durationSeconds - t) / 0.05);
     const amplitude = 0.3 * Math.max(0, envelope);
-    const sample = Math.round(Math.sin(2 * Math.PI * 440 * t) * amplitude * 32767);
+    const sample = Math.round(Math.sin(2 * Math.PI * frequencyHz * t) * amplitude * 32767);
     const clamped = Math.max(-32768, Math.min(32767, sample));
     buffer.writeInt16LE(clamped, offset); offset += 2; // left
     buffer.writeInt16LE(clamped, offset); offset += 2; // right
   }
 
-  const outPath = join(evidenceDir, 'task-5-fixture.wav');
+  const outPath = join(evidenceDir, options.fileName ?? 'task-5-fixture.wav');
   writeFileSync(outPath, buffer);
 
   return {
@@ -872,6 +1346,7 @@ function generateShortWavFixture(evidenceDir) {
     sampleRate,
     channels,
     bitsPerSample,
+    frequencyHz,
     sizeBytes: fileSize,
   };
 }
@@ -974,12 +1449,12 @@ async function scenarioLifecycle(runner, filePath) {
   runner.evidence.bridgeStateAfterOpen = 'alive';
 
   // Pause
-  runner.sendRpc('audio.pause', {}, 3);
+  runner.sendRpc('audio.pause', { sessionId: runner.sessionId }, 3);
   const pauseResp = await runner.waitResponse(3, 5000);
   runner.assert(pauseResp.result === true, 'Pause acknowledged');
 
   // Resume
-  runner.sendRpc('audio.resume', {}, 4);
+  runner.sendRpc('audio.resume', { sessionId: runner.sessionId }, 4);
   const resumeResp = await runner.waitResponse(4, 5000);
   runner.assert(resumeResp.result === true, 'Resume acknowledged');
 
@@ -1015,6 +1490,14 @@ async function scenarioLifecycle(runner, filePath) {
   // Wait for process exit
   const exitStartMs = Date.now();
   const exited = await new Promise((resolve) => {
+    if (runner.child.exitCode !== null || runner.child.signalCode !== null) {
+      runner.evidence.exitCode = runner.child.exitCode;
+      runner.evidence.exitSignal = runner.child.signalCode;
+      runner.evidence.exitDurationMs = 0;
+      runner.evidence.shutdownTotalDurationMs = Date.now() - shutdownStartMs;
+      resolve(true);
+      return;
+    }
     const t = setTimeout(() => {
       runner.child.kill('SIGKILL');
       resolve(false);
@@ -1043,6 +1526,399 @@ async function scenarioLifecycle(runner, filePath) {
   }
 
   runner.evidence.bridgeStateAfterExit = 'invalidated';
+  runner.evidence.passed = true;
+}
+
+async function scenarioQueueAdvance(runner, filePath, evidenceDir, outputTarget = {}) {
+  const fixtureDurationSeconds = 2;
+  const queueRates = Array.isArray(outputTarget.queueRates)
+    ? outputTarget.queueRates
+    : [48000, 44100, 96000];
+  if (queueRates.length < 2 || queueRates.some((rate) => !Number.isInteger(rate) || rate <= 0)) {
+    runner.fail(`queue-advance requires at least two positive integer rates: ${queueRates.join(',')}`);
+  }
+  const queueFiles = Array.isArray(outputTarget.queueFiles) ? outputTarget.queueFiles : null;
+  if (queueFiles && queueFiles.length !== queueRates.length) {
+    runner.fail(`queue-advance requires one --queue-files entry per rate (${queueFiles.length} files, ${queueRates.length} rates)`);
+  }
+  const generatedFixtures = queueRates.map((sampleRate, index) => {
+    if (!queueFiles) {
+      return generateShortWavFixture(evidenceDir, {
+        sampleRate,
+        durationSeconds: fixtureDurationSeconds,
+        frequencyHz: 440 * (1 + index * 0.2),
+        fileName: `task-8-queue-${index + 1}-${sampleRate}.wav`,
+      });
+    }
+    const path = resolve(queueFiles[index]);
+    if (!existsSync(path)) runner.fail(`queue fixture not found: ${path}`);
+    return { path, sampleRate, durationSeconds: fixtureDurationSeconds };
+  });
+  const firstFixture = generatedFixtures[0];
+  runner.evidence.originalRequestedFile = filePath;
+  runner.evidence.generatedFixtures = generatedFixtures;
+  runner.evidence.queueRates = queueRates;
+
+  runner.spawn();
+  await runner.waitReady(15000, {
+    outputMode: outputTarget.outputMode || 'shared',
+    deviceIndex: outputTarget.deviceIndex ?? -1,
+    deviceName: outputTarget.deviceName || '',
+    sampleRate: firstFixture.sampleRate,
+    processing: { outputFormat: 'pcm' },
+  });
+  await sleep(300);
+  runner.markEventOffset();
+
+  const queueRevision = 1;
+  runner.sendRpc('queue.set', {
+    revision: queueRevision,
+    currentItemId: 'queue-1',
+    repeatMode: 'off',
+    items: generatedFixtures.map((fixture, index) => ({
+      itemId: `queue-${index + 1}`,
+      trackId: `track-${index + 1}`,
+      filePath: fixture.path,
+      sampleRate: fixture.sampleRate,
+      startSeconds: 0,
+    })),
+  }, 1);
+  const queueResp = await runner.waitResponse(1, 5000);
+  runner.assert(queueResp.result?.queueRevision === queueRevision, 'queue.set acknowledged revision 1');
+
+  runner.sendRpc('audio.openFile', [{
+    filePath: firstFixture.path,
+    sampleRate: firstFixture.sampleRate,
+  }], 2);
+  const openResp = await runner.waitResponse(2, 10000);
+  runner.assert(!openResp.error, 'initial queue file opened');
+  runner.assert(
+    openResp.result?.sampleRate === firstFixture.sampleRate,
+    `initial decode targets the resident ${firstFixture.sampleRate} Hz device`,
+  );
+  const initialOperationId = openResp.result?.operationId;
+
+  const endedEvents = await runner.waitNotifications('audio.ended', generatedFixtures.length, 60000);
+  const advances = endedEvents.filter((event) => event.params?.queueAdvance === true);
+  runner.assert(
+    advances.length === generatedFixtures.length - 1,
+    `host emitted exactly ${generatedFixtures.length - 1} autonomous queue advances`,
+  );
+
+  for (const [index, advance] of advances.entries()) {
+    const expectedRate = outputTarget.outputMode === 'asio'
+      ? generatedFixtures[index + 1].sampleRate
+      : firstFixture.sampleRate;
+    runner.assert(advance?.params?.queueRevision === queueRevision, `queueAdvance ${index + 1} preserved queue revision`);
+    runner.assert(advance?.params?.nextItemId === `queue-${index + 2}`, `queueAdvance ${index + 1} selected queue-${index + 2}`);
+    runner.assert(
+      advance?.params?.nextSampleRate === expectedRate,
+      `queueAdvance ${index + 1} decoder rate is ${expectedRate} Hz (${advance?.params?.nextSampleRate})`,
+    );
+    if (outputTarget.outputMode === 'asio') {
+      const previousRate = generatedFixtures[index].sampleRate;
+      const expectedTransitionMode = previousRate === expectedRate ? 'resident' : 'asio-full-reopen';
+      runner.assert(advance?.params?.targetSampleRate === expectedRate, `queueAdvance ${index + 1} targeted ${expectedRate} Hz`);
+      runner.assert(advance?.params?.actualSampleRate === expectedRate, `queueAdvance ${index + 1} confirmed hardware ${expectedRate} Hz`);
+      runner.assert(
+        advance?.params?.sampleRateTransitionMode === expectedTransitionMode,
+        `queueAdvance ${index + 1} used ${expectedTransitionMode}`,
+      );
+      runner.assert(
+        previousRate !== expectedRate || advance?.params?.sampleRateTransitionDurationMs === 0,
+        `queueAdvance ${index + 1} avoided device reconfiguration for an unchanged rate`,
+      );
+    }
+    runner.assert(
+      typeof advance?.params?.operationId === 'number' && advance.params.operationId !== initialOperationId,
+      `queueAdvance ${index + 1} carried a new operation id`,
+    );
+    runner.assert(
+      Math.abs(Number(advance?.params?.nextDurationSeconds) - fixtureDurationSeconds) <= 0.05,
+      `queueAdvance ${index + 1} preserved the source duration`,
+    );
+  }
+
+  const operationIds = advances.map((advance) => advance.params.operationId);
+  const positions = runner.readNotificationsAfter('audio.position');
+  for (const [index, operationId] of operationIds.entries()) {
+    const advance = advances[index];
+    const advanceEventIndex = runner.evidence.rpcEvents.findIndex((event) => event.msg === advance);
+    const startedEventIndex = runner.evidence.rpcEvents.findIndex(
+      (event) => event.msg?.method === 'audio.started' && event.msg.params?.operationId === operationId,
+    );
+    const operationPositionEvents = runner.evidence.rpcEvents.filter(
+      (event) => event.msg?.method === 'audio.position' && event.msg.params?.operationId === operationId,
+    );
+    const firstPositionEvent = operationPositionEvents[0];
+    const firstPositionEventIndex = runner.evidence.rpcEvents.indexOf(firstPositionEvent);
+    runner.assert(
+      positions.some((event) => event.params?.operationId === operationId),
+      `mixed-rate operation ${index + 2} emitted position`,
+    );
+    runner.assert(advanceEventIndex >= 0, `queueAdvance ${index + 1} was recorded in the RPC event stream`);
+    runner.assert(
+      startedEventIndex > advanceEventIndex,
+      `operation ${operationId} started only after queueAdvance publication`,
+    );
+    runner.assert(
+      firstPositionEventIndex > startedEventIndex && firstPositionEvent?.msg?.params?.framesPlayed > 0,
+      `operation ${operationId} first position followed started with positive PCM frames`,
+    );
+    runner.assert(
+      operationPositionEvents.every((event) => event.msg.params?.framesPlayed > 0),
+      `operation ${operationId} emitted no premature zero-frame position`,
+    );
+  }
+
+  const timedEndedEvents = runner.evidence.rpcEvents
+    .filter((event) => event.msg?.method === 'audio.ended')
+    .slice(-3);
+  const finalTrackElapsedMs = timedEndedEvents.at(-1)?.timeMs - timedEndedEvents.at(-2)?.timeMs;
+  runner.evidence.finalTrackElapsedMs = finalTrackElapsedMs;
+  runner.assert(
+    Number.isFinite(finalTrackElapsedMs)
+      && finalTrackElapsedMs >= fixtureDurationSeconds * 600
+      && finalTrackElapsedMs <= fixtureDurationSeconds * 1600,
+    `final source played at normal duration (${finalTrackElapsedMs}ms)`,
+  );
+  runner.assert(endedEvents.at(-1)?.params?.queueAdvance !== true, 'queue ended naturally after the final item');
+  runner.evidence.queueAdvances = advances.map((advance) => advance.params);
+
+  runner.sendRpc('audio.stop', {}, 3);
+  await runner.waitResponse(3, 5000);
+  runner.evidence.passed = true;
+}
+
+async function scenarioCrashExit(runner, evidenceDir) {
+  const generatedFixture = generateShortWavFixture(evidenceDir, {
+    sampleRate: 48000,
+    durationSeconds: 5,
+    fileName: 'task-9-crash-exit-48000.wav',
+  });
+  runner.evidence.generatedFixture = generatedFixture;
+
+  runner.spawn();
+  await runner.waitReady();
+  await sleep(300);
+  runner.markEventOffset();
+
+  runner.sendRpc('audio.openFile', [{ filePath: generatedFixture.path }], 1);
+  const openResp = await runner.waitResponse(1, 10000);
+  runner.assert(!openResp.error, 'crash fixture opened');
+  await runner.waitNotifications('audio.position', 1, 10000);
+
+  const daemonPid = runner.child.pid;
+  const exitPromise = waitForEventOrTimeout(runner.child, 'exit', 5000);
+  const bridgeClosePromise = waitForEventOrTimeout(runner.rpcOut, 'close', 5000);
+  const crashStartedAt = Date.now();
+  const killSent = runner.child.kill('SIGKILL');
+  runner.assert(killSent, 'forced daemon termination was requested during playback');
+
+  const [exitResult, bridgeCloseResult] = await Promise.all([exitPromise, bridgeClosePromise]);
+  runner.assert(exitResult.occurred, 'daemon process emitted exit after forced termination');
+  runner.assert(bridgeCloseResult.occurred, 'daemon RPC output closed after process exit');
+  runner.evidence.daemonPid = daemonPid;
+  runner.evidence.exitCode = exitResult.args[0] ?? null;
+  runner.evidence.exitSignal = exitResult.args[1] ?? null;
+  runner.evidence.transportClosedWithinMs = Date.now() - crashStartedAt;
+  runner.evidence.passed = true;
+}
+
+async function scenarioGaplessBoundary(runner, evidenceDir, outputTarget = {}) {
+  const fixtureDurationSeconds = 1.25;
+  const fixtureSampleRate = Number.isInteger(outputTarget.sampleRate) && outputTarget.sampleRate > 0
+    ? outputTarget.sampleRate
+    : 48000;
+  const generatedFixtures = [440, 523.25, 659.25].map((frequencyHz, index) =>
+    generateShortWavFixture(evidenceDir, {
+      sampleRate: fixtureSampleRate,
+      durationSeconds: fixtureDurationSeconds,
+      frequencyHz,
+      fileName: `gapless-boundary-${index + 1}.wav`,
+    }));
+  const [firstFixture, secondFixture, thirdFixture] = generatedFixtures;
+  runner.evidence.generatedFixtures = generatedFixtures;
+
+  runner.spawn();
+  await runner.waitReady(15000, {
+    outputMode: outputTarget.outputMode || 'shared',
+    deviceIndex: outputTarget.deviceIndex ?? -1,
+    deviceName: outputTarget.deviceName || '',
+    sampleRate: fixtureSampleRate,
+    processing: { outputFormat: 'pcm' },
+  });
+  await sleep(200);
+  runner.markEventOffset();
+
+  const queueRevision = 1;
+  runner.sendRpc('queue.set', {
+    revision: queueRevision,
+    currentItemId: 'gapless-queue-1',
+    repeatMode: 'off',
+    items: generatedFixtures.map((fixture, index) => ({
+      itemId: `gapless-queue-${index + 1}`,
+      trackId: `gapless-track-${index + 1}`,
+      filePath: fixture.path,
+      sampleRate: fixtureSampleRate,
+      startSeconds: 0,
+      metadata: { title: `Gapless ${index + 1}`, album: 'Smoke Album', albumArtist: 'ECHO' },
+    })),
+  }, 1);
+  const queueResponse = await runner.waitResponse(1, 5000);
+  runner.assert(queueResponse.result?.queueRevision === queueRevision, 'gapless queue snapshot acknowledged');
+
+  runner.sendRpc('audio.openFile', { filePath: firstFixture.path, sampleRate: fixtureSampleRate }, 2);
+  const openResponse = await runner.waitResponse(2, 10000);
+  runner.assert(!openResponse.error, 'gapless current file opened');
+  const initialOperationId = openResponse.result?.operationId;
+
+  runner.sendRpc('audio.gaplessPrepare', {
+    filePath: secondFixture.path,
+    trackId: 'gapless-track-2',
+    itemId: 'gapless-queue-2',
+    sampleRate: fixtureSampleRate,
+    metadata: { title: 'Gapless 2', album: 'Smoke Album', albumArtist: 'ECHO' },
+    following: [{
+      filePath: thirdFixture.path,
+      trackId: 'gapless-track-3',
+      itemId: 'gapless-queue-3',
+      metadata: { title: 'Gapless 3', album: 'Smoke Album', albumArtist: 'ECHO' },
+    }],
+  }, 3);
+  const prepareResponse = await runner.waitResponse(3, 10000);
+  runner.assert(prepareResponse.result?.prepared === true, 'gapless next FIFO accepted real decoded PCM');
+  runner.assert(prepareResponse.result?.operationId === initialOperationId, 'gapless priming stayed on the current operation');
+
+  const endedEvents = await runner.waitNotifications('audio.ended', 3, 15000);
+  const advances = endedEvents.filter((event) => event.params?.gaplessAdvance === true);
+  runner.assert(advances.length === 2, 'host emitted exactly two PCM-boundary gapless commits');
+  runner.assert(advances[0]?.params?.nextItemId === 'gapless-queue-2', 'first boundary committed queue item 2');
+  runner.assert(advances[1]?.params?.nextItemId === 'gapless-queue-3', 'second boundary committed queue item 3');
+  runner.assert(advances.every((event) => event.params?.queueAdvance === true), 'gapless commits use the queue identity handoff contract');
+  runner.assert(
+    advances.every((event) => Number.isFinite(event.params?.operationId) && event.params.operationId !== initialOperationId),
+    'every gapless boundary issued a new operation identity',
+  );
+  runner.assert(endedEvents.at(-1)?.params?.queueAdvance !== true, 'final prepared track ended naturally without replaying the queue');
+  runner.evidence.gaplessAdvances = advances.map((event) => event.params);
+
+  runner.sendRpc('audio.stop', {}, 4);
+  await runner.waitResponse(4, 5000);
+  runner.evidence.passed = true;
+}
+
+async function scenarioMainThreadStall(runner, evidenceDir) {
+  const generatedFixture = generateShortWavFixture(evidenceDir, {
+    sampleRate: 48000,
+    durationSeconds: 5,
+    frequencyHz: 330,
+    fileName: 'task-10-main-thread-stall-48000.wav',
+  });
+  runner.evidence.generatedFixture = generatedFixture;
+
+  runner.spawn();
+  await runner.waitReady();
+  await sleep(300);
+  runner.markEventOffset();
+
+  runner.sendRpc('audio.openFile', [{ filePath: generatedFixture.path, targetSampleRate: 48000 }], 1);
+  const openResponse = await runner.waitResponse(1, 10000);
+  runner.assert(!openResponse.error, 'stall fixture opened in the native daemon');
+  const operationId = openResponse.result?.operationId;
+  const sampleRate = openResponse.result?.sampleRate ?? 48000;
+  const beforeEvents = await runner.waitNotifications('audio.position', 2, 10000);
+  const beforeEvent = beforeEvents.filter((event) => event.params?.operationId === operationId).at(-1);
+  const beforeSeconds = observedPositionSeconds(beforeEvent, 0, sampleRate);
+  runner.assert(Number.isFinite(beforeSeconds), 'native position was observable before the control-plane stall');
+
+  const stallDurationMs = 1200;
+  const stallStartedAt = Date.now();
+  while (Date.now() - stallStartedAt < stallDurationMs) {
+    Math.sqrt(12345.6789);
+  }
+  const actualStallMs = Date.now() - stallStartedAt;
+
+  const afterEvents = await runner.waitNotifications('audio.position', beforeEvents.length + 1, 5000);
+  const afterEvent = afterEvents.filter((event) => event.params?.operationId === operationId).at(-1);
+  const afterSeconds = observedPositionSeconds(afterEvent, 0, sampleRate);
+  const positionDeltaSeconds = afterSeconds - beforeSeconds;
+  runner.assert(
+    Number.isFinite(afterSeconds) && positionDeltaSeconds >= 0.8,
+    `native playback advanced ${positionDeltaSeconds.toFixed(3)}s while Node was blocked for ${actualStallMs}ms`,
+  );
+  runner.assert(runner.child.exitCode === null, 'native daemon remained alive across the control-plane stall');
+  runner.evidence.controlPlaneStall = {
+    requestedMs: stallDurationMs,
+    actualMs: actualStallMs,
+    beforeSeconds,
+    afterSeconds,
+    positionDeltaSeconds,
+    operationId,
+  };
+  runner.evidence.passed = true;
+}
+
+async function scenarioLivePlaybackRate(runner, evidenceDir, outputTarget = {}) {
+  const generatedFixture = generateShortWavFixture(evidenceDir, {
+    sampleRate: 6000,
+    durationSeconds: 8,
+    frequencyHz: 440,
+    fileName: 'live-playback-rate-src-6000.wav',
+  });
+  runner.evidence.generatedFixture = generatedFixture;
+
+  runner.spawn();
+  await runner.waitReady(15000, {
+    outputMode: 'shared',
+    deviceIndex: outputTarget.deviceIndex ?? -1,
+    deviceName: outputTarget.deviceName || '',
+    sampleRate: 48000,
+    processing: {
+      outputFormat: 'pcm',
+      dither: {
+        mode: 'tpdf',
+        bitDepth: 24,
+      },
+      echoSrc: {
+        sourceSampleRate: 6000,
+        targetSampleRate: 48000,
+        computeBackend: 'cuda',
+        stages: [
+          { upsampleFactor: 2, taps: [-0.02, 0, 0.24, 0.56, 0.24, 0, -0.02] },
+          { upsampleFactor: 2, taps: [0, 0.25, 0.5, 0.25, 0] },
+          { upsampleFactor: 2, taps: [0, 0.25, 0.5, 0.25, 0] },
+        ],
+      },
+    },
+  });
+  runner.markEventOffset();
+
+  runner.sendRpc('audio.openFile', [{ filePath: generatedFixture.path }], 1);
+  const openResponse = await runner.waitResponse(1, 10000);
+  runner.assert(!openResponse.error, 'playback-rate fixture opened');
+  await runner.waitNotifications('audio.position', 1, 10000);
+
+  runner.sendRpc('playbackRate.setRate', [1.05], 2);
+  const rateResponse = await runner.waitResponse(2, 5000);
+  runner.assert(!rateResponse.error && Math.abs(rateResponse.result?.rate - 1.05) < 0.001,
+    'live playback-rate update was acknowledged');
+  const postRatePositions = await runner.waitNotifications('audio.position', 12, 5000);
+  runner.assert(postRatePositions.some((event) => event.params?.processing?.echoSrc?.active === true),
+    '8x ECHO SRC remained active after the playback-rate update');
+  runner.assert(postRatePositions.some((event) => event.params?.processing?.dither?.active === true),
+    '24-bit TPDF dither remained active after the playback-rate update');
+
+  for (let seekIndex = 0; seekIndex < 6; seekIndex += 1) {
+    runner.markEventOffset();
+    const seekId = 10 + seekIndex;
+    const positionSeconds = 0.5 + seekIndex * 0.25;
+    runner.sendRpc('audio.seek', [{ positionSeconds }], seekId);
+    const seekResponse = await runner.waitResponse(seekId, 10000);
+    runner.assert(!seekResponse.error, `playback-rate seek ${seekIndex + 1} succeeded`);
+    await runner.waitNotifications('audio.position', 1, 5000);
+  }
+  runner.assert(runner.child.exitCode === null, 'daemon remained alive after live playback-rate update');
   runner.evidence.passed = true;
 }
 
@@ -1092,7 +1968,13 @@ async function main() {
     console.log(`[smoke:daemon] File: ${args.file}`);
 
     // Pre-check: missing file (skip for scenarios that generate fixtures)
-    const generatesFixture = scenario === 'natural-ended' || scenario === 'explicit-stop';
+    const generatesFixture = scenario === 'natural-ended'
+      || scenario === 'explicit-stop'
+      || scenario === 'queue-advance'
+      || scenario === 'gapless-boundary'
+      || scenario === 'main-thread-stall'
+      || scenario === 'live-playback-rate'
+      || scenario === 'crash-exit';
     if (!generatesFixture) {
       const missingErr = checkMissingFile(args.file);
       if (missingErr) {
@@ -1116,6 +1998,26 @@ async function main() {
         case 'cold-open':
           await scenarioColdOpen(runner, args.file);
           break;
+        case 'remote-source':
+          await scenarioRemoteSource(runner, args.file);
+          break;
+        case 'output-mode-cycle':
+          await scenarioOutputModeCycle(runner, args.file, {
+            deviceIndex: Number.isInteger(args.deviceIndex) ? args.deviceIndex : -1,
+            deviceName: args.deviceName,
+            alternateDeviceIndex: Number.isInteger(args.alternateDeviceIndex) ? args.alternateDeviceIndex : null,
+            alternateDeviceName: args.alternateDeviceName,
+            sampleRate: Number.isInteger(args.sampleRate) && args.sampleRate > 0 ? args.sampleRate : 48000,
+          });
+          break;
+        case 'hotplug-recovery':
+          await scenarioHotplugRecovery(runner, args.file, {
+            outputMode: args.outputMode,
+            deviceIndex: Number.isInteger(args.deviceIndex) ? args.deviceIndex : -1,
+            deviceName: args.deviceName,
+            sampleRate: Number.isInteger(args.sampleRate) && args.sampleRate > 0 ? args.sampleRate : 48000,
+          });
+          break;
         case 'offset-open':
           await scenarioOffsetOpen(runner, args.file, args.offset, args.evidenceDir);
           break;
@@ -1133,6 +2035,35 @@ async function main() {
           break;
         case 'prefetch-no-truncate':
           await scenarioPrefetchNoTruncate(runner, args.file);
+          break;
+        case 'queue-advance':
+          await scenarioQueueAdvance(runner, args.file, args.evidenceDir, {
+            outputMode: args.outputMode === 'asio' ? 'asio' : args.outputMode === 'exclusive' ? 'exclusive' : 'shared',
+            deviceIndex: Number.isInteger(args.deviceIndex) ? args.deviceIndex : -1,
+            deviceName: args.deviceName,
+            queueRates: args.queueRates,
+            queueFiles: args.queueFiles,
+          });
+          break;
+        case 'gapless-boundary':
+          await scenarioGaplessBoundary(runner, args.evidenceDir, {
+            outputMode: args.outputMode === 'asio' ? 'asio' : args.outputMode === 'exclusive' ? 'exclusive' : 'shared',
+            deviceIndex: Number.isInteger(args.deviceIndex) ? args.deviceIndex : -1,
+            deviceName: args.deviceName,
+            sampleRate: Number.isInteger(args.sampleRate) && args.sampleRate > 0 ? args.sampleRate : 48000,
+          });
+          break;
+        case 'main-thread-stall':
+          await scenarioMainThreadStall(runner, args.evidenceDir);
+          break;
+        case 'live-playback-rate':
+          await scenarioLivePlaybackRate(runner, args.evidenceDir, {
+            deviceIndex: Number.isInteger(args.deviceIndex) ? args.deviceIndex : -1,
+            deviceName: args.deviceName,
+          });
+          break;
+        case 'crash-exit':
+          await scenarioCrashExit(runner, args.evidenceDir);
           break;
         case 'lifecycle':
           await scenarioLifecycle(runner, args.file);
@@ -1176,6 +2107,18 @@ async function main() {
               ? 'task-6-eq-replay.json'
               : scenario === 'prefetch-no-truncate'
                 ? 'task-7-prefetch-no-truncate.json'
+                : scenario === 'queue-advance'
+                  ? 'task-8-queue-advance.json'
+                : scenario === 'gapless-boundary'
+                  ? 'gapless-boundary.json'
+                : scenario === 'remote-source'
+                  ? 'task-remote-source.json'
+                : scenario === 'main-thread-stall'
+                  ? 'task-10-main-thread-stall.json'
+                  : scenario === 'live-playback-rate'
+                    ? 'live-playback-rate.json'
+                  : scenario === 'crash-exit'
+                  ? 'task-9-crash-exit.json'
                 : scenario === 'lifecycle'
                   ? 'task-8-lifecycle-shutdown.json'
                   : `task-1-smoke-helper-${scenario}.json`;

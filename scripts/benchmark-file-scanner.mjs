@@ -210,7 +210,7 @@ const scanWithNative = async (root) => {
 
 const createSyntheticLibrary = () => {
   const root = join(tmpdir(), `echo-next-scanner-bench-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-  const extensions = ['.flac', '.mp3', '.wav', '.m4a', '.opus', '.jpg'];
+  const extensions = ['.flac', '.mp3', '.wav', '.m4a', '.opus'];
   mkdirSync(root, { recursive: true });
 
   for (let directoryIndex = 0; directoryIndex < syntheticDirectoryCount; directoryIndex += 1) {
@@ -222,22 +222,53 @@ const createSyntheticLibrary = () => {
     const directory = join(root, `album-${String((index % syntheticDirectoryCount) + 1).padStart(3, '0')}`);
     const extension = extensions[index % extensions.length];
     const fileName = `track-${String(index + 1).padStart(5, '0')}${extension}`;
-    writeFileSync(join(directory, fileName), extension === '.jpg' ? 'cover' : `audio-${index}`);
+    writeFileSync(join(directory, fileName), `audio-${index}`);
+  }
+
+  for (let directoryIndex = 0; directoryIndex < syntheticDirectoryCount; directoryIndex += 1) {
+    writeFileSync(join(root, `album-${String(directoryIndex + 1).padStart(3, '0')}`, 'cover.jpg'), 'cover');
   }
 
   return root;
 };
 
 const compareResults = (nodeFiles, nativeFiles) => {
-  const nodeKeys = new Set(nodeFiles.map((file) => pathKey(file.path)));
-  const nativeKeys = new Set(nativeFiles.map((file) => pathKey(file.path)));
-  const missingFromNative = [...nodeKeys].filter((key) => !nativeKeys.has(key)).slice(0, sampleLimit);
-  const extraFromNative = [...nativeKeys].filter((key) => !nodeKeys.has(key)).slice(0, sampleLimit);
+  const nodeByPath = new Map(nodeFiles.map((file) => [pathKey(file.path), file]));
+  const nativeByPath = new Map(nativeFiles.map((file) => [pathKey(file.path), file]));
+  const missingFromNative = [...nodeByPath.keys()].filter((key) => !nativeByPath.has(key)).slice(0, sampleLimit);
+  const extraFromNative = [...nativeByPath.keys()].filter((key) => !nodeByPath.has(key)).slice(0, sampleLimit);
+  const statMismatches = [];
+  for (const [key, nodeFile] of nodeByPath) {
+    const nativeFile = nativeByPath.get(key);
+    if (!nativeFile) {
+      continue;
+    }
+    if (
+      Number(nodeFile.sizeBytes) !== Number(nativeFile.sizeBytes) ||
+      Math.abs(Number(nodeFile.mtimeMs) - Number(nativeFile.mtimeMs)) > 2
+    ) {
+      statMismatches.push({
+        path: nodeFile.path,
+        nodeSizeBytes: nodeFile.sizeBytes,
+        nativeSizeBytes: nativeFile.sizeBytes,
+        nodeMtimeMs: nodeFile.mtimeMs,
+        nativeMtimeMs: nativeFile.mtimeMs,
+      });
+      if (statMismatches.length >= sampleLimit) {
+        break;
+      }
+    }
+  }
 
   return {
-    matches: nodeKeys.size === nativeKeys.size && missingFromNative.length === 0 && extraFromNative.length === 0,
+    matches:
+      nodeByPath.size === nativeByPath.size &&
+      missingFromNative.length === 0 &&
+      extraFromNative.length === 0 &&
+      statMismatches.length === 0,
     missingFromNative,
     extraFromNative,
+    statMismatches,
   };
 };
 
@@ -313,6 +344,7 @@ const printSummary = ({ root, synthetic, nodeScan, nativeScan, comparison }) => 
   if (!comparison.files.matches) {
     console.log(`[benchmark:file-scanner] files missing from native sample: ${JSON.stringify(comparison.files.missingFromNative)}`);
     console.log(`[benchmark:file-scanner] files extra from native sample: ${JSON.stringify(comparison.files.extraFromNative)}`);
+    console.log(`[benchmark:file-scanner] file stat mismatch sample: ${JSON.stringify(comparison.files.statMismatches)}`);
   }
   if (!comparison.snapshots.matches) {
     console.log(`[benchmark:file-scanner] snapshots missing from native sample: ${JSON.stringify(comparison.snapshots.missingFromNative)}`);

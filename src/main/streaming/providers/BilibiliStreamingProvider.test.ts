@@ -47,6 +47,7 @@ describe('BilibiliStreamingProvider', () => {
       supportsPlayback: true,
       supportsDownload: false,
       supportsMv: true,
+      supportedSearchMediaTypes: ['track'],
       requiresAccount: false,
     });
   });
@@ -79,7 +80,9 @@ describe('BilibiliStreamingProvider', () => {
       pageSize: 10,
     });
 
+    expect(String(fetchRunner.mock.calls[0][0])).toContain('/wbi/search/type');
     expect(String(fetchRunner.mock.calls[0][0])).toContain('search_type=video');
+    expect(new Headers(fetchRunner.mock.calls[0][1]?.headers).get('cookie')).toBeNull();
     expect(result.tracks[0]).toMatchObject({
       provider: 'bilibili',
       providerTrackId: 'BV1ECHO',
@@ -229,6 +232,41 @@ describe('BilibiliStreamingProvider', () => {
     });
   });
 
+  it('ranks music results ahead of commercial noise while preserving both results', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 0,
+        data: {
+          numResults: 2,
+          result: [
+            {
+              bvid: 'BV1AD',
+              title: '爱慕（Aimer）新品睡衣开箱',
+              author: '购物频道',
+              duration: '01:20',
+            },
+            {
+              bvid: 'BV1MUSIC',
+              title: '【Aimer】カタオモイ Official MV',
+              author: '音乐收藏',
+              duration: '03:30',
+            },
+          ],
+        },
+      }),
+    ));
+
+    const result = await new BilibiliStreamingProvider().search({
+      provider: 'bilibili',
+      query: 'Aimer',
+      mediaTypes: ['track'],
+      page: 1,
+      pageSize: 10,
+    });
+
+    expect(result.tracks.map((track) => track.providerTrackId)).toEqual(['BV1MUSIC', 'BV1AD']);
+  });
+
   it('tries normalized query variants when the exact Bilibili query has no videos', async () => {
     const fetchRunner = vi
       .fn()
@@ -273,6 +311,7 @@ describe('BilibiliStreamingProvider', () => {
     const fetchRunner = vi
       .fn()
       .mockResolvedValueOnce(new Response('blocked', { status: 412 }))
+      .mockResolvedValueOnce(new Response('blocked', { status: 412 }))
       .mockResolvedValueOnce(
         new Response(
           `<script>window.__pinia={
@@ -315,6 +354,21 @@ describe('BilibiliStreamingProvider', () => {
     expect(execFileMock).not.toHaveBeenCalled();
   });
 
+  it('reports Bilibili risk control instead of presenting a false empty result when every search path fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('blocked', { status: 412 })));
+    execFileMock.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (...args: unknown[]) => void) => {
+      callback(new Error('HTTP Error 412'), '', 'HTTP Error 412');
+    });
+
+    await expect(new BilibiliStreamingProvider().search({
+      provider: 'bilibili',
+      query: 'Aimer',
+      mediaTypes: ['track'],
+      page: 1,
+      pageSize: 10,
+    })).rejects.toThrow('风控拦截');
+  });
+
   it('resolves playback from Bilibili with the best audio-only format', async () => {
     let capturedArgs: string[] = [];
     execFileMock.mockImplementation((_file: string, args: string[], _options: unknown, callback: (...args: unknown[]) => void) => {
@@ -348,6 +402,9 @@ describe('BilibiliStreamingProvider', () => {
               http_headers: {
                 Referer: 'https://www.bilibili.com/video/BV1ECHO',
                 Cookie: 'should-not-leak',
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+                'Sec-Fetch-Mode': 'navigate',
+                Origin: 'https://www.bilibili.com/\r\nX-Injected: true',
               },
             },
           ],
@@ -379,5 +436,8 @@ describe('BilibiliStreamingProvider', () => {
       Referer: 'https://www.bilibili.com/video/BV1ECHO',
     });
     expect(source.headers.Cookie).toBeUndefined();
+    expect(source.headers['Accept-Language']).toBeUndefined();
+    expect(source.headers['Sec-Fetch-Mode']).toBeUndefined();
+    expect(source.headers.Origin).toBeUndefined();
   });
 });

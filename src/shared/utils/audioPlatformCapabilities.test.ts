@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isAdvancedNativeOutputPlatform,
+  isExclusiveNativeOutputPlatform,
   isNativeSharedOutputPlatform,
   normalizeAudioSharedBackendForPlatform,
   normalizeAudioOutputModeForPlatform,
@@ -26,5 +27,16 @@ describe('audio platform capabilities', () => {
     expect(normalizeAudioSharedBackendForPlatform('directsound', 'linux')).toBe('auto');
     expect(normalizeAudioSharedBackendForPlatform('windows', 'linux')).toBe('auto');
     expect(normalizeAudioSharedBackendForPlatform('alsa', 'linux')).toBe('alsa');
+  });
+
+  it('allows macOS shared output while keeping advanced modes unavailable', () => {
+    expect(isAdvancedNativeOutputPlatform('darwin')).toBe(false);
+    expect(isExclusiveNativeOutputPlatform('darwin')).toBe(true);
+    expect(isNativeSharedOutputPlatform('darwin')).toBe(true);
+    expect(normalizeAudioOutputModeForPlatform('shared', 'darwin')).toBe('shared');
+    expect(normalizeAudioOutputModeForPlatform('exclusive', 'darwin')).toBe('exclusive');
+    expect(normalizeAudioOutputModeForPlatform('asio', 'darwin')).toBe('shared');
+    expect(normalizeAudioOutputModeForPlatform('system', 'darwin')).toBe('shared');
+    expect(normalizeAudioSharedBackendForPlatform('alsa', 'darwin')).toBe('auto');
   });
 });

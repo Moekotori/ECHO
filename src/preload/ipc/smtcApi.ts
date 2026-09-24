@@ -9,6 +9,7 @@ export function createSmtcApi(
   return {
     getDiagnostics: () => ipcRenderer.invoke(IpcChannels.SmtcGetDiagnostics),
     setLyricsProgress: (progress) => ipcRenderer.invoke(IpcChannels.SmtcSetLyricsProgress, progress),
+    setEnabledActions: (actions) => ipcRenderer.invoke(IpcChannels.SmtcSetEnabledActions, actions),
     restart: () => ipcRenderer.invoke(IpcChannels.SmtcRestart),
     onCommand: (handler) => {
       const listener = (_event: Electron.IpcRendererEvent, command: unknown): void => {

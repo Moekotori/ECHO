@@ -88,6 +88,56 @@ void writeLe32(std::ofstream& out, uint32_t value)
     out.write(bytes, sizeof(bytes));
 }
 
+void writeLe64(std::ofstream& out, uint64_t value)
+{
+    char bytes[8] {
+        static_cast<char>(value & 0xff),
+        static_cast<char>((value >> 8) & 0xff),
+        static_cast<char>((value >> 16) & 0xff),
+        static_cast<char>((value >> 24) & 0xff),
+        static_cast<char>((value >> 32) & 0xff),
+        static_cast<char>((value >> 40) & 0xff),
+        static_cast<char>((value >> 48) & 0xff),
+        static_cast<char>((value >> 56) & 0xff),
+    };
+    out.write(bytes, sizeof(bytes));
+}
+
+void writeBe16(std::ofstream& out, uint16_t value)
+{
+    char bytes[2] {
+        static_cast<char>((value >> 8) & 0xff),
+        static_cast<char>(value & 0xff),
+    };
+    out.write(bytes, sizeof(bytes));
+}
+
+void writeBe32(std::ofstream& out, uint32_t value)
+{
+    char bytes[4] {
+        static_cast<char>((value >> 24) & 0xff),
+        static_cast<char>((value >> 16) & 0xff),
+        static_cast<char>((value >> 8) & 0xff),
+        static_cast<char>(value & 0xff),
+    };
+    out.write(bytes, sizeof(bytes));
+}
+
+void writeBe64(std::ofstream& out, uint64_t value)
+{
+    char bytes[8] {
+        static_cast<char>((value >> 56) & 0xff),
+        static_cast<char>((value >> 48) & 0xff),
+        static_cast<char>((value >> 40) & 0xff),
+        static_cast<char>((value >> 32) & 0xff),
+        static_cast<char>((value >> 24) & 0xff),
+        static_cast<char>((value >> 16) & 0xff),
+        static_cast<char>((value >> 8) & 0xff),
+        static_cast<char>(value & 0xff),
+    };
+    out.write(bytes, sizeof(bytes));
+}
+
 std::string writeStreamingDecoderWavFixture(int sampleRate, int channels, int frames)
 {
     const auto path = std::filesystem::temp_directory_path()
@@ -124,6 +174,101 @@ std::string writeStreamingDecoderWavFixture(int sampleRate, int channels, int fr
     }
 
     require(out.good(), "streaming decoder test writes WAV fixture");
+    return path.string();
+}
+
+std::string writeStreamingDecoderDsfFixture()
+{
+    constexpr uint32_t nativeSampleRate = 2822400;
+    constexpr uint32_t channels = 2;
+    constexpr uint32_t blockBytesPerChannel = 4096;
+    constexpr uint64_t samplesPerChannel = static_cast<uint64_t>(blockBytesPerChannel) * 8;
+    constexpr uint64_t dataBytes = static_cast<uint64_t>(blockBytesPerChannel) * channels;
+    constexpr uint64_t fileBytes = 28 + 52 + 12 + dataBytes;
+    const auto path = std::filesystem::temp_directory_path()
+        / std::filesystem::path("echo-libav-streaming-dsd64.dsf");
+    std::ofstream out(path, std::ios::binary);
+    require(out.good(), "DSD streaming decoder test can create DSF fixture");
+
+    out.write("DSD ", 4);
+    writeLe64(out, 28);
+    writeLe64(out, fileBytes);
+    writeLe64(out, 0);
+
+    out.write("fmt ", 4);
+    writeLe64(out, 52);
+    writeLe32(out, 1);
+    writeLe32(out, 0);
+    writeLe32(out, 2);
+    writeLe32(out, channels);
+    writeLe32(out, nativeSampleRate);
+    writeLe32(out, 1);
+    writeLe64(out, samplesPerChannel);
+    writeLe32(out, blockBytesPerChannel);
+    writeLe32(out, 0);
+
+    out.write("data", 4);
+    writeLe64(out, 12 + dataBytes);
+    for (uint32_t channel = 0; channel < channels; ++channel)
+    {
+        for (uint32_t index = 0; index < blockBytesPerChannel; ++index)
+        {
+            const unsigned char byte = ((index + channel) & 1) == 0 ? 0x69 : 0x96;
+            out.put(static_cast<char>(byte));
+        }
+    }
+
+    require(out.good(), "DSD streaming decoder test writes DSF fixture");
+    out.close();
+    return path.string();
+}
+
+std::string writeStreamingDecoderDffFixture()
+{
+    constexpr uint32_t nativeSampleRate = 2822400;
+    constexpr uint16_t channels = 2;
+    constexpr uint32_t bytesPerChannel = 4096;
+    constexpr uint64_t dataBytes = static_cast<uint64_t>(bytesPerChannel) * channels;
+    constexpr uint64_t propertyBytes = 4 + (12 + 4) + (12 + 10) + (12 + 4);
+    constexpr uint64_t fileBytes = 16 + (12 + 4) + (12 + propertyBytes) + (12 + dataBytes);
+    const auto path = std::filesystem::temp_directory_path()
+        / std::filesystem::path("echo-libav-streaming-dsd64.dff");
+    std::ofstream out(path, std::ios::binary);
+    require(out.good(), "DSD streaming decoder test can create DFF fixture");
+
+    out.write("FRM8", 4);
+    writeBe64(out, fileBytes - 12);
+    out.write("DSD ", 4);
+
+    out.write("FVER", 4);
+    writeBe64(out, 4);
+    writeBe32(out, 0x01050000);
+
+    out.write("PROP", 4);
+    writeBe64(out, propertyBytes);
+    out.write("SND ", 4);
+    out.write("FS  ", 4);
+    writeBe64(out, 4);
+    writeBe32(out, nativeSampleRate);
+    out.write("CHNL", 4);
+    writeBe64(out, 10);
+    writeBe16(out, channels);
+    out.write("SLFT", 4);
+    out.write("SRGT", 4);
+    out.write("CMPR", 4);
+    writeBe64(out, 4);
+    out.write("DSD ", 4);
+
+    out.write("DSD ", 4);
+    writeBe64(out, dataBytes);
+    for (uint32_t index = 0; index < bytesPerChannel; ++index)
+    {
+        out.put(static_cast<char>((index & 1) == 0 ? 0x69 : 0x96));
+        out.put(static_cast<char>((index & 1) == 0 ? 0x96 : 0x69));
+    }
+
+    require(out.good(), "DSD streaming decoder test writes DFF fixture");
+    out.close();
     return path.string();
 }
 
@@ -176,6 +321,8 @@ struct DspChainFixture
     echo::ChannelBalanceProcessor channelBalanceProcessor;
     echo::DspHeadroomProcessor headroomProcessor;
     echo::ReplayGainProcessor replayGainProcessor;
+    echo::CompressorProcessor compressorProcessor;
+    echo::SpatialDspProcessor spatialDspProcessor;
     echo::PlaybackRateProcessor playbackRateProcessor;
     echo::LevelMeterProcessor levelMeterProcessor;
     echo::DspChain dspChain;
@@ -187,6 +334,8 @@ struct DspChainFixture
             channelBalanceProcessor,
             headroomProcessor,
             replayGainProcessor,
+            compressorProcessor,
+            spatialDspProcessor,
             playbackRateProcessor,
             levelMeterProcessor)
     {
@@ -397,6 +546,12 @@ void testDspChainBypassPreservesDryBuffer()
 {
     DspChainFixture fixture;
     auto& dspChain = fixture.dspChain;
+    bool meterObserved = false;
+    fixture.levelMeterProcessor.setIntervalMs(1);
+    fixture.levelMeterProcessor.setCallback([&meterObserved](const echo::LevelMeterSnapshot& snapshot)
+    {
+        meterObserved = ! snapshot.peakDb.empty() && snapshot.peakDb.front() > -60.0f;
+    });
     dspChain.prepare(48000.0, 128, 2);
 
     auto buffer = makeFloatBuffer(2, 128);
@@ -418,8 +573,88 @@ void testDspChainBypassPreservesDryBuffer()
     require(! dspChain.isActive(), "inactive DSP chain must report bypass");
     dspChain.processBlock(buffer, 0, buffer.getNumSamples());
     requireBuffersClose(buffer, dry, strictTolerance, "inactive DSP chain must not touch native playback samples");
+    require(meterObserved, "inactive DSP chain must still report native output levels");
     require(! dspChain.hasClippingRisk(), "inactive DSP chain must not report clipping risk");
     require(! dspChain.isSafetyLimiterProtecting(), "inactive DSP chain must not report limiter protection");
+}
+
+void testCompressorReducesHotSignalsAndPreservesBypass()
+{
+    echo::CompressorProcessor processor;
+    processor.prepare(48'000.0, 512, 2);
+
+    echo::FloatAudioBuffer bypassed(2, 512);
+    for (int channel = 0; channel < 2; ++channel)
+        std::fill_n(bypassed.getWritePointer(channel), 512, 0.8f);
+    processor.processBlock(bypassed, 0, 512);
+    require(std::abs(bypassed.getSample(0, 511) - 0.8f) <= 1.0e-7f,
+        "disabled compressor must preserve the dry signal exactly");
+
+    echo::CompressorState state;
+    state.enabled = true;
+    state.thresholdDb = -18.0f;
+    state.ratio = 8.0f;
+    state.attackMs = 0.1f;
+    state.releaseMs = 100.0f;
+    state.kneeDb = 0.0f;
+    processor.setState(state);
+
+    echo::FloatAudioBuffer compressed(2, 512);
+    for (int channel = 0; channel < 2; ++channel)
+        std::fill_n(compressed.getWritePointer(channel), 512, 0.8f);
+    processor.processBlock(compressed, 0, 512);
+    require(std::isfinite(compressed.getSample(0, 511)), "compressor output must remain finite");
+    require(compressed.getSample(0, 511) < 0.35f,
+        "enabled compressor must reduce a sustained signal above threshold");
+    require(processor.gainReductionDb() > 8.0f,
+        "compressor must expose positive gain-reduction telemetry");
+}
+
+void testSpatialDspStagesProcessIndependently()
+{
+    echo::SpatialDspProcessor processor;
+    processor.prepare(48'000.0, 2048, 2);
+
+    echo::CrossfeedState crossfeed;
+    crossfeed.enabled = true;
+    crossfeed.amount = 0.5f;
+    crossfeed.cutoffHz = 1'500.0f;
+    processor.setCrossfeedState(crossfeed);
+    echo::FloatAudioBuffer crossfeedBuffer(2, 2048);
+    std::fill_n(crossfeedBuffer.getWritePointer(0), 2048, 1.0f);
+    std::fill_n(crossfeedBuffer.getWritePointer(1), 2048, -1.0f);
+    processor.processCrossfeedBlock(crossfeedBuffer, 0, 2048);
+    require(crossfeedBuffer.getSample(0, 2047) < 0.55f && crossfeedBuffer.getSample(0, 2047) > 0.45f,
+        "crossfeed must narrow sustained low-frequency side content");
+    require(std::abs(crossfeedBuffer.getSample(0, 2047) + crossfeedBuffer.getSample(1, 2047)) < 1.0e-5f,
+        "crossfeed must preserve the stereo center");
+
+    echo::StereoFieldState stereoField;
+    stereoField.enabled = true;
+    stereoField.width = 0.0f;
+    processor.setStereoFieldState(stereoField);
+    echo::FloatAudioBuffer stereoBuffer(2, 1);
+    stereoBuffer.setSample(0, 0, 1.0f);
+    stereoBuffer.setSample(1, 0, -1.0f);
+    processor.processStereoFieldBlock(stereoBuffer, 0, 1);
+    require(std::abs(stereoBuffer.getSample(0, 0)) < 1.0e-6f
+            && std::abs(stereoBuffer.getSample(1, 0)) < 1.0e-6f,
+        "zero stereo width must remove pure side content");
+
+    echo::ChannelMatrixState matrix;
+    matrix.enabled = true;
+    matrix.leftToLeft = 0.0f;
+    matrix.rightToLeft = 1.0f;
+    matrix.leftToRight = 1.0f;
+    matrix.rightToRight = 0.0f;
+    processor.setChannelMatrixState(matrix);
+    echo::FloatAudioBuffer matrixBuffer(2, 1);
+    matrixBuffer.setSample(0, 0, 0.25f);
+    matrixBuffer.setSample(1, 0, -0.5f);
+    processor.processChannelMatrixBlock(matrixBuffer, 0, 1);
+    require(std::abs(matrixBuffer.getSample(0, 0) + 0.5f) < 1.0e-6f
+            && std::abs(matrixBuffer.getSample(1, 0) - 0.25f) < 1.0e-6f,
+        "channel matrix must apply the configured two-by-two routing coefficients");
 }
 
 void testDspChainLimiterProtectsActiveOutput()
@@ -498,33 +733,66 @@ void testDspChainLimiterCanBeBypassed()
     echo::DspChain::setSafetyLimiterEnabled(true);
 }
 
-void testDspHeadroomOnlyAppliesToActiveDsp()
+void testDspHeadroomActivatesProtectionChain()
 {
     echo::DspChain::setSafetyLimiterEnabled(true);
     DspChainFixture fixture;
-    auto& eqProcessor = fixture.eqProcessor;
     auto& headroomProcessor = fixture.headroomProcessor;
     auto& dspChain = fixture.dspChain;
     dspChain.prepare(48000.0, 128, 2);
     headroomProcessor.setHeadroomDb(-6.0f);
 
-    auto bypassed = makeFloatBuffer(2, 128);
-    bypassed.clear();
-    bypassed.setSample(0, 0, 0.5f);
-    bypassed.setSample(1, 0, -0.5f);
-    dspChain.processBlock(bypassed, 0, bypassed.getNumSamples());
-    require(std::abs(bypassed.getSample(0, 0) - 0.5f) <= strictTolerance, "DSP headroom must not affect native bypass");
-    require(std::abs(bypassed.getSample(1, 0) + 0.5f) <= strictTolerance, "DSP headroom must preserve bypass polarity");
-
-    eqProcessor.setEnabled(true);
     auto processed = makeFloatBuffer(2, 128);
     processed.clear();
     processed.setSample(0, 0, 0.5f);
     processed.setSample(1, 0, -0.5f);
+    require(dspChain.isActive(), "configured headroom must activate the protection chain");
     dspChain.processBlock(processed, 0, processed.getNumSamples());
 
-    require(std::abs(processed.getSample(0, 0)) < 0.5f, "DSP headroom must attenuate active DSP output");
-    require(std::abs(processed.getSample(1, 0)) < 0.5f, "DSP headroom must attenuate active DSP output on all channels");
+    require(std::abs(processed.getSample(0, 0)) < 0.5f, "DSP headroom must attenuate output without another DSP enabled");
+    require(std::abs(processed.getSample(1, 0)) < 0.5f, "DSP headroom must attenuate every channel without another DSP enabled");
+}
+
+void testDspChainProtectsUpstreamPcmProcessing()
+{
+    echo::DspChain::setSafetyLimiterEnabled(true);
+    DspChainFixture fixture;
+    auto& dspChain = fixture.dspChain;
+    dspChain.prepare(192000.0, 128, 2);
+    dspChain.setUpstreamPcmProcessingActive(true);
+
+    auto buffer = makeFloatBuffer(2, 128);
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        auto* samples = buffer.getWritePointer(channel);
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+            samples[sample] = sample % 2 == 0 ? 1.25f : -1.25f;
+    }
+
+    require(dspChain.isActive(), "upstream PCM processing must activate the protection chain");
+    dspChain.processBlock(buffer, 0, buffer.getNumSamples());
+    require(dspChain.isSafetyLimiterProtecting(), "upstream PCM overshoot must engage the safety limiter");
+    require(std::abs(dspChain.safetyLimiterCeilingDb() + 1.0f) <= nearTolerance,
+        "upstream PCM limiter must use the -1 dB true-peak ceiling");
+    require(dspChain.safetyLimiterGainReductionDb() > 2.0f,
+        "upstream PCM limiter must report authoritative linked gain reduction");
+    const float truePeakCeiling = std::pow(10.0f, -1.0f / 20.0f);
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        const auto* samples = buffer.getReadPointer(channel);
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+            require(std::abs(samples[sample]) <= truePeakCeiling + nearTolerance,
+                "upstream PCM protection must prevent output clipping");
+    }
+
+    auto quiet = makeFloatBuffer(2, 128);
+    for (int channel = 0; channel < quiet.getNumChannels(); ++channel)
+        std::fill_n(quiet.getWritePointer(channel), quiet.getNumSamples(), 0.25f);
+    dspChain.processBlock(quiet, 0, quiet.getNumSamples());
+    require(quiet.getSample(0, 0) < quiet.getSample(0, quiet.getNumSamples() - 1),
+        "true-peak limiter must release smoothly instead of stepping back to unity");
+    require(std::abs(quiet.getSample(0, 0) - quiet.getSample(1, 0)) <= strictTolerance,
+        "true-peak limiter gain envelope must remain stereo linked");
 }
 
 void testDisabledEqIsDry()
@@ -718,10 +986,46 @@ void testHostBufferFallbackAttempts()
     requireVectorEquals(buildBufferSizeAttempts(shared), { 256, 512, 1024, 2048, 4096, 8192 }, "shared buffer fallback chain");
 
     const auto asio = parseOptions({ "echo-audio-host", "-asio" });
+    require(asio.asio, "ASIO backend flag must parse instead of silently selecting shared output");
     requireVectorEquals(buildBufferSizeAttempts(asio), { 256, 512, 1024, 2048, 4096, 8192 }, "ASIO buffer fallback chain");
 
     const auto balanced = parseOptions({ "echo-audio-host", "-exclusive", "-buffer", "2048" });
+    require(balanced.exclusive, "exclusive backend flag must parse");
     requireVectorEquals(buildBufferSizeAttempts(balanced), { 2048, 4096, 8192 }, "exclusive requested buffer fallback chain");
+}
+
+void testUnsupportedExclusiveFormatSkipsBufferRetries()
+{
+    class UnsupportedFormatBackend final : public NativePcmOutputBackend
+    {
+    public:
+        bool open(NativePlaybackPipeline&, const Options&, int, int, int, std::string& error) override
+        {
+            ++openAttempts;
+            error = "WASAPI exclusive format unsupported (hr=0x88890008)";
+            return false;
+        }
+        void close() noexcept override {}
+        const NativePcmOutputReadyInfo& readyInfo() const noexcept override { return info; }
+
+        int openAttempts = 0;
+        NativePcmOutputReadyInfo info;
+    } backend;
+
+    echo::EqProcessor eqProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    PcmRingAudioSource source(2, 4096, 0, 0, 1.0f, eqProcessor, channelBalanceProcessor);
+    DopRingSource dopSource(2, 4096, 0, 0);
+    NativeDsdRingSource nativeDsdSource(2, 8192, 0, 0);
+    NativePlaybackPipeline pipeline(source, dopSource, nativeDsdSource, 2);
+    const auto options = parseOptions({ "echo-audio-host", "-exclusive", "-buffer", "2048" });
+    int openedBufferFrames = 0;
+    std::string error;
+
+    require(! openNativePcmOutputWithFallback(backend, pipeline, options, 44100, 2, 2048, openedBufferFrames, error),
+        "unsupported exclusive format must fail");
+    require(backend.openAttempts == 1, "unsupported exclusive format must not retry unrelated buffer sizes");
+    requireContains(error, "0x88890008", "unsupported exclusive format error must be preserved");
 }
 
 void testHostSharedBackendOptions()
@@ -756,6 +1060,681 @@ void testHostSharedBackendOptions()
     require(shouldIncludeSharedBackendType("Windows Audio", defaultOptions.sharedBackend), "auto backend must include Windows Audio");
 }
 
+void testNativeDitherMatchesTypescriptGoldenVector()
+{
+    echo::PcmDitherProcessor processor;
+    processor.configure(echo::PcmDitherMode::NoiseShaped5, 24, 2);
+    std::vector<float> samples { 0.1234567f, -0.1234567f, 0.01f, -0.01f, 0.5f, -0.5f, 0.0f, 0.0f };
+    processor.process(samples);
+    const std::vector<float> expected {
+        0.1234566122f, -0.1234567314f, 0.01000011060f, -0.009999872185f,
+        0.5000000596f, -0.5000000596f, 0.0f, 1.192093038e-7f,
+    };
+    require(samples.size() == expected.size(), "native dither golden vector size");
+    for (size_t index = 0; index < samples.size(); ++index)
+        require(std::abs(samples[index] - expected[index]) < 1.0e-8f, "native dither must match TypeScript golden vector");
+}
+
+void testNativeEchoSrcMatchesReferenceConvolution()
+{
+    echo::EchoSrcProcessor processor;
+    std::string error;
+    require(processor.configure(1, { echo::EchoSrcStageConfig { 2, { 0.25f, 0.5f, 0.25f } } }, error),
+        "native ECHO SRC configuration must succeed");
+    const std::vector<float> input { 1.0f, 0.0f };
+    const auto output = processor.process(input.data(), 2);
+    const std::vector<float> expected { 0.5f, 1.0f, 0.5f, 0.0f };
+    require(output.size() == expected.size(), "native ECHO SRC output length");
+    for (size_t index = 0; index < output.size(); ++index)
+        require(std::abs(output[index] - expected[index]) < 1.0e-7f, "native ECHO SRC convolution output");
+}
+
+void testNativeEchoSrcPolyphaseMatchesDenseFactorFourConvolution()
+{
+    echo::EchoSrcProcessor processor;
+    std::string error;
+    require(processor.configure(
+        2,
+        { echo::EchoSrcStageConfig {
+            4,
+            { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f },
+        } },
+        error),
+        "factor-four native ECHO SRC configuration must succeed");
+
+    const std::vector<float> input {
+        1.0f, -1.0f,
+        0.5f, 0.25f,
+        0.0f, 0.0f,
+    };
+    const auto output = processor.process(input.data(), 3);
+    const std::vector<float> expected {
+        0.4f, -0.4f,
+        0.8f, -0.8f,
+        1.2f, -1.2f,
+        1.6f, -1.6f,
+        2.2f, -1.9f,
+        2.8f, -2.2f,
+        3.4f, -2.5f,
+        0.8f, 0.4f,
+        1.0f, 0.5f,
+        1.2f, 0.6f,
+        1.4f, 0.7f,
+        0.0f, 0.0f,
+    };
+    require(output.size() == expected.size(), "factor-four polyphase output length");
+    require(processor.estimatedMacsPerInputFrame() == 14,
+        "factor-four sparse polyphase estimator must count each non-zero tap once per channel");
+    for (size_t index = 0; index < output.size(); ++index)
+        require(std::abs(output[index] - expected[index]) < 1.0e-6f,
+            "factor-four sparse polyphase output must equal dense zero-stuffed convolution");
+}
+
+void testNativeEchoSrcIsStableAcrossDecodeChunks()
+{
+    const std::vector<echo::EchoSrcStageConfig> stages {
+        echo::EchoSrcStageConfig { 2, { 0.25f, 0.5f, 0.25f } },
+        echo::EchoSrcStageConfig { 2, { 0.125f, 0.75f, 0.125f } },
+    };
+    const std::vector<float> input { 1.0f, -0.5f, 0.25f, 0.0f, -0.25f };
+    std::string error;
+    echo::EchoSrcProcessor contiguous;
+    echo::EchoSrcProcessor chunked;
+    require(contiguous.configure(1, stages, error), "contiguous native ECHO SRC configuration");
+    require(chunked.configure(1, stages, error), "chunked native ECHO SRC configuration");
+
+    const auto expected = contiguous.process(input.data(), static_cast<int>(input.size()));
+    const auto first = chunked.process(input.data(), 2);
+    const auto second = chunked.process(input.data() + 2, static_cast<int>(input.size() - 2));
+    std::vector<float> actual = first;
+    actual.insert(actual.end(), second.begin(), second.end());
+
+    require(actual.size() == expected.size(), "chunked native ECHO SRC output length");
+    for (size_t index = 0; index < actual.size(); ++index)
+        require(std::abs(actual[index] - expected[index]) < 1.0e-7f,
+            "native ECHO SRC must preserve FIR history across decoder chunks");
+}
+
+void testNativeEchoSrcFlushesTailExactlyOnce()
+{
+    NativeFirProcessor processor;
+    std::string error;
+    require(processor.configure(
+        1,
+        { echo::EchoSrcStageConfig { 2, { 0.25f, 0.5f, 0.25f } } },
+        false,
+        64,
+        error),
+        "native ECHO SRC tail test configuration must succeed");
+
+    const float impulse = 1.0f;
+    const auto body = processor.process(&impulse, 1);
+    const auto tail = processor.flush();
+    require(body.size() == 2, "native ECHO SRC body must keep the configured output factor");
+    require(tail.size() == 1, "native ECHO SRC flush must emit the remaining convolution support");
+    require(std::abs(body[0] - 0.5f) < 1.0e-7f
+        && std::abs(body[1] - 1.0f) < 1.0e-7f
+        && std::abs(tail[0] - 0.5f) < 1.0e-7f,
+        "native ECHO SRC flush must preserve the complete impulse response");
+    require(processor.flush().empty(), "native ECHO SRC flush must be idempotent at EOF");
+}
+
+void testNativePlaybackPipelineDrainsEchoSrcTailBeforeEof()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    PcmRingAudioSource pcm(1, 64, 0, 0, 1.0f, eqProcessor, channelBalanceProcessor);
+    DopRingSource dop(1, 64, 0, 0);
+    NativeDsdRingSource nativeDsd(1, 64, 0, 0);
+    NativePlaybackPipeline pipeline(pcm, dop, nativeDsd, 1);
+
+    NativePlaybackPipeline::ProcessingConfig config;
+    config.outputFormat = NativePlaybackPipeline::OutputFormat::Pcm;
+    config.echoSrc.sourceSampleRate = 48'000;
+    config.echoSrc.targetSampleRate = 96'000;
+    config.echoSrc.stages = {
+        echo::EchoSrcStageConfig { 2, { 0.25f, 0.5f, 0.25f } },
+    };
+    std::string error;
+    require(pipeline.configure(config, error), "native pipeline ECHO SRC configuration must succeed");
+    require(pipeline.seekPrerollFrames() == 1,
+        "native pipeline must expose the exact source-rate FIR history needed by seek");
+    const auto initialStatus = pipeline.processingStatus();
+    require(initialStatus.echoSrc.nominalLatencyFrames == 1,
+        "native pipeline must report the FIR nominal phase latency in output frames");
+    require(initialStatus.limiter.active
+            && std::abs(initialStatus.limiter.ceilingDb + 1.0f) <= nearTolerance,
+        "native pipeline must report active -1 dB true-peak protection for ECHO SRC");
+    pipeline.beginSession();
+
+    const float impulse = 1.0f;
+    require(pipeline.push(&impulse, 1), "native pipeline must accept ECHO SRC input");
+    pipeline.markInputEnded();
+    pipeline.markInputEnded();
+
+    require(pcm.isDspActive(), "active ECHO SRC must activate PCM output protection");
+    require(pipeline.hasInputEnded(), "native pipeline must publish EOF after committing the FIR tail");
+    require(pipeline.getReadyFrames() == 3, "native pipeline must queue body plus one exact FIR tail frame");
+    require(!pipeline.isDrained(), "native pipeline must not report drained while the FIR tail is buffered");
+
+    auto output = makeBuffer(1, 3);
+    require(pcm.renderPlanar(output, 0, 3) == 3, "native pipeline must render the complete FIR body and tail");
+    require(pipeline.isDrained(), "native pipeline must report drained only after the FIR tail is consumed");
+
+    const std::vector<float> seekPrime { 0.25f, 1.0f, 0.0f };
+    require(pipeline.replaceBufferedAudioWithPreroll(
+        seekPrime.data(),
+        static_cast<int>(seekPrime.size()),
+        1,
+        false) == 2,
+        "native seek replacement must prime FIR history without counting preroll as audible input");
+    require(pipeline.getReadyFrames() == 4,
+        "native seek replacement must discard preroll output while retaining target PCM geometry");
+}
+
+int countBits(uint8_t value)
+{
+    int count = 0;
+    for (int bit = 0; bit < 8; ++bit)
+        count += (value & static_cast<uint8_t>(1u << bit)) != 0 ? 1 : 0;
+    return count;
+}
+
+uint8_t reverseBitsForTest(uint8_t value)
+{
+    value = static_cast<uint8_t>(((value & 0xf0u) >> 4u) | ((value & 0x0fu) << 4u));
+    value = static_cast<uint8_t>(((value & 0xccu) >> 2u) | ((value & 0x33u) << 2u));
+    return static_cast<uint8_t>(((value & 0xaau) >> 1u) | ((value & 0x55u) << 1u));
+}
+
+double nativeDsdOneDensity(
+    const std::vector<uint8_t>& output,
+    int startTransportFrame,
+    int transportFrames,
+    int channels = 1,
+    int channel = 0)
+{
+    int ones = 0;
+    int bits = 0;
+    const int endFrame = std::min(
+        startTransportFrame + transportFrames,
+        static_cast<int>(output.size() / static_cast<size_t>(std::max(1, channels) * 2)));
+    for (int frame = std::max(0, startTransportFrame); frame < endFrame; ++frame)
+    {
+        const size_t base = static_cast<size_t>(frame * channels * 2);
+        ones += countBits(output[base + static_cast<size_t>(channel)]);
+        ones += countBits(output[base + static_cast<size_t>(channels + channel)]);
+        bits += 16;
+    }
+    return bits > 0 ? static_cast<double>(ones) / static_cast<double>(bits) : 0.0;
+}
+
+double sdmProfileHeadroomGain(echo::SdmQualityProfile profile)
+{
+    switch (profile)
+    {
+        case echo::SdmQualityProfile::Hifi: return std::pow(10.0, -12.0 / 20.0);
+        case echo::SdmQualityProfile::Reference: return std::pow(10.0, -14.0 / 20.0);
+        case echo::SdmQualityProfile::Insane: return std::pow(10.0, -16.0 / 20.0);
+        case echo::SdmQualityProfile::Safe:
+        default: return std::pow(10.0, -10.0 / 20.0);
+    }
+}
+
+double measureSdmInBandResidualDb(echo::SdmQualityProfile profile, int transportSampleRate)
+{
+    const int bitSampleRate = transportSampleRate * 16;
+    const int inputFrames = transportSampleRate / 8;
+    constexpr int decimation = 64;
+    constexpr int tapCount = 511;
+    constexpr double pi = 3.14159265358979323846;
+    constexpr double signalFrequency = 1'000.0;
+    constexpr double signalAmplitude = 0.1;
+    constexpr double cutoffHz = 20'000.0;
+
+    std::vector<float> input(static_cast<size_t>(inputFrames));
+    for (int frame = 0; frame < inputFrames; ++frame)
+        input[static_cast<size_t>(frame)] = static_cast<float>(
+            std::sin(2.0 * pi * signalFrequency * static_cast<double>(frame) / transportSampleRate)
+            * signalAmplitude);
+
+    echo::SdmProcessor processor;
+    processor.configure(1, profile, transportSampleRate);
+    const auto output = processor.processNativeDsd(input.data(), inputFrames);
+
+    std::vector<double> residual(static_cast<size_t>(inputFrames * 16), 0.0);
+    const double headroomGain = sdmProfileHeadroomGain(profile);
+    const int transitionFrames = transportSampleRate / 100;
+    double previousSample = 0.0;
+    size_t bitIndex = 0;
+    for (int frame = 0; frame < inputFrames; ++frame)
+    {
+        const double sample = static_cast<double>(input[static_cast<size_t>(frame)]);
+        const double transitionGain = std::min(
+            1.0,
+            static_cast<double>(frame + 1) / static_cast<double>(transitionFrames));
+        for (int bit = 0; bit < 16; ++bit)
+        {
+            const double ideal =
+                (previousSample + (sample - previousSample) * (static_cast<double>(bit + 1) / 16.0))
+                * headroomGain
+                * transitionGain;
+            const uint8_t byte = output[static_cast<size_t>(frame * 2 + bit / 8)];
+            const double actual = (byte & static_cast<uint8_t>(1u << (bit % 8))) != 0 ? 1.0 : -1.0;
+            residual[bitIndex++] = actual - ideal;
+        }
+        previousSample = sample;
+    }
+
+    std::vector<double> taps(static_cast<size_t>(tapCount), 0.0);
+    const int center = (tapCount - 1) / 2;
+    const double normalizedCutoff = cutoffHz / bitSampleRate;
+    double tapSum = 0.0;
+    for (int tap = 0; tap < tapCount; ++tap)
+    {
+        const int offset = tap - center;
+        const double sinc = offset == 0
+            ? 2.0 * normalizedCutoff
+            : std::sin(2.0 * pi * normalizedCutoff * offset) / (pi * offset);
+        const double window = 0.5 - 0.5 * std::cos(2.0 * pi * tap / (tapCount - 1));
+        taps[static_cast<size_t>(tap)] = sinc * window;
+        tapSum += taps[static_cast<size_t>(tap)];
+    }
+    for (auto& tap : taps)
+        tap /= tapSum;
+
+    const int firstBit = bitSampleRate / 50;
+    const int lastBit = bitSampleRate / 10;
+    double sumSquares = 0.0;
+    int sampleCount = 0;
+    for (int outputBit = firstBit; outputBit < lastBit; outputBit += decimation)
+    {
+        if (outputBit - center < 0 || outputBit + center >= static_cast<int>(residual.size()))
+            continue;
+        double filtered = 0.0;
+        for (int tap = 0; tap < tapCount; ++tap)
+            filtered += residual[static_cast<size_t>(outputBit + tap - center)] * taps[static_cast<size_t>(tap)];
+        sumSquares += filtered * filtered;
+        ++sampleCount;
+    }
+    const double rms = sampleCount > 0 ? std::sqrt(sumSquares / sampleCount) : 1.0;
+    return 20.0 * std::log10(std::max(rms, 1.0e-15));
+}
+
+void testNativeSdmProducesDeterministicProtectedDop()
+{
+    echo::SdmProcessor first;
+    echo::SdmProcessor second;
+    echo::SdmProcessor native;
+    first.configure(2, echo::SdmQualityProfile::Safe);
+    second.configure(2, echo::SdmQualityProfile::Safe);
+    native.configure(2, echo::SdmQualityProfile::Safe);
+    const std::vector<float> samples { 0.1234567f, -0.1234567f, 0.01f, -0.01f, 0.5f, -0.5f, 0.0f, 0.0f };
+    const auto output = first.processDop(samples.data(), 4);
+    const auto nativeOutput = native.processNativeDsd(samples.data(), 4);
+    require(output == second.processDop(samples.data(), 4),
+        "native SDM must remain deterministic across equivalent sessions");
+    require(output.size() == 8, "native SDM must emit one protected DoP word per channel and frame");
+    for (size_t frame = 0; frame < 4; ++frame)
+    {
+        const uint32_t expectedMarker = (frame & 1u) == 0u ? 0x05u : 0xfau;
+        for (size_t channel = 0; channel < 2; ++channel)
+        {
+            require((output[frame * 2 + channel] >> 16u) == expectedMarker,
+                "native SDM must preserve alternating DoP markers");
+            const size_t nativeBase = frame * 4;
+            const uint8_t older = nativeOutput[nativeBase + channel];
+            const uint8_t newer = nativeOutput[nativeBase + 2 + channel];
+            const uint32_t expectedDsd =
+                static_cast<uint32_t>(reverseBitsForTest(newer))
+                | (static_cast<uint32_t>(reverseBitsForTest(older)) << 8u);
+            require((output[frame * 2 + channel] & 0xffffu) == expectedDsd,
+                "native SDM DoP output must place chronological t0 at bit 15");
+        }
+    }
+}
+
+void testNativeSdmProfilesShapeNoiseOutOfBand()
+{
+    struct SpectrumGuard
+    {
+        echo::SdmQualityProfile profile;
+        double dsd64MaximumResidualDb;
+        double dsd128MaximumResidualDb;
+    };
+    const std::vector<SpectrumGuard> profiles {
+        { echo::SdmQualityProfile::Safe, -78.0, -96.0 },
+        { echo::SdmQualityProfile::Hifi, -98.0, -122.0 },
+        { echo::SdmQualityProfile::Reference, -104.0, -125.0 },
+        { echo::SdmQualityProfile::Insane, -108.0, -126.0 },
+    };
+    for (const auto [transportSampleRate, rateName] : {
+        std::pair { 176'400, "DSD64" },
+        std::pair { 352'800, "DSD128" },
+    })
+    {
+        std::vector<double> residuals;
+        for (const auto& guard : profiles)
+        {
+            const double residualDb = measureSdmInBandResidualDb(guard.profile, transportSampleRate);
+            residuals.push_back(residualDb);
+            const double maximumResidualDb = transportSampleRate == 176'400
+                ? guard.dsd64MaximumResidualDb
+                : guard.dsd128MaximumResidualDb;
+            require(
+                residualDb < maximumResidualDb,
+                std::string("SDM profile must meet its ") + rateName
+                    + " in-band residual guard, measured " + std::to_string(residualDb));
+        }
+        const double minimumProfileImprovementDb = transportSampleRate == 176'400 ? 3.0 : 0.25;
+        for (size_t profile = 1; profile < residuals.size(); ++profile)
+            require(residuals[profile] < residuals[profile - 1] - minimumProfileImprovementDb,
+                std::string("each higher SDM profile must improve ") + rateName
+                    + " in-band residual");
+    }
+}
+
+void testNativeSdmHighOrderProfilesRemainBounded()
+{
+    constexpr int transportSampleRate = 176'400;
+    constexpr int frames = transportSampleRate / 4;
+    constexpr double pi = 3.14159265358979323846;
+    uint32_t randomState = 0x12345678u;
+
+    std::vector<float> input(static_cast<size_t>(frames));
+    for (int frame = 0; frame < frames; ++frame)
+    {
+        const int section = (frame / 2'048) % 4;
+        if (section == 0)
+            input[static_cast<size_t>(frame)] = 1.0f;
+        else if (section == 1)
+            input[static_cast<size_t>(frame)] = -1.0f;
+        else if (section == 2)
+            input[static_cast<size_t>(frame)] = static_cast<float>(
+                0.57 * std::sin(2.0 * pi * 997.0 * frame / transportSampleRate)
+                + 0.43 * std::sin(2.0 * pi * 19'001.0 * frame / transportSampleRate));
+        else
+        {
+            randomState = randomState * 1664525u + 1013904223u;
+            input[static_cast<size_t>(frame)] =
+                static_cast<float>(static_cast<double>(randomState) / 2147483648.0 - 1.0);
+        }
+    }
+
+    const std::vector<std::pair<echo::SdmQualityProfile, int>> profiles {
+        { echo::SdmQualityProfile::Hifi, 6 },
+        { echo::SdmQualityProfile::Reference, 7 },
+        { echo::SdmQualityProfile::Insane, 8 },
+    };
+    for (const auto& [profile, expectedOrder] : profiles)
+    {
+        echo::SdmProcessor processor;
+        processor.configure(1, profile, transportSampleRate);
+        for (int offset = 0; offset < frames; offset += 2'048)
+        {
+            const int chunkFrames = std::min(2'048, frames - offset);
+            const auto output = processor.processNativeDsd(input.data() + offset, chunkFrames);
+            require(
+                output.size() == static_cast<size_t>(chunkFrames * 2),
+                "high-order SDM stress block must produce complete native DSD output");
+        }
+        require(processor.modulatorOrder() == expectedOrder, "SDM profile must use its guarded NTF order");
+        require(processor.stabilityRecoveryCount() == 0,
+            "high-order SDM must not trigger stability recovery under full-scale DC, multitone, noise, or steps");
+        require(processor.peakFeedbackState() < 2.0,
+            "high-order SDM feedback state must retain at least 6 dB margin to the emergency guard");
+    }
+}
+
+void testNativeSdmHighOrderProfilesAreChunkInvariant()
+{
+    constexpr int transportSampleRate = 176'400;
+    constexpr int frames = 4'097;
+    constexpr double pi = 3.14159265358979323846;
+    std::vector<float> input(static_cast<size_t>(frames));
+    for (int frame = 0; frame < frames; ++frame)
+        input[static_cast<size_t>(frame)] = static_cast<float>(
+            0.72 * std::sin(2.0 * pi * 997.0 * frame / transportSampleRate)
+            + 0.18 * std::sin(2.0 * pi * 17'003.0 * frame / transportSampleRate));
+
+    for (const auto profile : {
+        echo::SdmQualityProfile::Hifi,
+        echo::SdmQualityProfile::Reference,
+        echo::SdmQualityProfile::Insane,
+    })
+    {
+        echo::SdmProcessor contiguous;
+        echo::SdmProcessor chunked;
+        contiguous.configure(1, profile, transportSampleRate);
+        chunked.configure(1, profile, transportSampleRate);
+        const auto expected = contiguous.processNativeDsd(input.data(), frames);
+
+        std::vector<uint8_t> actual;
+        for (int offset = 0; offset < frames;)
+        {
+            const int chunkFrames = std::min(137 + (offset % 251), frames - offset);
+            auto block = chunked.processNativeDsd(input.data() + offset, chunkFrames);
+            actual.insert(actual.end(), block.begin(), block.end());
+            offset += chunkFrames;
+        }
+        require(actual == expected, "high-order SDM output must be bit-identical across decoder chunking");
+        require(chunked.stabilityRecoveryCount() == 0, "chunked high-order SDM must not require recovery");
+    }
+}
+
+void testNativeSdmAppliesHeadroomAndSmoothsTransitions()
+{
+    constexpr int transportSampleRate = 176'400;
+    constexpr int transitionFrames = transportSampleRate / 100;
+    echo::SdmProcessor processor;
+    processor.configure(1, echo::SdmQualityProfile::Safe, transportSampleRate);
+    std::vector<float> fullScale(static_cast<size_t>(transitionFrames * 3), 1.0f);
+    const auto started = processor.processNativeDsd(fullScale.data(), static_cast<int>(fullScale.size()));
+
+    const double earlyDensity = nativeDsdOneDensity(started, 0, transitionFrames / 10);
+    const double settledDensity = nativeDsdOneDensity(started, transitionFrames * 2, transitionFrames);
+    require(earlyDensity < 0.56, "SDM startup must ramp from silence instead of stepping to full signal");
+    require(
+        settledDensity > 0.64 && settledDensity < 0.68,
+        "SDM safe profile must apply its 10 dB headroom before modulation");
+
+    processor.setTargetGain(0.0);
+    std::vector<float> volumeChange(static_cast<size_t>(transitionFrames), 1.0f);
+    const auto faded = processor.processNativeDsd(volumeChange.data(), transitionFrames);
+    const double fadeStartDensity = nativeDsdOneDensity(faded, 0, transitionFrames / 4);
+    const double fadeEndDensity = nativeDsdOneDensity(
+        faded,
+        transitionFrames - transitionFrames / 4,
+        transitionFrames / 4);
+    require(
+        fadeStartDensity > fadeEndDensity + 0.1,
+        "SDM volume changes must use a time-domain gain ramp");
+    require(fadeEndDensity < 0.55, "SDM gain ramp must settle near shaped silence");
+
+    echo::SdmProcessor mutedProcessor;
+    mutedProcessor.configure(1, echo::SdmQualityProfile::Safe, transportSampleRate);
+    mutedProcessor.setTargetGain(0.0);
+    mutedProcessor.reset();
+    const auto muted = mutedProcessor.processNativeDsd(fullScale.data(), transitionFrames);
+    const double mutedDensity = nativeDsdOneDensity(muted, 0, transitionFrames);
+    require(
+        mutedDensity > 0.49 && mutedDensity < 0.51,
+        "an SDM session started muted must not produce a gain-ramp hump");
+}
+
+void testNativeSdmIdleLockPreservesWeakSignals()
+{
+    constexpr int transportSampleRate = 176'400;
+    constexpr int signalFrames = transportSampleRate / 20;
+    constexpr double pi = 3.14159265358979323846;
+    echo::SdmProcessor processor;
+    processor.configure(1, echo::SdmQualityProfile::Reference, transportSampleRate);
+    std::vector<float> weakSignal(static_cast<size_t>(signalFrames));
+    for (int frame = 0; frame < signalFrames; ++frame)
+        weakSignal[static_cast<size_t>(frame)] = static_cast<float>(
+            std::sin(2.0 * pi * 1'000.0 * static_cast<double>(frame) / transportSampleRate) * 0.001);
+    const auto signalOutput = processor.processNativeDsd(weakSignal.data(), signalFrames);
+
+    int longestIdleRun = 0;
+    int currentIdleRun = 0;
+    for (int frame = transportSampleRate / 50; frame < signalFrames; ++frame)
+    {
+        const size_t base = static_cast<size_t>(frame * 2);
+        if (signalOutput[base] == 0x69u && signalOutput[base + 1] == 0x69u)
+        {
+            currentIdleRun += 1;
+            longestIdleRun = std::max(longestIdleRun, currentIdleRun);
+        }
+        else
+        {
+            currentIdleRun = 0;
+        }
+    }
+    require(longestIdleRun < 64, "SDM idle lock must not gate sustained -60 dBFS content");
+
+    processor.reset();
+    std::vector<float> digitalSilence(static_cast<size_t>(transportSampleRate / 25), 0.0f);
+    const auto silenceOutput = processor.processNativeDsd(
+        digitalSilence.data(),
+        static_cast<int>(digitalSilence.size()));
+    for (int frame = static_cast<int>(digitalSilence.size()) - 32;
+         frame < static_cast<int>(digitalSilence.size());
+         ++frame)
+    {
+        const size_t base = static_cast<size_t>(frame * 2);
+        require(
+            silenceOutput[base] == 0x69u && silenceOutput[base + 1] == 0x69u,
+            "sustained digital silence must settle to the standard DSD idle pattern");
+    }
+}
+
+void testNativeProcessingConfigurationFailsClosed()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    PcmRingAudioSource pcm(2, 4096, 0, 0, 1.0f, eqProcessor, channelBalanceProcessor);
+    DopRingSource dop(2, 4096, 0, 0);
+    NativeDsdRingSource nativeDsd(2, 8192, 0, 0);
+    NativePlaybackPipeline pipeline(pcm, dop, nativeDsd, 2);
+    Options options;
+    options.exclusive = true;
+    options.sampleRate = 96'000;
+    std::string error;
+
+    const echo_audio_host::Json validEcho = {
+        {"processing", {
+            {"outputFormat", "pcm"},
+            {"echoSrc", {
+                {"sourceSampleRate", 48'000},
+                {"targetSampleRate", 96'000},
+                {"stages", echo_audio_host::Json::array({
+                    {{"upsampleFactor", 2}, {"taps", {0.25, 0.5, 0.25}}},
+                })},
+            }},
+            {"dither", {{"mode", "ns-5"}, {"bitDepth", 24}}},
+        }},
+    };
+    require(configureNativeProcessing(validEcho, options, pipeline, error),
+        "valid native ECHO SRC and dither configuration must be accepted");
+    require(pipeline.decoderSampleRate(options.sampleRate) == 48'000,
+        "native ECHO SRC must make the decoder preserve source rate");
+
+    auto invalidEcho = validEcho;
+    invalidEcho["processing"]["echoSrc"]["targetSampleRate"] = 192'000;
+    require(! configureNativeProcessing(invalidEcho, options, pipeline, error),
+        "mismatched native ECHO SRC target must fail closed");
+    requireContains(error, "sample_rate_mismatch", "native ECHO SRC mismatch error");
+    require(pipeline.decoderSampleRate(options.sampleRate) == 48'000,
+        "failed native DSP reconfiguration must preserve the previous processor state");
+
+    const echo_audio_host::Json invalidSdm = {
+        {"processing", {
+            {"outputFormat", "dop24le"},
+            {"sdm", {{"qualityProfile", "unknown"}}},
+        }},
+    };
+    require(! configureNativeProcessing(invalidSdm, options, pipeline, error),
+        "unknown native SDM profile must fail closed");
+    requireContains(error, "invalid_quality_profile", "native SDM profile error");
+    require(pipeline.outputFormat() == NativePlaybackPipeline::OutputFormat::Pcm,
+        "failed native SDM reconfiguration must preserve PCM output routing");
+}
+
+void testRuntimeDeviceConfigurationIsAuthoritative()
+{
+    const auto current = parseOptions({ "echo-audio-host", "--defer-device-open" });
+    Options configured;
+    std::string error;
+    const echo_audio_host::Json sharedParams = {
+        {"outputMode", "shared"},
+        {"deviceId", "shared:3"},
+        {"deviceName", "USB DAC"},
+        {"deviceIndex", 3},
+        {"sampleRate", 96000},
+        {"channels", 2},
+        {"bufferSize", 0},
+        {"latencyProfile", "stable"},
+        {"sharedBackend", "windows"},
+    };
+
+    require(configureRuntimeOutputOptions(sharedParams, current, configured, error),
+        "runtime shared device configuration must be accepted");
+    require(! configured.exclusive && ! configured.asio, "runtime shared mode must clear exclusive flags");
+    require(configured.deviceId == "shared:3" && configured.deviceName == "USB DAC" && configured.deviceIndex == 3,
+        "runtime shared configuration must preserve the selected device identity");
+    require(configured.sampleRate == 96000 && configured.channels == 2,
+        "runtime shared configuration must preserve the requested PCM format");
+    require(configured.bufferSize == 4096, "stable latency profile must choose the stable native buffer");
+    require(configured.sharedBackend == "windows", "runtime shared backend must be authoritative");
+
+    Options repeated;
+    require(configureRuntimeOutputOptions(sharedParams, configured, repeated, error),
+        "repeated runtime configuration must remain accepted");
+    require(hasSameRuntimeOutputOptions(configured, repeated),
+        "repeated runtime configuration must be detected as a no-op");
+
+    Options invalid;
+    require(! configureRuntimeOutputOptions(
+        echo_audio_host::Json{{"outputMode", "invalid-mode"}}, configured, invalid, error),
+        "unsupported runtime output mode must fail closed");
+    requireContains(error, "unsupported outputMode", "unsupported runtime mode error");
+
+#ifdef _WIN32
+    Options exclusive;
+    require(configureRuntimeOutputOptions(
+        echo_audio_host::Json{
+            {"outputMode", "exclusive"},
+            {"deviceName", "Exclusive DAC"},
+            {"sampleRate", 192000},
+            {"channels", 2},
+            {"bufferSize", 1024},
+        },
+        configured,
+        exclusive,
+        error),
+        "runtime exclusive device configuration must be accepted on Windows");
+    require(exclusive.exclusive && ! exclusive.asio && exclusive.sampleRate == 192000,
+        "runtime exclusive configuration must select the WASAPI exclusive backend and rate");
+
+    Options asio;
+    require(configureRuntimeOutputOptions(
+        echo_audio_host::Json{
+            {"outputMode", "asio"},
+            {"deviceName", "ASIO DAC"},
+            {"deviceIndex", 1},
+            {"sampleRate", 96000},
+            {"channels", 2},
+            {"asioOutputChannelStart", 2},
+        },
+        exclusive,
+        asio,
+        error),
+        "runtime ASIO device configuration must be accepted on Windows");
+    require(asio.asio && ! asio.exclusive && asio.asioOutputChannelStart == 2,
+        "runtime ASIO configuration must preserve the selected output channel pair");
+#endif
+}
+
 void testHostBackendNames()
 {
     const DeviceDescriptor shared { 0, "miniaudio-shared", "Default Output", 48000, 48000, true, false };
@@ -781,7 +1760,18 @@ void testHostBackendNames()
 void testSpecializedOutputsSkipMiniaudioSharedOutput()
 {
     const auto shared = parseOptions({ "echo-audio-host" });
-    require(shouldTryMiniaudioSharedOutput(shared), "default shared output must try miniaudio shared PCM");
+#ifdef _WIN32
+    require(! shouldTryMiniaudioSharedOutput(shared), "default Windows shared output must use the stable native WASAPI backend");
+    require(selectNativePcmOutputBackend(shared) == NativePcmOutputBackendKind::WasapiShared,
+        "default Windows shared output must dispatch to native WASAPI shared");
+#else
+    require(shouldTryMiniaudioSharedOutput(shared), "non-Windows shared output may use miniaudio when no platform backend is selected");
+#endif
+
+    const auto miniaudioShared = parseOptions({ "echo-audio-host", "-shared-backend", "miniaudio" });
+    require(shouldTryMiniaudioSharedOutput(miniaudioShared), "miniaudio must require an explicit backend selection on Windows");
+    require(selectNativePcmOutputBackend(miniaudioShared) == NativePcmOutputBackendKind::Miniaudio,
+        "explicit miniaudio selection must dispatch to the experimental backend");
 
     const auto exclusive = parseOptions({ "echo-audio-host", "-exclusive" });
     require(! shouldTryMiniaudioSharedOutput(exclusive), "WASAPI exclusive must not route through miniaudio shared output");
@@ -858,6 +1848,29 @@ void testHostPrebufferDefaultsRemainCompatible()
     require(getStartupPrebufferFrames(exclusive, 48000) == 960, "exclusive default prebuffer must remain compatible");
     require(getStartupPrebufferFrames(exclusive, 192000) == 34560, "high-rate exclusive default prebuffer must reduce startup underruns");
     require(getStartupPrebufferTimeoutMs(exclusive) == 300, "default prebuffer timeout must remain compatible");
+}
+
+void testHighRateNativeDsdBuffersUseByteFrameScale()
+{
+    const auto nativeDsd = parseOptions({
+        "echo-audio-host",
+        "-asio",
+        "-dop-output",
+        "-asio-native-dsd-output",
+    });
+
+    require(
+        getNativeDsdFifoCapacityByteFrames(nativeDsd, 22'579'200) == 564'480,
+        "DSD512 FIFO must allocate 200 ms in byte frames");
+    require(
+        getNativeDsdStartupPrebufferByteFrames(nativeDsd, 22'579'200) == 56'448,
+        "DSD512 startup prebuffer must hold 20 ms in byte frames");
+    require(
+        getNativeDsdFifoCapacityByteFrames(nativeDsd, 45'158'400) == 1'128'960,
+        "DSD1024 FIFO must allocate 200 ms in byte frames");
+    require(
+        getNativeDsdStartupPrebufferByteFrames(nativeDsd, 45'158'400) == 112'896,
+        "DSD1024 startup prebuffer must hold 20 ms in byte frames");
 }
 
 void testExplicitZeroPrebufferDisablesWait()
@@ -971,10 +1984,34 @@ void testPcmSourcePlaybackRateConsumesSourceFramesAtRate()
     source.beginSession();
     require(source.push(input.data(), 32), "playback-rate source test must accept PCM");
     source.getRateProcessor()->setRate(2.0f);
-    source.renderPlanar(output, 0, output.getNumSamples());
+    require(source.renderPlanar(output, 0, output.getNumSamples()) == 8,
+        "2x playback must report bounded output frames rather than source frames consumed");
 
     require(source.getFramesPlayed() == 16, "2x playback must consume source frames at double output rate");
     require(source.getReadyFrames() == 16, "2x playback must drain double-rate source frames from FIFO");
+}
+
+void testNativeRenderPlaybackRateKeepsDitherInsideOutputBuffer()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    PcmRingAudioSource source(1, 64, 0, 0, 1.0f, eqProcessor, channelBalanceProcessor);
+    source.prepareForNativeRender(8, 48'000.0);
+    source.configureDither(echo::PcmDitherMode::Tpdf, 24);
+    source.beginSession();
+    source.getRateProcessor()->setRate(2.0f);
+
+    const std::vector<float> input(32, 0.25f);
+    require(source.push(input.data(), static_cast<int>(input.size())),
+        "playback-rate dither guard test must accept PCM");
+
+    constexpr float guardValue = 1234.5f;
+    std::vector<float> outputWithGuard(12, guardValue);
+    require(source.renderInterleaved(outputWithGuard.data(), 8, 1) == 8,
+        "native playback-rate render must report no more than output capacity");
+    require(std::all_of(outputWithGuard.begin() + 8, outputWithGuard.end(), [](float sample) {
+        return sample == guardValue;
+    }), "native playback-rate dither must not write beyond the output buffer");
 }
 
 void testPcmSourceReplaceBufferedAudioDropsStaleFrames()
@@ -1104,6 +2141,161 @@ void testLibavPcmStreamDecoderReadsBoundedChunks()
 
     require(totalFrames == frames, "streaming decoder emits every generated frame");
     require(chunks > 1, "streaming decoder does not return the whole track as one resident chunk");
+}
+
+void testLibavPcmStreamDecoderBoundsDamagedMediaRecovery()
+{
+    echo::LibavDecodeRecoveryBudget budget;
+    require(
+        ! budget.tryConsume(AVERROR(EIO), echo::LibavDecodeErrorStage::packet),
+        "streaming decoder does not hide I/O errors");
+    require(
+        ! budget.tryConsume(AVERROR(ENOMEM), echo::LibavDecodeErrorStage::packet),
+        "streaming decoder does not hide allocation errors");
+    require(
+        ! budget.tryConsume(AVERROR_EOF, echo::LibavDecodeErrorStage::packet),
+        "streaming decoder keeps EOF outside error recovery");
+
+    for (int count = 1; count <= 5; ++count)
+        require(
+            budget.tryConsume(AVERROR_INVALIDDATA, echo::LibavDecodeErrorStage::packet, 24'000, 1'024),
+            "streaming decoder tolerates the five-packet damage burst seen in a playable MP3");
+    require(
+        budget.regionErrors() == 5
+            && budget.skippedDurationUs() == 120'000
+            && budget.skippedBytes() == 5'120,
+        "streaming decoder tracks the damaged media region");
+    budget.resetRegion();
+    require(
+        budget.regionErrors() == 0 && budget.totalErrors() == 5,
+        "a decoded PCM frame resets the region without erasing lifetime diagnostics");
+
+    for (int count = 1; count <= echo::maxRecoverableLibavFrameErrors; ++count)
+        require(
+            budget.tryConsume(AVERROR_INVALIDDATA, echo::LibavDecodeErrorStage::frame),
+            "streaming decoder permits a bounded run of invalid frames");
+    require(
+        ! budget.tryConsume(AVERROR_INVALIDDATA, echo::LibavDecodeErrorStage::frame),
+        "streaming decoder fails closed after repeated invalid frames");
+
+    budget.resetRegion();
+    for (int count = 1; count <= echo::maxRecoverableLibavDemuxErrors; ++count)
+        require(
+            budget.tryConsume(AVERROR_INVALIDDATA, echo::LibavDecodeErrorStage::demux),
+            "streaming decoder permits a bounded demux resynchronization attempt");
+    require(
+        ! budget.tryConsume(AVERROR_INVALIDDATA, echo::LibavDecodeErrorStage::demux),
+        "streaming decoder stops a demuxer that cannot make progress");
+
+    budget.resetRegion();
+    require(
+        budget.tryConsume(
+            AVERROR_INVALIDDATA,
+            echo::LibavDecodeErrorStage::packet,
+            echo::maxRecoverableLibavDamageDurationUs,
+            0),
+        "streaming decoder accepts damage at the duration budget boundary");
+    require(
+        ! budget.tryConsume(AVERROR_INVALIDDATA, echo::LibavDecodeErrorStage::packet, 1, 0),
+        "streaming decoder rejects damage beyond the duration budget");
+
+    budget.resetRegion();
+    require(
+        budget.tryConsume(
+            AVERROR_INVALIDDATA,
+            echo::LibavDecodeErrorStage::packet,
+            0,
+            echo::maxRecoverableLibavDamageBytes),
+        "streaming decoder accepts damage at the byte budget boundary");
+    require(
+        ! budget.tryConsume(AVERROR_INVALIDDATA, echo::LibavDecodeErrorStage::packet, 0, 1),
+        "streaming decoder rejects damage beyond the byte budget");
+
+    budget.resetRegion();
+    for (int count = 1; count <= echo::maxRecoverableLibavRegionErrors; ++count)
+        require(
+            budget.tryConsume(AVERROR_INVALIDDATA, echo::LibavDecodeErrorStage::packet),
+            "streaming decoder permits bounded recovery when packet timing is unavailable");
+    require(
+        ! budget.tryConsume(AVERROR_INVALIDDATA, echo::LibavDecodeErrorStage::packet),
+        "streaming decoder stops recovery when no valid PCM frame appears");
+
+    require(echo::shouldLogRecoverableLibavError(1), "recovery logs the first damaged packet");
+    require(echo::shouldLogRecoverableLibavError(4), "recovery logs power-of-two progress");
+    require(! echo::shouldLogRecoverableLibavError(5), "recovery suppresses repetitive log noise");
+}
+
+void testLibavPcmStreamDecoderMapsToNativeOutputFormat()
+{
+    const int sourceSampleRate = 44100;
+    const int targetSampleRate = 48000;
+    const int sourceFrames = 4410;
+    const auto path = writeStreamingDecoderWavFixture(sourceSampleRate, 1, sourceFrames);
+    ScopedFileRemoval cleanup(path);
+
+    echo::LibavPcmStreamDecoder decoder;
+    decoder.open(path, targetSampleRate, 2);
+    require(decoder.sampleRate() == targetSampleRate,
+        "streaming decoder must resample into the native device rate");
+    require(decoder.channels() == 2,
+        "streaming decoder must map mono input into the native stereo layout");
+
+    int totalFrames = 0;
+    while (! decoder.eof())
+    {
+        auto chunk = decoder.readFrames(512);
+        if (chunk.frames == 0)
+            break;
+        require(chunk.samples.size() == static_cast<size_t>(chunk.frames * 2),
+            "mapped streaming decoder output must remain stereo interleaved f32");
+        totalFrames += chunk.frames;
+    }
+    require(totalFrames > sourceFrames,
+        "44.1 kHz source must expand when mapped into a 48 kHz native output stream");
+}
+
+void requireDsdContainerDecodesToPcm(const std::string& path, const std::string& container)
+{
+    const auto probe = echo::LibavDecoder::probe(path);
+    require(probe.channels == 2, container + " probe reports stereo channels");
+    require(probe.codec.find("dsd") != std::string::npos, container + " probe resolves a DSD codec");
+
+    constexpr int targetSampleRate = 176400;
+    echo::LibavPcmStreamDecoder decoder;
+    decoder.open(path, targetSampleRate, 2);
+    require(decoder.sampleRate() == targetSampleRate, container + " decoder maps into the requested PCM sample rate");
+    require(decoder.channels() == 2, container + " decoder keeps stereo PCM output");
+
+    int totalFrames = 0;
+    float peakMagnitude = 0.0f;
+    while (! decoder.eof())
+    {
+        auto chunk = decoder.readFrames(512);
+        if (chunk.frames == 0)
+            break;
+        require(chunk.samples.size() == static_cast<size_t>(chunk.frames * 2),
+            container + " decoder output is stereo interleaved f32");
+        require(std::all_of(chunk.samples.begin(), chunk.samples.end(), [](float sample) {
+            return std::isfinite(sample);
+        }), container + " decoder output remains finite");
+        for (const float sample : chunk.samples)
+            peakMagnitude = std::max(peakMagnitude, std::abs(sample));
+        totalFrames += chunk.frames;
+    }
+
+    require(totalFrames > 0, container + " decoder emits PCM frames");
+    require(peakMagnitude <= 1.0f, container + " decoder output stays within normalized PCM range");
+}
+
+void testLibavPcmStreamDecoderDecodesDsdContainersToPcm()
+{
+    const auto dsfPath = writeStreamingDecoderDsfFixture();
+    ScopedFileRemoval dsfCleanup(dsfPath);
+    requireDsdContainerDecodesToPcm(dsfPath, "DSF");
+
+    const auto dffPath = writeStreamingDecoderDffFixture();
+    ScopedFileRemoval dffCleanup(dffPath);
+    requireDsdContainerDecodesToPcm(dffPath, "DFF");
 }
 
 void testLibavPcmStreamDecoderSeekCancelAndInvalidFile()
@@ -1236,6 +2428,111 @@ void testNativeAutomixDeckMixesNextBeforeCurrentEnds()
     require(source.isDrained(), "native automix must drain only after next deck ends");
 }
 
+void testNativeAutomixAppliesUserDspOnceAfterDeckSum()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ConvolutionProcessor convolutionProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    echo::DspHeadroomProcessor headroomProcessor;
+    echo::ReplayGainProcessor replayGainProcessor;
+    echo::CompressorProcessor compressorProcessor;
+    echo::SpatialDspProcessor spatialDspProcessor;
+    echo::PlaybackRateProcessor playbackRateProcessor;
+    echo::LevelMeterProcessor meterProcessor;
+    eqProcessor.setEnabled(true);
+    headroomProcessor.setHeadroomDb(-6.0f);
+
+    PcmRingAudioSource source(
+        2,
+        256,
+        0,
+        0,
+        1.0f,
+        eqProcessor,
+        convolutionProcessor,
+        channelBalanceProcessor,
+        headroomProcessor,
+        replayGainProcessor,
+        compressorProcessor,
+        spatialDspProcessor,
+        playbackRateProcessor,
+        meterProcessor);
+    source.prepareForNativeRender(64, 1000.0);
+    source.beginSession();
+    require(source.prepareAutomixFrames(16, 32, 0.0, 0.0),
+        "DSP routing test must arm Smart Transition");
+
+    const std::vector<float> current(64 * 2, 0.5f);
+    const std::vector<float> next(64 * 2, 0.5f);
+    require(source.push(current.data(), 64), "DSP routing test must accept current deck");
+    require(source.pushAutomixNext(next.data(), 64), "DSP routing test must accept next deck");
+
+    auto output = makeBuffer(2, 64);
+    require(source.renderPlanar(output, 0, 64) == 64, "DSP routing test must render the overlap");
+
+    constexpr float minusSixDbGain = 0.5011872f;
+    require(std::abs(output.getSample(0, 8) - (0.5f * minusSixDbGain)) < 0.015f,
+        "headroom must run once on the single-deck region");
+    const float equalPowerMidpoint = 0.5f * std::sqrt(2.0f) * minusSixDbGain;
+    require(std::abs(output.getSample(0, 32) - equalPowerMidpoint) < 0.02f,
+        "EQ/headroom must run once after the equal-power A/B sum");
+}
+
+void testNativeAutomixAppliesReplayGainPerDeckWithoutGlobalDoubleProcessing()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ConvolutionProcessor convolutionProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    echo::DspHeadroomProcessor headroomProcessor;
+    echo::ReplayGainProcessor replayGainProcessor;
+    echo::CompressorProcessor compressorProcessor;
+    echo::SpatialDspProcessor spatialDspProcessor;
+    echo::PlaybackRateProcessor playbackRateProcessor;
+    echo::LevelMeterProcessor meterProcessor;
+    echo::ReplayGainConfig globalReplayGain;
+    globalReplayGain.mode = echo::replayGainModeTrack;
+    globalReplayGain.trackGainDb = 6.0f;
+    globalReplayGain.preventClipping = false;
+    replayGainProcessor.setConfig(globalReplayGain);
+
+    PcmRingAudioSource source(
+        2,
+        256,
+        0,
+        0,
+        1.0f,
+        eqProcessor,
+        convolutionProcessor,
+        channelBalanceProcessor,
+        headroomProcessor,
+        replayGainProcessor,
+        compressorProcessor,
+        spatialDspProcessor,
+        playbackRateProcessor,
+        meterProcessor);
+    source.prepareForNativeRender(64, 1000.0);
+    source.beginSession();
+    require(source.prepareAutomixFrames(16, 32, 0.0, 0.0, -6.0, -12.0),
+        "ReplayGain routing test must arm Smart Transition");
+
+    const std::vector<float> current(64 * 2, 0.5f);
+    const std::vector<float> next(64 * 2, 0.5f);
+    require(source.push(current.data(), 64), "ReplayGain routing test must accept current deck");
+    require(source.pushAutomixNext(next.data(), 64), "ReplayGain routing test must accept next deck");
+
+    auto output = makeBuffer(2, 64);
+    require(source.renderPlanar(output, 0, 64) == 64, "ReplayGain routing test must render the overlap");
+
+    constexpr float currentDeckGain = 0.5011872f;
+    constexpr float nextDeckGain = 0.2511886f;
+    require(std::abs(output.getSample(0, 8) - (0.5f * currentDeckGain)) < 0.015f,
+        "current Deck ReplayGain must replace, not multiply with, the global ReplayGain stage");
+    const float expectedMidpoint =
+        0.5f * static_cast<float>(std::sqrt(0.5)) * (currentDeckGain + nextDeckGain);
+    require(std::abs(output.getSample(0, 32) - expectedMidpoint) < 0.02f,
+        "current and next ReplayGain must be applied independently before the A/B sum");
+}
+
 void testNativeAutomixNextDeckCannotAdvancePastCurrentBuffer()
 {
     echo::EqProcessor eqProcessor;
@@ -1266,6 +2563,59 @@ void testNativeAutomixNextDeckCannotAdvancePastCurrentBuffer()
     require(source.getFramesPlayed() == 3, "native automix clock must stay pinned to available current deck frames");
 }
 
+void testNativeAutomixDeckFailureUsesTwentyMillisecondRecovery()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    PcmRingAudioSource source(2, 256, 0, 0, 1.0f, eqProcessor, channelBalanceProcessor);
+    source.prepareForNativeRender(64, 1000.0);
+    source.beginSession();
+    require(source.prepareAutomixFrames(0, 100, 0.0, 0.0), "fault test must arm AutoMix");
+    const std::vector<float> current(160 * 2, 1.0f);
+    const std::vector<float> next(160 * 2, 0.5f);
+    require(source.push(current.data(), 160), "fault test must accept current deck");
+    require(source.pushAutomixNext(next.data(), 160), "fault test must accept next deck");
+
+    auto beforeFailure = makeBuffer(2, 12);
+    require(source.renderPlanar(beforeFailure, 0, 12) == 12, "fault test must enter overlap");
+    source.failAutomixNext(20);
+    source.markAutomixNextEnded();
+    auto recovery = makeBuffer(2, 24);
+    require(source.renderPlanar(recovery, 0, 24) == 24, "healthy deck must continue through recovery");
+    for (int frame = 0; frame < recovery.getNumSamples(); ++frame)
+    {
+        require(std::isfinite(recovery.getSample(0, frame)), "fault recovery must remain finite");
+        if (frame > 0)
+            require(std::abs(recovery.getSample(0, frame) - recovery.getSample(0, frame - 1)) < 0.08f,
+                "fault recovery must not introduce a block-edge pop");
+    }
+    require(std::abs(recovery.getSample(0, 23) - 1.0f) < 0.02f,
+        "20ms recovery must restore the healthy current deck to unity");
+}
+
+void testNativeGaplessJoinsAtDecodedPcmBoundary()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    PcmRingAudioSource source(2, 64, 0, 0, 1.0f, eqProcessor, channelBalanceProcessor);
+    source.beginSession();
+    source.prepareGapless();
+
+    const std::vector<float> current(8, 1.0f);
+    const std::vector<float> next(8, 0.25f);
+    require(source.push(current.data(), 4), "native gapless must accept current PCM");
+    require(source.pushAutomixNext(next.data(), 4), "native gapless must prebuffer next PCM");
+    source.markInputEnded();
+    source.markAutomixNextEnded();
+
+    auto output = makeBuffer(2, 8);
+    require(source.renderPlanar(output, 0, 8) == 8, "native gapless must fill one callback across the track boundary");
+    require(std::abs(output.getSample(0, 3) - 1.0f) <= nearTolerance, "native gapless must preserve the final current-track sample");
+    require(std::abs(output.getSample(0, 4) - 0.25f) <= nearTolerance, "native gapless must start the next track without a silent or faded sample");
+    require(source.getGaplessBoundaryFrame() == 4, "native gapless boundary must come from consumed PCM frames");
+    require(source.isDrained(), "native gapless must drain only after both tracks finish");
+}
+
 void testDopRenderKeepsValidMarkersDuringSilenceAndData()
 {
     DopRingSource source(2, 16, 0, 0);
@@ -1273,9 +2623,12 @@ void testDopRenderKeepsValidMarkersDuringSilenceAndData()
 
     const auto emptyFrames = source.renderInterleaved(silence.data(), 3, 2);
     require(emptyFrames == 0, "DoP silence render must not count as consumed input frames");
-    require(silence[0] == 0x050000 && silence[1] == 0x050000, "DoP silence frame 0 must carry 0x05 markers");
-    require(silence[2] == 0xfa0000 && silence[3] == 0xfa0000, "DoP silence frame 1 must carry 0xfa markers");
-    require(silence[4] == 0x050000 && silence[5] == 0x050000, "DoP silence frame 2 must keep alternating markers");
+    require(silence[0] == 0x056969 && silence[1] == 0x056969,
+        "DoP silence frame 0 must carry balanced DSD idle with 0x05 markers");
+    require(silence[2] == 0xfa6969 && silence[3] == 0xfa6969,
+        "DoP silence frame 1 must carry balanced DSD idle with 0xfa markers");
+    require(silence[4] == 0x056969 && silence[5] == 0x056969,
+        "DoP silence frame 2 must keep balanced idle and alternating markers");
 
     source.beginSession();
     const std::vector<uint32_t> wrongMarkerInput {
@@ -1287,8 +2640,10 @@ void testDopRenderKeepsValidMarkersDuringSilenceAndData()
     std::vector<uint32_t> data(4, 0u);
     const auto dataFrames = source.renderInterleaved(data.data(), 2, 2);
     require(dataFrames == 2, "DoP render must consume queued input frames");
-    require(data[0] == 0x050201 && data[1] == 0x050605, "DoP data frame 0 must rewrite to the reference 0x05 marker");
-    require(data[2] == 0xfa0403 && data[3] == 0xfa0807, "DoP data frame 1 must rewrite to the reference 0xfa marker");
+    require(data[0] == 0xfa0201 && data[1] == 0xfa0605,
+        "DoP data frame 0 must preserve the transport phase with a 0xfa marker");
+    require(data[2] == 0x050403 && data[3] == 0x050807,
+        "DoP data frame 1 must preserve the transport phase with a 0x05 marker");
 }
 
 #ifdef _WIN32
@@ -1415,25 +2770,43 @@ void testAsioSampleConversion()
     require(std::string(asio_error_name_for_tests(ASE_InvalidMode)) == "ASE_InvalidMode", "ASIO error name helper");
 }
 
-void testAsioDopConversionMatchesReferenceHost()
+void testAsioDopConversionMatchesStandards()
 {
     std::vector<unsigned char> bytes(16, 0);
-    asio_write_dop_sample_for_tests(bytes.data(), ASIOSTInt32LSB, 0, 0x050201u);
+    asio_write_dop_sample_for_tests(bytes.data(), ASIOSTInt24LSB, 0, 0x05a1b2u);
     require(
-        bytes[0] == 0x02 && bytes[1] == 0x01 && bytes[2] == 0x05 && bytes[3] == 0x05,
-        "ASIO DoP int32 LSB must match asio-test-native byte layout");
+        bytes[0] == 0xb2 && bytes[1] == 0xa1 && bytes[2] == 0x05,
+        "ASIO DoP packed int24 LSB must put the marker in the most-significant byte");
 
     std::fill(bytes.begin(), bytes.end(), static_cast<unsigned char>(0));
-    asio_write_dop_sample_for_tests(bytes.data(), ASIOSTInt32LSB24, 0, 0x050201u);
+    asio_write_dop_sample_for_tests(bytes.data(), ASIOSTInt24MSB, 0, 0x05a1b2u);
     require(
-        bytes[0] == 0x00 && bytes[1] == 0x01 && bytes[2] == 0x02 && bytes[3] == 0x05,
-        "ASIO DoP int32 LSB 24-bit aligned must keep the DoP payload left-aligned");
+        bytes[0] == 0x05 && bytes[1] == 0xa1 && bytes[2] == 0xb2,
+        "ASIO DoP packed int24 MSB must put the marker in the most-significant byte");
 
     std::fill(bytes.begin(), bytes.end(), static_cast<unsigned char>(0));
-    asio_write_dop_sample_for_tests(bytes.data(), ASIOSTInt24LSB, 0, 0xfa0403u);
+    asio_write_dop_sample_for_tests(bytes.data(), ASIOSTInt32LSB, 0, 0x05a1b2u);
     require(
-        bytes[0] == 0xfa && bytes[1] == 0x03 && bytes[2] == 0x04,
-        "ASIO DoP int24 LSB must match asio-test-native byte layout");
+        bytes[0] == 0x00 && bytes[1] == 0xb2 && bytes[2] == 0xa1 && bytes[3] == 0x05,
+        "ASIO DoP basic int32 LSB must left-align the 24-bit frame");
+
+    std::fill(bytes.begin(), bytes.end(), static_cast<unsigned char>(0));
+    asio_write_dop_sample_for_tests(bytes.data(), ASIOSTInt32MSB, 0, 0x05a1b2u);
+    require(
+        bytes[0] == 0x05 && bytes[1] == 0xa1 && bytes[2] == 0xb2 && bytes[3] == 0x00,
+        "ASIO DoP basic int32 MSB must left-align the 24-bit frame");
+
+    std::fill(bytes.begin(), bytes.end(), static_cast<unsigned char>(0));
+    asio_write_dop_sample_for_tests(bytes.data(), ASIOSTInt32LSB24, 0, 0xfaa1b2u);
+    require(
+        bytes[0] == 0xb2 && bytes[1] == 0xa1 && bytes[2] == 0xfa && bytes[3] == 0xff,
+        "ASIO DoP int32 LSB24 must right-align and sign-extend the 24-bit frame");
+
+    std::fill(bytes.begin(), bytes.end(), static_cast<unsigned char>(0));
+    asio_write_dop_sample_for_tests(bytes.data(), ASIOSTInt32MSB24, 0, 0xfaa1b2u);
+    require(
+        bytes[0] == 0xff && bytes[1] == 0xfa && bytes[2] == 0xa1 && bytes[3] == 0xb2,
+        "ASIO DoP int32 MSB24 must right-align and sign-extend the 24-bit frame");
 }
 
 void testAsioNativeDsdConversion()
@@ -1493,6 +2866,19 @@ void testAsioRenderGuardCatchesCallbackException()
 {
     require(asio_render_guard_catches_exception_for_tests() != 0, "ASIO render guard must catch callback exceptions and write silence");
 }
+
+void testAsioUnsolicitedWindowSuppressionScope()
+{
+    require(
+        asio_should_suppress_unsolicited_windows_for_tests("O Deus ASIO Link Pro") == 1,
+        "ASIO Link Pro must suppress its unsolicited routing window");
+    require(
+        asio_should_suppress_unsolicited_windows_for_tests("O DEUS ASIO LINK PRO 2.4.2.0") == 1,
+        "ASIO Link Pro matching must be case insensitive");
+    require(
+        asio_should_suppress_unsolicited_windows_for_tests("RME Fireface USB") == 0,
+        "ordinary ASIO drivers must keep their native window behavior");
+}
 #endif
 
 void testCleanupEmitsShutdownAckOnce()
@@ -1510,6 +2896,305 @@ void testCleanupEmitsShutdownAckOnce()
 
     require(shutdownAckSent, "cleanup must mark shutdown ack sent");
     require(output.str() == "{\"event\":\"shutdown-ack\"}\n", "cleanup must emit shutdown ack exactly once");
+}
+
+void testExplicitStopSuppressesDaemonQueueAdvance()
+{
+    const auto fixturePath = writeStreamingDecoderWavFixture(48000, 2, 64);
+    ScopedFileRemoval removeFixture(fixturePath);
+    std::atomic<bool> shutdownRequested { false };
+    int continueAfterDrainCalls = 0;
+    int inputEndedCalls = 0;
+    AudioDaemon daemon({
+        [] {},
+        [&] { ++continueAfterDrainCalls; },
+        [&] { ++inputEndedCalls; },
+        [] {},
+        [](bool) {},
+        [](const float*, int frames, bool) { return frames; },
+        [](const float*, int) { return true; },
+        [](const float*, int, uint64_t) { return true; },
+        [] { return true; },
+        [](const float*, int) { return true; },
+        [] {},
+        [] {},
+        [] { return UINT64_MAX; },
+        [](uint64_t, uint64_t, double, double, double, double) { return true; },
+        [](const float*, int) { return true; },
+        [] {},
+        [] {},
+        [](uint64_t) {},
+        [] { return uint64_t { 0 }; },
+        [] { return uint64_t { 0 }; },
+        [] { return false; },
+        [] { return uint64_t { 1 }; },
+        [](float) {},
+        [](int outputSampleRate) { return outputSampleRate; },
+    }, 48000, 1, shutdownRequested);
+
+    require(daemon.onQueueSet(nlohmann::json::array({
+        {{"itemId", "current"}, {"trackId", "track-current"}, {"filePath", fixturePath}, {"sampleRate", 48000}},
+        {{"itemId", "next"}, {"trackId", "track-next"}, {"filePath", fixturePath}, {"sampleRate", 48000}},
+    }), "off", 1, "current"), "daemon queue snapshot is accepted");
+
+    nlohmann::json stopResult;
+    daemon.stopForTests(stopResult);
+    daemon.emitEnded();
+
+    require(stopResult.value("operationId", uint64_t { 0 }) > 0, "explicit stop creates a playback operation boundary");
+    require(inputEndedCalls == 1, "explicit stop marks the source ended once");
+    require(continueAfterDrainCalls == 0, "explicit stop must not autonomously open the next queued track");
+}
+
+void testNaturalEndStillAdvancesDaemonQueue()
+{
+    const auto fixturePath = writeStreamingDecoderWavFixture(48000, 2, 64);
+    ScopedFileRemoval removeFixture(fixturePath);
+    std::atomic<bool> shutdownRequested { false };
+    int continueAfterDrainCalls = 0;
+    AudioDaemon daemon({
+        [] {},
+        [&] { ++continueAfterDrainCalls; },
+        [] {},
+        [] {},
+        [](bool) {},
+        [](const float*, int frames, bool) { return frames; },
+        [](const float*, int) { return true; },
+        [](const float*, int, uint64_t) { return true; },
+        [] { return true; },
+        [](const float*, int) { return true; },
+        [] {},
+        [] {},
+        [] { return UINT64_MAX; },
+        [](uint64_t, uint64_t, double, double, double, double) { return true; },
+        [](const float*, int) { return true; },
+        [] {},
+        [] {},
+        [](uint64_t) {},
+        [] { return uint64_t { 0 }; },
+        [] { return uint64_t { 0 }; },
+        [] { return false; },
+        [] { return uint64_t { 1 }; },
+        [](float) {},
+        [](int outputSampleRate) { return outputSampleRate; },
+    }, 48000, 1, shutdownRequested);
+
+    require(daemon.onQueueSet(nlohmann::json::array({
+        {{"itemId", "current"}, {"trackId", "track-current"}, {"filePath", fixturePath}, {"sampleRate", 48000}},
+        {{"itemId", "next"}, {"trackId", "track-next"}, {"filePath", fixturePath}, {"sampleRate", 48000}},
+    }), "off", 1, "current"), "daemon queue snapshot is accepted");
+
+    daemon.emitEnded();
+
+    require(continueAfterDrainCalls == 1, "natural playback end still autonomously opens the next queued track");
+    require(daemon.hasPendingQueueAdvanceForTests(), "queue advance waits for the next operation to render PCM");
+    daemon.emitPosition(0, 0, false);
+    require(daemon.hasPendingQueueAdvanceForTests(), "zero-frame position must not commit queue advance or audio.started");
+    daemon.emitEnded();
+    require(! daemon.hasPendingQueueAdvanceForTests(), "a target ending before first PCM clears the pending advance");
+    nlohmann::json stopResult;
+    daemon.stopForTests(stopResult);
+}
+
+void testRuntimeOutputTransitionRunsOnPumpOwner()
+{
+    RuntimeOutputTransitionCoordinator coordinator;
+    const auto ownerThread = std::this_thread::get_id();
+    std::thread::id handlerThread;
+    coordinator.setHandler([&](int targetSampleRate)
+    {
+        handlerThread = std::this_thread::get_id();
+        return RuntimeOutputTransitionResult {true, targetSampleRate, "test", {}, 0.0};
+    });
+
+    RuntimeOutputTransitionResult result;
+    std::atomic<bool> completed { false };
+    std::jthread requester([&]
+    {
+        result = coordinator.request(44100);
+        completed.store(true, std::memory_order_release);
+    });
+    while (! completed.load(std::memory_order_acquire))
+    {
+        coordinator.pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    require(result.success && result.actualSampleRate == 44100, "runtime transition returns the owner result");
+    require(handlerThread == ownerThread, "runtime transition handler stays on the pump owner thread");
+    coordinator.close();
+}
+
+void testMixedRateDaemonAdvanceReconfiguresBeforeDecode()
+{
+    const auto fixturePath = writeStreamingDecoderWavFixture(44100, 2, 64);
+    ScopedFileRemoval removeFixture(fixturePath);
+    std::atomic<bool> shutdownRequested { false };
+    int transitionTarget = 0;
+    int transitionCalls = 0;
+    int continueAfterDrainCalls = 0;
+
+    AudioDaemon::SourceHooks hooks;
+    hooks.continueSessionAfterDrain = [&] { ++continueAfterDrainCalls; };
+    hooks.markInputEnded = [] {};
+    hooks.requestStop = [] {};
+    hooks.setPaused = [](bool) {};
+    hooks.replaceBufferedAudio = [](const float*, int frames, bool) { return frames; };
+    hooks.push = [](const float*, int) { return true; };
+    hooks.pushForGeneration = [](const float*, int, uint64_t) { return true; };
+    hooks.generation = [] { return uint64_t { 1 }; };
+    hooks.decoderSampleRateFor = [](int outputSampleRate) { return outputSampleRate; };
+    hooks.reconfigureOutputSampleRate = [&](int targetSampleRate, nlohmann::json& result, std::string&)
+    {
+        ++transitionCalls;
+        transitionTarget = targetSampleRate;
+        result = {
+            {"actualSampleRate", targetSampleRate},
+            {"mode", "test-stop-open"},
+            {"durationMs", 10.0},
+        };
+        return true;
+    };
+    hooks.strictOutputSampleRateTransition = [] { return true; };
+    AudioDaemon daemon(std::move(hooks), 48000, 1, shutdownRequested);
+
+    require(daemon.onQueueSet(nlohmann::json::array({
+        {{"itemId", "current"}, {"trackId", "track-current"}, {"filePath", "current.wav"}, {"sampleRate", 48000}},
+        {{"itemId", "next"}, {"trackId", "track-next"}, {"filePath", fixturePath}, {"sampleRate", 44100}},
+        {{"itemId", "third"}, {"trackId", "track-third"}, {"filePath", fixturePath}, {"sampleRate", 44100}},
+    }), "off", 2, "current"), "mixed-rate daemon queue snapshot is accepted");
+
+    daemon.emitEnded();
+
+    require(transitionTarget == 44100, "mixed-rate daemon advance reconfigures the device to the source rate");
+    require(continueAfterDrainCalls == 1, "decode starts only after the output transition succeeds");
+    require(daemon.hasPendingQueueAdvanceForTests(), "mixed-rate queue advance waits for rendered PCM");
+    daemon.emitPosition(1, 0, false);
+    require(! daemon.hasPendingQueueAdvanceForTests(), "mixed-rate queue advance commits on the first rendered PCM frame");
+    daemon.emitEnded();
+    require(transitionCalls == 1, "the following same-rate track does not reconfigure the device");
+    require(continueAfterDrainCalls == 2, "the same-rate third track keeps the fast autonomous path");
+    require(daemon.hasPendingQueueAdvanceForTests(), "the same-rate third track still waits for first rendered PCM");
+    daemon.emitPosition(1, 0, false);
+    require(! daemon.hasPendingQueueAdvanceForTests(), "the same-rate third track commits on rendered PCM");
+    nlohmann::json stopResult;
+    daemon.stopForTests(stopResult);
+}
+
+void testManualStopSupersedesMixedRateDaemonAdvance()
+{
+    const auto fixturePath = writeStreamingDecoderWavFixture(44100, 2, 64);
+    ScopedFileRemoval removeFixture(fixturePath);
+    std::atomic<bool> shutdownRequested { false };
+    int continueAfterDrainCalls = 0;
+    AudioDaemon* daemonOwner = nullptr;
+
+    AudioDaemon::SourceHooks hooks;
+    hooks.continueSessionAfterDrain = [&] { ++continueAfterDrainCalls; };
+    hooks.markInputEnded = [] {};
+    hooks.requestStop = [] {};
+    hooks.setPaused = [](bool) {};
+    hooks.replaceBufferedAudio = [](const float*, int frames, bool) { return frames; };
+    hooks.push = [](const float*, int) { return true; };
+    hooks.pushForGeneration = [](const float*, int, uint64_t) { return true; };
+    hooks.generation = [] { return uint64_t { 1 }; };
+    hooks.decoderSampleRateFor = [](int outputSampleRate) { return outputSampleRate; };
+    hooks.reconfigureOutputSampleRate = [&](int targetSampleRate, nlohmann::json& result, std::string&)
+    {
+        nlohmann::json stopResult;
+        daemonOwner->stopForTests(stopResult);
+        result = {
+            {"actualSampleRate", targetSampleRate},
+            {"mode", "test-stop-open"},
+            {"durationMs", 10.0},
+        };
+        return true;
+    };
+    hooks.strictOutputSampleRateTransition = [] { return true; };
+    AudioDaemon daemon(std::move(hooks), 48000, 1, shutdownRequested);
+    daemonOwner = &daemon;
+
+    require(daemon.onQueueSet(nlohmann::json::array({
+        {{"itemId", "current"}, {"trackId", "track-current"}, {"filePath", "current.wav"}, {"sampleRate", 48000}},
+        {{"itemId", "next"}, {"trackId", "track-next"}, {"filePath", fixturePath}, {"sampleRate", 44100}},
+    }), "off", 3, "current"), "mixed-rate queue is accepted before stop race");
+
+    daemon.emitEnded();
+
+    require(continueAfterDrainCalls == 0, "a manual stop winning the transition prevents autonomous decode");
+    require(! daemon.hasPendingQueueAdvanceForTests(), "a superseded transition cannot publish queue advance");
+}
+
+void testStrictDaemonAdvanceRejectsMissingSampleRate()
+{
+    std::atomic<bool> shutdownRequested { false };
+    int continueAfterDrainCalls = 0;
+    int transitionCalls = 0;
+    AudioDaemon::SourceHooks hooks;
+    hooks.continueSessionAfterDrain = [&] { ++continueAfterDrainCalls; };
+    hooks.markInputEnded = [] {};
+    hooks.requestStop = [] {};
+    hooks.setPaused = [](bool) {};
+    hooks.decoderSampleRateFor = [](int outputSampleRate) { return outputSampleRate; };
+    hooks.reconfigureOutputSampleRate = [&](int, nlohmann::json&, std::string&)
+    {
+        ++transitionCalls;
+        return true;
+    };
+    hooks.strictOutputSampleRateTransition = [] { return true; };
+    AudioDaemon daemon(std::move(hooks), 48000, 1, shutdownRequested);
+
+    require(daemon.onQueueSet(nlohmann::json::array({
+        {{"itemId", "current"}, {"trackId", "track-current"}, {"filePath", "current.wav"}, {"sampleRate", 48000}},
+        {{"itemId", "next"}, {"trackId", "track-next"}, {"filePath", "missing-rate.wav"}},
+    }), "off", 4, "current"), "strict queue with missing next rate is accepted as metadata");
+
+    daemon.emitEnded();
+
+    require(transitionCalls == 0, "missing source rate fails before any device transition");
+    require(continueAfterDrainCalls == 0, "missing source rate fails before autonomous decode");
+    require(! daemon.hasPendingQueueAdvanceForTests(), "missing source rate cannot publish queue advance");
+}
+
+void testQueueReplacementCancelsPendingDaemonAdvance()
+{
+    const auto fixturePath = writeStreamingDecoderWavFixture(48000, 2, 64);
+    ScopedFileRemoval removeFixture(fixturePath);
+    std::atomic<bool> shutdownRequested { false };
+    int continueAfterDrainCalls = 0;
+    AudioDaemon::SourceHooks hooks;
+    hooks.continueSessionAfterDrain = [&] { ++continueAfterDrainCalls; };
+    hooks.markInputEnded = [] {};
+    hooks.requestStop = [] {};
+    hooks.setPaused = [](bool) {};
+    hooks.replaceBufferedAudio = [](const float*, int frames, bool) { return frames; };
+    hooks.push = [](const float*, int) { return true; };
+    hooks.pushForGeneration = [](const float*, int, uint64_t) { return true; };
+    hooks.generation = [] { return uint64_t { 1 }; };
+    hooks.decoderSampleRateFor = [](int outputSampleRate) { return outputSampleRate; };
+    AudioDaemon daemon(std::move(hooks), 48000, 1, shutdownRequested);
+
+    require(daemon.onQueueSet(nlohmann::json::array({
+        {{"itemId", "current"}, {"trackId", "track-current"}, {"filePath", fixturePath}, {"sampleRate", 48000}},
+        {{"itemId", "next"}, {"trackId", "track-next"}, {"filePath", fixturePath}, {"sampleRate", 48000}},
+    }), "off", 5, "current"), "initial queue is accepted before pending replacement");
+    daemon.emitEnded();
+    require(daemon.hasPendingQueueAdvanceForTests(), "natural advance arms a pending first-frame commit");
+
+    require(daemon.onQueueSet(nlohmann::json::array({
+        {{"itemId", "current"}, {"trackId", "track-current"}, {"filePath", fixturePath}, {"sampleRate", 48000}},
+        {{"itemId", "next"}, {"trackId", "track-next"}, {"filePath", fixturePath}, {"sampleRate", 48000}},
+    }), "off", 5, "current"), "same-revision retry is accepted idempotently");
+    require(daemon.hasPendingQueueAdvanceForTests(), "same-revision retry preserves the pending commit");
+
+    require(daemon.onQueueSet(nlohmann::json::array({
+        {{"itemId", "replacement"}, {"trackId", "track-replacement"}, {"filePath", fixturePath}, {"sampleRate", 48000}},
+    }), "off", 6, "replacement"), "replacement queue wins before first PCM");
+
+    require(continueAfterDrainCalls == 1, "replacement occurs after exactly one autonomous open");
+    require(! daemon.hasPendingQueueAdvanceForTests(), "replacement queue cancels the stale pending advance");
+    daemon.emitPosition(1, 0, false);
+    require(! daemon.hasPendingQueueAdvanceForTests(), "stale first PCM cannot resurrect a cancelled advance");
 }
 
 void testProtocolMessages()
@@ -1646,17 +3331,98 @@ int main()
         { "Channel balance solo keeps physical side", testChannelBalanceSoloKeepsPhysicalSide },
         { "Channel balance band gain compensation", testChannelBalanceBandGainCompensation },
         { "DSP chain bypass preserves dry buffer", testDspChainBypassPreservesDryBuffer },
+        { "compressor reduces hot signals and preserves bypass", testCompressorReducesHotSignalsAndPreservesBypass },
+        { "spatial DSP stages process independently", testSpatialDspStagesProcessIndependently },
         { "DSP chain limiter protects active output", testDspChainLimiterProtectsActiveOutput },
         { "DSP chain limiter ignores near full-scale output", testDspChainLimiterIgnoresNearFullScaleOutput },
         { "DSP chain limiter can be bypassed", testDspChainLimiterCanBeBypassed },
-        { "DSP headroom only applies to active DSP", testDspHeadroomOnlyAppliesToActiveDsp },
+        { "DSP headroom activates protection chain", testDspHeadroomActivatesProtectionChain },
+        { "DSP chain protects upstream PCM processing", testDspChainProtectsUpstreamPcmProcessing },
         { "host buffer fallback attempts", testHostBufferFallbackAttempts },
+        { "unsupported exclusive format skips buffer retries", testUnsupportedExclusiveFormatSkipsBufferRetries },
+        { "native dither matches TypeScript golden vector", testNativeDitherMatchesTypescriptGoldenVector },
+        { "native ECHO SRC matches reference convolution", testNativeEchoSrcMatchesReferenceConvolution },
+        { "native ECHO SRC factor-four polyphase matches dense convolution", testNativeEchoSrcPolyphaseMatchesDenseFactorFourConvolution },
+        { "native ECHO SRC is stable across decode chunks", testNativeEchoSrcIsStableAcrossDecodeChunks },
+        { "native ECHO SRC flushes tail exactly once", testNativeEchoSrcFlushesTailExactlyOnce },
+        { "native pipeline drains ECHO SRC tail before EOF", testNativePlaybackPipelineDrainsEchoSrcTailBeforeEof },
+        { "native SDM produces deterministic protected DoP", testNativeSdmProducesDeterministicProtectedDop },
+        { "native SDM profiles shape noise out of band", testNativeSdmProfilesShapeNoiseOutOfBand },
+        { "native SDM high-order profiles remain bounded", testNativeSdmHighOrderProfilesRemainBounded },
+        { "native SDM high-order profiles are chunk invariant", testNativeSdmHighOrderProfilesAreChunkInvariant },
+        { "native SDM applies headroom and smooths transitions", testNativeSdmAppliesHeadroomAndSmoothsTransitions },
+        { "native SDM idle lock preserves weak signals", testNativeSdmIdleLockPreservesWeakSignals },
+        { "native processing configuration fails closed", testNativeProcessingConfigurationFailsClosed },
         { "host shared backend options", testHostSharedBackendOptions },
+        { "runtime device configuration is authoritative", testRuntimeDeviceConfigurationIsAuthoritative },
         { "host backend names", testHostBackendNames },
     { "specialized outputs skip miniaudio shared output", testSpecializedOutputsSkipMiniaudioSharedOutput },
     { "specialized runHost validation before hardware open", testSpecializedRunHostValidationBeforeHardwareOpen },
     { "host prebuffer defaults remain compatible", testHostPrebufferDefaultsRemainCompatible },
+        { "high-rate native DSD buffers use byte-frame scale", testHighRateNativeDsdBuffersUseByteFrameScale },
         { "explicit zero prebuffer disables wait", testExplicitZeroPrebufferDisablesWait },
         { "native FIFO wraps and resets", testNativeFifoWrapsAndResets },
         { "libav PCM stream decoder reads bounded chunks", testLibavPcmStreamDecoderReadsBoundedChunks },
+        { "libav PCM stream decoder bounds damaged media recovery", testLibavPcmStreamDecoderBoundsDamagedMediaRecovery },
+        { "libav PCM stream decoder maps native output format", testLibavPcmStreamDecoderMapsToNativeOutputFormat },
+        { "libav PCM stream decoder decodes DSD containers to PCM", testLibavPcmStreamDecoderDecodesDsdContainersToPcm },
         { "libav PCM stream decoder seek cancel and invalid file", testLibavPcmStreamDecoderSeekCancelAndInvalidFile },
+        { "PCM idle does not count underrun before PCM", testPcmIdleDoesNotCountUnderrunBeforePcm },
+        { "PCM pause retains buffered frames", testPcmSourcePauseRetainsBufferedFrames },
+        { "PCM input ended waits for buffered drain", testPcmInputEndedWaitsForBufferedDrain },
+        { "PCM playback rate consumes source frames", testPcmSourcePlaybackRateConsumesSourceFramesAtRate },
+        { "PCM playback rate bounds native dither writes", testNativeRenderPlaybackRateKeepsDitherInsideOutputBuffer },
+        { "PCM replacement drops stale frames", testPcmSourceReplaceBufferedAudioDropsStaleFrames },
+        { "PCM replacement stays paused until resume", testPcmSourceReplaceBufferedAudioWhilePausedWaitsForResume },
+        { "PCM prebuffer avoids premature underrun", testPcmPrebufferDoesNotCountUnderrunBeforeTarget },
+        { "native render adapter", testNativeRenderAdapter },
+        { "PCM declick ramp", testPcmDeclickRampOnSessionStartAndStop },
+        { "native automix mixes next deck", testNativeAutomixDeckMixesNextBeforeCurrentEnds },
+        { "native automix applies DSP once after deck sum", testNativeAutomixAppliesUserDspOnceAfterDeckSum },
+        { "native automix applies ReplayGain per deck", testNativeAutomixAppliesReplayGainPerDeckWithoutGlobalDoubleProcessing },
+        { "native automix next deck respects current buffer", testNativeAutomixNextDeckCannotAdvancePastCurrentBuffer },
+        { "native automix deck failure recovery", testNativeAutomixDeckFailureUsesTwentyMillisecondRecovery },
+        { "native gapless joins at PCM boundary", testNativeGaplessJoinsAtDecodedPcmBoundary },
+        { "DoP render keeps valid markers", testDopRenderKeepsValidMarkersDuringSilenceAndData },
+#ifdef _WIN32
+        { "ASIO buffer candidates", testAsioBufferCandidateGeneration },
+        { "ASIO sample-rate pivots", testAsioSampleRatePivotCandidateGeneration },
+        { "ASIO sample conversion", testAsioSampleConversion },
+        { "ASIO DoP conversion", testAsioDopConversionMatchesStandards },
+        { "ASIO native DSD conversion", testAsioNativeDsdConversion },
+        { "ASIO render guard catches exceptions", testAsioRenderGuardCatchesCallbackException },
+        { "ASIO unsolicited window suppression scope", testAsioUnsolicitedWindowSuppressionScope },
+#endif
+        { "cleanup emits shutdown ack once", testCleanupEmitsShutdownAckOnce },
+        { "explicit stop suppresses daemon queue advance", testExplicitStopSuppressesDaemonQueueAdvance },
+        { "natural end advances daemon queue", testNaturalEndStillAdvancesDaemonQueue },
+        { "runtime output transition stays on owner", testRuntimeOutputTransitionRunsOnPumpOwner },
+        { "mixed-rate daemon advance reconfigures before decode", testMixedRateDaemonAdvanceReconfiguresBeforeDecode },
+        { "manual stop supersedes mixed-rate daemon advance", testManualStopSupersedesMixedRateDaemonAdvance },
+        { "strict daemon advance rejects missing sample rate", testStrictDaemonAdvanceRejectsMissingSampleRate },
+        { "queue replacement cancels pending daemon advance", testQueueReplacementCancelsPendingDaemonAdvance },
+        { "protocol messages", testProtocolMessages },
+    };
+
+    int failures = 0;
+    for (const auto& [name, test] : tests)
+    {
+        try
+        {
+            test();
+            std::cout << "[PASS] " << name << std::endl;
+        }
+        catch (const std::exception& error)
+        {
+            ++failures;
+            std::cerr << "[FAIL] " << name << ": " << error.what() << std::endl;
+        }
+        catch (...)
+        {
+            ++failures;
+            std::cerr << "[FAIL] " << name << ": unknown error" << std::endl;
+        }
+    }
+
+    return failures == 0 ? 0 : 1;
+}

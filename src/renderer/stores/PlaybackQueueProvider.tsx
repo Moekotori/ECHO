@@ -4,9 +4,17 @@ import type { AudioOutputSettings, AudioPlaybackState, AudioStatus, PlaybackSpee
 import type { AppSettings } from '../../shared/types/appSettings';
 import type { AirPlayReceiverStatus, ConnectReceiverStatus, ConnectSessionStatus } from '../../shared/types/connect';
 import { hqPlayerConnectDeviceId } from '../../shared/types/connect';
-import type { LibraryPlaylistItem, LibraryTrack, PlaylistSourceProvider } from '../../shared/types/library';
+import type {
+  ContinuousPlayMode,
+  ContinuousPlayPreference,
+  ContinuousPlayPreferenceKind,
+  LibraryPlaylistItem,
+  LibraryTrack,
+  PlaylistSourceProvider,
+} from '../../shared/types/library';
 import type {
   LocalFileResolveResult,
+  PlaybackOrderMode,
   PlaybackStatus,
   PersistedPlaybackRepeatMode,
   PersistedPlaybackSessionResume,
@@ -20,10 +28,15 @@ import type { PlayableTrack } from '../../shared/types/remoteSources';
 import type { ReplayGainTrackData } from '../../shared/utils/replayGain';
 import { streamingProviderNames, streamingStableKey } from '../../shared/types/streaming';
 import type { StreamingProviderName } from '../../shared/types/streaming';
-import { isReliableBpmAnalysis } from '../../shared/constants/audioAnalysis';
+import { shouldAnalyzeBpm } from '../../shared/constants/audioAnalysis';
 import { isSpotifyTrack, pauseSpotifyPlayback, playSpotifyTrack } from '../integrations/spotify/spotifyPlayback';
+import { translateCurrentLocale } from '../i18n/I18nProvider';
+import type { TranslationKey } from '../i18n/locales';
 import { isActiveConnectPlaybackStatus } from '../utils/connectPlayback';
-import { beginPlaybackSwitchSnapshot, setPlaybackStatusSnapshot } from './playbackStatusStore';
+import { beginPlaybackSwitchSnapshot, setPlaybackStatusSnapshot, useSharedPlaybackStatusOnly } from './playbackStatusStore';
+
+const tq = (key: TranslationKey, options?: Record<string, string | number>): string =>
+  translateCurrentLocale(key, options);
 
 const playbackCancellationErrorMessage = 'audio_session_run_cancelled';
 const playbackHistoryChangedEvent = 'playback-history:changed';
@@ -35,8 +48,6 @@ const maxShuffleAvoidRecentCount = 200;
 const activePlaybackStates = new Set<AudioStatus['state']>(['loading', 'playing', 'paused']);
 const playbackPressureStates = new Set<AudioStatus['state']>(['loading', 'playing']);
 const playbackPressureOutputModes = new Set<AudioStatus['outputMode']>(['exclusive']);
-const automixLateArmWindowSeconds = 60;
-const automixShortTrackArmRatio = 0.35;
 const automixBpmAnalysisStatusPollMs = 1500;
 const enhancedLowLoadMvSearchDelayMs = 8_000;
 const playbackPressureBufferedThresholdMs = 40;
@@ -46,24 +57,6 @@ const dsdCodecs = new Set(['dsd', 'dsf', 'dff', 'sacd']);
 const clampPlaybackRate = (value: number): number => Math.max(0.5, Math.min(2, value));
 const normalizePlaybackSpeedMode = (value: unknown): PlaybackSpeedMode | null =>
   value === 'daycore' || value === 'speed' || value === 'nightcore' ? value : null;
-
-const hasPendingAutomixTransition = (automix: AudioStatus['automix']): boolean => {
-  if (!automix?.active) {
-    return false;
-  }
-
-  if (automix.mode === 'armed') {
-    return true;
-  }
-
-  const plannedTrackCount = Number.isFinite(automix.plannedTrackCount) ? automix.plannedTrackCount ?? 0 : 0;
-  const nextTransitionIndex = Number.isFinite(automix.nextTransitionIndex) ? automix.nextTransitionIndex ?? 0 : 0;
-  if (plannedTrackCount <= 1) {
-    return true;
-  }
-
-  return nextTransitionIndex < plannedTrackCount - 1;
-};
 
 const createPlaybackSpeedOutput = (
   playbackRate: unknown,
@@ -126,14 +119,32 @@ const playbackStatusFromConnectStatus = (status: ConnectSessionStatus, item: Que
   positionMs: Math.round(Math.max(0, status.positionSeconds) * 1000),
   durationMs: Math.round(Math.max(0, status.durationSeconds || item.track.duration) * 1000),
   filePath: item.track.path,
+  volume: typeof status.volume === 'number' ? Math.max(0, Math.min(1, status.volume / 100)) : null,
 });
 
 export type RepeatMode = PersistedPlaybackRepeatMode;
+
+type BackendQueueSyncItem = {
+  itemId: string;
+  trackId: string;
+  filePath: string;
+  sampleRate?: number;
+  startSeconds?: number;
+  metadata?: {
+    title?: string | null;
+    artist?: string | null;
+    album?: string | null;
+    albumArtist?: string | null;
+    coverUrl?: string | null;
+  };
+};
 
 type PlaybackModeMemory = {
   isShuffleEnabled: boolean;
   repeatMode: RepeatMode;
   autoFillQueueEnabled: boolean;
+  continuousPlayMode: ContinuousPlayMode;
+  continuousPlayPreferences: ContinuousPlayPreference[];
 };
 
 type PlaylistPlaybackSnapshot = {
@@ -213,6 +224,7 @@ const writeHqPlayerTakeoverEnabled = (enabled: boolean): void => {
 
 type PlaybackQueueMemory = {
   version: 1;
+  revision?: number;
   items: QueueItem[];
   currentQueueId: string | null;
   currentTrackId: string | null;
@@ -270,10 +282,6 @@ type PlayLocalTrackOptions = {
   forceHqPlayerConnect?: boolean;
   startSeconds?: number;
   forceRefresh?: boolean;
-  forceAutomix?: boolean;
-  automixIncludeUpcoming?: boolean;
-  automixProbeDurationSeconds?: number;
-  silentRearm?: boolean;
 };
 
 type PlaybackQueueContextValue = {
@@ -289,6 +297,9 @@ type PlaybackQueueContextValue = {
   repeatMode: RepeatMode;
   automixEnabled: boolean;
   autoFillQueueEnabled: boolean;
+  continuousPlayMode: ContinuousPlayMode;
+  continuousPlayPreferences: ContinuousPlayPreference[];
+  isContinuousPlayFilling: boolean;
   hqPlayerTakeoverEnabled: boolean;
   gaplessPlaybackEnabled: boolean;
   playbackShuffleAvoidRecentCount: number;
@@ -303,9 +314,11 @@ type PlaybackQueueContextValue = {
   appendTracksToQueue: (tracks: LibraryTrack[], source?: QueueSource) => void;
   fillQueue: (options?: FillQueueOptions) => Promise<number>;
   playTrackNext: (track: LibraryTrack, source?: QueueSource) => void;
+  playTracksNext: (tracks: LibraryTrack[], source?: QueueSource) => void;
   removeQueueItem: (queueId: string) => void;
   removeQueueItems: (queueIds: string[]) => void;
   removeTrackFromQueue: (trackId: string) => number;
+  setQueueItemsRemoveAfterPlay: (queueIds: string[], enabled: boolean) => void;
   clearQueue: () => void;
   moveQueueItem: (fromIndex: number, toIndex: number) => void;
   moveQueueItemsToIndex: (queueIds: string[], toIndex: number) => void;
@@ -321,7 +334,12 @@ type PlaybackQueueContextValue = {
   activateHqPlayerTakeover: () => Promise<PlaybackStatus | null>;
   setHqPlayerTakeoverEnabled: (enabled: boolean) => void;
   setAutomixEnabled: (enabled: boolean) => void;
+  setGaplessPlaybackEnabled: (enabled: boolean) => Promise<void>;
   setAutoFillQueueEnabled: (enabled: boolean) => void;
+  setContinuousPlayMode: (mode: ContinuousPlayMode) => void;
+  reduceContinuousPlayFrequency: (kind: ContinuousPlayPreferenceKind, value: string) => void;
+  clearContinuousPlayPreferences: () => void;
+  removeContinuousPlayItems: () => void;
   setCurrentTrackId: (trackId: string | null) => void;
   updateCurrentTrackSnapshot: (
     patch: Partial<
@@ -369,6 +387,7 @@ type PlaybackQueueContextValue = {
   syncPlaybackState: (state: AudioPlaybackState) => void;
   toggleShuffle: () => void;
   setRepeatMode: (mode: RepeatMode) => void;
+  setPlaybackOrder: (mode: PlaybackOrderMode) => Promise<void>;
 };
 
 type PlaybackQueueDiagnosticsSnapshot = {
@@ -431,10 +450,13 @@ const defaultPlaybackModeMemory: PlaybackModeMemory = {
   isShuffleEnabled: false,
   repeatMode: 'off',
   autoFillQueueEnabled: false,
+  continuousPlayMode: 'similar',
+  continuousPlayPreferences: [],
 };
 
 const defaultPlaybackQueueMemory: PlaybackQueueMemory = {
   version: 1,
+  revision: 0,
   items: [],
   currentQueueId: null,
   currentTrackId: null,
@@ -461,6 +483,35 @@ const slowQueuePlaybackStepWarnCooldownMs = 10_000;
 const lastSlowQueuePlaybackStepWarnAtByKey = new Map<string, number>();
 
 const isRepeatMode = (value: unknown): value is RepeatMode => value === 'off' || value === 'one' || value === 'all';
+const isContinuousPlayMode = (value: unknown): value is ContinuousPlayMode =>
+  value === 'similar' ||
+  value === 'deep-cuts' ||
+  value === 'recently-added' ||
+  value === 'night' ||
+  value === 'headphone-test';
+
+const normalizeContinuousPlayPreferences = (value: unknown): ContinuousPlayPreference[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+    const kind = item.kind as ContinuousPlayPreferenceKind;
+    const preferenceValue = typeof item.value === 'string' ? item.value.trim() : '';
+    if ((kind !== 'artist' && kind !== 'album' && kind !== 'genre') || !preferenceValue) {
+      return [];
+    }
+    return [{
+      kind,
+      value: preferenceValue,
+      weight: typeof item.weight === 'number' && Number.isFinite(item.weight)
+        ? Math.max(0.1, Math.min(1, item.weight))
+        : 0.35,
+    }];
+  }).slice(0, 200);
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object';
 
@@ -570,7 +621,7 @@ const isQueueSource = (value: unknown): value is QueueSource =>
   isRecord(value) &&
   typeof value.type === 'string' &&
   typeof value.label === 'string' &&
-  ['songs', 'album', 'artist', 'folder', 'liked', 'streaming', 'local-file', 'manual'].includes(value.type);
+  ['songs', 'album', 'artist', 'folder', 'liked', 'streaming', 'local-file', 'continuous-play', 'manual'].includes(value.type);
 
 const isQueueItemSnapshot = (value: unknown): value is QueueItem =>
   isRecord(value) &&
@@ -592,6 +643,8 @@ const readPlaybackModeMemory = (): PlaybackModeMemory => {
       isShuffleEnabled: parsed.isShuffleEnabled === true,
       repeatMode: isRepeatMode(parsed.repeatMode) ? parsed.repeatMode : 'off',
       autoFillQueueEnabled: parsed.autoFillQueueEnabled === true,
+      continuousPlayMode: isContinuousPlayMode(parsed.continuousPlayMode) ? parsed.continuousPlayMode : 'similar',
+      continuousPlayPreferences: normalizeContinuousPlayPreferences(parsed.continuousPlayPreferences),
     };
   } catch {
     return defaultPlaybackModeMemory;
@@ -655,6 +708,7 @@ const readPlaybackQueueMemory = (): PlaybackQueueMemory => {
 
     return {
       version: 1,
+      revision: Number.isSafeInteger(parsed.revision) && Number(parsed.revision) >= 0 ? Number(parsed.revision) : 0,
       items,
       currentQueueId,
       currentTrackId,
@@ -770,6 +824,8 @@ const playlistSnapshotFromPersisted = (
       isShuffleEnabled: snapshot.mode?.isShuffleEnabled === true,
       repeatMode: isRepeatMode(snapshot.mode?.repeatMode) ? snapshot.mode.repeatMode : 'off',
       autoFillQueueEnabled: snapshot.mode?.autoFillQueueEnabled === true,
+      continuousPlayMode: isContinuousPlayMode(snapshot.mode?.continuousPlayMode) ? snapshot.mode.continuousPlayMode : 'similar',
+      continuousPlayPreferences: normalizeContinuousPlayPreferences(snapshot.mode?.continuousPlayPreferences),
     },
     automixEnabled: canRestoreAutomixEnabled(snapshot.mode?.automixEnabled),
   };
@@ -815,6 +871,7 @@ const playbackSessionFromPersisted = (session: PersistedPlaybackSessionV1 | null
 
   return {
     version: 1,
+    revision: Number.isSafeInteger(session.revision) && Number(session.revision) >= 0 ? Number(session.revision) : 0,
     items,
     currentQueueId,
     currentTrackId,
@@ -825,6 +882,8 @@ const playbackSessionFromPersisted = (session: PersistedPlaybackSessionV1 | null
       isShuffleEnabled: session.mode?.isShuffleEnabled === true,
       repeatMode: isRepeatMode(session.mode?.repeatMode) ? session.mode.repeatMode : 'off',
       autoFillQueueEnabled: session.mode?.autoFillQueueEnabled === true,
+      continuousPlayMode: isContinuousPlayMode(session.mode?.continuousPlayMode) ? session.mode.continuousPlayMode : 'similar',
+      continuousPlayPreferences: normalizeContinuousPlayPreferences(session.mode?.continuousPlayPreferences),
     },
     automixEnabled: canRestoreAutomixEnabled(session.mode?.automixEnabled),
     playlistPlayback: playlistPlaybackFromPersisted(session.playlistPlayback),
@@ -842,12 +901,15 @@ const createPersistedPlaylistSnapshot = (snapshot: PlaylistPlaybackSnapshot): Pe
     repeatMode: snapshot.mode.repeatMode,
     automixEnabled: snapshot.automixEnabled,
     autoFillQueueEnabled: snapshot.mode.autoFillQueueEnabled,
+    continuousPlayMode: snapshot.mode.continuousPlayMode,
+    continuousPlayPreferences: snapshot.mode.continuousPlayPreferences,
   },
   resume: isResumeMemory(snapshot.resume, snapshot.items) ? snapshot.resume : null,
 });
 
 const createPersistedSessionSnapshot = (session: HydratedPlaybackSession): PersistedPlaybackSessionV1 => ({
   version: 1,
+  revision: session.revision ?? 0,
   items: session.items,
   currentQueueId: session.currentQueueId,
   currentTrackId: session.currentTrackId,
@@ -858,6 +920,8 @@ const createPersistedSessionSnapshot = (session: HydratedPlaybackSession): Persi
     repeatMode: session.mode.repeatMode,
     automixEnabled: session.automixEnabled,
     autoFillQueueEnabled: session.mode.autoFillQueueEnabled,
+    continuousPlayMode: session.mode.continuousPlayMode,
+    continuousPlayPreferences: session.mode.continuousPlayPreferences,
   },
   resume: isResumeMemory(session.resume, session.items) ? session.resume : null,
   updatedAt: new Date().toISOString(),
@@ -1272,33 +1336,7 @@ const shouldAnalyzeAutomixBpmCandidate = (track: LibraryTrack): boolean =>
   isLocalAutomixCandidate(track) &&
   !track.isTemporary &&
   Boolean(track.path) &&
-  track.analysisStatus !== 'analyzing' &&
-  !isReliableBpmAnalysis(track.bpm, track.bpmConfidence, track.analysisStatus);
-
-const resolveAutomixArmStartSeconds = (durationSeconds: number): number => {
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-    return 0;
-  }
-
-  if (durationSeconds > automixLateArmWindowSeconds) {
-    return Math.max(0, durationSeconds - automixLateArmWindowSeconds);
-  }
-
-  return Math.max(1, Math.min(Math.max(1, durationSeconds - 4.5), durationSeconds * automixShortTrackArmRatio));
-};
-
-const shouldArmAutomixForPlaybackStart = (track: LibraryTrack, startSeconds: number | undefined, forceAutomix: boolean): boolean => {
-  if (forceAutomix) {
-    return true;
-  }
-
-  const durationSeconds = Number(track.duration);
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-    return false;
-  }
-
-  return Math.max(0, startSeconds ?? 0) >= resolveAutomixArmStartSeconds(durationSeconds);
-};
+  shouldAnalyzeBpm(track);
 
 const findItemByQueueId = (items: QueueItem[], queueId: string | null): QueueItem | null =>
   queueId ? items.find((item) => item.queueId === queueId) ?? null : null;
@@ -1333,11 +1371,18 @@ const findAutomixAdvanceItem = (
 
 const resolveSequentialNextItem = (items: QueueItem[], item: QueueItem, repeatMode: RepeatMode): QueueItem | null => {
   const index = items.findIndex((candidate) => candidate.queueId === item.queueId);
-  if (index >= 0 && index < items.length - 1) {
-    return items[index + 1] ?? null;
+  if (index < 0) {
+    return null;
   }
 
-  return index === items.length - 1 && repeatMode === 'all' && items.length > 1 ? items[0] ?? null : null;
+  const afterCurrent = items.slice(index + 1).find((candidate) => candidate.track.unavailable !== true) ?? null;
+  if (afterCurrent) {
+    return afterCurrent;
+  }
+
+  return repeatMode === 'all'
+    ? items.slice(0, index).find((candidate) => candidate.track.unavailable !== true) ?? null
+    : null;
 };
 
 const resolveSnapshotResumeItem = (snapshot: PlaylistPlaybackSnapshot, mode: 'current' | 'next'): QueueItem | null => {
@@ -1347,18 +1392,24 @@ const resolveSnapshotResumeItem = (snapshot: PlaylistPlaybackSnapshot, mode: 'cu
 
   const currentIndex = findCurrentIndex(snapshot.items, snapshot.currentQueueId, snapshot.currentTrackId);
   if (mode === 'current') {
-    return currentIndex >= 0 ? snapshot.items[currentIndex] ?? null : snapshot.items[0] ?? null;
+    const current = currentIndex >= 0 ? snapshot.items[currentIndex] ?? null : null;
+    return current?.track.unavailable !== true
+      ? current
+      : snapshot.items.find((item) => item.track.unavailable !== true) ?? null;
   }
 
   if (currentIndex < 0) {
-    return snapshot.items[0] ?? null;
+    return snapshot.items.find((item) => item.track.unavailable !== true) ?? null;
   }
 
-  if (currentIndex < snapshot.items.length - 1) {
-    return snapshot.items[currentIndex + 1] ?? null;
+  const afterCurrent = snapshot.items.slice(currentIndex + 1).find((item) => item.track.unavailable !== true) ?? null;
+  if (afterCurrent) {
+    return afterCurrent;
   }
 
-  return snapshot.mode.repeatMode === 'all' && snapshot.items.length > 1 ? snapshot.items[0] ?? null : null;
+  return snapshot.mode.repeatMode === 'all'
+    ? snapshot.items.slice(0, currentIndex).find((item) => item.track.unavailable !== true) ?? null
+    : null;
 };
 
 const resolveSequentialAutomixNextItem = (items: QueueItem[], item: QueueItem, repeatMode: RepeatMode): QueueItem | null => {
@@ -1402,7 +1453,7 @@ const getShuffleCandidates = (items: QueueItem[], activeItem: QueueItem | null, 
     excludedQueueIds.add(activeItem.queueId);
   }
 
-  return items.filter((item) => !excludedQueueIds.has(item.queueId));
+  return items.filter((item) => item.track.unavailable !== true && !excludedQueueIds.has(item.queueId));
 };
 
 const getLibraryShuffleExcludedTrackIds = (activeItem: QueueItem | null, history: QueueItem[], avoidRecentCount: number): string[] => {
@@ -1491,41 +1542,48 @@ const normalizeShuffleAvoidRecentCount = (value: unknown): number => {
 
 const queueSourceDisplayLabel = (source: QueueSource | null | undefined, playlistPlayback: PlaylistPlaybackInfo): string => {
   if (playlistPlayback.active) {
-    return `当前播放列表：${playlistPlayback.label ?? '播放列表'}`;
+    return tq('queue.source.playlist.current', {
+      label: playlistPlayback.label ?? tq('queue.source.playlist.default'),
+    });
   }
 
   if (!source) {
-    return '手动队列';
+    return tq('queue.source.manual');
   }
 
   if (source.type === 'songs') {
-    return source.sort === 'random' ? '全曲库随机' : `歌曲列表：${source.label}`;
+    return source.sort === 'random'
+      ? tq('queue.source.songs.random')
+      : tq('queue.source.songs.list', { label: source.label });
   }
   if (source.type === 'folder') {
-    return source.sort === 'random' ? `当前文件夹随机：${source.label}` : `文件夹：${source.label}`;
+    return source.sort === 'random'
+      ? tq('queue.source.folder.random', { label: source.label })
+      : tq('queue.source.folder.list', { label: source.label });
   }
   if (source.type === 'liked') {
-    return `我喜欢：${source.label}`;
+    return tq('queue.source.liked', { label: source.label });
   }
   if (source.type === 'album') {
-    return `专辑：${source.label}`;
+    return tq('queue.source.album', { label: source.label });
   }
   if (source.type === 'artist') {
-    return `艺术家：${source.label}`;
+    return tq('queue.source.artist', { label: source.label });
   }
   if (source.type === 'streaming') {
-    return `在线来源：${source.label}`;
+    return tq('queue.source.streaming', { label: source.label });
   }
   if (source.type === 'local-file') {
-    return `本地文件：${source.label}`;
+    return tq('queue.source.localFile', { label: source.label });
   }
 
-  return source.label || '手动队列';
+  return source.label || tq('queue.source.manual');
 };
 
 const queueChromeNoticeEvent = 'app:show-chrome-notice';
 
 export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Element => {
+  const sharedPlaybackStatus = useSharedPlaybackStatusOnly();
   const initialSession = useMemo(
     () => (shouldUseLegacyPlaybackStorage() ? readLegacyPlaybackSession() : defaultHydratedPlaybackSession),
     [],
@@ -1541,8 +1599,12 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const [repeatMode, setRepeatMode] = useState<RepeatMode>(initialSession.mode.repeatMode);
   const [automixEnabled, setAutomixEnabledState] = useState(initialSession.automixEnabled);
   const [autoFillQueueEnabled, setAutoFillQueueEnabledState] = useState(initialSession.mode.autoFillQueueEnabled);
+  const [continuousPlayMode, setContinuousPlayModeState] = useState<ContinuousPlayMode>(initialSession.mode.continuousPlayMode);
+  const [continuousPlayPreferences, setContinuousPlayPreferencesState] = useState<ContinuousPlayPreference[]>(initialSession.mode.continuousPlayPreferences);
+  const [isContinuousPlayFilling, setIsContinuousPlayFilling] = useState(false);
   const [hqPlayerTakeoverEnabled, setHqPlayerTakeoverEnabledState] = useState(readHqPlayerTakeoverEnabled);
   const [gaplessPlaybackEnabled, setGaplessPlaybackEnabledState] = useState(false);
+  const [autoPlayOnStartupEnabled, setAutoPlayOnStartupEnabled] = useState<boolean | null>(null);
   const [playbackShuffleAvoidRecentCount, setPlaybackShuffleAvoidRecentCount] = useState(defaultShuffleAvoidRecentCount);
   const [lastQueueFeedback, setLastQueueFeedback] = useState<QueueFeedback | null>(null);
   const [playlistPlaybackState, setPlaylistPlaybackState] = useState<PlaylistPlaybackState>(defaultPlaylistPlaybackState);
@@ -1556,6 +1618,9 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const repeatModeRef = useRef(repeatMode);
   const automixEnabledRef = useRef(automixEnabled);
   const autoFillQueueEnabledRef = useRef(autoFillQueueEnabled);
+  const continuousPlayModeRef = useRef(continuousPlayMode);
+  const continuousPlayPreferencesRef = useRef(continuousPlayPreferences);
+  const continuousPlayFillInFlightRef = useRef(false);
   const hqPlayerTakeoverEnabledRef = useRef(hqPlayerTakeoverEnabled);
   const gaplessPlaybackEnabledRef = useRef(gaplessPlaybackEnabled);
   const playbackShuffleAvoidRecentCountRef = useRef(playbackShuffleAvoidRecentCount);
@@ -1565,6 +1630,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const lowLoadPlaybackEnhancementsEnabledRef = useRef(false);
   const enhancedLowLoadPlaybackActiveRef = useRef(false);
   const latestAudioStatusRef = useRef<AudioStatus | null>(null);
+  const startupAutoPlayAttemptedRef = useRef(false);
   const isShuffleEnabledRef = useRef(isShuffleEnabled);
   const playlistPlaybackStateRef = useRef(playlistPlaybackState);
   const playbackHistorySessionRef = useRef<PlaybackHistorySession | null>(null);
@@ -1583,32 +1649,91 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const automixBpmAnalysisJobIdsRef = useRef<Map<string, string | 'done'>>(new Map());
   const automixBpmAnalysisPollTimersRef = useRef<Map<string, number>>(new Map());
   const scheduleAutomixBpmAnalysisRef = useRef<(track: LibraryTrack) => void>(() => undefined);
-  const automixLateArmRef = useRef<{ queueId: string; trackId: string } | null>(null);
   const automixShuffleNextQueueIdRef = useRef<Map<string, string>>(new Map());
   const cancelPlaybackSessionPersistRef = useRef<(() => void) | null>(null);
   const updateTrackSnapshotRef = useRef<PlaybackQueueContextValue['updateTrackSnapshot']>(() => undefined);
   const sessionHydratedRef = useRef(sessionHydrated);
+  const sessionRevisionRef = useRef(initialSession.revision ?? 0);
+  const applyingSessionSnapshotRef = useRef(false);
+  const localSessionDirtyRef = useRef(false);
+  const localMutationGenerationRef = useRef(0);
+  const persistenceChainRef = useRef<Promise<void>>(Promise.resolve());
   const suppressNextSessionPersistenceRef = useRef(false);
+  const lastHostQueueCommitRef = useRef<string | null>(null);
+  const lastFallbackEndedIdentityRef = useRef<string | null>(null);
+  const previousRemoveAfterPlayQueueIdRef = useRef(currentQueueId);
+  const backendQueueSyncRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
+  const lastBackendQueueSyncKeyRef = useRef<string | null>(null);
 
   const setItems = useCallback((nextItems: QueueItem[] | ((current: QueueItem[]) => QueueItem[])): void => {
     const resolved = typeof nextItems === 'function' ? nextItems(itemsRef.current) : nextItems;
     itemsRef.current = resolved;
     setItemsState(resolved);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
   }, []);
+
+  const syncQueueSnapshotToBackend = useCallback(
+    async (queueItems: BackendQueueSyncItem[], nextRepeatMode: RepeatMode, nextCurrentQueueId: string | null): Promise<void> => {
+      const syncQueue = window.echo?.playback?.syncQueueToBackend;
+      if (!syncQueue) {
+        return;
+      }
+
+      const key = JSON.stringify([nextRepeatMode, nextCurrentQueueId, queueItems]);
+      if (lastBackendQueueSyncKeyRef.current === key) {
+        return;
+      }
+
+      const activeSync = backendQueueSyncRef.current;
+      if (activeSync?.key === key) {
+        return activeSync.promise;
+      }
+
+      const previousSync = activeSync?.promise.catch(() => undefined) ?? Promise.resolve();
+      const promise = previousSync
+        .then(() => syncQueue(queueItems, nextRepeatMode, nextCurrentQueueId))
+        .then(() => {
+          lastBackendQueueSyncKeyRef.current = key;
+        })
+        .finally(() => {
+          if (backendQueueSyncRef.current?.promise === promise) {
+            backendQueueSyncRef.current = null;
+          }
+        });
+      backendQueueSyncRef.current = { key, promise };
+      return promise;
+    },
+    [],
+  );
 
   const setCurrentQueueId = useCallback((queueId: string | null): void => {
     currentQueueIdRef.current = queueId;
     setCurrentQueueIdState(queueId);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
   }, []);
 
   const setCurrentTrackIdInternal = useCallback((trackId: string | null): void => {
     currentTrackIdRef.current = trackId;
     setCurrentTrackIdState(trackId);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
   }, []);
 
   const setLastPlayedTrack = useCallback((track: LibraryTrack | null): void => {
     lastPlayedTrackRef.current = track;
     setLastPlayedTrackState(track);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
   }, []);
 
   useEffect(() => {
@@ -1636,16 +1761,28 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     const resolved = typeof nextHistory === 'function' ? nextHistory(historyRef.current) : nextHistory;
     historyRef.current = resolved;
     setHistoryState(resolved);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
   }, []);
 
   const setPlaylistPlaybackStateInternal = useCallback((state: PlaylistPlaybackState): void => {
     playlistPlaybackStateRef.current = state;
     setPlaylistPlaybackState(state);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
   }, []);
 
   const setResumeMemory = useCallback((resume: PersistedPlaybackSessionResume | null): void => {
     resumeMemoryRef.current = resume;
     setResumeMemoryState(resume);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
   }, []);
 
   const setHqPlayerTakeoverEnabled = useCallback((enabled: boolean): void => {
@@ -1657,11 +1794,17 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const setRepeatModeInternal = useCallback((mode: RepeatMode): void => {
     repeatModeRef.current = mode;
     setRepeatMode(mode);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
     if (shouldUseLegacyPlaybackStorage()) {
       writePlaybackModeMemory({
         isShuffleEnabled: isShuffleEnabledRef.current,
         repeatMode: mode,
         autoFillQueueEnabled: autoFillQueueEnabledRef.current,
+        continuousPlayMode: continuousPlayModeRef.current,
+        continuousPlayPreferences: continuousPlayPreferencesRef.current,
       });
     }
   }, []);
@@ -1734,10 +1877,18 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     clearLibraryShuffleDeck();
     isShuffleEnabledRef.current = next;
     setIsShuffleEnabled(next);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
     if (next) {
       const activeItem = findItemByQueueId(itemsRef.current, currentQueueIdRef.current);
       const scope = queueSourceDisplayLabel(activeItem?.source, playlistPlaybackStateRef.current);
-      publishQueueFeedback(`随机播放已开启：${scope}`, `避开最近 ${playbackShuffleAvoidRecentCountRef.current} 首`, 'info');
+      publishQueueFeedback(
+        tq('queue.feedback.shuffleOn', { scope }),
+        tq('queue.feedback.avoidRecent', { count: playbackShuffleAvoidRecentCountRef.current }),
+        'info',
+      );
     }
     if (next && repeatModeRef.current === 'all') {
       setRepeatModeInternal('off');
@@ -1746,6 +1897,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         isShuffleEnabled: next,
         repeatMode: repeatModeRef.current,
         autoFillQueueEnabled: autoFillQueueEnabledRef.current,
+        continuousPlayMode: continuousPlayModeRef.current,
+        continuousPlayPreferences: continuousPlayPreferencesRef.current,
       });
     }
   }, [clearLibraryShuffleDeck, publishQueueFeedback, setRepeatModeInternal]);
@@ -1753,11 +1906,82 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const setAutoFillQueueEnabled = useCallback((enabled: boolean): void => {
     autoFillQueueEnabledRef.current = enabled;
     setAutoFillQueueEnabledState(enabled);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
     if (shouldUseLegacyPlaybackStorage()) {
       writePlaybackModeMemory({
         isShuffleEnabled: isShuffleEnabledRef.current,
         repeatMode: repeatModeRef.current,
         autoFillQueueEnabled: enabled,
+        continuousPlayMode: continuousPlayModeRef.current,
+        continuousPlayPreferences: continuousPlayPreferencesRef.current,
+      });
+    }
+  }, []);
+
+  const setContinuousPlayMode = useCallback((mode: ContinuousPlayMode): void => {
+    continuousPlayModeRef.current = mode;
+    setContinuousPlayModeState(mode);
+    setItems((current) => current.filter((item) =>
+      item.source.type !== 'continuous-play' || item.queueId === currentQueueIdRef.current));
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
+    if (shouldUseLegacyPlaybackStorage()) {
+      writePlaybackModeMemory({
+        isShuffleEnabled: isShuffleEnabledRef.current,
+        repeatMode: repeatModeRef.current,
+        autoFillQueueEnabled: autoFillQueueEnabledRef.current,
+        continuousPlayMode: mode,
+        continuousPlayPreferences: continuousPlayPreferencesRef.current,
+      });
+    }
+  }, [setItems]);
+
+  const reduceContinuousPlayFrequency = useCallback((kind: ContinuousPlayPreferenceKind, value: string): void => {
+    const normalizedValue = value.normalize('NFKC').trim();
+    if (!normalizedValue) {
+      return;
+    }
+    const next = [
+      ...continuousPlayPreferencesRef.current.filter((item) =>
+        item.kind !== kind || item.value.normalize('NFKC').trim().toLocaleLowerCase() !== normalizedValue.toLocaleLowerCase()),
+      { kind, value: normalizedValue, weight: 0.35 },
+    ].slice(-200);
+    continuousPlayPreferencesRef.current = next;
+    setContinuousPlayPreferencesState(next);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
+    if (shouldUseLegacyPlaybackStorage()) {
+      writePlaybackModeMemory({
+        isShuffleEnabled: isShuffleEnabledRef.current,
+        repeatMode: repeatModeRef.current,
+        autoFillQueueEnabled: autoFillQueueEnabledRef.current,
+        continuousPlayMode: continuousPlayModeRef.current,
+        continuousPlayPreferences: next,
+      });
+    }
+  }, []);
+
+  const clearContinuousPlayPreferences = useCallback((): void => {
+    continuousPlayPreferencesRef.current = [];
+    setContinuousPlayPreferencesState([]);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
+    if (shouldUseLegacyPlaybackStorage()) {
+      writePlaybackModeMemory({
+        isShuffleEnabled: isShuffleEnabledRef.current,
+        repeatMode: repeatModeRef.current,
+        autoFillQueueEnabled: autoFillQueueEnabledRef.current,
+        continuousPlayMode: continuousPlayModeRef.current,
+        continuousPlayPreferences: [],
       });
     }
   }, []);
@@ -1765,6 +1989,10 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const setAutomixEnabled = useCallback((enabled: boolean): void => {
     automixEnabledRef.current = enabled;
     setAutomixEnabledState(enabled);
+    if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
+      localSessionDirtyRef.current = true;
+      localMutationGenerationRef.current += 1;
+    }
     writeAutomixEnabledMemory(enabled);
     if (enabled) {
       const currentItem = findItemByQueueId(itemsRef.current, currentQueueIdRef.current);
@@ -1776,22 +2004,33 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
 
   const applyHydratedPlaybackSession = useCallback(
     (session: HydratedPlaybackSession): void => {
-      setItems(session.items);
-      setHistory(session.history);
-      setCurrentQueueId(session.currentQueueId);
-      setCurrentTrackIdInternal(session.currentTrackId);
-      setLastPlayedTrack(session.lastPlayedTrack);
-      setResumeMemory(session.resume);
-      isShuffleEnabledRef.current = session.mode.isShuffleEnabled;
-      setIsShuffleEnabled(session.mode.isShuffleEnabled);
-      repeatModeRef.current = session.mode.repeatMode;
-      setRepeatMode(session.mode.repeatMode);
-      autoFillQueueEnabledRef.current = session.mode.autoFillQueueEnabled;
-      setAutoFillQueueEnabledState(session.mode.autoFillQueueEnabled);
-      const hydratedAutomixEnabled = canRestoreAutomixEnabled(session.automixEnabled);
-      automixEnabledRef.current = hydratedAutomixEnabled;
-      setAutomixEnabledState(hydratedAutomixEnabled);
-      setPlaylistPlaybackStateInternal(session.playlistPlayback ?? defaultPlaylistPlaybackState);
+      applyingSessionSnapshotRef.current = true;
+      try {
+        sessionRevisionRef.current = session.revision ?? 0;
+        setItems(session.items);
+        setHistory(session.history);
+        setCurrentQueueId(session.currentQueueId);
+        setCurrentTrackIdInternal(session.currentTrackId);
+        setLastPlayedTrack(session.lastPlayedTrack);
+        setResumeMemory(session.resume);
+        isShuffleEnabledRef.current = session.mode.isShuffleEnabled;
+        setIsShuffleEnabled(session.mode.isShuffleEnabled);
+        repeatModeRef.current = session.mode.repeatMode;
+        setRepeatMode(session.mode.repeatMode);
+        autoFillQueueEnabledRef.current = session.mode.autoFillQueueEnabled;
+        setAutoFillQueueEnabledState(session.mode.autoFillQueueEnabled);
+        continuousPlayModeRef.current = session.mode.continuousPlayMode;
+        setContinuousPlayModeState(session.mode.continuousPlayMode);
+        continuousPlayPreferencesRef.current = session.mode.continuousPlayPreferences;
+        setContinuousPlayPreferencesState(session.mode.continuousPlayPreferences);
+        const hydratedAutomixEnabled = canRestoreAutomixEnabled(session.automixEnabled);
+        automixEnabledRef.current = hydratedAutomixEnabled;
+        setAutomixEnabledState(hydratedAutomixEnabled);
+        setPlaylistPlaybackStateInternal(session.playlistPlayback ?? defaultPlaylistPlaybackState);
+        localSessionDirtyRef.current = false;
+      } finally {
+        applyingSessionSnapshotRef.current = false;
+      }
     },
     [setCurrentQueueId, setCurrentTrackIdInternal, setHistory, setItems, setLastPlayedTrack, setPlaylistPlaybackStateInternal, setResumeMemory],
   );
@@ -1807,6 +2046,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       isShuffleEnabled: isShuffleEnabledRef.current,
       repeatMode: repeatModeRef.current,
       autoFillQueueEnabled: autoFillQueueEnabledRef.current,
+      continuousPlayMode: continuousPlayModeRef.current,
+      continuousPlayPreferences: continuousPlayPreferencesRef.current,
     },
     automixEnabled: automixTemporarilyDisabled ? false : automixEnabledRef.current,
   }), []);
@@ -1825,6 +2066,10 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       setRepeatMode(snapshot.mode.repeatMode);
       autoFillQueueEnabledRef.current = snapshot.mode.autoFillQueueEnabled;
       setAutoFillQueueEnabledState(snapshot.mode.autoFillQueueEnabled);
+      continuousPlayModeRef.current = snapshot.mode.continuousPlayMode;
+      setContinuousPlayModeState(snapshot.mode.continuousPlayMode);
+      continuousPlayPreferencesRef.current = snapshot.mode.continuousPlayPreferences;
+      setContinuousPlayPreferencesState(snapshot.mode.continuousPlayPreferences);
       const nextAutomixEnabled = canRestoreAutomixEnabled(snapshot.automixEnabled);
       automixEnabledRef.current = nextAutomixEnabled;
       setAutomixEnabledState(nextAutomixEnabled);
@@ -1848,6 +2093,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     const session: HydratedPlaybackSession = playlistSnapshot
       ? {
           version: 1,
+          revision: sessionRevisionRef.current,
           items: playlistSnapshot.items,
           currentQueueId: playlistSnapshot.currentQueueId,
           currentTrackId: playlistSnapshot.currentTrackId,
@@ -1860,6 +2106,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         }
       : {
           version: 1,
+          revision: sessionRevisionRef.current,
           items: itemsRef.current,
           currentQueueId: currentQueueIdRef.current,
           currentTrackId: currentTrackIdRef.current,
@@ -1870,6 +2117,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
             isShuffleEnabled: isShuffleEnabledRef.current,
             repeatMode: repeatModeRef.current,
             autoFillQueueEnabled: autoFillQueueEnabledRef.current,
+            continuousPlayMode: continuousPlayModeRef.current,
+            continuousPlayPreferences: continuousPlayPreferencesRef.current,
           },
           automixEnabled: automixTemporarilyDisabled ? false : automixEnabledRef.current,
           playlistPlayback: null,
@@ -1882,6 +2131,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     const playlistState = playlistPlaybackStateRef.current;
     return createPersistedSessionSnapshot({
       version: 1,
+      revision: sessionRevisionRef.current,
       items: itemsRef.current,
       currentQueueId: currentQueueIdRef.current,
       currentTrackId: currentTrackIdRef.current,
@@ -1892,6 +2142,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         isShuffleEnabled: isShuffleEnabledRef.current,
         repeatMode: repeatModeRef.current,
         autoFillQueueEnabled: autoFillQueueEnabledRef.current,
+        continuousPlayMode: continuousPlayModeRef.current,
+        continuousPlayPreferences: continuousPlayPreferencesRef.current,
       },
       automixEnabled: automixTemporarilyDisabled ? false : automixEnabledRef.current,
       playlistPlayback: playlistState.active && playlistState.snapshot ? playlistState : null,
@@ -1903,30 +2155,74 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       return;
     }
 
-    const snapshot = createCurrentPersistedSession();
-    const broadcastSnapshot = createCurrentBroadcastSession();
     const playback = window.echo?.playback;
-    if (playback?.saveQueueSession) {
+    if (!playback?.saveQueueSession) {
+      const snapshot = createCurrentPersistedSession();
+      writePlaybackQueueMemory(snapshot);
+      writePlaybackModeMemory({
+        isShuffleEnabled: snapshot.mode.isShuffleEnabled,
+        repeatMode: snapshot.mode.repeatMode,
+        autoFillQueueEnabled: snapshot.mode.autoFillQueueEnabled === true,
+        continuousPlayMode: isContinuousPlayMode(snapshot.mode.continuousPlayMode) ? snapshot.mode.continuousPlayMode : 'similar',
+        continuousPlayPreferences: normalizeContinuousPlayPreferences(snapshot.mode.continuousPlayPreferences),
+      });
+      writeAutomixEnabledMemory(snapshot.mode.automixEnabled);
+      localSessionDirtyRef.current = false;
+      return;
+    }
+
+    const runPersistence = async (): Promise<void> => {
+      const snapshot = createCurrentPersistedSession();
+      const broadcastSnapshot = createCurrentBroadcastSession();
+      const expectedRevision = sessionRevisionRef.current;
+      const mutationGeneration = localMutationGenerationRef.current;
       try {
-        const saved = await playback.saveQueueSession(snapshot, { broadcastSnapshot });
+        const saved = await playback.saveQueueSession(snapshot, {
+          broadcastSnapshot,
+          expectedRevision,
+        });
+        sessionRevisionRef.current = saved.revision ?? expectedRevision + 1;
+        if (localMutationGenerationRef.current === mutationGeneration) {
+          localSessionDirtyRef.current = false;
+        }
         const savedResume = playbackSessionFromPersisted(saved).resume;
         if (resumeMemoryRef.current && !savedResume) {
           setResumeMemory(null);
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('playback_queue_session_conflict')) {
+          const authoritative = await playback.getQueueSession?.().catch(() => null);
+          if (authoritative) {
+            applyHydratedPlaybackSession(playbackSessionFromPersisted(authoritative));
+            publishQueueFeedback(
+              '队列已从另一播放窗口更新',
+              '当前窗口的过期修改未覆盖最新队列',
+              'info',
+            );
+          }
+        }
         // Persistence failures should not interrupt playback controls.
       }
-      return;
+    };
+
+    const queued = persistenceChainRef.current.then(runPersistence, runPersistence);
+    persistenceChainRef.current = queued.catch(() => undefined);
+    await queued;
+  }, [applyHydratedPlaybackSession, createCurrentBroadcastSession, createCurrentPersistedSession, publishQueueFeedback, setResumeMemory]);
+
+  const setPlaybackOrder = useCallback(async (mode: PlaybackOrderMode): Promise<void> => {
+    const nextRepeatMode: RepeatMode = mode === 'repeat-one' ? 'one' : 'off';
+    const nextShuffleEnabled = mode === 'shuffle';
+
+    if (repeatModeRef.current !== nextRepeatMode) {
+      setRepeatModeInternal(nextRepeatMode);
+    }
+    if (isShuffleEnabledRef.current !== nextShuffleEnabled) {
+      toggleShuffle();
     }
 
-    writePlaybackQueueMemory(snapshot);
-    writePlaybackModeMemory({
-      isShuffleEnabled: snapshot.mode.isShuffleEnabled,
-      repeatMode: snapshot.mode.repeatMode,
-      autoFillQueueEnabled: snapshot.mode.autoFillQueueEnabled === true,
-    });
-    writeAutomixEnabledMemory(snapshot.mode.automixEnabled);
-  }, [createCurrentBroadcastSession, createCurrentPersistedSession, setResumeMemory]);
+    await persistPlaybackSessionNow();
+  }, [persistPlaybackSessionNow, setRepeatModeInternal, toggleShuffle]);
 
   const cancelScheduledPlaybackSessionPersistence = useCallback((): void => {
     cancelPlaybackSessionPersistRef.current?.();
@@ -1954,6 +2250,10 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       const enabled = settings.gaplessPlaybackEnabled === true;
       gaplessPlaybackEnabledRef.current = enabled;
       setGaplessPlaybackEnabledState(enabled);
+    }
+
+    if ('autoPlayOnStartup' in settings) {
+      setAutoPlayOnStartupEnabled(settings.autoPlayOnStartup === true);
     }
 
     if ('playbackShuffleAvoidRecentCount' in settings) {
@@ -1996,6 +2296,17 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     }
   }, [clearLibraryShuffleDeck]);
 
+  const setGaplessPlaybackEnabled = useCallback(async (enabled: boolean): Promise<void> => {
+    const app = window.echo?.app;
+    if (!app?.setSettings) {
+      throw new Error('Desktop bridge unavailable.');
+    }
+
+    const settings = await app.setSettings({ gaplessPlaybackEnabled: enabled });
+    applyPlaybackSettings(settings);
+    window.dispatchEvent(new CustomEvent('settings:changed', { detail: settings }));
+  }, [applyPlaybackSettings]);
+
   useEffect(() => {
     let cancelled = false;
     void window.echo?.app?.getSettings?.()
@@ -2013,6 +2324,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         typeof event.detail === 'object' &&
         (
           'gaplessPlaybackEnabled' in event.detail ||
+          'autoPlayOnStartup' in event.detail ||
           'playbackShuffleAvoidRecentCount' in event.detail ||
           'audioAnalysisEnabled' in event.detail ||
           'lowLoadPlaybackModeEnabled' in event.detail ||
@@ -2074,7 +2386,10 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         const legacySession = readLegacyPlaybackSession();
         if (hasLegacyPlaybackSession(legacySession)) {
           applyHydratedPlaybackSession(legacySession);
-          await playback.saveQueueSession?.(createPersistedSessionSnapshot(legacySession)).catch(() => null);
+          const migrated = await playback.saveQueueSession?.(createPersistedSessionSnapshot(legacySession)).catch(() => null);
+          if (migrated) {
+            sessionRevisionRef.current = migrated.revision ?? sessionRevisionRef.current;
+          }
           clearLegacyPlaybackMemory();
         }
       }
@@ -2109,6 +2424,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     autoFillQueueEnabled,
     automixEnabled,
     cancelScheduledPlaybackSessionPersistence,
+    continuousPlayMode,
+    continuousPlayPreferences,
     currentQueueId,
     currentTrackId,
     history,
@@ -2123,6 +2440,14 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
 
   useEffect(() => {
     const unsubscribe = window.echo?.playback?.onQueueSessionChanged?.((snapshot) => {
+      const incomingRevision = snapshot?.revision ?? 0;
+      if (snapshot?.revision !== undefined && incomingRevision <= sessionRevisionRef.current) {
+        return;
+      }
+      if (snapshot && localSessionDirtyRef.current) {
+        void persistPlaybackSessionNow();
+        return;
+      }
       suppressNextSessionPersistenceRef.current = true;
       applyHydratedPlaybackSession(playbackSessionFromPersisted(snapshot));
       sessionHydratedRef.current = true;
@@ -2132,7 +2457,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     return () => {
       unsubscribe?.();
     };
-  }, [applyHydratedPlaybackSession]);
+  }, [applyHydratedPlaybackSession, persistPlaybackSessionNow]);
 
   useEffect(() => {
     const flush = (): void => {
@@ -2292,6 +2617,22 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
 
     return queuedTrack ?? (lastPlayedTrack?.id === currentTrackId ? lastPlayedTrack : null);
   }, [currentItem, currentTrackId, items, lastPlayedTrack]);
+
+  useEffect(() => {
+    const previousQueueId = previousRemoveAfterPlayQueueIdRef.current;
+    previousRemoveAfterPlayQueueIdRef.current = currentQueueId;
+    if (!previousQueueId || previousQueueId === currentQueueId) {
+      return;
+    }
+
+    const previousItem = itemsRef.current.find((item) => item.queueId === previousQueueId);
+    if (previousItem?.removeAfterPlay !== true) {
+      return;
+    }
+
+    setItems((current) => current.filter((item) => item.queueId !== previousQueueId));
+    setHistory((current) => current.filter((item) => item.queueId !== previousQueueId));
+  }, [currentQueueId, setHistory, setItems]);
   const playlistPlaybackSummary = useMemo<PlaylistPlaybackInfo>(
     () => ({
       active: playlistPlaybackState.active,
@@ -2557,7 +2898,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     return next;
   }, []);
 
-  const createAutomixOptions = useCallback((item: QueueItem, options: { startSeconds?: number; force?: boolean; includeUpcoming?: boolean } = {}): {
+  const createAutomixOptions = useCallback((item: QueueItem): {
     enabled: boolean;
     maxTransitionSeconds: number;
     beatAlignEnabled: boolean;
@@ -2569,10 +2910,6 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     if (!automixEnabledRef.current || repeatModeRef.current === 'one') {
       return undefined;
     }
-    if (!shouldArmAutomixForPlaybackStart(item.track, options.startSeconds, options.force === true)) {
-      return undefined;
-    }
-
     const current = itemsRef.current;
     const index = current.findIndex((candidate) => candidate.queueId === item.queueId);
     const next = isShuffleEnabledRef.current
@@ -2587,15 +2924,13 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           .slice(index + 2)
           .filter((candidate) => isAutomixQueueCandidate(candidate.track))
           .slice(0, 2);
-    const includeUpcoming = options.includeUpcoming !== false;
-
     return {
       enabled: true,
       maxTransitionSeconds: 16,
       beatAlignEnabled: true,
       nextItem: toPlayableTrack(next.track),
       nextProbe: createProbeFromTrack(next.track),
-      ...(includeUpcoming && upcoming.length > 0
+      ...(upcoming.length > 0
         ? {
             upcomingItems: upcoming.map((candidate) => toPlayableTrack(candidate.track)),
             upcomingProbes: upcoming.map((candidate) => createProbeFromTrack(candidate.track)),
@@ -2608,6 +2943,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     enabled: boolean;
     nextItem: PlayableTrack | null;
     nextProbe?: ReturnType<typeof createProbeFromTrack>;
+    upcomingItems?: PlayableTrack[];
+    upcomingProbes?: ReturnType<typeof createProbeFromTrack>[];
   } | undefined => {
     const playbackRate = typeof output?.playbackRate === 'number' && Number.isFinite(output.playbackRate) ? output.playbackRate : 1;
     if (
@@ -2633,10 +2970,27 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       return undefined;
     }
 
+    const following: QueueItem[] = [];
+    let previous = next;
+    for (let candidateIndex = index + 2; candidateIndex < current.length && following.length < 30; candidateIndex += 1) {
+      const candidate = current[candidateIndex];
+      if (!candidate || !isLocalGaplessCandidate(candidate.track) || !isGaplessAlbumAdjacent(previous.track, candidate.track)) {
+        break;
+      }
+      following.push(candidate);
+      previous = candidate;
+    }
+
     return {
       enabled: true,
       nextItem: toPlayableTrack(next.track),
       nextProbe: createProbeFromTrack(next.track),
+      ...(following.length > 0
+        ? {
+            upcomingItems: following.map((candidate) => toPlayableTrack(candidate.track)),
+            upcomingProbes: following.map((candidate) => createProbeFromTrack(candidate.track)),
+          }
+        : {}),
     };
   }, []);
 
@@ -2709,6 +3063,9 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     const operation = 'playLocalTrack';
     const playback = window.echo?.playback;
     const track = item.track;
+    if (track.unavailable === true) {
+      throw new Error('Queue item is unavailable.');
+    }
     const requestToken = playRequestTokenRef.current + 1;
     playRequestTokenRef.current = requestToken;
 
@@ -2719,30 +3076,20 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         ? Math.max(0, options.startSeconds)
         : undefined;
     const resumeStartSeconds = requestedStartSeconds ?? getResumeStartSecondsForItem(item);
-    if (options.forceAutomix !== true) {
-      automixLateArmRef.current = null;
-    }
-    const automix = runQueuePlaybackStepSync(operation, 'resolve automix', track.id, () => createAutomixOptions(item, {
-      startSeconds: resumeStartSeconds,
-      force: options.forceAutomix === true,
-      includeUpcoming: options.automixIncludeUpcoming !== false,
-    }));
-    const silentRearm = options.silentRearm === true && options.forceAutomix === true;
-    if (!silentRearm) {
-      schedulePlaybackHistoryFinish();
-      runQueuePlaybackStepSync(operation, 'set queue/current track', track.id, () => {
-        setCurrentQueueId(item.queueId);
-        setCurrentTrackIdInternal(item.track.id);
-        setLastPlayedTrack(item.track);
-        beginPlaybackSwitchSnapshot({
-          state: 'loading',
-          currentTrackId: item.track.id,
-          positionMs: Math.round((resumeStartSeconds ?? 0) * 1000),
-          durationMs: Math.round(Math.max(0, item.track.duration) * 1000),
-          filePath: track.path,
-        });
+    let automix = runQueuePlaybackStepSync(operation, 'resolve automix', track.id, () => createAutomixOptions(item));
+    schedulePlaybackHistoryFinish();
+    runQueuePlaybackStepSync(operation, 'set queue/current track', track.id, () => {
+      setCurrentQueueId(item.queueId);
+      setCurrentTrackIdInternal(item.track.id);
+      setLastPlayedTrack(item.track);
+      beginPlaybackSwitchSnapshot({
+        state: 'loading',
+        currentTrackId: item.track.id,
+        positionMs: Math.round((resumeStartSeconds ?? 0) * 1000),
+        durationMs: Math.round(Math.max(0, item.track.duration) * 1000),
+        filePath: track.path,
       });
-    }
+    });
     const rawStatus = await (async () => {
       try {
         if (shouldPausePreviousSpotify && previousItem) {
@@ -2760,6 +3107,32 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         }
         if (shouldForceHqPlayerConnect) {
           throw new Error('HQPlayer 接管不可用：没有可用的 HQPlayer Connect 通道。');
+        }
+
+        if (automix) {
+          const queueItems: BackendQueueSyncItem[] = itemsRef.current
+            .map((candidate) => ({
+              itemId: candidate.queueId,
+              trackId: candidate.track.id,
+              filePath: candidate.track.path ?? '',
+              sampleRate: candidate.track.sampleRate ?? undefined,
+              startSeconds: 0,
+              metadata: {
+                title: candidate.track.title,
+                artist: candidate.track.artist,
+                album: candidate.track.album,
+                albumArtist: candidate.track.albumArtist,
+                coverUrl: candidate.track.coverThumb,
+              },
+            }))
+            .filter((candidate) => candidate.filePath);
+          try {
+            await runQueuePlaybackStep(operation, 'sync automix queue', track.id, () =>
+              syncQueueSnapshotToBackend(queueItems, repeatModeRef.current, item.queueId));
+          } catch (error) {
+            automix = undefined;
+            console.warn('[智能过渡] 队列同步失败，本次播放安全降级为普通切歌:', error);
+          }
         }
 
         const output = await runQueuePlaybackStep(operation, 'resolvePlaybackSpeedOutput', track.id, resolvePlaybackSpeedOutput);
@@ -2785,7 +3158,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
                     output,
                     automix,
                     gapless,
-                    ...(automixEnabledRef.current === true && !silentRearm ? { automixAnalyze: true } : {}),
+                    ...(automixEnabledRef.current === true ? { automixAnalyze: true } : {}),
                     forceRefresh: options.forceRefresh === true,
                   })
                   : playback.playLocalFile({
@@ -2800,9 +3173,9 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
                     },
                     startSeconds: resumeStartSeconds,
                     output,
-                    probe: createProbeFromTrack(track, { durationSeconds: options.automixProbeDurationSeconds }),
+                    probe: createProbeFromTrack(track),
                     replayGain: replayGainFromTrack(track),
-                    ...(automixEnabledRef.current === true && !silentRearm ? { automixAnalyze: true } : {}),
+                    ...(automixEnabledRef.current === true ? { automixAnalyze: true } : {}),
                     automix,
                     gapless,
                   }),
@@ -2813,115 +3186,30 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           throw new Error(playbackCancellationErrorMessage);
         }
 
-        if (!silentRearm) {
-          if (previousItem && currentQueueIdRef.current === item.queueId) {
-            setCurrentQueueId(previousItem.queueId);
-            setCurrentTrackIdInternal(previousItem.track.id);
-            setLastPlayedTrack(previousItem.track);
-          }
-          setPlaybackStatusSnapshot({
-            playbackStatus: statusForPlaybackFailure(item.track),
-            error: error instanceof Error ? error.message : String(error),
-            playbackVisualIntent: null,
-          });
+        if (previousItem && currentQueueIdRef.current === item.queueId) {
+          setCurrentQueueId(previousItem.queueId);
+          setCurrentTrackIdInternal(previousItem.track.id);
+          setLastPlayedTrack(previousItem.track);
         }
+        setPlaybackStatusSnapshot({
+          playbackStatus: statusForPlaybackFailure(item.track),
+          error: error instanceof Error ? error.message : String(error),
+          playbackVisualIntent: null,
+        });
         throw error;
       }
     })();
-    if (!silentRearm && resumeMemoryRef.current) {
+    if (resumeMemoryRef.current) {
       setResumeMemory(null);
     }
     const status = playbackStatusForItem(rawStatus, item, resumeStartSeconds ?? 0);
     playbackStatusTokensRef.current.set(status, requestToken);
     playbackStatusPreviousItemRef.current.set(status, previousItem);
-    if (!silentRearm && playRequestTokenRef.current === requestToken) {
+    if (playRequestTokenRef.current === requestToken) {
       schedulePlaybackHistoryStart(item);
     }
     return status;
-  }, [createAutomixOptions, createGaplessOptions, getResumeStartSecondsForItem, playConnectOutputTrack, schedulePlaybackHistoryFinish, schedulePlaybackHistoryStart, setCurrentQueueId, setCurrentTrackIdInternal, setLastPlayedTrack, setResumeMemory]);
-
-  useEffect(() => {
-    const audio = window.echo?.audio;
-    if (!audio?.onStatus) {
-      return undefined;
-    }
-
-    let arming = false;
-    const maybeArmAutomix = (status: AudioStatus): void => {
-      if (
-        arming ||
-        !automixEnabledRef.current ||
-        status.state !== 'playing' ||
-        hasPendingAutomixTransition(status.automix)
-      ) {
-        return;
-      }
-
-      const item =
-        findItemByQueueId(itemsRef.current, currentQueueIdRef.current) ??
-        itemsRef.current.find((candidate) => candidate.track.id === status.currentTrackId) ??
-        null;
-      if (!item || isSpotifyTrack(item.track) || item.track.id !== status.currentTrackId) {
-        return;
-      }
-
-      const durationSeconds = status.durationSeconds > 0 ? status.durationSeconds : item.track.duration;
-      const positionSeconds = Math.max(0, status.positionSeconds);
-      if (
-        positionSeconds < resolveAutomixArmStartSeconds(durationSeconds) ||
-        positionSeconds >= durationSeconds - 4
-      ) {
-        return;
-      }
-
-      const armKey = { queueId: item.queueId, trackId: item.track.id };
-      const previousArm = automixLateArmRef.current;
-      if (previousArm?.queueId === armKey.queueId && previousArm.trackId === armKey.trackId) {
-        return;
-      }
-      if (!createAutomixOptions(item, { startSeconds: positionSeconds, force: true })) {
-        return;
-      }
-
-      const itemForAutomix =
-        durationSeconds > 0 && item.track.duration <= 0
-          ? { ...item, track: { ...item.track, duration: durationSeconds } }
-          : item;
-      if (itemForAutomix !== item) {
-        setItems((current) => current.map((candidate) => (candidate.queueId === item.queueId ? itemForAutomix : candidate)));
-      }
-
-      automixLateArmRef.current = armKey;
-      arming = true;
-      void playLocalTrack(itemForAutomix, {
-        routeToConnectOutput: false,
-        startSeconds: positionSeconds,
-        forceAutomix: true,
-        automixIncludeUpcoming: false,
-        automixProbeDurationSeconds: durationSeconds,
-        silentRearm: true,
-      })
-        .then((nextStatus) => {
-          setPlaybackStatusSnapshot({
-            playbackStatus: playbackStatusForItem(nextStatus, item, positionSeconds),
-            error: null,
-          });
-        })
-        .catch(() => {
-          automixLateArmRef.current = null;
-        })
-        .finally(() => {
-          arming = false;
-        });
-    };
-
-    const unsubscribe = audio.onStatus(maybeArmAutomix);
-    return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
-    };
-  }, [createAutomixOptions, playLocalTrack]);
+  }, [createAutomixOptions, createGaplessOptions, getResumeStartSecondsForItem, playConnectOutputTrack, schedulePlaybackHistoryFinish, schedulePlaybackHistoryStart, setCurrentQueueId, setCurrentTrackIdInternal, setLastPlayedTrack, setResumeMemory, syncQueueSnapshotToBackend]);
 
   const autoSearchMv = useCallback((trackId: string): void => {
     const mvApi = window.echo?.mv;
@@ -3057,7 +3345,6 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     }
 
     const current = itemsRef.current;
-    const index = current.findIndex((candidate) => candidate.queueId === item.queueId);
     const next = automixEnabledRef.current && isShuffleEnabledRef.current
       ? getStableShuffleAutomixNextItem(item)
       : resolveSequentialNextItem(current, item, repeatModeRef.current);
@@ -3164,6 +3451,65 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     },
     [autoSearchMv, prepareNextMediaItem, schedulePlaybackSessionPersistence, setCurrentQueueId, setCurrentTrackIdInternal, setHistory, setLastPlayedTrack],
   );
+
+  useEffect(() => {
+    const audio = window.echo?.audio;
+    if (!audio?.onStatus) {
+      return undefined;
+    }
+
+    const commitHostQueueAdvance = (status: AudioStatus): void => {
+      const queueItemId = status.currentQueueItemId;
+      const queueRevision = Number(status.queueRevision);
+      if (
+        status.state !== 'playing' ||
+        status.nativeDirectLocalPlaybackActive !== true ||
+        !queueItemId ||
+        !Number.isSafeInteger(queueRevision) ||
+        queueRevision <= 0
+      ) {
+        return;
+      }
+
+      const commitKey = `${queueRevision}:${queueItemId}`;
+      if (lastHostQueueCommitRef.current === commitKey) {
+        return;
+      }
+
+      const next = findItemByQueueId(itemsRef.current, queueItemId);
+      if (!next || (status.currentTrackId && next.track.id !== status.currentTrackId)) {
+        console.error('[Queue] host advance target does not match the renderer snapshot:', {
+          queueRevision,
+          queueItemId,
+          trackId: status.currentTrackId,
+        });
+        return;
+      }
+
+      lastHostQueueCommitRef.current = commitKey;
+      if (currentQueueIdRef.current === next.queueId) {
+        setPlaybackStatusSnapshot({ audioStatus: status, error: null });
+        return;
+      }
+
+      const previous = findItemByQueueId(itemsRef.current, currentQueueIdRef.current);
+      schedulePlaybackHistoryFinish(true);
+      commitPlayedItem(next, {
+        state: 'playing',
+        currentTrackId: next.track.id,
+        positionMs: Math.round(Math.max(0, status.positionSeconds) * 1000),
+        durationMs: Math.round(Math.max(0, status.durationSeconds || next.track.duration) * 1000),
+        filePath: next.track.path,
+      }, { previousItem: previous });
+      setPlaybackStatusSnapshot({ audioStatus: status, error: null });
+      schedulePlaybackHistoryStart(next);
+    };
+
+    const unsubscribe = audio.onStatus(commitHostQueueAdvance);
+    return () => {
+      unsubscribe?.();
+    };
+  }, [commitPlayedItem, schedulePlaybackHistoryFinish, schedulePlaybackHistoryStart]);
 
   useEffect(() => {
     const unsubscribe = window.echo?.playback?.onAutomixAdvance?.((event) => {
@@ -3337,8 +3683,24 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const appendToQueue = useCallback(
     (track: LibraryTrack, source: QueueSource = manualSource): void => {
       restorePlaylistPlaybackSnapshotOnly();
-      setItems((current) => [...current, createQueueItem(track, source)]);
-      publishQueueFeedback('已加入队尾', `${track.title} · ${queueSourceDisplayLabel(source, playlistPlaybackStateRef.current)}`);
+      setItems((current) => {
+        const item = createQueueItem(track, source);
+        if (source.type === 'continuous-play') {
+          return [...current, item];
+        }
+        const currentIndex = findCurrentIndex(current, currentQueueIdRef.current, currentTrackIdRef.current);
+        const recommendedTailIndex = current.findIndex((candidate, index) =>
+          index > currentIndex && candidate.source.type === 'continuous-play');
+        const insertIndex = recommendedTailIndex >= 0 ? recommendedTailIndex : current.length;
+        return [...current.slice(0, insertIndex), item, ...current.slice(insertIndex)];
+      });
+      publishQueueFeedback(
+        tq('queue.feedback.addedToTail'),
+        tq('queue.feedback.trackDetail', {
+          title: track.title,
+          source: queueSourceDisplayLabel(source, playlistPlaybackStateRef.current),
+        }),
+      );
     },
     [publishQueueFeedback, restorePlaylistPlaybackSnapshotOnly, setItems],
   );
@@ -3350,8 +3712,23 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       }
 
       restorePlaylistPlaybackSnapshotOnly();
-      setItems((current) => [...current, ...tracks.map((track) => createQueueItem(track, source))]);
-      publishQueueFeedback(`已加入 ${tracks.length} 首`, `${queueSourceDisplayLabel(source, playlistPlaybackStateRef.current)} · 队尾`);
+      setItems((current) => {
+        const nextItems = tracks.map((track) => createQueueItem(track, source));
+        if (source.type === 'continuous-play') {
+          return [...current, ...nextItems];
+        }
+        const currentIndex = findCurrentIndex(current, currentQueueIdRef.current, currentTrackIdRef.current);
+        const recommendedTailIndex = current.findIndex((candidate, index) =>
+          index > currentIndex && candidate.source.type === 'continuous-play');
+        const insertIndex = recommendedTailIndex >= 0 ? recommendedTailIndex : current.length;
+        return [...current.slice(0, insertIndex), ...nextItems, ...current.slice(insertIndex)];
+      });
+      publishQueueFeedback(
+        tq('queue.feedback.addedCount', { count: tracks.length }),
+        tq('queue.feedback.sourceTail', {
+          source: queueSourceDisplayLabel(source, playlistPlaybackStateRef.current),
+        }),
+      );
     },
     [publishQueueFeedback, restorePlaylistPlaybackSnapshotOnly, setItems],
   );
@@ -3365,7 +3742,34 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         const nextItem = createQueueItem(track, source);
         return [...current.slice(0, insertIndex), nextItem, ...current.slice(insertIndex)];
       });
-      publishQueueFeedback('已加入下一首', `${track.title} · ${queueSourceDisplayLabel(source, playlistPlaybackStateRef.current)}`);
+      publishQueueFeedback(
+        tq('queue.feedback.addedNext'),
+        tq('queue.feedback.trackDetail', {
+          title: track.title,
+          source: queueSourceDisplayLabel(source, playlistPlaybackStateRef.current),
+        }),
+      );
+    },
+    [publishQueueFeedback, restorePlaylistPlaybackSnapshotOnly, setItems],
+  );
+
+  const playTracksNext = useCallback(
+    (tracks: LibraryTrack[], source: QueueSource = manualSource): void => {
+      if (tracks.length === 0) {
+        return;
+      }
+
+      restorePlaylistPlaybackSnapshotOnly();
+      setItems((current) => {
+        const currentIndex = findCurrentIndex(current, currentQueueIdRef.current, currentTrackIdRef.current);
+        const insertIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
+        const nextItems = tracks.map((track) => createQueueItem(track, source));
+        return [...current.slice(0, insertIndex), ...nextItems, ...current.slice(insertIndex)];
+      });
+      publishQueueFeedback(
+        tq('queue.feedback.addedNextCount', { count: tracks.length }),
+        queueSourceDisplayLabel(source, playlistPlaybackStateRef.current),
+      );
     },
     [publishQueueFeedback, restorePlaylistPlaybackSnapshotOnly, setItems],
   );
@@ -3405,30 +3809,73 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     (trackId: string): number => {
       restorePlaylistPlaybackSnapshotOnly();
       const queuedCount = itemsRef.current.filter((item) => item.track.id === trackId).length;
-      if (queuedCount === 0) {
+      const currentItem = findItemByQueueId(itemsRef.current, currentQueueIdRef.current);
+      const wasCurrentTrack = currentTrackIdRef.current === trackId || currentItem?.track.id === trackId;
+      const wasLastPlayedTrack = lastPlayedTrackRef.current?.id === trackId;
+      const hasResumeMemory = resumeMemoryRef.current?.trackId === trackId;
+      if (queuedCount === 0 && !wasCurrentTrack && !wasLastPlayedTrack && !hasResumeMemory) {
         return 0;
       }
 
-      const wasCurrentTrack = findItemByQueueId(itemsRef.current, currentQueueIdRef.current)?.track.id === trackId;
       setItems((current) => current.filter((item) => item.track.id !== trackId));
       setHistory((current) => current.filter((item) => item.track.id !== trackId));
 
-      if (wasCurrentTrack) {
+      if (currentItem?.track.id === trackId) {
         setCurrentQueueId(null);
+      }
+      if (wasCurrentTrack) {
+        setCurrentTrackIdInternal(null);
+      }
+      if (wasLastPlayedTrack) {
+        setLastPlayedTrack(null);
+      }
+      if (hasResumeMemory) {
+        setResumeMemory(null);
       }
 
       return queuedCount;
     },
-    [restorePlaylistPlaybackSnapshotOnly, setCurrentQueueId, setHistory, setItems],
+    [
+      restorePlaylistPlaybackSnapshotOnly,
+      setCurrentQueueId,
+      setCurrentTrackIdInternal,
+      setHistory,
+      setItems,
+      setLastPlayedTrack,
+      setResumeMemory,
+    ],
+  );
+
+  const setQueueItemsRemoveAfterPlay = useCallback(
+    (queueIds: string[], enabled: boolean): void => {
+      const queueIdSet = new Set(queueIds);
+      if (queueIdSet.size === 0) {
+        return;
+      }
+
+      setItems((current) =>
+        current.map((item) =>
+          queueIdSet.has(item.queueId)
+            ? { ...item, removeAfterPlay: enabled || undefined }
+            : item,
+        ),
+      );
+    },
+    [setItems],
   );
 
   const clearQueue = useCallback((): void => {
     restorePlaylistPlaybackSnapshotOnly();
     clearLibraryShuffleDeck();
+    setAutoFillQueueEnabled(false);
     setItems([]);
     setHistory([]);
     setCurrentQueueId(null);
-  }, [clearLibraryShuffleDeck, restorePlaylistPlaybackSnapshotOnly, setCurrentQueueId, setHistory, setItems]);
+  }, [clearLibraryShuffleDeck, restorePlaylistPlaybackSnapshotOnly, setAutoFillQueueEnabled, setCurrentQueueId, setHistory, setItems]);
+
+  const removeContinuousPlayItems = useCallback((): void => {
+    setItems((current) => current.filter((item) => item.source.type !== 'continuous-play' || item.queueId === currentQueueIdRef.current));
+  }, [setItems]);
 
   const moveQueueItem = useCallback(
     (fromIndex: number, toIndex: number): void => {
@@ -3559,6 +4006,43 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     },
     [commitPlayedItem, playLocalTrack],
   );
+
+  useEffect(() => {
+    if (startupAutoPlayAttemptedRef.current || !sessionHydrated || autoPlayOnStartupEnabled === null) {
+      return;
+    }
+
+    startupAutoPlayAttemptedRef.current = true;
+    if (!autoPlayOnStartupEnabled) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const currentStatus = await window.echo?.audio?.getStatus?.().catch(() => null);
+      if (cancelled || currentStatus?.state === 'loading' || currentStatus?.state === 'playing') {
+        return;
+      }
+
+      const current = itemsRef.current;
+      const startupItem =
+        findItemByQueueId(current, currentQueueIdRef.current) ??
+        (currentTrackIdRef.current ? current.find((item) => item.track.id === currentTrackIdRef.current) ?? null : null) ??
+        current.find((item) => item.track.unavailable !== true) ??
+        null;
+      if (!startupItem || startupItem.track.unavailable === true) {
+        return;
+      }
+
+      await playQueueItem(startupItem.queueId).catch((error) => {
+        console.warn('[playback] Startup auto-play failed:', error);
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [autoPlayOnStartupEnabled, playQueueItem, sessionHydrated]);
 
   const fetchLibraryShuffleTarget = useCallback(
     async (activeItem: QueueItem | null): Promise<QueueItem | null> => {
@@ -3782,7 +4266,12 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   );
 
   const fetchLibraryRandomQueueRefresh = useCallback(
-    async (source: Extract<QueueSource, { type: 'songs' }>, activeItem: QueueItem | null, pageSize: number): Promise<QueueItem[]> => {
+    async (
+      source: Extract<QueueSource, { type: 'songs' }>,
+      activeItem: QueueItem | null,
+      pageSize: number,
+      relaxRecentHistory = false,
+    ): Promise<QueueItem[]> => {
       const library = window.echo?.library;
 
       if (!library?.getTracks) {
@@ -3790,11 +4279,13 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       }
 
       try {
-        const excludeTrackIds = getLibraryShuffleExcludedTrackIds(
-          activeItem,
-          historyRef.current,
-          playbackShuffleAvoidRecentCountRef.current,
-        );
+        const excludeTrackIds = relaxRecentHistory
+          ? activeItem ? [activeItem.track.id] : []
+          : getLibraryShuffleExcludedTrackIds(
+            activeItem,
+            historyRef.current,
+            playbackShuffleAvoidRecentCountRef.current,
+          );
         const result = await library.getTracks({
           page: 1,
           pageSize: Math.max(2, Math.min(pageSize, libraryRandomQueueRefreshPageSize)),
@@ -3897,7 +4388,10 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       const missingCount = Math.max(0, targetSize - current.length);
 
       if (missingCount === 0) {
-        publishQueueFeedback('队列已足够', `当前已有 ${current.length} 首`);
+        publishQueueFeedback(
+          tq('queue.feedback.fillEnough'),
+          tq('queue.feedback.fillEnoughDetail', { count: current.length }),
+        );
         return 0;
       }
 
@@ -3933,13 +4427,22 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       }
 
       if (nextItems.length === 0) {
-        publishQueueFeedback('没有可补全的歌曲', `已避开最近 ${playbackShuffleAvoidRecentCountRef.current} 首和当前队列`, 'info');
+        publishQueueFeedback(
+          tq('queue.feedback.fillEmpty'),
+          tq('queue.feedback.fillEmptyDetail', { count: playbackShuffleAvoidRecentCountRef.current }),
+          'info',
+        );
         return 0;
       }
 
       restorePlaylistPlaybackSnapshotOnly();
       setItems((items) => [...items, ...nextItems]);
-      publishQueueFeedback(`已补全 ${nextItems.length} 首`, `${queueSourceDisplayLabel(nextItems[0]?.source, playlistPlaybackStateRef.current)} · 队尾`);
+      publishQueueFeedback(
+        tq('queue.feedback.filledCount', { count: nextItems.length }),
+        tq('queue.feedback.sourceTail', {
+          source: queueSourceDisplayLabel(nextItems[0]?.source, playlistPlaybackStateRef.current),
+        }),
+      );
       return nextItems.length;
     },
     [
@@ -3951,6 +4454,95 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       setItems,
     ],
   );
+
+  const fillContinuousPlayQueue = useCallback(async (targetAhead = 5): Promise<number> => {
+    if (!autoFillQueueEnabledRef.current || continuousPlayFillInFlightRef.current) {
+      return 0;
+    }
+
+    const library = window.echo?.library;
+    if (!library?.getContinuousPlayRecommendations) {
+      return 0;
+    }
+
+    const current = itemsRef.current;
+    const currentIndex = findCurrentIndex(current, currentQueueIdRef.current, currentTrackIdRef.current);
+    const upcomingCount = currentIndex >= 0 ? current.length - currentIndex - 1 : current.length;
+    const missingCount = Math.max(0, Math.min(8, targetAhead - upcomingCount));
+    if (missingCount === 0) {
+      return 0;
+    }
+
+    const seedTrack = currentIndex >= 0
+      ? current[currentIndex]?.track ?? null
+      : findItemByQueueId(current, currentQueueIdRef.current)?.track ?? lastPlayedTrackRef.current;
+    continuousPlayFillInFlightRef.current = true;
+    setIsContinuousPlayFilling(true);
+    try {
+      const excludeTrackIds = Array.from(new Set([
+        ...current.map((item) => item.track.id),
+        ...historyRef.current.slice(-100).map((item) => item.track.id),
+      ]));
+      const result = await library.getContinuousPlayRecommendations({
+        mode: continuousPlayModeRef.current,
+        seedTrackId: seedTrack?.id ?? null,
+        excludeTrackIds,
+        limit: missingCount,
+        preferences: continuousPlayPreferencesRef.current,
+      });
+      if (!autoFillQueueEnabledRef.current || result.mode !== continuousPlayModeRef.current) {
+        return 0;
+      }
+
+      const existingTrackIds = new Set(itemsRef.current.map((item) => item.track.id));
+      const nextItems: QueueItem[] = result.items.flatMap((recommendation) => {
+        if (existingTrackIds.has(recommendation.track.id)) {
+          return [];
+        }
+        existingTrackIds.add(recommendation.track.id);
+        const source: QueueSource = {
+          type: 'continuous-play',
+          label: tq('queue.continuousPlay.source'),
+          mode: result.mode,
+        };
+        return [{
+          ...createQueueItem(recommendation.track, source),
+          recommendation: {
+            mode: result.mode,
+            reasons: recommendation.reasons,
+            generatedAt: result.generatedAt,
+          },
+        }];
+      });
+      if (nextItems.length > 0) {
+        setItems((items) => [...items, ...nextItems]);
+      }
+      return nextItems.length;
+    } catch (error) {
+      console.warn('[Queue] continuous play recommendation failed:', error);
+      return 0;
+    } finally {
+      continuousPlayFillInFlightRef.current = false;
+      setIsContinuousPlayFilling(false);
+    }
+  }, [setItems]);
+
+  useEffect(() => {
+    if (!sessionHydrated || !autoFillQueueEnabled) {
+      return;
+    }
+    const ensureRecommendationBuffer = (): void => {
+      const current = itemsRef.current;
+      const currentIndex = findCurrentIndex(current, currentQueueIdRef.current, currentTrackIdRef.current);
+      const upcomingCount = currentIndex >= 0 ? current.length - currentIndex - 1 : current.length;
+      if (upcomingCount <= 2) {
+        void fillContinuousPlayQueue();
+      }
+    };
+    ensureRecommendationBuffer();
+    const retryTimer = window.setInterval(ensureRecommendationBuffer, 7_500);
+    return () => window.clearInterval(retryTimer);
+  }, [autoFillQueueEnabled, continuousPlayMode, continuousPlayPreferences, currentQueueId, currentTrackId, fillContinuousPlayQueue, items, sessionHydrated]);
 
   const playTrack = useCallback(
     async (track: LibraryTrack, options: PlayTrackOptions = {}): Promise<PlaybackStatus> => {
@@ -4055,11 +4647,15 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   );
 
   const playPrevious = useCallback(async (): Promise<PlaybackStatus | null> => {
-    const previousFromHistory = historyRef.current[historyRef.current.length - 1];
+    let previousHistoryIndex = historyRef.current.length - 1;
+    while (previousHistoryIndex >= 0 && historyRef.current[previousHistoryIndex]?.track.unavailable === true) {
+      previousHistoryIndex -= 1;
+    }
+    const previousFromHistory = previousHistoryIndex >= 0 ? historyRef.current[previousHistoryIndex] : null;
 
     if (previousFromHistory) {
       const status = await playLocalTrack(previousFromHistory, { routeToConnectOutput: true });
-      setHistory((current) => current.slice(0, -1));
+      setHistory((current) => current.slice(0, previousHistoryIndex));
       commitPlayedItem(previousFromHistory, status, { recordHistory: false });
       return status;
     }
@@ -4070,13 +4666,14 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     }
 
     const currentIndex = findCurrentIndex(current, currentQueueIdRef.current, currentTrackIdRef.current);
-    const targetIndex =
-      currentIndex > 0
-        ? currentIndex - 1
-        : repeatModeRef.current === 'all' && current.length > 1
-          ? current.length - 1
-          : -1;
-    const target = targetIndex >= 0 ? current[targetIndex] : null;
+    const beforeCurrent = currentIndex > 0
+      ? [...current.slice(0, currentIndex)].reverse().find((item) => item.track.unavailable !== true) ?? null
+      : null;
+    const target = beforeCurrent ?? (
+      repeatModeRef.current === 'all'
+        ? [...current.slice(currentIndex + 1)].reverse().find((item) => item.track.unavailable !== true) ?? null
+        : null
+    );
 
     if (!target) {
       return null;
@@ -4117,7 +4714,27 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     }
 
     if (current.length === 0) {
-      return activeRepeatMode === 'one' ? repeatCurrentItem() : null;
+      if (activeRepeatMode === 'one') {
+        return repeatCurrentItem();
+      }
+      if (autoFillQueueEnabledRef.current) {
+        await fillContinuousPlayQueue();
+        let target = itemsRef.current.find((item) => item.track.unavailable !== true) ?? null;
+        if (!target) {
+          const fallbackItems = await fetchLibraryRandomQueueRefresh(libraryShuffleSource, null, 5, true);
+          if (fallbackItems.length > 0) {
+            setItems(fallbackItems);
+            setHistory([]);
+            target = fallbackItems[0] ?? null;
+          }
+        }
+        if (target) {
+          const status = await playLocalTrack(target, { routeToConnectOutput });
+          commitPlayedItem(target, status);
+          return status;
+        }
+      }
+      return null;
     }
 
     const navigationRepeatMode = activeRepeatMode === 'one' ? 'off' : activeRepeatMode;
@@ -4132,12 +4749,14 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         target = pickRandom(candidates);
 
         if (!target && navigationRepeatMode === 'all') {
-          candidates = activeItem ? current.filter((item) => item.queueId !== activeItem.queueId) : current;
+          candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
           target = pickRandom(candidates);
         }
 
         if (!target && navigationRepeatMode === 'all') {
-          target = activeItem ?? current[0] ?? null;
+          target = activeItem && activeItem.track.unavailable !== true
+            ? activeItem
+            : current.find((item) => item.track.unavailable !== true) ?? null;
         }
       } else {
         const source = activeItem?.source ?? null;
@@ -4158,12 +4777,14 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           }
 
           if (!target && !folderShuffleAvailable && navigationRepeatMode === 'all') {
-            candidates = activeItem ? current.filter((item) => item.queueId !== activeItem.queueId) : current;
+            candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
             target = pickRandom(candidates);
           }
 
           if (!target && !folderShuffleAvailable && navigationRepeatMode === 'all') {
-            target = activeItem ?? current[0] ?? null;
+            target = activeItem && activeItem.track.unavailable !== true
+              ? activeItem
+              : current.find((item) => item.track.unavailable !== true) ?? null;
           }
         } else if (isLikedSource(source)) {
           target = await fetchLikedShuffleTarget(source, activeItem ?? null);
@@ -4173,12 +4794,14 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           }
 
           if (!target && navigationRepeatMode === 'all') {
-            candidates = activeItem ? current.filter((item) => item.queueId !== activeItem.queueId) : current;
+            candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
             target = pickRandom(candidates);
           }
 
           if (!target && navigationRepeatMode === 'all') {
-            target = activeItem ?? current[0] ?? null;
+            target = activeItem && activeItem.track.unavailable !== true
+              ? activeItem
+              : current.find((item) => item.track.unavailable !== true) ?? null;
           }
         } else {
           const librarySource = isLibraryRandomSource(source) ? source : libraryShuffleSource;
@@ -4198,27 +4821,30 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           }
 
           if (!target && !libraryShuffleAvailable && navigationRepeatMode === 'all') {
-            candidates = activeItem ? current.filter((item) => item.queueId !== activeItem.queueId) : current;
+            candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
             target = pickRandom(candidates);
           }
 
           if (!target && !libraryShuffleAvailable && navigationRepeatMode === 'all') {
-            target = activeItem ?? current[0] ?? null;
+            target = activeItem && activeItem.track.unavailable !== true
+              ? activeItem
+              : current.find((item) => item.track.unavailable !== true) ?? null;
           }
         }
       }
-    } else if (currentIndex >= 0 && currentIndex < current.length - 1) {
-      target = current[currentIndex + 1] ?? null;
+    } else if (currentIndex >= 0) {
+      target = current.slice(currentIndex + 1).find((item) => item.track.unavailable !== true) ?? null;
+      if (!target && isFolderRandomSortSource(activeItem?.source)) {
+        refreshedRandomQueue = await fetchFolderRandomQueueRefresh(activeItem.source, activeItem, current.length || 100);
+        target = refreshedRandomQueue[0] ?? null;
+      } else if (!target && isSongsRandomSortSource(activeItem?.source)) {
+        refreshedRandomQueue = await fetchLibraryRandomQueueRefresh(activeItem.source, activeItem, current.length || 100);
+        target = refreshedRandomQueue[0] ?? null;
+      } else if (!target && navigationRepeatMode === 'all' && activeItem) {
+        target = resolveSequentialNextItem(current, activeItem, navigationRepeatMode);
+      }
     } else if (currentIndex < 0) {
-      target = current[0] ?? null;
-    } else if (isFolderRandomSortSource(activeItem?.source)) {
-      refreshedRandomQueue = await fetchFolderRandomQueueRefresh(activeItem.source, activeItem, current.length || 100);
-      target = refreshedRandomQueue[0] ?? null;
-    } else if (isSongsRandomSortSource(activeItem?.source)) {
-      refreshedRandomQueue = await fetchLibraryRandomQueueRefresh(activeItem.source, activeItem, current.length || 100);
-      target = refreshedRandomQueue[0] ?? null;
-    } else if (navigationRepeatMode === 'all') {
-      target = current[0] ?? null;
+      target = current.find((item) => item.track.unavailable !== true) ?? null;
     }
 
     if (!target) {
@@ -4227,14 +4853,36 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         return finishPlaylistSequence('next');
       }
 
-      if (options.autoAdvance === true && autoFillQueueEnabledRef.current) {
+      if (autoFillQueueEnabledRef.current) {
+        await fillContinuousPlayQueue();
+        const continuousCurrent = itemsRef.current;
+        const continuousCurrentIndex = findCurrentIndex(
+          continuousCurrent,
+          currentQueueIdRef.current,
+          currentTrackIdRef.current,
+        );
+        const continuousTarget = continuousCurrentIndex >= 0
+          ? continuousCurrent.slice(continuousCurrentIndex + 1).find((item) => item.track.unavailable !== true) ?? null
+          : continuousCurrent.find((item) => item.track.unavailable !== true) ?? null;
+        if (continuousTarget) {
+          logQueuePlaybackStep('playNext', 'resolve continuous play target', resolveStartedAtMs, continuousTarget.track.id);
+          const status = await playLocalTrack(continuousTarget, { routeToConnectOutput });
+          commitPlayedItem(continuousTarget, status);
+          return status;
+        }
+
         if (isFolderRandomSortSource(activeItem?.source)) {
           refreshedRandomQueue = await fetchFolderRandomQueueRefresh(activeItem.source, activeItem ?? null, libraryRandomQueueRefreshPageSize);
         } else if (isLikedSource(activeItem?.source)) {
           refreshedRandomQueue = await fetchLikedRandomQueueRefresh(activeItem.source, activeItem ?? null, libraryRandomQueueRefreshPageSize);
         } else {
           const source = isLibraryRandomSource(activeItem?.source) ? activeItem.source : libraryShuffleSource;
-          refreshedRandomQueue = await fetchLibraryRandomQueueRefresh(source, activeItem ?? null, libraryRandomQueueRefreshPageSize);
+          refreshedRandomQueue = await fetchLibraryRandomQueueRefresh(
+            source,
+            activeItem ?? null,
+            libraryRandomQueueRefreshPageSize,
+            true,
+          );
         }
         target = refreshedRandomQueue[0] ?? null;
         if (target) {
@@ -4243,6 +4891,13 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           setHistory([]);
           const status = await playLocalTrack(target, { routeToConnectOutput });
           commitPlayedItem(target, status);
+          return status;
+        }
+
+        if (activeItem && activeItem.track.unavailable !== true) {
+          logQueuePlaybackStep('playNext', 'repeat sole local radio track', resolveStartedAtMs, activeItem.track.id);
+          const status = await playLocalTrack(activeItem, { routeToConnectOutput });
+          commitPlayedItem(activeItem, status, { recordHistory: false });
           return status;
         }
       }
@@ -4264,7 +4919,78 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     }
     commitPlayedItem(target, status);
     return status;
-  }, [commitPlayedItem, fetchFolderRandomQueueRefresh, fetchFolderShuffleTarget, fetchLibraryRandomQueueRefresh, fetchLibraryShuffleTarget, fetchLikedRandomQueueRefresh, fetchLikedShuffleTarget, finishPlaylistSequence, isConnectOutputActive, playLocalTrack, playTrack, setHistory, setItems]);
+  }, [commitPlayedItem, fetchFolderRandomQueueRefresh, fetchFolderShuffleTarget, fetchLibraryRandomQueueRefresh, fetchLibraryShuffleTarget, fetchLikedRandomQueueRefresh, fetchLikedShuffleTarget, fillContinuousPlayQueue, finishPlaylistSequence, isConnectOutputActive, playLocalTrack, playTrack, setHistory, setItems]);
+
+  useEffect(() => {
+    const audio = window.echo?.audio;
+    if (!audio?.onStatus) {
+      return undefined;
+    }
+
+    const handlePlaybackEnded = (status: AudioStatus): void => {
+      if (status.state !== 'ended') {
+        if (status.state === 'playing' || status.state === 'loading') {
+          lastFallbackEndedIdentityRef.current = null;
+        }
+        return;
+      }
+
+      const activeTrackId = currentTrackIdRef.current;
+      if (status.currentTrackId && activeTrackId && status.currentTrackId !== activeTrackId) {
+        return;
+      }
+
+      const endedIdentity = status.currentTrackId ?? status.currentFilePath ?? currentQueueIdRef.current;
+      if (!endedIdentity || lastFallbackEndedIdentityRef.current === endedIdentity) {
+        return;
+      }
+
+      // A successful daemon queue advance remains in `playing` and is committed by
+      // commitHostQueueAdvance above. Reaching a real `ended` state means that path
+      // could not advance autonomously (for example a bridge/streaming backend), so
+      // the renderer control plane must issue exactly one queue command.
+      lastFallbackEndedIdentityRef.current = endedIdentity;
+      void playNext({ autoAdvance: true }).catch((error) => {
+        console.error('[Queue] failed to advance after playback ended:', error);
+      });
+    };
+
+    const unsubscribe = audio.onStatus(handlePlaybackEnded);
+    return () => {
+      unsubscribe?.();
+    };
+  }, [playNext]);
+
+  useEffect(() => {
+    const status = sharedPlaybackStatus;
+    if (!status) {
+      return;
+    }
+
+    if (status.state !== 'ended') {
+      if (status.state === 'playing' || status.state === 'loading') {
+        lastFallbackEndedIdentityRef.current = null;
+      }
+      return;
+    }
+
+    const activeTrackId = currentTrackIdRef.current;
+    if (status.currentTrackId && activeTrackId && status.currentTrackId !== activeTrackId) {
+      return;
+    }
+
+    const endedIdentity = status.currentTrackId ?? status.filePath ?? currentQueueIdRef.current;
+    if (!endedIdentity || lastFallbackEndedIdentityRef.current === endedIdentity) {
+      return;
+    }
+
+    // Renderer-owned playback sources (notably Spotify and Connect) publish a
+    // PlaybackStatus instead of an AudioStatus, but use the same queue policy.
+    lastFallbackEndedIdentityRef.current = endedIdentity;
+    void playNext({ autoAdvance: true }).catch((error) => {
+      console.error('[Queue] failed to advance renderer playback after ended:', error);
+    });
+  }, [playNext, sharedPlaybackStatus]);
 
   useEffect(() => {
     window.echo?.playback?.setRepeatMode?.(repeatMode);
@@ -4272,14 +4998,32 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
 
   // Sync queue items to the daemon backend for autonomous advancement
   useEffect(() => {
-    const queueItems = items.map((item) => ({
+    if (!sessionHydrated) {
+      return;
+    }
+
+    const queueItems: BackendQueueSyncItem[] = items.map((item) => ({
+      itemId: item.queueId,
+      trackId: item.track.id,
       filePath: item.track.path ?? '',
       sampleRate: item.track.sampleRate ?? undefined,
       startSeconds: 0,
-    })).filter((item) => item.filePath);
+      metadata: {
+        title: item.track.title,
+        artist: item.track.artist,
+        album: item.track.album,
+        albumArtist: item.track.albumArtist,
+        coverUrl: item.track.coverThumb,
+      },
+    })).filter((item, index) => item.filePath && items[index]?.track.unavailable !== true);
+    const backendCurrentQueueId = currentQueueId && queueItems.some((item) => item.itemId === currentQueueId)
+      ? currentQueueId
+      : null;
 
-    window.echo?.playback?.syncQueueToBackend?.(queueItems, repeatMode);
-  }, [items, repeatMode]);
+    void syncQueueSnapshotToBackend(queueItems, repeatMode, backendCurrentQueueId).catch((error) => {
+      console.warn('[Queue] failed to sync queue snapshot to audio backend:', error);
+    });
+  }, [currentQueueId, items, repeatMode, sessionHydrated, syncQueueSnapshotToBackend]);
 
   const activateHqPlayerTakeover = useCallback(async (): Promise<PlaybackStatus | null> => {
     const activeItem =
@@ -4297,7 +5041,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
 
     const fallbackTrack = lastPlayedTrackRef.current;
     if (!fallbackTrack) {
-      throw new Error('没有可交给 HQPlayer 的当前歌曲。');
+      throw new Error(tq('queue.feedback.noHqPlayerTrack'));
     }
 
     const status = await playTrack(fallbackTrack, { routeToConnectOutput: true, forceHqPlayerConnect: true });
@@ -4409,12 +5153,14 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   updateTrackSnapshotRef.current = updateTrackSnapshot;
 
   const canGoPrevious = useMemo(() => {
-    if (history.length > 0) {
+    if (history.some((item) => item.track.unavailable !== true)) {
       return true;
     }
 
     const currentIndex = findCurrentIndex(items, currentQueueId, currentTrackId);
-    return currentIndex > 0 || (repeatMode === 'all' && items.length > 1);
+    const hasPlayableBefore = currentIndex > 0 && items.slice(0, currentIndex).some((item) => item.track.unavailable !== true);
+    const hasOtherPlayable = items.some((item, index) => index !== currentIndex && item.track.unavailable !== true);
+    return hasPlayableBefore || (repeatMode === 'all' && hasOtherPlayable);
   }, [currentQueueId, currentTrackId, history.length, items, repeatMode]);
 
   const canGoNext = useMemo(() => {
@@ -4451,7 +5197,11 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       return Boolean(resolveSnapshotResumeItem(playlistPlaybackState.snapshot, 'next'));
     }
 
-    return currentIndex < 0 || currentIndex < items.length - 1 || repeatMode === 'all';
+    const hasPlayableAfter = currentIndex >= 0 &&
+      items.slice(currentIndex + 1).some((item) => item.track.unavailable !== true);
+    const hasAnyPlayable = items.some((item) => item.track.unavailable !== true);
+    const hasOtherPlayable = items.some((item, index) => index !== currentIndex && item.track.unavailable !== true);
+    return (currentIndex < 0 && hasAnyPlayable) || hasPlayableAfter || (repeatMode === 'all' && hasOtherPlayable);
   }, [autoFillQueueEnabled, currentItem, currentQueueId, currentTrackId, currentTrack, history, isShuffleEnabled, items, lastPlayedTrack, playbackShuffleAvoidRecentCount, playlistPlaybackState, repeatMode]);
 
   const value = useMemo<PlaybackQueueContextValue>(
@@ -4468,6 +5218,9 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       repeatMode,
       automixEnabled,
       autoFillQueueEnabled,
+      continuousPlayMode,
+      continuousPlayPreferences,
+      isContinuousPlayFilling,
       hqPlayerTakeoverEnabled,
       gaplessPlaybackEnabled,
       playbackShuffleAvoidRecentCount,
@@ -4482,10 +5235,13 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       appendTracksToQueue,
       fillQueue,
       playTrackNext,
+      playTracksNext,
       removeQueueItem,
       removeQueueItems,
       removeTrackFromQueue,
+      setQueueItemsRemoveAfterPlay,
       clearQueue,
+      removeContinuousPlayItems,
       moveQueueItem,
       moveQueueItemsToIndex,
       moveQueueItemsAfterCurrent,
@@ -4500,13 +5256,18 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       activateHqPlayerTakeover,
       setHqPlayerTakeoverEnabled,
       setAutomixEnabled,
+      setGaplessPlaybackEnabled,
       setAutoFillQueueEnabled,
+      setContinuousPlayMode,
+      reduceContinuousPlayFrequency,
+      clearContinuousPlayPreferences,
       setCurrentTrackId,
       updateCurrentTrackSnapshot,
       updateTrackSnapshot,
       syncPlaybackState,
       toggleShuffle,
       setRepeatMode: setRepeatModeInternal,
+      setPlaybackOrder,
     }),
     [
       appendToQueue,
@@ -4514,6 +5275,9 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       canGoNext,
       canGoPrevious,
       clearQueue,
+      clearContinuousPlayPreferences,
+      continuousPlayMode,
+      continuousPlayPreferences,
       currentItem,
       currentQueueId,
       currentSourceLabel,
@@ -4525,6 +5289,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       activateHqPlayerTakeover,
       automixEnabled,
       autoFillQueueEnabled,
+      isContinuousPlayFilling,
       hqPlayerTakeoverEnabled,
       gaplessPlaybackEnabled,
       isShuffleEnabled,
@@ -4540,30 +5305,36 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       playQueueItem,
       playTrack,
       playbackShuffleAvoidRecentCount,
-      playlistPlaybackState,
       playlistPlaybackSummary,
       setHqPlayerTakeoverEnabled,
       openTemporaryLocalFiles,
       playTrackNext,
+      playTracksNext,
       removeQueueItem,
       removeQueueItems,
       removeTrackFromQueue,
+      removeContinuousPlayItems,
+      reduceContinuousPlayFrequency,
+      setQueueItemsRemoveAfterPlay,
       repeatMode,
       restoreQueueItems,
       replaceQueue,
       setAutomixEnabled,
+      setGaplessPlaybackEnabled,
       setAutoFillQueueEnabled,
+      setContinuousPlayMode,
       setCurrentTrackId,
       updateCurrentTrackSnapshot,
       updateTrackSnapshot,
       setRepeatModeInternal,
+      setPlaybackOrder,
       syncPlaybackState,
       shuffleScopeLabel,
       toggleShuffle,
     ],
   );
 
-  return <PlaybackQueueContext.Provider value={value}>{children}</PlaybackQueueContext.Provider>;
+  return <PlaybackQueueContext.Provider value={value}>{sessionHydrated ? children : null}</PlaybackQueueContext.Provider>;
 };
 
 export const usePlaybackQueue = (): PlaybackQueueContextValue => {

@@ -4,6 +4,7 @@ import { IpcChannels } from '../shared/constants/ipcChannels';
 import { createAppApi } from './ipc/appApi';
 import { createLibraryApi } from './ipc/libraryApi';
 import { createPlaybackApi, type PlaybackDeps } from './ipc/playbackApi';
+import { createStreamingApi } from './ipc/streamingApi';
 import { createAudioApi } from './ipc/ipcAudio';
 import { createEqApi } from './ipc/ipcEq';
 import { createSystemAudioEngine, type SystemAudioEngine } from './systemAudioEngine';
@@ -47,6 +48,7 @@ function createMockSa(): SystemAudioEngine {
     }),
     lastNativeAudioStatus: null,
     systemAudioModeActive: false,
+    ownsSystemAudioPlayback: true,
     handoffNativePlaybackToSystemAudio: vi.fn().mockResolvedValue(null),
     stopSystemPlayback: vi.fn().mockReturnValue({
       state: 'stopped', currentTrackId: null, positionMs: 0, durationMs: 0, filePath: null,
@@ -160,6 +162,9 @@ describe('createEqApi', () => {
     expect(api).toHaveProperty('setEnabled');
     expect(api).toHaveProperty('setBandGain');
     expect(api).toHaveProperty('setPreamp');
+    expect(api).toHaveProperty('setCrossfeedState');
+    expect(api).toHaveProperty('setStereoFieldState');
+    expect(api).toHaveProperty('setChannelMatrixState');
     expect(api).toHaveProperty('reset');
   });
 });
@@ -233,12 +238,31 @@ describe('all returned methods are functions', () => {
 // Test 7-11: IPC channel verification — calling methods hits correct channels
 // ---------------------------------------------------------------------------
 describe('IPC channel verification', () => {
+  it('createStreamingApi exposes account playlist listing on the correct channel', async () => {
+    const ipc = createMockIpcRenderer();
+    const api = createStreamingApi(ipc as any, IpcChannels);
+
+    expect(typeof api.listAccountPlaylists).toBe('function');
+    await api.listAccountPlaylists?.('netease');
+
+    expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.StreamingListAccountPlaylists, 'netease');
+  });
+
   it('createAppApi calls correct channels', async () => {
     const ipc = createMockIpcRenderer();
     const api = createAppApi(ipc as any, IpcChannels);
 
     await api.getVersion();
     expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.AppGetVersion);
+
+    await api.getRuntimeAudioComponentStatus();
+    expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.AppGetRuntimeAudioComponentStatus);
+
+    await api.importRuntimeAudioComponent();
+    expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.AppImportRuntimeAudioComponent);
+
+    await api.openRuntimeAudioComponentDownloadPage();
+    expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.AppOpenRuntimeAudioComponentDownloadPage);
 
     await api.getSettings();
     expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.AppGetSettings);
@@ -324,6 +348,15 @@ describe('IPC channel verification', () => {
 
     await api.setPreamp(-2);
     expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.EqSetPreamp, -2);
+
+    await api.setCrossfeedState({ enabled: true, amount: 0.3 });
+    expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.EqSetCrossfeedState, { enabled: true, amount: 0.3 });
+
+    await api.setStereoFieldState({ enabled: true, width: 1.2 });
+    expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.EqSetStereoFieldState, { enabled: true, width: 1.2 });
+
+    await api.setChannelMatrixState({ enabled: true, rightToLeft: 0.2 });
+    expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.EqSetChannelMatrixState, { enabled: true, rightToLeft: 0.2 });
 
     await api.reset();
     expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.EqReset);

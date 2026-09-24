@@ -75,12 +75,56 @@ const clampInt = (value: unknown, fallback: number, min: number, max: number): n
   return Number.isFinite(parsed) ? Math.max(min, Math.min(max, Math.round(parsed))) : fallback;
 };
 
-const timeoutSignal = (timeoutMs: number, signal?: AbortSignal): AbortSignal => {
+const timeoutSignal = (timeoutMs: number, signal?: AbortSignal): { signal: AbortSignal; dispose: () => void } => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   timer.unref?.();
-  signal?.addEventListener('abort', () => controller.abort(), { once: true });
-  return controller.signal;
+  const onAbort = (): void => controller.abort(signal?.reason);
+  if (signal?.aborted) {
+    onAbort();
+  } else {
+    signal?.addEventListener('abort', onAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    },
+  };
+};
+
+const readBodyWithLimit = async (response: Response, limit: number): Promise<Uint8Array | null> => {
+  if (!response.body) {
+    return new Uint8Array();
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel('response body exceeds limit');
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const output = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
 };
 
 const inferTitle = (remotePath: string): string =>
@@ -390,6 +434,10 @@ export class BaiduRemoteSourceAdapter implements RemoteSourceAdapter {
       headers: {
         'User-Agent': baiduUserAgent,
       },
+      // Baidu download responses can contain raw Unicode filenames in headers.
+      // Electron net.fetch converts those response headers through ByteString and
+      // can throw outside the caller's promise chain, crashing the main process.
+      fetchTransport: 'node',
     };
   }
 
@@ -492,23 +540,25 @@ export class BaiduRemoteSourceAdapter implements RemoteSourceAdapter {
       return null;
     }
 
-    const response = await this.fetch(input, proxyRequest.url, {
+    return this.fetchWithResponse(input, proxyRequest.url, {
       headers: {
         ...(proxyRequest.headers ?? {}),
         Range: range,
       },
-    }, 10000);
+    }, 10000, async (response) => {
+      if (!response.ok && response.status !== 206) {
+        await response.body?.cancel();
+        return null;
+      }
 
-    if (!response.ok && response.status !== 206) {
-      return null;
-    }
+      const contentLength = Number(response.headers.get('content-length') ?? 0);
+      if (response.status === 200 && contentLength > maxFallback) {
+        await response.body?.cancel();
+        return null;
+      }
 
-    const contentLength = Number(response.headers.get('content-length') ?? 0);
-    if (response.status === 200 && contentLength > maxFallback) {
-      return null;
-    }
-
-    return new Uint8Array(await response.arrayBuffer());
+      return readBodyWithLimit(response, maxFallback);
+    });
   }
 
   private async apiGet(input: RemoteAdapterInput, endpoint: string, params: Record<string, string>): Promise<Record<string, unknown>> {
@@ -532,23 +582,38 @@ export class BaiduRemoteSourceAdapter implements RemoteSourceAdapter {
       url.searchParams.set(key, value);
     }
 
-    const response = await this.fetch(input, url.toString(), {
+    return this.fetchWithResponse(input, url.toString(), {
       headers: {
         'User-Agent': baiduUserAgent,
       },
-    }, 10000);
-    if (!response.ok) {
-      throw new BaiduApiError(`百度网盘请求失败：HTTP ${response.status}`, response.status);
-    }
-    return normalizeApiPayload(response);
+    }, 10000, async (response) => {
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new BaiduApiError(`百度网盘请求失败：HTTP ${response.status}`, response.status);
+      }
+      return normalizeApiPayload(response);
+    });
   }
 
-  private fetch(input: RemoteAdapterInput, url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
-    return baiduRequestLimiter.run(() =>
-      fetch(url, {
-        ...options,
-        signal: timeoutSignal(timeoutMs, input.signal),
-      }), input.signal);
+  private fetchWithResponse<T>(
+    input: RemoteAdapterInput,
+    url: string,
+    options: RequestInit,
+    timeoutMs: number,
+    consume: (response: Response) => Promise<T>,
+  ): Promise<T> {
+    return baiduRequestLimiter.run(async () => {
+      const deadline = timeoutSignal(timeoutMs, input.signal);
+      try {
+        const response = await fetch(url, {
+          ...options,
+          signal: deadline.signal,
+        });
+        return await consume(response);
+      } finally {
+        deadline.dispose();
+      }
+    }, input.signal);
   }
 
   private mapItem(sourceId: string, item: BaiduFileItem): RemoteDirectoryItem | null {

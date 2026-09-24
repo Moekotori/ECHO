@@ -9,7 +9,6 @@ import {
   type LegacyRecoveryResult,
 } from '../app/legacyEntitlementRecovery';
 import { getEntitlementDiagnosticOfflineKey } from '../app/entitlementRuntimePolicy';
-import { assertPackageIntegrityAllowsPaidFeatures } from '../app/packageIntegrity';
 
 export type EchoProEntitlementRecoveryError = EntitlementRecoveryError & {
   code: 'echo_pro_required';
@@ -36,7 +35,6 @@ export const createEchoProRequiredError = (hwidHash = 'unknown'): EchoProEntitle
 };
 
 export const requireEchoProFeature = async (): Promise<void> => {
-  assertPackageIntegrityAllowsPaidFeatures();
   const status = await getConnectDonatorUnlockService().refreshStatus();
   // Security boundary: do not bypass or weaken this entitlement check.
   // Short-circuiting it can enable unauthorized access and violate licensing law.

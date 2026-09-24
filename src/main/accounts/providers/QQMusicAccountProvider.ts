@@ -58,6 +58,7 @@ export class QQMusicAccountProvider extends AccountProviderBase {
         ...record,
         lastCheckedAt: now,
         error: 'QQ 音乐 Cookie 为空，请重新登录 QQ 音乐。',
+        authInvalid: true,
       };
     }
 
@@ -71,6 +72,7 @@ export class QQMusicAccountProvider extends AccountProviderBase {
         avatarUrl: null,
         lastCheckedAt: now,
         error: 'QQ 音乐登录凭证不完整，请重新登录 QQ 音乐。',
+        authInvalid: true,
       };
     }
 
@@ -113,7 +115,11 @@ export class QQMusicAccountProvider extends AccountProviderBase {
       const data = request && isRecord(request.data) ? request.data : {};
       const code = request ? number(request.code) ?? number(data.code) : null;
 
-      if (!response.ok || code !== 0) {
+      if (!response.ok) {
+        throw new Error(`QQ Music login check failed with HTTP ${response.status}.`);
+      }
+
+      if (code === 1000) {
         return {
           ...record,
           username: null,
@@ -121,6 +127,15 @@ export class QQMusicAccountProvider extends AccountProviderBase {
           avatarUrl: null,
           lastCheckedAt: now,
           error: 'QQ 音乐登录凭证已过期，请重新登录 QQ 音乐后再播放会员歌曲。',
+          authInvalid: true,
+        };
+      }
+
+      if (code !== 0) {
+        return {
+          ...record,
+          lastCheckedAt: now,
+          error: `QQ Music login check was temporarily rejected (code ${code ?? 'unknown'}).`,
         };
       }
 
@@ -132,6 +147,7 @@ export class QQMusicAccountProvider extends AccountProviderBase {
         avatarUrl: text(user.headurl) ?? text(user.avatar) ?? record?.avatarUrl ?? null,
         lastCheckedAt: now,
         error: null,
+        authInvalid: false,
       };
     } catch (error) {
       return {
@@ -143,7 +159,7 @@ export class QQMusicAccountProvider extends AccountProviderBase {
   }
 
   protected override isConnected(record: StoredAccountRecord | null | undefined): boolean {
-    return super.isConnected(record) && !record?.error;
+    return super.isConnected(record) && record?.authInvalid !== true;
   }
 }
 

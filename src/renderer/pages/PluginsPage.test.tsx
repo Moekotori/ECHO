@@ -140,6 +140,14 @@ describe('PluginsPage', () => {
     expect(pluginsBridge.getLogs).toHaveBeenCalledWith('echo.playback-panel');
   });
 
+  it('opens the command palette from the plugin page instead of the titlebar', async () => {
+    render(<PluginsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '打开命令面板' }));
+
+    expect(await screen.findByRole('dialog', { name: '插件命令' })).toBeTruthy();
+  });
+
   it('loads plugin management even when ECHO Pro is not verified', async () => {
     getDonatorUnlockStatusMock.mockResolvedValue({ unlocked: false });
 

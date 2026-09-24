@@ -51,7 +51,6 @@ import {
   type EntitlementRouteProbe,
 } from '../app/entitlementDiagnostics';
 import { getEntitlementDiagnosticOfflineKey } from '../app/entitlementRuntimePolicy';
-import { assertPackageIntegrityAllowsPaidFeatures } from '../app/packageIntegrity';
 
 export type PrivateFeatureId =
   | 'echo-pro'
@@ -193,7 +192,6 @@ export const createPrivateFeatureError = (
 };
 
 export const requirePrivateFeature = async (feature: PrivateFeatureId = 'echo-pro'): Promise<void> => {
-  assertPackageIntegrityAllowsPaidFeatures();
   try {
     const requiredLicenseFeature = requiredEchoProLicenseFeatureForPrivateFeature(feature);
     const proLicenseStatus = getPluginService().getEchoProLicenseStatus();

@@ -1,6 +1,6 @@
 import * as os from 'node:os';
 
-export type ScanPerformanceMode = 'low' | 'balanced' | 'performance' | 'custom';
+export type ScanPerformanceMode = 'low' | 'balanced' | 'performance' | 'ultra' | 'custom';
 
 export type ScanConcurrencyRecommendation = {
   metadataConcurrency: number;
@@ -63,6 +63,15 @@ export const getRecommendedScanConcurrency = (options: ScanConcurrencyOptions = 
     return {
       metadataConcurrency: clamp(Math.floor(cpuCount * 0.75), 3, 6),
       coverConcurrency: clamp(Math.floor(cpuCount / 3), 2, 4),
+      cpuCount,
+      mode,
+    };
+  }
+
+  if (mode === 'ultra') {
+    return {
+      metadataConcurrency: clamp(Math.ceil(cpuCount * 0.75), 6, 12),
+      coverConcurrency: clamp(Math.ceil(cpuCount / 2), 4, 6),
       cpuCount,
       mode,
     };

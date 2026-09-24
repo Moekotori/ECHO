@@ -3,6 +3,9 @@ import { fileURLToPath } from 'node:url';
 
 const isHttpUrl = (value: string): boolean => /^https?:\/\//iu.test(value);
 
+export const selectPlaybackRequestPath = (input: Record<string, unknown>): unknown =>
+  input.filePath ?? input.path;
+
 export const normalizePlaybackFilePath = (value: string): string => {
   const trimmed = value.trim();
 

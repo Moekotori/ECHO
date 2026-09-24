@@ -1,10 +1,12 @@
+import { join } from 'node:path';
 import { getAppSettings } from '../../app/appSettings';
 import { assertProtectedLibraryAvailable } from '../../app/dataProtection';
 import { createDatabase } from '../../database/createDatabase';
 import type { EchoDatabase } from '../../database/createDatabase';
 import { getLibraryDatabaseManager } from '../../database/LibraryDatabaseManager';
 import type { AppSettings, RemoteAlbumMergeStrategy } from '../../../shared/types/appSettings';
-import type { LibraryPage, LibraryTrack } from '../../../shared/types/library';
+import { resolveEffectivePerformancePolicy } from '../../../shared/utils/performancePolicy';
+import type { LibraryTrack } from '../../../shared/types/library';
 import type {
   RemoteAlbumGroupingPreview,
   RemoteDirectoryItem,
@@ -16,6 +18,7 @@ import type {
   RemoteDirectoryPreviewOptions,
   RemoteIndexedFolderStats,
   RemoteIndexedTracksQuery,
+  RemoteIndexedTracksPage,
   RemoteLibraryTrack,
   RemoteMetadataResult,
   RemoteSourceIssueItem,
@@ -29,6 +32,7 @@ import type {
   RemoteSourceUpdate,
   RemoteStreamUrlResult,
   RemoteSyncOptions,
+  RemoteSyncPreview,
   RemoteSyncStatus,
   RemoteTrackLookupItem,
   RemoteVisibleHydrationOptions,
@@ -99,6 +103,8 @@ export class RemoteSourceService {
     key: string;
     preview: RemoteAlbumGroupingPreview;
   } | null = null;
+  private disposing = false;
+  private disposePromise: Promise<void> | null = null;
 
   constructor(
     private readonly database: EchoDatabase,
@@ -124,6 +130,7 @@ export class RemoteSourceService {
       (provider) => this.getAdapter(provider),
       this.coverService,
       getRemoteBackgroundRuntimeLimits,
+      coverCacheDir ? join(coverCacheDir, 'remote-direct', 'subsonic') : null,
     );
     this.syncService = new RemoteLibrarySyncService(this.store, (provider) => this.getAdapter(provider), () => this.invalidateSourceListCache(), (sourceId, status, options) => {
       this.invalidateSourceListCache();
@@ -187,18 +194,22 @@ export class RemoteSourceService {
   }
 
   updateSource(input: RemoteSourceUpdate): RemoteSource {
+    this.cancelSourceWork(input.id);
+    this.proxy.clearSourceTokens(input.id);
     const source = this.store.updateSource(input);
     this.invalidateSourceListCache();
     return source;
   }
 
   deleteSource(id: string): void {
+    this.cancelSourceWork(id);
     this.proxy.clearSourceTokens(id);
     this.store.deleteSource(id);
     this.invalidateSourceListCache();
   }
 
   disconnectSource(id: string): void {
+    this.cancelSourceWork(id);
     this.proxy.clearSourceTokens(id);
     this.store.disconnectSource(id);
     this.invalidateSourceListCache();
@@ -220,14 +231,20 @@ export class RemoteSourceService {
   }
 
   async browse(sourceId: string, path?: string | null): Promise<RemoteDirectoryItem[]> {
-    const source = this.requireSource(sourceId);
+    const source = this.requireEnabledSource(sourceId);
     return this.getAdapter(source.provider).browse({ source, path });
   }
 
   syncSource(sourceId: string, options: RemoteSyncOptions = {}): RemoteSyncStatus {
+    this.requireEnabledSource(sourceId);
     this.backgroundQueue.setSourceSyncActive(sourceId, true);
     this.invalidateSourceListCache();
     return this.syncService.syncSource(sourceId, options);
+  }
+
+  async previewSync(sourceId: string, options: RemoteSyncOptions = {}): Promise<RemoteSyncPreview> {
+    this.requireEnabledSource(sourceId);
+    return this.syncService.previewSync(sourceId, options);
   }
 
   cancelSync(sourceId: string): RemoteSyncStatus {
@@ -252,7 +269,7 @@ export class RemoteSourceService {
   }
 
   startBackgroundJobs(sourceId: string, kinds?: RemoteBackgroundJobKind[]): RemoteBackgroundJobStatus {
-    this.requireSource(sourceId);
+    this.requireEnabledSource(sourceId);
     this.invalidateOverviewCache();
     return this.backgroundQueue.enqueueSource(sourceId, kinds);
   }
@@ -263,7 +280,7 @@ export class RemoteSourceService {
   }
 
   resumeBackgroundJobs(sourceId: string): RemoteBackgroundJobStatus {
-    this.requireSource(sourceId);
+    this.requireEnabledSource(sourceId);
     return this.backgroundQueue.resume(sourceId);
   }
 
@@ -273,7 +290,7 @@ export class RemoteSourceService {
   }
 
   retryFailedJobs(sourceId: string, kinds?: RemoteBackgroundJobKind[]): RemoteBackgroundJobStatus {
-    this.requireSource(sourceId);
+    this.requireEnabledSource(sourceId);
     this.invalidateOverviewCache();
     return this.backgroundQueue.retryFailed(sourceId, kinds);
   }
@@ -313,7 +330,7 @@ export class RemoteSourceService {
       throw new Error('sourceId and remotePath are required');
     }
 
-    const source = this.requireSource(sourceId);
+    const source = this.requireEnabledSource(sourceId);
     return this.getAdapter(source.provider).createStreamUrl({ source, remotePath, stableKey: track?.stableKey ?? input.stableKey ?? null });
   }
 
@@ -336,7 +353,7 @@ export class RemoteSourceService {
     return this.store.listTracksBySourceFolder(sourceId, rootPath).map((track) => this.store.toLibraryTrack(track));
   }
 
-  listIndexedTracksPage(sourceId: string, query: RemoteIndexedTracksQuery = {}): LibraryPage<LibraryTrack> {
+  listIndexedTracksPage(sourceId: string, query: RemoteIndexedTracksQuery = {}): RemoteIndexedTracksPage<LibraryTrack> {
     this.requireSource(sourceId);
     const page = this.store.listTracksBySourceFolderPage(sourceId, query);
     return {
@@ -355,7 +372,7 @@ export class RemoteSourceService {
     items: RemoteDirectoryItem[],
     options: RemoteDirectoryPreviewOptions = {},
   ): Promise<RemoteDirectoryPreviewItem[]> {
-    const source = this.requireSource(sourceId);
+    const source = this.requireEnabledSource(sourceId);
     const adapter = this.getAdapter(source.provider);
     const limit = Math.min(Math.max(1, Math.round(options.limit ?? 12)), 24);
     const includeCover = options.includeCover !== false;
@@ -420,7 +437,7 @@ export class RemoteSourceService {
       return this.emptyRemoteCover('cover_not_found');
     }
 
-    const source = this.requireSource(track.sourceId);
+    const source = this.requireEnabledSource(track.sourceId);
     const adapter = this.getAdapter(track.provider);
     if (!adapter.readCover) {
       return this.emptyRemoteCover('cover_not_found');
@@ -463,16 +480,78 @@ export class RemoteSourceService {
     return adapter.readCover({ source, item, size });
   }
 
+  async readSubsonicCoverByIdentity(sourceId: string, coverArt: string, size = 512): Promise<RemoteCoverResult> {
+    const source = this.requireEnabledSource(sourceId);
+    if (source.provider !== 'subsonic') {
+      return this.emptyRemoteCover('cover_not_found');
+    }
+
+    const adapter = this.getAdapter(source.provider);
+    if (!adapter.readCover) {
+      return this.emptyRemoteCover('cover_not_found');
+    }
+
+    const item: RemoteScanItem = {
+      sourceId,
+      provider: 'subsonic',
+      path: `subsonic:song:${coverArt}`,
+      name: coverArt,
+      kind: 'file',
+      sizeBytes: null,
+      modifiedAt: null,
+      etag: null,
+      contentType: null,
+      audio: true,
+      remoteUrlHash: '',
+      stableKey: coverArt,
+      metadata: {
+        status: 'partial',
+        title: coverArt,
+        artist: 'Unknown Artist',
+        album: '',
+        albumArtist: 'Unknown Artist',
+        trackNo: null,
+        discNo: null,
+        year: null,
+        genre: null,
+        duration: null,
+        codec: null,
+        sampleRate: null,
+        bitDepth: null,
+        bitrate: null,
+        fieldSources: { coverArt },
+        warnings: [],
+        errors: [],
+      },
+    };
+
+    return adapter.readCover({ source, item, size });
+  }
+
   toLibraryTrack(track: RemoteLibraryTrack): LibraryTrack {
     return this.store.toLibraryTrack(track);
   }
 
-  close(): void {
-    this.invalidateSourceListCache();
-    this.invalidateOverviewCache();
-    this.coverService?.close();
-    void this.proxy.close();
-    this.closeDatabase();
+  async close(): Promise<void> {
+    if (this.disposePromise) {
+      return this.disposePromise;
+    }
+    this.disposing = true;
+    this.disposePromise = (async () => {
+      this.invalidateSourceListCache();
+      this.invalidateOverviewCache();
+      await this.syncService.dispose();
+      await this.backgroundQueue.dispose();
+      await this.proxy.close();
+      this.coverService?.close();
+      this.closeDatabase();
+    })();
+    return this.disposePromise;
+  }
+
+  private cancelSourceWork(sourceId: string): void {
+    this.syncService.cancelSync(sourceId);
+    this.backgroundQueue.cancelSource(sourceId);
   }
 
   private invalidateSourceListCache(): void {
@@ -522,6 +601,14 @@ export class RemoteSourceService {
     const source = this.store.getSourceWithSecret(sourceId);
     if (!source) {
       throw new Error(`Unknown remote source ${sourceId}`);
+    }
+    return source;
+  }
+
+  private requireEnabledSource(sourceId: string) {
+    const source = this.requireSource(sourceId);
+    if (source.status !== 'enabled') {
+      throw new Error(`Remote source ${sourceId} is not enabled`);
     }
     return source;
   }
@@ -606,10 +693,7 @@ const getAppSettingsSafe = (): Pick<AppSettings, 'coverCacheDir'> & Partial<AppS
 };
 
 const getRemoteBackgroundRuntimeLimits = (): RemoteRuntimeLimits => {
-  const concurrency = getAppSettingsSafe().remoteBackgroundConcurrency;
-  if (!concurrency) {
-    return {};
-  }
+  const concurrency = resolveEffectivePerformancePolicy(getAppSettingsSafe()).remoteBackgroundConcurrency;
 
   return {
     metadataConcurrency: concurrency.metadata,
@@ -633,11 +717,12 @@ export const getRemoteSourceService = (): RemoteSourceService => {
   return defaultRemoteSourceService;
 };
 
-export const closeDefaultRemoteSourceService = (): void => {
+export const closeDefaultRemoteSourceService = async (): Promise<void> => {
   if (!defaultRemoteSourceService) {
     return;
   }
 
-  defaultRemoteSourceService.close();
+  const service = defaultRemoteSourceService;
   defaultRemoteSourceService = null;
+  await service.close();
 };

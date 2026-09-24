@@ -18,7 +18,7 @@ import { streamingStableKey } from '../../../shared/types/streaming';
 import type { QobuzFormatId } from '../../../shared/types/qobuz';
 import { QOBUZ_QUALITY_BY_FORMAT } from '../../../shared/types/qobuz';
 import { QobuzAuthService } from '../../qobuz/QobuzAuthService';
-import { QobuzApiClient } from '../../qobuz/QobuzApiClient';
+import type { QobuzApiClient } from '../../qobuz/QobuzApiClient';
 import type { StreamingProvider } from '../StreamingProvider';
 
 const provider = 'qobuz' as const;

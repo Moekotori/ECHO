@@ -1,90 +1,70 @@
-import { EventEmitter } from 'node:events';
 import { get } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AudioStatus } from '../../../shared/types/audio';
+import type { IntegrationEventEnvelopeV1, IntegrationPlaybackSnapshotV1 } from '../../../shared/types/integrationPlatform';
 import type { TrackLyrics } from '../../../shared/types/lyrics';
+import type { StageBridgeSnapshot } from '../../../shared/types/stage';
 import { StageBridgeService, createStageBridgeSnapshot } from './StageBridgeService';
+import { getStageBridgeClientCount, resetStageBridgeRuntimeForTests } from './StageBridgeRuntime';
 
-class FakeAudioSession extends EventEmitter {
-  private status: AudioStatus;
+class FakeEventHub {
+  private snapshot: IntegrationPlaybackSnapshotV1;
+  private readonly listeners = new Set<(event: IntegrationEventEnvelopeV1) => void>();
 
-  constructor(status: AudioStatus) {
-    super();
-    this.status = status;
+  constructor(snapshot: IntegrationPlaybackSnapshotV1) {
+    this.snapshot = snapshot;
   }
 
-  getStatus(): AudioStatus {
-    return this.status;
+  getSnapshot(): IntegrationPlaybackSnapshotV1 {
+    return this.snapshot;
   }
 
-  setStatus(status: AudioStatus): void {
-    this.status = status;
-    this.emit('status', status);
+  subscribe(listener: (event: IntegrationEventEnvelopeV1) => void): () => void {
+    this.listeners.add(listener);
+    listener({ version: 1, id: 'initial', type: 'snapshot', occurredAt: this.snapshot.observedAt, snapshot: this.snapshot });
+    return () => this.listeners.delete(listener);
+  }
+
+  setSnapshot(snapshot: IntegrationPlaybackSnapshotV1): void {
+    this.snapshot = snapshot;
+    for (const listener of this.listeners) {
+      listener({ version: 1, id: String(snapshot.revision), type: 'playback.track.changed', occurredAt: snapshot.observedAt, snapshot });
+    }
+  }
+
+  get subscriberCount(): number {
+    return this.listeners.size;
   }
 }
 
-const createStatus = (patch: Partial<AudioStatus> = {}): AudioStatus => ({
-  host: 'ready',
+const createPlayback = (patch: Partial<IntegrationPlaybackSnapshotV1> = {}): IntegrationPlaybackSnapshotV1 => ({
+  version: 1,
+  revision: 1,
+  observedAt: '2026-06-30T00:00:00.000Z',
   state: 'playing',
-  outputDeviceId: 'device-1',
-  outputDeviceName: 'TEAC USB DAC',
-  outputDeviceType: 'Windows Audio (Exclusive Mode)',
-  outputBackend: 'wasapi-exclusive',
-  activeOutputBackendImpl: 'legacy-wasapi-exclusive',
-  nativeOutputFormat: 'float32',
-  outputMode: 'exclusive',
-  sharedBackend: 'auto',
-  activeDecodeBackendImpl: 'ffmpeg',
-  volume: 1,
-  playbackRate: 1,
-  playbackSpeedMode: 'nightcore',
-  currentFilePath: 'D:\\Music\\private.flac',
-  currentTrackId: 'track-1',
-  currentTrackTitle: 'Signal',
-  currentTrackArtist: 'ECHO',
-  currentTrackAlbum: 'Bridge',
-  currentTrackAlbumArtist: 'ECHO',
-  currentTrackCoverUrl: 'echo-cover://track-1',
-  durationSeconds: 180,
-  positionSeconds: 42,
-  channels: 2,
-  codec: 'flac',
-  bitDepth: 24,
-  bitrate: 1200000,
-  fileSampleRate: 96000,
-  decoderOutputSampleRate: 96000,
-  requestedOutputSampleRate: 96000,
-  actualDeviceSampleRate: 96000,
-  sharedDeviceSampleRate: null,
-  resampling: false,
-  bitPerfectCandidate: true,
-  sampleRateMismatch: false,
-  eqEnabled: false,
-  channelBalanceEnabled: false,
-  dspActive: false,
-  preampDb: 0,
-  eqPresetName: null,
-  clippingRisk: false,
-  audioLevels: {
-    inputPeakDb: -4.2,
-    inputRmsDb: -18.5,
-    estimatedOutputPeakDb: -4.2,
-    estimatedOutputRmsDb: -18.5,
-    visualSpectrum: Array.from({ length: 32 }, (_, index) => index / 31),
-    visualSpectrumVersion: 2,
-    visualEnergy: 0.72,
-    visualTransient: 0.35,
-    visualTelemetryState: 'pcm',
-    headroomDb: 4.2,
-    clipCount: 0,
-    lastClipAt: null,
-    meterSource: 'pre_native_estimated_post_dsp',
+  track: {
+    id: 'track-1',
+    title: 'Signal',
+    artist: 'ECHO',
+    album: 'Bridge',
+    albumArtist: 'ECHO',
+    artworkUrl: 'echo-cover://track-1',
   },
-  bitPerfectDisabledReason: null,
-  warnings: [],
-  error: null,
+  durationMs: 180_000,
+  positionMs: 42_000,
+  volume: 1,
+  output: {
+    mode: 'exclusive',
+    deviceName: 'TEAC USB DAC',
+    backend: 'wasapi-exclusive',
+  },
   ...patch,
 });
+
+const telemetry = {
+  visualSpectrum: Array.from({ length: 32 }, (_, index) => index / 31),
+  visualEnergy: 0.72,
+  visualTransient: 0.35,
+};
 
 const lyrics: TrackLyrics = {
   id: 'lyrics-1',
@@ -112,20 +92,24 @@ const readJson = async <T>(url: string): Promise<T> => {
   return await response.json() as T;
 };
 
+const wait = (durationMs: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, durationMs));
+
 describe('StageBridgeService', () => {
   let service: StageBridgeService | null = null;
 
   afterEach(async () => {
     await service?.stop();
     service = null;
+    resetStageBridgeRuntimeForTests();
   });
 
-  it('builds a public Stage snapshot with current lyrics and no file path', async () => {
-    const snapshot = await createStageBridgeSnapshot(createStatus(), () => ({
+  it('builds the v1 Stage response from a semantic snapshot and adapter data', async () => {
+    const snapshot = await createStageBridgeSnapshot(createPlayback(), telemetry, () => ({
       getLyricsForTrack: async () => lyrics,
     }));
 
     expect(snapshot).toMatchObject({
+      version: 1,
       integration: 'stage',
       state: 'playing',
       track: {
@@ -143,15 +127,21 @@ describe('StageBridgeService', () => {
           text: 'Next line',
         },
       },
+      audio: {
+        visualEnergy: 0.72,
+        visualTransient: 0.35,
+      },
     });
+    expect(snapshot.audio.visualSpectrum).toHaveLength(32);
     expect(JSON.stringify(snapshot)).not.toContain('private.flac');
   });
 
-  it('serves OBS and Stage API only after the matching setting is enabled', async () => {
-    const audioSession = new FakeAudioSession(createStatus());
+  it('preserves the existing OBS and Stage API gates and response paths', async () => {
+    const eventHub = new FakeEventHub(createPlayback());
     service = new StageBridgeService({
       port: 0,
-      audioSession,
+      eventHub,
+      telemetrySource: { read: () => telemetry },
       getLyrics: () => ({ getLyricsForTrack: async () => lyrics }),
     });
     let status = await service.configure({ obsEnabled: false, apiEnabled: false });
@@ -161,34 +151,38 @@ describe('StageBridgeService', () => {
     expect(status.running).toBe(true);
     expect(status.obsUrl).toBe(`${status.url}/obs`);
     expect((await fetch(`${status.url}/obs`)).ok).toBe(true);
-    const eventsController = new AbortController();
-    const eventsResponse = await fetch(`${status.url}/events`, { signal: eventsController.signal });
-    expect(eventsResponse.ok).toBe(true);
-    eventsController.abort();
     expect((await fetch(`${status.url}/api/stage/status`)).status).toBe(403);
 
     status = await service.configure({ obsEnabled: true, apiEnabled: true });
-    const snapshot = await readJson<Awaited<ReturnType<typeof createStageBridgeSnapshot>>>(`${status.url}/api/stage/status`);
+    const snapshot = await readJson<StageBridgeSnapshot>(`${status.url}/api/stage/status`);
     expect(snapshot.lyrics.current?.text).toBe('Current line');
+    expect(eventHub.subscriberCount).toBe(1);
   });
 
-  it('streams snapshots over SSE when Stage API is enabled', async () => {
-    const audioSession = new FakeAudioSession(createStatus());
+  it('refreshes read-only telemetry only while an SSE client exists and cleans up the EventHub subscription', async () => {
+    const eventHub = new FakeEventHub(createPlayback());
+    let telemetryReads = 0;
     service = new StageBridgeService({
       port: 0,
-      audioSession,
+      eventHub,
+      telemetrySource: {
+        read: () => {
+          telemetryReads += 1;
+          return telemetry;
+        },
+      },
       getLyrics: () => ({ getLyricsForTrack: async () => lyrics }),
     });
     const status = await service.configure({ obsEnabled: false, apiEnabled: true });
+    expect(telemetryReads).toBe(0);
 
+    let request: ReturnType<typeof get>;
     await new Promise<void>((resolve, reject) => {
-      const request = get(`${status.url}/events`, (response) => {
+      request = get(`${status.url}/events`, (response) => {
         response.setEncoding('utf8');
         response.once('data', (chunk) => {
           try {
             expect(String(chunk)).toContain('event: snapshot');
-            expect(service?.getServerStatus().eventClients).toBe(1);
-            request.destroy();
             resolve();
           } catch (error) {
             reject(error);
@@ -197,5 +191,22 @@ describe('StageBridgeService', () => {
       });
       request.on('error', reject);
     });
+
+    expect(service.getServerStatus().eventClients).toBe(1);
+    expect(getStageBridgeClientCount()).toBe(1);
+    await wait(320);
+    expect(telemetryReads).toBeGreaterThanOrEqual(2);
+
+    request!.destroy();
+    await wait(80);
+    expect(service.getServerStatus().eventClients).toBe(0);
+    expect(getStageBridgeClientCount()).toBe(0);
+    const readsAfterDisconnect = telemetryReads;
+    await wait(320);
+    expect(telemetryReads).toBe(readsAfterDisconnect);
+
+    await service.stop();
+    expect(eventHub.subscriberCount).toBe(0);
+    service = null;
   });
 });

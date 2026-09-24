@@ -55,7 +55,6 @@ import type { DaemonHostProcessContext } from './DaemonHostProcess';
 import { JsonRpcBridge } from './JsonRpcBridge';
 import {
   setActiveJsonRpcBridge,
-  clearActiveJsonRpcBridge,
   clearActiveJsonRpcBridgeIf,
 } from './HostBridgeRegistry';
 
@@ -114,6 +113,19 @@ class MockChildProcess extends EventEmitter {
   }
 }
 
+const processReadyLine = `${JSON.stringify({
+  ready: true,
+  readyLevel: 'process',
+  protocolVersion: 1,
+  backendContractVersion: 2,
+  capabilities: {
+    deviceReadyV2: true,
+    runtimeDeviceConfigureV1: true,
+    hostOwnedLocalPlaybackV1: true,
+    nativeDspV1: true,
+  },
+})}\n`;
+
 // ===========================================================================
 // Helper — create a mock DaemonHostProcessContext
 // ===========================================================================
@@ -171,7 +183,7 @@ describe('DaemonHostProcess', () => {
         setTimeout(r, 0);
       });
       // Daemon writes ready signal to stdout
-      mockProc.stdout.write('{"ready":true}\n');
+      mockProc.stdout.write(processReadyLine);
 
       await startPromise;
 
@@ -181,6 +193,7 @@ describe('DaemonHostProcess', () => {
       expect(spawnCall[0]).toBe('/usr/bin/echo-audio-host');
       expect(spawnCall[1]).toEqual([
         '--no-stdin',
+        '--defer-device-open',
         '--rpc-stdin-fd',
         '3',
         '--rpc-stdout-fd',
@@ -289,7 +302,7 @@ describe('DaemonHostProcess', () => {
       await new Promise((r) => {
         setTimeout(r, 0);
       });
-      mockProc.stdout.write('{"ready":true}\n');
+      mockProc.stdout.write(processReadyLine);
       await startPromise;
 
       const spawnArgs = vi.mocked(context.spawn).mock.calls[0][1] as string[];
@@ -297,6 +310,7 @@ describe('DaemonHostProcess', () => {
       // Exactly the documented transport-level args
       expect(spawnArgs).toEqual([
         '--no-stdin',
+        '--defer-device-open',
         '--rpc-stdin-fd',
         '3',
         '--rpc-stdout-fd',
@@ -343,7 +357,7 @@ describe('DaemonHostProcess', () => {
         await new Promise((r) => {
           setTimeout(r, 0);
         });
-        mockProc.stdout.write('{"ready":true}\n');
+        mockProc.stdout.write(processReadyLine);
 
         await spawnPromise;
 
@@ -352,6 +366,7 @@ describe('DaemonHostProcess', () => {
         expect(spawnCall[0]).toBe('/usr/bin/echo-audio-host');
         expect(spawnCall[1]).toEqual([
           '--no-stdin',
+          '--defer-device-open',
           '--rpc-stdin-fd',
           '3',
           '--rpc-stdout-fd',

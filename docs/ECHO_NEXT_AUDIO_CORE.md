@@ -1,6 +1,6 @@
 # ECHO NEXT Audio Core 指南
 
-> **⚠️ 重构进行中（refactor/audio-architecture 分支）**：JUCE-to-libav/miniaudio 迁移尚未完成。本文档已更新为重构后的目标架构（host-centered facade 模式），但部分旧代码路径仍存在。任何改动前先加载 `.skill/echo-audio-architecture-refactor` 对应的 SKILL.md。
+> **当前状态**：本地 daemon direct playback 已把文件读取、libav 解码、ECHO SRC、Dither、SDM、FIFO 和输出 drain 迁入 native host。remote / CUE / chained playback 等 generic legacy PCM 路径仍保留。实现与协作边界以 [Native Audio Pipeline 迁移指南](./ECHO_NEXT_NATIVE_AUDIO_PIPELINE.md) 为准；任何改动前先加载 `.agents/skills/echo-audio-architecture-refactor/SKILL.md`。
 
 Audio Core 负责 ECHO NEXT 的播放、时钟、输出设备、解码、DSP 状态和 HiFi 可解释性。它是播放事实来源，不是 UI 的附属工具，也不是旧 ECHO `AudioEngine.js` 的简单搬运。
 
@@ -331,23 +331,11 @@ Audio Core 不允许：
 
 Audio Core 的每个改动都要让“能不能播、播到哪里、从哪里输出、有没有改声音、为什么失败”更清楚。只要一个改动让这些问题更难回答，就应该先停下来拆清楚。
 
-## 重构进度（refactor/audio-architecture）
+## 重构进度
 
-JUCE-to-libav/miniaudio 迁移进行中。已完成：
+本地 daemon direct playback 的数据面迁移已经完成：native host 持有本地文件读取、libav 解码、ECHO SRC、Dither、SDM、FIFO、设备输出和 drain 判定；主进程只保留规划、控制和状态解释。旧 JavaScript ECHO SRC / Dither / PCM-to-SDM transform 已删除。
 
-- `NativeOutputBridge` 单体拆分为 facade re-export，真正实现在 `NativePcmHostProcess`
-- daemon 进程管理拆到 `DaemonHostProcess`，bridge 注册拆到 `HostBridgeRegistry`，RPC 通信拆到 `JsonRpcBridge`
-- `EqBridge` 拆分为 `EqBridge` + `EqStateStore`
-- 渲染层 JUCE 输出/解码 toggle 已移除，仅保留 native-direct 控制
-- 已删除 JUCE-era 测试（ECNP framed 协议、`-framed-stdin`/`-juce-output` CLI 参数、JUCE 设备命名）
-
-未完成 / 待核对：
-
-- daemon spawn 仍硬编码 5 个音频参数（`-sr -ch -buffer -fifo-ms -prebuffer-ms`），目标是迁移到 session-time JSON-RPC 配置，实现"无音频启动参数 daemon"
-- native host `main.cpp` 构造时用 CLI 参数打开设备，需改为延迟打开（spawn 时不 open，收到 `session.begin` 再 open）
-- per-play host 路径（`NativePcmHostProcess.start`）仍用 20+ 个 CLI 参数，后续逐步退役为 daemon 路径
-- `JuceDecodePipeline` 和 `EqBridge` 从 origin/main 恢复，是 theirs `AudioSession` 的依赖；最终需要评估是否合并到 libav 路径
-- 旧 `EqBridge.test.ts` 和 `JuceDecodePipeline.test.ts` 覆盖度待核对
+尚未统一的范围是 remote URL、CUE、带 headers、gapless / automix chained playback 等 generic legacy PCM 路径；CUDA worker 基础设施也仍保留，但不在当前 native DSP 播放数据面。完整现状、文件地图、fail-closed 规则和验证矩阵见 [Native Audio Pipeline 迁移指南](./ECHO_NEXT_NATIVE_AUDIO_PIPELINE.md)。
 
 ## 新增 Backend 步骤
 

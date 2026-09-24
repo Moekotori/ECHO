@@ -386,7 +386,6 @@ const artistRefs = (singersValue: unknown): StreamingArtistRef[] => {
 const mapSong = (songValue: unknown): StreamingTrack => {
   const song = unwrapQqSongRecord(songValue);
   const album = asRecord(song.album ?? song.albumInfo ?? song.albuminfo);
-  const file = asRecord(song.file);
   const artists = artistRefs(song.singer ?? song.singers ?? song.singerList ?? song.singer_list);
   const mid = songMidFromSong(song) ?? songIdFromSong(song) ?? firstQqText(song, qqSongIdKeys) ?? '';
   const title = firstQqText(song, qqSongNameKeys) ?? 'Untitled';

@@ -17,6 +17,35 @@ const targetPath = join(
 );
 const markerPath = join(projectRoot, 'electron-app', 'build', '.echo-audio-host.ensure.json');
 
+const resolveWindowsCudaToolkitDir = () => {
+  if (process.platform !== 'win32') {
+    return null;
+  }
+  const explicit = process.env.CUDA_PATH || process.env.CUDAToolkit_ROOT;
+  if (explicit && existsSync(join(explicit, 'bin', 'nvcc.exe'))) {
+    return explicit;
+  }
+  const root = join('C:\\', 'Program Files', 'NVIDIA GPU Computing Toolkit', 'CUDA');
+  if (!existsSync(root)) {
+    return null;
+  }
+  const versions = readdirSync(root)
+    .filter((name) => /^v\d+(?:\.\d+)*$/u.test(name) && existsSync(join(root, name, 'bin', 'nvcc.exe')))
+    .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }));
+  return versions.length > 0 ? join(root, versions[0]) : null;
+};
+
+const getCudaToolchainMarker = () => {
+  const root = resolveWindowsCudaToolkitDir();
+  const nvccPath = root ? join(root, 'bin', 'nvcc.exe') : null;
+  const stats = nvccPath && existsSync(nvccPath) ? statSync(nvccPath) : null;
+  return {
+    root,
+    nvccMtimeMs: stats?.mtimeMs ?? null,
+    nvccSize: stats?.size ?? null,
+  };
+};
+
 const getLatestSourceMtime = (directory) => {
   let latest = 0;
 
@@ -78,7 +107,7 @@ const readMarker = () => {
   }
 };
 
-const isCurrent = (latestSourceMtime) => {
+const isCurrent = (latestSourceMtime, cudaToolchain) => {
   const marker = readMarker();
   const targetStats = getTargetStats();
   const buildScriptMtime = statSync(buildScriptPath).mtimeMs;
@@ -92,12 +121,15 @@ const isCurrent = (latestSourceMtime) => {
       marker.enableAsio === enableAsio &&
       marker.latestSourceMtime === latestSourceMtime &&
       marker.buildScriptMtime === buildScriptMtime &&
+      marker.cudaToolchain?.root === cudaToolchain.root &&
+      marker.cudaToolchain?.nvccMtimeMs === cudaToolchain.nvccMtimeMs &&
+      marker.cudaToolchain?.nvccSize === cudaToolchain.nvccSize &&
       marker.target?.size === targetStats.size &&
       marker.target?.mtimeMs === targetStats.mtimeMs,
   );
 };
 
-const writeMarker = (latestSourceMtime) => {
+const writeMarker = (latestSourceMtime, cudaToolchain) => {
   const targetStats = getTargetStats();
   if (!targetStats) {
     return;
@@ -114,6 +146,7 @@ const writeMarker = (latestSourceMtime) => {
         enableAsio,
         latestSourceMtime,
         buildScriptMtime: statSync(buildScriptPath).mtimeMs,
+        cudaToolchain,
         target: targetStats,
       },
       null,
@@ -131,8 +164,9 @@ try {
 
   const targetMtime = existsSync(targetPath) ? statSync(targetPath).mtimeMs : 0;
   const latestSourceMtime = Math.max(...sourceRoots.map(getLatestSourceMtime));
+  const cudaToolchain = getCudaToolchainMarker();
 
-  if (targetMtime > 0 && (targetMtime >= latestSourceMtime || isCurrent(latestSourceMtime))) {
+  if (targetMtime > 0 && isCurrent(latestSourceMtime, cudaToolchain)) {
     console.log(`[ensure:audio-host] ${targetPath} is up to date.`);
     process.exit(0);
   }
@@ -144,7 +178,7 @@ try {
   }
 
   run(process.execPath, [join(projectRoot, 'scripts', 'build-audio-host.mjs')]);
-  writeMarker(latestSourceMtime);
+  writeMarker(latestSourceMtime, cudaToolchain);
 } catch (error) {
   console.error('[ensure:audio-host] Native audio host is required for local playback.');
   console.error(

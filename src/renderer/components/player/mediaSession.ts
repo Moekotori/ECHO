@@ -33,6 +33,9 @@ const mediaSessionActions: MediaSessionAction[] = [
   'seekforward',
 ];
 
+let latestMediaSessionSnapshot: MediaSessionSnapshot | null = null;
+let externalMediaSessionAuthority = false;
+
 const getMediaSession = (): MediaSession | null => {
   if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) {
     return null;
@@ -80,7 +83,7 @@ export const clearMediaSession = (): void => {
   }
 };
 
-export const applyMediaSessionSnapshot = (snapshot: MediaSessionSnapshot): void => {
+const applyMediaSessionSnapshotNow = (snapshot: MediaSessionSnapshot): void => {
   const session = getMediaSession();
 
   if (!session) {
@@ -123,6 +126,28 @@ export const applyMediaSessionSnapshot = (snapshot: MediaSessionSnapshot): void 
     } catch {
       // Chromium validates this strictly; metadata and actions should still work if position is rejected.
     }
+  }
+};
+
+export const applyMediaSessionSnapshot = (snapshot: MediaSessionSnapshot): void => {
+  latestMediaSessionSnapshot = snapshot;
+  if (externalMediaSessionAuthority) {
+    clearMediaSession();
+    return;
+  }
+  applyMediaSessionSnapshotNow(snapshot);
+};
+
+export const setExternalMediaSessionAuthority = (active: boolean): void => {
+  if (externalMediaSessionAuthority === active) {
+    return;
+  }
+
+  externalMediaSessionAuthority = active;
+  if (active) {
+    clearMediaSession();
+  } else if (latestMediaSessionSnapshot) {
+    applyMediaSessionSnapshotNow(latestMediaSessionSnapshot);
   }
 };
 

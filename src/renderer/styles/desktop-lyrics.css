@@ -185,6 +185,34 @@ html[data-theme-preset="darkSideMoon"] .desktop-lyrics-app[data-color-mode="them
   -webkit-app-region: inherit;
 }
 
+.desktop-lyrics-app[data-text-direction="horizontal"] .desktop-lyrics-lines strong,
+.desktop-lyrics-app[data-text-direction="horizontal"] .desktop-lyrics-line-text > span {
+  padding-block: 0.06em 0.14em;
+}
+
+.desktop-lyrics-primary-text {
+  transform-origin: 50% 72%;
+  animation: desktop-lyrics-primary-enter 320ms var(
+    --echo-motion-ease-standard,
+    cubic-bezier(0.2, 0.82, 0.18, 1)
+  ) both;
+}
+
+.desktop-lyrics-line-text > span {
+  animation: desktop-lyrics-secondary-enter 280ms 50ms var(
+    --echo-motion-ease-standard,
+    cubic-bezier(0.2, 0.82, 0.18, 1)
+  ) both;
+}
+
+.desktop-lyrics-app[data-text-direction="vertical"] .desktop-lyrics-primary-text {
+  animation-name: desktop-lyrics-vertical-primary-enter;
+}
+
+.desktop-lyrics-app[data-text-direction="vertical"] .desktop-lyrics-line-text > span {
+  animation-name: desktop-lyrics-vertical-secondary-enter;
+}
+
 .desktop-lyrics-app[data-text-direction="vertical"] .desktop-lyrics-lines strong,
 .desktop-lyrics-app[data-text-direction="vertical"] .desktop-lyrics-line-text > span {
   display: inline-flex;
@@ -364,6 +392,50 @@ html[data-theme-preset="darkSideMoon"] .desktop-lyrics-app[data-color-mode="them
   -webkit-text-fill-color: currentColor;
 }
 
+.desktop-lyrics-lines strong[data-word-highlight="true"] {
+  color: var(--desktop-lyrics-word-fill-color);
+  background-image: none;
+  background-clip: border-box;
+  -webkit-background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+}
+
+.desktop-lyrics-word {
+  --desktop-lyrics-word-progress: 0;
+
+  display: inline;
+  color: var(--desktop-lyrics-word-fill-color);
+  background-image: linear-gradient(
+    90deg,
+    var(--desktop-lyrics-word-fill-color) 0%,
+    var(--desktop-lyrics-word-fill-color) calc(var(--desktop-lyrics-word-progress) * 100%),
+    color-mix(in srgb, var(--desktop-lyrics-word-fill-color) 32%, transparent)
+      calc(var(--desktop-lyrics-word-progress) * 100%),
+    color-mix(in srgb, var(--desktop-lyrics-word-fill-color) 32%, transparent) 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.desktop-lyrics-app[data-text-direction="vertical"] .desktop-lyrics-word {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  background-image: linear-gradient(
+    180deg,
+    var(--desktop-lyrics-word-fill-color) 0%,
+    var(--desktop-lyrics-word-fill-color) calc(var(--desktop-lyrics-word-progress) * 100%),
+    color-mix(in srgb, var(--desktop-lyrics-word-fill-color) 32%, transparent)
+      calc(var(--desktop-lyrics-word-progress) * 100%),
+    color-mix(in srgb, var(--desktop-lyrics-word-fill-color) 32%, transparent) 100%
+  );
+}
+
+.desktop-lyrics-word > * {
+  -webkit-text-fill-color: transparent;
+}
+
 .desktop-lyrics-line-text > span {
   color: color-mix(in srgb, var(--desktop-lyrics-color) 82%, transparent);
   font-size: var(--desktop-lyrics-secondary-font-size);
@@ -518,8 +590,63 @@ html[data-theme-preset="darkSideMoon"] .desktop-lyrics-app[data-color-mode="them
   border: 0;
 }
 
+@keyframes desktop-lyrics-primary-enter {
+  from {
+    opacity: 0.42;
+    transform: translateY(0.18em) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes desktop-lyrics-secondary-enter {
+  from {
+    opacity: 0.2;
+    transform: translateY(0.22em);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes desktop-lyrics-vertical-primary-enter {
+  from {
+    opacity: 0.42;
+    transform: translateX(0.16em) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes desktop-lyrics-vertical-secondary-enter {
+  from {
+    opacity: 0.2;
+    transform: translateX(0.18em);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .desktop-lyrics-reactive-backdrop {
     transition: none;
+  }
+
+  .desktop-lyrics-primary-text,
+  .desktop-lyrics-line-text > span {
+    animation: none;
+    opacity: 1;
+    transform: none;
   }
 }

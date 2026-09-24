@@ -376,36 +376,48 @@ void write_asio_dop_sample(void* buffer, ASIOSampleType type, long frameIndex, u
 {
     auto* bytes = static_cast<unsigned char*>(buffer);
     const uint32_t payload = sample24 & 0x00ffffffu;
-    const auto dsdByte1 = static_cast<unsigned char>(payload & 0xffu);
-    const auto dsdByte2 = static_cast<unsigned char>((payload >> 8) & 0xffu);
+    const auto dsdLow = static_cast<unsigned char>(payload & 0xffu);
+    const auto dsdHigh = static_cast<unsigned char>((payload >> 8) & 0xffu);
     const auto marker = static_cast<unsigned char>((payload >> 16) & 0xffu);
+    const auto signExtension = static_cast<unsigned char>((payload & 0x00800000u) != 0u ? 0xffu : 0x00u);
 
     switch (type)
     {
         case ASIOSTInt24LSB:
-            // Match the proven asio-test-native DoP layout for ASIO drivers.
-            bytes[frameIndex * 3 + 0] = marker;
-            bytes[frameIndex * 3 + 1] = dsdByte1;
-            bytes[frameIndex * 3 + 2] = dsdByte2;
+            bytes[frameIndex * 3 + 0] = dsdLow;
+            bytes[frameIndex * 3 + 1] = dsdHigh;
+            bytes[frameIndex * 3 + 2] = marker;
             break;
         case ASIOSTInt24MSB:
-            bytes[frameIndex * 3 + 0] = static_cast<unsigned char>((payload >> 16) & 0xff);
-            bytes[frameIndex * 3 + 1] = static_cast<unsigned char>((payload >> 8) & 0xff);
-            bytes[frameIndex * 3 + 2] = static_cast<unsigned char>(payload & 0xff);
+            bytes[frameIndex * 3 + 0] = marker;
+            bytes[frameIndex * 3 + 1] = dsdHigh;
+            bytes[frameIndex * 3 + 2] = dsdLow;
             break;
         case ASIOSTInt32LSB24:
-            reinterpret_cast<uint32_t*>(buffer)[frameIndex] = payload << 8;
+            // ASIO's suffixed 24-bit variants are right-aligned in 32 bits.
+            bytes[frameIndex * 4 + 0] = dsdLow;
+            bytes[frameIndex * 4 + 1] = dsdHigh;
+            bytes[frameIndex * 4 + 2] = marker;
+            bytes[frameIndex * 4 + 3] = signExtension;
             break;
         case ASIOSTInt32LSB:
-            reinterpret_cast<uint32_t*>(buffer)[frameIndex] =
-                (static_cast<uint32_t>(marker) << 24)
-                | (static_cast<uint32_t>(marker) << 16)
-                | (static_cast<uint32_t>(dsdByte1) << 8)
-                | static_cast<uint32_t>(dsdByte2);
+            // Basic 32-bit ASIO integer types left-align 24 valid bits.
+            bytes[frameIndex * 4 + 0] = 0;
+            bytes[frameIndex * 4 + 1] = dsdLow;
+            bytes[frameIndex * 4 + 2] = dsdHigh;
+            bytes[frameIndex * 4 + 3] = marker;
             break;
         case ASIOSTInt32MSB24:
+            bytes[frameIndex * 4 + 0] = signExtension;
+            bytes[frameIndex * 4 + 1] = marker;
+            bytes[frameIndex * 4 + 2] = dsdHigh;
+            bytes[frameIndex * 4 + 3] = dsdLow;
+            break;
         case ASIOSTInt32MSB:
-            write_u32_be(bytes + frameIndex * 4, payload << 8);
+            bytes[frameIndex * 4 + 0] = marker;
+            bytes[frameIndex * 4 + 1] = dsdHigh;
+            bytes[frameIndex * 4 + 2] = dsdLow;
+            bytes[frameIndex * 4 + 3] = 0;
             break;
         default:
             break;
@@ -774,6 +786,43 @@ HWND create_asio_host_window()
         nullptr);
 }
 
+bool should_suppress_unsolicited_driver_windows(const char* driverName)
+{
+    // ASIO Link Pro opens its full routing UI from ASIOInit/ASIOStart even
+    // though the host never requested ASIOControlPanel. Keep this compatibility
+    // quirk scoped to that driver family so ordinary ASIO drivers are untouched.
+    return contains_icase(driverName, "asio link pro") != 0;
+}
+
+struct AsioWindowSuppressionContext
+{
+    HWND hostWindow = nullptr;
+    DWORD processId = 0;
+};
+
+BOOL CALLBACK hide_unsolicited_asio_window(HWND window, LPARAM rawContext)
+{
+    const auto* context = reinterpret_cast<const AsioWindowSuppressionContext*>(rawContext);
+    if (context == nullptr || window == context->hostWindow || ! IsWindowVisible(window))
+        return TRUE;
+
+    DWORD ownerProcessId = 0;
+    GetWindowThreadProcessId(window, &ownerProcessId);
+    if (ownerProcessId == context->processId)
+        ShowWindowAsync(window, SW_HIDE);
+
+    return TRUE;
+}
+
+void suppress_unsolicited_driver_windows(const char* driverName, HWND hostWindow)
+{
+    if (! should_suppress_unsolicited_driver_windows(driverName))
+        return;
+
+    const AsioWindowSuppressionContext context { hostWindow, GetCurrentProcessId() };
+    EnumWindows(hide_unsolicited_asio_window, reinterpret_cast<LPARAM>(&context));
+}
+
 bool is_power_of_two(long value)
 {
     return value > 0 && (value & (value - 1)) == 0;
@@ -903,6 +952,9 @@ int collect_asio_devices(std::vector<asio_device_info>& devices)
     if (count <= 0)
         return 0;
 
+    // Device discovery must stay passive. Initializing every registered driver
+    // here can open hardware, contend with playback, or show vendor UI before
+    // the user has selected or played through that driver.
     for (long i = 0; i < count; ++i)
     {
         char utf8Name[512] {};
@@ -919,51 +971,8 @@ int collect_asio_devices(std::vector<asio_device_info>& devices)
 
         asio_device_info info {};
         snprintf(info.name, sizeof(info.name), "%s", utf8Name);
+
         info.isDefault = devices.empty() ? 1 : 0;
-
-        char ansiName[512] {};
-        utf8_to_ansi(utf8Name, ansiName, static_cast<int>(sizeof(ansiName)));
-        if (contains_icase(utf8Name, "asio4all") && ansiName[0] != '\0' && loadAsioDriver(ansiName))
-        {
-            ASIODriverInfo driverInfo {};
-            driverInfo.asioVersion = 2;
-            HWND window = create_asio_host_window();
-            driverInfo.sysRef = window != nullptr ? window : GetDesktopWindow();
-            if (ASIOInit(&driverInfo) == ASE_OK)
-            {
-                long inputChannels = 0;
-                long outputChannels = 0;
-                if (ASIOGetChannels(&inputChannels, &outputChannels) == ASE_OK && outputChannels > 0)
-                {
-                    info.outputChannels = static_cast<uint32_t>(std::min<long>(outputChannels, maxAsioOutputChannels));
-                    std::string namesText;
-                    for (long channel = 0; channel < static_cast<long>(info.outputChannels); ++channel)
-                    {
-                        ASIOChannelInfo channelInfo {};
-                        channelInfo.channel = channel;
-                        channelInfo.isInput = ASIOFalse;
-                        if (ASIOGetChannelInfo(&channelInfo) == ASE_OK && channelInfo.name[0] != '\0')
-                        {
-                            char channelUtf8[128] {};
-                            ansi_to_utf8(channelInfo.name, channelUtf8, static_cast<int>(sizeof(channelUtf8)));
-                            if (channelUtf8[0] != '\0')
-                            {
-                                if (! namesText.empty())
-                                    namesText += "|";
-                                namesText += channelUtf8;
-                            }
-                        }
-                    }
-                    snprintf(info.outputChannelNames, sizeof(info.outputChannelNames), "%s", namesText.c_str());
-                }
-                ASIOExit();
-                if (asioDrivers != nullptr)
-                    asioDrivers->removeCurrentDriver();
-            }
-            if (window != nullptr)
-                DestroyWindow(window);
-        }
-
         devices.push_back(info);
     }
 
@@ -1024,7 +1033,7 @@ bool should_force_native_dsd_packed_msb(const char* selectedUtf8)
 
 uint32_t asio_dop_silence_sample(long frameIndex)
 {
-    return ((frameIndex & 1L) == 0L) ? 0x050000u : 0xfa0000u;
+    return (((frameIndex & 1L) == 0L) ? 0x050000u : 0xfa0000u) | 0x006969u;
 }
 
 void write_asio_silence(asio_runtime* runtime, long bufferIndex) noexcept
@@ -1829,6 +1838,7 @@ static int asio_start_impl(
     }
     runtime->initialized = true;
     asioInitialised = true;
+    suppress_unsolicited_driver_windows(runtime->selectedName, runtime->sysRefWindow);
     fprintf(stderr, "[echo-audio-host] ASIOInit completed: %s\n", selectedUtf8);
 
     if (runtime->nativeDsdMode)
@@ -1856,6 +1866,7 @@ static int asio_start_impl(
         return -1;
     }
     fprintf(stderr, "[echo-audio-host] ASIOGetChannels completed: inputs=%ld outputs=%ld\n", availableInputChannels, availableOutputChannels);
+    suppress_unsolicited_driver_windows(runtime->selectedName, runtime->sysRefWindow);
 
     fprintf(stderr, "[echo-audio-host] ASIOGetBufferSize starting: %s\n", selectedUtf8);
     if (! refresh_asio_buffer_size(runtime, "initial", error, errorLen))
@@ -1957,6 +1968,7 @@ static int asio_start_impl(
         output_format_summary(runtime).c_str(),
         runtime->dopMode ? 1 : 0,
         runtime->nativeDsdMode ? 1 : 0);
+    suppress_unsolicited_driver_windows(runtime->selectedName, runtime->sysRefWindow);
 
     if (runtime->nativeDsdMode)
     {
@@ -2011,6 +2023,7 @@ static int asio_start_impl(
     }
     runtime->started = true;
     asioStarted = true;
+    suppress_unsolicited_driver_windows(runtime->selectedName, runtime->sysRefWindow);
     fprintf(stderr, "[echo-audio-host] ASIOStart completed: %s\n", selectedUtf8);
 
     outInfo->sampleRate = asio_sample_rate_to_uint32(runtime->sampleRate);
@@ -2335,6 +2348,11 @@ int asio_render_guard_catches_exception_for_tests(void)
     }
 
     return 1;
+}
+
+int asio_should_suppress_unsolicited_windows_for_tests(const char* driverName)
+{
+    return should_suppress_unsolicited_driver_windows(driverName) ? 1 : 0;
 }
 #endif
 

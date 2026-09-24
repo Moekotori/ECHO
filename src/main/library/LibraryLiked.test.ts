@@ -181,6 +181,21 @@ describe('LibraryStore liked media', () => {
     expect(store.getLikedSongsPlaylist().kind).toBe('system');
   });
 
+  it('orders liked tracks by listening frequency', () => {
+    const store = createStore();
+    seedTrack(store, 'quiet-track', { title: 'Quiet Track' });
+    seedTrack(store, 'favorite-track', { title: 'Favorite Track' });
+    store.likeTrack('quiet-track');
+    store.likeTrack('favorite-track');
+
+    recordCompletedPlay(store, 'favorite-track', '2026-07-20T10:00:00.000Z');
+    recordCompletedPlay(store, 'favorite-track', '2026-07-21T10:00:00.000Z');
+
+    const result = store.getLikedTracks({ sort: 'frequent' });
+
+    expect(result.items.map((item) => item.mediaId)).toEqual(['favorite-track', 'quiet-track']);
+  });
+
   it('likes, deduplicates, unlikes, and clears albums', () => {
     const store = createStore();
     seedAlbum(store, 'album-1', { title: 'Album Alpha' });

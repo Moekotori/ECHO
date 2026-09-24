@@ -59,6 +59,25 @@ import type {
   StreamingLikedSongsSyncResult,
   StreamingPlaylistImportResult,
 } from '../../shared/types/streaming';
+import type { QobuzLoginResult, QobuzManualCredentials } from '../../shared/types/qobuz';
+import type { TranslationKey } from '../i18n/locales';
+import { translateStatic } from '../i18n/translateStatic';
+import {
+  defaultDspRackState,
+  normalizeDspRackState,
+  type ChannelMatrixState,
+  type CompressorState,
+  type CrossfeedState,
+  type DspRackState,
+  type StereoFieldState,
+} from '../../shared/types/dspRack';
+
+const te = (key: TranslationKey): string => translateStatic(key);
+
+type QobuzBridge = {
+  login: (credentials: QobuzManualCredentials) => Promise<QobuzLoginResult>;
+  logout: () => Promise<void>;
+};
 
 export const getEchoBridge = (): Window['echo'] | null => window.echo ?? null;
 
@@ -72,9 +91,14 @@ export const getAccountsBridge = (): Window['echo']['accounts'] | null => getEch
 
 export const getDiagnosticsBridge = (): Window['echo']['diagnostics'] | null => getEchoBridge()?.diagnostics ?? null;
 
-export const getDiscordPresenceBridge = () => (getEchoBridge() as any)?.discordPresence ?? null;
+export const getDiscordPresenceBridge = (): Window['echo']['discordPresence'] | null => getEchoBridge()?.discordPresence ?? null;
 
-export const getStageBridge = () => (getEchoBridge() as any)?.stageBridge ?? null;
+export const getStageBridge = (): Window['echo']['stageBridge'] | null => getEchoBridge()?.stageBridge ?? null;
+
+export const getEchoLinkBridge = (): Window['echo']['echoLink'] | null => getEchoBridge()?.echoLink ?? null;
+
+export const getMqttIntegrationBridge = (): Window['echo']['mqttIntegration'] | null =>
+  getEchoBridge()?.mqttIntegration ?? null;
 
 export const getDownloadsBridge = (): Window['echo']['downloads'] | null => getEchoBridge()?.downloads ?? null;
 
@@ -88,6 +112,7 @@ type BrowserEqStorage = {
   state: EqState;
   channelBalance: ChannelBalanceState;
   roomCorrection: RoomCorrectionState;
+  dspRack: DspRackState;
   userPresets: EqPreset[];
   profiles: EqProfile[];
 };
@@ -372,6 +397,7 @@ class BrowserEqBridge implements EqBridgeApi {
     state: defaultBrowserEqState(),
     channelBalance: defaultBrowserChannelBalance(),
     roomCorrection: defaultBrowserRoomCorrection(),
+    dspRack: defaultDspRackState(),
     userPresets: [],
     profiles: [],
   };
@@ -497,6 +523,63 @@ class BrowserEqBridge implements EqBridgeApi {
     this.storage.state = { ...this.storage.state, dspSafetyLimiterEnabled: enabled !== false };
     this.writeStorage();
     return this.getState();
+  }
+
+  async getDspRackState(): Promise<DspRackState> {
+    return normalizeDspRackState(this.storage.dspRack);
+  }
+
+  async setDspRackState(state: Pick<DspRackState, 'order'>): Promise<DspRackState> {
+    this.storage.dspRack = normalizeDspRackState({ ...this.storage.dspRack, ...state });
+    this.writeStorage();
+    return this.getDspRackState();
+  }
+
+  async getCompressorState(): Promise<CompressorState> {
+    return { ...normalizeDspRackState(this.storage.dspRack).compressor };
+  }
+
+  async setCompressorState(patch: Partial<CompressorState>): Promise<CompressorState> {
+    const current = normalizeDspRackState(this.storage.dspRack);
+    this.storage.dspRack = normalizeDspRackState({
+      ...current,
+      compressor: { ...current.compressor, ...patch },
+    });
+    this.writeStorage();
+    return this.getCompressorState();
+  }
+
+  async getCrossfeedState(): Promise<CrossfeedState> {
+    return { ...normalizeDspRackState(this.storage.dspRack).crossfeed };
+  }
+
+  async setCrossfeedState(patch: Partial<CrossfeedState>): Promise<CrossfeedState> {
+    const current = normalizeDspRackState(this.storage.dspRack);
+    this.storage.dspRack = normalizeDspRackState({ ...current, crossfeed: { ...current.crossfeed, ...patch } });
+    this.writeStorage();
+    return this.getCrossfeedState();
+  }
+
+  async getStereoFieldState(): Promise<StereoFieldState> {
+    return { ...normalizeDspRackState(this.storage.dspRack).stereoField };
+  }
+
+  async setStereoFieldState(patch: Partial<StereoFieldState>): Promise<StereoFieldState> {
+    const current = normalizeDspRackState(this.storage.dspRack);
+    this.storage.dspRack = normalizeDspRackState({ ...current, stereoField: { ...current.stereoField, ...patch } });
+    this.writeStorage();
+    return this.getStereoFieldState();
+  }
+
+  async getChannelMatrixState(): Promise<ChannelMatrixState> {
+    return { ...normalizeDspRackState(this.storage.dspRack).channelMatrix };
+  }
+
+  async setChannelMatrixState(patch: Partial<ChannelMatrixState>): Promise<ChannelMatrixState> {
+    const current = normalizeDspRackState(this.storage.dspRack);
+    this.storage.dspRack = normalizeDspRackState({ ...current, channelMatrix: { ...current.channelMatrix, ...patch } });
+    this.writeStorage();
+    return this.getChannelMatrixState();
   }
 
   async setPreset(presetId: string): Promise<EqState> {
@@ -977,6 +1060,7 @@ class BrowserEqBridge implements EqBridgeApi {
         state: normalizeState(parsed.state),
         channelBalance: normalizeChannelBalance(parsed.channelBalance ?? {}, defaultBrowserChannelBalance()),
         roomCorrection: { ...defaultBrowserRoomCorrection(), ...(parsed.roomCorrection ?? {}) },
+        dspRack: normalizeDspRackState(parsed.dspRack),
         userPresets: Array.isArray(parsed.userPresets)
           ? parsed.userPresets.map(normalizePreset).filter((preset): preset is EqPreset => Boolean(preset && !preset.readonly))
           : [],
@@ -1011,7 +1095,7 @@ export const getLibraryBridge = (): Window['echo']['library'] | null => getEchoB
 
 export const getLibraryLabBridge = (): Window['echo']['libraryLab'] | null => getEchoBridge()?.libraryLab ?? null;
 
-export const getLastFmBridge = () => (getEchoBridge() as any)?.lastfm ?? null;
+export const getLastFmBridge = (): Window['echo']['lastfm'] | null => getEchoBridge()?.lastfm ?? null;
 
 export const getHqPlayerBridge = (): Window['echo']['hqPlayer'] | null => getEchoBridge()?.hqPlayer ?? null;
 
@@ -1035,12 +1119,12 @@ const importPlaylistFromDevApi = async (url: string): Promise<StreamingPlaylistI
     },
     body: JSON.stringify({ url }),
   }).catch(() => {
-    throw new Error('本地开发接口未启动，请重启 npm run dev 后再添加歌单。');
+    throw new Error(te('error.devApi.unavailable.playlist'));
   });
   const payload = (await response.json().catch(() => ({}))) as { error?: string };
 
   if (!response.ok) {
-    throw new Error(payload.error ?? '添加流媒体歌单失败');
+    throw new Error(payload.error ?? te('error.devApi.importPlaylistFailed'));
   }
 
   return payload as StreamingPlaylistImportResult;
@@ -1050,12 +1134,12 @@ const refreshNeteaseDailyRecommendFromDevApi = async (): Promise<StreamingPlayli
   const response = await fetch(`${devApiBaseUrl}/streaming/netease-daily-recommend`, {
     method: 'POST',
   }).catch(() => {
-    throw new Error('本地开发接口未启动，请重启 npm run dev 后再刷新每日推荐。');
+    throw new Error(te('error.devApi.unavailable.dailyRecommend'));
   });
   const payload = (await response.json().catch(() => ({}))) as { error?: string };
 
   if (!response.ok) {
-    throw new Error(payload.error ?? '刷新网易云每日推荐失败。');
+    throw new Error(payload.error ?? te('error.devApi.dailyRecommendFailed'));
   }
 
   return payload as StreamingPlaylistImportResult;
@@ -1067,12 +1151,12 @@ const syncLikedSongsFromDevApi = async (provider?: 'netease' | 'qqmusic'): Promi
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider }),
   }).catch(() => {
-    throw new Error('本地开发接口未启动，请重启 npm run dev 后再同步喜欢歌单。');
+    throw new Error(te('error.devApi.unavailable.likedSongs'));
   });
   const payload = (await response.json().catch(() => ({}))) as { error?: string };
 
   if (!response.ok) {
-    throw new Error(payload.error ?? '同步在线喜欢歌单失败。');
+    throw new Error(payload.error ?? te('error.devApi.syncLikedFailed'));
   }
 
   return payload as StreamingLikedSongsSyncResult;
@@ -1088,12 +1172,12 @@ const setStreamingTrackLikedFromDevApi = async (request: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   }).catch(() => {
-    throw new Error('Local development API is unavailable. Restart npm run dev before syncing liked tracks.');
+    throw new Error(te('error.devApi.unavailable.likedTrack'));
   });
   const payload = (await response.json().catch(() => ({}))) as { error?: string };
 
   if (!response.ok) {
-    throw new Error(payload.error ?? 'Failed to sync liked track.');
+    throw new Error(payload.error ?? te('error.devApi.syncLikedTrackFailed'));
   }
 
   return payload as { liked: boolean };
@@ -1101,33 +1185,33 @@ const setStreamingTrackLikedFromDevApi = async (request: {
 
 const browserStreamingBridge: StreamingBridgeApi = {
   search: async () => {
-    throw new Error('桌面桥接不可用，请在 ECHO Next 客户端窗口中搜索流媒体。');
+    throw new Error(te('error.bridge.streamingSearch'));
   },
   getTrack: async () => {
-    throw new Error('桌面桥接不可用，请在 ECHO Next 客户端窗口中读取流媒体歌曲。');
+    throw new Error(te('error.bridge.streamingTrack'));
   },
   getAlbum: async () => {
-    throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to read streaming albums.');
+    throw new Error(te('error.bridge.streamingAlbum'));
   },
   getArtist: async () => {
-    throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to read streaming artists.');
+    throw new Error(te('error.bridge.streamingArtist'));
   },
   resolvePlayback: async () => {
-    throw new Error('桌面桥接不可用，请在 ECHO Next 客户端窗口中播放流媒体。');
+    throw new Error(te('error.bridge.streamingPlayback'));
   },
   analyzeBpm: async () => {
-    throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to analyze streaming BPM.');
+    throw new Error(te('error.bridge.streamingBpm'));
   },
   getLyrics: async () => {
-    throw new Error('桌面桥接不可用，请在 ECHO Next 客户端窗口中读取歌词。');
+    throw new Error(te('error.bridge.streamingLyrics'));
   },
   getMv: async () => {
-    throw new Error('桌面桥接不可用，请在 ECHO Next 客户端窗口中读取 MV。');
+    throw new Error(te('error.bridge.streamingMv'));
   },
   getProviders: async () => [],
   importPlaylistFromUrl: importPlaylistFromDevApi,
   importFavoritesFromUrl: async (): Promise<StreamingFavoritesImportResult> => {
-    throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to import streaming favorites.');
+    throw new Error(te('error.bridge.streamingFavorites'));
   },
   exportFavorites: async () => null,
   syncLikedSongs: syncLikedSongsFromDevApi,
@@ -1170,4 +1254,5 @@ const browserStreamingBridge: StreamingBridgeApi = {
 
 export const getStreamingBridge = (): Window['echo']['streaming'] | null => getEchoBridge()?.streaming ?? browserStreamingBridge;
 
-export const getQobuzBridge = () => (getEchoBridge() as any)?.qobuz ?? null;
+export const getQobuzBridge = (): QobuzBridge | null =>
+  (getEchoBridge() as (Window['echo'] & { qobuz?: QobuzBridge }) | null)?.qobuz ?? null;

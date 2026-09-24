@@ -20,7 +20,7 @@ import type {
 } from '../../shared/types/remoteSources';
 import type { LibrarySort } from '../../shared/types/library';
 import { getRemoteSourceService } from '../library/remote/RemoteSourceService';
-import { requirePrivateFeature } from '../plugins/privateEntitlements';
+import { requireLocalPro } from '../plugins/LocalProEntitlements';
 import {
   createBaiduOAuthAuthorizeUrl,
   exchangeBaiduOAuthCode,
@@ -38,6 +38,8 @@ const sortValues = new Set<LibrarySort>([
   'default',
   'createdAsc',
   'createdDesc',
+  'yearAsc',
+  'yearDesc',
   'titleAsc',
   'titleDesc',
   'durationAsc',
@@ -46,6 +48,15 @@ const sortValues = new Set<LibrarySort>([
   'fileModifiedDesc',
   'qualityAsc',
   'qualityDesc',
+  'codecAsc',
+  'codecDesc',
+  'audioSpecAsc',
+  'audioSpecDesc',
+  'bitrateAsc',
+  'bitrateDesc',
+  'bpmAsc',
+  'bpmDesc',
+  'trackNumber',
   'frequent',
   'random',
   'title',
@@ -55,9 +66,9 @@ const sortValues = new Set<LibrarySort>([
   'recent',
 ]);
 
-const requireRemoteSourcesProUnlock = async (): Promise<void> => {
+const requireLightweightRemoteSourcesProUnlock = (): void => {
   try {
-    await requirePrivateFeature('remote-sources');
+    requireLocalPro('remote-sources');
   } catch (error) {
     if (isAuthorizationFailure(error)) {
       throw createPublicAuthorizationRequiredError();
@@ -66,23 +77,27 @@ const requireRemoteSourcesProUnlock = async (): Promise<void> => {
   }
 };
 
-let remoteSourcesProUnlockInFlight: Promise<void> | null = null;
-
-const requireRemoteSourcesProUnlockCoalesced = async (): Promise<void> => {
-  if (!remoteSourcesProUnlockInFlight) {
-    remoteSourcesProUnlockInFlight = requireRemoteSourcesProUnlock().finally(() => {
-      remoteSourcesProUnlockInFlight = null;
-    });
-  }
-
-  await remoteSourcesProUnlockInFlight;
-};
-
 const withRemoteSourcesProUnlock = <TArgs extends unknown[], TResult>(
   handler: (...args: TArgs) => TResult | Promise<TResult>,
 ): ((...args: TArgs) => Promise<TResult>) =>
   async (...args: TArgs): Promise<TResult> => {
-    await requireRemoteSourcesProUnlockCoalesced();
+    requireLightweightRemoteSourcesProUnlock();
+    return handler(...args);
+  };
+
+const withOptionalRemoteSourcesProUnlock = <TArgs extends unknown[], TResult>(
+  fallback: TResult,
+  handler: (...args: TArgs) => TResult | Promise<TResult>,
+): ((...args: TArgs) => Promise<TResult>) =>
+  async (...args: TArgs): Promise<TResult> => {
+    try {
+      requireLightweightRemoteSourcesProUnlock();
+    } catch (error) {
+      if (isAuthorizationFailure(error)) {
+        return fallback;
+      }
+      throw error;
+    }
     return handler(...args);
   };
 
@@ -206,6 +221,7 @@ const normalizeIndexedTracksQuery = (value: unknown): RemoteIndexedTracksQuery =
     pageSize: typeof input.pageSize === 'number' && Number.isFinite(input.pageSize) ? Math.max(1, Math.min(500, Math.floor(input.pageSize))) : undefined,
     search: optionalText(input.search) ?? undefined,
     sort: sortValues.has(input.sort as LibrarySort) ? (input.sort as LibrarySort) : undefined,
+    cursor: optionalText(input.cursor),
   };
 };
 
@@ -377,7 +393,7 @@ const normalizeUpdate = (value: unknown): RemoteSourceUpdate => {
 };
 
 export const registerRemoteSourcesIpc = (): void => {
-  ipcMain.handle(IpcChannels.RemoteSourcesList, withRemoteSourcesProUnlock(() => getRemoteSourceService().listSources()));
+  ipcMain.handle(IpcChannels.RemoteSourcesList, withOptionalRemoteSourcesProUnlock([], () => getRemoteSourceService().listSources()));
   ipcMain.handle(IpcChannels.RemoteSourcesGetOverview, withRemoteSourcesProUnlock((_event, sourceId?: unknown) =>
     getRemoteSourceService().getOverview(optionalText(sourceId)),
   ));
@@ -399,6 +415,9 @@ export const registerRemoteSourcesIpc = (): void => {
   ));
   ipcMain.handle(IpcChannels.RemoteSourcesSync, withRemoteSourcesProUnlock((_event, sourceId: unknown, options?: unknown) =>
     getRemoteSourceService().syncSource(requireText(sourceId, 'sourceId'), normalizeRemoteSyncOptions(options)),
+  ));
+  ipcMain.handle(IpcChannels.RemoteSourcesPreviewSync, withRemoteSourcesProUnlock((_event, sourceId: unknown, options?: unknown) =>
+    getRemoteSourceService().previewSync(requireText(sourceId, 'sourceId'), normalizeRemoteSyncOptions(options)),
   ));
   ipcMain.handle(IpcChannels.RemoteSourcesCancelSync, withRemoteSourcesProUnlock((_event, sourceId: unknown) => getRemoteSourceService().cancelSync(requireText(sourceId, 'sourceId'))));
   ipcMain.handle(IpcChannels.RemoteSourcesGetSyncStatus, withRemoteSourcesProUnlock((_event, sourceId: unknown) =>

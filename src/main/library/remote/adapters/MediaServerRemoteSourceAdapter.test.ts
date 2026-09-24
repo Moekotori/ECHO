@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JellyfinRemoteSourceAdapter } from './MediaServerRemoteSourceAdapter';
 import { RemoteStreamProxyService } from '../RemoteStreamProxyService';
 import type { RemoteSourceSecret } from '../remoteTypes';
@@ -49,6 +49,7 @@ describe('MediaServerRemoteSourceAdapter', () => {
   const servers: Server[] = [];
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     for (const server of servers.splice(0)) {
       await close(server);
     }
@@ -282,10 +283,14 @@ describe('MediaServerRemoteSourceAdapter', () => {
     const port = await listen(server);
     const adapter = new JellyfinRemoteSourceAdapter();
     const remoteSource = source(port);
+    const controller = new AbortController();
+    const addAbortListener = vi.spyOn(controller.signal, 'addEventListener');
+    const removeAbortListener = vi.spyOn(controller.signal, 'removeEventListener');
 
     await Promise.all(Array.from({ length: 12 }, (_value, index) =>
       adapter.readCover({
         source: remoteSource,
+        signal: controller.signal,
         item: {
           sourceId: remoteSource.id,
           provider: 'jellyfin',
@@ -305,6 +310,9 @@ describe('MediaServerRemoteSourceAdapter', () => {
 
     expect(authRequests).toBe(1);
     expect(maxActiveCoverRequests).toBeLessThanOrEqual(32);
+    expect(removeAbortListener.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(
+      addAbortListener.mock.calls.filter(([event]) => event === 'abort').length,
+    );
   });
 
   it('supports API key authentication without username/password login', async () => {

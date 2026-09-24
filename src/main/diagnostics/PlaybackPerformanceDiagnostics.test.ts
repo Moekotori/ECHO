@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   beginMainBackgroundTask,
+  beginIpcMainHandler,
   getPlaybackPerformanceSnapshot,
   recordIpcMainHandlerDuration,
   runPlaybackPerformanceStepSync,
@@ -61,6 +62,33 @@ describe('PlaybackPerformanceDiagnostics', () => {
       lastSlowIpcFailed: false,
     });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('[ipc-perf] library:scan-folder 420ms SLOW'));
+  });
+
+  it('tracks active IPC handlers and keeps the completed handler for stall correlation', () => {
+    let now = 12_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+
+    const complete = beginIpcMainHandler('library:get-playback-stats-dashboard');
+    now = 13_250;
+
+    expect(getPlaybackPerformanceSnapshot()).toMatchObject({
+      activeIpcChannel: 'library:get-playback-stats-dashboard',
+      activeIpcElapsedMs: 1250,
+      activeIpcCount: 1,
+    });
+
+    now = 18_600;
+    complete();
+    now = 18_750;
+
+    expect(getPlaybackPerformanceSnapshot()).toMatchObject({
+      activeIpcChannel: null,
+      activeIpcCount: 0,
+      lastIpcChannel: 'library:get-playback-stats-dashboard',
+      lastIpcDurationMs: 6600,
+      lastIpcAgeMs: 150,
+      lastIpcFailed: false,
+    });
   });
 
   it('throttles repeated slow IPC warnings while keeping the latest snapshot', () => {

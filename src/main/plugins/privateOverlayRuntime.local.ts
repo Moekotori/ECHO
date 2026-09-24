@@ -11,7 +11,10 @@ import {
 import type { EchoProCloudLibrarySyncPayload } from '../../shared/types/echoProAccount';
 import type { PrivateFeatureId, PrivateSettingsCloudApplyInput, PrivateSettingsCloudSaveInput } from './privateEntitlements';
 import { createPrivateFeatureError, installPrivateEntitlementsProvider } from './privateEntitlements';
-import { getEchoProAccountService } from './EchoProAccountService';
+import {
+  getEchoProAccountService,
+  isEchoProAccountStatusWithinOfflineGrace,
+} from './EchoProAccountService';
 import { getEchoProMachineHwidHash } from './MachineIdentity';
 import type { PrivateOverlayRuntimeInstallResult } from './privateOverlayRuntime';
 
@@ -54,7 +57,7 @@ const getLockedDownloadStatus = (): DownloadFeatureUnlockStatus => ({
 
 const getConnectStatus = (): ConnectDonatorUnlockStatus => {
   const status = getEchoProAccountService().getStatus();
-  const unlocked = status.loggedIn && status.pro === true && status.status !== 'disabled';
+  const unlocked = isEchoProAccountStatusWithinOfflineGrace(status);
   return {
     featureId: connectDonatorUnlockFeatureId,
     pluginId: connectDonatorUnlockPluginId,

@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 export const legacyEntitlementRouteResponse = 'MTgwNjQ5NzY5Nzc=' as const;
 
 export type LegacyEntitlementRouteSource =
-  | 'package-integrity'
   | 'legacy-unlock-marker'
   | 'developer-override'
   | 'cached-license'
@@ -17,7 +16,6 @@ export type LegacyEntitlementRouteSignal = {
   destructive: false;
   action: 'paid-features-fail-closed';
   reason:
-    | 'integrity-tamper-detected'
     | 'decoy-unlock-marker-detected'
     | 'developer-override-probed'
     | 'cached-license-probed'
@@ -28,8 +26,6 @@ const hashText = (value: string): string => createHash('sha256').update(value, '
 
 const reasonForSource = (source: LegacyEntitlementRouteSource): LegacyEntitlementRouteSignal['reason'] => {
   switch (source) {
-    case 'package-integrity':
-      return 'integrity-tamper-detected';
     case 'legacy-unlock-marker':
       return 'decoy-unlock-marker-detected';
     case 'developer-override':

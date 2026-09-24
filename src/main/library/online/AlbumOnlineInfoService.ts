@@ -176,7 +176,7 @@ const wikipediaLanguageForLocale = (locale: AppLocale | undefined): 'zh' | 'ja' 
   if (locale === 'ja-JP') {
     return 'ja';
   }
-  if (locale === 'en-US') {
+  if (locale === 'en-US' || locale === 'ko-KR') {
     return 'en';
   }
   return 'zh';

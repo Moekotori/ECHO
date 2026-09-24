@@ -3,6 +3,7 @@ import { IpcChannels } from '../../shared/constants/ipcChannels';
 import type { TaskbarMiniPlayerState } from '../../shared/types/taskbarMiniPlayer';
 import { getAppSettings, setAppSettings } from './appSettings';
 import {
+  getTaskbarHostDiagnostics,
   hideTaskbarHost,
   isTaskbarHostReady,
   showTaskbarHost,
@@ -23,13 +24,24 @@ const emitTaskbarMiniPlayerStateChanged = (): void => {
 
 export const getTaskbarMiniPlayerState = (): TaskbarMiniPlayerState => {
   const enabled = getAppSettings().taskbarMiniPlayerEnabled === true;
-  const supported = process.platform === 'win32';
+  const diagnostics = getTaskbarHostDiagnostics();
+  const unsupportedReason =
+    process.platform !== 'win32'
+      ? 'non-windows'
+      : !diagnostics.hostPathAvailable || diagnostics.state === 'missing'
+        ? 'host-missing'
+        : diagnostics.state === 'error'
+          ? 'host-start-failed'
+          : null;
+  const supported = unsupportedReason === null;
   return {
     visible: enabled && taskbarMiniPlayerVisible && isTaskbarHostReady(),
     supported,
-    unsupportedReason: supported ? null : 'non-windows',
+    unsupportedReason,
     bounds: null,
     edge: null,
+    hostState: diagnostics.state,
+    lastError: diagnostics.lastError,
     settings: {
       taskbarMiniPlayerEnabled: enabled,
     },
@@ -41,11 +53,13 @@ export const showTaskbarMiniPlayerOnly = (): TaskbarMiniPlayerState => {
     return getTaskbarMiniPlayerState();
   }
 
+  taskbarMiniPlayerVisible = true;
+  showTaskbarHost();
   if (startTaskbarHost()) {
-    taskbarMiniPlayerVisible = true;
-    showTaskbarHost();
+    // Visibility becomes true when the native host reports ready.
   } else {
     taskbarMiniPlayerVisible = false;
+    hideTaskbarHost(true);
   }
 
   emitTaskbarMiniPlayerStateChanged();
@@ -92,5 +106,9 @@ export const resetTaskbarMiniPlayerBounds = (): TaskbarMiniPlayerState => {
 export const stopTaskbarMiniPlayer = (): void => {
   taskbarMiniPlayerVisible = false;
   stopTaskbarHost();
+  emitTaskbarMiniPlayerStateChanged();
+};
+
+export const notifyTaskbarMiniPlayerHostStateChanged = (): void => {
   emitTaskbarMiniPlayerStateChanged();
 };

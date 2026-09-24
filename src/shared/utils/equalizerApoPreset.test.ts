@@ -207,4 +207,33 @@ Filter 2: ON LS Fc80Hz Gain2.5dB Q0.7
     expect(preset.bands[0]).toMatchObject({ frequencyHz: 1000, gainDb: -3, q: 1.4, filterType: 'peaking' });
     expect(preset.bands[1]).toMatchObject({ frequencyHz: 80, gainDb: 2.5, q: 0.7, filterType: 'lowShelf' });
   });
+
+  it('imports REW Equalizer APO filter-settings exports', () => {
+    const preset = parseEqualizerApoPreset(`
+Filter Settings file
+Room EQ V5.40
+Equaliser: Generic
+Filter  1: ON  PK       Fc    43.20 Hz  Gain  -4.50 dB  Q  3.200
+Filter  2: ON  LS       Fc   105.00 Hz  Gain   2.00 dB  Q  0.710
+`);
+
+    expect(preset.importedFilterCount).toBe(2);
+    expect(preset.bands[0]).toMatchObject({ frequencyHz: 43.2, gainDb: -4.5, q: 3.2, filterType: 'peaking' });
+    expect(preset.bands[1]).toMatchObject({ frequencyHz: 105, gainDb: 2, q: 0.71, filterType: 'lowShelf' });
+  });
+
+  it('imports AutoEq ParametricEQ exports', () => {
+    const preset = parseEqualizerApoPreset(`
+# AutoEq generated EqualizerAPO configuration
+Preamp: -6.4 dB
+Filter 1: ON PK Fc 31 Hz Gain 3.1 dB Q 1.02
+Filter 2: ON PK Fc 122 Hz Gain -5.6 dB Q 0.71
+Filter 3: ON HS Fc 10000 Hz Gain -1.5 dB Q 0.70
+`);
+
+    expect(preset.preampDb).toBe(-6.4);
+    expect(preset.importedFilterCount).toBe(3);
+    expect(preset.bands[0]).toMatchObject({ frequencyHz: 31, gainDb: 3.1, q: 1.02, filterType: 'peaking' });
+    expect(preset.bands[2]).toMatchObject({ frequencyHz: 10000, gainDb: -1.5, q: 0.7, filterType: 'highShelf' });
+  });
 });

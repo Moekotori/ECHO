@@ -1,7 +1,12 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteLibraryTrack, RemoteMetadataResult } from '../../../shared/types/remoteSources';
 import type { RemoteSourceSecret } from './remoteTypes';
 import { RemoteBackgroundJobQueue } from './RemoteBackgroundJobQueue';
+import { remoteCoverCacheKeyFor } from './remoteCoverUrls';
+import { readSubsonicCoverDiskCache, writeSubsonicCoverDiskCache } from './SubsonicCoverDiskCache';
 
 const serviceMocks = vi.hoisted(() => ({
   getLyricsForTrack: vi.fn(),
@@ -901,6 +906,96 @@ describe('RemoteBackgroundJobQueue', () => {
     expect(store.getCachedRemoteCoverIdForTrack).toHaveBeenCalledWith(track);
     expect(store.updateTrackCoversByCoverArt).toHaveBeenCalledWith(source.id, 'album-cover-1', 'cached-cover-id');
     expect(readCover).not.toHaveBeenCalled();
+  });
+
+  it('promotes an on-demand Subsonic disk cover without fetching it again', async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), 'echo-subsonic-cover-'));
+    const source = { ...makeSource(), provider: 'subsonic' as const };
+    const track = {
+      ...makeTrack(),
+      provider: 'subsonic' as const,
+      metadataStatus: 'ok' as const,
+      fieldSources: { coverArt: 'album-cover-1' },
+    };
+    const coverKey = remoteCoverCacheKeyFor(track)!;
+    await writeSubsonicCoverDiskCache(cacheDir, coverKey, 512, 'image/jpeg', Buffer.from('cached-cover'));
+    const readCover = vi.fn();
+    const store = {
+      getTracksForBackgroundJobs: vi.fn().mockReturnValue([track]),
+      getTrack: vi.fn(() => track),
+      getSource: vi.fn(() => source),
+      getSourceWithSecret: vi.fn(() => source),
+      getCachedRemoteCoverIdForTrack: vi.fn(() => null),
+      upsertRemoteCoverCacheForTrack: vi.fn(),
+      updateTrackJobStatus: vi.fn(),
+      updateTrackCover: vi.fn(),
+      updateTrackCoversByCoverArt: vi.fn(() => 1),
+    };
+    const coverService = {
+      ensureCover: vi.fn(async (_path, metadata) => {
+        expect(Buffer.from(metadata.embeddedCover.data).toString()).toBe('cached-cover');
+        return 'promoted-cover-id';
+      }),
+    };
+    const queue = new RemoteBackgroundJobQueue(store as never, () => ({ readCover } as never), coverService as never, () => ({}), cacheDir);
+
+    try {
+      queue.enqueueSource(source.id, ['cover']);
+      await waitFor(() => queue.getStatus(source.id).completed.cover === 1);
+
+      expect(readCover).not.toHaveBeenCalled();
+      expect(coverService.ensureCover).toHaveBeenCalledTimes(1);
+      expect(store.updateTrackCoversByCoverArt).toHaveBeenCalledWith(source.id, 'album-cover-1', 'promoted-cover-id');
+    } finally {
+      await queue.dispose();
+      await rm(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it('shares a background-fetched Subsonic cover with later on-demand reads', async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), 'echo-subsonic-cover-'));
+    const source = { ...makeSource(), provider: 'subsonic' as const };
+    const track = {
+      ...makeTrack(),
+      provider: 'subsonic' as const,
+      metadataStatus: 'ok' as const,
+      fieldSources: { coverArt: 'album-cover-1' },
+    };
+    const coverKey = remoteCoverCacheKeyFor(track)!;
+    const readCover = vi.fn(async () => ({
+      status: 'ok' as const,
+      data: new Uint8Array(Buffer.from('remote-cover')),
+      mimeType: 'image/png',
+      fieldSources: { cover: 'subsonic' },
+      warnings: [],
+      errors: [],
+    }));
+    const store = {
+      getTracksForBackgroundJobs: vi.fn().mockReturnValue([track]),
+      getTrack: vi.fn(() => track),
+      getSource: vi.fn(() => source),
+      getSourceWithSecret: vi.fn(() => source),
+      getCachedRemoteCoverIdForTrack: vi.fn(() => null),
+      upsertRemoteCoverCacheForTrack: vi.fn(),
+      updateTrackJobStatus: vi.fn(),
+      updateTrackCover: vi.fn(),
+      updateTrackCoversByCoverArt: vi.fn(() => 1),
+    };
+    const coverService = { ensureCover: vi.fn(async () => 'remote-cover-id') };
+    const queue = new RemoteBackgroundJobQueue(store as never, () => ({ readCover } as never), coverService as never, () => ({}), cacheDir);
+
+    try {
+      queue.enqueueSource(source.id, ['cover']);
+      await waitFor(() => queue.getStatus(source.id).completed.cover === 1);
+      const cached = await readSubsonicCoverDiskCache(cacheDir, coverKey, 512);
+
+      expect(readCover).toHaveBeenCalledTimes(1);
+      expect(cached?.mimeType).toBe('image/png');
+      expect(cached?.data.toString()).toBe('remote-cover');
+    } finally {
+      await queue.dispose();
+      await rm(cacheDir, { recursive: true, force: true });
+    }
   });
 
   it('aborts running cover work when a source is paused', async () => {

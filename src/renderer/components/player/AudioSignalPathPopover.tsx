@@ -6,6 +6,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Speaker,
+  Workflow,
   Waves,
   X,
 } from 'lucide-react';
@@ -262,6 +263,16 @@ const formatDsdOutputRate = (sampleRate: number | null | undefined): string | nu
   return formatRoonRate(sampleRate);
 };
 
+const formatSdmNativeRate = (sampleRate: number | null | undefined): string | null => {
+  if (!sampleRate || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return null;
+  }
+
+  return sampleRate >= 1_000_000
+    ? `${trimFixed(sampleRate / 1_000_000, 4)}MHz`
+    : formatRoonRate(sampleRate);
+};
+
 const formatEchoSrcFirFrames = (frames: number | null | undefined): string | null =>
   typeof frames === 'number' && Number.isFinite(frames) && frames > 0 ? `${Math.round(frames)}f` : null;
 
@@ -373,9 +384,207 @@ const formatSdmBackendLabel = (backend: AudioSdmRuntimeBackend | null | undefine
   return null;
 };
 
+const isPcmToSdmSignalPath = (status: AudioStatus | null | undefined): boolean =>
+  status?.sdmRuntimeState === 'pcm_to_sdm_active'
+  || (
+    status?.sdmRuntime?.state === 'fallback'
+    && Boolean(status.sdmRuntime.nativeSampleRate ?? status.sdmNativeSampleRate)
+    && Boolean(status.sdmRuntime.transportSampleRate ?? status.sdmTransportSampleRate)
+  );
+
+const isSdmHybridRuntime = (status: AudioStatus | null | undefined): boolean =>
+  status?.sdmRuntime?.activeBackend === 'cpu'
+  && status.sdmRuntime.oversamplingRuntime?.activeBackend === 'cuda';
+
+const formatSdmModuleLabel = (status: AudioStatus): string => {
+  if (isSdmHybridRuntime(status)) {
+    return 'ECHO SDM Hybrid';
+  }
+  if (status.sdmRuntime?.activeBackend === 'cuda') {
+    return 'ECHO SDM CUDA';
+  }
+  if (status.sdmRuntime?.activeBackend === 'cpu') {
+    return status.sdmRuntime.state === 'fallback' ? 'ECHO SDM CPU fallback' : 'ECHO SDM CPU';
+  }
+  return status.sdmRuntime?.state === 'fallback' ? 'ECHO SDM fallback' : 'ECHO SDM';
+};
+
+const formatSdmOversamplingFactor = (status: AudioStatus): string | null => {
+  const runtime = status.sdmRuntime;
+  const factor = runtime?.oversamplingFactor
+    ?? (
+      runtime?.oversamplingSourceSampleRate
+      && runtime.oversamplingTargetSampleRate
+        ? runtime.oversamplingTargetSampleRate / runtime.oversamplingSourceSampleRate
+        : null
+    );
+
+  if (!factor || !Number.isFinite(factor) || factor <= 0) {
+    return null;
+  }
+
+  return `${factor.toFixed(Math.abs(factor - Math.round(factor)) < 0.001 ? 0 : 2)}x`;
+};
+
+const formatSdmOversamplingPath = (status: AudioStatus): string => {
+  const runtime = status.sdmRuntime;
+  const sourceRate = formatRoonRate(runtime?.oversamplingSourceSampleRate ?? status.fileSampleRate);
+  const targetRate = formatRoonRate(runtime?.oversamplingTargetSampleRate ?? runtime?.transportSampleRate ?? status.sdmTransportSampleRate);
+  const factor = formatSdmOversamplingFactor(status);
+
+  if (sourceRate && targetRate) {
+    return joinSpec([`${sourceRate} PCM -> ${targetRate} PCM`, factor], `${sourceRate} PCM -> ${targetRate} PCM`);
+  }
+
+  return joinSpec([sourceRate ? `${sourceRate} PCM` : null, targetRate ? `${targetRate} PCM` : null, factor], 'PCM FIR oversampling');
+};
+
+const formatSdmOversamplingEngine = (status: AudioStatus): string => {
+  const runtime = status.sdmRuntime?.oversamplingRuntime;
+  const backend = runtime?.activeBackend === 'cuda'
+    ? 'CUDA FIR'
+    : runtime?.activeBackend === 'cpu'
+      ? 'CPU FIR'
+      : runtime?.requestedBackend === 'cuda'
+        ? 'CUDA FIR planned'
+        : runtime?.requestedBackend === 'cpu'
+          ? 'CPU FIR planned'
+          : null;
+  const cudaDevice = runtime?.activeBackend === 'cuda' ? formatSdmCudaRuntimeDevice(status) : null;
+  const stageProfiles = runtime?.firStageProfiles ?? [];
+  const filterSlot = stageProfiles.length > 1
+    ? 'Filter 1x/Nx'
+    : runtime?.filterSlot
+      ? `Filter ${runtime.filterSlot === '1x' ? '1x' : 'Nx'}`
+      : status.sdmRuntime?.oversamplingFilterSlot
+        ? `Filter ${status.sdmRuntime.oversamplingFilterSlot === '1x' ? '1x' : 'Nx'}`
+        : null;
+  const profile = stageProfiles.length
+    ? stageProfiles.join(' -> ')
+    : runtime?.filterProfile
+      ?? status.sdmRuntime?.oversamplingFilterProfile1x
+      ?? status.sdmRuntime?.oversamplingFilterProfileNx;
+  const stageText = runtime?.firStageCount && runtime.firStageCount > 1
+    ? `${runtime.firStageCount} stages`
+    : null;
+  const tapText = runtime?.firStageTapCounts?.length
+    ? `${runtime.firStageTapCounts.join('+')} taps`
+    : runtime?.tapCount
+      ? `${runtime.tapCount} taps`
+      : null;
+  const fallbackText = runtime?.state === 'fallback'
+    ? `fallback: ${cleanReason(runtime.fallbackReason) ?? 'runtime fallback'}`
+    : null;
+
+  return joinSpec([
+    backend,
+    cudaDevice,
+    filterSlot,
+    profile,
+    stageText,
+    tapText,
+    runtime?.firProcessingMode,
+    fallbackText,
+  ], status.sdmRuntime?.oversamplingEngine === 'soxr' ? 'SOXR oversampling' : 'FIR oversampling');
+};
+
+const formatSdmModulatorPath = (status: AudioStatus): string => {
+  const runtime = status.sdmRuntime;
+  const nativeRate = runtime?.nativeSampleRate ?? status.sdmNativeSampleRate;
+  const target = formatDsdOutputRate(nativeRate) ?? runtime?.targetRate?.toUpperCase() ?? 'SDM';
+  const nativeRateText = formatSdmNativeRate(nativeRate);
+  const backend = formatSdmBackendLabel(runtime?.activeBackend);
+  const profile = runtime?.modulatorProfile ?? status.sdmModulatorProfile ?? null;
+
+  return joinSpec([
+    target,
+    nativeRateText ? `${nativeRateText} 1-bit` : '1-bit',
+    profile?.name,
+    profile ? `${profile.order}th-order` : null,
+    backend,
+  ], target);
+};
+
+const formatSdmModulatorRuntime = (status: AudioStatus): string => {
+  const runtime = status.sdmRuntime;
+  const fallbackText = runtime?.state === 'fallback'
+    ? `fallback: ${cleanReason(runtime.fallbackReason) ?? 'runtime fallback'}`
+    : null;
+
+  return joinSpec([
+    runtime?.processingMode,
+    runtime?.batchFrames && runtime.batchFrames > 1 ? `batch ${formatEchoSrcFirFrames(runtime.batchFrames)}` : null,
+    runtime?.maxBlockFrames && runtime.maxBlockFrames > 1 ? `block ${formatEchoSrcFirFrames(runtime.maxBlockFrames)}` : null,
+    runtime?.workerAverageMs !== null && runtime?.workerAverageMs !== undefined
+      ? `worker ${formatEchoSrcFirMs(runtime.workerAverageMs)} avg`
+      : null,
+    formatEchoSrcFirRealtime(runtime?.realtimeRatio),
+    fallbackText,
+  ], runtime?.activeBackend === 'cuda' ? 'CUDA modulator active' : 'CPU recursive modulator');
+};
+
+const formatNativeOutputLayout = (format: string | null | undefined): string | null => {
+  const normalized = format?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const labels: Record<string, string> = {
+    int16lsb: 'ASIO Int16 LSB',
+    int24lsb: 'ASIO Int24 LSB',
+    int32lsb: 'ASIO Int32 LSB',
+    int32lsb16: 'ASIO Int32 LSB16',
+    int32lsb18: 'ASIO Int32 LSB18',
+    int32lsb20: 'ASIO Int32 LSB20',
+    int32lsb24: 'ASIO Int32 LSB24',
+  };
+
+  return labels[normalized] ?? format?.trim() ?? null;
+};
+
+const formatSdmTransportPath = (status: AudioStatus): string => {
+  const runtime = status.sdmRuntime;
+  const nativeRate = runtime?.nativeSampleRate ?? status.sdmNativeSampleRate;
+  const transportRate = runtime?.transportSampleRate ?? status.sdmTransportSampleRate ?? status.actualDeviceSampleRate;
+  const target = formatDsdOutputRate(nativeRate) ?? runtime?.targetRate?.toUpperCase() ?? 'SDM';
+  const transport = formatRoonRate(transportRate);
+
+  return transport ? `${target} -> DoP ${transport} carrier` : `${target} -> DoP`;
+};
+
+const formatSdmTransportDetail = (status: AudioStatus): string =>
+  joinSpec([
+    'DoP 24-bit',
+    formatNativeOutputLayout(status.nativeOutputFormat),
+    'markers 0x05/0xFA',
+  ], 'DoP 24-bit');
+
+const formatSdmClockValue = (status: AudioStatus): string => {
+  const nativeRate = status.sdmRuntime?.nativeSampleRate ?? status.sdmNativeSampleRate;
+  const transportRate = status.sdmRuntime?.transportSampleRate ?? status.sdmTransportSampleRate ?? status.actualDeviceSampleRate;
+
+  return joinSpec([
+    formatSdmNativeRate(nativeRate) ? `SDM ${formatSdmNativeRate(nativeRate)}` : null,
+    formatRoonRate(transportRate) ? `DoP ${formatRoonRate(transportRate)}` : null,
+  ], 'SDM clock pending');
+};
+
+const formatSdmClockDetail = (status: AudioStatus): string => {
+  const sourceRate = status.sdmRuntime?.oversamplingSourceSampleRate ?? status.fileSampleRate;
+  const nativeRate = status.sdmRuntime?.nativeSampleRate ?? status.sdmNativeSampleRate;
+  const factor = sourceRate && nativeRate ? nativeRate / sourceRate : null;
+  const factorText = factor && Number.isFinite(factor)
+    ? `${factor.toFixed(Math.abs(factor - Math.round(factor)) < 0.001 ? 0 : 2)}x PCM rate`
+    : null;
+
+  return joinSpec([factorText, '1-bit SDM; DoP rate is the carrier clock'], '1-bit SDM / DoP carrier clock');
+};
+
 const formatSdmEngine = (status: AudioStatus): string => {
   const runtime = status.sdmRuntime;
-  const backend = formatSdmBackendLabel(runtime?.activeBackend ?? null);
+  const backend = isSdmHybridRuntime(status)
+    ? 'CUDA FIR + CPU SDM'
+    : formatSdmBackendLabel(runtime?.activeBackend ?? null);
   const profile = runtime?.modulatorProfile ?? status.sdmModulatorProfile ?? null;
   const cudaDevice = runtime?.activeBackend === 'cuda' ? formatSdmCudaRuntimeDevice(status) : null;
   const workerText = runtime?.workerAverageMs !== null && runtime?.workerAverageMs !== undefined
@@ -407,26 +616,31 @@ const formatSdmEngine = (status: AudioStatus): string => {
 };
 
 const formatSdmPath = (status: AudioStatus | null, track?: LibraryTrack | null): string | null => {
-  if (status?.sdmRuntimeState !== 'pcm_to_sdm_active' && status?.sdmRuntime?.state !== 'fallback') {
+  if (!status || !isPcmToSdmSignalPath(status)) {
     return null;
   }
 
   const runtime = status.sdmRuntime;
   const sourceRate = formatRoonRate(status.fileSampleRate ?? track?.sampleRate);
   const targetRate = formatDsdOutputRate(runtime?.nativeSampleRate ?? status.sdmNativeSampleRate);
+  const nativeRate = formatSdmNativeRate(runtime?.nativeSampleRate ?? status.sdmNativeSampleRate);
   const transportRate = formatRoonRate(runtime?.transportSampleRate ?? status.sdmTransportSampleRate ?? status.requestedOutputSampleRate);
   const engine = formatSdmEngine(status);
-  const detail = joinSpec([targetRate, transportRate ? `DoP ${transportRate}` : null], targetRate ?? 'SDM');
+  const detail = joinSpec([
+    targetRate,
+    nativeRate ? `${nativeRate} 1-bit` : null,
+    transportRate ? `DoP ${transportRate} carrier` : null,
+  ], targetRate ?? 'SDM');
 
   if (sourceRate) {
-    return `${sourceRate} -> ECHO SDM ${detail} / ${engine}`;
+    return `${sourceRate} PCM -> ECHO SDM ${detail} / ${engine}`;
   }
 
   return `ECHO SDM ${detail} / ${engine}`;
 };
 
 const formatResamplePath = (status: AudioStatus | null, track?: LibraryTrack | null): string | null => {
-  if (!status?.resampling) {
+  if (!status?.resampling || isPcmToSdmSignalPath(status)) {
     return null;
   }
 
@@ -598,6 +812,9 @@ const hasHqPlayerPlaybackDetails = (
   ));
 
 const outputModeLabel = (mode: AudioStatus['outputMode'] | null | undefined, t: Translate = fallbackT): string => {
+  if (mode === 'asio') {
+    return t('settings.playback.outputMode.asio');
+  }
   if (mode === 'exclusive') {
     return t('audioSignalPath.outputMode.exclusive');
   }
@@ -869,13 +1086,7 @@ const buildDspModules = (status: AudioStatus | null, t: Translate = fallbackT): 
           ? 'ECHO SRC CUDA FIR'
           : 'ECHO SRC'
     : null;
-  const sdmModule = status.sdmRuntimeState === 'pcm_to_sdm_active' || status.sdmRuntime?.state === 'fallback'
-    ? status.sdmRuntime?.state === 'fallback'
-      ? 'ECHO SDM fallback'
-      : status.sdmRuntime?.activeBackend === 'cuda'
-        ? 'ECHO SDM CUDA'
-        : 'ECHO SDM CPU'
-    : null;
+  const sdmModule = isPcmToSdmSignalPath(status) ? formatSdmModuleLabel(status) : null;
 
   return [
     status.dspActive && Math.abs(status.dspHeadroomDb ?? 0) > 0.05
@@ -893,6 +1104,8 @@ const buildDspModules = (status: AudioStatus | null, t: Translate = fallbackT): 
 
 export const buildAudioSignalPathNodes = (status: AudioStatus | null, track: LibraryTrack | null, t: Translate = fallbackT): SignalNode[] => {
   const dspModules = buildDspModules(status, t);
+  const gaplessEnabled = status?.gaplessPlaybackEnabled === true;
+  const gaplessActive = status?.automix?.gapless === true && status.automix.active === true;
   const outputRate = formatRate(status?.actualDeviceSampleRate ?? status?.requestedOutputSampleRate ?? status?.sharedDeviceSampleRate);
   const sourceTone: SignalTone = status ? 'good' : 'muted';
   const decodeTone: SignalTone = status?.resampling ? 'warning' : status ? 'good' : 'muted';
@@ -920,6 +1133,19 @@ export const buildAudioSignalPathNodes = (status: AudioStatus | null, track: Lib
       icon: Cpu,
       tone: decodeTone,
     },
+    ...(gaplessEnabled
+      ? [{
+          title: t('audioSignalPath.node.transition'),
+          value: gaplessActive
+            ? t('audioSignalPath.gapless.active')
+            : t('audioSignalPath.gapless.enabled'),
+          detail: gaplessActive
+            ? t('audioSignalPath.gapless.activeDetail')
+            : t('audioSignalPath.gapless.pendingDetail'),
+          icon: Workflow,
+          tone: gaplessActive ? 'good' as const : 'process' as const,
+        }]
+      : []),
     {
       title: t('audioSignalPath.node.process'),
       value: dspModules.length ? dspModules.join(' + ') : t('audioSignalPath.process.nativePath'),
@@ -1001,6 +1227,17 @@ const getSignalSummary = (status: AudioStatus | null, track: LibraryTrack | null
       tone,
     };
   }
+  if (isPcmToSdmSignalPath(status)) {
+    const target = formatDsdOutputRate(status.sdmRuntime?.nativeSampleRate ?? status.sdmNativeSampleRate)
+      ?? status.sdmRuntime?.targetRate?.toUpperCase()
+      ?? 'SDM';
+    return {
+      label: t('audioSignalPath.summary.pcmToSdm', { target }),
+      detail: formatSdmPath(status, track) ?? `PCM -> ${target}`,
+      spec,
+      tone,
+    };
+  }
   if (status.echoSrcActive) {
     return {
       label: t('audioSignalPath.summary.upsampling'),
@@ -1061,6 +1298,9 @@ const getRoonPathLabel = (status: AudioStatus | null, t: Translate = fallbackT):
   if (status.dspLimiterProtecting || status.dspClippingRisk) {
     return t('audioSignalPath.summary.protecting');
   }
+  if (isPcmToSdmSignalPath(status)) {
+    return t('audioSignalPath.path.sdm');
+  }
   if (
     status.dspActive
     || status.eqEnabled
@@ -1083,6 +1323,9 @@ const outputLabel = (status: AudioStatus | null, t: Translate = fallbackT): stri
   if (!status) {
     return unknown(t);
   }
+  if (status.outputMode === 'asio') {
+    return t('audioSignalPath.output.asio');
+  }
   if (status.outputMode === 'exclusive') {
     return t('audioSignalPath.output.exclusive');
   }
@@ -1100,7 +1343,10 @@ const hasOutputFallbackSignal = (status: AudioStatus | null): boolean => {
   const haystack = [
     status.error,
     status.bitPerfectDisabledReason,
-    ...status.warnings,
+    ...status.warnings.filter((warning) =>
+      !/^(?:native_cuda_sdm_|sdm_cuda_)/u.test(warning)
+      || /fell_back_to_pcm|output/u.test(warning),
+    ),
   ].filter(Boolean).join(' ').toLowerCase();
 
   return /fallback|fell[_ -]?back|returned to shared|compatibility_mode|recovery/u.test(haystack);
@@ -1138,6 +1384,10 @@ const stabilityReason = (status: AudioStatus | null, t: Translate = fallbackT): 
     return t('audioSignalPath.stability.reasonSystem');
   }
 
+  if (isPcmToSdmSignalPath(status)) {
+    return t('audioSignalPath.stability.reasonSdm');
+  }
+
   const warning = status.warnings.find((item) => item.trim().length > 0);
   const warningReason = cleanReason(warning);
   if (warningReason) {
@@ -1166,6 +1416,7 @@ const buildLocalStabilityReadout = (
 ): SignalStabilityReadout => {
   const sourceRate = status?.fileSampleRate ?? track?.sampleRate ?? null;
   const outputRate = status?.actualDeviceSampleRate ?? status?.sharedDeviceSampleRate ?? status?.requestedOutputSampleRate ?? null;
+  const sdmActive = isPcmToSdmSignalPath(status);
   const fallbackActive = status?.outputMode !== 'system' && hasOutputFallbackSignal(status);
   const dspModules = buildDspModules(status, t);
   const chainTone: SignalTone = !status
@@ -1174,7 +1425,7 @@ const buildLocalStabilityReadout = (
       ? 'danger'
       : fallbackActive || status.outputMode === 'system'
         ? 'warning'
-        : status.dspActive || status.resampling || status.echoSrcActive
+        : status.dspActive || status.resampling || status.echoSrcActive || sdmActive
           ? 'process'
           : 'good';
   const actualRoute = joinSpec([
@@ -1188,21 +1439,29 @@ const buildLocalStabilityReadout = (
       : status.outputMode === 'system'
         ? t('audioSignalPath.stability.fallbackSystem')
         : t('audioSignalPath.stability.fallbackNone');
-  const dspValue = dspModules.length
+  const dspValue = sdmActive && status
+    ? formatSdmModuleLabel(status)
+    : dspModules.length
     ? dspModules.slice(0, 3).join(' + ')
     : status?.dspActive
       ? t('audioSignalPath.stability.dspActive')
       : t('audioSignalPath.stability.dspBypassed');
-  const dspDetail = status?.dspLimiterProtecting
+  const dspDetail = sdmActive
+    ? t('audioSignalPath.stability.sdmInPath')
+    : status?.dspLimiterProtecting
     ? t('audioSignalPath.stability.dspLimiter')
     : status?.dspClippingRisk || status?.clippingRisk
       ? t('audioSignalPath.stability.dspRisk')
       : status?.dspActive || dspModules.length
         ? t('audioSignalPath.stability.dspInPath')
         : t('audioSignalPath.stability.dspOffDetail');
-  const rateValue = ratePairLabel(sourceRate, outputRate, t('audioSignalPath.metric.clockPending'));
+  const rateValue = sdmActive && status
+    ? formatSdmClockValue(status)
+    : ratePairLabel(sourceRate, outputRate, t('audioSignalPath.metric.clockPending'));
   const rateDetail = status?.sampleRateMismatch
     ? t('audioSignalPath.stability.rateMismatch')
+    : sdmActive && status
+      ? formatSdmClockDetail(status)
     : status?.resampling || status?.echoSrcActive
       ? t('audioSignalPath.stability.rateConverted')
       : outputRate
@@ -1238,7 +1497,7 @@ const buildLocalStabilityReadout = (
         label: t('audioSignalPath.stability.sampleRate'),
         value: rateValue,
         detail: rateDetail,
-        tone: status?.sampleRateMismatch ? 'danger' : status?.resampling || status?.echoSrcActive ? 'process' : status ? 'good' : 'muted',
+        tone: status?.sampleRateMismatch ? 'danger' : sdmActive || status?.resampling || status?.echoSrcActive ? 'process' : status ? 'good' : 'muted',
       },
       {
         label: t('audioSignalPath.stability.dsp'),
@@ -1329,8 +1588,8 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
 
   const nodes: RoonSignalNode[] = [];
   const echoSrcPath = formatEchoSrcPath(status, track);
-  const sdmPath = formatSdmPath(status, track);
-  const resamplePath = echoSrcPath || sdmPath ? null : formatResamplePath(status, track);
+  const sdmActive = isPcmToSdmSignalPath(status);
+  const resamplePath = echoSrcPath || sdmActive ? null : formatResamplePath(status, track);
   const echoSrcRuntimeBackend = status.echoSrcRuntime?.activeBackend ?? null;
   const echoSrcRuntimeFallback = status.echoSrcRuntime?.state === 'fallback';
   const echoSrcTitle = echoSrcRuntimeFallback
@@ -1348,20 +1607,6 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
       badge: '',
       title: echoSrcTitle,
       value: echoSrcPath,
-      tone: 'process',
-      variant: 'process',
-    });
-  }
-
-  if (sdmPath) {
-    nodes.push({
-      badge: '',
-      title: status.sdmRuntime?.state === 'fallback'
-        ? 'ECHO SDM fallback'
-        : status.sdmRuntime?.activeBackend === 'cuda'
-          ? 'ECHO SDM CUDA'
-          : 'ECHO SDM',
-      value: sdmPath,
       tone: 'process',
       variant: 'process',
     });
@@ -1420,7 +1665,7 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
     });
   }
 
-  if (nodes.length || status.dspActive) {
+  if ((nodes.length || status.dspActive) && !sdmActive) {
     nodes.push({
       badge: '',
       title: t('audioSignalPath.processing.bitDepthConversion'),
@@ -1430,11 +1675,47 @@ const buildRoonProcessingNodes = (status: AudioStatus | null, track: LibraryTrac
     });
   }
 
+  if (sdmActive) {
+    nodes.push(
+      {
+        badge: '',
+        title: t('audioSignalPath.processing.sdmOversampling'),
+        value: joinSpec([
+          formatSdmOversamplingPath(status),
+          formatSdmOversamplingEngine(status),
+        ], formatSdmOversamplingPath(status)),
+        tone: 'process',
+        variant: 'process',
+      },
+      {
+        badge: '',
+        title: t('audioSignalPath.processing.sdmModulator'),
+        value: joinSpec([
+          formatSdmModulatorPath(status),
+          formatSdmModulatorRuntime(status),
+        ], formatSdmModulatorPath(status)),
+        tone: status.sdmRuntime?.state === 'fallback' && !isSdmHybridRuntime(status) ? 'warning' : 'process',
+        variant: 'process',
+      },
+      {
+        badge: 'DoP',
+        title: t('audioSignalPath.processing.dopTransport'),
+        value: joinSpec([
+          formatSdmTransportPath(status),
+          formatSdmTransportDetail(status),
+        ], formatSdmTransportPath(status)),
+        tone: 'process',
+        variant: 'process',
+      },
+    );
+  }
+
   return nodes;
 };
 
 const buildRoonSignalPathNodes = (status: AudioStatus | null, track: LibraryTrack | null, t: Translate = fallbackT): RoonSignalNode[] => {
   const codec = normalizeCodec(track?.codec ?? status?.codec) ?? 'SRC';
+  const sdmActive = isPcmToSdmSignalPath(status);
   const directDecodeNode: RoonSignalNode[] = isNativeDirectDecodeBackend(status)
     ? [{
         badge: '',
@@ -1448,10 +1729,16 @@ const buildRoonSignalPathNodes = (status: AudioStatus | null, track: LibraryTrac
   const transport = joinSpec([
     outputModeLabel(status?.outputMode, t),
     outputBackendLabel(status?.activeOutputBackendImpl ?? status?.outputBackend),
+    sdmActive && status ? formatNativeOutputLayout(status.nativeOutputFormat) : null,
   ], status ? outputModeLabel(status.outputMode, t) : unknown(t));
   const outputDetail = joinSpec([
     outputLabel(status, t),
-    formatRoonRate(status?.actualDeviceSampleRate ?? status?.sharedDeviceSampleRate ?? status?.requestedOutputSampleRate),
+    sdmActive && status
+      ? `${formatRoonRate(status.sdmRuntime?.transportSampleRate ?? status.sdmTransportSampleRate ?? status.actualDeviceSampleRate) ?? 'DoP'} carrier`
+      : formatRoonRate(status?.actualDeviceSampleRate ?? status?.sharedDeviceSampleRate ?? status?.requestedOutputSampleRate),
+    sdmActive && status
+      ? formatDsdOutputRate(status.sdmRuntime?.nativeSampleRate ?? status.sdmNativeSampleRate)
+      : null,
   ], outputLabel(status, t));
 
   return [
@@ -1623,10 +1910,10 @@ const signalPeakFillPercent = (peakDb: number | null | undefined): number => {
   return clampPercent(((Math.max(-64, Math.min(0, peak)) + 64) / 64) * 100);
 };
 
-const signalLiveFillPercent = (status: AudioStatus | null): number => {
+export const signalLiveFillPercent = (status: AudioStatus | null): number => {
   const levels = status?.audioLevels;
   const visualEnergy = finiteNumber(levels?.visualEnergy);
-  if (visualEnergy !== null) {
+  if (visualEnergy !== null && levels?.visualTelemetryState !== 'fallback') {
     return clampPercent(visualEnergy * 100);
   }
 
@@ -1638,7 +1925,7 @@ const signalLiveValueLabel = (status: AudioStatus | null): string | null => {
   return formatDb(levels?.estimatedOutputRmsDb ?? levels?.inputRmsDb ?? levels?.estimatedOutputPeakDb ?? levels?.inputPeakDb);
 };
 
-const buildHeadroomMeter = (status: AudioStatus | null, t: Translate = fallbackT): SignalTheaterMeter => {
+export const buildHeadroomMeter = (status: AudioStatus | null, t: Translate = fallbackT): SignalTheaterMeter => {
   const levels = status?.audioLevels;
   const headroomDb = levels?.headroomDb ?? null;
   const clipCount = levels?.clipCount ?? 0;
@@ -1651,13 +1938,19 @@ const buildHeadroomMeter = (status: AudioStatus | null, t: Translate = fallbackT
         ? 'warning'
         : 'good';
   const levelPeak = formatDb(levels?.estimatedOutputPeakDb ?? levels?.inputPeakDb);
-  const meterSource = levels?.visualTelemetryState === 'pcm'
+  const liveValue = signalLiveValueLabel(status);
+  const sdmMeterUnavailable = Boolean(status && isPcmToSdmSignalPath(status) && !liveValue);
+  const meterSource = levels?.meterSource === 'native_post_dsp'
+    ? t('audioSignalPath.meter.sourceNative')
+    : levels?.visualTelemetryState === 'pcm'
     ? t('audioSignalPath.meter.sourcePcm')
     : levels?.visualTelemetryState === 'priming'
       ? t('audioSignalPath.meter.sourcePriming')
       : t('audioSignalPath.meter.sourceFallback');
   const detail = !status
     ? t('audioSignalPath.meter.waiting')
+    : sdmMeterUnavailable
+      ? t('audioSignalPath.meter.sdmUnavailableDetail')
     : status.dspLimiterProtecting
       ? t('audioSignalPath.meter.limiterHolding')
       : clipCount > 0
@@ -1669,10 +1962,10 @@ const buildHeadroomMeter = (status: AudioStatus | null, t: Translate = fallbackT
             : meterSource;
 
   return {
-    label: t('audioSignalPath.metric.liveLevel'),
-    value: signalLiveValueLabel(status) ?? '--',
+    label: sdmMeterUnavailable ? t('audioSignalPath.meter.sdmDomain') : t('audioSignalPath.metric.liveLevel'),
+    value: sdmMeterUnavailable ? t('audioSignalPath.meter.notReported') : liveValue ?? '--',
     detail,
-    tone,
+    tone: sdmMeterUnavailable ? 'muted' : tone,
     fillPercent: signalLiveFillPercent(status),
   };
 };
@@ -1696,6 +1989,7 @@ const buildLocalSignalDoctorInsights = (
   const insights: SignalDoctorInsight[] = [];
   const sourceRate = status.fileSampleRate ?? track?.sampleRate ?? null;
   const outputRate = status.actualDeviceSampleRate ?? status.sharedDeviceSampleRate ?? status.requestedOutputSampleRate ?? null;
+  const sdmActive = isPcmToSdmSignalPath(status);
   const ratePath = ratePairLabel(sourceRate, outputRate, 'rate pending');
   const dspModules = buildDspModules(status, t);
   const headroomDb = status.audioLevels?.headroomDb ?? null;
@@ -1712,19 +2006,29 @@ const buildLocalSignalDoctorInsights = (
       advice: status.error ? t('audioSignalPath.doctor.outputError.advice') : t('audioSignalPath.doctor.sampleRateMismatch.advice'),
       tone: 'danger',
     });
-  } else if (status.resampling || (
+  } else if (!sdmActive && (status.resampling || (
     sourceRate !== null
     && outputRate !== null
     && Number.isFinite(sourceRate)
     && Number.isFinite(outputRate)
     && Math.round(sourceRate) !== Math.round(outputRate)
-  )) {
+  ))) {
     insights.push({
       eyebrow: t('audioSignalPath.doctor.eyebrow.why'),
       title: t('audioSignalPath.doctor.resampling.title'),
       detail: t('audioSignalPath.doctor.resampling.detail', { path: ratePath }),
       advice: atlasResamplingAdvice(atlasProfile, t) ?? t('audioSignalPath.doctor.resampling.advice'),
       tone: status.echoSrcActive ? 'process' : 'warning',
+    });
+  }
+
+  if (sdmActive) {
+    insights.push({
+      eyebrow: t('audioSignalPath.doctor.eyebrow.sdm'),
+      title: t('audioSignalPath.doctor.sdm.title'),
+      detail: formatSdmPath(status, track) ?? formatSdmClockValue(status),
+      advice: t('audioSignalPath.doctor.sdm.advice'),
+      tone: 'process',
     });
   }
 
@@ -1752,7 +2056,7 @@ const buildLocalSignalDoctorInsights = (
     });
   } else {
     const blockers = [
-      status.resampling || status.echoSrcActive ? t('audioSignalPath.doctor.blocker.rateConversion') : null,
+      (!sdmActive && status.resampling) || status.echoSrcActive ? t('audioSignalPath.doctor.blocker.rateConversion') : null,
       dspModules.length ? dspModules.slice(0, 2).join(' + ') : null,
       status.outputMode === 'shared' || status.outputMode === 'system' ? outputModeLabel(status.outputMode, t) : null,
       cleanReason(status.bitPerfectDisabledReason),
@@ -1839,6 +2143,7 @@ const buildLocalSignalTheater = (
   t: Translate = fallbackT,
 ): SignalTheaterModel => {
   const dspModules = buildDspModules(status, t);
+  const sdmActive = isPcmToSdmSignalPath(status);
   const outputRate = status?.actualDeviceSampleRate ?? status?.sharedDeviceSampleRate ?? status?.requestedOutputSampleRate ?? null;
   const outputMode = outputModeLabel(status?.outputMode, t);
   const outputBackend = outputBackendLabel(status?.activeOutputBackendImpl ?? status?.outputBackend);
@@ -1863,27 +2168,50 @@ const buildLocalSignalTheater = (
       },
       {
         label: t('audioSignalPath.metric.processing'),
-        value: dspModules.length ? dspModules.slice(0, 3).join(' + ') : status?.resampling ? t('audioSignalPath.summary.resampling') : t('audioSignalPath.metric.directPath'),
-        detail: formatResamplePath(status, track) ?? (dspModules.length ? t('audioSignalPath.process.echoChain') : t('audioSignalPath.metric.noDspModules')),
+        value: sdmActive && status
+          ? t('audioSignalPath.summary.pcmToSdm', {
+            target: formatDsdOutputRate(status.sdmRuntime?.nativeSampleRate ?? status.sdmNativeSampleRate)
+              ?? status.sdmRuntime?.targetRate?.toUpperCase()
+              ?? 'SDM',
+          })
+          : dspModules.length
+            ? dspModules.slice(0, 3).join(' + ')
+            : status?.resampling
+              ? t('audioSignalPath.summary.resampling')
+              : t('audioSignalPath.metric.directPath'),
+        detail: sdmActive && status
+          ? formatSdmPath(status, track) ?? t('audioSignalPath.stability.sdmInPath')
+          : formatResamplePath(status, track) ?? (dspModules.length ? t('audioSignalPath.process.echoChain') : t('audioSignalPath.metric.noDspModules')),
         tone: processingTone,
       },
       {
         label: t('audioSignalPath.metric.output'),
         value: status?.outputDeviceName ?? t('audioSignalPath.output.systemDefaultDevice'),
-        detail: joinSpec([outputMode, outputBackend, formatRoonRate(outputRate)], outputMode),
+        detail: joinSpec([
+          outputMode,
+          outputBackend,
+          sdmActive && status
+            ? `DoP ${formatRoonRate(status.sdmRuntime?.transportSampleRate ?? status.sdmTransportSampleRate ?? outputRate) ?? 'carrier'}`
+            : formatRoonRate(outputRate),
+          sdmActive && status ? formatNativeOutputLayout(status.nativeOutputFormat) : null,
+        ], outputMode),
         tone: status?.sampleRateMismatch || status?.error ? 'danger' : status ? 'good' : 'muted',
       },
       {
         label: t('audioSignalPath.metric.clock'),
-        value: ratePairLabel(status?.fileSampleRate ?? track?.sampleRate, outputRate, t('audioSignalPath.metric.clockPending')),
+        value: sdmActive && status
+          ? formatSdmClockValue(status)
+          : ratePairLabel(status?.fileSampleRate ?? track?.sampleRate, outputRate, t('audioSignalPath.metric.clockPending')),
         detail: status?.bitPerfectCandidate
           ? t('audioSignalPath.metric.bitPerfectCandidate')
           : status?.sampleRateMismatch
             ? t('audioSignalPath.metric.sourceDeviceRateDiffers')
+            : sdmActive && status
+              ? formatSdmClockDetail(status)
             : status?.resampling || status?.echoSrcActive
               ? t('audioSignalPath.metric.rateConversionActive')
               : t('audioSignalPath.metric.nativeClockPath'),
-        tone: status?.sampleRateMismatch ? 'danger' : status?.resampling || status?.echoSrcActive ? 'process' : status ? 'good' : 'muted',
+        tone: status?.sampleRateMismatch ? 'danger' : sdmActive || status?.resampling || status?.echoSrcActive ? 'process' : status ? 'good' : 'muted',
       },
     ],
   };
@@ -1997,7 +2325,7 @@ export const AudioSignalPathControl = ({
       onClick={onClick}
     >
       <span className="signal-path-control__mark" aria-hidden="true">
-        <Waves size={16} />
+        <Workflow size={18} strokeWidth={1.8} />
       </span>
       <span className="signal-path-control__status-dot" aria-hidden="true" />
     </button>

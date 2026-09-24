@@ -277,6 +277,65 @@ describe('WebDavRemoteSourceAdapter', () => {
     expect(maxActive).toBeLessThanOrEqual(4);
   });
 
+  it('requests only required WebDAV properties and applies RFC 6578 changes to a cached directory snapshot', async () => {
+    let propfindBody = '';
+    let reportRequests = 0;
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      request.on('end', () => {
+        if (request.method === 'PROPFIND') {
+          propfindBody = Buffer.concat(chunks).toString('utf8');
+          response.writeHead(207, { 'Content-Type': 'application/xml' });
+          response.end(xml([
+            `<d:response><d:href>/dav/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype><d:sync-token>token-1</d:sync-token></d:prop></d:propstat></d:response>`,
+            item('/dav/old.flac', false, 100),
+          ]));
+          return;
+        }
+        if (request.method === 'REPORT') {
+          reportRequests += 1;
+          response.writeHead(207, { 'Content-Type': 'application/xml' });
+          response.end(`<?xml version="1.0" encoding="utf-8"?>
+            <d:multistatus xmlns:d="DAV:">
+              <d:sync-token>token-2</d:sync-token>
+              <d:response><d:href>/dav/old.flac</d:href><d:status>HTTP/1.1 404 Not Found</d:status></d:response>
+              ${item('/dav/new.flac', false, 200)}
+            </d:multistatus>`);
+          return;
+        }
+        response.writeHead(405);
+        response.end();
+      });
+    });
+    servers.push(server);
+    const port = await listen(server);
+    const adapter = new WebDavRemoteSourceAdapter();
+    const entries = new Map<string, { fingerprint: string; payload: string; verifiedAt: string }>();
+    const scanCache = {
+      get: (namespace: string, key: string) => entries.get(`${namespace}:${key}`) ?? null,
+      set: (namespace: string, key: string, fingerprint: string, payload: string, verifiedAt = new Date().toISOString()) => {
+        entries.set(`${namespace}:${key}`, { fingerprint, payload, verifiedAt });
+      },
+    };
+
+    const first = [];
+    for await (const scanned of adapter.scan({ source: makeSource(port), scanCache })) {
+      first.push(scanned.path);
+    }
+    const second = [];
+    for await (const scanned of adapter.scan({ source: makeSource(port), scanCache })) {
+      second.push(scanned.path);
+    }
+
+    expect(first).toEqual(['/old.flac']);
+    expect(second).toEqual(['/new.flac']);
+    expect(reportRequests).toBe(1);
+    expect(propfindBody).toContain('<D:getetag/>');
+    expect(propfindBody).toContain('<D:sync-token/>');
+    expect(propfindBody).not.toContain('allprop');
+  });
+
   it('uses filename fallback when a backend ignores Range for large files', async () => {
     const server = createServer((request, response) => {
       if (request.method === 'PROPFIND') {

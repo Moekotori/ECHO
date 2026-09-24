@@ -8,12 +8,38 @@ import { normalizeAudioSampleRate } from '../../audio/SampleRateGuards';
 import { resolveCueTrack } from '../../audio/CueSheet';
 import { resolveMp4ContainerAudioCodec } from '../../audio/Mp4AudioCodec';
 import type { EmbeddedCoverData, FieldSource, FieldSources, MetadataFields, MetadataResult } from '../libraryTypes';
-import type { MetadataReader } from './MetadataReader';
+import type { MetadataReader, MetadataReadOptions } from './MetadataReader';
+
+type WaveInfoTagKey =
+  | 'IART'
+  | 'INAM'
+  | 'IPRD'
+  | 'IGNR'
+  | 'ICRD'
+  | 'ITRK'
+  | 'BEXT_DESCRIPTION'
+  | 'BEXT_ORIGINATOR'
+  | 'BEXT_ORIGINATION_DATE';
+type WaveInfoTags = Partial<Record<WaveInfoTagKey, string>>;
 
 const unknownArtist = 'Unknown Artist';
 const unknownAlbum = '';
-const waveInfoTagIds = new Set(['IART', 'INAM', 'IPRD', 'IGNR', 'ICRD', 'ITRK']);
+const waveInfoTagAliases = new Map<string, WaveInfoTagKey>([
+  ['IART', 'IART'],
+  ['INAM', 'INAM'],
+  ['TITL', 'INAM'],
+  ['IPRD', 'IPRD'],
+  ['IRPD', 'IPRD'],
+  ['IGNR', 'IGNR'],
+  ['GNRE', 'IGNR'],
+  ['ICRD', 'ICRD'],
+  ['IYEAR', 'ICRD'],
+  ['YEAR', 'ICRD'],
+  ['ITRK', 'ITRK'],
+  ['IPRT', 'ITRK'],
+]);
 const waveContainerIds = new Set(['RIFF', 'RF64', 'BW64']);
+const waveMetadataExtensions = new Set(['.wav', '.wave', '.bwf']);
 const riffSizePlaceholder = 0xffffffff;
 const tagLibPreferredExtensions = new Set([
   '.dsf',
@@ -39,16 +65,49 @@ const tagLibPreferredExtensions = new Set([
 ]);
 const tagLibCoreFallbackFields = ['title', 'artist'] as const;
 const tagLibTechnicalFallbackFields = ['duration', 'codec', 'sampleRate', 'bitDepth', 'bitrate'] as const;
+const formatsWithoutMeaningfulBitDepth = new Set(['.aac', '.mp3', '.ogg', '.opus']);
 const replaceableMetadataSources = new Set<FieldSource>(['unknown', 'filename_fallback', 'folder_structure', 'artist_fallback']);
 const replaceableTechnicalSources = new Set<FieldSource>(['unknown', 'filename_fallback']);
-const mojibakeCandidateEncodings = ['latin1', 'win1252', 'gb18030', 'gbk', 'big5', 'shift_jis'] as const;
+const mojibakeCandidateEncodings = [
+  'latin1',
+  'win1250',
+  'win1251',
+  'win1252',
+  'win1253',
+  'win1254',
+  'win1255',
+  'win1256',
+  'win1257',
+  'win1258',
+  'windows-874',
+  'koi8-r',
+  'koi8-u',
+  'gb18030',
+  'gbk',
+  'big5',
+  'shift_jis',
+  'euc-jp',
+  'cp949',
+] as const;
+const legacyByteTargetEncodings = [
+  'gb18030',
+  'gbk',
+  'big5',
+  'shift_jis',
+  'euc-jp',
+  'cp949',
+] as const;
 const tagLibTextQualityFallbackExtensions = new Set(['.wav', '.wave', '.aiff', '.aif']);
 const textMetadataFields = new Set<keyof MetadataFields>(['title', 'artist', 'album', 'albumArtist', 'genre']);
 const maxMetadataTextLength = 512;
 const maxRawMetadataTextLength = 4096;
 const suspiciousMojibakePattern = /(?:[\u00c0-\u00ff]{2,}|[\u00c2-\u00f4][\u0080-\u00bf]|[\u00c3\u00c2][\u0080-\u00ffA-Za-z]|[\u93c4\u71b7\u5a07\u9287\u958e\u59b5\u7d0b]{2,}|\u{fffd}|\?{2,})/u;
+const scriptMojibakePattern = /(?:(?:[\u0420\u0421][\u0400-\u04ff\u00a0-\u00ff]){2,}|(?:[\u0637\u0638][\u0600-\u06ff\u00a0-\u00ff\u2026]){2,})/u;
+// eslint-disable-next-line no-control-regex -- NUL identifies binary metadata embedded in text fields.
 const binaryMetadataTextPattern = /(?:APIC|image\/(?:jpeg|jpg|png|webp|gif)|JFIF|Exif|\u0000)/iu;
 const japaneseKanaPattern = /[\u3040-\u30ff]/u;
+const japaneseKanaGlobalPattern = /[\u3040-\u30ff]/gu;
+const koreanHangulGlobalPattern = /[\uac00-\ud7af]/gu;
 const unsafeEmbeddedMetadataWarning = 'embedded_metadata_skipped_unsafe_text';
 const commonTextMetadataKeys = new Set(['title', 'artist', 'artists', 'album', 'albumartist', 'genre', 'date']);
 const nativeArtworkTagIds = ['apic', 'pic', 'covr', 'coverart', 'metadata_block_picture', 'metadatablockpicture', 'wmpicture'];
@@ -78,8 +137,6 @@ const mojibakeFragments = [
   '\u7d0b',
   '\u{fffd}',
 ];
-
-type WaveInfoTags = Partial<Record<'IART' | 'INAM' | 'IPRD' | 'IGNR' | 'ICRD' | 'ITRK' | 'BEXT_DESCRIPTION' | 'BEXT_ORIGINATOR' | 'BEXT_ORIGINATION_DATE', string>>;
 
 type TagLibFallbackFields = {
   [Key in keyof MetadataFields]?: MetadataFields[Key] | null;
@@ -125,9 +182,11 @@ const countControlCharacters = (text: string): number => {
 };
 
 const countHardControlCharacters = (text: string): number =>
+  // eslint-disable-next-line no-control-regex -- validation intentionally counts control characters.
   countMatches(text, /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu);
 
 const normalizeMetadataTextWhitespace = (text: string): string =>
+  // eslint-disable-next-line no-control-regex -- sanitization intentionally targets control characters.
   text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu, ' ').replace(/\s+/gu, ' ').trim();
 
 const isSafeMetadataText = (text: string): boolean => {
@@ -264,9 +323,27 @@ const isSuspiciousMetadataText = (text: string): boolean => {
 
 export const repairMojibakeText = (value: string): string => {
   const trimmed = value.trim();
-  if (!suspiciousMojibakePattern.test(trimmed)) {
+  const characters = Array.from(trimmed);
+  const legacyByteCharacterCount = characters.filter((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint >= 0x0080 && codePoint <= 0x00ff;
+  }).length;
+  const suspiciousLegacyByteSequence =
+    legacyByteCharacterCount >= 4 &&
+    (
+      legacyByteCharacterCount / Math.max(1, characters.length) >= 0.3 ||
+      /[\u0080-\u00ff]{4,}/u.test(trimmed)
+    );
+  const suspiciousByPattern =
+    suspiciousMojibakePattern.test(trimmed) ||
+    scriptMojibakePattern.test(trimmed) ||
+    countMatches(trimmed, /[\u0100-\u017f]/gu) >= 4 ||
+    suspiciousLegacyByteSequence;
+  if (!suspiciousByPattern) {
     return trimmed;
   }
+
+  const originalLength = characters.length;
 
   const candidates = mojibakeCandidateEncodings.flatMap((encoding) => {
     try {
@@ -275,17 +352,69 @@ export const repairMojibakeText = (value: string): string => {
         return [];
       }
 
-      return [{ text: decoded, score: textQualityScore(decoded) }];
+      const decodedLength = Array.from(decoded).length;
+      const roundTrips =
+        !decoded.includes('\uFFFD') &&
+        iconv.decode(Buffer.from(decoded, 'utf8'), encoding).trim() === trimmed;
+      const compression =
+        roundTrips && decodedLength <= originalLength * 0.75
+          ? Math.max(0, originalLength - decodedLength)
+          : 0;
+
+      return [{
+        text: decoded,
+        score: textQualityScore(decoded) + compression * 2,
+        compression,
+      }];
     } catch {
       return [];
     }
   });
+  if (suspiciousLegacyByteSequence) {
+    const legacyBytes = iconv.encode(trimmed, 'latin1');
+    const gbkCandidateHasKana = japaneseKanaPattern.test(iconv.decode(legacyBytes, 'gbk'));
+    for (const encoding of legacyByteTargetEncodings) {
+      try {
+        const decoded = iconv.decode(legacyBytes, encoding).trim();
+        if (
+          !decoded ||
+          decoded === trimmed ||
+          decoded.includes('\uFFFD') ||
+          !iconv.encode(decoded, encoding).equals(legacyBytes)
+        ) {
+          continue;
+        }
+
+        const decodedLength = Array.from(decoded).length;
+        const compression =
+          decodedLength <= originalLength * 0.75
+            ? Math.max(0, originalLength - decodedLength)
+            : 0;
+        const japaneseKanaCount = countMatches(decoded, japaneseKanaGlobalPattern);
+        const koreanHangulCount = countMatches(decoded, koreanHangulGlobalPattern);
+        const scriptBonus =
+          (encoding === 'shift_jis' || encoding === 'euc-jp') && japaneseKanaCount >= 2
+            ? 12
+            : encoding === 'cp949' && koreanHangulCount >= 2 && !gbkCandidateHasKana
+              ? 12
+              : 0;
+        candidates.push({
+          text: decoded,
+          score: textQualityScore(decoded) + compression * 2 + scriptBonus,
+          compression,
+        });
+      } catch {
+        // Ignore unsupported or invalid legacy decoding candidates.
+      }
+    }
+  }
 
   const originalScore = textQualityScore(trimmed);
   candidates.sort((left, right) => right.score - left.score);
   const best = candidates[0];
 
-  return best && best.score >= originalScore + 4 ? best.text : trimmed;
+  const hasRepairEvidence = suspiciousByPattern || (best?.compression ?? 0) >= 3;
+  return hasRepairEvidence && best && best.score >= originalScore + 4 ? best.text : trimmed;
 };
 
 const cleanText = (value: unknown): string | null => {
@@ -317,6 +446,18 @@ const cleanTextList = (value: unknown): string | null => {
   }
 
   return cleanText(value);
+};
+
+const cleanJoinedTextList = (value: unknown, separator = '; '): string | null => {
+  if (!Array.isArray(value)) {
+    return cleanText(value);
+  }
+
+  const cleaned = value
+    .map((item) => cleanText(item))
+    .filter((item): item is string => Boolean(item));
+  const unique = [...new Set(cleaned)];
+  return unique.length > 0 ? unique.join(separator) : null;
 };
 
 const shouldInspectNativeTextTag = (common: IAudioMetadata['common'], rawId: string): boolean => {
@@ -522,7 +663,7 @@ const readBextTags = (data: Buffer): WaveInfoTags => {
 };
 
 const readWaveInfoTags = async (filePath: string): Promise<WaveInfoTags> => {
-  if (extname(filePath).toLowerCase() !== '.wav') {
+  if (!waveMetadataExtensions.has(extname(filePath).toLowerCase())) {
     return {};
   }
 
@@ -591,13 +732,14 @@ const readWaveInfoTags = async (filePath: string): Promise<WaveInfoTags> => {
             }
             const infoDataPosition = infoPosition + 8;
 
-            if (waveInfoTagIds.has(infoId) && infoDataPosition + resolvedInfoSize <= fileSize) {
+            const canonicalInfoId = waveInfoTagAliases.get(infoId);
+            if (canonicalInfoId && infoDataPosition + resolvedInfoSize <= fileSize) {
               const value = Buffer.alloc(resolvedInfoSize);
               const valueRead = await file.read(value, 0, value.length, infoDataPosition);
               if (valueRead.bytesRead === value.length) {
                 const decoded = decodeWaveInfoText(value);
                 if (decoded) {
-                  tags[infoId as keyof WaveInfoTags] = decoded;
+                  tags[canonicalInfoId] = decoded;
                 }
               }
             }
@@ -658,8 +800,21 @@ const folderAlbumFallback = (filePath: string): string | null => {
   return folderName.length > 0 ? folderName : null;
 };
 
+const normalizeCodecLabel = (value: unknown): string | null => {
+  const codec = cleanText(value);
+  if (!codec) {
+    return null;
+  }
+
+  const compact = codec.normalize('NFKC').replace(/[\s._-]+/gu, '').toUpperCase();
+  if (compact === 'MP3' || /^MPEG(?:1|2|25)?LAYER(?:3|III)$/u.test(compact)) {
+    return 'MP3';
+  }
+  return codec;
+};
+
 const codecFallback = (filePath: string, embeddedCodec: string | undefined): string | null => {
-  const codec = cleanText(embeddedCodec);
+  const codec = normalizeCodecLabel(embeddedCodec);
   if (codec) {
     return codec;
   }
@@ -784,6 +939,26 @@ const nativeValues = (metadata: IAudioMetadata, keys: string[]): unknown[] => {
   return values;
 };
 
+const hasMqaEncoderTag = (metadata: IAudioMetadata): boolean => {
+  for (const entries of Object.values(metadata.native ?? {})) {
+    for (const entry of entries) {
+      const id = typeof entry.id === 'string'
+        ? entry.id.toLowerCase().replace(/[^a-z0-9]/g, '')
+        : '';
+      if (!id.endsWith('mqaencoder') && !id.endsWith('mqaencoderversion')) {
+        continue;
+      }
+
+      const value = cleanText(entry.value);
+      if (value && !/^(?:0|false|no|off|none)$/iu.test(value)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
+
 const firstNativeText = (metadata: IAudioMetadata, keys: string[]): string | null =>
   firstText(nativeValues(metadata, keys));
 
@@ -839,6 +1014,18 @@ const preferHigherQualityText = (primary: string | null, candidate: string | nul
   }
 
   if (!primary) {
+    return candidate;
+  }
+
+  const candidateUtf8 = Buffer.from(candidate, 'utf8');
+  const primaryIsLegacyDecodedCandidate = mojibakeCandidateEncodings.some((encoding) => {
+    try {
+      return iconv.decode(candidateUtf8, encoding).trim() === primary;
+    } catch {
+      return false;
+    }
+  });
+  if (primaryIsLegacyDecodedCandidate) {
     return candidate;
   }
 
@@ -943,12 +1130,12 @@ const resolveTagLibBitrate = async (
 };
 
 const normalizeTagLibCodec = (properties: Record<string, unknown> | undefined): string | null => {
-  const codec = cleanText(properties?.codec);
+  const codec = normalizeCodecLabel(properties?.codec);
   if (codec && codec.toLowerCase() !== 'unknown') {
     return codec;
   }
 
-  const container = cleanText(properties?.containerFormat);
+  const container = normalizeCodecLabel(properties?.containerFormat);
   return container && container.toLowerCase() !== 'unknown' ? container : null;
 };
 
@@ -1044,6 +1231,7 @@ const fallbackFields = (filePath: string): MetadataResult => {
       genre: null,
       duration: 0,
       codec,
+      mqa: false,
       sampleRate: null,
       bitDepth: null,
       bitrate: null,
@@ -1065,6 +1253,7 @@ const fallbackFields = (filePath: string): MetadataResult => {
       genre: 'unknown',
       duration: 'unknown',
       codec: codec ? 'filename_fallback' : 'unknown',
+      mqa: 'unknown',
       sampleRate: 'unknown',
       bitDepth: 'unknown',
       bitrate: 'unknown',
@@ -1079,14 +1268,25 @@ const fallbackFields = (filePath: string): MetadataResult => {
 };
 
 export class TsMetadataReader implements MetadataReader {
-  async read(filePath: string): Promise<MetadataResult> {
+  async read(filePath: string, options: MetadataReadOptions = {}): Promise<MetadataResult> {
+    const readCover = options.readCover !== false;
+    const result = await this.readInternal(filePath, readCover);
+    if (readCover || !result.embeddedCover) {
+      return result;
+    }
+    const metadataOnly = { ...result };
+    delete metadataOnly.embeddedCover;
+    return metadataOnly;
+  }
+
+  private async readInternal(filePath: string, readCover: boolean): Promise<MetadataResult> {
     const cueTrack = resolveCueTrack(filePath);
     const metadataPath = cueTrack?.audioPath ?? filePath;
 
     try {
       const metadata = await parseFile(metadataPath, {
         duration: true,
-        skipCovers: false,
+        skipCovers: !readCover,
       });
 
       if (!cueTrack) {
@@ -1181,13 +1381,27 @@ export class TsMetadataReader implements MetadataReader {
         };
       }
 
-      const result = fallbackFields(filePath);
+      const waveInfoTags = await readWaveInfoTags(filePath).catch(() => ({}));
+      const result =
+        Object.keys(waveInfoTags).length > 0
+          ? this.normalize(
+              filePath,
+              {
+                common: {},
+                format: {},
+                native: {},
+              } as IAudioMetadata,
+              waveInfoTags,
+            )
+          : fallbackFields(filePath);
       const tagLibMetadata = await readTagLibFallbackMetadata(filePath);
       const merged = await this.applyMp4AudioCodecCorrection(
         this.applyTagLibFallback(result, tagLibMetadata, filePath),
         filePath,
       );
-      const recovered = hasTagLibFieldData(tagLibMetadata);
+      const recovered =
+        result.embeddedMetadataStatus === 'present' ||
+        hasTagLibFieldData(tagLibMetadata);
 
       return {
         ...merged,
@@ -1228,9 +1442,13 @@ export class TsMetadataReader implements MetadataReader {
     const missingCoreMetadata = tagLibCoreFallbackFields.some((field) =>
       replaceableMetadataSources.has(result.fieldSources[field] ?? 'unknown'),
     );
-    const missingTechnicalMetadata = tagLibTechnicalFallbackFields.some((field) =>
-      replaceableTechnicalSources.has(result.fieldSources[field] ?? 'unknown'),
-    );
+    const extension = extname(filePath).toLowerCase();
+    const missingTechnicalMetadata = tagLibTechnicalFallbackFields.some((field) => {
+      if (field === 'bitDepth' && formatsWithoutMeaningfulBitDepth.has(extension)) {
+        return false;
+      }
+      return replaceableTechnicalSources.has(result.fieldSources[field] ?? 'unknown');
+    });
 
     return missingCoreMetadata || missingTechnicalMetadata;
   }
@@ -1361,7 +1579,12 @@ export class TsMetadataReader implements MetadataReader {
     };
 
     const commonTitle = skipEmbeddedMetadata ? null : cleanText(common.title);
-    const commonArtist = skipEmbeddedMetadata ? null : (cleanText(common.artist) ?? cleanTextList(common.artists));
+    const commonArtist = skipEmbeddedMetadata
+      ? null
+      : (
+          cleanJoinedTextList(common.artists, extname(filePath).toLowerCase() === '.mp3' ? '/' : '; ') ??
+          cleanText(common.artist)
+        );
     const commonAlbum = skipEmbeddedMetadata ? null : cleanText(common.album);
     const embeddedTitle = skipEmbeddedMetadata
       ? null
@@ -1397,6 +1620,8 @@ export class TsMetadataReader implements MetadataReader {
     fieldSources.duration = duration > 0 ? 'technical' : 'unknown';
     const codec = codecFallback(filePath, format.codec);
     fieldSources.codec = codec ? (format.codec ? 'technical' : 'filename_fallback') : 'unknown';
+    const mqa = !skipEmbeddedMetadata && hasMqaEncoderTag(metadata);
+    fieldSources.mqa = mqa ? 'embedded' : 'unknown';
     const sampleRate = normalizeAudioSampleRate(format.sampleRate);
     fieldSources.sampleRate = sampleRate ? 'technical' : 'unknown';
     const bitDepth = typeof format.bitsPerSample === 'number' ? format.bitsPerSample : null;
@@ -1448,6 +1673,7 @@ export class TsMetadataReader implements MetadataReader {
       genre,
       duration,
       codec,
+      mqa,
       sampleRate,
       bitDepth,
       bitrate,

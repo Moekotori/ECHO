@@ -25,12 +25,13 @@ const mocks = vi.hoisted(() => ({
   }),
   setAppSettings: vi.fn(),
   createMainWindow: vi.fn(),
+  allWindows: [] as unknown[],
 }));
 
 vi.mock('electron', () => ({
   BrowserWindow: class {
     static getAllWindows(): unknown[] {
-      return [];
+      return mocks.allWindows;
     }
   },
   screen: {
@@ -82,6 +83,7 @@ describe('mini player window bounds', () => {
     mocks.mainWindow = null;
     mocks.setAppSettings.mockClear();
     mocks.createMainWindow.mockReset();
+    mocks.allWindows = [];
     vi.resetModules();
   });
 
@@ -146,6 +148,70 @@ describe('mini player window bounds', () => {
       height: 74,
     });
   });
+
+  it('resets to the real default instead of reusing saved bounds', async () => {
+    mocks.settings.miniPlayerBounds = { x: 100, y: 200, width: 388, height: 74 };
+    const { resetMiniPlayerBounds } = await import('./miniPlayerWindow');
+
+    resetMiniPlayerBounds();
+
+    expect(mocks.setAppSettings).toHaveBeenCalledWith({
+      miniPlayerBounds: { x: 1504, y: 44, width: 388, height: 74 },
+    });
+  });
+
+  it('reacquires an existing mini window and repairs a stale collapsed height', async () => {
+    let bounds = { x: 100, y: 100, width: 388, height: 74 };
+    const window = {
+      getBounds: vi.fn(() => ({ ...bounds })),
+      getTitle: vi.fn(() => 'ECHO Mini Player'),
+      isDestroyed: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
+      setAlwaysOnTop: vi.fn(),
+      setBounds: vi.fn((next: typeof bounds) => { bounds = { ...next }; }),
+      setPosition: vi.fn((x: number, y: number) => { bounds = { ...bounds, x, y }; }),
+      setSize: vi.fn((width: number, height: number) => { bounds = { ...bounds, width, height }; }),
+      setVisibleOnAllWorkspaces: vi.fn(),
+      webContents: {
+        getURL: vi.fn(() => 'http://localhost/?miniPlayer=1'),
+        send: vi.fn(),
+      },
+    };
+    mocks.allWindows = [window];
+    const { setMiniPlayerQueueOpen } = await import('./miniPlayerWindow');
+
+    expect(setMiniPlayerQueueOpen(true).bounds?.height).toBe(324);
+    bounds = { ...bounds, height: 74 };
+    expect(setMiniPlayerQueueOpen(true).bounds?.height).toBe(324);
+    expect(window.setBounds).toHaveBeenLastCalledWith(expect.objectContaining({ height: 324 }));
+  });
+
+  it('does not report the queue as open when the operating system rejects both resize attempts', async () => {
+    const bounds = { x: 100, y: 100, width: 388, height: 74 };
+    const window = {
+      getBounds: vi.fn(() => ({ ...bounds })),
+      getTitle: vi.fn(() => 'ECHO Mini Player'),
+      isDestroyed: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
+      setAlwaysOnTop: vi.fn(),
+      setBounds: vi.fn(),
+      setPosition: vi.fn(),
+      setSize: vi.fn(),
+      setVisibleOnAllWorkspaces: vi.fn(),
+      webContents: {
+        getURL: vi.fn(() => 'http://localhost/?miniPlayer=1'),
+        send: vi.fn(),
+      },
+    };
+    mocks.allWindows = [window];
+    const { setMiniPlayerQueueOpen } = await import('./miniPlayerWindow');
+
+    const state = setMiniPlayerQueueOpen(true);
+
+    expect(window.setSize).toHaveBeenCalledWith(388, 324, false);
+    expect(state.queueOpen).toBe(false);
+    expect(state.bounds?.height).toBe(74);
+  });
 });
 
 describe('mini player window hide behavior', () => {
@@ -154,6 +220,7 @@ describe('mini player window hide behavior', () => {
     mocks.mainWindow = null;
     mocks.setAppSettings.mockClear();
     mocks.createMainWindow.mockReset();
+    mocks.allWindows = [];
     vi.resetModules();
   });
 

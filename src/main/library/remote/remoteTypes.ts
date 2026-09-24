@@ -42,12 +42,17 @@ export type RemoteProxyRequest = {
   url?: string;
   filePath?: string;
   headers?: Record<string, string>;
+  fetchTransport?: 'network-proxy' | 'node';
 };
 
 export type RemoteScanInput = RemoteAdapterInput & {
   rootPath?: string | null;
   onProgress?: (item: RemoteDirectoryItem) => void;
   onError?: (path: string, error: Error) => void;
+  scanCache?: {
+    get: (namespace: string, key: string) => { fingerprint: string; payload: string; verifiedAt: string } | null;
+    set: (namespace: string, key: string, fingerprint: string, payload: string, verifiedAt?: string) => void;
+  };
 };
 
 export type RemoteTrackWrite = Omit<RemoteLibraryTrack, 'coverThumb' | 'createdAt' | 'updatedAt'> & {

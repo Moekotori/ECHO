@@ -21,6 +21,7 @@ const provider = 'youtube' as const;
 const youtubeReferer = 'https://www.youtube.com/';
 const youtubeUserAgent =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+const youtubePlaybackHeaderNames = new Set(['user-agent', 'accept', 'referer', 'origin']);
 const ytDlpFileName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
 const ytDlpTimeoutMs = 45_000;
 const ytDlpMaxBuffer = 1024 * 1024 * 12;
@@ -242,7 +243,7 @@ const headersFromFormat = (format: YtDlpFormat): Record<string, string> => {
     Referer: youtubeReferer,
     ...Object.fromEntries(
       Object.entries(headers).filter(
-        ([key, value]) => typeof value === 'string' && !/authorization|cookie/iu.test(key),
+        ([key, value]) => typeof value === 'string' && youtubePlaybackHeaderNames.has(key.trim().toLocaleLowerCase()),
       ),
     ),
   } as Record<string, string>;
@@ -289,6 +290,7 @@ export class YouTubeStreamingProvider implements StreamingProvider {
       displayName: 'YouTube',
       enabled: true,
       supportsSearch: true,
+      supportedSearchMediaTypes: ['track'],
       supportsPlayback: true,
       supportsDownload: false,
       supportsLyrics: false,

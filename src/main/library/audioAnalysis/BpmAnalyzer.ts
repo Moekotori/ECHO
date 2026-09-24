@@ -34,8 +34,11 @@ const hopSize = 256;
 const minBpm = 60;
 const maxBpm = 200;
 const bpmSearchStep = 0.25;
-const stableMinBpm = 80;
-const stableMaxBpm = 200;
+// osu! timing points conventionally use the playable beat grid rather than a
+// slow musical half-time pulse. Keep detected tempi in that rhythm-game range
+// so 100/105/109 BPM aliases are reported as 200/210/218 BPM.
+const stableMinBpm = 120;
+const stableMaxBpm = 300;
 
 const defaultLogger = (message: string): void => {
   console.warn(message);
@@ -281,7 +284,7 @@ const estimateTempo = (envelope: Float32Array): BpmAnalyzerResult => {
       correlateEnvelopeAtLag(envelope, lag / 2) * 0.14 +
       correlateEnvelopeAtLag(envelope, lag * 2) * 0.2 +
       correlateEnvelopeAtLag(envelope, lag * 3) * 0.08;
-    const centerPreference = bpm >= 90 && bpm <= 190 ? 1 : 0.94;
+    const centerPreference = bpm >= stableMinBpm && bpm <= 260 ? 1 : 0.94;
     candidates.push({
       bpm,
       rawBpm,
@@ -326,6 +329,55 @@ const estimateTempo = (envelope: Float32Array): BpmAnalyzerResult => {
   return {
     bpm: Math.round(selected.bpm * 100) / 100,
     confidence: Math.round(confidence * 1000) / 1000,
+    beatOffsetMs: offsetMs,
+  };
+};
+
+const estimateTempoRobust = (envelope: Float32Array): BpmAnalyzerResult => {
+  const fullResult = estimateTempo(envelope);
+  const envelopeRate = sampleRate / hopSize;
+  const segmentFrames = Math.round(envelopeRate * 24);
+  if (envelope.length < segmentFrames * 2) {
+    return fullResult;
+  }
+
+  const maxStart = envelope.length - segmentFrames;
+  const starts = [0, 0.25, 0.5, 0.75, 1]
+    .map((ratio) => Math.round(maxStart * ratio))
+    .filter((start, index, values) => index === 0 || start !== values[index - 1]);
+  const segmentResults = starts.map((start) => estimateTempo(envelope.slice(start, start + segmentFrames)));
+  const results = [fullResult, ...segmentResults].filter((result) => result.bpm > 0);
+  const clusters: BpmAnalyzerResult[][] = [];
+
+  for (const result of results) {
+    const cluster = clusters.find((items) => {
+      const reference = items[0]?.bpm ?? result.bpm;
+      return Math.abs(result.bpm - reference) / Math.max(1, reference) <= 0.025;
+    });
+    if (cluster) {
+      cluster.push(result);
+    } else {
+      clusters.push([result]);
+    }
+  }
+
+  const bestCluster = clusters.reduce<BpmAnalyzerResult[]>((best, cluster) => {
+    const score = cluster.reduce((total, result) => total + result.confidence * result.confidence + 0.05, 0);
+    const bestScore = best.reduce((total, result) => total + result.confidence * result.confidence + 0.05, 0);
+    return score > bestScore ? cluster : best;
+  }, []);
+  const fullResultInConsensus = bestCluster.includes(fullResult);
+  const representative = fullResultInConsensus
+    ? fullResult
+    : bestCluster.reduce<BpmAnalyzerResult | null>((best, result) =>
+        !best || result.confidence > best.confidence ? result : best, null) ?? fullResult;
+  const consensus = bestCluster.length / Math.max(1, results.length);
+  const meanConfidence = bestCluster.reduce((total, result) => total + result.confidence, 0) / Math.max(1, bestCluster.length);
+  const { offsetMs } = phaseFit(envelope, representative.bpm, envelopeRate);
+
+  return {
+    bpm: representative.bpm,
+    confidence: Math.round(clamp(meanConfidence * (0.82 + consensus * 0.18)) * 1000) / 1000,
     beatOffsetMs: offsetMs,
   };
 };
@@ -402,7 +454,7 @@ export class BpmAnalyzer {
       throw new Error('audio_too_short_for_bpm_analysis');
     }
 
-    const result = estimateTempo(onsetEnvelope(samples));
+    const result = estimateTempoRobust(onsetEnvelope(samples));
     if (verboseAudioLogsEnabled) {
       this.logger(
         `[BpmAnalyzer] file="${filePath}" bpm=${result.bpm} confidence=${result.confidence} offsetMs=${result.beatOffsetMs}`,

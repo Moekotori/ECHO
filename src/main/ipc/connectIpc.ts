@@ -83,15 +83,15 @@ const createLockedAirPlayReceiverStatus = (): AirPlayReceiverStatus => ({
 const isConnectDonatorUnlocked = (): boolean => getConnectDonatorUnlockService().getStatus().unlocked === true;
 
 const getReceiverStatusForCurrentEntitlement = (
-  receiverService: ReturnType<typeof getConnectReceiverService>,
+  loadReceiverService: () => ReturnType<typeof getConnectReceiverService>,
 ): ConnectReceiverStatus => (
-  isConnectDonatorUnlocked() ? receiverService.getStatus() : createLockedConnectReceiverStatus()
+  isConnectDonatorUnlocked() ? loadReceiverService().getStatus() : createLockedConnectReceiverStatus()
 );
 
 const getAirPlayReceiverStatusForCurrentEntitlement = (
-  airPlayReceiverService: ReturnType<typeof getAirPlayReceiverSpikeService>,
+  loadAirPlayReceiverService: () => ReturnType<typeof getAirPlayReceiverSpikeService>,
 ): AirPlayReceiverStatus => (
-  isConnectDonatorUnlocked() ? airPlayReceiverService.getStatus() : createLockedAirPlayReceiverStatus()
+  isConnectDonatorUnlocked() ? loadAirPlayReceiverService().getStatus() : createLockedAirPlayReceiverStatus()
 );
 
 const webBackgroundImageFilters = [
@@ -99,8 +99,8 @@ const webBackgroundImageFilters = [
 ];
 
 const startConfiguredReceivers = (
-  receiverService: ReturnType<typeof getConnectReceiverService>,
-  airPlayReceiverService: ReturnType<typeof getAirPlayReceiverSpikeService>,
+  loadReceiverService: () => ReturnType<typeof getConnectReceiverService>,
+  loadAirPlayReceiverService: () => ReturnType<typeof getAirPlayReceiverSpikeService>,
 ): void => {
   if (getAppSettings().connectAutoStartReceiversEnabled !== true) {
     return;
@@ -108,43 +108,75 @@ const startConfiguredReceivers = (
   if (!isConnectDonatorUnlocked()) {
     return;
   }
-  void receiverService.setEnabled(true).catch(() => undefined);
-  void airPlayReceiverService.setEnabled(true).catch(() => undefined);
+  void loadReceiverService().setEnabled(true).catch(() => undefined);
+  void loadAirPlayReceiverService().setEnabled(true).catch(() => undefined);
 };
 
 export const registerConnectIpc = (): void => {
-  const service = getConnectService();
-  const receiverService = getConnectReceiverService();
-  const airPlayReceiverService = getAirPlayReceiverSpikeService();
-  const echoLinkService = getEchoLinkService();
-  service.on('status', sendConnectStatus);
-  receiverService.on('status', sendConnectReceiverStatus);
-  airPlayReceiverService.on('status', sendAirPlayReceiverStatus);
+  let connectService: ReturnType<typeof getConnectService> | null = null;
+  let receiverService: ReturnType<typeof getConnectReceiverService> | null = null;
+  let airPlayReceiverService: ReturnType<typeof getAirPlayReceiverSpikeService> | null = null;
+  let echoLinkService: ReturnType<typeof getEchoLinkService> | null = null;
 
-  ipcMain.handle(IpcChannels.ConnectGetDonatorUnlockStatus, () => getConnectDonatorUnlockService().getStatus());
-  ipcMain.handle(IpcChannels.ConnectListDevices, requireConnectDonatorFeatureThen((): ConnectDevice[] => service.listDevices()));
-  ipcMain.handle(IpcChannels.ConnectRefresh, requireConnectDonatorFeatureThen((): Promise<ConnectDevice[]> => service.refreshDevices()));
-  ipcMain.handle(IpcChannels.ConnectGetStatus, (): ConnectSessionStatus => service.getStatus());
+  const loadConnectService = (): ReturnType<typeof getConnectService> => {
+    if (!connectService) {
+      connectService = getConnectService();
+      connectService.on('status', sendConnectStatus);
+    }
+    return connectService;
+  };
+
+  const loadReceiverService = (): ReturnType<typeof getConnectReceiverService> => {
+    if (!receiverService) {
+      receiverService = getConnectReceiverService();
+      receiverService.on('status', sendConnectReceiverStatus);
+    }
+    return receiverService;
+  };
+
+  const loadAirPlayReceiverService = (): ReturnType<typeof getAirPlayReceiverSpikeService> => {
+    if (!airPlayReceiverService) {
+      airPlayReceiverService = getAirPlayReceiverSpikeService();
+      airPlayReceiverService.on('status', sendAirPlayReceiverStatus);
+    }
+    return airPlayReceiverService;
+  };
+
+  const loadEchoLinkService = (): ReturnType<typeof getEchoLinkService> => {
+    echoLinkService ??= getEchoLinkService();
+    return echoLinkService;
+  };
+
+  ipcMain.handle(IpcChannels.ConnectGetDonatorUnlockStatus, (_event, options?: unknown) =>
+    getConnectDonatorUnlockService().refreshStatus(
+      options && typeof options === 'object'
+        ? { force: (options as { force?: unknown }).force === true }
+        : undefined,
+    ),
+  );
+  ipcMain.handle(IpcChannels.ConnectListDevices, requireConnectDonatorFeatureThen((): ConnectDevice[] => loadConnectService().listDevices()));
+  ipcMain.handle(IpcChannels.ConnectRefresh, requireConnectDonatorFeatureThen((): Promise<ConnectDevice[]> => loadConnectService().refreshDevices()));
+  ipcMain.handle(IpcChannels.ConnectGetStatus, (): ConnectSessionStatus => loadConnectService().getStatus());
   ipcMain.handle(IpcChannels.ConnectConnect, requireConnectDonatorFeatureThen((_event, request: unknown): Promise<ConnectSessionStatus> =>
-    service.connect(normalizeConnectStartRequest(request)),
+    loadConnectService().connect(normalizeConnectStartRequest(request)),
   ));
-  ipcMain.handle(IpcChannels.ConnectDisconnect, requireConnectDonatorFeatureThen((): Promise<ConnectSessionStatus> => service.disconnect()));
-  ipcMain.handle(IpcChannels.ConnectPlay, requireConnectDonatorFeatureThen((): Promise<ConnectSessionStatus> => service.play()));
-  ipcMain.handle(IpcChannels.ConnectPause, requireConnectDonatorFeatureThen((): Promise<ConnectSessionStatus> => service.pause()));
-  ipcMain.handle(IpcChannels.ConnectStop, requireConnectDonatorFeatureThen((): Promise<ConnectSessionStatus> => service.stop()));
+  ipcMain.handle(IpcChannels.ConnectDisconnect, requireConnectDonatorFeatureThen((): Promise<ConnectSessionStatus> => loadConnectService().disconnect()));
+  ipcMain.handle(IpcChannels.ConnectPlay, requireConnectDonatorFeatureThen((): Promise<ConnectSessionStatus> => loadConnectService().play()));
+  ipcMain.handle(IpcChannels.ConnectPause, requireConnectDonatorFeatureThen((): Promise<ConnectSessionStatus> => loadConnectService().pause()));
+  ipcMain.handle(IpcChannels.ConnectStop, requireConnectDonatorFeatureThen((): Promise<ConnectSessionStatus> => loadConnectService().stop()));
   ipcMain.handle(IpcChannels.ConnectSeek, requireConnectDonatorFeatureThen((_event, positionSeconds: unknown): Promise<ConnectSessionStatus> =>
-    service.seek(normalizeSeconds(positionSeconds)),
+    loadConnectService().seek(normalizeSeconds(positionSeconds)),
   ));
   ipcMain.handle(IpcChannels.ConnectSetVolume, requireConnectDonatorFeatureThen((_event, volumePercent: unknown): Promise<ConnectSessionStatus> =>
-    service.setVolume(normalizeVolume(volumePercent)),
+    loadConnectService().setVolume(normalizeVolume(volumePercent)),
   ));
-  ipcMain.handle(IpcChannels.EchoLinkGetStatus, requireConnectDonatorFeatureThen((): EchoLinkServerStatus => echoLinkService.getServerStatus()));
+  ipcMain.handle(IpcChannels.EchoLinkGetStatus, requireConnectDonatorFeatureThen((): EchoLinkServerStatus => loadEchoLinkService().getServerStatus()));
   ipcMain.handle(IpcChannels.EchoLinkSetEnabled, requireConnectDonatorFeatureThen((_event, enabled: unknown): Promise<EchoLinkServerStatus> =>
-    echoLinkService.setEnabled(enabled === true),
+    loadEchoLinkService().setEnabled(enabled === true),
   ));
-  ipcMain.handle(IpcChannels.EchoLinkRotateToken, requireConnectDonatorFeatureThen((): EchoLinkServerStatus => echoLinkService.rotateToken()));
+  ipcMain.handle(IpcChannels.EchoLinkRotateToken, requireConnectDonatorFeatureThen((): EchoLinkServerStatus => loadEchoLinkService().rotateToken()));
   ipcMain.handle(IpcChannels.EchoLinkSetWebBackground, requireConnectDonatorFeatureThen((_event, background: unknown): EchoLinkServerStatus =>
-    echoLinkService.setWebBackground(background as Partial<EchoLinkWebBackground>),
+    loadEchoLinkService().setWebBackground(background as Partial<EchoLinkWebBackground>),
   ));
   ipcMain.handle(IpcChannels.EchoLinkChooseWebBackgroundImage, requireConnectDonatorFeatureThen(async (): Promise<EchoLinkServerStatus | null> => {
     const result = await dialog.showOpenDialog({
@@ -155,26 +187,26 @@ export const registerConnectIpc = (): void => {
     if (result.canceled || !result.filePaths[0]) {
       return null;
     }
-    return echoLinkService.setLocalWebBackgroundImage(result.filePaths[0]);
+    return loadEchoLinkService().setLocalWebBackgroundImage(result.filePaths[0]);
   }));
   ipcMain.handle(IpcChannels.ConnectReceiverGetStatus, (): ConnectReceiverStatus =>
-    getReceiverStatusForCurrentEntitlement(receiverService),
+    getReceiverStatusForCurrentEntitlement(loadReceiverService),
   );
   ipcMain.handle(IpcChannels.ConnectReceiverSetEnabled, requireConnectDonatorFeatureThen((_event, enabled: unknown): Promise<ConnectReceiverStatus> =>
-    receiverService.setEnabled(enabled === true),
+    loadReceiverService().setEnabled(enabled === true),
   ));
-  ipcMain.handle(IpcChannels.ConnectReceiverStopPlayback, requireConnectDonatorFeatureThen((): ConnectReceiverStatus => receiverService.stopPlayback()));
+  ipcMain.handle(IpcChannels.ConnectReceiverStopPlayback, requireConnectDonatorFeatureThen((): ConnectReceiverStatus => loadReceiverService().stopPlayback()));
   ipcMain.handle(IpcChannels.ConnectAirPlayReceiverGetStatus, (): AirPlayReceiverStatus =>
-    getAirPlayReceiverStatusForCurrentEntitlement(airPlayReceiverService),
+    getAirPlayReceiverStatusForCurrentEntitlement(loadAirPlayReceiverService),
   );
   ipcMain.handle(IpcChannels.ConnectAirPlayReceiverSetEnabled, requireConnectDonatorFeatureThen((_event, enabled: unknown): Promise<AirPlayReceiverStatus> =>
-    airPlayReceiverService.setEnabled(enabled === true),
+    loadAirPlayReceiverService().setEnabled(enabled === true),
   ));
   ipcMain.handle(IpcChannels.ConnectAirPlayReceiverStopPlayback, requireConnectDonatorFeatureThen((): Promise<AirPlayReceiverStatus> =>
-    airPlayReceiverService.stopPlayback(),
+    loadAirPlayReceiverService().stopPlayback(),
   ));
   ipcMain.handle(IpcChannels.ConnectWallpaperEngineBridgeGetStatus, requireConnectDonatorFeatureThen(() =>
     getWallpaperEngineBridgeService().getServerStatus(),
   ));
-  startConfiguredReceivers(receiverService, airPlayReceiverService);
+  startConfiguredReceivers(loadReceiverService, loadAirPlayReceiverService);
 };

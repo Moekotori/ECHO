@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { QobuzBundleSecrets, QobuzFormatId, QobuzTrackFileUrl, QobuzTrackFileUrlRaw, QobuzTrackItem } from '../../shared/types/qobuz';
+import type { QobuzFormatId, QobuzTrackFileUrl, QobuzTrackFileUrlRaw } from '../../shared/types/qobuz';
 import { fetchWithNetworkProxy } from '../network/networkFetch';
 
 const QOBUZ_API_BASE = 'https://www.qobuz.com/api.json/0.2/';

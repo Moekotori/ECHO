@@ -3,6 +3,7 @@ import { IpcChannels } from '../../shared/constants/ipcChannels';
 import {
   getTaskbarMiniPlayerState,
   hideTaskbarMiniPlayerWindow,
+  notifyTaskbarMiniPlayerHostStateChanged,
   setTaskbarMiniPlayerEnabled,
   showTaskbarMiniPlayerWindow,
 } from '../app/taskbarMiniPlayerWindow';
@@ -10,6 +11,7 @@ import {
   setTaskbarHostClickCallback,
   setTaskbarHostDoubleClickCallback,
   setTaskbarHostReadyCallback,
+  setTaskbarHostStateChangedCallback,
 } from '../app/taskbarHostProcess';
 import { getAudioSession } from '../audio/AudioSession';
 import { refreshTaskbarPlaybackIntegration } from '../app/taskbarPlaybackIntegration';
@@ -66,6 +68,9 @@ export const registerTaskbarMiniPlayerIpc = (): void => {
 
   setTaskbarHostReadyCallback(() => {
     try { refreshTaskbarPlaybackIntegration(); } catch { /* best-effort */ }
+  });
+  setTaskbarHostStateChangedCallback(() => {
+    notifyTaskbarMiniPlayerHostStateChanged();
   });
 
   ipcMain.handle(IpcChannels.TaskbarMiniPlayerShow, () => showTaskbarMiniPlayerWindow());

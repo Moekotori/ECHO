@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { Readable } from 'node:stream';
-import { isDsfFilePath } from './DsdProbe';
+import { isDsfFilePath, supportedDsdNativeSampleRates } from './DsdProbe';
 
 export type DsfDopInfo = {
   channels: number;
@@ -18,6 +18,12 @@ const fmtMagic = Buffer.from('fmt ', 'ascii');
 const dataMagic = Buffer.from('data', 'ascii');
 const dopFrameSourceBytes = 2;
 const dopBytesPerSample = 3;
+
+const reverseDsdByteForDop = (value: number): number => {
+  let reversed = ((value & 0xf0) >>> 4) | ((value & 0x0f) << 4);
+  reversed = ((reversed & 0xcc) >>> 2) | ((reversed & 0x33) << 2);
+  return ((reversed & 0xaa) >>> 1) | ((reversed & 0x55) << 1);
+};
 
 const readUInt64LeAsNumber = (buffer: Buffer, offset: number): number | null => {
   if (offset < 0 || offset + 8 > buffer.length) {
@@ -70,7 +76,7 @@ export const parseDsfDopInfoFromBuffer = (filePath: string, buffer: Buffer): Dsf
   if (channels < 1 || channels > 2) {
     throw new Error(`dsd_dop_format_unsupported:channels_${channels || 'unknown'}`);
   }
-  if (![2_822_400, 5_644_800, 11_289_600].includes(nativeSampleRate)) {
+  if (!supportedDsdNativeSampleRates.some((supportedRate) => supportedRate === nativeSampleRate)) {
     throw new Error(`dsd_dop_format_unsupported:rate_${nativeSampleRate || 'unknown'}`);
   }
   if (sampleCount <= 0 || blockSizePerChannel <= 0 || dataOffset <= 0 || dataBytes <= 0) {
@@ -117,8 +123,12 @@ export const packDop24Le = (
     const sourceOffset = byteOffset + frame * dopFrameSourceBytes;
 
     for (const block of channelBlocks) {
-      output[outputOffset] = block[sourceOffset] ?? 0;
-      output[outputOffset + 1] = block[sourceOffset + 1] ?? 0;
+      // DSF stores the oldest bit in bit 0. DoP v1.1 stores t0 at bit 15,
+      // so the newer reversed byte is serialized first in packed 24-bit LE.
+      const olderDsfByte = block[sourceOffset] ?? 0x69;
+      const newerDsfByte = block[sourceOffset + 1] ?? 0x69;
+      output[outputOffset] = reverseDsdByteForDop(newerDsfByte);
+      output[outputOffset + 1] = reverseDsdByteForDop(olderDsfByte);
       output[outputOffset + 2] = marker;
       outputOffset += dopBytesPerSample;
     }

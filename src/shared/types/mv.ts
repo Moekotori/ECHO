@@ -3,6 +3,28 @@ export type MvProvider = 'local' | 'bilibili' | 'youtube' | 'netease' | 'qqmusic
 export type MvProviderId = MvProvider;
 
 export type MvSourceType = 'sidecar' | 'manual' | 'search_candidate' | 'stream';
+export type MvSelectionOrigin = 'auto' | 'manual' | 'unknown';
+export type MvMatchRisk = 'low' | 'medium' | 'high';
+
+export type MvMatchEvidence = {
+  title: 'exact' | 'phrase' | 'tokens' | 'mismatch';
+  titleCoverage: number;
+  artist: 'title' | 'uploader' | 'none';
+  duration: 'strong' | 'close' | 'weak' | 'conflict' | 'unknown';
+  writingSystemAlias: boolean;
+  officialVideoSignal: boolean;
+  conflicts: string[];
+};
+
+export type MvMatchDecision = {
+  score: number;
+  autoAccept: boolean;
+  candidateOnly: boolean;
+  risk: MvMatchRisk;
+  reasons: string[];
+  algorithmVersion: number;
+  evidence: MvMatchEvidence;
+};
 
 export type NetworkMvProviderId = Extract<MvProviderId, 'bilibili' | 'youtube'>;
 
@@ -82,6 +104,7 @@ export type TrackVideo = {
   offsetMs?: number;
   score: number;
   selected: boolean;
+  selectionOrigin?: MvSelectionOrigin;
   playableInApp: boolean;
   temporary?: boolean;
   rawProviderJson: unknown | null;
@@ -100,10 +123,14 @@ export type MvMatchCandidate = {
   providerUrl: string | null;
   thumbnailUrl: string | null;
   uploader: string | null;
+  uploaderId?: string | null;
   viewCount?: number | null;
   availableQualities: MvQualityVariant[];
   durationSeconds: number | null;
   score: number;
+  autoEligible?: boolean;
+  matchVersion?: number;
+  decision?: MvMatchDecision;
   playableInApp: boolean;
   reasons: string[];
 };
@@ -118,6 +145,7 @@ export type MvTrackSnapshotSearchRequest = {
   coverThumb?: string | null;
   mediaType?: 'local' | 'remote' | 'streaming';
   query?: string | null;
+  autoSelect?: boolean;
 };
 
 export type MvMatchSummary = {

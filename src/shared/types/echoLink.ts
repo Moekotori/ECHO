@@ -1,4 +1,5 @@
 export type EchoLinkPlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'stopped' | 'error';
+export type EchoLinkPlaybackOrderMode = 'sequential' | 'shuffle' | 'repeat-one';
 
 export type EchoLinkDevice = {
   id: string;
@@ -138,3 +139,67 @@ export type EchoLinkPlaybackCommand =
   | { command: 'playTrack'; trackId: string; output: 'pc' }
   | { command: 'handoff'; trackId: string; positionMs: number; target: 'pc' }
   | { command: 'queueReplace'; trackIds: string[]; startTrackId?: string; output: 'pc' };
+
+export type EchoLinkV2Scope = 'status:read' | 'events:read' | 'playback:control';
+
+export type EchoLinkPairedClient = {
+  id: string;
+  name: string;
+  platform: string | null;
+  scopes: EchoLinkV2Scope[];
+  createdAt: string;
+  lastSeenAt: string | null;
+};
+
+export type EchoLinkBasicStatus = {
+  enabled: boolean;
+  running: boolean;
+  host: string;
+  port: number;
+  addresses: string[];
+  deviceId: string;
+  deviceName: string;
+  pairingActive: boolean;
+  clients: EchoLinkPairedClient[];
+  error: string | null;
+  updatedAt: string;
+};
+
+export type EchoLinkPairingSession = {
+  id: string;
+  pairingUri: string;
+  webRemoteUrl: string;
+  qrDataUrl: string;
+  expiresAt: string;
+};
+
+export type EchoLinkV2PlaybackSnapshot = {
+  version: 1;
+  revision: number;
+  observedAt: string;
+  state: EchoLinkPlaybackState;
+  track: {
+    id: string | null;
+    title: string | null;
+    artist: string | null;
+    album: string | null;
+  } | null;
+  positionMs: number;
+  durationMs: number;
+  volume: number;
+  playbackOrder: EchoLinkPlaybackOrderMode;
+  output: {
+    mode: string;
+    deviceName: string | null;
+  };
+};
+
+export type EchoLinkV2StatusResponse = {
+  apiVersion: 2;
+  device: EchoLinkDevice;
+  capabilities: {
+    scopes: EchoLinkV2Scope[];
+    playbackActions: Array<'play' | 'pause' | 'stop' | 'previous' | 'next' | 'seek' | 'setVolume' | 'setPlaybackOrder'>;
+  };
+  playback: EchoLinkV2PlaybackSnapshot;
+};

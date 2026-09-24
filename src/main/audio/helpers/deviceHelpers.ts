@@ -22,6 +22,7 @@ export const nativeHostNotificationEvents = new Set<NativeHostNotificationEvent[
   'default_device_changed',
   'device_state_changed',
   'device_removed',
+  'device_sample_rate_changed',
   'audio_session_disconnected',
 ]);
 

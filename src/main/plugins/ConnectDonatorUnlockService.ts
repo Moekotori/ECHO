@@ -9,17 +9,19 @@ import {
   getDefaultConnectDonatorUnlockStatus,
   getPrivateEntitlementsProvider,
 } from './privateEntitlements';
-import { getPluginService } from './PluginService';
-import { assertPackageIntegrityAllowsPaidFeatures } from '../app/packageIntegrity';
-import { getEchoProAccountService } from './EchoProAccountService';
+import {
+  getEchoProAccountService,
+  isEchoProAccountStatusWithinOfflineGrace,
+} from './EchoProAccountService';
 import { getEchoProMachineHwidHash } from './MachineIdentity';
+import { getLocalProEntitlementSnapshot } from './LocalProEntitlements';
 
 const nowIso = (): string => new Date().toISOString();
 
 const createAccountConnectStatus = (): ConnectDonatorUnlockStatus | null => {
   try {
     const status = getEchoProAccountService().getStatus();
-    const unlocked = status.loggedIn && status.pro === true && status.status !== 'disabled';
+    const unlocked = isEchoProAccountStatusWithinOfflineGrace(status);
     if (!unlocked) {
       return null;
     }
@@ -43,23 +45,19 @@ export class ConnectDonatorUnlockService {
   constructor(_userDataPath?: string) {}
 
   getStatus(): ConnectDonatorUnlockStatus {
-    try {
-      const proLicenseStatus = getPluginService().getEchoProLicenseStatus();
-      if (proLicenseStatus.valid && proLicenseStatus.enabled && proLicenseStatus.features.includes('connect')) {
-        return {
-          featureId: 'connect',
-          pluginId: 'echo.connect-donator-unlock',
-          requiredVersion: 'plugin:echo.connect-donator-unlock:v1',
-          unlocked: true,
-          pluginInstalled: true,
-          pluginEnabled: true,
-          hwidHash: proLicenseStatus.machineCode,
-          reason: 'unlocked',
-          checkedAt: proLicenseStatus.checkedAt,
-        };
-      }
-    } catch {
-      // Keep the legacy/private unlock path available if plugin state is unavailable.
+    const local = getLocalProEntitlementSnapshot('connect');
+    if (local.unlocked) {
+      return {
+        featureId: connectDonatorUnlockFeatureId,
+        pluginId: connectDonatorUnlockPluginId,
+        requiredVersion: connectDonatorUnlockVersion,
+        unlocked: true,
+        pluginInstalled: true,
+        pluginEnabled: true,
+        hwidHash: getEchoProMachineHwidHash(),
+        reason: 'unlocked',
+        checkedAt: local.checkedAt ?? nowIso(),
+      };
     }
     const privateStatus = getPrivateEntitlementsProvider()?.getConnectStatus?.();
     if (privateStatus?.unlocked === true) {
@@ -68,14 +66,21 @@ export class ConnectDonatorUnlockService {
     return createAccountConnectStatus() ?? privateStatus ?? getDefaultConnectDonatorUnlockStatus();
   }
 
-  async refreshStatus(): Promise<ConnectDonatorUnlockStatus> {
-    try {
-      const proLicenseStatus = getPluginService().getEchoProLicenseStatus();
-      if (proLicenseStatus.valid && proLicenseStatus.enabled && proLicenseStatus.features.includes('connect')) {
-        return this.getStatus();
+  async refreshStatus(options: { force?: boolean } = {}): Promise<ConnectDonatorUnlockStatus> {
+    const cached = this.getStatus();
+    if (cached.unlocked) {
+      return cached;
+    }
+    if (options.force === true) {
+      try {
+        await getEchoProAccountService().refreshStatus({ force: true });
+      } catch {
+        // Preserve the last trusted account status when the refresh is temporarily unavailable.
       }
-    } catch {
-      // Keep the legacy/private unlock path available if plugin state is unavailable.
+      const forcedAccountStatus = createAccountConnectStatus();
+      if (forcedAccountStatus) {
+        return forcedAccountStatus;
+      }
     }
     const provider = getPrivateEntitlementsProvider();
     if (provider?.refreshConnectStatus) {
@@ -84,20 +89,10 @@ export class ConnectDonatorUnlockService {
         return privateStatus;
       }
     }
-    try {
-      await getEchoProAccountService().refreshStatus();
-    } catch {
-      // Keep the synchronous cached status path below available during offline grace.
-    }
-    const accountStatus = createAccountConnectStatus();
-    if (accountStatus) {
-      return accountStatus;
-    }
     return provider?.getConnectStatus?.() ?? getDefaultConnectDonatorUnlockStatus();
   }
 
   assertUnlocked(): ConnectDonatorUnlockStatus {
-    assertPackageIntegrityAllowsPaidFeatures();
     const status = this.getStatus();
     if (!status.unlocked) {
       throw createPrivateFeatureError('echo-pro', 'echo_pro_required');

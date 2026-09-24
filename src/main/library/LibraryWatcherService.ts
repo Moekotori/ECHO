@@ -4,7 +4,7 @@ import { stat as statFile } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
 import { SCANNABLE_AUDIO_EXTENSIONS } from '../../shared/constants/audioExtensions';
 
-export type LibraryWatcherEventType = 'add' | 'change' | 'unlink' | 'rename' | 'unknown';
+export type LibraryWatcherEventType = 'add' | 'change' | 'unlink' | 'rename' | 'directory' | 'unknown';
 
 export type LibraryWatcherRecentEvent = {
   timestamp: string;
@@ -49,6 +49,7 @@ export type LibraryWatcherFolder = {
 };
 
 export type LibraryWatcherSubscription = {
+  active?: boolean;
   close: () => void;
 };
 
@@ -81,9 +82,11 @@ type PendingEvent = {
 export type LibraryWatcherRescanCoordinator = {
   rescanPaths: (folderId: string, paths: string[]) => unknown;
   markMissingPaths?: (folderId: string, paths: string[]) => unknown;
+  reconcileFolder?: (folderId: string, options: { reason: 'startup' | 'recovery' }) => unknown;
   previewRescanPaths?: (folderId: string, paths: string[]) => unknown;
   hasRunningJobs?: () => boolean;
   shouldDelayRescan?: () => boolean | Promise<boolean>;
+  shouldAutoHideDeleted?: () => boolean;
 };
 
 type LibraryWatcherServiceOptions = {
@@ -96,6 +99,11 @@ type LibraryWatcherServiceOptions = {
   now?: () => number;
   debounceMs?: number;
   rescanDebounceMs?: number;
+  reconciliationDebounceMs?: number;
+  startupReconciliationDelayMs?: number;
+  restartDelayMs?: number;
+  maxRestartDelayMs?: number;
+  maxRescanDeferralMs?: number;
   stabilityPollMs?: number;
   maxStabilityChecks?: number;
   maxPendingPathCount?: number;
@@ -214,12 +222,42 @@ const isClearlyTemporaryPath = (filePath: string): boolean => {
   );
 };
 
-const shouldObservePath = (filePath: string): boolean => {
+const shouldIgnorePath = (filePath: string): boolean => {
   if (isHiddenPath(filePath) || isClearlyTemporaryPath(filePath)) {
+    return true;
+  }
+
+  return false;
+};
+
+const shouldObservePath = (filePath: string): boolean => {
+  if (shouldIgnorePath(filePath)) {
     return false;
   }
 
-  return SCANNABLE_AUDIO_EXTENSIONS.has(extname(filePath).toLowerCase());
+  const extension = extname(filePath).toLowerCase();
+  return SCANNABLE_AUDIO_EXTENSIONS.has(extension) || extension === '.cue';
+};
+
+const stripNodeExtendedLengthPathPrefix = (filePath: string): string => {
+  if (filePath.startsWith('\\\\?\\UNC\\')) {
+    return `\\\\${filePath.slice(8)}`;
+  }
+  if (filePath.startsWith('\\\\?\\')) {
+    return filePath.slice(4);
+  }
+  return filePath;
+};
+
+export const resolveNodeWatcherEventPath = (folderPath: string, fileName: string): string =>
+  resolve(folderPath, stripNodeExtendedLengthPathPrefix(fileName));
+
+export const isNodeWatcherRootEvent = (folderPath: string, fileName: string): boolean => {
+  const rootPath = resolve(stripNodeExtendedLengthPathPrefix(folderPath));
+  const eventPath = resolveNodeWatcherEventPath(rootPath, fileName);
+  return process.platform === 'win32'
+    ? eventPath.toLowerCase() === rootPath.toLowerCase()
+    : eventPath === rootPath;
 };
 
 export const classifyNodeWatcherEvent = (eventType: string, filePath: string): LibraryWatcherEventType => {
@@ -228,7 +266,15 @@ export const classifyNodeWatcherEvent = (eventType: string, filePath: string): L
   }
 
   if (eventType === 'rename') {
-    return defaultStatFileSync(filePath) ? 'add' : 'unlink';
+    try {
+      const stats = statSync(filePath);
+      return stats.isDirectory() ? 'directory' : stats.isFile() ? 'add' : 'unknown';
+    } catch {
+      if (shouldObservePath(filePath)) {
+        return 'unlink';
+      }
+      return shouldIgnorePath(filePath) ? 'unknown' : 'directory';
+    }
   }
 
   return 'unknown';
@@ -240,6 +286,17 @@ const classifyNodeWatcherEventAsync = async (eventType: string, filePath: string
   }
 
   if (eventType === 'rename') {
+    try {
+      const stats = await statFile(filePath);
+      if (stats.isDirectory()) {
+        return 'directory';
+      }
+    } catch {
+      if (shouldObservePath(filePath)) {
+        return 'rename';
+      }
+      return shouldIgnorePath(filePath) ? 'unknown' : 'directory';
+    }
     return 'rename';
   }
 
@@ -253,31 +310,77 @@ export class NodeFileSystemWatcherAdapter implements FileSystemWatcherAdapter {
     onError: (error: unknown) => void,
   ): LibraryWatcherSubscription {
     let watcher: FSWatcher | null = null;
+    let active = false;
+    let closed = false;
+    let failureReported = false;
+    let rootCheckInFlight = false;
+    const rootPath = resolve(folder.path);
+    const reportFailure = (error: unknown): void => {
+      if (closed || failureReported) {
+        return;
+      }
+      failureReported = true;
+      onError(error);
+    };
+    const validateRoot = (): void => {
+      if (closed || failureReported || rootCheckInFlight) {
+        return;
+      }
+      rootCheckInFlight = true;
+      void statFile(rootPath)
+        .then((stats) => {
+          rootCheckInFlight = false;
+          if (!stats.isDirectory()) {
+            reportFailure(new Error(`Library watch root is no longer a directory: ${rootPath}`));
+          }
+        })
+        .catch((error) => {
+          rootCheckInFlight = false;
+          reportFailure(
+            new Error(
+              `Library watch root is unavailable: ${rootPath}: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          );
+        });
+    };
 
     try {
-      watcher = watchFileSystem(folder.path, { recursive: true }, (eventType, fileName) => {
+      watcher = watchFileSystem(rootPath, { recursive: true }, (eventType, fileName) => {
         if (!fileName) {
+          validateRoot();
           return;
         }
 
-        const fullPath = resolve(folder.path, String(fileName));
+        const reportedFileName = String(fileName);
+        if (isNodeWatcherRootEvent(rootPath, reportedFileName)) {
+          validateRoot();
+          return;
+        }
+
+        const fullPath = resolveNodeWatcherEventPath(rootPath, reportedFileName);
         void classifyNodeWatcherEventAsync(eventType, fullPath)
           .then((classifiedEventType) => {
+            if (closed || failureReported) {
+              return;
+            }
             onEvent({
               folderId: folder.id,
               eventType: classifiedEventType,
               path: fullPath,
             });
           })
-          .catch(onError);
+          .catch(reportFailure);
       });
-      watcher.on('error', onError);
+      watcher.on('error', reportFailure);
+      active = true;
     } catch (error) {
-      onError(error);
+      reportFailure(error);
     }
 
     return {
+      active,
       close: () => {
+        closed = true;
         watcher?.close();
       },
     };
@@ -291,6 +394,11 @@ export class LibraryWatcherService {
   private readonly now: () => number;
   private readonly debounceMs: number;
   private readonly rescanDebounceMs: number;
+  private readonly reconciliationDebounceMs: number;
+  private readonly startupReconciliationDelayMs: number;
+  private readonly restartDelayMs: number;
+  private readonly maxRestartDelayMs: number;
+  private readonly maxRescanDeferralMs: number;
   private readonly stabilityPollMs: number;
   private readonly maxStabilityChecks: number;
   private readonly maxPendingPathCount: number;
@@ -299,15 +407,30 @@ export class LibraryWatcherService {
   private readonly stormThreshold: number;
   private readonly readFolders: () => LibraryWatcherFolder[];
   private diagnostics: LibraryWatcherDiagnostics;
-  private subscriptions: LibraryWatcherSubscription[] = [];
+  private subscriptions = new Map<string, LibraryWatcherSubscription>();
+  private watchedFolderPaths = new Map<string, string>();
+  private configuredFolderIds = new Set<string>();
+  private folderRestartTimers = new Map<string, NodeJS.Timeout>();
+  private folderRestartAttempts = new Map<string, number>();
+  private watcherErrors = new Map<string, string>();
   private pendingEvents = new Map<string, PendingEvent>();
   private pendingRescanPaths = new Map<string, Set<string>>();
+  private pendingRescanStartedAtMs = new Map<string, number>();
   private previewedRescanPaths = new Map<string, Set<string>>();
   private rescanTimers = new Map<string, NodeJS.Timeout>();
   private folderRescansInFlight = new Set<string>();
+  private pendingReconciliationStartedAtMs = new Map<string, number>();
+  private pendingReconciliationMaxDeferralMs = new Map<string, number>();
+  private pendingReconciliationReasons = new Map<string, 'startup' | 'recovery'>();
+  private reconciliationDueAtMs = new Map<string, number>();
+  private reconciliationTimers = new Map<string, NodeJS.Timeout>();
+  private folderReconciliationsInFlight = new Set<string>();
+  private restartTimer: NodeJS.Timeout | null = null;
+  private restartAttempt = 0;
+  private shouldRun = false;
   private stormWindowTimer: NodeJS.Timeout | null = null;
-  private stormWindowEventCount = 0;
-  private stormWindowTripped = false;
+  private stormWindowEventCounts = new Map<string, number>();
+  private stormWindowTrippedFolders = new Set<string>();
 
   constructor(options: LibraryWatcherServiceOptions) {
     this.adapter = options.adapter ?? new NodeFileSystemWatcherAdapter();
@@ -316,6 +439,11 @@ export class LibraryWatcherService {
     this.now = options.now ?? Date.now;
     this.debounceMs = options.debounceMs ?? 500;
     this.rescanDebounceMs = options.rescanDebounceMs ?? 1000;
+    this.reconciliationDebounceMs = options.reconciliationDebounceMs ?? 5000;
+    this.startupReconciliationDelayMs = options.startupReconciliationDelayMs ?? 10000;
+    this.restartDelayMs = options.restartDelayMs ?? 1000;
+    this.maxRestartDelayMs = options.maxRestartDelayMs ?? 30000;
+    this.maxRescanDeferralMs = options.maxRescanDeferralMs ?? 15000;
     this.stabilityPollMs = options.stabilityPollMs ?? 300;
     this.maxStabilityChecks = options.maxStabilityChecks ?? 3;
     this.maxPendingPathCount = options.maxPendingPathCount ?? 1000;
@@ -326,50 +454,45 @@ export class LibraryWatcherService {
     this.diagnostics = createEmptyDiagnostics(options.enabled === true, options.autoRescanEnabled === true);
   }
 
-  start(): LibraryWatcherDiagnostics {
+  start(reconciliationReason: 'startup' | 'recovery' = 'startup'): LibraryWatcherDiagnostics {
     if (!this.diagnostics.enabled) {
       return this.getDiagnostics();
     }
 
-    if (this.subscriptions.length > 0) {
-      return this.getDiagnostics();
+    const wasRunningRequested = this.shouldRun;
+    this.shouldRun = true;
+    if (!wasRunningRequested) {
+      this.diagnostics.startedAt = toIso(this.now());
+      this.diagnostics.stoppedAt = null;
+      this.diagnostics.lastError = null;
+      this.watcherErrors.clear();
     }
-
-    const startedAtMs = this.now();
-    this.diagnostics.startedAt = toIso(startedAtMs);
-    this.diagnostics.stoppedAt = null;
-    this.diagnostics.lastError = null;
-
-    try {
-      const folders = this.readFolders().filter((folder) => folder.enabled !== false);
-      for (const folder of folders) {
-        const subscription = this.adapter.watch(
-          folder,
-          (event) => this.handleRawEvent(event),
-          (error) => this.recordError(error),
-        );
-        this.subscriptions.push(subscription);
-      }
-      this.diagnostics.watchedFolderCount = this.subscriptions.length;
-    } catch (error) {
-      this.recordError(error);
-    }
-
-    return this.getDiagnostics();
+    return this.syncFolders(reconciliationReason);
   }
 
   stop(): LibraryWatcherDiagnostics {
-    if (this.subscriptions.length > 0) {
-      for (const subscription of this.subscriptions) {
-        try {
-          subscription.close();
-        } catch (error) {
-          this.recordError(error);
-        }
+    this.shouldRun = false;
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+    this.restartAttempt = 0;
+    for (const timer of this.folderRestartTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.folderRestartTimers.clear();
+    this.folderRestartAttempts.clear();
+    for (const subscription of this.subscriptions.values()) {
+      try {
+        subscription.close();
+      } catch (error) {
+        this.recordError(error);
       }
     }
 
-    this.subscriptions = [];
+    this.subscriptions.clear();
+    this.watchedFolderPaths.clear();
+    this.configuredFolderIds.clear();
     this.diagnostics.watchedFolderCount = 0;
     this.diagnostics.stoppedAt = toIso(this.now());
     this.clearPendingEvents();
@@ -379,8 +502,9 @@ export class LibraryWatcherService {
   }
 
   restart(): LibraryWatcherDiagnostics {
+    const shouldRestart = this.diagnostics.enabled;
     this.stop();
-    return this.start();
+    return shouldRestart ? this.start() : this.getDiagnostics();
   }
 
   getDiagnostics(): LibraryWatcherDiagnostics {
@@ -408,17 +532,84 @@ export class LibraryWatcherService {
     return this.getDiagnostics();
   }
 
+  syncFolders(reconciliationReason: 'startup' | 'recovery' = 'startup'): LibraryWatcherDiagnostics {
+    if (!this.diagnostics.enabled) {
+      return this.getDiagnostics();
+    }
+    if (!this.shouldRun) {
+      return this.start(reconciliationReason);
+    }
+
+    let folders: LibraryWatcherFolder[];
+    try {
+      folders = this.readFolders().filter((folder) => folder.enabled !== false);
+      if (this.restartTimer) {
+        clearTimeout(this.restartTimer);
+        this.restartTimer = null;
+      }
+      this.watcherErrors.delete('__service__');
+      this.restartAttempt = 0;
+      this.refreshWatcherError();
+    } catch (error) {
+      this.handleWatcherServiceError(error);
+      return this.getDiagnostics();
+    }
+
+    const targetFolders = new Map(folders.map((folder) => [folder.id, folder]));
+    this.configuredFolderIds = new Set(targetFolders.keys());
+    for (const [folderId, watchedPath] of this.watchedFolderPaths) {
+      const target = targetFolders.get(folderId);
+      if (!target || resolve(target.path) !== watchedPath) {
+        this.removeFolderWatcher(folderId);
+      }
+    }
+    for (const folderId of this.folderRestartTimers.keys()) {
+      if (!targetFolders.has(folderId)) {
+        this.removeFolderWatcher(folderId);
+      }
+    }
+    for (const folder of folders) {
+      if (!this.subscriptions.has(folder.id) && !this.folderRestartTimers.has(folder.id)) {
+        this.watchFolder(folder, reconciliationReason);
+      }
+    }
+
+    this.updateWatchedFolderCount();
+    return this.getDiagnostics();
+  }
+
   isRunning(): boolean {
-    return this.subscriptions.length > 0;
+    return (
+      this.subscriptions.size > 0 &&
+      this.folderRestartTimers.size === 0 &&
+      this.restartTimer === null
+    );
   }
 
   private handleRawEvent(event: LibraryWatcherRawEvent): void {
-    if (!this.diagnostics.enabled || !shouldObservePath(event.path)) {
+    if (!this.diagnostics.enabled || shouldIgnorePath(event.path)) {
+      return;
+    }
+
+    const isCueFile = extname(event.path).toLowerCase() === '.cue';
+    if (event.eventType === 'directory' || isCueFile) {
+      this.diagnostics.totalEventCount += 1;
+      if (!this.recordStormWindowEvent(event.folderId)) {
+        return;
+      }
+      this.recordImmediateEvent(event);
+      this.scheduleFolderReconciliation(event.folderId);
+      return;
+    }
+
+    if (!shouldObservePath(event.path)) {
       return;
     }
 
     this.diagnostics.totalEventCount += 1;
-    this.recordStormWindowEvent();
+    if (!this.recordStormWindowEvent(event.folderId)) {
+      return;
+    }
 
     const eventType = event.eventType;
     const key = `${event.folderId}:${resolve(event.path).toLowerCase()}`;
@@ -435,6 +626,13 @@ export class LibraryWatcherService {
         void this.confirmPendingEvent(key);
       }, this.debounceMs);
       pending.debounceTimer.unref?.();
+      return;
+    }
+
+    if (this.pendingEvents.size + this.getPendingPathCount() >= this.maxPendingPathCount) {
+      this.diagnostics.droppedPathCount += 1;
+      this.diagnostics.eventStormCount += 1;
+      this.scheduleFolderReconciliation(event.folderId);
       return;
     }
 
@@ -463,12 +661,6 @@ export class LibraryWatcherService {
 
     pending.debounceTimer = null;
     const eventType = coalescedEventType(pending.eventTypes);
-    if (eventType === 'unlink') {
-      this.markPendingPathMissing(pending, eventType);
-      this.pendingEvents.delete(key);
-      return;
-    }
-
     if (eventType === 'unknown') {
       this.recordRecentEvent(pending, eventType, null);
       this.pendingEvents.delete(key);
@@ -479,10 +671,11 @@ export class LibraryWatcherService {
     if (!firstSnapshot) {
       pending.checks += 1;
       if (pending.checks >= this.maxStabilityChecks) {
-        if (eventType === 'rename') {
+        if (pending.eventTypes.has('unlink') || pending.eventTypes.has('rename')) {
           this.markPendingPathMissing(pending, 'unlink');
         } else {
           this.recordRecentEvent(pending, eventType, null);
+          this.scheduleFolderReconciliation(pending.folderId);
         }
         this.pendingEvents.delete(key);
         return;
@@ -498,7 +691,10 @@ export class LibraryWatcherService {
         pending.stabilityTimer = null;
         const secondSnapshot = await Promise.resolve(this.statFile(pending.path));
         if (isSameSnapshot(firstSnapshot, secondSnapshot)) {
-          const stableEventType = eventType === 'rename' ? 'add' : eventType;
+          const stableEventType =
+            pending.eventTypes.has('add') || pending.eventTypes.has('rename') || pending.eventTypes.has('unlink')
+              ? 'add'
+              : eventType;
           this.recordRecentEvent(pending, stableEventType, secondSnapshot);
           this.enqueueAutoRescan(pending.folderId, pending.path, stableEventType, secondSnapshot);
           this.pendingEvents.delete(key);
@@ -507,6 +703,7 @@ export class LibraryWatcherService {
 
         if (pending.checks >= this.maxStabilityChecks) {
           this.recordRecentEvent(pending, eventType, null);
+          this.scheduleFolderReconciliation(pending.folderId);
           this.pendingEvents.delete(key);
           return;
         }
@@ -526,7 +723,15 @@ export class LibraryWatcherService {
 
   private markPendingPathMissing(pending: PendingEvent, eventType: LibraryWatcherEventType): void {
     this.recordRecentEvent(pending, eventType, null);
-    if (this.diagnostics.autoRescanEnabled && this.rescanCoordinator?.markMissingPaths) {
+    let shouldAutoHideDeleted = true;
+    try {
+      shouldAutoHideDeleted = this.rescanCoordinator?.shouldAutoHideDeleted?.() ?? true;
+    } catch (error) {
+      shouldAutoHideDeleted = false;
+      this.diagnostics.lastRescanError = error instanceof Error ? error.message : String(error);
+    }
+
+    if (this.diagnostics.autoRescanEnabled && shouldAutoHideDeleted && this.rescanCoordinator?.markMissingPaths) {
       try {
         const result = this.rescanCoordinator.markMissingPaths(pending.folderId, [pending.path]);
         this.diagnostics.triggeredRescanCount += 1;
@@ -565,6 +770,21 @@ export class LibraryWatcherService {
     }
   }
 
+  private recordImmediateEvent(event: LibraryWatcherRawEvent): void {
+    const nowMs = this.now();
+    this.diagnostics.recentEvents.push({
+      timestamp: toIso(nowMs),
+      folderId: event.folderId,
+      eventType: event.eventType,
+      path: event.path,
+      extension: extname(event.path).toLowerCase(),
+      stableForMs: 0,
+    });
+    if (this.diagnostics.recentEvents.length > recentEventLimit) {
+      this.diagnostics.recentEvents = this.diagnostics.recentEvents.slice(-recentEventLimit);
+    }
+  }
+
   private enqueueAutoRescan(
     folderId: string,
     filePath: string,
@@ -582,11 +802,15 @@ export class LibraryWatcherService {
     if (!alreadyQueued && this.getPendingPathCount() >= this.maxPendingPathCount) {
       this.diagnostics.droppedPathCount += 1;
       this.diagnostics.eventStormCount += 1;
+      this.scheduleFolderReconciliation(folderId);
       return;
     }
 
     folderPaths.add(normalizedPath);
     this.pendingRescanPaths.set(folderId, folderPaths);
+    if (!this.pendingRescanStartedAtMs.has(folderId)) {
+      this.pendingRescanStartedAtMs.set(folderId, this.now());
+    }
     this.updatePendingPathCount();
     this.scheduleRescanFlush(folderId);
   }
@@ -618,7 +842,9 @@ export class LibraryWatcherService {
     }
 
     try {
-      if (await Promise.resolve(this.rescanCoordinator?.shouldDelayRescan?.() ?? false)) {
+      const queuedAtMs = this.pendingRescanStartedAtMs.get(folderId) ?? this.now();
+      const deferralExpired = this.now() - queuedAtMs >= this.maxRescanDeferralMs;
+      if (!deferralExpired && (await Promise.resolve(this.rescanCoordinator?.shouldDelayRescan?.() ?? false))) {
         await this.previewDelayedRescanPaths(folderId, paths);
         this.scheduleRescanFlush(folderId);
         return;
@@ -658,12 +884,35 @@ export class LibraryWatcherService {
       this.diagnostics.triggeredRescanCount += 1;
       this.diagnostics.lastTriggeredRescanAt = toIso(this.now());
       this.diagnostics.lastRescanError = null;
-      void Promise.resolve(result).finally(() => {
-        this.folderRescansInFlight.delete(folderId);
-        if ((this.pendingRescanPaths.get(folderId)?.size ?? 0) > 0) {
-          this.scheduleRescanFlush(folderId);
-        }
-      });
+      if ((this.pendingRescanPaths.get(folderId)?.size ?? 0) === 0) {
+        this.pendingRescanStartedAtMs.delete(folderId);
+      }
+      void Promise.resolve(result)
+        .catch((error) => {
+          this.diagnostics.lastRescanError = error instanceof Error ? error.message : String(error);
+          if (
+            !this.diagnostics.autoRescanEnabled ||
+            !this.shouldRun ||
+            !this.configuredFolderIds.has(folderId)
+          ) {
+            return;
+          }
+          const merged = this.pendingRescanPaths.get(folderId) ?? new Set<string>();
+          for (const filePath of batch) {
+            merged.add(filePath);
+          }
+          this.pendingRescanPaths.set(folderId, merged);
+          if (!this.pendingRescanStartedAtMs.has(folderId)) {
+            this.pendingRescanStartedAtMs.set(folderId, this.now());
+          }
+          this.updatePendingPathCount();
+        })
+        .finally(() => {
+          this.folderRescansInFlight.delete(folderId);
+          if ((this.pendingRescanPaths.get(folderId)?.size ?? 0) > 0) {
+            this.scheduleRescanFlush(folderId);
+          }
+        });
     } catch (error) {
       this.diagnostics.lastRescanError = error instanceof Error ? error.message : String(error);
       const merged = this.pendingRescanPaths.get(folderId) ?? new Set<string>();
@@ -671,9 +920,119 @@ export class LibraryWatcherService {
         merged.add(filePath);
       }
       this.pendingRescanPaths.set(folderId, merged);
+      if (!this.pendingRescanStartedAtMs.has(folderId)) {
+        this.pendingRescanStartedAtMs.set(folderId, this.now());
+      }
       this.updatePendingPathCount();
       this.folderRescansInFlight.delete(folderId);
+      this.scheduleRescanFlush(folderId);
     }
+  }
+
+  private scheduleFolderReconciliation(
+    folderId: string,
+    delayMs = this.reconciliationDebounceMs,
+    maxDeferralMs?: number,
+    reason: 'startup' | 'recovery' = 'recovery',
+  ): void {
+    if (
+      !this.diagnostics.autoRescanEnabled ||
+      !this.subscriptions.has(folderId) ||
+      !this.rescanCoordinator?.reconcileFolder
+    ) {
+      return;
+    }
+
+    if (!this.pendingReconciliationStartedAtMs.has(folderId)) {
+      this.pendingReconciliationStartedAtMs.set(folderId, this.now());
+    }
+    const existingMaxDeferralMs = this.pendingReconciliationMaxDeferralMs.get(folderId);
+    if (existingMaxDeferralMs === undefined) {
+      this.pendingReconciliationMaxDeferralMs.set(folderId, maxDeferralMs ?? this.maxRescanDeferralMs);
+    } else if (maxDeferralMs !== undefined) {
+      this.pendingReconciliationMaxDeferralMs.set(folderId, Math.min(existingMaxDeferralMs, maxDeferralMs));
+    }
+    if (reason === 'recovery' || !this.pendingReconciliationReasons.has(folderId)) {
+      this.pendingReconciliationReasons.set(folderId, reason);
+    }
+    const dueAtMs = this.now() + delayMs;
+    const existingTimer = this.reconciliationTimers.get(folderId);
+    if (existingTimer) {
+      const existingDueAtMs = this.reconciliationDueAtMs.get(folderId) ?? dueAtMs;
+      if (existingDueAtMs <= dueAtMs) {
+        return;
+      }
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(() => {
+      void this.flushFolderReconciliation(folderId);
+    }, delayMs);
+    timer.unref?.();
+    this.reconciliationTimers.set(folderId, timer);
+    this.reconciliationDueAtMs.set(folderId, dueAtMs);
+  }
+
+  private async flushFolderReconciliation(folderId: string): Promise<void> {
+    this.reconciliationTimers.delete(folderId);
+    this.reconciliationDueAtMs.delete(folderId);
+    if (!this.pendingReconciliationStartedAtMs.has(folderId)) {
+      return;
+    }
+    const reconcileFolder = this.rescanCoordinator?.reconcileFolder;
+    if (!reconcileFolder) {
+      this.pendingReconciliationStartedAtMs.delete(folderId);
+      this.pendingReconciliationMaxDeferralMs.delete(folderId);
+      this.pendingReconciliationReasons.delete(folderId);
+      return;
+    }
+
+    if (this.folderReconciliationsInFlight.has(folderId) || this.rescanCoordinator?.hasRunningJobs?.() === true) {
+      this.rescheduleFolderReconciliation(folderId);
+      return;
+    }
+
+    try {
+      const requestedAtMs = this.pendingReconciliationStartedAtMs.get(folderId) ?? this.now();
+      const maxDeferralMs = this.pendingReconciliationMaxDeferralMs.get(folderId) ?? this.maxRescanDeferralMs;
+      const deferralExpired = this.now() - requestedAtMs >= maxDeferralMs;
+      if (!deferralExpired && (await Promise.resolve(this.rescanCoordinator?.shouldDelayRescan?.() ?? false))) {
+        this.rescheduleFolderReconciliation(folderId);
+        return;
+      }
+    } catch (error) {
+      this.diagnostics.lastRescanError = error instanceof Error ? error.message : String(error);
+      this.rescheduleFolderReconciliation(folderId);
+      return;
+    }
+
+    this.folderReconciliationsInFlight.add(folderId);
+    try {
+      const result = reconcileFolder(folderId, {
+        reason: this.pendingReconciliationReasons.get(folderId) ?? 'recovery',
+      });
+      this.diagnostics.triggeredRescanCount += 1;
+      this.diagnostics.lastTriggeredRescanAt = toIso(this.now());
+      this.diagnostics.lastRescanError = null;
+      await Promise.resolve(result);
+      this.pendingReconciliationStartedAtMs.delete(folderId);
+      this.pendingReconciliationMaxDeferralMs.delete(folderId);
+      this.pendingReconciliationReasons.delete(folderId);
+    } catch (error) {
+      this.diagnostics.lastRescanError = error instanceof Error ? error.message : String(error);
+      this.rescheduleFolderReconciliation(folderId);
+    } finally {
+      this.folderReconciliationsInFlight.delete(folderId);
+    }
+  }
+
+  private rescheduleFolderReconciliation(folderId: string): void {
+    this.scheduleFolderReconciliation(
+      folderId,
+      this.reconciliationDebounceMs,
+      undefined,
+      this.pendingReconciliationReasons.get(folderId) ?? 'recovery',
+    );
   }
 
   private async previewDelayedRescanPaths(folderId: string, paths: Set<string>): Promise<void> {
@@ -698,21 +1057,25 @@ export class LibraryWatcherService {
     }
   }
 
-  private recordStormWindowEvent(): void {
-    this.stormWindowEventCount += 1;
-    if (this.stormWindowEventCount > this.stormThreshold && !this.stormWindowTripped) {
+  private recordStormWindowEvent(folderId: string): boolean {
+    const eventCount = (this.stormWindowEventCounts.get(folderId) ?? 0) + 1;
+    this.stormWindowEventCounts.set(folderId, eventCount);
+    if (eventCount > this.stormThreshold && !this.stormWindowTrippedFolders.has(folderId)) {
       this.diagnostics.eventStormCount += 1;
-      this.stormWindowTripped = true;
+      this.stormWindowTrippedFolders.add(folderId);
+      this.scheduleFolderReconciliation(folderId);
     }
 
     if (!this.stormWindowTimer) {
       this.stormWindowTimer = setTimeout(() => {
         this.stormWindowTimer = null;
-        this.stormWindowEventCount = 0;
-        this.stormWindowTripped = false;
+        this.stormWindowEventCounts.clear();
+        this.stormWindowTrippedFolders.clear();
       }, this.stormWindowMs);
       this.stormWindowTimer.unref?.();
     }
+
+    return eventCount <= this.stormThreshold;
   }
 
   private clearPendingEvents(): void {
@@ -733,8 +1096,18 @@ export class LibraryWatcherService {
     }
     this.rescanTimers.clear();
     this.pendingRescanPaths.clear();
+    this.pendingRescanStartedAtMs.clear();
     this.previewedRescanPaths.clear();
     this.folderRescansInFlight.clear();
+    for (const timer of this.reconciliationTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.reconciliationTimers.clear();
+    this.reconciliationDueAtMs.clear();
+    this.pendingReconciliationStartedAtMs.clear();
+    this.pendingReconciliationMaxDeferralMs.clear();
+    this.pendingReconciliationReasons.clear();
+    this.folderReconciliationsInFlight.clear();
     this.updatePendingPathCount();
   }
 
@@ -750,13 +1123,198 @@ export class LibraryWatcherService {
     this.diagnostics.pendingPathCount = this.getPendingPathCount();
   }
 
+  private watchFolder(folder: LibraryWatcherFolder, reconciliationReason: 'startup' | 'recovery'): void {
+    let subscription: LibraryWatcherSubscription;
+    try {
+      subscription = this.adapter.watch(
+        folder,
+        (event) => this.handleRawEvent(event),
+        (error) => this.handleWatcherError(folder.id, error),
+      );
+    } catch (error) {
+      this.handleWatcherError(folder.id, error);
+      return;
+    }
+
+    if (subscription.active === false) {
+      if (!this.folderRestartTimers.has(folder.id)) {
+        this.handleWatcherError(folder.id, new Error(`Could not watch library folder: ${folder.path}`));
+      }
+      return;
+    }
+    if (this.folderRestartTimers.has(folder.id)) {
+      try {
+        subscription.close();
+      } catch (error) {
+        this.recordError(error);
+      }
+      return;
+    }
+
+    this.subscriptions.set(folder.id, subscription);
+    this.watchedFolderPaths.set(folder.id, resolve(folder.path));
+    this.folderRestartAttempts.delete(folder.id);
+    this.watcherErrors.delete(folder.id);
+    this.refreshWatcherError();
+    this.updateWatchedFolderCount();
+    this.scheduleFolderReconciliation(
+      folder.id,
+      this.startupReconciliationDelayMs,
+      Number.POSITIVE_INFINITY,
+      reconciliationReason,
+    );
+  }
+
+  private handleWatcherError(folderId: string, error: unknown): void {
+    this.watcherErrors.set(folderId, error instanceof Error ? error.message : String(error));
+    this.refreshWatcherError();
+    if (!this.shouldRun || !this.diagnostics.enabled) {
+      return;
+    }
+
+    if (!this.folderRestartTimers.has(folderId)) {
+      const restartAttempt = this.folderRestartAttempts.get(folderId) ?? 0;
+      const retryDelayMs = Math.min(
+        this.maxRestartDelayMs,
+        this.restartDelayMs * (2 ** Math.min(restartAttempt, 10)),
+      );
+      this.folderRestartAttempts.set(folderId, restartAttempt + 1);
+      const timer = setTimeout(() => {
+        this.folderRestartTimers.delete(folderId);
+        if (!this.shouldRun || !this.diagnostics.enabled) {
+          return;
+        }
+
+        let folder: LibraryWatcherFolder | undefined;
+        try {
+          folder = this.readFolders().find((candidate) => candidate.id === folderId && candidate.enabled !== false);
+        } catch (readError) {
+          this.handleWatcherServiceError(readError);
+          return;
+        }
+        if (!folder) {
+          this.folderRestartAttempts.delete(folderId);
+          this.watcherErrors.delete(folderId);
+          this.refreshWatcherError();
+          return;
+        }
+        this.watchFolder(folder, 'recovery');
+      }, retryDelayMs);
+      timer.unref?.();
+      this.folderRestartTimers.set(folderId, timer);
+    }
+
+    const subscription = this.subscriptions.get(folderId);
+    this.subscriptions.delete(folderId);
+    this.watchedFolderPaths.delete(folderId);
+    this.clearPendingFolderWork(folderId);
+    this.updateWatchedFolderCount();
+    if (subscription) {
+      try {
+        subscription.close();
+      } catch (closeError) {
+        this.recordError(closeError);
+      }
+    }
+  }
+
+  private handleWatcherServiceError(error: unknown): void {
+    this.watcherErrors.set('__service__', error instanceof Error ? error.message : String(error));
+    this.refreshWatcherError();
+    if (!this.shouldRun || !this.diagnostics.enabled || this.restartTimer) {
+      return;
+    }
+
+    const retryDelayMs = Math.min(
+      this.maxRestartDelayMs,
+      this.restartDelayMs * (2 ** Math.min(this.restartAttempt, 10)),
+    );
+    this.restartAttempt += 1;
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (!this.shouldRun || !this.diagnostics.enabled) {
+        return;
+      }
+      this.syncFolders('recovery');
+    }, retryDelayMs);
+    this.restartTimer.unref?.();
+  }
+
+  private removeFolderWatcher(folderId: string): void {
+    const restartTimer = this.folderRestartTimers.get(folderId);
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      this.folderRestartTimers.delete(folderId);
+    }
+    this.folderRestartAttempts.delete(folderId);
+    this.watcherErrors.delete(folderId);
+
+    const subscription = this.subscriptions.get(folderId);
+    this.subscriptions.delete(folderId);
+    this.watchedFolderPaths.delete(folderId);
+    if (subscription) {
+      try {
+        subscription.close();
+      } catch (error) {
+        this.recordError(error);
+      }
+    }
+
+    this.clearPendingFolderWork(folderId);
+    this.refreshWatcherError();
+    this.updateWatchedFolderCount();
+  }
+
+  private clearPendingFolderWork(folderId: string): void {
+    for (const [key, pending] of this.pendingEvents) {
+      if (pending.folderId !== folderId) {
+        continue;
+      }
+      if (pending.debounceTimer) {
+        clearTimeout(pending.debounceTimer);
+      }
+      if (pending.stabilityTimer) {
+        clearTimeout(pending.stabilityTimer);
+      }
+      this.pendingEvents.delete(key);
+    }
+
+    const rescanTimer = this.rescanTimers.get(folderId);
+    if (rescanTimer) {
+      clearTimeout(rescanTimer);
+    }
+    this.rescanTimers.delete(folderId);
+    this.pendingRescanPaths.delete(folderId);
+    this.pendingRescanStartedAtMs.delete(folderId);
+    this.previewedRescanPaths.delete(folderId);
+
+    const reconciliationTimer = this.reconciliationTimers.get(folderId);
+    if (reconciliationTimer) {
+      clearTimeout(reconciliationTimer);
+    }
+    this.reconciliationTimers.delete(folderId);
+    this.reconciliationDueAtMs.delete(folderId);
+    this.pendingReconciliationStartedAtMs.delete(folderId);
+    this.pendingReconciliationMaxDeferralMs.delete(folderId);
+    this.pendingReconciliationReasons.delete(folderId);
+    this.updatePendingPathCount();
+  }
+
+  private updateWatchedFolderCount(): void {
+    this.diagnostics.watchedFolderCount = this.subscriptions.size;
+  }
+
+  private refreshWatcherError(): void {
+    this.diagnostics.lastError = Array.from(this.watcherErrors.values()).at(-1) ?? null;
+  }
+
   private clearStormWindow(): void {
     if (this.stormWindowTimer) {
       clearTimeout(this.stormWindowTimer);
       this.stormWindowTimer = null;
     }
-    this.stormWindowEventCount = 0;
-    this.stormWindowTripped = false;
+    this.stormWindowEventCounts.clear();
+    this.stormWindowTrippedFolders.clear();
   }
 
   private recordError(error: unknown): void {

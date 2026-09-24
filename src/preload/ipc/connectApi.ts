@@ -6,7 +6,9 @@ export function createConnectApi(
   IpcChannels: typeof import('../../shared/constants/ipcChannels').IpcChannels,
 ): EchoApi['connect'] {
   return {
-    getDonatorUnlockStatus: () => ipcRenderer.invoke(IpcChannels.ConnectGetDonatorUnlockStatus),
+    getDonatorUnlockStatus: (options) => options === undefined
+      ? ipcRenderer.invoke(IpcChannels.ConnectGetDonatorUnlockStatus)
+      : ipcRenderer.invoke(IpcChannels.ConnectGetDonatorUnlockStatus, options),
     listDevices: () => ipcRenderer.invoke(IpcChannels.ConnectListDevices),
     refresh: () => ipcRenderer.invoke(IpcChannels.ConnectRefresh),
     getStatus: () => ipcRenderer.invoke(IpcChannels.ConnectGetStatus),

@@ -131,8 +131,10 @@ export class AudioAuthenticityAnalyzer {
     const durationSeconds = positiveNumber(track.duration);
     const fileSizeBytes = this.resolveFileSize(filePath);
     const dsdByName = isDsdFilePath(filePath) || isDsdCodec(codec);
-    const codecIsLossless = hasCodecToken(codec, losslessCodecs) || (extension !== null && losslessExtensions.has(extension));
-    const codecIsLossy = hasCodecToken(codec, lossyCodecs) || (extension !== null && lossyExtensions.has(extension));
+    const codecSaysLossless = hasCodecToken(codec, losslessCodecs);
+    const codecSaysLossy = hasCodecToken(codec, lossyCodecs);
+    const codecIsLossless = codecSaysLossless || (!codecSaysLossy && extension !== null && losslessExtensions.has(extension));
+    const codecIsLossy = codecSaysLossy || (!codecSaysLossless && extension !== null && lossyExtensions.has(extension));
     const dsdNativeSampleRate = dsdByName && filePath && this.exists(filePath)
       ? await this.readDsdRate(filePath)
       : null;

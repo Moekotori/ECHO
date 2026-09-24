@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Archive, CheckCircle2, Clock3, Disc3, Folder, FolderOpen, ListMusic, ListPlus, Moon, RefreshCw, RotateCcw, Search, SkipForward, Snowflake, Sparkles, UserRound, Waves } from 'lucide-react';
 import type {
   LibraryInboxAlbumSummary,
-  LibraryInboxBatch,
   LibraryInboxFilterKind,
   LibraryInboxItemStatus,
   LibraryInboxIssueReason,
@@ -15,6 +14,7 @@ import type {
   PlaybackMemoryTrackInsight,
 } from '../../shared/types/library';
 import { useI18n } from '../i18n/I18nProvider';
+import type { TranslationKey } from '../i18n/locales';
 import { getLibraryBridge } from '../utils/echoBridge';
 import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
 import { useImeAwareDebouncedSearch } from '../utils/imeInput';
@@ -312,53 +312,35 @@ const emptyInboxPage = (scope: LibraryInboxScope, filter: LibraryInboxFilterKind
   },
 });
 
-const filterOptions: Array<{ value: LibraryInboxFilterKind; label: string }> = [
-  { value: 'all', label: '全部新增' },
-  { value: 'missing_cover', label: '缺封面' },
-  { value: 'metadata_issue', label: '资料异常' },
-  { value: 'unknown_artist', label: '未知艺人' },
-  { value: 'unknown_album', label: '未知专辑' },
-  { value: 'suspicious_file', label: '疑似异常' },
-];
-
-const statusOptions: Array<{ value: LibraryInboxStatusFilter; label: string }> = [
-  { value: 'all', label: '全部状态' },
-  { value: 'pending', label: '待处理' },
-  { value: 'processed', label: '已处理' },
-  { value: 'ignored', label: '已忽略' },
-];
-
-const reasonLabels: Record<LibraryInboxIssueReason, string> = {
-  missing_cover: '缺封面',
-  missing_title: '缺标题',
-  missing_artist: '缺艺人',
-  missing_album: '缺专辑',
-  missing_album_artist: '缺专辑艺人',
-  missing_track_no: '缺音轨号',
-  missing_disc_no: '缺碟号',
-  missing_year: '缺年份',
-  missing_genre: '缺流派',
-  unknown_artist: '未知艺人',
-  filename_fallback: '文件名回退',
-  unknown_field: '未知字段',
-  metadata_fallback: '元数据回退',
-  unknown_album: '未知专辑',
-  embedded_metadata_error: '内嵌标签读取失败',
-  embedded_cover_error: '内嵌封面读取失败',
-  network_metadata_candidate: '网络元数据候选',
-  network_cover_candidate: '网络封面候选',
-  suspicious_file: '疑似异常',
+const reasonLabelKeys: Record<LibraryInboxIssueReason, TranslationKey> = {
+  missing_cover: 'inboxPage.reason.missing_cover',
+  missing_title: 'inboxPage.reason.missing_title',
+  missing_artist: 'inboxPage.reason.missing_artist',
+  missing_album: 'inboxPage.reason.missing_album',
+  missing_album_artist: 'inboxPage.reason.missing_album_artist',
+  missing_track_no: 'inboxPage.reason.missing_track_no',
+  missing_disc_no: 'inboxPage.reason.missing_disc_no',
+  missing_year: 'inboxPage.reason.missing_year',
+  missing_genre: 'inboxPage.reason.missing_genre',
+  unknown_artist: 'inboxPage.reason.unknown_artist',
+  filename_fallback: 'inboxPage.reason.filename_fallback',
+  unknown_field: 'inboxPage.reason.unknown_field',
+  metadata_fallback: 'inboxPage.reason.metadata_fallback',
+  unknown_album: 'inboxPage.reason.unknown_album',
+  embedded_metadata_error: 'inboxPage.reason.embedded_metadata_error',
+  embedded_cover_error: 'inboxPage.reason.embedded_cover_error',
+  network_metadata_candidate: 'inboxPage.reason.network_metadata_candidate',
+  network_cover_candidate: 'inboxPage.reason.network_cover_candidate',
+  suspicious_file: 'inboxPage.reason.suspicious_file',
 };
 
-const formatReason = (reason: LibraryInboxIssueReason): string => reasonLabels[reason] ?? reason;
-
-const statusLabels: Record<LibraryInboxItemStatus, string> = {
-  pending: '待处理',
-  processed: '已处理',
-  ignored: '已忽略',
+const statusLabelKeys: Record<LibraryInboxItemStatus, TranslationKey> = {
+  pending: 'inboxPage.status.pending',
+  processed: 'inboxPage.status.processed',
+  ignored: 'inboxPage.status.ignored',
 };
 
-const formatDateTime = (value: string | null | undefined, emptyLabel = '尚无记录'): string => {
+const formatDateTime = (value: string | null | undefined, emptyLabel: string): string => {
   if (!value) {
     return emptyLabel;
   }
@@ -370,8 +352,6 @@ const formatDateTime = (value: string | null | undefined, emptyLabel = '尚无�
 
   return date.toLocaleString();
 };
-
-const folderLabel = (batch: LibraryInboxBatch | null): string => batch?.folderName ?? '最近新增';
 
 const batchSelectValue = (scope: LibraryInboxScope, batchId: string | null): string =>
   scope === 'all' ? '__all__' : scope === 'latest' ? '__latest__' : batchId ?? '__latest__';
@@ -418,7 +398,7 @@ const inboxItemKey = (item: Pick<LibraryInboxTrackItem, 'batchId' | 'track'>): s
 const formatPercent = (value: number): string => `${Math.max(0, Math.min(100, Math.round(value)))}%`;
 
 export const InboxPage = (): JSX.Element => {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const queue = usePlaybackQueue();
   const [scope, setScope] = useState<LibraryInboxScope>('latest');
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -559,7 +539,7 @@ export const InboxPage = (): JSX.Element => {
         setIsLoadingSmartCrates(false);
       }
     }
-  }, [coverIntelligenceEnabled, locale]);
+  }, [coverIntelligenceEnabled, t]);
 
   useEffect(() => {
     void loadSmartCrates();
@@ -653,7 +633,7 @@ export const InboxPage = (): JSX.Element => {
   const handleCreatePlaylist = useCallback(async (): Promise<void> => {
     const library = getLibraryBridge();
     if (!library?.createPlaylistFromLibraryInbox) {
-      setError('桌面桥接暂不可用，无法生成歌单。');
+      setError(t('inboxPage.error.desktopBridgePlaylist'));
       return;
     }
 
@@ -664,20 +644,30 @@ export const InboxPage = (): JSX.Element => {
     try {
       const result = await library.createPlaylistFromLibraryInbox({
         ...currentInboxQuery,
-        name: '新歌待听清单',
+        name: t('inboxPage.playlist.name'),
       });
-      const suffix = result.truncated ? `，已按性能保护加入前 ${result.limit} 首` : '';
-      setMessage(`已生成歌单「${result.playlist.name}」，加入 ${result.addedCount} 首${suffix}。`);
+      setMessage(
+        result.truncated
+          ? t('inboxPage.message.playlistCreatedTruncated', {
+              name: result.playlist.name,
+              count: result.addedCount,
+              limit: result.limit,
+            })
+          : t('inboxPage.message.playlistCreated', {
+              name: result.playlist.name,
+              count: result.addedCount,
+            }),
+      );
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : String(createError));
     } finally {
       setIsCreatingPlaylist(false);
     }
-  }, [currentInboxQuery]);
+  }, [currentInboxQuery, t]);
 
   const handleAddToQueue = useCallback(async (): Promise<void> => {
     const library = getLibraryBridge();
-    const source = { type: 'manual' as const, label: '新歌收件箱' };
+    const source = { type: 'manual' as const, label: t('inboxPage.source.label') };
 
     setIsAddingToQueue(true);
     setMessage(null);
@@ -686,30 +676,33 @@ export const InboxPage = (): JSX.Element => {
     try {
       if (selectedItemList.length > 0) {
         queue.appendTracksToQueue(selectedItemList.map((item) => item.track), source);
-        setMessage(`已加入队列 ${selectedItemList.length} 首。`);
+        setMessage(t('inboxPage.message.queueAdded', { count: selectedItemList.length }));
         return;
       }
 
       if (!library?.addLibraryInboxToQueue) {
-        setError('桌面桥接暂不可用，无法加入队列。');
+        setError(t('inboxPage.error.desktopBridgeQueue'));
         return;
       }
 
       const result = await library.addLibraryInboxToQueue(currentInboxQuery);
       if (result.tracks.length === 0) {
-        setError('当前筛选没有可加入队列的本地歌曲。');
+        setError(t('inboxPage.error.noLocalTracks'));
         return;
       }
 
       queue.appendTracksToQueue(result.tracks, source);
-      const suffix = result.truncated ? `，已按性能保护加入前 ${result.limit} 首` : '';
-      setMessage(`已加入队列 ${result.addedCount} 首${suffix}。`);
+      setMessage(
+        result.truncated
+          ? t('inboxPage.message.queueAddedTruncated', { count: result.addedCount, limit: result.limit })
+          : t('inboxPage.message.queueAdded', { count: result.addedCount }),
+      );
     } catch (queueError) {
       setError(queueError instanceof Error ? queueError.message : String(queueError));
     } finally {
       setIsAddingToQueue(false);
     }
-  }, [currentInboxQuery, queue, selectedItemList]);
+  }, [currentInboxQuery, queue, selectedItemList, t]);
 
   const handleAddSmartCrateToQueue = useCallback(
     (crate: SmartCrate | undefined): void => {
@@ -730,7 +723,7 @@ export const InboxPage = (): JSX.Element => {
     async (nextStatus: LibraryInboxItemStatus): Promise<void> => {
       const library = getLibraryBridge();
       if (!library?.updateLibraryInboxItemState) {
-        setError('桌面桥接暂不可用，无法更新收件箱状态。');
+        setError(t('inboxPage.error.desktopBridgeState'));
         return;
       }
 
@@ -748,21 +741,31 @@ export const InboxPage = (): JSX.Element => {
         });
         setSelectedItems({});
         await loadInbox(1, 'replace');
-        const suffix = result.truncated ? `，已按上限处理前 ${result.limit} 首` : '';
-        setMessage(`已标记为${statusLabels[nextStatus]} ${result.updatedCount} 首${suffix}。`);
+        setMessage(
+          result.truncated
+            ? t('inboxPage.message.stateUpdatedTruncated', {
+                status: t(statusLabelKeys[nextStatus]),
+                count: result.updatedCount,
+                limit: result.limit,
+              })
+            : t('inboxPage.message.stateUpdated', {
+                status: t(statusLabelKeys[nextStatus]),
+                count: result.updatedCount,
+              }),
+        );
       } catch (stateError) {
         setError(stateError instanceof Error ? stateError.message : String(stateError));
       } finally {
         setIsUpdatingState(false);
       }
     },
-    [currentInboxQuery, loadInbox, selectedItemList],
+    [currentInboxQuery, loadInbox, selectedItemList, t],
   );
 
   const handleOpenTrack = useCallback(async (trackId: string): Promise<void> => {
     const library = getLibraryBridge();
     if (!library?.openTrackInFolder) {
-      setError('桌面桥接暂不可用，无法定位歌曲。');
+      setError(t('inboxPage.error.desktopBridgeLocate'));
       return;
     }
 
@@ -771,7 +774,7 @@ export const InboxPage = (): JSX.Element => {
     } catch (openError) {
       setError(openError instanceof Error ? openError.message : String(openError));
     }
-  }, []);
+  }, [t]);
 
   const clearFilters = (): void => {
     setFilter('all');
@@ -1213,10 +1216,10 @@ export const InboxPage = (): JSX.Element => {
       </section>
 
       {albumSummaries.length > 0 ? (
-        <section className="inbox-album-wall" aria-label="新增专辑墙">
+        <section className="inbox-album-wall" aria-label={t('inboxPage.albumWall.aria')}>
           <div className="inbox-section-heading">
             <span className="panel-kicker">New Albums</span>
-            <strong>新增专辑墙</strong>
+            <strong>{t('inboxPage.albumWall.title')}</strong>
           </div>
           <div className="inbox-album-grid">
             {albumSummaries.map((summary) => (
@@ -1233,7 +1236,10 @@ export const InboxPage = (): JSX.Element => {
                   <strong>{summary.album}</strong>
                   <em>{summary.albumArtist}</em>
                   <small>
-                    {summary.trackCount} 首 · {formatDurationHours(summary.duration)}
+                    {t('inboxPage.albumWall.trackCount', {
+                      count: summary.trackCount,
+                      duration: formatDurationHours(summary.duration),
+                    })}
                   </small>
                 </span>
               </button>
@@ -1251,32 +1257,36 @@ export const InboxPage = (): JSX.Element => {
       ) : null}
 
       {items.length > 0 ? (
-        <section className="inbox-bulk-bar" aria-label="收件箱批量操作">
+        <section className="inbox-bulk-bar" aria-label={t('inboxPage.bulk.aria')}>
           <button className="inbox-selection-toggle" onClick={toggleVisibleSelection} type="button">
-            {allVisibleSelected ? '取消本页选择' : '选择本页'}
+            {allVisibleSelected ? t('inboxPage.bulk.deselectPage') : t('inboxPage.bulk.selectPage')}
           </button>
-          <span>{selectedCount > 0 ? `已选 ${selectedCount} 首` : `当前筛选 ${pageData.total} 首`}</span>
+          <span>
+            {selectedCount > 0
+              ? t('inboxPage.bulk.selectedCount', { count: selectedCount })
+              : t('inboxPage.bulk.filterCount', { count: pageData.total })}
+          </span>
           <button className="inbox-command-button" disabled={isAddingToQueue} onClick={() => void handleAddToQueue()} type="button">
             <ListMusic size={16} />
-            <span>加入队列</span>
+            <span>{t('inboxPage.action.addToQueue')}</span>
           </button>
           <button className="inbox-command-button" disabled={selectedCount !== 1} onClick={() => void openSingleSelected()} type="button">
             <FolderOpen size={16} />
-            <span>定位文件</span>
+            <span>{t('inboxPage.action.locateFile')}</span>
           </button>
           <button className="inbox-command-button" disabled={isUpdatingState} onClick={() => void handleUpdateState('processed')} type="button">
-            标记已处理
+            {t('inboxPage.action.markProcessed')}
           </button>
           <button className="inbox-command-button" disabled={isUpdatingState} onClick={() => void handleUpdateState('ignored')} type="button">
-            忽略问题
+            {t('inboxPage.action.ignore')}
           </button>
           <button className="inbox-command-button" disabled={isUpdatingState} onClick={() => void handleUpdateState('pending')} type="button">
-            设为待处理
+            {t('inboxPage.action.setPending')}
           </button>
         </section>
       ) : null}
 
-      <section className="inbox-list" aria-label="新歌列表" data-loading={isLoading ? 'true' : undefined}>
+      <section className="inbox-list" aria-label={t('inboxPage.list.aria')} data-loading={isLoading ? 'true' : undefined}>
         {items.length === 0 ? (
           <div className="inbox-empty-state">
             <strong>{isLoading ? t('inboxPage.loading') : pageData.batches.length === 0 ? t('inboxPage.empty.title') : t('inboxPage.empty.noMatch')}</strong>
@@ -1299,26 +1309,26 @@ export const InboxPage = (): JSX.Element => {
               <div className="inbox-track-main">
                 <div className="inbox-track-title">
                   <strong>{item.track.title}</strong>
-                  <span>{formatDateTime(item.addedAt)}</span>
+                  <span>{formatDateTime(item.addedAt, t('inboxPage.date.none'))}</span>
                 </div>
                 <div className="inbox-track-meta">
-                  <span>{item.track.artist || 'Unknown Artist'}</span>
-                  <span>{item.track.album || 'Unknown Album'}</span>
+                  <span>{item.track.artist || t('inboxPage.reason.unknown_artist')}</span>
+                  <span>{item.track.album || t('inboxPage.reason.unknown_album')}</span>
                 </div>
                 <div className="inbox-track-path">{readTrackPath(item)}</div>
                 <div className="inbox-reason-row">
-                  <span data-status={item.inboxStatus}>{statusLabels[item.inboxStatus]}</span>
+                  <span data-status={item.inboxStatus}>{t(statusLabelKeys[item.inboxStatus])}</span>
                   {item.reasons.slice(0, 4).map((reason) => (
-                    <span key={reason}>{formatReason(reason)}</span>
+                    <span key={reason}>{t(reasonLabelKeys[reason] ?? 'inboxPage.reason.unknown_field')}</span>
                   ))}
                 </div>
                 {item.reasons.length > 4 ? (
                   <div className="inbox-reason-row">
-                    <span>还有 {item.reasons.length - 4} 项</span>
+                    <span>{t('inboxPage.list.moreReasons', { count: item.reasons.length - 4 })}</span>
                   </div>
                 ) : null}
               </div>
-              <button className="inbox-icon-button" onClick={() => void handleOpenTrack(item.track.id)} title="定位歌曲" type="button">
+              <button className="inbox-icon-button" onClick={() => void handleOpenTrack(item.track.id)} title={t('inboxPage.action.locateTrack')} type="button">
                 <FolderOpen size={17} />
               </button>
             </article>
@@ -1328,7 +1338,9 @@ export const InboxPage = (): JSX.Element => {
 
       {pageData.hasMore ? (
         <button className="inbox-load-more" disabled={isLoading} onClick={() => void loadInbox(pageData.page + 1, 'append')} type="button">
-          {isLoading ? '正在读取...' : `继续加载 ${visibleCount}/${pageData.total}`}
+          {isLoading
+            ? t('inboxPage.loadingShort')
+            : t('inboxPage.loadMore', { visible: visibleCount, total: pageData.total })}
         </button>
       ) : null}
     </div>

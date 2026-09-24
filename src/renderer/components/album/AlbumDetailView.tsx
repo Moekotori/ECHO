@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import '../../styles/album-detail.css';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ChevronRight, Disc3, ExternalLink, FolderOpen, Heart, Info, ListEnd, Loader2, MoreHorizontal, Play, Plus, RefreshCw, Star } from 'lucide-react';
@@ -9,13 +10,14 @@ import { likedAlbumsChangedEvent, likedChangedEvent, likedTracksChangedEvent, us
 import { useAnimatedBackNavigation } from '../../hooks/useAnimatedBackNavigation';
 import { readStreamingQualityPreference } from '../../preferences/streamingQualityPreference';
 import { isPlaybackCancellationError, usePlaybackQueue } from '../../stores/PlaybackQueueProvider';
-import { useSharedPlaybackStatus } from '../../stores/playbackStatusStore';
+import { useSharedAudioPlaybackState } from '../../stores/playbackStatusStore';
 import { useI18n } from '../../i18n/I18nProvider';
 import type { TranslationKey } from '../../i18n/locales';
 import { openArtistDetailByName } from '../../utils/artistNavigation';
 import { albumDetailNavigationEvent, openAlbumDetailForTrack } from '../../utils/albumNavigation';
 import { resolvePlaylistForTrackAdd } from '../../utils/appPrompt';
 import { getLibraryBridge } from '../../utils/echoBridge';
+import { localCoverDisplayUrl } from '../../utils/coverDisplayUrl';
 import { OsuTimingPanel } from '../library/OsuTimingPanel';
 import { TrackContextMenu } from '../library/TrackContextMenu';
 import type { TrackMenuAction } from '../library/TrackContextMenu';
@@ -34,8 +36,8 @@ const isAlbumDetailPlaybackPriorityActive = (state: string | null | undefined): 
 const isAlbumDetailPlaybackPriorityBlocking = (state: string | null | undefined): boolean =>
   state === 'loading';
 
-const albumOriginalCoverUrl = (album: Pick<LibraryAlbum, 'coverId'>): string | null =>
-  album.coverId ? `echo-cover://original/${encodeURIComponent(album.coverId)}` : null;
+const albumDisplayCoverUrl = (album: Pick<LibraryAlbum, 'coverId'>): string | null =>
+  localCoverDisplayUrl(album.coverId);
 
 const coverFailureKey = (albumId: string, coverUrl: string): string => `${albumId}\n${coverUrl}`;
 
@@ -703,65 +705,6 @@ const streamingTrackToLibraryTrack = (track: StreamingTrack): LibraryTrack => ({
 
 const formatConfidence = (value: number): string => `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
 
-const creditRoleTitle = (role: string, t: (key: TranslationKey, options?: Record<string, string | number>) => string): string => {
-  switch (role) {
-    case 'Vocal':
-      return t('albumDetail.credit.role.vocal');
-    case 'Performer':
-      return t('albumDetail.credit.role.performer');
-    case 'Composer':
-      return t('albumDetail.credit.role.composer');
-    case 'Lyrics':
-      return t('albumDetail.credit.role.lyrics');
-    case 'Arrangement':
-      return t('albumDetail.credit.role.arrangement');
-    case 'Production':
-      return t('albumDetail.credit.role.production');
-    case 'Engineering':
-      return t('albumDetail.credit.role.engineering');
-    case 'Label':
-      return t('albumDetail.credit.role.label');
-    default:
-      return role || t('albumDetail.credit.role.other');
-  }
-};
-
-const creditRoleSummary = (role: string, t: (key: TranslationKey, options?: Record<string, string | number>) => string): string => {
-  switch (role) {
-    case 'Vocal':
-      return t('albumDetail.credit.summary.vocal');
-    case 'Performer':
-      return t('albumDetail.credit.summary.performer');
-    case 'Composer':
-      return t('albumDetail.credit.summary.composer');
-    case 'Lyrics':
-      return t('albumDetail.credit.summary.lyrics');
-    case 'Arrangement':
-      return t('albumDetail.credit.summary.arrangement');
-    case 'Production':
-      return t('albumDetail.credit.summary.production');
-    case 'Engineering':
-      return t('albumDetail.credit.summary.engineering');
-    case 'Label':
-      return t('albumDetail.credit.summary.label');
-    default:
-      return t('albumDetail.credit.summary.other');
-  }
-};
-
-const creditSourceLabel = (source: string, t: (key: TranslationKey, options?: Record<string, string | number>) => string): string => {
-  switch (source) {
-    case 'recording':
-      return t('albumDetail.credit.source.recording');
-    case 'work':
-      return t('albumDetail.credit.source.work');
-    case 'label':
-      return t('albumDetail.credit.source.label');
-    default:
-      return t('albumDetail.credit.source.album');
-  }
-};
-
 const sourceKindLabel = (kind: string, t: (key: TranslationKey, options?: Record<string, string | number>) => string): string => {
   switch (kind) {
     case 'database':
@@ -841,9 +784,9 @@ const formatReleaseVersionMeta = (version: NonNullable<AlbumOnlineInfo['releaseV
 export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.Element => {
   const { locale, t } = useI18n();
   const { appendToQueue, appendTracksToQueue, currentTrackId, playTrack, playTrackNext, removeTrackFromQueue, replaceQueue, updateTrackSnapshot } = usePlaybackQueue();
-  const playbackStatusSnapshot = useSharedPlaybackStatus();
-  const playbackPriorityActive = isAlbumDetailPlaybackPriorityActive(playbackStatusSnapshot.audioStatus?.state);
-  const playbackPriorityBlocking = isAlbumDetailPlaybackPriorityBlocking(playbackStatusSnapshot.audioStatus?.state);
+  const audioPlaybackState = useSharedAudioPlaybackState();
+  const playbackPriorityActive = isAlbumDetailPlaybackPriorityActive(audioPlaybackState);
+  const playbackPriorityBlocking = isAlbumDetailPlaybackPriorityBlocking(audioPlaybackState);
   const detailRootRef = useRef<HTMLDivElement | null>(null);
   const { isReturning, returnBack } = useAnimatedBackNavigation(onBack, true, {
     durationMs: 80,
@@ -858,6 +801,7 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
   const [failedOriginalCover, setFailedOriginalCover] = useState(false);
   const [failedLargeCover, setFailedLargeCover] = useState(false);
   const [failedThumbCover, setFailedThumbCover] = useState(false);
+  const [isCoverPreviewOpen, setIsCoverPreviewOpen] = useState(false);
   const [isAlbumLiked, setIsAlbumLiked] = useState(false);
   const [albumMenuPosition, setAlbumMenuPosition] = useState<AlbumMenuPosition | null>(null);
   const [albumPlaylistSubmenuOpen, setAlbumPlaylistSubmenuOpen] = useState(false);
@@ -889,6 +833,7 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
   const [albumDnaHistoryState, setAlbumDnaHistoryState] = useState<AlbumDnaHistoryState>(() => emptyAlbumDnaHistoryState());
   const [isAlbumDnaExpanded, setIsAlbumDnaExpanded] = useState(false);
   const tagEditorCloseTimerRef = useRef<number | null>(null);
+  const coverPreviewButtonRef = useRef<HTMLButtonElement | null>(null);
   const onlineInfoRequestRef = useRef(0);
   const relatedAlbumsRequestRef = useRef(0);
   const streamingAlbumsRequestRef = useRef(0);
@@ -961,14 +906,43 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
   const albumTracksStartedForCurrentAlbum = albumTrackLoadStartedRef.current === album.id;
   const shouldBlockAlbumTrackInitialLoad = !albumTracksStartedForCurrentAlbum && playbackPriorityBlocking;
   const shouldDelayAlbumTrackInitialLoad = !albumTracksStartedForCurrentAlbum && !shouldBlockAlbumTrackInitialLoad && playbackPriorityActive;
-  const originalCover = albumOriginalCoverUrl(album);
-  const detailCoverSrc = originalCover && !failedOriginalCover
-    ? originalCover
+  const displayCover = albumDisplayCoverUrl(album);
+  const detailCoverSrc = displayCover && !failedOriginalCover
+    ? displayCover
     : coverLarge && !failedLargeCover
       ? coverLarge
       : failedThumbCover
         ? null
         : album.coverThumb;
+
+  useEffect(() => {
+    setIsCoverPreviewOpen(false);
+  }, [album.id]);
+
+  useEffect(() => {
+    if (!isCoverPreviewOpen) {
+      return undefined;
+    }
+
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setIsCoverPreviewOpen(false);
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+    coverPreviewButtonRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [isCoverPreviewOpen]);
   const albumArtistDisplay = useMemo(
     () => deriveAlbumArtistDisplay(album.albumArtist, loadedTracks.length > 0 ? loadedTracks : firstTrack ? [firstTrack] : []),
     [album.albumArtist, firstTrack, loadedTracks],
@@ -988,7 +962,7 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
   );
   const albumDnaHistoryEntries = useMemo(
     () => (shouldPrepareExpandedAlbumDna ? albumDnaHistoryState.entries.filter((entry) => albumDnaHistoryEntryMatches(entry, album, loadedTracks)) : []),
-    [album, albumDnaHistoryState.entries, albumDnaTrackKey, loadedTracks, shouldPrepareExpandedAlbumDna],
+    [album, albumDnaHistoryState.entries, loadedTracks, shouldPrepareExpandedAlbumDna],
   );
   const albumDnaMemoryStats = useMemo(() => buildAlbumDnaMemoryStats(albumDnaHistoryEntries), [albumDnaHistoryEntries]);
   const albumDnaLoadedTrackTotal = loadedTotal || loadedTracks.length || album.trackCount;
@@ -1777,30 +1751,32 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
     }
   }, [album.mediaType, closeAlbumMenu, firstTrack, getAllAlbumTracks, loadedTracks, t]);
 
+  const handleCopyAlbumCover = useCallback(async (): Promise<void> => {
+    try {
+      setPlayError(null);
+      setTrackActionMessage(null);
+      const library = window.echo?.library;
+      if (!library?.copyAlbumCover) {
+        throw new Error(t('albumDetail.tracks.error.desktopBridgeActions'));
+      }
+
+      if (!(await library.copyAlbumCover(album.id))) {
+        setPlayError(t('library.albums.error.noCopyableCover'));
+        return;
+      }
+
+      setTrackActionMessage(t('albumDetail.status.copiedCover'));
+    } catch (error) {
+      setPlayError(error instanceof Error ? error.message : String(error));
+    }
+  }, [album.id, t]);
+
   const handleDetailCoverContextMenu = useCallback((event: MouseEvent<HTMLDivElement>): void => {
     event.preventDefault();
     event.stopPropagation();
     closeAlbumMenu();
-    void (async () => {
-      try {
-        setPlayError(null);
-        setTrackActionMessage(null);
-        const library = window.echo?.library;
-        if (!library?.copyAlbumCover) {
-          throw new Error(t('albumDetail.tracks.error.desktopBridgeActions'));
-        }
-
-        if (!(await library.copyAlbumCover(album.id))) {
-          setPlayError(t('library.albums.error.noCopyableCover'));
-          return;
-        }
-
-        setTrackActionMessage(t('albumDetail.status.copiedCover'));
-      } catch (error) {
-        setPlayError(error instanceof Error ? error.message : String(error));
-      }
-    })();
-  }, [album.id, closeAlbumMenu, t]);
+    void handleCopyAlbumCover();
+  }, [closeAlbumMenu, handleCopyAlbumCover]);
 
   const handlePlayTrack = useCallback(
     async (track: LibraryTrack): Promise<void> => {
@@ -2028,7 +2004,10 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
             if (!window.confirm(t('albumDetail.tracks.confirm.delete', { title: track.title }))) {
               return;
             }
-            await library?.deleteTrackFile(track.id);
+            const result = await library?.deleteTrackFile(track.id);
+            for (const removedTrackId of result?.removedTrackIds ?? [track.id]) {
+              removeTrackFromQueue(removedTrackId);
+            }
             setLoadedTracks((current) => current.filter((item) => item.id !== track.id));
             setLoadedTotal((current) => Math.max(0, current - 1));
             if (firstTrack?.id === track.id) {
@@ -2077,7 +2056,7 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
   );
 
   const handleDetailCoverError = useCallback((coverUrl: string): void => {
-    if (originalCover && coverUrl === originalCover && !failedOriginalCover) {
+    if (displayCover && coverUrl === displayCover && !failedOriginalCover) {
       setFailedOriginalCover(true);
       return;
     }
@@ -2088,7 +2067,7 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
     }
 
     setFailedThumbCover(true);
-  }, [coverLarge, failedLargeCover, failedOriginalCover, originalCover]);
+  }, [coverLarge, displayCover, failedLargeCover, failedOriginalCover]);
 
   const openArtistNameFromAlbum = useCallback((artistName: string): void => {
     const trimmedArtistName = artistName.trim();
@@ -2458,7 +2437,7 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
         </header>
         <div className="album-related-album-strip">
           {relatedAlbumsState.albums.map((relatedAlbum) => {
-            const relatedOriginalCover = albumOriginalCoverUrl(relatedAlbum);
+            const relatedOriginalCover = albumDisplayCoverUrl(relatedAlbum);
             const relatedCoverUrl = relatedOriginalCover && !failedRelatedCoverUrls[coverFailureKey(relatedAlbum.id, relatedOriginalCover)]
               ? relatedOriginalCover
               : relatedAlbum.coverThumb && !failedRelatedCoverUrls[coverFailureKey(relatedAlbum.id, relatedAlbum.coverThumb)]
@@ -2980,6 +2959,39 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
     );
   };
 
+  const renderCoverPreview = (): JSX.Element | null => {
+    if (!isCoverPreviewOpen || !detailCoverSrc) {
+      return null;
+    }
+
+    return createPortal(
+      <div
+        className="album-cover-preview-backdrop"
+        role="presentation"
+        onMouseDown={() => setIsCoverPreviewOpen(false)}
+      >
+        <section
+          className="album-cover-preview"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('albumDetail.aria.coverPreview', { album: album.title })}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <button
+            ref={coverPreviewButtonRef}
+            className="album-cover-preview-image-frame"
+            type="button"
+            aria-label={t('albumMenu.action.copyCover')}
+            onClick={() => void handleCopyAlbumCover()}
+          >
+            <img alt={album.title} decoding="async" draggable={false} src={detailCoverSrc} />
+          </button>
+        </section>
+      </div>,
+      document.body,
+    );
+  };
+
   if (selectedStreamingAlbum) {
     const streamingAlbum = selectedStreamingAlbumDetail ?? selectedStreamingAlbum;
     const detailTracks = selectedStreamingAlbumDetail?.tracks ?? [];
@@ -3075,7 +3087,22 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
       </button>
 
       <section className="album-detail-hero album-detail-switch-surface" key={`album-hero-${album.id}`} aria-label={t('albumDetail.aria.details', { album: album.title })}>
-        <div className="album-detail-cover" data-empty={!detailCoverSrc} onContextMenu={handleDetailCoverContextMenu}>
+        <div
+          className="album-detail-cover"
+          data-empty={!detailCoverSrc}
+          role={detailCoverSrc ? 'button' : undefined}
+          tabIndex={detailCoverSrc ? 0 : undefined}
+          aria-label={detailCoverSrc ? t('albumDetail.action.viewCover') : undefined}
+          title={detailCoverSrc ? t('albumDetail.action.viewCover') : undefined}
+          onClick={detailCoverSrc ? () => setIsCoverPreviewOpen(true) : undefined}
+          onKeyDown={detailCoverSrc ? (event: ReactKeyboardEvent<HTMLDivElement>) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              setIsCoverPreviewOpen(true);
+            }
+          } : undefined}
+          onContextMenu={handleDetailCoverContextMenu}
+        >
           {detailCoverSrc ? (
             <img alt="" decoding="async" draggable={false} height={320} src={detailCoverSrc} width={320} onError={() => handleDetailCoverError(detailCoverSrc)} />
           ) : (
@@ -3134,6 +3161,7 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
       </section>
 
       {renderAlbumMenu()}
+      {renderCoverPreview()}
 
       <section className="album-detail-track-console album-detail-switch-surface" key={`album-console-${album.id}`} aria-label={t('albumDetail.aria.trackConsole', { album: album.title })}>
         <header className="album-detail-tabs" aria-label={t('albumDetail.aria.sections')}>

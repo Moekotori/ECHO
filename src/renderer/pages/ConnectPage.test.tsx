@@ -523,6 +523,20 @@ describe('ConnectPage HQPlayer controls', () => {
     expect(bridge.connect.getEchoLinkStatus).not.toHaveBeenCalled();
     expect(bridge.connect.getWallpaperEngineBridgeStatus).not.toHaveBeenCalled();
 
+    const navigateSettings = vi.fn();
+    const navigateSettingsSection = vi.fn();
+    window.addEventListener('app:navigate:settings', navigateSettings);
+    window.addEventListener('app:navigate:settings-section', navigateSettingsSection);
+    fireEvent.click(screen.getByRole('button', { name: '打开 ECHO Pro 账号' }));
+    expect(navigateSettings).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(navigateSettingsSection).toHaveBeenCalledWith(expect.objectContaining({
+      detail: { section: 'general', targetId: 'settings-row-echo-pro-account' },
+    })));
+    expect(window.sessionStorage.getItem('echo-next.settings.pending-section')).toBe('general');
+    expect(window.localStorage.getItem('echo:settings:general:echo-pro-account-panel-expanded')).toBe('true');
+    window.removeEventListener('app:navigate:settings', navigateSettings);
+    window.removeEventListener('app:navigate:settings-section', navigateSettingsSection);
+
     const navigateHome = vi.fn();
     window.addEventListener('app:navigate:route', navigateHome);
     fireEvent.click(screen.getByRole('button', { name: '从侧栏隐藏' }));
@@ -538,33 +552,47 @@ describe('ConnectPage HQPlayer controls', () => {
     const first = renderConnectPage();
 
     await waitFor(() => expect(bridge.connect.getDonatorUnlockStatus).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole('heading', { name: 'Connect Command Center' })).toBeTruthy();
+    expect(await screen.findByRole('navigation', { name: 'Connect tasks' })).toBeTruthy();
 
     first.unmount();
     renderConnectPage();
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Connect Command Center' })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('navigation', { name: 'Connect tasks' })).toBeTruthy());
     expect(bridge.connect.getDonatorUnlockStatus).toHaveBeenCalledTimes(1);
   });
 
-  it('surfaces ECHO Link pairing, web remote, and protocol health in the Command Center', async () => {
+  it('keeps the last trusted unlock status when a forced recheck temporarily fails', async () => {
     const bridge = installEchoBridge(hqStatus('available'), hqSettings, dlnaConnectStatus, [dlnaDevice, hqPlayerDevice]);
     renderConnectPage();
 
-    expect(await screen.findByRole('heading', { name: 'Connect Command Center' })).toBeTruthy();
+    expect(await screen.findByRole('navigation', { name: 'Connect tasks' })).toBeTruthy();
+    bridge.connect.getDonatorUnlockStatus.mockRejectedValueOnce(new Error('temporary bridge failure'));
+
+    window.dispatchEvent(new Event('echo-pro:status-changed'));
+
+    await waitFor(() => expect(bridge.connect.getDonatorUnlockStatus).toHaveBeenCalledTimes(2));
+    expect(bridge.connect.getDonatorUnlockStatus).toHaveBeenLastCalledWith({ force: true });
+    expect(screen.getByRole('navigation', { name: 'Connect tasks' })).toBeTruthy();
+    expect(screen.queryByText('需要 ECHO Pro')).toBeNull();
+  });
+
+  it('surfaces ECHO Link, paired-device, MQTT, and web remote controls in the phone workspace', async () => {
+    const bridge = installEchoBridge(hqStatus('available'), hqSettings, dlnaConnectStatus, [dlnaDevice, hqPlayerDevice]);
+    renderConnectPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: '手机控制' }));
     await waitFor(() => expect(bridge.connect.getEchoLinkStatus).toHaveBeenCalled());
-    expect(screen.getByText('正在投送')).toBeTruthy();
+    expect(screen.getByText('ECHO Link Basic')).toBeTruthy();
+    expect(screen.getByText('MQTT 智能家居联动')).toBeTruthy();
     expect(screen.getByText('扫码连接手机 ECHO')).toBeTruthy();
-    expect(screen.getByText('Web 遥控就绪')).toBeTruthy();
     expect(screen.getAllByText('192.168.1.20:26789').length).toBeGreaterThan(0);
-    expect(screen.getByText('1 DLNA / 0 AirPlay / 1 HQPlayer')).toBeTruthy();
-    expect(screen.getByText('最近没有连接失败')).toBeTruthy();
   });
 
   it('saves the Echo Link web Album Sea background', async () => {
     const bridge = installEchoBridge(hqStatus('available'), hqSettings, dlnaConnectStatus, [dlnaDevice, hqPlayerDevice]);
     renderConnectPage();
 
+    fireEvent.click(await screen.findByRole('button', { name: '手机控制' }));
     expect(await screen.findByText('网页背景')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'video' } });
     fireEvent.change(screen.getByLabelText('媒体 URL'), { target: { value: 'https://example.test/background.webm' } });
@@ -582,6 +610,7 @@ describe('ConnectPage HQPlayer controls', () => {
     const bridge = installEchoBridge(hqStatus('available'), hqSettings, dlnaConnectStatus, [dlnaDevice, hqPlayerDevice]);
     renderConnectPage();
 
+    fireEvent.click(await screen.findByRole('button', { name: '手机控制' }));
     expect(await screen.findByText('网页背景')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '选择图片' }));
 
@@ -591,82 +620,40 @@ describe('ConnectPage HQPlayer controls', () => {
     expect((screen.getByLabelText('媒体 URL') as HTMLInputElement).value).toBe('/echo-link/v1/background/local-bg-token');
   });
 
-  it('remembers the Command Center and ECHO Link collapsed states', async () => {
+  it('switches among the four task workspaces', async () => {
+    installEchoBridge(hqStatus('available'), hqSettings, dlnaConnectStatus, [dlnaDevice, hqPlayerDevice]);
+    const { container } = renderConnectPage();
+
+    const page = container.querySelector('.connect-page--session');
+    expect(await screen.findByRole('navigation', { name: 'Connect tasks' })).toBeTruthy();
+    expect(page?.getAttribute('data-mode')).toBe('output');
+
+    fireEvent.click(screen.getByRole('button', { name: '从设备接收' }));
+    expect(page?.getAttribute('data-mode')).toBe('receive');
+    fireEvent.click(screen.getByRole('button', { name: '手机控制' }));
+    expect(page?.getAttribute('data-mode')).toBe('mobile');
+    fireEvent.click(screen.getByRole('button', { name: '电台 / 直播' }));
+    expect(page?.getAttribute('data-mode')).toBe('radio');
+  });
+
+  it('remembers the ECHO Link collapsed state inside phone control', async () => {
     installEchoBridge(hqStatus('available'), hqSettings, dlnaConnectStatus, [dlnaDevice, hqPlayerDevice]);
     const { container, unmount } = renderConnectPage();
 
-    const commandCenter = await screen.findByRole('region', { name: 'Connect Command Center' });
+    fireEvent.click(await screen.findByRole('button', { name: '手机控制' }));
     const echoLinkPanel = container.querySelector('.connect-echo-link-panel');
-    expect(commandCenter.getAttribute('data-collapsed')).toBeNull();
     expect(echoLinkPanel?.getAttribute('data-collapsed')).toBeNull();
 
-    fireEvent.click(within(commandCenter).getByRole('button', { name: '折叠 Connect Command Center' }));
     fireEvent.click(within(echoLinkPanel as HTMLElement).getByRole('button', { name: '折叠 ECHO Link' }));
-
-    expect(commandCenter.getAttribute('data-collapsed')).toBe('true');
     expect(echoLinkPanel?.getAttribute('data-collapsed')).toBe('true');
-    expect(window.localStorage.getItem('echo.connect.commandCenterCollapsed.v1')).toBe('true');
     expect(window.localStorage.getItem('echo.connect.echoLinkPanelCollapsed.v1')).toBe('true');
 
     unmount();
     renderConnectPage();
-
-    const restoredCommandCenter = await screen.findByRole('region', { name: 'Connect Command Center' });
+    fireEvent.click(await screen.findByRole('button', { name: '手机控制' }));
     const restoredEchoLinkPanel = document.querySelector('.connect-echo-link-panel');
-    expect(restoredCommandCenter.getAttribute('data-collapsed')).toBe('true');
     expect(restoredEchoLinkPanel?.getAttribute('data-collapsed')).toBe('true');
-    fireEvent.click(within(restoredCommandCenter).getByRole('button', { name: '展开 Connect Command Center' }));
-    fireEvent.click(within(restoredEchoLinkPanel as HTMLElement).getByRole('button', { name: '展开 ECHO Link' }));
-    expect(restoredCommandCenter.getAttribute('data-collapsed')).toBeNull();
-    expect(restoredEchoLinkPanel?.getAttribute('data-collapsed')).toBeNull();
   });
-
-  it('renders the Listening Room map from live Connect bridge state', async () => {
-    const bridge = installEchoBridge(hqStatus('available'), hqSettings, dlnaConnectStatus, [dlnaDevice, hqPlayerDevice]);
-    bridge.connect.getReceiverStatus.mockResolvedValue({
-      enabled: true,
-      state: 'playing',
-      advertisedName: 'ECHO Next',
-      addresses: ['192.168.1.20'],
-      currentClient: {
-        address: '192.168.1.44',
-        userAgent: 'BubbleUPnP',
-        lastSeenAt: '2026-05-21T01:02:00.000Z',
-      },
-      currentUri: 'http://192.168.1.44/song.flac',
-      metadata: null,
-      positionSeconds: 12,
-      durationSeconds: 180,
-      volume: 100,
-      error: null,
-      debugEvents: [],
-      updatedAt: '2026-05-21T01:02:00.000Z',
-    });
-
-    renderConnectPage();
-
-    const room = await screen.findByRole('region', { name: 'Listening Room map' });
-    await waitFor(() => expect(bridge.connect.getWallpaperEngineBridgeStatus).toHaveBeenCalled());
-
-    expect(room.getAttribute('data-collapsed')).toBe('true');
-    expect(within(room).queryByText('ECHO Hub')).toBeNull();
-
-    const expandButton = within(room).getByRole('button', { name: 'Expand Listening Room map' });
-    expect(expandButton.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(expandButton);
-
-    expect(expandButton.getAttribute('aria-expanded')).toBe('true');
-    expect(within(room).getByText('ECHO Hub')).toBeTruthy();
-    expect(within(room).getByText('Phone remote')).toBeTruthy();
-    expect(within(room).getByText('DLNA receiver')).toBeTruthy();
-    expect(within(room).getByText('HQPlayer')).toBeTruthy();
-    expect(within(room).getByText('Wallpaper Engine')).toBeTruthy();
-    expect(within(room).getByText('2 live visual client')).toBeTruthy();
-    expect(room.querySelector('[data-node="wallpaper"]')?.getAttribute('data-state')).toBe('active');
-    expect(room.querySelector('[data-node="outputs"]')?.getAttribute('data-state')).toBe('active');
-    expect(room.querySelector('[data-node="dlna"]')?.getAttribute('data-state')).toBe('active');
-  });
-
   it('shows HQPlayer as a Connect output device and routes connection through Connect', async () => {
     const bridge = installEchoBridge(hqStatus('available'));
     renderConnectPage();
@@ -726,7 +713,10 @@ describe('ConnectPage HQPlayer controls', () => {
 
     renderConnectPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy AirPlay Debug' }));
+    fireEvent.click(await screen.findByRole('button', { name: '从设备接收' }));
+    const copyButton = await screen.findByRole('button', { name: '复制 AirPlay 诊断' });
+    await waitFor(() => expect((copyButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(copyButton);
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('control frame decrypt failed')));
     expect(writeText.mock.calls[0]?.[0]).toContain('192.168.1.10:53124 ENC /airplay2 #probe-error 400');
@@ -759,6 +749,7 @@ describe('ConnectPage HQPlayer controls', () => {
 
     renderConnectPage();
 
+    fireEvent.click(await screen.findByRole('button', { name: '从设备接收' }));
     fireEvent.click(await screen.findByRole('button', { name: 'AirPlay 2 实验' }));
 
     await waitFor(() => expect(bridge.app.setSettings).toHaveBeenCalledWith({ airPlayReceiverProtocol: 'airplay2' }));
@@ -770,6 +761,7 @@ describe('ConnectPage HQPlayer controls', () => {
     const bridge = installEchoBridge(hqStatus('available'));
     renderConnectPage();
 
+    fireEvent.click(await screen.findByRole('button', { name: '电台 / 直播' }));
     const form = await screen.findByLabelText('网络电台表单');
     fireEvent.change(within(form).getByPlaceholderText('例如 ECHO FM'), {
       target: { value: 'Test FM' },
@@ -810,6 +802,7 @@ describe('ConnectPage HQPlayer controls', () => {
     const bridge = installEchoBridge(hqStatus('available'));
     renderConnectPage();
 
+    fireEvent.click(await screen.findByRole('button', { name: '电台 / 直播' }));
     const form = await screen.findByLabelText('直播表单');
     fireEvent.change(within(form).getByPlaceholderText('https://live.bilibili.com/21465419'), {
       target: { value: 'https://live.bilibili.com/21465419?live_from=71002&visit_id=2iess9qeic80' },
@@ -844,6 +837,7 @@ describe('ConnectPage HQPlayer controls', () => {
     installEchoBridge(hqStatus('available'));
     const { unmount } = renderConnectPage();
 
+    fireEvent.click(await screen.findByRole('button', { name: '电台 / 直播' }));
     await screen.findByText('Gensokyo Radio 东方');
     expect(screen.getByText('东方 Project 同人音乐电台，适合长时间后台播放。')).toBeTruthy();
     expect(screen.getByText('ANISONG')).toBeTruthy();
@@ -857,6 +851,7 @@ describe('ConnectPage HQPlayer controls', () => {
     unmount();
     renderConnectPage();
 
+    fireEvent.click(await screen.findByRole('button', { name: '电台 / 直播' }));
     expect(screen.queryByText('Zeno')).toBeNull();
     await screen.findByText('Gensokyo Radio 东方');
   });

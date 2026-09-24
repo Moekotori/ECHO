@@ -2,9 +2,8 @@ import type { DecoderPipeline } from './DecoderPipeline';
 import type { AutomixAnalyzer } from './AutomixAnalyzer';
 import type { DeviceService } from './DeviceService';
 import type { AutomixTransitionPlan } from './AutomixPlanner';
-import type { EchoSrcFirWorkerClientLike } from './EchoSrcFirWorkerTransform';
-import type { PcmToDsdDoPWorkerClientLike } from './PcmToDsdDoPTransform';
 import type { AudioCrashReportPayload } from '../diagnostics/CrashReportService';
+import type { DaemonAudioBackend } from './DaemonAudioBackend';
 import type { ReplayGainTrackData } from '../../shared/utils/replayGain';
 import type {
   AudioDeviceInfo,
@@ -16,7 +15,7 @@ import type {
   DecoderRun,
   FfmpegToolchainDiagnostics,
 } from './audioTypes';
-import { resolveEchoSrcFirBackendStatus } from './EchoSrcFirEngine';
+import type { resolveEchoSrcFirBackendStatus } from './EchoSrcFirEngine';
 
 export type DecoderPipelineLike = Pick<DecoderPipeline, 'probeLocalFile' | 'decodeLocalFile'> & {
   decodeAutomixPair?: DecoderPipeline['decodeAutomixPair'];
@@ -24,10 +23,19 @@ export type DecoderPipelineLike = Pick<DecoderPipeline, 'probeLocalFile' | 'deco
   getToolchainInfo?: () => FfmpegToolchainDiagnostics;
 };
 
-export type AutomixAnalyzerLike = Pick<AutomixAnalyzer, 'analyze'> & Partial<Pick<AutomixAnalyzer, 'getCachedAnalysis'>>;
+export type AutomixAnalyzerLike = Pick<AutomixAnalyzer, 'analyze'>
+  & Partial<Pick<AutomixAnalyzer, 'getCachedAnalysis' | 'analyzeV2'>>;
 
 export type DeviceServiceLike = Pick<DeviceService, 'listDevices'> &
-  Partial<Pick<DeviceService, 'listDevicesAsync' | 'refresh' | 'invalidateCache'>>;
+  Partial<Pick<
+    DeviceService,
+    | 'listDevicesAsync'
+    | 'listRoutingDevicesAsync'
+    | 'refreshSharedDevicesAsync'
+    | 'refreshRoutingDevicesAsync'
+    | 'refresh'
+    | 'invalidateCache'
+  >>;
 
 export type PausedDecoderPrewarm = {
   kind: 'held' | 'fresh';
@@ -126,8 +134,16 @@ export type AudioSessionDependencies = {
   /** @deprecated Wave 1 — kept for test compat, removed in Wave 6 */
   createBridge?: () => unknown;
   isNativeHostAvailable?: () => boolean;
-  createEchoSrcCudaWorkerClient?: () => EchoSrcFirWorkerClientLike & { dispose?: () => void };
-  createSdmCudaWorkerClient?: () => PcmToDsdDoPWorkerClientLike & { dispose?: () => void };
+  startAudioDaemon?: () => Promise<void>;
+  stopAudioDaemon?: () => Promise<void>;
+  createDaemonAudioBackend?: (
+    deviceId: string,
+    outputSettings: AudioOutputSettings,
+  ) => Promise<DaemonAudioBackend | null>;
+  /** @deprecated Native DSP owns ECHO SRC processing; retained only for test-call compatibility. */
+  createEchoSrcCudaWorkerClient?: () => unknown;
+  /** @deprecated Native DSP owns SDM processing; retained only for test-call compatibility. */
+  createSdmCudaWorkerClient?: () => unknown;
   resolveEchoSrcFirBackendStatus?: typeof resolveEchoSrcFirBackendStatus;
   reportAudioError?: (payload: AudioCrashReportPayload) => void;
   logger?: (message: string) => void;

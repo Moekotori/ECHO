@@ -8,6 +8,7 @@ const sourceDir = join(projectRoot, 'native', 'audio-host');
 const buildDir = join(projectRoot, 'out', 'native', 'audio-host');
 const config = process.env.ECHO_AUDIO_HOST_CONFIG || 'Release';
 const enableAsio = process.env.ECHO_ENABLE_ASIO ?? (process.platform === 'win32' ? 'ON' : 'OFF');
+const enableCudaDsp = process.env.ECHO_ENABLE_CUDA_DSP?.trim();
 const isWindows = process.platform === 'win32';
 const run = (command, args) => {
   const result = spawnSync(command, args, {
@@ -33,6 +34,9 @@ try {
     buildDir,
     `-DECHO_ENABLE_ASIO=${enableAsio}`,
   ];
+  if (enableCudaDsp) {
+    configureArgs.push(`-DECHO_ENABLE_CUDA_DSP=${enableCudaDsp}`);
+  }
 
   if (isWindows) {
     configureArgs.push('-G', 'Visual Studio 17 2022', '-A', 'x64');

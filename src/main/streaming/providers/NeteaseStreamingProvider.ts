@@ -31,6 +31,7 @@ const neteaseSongDetailBatchSize = 100;
 const neteaseCloudSearchFrequentOperationCooldownMs = 30 * 1000;
 const neteasePlaybackApiTimeoutMs = 2_500;
 const neteasePlaybackJsonTimeoutMs = 4_500;
+const neteasePlaybackTotalTimeoutMs = 5_000;
 let neteaseCloudSearchCooldownUntil = 0;
 
 const neteaseHeaders = (cookie?: string): Record<string, string> => ({
@@ -111,12 +112,18 @@ const accountStatus = (): AccountStatus => getAccountService().getStatus(provide
 
 const accountCookie = (): string | undefined => getAccountService().getCredentials(provider).cookie?.trim() || undefined;
 
-const getNcmApi = (): NeteaseApi | null => {
+const getNcmApi = (options: { allowColdLoad?: boolean } = {}): NeteaseApi | null => {
   if (ncmApiForTests !== undefined) {
     return ncmApiForTests;
   }
 
   try {
+    if (options.allowColdLoad === false) {
+      const entryPath = loadFromCjs.resolve('@neteasecloudmusicapienhanced/api');
+      if (!loadFromCjs.cache[entryPath]) {
+        return null;
+      }
+    }
     return loadFromCjs('@neteasecloudmusicapienhanced/api') as NeteaseApi;
   } catch {
     return null;
@@ -135,6 +142,22 @@ const withPlaybackApiTimeout = async <T>(work: Promise<T>): Promise<T> => {
       work,
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => reject(new Error('netease_playback_url_timeout')), neteasePlaybackApiTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+};
+
+const withPlaybackTotalTimeout = async <T>(work: Promise<T>): Promise<T> => {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error('netease_playback_resolve_timeout')), neteasePlaybackTotalTimeoutMs);
       }),
     ]);
   } finally {
@@ -201,8 +224,12 @@ const resolveWithNcmApi = async (
   request: StreamingPlaybackRequest,
   candidate: { level: string; bitrate: number; quality: NonNullable<StreamingPlaybackSource['codec']> },
   cookie: string | undefined,
+  options: { allowLegacy?: boolean } = {},
 ): Promise<NeteaseResolvedSource | null> => {
-  const ncm = getNcmApi();
+  // The package entry synchronously scans and requires hundreds of modules.
+  // Never cold-load it from the playback hot path; reuse it only when another
+  // provider operation has already paid that cost, otherwise use raw HTTP.
+  const ncm = getNcmApi({ allowColdLoad: false });
   if (!ncm?.song_url_v1 && !ncm?.song_url) {
     return null;
   }
@@ -213,6 +240,7 @@ const resolveWithNcmApi = async (
   }
 
   if (ncm.song_url_v1) {
+    let v1Failed = false;
     try {
       const response = await withPlaybackApiTimeout(ncm.song_url_v1({
         id,
@@ -230,11 +258,14 @@ const resolveWithNcmApi = async (
         };
       }
     } catch {
-      // Fall through to the older bitrate based resolver below.
+      v1Failed = true;
+    }
+    if (v1Failed) {
+      return null;
     }
   }
 
-  if (!ncm.song_url) {
+  if (options.allowLegacy !== true || !ncm.song_url) {
     return null;
   }
 
@@ -1499,15 +1530,18 @@ export class NeteaseStreamingProvider implements StreamingProvider {
   }
 
   async resolvePlayback(request: StreamingPlaybackRequest): Promise<StreamingPlaybackSource> {
+    return withPlaybackTotalTimeout((async () => {
     const cookie = accountCookie();
     const csrfToken = cookieValue(cookie, '__csrf') ?? cookieValue(cookie, 'csrf') ?? '';
     const candidates = neteaseQualityLevels[request.quality ?? 'fallback'] ?? neteaseQualityLevels.fallback;
     let lastSource: Record<string, unknown> = {};
     const attemptedLevels: string[] = [];
 
-    for (const candidate of candidates) {
+    for (const [candidateIndex, candidate] of candidates.entries()) {
       attemptedLevels.push(candidate.level);
-      const ncmSource = await resolveWithNcmApi(request, candidate, cookie);
+      const ncmSource = await resolveWithNcmApi(request, candidate, cookie, {
+        allowLegacy: candidateIndex === 0,
+      });
       if (ncmSource) {
         return toPlaybackSource(request, ncmSource, candidate, cookie);
       }
@@ -1520,17 +1554,22 @@ export class NeteaseStreamingProvider implements StreamingProvider {
         csrf_token: csrfToken,
         os: 'pc',
       });
-      const data = asRecord(
-        await jsonFetch(`https://music.163.com/api/song/enhance/player/url/v1?${params.toString()}`, {
+      let playbackData: unknown;
+      try {
+        playbackData = await jsonFetch(`https://music.163.com/api/song/enhance/player/url/v1?${params.toString()}`, {
           headers: neteaseHeaders(cookie),
           timeoutMs: neteasePlaybackJsonTimeoutMs,
-        }).catch(() =>
-          jsonFetch(`https://music.163.com/api/song/enhance/player/url?${params.toString()}`, {
-            headers: neteaseHeaders(cookie),
-            timeoutMs: neteasePlaybackJsonTimeoutMs,
-          }),
-        ),
-      );
+        });
+      } catch (error) {
+        if (candidateIndex !== 0) {
+          continue;
+        }
+        playbackData = await jsonFetch(`https://music.163.com/api/song/enhance/player/url?${params.toString()}`, {
+          headers: neteaseHeaders(cookie),
+          timeoutMs: neteasePlaybackJsonTimeoutMs,
+        });
+      }
+      const data = asRecord(playbackData);
       const source = asRecord((Array.isArray(data.data) ? data.data : [])[0]);
       lastSource = source;
       const url = text(source.url);
@@ -1552,5 +1591,6 @@ export class NeteaseStreamingProvider implements StreamingProvider {
     const message = text(lastSource.message) ?? text(lastSource.msg) ?? null;
     const code = integer(lastSource.code);
     throw new Error(message ?? `这首歌暂时不可播放，已尝试 ${attemptedLevels.join(' / ')} 音质${code ? `（网易返回 ${code}）` : ''}`);
+    })());
   }
 }

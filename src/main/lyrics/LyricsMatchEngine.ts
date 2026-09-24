@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
-import type { LyricsProviderId, LyricsQuery } from '../../shared/types/lyrics';
+import { createHash, randomUUID } from 'node:crypto';
+import type { LyricsProviderId, LyricsQuery, LyricsSearchCandidate } from '../../shared/types/lyrics';
 import type { LyricsProvider, LyricsProviderResult } from './LyricsProvider';
 import { dedupeLyricsCandidates, sortLyricsCandidates, type DedupableLyricsCandidate } from './lyricsCandidateDedup';
 import { buildNormalizedLyricsQuery, type NormalizedLyricsQuery } from './lyricsQueryBuilder';
 import { evaluateLyricsCandidate, type LyricsMatchDecision } from './lyricsScoring';
+import { parsePlainLyrics, parseSyncedLyrics } from './lyricsParser';
 
 export type LyricsMatchEngineOptions = {
   enabledProviders: LyricsProviderId[];
@@ -16,8 +17,13 @@ export type LyricsMatchEngineOptions = {
   collectAllCandidates: boolean;
   preferPrimaryProvider: boolean;
   relaxedAutoAccept: boolean;
+  ambiguityGraceMs: number;
+  minimumAutoAcceptScoreMargin: number;
+  contentConflictGateEnabled: boolean;
   preferredSecondaryFields: Array<'translation' | 'romanization'>;
   isRejected?: (provider: LyricsProviderId, providerLyricsId: string | null) => boolean;
+  onBackgroundCandidates?: (candidates: MatchedLyricsCandidate[]) => void | Promise<void>;
+  onBackgroundMatch?: (result: LyricsMatchEngineResult) => void | Promise<void>;
 };
 
 export type MatchedLyricsCandidate = DedupableLyricsCandidate & {
@@ -35,17 +41,24 @@ const defaultOptions: LyricsMatchEngineOptions = {
   enabledProviders: ['local', 'lrclib'],
   networkEnabled: true,
   providerTimeoutMs: 4500,
-  totalMatchTimeoutMs: 6000,
-  autoAcceptScore: 0.7,
+  totalMatchTimeoutMs: 4000,
+  autoAcceptScore: 0.78,
   coverAutoAcceptScore: 0.97,
   deepSearchEnabled: true,
   collectAllCandidates: false,
-  preferPrimaryProvider: true,
+  preferPrimaryProvider: false,
   relaxedAutoAccept: false,
+  ambiguityGraceMs: 250,
+  minimumAutoAcceptScoreMargin: 0.06,
+  contentConflictGateEnabled: true,
   preferredSecondaryFields: [],
 };
 
-const providerPriorityBonus = (priority: number): number => Math.min(0.01, Math.max(0, priority / 100000));
+const automaticBackgroundTimeoutMs = 8000;
+const automaticForegroundTimeoutMs = 2500;
+const balancedCandidateGraceMs = 500;
+const maxAutomaticNetworkConcurrency = 5;
+
 const providerOrderPriority = (order: LyricsProviderId[], provider: LyricsProvider): number => {
   const index = order.indexOf(provider.id);
   if (index < 0) {
@@ -58,55 +71,176 @@ const providerOrderPriority = (order: LyricsProviderId[], provider: LyricsProvid
 const sortProvidersByOrder = (providers: LyricsProvider[], order: LyricsProviderId[]): LyricsProvider[] =>
   [...providers].sort((left, right) => providerOrderPriority(order, right) - providerOrderPriority(order, left));
 
-const primaryProviderFromQuery = (query: LyricsQuery): LyricsProviderId | null => {
-  if (query.mediaType === 'remote') {
-    return null;
-  }
-
-  if (query.mediaType !== 'streaming') {
-    return 'netease';
-  }
-
-  const identity = `${query.trackId ?? ''}\n${query.stableKey ?? ''}`;
-  if (/(?:^|\n)streaming:netease:/u.test(identity)) {
-    return 'netease';
-  }
-  if (/(?:^|\n)streaming:qqmusic:/u.test(identity)) {
-    return 'qqmusic';
-  }
-  if (/(?:^|\n)streaming:kugou:/u.test(identity)) {
-    return 'kugou';
-  }
-  if (/(?:^|\n)streaming:kuwo:/u.test(identity)) {
-    return 'kuwo';
-  }
-
-  return null;
-};
-
 const hasText = (value: string | null | undefined): boolean => typeof value === 'string' && value.trim().length > 0;
 
-const isRelaxedAutoAcceptCandidate = (candidate: MatchedLyricsCandidate | null, settings: LyricsMatchEngineOptions): boolean => {
-  if (!settings.relaxedAutoAccept || !candidate) {
-    return false;
-  }
-
-  const decision = candidate.decision;
-  return (
-    !decision.rejected &&
-    decision.risk === 'medium' &&
-    decision.score > settings.autoAcceptScore &&
-    decision.titleScore >= 0.82 &&
-    decision.artistScore >= 0.75 &&
-    decision.durationScore >= 0.62 &&
-    decision.versionScore >= 0.7
-  );
+const hasWordTiming = (result: LyricsProviderResult): boolean => {
+  const sources = [result.karaokeLyrics, result.syncedLyrics].filter((source): source is string => Boolean(source));
+  return sources.some((source) => parseSyncedLyrics(source).some((line) => Boolean(line.words?.length)));
 };
 
-const isAutoAcceptCandidate = (candidate: MatchedLyricsCandidate | null, settings: LyricsMatchEngineOptions): boolean =>
-  Boolean(candidate?.decision.autoAccept && candidate.decision.risk === 'low') || isRelaxedAutoAcceptCandidate(candidate, settings);
+const lyricsCreditLinePattern =
+  /^(?:(?:作词|作詞|词|詞|作曲|编曲|編曲|混音|制作人|製作人|歌词提供|歌詞提供)|(?:lyrics?|lyricist|composer|arranger|producer|written by|lrc by))\s*[:：]/iu;
 
-const localDecision = (provider: LyricsProvider, result: LyricsProviderResult, settings: LyricsMatchEngineOptions): LyricsMatchDecision => {
+const previewLinesFromResult = (result: LyricsProviderResult): string[] => {
+  const source = result.karaokeLyrics ?? result.syncedLyrics ?? result.plainLyrics;
+  if (!source) {
+    return [];
+  }
+
+  const lines = result.karaokeLyrics || result.syncedLyrics
+    ? parseSyncedLyrics(source)
+    : parsePlainLyrics(source);
+  const seen = new Set<string>();
+  const preview: string[] = [];
+  for (const line of lines) {
+    const text = line.text.replace(/\s+/g, ' ').trim();
+    if (!text || seen.has(text)) {
+      continue;
+    }
+
+    seen.add(text);
+    preview.push(text);
+    if (preview.length >= 4) {
+      break;
+    }
+  }
+
+  return preview;
+};
+
+const lyricsFingerprintFromResult = (result: LyricsProviderResult): string | undefined => {
+  const source = result.karaokeLyrics ?? result.syncedLyrics ?? result.plainLyrics;
+  if (!source) {
+    return undefined;
+  }
+
+  const lines = result.karaokeLyrics || result.syncedLyrics
+    ? parseSyncedLyrics(source)
+    : parsePlainLyrics(source);
+  const normalized = lines
+    .map((line) => line.text.normalize('NFKC').toLocaleLowerCase().trim())
+    .filter((line) => line && !lyricsCreditLinePattern.test(line))
+    .map((line) => line.replace(/[^\p{Letter}\p{Number}]+/gu, ''))
+    .filter(Boolean)
+    .filter((line, index, all) => all.indexOf(line) === index)
+    .sort()
+    .join('\n');
+  return normalized ? createHash('sha1').update(normalized).digest('hex') : undefined;
+};
+
+const isHighConfidenceCandidate = (candidate: MatchedLyricsCandidate | null): boolean =>
+  candidate?.decision.confidence === 'high' && candidate.decision.autoAcceptEligible;
+
+export type LyricsAutoApplySelection<T extends LyricsSearchCandidate = LyricsSearchCandidate> = {
+  accepted: T | null;
+  blocked: T[];
+  blockedReason?: 'lyrics_content_conflict' | 'ambiguous_score_margin';
+};
+
+const hasStrongComparableMetadata = (candidate: LyricsSearchCandidate): boolean =>
+  (candidate.titleScore ?? 0) >= 0.98 &&
+  (candidate.artistScore ?? 0) >= 0.98 &&
+  (candidate.versionScore ?? 0) >= 0.9 &&
+  candidate.durationDeltaSeconds !== null &&
+  candidate.durationDeltaSeconds !== undefined &&
+  candidate.autoAcceptEligible === true;
+
+export const selectLyricsAutoApplyCandidate = <T extends LyricsSearchCandidate>(
+  candidates: T[],
+  options: {
+    minimumScoreMargin?: number;
+    contentConflictGateEnabled?: boolean;
+  } = {},
+): LyricsAutoApplySelection<T> => {
+  const contenders = candidates.filter((candidate) =>
+    candidate.autoAcceptEligible === true &&
+    candidate.confidence !== 'blocked' &&
+    candidate.risk !== 'high',
+  );
+  const primary = contenders[0] ?? null;
+  if (!primary) {
+    return { accepted: null, blocked: [] };
+  }
+
+  if (primary.provider === 'local') {
+    return { accepted: primary, blocked: [] };
+  }
+
+  if (
+    options.contentConflictGateEnabled !== false &&
+    hasStrongComparableMetadata(primary) &&
+    primary.contentFingerprint
+  ) {
+    const conflicts = contenders.filter((candidate) =>
+      candidate !== primary &&
+      candidate.provider !== 'local' &&
+      hasStrongComparableMetadata(candidate) &&
+      Boolean(candidate.contentFingerprint) &&
+      candidate.contentFingerprint !== primary.contentFingerprint,
+    );
+    if (conflicts.length) {
+      return {
+        accepted: null,
+        blocked: [primary, ...conflicts],
+        blockedReason: 'lyrics_content_conflict',
+      };
+    }
+  }
+
+  const runnerUp = contenders.find((candidate) => candidate !== primary && candidate.provider !== 'local');
+  if (
+    runnerUp &&
+    (options.minimumScoreMargin ?? 0.06) > 0 &&
+    primary.score - runnerUp.score < (options.minimumScoreMargin ?? 0.06)
+  ) {
+    return {
+      accepted: null,
+      blocked: [primary, runnerUp],
+      blockedReason: 'ambiguous_score_margin',
+    };
+  }
+
+  return { accepted: primary, blocked: [] };
+};
+
+const annotateBlockedSelection = (selection: LyricsAutoApplySelection<MatchedLyricsCandidate>): void => {
+  if (!selection.blockedReason) {
+    return;
+  }
+
+  for (const candidate of selection.blocked) {
+    const reasons = Array.from(new Set([
+      ...(candidate.reasons ?? []),
+      ...candidate.decision.reasons,
+      selection.blockedReason,
+      'candidate_only_ambiguity',
+    ]));
+    candidate.reasons = reasons;
+    candidate.confidence = 'blocked';
+    candidate.autoAcceptEligible = false;
+    candidate.risk = candidate.risk === 'high' ? 'high' : 'medium';
+    candidate.decision.reasons = reasons;
+    candidate.decision.autoAccept = false;
+    candidate.decision.autoAcceptEligible = false;
+    candidate.decision.confidence = 'blocked';
+    candidate.decision.candidateOnly = true;
+    candidate.decision.risk = candidate.risk;
+  }
+};
+
+const finalizeAutomaticCandidate = (
+  candidates: MatchedLyricsCandidate[],
+  settings: LyricsMatchEngineOptions,
+): MatchedLyricsCandidate | null => {
+  const selection = selectLyricsAutoApplyCandidate(candidates, {
+    minimumScoreMargin: settings.minimumAutoAcceptScoreMargin,
+    contentConflictGateEnabled: settings.contentConflictGateEnabled,
+  });
+  annotateBlockedSelection(selection);
+  return selection.accepted;
+};
+
+const localDecision = (provider: LyricsProvider, result: LyricsProviderResult, _settings: LyricsMatchEngineOptions): LyricsMatchDecision => {
   const reasons = result.matchReasons?.length ? [...result.matchReasons] : ['local_sidecar_priority'];
   const needsManualDurationCheck = reasons.includes('candidate_only_duration');
   const score = needsManualDurationCheck ? 0.42 : 1;
@@ -114,11 +248,14 @@ const localDecision = (provider: LyricsProvider, result: LyricsProviderResult, s
   return {
     score,
     autoAccept,
+    confidence: autoAccept ? 'high' : 'blocked',
+    autoAcceptEligible: autoAccept,
+    durationDeltaSeconds: needsManualDurationCheck ? 11 : 0,
     candidateOnly: needsManualDurationCheck,
     rejected: false,
     risk: needsManualDurationCheck ? 'medium' : 'low',
     reasons,
-    providerPriorityBonus: providerPriorityBonus(providerOrderPriority(settings.enabledProviders, provider)),
+    providerPriorityBonus: 0,
     titleScore: 1,
     artistScore: 1,
     albumScore: 1,
@@ -152,7 +289,15 @@ export class LyricsMatchEngine {
   constructor(private readonly providers: LyricsProvider[]) {}
 
   async match(query: LyricsQuery, options: Partial<LyricsMatchEngineOptions> = {}): Promise<LyricsMatchEngineResult> {
-    const settings = { ...defaultOptions, ...options };
+    const settings = {
+      ...defaultOptions,
+      ...options,
+      ambiguityGraceMs: Math.max(0, Math.min(500, options.ambiguityGraceMs ?? defaultOptions.ambiguityGraceMs)),
+      minimumAutoAcceptScoreMargin: Math.max(
+        0,
+        Math.min(0.2, options.minimumAutoAcceptScoreMargin ?? defaultOptions.minimumAutoAcceptScoreMargin),
+      ),
+    };
     const normalized = buildNormalizedLyricsQuery(query);
     const enabled = new Set(settings.enabledProviders);
     const orderedProviders = sortProvidersByOrder(this.providers, settings.enabledProviders);
@@ -170,7 +315,7 @@ export class LyricsMatchEngine {
 
       if (localCandidates.length && !settings.collectAllCandidates) {
         const sorted = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(localCandidates));
-        const accepted = sorted.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null;
+        const accepted = finalizeAutomaticCandidate(sorted, settings);
         if (!accepted) {
           continue;
         }
@@ -187,7 +332,7 @@ export class LyricsMatchEngine {
       const candidates = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(localCollected));
       return {
         normalized,
-        accepted: candidates.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null,
+        accepted: finalizeAutomaticCandidate(candidates, settings),
         candidates,
       };
     }
@@ -198,7 +343,7 @@ export class LyricsMatchEngine {
         const providerCandidates = await this.searchProvider(provider, query, normalized, settings, new AbortController().signal);
         collected.push(...providerCandidates);
         const sorted = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(collected));
-        const accepted = sorted.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null;
+        const accepted = finalizeAutomaticCandidate(sorted, settings);
         if (accepted && !settings.collectAllCandidates) {
           return { normalized, accepted, candidates: sorted };
         }
@@ -207,63 +352,159 @@ export class LyricsMatchEngine {
       const candidates = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(collected));
       return {
         normalized,
-        accepted: candidates.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null,
+        accepted: finalizeAutomaticCandidate(candidates, settings),
         candidates,
       };
     }
 
     const totalController = new AbortController();
-    const totalTimer = setTimeout(() => totalController.abort(), settings.totalMatchTimeoutMs);
+    const foregroundTimeoutMs = settings.collectAllCandidates
+      ? settings.totalMatchTimeoutMs
+      : Math.min(settings.totalMatchTimeoutMs, automaticForegroundTimeoutMs);
+    const backgroundEnabled = !settings.collectAllCandidates &&
+      Boolean(settings.onBackgroundCandidates || settings.onBackgroundMatch);
+    const totalTimeoutMs = backgroundEnabled
+      ? Math.max(foregroundTimeoutMs, automaticBackgroundTimeoutMs)
+      : foregroundTimeoutMs;
+    const totalTimer = setTimeout(() => totalController.abort(), totalTimeoutMs);
+    let foregroundTimer: ReturnType<typeof setTimeout> | null = null;
+    let ambiguityGraceTimer: ReturnType<typeof setTimeout> | null = null;
+    let ambiguityGraceDeadline: Promise<{ ambiguityGraceExpired: true }> | null = null;
+    const foregroundDeadline = new Promise<{ foregroundExpired: true }>((resolve) => {
+      foregroundTimer = setTimeout(() => resolve({ foregroundExpired: true }), foregroundTimeoutMs);
+    });
     const pending = new Map<LyricsProviderId, Promise<MatchedLyricsCandidate[]>>();
     const collected: MatchedLyricsCandidate[] = [...localCollected];
-    let accepted: MatchedLyricsCandidate | null = null;
-    const primaryProviderId = primaryProviderFromQuery(query);
-    const primaryProvider = settings.preferPrimaryProvider && !settings.collectAllCandidates
-      ? networkProviders.find((provider) => provider.id === primaryProviderId)
-      : undefined;
-    const remainingNetworkProviders = primaryProvider
-      ? networkProviders.filter((provider) => provider.id !== primaryProvider.id)
-      : networkProviders;
-
-    try {
-      if (primaryProvider && !totalController.signal.aborted) {
-        const primaryCandidates = await this.searchProvider(primaryProvider, query, normalized, settings, totalController.signal);
-        collected.push(...primaryCandidates);
-        const sorted = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(collected));
-        accepted = sorted.find((candidate) => candidate.provider === primaryProvider.id && isAutoAcceptCandidate(candidate, settings)) ?? null;
-        if (accepted) {
-          return { normalized, accepted, candidates: sorted };
-        }
+    let backgroundScheduled = false;
+    let nextProviderIndex = 0;
+    const maxNetworkConcurrency = Math.min(maxAutomaticNetworkConcurrency, networkProviders.length);
+    const startNextProvider = (): void => {
+      if (nextProviderIndex >= networkProviders.length || totalController.signal.aborted) {
+        return;
       }
 
-      for (const provider of remainingNetworkProviders) {
-        pending.set(provider.id, this.searchProvider(provider, query, normalized, settings, totalController.signal));
+      const provider = networkProviders[nextProviderIndex];
+      nextProviderIndex += 1;
+      pending.set(provider.id, this.searchProvider(provider, query, normalized, settings, totalController.signal));
+    };
+
+    const collectRemainingInBackground = async (): Promise<void> => {
+      try {
+        while (pending.size && !totalController.signal.aborted) {
+          const next = await Promise.race(
+            Array.from(pending.entries()).map(async ([id, promise]) => ({
+              id,
+              candidates: await promise.catch(() => [] as MatchedLyricsCandidate[]),
+            })),
+          );
+          pending.delete(next.id);
+          startNextProvider();
+          if (!next.candidates.length) {
+            continue;
+          }
+
+          collected.push(...next.candidates);
+          const backgroundCandidates = sortLyricsCandidates(
+            normalized.durationSeconds,
+            dedupeLyricsCandidates(collected),
+          );
+          await settings.onBackgroundCandidates?.(backgroundCandidates);
+        }
+
+        const backgroundCandidates = sortLyricsCandidates(
+          normalized.durationSeconds,
+          dedupeLyricsCandidates(collected),
+        );
+        const backgroundAccepted = finalizeAutomaticCandidate(backgroundCandidates, settings);
+        await settings.onBackgroundMatch?.({
+          normalized,
+          accepted: backgroundAccepted,
+          candidates: backgroundCandidates,
+        });
+      } catch {
+        // Background candidates are opportunistic and must never affect playback.
+      } finally {
+        clearTimeout(totalTimer);
+        totalController.abort();
+      }
+    };
+
+    try {
+      for (let index = 0; index < maxNetworkConcurrency; index += 1) {
+        startNextProvider();
       }
 
       while (pending.size && !totalController.signal.aborted) {
-        const next = await Promise.race(
-          Array.from(pending.entries()).map(async ([id, promise]) => ({
-            id,
-            candidates: await promise.catch(() => [] as MatchedLyricsCandidate[]),
-          })),
-        );
+        const providerRaces = Array.from(pending.entries()).map(async ([id, promise]) => ({
+          id,
+          candidates: await promise.catch(() => [] as MatchedLyricsCandidate[]),
+        }));
+        const next = await Promise.race([
+          ...providerRaces,
+          foregroundDeadline,
+          ...(ambiguityGraceDeadline ? [ambiguityGraceDeadline] : []),
+        ]);
+        if ('foregroundExpired' in next) {
+          if (backgroundEnabled && pending.size) {
+            backgroundScheduled = true;
+            void collectRemainingInBackground();
+          } else {
+            totalController.abort();
+          }
+          break;
+        }
+        if ('ambiguityGraceExpired' in next) {
+          if (backgroundEnabled && pending.size) {
+            backgroundScheduled = true;
+            void collectRemainingInBackground();
+          } else {
+            totalController.abort();
+          }
+          break;
+        }
         pending.delete(next.id);
+        startNextProvider();
         collected.push(...next.candidates);
         const sorted = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(collected));
-        accepted = sorted.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null;
-        if (accepted && !settings.collectAllCandidates) {
-          totalController.abort();
-          break;
+        const hasHighConfidenceCandidate = sorted.some((candidate) => isHighConfidenceCandidate(candidate));
+        const hasBalancedAutoCandidate = sorted.some((candidate) =>
+          candidate.decision.autoAcceptEligible &&
+          candidate.decision.confidence === 'balanced' &&
+          candidate.decision.risk !== 'high',
+        );
+        if (
+          (hasHighConfidenceCandidate || hasBalancedAutoCandidate) &&
+          !settings.collectAllCandidates &&
+          !ambiguityGraceDeadline &&
+          pending.size
+        ) {
+          const graceMs = hasHighConfidenceCandidate
+            ? settings.ambiguityGraceMs
+            : Math.max(settings.ambiguityGraceMs, balancedCandidateGraceMs);
+          ambiguityGraceDeadline = new Promise<{ ambiguityGraceExpired: true }>((resolve) => {
+            ambiguityGraceTimer = setTimeout(
+              () => resolve({ ambiguityGraceExpired: true }),
+              graceMs,
+            );
+          });
         }
       }
     } finally {
-      clearTimeout(totalTimer);
+      if (foregroundTimer) {
+        clearTimeout(foregroundTimer);
+      }
+      if (ambiguityGraceTimer) {
+        clearTimeout(ambiguityGraceTimer);
+      }
+      if (!backgroundScheduled) {
+        clearTimeout(totalTimer);
+      }
     }
 
     const candidates = sortLyricsCandidates(normalized.durationSeconds, dedupeLyricsCandidates(collected));
     return {
       normalized,
-      accepted: accepted ?? candidates.find((candidate) => isAutoAcceptCandidate(candidate, settings)) ?? null,
+      accepted: finalizeAutomaticCandidate(candidates, settings),
       candidates,
     };
   }
@@ -339,6 +580,7 @@ export class LyricsMatchEngine {
       durationSeconds: result.durationSeconds,
       instrumental: result.instrumental,
       hasSynced: Boolean(result.karaokeLyrics || result.syncedLyrics || result.instrumental),
+      hasWordTiming: hasWordTiming(result),
       hasPlain: Boolean(result.plainLyrics),
       sourceLabel: result.sourceLabel ?? provider.label,
     };
@@ -347,12 +589,16 @@ export class LyricsMatchEngine {
       : evaluateLyricsCandidate(normalized, base, {
           autoAcceptScore: settings.autoAcceptScore,
           coverAutoAcceptScore: settings.coverAutoAcceptScore,
-          providerPriorityBonus: providerPriorityBonus(providerOrderPriority(settings.enabledProviders, provider)),
+          providerPriorityBonus: 0,
           rejectedByUser,
         });
 
     if (decision.autoAccept) {
       decision.reasons.push('auto_accept');
+      decision.reasons.push(decision.confidence === 'high' ? 'confidence_high' : 'confidence_balanced');
+    }
+    if (base.hasWordTiming) {
+      decision.reasons.push('word_timed');
     }
 
     for (const reason of result.matchReasons ?? []) {
@@ -379,6 +625,12 @@ export class LyricsMatchEngine {
       id: randomUUID(),
       ...base,
       score: decision.score,
+      confidence: decision.confidence,
+      autoAcceptEligible: decision.autoAcceptEligible,
+      durationDeltaSeconds: decision.durationDeltaSeconds,
+      previewLines: previewLinesFromResult(result),
+      contentFingerprint: lyricsFingerprintFromResult(result),
+      matchedSources: [{ provider: provider.id, sourceLabel: result.sourceLabel ?? provider.label }],
       risk: decision.risk,
       reasons: decision.reasons,
       titleScore: decision.titleScore,
@@ -387,6 +639,7 @@ export class LyricsMatchEngine {
       durationScore: decision.durationScore,
       versionScore: decision.versionScore,
       raw: result.raw ?? result,
+      lyricsFingerprint: lyricsFingerprintFromResult(result),
       providerPriority: providerOrderPriority(settings.enabledProviders, provider),
       hasTranslation,
       hasRomanization,

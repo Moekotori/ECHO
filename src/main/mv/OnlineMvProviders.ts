@@ -11,6 +11,7 @@ import type {
 } from '../../shared/types/mv';
 import { getAccountService } from '../accounts/AccountService';
 import { fetchWithNetworkProxy } from '../network/networkFetch';
+import { parseMvDurationSeconds, scoreNetworkMvCandidate } from './MvScoring';
 
 export type ResolvedMvStreamVariant = MvQualityVariant & {
   url: string | null;
@@ -51,6 +52,10 @@ const userAgent =
 const bilibiliAcceptLanguage = 'zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7';
 const defaultExpiresMs = 45 * 60 * 1000;
 const bilibiliPlayurlBanBackoffMs = 2 * 60 * 1000;
+const bilibiliWbiKeyCacheMs = 30 * 60 * 1000;
+const bilibiliWbiKeyFailureCacheMs = 30 * 1000;
+const bilibiliMetadataTimeoutMs = 2500;
+const defaultNetworkTimeoutMs = 6500;
 
 const qualityHeight: Record<Exclude<MvQualityTier, 'auto'>, number> = {
   '720p': 720,
@@ -186,51 +191,6 @@ const decodeHtmlEntities = (value: string): string =>
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
-
-const normalizeSearchText = (value: string): string =>
-  decodeHtmlEntities(value)
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&+/g, ' ')
-    .replace(/[[\]【】「」『』()（）"'“”‘’]/g, ' ')
-    .replace(/[_\-~|/\\:：·・.,，。!?！？]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-const meaningfulTokens = (value: string): string[] =>
-  normalizeSearchText(value)
-    .split(' ')
-    .map((token) => token.trim())
-    .filter((token) => token.length > 1)
-    .filter((token) => !['mv', 'pv', 'official', 'music', 'video', 'full', 'ver', 'version'].includes(token));
-
-const scoreSearchTitle = (query: string, title: string): number => {
-  const normalizedQuery = normalizeSearchText(query);
-  const normalizedTitle = normalizeSearchText(title);
-  if (!normalizedQuery || !normalizedTitle) {
-    return 0.45;
-  }
-
-  if (normalizedTitle.includes(normalizedQuery)) {
-    return 0.96;
-  }
-
-  const tokens = meaningfulTokens(query);
-  if (tokens.length === 0) {
-    return 0.45;
-  }
-
-  const weightedTokens = tokens.map((token) => ({
-    token,
-    weight: token === 'cover' || token === 'remix' || token === 'live' ? 0.55 : 1,
-  }));
-  const totalWeight = weightedTokens.reduce((total, item) => total + item.weight, 0);
-  const matchedWeight = weightedTokens.reduce((total, item) => total + (normalizedTitle.includes(item.token) ? item.weight : 0), 0);
-  const coverage = totalWeight > 0 ? matchedWeight / totalWeight : 0;
-
-  return Number(Math.max(0.45, Math.min(0.94, 0.45 + coverage * 0.42)).toFixed(4));
-};
 
 const stripHtml = (value: unknown): string | null => {
   const raw = text(value);
@@ -450,9 +410,14 @@ const externalVariant = (
   rawProviderJson,
 });
 
-const fetchJsonWithTimeout = async (fetchImpl: FetchLike, url: string, headers: Record<string, string>): Promise<{ status: number; ok: boolean; payload: unknown }> => {
+const fetchJsonWithTimeout = async (
+  fetchImpl: FetchLike,
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs = defaultNetworkTimeoutMs,
+): Promise<{ status: number; ok: boolean; payload: unknown }> => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6500);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetchImpl(url, {
@@ -475,8 +440,13 @@ const fetchJsonWithTimeout = async (fetchImpl: FetchLike, url: string, headers: 
   }
 };
 
-const withTimeout = async (fetchImpl: FetchLike, url: string, headers: Record<string, string>): Promise<unknown> => {
-  const response = await fetchJsonWithTimeout(fetchImpl, url, headers);
+const withTimeout = async (
+  fetchImpl: FetchLike,
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs = defaultNetworkTimeoutMs,
+): Promise<unknown> => {
+  const response = await fetchJsonWithTimeout(fetchImpl, url, headers, timeoutMs);
   if (!response.ok) {
     throw new Error(`request_failed:${response.status}`);
   }
@@ -507,6 +477,8 @@ const bilibiliVideoHeaders = (bvid: string, credentials: Record<string, string>)
 class ProviderBase {
   protected readonly fetchImpl: FetchLike;
   private readonly credentialsReader: (provider: NetworkMvProviderId) => AccountCredentials;
+  private bilibiliWbiKeyCache: { value: string | null; expiresAt: number } | null = null;
+  private bilibiliWbiKeyRequest: Promise<string | null> | null = null;
 
   constructor(dependencies: ProviderDependencies = {}) {
     this.fetchImpl = dependencies.fetchImpl ?? fetchWithNetworkProxy;
@@ -523,16 +495,41 @@ class ProviderBase {
   }
 
   protected async bilibiliWbiMixinKey(headers: Record<string, string>): Promise<string | null> {
-    try {
-      const payload = await withTimeout(this.fetchImpl, 'https://api.bilibili.com/x/web-interface/nav', headers);
-      const data = isRecord(payload) ? payload.data : null;
-      const wbiImg = isRecord(data) ? data.wbi_img : null;
-      const imgKey = wbiKeyPart(isRecord(wbiImg) ? wbiImg.img_url : null);
-      const subKey = wbiKeyPart(isRecord(wbiImg) ? wbiImg.sub_url : null);
-      return imgKey && subKey ? mixinWbiKey(`${imgKey}${subKey}`) : null;
-    } catch {
-      return null;
+    const cached = this.bilibiliWbiKeyCache;
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
     }
+
+    if (!this.bilibiliWbiKeyRequest) {
+      this.bilibiliWbiKeyRequest = (async () => {
+        let value: string | null = null;
+        try {
+          const payload = await withTimeout(
+            this.fetchImpl,
+            'https://api.bilibili.com/x/web-interface/nav',
+            headers,
+            bilibiliMetadataTimeoutMs,
+          );
+          const data = isRecord(payload) ? payload.data : null;
+          const wbiImg = isRecord(data) ? data.wbi_img : null;
+          const imgKey = wbiKeyPart(isRecord(wbiImg) ? wbiImg.img_url : null);
+          const subKey = wbiKeyPart(isRecord(wbiImg) ? wbiImg.sub_url : null);
+          value = imgKey && subKey ? mixinWbiKey(`${imgKey}${subKey}`) : null;
+        } catch {
+          value = null;
+        }
+
+        this.bilibiliWbiKeyCache = {
+          value,
+          expiresAt: Date.now() + (value ? bilibiliWbiKeyCacheMs : bilibiliWbiKeyFailureCacheMs),
+        };
+        return value;
+      })().finally(() => {
+        this.bilibiliWbiKeyRequest = null;
+      });
+    }
+
+    return this.bilibiliWbiKeyRequest;
   }
 }
 
@@ -566,7 +563,7 @@ export class BilibiliMvProvider extends ProviderBase implements MainMvOnlineProv
     typeSearchUrl.searchParams.set('search_type', 'video');
     typeSearchUrl.searchParams.set('keyword', query);
     typeSearchUrl.searchParams.set('page', '1');
-    typeSearchUrl.searchParams.set('order', 'click');
+    typeSearchUrl.searchParams.set('order', 'totalrank');
     typeSearchUrl.searchParams.set('page_size', '8');
     if (wbiMixinKey) {
       appendWbiSignature(typeSearchUrl, wbiMixinKey);
@@ -574,7 +571,7 @@ export class BilibiliMvProvider extends ProviderBase implements MainMvOnlineProv
 
     let typeResults: unknown[] = [];
     try {
-      const typePayload = await withTimeout(this.fetchImpl, typeSearchUrl.toString(), headers);
+      const typePayload = await withTimeout(this.fetchImpl, typeSearchUrl.toString(), headers, bilibiliMetadataTimeoutMs);
       const typeData = isRecord(typePayload) ? typePayload.data : null;
       typeResults = isRecord(typeData) ? asArray(typeData.result) : [];
     } catch {
@@ -594,7 +591,10 @@ export class BilibiliMvProvider extends ProviderBase implements MainMvOnlineProv
       if (!bvid || !title) {
         return [];
       }
-      const score = scoreSearchTitle(query, title);
+      const uploader = stripHtml(item.author) ?? null;
+      const uploaderId = text(item.mid) ?? (number(item.mid) !== null ? String(number(item.mid)) : null);
+      const durationSeconds = parseMvDurationSeconds(item.duration);
+      const scoring = scoreNetworkMvCandidate(track, { title, uploader, durationSeconds });
 
       const providerUrl = `https://www.bilibili.com/video/${bvid}`;
       return [
@@ -603,34 +603,32 @@ export class BilibiliMvProvider extends ProviderBase implements MainMvOnlineProv
           provider: this.id,
           sourceType: 'search_candidate',
           title,
-          artist: track.artist || track.albumArtist || null,
+          artist: uploader,
           filePath: null,
           url: providerUrl,
           providerUrl,
           thumbnailUrl: normalizeUrl(item.pic),
-          uploader: stripHtml(item.author) ?? null,
+          uploader,
+          uploaderId,
           viewCount,
           availableQualities: [],
-          durationSeconds: null,
-          score,
+          durationSeconds,
+          score: scoring.score,
+          autoEligible: scoring.autoEligible,
+          matchVersion: scoring.matchVersion,
+          decision: scoring.decision,
           playableInApp: true,
-          reasons: ['Bilibili search', viewCount !== null ? `播放 ${viewCount}` : '播放量未知'],
+          reasons: ['Bilibili search', ...scoring.reasons, viewCount !== null ? `播放 ${viewCount}` : '播放量未知'],
         },
       ];
     })
       .sort((left, right) => {
-        if (settings.preferHighestViewCount) {
-          const viewDelta = (right.viewCount ?? -1) - (left.viewCount ?? -1);
-          if (viewDelta !== 0) {
-            return viewDelta;
-          }
-        }
-
         const scoreDelta = right.score - left.score;
         if (scoreDelta !== 0) {
           return scoreDelta;
         }
-        return (right.viewCount ?? -1) - (left.viewCount ?? -1);
+
+        return settings.preferHighestViewCount ? (right.viewCount ?? -1) - (left.viewCount ?? -1) : 0;
       })
       .slice(0, 8)
       .map((candidate) => candidate);
@@ -642,10 +640,15 @@ export class BilibiliMvProvider extends ProviderBase implements MainMvOnlineProv
       url.searchParams.set('keyword', query);
       url.searchParams.set('page', '1');
 
-      const payload = await withTimeout(this.fetchImpl, url.toString(), {
-        ...headers,
-        Referer: bilibiliAllSearchReferer(query),
-      });
+      const payload = await withTimeout(
+        this.fetchImpl,
+        url.toString(),
+        {
+          ...headers,
+          Referer: bilibiliAllSearchReferer(query),
+        },
+        bilibiliMetadataTimeoutMs,
+      );
       const data = isRecord(payload) ? payload.data : null;
       const groups = isRecord(data) ? asArray(data.result) : [];
       const videoGroup = groups.find(
@@ -969,7 +972,7 @@ export class YouTubeMvProvider extends ProviderBase implements MainMvOnlineProvi
     url.searchParams.set('type', 'video');
     url.searchParams.set('videoEmbeddable', 'true');
     url.searchParams.set('maxResults', '8');
-    url.searchParams.set('order', 'viewCount');
+    url.searchParams.set('order', 'relevance');
     url.searchParams.set('q', query);
     url.searchParams.set('key', apiKey);
 
@@ -990,7 +993,9 @@ export class YouTubeMvProvider extends ProviderBase implements MainMvOnlineProvi
       const thumbnails = isRecord(item.snippet.thumbnails) ? item.snippet.thumbnails : {};
       const thumbnail = isRecord(thumbnails.high) ? normalizeUrl(thumbnails.high.url) : null;
       const providerUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      const score = scoreSearchTitle(query, title);
+      const uploader = text(item.snippet.channelTitle);
+      const uploaderId = text(item.snippet.channelId);
+      const scoring = scoreNetworkMvCandidate(track, { title, uploader, durationSeconds: null });
 
       return [
         {
@@ -998,17 +1003,21 @@ export class YouTubeMvProvider extends ProviderBase implements MainMvOnlineProvi
           provider: this.id,
           sourceType: 'search_candidate',
           title,
-          artist: track.artist || track.albumArtist || null,
+          artist: uploader,
           filePath: null,
           url: providerUrl,
           providerUrl,
           thumbnailUrl: thumbnail,
-          uploader: text(item.snippet.channelTitle),
+          uploader,
+          uploaderId,
           availableQualities: [],
           durationSeconds: null,
-          score,
+          score: scoring.score,
+          autoEligible: scoring.autoEligible,
+          matchVersion: scoring.matchVersion,
+          decision: scoring.decision,
           playableInApp: false,
-          reasons: ['YouTube Data API'],
+          reasons: ['YouTube Data API', ...scoring.reasons],
         },
       ];
     });

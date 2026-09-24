@@ -146,6 +146,7 @@ export function createLibraryApi(
     getPlaybackHistorySummary: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetPlaybackHistorySummary, query),
     getPlaybackStatsDashboard: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetPlaybackStatsDashboard, query),
     getPlaybackMemoryGraph: (query) => ipcRenderer.invoke(IpcChannels.LibraryGetPlaybackMemoryGraph, query),
+    getContinuousPlayRecommendations: (request) => ipcRenderer.invoke(IpcChannels.LibraryGetContinuousPlayRecommendations, request),
     refreshInvalidPlaybackHistory: () => ipcRenderer.invoke(IpcChannels.LibraryRefreshInvalidPlaybackHistory),
     deletePlaybackHistoryEntry: (id) => ipcRenderer.invoke(IpcChannels.LibraryDeletePlaybackHistoryEntry, id),
     clearPlaybackHistory: () => ipcRenderer.invoke(IpcChannels.LibraryClearPlaybackHistory),

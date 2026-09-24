@@ -18,6 +18,7 @@ import {
   initializeProtectedUserDataPath,
   isDataProtectionBackgroundPlaybackBlockedForTest,
   isProtectedLibraryAvailable,
+  LibraryDatabaseUnavailableError,
   migrateLegacyProtectedData,
   noteDataProtectionPlaybackActivity,
   recordLibraryDatabaseMaintenanceEvent,
@@ -249,6 +250,31 @@ describe('dataProtection', () => {
     expect(result.restore.restored).toEqual([]);
     expect(result.snapshot.snapshotPath).toBe('');
     expect(existsSync(join(tempDir, 'data-protection', 'snapshots'))).toBe(false);
+  });
+
+  it('keeps an unreadable library unavailable without claiming corruption when snapshot protection is disabled', () => {
+    mkdirSync(join(tempDir, 'echo-library.sqlite'), { recursive: true });
+
+    const result = createDataProtectionDisabledResult(tempDir);
+
+    expect(result.libraryHealth.status).toBe('unreadable');
+    expect(result.recovery.action).toBe('failed');
+    expect(result.restore.restored).toEqual([]);
+    expect(result.snapshot.snapshotPath).toBe('');
+    expect(isProtectedLibraryAvailable()).toBe(false);
+    expect(existsSync(join(tempDir, 'data-protection', 'snapshots'))).toBe(false);
+    expect(new LibraryDatabaseUnavailableError(result.recovery).message).toContain('这不代表数据库已经损坏');
+  });
+
+  it('enters protected mode only when SQLite explicitly reports corruption with snapshot protection disabled', () => {
+    writeFileSync(join(tempDir, 'echo-library.sqlite'), 'not a sqlite database', 'utf8');
+
+    const result = createDataProtectionDisabledResult(tempDir);
+
+    expect(result.libraryHealth.status).toBe('corrupt');
+    expect(result.recovery.action).toBe('protected');
+    expect(isProtectedLibraryAvailable()).toBe(false);
+    expect(new LibraryDatabaseUnavailableError(result.recovery).message).toContain('SQLite 明确报告');
   });
 
   it('migrates stronger legacy echo-next data over a fresh protected directory', async () => {

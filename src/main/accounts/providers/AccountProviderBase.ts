@@ -14,6 +14,7 @@ export type StoredAccountRecord = {
   lastCheckedAt?: string | null;
   expiresAt?: string | null;
   error?: string | null;
+  authInvalid?: boolean;
 };
 
 export abstract class AccountProviderBase {
@@ -42,6 +43,7 @@ export abstract class AccountProviderBase {
       lastLoginAt: now,
       lastCheckedAt: now,
       error: null,
+      authInvalid: false,
     };
   }
 

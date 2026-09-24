@@ -6,6 +6,7 @@ import { registerLyricsIpc } from './lyricsIpc';
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   getLyricsForTrackMock: vi.fn(),
+  applyLyricsCandidateMock: vi.fn(),
   audioStatus: {
     state: 'idle',
     outputMode: 'shared',
@@ -29,7 +30,9 @@ vi.mock('electron', () => ({
 vi.mock('../lyrics/LyricsService', () => ({
   getLyricsService: () => ({
     getLyricsForTrack: mocks.getLyricsForTrackMock,
+    applyLyricsCandidate: mocks.applyLyricsCandidateMock,
   }),
+  onLyricsServiceChanged: vi.fn(() => () => undefined),
 }));
 
 vi.mock('../audio/AudioSession', () => ({
@@ -57,6 +60,7 @@ describe('lyrics IPC', () => {
   beforeEach(() => {
     mocks.handlers.clear();
     mocks.getLyricsForTrackMock.mockReset();
+    mocks.applyLyricsCandidateMock.mockReset();
     mocks.audioStatus = {
       state: 'idle',
       outputMode: 'shared',
@@ -128,5 +132,16 @@ describe('lyrics IPC', () => {
       enabledProviders: ['local'],
       networkEnabled: false,
     }));
+  });
+
+  it('passes automatic candidate applications through with their origin', async () => {
+    mocks.applyLyricsCandidateMock.mockResolvedValue(trackLyrics('track-1'));
+    registerLyricsIpc();
+    const handler = mocks.handlers.get(IpcChannels.LyricsApplyCandidate);
+
+    await expect(handler?.(null, 'track-1', 'candidate-1', 'auto')).resolves.toMatchObject({
+      trackId: 'track-1',
+    });
+    expect(mocks.applyLyricsCandidateMock).toHaveBeenCalledWith('track-1', 'candidate-1', 'auto');
   });
 });

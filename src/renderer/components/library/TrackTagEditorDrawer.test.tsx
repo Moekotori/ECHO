@@ -104,6 +104,7 @@ const installEcho = (
       getForTrack: vi.fn().mockResolvedValue(null),
       searchCandidates: vi.fn().mockResolvedValue([]),
       applyCandidate: vi.fn().mockResolvedValue(trackLyrics()),
+      applyCustomLrc: vi.fn().mockResolvedValue(trackLyrics({ provider: 'manual' })),
       embedToTrack: vi.fn().mockResolvedValue({
         trackId: 'track-1',
         provider: 'lrclib',
@@ -121,6 +122,8 @@ const installEcho = (
     plugins: {
       list: vi.fn().mockResolvedValue({ directory: 'D:\\Echo\\plugins', plugins: [] }),
       queryMetadata: vi.fn().mockResolvedValue({ providers: [], candidates: [] }),
+      queryLyrics: vi.fn().mockResolvedValue({ providers: [], candidates: [] }),
+      queryCovers: vi.fn().mockResolvedValue({ providers: [], candidates: [] }),
       getLogs: vi.fn().mockResolvedValue([]),
       ...pluginOverrides,
     },
@@ -290,6 +293,39 @@ describe('TrackTagEditorDrawer network tags', () => {
     });
     expect(screen.getByText('Plugin Tags')).toBeTruthy();
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('surfaces plugin cover providers in the network candidate flow', async () => {
+    const queryCovers = vi.fn().mockResolvedValue({
+      providers: [{ pluginId: 'echo.cover', id: 'artwork', title: 'Cover Plugin' }],
+      candidates: [{
+        pluginId: 'echo.cover',
+        providerId: 'artwork',
+        imageUrl: 'https://example.test/plugin-cover.jpg',
+        title: 'Plugin Artwork',
+        source: 'Cover Plugin',
+        confidence: 0.91,
+      }],
+    });
+    installEcho(vi.fn(), {}, { queryCovers });
+
+    render(<TrackTagEditorDrawer track={track()} isOpen isSaving={false} error={null} onClose={vi.fn()} onSave={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('tab', { name: '网络候选' }));
+    fireEvent.click(screen.getByRole('button', { name: '插件候选' }));
+
+    await screen.findByText('Plugin Artwork');
+    expect(screen.getByText('Cover Plugin')).toBeTruthy();
+    expect(queryCovers).toHaveBeenCalledWith({
+      track: {
+        id: 'track-1',
+        title: 'Local Song',
+        artist: 'Local Artist',
+        album: 'Local Album',
+        albumArtist: 'Local Artist',
+        duration: 180,
+      },
+    });
   });
 
   it('can limit plugin metadata search to a selected provider', async () => {
@@ -499,6 +535,35 @@ describe('TrackTagEditorDrawer network tags', () => {
     await waitFor(() => expect(applyCandidate).toHaveBeenCalledWith('track-1', 'lyrics-candidate-cache'));
     expect(screen.getByText('已应用到歌词库，不会写入源音频文件。')).toBeTruthy();
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('surfaces plugin lyrics and applies them through the host lyrics cache', async () => {
+    const queryLyrics = vi.fn().mockResolvedValue({
+      providers: [{ pluginId: 'echo.lyrics', id: 'provider', title: 'Lyrics Plugin' }],
+      candidates: [{
+        pluginId: 'echo.lyrics',
+        providerId: 'provider',
+        title: 'Plugin Lyrics Song',
+        lrc: '[00:01.00]Plugin line',
+        source: 'Lyrics Plugin',
+        confidence: 0.9,
+      }],
+    });
+    const applyCustomLrc = vi.fn().mockResolvedValue(trackLyrics({ provider: 'manual', title: 'Plugin Lyrics Song' }));
+    installEcho(vi.fn(), { applyCustomLrc }, { queryLyrics });
+
+    render(<TrackTagEditorDrawer track={track()} isOpen isSaving={false} error={null} onClose={vi.fn()} onSave={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('tab', { name: '歌词' }));
+    fireEvent.click(screen.getByRole('button', { name: '搜索歌词' }));
+    await screen.findByText('Plugin Lyrics Song');
+    fireEvent.click(screen.getByRole('button', { name: '应用到歌词库' }));
+
+    await waitFor(() => expect(applyCustomLrc).toHaveBeenCalledWith(
+      'track-1',
+      '[00:01.00]Plugin line',
+      'Lyrics Plugin.lrc',
+    ));
   });
 
   it('embeds a lyrics candidate through the new lyrics API', async () => {

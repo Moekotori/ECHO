@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaiduRemoteSourceAdapter } from './BaiduRemoteSourceAdapter';
-import type { RemoteSourceSecret } from '../remoteTypes';
+import type { RemoteReadMetadataInput, RemoteSourceSecret } from '../remoteTypes';
 import { encodeBaiduOAuthTokenSecret } from '../BaiduOAuth';
 
 const readRequestBody = (request: IncomingMessage): Promise<Buffer> =>
@@ -141,11 +141,14 @@ describe('BaiduRemoteSourceAdapter', () => {
       fileApiUrl: `${baseUrl}/file`,
       multimediaApiUrl: `${baseUrl}/multimedia`,
     });
+    const controller = new AbortController();
+    const addAbortListener = vi.spyOn(controller.signal, 'addEventListener');
+    const removeAbortListener = vi.spyOn(controller.signal, 'removeEventListener');
 
     const result = await adapter.testConnection({ source: source() });
     expect(result.ok).toBe(true);
 
-    const items = await adapter.browse({ source: source(), path: '/Music' });
+    const items = await adapter.browse({ source: source(), path: '/Music', signal: controller.signal });
     expect(items).toEqual([
       expect.objectContaining({
         provider: 'baidu',
@@ -163,6 +166,53 @@ describe('BaiduRemoteSourceAdapter', () => {
         sizeBytes: 1234,
       }),
     ]);
+    expect(removeAbortListener.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(
+      addAbortListener.mock.calls.filter(([event]) => event === 'abort').length,
+    );
+  });
+
+  it('cancels a Range fallback once a chunked response exceeds the byte limit', async () => {
+    const originalFetch = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((async (...args: Parameters<typeof fetch>) => {
+      const [input, init] = args;
+      const url = new URL(String(input));
+      if (url.pathname === '/download/song.mp3') {
+        return new Response(new Uint8Array(32), {
+          status: 200,
+          headers: { 'Content-Type': 'audio/mpeg' },
+        });
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch);
+    const adapter = new BaiduRemoteSourceAdapter({
+      fileApiUrl: `${baseUrl}/file`,
+      multimediaApiUrl: `${baseUrl}/multimedia`,
+    });
+    const remoteSource = source();
+    const input: RemoteReadMetadataInput = {
+      source: remoteSource,
+      item: {
+        sourceId: remoteSource.id,
+        provider: 'baidu',
+        path: '/Music/song.mp3',
+        name: 'song.mp3',
+        kind: 'file',
+        sizeBytes: 32,
+        modifiedAt: null,
+        etag: 'fsid:102',
+        contentType: 'audio/mpeg',
+        audio: true,
+        remoteUrlHash: '',
+        stableKey: 'baidu|baidu-1|102',
+      },
+    };
+    const fetchRange = (
+      adapter as unknown as {
+        fetchRange: (request: RemoteReadMetadataInput, range: string, maxFallback: number) => Promise<Uint8Array | null>;
+      }
+    ).fetchRange.bind(adapter);
+
+    await expect(fetchRange(input, 'bytes=0-15', 16)).resolves.toBeNull();
   });
 
   it('uses filemetas dlink and pan.baidu.com UA for proxy playback', async () => {
@@ -178,6 +228,7 @@ describe('BaiduRemoteSourceAdapter', () => {
     });
 
     expect(request.headers?.['User-Agent']).toBe('pan.baidu.com');
+    expect(request.fetchTransport).toBe('node');
     expect(request.url).toContain('/download/song.mp3');
     expect(request.url).toContain('access_token=token-1');
   });

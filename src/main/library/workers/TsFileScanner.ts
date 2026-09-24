@@ -9,6 +9,7 @@ import type { FileScanner } from './FileScanner';
 type SnapshotReplayResult = {
   files: ScannedFile[];
   directories: string[];
+  entries: ScanDirectorySnapshotEntry[];
 };
 
 type FileScannerFileSystem = {
@@ -49,6 +50,11 @@ export class TsFileScanner implements FileScanner {
         return;
       }
       if (replay) {
+        options.onDirectorySnapshot?.({
+          path: directoryPath,
+          mtimeMs: directoryMtimeMs,
+          entries: replay.entries,
+        });
         for (const file of replay.files) {
           if (options.signal?.aborted) {
             return;
@@ -82,53 +88,57 @@ export class TsFileScanner implements FileScanner {
       return;
     }
 
-    const snapshotEntries = entries
-      .map((entry): ScanDirectorySnapshotEntry | null => {
-        if (entry.isDirectory()) {
-          return { name: entry.name, kind: 'directory' };
-        }
-        if (entry.isFile() && audioExtensions.has(this.getExtension(entry.name))) {
-          return { name: entry.name, kind: 'file' };
-        }
-        return null;
-      })
-      .filter((entry): entry is ScanDirectorySnapshotEntry => entry !== null);
-
-    options.onDirectorySnapshot?.({
-      path: directoryPath,
-      mtimeMs: directoryMtimeMs,
-      entries: snapshotEntries,
-    });
+    const snapshotEntries: ScanDirectorySnapshotEntry[] = [];
+    const pendingFiles: Array<{ name: string; path: string }> = [];
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        snapshotEntries.push({ name: entry.name, kind: 'directory' });
+        continue;
+      }
+      if (entry.isFile() && audioExtensions.has(this.getExtension(entry.name))) {
+        pendingFiles.push({ name: entry.name, path: join(directoryPath, entry.name) });
+      }
+    }
 
     let scannedEntries = 0;
     for (const entry of snapshotEntries) {
       if (options.signal?.aborted) {
         return;
       }
-      scannedEntries += 1;
-
-      const entryPath = join(directoryPath, entry.name);
-
       if (entry.kind === 'directory') {
-        yield* this.walk(entryPath, audioExtensions, options);
-        continue;
+        scannedEntries += 1;
+        yield* this.walk(join(directoryPath, entry.name), audioExtensions, options);
       }
+    }
 
-      const fileStat = await this.safeStat(entryPath, 'file_stat', options);
+    for (const pending of pendingFiles) {
+      if (options.signal?.aborted) {
+        return;
+      }
+      scannedEntries += 1;
+      const fileStat = await this.safeStat(pending.path, 'file_stat', options);
       if (!fileStat || !fileStat.isFile()) {
         continue;
       }
-
+      const sizeBytes = fileStat.size;
+      const mtimeMs = Math.round(fileStat.mtimeMs);
+      snapshotEntries.push({ name: pending.name, kind: 'file', sizeBytes, mtimeMs });
       yield {
-        path: resolve(entryPath),
-        sizeBytes: fileStat.size,
-        mtimeMs: Math.round(fileStat.mtimeMs),
+        path: resolve(pending.path),
+        sizeBytes,
+        mtimeMs,
       };
 
       if (scannedEntries % (options.yieldEveryEntries ?? defaultYieldEveryEntries) === 0) {
         await yieldToMainLoop();
       }
     }
+
+    options.onDirectorySnapshot?.({
+      path: directoryPath,
+      mtimeMs: directoryMtimeMs,
+      entries: snapshotEntries,
+    });
   }
 
   private getExtension(fileName: string): string {
@@ -143,6 +153,7 @@ export class TsFileScanner implements FileScanner {
   ): Promise<SnapshotReplayResult | null> {
     const files: ScannedFile[] = [];
     const directories: string[] = [];
+    const entries: ScanDirectorySnapshotEntry[] = [];
 
     for (const entry of snapshot.entries) {
       if (options.signal?.aborted) {
@@ -150,6 +161,13 @@ export class TsFileScanner implements FileScanner {
       }
 
       const entryPath = join(directoryPath, entry.name);
+
+      if (entry.kind === 'directory') {
+        directories.push(entryPath);
+        entries.push({ name: entry.name, kind: 'directory' });
+        continue;
+      }
+
       let entryStat: Stats;
       try {
         entryStat = await this.withTimeout(
@@ -160,26 +178,20 @@ export class TsFileScanner implements FileScanner {
       } catch {
         return null;
       }
-
-      if (entry.kind === 'directory') {
-        if (!entryStat.isDirectory()) {
-          return null;
-        }
-        directories.push(entryPath);
-        continue;
-      }
-
       if (!entryStat.isFile()) {
         return null;
       }
+      const sizeBytes = entryStat.size;
+      const mtimeMs = Math.round(entryStat.mtimeMs);
       files.push({
         path: resolve(entryPath),
-        sizeBytes: entryStat.size,
-        mtimeMs: Math.round(entryStat.mtimeMs),
+        sizeBytes,
+        mtimeMs,
       });
+      entries.push({ name: entry.name, kind: 'file', sizeBytes, mtimeMs });
     }
 
-    return { files, directories };
+    return { files, directories, entries };
   }
 
   private async safeStat(filePath: string, kind: ScanFileSystemError['kind'], options: ScanOptions): Promise<Stats | null> {

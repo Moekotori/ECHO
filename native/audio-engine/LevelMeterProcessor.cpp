@@ -37,6 +37,8 @@ void LevelMeterProcessor::prepare(double sampleRateIn, int maximumBlockSize, int
 
     peakSquares.assign(static_cast<size_t>(channelCount), 0.0f);
     rmsSquares.assign(static_cast<size_t>(channelCount), 0.0f);
+    callbackSnapshot.peakDb.assign(static_cast<size_t>(channelCount), silenceDb);
+    callbackSnapshot.rmsDb.assign(static_cast<size_t>(channelCount), silenceDb);
 
     reset();
 }
@@ -86,8 +88,9 @@ void LevelMeterProcessor::processBlock(echo::FloatAudioBuffer& buffer, int start
 
     if (samplesSinceReport >= intervalSamples && callback)
     {
-        LevelMeterSnapshot snapshot;
-        snapshot.timestampMs = samplesSinceReport * 1000.0 / sampleRate;
+        callbackSnapshot.timestampMs = samplesSinceReport * 1000.0 / sampleRate;
+        callbackSnapshot.peakDb.resize(static_cast<size_t>(ch));
+        callbackSnapshot.rmsDb.resize(static_cast<size_t>(ch));
 
         for (int channel = 0; channel < ch; ++channel)
         {
@@ -96,7 +99,7 @@ void LevelMeterProcessor::processBlock(echo::FloatAudioBuffer& buffer, int start
             const float peakDb = peakSquares[chIdx] > 0.0f
                 ? 10.0f * std::log10(peakSquares[chIdx])
                 : silenceDb;
-            snapshot.peakDb.push_back(sanitizeDb(peakDb));
+            callbackSnapshot.peakDb[chIdx] = sanitizeDb(peakDb);
 
             const float meanSquare = samplesSinceReport > 0.0
                 ? rmsSquares[chIdx] / static_cast<float>(samplesSinceReport)
@@ -104,10 +107,10 @@ void LevelMeterProcessor::processBlock(echo::FloatAudioBuffer& buffer, int start
             const float rmsDb = meanSquare > 0.0f
                 ? 10.0f * std::log10(meanSquare)
                 : silenceDb;
-            snapshot.rmsDb.push_back(sanitizeDb(rmsDb));
+            callbackSnapshot.rmsDb[chIdx] = sanitizeDb(rmsDb);
         }
 
-        callback(snapshot);
+        callback(callbackSnapshot);
 
         std::fill(peakSquares.begin(), peakSquares.end(), 0.0f);
         std::fill(rmsSquares.begin(), rmsSquares.end(), 0.0f);

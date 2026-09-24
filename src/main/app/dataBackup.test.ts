@@ -7,13 +7,17 @@ import { strFromU8, unzipSync } from 'fflate';
 let userDataPath = process.cwd();
 const getLibraryServiceMock = vi.fn();
 
-vi.mock('electron', () => ({
-  app: {
+vi.mock('electron', () => {
+  const app = {
     getName: () => 'ECHO NEXT',
     getPath: (name: string) => (name === 'userData' ? userDataPath : tmpdir()),
     getVersion: () => '0.0.0-test',
-  },
-}));
+  };
+  return {
+    app,
+    default: { app },
+  };
+});
 
 vi.mock('../library/LibraryService', () => ({
   getLibraryService: getLibraryServiceMock,
@@ -86,6 +90,112 @@ describe('data backup', () => {
 
       await expect(exportEchoUserDataBackup(join(backupRoot, 'backup.zip'))).rejects.toThrow('曲库数据库未通过健康检查');
       expect(existsSync(join(backupRoot, 'backup.zip'))).toBe(false);
+    } finally {
+      rmSync(backupRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    }
+  });
+
+  it('remaps restored wallpaper references to the current user data directory', async () => {
+    const appWallpaperDirectory = join(userDataPath, 'app-wallpapers');
+    const lyricsWallpaperDirectory = join(userDataPath, 'lyrics-wallpapers');
+    const landscapePath = join(appWallpaperDirectory, 'landscape.png');
+    const portraitPath = join(appWallpaperDirectory, 'portrait.webm');
+    const lyricsPath = join(lyricsWallpaperDirectory, 'lyrics.webp');
+    mkdirSync(appWallpaperDirectory, { recursive: true });
+    mkdirSync(lyricsWallpaperDirectory, { recursive: true });
+    writeFileSync(landscapePath, 'landscape');
+    writeFileSync(portraitPath, 'portrait');
+    writeFileSync(lyricsPath, 'lyrics');
+
+    const { remapRestoredWallpaperPaths } = await import('./dataBackup');
+    const remapped = remapRestoredWallpaperPaths({
+      appCustomWallpaperPath: 'C:\\Old-ECHO\\app-wallpapers\\landscape.png',
+      appPortraitWallpaperPath: 'C:\\Old-ECHO\\app-wallpapers\\portrait.webm',
+      lyricsCustomWallpaperPath: 'C:\\Old-ECHO\\lyrics-wallpapers\\lyrics.webp',
+    });
+
+    expect(remapped.appCustomWallpaperPath).toBe(landscapePath);
+    expect(remapped.appPortraitWallpaperPath).toBe(portraitPath);
+    expect(remapped.lyricsCustomWallpaperPath).toBe(lyricsPath);
+  });
+
+  it('imports through staging, preserves the current cache target, and reloads account state', async () => {
+    const backupRoot = mkdtempSync(join(tmpdir(), 'echo-data-backup-output-'));
+    const unrelatedDirectory = mkdtempSync(join(tmpdir(), 'echo-data-backup-unrelated-'));
+    const coverCacheDirectory = join(userDataPath, 'cover-cache');
+    mkdirSync(coverCacheDirectory, { recursive: true });
+    writeFileSync(join(unrelatedDirectory, 'keep.txt'), 'must-stay');
+    writeFileSync(join(coverCacheDirectory, 'cover.webp'), 'backup-cover');
+    writeFileSync(join(userDataPath, 'echo-playback-memory.json'), '{"track":"backup"}\n');
+
+    try {
+      const { setAppSettings } = await import('./appSettings');
+      const { getAccountService } = await import('../accounts/AccountService');
+      const { exportEchoUserDataBackup, importEchoUserDataBackup } = await import('./dataBackup');
+      setAppSettings({ coverCacheDir: unrelatedDirectory });
+      getAccountService().saveCookie('netease', 'MUSIC_U=backup');
+      const backupPath = join(backupRoot, 'backup.zip');
+      await exportEchoUserDataBackup(backupPath);
+
+      setAppSettings({ coverCacheDir: null });
+      getAccountService().saveCookie('netease', 'MUSIC_U=current');
+      writeFileSync(join(coverCacheDirectory, 'cover.webp'), 'current-cover');
+      writeFileSync(join(userDataPath, 'echo-playback-memory.json'), '{"track":"current"}\n');
+
+      const result = await importEchoUserDataBackup(backupPath);
+
+      expect(result.settings.coverCacheDir).toBeNull();
+      expect(readFileSync(join(unrelatedDirectory, 'keep.txt'), 'utf8')).toBe('must-stay');
+      expect(readFileSync(join(coverCacheDirectory, 'cover.webp'), 'utf8')).toBe('backup-cover');
+      expect(readFileSync(join(userDataPath, 'echo-playback-memory.json'), 'utf8')).toContain('backup');
+      expect(getAccountService().getCredentials('netease').cookie).toBe('MUSIC_U=backup');
+    } finally {
+      rmSync(backupRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+      rmSync(unrelatedDirectory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    }
+  });
+
+  it('blocks a backup while an import is active', async () => {
+    const backupRoot = mkdtempSync(join(tmpdir(), 'echo-data-backup-output-'));
+    try {
+      const { setAppSettings } = await import('./appSettings');
+      const { importEchoUserDataBackup, runDataBackupNow } = await import('./dataBackup');
+      setAppSettings({ autoDataBackupDirectory: backupRoot });
+
+      const importPromise = importEchoUserDataBackup(join(backupRoot, 'missing.zip'));
+      await expect(runDataBackupNow()).rejects.toThrow('导入正在运行');
+      await expect(importPromise).rejects.toThrow();
+
+      const backupPromise = runDataBackupNow();
+      await expect(importEchoUserDataBackup(join(backupRoot, 'missing.zip'))).rejects.toThrow('备份正在运行');
+      await backupPromise;
+    } finally {
+      rmSync(backupRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    }
+  });
+
+  it('backs off automatic retries after a failed backup', async () => {
+    const backupRoot = mkdtempSync(join(tmpdir(), 'echo-data-backup-output-'));
+    writeFileSync(join(userDataPath, 'echo-library.sqlite'), 'not sqlite', 'utf8');
+    try {
+      const { setAppSettings } = await import('./appSettings');
+      const {
+        disposeDataBackupScheduler,
+        getDataBackupStatus,
+        runDataBackupNow,
+      } = await import('./dataBackup');
+      setAppSettings({
+        autoDataBackupDirectory: backupRoot,
+        autoDataBackupEnabled: true,
+        autoDataBackupLastRunAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const failedAt = Date.now();
+      await expect(runDataBackupNow('automatic')).rejects.toThrow('曲库数据库未通过健康检查');
+      const nextBackupAt = getDataBackupStatus().nextBackupAt;
+      expect(nextBackupAt).not.toBeNull();
+      expect(new Date(nextBackupAt!).getTime() - failedAt).toBeGreaterThanOrEqual(4 * 60_000);
+      disposeDataBackupScheduler();
     } finally {
       rmSync(backupRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
     }

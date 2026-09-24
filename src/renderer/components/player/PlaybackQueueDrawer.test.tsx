@@ -205,30 +205,37 @@ describe('PlaybackQueueDrawer', () => {
     expect(screen.getByText('随机范围：当前文件夹随机：Workout · 避开最近 25 首')).toBeTruthy();
   });
 
-  it('fills the drawer queue with random tracks from the current source', async () => {
+  it('enables local smart radio and buffers a locally recommended track', async () => {
     const first = makeTrack(1);
-    const filled = makeTrack(20);
-    const getTracks = vi.fn().mockResolvedValue({
-      items: [first, filled],
-      total: 2,
-      page: 1,
-      pageSize: 36,
-      hasMore: false,
+    const recommended = makeTrack(20);
+    const getContinuousPlayRecommendations = vi.fn().mockResolvedValue({
+      mode: 'similar',
+      seedTrackId: first.id,
+      generatedAt: '2026-07-22T10:00:00.000Z',
+      items: [{
+        track: recommended,
+        score: 8.4,
+        reasons: [{ code: 'same-artist', value: recommended.artist }],
+      }],
     });
 
     window.echo = {
       library: {
-        getTracks,
+        getContinuousPlayRecommendations,
       },
     } as unknown as Window['echo'];
 
     renderDrawer(true, [first], first.id, { type: 'songs', label: '随机队列', sort: 'random' });
 
-    fireEvent.click(await screen.findByRole('button', { name: '补全队列' }));
+    fireEvent.click(await screen.findByRole('button', { name: '本地智能电台' }));
 
-    await waitFor(() => expect(getTracks).toHaveBeenCalledWith(expect.objectContaining({ sort: 'random', randomWindow: true })));
-    expect(await screen.findByText(filled.title)).toBeTruthy();
-    expect(screen.getByText('已补全 1 首')).toBeTruthy();
+    await waitFor(() => expect(getContinuousPlayRecommendations).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'similar',
+      seedTrackId: first.id,
+    })));
+    expect(await screen.findByText(recommended.title)).toBeTruthy();
+    expect(screen.getByText('同一歌手')).toBeTruthy();
+    expect(screen.getByText('完全在本机生成，不使用 AI 云服务')).toBeTruthy();
   });
 
   it('shows queue add feedback', async () => {

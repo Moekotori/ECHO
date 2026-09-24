@@ -235,7 +235,7 @@ describe('LibraryFoldersPanel', () => {
 
     render(<LibraryFoldersPanel />);
 
-    expect(screen.queryByRole('button', { name: /导入 osu! 文件夹|瀵煎叆 osu! 鏂囦欢澶/u })).toBeNull();
+    expect(screen.queryByRole('button', { name: /导入 osu! 文件夹/u })).toBeNull();
   });
 
   it('does not show the disabled osu folder import on the settings surface', async () => {
@@ -244,7 +244,7 @@ describe('LibraryFoldersPanel', () => {
     render(<LibraryFoldersPanel showOsuFolderImport />);
 
     await waitFor(() => expect(libraryMock.getFolders).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: /导入 osu! 文件夹|瀵煎叆 osu! 鏂囦欢澶/u })).toBeNull();
+    expect(screen.queryByRole('button', { name: /导入 osu! 文件夹/u })).toBeNull();
   });
 
   it('keeps folder controls collapsed by default when requested', async () => {

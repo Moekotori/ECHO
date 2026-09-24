@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { zipSync } from 'fflate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { importOsuArchiveAsMp3, parseOsuFileMetadata } from './OsuArchiveImport';
+import { importOsuArchiveAsMp3, importOsuArchiveTracksAsMp3, parseOsuFileMetadata } from './OsuArchiveImport';
 
 const tempRoots: string[] = [];
 
@@ -164,6 +164,70 @@ describe('OsuArchiveImport', () => {
         },
       }),
     );
+  });
+
+  it('extracts every distinct song in a pack and picks the largest background mapped to each song', async () => {
+    const root = makeTempRoot();
+    const archivePath = writeArchive(root, {
+      'song-a-easy.osu':
+        '[General]\nAudioFilename: audio/song-a.mp3\n\n[Metadata]\nTitle: Song A\nArtist: Artist A\nVersion: Easy\nBeatmapID: 101\n\n[Events]\n0,0,"covers/song-a-small.jpg",0,0\n',
+      'song-a-hard.osu':
+        '[General]\nAudioFilename: audio/song-a.mp3\n\n[Metadata]\nTitle: Song A\nArtist: Artist A\nVersion: Hard\nBeatmapID: 102\n\n[Events]\n0,0,"covers/song-a-large.jpg",0,0\n',
+      'song-b.osu':
+        '[General]\nAudioFilename: audio/song-b.mp3\n\n[Metadata]\nTitle: Song B\nArtist: Artist B\nVersion: Normal\nBeatmapID: 201\n\n[Events]\n0,0,"covers/song-b.png",0,0\n',
+      'song-a-1.1x.osu':
+        '[General]\nAudioFilename: audio/song-a-1.1x.mp3\n\n[Metadata]\nTitle: Song A\nArtist: Artist A\nVersion: 1.1x\n\n[Events]\n0,0,"covers/song-a-speed.jpg",0,0\n',
+      'song-a-1.2x.osu':
+        '[General]\nAudioFilename: audio/song-a-1.2x.mp3\n\n[Metadata]\nTitle: Song A\nArtist: Artist A\nVersion: 1.2x\n',
+      'audio/song-a.mp3': new Uint8Array([1, 2, 3]),
+      'audio/song-b.mp3': new Uint8Array([4, 5, 6]),
+      'audio/song-a-1.1x.mp3': new Uint8Array([7, 8, 9]),
+      'audio/song-a-1.2x.mp3': new Uint8Array([10, 11, 12]),
+      'covers/song-a-small.jpg': new Uint8Array([1, 1]),
+      'covers/song-a-large.jpg': new Uint8Array([2, 2, 2, 2, 2]),
+      'covers/song-b.png': new Uint8Array([3, 3, 3]),
+      'covers/song-a-speed.jpg': new Uint8Array([9, 9, 9, 9, 9, 9]),
+      'storyboard/unrelated-large.png': new Uint8Array(20).fill(8),
+    });
+    const writeEmbeddedTrackTags = vi.fn(async () => undefined);
+
+    const result = await importOsuArchiveTracksAsMp3({
+      archivePath,
+      outputDirectory: root,
+      beatmapsetId: '999',
+      dependencies: { writeEmbeddedTrackTags },
+    });
+
+    expect(result.skippedSpeedVariantCount).toBe(2);
+    expect(result.tracks.map((track) => track.tags.title)).toEqual(['Song A', 'Song B']);
+    expect(result.tracks.map((track) => [...readFileSync(track.outputPath)])).toEqual([[1, 2, 3], [4, 5, 6]]);
+    expect(writeEmbeddedTrackTags).toHaveBeenCalledTimes(2);
+    expect(result.tracks.map((track) => track.coverData)).toEqual([
+      { data: new Uint8Array([2, 2, 2, 2, 2]), mimeType: 'image/jpeg' },
+      { data: new Uint8Array([3, 3, 3]), mimeType: 'image/png' },
+    ]);
+  });
+
+  it('keeps only the closest-to-original version when a pack contains only speed variants', async () => {
+    const root = makeTempRoot();
+    const archivePath = writeArchive(root, {
+      'song-1.1x.osu':
+        '[General]\nAudioFilename: song-1.1x.mp3\n\n[Metadata]\nTitle: Rate Pack Song\nArtist: Artist\nVersion: 1.1x\n',
+      'song-1.2x.osu':
+        '[General]\nAudioFilename: song-1.2x.mp3\n\n[Metadata]\nTitle: Rate Pack Song\nArtist: Artist\nVersion: 1.2x\n',
+      'song-1.1x.mp3': new Uint8Array([11]),
+      'song-1.2x.mp3': new Uint8Array([12]),
+    });
+
+    const result = await importOsuArchiveTracksAsMp3({
+      archivePath,
+      outputDirectory: root,
+      writeEmbeddedTags: false,
+    });
+
+    expect(result.skippedSpeedVariantCount).toBe(1);
+    expect(result.tracks).toHaveLength(1);
+    expect([...readFileSync(result.tracks[0].outputPath)]).toEqual([11]);
   });
 
   it('converts non-mp3 beatmap audio to mp3 with ffmpeg', async () => {

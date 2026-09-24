@@ -1,7 +1,11 @@
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import { BPM_CONFIDENCE_THRESHOLD, BPM_DISPLAY_CONFIDENCE_THRESHOLD } from '../../../shared/constants/audioAnalysis';
+import {
+  BPM_ANALYSIS_VERSION,
+  BPM_ANALYSIS_VERSION_FIELD,
+  BPM_CONFIDENCE_THRESHOLD,
+} from '../../../shared/constants/audioAnalysis';
 import type { LibraryStore } from '../LibraryStore';
 import type { BpmAnalysisJobStatus, BpmAnalysisStartOptions, LibraryTrack } from '../libraryTypes';
 import { writeEmbeddedBpmTag } from '../TagWriter';
@@ -16,6 +20,13 @@ const defaultTagWriteMaxAttempts = 120;
 
 const nowIso = (): string => new Date().toISOString();
 
+const hasOsuTimingBpm = (track: LibraryTrack): boolean =>
+  typeof track.bpm === 'number' &&
+  Number.isFinite(track.bpm) &&
+  track.bpm > 0 &&
+  track.fieldSources?.osu === 'osu' &&
+  track.fieldSources?.bpm !== 'audio_analysis';
+
 type BpmTagWriter = (filePath: string, bpm: number) => Promise<void>;
 type BpmTagWriteDelayPredicate = (filePath: string) => Promise<boolean>;
 
@@ -27,6 +38,7 @@ export class BpmAnalysisJobQueue {
   private readonly tagWriteMaxAttempts: number;
   private readonly jobs = new Map<string, MutableJobStatus>();
   private runningJob: Promise<void> | null = null;
+  private disposed = false;
 
   constructor(
     private readonly store: LibraryStore,
@@ -46,6 +58,9 @@ export class BpmAnalysisJobQueue {
   }
 
   start(options: BpmAnalysisStartOptions = {}): BpmAnalysisJobStatus {
+    if (this.disposed) {
+      throw new Error('BPM analysis queue is disposed');
+    }
     const id = randomUUID();
     const limit = Math.max(1, Math.min(500, Math.floor(options.limit ?? defaultLimit)));
     const targets = this.store.findBpmAnalysisTargets(limit, options.trackIds, options.force === true);
@@ -63,18 +78,16 @@ export class BpmAnalysisJobQueue {
     };
     this.jobs.set(id, job);
 
-    const run = async (): Promise<void> => {
-      if (this.runningJob) {
-        await this.runningJob.catch(() => undefined);
-      }
-      await this.runJob(job, targets);
-    };
-
-    this.runningJob = run().finally(() => {
-      if (this.runningJob) {
+    const previousJob = this.runningJob;
+    const run = (previousJob ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.runJob(job, targets));
+    const trackedJob = run.finally(() => {
+      if (this.runningJob === trackedJob) {
         this.runningJob = null;
       }
     });
+    this.runningJob = trackedJob;
 
     return { ...job };
   }
@@ -87,10 +100,27 @@ export class BpmAnalysisJobQueue {
     return { ...job, errors: [...job.errors] };
   }
 
+  async waitForIdle(): Promise<void> {
+    while (this.runningJob) {
+      const runningJob = this.runningJob;
+      await runningJob.catch(() => undefined);
+      if (this.runningJob === runningJob) {
+        return;
+      }
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+  }
+
   private async runJob(job: MutableJobStatus, tracks: LibraryTrack[]): Promise<void> {
     job.status = 'running';
     try {
       for (const track of tracks) {
+        if (this.disposed) {
+          break;
+        }
         job.currentTrackTitle = track.title;
         this.store.markTrackAnalyzing(track.id);
         try {
@@ -99,17 +129,31 @@ export class BpmAnalysisJobQueue {
           }
 
           const result = await this.analyzer.analyze(track.path, track.duration);
+          if (this.disposed) {
+            break;
+          }
           const status = result.confidence >= BPM_CONFIDENCE_THRESHOLD ? 'complete' : 'low_confidence';
-          const displayable = result.confidence >= BPM_DISPLAY_CONFIDENCE_THRESHOLD;
-          const bpm = result.bpm > 0 && displayable ? result.bpm : null;
-          const beatOffsetMs = result.beatOffsetMs >= 0 && displayable ? result.beatOffsetMs : null;
+          const preserveOsuBpm = hasOsuTimingBpm(track);
+          const bpm = preserveOsuBpm ? track.bpm! : result.bpm > 0 ? result.bpm : null;
+          const beatOffsetMs = result.beatOffsetMs >= 0 && result.bpm > 0 ? result.beatOffsetMs : null;
+          const storedStatus = preserveOsuBpm ? 'complete' : status;
           this.store.updateTrackBpmAnalysis(track.id, {
             bpm,
-            confidence: result.confidence,
+            confidence: preserveOsuBpm ? 1 : result.confidence,
             beatOffsetMs,
-            status,
+            status: storedStatus,
+            ...(preserveOsuBpm
+              ? {
+                  fieldSources: {
+                    ...track.fieldSources,
+                    bpm: 'osu',
+                    ...(beatOffsetMs !== null ? { beatOffsetMs: 'audio_analysis' } : {}),
+                    [BPM_ANALYSIS_VERSION_FIELD]: String(BPM_ANALYSIS_VERSION),
+                  },
+                }
+              : {}),
           });
-          if (bpm && status === 'complete') {
+          if (bpm && storedStatus === 'complete' && track.fieldSources?.osu !== 'osu') {
             this.scheduleBpmTagWrite(track.path, bpm, job);
           }
           job.updatedTracks += bpm ? 1 : 0;

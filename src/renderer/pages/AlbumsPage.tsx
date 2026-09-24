@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Check, ChevronDown, Disc3, ListFilter, RefreshCw, Search } from 'lucide-react';
 import type { AppSettings } from '../../shared/types/appSettings';
+import { resolveEffectivePerformancePolicy } from '../../shared/utils/performancePolicy';
 import type { EditableAlbumTags, LibraryAlbum, LibraryPlaylist, LibrarySort, LibraryTrack } from '../../shared/types/library';
 import type { RemoteSource } from '../../shared/types/remoteSources';
 import { AlbumContextMenu } from '../components/album/AlbumContextMenu';
@@ -45,20 +46,44 @@ const isPreserveScrollLibraryEvent = (event: Event): boolean =>
 const dispatchPreservedLibraryChange = (): void => {
   window.dispatchEvent(new CustomEvent('library:changed', { detail: { preserveScroll: true } }));
 };
-const albumSortOptions: Array<{ value: LibrarySort; labelKey: TranslationKey }> = [
-  { value: 'default', labelKey: 'library.sort.default' },
-  { value: 'titleAsc', labelKey: 'library.albums.sort.titleAsc' },
-  { value: 'titleDesc', labelKey: 'library.albums.sort.titleDesc' },
-  { value: 'artist', labelKey: 'library.albums.sort.artist' },
-  { value: 'createdAsc', labelKey: 'library.sort.createdAsc' },
-  { value: 'createdDesc', labelKey: 'library.sort.createdDesc' },
-  { value: 'durationAsc', labelKey: 'library.sort.durationAsc' },
-  { value: 'durationDesc', labelKey: 'library.sort.durationDesc' },
-  { value: 'fileModifiedAsc', labelKey: 'library.sort.fileModifiedAsc' },
-  { value: 'fileModifiedDesc', labelKey: 'library.sort.fileModifiedDesc' },
-  { value: 'recent', labelKey: 'library.sort.recent' },
-  { value: 'random', labelKey: 'library.sort.random' },
+type AlbumSortOption = { value: LibrarySort; labelKey: TranslationKey };
+const albumSortGroups: Array<{ labelKey: TranslationKey; options: AlbumSortOption[] }> = [
+  {
+    labelKey: 'library.albums.sort.group.general',
+    options: [
+      { value: 'default', labelKey: 'library.sort.default' },
+      { value: 'titleAsc', labelKey: 'library.albums.sort.titleAsc' },
+      { value: 'titleDesc', labelKey: 'library.albums.sort.titleDesc' },
+      { value: 'artist', labelKey: 'library.albums.sort.artist' },
+      { value: 'yearDesc', labelKey: 'library.albums.sort.yearDesc' },
+      { value: 'yearAsc', labelKey: 'library.albums.sort.yearAsc' },
+    ],
+  },
+  {
+    labelKey: 'library.albums.sort.group.listening',
+    options: [
+      { value: 'lastPlayed', labelKey: 'library.albums.sort.lastPlayed' },
+      { value: 'playCountDesc', labelKey: 'library.albums.sort.playCountDesc' },
+      { value: 'playCountAsc', labelKey: 'library.albums.sort.playCountAsc' },
+      { value: 'random', labelKey: 'library.sort.random' },
+    ],
+  },
+  {
+    labelKey: 'library.albums.sort.group.library',
+    options: [
+      { value: 'recent', labelKey: 'library.albums.sort.recentAdded' },
+      { value: 'trackCountDesc', labelKey: 'library.albums.sort.trackCountDesc' },
+      { value: 'trackCountAsc', labelKey: 'library.albums.sort.trackCountAsc' },
+      { value: 'durationAsc', labelKey: 'library.sort.durationAsc' },
+      { value: 'durationDesc', labelKey: 'library.sort.durationDesc' },
+      { value: 'createdAsc', labelKey: 'library.sort.createdAsc' },
+      { value: 'createdDesc', labelKey: 'library.sort.createdDesc' },
+      { value: 'fileModifiedAsc', labelKey: 'library.sort.fileModifiedAsc' },
+      { value: 'fileModifiedDesc', labelKey: 'library.sort.fileModifiedDesc' },
+    ],
+  },
 ];
+const albumSortOptions = albumSortGroups.flatMap((group) => group.options);
 const albumsSortStorageKey = 'echo-next.albums.sort';
 const validAlbumSortValues = new Set<LibrarySort>(albumSortOptions.map((option) => option.value));
 
@@ -92,14 +117,15 @@ const readAlbumWallScrollTop = (element: Element | null): number => {
 
 const writeAlbumWallScrollTop = (element: Element | null, top: number): void => {
   const scrollContainer = getPageScrollContainer(element);
+  const albumsPage = element?.closest('.albums-page') as HTMLElement | null;
   const pageSurface = element?.closest('.page-surface') as HTMLElement | null;
 
   if (scrollContainer) {
     scrollContainer.scrollTop = top;
   }
 
-  if (pageSurface && pageSurface !== scrollContainer) {
-    pageSurface.scrollTop = 0;
+  if (pageSurface && pageSurface !== scrollContainer && albumsPage?.dataset.detailOpen !== 'true') {
+    pageSurface.scrollTop = top;
   }
 };
 
@@ -280,7 +306,7 @@ export const AlbumsPage = (): JSX.Element => {
 
   useEffect(() => {
     const applySettings = (settings: Partial<AppSettings> | null | undefined): void => {
-      setAlbumWallVirtualizationEnabled(settings?.albumWallVirtualizationEnabled === true);
+      setAlbumWallVirtualizationEnabled(resolveEffectivePerformancePolicy(settings).albumWallVirtualizationEnabled);
     };
 
     const loadSettings = (): void => {
@@ -294,14 +320,7 @@ export const AlbumsPage = (): JSX.Element => {
       void app.getSettings().then(applySettings).catch(() => applySettings(null));
     };
 
-    const handleSettingsChanged = (event: Event): void => {
-      const detail = event instanceof CustomEvent ? (event.detail as Partial<AppSettings> | null | undefined) : null;
-
-      if (detail && Object.prototype.hasOwnProperty.call(detail, 'albumWallVirtualizationEnabled')) {
-        applySettings(detail);
-        return;
-      }
-
+    const handleSettingsChanged = (): void => {
       loadSettings();
     };
 
@@ -452,6 +471,12 @@ export const AlbumsPage = (): JSX.Element => {
       return;
     }
 
+    if (selectedAlbumReturnTo === 'playlists') {
+      window.dispatchEvent(new CustomEvent('app:navigate:route', { detail: 'playlists' }));
+      closeAlbumDetailAfterSourceRouteSwitch();
+      return;
+    }
+
     if (selectedAlbumReturnTo === 'songs') {
       window.dispatchEvent(new Event('app:navigate:songs'));
       closeAlbumDetailAfterSourceRouteSwitch();
@@ -586,10 +611,12 @@ export const AlbumsPage = (): JSX.Element => {
         return false;
       }
 
-      await library.deleteAlbumFiles(album.id);
-      setAlbums((current) => current.filter((item) => item.id !== album.id));
+      const result = await library.deleteAlbumFiles(album.id);
+      if (result.items.every((item) => item.status === 'success')) {
+        setAlbums((current) => current.filter((item) => item.id !== album.id));
+      }
       dispatchPreservedLibraryChange();
-      return true;
+      return result.items.every((item) => item.status === 'success');
     },
     [t],
   );
@@ -876,8 +903,9 @@ export const AlbumsPage = (): JSX.Element => {
 
     return Math.max(albumWallMinCardWidthPx, availableWidth / albumWallColumnCount);
   }, [albumWallColumnCount, albumWallViewportWidth]);
+  const albumWallVirtualLayoutReady = albumWallVirtualizationEnabled && albumWallViewportWidth > 0;
   const albumWallEstimatedRowHeight = Math.ceil(Math.max(albumWallVirtualMinRowHeightPx, albumWallEstimatedCardWidth + albumWallVirtualCopyHeightPx));
-  const albumWallVirtualRowCount = albumWallVirtualizationEnabled ? Math.ceil(albums.length / albumWallColumnCount) : 0;
+  const albumWallVirtualRowCount = albumWallVirtualLayoutReady ? Math.ceil(albums.length / albumWallColumnCount) : 0;
   const albumWallVirtualizer = useVirtualizer({
     count: albumWallVirtualRowCount,
     getScrollElement: () => getPageScrollContainer(pageRootRef.current),
@@ -886,9 +914,9 @@ export const AlbumsPage = (): JSX.Element => {
   });
   const albumWallVirtualRows = albumWallVirtualizer.getVirtualItems();
   const renderedAlbumWallVirtualRows =
-    albumWallVirtualizationEnabled && albumWallVirtualRows.length > 0
+    albumWallVirtualLayoutReady && albumWallVirtualRows.length > 0
       ? albumWallVirtualRows
-      : albumWallVirtualizationEnabled
+      : albumWallVirtualLayoutReady
         ? Array.from({ length: Math.min(albumWallVirtualRowCount, albumWallVirtualFallbackRows) }, (_, index) => ({
             index,
             key: `album-wall-fallback-${index}`,
@@ -972,7 +1000,7 @@ export const AlbumsPage = (): JSX.Element => {
   }, [albums.length, isLoading]);
 
   useEffect(() => {
-    if (!albumWallVirtualizationEnabled || !hasMore || isLoading || albumWallVirtualRowCount <= 0 || albumWallVirtualLoadRequestedRef.current) {
+    if (!albumWallVirtualLayoutReady || !hasMore || isLoading || albumWallVirtualRowCount <= 0 || albumWallVirtualLoadRequestedRef.current) {
       return;
     }
 
@@ -984,7 +1012,7 @@ export const AlbumsPage = (): JSX.Element => {
 
     albumWallVirtualLoadRequestedRef.current = true;
     handleLoadMoreAlbums();
-  }, [albumWallVirtualizationEnabled, albumWallVirtualRowCount, handleLoadMoreAlbums, hasMore, isLoading, lastAlbumWallVirtualRowIndex]);
+  }, [albumWallVirtualLayoutReady, albumWallVirtualRowCount, handleLoadMoreAlbums, hasMore, isLoading, lastAlbumWallVirtualRowIndex]);
 
   const renderAlbumCard = (album: LibraryAlbum, index: number): JSX.Element => {
     const shouldShowCover = Boolean(album.coverThumb && failedCoverUrls[album.id] !== album.coverThumb);
@@ -1091,22 +1119,28 @@ export const AlbumsPage = (): JSX.Element => {
             <ChevronDown className="sort-button-chevron" size={15} aria-hidden="true" />
           </button>
           {isSortOpen ? (
-            <div className="sort-menu" role="listbox" aria-label={t('library.albums.sort.aria')}>
-              {albumSortOptions.map((option) => (
-                <button
-                  key={option.value}
-                  className="sort-option"
-                  type="button"
-                  role="option"
-                  aria-selected={sort === option.value}
-                  onClick={() => {
-                    setSort(option.value);
-                    setIsSortOpen(false);
-                  }}
-                >
-                  <span>{t(option.labelKey)}</span>
-                  {sort === option.value ? <Check size={14} /> : null}
-                </button>
+            <div className="sort-menu" role="listbox" aria-label={t('library.albums.sort.aria')} data-state="open">
+              {albumSortGroups.map((group, groupIndex) => (
+                <Fragment key={group.labelKey}>
+                  {groupIndex > 0 ? <div className="sort-menu-divider" role="presentation" /> : null}
+                  <div className="sort-menu-section-title" role="presentation">{t(group.labelKey)}</div>
+                  {group.options.map((option) => (
+                    <button
+                      key={option.value}
+                      className="sort-option"
+                      type="button"
+                      role="option"
+                      aria-selected={sort === option.value}
+                      onClick={() => {
+                        setSort(option.value);
+                        setIsSortOpen(false);
+                      }}
+                    >
+                      <span>{t(option.labelKey)}</span>
+                      {sort === option.value ? <Check size={14} /> : null}
+                    </button>
+                  ))}
+                </Fragment>
               ))}
             </div>
           ) : null}
@@ -1114,7 +1148,7 @@ export const AlbumsPage = (): JSX.Element => {
       </div>
 
       <div ref={pageRootRef} className="media-wall-scroll-shell page-scroll-container">
-        {albumWallVirtualizationEnabled ? (
+        {albumWallVirtualLayoutReady ? (
           <section
             className="album-wall album-wall--virtualized"
             aria-label={t('library.albums.listAria')}
@@ -1146,7 +1180,7 @@ export const AlbumsPage = (): JSX.Element => {
             {albums.map((album, index) => renderAlbumCard(album, index))}
           </section>
         )}
-        {albumWallVirtualizationEnabled ? null : (
+        {albumWallVirtualLayoutReady ? null : (
           <InfiniteScrollSentinel
             canLoadMore={hasMore}
             fallbackDistance={albumWallLoadAheadDistancePx}

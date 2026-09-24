@@ -1,6 +1,8 @@
 import { existsSync as nodeExistsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { execFileSync as nodeExecFileSync } from 'node:child_process';
+import electron from 'electron';
+import { resolveInstalledAudioRuntimeFfmpeg } from '../app/RuntimeComponentService';
 
 export type FfmpegToolchainSource = 'explicit' | 'bundled' | 'dev-bundled' | 'system';
 
@@ -21,6 +23,8 @@ export type FfmpegToolchainDependencies = {
   env?: NodeJS.ProcessEnv;
   systemFfmpegPath?: string | null;
   resourcesPath?: string | null;
+  runtimeComponentRoot?: string | null;
+  userDataPath?: string | null;
   platform?: NodeJS.Platform;
   cwd?: string;
   existsSync?: (path: string) => boolean;
@@ -58,6 +62,18 @@ const getResourcesPath = (dependencies: FfmpegToolchainDependencies): string | n
   return normalizePath(processResourcesPath);
 };
 
+const getUserDataPath = (dependencies: FfmpegToolchainDependencies): string | null => {
+  if (dependencies.userDataPath !== undefined) {
+    return normalizePath(dependencies.userDataPath);
+  }
+  const electronApp = (electron as unknown as { app?: { getPath: (name: string) => string } }).app;
+  try {
+    return normalizePath(electronApp?.getPath?.('userData'));
+  } catch {
+    return null;
+  }
+};
+
 const readManifestVersion = (ffmpegPath: string): string | null => {
   try {
     const manifestPath = join(dirname(ffmpegPath), 'ffmpeg-manifest.json');
@@ -84,12 +100,18 @@ const collectCandidates = (dependencies: FfmpegToolchainDependencies = {}): Ffmp
   const systemPath = normalizePath(dependencies.systemFfmpegPath) ?? 'ffmpeg';
   const explicitFfmpegPath = normalizePath(dependencies.ffmpegPath);
   const explicitEnvPath = normalizePath(env.ECHO_FFMPEG_PATH);
+  const runtimeComponentRoot = normalizePath(dependencies.runtimeComponentRoot)
+    ?? normalizePath(env.ECHO_AUDIO_RUNTIME_COMPONENT_ROOT);
+  const installedRuntimeFfmpeg = resolveInstalledAudioRuntimeFfmpeg(getUserDataPath(dependencies));
   const candidates: Array<FfmpegCandidate | null> = [
     explicitFfmpegPath
       ? { path: normalizeAsarUnpackedPath(explicitFfmpegPath), source: 'explicit', mustExist: false }
       : null,
     explicitEnvPath
       ? { path: normalizeAsarUnpackedPath(explicitEnvPath), source: 'explicit', mustExist: false }
+      : null,
+    runtimeComponentRoot
+      ? { path: join(runtimeComponentRoot, 'tools', executableName), source: 'bundled', mustExist: true }
       : null,
     resourcesPath
       ? { path: join(resourcesPath, 'tools', executableName), source: 'bundled', mustExist: true }
@@ -98,6 +120,9 @@ const collectCandidates = (dependencies: FfmpegToolchainDependencies = {}): Ffmp
       ? { path: join(cwd, 'electron-app', 'tools-linux', executableName), source: 'dev-bundled', mustExist: true }
       : null,
     { path: join(cwd, 'electron-app', 'tools', executableName), source: 'dev-bundled', mustExist: true },
+    installedRuntimeFfmpeg
+      ? { path: installedRuntimeFfmpeg, source: 'bundled', mustExist: true }
+      : null,
     { path: systemPath, source: 'system', mustExist: false },
   ];
 

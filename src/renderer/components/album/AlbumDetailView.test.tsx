@@ -32,7 +32,7 @@ vi.mock('../../stores/PlaybackQueueProvider', () => ({
 }));
 
 vi.mock('../../stores/playbackStatusStore', () => ({
-  useSharedPlaybackStatus: () => sharedPlaybackState.value,
+  useSharedAudioPlaybackState: () => sharedPlaybackState.value.audioStatus?.state ?? null,
 }));
 
 vi.mock('../../i18n/I18nProvider', () => {
@@ -41,6 +41,8 @@ vi.mock('../../i18n/I18nProvider', () => {
     'albumDetail.action.addToQueue': 'Add to queue',
     'albumDetail.action.more': 'More album actions',
     'albumDetail.action.showInFolder': 'Show in folder',
+    'albumDetail.action.viewCover': 'View full cover',
+    'albumDetail.aria.coverPreview': '{album} full cover artwork',
     'albumDetail.count.loadedTracks': '{loaded} of {total} tracks',
     'albumDetail.count.tracks': '{count} tracks',
     'albumDetail.dna.aria': 'Album DNA',
@@ -90,6 +92,7 @@ vi.mock('../../i18n/I18nProvider', () => {
     'albumDetail.dna.unknown': 'Unknown',
     'albumDetail.tracks.status.addedToPlaylist': 'Added to {playlist}.',
     'albumMenu.action.addToPlaylist': 'Add to playlist...',
+    'albumMenu.action.copyCover': 'Copy album cover',
     'albumMenu.playlistSubmenu.aria': 'Choose playlist',
     'albumMenu.playlistSubmenu.empty': 'No local playlists',
     'albumMenu.playlistSubmenu.itemCount': '{count} tracks',
@@ -120,6 +123,7 @@ vi.mock('../../i18n/I18nProvider', () => {
     'albumDetail.tab.releases': 'Versions',
     'albumDetail.tab.sources': 'Sources',
     'albumDetail.tab.tracks': 'Tracks',
+    'app.window.close': 'Close',
   };
 
   return {
@@ -812,7 +816,7 @@ describe('AlbumDetailView', () => {
     expect(screen.queryByText(/== Career ==/u)).toBeNull();
   });
 
-  it('uses original album artwork in the detail hero', async () => {
+  it('uses the static large album artwork in the detail hero', async () => {
     installLibrary();
 
     const { container } = render(<AlbumDetailView album={album({
@@ -820,7 +824,7 @@ describe('AlbumDetailView', () => {
       coverThumb: 'echo-cover://album/cover%201',
     })} onBack={vi.fn()} />);
 
-    expect((container.querySelector('.album-detail-cover img') as HTMLImageElement | null)?.getAttribute('src')).toBe('echo-cover://original/cover%201');
+    expect((container.querySelector('.album-detail-cover img') as HTMLImageElement | null)?.getAttribute('src')).toBe('echo-cover://large/cover%201');
   });
 
   it('copies the original album artwork from the detail cover context menu', async () => {
@@ -835,6 +839,31 @@ describe('AlbumDetailView', () => {
 
     await waitFor(() => expect(copyAlbumCover).toHaveBeenCalledWith('album-1'));
     expect(screen.getByText('Original cover copied')).toBeTruthy();
+  });
+
+  it('shows only the full album artwork and copies it when left-clicked', async () => {
+    const { copyAlbumCover } = installLibrary();
+
+    const { container } = render(<AlbumDetailView album={album({
+      title: 'Preview Album',
+      coverId: 'cover 1',
+      coverThumb: 'echo-cover://album/cover%201',
+    })} onBack={vi.fn()} />);
+
+    fireEvent.click(container.querySelector('.album-detail-cover')!);
+
+    const preview = screen.getByRole('dialog', { name: 'Preview Album full cover artwork' });
+    expect(preview.querySelector('img')?.getAttribute('src')).toBe('echo-cover://large/cover%201');
+    expect(preview.textContent).toBe('');
+    expect(preview.querySelector('.album-cover-preview-toolbar')).toBeNull();
+    expect(preview.querySelector('.album-cover-preview-status')).toBeNull();
+
+    fireEvent.click(preview.querySelector('img')!);
+    await waitFor(() => expect(copyAlbumCover).toHaveBeenCalledWith('album-1'));
+    expect(preview.textContent).toBe('');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Preview Album full cover artwork' })).toBeNull();
   });
 
   it('opens information links through the system browser bridge', async () => {

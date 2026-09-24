@@ -502,12 +502,30 @@ export type PluginSettingsResult = {
 };
 
 export const pluginPanelBridgeChannel = 'echo:plugin-panel';
-export const pluginPanelBridgeVersion = 1;
+export const pluginPanelBridgeVersion = 2;
+
+export const pluginPanelHostActions = [
+  'host:playback:getStatus',
+  'host:playback:play',
+  'host:playback:pause',
+  'host:playback:stop',
+  'host:playback:seek',
+  'host:library:getSummary',
+  'host:library:getTracks',
+  'host:settings:get',
+  'host:settings:set',
+  'host:ui:notify',
+] as const;
+
+export type PluginPanelHostAction = (typeof pluginPanelHostActions)[number];
 
 export const pluginPanelBridgeActions = [
   'plugin:getSummary',
   'plugin:getLogs',
   'plugin:runCommand',
+  'plugin:subscribe',
+  'plugin:unsubscribe',
+  ...pluginPanelHostActions,
 ] as const;
 
 export type PluginPanelBridgeAction = (typeof pluginPanelBridgeActions)[number];
@@ -538,6 +556,15 @@ export type PluginPanelBridgeResponse = {
       error: string;
     }
 );
+
+export type PluginPanelBridgeEvent = {
+  channel: typeof pluginPanelBridgeChannel;
+  version: typeof pluginPanelBridgeVersion;
+  type: 'event';
+  pluginId: string;
+  eventName: PluginEventName;
+  payload: unknown;
+};
 
 export type PluginRuntimeStatus = 'disabled' | 'enabled' | 'running' | 'error';
 

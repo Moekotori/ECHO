@@ -4,6 +4,7 @@ import { asRecord, fetchJsonWithTimeout, number, text } from '../library/network
 import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, LyricsProviderSearchRequest } from './LyricsProvider';
 import { isInstrumentalLyricsText } from './instrumentalPlaceholders';
 import { parseSyncedLyrics } from './lyricsParser';
+import { providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
 
 const kugouHeaders = {
   Referer: 'https://www.kugou.com/',
@@ -97,7 +98,10 @@ export class KugouLyricsProvider implements LyricsProvider {
   async search(request: LyricsProviderSearchRequest): Promise<LyricsProviderResult[]> {
     try {
       const songs = await this.searchSongs(request);
-      const results = await Promise.all(songs.slice(0, 5).map((song) => this.fetchLyrics(song, request)));
+      const rankedSongs = rankLyricsProviderItems(request, songs);
+      const results = await Promise.all(
+        rankedSongs.slice(0, providerLyricsFetchLimit(request)).map((song) => this.fetchLyrics(song, request)),
+      );
       return results.filter((result): result is LyricsProviderResult => Boolean(result));
     } catch {
       return [];
@@ -153,6 +157,10 @@ export class KugouLyricsProvider implements LyricsProvider {
           durationSeconds: secondsFromDuration(song.Duration ?? song.duration),
           raw: songValue,
         });
+      }
+
+      if (!request.collectAllCandidates && songs.length > 0) {
+        break;
       }
     }
 

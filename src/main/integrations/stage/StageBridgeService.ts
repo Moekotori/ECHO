@@ -1,18 +1,24 @@
-import { EventEmitter } from 'node:events';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { AudioStatus } from '../../../shared/types/audio';
+import type { IntegrationEventEnvelopeV1, IntegrationPlaybackSnapshotV1 } from '../../../shared/types/integrationPlatform';
 import type { StageBridgeLyricLine, StageBridgeServerStatus, StageBridgeSnapshot } from '../../../shared/types/stage';
 import type { TrackLyrics } from '../../../shared/types/lyrics';
-import { getAudioSession } from '../../audio/AudioSession';
 import { getLyricsService } from '../../lyrics/LyricsService';
+import { getIntegrationEventHub } from '../core/IntegrationEventHub';
+import {
+  createAudioSessionStageVisualTelemetrySource,
+  type StageVisualTelemetrySnapshot,
+  type StageVisualTelemetrySource,
+} from './StageVisualTelemetrySource';
+import { decrementStageBridgeClients, incrementStageBridgeClients } from './StageBridgeRuntime';
 
 export const defaultStageBridgeHost = '127.0.0.1';
 export const defaultStageBridgePort = 47669;
 export const stageBridgeVersion = 1;
 
-type StageAudioSession = EventEmitter & {
-  getStatus: () => AudioStatus;
+type StageEventHub = {
+  getSnapshot: () => IntegrationPlaybackSnapshotV1;
+  subscribe: (listener: (event: IntegrationEventEnvelopeV1) => void) => () => void;
 };
 
 type StageLyricsService = {
@@ -22,7 +28,8 @@ type StageLyricsService = {
 export type StageBridgeServiceOptions = {
   host?: string;
   port?: number;
-  audioSession?: StageAudioSession;
+  eventHub?: StageEventHub;
+  telemetrySource?: StageVisualTelemetrySource;
   getLyrics?: () => StageLyricsService;
 };
 
@@ -126,16 +133,17 @@ const plainLyricLine = (lyrics: TrackLyrics): StageBridgeLyricLine | null => {
 };
 
 export const createStageBridgeSnapshot = async (
-  status: AudioStatus,
+  playback: IntegrationPlaybackSnapshotV1,
+  telemetry: StageVisualTelemetrySnapshot = { visualEnergy: 0, visualTransient: 0, visualSpectrum: emptySpectrum() },
   getLyrics: () => StageLyricsService = getLyricsService,
 ): Promise<StageBridgeSnapshot> => {
-  const durationSeconds = finiteSeconds(status.durationSeconds);
-  const positionSeconds = finiteSeconds(status.positionSeconds);
+  const durationSeconds = finiteSeconds(playback.durationMs / 1000);
+  const positionSeconds = finiteSeconds(playback.positionMs / 1000);
   let lyrics: TrackLyrics | null = null;
 
-  if (status.currentTrackId) {
+  if (playback.track?.id) {
     try {
-      lyrics = await getLyrics().getLyricsForTrack(status.currentTrackId, { networkEnabled: false, autoSearch: false });
+      lyrics = await getLyrics().getLyricsForTrack(playback.track.id, { networkEnabled: false, autoSearch: false });
     } catch {
       lyrics = null;
     }
@@ -144,20 +152,18 @@ export const createStageBridgeSnapshot = async (
   const positionMs = Math.max(0, Math.round(positionSeconds * 1000 + (lyrics?.offsetMs ?? 0)));
   const syncedLine = lyrics?.kind === 'synced' ? findSyncedLyricLine(lyrics, positionMs) : { current: null, next: null };
   const currentPlain = lyrics && lyrics.kind !== 'synced' ? plainLyricLine(lyrics) : null;
-  const audioLevels = status.audioLevels;
-
   return {
     version: stageBridgeVersion,
     app: 'ECHO',
     integration: 'stage',
     generatedAt: new Date().toISOString(),
-    state: status.state,
+    state: playback.state,
     track: {
-      id: status.currentTrackId,
-      title: status.currentTrackTitle ?? null,
-      artist: status.currentTrackArtist ?? null,
-      album: status.currentTrackAlbum ?? null,
-      coverUrl: status.currentTrackCoverUrl ?? null,
+      id: playback.track?.id ?? null,
+      title: playback.track?.title ?? null,
+      artist: playback.track?.artist ?? null,
+      album: playback.track?.album ?? null,
+      coverUrl: playback.track?.artworkUrl ?? null,
       durationSeconds,
       positionSeconds,
       progress: durationSeconds > 0 ? Math.round(clampUnit(positionSeconds / durationSeconds) * 10000) / 10000 : 0,
@@ -170,11 +176,11 @@ export const createStageBridgeSnapshot = async (
       offsetMs: lyrics?.offsetMs ?? 0,
     },
     audio: {
-      outputMode: status.outputMode,
-      outputBackend: status.outputBackend ?? null,
-      visualEnergy: Number.isFinite(audioLevels?.visualEnergy) ? clampUnit(audioLevels?.visualEnergy ?? 0) : 0,
-      visualTransient: Number.isFinite(audioLevels?.visualTransient) ? clampUnit(audioLevels?.visualTransient ?? 0) : 0,
-      visualSpectrum: normalizeUnitArray(audioLevels?.visualSpectrum),
+      outputMode: playback.output.mode,
+      outputBackend: playback.output.backend,
+      visualEnergy: Number.isFinite(telemetry.visualEnergy) ? clampUnit(telemetry.visualEnergy) : 0,
+      visualTransient: Number.isFinite(telemetry.visualTransient) ? clampUnit(telemetry.visualTransient) : 0,
+      visualSpectrum: normalizeUnitArray(telemetry.visualSpectrum),
     },
   };
 };
@@ -263,20 +269,32 @@ const obsPage = (): string => `<!doctype html>
 export class StageBridgeService {
   private readonly host: string;
   private readonly requestedPort: number;
-  private readonly audioSession: StageAudioSession;
+  private readonly eventHub: StageEventHub;
+  private readonly telemetrySource: StageVisualTelemetrySource;
   private readonly getLyrics: () => StageLyricsService;
   private server: Server | null = null;
   private boundPort: number | null = null;
   private enabledState: StageBridgeEnabledState = { obsEnabled: false, apiEnabled: false };
   private readonly clients = new Set<SseClient>();
-  private readonly statusListener = (status: AudioStatus): void => {
-    void this.broadcastSnapshot(status);
+  private unsubscribeEventHub: (() => void) | null = null;
+  private refreshTimer: NodeJS.Timeout | null = null;
+  private latestPlayback: IntegrationPlaybackSnapshotV1 | null = null;
+  private broadcastInFlight = false;
+  private broadcastPending = false;
+  private cachedLyricsTrackId: string | null = null;
+  private cachedLyricsPromise: Promise<TrackLyrics | null> | null = null;
+  private readonly cachedLyricsService: StageLyricsService = {
+    getLyricsForTrack: (trackId) => this.getCachedLyrics(trackId),
+  };
+  private readonly integrationListener = (event: IntegrationEventEnvelopeV1): void => {
+    this.latestPlayback = event.snapshot;
   };
 
   constructor(options: StageBridgeServiceOptions = {}) {
     this.host = options.host ?? defaultStageBridgeHost;
     this.requestedPort = options.port ?? defaultStageBridgePort;
-    this.audioSession = options.audioSession ?? getAudioSession();
+    this.eventHub = options.eventHub ?? getIntegrationEventHub();
+    this.telemetrySource = options.telemetrySource ?? createAudioSessionStageVisualTelemetrySource();
     this.getLyrics = options.getLyrics ?? getLyricsService;
   }
 
@@ -295,7 +313,8 @@ export class StageBridgeService {
       return this.getServerStatus();
     }
 
-    this.audioSession.on('status', this.statusListener);
+    this.latestPlayback = this.eventHub.getSnapshot();
+    this.unsubscribeEventHub = this.eventHub.subscribe(this.integrationListener);
     const server = createServer((request, response) => {
       void this.handleRequest(request, response);
     });
@@ -312,7 +331,8 @@ export class StageBridgeService {
         });
       });
     } catch (error) {
-      this.audioSession.off('status', this.statusListener);
+      this.unsubscribeEventHub?.();
+      this.unsubscribeEventHub = null;
       this.server = null;
       this.boundPort = null;
       throw error;
@@ -322,10 +342,15 @@ export class StageBridgeService {
   }
 
   async stop(): Promise<void> {
-    this.audioSession.off('status', this.statusListener);
+    this.unsubscribeEventHub?.();
+    this.unsubscribeEventHub = null;
+    this.stopRefreshTimer();
     for (const client of [...this.clients]) {
       this.closeClient(client);
     }
+    this.latestPlayback = null;
+    this.cachedLyricsTrackId = null;
+    this.cachedLyricsPromise = null;
 
     const server = this.server;
     this.server = null;
@@ -384,7 +409,7 @@ export class StageBridgeService {
           writeJson(response, 403, { error: 'stage_api_disabled' });
           return;
         }
-        writeJson(response, 200, await createStageBridgeSnapshot(this.audioSession.getStatus(), this.getLyrics));
+        writeJson(response, 200, await this.createSnapshot());
         return;
       case '/echo-stage.js':
         writeCorsHeaders(response, 'text/javascript; charset=utf-8');
@@ -426,7 +451,9 @@ export class StageBridgeService {
       }, 15_000),
     };
     this.clients.add(client);
-    void this.writeSnapshot(response, this.audioSession.getStatus());
+    incrementStageBridgeClients();
+    this.startRefreshTimer();
+    void this.writeSnapshot(response);
 
     const close = (): void => this.closeClient(client);
     request.on('close', close);
@@ -439,25 +466,86 @@ export class StageBridgeService {
     }
 
     clearInterval(client.heartbeat);
+    decrementStageBridgeClients();
+    if (this.clients.size === 0) {
+      this.stopRefreshTimer();
+    }
     if (!client.response.destroyed) {
       client.response.end();
     }
   }
 
-  private async broadcastSnapshot(status: AudioStatus): Promise<void> {
+  private startRefreshTimer(): void {
+    if (this.refreshTimer || this.clients.size === 0) {
+      return;
+    }
+    this.refreshTimer = setInterval(() => this.requestBroadcast(), 250);
+    this.refreshTimer.unref?.();
+  }
+
+  private stopRefreshTimer(): void {
+    if (!this.refreshTimer) {
+      return;
+    }
+    clearInterval(this.refreshTimer);
+    this.refreshTimer = null;
+    this.broadcastPending = false;
+  }
+
+  private requestBroadcast(): void {
+    if (this.clients.size === 0) {
+      return;
+    }
+    if (this.broadcastInFlight) {
+      this.broadcastPending = true;
+      return;
+    }
+    this.broadcastInFlight = true;
+    void this.broadcastSnapshot().finally(() => {
+      this.broadcastInFlight = false;
+      if (this.broadcastPending && this.clients.size > 0) {
+        this.broadcastPending = false;
+        this.requestBroadcast();
+      }
+    });
+  }
+
+  private async broadcastSnapshot(): Promise<void> {
     if (this.clients.size === 0) {
       return;
     }
 
-    const snapshot = await createStageBridgeSnapshot(status, this.getLyrics);
+    const snapshot = await this.createSnapshot();
+    if (this.clients.size === 0) {
+      return;
+    }
     const event = `event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`;
     for (const client of this.clients) {
       client.response.write(event);
     }
   }
 
-  private async writeSnapshot(response: ServerResponse, status: AudioStatus): Promise<void> {
-    const snapshot = await createStageBridgeSnapshot(status, this.getLyrics);
+  private async writeSnapshot(response: ServerResponse): Promise<void> {
+    const snapshot = await this.createSnapshot();
+    if (response.destroyed) {
+      return;
+    }
     response.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
+  }
+
+  private createSnapshot(): Promise<StageBridgeSnapshot> {
+    const playback = this.latestPlayback ?? this.eventHub.getSnapshot();
+    return createStageBridgeSnapshot(playback, this.telemetrySource.read(), () => this.cachedLyricsService);
+  }
+
+  private getCachedLyrics(trackId: string): Promise<TrackLyrics | null> {
+    if (this.cachedLyricsTrackId === trackId && this.cachedLyricsPromise) {
+      return this.cachedLyricsPromise;
+    }
+    this.cachedLyricsTrackId = trackId;
+    this.cachedLyricsPromise = this.getLyrics()
+      .getLyricsForTrack(trackId, { networkEnabled: false, autoSearch: false })
+      .catch(() => null);
+    return this.cachedLyricsPromise;
   }
 }

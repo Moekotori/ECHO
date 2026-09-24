@@ -8,6 +8,7 @@ const handleMock = vi.fn((channel: string, handler: (...args: unknown[]) => unkn
 const setMiniPlayerLockedMock = vi.fn((locked: boolean) => ({
   visible: true,
   locked,
+  queueOpen: false,
   bounds: null,
   settings: {
     miniPlayerEnabled: true,

@@ -29,7 +29,7 @@ const createDsfHeader = (sampleRate: number): Buffer => {
   return buffer;
 };
 
-const createDsfDopFixture = (): Buffer => {
+const createDsfDopFixture = (sampleRate = 2_822_400): Buffer => {
   const data = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
   const buffer = Buffer.alloc(28 + 52 + 12 + data.length);
 
@@ -45,7 +45,7 @@ const createDsfDopFixture = (): Buffer => {
   buffer.writeUInt32LE(0, fmtOffset + 16);
   buffer.writeUInt32LE(2, fmtOffset + 20);
   buffer.writeUInt32LE(2, fmtOffset + 24);
-  buffer.writeUInt32LE(2_822_400, fmtOffset + 28);
+  buffer.writeUInt32LE(sampleRate, fmtOffset + 28);
   buffer.writeUInt32LE(1, fmtOffset + 32);
   buffer.writeBigUInt64LE(32n, fmtOffset + 36);
   buffer.writeUInt32LE(4, fmtOffset + 44);
@@ -99,6 +99,9 @@ describe('DSD probing helpers', () => {
     expect(resolveDsdDopTransportSampleRate({ filePath: 'dsd64.dsf', codec: 'DSF', fileSampleRate: 2_822_400 })).toBe(176_400);
     expect(resolveDsdDopTransportSampleRate({ filePath: 'dsd128.dsf', codec: 'DSF', fileSampleRate: 5_644_800 })).toBe(352_800);
     expect(resolveDsdDopTransportSampleRate({ filePath: 'dsd256.dsf', codec: 'DSF', fileSampleRate: 11_289_600 })).toBe(705_600);
+    expect(resolveDsdDopTransportSampleRate({ filePath: 'dsd512.dsf', codec: 'DSF', fileSampleRate: 22_579_200 })).toBe(1_411_200);
+    expect(resolveDsdDopTransportSampleRate({ filePath: 'dsd1024.dsf', codec: 'DSF', fileSampleRate: 45_158_400 })).toBe(2_822_400);
+    expect(resolveDsdDopTransportSampleRate({ filePath: 'dsd1024-48k.dsf', codec: 'DSF', fileSampleRate: 49_152_000 })).toBe(3_072_000);
   });
 
   it('parses DSF DoP metadata from a local fixture', () => {
@@ -111,14 +114,30 @@ describe('DSD probing helpers', () => {
     });
   });
 
-  it('packs DoP24LE markers and interleaves channels', () => {
+  it.each([
+    ['DSD512', 22_579_200, 1_411_200],
+    ['DSD1024', 45_158_400, 2_822_400],
+    ['DSD1024 48 kHz family', 49_152_000, 3_072_000],
+  ])('accepts %s DSF passthrough metadata', (_label, nativeSampleRate, transportSampleRate) => {
+    expect(parseDsfDopInfoFromBuffer('fixture.dsf', createDsfDopFixture(nativeSampleRate))).toMatchObject({
+      nativeSampleRate,
+      transportSampleRate,
+    });
+  });
+
+  it('converts DSF LSB-first chronology into standard DoP24LE frames', () => {
     const packed = packDop24Le(
       [Buffer.from([1, 2, 3, 4]), Buffer.from([5, 6, 7, 8])],
       0,
       4,
     );
 
-    expect([...packed]).toEqual([1, 2, 0x05, 5, 6, 0x05, 3, 4, 0xfa, 7, 8, 0xfa]);
+    expect([...packed]).toEqual([
+      0x40, 0x80, 0x05,
+      0x60, 0xa0, 0x05,
+      0x20, 0xc0, 0xfa,
+      0x10, 0xe0, 0xfa,
+    ]);
   });
 
 });

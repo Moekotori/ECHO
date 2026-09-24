@@ -470,6 +470,22 @@ export const LibraryDiagnosticsPanel = (): JSX.Element => {
           <strong>{labState.nativeMetadataReader.workerFeatures?.join(', ') ?? '-'}</strong>
         </div>
         <div className="settings-library-lab-status-item">
+          <span>nativeMetadataReader.pool</span>
+          <strong>{`${labState.nativeMetadataReader.activeProcesses ?? 0}/${labState.nativeMetadataReader.poolSize ?? 0}`}</strong>
+        </div>
+        <div className="settings-library-lab-status-item">
+          <span>nativeMetadataReader.hitRate</span>
+          <strong>{labState.nativeMetadataReader.hitRate === undefined ? '-' : `${Math.round(labState.nativeMetadataReader.hitRate * 100)}%`}</strong>
+        </div>
+        <div className="settings-library-lab-status-item">
+          <span>nativeMetadataReader.fallbackToTs</span>
+          <strong>{labState.nativeMetadataReader.fallbackToTs ?? 0}</strong>
+        </div>
+        <div className="settings-library-lab-status-item">
+          <span>nativeMetadataReader.lastError</span>
+          <strong>{labState.nativeMetadataReader.lastError ?? '-'}</strong>
+        </div>
+        <div className="settings-library-lab-status-item">
           <span>nativeMetadataReader.supportedFormats</span>
           <strong>{labState.nativeMetadataReader.supportedFormats.join(', ')}</strong>
         </div>

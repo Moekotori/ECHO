@@ -8,6 +8,7 @@ import {
 import { ConnectDonatorUnlockService } from './ConnectDonatorUnlockService';
 
 const mocks = vi.hoisted(() => ({
+  localProUnlocked: false,
   accountStatus: {
     loggedIn: false,
     username: null,
@@ -26,6 +27,15 @@ const mocks = vi.hoisted(() => ({
     checkedAt: '2026-06-21T00:00:00.000Z',
     machineCode: 'plugin-machine',
   },
+  refreshAccountStatus: vi.fn(),
+}));
+
+vi.mock('./LocalProEntitlements', () => ({
+  getLocalProEntitlementSnapshot: () => ({
+    unlocked: mocks.localProUnlocked,
+    source: mocks.localProUnlocked ? 'included' : 'none',
+    checkedAt: null,
+  }),
 }));
 
 vi.mock('./PluginService', () => ({
@@ -35,9 +45,19 @@ vi.mock('./PluginService', () => ({
 }));
 
 vi.mock('./EchoProAccountService', () => ({
+  isEchoProAccountStatusWithinOfflineGrace: (status: EchoProAccountStatus) => {
+    const checkedAt = status.checkedAt ? Date.parse(status.checkedAt) : Number.NaN;
+    const ageMs = Date.now() - checkedAt;
+    return status.loggedIn &&
+      status.pro === true &&
+      status.status !== 'disabled' &&
+      Number.isFinite(checkedAt) &&
+      ageMs >= 0 &&
+      ageMs <= 7 * 24 * 60 * 60 * 1000;
+  },
   getEchoProAccountService: () => ({
     getStatus: () => mocks.accountStatus,
-    refreshStatus: async () => mocks.accountStatus,
+    refreshStatus: mocks.refreshAccountStatus,
   }),
 }));
 
@@ -47,6 +67,9 @@ vi.mock('./MachineIdentity', () => ({
 
 describe('ConnectDonatorUnlockService public stub', () => {
   beforeEach(() => {
+    mocks.localProUnlocked = false;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T12:00:00.000Z'));
     mocks.accountStatus = {
       loggedIn: false,
       username: null,
@@ -65,9 +88,12 @@ describe('ConnectDonatorUnlockService public stub', () => {
       checkedAt: '2026-06-21T00:00:00.000Z',
       machineCode: 'plugin-machine',
     };
+    mocks.refreshAccountStatus.mockReset();
+    mocks.refreshAccountStatus.mockImplementation(async () => mocks.accountStatus);
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     clearPrivateEntitlementsProvider();
   });
 
@@ -83,6 +109,16 @@ describe('ConnectDonatorUnlockService public stub', () => {
     });
     await expect(service.refreshStatus()).resolves.toMatchObject({ unlocked: false });
     expect(() => service.assertUnlocked()).toThrow('echo_pro_required');
+  });
+
+  it('allows Connect without an account when the base app includes it', async () => {
+    mocks.localProUnlocked = true;
+    const service = new ConnectDonatorUnlockService();
+
+    expect(service.getStatus()).toMatchObject({ unlocked: true, reason: 'unlocked' });
+    await expect(service.refreshStatus({ force: true })).resolves.toMatchObject({ unlocked: true });
+    expect(() => service.assertUnlocked()).not.toThrow();
+    expect(mocks.refreshAccountStatus).not.toHaveBeenCalled();
   });
 
   it('delegates status checks to an installed private entitlement overlay', async () => {
@@ -104,6 +140,24 @@ describe('ConnectDonatorUnlockService public stub', () => {
     expect(service.assertUnlocked()).toBe(unlockedStatus);
   });
 
+  it('accepts an unlocked local overlay cache without forcing an online account refresh', async () => {
+    const unlockedStatus = {
+      ...getDefaultConnectDonatorUnlockStatus(),
+      unlocked: true,
+      reason: 'unlocked' as const,
+      hwidHash: 'overlay-owned',
+    };
+    installPrivateEntitlementsProvider({
+      getConnectStatus: () => unlockedStatus,
+      refreshConnectStatus: async () => unlockedStatus,
+    });
+    const service = new ConnectDonatorUnlockService();
+
+    await expect(service.refreshStatus({ force: true })).resolves.toBe(unlockedStatus);
+
+    expect(mocks.refreshAccountStatus).not.toHaveBeenCalled();
+  });
+
   it('unlocks Connect from an active ECHO Pro account when no overlay status is installed', async () => {
     mocks.accountStatus = {
       loggedIn: true,
@@ -113,7 +167,7 @@ describe('ConnectDonatorUnlockService public stub', () => {
       status: 'active',
       machineCount: 1,
       maxMachineCount: 2,
-      checkedAt: '2026-06-28T12:00:00.000Z',
+      checkedAt: '2026-07-12T00:00:00.000Z',
       lastError: null,
     };
     const service = new ConnectDonatorUnlockService();
@@ -128,4 +182,26 @@ describe('ConnectDonatorUnlockService public stub', () => {
     await expect(service.refreshStatus()).resolves.toMatchObject({ unlocked: true });
     expect(service.assertUnlocked()).toMatchObject({ unlocked: true });
   });
+
+  it('does not unlock Connect from an account status beyond the offline grace period', () => {
+    mocks.accountStatus = {
+      loggedIn: true,
+      username: 'moe',
+      displayName: 'Moe',
+      pro: true,
+      status: 'active',
+      machineCount: 1,
+      maxMachineCount: 2,
+      checkedAt: '2026-07-05T11:59:59.999Z',
+      lastError: null,
+    };
+    const service = new ConnectDonatorUnlockService();
+
+    expect(service.getStatus()).toMatchObject({
+      unlocked: false,
+      reason: 'license-invalid',
+    });
+    expect(() => service.assertUnlocked()).toThrow('echo_pro_required');
+  });
+
 });

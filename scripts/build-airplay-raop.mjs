@@ -1,4 +1,5 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -7,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 const scriptPath = fileURLToPath(import.meta.url);
 const projectRoot = resolve(dirname(scriptPath), '..');
 const require = createRequire(import.meta.url);
+const pthreadsVersion = '2-9-1';
+const pthreadsArchiveUrl = `https://sourceware.org/pub/pthreads-win32/pthreads-w32-${pthreadsVersion}-release.zip`;
+const pthreadsArchiveSha256 = 'b9bd02958639a854461a72f72bf3e89a3c4181843b65924a54df8a50b4e5d15d';
 
 const fail = (message, details = []) => {
   console.error(`[build:airplay-raop] ${message}`);
@@ -60,7 +64,10 @@ const findNpmCommand = () => {
       .map((line) => line.trim())
       .find((line) => line && !isUnderProjectNodeModules(line));
     if (candidate) {
-      return { command: candidate, argsPrefix: [] };
+      const npmCli = join(dirname(candidate), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+      if (existsSync(npmCli)) {
+        return { command: process.execPath, argsPrefix: [npmCli] };
+      }
     }
   }
 
@@ -123,6 +130,26 @@ const findOpenSsl = () => {
   return null;
 };
 
+const resolveOpenSslFiles = (root) => {
+  const libDirs = [join(root, 'lib'), join(root, 'lib', 'VC', 'x64', 'MD')];
+  const libDir = libDirs.find((candidate) =>
+    existsSync(join(candidate, 'libssl.lib')) && existsSync(join(candidate, 'libcrypto.lib')));
+  const dllDirs = [join(root, 'bin'), root];
+  const findDll = (prefix) => {
+    for (const dir of dllDirs) {
+      if (!existsSync(dir)) continue;
+      const name = readdirSync(dir).find((entry) => new RegExp(`^${prefix}-\\d+-x64\\.dll$`, 'iu').test(entry));
+      if (name) return join(dir, name);
+    }
+    return null;
+  };
+  const sslDll = findDll('libssl');
+  const cryptoDll = findDll('libcrypto');
+  return libDir && sslDll && cryptoDll
+    ? { libDir, sslLib: join(libDir, 'libssl.lib'), cryptoLib: join(libDir, 'libcrypto.lib'), sslDll, cryptoDll }
+    : null;
+};
+
 const findGitBash = () => {
   const candidates = [
     'F:\\Git\\bin',
@@ -167,7 +194,43 @@ const createPython3Shim = (pythonPath) => {
 
 const toGypPath = (path) => path.replaceAll('\\', '/');
 
-const patchNodeLibraopWindowsBuild = (openSslRoot) => {
+const ensurePthreads = () => {
+  const cacheRoot = join(projectRoot, 'node_modules', '.cache', 'echo', `pthreads-w32-${pthreadsVersion}`);
+  const includeDir = join(cacheRoot, 'Pre-built.2', 'include');
+  const libPath = join(cacheRoot, 'Pre-built.2', 'lib', 'x64', 'pthreadVC2.lib');
+  const dllPath = join(cacheRoot, 'Pre-built.2', 'dll', 'x64', 'pthreadVC2.dll');
+  if (existsSync(join(includeDir, 'pthread.h')) && existsSync(libPath) && existsSync(dllPath)) {
+    return { root: cacheRoot, includeDir, libPath, dllPath };
+  }
+
+  const archivePath = `${cacheRoot}.zip`;
+  mkdirSync(dirname(cacheRoot), { recursive: true });
+  console.log(`[build:airplay-raop] Downloading pthreads-win32 ${pthreadsVersion.replaceAll('-', '.')}...`);
+  const download = spawnSync('powershell.exe', [
+    '-NoProfile', '-Command',
+    `$ErrorActionPreference='Stop'; Invoke-WebRequest -Uri '${pthreadsArchiveUrl}' -OutFile '${archivePath.replaceAll("'", "''")}'`,
+  ], { cwd: projectRoot, stdio: 'inherit' });
+  if (download.status !== 0) {
+    throw new Error(`Failed to download pthreads-win32 from ${pthreadsArchiveUrl}`);
+  }
+  const digest = createHash('sha256').update(readFileSync(archivePath)).digest('hex');
+  if (digest !== pthreadsArchiveSha256) {
+    rmSync(archivePath, { force: true });
+    throw new Error(`pthreads-win32 archive checksum mismatch: expected ${pthreadsArchiveSha256}, got ${digest}`);
+  }
+  rmSync(cacheRoot, { recursive: true, force: true });
+  const extract = spawnSync('powershell.exe', [
+    '-NoProfile', '-Command',
+    `$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '${archivePath.replaceAll("'", "''")}' -DestinationPath '${cacheRoot.replaceAll("'", "''")}' -Force`,
+  ], { cwd: projectRoot, stdio: 'inherit' });
+  rmSync(archivePath, { force: true });
+  if (extract.status !== 0 || !existsSync(join(includeDir, 'pthread.h')) || !existsSync(libPath) || !existsSync(dllPath)) {
+    throw new Error('Downloaded pthreads-win32 archive did not contain the expected x64 development files.');
+  }
+  return { root: cacheRoot, includeDir, libPath, dllPath };
+};
+
+const patchNodeLibraopWindowsBuild = (openSslRoot, openSslFiles, pthreads) => {
   const packageRoot = dirname(require.resolve('@lox-audioserver/node-libraop/package.json'));
   const queueStubPath = join(packageRoot, 'native', 'raop_client_queue_stub.c');
   writeFileSync(queueStubPath, [
@@ -186,18 +249,20 @@ const patchNodeLibraopWindowsBuild = (openSslRoot) => {
       '"native/log_stub.c",\n        "native/raop_client_queue_stub.c",',
     );
   }
-  const includeDir = toGypPath(join(openSslRoot, 'include'));
-  if (!binding.includes(includeDir)) {
+  const includeDirs = [join(openSslRoot, 'include'), pthreads.includeDir].map(toGypPath);
+  for (const includeDir of includeDirs) {
+    if (binding.includes(includeDir)) continue;
     binding = binding.replace(
       '"native",',
       `"${includeDir}",\n        "native",`,
     );
   }
   const libPaths = [
-    toGypPath(join(openSslRoot, 'lib', 'libssl.lib')),
-    toGypPath(join(openSslRoot, 'lib', 'libcrypto.lib')),
-    toGypPath(join(openSslRoot, 'lib', 'pthreadVC3.lib')),
+    toGypPath(openSslFiles.sslLib),
+    toGypPath(openSslFiles.cryptoLib),
+    toGypPath(pthreads.libPath),
   ];
+  binding = binding.replace(/^\s*"[^"]*\/(?:libssl|libcrypto|pthreadVC\d+)\.lib",?\s*$/gmu, '');
   for (const libPath of libPaths) {
     if (!binding.includes(libPath)) {
       binding = binding.replace(
@@ -213,8 +278,10 @@ const patchNodeLibraopWindowsBuild = (openSslRoot) => {
   if (!binding.includes('SSL_STATIC_LIB')) {
     binding = binding.replace(
       '"NAPI_DISABLE_CPP_EXCEPTIONS"',
-      '"SSL_STATIC_LIB", "NAPI_DISABLE_CPP_EXCEPTIONS"',
+      '"SSL_STATIC_LIB", "HAVE_STRUCT_TIMESPEC", "NAPI_DISABLE_CPP_EXCEPTIONS"',
     );
+  } else if (!binding.includes('HAVE_STRUCT_TIMESPEC')) {
+    binding = binding.replace('"SSL_STATIC_LIB"', '"SSL_STATIC_LIB", "HAVE_STRUCT_TIMESPEC"');
   }
   writeFileSync(bindingPath, binding, 'utf8');
 
@@ -729,7 +796,7 @@ const patchNodeLibraopWindowsBuild = (openSslRoot) => {
   writeFileSync(serverPath, server, 'utf8');
 };
 
-const copyRuntimeDlls = (openSslRoot) => {
+const copyRuntimeDlls = (openSslFiles, pthreads) => {
   const packageRoot = dirname(require.resolve('@lox-audioserver/node-libraop/package.json'));
   const releaseDir = join(packageRoot, 'build', 'Release');
   const prebuildDir = join(packageRoot, 'prebuilds', 'win32-x64');
@@ -740,12 +807,11 @@ const copyRuntimeDlls = (openSslRoot) => {
     console.log('[build:airplay-raop] Prebuild: win32-x64/raop_addon.node.napi.node');
   }
   const runtimeDlls = [
-    'libssl-3-x64.dll',
-    'libcrypto-3-x64.dll',
-    'pthreadVC3.dll',
+    [openSslFiles.sslDll.split(/[\\/]/u).at(-1), openSslFiles.sslDll],
+    [openSslFiles.cryptoDll.split(/[\\/]/u).at(-1), openSslFiles.cryptoDll],
+    ['pthreadVC2.dll', pthreads.dllPath],
   ];
-  for (const dll of runtimeDlls) {
-    const source = join(openSslRoot, 'bin', dll);
+  for (const [dll, source] of runtimeDlls) {
     if (existsSync(source)) {
       copyFileSync(source, join(releaseDir, dll));
       copyFileSync(source, join(prebuildDir, dll));
@@ -777,6 +843,14 @@ try {
     ]);
     process.exit();
   }
+  const openSslFiles = resolveOpenSslFiles(openSslRoot);
+  if (!openSslFiles) {
+    fail('OpenSSL x64 import libraries or runtime DLLs were not found in the detected installation.', [
+      `Detected root: ${openSslRoot}`,
+      'Expected libssl.lib/libcrypto.lib and matching libssl-*-x64.dll/libcrypto-*-x64.dll files.',
+    ]);
+    process.exit();
+  }
   const gitBashBin = findGitBash();
   if (!gitBashBin) {
     fail('Git Bash was not found, but node-libraop needs bash to prepare vendored libraop sources.', [
@@ -792,6 +866,7 @@ try {
     process.exit();
   }
   const pythonShimDir = createPython3Shim(pythonPath);
+  const pthreads = ensurePthreads();
 
   try {
     require.resolve('@lox-audioserver/node-libraop/package.json');
@@ -801,19 +876,19 @@ try {
     ]);
     process.exit();
   }
-  patchNodeLibraopWindowsBuild(openSslRoot);
+  patchNodeLibraopWindowsBuild(openSslRoot, openSslFiles, pthreads);
 
   const env = {
     ...process.env,
     OPENSSL_ROOT_DIR: openSslRoot,
-    npm_config_build_from_source: 'true',
-    npm_config_openssl_root: openSslRoot,
     INCLUDE: [
       join(openSslRoot, 'include'),
+      pthreads.includeDir,
       process.env.INCLUDE ?? '',
     ].filter(Boolean).join(';'),
     LIB: [
-      join(openSslRoot, 'lib'),
+      openSslFiles.libDir,
+      dirname(pthreads.libPath),
       process.env.LIB ?? '',
     ].filter(Boolean).join(';'),
     PATH: [
@@ -831,16 +906,16 @@ try {
     console.log(`[build:airplay-raop] MSVC x64: ${visualStudio.vcBin}`);
   }
   console.log(`[build:airplay-raop] OpenSSL: ${openSslRoot}`);
+  console.log(`[build:airplay-raop] pthreads-win32: ${pthreads.root}`);
   console.log(`[build:airplay-raop] Bash: ${join(gitBashBin, 'bash.exe')}`);
   console.log(`[build:airplay-raop] Python: ${pythonPath}`);
   run(npmCommand.command, [
     ...npmCommand.argsPrefix,
     'rebuild',
     '@lox-audioserver/node-libraop',
-    '--build-from-source',
   ], { env });
   console.log('[build:airplay-raop] RAOP native module rebuilt.');
-  copyRuntimeDlls(openSslRoot);
+  copyRuntimeDlls(openSslFiles, pthreads);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   const details = [message];

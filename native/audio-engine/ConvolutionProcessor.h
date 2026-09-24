@@ -3,6 +3,7 @@
 #include "buffer.h"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -71,6 +72,7 @@ private:
         const std::string& name);
     static float sanitize(float value);
     static float protectClippingSample(float sample, bool shouldProtect, bool& risk);
+    void applyRequestedReset(const std::shared_ptr<const PreparedImpulse>& impulse);
 
     double currentSampleRate = 44100.0;
     int preparedChannels = 0;
@@ -78,11 +80,14 @@ private:
     int historyWriteIndex = 0;
     std::vector<std::vector<float>> history;
     std::shared_ptr<const PreparedImpulse> activeImpulse;
+    std::shared_ptr<const PreparedImpulse> processedImpulse;
 
     std::atomic<bool> targetEnabled { false };
     std::atomic<float> atomicTrimDb { 0.0f };
     std::atomic<bool> clippingRisk { false };
     std::atomic<bool> hasError { false };
+    std::atomic<uint64_t> resetEpoch { 1 };
+    uint64_t appliedResetEpoch = 0;
     std::string errorMessage;
 };
 } // namespace echo

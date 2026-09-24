@@ -24,6 +24,14 @@ public:
         stopRequested_.store(false, std::memory_order_release);
     }
 
+    /** Re-arm an already drained autonomous queue session without changing its generation. */
+    void continueAfterDrain() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        inputEnded_.store(false, std::memory_order_release);
+        hasAudio_.store(false, std::memory_order_release);
+        stopRequested_.store(false, std::memory_order_release);
+    }
+
     /** Mark input as ended — no more data will be pushed. */
     void markInputEnded() {
         inputEnded_.store(true, std::memory_order_release);

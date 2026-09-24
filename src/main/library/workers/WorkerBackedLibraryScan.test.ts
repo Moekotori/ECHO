@@ -345,4 +345,38 @@ describe('WorkerBackedLibraryScan', () => {
       scanWorkers.close();
     }
   });
+
+  it('builds search terms in a dedicated scan worker', async () => {
+    const workers: FakeWorker[] = [];
+    const scanWorkers = createWorkerBackedLibraryScanWorkers({
+      workerCount: 4,
+      workerFactory: () => {
+        const worker = new FakeWorker((request) => ({
+          requestId: request.requestId,
+          ok: true,
+          result: request.type === 'search:preload' ? true : 'worker search terms',
+        }));
+        workers.push(worker);
+        return worker;
+      },
+    });
+
+    try {
+      await expect(scanWorkers.searchTermsBuilder.preload()).resolves.toBe(true);
+      await expect(scanWorkers.searchTermsBuilder.prepare({
+        title: 'Title',
+        artist: 'Artist',
+        album: 'Album',
+        albumArtist: 'Artist',
+      })).resolves.toBe('worker search terms');
+
+      expect(workers).toHaveLength(1);
+      expect(workers[0]?.requests.map((request) => request.type)).toEqual([
+        'search:preload',
+        'search:terms',
+      ]);
+    } finally {
+      scanWorkers.close();
+    }
+  });
 });

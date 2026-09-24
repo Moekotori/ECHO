@@ -377,6 +377,11 @@ const inferPerformanceStallCause = (
   const lastSlowIpcChannel = trimmedString(playbackSnapshot.lastSlowIpcChannel);
   const lastSlowIpcDurationMs = finiteNumber(playbackSnapshot.lastSlowIpcDurationMs);
   const lastSlowIpcAgeMs = finiteNumber(playbackSnapshot.lastSlowIpcAgeMs);
+  const activeIpcChannel = trimmedString(playbackSnapshot.activeIpcChannel);
+  const activeIpcElapsedMs = finiteNumber(playbackSnapshot.activeIpcElapsedMs);
+  const lastIpcChannel = trimmedString(playbackSnapshot.lastIpcChannel);
+  const lastIpcDurationMs = finiteNumber(playbackSnapshot.lastIpcDurationMs);
+  const lastIpcAgeMs = finiteNumber(playbackSnapshot.lastIpcAgeMs);
   const activePlaybackElapsedMs = finiteNumber(playbackSnapshot.elapsedMs);
   const lastPlaybackPhaseMs = finiteNumber(playbackSnapshot.lastCompletedDurationMs);
   const lastInputType = trimmedString(payload.details?.lastInputType);
@@ -407,6 +412,31 @@ const inferPerformanceStallCause = (
       confidence: 'high',
       why: `main event loop stalled while ${pendingBackgroundTask} was active`,
       actionHint: 'Move or slice this background task if it appears next to playback glitches.',
+    };
+  }
+
+  if (
+    payload.source === 'main' &&
+    lastIpcChannel &&
+    lastIpcDurationMs !== null &&
+    lastIpcAgeMs !== null &&
+    lastIpcDurationMs >= Math.max(500, payload.thresholdMs) &&
+    lastIpcAgeMs <= Math.max(2_000, payload.durationMs + mainStallCheckIntervalMs)
+  ) {
+    return {
+      probableCause: 'recent_blocking_ipc_handler',
+      confidence: 'high',
+      why: `IPC "${lastIpcChannel}" occupied ${lastIpcDurationMs.toFixed(0)}ms and overlapped this event-loop stall`,
+      actionHint: 'Inspect this IPC handler first; move synchronous work off the main thread or split it into bounded slices.',
+    };
+  }
+
+  if (payload.source === 'main' && activeIpcChannel && activeIpcElapsedMs !== null) {
+    return {
+      probableCause: 'active_ipc_handler',
+      confidence: 'medium',
+      why: `IPC "${activeIpcChannel}" was still pending after ${activeIpcElapsedMs.toFixed(0)}ms`,
+      actionHint: 'Inspect this IPC handler and confirm whether it is waiting asynchronously or doing synchronous main-thread work.',
     };
   }
 
@@ -550,6 +580,13 @@ export const recordPerformanceStall = (
   appendOptionalValueLine(lines, 'lastSlowIpcMs', playbackSnapshot.lastSlowIpcDurationMs);
   appendOptionalValueLine(lines, 'lastSlowIpcAgeMs', playbackSnapshot.lastSlowIpcAgeMs);
   appendOptionalValueLine(lines, 'lastSlowIpcFailed', playbackSnapshot.lastSlowIpcFailed);
+  appendOptionalLine(lines, 'activeIpcChannel', playbackSnapshot.activeIpcChannel);
+  appendOptionalValueLine(lines, 'activeIpcElapsedMs', playbackSnapshot.activeIpcElapsedMs);
+  appendOptionalValueLine(lines, 'activeIpcCount', playbackSnapshot.activeIpcCount);
+  appendOptionalLine(lines, 'lastIpcChannel', playbackSnapshot.lastIpcChannel);
+  appendOptionalValueLine(lines, 'lastIpcMs', playbackSnapshot.lastIpcDurationMs);
+  appendOptionalValueLine(lines, 'lastIpcAgeMs', playbackSnapshot.lastIpcAgeMs);
+  appendOptionalValueLine(lines, 'lastIpcFailed', playbackSnapshot.lastIpcFailed);
   appendOptionalLine(lines, 'lastPlaybackOperation', playbackSnapshot.lastCompletedOperation);
   appendOptionalLine(lines, 'lastPlaybackPhase', playbackSnapshot.lastCompletedPhase);
   appendOptionalValueLine(lines, 'lastPlaybackPhaseMs', playbackSnapshot.lastCompletedDurationMs);

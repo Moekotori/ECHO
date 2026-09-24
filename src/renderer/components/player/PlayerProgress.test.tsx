@@ -65,13 +65,13 @@ describe('PlayerProgress', () => {
     expect(css).toContain('--nyan-surface-gradient:');
     expect(css).toContain('--nyan-player-gradient:');
     expect(css).toMatch(
-      /html\[data-theme-preset="nyanCat"\] \.app-shell \{\r?\n  background: var\(--echo-polish-app-bg-layer\), var\(--echo-polish-app-bg\);/,
+      /html\[data-theme-preset="nyanCat"\] \.app-shell \{\r?\n {2}background: var\(--echo-polish-app-bg-layer\), var\(--echo-polish-app-bg\);/,
     );
     expect(css).toMatch(
-      /html\[data-theme-preset="nyanCat"\] \.page-surface:not\(:has\(\.lyrics-page\)\) \{\r?\n  background: var\(--echo-polish-page-bg\), var\(--theme-app-bg\);/,
+      /html\[data-theme-preset="nyanCat"\] \.page-surface:not\(:has\(\.lyrics-page\)\) \{\r?\n {2}background: var\(--echo-polish-page-bg\), var\(--theme-app-bg\);/,
     );
     expect(css).toMatch(
-      /html\[data-theme-preset="nyanCat"\] \.player-bar \{\r?\n  background: var\(--echo-polish-player-bg\);/,
+      /html\[data-theme-preset="nyanCat"\] \.player-bar \{\r?\n {2}background: var\(--echo-polish-player-bg\);/,
     );
     expect(css).toContain('animation: nyan-cat-gradient-flow 18s ease-in-out infinite alternate;');
     expect(css).toMatch(

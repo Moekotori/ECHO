@@ -639,7 +639,7 @@ export const createEchoSrcFirStagePlans = (
   const safeSourceRate = Math.max(1, Math.round(sourceSampleRate));
   const safeTargetRate = Math.max(1, Math.round(targetSampleRate));
   const factor = safeTargetRate / safeSourceRate;
-  if (factor !== 2 && factor !== 4 && factor !== 8) {
+  if (factor !== 2 && factor !== 4 && factor !== 8 && factor !== 16) {
     return [];
   }
 

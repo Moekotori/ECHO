@@ -58,12 +58,12 @@ const createAudioCommandTimeout = <T>(options: AudioCommandQueueOptions = {}): {
   };
 };
 
-const runAudioCommandWithTimeout = async <T>(fn: () => Promise<T> | T, options: AudioCommandQueueOptions = {}): Promise<T> => {
+const runAudioCommandWithTimeout = async <T>(operation: Promise<T>, options: AudioCommandQueueOptions = {}): Promise<T> => {
   const timeout = createAudioCommandTimeout<T>(options);
 
   try {
     return await Promise.race([
-      Promise.resolve().then(() => fn()),
+      operation,
       timeout.promise,
     ]);
   } finally {
@@ -72,8 +72,15 @@ const runAudioCommandWithTimeout = async <T>(fn: () => Promise<T> | T, options: 
 };
 
 export const enqueueAudioCommand = <T>(fn: () => Promise<T> | T, options: AudioCommandQueueOptions = {}): Promise<T> => {
-  const result = audioCommandQueue.then(() => runAudioCommandWithTimeout(fn, options));
-  audioCommandQueue = result.then(
+  const started = audioCommandQueue.then(() => {
+    const operation = Promise.resolve().then(() => fn());
+    return {
+      operation,
+      result: runAudioCommandWithTimeout(operation, options),
+    };
+  });
+  const result = started.then(({ result: commandResult }) => commandResult);
+  audioCommandQueue = started.then(({ operation }) => operation).then(
     () => undefined,
     () => undefined,
   );

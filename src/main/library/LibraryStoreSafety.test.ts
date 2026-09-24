@@ -58,6 +58,61 @@ afterEach(() => {
 });
 
 describe('LibraryStore track metadata safety', () => {
+  it('returns semantic scan metadata with folder cache states', () => {
+    const store = makeStore();
+    const folder = store.addFolder('D:\\Music');
+    const path = 'D:\\Music\\Semantic.flac';
+    store.upsertTrack(baseTrack(folder.id, path, {
+      trackNo: 3,
+      year: 2026,
+      bpm: 128,
+    }));
+
+    const state = store.getTrackCacheStatesByFolder(folder.id).get(path);
+
+    expect(state?.scanMetadata).toMatchObject({
+      fields: {
+        title: 'Safe Title',
+        artist: 'Safe Artist',
+        trackNo: 3,
+        year: 2026,
+        bpm: 128,
+      },
+      fieldSources: {
+        title: 'embedded',
+        codec: 'technical',
+      },
+      metadataStatus: 'ok',
+      embeddedMetadataStatus: 'present',
+      embeddedCoverStatus: 'missing',
+    });
+  });
+
+  it('returns semantic scan metadata with path-batched cache states', () => {
+    const store = makeStore();
+    const folder = store.addFolder('D:\\Music');
+    const path = 'D:\\Music\\Semantic Path.flac';
+    store.upsertTrack(baseTrack(folder.id, path, {
+      title: 'Semantic  Path',
+      album: 'Semantic　Album',
+    }));
+
+    const state = store.getTrackCacheStatesByPaths(folder.id, [path]).get(path);
+
+    expect(state?.scanMetadata).toMatchObject({
+      fields: {
+        title: 'Semantic Path',
+        album: 'Semantic Album',
+      },
+      fieldSources: {
+        title: 'filename_fallback',
+        album: 'unknown',
+      },
+      metadataStatus: 'ok',
+      embeddedMetadataStatus: 'present',
+    });
+  });
+
   it('sanitizes unsafe track text before writing and when reading stale rows', () => {
     const store = makeStore();
     const folder = store.addFolder('D:\\Music');

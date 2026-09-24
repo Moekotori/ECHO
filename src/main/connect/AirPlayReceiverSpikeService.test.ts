@@ -560,12 +560,13 @@ describe('AirPlayReceiverSpikeService', () => {
   });
 
   it('reports startup timeout when the RAOP receiver does not answer', async () => {
+    const stopReceiver = vi.fn();
     const service = new AirPlayReceiverSpikeService({
       audioSession: new FakeAudioSession() as never,
       startupTimeoutMs: 5,
       loadRaopModule: async () => ({
         startReceiver: vi.fn(() => new Promise<number>(() => undefined)),
-        stopReceiver: vi.fn(),
+        stopReceiver,
         sendRemoteCommand: vi.fn(() => true),
       }),
     });
@@ -576,6 +577,7 @@ describe('AirPlayReceiverSpikeService', () => {
     expect(status.state).toBe('unavailable');
     expect(status.nativeAvailable).toBe(false);
     expect(status.error).toContain('timed out');
+    expect(stopReceiver).toHaveBeenCalledWith(-1);
   });
 
   it('binds the RAOP receiver to all adapters and advertises each LAN interface', async () => {
@@ -808,11 +810,50 @@ describe('AirPlayReceiverSpikeService', () => {
       expect(responseBody.toString('binary')).toContain('protocolVersion');
       expect(responseBody.toString('binary')).toContain('sourceVersion');
       expect(responseBody.toString('binary')).toContain('pk');
+
+      const artwork = Buffer.alloc(128 * 1024, 0x5a);
+      socket.write(rawRequest('SET_PARAMETER', '*', artwork, ['CSeq: 2'], 'image/jpeg'));
+      const artworkResponse = await readUntil(socket, hasCompleteTextResponse);
+      expect(artworkResponse.toString('utf8')).toContain('RTSP/1.0 200 OK');
+      expect(service.getStatus().artworkUrl).toContain('data:image/jpeg;base64,');
     } finally {
       socket.destroy();
     }
 
     await service.setEnabled(false);
+  });
+
+  it('closes active AirPlay 2 control sockets when the receiver is disabled', async () => {
+    const mdnsStarts: Array<{ airPlayPort?: number | null }> = [];
+    const service = new AirPlayReceiverSpikeService({
+      audioSession: new FakeAudioSession() as never,
+      airPlay2Experimental: true,
+      getAdvertiseInterfaces: () => [
+        { name: 'Wi-Fi', address: '192.168.31.214', mac: '60:CF:84:CB:1E:D1' },
+      ],
+      createMdnsAdvertiser: () => ({
+        start: vi.fn(async (advertisement) => {
+          mdnsStarts.push({ airPlayPort: advertisement.airPlayPort });
+        }),
+        stop: vi.fn(async () => undefined),
+      }),
+      loadRaopModule: async () => ({
+        startReceiver: vi.fn(() => 24),
+        stopReceiver: vi.fn(),
+      }),
+    });
+
+    await service.setEnabled(true);
+    const socket = connect(mdnsStarts[0]!.airPlayPort!, '127.0.0.1');
+    await new Promise<void>((resolve, reject) => {
+      socket.once('connect', resolve);
+      socket.once('error', reject);
+    });
+
+    const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    await expect(service.setEnabled(false)).resolves.toMatchObject({ enabled: false, state: 'disabled' });
+    await closed;
+    expect(socket.destroyed).toBe(true);
   });
 
   it('answers AirPlay 2 Pair-Setup M1-M6 exchange', async () => {
@@ -1978,6 +2019,41 @@ describe('AirPlayReceiverSpikeService', () => {
     expect(service.getStatus().state).toBe('playing');
   });
 
+  it('bounds direct PCM buffering and resumes native forwarding after drain', async () => {
+    const audio = new FakeAudioSession();
+    const harness: { handler?: (event: Record<string, unknown>) => void } = {};
+    const setPcmForwarding = vi.fn(() => true);
+    const service = new AirPlayReceiverSpikeService({
+      audioSession: audio as never,
+      loadRaopModule: async () => ({
+        startReceiver: (_options, nextHandler) => {
+          harness.handler = nextHandler;
+          return 29;
+        },
+        stopReceiver: vi.fn(),
+        setPcmForwarding,
+      }),
+    });
+
+    await service.setEnabled(true);
+    harness.handler?.({ type: 'stream', remoteAddress: '192.168.1.55' });
+    harness.handler?.({
+      type: 'pcm',
+      data: Buffer.alloc(2 * 1024 * 1024 + 2),
+      sampleRate: 44100,
+      channels: 2,
+    });
+    await Promise.resolve();
+
+    expect(setPcmForwarding).toHaveBeenCalledWith(false);
+    const stream = audio.playPcmStream.mock.calls[0]?.[0].stream;
+    expect(stream).toBeTruthy();
+    stream?.resume();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(setPcmForwarding).toHaveBeenCalledWith(true);
+  });
+
   it('sends AirPlay remote commands for computer transport controls', async () => {
     const audio = new FakeAudioSession();
     const harness: { handler?: (event: Record<string, unknown>) => void } = {};
@@ -2007,10 +2083,38 @@ describe('AirPlayReceiverSpikeService', () => {
     await service.pausePlayback();
     expect(sendRemoteCommand).toHaveBeenCalledWith(15, 'pause');
     expect(audio.pause).not.toHaveBeenCalled();
+    expect(service.getStatus().state).toBe('playing');
+    harness.handler?.({ type: 'pause' });
     expect(service.getStatus().state).toBe('paused');
 
     await service.playPlayback();
     expect(sendRemoteCommand).toHaveBeenCalledWith(15, 'play');
+    expect(service.getStatus().state).toBe('paused');
+    harness.handler?.({ type: 'play' });
+    expect(service.getStatus().state).toBe('playing');
+  });
+
+  it('rejects transport commands that the sender did not accept without faking state', async () => {
+    const audio = new FakeAudioSession();
+    const harness: { handler?: (event: Record<string, unknown>) => void } = {};
+    const service = new AirPlayReceiverSpikeService({
+      audioSession: audio as never,
+      loadRaopModule: async () => ({
+        startReceiver: (_options, nextHandler) => {
+          harness.handler = nextHandler;
+          return 16;
+        },
+        stopReceiver: vi.fn(),
+        sendRemoteCommand: vi.fn(() => false),
+      }),
+    });
+
+    await service.setEnabled(true);
+    harness.handler?.({ type: 'stream', remoteAddress: '192.168.1.51' });
+    harness.handler?.({ type: 'pcm', data: Buffer.from([0, 0]), sampleRate: 44100, channels: 2 });
+    await Promise.resolve();
+
+    await expect(service.pausePlayback()).rejects.toThrow('did not accept');
     expect(service.getStatus().state).toBe('playing');
   });
 

@@ -232,7 +232,7 @@ describe('ArtistDetailView', () => {
     expect(screen.queryByText('EC')).toBeNull();
   });
 
-  it('uses the original album cover for the panoramic fallback instead of the compressed thumb', async () => {
+  it('uses the static large album cover for the panoramic fallback instead of the compressed thumb', async () => {
     installLibrary(vi.fn().mockResolvedValue(artist({
       coverId: 'cover 1',
       coverThumb: 'echo-cover://album/cover%201',
@@ -242,7 +242,7 @@ describe('ArtistDetailView', () => {
 
     await screen.findByText('Echo Unit');
     const image = document.querySelector('.artist-hero-backdrop') as HTMLImageElement | null;
-    expect(image?.getAttribute('src')).toBe('echo-cover://original/cover%201');
+    expect(image?.getAttribute('src')).toBe('echo-cover://large/cover%201');
   });
 
   it('does not use the online biography thumbnail as the panoramic hero fallback', async () => {
@@ -274,7 +274,7 @@ describe('ArtistDetailView', () => {
 
     renderDetail(artist());
 
-    await waitFor(() => expect(document.querySelector('.artist-hero-backdrop')?.getAttribute('src')).toBe('echo-cover://original/cover%201'));
+    await waitFor(() => expect(document.querySelector('.artist-hero-backdrop')?.getAttribute('src')).toBe('echo-cover://large/cover%201'));
   });
 
   it('renders legacy MediaWiki heading markers as headings instead of raw text', async () => {

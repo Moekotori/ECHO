@@ -627,7 +627,7 @@ static void asioBufferSwitch(long doubleBufferIndex, ASIOBool directProcess) {
                 
                 // 根据 ASIO 通道格式选择输出方式
                 if (g_asio.channelInfos[ch].type == ASIOSTInt32LSB) {
-                    int* buf32 = (int*)buffer;
+                    uint32_t* buf32 = (uint32_t*)buffer;
                     
                     for (long frame = 0; frame < frames; frame++) {
                         // DoP marker: 0x05 和 0xFA 交替
@@ -643,8 +643,14 @@ static void asioBufferSwitch(long doubleBufferIndex, ASIOBool directProcess) {
                             dsdByte2 = readDsfByte(ch, dsdByteIdx + 1);
                         }
                         
-                        // 构建 32-bit DoP 采样: [marker][marker][DSD_byte1][DSD_byte2]
-                        int sample = (marker << 24) | (marker << 16) | (dsdByte1 << 8) | dsdByte2;
+                        // DSF is LSB-first; DoP is chronological MSB-first.
+                        const unsigned char dopHigh = reverseBits(dsdByte1);
+                        const unsigned char dopLow = reverseBits(dsdByte2);
+                        // ASIOSTInt32LSB is left-aligned: [00][low][high][marker].
+                        const uint32_t sample =
+                            ((uint32_t)marker << 24)
+                            | ((uint32_t)dopHigh << 16)
+                            | ((uint32_t)dopLow << 8);
                         buf32[frame] = sample;
                     }
                 } else if (g_asio.channelInfos[ch].type == ASIOSTInt24LSB) {
@@ -663,11 +669,13 @@ static void asioBufferSwitch(long doubleBufferIndex, ASIOBool directProcess) {
                             dsdByte2 = readDsfByte(ch, dsdByteIdx + 1);
                         }
                         
-                        // 24-bit 格式: [marker][DSD_byte1][DSD_byte2]
+                        const unsigned char dopHigh = reverseBits(dsdByte1);
+                        const unsigned char dopLow = reverseBits(dsdByte2);
+                        // Packed Int24LSB: [low][high][marker].
                         long offset = frame * 3;
-                        buf24[offset + 0] = marker;
-                        buf24[offset + 1] = dsdByte1;
-                        buf24[offset + 2] = dsdByte2;
+                        buf24[offset + 0] = dopLow;
+                        buf24[offset + 1] = dopHigh;
+                        buf24[offset + 2] = marker;
                     }
                 }
             }
@@ -691,17 +699,21 @@ static void asioBufferSwitch(long doubleBufferIndex, ASIOBool directProcess) {
                 void* buffer = g_asio.bufferInfos[ch].buffers[doubleBufferIndex];
                 
                 if (g_asio.channelInfos[ch].type == ASIOSTInt32LSB) {
-                    int* buf32 = (int*)buffer;
+                    uint32_t* buf32 = (uint32_t*)buffer;
                     for (long frame = 0; frame < frames; frame++) {
                         unsigned char marker = (frame % 2 == 0) ? 0x05 : 0xFA;
-                        buf32[frame] = (marker << 24) | (marker << 16);
+                        buf32[frame] =
+                            ((uint32_t)marker << 24)
+                            | ((uint32_t)0x69 << 16)
+                            | ((uint32_t)0x69 << 8);
                     }
                 } else if (g_asio.channelInfos[ch].type == ASIOSTInt24LSB) {
                     unsigned char* buf24 = (unsigned char*)buffer;
-                    memset(buf24, 0, frames * 3);
                     for (long frame = 0; frame < frames; frame++) {
                         unsigned char marker = (frame % 2 == 0) ? 0x05 : 0xFA;
-                        buf24[frame * 3 + 0] = marker;
+                        buf24[frame * 3 + 0] = 0x69;
+                        buf24[frame * 3 + 1] = 0x69;
+                        buf24[frame * 3 + 2] = marker;
                     }
                 }
             }

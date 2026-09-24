@@ -45,6 +45,7 @@ type MvSettingsDrawerProps = {
 };
 
 const drawerExitAnimationMs = 480;
+const immersiveControlsOpenStorageKey = 'echo-next.mv.immersive-controls-open';
 const formatScore = (score: number): string => `${Math.round(score * 100)}%`;
 const formatThreshold = (threshold: number | undefined): string => `${Math.round((threshold ?? 0.7) * 100)}%`;
 const thresholdFromPercent = (value: string): number => Math.max(30, Math.min(100, Math.round(Number(value)))) / 100;
@@ -101,12 +102,28 @@ const immersiveBackgroundDefaults = {
   immersiveBackgroundOverlayOpacityPercent: 0,
 } satisfies Partial<MvSettings>;
 
+const readImmersiveControlsOpen = (): boolean => {
+  try {
+    return window.localStorage.getItem(immersiveControlsOpenStorageKey) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const writeImmersiveControlsOpen = (enabled: boolean): void => {
+  try {
+    window.localStorage.setItem(immersiveControlsOpenStorageKey, enabled ? 'true' : 'false');
+  } catch {
+    // UI preference only; MV background tuning remains usable without storage.
+  }
+};
+
 const fallbackSettings: MvSettings = {
   enabled: true,
   autoSearch: true,
   autoPreload: true,
   autoApplyThreshold: 0.7,
-  titleOnlySearch: true,
+  titleOnlySearch: false,
   preferHighestViewCount: true,
   immersiveBackground: true,
   ...immersiveBackgroundDefaults,
@@ -309,6 +326,7 @@ export const MvSettingsDrawer = ({ isOpen, onClose }: MvSettingsDrawerProps): JS
   const [draggedProvider, setDraggedProvider] = useState<NetworkMvProviderId | null>(null);
   const [dragOverProvider, setDragOverProvider] = useState<NetworkMvProviderId | null>(null);
   const [isNetworkSectionOpen, setIsNetworkSectionOpen] = useState(false);
+  const [isImmersiveControlsOpen, setIsImmersiveControlsOpen] = useState(readImmersiveControlsOpen);
   const [isMvOffsetSectionOpen, setIsMvOffsetSectionOpen] = useState(false);
   const [isMvOffsetSaving, setIsMvOffsetSaving] = useState(false);
   const [mvOffsetAdjustmentStepMs, setMvOffsetAdjustmentStepMs] = useState<(typeof mvOffsetStepOptionsMs)[number]>(500);
@@ -368,6 +386,8 @@ export const MvSettingsDrawer = ({ isOpen, onClose }: MvSettingsDrawerProps): JS
   const isMvEnabled = settings.enabled !== false;
   const followMusicProgress = settings.restartAudioOnLoad;
   const replayAudioOnChange = settings.replayAudioOnChange !== false;
+  const immersiveBackground = settings.immersiveBackground !== false;
+  const hideLyricsInMv = settings.hideLyrics === true;
   const selectedMvOffsetMs = clampMvOffsetMs(Number(selectedVideo?.offsetMs ?? 0));
 
   const findTrackForId = useCallback(
@@ -467,7 +487,7 @@ export const MvSettingsDrawer = ({ isOpen, onClose }: MvSettingsDrawerProps): JS
         }
       }
     },
-    [resolveSelectedStreams],
+    [resolveSelectedStreams, t],
   );
 
   const refreshActiveTrack = useCallback(async (): Promise<string | null> => {
@@ -609,6 +629,14 @@ export const MvSettingsDrawer = ({ isOpen, onClose }: MvSettingsDrawerProps): JS
     setDiagnosticsReportEnabled(nextEnabled);
     writeMvDiagnosticsEnabled(nextEnabled);
   }, [isDiagnosticsReportEnabled]);
+
+  const toggleImmersiveControls = useCallback((): void => {
+    setIsImmersiveControlsOpen((current) => {
+      const next = !current;
+      writeImmersiveControlsOpen(next);
+      return next;
+    });
+  }, []);
 
   const reorderProvider = useCallback(
     (provider: NetworkMvProviderId, targetProvider: NetworkMvProviderId): void => {
@@ -834,7 +862,7 @@ export const MvSettingsDrawer = ({ isOpen, onClose }: MvSettingsDrawerProps): JS
         setIsMvOffsetSaving(false);
       }
     },
-    [activeMvTrackId, loadCurrentMv, notifyMvChanged, refreshActiveTrack, resolveSelectedStreams],
+    [activeMvTrackId, loadCurrentMv, notifyMvChanged, refreshActiveTrack, resolveSelectedStreams, t],
   );
 
   const mvOffsetControls = useMemo(() => {
@@ -1444,6 +1472,150 @@ export const MvSettingsDrawer = ({ isOpen, onClose }: MvSettingsDrawerProps): JS
                   <em>{t('mvSettings.network.replayAudioOnChangeDescription')}</em>
                 </span>
               </button>
+              <button
+                type="button"
+                className="mv-source-toggle mv-auto-apply-toggle"
+                aria-pressed={immersiveBackground}
+                onClick={() => void patchSettings({ immersiveBackground: !immersiveBackground })}
+              >
+                <span className="mv-switch-track" aria-hidden="true">
+                  <span />
+                </span>
+                <span className="mv-toggle-copy">
+                  <strong>{t('mvSettings.immersive.title')}</strong>
+                  <em>{t('mvSettings.immersive.description')}</em>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="mv-source-toggle mv-auto-apply-toggle"
+                aria-pressed={hideLyricsInMv}
+                onClick={() => void patchSettings({ hideLyrics: !hideLyricsInMv })}
+              >
+                <span className="mv-switch-track" aria-hidden="true">
+                  <span />
+                </span>
+                <span className="mv-toggle-copy">
+                  <strong>{t('mvSettings.immersive.hideLyrics')}</strong>
+                  <em>{t('mvSettings.immersive.hideLyricsDescription')}</em>
+                </span>
+              </button>
+              {immersiveBackground ? (
+                <div className={`mv-immersive-controls${isImmersiveControlsOpen ? ' mv-immersive-controls--open' : ''}`}>
+                  <button
+                    type="button"
+                    className="mv-immersive-collapse"
+                    aria-expanded={isImmersiveControlsOpen}
+                    onClick={toggleImmersiveControls}
+                  >
+                    <span>
+                      <MonitorPlay size={15} />
+                      <strong>{t('mvSettings.immersive.tuning')}</strong>
+                      <em>{t('mvSettings.immersive.visualHint')}</em>
+                    </span>
+                    <ChevronDown size={16} aria-hidden="true" />
+                  </button>
+
+                  {isImmersiveControlsOpen ? (
+                    <div className="mv-immersive-controls-body">
+                      <button
+                        type="button"
+                        className="mv-immersive-reset"
+                        onClick={() => void patchSettings(immersiveBackgroundDefaults)}
+                      >
+                        <RotateCcw size={15} />
+                        {t('mvSettings.immersive.reset')}
+                      </button>
+                      <button
+                        type="button"
+                        className="mv-source-toggle mv-auto-apply-toggle"
+                        aria-pressed={settings.immersiveBackgroundAutoScale !== false}
+                        onClick={() => void patchSettings({ immersiveBackgroundAutoScale: settings.immersiveBackgroundAutoScale === false })}
+                      >
+                        <span className="mv-switch-track" aria-hidden="true">
+                          <span />
+                        </span>
+                        <span className="mv-toggle-copy">
+                          <strong>{t('mvSettings.immersive.autoScale')}</strong>
+                          <em>{t('mvSettings.immersive.autoScaleDescription')}</em>
+                        </span>
+                      </button>
+                      <label className="mv-threshold-control">
+                        <span className="mv-threshold-copy">
+                          <strong>{t('mvSettings.immersive.zoom')}</strong>
+                          <em>{settings.immersiveBackgroundScalePercent ?? 115}%</em>
+                        </span>
+                        <span className="mv-threshold-slider">
+                          <input
+                            type="range"
+                            min="70"
+                            max="220"
+                            step="1"
+                            value={settings.immersiveBackgroundScalePercent ?? 115}
+                            aria-label={t('mvSettings.immersive.zoom')}
+                            onChange={(event) => void patchSettings({ immersiveBackgroundScalePercent: Number(event.currentTarget.value) })}
+                          />
+                          <strong>{settings.immersiveBackgroundScalePercent ?? 115}%</strong>
+                        </span>
+                      </label>
+                      <label className="mv-threshold-control">
+                        <span className="mv-threshold-copy">
+                          <strong>{t('mvSettings.immersive.blur')}</strong>
+                          <em>{t('mvSettings.immersive.visualHint')}</em>
+                        </span>
+                        <span className="mv-threshold-slider">
+                          <input
+                            type="range"
+                            min="0"
+                            max="32"
+                            step="1"
+                            value={settings.immersiveBackgroundBlurPx ?? 0}
+                            aria-label={t('mvSettings.immersive.blur')}
+                            onChange={(event) => void patchSettings({ immersiveBackgroundBlurPx: Number(event.currentTarget.value) })}
+                          />
+                          <strong>{settings.immersiveBackgroundBlurPx ?? 0}px</strong>
+                        </span>
+                      </label>
+                      <label className="mv-threshold-control">
+                        <span className="mv-threshold-copy">
+                          <strong>{t('mvSettings.immersive.brightness')}</strong>
+                          <em>{t('mvSettings.immersive.visualHint')}</em>
+                        </span>
+                        <span className="mv-threshold-slider">
+                          <input
+                            type="range"
+                            min="60"
+                            max="140"
+                            step="1"
+                            value={settings.immersiveBackgroundBrightnessPercent ?? 100}
+                            aria-label={t('mvSettings.immersive.brightness')}
+                            onChange={(event) => void patchSettings({ immersiveBackgroundBrightnessPercent: Number(event.currentTarget.value) })}
+                          />
+                          <strong>{settings.immersiveBackgroundBrightnessPercent ?? 100}%</strong>
+                        </span>
+                      </label>
+                      <label className="mv-threshold-control">
+                        <span className="mv-threshold-copy">
+                          <strong>{t('mvSettings.immersive.overlay')}</strong>
+                          <em>{t('mvSettings.immersive.overlayHint')}</em>
+                        </span>
+                        <span className="mv-threshold-slider">
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value={settings.immersiveBackgroundOverlayOpacityPercent ?? 0}
+                            aria-label={t('mvSettings.immersive.overlay')}
+                            onChange={(event) => void patchSettings({ immersiveBackgroundOverlayOpacityPercent: Number(event.currentTarget.value) })}
+                          />
+                          <strong>{settings.immersiveBackgroundOverlayOpacityPercent ?? 0}%</strong>
+                        </span>
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="mv-quality-controls">
                 <div className="mv-quality-menu">
                   <span className="mv-field-label">{t('mvSettings.network.maxQuality')}</span>

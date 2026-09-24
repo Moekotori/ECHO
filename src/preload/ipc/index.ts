@@ -1,6 +1,7 @@
 export { createAppApi } from './appApi';
 export { createDesktopLyricsApi } from './desktopLyricsApi';
 export { createMiniPlayerApi } from './miniPlayerApi';
+export { createPetApi } from './petApi';
 export { createLibraryApi } from './libraryApi';
 export { createLibraryLabApi } from './libraryLabApi';
 export { createPlaybackApi, type PlaybackDeps } from './playbackApi';
@@ -24,3 +25,5 @@ export { setupPlaybackProxy } from './playbackProxy';
 export { createLastFmApi } from './ipcLastFm';
 export { createDiscordPresenceApi } from './ipcDiscordPresence';
 export { createStageBridgeApi } from './ipcStageBridge';
+export { createEchoLinkApi } from './ipcEchoLink';
+export { createMqttIntegrationApi } from './ipcMqttIntegration';

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const AUDIO_COMMAND_TIMEOUT_MS = 15_000;
+const ipcFixtureTimeoutMs = 10_000;
 
 describe('audio IPC command timeout fallback', () => {
   beforeEach(() => {
@@ -15,8 +16,9 @@ describe('audio IPC command timeout fallback', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns the current audio status instead of surfacing a timed-out command error', async () => {
+  it('preserves an ASIO output request when returning the current status after a timed-out command', async () => {
     vi.useFakeTimers();
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
 
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -115,14 +117,18 @@ describe('audio IPC command timeout fallback', () => {
     const { registerAudioIpc } = await import('./audioIpc');
     registerAudioIpc();
 
-    const result = handlers.get(IpcChannels.AudioSetOutput)?.({}, { outputMode: 'shared' }) as Promise<unknown>;
+    const result = handlers.get(IpcChannels.AudioSetOutput)?.({}, { outputMode: 'asio' }) as Promise<unknown>;
+    // enqueueAudioCommand starts the timeout from a queued microtask. Let it
+    // arm before advancing fake time, otherwise this assertion waits on a
+    // timer that was scheduled after the clock has already advanced.
+    await Promise.resolve();
     await vi.advanceTimersByTimeAsync(AUDIO_COMMAND_TIMEOUT_MS + 100);
 
     await expect(result).resolves.toBe(status);
-    expect(setOutput).toHaveBeenCalledWith(expect.objectContaining({ outputMode: 'shared' }));
+    expect(setOutput).toHaveBeenCalledWith(expect.objectContaining({ outputMode: 'asio' }));
     expect(reportAudioError).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith('[audioIpc] audio command timed out; returning current status');
-  });
+  }, ipcFixtureTimeoutMs);
 });
 
 describe('audio IPC EQ preset import', () => {
@@ -244,6 +250,10 @@ describe('audio IPC EQ preset import', () => {
     vi.doMock('../diagnostics/CrashReportService', () => ({
       getCrashReportService: () => ({ reportAudioError: vi.fn() }),
     }));
+    const requireLocalPro = vi.fn();
+    vi.doMock('../plugins/LocalProEntitlements', () => ({
+      requireLocalPro,
+    }));
 
     const { IpcChannels } = await import('../../shared/constants/ipcChannels');
     const { registerAudioIpc } = await import('./audioIpc');
@@ -277,5 +287,13 @@ describe('audio IPC EQ preset import', () => {
         includedFileCount: 1,
       },
     });
+    expect(requireLocalPro).toHaveBeenCalledWith('dsp');
+
+    const listPresetsCallCount = eqBridge.listPresets.mock.calls.length;
+    requireLocalPro.mockImplementationOnce(() => {
+      throw new Error('echo_pro_required');
+    });
+    expect(() => handlers.get(IpcChannels.EqListPresets)?.({})).toThrow('echo_pro_required');
+    expect(eqBridge.listPresets).toHaveBeenCalledTimes(listPresetsCallCount);
   });
 });

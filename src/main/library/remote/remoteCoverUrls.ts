@@ -18,6 +18,7 @@ const normalizeRemotePath = (value: unknown): string | null => {
 };
 
 export type RemoteCoverCacheKeyInput = {
+  sourceId?: unknown;
   provider: unknown;
   fieldSources?: Record<string, unknown> | null;
   remotePath?: unknown;
@@ -30,20 +31,22 @@ export const remoteCoverCacheKeyFor = (input: RemoteCoverCacheKeyInput): string 
     return null;
   }
 
+  const sourceId = clean(input.sourceId);
+  const sourcePrefix = sourceId ? `${provider}:source:${sourceId}` : provider;
   const coverArt = clean(input.fieldSources?.coverArt);
   if (coverArt) {
-    return `${provider}:cover-art:${coverArt}`;
+    return `${sourcePrefix}:cover-art:${coverArt}`;
   }
 
   const albumId = clean(input.fieldSources?.albumId ?? input.fieldSources?.serverAlbumId);
   if ((provider === 'subsonic' || provider === 'jellyfin' || provider === 'emby') && albumId) {
-    return `${provider}:album:${albumId}`;
+    return `${sourcePrefix}:album:${albumId}`;
   }
 
   const remotePath = normalizeRemotePath(input.remotePath);
   const stableKey = clean(input.stableKey);
   if (remotePath && stableKey) {
-    return `${provider}:path:${remotePath}:${stableKey}`;
+    return `${sourcePrefix}:path:${remotePath}:${stableKey}`;
   }
 
   return null;
@@ -51,6 +54,7 @@ export const remoteCoverCacheKeyFor = (input: RemoteCoverCacheKeyInput): string 
 
 export const subsonicDirectCoverUrlFor = (
   trackId: unknown,
+  sourceId: unknown,
   provider: unknown,
   coverId: unknown,
   fieldSources?: Record<string, unknown> | null,
@@ -63,10 +67,18 @@ export const subsonicDirectCoverUrlFor = (
   }
 
   const normalizedSize = Number.isFinite(size) ? Math.max(80, Math.min(1024, Math.round(size))) : 512;
-  const cacheKey = remoteCoverCacheKeyFor({ provider, fieldSources, remotePath, stableKey });
+  const normalizedSourceId = clean(sourceId);
+  const coverArt = clean(fieldSources?.coverArt);
+  const cacheKey = remoteCoverCacheKeyFor({ sourceId: normalizedSourceId, provider, fieldSources, remotePath, stableKey });
   const params = new URLSearchParams({ size: String(normalizedSize) });
   if (cacheKey) {
     params.set('cacheKey', cacheKey);
   }
+  if (normalizedSourceId && coverArt && cacheKey) {
+    params.set('sourceId', normalizedSourceId);
+    params.set('coverArt', coverArt);
+    return `echo-image://subsonic-cover/${encodeURIComponent(cacheKey)}?${params.toString()}`;
+  }
+
   return `echo-image://subsonic-cover/${encodeURIComponent(String(trackId))}?${params.toString()}`;
 };

@@ -169,10 +169,14 @@ describe('account IPC', () => {
     expect(startAccountLoginWindowMock).not.toHaveBeenCalled();
   });
 
-  it('saves a system browser choice for SoundCloud', () => {
+  it('saves a system browser choice for SoundCloud and broadcasts the updated account status', () => {
+    const sendMock = vi.fn();
+    browserWindowGetAllWindowsMock.mockReturnValue([{ webContents: { send: sendMock } }]);
+
     expect(handlers[IpcChannels.AccountSetBrowser]!(null, 'soundcloud', 'chrome')).toEqual({
       provider: 'soundcloud',
       connected: true,
     });
+    expect(sendMock).toHaveBeenCalledWith(IpcChannels.AccountStatusesChanged, []);
   });
 });

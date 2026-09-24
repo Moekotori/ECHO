@@ -435,11 +435,26 @@ type EchoPluginApi = {
   };
 };
 
-type EchoPluginPanelAction = 'plugin:getSummary' | 'plugin:getLogs' | 'plugin:runCommand';
+type EchoPluginPanelAction =
+  | 'plugin:getSummary'
+  | 'plugin:getLogs'
+  | 'plugin:runCommand'
+  | 'plugin:subscribe'
+  | 'plugin:unsubscribe'
+  | 'host:playback:getStatus'
+  | 'host:playback:play'
+  | 'host:playback:pause'
+  | 'host:playback:stop'
+  | 'host:playback:seek'
+  | 'host:library:getSummary'
+  | 'host:library:getTracks'
+  | 'host:settings:get'
+  | 'host:settings:set'
+  | 'host:ui:notify';
 
 type EchoPluginPanelRequest = {
   channel: 'echo:plugin-panel';
-  version: 1;
+  version: 2;
   type: 'request';
   requestId: string;
   pluginId: string;
@@ -450,7 +465,7 @@ type EchoPluginPanelRequest = {
 type EchoPluginPanelResponse =
   | {
       channel: 'echo:plugin-panel';
-      version: 1;
+      version: 2;
       type: 'response';
       requestId: string;
       pluginId: string;
@@ -459,12 +474,21 @@ type EchoPluginPanelResponse =
     }
   | {
       channel: 'echo:plugin-panel';
-      version: 1;
+      version: 2;
       type: 'response';
       requestId: string;
       pluginId: string;
       ok: false;
       error: string;
     };
+
+type EchoPluginPanelEvent = {
+  channel: 'echo:plugin-panel';
+  version: 2;
+  type: 'event';
+  pluginId: string;
+  eventName: EchoPluginEventName;
+  payload: unknown;
+};
 
 declare const echo: EchoPluginApi;

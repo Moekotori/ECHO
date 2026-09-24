@@ -19,8 +19,10 @@ import type {
   RemoteStreamInput,
 } from '../remoteTypes';
 import { remoteUrlHashFor } from '../remoteIdentity';
+import { readResponseBodyLimited } from '../../../network/readResponseBodyLimited';
 
 type MediaServerProvider = Extract<RemoteSourceProvider, 'jellyfin' | 'emby'>;
+const maximumRemoteCoverBytes = 16 * 1024 * 1024;
 
 type AuthContext = {
   headers: Record<string, string>;
@@ -148,12 +150,23 @@ const cleanNumber = (value: unknown): number | null => {
 };
 const sha1 = (value: unknown): string => createHash('sha1').update(JSON.stringify(value ?? {})).digest('hex');
 
-const timeoutSignal = (timeoutMs: number, signal?: AbortSignal): AbortSignal => {
+const timeoutSignal = (timeoutMs: number, signal?: AbortSignal): { signal: AbortSignal; dispose: () => void } => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   timer.unref?.();
-  signal?.addEventListener('abort', () => controller.abort(), { once: true });
-  return controller.signal;
+  const onAbort = (): void => controller.abort(signal?.reason);
+  if (signal?.aborted) {
+    onAbort();
+  } else {
+    signal?.addEventListener('abort', onAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    },
+  };
 };
 
 const baseUrlFor = (value: string | null): string => {
@@ -247,11 +260,14 @@ export class MediaServerRemoteSourceAdapter implements RemoteSourceAdapter {
     const testedAt = nowIso();
     try {
       const auth = await this.authenticate(input);
-      const response = await this.fetch(input, `${baseUrlFor(input.source.baseUrl)}/System/Info`, {
+      const status = await this.fetchWithResponse(input, `${baseUrlFor(input.source.baseUrl)}/System/Info`, {
         headers: auth.headers,
-      }, 8000);
-      if (!response.ok) {
-        return { ok: false, status: 'error', message: friendlyStatus(this.provider, response.status), testedAt };
+      }, 8000, async (response) => {
+        await response.body?.cancel();
+        return response.status;
+      });
+      if (status < 200 || status >= 300) {
+        return { ok: false, status: 'error', message: friendlyStatus(this.provider, status), testedAt };
       }
       return { ok: true, status: 'enabled', message: '连接成功。', testedAt };
     } catch (error) {
@@ -346,25 +362,27 @@ export class MediaServerRemoteSourceAdapter implements RemoteSourceAdapter {
   async readCover(input: RemoteReadCoverInput): Promise<RemoteCoverResult> {
     const itemId = parseItemId(this.provider, input.item.path);
     const auth = await this.authenticate(input);
-    const response = await this.fetch(input, `${baseUrlFor(input.source.baseUrl)}/Items/${encodeURIComponent(itemId)}/Images/Primary?maxWidth=512&quality=80`, {
+    return this.fetchWithResponse(input, `${baseUrlFor(input.source.baseUrl)}/Items/${encodeURIComponent(itemId)}/Images/Primary?maxWidth=512&quality=80`, {
       headers: auth.headers,
-    }, 8000);
+    }, 8000, async (response, signal) => {
+      if (response.status === 404) {
+        await response.body?.cancel();
+        return this.emptyCover('cover_not_found');
+      }
+      if (!response.ok) {
+        await response.body?.cancel();
+        return { ...this.emptyCover('cover_read_failed'), errors: [friendlyStatus(this.provider, response.status)] };
+      }
 
-    if (response.status === 404) {
-      return this.emptyCover('cover_not_found');
-    }
-    if (!response.ok) {
-      return { ...this.emptyCover('cover_read_failed'), errors: [friendlyStatus(this.provider, response.status)] };
-    }
-
-    return {
-      status: 'ok',
-      data: new Uint8Array(await response.arrayBuffer()),
-      mimeType: response.headers.get('content-type'),
-      fieldSources: { cover: this.provider },
-      warnings: [],
-      errors: [],
-    };
+      return {
+        status: 'ok',
+        data: await readResponseBodyLimited(response, maximumRemoteCoverBytes, { signal }),
+        mimeType: response.headers.get('content-type'),
+        fieldSources: { cover: this.provider },
+        warnings: [],
+        errors: [],
+      };
+    });
   }
 
   async createProxyRequest(input: RemoteStreamInput): Promise<{ url: string; headers: Record<string, string> }> {
@@ -417,18 +435,22 @@ export class MediaServerRemoteSourceAdapter implements RemoteSourceAdapter {
       return { headers: this.createBaseAuthorizationHeaders(), userId: cleanText(input.source.config.userId) };
     }
 
-    const response = await this.fetch(input, `${baseUrlFor(input.source.baseUrl)}/Users/AuthenticateByName`, {
-      method: 'POST',
-      headers: {
-        ...this.createBaseAuthorizationHeaders(),
-        'Content-Type': 'application/json',
+    const json = await this.fetchJson<{ AccessToken?: string; User?: { Id?: string } }>(
+      input,
+      `${baseUrlFor(input.source.baseUrl)}/Users/AuthenticateByName`,
+      {
+        method: 'POST',
+        headers: {
+          ...this.createBaseAuthorizationHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          Username: input.source.username,
+          Pw: input.source.secret,
+        }),
       },
-      body: JSON.stringify({
-        Username: input.source.username,
-        Pw: input.source.secret,
-      }),
-    }, 8000);
-    const json = await jsonOrError<{ AccessToken?: string; User?: { Id?: string } }>(response, this.provider);
+      8000,
+    );
     const token = cleanText(json.AccessToken);
     return {
       headers: token ? { ...this.createBaseAuthorizationHeaders(token), 'X-Emby-Token': token } : this.createBaseAuthorizationHeaders(),
@@ -457,12 +479,34 @@ export class MediaServerRemoteSourceAdapter implements RemoteSourceAdapter {
     return { 'X-Emby-Authorization': value };
   }
 
-  private fetch(input: RemoteAdapterInput, url: string | URL, options: RequestInit = {}, timeoutMs = 8000): Promise<Response> {
-    return mediaServerRequestLimiter.run(() =>
-      fetch(url, {
-        ...options,
-        signal: timeoutSignal(timeoutMs, input.signal),
-      }), input.signal);
+  private fetchWithResponse<T>(
+    input: RemoteAdapterInput,
+    url: string | URL,
+    options: RequestInit,
+    timeoutMs: number,
+    consume: (response: Response, signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    return mediaServerRequestLimiter.run(async () => {
+      const deadline = timeoutSignal(timeoutMs, input.signal);
+      try {
+        const response = await fetch(url, {
+          ...options,
+          signal: deadline.signal,
+        });
+        return await consume(response, deadline.signal);
+      } finally {
+        deadline.dispose();
+      }
+    }, input.signal);
+  }
+
+  private fetchJson<T>(
+    input: RemoteAdapterInput,
+    url: string | URL,
+    options: RequestInit = {},
+    timeoutMs = 8000,
+  ): Promise<T> {
+    return this.fetchWithResponse(input, url, options, timeoutMs, (response) => jsonOrError<T>(response, this.provider));
   }
 
   private authCacheKey(input: RemoteAdapterInput): string {
@@ -487,10 +531,7 @@ export class MediaServerRemoteSourceAdapter implements RemoteSourceAdapter {
   private async fetchLibraries(input: RemoteAdapterInput, auth: AuthContext): Promise<MediaServerItem[]> {
     const userPath = auth.userId ? `/Users/${encodeURIComponent(auth.userId)}/Views` : '/Items';
     const url = new URL(`${baseUrlFor(input.source.baseUrl)}${userPath}`);
-    const json = await jsonOrError<{ Items?: MediaServerItem[] }>(
-      await this.fetch(input, url, { headers: auth.headers }, 8000),
-      this.provider,
-    );
+    const json = await this.fetchJson<{ Items?: MediaServerItem[] }>(input, url, { headers: auth.headers }, 8000);
     return (json.Items ?? []).filter((item) => item.CollectionType === 'music' || item.Type === 'CollectionFolder' || item.Type === 'Folder');
   }
 
@@ -510,9 +551,11 @@ export class MediaServerRemoteSourceAdapter implements RemoteSourceAdapter {
     url.searchParams.set('StartIndex', String(startIndex));
     url.searchParams.set('Limit', String(limit));
 
-    return jsonOrError<{ Items?: MediaServerItem[]; TotalRecordCount?: number }>(
-      await this.fetch(input, url, { headers: auth.headers }, 12000),
-      this.provider,
+    return this.fetchJson<{ Items?: MediaServerItem[]; TotalRecordCount?: number }>(
+      input,
+      url,
+      { headers: auth.headers },
+      12000,
     );
   }
 
@@ -532,17 +575,21 @@ export class MediaServerRemoteSourceAdapter implements RemoteSourceAdapter {
     url.searchParams.set('StartIndex', String(startIndex));
     url.searchParams.set('Limit', String(limit));
 
-    return jsonOrError<{ Items?: MediaServerItem[]; TotalRecordCount?: number }>(
-      await this.fetch(input, url, { headers: auth.headers }, 12000),
-      this.provider,
+    return this.fetchJson<{ Items?: MediaServerItem[]; TotalRecordCount?: number }>(
+      input,
+      url,
+      { headers: auth.headers },
+      12000,
     );
   }
 
   private async fetchItem(input: RemoteAdapterInput, auth: AuthContext, itemId: string): Promise<MediaServerItem> {
     const basePath = auth.userId ? `/Users/${encodeURIComponent(auth.userId)}/Items/${encodeURIComponent(itemId)}` : `/Items/${encodeURIComponent(itemId)}`;
-    return jsonOrError<MediaServerItem>(
-      await this.fetch(input, `${baseUrlFor(input.source.baseUrl)}${basePath}`, { headers: auth.headers }, 8000),
-      this.provider,
+    return this.fetchJson<MediaServerItem>(
+      input,
+      `${baseUrlFor(input.source.baseUrl)}${basePath}`,
+      { headers: auth.headers },
+      8000,
     );
   }
 

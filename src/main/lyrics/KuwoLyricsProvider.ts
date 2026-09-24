@@ -3,6 +3,7 @@ import { asRecord, fetchJsonWithTimeout, number, text } from '../library/network
 import { fetchWithNetworkProxy } from '../network/networkFetch';
 import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, LyricsProviderSearchRequest } from './LyricsProvider';
 import { isInstrumentalLyricsText } from './instrumentalPlaceholders';
+import { providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
 
 const kuwoHeaders = {
   Referer: 'https://www.kuwo.cn/',
@@ -122,7 +123,10 @@ export class KuwoLyricsProvider implements LyricsProvider {
   async search(request: LyricsProviderSearchRequest): Promise<LyricsProviderResult[]> {
     try {
       const songs = await this.searchSongs(request);
-      const results = await Promise.all(songs.slice(0, 5).map((song) => this.fetchLyrics(song, request)));
+      const rankedSongs = rankLyricsProviderItems(request, songs);
+      const results = await Promise.all(
+        rankedSongs.slice(0, providerLyricsFetchLimit(request)).map((song) => this.fetchLyrics(song, request)),
+      );
       return results.filter((result): result is LyricsProviderResult => Boolean(result));
     } catch {
       return [];
@@ -177,6 +181,10 @@ export class KuwoLyricsProvider implements LyricsProvider {
           durationSeconds: number(song.DURATION ?? song.duration),
           raw: songValue,
         });
+      }
+
+      if (!request.collectAllCandidates && songs.length > 0) {
+        break;
       }
     }
 

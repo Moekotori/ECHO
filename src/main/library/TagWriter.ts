@@ -107,6 +107,8 @@ const { parentPort, workerData } = module['require']('node:worker_threads');
 const tagWriteQueues = new Map<string, Promise<void>>();
 let globalTagWriteQueue: Promise<void> = Promise.resolve();
 
+export const hasPendingTagWrites = (): boolean => tagWriteQueues.size > 0;
+
 export const writeEmbeddedTrackTags = async (request: FullTagWriteRequest): Promise<void> => {
   const previousWrite = tagWriteQueues.get(request.filePath) ?? Promise.resolve();
   const nextWrite = previousWrite.catch(() => undefined).then(() => enqueueGlobalTagWrite(request));

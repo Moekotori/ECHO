@@ -4,7 +4,9 @@
   --echo-motion-hover-ms: 100ms;
   --echo-motion-icon-hover-ms: 150ms;
   --echo-motion-mini-player-ms: 320ms;
+  --echo-motion-sidebar-ms: 280ms;
   --echo-motion-ease-standard: cubic-bezier(0.2, 0.82, 0.18, 1);
+  --echo-motion-ease-sidebar: cubic-bezier(0.16, 1, 0.3, 1);
   --echo-motion-ease-quick: cubic-bezier(0.22, 0.68, 0.18, 1);
   --echo-motion-ease-icon: cubic-bezier(0.18, 0.9, 0.22, 1);
 }
@@ -24,6 +26,7 @@
     --echo-motion-hover-ms: 1ms;
     --echo-motion-icon-hover-ms: 1ms;
     --echo-motion-mini-player-ms: 1ms;
+    --echo-motion-sidebar-ms: 1ms;
   }
 
   .nav-item,
@@ -42,4 +45,27 @@
     animation-duration: 1ms !important;
   }
 
+}
+
+.app-shell[data-low-spec-mode='true'] {
+  --echo-motion-page-ms: 1ms;
+  --echo-motion-panel-ms: 1ms;
+  --echo-motion-hover-ms: 1ms;
+  --echo-motion-icon-hover-ms: 1ms;
+  --echo-motion-mini-player-ms: 1ms;
+  --echo-motion-sidebar-ms: 1ms;
+  scroll-behavior: auto;
+}
+
+.app-shell[data-low-spec-mode='true'] *:not(.spinning-icon),
+.app-shell[data-low-spec-mode='true'] *:not(.spinning-icon)::before,
+.app-shell[data-low-spec-mode='true'] *:not(.spinning-icon)::after {
+  scroll-behavior: auto !important;
+  transition-duration: 1ms !important;
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+}
+
+.app-shell[data-low-spec-mode='true'] * {
+  backdrop-filter: none !important;
 }

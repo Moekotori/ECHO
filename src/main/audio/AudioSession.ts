@@ -1,45 +1,46 @@
 import { EventEmitter } from 'node:events';
-import { cpus } from 'node:os';
 import { basename, extname } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { Readable, Writable } from 'node:stream';
 import { DeviceService } from './DeviceService';
 import { DecoderPipeline } from './DecoderPipeline';
 import {
-  analyzeEchoSrcFirTaps,
   createEchoSrcFirPlan,
   createEchoSrcFirStagePlans,
   createEchoSrcFirTaps,
-  processFirInterleavedFloat32Cpu,
-  resolveEchoSrcFirBackendStatus,
-  type EchoSrcFirBackendStatus,
-  type EchoSrcFirTapsAnalysis,
 } from './EchoSrcFirEngine';
-import { EchoSrcFirWorkerTransform, type EchoSrcFirWorkerClientLike, type EchoSrcFirWorkerTransformMetrics } from './EchoSrcFirWorkerTransform';
-import { EchoSrcCudaWorkerClient } from './EchoSrcCudaWorker';
 import { getEqBridge } from './EqBridge';
-import { PcmLevelMeterTransform, createAudioLevelTelemetry, visualSpectrumBucketCount, type PcmLevelSnapshot } from './AudioLevelMeter';
+import { EqStateStore } from './EqStateStore';
+import {
+  PcmLevelMeterTransform,
+  createAudioLevelTelemetry,
+  createNativeAudioLevelTelemetry,
+  visualSpectrumBucketCount,
+  type PcmLevelSnapshot,
+} from './AudioLevelMeter';
 import type { EqProfileBindingTarget } from '../../shared/types/eq';
-import { isNativeOutputBridgeAvailable, startAudioDaemon, stopAudioDaemon, daemonBridge } from './NativePcmHostProcess';
-import { DaemonAudioBackend } from './DaemonAudioBackend';
+import { NativePcmHostProcess, isNativeOutputBridgeAvailable, startAudioDaemon, stopAudioDaemon, daemonBridge } from './NativePcmHostProcess';
+import type { DaemonAudioBackend, DaemonOutputSettings, NativeDspProcessingConfig } from './DaemonAudioBackend';
+import type { NativeDspProcessingStatus } from './JsonRpcBridge';
+import { normalizeAudioInputSource } from './AudioBackend';
+import type { AudioBackendQueueItem, AudioBackendQueueSnapshot, AudioInputSource } from './AudioBackend';
 import { createAudioBackend } from './BackendFactory';
 import { activeJsonRpcBridge } from './HostBridgeRegistry';
 import { PlaybackClock } from './PlaybackClock';
 import { isCueTrackPath } from './CueSheet';
 import { isDsdCodec, isDsdFilePath, isDsfFilePath, resolveDsdDopTransportSampleRate, resolveDsdPcmOutputSampleRate, shouldProbeDsdNativeSampleRate } from './DsdProbe';
 import { createDsfDopStream, createDsfNativeDsdStream, readDsfDopInfo } from './DsdDopPipeline';
-import { PcmToDsdDoPTransform, resolveSdmDopTransportSampleRate, resolveSdmModulatorProfile, resolveSdmNativeSampleRate, type PcmToDsdDoPTransformMetrics, type PcmToDsdDoPWorkerClientLike } from './PcmToDsdDoPTransform';
+import { resolveSdmDopTransportSampleRate, resolveSdmModulatorProfile, resolveSdmNativeSampleRate } from './SdmFormatPlan';
 import { AutomixAnalyzer } from './AutomixAnalyzer';
+import { planAutomixTransitionV2 } from './AutomixPlannerV2';
 import { normalizeAudioSampleRate } from './SampleRateGuards';
+import { isAlacCodec, isMp4ContainerPath } from './Mp4AudioCodec';
 import { getAppSettings } from '../app/appSettings';
 import { noteDataProtectionPlaybackActivity } from '../app/dataProtection';
-import { isWallpaperEngineBridgeVisualTelemetryActive } from '../integrations/wallpaperEngine/WallpaperEngineBridgeRuntime';
 import { buildNetworkProxyEnv } from '../network/proxyEnv';
 import { markPlaybackBreadcrumb, runPlaybackPerformanceStep, runPlaybackPerformanceStepSync } from '../diagnostics/PlaybackPerformanceDiagnostics';
 import { calculateReplayGain, dbToLinearGain, type ReplayGainCalculation, type ReplayGainTrackData } from '../../shared/utils/replayGain';
 import { normalizeAudioSharedBackendForPlatform } from '../../shared/utils/audioPlatformCapabilities';
-import { DEFAULT_REPLAY_GAIN_TARGET_LUFS } from '../../shared/constants/replayGain';
-import type { AudioTransportFadeCurve, ReplayGainMode } from '../../shared/types/appSettings';
 import {
   createEstimatedAutomixAnalysis,
   planAutomixTransition,
@@ -79,8 +80,6 @@ import type {
   AudioStatus,
   NativeDirectLocalPlaybackFallbackReason,
   DecoderRun,
-  FfmpegToolchainDiagnostics,
-  NativeHostNotificationEvent,
   NativeBridgeReadyResult,
   NativeOutputTelemetry,
   NativeOutputStartOptions,
@@ -90,6 +89,7 @@ import type {
 import type {
   ActiveDsdOutputMode,
   AudioDsdOutputMode,
+  AudioLevelTelemetry,
   AudioPlaybackDiagnosticEvent,
   AudioPlaybackDiagnosticSeverity,
   AudioPlaybackIssueSummary,
@@ -104,14 +104,29 @@ import type {
   PlaybackSpeedMode,
   SharedStabilityTier,
 } from '../../shared/types/audio';
+import type {
+  AutomixAnalysisV2,
+  AutomixRuntimePhase,
+  AutomixRuntimeState,
+  AutomixTransitionCommittedEventV2,
+  AutomixTransitionPlanV2,
+} from '../../shared/types/automix';
+import { automixAnalysisVersion, resolveAutomixRuntimePhase } from '../../shared/types/automix';
 import type { PlaybackMemory } from './PlaybackMemoryStore';
 import type { AudioCrashReportPayload } from '../diagnostics/CrashReportService';
 import { hashText } from '../diagnostics/Logger';
 import { PcmVolumeTransform } from './transforms/PcmVolumeTransform';
-import { PcmDitherTransform } from './transforms/PcmDitherTransform';
 import { PcmPlaybackRateTransform } from './transforms/PcmPlaybackRateTransform';
 import { PcmLinearResamplerTransform } from './transforms/PcmLinearResamplerTransform';
 import { normalizeStabilityRecoveryOptions } from './helpers/stabilityHelpers';
+import {
+  createOutputFallbackSettingsPolicy,
+  hasExplicitDeviceSelection,
+  isAutomaticDirectSoundFallbackError,
+  isDefaultDeviceFallbackAllowed,
+  isOutputStartRetryMode,
+  isSharedFallbackAllowedForExclusive,
+} from './OutputFallbackPolicy';
 import {
   fallbackSampleRate,
   fallbackSharedMixSampleRate,
@@ -142,26 +157,22 @@ import {
   nativeStartupTelemetryLogWindowMs,
   nativeStartupTelemetryLogIntervalMs,
   exclusiveInstabilityFallbackDisabledLogCooldownMs,
-  echoSrcCudaWorkerMaxInputSamples,
   levelMeterVisualIntervalMs,
   levelMeterStatusIntervalMs,
+  levelMeterNonVisualStatusIntervalMs,
   mainEventLoopLagSampleIntervalMs,
-  getPlaybackLoadSettings,
   isAudioVisualSpectrumEnabled,
+  isPlaybackIntegrationVisualTelemetryActive,
   sharedStabilityMemoryTtlMs,
-  type PlaybackLoadSettings,
 } from './helpers/playbackDefaults';
-import { normalizeCpuModel, runtimeCpuModel, nativeHostNotificationEvents, inactiveDeviceReasons, isNativeHostNotificationEvent } from './helpers/deviceHelpers';
+import { runtimeCpuModel, inactiveDeviceReasons, isNativeHostNotificationEvent } from './helpers/deviceHelpers';
 import {
-  defaultReplayGainAudioSettings,
   getReplayGainAudioSettings,
-  type ReplayGainAudioSettings,
 } from './helpers/replayGainHelpers';
 import {
   defaultTransportFadeDurationMs,
   defaultTransportFadeStepMs,
   defaultTransportFadeCurve,
-  transportFadeCurves,
   normalizeTransportFadeDurationMs,
   normalizeTransportFadeCurve,
   applyTransportFadeCurve,
@@ -174,6 +185,7 @@ import {
   stableSharedProfile,
   echoSrcUltraOutputProfile,
   nativeAdaptiveOutputProfiles,
+  nativeExclusiveFeedProfile,
   httpStreamingSharedProfile,
   directSoundSharedProfile,
   type SharedOutputProfile,
@@ -197,17 +209,32 @@ import type {
 
 export type { AudioErrorRecoveryHandler, AudioSessionDependencies } from './AudioSessionTypes';
 
-type OutputBridgeLike = any;
-type BridgeEventListeners = any;
-type BridgeStartResult = any;
-type StartOutputBridgeOptions = any;
-
-const getPersistedNativeDirectLocalPlaybackEnabled = (): boolean => {
-  try {
-    return getAppSettings().audioNativeDirectLocalPlaybackEnabled === true;
-  } catch {
-    return false;
-  }
+type OutputBridgeLike = Omit<NativePcmHostProcess, 'beginSession' | 'start' | 'stopGracefully' | 'syncDspState' | 'activateDspControl'> & {
+  beginSession?: (
+    options?: { startSeconds?: number; playbackRate?: number; durationSeconds?: number } & Record<string, unknown>,
+  ) => number;
+  start: (
+    options: NativeOutputStartOptions & Record<string, unknown>,
+  ) => Promise<NativeBridgeReadyResult>;
+  stopGracefully?: (reason?: string, timeoutMs?: number, waitForExit?: boolean) => Promise<void>;
+  syncDspState?: (profileTarget?: EqProfileBindingTarget) => Promise<void>;
+  activateDspControl?: () => void;
+};
+type BridgeEventListeners = {
+  position: (frames: unknown, telemetry?: unknown) => void;
+  ended: () => void;
+  error: (error: unknown) => void;
+  deviceEvent: (event: unknown) => void;
+};
+type BridgeStartResult = {
+  bridge: OutputBridgeLike;
+  plan: SampleRatePlan;
+  ready: NativeBridgeReadyResult;
+  hostReused: boolean;
+  hostRestartReason: string | null;
+};
+type StartOutputBridgeOptions = {
+  allowNativeDirectLocalPlaybackChannelMapping?: boolean;
 };
 
 const isAudioSessionRunCancelledError = (error: unknown): boolean => {
@@ -320,9 +347,12 @@ const localDirectPlaybackPilotExtensions = new Set([
   '.aifc',
   '.flac',
   '.fla',
+  '.m4a',
   '.mp3',
   '.ogg',
   '.oga',
+  '.dsf',
+  '.dff',
 ]);
 
 const createPossibleCorruptAudioFileError = (positionSeconds: number, durationSeconds: number): Error =>
@@ -337,6 +367,8 @@ const localPlaybackAutoRecoveryMaxAttempts = 1;
 const recoverableLocalDecodeErrorPattern =
   /\baudio_file_decode_failed_or_corrupt\b|\bkind="input_invalid"\b|invalid data found when processing input|decode_frame\(\) failed|error while decoding stream/iu;
 const nativeDirectLocalPlaybackErrorPattern = /\bdirect_pcm_reader_failed\b/iu;
+const recoverableDaemonRemotePlaybackErrorPattern =
+  /\bdaemon_rpc_bridge_closed\b|\brpc_bridge_(?:closed|not_open)\b|\bavcodec_(?:receive_frame|send_packet) failed\b|\bav_read_frame failed\b|invalid data found when processing input|input\/output error|connection (?:reset|timed out)|network is unreachable/iu;
 const isClearlyCorruptLocalEnd = (positionSeconds: number, durationSeconds: number): boolean =>
   durationSeconds > 0 &&
   positionSeconds < durationSeconds - prematureLocalEndToleranceSeconds &&
@@ -350,6 +382,10 @@ const isLocalDirectPlaybackPilotPath = (value: string): boolean => {
   const extension = extname(value).toLowerCase();
   return localDirectPlaybackPilotExtensions.has(extension);
 };
+
+const isNativeDaemonLocalSourceSupported = (filePath: string, probe: AudioProbeResult): boolean =>
+  isLocalDirectPlaybackPilotPath(filePath) ||
+  (isMp4ContainerPath(filePath) && isAlacCodec(probe.codec));
 
 const hasOwn = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
@@ -384,18 +420,24 @@ const isWritableUsable = (writable: Writable | null): writable is Writable =>
   Boolean(writable && !writable.destroyed && !writable.writableEnded);
 
 const normalizeOutputMode = (value: unknown): AudioOutputMode => {
-  return value === 'exclusive' || value === 'system' ? value : 'shared';
+  return value === 'exclusive' || value === 'asio' || value === 'system' ? value : 'shared';
 };
 
 const normalizeSharedBackend = (value: unknown): AudioSharedBackend => {
   return normalizeAudioSharedBackendForPlatform(value as AudioSharedBackend | undefined, process.platform);
 };
 
+const {
+  createSharedFallbackSettings,
+  createSafeSharedFallbackSettings,
+  createAutomaticDirectSoundFallbackSettings,
+} = createOutputFallbackSettingsPolicy(normalizeSharedBackend);
+
 const normalizeDsdOutputMode = (value: unknown): AudioDsdOutputMode => (value === 'dop' ? 'dop' : 'pcm');
 
 const isResidentOutputMode = (value: unknown): boolean => {
   const mode = normalizeOutputMode(value);
-  return mode === 'exclusive';
+  return mode === 'exclusive' || mode === 'asio';
 };
 
 const canReuseResidentOutputBridge = (_outputMode: AudioOutputMode): boolean => {
@@ -460,7 +502,7 @@ const normalizePlaybackSpeedMode = (value: unknown): PlaybackSpeedMode => {
 };
 
 const normalizeEchoSrcMode = (value: unknown): AudioEchoSrcMode =>
-  value === 'family2x' || value === 'family4x' || value === 'family8x' ? value : 'off';
+  value === 'compatibility48' || value === 'family2x' || value === 'family4x' || value === 'family8x' ? value : 'off';
 
 const normalizeEchoSrcQualityProfile = (value: unknown): AudioEchoSrcQualityProfile =>
   value === 'balanced' || value === 'lowLatency' ? value : 'transparent';
@@ -554,80 +596,13 @@ type EchoSrcFirBlockPlan = {
   targetBatchFrames: number;
 };
 
-const clampEchoSrcCudaBlockFrames = (
-  desiredFrames: number,
-  channels: number,
-  upsampleFactor: 1 | 2 | 4 | 8,
-): number => {
-  const safeChannels = Math.max(1, Math.round(channels));
-  const maxFramesByWorkerLimit = Math.floor(echoSrcCudaWorkerMaxInputSamples / safeChannels / upsampleFactor);
-  return Math.max(1, Math.min(desiredFrames, Math.max(1, maxFramesByWorkerLimit)));
-};
-
-const resolveEchoSrcFirBlockPlan = (
-  backend: AudioEchoSrcComputeBackend,
-  upsampleFactor: 1 | 2 | 4 | 8,
-  channels: number,
+const resolveSdmBlockPlan = (
+  targetRate: AudioSdmTargetRate,
 ): EchoSrcFirBlockPlan => {
-  if (backend === 'cuda' && upsampleFactor >= 8) {
-    const blockFrames = clampEchoSrcCudaBlockFrames(16_384, channels, upsampleFactor);
-    return {
-      processingMode: 'ultra',
-      maxBlockFrames: blockFrames,
-      targetBatchFrames: blockFrames,
-    };
-  }
-
-  if (backend === 'cuda') {
-    const maxBlockFrames = clampEchoSrcCudaBlockFrames(upsampleFactor >= 4 ? 8192 : 4096, channels, upsampleFactor);
-    const targetBatchFrames = clampEchoSrcCudaBlockFrames(upsampleFactor >= 4 ? 4096 : 2048, channels, upsampleFactor);
-    return {
-      processingMode: 'batched',
-      maxBlockFrames,
-      targetBatchFrames: Math.min(targetBatchFrames, maxBlockFrames),
-    };
-  }
-
   return {
     processingMode: 'realtime',
-    maxBlockFrames: upsampleFactor >= 8 ? 8192 : 2048,
+    maxBlockFrames: targetRate === 'dsd128' ? 4096 : 2048,
     targetBatchFrames: 1,
-  };
-};
-
-const clampSdmCudaBlockFrames = (desiredFrames: number, channels: number): number => {
-  const safeChannels = Math.max(1, Math.round(channels));
-  const maxFramesByWorkerLimit = Math.floor(echoSrcCudaWorkerMaxInputSamples / safeChannels);
-  return Math.max(1, Math.min(desiredFrames, Math.max(1, maxFramesByWorkerLimit)));
-};
-
-const resolveSdmBlockPlan = (
-  backend: AudioSdmComputeBackend,
-  targetRate: AudioSdmTargetRate,
-  qualityProfile: AudioSdmQualityProfile,
-  channels: number,
-): EchoSrcFirBlockPlan => {
-  if (backend !== 'cuda') {
-    return {
-      processingMode: 'realtime',
-      maxBlockFrames: targetRate === 'dsd128' ? 4096 : 2048,
-      targetBatchFrames: 1,
-    };
-  }
-
-  const desired =
-    qualityProfile === 'insane'
-      ? { targetBatchFrames: 16_384, maxBlockFrames: 32_768, processingMode: 'ultra' as const }
-      : qualityProfile === 'reference'
-        ? { targetBatchFrames: 8192, maxBlockFrames: 16_384, processingMode: 'batched' as const }
-        : { targetBatchFrames: 4096, maxBlockFrames: 8192, processingMode: 'batched' as const };
-  const maxBlockFrames = clampSdmCudaBlockFrames(desired.maxBlockFrames, channels);
-  const targetBatchFrames = clampSdmCudaBlockFrames(desired.targetBatchFrames, channels);
-
-  return {
-    processingMode: desired.processingMode,
-    maxBlockFrames,
-    targetBatchFrames: Math.min(targetBatchFrames, maxBlockFrames),
   };
 };
 
@@ -708,9 +683,6 @@ const resolveSdmOversamplingEffectiveFilterProfile = (
 ): AudioEchoSrcFilterProfile =>
   plan.filterSlot === 'nx' ? plan.filterProfileNx : plan.filterProfile1x;
 
-const roundEchoSrcFirMetric = (value: number | null | undefined): number | null =>
-  typeof value === 'number' && Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
-
 const createEchoSrcRuntimeStatus = (
   state: AudioEchoSrcRuntimeStatus['state'],
   options: {
@@ -723,7 +695,6 @@ const createEchoSrcRuntimeStatus = (
     activeBackend: AudioEchoSrcRuntimeStatus['activeBackend'];
     cudaActive?: boolean;
     fallbackReason?: string | null;
-    firAnalysis?: EchoSrcFirTapsAnalysis | null;
     firStageCount?: number | null;
     firStageTapCounts?: number[] | null;
     firStageProfiles?: AudioEchoSrcFilterProfile[] | null;
@@ -731,7 +702,6 @@ const createEchoSrcRuntimeStatus = (
     firProcessingMode?: AudioEchoSrcFirProcessingMode | null;
     firBatchFrames?: number | null;
     firMaxBlockFrames?: number | null;
-    firMetrics?: EchoSrcFirWorkerTransformMetrics | null;
   },
 ): AudioEchoSrcRuntimeStatus => {
   const sourceSampleRate = normalizeAudioSampleRate(options.sourceSampleRate);
@@ -756,22 +726,27 @@ const createEchoSrcRuntimeStatus = (
     firProcessingMode: options.firProcessingMode ?? null,
     firBatchFrames: options.firBatchFrames ?? null,
     firMaxBlockFrames: options.firMaxBlockFrames ?? null,
-    firLastInputFrames: options.firMetrics?.lastInputFrames ?? null,
-    firLastOutputFrames: options.firMetrics?.lastOutputFrames ?? null,
-    firWorkerRequests: options.firMetrics?.requestCount ?? null,
-    firWorkerAverageMs: roundEchoSrcFirMetric(options.firMetrics?.averageProcessMs),
-    firWorkerLastMs: roundEchoSrcFirMetric(options.firMetrics?.lastProcessMs),
-    firRealtimeRatio: roundEchoSrcFirMetric(options.firMetrics?.realtimeRatio),
+    firLastInputFrames: null,
+    firLastOutputFrames: null,
+    firWorkerRequests: null,
+    firWorkerAverageMs: null,
+    firWorkerLastMs: null,
+    firRealtimeRatio: null,
+    nominalLatencyFrames: null,
+    nominalLatencyMilliseconds: null,
+    limiterCeilingDb: null,
+    limiterGainReductionDb: null,
+    limiterProtecting: false,
     window: firPlan?.window ?? null,
     phase: firPlan?.phase ?? null,
     normalizedCutoff: firPlan?.normalizedCutoff ?? null,
     transitionRatio: firPlan?.transitionRatio ?? null,
     stopbandAttenuationDb: firPlan?.attenuationDb ?? null,
-    impulsePeakIndex: options.firAnalysis?.peakIndex ?? null,
-    impulseEnergyCentroid: options.firAnalysis?.energyCentroid ?? null,
-    preRingingEnergyRatio: options.firAnalysis?.preRingingEnergyRatio ?? null,
-    measuredStopbandPeakDb: options.firAnalysis?.stopbandPeakDb ?? null,
-    measuredPassbandRippleDb: options.firAnalysis?.passbandRippleDb ?? null,
+    impulsePeakIndex: null,
+    impulseEnergyCentroid: null,
+    preRingingEnergyRatio: null,
+    measuredStopbandPeakDb: null,
+    measuredPassbandRippleDb: null,
     cudaActive: options.cudaActive === true,
     fallbackReason: options.fallbackReason ?? null,
   };
@@ -784,7 +759,6 @@ const createSdmOversamplingRuntimeStatus = (
     requestedBackend?: AudioEchoSrcRuntimeStatus['requestedBackend'];
     activeBackend?: AudioEchoSrcRuntimeStatus['activeBackend'];
     fallbackReason?: string | null;
-    firAnalysis?: EchoSrcFirTapsAnalysis | null;
     firStageCount?: number | null;
     firStageTapCounts?: number[] | null;
     firStageProfiles?: AudioEchoSrcFilterProfile[] | null;
@@ -792,7 +766,6 @@ const createSdmOversamplingRuntimeStatus = (
     firProcessingMode?: AudioEchoSrcFirProcessingMode | null;
     firBatchFrames?: number | null;
     firMaxBlockFrames?: number | null;
-    firMetrics?: EchoSrcFirWorkerTransformMetrics | null;
   } = {},
 ): AudioEchoSrcRuntimeStatus | null => {
   if (!plan) {
@@ -815,7 +788,6 @@ const createSdmOversamplingRuntimeStatus = (
     activeBackend,
     cudaActive: activeBackend === 'cuda',
     fallbackReason: options.fallbackReason ?? null,
-    firAnalysis: options.firAnalysis ?? null,
     firStageCount: options.firStageCount ?? null,
     firStageTapCounts: options.firStageTapCounts ?? null,
     firStageProfiles: options.firStageProfiles ?? null,
@@ -823,7 +795,6 @@ const createSdmOversamplingRuntimeStatus = (
     firProcessingMode: options.firProcessingMode ?? null,
     firBatchFrames: options.firBatchFrames ?? null,
     firMaxBlockFrames: options.firMaxBlockFrames ?? null,
-    firMetrics: options.firMetrics ?? null,
   });
 };
 
@@ -843,7 +814,6 @@ const createSdmRuntimeStatus = (
     maxBlockFrames?: number | null;
     cudaActive?: boolean;
     fallbackReason?: string | null;
-    metrics?: PcmToDsdDoPTransformMetrics | null;
   },
 ): AudioSdmRuntimeStatus => ({
   state,
@@ -864,53 +834,201 @@ const createSdmRuntimeStatus = (
   oversamplingRuntime: options.oversamplingRuntime ?? createSdmOversamplingRuntimeStatus(options.oversamplingPlan ?? null),
   modulatorProfile: options.modulatorProfile,
   processingMode: options.processingMode ?? null,
-  batchFrames: options.metrics?.targetBatchFrames ?? options.batchFrames ?? null,
-  maxBlockFrames: options.metrics?.maxBlockFrames ?? options.maxBlockFrames ?? null,
-  lastInputFrames: options.metrics?.lastInputFrames ?? null,
-  lastOutputFrames: options.metrics?.lastOutputFrames ?? null,
+  batchFrames: options.batchFrames ?? null,
+  maxBlockFrames: options.maxBlockFrames ?? null,
+  lastInputFrames: null,
+  lastOutputFrames: null,
   cudaActive: options.cudaActive === true,
   fallbackReason: options.fallbackReason ?? null,
-  workerRequests: options.metrics?.requestCount ?? null,
-  workerAverageMs: roundEchoSrcFirMetric(options.metrics?.averageProcessMs),
-  workerLastMs: roundEchoSrcFirMetric(options.metrics?.lastProcessMs),
-  realtimeRatio: roundEchoSrcFirMetric(options.metrics?.realtimeRatio),
+  workerRequests: null,
+  workerAverageMs: null,
+  workerLastMs: null,
+  realtimeRatio: null,
 });
 
-const getSdmOversamplingPlanFromRuntime = (runtime: AudioSdmRuntimeStatus | null | undefined): SdmOversamplingPlan | null => {
-  if (
-    !runtime?.oversamplingEngine ||
-    !runtime.oversamplingQualityProfile ||
-    !runtime.oversamplingFilterProfile1x ||
-    !runtime.oversamplingFilterProfileNx
-  ) {
-    return null;
+const applyNativeDspProcessingStatus = (
+  plan: SampleRatePlan,
+  processing: NativeDspProcessingStatus | null,
+): SampleRatePlan => {
+  if (!processing) {
+    return plan;
+  }
+
+  const echoSrc = processing.echoSrc;
+  const echoSrcLastInputFrames = (echoSrc.lastInputFrames ?? 0) > 0
+    ? echoSrc.lastInputFrames ?? null
+    : null;
+  const echoSrcLastOutputFrames = (echoSrc.lastOutputFrames ?? 0) > 0
+    ? echoSrc.lastOutputFrames ?? null
+    : null;
+  const echoSrcLastProcessMs = (echoSrc.lastProcessMilliseconds ?? 0) > 0
+    ? echoSrc.lastProcessMilliseconds ?? null
+    : null;
+  const echoSrcRealtimeRatio =
+    echoSrcLastInputFrames && echoSrcLastProcessMs && (echoSrc.sourceSampleRate ?? 0) > 0
+      ? echoSrcLastProcessMs / (echoSrcLastInputFrames / (echoSrc.sourceSampleRate as number) * 1_000)
+      : null;
+  // Plain family 2x/4x/8x SRC is performed by the host Libav decode rate.
+  // Its FIR telemetry is intentionally inactive, so it must not be mistaken
+  // for an unavailable resampler. Only the advanced host-owned FIR route is
+  // authoritative here.
+  const echoSrcRuntime = plan.echoSrcRuntime && plan.echoSrcFirActive
+    ? {
+      ...plan.echoSrcRuntime,
+      state: !echoSrc.active
+        ? 'unavailable' as const
+        : echoSrc.fallbackReason
+          ? 'fallback' as const
+          : 'active' as const,
+      sourceSampleRate: echoSrc.sourceSampleRate ?? plan.echoSrcRuntime.sourceSampleRate,
+      targetSampleRate: echoSrc.targetSampleRate ?? plan.echoSrcRuntime.targetSampleRate,
+      requestedBackend: echoSrc.requestedBackend ?? plan.echoSrcRuntime.requestedBackend,
+      activeBackend: echoSrc.activeBackend,
+      firStageCount: echoSrc.stageCount,
+      cudaActive: echoSrc.activeBackend === 'cuda',
+      fallbackReason: echoSrc.fallbackReason,
+      lastInputFrames: echoSrcLastInputFrames,
+      lastOutputFrames: echoSrcLastOutputFrames,
+      workerRequests: echoSrc.processedBlocks ?? null,
+      workerAverageMs: echoSrc.averageProcessMilliseconds ?? null,
+      workerLastMs: echoSrcLastProcessMs,
+      realtimeRatio: echoSrcRealtimeRatio,
+      nominalLatencyFrames: echoSrc.nominalLatencyFrames ?? null,
+      nominalLatencyMilliseconds: echoSrc.nominalLatencyMilliseconds ?? null,
+      limiterCeilingDb: processing.limiter?.active === true
+        ? processing.limiter.ceilingDb
+        : null,
+      limiterGainReductionDb: processing.limiter?.active === true
+        ? processing.limiter.gainReductionDb
+        : null,
+      limiterProtecting: processing.limiter?.protecting === true,
+    }
+    : plan.echoSrcRuntime;
+
+  const sdm = processing.sdm;
+  const sdmLastInputFrames = (sdm.lastInputFrames ?? 0) > 0
+    ? sdm.lastInputFrames ?? null
+    : null;
+  const sdmLastOutputFrames = (sdm.lastOutputFrames ?? 0) > 0
+    ? sdm.lastOutputFrames ?? null
+    : null;
+  const sdmLastProcessMs = (sdm.lastProcessMilliseconds ?? 0) > 0
+    ? sdm.lastProcessMilliseconds ?? null
+    : null;
+  const sdmRealtimeRatio =
+    sdmLastInputFrames && sdmLastProcessMs && (sdm.sourceSampleRate ?? 0) > 0
+      ? sdmLastProcessMs / (sdmLastInputFrames / (sdm.sourceSampleRate as number) * 1_000)
+      : null;
+  const sdmRuntime = plan.sdmRuntime && plan.sdmPcmToDsdActive
+    ? {
+      ...plan.sdmRuntime,
+      state: !sdm.active
+        ? 'unavailable' as const
+        : sdm.fallbackReason
+          ? 'fallback' as const
+          : 'active' as const,
+      requestedBackend: sdm.requestedBackend ?? plan.sdmRuntime.requestedBackend,
+      activeBackend: sdm.modulatorBackend ?? sdm.activeBackend,
+      cudaActive: (sdm.modulatorBackend ?? sdm.activeBackend) === 'cuda',
+      fallbackReason: sdm.fallbackReason,
+      lastInputFrames: sdmLastInputFrames,
+      lastOutputFrames: sdmLastOutputFrames,
+      workerRequests: sdm.processedBlocks ?? null,
+      workerAverageMs: sdm.averageProcessMilliseconds ?? null,
+      workerLastMs: sdmLastProcessMs,
+      realtimeRatio: sdmRealtimeRatio,
+      oversamplingRuntime: plan.sdmRuntime.oversamplingRuntime
+        ? {
+          ...plan.sdmRuntime.oversamplingRuntime,
+          state: !sdm.active
+            ? 'unavailable' as const
+            : sdm.oversamplingFallbackReason
+              ? 'fallback' as const
+              : 'active' as const,
+          sourceSampleRate: sdm.sourceSampleRate ?? plan.sdmRuntime.oversamplingRuntime.sourceSampleRate,
+          targetSampleRate: sdm.targetSampleRate ?? plan.sdmRuntime.oversamplingRuntime.targetSampleRate,
+          requestedBackend: sdm.requestedBackend ?? plan.sdmRuntime.oversamplingRuntime.requestedBackend,
+          activeBackend: sdm.oversamplingBackend ?? sdm.activeBackend,
+          firStageCount: sdm.stageCount,
+          cudaActive: (sdm.oversamplingBackend ?? sdm.activeBackend) === 'cuda',
+          fallbackReason: sdm.oversamplingFallbackReason ?? null,
+          lastInputFrames: null,
+          lastOutputFrames: null,
+          workerRequests: null,
+          workerAverageMs: null,
+          workerLastMs: null,
+          realtimeRatio: null,
+        }
+        : null,
+    }
+    : plan.sdmRuntime;
+
+  const warnings = [...plan.warnings];
+  for (const fallbackReason of [
+    plan.echoSrcFirActive ? echoSrc.fallbackReason : null,
+    sdm.fallbackReason,
+    sdm.oversamplingFallbackReason,
+  ]) {
+    if (fallbackReason && !warnings.includes(fallbackReason)) {
+      warnings.push(fallbackReason);
+    }
   }
 
   return {
-    engine: runtime.oversamplingEngine,
-    qualityProfile: runtime.oversamplingQualityProfile,
-    filterProfile1x: runtime.oversamplingFilterProfile1x,
-    filterProfileNx: runtime.oversamplingFilterProfileNx,
-    filterSlot: runtime.oversamplingFilterSlot,
-    sourceSampleRate: runtime.oversamplingSourceSampleRate,
-    targetSampleRate: runtime.oversamplingTargetSampleRate,
-    factor: runtime.oversamplingFactor,
-    precision: runtime.oversamplingPrecision ?? 28,
+    ...plan,
+    echoSrcCudaActive: plan.echoSrcFirActive
+      ? echoSrc.activeBackend === 'cuda'
+      : plan.echoSrcCudaActive,
+    echoSrcCudaStatus: echoSrc.activeBackend === 'cuda'
+      ? {
+        available: true,
+        source: 'native-host',
+        deviceName: echoSrc.deviceName ?? 'NVIDIA CUDA',
+        driverVersion: null,
+        cudaVersion: null,
+        error: null,
+      }
+      : plan.echoSrcCudaStatus,
+    echoSrcRuntime,
+    sdmActualComputeBackend: sdm.active ? sdm.activeBackend : null,
+    sdmOversamplingFirActive: sdm.active && sdm.stageCount > 0,
+    sdmCudaStatus: sdm.activeBackend === 'cuda'
+      ? {
+        available: true,
+        source: 'native-host',
+        deviceName: sdm.deviceName ?? 'NVIDIA CUDA',
+        driverVersion: null,
+        cudaVersion: null,
+        error: null,
+      }
+      : plan.sdmCudaStatus,
+    sdmRuntime,
+    warnings,
   };
 };
 
-const createLocalEchoSrcFirClient = (): EchoSrcFirWorkerClientLike => ({
-  processFir: async (request) => {
-    const result = processFirInterleavedFloat32Cpu(request.input, request.channels, request.taps, {
-      history: request.history,
-    });
-    return {
-      backend: 'cpu',
-      output: result.output,
-      history: result.state.history,
-    };
-  },
-});
+const nativeDaemonRemoteCodecs = new Set(['aac', 'alac', 'flac', 'm4a', 'm4s', 'mp3', 'mpeg', 'mp4', 'mp4a']);
+const nativeDaemonRemoteExtensions = new Set(['.aac', '.alac', '.flac', '.m4a', '.m4s', '.mp3']);
+const nativeDaemonRemoteMimePattern = /^audio\/(?:aac|flac|mpeg|mp4)/u;
+export const isNativeDaemonRemoteSourceSupported = (
+  filePath: string,
+  mimeType: string | null | undefined,
+  probe: AudioProbeResult,
+): boolean => {
+  const codec = probe.codec?.trim().toLocaleLowerCase() ?? '';
+  if (nativeDaemonRemoteCodecs.has(codec) || codec.startsWith('mp4a.') || nativeDaemonRemoteMimePattern.test(codec)) {
+    return true;
+  }
+  const mime = mimeType?.trim().toLocaleLowerCase() ?? '';
+  if (nativeDaemonRemoteMimePattern.test(mime)) {
+    return true;
+  }
+  try {
+    return nativeDaemonRemoteExtensions.has(extname(new URL(filePath).pathname).toLocaleLowerCase());
+  } catch {
+    return false;
+  }
+};
 
 const detectPcmRateFamilyBase = (sampleRate: number): 44100 | 48000 | null => {
   const rounded = Math.round(sampleRate);
@@ -931,6 +1049,10 @@ const resolveEchoSrcTargetSampleRate = (
     return null;
   }
 
+  if (mode === 'compatibility48') {
+    return sourceSampleRate === 48000 ? null : 48000;
+  }
+
   const familyBase = detectPcmRateFamilyBase(sourceSampleRate);
   if (!familyBase) {
     return null;
@@ -945,44 +1067,46 @@ const resolveEchoSrcTargetSampleRate = (
   return target;
 };
 
-const hasExplicitDeviceSelection = (settings: AudioOutputSettings): boolean => {
-  return Number.isInteger(Number(settings.deviceIndex)) || Boolean(settings.deviceName);
-};
-
 const maxOutputStartRetries = 2;
+const daemonRemotePlaybackSignalTimeoutMs = 30_000;
 
-const isOutputStartRetryMode = (value: unknown): boolean => {
-  const mode = normalizeOutputMode(value);
-  return mode === 'shared' || mode === 'exclusive';
+class DaemonRemoteSampleRateCorrection extends Error {
+  constructor(readonly sourceSampleRate: number) {
+    super(`daemon_remote_source_rate_correction:${sourceSampleRate}`);
+    this.name = 'DaemonRemoteSampleRateCorrection';
+  }
+}
+
+const waitForDaemonPlaybackSignal = async (
+  signal: Promise<void>,
+  signalName: 'first_pcm' | 'audio_started',
+): Promise<void> => {
+  let timeout: NodeJS.Timeout | null = null;
+  try {
+    await Promise.race([
+      signal,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`daemon_remote_${signalName}_timeout`)),
+          daemonRemotePlaybackSignalTimeoutMs,
+        );
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 };
 
-const isSharedFallbackAllowedForExclusive = (settings: AudioOutputSettings): boolean =>
-  settings.exclusiveInstabilityFallbackEnabled === true;
-
-const isDefaultDeviceFallbackAllowed = (settings: AudioOutputSettings): boolean =>
-  settings.defaultDeviceFallbackEnabled === true;
-
-const createSharedFallbackSettings = (settings: AudioOutputSettings): AudioOutputSettings => ({
-  ...settings,
-  outputMode: 'shared',
-  sharedBackend: normalizeSharedBackend('windows'),
-  requestedOutputSampleRate: undefined,
-  useMiniaudioOutput: false,
-  dsdOutputMode: 'pcm',
-});
-
-const createSafeSharedFallbackSettings = (settings: AudioOutputSettings): AudioOutputSettings => ({
-  ...settings,
-  outputMode: 'shared',
-  sharedBackend: normalizeSharedBackend('windows'),
-  deviceIndex: undefined,
-  deviceName: undefined,
-  requestedOutputSampleRate: undefined,
-  latencyProfile: 'stable',
-  bufferSizeFrames: undefined,
-  useMiniaudioOutput: false,
-  dsdOutputMode: 'pcm',
-});
+const classifyDaemonRemoteFallbackReason = (error: unknown): string => {
+  const message = error instanceof Error ? error.message.toLocaleLowerCase() : '';
+  if (message.includes('401') || message.includes('403') || message.includes('authorization')) return 'authorization';
+  if (message.includes('range') || message.includes('416')) return 'range';
+  if (message.includes('timeout') || message.includes('timed out')) return 'timeout';
+  if (message.includes('codec') || message.includes('format') || message.includes('probe')) return 'format';
+  if (message.includes('header')) return 'headers';
+  return 'open_failed';
+};
 
 const shouldUseMiniaudioOutputForHost = (
   outputMode: AudioOutputMode,
@@ -1022,16 +1146,9 @@ const isNativeDirectLocalPlaybackSampleRateSupported = (
 };
 
 const isNativeDirectLocalPlaybackBackend = (backendImpl: string | null | undefined): boolean =>
+  backendImpl === 'native-direct-daemon-libav' ||
   backendImpl === 'native-direct-juce-audio-format' ||
   backendImpl === 'native-direct-juce-audio-format-src-pcm';
-
-const shouldUseNativeDirectAdvancedEchoSrcPcmPath = (
-  fallbackReason: NativeDirectLocalPlaybackFallbackReason | null,
-  plan: SampleRatePlan,
-): boolean =>
-  fallbackReason === null &&
-  plan.echoSrcActive === true &&
-  plan.echoSrcRuntime?.state === 'planned';
 
 const nativeDirectLocalPlaybackFallbackReasons = new Set<NativeDirectLocalPlaybackFallbackReason>([
   'disabled',
@@ -1047,7 +1164,11 @@ const nativeDirectLocalPlaybackFallbackReasons = new Set<NativeDirectLocalPlayba
   'echo_src_active',
   'dsp_active',
   'replaygain_active',
+  'visual_telemetry_active',
   'chained_playback',
+  'unsupported_output_mode',
+  'custom_device_not_supported',
+  'daemon_unavailable',
   'reader_failed',
 ]);
 
@@ -1062,8 +1183,15 @@ const getNativeDirectLocalPlaybackFallbackReason = (
   outputSettings: AudioOutputSettings,
   hasChainedPlayback: boolean,
 ): NativeDirectLocalPlaybackFallbackReason | null => {
-  if (outputSettings.nativeDirectLocalPlaybackEnabled !== true) {
+  if (process.env.ECHO_FORCE_LEGACY_LOCAL_PLAYBACK === '1') {
     return 'disabled';
+  }
+
+  if (
+    isPlaybackIntegrationVisualTelemetryActive() &&
+    getNativeDspLegacyFallbackBlockReason(plan, outputSettings) === null
+  ) {
+    return 'visual_telemetry_active';
   }
 
   if (hasChainedPlayback) {
@@ -1105,6 +1233,104 @@ const getNativeDirectLocalPlaybackFallbackReason = (
   return null;
 };
 
+const getNativeDspLegacyFallbackBlockReason = (
+  plan: SampleRatePlan,
+  outputSettings: AudioOutputSettings,
+): 'echo_src' | 'dither' | 'sdm' | null => {
+  if (plan.sdmPcmToDsdActive) {
+    return 'sdm';
+  }
+  if (plan.echoSrcActive && plan.echoSrcAdvancedModeEnabled) {
+    return 'echo_src';
+  }
+  const outputMode = normalizeOutputMode(outputSettings.outputMode);
+  if (normalizePcmDitherMode(outputSettings.pcmDitherMode) !== 'off' && outputMode !== 'shared') {
+    return 'dither';
+  }
+  return null;
+};
+
+const getNativeDirectDaemonPlaybackFallbackReason = (
+  filePath: string,
+  inputHeaders: Record<string, string> | null | undefined,
+  mimeType: string | null | undefined,
+  probe: AudioProbeResult,
+  plan: SampleRatePlan,
+  outputSettings: AudioOutputSettings,
+  hasChainedPlayback: boolean,
+): NativeDirectLocalPlaybackFallbackReason | null => {
+  if (process.env.ECHO_FORCE_LEGACY_LOCAL_PLAYBACK === '1') {
+    return 'disabled';
+  }
+
+  if (
+    isPlaybackIntegrationVisualTelemetryActive() &&
+    getNativeDspLegacyFallbackBlockReason(plan, outputSettings) === null
+  ) {
+    return 'visual_telemetry_active';
+  }
+
+  if (hasChainedPlayback) {
+    return 'chained_playback';
+  }
+
+  if (isHttpPlaybackUrl(filePath)) {
+    if (process.env.ECHO_DISABLE_DAEMON_REMOTE_PLAYBACK === '1') {
+      return 'remote_source';
+    }
+    try {
+      normalizeAudioInputSource({
+        kind: 'http',
+        uri: filePath,
+        headers: inputHeaders ?? undefined,
+        mimeType,
+      });
+    } catch {
+      return 'input_headers';
+    }
+    if (!isNativeDaemonRemoteSourceSupported(filePath, mimeType, probe)) {
+      return 'unsupported_format';
+    }
+  } else {
+    if (isCueTrackPath(filePath)) {
+      return 'cue_track';
+    }
+
+    if (!isNativeDaemonLocalSourceSupported(filePath, probe)) {
+      return 'unsupported_format';
+    }
+
+    if (inputHeaders) {
+      return 'input_headers';
+    }
+  }
+
+  const outputMode = normalizeOutputMode(outputSettings.outputMode);
+  if (outputMode !== 'shared' && outputMode !== 'exclusive' && outputMode !== 'asio') {
+    return 'unsupported_output_mode';
+  }
+
+  if (plan.dsdOutputMode !== 'pcm') {
+    return 'dsd_active';
+  }
+  // A persisted DoP preference is not an active DSD route for a PCM source.
+  // Preserve the established legacy PCM path unless a native DSP feature
+  // explicitly requires the daemon; in that case the host-facing PCM plan is
+  // authoritative and the dormant DSD preference must not block playback.
+  if (
+    normalizeDsdOutputMode(outputSettings.dsdOutputMode) !== 'pcm' &&
+    getNativeDspLegacyFallbackBlockReason(plan, outputSettings) === null
+  ) {
+    return 'dsd_active';
+  }
+
+  if (probe.channels < 1 || probe.channels > 2) {
+    return 'unsupported_channels';
+  }
+
+  return null;
+};
+
 const resolveNativeDirectLocalPlaybackOutputChannels = (
   probe: AudioProbeResult,
   fallbackReason: NativeDirectLocalPlaybackFallbackReason | null,
@@ -1113,7 +1339,7 @@ const resolveNativeDirectLocalPlaybackOutputChannels = (
     ? 2
     : probe.channels;
 
-const dsdDopSupportedOutputModes = new Set<AudioOutputMode>(['exclusive']);
+const dsdDopSupportedOutputModes = new Set<AudioOutputMode>(['exclusive', 'asio']);
 
 const getDsdDopDisabledWarning = (
   filePath: string,
@@ -1146,9 +1372,9 @@ const getDsdDopDisabledWarning = (
     return 'dsd_dop_disabled_by_dsp';
   }
 
-  const eqState = getEqBridge().getState();
-  const channelBalanceState = getEqBridge().getChannelBalanceState();
-  const roomCorrectionState = getEqBridge().getRoomCorrectionState();
+  const eqState = EqStateStore.loadEqState();
+  const channelBalanceState = EqStateStore.loadChannelBalanceState();
+  const roomCorrectionState = EqStateStore.loadRoomCorrectionState();
   if (eqState.enabled || roomCorrectionState.enabled || channelBalanceState.enabled) {
     return 'dsd_dop_disabled_by_dsp';
   }
@@ -1169,18 +1395,14 @@ const isDsdPlaybackCandidate = (filePath: string, probe: AudioProbeResult): bool
   isDsdFilePath(filePath) || isDsdCodec(probe.codec);
 
 const shouldAttemptAsioNativeDsd = (
-  _filePath: string,
-  _inputHeaders: Record<string, string> | null | undefined,
-  _probe: AudioProbeResult,
-  _outputSettings: AudioOutputSettings,
-  _outputMode: AudioOutputMode,
-): boolean => false;
-
-const outputDeviceStartRefusedPatterns = [
-  /Couldn't open the output device/iu,
-  /Device didn't start correctly/iu,
-  /timeout_waiting_for_ready/iu,
-];
+  filePath: string,
+  inputHeaders: Record<string, string> | null | undefined,
+  probe: AudioProbeResult,
+  outputSettings: AudioOutputSettings,
+  outputMode: AudioOutputMode,
+): boolean => outputMode === 'asio' &&
+  shouldAttemptDsdDop(filePath, inputHeaders, probe, outputSettings, outputMode) &&
+  isDsfFilePath(filePath);
 
 const deviceInitializeTimeoutPatterns = [
   /\bdevice_initialize_timeout\b/u,
@@ -1189,9 +1411,8 @@ const deviceInitializeTimeoutPatterns = [
 const isDeviceInitializeTimeoutError = (error: Error): boolean =>
   deviceInitializeTimeoutPatterns.some((pattern) => pattern.test(error.message));
 
-const isOutputDeviceStartRefused = (error: Error): boolean =>
-  outputDeviceStartRefusedPatterns.some((pattern) => pattern.test(error.message)) ||
-  isDeviceInitializeTimeoutError(error);
+const isUnsupportedExclusiveFormatError = (error: Error): boolean =>
+  /WASAPI exclusive format unsupported|AUDCLNT_E_UNSUPPORTED_FORMAT|0x88890008/iu.test(error.message);
 
 const isEqControlDisconnectError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error);
@@ -1277,6 +1498,14 @@ const clampAutomixTransitionSeconds = (value: unknown): number =>
 const nativeAutomixDualDeckEnabled = false;
 const nativeAutomixDualDeckLateArmWindowSeconds = 60;
 const automixAdvanceAudibleRatio = 0.5;
+// The feature toggle remains opt-in. Once enabled, production builds use the
+// native beta path by default; ECHO_AUTOMIX_V2_PHASE=off is the kill switch.
+// Tests preserve the legacy default unless they explicitly select a phase.
+const automixV2Phase: AutomixRuntimePhase = resolveAutomixRuntimePhase(
+  process.env.ECHO_AUTOMIX_V2_PHASE,
+  process.env.NODE_ENV === 'test' ? 'off' : 'native_beta',
+);
+const automixV2NativeEnabled = automixV2Phase === 'native_beta' || automixV2Phase === 'native_default';
 
 const getAutomixAudibleAdvanceSeconds = (transition: ActiveAutomixTransition): number => {
   const transitionSeconds = Number.isFinite(transition.transitionSeconds) ? Math.max(0, transition.transitionSeconds) : 0;
@@ -1350,7 +1579,7 @@ const createDeviceFromOutputSettings = (settings: AudioOutputSettings): AudioDev
     return null;
   }
 
-  const outputModeKey = 'shared';
+  const outputModeKey: AudioDeviceInfo['outputMode'] = outputMode;
   const deviceIndex = Number.isInteger(Number(settings.deviceIndex)) ? Number(settings.deviceIndex) : -1;
 
   return {
@@ -1450,8 +1679,8 @@ const createOutputRestartSnapshot = (settings: AudioOutputSettings): AudioOutput
     sdmTargetRate: normalizeSdmTargetRate(settings.sdmTargetRate),
     sdmQualityProfile: normalizeSdmQualityProfile(settings.sdmQualityProfile),
     sdmComputeBackend: normalizeSdmComputeBackend(settings.sdmComputeBackend),
-    sdmOversamplingFilterProfile1x: normalizeEchoSrcFilterProfile(settings.sdmOversamplingFilterProfile1x ?? 'poly-sinc-ext2-long'),
-    sdmOversamplingFilterProfileNx: normalizeEchoSrcFilterProfile(settings.sdmOversamplingFilterProfileNx ?? 'poly-sinc-ext2-hires-lp'),
+    sdmOversamplingFilterProfile1x: normalizeEchoSrcFilterProfile(settings.sdmOversamplingFilterProfile1x ?? 'sinc-long'),
+    sdmOversamplingFilterProfileNx: normalizeEchoSrcFilterProfile(settings.sdmOversamplingFilterProfileNx ?? 'poly-sinc-hb'),
     pcmDitherMode: normalizePcmDitherMode(settings.pcmDitherMode),
     releaseExclusiveOnPauseExperimentalEnabled: settings.releaseExclusiveOnPauseExperimentalEnabled === true,
   };
@@ -1550,16 +1779,16 @@ type RepeatMode = 'off' | 'one' | 'all';
 
 export class AudioSession extends EventEmitter {
   // Backing field for bridge — used by legacy test harness via dependency injection
-  private _bridge: any = null;
-  private get bridge(): any { return this._bridge; }
-  private set bridge(v: any) { this._bridge = v; }
+  private _bridge: OutputBridgeLike | null = null;
+  private get bridge(): OutputBridgeLike | null { return this._bridge; }
+  private set bridge(value: OutputBridgeLike | null) { this._bridge = value; }
 
 
   // Bridge event listeners — attached during playback to forward native host events
-  private attachedBridgeEvents: { bridge: any; listeners: Record<string, (...args: any[]) => void> } | null = null;
+  private attachedBridgeEvents: { bridge: OutputBridgeLike; listeners: BridgeEventListeners } | null = null;
 
   // Stubs for removed bridge infrastructure (to be eliminated in Wave 3)
-  private detachBridgeEvents(bridge: any | null = this.attachedBridgeEvents?.bridge ?? null): void {
+  private detachBridgeEvents(bridge: OutputBridgeLike | null = this.attachedBridgeEvents?.bridge ?? null): void {
     const attached = this.attachedBridgeEvents;
     if (!bridge || !attached || attached.bridge !== bridge) {
       return;
@@ -1577,11 +1806,15 @@ export class AudioSession extends EventEmitter {
     this.lastPositionSample = null;
   }
 
-  private attachBridgeEvents(bridge: any, token: number): void {
+  private attachBridgeEvents(bridge: OutputBridgeLike, token: number): void {
+    if (!bridge || typeof bridge.on !== 'function') {
+      throw new Error('native output bridge is unavailable for event attachment');
+    }
+
     this.detachBridgeEvents();
     this.markExpectedPositionDiscontinuity();
 
-    const listeners = {
+    const listeners: BridgeEventListeners = {
       position: (frames: unknown, telemetry?: unknown) => {
         if (this.runToken !== token) {
           return;
@@ -1738,7 +1971,7 @@ export class AudioSession extends EventEmitter {
     this.attachedBridgeEvents = { bridge, listeners };
   }
 
-  private async stopBridgeGracefully(bridge: any, reason: string): Promise<void> {
+  private async stopBridgeGracefully(bridge: OutputBridgeLike, reason: string): Promise<void> {
     try {
       if (bridge.stopGracefully) {
         const timeoutMs = this.getGracefulStopTimeoutMs(reason);
@@ -1789,7 +2022,7 @@ export class AudioSession extends EventEmitter {
   }
 
   private async stopBridgeWithOptions(
-    bridge: any,
+    bridge: OutputBridgeLike,
     reason: string,
     timeoutMs: number | undefined,
     waitForExit: boolean,
@@ -1808,24 +2041,39 @@ export class AudioSession extends EventEmitter {
   }
 
   private async detachSharedReplacementBridge(_reason: string): Promise<void> {}
-  private shouldDetachSharedReplacement(_nextOutputMode: any, _nextSharedBackend: any): boolean { return false; }
+  private shouldDetachSharedReplacement(_nextOutputMode: AudioOutputMode, _nextSharedBackend: AudioSharedBackend): boolean { return false; }
   private get isWritableUsable(): never { throw new Error('not implemented'); }
-  private readonly _depCreateBridge?: () => any;
-  private createBridge(): any { return this._depCreateBridge?.() ?? null; }
+  private readonly _depCreateBridge?: () => unknown;
+  private createBridge(): OutputBridgeLike {
+    const bridge = this._depCreateBridge
+      ? this._depCreateBridge()
+      : new NativePcmHostProcess({
+        logger: this.logger,
+        platform: this.platform as NodeJS.Platform,
+      });
+
+    const bridgeShape = bridge && typeof bridge === 'object'
+      ? bridge as { on?: unknown; start?: unknown }
+      : null;
+    if (!bridgeShape || typeof bridgeShape.on !== 'function' || typeof bridgeShape.start !== 'function') {
+      throw new Error('native output bridge factory did not create a usable bridge');
+    }
+
+    return bridge as OutputBridgeLike;
+  }
   private get bridgeStopInProgress(): Promise<void> | null { return null; }
   private set bridgeStopInProgress(_v: Promise<void> | null) {}
-
-  // Stub types
-  private _bridgeStartResultStub!: any;
-  private _startOutputBridgeOptionsStub!: any;
 
   private readonly decoder: DecoderPipelineLike;
   private readonly automixAnalyzer: AutomixAnalyzerLike;
   private readonly deviceService: DeviceServiceLike;
   private readonly isNativeHostAvailable: () => boolean;
-  private readonly createEchoSrcCudaWorkerClient: () => EchoSrcFirWorkerClientLike & { dispose?: () => void };
-  private readonly createSdmCudaWorkerClient: () => PcmToDsdDoPWorkerClientLike & { dispose?: () => void };
-  private readonly resolveEchoSrcFirBackendStatus: typeof resolveEchoSrcFirBackendStatus;
+  private readonly startAudioDaemonForPlayback: () => Promise<void>;
+  private readonly stopAudioDaemonForPlayback: () => Promise<void>;
+  private readonly createDaemonAudioBackendForPlayback: (
+    deviceId: string,
+    outputSettings: AudioOutputSettings & DaemonOutputSettings,
+  ) => Promise<DaemonAudioBackend | null>;
   private readonly reportAudioError: (payload: AudioCrashReportPayload) => void;
   private readonly logger: (message: string) => void;
   private readonly verboseLogger: (message: string) => void;
@@ -1835,17 +2083,18 @@ export class AudioSession extends EventEmitter {
   private outputSettings: Required<Pick<AudioOutputSettings, 'outputMode' | 'latencyProfile' | 'volume' | 'playbackRate' | 'playbackSpeedMode'>> &
     Omit<AudioOutputSettings, 'outputMode' | 'latencyProfile' | 'volume' | 'playbackRate' | 'playbackSpeedMode'> = {
     outputMode: 'shared',
+    automaticOutputEnabled: false,
     latencyProfile: 'balanced',
     sharedBackend: 'auto',
     useMiniaudioOutput: false,
-    nativeDirectLocalPlaybackEnabled: false,
+    nativeDirectLocalPlaybackEnabled: true,
     dsdOutputMode: 'pcm',
     sdmMode: 'off',
     sdmTargetRate: 'dsd128',
     sdmQualityProfile: 'safe',
     sdmComputeBackend: 'cpu',
-    sdmOversamplingFilterProfile1x: 'poly-sinc-ext2-long',
-    sdmOversamplingFilterProfileNx: 'poly-sinc-ext2-hires-lp',
+    sdmOversamplingFilterProfile1x: 'sinc-long',
+    sdmOversamplingFilterProfileNx: 'poly-sinc-hb',
     exclusiveInstabilityFallbackEnabled: false,
     defaultDeviceFallbackEnabled: false,
     soxrFallbackEnabled: true,
@@ -1863,6 +2112,7 @@ export class AudioSession extends EventEmitter {
     playbackSpeedMode: 'nightcore',
   };
   private state: AudioPlaybackState = 'idle';
+  private automaticOutputStage: AudioStatus['automaticOutputStage'] = 'disabled';
   private hostStatus: AudioStatus['host'] = isNativeOutputBridgeAvailable() ? 'not-initialized' : 'unavailable';
   private currentProbe: AudioProbeResult | null = null;
   private currentTrackId: string | null = null;
@@ -1872,6 +2122,7 @@ export class AudioSession extends EventEmitter {
   private currentOutputSettings: AudioOutputSettings | null = null;
   private pendingOutputRestartContext: { recoveryReason?: string | null; fallbackReason?: string | null } | null = null;
   private currentPlan: SampleRatePlan | null = null;
+  private currentNativeProcessingStatus: NativeDspProcessingStatus | null = null;
   private currentDevice: AudioDeviceInfo | null = null;
   private currentOutputBackend: string | null = null;
   private currentOutputBackendImpl: string | null = null;
@@ -1883,7 +2134,17 @@ export class AudioSession extends EventEmitter {
   private currentActiveDsdOutputMode: ActiveDsdOutputMode = null;
   private currentDsdNativeSampleRate: number | null = null;
   private currentDsdTransportSampleRate: number | null = null;
+  private asioNativeDsdDisabledForCurrentPlayback = false;
   private repeatMode: RepeatMode = 'off';
+  private queueRevision = 0;
+  private currentQueueItemId: string | null = null;
+  private currentQueueRevision: number | null = null;
+  private queueSnapshot: AudioBackendQueueSnapshot = {
+    revision: 0,
+    currentItemId: null,
+    repeatMode: 'off',
+    items: [],
+  };
   private currentReplayGain: ReplayGainTrackData | null = null;
   private currentReplayGainCalculation: ReplayGainCalculation = {
     appliedDb: 0,
@@ -1898,13 +2159,23 @@ export class AudioSession extends EventEmitter {
   private currentResidentOutputSampleRate: number | null = null;
   private currentResamplerEngine: AudioResamplerEngine = 'default';
   private currentResamplerFallbackActive = false;
-  private echoSrcCudaWorkerClient: (EchoSrcFirWorkerClientLike & { dispose?: () => void }) | null = null;
-  private sdmCudaWorkerClient: (PcmToDsdDoPWorkerClientLike & { dispose?: () => void }) | null = null;
   private activeAutomix: ActiveAutomixState | null = null;
+  private activeAutomixV2: {
+    state: AutomixRuntimeState;
+    plan: AutomixTransitionPlanV2;
+    nextFilePath: string;
+    nextInputHeaders: Record<string, string> | null;
+    nextMetadata: AudioSessionPlayRequest['metadata'] | null;
+    nextProbe: AudioProbeResult;
+    nextReplayGain: ReplayGainTrackData | null;
+  } | null = null;
+  private automixPreparationTask: Promise<void> | null = null;
+  private daemonGaplessActive = false;
   private nativeHostNotificationQueue: Promise<void> = Promise.resolve();
   private decoderRun: DecoderRun | null = null;
   private decoderStopInProgress: Promise<void> | null = null;
   private pausedOutputPrewarmPromise: Promise<void> | null = null;
+  private pausedSeekTransaction: Promise<void> | null = null;
   private pausedDecoderPrewarm: PausedDecoderPrewarm | null = null;
   private gainTransform: PcmVolumeTransform | null = null;
   private speedTransform: PcmPlaybackRateTransform | null = null;
@@ -1924,6 +2195,7 @@ export class AudioSession extends EventEmitter {
     visualSpectrumComputeCostMs: 0,
   };
   private readonly disabledVisualSpectrum = Array.from({ length: visualSpectrumBucketCount }, () => 0);
+  private nativeAudioLevels: AudioLevelTelemetry | null = null;
   private errorMessage: string | null = null;
   private outputWarnings: string[] = [];
   private pausedPositionSeconds: number | null = null;
@@ -1991,6 +2263,8 @@ export class AudioSession extends EventEmitter {
   private audioHostRestartCount = 0;
   private playbackRecoveryCount = 0;
   private activeDaemonBackend: DaemonAudioBackend | null = null;
+  private activeDaemonRemoteSource = false;
+  private daemonStopInProgress: Promise<void> | null = null;
   private readonly preparedLocalPlaybackCache = new Map<string, PreparedLocalPlaybackItem>();
   private readonly sharedStabilityMemory = new Map<string, { tier: SharedStabilityTier; expiresAt: number }>();
   private lastSharedStabilityRecoveryKey: string | null = null;
@@ -2009,17 +2283,33 @@ export class AudioSession extends EventEmitter {
       logger: this.logger,
       getSpawnEnv: () => buildNetworkProxyEnv(getAppSettings()),
     });
-    this.automixAnalyzer = dependencies.automixAnalyzer ?? new AutomixAnalyzer({ logger: this.logger });
+    this.automixAnalyzer = dependencies.automixAnalyzer ?? new AutomixAnalyzer({
+      logger: this.logger,
+      persistentStore: process.env.NODE_ENV !== 'test',
+    });
     this.deviceService = dependencies.deviceService ?? new DeviceService({ logger: this.logger, platform: this.platform });
+    if (!dependencies.deviceService && process.env.NODE_ENV !== 'test') {
+      void this.deviceService.listRoutingDevicesAsync?.().catch((error) => {
+        this.logger(`[AudioSession] output route cache prewarm failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`);
+      });
+    }
     this.isNativeHostAvailable = dependencies.isNativeHostAvailable ?? isNativeOutputBridgeAvailable;
+    this.startAudioDaemonForPlayback = dependencies.startAudioDaemon ?? startAudioDaemon;
+    this.stopAudioDaemonForPlayback = dependencies.stopAudioDaemon ?? stopAudioDaemon;
+    this.createDaemonAudioBackendForPlayback = dependencies.createDaemonAudioBackend ?? (async (deviceId, outputSettings) => {
+      if (!daemonBridge?.isDaemonRunning?.()) {
+        return null;
+      }
+
+      return createAudioBackend({
+        jrpc: activeJsonRpcBridge,
+        deviceId,
+        outputSettings,
+      });
+    });
     this._depCreateBridge = dependencies.createBridge;
-    this.createEchoSrcCudaWorkerClient = dependencies.createEchoSrcCudaWorkerClient ?? (() => new EchoSrcCudaWorkerClient({
-      logger: this.logger,
-    }));
-    this.createSdmCudaWorkerClient = dependencies.createSdmCudaWorkerClient ?? (() => new EchoSrcCudaWorkerClient({
-      logger: this.logger,
-    }));
-    this.resolveEchoSrcFirBackendStatus = dependencies.resolveEchoSrcFirBackendStatus ?? resolveEchoSrcFirBackendStatus;
     this.reportAudioError = dependencies.reportAudioError ?? defaultAudioErrorReporter;
     this.watchdogIntervalMs = Math.max(250, dependencies.watchdogIntervalMs ?? defaultWatchdogIntervalMs);
     this.watchdogStallChecks = Math.max(1, dependencies.watchdogStallChecks ?? defaultWatchdogStallChecks);
@@ -2070,7 +2360,40 @@ export class AudioSession extends EventEmitter {
   }
 
   async listDevicesAsync(): Promise<AudioDeviceInfo[]> {
-    return this.deviceService.listDevicesAsync?.() ?? this.deviceService.listDevices();
+    // ASIO probing can contend with a live native session. During playback,
+    // refresh only the OS shared endpoint list and retain cached ASIO routes.
+    // This keeps USB hot-plug discovery live without reopening ASIO drivers.
+    if (this.state === 'loading' || this.state === 'playing' || this.state === 'paused') {
+      const cachedDevices = this.deviceService.listDevices();
+      const sharedDevices = await (this.deviceService.refreshSharedDevicesAsync?.()
+        ?? Promise.resolve(cachedDevices.filter((device) => device.outputMode === 'shared')));
+      return [
+        ...sharedDevices,
+        ...cachedDevices.filter((device) => device.outputMode !== 'shared'),
+      ];
+    }
+    const devices = await (this.deviceService.refreshRoutingDevicesAsync?.()
+      ?? this.deviceService.listRoutingDevicesAsync?.()
+      ?? this.deviceService.listDevicesAsync?.()
+      ?? this.deviceService.listDevices());
+
+    if (
+      this.state === 'error' &&
+      this.currentDevice &&
+      !devices.some((device) =>
+        device.outputMode === (this.currentDevice?.outputMode === 'exclusive' ? 'shared' : this.currentDevice?.outputMode) &&
+        device.name === this.currentDevice?.name,
+      )
+    ) {
+      this.currentDevice = null;
+      this.currentOutputDeviceName = null;
+      this.currentOutputDeviceType = null;
+      this.currentOutputBackend = null;
+      this.currentOutputBackendImpl = null;
+      this.emitStatus();
+    }
+
+    return devices;
   }
 
   setAudioErrorRecoveryHandler(handler: AudioErrorRecoveryHandler | null): void {
@@ -2167,7 +2490,52 @@ export class AudioSession extends EventEmitter {
     }
   }
 
+  private async resolveAutomaticOutputSettings(settings: AudioOutputSettings): Promise<AudioOutputSettings> {
+    const manualRouteRequested =
+      settings.outputMode !== undefined ||
+      settings.sharedBackend !== undefined ||
+      settings.deviceIndex !== undefined ||
+      settings.deviceName !== undefined ||
+      settings.latencyProfile !== undefined ||
+      settings.bufferSizeFrames !== undefined;
+
+    if (settings.automaticOutputEnabled !== true) {
+      if (settings.automaticOutputEnabled === false) {
+        this.automaticOutputStage = 'disabled';
+      }
+      if (settings.automaticOutputEnabled === undefined && this.outputSettings.automaticOutputEnabled === true && manualRouteRequested) {
+        this.automaticOutputStage = 'disabled';
+        return { ...settings, automaticOutputEnabled: false };
+      }
+      return settings;
+    }
+
+    try {
+      await this.refreshDeviceService();
+    } catch (error) {
+      this.logger(`[AudioSession] automatic output device refresh failed; using current device snapshot: ${
+        error instanceof Error ? error.message : String(error)
+      }`);
+    }
+
+    const nativeSharedSupported = this.platform === 'win32' || this.platform === 'linux' || this.platform === 'darwin';
+    this.automaticOutputStage = nativeSharedSupported ? 'default-shared' : 'disabled';
+    return {
+      ...settings,
+      automaticOutputEnabled: true,
+      outputMode: nativeSharedSupported ? 'shared' : 'system',
+      sharedBackend: 'auto',
+      latencyProfile: 'balanced',
+      bufferSizeFrames: null,
+      deviceIndex: undefined,
+      deviceName: undefined,
+      defaultDeviceFallbackEnabled: true,
+      exclusiveInstabilityFallbackEnabled: true,
+    };
+  }
+
   async setOutput(settings: AudioOutputSettings): Promise<AudioStatus> {
+    settings = await this.resolveAutomaticOutputSettings(settings);
     this.cancelTransportFade();
     const previousOutputSettings = this.currentOutputSettings ? { ...this.currentOutputSettings } : null;
     const previousGlobalOutputSettings = { ...this.outputSettings };
@@ -2219,10 +2587,10 @@ export class AudioSession extends EventEmitter {
       sdmQualityProfile: normalizeSdmQualityProfile(settings.sdmQualityProfile ?? this.outputSettings.sdmQualityProfile),
       sdmComputeBackend: normalizeSdmComputeBackend(settings.sdmComputeBackend ?? this.outputSettings.sdmComputeBackend),
       sdmOversamplingFilterProfile1x: normalizeEchoSrcFilterProfile(
-        settings.sdmOversamplingFilterProfile1x ?? this.outputSettings.sdmOversamplingFilterProfile1x ?? 'poly-sinc-ext2-long',
+        settings.sdmOversamplingFilterProfile1x ?? this.outputSettings.sdmOversamplingFilterProfile1x ?? 'sinc-long',
       ),
       sdmOversamplingFilterProfileNx: normalizeEchoSrcFilterProfile(
-        settings.sdmOversamplingFilterProfileNx ?? this.outputSettings.sdmOversamplingFilterProfileNx ?? 'poly-sinc-ext2-hires-lp',
+        settings.sdmOversamplingFilterProfileNx ?? this.outputSettings.sdmOversamplingFilterProfileNx ?? 'poly-sinc-hb',
       ),
       exclusiveInstabilityFallbackEnabled:
         settings.exclusiveInstabilityFallbackEnabled ??
@@ -2256,6 +2624,20 @@ export class AudioSession extends EventEmitter {
     };
     if (this.outputSettings.sharedBackend === 'directsound') {
       this.outputSettings.deviceIndex = undefined;
+    }
+
+    const outputModeChanged = nextOutputMode !== normalizeOutputMode(baseOutputMode);
+    if (outputModeChanged && nextOutputMode !== 'system') {
+      const targetModeDevice = this.resolveSelectedDevice(this.outputSettings);
+      if (targetModeDevice) {
+        this.outputSettings.deviceIndex = targetModeDevice.index;
+        this.outputSettings.deviceName = targetModeDevice.name;
+      } else if (this.outputSettings.deviceName) {
+        // Device indexes belong to a backend/mode-specific enumeration. When the
+        // target list is not cached, preserve the stable human-readable route and
+        // let the native backend resolve it instead of reusing a stale index.
+        this.outputSettings.deviceIndex = undefined;
+      }
     }
 
     if (this.currentOutputSettings) {
@@ -2301,7 +2683,7 @@ export class AudioSession extends EventEmitter {
       this.gainTransform?.setVolume(volumeRouting.softwareGain);
       this.levelMeterTransform?.setGain(volumeRouting.meterGain);
       if (this.activeDaemonBackend) {
-        this.activeDaemonBackend.setVolume?.(this.outputSettings.volume).catch(() => {});
+        await this.activeDaemonBackend.setVolume?.(this.outputSettings.volume);
       }
       this.emitStatus();
       return this.getStatus();
@@ -2312,10 +2694,10 @@ export class AudioSession extends EventEmitter {
       this.speedTransform?.setPlaybackRate(this.outputSettings.playbackRate);
       this.bridge?.resetOutputClock?.(positionSeconds, this.outputSettings.playbackRate);
       if (this.activeDaemonBackend) {
-        this.activeDaemonBackend.setPlaybackSpeed(
+        await this.activeDaemonBackend.setPlaybackSpeed(
           this.outputSettings.playbackRate,
           this.outputSettings.playbackSpeedMode,
-        ).catch(() => {});
+        );
       }
       this.clock.reset(positionSeconds, this.currentPlan?.actualDeviceSampleRate ?? this.currentPlan?.requestedOutputSampleRate ?? null);
       this.markExpectedPositionDiscontinuity();
@@ -2441,9 +2823,13 @@ export class AudioSession extends EventEmitter {
     this.pendingOutputAdaptiveProfile = null;
     this.currentOutputAdaptiveProfile = outputAdaptiveProfile;
     this.runToken = token;
+    this.asioNativeDsdDisabledForCurrentPlayback = false;
     const decoderStop = this.stopDecoderRun();
     if (decoderStop) {
       await decoderStop;
+    }
+    if (this.activeDaemonBackend || this.daemonStopInProgress) {
+      await this.stopActiveDaemonBackend('playback-replaced');
     }
     this.verboseLogger(
       `[AudioSession] playLocalFile: file="${redactUrlSecrets(request.filePath)}" trackId=${request.trackId ?? 'n/a'} start=${
@@ -2479,6 +2865,7 @@ export class AudioSession extends EventEmitter {
     this.pausedPositionSeconds = null;
     this.currentProbe = null;
     this.currentPlan = null;
+    this.currentNativeProcessingStatus = null;
     this.currentResidentOutputSampleRate = null;
     this.currentOutputBackend = null;
     this.currentOutputBackendImpl = null;
@@ -2487,11 +2874,16 @@ export class AudioSession extends EventEmitter {
     this.currentResamplerEngine = 'default';
     this.currentResamplerFallbackActive = false;
     this.activeAutomix = null;
+    this.activeAutomixV2 = null;
+    this.daemonGaplessActive = false;
     this.currentDecodeBackendImpl = null;
     this.nativeStartupStatusGuardActive = false;
     this.nativePositionReportedBeforePlaying = false;
     this.nativePositionBeforePlayingBaselineSeconds = null;
     this.currentOutputSettings = this.createOutputSettingsForRequest(request.output);
+    if (this.currentOutputSettings.automaticOutputEnabled === true) {
+      this.automaticOutputStage = 'default-shared';
+    }
     const playbackPerfDetails = (): { trackId: string | null; outputMode: string | null } => ({
       trackId: this.currentTrackId,
       outputMode: normalizeOutputMode(this.currentOutputSettings?.outputMode ?? this.outputSettings.outputMode),
@@ -2520,7 +2912,10 @@ export class AudioSession extends EventEmitter {
     this.currentActiveDsdOutputMode = null;
     this.currentDsdNativeSampleRate = null;
     this.currentDsdTransportSampleRate = null;
-    this.currentDevice = this.resolvePlanDeviceForSettings(this.currentOutputSettings);
+    this.currentDevice = normalizeOutputMode(this.currentOutputSettings.outputMode) === 'exclusive' ||
+      normalizeOutputMode(this.currentOutputSettings.outputMode) === 'asio'
+      ? await this.resolvePlaybackDeviceForSettings(this.currentOutputSettings)
+      : this.resolvePlanDeviceForSettings(this.currentOutputSettings);
     const requestedOutputSettings = { ...this.currentOutputSettings };
     const requestedDevice = this.currentDevice ? { ...this.currentDevice } : null;
     this.clock.reset(request.startSeconds ?? 0, null);
@@ -2563,61 +2958,433 @@ export class AudioSession extends EventEmitter {
       }
       this.assertCurrentRun(token);
       this.currentProbe = probe;
-      const daemon = daemonBridge;
-      if (daemon?.isDaemonRunning?.()) {
+      const daemonCandidatePlan = this.createSampleRatePlan(probe, this.currentOutputSettings!, this.currentDevice);
+      const gaplessRequested = request.gapless?.enabled === true && Boolean(request.gapless.next);
+      const gaplessNext = gaplessRequested ? request.gapless?.next ?? null : null;
+      const daemonGaplessCandidates = gaplessNext
+        ? [gaplessNext, ...(request.gapless?.following ?? [])].slice(0, 31)
+        : [];
+      const daemonGaplessProbeCandidates = await Promise.all(
+        daemonGaplessCandidates.map((track) =>
+          this.resolveAutomixNextProbe(track).catch((error) => {
+            this.logger(`[AudioSession] native gapless candidate skipped: ${
+              error instanceof Error ? error.message : String(error)
+            }`);
+            return null;
+          })),
+      );
+      const firstUnavailableGaplessIndex = daemonGaplessProbeCandidates.findIndex((candidate) => candidate === null);
+      const daemonGaplessTrackCount = firstUnavailableGaplessIndex >= 0
+        ? firstUnavailableGaplessIndex
+        : daemonGaplessCandidates.length;
+      const daemonGaplessTracks = daemonGaplessCandidates.slice(0, daemonGaplessTrackCount);
+      const daemonGaplessProbes = daemonGaplessProbeCandidates
+        .slice(0, daemonGaplessTrackCount)
+        .filter((candidate): candidate is AudioProbeResult => candidate !== null);
+      const daemonGaplessUnavailableReason = !gaplessRequested
+        ? null
+        : request.automix?.enabled === true
+          ? 'automix_active'
+          : !gaplessNext || daemonGaplessProbes.length === 0
+            ? 'next_track_unavailable'
+            : !isLocalPlaybackPath(request.filePath)
+              || daemonGaplessTracks.some((track, index) =>
+                !isLocalPlaybackPath(track.filePath)
+                || !isNativeDaemonLocalSourceSupported(track.filePath, daemonGaplessProbes[index]!)
+                || Boolean(track.inputHeaders))
+              || Boolean(request.inputHeaders)
+              || daemonGaplessProbes.some((nextProbe, index) =>
+                nextProbe.channels < 1
+                || nextProbe.channels > 2
+                || isDsdCodec(nextProbe.codec)
+                || isDsdFilePath(daemonGaplessTracks[index]?.filePath ?? ''))
+              ? 'unsupported_next_track'
+              : normalizeOutputMode(this.currentOutputSettings?.outputMode) !== 'shared'
+                && daemonGaplessProbes.some((nextProbe) =>
+                  normalizeAudioSampleRate(nextProbe.fileSampleRate) !== normalizeAudioSampleRate(probe.fileSampleRate))
+                ? 'sample_rate_mismatch'
+              : daemonCandidatePlan.dsdOutputMode !== 'pcm'
+                || daemonCandidatePlan.sdmPcmToDsdActive === true
+                || daemonCandidatePlan.echoSrcActive === true
+                ? 'native_processing_active'
+                : Math.abs((this.currentOutputSettings?.playbackRate ?? 1) - 1) > 1e-6
+                  ? 'playback_rate_active'
+                  : getReplayGainAudioSettings().replayGainEnabled === true
+                    ? 'replay_gain_active'
+                    : null;
+      const daemonGaplessEligible = gaplessRequested && daemonGaplessUnavailableReason === null;
+      const automixV2Requested = request.automix?.enabled === true && Boolean(request.automix.next);
+      const hasChainedPlaybackRequest = gaplessRequested && !daemonGaplessEligible;
+      const legacyPlaybackRequest: AudioSessionPlayRequest = gaplessRequested
+        ? { ...request, gapless: undefined, automix: undefined }
+        : automixV2Requested
+          ? { ...request, automix: undefined }
+          : request;
+      if (daemonGaplessUnavailableReason) {
+        this.addOutputWarning(`native_gapless_unavailable:${daemonGaplessUnavailableReason}`);
+      }
+      const nativeDirectLocalPlaybackFallbackReason =
+        request.remoteDaemonPlaybackFallbackAttempt === true && isHttpPlaybackUrl(request.filePath)
+          ? 'remote_source'
+          : getNativeDirectDaemonPlaybackFallbackReason(
+              request.filePath,
+              request.inputHeaders,
+              request.mimeType,
+              probe,
+              daemonCandidatePlan,
+              this.currentOutputSettings!,
+              hasChainedPlaybackRequest,
+            );
+      const remoteDaemonPlayback = nativeDirectLocalPlaybackFallbackReason === null && isHttpPlaybackUrl(request.filePath);
+      let daemonGaplessFellBackToOrdinaryPlayback = false;
+      if (nativeDirectLocalPlaybackFallbackReason === null) {
         try {
-          this.disposeActiveDaemonBackend();
-          const daemonBackend = await createAudioBackend({
-            jrpc: activeJsonRpcBridge,
-            deviceId: this.currentDevice?.id ?? '',
-            outputSettings: this.currentOutputSettings!,
-          });
+          // One-shot PCM/DoP/native-DSD hosts own the hardware device. A
+          // daemon takeover must wait for the old process to exit so ASIO
+          // cannot observe overlapping PCM and DSD transports.
+          if (this.bridge || this.bridgeStopInProgress) {
+            await this.stopResourcesGracefully('native-direct-takeover', true);
+            this.assertCurrentRun(token);
+          }
+          if (this.activeDaemonBackend || this.daemonStopInProgress) {
+            await this.stopActiveDaemonBackend('native-direct-replace');
+          }
+          await this.startAudioDaemonForPlayback();
+          this.assertCurrentRun(token);
+          const daemonOutputMode = normalizeOutputMode(this.currentOutputSettings!.outputMode);
+          const nativePlan = daemonCandidatePlan;
+          this.currentPlan = nativePlan;
+          const nativeProcessing: NativeDspProcessingConfig = {
+            outputFormat: nativePlan.sdmPcmToDsdActive
+              ? nativePlan.sdmOutputFormat ?? 'dop24le'
+              : 'pcm',
+          };
+          const sourceSampleRate = normalizeAudioSampleRate(nativePlan.fileSampleRate);
+          const echoTargetSampleRate = normalizeAudioSampleRate(nativePlan.echoSrcTargetSampleRate);
+          const echoUpsampleFactor = normalizeEchoSrcUpsampleFactor(sourceSampleRate, echoTargetSampleRate);
+          if (
+            nativePlan.echoSrcActive &&
+            nativePlan.echoSrcAdvancedModeEnabled &&
+            sourceSampleRate &&
+            echoTargetSampleRate &&
+            echoUpsampleFactor &&
+            echoUpsampleFactor !== 1
+          ) {
+            const stagePlans = createEchoSrcFirStagePlans(
+              nativePlan.echoSrcFilterProfile,
+              sourceSampleRate,
+              echoTargetSampleRate,
+              {
+                resolveProfile: (stageSourceRate) => resolveEchoSrcFilterProfileForSlot(
+                  resolveEchoSrcFilterSlot(stageSourceRate),
+                  {
+                    echoSrcFilterProfile: nativePlan.echoSrcFilterProfile,
+                    echoSrcFilterProfile1x: nativePlan.echoSrcFilterProfile1x,
+                    echoSrcFilterProfileNx: nativePlan.echoSrcFilterProfileNx,
+                  },
+                ),
+              },
+            );
+            const nativeStages = stagePlans.length > 0
+              ? stagePlans.map((stage) => ({
+                  upsampleFactor: stage.upsampleFactor,
+                  taps: Array.from(createEchoSrcFirTaps(stage.plan)),
+                }))
+              : [{
+                  upsampleFactor: echoUpsampleFactor,
+                  taps: Array.from(createEchoSrcFirTaps(
+                    createEchoSrcFirPlan(nativePlan.echoSrcFilterProfile, sourceSampleRate, echoTargetSampleRate),
+                  )),
+                }];
+            nativeProcessing.echoSrc = {
+              sourceSampleRate,
+              targetSampleRate: echoTargetSampleRate,
+              stages: nativeStages,
+              computeBackend: nativePlan.echoSrcComputeBackend,
+            };
+          }
+          const ditherMode = normalizePcmDitherMode(this.currentOutputSettings!.pcmDitherMode);
+          if (ditherMode !== 'off' && !nativePlan.sdmPcmToDsdActive && daemonOutputMode !== 'shared') {
+            nativeProcessing.dither = { mode: ditherMode, bitDepth: 24 };
+          }
+          if (nativePlan.sdmPcmToDsdActive) {
+            const sdmTargetSampleRate = normalizeAudioSampleRate(nativePlan.sdmTransportSampleRate);
+            if (!sourceSampleRate || !sdmTargetSampleRate) {
+              throw new Error('native_sdm_invalid_sample_rate_plan');
+            }
+            const sdmStagePlans = createEchoSrcFirStagePlans(
+              nativePlan.sdmOversamplingFilterProfile,
+              sourceSampleRate,
+              sdmTargetSampleRate,
+              {
+                resolveProfile: (stageSourceRate) => resolveEchoSrcFilterProfileForSlot(
+                  resolveEchoSrcFilterSlot(stageSourceRate),
+                  {
+                    echoSrcFilterProfile: nativePlan.sdmOversamplingFilterProfile,
+                    echoSrcFilterProfile1x: nativePlan.sdmOversamplingFilterProfile1x,
+                    echoSrcFilterProfileNx: nativePlan.sdmOversamplingFilterProfileNx,
+                  },
+                ),
+              },
+            );
+            if (sdmStagePlans.length === 0) {
+              throw new Error(`native_sdm_oversampling_unsupported:${sourceSampleRate}->${sdmTargetSampleRate}`);
+            }
+            nativeProcessing.sdm = {
+              sourceSampleRate,
+              targetSampleRate: sdmTargetSampleRate,
+              stages: sdmStagePlans.map((stage) => ({
+                upsampleFactor: stage.upsampleFactor,
+                taps: Array.from(createEchoSrcFirTaps(stage.plan)),
+              })),
+              qualityProfile: normalizeSdmQualityProfile(this.currentOutputSettings!.sdmQualityProfile),
+              computeBackend: nativePlan.sdmComputeBackend,
+            };
+          }
+          const daemonRequestedSampleRate = nativePlan.requestedOutputSampleRate;
+          const daemonOutputSettings: AudioOutputSettings & DaemonOutputSettings = {
+            ...this.currentOutputSettings!,
+            requestedOutputSampleRate: daemonRequestedSampleRate,
+            nativeProcessing,
+          };
+          const daemonBackend = await this.createDaemonAudioBackendForPlayback(
+            this.currentDevice?.id ?? '',
+            daemonOutputSettings,
+          );
           if (!daemonBackend) {
             throw new Error('daemon_backend_unavailable');
           }
           this.activeDaemonBackend = daemonBackend;
+          this.activeDaemonRemoteSource = remoteDaemonPlayback;
+          this.currentNativeProcessingStatus = daemonBackend.getNativeProcessingStatus?.() ?? null;
+          if (remoteDaemonPlayback) {
+            // Remote URLs and auth headers are short-lived session material.
+            // The renderer/main queue remains authoritative and resolves the
+            // next track again after the host reports a real drained EOF.
+            await daemonBackend.clearQueue();
+          } else {
+            await this.replayQueueSnapshotToDaemonBackend(daemonBackend);
+          }
+          this.assertCurrentRun(token);
+
+          let resolveFirstPcm: (() => void) | null = null;
+          let rejectFirstPcm: ((error: Error) => void) | null = null;
+          let resolveAudioStarted: (() => void) | null = null;
+          let rejectAudioStarted: ((error: Error) => void) | null = null;
+          let remoteAudioStartedObserved = false;
+          const firstPcmSignal = new Promise<void>((resolve, reject) => {
+            resolveFirstPcm = resolve;
+            rejectFirstPcm = reject;
+          });
+          const audioStartedSignal = new Promise<void>((resolve, reject) => {
+            resolveAudioStarted = resolve;
+            rejectAudioStarted = reject;
+          });
+          // Notifications can arrive while audio.openSource is still resolving.
+          // Mark both rejections handled immediately while preserving the
+          // original promises for the startup waits below.
+          void firstPcmSignal.catch(() => undefined);
+          void audioStartedSignal.catch(() => undefined);
 
           daemonBackend.onPosition((pos: number) => {
             if (this.runToken === token && this.state === 'playing') {
+              const sampledAtMs = Date.now();
               this.clock.reset(pos, probe.fileSampleRate ?? 48000);
+              this.watchdogLastPositionSeconds = pos;
+              this.handlePositionSample(token, pos, null, sampledAtMs);
               this.maybeAdvanceAutomix(token);
+              this.watchdogStalledChecks = 0;
+              this.emitNativeTelemetryStatus();
+            }
+          });
+
+          daemonBackend.onLevelMeter?.((snapshot) => {
+            if (this.runToken !== token || (this.state !== 'playing' && this.state !== 'loading')) {
+              return;
+            }
+            this.nativeAudioLevels = createNativeAudioLevelTelemetry(
+              Math.max(...snapshot.peakDb),
+              Math.max(...snapshot.rmsDb),
+            );
+            if (this.state === 'playing') {
+              const now = Date.now();
+              if (now - this.lastLevelMeterStatusEmittedAt >= levelMeterStatusIntervalMs) {
+                this.lastLevelMeterStatusEmittedAt = now;
+                this.emitStatus();
+              }
+            }
+          });
+
+          daemonBackend.onAutomixTransitionCommitted((event) => {
+            if (this.runToken === token && (this.state === 'playing' || this.state === 'loading')) {
+              this.handleAutomixV2TransitionCommitted(event);
             }
           });
 
           daemonBackend.onEnded((params?: Record<string, unknown>) => {
             if (this.runToken === token && (this.state === 'playing' || this.state === 'loading')) {
+              if (remoteDaemonPlayback && this.state === 'loading' && !remoteAudioStartedObserved) {
+                const error = new Error('daemon_remote_ended_before_started');
+                rejectFirstPcm?.(error);
+                rejectAudioStarted?.(error);
+                return;
+              }
               this.updatePositionFromOutput();
               this.maybeAdvanceAutomix(token);
               if (params?.queueAdvance === true) {
                 this.handleQueueAdvance(params);
               } else {
-                this.handlePlaybackEnded(token);
+                void this.finalizeNaturalDaemonEnd(token);
               }
             }
-            this.disposeActiveDaemonBackend();
           });
 
           daemonBackend.onError((err: Error) => {
             if (this.runToken === token) {
+              if (remoteDaemonPlayback && this.state === 'loading') {
+                rejectFirstPcm?.(err);
+                rejectAudioStarted?.(err);
+                return;
+              }
               this.handleError(err);
             }
           });
 
-          const backendProbe = await daemonBackend.openFile(request.filePath, request.startSeconds ?? 0);
+          if (remoteDaemonPlayback) {
+            daemonBackend.onFirstPcm(() => resolveFirstPcm?.());
+            daemonBackend.onStarted(() => {
+              remoteAudioStartedObserved = true;
+              resolveAudioStarted?.();
+            });
+          }
 
-          // Apply playback speed to daemon backend (native host handles speed internally)
           const requestedSpeed = this.currentOutputSettings?.playbackRate ?? this.outputSettings.playbackRate;
           const requestedSpeedMode = this.currentOutputSettings?.playbackSpeedMode ?? this.outputSettings.playbackSpeedMode;
           if (Math.abs(requestedSpeed - 1) > 1e-6 || requestedSpeedMode !== 'nightcore') {
-            daemonBackend.setPlaybackSpeed(requestedSpeed, requestedSpeedMode).catch(() => {});
+            await daemonBackend.setPlaybackSpeed(requestedSpeed, requestedSpeedMode);
           }
 
-          daemonBackend.setVolume?.(this.currentOutputSettings?.volume ?? this.outputSettings.volume).catch(() => {});
-          daemonBackend.syncEqState?.().catch(() => {});
+          await daemonBackend.setVolume?.(this.currentOutputSettings?.volume ?? this.outputSettings.volume);
+          // A fresh daemon starts with flat/default processors. Rehydrate every
+          // persisted DSP module before openFile can enqueue the first PCM.
+          await daemonBackend.syncDspState?.(this.createEqProfileBindingTarget());
+          const daemonReplayGain = this.calculateCurrentReplayGain();
+          await daemonBackend.setReplayGainConfig({
+            trackGainDb: daemonReplayGain.appliedDb,
+            albumGainDb: daemonReplayGain.appliedDb,
+            peak: 0,
+            mode: daemonReplayGain.active ? 1 : 0,
+            preampDb: 0,
+            preventClipping: false,
+          });
+          this.currentReplayGainCalculation = daemonReplayGain;
+          this.assertCurrentRun(token);
+          const inputSource: AudioInputSource = remoteDaemonPlayback
+            ? {
+                kind: 'http',
+                uri: request.filePath,
+                headers: request.inputHeaders,
+                mimeType: request.mimeType,
+              }
+            : { kind: 'local', uri: request.filePath };
+          const delayDaemonStart = remoteDaemonPlayback || daemonGaplessEligible;
+          const backendProbe = await runPlaybackPerformanceStep(
+            'AudioSession.playLocalFile',
+            'daemon open',
+            playbackPerfDetails(),
+            () => daemonBackend.openSource(
+              inputSource,
+              request.startSeconds ?? 0,
+              delayDaemonStart ? { startPaused: true, autoPlay: false } : undefined,
+            ),
+          );
+          this.assertCurrentRun(token);
+          if (daemonGaplessEligible && gaplessNext) {
+            const queuedNext = this.queueSnapshot.items.find((item) =>
+              item.trackId === (gaplessNext.trackId ?? gaplessNext.filePath) || item.filePath === gaplessNext.filePath,
+            );
+            try {
+              await runPlaybackPerformanceStep(
+                'AudioSession.playLocalFile',
+                'daemon gapless prepare',
+                playbackPerfDetails(),
+                () => daemonBackend.prepareGapless({
+                  filePath: gaplessNext.filePath,
+                  trackId: gaplessNext.trackId ?? gaplessNext.filePath,
+                  itemId: queuedNext?.itemId,
+                  metadata: queuedNext?.metadata,
+                  following: daemonGaplessTracks.slice(1).map((track) => {
+                    const queuedTrack = this.queueSnapshot.items.find((item) =>
+                      item.trackId === (track.trackId ?? track.filePath) || item.filePath === track.filePath,
+                    );
+                    return {
+                      filePath: track.filePath,
+                      trackId: track.trackId ?? track.filePath,
+                      itemId: queuedTrack?.itemId,
+                      metadata: queuedTrack?.metadata,
+                    };
+                  }),
+                }),
+              );
+              this.daemonGaplessActive = true;
+            } catch (gaplessError) {
+              this.daemonGaplessActive = false;
+              const reason = gaplessError instanceof Error ? gaplessError.message.slice(0, 96) : 'unknown';
+              this.addOutputWarning(`native_gapless_prepare_failed:${reason}`);
+              this.logger(`[AudioSession] native gapless priming failed; continuing normal playback: ${reason}`);
+            }
+            await daemonBackend.startOpenedSource();
+            this.assertCurrentRun(token);
+          }
+          if (remoteDaemonPlayback) {
+            const actualSourceSampleRate = normalizeAudioSampleRate(backendProbe.sourceSampleRate);
+            const plannedSourceSampleRate = normalizeAudioSampleRate(probe.fileSampleRate);
+            const sourceRateAffectsOutputPlan =
+              daemonOutputMode === 'exclusive' ||
+              daemonOutputMode === 'asio' ||
+              nativePlan.echoSrcActive ||
+              nativePlan.sdmPcmToDsdActive;
+            if (
+              sourceRateAffectsOutputPlan &&
+              actualSourceSampleRate &&
+              actualSourceSampleRate !== plannedSourceSampleRate &&
+              request.remoteSampleRateCorrectionAttempt !== true
+            ) {
+              throw new DaemonRemoteSampleRateCorrection(actualSourceSampleRate);
+            }
+            if (
+              sourceRateAffectsOutputPlan &&
+              actualSourceSampleRate &&
+              actualSourceSampleRate !== plannedSourceSampleRate
+            ) {
+              throw new Error(
+                `daemon_remote_source_rate_mismatch:${String(plannedSourceSampleRate)}:${actualSourceSampleRate}`,
+              );
+            }
+            await daemonBackend.startOpenedSource();
+            this.assertCurrentRun(token);
+            await runPlaybackPerformanceStep(
+              'AudioSession.playLocalFile',
+              'first PCM',
+              playbackPerfDetails(),
+              () => waitForDaemonPlaybackSignal(firstPcmSignal, 'first_pcm'),
+            );
+            this.assertCurrentRun(token);
+            await runPlaybackPerformanceStep(
+              'AudioSession.playLocalFile',
+              'audio started',
+              playbackPerfDetails(),
+              () => waitForDaemonPlaybackSignal(audioStartedSignal, 'audio_started'),
+            );
+            this.assertCurrentRun(token);
+          }
 
           this.currentProbe = {
             filePath: probe.filePath,
-            fileSampleRate: backendProbe.sampleRate ?? probe.fileSampleRate,
+            // AudioDaemon reports its decoded/output rate here. Preserve the
+            // probe's source rate so status and bit-perfect diagnostics do not
+            // mistake an output rate for the file's native rate.
+            fileSampleRate: normalizeAudioSampleRate(backendProbe.sourceSampleRate) ?? probe.fileSampleRate,
             channels: backendProbe.channels ?? probe.channels,
             durationSeconds: backendProbe.durationSeconds ?? probe.durationSeconds,
             codec: backendProbe.codec ?? probe.codec,
@@ -2625,21 +3392,129 @@ export class AudioSession extends EventEmitter {
             bitrate: backendProbe.bitrate ?? probe.bitrate,
           };
 
-          this.currentDecodeBackendImpl = 'daemon-audio-backend';
+          const daemonReady = daemonBackend.getOutputReady();
+          if (daemonReady) {
+            const actualDeviceSampleRate = normalizeAudioSampleRate(
+              daemonReady.hardwareSampleRate ?? daemonReady.sampleRate,
+            );
+            this.currentReadyResult = {
+              ok: true,
+              device: daemonReady,
+              requestedOutputSampleRate: daemonRequestedSampleRate,
+              actualDeviceSampleRate,
+            };
+            this.currentPlan = applyNativeDspProcessingStatus(
+              this.createSampleRatePlan(
+                this.currentProbe,
+                this.currentOutputSettings!,
+                this.currentDevice,
+                actualDeviceSampleRate,
+              ),
+              this.currentNativeProcessingStatus,
+            );
+            this.assertAsioSampleRateUsable();
+            this.assertReadySampleRateConsistent();
+            this.currentOutputDeviceType = typeof daemonReady.deviceType === 'string' ? daemonReady.deviceType : null;
+            this.currentOutputDeviceName = typeof daemonReady.deviceName === 'string' ? daemonReady.deviceName : null;
+          }
+          this.currentActiveDsdOutputMode = nativePlan.sdmPcmToDsdActive
+            ? 'dop'
+            : nativePlan.dsdOutputMode !== 'pcm'
+              ? nativePlan.dsdOutputMode
+              : null;
+          this.currentDsdNativeSampleRate = nativePlan.sdmNativeSampleRate ?? nativePlan.dsdNativeSampleRate;
+          this.currentDsdTransportSampleRate = nativePlan.sdmTransportSampleRate ?? nativePlan.dsdTransportSampleRate;
+          this.currentDecodeBackendImpl = 'native-direct-daemon-libav';
+          this.currentOutputBackend = daemonReady?.backend ?? 'jsonrpc';
+          this.currentOutputBackendImpl = daemonReady?.backendImpl ?? 'native-daemon-output';
+          this.clock.reset(request.startSeconds ?? 0, backendProbe.sampleRate ?? probe.fileSampleRate ?? 48_000);
           this.state = 'playing';
           this.hostStatus = 'ready';
           this.resetWatchdogProgress();
           this.markNativeStartupStatusGuard();
+          const automixPreparation = this.prepareDaemonAutomixV2(
+            request,
+            probe,
+            daemonBackend,
+            token,
+            nativePlan,
+          ).catch((error) => {
+            if (this.runToken === token) {
+              this.activeAutomixV2 = null;
+              this.addOutputWarning(`automix_v2_background_prepare_failed:${
+                error instanceof Error ? error.message.slice(0, 96) : 'unknown'
+              }`);
+              this.emitStatus();
+            }
+          }).finally(() => {
+            if (this.automixPreparationTask === automixPreparation) {
+              this.automixPreparationTask = null;
+            }
+          });
+          this.automixPreparationTask = automixPreparation;
+          this.recordPlaybackDiagnosticEvent('output_ready', 'info', 'native_direct_daemon_playback', {
+            trackId: request.trackId ?? null,
+            filePath: request.filePath,
+            outputMode: daemonOutputMode,
+            outputBackend: this.currentOutputBackend,
+            outputBackendImpl: this.currentOutputBackendImpl,
+            details: {
+              codec: this.currentProbe.codec,
+              sampleRate: backendProbe.sampleRate,
+              channels: backendProbe.channels,
+              startSeconds: request.startSeconds ?? 0,
+            },
+          });
           this.emitStatus();
           return this.getStatus();
         } catch (daemonError) {
-          this.disposeActiveDaemonBackend();
-          this.addOutputWarning(`daemon_playback_fell_back:${daemonError instanceof Error ? daemonError.message.slice(0, 96) : 'unknown'}`);
+          if (daemonError instanceof DaemonRemoteSampleRateCorrection) {
+            throw daemonError;
+          }
+          await this.stopActiveDaemonBackend('native-direct-start-failed');
+          try {
+            // A failed daemon startup may leave an exclusive/ASIO device open
+            // even after audio.stop. Reset the host before any later route can
+            // attempt a different wire format.
+            await this.stopAudioDaemonForPlayback();
+          } catch (stopError) {
+            this.logger(`[AudioSession] daemon reset after startup failure failed: ${
+              stopError instanceof Error ? stopError.message : String(stopError)
+            }`);
+          }
+          if (remoteDaemonPlayback) {
+            const reason = classifyDaemonRemoteFallbackReason(daemonError);
+            const warning = `daemon_remote_source_fell_back:${reason}`;
+            this.addOutputWarning(warning);
+            this.logger(`[AudioSession] ${warning}`);
+          } else {
+            const message = daemonError instanceof Error ? daemonError.message.slice(0, 96) : 'unknown';
+            if (daemonGaplessEligible) {
+              this.daemonGaplessActive = false;
+              daemonGaplessFellBackToOrdinaryPlayback = true;
+              this.addOutputWarning(`native_gapless_unavailable:daemon_start_failed:${message}`);
+              this.logger(`[AudioSession] native gapless host unavailable; continuing ordinary playback: ${message}`);
+            } else {
+              this.addOutputWarning(`daemon_playback_failed_closed:${message}`);
+              throw daemonError;
+            }
+          }
         }
       }
-      const hasChainedPlaybackRequest =
-        (request.automix?.enabled === true && Boolean(request.automix.next)) ||
-        (request.gapless?.enabled === true && Boolean(request.gapless.next));
+      if (
+        !daemonGaplessFellBackToOrdinaryPlayback &&
+        nativeDirectLocalPlaybackFallbackReason !== 'disabled' &&
+        process.env.ECHO_FORCE_LEGACY_LOCAL_PLAYBACK !== '1'
+      ) {
+        this.addOutputWarning(`native_direct_local_playback_not_applied:${nativeDirectLocalPlaybackFallbackReason}`);
+      }
+      const legacyFallbackPlan = this.createSampleRatePlan(probe, this.currentOutputSettings!, this.currentDevice);
+      const nativeDspBlockReason = getNativeDspLegacyFallbackBlockReason(legacyFallbackPlan, this.currentOutputSettings!);
+      if (nativeDspBlockReason) {
+        throw new Error(
+          `native_dsp_${nativeDspBlockReason}_requires_daemon_local_playback:${nativeDirectLocalPlaybackFallbackReason}`,
+        );
+      }
       let { bridge, plan, ready, hostReused, hostRestartReason } = await runPlaybackPerformanceStep(
         'AudioSession.playLocalFile',
         'startOutputBridgeForProbe',
@@ -2648,7 +3523,7 @@ export class AudioSession extends EventEmitter {
           probe,
           token,
           request.startSeconds ?? 0,
-          { allowNativeDirectLocalPlaybackChannelMapping: !hasChainedPlaybackRequest },
+          { allowNativeDirectLocalPlaybackChannelMapping: false },
         ),
       );
       this.assertCurrentRun(token);
@@ -2749,6 +3624,7 @@ export class AudioSession extends EventEmitter {
           const nativeDsdError = error instanceof Error ? error : new Error(String(error));
           this.addOutputWarning(`asio_native_dsd_fell_back_to_dop:${nativeDsdError.message.slice(0, 96)}`);
           await this.stopResourcesGracefully('asio-native-dsd-fallback-to-dop');
+          this.asioNativeDsdDisabledForCurrentPlayback = true;
           this.currentOutputSettings = {
             ...this.currentOutputSettings,
           };
@@ -2763,7 +3639,7 @@ export class AudioSession extends EventEmitter {
               probe,
               token,
               request.startSeconds ?? 0,
-              { allowNativeDirectLocalPlaybackChannelMapping: !hasChainedPlaybackRequest },
+              { allowNativeDirectLocalPlaybackChannelMapping: false },
             ),
           ));
           this.assertCurrentRun(token);
@@ -2824,7 +3700,7 @@ export class AudioSession extends EventEmitter {
               probe,
               token,
               request.startSeconds ?? 0,
-              { allowNativeDirectLocalPlaybackChannelMapping: !hasChainedPlaybackRequest },
+              { allowNativeDirectLocalPlaybackChannelMapping: false },
             ),
           ));
           this.assertCurrentRun(token);
@@ -2832,87 +3708,12 @@ export class AudioSession extends EventEmitter {
         }
       }
       const pcmPlan = this.currentPlan ?? plan;
-      const replayGainCalculation = this.calculateCurrentReplayGain();
-      const nativeDirectLocalPlaybackFallbackReason = getNativeDirectLocalPlaybackFallbackReason(
-        request.filePath,
-        request.inputHeaders,
-        probe,
-        pcmPlan,
-        this.currentOutputSettings!,
-        hasChainedPlaybackRequest,
-      );
-      const useNativeDirectAdvancedEchoSrcPcmPath = shouldUseNativeDirectAdvancedEchoSrcPcmPath(
-        nativeDirectLocalPlaybackFallbackReason,
-        pcmPlan,
-      );
-      const useNativeDirectLocalPlayback =
-        nativeDirectLocalPlaybackFallbackReason === null && !useNativeDirectAdvancedEchoSrcPcmPath;
-      if (
-        nativeDirectLocalPlaybackFallbackReason !== null &&
-        nativeDirectLocalPlaybackFallbackReason !== 'disabled' &&
-        this.currentOutputSettings!.nativeDirectLocalPlaybackEnabled === true
-      ) {
-        this.addOutputWarning(`native_direct_local_playback_not_applied:${nativeDirectLocalPlaybackFallbackReason}`);
-      }
-      if (useNativeDirectLocalPlayback) {
-        await this.syncEqStateForPlayback();
-        this.assertCurrentRun(token);
-        const nativeDirectPlaybackRate = normalizePlaybackRate(this.currentOutputSettings!.playbackRate);
-        const sessionId = bridge.beginSession?.({
-          startSeconds: request.startSeconds ?? 0,
-          playbackRate: nativeDirectPlaybackRate,
-          durationSeconds: probe.durationSeconds,
-          directFilePath: request.filePath,
-          directStartSeconds: request.startSeconds ?? 0,
-          directSampleRate: pcmPlan.decoderOutputSampleRate,
-          directChannels: probe.channels,
-          directOutputChannels: pcmPlan.outputChannels,
-          directPlaybackRate: nativeDirectPlaybackRate,
-          directGain: this.replayGainLinearGain(replayGainCalculation),
-        });
-        if (!sessionId) {
-          throw new Error('native output bridge did not expose a direct PCM playback session');
-        }
-
-        this.currentDecodeBackendImpl = 'native-direct-juce-audio-format';
-        this.currentReplayGainCalculation = replayGainCalculation;
-        this.state = 'playing';
-        this.hostStatus = 'ready';
-        this.resetWatchdogProgress();
-        this.markNativeStartupStatusGuard();
-        this.recordPlaybackDiagnosticEvent('output_ready', 'info', 'native_direct_local_playback', {
-          trackId: request.trackId ?? null,
-          filePath: request.filePath,
-          outputMode: pcmPlan.outputMode,
-          details: {
-            codec: probe.codec,
-            fileSampleRate: probe.fileSampleRate,
-            decoderOutputSampleRate: pcmPlan.decoderOutputSampleRate,
-            channels: probe.channels,
-            playbackRate: nativeDirectPlaybackRate,
-            replayGainDb: replayGainCalculation.appliedDb,
-          },
-        });
-        this.emitStatus();
-        if (request.automixAnalyze === true) {
-          const analysisHint = createAutomixAnalysisHint(playbackProbeHint);
-          void this.automixAnalyzer.analyze({
-            filePath: request.filePath,
-            probe,
-            headers: request.inputHeaders,
-            hint: analysisHint,
-          }).catch((error) => {
-            this.logger(`[AudioSession] Automix playback analysis skipped: ${error instanceof Error ? error.message : String(error)}`);
-          });
-        }
-        return this.getStatus();
-      }
       const nativeAutomix = await runPlaybackPerformanceStep(
         'AudioSession.playLocalFile',
         'createDecoderRunForPlayback',
         playbackPerfDetails(),
         () => this.createNativeAutomixPlayback(
-          request,
+          legacyPlaybackRequest,
           probe,
           pcmPlan,
           this.currentOutputSettings!,
@@ -2927,7 +3728,7 @@ export class AudioSession extends EventEmitter {
             'createDecoderRunForPlayback',
             playbackPerfDetails(),
             () => this.createNativeGaplessPlayback(
-              request,
+              legacyPlaybackRequest,
               probe,
               pcmPlan,
               this.currentOutputSettings!,
@@ -2943,7 +3744,7 @@ export class AudioSession extends EventEmitter {
               'AudioSession.playLocalFile',
               'createDecoderRunForPlayback',
               playbackPerfDetails(),
-              () => this.createAutomixDecoderRunForPlayback(request, probe, pcmPlan, this.currentOutputSettings!),
+              () => this.createAutomixDecoderRunForPlayback(legacyPlaybackRequest, probe, pcmPlan, this.currentOutputSettings!),
             );
       const gaplessRun = nativeAutomix || nativeGapless || automixRun
         ? null
@@ -2951,7 +3752,7 @@ export class AudioSession extends EventEmitter {
             'AudioSession.playLocalFile',
             'createDecoderRunForPlayback',
             playbackPerfDetails(),
-            () => this.createGaplessDecoderRunForPlayback(request, probe, pcmPlan, this.currentOutputSettings!),
+            () => this.createGaplessDecoderRunForPlayback(legacyPlaybackRequest, probe, pcmPlan, this.currentOutputSettings!),
           );
       const activeChainedState = nativeAutomix?.state ?? nativeGapless?.state ?? automixRun?.state ?? gaplessRun?.state ?? null;
       const playbackRun = automixRun
@@ -2959,30 +3760,21 @@ export class AudioSession extends EventEmitter {
         : gaplessRun
           ? gaplessRun.run
           : await runPlaybackPerformanceStep(
-              'AudioSession.playLocalFile',
-              'createDecoderRunForPlayback',
-              playbackPerfDetails(),
-              () => useNativeDirectAdvancedEchoSrcPcmPath
-                ? this.createNativeDirectAdvancedEchoSrcDecoderRunForPlayback(
-                  request.filePath,
-                  request.inputHeaders,
-                  request.startSeconds ?? 0,
-                  probe,
-                  pcmPlan,
-                  this.currentOutputSettings!,
-                )
-                : this.createDecoderRunForPlayback(
-                  request.filePath,
-                  request.inputHeaders,
-                  request.startSeconds ?? 0,
-                  probe,
-                  pcmPlan,
-                  this.currentOutputSettings!,
-                ),
+            'AudioSession.playLocalFile',
+            'createDecoderRunForPlayback',
+            playbackPerfDetails(),
+              () => this.createDecoderRunForPlayback(
+                request.filePath,
+                request.inputHeaders,
+                request.startSeconds ?? 0,
+                probe,
+                pcmPlan,
+                this.currentOutputSettings!,
+              ),
             );
       this.activeAutomix = activeChainedState;
 
-      await this.syncEqStateForPlayback();
+      await this.syncEqStateForPlayback(bridge);
       this.assertCurrentRun(token);
       const bridgeStartSeconds = activeChainedState?.compositeStartSeconds ?? request.startSeconds ?? 0;
       const bridgeDurationSeconds = activeChainedState
@@ -3052,6 +3844,16 @@ export class AudioSession extends EventEmitter {
       }
       return this.getStatus();
     } catch (error) {
+      if (error instanceof DaemonRemoteSampleRateCorrection) {
+        return this.playLocalFile({
+          ...request,
+          probe: mergeProbeHints(
+            { fileSampleRate: error.sourceSampleRate },
+            request.probe,
+          ),
+          remoteSampleRateCorrectionAttempt: true,
+        });
+      }
       if (this.runToken === token) {
         this.handleError(error instanceof Error ? error : new Error(String(error)));
       }
@@ -3095,6 +3897,7 @@ export class AudioSession extends EventEmitter {
     this.pausedPositionSeconds = null;
     this.currentProbe = null;
     this.currentPlan = null;
+    this.currentNativeProcessingStatus = null;
     this.currentResidentOutputSampleRate = null;
     this.currentOutputBackend = null;
     this.currentOutputBackendImpl = null;
@@ -3109,7 +3912,10 @@ export class AudioSession extends EventEmitter {
     this.currentActiveDsdOutputMode = null;
     this.currentDsdNativeSampleRate = null;
     this.currentDsdTransportSampleRate = null;
-    this.currentDevice = this.resolvePlanDeviceForSettings(this.currentOutputSettings);
+    this.currentDevice = normalizeOutputMode(this.currentOutputSettings.outputMode) === 'exclusive' ||
+      normalizeOutputMode(this.currentOutputSettings.outputMode) === 'asio'
+      ? await this.resolvePlaybackDeviceForSettings(this.currentOutputSettings)
+      : this.resolvePlanDeviceForSettings(this.currentOutputSettings);
     this.resetSharedStabilityForFreshPlayback(this.currentOutputSettings.outputMode ?? 'shared', this.currentOutputSettings, this.currentDevice);
     this.emitStatus();
 
@@ -3169,7 +3975,7 @@ export class AudioSession extends EventEmitter {
         preparedLocalProbeUsed: false,
         preparedLocalProbeAgeMs: null,
       });
-      await this.syncEqStateForPlayback();
+      await this.syncEqStateForPlayback(bridge);
       this.assertCurrentRun(token);
       const sessionId = bridge.beginSession?.({
         startSeconds: 0,
@@ -3263,7 +4069,33 @@ export class AudioSession extends EventEmitter {
   async play(): Promise<AudioStatus> {
     await this.waitForExclusiveReleaseOnPause('play');
 
+    // A shared-output paused seek may still be tearing down the old host and
+    // preparing the new target. Do not snapshot pausedPositionSeconds until
+    // that transaction has committed; otherwise resume can reopen the stale
+    // position while the newer seek is still awaiting cleanup.
+    const pausedSeekTransaction = this.pausedSeekTransaction;
+    if (pausedSeekTransaction) {
+      await pausedSeekTransaction;
+    }
+
     if (this.state === 'paused' && this.currentFilePath && this.currentOutputSettings) {
+      if (this.activeDaemonBackend) {
+        try {
+          await this.activeDaemonBackend.resume();
+          const positionSeconds = this.activeDaemonBackend.getPositionSeconds();
+          this.pausedPositionSeconds = null;
+          this.clock.reset(positionSeconds, this.currentProbe?.fileSampleRate ?? null);
+          this.state = 'playing';
+          this.hostStatus = 'ready';
+          this.resetWatchdogProgress();
+          this.emitStatus();
+          return this.getStatus();
+        } catch (error) {
+          this.handleError(error instanceof Error ? error : new Error(String(error)));
+          return this.getStatus();
+        }
+      }
+
       if (this.hostStatus === 'starting' && this.pausedOutputPrewarmPromise) {
         await this.waitBrieflyForPausedOutputPrewarm();
         if (this.state !== 'paused' || !this.currentFilePath || !this.currentOutputSettings) {
@@ -3311,8 +4143,6 @@ export class AudioSession extends EventEmitter {
         const shouldFadeIn = this.prepareNativeTransportFadeIn(bridge, fadeInTargetVolume, fadeInSettings);
         this.pausedPositionSeconds = null;
         this.attachBridgeEvents(bridge, token);
-        await this.syncEqStateForPlayback();
-        this.assertCurrentRun(token);
         const replayGainCalculation = this.calculateCurrentReplayGain();
         const nativeDirectPlaybackRate = normalizePlaybackRate(this.currentOutputSettings.playbackRate);
         const sessionId = bridge.beginSession?.({
@@ -3329,6 +4159,10 @@ export class AudioSession extends EventEmitter {
         });
         if (!sessionId) {
           throw new Error('native output bridge did not expose a direct PCM playback session');
+        }
+        if (isResidentOutputMode(currentPlan.outputMode)) {
+          await bridge.setPaused?.(false);
+          this.assertCurrentRun(token);
         }
         bridge.resetOutputClock?.(startSeconds, nativeDirectPlaybackRate);
         this.clock.reset(startSeconds, currentPlan.actualDeviceSampleRate ?? currentPlan.requestedOutputSampleRate);
@@ -3353,14 +4187,13 @@ export class AudioSession extends EventEmitter {
         const shouldFadeIn = this.prepareNativeTransportFadeIn(bridge, fadeInTargetVolume, fadeInSettings);
         this.pausedPositionSeconds = null;
         this.attachBridgeEvents(bridge, token);
-        await this.syncEqStateForPlayback();
-        this.assertCurrentRun(token);
         const prewarmedRun = this.consumePausedDecoderPrewarm(this.currentFilePath, startSeconds);
         const timelineStartSeconds = prewarmedRun?.timelineStartSeconds ?? startSeconds;
         const sessionId = bridge.beginSession?.({
           startSeconds: timelineStartSeconds,
           playbackRate: this.currentOutputSettings.playbackRate ?? 1,
           durationSeconds: currentProbe.durationSeconds,
+          startPaused: isResidentOutputMode(currentPlan.outputMode),
         });
         bridge.resetOutputClock?.(timelineStartSeconds, this.currentOutputSettings.playbackRate ?? 1);
         this.clock.reset(timelineStartSeconds, currentPlan.actualDeviceSampleRate ?? currentPlan.requestedOutputSampleRate);
@@ -3378,6 +4211,14 @@ export class AudioSession extends EventEmitter {
           throw new Error('native output bridge did not expose a writable PCM stream');
         }
         this.startDecoderRun(run, writable, token);
+        // Keep the resident device callback paused until the replacement
+        // decoder is attached to the new session. Resuming first advances the
+        // native output clock through silent underrun frames and later forces
+        // the UI position to roll back when real PCM arrives.
+        if (isResidentOutputMode(currentPlan.outputMode)) {
+          await bridge.setPaused?.(false);
+          this.assertCurrentRun(token);
+        }
         if (isHttpPlaybackUrl(this.currentFilePath)) {
           this.pausedPositionSeconds = timelineStartSeconds;
           this.state = 'loading';
@@ -3641,7 +4482,7 @@ export class AudioSession extends EventEmitter {
         this.pausedPositionSeconds = pos;
         this.clock.reset(pos, this.currentProbe?.fileSampleRate ?? null);
         this.state = 'paused';
-        this.hostStatus = this.isNativeHostAvailable() ? 'not-initialized' : 'unavailable';
+        this.hostStatus = 'ready';
         this.resetWatchdogProgress();
         this.emitStatus();
         return this.getStatus();
@@ -3686,6 +4527,7 @@ export class AudioSession extends EventEmitter {
         const canHoldPausedDecoder = this.canHoldCurrentDecoderForPausedResume();
         this.runToken += 1;
         this.activeAutomix = null;
+        this.activeAutomixV2 = null;
         const token = this.runToken;
         if (shouldReleaseExclusiveOnPause && this.bridge) {
           await this.releaseExclusiveOutputOnPause(this.bridge, token, positionSeconds, sampleRate);
@@ -3695,12 +4537,13 @@ export class AudioSession extends EventEmitter {
           ? this.holdCurrentDecoderForPausedResume(token, positionSeconds)
           : false;
         if (keepResidentBridge) {
+          // Pause the callback immediately, then abort (rather than drain) the
+          // current session so resume is never queued behind audio.inputEnd.
+          await this.bridge?.setPaused?.(true);
+          this.assertCurrentRun(token);
           const decoderStop = heldPausedDecoder ? null : this.stopDecoderRun();
-          try {
-            this.bridge?.endSession?.();
-          } catch {
-            // Best-effort idle transition for resident native output.
-          }
+          await this.bridge?.abortSession?.();
+          this.assertCurrentRun(token);
           if (decoderStop) {
             void decoderStop.catch((stopError) => {
               this.logger(`[AudioSession] paused decoder cleanup finished with error: ${
@@ -3737,6 +4580,7 @@ export class AudioSession extends EventEmitter {
         }
         this.runToken += 1;
         this.activeAutomix = null;
+        this.activeAutomixV2 = null;
         this.pausedPositionSeconds = positionSeconds;
         this.clock.reset(positionSeconds, sampleRate);
         this.state = 'paused';
@@ -3788,6 +4632,8 @@ export class AudioSession extends EventEmitter {
     this.currentResamplerFallbackActive = false;
     this.currentDecodeBackendImpl = null;
     this.activeAutomix = null;
+    this.activeAutomixV2 = null;
+    this.daemonGaplessActive = false;
     this.currentUseMiniaudioOutputRequested = false;
     this.currentDsdOutputModeRequested = 'pcm';
     this.currentActiveDsdOutputMode = null;
@@ -3813,6 +4659,7 @@ export class AudioSession extends EventEmitter {
     const resetReason = normalizeResetReason(reason);
     this.runToken += 1;
     await this.stopResourcesGracefully(resetReason, true);
+    await this.stopAudioDaemonForPlayback();
     await this.refreshDeviceService();
     this.watchdogRecoveries.clear();
     this.localPlaybackRecoveries.clear();
@@ -3833,6 +4680,7 @@ export class AudioSession extends EventEmitter {
     const resetReason = normalizeResetReason(reason);
     this.runToken += 1;
     await this.stopResourcesGracefully(resetReason, true);
+    await this.stopAudioDaemonForPlayback();
     this.resetSessionAfterForcedStop();
     return this.getStatus();
   }
@@ -3866,6 +4714,9 @@ export class AudioSession extends EventEmitter {
     this.currentOutputDeviceType = null;
     this.currentOutputDeviceName = null;
     this.currentUseMiniaudioOutputRequested = false;
+    this.activeAutomix = null;
+    this.activeAutomixV2 = null;
+    this.daemonGaplessActive = false;
     this.currentReadyResult = null;
     this.currentBridgeOutputMode = null;
     this.currentBridgeSharedBackend = null;
@@ -3912,14 +4763,22 @@ export class AudioSession extends EventEmitter {
 
     if (this.activeDaemonBackend) {
       if (this.state === 'paused') {
-        this.pausedPositionSeconds = safePositionSeconds;
-        this.clock.reset(safePositionSeconds, this.currentProbe?.fileSampleRate ?? null);
-        this.emitStatus();
-        return this.getStatus();
+        try {
+          await this.activeDaemonBackend.seek(safePositionSeconds);
+          this.daemonGaplessActive = false;
+          this.pausedPositionSeconds = safePositionSeconds;
+          this.clock.reset(safePositionSeconds, this.currentProbe?.fileSampleRate ?? null);
+          this.emitStatus();
+          return this.getStatus();
+        } catch (error) {
+          this.handleError(error instanceof Error ? error : new Error(String(error)));
+          return this.getStatus();
+        }
       }
       if (this.state === 'playing') {
         try {
           await this.activeDaemonBackend.seek(safePositionSeconds);
+          this.daemonGaplessActive = false;
           this.clock.reset(safePositionSeconds, this.currentProbe?.fileSampleRate ?? null);
           this.emitStatus();
           return this.getStatus();
@@ -3934,33 +4793,95 @@ export class AudioSession extends EventEmitter {
       const sampleRate = this.currentPlan?.actualDeviceSampleRate ?? this.currentPlan?.requestedOutputSampleRate ?? null;
       this.runToken += 1;
       const token = this.runToken;
-      await this.stopResourcesGracefully('seek-paused');
+      const keepResidentPausedBridge = Boolean(
+        this.bridge &&
+        this.currentReadyResult &&
+        isResidentOutputMode(this.currentPlan?.outputMode ?? this.currentOutputSettings.outputMode),
+      );
+      if (keepResidentPausedBridge) {
+        this.stopPausedDecoderPrewarm();
+        this.pausedPositionSeconds = safePositionSeconds;
+        this.clock.reset(safePositionSeconds, sampleRate);
+        this.hostStatus = 'ready';
+        this.emitStatus();
+        if (this.currentProbe && this.currentPlan) {
+          void this.preparePausedDecoderRun(
+            token,
+            safePositionSeconds,
+            this.currentProbe,
+            this.currentPlan,
+            this.currentOutputSettings,
+          );
+        }
+        return this.getStatus();
+      }
+      // Publish the latest user target synchronously before yielding to host
+      // cleanup. A concurrently requested resume will wait for this complete
+      // transaction and can only start from the new target.
       this.pausedPositionSeconds = safePositionSeconds;
       this.clock.reset(safePositionSeconds, sampleRate);
-      const keepExclusiveReleased =
-        this.exclusiveReleasedOnPause &&
-        this.currentOutputSettings.releaseExclusiveOnPauseExperimentalEnabled === true &&
-        normalizeOutputMode(this.currentOutputSettings.outputMode) === 'exclusive';
-      const canPrewarm = !keepExclusiveReleased && Boolean(this.currentProbe && this.currentOutputSettings && this.isNativeHostAvailable());
-      this.hostStatus = canPrewarm ? 'starting' : this.isNativeHostAvailable() ? 'not-initialized' : 'unavailable';
       this.emitStatus();
-      if (canPrewarm) {
-        this.startPausedOutputPrewarm(token, safePositionSeconds);
+      const transaction = (async (): Promise<void> => {
+        await this.stopResourcesGracefully('seek-paused');
+        if (this.runToken !== token) {
+          return;
+        }
+        const keepExclusiveReleased =
+          this.exclusiveReleasedOnPause &&
+          this.currentOutputSettings?.releaseExclusiveOnPauseExperimentalEnabled === true &&
+          normalizeOutputMode(this.currentOutputSettings.outputMode) === 'exclusive';
+        const canPrewarm = !keepExclusiveReleased && Boolean(this.currentProbe && this.currentOutputSettings && this.isNativeHostAvailable());
+        this.hostStatus = canPrewarm ? 'starting' : this.isNativeHostAvailable() ? 'not-initialized' : 'unavailable';
+        this.emitStatus();
+        if (canPrewarm) {
+          this.startPausedOutputPrewarm(token, safePositionSeconds);
+        }
+      })();
+      this.pausedSeekTransaction = transaction;
+      try {
+        await transaction;
+      } finally {
+        if (this.pausedSeekTransaction === transaction) {
+          this.pausedSeekTransaction = null;
+        }
       }
       return this.getStatus();
     }
 
-    if (this.state === 'playing' && this.bridge && isWritableUsable(this.bridge.writable) && this.currentProbe && this.currentPlan) {
+    if ((this.state === 'playing' || this.state === 'loading') && this.bridge && isWritableUsable(this.bridge.writable) && this.currentProbe && this.currentPlan) {
       const token = this.runToken + 1;
       this.runToken = token;
+      const bridge = this.bridge;
+      const activeDsdOutputMode = this.currentPlan.dsdOutputMode;
+      const nativeDirectSeekActive = isNativeDirectLocalPlaybackBackend(this.currentDecodeBackendImpl);
+      const transactionalPcmSeek =
+        !nativeDirectSeekActive && activeDsdOutputMode !== 'dop' && activeDsdOutputMode !== 'native';
+      if (transactionalPcmSeek) {
+        // Freeze the device callback before detaching the old decoder. Both
+        // shared and exclusive resident outputs otherwise keep rendering
+        // silence while seek setup runs, making UI time advance before audio.
+        await bridge.setPaused?.(true);
+        this.assertCurrentRun(token);
+      }
       const decoderStop = this.stopDecoderRun();
-      if (decoderStop) {
+      if (transactionalPcmSeek) {
+        // Establish a strict raw-pipe byte boundary. Decoder process teardown
+        // may finish later, but synchronous unpipe/destroy above prevents any
+        // new old-session PCM from being submitted past this abort barrier.
+        await bridge.abortSession?.();
+        this.assertCurrentRun(token);
+        if (decoderStop) {
+          void decoderStop.catch((stopError) => {
+            this.logger(`[AudioSession] seek decoder cleanup finished with error: ${
+              stopError instanceof Error ? stopError.message : String(stopError)
+            }`);
+          });
+        }
+      } else if (decoderStop) {
         await decoderStop;
       }
-      await this.syncEqStateForPlayback();
       this.assertCurrentRun(token);
 
-      const activeDsdOutputMode = this.currentPlan.dsdOutputMode;
       let bitstreamRun: { stream: Readable; decodeBackendImpl: string; nativeSampleRate: number; transportSampleRate: number | null } | null = null;
       if (activeDsdOutputMode === 'dop' || activeDsdOutputMode === 'native') {
         try {
@@ -3985,12 +4906,12 @@ export class AudioSession extends EventEmitter {
 
       const waitForHttpDecoderReady = isHttpPlaybackUrl(this.currentFilePath);
       const nativeDirectPlaybackRate = normalizePlaybackRate(this.currentOutputSettings.playbackRate);
-      const nativeDirectSeekActive = isNativeDirectLocalPlaybackBackend(this.currentDecodeBackendImpl);
       const replayGainCalculation = nativeDirectSeekActive ? this.calculateCurrentReplayGain() : null;
-      const sessionId = this.bridge.beginSession?.({
+      const sessionId = bridge.beginSession?.({
         startSeconds: safePositionSeconds,
         playbackRate: nativeDirectPlaybackRate,
         durationSeconds: this.currentProbe.durationSeconds,
+        startPaused: transactionalPcmSeek,
         ...(nativeDirectSeekActive
           ? {
               directFilePath: this.currentFilePath,
@@ -4003,8 +4924,8 @@ export class AudioSession extends EventEmitter {
             }
           : {}),
       });
-      this.bridge.resetOutputClock?.(safePositionSeconds, this.currentOutputSettings.playbackRate ?? 1);
-      this.attachBridgeEvents(this.bridge, token);
+      bridge.resetOutputClock?.(safePositionSeconds, this.currentOutputSettings.playbackRate ?? 1);
+      this.attachBridgeEvents(bridge, token);
       this.clock.reset(safePositionSeconds, this.currentPlan.actualDeviceSampleRate ?? this.currentPlan.requestedOutputSampleRate);
       if (nativeDirectSeekActive) {
         this.resetWatchdogProgress();
@@ -4018,7 +4939,7 @@ export class AudioSession extends EventEmitter {
       }
 
       if (bitstreamRun) {
-        const writable = this.bridge.createSessionWritable?.(sessionId) ?? this.bridge.writable;
+        const writable = bridge.createSessionWritable?.(sessionId) ?? bridge.writable;
         if (!writable) {
           throw new Error('native output bridge did not expose a writable DSD bitstream');
         }
@@ -4040,7 +4961,7 @@ export class AudioSession extends EventEmitter {
         this.currentPlan,
         this.currentOutputSettings,
       );
-      const writable = this.bridge.createSessionWritable?.(sessionId) ?? this.bridge.writable;
+      const writable = bridge.createSessionWritable?.(sessionId) ?? bridge.writable;
       if (!writable) {
         throw new Error('native output bridge did not expose a writable PCM stream');
       }
@@ -4051,8 +4972,15 @@ export class AudioSession extends EventEmitter {
           playbackRate: this.currentOutputSettings.playbackRate ?? 1,
           sampleRate: this.currentPlan.actualDeviceSampleRate ?? this.currentPlan.requestedOutputSampleRate,
         });
-        this.state = 'playing';
       }
+      if (transactionalPcmSeek) {
+        // audio.resume returns only after the target session has reached the
+        // native startup-prebuffer threshold, so a completed seek is audible
+        // immediately and its position is already backed by consumed PCM.
+        await bridge.setPaused?.(false);
+        this.assertCurrentRun(token);
+      }
+      this.state = 'playing';
       this.resetWatchdogProgress();
       this.emitStatus();
       return this.getStatus();
@@ -4072,13 +5000,13 @@ export class AudioSession extends EventEmitter {
     this.updatePositionFromOutput();
 
     const plan = this.currentPlan;
-    const eqState = getEqBridge().getState();
-    const channelBalanceState = getEqBridge().getChannelBalanceState();
-    const roomCorrectionState = getEqBridge().getRoomCorrectionState();
+    const eqState = EqStateStore.loadEqState();
+    const channelBalanceState = EqStateStore.loadChannelBalanceState();
+    const roomCorrectionState = EqStateStore.loadRoomCorrectionState();
     const dspModuleActive = eqState.enabled || roomCorrectionState.enabled || channelBalanceState.enabled;
     const audioVisualSpectrumEnabled = isAudioVisualSpectrumEnabled();
     this.levelMeterTransform?.setVisualSpectrumEnabled(audioVisualSpectrumEnabled);
-    const audioLevels = createAudioLevelTelemetry(
+    const audioLevels = this.nativeAudioLevels ?? createAudioLevelTelemetry(
       audioVisualSpectrumEnabled ? this.levelSnapshot : this.createLevelSnapshotWithoutVisualTelemetry(this.levelSnapshot),
       eqState,
       channelBalanceState,
@@ -4091,22 +5019,33 @@ export class AudioSession extends EventEmitter {
     const realtimeLevelClipped = audioLevels.clipCount > 0;
     const nativeDspClippingRisk = this.nativeTelemetry.dspClippingRisk === true;
     const nativeDspLimiterProtecting = this.nativeTelemetry.dspLimiterProtecting === true;
-    const chainedPlaybackActive = this.activeAutomix !== null;
-    const gaplessActive = this.activeAutomix?.gapless === true;
-    const automixActive = chainedPlaybackActive && !gaplessActive;
+    const legacyChainedPlaybackActive = this.activeAutomix !== null;
+    const nativeAutomixV2Active =
+      this.activeAutomixV2?.state === 'armed' || this.activeAutomixV2?.state === 'committed';
+    const automixV2Configured = this.activeAutomixV2 !== null && automixV2Phase !== 'off';
+    const chainedPlaybackActive = legacyChainedPlaybackActive || nativeAutomixV2Active || this.daemonGaplessActive;
+    const gaplessActive = this.activeAutomix?.gapless === true || this.daemonGaplessActive;
+    const automixActive = (legacyChainedPlaybackActive && !gaplessActive) || automixV2Configured;
+    const gaplessPlaybackEnabled = getAppSettings().gaplessPlaybackEnabled === true;
     const settings = getReplayGainAudioSettings();
     const replayGainCalculation = this.currentReplayGainCalculation;
     const replayGainActive = replayGainCalculation.active && Math.abs(replayGainCalculation.appliedDb) >= 0.001;
     const echoSrcActive = plan?.echoSrcActive === true;
     const sdmPcmToDsdActive = plan?.sdmPcmToDsdActive === true;
-    const dspActive = dspModuleActive || chainedPlaybackActive || replayGainActive || echoSrcActive || sdmPcmToDsdActive;
+    const dspActive =
+      dspModuleActive
+      || legacyChainedPlaybackActive
+      || nativeAutomixV2Active
+      || replayGainActive
+      || echoSrcActive
+      || sdmPcmToDsdActive;
     const bitPerfectDisabledReason = eqState.enabled
       ? 'eq_enabled'
       : roomCorrectionState.enabled
         ? 'room_correction_enabled'
         : channelBalanceState.enabled
           ? 'channel_balance_enabled'
-          : chainedPlaybackActive
+          : legacyChainedPlaybackActive || nativeAutomixV2Active
             ? gaplessActive
               ? 'gapless_enabled'
               : 'automix_enabled'
@@ -4130,7 +5069,7 @@ export class AudioSession extends EventEmitter {
       warnings.push('room_correction_bit_perfect_disabled');
     } else if (channelBalanceState.enabled) {
       warnings.push('channel_balance_bit_perfect_disabled');
-    } else if (chainedPlaybackActive) {
+    } else if (legacyChainedPlaybackActive || nativeAutomixV2Active) {
       warnings.push(gaplessActive ? 'gapless_enabled_bit_perfect_disabled' : 'automix_enabled_bit_perfect_disabled');
     } else if (replayGainActive) {
       warnings.push('replay_gain_bit_perfect_disabled');
@@ -4186,9 +5125,7 @@ export class AudioSession extends EventEmitter {
           )
         : rawPositionSeconds;
     const automixDurationSeconds = this.currentProbe?.durationSeconds ?? 0;
-    const nativeDirectLocalPlaybackRequested = this.currentOutputSettings
-      ? this.currentOutputSettings.nativeDirectLocalPlaybackEnabled === true
-      : this.outputSettings.nativeDirectLocalPlaybackEnabled === true;
+    const nativeDirectLocalPlaybackRequested = process.env.ECHO_FORCE_LEGACY_LOCAL_PLAYBACK !== '1';
     const nativeDirectLocalPlaybackActive = isNativeDirectLocalPlaybackBackend(this.currentDecodeBackendImpl);
     const nativeDirectLocalPlaybackWarningReason = this.getNativeDirectLocalPlaybackStatusFallbackReason();
     const nativeDirectLocalPlaybackFallbackReason = nativeDirectLocalPlaybackActive
@@ -4196,8 +5133,22 @@ export class AudioSession extends EventEmitter {
       : nativeDirectLocalPlaybackWarningReason ?? (nativeDirectLocalPlaybackRequested ? null : 'disabled');
     const nativeOutputFormat = getReadyOutputFormat(this.currentReadyResult);
     const pcmDitherMode = normalizePcmDitherMode(this.currentOutputSettings?.pcmDitherMode ?? this.outputSettings.pcmDitherMode);
-    const pcmDitherRuntimeStatus = nativeDirectLocalPlaybackActive
-      ? { active: false, targetBitDepth: null, reason: 'native_direct_bypass' }
+    const nativeDitherStatus = nativeDirectLocalPlaybackActive
+      ? this.currentNativeProcessingStatus?.dither ?? null
+      : null;
+    const nativeDitherBitDepth: 16 | 24 | null = nativeDitherStatus?.bitDepth === 16 || nativeDitherStatus?.bitDepth === 24
+      ? nativeDitherStatus.bitDepth
+      : null;
+    const pcmDitherRuntimeStatus = nativeDitherStatus
+      ? {
+        active: nativeDitherStatus.active,
+        targetBitDepth: nativeDitherBitDepth,
+        reason: nativeDitherStatus.active
+          ? null
+          : nativeDitherStatus.mode === 'off'
+            ? 'off'
+            : 'native_host_inactive',
+      }
       : this.currentActiveDsdOutputMode === 'dop' || this.currentActiveDsdOutputMode === 'native'
         ? { active: false, targetBitDepth: null, reason: 'dsd_direct_bypass' }
         : sdmPcmToDsdActive
@@ -4212,10 +5163,10 @@ export class AudioSession extends EventEmitter {
       this.currentOutputSettings?.sdmComputeBackend ?? this.outputSettings.sdmComputeBackend,
     );
     const sdmOversamplingFilterProfile1x = normalizeEchoSrcFilterProfile(
-      this.currentOutputSettings?.sdmOversamplingFilterProfile1x ?? this.outputSettings.sdmOversamplingFilterProfile1x ?? 'poly-sinc-ext2-long',
+      this.currentOutputSettings?.sdmOversamplingFilterProfile1x ?? this.outputSettings.sdmOversamplingFilterProfile1x ?? 'sinc-long',
     );
     const sdmOversamplingFilterProfileNx = normalizeEchoSrcFilterProfile(
-      this.currentOutputSettings?.sdmOversamplingFilterProfileNx ?? this.outputSettings.sdmOversamplingFilterProfileNx ?? 'poly-sinc-ext2-hires-lp',
+      this.currentOutputSettings?.sdmOversamplingFilterProfileNx ?? this.outputSettings.sdmOversamplingFilterProfileNx ?? 'poly-sinc-hb',
     );
     const sdmRuntimeState = resolveSdmRuntimeState(sdmMode, this.currentActiveDsdOutputMode, sdmPcmToDsdActive);
 
@@ -4230,6 +5181,10 @@ export class AudioSession extends EventEmitter {
       activeOutputBackendImpl: this.currentOutputBackendImpl,
       nativeOutputFormat,
       outputMode: plan?.outputMode ?? this.outputSettings.outputMode,
+      automaticOutputEnabled: this.currentOutputSettings
+        ? this.currentOutputSettings.automaticOutputEnabled === true
+        : this.outputSettings.automaticOutputEnabled === true,
+      automaticOutputStage: this.automaticOutputStage,
       sharedBackend: normalizeSharedBackend(this.currentOutputSettings?.sharedBackend ?? this.outputSettings.sharedBackend),
       useMiniaudioOutputRequested: this.currentOutputSettings
         ? this.currentUseMiniaudioOutputRequested
@@ -4238,6 +5193,9 @@ export class AudioSession extends EventEmitter {
       nativeDirectLocalPlaybackActive,
       nativeDirectLocalPlaybackFallbackReason,
       activeDecodeBackendImpl: this.currentDecodeBackendImpl,
+      activeDecodeBackendLabel: this.currentDecodeBackendImpl === 'native-direct-daemon-libav'
+        ? 'native-direct-libav-audio-format-daemon'
+        : null,
       dsdOutputModeRequested: this.currentOutputSettings
         ? this.currentDsdOutputModeRequested
         : normalizeDsdOutputMode(this.outputSettings.dsdOutputMode),
@@ -4266,42 +5224,73 @@ export class AudioSession extends EventEmitter {
       replayGainMode: settings.replayGainMode ?? 'track',
       replayGainAppliedDb: replayGainCalculation.appliedDb,
       replayGainPreventedClipping: replayGainCalculation.preventedClipping,
+      gaplessPlaybackEnabled,
       automix: {
         enabled: automixActive,
-        mode: this.activeAutomix
+        mode: this.activeAutomixV2
+          ? this.activeAutomixV2.state === 'committed'
+            ? 'transitioning'
+            : this.activeAutomixV2.state === 'preparing' || this.activeAutomixV2.state === 'armed'
+              ? 'armed'
+              : 'off'
+          : this.activeAutomix
           ? this.activeAutomix.nextTransitionIndex > 0
             ? 'transitioning'
             : 'armed'
-          : 'off',
+          : this.daemonGaplessActive
+            ? 'armed'
+            : 'off',
         active: chainedPlaybackActive,
-        transitionSeconds: this.activeAutomix?.transitionSeconds ?? null,
-        transitionStartedAtSeconds: this.activeAutomix?.transitionStartSeconds ?? null,
-        nextTrackId: this.activeAutomix?.nextTrackId ?? null,
-        transitionMode: this.activeAutomix?.plan.mode ?? null,
-        fallbackReason: this.activeAutomix?.plan.fallbackReason ?? null,
-        beatAligned: this.activeAutomix?.plan.beatAligned ?? false,
+        transitionSeconds: this.activeAutomixV2
+          ? this.activeAutomixV2.plan.overlapFrames / this.activeAutomixV2.plan.mixSampleRate
+          : this.activeAutomix?.transitionSeconds ?? null,
+        transitionStartedAtSeconds: this.activeAutomixV2
+          ? this.activeAutomixV2.plan.fadeStartOutputFrame / this.activeAutomixV2.plan.mixSampleRate
+          : this.activeAutomix?.transitionStartSeconds ?? null,
+        nextTrackId: this.activeAutomixV2?.plan.toTrackId ?? this.activeAutomix?.nextTrackId ?? null,
+        transitionMode: this.activeAutomixV2?.plan.mode ?? this.activeAutomix?.plan.mode ?? null,
+        fallbackReason: this.activeAutomixV2?.plan.fallbackReason ?? this.activeAutomix?.plan.fallbackReason ?? null,
+        beatAligned: this.activeAutomixV2?.plan.mode === 'beat_match' || this.activeAutomix?.plan.beatAligned === true,
         gapless: gaplessActive,
         skipIntroSilence: this.activeAutomix?.plan.skipIntroSilence ?? false,
-        engine: this.currentDecodeBackendImpl === 'native-gapless-dual-deck'
+        engine: this.activeAutomixV2 && nativeAutomixV2Active
+          ? 'nativeDualDeck'
+          : this.daemonGaplessActive
           ? 'nativeGapless'
-          : this.currentDecodeBackendImpl === 'ffmpeg-gapless'
-            ? 'ffmpegGapless'
-            : this.currentDecodeBackendImpl === 'native-automix-dual-deck'
-              ? 'nativeDualDeck'
-              : this.currentDecodeBackendImpl === 'ffmpeg-automix'
-                ? 'ffmpegPremix'
-                : chainedPlaybackActive
-                  ? 'fallback'
-                  : null,
-        tempoRatio: this.activeAutomix?.plan.tempoRatio ?? null,
-        nextStartSeconds: this.activeAutomix?.plan.nextStartSeconds ?? null,
-        overlapSeconds: this.activeAutomix?.plan.overlapSeconds ?? null,
-        advanceAtSeconds: this.activeAutomix?.plan.advanceAtSeconds ?? null,
-        plannedTrackCount: this.activeAutomix ? this.activeAutomix.transitions.length + 1 : 0,
+          : this.currentDecodeBackendImpl === 'native-gapless-dual-deck'
+            ? 'nativeGapless'
+            : this.currentDecodeBackendImpl === 'ffmpeg-gapless'
+              ? 'ffmpegGapless'
+              : this.currentDecodeBackendImpl === 'native-automix-dual-deck'
+                ? 'nativeDualDeck'
+                : this.currentDecodeBackendImpl === 'ffmpeg-automix'
+                  ? 'ffmpegPremix'
+                  : chainedPlaybackActive
+                    ? 'fallback'
+                    : null,
+        tempoRatio: this.activeAutomixV2?.plan.tempoRatio ?? this.activeAutomix?.plan.tempoRatio ?? null,
+        nextStartSeconds: this.activeAutomixV2?.plan.nextStartSeconds ?? this.activeAutomix?.plan.nextStartSeconds ?? null,
+        overlapSeconds: this.activeAutomixV2
+          ? this.activeAutomixV2.plan.overlapFrames / this.activeAutomixV2.plan.mixSampleRate
+          : this.activeAutomix?.plan.overlapSeconds ?? null,
+        advanceAtSeconds: this.activeAutomixV2
+          ? this.activeAutomixV2.plan.commitOutputFrame / this.activeAutomixV2.plan.mixSampleRate
+          : this.activeAutomix?.plan.advanceAtSeconds ?? null,
+        plannedTrackCount: this.activeAutomixV2 ? 2 : this.activeAutomix ? this.activeAutomix.transitions.length + 1 : 0,
         nextTransitionIndex: this.activeAutomix?.nextTransitionIndex ?? 0,
+        phase: automixV2Phase,
+        runtimeState: this.activeAutomixV2?.state ?? 'idle',
+        planId: this.activeAutomixV2?.plan.planId ?? null,
+        analysisVersion: this.activeAutomixV2 ? automixAnalysisVersion : null,
+        bitPerfectDisabled: nativeAutomixV2Active,
+        automixBypassed: this.activeAutomixV2?.state === 'fallback'
+          ? this.activeAutomixV2.plan.fallbackReason
+          : null,
       },
       currentFilePath: this.currentFilePath,
       currentTrackId: this.currentTrackId,
+      currentQueueItemId: this.currentTrackId ? this.currentQueueItemId : null,
+      queueRevision: this.currentQueueRevision,
       currentTrackTitle: this.currentTrackMetadata?.title ?? null,
       currentTrackArtist: this.currentTrackMetadata?.artist ?? null,
       currentTrackAlbum: this.currentTrackMetadata?.album ?? null,
@@ -4342,7 +5331,7 @@ export class AudioSession extends EventEmitter {
       pcmDitherActive: pcmDitherRuntimeStatus.active,
       pcmDitherTargetBitDepth: pcmDitherRuntimeStatus.targetBitDepth,
       pcmDitherReason: pcmDitherRuntimeStatus.reason,
-      bitPerfectCandidate: (plan?.bitPerfectCandidate ?? false) && !dspActive,
+      bitPerfectCandidate: this.currentReadyResult !== null && (plan?.bitPerfectCandidate ?? false) && !dspActive,
       sampleRateMismatch: plan?.sampleRateMismatch ?? false,
       eqEnabled: eqState.enabled,
       roomCorrectionEnabled: roomCorrectionState.enabled,
@@ -4589,11 +5578,16 @@ export class AudioSession extends EventEmitter {
     const token = this.runToken;
 
     try {
+      // Both playback paths expose the host-owned output clock. The daemon
+      // intentionally has no legacy PCM bridge, so using only this.bridge here
+      // would leave daemon-direct playback outside the same stall recovery
+      // policy as resident native output.
+      const playbackPositionSource = this.activeDaemonBackend ?? this.bridge;
       if (
         this.state !== 'playing' ||
         this.watchdogRecovering ||
         this.sharedStabilityRecovering ||
-        !this.bridge ||
+        !playbackPositionSource ||
         !this.currentFilePath ||
         !this.currentOutputSettings
       ) {
@@ -4601,7 +5595,7 @@ export class AudioSession extends EventEmitter {
         return;
       }
 
-      const positionSeconds = this.bridge.getPositionSeconds();
+      const positionSeconds = playbackPositionSource.getPositionSeconds();
       if (!Number.isFinite(positionSeconds)) {
         this.resetWatchdogProgress();
         return;
@@ -4698,19 +5692,17 @@ export class AudioSession extends EventEmitter {
         false,
       defaultDeviceFallbackEnabled: output?.defaultDeviceFallbackEnabled ?? baseOutputSettings.defaultDeviceFallbackEnabled ?? false,
       useMiniaudioOutput: output?.useMiniaudioOutput ?? baseOutputSettings.useMiniaudioOutput ?? false,
-      nativeDirectLocalPlaybackEnabled:
-        output?.nativeDirectLocalPlaybackEnabled ??
-        (baseOutputSettings.nativeDirectLocalPlaybackEnabled === true || getPersistedNativeDirectLocalPlaybackEnabled()),
+      nativeDirectLocalPlaybackEnabled: process.env.ECHO_FORCE_LEGACY_LOCAL_PLAYBACK !== '1',
       dsdOutputMode: normalizeDsdOutputMode(output?.dsdOutputMode ?? baseOutputSettings.dsdOutputMode),
       sdmMode: normalizeSdmMode(output?.sdmMode ?? baseOutputSettings.sdmMode),
       sdmTargetRate: normalizeSdmTargetRate(output?.sdmTargetRate ?? baseOutputSettings.sdmTargetRate),
       sdmQualityProfile: normalizeSdmQualityProfile(output?.sdmQualityProfile ?? baseOutputSettings.sdmQualityProfile),
       sdmComputeBackend: normalizeSdmComputeBackend(output?.sdmComputeBackend ?? baseOutputSettings.sdmComputeBackend),
       sdmOversamplingFilterProfile1x: normalizeEchoSrcFilterProfile(
-        output?.sdmOversamplingFilterProfile1x ?? baseOutputSettings.sdmOversamplingFilterProfile1x ?? 'poly-sinc-ext2-long',
+        output?.sdmOversamplingFilterProfile1x ?? baseOutputSettings.sdmOversamplingFilterProfile1x ?? 'sinc-long',
       ),
       sdmOversamplingFilterProfileNx: normalizeEchoSrcFilterProfile(
-        output?.sdmOversamplingFilterProfileNx ?? baseOutputSettings.sdmOversamplingFilterProfileNx ?? 'poly-sinc-ext2-hires-lp',
+        output?.sdmOversamplingFilterProfileNx ?? baseOutputSettings.sdmOversamplingFilterProfileNx ?? 'poly-sinc-hb',
       ),
       soxrFallbackEnabled: output?.soxrFallbackEnabled ?? baseOutputSettings.soxrFallbackEnabled ?? true,
       echoSrcMode: normalizeEchoSrcMode(output?.echoSrcMode ?? baseOutputSettings.echoSrcMode),
@@ -4742,20 +5734,12 @@ export class AudioSession extends EventEmitter {
   }
 
   private getRequestedResamplerEngine(plan: SampleRatePlan, outputSettings: AudioOutputSettings): AudioResamplerEngine {
-    if (this.shouldUseEchoSrcFirTransform(plan, outputSettings)) {
-      return 'default';
-    }
-
-    if (this.shouldUseSdmOversamplingFirTransform(plan)) {
-      return 'default';
-    }
-
     if (plan.echoSrcActive) {
-      return 'soxr';
+      return this.getPreferredFfmpegResamplerEngine();
     }
 
     if (plan.sdmPcmToDsdActive) {
-      return 'soxr';
+      return this.getPreferredFfmpegResamplerEngine();
     }
 
     if (
@@ -4764,33 +5748,15 @@ export class AudioSession extends EventEmitter {
       plan.fileSampleRate !== null &&
       plan.fileSampleRate !== plan.decoderOutputSampleRate
     ) {
-      return 'soxr';
+      return this.getPreferredFfmpegResamplerEngine();
     }
 
     return 'default';
   }
 
-  private getEchoSrcFirBackendStatus(plan: SampleRatePlan, outputSettings: AudioOutputSettings): EchoSrcFirBackendStatus | null {
-    const backend = normalizeEchoSrcComputeBackend(outputSettings.echoSrcComputeBackend);
-    if (
-      !plan.echoSrcActive ||
-      outputSettings.echoSrcAdvancedModeEnabled !== true ||
-      plan.dsdOutputMode !== 'pcm' ||
-      (plan.outputMode !== 'exclusive') ||
-      !normalizeEchoSrcUpsampleFactor(plan.fileSampleRate, plan.echoSrcTargetSampleRate)
-    ) {
-      return null;
-    }
-
-    return this.resolveEchoSrcFirBackendStatus(backend);
-  }
-
-  private shouldUseEchoSrcFirTransform(plan: SampleRatePlan, outputSettings: AudioOutputSettings): boolean {
-    return this.getEchoSrcFirBackendStatus(plan, outputSettings)?.available === true;
-  }
-
-  private shouldUseSdmOversamplingFirTransform(plan: SampleRatePlan | null | undefined): boolean {
-    return plan?.sdmPcmToDsdActive === true && plan.sdmOversamplingFirActive === true;
+  private getPreferredFfmpegResamplerEngine(): AudioResamplerEngine {
+    const toolchain = this.decoder.getToolchainInfo?.();
+    return toolchain ? (toolchain.soxrAvailable ? 'soxr' : 'default') : 'soxr';
   }
 
   private createDecodeRequest(
@@ -4801,8 +5767,6 @@ export class AudioSession extends EventEmitter {
     plan: SampleRatePlan,
     outputSettings: AudioOutputSettings,
   ): PcmDecodeRequest {
-    const useEchoSrcFirTransform = this.shouldUseEchoSrcFirTransform(plan, outputSettings);
-    const useSdmOversamplingFirTransform = this.shouldUseSdmOversamplingFirTransform(plan);
     const resamplerEngine = this.getRequestedResamplerEngine(plan, outputSettings);
     this.currentResamplerEngine = resamplerEngine;
     this.currentResamplerFallbackActive = false;
@@ -4812,10 +5776,7 @@ export class AudioSession extends EventEmitter {
       inputHeaders: inputHeaders ?? undefined,
       startSeconds,
       channels,
-      decoderOutputSampleRate:
-        useEchoSrcFirTransform || useSdmOversamplingFirTransform
-          ? normalizeAudioSampleRate(plan.fileSampleRate) ?? plan.decoderOutputSampleRate
-          : plan.decoderOutputSampleRate,
+      decoderOutputSampleRate: plan.decoderOutputSampleRate,
       resamplerEngine,
       resamplerQualityProfile: plan.sdmPcmToDsdActive ? 'transparent' : plan.echoSrcQualityProfile,
       allowResamplerFallback: outputSettings.soxrFallbackEnabled !== false,
@@ -4856,26 +5817,6 @@ export class AudioSession extends EventEmitter {
   }
 
   private async createDecoderRunForPlayback(
-    filePath: string,
-    inputHeaders: Record<string, string> | null | undefined,
-    startSeconds: number,
-    probe: AudioProbeResult,
-    plan: SampleRatePlan,
-    outputSettings: AudioOutputSettings,
-  ): Promise<DecoderRun> {
-    const request = this.createDecodeRequest(
-      filePath,
-      inputHeaders,
-      startSeconds,
-      probe.channels,
-      plan,
-      outputSettings,
-    );
-
-    return this.createFfmpegDecoderRun(request);
-  }
-
-  private async createNativeDirectAdvancedEchoSrcDecoderRunForPlayback(
     filePath: string,
     inputHeaders: Record<string, string> | null | undefined,
     startSeconds: number,
@@ -4945,6 +5886,200 @@ export class AudioSession extends EventEmitter {
       this.logger(`[AudioSession] Automix background analysis skipped: ${error instanceof Error ? error.message : String(error)}`);
     });
     return estimated;
+  }
+
+  private unavailableAutomixAnalysisV2(
+    probe: AudioProbeResult,
+    reason: string,
+  ): AutomixAnalysisV2 {
+    return {
+      version: automixAnalysisVersion,
+      fingerprint: `${probe.filePath}:${probe.durationSeconds}`,
+      status: 'unavailable',
+      durationSeconds: Math.max(0, probe.durationSeconds),
+      bpm: null,
+      bpmConfidence: null,
+      beatOffsetMs: null,
+      beatGridSeconds: [],
+      downbeatGridSeconds: [],
+      phraseBoundaries: [],
+      key: null,
+      leadingSilenceSeconds: 0,
+      trailingSilenceSeconds: 0,
+      integratedLufs: null,
+      segmentRmsDb: [],
+      energyCurve: [],
+      analyzedAt: null,
+      error: reason,
+    };
+  }
+
+  private async prepareDaemonAutomixV2(
+    request: AudioSessionPlayRequest,
+    currentProbe: AudioProbeResult,
+    backend: DaemonAudioBackend,
+    token: number,
+    sampleRatePlan: SampleRatePlan,
+  ): Promise<void> {
+    const next = request.automix?.enabled === true ? request.automix.next ?? null : null;
+    if (!next || automixV2Phase === 'off') {
+      return;
+    }
+
+    const currentIndex = this.queueSnapshot.items.findIndex((item) =>
+      (this.currentQueueItemId !== null && item.itemId === this.currentQueueItemId)
+      || item.trackId === (request.trackId ?? request.filePath)
+      || item.filePath === request.filePath,
+    );
+    let nextIndex = currentIndex + 1;
+    if (nextIndex >= this.queueSnapshot.items.length && this.queueSnapshot.repeatMode === 'all') {
+      nextIndex = 0;
+    }
+    const currentQueueItem = currentIndex >= 0 ? this.queueSnapshot.items[currentIndex] : null;
+    const nextQueueItem = nextIndex >= 0 && nextIndex < this.queueSnapshot.items.length
+      ? this.queueSnapshot.items[nextIndex]
+      : null;
+    const requestedNextTrackId = next.trackId ?? next.filePath;
+    if (!currentQueueItem || !nextQueueItem
+      || (nextQueueItem.trackId !== requestedNextTrackId && nextQueueItem.filePath !== next.filePath)) {
+      this.addOutputWarning('automix_v2_queue_identity_unavailable');
+      return;
+    }
+
+    const nextProbe = await this.resolveAutomixNextProbe(next).catch((error) => {
+      this.addOutputWarning('automix_v2_next_probe_failed');
+      this.logger(`[AudioSession] AutoMix V2 next probe failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    if (!nextProbe || this.runToken !== token) {
+      return;
+    }
+
+    const analyzeV2 = this.automixAnalyzer.analyzeV2?.bind(this.automixAnalyzer);
+    const [currentAnalysis, nextAnalysis] = analyzeV2
+      ? await Promise.all([
+          analyzeV2({
+            filePath: request.filePath,
+            probe: currentProbe,
+            headers: request.inputHeaders,
+            hint: createAutomixAnalysisHint(request.probe),
+            trackId: request.trackId,
+          }),
+          analyzeV2({
+            filePath: next.filePath,
+            probe: nextProbe,
+            headers: next.inputHeaders,
+            hint: createAutomixAnalysisHint(next.probe),
+            trackId: next.trackId,
+          }),
+        ])
+      : [
+          this.unavailableAutomixAnalysisV2(currentProbe, 'v2_analyzer_unavailable'),
+          this.unavailableAutomixAnalysisV2(nextProbe, 'v2_analyzer_unavailable'),
+        ];
+    if (this.runToken !== token) {
+      return;
+    }
+
+    const mixSampleRate = normalizeAudioSampleRate(
+      this.currentPlan?.actualDeviceSampleRate
+        ?? this.currentReadyResult?.actualDeviceSampleRate
+        ?? sampleRatePlan.requestedOutputSampleRate,
+    ) ?? 48_000;
+    const currentSourcePositionSeconds = Math.max(
+      request.startSeconds ?? 0,
+      backend.getPositionSeconds(),
+    );
+    const currentOutputFrame = Math.max(
+      0,
+      Math.round((currentSourcePositionSeconds - (request.startSeconds ?? 0)) * mixSampleRate),
+    );
+    const plan = planAutomixTransitionV2({
+      queueRevision: this.queueSnapshot.revision,
+      fromItemId: currentQueueItem.itemId,
+      fromTrackId: currentQueueItem.trackId,
+      toItemId: nextQueueItem.itemId,
+      toTrackId: nextQueueItem.trackId,
+      mixSampleRate,
+      currentOutputFrame,
+      currentSourcePositionSeconds,
+      currentAnalysis,
+      nextAnalysis,
+      currentIsDsd: isDsdCodec(currentProbe.codec) || isDsdFilePath(request.filePath),
+      nextIsDsd: isDsdCodec(nextProbe.codec) || isDsdFilePath(next.filePath),
+      playbackRate: this.currentOutputSettings?.playbackRate ?? 1,
+      maxTransitionSeconds: request.automix?.maxTransitionSeconds,
+    });
+    plan.currentReplayGainDb = this.calculateCurrentReplayGain().appliedDb;
+    plan.nextReplayGainDb = this.calculateReplayGainForTrack(next.replayGain).appliedDb;
+    this.recordPlaybackDiagnosticEvent('play_request', 'info', 'automix_v2_plan', {
+      trackId: request.trackId ?? null,
+      filePath: request.filePath,
+      details: {
+        phase: automixV2Phase,
+        planId: plan.planId,
+        mode: plan.mode,
+        fallbackReason: plan.fallbackReason,
+        queueRevision: plan.queueRevision,
+      },
+    });
+
+    this.activeAutomixV2 = {
+      state: plan.mode === 'gapless_fallback' ? 'fallback' : 'preparing',
+      plan,
+      nextFilePath: next.filePath,
+      nextInputHeaders: next.inputHeaders ?? null,
+      nextMetadata: next.metadata ?? null,
+      nextProbe,
+      nextReplayGain: next.replayGain ?? null,
+    };
+    if (!automixV2NativeEnabled) {
+      this.activeAutomixV2.state = plan.mode === 'gapless_fallback' ? 'fallback' : 'idle';
+      this.addOutputWarning(`automix_v2_shadow:${plan.mode}`);
+      return;
+    }
+
+    const bypassReason = sampleRatePlan.dsdOutputMode !== 'pcm'
+      ? 'dsd_direct'
+      : sampleRatePlan.sdmPcmToDsdActive
+        ? 'sdm_active'
+        : Math.abs((this.currentOutputSettings?.playbackRate ?? 1) - 1) > 1e-6
+          ? 'playback_rate_active'
+          : plan.mode === 'gapless_fallback'
+            ? plan.fallbackReason ?? 'gapless_fallback'
+            : null;
+    if (bypassReason) {
+      this.activeAutomixV2.state = 'fallback';
+      this.addOutputWarning(`automix_v2_bypassed:${bypassReason}`);
+      return;
+    }
+
+    try {
+      const result = await backend.prepareAutomixV2({
+        plan,
+        nextSource: normalizeAudioInputSource({
+          kind: isHttpPlaybackUrl(next.filePath) ? 'http' : 'local',
+          uri: next.filePath,
+          headers: next.inputHeaders,
+          mimeType: next.mimeType,
+        }),
+      });
+      if (this.runToken !== token || this.activeAutomixV2?.plan.planId !== plan.planId) {
+        await backend.cancelAutomixV2(plan.planId).catch(() => undefined);
+        return;
+      }
+      this.activeAutomixV2.state = result.state;
+      if (result.state === 'fallback') {
+        this.addOutputWarning(`automix_v2_fallback:${result.reason ?? 'unknown'}`);
+      }
+    } catch (error) {
+      if (this.activeAutomixV2?.plan.planId === plan.planId) {
+        this.activeAutomixV2.state = 'fallback';
+      }
+      const reason = error instanceof Error ? error.message.slice(0, 96) : 'unknown';
+      this.addOutputWarning(`automix_v2_prepare_failed:${reason}`);
+      this.logger(`[AudioSession] AutoMix V2 prepare failed closed: ${reason}`);
+    }
   }
 
   private createGaplessTransitionPlan(
@@ -5550,6 +6685,24 @@ export class AudioSession extends EventEmitter {
 
   private resolvePlanDeviceForSettings(outputSettings: AudioOutputSettings): AudioDeviceInfo | null {
     const outputMode = normalizeOutputMode(outputSettings.outputMode);
+    if (outputMode === 'exclusive') {
+      const resolvedDevice = this.resolveSelectedDevice(outputSettings);
+      if (resolvedDevice) {
+        return resolvedDevice;
+      }
+
+      if (!hasExplicitDeviceSelection(outputSettings)) {
+        if (this.platform === 'darwin') {
+          return this.resolveDefaultSharedDevice();
+        }
+        const defaultExclusiveDevice = this.deviceService.listDevices().find(
+          (device) => device.outputMode === 'exclusive' && device.isDefault,
+        );
+        if (defaultExclusiveDevice) {
+          return defaultExclusiveDevice;
+        }
+      }
+    }
     const explicitDevice = createDeviceFromOutputSettings(outputSettings);
 
     if (explicitDevice) {
@@ -5557,6 +6710,40 @@ export class AudioSession extends EventEmitter {
     }
 
     return outputMode === 'shared' ? this.resolveDefaultSharedDevice() : null;
+  }
+
+  private async resolvePlaybackDeviceForSettings(outputSettings: AudioOutputSettings): Promise<AudioDeviceInfo | null> {
+    const resolvedDevice = this.resolvePlanDeviceForSettings(outputSettings);
+    if (
+      normalizeOutputMode(outputSettings.outputMode) !== 'exclusive' ||
+      (resolvedDevice?.sampleRate && resolvedDevice.sharedDeviceSampleRate)
+    ) {
+      return resolvedDevice;
+    }
+
+    const listDevicesAsync = this.deviceService.listDevicesAsync;
+    if (!listDevicesAsync) {
+      return resolvedDevice;
+    }
+
+    try {
+      const devices = await listDevicesAsync.call(this.deviceService);
+      const selectedDevice = this.resolveSelectedDevice(outputSettings, devices);
+      if (selectedDevice) {
+        return selectedDevice;
+      }
+
+      if (!hasExplicitDeviceSelection(outputSettings)) {
+        return devices.find((device) => device.outputMode === 'exclusive' && device.isDefault) ?? resolvedDevice;
+      }
+
+      return resolvedDevice;
+    } catch (error) {
+      this.logger(`[AudioSession] exclusive device capability refresh failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`);
+      return resolvedDevice;
+    }
   }
 
   private createLocalPrepareContext(
@@ -5668,6 +6855,7 @@ export class AudioSession extends EventEmitter {
     const outputMode = normalizeOutputMode(outputSettings.outputMode);
     const fileSampleRate = normalizeAudioSampleRate(probe.fileSampleRate);
     const sourceSampleRate = fileSampleRate ?? fallbackSampleRate;
+    const preferredFfmpegResampler = this.getPreferredFfmpegResamplerEngine();
     const dsdPcmOutputSampleRate = resolveDsdPcmOutputSampleRate(probe);
     const dsdDopTransportSampleRate = shouldAttemptDsdDop(
       probe.filePath,
@@ -5678,7 +6866,7 @@ export class AudioSession extends EventEmitter {
     )
       ? resolveDsdDopTransportSampleRate(probe)
       : null;
-    const asioNativeDsdSampleRate = shouldAttemptAsioNativeDsd(
+    const asioNativeDsdSampleRate = !this.asioNativeDsdDisabledForCurrentPlayback && shouldAttemptAsioNativeDsd(
       probe.filePath,
       this.currentInputHeaders,
       probe,
@@ -5698,8 +6886,8 @@ export class AudioSession extends EventEmitter {
     const sdmQualityProfile = normalizeSdmQualityProfile(outputSettings.sdmQualityProfile);
     const sdmComputeBackend = normalizeSdmComputeBackend(outputSettings.sdmComputeBackend);
     const sdmPcmToDsdRequested = sdmMode === 'pcmToDsd';
-    const sdmExclusivePcmToDsdBlocked = outputMode === 'exclusive';
-    const sdmOutputModeSupported = false;
+    const sdmExclusivePcmToDsdBlocked = false;
+    const sdmOutputModeSupported = outputMode === 'exclusive' || outputMode === 'asio';
     const sdmTargetSupported = realtimePcmToSdmTargetRates.has(sdmTargetRate);
     const sdmChannelSupported = probe.channels >= 1 && probe.channels <= 2;
     const sdmPcmToDsdActive =
@@ -5712,52 +6900,49 @@ export class AudioSession extends EventEmitter {
     const sdmNativeSampleRate = sdmPcmToDsdActive ? resolveSdmNativeSampleRate(sdmTargetRate, sourceSampleRate) : null;
     const sdmTransportSampleRate = sdmPcmToDsdActive ? resolveSdmDopTransportSampleRate(sdmTargetRate, sourceSampleRate) : null;
     const sdmOutputFormat: SampleRatePlan['sdmOutputFormat'] = sdmPcmToDsdActive
-      ? 'dsd-native-raw'
+      ? 'dop24le'
       : null;
-    const sdmCudaBackendStatus = sdmPcmToDsdRequested && sdmComputeBackend === 'cuda'
-      ? this.resolveEchoSrcFirBackendStatus('cuda')
-      : null;
-    const sdmCudaStatus = sdmCudaBackendStatus?.cudaRuntime;
-    const sdmCudaFallbackReason =
-      sdmComputeBackend === 'cuda'
-        ? sdmCudaBackendStatus?.available === true
-          ? null
-          : sdmCudaBackendStatus?.reason ?? sdmCudaStatus?.error ?? 'src_cuda_worker_unavailable'
-        : null;
-    const sdmActualComputeBackend: AudioSdmComputeBackend | null = sdmPcmToDsdActive
-      ? sdmComputeBackend === 'cuda' && sdmCudaBackendStatus?.available === true
-        ? 'cuda'
-        : 'cpu'
-      : null;
-    const sdmOversamplingFactor = normalizeEchoSrcUpsampleFactor(sourceSampleRate, sdmTransportSampleRate);
-    const sdmOversamplingFirActive =
-      sdmPcmToDsdActive &&
-      sdmActualComputeBackend === 'cuda' &&
-      (sdmOversamplingFactor === 4 || sdmOversamplingFactor === 8);
+    // The native host is the authority for the active compute backend. Keep
+    // the planning phase unresolved until device.configure returns telemetry.
+    const sdmActualComputeBackend: AudioSdmComputeBackend | null = null;
     const sdmOversamplingPlan = sdmPcmToDsdActive
       ? resolveSdmOversamplingPlan(
         sdmQualityProfile,
         sourceSampleRate,
         sdmTransportSampleRate,
-        sdmOversamplingFirActive ? 'echo-fir' : 'soxr',
+        'echo-fir',
         {
           filterProfile1x: outputSettings.sdmOversamplingFilterProfile1x,
           filterProfileNx: outputSettings.sdmOversamplingFilterProfileNx,
         },
       )
       : null;
+    const sdmOversamplingFilterProfile = sdmOversamplingPlan
+      ? resolveSdmOversamplingEffectiveFilterProfile(sdmOversamplingPlan)
+      : normalizeEchoSrcFilterProfile(outputSettings.sdmOversamplingFilterProfile1x ?? 'sinc-long');
+    const sdmOversamplingFilterProfile1x = sdmOversamplingPlan?.filterProfile1x
+      ?? normalizeEchoSrcFilterProfile(outputSettings.sdmOversamplingFilterProfile1x ?? 'sinc-long');
+    const sdmOversamplingFilterProfileNx = sdmOversamplingPlan?.filterProfileNx
+      ?? normalizeEchoSrcFilterProfile(outputSettings.sdmOversamplingFilterProfileNx ?? 'poly-sinc-hb');
+    const sdmOversamplingFirActive = sdmPcmToDsdActive &&
+      createEchoSrcFirStagePlans(
+        sdmOversamplingFilterProfile,
+        sourceSampleRate,
+        sdmTransportSampleRate ?? sourceSampleRate,
+      ).length > 0;
     const sdmOversamplingRuntime = sdmPcmToDsdActive
       ? createSdmOversamplingRuntimeStatus(sdmOversamplingPlan, {
-        state: sdmOversamplingFirActive ? 'planned' : 'active',
-        requestedBackend: sdmOversamplingFirActive ? 'cuda' : 'soxr',
-        activeBackend: sdmOversamplingFirActive ? null : 'soxr',
+        state: sdmComputeBackend === 'cuda' ? 'planned' : 'active',
+        requestedBackend: sdmComputeBackend,
+        activeBackend: sdmComputeBackend === 'cuda' ? null : 'cpu',
+        fallbackReason: null,
       })
       : null;
     const sdmModulatorProfile = sdmPcmToDsdActive
       ? resolveSdmModulatorProfile(sdmQualityProfile)
       : null;
     const sdmBlockPlan = sdmPcmToDsdActive && sdmActualComputeBackend
-      ? resolveSdmBlockPlan(sdmActualComputeBackend, sdmTargetRate, sdmQualityProfile, probe.channels)
+      ? resolveSdmBlockPlan(sdmTargetRate)
       : null;
     const sdmNotRoutedReason = (() => {
       if (!sdmPcmToDsdRequested) {
@@ -5786,28 +6971,21 @@ export class AudioSession extends EventEmitter {
         ? null
         : sdmPcmToDsdActive
           ? (() => {
-              let state: AudioSdmRuntimeStatus['state'];
-              if (sdmActualComputeBackend === 'cuda') {
-                state = 'active';
-              } else if (sdmComputeBackend === 'cuda') {
-                state = 'fallback';
-              } else {
-                state = 'active';
-              }
+              const state: AudioSdmRuntimeStatus['state'] = 'active';
               return createSdmRuntimeStatus(state, {
                 targetRate: sdmTargetRate,
                 nativeSampleRate: sdmNativeSampleRate,
                 transportSampleRate: sdmTransportSampleRate,
                 modulatorProfile: sdmModulatorProfile,
                 requestedBackend: sdmComputeBackend,
-                activeBackend: sdmActualComputeBackend,
+                activeBackend: sdmComputeBackend === 'cuda' ? null : 'cpu',
                 oversamplingPlan: sdmOversamplingPlan,
                 oversamplingRuntime: sdmOversamplingRuntime,
                 processingMode: sdmBlockPlan?.processingMode ?? null,
                 batchFrames: sdmBlockPlan?.targetBatchFrames ?? null,
                 maxBlockFrames: sdmBlockPlan?.maxBlockFrames ?? null,
-                cudaActive: sdmActualComputeBackend === 'cuda',
-                fallbackReason: sdmActualComputeBackend === 'cuda' ? null : sdmCudaFallbackReason,
+                cudaActive: false,
+                fallbackReason: null,
               });
             })()
           : createSdmRuntimeStatus('unavailable', {
@@ -5823,6 +7001,7 @@ export class AudioSession extends EventEmitter {
     const echoSrcMode = normalizeEchoSrcMode(outputSettings.echoSrcMode);
     const echoSrcQualityProfile = normalizeEchoSrcQualityProfile(outputSettings.echoSrcQualityProfile);
     const echoSrcAdvancedModeEnabled = outputSettings.echoSrcAdvancedModeEnabled === true;
+    const echoSrcFirModeEnabled = echoSrcMode !== 'compatibility48' && echoSrcAdvancedModeEnabled;
     const echoSrcFilterSlot = resolveEchoSrcFilterSlot(sourceSampleRate);
     const echoSrcFilterProfile1x = normalizeEchoSrcFilterProfile(outputSettings.echoSrcFilterProfile1x ?? outputSettings.echoSrcFilterProfile);
     const echoSrcFilterProfileNx = normalizeEchoSrcFilterProfile(outputSettings.echoSrcFilterProfileNx ?? 'poly-sinc-hb');
@@ -5832,7 +7011,7 @@ export class AudioSession extends EventEmitter {
       echoSrcFilterProfileNx,
     });
     const echoSrcComputeBackend = normalizeEchoSrcComputeBackend(outputSettings.echoSrcComputeBackend);
-    const echoSrcOutputModeSupported = outputMode === 'exclusive';
+    const echoSrcOutputModeSupported = outputMode === 'exclusive' || outputMode === 'asio';
     const echoSrcTargetSampleRate =
       echoSrcMode !== 'off' &&
       echoSrcOutputModeSupported &&
@@ -5842,20 +7021,12 @@ export class AudioSession extends EventEmitter {
         ? resolveEchoSrcTargetSampleRate(echoSrcMode, sourceSampleRate)
         : null;
     const echoSrcActive = echoSrcTargetSampleRate !== null && echoSrcTargetSampleRate !== sourceOutputSampleRate;
-    const echoSrcFirBackendStatus = echoSrcAdvancedModeEnabled && echoSrcComputeBackend === 'cuda'
-      ? resolveEchoSrcFirBackendStatus('cuda')
-      : null;
-    const echoSrcCudaStatus = echoSrcFirBackendStatus?.cudaRuntime;
     const echoSrcCudaActive = false;
     const echoSrcRequestedBackend = echoSrcMode === 'off'
       ? null
-      : echoSrcAdvancedModeEnabled
+      : echoSrcFirModeEnabled
         ? echoSrcComputeBackend
-        : 'soxr';
-    const echoSrcCudaFallbackReason =
-      echoSrcFirBackendStatus?.available === true
-        ? 'src_cuda_worker_ready_not_routed'
-        : echoSrcFirBackendStatus?.reason ?? echoSrcCudaStatus?.error ?? 'src_cuda_worker_unavailable';
+        : preferredFfmpegResampler;
     const echoSrcRuntime: AudioEchoSrcRuntimeStatus | null =
       echoSrcMode === 'off'
         ? null
@@ -5863,41 +7034,31 @@ export class AudioSession extends EventEmitter {
           ? createEchoSrcRuntimeStatus('bypassed', {
             sourceSampleRate,
             targetSampleRate: echoSrcTargetSampleRate,
-            filterProfile: echoSrcAdvancedModeEnabled ? echoSrcFilterProfile : null,
-            filterSlot: echoSrcAdvancedModeEnabled ? echoSrcFilterSlot : null,
+            filterProfile: echoSrcFirModeEnabled ? echoSrcFilterProfile : null,
+            filterSlot: echoSrcFirModeEnabled ? echoSrcFilterSlot : null,
             qualityProfile: echoSrcQualityProfile,
             requestedBackend: echoSrcRequestedBackend,
             activeBackend: null,
           })
-          : !echoSrcAdvancedModeEnabled
+          : !echoSrcFirModeEnabled
             ? createEchoSrcRuntimeStatus('active', {
               sourceSampleRate,
               targetSampleRate: echoSrcTargetSampleRate,
               filterProfile: null,
               filterSlot: null,
               qualityProfile: echoSrcQualityProfile,
-              requestedBackend: 'soxr',
-              activeBackend: 'soxr',
+              requestedBackend: preferredFfmpegResampler,
+              activeBackend: preferredFfmpegResampler,
             })
-            : echoSrcComputeBackend === 'cuda' && echoSrcFirBackendStatus?.available !== true
-              ? createEchoSrcRuntimeStatus('fallback', {
-                sourceSampleRate,
-                targetSampleRate: echoSrcTargetSampleRate,
-                filterProfile: echoSrcFilterProfile,
-                filterSlot: echoSrcFilterSlot,
-                qualityProfile: echoSrcQualityProfile,
-                requestedBackend: 'cuda',
-                activeBackend: 'soxr',
-                fallbackReason: echoSrcCudaFallbackReason,
-              })
-              : createEchoSrcRuntimeStatus('planned', {
+            : createEchoSrcRuntimeStatus(echoSrcComputeBackend === 'cuda' ? 'planned' : 'active', {
                 sourceSampleRate,
                 targetSampleRate: echoSrcTargetSampleRate,
                 filterProfile: echoSrcFilterProfile,
                 filterSlot: echoSrcFilterSlot,
                 qualityProfile: echoSrcQualityProfile,
                 requestedBackend: echoSrcComputeBackend,
-                activeBackend: null,
+                activeBackend: echoSrcComputeBackend === 'cuda' ? null : 'cpu',
+                fallbackReason: null,
               });
     const residentOutputSampleRate =
       outputMode !== 'shared' ? normalizeAudioSampleRate(planOptions.residentOutputSampleRate) : null;
@@ -5909,10 +7070,7 @@ export class AudioSession extends EventEmitter {
     const sharedRequestedSampleRate =
       sharedDeviceSampleRate ?? currentReadySampleRate ?? fallbackSharedMixSampleRate;
     const cappedSharedRequestedSampleRate = capSharedOutputSampleRate(sharedRequestedSampleRate);
-    const sdmOutputSampleRate =
-      sdmOutputFormat === 'dsd-native-raw'
-        ? sdmNativeSampleRate
-        : sdmTransportSampleRate;
+    const sdmOutputSampleRate = sdmTransportSampleRate;
     const requestedOutputSampleRate =
       residentOutputSampleRate ??
       (outputMode === 'shared'
@@ -5972,17 +7130,6 @@ export class AudioSession extends EventEmitter {
               : `sdm_oversampling_soxr:${sdmOversamplingPlan.sourceSampleRate}->${sdmOversamplingPlan.targetSampleRate}:precision=${sdmOversamplingPlan.precision}`,
           );
         }
-        if (sdmOutputFormat === 'dsd-native-raw') {
-          warnings.push(`sdm_native_dsd_active:${sdmNativeSampleRate}`);
-        }
-        if (sdmComputeBackend === 'cuda' && sdmActualComputeBackend === 'cuda') {
-          warnings.push(`sdm_cuda_worker_active:${sdmModulatorProfile?.id ?? 'unknown'}`);
-          if (sdmBlockPlan) {
-            warnings.push(`sdm_cuda_batch:${sdmBlockPlan.processingMode}:batch=${sdmBlockPlan.targetBatchFrames}:block=${sdmBlockPlan.maxBlockFrames}`);
-          }
-        } else if (sdmComputeBackend === 'cuda') {
-          warnings.push(`sdm_cuda_backend_unavailable:${sdmCudaFallbackReason ?? 'src_cuda_worker_unavailable'}:cpu_fallback`);
-        }
       } else if (sdmNotRoutedReason) {
         warnings.push(sdmNotRoutedReason);
       }
@@ -6000,13 +7147,6 @@ export class AudioSession extends EventEmitter {
       warnings.push('echo_src_bypassed_for_sdm');
     } else if (echoSrcMode !== 'off' && echoSrcActive) {
       warnings.push(`echo_src_active:${sourceSampleRate}->${echoSrcTargetSampleRate}`);
-      if (echoSrcAdvancedModeEnabled && echoSrcComputeBackend === 'cuda' && !echoSrcCudaActive) {
-        warnings.push(
-          echoSrcCudaStatus?.available === true
-            ? `echo_src_cuda_backend_unavailable:${echoSrcFilterProfile}:${echoSrcCudaFallbackReason}`
-            : `echo_src_cuda_unavailable:${echoSrcCudaFallbackReason}`,
-        );
-      }
     }
 
     if (
@@ -6088,13 +7228,13 @@ export class AudioSession extends EventEmitter {
       echoSrcMode,
       echoSrcQualityProfile,
       echoSrcAdvancedModeEnabled,
+      echoSrcFirActive: echoSrcActive && echoSrcFirModeEnabled,
       echoSrcFilterProfile,
       echoSrcFilterProfile1x,
       echoSrcFilterProfileNx,
       echoSrcFilterSlot,
       echoSrcComputeBackend,
       echoSrcCudaActive,
-      echoSrcCudaStatus,
       echoSrcTargetSampleRate,
       echoSrcActive,
       echoSrcRuntime,
@@ -6102,13 +7242,16 @@ export class AudioSession extends EventEmitter {
       sdmOutputFormat,
       sdmNativeSampleRate,
       sdmTransportSampleRate,
+      sdmComputeBackend,
       sdmActualComputeBackend,
       sdmModulatorProfile,
       sdmProcessingMode: sdmBlockPlan?.processingMode ?? null,
       sdmBatchFrames: sdmBlockPlan?.targetBatchFrames ?? null,
       sdmMaxBlockFrames: sdmBlockPlan?.maxBlockFrames ?? null,
+      sdmOversamplingFilterProfile,
+      sdmOversamplingFilterProfile1x,
+      sdmOversamplingFilterProfileNx,
       sdmOversamplingFirActive,
-      sdmCudaStatus,
       sdmRuntime,
       bitPerfectCandidate,
       sampleRateMismatch,
@@ -6121,11 +7264,46 @@ export class AudioSession extends EventEmitter {
       return;
     }
 
-    this.currentReadyResult = ready;
     if (!isResidentOutputMode(this.currentOutputSettings.outputMode)) {
       this.currentResidentOutputSampleRate = null;
     }
     const readyDevice = ready.device;
+    const requestedOutputMode = normalizeOutputMode(this.currentOutputSettings.outputMode);
+    const readyBackend = typeof readyDevice.backend === 'string' ? readyDevice.backend.toLowerCase() : '';
+    const readyBackendImpl = typeof readyDevice.backendImpl === 'string' ? readyDevice.backendImpl.toLowerCase() : '';
+    const readyBackendIdentity = `${readyBackend} ${readyBackendImpl}`;
+    if (requestedOutputMode === 'exclusive') {
+      if (readyDevice.exclusive !== true || !readyBackendIdentity.includes('exclusive')) {
+        throw new Error(
+          `native_output_contract_mismatch: requested=exclusive actualExclusive=${String(readyDevice.exclusive)} ` +
+          `backend=${readyDevice.backend ?? 'unknown'} backendImpl=${readyDevice.backendImpl ?? 'unknown'}`,
+        );
+      }
+    } else if (requestedOutputMode === 'asio') {
+      if (!readyBackendIdentity.includes('asio')) {
+        throw new Error(
+          `native_output_contract_mismatch: requested=asio backend=${readyDevice.backend ?? 'unknown'} ` +
+          `backendImpl=${readyDevice.backendImpl ?? 'unknown'}`,
+        );
+      }
+    } else if (requestedOutputMode === 'shared' && readyDevice.exclusive === true) {
+      throw new Error(
+        `native_output_contract_mismatch: requested=shared actualExclusive=true ` +
+        `backend=${readyDevice.backend ?? 'unknown'} backendImpl=${readyDevice.backendImpl ?? 'unknown'}`,
+      );
+    }
+    const requestedSharedBackend = normalizeSharedBackend(this.currentOutputSettings.sharedBackend);
+    if (
+      requestedOutputMode === 'shared' &&
+      requestedSharedBackend === 'directsound' &&
+      !readyBackendIdentity.includes('directsound')
+    ) {
+      throw new Error(
+        `native_output_contract_mismatch: requested=directsound actualBackend=${readyDevice.backend ?? 'unknown'} ` +
+        `backendImpl=${readyDevice.backendImpl ?? 'unknown'}`,
+      );
+    }
+    this.currentReadyResult = ready;
     this.currentOutputBackend = typeof readyDevice.backend === 'string' ? readyDevice.backend : null;
     this.currentOutputBackendImpl = typeof readyDevice.backendImpl === 'string' ? readyDevice.backendImpl : null;
     this.currentActiveDsdOutputMode = this.currentPlan?.dsdOutputMode !== 'pcm' ? this.currentPlan?.dsdOutputMode ?? null : null;
@@ -6133,7 +7311,7 @@ export class AudioSession extends EventEmitter {
     this.currentDsdTransportSampleRate = this.currentPlan?.dsdTransportSampleRate ?? null;
     this.currentOutputDeviceType = typeof readyDevice.deviceType === 'string' ? readyDevice.deviceType : null;
     this.currentOutputDeviceName = typeof readyDevice.deviceName === 'string' ? readyDevice.deviceName : null;
-    this.currentBridgeOutputMode = normalizeOutputMode(this.currentOutputSettings.outputMode);
+    this.currentBridgeOutputMode = requestedOutputMode;
     this.currentBridgeSharedBackend =
       this.currentBridgeOutputMode === 'shared'
         ? this.currentOutputBackend === 'directsound-shared'
@@ -6235,7 +7413,13 @@ export class AudioSession extends EventEmitter {
   }
 
   private assertAsioSampleRateUsable(): void {
-    // ASIO support has been removed; this check is no longer needed.
+    const plan = this.currentPlan;
+    if (plan?.outputMode === 'asio' && plan.actualDeviceSampleRate !== null &&
+        plan.actualDeviceSampleRate !== plan.requestedOutputSampleRate) {
+      throw new Error(
+        `asio_output_sample_rate_mismatch:${plan.requestedOutputSampleRate}->${plan.actualDeviceSampleRate}`,
+      );
+    }
   }
 
   private assertReadySampleRateConsistent(): void {
@@ -6322,7 +7506,10 @@ export class AudioSession extends EventEmitter {
     );
   }
 
-  private resolveSelectedDevice(outputSettings: AudioOutputSettings): AudioDeviceInfo | null {
+  private resolveSelectedDevice(
+    outputSettings: AudioOutputSettings,
+    availableDevices: AudioDeviceInfo[] = this.deviceService.listDevices(),
+  ): AudioDeviceInfo | null {
     const deviceIndex = Number(outputSettings.deviceIndex);
     const deviceName = outputSettings.deviceName;
 
@@ -6330,10 +7517,13 @@ export class AudioSession extends EventEmitter {
       return null;
     }
 
-    const outputMode = normalizeOutputMode(outputSettings.outputMode);
-    const expectedDeviceMode = 'shared';
+    const requestedMode = normalizeOutputMode(outputSettings.outputMode);
+    const expectedDeviceMode: AudioDeviceInfo['outputMode'] = requestedMode === 'system'
+      || (requestedMode === 'exclusive' && this.platform === 'darwin')
+      ? 'shared'
+      : requestedMode;
 
-    const devices = this.deviceService.listDevices().filter((device) => device.outputMode === expectedDeviceMode);
+    const devices = availableDevices.filter((device) => device.outputMode === expectedDeviceMode);
 
     if (deviceName) {
       const nameMatch = devices.find((device) => device.name === deviceName);
@@ -6356,6 +7546,16 @@ export class AudioSession extends EventEmitter {
   }
 
   private createBridgeStartCandidates(outputSettings: AudioOutputSettings): Array<AudioDeviceInfo | null> {
+    const outputMode = normalizeOutputMode(outputSettings.outputMode);
+    if (outputMode === 'exclusive' || outputMode === 'asio') {
+      if (this.currentDevice?.outputMode === outputMode) {
+        return isDefaultDeviceFallbackAllowed(outputSettings) ? [this.currentDevice, null] : [this.currentDevice];
+      }
+      const resolvedDevice = this.resolveSelectedDevice(outputSettings);
+      if (resolvedDevice) {
+        return isDefaultDeviceFallbackAllowed(outputSettings) ? [resolvedDevice, null] : [resolvedDevice];
+      }
+    }
     const explicitDevice = createDeviceFromOutputSettings(outputSettings);
 
     if (explicitDevice) {
@@ -6438,6 +7638,15 @@ export class AudioSession extends EventEmitter {
       throw new Error('audio output settings unavailable');
     }
 
+    // This is the factory boundary for every one-shot PCM, DoP, and native
+    // DSD host. Enforce single output ownership here so future callers cannot
+    // accidentally overlap a resident daemon with a raw hardware bridge.
+    if (this.activeDaemonBackend || this.daemonStopInProgress) {
+      await this.stopActiveDaemonBackend('one-shot-output-takeover');
+    }
+    await this.stopAudioDaemonForPlayback();
+    this.assertCurrentRun(token);
+
     const candidates = this.createBridgeStartCandidates(this.currentOutputSettings);
     let lastError: Error | null = null;
     let previousBridgeStopped = false;
@@ -6491,9 +7700,10 @@ export class AudioSession extends EventEmitter {
           ? httpStreamingSharedProfile
           : null;
       const isDsdDopOutput = this.currentPlan.dsdOutputMode === 'dop';
-      const isAsioNativeDsdOutput = this.currentPlan.dsdOutputMode === 'native';
       const isSdmPcmToDsdOutput = this.currentPlan.sdmPcmToDsdActive === true;
       const isSdmNativeDsdOutput = this.currentPlan.sdmOutputFormat === 'dsd-native-raw';
+      const isSourceNativeDsdOutput = this.currentPlan.dsdOutputMode === 'native';
+      const isNativeDsdOutput = isSourceNativeDsdOutput || isSdmNativeDsdOutput;
       const residentReuseAllowed = canReuseResidentOutputBridge(outputMode);
       const echoSrcUltraOutputProfileOverride =
         this.currentPlan.echoSrcMode === 'family8x' && this.currentPlan.echoSrcActive
@@ -6503,7 +7713,10 @@ export class AudioSession extends EventEmitter {
         outputMode !== 'shared' && this.currentPlan.dsdOutputMode === 'pcm'
           ? this.currentOutputAdaptiveProfile
           : null;
-      const stabilityOutputProfile = adaptiveOutputProfile ?? echoSrcUltraOutputProfileOverride;
+      const stabilityOutputProfile =
+        adaptiveOutputProfile ??
+        echoSrcUltraOutputProfileOverride ??
+        (outputMode === 'exclusive' ? nativeExclusiveFeedProfile : null);
 
       const startOptions = this.createNativeOutputStartOptions({
         requestedOutputSampleRate: this.currentPlan.requestedOutputSampleRate,
@@ -6515,8 +7728,9 @@ export class AudioSession extends EventEmitter {
         deviceName: candidate?.name ?? (usingDefaultSharedFallback ? undefined : this.currentOutputSettings.deviceName),
         sharedBackend,
         exclusive: outputMode === 'exclusive',
+        asio: outputMode === 'asio',
         useMiniaudioOutput:
-          isDsdDopOutput || isSdmPcmToDsdOutput || isSdmNativeDsdOutput
+          isDsdDopOutput || isSdmPcmToDsdOutput || isNativeDsdOutput
             ? false
             : useMiniaudioOutputForHost,
         latencyProfile: echoSrcUltraOutputProfileOverride ? 'stable' : this.currentOutputSettings.latencyProfile,
@@ -6533,15 +7747,17 @@ export class AudioSession extends EventEmitter {
         playbackRate: this.currentOutputSettings.playbackRate,
         playbackSpeedMode: this.currentOutputSettings.playbackSpeedMode,
         durationSeconds: probe.durationSeconds,
-        inputFormat: isSdmNativeDsdOutput
+        inputFormat: isNativeDsdOutput
           ? 'dsd-native-raw'
           : isDsdDopOutput || isSdmPcmToDsdOutput
             ? 'dop24le'
             : 'pcm-f32le',
-        readyTimeoutMs: isSdmNativeDsdOutput ? sdmNativeOutputReadyTimeoutMs : undefined,
-        nativeDsdSampleRate: isSdmNativeDsdOutput
-          ? this.currentPlan.sdmNativeSampleRate
-          : null,
+        readyTimeoutMs: isNativeDsdOutput ? sdmNativeOutputReadyTimeoutMs : undefined,
+        nativeDsdSampleRate: isSourceNativeDsdOutput
+          ? this.currentPlan.dsdNativeSampleRate
+          : isSdmNativeDsdOutput
+            ? this.currentPlan.sdmNativeSampleRate
+            : null,
       });
       const reusableBridge = this.bridge;
       if (!useDirectSoundBackend && residentReuseAllowed && reusableBridge?.canReuseFor?.(startOptions) && this.currentReadyResult) {
@@ -6630,6 +7846,7 @@ export class AudioSession extends EventEmitter {
           this.assertCurrentRun(token);
           if (this.currentPlan?.dsdOutputMode === 'native' && this.currentOutputSettings.dsdOutputMode === 'dop') {
             this.addOutputWarning(`native_dsd_fell_back_to_dop:${lastError.message.slice(0, 96)}`);
+            this.asioNativeDsdDisabledForCurrentPlayback = true;
             this.currentOutputSettings = {
               ...this.currentOutputSettings,
             };
@@ -6661,6 +7878,11 @@ export class AudioSession extends EventEmitter {
             this.addOutputWarning('device_initialize_timeout');
             this.logger('[AudioSession] device initialize timed out; skipping retry on same device');
             candidates.length = 0;
+            break;
+          }
+          if (outputMode === 'exclusive' && isUnsupportedExclusiveFormatError(lastError)) {
+            this.addOutputWarning('exclusive_output_format_unsupported');
+            this.logger('[AudioSession] exclusive format is unsupported; skipping retries that only reopen the same format');
             break;
           }
           if (
@@ -6829,6 +8051,9 @@ export class AudioSession extends EventEmitter {
         requestedOutputSampleRate: this.currentPlan.requestedOutputSampleRate,
         channels: probe.channels,
       });
+      if (fallbackSettings.automaticOutputEnabled === true) {
+        this.automaticOutputStage = 'safe-shared';
+      }
       return {
         bridge,
         plan: this.currentPlan,
@@ -6845,6 +8070,86 @@ export class AudioSession extends EventEmitter {
       const fallbackError = error instanceof Error ? error : new Error(String(error));
       this.logger(`[AudioSession] safe shared fallback failed: ${fallbackError.message}`);
       await this.stopBridgeGracefully(bridge, 'safe-shared-fallback-failed');
+      if (
+        this.currentOutputSettings.automaticOutputEnabled === true &&
+        this.platform === 'win32' &&
+        isAutomaticDirectSoundFallbackError(fallbackError)
+      ) {
+        return this.startAutomaticDirectSoundFallbackForProbe(probe, token, startSeconds, fallbackError);
+      }
+      if (this.currentOutputSettings.automaticOutputEnabled === true) {
+        this.automaticOutputStage = 'failed';
+      }
+      throw fallbackError;
+    }
+  }
+
+  private async startAutomaticDirectSoundFallbackForProbe(
+    probe: AudioProbeResult,
+    token: number,
+    startSeconds: number,
+    cause: Error,
+  ): Promise<BridgeStartResult> {
+    if (!this.currentOutputSettings) {
+      throw new Error('audio output settings unavailable');
+    }
+
+    const fallbackSettings = createAutomaticDirectSoundFallbackSettings(this.currentOutputSettings);
+    this.assertCurrentRun(token);
+    this.currentOutputSettings = fallbackSettings;
+    this.currentUseMiniaudioOutputRequested = false;
+    this.currentDevice = null;
+    this.currentPlan = this.createSampleRatePlan(probe, fallbackSettings, null);
+    this.sharedStabilityTier = 'emergency';
+    this.addOutputWarning('automatic_output_trying_directsound');
+    this.logger(`[AudioSession] automatic WASAPI recovery failed; trying DirectSound compatibility output: ${cause.message}`);
+    this.clock.reset(startSeconds, this.currentPlan.requestedOutputSampleRate);
+
+    const bridge = this.createBridge();
+    this.bridge = bridge;
+    this.attachBridgeEvents(bridge, token);
+
+    try {
+      const ready = await bridge.start(this.createNativeOutputStartOptions({
+        requestedOutputSampleRate: this.currentPlan.requestedOutputSampleRate,
+        sharedMixSampleRate: this.currentPlan.requestedOutputSampleRate,
+        channels: probe.channels,
+        sharedBackend: 'directsound',
+        exclusive: false,
+        useMiniaudioOutput: false,
+        latencyProfile: 'stable',
+        volume: fallbackSettings.volume,
+        startSeconds,
+        playbackRate: fallbackSettings.playbackRate,
+        playbackSpeedMode: fallbackSettings.playbackSpeedMode,
+        durationSeconds: probe.durationSeconds,
+      }));
+      this.assertCurrentRun(token);
+      this.automaticOutputStage = 'directsound';
+      this.addOutputWarning('automatic_output_recovered_directsound');
+      this.reportRecoverableAudioError(cause, 'automatic-directsound-fallback', {
+        recovered: true,
+        requestedOutputSampleRate: this.currentPlan.requestedOutputSampleRate,
+        channels: probe.channels,
+      });
+      return {
+        bridge,
+        plan: this.currentPlan,
+        ready,
+        hostReused: false,
+        hostRestartReason: 'automatic_directsound_fallback',
+      };
+    } catch (error) {
+      if (isAudioSessionRunCancelledError(error)) {
+        await this.stopBridgeGracefully(bridge, 'automatic-directsound-fallback-superseded');
+        throw error;
+      }
+
+      const fallbackError = error instanceof Error ? error : new Error(String(error));
+      this.logger(`[AudioSession] automatic DirectSound fallback failed: ${fallbackError.message}`);
+      await this.stopBridgeGracefully(bridge, 'automatic-directsound-fallback-failed');
+      this.automaticOutputStage = 'system-required';
+      this.addOutputWarning('automatic_output_system_audio_required');
       throw fallbackError;
     }
   }
@@ -7337,109 +8642,16 @@ export class AudioSession extends EventEmitter {
     this.decoderPipelineCleanup?.();
     run.ready?.catch(() => undefined);
     const volume = this.currentOutputSettings?.volume ?? this.outputSettings.volume;
-    const sdmPcmToDsdActive = this.currentPlan?.sdmPcmToDsdActive === true;
     const volumeRouting = resolveOutputVolumeRouting(this.bridge, this.currentPlan, volume);
     const replayGainCalculation = this.calculateCurrentReplayGain();
     markPlaybackBreadcrumb('AudioSession.startDecoderRun:createTransforms:start');
     const replayGainTransform = new PcmVolumeTransform(run.replayGainAppliedInStream === true ? 1 : this.replayGainLinearGain(replayGainCalculation), 16);
     const livePcmResampler = this.createLivePcmResamplerTransform();
-    const echoSrcFirTransform = this.createEchoSrcFirTransform();
-    const sdmOversamplingFirTransform = this.createSdmOversamplingFirTransform();
     const gainTransform = new PcmVolumeTransform(volumeRouting.softwareGain);
     const speedTransform = new PcmPlaybackRateTransform(
       this.currentProbe?.channels ?? 2,
       this.currentOutputSettings?.playbackRate ?? this.outputSettings.playbackRate,
     );
-    const pcmDitherMode = normalizePcmDitherMode(this.currentOutputSettings?.pcmDitherMode ?? this.outputSettings.pcmDitherMode);
-    const pcmDitherRuntimeStatus = this.currentActiveDsdOutputMode === 'dop' || this.currentActiveDsdOutputMode === 'native'
-      ? { active: false, targetBitDepth: null, reason: 'dsd_direct_bypass' }
-      : sdmPcmToDsdActive
-        ? { active: false, targetBitDepth: null, reason: 'sdm_direct_bypass' }
-        : resolvePcmDitherRuntimeStatus(pcmDitherMode, getReadyOutputFormat(this.currentReadyResult));
-    const pcmDitherTransform = pcmDitherRuntimeStatus.active && pcmDitherRuntimeStatus.targetBitDepth
-      ? new PcmDitherTransform(pcmDitherMode, pcmDitherRuntimeStatus.targetBitDepth, this.currentPlan?.outputChannels ?? this.currentProbe?.channels ?? 2)
-      : null;
-    const sdmBackend = this.currentPlan?.sdmActualComputeBackend ?? 'cpu';
-    const sdmWorkerClient = sdmPcmToDsdActive && sdmBackend === 'cuda'
-      ? this.createSdmCudaWorkerClient()
-      : null;
-    this.sdmCudaWorkerClient?.dispose?.();
-    this.sdmCudaWorkerClient = sdmWorkerClient;
-    const handleSdmMetrics = (metrics: PcmToDsdDoPTransformMetrics): void => {
-      const currentPlan = this.currentPlan;
-      const runtime = currentPlan?.sdmRuntime;
-      if (!currentPlan || !runtime) {
-        return;
-      }
-
-      this.currentPlan = {
-        ...currentPlan,
-        sdmActualComputeBackend: metrics.backend,
-        sdmRuntime: createSdmRuntimeStatus(metrics.backend === 'cuda' ? 'active' : runtime.state, {
-          targetRate: runtime.targetRate,
-          nativeSampleRate: runtime.nativeSampleRate,
-          transportSampleRate: runtime.transportSampleRate,
-          modulatorProfile: runtime.modulatorProfile,
-          requestedBackend: runtime.requestedBackend,
-          activeBackend: metrics.backend,
-          oversamplingPlan: getSdmOversamplingPlanFromRuntime(runtime),
-          oversamplingRuntime: runtime.oversamplingRuntime,
-          processingMode: runtime.processingMode,
-          batchFrames: runtime.batchFrames,
-          maxBlockFrames: runtime.maxBlockFrames,
-          cudaActive: metrics.backend === 'cuda',
-          fallbackReason: metrics.backend === 'cuda' ? null : runtime.fallbackReason,
-          metrics,
-        }),
-      };
-      this.emitNativeTelemetryStatus();
-    };
-    const pcmToDsdTransform = sdmPcmToDsdActive
-      ? new PcmToDsdDoPTransform({
-        channels: this.currentPlan?.outputChannels ?? this.currentProbe?.channels ?? 2,
-        qualityProfile: normalizeSdmQualityProfile(this.currentOutputSettings?.sdmQualityProfile ?? this.outputSettings.sdmQualityProfile),
-        outputFormat: this.currentPlan?.sdmOutputFormat ?? 'dop24le',
-        backend: sdmBackend,
-        workerClient: sdmWorkerClient ?? undefined,
-        fallbackToCpuOnError: sdmBackend === 'cuda',
-        targetBatchFrames: this.currentPlan?.sdmBatchFrames ?? undefined,
-        maxBlockFrames: this.currentPlan?.sdmMaxBlockFrames ?? undefined,
-        sourceSampleRate: this.currentPlan?.decoderOutputSampleRate ?? this.currentProbe?.fileSampleRate ?? null,
-        onMetrics: handleSdmMetrics,
-        onBackendFallback: (reason) => {
-          const currentPlan = this.currentPlan;
-          const runtime = currentPlan?.sdmRuntime;
-          if (!currentPlan || !runtime) {
-            return;
-          }
-          this.currentPlan = {
-            ...currentPlan,
-            sdmActualComputeBackend: 'cpu',
-            sdmRuntime: createSdmRuntimeStatus('fallback', {
-              targetRate: runtime.targetRate,
-              nativeSampleRate: runtime.nativeSampleRate,
-              transportSampleRate: runtime.transportSampleRate,
-              modulatorProfile: runtime.modulatorProfile,
-              requestedBackend: 'cuda',
-              activeBackend: 'cpu',
-              oversamplingPlan: getSdmOversamplingPlanFromRuntime(runtime),
-              oversamplingRuntime: runtime.oversamplingRuntime,
-              processingMode: runtime.processingMode,
-              batchFrames: runtime.batchFrames,
-              maxBlockFrames: runtime.maxBlockFrames,
-              fallbackReason: reason,
-            }),
-            warnings: [
-              ...currentPlan.warnings.filter((warning) => !warning.startsWith('sdm_cuda_runtime_fallback:')),
-              `sdm_cuda_runtime_fallback:${reason}`,
-            ],
-          };
-          this.addOutputWarning(`sdm_cuda_runtime_fallback:${reason}`);
-          this.logger(`[AudioSession] SDM CUDA worker fell back to CPU SDM: ${reason}`);
-          this.emitStatus();
-        },
-      })
-      : null;
     const levelMeterTransform = new PcmLevelMeterTransform(
       (snapshot) => this.handleLevelSnapshot(snapshot),
       levelMeterVisualIntervalMs,
@@ -7479,49 +8691,29 @@ export class AudioSession extends EventEmitter {
     };
     const streamErrorHandler = handlePipelineError('decoder_stream_error');
     const resamplerErrorHandler = handlePipelineError('live_pcm_resampler_error');
-    const echoSrcFirErrorHandler = handlePipelineError('echo_src_fir_error');
-    const sdmOversamplingFirErrorHandler = handlePipelineError('sdm_oversampling_fir_error');
     const gainErrorHandler = handlePipelineError('pcm_gain_error');
     const replayGainErrorHandler = handlePipelineError('pcm_replay_gain_error');
     const speedErrorHandler = handlePipelineError('pcm_speed_error');
     const levelErrorHandler = handlePipelineError('pcm_level_meter_error');
-    const ditherErrorHandler = handlePipelineError('pcm_dither_error');
-    const pcmToDsdErrorHandler = handlePipelineError('pcm_to_dsd_error');
     const writableErrorHandler = handlePipelineError('native_writable_error');
 
     markPlaybackBreadcrumb('AudioSession.startDecoderRun:attachHandlers:start');
     run.stream.on('error', streamErrorHandler);
     livePcmResampler?.on('error', resamplerErrorHandler);
-    echoSrcFirTransform?.on('error', echoSrcFirErrorHandler);
-    sdmOversamplingFirTransform?.on('error', sdmOversamplingFirErrorHandler);
     gainTransform.on('error', gainErrorHandler);
     replayGainTransform.on('error', replayGainErrorHandler);
     speedTransform.on('error', speedErrorHandler);
     levelMeterTransform.on('error', levelErrorHandler);
-    pcmDitherTransform?.on('error', ditherErrorHandler);
-    pcmToDsdTransform?.on('error', pcmToDsdErrorHandler);
     writable.on('error', writableErrorHandler);
     this.decoderPipelineCleanup = (): void => {
       run.stream.off('error', streamErrorHandler);
       livePcmResampler?.off('error', resamplerErrorHandler);
       livePcmResampler?.destroy();
-      echoSrcFirTransform?.off('error', echoSrcFirErrorHandler);
-      echoSrcFirTransform?.destroy();
-      sdmOversamplingFirTransform?.off('error', sdmOversamplingFirErrorHandler);
-      sdmOversamplingFirTransform?.destroy();
-      this.echoSrcCudaWorkerClient?.dispose?.();
-      this.echoSrcCudaWorkerClient = null;
-      this.sdmCudaWorkerClient?.dispose?.();
-      this.sdmCudaWorkerClient = null;
       gainTransform.off('error', gainErrorHandler);
       replayGainTransform.off('error', replayGainErrorHandler);
       replayGainTransform.destroy();
       speedTransform.off('error', speedErrorHandler);
       levelMeterTransform.off('error', levelErrorHandler);
-      pcmDitherTransform?.off('error', ditherErrorHandler);
-      pcmDitherTransform?.destroy();
-      pcmToDsdTransform?.off('error', pcmToDsdErrorHandler);
-      pcmToDsdTransform?.destroy();
       writable.off('error', writableErrorHandler);
     };
     markPlaybackBreadcrumb('AudioSession.startDecoderRun:attachHandlers:complete');
@@ -7529,18 +8721,8 @@ export class AudioSession extends EventEmitter {
     if (livePcmResampler) {
       pcmSource = pcmSource.pipe(livePcmResampler);
     }
-    if (echoSrcFirTransform) {
-      pcmSource = pcmSource.pipe(echoSrcFirTransform);
-    }
-    if (sdmOversamplingFirTransform) {
-      pcmSource = pcmSource.pipe(sdmOversamplingFirTransform);
-    }
     markPlaybackBreadcrumb('AudioSession.startDecoderRun:pipelinePipe:start');
-    let finalPcmSource: Readable = pcmSource.pipe(gainTransform).pipe(replayGainTransform).pipe(speedTransform).pipe(levelMeterTransform);
-    if (pcmDitherTransform) {
-      finalPcmSource = finalPcmSource.pipe(pcmDitherTransform);
-    }
-    const finalOutputSource = pcmToDsdTransform ? finalPcmSource.pipe(pcmToDsdTransform) : finalPcmSource;
+    const finalOutputSource = pcmSource.pipe(gainTransform).pipe(replayGainTransform).pipe(speedTransform).pipe(levelMeterTransform);
     finalOutputSource.pipe(writable, { end: false });
     markPlaybackBreadcrumb('AudioSession.startDecoderRun:pipelinePipe:complete');
     finalOutputSource.once('end', signalNativeInputEnded);
@@ -7810,12 +8992,158 @@ export class AudioSession extends EventEmitter {
     }
   }
 
+  private handleAutomixV2TransitionCommitted(event: AutomixTransitionCommittedEventV2): void {
+    const active = this.activeAutomixV2;
+    if (!active || active.plan.planId !== event.planId
+      || active.plan.queueRevision !== event.queueRevision
+      || active.plan.fromItemId !== event.fromItemId
+      || active.plan.toItemId !== event.toItemId) {
+      this.addOutputWarning('automix_v2_stale_transition_event');
+      return;
+    }
+
+    active.state = 'committed';
+    this.currentQueueItemId = event.toItemId;
+    this.currentQueueRevision = event.queueRevision;
+    this.currentTrackId = event.toTrackId;
+    this.currentFilePath = active.nextFilePath;
+    this.currentInputHeaders = active.nextInputHeaders;
+    this.currentTrackMetadata = active.nextMetadata;
+    this.currentProbe = active.nextProbe;
+    this.currentReplayGain = active.nextReplayGain;
+    this.currentReplayGainCalculation = this.calculateCurrentReplayGain();
+    this.clock.reset(event.sourcePositionSeconds, active.plan.mixSampleRate);
+    this.emit('automix-advance', {
+      fromTrackId: event.fromTrackId,
+      toTrackId: event.toTrackId,
+      fromItemId: event.fromItemId,
+      toItemId: event.toItemId,
+      queueRevision: event.queueRevision,
+      planId: event.planId,
+      transitionSeconds: active.plan.overlapFrames / active.plan.mixSampleRate,
+      mode: active.plan.mode,
+      fallbackReason: active.plan.fallbackReason,
+      beatAligned: active.plan.mode === 'beat_match',
+      skipIntroSilence: active.plan.nextStartSeconds > 0.12,
+      nextStartSeconds: event.sourcePositionSeconds,
+    });
+    this.recordPlaybackDiagnosticEvent('ended', 'info', 'automix_v2_transition_committed', {
+      trackId: event.toTrackId,
+      filePath: active.nextFilePath,
+      positionSeconds: event.sourcePositionSeconds,
+      details: {
+        planId: event.planId,
+        queueRevision: event.queueRevision,
+        operationId: event.operationId,
+        outputFrame: event.outputFrame,
+      },
+    });
+    this.emitStatus();
+  }
+
   private handleQueueAdvance(params: Record<string, unknown>): void {
     if (typeof params.nextFilePath === 'string') {
       this.currentFilePath = params.nextFilePath;
-      this.currentTrackId = null;
-      this.currentTrackMetadata = null;
+      this.currentTrackId = typeof params.nextTrackId === 'string' ? params.nextTrackId : null;
+      const metadata = params.nextMetadata && typeof params.nextMetadata === 'object' && !Array.isArray(params.nextMetadata)
+        ? params.nextMetadata as Record<string, unknown>
+        : null;
+      this.currentTrackMetadata = metadata
+        ? {
+            title: typeof metadata.title === 'string' ? metadata.title : null,
+            artist: typeof metadata.artist === 'string' ? metadata.artist : null,
+            album: typeof metadata.album === 'string' ? metadata.album : null,
+            albumArtist: typeof metadata.albumArtist === 'string' ? metadata.albumArtist : null,
+            coverUrl: typeof metadata.coverUrl === 'string' ? metadata.coverUrl : null,
+          }
+        : null;
     }
+    const nextSampleRate = Number(params.nextSampleRate);
+    const nextSourceSampleRate = Number(params.nextSourceSampleRate);
+    const nextChannels = Number(params.nextChannels);
+    const nextDurationSeconds = Number(params.nextDurationSeconds);
+    const nextStartSeconds = Number(params.nextStartSeconds);
+    const nextQueueRevision = Number(params.queueRevision);
+    this.currentQueueItemId = typeof params.nextItemId === 'string' ? params.nextItemId : null;
+    this.currentQueueRevision = Number.isSafeInteger(nextQueueRevision) && nextQueueRevision > 0
+      ? nextQueueRevision
+      : null;
+    this.currentProbe = {
+      filePath: this.currentFilePath ?? '',
+      fileSampleRate: Number.isFinite(nextSourceSampleRate) && nextSourceSampleRate > 0
+        ? nextSourceSampleRate
+        : Number.isFinite(nextSampleRate) && nextSampleRate > 0
+          ? nextSampleRate
+        : this.currentProbe?.fileSampleRate ?? null,
+      channels: Number.isFinite(nextChannels) && nextChannels > 0
+        ? Math.round(nextChannels)
+        : this.currentProbe?.channels ?? 2,
+      durationSeconds: Number.isFinite(nextDurationSeconds) && nextDurationSeconds > 0
+        ? nextDurationSeconds
+        : this.currentProbe?.durationSeconds ?? 0,
+      codec: typeof params.nextCodec === 'string' ? params.nextCodec : this.currentProbe?.codec ?? null,
+      bitDepth: typeof params.nextBitDepth === 'number' && Number.isFinite(params.nextBitDepth)
+        ? params.nextBitDepth
+        : null,
+      bitrate: null,
+    };
+    if (this.currentPlan && Number.isFinite(nextSourceSampleRate) && nextSourceSampleRate > 0) {
+      if (this.currentPlan.outputMode === 'shared') {
+        this.currentPlan = {
+          ...this.currentPlan,
+          fileSampleRate: nextSourceSampleRate,
+        };
+      } else if (
+        this.currentPlan.outputMode === 'asio' &&
+        Number.isFinite(nextSampleRate) &&
+        nextSampleRate > 0
+      ) {
+        const requestedSampleRate = Number(params.targetSampleRate);
+        const actualSampleRate = Number(params.actualSampleRate);
+        const nextRequestedSampleRate = Number.isFinite(requestedSampleRate) && requestedSampleRate > 0
+          ? requestedSampleRate
+          : nextSampleRate;
+        const nextActualSampleRate = Number.isFinite(actualSampleRate) && actualSampleRate > 0
+          ? actualSampleRate
+          : nextSampleRate;
+        const sampleRateMismatch = nextActualSampleRate !== nextRequestedSampleRate;
+        const resampling = nextSourceSampleRate !== nextSampleRate
+          || nextSampleRate !== nextActualSampleRate;
+        this.currentPlan = {
+          ...this.currentPlan,
+          fileSampleRate: nextSourceSampleRate,
+          decoderOutputSampleRate: nextSampleRate,
+          requestedOutputSampleRate: nextRequestedSampleRate,
+          actualDeviceSampleRate: nextActualSampleRate,
+          resampling,
+          bitPerfectCandidate: this.currentPlan.dsdOutputMode === 'pcm'
+            && !resampling
+            && !sampleRateMismatch
+            && this.currentPlan.echoSrcActive !== true
+            && this.currentPlan.sdmPcmToDsdActive !== true,
+          sampleRateMismatch,
+        };
+      }
+    }
+    const startSeconds = Number.isFinite(nextStartSeconds) ? Math.max(0, nextStartSeconds) : 0;
+    this.clock.reset(startSeconds, Number.isFinite(nextSampleRate) && nextSampleRate > 0 ? nextSampleRate : null);
+    this.state = 'playing';
+    this.hostStatus = 'ready';
+    this.recordPlaybackDiagnosticEvent('ended', 'info', 'daemon_queue_advance', {
+      trackId: this.currentTrackId,
+      filePath: this.currentFilePath,
+      positionSeconds: startSeconds,
+      details: {
+        operationId: params.operationId ?? null,
+        queueRevision: params.queueRevision ?? null,
+        queueItemId: params.nextItemId ?? null,
+        previousSampleRate: params.previousSampleRate ?? null,
+        targetSampleRate: params.targetSampleRate ?? null,
+        actualSampleRate: params.actualSampleRate ?? null,
+        sampleRateTransitionMode: params.sampleRateTransitionMode ?? null,
+        sampleRateTransitionDurationMs: params.sampleRateTransitionDurationMs ?? null,
+      },
+    });
     // The daemon is already playing the next track.
     // Emit status so the renderer updates its display.
     // Don't change state — position events from the daemon keep it 'playing'.
@@ -7859,6 +9187,8 @@ export class AudioSession extends EventEmitter {
     }
 
     this.activeAutomix = null;
+    this.activeAutomixV2 = null;
+    this.daemonGaplessActive = false;
     this.state = 'ended';
     this.resetWatchdogProgress();
     this.emit('ended', this.getStatus());
@@ -7914,6 +9244,8 @@ export class AudioSession extends EventEmitter {
       recoveryReason = 'audio_device_removed';
     } else if (event.event === 'device_state_changed' && affectsCurrentOutput && inactiveDeviceReasons.has(reason)) {
       recoveryReason = `audio_device_state_changed:${reason}`;
+    } else if (event.event === 'device_sample_rate_changed' && affectsCurrentOutput) {
+      recoveryReason = `audio_device_sample_rate_changed:${event.code ?? 'unknown'}`;
     }
 
     if (!recoveryReason) {
@@ -8228,6 +9560,7 @@ export class AudioSession extends EventEmitter {
 
   private resetLevelMeter(): void {
     this.levelMeterTransform?.reset();
+    this.nativeAudioLevels = null;
     this.levelSnapshot = {
       inputPeakDb: null,
       inputRmsDb: null,
@@ -8245,6 +9578,7 @@ export class AudioSession extends EventEmitter {
   }
 
   private resetNativeTelemetry(): void {
+    this.nativeAudioLevels = null;
     this.nativeDeviceBufferFrames = null;
     this.nativeRequestedBufferFrames = null;
     this.nativeActualBufferFrames = null;
@@ -8366,11 +9700,12 @@ export class AudioSession extends EventEmitter {
 
   private handleLevelSnapshot(snapshot: PcmLevelSnapshot): void {
     const audioVisualSpectrumEnabled = isAudioVisualSpectrumEnabled();
+    const statusIntervalMs = audioVisualSpectrumEnabled ? levelMeterStatusIntervalMs : levelMeterNonVisualStatusIntervalMs;
     this.levelMeterTransform?.setVisualSpectrumEnabled(audioVisualSpectrumEnabled);
     this.levelSnapshot = audioVisualSpectrumEnabled ? snapshot : this.createLevelSnapshotWithoutVisualTelemetry(snapshot);
     if (this.state === 'playing') {
       const now = Date.now();
-      if (now - this.lastLevelMeterStatusEmittedAt >= levelMeterStatusIntervalMs) {
+      if (now - this.lastLevelMeterStatusEmittedAt >= statusIntervalMs) {
         this.lastLevelMeterStatusEmittedAt = now;
         this.emitStatus();
       }
@@ -8394,21 +9729,177 @@ export class AudioSession extends EventEmitter {
     } catch {
     }
     this.activeDaemonBackend = null;
+    this.activeDaemonRemoteSource = false;
+    this.daemonGaplessActive = false;
+  }
+
+  private queueActiveDaemonStop(reason: string): void {
+    if (!this.activeDaemonBackend) {
+      return;
+    }
+
+    const backend = this.activeDaemonBackend;
+    this.activeDaemonBackend = null;
+    this.activeDaemonRemoteSource = false;
+    this.daemonGaplessActive = false;
+    const stopPromise = backend.stop()
+      .catch((error) => {
+        this.logger(`[AudioSession] daemon stop failed (${reason}): ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        try {
+          backend.dispose();
+        } catch {
+        }
+        if (this.daemonStopInProgress === stopPromise) {
+          this.daemonStopInProgress = null;
+        }
+      });
+    this.daemonStopInProgress = stopPromise;
+  }
+
+  private async stopActiveDaemonBackend(reason: string): Promise<void> {
+    this.queueActiveDaemonStop(reason);
+    if (this.daemonStopInProgress) {
+      await this.daemonStopInProgress;
+    }
   }
 
   /** Sync the playback queue to the daemon backend for autonomous advancement. */
   async syncQueueToBackend(
-    items: Array<{ filePath: string; sampleRate?: number; startSeconds?: number }>,
-    repeatMode: string = 'off',
+    items: AudioBackendQueueItem[],
+    repeatMode: RepeatMode = 'off',
+    currentItemId: string | null = null,
   ): Promise<void> {
+    this.queueRevision += 1;
+    this.queueSnapshot = {
+      revision: this.queueRevision,
+      currentItemId,
+      repeatMode,
+      items: items.map((item) => ({ ...item })),
+    };
+    this.currentQueueItemId = currentItemId;
+    this.currentQueueRevision = this.queueRevision;
     const backend = this.activeDaemonBackend;
-    if (backend && 'setQueue' in backend) {
-      await backend.setQueue(items, repeatMode);
+    if (backend) {
+      if (this.activeDaemonRemoteSource) {
+        await backend.clearQueue();
+      } else {
+        await backend.setQueue(this.createDaemonQueueSnapshotForCurrentPlan());
+        const activePlan = this.activeAutomixV2;
+        if (activePlan && automixV2NativeEnabled
+            && (activePlan.state === 'preparing'
+              || activePlan.state === 'armed'
+              || activePlan.state === 'committed')) {
+          const daemonAutomixState = await backend.getAutomixStateV2();
+          if (daemonAutomixState.planId === activePlan.plan.planId
+              && daemonAutomixState.state === 'committed') {
+            activePlan.plan.queueRevision = this.queueSnapshot.revision;
+            activePlan.state = 'committed';
+          } else if (daemonAutomixState.state === 'idle'
+              || daemonAutomixState.planId !== activePlan.plan.planId) {
+            activePlan.state = 'fallback';
+            this.addOutputWarning('automix_v2_cancelled_by_queue_revision');
+          } else {
+            activePlan.state = daemonAutomixState.state;
+          }
+        }
+      }
     }
   }
 
+  private async replayQueueSnapshotToDaemonBackend(backend: DaemonAudioBackend): Promise<void> {
+    if (this.queueSnapshot.revision <= 0) {
+      return;
+    }
+    await backend.setQueue(this.createDaemonQueueSnapshotForCurrentPlan());
+  }
+
+  private async finalizeNaturalDaemonEnd(token: number): Promise<void> {
+    await this.stopActiveDaemonBackend('daemon-natural-end');
+    if (this.runToken !== token) {
+      return;
+    }
+    this.handlePlaybackEnded(token);
+  }
+
+  private createDaemonQueueSnapshotForCurrentPlan(): AudioBackendQueueSnapshot {
+    const snapshot: AudioBackendQueueSnapshot = {
+      ...this.queueSnapshot,
+      items: this.queueSnapshot.items.map((item) => ({ ...item })),
+    };
+    const strictAsioPcmQueue = this.currentPlan?.outputMode === 'asio'
+      && this.currentPlan.dsdOutputMode === 'pcm'
+      && this.currentPlan.echoSrcActive !== true
+      && this.currentPlan.sdmPcmToDsdActive !== true;
+    const hasCompleteSampleRateMetadata = snapshot.items.every((item) =>
+      normalizeAudioSampleRate(item.sampleRate) !== null);
+    if (
+      this.currentPlan?.outputMode === 'shared' ||
+      (strictAsioPcmQueue && hasCompleteSampleRateMetadata)
+    ) {
+      return snapshot;
+    }
+
+    const sourceSampleRate = normalizeAudioSampleRate(this.currentProbe?.fileSampleRate);
+    if (!sourceSampleRate) {
+      return {
+        ...snapshot,
+        currentItemId: null,
+        repeatMode: 'off',
+        items: [],
+      };
+    }
+
+    const currentIndex = snapshot.items.findIndex((item) =>
+      (snapshot.currentItemId !== null && item.itemId === snapshot.currentItemId) ||
+      (snapshot.currentItemId === null && this.currentFilePath !== null && item.filePath === this.currentFilePath));
+    if (currentIndex < 0) {
+      return {
+        ...snapshot,
+        currentItemId: null,
+        repeatMode: 'off',
+        items: [],
+      };
+    }
+
+    const currentItem = {
+      ...snapshot.items[currentIndex]!,
+      sampleRate: sourceSampleRate,
+    };
+    if (snapshot.repeatMode === 'one') {
+      return {
+        ...snapshot,
+        currentItemId: currentItem.itemId,
+        items: [currentItem],
+      };
+    }
+
+    const allItemsRateCompatible = snapshot.items.every((item) =>
+      normalizeAudioSampleRate(item.sampleRate) === sourceSampleRate);
+    if (snapshot.repeatMode === 'all' && allItemsRateCompatible) {
+      return snapshot;
+    }
+
+    const compatibleItems = [currentItem];
+    for (let index = currentIndex + 1; index < snapshot.items.length; index += 1) {
+      const item = snapshot.items[index]!;
+      if (normalizeAudioSampleRate(item.sampleRate) !== sourceSampleRate) {
+        break;
+      }
+      compatibleItems.push({ ...item, sampleRate: sourceSampleRate });
+    }
+
+    return {
+      ...snapshot,
+      currentItemId: currentItem.itemId,
+      repeatMode: 'off',
+      items: compatibleItems,
+    };
+  }
+
   private stopResources(options: { preservePausedDecoderPrewarm?: boolean } = {}): void {
-    this.disposeActiveDaemonBackend();
+    this.queueActiveDaemonStop('synchronous-resource-stop');
     this.cancelTransportFade();
     this.pausedOutputPrewarmPromise = null;
     if (options.preservePausedDecoderPrewarm !== true) {
@@ -8432,6 +9923,9 @@ export class AudioSession extends EventEmitter {
   }
 
   private async stopResourcesGracefully(reason: string, waitForExitOverride?: boolean): Promise<void> {
+    if (this.activeDaemonBackend || this.daemonStopInProgress) {
+      await this.stopActiveDaemonBackend(reason);
+    }
     this.pausedOutputPrewarmPromise = null;
     this.stopPausedDecoderPrewarm();
     const decoderStop = this.stopDecoderRun();
@@ -8502,6 +9996,10 @@ export class AudioSession extends EventEmitter {
       return;
     }
 
+    if (this.tryRecoverDaemonRemotePlaybackError(error)) {
+      return;
+    }
+
     if (this.tryRecoverNativeDirectLocalPlaybackError(error)) {
       return;
     }
@@ -8520,6 +10018,13 @@ export class AudioSession extends EventEmitter {
       return;
     }
 
+    if (
+      this.state === 'loading' &&
+      (this.currentPlan?.outputMode === 'asio' || this.currentPlan?.outputMode === 'exclusive')
+    ) {
+      this.deviceService.invalidateCache?.();
+    }
+
     this.stopResources();
     this.errorMessage = error.message;
     this.state = 'error';
@@ -8528,6 +10033,83 @@ export class AudioSession extends EventEmitter {
     this.resetWatchdogProgress();
     this.emit('error', error, this.getStatus());
     this.emitStatus();
+  }
+
+  private tryRecoverDaemonRemotePlaybackError(error: Error): boolean {
+    if (
+      this.state !== 'playing' ||
+      !this.currentFilePath ||
+      !this.currentOutputSettings ||
+      !this.currentProbe ||
+      !this.currentPlan ||
+      this.activeAutomix ||
+      !this.activeDaemonRemoteSource ||
+      !isHttpPlaybackUrl(this.currentFilePath) ||
+      this.currentDecodeBackendImpl !== 'native-direct-daemon-libav' ||
+      !recoverableDaemonRemotePlaybackErrorPattern.test(error.message) ||
+      getNativeDspLegacyFallbackBlockReason(this.currentPlan, this.currentOutputSettings) !== null ||
+      !this.reserveLocalPlaybackRecoverySlot('daemon_remote_decode_error')
+    ) {
+      return false;
+    }
+
+    this.updatePositionFromOutput();
+    const filePath = this.currentFilePath;
+    const trackId = this.currentTrackId;
+    const metadata = this.currentTrackMetadata ?? undefined;
+    const replayGain = this.currentReplayGain;
+    const inputHeaders = this.currentInputHeaders ? { ...this.currentInputHeaders } : undefined;
+    const output = { ...this.currentOutputSettings };
+    const probe = createProbeHint(this.currentProbe);
+    const safePositionSeconds = Math.min(
+      Math.max(0, this.clock.getPositionSeconds()),
+      this.currentProbe.durationSeconds || Number.POSITIVE_INFINITY,
+    );
+    const fallbackCause = /\b(?:daemon_)?rpc_bridge_(?:closed|not_open)\b/iu.test(error.message)
+      ? 'transport_closed'
+      : 'decode_error';
+
+    this.addPendingOutputWarning(`daemon_remote_decode_fell_back_to_pcm:${fallbackCause}`);
+    this.recordPlaybackDiagnosticEvent(
+      'watchdog_recovery',
+      'recovery',
+      'daemon_remote_decode_fell_back_to_pcm',
+      {
+        trackId,
+        filePath,
+        positionSeconds: safePositionSeconds,
+        durationSeconds: this.currentProbe.durationSeconds,
+        details: {
+          cause: error.message,
+          fallbackBackend: 'legacy-pcm',
+        },
+      },
+    );
+    this.logger(
+      `[AudioSession] remote daemon playback failed; falling back to PCM decoder file="${redactUrlSecrets(
+        filePath,
+      )}" position=${safePositionSeconds.toFixed(3)} cause=${error.message}`,
+    );
+
+    void this.playLocalFile({
+      filePath,
+      trackId: trackId ?? undefined,
+      metadata,
+      replayGain,
+      startSeconds: safePositionSeconds,
+      output,
+      probe,
+      inputHeaders,
+      remoteDaemonPlaybackFallbackAttempt: true,
+    }).catch((recoveryError) => {
+      if (isAudioSessionRunCancelledError(recoveryError)) {
+        this.verboseLogger('[AudioSession] remote daemon PCM fallback was superseded by a newer playback run');
+        return;
+      }
+
+      this.handleError(recoveryError instanceof Error ? recoveryError : new Error(String(recoveryError)));
+    });
+    return true;
   }
 
   private tryRecoverNativeDirectLocalPlaybackError(error: Error): boolean {
@@ -8708,367 +10290,6 @@ export class AudioSession extends EventEmitter {
       `[AudioSession] live PCM resampler enabled source=${sourceSampleRate} target=${targetSampleRate} channels=${channels}`,
     );
     return new PcmLinearResamplerTransform(channels, sourceSampleRate, targetSampleRate);
-  }
-
-  private createSdmOversamplingFirTransform(): EchoSrcFirWorkerTransform | null {
-    const plan = this.currentPlan;
-    if (
-      !plan ||
-      !this.currentProbe ||
-      !this.shouldUseSdmOversamplingFirTransform(plan) ||
-      plan.sdmRuntime?.oversamplingEngine !== 'echo-fir'
-    ) {
-      return null;
-    }
-
-    const oversamplingPlan = getSdmOversamplingPlanFromRuntime(plan.sdmRuntime);
-    if (!oversamplingPlan || oversamplingPlan.engine !== 'echo-fir') {
-      return null;
-    }
-
-    const sourceSampleRate = normalizeAudioSampleRate(plan.fileSampleRate);
-    const targetSampleRate = normalizeAudioSampleRate(plan.sdmTransportSampleRate);
-    const upsampleFactor = normalizeEchoSrcUpsampleFactor(sourceSampleRate, targetSampleRate);
-    const channels = normalizePositiveInteger(this.currentProbe.channels) ?? 2;
-    if (!sourceSampleRate || !targetSampleRate || !upsampleFactor || upsampleFactor === 1) {
-      return null;
-    }
-
-    const effectiveProfile = resolveSdmOversamplingEffectiveFilterProfile(oversamplingPlan);
-    const firPlan = createEchoSrcFirPlan(effectiveProfile, sourceSampleRate, targetSampleRate);
-    const designedStagePlans = createEchoSrcFirStagePlans(effectiveProfile, sourceSampleRate, targetSampleRate, {
-      resolveProfile: (stageSourceRate) => resolveEchoSrcFilterProfileForSlot(resolveEchoSrcFilterSlot(stageSourceRate), {
-        echoSrcFilterProfile: effectiveProfile,
-        echoSrcFilterProfile1x: oversamplingPlan.filterProfile1x,
-        echoSrcFilterProfileNx: oversamplingPlan.filterProfileNx,
-      }),
-    });
-    if (designedStagePlans.length === 0) {
-      return null;
-    }
-
-    const stages = designedStagePlans.map((stage) => ({
-      taps: createEchoSrcFirTaps(stage.plan),
-      upsampleFactor: stage.upsampleFactor,
-      label: `sdm-stage-${stage.index + 1}`,
-    }));
-    const taps = stages[0]?.taps ?? createEchoSrcFirTaps(firPlan);
-    const stageTapCounts = stages.map((stage) => stage.taps.length);
-    const stageProfiles = designedStagePlans.map((stage) => stage.plan.profile);
-    const totalTapCount = stageTapCounts.reduce((total, tapCount) => total + tapCount, 0) || taps.length;
-    const firAnalysis = analyzeEchoSrcFirTaps(firPlan, taps);
-    const backend: AudioEchoSrcComputeBackend = 'cuda';
-    const baseBlockPlan = resolveEchoSrcFirBlockPlan(backend, upsampleFactor, channels);
-    const blockPlan: EchoSrcFirBlockPlan = {
-      ...baseBlockPlan,
-      targetBatchFrames: Math.min(baseBlockPlan.targetBatchFrames, 4096),
-    };
-    const client = this.createEchoSrcCudaWorkerClient();
-    this.echoSrcCudaWorkerClient?.dispose?.();
-    this.echoSrcCudaWorkerClient = client;
-    const plannedWarningPrefix = 'sdm_oversampling_echo_fir_planned:';
-    const activeWarningPrefix = 'sdm_oversampling_echo_fir_active:';
-
-    this.currentPlan = {
-      ...plan,
-      sdmRuntime: createSdmRuntimeStatus(plan.sdmRuntime.state, {
-        targetRate: plan.sdmRuntime.targetRate,
-        nativeSampleRate: plan.sdmRuntime.nativeSampleRate,
-        transportSampleRate: plan.sdmRuntime.transportSampleRate,
-        modulatorProfile: plan.sdmRuntime.modulatorProfile,
-        requestedBackend: plan.sdmRuntime.requestedBackend,
-        activeBackend: plan.sdmRuntime.activeBackend,
-        oversamplingPlan,
-        oversamplingRuntime: createSdmOversamplingRuntimeStatus(oversamplingPlan, {
-          state: 'active',
-          requestedBackend: 'cuda',
-          activeBackend: backend,
-          firAnalysis,
-          firStageCount: stages.length,
-          firStageTapCounts: stageTapCounts,
-          firStageProfiles: stageProfiles,
-          firTotalTapCount: totalTapCount,
-          firProcessingMode: blockPlan.processingMode,
-          firBatchFrames: blockPlan.targetBatchFrames,
-          firMaxBlockFrames: blockPlan.maxBlockFrames,
-        }),
-        processingMode: plan.sdmRuntime.processingMode,
-        batchFrames: plan.sdmRuntime.batchFrames,
-        maxBlockFrames: plan.sdmRuntime.maxBlockFrames,
-        cudaActive: plan.sdmRuntime.cudaActive,
-        fallbackReason: plan.sdmRuntime.fallbackReason,
-      }),
-      warnings: [
-        ...plan.warnings.filter((warning) => (
-          !warning.startsWith(plannedWarningPrefix) &&
-          !warning.startsWith(activeWarningPrefix)
-        )),
-        `sdm_oversampling_echo_fir_active:${backend}:${sourceSampleRate}->${targetSampleRate}:${stageProfiles.join('+')}:taps=${stageTapCounts.join('+')}`,
-      ],
-    };
-    this.logger(
-      `[AudioSession] SDM oversampling FIR enabled backend=${backend} source=${sourceSampleRate} target=${targetSampleRate} factor=${upsampleFactor} channels=${channels} profiles=${stageProfiles.join('+')} taps=${stageTapCounts.join('+')} processing=${blockPlan.processingMode} batchFrames=${blockPlan.targetBatchFrames} maxBlockFrames=${blockPlan.maxBlockFrames}`,
-    );
-
-    const handleFirMetrics = (metrics: EchoSrcFirWorkerTransformMetrics): void => {
-      const currentPlan = this.currentPlan;
-      const runtime = currentPlan?.sdmRuntime;
-      if (!currentPlan || !runtime) {
-        return;
-      }
-
-      this.currentPlan = {
-        ...currentPlan,
-        sdmRuntime: createSdmRuntimeStatus(runtime.state, {
-          targetRate: runtime.targetRate,
-          nativeSampleRate: runtime.nativeSampleRate,
-          transportSampleRate: runtime.transportSampleRate,
-          modulatorProfile: runtime.modulatorProfile,
-          requestedBackend: runtime.requestedBackend,
-          activeBackend: runtime.activeBackend,
-          oversamplingPlan,
-          oversamplingRuntime: createSdmOversamplingRuntimeStatus(oversamplingPlan, {
-            state: metrics.backend === 'cuda' ? 'active' : 'fallback',
-            requestedBackend: 'cuda',
-            activeBackend: metrics.backend,
-            fallbackReason: metrics.backend === 'cuda' ? null : runtime.oversamplingRuntime?.fallbackReason,
-            firAnalysis,
-            firStageCount: stages.length,
-            firStageTapCounts: stageTapCounts,
-            firStageProfiles: stageProfiles,
-            firTotalTapCount: totalTapCount,
-            firProcessingMode: blockPlan.processingMode,
-            firBatchFrames: blockPlan.targetBatchFrames,
-            firMaxBlockFrames: blockPlan.maxBlockFrames,
-            firMetrics: metrics,
-          }),
-          processingMode: runtime.processingMode,
-          batchFrames: runtime.batchFrames,
-          maxBlockFrames: runtime.maxBlockFrames,
-          cudaActive: runtime.cudaActive,
-          fallbackReason: runtime.fallbackReason,
-        }),
-      };
-      this.emitNativeTelemetryStatus();
-    };
-
-    return new EchoSrcFirWorkerTransform({
-      client,
-      backend,
-      channels,
-      taps,
-      stages,
-      maxBlockFrames: blockPlan.maxBlockFrames,
-      targetBatchFrames: blockPlan.targetBatchFrames,
-      sourceSampleRate,
-      fallbackToCpuOnError: true,
-      onMetrics: handleFirMetrics,
-      onBackendFallback: (reason) => {
-        const currentPlan = this.currentPlan;
-        const runtime = currentPlan?.sdmRuntime;
-        if (!currentPlan || !runtime) {
-          return;
-        }
-
-        this.currentPlan = {
-          ...currentPlan,
-          sdmRuntime: createSdmRuntimeStatus(runtime.state, {
-            targetRate: runtime.targetRate,
-            nativeSampleRate: runtime.nativeSampleRate,
-            transportSampleRate: runtime.transportSampleRate,
-            modulatorProfile: runtime.modulatorProfile,
-            requestedBackend: runtime.requestedBackend,
-            activeBackend: runtime.activeBackend,
-            oversamplingPlan,
-            oversamplingRuntime: createSdmOversamplingRuntimeStatus(oversamplingPlan, {
-              state: 'fallback',
-              requestedBackend: 'cuda',
-              activeBackend: 'cpu',
-              fallbackReason: reason,
-              firAnalysis,
-              firStageCount: stages.length,
-              firStageTapCounts: stageTapCounts,
-              firStageProfiles: stageProfiles,
-              firTotalTapCount: totalTapCount,
-              firProcessingMode: blockPlan.processingMode,
-              firBatchFrames: blockPlan.targetBatchFrames,
-              firMaxBlockFrames: blockPlan.maxBlockFrames,
-            }),
-            processingMode: runtime.processingMode,
-            batchFrames: runtime.batchFrames,
-            maxBlockFrames: runtime.maxBlockFrames,
-            cudaActive: runtime.cudaActive,
-            fallbackReason: runtime.fallbackReason,
-          }),
-          warnings: [
-            ...currentPlan.warnings.filter((warning) => !warning.startsWith('sdm_oversampling_cuda_runtime_fallback:')),
-            `sdm_oversampling_cuda_runtime_fallback:${reason}`,
-          ],
-        };
-        this.addOutputWarning(`sdm_oversampling_cuda_runtime_fallback:${reason}`);
-        this.logger(`[AudioSession] SDM oversampling CUDA FIR fell back to CPU FIR: ${reason}`);
-        this.emitStatus();
-      },
-    });
-  }
-
-  private createEchoSrcFirTransform(): EchoSrcFirWorkerTransform | null {
-    const plan = this.currentPlan;
-    const outputSettings = this.currentOutputSettings ?? this.outputSettings;
-    const backendStatus = plan ? this.getEchoSrcFirBackendStatus(plan, outputSettings) : null;
-    if (!plan || !this.currentProbe || backendStatus?.available !== true) {
-      return null;
-    }
-
-    const sourceSampleRate = normalizeAudioSampleRate(plan.fileSampleRate);
-    const targetSampleRate = normalizeAudioSampleRate(plan.echoSrcTargetSampleRate);
-    const upsampleFactor = normalizeEchoSrcUpsampleFactor(sourceSampleRate, targetSampleRate);
-    const channels = normalizePositiveInteger(this.currentProbe.channels) ?? 2;
-    if (!sourceSampleRate || !targetSampleRate || !upsampleFactor || upsampleFactor === 1) {
-      return null;
-    }
-
-    const firPlan = createEchoSrcFirPlan(plan.echoSrcFilterProfile, sourceSampleRate, targetSampleRate);
-    const designedStagePlans = createEchoSrcFirStagePlans(plan.echoSrcFilterProfile, sourceSampleRate, targetSampleRate, {
-      resolveProfile: (stageSourceRate) => resolveEchoSrcFilterProfileForSlot(resolveEchoSrcFilterSlot(stageSourceRate), {
-        echoSrcFilterProfile: plan.echoSrcFilterProfile,
-        echoSrcFilterProfile1x: plan.echoSrcFilterProfile1x,
-        echoSrcFilterProfileNx: plan.echoSrcFilterProfileNx,
-      }),
-    });
-    const designedStages = designedStagePlans.map((stage) => ({
-      taps: createEchoSrcFirTaps(stage.plan),
-      upsampleFactor: stage.upsampleFactor,
-      label: `stage-${stage.index + 1}`,
-    }));
-    const useRealtimeStagedFir = designedStages.length <= 1;
-    const stages = useRealtimeStagedFir ? designedStages : [];
-    const taps = stages[0]?.taps ?? createEchoSrcFirTaps(firPlan);
-    const stageTapCounts = stages.map((stage) => stage.taps.length);
-    const stageProfiles = (useRealtimeStagedFir ? designedStagePlans : []).map((stage) => stage.plan.profile);
-    const totalTapCount = stageTapCounts.reduce((total, tapCount) => total + tapCount, 0) || taps.length;
-    const firAnalysis = analyzeEchoSrcFirTaps(firPlan, taps);
-    const backend = backendStatus.backend;
-    const blockPlan = resolveEchoSrcFirBlockPlan(backend, upsampleFactor, channels);
-    const client = backend === 'cuda'
-      ? this.createEchoSrcCudaWorkerClient()
-      : createLocalEchoSrcFirClient();
-    this.echoSrcCudaWorkerClient?.dispose?.();
-    this.echoSrcCudaWorkerClient = backend === 'cuda' ? client : null;
-    const cudaWarnings = plan.warnings.filter((warning) => (
-      !warning.startsWith('echo_src_cuda_backend_unavailable:') &&
-      !warning.startsWith('echo_src_cuda_unavailable:')
-    ));
-    this.currentPlan = {
-      ...plan,
-      echoSrcCudaActive: backend === 'cuda',
-      echoSrcRuntime: createEchoSrcRuntimeStatus('active', {
-        sourceSampleRate,
-        targetSampleRate,
-        filterProfile: plan.echoSrcFilterProfile,
-        filterSlot: plan.echoSrcFilterSlot,
-        qualityProfile: plan.echoSrcQualityProfile,
-        requestedBackend: plan.echoSrcComputeBackend,
-        activeBackend: backend,
-        cudaActive: backend === 'cuda',
-        firAnalysis,
-        firStageCount: stages.length || 1,
-        firStageTapCounts: stageTapCounts.length > 0 ? stageTapCounts : [taps.length],
-        firStageProfiles: stageProfiles.length > 0 ? stageProfiles : [plan.echoSrcFilterProfile],
-        firTotalTapCount: totalTapCount,
-        firProcessingMode: blockPlan.processingMode,
-        firBatchFrames: blockPlan.targetBatchFrames,
-        firMaxBlockFrames: blockPlan.maxBlockFrames,
-      }),
-      warnings: [
-        ...cudaWarnings,
-        `echo_src_fir_active:${backend}:${sourceSampleRate}->${targetSampleRate}:${plan.echoSrcFilterProfile}:taps=${firPlan.tapCount}`,
-        `echo_src_fir_processing:${backend}:${blockPlan.processingMode}:batch=${blockPlan.targetBatchFrames}:block=${blockPlan.maxBlockFrames}`,
-        ...(designedStages.length > 1
-          ? [`echo_src_fir_staged_deferred_realtime:${backend}:${sourceSampleRate}->${targetSampleRate}:${plan.echoSrcFilterProfile}:designedStages=${designedStages.length}`]
-          : []),
-      ],
-    };
-    this.logger(
-      `[AudioSession] ECHO SRC FIR enabled backend=${backend} source=${sourceSampleRate} target=${targetSampleRate} factor=${upsampleFactor} channels=${channels} filter=${plan.echoSrcFilterProfile} stages=${stages.length || 1} taps=${(stageTapCounts.length > 0 ? stageTapCounts : [taps.length]).join('+')} profiles=${(stageProfiles.length > 0 ? stageProfiles : [plan.echoSrcFilterProfile]).join('+')} designedStages=${designedStages.length || 1} processing=${blockPlan.processingMode} batchFrames=${blockPlan.targetBatchFrames} maxBlockFrames=${blockPlan.maxBlockFrames}`,
-    );
-
-    const handleFirMetrics = (metrics: EchoSrcFirWorkerTransformMetrics): void => {
-      const currentPlan = this.currentPlan;
-      const runtime = currentPlan?.echoSrcRuntime;
-      if (!currentPlan || !runtime) {
-        return;
-      }
-
-      this.currentPlan = {
-        ...currentPlan,
-        echoSrcCudaActive: metrics.backend === 'cuda',
-        echoSrcRuntime: {
-          ...runtime,
-          activeBackend: metrics.backend,
-          cudaActive: metrics.backend === 'cuda',
-          firProcessingMode: blockPlan.processingMode,
-          firBatchFrames: blockPlan.targetBatchFrames,
-          firMaxBlockFrames: blockPlan.maxBlockFrames,
-          firLastInputFrames: metrics.lastInputFrames,
-          firLastOutputFrames: metrics.lastOutputFrames,
-          firWorkerRequests: metrics.requestCount,
-          firWorkerAverageMs: roundEchoSrcFirMetric(metrics.averageProcessMs),
-          firWorkerLastMs: roundEchoSrcFirMetric(metrics.lastProcessMs),
-          firRealtimeRatio: roundEchoSrcFirMetric(metrics.realtimeRatio),
-        },
-      };
-      this.emitNativeTelemetryStatus();
-    };
-
-    return new EchoSrcFirWorkerTransform({
-      client,
-      backend,
-      channels,
-      taps,
-      stages,
-      upsampleFactor: stages.length > 0 ? undefined : upsampleFactor,
-      maxBlockFrames: blockPlan.maxBlockFrames,
-      targetBatchFrames: blockPlan.targetBatchFrames > 1 ? blockPlan.targetBatchFrames : undefined,
-      sourceSampleRate,
-      fallbackToCpuOnError: backend === 'cuda',
-      onMetrics: handleFirMetrics,
-      onBackendFallback: (reason) => {
-        const currentPlan = this.currentPlan;
-        if (!currentPlan) {
-          return;
-        }
-        this.currentPlan = {
-          ...currentPlan,
-          echoSrcCudaActive: false,
-          echoSrcRuntime: createEchoSrcRuntimeStatus('fallback', {
-            sourceSampleRate,
-            targetSampleRate,
-            filterProfile: currentPlan.echoSrcFilterProfile,
-            filterSlot: currentPlan.echoSrcFilterSlot,
-            qualityProfile: currentPlan.echoSrcQualityProfile,
-            requestedBackend: 'cuda',
-            activeBackend: 'cpu',
-            fallbackReason: reason,
-            firAnalysis,
-            firStageCount: stages.length || 1,
-            firStageTapCounts: stageTapCounts.length > 0 ? stageTapCounts : [taps.length],
-            firStageProfiles: stageProfiles.length > 0 ? stageProfiles : [currentPlan.echoSrcFilterProfile],
-            firTotalTapCount: totalTapCount,
-            firProcessingMode: blockPlan.processingMode,
-            firBatchFrames: blockPlan.targetBatchFrames,
-            firMaxBlockFrames: blockPlan.maxBlockFrames,
-          }),
-          warnings: [
-            ...currentPlan.warnings.filter((warning) => !warning.startsWith('echo_src_cuda_runtime_fallback:')),
-            `echo_src_cuda_runtime_fallback:${reason}`,
-          ],
-        };
-        this.addOutputWarning(`echo_src_cuda_runtime_fallback:${reason}`);
-        this.logger(`[AudioSession] ECHO SRC CUDA FIR fell back to CPU FIR: ${reason}`);
-        this.emitStatus();
-      },
-    });
   }
 
   private emitNativeTelemetryStatus(): void {
@@ -9279,11 +10500,13 @@ export class AudioSession extends EventEmitter {
     };
   }
 
-  private async syncEqStateForPlayback(): Promise<void> {
+  private async syncEqStateForPlayback(bridge: OutputBridgeLike | null = this.bridge): Promise<void> {
     try {
-      const eqBridge = getEqBridge();
-      eqBridge.applyBoundProfileForOutput(this.createEqProfileBindingTarget());
-      await eqBridge.syncStateToNative();
+      if (!bridge?.syncDspState) {
+        return;
+      }
+      bridge.activateDspControl?.();
+      await bridge.syncDspState(this.createEqProfileBindingTarget());
     } catch (error) {
       if (!isEqControlDisconnectError(error)) {
         throw error;
@@ -9856,9 +11079,6 @@ let defaultAudioSession: AudioSession | null = null;
 export const getAudioSession = (): AudioSession => {
   if (!defaultAudioSession) {
     defaultAudioSession = new AudioSession();
-    try {
-      startAudioDaemon().catch(() => {});
-    } catch {}
   }
   return defaultAudioSession;
 };

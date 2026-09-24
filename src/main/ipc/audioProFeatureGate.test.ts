@@ -46,6 +46,14 @@ describe('audioProFeatureGate', () => {
 
     await requireEchoProForAudioDspPatch({ echoSrcMode: 'family2x' });
     await requireEchoProForAudioDspPatch({ sdmMode: 'pcmToDsd' });
-    expect(getEchoProLicenseStatusMock).toHaveBeenCalledTimes(1);
+    expect(getEchoProLicenseStatusMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('rechecks the existing local entitlement after it is revoked', async () => {
+    await expect(requireEchoProForAudioDspPatch({ dsdOutputMode: 'dop' })).resolves.toBeUndefined();
+
+    getEchoProLicenseStatusMock.mockReturnValue({ valid: false, enabled: false, features: [] });
+
+    await expect(requireEchoProForAudioDspPatch({ echoSrcMode: 'family4x' })).rejects.toThrow('echo_pro_required');
   });
 });

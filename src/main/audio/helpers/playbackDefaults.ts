@@ -1,5 +1,7 @@
 import { getAppSettings } from '../../app/appSettings';
 import { isWallpaperEngineBridgeVisualTelemetryActive } from '../../integrations/wallpaperEngine/WallpaperEngineBridgeRuntime';
+import { isStageBridgeVisualTelemetryActive } from '../../integrations/stage/StageBridgeRuntime';
+import { resolveEffectivePerformancePolicy } from '../../../shared/utils/performancePolicy';
 
 export const fallbackSampleRate = 44100;
 export const fallbackSharedMixSampleRate = 48000;
@@ -33,6 +35,7 @@ export const exclusiveInstabilityFallbackDisabledLogCooldownMs = 30_000;
 export const echoSrcCudaWorkerMaxInputSamples = 262_144;
 export const levelMeterVisualIntervalMs = 33;
 export const levelMeterStatusIntervalMs = 33;
+export const levelMeterNonVisualStatusIntervalMs = 250;
 export const mainEventLoopLagSampleIntervalMs = 2_000;
 
 export type PlaybackLoadSettings = {
@@ -44,9 +47,10 @@ export type PlaybackLoadSettings = {
 export const getPlaybackLoadSettings = (): PlaybackLoadSettings => {
   try {
     const settings = getAppSettings();
+    const performancePolicy = resolveEffectivePerformancePolicy(settings);
     return {
-      homeWaveformVisualizerEnabled: settings.homeWaveformVisualizerEnabled !== false,
-      audioVisualSpectrumEnabled: settings.audioVisualSpectrumEnabled === true,
+      homeWaveformVisualizerEnabled: performancePolicy.homeWaveformVisualizerEnabled,
+      audioVisualSpectrumEnabled: performancePolicy.audioVisualSpectrumEnabled,
       lowLoadPlaybackModeEnabled: settings.lowLoadPlaybackModeEnabled === true,
     };
   } catch {
@@ -62,7 +66,16 @@ export const isAudioVisualSpectrumEnabled = (): boolean => {
   const settings = getPlaybackLoadSettings();
   return (
     (settings.homeWaveformVisualizerEnabled && settings.audioVisualSpectrumEnabled) ||
-    isWallpaperEngineBridgeVisualTelemetryActive()
+    isWallpaperEngineBridgeVisualTelemetryActive() ||
+    isStageBridgeVisualTelemetryActive()
+  ) && !settings.lowLoadPlaybackModeEnabled;
+};
+
+export const isPlaybackIntegrationVisualTelemetryActive = (): boolean => {
+  const settings = getPlaybackLoadSettings();
+  return (
+    isWallpaperEngineBridgeVisualTelemetryActive() ||
+    isStageBridgeVisualTelemetryActive()
   ) && !settings.lowLoadPlaybackModeEnabled;
 };
 

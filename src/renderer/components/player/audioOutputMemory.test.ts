@@ -11,6 +11,23 @@ beforeEach(() => {
 });
 
 describe('audioOutputMemory', () => {
+  it('preserves remembered ASIO output mode', () => {
+    window.localStorage.setItem('echo-next.audio-output-memory', JSON.stringify({
+      enabled: true,
+      outputMode: 'asio',
+      latencyProfile: 'balanced',
+      deviceIndex: 0,
+      deviceName: 'TEAC ASIO',
+    }));
+
+    expect(readRememberedAudioOutput()).toMatchObject({
+      enabled: true,
+      outputMode: 'asio',
+      deviceIndex: 0,
+      deviceName: 'TEAC ASIO',
+    });
+  });
+
   it('defaults empty output memory to shared audio', () => {
     expect(readRememberedAudioOutput()).toMatchObject({
       enabled: false,

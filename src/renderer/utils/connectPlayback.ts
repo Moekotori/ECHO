@@ -59,4 +59,5 @@ export const playbackStatusFromConnectStatus = (
     Math.max(0, status.durationSeconds || status.metadata?.durationSeconds || (fallback.durationMs ?? 0) / 1000) * 1000,
   ),
   filePath: fallback.filePath ?? null,
+  volume: typeof status.volume === 'number' ? Math.max(0, Math.min(1, status.volume / 100)) : null,
 });

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import '../../styles/album-detail.css';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowLeft, Check, ChevronDown, Disc3, Download, Heart, Link, ListPlus, Loader2, Play, Radio, RefreshCw, Search, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronDown, Disc3, Download, Heart, Link, ListPlus, Loader2, Play, Radio, RefreshCw, Search, UserRound } from 'lucide-react';
 import type { AppSettings } from '../../../shared/types/appSettings';
 import type { DownloadJob, DownloadJobStatus } from '../../../shared/types/downloads';
 import type {
@@ -25,11 +26,19 @@ import { useAnimatedBackNavigation } from '../../hooks/useAnimatedBackNavigation
 import { useProgressiveRenderLimit } from '../../hooks/useProgressiveRenderLimit';
 import { StreamingConsentNoticeModal } from './StreamingConsentNoticeModal';
 import { translateCurrentLocale, useI18n } from '../../i18n/I18nProvider';
+import type { TranslationKey } from '../../i18n/locales';
+import { translateStatic } from '../../i18n/translateStatic';
 import { isPlaybackCancellationError, usePlaybackQueue } from '../../stores/PlaybackQueueProvider';
 import { getAccountsBridge, getAppBridge, getDownloadsBridge, getEchoBridge, getStreamingBridge } from '../../utils/echoBridge';
 import { useImeAwareDebouncedSearch } from '../../utils/imeInput';
 import { formatUserFacingError } from '../../utils/userFacingError';
 import { streamingTrackToLibraryTrack, defaultStreamingCoverThumb } from '../../utils/streamingTrack';
+import {
+  consumePendingStreamingDetailNavigation,
+  streamingDetailNavigationEvent,
+  type StreamingDetailNavigationRequest,
+  type StreamingDetailReturnTarget,
+} from '../../utils/streamingDetailNavigation';
 import {
   readStreamingSearchMemory,
   updateStreamingSearchMemory,
@@ -70,14 +79,76 @@ const providerPriority: StreamingProviderName[] = ['netease', 'qqmusic', 'plugin
 const unsupportedDownloadProviders = new Set<StreamingProviderName>(['spotify', 'tidal', 'bilibili', 'youtube', 'plugin']);
 const favoriteProviders = new Set<StreamingProviderName>(['bilibili', 'youtube', 'soundcloud']);
 const qualitySwitchPlaybackStates = new Set(['loading', 'playing']);
-const providerCacheTtlMs = 30_000;
 const albumDownloadQueueYieldMs = 90;
 const emptyTracks: StreamingTrack[] = [];
 const emptyAlbums: StreamingAlbum[] = [];
 const emptyArtists: StreamingArtist[] = [];
 const emptyPlaylists: StreamingPlaylist[] = [];
-
-let cachedProviders: { items: StreamingProviderDescriptor[]; expiresAtMs: number } | null = null;
+const streamingSearchShortcuts = ['我的世界', 'Chillhop', 'Synthwave', 'Aimer'];
+const previewCoverEcho = new URL('../../assets/echo-startup-logo.png', import.meta.url).href;
+const previewCoverFinal = new URL('../../assets/final-theme-character-hero-clean.png', import.meta.url).href;
+const previewCoverLmao = new URL('../../assets/lmao.jpeg', import.meta.url).href;
+const previewCoverNyan = new URL('../../assets/nyancat-thumb.png', import.meta.url).href;
+const previewCoverRemote = new URL('../../assets/remote-library-preview.png', import.meta.url).href;
+const streamingDesignPreviewProviders: StreamingProviderDescriptor[] = [
+  { name: 'netease', displayName: '网易云音乐', enabled: true, supportsSearch: true, supportsPlayback: true, supportsLyrics: true, supportsMv: true, requiresAccount: false },
+  { name: 'qqmusic', displayName: 'QQ 音乐', enabled: true, supportsSearch: true, supportsPlayback: true, supportsLyrics: true, supportsMv: true, requiresAccount: false },
+  { name: 'bilibili', displayName: 'Bilibili', enabled: true, supportsSearch: true, supportedSearchMediaTypes: ['track'], supportsPlayback: true, supportsLyrics: false, supportsMv: true, requiresAccount: false },
+  { name: 'youtube', displayName: 'YouTube', enabled: true, supportsSearch: true, supportedSearchMediaTypes: ['track'], supportsPlayback: true, supportsLyrics: false, supportsMv: true, requiresAccount: false },
+  { name: 'soundcloud', displayName: 'SoundCloud', enabled: false, supportsSearch: true, supportedSearchMediaTypes: ['track'], supportsPlayback: true, supportsLyrics: false, supportsMv: false, requiresAccount: false },
+  { name: 'spotify', displayName: 'Spotify', enabled: true, supportsSearch: true, supportsPlayback: true, supportsLyrics: false, supportsMv: false, requiresAccount: true, accountConnected: false },
+  { name: 'tidal', displayName: 'TIDAL', enabled: false, supportsSearch: true, supportsPlayback: true, supportsLyrics: false, supportsMv: false, requiresAccount: true, accountConnected: false },
+  { name: 'qobuz', displayName: 'Qobuz', enabled: false, supportsSearch: true, supportsPlayback: true, supportsLyrics: false, supportsMv: false, requiresAccount: true, accountConnected: false },
+  { name: 'plugin', displayName: '插件音源', enabled: true, supportsSearch: true, supportedSearchMediaTypes: ['track'], supportsPlayback: true, supportsLyrics: false, supportsMv: false, requiresAccount: false },
+];
+const streamingDesignPreviewResult: StreamingSearchResult = {
+  provider: 'netease',
+  query: '我的世界',
+  page: 1,
+  pageSize: 30,
+  total: 5,
+  hasMore: true,
+  tracks: [
+    { id: 'preview-minecraft', provider: 'netease', providerTrackId: 'preview-minecraft', stableKey: 'streaming:netease:preview-minecraft', title: 'Minecraft', artist: 'C418', artists: [], album: 'Minecraft - Volume Alpha', albumId: null, albumArtist: 'C418', duration: 254, coverUrl: previewCoverNyan, coverThumb: previewCoverNyan, qualities: ['high', 'lossless'], explicit: false, playable: true, unavailableReason: null, lyricsStatus: 'unknown', mvStatus: 'unknown' },
+    { id: 'preview-my-world', provider: 'netease', providerTrackId: 'preview-my-world', stableKey: 'streaming:netease:preview-my-world', title: '我的世界', artist: '陈奕迅', artists: [], album: '我的世界', albumId: null, albumArtist: '陈奕迅', duration: 280, coverUrl: previewCoverLmao, coverThumb: previewCoverLmao, qualities: ['high', 'lossless'], explicit: false, playable: true, unavailableReason: null, lyricsStatus: 'unknown', mvStatus: 'unknown' },
+    { id: 'preview-monkeys', provider: 'netease', providerTrackId: 'preview-monkeys', stableKey: 'streaming:netease:preview-monkeys', title: 'Monkeys Spinning Monkeys', artist: 'Kevin MacLeod', artists: [], album: 'Monkeys Spinning Monkeys', albumId: null, albumArtist: 'Kevin MacLeod', duration: 125, coverUrl: previewCoverEcho, coverThumb: previewCoverEcho, qualities: ['high', 'lossless'], explicit: false, playable: true, unavailableReason: null, lyricsStatus: 'unknown', mvStatus: 'unknown' },
+    { id: 'preview-lava-chicken', provider: 'netease', providerTrackId: 'preview-lava-chicken', stableKey: 'streaming:netease:preview-lava-chicken', title: "Steve's Lava Chicken", artist: 'Jack Black', artists: [], album: 'A Minecraft Movie (Original Motion Picture Soundtrack)', albumId: null, albumArtist: 'Jack Black', duration: 34, coverUrl: previewCoverFinal, coverThumb: previewCoverFinal, qualities: ['high'], explicit: false, playable: true, unavailableReason: null, lyricsStatus: 'unknown', mvStatus: 'unknown' },
+    { id: 'preview-to-my-world', provider: 'netease', providerTrackId: 'preview-to-my-world', stableKey: 'streaming:netease:preview-to-my-world', title: '致我的世界', artist: '小熙', artists: [], album: '我的世界', albumId: null, albumArtist: '小熙', duration: 222, coverUrl: previewCoverRemote, coverThumb: previewCoverRemote, qualities: ['high', 'lossless'], explicit: false, playable: true, unavailableReason: null, lyricsStatus: 'unknown', mvStatus: 'unknown' },
+  ],
+  albums: [],
+  artists: [],
+  playlists: [],
+  mvs: [],
+};
+const streamingDesignPreviewArtist: StreamingArtist = {
+  id: 'preview-artist-c418',
+  provider: 'netease',
+  providerArtistId: 'preview-artist-c418',
+  name: 'C418',
+  avatarUrl: previewCoverNyan,
+  coverUrl: previewCoverNyan,
+};
+const streamingDesignPreviewArtistDetail: StreamingArtistDetail = {
+  ...streamingDesignPreviewArtist,
+  topTracks: streamingDesignPreviewResult.tracks,
+  albums: [],
+};
+const streamingDesignPreviewAlbum: StreamingAlbum = {
+  id: 'preview-album-minecraft',
+  provider: 'netease',
+  providerAlbumId: 'preview-album-minecraft',
+  title: 'Minecraft - Volume Alpha',
+  artist: 'C418',
+  artists: [],
+  coverUrl: previewCoverNyan,
+  coverThumb: previewCoverNyan,
+  releaseDate: '2011',
+  trackCount: streamingDesignPreviewResult.tracks.length,
+};
+const streamingDesignPreviewAlbumDetail: StreamingAlbumDetail = {
+  ...streamingDesignPreviewAlbum,
+  tracks: streamingDesignPreviewResult.tracks,
+};
 
 const streamingSearchResultKey = (provider: StreamingProviderName, query: string, activeTab: StreamingMediaType): string =>
   `${provider}:${activeTab}:${query.trim().toLocaleLowerCase()}`;
@@ -103,20 +174,6 @@ const favoriteIdsFromSnapshot = (snapshot: StreamingFavoritesSnapshot | null | u
   return ids;
 };
 
-const readCachedProviders = (): StreamingProviderDescriptor[] | null => {
-  if (!cachedProviders || cachedProviders.expiresAtMs <= Date.now()) {
-    cachedProviders = null;
-    return null;
-  }
-
-  return cachedProviders.items;
-};
-
-const writeCachedProviders = (items: StreamingProviderDescriptor[]): StreamingProviderDescriptor[] => {
-  cachedProviders = { items, expiresAtMs: Date.now() + providerCacheTtlMs };
-  return items;
-};
-
 const readStreamingDownloadActionsEnabled = (settings: Partial<AppSettings> | null | undefined): boolean =>
   settings?.downloadsFeatureUnlocked === true;
 
@@ -131,16 +188,31 @@ const formatDuration = (duration: number | null): string => {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-const statusText = (provider: StreamingProviderDescriptor): string => {
+const accountAwareStreamingProviders = new Set<StreamingProviderName>(['netease', 'qqmusic', 'soundcloud', 'spotify', 'tidal', 'qobuz']);
+type StreamingProviderRailState = 'available' | 'disabled' | 'signedIn' | 'signedOut';
+
+const providerRailState = (provider: StreamingProviderDescriptor): StreamingProviderRailState => {
+  if (accountAwareStreamingProviders.has(provider.name) && provider.accountConnected !== true) {
+    return 'signedOut';
+  }
   if (!provider.enabled) {
+    return 'disabled';
+  }
+  return accountAwareStreamingProviders.has(provider.name) ? 'signedIn' : 'available';
+};
+
+const providerRailStatusText = (provider: StreamingProviderDescriptor): string => {
+  const state = providerRailState(provider);
+  if (state === 'disabled') {
     return translateCurrentLocale('streaming.provider.disabled');
   }
-  if (provider.requiresAccount && !provider.accountConnected) {
+  if (state === 'signedOut') {
     return translateCurrentLocale('streaming.provider.notLoggedIn');
   }
-  return provider.accountDisplayName
-    ? translateCurrentLocale('streaming.provider.loggedIn', { name: provider.accountDisplayName })
-    : translateCurrentLocale('streaming.provider.available');
+  if (state === 'signedIn') {
+    return translateCurrentLocale('streaming.provider.loggedIn', { name: provider.accountDisplayName ?? provider.displayName });
+  }
+  return translateCurrentLocale('streaming.provider.available');
 };
 
 const qualityToPlaybackQuality = (quality: QualityPreference): StreamingAudioQuality => quality;
@@ -160,17 +232,20 @@ const showChromeNotice = (message: string): void => {
   window.dispatchEvent(new CustomEvent('app:show-chrome-notice', { detail: message }));
 };
 
-const downloadStatusLabels: Record<DownloadJobStatus, string> = {
-  queued: '排队中',
-  probing: '解析链接',
-  downloading: '下载中',
-  extracting_audio: '提取音频',
-  importing: '导入曲库',
-  binding_mv: '绑定 MV',
-  completed: '下载成功',
-  failed: '下载失败',
-  cancelled: '已取消',
+const downloadStatusLabelKeys: Record<DownloadJobStatus, TranslationKey> = {
+  queued: 'playerBar.download.status.queued',
+  probing: 'playerBar.download.status.probing',
+  downloading: 'playerBar.download.status.downloading',
+  extracting_audio: 'playerBar.download.status.extracting_audio',
+  importing: 'playerBar.download.status.importing',
+  binding_mv: 'playerBar.download.status.binding_mv',
+  completed: 'playerBar.download.status.completed',
+  failed: 'playerBar.download.status.failed',
+  cancelled: 'playerBar.download.status.cancelled',
 };
+
+const downloadStatusLabel = (status: DownloadJobStatus): string =>
+  translateStatic(downloadStatusLabelKeys[status]);
 
 const streamingTrackWebUrl = (track: StreamingTrack): string | null => {
   switch (track.provider) {
@@ -277,10 +352,16 @@ const streamingTrackArtists = (track: StreamingTrack): StreamingTrack['artists']
 export const StreamingSearchPage = (): JSX.Element => {
   const { t } = useI18n();
   const queue = usePlaybackQueue();
+  const streamingDesignPreviewTarget = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
+    ? new URLSearchParams(window.location.search).get('streamingPreview')
+    : null;
+  const streamingDesignPreview = streamingDesignPreviewTarget !== null;
   const initialMemory = readStreamingSearchMemory();
-  const initialProvider = hiddenProviderTabs.has(initialMemory.provider) ? 'netease' : initialMemory.provider;
-  const initialResult = initialMemory.result && !hiddenProviderTabs.has(initialMemory.result.provider) ? initialMemory.result : null;
-  const [providers, setProviders] = useState<StreamingProviderDescriptor[]>(() => readCachedProviders() ?? []);
+  const initialProvider = streamingDesignPreview ? 'netease' : hiddenProviderTabs.has(initialMemory.provider) ? 'netease' : initialMemory.provider;
+  const initialResult = streamingDesignPreview
+    ? streamingDesignPreviewResult
+    : initialMemory.result && !hiddenProviderTabs.has(initialMemory.result.provider) ? initialMemory.result : null;
+  const [providers, setProviders] = useState<StreamingProviderDescriptor[]>(() => streamingDesignPreview ? streamingDesignPreviewProviders : []);
   const [provider, setProvider] = useState<StreamingProviderName>(initialProvider);
   const [quality, setQuality] = useState<QualityPreference>(initialMemory.quality);
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
@@ -288,18 +369,21 @@ export const StreamingSearchPage = (): JSX.Element => {
   const [activeTab, setActiveTab] = useState<StreamingMediaType>(initialMemory.activeTab);
   const {
     searchInput: input,
+    setSearchInput,
     search: query,
     searchInputProps,
-  } = useImeAwareDebouncedSearch(300, initialMemory.input || initialMemory.query);
+  } = useImeAwareDebouncedSearch(300, streamingDesignPreview ? streamingDesignPreviewResult.query : initialMemory.input || initialMemory.query);
   const [result, setResult] = useState<StreamingSearchResult | null>(initialResult);
-  const [selectedAlbum, setSelectedAlbum] = useState<StreamingAlbum | null>(null);
-  const [selectedAlbumDetail, setSelectedAlbumDetail] = useState<StreamingAlbumDetail | null>(null);
+  const [selectedAlbum, setSelectedAlbum] = useState<StreamingAlbum | null>(() => streamingDesignPreviewTarget === 'album' ? streamingDesignPreviewAlbum : null);
+  const [selectedAlbumDetail, setSelectedAlbumDetail] = useState<StreamingAlbumDetail | null>(() => streamingDesignPreviewTarget === 'album' ? streamingDesignPreviewAlbumDetail : null);
   const [isAlbumDetailLoading, setIsAlbumDetailLoading] = useState(false);
   const [albumDetailError, setAlbumDetailError] = useState<string | null>(null);
-  const [selectedArtist, setSelectedArtist] = useState<StreamingArtist | null>(null);
-  const [selectedArtistDetail, setSelectedArtistDetail] = useState<StreamingArtistDetail | null>(null);
+  const [selectedArtist, setSelectedArtist] = useState<StreamingArtist | null>(() => streamingDesignPreviewTarget === 'artist' ? streamingDesignPreviewArtist : null);
+  const [selectedArtistDetail, setSelectedArtistDetail] = useState<StreamingArtistDetail | null>(() => streamingDesignPreviewTarget === 'artist' ? streamingDesignPreviewArtistDetail : null);
   const [isArtistDetailLoading, setIsArtistDetailLoading] = useState(false);
   const [artistDetailError, setArtistDetailError] = useState<string | null>(null);
+  const [detailReturnTo, setDetailReturnTo] = useState<StreamingDetailReturnTarget | null>(null);
+  const [externalDetailKind, setExternalDetailKind] = useState<StreamingDetailNavigationRequest['kind'] | null>(null);
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [accountPlaylistProvider, setAccountPlaylistProvider] = useState<Extract<StreamingProviderName, 'netease' | 'qqmusic'>>('netease');
   const [accountPlaylists, setAccountPlaylists] = useState<StreamingAccountPlaylist[]>([]);
@@ -307,8 +391,8 @@ export const StreamingSearchPage = (): JSX.Element => {
   const [isAccountPlaylistPanelOpen, setIsAccountPlaylistPanelOpen] = useState(false);
   const [isLoadingAccountPlaylists, setIsLoadingAccountPlaylists] = useState(false);
   const [syncingAccountPlaylistIds, setSyncingAccountPlaylistIds] = useState<Record<string, boolean>>({});
-  const [streamingPlaylistImportNoticeAccepted, setStreamingPlaylistImportNoticeAccepted] = useState(false);
-  const [streamingNoticeSettingsLoaded, setStreamingNoticeSettingsLoaded] = useState(false);
+  const [streamingPlaylistImportNoticeAccepted, setStreamingPlaylistImportNoticeAccepted] = useState(streamingDesignPreview);
+  const [streamingNoticeSettingsLoaded, setStreamingNoticeSettingsLoaded] = useState(streamingDesignPreview);
   const [streamingPlaylistNoticeOpen, setStreamingPlaylistNoticeOpen] = useState(false);
   const [streamingPlaylistNoticeConsent, setStreamingPlaylistNoticeConsent] = useState('');
   const [streamingNoticeDismissed, setStreamingNoticeDismissed] = useState(false);
@@ -328,10 +412,27 @@ export const StreamingSearchPage = (): JSX.Element => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [failedCoverUrls, setFailedCoverUrls] = useState<Record<string, string>>(initialMemory.failedCoverUrls);
-  const { isReturning: isAlbumReturning, returnBack: returnFromAlbum } = useAnimatedBackNavigation(() => setSelectedAlbum(null), Boolean(selectedAlbum));
-  const { isReturning: isArtistReturning, returnBack: returnFromArtist } = useAnimatedBackNavigation(() => setSelectedArtist(null), Boolean(selectedArtist) && !selectedAlbum);
+  const returnFromExternalDetail = useCallback((kind: StreamingDetailNavigationRequest['kind']): void => {
+    if (!detailReturnTo || externalDetailKind !== kind) {
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('app:navigate:route', { detail: detailReturnTo }));
+    setDetailReturnTo(null);
+    setExternalDetailKind(null);
+  }, [detailReturnTo, externalDetailKind]);
+  const { isReturning: isAlbumReturning, returnBack: returnFromAlbum } = useAnimatedBackNavigation(() => {
+    setSelectedAlbum(null);
+    returnFromExternalDetail('album');
+  }, Boolean(selectedAlbum));
+  const { isReturning: isArtistReturning, returnBack: returnFromArtist } = useAnimatedBackNavigation(() => {
+    setSelectedArtist(null);
+    returnFromExternalDetail('artist');
+  }, Boolean(selectedArtist) && !selectedAlbum);
   const requestIdRef = useRef(0);
   const playActionIdRef = useRef(0);
+  const playbackPrepareTimerRef = useRef<number | null>(null);
+  const playbackPrepareKeyRef = useRef<string | null>(null);
+  const playbackPrepareInFlightRef = useRef<Promise<void> | null>(null);
   const resultRef = useRef<StreamingSearchResult | null>(initialResult);
   const listRef = useRef<HTMLDivElement | null>(null);
   const notifiedDownloadJobIdsRef = useRef<Set<string>>(new Set());
@@ -361,6 +462,15 @@ export const StreamingSearchPage = (): JSX.Element => {
     [providers],
   );
   const currentProvider = providerOptions.find((item) => item.name === provider) ?? providerOptions[0];
+  const visibleSearchTabs = useMemo(() => {
+    const supportedMediaTypes = currentProvider?.supportedSearchMediaTypes;
+    return supportedMediaTypes?.length
+      ? tabs.filter((tab) => supportedMediaTypes.includes(tab.key))
+      : tabs;
+  }, [currentProvider]);
+  const currentProviderResolved = currentProvider?.name === provider;
+  const activeTabSupported = visibleSearchTabs.some((tab) => tab.key === activeTab);
+  const canRunSearchForActiveTab = currentProviderResolved && activeTabSupported;
   const syncableProviders = providerOptions.filter((item) => item.name === 'netease' || item.name === 'qqmusic');
   const accountPlaylistProviderDescriptor = syncableProviders.find((item) => item.name === accountPlaylistProvider);
   const currentQuality = qualities.find((item) => item.key === quality) ?? qualities[0];
@@ -382,6 +492,10 @@ export const StreamingSearchPage = (): JSX.Element => {
       ? t('streaming.result.searching')
       : t('streaming.result.count', { count: resultCount })
     : t('streaming.hero.preparingSearch');
+  const recentSearches = streamingSearchShortcuts;
+  const handleSearchShortcut = (value: string): void => {
+    setSearchInput(value);
+  };
   const searchStateMessage =
     isLoading && resultCount === 0
       ? t('streaming.result.searchingEllipsis')
@@ -399,6 +513,61 @@ export const StreamingSearchPage = (): JSX.Element => {
           ? t('streaming.empty.searchHint')
           : null;
   const currentStableKey = queue.currentTrack?.mediaType === 'streaming' ? queue.currentTrack.stableKey ?? queue.currentTrack.id : null;
+  const cancelPlaybackPrepare = useCallback((): void => {
+    if (playbackPrepareTimerRef.current !== null) {
+      window.clearTimeout(playbackPrepareTimerRef.current);
+      playbackPrepareTimerRef.current = null;
+    }
+    playbackPrepareKeyRef.current = null;
+  }, []);
+  const schedulePlaybackPrepare = useCallback((track: StreamingTrack): void => {
+    cancelPlaybackPrepare();
+    if (!track.playable || !window.echo?.playback?.prepareMediaItem) {
+      return;
+    }
+
+    const prepareKey = `${track.stableKey}:${quality}`;
+    playbackPrepareKeyRef.current = prepareKey;
+    playbackPrepareTimerRef.current = window.setTimeout(() => {
+      playbackPrepareTimerRef.current = null;
+      if (playbackPrepareKeyRef.current !== prepareKey) {
+        return;
+      }
+      if (playbackPrepareInFlightRef.current) {
+        return;
+      }
+
+      const prepare = window.echo?.playback?.prepareMediaItem?.({
+        item: {
+          mediaType: 'streaming',
+          trackId: track.stableKey,
+          provider: track.provider,
+          providerTrackId: track.providerTrackId,
+          quality: qualityToPlaybackQuality(quality),
+          stableKey: track.stableKey,
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+          albumArtist: track.albumArtist,
+          duration: track.duration,
+          coverThumb: track.coverThumb,
+          playable: track.playable,
+          unavailableReason: track.unavailableReason,
+        },
+      });
+      if (!prepare) {
+        return;
+      }
+      const inFlight = prepare
+        .catch(() => undefined)
+        .finally(() => {
+          if (playbackPrepareInFlightRef.current === inFlight) {
+            playbackPrepareInFlightRef.current = null;
+          }
+        });
+      playbackPrepareInFlightRef.current = inFlight;
+    }, 180);
+  }, [cancelPlaybackPrepare, quality]);
   const selectedAlbumTrackRenderLimit = useProgressiveRenderLimit({
     identityKey: selectedAlbumDetail?.id ?? selectedAlbum?.id ?? null,
     itemCount: selectedAlbumDetail?.tracks.length ?? 0,
@@ -419,11 +588,13 @@ export const StreamingSearchPage = (): JSX.Element => {
     }
   }, [activeTab]);
 
+  useEffect(() => cancelPlaybackPrepare, [cancelPlaybackPrepare]);
+
   useEffect(() => {
-    if (provider === 'plugin' && activeTab !== 'track') {
-      setActiveTab('track');
+    if (currentProviderResolved && !activeTabSupported) {
+      setActiveTab(visibleSearchTabs[0]?.key ?? 'track');
     }
-  }, [activeTab, provider]);
+  }, [activeTabSupported, currentProviderResolved, visibleSearchTabs]);
 
   useEffect(() => {
     resultRef.current = result;
@@ -528,6 +699,9 @@ export const StreamingSearchPage = (): JSX.Element => {
   }, [streamingNoticeDismissed, streamingNoticeSettingsLoaded, streamingPlaylistImportNoticeAccepted, streamingPlaylistNoticeOpen]);
 
   useEffect(() => {
+    if (streamingDesignPreview) {
+      return undefined;
+    }
     if (!streamingPlaylistImportNoticeAccepted) {
       return undefined;
     }
@@ -552,26 +726,20 @@ export const StreamingSearchPage = (): JSX.Element => {
           : providerPriority.find((name) => visibleItems.some((item) => item.name === name && item.enabled)) ?? visibleItems.find((item) => item.enabled)?.name ?? 'netease';
       });
     };
-    const loadProviders = (forceRefresh = false): void => {
-      const cached = forceRefresh ? null : readCachedProviders();
-      if (cached) {
-        applyProviders(cached);
-        return;
-      }
-
+    const loadProviders = (): void => {
       void streaming
         .getProviders()
-        .then((items) => applyProviders(writeCachedProviders(items)))
+        .then(applyProviders)
         .catch(() => undefined);
     };
 
     loadProviders();
-    const unsubscribe = getAccountsBridge()?.onStatusesChanged?.(() => loadProviders(true));
+    const unsubscribe = getAccountsBridge()?.onStatusesChanged?.(loadProviders);
     return () => {
       disposed = true;
       unsubscribe?.();
     };
-  }, [streamingPlaylistImportNoticeAccepted]);
+  }, [streamingDesignPreview, streamingPlaylistImportNoticeAccepted]);
 
   const runSearch = useCallback(
     async (nextPage: number, mode: 'replace' | 'append'): Promise<void> => {
@@ -589,7 +757,7 @@ export const StreamingSearchPage = (): JSX.Element => {
 
       if (!streaming) {
         setResult(null);
-        setError('桌面桥接不可用，请在 ECHO Next 客户端中使用流媒体。');
+        setError(translateStatic('streaming.error.desktopBridge'));
         return;
       }
 
@@ -597,6 +765,9 @@ export const StreamingSearchPage = (): JSX.Element => {
         setResult(null);
         setError(null);
         setIsLoading(false);
+        return;
+      }
+      if (!canRunSearchForActiveTab) {
         return;
       }
 
@@ -644,7 +815,10 @@ export const StreamingSearchPage = (): JSX.Element => {
             return;
           }
 
-          setError(formatUserFacingError(searchError, { context: 'streaming', fallback: '流媒体服务暂时不可用' }));
+          setError(formatUserFacingError(searchError, {
+            context: 'streaming',
+            fallback: translateStatic('streaming.error.serviceUnavailable'),
+          }));
           setResult(null);
         }
       } finally {
@@ -653,13 +827,12 @@ export const StreamingSearchPage = (): JSX.Element => {
         }
       }
     },
-    [activeTab, provider, query, streamingPlaylistImportNoticeAccepted],
+    [activeTab, canRunSearchForActiveTab, provider, query, streamingPlaylistImportNoticeAccepted],
   );
 
   useEffect(() => {
     const restoredResultKey = restoredResultKeyRef.current;
     if (restoredResultKey && resultRef.current && restoredResultKey === streamingSearchResultKey(provider, query, activeTab)) {
-      restoredResultKeyRef.current = null;
       return;
     }
 
@@ -707,6 +880,13 @@ export const StreamingSearchPage = (): JSX.Element => {
       return undefined;
     }
 
+    if (streamingDesignPreviewTarget === 'album' && selectedAlbum.id === streamingDesignPreviewAlbum.id) {
+      setSelectedAlbumDetail(streamingDesignPreviewAlbumDetail);
+      setAlbumDetailError(null);
+      setIsAlbumDetailLoading(false);
+      return undefined;
+    }
+
     const streaming = getStreamingBridge();
     if (!streaming?.getAlbum) {
       setSelectedAlbumDetail(null);
@@ -744,11 +924,18 @@ export const StreamingSearchPage = (): JSX.Element => {
     return () => {
       isMounted = false;
     };
-  }, [selectedAlbum]);
+  }, [selectedAlbum, streamingDesignPreviewTarget]);
 
   useEffect(() => {
     if (!selectedArtist) {
       setSelectedArtistDetail(null);
+      setArtistDetailError(null);
+      setIsArtistDetailLoading(false);
+      return undefined;
+    }
+
+    if (streamingDesignPreviewTarget === 'artist' && selectedArtist.id === streamingDesignPreviewArtist.id) {
+      setSelectedArtistDetail(streamingDesignPreviewArtistDetail);
       setArtistDetailError(null);
       setIsArtistDetailLoading(false);
       return undefined;
@@ -791,7 +978,7 @@ export const StreamingSearchPage = (): JSX.Element => {
     return () => {
       isMounted = false;
     };
-  }, [selectedArtist]);
+  }, [selectedArtist, streamingDesignPreviewTarget]);
 
   useEffect(() => {
     const downloads = getDownloadsBridge();
@@ -812,7 +999,9 @@ export const StreamingSearchPage = (): JSX.Element => {
           notifiedDownloadJobIdsRef.current.add(job.id);
           const matchedTrack = visibleKnownTracks.find((track) => track.stableKey === matchedTrackKey);
           setActionError(null);
-          setActionMessage(`下载成功：${job.title ?? matchedTrack?.title ?? job.sourceUrl}`);
+          setActionMessage(translateStatic('streaming.message.downloadCompleted', {
+            title: job.title ?? matchedTrack?.title ?? job.sourceUrl,
+          }));
           break;
         }
       }
@@ -830,9 +1019,22 @@ export const StreamingSearchPage = (): JSX.Element => {
         const notice =
           terminalCount >= albumDownload.total
             ? failedCount > 0
-              ? `专辑下载结束：${albumDownload.title}，完成 ${completedCount}/${albumDownload.total}，失败 ${failedCount}`
-              : `专辑下载完成：${albumDownload.title}（${albumDownload.total}/${albumDownload.total}）`
-            : `专辑下载中：${albumDownload.title}，${completedCount}/${albumDownload.total} · ${progress}%`;
+              ? translateStatic('streaming.message.albumDownloadFinishedPartial', {
+                  title: albumDownload.title,
+                  done: completedCount,
+                  total: albumDownload.total,
+                  failed: failedCount,
+                })
+              : translateStatic('streaming.message.albumDownloadDone', {
+                  title: albumDownload.title,
+                  total: albumDownload.total,
+                })
+            : translateStatic('streaming.message.albumDownloadProgress', {
+                title: albumDownload.title,
+                done: completedCount,
+                total: albumDownload.total,
+                progress,
+              });
 
         if (lastAlbumDownloadNoticeRef.current !== notice) {
           lastAlbumDownloadNoticeRef.current = notice;
@@ -913,7 +1115,7 @@ export const StreamingSearchPage = (): JSX.Element => {
       }
 
       if (!track.playable) {
-      setActionError(track.unavailableReason ?? '这首歌暂时不可播放');
+      setActionError(track.unavailableReason ?? translateStatic('streaming.error.trackUnplayable'));
         setActionMessage(null);
         return;
       }
@@ -944,7 +1146,10 @@ export const StreamingSearchPage = (): JSX.Element => {
           return;
         }
 
-        setActionError(formatUserFacingError(playError, { context: 'streaming', fallback: '流媒体服务暂时不可用' }));
+        setActionError(formatUserFacingError(playError, {
+          context: 'streaming',
+          fallback: translateStatic('streaming.error.serviceUnavailable'),
+        }));
       } finally {
         if (playActionIdRef.current === playActionId) {
           setResolvingTrackKey(null);
@@ -957,13 +1162,13 @@ export const StreamingSearchPage = (): JSX.Element => {
   const handleAddToQueue = useCallback(
     (track: StreamingTrack): void => {
       if (!track.playable) {
-        setActionError(track.unavailableReason ?? '这首歌暂时不可播放');
+        setActionError(track.unavailableReason ?? translateStatic('streaming.error.trackUnplayable'));
         setActionMessage(null);
         return;
       }
 
       setActionError(null);
-      setActionMessage('已加入队列');
+      setActionMessage(translateStatic('streaming.message.addedToQueue'));
       queue.appendToQueue(streamingTrackToLibraryTrack(track, quality), source);
       setQueuedTrackKey(track.stableKey);
       window.setTimeout(() => setQueuedTrackKey((current) => (current === track.stableKey ? null : current)), 1400);
@@ -991,9 +1196,16 @@ export const StreamingSearchPage = (): JSX.Element => {
       setFavoriteTrackIds(favoriteIdsFromSnapshot(result.snapshot));
       window.dispatchEvent(new CustomEvent('streaming:favorites-changed', { detail: result.snapshot }));
       setActionError(null);
-      setActionMessage(result.favorite ? `已收藏：${track.title}` : `已取消收藏：${track.title}`);
+      setActionMessage(
+        result.favorite
+          ? translateStatic('streaming.message.favorited', { title: track.title })
+          : translateStatic('streaming.message.unfavorited', { title: track.title }),
+      );
     } catch (favoriteError) {
-      setActionError(formatUserFacingError(favoriteError, { context: 'streaming', fallback: '收藏操作没有成功' }));
+      setActionError(formatUserFacingError(favoriteError, {
+        context: 'streaming',
+        fallback: translateStatic('streaming.error.favoriteFailed'),
+      }));
       setActionMessage(null);
     } finally {
       setFavoriteTrackKey((current) => (current === track.stableKey ? null : current));
@@ -1002,21 +1214,21 @@ export const StreamingSearchPage = (): JSX.Element => {
 
   const handleDownload = useCallback(async (track: StreamingTrack): Promise<void> => {
     if (unsupportedDownloadProviders.has(track.provider)) {
-      setActionError('这个平台在 ECHO Next 中仅支持流播放，不提供下载任务。');
+      setActionError(translateStatic('streaming.error.platformStreamOnly'));
       setActionMessage(null);
       return;
     }
 
     const sourceUrl = streamingTrackWebUrl(track);
     if (!sourceUrl) {
-      setActionError('这个平台暂不支持从流媒体结果直接下载。');
+      setActionError(translateStatic('streaming.error.noDirectDownload'));
       setActionMessage(null);
       return;
     }
 
     const downloads = getDownloadsBridge();
     if (!downloads?.createUrlJob) {
-      setActionError('桌面下载服务不可用。');
+      setActionError(translateStatic('streaming.error.downloadService'));
       setActionMessage(null);
       return;
     }
@@ -1027,7 +1239,7 @@ export const StreamingSearchPage = (): JSX.Element => {
     try {
       const streaming = getStreamingBridge();
       if (!streaming?.resolvePlayback) {
-        throw new Error('桌面桥接不可用，无法解析流媒体下载地址。');
+        throw new Error(translateStatic('error.bridge.streamingDownloadResolve'));
       }
       const source = await streaming.resolvePlayback({
         provider: track.provider,
@@ -1053,9 +1265,12 @@ export const StreamingSearchPage = (): JSX.Element => {
       });
       setDownloadJobs((current) => (current.some((item) => item.id === job.id) ? current : [job, ...current]));
       setDownloadJobIdsByTrackKey((current) => ({ ...current, [track.stableKey]: job.id }));
-      setActionMessage(`已加入下载队列：${track.title}`);
+      setActionMessage(translateStatic('streaming.message.downloadQueued', { title: track.title }));
     } catch (downloadError) {
-      setActionError(formatUserFacingError(downloadError, { context: 'downloads', fallback: '添加下载任务失败' }));
+      setActionError(formatUserFacingError(downloadError, {
+        context: 'downloads',
+        fallback: translateStatic('streaming.error.downloadJobFailed'),
+      }));
       setActionMessage(null);
     } finally {
       setDownloadingTrackKey((current) => (current === track.stableKey ? null : current));
@@ -1071,8 +1286,8 @@ export const StreamingSearchPage = (): JSX.Element => {
     const downloads = getDownloadsBridge();
     const streaming = getStreamingBridge();
     if (!downloads?.createUrlJob || !streaming?.resolvePlayback) {
-      setAlbumDetailError('Desktop download bridge unavailable. Open ECHO Next in Electron to download streaming albums.');
-      showChromeNotice('下载服务不可用：请在 ECHO Next 桌面端使用。');
+      setAlbumDetailError(translateStatic('streaming.error.downloadServiceDesktop'));
+      showChromeNotice(translateStatic('streaming.error.downloadServiceDesktop'));
       return;
     }
 
@@ -1083,8 +1298,8 @@ export const StreamingSearchPage = (): JSX.Element => {
     );
 
     if (downloadableTracks.length === 0) {
-      setAlbumDetailError('这张流媒体专辑没有可下载的歌曲。');
-      showChromeNotice(`无法下载专辑：${detail.title}`);
+      setAlbumDetailError(translateStatic('streaming.error.albumNoDownloadable'));
+      showChromeNotice(translateStatic('streaming.message.albumDownloadFailed', { title: detail.title }));
       return;
     }
 
@@ -1094,6 +1309,7 @@ export const StreamingSearchPage = (): JSX.Element => {
     const albumSubdirectory = [detail.artist, detail.title].filter(Boolean).join(' - ') || detail.title;
     let queuedCount = 0;
     let failedToQueueCount = 0;
+    let lastQueueError: string | null = null;
 
     setAlbumDetailError(null);
     setActionError(null);
@@ -1106,7 +1322,10 @@ export const StreamingSearchPage = (): JSX.Element => {
       failedToQueue: 0,
       jobIds: [],
     });
-    showChromeNotice(`准备下载专辑：${detail.title}（0/${downloadableTracks.length}）`);
+    showChromeNotice(translateStatic('streaming.message.albumDownloadPrepare', {
+      title: detail.title,
+      total: downloadableTracks.length,
+    }));
 
     for (let index = 0; index < downloadableTracks.length; index += 1) {
       if (albumDownloadRunIdRef.current !== runId) {
@@ -1168,12 +1387,16 @@ export const StreamingSearchPage = (): JSX.Element => {
         );
       } catch (downloadError) {
         failedToQueueCount += 1;
+        lastQueueError = formatUserFacingError(downloadError, {
+          context: 'downloads',
+          fallback: translateStatic('streaming.error.downloadJobFailed'),
+        });
         setAlbumDownload((current) =>
           current?.albumId === detail.id
             ? { ...current, failedToQueue: failedToQueueCount }
             : current,
         );
-        setActionError(formatUserFacingError(downloadError, { context: 'downloads', fallback: '添加专辑下载任务失败' }));
+        setActionError(lastQueueError);
       } finally {
         setDownloadingTrackKey((current) => (current === track.stableKey ? null : current));
       }
@@ -1185,9 +1408,20 @@ export const StreamingSearchPage = (): JSX.Element => {
       return;
     }
 
-    const finalNotice = failedToQueueCount > 0
-      ? `专辑已加入下载队列：${detail.title}，成功 ${queuedCount}/${downloadableTracks.length}，失败 ${failedToQueueCount}`
-      : `专辑已加入下载队列：${detail.title}（${queuedCount}/${downloadableTracks.length}）`;
+    const finalNotice = queuedCount === 0
+      ? translateStatic('streaming.message.albumDownloadFailed', { title: detail.title })
+        + (lastQueueError ? ` ${lastQueueError}` : '')
+      : failedToQueueCount > 0
+        ? translateStatic('streaming.message.albumDownloadFinishedPartial', {
+            title: detail.title,
+            done: queuedCount,
+            total: downloadableTracks.length,
+            failed: failedToQueueCount,
+          })
+        : translateStatic('streaming.message.albumDownloadDone', {
+            title: detail.title,
+            total: queuedCount,
+          });
     showChromeNotice(finalNotice);
     setActionMessage(finalNotice);
     if (queuedCount === 0) {
@@ -1419,6 +1653,34 @@ export const StreamingSearchPage = (): JSX.Element => {
     setActionMessage(null);
   }, []);
 
+  useEffect(() => {
+    const openRequestedDetail = (request: StreamingDetailNavigationRequest | null): void => {
+      if (!request) {
+        return;
+      }
+
+      setDetailReturnTo(request.returnTo ?? null);
+      setExternalDetailKind(request.kind);
+      if (request.kind === 'album') {
+        setSelectedArtist(null);
+        handleOpenAlbum(request.album);
+      } else {
+        setSelectedAlbum(null);
+        handleOpenArtist(request.artist);
+      }
+    };
+
+    openRequestedDetail(consumePendingStreamingDetailNavigation());
+    const handleNavigateStreamingDetail = (event: Event): void => {
+      const request = event instanceof CustomEvent ? event.detail as StreamingDetailNavigationRequest : null;
+      consumePendingStreamingDetailNavigation();
+      openRequestedDetail(request);
+    };
+
+    window.addEventListener(streamingDetailNavigationEvent, handleNavigateStreamingDetail);
+    return () => window.removeEventListener(streamingDetailNavigationEvent, handleNavigateStreamingDetail);
+  }, [handleOpenAlbum, handleOpenArtist]);
+
   const handleArtistKeyDown = useCallback((event: KeyboardEvent<HTMLElement>, artist: StreamingArtist): void => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -1460,7 +1722,7 @@ export const StreamingSearchPage = (): JSX.Element => {
     const detail = selectedAlbumDetail;
     const firstTrack = detail?.tracks.find((track) => track.playable) ?? null;
     if (!detail || !firstTrack) {
-      setAlbumDetailError('这张流媒体专辑暂时没有可播放的歌曲。');
+      setAlbumDetailError(translateStatic('streaming.error.albumNoDownloadable'));
       return;
     }
 
@@ -1468,7 +1730,7 @@ export const StreamingSearchPage = (): JSX.Element => {
     const playableTracks = detail.tracks.filter((track) => track.playable).map((track) => streamingTrackToLibraryTrack(track, quality));
     const firstPlayable = playableTracks[0];
     if (!firstPlayable) {
-      setAlbumDetailError('这张流媒体专辑暂时没有可播放的歌曲。');
+      setAlbumDetailError(translateStatic('streaming.error.albumNoDownloadable'));
       return;
     }
 
@@ -1675,7 +1937,7 @@ export const StreamingSearchPage = (): JSX.Element => {
                           <span style={{ width: `${downloadProgress}%` }} />
                         </div>
                         <small>
-                          {downloadStatusLabels[downloadJob.status]} · {Math.round(downloadProgress)}%
+                          {downloadStatusLabel(downloadJob.status)} · {Math.round(downloadProgress)}%
                         </small>
                         {downloadJob.status === 'failed' && downloadJob.error ? <small>{downloadJob.error}</small> : null}
                       </div>
@@ -2123,41 +2385,74 @@ export const StreamingSearchPage = (): JSX.Element => {
   }
 
   return (
-    <div className="streaming-page streaming-hub">
-      <header className="streaming-hero">
-        <div className="streaming-hero-copy">
-          <span className="streaming-kicker">
-            <Radio size={16} />
-            {t('route.streaming.label')}
-          </span>
-          <h1>{t('streaming.hero.title')}</h1>
-          <p>{t('streaming.hero.description')}</p>
+    <div className="streaming-page streaming-hub streaming-hub--spatial">
+      <aside className="streaming-source-rail" aria-label={t('streaming.providers.aria')}>
+        <div className="streaming-source-rail-heading">
+          <span>{t('streaming.providers.aria')}</span>
+          <small>{providerOptions.filter((item) => item.enabled).length}</small>
         </div>
-        <div className="streaming-hero-meter" aria-label={t('streaming.hero.meterAria')}>
-          <span>{t('streaming.hero.currentProvider')}</span>
-          <strong>{currentProvider?.displayName ?? provider}</strong>
-          <small>{activeTabLabel} · {resultSummary}</small>
-        </div>
-      </header>
-
-      <section className="streaming-command-panel">
-        <label className="search-box streaming-search-box">
-          <Search size={19} />
-          <input {...searchInputProps} placeholder={t('streaming.search.placeholder')} />
-        </label>
-        <div className="streaming-provider-tabs" aria-label={t('streaming.providers.aria')}>
+        <div className="streaming-source-list">
           {providerOptions.map((item) => (
             <button key={item.name} type="button" data-active={item.name === provider} disabled={!item.enabled} onClick={() => setProvider(item.name)}>
-              <span>{item.displayName}</span>
-              <small>{statusText(item)}</small>
+              <i aria-hidden="true" data-status={providerRailState(item)} />
+              <span>
+                <strong>{item.displayName}</strong>
+                <small>{providerRailStatusText(item)}</small>
+              </span>
+              {item.name === provider ? <span className="streaming-source-active-dot" aria-hidden="true" /> : null}
             </button>
           ))}
         </div>
-      </section>
+        <div className="streaming-recent-searches">
+          <div>
+            <span>最近搜索</span>
+            <small>{recentSearches.length}</small>
+          </div>
+          {recentSearches.map((value) => (
+            <button key={value} type="button" data-active={value === query} onClick={() => handleSearchShortcut(value)}>
+              <Search size={13} />
+              <span>{value}</span>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <main className="streaming-workspace">
+        <header className="streaming-hero">
+          <div className="streaming-hero-copy">
+            <span className="streaming-kicker">
+              <Radio size={16} />
+              {t('route.streaming.label')}
+            </span>
+            <h1>{t('streaming.hero.title')}</h1>
+            <p>{t('streaming.hero.description')}</p>
+          </div>
+          <div className="streaming-provider-tabs" aria-label={t('streaming.providers.aria')}>
+            {providerOptions.map((item) => (
+              <span key={item.name} data-active={item.name === provider} data-disabled={!item.enabled}>
+                <span>{item.displayName}</span>
+              </span>
+            ))}
+          </div>
+        </header>
+
+        <section className="streaming-command-panel">
+          <label className="search-box streaming-search-box">
+            <Search size={19} />
+            <input {...searchInputProps} placeholder={t('streaming.search.placeholder')} />
+          </label>
+          <button className="streaming-search-submit" type="button" aria-label={t('streaming.search.placeholder')} onClick={() => handleSearchShortcut(input)}>
+            <ArrowRight size={20} />
+          </button>
+          <div className="streaming-command-summary" aria-live="polite">
+            <strong>{currentProvider?.displayName ?? provider}</strong>
+            <span>{activeTabLabel} · {resultSummary}</span>
+          </div>
+        </section>
 
       <section className="streaming-toolbar">
         <nav className="streaming-result-tabs" aria-label={t('streaming.tabs.aria')}>
-          {tabs.map((tab) => (
+          {visibleSearchTabs.map((tab) => (
             <button key={tab.key} type="button" data-active={tab.key === activeTab} onClick={() => setActiveTab(tab.key)}>
               {t(tab.labelKey)}
             </button>
@@ -2198,6 +2493,15 @@ export const StreamingSearchPage = (): JSX.Element => {
       </div>
 
       <div className="streaming-results-shell">
+        {activeTab === 'track' && !searchStateMessage ? (
+          <div className="streaming-track-header" aria-hidden="true">
+            <span>#</span>
+            <span>歌曲</span>
+            <span>来源 / 音质</span>
+            <span>时长</span>
+            <span>操作</span>
+          </div>
+        ) : null}
         {searchStateMessage ? (
           <div className="streaming-results-empty">{searchStateMessage}</div>
         ) : activeTab === 'playlist' ? (
@@ -2363,7 +2667,15 @@ export const StreamingSearchPage = (): JSX.Element => {
                     data-index={virtualItem.index}
                     style={{ transform: `translateY(${virtualItem.start}px)` }}
                   >
-                    <article className="streaming-row" data-playing={isPlaying} data-unavailable={!track.playable} onDoubleClick={() => void handlePlay(track)}>
+                    <article
+                      className="streaming-row"
+                      data-playing={isPlaying}
+                      data-unavailable={!track.playable}
+                      onDoubleClick={() => void handlePlay(track)}
+                      onMouseEnter={() => schedulePlaybackPrepare(track)}
+                      onMouseLeave={cancelPlaybackPrepare}
+                    >
+                      <span className="streaming-row-index">{virtualItem.index + 1}</span>
                       <div className="streaming-cover" data-empty={coverSrc === defaultCover}>
                         <img
                           src={coverSrc}
@@ -2383,11 +2695,21 @@ export const StreamingSearchPage = (): JSX.Element => {
                           {isPlaying ? <em>正在播放</em> : null}
                         </div>
                         {renderTrackCredits(track)}
-                        <small>{track.playable ? `${track.provider} · ${track.qualities.join(' / ') || 'standard'}` : (track.unavailableReason ?? '这首歌暂时不可播放')}</small>
                       </div>
+                      <span className="streaming-source-meta">
+                        <strong>{currentProvider?.displayName ?? track.provider}</strong>
+                        <small>{track.playable ? track.qualities.join(' / ') || 'standard' : (track.unavailableReason ?? '不可播放')}</small>
+                      </span>
                       <span className="streaming-duration">{formatDuration(track.duration)}</span>
                       <div className="streaming-actions" onDoubleClick={(event) => event.stopPropagation()}>
-                        <button type="button" title="播放" onClick={() => void handlePlay(track)} disabled={disabled}>
+                        <button
+                          type="button"
+                          title="播放"
+                          onBlur={cancelPlaybackPrepare}
+                          onClick={() => void handlePlay(track)}
+                          onFocus={() => schedulePlaybackPrepare(track)}
+                          disabled={disabled}
+                        >
                           {isResolving ? <Loader2 className="spinning-icon" size={16} /> : <Play size={16} />}
                         </button>
                         <button type="button" title="加入队列" onClick={() => handleAddToQueue(track)} disabled={!track.playable}>
@@ -2414,7 +2736,7 @@ export const StreamingSearchPage = (): JSX.Element => {
                             <span style={{ width: `${downloadProgress}%` }} />
                           </div>
                           <small>
-                            {downloadStatusLabels[downloadJob.status]} · {Math.round(downloadProgress)}%
+                            {downloadStatusLabel(downloadJob.status)} · {Math.round(downloadProgress)}%
                           </small>
                           {downloadJob.status === 'failed' && downloadJob.error ? <small>{downloadJob.error}</small> : null}
                         </div>
@@ -2433,6 +2755,7 @@ export const StreamingSearchPage = (): JSX.Element => {
           {isLoading ? '加载中...' : '加载更多'}
         </button>
       ) : null}
+      </main>
       {streamingPlaylistNoticeOpen ? (
         <StreamingConsentNoticeModal
           consent={streamingPlaylistNoticeConsent}

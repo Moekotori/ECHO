@@ -11,6 +11,7 @@ import { hideTaskbarMiniPlayerOnly, showTaskbarMiniPlayerOnly } from './taskbarM
 import { recordMainRuntimeIssue, recordRendererConsoleMessage } from '../diagnostics/DevConsoleService';
 
 const mainOutputDir = import.meta.dirname;
+const miniPlayerWindowTitle = 'ECHO Mini Player';
 const defaultMiniPlayerSize = {
   width: 388,
   height: 74,
@@ -36,7 +37,29 @@ const rememberBoundsDebounceMs = 300;
 let miniPlayerWindow: BrowserWindow | null = null;
 let rememberBoundsTimer: ReturnType<typeof setTimeout> | null = null;
 let miniPlayerQueueOpen = false;
+let collapsedMiniPlayerBounds: MiniPlayerBounds | null = null;
 let suppressBoundsRememberUntilMs = 0;
+
+const resolveLiveMiniPlayerWindow = (): BrowserWindow | null => {
+  if (miniPlayerWindow && !miniPlayerWindow.isDestroyed()) {
+    return miniPlayerWindow;
+  }
+
+  miniPlayerWindow = BrowserWindow.getAllWindows().find((window) => {
+    if (window.isDestroyed()) {
+      return false;
+    }
+    if (window.getTitle() === miniPlayerWindowTitle) {
+      return true;
+    }
+    try {
+      return new URL(window.webContents.getURL()).searchParams.get('miniPlayer') === '1';
+    } catch {
+      return false;
+    }
+  }) ?? null;
+  return miniPlayerWindow;
+};
 
 const migratePreviousDefaultBounds = (bounds: MiniPlayerBounds, allowExpandedHeight = false): MiniPlayerBounds => {
   const matchesPreviousDefault = bounds.width <= 312 && bounds.height <= 88 || previousDefaultMiniPlayerSizes.some(
@@ -69,6 +92,9 @@ const migratePreviousDefaultBounds = (bounds: MiniPlayerBounds, allowExpandedHei
 const boundsEqual = (a: MiniPlayerBounds, b: MiniPlayerBounds): boolean =>
   a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 
+const sizeMatches = (a: MiniPlayerBounds, b: MiniPlayerBounds): boolean =>
+  a.width === b.width && a.height === b.height;
+
 const toMiniPlayerSettings = (): MiniPlayerState['settings'] => {
   const settings = getAppSettings();
   return {
@@ -89,12 +115,14 @@ const getWindowBounds = (window: BrowserWindow | null): MiniPlayerBounds | null 
 
 export const getMiniPlayerState = (): MiniPlayerState => {
   const settings = getAppSettings();
-  const visible = Boolean(miniPlayerWindow && !miniPlayerWindow.isDestroyed() && miniPlayerWindow.isVisible());
+  const window = resolveLiveMiniPlayerWindow();
+  const visible = Boolean(window?.isVisible());
 
   return {
     visible,
     locked: false,
-    bounds: getWindowBounds(miniPlayerWindow) ?? settings.miniPlayerBounds ?? null,
+    queueOpen: miniPlayerQueueOpen,
+    bounds: getWindowBounds(window) ?? settings.miniPlayerBounds ?? null,
     settings: toMiniPlayerSettings(),
   };
 };
@@ -143,12 +171,7 @@ const normalizeMiniPlayerWindowBounds = (window: BrowserWindow): MiniPlayerBound
   return nextBounds;
 };
 
-export const resolveInitialMiniPlayerBounds = (): MiniPlayerBounds => {
-  const savedBounds = getAppSettings().miniPlayerBounds;
-  if (savedBounds && isBoundsVisible(savedBounds)) {
-    return clampBoundsToVisibleArea(migratePreviousDefaultBounds(savedBounds));
-  }
-
+const resolveDefaultMiniPlayerBounds = (): MiniPlayerBounds => {
   const area = screen.getPrimaryDisplay().workArea;
   const width = Math.min(defaultMiniPlayerSize.width, Math.max(miniPlayerMinimumSize.width, area.width - 48));
   const height = defaultMiniPlayerSize.height;
@@ -159,6 +182,14 @@ export const resolveInitialMiniPlayerBounds = (): MiniPlayerBounds => {
     width,
     height,
   };
+};
+
+export const resolveInitialMiniPlayerBounds = (): MiniPlayerBounds => {
+  const savedBounds = getAppSettings().miniPlayerBounds;
+  if (savedBounds && isBoundsVisible(savedBounds)) {
+    return clampBoundsToVisibleArea(migratePreviousDefaultBounds(savedBounds));
+  }
+  return resolveDefaultMiniPlayerBounds();
 };
 
 const applyMiniPlayerAlwaysOnTop = (window: BrowserWindow): void => {
@@ -229,21 +260,22 @@ const scheduleRememberMiniPlayerBounds = (window: BrowserWindow): void => {
 
 const loadMiniPlayerRenderer = (window: BrowserWindow): void => {
   if (process.env.ELECTRON_RENDERER_URL) {
-    const url = new URL(process.env.ELECTRON_RENDERER_URL);
+    const url = new URL('/auxiliary.html', process.env.ELECTRON_RENDERER_URL);
     url.searchParams.set('miniPlayer', '1');
     void window.loadURL(url.toString());
     return;
   }
 
-  void window.loadFile(join(mainOutputDir, '../renderer/index.html'), {
+  void window.loadFile(join(mainOutputDir, '../renderer/auxiliary.html'), {
     query: { miniPlayer: '1' },
   });
 };
 
 export const createMiniPlayerWindow = (): BrowserWindow => {
-  if (miniPlayerWindow && !miniPlayerWindow.isDestroyed()) {
-    normalizeMiniPlayerWindowBounds(miniPlayerWindow);
-    return miniPlayerWindow;
+  const existingWindow = resolveLiveMiniPlayerWindow();
+  if (existingWindow) {
+    normalizeMiniPlayerWindowBounds(existingWindow);
+    return existingWindow;
   }
 
   const bounds = resolveInitialMiniPlayerBounds();
@@ -251,7 +283,7 @@ export const createMiniPlayerWindow = (): BrowserWindow => {
     ...bounds,
     minWidth: miniPlayerMinimumSize.width,
     minHeight: miniPlayerMinimumSize.height,
-    title: 'ECHO Mini Player',
+    title: miniPlayerWindowTitle,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -307,6 +339,8 @@ export const createMiniPlayerWindow = (): BrowserWindow => {
       rememberBoundsTimer = null;
     }
 
+    miniPlayerQueueOpen = false;
+    collapsedMiniPlayerBounds = null;
     miniPlayerWindow = null;
     emitMiniPlayerStateChanged();
   });
@@ -317,6 +351,7 @@ export const createMiniPlayerWindow = (): BrowserWindow => {
 
 export const showMiniPlayerWindow = (): MiniPlayerState => {
   miniPlayerQueueOpen = false;
+  collapsedMiniPlayerBounds = null;
   setAppSettings({ miniPlayerEnabled: true });
   // Hide taskbar mini player 鈥?desktop mini player takes priority.
   try { hideTaskbarMiniPlayerOnly(); } catch { /* best-effort */ }
@@ -334,6 +369,7 @@ export const showMiniPlayerWindow = (): MiniPlayerState => {
 
 export const hideMiniPlayerWindow = (options: MiniPlayerHideOptions = {}): MiniPlayerState => {
   miniPlayerQueueOpen = false;
+  collapsedMiniPlayerBounds = null;
   setAppSettings({ miniPlayerEnabled: false });
   if (miniPlayerWindow && !miniPlayerWindow.isDestroyed()) {
     miniPlayerWindow.hide();
@@ -351,6 +387,8 @@ export const hideMiniPlayerWindow = (options: MiniPlayerHideOptions = {}): MiniP
 
 export const closeMiniPlayerWindow = (): void => {
   if (!miniPlayerWindow || miniPlayerWindow.isDestroyed()) {
+    miniPlayerQueueOpen = false;
+    collapsedMiniPlayerBounds = null;
     miniPlayerWindow = null;
     return;
   }
@@ -361,6 +399,8 @@ export const closeMiniPlayerWindow = (): void => {
   }
 
   rememberMiniPlayerBounds(miniPlayerWindow);
+  miniPlayerQueueOpen = false;
+  collapsedMiniPlayerBounds = null;
   miniPlayerWindow.destroy();
 };
 
@@ -375,26 +415,46 @@ export const setMiniPlayerLocked = (_locked: boolean): MiniPlayerState => {
 };
 
 export const setMiniPlayerQueueOpen = (open: boolean): MiniPlayerState => {
+  const wasOpen = miniPlayerQueueOpen;
   miniPlayerQueueOpen = open;
-  if (!miniPlayerWindow || miniPlayerWindow.isDestroyed()) {
+  const window = resolveLiveMiniPlayerWindow();
+  if (!window) {
     return getMiniPlayerState();
   }
 
-  const currentBounds = miniPlayerWindow.getBounds();
-  const nextBounds = clampBoundsToVisibleArea({
-    ...currentBounds,
-    height: open ? expandedMiniPlayerHeight : defaultMiniPlayerSize.height,
-  });
+  const currentBounds = window.getBounds();
+  if (open && !wasOpen) {
+    collapsedMiniPlayerBounds = clampBoundsToVisibleArea({ ...currentBounds, height: defaultMiniPlayerSize.height });
+  }
+  const nextBounds = open
+    ? clampBoundsToVisibleArea({ ...currentBounds, height: expandedMiniPlayerHeight })
+    : clampBoundsToVisibleArea(collapsedMiniPlayerBounds ?? { ...currentBounds, height: defaultMiniPlayerSize.height });
+  if (!open) {
+    collapsedMiniPlayerBounds = null;
+  }
   suppressBoundsRememberUntilMs = Date.now() + rememberBoundsDebounceMs + 100;
-  miniPlayerWindow.setBounds(nextBounds);
-  applyMiniPlayerAlwaysOnTop(miniPlayerWindow);
+  window.setBounds(nextBounds);
+  if (!sizeMatches(window.getBounds(), nextBounds)) {
+    window.setSize(nextBounds.width, nextBounds.height, false);
+    window.setPosition(nextBounds.x, nextBounds.y, false);
+  }
+  const finalBounds = window.getBounds();
+  const requestedSizeApplied = sizeMatches(finalBounds, nextBounds);
+  if (!requestedSizeApplied) {
+    miniPlayerQueueOpen = finalBounds.height === expandedMiniPlayerHeight;
+    if (!miniPlayerQueueOpen) {
+      collapsedMiniPlayerBounds = null;
+    }
+  }
+  applyMiniPlayerAlwaysOnTop(window);
   emitMiniPlayerStateChanged();
   return getMiniPlayerState();
 };
 
 export const resetMiniPlayerBounds = (): MiniPlayerState => {
   miniPlayerQueueOpen = false;
-  const bounds = resolveInitialMiniPlayerBounds();
+  collapsedMiniPlayerBounds = null;
+  const bounds = resolveDefaultMiniPlayerBounds();
   setAppSettings({ miniPlayerBounds: bounds });
   if (miniPlayerWindow && !miniPlayerWindow.isDestroyed()) {
     miniPlayerWindow.setBounds(bounds);

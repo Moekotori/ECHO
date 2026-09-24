@@ -54,6 +54,8 @@ export type EchoProPluginLicenseStatus = {
     | 'machine-mismatch'
     | 'license-expired'
     | 'app-version-too-old'
+    | 'license-revoked'
+    | 'online-verification-required'
     | 'unlocked';
   checkedAt: string;
 };
@@ -303,7 +305,7 @@ export const verifyEchoProPluginPackageSignature = (
   }
 };
 
-const readLicenseFromDirectory = (directory: string): { license: EchoProPluginLicense | null; signature: string | null } => {
+export const readEchoProLicenseFromDirectory = (directory: string): { license: EchoProPluginLicense | null; signature: string | null } => {
   const licensePath = join(directory, echoProLicenseFileName);
   const signaturePath = join(directory, echoProLicenseSignatureFileName);
   if (!existsSync(licensePath) || !existsSync(signaturePath)) {
@@ -366,7 +368,7 @@ export const verifyEchoProPluginDirectoryPackageSignature = (
     return false;
   }
   const seal = readEchoProPluginPackageSeal(directory);
-  const { license, signature } = readLicenseFromDirectory(directory);
+  const { license, signature } = readEchoProLicenseFromDirectory(directory);
   if (!seal || !license || !signature) {
     return false;
   }
@@ -400,15 +402,10 @@ const getLicenseVerifyUrl = (): string | null => {
   return defaultLicenseVerifyUrl;
 };
 
-export const verifyEchoProPluginLicenseOnline = async (
-  manifest: PluginManifest | null,
-  directory: string | null,
+export const verifyEchoProSignedLicenseOnline = async (
+  license: EchoProPluginLicense | null,
+  signature: string | null,
 ): Promise<EchoProLicenseOnlineVerificationResult> => {
-  if (manifest?.id !== echoProUnlockPluginId || !directory) {
-    return { checked: false, valid: false, reason: 'verify_unavailable', revokedAt: null };
-  }
-
-  const { license, signature } = readLicenseFromDirectory(directory);
   if (!license || !signature || !verifyEchoProPluginLicenseSignature(license, signature)) {
     return { checked: false, valid: false, reason: 'verify_unavailable', revokedAt: null };
   }
@@ -457,17 +454,28 @@ export const verifyEchoProPluginLicenseOnline = async (
   }
 };
 
-export const getEchoProPluginLicenseStatus = (
+export const verifyEchoProPluginLicenseOnline = async (
   manifest: PluginManifest | null,
   directory: string | null,
-  enabled: boolean,
+): Promise<EchoProLicenseOnlineVerificationResult> => {
+  if (manifest?.id !== echoProUnlockPluginId || !directory) {
+    return { checked: false, valid: false, reason: 'verify_unavailable', revokedAt: null };
+  }
+  const { license, signature } = readEchoProLicenseFromDirectory(directory);
+  return verifyEchoProSignedLicenseOnline(license, signature);
+};
+
+export const getEchoProSignedLicenseStatus = (
+  license: EchoProPluginLicense | null,
+  signature: string | null,
+  enabled = true,
 ): EchoProPluginLicenseStatus => {
   const checkedAt = new Date().toISOString();
   const machineCode = getEchoProMachineCode();
   const machineCodeHash = hashText(machineCode);
   const base: Omit<EchoProPluginLicenseStatus, 'valid' | 'reason'> = {
     pluginId: echoProUnlockPluginId,
-    installed: manifest?.id === echoProUnlockPluginId,
+    installed: Boolean(license && signature),
     enabled,
     machineCode,
     licenseId: null,
@@ -480,11 +488,6 @@ export const getEchoProPluginLicenseStatus = (
     checkedAt,
   };
 
-  if (manifest?.id !== echoProUnlockPluginId || !directory) {
-    return { ...base, valid: false, reason: 'plugin-missing' };
-  }
-
-  const { license, signature } = readLicenseFromDirectory(directory);
   if (!license || !signature) {
     return { ...base, valid: false, reason: 'license-missing' };
   }
@@ -502,9 +505,6 @@ export const getEchoProPluginLicenseStatus = (
   if (!verifyEchoProPluginLicenseSignature(license, signature)) {
     return { ...withLicense, valid: false, reason: 'signature-invalid' };
   }
-  if (!verifyEchoProPluginDirectoryPackageSignature(manifest, directory)) {
-    return { ...withLicense, valid: false, reason: 'signature-invalid' };
-  }
   if (license.machineCodeHash !== machineCodeHash) {
     return { ...withLicense, valid: false, reason: 'machine-mismatch' };
   }
@@ -519,6 +519,28 @@ export const getEchoProPluginLicenseStatus = (
   }
 
   return { ...withLicense, valid: true, reason: 'unlocked' };
+};
+
+export const getEchoProPluginLicenseStatus = (
+  manifest: PluginManifest | null,
+  directory: string | null,
+  enabled: boolean,
+): EchoProPluginLicenseStatus => {
+  if (manifest?.id !== echoProUnlockPluginId || !directory) {
+    return {
+      ...getEchoProSignedLicenseStatus(null, null, enabled),
+      reason: 'plugin-missing',
+    };
+  }
+  const { license, signature } = readEchoProLicenseFromDirectory(directory);
+  const signedStatus = getEchoProSignedLicenseStatus(license, signature, enabled);
+  if (!license || !signature || signedStatus.reason === 'signature-invalid') {
+    return signedStatus;
+  }
+  if (!verifyEchoProPluginDirectoryPackageSignature(manifest, directory)) {
+    return { ...signedStatus, valid: false, reason: 'signature-invalid' };
+  }
+  return signedStatus;
 };
 
 export const isEchoProUnlockManifest = (manifest: PluginManifest | null): boolean =>

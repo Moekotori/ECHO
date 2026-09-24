@@ -1,7 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { Readable } from 'node:stream';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { readdir, stat, unlink } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { app, protocol } from 'electron';
 import type { CoverVariant } from '../library/libraryTypes';
@@ -10,14 +9,20 @@ import { getLibraryService } from '../library/LibraryService';
 import { defaultCoverSvg } from '../library/workers/TsCoverExtractor';
 import { fetchWithNetworkProxy } from '../network/networkFetch';
 import { getRemoteSourceService } from '../library/remote/RemoteSourceService';
-import { requirePrivateFeature } from '../plugins/privateEntitlements';
 import { beginCoverProtocolDiagnostic } from '../diagnostics/CoverProtocolDiagnostics';
 import type { DiagnosticCoverProtocolOutcome, DiagnosticCoverProtocolScheme } from '../../shared/types/diagnostics';
+import { readSubsonicCoverDiskCache, subsonicCoverDiskCacheKey, writeSubsonicCoverDiskCache } from '../library/remote/SubsonicCoverDiskCache';
 
 const cacheControlHeader = 'public, max-age=31536000, immutable';
 const wallpaperCacheControlHeader = 'no-store';
 const remoteImageCacheControlHeader = 'public, max-age=86400';
-const subsonicCoverCacheControlHeader = 'public, max-age=31536000, immutable';
+const subsonicCoverCacheControlHeader = 'private, max-age=86400';
+const subsonicCoverNegativeTtlMs = 2 * 60 * 1000;
+const subsonicCoverNegativeCacheMaxEntries = 4096;
+const subsonicCoverCacheMaxBytes = 512 * 1024 * 1024;
+const subsonicCoverCacheMaxAgeMs = 30 * 24 * 60 * 60 * 1000;
+const subsonicCoverCachePruneIntervalMs = 10 * 60 * 1000;
+const remoteImageMaxBytes = 16 * 1024 * 1024;
 const allowedRemoteImageHosts = new Set([
   'i0.hdslb.com',
   'i1.hdslb.com',
@@ -102,24 +107,20 @@ const parseRange = (rangeHeader: string | null, size: number): { start: number; 
 const streamBody = (filePath: string, range: { start: number; end: number } | null): BodyInit =>
   Readable.toWeb(createReadStream(filePath, range ?? undefined)) as unknown as BodyInit;
 
-const wallpaperResponse = (request: Request, wallpaperPath: string): Response => {
+const wallpaperResponse = (request: Request, wallpaperPath: string, size: number): Response => {
   const contentType = contentTypeForPath(wallpaperPath, null);
   if (!contentType.startsWith('video/')) {
-    return new Response(readFileSync(wallpaperPath), {
+    return new Response(request.method === 'HEAD' ? null : streamBody(wallpaperPath, null), {
       headers: {
         'Content-Type': contentType,
         'Cache-Control': wallpaperCacheControlHeader,
+        'Content-Length': String(size),
       },
     });
   }
 
-  const fileStat = statSync(wallpaperPath);
-  if (!fileStat.isFile()) {
-    return missingCoverResponse();
-  }
-
   const rangeHeader = request.headers.get('range');
-  const range = parseRange(rangeHeader, fileStat.size);
+  const range = parseRange(rangeHeader, size);
   const headers = new Headers({
     'Accept-Ranges': 'bytes',
     'Cache-Control': wallpaperCacheControlHeader,
@@ -128,42 +129,48 @@ const wallpaperResponse = (request: Request, wallpaperPath: string): Response =>
 
   if (rangeHeader && !range) {
     headers.set('Content-Length', '0');
-    headers.set('Content-Range', `bytes */${fileStat.size}`);
+    headers.set('Content-Range', `bytes */${size}`);
     return new Response('', { status: 416, headers });
   }
 
   if (range) {
     headers.set('Content-Length', String(range.end - range.start + 1));
-    headers.set('Content-Range', `bytes ${range.start}-${range.end}/${fileStat.size}`);
+    headers.set('Content-Range', `bytes ${range.start}-${range.end}/${size}`);
     return new Response(request.method === 'HEAD' ? null : streamBody(wallpaperPath, range), { status: 206, headers });
   }
 
-  headers.set('Content-Length', String(fileStat.size));
+  headers.set('Content-Length', String(size));
   return new Response(request.method === 'HEAD' ? null : streamBody(wallpaperPath, null), { headers });
 };
 
-const cachedRemoteCoverExtensions = ['avif', 'webp', 'png', 'jpg', 'jpeg', 'gif'] as const;
-
-const extensionForImageMimeType = (mimeType: string): string | null => {
-  switch (mimeType) {
-    case 'image/avif':
-      return 'avif';
-    case 'image/webp':
-      return 'webp';
-    case 'image/png':
-      return 'png';
-    case 'image/jpeg':
-    case 'image/jpg':
-      return 'jpg';
-    case 'image/gif':
-      return 'gif';
-    default:
-      return null;
-  }
+type SubsonicCoverData = {
+  data: Buffer;
+  mimeType: string;
+  source: 'subsonic-cache' | 'subsonic-remote';
 };
 
-const subsonicCoverCacheKey = (identity: string, size: number): string =>
-  createHash('sha256').update('subsonic-cover').update('\0').update(identity).update('\0').update(String(size)).digest('hex');
+const subsonicCoverInFlight = new Map<string, Promise<SubsonicCoverData | null>>();
+const subsonicCoverNegativeCache = new Map<string, number>();
+let lastSubsonicCoverCachePruneAt = 0;
+
+const rememberSubsonicCoverMiss = (requestKey: string): void => {
+  const now = Date.now();
+  if (subsonicCoverNegativeCache.size >= subsonicCoverNegativeCacheMaxEntries) {
+    for (const [key, expiresAt] of subsonicCoverNegativeCache) {
+      if (expiresAt <= now) {
+        subsonicCoverNegativeCache.delete(key);
+      }
+    }
+  }
+  while (subsonicCoverNegativeCache.size >= subsonicCoverNegativeCacheMaxEntries) {
+    const oldest = subsonicCoverNegativeCache.keys().next().value;
+    if (typeof oldest !== 'string') {
+      break;
+    }
+    subsonicCoverNegativeCache.delete(oldest);
+  }
+  subsonicCoverNegativeCache.set(requestKey, now + subsonicCoverNegativeTtlMs);
+};
 
 const getRemoteCoverCacheDirectory = (): string => {
   try {
@@ -273,49 +280,73 @@ const missingProtocolResponse = (
   knownBytes: 0,
 });
 
-const readSubsonicCoverCache = async (identity: string, size: number): Promise<ProtocolResponseResult | null> => {
-  const cacheKey = subsonicCoverCacheKey(identity, size);
+const readSubsonicCoverCache = async (identity: string, size: number): Promise<SubsonicCoverData | null> => {
   const cacheDir = getRemoteCoverCacheDirectory();
-  for (const extension of cachedRemoteCoverExtensions) {
-    const filePath = join(cacheDir, `${cacheKey}.${extension}`);
-    try {
-      const data = await readFile(filePath);
-      return {
-        response: new Response(data, {
-          headers: {
-            'Content-Type': contentTypeForPath(filePath, null),
-            'Cache-Control': subsonicCoverCacheControlHeader,
-          },
-        }),
-        source: 'subsonic-cache',
-        outcome: 'ok',
-        knownBytes: data.byteLength,
-      };
-    } catch {
-      // Try the next possible extension.
-    }
-  }
-
-  return null;
+  const cached = await readSubsonicCoverDiskCache(cacheDir, identity, size);
+  return cached ? { ...cached, source: 'subsonic-cache' } : null;
 };
 
-const localFileResponse = (filePath: string, mimeType: string | null, cacheControl: string): { response: Response; knownBytes: number } => {
-  const data = readFileSync(filePath);
+const pruneSubsonicCoverCache = async (): Promise<void> => {
+  const now = Date.now();
+  if (now - lastSubsonicCoverCachePruneAt < subsonicCoverCachePruneIntervalMs) {
+    return;
+  }
+  lastSubsonicCoverCachePruneAt = now;
+
+  const cacheDir = getRemoteCoverCacheDirectory();
+  const names = await readdir(cacheDir).catch(() => [] as string[]);
+  const entries = (await Promise.all(names.map(async (name) => {
+    const filePath = join(cacheDir, name);
+    const fileStat = await stat(filePath).catch(() => null);
+    return fileStat?.isFile() ? { filePath, size: fileStat.size, mtimeMs: fileStat.mtimeMs } : null;
+  }))).filter((entry): entry is { filePath: string; size: number; mtimeMs: number } => Boolean(entry));
+
+  let totalBytes = entries.reduce((sum, entry) => sum + entry.size, 0);
+  for (const entry of entries.sort((left, right) => left.mtimeMs - right.mtimeMs)) {
+    const expired = now - entry.mtimeMs > subsonicCoverCacheMaxAgeMs;
+    if (!expired && totalBytes <= subsonicCoverCacheMaxBytes) {
+      break;
+    }
+    await unlink(entry.filePath).catch(() => undefined);
+    totalBytes -= entry.size;
+  }
+};
+
+const localFileResponse = async (filePath: string, mimeType: string | null, cacheControl: string): Promise<{ response: Response; knownBytes: number }> => {
+  const fileStat = await stat(filePath);
+  if (!fileStat.isFile()) {
+    throw new Error('Cover asset must be a regular file');
+  }
+
   return {
-    response: new Response(data, {
+    response: new Response(streamBody(filePath, null), {
       headers: {
         'Content-Type': contentTypeForPath(filePath, mimeType),
         'Cache-Control': cacheControl,
       },
     }),
-    knownBytes: data.byteLength,
+    knownBytes: fileStat.size,
   };
 };
 
-const wallpaperProtocolResponse = (request: Request, wallpaperPath: string): { response: Response; knownBytes: number } => ({
-  response: wallpaperResponse(request, wallpaperPath),
-  knownBytes: statSync(wallpaperPath).size,
-});
+const wallpaperProtocolResponse = async (
+  request: Request,
+  wallpaperPath: string,
+): Promise<{ response: Response; knownBytes: number } | null> => {
+  try {
+    const fileStat = await stat(wallpaperPath);
+    if (!fileStat.isFile()) {
+      return null;
+    }
+
+    return {
+      response: wallpaperResponse(request, wallpaperPath, fileStat.size),
+      knownBytes: fileStat.size,
+    };
+  } catch {
+    return null;
+  }
+};
 
 const defaultProtocolSvgResponse = (): { response: Response; knownBytes: number } => ({
   response: defaultSvgResponse(),
@@ -328,22 +359,58 @@ const writeSubsonicCoverCache = async (
   mimeType: string,
   data: Buffer,
 ): Promise<void> => {
-  const extension = extensionForImageMimeType(mimeType);
-  if (!extension) {
-    return;
+  const cacheDir = getRemoteCoverCacheDirectory();
+  if (await writeSubsonicCoverDiskCache(cacheDir, identity, size, mimeType, data)) {
+    void pruneSubsonicCoverCache().catch(() => undefined);
+  }
+};
+
+const loadSubsonicCover = async (
+  trackId: string,
+  sourceId: string | null,
+  coverArt: string | null,
+  identity: string,
+  size: number,
+): Promise<SubsonicCoverData | null> => {
+  const requestKey = subsonicCoverDiskCacheKey(identity, size);
+  const negativeUntil = subsonicCoverNegativeCache.get(requestKey) ?? 0;
+  if (negativeUntil > Date.now()) {
+    return null;
+  }
+  subsonicCoverNegativeCache.delete(requestKey);
+
+  const existing = subsonicCoverInFlight.get(requestKey);
+  if (existing) {
+    return existing;
   }
 
-  const cacheDir = getRemoteCoverCacheDirectory();
-  const cacheKey = subsonicCoverCacheKey(identity, size);
-  const targetPath = join(cacheDir, `${cacheKey}.${extension}`);
-  const tempPath = join(cacheDir, `${cacheKey}.${randomUUID()}.tmp`);
-  try {
-    await mkdir(cacheDir, { recursive: true });
-    await writeFile(tempPath, data);
-    await rename(tempPath, targetPath);
-  } catch {
-    await unlink(tempPath).catch(() => undefined);
-  }
+  const task = (async (): Promise<SubsonicCoverData | null> => {
+    const cached = await readSubsonicCoverCache(identity, size);
+    if (cached) {
+      return cached;
+    }
+
+    const result = sourceId && coverArt
+      ? await getRemoteSourceService().readSubsonicCoverByIdentity(sourceId, coverArt, size)
+      : await getRemoteSourceService().readRemoteCover(trackId, size);
+    const mimeType = result.mimeType?.split(';')[0]?.trim().toLocaleLowerCase();
+    if (result.status !== 'ok' || !result.data?.byteLength || !mimeType?.startsWith('image/')) {
+      rememberSubsonicCoverMiss(requestKey);
+      return null;
+    }
+    if (result.data.byteLength > remoteImageMaxBytes) {
+      rememberSubsonicCoverMiss(requestKey);
+      return null;
+    }
+
+    const data = Buffer.from(result.data);
+    await writeSubsonicCoverCache(identity, size, mimeType, data);
+    return { data, mimeType, source: 'subsonic-remote' };
+  })().finally(() => {
+    subsonicCoverInFlight.delete(requestKey);
+  });
+  subsonicCoverInFlight.set(requestKey, task);
+  return task;
 };
 
 const isPathInsideDirectory = (directory: string, filePath: string): boolean => {
@@ -372,6 +439,39 @@ const passthroughImageHeaders = (response: Response): Headers => {
   return headers;
 };
 
+const limitRemoteImageBody = (
+  body: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): ReadableStream<Uint8Array> => {
+  const reader = body.getReader();
+  let receivedBytes = 0;
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          controller.close();
+          return;
+        }
+
+        receivedBytes += chunk.value.byteLength;
+        if (receivedBytes > maxBytes) {
+          await reader.cancel('remote image exceeds memory-safe limit').catch(() => undefined);
+          controller.error(new Error('Remote image exceeds memory-safe limit'));
+          return;
+        }
+        controller.enqueue(chunk.value);
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+};
+
 const clampRemoteCoverSize = (value: string | null): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(80, Math.min(1024, Math.round(parsed))) : 512;
@@ -385,30 +485,23 @@ const subsonicCoverResponse = async (url: URL): Promise<ProtocolResponseResult> 
 
   const size = clampRemoteCoverSize(url.searchParams.get('size'));
   const cacheIdentity = url.searchParams.get('cacheKey') || trackId;
-  const cached = await readSubsonicCoverCache(cacheIdentity, size);
-  if (cached) {
-    return cached;
-  }
-
-  await requirePrivateFeature('cover-cache');
-  const result = await getRemoteSourceService().readRemoteCover(trackId, size);
-  const mimeType = result.mimeType?.split(';')[0]?.trim().toLocaleLowerCase();
-  if (result.status !== 'ok' || !result.data?.byteLength || !mimeType?.startsWith('image/')) {
+  const sourceId = url.searchParams.get('sourceId');
+  const coverArt = url.searchParams.get('coverArt');
+  const cover = await loadSubsonicCover(trackId, sourceId, coverArt, cacheIdentity, size);
+  if (!cover) {
     return missingProtocolResponse('subsonic-remote', 'missing');
   }
-  const data = Buffer.from(result.data);
-  await writeSubsonicCoverCache(cacheIdentity, size, mimeType, data);
 
   return {
-    response: new Response(data, {
+    response: new Response(new Uint8Array(cover.data), {
       headers: {
-        'Content-Type': mimeType,
+        'Content-Type': cover.mimeType,
         'Cache-Control': subsonicCoverCacheControlHeader,
       },
     }),
-    source: 'subsonic-remote',
+    source: cover.source,
     outcome: 'ok',
-    knownBytes: data.byteLength,
+    knownBytes: cover.data.byteLength,
   };
 };
 
@@ -440,14 +533,29 @@ const remoteImageProtocolResponse = async (url: URL): Promise<ProtocolResponseRe
     return missingProtocolResponse('remote-image-fetch', 'missing');
   }
 
+  const upstreamKnownBytes = parseContentLength(upstream.headers.get('content-length'));
+  if (upstreamKnownBytes !== undefined && upstreamKnownBytes > remoteImageMaxBytes) {
+    void upstream.body?.cancel('remote image exceeds memory-safe limit').catch(() => undefined);
+    return {
+      response: new Response('', { status: 413 }),
+      source: 'remote-image-too-large',
+      outcome: 'blocked',
+      knownBytes: 0,
+    };
+  }
+
+  const body = upstream.body
+    ? limitRemoteImageBody(upstream.body, remoteImageMaxBytes)
+    : null;
+
   return {
-    response: new Response(upstream.body, {
+    response: new Response(body, {
       status: upstream.status,
       headers: passthroughImageHeaders(upstream),
     }),
     source: 'remote-image-fetch',
     outcome: 'ok',
-    knownBytes: parseContentLength(upstream.headers.get('content-length')),
+    knownBytes: upstreamKnownBytes,
   };
 };
 
@@ -536,7 +644,10 @@ export const registerCoverProtocolHandler = (): void => {
         });
       }
 
-      const asset = getLibraryService().resolveCoverAsset(coverId, variant);
+      // Renderer-facing cover URLs must never decode the untrusted raw original.
+      // Copy/save/export paths resolve the original directly through LibraryService.
+      const displayVariant = variant === 'original' ? 'large' : variant;
+      const asset = getLibraryService().resolveCoverAsset(coverId, displayVariant);
 
       if (!asset || !existsSync(asset.filePath)) {
         if (variant === 'large' || variant === 'original') {
@@ -555,7 +666,7 @@ export const registerCoverProtocolHandler = (): void => {
         });
       }
 
-      const result = localFileResponse(asset.filePath, asset.mimeType, cacheControlHeader);
+      const result = await localFileResponse(asset.filePath, asset.mimeType, cacheControlHeader);
       return finishProtocolDiagnostic(diagnostic, result.response, {
         outcome: 'ok',
         source: 'local-cover-cache',
@@ -598,7 +709,7 @@ export const registerCoverProtocolHandler = (): void => {
           ? getAppWallpaperDirectory()
           : null;
 
-      if (!wallpaperPath || !wallpaperDirectory || !isPathInsideDirectory(wallpaperDirectory, wallpaperPath) || !existsSync(wallpaperPath)) {
+      if (!wallpaperPath || !wallpaperDirectory || !isPathInsideDirectory(wallpaperDirectory, wallpaperPath)) {
         return finishProtocolDiagnostic(diagnostic, missingCoverResponse(), {
           outcome: 'missing',
           source: 'custom-wallpaper',
@@ -606,7 +717,14 @@ export const registerCoverProtocolHandler = (): void => {
         });
       }
 
-      const result = wallpaperProtocolResponse(request, wallpaperPath);
+      const result = await wallpaperProtocolResponse(request, wallpaperPath);
+      if (!result) {
+        return finishProtocolDiagnostic(diagnostic, missingCoverResponse(), {
+          outcome: 'missing',
+          source: 'custom-wallpaper',
+          knownBytes: 0,
+        });
+      }
       return finishProtocolDiagnostic(diagnostic, result.response, {
         outcome: 'ok',
         source: 'custom-wallpaper',
@@ -646,7 +764,7 @@ export const registerCoverProtocolHandler = (): void => {
         });
       }
 
-      const result = localFileResponse(asset.filePath, asset.mimeType, cacheControlHeader);
+      const result = await localFileResponse(asset.filePath, asset.mimeType, cacheControlHeader);
       return finishProtocolDiagnostic(diagnostic, result.response, {
         outcome: 'ok',
         source: 'artist-image-cache',

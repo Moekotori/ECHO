@@ -11,7 +11,7 @@ import { logLyricsConsole } from '../diagnostics/lyricsConsole';
 
 type PlaybackVisualIntent = {
   type: 'track-switch' | 'seek';
-  state: 'playing';
+  state: 'playing' | 'paused';
   currentTrackId: string | null;
   filePath: string | null;
   expectedPositionMs: number;
@@ -61,6 +61,13 @@ let enhancedLowLoadPlaybackActive = false;
 
 const getSnapshot = (): PlaybackStatusSnapshot => snapshot;
 
+const getPlaybackStatusSnapshot = (): PlaybackStatus | null => snapshot.playbackStatus;
+
+const getAudioPlaybackStateSnapshot = (): AudioPlaybackState | null => snapshot.audioStatus?.state ?? null;
+
+const getPlaybackActivityStateSnapshot = (): AudioPlaybackState =>
+  snapshot.audioStatus?.state ?? snapshot.playbackStatus?.state ?? 'idle';
+
 const emitChange = (): void => {
   snapshot = { ...snapshot, version: snapshot.version + 1 };
   for (const listener of listeners) {
@@ -77,6 +84,10 @@ const playbackHasIdentity = (status: AudioStatus | PlaybackStatus): boolean =>
 
 const playbackStartsVisualIntent = (status: PlaybackStatus | null | undefined, intent: PlaybackVisualIntent | null | undefined): boolean =>
   Boolean(status && intent && playbackMatchesIntent(status, intent));
+
+const audioStatusMatchesPlaybackStatus = (audioStatus: AudioStatus, playbackStatus: PlaybackStatus): boolean =>
+  Boolean(playbackStatus.currentTrackId && audioStatus.currentTrackId === playbackStatus.currentTrackId) ||
+  Boolean(playbackStatus.filePath && audioStatus.currentFilePath === playbackStatus.filePath);
 
 const isSpotifyPlaybackStatus = (status: PlaybackStatus | null | undefined): boolean =>
   typeof status?.filePath === 'string' && status.filePath.startsWith('streaming:spotify:');
@@ -361,13 +372,27 @@ export const beginPlaybackSeekSnapshot = (playbackStatus: PlaybackStatus): Playb
     tracked: shouldTrackSeekIntent,
   });
 
+  const currentAudioStatus = snapshot.audioStatus;
+  const seekAudioStatus = currentAudioStatus && audioStatusMatchesPlaybackStatus(currentAudioStatus, playbackStatus)
+    ? {
+        ...currentAudioStatus,
+        state: playbackStatus.state,
+        currentTrackId: playbackStatus.currentTrackId ?? currentAudioStatus.currentTrackId,
+        currentFilePath: playbackStatus.filePath ?? currentAudioStatus.currentFilePath,
+        positionSeconds: Math.max(0, playbackStatus.positionMs) / 1000,
+        durationSeconds: playbackStatus.durationMs > 0
+          ? playbackStatus.durationMs / 1000
+          : currentAudioStatus.durationSeconds,
+      }
+    : null;
+
   return setPlaybackStatusSnapshot({
-    audioStatus: null,
+    audioStatus: seekAudioStatus,
     playbackStatus,
     playbackVisualIntent: shouldTrackSeekIntent
       ? {
           type: 'seek',
-          state: 'playing',
+          state: playbackStatus.state === 'paused' ? 'paused' : 'playing',
           currentTrackId: playbackStatus.currentTrackId,
           filePath: playbackStatus.filePath,
           expectedPositionMs: Math.max(0, playbackStatus.positionMs),
@@ -410,8 +435,9 @@ export const refreshPlaybackStatus = async (): Promise<PlaybackStatusSnapshot> =
       return applyConnectStatus(connectStatus);
     }
 
+    const shouldIgnoreAudioStatus = shouldIgnoreAudioStatusPatch(audioStatus);
     return setPlaybackStatusSnapshot({
-      audioStatus: shouldIgnoreAudioStatusPatch(audioStatus) ? null : audioStatus,
+      ...(shouldIgnoreAudioStatus ? {} : { audioStatus }),
       playbackStatus,
       error: getActionableAudioStatusError(audioStatus.error),
     });
@@ -512,8 +538,12 @@ const ensureStarted = (): void => {
     }
 
     refreshRequestId += 1;
+    if (shouldIgnoreAudioStatusPatch(audioStatus)) {
+      setPlaybackStatusSnapshot({ error: null });
+      return;
+    }
     setPlaybackStatusSnapshot({
-      audioStatus: shouldIgnoreAudioStatusPatch(audioStatus) ? null : audioStatus,
+      audioStatus,
       error: getActionableAudioStatusError(audioStatus.error),
     });
   });
@@ -563,6 +593,18 @@ const subscribe = (listener: () => void): (() => void) => {
 
 export const useSharedPlaybackStatus = (): PlaybackStatusSnapshot => {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+};
+
+export const useSharedPlaybackStatusOnly = (): PlaybackStatus | null => {
+  return useSyncExternalStore(subscribe, getPlaybackStatusSnapshot, getPlaybackStatusSnapshot);
+};
+
+export const useSharedAudioPlaybackState = (): AudioPlaybackState | null => {
+  return useSyncExternalStore(subscribe, getAudioPlaybackStateSnapshot, getAudioPlaybackStateSnapshot);
+};
+
+export const useSharedPlaybackActivityState = (): AudioPlaybackState => {
+  return useSyncExternalStore(subscribe, getPlaybackActivityStateSnapshot, getPlaybackActivityStateSnapshot);
 };
 
 export const useThrottledSharedPlaybackStatus = (minIntervalMs: number): PlaybackStatusSnapshot => {

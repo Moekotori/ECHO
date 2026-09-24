@@ -7,9 +7,11 @@ import { BrowserWindow } from 'electron';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
 import type {
   EchoLinkAlbumPreview,
+  EchoLinkBasicStatus,
   EchoLinkLibraryAlbumsResponse,
   EchoLinkLibraryAlbumTracksResponse,
   EchoLinkLibraryTracksResponse,
+  EchoLinkPairingSession,
   EchoLinkPlayback,
   EchoLinkPlaybackCommand,
   EchoLinkPlaybackState,
@@ -30,6 +32,8 @@ import { getLyricsService } from '../lyrics/LyricsService';
 import type { CoverVariant } from '../library/libraryTypes';
 import { EchoLinkMdnsAdvertiser } from './EchoLinkMdnsAdvertiser';
 import type { EchoLinkMdnsAdvertisement } from './EchoLinkMdnsAdvertiser';
+import { EchoLinkV2Service } from './EchoLinkV2Service';
+import type { EchoLinkV2RuntimeState } from './EchoLinkV2Service';
 
 type LibraryServiceLike = {
   getTrack(trackId: string): LibraryTrack | null;
@@ -77,6 +81,7 @@ type EchoLinkServiceDependencies = {
   deviceId?: string;
   deviceName?: string;
   port?: number;
+  createV2Service?: (getRuntime: () => EchoLinkV2RuntimeState) => EchoLinkV2Service;
 };
 
 type MediaTokenRecord = {
@@ -86,6 +91,7 @@ type MediaTokenRecord = {
 };
 
 type ArtworkTokenRecord = {
+  cacheKey: string;
   filePath: string | null;
   mimeType: string;
   expiresAtEpochMs: number;
@@ -122,6 +128,7 @@ const defaultPort = 26789;
 const linkVersion = '1';
 const streamTokenTtlMs = 5 * 60 * 1000;
 const artworkTokenTtlMs = 30 * 60 * 1000;
+const maximumArtworkTokenRecords = 1024;
 const maxLibraryPageSize = 500;
 const maxJsonBodyBytes = 2 * 1024 * 1024;
 const defaultDeviceName = 'PC ECHO';
@@ -2640,12 +2647,15 @@ const parseRange = (range: string | undefined, size: number): { start: number; e
 
 export class EchoLinkService {
   private server: Server | null = null;
-  private enabled = false;
-  private error: string | null = null;
+  private legacyV1Enabled = false;
+  private basicV2Enabled = false;
+  private legacyV1Error: string | null = null;
+  private basicV2Error: string | null = null;
   private updatedAt = new Date(0).toISOString();
   private token = randomBytes(32).toString('base64url');
   private readonly mediaTokens = new Map<string, MediaTokenRecord>();
   private readonly artworkTokens = new Map<string, ArtworkTokenRecord>();
+  private readonly artworkTokenByCacheKey = new Map<string, string>();
   private queueTrackIds: string[] = [];
   private currentQueueTrackId: string | null = null;
   private lastPhoneConnectionAt: string | null = null;
@@ -2674,6 +2684,8 @@ export class EchoLinkService {
   private readonly deviceName: string;
   private readonly port: number;
   private boundPort: number | null = null;
+  private v2Service: EchoLinkV2Service | null = null;
+  private readonly createV2Service: (getRuntime: () => EchoLinkV2RuntimeState) => EchoLinkV2Service;
 
   constructor(dependencies: EchoLinkServiceDependencies = {}) {
     this.audioSession = dependencies.audioSession ?? getAudioSession();
@@ -2699,6 +2711,7 @@ export class EchoLinkService {
     this.deviceId = dependencies.deviceId ?? `pc-${randomBytes(8).toString('hex')}`;
     this.deviceName = dependencies.deviceName ?? defaultDeviceName;
     this.port = dependencies.port ?? defaultPort;
+    this.createV2Service = dependencies.createV2Service ?? ((getRuntime) => new EchoLinkV2Service({ getRuntime }));
   }
 
   getServerStatus(): EchoLinkServerStatus {
@@ -2706,13 +2719,13 @@ export class EchoLinkService {
     const addresses = this.getLanAddresses();
     const host = addresses[0] ?? '127.0.0.1';
     return {
-      enabled: this.enabled,
+      enabled: this.legacyV1Enabled,
       running: Boolean(this.server),
       port: this.boundPort ?? this.port,
       host,
       addresses,
-      pairingUri: this.enabled && this.server ? this.createPairingUri(host) : null,
-      webControlUrl: this.enabled && this.server ? this.createWebControlUrl(host) : null,
+      pairingUri: this.legacyV1Enabled && this.server ? this.createPairingUri(host) : null,
+      webControlUrl: this.legacyV1Enabled && this.server ? this.createWebControlUrl(host) : null,
       token: this.token,
       deviceName: this.deviceName,
       deviceId: this.deviceId,
@@ -2731,28 +2744,60 @@ export class EchoLinkService {
         lastMediaTokenServed: this.lastMediaTokenServed ? { ...this.lastMediaTokenServed } : null,
         recentHttpErrors: [...this.recentHttpErrors],
       },
-      error: this.error,
+      error: this.legacyV1Error,
       updatedAt: this.updatedAt,
     };
   }
 
   async setEnabled(enabled: boolean): Promise<EchoLinkServerStatus> {
-    this.enabled = enabled;
-    this.error = null;
+    this.legacyV1Enabled = enabled;
+    this.legacyV1Error = null;
     if (!enabled) {
-      await this.close();
+      this.mediaTokens.clear();
+      this.clearArtworkTokens();
+      await this.reconcileServer();
       this.touch();
       return this.getServerStatus();
     }
 
     try {
-      await this.ensureStarted();
-      await this.startMdnsAdvertisements();
+      await this.reconcileServer();
     } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error);
+      this.legacyV1Error = error instanceof Error ? error.message : String(error);
     }
     this.touch();
     return this.getServerStatus();
+  }
+
+  getBasicStatus(): EchoLinkBasicStatus {
+    return this.getV2Service().getManagerStatus();
+  }
+
+  async setBasicEnabled(enabled: boolean): Promise<EchoLinkBasicStatus> {
+    this.basicV2Enabled = enabled;
+    this.basicV2Error = null;
+    if (!enabled) {
+      this.v2Service?.disable();
+    }
+    try {
+      await this.reconcileServer();
+    } catch (error) {
+      this.basicV2Error = error instanceof Error ? error.message : String(error);
+    }
+    this.touch();
+    return this.getBasicStatus();
+  }
+
+  startBasicPairing(): Promise<EchoLinkPairingSession> {
+    return this.getV2Service().startPairing();
+  }
+
+  cancelBasicPairing(): EchoLinkBasicStatus {
+    return this.getV2Service().cancelPairing();
+  }
+
+  revokeBasicClient(clientId: string): EchoLinkBasicStatus {
+    return this.getV2Service().revokeClient(clientId);
   }
 
   setWebBackground(value: unknown): EchoLinkServerStatus {
@@ -2787,8 +2832,16 @@ export class EchoLinkService {
   }
 
   async close(): Promise<void> {
+    this.legacyV1Enabled = false;
+    this.basicV2Enabled = false;
     this.mediaTokens.clear();
-    this.artworkTokens.clear();
+    this.clearArtworkTokens();
+    this.v2Service?.dispose();
+    this.v2Service = null;
+    await this.closeServer();
+  }
+
+  private async closeServer(): Promise<void> {
     await this.stopMdnsAdvertisements();
     if (!this.server) {
       this.boundPort = null;
@@ -2805,7 +2858,7 @@ export class EchoLinkService {
   rotateToken(): EchoLinkServerStatus {
     this.token = randomBytes(32).toString('base64url');
     this.mediaTokens.clear();
-    this.artworkTokens.clear();
+    this.clearArtworkTokens();
     this.authFailureCount = 0;
     this.lastAuthFailureAt = null;
     this.touch();
@@ -2830,6 +2883,7 @@ export class EchoLinkService {
   }
 
   getStatusResponse(baseUrl?: string): EchoLinkStatusResponse {
+    this.cleanupExpiredTokens();
     const audioStatus = this.audioSession.getStatus();
     this.syncQueueTrackFromAudioStatus(audioStatus);
     const track = this.resolveCurrentTrack(audioStatus);
@@ -3028,6 +3082,12 @@ export class EchoLinkService {
         address,
         port: this.boundPort ?? this.port,
         version: 1,
+        versions: [
+          ...(this.legacyV1Enabled ? [1] : []),
+          ...(this.basicV2Enabled ? [2] : []),
+        ],
+        auth: this.basicV2Enabled ? 'pairing' : 'token',
+        apiPath: this.basicV2Enabled ? '/echo-link/v2' : '/echo-link/v1',
       };
       try {
         await advertiser.start(advertisement);
@@ -3063,6 +3123,34 @@ export class EchoLinkService {
     this.updatedAt = new Date(this.now()).toISOString();
   }
 
+  private getV2RuntimeState(): EchoLinkV2RuntimeState {
+    const addresses = this.getLanAddresses();
+    return {
+      enabled: this.basicV2Enabled,
+      running: Boolean(this.server),
+      host: addresses[0] ?? '127.0.0.1',
+      port: this.boundPort ?? this.port,
+      addresses,
+      deviceId: this.deviceId,
+      deviceName: this.deviceName,
+      error: this.basicV2Error,
+    };
+  }
+
+  private getV2Service(): EchoLinkV2Service {
+    this.v2Service ??= this.createV2Service(() => this.getV2RuntimeState());
+    return this.v2Service;
+  }
+
+  private async reconcileServer(): Promise<void> {
+    if (!this.legacyV1Enabled && !this.basicV2Enabled) {
+      await this.closeServer();
+      return;
+    }
+    await this.ensureStarted();
+    await this.startMdnsAdvertisements();
+  }
+
   private defaultBaseUrl(): string {
     return `http://${this.getLanAddresses()[0] ?? '127.0.0.1'}:${this.boundPort ?? this.port}`;
   }
@@ -3081,8 +3169,31 @@ export class EchoLinkService {
     }
     for (const [token, record] of this.artworkTokens) {
       if (record.expiresAtEpochMs <= now) {
-        this.artworkTokens.delete(token);
+        this.deleteArtworkToken(token);
       }
+    }
+  }
+
+  private deleteArtworkToken(token: string): void {
+    const record = this.artworkTokens.get(token);
+    this.artworkTokens.delete(token);
+    if (record && this.artworkTokenByCacheKey.get(record.cacheKey) === token) {
+      this.artworkTokenByCacheKey.delete(record.cacheKey);
+    }
+  }
+
+  private clearArtworkTokens(): void {
+    this.artworkTokens.clear();
+    this.artworkTokenByCacheKey.clear();
+  }
+
+  private trimArtworkTokens(): void {
+    while (this.artworkTokens.size > maximumArtworkTokenRecords) {
+      const oldestToken = this.artworkTokens.keys().next().value;
+      if (typeof oldestToken !== 'string') {
+        break;
+      }
+      this.deleteArtworkToken(oldestToken);
     }
   }
 
@@ -3119,9 +3230,19 @@ export class EchoLinkService {
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
-      this.assertLanRequest(request);
       const url = new URL(request.url ?? '/', this.baseUrlForRequest(request));
       const path = url.pathname;
+
+      if (path.startsWith('/echo-link/v2/')) {
+        await this.getV2Service().handleRequest(request, response, url);
+        return;
+      }
+
+      this.assertLanRequest(request);
+      if (!this.legacyV1Enabled) {
+        writeError(response, 404, 'echo_link_v1_disabled');
+        return;
+      }
 
       if (path.startsWith('/echo-link/media/')) {
         await this.serveMediaToken(request, response, path.slice('/echo-link/media/'.length));
@@ -3448,14 +3569,45 @@ export class EchoLinkService {
 
   private createArtworkUrl(coverId: string | null, baseUrl: string): string {
     const asset = this.resolveCoverAsset(coverId);
+    const cacheKey = this.artworkCacheKey(coverId, asset);
+    const now = this.now();
+    const existingToken = this.artworkTokenByCacheKey.get(cacheKey);
+    const existingRecord = existingToken ? this.artworkTokens.get(existingToken) : null;
+    if (existingToken && existingRecord && existingRecord.expiresAtEpochMs > now) {
+      existingRecord.expiresAtEpochMs = now + artworkTokenTtlMs;
+      this.artworkTokens.delete(existingToken);
+      this.artworkTokens.set(existingToken, existingRecord);
+      return `${baseUrl}/echo-link/v1/artwork/${existingToken}`;
+    }
+    if (existingToken) {
+      this.deleteArtworkToken(existingToken);
+    }
+
     const token = randomBytes(24).toString('base64url');
     this.artworkTokens.set(token, {
+      cacheKey,
       filePath: asset?.filePath ?? null,
       mimeType: asset?.mimeType ?? 'image/svg+xml',
-      expiresAtEpochMs: this.now() + artworkTokenTtlMs,
+      expiresAtEpochMs: now + artworkTokenTtlMs,
     });
-    this.cleanupExpiredTokens();
+    this.artworkTokenByCacheKey.set(cacheKey, token);
+    this.trimArtworkTokens();
     return `${baseUrl}/echo-link/v1/artwork/${token}`;
+  }
+
+  private artworkCacheKey(
+    coverId: string | null,
+    asset: { filePath: string; mimeType: string | null } | null,
+  ): string {
+    if (!asset) {
+      return `missing:${coverId ?? 'default'}`;
+    }
+    try {
+      const stats = statSync(asset.filePath);
+      return `${coverId ?? 'cover'}\0${asset.filePath}\0${stats.size}\0${Math.round(stats.mtimeMs)}`;
+    } catch {
+      return `${coverId ?? 'cover'}\0${asset.filePath}`;
+    }
   }
 
   private resolveCoverAsset(coverId: string | null): { filePath: string; mimeType: string | null } | null {
@@ -3584,9 +3736,11 @@ export class EchoLinkService {
   private async serveArtworkToken(request: IncomingMessage, response: ServerResponse, token: string): Promise<void> {
     const record = this.artworkTokens.get(token);
     if (!record || record.expiresAtEpochMs <= this.now()) {
-      this.artworkTokens.delete(token);
+      this.deleteArtworkToken(token);
       throw new HttpError(401, 'artwork_token_expired_or_missing');
     }
+    this.artworkTokens.delete(token);
+    this.artworkTokens.set(token, record);
 
     if (!record.filePath || !existsSync(record.filePath)) {
       const body = Buffer.from(

@@ -436,7 +436,10 @@ export const ArtistTrackList = ({
             if (!window.confirm(t('artistDetail.tracks.confirm.delete', { title: track.title }))) {
               return;
             }
-            await library?.deleteTrackFile(track.id);
+            const result = await library?.deleteTrackFile(track.id);
+            for (const removedTrackId of result?.removedTrackIds ?? [track.id]) {
+              removeTrackFromQueue(removedTrackId);
+            }
             setTracks((current) => current.filter((item) => item.id !== track.id));
             window.dispatchEvent(new Event('library:changed'));
             return;

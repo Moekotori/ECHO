@@ -21,6 +21,7 @@ type PlaylistBackupSnapshot = {
 const backupFolderName = 'ECHO Next Playlist Backups';
 
 const sanitizeFileName = (value: string): string => {
+  // eslint-disable-next-line no-control-regex -- file names must reject control characters.
   const normalized = value.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/\s+/g, ' ').trim();
   return normalized.length > 0 ? normalized.slice(0, 80) : 'playlist';
 };

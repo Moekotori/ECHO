@@ -32,6 +32,7 @@ import type { AirPlayReceiverStatus, ConnectMetadata, ConnectReceiverClient, Con
 import { getAudioSession } from '../audioPublicApi';
 import { getAppSettings } from '../app/appSettings';
 import { AirPlayMdnsAdvertiser, airPlay2FeatureMask, createAirPlay2PairingUuid } from './AirPlayMdnsAdvertiser';
+import { AirPlayRtpReorderBuffer } from './AirPlayRtpReorderBuffer';
 
 type RaopEvent = Record<string, unknown> & {
   type?: string;
@@ -187,6 +188,7 @@ type AirPlay2TcpConnection = {
   plaintextBuffer: Buffer;
   encrypted: boolean;
   draining: boolean;
+  waitingForData: boolean;
   cipher: AirPlay2ControlCipherState;
   lastFrameSummary: string | null;
 };
@@ -307,7 +309,9 @@ const readConfiguredAirPlayReceiverProtocol = (): AirPlayReceiverProtocol => {
 };
 const highVolumeDebugActions = new Set(['pcm', 'rtp', 'rtcp']);
 const airPlay2ProbeSourceVersion = '366.0';
+const airPlay2ProbeHeaderLimitBytes = 32 * 1024;
 const airPlay2ProbeBodyLimitBytes = 64 * 1024;
+const airPlay2ArtworkBodyLimitBytes = 8 * 1024 * 1024;
 const airPlay2SupportedPcmAudioFormats = 0x3fffc;
 const airPlay2SupportedAlacAudioFormats = 0x140000;
 const airPlay2SupportedAudioFormats = airPlay2SupportedPcmAudioFormats | airPlay2SupportedAlacAudioFormats;
@@ -1410,7 +1414,13 @@ const summarizeAirPlay2Tlv = (body: Buffer): string | null => {
 const parseAirPlay2TextRequest = (buffer: Buffer): { request: AirPlay2ProbeRequest; consumed: number } | null => {
   const headerEnd = buffer.indexOf('\r\n\r\n');
   if (headerEnd < 0) {
+    if (buffer.length > airPlay2ProbeHeaderLimitBytes) {
+      throw new Error(`AirPlay 2 request headers exceed ${airPlay2ProbeHeaderLimitBytes} bytes.`);
+    }
     return null;
+  }
+  if (headerEnd > airPlay2ProbeHeaderLimitBytes) {
+    throw new Error(`AirPlay 2 request headers exceed ${airPlay2ProbeHeaderLimitBytes} bytes.`);
   }
 
   const headerText = buffer.subarray(0, headerEnd).toString('utf8');
@@ -1430,7 +1440,9 @@ const parseAirPlay2TextRequest = (buffer: Buffer): { request: AirPlay2ProbeReque
   }
 
   const contentLength = Number(headers['content-length'] ?? 0);
-  if (!Number.isInteger(contentLength) || contentLength < 0 || contentLength > airPlay2ProbeBodyLimitBytes) {
+  const contentType = headers['content-type']?.toLowerCase() ?? '';
+  const bodyLimit = contentType.startsWith('image/') ? airPlay2ArtworkBodyLimitBytes : airPlay2ProbeBodyLimitBytes;
+  if (!Number.isInteger(contentLength) || contentLength < 0 || contentLength > bodyLimit) {
     throw new Error(`Invalid AirPlay 2 Content-Length: ${headers['content-length'] ?? 'missing'}.`);
   }
 
@@ -2146,7 +2158,16 @@ export class AirPlayRaopHelperModule implements RaopModule {
 
     const child = this.child;
     this.readyPromise = new Promise<void>((resolve, reject) => {
-      const readyTimeout = setTimeout(() => reject(new Error('AirPlay helper did not become ready.')), 10_000);
+      const readyTimeout = setTimeout(() => {
+        const error = new Error('AirPlay helper did not become ready.');
+        if (this.child === child) {
+          this.child = null;
+          this.readyPromise = null;
+          this.rejectAll(error);
+          child.kill();
+        }
+        reject(error);
+      }, 10_000);
       child.once('error', (error) => {
         clearTimeout(readyTimeout);
         reject(error);
@@ -2446,8 +2467,10 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
   private mdnsAdvertisers: AirPlayMdnsAdvertiserLike[] = [];
   private airPlay2ProbeServer: TcpServer | null = null;
   private airPlay2ProbePort: number | null = null;
+  private readonly airPlay2ProbeSockets = new Set<Socket>();
   private airPlay2EventServer: TcpServer | null = null;
   private airPlay2EventPort: number | null = null;
+  private readonly airPlay2EventSockets = new Set<Socket>();
   private airPlay2UdpListeners: AirPlay2UdpListener[] = [];
   private airPlay2StreamState: AirPlay2StreamState | null = null;
   private airPlay2PairSetupState: AirPlay2PairSetupState | null = null;
@@ -2465,6 +2488,10 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
   private httpPcmBytesReceived = 0;
   private lastHttpPcmPort: number | null = null;
   private pcmPlaybackStarted = false;
+  private pcmBackpressured = false;
+  private pcmDrainStream: PassThrough | null = null;
+  private pcmDrainListener: (() => void) | null = null;
+  private pcmForwardingOperation: Promise<void> = Promise.resolve();
   private currentSourceId: string | null = null;
   private ignorePcmUntilNextStream = false;
   private audioSessionClaimedCurrentSource = false;
@@ -2473,6 +2500,16 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
   private positionAnchorUpdatedAtMs = 0;
   private sessionCounter = 0;
   private status: AirPlayReceiverStatus;
+  private lifecycleOperation: Promise<void> = Promise.resolve();
+  private readonly airPlay2RtpReorderBuffer = new AirPlayRtpReorderBuffer<{
+    packet: AirPlay2RtpPacket;
+    remote: RemoteInfo;
+  }>({
+    maxPendingPackets: 32,
+    maxWaitMs: 30,
+    onPacket: ({ packet, remote }) => this.processAirPlay2RtpPacket(packet, remote),
+    onGap: (missingPackets) => this.handleAirPlay2RtpGap(missingPackets),
+  });
 
   constructor(dependencies: AirPlayReceiverDependencies = {}) {
     super();
@@ -2481,7 +2518,9 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
     this.loadRaopModule = dependencies.loadRaopModule ?? loadDefaultRaopModule;
     this.createAirPlay2AlacDecoder = dependencies.createAirPlay2AlacDecoder ?? createDefaultAirPlay2AlacDecoder;
     this.getAdvertiseInterfaces = dependencies.getAdvertiseInterfaces ?? getAdvertiseInterfaces;
-    this.createMdnsAdvertiser = dependencies.createMdnsAdvertiser ?? (() => new AirPlayMdnsAdvertiser());
+    this.createMdnsAdvertiser = dependencies.createMdnsAdvertiser ?? (() => new AirPlayMdnsAdvertiser((error) => {
+      this.addDebugEvent('mdns', error.message);
+    }));
     this.useHttpPcmBridge = dependencies.useHttpPcmBridge ?? shouldUseAirPlayHttpPcmBridge();
     this.getAirPlayReceiverProtocol = dependencies.airPlay2Experimental !== undefined
       ? () => (dependencies.airPlay2Experimental ? 'airplay2' : 'airplay1')
@@ -2502,17 +2541,15 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
   }
 
   async setEnabled(enabled: boolean): Promise<AirPlayReceiverStatus> {
-    if (enabled) {
-      await this.start();
-    } else {
-      await this.stop();
-    }
+    const operation = this.lifecycleOperation.then(() => enabled ? this.start() : this.stop());
+    this.lifecycleOperation = operation.catch(() => undefined);
+    await operation;
 
     return this.getStatus();
   }
 
   async stopPlayback(): Promise<AirPlayReceiverStatus> {
-    this.sendRemoteCommand('stop');
+    await this.sendRemoteCommand('stop');
     const currentSourceId = this.currentSourceId;
     if (currentSourceId && this.audioSession.getStatus().currentFilePath === currentSourceId) {
       await Promise.resolve(this.audioSession.stop()).catch(() => undefined);
@@ -2537,16 +2574,16 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
   }
 
   async playPlayback(): Promise<AirPlayReceiverStatus> {
-    this.sendRemoteCommand('play');
-    this.setPositionAnchor(this.estimatePosition(this.status));
-    this.setStatus({ state: 'playing' });
+    if (!await this.sendRemoteCommand('play')) {
+      throw new Error('AirPlay sender did not accept the play command.');
+    }
     return this.getStatus();
   }
 
   async pausePlayback(): Promise<AirPlayReceiverStatus> {
-    this.sendRemoteCommand('pause');
-    this.setPositionAnchor(this.estimatePosition(this.status));
-    this.setStatus({ state: 'paused' });
+    if (!await this.sendRemoteCommand('pause')) {
+      throw new Error('AirPlay sender did not accept the pause command.');
+    }
     return this.getStatus();
   }
 
@@ -2557,7 +2594,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
   }
 
   async dispose(): Promise<void> {
-    await this.stop();
+    await this.setEnabled(false);
     this.audioSession.off?.('status', this.handleAudioStatus);
     this.removeAllListeners();
   }
@@ -2676,9 +2713,18 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const failedReceiverHandle = this.receiverHandle;
+      const failedRaopModule = this.raopModule;
       this.receiverHandle = null;
       this.raopModule = null;
+      const mdnsAdvertisers = this.mdnsAdvertisers.splice(0);
+      await Promise.all(mdnsAdvertisers.map((advertiser) => advertiser.stop(false).catch(() => undefined)));
       await this.stopAirPlay2ProbeServer().catch(() => undefined);
+      if (failedRaopModule) {
+        await Promise.resolve(failedRaopModule.stopReceiver(failedReceiverHandle ?? -1)).catch((cleanupError) => {
+          this.addDebugEvent('error', `AirPlay receiver cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+        });
+      }
       this.clearCurrentSession('native module unavailable');
       this.setStatus({
         enabled: false,
@@ -2807,9 +2853,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
       return;
     }
 
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve());
-    });
+    await this.closeAirPlay2TcpServer(server, this.airPlay2ProbeSockets);
   }
 
   private async stopAirPlay2SessionResources(): Promise<void> {
@@ -2820,13 +2864,39 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
     const udpListeners = this.airPlay2UdpListeners.splice(0);
     await Promise.all([
       eventServer
-        ? new Promise<void>((resolve) => eventServer.close(() => resolve()))
+        ? this.closeAirPlay2TcpServer(eventServer, this.airPlay2EventSockets)
         : Promise.resolve(),
       ...udpListeners.map((listener) => new Promise<void>((resolve) => listener.socket.close(() => resolve()))),
     ]);
   }
 
+  private async closeAirPlay2TcpServer(server: TcpServer, sockets: Set<Socket>): Promise<void> {
+    for (const socket of sockets) {
+      socket.end();
+    }
+    await new Promise<void>((resolve) => {
+      let finished = false;
+      const finish = (): void => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        clearTimeout(forceCloseTimer);
+        sockets.clear();
+        resolve();
+      };
+      const forceCloseTimer = setTimeout(() => {
+        for (const socket of sockets) {
+          socket.destroy();
+        }
+      }, 250);
+      forceCloseTimer.unref?.();
+      server.close(finish);
+    });
+  }
+
   private closeAirPlay2StreamState(): void {
+    this.airPlay2RtpReorderBuffer.reset();
     const state = this.airPlay2StreamState;
     this.airPlay2StreamState = null;
     if (!state?.alacDecoder) {
@@ -2840,17 +2910,21 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
   }
 
   private handleAirPlay2TcpConnection(socket: Socket): void {
+    this.airPlay2ProbeSockets.add(socket);
+    socket.once('close', () => this.airPlay2ProbeSockets.delete(socket));
     const connection: AirPlay2TcpConnection = {
       buffer: Buffer.alloc(0),
       plaintextBuffer: Buffer.alloc(0),
       encrypted: false,
       draining: false,
+      waitingForData: false,
       cipher: { readCounter: 0, writeCounter: 0, readCounterOffset: 0, writeCounterOffset: 0 },
       lastFrameSummary: null,
     };
 
     socket.on('data', (chunk) => {
       connection.buffer = Buffer.concat([connection.buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+      connection.waitingForData = false;
       if (!connection.draining) {
         void this.drainAirPlay2TcpConnection(socket, connection);
       }
@@ -2875,6 +2949,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
             throw new Error('Encrypted AirPlay 2 control frame arrived before control encryption was ready.');
           }
           if (connection.buffer.length < 2) {
+            connection.waitingForData = true;
             return;
           }
           const payloadLength = connection.buffer.readUInt16LE(0);
@@ -2883,6 +2958,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
           }
           const frameLength = 2 + payloadLength + 16;
           if (connection.buffer.length < frameLength) {
+            connection.waitingForData = true;
             return;
           }
           const frame = connection.buffer.subarray(0, frameLength);
@@ -2897,6 +2973,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
           while (connection.plaintextBuffer.length > 0) {
             const parsed = parseAirPlay2TextRequest(connection.plaintextBuffer);
             if (!parsed) {
+              connection.waitingForData = true;
               break;
             }
             connection.plaintextBuffer = connection.plaintextBuffer.subarray(parsed.consumed);
@@ -2916,6 +2993,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
 
         const parsed = parseAirPlay2TextRequest(connection.buffer);
         if (!parsed) {
+          connection.waitingForData = true;
           return;
         }
         connection.buffer = connection.buffer.subarray(parsed.consumed);
@@ -2957,7 +3035,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
       socket.end();
     } finally {
       connection.draining = false;
-      if (connection.buffer.length > 0 && !socket.destroyed) {
+      if (connection.buffer.length > 0 && !connection.waitingForData && !socket.destroyed) {
         void this.drainAirPlay2TcpConnection(socket, connection);
       }
     }
@@ -3450,6 +3528,8 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
       return this.airPlay2EventPort;
     }
     const server = createTcpServer((socket) => {
+      this.airPlay2EventSockets.add(socket);
+      socket.once('close', () => this.airPlay2EventSockets.delete(socket));
       socket.on('data', (chunk) => {
         this.addDebugEvent('event', `AirPlay 2 event channel data ${summarizeBuffer(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))}`);
       });
@@ -3528,48 +3608,10 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
 
     const state = this.airPlay2StreamState;
     if (state) {
-      const previousSequence = state.lastSequenceNumber;
       state.packetCount += 1;
       state.byteCount += message.length;
       state.firstPacketAt ??= this.now();
-      state.lastSequenceNumber = packet.sequenceNumber;
-      state.lastTimestamp = packet.timestamp;
-      const expectedSequence = previousSequence === null ? null : (previousSequence + 1) & 0xffff;
-      const hasGap = expectedSequence !== null && packet.sequenceNumber !== expectedSequence;
-      const gap = hasGap ? ` gap=${previousSequence}->${packet.sequenceNumber}` : '';
-      let decryptSummary = state.sharedKey ? 'decrypted=pending' : 'shk=missing';
-      let decryptFailedNow = false;
-      if (state.sharedKey) {
-        try {
-          const decrypted = decryptAirPlay2RtpPayload(packet, state.sharedKey);
-          state.decryptedPacketCount += 1;
-          decryptSummary = `decrypted=${decrypted.length}b`;
-          if (state.pcmFormat) {
-            this.writeAirPlay2LpcmPayload(decrypted, state, remote);
-            decryptSummary += '; pcm=f32le';
-          } else if (state.alacDecoder && state.alacFormat) {
-            const pcm = state.alacDecoder.decodeFrame(decrypted);
-            if (pcm.length > 0) {
-              state.decodedPacketCount += 1;
-              this.writeAirPlay2S16lePayload(pcm, state, remote, 'ALAC');
-              decryptSummary += `; alacPcm=${pcm.length}b; pcm=f32le`;
-            } else {
-              decryptSummary += '; alacPcm=0b';
-            }
-          }
-        } catch (error) {
-          state.decryptFailureCount += 1;
-          decryptFailedNow = true;
-          decryptSummary = `decryptFailed=${state.decryptFailureCount}:${error instanceof Error ? error.message : String(error)}`;
-        }
-      }
-      if (state.packetCount === 1 || state.packetCount % 64 === 0 || hasGap || (decryptFailedNow && state.decryptFailureCount <= 3)) {
-        this.addDebugEvent(
-          'rtp',
-          `${remote.address}:${remote.port} packets=${state.packetCount} bytes=${state.byteCount} decryptedPackets=${state.decryptedPacketCount} decodedPackets=${state.decodedPacketCount}${gap}; ${summarizeAirPlay2RtpPacket(packet)}; ${decryptSummary}`,
-          { method: 'UDP', path: '/airplay2/data', statusCode: null },
-        );
-      }
+      this.airPlay2RtpReorderBuffer.push(packet.sequenceNumber, { packet, remote });
       return;
     }
 
@@ -3578,6 +3620,66 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
       path: '/airplay2/data',
       statusCode: null,
     });
+  }
+
+  private processAirPlay2RtpPacket(packet: AirPlay2RtpPacket, remote: RemoteInfo): void {
+    const state = this.airPlay2StreamState;
+    if (!state) {
+      return;
+    }
+    const previousSequence = state.lastSequenceNumber;
+    state.lastSequenceNumber = packet.sequenceNumber;
+    state.lastTimestamp = packet.timestamp;
+    const expectedSequence = previousSequence === null ? null : (previousSequence + 1) & 0xffff;
+    const hasGap = expectedSequence !== null && packet.sequenceNumber !== expectedSequence;
+    const gap = hasGap ? ` gap=${previousSequence}->${packet.sequenceNumber}` : '';
+    let decryptSummary = state.sharedKey ? 'decrypted=pending' : 'shk=missing';
+    let decryptFailedNow = false;
+    if (state.sharedKey) {
+      try {
+        const decrypted = decryptAirPlay2RtpPayload(packet, state.sharedKey);
+        state.decryptedPacketCount += 1;
+        decryptSummary = `decrypted=${decrypted.length}b`;
+        if (state.pcmFormat) {
+          this.writeAirPlay2LpcmPayload(decrypted, state, remote);
+          decryptSummary += '; pcm=f32le';
+        } else if (state.alacDecoder && state.alacFormat) {
+          const pcm = state.alacDecoder.decodeFrame(decrypted);
+          if (pcm.length > 0) {
+            state.decodedPacketCount += 1;
+            this.writeAirPlay2S16lePayload(pcm, state, remote, 'ALAC');
+            decryptSummary += `; alacPcm=${pcm.length}b; pcm=f32le`;
+          } else {
+            decryptSummary += '; alacPcm=0b';
+          }
+        }
+      } catch (error) {
+        state.decryptFailureCount += 1;
+        decryptFailedNow = true;
+        decryptSummary = `decryptFailed=${state.decryptFailureCount}:${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
+    if (state.packetCount === 1 || state.packetCount % 64 === 0 || hasGap || (decryptFailedNow && state.decryptFailureCount <= 3)) {
+      this.addDebugEvent(
+        'rtp',
+        `${remote.address}:${remote.port} packets=${state.packetCount} bytes=${state.byteCount} decryptedPackets=${state.decryptedPacketCount} decodedPackets=${state.decodedPacketCount}${gap}; ${summarizeAirPlay2RtpPacket(packet)}; ${decryptSummary}`,
+        { method: 'UDP', path: '/airplay2/data', statusCode: null },
+      );
+    }
+  }
+
+  private handleAirPlay2RtpGap(missingPackets: number): void {
+    const state = this.airPlay2StreamState;
+    const format = state?.pcmFormat ?? state?.alacFormat ?? null;
+    if (!state || !format || missingPackets <= 0) {
+      return;
+    }
+    const framesPerPacket = Math.max(1, state.framesPerPacket ?? state.alacFormat?.framesPerPacket ?? 352);
+    const silenceBytes = missingPackets * framesPerPacket * format.channels * 4;
+    this.addDebugEvent('rtp', `concealed ${missingPackets} missing packet(s) with ${silenceBytes} bytes of silence`);
+    if (this.pcmStream && silenceBytes > 0) {
+      this.writePcmChunk(Buffer.alloc(silenceBytes), 'AirPlay 2 RTP concealment');
+    }
   }
 
   private writeAirPlay2LpcmPayload(decrypted: Buffer, state: AirPlay2StreamState, remote: RemoteInfo): void {
@@ -3628,8 +3730,8 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
     }
 
     const converted = convertAirPlay2LpcmToF32le(decrypted, state.pcmFormat);
-    if (converted.length > 0 && !this.pcmStream.write(converted)) {
-      this.addDebugEvent('pcm', 'backpressure');
+    if (converted.length > 0) {
+      this.writePcmChunk(converted, 'AirPlay 2 LPCM');
     }
   }
 
@@ -3688,8 +3790,8 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
 
     const evenLength = pcm.length - (pcm.length % 2);
     const converted = convertS16leToF32le(evenLength === pcm.length ? pcm : pcm.subarray(0, evenLength));
-    if (converted.length > 0 && !this.pcmStream.write(converted)) {
-      this.addDebugEvent('pcm', 'backpressure');
+    if (converted.length > 0) {
+      this.writePcmChunk(converted, `AirPlay 2 ${codec}`);
     }
   }
 
@@ -4328,9 +4430,58 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
     }
 
     const converted = convertS16leToF32le(data);
-    if (!this.pcmStream.write(converted)) {
-      this.addDebugEvent('pcm', 'backpressure');
+    this.writePcmChunk(converted, 'AirPlay 1 PCM');
+  }
+
+  private writePcmChunk(chunk: Buffer, source: string): void {
+    const stream = this.pcmStream;
+    if (!stream || chunk.length === 0 || this.pcmBackpressured) {
+      return;
     }
+    if (stream.write(chunk)) {
+      return;
+    }
+
+    this.pcmBackpressured = true;
+    this.addDebugEvent('pcm', `${source} backpressure; dropping live PCM until native output drains`);
+    if (this.airPlayReceiverProtocol === 'airplay1' && !this.useHttpPcmBridge) {
+      this.queueDirectPcmForwarding(false);
+    }
+    const onDrain = (): void => {
+      if (this.pcmDrainStream !== stream) {
+        return;
+      }
+      this.pcmDrainStream = null;
+      this.pcmDrainListener = null;
+      this.pcmBackpressured = false;
+      this.addDebugEvent('pcm', `${source} backpressure cleared`);
+      if (this.airPlayReceiverProtocol === 'airplay1' && !this.useHttpPcmBridge) {
+        this.queueDirectPcmForwarding(true);
+      }
+    };
+    this.pcmDrainStream = stream;
+    this.pcmDrainListener = onDrain;
+    stream.once('drain', onDrain);
+  }
+
+  private queueDirectPcmForwarding(enabled: boolean): void {
+    this.pcmForwardingOperation = this.pcmForwardingOperation.then(async () => {
+      const result = await Promise.resolve(this.raopModule?.setPcmForwarding?.(enabled));
+      if (result === false) {
+        this.addDebugEvent('pcm', `native PCM forwarding=${enabled} was not acknowledged`);
+      }
+    }).catch((error) => {
+      this.addDebugEvent('pcm', error instanceof Error ? error.message : String(error));
+    });
+  }
+
+  private clearPcmBackpressure(): void {
+    if (this.pcmDrainStream && this.pcmDrainListener) {
+      this.pcmDrainStream.removeListener('drain', this.pcmDrainListener);
+    }
+    this.pcmDrainStream = null;
+    this.pcmDrainListener = null;
+    this.pcmBackpressured = false;
   }
 
   private startHttpPcmPlayback(event: RaopEvent): void {
@@ -4527,9 +4678,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
     this.destroyHttpPcmPlayback();
     this.pcmStream = null;
     this.pcmPlaybackStarted = false;
-    void Promise.resolve(this.raopModule?.setPcmForwarding?.(true)).catch((error) => {
-      this.addDebugEvent('pcm', error instanceof Error ? error.message : String(error));
-    });
+    this.queueDirectPcmForwarding(true);
   }
 
   private destroyHttpPcmPlayback(): void {
@@ -4549,6 +4698,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
   private clearCurrentSession(reason: string): void {
     this.clearHttpPcmReconnectTimer();
     this.destroyHttpPcmPlayback();
+    this.clearPcmBackpressure();
     if (this.pcmStream) {
       this.pcmStream.destroy();
     }
@@ -4614,15 +4764,20 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
     });
   }
 
-  private sendRemoteCommand(command: 'play' | 'pause' | 'stop'): void {
+  private async sendRemoteCommand(command: 'play' | 'pause' | 'stop'): Promise<boolean> {
     if (this.receiverHandle === null || !this.raopModule?.sendRemoteCommand) {
-      return;
+      return false;
     }
 
     try {
-      this.raopModule.sendRemoteCommand(this.receiverHandle, command);
+      const sent = await Promise.resolve(this.raopModule.sendRemoteCommand(this.receiverHandle, command));
+      if (!sent) {
+        this.addDebugEvent('remote', `${command} command was not accepted by the AirPlay sender`);
+      }
+      return sent;
     } catch (error) {
       this.addDebugEvent('remote', error instanceof Error ? error.message : String(error));
+      return false;
     }
   }
 
@@ -4662,7 +4817,7 @@ export class AirPlayReceiverSpikeService extends EventEmitter<AirPlayReceiverEve
       audioStatus.currentFilePath !== this.currentSourceId &&
       (audioStatus.state === 'loading' || audioStatus.state === 'playing')
     ) {
-      this.sendRemoteCommand('stop');
+      void this.sendRemoteCommand('stop');
       this.ignorePcmUntilNextStream = true;
       this.clearCurrentSession('local playback took over');
       this.setStatus({

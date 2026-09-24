@@ -1,4 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebDavRemoteSourceAdapter } from './adapters/WebDavRemoteSourceAdapter';
 import { RemoteStreamProxyService } from './RemoteStreamProxyService';
@@ -144,6 +147,41 @@ describe('RemoteStreamProxyService', () => {
     expect(response.status).toBe(401);
   });
 
+  it('serves file-backed ALAC sources with the MP4 audio content type', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'echo-remote-alac-'));
+    const filePath = join(directory, 'lossless.alac');
+    await writeFile(filePath, audioBytes);
+    await proxy.close();
+    const adapter = {
+      provider: 'webdav',
+      createProxyRequest: () => ({ filePath }),
+    } as unknown as RemoteSourceAdapter;
+    proxy = new RemoteStreamProxyService(() => adapter);
+
+    try {
+      const stream = await proxy.createStreamUrl(source(), '/lossless.alac', 'stable-alac');
+      const response = await fetch(stream.url, { method: 'HEAD' });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('audio/mp4');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('bounds retained stream tokens and evicts the oldest URL', async () => {
+    await proxy.close();
+    const adapter = new WebDavRemoteSourceAdapter();
+    proxy = new RemoteStreamProxyService(() => adapter, { maxTokenRecords: 2 });
+    const first = await proxy.createStreamUrl(source(), '/song.mp3', 'stable-1');
+    const second = await proxy.createStreamUrl(source(), '/song.mp3', 'stable-2');
+    const third = await proxy.createStreamUrl(source(), '/song.mp3', 'stable-3');
+
+    expect((await fetch(first.url)).status).toBe(401);
+    expect((await fetch(second.url)).status).toBe(200);
+    expect((await fetch(third.url)).status).toBe(200);
+  });
+
   it('uses the configured upstream fetch for remote stream requests', async () => {
     await proxy.close();
     const upstreamFetch = vi.fn(async () =>
@@ -180,6 +218,51 @@ describe('RemoteStreamProxyService', () => {
     );
   });
 
+  it('uses direct Node fetch for adapters that must bypass Electron response header conversion', async () => {
+    await proxy.close();
+    const directFetch = vi.fn(async () =>
+      new Response(audioBytes, {
+        status: 200,
+        headers: {
+          'Content-Length': String(audioBytes.length),
+          'Content-Type': 'audio/mpeg',
+        },
+      }),
+    );
+    const adapter = {
+      provider: 'baidu',
+      createProxyRequest: () => ({
+        url: 'https://d.pcs.baidu.com/file/song.mp3',
+        headers: { 'User-Agent': 'pan.baidu.com' },
+        fetchTransport: 'node',
+      }),
+    } as unknown as RemoteSourceAdapter;
+    proxy = new RemoteStreamProxyService(() => adapter, { directFetch: directFetch as typeof fetch });
+    const baiduSource = {
+      ...source(),
+      provider: 'baidu' as const,
+      displayName: 'Baidu',
+      baseUrl: null,
+      username: null,
+      authType: 'token' as const,
+      secret: 'token-1',
+    };
+
+    const stream = await proxy.createStreamUrl(baiduSource, '/一首歌.mp3', 'baidu|source-1|1');
+    const response = await fetch(stream.url);
+
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer()).equals(audioBytes)).toBe(true);
+    expect(directFetch).toHaveBeenCalledWith(
+      'https://d.pcs.baidu.com/file/song.mp3',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'User-Agent': 'pan.baidu.com',
+        }),
+      }),
+    );
+  });
+
   it('times out stalled upstream streams instead of leaving playback waiting forever', async () => {
     await proxy.close();
     await close(backend);
@@ -198,5 +281,30 @@ describe('RemoteStreamProxyService', () => {
     const response = await fetch(stream.url);
 
     expect(response.status).toBe(502);
+  });
+
+  it('times out when an upstream sends headers and then stalls its response body', async () => {
+    await proxy.close();
+    await close(backend);
+
+    backend = createServer((_request, response) => {
+      response.writeHead(200, {
+        'Content-Type': 'audio/mpeg',
+        'Transfer-Encoding': 'chunked',
+      });
+      response.write(audioBytes.subarray(0, 1));
+    });
+    backendPort = await listen(backend);
+    const adapter = {
+      provider: 'webdav',
+      createProxyRequest: () => ({ url: `http://127.0.0.1:${backendPort}/dav/song.mp3` }),
+    } as unknown as RemoteSourceAdapter;
+    proxy = new RemoteStreamProxyService(() => adapter, { upstreamResponseTimeoutMs: 20 });
+
+    const stream = await proxy.createStreamUrl(source(), '/song.mp3', 'stable-1');
+    const response = await fetch(stream.url);
+
+    expect(response.status).toBe(200);
+    await expect(response.arrayBuffer()).rejects.toThrow();
   });
 });

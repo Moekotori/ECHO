@@ -101,6 +101,8 @@ describe('SubsonicRemoteSourceAdapter', () => {
       }
       if (url.pathname === '/rest/stream.view') {
         expect(url.searchParams.get('id')).toBe('song-1');
+        expect(url.searchParams.get('format')).toBe('raw');
+        expect(url.searchParams.get('maxBitRate')).toBe('0');
         response.writeHead(200, {
           'Content-Type': 'audio/flac',
           'Content-Length': String(audio.length),
@@ -229,6 +231,49 @@ describe('SubsonicRemoteSourceAdapter', () => {
     expect(errors).toEqual([expect.objectContaining({ path: 'subsonic:album:album-2' })]);
     expect(maxActiveAlbumRequests).toBeGreaterThan(1);
     expect(maxActiveAlbumRequests).toBeLessThanOrEqual(4);
+  });
+
+  it('reuses cached album details while the album summary fingerprint is unchanged', async () => {
+    let albumDetailRequests = 0;
+    const server = createServer((request, response) => {
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+      response.setHeader('Content-Type', 'application/json');
+      if (url.pathname === '/rest/getAlbumList2.view') {
+        response.end(envelope({
+          albumList2: { album: [{ id: 'album-1', name: 'Echo', songCount: 1, duration: 120, coverArt: 'cover-1', created: '2026-01-01' }] },
+        }));
+        return;
+      }
+      if (url.pathname === '/rest/getAlbum.view') {
+        albumDetailRequests += 1;
+        response.end(envelope({
+          album: { id: 'album-1', song: [{ id: 'song-1', title: 'Song', artist: 'Artist', album: 'Echo', duration: 120 }] },
+        }));
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    servers.push(server);
+    const port = await listen(server);
+    const adapter = new SubsonicRemoteSourceAdapter();
+    const entries = new Map<string, { fingerprint: string; payload: string; verifiedAt: string }>();
+    const scanCache = {
+      get: (namespace: string, key: string) => entries.get(`${namespace}:${key}`) ?? null,
+      set: (namespace: string, key: string, fingerprint: string, payload: string, verifiedAt = new Date().toISOString()) => {
+        entries.set(`${namespace}:${key}`, { fingerprint, payload, verifiedAt });
+      },
+    };
+
+    for (let pass = 0; pass < 2; pass += 1) {
+      const scanned = [];
+      for await (const item of adapter.scan({ source: source(port), scanCache })) {
+        scanned.push(item);
+      }
+      expect(scanned).toHaveLength(1);
+    }
+
+    expect(albumDetailRequests).toBe(1);
   });
 
   it('requests compressed cover art from Subsonic servers', async () => {

@@ -8,6 +8,7 @@ import { createDatabase, type EchoDatabase } from '../../database/createDatabase
 import { LibraryStore } from '../LibraryStore';
 import { RemoteSourceService } from './RemoteSourceService';
 import { remoteTrackIdFor } from './remoteIdentity';
+import { subsonicDirectCoverUrlFor } from './remoteCoverUrls';
 
 const serviceMocks = vi.hoisted(() => ({
   getLyricsForTrack: vi.fn(),
@@ -186,11 +187,20 @@ describe('RemoteSourceService Subsonic integration', () => {
     await waitForSync(service, source.id);
 
     const trackId = remoteTrackIdFor(source.id, 'song-1');
+    const directCoverUrl = subsonicDirectCoverUrlFor(
+      trackId,
+      source.id,
+      'subsonic',
+      null,
+      { coverArt: 'cover-1', albumId: 'album-1' },
+      'subsonic:song:song-1',
+      'song-1',
+    );
     expect(service.getJobStatus(source.id).completed.cover).toBe(0);
 
     const hydrated = await service.hydrateVisibleTracks([trackId], { metadata: false, cover: true, immediateCover: true });
     expect(hydrated[0]).toEqual(expect.objectContaining({
-      coverThumb: `echo-image://subsonic-cover/${encodeURIComponent(trackId)}?size=512`,
+      coverThumb: directCoverUrl,
       metadataStatus: 'ok',
     }));
     expect(coverRequests).toBe(0);
@@ -204,11 +214,11 @@ describe('RemoteSourceService Subsonic integration', () => {
       sampleRate: 96000,
       bitDepth: 24,
       bitrate: 900000,
-      coverThumb: `echo-image://subsonic-cover/${encodeURIComponent(trackId)}?size=512`,
+      coverThumb: directCoverUrl,
       metadataStatus: 'ok',
     }));
     expect(libraryStore.getTracks({ sourceProvider: 'remote', sourceId: source.id }).items[0]).toEqual(expect.objectContaining({
-      coverThumb: `echo-image://subsonic-cover/${encodeURIComponent(trackId)}?size=512`,
+      coverThumb: directCoverUrl,
     }));
     const remoteCover = await service.readRemoteCover(trackId);
     expect(remoteCover.status).toBe('ok');

@@ -21,6 +21,8 @@ export const AnimatedOutlet = ({
       data-motion-route="true"
       data-route-id={routeId}
       hidden={hidden}
+      id={`main-content-${routeId}`}
+      tabIndex={-1}
     >
       {children}
     </main>

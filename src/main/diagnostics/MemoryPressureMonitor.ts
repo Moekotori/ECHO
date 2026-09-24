@@ -8,7 +8,7 @@ import type {
   DiagnosticMemorySnapshot,
   DiagnosticRendererMemorySnapshot,
 } from '../../shared/types/diagnostics';
-import { getCrashReportService } from './CrashReportService';
+import { createMemoryPressureEventFromSnapshot, getCrashReportService } from './CrashReportService';
 import { getCoverProtocolDiagnosticsSnapshot } from './CoverProtocolDiagnostics';
 import { getLyricsSearchDiagnosticsSnapshot } from './LyricsSearchDiagnostics';
 import { hashText } from './Logger';
@@ -54,6 +54,7 @@ type MemoryPressureConsoleSummary = {
 let checkTimer: NodeJS.Timeout | null = null;
 let initialCheckTimer: NodeJS.Timeout | null = null;
 let hasReportedMemoryPressure = false;
+let lastMemoryPressureReportPath = '';
 let isCheckingMemoryPressure = false;
 const recentMemoryTrendSamples: DiagnosticMemoryTrendSample[] = [];
 
@@ -874,12 +875,15 @@ const sendMemoryPressureEvent = (event: DiagnosticMemoryPressureEvent): void => 
 };
 
 export const shouldReleaseSoftMemoryPressure = (
-  recentSamples: readonly Pick<DiagnosticMemoryTrendSample, 'totalWorkingSetBytes'>[],
+  recentSamples: readonly Pick<DiagnosticMemoryTrendSample, 'totalWorkingSetBytes' | 'totalPrivateBytes'>[],
   thresholdBytes = softMemoryPressureThresholdBytes,
 ): boolean => {
   const samples = recentSamples.slice(-softMemoryPressureRequiredSamples);
   return samples.length >= softMemoryPressureRequiredSamples &&
-    samples.every((sample) => sample.totalWorkingSetBytes >= thresholdBytes);
+    samples.every((sample) => Math.max(
+      sample.totalWorkingSetBytes,
+      sample.totalPrivateBytes ?? 0,
+    ) >= thresholdBytes);
 };
 
 const maybeReleaseSoftMemoryPressure = (): void => {
@@ -911,24 +915,33 @@ const maybeReleaseSoftMemoryPressure = (): void => {
 };
 
 export const checkMemoryPressureNow = async (): Promise<DiagnosticMemoryPressureEvent | null> => {
-  if (hasReportedMemoryPressure || isCheckingMemoryPressure) {
+  if (isCheckingMemoryPressure) {
     return null;
   }
 
   isCheckingMemoryPressure = true;
-  const snapshot = createDiagnosticMemorySnapshot(getAppMetricsSnapshot(), {
-    appVersion: safeAppVersion(),
-    thresholdBytes: memoryPressureThresholdBytes,
-  });
-  recordMemoryTrendSample(snapshot);
-
-  if (snapshot.totalWorkingSetBytes < snapshot.thresholdBytes) {
-    maybeReleaseSoftMemoryPressure();
-    isCheckingMemoryPressure = false;
-    return null;
-  }
-
+  let sampledSnapshot: DiagnosticMemorySnapshot | null = null;
   try {
+    const snapshot = createDiagnosticMemorySnapshot(getAppMetricsSnapshot(), {
+      appVersion: safeAppVersion(),
+      thresholdBytes: memoryPressureThresholdBytes,
+    });
+    sampledSnapshot = snapshot;
+    recordMemoryTrendSample(snapshot);
+
+    // Keep sampling and releasing disposable caches after the first hard-pressure
+    // report. Previously hasReportedMemoryPressure short-circuited the monitor,
+    // leaving the process with no self-healing path for the rest of the session.
+    maybeReleaseSoftMemoryPressure();
+
+    const totalPressureBytes = Math.max(
+      snapshot.totalWorkingSetBytes,
+      snapshot.totalPrivateBytes ?? 0,
+    );
+    if (totalPressureBytes < snapshot.thresholdBytes) {
+      return null;
+    }
+
     const enrichedSnapshot: DiagnosticMemorySnapshot = {
       ...snapshot,
       rendererProcesses: await collectRendererMemorySnapshots(snapshot.metrics),
@@ -936,18 +949,24 @@ export const checkMemoryPressureNow = async (): Promise<DiagnosticMemoryPressure
       coverProtocol: getCoverProtocolDiagnosticsSnapshot(),
       recentSamples: getRecentMemoryTrendSamples(),
     };
-    const event = getCrashReportService().reportMemoryPressure(enrichedSnapshot);
-    const consoleSummary = createMemoryPressureConsoleSummary(enrichedSnapshot, event.reportPath);
-    console.warn('[memory-pressure] ECHO memory exceeded threshold', consoleSummary);
-    getCrashReportService().getLogger()?.warn('main', 'memory pressure cause summary', consoleSummary);
-    hasReportedMemoryPressure = true;
+    const event = hasReportedMemoryPressure
+      ? createMemoryPressureEventFromSnapshot(enrichedSnapshot, lastMemoryPressureReportPath)
+      : getCrashReportService().reportMemoryPressure(enrichedSnapshot);
+    if (!hasReportedMemoryPressure) {
+      lastMemoryPressureReportPath = event.reportPath;
+      const consoleSummary = createMemoryPressureConsoleSummary(enrichedSnapshot, event.reportPath);
+      console.warn('[memory-pressure] ECHO memory exceeded threshold', consoleSummary);
+      getCrashReportService().getLogger()?.warn('main', 'memory pressure cause summary', consoleSummary);
+      hasReportedMemoryPressure = true;
+    }
     sendMemoryPressureEvent(event);
     return event;
   } catch (error) {
     getCrashReportService().getLogger()?.warn('main', 'failed to create memory pressure report', {
       error: error instanceof Error ? error.message : String(error),
-      totalWorkingSetBytes: snapshot.totalWorkingSetBytes,
-      thresholdBytes: snapshot.thresholdBytes,
+      totalWorkingSetBytes: sampledSnapshot?.totalWorkingSetBytes,
+      totalPrivateBytes: sampledSnapshot?.totalPrivateBytes,
+      thresholdBytes: sampledSnapshot?.thresholdBytes,
     });
     return null;
   } finally {
@@ -961,6 +980,7 @@ export const startMemoryPressureMonitor = (): void => {
   }
 
   hasReportedMemoryPressure = false;
+  lastMemoryPressureReportPath = '';
   isCheckingMemoryPressure = false;
   initialCheckTimer = setTimeout(() => {
     initialCheckTimer = null;
@@ -981,4 +1001,12 @@ export const stopMemoryPressureMonitor = (): void => {
     clearInterval(checkTimer);
     checkTimer = null;
   }
+};
+
+export const resetMemoryPressureMonitorForTests = (): void => {
+  stopMemoryPressureMonitor();
+  hasReportedMemoryPressure = false;
+  lastMemoryPressureReportPath = '';
+  isCheckingMemoryPressure = false;
+  recentMemoryTrendSamples.length = 0;
 };

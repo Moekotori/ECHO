@@ -5,8 +5,7 @@ export type EntitlementDiagnosticScope =
   | 'echo-pro-account'
   | 'echo-pro-hwid'
   | 'echo-pro-cloud'
-  | 'connect-donator'
-  | 'package-integrity';
+  | 'connect-donator';
 
 export type EntitlementRouteProbe = {
   accepted: true;

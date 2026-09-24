@@ -33,6 +33,11 @@ if (!existsSync(manifestPath)) {
 
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 const sourceUrl = typeof manifest.sourceUrl === 'string' ? manifest.sourceUrl.trim() : '';
+const mirrorPrefix = (process.env.ECHO_FFMPEG_MIRROR_PREFIX ?? 'https://gh-proxy.com/').trim();
+const sourceUrls = [
+  mirrorPrefix && sourceUrl.startsWith('https://github.com/') ? `${mirrorPrefix}${sourceUrl}` : null,
+  sourceUrl,
+].filter((url, index, urls) => url && urls.indexOf(url) === index);
 const targetFfmpeg = resolve(projectRoot, String(manifest.artifact ?? ''));
 const targetDir = dirname(targetFfmpeg);
 const expectedHash = String(manifest.sha256 ?? '').toUpperCase();
@@ -82,10 +87,26 @@ const downloadFile = async (url, destination) => {
   renameSync(temporaryPath, destination);
 };
 
+const downloadArchive = async () => {
+  let lastError = null;
+  for (const url of sourceUrls) {
+    try {
+      console.log(`[prepare:win-ffmpeg] downloading ${url}`);
+      await downloadFile(url, zipPath);
+      unzipSync(readFileSync(zipPath));
+      return;
+    } catch (error) {
+      lastError = error;
+      rmSync(zipPath, { force: true });
+      console.warn(`[prepare:win-ffmpeg] source failed, trying next: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  fail(`All download sources failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+};
+
 const readZipEntries = async () => {
   if (!existsSync(zipPath) || statSync(zipPath).size === 0) {
-    console.log(`[prepare:win-ffmpeg] downloading ${sourceUrl}`);
-    await downloadFile(sourceUrl, zipPath);
+    await downloadArchive();
   }
 
   try {
@@ -93,7 +114,7 @@ const readZipEntries = async () => {
   } catch (error) {
     console.warn(`[prepare:win-ffmpeg] cached archive is invalid, downloading again: ${error instanceof Error ? error.message : String(error)}`);
     rmSync(zipPath, { force: true });
-    await downloadFile(sourceUrl, zipPath);
+    await downloadArchive();
     return unzipSync(readFileSync(zipPath));
   }
 };

@@ -1,0 +1,158 @@
+.mqtt-integration-panel {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--settings-border, rgba(127, 127, 127, 0.2));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--color-surface, #fff) 92%, transparent);
+}
+
+.mqtt-integration-panel__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.mqtt-integration-panel__header h3,
+.mqtt-integration-panel__header p {
+  margin: 0;
+}
+
+.mqtt-integration-panel__header p {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+}
+
+.mqtt-integration-panel__icon {
+  color: #7c5cff;
+}
+
+.mqtt-integration-panel__phase {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-secondary) 12%, transparent);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mqtt-integration-panel__phase[data-phase='connected'] {
+  background: color-mix(in srgb, #2ebd85 15%, transparent);
+  color: #16845b;
+}
+
+.mqtt-integration-panel__phase[data-phase='error'] {
+  background: color-mix(in srgb, #e05a67 14%, transparent);
+  color: #c33c4a;
+}
+
+.mqtt-integration-panel__form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mqtt-integration-panel__form > label:not(.mqtt-integration-panel__discovery) {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.mqtt-integration-panel__form input:not([type='checkbox']) {
+  min-width: 0;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--settings-border, rgba(127, 127, 127, 0.22));
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.mqtt-integration-panel__discovery {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, #7c5cff 7%, transparent);
+}
+
+.mqtt-integration-panel__discovery span {
+  display: grid;
+  gap: 3px;
+}
+
+.mqtt-integration-panel__discovery small {
+  color: var(--color-text-secondary);
+}
+
+.mqtt-integration-panel__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+}
+
+.mqtt-integration-panel__error,
+.mqtt-integration-panel__security {
+  margin: 0;
+  font-size: 12px;
+}
+
+.mqtt-integration-panel__error {
+  color: #c33c4a;
+}
+
+.mqtt-integration-panel__security {
+  color: var(--color-text-secondary);
+}
+
+.mqtt-integration-panel__topics {
+  display: grid;
+  gap: 7px;
+}
+
+.mqtt-integration-panel__topics > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mqtt-integration-panel__topics code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+.mqtt-integration-panel__topics button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .mqtt-integration-panel__header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .mqtt-integration-panel__header .mqtt-integration-panel__phase {
+    grid-column: 2;
+  }
+
+  .mqtt-integration-panel__form {
+    grid-template-columns: 1fr;
+  }
+}
+

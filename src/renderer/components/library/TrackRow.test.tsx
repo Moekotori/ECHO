@@ -65,18 +65,25 @@ describe('TrackRow', () => {
     expect(specTag.className).not.toContain('tag-hires');
   });
 
+  it('shows a dedicated MQA tag when metadata detection marked the track', () => {
+    render(<TrackRow isPlaying={false} track={track({ mqa: true, sampleRate: 48000 })} />);
+
+    expect(screen.getByText('MQA').className).toContain('tag-mqa');
+    expect(screen.getByText('FLAC')).toBeTruthy();
+  });
+
   it('shows detected BPM tags for reliable and displayable estimated analysis', () => {
-    const { rerender } = render(<TrackRow isPlaying={false} track={track({ bpm: 128, bpmConfidence: 0.92, analysisStatus: 'complete' })} />);
+    const { rerender } = render(<TrackRow isPlaying={false} track={track({ bpm: 128, bpmConfidence: 0.92, analysisStatus: 'complete', fieldSources: { bpm: 'audio_analysis' } })} />);
 
-    expect(screen.getByText('128 BPM')).toBeTruthy();
+    expect(screen.getByText('≈128 BPM')).toBeTruthy();
 
-    rerender(<TrackRow isPlaying={false} track={track({ bpm: 121, bpmConfidence: 0.51, analysisStatus: 'low_confidence' })} />);
+    rerender(<TrackRow isPlaying={false} track={track({ bpm: 121, bpmConfidence: 0.51, analysisStatus: 'low_confidence', fieldSources: { bpm: 'audio_analysis' } })} />);
 
-    expect(screen.getByText('121 BPM')).toBeTruthy();
+    expect(screen.getByText('≈121 BPM')).toBeTruthy();
 
-    rerender(<TrackRow isPlaying={false} track={track({ bpm: 128, bpmConfidence: 0.2, analysisStatus: 'low_confidence' })} />);
+    rerender(<TrackRow isPlaying={false} track={track({ bpm: 128, bpmConfidence: 0.2, analysisStatus: 'low_confidence', fieldSources: { bpm: 'audio_analysis' } })} />);
 
-    expect(screen.queryByText('128 BPM')).toBeNull();
+    expect(screen.getByText('≈128 BPM')).toBeTruthy();
 
     rerender(<TrackRow isPlaying={false} track={track({ bpm: 128, bpmConfidence: null, analysisStatus: 'analyzing' })} />);
 
@@ -121,14 +128,21 @@ describe('TrackRow', () => {
     expect(container.querySelector('.track-cover img')).toBeNull();
   });
 
-  it('loads Subsonic proxy covers eagerly once the row is rendered', () => {
+  it('keeps Subsonic proxy covers lazy outside the priority window', () => {
     const coverThumb = 'echo-image://subsonic-cover/remote-track-1?size=512';
     const { container } = render(<TrackRow isPlaying={false} track={track({ coverThumb, mediaType: 'remote', provider: 'subsonic' })} />);
     const img = container.querySelector('.track-cover img') as HTMLImageElement | null;
 
     expect(img?.getAttribute('src')).toBe(coverThumb);
-    expect(img?.getAttribute('loading')).toBe('eager');
+    expect(img?.getAttribute('loading')).toBe('lazy');
     expect(img?.getAttribute('decoding')).toBe('async');
+  });
+
+  it('loads priority Subsonic proxy covers eagerly', () => {
+    const coverThumb = 'echo-image://subsonic-cover/remote-track-1?size=512';
+    const { container } = render(<TrackRow isPlaying={false} priorityCover track={track({ coverThumb, mediaType: 'remote', provider: 'subsonic' })} />);
+
+    expect(container.querySelector('.track-cover img')?.getAttribute('loading')).toBe('eager');
   });
 
   it('hides Subsonic internal remote path tags', () => {

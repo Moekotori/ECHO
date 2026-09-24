@@ -31,6 +31,7 @@ export const defaultSidebarHiddenRouteIds: SidebarRouteId[] = [
   'audio-cd',
   'inbox',
   'import-folder',
+  'audio-settings',
   'lyrics-settings',
   'import-file',
 ];

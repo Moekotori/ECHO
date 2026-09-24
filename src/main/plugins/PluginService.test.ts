@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -8,7 +8,6 @@ import {
   echoProUnlockLicenseVersion,
   echoProUnlockPluginId,
 } from '../../shared/constants/featureUnlocks';
-import type { AudioStatus } from '../../shared/types/audio';
 import type { PluginManifest, PluginPackage } from '../../shared/types/plugins';
 import {
   canonicalizeEchoProPackage,
@@ -95,23 +94,26 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('electron', () => ({
-  app: {
-    getPath: () => join(tmpdir(), 'echo-next-plugin-service-userdata'),
-    getVersion: () => '0.0.0-test',
-    get isPackaged() {
-      return mocks.isPackaged;
+vi.mock('electron', () => {
+  const electronMock = {
+    app: {
+      getPath: () => join(tmpdir(), 'echo-next-plugin-service-userdata'),
+      getVersion: () => '0.0.0-test',
+      get isPackaged() {
+        return mocks.isPackaged;
+      },
     },
-  },
-  shell: {
-    openPath: mocks.openPathMock,
-    trashItem: mocks.trashItemMock,
-  },
-  dialog: {
-    showSaveDialog: mocks.showSaveDialogMock,
-    showOpenDialog: mocks.showOpenDialogMock,
-  },
-}));
+    shell: {
+      openPath: mocks.openPathMock,
+      trashItem: mocks.trashItemMock,
+    },
+    dialog: {
+      showSaveDialog: mocks.showSaveDialogMock,
+      showOpenDialog: mocks.showOpenDialogMock,
+    },
+  };
+  return { ...electronMock, default: electronMock };
+});
 
 vi.mock('../audio/AudioSession', () => ({
   getAudioSession: () => mocks.fakeAudioSession,
@@ -508,26 +510,107 @@ describe('PluginService', () => {
     expect(exported.files.map((file) => file.path)).not.toContain('echo-pro-license.json');
   });
 
-  it('activates the ECHO Pro plugin from a server-issued package and enables it online', async () => {
+  it('automatically migrates an enabled legacy Pro plugin and keeps Pro after the plugin is removed', async () => {
+    const { packagePath, license } = writeSignedEchoProPackage(pluginRoot, {
+      licenseId: 'license-auto-migration',
+      packageFileName: 'auto-migration.echo',
+    });
+    await service.importPluginPackage(packagePath);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      valid: true,
+      reason: 'unlocked',
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })));
+    await service.enable({ pluginId: echoProUnlockPluginId, trustedPermissions: [] });
+
+    expect(service.getEchoProLicenseStatus()).toMatchObject({
+      valid: true,
+      licenseId: license.licenseId,
+    });
+    expect(service.getEchoProLicenseSource()).toBe('legacy-plugin');
+
+    const upgradedService = new PluginService(pluginRoot);
+    expect(upgradedService.list().plugins.some((plugin) => plugin.id === echoProUnlockPluginId)).toBe(false);
+    expect(existsSync(join(pluginRoot, echoProUnlockPluginId))).toBe(false);
+    expect(upgradedService.getEchoProLicenseSource()).toBe('native-license');
+    expect(upgradedService.getEchoProLicenseStatus()).toMatchObject({
+      valid: true,
+      licenseId: license.licenseId,
+    });
+
+    const restartedService = new PluginService(pluginRoot);
+    expect(restartedService.getEchoProLicenseStatus()).toMatchObject({
+      valid: true,
+      licenseId: license.licenseId,
+    });
+  });
+
+  it('never lets a stale legacy plugin overwrite a revoked native entitlement', async () => {
+    const { packagePath, license } = writeSignedEchoProPackage(pluginRoot, {
+      licenseId: 'license-revoked-after-migration',
+      packageFileName: 'revoked-after-migration.echo',
+    });
+    await service.importPluginPackage(packagePath);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      valid: true,
+      reason: 'unlocked',
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })));
+    await service.enable({ pluginId: echoProUnlockPluginId, trustedPermissions: [] });
+
+    const entitlementDirectory = join(tmpdir(), `${pluginRoot.split(/[\\/]/u).at(-1)}.entitlements`);
+    const migratedService = new PluginService(pluginRoot);
+    migratedService.list();
+    const backupName = readdirSync(entitlementDirectory)
+      .find((name) => name.startsWith('legacy-plugin-backup-'));
+    expect(backupName).toBeTruthy();
+    cpSync(join(entitlementDirectory, backupName!), join(pluginRoot, echoProUnlockPluginId), { recursive: true });
+    writeFileSync(join(pluginRoot, 'plugin-state.json'), `${JSON.stringify({
+      plugins: {
+        [echoProUnlockPluginId]: {
+          enabled: true,
+          trustedPermissions: [],
+          disabledByHost: false,
+        },
+      },
+    }, null, 2)}\n`, 'utf8');
+
+    const entitlementPath = join(entitlementDirectory, 'echo-pro-entitlement.json');
+    const envelope = JSON.parse(readFileSync(entitlementPath, 'utf8')) as Record<string, unknown>;
+    envelope.revokedReason = 'license_revoked';
+    envelope.revokedAt = '2026-07-19T00:00:00.000Z';
+    writeFileSync(entitlementPath, `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
+
+    const restartedService = new PluginService(pluginRoot);
+    restartedService.list();
+    expect(restartedService.getEchoProLicenseStatus()).toMatchObject({
+      valid: false,
+      reason: 'license-revoked',
+      licenseId: license.licenseId,
+    });
+  });
+
+  it('activates ECHO Pro directly from a server-issued signed license without installing a plugin', async () => {
     const { packagePath, license } = writeSignedEchoProPackage(pluginRoot, {
       licenseId: 'license-activation-flow',
       packageFileName: 'activation-flow.echo',
     });
-    const packageText = readFileSync(packagePath, 'utf8');
+    const packagePayload = JSON.parse(readFileSync(packagePath, 'utf8')) as PluginPackage & {
+      licenseSignature: string;
+    };
     vi.stubEnv('ECHO_PRO_ACTIVATION_API_URL', 'https://activation.test/api/echo-pro');
     const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
       const requestUrl = String(url);
-      if (requestUrl === 'https://activation.test/api/echo-pro/keys/redeem') {
-        return new Response(packageText, {
-          status: 200,
-          headers: {
-            'x-echo-license-id': license.licenseId,
-            'x-echo-activation-id': license.activationId,
-          },
-        });
-      }
-      if (requestUrl === 'https://echonext.moe/api/echo-pro/license/verify') {
-        return new Response(JSON.stringify({ valid: true, reason: 'unlocked' }), {
+      if (requestUrl === 'https://activation.test/api/echo-pro/license/keys/activate') {
+        return new Response(JSON.stringify({
+          ok: true,
+          license: packagePayload.license,
+          licenseSignature: packagePayload.licenseSignature,
+        }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });
@@ -550,13 +633,11 @@ describe('PluginService', () => {
       licenseId: license.licenseId,
       activationId: license.activationId,
       qq: license.qq,
-      importedFileCount: 5,
+      importedFileCount: 0,
     });
-    expect(service.list().plugins.find((plugin) => plugin.id === echoProUnlockPluginId)).toMatchObject({
-      enabled: true,
-      disabledByHost: false,
-    });
-    expect(fetchMock).toHaveBeenCalledWith('https://activation.test/api/echo-pro/keys/redeem', expect.objectContaining({
+    expect(service.list().plugins.find((plugin) => plugin.id === echoProUnlockPluginId)).toBeUndefined();
+    expect(service.getEchoProLicenseStatus()).toMatchObject({ valid: true, reason: 'unlocked' });
+    expect(fetchMock).toHaveBeenCalledWith('https://activation.test/api/echo-pro/license/keys/activate', expect.objectContaining({
       method: 'POST',
     }));
     const activationBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as Record<string, unknown>;
@@ -566,6 +647,129 @@ describe('PluginService', () => {
     });
     expect(activationBody.machineCodeHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(activationBody.machineCode).toBeUndefined();
+  });
+
+  it('offers the signed stale activation as replacement proof only after explicit HWID reset confirmation', async () => {
+    const { packagePath, license } = writeSignedEchoProPackage(pluginRoot, {
+      licenseId: 'license-old-machine',
+      machineCodeHash: '0'.repeat(64),
+    });
+    await service.importPluginPackage(packagePath);
+    vi.stubEnv('ECHO_PRO_ACTIVATION_API_URL', 'https://activation.test/api/echo-pro');
+    const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response(JSON.stringify({ message: 'temporary_test_stop' }), {
+      status: 500,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(service.activateEchoProPlugin({
+      mode: 'afdian',
+      qq: license.qq,
+      orderId: '202607140857551985310505',
+    })).rejects.toThrow('echo_pro_activation_machine_binding_confirmation_required');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await expect(service.activateEchoProPlugin({
+      mode: 'afdian',
+      qq: license.qq,
+      orderId: '202607140857551985310505',
+      replaceMachineBinding: true,
+    })).rejects.toThrow('echo_pro_activation_temporary_test_stop');
+
+    const replacementBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as Record<string, unknown>;
+    expect(replacementBody).toMatchObject({
+      replaceMachineBinding: true,
+      replaceLicenseId: license.licenseId,
+      replaceActivationId: license.activationId,
+    });
+  });
+
+  it('rejects an HWID reset request without a locally signed mismatched activation', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(service.activateEchoProPlugin({
+      mode: 'afdian',
+      qq: '12345678',
+      orderId: '202607140857551985310505',
+      replaceMachineBinding: true,
+    })).rejects.toThrow('echo_pro_activation_replacement_unavailable');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('securely releases only the current ECHO Pro device and removes its local license', async () => {
+    const { packagePath, license } = writeSignedEchoProPackage(pluginRoot, {
+      licenseId: 'license-device-release',
+      packageFileName: 'device-release.echo',
+    });
+    await service.importPluginPackage(packagePath);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      valid: true,
+      reason: 'unlocked',
+    }), { status: 200 })));
+    await service.enable({ pluginId: echoProUnlockPluginId, trustedPermissions: [] });
+
+    vi.stubEnv('ECHO_PRO_ACTIVATION_API_URL', 'https://activation.test/api/echo-pro');
+    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      expect(String(url)).toBe('https://activation.test/api/echo-pro/license/release-device');
+      expect(init?.method).toBe('POST');
+      return new Response(JSON.stringify({
+        ok: true,
+        releasedAt: '2026-07-17T00:00:00.000Z',
+        alreadyReleased: false,
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(service.releaseEchoProCurrentDevice()).resolves.toMatchObject({
+      ok: true,
+      pluginId: echoProUnlockPluginId,
+      removedLocalPlugin: true,
+    });
+    const releaseBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as Record<string, unknown>;
+    expect(releaseBody).toMatchObject({
+      licenseId: license.licenseId,
+      activationId: license.activationId,
+      machineCode: getEchoProMachineCode(),
+    });
+    expect(existsSync(join(pluginRoot, echoProUnlockPluginId))).toBe(false);
+    expect(service.list().plugins.some((plugin) => plugin.id === echoProUnlockPluginId)).toBe(false);
+  });
+
+  it('releases every order HWID using only the Afdian order ID', async () => {
+    vi.stubEnv('ECHO_PRO_ACTIVATION_API_URL', 'https://activation.test/api/echo-pro');
+    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      expect(String(url)).toBe('https://activation.test/api/echo-pro/unbind');
+      expect(init?.method).toBe('POST');
+      return new Response(JSON.stringify({
+        ok: true,
+        releasedAt: '2026-07-18T00:00:00.000Z',
+        alreadyReleased: false,
+        releasedCount: 2,
+        activeCount: 0,
+        releasedLicenseIds: [],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(service.releaseEchoProCurrentDevice('202607140857551985310505')).resolves.toMatchObject({
+      ok: true,
+      pluginId: echoProUnlockPluginId,
+      releasedCount: 2,
+      activeCount: 0,
+      removedLocalPlugin: false,
+    });
+    const releaseBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as Record<string, unknown>;
+    expect(releaseBody).toEqual({
+      orderId: '202607140857551985310505',
+    });
   });
 
   it('rejects an ECHO Pro license whose appMinVersion is newer than this app', async () => {
@@ -658,6 +862,55 @@ describe('PluginService', () => {
     expect(service.list().plugins.find((plugin) => plugin.id === echoProUnlockPluginId)).toMatchObject({
       enabled: true,
       disabledByHost: false,
+    });
+  });
+
+  it('repairs stale in-memory ECHO Pro errors while the signed license remains trusted', async () => {
+    vi.setSystemTime(new Date('2026-06-22T00:00:00.000Z'));
+    const { packagePath } = writeSignedEchoProPackage(pluginRoot, {
+      licenseId: 'license-stale-runtime-state',
+    });
+    await service.importPluginPackage(packagePath);
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ valid: true, reason: 'unlocked' }),
+    })));
+    await service.enable({ pluginId: echoProUnlockPluginId, trustedPermissions: [] });
+
+    type MutablePluginRecord = {
+      enabled: boolean;
+      disabledByHost: boolean;
+      status: 'enabled' | 'disabled' | 'running' | 'error';
+      error: string | null;
+    };
+    const records = (service as unknown as { records: Map<string, MutablePluginRecord> }).records;
+    const record = records.get(echoProUnlockPluginId);
+    expect(record).toBeDefined();
+    record!.status = 'error';
+    record!.error = 'echo_pro_license_network_error';
+
+    expect(service.list().plugins.find((plugin) => plugin.id === echoProUnlockPluginId)).toMatchObject({
+      enabled: true,
+      disabledByHost: false,
+      status: 'enabled',
+      error: null,
+    });
+
+    const staleRecord = records.get(echoProUnlockPluginId)!;
+    staleRecord.enabled = false;
+    staleRecord.disabledByHost = true;
+    staleRecord.status = 'disabled';
+    staleRecord.error = 'echo_pro_license_network_error';
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('offline');
+    }));
+
+    await service.refreshEchoProLicenseOnline(staleRecord as never);
+    expect(staleRecord).toMatchObject({
+      enabled: true,
+      disabledByHost: false,
+      status: 'enabled',
+      error: null,
     });
   });
 
@@ -794,14 +1047,17 @@ describe('PluginService', () => {
       },
     }, null, 2)}\n`, 'utf8');
 
-    expect(service.list().plugins.find((plugin) => plugin.id === echoProUnlockPluginId)).toMatchObject({
-      enabled: true,
-      disabledByHost: false,
-    });
-    const state = JSON.parse(readFileSync(statePath, 'utf8')) as {
-      plugins: Record<string, { echoProOfflineUntil?: string }>;
+    expect(service.list().plugins.some((plugin) => plugin.id === echoProUnlockPluginId)).toBe(false);
+    expect(service.getEchoProLicenseSource()).toBe('native-license');
+    const entitlementPath = join(
+      tmpdir(),
+      `${pluginRoot.split(/[\\/]/u).at(-1)}.entitlements`,
+      'echo-pro-entitlement.json',
+    );
+    const entitlement = JSON.parse(readFileSync(entitlementPath, 'utf8')) as {
+      offlineUntil: string;
     };
-    expect(state.plugins[echoProUnlockPluginId]!.echoProOfflineUntil).toBe('2026-06-29T00:00:00.000Z');
+    expect(entitlement.offlineUntil).toBe('2026-06-29T00:00:00.000Z');
   });
 
   it('invalidates an imported ECHO Pro plugin when any signed plugin file is modified', async () => {

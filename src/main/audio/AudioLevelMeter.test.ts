@@ -7,6 +7,7 @@ import {
   audioLevelMeterTestHooks,
   computeDspEstimatedGainDb,
   createAudioLevelTelemetry,
+  createNativeAudioLevelTelemetry,
   type PcmLevelSnapshot,
 } from './AudioLevelMeter';
 
@@ -428,5 +429,17 @@ describe('AudioLevelMeter', () => {
     });
 
     expect(computeDspEstimatedGainDb(eq, channelBalanceState())).toBe(-2);
+  });
+
+  it('preserves authoritative native post-DSP levels without estimating DSP gain twice', () => {
+    expect(createNativeAudioLevelTelemetry(-7.25, -18.75)).toMatchObject({
+      inputPeakDb: -7.25,
+      inputRmsDb: -18.75,
+      estimatedOutputPeakDb: -7.25,
+      estimatedOutputRmsDb: -18.75,
+      headroomDb: 7.3,
+      visualTelemetryState: 'fallback',
+      meterSource: 'native_post_dsp',
+    });
   });
 });

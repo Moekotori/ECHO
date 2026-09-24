@@ -1,5 +1,11 @@
 import type { AudioOutputSettings, AudioPlaybackState } from './audio';
-import type { LibraryAudioFormatFilter, LibraryTrack } from './library';
+import type {
+  ContinuousPlayMode,
+  ContinuousPlayPreference,
+  ContinuousPlayReason,
+  LibraryAudioFormatFilter,
+  LibraryTrack,
+} from './library';
 import type { PlayableTrack } from './remoteSources';
 import type { ReplayGainTrackData } from '../utils/replayGain';
 
@@ -9,6 +15,7 @@ export type PlaybackStatus = {
   positionMs: number;
   durationMs: number;
   filePath: string | null;
+  volume?: number | null;
 };
 
 export type PlaybackProbeHint = {
@@ -102,6 +109,7 @@ export type LocalFileResolveResult = {
 };
 
 export type PersistedPlaybackRepeatMode = 'off' | 'one' | 'all';
+export type PlaybackOrderMode = 'sequential' | 'shuffle' | 'repeat-one';
 
 export type PersistedQueueSource =
   | {
@@ -120,6 +128,7 @@ export type PersistedQueueSource =
   | { type: 'liked'; label: string; sourceProvider: 'local' | 'netease' | 'qqmusic'; search?: string; sort?: string }
   | { type: 'streaming'; label: string; provider: string }
   | { type: 'local-file'; label: string }
+  | { type: 'continuous-play'; label: string; mode: ContinuousPlayMode }
   | { type: 'manual'; label: string };
 
 export type PersistedQueueItem = {
@@ -127,6 +136,12 @@ export type PersistedQueueItem = {
   track: LibraryTrack;
   source: PersistedQueueSource;
   addedAt: string;
+  removeAfterPlay?: boolean;
+  recommendation?: {
+    mode: ContinuousPlayMode;
+    reasons: ContinuousPlayReason[];
+    generatedAt: string;
+  };
 };
 
 export type PersistedPlaybackSessionMode = {
@@ -134,6 +149,8 @@ export type PersistedPlaybackSessionMode = {
   repeatMode: PersistedPlaybackRepeatMode;
   automixEnabled: boolean;
   autoFillQueueEnabled?: boolean;
+  continuousPlayMode?: ContinuousPlayMode;
+  continuousPlayPreferences?: ContinuousPlayPreference[];
 };
 
 export type PersistedPlaybackSessionResume = {
@@ -165,6 +182,7 @@ export type PersistedPlaylistPlaybackState = {
 
 export type PersistedPlaybackSessionV1 = {
   version: 1;
+  revision?: number;
   items: PersistedQueueItem[];
   currentQueueId: string | null;
   currentTrackId: string | null;
@@ -178,4 +196,17 @@ export type PersistedPlaybackSessionV1 = {
 
 export type PlaybackQueueSessionSaveOptions = {
   broadcastSnapshot?: PersistedPlaybackSessionV1 | null;
+  expectedRevision?: number;
 };
+
+export type MainWindowPlaybackControlRequest =
+  | { type: 'play' }
+  | { type: 'pause' }
+  | { type: 'stop' }
+  | { type: 'playPause' }
+  | { type: 'previous' }
+  | { type: 'next' }
+  | { type: 'seek'; positionSeconds: number }
+  | { type: 'setVolume'; volume: number }
+  | { type: 'setPlaybackOrder'; mode: PlaybackOrderMode }
+  | { type: 'playQueueItem'; queueId: string };

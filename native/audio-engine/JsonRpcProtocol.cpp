@@ -259,6 +259,102 @@ nlohmann::json buildReplayGainConfig(const ReplayGainProcessor& processor)
     return obj;
 }
 
+nlohmann::json buildCompressorState(const CompressorProcessor& processor)
+{
+    const auto state = processor.getState();
+    return nlohmann::json::object({
+        {"enabled", state.enabled},
+        {"thresholdDb", state.thresholdDb},
+        {"ratio", state.ratio},
+        {"attackMs", state.attackMs},
+        {"releaseMs", state.releaseMs},
+        {"kneeDb", state.kneeDb},
+        {"makeupDb", state.makeupDb},
+        {"mix", state.mix},
+        {"gainReductionDb", processor.gainReductionDb()},
+        {"clippingRisk", processor.hasClippingRisk()}
+    });
+}
+
+CompressorState readCompressorState(const nlohmann::json& value, const CompressorState& fallback)
+{
+    CompressorState state = fallback;
+    state.enabled = getBool(value, "enabled", fallback.enabled);
+    state.thresholdDb = getNumber(value, "thresholdDb", fallback.thresholdDb);
+    state.ratio = getNumber(value, "ratio", fallback.ratio);
+    state.attackMs = getNumber(value, "attackMs", fallback.attackMs);
+    state.releaseMs = getNumber(value, "releaseMs", fallback.releaseMs);
+    state.kneeDb = getNumber(value, "kneeDb", fallback.kneeDb);
+    state.makeupDb = getNumber(value, "makeupDb", fallback.makeupDb);
+    state.mix = getNumber(value, "mix", fallback.mix);
+    return state;
+}
+
+nlohmann::json buildCrossfeedState(const SpatialDspProcessor& processor)
+{
+    const auto state = processor.getCrossfeedState();
+    return nlohmann::json::object({
+        {"enabled", state.enabled},
+        {"amount", state.amount},
+        {"cutoffHz", state.cutoffHz}
+    });
+}
+
+nlohmann::json buildStereoFieldState(const SpatialDspProcessor& processor)
+{
+    const auto state = processor.getStereoFieldState();
+    return nlohmann::json::object({
+        {"enabled", state.enabled},
+        {"width", state.width},
+        {"centerGainDb", state.centerGainDb},
+        {"sideGainDb", state.sideGainDb},
+        {"clippingRisk", processor.hasStereoFieldClippingRisk()}
+    });
+}
+
+nlohmann::json buildChannelMatrixState(const SpatialDspProcessor& processor)
+{
+    const auto state = processor.getChannelMatrixState();
+    return nlohmann::json::object({
+        {"enabled", state.enabled},
+        {"leftToLeft", state.leftToLeft},
+        {"rightToLeft", state.rightToLeft},
+        {"leftToRight", state.leftToRight},
+        {"rightToRight", state.rightToRight},
+        {"clippingRisk", processor.hasChannelMatrixClippingRisk()}
+    });
+}
+
+CrossfeedState readCrossfeedState(const nlohmann::json& value, const CrossfeedState& fallback)
+{
+    return {
+        getBool(value, "enabled", fallback.enabled),
+        getNumber(value, "amount", fallback.amount),
+        getNumber(value, "cutoffHz", fallback.cutoffHz)
+    };
+}
+
+StereoFieldState readStereoFieldState(const nlohmann::json& value, const StereoFieldState& fallback)
+{
+    return {
+        getBool(value, "enabled", fallback.enabled),
+        getNumber(value, "width", fallback.width),
+        getNumber(value, "centerGainDb", fallback.centerGainDb),
+        getNumber(value, "sideGainDb", fallback.sideGainDb)
+    };
+}
+
+ChannelMatrixState readChannelMatrixState(const nlohmann::json& value, const ChannelMatrixState& fallback)
+{
+    return {
+        getBool(value, "enabled", fallback.enabled),
+        getNumber(value, "leftToLeft", fallback.leftToLeft),
+        getNumber(value, "rightToLeft", fallback.rightToLeft),
+        getNumber(value, "leftToRight", fallback.leftToRight),
+        getNumber(value, "rightToRight", fallback.rightToRight)
+    };
+}
+
 nlohmann::json buildPresetList()
 {
     const auto presets = EqPresetStore::createBuiltInPresets();
@@ -286,6 +382,32 @@ nlohmann::json buildPresetList()
         result.push_back(obj);
     }
     return result;
+}
+
+nlohmann::json buildDspRackState(
+    const DspRackOrder& rackOrder,
+    const CompressorProcessor& compressor,
+    const SpatialDspProcessor& spatialDsp)
+{
+    nlohmann::json order = nlohmann::json::array();
+    for (const auto module : rackOrder.snapshot())
+        order.push_back(DspRackOrder::moduleIdText(module));
+
+    return nlohmann::json::object({
+        {"schemaVersion", 3},
+        {"order", order},
+        {"compressor", buildCompressorState(compressor)},
+        {"crossfeed", buildCrossfeedState(spatialDsp)},
+        {"stereoField", buildStereoFieldState(spatialDsp)},
+        {"channelMatrix", buildChannelMatrixState(spatialDsp)},
+        {"reorderableModules", nlohmann::json::array({
+            "equalizer", "convolution", "replayGain", "compressor",
+            "crossfeed", "stereoField", "channelMatrix", "channelBalance"
+        })},
+        {"fixedPostStages", nlohmann::json::array({
+            "headroom", "truePeakLimiter", "playbackRate", "levelMeter"
+        })}
+    });
 }
 
 const nlohmann::json* getParamsObject(const nlohmann::json& params)
@@ -357,10 +479,15 @@ int getParamsInt(const nlohmann::json& params, int fallback)
 
 JsonRpcProtocol::WriteCallback JsonRpcProtocol::writeCallback;
 JsonRpcProtocol::OpenFileCallback JsonRpcProtocol::openFileCallback = nullptr;
+JsonRpcProtocol::OpenSourceCallback JsonRpcProtocol::openSourceCallback = nullptr;
 JsonRpcProtocol::PauseCallback JsonRpcProtocol::pauseCallback;
 JsonRpcProtocol::SeekCallback JsonRpcProtocol::seekCallback;
 JsonRpcProtocol::StopCallback JsonRpcProtocol::stopCallback;
 JsonRpcProtocol::PrefetchCallback JsonRpcProtocol::prefetchCallback;
+JsonRpcProtocol::GaplessPrepareCallback JsonRpcProtocol::gaplessPrepareCallback;
+JsonRpcProtocol::AutomixPrepareCallback JsonRpcProtocol::automixPrepareCallback;
+JsonRpcProtocol::AutomixCancelCallback JsonRpcProtocol::automixCancelCallback;
+JsonRpcProtocol::AutomixStateCallback JsonRpcProtocol::automixStateCallback;
 JsonRpcProtocol::VolumeCallback JsonRpcProtocol::volumeCallback;
 JsonRpcProtocol::QueueSetCallback JsonRpcProtocol::queueSetCallback;
 JsonRpcProtocol::QueueClearCallback JsonRpcProtocol::queueClearCallback;
@@ -375,10 +502,19 @@ void JsonRpcProtocol::setOpenFileCallback(OpenFileCallback callback)
     openFileCallback = callback;
 }
 
+void JsonRpcProtocol::setOpenSourceCallback(OpenSourceCallback callback)
+{
+    openSourceCallback = callback;
+}
+
 void JsonRpcProtocol::setPauseCallback(PauseCallback cb) { pauseCallback = cb; }
 void JsonRpcProtocol::setSeekCallback(SeekCallback cb) { seekCallback = cb; }
 void JsonRpcProtocol::setStopCallback(StopCallback cb) { stopCallback = cb; }
 void JsonRpcProtocol::setPrefetchCallback(PrefetchCallback cb) { prefetchCallback = cb; }
+void JsonRpcProtocol::setGaplessPrepareCallback(GaplessPrepareCallback cb) { gaplessPrepareCallback = std::move(cb); }
+void JsonRpcProtocol::setAutomixPrepareCallback(AutomixPrepareCallback cb) { automixPrepareCallback = std::move(cb); }
+void JsonRpcProtocol::setAutomixCancelCallback(AutomixCancelCallback cb) { automixCancelCallback = std::move(cb); }
+void JsonRpcProtocol::setAutomixStateCallback(AutomixStateCallback cb) { automixStateCallback = std::move(cb); }
 void JsonRpcProtocol::setVolumeCallback(VolumeCallback cb) { volumeCallback = cb; }
 void JsonRpcProtocol::setQueueSetCallback(QueueSetCallback cb) { queueSetCallback = std::move(cb); }
 void JsonRpcProtocol::setQueueClearCallback(QueueClearCallback cb) { queueClearCallback = std::move(cb); }
@@ -417,8 +553,9 @@ std::string JsonRpcProtocol::createJsonRpcNotification(const std::string& method
 std::string JsonRpcProtocol::handleJsonLine(
     const std::string& line,
     EqProcessor& eq, ChannelBalanceProcessor& cb, ConvolutionProcessor& conv,
-    DspHeadroomProcessor& headroom, ReplayGainProcessor& rg,
-    PlaybackRateProcessor& rate, LevelMeterProcessor& meter,
+    DspHeadroomProcessor& headroom, ReplayGainProcessor& rg, CompressorProcessor& compressor,
+    SpatialDspProcessor& spatialDsp,
+    PlaybackRateProcessor& rate, LevelMeterProcessor& meter, DspRackOrder& rackOrder,
     EqPresetStore& /*presets*/)
 {
     nlohmann::json parsed;
@@ -570,6 +707,77 @@ std::string JsonRpcProtocol::handleJsonLine(
     {
         DspChain::setSafetyLimiterEnabled(getParamsBool(params, true));
         return createJsonRpcResponse(id, buildDspState(headroom));
+    }
+
+    if (method == "dspRack.getState")
+        return createJsonRpcResponse(id, buildDspRackState(rackOrder, compressor, spatialDsp));
+
+    if (method == "dspRack.setState")
+    {
+        const auto* paramsObj = getParamsObject(params);
+        if (paramsObj == nullptr || !paramsObj->contains("order") || !(*paramsObj)["order"].is_array())
+            return createJsonRpcError(id, -32602, "dspRack.setState requires an order array");
+
+        std::vector<DspRackModuleId> order;
+        for (const auto& item : (*paramsObj)["order"])
+        {
+            if (!item.is_string())
+                return createJsonRpcError(id, -32602, "DSP rack module IDs must be strings");
+            DspRackModuleId module;
+            if (!DspRackOrder::parseModuleId(item.get<std::string>(), module))
+                return createJsonRpcError(id, -32004, "Unsupported DSP rack module");
+            order.push_back(module);
+        }
+
+        std::string error;
+        if (!rackOrder.setOrder(order, error))
+            return createJsonRpcError(id, -32004, error);
+        return createJsonRpcResponse(id, buildDspRackState(rackOrder, compressor, spatialDsp));
+    }
+
+    if (method == "compressor.getState")
+        return createJsonRpcResponse(id, buildCompressorState(compressor));
+
+    if (method == "compressor.setState")
+    {
+        const auto* paramsObj = getParamsObject(params);
+        if (paramsObj == nullptr)
+            return createJsonRpcError(id, -32602, "compressor.setState requires a state object");
+        compressor.setState(readCompressorState(*paramsObj, compressor.getState()));
+        return createJsonRpcResponse(id, buildCompressorState(compressor));
+    }
+
+    if (method == "crossfeed.getState")
+        return createJsonRpcResponse(id, buildCrossfeedState(spatialDsp));
+    if (method == "crossfeed.setState")
+    {
+        const auto* paramsObj = getParamsObject(params);
+        if (paramsObj == nullptr)
+            return createJsonRpcError(id, -32602, "crossfeed.setState requires a state object");
+        spatialDsp.setCrossfeedState(readCrossfeedState(*paramsObj, spatialDsp.getCrossfeedState()));
+        return createJsonRpcResponse(id, buildCrossfeedState(spatialDsp));
+    }
+
+    if (method == "stereoField.getState")
+        return createJsonRpcResponse(id, buildStereoFieldState(spatialDsp));
+    if (method == "stereoField.setState")
+    {
+        const auto* paramsObj = getParamsObject(params);
+        if (paramsObj == nullptr)
+            return createJsonRpcError(id, -32602, "stereoField.setState requires a state object");
+        spatialDsp.setStereoFieldState(readStereoFieldState(*paramsObj, spatialDsp.getStereoFieldState()));
+        return createJsonRpcResponse(id, buildStereoFieldState(spatialDsp));
+    }
+
+    if (method == "channelMatrix.getState")
+        return createJsonRpcResponse(id, buildChannelMatrixState(spatialDsp));
+    if (method == "channelMatrix.setState")
+    {
+        const auto* paramsObj = getParamsObject(params);
+        if (paramsObj == nullptr)
+            return createJsonRpcError(id, -32602, "channelMatrix.setState requires a state object");
+        spatialDsp.setChannelMatrixState(readChannelMatrixState(*paramsObj, spatialDsp.getChannelMatrixState()));
+        return createJsonRpcResponse(id, buildChannelMatrixState(spatialDsp));
     }
 
     // ── Channel Balance Methods ──
@@ -853,12 +1061,17 @@ std::string JsonRpcProtocol::handleJsonLine(
     // ── Queue Methods ──
 
     if (method == "queue.set" && queueSetCallback) {
-        nlohmann::json items = params.is_array() && !params.empty() && params[0].contains("items")
-            ? params[0]["items"] : nlohmann::json::array();
-        std::string repeatMode = (params.is_array() && !params.empty() && params[0].contains("repeatMode"))
-            ? params[0]["repeatMode"].get<std::string>() : "off";
-        queueSetCallback(items, repeatMode);
-        return createJsonRpcResponse(id, nlohmann::json::object());
+        const auto* paramsObj = getParamsObject(params);
+        if (paramsObj == nullptr)
+            return createJsonRpcError(id, -32602, "Invalid queue snapshot");
+        const auto items = paramsObj->contains("items") && (*paramsObj)["items"].is_array()
+            ? (*paramsObj)["items"] : nlohmann::json::array();
+        const std::string repeatMode = getString(*paramsObj, "repeatMode");
+        const uint64_t revision = static_cast<uint64_t>(std::max(0, getInt(*paramsObj, "revision", 0)));
+        const std::string currentItemId = getString(*paramsObj, "currentItemId");
+        if (revision == 0 || !queueSetCallback(items, repeatMode, revision, currentItemId))
+            return createJsonRpcError(id, -32000, "queue snapshot rejected");
+        return createJsonRpcResponse(id, {{"queueRevision", revision}});
     }
 
     if (method == "queue.clear" && queueClearCallback) {
@@ -867,6 +1080,102 @@ std::string JsonRpcProtocol::handleJsonLine(
     }
 
     // ── Audio File Methods ──
+
+    if (method == "audio.openSource")
+    {
+        const auto* paramsObj = getParamsObject(params);
+        if (paramsObj == nullptr || !paramsObj->contains("source") || !(*paramsObj)["source"].is_object())
+            return createJsonRpcError(id, -32602, "Invalid source");
+        const auto& source = (*paramsObj)["source"];
+        const std::string kind = getString(source, "kind");
+        const std::string uri = getString(source, "uri");
+        if ((kind != "local" && kind != "http") || uri.empty())
+            return createJsonRpcError(id, -32602, "Invalid source");
+
+        double requestedStartSeconds = 0.0;
+        const auto startSecondsIt = paramsObj->find("startSeconds");
+        if (startSecondsIt != paramsObj->end())
+        {
+            if (!startSecondsIt->is_number())
+                return createJsonRpcError(id, -32602, "Invalid startSeconds");
+            requestedStartSeconds = startSecondsIt->get<double>();
+            if (!std::isfinite(requestedStartSeconds))
+                return createJsonRpcError(id, -32602, "Invalid startSeconds");
+        }
+        if (!openSourceCallback)
+            return createJsonRpcError(id, -32601, "openSource unavailable");
+
+        const int targetSampleRate = getInt(*paramsObj, "sampleRate", 0);
+        nlohmann::json result;
+        try
+        {
+            const bool ok = openSourceCallback(source, targetSampleRate, requestedStartSeconds, result);
+            return ok
+                ? createJsonRpcResponse(id, result)
+                : createJsonRpcError(id, -32000, result.value("error", "openSource failed"));
+        }
+        catch (const std::exception& e)
+        {
+            return createJsonRpcError(id, -32000, e.what());
+        }
+    }
+
+    if (method == "audio.gaplessPrepare") {
+        const auto* paramsObj = getParamsObject(params);
+        if (paramsObj == nullptr)
+            return createJsonRpcError(id, -32602, "Invalid gapless request");
+        nlohmann::json result;
+        const bool ok = gaplessPrepareCallback ? gaplessPrepareCallback(*paramsObj, result) : false;
+        const std::string error = result.is_object()
+            ? result.value("error", "gapless prepare failed")
+            : "gapless prepare failed";
+        return ok
+            ? createJsonRpcResponse(id, result.is_null() ? nlohmann::json(true) : result)
+            : createJsonRpcError(id, -32000, error);
+    }
+
+    if (method == "automix.prepare") {
+        const auto* paramsObj = getParamsObject(params);
+        if (paramsObj == nullptr)
+            return createJsonRpcError(id, -32602, "Invalid automix request");
+        nlohmann::json result;
+        const bool ok = automixPrepareCallback ? automixPrepareCallback(*paramsObj, result) : false;
+        const std::string error = result.is_object()
+            ? result.value("error", "automix prepare failed")
+            : "automix prepare failed";
+        return ok
+            ? createJsonRpcResponse(id, result)
+            : createJsonRpcError(id, -32000, error);
+    }
+
+    if (method == "automix.cancel") {
+        const auto* paramsObj = getParamsObject(params);
+        if (paramsObj == nullptr)
+            return createJsonRpcError(id, -32602, "Invalid automix cancel request");
+        const std::string planId = getString(*paramsObj, "planId");
+        if (planId.empty())
+            return createJsonRpcError(id, -32602, "Missing planId");
+        nlohmann::json result;
+        const bool ok = automixCancelCallback ? automixCancelCallback(planId, result) : false;
+        const std::string error = result.is_object()
+            ? result.value("error", "automix cancel failed")
+            : "automix cancel failed";
+        return ok
+            ? createJsonRpcResponse(id, result)
+            : createJsonRpcError(id, -32000, error);
+    }
+
+    if (method == "automix.state") {
+        return createJsonRpcResponse(
+            id,
+            automixStateCallback ? automixStateCallback() : nlohmann::json{
+                {"state", "idle"},
+                {"planId", nullptr},
+                {"queueRevision", nullptr},
+                {"operationId", nullptr},
+                {"reason", "automix_unavailable"},
+            });
+    }
 
     if (method == "audio.openFile")
     {

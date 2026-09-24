@@ -24,6 +24,8 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           libraryScanWorkerHost: resolve(__dirname, 'src/main/library/workers/LibraryScanWorkerHost.ts'),
+          libraryIdentityWorkerHost: resolve(__dirname, 'src/main/library/workers/libraryIdentityWorkerHost.ts'),
+          librarySearchWorkerHost: resolve(__dirname, 'src/main/library/workers/librarySearchWorkerHost.ts'),
         },
         output: {
           footer: '\nimport "node:module";\n',
@@ -54,5 +56,18 @@ export default defineConfig({
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
     plugins: [react()],
+    esbuild: {
+      keepNames: true,
+    },
+    build: {
+      minify: 'esbuild',
+      cssMinify: 'esbuild',
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          auxiliary: resolve(__dirname, 'src/renderer/auxiliary.html'),
+        },
+      },
+    },
   },
 });

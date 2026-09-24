@@ -1,23 +1,6 @@
 import { lazy } from 'react';
-import { Disc3, Inbox, type LucideIcon } from 'lucide-react';
-import { AlbumsPage } from '../pages/AlbumsPage';
-import { AudioCdPage } from '../pages/AudioCdPage';
-import { ArtistsPage } from '../pages/ArtistsPage';
-import { ConnectPage } from '../pages/ConnectPage';
-import { DownloadsPage } from '../pages/DownloadsPage';
-import { DspPage } from '../pages/DspPage';
-import { FoldersPage } from '../pages/FoldersPage';
-import { HistoryPage } from '../pages/HistoryPage';
+import { Disc3, Inbox, PanelTop, type LucideIcon } from 'lucide-react';
 import { HomePage } from '../pages/HomePage';
-import { ImportFolderPage } from '../pages/ImportFolderPage';
-import { InboxPage } from '../pages/InboxPage';
-import { PlaylistsPage } from '../pages/PlaylistsPage';
-import { QueuePage } from '../pages/QueuePage';
-import { SongsPage } from '../pages/SongsPage';
-import { LyricsPage } from '../pages/LyricsPage';
-import { LikedPage } from '../pages/LikedPage';
-import { RemoteSourcesPanel } from '../components/settings/RemoteSourcesPanel';
-import { StreamingSearchPage } from '../components/streaming/StreamingSearchPage';
 import {
   EchoAlbumsIcon,
   EchoArtistsIcon,
@@ -44,11 +27,69 @@ import { EmptyState } from '../components/ui/EmptyState';
 import type { TranslationKey } from '../i18n/locales';
 import type { SidebarRouteId } from '../../shared/types/sidebar';
 import type { PluginSummary } from '../../shared/types/plugins';
-
-const PluginsPage = lazy(() => import('../pages/PluginsPage').then((module) => ({ default: module.PluginsPage })));
-const SettingsPage = lazy(() => import('../pages/SettingsPage').then((module) => ({ default: module.SettingsPage })));
+import { PluginPanelPage } from '../components/plugins/PluginPanelPage';
 
 export type AppRouteId = SidebarRouteId | 'lyrics' | `plugin:${string}`;
+export const pendingAppRouteStorageKey = 'echo-next.pending-route';
+
+const pageLoaders = {
+  albums: () => import('../pages/AlbumsPage'),
+  artists: () => import('../pages/ArtistsPage'),
+  'audio-cd': () => import('../pages/AudioCdPage'),
+  connect: () => import('../pages/ConnectPage'),
+  downloads: () => import('../pages/DownloadsPage'),
+  dsp: () => import('../pages/DspPage'),
+  history: () => import('../pages/HistoryPage'),
+  'import-folder': () => import('../pages/ImportFolderPage'),
+  inbox: () => import('../pages/InboxPage'),
+  plugins: () => import('../pages/PluginsPage'),
+  settings: () => import('../pages/SettingsRoute'),
+  folders: () => import('../pages/FoldersPage'),
+  playlists: () => import('../pages/PlaylistsPage'),
+  queue: () => import('../pages/QueuePage'),
+  songs: () => import('../pages/SongsPage'),
+  lyrics: () => import('../pages/LyricsPage'),
+  liked: () => import('../pages/LikedPage'),
+  remote: () => import('../components/settings/RemoteSourcesPanel'),
+  streaming: () => import('../components/streaming/StreamingSearchPage'),
+} satisfies Partial<Record<AppRouteId, () => Promise<unknown>>>;
+
+export const preloadAppRoute = async (routeId: AppRouteId): Promise<void> => {
+  const loader = pageLoaders[routeId as keyof typeof pageLoaders];
+  const preloadContent = routeId === 'settings' ? import('../pages/SettingsPage') : Promise.resolve();
+  await Promise.all([loader?.(), preloadContent]).then(() => undefined).catch(() => undefined);
+};
+
+export const preloadPendingAppRoute = async (): Promise<void> => {
+  try {
+    const pendingRouteId = window.localStorage.getItem(pendingAppRouteStorageKey) as AppRouteId | null;
+    if (pendingRouteId) {
+      await preloadAppRoute(pendingRouteId);
+    }
+  } catch {
+    // localStorage and route preloading are both best-effort during startup.
+  }
+};
+
+const AlbumsPage = lazy(() => pageLoaders.albums().then((module) => ({ default: module.AlbumsPage })));
+const ArtistsPage = lazy(() => pageLoaders.artists().then((module) => ({ default: module.ArtistsPage })));
+const AudioCdPage = lazy(() => pageLoaders['audio-cd']().then((module) => ({ default: module.AudioCdPage })));
+const ConnectPage = lazy(() => pageLoaders.connect().then((module) => ({ default: module.ConnectPage })));
+const DownloadsPage = lazy(() => pageLoaders.downloads().then((module) => ({ default: module.DownloadsPage })));
+const DspPage = lazy(() => pageLoaders.dsp().then((module) => ({ default: module.DspPage })));
+const HistoryPage = lazy(() => pageLoaders.history().then((module) => ({ default: module.HistoryPage })));
+const ImportFolderPage = lazy(() => pageLoaders['import-folder']().then((module) => ({ default: module.ImportFolderPage })));
+const InboxPage = lazy(() => pageLoaders.inbox().then((module) => ({ default: module.InboxPage })));
+const PluginsPage = lazy(() => pageLoaders.plugins().then((module) => ({ default: module.PluginsPage })));
+const SettingsPage = lazy(() => pageLoaders.settings().then((module) => ({ default: module.SettingsRoute })));
+const FoldersPage = lazy(() => pageLoaders.folders().then((module) => ({ default: module.FoldersPage })));
+const PlaylistsPage = lazy(() => pageLoaders.playlists().then((module) => ({ default: module.PlaylistsPage })));
+const QueuePage = lazy(() => pageLoaders.queue().then((module) => ({ default: module.QueuePage })));
+const SongsPage = lazy(() => pageLoaders.songs().then((module) => ({ default: module.SongsPage })));
+const LyricsPage = lazy(() => pageLoaders.lyrics().then((module) => ({ default: module.LyricsPage })));
+const LikedPage = lazy(() => pageLoaders.liked().then((module) => ({ default: module.LikedPage })));
+const RemoteSourcesPanel = lazy(() => pageLoaders.remote().then((module) => ({ default: module.RemoteSourcesPanel })));
+const StreamingSearchPage = lazy(() => pageLoaders.streaming().then((module) => ({ default: module.StreamingSearchPage })));
 
 export type AppRoute = {
   id: AppRouteId;
@@ -83,7 +124,22 @@ export const createPluginPanelRoutes = (plugins: PluginSummary[]): AppRoute[] =>
       return [];
     }
 
-    return plugin.contributes.panels?.flatMap((): AppRoute[] => []) ?? [];
+    const declaredPanels = plugin.contributes.panels ?? [];
+    const contributedPanels = declaredPanels.filter((panel) => !panel.hostPage && Boolean(panel.path));
+    const panels = declaredPanels.length > 0
+      ? contributedPanels
+      : plugin.panel
+        ? [{ id: 'main', title: plugin.name, placement: 'main' as const }]
+        : [];
+
+    return panels.map((panel): AppRoute => ({
+      id: `plugin:${encodeURIComponent(plugin.id)}:${encodeURIComponent(panel.id)}`,
+      label: panel.title,
+      description: `${plugin.name} 插件面板`,
+      icon: PanelTop,
+      placement: panel.placement ?? 'main',
+      element: <PluginPanelPage plugin={plugin} panel={panel} />,
+    }));
   });
 
 export const appRoutes: AppRoute[] = [
@@ -119,7 +175,7 @@ export const appRoutes: AppRoute[] = [
   },
   {
     id: 'osu-downloader',
-    label: 'osu downloader',
+    label: 'osu!',
     labelKey: 'route.osuDownloader.label',
     description: 'osu! beatmap audio downloader.',
     icon: EchoDownloadsIcon,
@@ -191,7 +247,7 @@ export const appRoutes: AppRoute[] = [
   },
   {
     id: 'connect',
-    label: '连接',
+    label: 'Connect',
     labelKey: 'route.connect.label',
     description: 'DLNA and AirPlay wireless playback.',
     descriptionKey: 'route.connect.description',
@@ -201,7 +257,7 @@ export const appRoutes: AppRoute[] = [
   },
   {
     id: 'dsp',
-    label: '音效处理',
+    label: 'DSP',
     labelKey: 'route.dsp.label',
     description: 'Signal-chain tuning workbench.',
     descriptionKey: 'route.dsp.description',

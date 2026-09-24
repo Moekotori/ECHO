@@ -2,21 +2,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  ChevronRight,
   ChevronLeft,
   Check,
   Database,
   ExternalLink,
-  EyeOff,
   File,
   FolderOpen,
   Gauge,
   HardDrive,
+  History,
   KeyRound,
   ListPlus,
   LockKeyhole,
   Minus,
   Music2,
   PauseCircle,
+  Pin,
+  PinOff,
   Play,
   Plus,
   RefreshCw,
@@ -44,6 +47,7 @@ import type {
   RemoteRuntimeLimits,
   RemoteSourceSyncMode,
   RemoteSyncStatus,
+  RemoteSyncPreview,
   RemoteTrackLookupItem,
   RemoteTrackStatus,
   TestRemoteSourceResult,
@@ -60,10 +64,19 @@ import type { PluginSummary } from '../../../shared/types/plugins';
 import type { EchoProAccountStatus } from '../../../shared/types/privateEntitlements';
 import { useI18n } from '../../i18n/I18nProvider';
 import type { TranslationKey } from '../../i18n/locales';
+import { translateStatic } from '../../i18n/translateStatic';
 import { usePlaybackQueue } from '../../stores/PlaybackQueueProvider';
 import { useSharedPlaybackStatus } from '../../stores/playbackStatusStore';
 import { getAppBridge, getPluginsBridge, getRemoteSourcesBridge } from '../../utils/echoBridge';
-import { hideSidebarRouteEntry } from '../../utils/sidebarRouteVisibility';
+import {
+  loadRemoteSourceUxMemory,
+  rememberRemoteLocation,
+  removeRemoteSourceUxMemory,
+  saveRemoteSourceUxMemory,
+  toggleRemoteLocationPinned,
+  toggleRemoteSourcePinned,
+  type RemoteSourceUxMemory,
+} from '../../preferences/remoteSourceUxMemory';
 
 type Tab = {
   provider: RemoteSourceProvider;
@@ -83,6 +96,7 @@ const tabs: Tab[] = [
 
 const baiduLoopbackRedirectUri = 'http://127.0.0.1:53682/baidu/oauth/callback';
 const navidromeDockerDocsUrl = 'https://www.navidrome.org/docs/installation/docker/';
+const remoteLibraryPreview = new URL('../../assets/remote-library-preview.png', import.meta.url).href;
 
 type RemoteSourceFormState = {
   displayName: string;
@@ -106,6 +120,8 @@ type RemoteSourceFormState = {
   baiduCredentialMode: '' | 'oauth-refresh' | 'access-token';
 };
 
+type RemoteReconnectState = 'idle' | 'testing' | 'ready' | 'failed';
+
 const createDefaultRemoteSourceForm = (): RemoteSourceFormState => ({
   displayName: '',
   baseUrl: '',
@@ -128,62 +144,34 @@ const createDefaultRemoteSourceForm = (): RemoteSourceFormState => ({
   baiduCredentialMode: '',
 });
 
-const isEchoProUnlockPluginActive = (plugin: Pick<PluginSummary, 'id' | 'enabled' | 'status' | 'disabledByHost'>): boolean =>
+const isLightweightRemoteSourcesProPlugin = (plugin: Pick<PluginSummary, 'id' | 'enabled' | 'status' | 'disabledByHost'>): boolean =>
   plugin.id === echoProUnlockPluginId && plugin.enabled === true && plugin.disabledByHost !== true && plugin.status !== 'error';
 
-type RemoteSourcesProUnlockCache = {
-  unlocked: boolean;
-};
-
-type AppBridge = ReturnType<typeof getAppBridge>;
-type PluginsBridge = ReturnType<typeof getPluginsBridge>;
-
-let remoteSourcesProUnlockCache: RemoteSourcesProUnlockCache | null = null;
-let remoteSourcesProUnlockRequest: Promise<RemoteSourcesProUnlockCache> | null = null;
+let remoteSourcesProUnlockCache: boolean | null = null;
 
 export const resetRemoteSourcesProUnlockCacheForTests = (): void => {
   remoteSourcesProUnlockCache = null;
-  remoteSourcesProUnlockRequest = null;
 };
 
-const readRemoteSourcesProUnlock = (
-  appApi: AppBridge,
-  pluginsApi: PluginsBridge,
-  force = false,
-): Promise<RemoteSourcesProUnlockCache> => {
-  if (!force && remoteSourcesProUnlockCache) {
-    return Promise.resolve(remoteSourcesProUnlockCache);
-  }
-  if (!force && remoteSourcesProUnlockRequest) {
-    return remoteSourcesProUnlockRequest;
-  }
-
-  const request = Promise.all([
-    appApi?.getEchoProAccountStatus ? appApi.getEchoProAccountStatus().catch((): EchoProAccountStatus | null => null) : Promise.resolve(null),
+const readLightweightRemoteSourcesProUnlock = async (
+  appApi: ReturnType<typeof getAppBridge>,
+  pluginsApi: ReturnType<typeof getPluginsBridge>,
+): Promise<boolean> => {
+  const [accountStatus, pluginResult, localEntitlement] = await Promise.all([
+    appApi?.getEchoProAccountStatus
+      ? appApi.getEchoProAccountStatus().catch((): EchoProAccountStatus | null => null)
+      : Promise.resolve(null),
     pluginsApi?.list ? pluginsApi.list().catch(() => null) : Promise.resolve(null),
-  ]).then(([accountStatus, pluginResult]) => {
-    const nextCache = {
-      unlocked: accountStatus?.pro === true || pluginResult?.plugins.some(isEchoProUnlockPluginActive) === true,
-    };
-    remoteSourcesProUnlockCache = nextCache;
-    return nextCache;
-  });
-
-  remoteSourcesProUnlockRequest = request;
-  void request.then(() => {
-    if (remoteSourcesProUnlockRequest === request) {
-      remoteSourcesProUnlockRequest = null;
-    }
-  }, () => {
-    if (remoteSourcesProUnlockRequest === request) {
-      remoteSourcesProUnlockRequest = null;
-    }
-  });
-  return request;
-};
-
-const invalidateRemoteSourcesProUnlockCache = (): void => {
-  remoteSourcesProUnlockCache = null;
+    appApi?.getEchoProLocalEntitlementStatus
+      ? appApi.getEchoProLocalEntitlementStatus().catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  const unlocked =
+    (accountStatus?.loggedIn === true && accountStatus.pro === true && accountStatus.status !== 'disabled') ||
+    localEntitlement?.unlocked === true ||
+    pluginResult?.plugins.some(isLightweightRemoteSourcesProPlugin) === true;
+  remoteSourcesProUnlockCache = unlocked;
+  return unlocked;
 };
 
 const syncModeOptions: Array<{ value: RemoteSourceSyncMode; labelKey: TranslationKey }> = [
@@ -304,13 +292,15 @@ const normalizeRemoteAlbumMergeStrategy = (value: unknown): RemoteAlbumMergeStra
 
 const jobKinds: RemoteBackgroundJobKind[] = ['metadata', 'cover', 'lyrics', 'mv', 'duration-backfill'];
 
-const jobLabels: Record<RemoteBackgroundJobKind, string> = {
-  metadata: '元数据',
-  cover: '封面',
-  lyrics: '歌词',
-  mv: 'MV',
-  'duration-backfill': '时长回填',
+const jobLabelKeys: Record<RemoteBackgroundJobKind, TranslationKey> = {
+  metadata: 'settings.remote.job.metadata',
+  cover: 'settings.remote.job.cover',
+  lyrics: 'settings.remote.job.lyrics',
+  mv: 'settings.remote.job.mv',
+  'duration-backfill': 'settings.remote.job.durationBackfill',
 };
+
+const jobLabel = (kind: RemoteBackgroundJobKind): string => translateStatic(jobLabelKeys[kind]);
 
 const providerLabelKeys: Record<RemoteSourceProvider, TranslationKey> = {
   webdav: 'settings.remote.provider.webdav.label',
@@ -488,17 +478,20 @@ const emptyOverviewItem = (source: RemoteSource): RemoteSourceOverviewItem => ({
   lastError: source.lastError,
 });
 
-const phaseLabels: Record<RemoteSyncStatus['phase'], string> = {
-  idle: '\u7a7a\u95f2',
-  testing: '\u6d4b\u8bd5\u8fde\u63a5',
-  scanning: '\u626b\u63cf\u6587\u4ef6',
-  reading_metadata: '\u89e3\u6790\u5143\u6570\u636e',
-  writing_database: '\u5199\u5165\u7d22\u5f15',
-  marking_missing: '\u6807\u8bb0\u7f3a\u5931',
-  finished: '\u5df2\u5b8c\u6210',
-  cancelled: '\u5df2\u53d6\u6d88',
-  failed: '\u5931\u8d25',
+const phaseLabelKeys: Record<RemoteSyncStatus['phase'], TranslationKey> = {
+  idle: 'settings.remote.ux.phase.idle',
+  testing: 'settings.remote.ux.phase.testing',
+  scanning: 'settings.remote.ux.phase.scanning',
+  reading_metadata: 'settings.remote.ux.phase.readingMetadata',
+  writing_database: 'settings.remote.ux.phase.writingDatabase',
+  marking_missing: 'settings.remote.ux.phase.markingMissing',
+  finished: 'settings.remote.ux.phase.finished',
+  cancelled: 'settings.remote.ux.phase.cancelled',
+  failed: 'settings.remote.ux.phase.failed',
 };
+
+const phaseLabel = (phase: RemoteSyncStatus['phase']): string =>
+  phaseLabelKeys[phase] ? translateStatic(phaseLabelKeys[phase]) : phase;
 
 const clampPercent = (value: number): number => Math.max(0, Math.min(100, value));
 
@@ -507,17 +500,18 @@ const syncProgressFor = (status: RemoteSyncStatus): { processed: number; total: 
   const processed = Math.min(total, Math.max(0, status.writtenCount + status.skippedCount + status.missingCount + status.failedCount));
   const active = status.status === 'running';
   const percent = total > 0 ? clampPercent(Math.round((processed / total) * 100)) : 0;
-  const phase = phaseLabels[status.phase] ?? status.phase;
+  const phase = phaseLabel(status.phase);
   const label = total > 0
     ? `${phase} · ${processed}/${total} · ${percent}%`
     : active
-      ? `${phase} · \u6b63\u5728\u53d1\u73b0\u97f3\u4e50`
+      ? `${phase} · ${translateStatic('settings.remote.ux.sync.discovering')}`
       : phase;
 
   return { processed, total, percent, active, label };
 };
 
-const formatDate = (value: string | null): string => (value ? new Date(value).toLocaleString() : '尚未执行');
+const formatDate = (value: string | null): string =>
+  value ? new Date(value).toLocaleString() : translateStatic('settings.remote.ux.date.never');
 const formatCount = (value: number): string => new Intl.NumberFormat().format(Math.max(0, value));
 const formatBytes = (value: number): string => {
   if (!Number.isFinite(value) || value <= 0) {
@@ -535,32 +529,63 @@ const formatBytes = (value: number): string => {
   return `${size >= 10 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`;
 };
 
-const remoteSourceErrorText = (error: unknown, fallback = '操作失败。'): string => {
-  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : fallback;
-  const message = raw.trim() || fallback;
-  const withReason = (summary: string): string => `${summary} 原始原因：${message}`;
+type RemoteSourceErrorPresentation = {
+  title: string;
+  description: string;
+};
+
+const remoteSourceErrorPresentation = (error: unknown, fallback?: string): RemoteSourceErrorPresentation => {
+  const defaultFallback = translateStatic('settings.remote.ux.unavailableFallback');
+  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : (fallback ?? defaultFallback);
+  const message = raw.trim() || fallback || defaultFallback;
 
   if (/timeout|timed out|ETIMEDOUT|AbortError|aborted/iu.test(message)) {
-    return withReason('远程来源连接超时。先确认服务器地址、端口和根目录能在浏览器或 WebDAV 客户端打开；如果正在播放，等空闲后再重试同步。');
+    return {
+      title: translateStatic('settings.remote.ux.error.timeout.title'),
+      description: translateStatic('settings.remote.ux.error.timeout.description'),
+    };
   }
 
   if (/ENOTFOUND|EAI_AGAIN|DNS|getaddrinfo|name.*not.*resolved/iu.test(message)) {
-    return withReason('远程来源地址无法解析。请检查域名、内网/VPN、代理和端口，确认当前电脑能访问这个地址。');
+    return {
+      title: translateStatic('settings.remote.ux.error.dns.title'),
+      description: translateStatic('settings.remote.ux.error.dns.description'),
+    };
   }
 
   if (/ECONNREFUSED|ECONNRESET|network down|fetch failed|network|socket hang up|self[- ]signed|certificate|TLS|SSL/iu.test(message)) {
-    return withReason('远程来源连接失败。请确认服务正在运行、URL/端口正确，证书可信；网络不稳时可以降低后台并发后重试。');
+    return {
+      title: translateStatic('settings.remote.ux.error.network.title'),
+      description: translateStatic('settings.remote.ux.error.network.description'),
+    };
   }
 
   if (/401|403|unauthorized|forbidden|invalid token|access token|permission|denied|credential|password/iu.test(message)) {
-    return withReason('远程来源认证失败。请重新测试用户名、密码或 token；百度网盘来源可以重新走授权，再保存连接。');
+    return {
+      title: translateStatic('settings.remote.ux.error.auth.title'),
+      description: translateStatic('settings.remote.ux.error.auth.description'),
+    };
   }
 
   if (/404|not found|root path|path.*missing|ENOENT/iu.test(message)) {
-    return withReason('远程路径不存在或根目录写错了。请回到来源设置里检查根目录，然后先打开根目录确认目录能列出来。');
+    return {
+      title: translateStatic('settings.remote.ux.error.path.title'),
+      description: translateStatic('settings.remote.ux.error.path.description'),
+    };
   }
 
-  return message;
+  return {
+    title: translateStatic('settings.remote.ux.error.generic.title'),
+    description: translateStatic('settings.remote.ux.error.generic.description'),
+  };
+};
+
+const remoteSourceErrorText = (error: unknown, fallback?: string): string => {
+  const defaultFallback = translateStatic('settings.remote.ux.operationFailed');
+  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : (fallback ?? defaultFallback);
+  const presentation = remoteSourceErrorPresentation(error, fallback ?? defaultFallback);
+  const message = raw.trim() || fallback || defaultFallback;
+  return `${presentation.title}. ${presentation.description} ${translateStatic('settings.remote.ux.error.rawReason', { message })}`;
 };
 
 const sumKinds = (values: Record<RemoteBackgroundJobKind, number>): number => jobKinds.reduce((total, kind) => total + values[kind], 0);
@@ -570,11 +595,15 @@ const statusCompletionText = (counts: RemoteSourceOverviewItem['metadata']): str
   const done = counts.ok;
   const total = counts.pending + counts.searching + counts.partial + counts.ok + counts.not_found + counts.error;
   if (total <= 0) {
-    return '暂无数据';
+    return translateStatic('settings.remote.ux.noData');
   }
 
   const percent = Math.round((done / total) * 100);
-  return `${formatCount(done)}/${formatCount(total)} · ${percent}%`;
+  return translateStatic('settings.remote.ux.completion', {
+    done: formatCount(done),
+    total: formatCount(total),
+    percent,
+  });
 };
 
 const sourceIssueTotal = (source: RemoteSourceOverviewItem): number =>
@@ -583,6 +612,69 @@ const sourceIssueTotal = (source: RemoteSourceOverviewItem): number =>
   + source.cover.error + source.cover.not_found
   + source.lyrics.error + source.lyrics.not_found
   + source.mv.error + source.mv.not_found;
+
+const sourceHealthSummary = (
+  source: RemoteSource,
+  overview: RemoteSourceOverviewItem,
+  syncStatus: RemoteSyncStatus,
+  reconnectState: RemoteReconnectState,
+): { tone: 'healthy' | 'attention' | 'offline' | 'paused' | 'working'; title: string; description: string } => {
+  if (reconnectState === 'testing') {
+    return {
+      tone: 'working',
+      title: translateStatic('settings.remote.ux.health.reconnecting.title'),
+      description: translateStatic('settings.remote.ux.health.reconnecting.description'),
+    };
+  }
+  if (syncStatus.status === 'running') {
+    return {
+      tone: 'working',
+      title: translateStatic('settings.remote.ux.health.syncing.title'),
+      description: translateStatic('settings.remote.ux.health.syncing.description', {
+        count: formatCount(syncStatus.discoveredCount),
+      }),
+    };
+  }
+  if (source.status === 'error') {
+    const presentation = remoteSourceErrorPresentation(source.lastError);
+    return { tone: 'offline', title: presentation.title, description: presentation.description };
+  }
+  if (source.status === 'disabled') {
+    return {
+      tone: 'paused',
+      title: translateStatic('settings.remote.ux.health.paused.title'),
+      description: translateStatic('settings.remote.ux.health.paused.description'),
+    };
+  }
+  const issues = sourceIssueTotal(overview);
+  if (issues > 0) {
+    return {
+      tone: 'attention',
+      title: translateStatic('settings.remote.ux.health.issues.title', { count: formatCount(issues) }),
+      description: translateStatic('settings.remote.ux.health.issues.description'),
+    };
+  }
+  if (!source.lastSyncAt) {
+    return {
+      tone: 'attention',
+      title: translateStatic('settings.remote.ux.health.neverSynced.title'),
+      description: translateStatic('settings.remote.ux.health.neverSynced.description'),
+    };
+  }
+  const lastSyncAt = new Date(source.lastSyncAt).getTime();
+  const stale = Number.isFinite(lastSyncAt) && Date.now() - lastSyncAt > 7 * 24 * 60 * 60 * 1000;
+  return stale
+    ? {
+        tone: 'attention',
+        title: translateStatic('settings.remote.ux.health.stale.title'),
+        description: translateStatic('settings.remote.ux.health.stale.description', { date: formatDate(source.lastSyncAt) }),
+      }
+    : {
+        tone: 'healthy',
+        title: translateStatic('settings.remote.ux.health.healthy.title'),
+        description: translateStatic('settings.remote.ux.health.healthy.description', { date: formatDate(source.lastSyncAt) }),
+      };
+};
 
 const recommendedIssueKind = (source: RemoteSourceOverviewItem): RemoteSourceIssueKind | null => {
   if (source.metadata.error + source.metadata.partial + source.metadata.not_found > 0) {
@@ -603,19 +695,23 @@ const recommendedIssueKind = (source: RemoteSourceOverviewItem): RemoteSourceIss
   return null;
 };
 
-const issueKindLabels: Record<RemoteSourceIssueKind, string> = {
-  metadata: '元数据',
-  cover: '封面',
-  lyrics: '歌词',
-  mv: 'MV',
-  missing: '缺失文件',
+const issueKindLabelKeys: Record<RemoteSourceIssueKind, TranslationKey> = {
+  metadata: 'settings.remote.job.metadata',
+  cover: 'settings.remote.job.cover',
+  lyrics: 'settings.remote.job.lyrics',
+  mv: 'settings.remote.job.mv',
+  missing: 'settings.remote.ux.issue.missing',
 };
 
-const sourceStatusLabels: Record<RemoteSource['status'], string> = {
-  enabled: '已启用',
-  disabled: '已禁用',
-  error: '异常',
+const issueKindLabel = (kind: RemoteSourceIssueKind): string => translateStatic(issueKindLabelKeys[kind]);
+
+const sourceStatusLabelKeys: Record<RemoteSource['status'], TranslationKey> = {
+  enabled: 'settings.remote.ux.source.enabled',
+  disabled: 'settings.remote.ux.source.disabled',
+  error: 'settings.remote.ux.source.error',
 };
+
+const sourceStatusLabel = (status: RemoteSource['status']): string => translateStatic(sourceStatusLabelKeys[status]);
 
 const statusKindTotal = (counts: RemoteSourceOverviewItem['metadata']): number =>
   counts.pending + counts.searching + counts.partial + counts.ok + counts.not_found + counts.error;
@@ -630,7 +726,7 @@ const completionPercent = (counts: RemoteSourceOverviewItem['metadata']): number
 
 const completionPercentText = (counts: RemoteSourceOverviewItem['metadata']): string => {
   const percent = completionPercent(counts);
-  return percent === null ? '暂无数据' : `${percent}%`;
+  return percent === null ? translateStatic('settings.remote.ux.noData') : `${percent}%`;
 };
 
 const coverProgressFor = (
@@ -644,8 +740,13 @@ const coverProgressFor = (
   const active = status.pending.cover + status.running.cover > 0 || counts.searching > 0;
   const percent = total > 0 ? clampPercent(Math.round((processed / total) * 100)) : 0;
   const label = total > 0
-    ? `已加载 ${formatCount(processed)} / ${formatCount(total)} · 还剩 ${formatCount(pending)} · 运行 ${formatCount(running)}`
-    : '暂无封面任务';
+    ? translateStatic('settings.remote.ux.cover.progress', {
+        processed: formatCount(processed),
+        total: formatCount(total),
+        pending: formatCount(pending),
+        running: formatCount(running),
+      })
+    : translateStatic('settings.remote.ux.cover.none');
 
   return { processed, total, pending, running, percent, active, label };
 };
@@ -657,19 +758,19 @@ const recommendationText = (source: RemoteSourceOverviewItem): string | null => 
   const mvIssues = source.mv.error + source.mv.not_found;
 
   if (metadataIssues > 0) {
-    return `有 ${formatCount(metadataIssues)} 首元数据异常，建议先只重试元数据/时长。`;
+    return translateStatic('settings.remote.ux.recommend.metadata', { count: formatCount(metadataIssues) });
   }
   if (coverIssues > 0) {
-    return `有 ${formatCount(coverIssues)} 首封面加载失败，可以空闲时小批量重试。`;
+    return translateStatic('settings.remote.ux.recommend.cover', { count: formatCount(coverIssues) });
   }
   if (lyricsIssues > 0) {
-    return `有 ${formatCount(lyricsIssues)} 首歌词匹配失败，建议后台低负载处理。`;
+    return translateStatic('settings.remote.ux.recommend.lyrics', { count: formatCount(lyricsIssues) });
   }
   if (source.missingTrackCount > 0) {
-    return `有 ${formatCount(source.missingTrackCount)} 首远程文件已缺失，建议确认网盘路径后重新同步。`;
+    return translateStatic('settings.remote.ux.recommend.missing', { count: formatCount(source.missingTrackCount) });
   }
   if (mvIssues > 0) {
-    return `有 ${formatCount(mvIssues)} 首 MV 匹配失败，建议先保持低优先级。`;
+    return translateStatic('settings.remote.ux.recommend.mv', { count: formatCount(mvIssues) });
   }
   return null;
 };
@@ -904,21 +1005,24 @@ const emptyBrowserState = (): RemoteBrowserState => ({
 
 type RemoteBrowserFilter = 'all' | 'audio' | 'unindexed' | 'indexed';
 
-const browserFilterOptions: Array<{ value: RemoteBrowserFilter; label: string }> = [
-  { value: 'all', label: '全部' },
-  { value: 'audio', label: '音频' },
-  { value: 'unindexed', label: '未索引' },
-  { value: 'indexed', label: '已入库' },
+const browserFilterOptions = (): Array<{ value: RemoteBrowserFilter; label: string }> => [
+  { value: 'all', label: translateStatic('settings.remote.ux.browser.filter.all') },
+  { value: 'audio', label: translateStatic('settings.remote.ux.browser.filter.audio') },
+  { value: 'unindexed', label: translateStatic('settings.remote.ux.browser.filter.unindexed') },
+  { value: 'indexed', label: translateStatic('settings.remote.ux.browser.filter.indexed') },
 ];
 
-const remoteTrackStatusLabels: Record<RemoteTrackStatus, string> = {
-  pending: '待处理',
-  searching: '处理中',
-  partial: '部分',
-  ok: '完成',
-  not_found: '未找到',
-  error: '异常',
+const remoteTrackStatusLabelKeys: Record<RemoteTrackStatus, TranslationKey> = {
+  pending: 'settings.remote.ux.task.pending',
+  searching: 'settings.remote.ux.task.searching',
+  partial: 'settings.remote.ux.task.partial',
+  ok: 'settings.remote.ux.task.ok',
+  not_found: 'settings.remote.ux.task.notFound',
+  error: 'settings.remote.ux.task.error',
 };
+
+const remoteTrackStatusLabel = (status: RemoteTrackStatus): string =>
+  translateStatic(remoteTrackStatusLabelKeys[status]);
 
 const normalizeBrowserPath = (value: string | null | undefined): string => {
   const trimmed = value?.trim();
@@ -956,7 +1060,9 @@ const browserBreadcrumbs = (source: RemoteSource, path: string | null): Array<{ 
     : currentPath.startsWith(`${rootPath}/`)
       ? currentPath.slice(rootPath.length + 1)
       : '';
-  const crumbs: Array<{ label: string; path: string | null }> = [{ label: '根目录', path: null }];
+  const crumbs: Array<{ label: string; path: string | null }> = [
+    { label: translateStatic('settings.remote.ux.browser.root'), path: null },
+  ];
   if (!relativePath) {
     return crumbs;
   }
@@ -1121,13 +1227,13 @@ const baiduCredentialModeFromSecret = (secret: string): 'oauth-refresh' | 'acces
 const credentialTextForSource = (source: RemoteSource): string => {
   if (source.provider === 'baidu') {
     return source.config.credentialMode === 'oauth-refresh'
-      ? 'OAuth 自动续期'
+      ? 'OAuth'
       : source.config.credentialMode === 'access-token'
-        ? 'Access Token 手动续期'
+        ? 'Access Token'
         : 'Token';
   }
   if (source.authType === 'none') {
-    return '无需认证';
+    return translateStatic('settings.remote.ux.auth.none');
   }
   if (source.authType === 'apiKey') {
     return 'API Key';
@@ -1135,7 +1241,9 @@ const credentialTextForSource = (source: RemoteSource): string => {
   if (source.authType === 'token') {
     return 'Token';
   }
-  return source.username ? '用户名密码' : '认证';
+  return source.username
+    ? translateStatic('settings.remote.ux.auth.password')
+    : translateStatic('settings.remote.ux.auth.generic');
 };
 
 export const RemoteSourcesPanel = (): JSX.Element => {
@@ -1169,16 +1277,25 @@ export const RemoteSourcesPanel = (): JSX.Element => {
   const [baiduAuthFeedback, setBaiduAuthFeedback] = useState<string | null>(null);
   const [baiduAuthUrl, setBaiduAuthUrl] = useState<string | null>(null);
   const [showBaiduDeveloperFields, setShowBaiduDeveloperFields] = useState(false);
-  const [isSidebarHideBusy, setIsSidebarHideBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [connectionAdvancedOpen, setConnectionAdvancedOpen] = useState(false);
+  const [showEmptyConnectionForm, setShowEmptyConnectionForm] = useState(false);
+  const [showConnectionOptions, setShowConnectionOptions] = useState(false);
+  const [maintenanceOpen, setMaintenanceOpen] = useState(false);
+  const [uxMemory, setUxMemory] = useState<RemoteSourceUxMemory>(() => loadRemoteSourceUxMemory());
+  const [reconnectStates, setReconnectStates] = useState<Record<string, RemoteReconnectState>>({});
+  const [syncPreview, setSyncPreview] = useState<{ sourceId: string; rootPath: string | null; result: RemoteSyncPreview } | null>(null);
+  const [syncPreviewBusySourceId, setSyncPreviewBusySourceId] = useState<string | null>(null);
   const [remoteBackgroundConcurrencySaving, setRemoteBackgroundConcurrencySaving] = useState(false);
   const [testResult, setTestResult] = useState<TestRemoteSourceResult | null>(null);
-  const [remoteSourcesProUnlocked, setRemoteSourcesProUnlocked] = useState<boolean | null>(() => remoteSourcesProUnlockCache?.unlocked ?? null);
+  const [remoteSourcesProUnlocked, setRemoteSourcesProUnlocked] = useState<boolean | null>(remoteSourcesProUnlockCache);
   const terminalSyncEventsRef = useRef<Record<string, string>>({});
   const formDraftsRef = useRef<Partial<Record<RemoteSourceProvider, RemoteSourceFormState>>>({
     webdav: createDefaultRemoteSourceForm(),
   });
   const formSectionRef = useRef<HTMLElement | null>(null);
+  const browserSectionRef = useRef<HTMLElement | null>(null);
+  const maintenanceSectionRef = useRef<HTMLElement | null>(null);
 
   const activeTab = useMemo(() => tabs.find((tab) => tab.provider === activeProvider) ?? tabs[0], [activeProvider]);
   const visibleSources = useMemo(() => sources.filter((source) => source.provider === activeProvider), [activeProvider, sources]);
@@ -1194,8 +1311,12 @@ export const RemoteSourcesPanel = (): JSX.Element => {
     playbackStatusSnapshot.playbackStatus?.state === 'playing';
   const playbackLoadReduced = globalJobStatus.playbackActive && !globalJobStatus.paused;
 
-  const openEchoProAccountSettings = useCallback((): void => {
-    window.dispatchEvent(new CustomEvent('app:navigate:settings-section', { detail: { section: 'general', targetId: 'settings-row-echo-pro-account' } }));
+  const updateUxMemory = useCallback((updater: (current: RemoteSourceUxMemory) => RemoteSourceUxMemory): void => {
+    setUxMemory((current) => {
+      const next = updater(current);
+      saveRemoteSourceUxMemory(next);
+      return next;
+    });
   }, []);
 
   const setRememberedForm = useCallback((updater: RemoteSourceFormState | ((current: RemoteSourceFormState) => RemoteSourceFormState)): void => {
@@ -1239,6 +1360,10 @@ export const RemoteSourcesPanel = (): JSX.Element => {
   }, [activeProvider, form]);
 
   const startAddingRemoteProvider = useCallback((provider: RemoteSourceProvider): void => {
+    setShowConnectionOptions(true);
+    setMaintenanceOpen(false);
+    setShowEmptyConnectionForm(true);
+    setConnectionAdvancedOpen(false);
     switchRemoteProvider(provider, {
       clearSelection: true,
       message: t('settings.remote.message.providerSelected').replace('{provider}', t(providerGuides[provider].intentKey)),
@@ -1246,49 +1371,18 @@ export const RemoteSourcesPanel = (): JSX.Element => {
     });
   }, [switchRemoteProvider, t]);
 
-  const hideRemoteSourcesFromSidebar = useCallback(async (): Promise<void> => {
-    setIsSidebarHideBusy(true);
-    setMessage(null);
-    try {
-      await hideSidebarRouteEntry('remote', appApi);
-    } catch (hideError) {
-      setMessage(hideError instanceof Error ? hideError.message : String(hideError));
-    } finally {
-      setIsSidebarHideBusy(false);
-    }
-  }, [appApi]);
-
-  const refreshRemoteSourcesProUnlock = useCallback(async (options: { force?: boolean } = {}): Promise<void> => {
-    try {
-      const snapshot = await readRemoteSourcesProUnlock(appApi, pluginsApi, options.force === true);
-      setRemoteSourcesProUnlocked(snapshot.unlocked);
-      if (snapshot.unlocked) {
-        setMessage(null);
-      } else {
-        setMessage('网盘功能需要 ECHO Pro 账号或 ECHO Pro 解锁插件。');
+  useEffect(() => {
+    let active = true;
+    void readLightweightRemoteSourcesProUnlock(appApi, pluginsApi).then((unlocked) => {
+      if (active) {
+        setRemoteSourcesProUnlocked(unlocked);
       }
-    } catch {
-      setRemoteSourcesProUnlocked(false);
-      setMessage('网盘功能需要 ECHO Pro 账号或 ECHO Pro 解锁插件。');
-    }
+    });
+    return () => {
+      active = false;
+    };
   }, [appApi, pluginsApi]);
 
-  useEffect(() => {
-    void refreshRemoteSourcesProUnlock();
-  }, [refreshRemoteSourcesProUnlock]);
-
-  useEffect(() => {
-    const handleUnlockChanged = (): void => {
-      invalidateRemoteSourcesProUnlockCache();
-      void refreshRemoteSourcesProUnlock({ force: true });
-    };
-    window.addEventListener('plugins:changed', handleUnlockChanged);
-    window.addEventListener('echo-pro:status-changed', handleUnlockChanged);
-    return () => {
-      window.removeEventListener('plugins:changed', handleUnlockChanged);
-      window.removeEventListener('echo-pro:status-changed', handleUnlockChanged);
-    };
-  }, [refreshRemoteSourcesProUnlock]);
   const providerSummaries = useMemo(() => tabs.map((tab) => {
     const overviewSources = overview.sources.filter((source) => source.provider === tab.provider);
     const listedSources = sources.filter((source) => source.provider === tab.provider);
@@ -1734,6 +1828,10 @@ export const RemoteSourcesPanel = (): JSX.Element => {
       setMessage(lookupError
         ? `已打开 ${source.displayName}：${formatCount(items.length)} 个项目，入库状态暂未读取。`
         : `已打开 ${source.displayName}：${formatCount(items.length)} 个项目。`);
+      updateUxMemory((current) => rememberRemoteLocation(current, {
+        sourceId: source.id,
+        path: path ?? rootPathForSource(source),
+      }));
     } catch (error) {
       const message = remoteSourceErrorText(error, '读取目录失败。');
       setBrowserStates((current) => ({
@@ -1749,7 +1847,124 @@ export const RemoteSourcesPanel = (): JSX.Element => {
       }));
       setMessage(message);
     }
-  }, [remoteApi, remoteSourcesProUnlocked]);
+  }, [remoteApi, updateUxMemory]);
+
+  const openSourceBrowser = useCallback(async (source: RemoteSource, path: string | null = null): Promise<void> => {
+    switchRemoteProvider(source.provider);
+    setShowConnectionOptions(false);
+    await loadBrowserDirectory(source, path);
+    window.setTimeout(() => {
+      browserSectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, [loadBrowserDirectory, switchRemoteProvider]);
+
+  const openMaintenanceForSource = useCallback((source?: RemoteSource): void => {
+    if (source) {
+      switchRemoteProvider(source.provider);
+      setSelectedSourceId(source.id);
+    }
+    setShowConnectionOptions(false);
+    setMaintenanceOpen(true);
+    window.setTimeout(() => {
+      maintenanceSectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, [switchRemoteProvider]);
+
+  const togglePinnedSource = useCallback((sourceId: string): void => {
+    updateUxMemory((current) => toggleRemoteSourcePinned(current, sourceId));
+  }, [updateUxMemory]);
+
+  const togglePinnedLocation = useCallback((source: RemoteSource, path: string): void => {
+    updateUxMemory((current) => toggleRemoteLocationPinned(current, { sourceId: source.id, path }));
+  }, [updateUxMemory]);
+
+  const retrySourceConnection = useCallback(async (source: RemoteSource, automatic = false): Promise<void> => {
+    if (!remoteApi || source.status === 'disabled' || reconnectStates[source.id] === 'testing') {
+      return;
+    }
+    setReconnectStates((current) => ({ ...current, [source.id]: 'testing' }));
+    if (!automatic) {
+      setMessage(`正在重新连接 ${source.displayName}…`);
+    }
+    try {
+      const result = await remoteApi.test(source.id);
+      setReconnectStates((current) => ({ ...current, [source.id]: result.ok ? 'ready' : 'failed' }));
+      if (result.ok) {
+        setMessage(automatic
+          ? `${source.displayName} 已恢复连接，现有索引和浏览位置都已保留。`
+          : `${source.displayName} 已重新连接。`);
+      } else {
+        const presentation = remoteSourceErrorPresentation(result.message, '重新连接失败。');
+        setMessage(`${presentation.title}。${presentation.description}`);
+      }
+      await refreshSources(true);
+    } catch (error) {
+      const presentation = remoteSourceErrorPresentation(error, '重新连接失败。');
+      setReconnectStates((current) => ({ ...current, [source.id]: 'failed' }));
+      setMessage(`${presentation.title}。${presentation.description}`);
+    }
+  }, [reconnectStates, refreshSources, remoteApi]);
+
+  useEffect(() => {
+    const handleOnline = (): void => {
+      sources.filter((source) => source.status === 'error').forEach((source) => {
+        void retrySourceConnection(source, true);
+      });
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [retrySourceConnection, sources]);
+
+  const previewSourceSync = useCallback(async (source: RemoteSource, rootPath: string | null = null): Promise<void> => {
+    if (!remoteApi?.previewSync) {
+      setMessage('当前桌面桥接版本不支持同步预览，请重启 ECHO 后再试。');
+      return;
+    }
+    if (remotePanelPlaybackActive) {
+      setMessage('正在播放，暂不启动远程扫描。播放结束后再预览同步变化。');
+      return;
+    }
+    setSyncPreviewBusySourceId(source.id);
+    setSyncPreview(null);
+    setMessage(`正在只读扫描 ${source.displayName}，不会修改曲库…`);
+    try {
+      const result = await remoteApi.previewSync(source.id, { rootPath, markMissing: rootPath === null });
+      setSyncPreview({ sourceId: source.id, rootPath, result });
+      setMessage(null);
+    } catch (error) {
+      const presentation = remoteSourceErrorPresentation(error, '同步预览失败。');
+      setMessage(`${presentation.title}。${presentation.description}`);
+    } finally {
+      setSyncPreviewBusySourceId(null);
+    }
+  }, [remoteApi, remotePanelPlaybackActive]);
+
+  const confirmSyncPreview = useCallback(async (): Promise<void> => {
+    if (!remoteApi || !syncPreview) {
+      return;
+    }
+    const source = sources.find((item) => item.id === syncPreview.sourceId);
+    if (!source) {
+      setSyncPreview(null);
+      return;
+    }
+    const key = `sync:${source.id}`;
+    setBusy(key);
+    try {
+      const status = await remoteApi.sync(source.id, {
+        rootPath: syncPreview.rootPath,
+        markMissing: syncPreview.rootPath === null,
+        includeCover: true,
+      });
+      setSyncStatuses((current) => ({ ...current, [status.sourceId]: status }));
+      setSyncPreview(null);
+      setMessage(`已确认同步 ${source.displayName}。后台任务会优先保证本地播放。`);
+    } catch (error) {
+      setMessage(remoteSourceErrorText(error, '开始同步失败。'));
+    } finally {
+      setBusy(null);
+    }
+  }, [remoteApi, sources, syncPreview]);
 
   const playBrowserItem = useCallback(async (source: RemoteSource, item: RemoteDirectoryItem, indexedTrack?: RemoteTrackLookupItem): Promise<void> => {
     const track = indexedTrack ? trackFromLookupItem(source, indexedTrack) : trackFromBrowserItem(source, item);
@@ -1838,13 +2053,46 @@ export const RemoteSourcesPanel = (): JSX.Element => {
 
     setBusy(action);
     setMessage(null);
+    let exchangingBaiduCode = false;
     try {
-      const input = toInput(activeProvider);
+      let actionForm = form;
+      if (activeProvider === 'baidu' && !actionForm.secret.trim()) {
+        const code = actionForm.baiduAuthCode.trim();
+        if (!code) {
+          const text = '请先登录百度账号并填入授权码；拿到授权码后可直接测试或保存，ECHO 会自动换取 Token。';
+          setBaiduAuthFeedback(text);
+          setMessage(text);
+          return;
+        }
+
+        exchangingBaiduCode = true;
+        setBaiduAuthFeedback('正在用授权码换取百度 Token...');
+        const result = await remoteApi.exchangeBaiduAuthCode({
+          clientId: actionForm.baiduClientId.trim() || null,
+          clientSecret: actionForm.baiduClientSecret.trim() || null,
+          redirectUri: actionForm.baiduRedirectUri.trim() || 'oob',
+          code,
+        });
+        actionForm = {
+          ...actionForm,
+          secret: result.tokenSecret,
+          baiduAuthCode: '',
+          baiduCredentialMode: result.refreshToken ? 'oauth-refresh' : 'access-token',
+        };
+        setProviderFormDraft('baidu', actionForm);
+        setTestResult(null);
+        setBaiduAuthFeedback('已自动换取百度 Token，正在继续操作...');
+      }
+
+      const input = toInput(activeProvider, actionForm);
       if (action === 'test') {
         const result = await remoteApi.test(input);
         const nextResult = result.ok ? result : { ...result, message: remoteSourceErrorText(result.message, '测试连接失败。') };
         setTestResult(nextResult);
         setMessage(nextResult.message);
+        if (activeProvider === 'baidu' && exchangingBaiduCode) {
+          setBaiduAuthFeedback(result.ok ? '已换取 Token，百度网盘连接测试通过。' : nextResult.message);
+        }
         return;
       }
 
@@ -1852,15 +2100,22 @@ export const RemoteSourcesPanel = (): JSX.Element => {
       const saved = sourceToUpdate
         ? await remoteApi.update({ id: sourceToUpdate.id, ...input })
         : await remoteApi.create(input);
-      formDraftsRef.current[saved.provider] = form;
+      formDraftsRef.current[saved.provider] = actionForm;
       setSelectedSourceId(saved.id);
       setMessage(action === 'saveSync' ? '来源已保存，正在开始同步。之后切回来会继续停在这个来源。' : '来源已保存，之后切回来会继续停在这个来源。');
+      if (activeProvider === 'baidu' && exchangingBaiduCode) {
+        setBaiduAuthFeedback('已换取 Token，并已保存为百度网盘来源。');
+      }
       if (action === 'saveSync') {
         await remoteApi.sync(saved.id);
       }
       await refreshSources(true);
     } catch (error) {
-      setMessage(remoteSourceErrorText(error, '操作失败。'));
+      const text = remoteSourceErrorText(error, exchangingBaiduCode ? '授权码换取 Token 失败。' : '操作失败。');
+      setMessage(text);
+      if (activeProvider === 'baidu' && exchangingBaiduCode) {
+        setBaiduAuthFeedback(text);
+      }
     } finally {
       setBusy(null);
     }
@@ -2109,9 +2364,8 @@ export const RemoteSourcesPanel = (): JSX.Element => {
         const result = await remoteApi.test(source.id);
         setMessage(result.ok ? result.message : remoteSourceErrorText(result.message, '测试连接失败。'));
       } else if (action === 'sync') {
-        const status = await remoteApi.sync(source.id, { includeCover: true });
-        setSyncStatuses((current) => ({ ...current, [status.sourceId]: status }));
-        setMessage('已开始同步。');
+        await previewSourceSync(source);
+        return;
       } else if (action === 'metadata') {
         await remoteApi.startBackgroundJobs(source.id, ['metadata', 'duration-backfill']);
         setMessage('已加入元数据补齐任务。');
@@ -2184,6 +2438,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
         setSelectedSourceId(null);
         setIssuePreviews((current) => withoutSourceKey(source.id, current));
         setOverview((current) => removeOverviewSource(current, source.id));
+        updateUxMemory((current) => removeRemoteSourceUxMemory(current, source.id));
         window.dispatchEvent(new Event('library:changed'));
         setMessage('来源已删除，本地远程索引和连接配置已移除；服务器文件不会被删除。');
         await refreshSources(true).catch(() => undefined);
@@ -2200,33 +2455,13 @@ export const RemoteSourcesPanel = (): JSX.Element => {
     } finally {
       setBusy(null);
     }
-  }, [globalJobStatus, jobStatuses, loadBrowserDirectory, refreshSources, refreshStatuses, remoteApi, remoteCoverLoadPerformanceMode]);
+  }, [globalJobStatus, jobStatuses, loadBrowserDirectory, previewSourceSync, refreshSources, refreshStatuses, remoteApi, remoteCoverLoadPerformanceMode, updateUxMemory]);
 
   const syncBrowserDirectory = useCallback(async (source: RemoteSource): Promise<void> => {
-    if (!remoteApi) {
-      return;
-    }
-
     const state = browserStates[source.id] ?? emptyBrowserState();
     const rootPath = state.path ?? rootPathForSource(source);
-    const key = `sync:${source.id}`;
-    setBusy(key);
-    setMessage(null);
-    try {
-      const status = await remoteApi.sync(source.id, {
-        rootPath,
-        markMissing: false,
-        includeCover: true,
-      });
-      setSyncStatuses((current) => ({ ...current, [status.sourceId]: status }));
-      await refreshStatuses([source.id]);
-      setMessage(`已开始同步当前目录索引：${rootPath}`);
-    } catch (error) {
-      setMessage(remoteSourceErrorText(error, '同步当前目录索引失败。'));
-    } finally {
-      setBusy(null);
-    }
-  }, [browserStates, refreshStatuses, remoteApi]);
+    await previewSourceSync(source, rootPath);
+  }, [browserStates, previewSourceSync]);
 
   const showSourceIssues = async (source: RemoteSource, kind: RemoteSourceIssueKind): Promise<void> => {
     if (!remoteApi) {
@@ -2240,8 +2475,14 @@ export const RemoteSourcesPanel = (): JSX.Element => {
       const items = await remoteApi.listIssues(source.id, kind, 6);
       setIssuePreviews((current) => ({ ...current, [source.id]: items }));
       setMessage(items.length > 0
-        ? `已列出 ${source.displayName} 的 ${issueKindLabels[kind]} 问题。`
-        : `${source.displayName} 暂时没有 ${issueKindLabels[kind]} 问题。`);
+        ? translateStatic('settings.remote.ux.issue.listed', {
+            name: source.displayName,
+            kind: issueKindLabel(kind),
+          })
+        : translateStatic('settings.remote.ux.issue.none', {
+            name: source.displayName,
+            kind: issueKindLabel(kind),
+          }));
     } catch (error) {
       setMessage(remoteSourceErrorText(error, '读取问题列表失败。'));
     } finally {
@@ -2249,35 +2490,457 @@ export const RemoteSourcesPanel = (): JSX.Element => {
     }
   };
 
-  const renderOverview = (): JSX.Element => {
-    const hasAnySource = overview.totalSources > 0 || sources.length > 0;
+  const hasAnyRemoteSource = overview.totalSources > 0 || sources.length > 0;
+  const providerIcon = (provider: RemoteSourceProvider, size = 18): JSX.Element => (
+    provider === 'subsonic' || provider === 'jellyfin' || provider === 'emby'
+      ? <Server size={size} />
+      : provider === 'baidu' || provider === 'webdav'
+        ? <HardDrive size={size} />
+        : <FolderOpen size={size} />
+  );
 
-    if (!hasAnySource) {
-      return (
-        <section className="remote-start-card" aria-label={t('settings.remote.start.aria')}>
+  const renderConnectedLibraryHome = (): JSX.Element => (
+    <section className="remote-library-home" aria-label={t('settings.remote.home.sourcesAria')}>
+      <header className="remote-library-home-header">
+        <div>
+          <span>{t('settings.remote.home.eyebrow')}</span>
+          <h2>{t('settings.remote.library.title')}</h2>
+          <p>{t('settings.remote.home.description')}</p>
+        </div>
+        <div className="remote-library-home-header-actions">
+          <button
+            type="button"
+            aria-expanded={showConnectionOptions}
+            onClick={() => {
+              setShowEmptyConnectionForm(false);
+              setShowConnectionOptions((current) => !current);
+            }}
+          >
+            <Plus size={16} />
+            {showConnectionOptions ? t('settings.remote.home.hideAdd') : t('settings.remote.home.add')}
+          </button>
+          <button type="button" onClick={() => openMaintenanceForSource(sources[0])}>
+            <Gauge size={16} />
+            {t('settings.remote.home.manage')}
+          </button>
+        </div>
+      </header>
+
+      <div className="remote-library-home-summary" aria-label={t('settings.remote.overview.aria')}>
+        <span>
+          <strong>{formatCount(sources.length)}</strong>
+          <small>{t('settings.remote.metric.sources')}</small>
+        </span>
+        <span>
+          <strong>{formatCount(overview.trackCount)}</strong>
+          <small>{t('settings.remote.metric.indexedTracks')}</small>
+        </span>
+        <span data-tone={overviewIssueCount > 0 ? 'warning' : 'ready'}>
+          <strong>{formatCount(overviewIssueCount)}</strong>
+          <small>{t('settings.remote.metric.issues')}</small>
+        </span>
+        <span data-tone={globalJobStatus.paused || playbackLoadReduced ? 'warning' : 'ready'}>
+          <strong>{commandStatusLabel}</strong>
+          <small>{t('settings.remote.metric.backgroundStatus')}</small>
+        </span>
+      </div>
+
+      <div className="remote-library-home-list">
+        {sources.map((source) => {
+          const sourceOverview = overviewBySourceId.get(source.id) ?? emptyOverviewItem(source);
+          const syncStatus = syncStatuses[source.id] ?? emptyStatus(source.id);
+          const sourceSummary = sourceHealthSummary(source, sourceOverview, syncStatus, reconnectStates[source.id] ?? 'idle');
+          const browserLoading = browserStates[source.id]?.loading === true;
+          const syncBusy = syncPreviewBusySourceId === source.id;
+          const unavailable = source.status === 'disabled';
+          return (
+            <article key={source.id} data-tone={sourceSummary.tone}>
+              <div className="remote-library-home-source-icon" aria-hidden="true">
+                {providerIcon(source.provider, 22)}
+              </div>
+              <div className="remote-library-home-source-copy">
+                <span>{t(providerLabelKeys[source.provider])}</span>
+                <h3>{source.displayName}</h3>
+                <p>{sourceSummary.title} · {sourceSummary.description}</p>
+              </div>
+              <div className="remote-library-home-source-stats">
+                <span>
+                  <strong>{formatCount(sourceOverview.trackCount)}</strong>
+                  <small>{t('settings.remote.unit.songs')}</small>
+                </span>
+                <span>
+                  <strong>{formatCount(sourceOverview.albumCount)}</strong>
+                  <small>{t('settings.remote.unit.albums')}</small>
+                </span>
+                <span>
+                  <strong>{formatDate(source.lastSyncAt)}</strong>
+                  <small>{t('settings.remote.home.lastSync')}</small>
+                </span>
+              </div>
+              <div className="remote-library-home-source-actions">
+                <button
+                  type="button"
+                  disabled={unavailable || browserLoading}
+                  onClick={() => void openSourceBrowser(source)}
+                >
+                  <FolderOpen size={15} />
+                  {browserLoading ? t('settings.remote.home.opening') : t('settings.remote.home.open')}
+                </button>
+                {source.status === 'error' ? (
+                  <button type="button" disabled={reconnectStates[source.id] === 'testing'} onClick={() => void retrySourceConnection(source)}>
+                    <Wifi size={15} />
+                    {reconnectStates[source.id] === 'testing' ? t('settings.remote.home.reconnecting') : t('settings.remote.home.reconnect')}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={unavailable || syncBusy || remotePanelPlaybackActive}
+                    onClick={() => void previewSourceSync(source)}
+                  >
+                    <RefreshCw size={15} />
+                    {syncBusy ? t('settings.remote.home.syncing') : remotePanelPlaybackActive ? t('settings.remote.home.playing') : t('settings.remote.home.sync')}
+                  </button>
+                )}
+                <button type="button" onClick={() => openMaintenanceForSource(source)}>
+                  <Gauge size={15} />
+                  {t('settings.remote.home.sourceManage')}
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+
+  const renderConnectionLanding = (): JSX.Element => {
+    return (
+      <section className="remote-empty-library" aria-label={t('settings.remote.start.aria')}>
+        <header className="remote-empty-library-header">
           <div>
-            <span>{t('settings.remote.start.emptyEyebrow')}</span>
-            <h3>{t('settings.remote.start.title')}</h3>
-            <p>{t('settings.remote.start.description')}</p>
+            <h2>{t('settings.remote.hero.title')}</h2>
+            <p>{t(hasAnyRemoteSource ? 'settings.remote.library.description' : 'settings.remote.empty.lede')}</p>
           </div>
-          <div className="remote-start-options" aria-label={t('settings.remote.start.optionsAria')}>
-            <button type="button" onClick={() => startAddingRemoteProvider('subsonic')}>
-              <Server size={15} />
-              {t('settings.remote.start.option.server')}
-            </button>
-            <button type="button" onClick={() => startAddingRemoteProvider('webdav')}>
-              <HardDrive size={15} />
-              {t('settings.remote.start.option.cloudDrive')}
-            </button>
-            <button type="button" onClick={() => startAddingRemoteProvider('smb')}>
-              <FolderOpen size={15} />
-              {t('settings.remote.start.option.nas')}
-            </button>
+          <div className="remote-empty-library-trust">
+            <ShieldCheck size={17} />
+            <strong>{t('settings.remote.guardrail.title')}</strong>
+            <span>{t('settings.remote.guardrail.description')}</span>
           </div>
-        </section>
-      );
-    }
+        </header>
 
+        <section className="remote-empty-recommended" aria-label={t('settings.remote.badge.recommended')}>
+          <div className="remote-empty-recommended-icon" aria-hidden="true">
+            <Server size={28} />
+          </div>
+          <div className="remote-empty-recommended-copy">
+            <span>{t('settings.remote.badge.recommended')}</span>
+            <h3>Navidrome / Subsonic</h3>
+            <p>{t('settings.remote.provider.subsonic.summary')}</p>
+          </div>
+          <button type="button" onClick={() => startAddingRemoteProvider('subsonic')}>
+            {t('settings.remote.provider.subsonic.action')}
+            <ChevronRight size={17} />
+          </button>
+        </section>
+
+        <div className="remote-empty-library-body">
+          <section className="remote-empty-alternatives">
+            <h3>{t('settings.remote.empty.alternatives')}</h3>
+            <div className="remote-empty-alternative-list">
+              {tabs.filter((tab) => tab.provider !== 'subsonic').map((tab) => {
+                const guide = providerGuides[tab.provider];
+                return (
+                  <button
+                    key={tab.provider}
+                    type="button"
+                    data-active={showEmptyConnectionForm && activeProvider === tab.provider ? 'true' : undefined}
+                    onClick={() => startAddingRemoteProvider(tab.provider)}
+                  >
+                    <i aria-hidden="true">{providerIcon(tab.provider)}</i>
+                    <span>
+                      <strong>{t(tab.labelKey)}</strong>
+                      <small>{t(guide.promiseKey)}</small>
+                    </span>
+                    <ChevronRight size={17} />
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {hasAnyRemoteSource ? (
+            <aside className="remote-empty-preview">
+              <h3>{t('settings.remote.library.title')}</h3>
+              <div className="remote-empty-preview-list">
+                {sources.map((source) => {
+                  const sourceOverview = overviewBySourceId.get(source.id) ?? emptyOverviewItem(source);
+                  return (
+                    <span key={source.id}>
+                      {providerIcon(source.provider)}
+                      <span>
+                        <strong>{source.displayName}</strong>
+                        <small>
+                          {t(providerLabelKeys[source.provider])} · {t('settings.remote.metric.indexedTracks')} {formatCount(sourceOverview.trackCount)}
+                        </small>
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
+            </aside>
+          ) : (
+            <aside className="remote-empty-preview">
+              <img src={remoteLibraryPreview} alt="" />
+              <h3>{t('settings.remote.empty.preview.title')}</h3>
+              <div className="remote-empty-preview-list">
+                <span>
+                  <Music2 size={18} />
+                  <span>
+                    <strong>{t('settings.remote.empty.preview.browse.title')}</strong>
+                    <small>{t('settings.remote.empty.preview.browse.description')}</small>
+                  </span>
+                </span>
+                <span>
+                  <RefreshCw size={18} />
+                  <span>
+                    <strong>{t('settings.remote.empty.preview.sync.title')}</strong>
+                    <small>{t('settings.remote.empty.preview.sync.description')}</small>
+                  </span>
+                </span>
+                <span>
+                  <Check size={18} />
+                  <span>
+                    <strong>{t('settings.remote.empty.preview.playback.title')}</strong>
+                    <small>{t('settings.remote.empty.preview.playback.description')}</small>
+                  </span>
+                </span>
+              </div>
+            </aside>
+          )}
+        </div>
+
+        {showEmptyConnectionForm ? (
+          <div className="remote-empty-connection-form">
+            <div className="remote-section-heading remote-section-heading--compact">
+              <div>
+                <span>{t(activeProviderGuide.fitKey)}</span>
+                <h3>{t(activeProviderGuide.actionKey)}</h3>
+              </div>
+              <p>{t(activeProviderGuide.summaryKey)}</p>
+            </div>
+            {activeTab.supported ? renderForm() : (
+              <section className="remote-source-coming-soon">
+                <Play size={18} />
+                <strong>{t('settings.remote.comingSoon.title').replace('{provider}', t(activeTab.labelKey))}</strong>
+                <span>{t('settings.remote.comingSoon.description')}</span>
+              </section>
+            )}
+          </div>
+        ) : null}
+      </section>
+    );
+  };
+
+  const renderHumanizedHub = (): JSX.Element => {
+    const sourceById = new Map(sources.map((source) => [source.id, source]));
+    const recentLocations = uxMemory.recentLocations
+      .flatMap((item) => {
+        const source = sourceById.get(item.sourceId);
+        return source ? [{ item, source }] : [];
+      })
+      .slice(0, 5);
+    const pinnedSources = uxMemory.pinnedSourceIds
+      .map((sourceId) => sourceById.get(sourceId))
+      .filter((source): source is RemoteSource => Boolean(source));
+    const pinnedLocations = uxMemory.pinnedLocations
+      .flatMap((item) => {
+        const source = sourceById.get(item.sourceId);
+        return source ? [{ item, source }] : [];
+      });
+    const errorSources = sources.filter((source) => source.status === 'error');
+    const hasPins = pinnedSources.length > 0 || pinnedLocations.length > 0;
+
+    return (
+      <div className="remote-humanized-stack">
+        <section className="remote-humanized-hub" aria-label="远程音乐快捷入口">
+          <article className="remote-humanized-panel">
+            <header>
+              <span><History size={17} />继续浏览</span>
+              {recentLocations.length > 0 ? (
+                <button type="button" onClick={() => updateUxMemory((current) => ({ ...current, recentLocations: [] }))}>清空</button>
+              ) : null}
+            </header>
+            {recentLocations.length > 0 ? (
+              <div className="remote-humanized-list">
+                {recentLocations.map(({ item, source }) => (
+                  <button key={`${item.sourceId}:${item.path}`} type="button" onClick={() => void loadBrowserDirectory(source, item.path)}>
+                    <FolderOpen size={17} />
+                    <span>
+                      <strong>{item.path}</strong>
+                      <small>{source.displayName} · {formatDate(item.visitedAt)}</small>
+                    </span>
+                    <ChevronRight size={16} />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p>浏览过的远程目录会留在这里，下次可以直接回到上次的位置。</p>
+            )}
+          </article>
+
+          <article className="remote-humanized-panel">
+            <header>
+              <span><Pin size={17} />收藏与置顶</span>
+            </header>
+            {hasPins ? (
+              <div className="remote-humanized-list">
+                {pinnedSources.map((source) => (
+                  <div className="remote-humanized-row" key={`source:${source.id}`}>
+                    <button type="button" onClick={() => void loadBrowserDirectory(source, null)}>
+                      <Server size={17} />
+                      <span><strong>{source.displayName}</strong><small>{t(providerLabelKeys[source.provider])} · 已置顶来源</small></span>
+                      <ChevronRight size={16} />
+                    </button>
+                    <button type="button" aria-label={`取消置顶 ${source.displayName}`} onClick={() => togglePinnedSource(source.id)}><PinOff size={15} /></button>
+                  </div>
+                ))}
+                {pinnedLocations.map(({ item, source }) => (
+                  <div className="remote-humanized-row" key={`path:${item.sourceId}:${item.path}`}>
+                    <button type="button" onClick={() => void loadBrowserDirectory(source, item.path)}>
+                      <FolderOpen size={17} />
+                      <span><strong>{item.path}</strong><small>{source.displayName} · 收藏目录</small></span>
+                      <ChevronRight size={16} />
+                    </button>
+                    <button type="button" aria-label={`取消收藏 ${item.path}`} onClick={() => togglePinnedLocation(source, item.path)}><PinOff size={15} /></button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="remote-pin-suggestions">
+                <p>把常用来源放在手边，目录也可以在文件浏览器里收藏。</p>
+                <div>
+                  {sources.slice(0, 3).map((source) => (
+                    <button key={source.id} type="button" onClick={() => togglePinnedSource(source.id)}>
+                      <Pin size={14} />置顶 {source.displayName}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </article>
+        </section>
+
+        {errorSources.length > 0 ? (
+          <section className="remote-reconnect-center" aria-label="需要恢复连接的来源">
+            {errorSources.map((source) => {
+              const presentation = remoteSourceErrorPresentation(source.lastError);
+              const reconnectState = reconnectStates[source.id] ?? 'idle';
+              return (
+                <article key={source.id}>
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>{source.displayName} · {presentation.title}</strong>
+                    <span>{presentation.description}</span>
+                  </div>
+                  <button type="button" disabled={reconnectState === 'testing'} onClick={() => void retrySourceConnection(source)}>
+                    {reconnectState === 'testing' ? <RefreshCw className="spinning-icon" size={15} /> : <Wifi size={15} />}
+                    {reconnectState === 'testing' ? '正在重连' : '重新连接'}
+                  </button>
+                </article>
+              );
+            })}
+            <p>网络恢复时，ECHO 只会为异常来源自动测试一次，不会循环打扰服务器。</p>
+          </section>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderSourceHealthCenter = (): JSX.Element => (
+    <section className="remote-health-center" aria-label="来源健康摘要">
+      <header>
+        <div>
+          <span>来源健康</span>
+          <h3>{sources.every((source) => source.status === 'enabled') ? '你的远程音乐都在正常待命' : '有来源需要留意'}</h3>
+        </div>
+        <small>只显示用户需要知道的结论，技术细节仍放在高级维护中。</small>
+      </header>
+      <div>
+        {sources.map((source) => {
+          const sourceOverview = overviewBySourceId.get(source.id) ?? emptyOverviewItem(source);
+          const syncStatus = syncStatuses[source.id] ?? emptyStatus(source.id);
+          const summary = sourceHealthSummary(source, sourceOverview, syncStatus, reconnectStates[source.id] ?? 'idle');
+          return (
+            <article key={source.id} data-tone={summary.tone}>
+              <i aria-hidden="true" />
+              <span>
+                <strong>{source.displayName}</strong>
+                <small>{t(providerLabelKeys[source.provider])}</small>
+              </span>
+              <span>
+                <strong>{summary.title}</strong>
+                <small>{summary.description}</small>
+              </span>
+              {source.status === 'error' ? (
+                <button type="button" onClick={() => void retrySourceConnection(source)}>重新连接</button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={remotePanelPlaybackActive || syncPreviewBusySourceId === source.id}
+                  onClick={() => void previewSourceSync(source)}
+                >
+                  {syncPreviewBusySourceId === source.id ? '正在预览' : remotePanelPlaybackActive ? '播放中' : '预览同步'}
+                </button>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+
+  const renderSyncPreview = (): JSX.Element | null => {
+    if (!syncPreview) {
+      return null;
+    }
+    const source = sources.find((item) => item.id === syncPreview.sourceId);
+    if (!source) {
+      return null;
+    }
+    const { result } = syncPreview;
+    return (
+      <section className="remote-sync-preview" aria-label={`${source.displayName} 同步预览`}>
+        <header>
+          <div>
+            <span>只读预览 · {syncPreview.rootPath ? `目录 ${syncPreview.rootPath}` : '完整来源'}</span>
+            <h3>{result.complete ? '确认这些变化后再同步' : '这次扫描没有完整结束'}</h3>
+          </div>
+          <button type="button" onClick={() => setSyncPreview(null)}>关闭</button>
+        </header>
+        <div className="remote-sync-preview-counts">
+          <span data-tone="added"><em>新增</em><strong>{formatCount(result.addedCount)}</strong><small>首歌曲</small></span>
+          <span data-tone="updated"><em>更新</em><strong>{formatCount(result.updatedCount)}</strong><small>首歌曲</small></span>
+          <span><em>没有变化</em><strong>{formatCount(result.unchangedCount)}</strong><small>首歌曲</small></span>
+          <span data-tone={result.missingCount && result.missingCount > 0 ? 'missing' : undefined}>
+            <em>暂时找不到</em><strong>{result.missingCount === null ? '—' : formatCount(result.missingCount)}</strong><small>不会立即删除</small>
+          </span>
+        </div>
+        <p>
+          {result.complete
+            ? `本次共发现 ${formatCount(result.discoveredCount)} 首。确认后才会写入索引；暂时找不到的歌曲只会标记状态，不会删除服务器文件。`
+            : `有 ${formatCount(result.failedCount)} 个位置读取失败，因此没有计算缺失歌曲。请先恢复连接后重新预览。`}
+        </p>
+        <footer>
+          <button type="button" onClick={() => setSyncPreview(null)}>先不处理</button>
+          <button type="button" disabled={!result.complete || busy === `sync:${source.id}`} onClick={() => void confirmSyncPreview()}>
+            {busy === `sync:${source.id}` ? '正在开始' : '确认并同步'}
+          </button>
+        </footer>
+      </section>
+    );
+  };
+
+  const renderOverview = (): JSX.Element => {
     return (
       <section className="remote-command-center" aria-label={t('settings.remote.overview.aria')}>
       <div className="remote-command-panel">
@@ -2435,7 +3098,13 @@ export const RemoteSourcesPanel = (): JSX.Element => {
   };
 
   const renderBrowserWorkbench = (): JSX.Element | null => {
-    if (!activeTab.supported || visibleSources.length === 0 || !selectedSource || !selectedBrowser) {
+    if (
+      !activeTab.supported ||
+      visibleSources.length === 0 ||
+      !selectedSource ||
+      !selectedBrowser ||
+      (!selectedBrowser.loading && !selectedBrowser.loaded && !selectedBrowser.error)
+    ) {
       return null;
     }
 
@@ -2443,6 +3112,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
     const syncStatus = syncStatuses[selectedSource.id] ?? emptyStatus(selectedSource.id);
     const syncProgress = syncProgressFor(syncStatus);
     const currentPath = displayPathForBrowser(selectedSource, selectedBrowser.path);
+    const currentLocationPinned = uxMemory.pinnedLocations.some((item) => item.sourceId === selectedSource.id && item.path === currentPath);
     const parentPath = parentBrowserPath(selectedSource, selectedBrowser.path);
     const canGoUp = currentPath !== rootPathForSource(selectedSource);
     const breadcrumbs = browserBreadcrumbs(selectedSource, selectedBrowser.path);
@@ -2453,7 +3123,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
     const filteredItems = selectedBrowser.items.filter((item) => shouldShowBrowserItem(item, selectedBrowser.indexedTracks[item.path], browserFilter));
 
     return (
-      <section className="remote-browser-workbench" aria-label="网盘文件浏览器">
+      <section ref={browserSectionRef} className="remote-browser-workbench" aria-label="网盘文件浏览器">
         <aside className="remote-browser-sources" aria-label="远程来源">
           <div className="remote-browser-panel-head">
             <strong>来源</strong>
@@ -2478,7 +3148,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
                   >
                     <span>
                       <strong>{source.displayName}</strong>
-                      <small>{t(providerLabelKeys[source.provider])} · {sourceStatusLabels[source.status]}</small>
+                      <small>{t(providerLabelKeys[source.provider])} · {sourceStatusLabel(source.status)}</small>
                     </span>
                     <em>{formatCount(itemOverview.trackCount)} {t('settings.remote.unit.tracks')}</em>
                   </button>
@@ -2508,14 +3178,22 @@ export const RemoteSourcesPanel = (): JSX.Element => {
               <p>{currentPath}</p>
             </div>
             <div className="remote-file-browser-actions">
+              <button
+                type="button"
+                aria-pressed={currentLocationPinned}
+                onClick={() => togglePinnedLocation(selectedSource, currentPath)}
+              >
+                {currentLocationPinned ? <PinOff size={15} /> : <Pin size={15} />}
+                {currentLocationPinned ? '取消收藏' : '收藏目录'}
+              </button>
               <button type="button" disabled={!canGoUp || selectedBrowser.loading} onClick={() => void loadBrowserDirectory(selectedSource, parentPath)}>
                 <ChevronLeft size={15} />{t('settings.remote.browser.up')}
               </button>
               <button type="button" disabled={selectedBrowser.loading} onClick={() => void loadBrowserDirectory(selectedSource, selectedBrowser.path)}>
                 <RefreshCw size={15} />{t('settings.remote.browser.refreshDirectory')}
               </button>
-              <button type="button" disabled={busy === `sync:${selectedSource.id}`} onClick={() => void syncBrowserDirectory(selectedSource)}>
-                <Database size={15} />{t('settings.remote.browser.syncIndex')}
+              <button type="button" disabled={syncPreviewBusySourceId === selectedSource.id || remotePanelPlaybackActive} onClick={() => void syncBrowserDirectory(selectedSource)}>
+                <Database size={15} />{syncPreviewBusySourceId === selectedSource.id ? '正在预览' : remotePanelPlaybackActive ? '播放中' : '预览同步'}
               </button>
             </div>
           </div>
@@ -2572,7 +3250,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
                 <span>未索引 {formatCount(unindexedAudioCount)}</span>
               </div>
               <div className="remote-browser-filter" role="group" aria-label="文件筛选">
-                {browserFilterOptions.map((option) => (
+                {browserFilterOptions().map((option) => (
                   <button
                     key={option.value}
                     type="button"
@@ -2661,9 +3339,9 @@ export const RemoteSourcesPanel = (): JSX.Element => {
                         {indexedTrack ? (
                           <div className="remote-file-meta-strip">
                             <span data-tone="ready">已入库</span>
-                            <span>元数据 {remoteTrackStatusLabels[indexedTrack.metadataStatus]}</span>
-                            <span>封面 {remoteTrackStatusLabels[indexedTrack.coverStatus]}</span>
-                            <span>歌词 {remoteTrackStatusLabels[indexedTrack.lyricsStatus]}</span>
+                            <span>{translateStatic('settings.remote.ux.browser.metadataLabel', { status: remoteTrackStatusLabel(indexedTrack.metadataStatus) })}</span>
+                            <span>{translateStatic('settings.remote.ux.browser.coverLabel', { status: remoteTrackStatusLabel(indexedTrack.coverStatus) })}</span>
+                            <span>{translateStatic('settings.remote.ux.browser.lyricsLabel', { status: remoteTrackStatusLabel(indexedTrack.lyricsStatus) })}</span>
                           </div>
                         ) : item.audio ? (
                           <div className="remote-file-meta-strip">
@@ -2707,217 +3385,219 @@ export const RemoteSourcesPanel = (): JSX.Element => {
   };
 
   const renderForm = (): JSX.Element => (
-    <section className="remote-source-form" ref={formSectionRef}>
-      {activeProvider === 'subsonic' ? (
-        <div className="remote-source-navidrome-guide" aria-label="Navidrome 推荐">
-          <div>
-            <Server size={17} />
-            <strong>推荐使用 Navidrome</strong>
-            <span>轻量、稳定、兼容 Subsonic API，适合把 NAS 或本机音乐库部署成远程音乐服务器；ECHO 只做索引和按需取流，不会直接改动服务端音乐文件。</span>
-          </div>
-          <button type="button" onClick={() => void openNavidromeDockerDocs()}>
-            <ExternalLink size={15} />Docker 部署
-          </button>
+    <section
+      className={`remote-connection-flow remote-connection-flow--${activeProvider}`}
+      ref={formSectionRef}
+      aria-label={`${t(activeTab.labelKey)} 连接设置`}
+    >
+      <header className="remote-connection-flow-header">
+        <div className="remote-connection-flow-provider-icon" aria-hidden="true">
+          {activeProvider === 'subsonic' || activeProvider === 'jellyfin' || activeProvider === 'emby'
+            ? <Server size={23} />
+            : activeProvider === 'baidu' || activeProvider === 'webdav'
+              ? <HardDrive size={23} />
+              : <FolderOpen size={23} />}
         </div>
-      ) : null}
-      <label>
-        显示名称
-        <input value={form.displayName} placeholder={defaultNameFor(activeProvider)} onChange={(event) => updateForm({ displayName: event.target.value })} />
-      </label>
-      {activeProvider !== 'baidu' ? (
-        <label>
-          服务器 URL
-          <input value={form.baseUrl} placeholder={activeProvider === 'webdav' ? 'https://example.com/dav' : 'https://music.example.com'} onChange={(event) => updateForm({ baseUrl: event.target.value })} />
-        </label>
-      ) : null}
-      {activeProvider !== 'baidu' ? (
-        <label>
-          用户名
-          <input value={form.username} onChange={(event) => updateForm({ username: event.target.value })} />
-        </label>
-      ) : null}
-      {activeProvider !== 'baidu' || showBaiduDeveloperFields ? (
-        <label>
-        {activeProvider === 'baidu' ? 'Access Token / OAuth Token' : activeProvider === 'webdav' ? '密码' : activeProvider === 'subsonic' ? '密码 / API token' : '密码 / API Key'}
-        <input type="password" value={form.secret} onChange={(event) => updateForm({ secret: event.target.value })} />
-        </label>
-      ) : null}
-      {activeProvider === 'baidu' ? (
-        <div className="baidu-oauth-helper" aria-label="百度网盘 OAuth 授权">
-          <div>
-            <KeyRound size={16} />
-            <strong>账号授权助手</strong>
-            <span>使用 ECHO 专用百度开放平台应用登录；不保存百度账号密码，只保存授权后的 Token。</span>
+        <div>
+          <span>连接向导 · {t(activeTab.labelKey)}</span>
+          <h3>{t(activeProviderGuide.actionKey)}</h3>
+          <p>{t(activeProviderGuide.summaryKey)}</p>
+        </div>
+        <button type="button" onClick={() => setShowEmptyConnectionForm(false)}>暂不连接</button>
+      </header>
+
+      <ol className="remote-connection-steps" aria-label="连接步骤">
+        <li data-state="complete"><Check size={14} /><span><strong>选择来源</strong><small>{t(activeTab.labelKey)}</small></span></li>
+        <li data-state="current"><KeyRound size={14} /><span><strong>填写连接</strong><small>地址与授权</small></span></li>
+        <li><Wifi size={14} /><span><strong>验证保存</strong><small>测试后开始同步</small></span></li>
+      </ol>
+
+      <div className="remote-connection-flow-body">
+        {activeProvider === 'subsonic' ? (
+          <div className="remote-source-navidrome-guide" aria-label="Navidrome 推荐">
+            <div>
+              <Server size={17} />
+              <strong>推荐使用 Navidrome</strong>
+              <span>轻量、稳定、兼容 Subsonic API；ECHO 只做索引和按需取流，不会直接改动服务端音乐文件。</span>
+            </div>
+            <button type="button" onClick={() => void openNavidromeDockerDocs()}>
+              <ExternalLink size={15} />Docker 部署
+            </button>
           </div>
-          {showBaiduDeveloperFields ? (
-            <>
+        ) : null}
+
+        <section className="remote-connection-card" aria-labelledby="remote-connection-location-title">
+          <header>
+            <i>1</i>
+            <div>
+              <h4 id="remote-connection-location-title">来源位置</h4>
+              <p>给这个来源起一个容易识别的名字，并填写音乐所在位置。</p>
+            </div>
+          </header>
+          <div className="remote-connection-field-grid">
+            <label>
+              <span>显示名称</span>
+              <input value={form.displayName} placeholder={defaultNameFor(activeProvider)} onChange={(event) => updateForm({ displayName: event.target.value })} />
+            </label>
+            {activeProvider !== 'baidu' ? (
+              <label className="remote-connection-field--wide">
+                <span>服务器 URL</span>
+                <input value={form.baseUrl} placeholder={activeProvider === 'webdav' ? 'https://example.com/dav' : 'https://music.example.com'} onChange={(event) => updateForm({ baseUrl: event.target.value })} />
+              </label>
+            ) : null}
+            {activeProvider === 'webdav' || activeProvider === 'baidu' || activeProvider === 'smb' || activeProvider === 'sshfs' ? (
               <label>
-                百度 App Key
-                <input value={form.baiduClientId} placeholder="API Key / Client ID" onChange={(event) => updateForm({ baiduClientId: event.target.value })} />
+                <span>{activeProvider === 'webdav' || activeProvider === 'baidu' ? '根目录' : '挂载子目录'}</span>
+                <input value={form.rootPath} onChange={(event) => updateForm({ rootPath: event.target.value })} />
+              </label>
+            ) : null}
+          </div>
+          {activeProvider === 'smb' || activeProvider === 'sshfs' ? (
+            <p className="remote-connection-card-note">
+              <ShieldCheck size={15} />使用系统已挂载或可直接访问的路径。Windows 可填写 \\NAS\Music 或 Z:\Music；SSHFS 请先在系统中挂载。
+            </p>
+          ) : null}
+        </section>
+
+        <section className="remote-connection-card" aria-labelledby="remote-connection-auth-title">
+          <header>
+            <i>2</i>
+            <div>
+              <h4 id="remote-connection-auth-title">登录与授权</h4>
+              <p>{activeProvider === 'baidu' ? '通过百度官方页面授权，ECHO 不会保存你的百度账号密码。' : '凭据只用于连接这个远程来源。'}</p>
+            </div>
+          </header>
+          {activeProvider !== 'baidu' ? (
+            <div className="remote-connection-field-grid">
+              <label>
+                <span>用户名</span>
+                <input value={form.username} onChange={(event) => updateForm({ username: event.target.value })} />
               </label>
               <label>
-                百度 Secret Key
-                <input type="password" value={form.baiduClientSecret} placeholder="Secret Key" onChange={(event) => updateForm({ baiduClientSecret: event.target.value })} />
+                <span>{activeProvider === 'webdav' ? '密码' : activeProvider === 'subsonic' ? '密码 / API token' : '密码 / API Key'}</span>
+                <input type="password" value={form.secret} onChange={(event) => updateForm({ secret: event.target.value })} />
               </label>
               <label>
-                Redirect URI
-                <input value={form.baiduRedirectUri} placeholder="oob" onChange={(event) => updateForm({ baiduRedirectUri: event.target.value })} />
+                <span>认证方式</span>
+                <select value={form.authType} onChange={(event) => updateForm({ authType: event.target.value as RemoteSourceInput['authType'] })}>
+                  <option value="basic">{translateStatic('settings.remote.ux.auth.password')}</option>
+                  <option value="apiKey">API Key</option>
+                  <option value="token">Token</option>
+                  <option value="none">{translateStatic('settings.remote.ux.auth.none')}</option>
+                </select>
               </label>
-              <label>
-                授权码
-                <input value={form.baiduAuthCode} placeholder="可粘贴 code 或完整回调地址" onChange={(event) => updateForm({ baiduAuthCode: event.target.value })} />
-              </label>
-              <label>
-                Access Token 回调
-                <input value={form.baiduAccessTokenText} placeholder="可粘贴 login_success#access_token=..." onChange={(event) => updateForm({ baiduAccessTokenText: event.target.value })} />
-              </label>
-            </>
+            </div>
           ) : (
-            <div className="baidu-oauth-guide baidu-oauth-guide-compact">
-              <strong>已内置 ECHO 专用百度应用</strong>
-              <span>普通用户直接点“登录账号”即可。百度网盘开放平台目前没有显示回调地址配置入口，所以默认使用官方 oob 授权码方式，避免 redirect_uri_mismatch。</span>
+            <div className="baidu-oauth-helper" aria-label="百度网盘 OAuth 授权">
+              <div>
+                <KeyRound size={16} />
+                <strong>账号授权助手</strong>
+                <span>使用 ECHO 专用百度开放平台应用登录；只保存授权后的 Token。</span>
+              </div>
+              {showBaiduDeveloperFields ? (
+                <>
+                  <label><span>百度 App Key</span><input value={form.baiduClientId} placeholder="API Key / Client ID" onChange={(event) => updateForm({ baiduClientId: event.target.value })} /></label>
+                  <label><span>百度 Secret Key</span><input type="password" value={form.baiduClientSecret} placeholder="Secret Key" onChange={(event) => updateForm({ baiduClientSecret: event.target.value })} /></label>
+                  <label><span>Redirect URI</span><input value={form.baiduRedirectUri} placeholder="oob" onChange={(event) => updateForm({ baiduRedirectUri: event.target.value })} /></label>
+                  <label><span>授权码</span><input value={form.baiduAuthCode} placeholder="可粘贴 code 或完整回调地址" onChange={(event) => updateForm({ baiduAuthCode: event.target.value })} /></label>
+                  <label className="remote-connection-field--wide"><span>Access Token 回调</span><input value={form.baiduAccessTokenText} placeholder="可粘贴 login_success#access_token=..." onChange={(event) => updateForm({ baiduAccessTokenText: event.target.value })} /></label>
+                  <label className="remote-connection-field--wide"><span>Access Token / OAuth Token</span><input type="password" value={form.secret} onChange={(event) => updateForm({ secret: event.target.value })} /></label>
+                </>
+              ) : (
+                <div className="baidu-oauth-guide baidu-oauth-guide-compact">
+                  <strong>已内置 ECHO 专用百度应用</strong>
+                  <span>点击“登录账号”，在百度官方页面完成授权，再把页面显示的授权码粘贴回来。</span>
+                </div>
+              )}
+              {!showBaiduDeveloperFields ? (
+                <label className="baidu-oauth-code-field">
+                  <span>授权码</span>
+                  <input value={form.baiduAuthCode} placeholder="授权完成后把 code 粘贴到这里" onChange={(event) => updateForm({ baiduAuthCode: event.target.value })} />
+                </label>
+              ) : null}
+              <div className="remote-source-actions">
+                <button type="button" disabled={busy === 'baiduAccountLogin'} onClick={() => void startBaiduAccountLogin()}><KeyRound size={15} />登录账号</button>
+                {!showBaiduDeveloperFields ? <button type="button" disabled={busy === 'baiduExchangeCode'} onClick={() => void exchangeBaiduAuthCode()}><KeyRound size={15} />换取 Token</button> : null}
+                <button type="button" onClick={() => setShowBaiduDeveloperFields((current) => !current)}><KeyRound size={15} />{showBaiduDeveloperFields ? '普通模式' : '高级设置'}</button>
+                {showBaiduDeveloperFields ? (
+                  <>
+                    <button type="button" disabled={busy === 'baiduAuthUrl'} onClick={() => void openBaiduAuthUrl('code')}><ExternalLink size={15} />打开授权页</button>
+                    <button type="button" disabled={busy === 'baiduTokenAuthUrl'} onClick={() => void openBaiduAuthUrl('token')}><ExternalLink size={15} />打开 Token 页</button>
+                    <button type="button" disabled={busy === 'baiduExchangeCode'} onClick={() => void exchangeBaiduAuthCode()}><KeyRound size={15} />换取 Token</button>
+                    <button type="button" onClick={fillBaiduAccessToken}><KeyRound size={15} />填入 Access Token</button>
+                  </>
+                ) : null}
+              </div>
+              <p className="settings-inline-note">百度网盘使用官方开放平台 Token 挂载；下载速度和可用性受账号、会员和百度策略限制。</p>
+              {showBaiduDeveloperFields ? (
+                <div className="baidu-oauth-guide">
+                  <strong>开发配置覆盖</strong>
+                  <span>默认使用 ECHO 内置 AppKey / SecretKey。只有要替换百度开放平台应用时才需要修改。</span>
+                  <code>{baiduLoopbackRedirectUri}</code>
+                  <div className="remote-source-actions">
+                    <button type="button" onClick={() => void openBaiduHelpUrl('https://pan.baidu.com/union', '百度网盘开放平台')}><ExternalLink size={15} />开放平台</button>
+                    <button type="button" onClick={() => void openBaiduHelpUrl('https://openauth.baidu.com/doc/prepare.html', '创建应用说明')}><ExternalLink size={15} />创建应用说明</button>
+                    <button type="button" onClick={useBaiduLoopbackRedirectUri}><KeyRound size={15} />填入回调地址</button>
+                  </div>
+                  <span>AppID 只用于百度开放平台后台识别应用，不参与当前授权请求。</span>
+                </div>
+              ) : null}
+              {baiduAuthFeedback ? <p className="baidu-oauth-feedback" aria-live="polite">{baiduAuthFeedback}</p> : null}
+              {baiduAuthUrl ? <a className="baidu-oauth-link" href={baiduAuthUrl} target="_blank" rel="noreferrer">{baiduAuthUrl}</a> : null}
             </div>
           )}
-          {!showBaiduDeveloperFields ? (
-            <label className="baidu-oauth-code-field">
-              授权码
-              <input value={form.baiduAuthCode} placeholder="授权完成后把 code 粘贴到这里" onChange={(event) => updateForm({ baiduAuthCode: event.target.value })} />
+        </section>
+
+        <section className="remote-connection-card remote-connection-card--plan" aria-labelledby="remote-connection-plan-title">
+          <header>
+            <i>3</i>
+            <div>
+              <h4 id="remote-connection-plan-title">同步计划</h4>
+              <p>先选日常使用方式；性能参数保持默认即可。</p>
+            </div>
+          </header>
+          <div className="remote-connection-field-grid">
+            <label>
+              <span>同步模式</span>
+              <select value={form.syncMode} onChange={(event) => updateForm({ syncMode: event.target.value as RemoteSourceSyncMode })}>
+                {syncModeOptions.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}
+              </select>
             </label>
-          ) : null}
-          <div className="remote-source-actions">
-            <button type="button" disabled={busy === 'baiduAccountLogin'} onClick={() => void startBaiduAccountLogin()}>
-              <KeyRound size={15} />登录账号
-            </button>
-            {!showBaiduDeveloperFields ? (
-              <button type="button" disabled={busy === 'baiduExchangeCode'} onClick={() => void exchangeBaiduAuthCode()}>
-                <KeyRound size={15} />换取 Token
-              </button>
-            ) : null}
-            <button type="button" onClick={() => setShowBaiduDeveloperFields((current) => !current)}>
-              <KeyRound size={15} />{showBaiduDeveloperFields ? '普通模式' : '高级设置'}
-            </button>
-            {showBaiduDeveloperFields ? (
-              <>
-                <button type="button" disabled={busy === 'baiduAuthUrl'} onClick={() => void openBaiduAuthUrl('code')}>
-                  <ExternalLink size={15} />打开授权页
-                </button>
-                <button type="button" disabled={busy === 'baiduTokenAuthUrl'} onClick={() => void openBaiduAuthUrl('token')}>
-                  <ExternalLink size={15} />打开 Token 页
-                </button>
-                <button type="button" disabled={busy === 'baiduExchangeCode'} onClick={() => void exchangeBaiduAuthCode()}>
-                  <KeyRound size={15} />换取 Token
-                </button>
-                <button type="button" onClick={fillBaiduAccessToken}>
-                  <KeyRound size={15} />填入 Access Token
-                </button>
-              </>
-            ) : null}
           </div>
-          <p className="settings-inline-note">
-            登录账号会打开百度官方授权页并使用本机回调地址，授权成功后自动填入可续期 Token。
-          </p>
-          {showBaiduDeveloperFields ? (
-            <div className="baidu-oauth-guide">
-              <strong>开发配置覆盖</strong>
-              <span>默认使用 ECHO 内置 AppKey / SecretKey。只有要替换百度开放平台应用，或你找到了 OAuth 安全设置回调入口时，才需要改这些字段。SignKey 当前 OAuth 挂载流程不用填。</span>
-              <code>{baiduLoopbackRedirectUri}</code>
-              <div className="remote-source-actions">
-                <button type="button" onClick={() => void openBaiduHelpUrl('https://pan.baidu.com/union', '百度网盘开放平台')}>
-                  <ExternalLink size={15} />开放平台
-                </button>
-                <button type="button" onClick={() => void openBaiduHelpUrl('https://openauth.baidu.com/doc/prepare.html', '创建应用说明')}>
-                  <ExternalLink size={15} />创建应用说明
-                </button>
-                <button type="button" onClick={useBaiduLoopbackRedirectUri}>
-                  <KeyRound size={15} />填入回调地址
-                </button>
-              </div>
-              <span>AppID 只用于百度开放平台后台识别应用，不参与当前授权请求。</span>
+          <button className="remote-connection-advanced-toggle" type="button" aria-expanded={connectionAdvancedOpen} onClick={() => setConnectionAdvancedOpen((current) => !current)}>
+            <Gauge size={15} />
+            <span><strong>连接高级参数</strong><small>API 兼容与后台并发</small></span>
+            <ChevronRight size={16} />
+          </button>
+          {connectionAdvancedOpen ? (
+            <div className="remote-connection-field-grid remote-connection-advanced-fields">
+              {activeProvider === 'subsonic' ? (
+                <>
+                  <label><span>API 版本</span><input value={form.apiVersion} onChange={(event) => updateForm({ apiVersion: event.target.value })} /></label>
+                  <label><span>Subsonic 认证</span><select value={form.authMode} onChange={(event) => updateForm({ authMode: event.target.value })}><option value="token">Token salt，推荐</option><option value="password">明文兼容模式</option></select></label>
+                </>
+              ) : null}
+              <label><span>扫描并发</span><input type="number" min={1} max={8} value={form.scanConcurrency} onChange={(event) => updateForm({ scanConcurrency: Number(event.target.value) })} /></label>
+              <label><span>元数据并发</span><input type="number" min={1} max={8} value={form.metadataConcurrency} onChange={(event) => updateForm({ metadataConcurrency: Number(event.target.value) })} /></label>
+              <label><span>封面并发</span><input type="number" min={1} max={8} value={form.coverConcurrency} onChange={(event) => updateForm({ coverConcurrency: Number(event.target.value) })} /></label>
+              <label><span>时长回填并发</span><input type="number" min={1} max={4} value={form.durationBackfillConcurrency} onChange={(event) => updateForm({ durationBackfillConcurrency: Number(event.target.value) })} /></label>
             </div>
           ) : null}
-          {baiduAuthFeedback ? (
-            <p className="baidu-oauth-feedback" aria-live="polite">{baiduAuthFeedback}</p>
-          ) : null}
-          {baiduAuthUrl ? (
-            <a className="baidu-oauth-link" href={baiduAuthUrl} target="_blank" rel="noreferrer">
-              {baiduAuthUrl}
-            </a>
-          ) : null}
-        </div>
-      ) : null}
-      {activeProvider !== 'baidu' ? (
-        <label>
-          认证方式
-          <select value={form.authType} onChange={(event) => updateForm({ authType: event.target.value as RemoteSourceInput['authType'] })}>
-            <option value="basic">用户名密码</option>
-            <option value="apiKey">API Key</option>
-            <option value="token">Token</option>
-            <option value="none">无需认证</option>
-          </select>
-        </label>
-      ) : (
-        <p className="settings-inline-note">百度网盘使用官方开放平台 access token 挂载；下载速度和可用性受账号、会员和百度策略限制。</p>
-      )}
-      {activeProvider === 'webdav' || activeProvider === 'baidu' || activeProvider === 'smb' || activeProvider === 'sshfs' ? (
-        <label>
-          {activeProvider === 'webdav' || activeProvider === 'baidu' ? '根目录' : '挂载子目录'}
-          <input value={form.rootPath} onChange={(event) => updateForm({ rootPath: event.target.value })} />
-        </label>
-      ) : null}
-      {activeProvider === 'smb' || activeProvider === 'sshfs' ? (
-        <p className="settings-inline-note">
-          第一阶段使用系统已挂载或可直接访问的路径。Windows 可填写 UNC 路径或映射盘，例如 \\NAS\Music 或 Z:\Music；SSHFS 请先在系统中挂载后填写挂载目录。
-        </p>
-      ) : null}
-      {activeProvider === 'subsonic' ? (
-        <>
-          <label>
-            API 版本
-            <input value={form.apiVersion} onChange={(event) => updateForm({ apiVersion: event.target.value })} />
-          </label>
-          <label>
-            Subsonic 认证
-            <select value={form.authMode} onChange={(event) => updateForm({ authMode: event.target.value })}>
-              <option value="token">Token salt，推荐</option>
-              <option value="password">明文兼容模式</option>
-            </select>
-          </label>
-        </>
-      ) : null}
-      <label>
-        同步模式
-        <select value={form.syncMode} onChange={(event) => updateForm({ syncMode: event.target.value as RemoteSourceSyncMode })}>
-          {syncModeOptions.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}
-        </select>
-      </label>
-      <label>
-        扫描并发
-        <input type="number" min={1} max={8} value={form.scanConcurrency} onChange={(event) => updateForm({ scanConcurrency: Number(event.target.value) })} />
-      </label>
-      <label>
-        元数据并发
-        <input type="number" min={1} max={8} value={form.metadataConcurrency} onChange={(event) => updateForm({ metadataConcurrency: Number(event.target.value) })} />
-      </label>
-      <label>
-        封面并发
-        <input type="number" min={1} max={8} value={form.coverConcurrency} onChange={(event) => updateForm({ coverConcurrency: Number(event.target.value) })} />
-      </label>
-      <label>
-        时长回填并发
-        <input type="number" min={1} max={4} value={form.durationBackfillConcurrency} onChange={(event) => updateForm({ durationBackfillConcurrency: Number(event.target.value) })} />
-      </label>
-      <div className="remote-source-actions">
-        <button type="button" disabled={busy === 'test'} onClick={() => void runFormAction('test')}>
-          <Wifi size={15} />测试连接
-        </button>
-        <button type="button" disabled={busy === 'save'} onClick={() => void runFormAction('save')}>
-          <Save size={15} />保存
-        </button>
-        <button type="button" disabled={busy === 'saveSync'} onClick={() => void runFormAction('saveSync')}>
-          <RefreshCw size={15} />保存并同步
-        </button>
+        </section>
       </div>
-      {testResult ? <p className="settings-inline-note">{testResult.ok ? '测试通过：' : '测试失败：'}{testResult.message}</p> : null}
+
+      <footer className="remote-connection-flow-footer">
+        <div>
+          <ShieldCheck size={16} />
+          <span><strong>本地播放优先</strong><small>同步与补齐会在后台限速，播放时自动降载。</small></span>
+        </div>
+        <div className="remote-source-actions">
+          <button type="button" disabled={busy === 'test'} onClick={() => void runFormAction('test')}><Wifi size={15} />测试连接</button>
+          <button type="button" disabled={busy === 'save'} onClick={() => void runFormAction('save')}><Save size={15} />保存</button>
+          <button className="remote-connection-primary-action" type="button" disabled={busy === 'saveSync'} onClick={() => void runFormAction('saveSync')}><RefreshCw size={15} />保存并同步</button>
+        </div>
+      </footer>
+      {testResult ? <p className="remote-connection-result" data-tone={testResult.ok ? 'success' : 'error'}>{testResult.ok ? '测试通过：' : '测试失败：'}{testResult.message}</p> : null}
     </section>
   );
 
@@ -3133,7 +3813,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
                   <div className="remote-job-grid remote-background-effective-grid">
                     {jobKinds.map((kind) => (
                       <span key={kind}>
-                        <em>{jobLabels[kind]}</em>
+                        <em>{jobLabel(kind)}</em>
                         <strong>并发 {globalJobStatus.concurrency[kind]}</strong>
                       </span>
                     ))}
@@ -3156,29 +3836,33 @@ export const RemoteSourcesPanel = (): JSX.Element => {
         <section className="remote-sources-hero">
           <div>
             <h3>{t('settings.remote.hero.title')}</h3>
-            <strong>网盘功能已升级为 ECHO Pro Only</strong>
-            <p>WebDAV、百度网盘、NAS/SMB、媒体服务器和远程索引都需要 ECHO Pro 账号或 ECHO Pro 解锁插件。</p>
+            <strong>{remoteSourcesProUnlocked === null ? '正在读取本机 Pro 状态' : '网盘功能需要 ECHO Pro'}</strong>
+            <p>只进行本机账号或插件状态检查；已识别的 Pro 用户不会再被在线授权校验拦截。</p>
           </div>
           <LockKeyhole size={28} />
         </section>
-        <section className="remote-source-guardrail" aria-label="ECHO Pro required">
-          <strong>{remoteSourcesProUnlocked === null ? '正在检查 ECHO Pro 状态' : '需要 ECHO Pro'}</strong>
-          <span>请登录 ECHO Pro 账号，或导入并启用已通过服务端校验的 ECHO Pro 解锁插件。</span>
-        </section>
-        <div className="remote-source-actions">
-          <button className="settings-action-button" type="button" onClick={openEchoProAccountSettings}>
-            <KeyRound size={15} />
-            打开 ECHO Pro 账号
-          </button>
-          <button className="settings-action-button" type="button" onClick={() => void refreshRemoteSourcesProUnlock({ force: true })}>
-            <RefreshCw size={15} />
-            重新检查
-          </button>
-          <button className="settings-action-button" type="button" onClick={() => void hideRemoteSourcesFromSidebar()} disabled={isSidebarHideBusy}>
-            {isSidebarHideBusy ? <RefreshCw className="spinning-icon" size={15} /> : <EyeOff size={15} />}
-            从侧栏隐藏
-          </button>
-        </div>
+        {remoteSourcesProUnlocked === false ? (
+          <div className="remote-source-actions">
+            <button
+              className="settings-action-button"
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('app:navigate:settings-section', {
+                detail: { section: 'general', targetId: 'settings-row-echo-pro-account' },
+              }))}
+            >
+              <KeyRound size={15} />
+              打开 ECHO Pro 账号
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (!hasAnyRemoteSource) {
+    return (
+      <div className="remote-sources-panel remote-sources-panel--empty">
+        {renderConnectionLanding()}
         {message ? <p className="settings-inline-note">{message}</p> : null}
       </div>
     );
@@ -3186,55 +3870,54 @@ export const RemoteSourcesPanel = (): JSX.Element => {
 
   return (
     <div className="remote-sources-panel">
-      <section className="remote-sources-hero">
-        <div>
-          <h3>{t('settings.remote.hero.title')}</h3>
-          <strong>{t('settings.remote.hero.summary')}</strong>
-          <p>{t('settings.remote.hero.description')}</p>
-        </div>
-        <div className="remote-sources-hero-icon" aria-hidden="true">
-          <Server size={28} />
-        </div>
-      </section>
+      {renderConnectedLibraryHome()}
+      {showConnectionOptions ? renderConnectionLanding() : null}
+      {message ? <p className="settings-inline-note remote-library-home-message" role="status">{message}</p> : null}
+      {renderSyncPreview()}
+      {renderBrowserWorkbench()}
 
-      <section className="remote-source-guardrail" aria-label={t('settings.remote.guardrail.aria')}>
-        <strong>{t('settings.remote.guardrail.title')}</strong>
-        <span>{t('settings.remote.guardrail.description')}</span>
-      </section>
+      <section ref={maintenanceSectionRef} className="remote-maintenance-zone" aria-label={t('settings.remote.maintenance.title')}>
+        <header>
+          <div>
+            <span>{t('settings.remote.maintenance.eyebrow')}</span>
+            <h3>{t('settings.remote.maintenance.title')}</h3>
+            <p>{t('settings.remote.maintenance.description')}</p>
+          </div>
+          <button type="button" aria-expanded={maintenanceOpen} onClick={() => setMaintenanceOpen((current) => !current)}>
+            <Gauge size={16} />
+            {maintenanceOpen ? t('settings.remote.maintenance.close') : t('settings.remote.maintenance.open')}
+          </button>
+        </header>
 
-      {renderOverview()}
+        {maintenanceOpen ? (
+          <div className="remote-maintenance-content">
+            {renderHumanizedHub()}
+            {renderSourceHealthCenter()}
+            {renderOverview()}
 
-      <section className="remote-main-workspace" aria-label="远程来源主工作区">
-        <div className="remote-connect-column">
-          {renderProviderWorkspace()}
+            <section className="remote-main-workspace" aria-label="远程来源主工作区">
+              <div className="remote-connect-column">
+                {renderProviderWorkspace()}
+              </div>
 
-          {activeTab.supported ? renderForm() : (
-            <section className="remote-source-coming-soon">
-              <Play size={18} />
-              <strong>{t('settings.remote.comingSoon.title').replace('{provider}', t(activeTab.labelKey))}</strong>
-              <span>{t('settings.remote.comingSoon.description')}</span>
-            </section>
-          )}
-        </div>
+              <div className="remote-library-column">
+                {activeProviderSummary && activeProviderSummary.sourceCount > 0 ? (
+                  <section className="remote-provider-summary" aria-label={`${t(activeTab.labelKey)} ${t('settings.remote.providerSummary.aria')}`}>
+                    <span>
+                      <Server size={15} />
+                      {t(activeTab.labelKey)}
+                    </span>
+                    <strong>{formatCount(activeProviderSummary.sourceCount)} {t('settings.remote.unit.sources')}</strong>
+                    <span>{t('settings.remote.metric.enabled')} {formatCount(activeProviderSummary.enabledCount)}</span>
+                    <span>{t('settings.remote.unit.songs')} {formatCount(activeProviderSummary.trackCount)}</span>
+                    <span data-tone={activeProviderSummary.issueCount > 0 || activeProviderSummary.errorCount > 0 ? 'warning' : 'ready'}>
+                      {t('settings.remote.metric.issues')} {formatCount(activeProviderSummary.issueCount + activeProviderSummary.errorCount)}
+                    </span>
+                  </section>
+                ) : null}
 
-        <div className="remote-library-column">
-          {activeProviderSummary && activeProviderSummary.sourceCount > 0 ? (
-            <section className="remote-provider-summary" aria-label={`${t(activeTab.labelKey)} ${t('settings.remote.providerSummary.aria')}`}>
-              <span>
-                <Server size={15} />
-                {t(activeTab.labelKey)}
-              </span>
-              <strong>{formatCount(activeProviderSummary.sourceCount)} {t('settings.remote.unit.sources')}</strong>
-              <span>{t('settings.remote.metric.enabled')} {formatCount(activeProviderSummary.enabledCount)}</span>
-              <span>{t('settings.remote.unit.songs')} {formatCount(activeProviderSummary.trackCount)}</span>
-              <span data-tone={activeProviderSummary.issueCount > 0 || activeProviderSummary.errorCount > 0 ? 'warning' : 'ready'}>
-                {t('settings.remote.metric.issues')} {formatCount(activeProviderSummary.issueCount + activeProviderSummary.errorCount)}
-              </span>
-            </section>
-          ) : null}
-
-          <section className="remote-source-list" aria-label={`${t(activeTab.labelKey)} ${t('settings.remote.sourceList.aria')}`}>
-            {visibleSources.map((source) => {
+                <section className="remote-source-list" aria-label={`${t(activeTab.labelKey)} ${t('settings.remote.sourceList.aria')}`}>
+                  {visibleSources.map((source) => {
           const syncStatus = syncStatuses[source.id] ?? emptyStatus(source.id);
           const jobStatus = jobStatuses[source.id] ?? emptyJobStatus(source.id);
           const issuePreview = issuePreviews[source.id] ?? [];
@@ -3256,6 +3939,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
           const mvPercent = completionPercent(sourceOverview.mv);
           const sourceIssues = sourceIssueTotal(sourceOverview);
           const coverProgress = coverProgressFor(sourceOverview.cover, jobStatus);
+          const sourceErrorPresentation = source.lastError ? remoteSourceErrorPresentation(source.lastError) : null;
 
           return (
             <article className="remote-source-card" key={source.id}>
@@ -3268,7 +3952,16 @@ export const RemoteSourcesPanel = (): JSX.Element => {
                   <p>{source.provider === 'baidu' ? `根目录 ${rootPathForSource(source)}` : source.baseUrl ?? '无服务器地址'}</p>
                 </div>
                 <div className="remote-source-state-stack">
-                  <span className={`remote-source-status remote-source-status--${source.status}`}>{sourceStatusLabels[source.status]}</span>
+                  <button
+                    type="button"
+                    className="remote-source-pin-button"
+                    aria-pressed={uxMemory.pinnedSourceIds.includes(source.id)}
+                    onClick={() => togglePinnedSource(source.id)}
+                  >
+                    {uxMemory.pinnedSourceIds.includes(source.id) ? <PinOff size={14} /> : <Pin size={14} />}
+                    {uxMemory.pinnedSourceIds.includes(source.id) ? '取消置顶' : '置顶来源'}
+                  </button>
+                  <span className={`remote-source-status remote-source-status--${source.status}`}>{sourceStatusLabel(source.status)}</span>
                   {running ? <span className="remote-source-status remote-source-status--syncing">同步中</span> : null}
                 </div>
               </div>
@@ -3311,9 +4004,20 @@ export const RemoteSourcesPanel = (): JSX.Element => {
                 <span><em>问题项</em><strong>{formatCount(sourceIssueTotal(sourceOverview))}</strong></span>
                 <span><em>后台并发</em><strong>scan {readConfigNumber(source, 'scanConcurrency', 3)} / metadata {jobStatus.concurrency.metadata} / cover {jobStatus.concurrency.cover}</strong></span>
               </div>
-              {source.lastError ? <p className="settings-inline-note">错误：{remoteSourceErrorText(source.lastError)}</p> : null}
+              {sourceErrorPresentation ? (
+                <div className="remote-source-friendly-error">
+                  <AlertTriangle size={17} />
+                  <span>
+                    <strong>{sourceErrorPresentation.title}</strong>
+                    <small>{sourceErrorPresentation.description}</small>
+                  </span>
+                  <button type="button" disabled={reconnectStates[source.id] === 'testing'} onClick={() => void retrySourceConnection(source)}>
+                    {reconnectStates[source.id] === 'testing' ? '正在重连' : '重新连接'}
+                  </button>
+                </div>
+              ) : null}
               <div className="remote-sync-status">
-                <span>阶段：<strong>{phaseLabels[syncStatus.phase] ?? syncStatus.phase}</strong></span>
+                <span>阶段：<strong>{phaseLabel(syncStatus.phase)}</strong></span>
                 <span>发现：<strong>{syncStatus.discoveredCount}</strong></span>
                 <span>成功写入：<strong>{syncStatus.writtenCount}</strong></span>
                 <span>跳过：<strong>{syncStatus.skippedCount}</strong></span>
@@ -3330,7 +4034,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
                   <span>{recommendation}</span>
                   {recommendedKind ? (
                     <button type="button" disabled={busy === `issues:${recommendedKind}:${source.id}`} onClick={() => void showSourceIssues(source, recommendedKind)}>
-                      查看{issueKindLabels[recommendedKind]}问题
+                      {translateStatic('settings.remote.ux.issue.view', { kind: issueKindLabel(recommendedKind) })}
                     </button>
                   ) : null}
                 </div>
@@ -3380,7 +4084,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
               <div className="remote-job-grid">
                 {jobKinds.map((kind) => (
                   <span key={kind}>
-                    <em>{jobLabels[kind]}</em>
+                    <em>{jobLabel(kind)}</em>
                     <strong>{jobStatus.completed[kind]} 完成 / {jobStatus.pending[kind]} 待处理 / {jobStatus.running[kind]} 运行 / {jobStatus.failed[kind]} 失败</strong>
                   </span>
                 ))}
@@ -3390,7 +4094,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
                 <div className="remote-issue-list" aria-label={`${source.displayName} 问题预览`}>
                   {issuePreview.map((item) => (
                     <span key={`${item.kind}:${item.id}`}>
-                      <em>{issueKindLabels[item.kind]} · {item.status}</em>
+                      <em>{issueKindLabel(item.kind)} · {item.status}</em>
                       <strong>{item.title || item.remotePath}</strong>
                       <small>{item.artist || '未知艺人'} · {item.remotePath}</small>
                     </span>
@@ -3402,8 +4106,8 @@ export const RemoteSourcesPanel = (): JSX.Element => {
                   <button type="button" disabled={busy === `test:${source.id}`} onClick={() => void runSourceAction(source, 'test')}>
                     <Wifi size={15} />测试
                   </button>
-                  <button type="button" disabled={busy === `sync:${source.id}`} data-state={running ? 'active' : undefined} aria-pressed={running} onClick={() => void runSourceAction(source, 'sync')}>
-                    <RefreshCw size={15} />同步
+                  <button type="button" disabled={busy === `sync:${source.id}` || syncPreviewBusySourceId === source.id || remotePanelPlaybackActive} data-state={running ? 'active' : undefined} aria-pressed={running} onClick={() => void runSourceAction(source, 'sync')}>
+                    <RefreshCw size={15} />{syncPreviewBusySourceId === source.id ? '正在预览' : remotePanelPlaybackActive ? '播放中' : '预览同步'}
                   </button>
                   <button type="button" disabled={busy === `browse:${source.id}`} onClick={() => void runSourceAction(source, 'browse')}>
                     <FolderOpen size={15} />浏览文件夹
@@ -3441,35 +4145,34 @@ export const RemoteSourcesPanel = (): JSX.Element => {
               </div>
             </article>
           );
-        })}
-            {activeTab.supported && visibleSources.length === 0 ? (
-              <section className="remote-source-empty" aria-label={`${t(activeTab.labelKey)} ${t('settings.remote.empty.aria')}`}>
-                <HardDrive size={22} />
-                <div>
-                  <strong>{t('settings.remote.empty.title').replace('{provider}', t(activeTab.labelKey))}</strong>
-                  <span>{t(activeProviderGuide.emptyTextKey)}</span>
-                  <div className="remote-source-empty-actions">
-                    <button type="button" onClick={() => startAddingRemoteProvider(activeProvider)}>
-                      <Plus size={15} />{t('settings.remote.action.startConnection')}
-                    </button>
-                    {activeProvider !== 'subsonic' ? (
-                      <button type="button" onClick={() => startAddingRemoteProvider('subsonic')}>
-                        <Server size={15} />{t('settings.remote.action.chooseRecommended')}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </section>
-            ) : null}
-          </section>
-        </div>
+                  })}
+                  {activeTab.supported && visibleSources.length === 0 ? (
+                    <section className="remote-source-empty" aria-label={`${t(activeTab.labelKey)} ${t('settings.remote.empty.aria')}`}>
+                      <HardDrive size={22} />
+                      <div>
+                        <strong>{t('settings.remote.empty.title').replace('{provider}', t(activeTab.labelKey))}</strong>
+                        <span>{t(activeProviderGuide.emptyTextKey)}</span>
+                        <div className="remote-source-empty-actions">
+                          <button type="button" onClick={() => startAddingRemoteProvider(activeProvider)}>
+                            <Plus size={15} />{t('settings.remote.action.startConnection')}
+                          </button>
+                          {activeProvider !== 'subsonic' ? (
+                            <button type="button" onClick={() => startAddingRemoteProvider('subsonic')}>
+                              <Server size={15} />{t('settings.remote.action.chooseRecommended')}
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
+                </section>
+              </div>
+            </section>
+
+            {renderAdvancedPanel()}
+          </div>
+        ) : null}
       </section>
-
-      {renderBrowserWorkbench()}
-
-      {renderAdvancedPanel()}
-
-      {message ? <p className="settings-inline-note">{message}</p> : null}
     </div>
   );
 };

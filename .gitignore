@@ -1,11 +1,69 @@
+# Dependencies and tool caches
 node_modules/
 .cache/
+.npm/
+.vite/
+.vitest/
+.turbo/
+.parcel-cache/
+.eslintcache
+*.tsbuildinfo
+
+# JavaScript/Electron build and test outputs
 out/
 dist/
 result
+coverage/
+.nyc_output/
 .electron-cache/
+/test-results/
+/playwright-report/
+/blob-report/
+/junit.xml
+
+# Logs, process state, crash dumps, and OS/editor noise
 *.log
+*.pid
+*.pid.lock
+*.dmp
+*.stackdump
 .DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.vs/
+*.swp
+*~
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+/run-logs/
+
+# Root scratch workspace. Keep intentionally tracked one-file benchmark scripts.
+/tmp/**
+!/tmp/*.mjs
+!/tmp/*.ts
+!/tmp/*.md
+
+# Generated visual QA and benchmark artifacts
+/.tmp/
+/.codex-qa/
+/artifacts/**
+!/artifacts/design-qa/
+!/artifacts/design-qa/echo-link-mobile-remote-comparison.jpg
+!/artifacts/design-qa/echo-link-mobile-remote-implementation.png
+!/artifacts/echo-link-handoff/
+!/artifacts/echo-link-handoff/echo-everything-connected-zh-en-ja.png
+!/artifacts/echo-link-handoff/mobile-remote-approved-reference.png
+/output/
+/design-qa*.md
 
 # Local Codex workspace state
 /.codex/
@@ -21,10 +79,15 @@ electron-app/build/
 native/**/build/
 native/**/cmake-build-*/
 /build/native-host/
+/asio-test-native/build/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 compile_commands.json
+build.ninja
+rules.ninja
+.ninja_deps
+.ninja_log
 
 # Local binary tools downloaded outside source control
 electron-app/tools/ffmpeg.exe
@@ -33,6 +96,8 @@ electron-app/tools/*.exe
 electron-app/tools-linux/ffmpeg
 electron-app/tools-linux/ffprobe
 electron-app/tools-linux/yt-dlp
+electron-app/tools-macos/ffmpeg
+electron-app/tools-macos/lib/
 
 # Electron Builder artifacts
 dist-packaged*/
@@ -57,6 +122,7 @@ dist-packaged*/
 /.reasonix/
 /.omo/
 /.playwright-mcp/
+/.ssh/
 
 # Root-level duplicate image drops; canonical app artwork lives in build-resources/icons/.
 /logo.png
@@ -66,14 +132,17 @@ dist-packaged*/
 /software.png
 /softwarelogo.png
 
-# Local config files (not for upstream)
-CLAUDE.md
-FORK.md
-docs/agents/
-docs/security/*.private.md
-prd-sleep-timer.md
+# Maintainer instructions, design notes, and reusable editor configuration are
+# intentionally trackable in this private single-maintainer repository.
 
-# Local signing keys for private packaging only. Do not commit or publish these.
+# Environment files may contain credentials; examples remain trackable.
+.env
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+
+# Local secrets and retired signing material must never enter Git history.
 /.echo-local/keys/
 
 # ECHODev is a private development repo, so source files for Pro/cloud can be
@@ -81,6 +150,10 @@ prd-sleep-timer.md
 # runtime artifacts ignored below.
 
 # Keep generated credentials, runtime databases, deploy bundles, and local machine artifacts out of git.
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
 /echo-pro-cloud*.zip
 /echo-pro-cloud*.tar.gz
 /echo-pro-cloud.env
@@ -94,10 +167,6 @@ prd-sleep-timer.md
 /private/**/runtime/
 /private/**/*deploy*.zip
 /private/**/*deploy*.tar.gz
-
-# Local test media; do not publish copyrighted sample tracks.
-/test/tt/*.mp3
-/.codex-qa/
 *.echo-pro-secret
 *.echo-pro-token
 *.echo-pro-session

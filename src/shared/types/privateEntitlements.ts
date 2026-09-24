@@ -27,11 +27,19 @@ export type EchoProKeyRedeemResult = {
 
 export type EchoProPluginActivationMode = 'afdian' | 'key';
 
+export type EchoProLocalEntitlementStatus = {
+  unlocked: boolean;
+  dspUnlocked: boolean;
+  source: 'account-cache' | 'native-license' | 'legacy-plugin' | 'included' | 'none';
+  checkedAt: string | null;
+};
+
 export type EchoProPluginActivationRequest = {
   mode: EchoProPluginActivationMode;
   qq: string;
   orderId?: string;
   key?: string;
+  replaceMachineBinding?: boolean;
 };
 
 export type EchoProPluginActivationResult = {
@@ -45,6 +53,16 @@ export type EchoProPluginActivationResult = {
   activatedAt: string;
   importedFileCount: number;
   checksum: string;
+};
+
+export type EchoProPluginDeviceReleaseResult = {
+  ok: boolean;
+  pluginId: string;
+  releasedAt: string;
+  alreadyReleased: boolean;
+  removedLocalPlugin: boolean;
+  releasedCount?: number;
+  activeCount?: number;
 };
 
 export type EchoProReleaseDevicesResult = {

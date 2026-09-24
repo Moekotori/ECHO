@@ -79,6 +79,7 @@ type TimedSegment = {
 
 const normalizeWordTimings = (segments: TimedSegment[]): LyricWordTiming[] | undefined => {
   const words: LyricWordTiming[] = [];
+  let pendingText = '';
 
   for (const segment of segments) {
     const text = normalizeTimedSegmentText(segment.text);
@@ -87,27 +88,44 @@ const normalizeWordTimings = (segments: TimedSegment[]): LyricWordTiming[] | und
     }
 
     if (!Number.isFinite(segment.startMs) || segment.startMs < 0) {
-      return undefined;
+      if (words.length > 0) {
+        words[words.length - 1].text += text;
+      } else {
+        pendingText += text;
+      }
+      continue;
     }
 
-    if (segment.endMs !== null && (!Number.isFinite(segment.endMs) || segment.endMs <= segment.startMs)) {
-      return undefined;
-    }
+    const startMs = Math.round(segment.startMs);
+    const endMs =
+      segment.endMs !== null && Number.isFinite(segment.endMs) && segment.endMs > segment.startMs
+        ? Math.round(segment.endMs)
+        : null;
+    const normalizedText = `${pendingText}${text}`;
+    pendingText = '';
 
     const previous = words[words.length - 1];
-    if (previous && segment.startMs <= previous.startMs) {
-      return undefined;
+    if (previous && startMs <= previous.startMs) {
+      previous.text += normalizedText;
+      if (endMs !== null) {
+        previous.endMs = Math.max(previous.endMs ?? 0, endMs);
+      }
+      continue;
     }
 
     words.push({
-      text,
-      startMs: Math.round(segment.startMs),
-      endMs: segment.endMs === null ? null : Math.round(segment.endMs),
+      text: normalizedText,
+      startMs,
+      endMs,
     });
 
     if (words.length > maxLyricWordTimingsPerLine) {
       return undefined;
     }
+  }
+
+  if (pendingText && words.length > 0) {
+    words[words.length - 1].text += pendingText;
   }
 
   return words.length >= 2 ? words : undefined;
@@ -178,9 +196,22 @@ const parseNeteaseYrcLine = (line: string): LyricLine | null => {
   }
 
   const yrcTimingToleranceMs = 50;
-  const usesRelativeWordTimes =
+  const fitsRelativeWordTimes =
     lineDurationMs > 0 &&
-    rawSegments.every((segment) => segment.rawStartMs + segment.durationMs <= lineDurationMs + yrcTimingToleranceMs);
+    rawSegments.every(
+      (segment) =>
+        segment.rawStartMs >= 0 &&
+        segment.rawStartMs + segment.durationMs <= lineDurationMs + yrcTimingToleranceMs,
+    );
+  const lineEndMs = timeMs + lineDurationMs;
+  const fitsAbsoluteWordTimes =
+    lineDurationMs > 0 &&
+    rawSegments.every(
+      (segment) =>
+        segment.rawStartMs >= Math.max(0, timeMs - yrcTimingToleranceMs) &&
+        segment.rawStartMs + segment.durationMs <= lineEndMs + yrcTimingToleranceMs,
+    );
+  const usesRelativeWordTimes = fitsRelativeWordTimes && !fitsAbsoluteWordTimes;
   const segments: TimedSegment[] = rawSegments.map((segment) => {
     const startMs = usesRelativeWordTimes
       ? timeMs + segment.rawStartMs
@@ -475,7 +506,7 @@ const looksLikeTranslationText = (primaryText: string, value: string): boolean =
 };
 
 const splitInlineTranslation = (value: string): Pick<LyricLine, 'text' | 'translation'> => {
-  const delimiterPattern = /\s*[\/／]\s*/g;
+  const delimiterPattern = /\s*[/／]\s*/g;
   for (const match of value.matchAll(delimiterPattern)) {
     const delimiterIndex = match.index ?? -1;
     if (delimiterIndex <= 0) {

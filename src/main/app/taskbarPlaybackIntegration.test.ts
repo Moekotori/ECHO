@@ -87,6 +87,14 @@ const createWindow = () => ({
   setThumbnailClip: vi.fn(),
   setThumbnailToolTip: vi.fn(),
   setTitle: vi.fn(),
+  visible: true,
+  minimized: false,
+  isVisible() {
+    return this.visible;
+  },
+  isMinimized() {
+    return this.minimized;
+  },
   isDestroyed() {
     return this.destroyed;
   },
@@ -128,6 +136,70 @@ describe('TaskbarPlaybackIntegration', () => {
     expect(window.setThumbnailToolTip).toHaveBeenCalledWith('Song A - Artist A | ECHO Next');
     expect(window.setThumbarButtons).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ tooltip: 'Pause' })]));
     expect(integration.getStatus()).toMatchObject({ thumbnailClip: 'player-bar' });
+    integration.dispose();
+  });
+
+  it('uses the current artwork for the Windows thumbnail when the native helper is available', async () => {
+    const { TaskbarPlaybackIntegration } = await import('./taskbarPlaybackIntegration');
+    const coverController = {
+      isAvailable: vi.fn(() => true),
+      setCover: vi.fn(async () => true),
+      setButtons: vi.fn(() => true),
+      clear: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const integration = new TaskbarPlaybackIntegration({
+      window,
+      audioSession: createAudioSession(),
+      platform: 'win32',
+      getSettings: () => ({ taskbarPlaybackControlsEnabled: true, taskbarMiniPlayerEnabled: false }),
+      getLibrary: () => ({ getTrack: () => ({ title: 'Song A', artist: 'Artist A' }) }),
+      createIcon: () => ({ isEmpty: () => false }) as never,
+      coverController,
+    });
+
+    integration.initialize();
+    integration.setThumbnailArtworkUrl('echo-cover://original/cover-1');
+    await Promise.resolve();
+
+    expect(coverController.setCover).toHaveBeenCalledWith('echo-cover://original/cover-1');
+    expect(coverController.setButtons).toHaveBeenCalledWith({
+      playing: true,
+      canLike: false,
+      liked: false,
+      visible: true,
+    });
+    expect(window.setThumbnailClip).toHaveBeenLastCalledWith({ x: 0, y: 0, width: 1280, height: 720 });
+    expect(integration.getStatus().thumbnailClip).toBeNull();
+    integration.dispose();
+  });
+
+  it('falls back to the player-bar clip when applying artwork fails', async () => {
+    const { TaskbarPlaybackIntegration } = await import('./taskbarPlaybackIntegration');
+    const coverController = {
+      isAvailable: vi.fn(() => true),
+      setCover: vi.fn(async () => false),
+      setButtons: vi.fn(() => true),
+      clear: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const integration = new TaskbarPlaybackIntegration({
+      window,
+      audioSession: createAudioSession(),
+      platform: 'win32',
+      getSettings: () => ({ taskbarPlaybackControlsEnabled: true, taskbarMiniPlayerEnabled: false }),
+      getLibrary: () => ({ getTrack: () => ({ title: 'Song A', artist: 'Artist A' }) }),
+      createIcon: () => ({ isEmpty: () => false }) as never,
+      coverController,
+    });
+
+    integration.initialize();
+    integration.setThumbnailArtworkUrl('https://example.test/broken-cover.jpg');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(window.setThumbnailClip).toHaveBeenLastCalledWith({ x: 0, y: 624, width: 1280, height: 96 });
+    expect(integration.getStatus().thumbnailClip).toBe('player-bar');
     integration.dispose();
   });
 

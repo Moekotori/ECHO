@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { IpcChannels } from '../../shared/constants/ipcChannels';
 
 const mocks = vi.hoisted(() => ({
   settings: {
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     bounds: { x: number; y: number; width: number; height: number };
     webContents: {
       on: ReturnType<typeof vi.fn>;
+      once: ReturnType<typeof vi.fn>;
       send: ReturnType<typeof vi.fn>;
     };
     destroy: ReturnType<typeof vi.fn>;
@@ -46,6 +48,7 @@ const mocks = vi.hoisted(() => ({
       },
       webContents: {
         on: vi.fn(),
+        once: vi.fn(),
         send: vi.fn(),
       },
       destroy: vi.fn(() => {
@@ -308,5 +311,32 @@ describe('desktop lyrics menu reveal', () => {
 
     expect(mocks.setAppSettings).toHaveBeenCalledWith({ desktopLyricsLocked: false });
     expect(mocks.createdWindows[0].setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+  });
+
+  it('waits for the renderer and reuses one request id across reveal retries', async () => {
+    vi.useFakeTimers();
+    try {
+      const { revealDesktopLyricsMenu } = await import('./desktopLyricsWindow');
+
+      revealDesktopLyricsMenu();
+      const window = mocks.createdWindows[0];
+      expect(window.webContents.send).not.toHaveBeenCalledWith(IpcChannels.DesktopLyricsRevealMenu, expect.anything());
+
+      const didFinishLoad = window.webContents.once.mock.calls.find(
+        ([event]) => event === 'did-finish-load',
+      )?.[1] as (() => void) | undefined;
+      expect(didFinishLoad).toBeTypeOf('function');
+
+      didFinishLoad?.();
+      vi.runAllTimers();
+
+      const revealCalls = window.webContents.send.mock.calls.filter(
+        ([channel]) => channel === IpcChannels.DesktopLyricsRevealMenu,
+      );
+      expect(revealCalls).toHaveLength(3);
+      expect(new Set(revealCalls.map(([, requestId]) => requestId)).size).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

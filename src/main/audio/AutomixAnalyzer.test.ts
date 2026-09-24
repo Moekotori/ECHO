@@ -1,7 +1,11 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { AutomixAnalyzer, analyzePcmTransitionSegment } from './AutomixAnalyzer';
+import {
+  AutomixAnalyzer,
+  analyzePcmMusicalFeatures,
+  analyzePcmTransitionSegment,
+} from './AutomixAnalyzer';
 
 const samplesForSeconds = (seconds: number, sampleRate: number, value: number): Float32Array =>
   new Float32Array(Math.max(0, Math.round(seconds * sampleRate))).fill(value);
@@ -34,6 +38,24 @@ describe('AutomixAnalyzer PCM helpers', () => {
     expect(analysis.energyCurve).toHaveLength(8);
     expect(Math.max(...analysis.energyCurve)).toBeCloseTo(1, 1);
     expect(analysis.energyCurve[0]).toBe(0);
+  });
+
+  it('derives a bounded tempo grid candidate from a periodic onset train', () => {
+    const sampleRate = 22_050;
+    const samples = new Float32Array(sampleRate * 12);
+    const beatFrames = Math.round(sampleRate * 0.5);
+    for (let beat = 0; beat * beatFrames < samples.length; beat += 1) {
+      const start = beat * beatFrames;
+      for (let index = 0; index < 500 && start + index < samples.length; index += 1) {
+        samples[start + index] = Math.sin((index / sampleRate) * Math.PI * 2 * 440) * 0.8;
+      }
+    }
+
+    const result = analyzePcmMusicalFeatures(samples, sampleRate);
+
+    expect(result.bpm).toBeCloseTo(120, 0);
+    expect(result.bpmConfidence).toBeGreaterThan(0.5);
+    expect(result.beatOffsetMs).not.toBeNull();
   });
 
   it('exposes completed analysis from the in-memory cache', async () => {

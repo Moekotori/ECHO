@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import type { AudioStatus } from '../../shared/types/audio';
 import type { LibraryTrack } from '../../shared/types/library';
+import { I18nProvider } from '../i18n/I18nProvider';
 import { PlaybackQueueProvider, usePlaybackQueue } from '../stores/PlaybackQueueProvider';
+import { showAudioErrorNoticeEvent } from '../utils/audioErrorNotice';
 import { NowPlayingPage } from './NowPlayingPage';
 
 const makeTrack = (overrides: Partial<LibraryTrack> = {}): LibraryTrack => ({
@@ -102,6 +104,7 @@ const mockEcho = (track: LibraryTrack | null): void => {
     },
     audio: {
       getStatus: vi.fn().mockResolvedValue(makeAudioStatus(track)),
+      onStatus: vi.fn(() => vi.fn()),
       listDevices: vi.fn(),
       setOutput: vi.fn().mockResolvedValue(makeAudioStatus(track)),
     },
@@ -110,6 +113,7 @@ const mockEcho = (track: LibraryTrack | null): void => {
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.localStorage.setItem('echo-next.locale', 'zh-CN');
 });
 
 afterEach(() => {
@@ -119,16 +123,72 @@ afterEach(() => {
 });
 
 describe('NowPlayingPage', () => {
+  it('does not start a page-local 500ms playback status poll', async () => {
+    const track = makeTrack();
+    mockEcho(track);
+    const intervalSpy = vi.spyOn(window, 'setInterval');
+
+    render(
+      <I18nProvider>
+        <PlaybackQueueProvider>
+          <QueueSeed track={track}>
+            <NowPlayingPage />
+          </QueueSeed>
+        </PlaybackQueueProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Test Song' })).toBeTruthy();
+    expect(intervalSpy).not.toHaveBeenCalledWith(expect.any(Function), 500);
+  });
+
+  it('routes audio host failures to the upper-left notice without rendering them in the page', async () => {
+    const track = makeTrack();
+    const rawError = 'echo-audio-host runtime_error; nativeMessage="WASAPI exclusive format unsupported"';
+    const notices: Event[] = [];
+    const handleNotice = (event: Event): void => {
+      notices.push(event);
+    };
+    mockEcho(track);
+    vi.mocked(window.echo.audio.getStatus).mockResolvedValue({
+      ...makeAudioStatus(track),
+      state: 'error',
+      error: rawError,
+    });
+    window.addEventListener(showAudioErrorNoticeEvent, handleNotice);
+
+    try {
+      const { container } = render(
+        <I18nProvider>
+          <PlaybackQueueProvider>
+            <QueueSeed track={track}>
+              <NowPlayingPage />
+            </QueueSeed>
+          </PlaybackQueueProvider>
+        </I18nProvider>,
+      );
+
+      await waitFor(() => expect(notices.length).toBeGreaterThan(0));
+      expect((notices[0] as CustomEvent<{ message: string }>).detail.message).toBe(rawError);
+      expect(container.querySelector('.now-playing-error')).toBeNull();
+      expect(screen.queryByText(rawError)).toBeNull();
+    } finally {
+      window.removeEventListener(showAudioErrorNoticeEvent, handleNotice);
+    }
+  });
+
   it('shows a compact current playback overview instead of the lyrics view', async () => {
     const track = makeTrack();
     mockEcho(track);
 
     const { container } = render(
-      <PlaybackQueueProvider>
-        <QueueSeed track={track}>
-          <NowPlayingPage />
-        </QueueSeed>
-      </PlaybackQueueProvider>,
+      <I18nProvider>
+        <PlaybackQueueProvider>
+          <QueueSeed track={track}>
+            <NowPlayingPage />
+          </QueueSeed>
+        </PlaybackQueueProvider>
+      </I18nProvider>,
     );
 
     expect(await screen.findByRole('heading', { name: '正在播放' })).toBeTruthy();
@@ -142,11 +202,13 @@ describe('NowPlayingPage', () => {
     mockEcho(null);
 
     render(
-      <PlaybackQueueProvider>
-        <NowPlayingPage />
-      </PlaybackQueueProvider>,
+      <I18nProvider>
+        <PlaybackQueueProvider>
+          <NowPlayingPage />
+        </PlaybackQueueProvider>
+      </I18nProvider>,
     );
 
-    expect(await screen.findByText('Nothing is playing')).toBeTruthy();
+    expect(await screen.findByText('暂无播放')).toBeTruthy();
   });
 });

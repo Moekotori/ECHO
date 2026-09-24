@@ -4,8 +4,9 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AlbumService } from './AlbumService';
 import type { LibraryStore } from './LibraryStore';
-import { hasCompleteCoverCacheForScan, ScanJobQueue } from './ScanJobQueue';
+import { getEffectiveScanPipelineConcurrency, hasCompleteCoverCacheForScan, ScanJobQueue } from './ScanJobQueue';
 import type { FileIdentityObservation } from './FileIdentityService';
+import type { SearchIndexTrackFields } from './SearchIndexTokens';
 import type {
   CoverExtractOptions,
   CoverResult,
@@ -19,9 +20,9 @@ import type {
   StoredTrackCoverState,
   TrackWrite,
 } from './libraryTypes';
-import type { CoverExtractor } from './workers/CoverExtractor';
+import { getEmbeddedCoverSourceHash, type CoverExtractor } from './workers/CoverExtractor';
 import type { FileScanner } from './workers/FileScanner';
-import type { MetadataReader } from './workers/MetadataReader';
+import type { MetadataReader, MetadataReadOptions } from './workers/MetadataReader';
 
 const tempRoots: string[] = [];
 const previousSyncScanHealthCheckEnv = process.env.ECHO_SYNC_SCAN_HEALTH_CHECK;
@@ -129,6 +130,35 @@ const metadataResult = (embeddedCover?: Uint8Array): MetadataResult => ({
   warnings: [],
   errors: [],
   status: 'ok',
+});
+
+describe('scan pipeline concurrency sizing', () => {
+  it('avoids counterproductive ultra fan-out for small scans without reducing large scans', () => {
+    expect(getEffectiveScanPipelineConcurrency(291, {
+      metadataConcurrency: 12,
+      coverConcurrency: 6,
+    })).toEqual({
+      metadataConcurrency: 6,
+      coverConcurrency: 4,
+    });
+    expect(getEffectiveScanPipelineConcurrency(10_000, {
+      metadataConcurrency: 12,
+      coverConcurrency: 6,
+    })).toEqual({
+      metadataConcurrency: 12,
+      coverConcurrency: 6,
+    });
+  });
+
+  it('never raises lower-power configured concurrency', () => {
+    expect(getEffectiveScanPipelineConcurrency(291, {
+      metadataConcurrency: 2,
+      coverConcurrency: 1,
+    })).toEqual({
+      metadataConcurrency: 2,
+      coverConcurrency: 1,
+    });
+  });
 });
 
 class FakeStore {
@@ -242,6 +272,15 @@ class FakeStore {
     return '';
   }
 
+  prepareTrackSearchFields(track: TrackWrite): SearchIndexTrackFields {
+    return {
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      albumArtist: track.albumArtist,
+    };
+  }
+
   upsertTrack(track: TrackWrite): 'added' | 'updated' {
     this.upsertedTracks.push(track);
     return this.coverStatesByPath.has(track.path) ? 'updated' : 'added';
@@ -336,11 +375,13 @@ class RecoverableErrorScanner implements FileScanner {
 
 class FakeMetadataReader implements MetadataReader {
   readonly paths: string[] = [];
+  readonly options: MetadataReadOptions[] = [];
 
   constructor(private readonly result: MetadataResult = metadataResult()) {}
 
-  async read(filePath: string): Promise<MetadataResult> {
+  async read(filePath: string, options: MetadataReadOptions = {}): Promise<MetadataResult> {
     this.paths.push(filePath);
+    this.options.push(options);
     return this.result;
   }
 }
@@ -349,9 +390,12 @@ class ConcurrentMetadataReader implements MetadataReader {
   activeReads = 0;
   maxActiveReads = 0;
 
+  constructor(private readonly onRead?: () => void) {}
+
   async read(): Promise<MetadataResult> {
     this.activeReads += 1;
     this.maxActiveReads = Math.max(this.maxActiveReads, this.activeReads);
+    this.onRead?.();
     await new Promise((resolve) => setImmediate(resolve));
     this.activeReads -= 1;
     return metadataResult();
@@ -421,6 +465,35 @@ class CapturingCoverExtractor implements CoverExtractor {
   }
 }
 
+class ConcurrentCoverExtractor implements CoverExtractor {
+  activeExtractions = 0;
+  maxActiveExtractions = 0;
+
+  constructor(private readonly delayMs = 0) {}
+
+  async extract(_filePath: string, options: CoverExtractOptions): Promise<CoverResult> {
+    this.activeExtractions += 1;
+    this.maxActiveExtractions = Math.max(this.maxActiveExtractions, this.activeExtractions);
+    if (this.delayMs > 0) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, this.delayMs));
+    } else {
+      await new Promise((resolveImmediate) => setImmediate(resolveImmediate));
+    }
+    this.activeExtractions -= 1;
+    return {
+      source: 'default',
+      thumbPath: join(options.cacheRoot, 'thumb.webp'),
+      albumPath: join(options.cacheRoot, 'album.webp'),
+      largePath: join(options.cacheRoot, 'large.webp'),
+      originalRef: join(options.cacheRoot, 'original.svg'),
+      sourceHash: 'default-cover',
+      mimeType: 'image/svg+xml',
+      warnings: [],
+      errors: [],
+    };
+  }
+}
+
 const makeFiles = (root: string, count: number): ScannedFile[] =>
   Array.from({ length: count }, (_, index) => ({
     path: join(root, 'music', `track-${index}.flac`),
@@ -455,6 +528,7 @@ const runQueue = async (
   cacheRoot: string,
   folder: LibraryFolder,
   options: LibraryScanOptions = {},
+  queueOptions: Partial<ConstructorParameters<typeof ScanJobQueue>[5]> = {},
 ): Promise<LibraryScanStatus> => {
   const queue = new ScanJobQueue(
     store as unknown as LibraryStore,
@@ -462,7 +536,7 @@ const runQueue = async (
     metadataReader,
     coverExtractor,
     {} as AlbumService,
-    { coverCacheDir: cacheRoot },
+    { coverCacheDir: cacheRoot, ...queueOptions },
   );
   const job = queue.scanFolder(folder, options);
   try {
@@ -648,6 +722,57 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(store.findTrackCoverStateCalls).toBe(0);
   });
 
+  it('rereads an unchanged file when stored embedded text has repairable mojibake', async () => {
+    const root = makeTempRoot();
+    const cacheRoot = join(root, 'custom-cache');
+    mkdirSync(cacheRoot, { recursive: true });
+    const cachedCover = join(cacheRoot, 'cached.webp');
+    writeFileSync(cachedCover, 'cached');
+    const [file] = makeFiles(root, 1);
+    const staleMetadata = metadataResult();
+    staleMetadata.fields.title = '06 \u00b9\u00c2\u00b6\u00c0\u00a4\u00ca\u00d1\u00b2\u00c0\u00f1';
+    staleMetadata.fields.genre = '\u00a5\u00a2\u00a5\u00cb\u00a5\u00e1';
+    const repairedMetadata = metadataResult();
+    repairedMetadata.fields.title = '06 \u5b64\u72ec\u306a\u5de1\u793c';
+    repairedMetadata.fields.genre = '\u30a2\u30cb\u30e1';
+    const metadataReader = new FakeMetadataReader(repairedMetadata);
+    const store = new FakeStore(
+      coverStateMap([file], (item) =>
+        coverState(item, {
+          thumbPath: cachedCover,
+          albumPath: cachedCover,
+          largePath: cachedCover,
+          originalRef: cachedCover,
+          scanMetadata: {
+            fields: staleMetadata.fields,
+            fieldSources: staleMetadata.fieldSources,
+            metadataStatus: staleMetadata.status,
+            embeddedMetadataStatus: staleMetadata.embeddedMetadataStatus,
+            embeddedCoverStatus: staleMetadata.embeddedCoverStatus,
+          },
+        }),
+      ),
+    );
+
+    const status = await runQueue(
+      store,
+      new FakeScanner([file]),
+      metadataReader,
+      new CapturingCoverExtractor(),
+      cacheRoot,
+      baseFolder(root),
+    );
+
+    expect(status).toMatchObject({ skippedFiles: 0, updatedTracks: 1 });
+    expect(metadataReader.paths).toEqual([file.path]);
+    expect(store.upsertedTracks).toEqual([
+      expect.objectContaining({
+        title: '06 \u5b64\u72ec\u306a\u5de1\u793c',
+        genre: '\u30a2\u30cb\u30e1',
+      }),
+    ]);
+  });
+
   it('applies scanner progress during discovery before buffered files are yielded', async () => {
     const root = makeTempRoot();
     const cacheRoot = join(root, 'custom-cache');
@@ -762,7 +887,7 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(store.findTrackCoverStateCalls).toBe(0);
   });
 
-  it('changes-only scans read added files and mark removed paths without rereading existing paths', async () => {
+  it('changes-only scans read added and modified files and mark removed paths', async () => {
     const root = makeTempRoot();
     const existingFiles = makeFiles(root, 120);
     const [existingFile, deletedFile] = existingFiles;
@@ -787,15 +912,86 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
 
     expect(status.status).toBe('completed');
     expect(status.addedTracks).toBe(1);
-    expect(status.updatedTracks).toBe(0);
+    expect(status.updatedTracks).toBe(1);
     expect(status.removedTracks).toBe(1);
-    expect(status.totalFiles).toBe(1);
-    expect(metadataReader.paths).toEqual([newFile.path]);
-    expect(store.upsertedTracks.map((track) => track.path)).toEqual([newFile.path]);
+    expect(status.totalFiles).toBe(2);
+    expect(metadataReader.paths).toEqual([changedExistingFile.path, newFile.path]);
+    expect(store.upsertedTracks.map((track) => track.path)).toEqual([changedExistingFile.path, newFile.path]);
     expect(store.missingPaths).toEqual([deletedFile.path]);
     expect(store.getTrackCacheStatesByFolderCalls).toBe(1);
     expect(store.getTrackCacheStatesByPathsCalls).toBe(0);
-    expect(Math.max(...store.updates.map((update) => update.totalFiles ?? 0))).toBe(1);
+    expect(Math.max(...store.updates.map((update) => update.totalFiles ?? 0))).toBe(2);
+  });
+
+  it('can reconcile added and modified files without marking missing paths', async () => {
+    const root = makeTempRoot();
+    const [existingFile, deletedFile] = makeFiles(root, 2);
+    const newFile = {
+      path: join(root, 'music', 'new-track.flac'),
+      sizeBytes: 10,
+      mtimeMs: 1,
+    };
+    const changedExistingFile = { ...existingFile, sizeBytes: existingFile.sizeBytes + 100 };
+    const store = new FakeStore(coverStateMap([existingFile, deletedFile], (item) => coverState(item)));
+
+    const status = await runQueue(
+      store,
+      new FakeScanner([changedExistingFile, newFile]),
+      new FakeMetadataReader(),
+      new CapturingCoverExtractor(),
+      join(root, 'custom-cache'),
+      baseFolder(root),
+      { changesOnly: true, markMissing: false, reduceScanPressure: true },
+    );
+
+    expect(status).toMatchObject({
+      status: 'completed',
+      addedTracks: 1,
+      updatedTracks: 1,
+      removedTracks: 0,
+    });
+    expect(store.missingPaths).toEqual([]);
+    expect(store.markMissingCalls).toBe(0);
+  });
+
+  it('aggregates unavailable NCM files without counting them as processed audio', async () => {
+    const root = makeTempRoot();
+    const cacheRoot = join(root, 'custom-cache');
+    const files: ScannedFile[] = [
+      { path: join(root, 'music', 'locked-1.ncm'), sizeBytes: 10, mtimeMs: 1 },
+      { path: join(root, 'music', 'locked-2.ncm'), sizeBytes: 10, mtimeMs: 1 },
+      { path: join(root, 'music', 'song.flac'), sizeBytes: 10, mtimeMs: 1 },
+    ];
+    const convertIfNeeded = vi.fn(async (filePath: string) => resolve(filePath));
+    const status = await runQueue(
+      new FakeStore(),
+      new FakeScanner(files),
+      new FakeMetadataReader(),
+      new CapturingCoverExtractor(),
+      cacheRoot,
+      baseFolder(root),
+      {},
+      {
+        ncmConverter: {
+          getAvailability: () => ({
+            available: false as const,
+            converterPath: null,
+            error: 'NCM 解密工具不可用: NCMConverter.exe',
+          }),
+          convertIfNeeded,
+        },
+      },
+    );
+
+    expect(status.status).toBe('completed');
+    expect(status.totalFiles).toBe(1);
+    expect(status.processedFiles).toBe(1);
+    expect(status.addedTracks).toBe(1);
+    expect(status.errors).toEqual([
+      expect.stringContaining('ncm: 2 file(s) skipped: NCM 解密工具不可用'),
+    ]);
+    expect(convertIfNeeded).toHaveBeenCalledOnce();
+    expect(convertIfNeeded).toHaveBeenCalledWith(files[2].path);
   });
 
   it('adds newly discovered files', async () => {
@@ -1015,7 +1211,43 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(scanner.lastOptions?.backgroundPriority).toBe(true);
   });
 
-  it('reduces metadata read concurrency while scan pressure should stay low', async () => {
+  it('keeps files under a nested configured folder out of the parent scan', async () => {
+    const root = makeTempRoot();
+    const parent = baseFolder(root);
+    const child: LibraryFolder = {
+      ...parent,
+      id: 'folder-child',
+      path: join(parent.path, 'nested-library'),
+      name: 'nested-library',
+    };
+    const parentFile: ScannedFile = {
+      path: join(parent.path, 'parent.flac'),
+      sizeBytes: 10,
+      mtimeMs: 1,
+    };
+    const childFile: ScannedFile = {
+      path: join(child.path, 'child.flac'),
+      sizeBytes: 10,
+      mtimeMs: 1,
+    };
+    const store = Object.assign(new FakeStore(), {
+      getFolders: () => [parent, child],
+    });
+
+    const status = await runQueue(
+      store,
+      new FakeScanner([parentFile, childFile]),
+      new FakeMetadataReader(),
+      new CapturingCoverExtractor(),
+      join(root, 'custom-cache'),
+      parent,
+    );
+
+    expect(status).toMatchObject({ status: 'completed', totalFiles: 1, processedFiles: 1 });
+    expect(store.upsertedTracks.map((track) => track.path)).toEqual([parentFile.path]);
+  });
+
+  it('reduces metadata concurrency without collapsing playback scans to one worker', async () => {
     const root = makeTempRoot();
     const files = makeFiles(root, 4);
     const metadataReader = new ConcurrentMetadataReader();
@@ -1041,7 +1273,230 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     }
 
     expect(store.getScanJob()).toMatchObject({ status: 'completed', processedFiles: 4 });
-    expect(metadataReader.maxActiveReads).toBe(1);
+    expect(metadataReader.maxActiveReads).toBe(2);
+  });
+
+  it('keeps two metadata workers for explicitly reduced background scans', async () => {
+    const root = makeTempRoot();
+    const files = makeFiles(root, 4);
+    const metadataReader = new ConcurrentMetadataReader();
+    const store = new FakeStore();
+    const queue = new ScanJobQueue(
+      store as unknown as LibraryStore,
+      new FakeScanner(files),
+      metadataReader,
+      new CapturingCoverExtractor(),
+      {} as AlbumService,
+      {
+        coverCacheDir: join(root, 'custom-cache'),
+        metadataConcurrency: 4,
+      },
+    );
+
+    const job = queue.scanFolder(baseFolder(root), { reduceScanPressure: true });
+    try {
+      await queue.waitForIdle(job.id);
+    } finally {
+      queue.dispose();
+    }
+
+    expect(metadataReader.maxActiveReads).toBe(2);
+  });
+
+  it('restores configured metadata concurrency on the next batch after playback pressure clears', async () => {
+    const root = makeTempRoot();
+    const files = makeFiles(root, 4);
+    let reduceScanPressure = true;
+    let readCount = 0;
+    const metadataReader = new ConcurrentMetadataReader(() => {
+      readCount += 1;
+      if (readCount === 1) {
+        reduceScanPressure = false;
+      }
+    });
+    const store = new FakeStore();
+    const queue = new ScanJobQueue(
+      store as unknown as LibraryStore,
+      new FakeScanner(files),
+      metadataReader,
+      new CapturingCoverExtractor(),
+      {} as AlbumService,
+      {
+        coverCacheDir: join(root, 'custom-cache'),
+        metadataConcurrency: 4,
+        shouldReduceScanPressure: () => reduceScanPressure,
+      },
+    );
+
+    const job = queue.scanFolder(baseFolder(root));
+    try {
+      await queue.waitForIdle(job.id);
+    } finally {
+      queue.dispose();
+    }
+
+    expect(store.getScanJob()).toMatchObject({ status: 'completed', processedFiles: 4 });
+    expect(metadataReader.maxActiveReads).toBe(3);
+  });
+
+  it('uses cover concurrency independently from metadata concurrency', async () => {
+    const root = makeTempRoot();
+    const files = makeFiles(root, 4);
+    const coverExtractor = new ConcurrentCoverExtractor(20);
+    const store = new FakeStore();
+    const queue = new ScanJobQueue(
+      store as unknown as LibraryStore,
+      new FakeScanner(files),
+      new ConcurrentMetadataReader(),
+      coverExtractor,
+      {} as AlbumService,
+      {
+        coverCacheDir: join(root, 'custom-cache'),
+        metadataConcurrency: 1,
+        coverConcurrency: 4,
+      },
+    );
+
+    const job = queue.scanFolder(baseFolder(root));
+    try {
+      await queue.waitForIdle(job.id);
+    } finally {
+      queue.dispose();
+    }
+
+    expect(store.getScanJob()).toMatchObject({ status: 'completed', processedFiles: 4 });
+    expect(coverExtractor.maxActiveExtractions).toBe(4);
+  });
+
+  it('starts cover work before all metadata reads finish', async () => {
+    const root = makeTempRoot();
+    const files = makeFiles(root, 4);
+    let metadataCompleted = 0;
+    let coverOverlappedMetadata = false;
+    const metadataReader: MetadataReader = {
+      read: async (filePath) => {
+        const index = Number(/track-(\d+)/u.exec(filePath)?.[1] ?? 0);
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, index === 0 ? 1 : 30));
+        metadataCompleted += 1;
+        return metadataResult();
+      },
+    };
+    const coverExtractor: CoverExtractor = {
+      extract: async (_filePath, options) => {
+        coverOverlappedMetadata ||= metadataCompleted < files.length;
+        return {
+          source: 'default',
+          thumbPath: join(options.cacheRoot, 'thumb.webp'),
+          albumPath: join(options.cacheRoot, 'album.webp'),
+          largePath: join(options.cacheRoot, 'large.webp'),
+          originalRef: join(options.cacheRoot, 'original.svg'),
+          sourceHash: 'default-cover',
+          mimeType: 'image/svg+xml',
+          warnings: [],
+          errors: [],
+        };
+      },
+    };
+
+    const status = await runQueue(
+      new FakeStore(),
+      new FakeScanner(files),
+      metadataReader,
+      coverExtractor,
+      join(root, 'custom-cache'),
+      baseFolder(root),
+      {},
+      {
+        metadataConcurrency: 4,
+        coverConcurrency: 2,
+        searchTermsBuilder: {
+          preload: async () => true,
+          prepare: async () => '',
+        },
+      },
+    );
+
+    expect(status).toMatchObject({ status: 'completed', processedFiles: 4, addedTracks: 4 });
+    expect(coverOverlappedMetadata).toBe(true);
+  });
+
+  it('starts database writes before all cover work finishes', async () => {
+    const root = makeTempRoot();
+    const files = makeFiles(root, 6);
+    let coversCompleted = 0;
+    let writeOverlappedCovers = false;
+    class PipelineTrackingStore extends FakeStore {
+      override upsertTrack(track: TrackWrite): 'added' | 'updated' {
+        writeOverlappedCovers ||= coversCompleted < files.length;
+        return super.upsertTrack(track);
+      }
+    }
+    const coverExtractor: CoverExtractor = {
+      extract: async (_filePath, options) => {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, coversCompleted === 0 ? 1 : 25));
+        coversCompleted += 1;
+        return {
+          source: 'default',
+          thumbPath: join(options.cacheRoot, 'thumb.webp'),
+          albumPath: join(options.cacheRoot, 'album.webp'),
+          largePath: join(options.cacheRoot, 'large.webp'),
+          originalRef: join(options.cacheRoot, 'original.svg'),
+          sourceHash: 'default-cover',
+          mimeType: 'image/svg+xml',
+          warnings: [],
+          errors: [],
+        };
+      },
+    };
+
+    const status = await runQueue(
+      new PipelineTrackingStore(),
+      new FakeScanner(files),
+      new FakeMetadataReader(),
+      coverExtractor,
+      join(root, 'custom-cache'),
+      baseFolder(root),
+      {},
+      {
+        metadataConcurrency: 4,
+        coverConcurrency: 2,
+        searchTermsBuilder: {
+          preload: async () => true,
+          prepare: async () => '',
+        },
+      },
+    );
+
+    expect(status).toMatchObject({ status: 'completed', processedFiles: 6, addedTracks: 6 });
+    expect(writeOverlappedCovers).toBe(true);
+  });
+
+  it('fails and drains the bounded pipeline when search preparation rejects', async () => {
+    const root = makeTempRoot();
+    const store = new FakeStore();
+    const status = await runQueue(
+      store,
+      new FakeScanner(makeFiles(root, 20)),
+      new FakeMetadataReader(),
+      new ConcurrentCoverExtractor(2),
+      join(root, 'custom-cache'),
+      baseFolder(root),
+      {},
+      {
+        metadataConcurrency: 4,
+        coverConcurrency: 3,
+        searchTermsBuilder: {
+          preload: async () => true,
+          prepare: async () => {
+            throw new Error('search worker failed');
+          },
+        },
+      },
+    );
+
+    expect(status).toMatchObject({ status: 'failed', phase: 'failed' });
+    expect(status.errors).toEqual([expect.stringContaining('search worker failed')]);
+    expect(store.upsertedTracks).toEqual([]);
   });
 
   it('uses tiny database write batches while scan pressure should stay low', async () => {
@@ -1064,8 +1519,45 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     await queue.waitForIdle(job.id);
 
     expect(store.getScanJob()).toMatchObject({ status: 'completed', processedFiles: 9 });
-    expect(store.seededAlbumTrackIds).toHaveLength(3);
-    expect(store.seededAlbumTrackIds.every((trackIds) => trackIds.length <= 4)).toBe(true);
+    expect(store.seededAlbumTrackIds).toHaveLength(9);
+    expect(store.seededAlbumTrackIds.every((trackIds) => trackIds.length === 1)).toBe(true);
+  });
+
+  it('yields the event loop between adaptive database write slices', async () => {
+    const root = makeTempRoot();
+    const files = makeFiles(root, 20);
+    const store = new FakeStore();
+    const originalUpsertTrack = store.upsertTrack.bind(store);
+    let timerFired = false;
+    let timerScheduled = false;
+    let sawTimerDuringWrites = false;
+    store.upsertTrack = (track) => {
+      if (!timerScheduled) {
+        timerScheduled = true;
+        setTimeout(() => {
+          timerFired = true;
+        }, 0);
+      }
+      const blockUntil = performance.now() + 1;
+      while (performance.now() < blockUntil) {
+        // Simulate synchronous SQLite/FTS work within one track write.
+      }
+      sawTimerDuringWrites ||= timerFired;
+      return originalUpsertTrack(track);
+    };
+
+    const status = await runQueue(
+      store,
+      new FakeScanner(files),
+      new FakeMetadataReader(),
+      new CapturingCoverExtractor(),
+      join(root, 'custom-cache'),
+      baseFolder(root),
+    );
+
+    expect(status).toMatchObject({ status: 'completed', addedTracks: 20 });
+    expect(timerFired).toBe(true);
+    expect(sawTimerDuringWrites).toBe(true);
   });
 
   it('creates a recovery snapshot after a successful scan writes library changes', async () => {
@@ -1269,6 +1761,7 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
 
     expect(store.upsertedTracks).toHaveLength(2001);
     expect(store.transactionCalls).toBeGreaterThan(10);
+    expect(store.seededAlbumTrackIds.some((trackIds) => trackIds.length > 1)).toBe(true);
     expect(store.refreshAlbumsCalls).toBe(0);
     expect(store.refreshArtistsCalls).toBe(0);
 
@@ -1314,6 +1807,280 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(store.getTrackCacheStatesByPathsCalls).toBe(1);
     expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
     expect(store.findTrackCoverStateCalls).toBe(0);
+  });
+
+  it('skips database and cover work when an embedded-tag rescan is semantically unchanged', async () => {
+    const root = makeTempRoot();
+    const cacheRoot = join(root, 'custom-cache');
+    const folder = baseFolder(root);
+    mkdirSync(folder.path, { recursive: true });
+    mkdirSync(cacheRoot, { recursive: true });
+    const cachedCover = join(cacheRoot, 'cached.webp');
+    writeFileSync(cachedCover, 'cached');
+    const [file] = makeFiles(root, 1);
+    writeFileSync(file.path, 'audio');
+    const fileStat = statSync(file.path);
+    const scannedFile = {
+      ...file,
+      sizeBytes: fileStat.size,
+      mtimeMs: Math.round(fileStat.mtimeMs),
+    };
+    const embeddedCover = new Uint8Array([1, 2, 3, 4]);
+    const metadata = metadataResult(embeddedCover);
+    const metadataReader = new FakeMetadataReader(metadata);
+    const coverExtractor = new CapturingCoverExtractor();
+    const store = new FakeStore(
+      coverStateMap([scannedFile], (track) =>
+        coverState(track, {
+          coverSource: 'embedded',
+          sourceHash: getEmbeddedCoverSourceHash(embeddedCover),
+          thumbPath: cachedCover,
+          albumPath: cachedCover,
+          largePath: cachedCover,
+          originalRef: cachedCover,
+          scanMetadata: {
+            fields: metadata.fields,
+            fieldSources: metadata.fieldSources,
+            metadataStatus: metadata.status,
+            embeddedMetadataStatus: metadata.embeddedMetadataStatus,
+            embeddedCoverStatus: metadata.embeddedCoverStatus,
+          },
+        }),
+      ),
+    );
+
+    const status = await runStoredQueue(
+      store,
+      new ThrowingScanner(),
+      metadataReader,
+      coverExtractor,
+      cacheRoot,
+      folder,
+      { mode: 'embedded-tags-all' },
+    );
+
+    expect(status).toMatchObject({
+      status: 'completed',
+      totalFiles: 1,
+      processedFiles: 1,
+      skippedFiles: 1,
+      updatedTracks: 0,
+      coverCount: 0,
+    });
+    expect(metadataReader.paths).toEqual([resolve(file.path)]);
+    expect(metadataReader.options).toEqual([{ readCover: false }]);
+    expect(coverExtractor.cacheRoots).toEqual([]);
+    expect(store.upsertedTracks).toEqual([]);
+    expect(store.seededAlbumTrackIds).toEqual([]);
+  });
+
+  it('compares embedded rescans after applying storage whitespace normalization', async () => {
+    const root = makeTempRoot();
+    const cacheRoot = join(root, 'custom-cache');
+    const folder = baseFolder(root);
+    mkdirSync(folder.path, { recursive: true });
+    mkdirSync(cacheRoot, { recursive: true });
+    const cachedCover = join(cacheRoot, 'cached.webp');
+    writeFileSync(cachedCover, 'cached');
+    const [file] = makeFiles(root, 1);
+    writeFileSync(file.path, 'audio');
+    const fileStat = statSync(file.path);
+    const scannedFile = {
+      ...file,
+      sizeBytes: fileStat.size,
+      mtimeMs: Math.round(fileStat.mtimeMs),
+    };
+    const embeddedCover = new Uint8Array([1, 2, 3, 4]);
+    const metadata = metadataResult(embeddedCover);
+    metadata.fields = {
+      ...metadata.fields,
+      title: 'Embedded  Title',
+      album: 'Embedded　Album',
+    };
+    const storedFieldSources = {
+      ...metadata.fieldSources,
+      album: 'unknown' as const,
+    };
+    const store = new FakeStore(
+      coverStateMap([scannedFile], (track) =>
+        coverState(track, {
+          coverSource: 'embedded',
+          sourceHash: getEmbeddedCoverSourceHash(embeddedCover),
+          thumbPath: cachedCover,
+          albumPath: cachedCover,
+          largePath: cachedCover,
+          originalRef: cachedCover,
+          scanMetadata: {
+            fields: {
+              ...metadata.fields,
+              title: 'Embedded Title',
+              album: 'Embedded Album',
+            },
+            fieldSources: storedFieldSources,
+            metadataStatus: metadata.status,
+            embeddedMetadataStatus: metadata.embeddedMetadataStatus,
+            embeddedCoverStatus: metadata.embeddedCoverStatus,
+          },
+        }),
+      ),
+    );
+
+    const status = await runStoredQueue(
+      store,
+      new ThrowingScanner(),
+      new FakeMetadataReader(metadata),
+      new CapturingCoverExtractor(),
+      cacheRoot,
+      folder,
+      { mode: 'embedded-tags-all' },
+    );
+
+    expect(status).toMatchObject({
+      status: 'completed',
+      skippedFiles: 1,
+      updatedTracks: 0,
+    });
+    expect(store.upsertedTracks).toEqual([]);
+  });
+
+  it('treats cross-reader duration and MP3 codec labels as equivalent while preserving richer technical fields', async () => {
+    const root = makeTempRoot();
+    const cacheRoot = join(root, 'custom-cache');
+    const folder = baseFolder(root);
+    mkdirSync(folder.path, { recursive: true });
+    mkdirSync(cacheRoot, { recursive: true });
+    const cachedCover = join(cacheRoot, 'cached.webp');
+    writeFileSync(cachedCover, 'cached');
+    const [file] = makeFiles(root, 1);
+    writeFileSync(file.path, 'audio');
+    const fileStat = statSync(file.path);
+    const scannedFile = {
+      ...file,
+      sizeBytes: fileStat.size,
+      mtimeMs: Math.round(fileStat.mtimeMs),
+    };
+    const embeddedCover = new Uint8Array([1, 2, 3, 4]);
+    const storedMetadata = metadataResult(embeddedCover);
+    storedMetadata.fields.codec = 'MP3';
+    const incomingMetadata = metadataResult(embeddedCover);
+    incomingMetadata.fields = {
+      ...incomingMetadata.fields,
+      duration: storedMetadata.fields.duration + 0.004,
+      codec: 'MPEG 1 Layer 3',
+      bitrate: null,
+    };
+    incomingMetadata.fieldSources = {
+      ...incomingMetadata.fieldSources,
+      bitrate: 'unknown',
+    };
+    const store = new FakeStore(
+      coverStateMap([scannedFile], (track) =>
+        coverState(track, {
+          coverSource: 'embedded',
+          sourceHash: getEmbeddedCoverSourceHash(embeddedCover),
+          thumbPath: cachedCover,
+          albumPath: cachedCover,
+          largePath: cachedCover,
+          originalRef: cachedCover,
+          scanMetadata: {
+            fields: storedMetadata.fields,
+            fieldSources: storedMetadata.fieldSources,
+            metadataStatus: storedMetadata.status,
+            embeddedMetadataStatus: storedMetadata.embeddedMetadataStatus,
+            embeddedCoverStatus: storedMetadata.embeddedCoverStatus,
+          },
+        }),
+      ),
+    );
+
+    const status = await runStoredQueue(
+      store,
+      new ThrowingScanner(),
+      new FakeMetadataReader(incomingMetadata),
+      new CapturingCoverExtractor(),
+      cacheRoot,
+      folder,
+      { mode: 'embedded-tags-all' },
+    );
+
+    expect(status).toMatchObject({
+      status: 'completed',
+      skippedFiles: 1,
+      updatedTracks: 0,
+    });
+    expect(store.upsertedTracks).toEqual([]);
+  });
+
+  it('does not erase richer stored fields when another embedded field legitimately changes', async () => {
+    const root = makeTempRoot();
+    const cacheRoot = join(root, 'custom-cache');
+    const folder = baseFolder(root);
+    mkdirSync(folder.path, { recursive: true });
+    mkdirSync(cacheRoot, { recursive: true });
+    const cachedCover = join(cacheRoot, 'cached.webp');
+    writeFileSync(cachedCover, 'cached');
+    const [file] = makeFiles(root, 1);
+    writeFileSync(file.path, 'audio');
+    const fileStat = statSync(file.path);
+    const scannedFile = {
+      ...file,
+      sizeBytes: fileStat.size,
+      mtimeMs: Math.round(fileStat.mtimeMs),
+    };
+    const embeddedCover = new Uint8Array([1, 2, 3, 4]);
+    const storedMetadata = metadataResult(embeddedCover);
+    storedMetadata.fields.codec = 'MP3';
+    const incomingMetadata = metadataResult(embeddedCover);
+    incomingMetadata.fields = {
+      ...incomingMetadata.fields,
+      title: 'Changed Embedded Title',
+      duration: storedMetadata.fields.duration + 0.004,
+      codec: 'MPEG 1 Layer 3',
+      bitrate: null,
+    };
+    incomingMetadata.fieldSources = {
+      ...incomingMetadata.fieldSources,
+      bitrate: 'unknown',
+    };
+    const store = new FakeStore(
+      coverStateMap([scannedFile], (track) =>
+        coverState(track, {
+          coverSource: 'embedded',
+          sourceHash: getEmbeddedCoverSourceHash(embeddedCover),
+          thumbPath: cachedCover,
+          albumPath: cachedCover,
+          largePath: cachedCover,
+          originalRef: cachedCover,
+          scanMetadata: {
+            fields: storedMetadata.fields,
+            fieldSources: storedMetadata.fieldSources,
+            metadataStatus: storedMetadata.status,
+            embeddedMetadataStatus: storedMetadata.embeddedMetadataStatus,
+            embeddedCoverStatus: storedMetadata.embeddedCoverStatus,
+          },
+        }),
+      ),
+    );
+
+    const status = await runStoredQueue(
+      store,
+      new ThrowingScanner(),
+      new FakeMetadataReader(incomingMetadata),
+      new CapturingCoverExtractor(),
+      cacheRoot,
+      folder,
+      { mode: 'embedded-tags-all' },
+    );
+
+    expect(status.updatedTracks).toBe(1);
+    expect(store.upsertedTracks).toHaveLength(1);
+    expect(store.upsertedTracks[0]).toMatchObject({
+      title: 'Changed Embedded Title',
+      duration: storedMetadata.fields.duration,
+      codec: 'MP3',
+      bitrate: storedMetadata.fields.bitrate,
+      fieldSources: expect.objectContaining({ bitrate: 'technical' }),
+    });
   });
 
   it('rescans stored missing-cover tracks without walking the library folder', async () => {
@@ -1868,6 +2635,42 @@ describe('ScanJobQueue local path rescans', () => {
     const status = await runPathsQueue(store, new FakeScanner([]), metadataReader, coverExtractor, cacheRoot, folder, [filePath]);
 
     expect(status.skippedFiles).toBe(1);
+    expect(metadataReader.paths).toEqual([]);
+    expect(coverExtractor.cacheRoots).toEqual([]);
+    expect(store.upsertedTracks).toEqual([]);
+  });
+
+  it('skips unchanged files whose embedded scan already confirmed there is no cover', async () => {
+    const root = makeTempRoot();
+    const folder = baseFolder(root);
+    mkdirSync(folder.path, { recursive: true });
+    const filePath = join(folder.path, 'no-cover.flac');
+    writeFileSync(filePath, 'no-cover');
+    const file = { path: filePath, sizeBytes: 8, mtimeMs: Math.round(statMtimeMs(filePath)) };
+    const metadataReader = new FakeMetadataReader();
+    const coverExtractor = new CapturingCoverExtractor();
+    const store = new FakeStore(
+      coverStateMap([file], (item) =>
+        coverState(item, {
+          metadataStatus: 'ok',
+          embeddedMetadataStatus: 'present',
+          embeddedCoverStatus: 'missing',
+          coverSource: 'default',
+        }),
+      ),
+    );
+
+    const status = await runPathsQueue(
+      store,
+      new FakeScanner([]),
+      metadataReader,
+      coverExtractor,
+      join(root, 'custom-cache'),
+      folder,
+      [filePath],
+    );
+
+    expect(status).toMatchObject({ status: 'completed', processedFiles: 1, skippedFiles: 1, updatedTracks: 0 });
     expect(metadataReader.paths).toEqual([]);
     expect(coverExtractor.cacheRoots).toEqual([]);
     expect(store.upsertedTracks).toEqual([]);

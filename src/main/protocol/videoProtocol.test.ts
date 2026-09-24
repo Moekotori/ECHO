@@ -73,6 +73,59 @@ describe('echo-video protocol', () => {
     expect(getVideoFileForProtocolMock).toHaveBeenCalledWith('video-1');
   });
 
+  it('returns 416 for unsatisfiable local video byte ranges', async () => {
+    const root = makeTempRoot();
+    const videoPath = join(root, 'Echo Song.mp4');
+    writeFileSync(videoPath, 'video');
+    getVideoFileForProtocolMock.mockReturnValue({
+      filePath: videoPath,
+      mimeType: 'video/mp4',
+      playableInApp: true,
+    });
+    const handler = handleMock.mock.calls[0][1] as (request: Request) => Promise<Response>;
+
+    const response = await handler(new Request('echo-video://mv/video-1', { headers: { Range: 'bytes=99-120' } }));
+
+    expect(response.status).toBe(416);
+    expect(response.headers.get('Content-Range')).toBe('bytes */5');
+  });
+
+  it('serves suffix ranges for local videos', async () => {
+    const root = makeTempRoot();
+    const videoPath = join(root, 'Echo Song.mp4');
+    writeFileSync(videoPath, 'video');
+    getVideoFileForProtocolMock.mockReturnValue({
+      filePath: videoPath,
+      mimeType: 'video/mp4',
+      playableInApp: true,
+    });
+    const handler = handleMock.mock.calls[0][1] as (request: Request) => Promise<Response>;
+
+    const response = await handler(new Request('echo-video://mv/video-1', { headers: { Range: 'bytes=-2' } }));
+
+    expect(response.status).toBe(206);
+    expect(response.headers.get('Content-Range')).toBe('bytes 3-4/5');
+    expect(await response.text()).toBe('eo');
+  });
+
+  it('serves local video metadata without a response body for HEAD requests', async () => {
+    const root = makeTempRoot();
+    const videoPath = join(root, 'Echo Song.mp4');
+    writeFileSync(videoPath, 'video');
+    getVideoFileForProtocolMock.mockReturnValue({
+      filePath: videoPath,
+      mimeType: 'video/mp4',
+      playableInApp: true,
+    });
+    const handler = handleMock.mock.calls[0][1] as (request: Request) => Promise<Response>;
+
+    const response = await handler(new Request('echo-video://mv/video-1', { method: 'HEAD' }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Length')).toBe('5');
+    expect(await response.text()).toBe('');
+  });
+
   it('does not allow arbitrary path-shaped urls', async () => {
     const handler = handleMock.mock.calls[0][1] as (request: Request) => Promise<Response>;
 

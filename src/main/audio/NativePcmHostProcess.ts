@@ -1,18 +1,23 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { performance } from 'node:perf_hooks';
 import readline from 'node:readline';
-import { Readable, Writable } from 'node:stream';
+import type { Readable} from 'node:stream';
+import { Writable } from 'node:stream';
 import electron from 'electron';
+import { hasPortableExecutableHeader } from '../app/fileHeader';
+import { resolveInstalledAudioRuntimeHost } from '../app/RuntimeComponentService';
 import { JsonRpcBridge } from './JsonRpcBridge';
 import { DaemonHostProcess } from './DaemonHostProcess';
+import { syncPersistedDspStateToNative } from './DspStateSync';
 import { activeJsonRpcBridge } from './HostBridgeRegistry';
 import type { BridgeSpawnOptions, DaemonHostProcessContext, DaemonSpawnOptions, HostSpawner } from './DaemonHostProcess';
 import {
   clearActiveJsonRpcBridgeIf,
+  setActiveJsonRpcBridge,
 } from './HostBridgeRegistry';
 import type {
   NativeHostNotificationEvent,
@@ -21,7 +26,9 @@ import type {
   NativeOutputTelemetry,
   NativeOutputStartOptions,
 } from './audioTypes';
+import { nativeBackendContractVersion, nativeHostProtocolVersion } from './audioTypes';
 import type { AutomixTransitionPlan } from './AutomixPlanner';
+import type { EqProfileBindingTarget } from '../../shared/types/eq';
 
 export {
   activeJsonRpcBridge,
@@ -44,6 +51,7 @@ export type HostBinaryResolveOptions = {
   cwd?: string;
   appPath?: string | null;
   resourcesPath?: string;
+  userDataPath?: string | null;
   exists?: (path: string) => boolean;
   isExecutable?: (path: string) => boolean;
   includeMigrationFallback?: boolean;
@@ -59,13 +67,22 @@ const getElectronAppPath = (): string | null => {
   }
 };
 
+const getElectronUserDataPath = (): string | null => {
+  const electronApp = (electron as unknown as { app?: { getPath: (name: string) => string } }).app;
+
+  try {
+    return electronApp?.getPath?.('userData') ?? null;
+  } catch {
+    return null;
+  }
+};
+
 const defaultLogger = (message: string): void => {
   console.warn(message);
 };
 
 const verboseAudioLogsEnabled = process.env.ECHO_VERBOSE_AUDIO_LOGS === '1';
 const maxAutomixPcmNotificationBytes = 64 * 1024;
-
 const sharedReadyTimeoutMs = 15_000;
 const slowNativeModeReadyTimeoutMs = 45_000;
 const sharedGracefulStopTimeoutMs = 2_500;
@@ -78,6 +95,7 @@ const nativeHostNotificationEvents = new Set<NativeHostNotificationEvent['event'
   'default_device_changed',
   'device_state_changed',
   'device_removed',
+  'device_sample_rate_changed',
   'audio_session_disconnected',
 ]);
 
@@ -106,10 +124,27 @@ let daemonBridge: NativePcmHostProcess | null = null;
 export { daemonBridge };
 
 export async function startAudioDaemon(): Promise<void> {
-  if (daemonBridge?.isDaemonRunning()) return;
+  if (daemonBridge?.isDaemonRunning()) {
+    // A one-shot PCM/DoP bridge may temporarily own the global DSP control
+    // route. Restore the persistent daemon's own bridge before callers create
+    // a daemon backend. If its RPC transport is no longer usable, restart the
+    // daemon instead of returning a running process with no usable bridge.
+    if (daemonBridge.activateDspControl()) {
+      return;
+    }
+    await daemonBridge.stopDaemon();
+    daemonBridge = null;
+  }
   const bridge = new NativePcmHostProcess({ logger: console.warn });
   daemonBridge = bridge;
-  await bridge.startDaemon();
+  try {
+    await bridge.startDaemon();
+  } catch (error) {
+    if (daemonBridge === bridge) {
+      daemonBridge = null;
+    }
+    throw error;
+  }
 }
 
 export async function stopAudioDaemon(): Promise<void> {
@@ -146,12 +181,15 @@ const isLikelyExecutableHostBinary = (path: string): boolean => {
     return true;
   }
 
-  try {
-    const header = readFileSync(path).subarray(0, 2);
-    return header.length === 2 && header[0] === 0x4d && header[1] === 0x5a;
-  } catch {
+  if (!hasPortableExecutableHeader(path)) {
     return false;
   }
+
+  const hostDirectory = dirname(path);
+  return ['avcodec-62.dll', 'avformat-62.dll', 'avutil-60.dll', 'swresample-6.dll'].every((name) => {
+    const dependencyPath = join(hostDirectory, name);
+    return existsSync(dependencyPath) && hasPortableExecutableHeader(dependencyPath);
+  });
 };
 
 const isNativeHostNotificationEvent = (event: unknown): event is NativeHostNotificationEvent['event'] =>
@@ -255,6 +293,13 @@ export const resolveHostBinary = (options: HostBinaryResolveOptions = {}): strin
   candidates.push(join(cwd, 'electron-app', 'build', exe));
   candidates.push(join(cwd, 'build', exe));
 
+  const installedRuntimeHost = resolveInstalledAudioRuntimeHost(
+    options.userDataPath === undefined ? getElectronUserDataPath() : options.userDataPath,
+  );
+  if (installedRuntimeHost) {
+    candidates.push(installedRuntimeHost);
+  }
+
   if (includeMigrationFallback) {
     // Local migration fallback only. Dev and production should use ECHO Next's
     // own electron-app/build copy or the packaged resourcesPath binary.
@@ -268,22 +313,33 @@ export const isNativeOutputBridgeAvailable = (): boolean => resolveHostBinary() 
 
 class BridgeWritable extends Writable {
   private isClosed = false;
+  private readonly targetErrorListener: (error: unknown) => void;
+  private readonly targetCloseListener: () => void;
+  private readonly onTargetError?: (error: Error) => void;
 
   constructor(
     private readonly target: Writable,
     onTargetError?: (error: Error) => void,
   ) {
     super();
+    this.onTargetError = onTargetError;
 
-    target.on('error', (err) => {
+    this.targetErrorListener = (err) => {
+      if (this.isClosed) {
+        return;
+      }
       this.isClosed = true;
       const error = err instanceof Error ? err : new Error(String(err));
-      onTargetError?.(error);
-      this.destroy(onTargetError ? undefined : error);
-    });
-    target.on('close', () => {
+      this.onTargetError?.(error);
+      if (!this.onTargetError) {
+        this.destroy(error);
+      }
+    };
+    this.targetCloseListener = () => {
       this.isClosed = true;
-    });
+    };
+    target.on('error', this.targetErrorListener);
+    target.on('close', this.targetCloseListener);
   }
 
   override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
@@ -296,43 +352,47 @@ class BridgeWritable extends Writable {
     try {
       this.target.write(chunk, (error: Error | null | undefined) => {
         if (error) {
-          this.isClosed = true;
-          callback(error);
+          if (!this.isClosed) {
+            this.isClosed = true;
+            this.onTargetError?.(error);
+          }
+          callback(this.onTargetError ? undefined : error);
           return;
         }
 
         callback();
       });
     } catch (error) {
-      this.isClosed = true;
-      callback(error instanceof Error ? error : new Error(String(error)));
+      const normalizedError = error instanceof Error ? error : new Error(String(error));
+      if (!this.isClosed) {
+        this.isClosed = true;
+        this.onTargetError?.(normalizedError);
+      }
+      callback(this.onTargetError ? undefined : normalizedError);
     }
   }
 
   override _final(callback: (error?: Error | null) => void): void {
-    if (this.isClosed || this.target.destroyed || this.target.writableEnded || !this.target.writable) {
-      callback();
-      return;
-    }
+    callback();
+  }
 
-    try {
-      this.target.end(callback);
-    } catch (error) {
-      this.isClosed = true;
-      callback(error instanceof Error ? error : new Error(String(error)));
-    }
+  override _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
+    this.isClosed = true;
+    this.target.off('error', this.targetErrorListener);
+    this.target.off('close', this.targetCloseListener);
+    callback(error);
   }
 }
 
-const normalizeOutputMode = (options: NativeOutputStartOptions): 'shared' | 'exclusive' =>
-  options.exclusive ? 'exclusive' : 'shared';
+const normalizeOutputMode = (options: NativeOutputStartOptions): 'shared' | 'exclusive' | 'asio' =>
+  options.asio ? 'asio' : options.exclusive ? 'exclusive' : 'shared';
 
 type NativeOutputMode = ReturnType<typeof normalizeOutputMode>;
 
 export const normalizeSharedBackendForHost = (
   sharedBackend: NativeOutputStartOptions['sharedBackend'],
   platform: NodeJS.Platform = process.platform,
-): 'auto' | 'windows' | 'directsound' | 'alsa' => {
+): 'auto' | 'windows' | 'directsound' | 'alsa' | 'miniaudio' => {
   if (platform === 'win32') {
     return sharedBackend === 'windows' || sharedBackend === 'directsound' ? sharedBackend : 'auto';
   }
@@ -375,21 +435,24 @@ const createReuseKey = (
     : null;
 
   const sharedBackend = outputMode === 'shared'
-    ? platformExplicitlySet
-      ? normalizeSharedBackendForHost(options.sharedBackend, platform)
-      : (options.sharedBackend === 'windows' || options.sharedBackend === 'directsound' || options.sharedBackend === 'alsa'
-          ? options.sharedBackend
-          : 'auto')
+    ? options.useMiniaudioOutput === true
+      ? 'miniaudio'
+      : platformExplicitlySet
+        ? normalizeSharedBackendForHost(options.sharedBackend, platform)
+        : (options.sharedBackend === 'windows' || options.sharedBackend === 'directsound' || options.sharedBackend === 'alsa'
+            ? options.sharedBackend
+            : 'auto')
     : null;
 
   return JSON.stringify({
-    outputMode: options.exclusive ? 'exclusive' : 'shared',
+    outputMode,
     deviceIndex: Number.isInteger(Number(options.deviceIndex)) ? Number(options.deviceIndex) : null,
     deviceName: options.deviceName ?? null,
     sharedBackend,
     sampleRate,
     channels: options.channels,
     exclusive: options.exclusive === true,
+    asio: options.asio === true,
     bufferSizeFrames,
     latencyProfile: options.latencyProfile ?? null,
     playbackSpeedMode: options.playbackSpeedMode ?? null,
@@ -406,6 +469,10 @@ class NativeSessionWritable extends Writable {
     private readonly sessionId: number,
   ) {
     super();
+    // A target pipe can fail after AudioSession has detached its pipeline
+    // listener during replacement. Keep teardown races from becoming an
+    // uncaught stream error; active pipeline listeners still receive it.
+    this.on('error', () => undefined);
   }
 
   override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
@@ -478,11 +545,13 @@ export class NativePcmHostProcess extends EventEmitter {
   private readonly logger: (message: string) => void;
   private hostBinary: string | null;
   private proc: ChildProcessWithoutNullStreams | null = null;
+  private pcmInput: Writable | null = null;
   private bridgeWritable: BridgeWritable | null = null;
   private sessionWritable: NativeSessionWritable | null = null;
   private sessionIdCounter = 0;
   private currentSessionId = 0;
   private currentSessionHasPcm = false;
+  private currentSessionPcmBytes = 0;
   private sessionBeginWrites = new Map<number, Promise<void>>();
   private reuseKey: string | null = null;
   private framesConsumed = 0;
@@ -617,6 +686,7 @@ export class NativePcmHostProcess extends EventEmitter {
       this.sessionIdCounter = 0;
       this.currentSessionId = 0;
       this.currentSessionHasPcm = false;
+      this.currentSessionPcmBytes = 0;
       this.sessionBeginWrites.clear();
       this.reuseKey = createReuseKey(options, this.platform, this.platformExplicitlySet);
       this.ready = false;
@@ -657,11 +727,11 @@ export class NativePcmHostProcess extends EventEmitter {
 
       this.logVerbose(`[NativeOutputBridge] spawn: ${bin} ${args.join(' ')}`);
       this.proc = this.spawn(bin, args, {
-        stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe', 'pipe'],
         windowsHide: true,
       } as unknown as BridgeSpawnOptions);
       const spawnedProc = this.proc;
-      const handleStdinFailure = (error: Error) => {
+      const handlePcmInputFailure = (error: Error) => {
         if (this.proc !== spawnedProc && this.pendingGracefulStop?.proc !== spawnedProc) {
           return;
         }
@@ -669,7 +739,7 @@ export class NativePcmHostProcess extends EventEmitter {
         const wasReady = this.ready;
         const intentional = this.stopRequested;
         const hostError = createError(
-          `stdin_error:${error instanceof Error ? error.message : String(error)}`,
+          `pcm_input_error:${error instanceof Error ? error.message : String(error)}`,
         );
         this.ready = false;
         this.clearReadyTimer();
@@ -685,8 +755,19 @@ export class NativePcmHostProcess extends EventEmitter {
 
         this.emit('error', hostError);
       };
-      this.bridgeWritable = new BridgeWritable(this.proc.stdin, handleStdinFailure);
-      this.bridgeWritable.on('error', handleStdinFailure);
+      const childStdio = this.proc.stdio as unknown as Array<Readable | Writable | null | undefined> | undefined;
+      // A real Node child always exposes the requested fd5. Some injected
+      // HostSpawner test doubles predate extra stdio descriptors and expose
+      // only stdin/stdout/stderr, so retain their in-memory sink explicitly.
+      const pcmInput = (childStdio ? childStdio[5] : this.proc.stdin) as Writable | undefined;
+      if (!pcmInput) {
+        this.proc.kill('SIGKILL');
+        this.proc = null;
+        settleReject(createError('pcm_input_pipe_unavailable'));
+        return;
+      }
+      this.pcmInput = pcmInput;
+      this.bridgeWritable = new BridgeWritable(pcmInput, handlePcmInputFailure);
 
       this.stdoutReadline = readline.createInterface({ input: this.proc.stdout });
       const stdout = this.stdoutReadline;
@@ -823,22 +904,22 @@ export class NativePcmHostProcess extends EventEmitter {
       return false;
     }
 
-    const stdin = this.proc?.stdin;
+    const pcmInput = this.pcmInput;
 
     return Boolean(
       this.ready &&
       this.proc &&
-      stdin &&
-      !stdin.destroyed &&
-      !stdin.writableEnded &&
-      stdin.writable &&
+      pcmInput &&
+      !pcmInput.destroyed &&
+      !pcmInput.writableEnded &&
+      pcmInput.writable &&
       !this.currentSessionHasPcm &&
       this.reuseKey === createReuseKey(options, this.platform, this.platformExplicitlySet),
     );
   }
 
-  beginSession(options: { startSeconds?: number; playbackRate?: number; durationSeconds?: number } = {}): number {
-    if (!this.proc || this.proc.stdin.destroyed || this.proc.stdin.writableEnded || !this.proc.stdin.writable) {
+  beginSession(options: { startSeconds?: number; playbackRate?: number; durationSeconds?: number; startPaused?: boolean } = {}): number {
+    if (!this.proc || !this.pcmInput || this.pcmInput.destroyed || this.pcmInput.writableEnded || !this.pcmInput.writable) {
       throw new Error('native output bridge is not writable');
     }
 
@@ -846,6 +927,7 @@ export class NativePcmHostProcess extends EventEmitter {
     this.sessionIdCounter = sessionId;
     this.currentSessionId = sessionId;
     this.currentSessionHasPcm = false;
+    this.currentSessionPcmBytes = 0;
     this.sessionWritable?.destroy();
     this.sessionWritable = null;
     this.durationSeconds =
@@ -862,7 +944,7 @@ export class NativePcmHostProcess extends EventEmitter {
       nativePositionStalenessMs: null,
     };
     if (this.jsonRpcBridge) {
-      const sessionBeginWrite = this.beginNativeSession(sessionId);
+      const sessionBeginWrite = this.beginNativeSession(sessionId, options.startPaused === true);
       sessionBeginWrite.catch((error: Error) => this.emit('error', error));
       this.sessionBeginWrites.set(sessionId, sessionBeginWrite);
     }
@@ -914,19 +996,58 @@ export class NativePcmHostProcess extends EventEmitter {
     if (
       !sessionId ||
       sessionId !== this.currentSessionId ||
-      !this.bridgeWritable ||
       !this.proc ||
-      this.proc.stdin.destroyed ||
-      this.proc.stdin.writableEnded ||
-      !this.proc.stdin.writable
+      !this.jsonRpcBridge
     ) {
       callback?.();
       return;
     }
 
-    const bridgeWritable = this.bridgeWritable;
-    this.bridgeWritable = null;
-    bridgeWritable.end(callback);
+    const sessionBeginWrite = this.sessionBeginWrites.get(sessionId) ?? Promise.resolve();
+    const pcmBytes = this.currentSessionPcmBytes;
+    sessionBeginWrite
+      .then(() => this.jsonRpcBridge?.call<boolean>('audio.inputEnd', {
+        sessionId,
+        pcmBytes,
+      }))
+      .then((accepted) => {
+        this.sessionBeginWrites.delete(sessionId);
+        if (accepted !== true) {
+          callback?.(new Error(`native host rejected audio.inputEnd for session ${sessionId}`));
+          return;
+        }
+        callback?.();
+      }, (error: Error) => callback?.(error));
+  }
+
+  async abortSession(sessionId = this.currentSessionId): Promise<void> {
+    if (
+      !sessionId ||
+      sessionId !== this.currentSessionId ||
+      !this.proc ||
+      !this.jsonRpcBridge
+    ) {
+      return;
+    }
+
+    // Synchronously close the per-session writable before taking the byte
+    // boundary. This drops queued Node writes and prevents the old decoder
+    // from submitting PCM after audio.sessionAbort has established its
+    // discard target. The one active _write, if any, was already counted by
+    // writeSessionChunk before it was handed to the raw PCM pipe.
+    this.sessionWritable?.destroy();
+    this.sessionWritable = null;
+    const sessionBeginWrite = this.sessionBeginWrites.get(sessionId) ?? Promise.resolve();
+    await sessionBeginWrite;
+    const pcmBytes = this.currentSessionPcmBytes;
+    const accepted = await this.jsonRpcBridge.call<boolean>('audio.sessionAbort', {
+      sessionId,
+      pcmBytes,
+    });
+    this.sessionBeginWrites.delete(sessionId);
+    if (accepted !== true) {
+      throw new Error(`native host rejected audio.sessionAbort for session ${sessionId}`);
+    }
   }
 
   setVolume(volume: number): void {
@@ -934,13 +1055,39 @@ export class NativePcmHostProcess extends EventEmitter {
     this.jsonRpcBridge?.setVolume(safeVolume).catch((error: Error) => this.emit('error', error));
   }
 
-  setPaused(paused: boolean): void {
+  async setPaused(paused: boolean): Promise<void> {
     if (!this.currentSessionId) {
       return;
     }
 
-    const promise = paused ? this.jsonRpcBridge?.pause() : this.jsonRpcBridge?.resume();
-    promise?.catch((error: Error) => this.emit('error', error));
+    const bridge = this.jsonRpcBridge;
+    if (!bridge) {
+      return;
+    }
+
+    const accepted = await bridge.call<boolean>(paused ? 'audio.pause' : 'audio.resume', {
+      sessionId: this.currentSessionId,
+    });
+    if (accepted !== true) {
+      throw new Error(`native host rejected ${paused ? 'audio.pause' : 'audio.resume'} for session ${this.currentSessionId}`);
+    }
+  }
+
+  async syncDspState(profileTarget?: EqProfileBindingTarget): Promise<void> {
+    const bridge = this.jsonRpcBridge;
+    if (!bridge || bridge.isClosed) {
+      throw new Error('native json-rpc bridge is not open');
+    }
+    await syncPersistedDspStateToNative(bridge, profileTarget);
+  }
+
+  activateDspControl(): boolean {
+    const bridge = this.jsonRpcBridge;
+    if (bridge && !bridge.isClosed) {
+      setActiveJsonRpcBridge(bridge);
+      return true;
+    }
+    return false;
   }
 
   writeReplayGainFrame(
@@ -1021,6 +1168,10 @@ export class NativePcmHostProcess extends EventEmitter {
     }
 
     this.currentSessionHasPcm = true;
+    // _write is serialized by NativeSessionWritable. Count the active chunk
+    // before waiting for sessionBegin so abortSession can capture the complete
+    // submitted boundary even when JSON-RPC and PCM pipe scheduling cross.
+    this.currentSessionPcmBytes += chunk.length;
     const sessionBeginWrite = this.sessionBeginWrites.get(sessionId) ?? Promise.resolve();
     sessionBeginWrite.then(
       () => {
@@ -1029,7 +1180,29 @@ export class NativePcmHostProcess extends EventEmitter {
           return;
         }
 
-        bridgeWritable.write(chunk, callback);
+        // Count the chunk before submitting it. A session abort runs over the
+        // JSON-RPC pipe while PCM uses a separate pipe, so counting only in
+        // the write callback leaves an untracked in-flight tail that can land
+        // in the next session.
+        bridgeWritable.write(chunk, (error) => {
+          if (
+            error &&
+            (
+              !this.ready ||
+              this.stopRequested ||
+              this.ended ||
+              sessionId !== this.currentSessionId ||
+              bridgeWritable !== this.bridgeWritable
+            )
+          ) {
+            // The bridge/process lifecycle owns the primary failure. A queued
+            // PCM write can receive the same closed-pipe error afterwards;
+            // surfacing it again would replace the more useful host error.
+            callback();
+            return;
+          }
+          callback(error);
+        });
       },
       (error: Error) => callback(error),
     );
@@ -1108,6 +1281,13 @@ export class NativePcmHostProcess extends EventEmitter {
       this.bridgeWritable = null;
     }
 
+    if (this.pcmInput) {
+      try {
+        this.pcmInput.destroy();
+      } catch { /* empty */ }
+      this.pcmInput = null;
+    }
+
     if (this.sessionWritable) {
       try {
         this.sessionWritable.destroy();
@@ -1161,6 +1341,13 @@ export class NativePcmHostProcess extends EventEmitter {
         this.bridgeWritable.destroy();
       } catch { /* empty */ }
       this.bridgeWritable = null;
+    }
+
+    if (this.pcmInput) {
+      try {
+        this.pcmInput.destroy();
+      } catch { /* empty */ }
+      this.pcmInput = null;
     }
 
     const selectedTimeoutMs =
@@ -1231,9 +1418,31 @@ export class NativePcmHostProcess extends EventEmitter {
   }
 
   private createSpawnArgs(options: NativeOutputStartOptions): string[] {
-    // Audio params (sr, ch, buffer, fifo, prebuffer) are sent via session.begin
-    // JSON-RPC when the daemon is running.
-    const args: string[] = [];
+    // PcmRingAudioSource is allocated before session.begin, so per-play hosts
+    // still need their fixed source format and capacity at process startup.
+    const daemonMode = this.isDaemonBridgeHealthy();
+    const args: string[] = daemonMode ? [] : [
+      '-sr', String(Math.max(1, Math.round(options.requestedOutputSampleRate || 48000))),
+      '-ch', String(Math.max(1, Math.min(8, Math.round(options.channels || 2)))),
+    ];
+
+    const bufferSizeFrames = Number(options.bufferSizeFrames);
+    if (!daemonMode && Number.isFinite(bufferSizeFrames) && bufferSizeFrames > 0) {
+      const sanitizedBufferSizeFrames = sanitizeHostBufferSizeFrames(options, Math.round(bufferSizeFrames));
+      if (sanitizedBufferSizeFrames !== null) {
+        args.push('-buffer', String(sanitizedBufferSizeFrames));
+      }
+    }
+
+    const fifoCapacityMs = Number(options.fifoCapacityMs);
+    if (!daemonMode && Number.isFinite(fifoCapacityMs) && fifoCapacityMs > 0) {
+      args.push('-fifo-ms', String(Math.round(fifoCapacityMs)));
+    }
+
+    const startupPrebufferMs = Number(options.startupPrebufferMs);
+    if (!daemonMode && Number.isFinite(startupPrebufferMs) && startupPrebufferMs >= 0) {
+      args.push('-prebuffer-ms', String(Math.round(startupPrebufferMs)));
+    }
 
     // Deprecated: -eq-port kept for backward-compat test expectations.
     // The host binary still accepts it but JSON-RPC on stdio is the active transport.
@@ -1253,28 +1462,31 @@ export class NativePcmHostProcess extends EventEmitter {
       args.push('-exclusive');
     }
 
+    if (options.asio) {
+      args.push('-asio');
+    }
+
     if (options.inputFormat === 'dop24le') {
       args.push('-dop-output');
     }
 
     if (options.inputFormat === 'dsd-native-raw') {
       args.push('-dop-output');
-      const nativeDsdSampleRate = Number(options.nativeDsdSampleRate);
-      if (Number.isFinite(nativeDsdSampleRate) && nativeDsdSampleRate > 0) {
-        args.push('-native-dsd-sr', String(Math.round(nativeDsdSampleRate)));
-      }
+      args.push('-asio-native-dsd-output');
     }
 
     // When the caller doesn't explicitly set a platform, pass the shared
     // backend through unnormalised so tests that don't set platform work
     // on any host machine.  When a platform IS explicitly set (Linux/Windows),
     // apply the normal filtering.
-    const sharedBackend = this.platformExplicitlySet
-      ? normalizeSharedBackendForHost(options.sharedBackend, this.platform)
-      : (options.sharedBackend === 'windows' || options.sharedBackend === 'directsound' || options.sharedBackend === 'alsa'
-          ? options.sharedBackend
-          : 'auto');
-    if (!options.exclusive && sharedBackend !== 'auto') {
+    const sharedBackend = options.useMiniaudioOutput === true
+      ? 'miniaudio'
+      : this.platformExplicitlySet
+        ? normalizeSharedBackendForHost(options.sharedBackend, this.platform)
+        : (options.sharedBackend === 'windows' || options.sharedBackend === 'directsound' || options.sharedBackend === 'alsa'
+            ? options.sharedBackend
+            : 'auto');
+    if (!options.exclusive && !options.asio && sharedBackend !== 'auto') {
       args.push('-shared-backend', sharedBackend);
     }
 
@@ -1286,6 +1498,7 @@ export class NativePcmHostProcess extends EventEmitter {
     // JSON-RPC: use fd 3 for stdin, fd 4 for stdout (persistent connection)
     args.push('--rpc-stdin-fd', '3');
     args.push('--rpc-stdout-fd', '4');
+    args.push('--pcm-input-fd', '5');
     args.push('--no-stdin');
 
     return args;
@@ -1303,8 +1516,8 @@ export class NativePcmHostProcess extends EventEmitter {
     return this.jsonRpcBridge.writeNotification(method, params);
   }
 
-  private beginNativeSession(sessionId: number): Promise<void> {
-    const params: Record<string, unknown> = { sessionId };
+  private beginNativeSession(sessionId: number, startPaused = false): Promise<void> {
+    const params: Record<string, unknown> = { sessionId, startPaused };
     const opts = this.currentStartOptions;
     if (opts) {
       params.sr = opts.requestedOutputSampleRate ?? 48000;
@@ -1316,7 +1529,15 @@ export class NativePcmHostProcess extends EventEmitter {
       const prebuf = Number(opts.startupPrebufferMs);
       if (Number.isFinite(prebuf) && prebuf >= 0) params.prebufferMs = Math.round(prebuf);
     }
-    return this.notifyNativeControlAsync('audio.sessionBegin', [params]);
+    if (!this.jsonRpcBridge) {
+      return Promise.reject(new Error('native json-rpc bridge is not open'));
+    }
+
+    return this.jsonRpcBridge.call<boolean>('audio.sessionBegin', params).then((accepted) => {
+      if (accepted !== true) {
+        throw new Error(`native host rejected audio.sessionBegin for session ${sessionId}`);
+      }
+    });
   }
 
   private handleStdoutLine(
@@ -1356,20 +1577,48 @@ export class NativePcmHostProcess extends EventEmitter {
     }
 
     if (message.ready) {
+      // Initialize JSON-RPC bridge on fd 3 (stdin) / fd 4 (stdout)
+      if ((!this.jsonRpcBridge || this.jsonRpcBridge.isClosed) && this.proc?.stdio?.[3] && this.proc?.stdio?.[4]) {
+        const rpcBridge = new JsonRpcBridge();
+        rpcBridge.on('error', (error: Error) => this.emit('error', error));
+        rpcBridge.open(this.proc.stdio[4] as Readable, this.proc.stdio[3] as Writable);
+        this.jsonRpcBridge = rpcBridge;
+      }
+
+      if (message.readyLevel === 'process') {
+        if (
+          message.protocolVersion !== nativeHostProtocolVersion ||
+          message.backendContractVersion !== nativeBackendContractVersion ||
+          message.capabilities?.deviceReadyV2 !== true
+        ) {
+          this.clearReadyTimer();
+          this.stop();
+          rejectReady(createError?.(
+            `native_host_contract_mismatch: protocol=${String(message.protocolVersion)} backendContract=${String(message.backendContractVersion)}`,
+          ) ?? new Error('native_host_contract_mismatch'));
+        }
+        return;
+      }
+
+      if (message.readyLevel === 'device' && (
+        message.protocolVersion !== nativeHostProtocolVersion ||
+        message.backendContractVersion !== nativeBackendContractVersion ||
+        message.capabilities?.deviceReadyV2 !== true
+      )) {
+        this.clearReadyTimer();
+        this.stop();
+        rejectReady(createError?.(
+          `native_host_contract_mismatch: protocol=${String(message.protocolVersion)} backendContract=${String(message.backendContractVersion)}`,
+        ) ?? new Error('native_host_contract_mismatch'));
+        return;
+      }
+
       this.ready = true;
       this.readyMessage = message;
       this.clearReadyTimer();
 
       if (typeof message.sampleRate === 'number' && message.sampleRate > 0) {
         this.actualDeviceSampleRate = message.sampleRate;
-      }
-
-      // Initialize JSON-RPC bridge on fd 3 (stdin) / fd 4 (stdout)
-      if (this.proc?.stdio?.[3] && this.proc?.stdio?.[4]) {
-        const rpcBridge = new JsonRpcBridge();
-        rpcBridge.on('error', (error: Error) => this.emit('error', error));
-        rpcBridge.open(this.proc.stdio[4] as Readable, this.proc.stdio[3] as Writable);
-        this.jsonRpcBridge = rpcBridge;
       }
 
       const result: NativeBridgeReadyResult = {

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { basename, extname, join, resolve, sep } from 'node:path';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import vm from 'node:vm';
 import { app, dialog, shell } from 'electron';
 import type { AudioStatus } from '../../shared/types/audio';
@@ -67,6 +67,7 @@ import type {
   EchoProPluginActivationMode,
   EchoProPluginActivationRequest,
   EchoProPluginActivationResult,
+  EchoProPluginDeviceReleaseResult,
 } from '../../shared/types/privateEntitlements';
 import { getAppSettings, setAppSettings } from '../app/appSettings';
 import { echoProUnlockPluginId } from '../../shared/constants/featureUnlocks';
@@ -87,6 +88,7 @@ import {
   verifyEchoProPluginLicenseOnline,
   type EchoProPluginLicenseStatus,
 } from './EchoProLicensePlugin';
+import { EchoProNativeLicenseStore } from './EchoProNativeLicenseStore';
 import { getEchoProMachineCode } from './MachineIdentity';
 
 type PluginState = {
@@ -395,7 +397,7 @@ const exampleTemplates: Record<PluginCreateExampleKind, { id: string; name: stri
       'const requestHost = (action, payload) => new Promise((resolve) => {',
       '  const requestId = `${Date.now()}-${Math.random()}`;',
       '  pending.set(requestId, resolve);',
-      "  parent.postMessage({ channel, version: 1, type: 'request', requestId, pluginId, action, payload }, '*');",
+      "  parent.postMessage({ channel, version: 2, type: 'request', requestId, pluginId, action, payload }, '*');",
       '});',
       'const output = document.getElementById("output");',
       'const show = (value) => { output.textContent = JSON.stringify(value, null, 2); };',
@@ -619,8 +621,8 @@ const normalizePluginMarketList = (value: unknown): PluginMarketListResult => {
 };
 
 type NormalizedEchoProPluginActivationRequest =
-  | { mode: 'afdian'; qq: string; orderId: string }
-  | { mode: 'key'; qq: string; key: string };
+  | { mode: 'afdian'; qq: string; orderId: string; replaceMachineBinding: boolean }
+  | { mode: 'key'; qq: string; key: string; replaceMachineBinding: boolean };
 
 const normalizeEchoProPluginActivationMode = (value: unknown): EchoProPluginActivationMode => {
   if (value === 'afdian' || value === 'key') {
@@ -635,6 +637,7 @@ const normalizeEchoProPluginActivationRequest = (request: EchoProPluginActivatio
   }
   const mode = normalizeEchoProPluginActivationMode(request.mode);
   const qq = typeof request.qq === 'string' ? request.qq.trim() : '';
+  const replaceMachineBinding = request.replaceMachineBinding === true;
   if (!/^[1-9][0-9]{4,11}$/u.test(qq)) {
     throw new Error('echo_pro_activation_qq_invalid');
   }
@@ -643,7 +646,7 @@ const normalizeEchoProPluginActivationRequest = (request: EchoProPluginActivatio
     if (!/^[0-9A-Za-z_-]{12,80}$/u.test(orderId)) {
       throw new Error('echo_pro_activation_order_id_invalid');
     }
-    return { mode, qq, orderId };
+    return { mode, qq, orderId, replaceMachineBinding };
   }
 
   const key = typeof request.key === 'string'
@@ -652,7 +655,7 @@ const normalizeEchoProPluginActivationRequest = (request: EchoProPluginActivatio
   if (!/^ECHO-[A-Z2-9]{5}(?:-[A-Z2-9]{5}){3}$/u.test(key)) {
     throw new Error('echo_pro_activation_key_invalid');
   }
-  return { mode, qq, key };
+  return { mode, qq, key, replaceMachineBinding };
 };
 
 const sanitizeEchoProActivationErrorCode = (value: string): string =>
@@ -1244,8 +1247,17 @@ export class PluginService {
   private autoStartScheduled = false;
   private audioStatusSubscribed = false;
   private readonly audioAnalyzer = new AudioAuthenticityAnalyzer();
+  private legacyEchoProEnabledThisSession = false;
 
-  constructor(private readonly pluginDirectory = join(app.getPath('userData'), 'plugins')) {}
+  private readonly nativeLicenseStore: EchoProNativeLicenseStore;
+  private readonly entitlementDirectory: string;
+
+  constructor(private readonly pluginDirectory = join(app.getPath('userData'), 'plugins')) {
+    this.entitlementDirectory = basename(pluginDirectory).toLocaleLowerCase() === 'plugins'
+      ? join(dirname(pluginDirectory), 'entitlements')
+      : join(dirname(pluginDirectory), `${basename(pluginDirectory)}.entitlements`);
+    this.nativeLicenseStore = new EchoProNativeLicenseStore(this.entitlementDirectory);
+  }
 
   list(): PluginListResult {
     this.scan();
@@ -1316,22 +1328,38 @@ export class PluginService {
     const normalized = normalizeEchoProPluginActivationRequest(request);
     this.scan();
     const machineCode = getEchoProMachineCode();
+    const currentEchoProStatus = this.getEchoProLicenseStatus();
+    if (currentEchoProStatus?.reason === 'machine-mismatch' && !normalized.replaceMachineBinding) {
+      throw new Error('echo_pro_activation_machine_binding_confirmation_required');
+    }
+    const replacementProof = normalized.replaceMachineBinding
+      ? currentEchoProStatus?.reason === 'machine-mismatch' &&
+        currentEchoProStatus.licenseId &&
+        currentEchoProStatus.activationId
+        ? {
+            replaceMachineBinding: true,
+            replaceLicenseId: currentEchoProStatus.licenseId,
+            replaceActivationId: currentEchoProStatus.activationId,
+          }
+        : null
+      : {};
+    if (replacementProof === null) {
+      throw new Error('echo_pro_activation_replacement_unavailable');
+    }
     const apiBaseUrl = getEchoProActivationApiBaseUrl();
-    const endpoint = normalized.mode === 'afdian' ? '/activate' : '/keys/redeem';
+    const endpoint = normalized.mode === 'afdian' ? '/license/activate' : '/license/keys/activate';
     const body = normalized.mode === 'afdian'
-      ? { orderId: normalized.orderId, qq: normalized.qq, machineCode }
-      : { key: normalized.key, qq: normalized.qq, machineCodeHash: checksumText(machineCode) };
+      ? { orderId: normalized.orderId, qq: normalized.qq, machineCode, ...replacementProof }
+      : { key: normalized.key, qq: normalized.qq, machineCodeHash: checksumText(machineCode), ...replacementProof };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), echoProActivationRequestTimeoutMs);
 
-    let packageText = '';
-    let licenseId: string | null = null;
-    let activationId: string | null = null;
+    let responsePayload: unknown;
     try {
       const response = await fetchWithNetworkProxy(`${apiBaseUrl}${endpoint}`, {
         method: 'POST',
         headers: {
-          accept: 'application/octet-stream, application/json',
+          accept: 'application/json',
           'content-type': 'application/json',
         },
         body: JSON.stringify(body),
@@ -1341,13 +1369,7 @@ export class PluginService {
         const serverCode = await readEchoProActivationServerError(response);
         throw new Error(`echo_pro_activation_${serverCode}`);
       }
-      packageText = await response.text();
-      if (Buffer.byteLength(packageText, 'utf8') > maxPluginPackageBytes) {
-        throw new Error('plugin_package_too_large');
-      }
-      assertEchoProActivationPackage(packageText);
-      licenseId = response.headers.get('x-echo-license-id');
-      activationId = response.headers.get('x-echo-activation-id');
+      responsePayload = await response.json() as unknown;
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error('echo_pro_activation_timeout');
@@ -1357,60 +1379,36 @@ export class PluginService {
       clearTimeout(timer);
     }
 
-    mkdirSync(this.pluginDirectory, { recursive: true });
-    const tempPath = join(this.pluginDirectory, `.echo-pro-activation-${normalized.mode}-${randomUUID()}${pluginPackageExtension}`);
-    const previousEchoProState = this.state.plugins[echoProUnlockPluginId]
-      ? jsonClone(this.state.plugins[echoProUnlockPluginId])
-      : null;
-    writeFileSync(tempPath, packageText, 'utf8');
-    try {
-      const imported = await this.importPluginPackage(tempPath, { allowOverwrite: true });
-      if (!imported) {
-        throw new Error('echo_pro_activation_import_cancelled');
-      }
-      if (imported.pluginId !== echoProUnlockPluginId) {
-        throw new Error('echo_pro_activation_package_plugin_mismatch');
-      }
-
-      let enabled = false;
-      try {
-        const summary = await this.enable({ pluginId: echoProUnlockPluginId, trustedPermissions: [] });
-        enabled = summary.enabled === true && summary.disabledByHost !== true;
-      } catch (error) {
-        if (imported.backedUpDirectory && existsSync(imported.backedUpDirectory)) {
-          this.assertPluginDirectoryTarget(imported.directory);
-          this.assertPluginDirectoryTarget(imported.backedUpDirectory);
-          this.stopPlugin(echoProUnlockPluginId);
-          rmSync(imported.directory, { recursive: true, force: true });
-          renameSync(imported.backedUpDirectory, imported.directory);
-          if (previousEchoProState) {
-            this.state.plugins[echoProUnlockPluginId] = previousEchoProState;
-          } else {
-            delete this.state.plugins[echoProUnlockPluginId];
-          }
-          this.writeState();
-          this.scan();
-        }
-        throw error;
-      }
-
-      const status = this.getEchoProLicenseStatus();
-      this.log(echoProUnlockPluginId, 'info', `echo_pro_activation_applied:${normalized.mode}`);
-      return {
-        ok: true,
-        mode: normalized.mode,
-        pluginId: echoProUnlockPluginId,
-        enabled,
-        licenseId: status.licenseId ?? licenseId,
-        activationId: status.activationId ?? activationId,
-        qq: status.qq ?? normalized.qq,
-        activatedAt: status.issuedAt ?? new Date().toISOString(),
-        importedFileCount: imported.importedFileCount,
-        checksum: imported.checksum,
-      };
-    } finally {
-      rmSync(tempPath, { force: true });
+    if (
+      !isRecord(responsePayload) ||
+      responsePayload.ok !== true ||
+      !isRecord(responsePayload.license) ||
+      typeof responsePayload.licenseSignature !== 'string'
+    ) {
+      throw new Error('echo_pro_activation_license_response_invalid');
     }
+    const status = this.nativeLicenseStore.install(
+      responsePayload.license,
+      responsePayload.licenseSignature,
+      'direct-activation',
+    );
+    const legacyRecord = this.records.get(echoProUnlockPluginId);
+    if (legacyRecord) {
+      this.retireLegacyEchoProPlugin(legacyRecord);
+    }
+    this.log(echoProUnlockPluginId, 'info', `echo_pro_native_activation_applied:${normalized.mode}`);
+    return {
+      ok: true,
+      mode: normalized.mode,
+      pluginId: echoProUnlockPluginId,
+      enabled: status.valid,
+      licenseId: status.licenseId,
+      activationId: status.activationId,
+      qq: status.qq ?? normalized.qq,
+      activatedAt: status.issuedAt ?? new Date().toISOString(),
+      importedFileCount: 0,
+      checksum: checksumText(JSON.stringify(responsePayload)),
+    };
   }
 
   scheduleAutoStart(): void {
@@ -1423,6 +1421,11 @@ export class PluginService {
       void (async () => {
         try {
         this.scan();
+        if (this.nativeLicenseStore.getStatus().installed) {
+          await this.nativeLicenseStore.ensureOnlineFresh().catch((error) => {
+            this.log(echoProUnlockPluginId, 'warn', `echo_pro_native_license_online_check_failed:${error instanceof Error ? error.message : String(error)}`);
+          });
+        }
         for (const record of this.records.values()) {
           if (record.enabled) {
             if (isEchoProUnlockManifest(record.manifest)) {
@@ -1513,7 +1516,9 @@ export class PluginService {
     record.disabledByHost = false;
     record.status = 'enabled';
     record.error = null;
-    if (!isEchoProUnlockManifest(record.manifest)) {
+    if (isEchoProUnlockManifest(record.manifest)) {
+      this.legacyEchoProEnabledThisSession = true;
+    } else {
       void this.startPlugin(record.manifest.id).catch((error) => this.markError(record, error));
     }
     return this.toSummary(record);
@@ -2041,8 +2046,278 @@ export class PluginService {
 
   getEchoProLicenseStatus(): EchoProPluginLicenseStatus {
     this.scanForEchoProLicenseStatus();
+    const nativeStatus = this.nativeLicenseStore.getStatus();
+    if (nativeStatus.installed) {
+      return nativeStatus;
+    }
     const record = this.records.get('echo.pro-unlock');
     return getEchoProPluginLicenseStatus(record?.manifest ?? null, record?.directory ?? null, record?.enabled === true);
+  }
+
+  getEchoProLicenseSource(): 'native-license' | 'legacy-plugin' | 'none' {
+    if (this.nativeLicenseStore.hasStoredLicense()) {
+      return 'native-license';
+    }
+    const record = this.records.get(echoProUnlockPluginId);
+    return record ? 'legacy-plugin' : 'none';
+  }
+
+  private retireLegacyEchoProPlugin(record: PluginRecord): boolean {
+    const nativeStatus = this.nativeLicenseStore.getStatus();
+    if (!nativeStatus.valid || !nativeStatus.licenseId) {
+      return false;
+    }
+    try {
+      this.assertPluginDirectoryTarget(record.directory);
+      mkdirSync(this.entitlementDirectory, { recursive: true });
+      const safeLicenseId = nativeStatus.licenseId.replace(/[^a-z0-9._-]/giu, '_');
+      let backupDirectory = join(this.entitlementDirectory, `legacy-plugin-backup-${safeLicenseId}`);
+      if (existsSync(backupDirectory)) {
+        backupDirectory = join(this.entitlementDirectory, `legacy-plugin-backup-${safeLicenseId}-${Date.now()}`);
+      }
+      this.stopPlugin(echoProUnlockPluginId);
+      renameSync(record.directory, backupDirectory);
+      delete this.state.plugins[echoProUnlockPluginId];
+      this.writeState();
+      this.records.delete(echoProUnlockPluginId);
+      this.activity.delete(echoProUnlockPluginId);
+      this.logs = this.logs.filter((entry) => entry.pluginId !== echoProUnlockPluginId);
+      this.log(echoProUnlockPluginId, 'info', 'echo_pro_legacy_plugin_retired_after_native_migration');
+      return true;
+    } catch (error) {
+      this.log(
+        echoProUnlockPluginId,
+        'warn',
+        `echo_pro_legacy_plugin_retire_failed:${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+
+  private restoreEchoProRecordAvailability(record: PluginRecord, persisted: PluginState): void {
+    record.enabled = persisted.enabled === true;
+    record.disabledByHost = false;
+    record.status = record.enabled ? 'enabled' : 'disabled';
+    record.error = null;
+  }
+
+  private async releaseEchoProOrderDevices(orderIdInput: string): Promise<EchoProPluginDeviceReleaseResult> {
+    const orderId = orderIdInput.trim();
+    if (!/^[0-9A-Za-z_-]{12,80}$/u.test(orderId)) {
+      throw new Error('echo_pro_order_release_order_id_invalid');
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), echoProActivationRequestTimeoutMs);
+    let payload: unknown;
+    try {
+      const response = await fetchWithNetworkProxy(
+        `${getEchoProActivationApiBaseUrl()}/unbind`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ orderId }),
+          signal: controller.signal,
+        },
+      );
+      if (!response.ok) {
+        const serverCode = await readEchoProActivationServerError(response);
+        throw new Error(`echo_pro_order_release_${serverCode}`);
+      }
+      payload = await response.json() as unknown;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('echo_pro_order_release_timeout');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (
+      !isRecord(payload) ||
+      payload.ok !== true ||
+      typeof payload.releasedAt !== 'string' ||
+      typeof payload.releasedCount !== 'number' ||
+      !Number.isInteger(payload.releasedCount) ||
+      typeof payload.activeCount !== 'number' ||
+      !Number.isInteger(payload.activeCount) ||
+      payload.activeCount !== 0 ||
+      !Array.isArray(payload.releasedLicenseIds) ||
+      !payload.releasedLicenseIds.every((value) => typeof value === 'string')
+    ) {
+      throw new Error('echo_pro_order_release_response_invalid');
+    }
+
+    this.scan();
+    const record = this.records.get(echoProUnlockPluginId) ?? null;
+    const currentStatus = this.getEchoProLicenseStatus();
+    const releasedLicenseIds = new Set(payload.releasedLicenseIds);
+    const releasedCurrentLicense = Boolean(
+      currentStatus.licenseId && releasedLicenseIds.has(currentStatus.licenseId),
+    );
+    let removedLocalPlugin = false;
+    try {
+      if (releasedCurrentLicense) {
+        this.nativeLicenseStore.clear(currentStatus.licenseId ?? undefined);
+      }
+      const pluginStatus = record
+        ? getEchoProPluginLicenseStatus(record.manifest, record.directory, record.enabled === true)
+        : null;
+      if (record && pluginStatus?.licenseId && releasedLicenseIds.has(pluginStatus.licenseId)) {
+        this.stopPlugin(echoProUnlockPluginId);
+        this.assertPluginDirectoryTarget(record.directory);
+        rmSync(record.directory, { force: true, recursive: true, maxRetries: 3, retryDelay: 100 });
+        this.records.delete(echoProUnlockPluginId);
+        this.activity.delete(echoProUnlockPluginId);
+        this.logs = this.logs.filter((entry) => entry.pluginId !== echoProUnlockPluginId);
+        removedLocalPlugin = true;
+      }
+      if (this.state.plugins[echoProUnlockPluginId]) {
+        delete this.state.plugins[echoProUnlockPluginId];
+        this.writeState();
+      }
+    } catch {
+      throw new Error('echo_pro_order_release_local_cleanup_failed');
+    }
+
+    return {
+      ok: true,
+      pluginId: echoProUnlockPluginId,
+      releasedAt: payload.releasedAt,
+      alreadyReleased: payload.alreadyReleased === true,
+      removedLocalPlugin,
+      releasedCount: payload.releasedCount,
+      activeCount: payload.activeCount,
+    };
+  }
+
+  async releaseEchoProCurrentDevice(orderId?: string): Promise<EchoProPluginDeviceReleaseResult> {
+    if (orderId !== undefined) {
+      return this.releaseEchoProOrderDevices(orderId);
+    }
+    this.scan();
+    const record = this.records.get(echoProUnlockPluginId) ?? null;
+    const status = this.getEchoProLicenseStatus();
+    const locallyProvenLicense = status.valid ||
+      status.reason === 'license-expired' ||
+      status.reason === 'app-version-too-old' ||
+      status.reason === 'license-revoked' ||
+      status.reason === 'online-verification-required';
+    if (
+      !locallyProvenLicense ||
+      !status.licenseId ||
+      !status.activationId ||
+      !/^[a-f0-9]{32,128}$/iu.test(status.machineCode)
+    ) {
+      throw new Error('echo_pro_device_release_local_license_invalid');
+    }
+
+    const previousState = record && this.state.plugins[echoProUnlockPluginId]
+      ? jsonClone(this.state.plugins[echoProUnlockPluginId])
+      : null;
+    const previousRecordState = record ? {
+      enabled: record.enabled,
+      disabledByHost: record.disabledByHost,
+      status: record.status,
+      error: record.error,
+    } : null;
+    if (record) {
+      this.stopPlugin(echoProUnlockPluginId);
+      this.state.plugins[echoProUnlockPluginId] = {
+        ...this.state.plugins[echoProUnlockPluginId],
+        enabled: false,
+      };
+      this.writeState();
+      record.enabled = false;
+      record.status = 'disabled';
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), echoProActivationRequestTimeoutMs);
+    let serverAcceptedRelease = false;
+    let releasedAt = '';
+    let alreadyReleased = false;
+    try {
+      const response = await fetchWithNetworkProxy(
+        `${getEchoProActivationApiBaseUrl()}/license/release-device`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            licenseId: status.licenseId,
+            activationId: status.activationId,
+            machineCode: status.machineCode,
+          }),
+          signal: controller.signal,
+        },
+      );
+      if (!response.ok) {
+        const serverCode = await readEchoProActivationServerError(response);
+        throw new Error(`echo_pro_device_release_${serverCode}`);
+      }
+      serverAcceptedRelease = true;
+      const payload = await response.json() as unknown;
+      if (
+        !isRecord(payload) ||
+        payload.ok !== true ||
+        typeof payload.releasedAt !== 'string'
+      ) {
+        throw new Error('echo_pro_device_release_response_invalid');
+      }
+      releasedAt = payload.releasedAt;
+      alreadyReleased = payload.alreadyReleased === true;
+    } catch (error) {
+      if (!serverAcceptedRelease && record && previousRecordState) {
+        if (previousState) {
+          this.state.plugins[echoProUnlockPluginId] = previousState;
+        } else {
+          delete this.state.plugins[echoProUnlockPluginId];
+        }
+        this.writeState();
+        record.enabled = previousRecordState.enabled;
+        record.disabledByHost = previousRecordState.disabledByHost;
+        record.status = previousRecordState.status;
+        record.error = previousRecordState.error;
+      }
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('echo_pro_device_release_timeout');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    let removedLocalPlugin = false;
+    try {
+      this.nativeLicenseStore.clear(status.licenseId);
+      if (record) {
+        this.assertPluginDirectoryTarget(record.directory);
+        rmSync(record.directory, { force: true, recursive: true, maxRetries: 3, retryDelay: 100 });
+        delete this.state.plugins[echoProUnlockPluginId];
+        this.writeState();
+        this.records.delete(echoProUnlockPluginId);
+        this.activity.delete(echoProUnlockPluginId);
+        this.logs = this.logs.filter((entry) => entry.pluginId !== echoProUnlockPluginId);
+        removedLocalPlugin = true;
+      }
+    } catch {
+      throw new Error('echo_pro_device_release_local_cleanup_failed');
+    }
+
+    return {
+      ok: true,
+      pluginId: echoProUnlockPluginId,
+      releasedAt,
+      alreadyReleased,
+      removedLocalPlugin,
+    };
   }
 
   async refreshEchoProLicenseOnline(record = this.records.get(echoProUnlockPluginId) ?? null): Promise<void> {
@@ -2064,8 +2339,7 @@ export class PluginService {
         ...createEchoProOnlineVerificationState(),
       };
       this.writeState();
-      record.disabledByHost = false;
-      record.error = null;
+      this.restoreEchoProRecordAvailability(record, this.state.plugins[echoProUnlockPluginId]);
       return;
     }
     if (!onlineStatus.checked && hasActiveEchoProOfflineGrace(persisted)) {
@@ -2076,6 +2350,7 @@ export class PluginService {
         lastErrorAt: new Date().toISOString(),
       };
       this.writeState();
+      this.restoreEchoProRecordAvailability(record, this.state.plugins[echoProUnlockPluginId]);
       return;
     }
     if (!onlineStatus.checked) {
@@ -2086,8 +2361,7 @@ export class PluginService {
         lastErrorAt: new Date().toISOString(),
       };
       this.writeState();
-      record.disabledByHost = false;
-      record.error = null;
+      this.restoreEchoProRecordAvailability(record, this.state.plugins[echoProUnlockPluginId]);
       this.log(echoProUnlockPluginId, 'warn', `echo_pro_license_online_${onlineStatus.reason}`);
       return;
     }
@@ -2110,6 +2384,10 @@ export class PluginService {
   }
 
   async ensureEchoProLicenseOnlineFresh(record = this.records.get(echoProUnlockPluginId) ?? null): Promise<void> {
+    if (this.nativeLicenseStore.getStatus().installed) {
+      await this.nativeLicenseStore.ensureOnlineFresh();
+      return;
+    }
     if (!record || !isEchoProUnlockManifest(record.manifest)) {
       return;
     }
@@ -2119,9 +2397,15 @@ export class PluginService {
     }
     const persisted = this.state.plugins[echoProUnlockPluginId] ?? {};
     if (hasFreshEchoProOnlineVerification(persisted)) {
+      if (persisted.disabledByHost !== true) {
+        this.restoreEchoProRecordAvailability(record, persisted);
+      }
       return;
     }
     if (hasActiveEchoProOfflineGrace(persisted) && hasRecentEchoProOnlineRetry(persisted)) {
+      if (persisted.disabledByHost !== true) {
+        this.restoreEchoProRecordAvailability(record, persisted);
+      }
       return;
     }
     await this.refreshEchoProLicenseOnline(record);
@@ -2157,8 +2441,10 @@ export class PluginService {
       let disabledByHost = persisted.disabledByHost === true;
       let hostError = persisted.lastError ?? current?.error ?? null;
       let shouldWriteState = false;
+      let echoProLicenseValid = false;
       if (isEchoProUnlockManifest(manifest)) {
         const licenseStatus = getEchoProPluginLicenseStatus(manifest, directory, persisted.enabled === true);
+        echoProLicenseValid = licenseStatus.valid;
         if (!licenseStatus.valid) {
           disabledByHost = true;
           hostError = `echo_pro_license_${licenseStatus.reason}`;
@@ -2193,13 +2479,20 @@ export class PluginService {
         }
       }
       const enabled = persisted.enabled === true && !disabledByHost;
+      const recordError = error ?? (
+        disabledByHost
+          ? hostError
+          : echoProLicenseValid
+            ? null
+            : current?.error ?? null
+      );
       this.records.set(id, {
         manifest,
         directory,
         enabled,
         trustedPermissions: this.normalizeTrustedPermissions(persisted.trustedPermissions ?? [], manifest?.permissions ?? []),
-        status: enabled ? current?.status ?? 'enabled' : 'disabled',
-        error: error ?? (disabledByHost ? hostError : current?.error ?? null),
+        status: enabled ? (echoProLicenseValid ? 'enabled' : current?.status ?? 'enabled') : 'disabled',
+        error: recordError,
         disabledByHost,
       });
       if (shouldWriteState) {
@@ -2212,6 +2505,17 @@ export class PluginService {
         this.stopPlugin(id);
         this.records.delete(id);
       }
+    }
+
+    const legacyEchoProRecord = this.records.get(echoProUnlockPluginId);
+    if (
+      legacyEchoProRecord?.directory &&
+      legacyEchoProRecord.enabled &&
+      !this.legacyEchoProEnabledThisSession &&
+      this.nativeLicenseStore.migrateFromPlugin(legacyEchoProRecord.directory)
+    ) {
+      this.log(echoProUnlockPluginId, 'info', 'echo_pro_native_license_migrated_from_plugin');
+      this.retireLegacyEchoProPlugin(legacyEchoProRecord);
     }
 
     this.lastScanCompletedAtMs = Date.now();

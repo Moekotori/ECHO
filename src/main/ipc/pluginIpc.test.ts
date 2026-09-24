@@ -7,6 +7,7 @@ const handleMock = vi.fn((channel: string, handler: (...args: unknown[]) => unkn
 });
 const getPrivatePluginOperationsMock = vi.fn();
 const requirePrivateFeatureMock = vi.fn(async () => undefined);
+const requireLocalProMock = vi.fn(() => undefined);
 const serviceMock = {
   scheduleAutoStart: vi.fn(),
   list: vi.fn(() => ({ directory: 'D:\\Echo\\plugins', plugins: [] })),
@@ -62,6 +63,10 @@ vi.mock('../plugins/privateEntitlements', () => ({
   requirePrivateFeature: requirePrivateFeatureMock,
 }));
 
+vi.mock('../plugins/LocalProEntitlements', () => ({
+  requireLocalPro: requireLocalProMock,
+}));
+
 const resetHandlers = (): void => {
   for (const key of Object.keys(handlers)) {
     delete handlers[key];
@@ -77,6 +82,7 @@ describe('plugin IPC', () => {
     getPrivatePluginOperationsMock.mockReturnValue(serviceMock);
     requirePrivateFeatureMock.mockReset();
     requirePrivateFeatureMock.mockResolvedValue(undefined);
+    requireLocalProMock.mockReset();
     vi.resetModules();
     const module = await import('./pluginIpc');
     module.registerPluginIpc();
@@ -133,7 +139,7 @@ describe('plugin IPC', () => {
     expect(serviceMock.createExample).toHaveBeenCalledWith('theme-preset');
     expect(serviceMock.enable).toHaveBeenCalledWith({ pluginId: 'echo.playback-panel' });
     expect(serviceMock.deletePlugin).toHaveBeenCalledWith('echo.playback-panel');
-    expect(requirePrivateFeatureMock).toHaveBeenCalledWith('plugins');
+    expect(requireLocalProMock).toHaveBeenCalledWith('plugins');
     expect(serviceMock.exportPackage).toHaveBeenCalledWith('echo.playback-panel');
     expect(serviceMock.importPackage).toHaveBeenCalledWith(undefined);
     expect(serviceMock.importPackage).toHaveBeenCalledWith('D:\\Echo\\plugin.echo');
@@ -177,19 +183,23 @@ describe('plugin IPC', () => {
   });
 
   it('blocks plugin package export before reaching the service when plugin export is not authorized', async () => {
-    requirePrivateFeatureMock.mockRejectedValue(new Error('echo_pro_required'));
+    requireLocalProMock.mockImplementation(() => {
+      throw new Error('echo_pro_required');
+    });
 
-    await expect(handlers[IpcChannels.PluginsExportPackage]!(null, 'echo.playback-panel'))
-      .rejects.toThrow('echo_authorization_required');
+    expect(() => handlers[IpcChannels.PluginsExportPackage]!(null, 'echo.playback-panel'))
+      .toThrow('echo_authorization_required');
 
     expect(serviceMock.exportPackage).not.toHaveBeenCalled();
   });
 
   it('blocks plugin market install before reaching the service when Pro plugins are not authorized', async () => {
-    requirePrivateFeatureMock.mockRejectedValue(new Error('echo_pro_required'));
+    requireLocalProMock.mockImplementation(() => {
+      throw new Error('echo_pro_required');
+    });
 
-    await expect(handlers[IpcChannels.PluginsInstallMarket]!(null, 'echo.market-tool'))
-      .rejects.toThrow('echo_authorization_required');
+    expect(() => handlers[IpcChannels.PluginsInstallMarket]!(null, 'echo.market-tool'))
+      .toThrow('echo_authorization_required');
 
     expect(serviceMock.installMarket).not.toHaveBeenCalled();
   });

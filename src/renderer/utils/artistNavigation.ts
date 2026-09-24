@@ -1,4 +1,5 @@
 import type { LibraryArtist, LibraryTrack } from '../../shared/types/library';
+import { translateStatic } from '../i18n/translateStatic';
 import type { DetailReturnTarget } from './albumNavigation';
 
 export const artistDetailNavigationEvent = 'app:navigate:artist-detail';
@@ -60,7 +61,7 @@ export const openArtistDetailByName = async (artistName: string, options: { retu
   }
 
   if (!library?.getArtists) {
-    throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to locate this artist.');
+    throw new Error(translateStatic('error.bridge.locateArtist'));
   }
 
   const candidates = uniqueNames([trimmedName, ...splitArtistNames(trimmedName)]);

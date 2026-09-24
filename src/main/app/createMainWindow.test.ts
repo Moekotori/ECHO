@@ -48,7 +48,7 @@ describe('resolvePreloadPath', () => {
 });
 
 describe('createMainWindowWebPreferences', () => {
-  it('keeps renderer timers unthrottled for background playback', () => {
+  it('keeps renderer timers running while playback control windows are hidden', () => {
     expect(createMainWindowWebPreferences()).toMatchObject({
       backgroundThrottling: false,
     });
@@ -95,15 +95,20 @@ describe('resolveInitialMainWindowSize', () => {
 describe('resolveMainWindowBackgroundOptions', () => {
   it('keeps the normal main window opaque when acrylic is off', () => {
     expect(resolveMainWindowBackgroundOptions({ appWindowAcrylicEnabled: false }, true)).toEqual({
-      backgroundColor: '#f7f9fc',
+      backgroundColor: '#74d3e5',
       backgroundMaterial: 'none',
     });
   });
 
   it('uses acrylic background material only when acrylic is explicitly on', () => {
     expect(resolveMainWindowBackgroundOptions({ appWindowAcrylicEnabled: true }, true)).toEqual({
-      backgroundColor: '#f7f9fc',
+      backgroundColor: '#74d3e5',
       backgroundMaterial: 'acrylic',
+    });
+
+    expect(resolveMainWindowBackgroundOptions({ appWindowAcrylicEnabled: true, lowSpecModeEnabled: true }, true)).toEqual({
+      backgroundColor: '#74d3e5',
+      backgroundMaterial: 'none',
     });
   });
 });

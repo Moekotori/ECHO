@@ -12,9 +12,21 @@ type LyricsLineProps = {
   showRomanization?: boolean;
   preferKanaPronunciation?: boolean;
   showTranslation?: boolean;
+  showTimestamp?: boolean;
   wordHighlightEnabled?: boolean;
   focusDistance?: number;
   textDirection?: 'horizontal' | 'vertical';
+};
+
+const formatLyricTimestamp = (timeMs: number): string | null => {
+  if (!Number.isFinite(timeMs) || timeMs < 0) {
+    return null;
+  }
+
+  const totalSeconds = Math.floor(timeMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
 const selectPronunciation = (
@@ -60,26 +72,18 @@ const getLyricDensity = (
   return 'short';
 };
 
-const maxRawWordHighlightSegments = 72;
-const maxRenderedWordHighlightSegments = 18;
+const maxRawWordHighlightSegments = 160;
 const minRenderableWordHighlightSegments = 2;
 const minTimedWordDurationMs = 40;
 const minLineTimingSpanMs = 220;
 const tinySegmentDurationMs = 95;
 const tinySegmentRatioLimit = 0.45;
-const phraseTargetChars = 3;
-const phraseMinDurationMs = 260;
-const phraseMaxDurationMs = 900;
-const phraseGapBoundaryMs = 210;
-const phraseBoundaryPattern = /[,.!?;:)\u3001\u3002\uff0c\uff01\uff1f\uff1b\uff1a\u2026]\s*$/u;
 
 const renderableWordsCache = new WeakMap<LyricLineType, readonly LyricWordTiming[] | null>();
 
 const lyricTextLength = (value: string): number => Array.from(value.replace(/\s+/gu, '')).length;
 
 const hasWhitespace = (value: string): boolean => /\s/u.test(value);
-
-const isPhraseBoundary = (value: string): boolean => phraseBoundaryPattern.test(value);
 
 const normalizeTimingText = (value: string): string => value.replace(/\s+/gu, ' ').trim();
 const normalizeCompactTimingText = (value: string): string => value.replace(/\s+/gu, '').trim();
@@ -139,106 +143,6 @@ const getSegmentDurationMs = (words: readonly LyricWordTiming[], index: number):
   return endMs === null ? null : endMs - words[index].startMs;
 };
 
-const shouldCoalesceWordTimings = (words: readonly LyricWordTiming[], lineText: string): boolean => {
-  if (words.length <= maxRenderedWordHighlightSegments) {
-    const compactLength = lyricTextLength(lineText);
-    return compactLength > 0 && !hasWhitespace(lineText) && words.length >= 7 && compactLength / words.length <= 1.35;
-  }
-
-  return true;
-};
-
-const mergeOverflowingWordTimingPhrases = (
-  phrases: readonly LyricWordTiming[],
-  maxSegments: number,
-): LyricWordTiming[] => {
-  const merged = [...phrases];
-
-  while (merged.length > maxSegments) {
-    let bestIndex = 0;
-    let bestScore = Number.POSITIVE_INFINITY;
-
-    for (let index = 0; index < merged.length - 1; index += 1) {
-      const current = merged[index];
-      const next = merged[index + 1];
-      const currentEndMs = current.endMs ?? next.startMs;
-      const gapMs = Math.max(0, next.startMs - currentEndMs);
-      const combinedEndMs = next.endMs ?? currentEndMs;
-      const combinedDurationMs = Math.max(0, combinedEndMs - current.startMs);
-      const combinedChars = lyricTextLength(current.text) + lyricTextLength(next.text);
-      const punctuationPenalty = isPhraseBoundary(current.text) ? 500 : 0;
-      const score = gapMs * 4 + combinedDurationMs + combinedChars * 18 + punctuationPenalty;
-
-      if (score < bestScore) {
-        bestScore = score;
-        bestIndex = index;
-      }
-    }
-
-    const current = merged[bestIndex];
-    const next = merged[bestIndex + 1];
-    merged.splice(bestIndex, 2, {
-      text: `${current.text}${next.text}`,
-      startMs: current.startMs,
-      endMs: next.endMs ?? current.endMs,
-    });
-  }
-
-  return merged;
-};
-
-const coalesceWordTimings = (
-  words: readonly LyricWordTiming[],
-  maxSegments = maxRenderedWordHighlightSegments,
-): LyricWordTiming[] => {
-  const phrases: LyricWordTiming[] = [];
-  let phraseStart = 0;
-  let phraseText = '';
-  let phraseChars = 0;
-  const totalChars = Math.max(1, words.reduce((total, word) => total + lyricTextLength(word.text), 0));
-  const firstStartMs = words[0]?.startMs ?? 0;
-  const lastEndMs = getSegmentEndMs(words, words.length - 1) ?? words[words.length - 1]?.startMs ?? firstStartMs;
-  const totalDurationMs = Math.max(phraseMinDurationMs, lastEndMs - firstStartMs);
-  const dynamicTargetChars = Math.max(phraseTargetChars, Math.ceil(totalChars / Math.max(1, maxSegments)));
-  const dynamicMinDurationMs = Math.max(
-    phraseMinDurationMs,
-    Math.min(620, Math.round((totalDurationMs / Math.max(1, maxSegments)) * 0.9)),
-  );
-
-  for (let index = 0; index < words.length; index += 1) {
-    const word = words[index];
-    if (!phraseText) {
-      phraseStart = word.startMs;
-    }
-
-    phraseText += word.text;
-    phraseChars += lyricTextLength(word.text);
-
-    const endMs = getSegmentEndMs(words, index);
-    const nextStartMs = words[index + 1]?.startMs ?? null;
-    const phraseDurationMs = endMs === null ? 0 : endMs - phraseStart;
-    const nextGapMs = endMs !== null && nextStartMs !== null ? nextStartMs - endMs : 0;
-    const shouldClose =
-      index === words.length - 1 ||
-      nextGapMs >= phraseGapBoundaryMs ||
-      (phraseChars >= dynamicTargetChars && phraseDurationMs >= dynamicMinDurationMs) ||
-      phraseDurationMs >= phraseMaxDurationMs ||
-      isPhraseBoundary(word.text);
-
-    if (shouldClose) {
-      phrases.push({
-        text: phraseText,
-        startMs: phraseStart,
-        endMs,
-      });
-      phraseText = '';
-      phraseChars = 0;
-    }
-  }
-
-  return mergeOverflowingWordTimingPhrases(phrases, maxSegments);
-};
-
 export const getRenderableLyricWords = (line: LyricLineType): readonly LyricWordTiming[] | null => {
   const cached = renderableWordsCache.get(line);
   if (cached !== undefined) {
@@ -292,14 +196,10 @@ export const getRenderableLyricWords = (line: LyricLineType): readonly LyricWord
     return null;
   }
 
-  const spacedSourceWords = preserveLineSpacingInWordTimings(line.text, sourceWords);
-  const renderableWords = shouldCoalesceWordTimings(spacedSourceWords, line.text)
-    ? coalesceWordTimings(spacedSourceWords, maxRenderedWordHighlightSegments)
-    : [...spacedSourceWords];
-
+  const renderableWords = [...preserveLineSpacingInWordTimings(line.text, sourceWords)];
   const result =
     renderableWords.length >= minRenderableWordHighlightSegments &&
-    renderableWords.length <= maxRenderedWordHighlightSegments &&
+    renderableWords.length <= maxRawWordHighlightSegments &&
     wordsMatchLineText(line, renderableWords)
       ? renderableWords
       : null;
@@ -313,10 +213,11 @@ export const LyricsLine = ({
   line,
   onSeek,
   past,
-  seekable = true,
+  seekable = false,
   showRomanization = true,
   preferKanaPronunciation = false,
   showTranslation = true,
+  showTimestamp = false,
   wordHighlightEnabled = true,
   focusDistance = 4,
   textDirection = 'horizontal',
@@ -326,9 +227,10 @@ export const LyricsLine = ({
   const visibleSecondaryLines =
     (showRomanization && pronunciation ? 1 : 0) +
     (showTranslation && line.translation ? 1 : 0);
-  const renderableWords = wordHighlightEnabled ? getRenderableLyricWords(line) : null;
+  const renderableWords = wordHighlightEnabled && active ? getRenderableLyricWords(line) : null;
   const hasWordHighlight = Boolean(renderableWords);
   const isVerticalText = textDirection === 'vertical';
+  const timestamp = showTimestamp ? formatLyricTimestamp(line.timeMs) : null;
 
   return (
     <button
@@ -389,6 +291,11 @@ export const LyricsLine = ({
           </em>
         ) : null}
       </span>
+      {timestamp ? (
+        <time className="lyrics-line-time" aria-hidden="true">
+          {timestamp}
+        </time>
+      ) : null}
     </button>
   );
 };

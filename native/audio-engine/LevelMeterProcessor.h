@@ -42,6 +42,7 @@ private:
     Callback callback;
     std::vector<float> peakSquares;
     std::vector<float> rmsSquares;
+    LevelMeterSnapshot callbackSnapshot;
     double samplesSinceReport = 0.0;
     double sampleRate = 44100.0;
     int channelCount = 0;

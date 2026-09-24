@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ChevronRight, Clock3, Headphones, RefreshCw, Search, Star, X } from 'lucide-react';
 import type { EqState } from '../../../shared/types/eq';
 import type {
@@ -14,6 +14,7 @@ import { computeEqResponseGainDbAtFrequency, formatFrequencyLabel } from './eqPa
 
 type HeadphoneCorrectionPanelProps = {
   eqState: EqState;
+  showTitle?: boolean;
   onApplied?: (state: EqState) => void;
   onAppliedStatusRefresh?: () => Promise<void> | void;
 };
@@ -189,11 +190,66 @@ const headphoneCorrectionTextEnUS: Record<HeadphoneCorrectionTextKey, string> = 
   'vendor.stats': '{productCount} models / {eqCount} presets',
 };
 
+const headphoneCorrectionTextKoKR: Record<HeadphoneCorrectionTextKey, string> = {
+  'action.apply': '헤드폰 보정 적용',
+  'action.openSource': '소스 열기',
+  'aria.favorites': '즐겨찾는 모델',
+  'aria.panel': '헤드폰 보정',
+  'aria.preview': '헤드폰 보정 미리보기',
+  'aria.products': '헤드폰 모델',
+  'aria.recent': '최근 사용',
+  'aria.search': '모델 또는 제조사 검색',
+  'aria.vendors': '모든 제조사',
+  'control.detail.empty': '사용하기 전에 모델과 프리셋을 선택하세요',
+  'control.status.disabled': '사용 안 함',
+  'control.status.enabled': '사용 중',
+  'control.status.noPreset': '프리셋 미선택',
+  'control.toggle.enable': '사용',
+  'control.toggle.on': '사용 중',
+  'curve.aria': 'OPRA EQ 곡선 미리보기',
+  'empty.detail': '제조사 또는 모델로 찾아 맞는 보정 프리셋을 선택하세요.',
+  'empty.title': '프리셋 미선택',
+  'favorite.add': '모델 즐겨찾기',
+  'favorite.remove': '즐겨찾기 해제',
+  'intro.detail': 'OPRA는 커뮤니티가 유지하는 개방형 헤드폰 모델 및 EQ 보정 곡선 카탈로그입니다. 제조사별로 둘러보거나 모델을 바로 검색하세요.',
+  'intro.kicker': 'OPRA by Roon',
+  'message.applied': '{vendor} {product} 적용됨',
+  'message.cacheEmpty': 'OPRA 데이터베이스가 아직 캐시되지 않았습니다. 라이브러리를 새로고침해 브랜드와 모델을 가져오세요.',
+  'message.chooseBeforeEnable': '먼저 제조사, 모델, 프리셋을 선택하세요.',
+  'message.disabled': '헤드폰 보정이 꺼져 있습니다.',
+  'message.enabled': '헤드폰 보정이 켜져 있습니다.',
+  'message.noMatches': '일치하는 헤드폰 모델을 찾지 못했습니다.',
+  'message.unavailable': '헤드폰 보정 데이터베이스를 사용할 수 없습니다.',
+  'metric.adjusted': '조정',
+  'metric.filters': 'OPRA 필터',
+  'metric.preamp': '프리앰프',
+  'preset.filterCount': 'OPRA 필터 {count}개',
+  'preset.panel.empty': '제조사와 모델을 선택하면 사용 가능한 프리셋이 표시됩니다.',
+  'product.presetCount.many': '프리셋 {count}개',
+  'product.presetCount.one': '프리셋 {count}개',
+  'search.clear': '검색 지우기',
+  'search.placeholder': '모델 이름 또는 제조사로 검색',
+  'search.refresh': '라이브러리 새로고침',
+  'search.submit': '검색',
+  'shortcut.favorites': '즐겨찾는 모델',
+  'shortcut.recent': '최근 사용',
+  'status.eqCount': '곡선 {count}개',
+  'status.productCount': '헤드폰 {count}개',
+  'status.source.cache': '로컬 캐시',
+  'status.source.empty': '캐시 없음',
+  'status.source.network': '방금 업데이트',
+  'status.vendorCount': '브랜드 {count}개',
+  title: '헤드폰 보정',
+  'vendors.all': '모든 제조사',
+  'vendor.stats': '모델 {productCount}개 / 프리셋 {eqCount}개',
+};
+
 const headphoneCorrectionTexts: Record<Locale, Record<HeadphoneCorrectionTextKey, string>> = {
   'zh-CN': headphoneCorrectionTextZhCN,
   'zh-TW': headphoneCorrectionTextZhCN,
   'ja-JP': headphoneCorrectionTextEnUS,
   'en-US': headphoneCorrectionTextEnUS,
+  'ko-KR': headphoneCorrectionTextKoKR,
 };
 
 const interpolateText = (text: string, options?: HeadphoneCorrectionTranslateOptions): string => {
@@ -303,7 +359,7 @@ const previewToStoredProduct = (preview: OpraHeadphoneCorrectionPreview): Stored
   assetUrl: null,
 });
 
-export const HeadphoneCorrectionPanel = ({ eqState, onApplied, onAppliedStatusRefresh }: HeadphoneCorrectionPanelProps): JSX.Element => {
+export const HeadphoneCorrectionPanel = ({ eqState, showTitle = true, onApplied, onAppliedStatusRefresh }: HeadphoneCorrectionPanelProps): JSX.Element => {
   const i18n = useOptionalI18n();
   const localText = headphoneCorrectionTexts[i18n?.locale ?? 'zh-CN'] ?? headphoneCorrectionTextZhCN;
   const t = useCallback((key: HeadphoneCorrectionTextKey, options?: HeadphoneCorrectionTranslateOptions): string => {
@@ -318,6 +374,7 @@ export const HeadphoneCorrectionPanel = ({ eqState, onApplied, onAppliedStatusRe
   const [message, setMessage] = useState<string | null>(null);
   const [favoriteProducts, setFavoriteProducts] = useState<StoredHeadphoneProduct[]>(() => readStoredProducts(opraFavoriteProductsStorageKey));
   const [recentProducts, setRecentProducts] = useState<StoredHeadphoneProduct[]>(() => readStoredProducts(opraRecentProductsStorageKey));
+  const presetPanelRef = useRef<HTMLDivElement | null>(null);
 
   const selectedProduct = useMemo<OpraHeadphoneCorrectionProductResult | null>(() => {
     if (!browse) {
@@ -460,6 +517,18 @@ export const HeadphoneCorrectionPanel = ({ eqState, onApplied, onAppliedStatusRe
     }
   }, [onApplied, onAppliedStatusRefresh, rememberRecentProduct, t]);
 
+  const openProductPresets = (product: OpraHeadphoneCorrectionProductResult): void => {
+    chooseProduct(product);
+    if (product.eqs.length === 1) {
+      void applyCorrection(product.eqs[0]);
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      presetPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  };
+
   const toggleHeadphoneCorrection = useCallback(async (): Promise<void> => {
     const eq = getEqBridge();
     if (!eq) {
@@ -492,10 +561,10 @@ export const HeadphoneCorrectionPanel = ({ eqState, onApplied, onAppliedStatusRe
   }, [applyCorrection, eqState.enabled, hasAppliedHeadphoneCorrection, onApplied, onAppliedStatusRefresh, selectedPreview, t]);
 
   return (
-    <section className="opra-browser" aria-label={t('aria.panel')}>
+    <section className="opra-browser" aria-label={t('aria.panel')} data-has-selection={Boolean(selectedProduct)}>
       <header className="opra-browser-control">
         <div>
-          <span>{t('title')}</span>
+          {showTitle ? <span>{t('title')}</span> : null}
           <strong>{headphoneCorrectionEnabled ? t('control.status.enabled') : hasAppliedHeadphoneCorrection ? t('control.status.disabled') : t('control.status.noPreset')}</strong>
           <small>{controlDetail}</small>
         </div>
@@ -512,10 +581,12 @@ export const HeadphoneCorrectionPanel = ({ eqState, onApplied, onAppliedStatusRe
       </header>
       <div className="opra-browser-main">
         <header className="opra-browser-intro">
-          <div>
-            <span>{t('intro.kicker')}</span>
-            <strong>{t('title')}</strong>
-          </div>
+          {showTitle ? (
+            <div>
+              <span>{t('intro.kicker')}</span>
+              <strong>{t('title')}</strong>
+            </div>
+          ) : null}
           <p>{t('intro.detail')}</p>
         </header>
 
@@ -625,9 +696,17 @@ export const HeadphoneCorrectionPanel = ({ eqState, onApplied, onAppliedStatusRe
                 type="button"
                 data-active={selectedProduct?.productId === product.productId}
                 key={product.productId}
-                onClick={() => chooseProduct(product)}
+                onClick={(event) => {
+                  if (event.detail >= 2) {
+                    openProductPresets(product);
+                    return;
+                  }
+                  chooseProduct(product);
+                }}
               >
-                {product.assetUrl ? <img src={product.assetUrl} alt="" loading="lazy" /> : <Headphones size={34} aria-hidden="true" />}
+                <span className="opra-product-art" aria-hidden="true">
+                  {product.assetUrl ? <img src={product.assetUrl} alt="" loading="lazy" /> : <Headphones size={34} />}
+                </span>
                 <span>
                   <strong>{product.productName}</strong>
                   <small>{product.vendorName}</small>
@@ -677,11 +756,13 @@ export const HeadphoneCorrectionPanel = ({ eqState, onApplied, onAppliedStatusRe
           ) : null}
         </div>
 
-        <div className="opra-preset-panel">
+        <div className="opra-preset-panel" ref={presetPanelRef}>
           {selectedProduct ? (
             <>
               <div className="opra-selected-product">
-                {selectedProduct.assetUrl ? <img src={selectedProduct.assetUrl} alt="" loading="lazy" /> : <Headphones size={36} aria-hidden="true" />}
+                <span className="opra-product-art" aria-hidden="true">
+                  {selectedProduct.assetUrl ? <img src={selectedProduct.assetUrl} alt="" loading="lazy" /> : <Headphones size={36} />}
+                </span>
                 <span>
                   <small>{selectedProduct.vendorName}</small>
                   <strong>{selectedProduct.productName}</strong>

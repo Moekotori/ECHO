@@ -60,7 +60,7 @@ type LyricsBackfillAttemptRow = {
 const maxStoredErrors = 100;
 const maxLimit = 20000;
 const pageSize = 500;
-const defaultBackfillAutoAcceptScore = 0.45;
+const defaultBackfillAutoAcceptScore = 0.78;
 const playbackConcurrency = 4;
 const playbackSlotWaitMs = 500;
 const playbackInterTrackDelayMs = 150;
@@ -132,7 +132,7 @@ const normalizeConcurrency = (value: unknown, fallback: number): number => {
 
 const normalizeAutoAcceptScore = (value: unknown, fallback = defaultBackfillAutoAcceptScore): number => {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(0.3, Math.min(0.95, parsed)) : fallback;
+  return Number.isFinite(parsed) ? Math.max(0.78, Math.min(0.95, parsed)) : fallback;
 };
 
 const isUsableLyrics = (lyrics: TrackLyrics | null): boolean =>
@@ -165,6 +165,7 @@ const normalizeRunOptions = (options: LyricsBackfillStartOptions = {}): Normaliz
 const lookupOptionsFor = (mode: LyricsBackfillMode, autoAcceptScore: number): LyricsLookupOptions => ({
   ...modeDefaults[mode].lookupOptions,
   autoAcceptScore,
+  autoApply: true,
   relaxedAutoAccept: true,
 });
 
@@ -715,18 +716,18 @@ export class LyricsBackfillJobQueue {
       }
     } catch (error) {
       this.pushError(job, `${track.title || track.path}: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      if (this.disposed) {
-        return;
-      }
-
-      job.processedTracks += 1;
-      const attempted = this.attemptedTrackIds.get(job.id) ?? new Set<string>();
-      attempted.add(track.id);
-      this.attemptedTrackIds.set(job.id, attempted);
-      this.queueAttemptedTrackId(job.id, track.id);
-      this.persistJob(job);
     }
+
+    if (this.disposed) {
+      return;
+    }
+
+    job.processedTracks += 1;
+    const attempted = this.attemptedTrackIds.get(job.id) ?? new Set<string>();
+    attempted.add(track.id);
+    this.attemptedTrackIds.set(job.id, attempted);
+    this.queueAttemptedTrackId(job.id, track.id);
+    this.persistJob(job);
   }
 
   private hasCachedLyrics(lyricsService: LyricsServiceLike, track: LibraryTrack): boolean {

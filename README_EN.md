@@ -1,357 +1,342 @@
 <p align="center">
-  <a href="https://echonext.moe/zh/">
-    <img src="https://echonext.moe/assets/product/brand-art-1200.webp" width="880" alt="ECHO NEXT" />
-  </a>
+  <img src="./build-resources/icons/logo.png" alt="ECHO NEXT" width="520" />
 </p>
 
-<h1 align="center">ECHO Community</h1>
+<h1 align="center">ECHO Developers</h1>
 
 <p align="center">
-  <strong>A desktop player built for music you actually own.</strong><br />
-  Serious library management, resilient playback, native HiFi output, and an audio chain you can inspect.
+  <strong>ECHO NEXT developer entrypoint: local development, audio pipeline, packaging, validation, and contribution boundaries.</strong>
 </p>
 
 <p align="center">
-  <img alt="Status" src="https://img.shields.io/badge/status-actively%20maintained-7c5cff?style=flat-square" />
-  <img alt="Edition" src="https://img.shields.io/badge/edition-community-22c55e?style=flat-square" />
-  <img alt="License" src="https://img.shields.io/badge/license-LGPL--3.0-7c5cff?style=flat-square" />
-  <img alt="Focus" src="https://img.shields.io/badge/focus-local%20music%20%26%20HiFi-0ea5e9?style=flat-square" />
-</p>
-
-<p align="center">
-  <a href="https://github.com/Moekotori/ECHO/releases">
-    <img alt="Downloads" src="https://img.shields.io/github/downloads/Moekotori/ECHO/total?style=flat-square&logo=github&label=downloads&color=22c55e" />
-  </a>
-  <a href="https://github.com/Moekotori/ECHO">
-    <img alt="GitHub Stars" src="https://img.shields.io/github/stars/Moekotori/ECHO?style=flat-square&logo=github&label=stars&color=fbbf24" />
-  </a>
-</p>
-
-<p align="center">
-  <a href="./README.md">中文</a>
-  ·
-  <a href="https://echonext.moe/zh/">Official site</a>
-  ·
-  <a href="https://echonext.moe/zh/download/">Download Community</a>
-  ·
-  <a href="https://www.ifdian.net/a/echonext">Buy Steam Ver.</a>
-  ·
-  <a href="https://echonext.moe/zh/docs/">Documentation</a>
-  ·
-  <a href="https://echonext.moe/zh/changelog/">Changelog</a>
-  ·
-  <a href="https://github.com/Moekotori/ECHO/issues">Issues</a>
+  <a href="./README.md">Chinese README</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#current-focus">Current Focus</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#quick-start">Quick Start</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#build-dependencies">Build Dependencies</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#common-commands">Common Commands</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#architecture-boundaries">Architecture</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#documentation">Documentation</a>
 </p>
 
 ---
 
-## Why the project reopened
+## Project Scope
 
-ECHO was briefly closed after months of harassment, two repository-vandalism incidents, and accusations that the project was “open source only to sell something.” Those events made sharing feel unsafe, so the source was taken down to protect the project and its maintainer.
+ECHO NEXT is the next-generation desktop music player in the ECHO family. This repository is for development, debugging, packaging, and contribution work. It is not a product landing page or the main user manual. For installation, feature usage, and troubleshooting, see the [official ECHO NEXT documentation](https://echonext.moe/zh/docs/) or [docs/USER_GUIDE.md](./docs/USER_GUIDE.md).
 
-That decision has been reversed. **ECHO is open again.** The source lives in this repository. Docs and contribution paths will keep being cleaned up.
+This README keeps the material developers need to move safely: how to start, where to change code, how to build, what to validate, and which boundaries must stay intact. Development priorities are stable local playback, reliable library data, clear audio boundaries, user data safety, and maintainable feature boundaries. For large PRs, cross-module changes, database migrations, playback pipeline work, native host work, packaging / release work, or entitlement / integrity / Pro feature work, notify the maintainers before starting a broad implementation.
 
-If you learn from ECHO’s design or code, leaving a name or a link is enough. Use, copy, and distribute the project under the repository license. **Large PRs will not be merged.** Community development is now mostly in your hands: if you find a bug, try to fix it and open a small, reviewable Pull Request.
+## Current Focus
 
-## What Community edition is
+| Area | Current focus |
+| --- | --- |
+| Playback stability | Audio Core is the source of truth for playback; state, position, output device, fallback, and error reasons must stay explainable. |
+| Audio / DSP | ECHO SRC, EQ, ReplayGain, PCM dither, channel processing, and safety limits must honestly mark their bit-perfect impact. |
+| Annoying but important SDM | We are working on PCM -> SDM / DSD64-DSD512, DSD passthrough, DoP / ASIO Native DSD, CPU / CUDA compute, and explainable fallback. This is a high-risk experimental path: when device or output-mode requirements are not met, it must visibly fall back to PCM, and UI/status must never pretend SDM is active. |
+| Library and data | Scanning, metadata, covers, playlists, remote sources, and import flows must protect user data; migrations need compatibility and rollback thinking. |
+| Build and release | Dev/base builds may reuse safely verified artifacts; release builds must keep integrity signing, authorization checks, and Pro / paid features fail-closed. |
 
-This repository is **ECHO Community**.
+## Tech Stack
 
-It is the open-source desktop player: local library, playback, HiFi output, DSP, and the extra Community capabilities that already exist here. It is **not** a full copy of the Steam edition and does not include the Workshop ecosystem.
+| Area | Current choice |
+| --- | --- |
+| Desktop runtime | Electron 42.x |
+| Build framework | electron-vite 5.x, Vite 7.x |
+| UI | React 18.2, TypeScript 5.x |
+| Packaging | electron-builder 26.x, NSIS, portable, AppImage, deb |
+| Library | SQLite, better-sqlite3, native scanner, metadata worker |
+| Audio | HTML Audio fallback, Native Audio Host, WASAPI Shared / Exclusive, ASIO, DSD / DoP |
+| DSP / HiFi | ECHO SRC, PCM dither, ECHO SDM / DSD, CPU / CUDA experimental compute |
+| Extensions | Plugin SDK, remote sources, network metadata, downloader, LAN playback features |
 
-We will **slow down Community releases**. Official effort moves to Steam. Community is maintained together: if you hit a bug, try fixing it and send a Pull Request. Serious issues can still be reported, but Community is no longer the weekly official train.
+Versions in [package.json](./package.json) and [package-lock.json](./package-lock.json) are authoritative. If docs disagree with the lockfile, trust the lockfile and submit a docs fix.
 
-Want the full ecosystem (Workshop themes, lyric scenes, visualizers, DSP presets, and ongoing official updates)? Buy **ECHO Steam Ver.**:
+## Repository Layout
 
-<p align="center">
-  <a href="https://www.ifdian.net/a/echonext"><strong>Get ECHO Steam Ver. →</strong></a>
-</p>
+| Path | Purpose |
+| --- | --- |
+| `src/renderer` | React pages, components, state, and UI interaction |
+| `src/preload` | Typed bridge APIs exposed to the renderer |
+| `src/main` | Electron main process, IPC, services, library, playback, settings, and system integration |
+| `src/shared` | Shared types, constants, and pure utilities used across main, preload, and renderer |
+| `electron-app` | Native hosts, build artifacts, FFmpeg toolchain, and packaging resources |
+| `native` | Native modules and host-related source |
+| `scripts` | Build, verification, repair, packaging, smoke-test, and maintenance scripts |
+| `docs` | Architecture, library, audio, plugin, Linux build, and UI documentation |
+| `build-resources` | Icons, installer resources, and build assets |
 
-Do not treat the two trees as the same product. Community is broader, slower, and PR-driven. Steam is narrower, with Workshop and the official update line.
-
-| | Community (this repo) | ECHO Steam Ver. |
-| :--- | :--- | :--- |
-| Role | Open-source edition, maintained together | Full-ecosystem Steam release |
-| Updates | Lower frequency; fix bugs via PR | Official update line |
-| License / source | This repo, `LGPL-3.0-only` | Assembled separately under Steam distribution rules |
-| Local library / DSP / HiFi output | Yes | Yes |
-| Remote libraries | Yes | Yes (user-owned NAS / servers / media libraries) |
-| Third-party music platforms / downloaders / online MV | Community may keep existing capabilities | Not provided |
-| Steam Workshop | No | Themes, lyric scenes, visualizers, DSP, and related content |
-| Platforms | Follow this repo’s release notes | Windows is the current Steam mainline; Linux / macOS are not Steam-supported claims yet |
-
-Anyone who purchased ECHO Pro before **15 August 2026** still receives the Steam CD Key, contributor-list, and merch benefits promised at that time. That limited offer has ended. The Steam store page is not public yet; buy through [Afdian](https://www.ifdian.net/a/echonext) for now.
-
-## Meet ECHO NEXT
-
-ECHO NEXT is a desktop music player engineered for large local libraries, native audio output, and professional DSP. It is not a web player wrapped in Electron, and it does not stop at “the file plays.” Scanning, metadata, covers, queues, decoding, DSP, device routing, and playback truth are treated as separate systems with explicit ownership.
-
-| LOCAL LIBRARY | DSP CENTER | NATIVE OUTPUT |
-| :--- | :--- | :--- |
-| Folder scanning, SQLite, tags, covers, album wall, playlists | Parametric EQ, headroom, FIR, OPRA, channel tools, output safety | WASAPI Shared / Exclusive, ASIO, DSD / DoP, HQPlayer |
-
-> [!NOTE]
-> Source is public again. License terms and third-party material follow the files currently in this repository.
-
-## Recent engineering highlights — July 2026
-
-This development wave has been less about adding another shiny toggle and more about rebuilding the parts that determine whether a music player still feels solid after ten thousand tracks, a device switch, a seek, or a decoder error.
-
-| Area | What changed |
-| :--- | :--- |
-| Native library scanner | A session-resident C++ scanner now streams bounded batches, progress, directory snapshots, and diagnostics into the library pipeline. Incremental rescans can replay clean snapshots and send only dirty subtrees through the native walker. |
-| Scanner performance | Five synthetic 10,000-file parity runs matched the TypeScript scanner's file/stat/snapshot output. The native file walk measured a median **4.57× speedup** in that focused benchmark. Results vary by disk, filesystem, folder shape, antivirus, and hardware. |
-| Native audio data plane | Local file I/O, libav decoding, seek/prefetch, ECHO SRC, dither, SDM routing, FIFO/drain handling, and device output now live in the native audio host instead of riding on Electron's scheduling loop. |
-| Playback resilience | Recent work tightened gapless queue transitions, HTTP-source playback, ALAC and DSD-container paths, output ownership, playback-speed buffering, and bounded recovery from malformed decoder frames. |
-| Honest signal-path UI | The player exposes source format, processing stages, sample-rate changes, output mode, device state, bit-perfect candidacy, and fallback reasons instead of compressing the entire chain into one “HiFi” badge. |
-| ECHO Everything Connected | ECHO Link is being built on a host-centered event and action core, with a focused mobile remote and provider-aware control path rather than a second, competing playback state machine. |
-
-The scanner number above is a reproducible engineering result, not a promise that every library will scan exactly 4.57 times faster. We keep the TypeScript implementation as a safe fallback, and experimental native paths are rolled out only when they beat the existing path without weakening correctness.
-
-## The scanner: fast is useful only when the library stays correct
-
-Large-library performance starts before SQLite. ECHO's scanner is designed as a streaming worker, not a giant recursive call that blocks the app and returns one enormous array at the end.
+## Architecture Boundaries
 
 ```text
-FOLDER ROOT
-    |
-    +-- clean directory snapshot ----> replay known entries
-    |
-    +-- dirty / new subtree ----------> native C++ walker
-                                            |
-                                      bounded batches
-                                      progress + errors
-                                      size + mtime
-                                      fresh snapshots
-                                            |
-                                      Scan Job Queue
-                                            |
-                                 metadata / cover workers
-                                            |
-                                    SQLite transaction
-                                            |
-                                   paged library views
+React Renderer
+  pages, components, virtual lists, settings, player controls
+        |
+Typed Preload Bridge
+        |
+Electron Main Process
+  IPC, windows, lifecycle, services, system integration
+        |
+        +-- Library Core
+        |     SQLite, scans, metadata, covers, folders, playlists
+        |
+        +-- Audio Core
+        |     AudioSession, decoder pipeline, output bridge, DSD / SDM / SRC state
+        |
+        +-- Native Hosts
+        |     echo-audio-host, echo-src-cuda-worker, WASAPI, ASIO, EQ, SMTC helper
+        |
+        +-- Experience Services
+              lyrics, MV, streaming, downloads, plugins, remote sources
 ```
 
-What matters in practice:
+The renderer owns interaction and presentation. It must not directly scan folders, generate covers, parse audio files, or calculate authoritative playback state. The main process exposes controlled capabilities through typed IPC, while heavy work is routed to Library Core, Audio Core, native hosts, or dedicated services.
 
-- **Incremental by design.** Clean directory snapshots can be reused; changed subtrees are scanned again.
-- **Bounded and cancellable.** Results stream in batches, scan progress stays visible, and background work can be stopped.
-- **Parity before speed.** Paths, file sizes, modification times, snapshot entries, long paths, and non-ASCII names are part of validation.
-- **Failure-aware fallback.** If the native worker fails before emitting results, ECHO can return to the TypeScript scanner. It does not blindly restart after partial output and duplicate tracks.
-- **Background manners.** The native worker can run at reduced priority and shuts down after an idle period instead of living forever.
-- **Separate jobs, separate truths.** File discovery, metadata parsing, cover generation, and database writes remain independent stages, so a faster walker cannot silently redefine tags or albums.
+See [docs/ECHO_NEXT_ARCHITECTURE.md](./docs/ECHO_NEXT_ARCHITECTURE.md) for the full architecture notes.
 
-## ECHO Audio Engine
+## Build Dependencies
 
-ECHO NEXT does not hide its audio engine behind a single “sound enhancement” switch. The current source, processing stages, sample-rate changes, output mode, device state, bit-perfect candidacy, and fallback reason should all be inspectable.
+Common dependencies:
 
-### Control plane and real-time data plane
+| Dependency | Recommended version / requirement |
+| --- | --- |
+| Node.js | 22.23.1 LTS (pinned by `.nvmrc`, `.node-version`, and Volta; minimum 22.23) |
+| npm | 10.8.2 (pinned by `package.json#packageManager`) |
+| Git | 2.x |
+| Python | 3.x, used by parts of the native dependency toolchain |
+| C++ toolchain | C++17-capable |
+| CMake | 3.24 or newer is safer |
+| Electron | Use the version pinned by `package-lock.json`; do not upgrade manually |
 
-```text
-RENDERER
-play / pause / seek / settings / visible state
-    |
-    | typed IPC
-    v
-AUDIO SESSION
-path selection / device plan / DSP plan / fallback explanation
-    |
-    | ordered JSON-RPC control
-    v
-NATIVE AUDIO HOST
-    |
-    +-- AudioDaemon + libav
-    |     file or HTTP read / probe / decode / seek / prefetch
-    |
-    +-- NativePlaybackPipeline
-    |     ECHO SRC / PCM / DoP / Native DSD / SDM routing
-    |
-    +-- Native ring source
-    |     FIFO / pause / generation / input-ended / drain / frame counter
-    |
-    +-- Callback DSP
-    |     EQ / convolution / channel tools / headroom / ReplayGain / dither
-    |
-    +-- Device backend
-          WASAPI Shared / Exclusive / ASIO
-    |
-    v
-DAC / AUDIO INTERFACE
+Platform dependencies:
+
+| Platform | Requirements |
+| --- | --- |
+| Windows build tools | Visual Studio 2022 Desktop development with C++ |
+| Windows packaging tools | NSIS is handled by electron-builder; FFmpeg and yt-dlp are prepared from pinned manifests by the Windows build scripts |
+| Linux build tools | CMake, g++, pkg-config, fakeroot, dpkg, rpm, binutils |
+| Linux audio / desktop dependencies | ALSA, JACK, X11, fontconfig, freetype, GTK / NSS / XSS / XTest / DRM / GBM runtime libraries |
+| Linux FFmpeg | x64 executable with at least `aresample`; see [Linux Build Guide](./docs/ECHO_NEXT_LINUX_BUILD.md) for the full checklist |
+
+Common Ubuntu / Debian packages:
+
+```bash
+sudo apt update
+sudo apt install cmake g++ pkg-config fakeroot dpkg rpm binutils
+sudo apt install libasound2-dev libjack-jackd2-dev libfreetype-dev libfontconfig1-dev
+sudo apt install libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev
+sudo apt install libgtk-3-0 libnss3 libxss1 libxtst6 libdrm2 libgbm1
 ```
 
-This boundary is deliberate:
+## Mainland China Mirrors
 
-- Electron plans and controls playback; it does not carry real-time PCM for the native local path.
-- Playback position comes from the native output frame counter, not a UI timer.
-- Decoder EOF means “no more input.” A track ends only after the output FIFO has drained.
-- Seek and source replacement reset stateful processing so old history cannot leak into the new position.
-- Unsupported DSP/output combinations fail with a visible reason. They do not silently claim that SRC, SDM, DoP, or Native DSD is active.
-- Device-changing commands are ordered and awaited, which keeps one authoritative owner across output switches.
+Developers in mainland China should configure local mirrors first to reduce `npm ci`, Electron, and electron-builder download failures:
 
-That is the difference between an audio feature list and an audio architecture: the chain has a source of truth, every stage has an owner, and failure is part of the contract.
-
-## DSP Center
-
-DSP Center is a readable, adjustable, bypassable signal workbench rather than a collection of unrelated EQ sliders.
-
-<p align="center">
-  <img src="https://echonext.moe/assets/product/dsp-center-eq.webp" width="49%" alt="ECHO NEXT DSP Center parametric EQ" />
-  <img src="https://echonext.moe/assets/product/dsp-center-headphone.webp" width="49%" alt="ECHO NEXT DSP Center OPRA headphone correction" />
-</p>
-
-<p align="center">
-  <img src="https://echonext.moe/assets/product/dsp-center-fir.webp" width="49%" alt="ECHO NEXT DSP Center FIR room correction" />
-  <img src="https://echonext.moe/assets/product/dsp-center-channel.webp" width="49%" alt="ECHO NEXT DSP Center channel tools" />
-</p>
-
-| Module | Capability |
-| :--- | :--- |
-| Parametric EQ | Quick tonal controls in Simple mode; frequency, gain, Q, and preamp control in Pro mode |
-| Headroom / output safety | Auto gain, preamp margin, clipping risk, and output safety in one workflow |
-| OPRA headphone correction | Model-based correction profiles with clear A/B and bypass behavior |
-| FIR / room correction | Import impulse responses and manage trim, delay, convolution, and safety margin |
-| Channel tools | Per-channel gain, balance, delay, mono, and channel swap |
-| APO import / export | Bridge existing Equalizer APO configurations into ECHO's DSP workflow |
-
-When EQ, FIR, ReplayGain, channel tools, dither, or sample-rate conversion changes the signal, ECHO leaves the bit-perfect candidate state. It returns only after the processing is genuinely bypassed and the output format still matches. There is no “DSP is on, but the badge still says direct” loophole.
-
-[DSP beginner guide](https://echonext.moe/zh/docs/audio-output/dsp-beginner/) · [EQ guide](https://echonext.moe/zh/docs/audio-output/eq/)
-
-## PCM, ECHO SRC, SDM, and DSD are not interchangeable
-
-| Path | Input | What happens | Output target |
-| :--- | :--- | :--- | :--- |
-| Native PCM | PCM | Direct output where possible when extra DSP is bypassed | PCM DAC path |
-| ECHO SRC | PCM | FIR sample-rate conversion creates new PCM samples | Higher-rate PCM |
-| ECHO SDM | PCM | Oversampling, filtering, sigma-delta modulation, noise shaping | DSD/SDM-capable device; research preview |
-| DSD Direct | DSF / DFF | DoP framing or vendor ASIO Native DSD transport | DAC DSD input path |
-
-### ECHO SRC
-
-ECHO SRC follows the 44.1 kHz and 48 kHz sample-rate families instead of forcing every track into one arbitrary fixed format. The CPU path is authoritative; accelerated paths are admitted only when their runtime and device conditions are satisfied, with active/fallback state kept visible.
-
-Upsampling is not bit-perfect and cannot create information missing from the source. The useful part is not the largest number in the UI—it is the filter, compute path, driver, DAC, and full pipeline remaining stable together.
-
-### ECHO SDM and DSD output
-
-> [!NOTE]
-> ECHO SDM and some Native DSD paths are research-preview capabilities. Availability depends on the output mode, official driver, device format support, compute headroom, and real DAC validation.
-
-DoP uses PCM-looking frames to transport DSD bits to a compatible DAC. ASIO Native DSD uses a vendor-supported raw DSD path. Neither may be treated like normal PCM: software volume, EQ, mixing, or resampling would destroy the direct-stream goal.
-
-ECHO therefore separates PCM upsampling, PCM-to-SDM conversion, and native DSD-file passthrough in both status and diagnostics. Seeing “ASIO” in an interface is not proof that a DAC is receiving Native DSD.
-
-[Upsampling guide](https://echonext.moe/zh/docs/audio-output/upsampling/) · [DSD playback guide](https://echonext.moe/zh/docs/audio-output/dsd/) · [WASAPI Exclusive vs ASIO](https://echonext.moe/zh/docs/audio-output/asio-vs-exclusive/)
-
-## Native output
-
-| Output mode | Best fit | Boundary |
-| :--- | :--- | :--- |
-| System / WASAPI Shared | Everyday playback, Bluetooth, system mixing, fast troubleshooting | Most compatible; the system mixer may determine the final format |
-| WASAPI Exclusive | Opening a DAC directly for a track or DSP target | Exclusive device ownership; more dependent on driver and DAC behavior |
-| ASIO | Official vendor drivers, professional interfaces, low latency, Native DSD scenarios | Wrapper drivers are not treated as equivalent to vendor-native support |
-| DSD over PCM | Carrying DSD through DoP-capable hardware | The carrier cannot be volume-adjusted, mixed, or resampled |
-| ASIO Native DSD | Raw DSD to explicitly compatible hardware | Experimental; requires official driver support and strict volume safety |
-| HQPlayer | ECHO manages the library and control surface; HQPlayer handles specialist filtering/modulation | Actual capability depends on HQPlayer, NAA, DAC, and network topology |
-
-## ECHO Everything Connected
-
-**ECHO Everything Connected** is the umbrella vision; **ECHO Link** is the device and protocol layer that carries it.
-
-```text
-Native Audio Host
-        |
-   AudioSession
-        |
-Integration Event Hub ------> ECHO Link / mobile remote / adapters
-        ^
-        |
-Integration Action Router <--- provider-aware play / seek / volume commands
+```powershell
+npm config set registry https://registry.npmmirror.com
+$env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+$env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-builder-binaries/"
+npm ci
 ```
 
-External devices receive a sanitized playback snapshot and semantic events rather than private file paths or native-host internals. Commands return through a provider-aware action path, so local playback, Connect, and streaming providers keep their correct control surfaces. The goal is one trustworthy playback truth across the desktop, phone, and future local integrations—not several clocks that merely look synchronized.
+For permanent use, put those environment variables in your user-level system environment. Use personal or system-level configuration; do not commit `.npmrc`, proxy URLs, account tokens, or private mirror credentials to the repository.
 
-## Still a complete music player
+## Quick Start
 
-| Capability | What it covers |
-| :--- | :--- |
-| Local library | Folder imports, SQLite, metadata, cover cache, albums, artists, likes, history, playlists, duplicate filtering |
-| Lyrics and MV | Local and online candidates, translation, romanization, lyric offset, desktop lyrics, immersive playback, MV matching |
-| Remote sources | WebDAV, SMB, Jellyfin, Emby, Subsonic, Navidrome, controlled remote indexing and playback |
-| Extensions | Plugins, downloaders, network metadata, and background jobs behind explicit permission and diagnostic boundaries |
-| Long-term maintenance | Logs, crash recovery, library health, cache migration, settings backup, and confirmation for destructive actions |
+```bash
+git clone https://github.com/Moekotori/ECHODev.git
+cd ECHODev
+npm run setup
+npm run dev
+```
 
-## Quick links
+If the Electron runtime is incomplete, `npm run dev` may fail with `Error: Electron uninstall`. Repair Electron and restart:
 
-| I want to… | Go to |
-| :--- | :--- |
-| Download the latest Community build | [Official downloads](https://echonext.moe/zh/download/) · [GitHub Releases](https://github.com/Moekotori/ECHO/releases/latest) |
-| Get the full ecosystem | [Buy ECHO Steam Ver.](https://www.ifdian.net/a/echonext) |
-| Start using ECHO NEXT | [Documentation](https://echonext.moe/zh/docs/) |
-| See the latest user-facing changes | [Changelog](https://echonext.moe/zh/changelog/) |
-| Report a problem or suggest a feature | [GitHub Issues](https://github.com/Moekotori/ECHO/issues) |
-| Support long-term development | [ECHO Pro](https://www.ifdian.net/a/echonext) |
-| Join ECHO Android | [ECHO Android](https://github.com/Moekotori/ECHOAndroid) |
+```bash
+npm run repair:electron
+npx electron --version
+npm run dev
+```
 
-## Project status
+If you also need to build the audio host and Windows SMTC host before launching development mode:
 
-This public repository is the Community source tree again. Steam has its own assembly and release boundary; do not expect every Community feature to appear there.
+```bash
+npm run dev:full
+```
 
-This repo remains the public home for:
+`npm run dev` performs safe incremental preflight checks by default: better-sqlite3 ABI, the AirPlay RAOP native backend, and the audio host are skipped quickly when they were already verified and their files have not changed.
 
-- Community source, issues, and small reviewable PRs;
-- official Community downloads, documentation, changelogs, and release notes;
-- reproducible bug reports and product suggestions;
-- licensing material and the files that define the current public contract.
+## Multi-device Development
 
-## ECHO Pro
+- Use the repository-declared Node/npm versions on every computer. nvm, fnm, and asdf can read `.nvmrc` or `.node-version`; Volta reads `package.json` automatically.
+- Run `npm run setup` on a new computer or after the lockfile/toolchain version changes. After an ordinary source update, run `npm run dev`; incremental checks reuse valid native artifacts on that computer.
+- Sync source, configuration, and `package-lock.json` through Git. Do not copy `node_modules`, `out`, `dist`, `build`, `.echo-local`, private keys, or `.env` files between computers; native modules must be built locally for each device's ABI.
+- Use `npm ci` for routine dependency installation. When intentionally upgrading a dependency, commit `package.json` and `package-lock.json` together.
 
-ECHO Pro is an advanced plan for long-term supporters. Support helps fund infrastructure, test hardware, design work, and sustained development. Pro entitlements, experimental features, and availability may change by release; the official page is authoritative.
+## Common Commands
 
-<p align="center">
-  <a href="https://afdian.com/a/echonext"><strong>Support ECHO NEXT · Explore ECHO Pro →</strong></a>
-</p>
+| Command | Purpose |
+| --- | --- |
+| `npm run setup` | Check the toolchain and initialize this computer from the lockfile; append `-- --mirror` in mainland China |
+| `npm run dev` | Start the Electron + Vite development environment |
+| `npm run dev:full` | Build the audio host and SMTC host, then start development mode |
+| `npm run repair:electron` | Reinstall / repair the Electron runtime |
+| `npm run typecheck` | Run TypeScript type checking |
+| `npm run test` | Run Vitest tests |
+| `npm run build` | Typecheck and build main, preload, and renderer output |
+| `npm run prepare:win-ffmpeg` | Download and verify the manifest-pinned FFmpeg for Windows packaging |
+| `npm run prepare:win-ytdlp` | Download and verify the manifest-pinned yt-dlp required for streaming playback |
+| `npm run verify:ffmpeg` | Verify the FFmpeg toolchain |
+| `npm run build:audio-host` | Build the audio host |
+| `npm run build:src-cuda-worker` | Build the ECHO SRC CUDA worker |
+| `npm run build:smtc-host` | Build the Windows SMTC host |
+| `npm run build:native-scanner` | Build the native scanner |
+| `npm run ensure:src-cuda-worker` | Incrementally check the CUDA worker; skip when the artifact is fresh |
+| `npm run ensure:smtc-host` | Incrementally check the Windows SMTC host; skip when the artifact is fresh |
+| `npm run ensure:native-scanner` | Incrementally check the native scanner; skip when the artifact is fresh |
+| `npm run smoke:audio-host` | Smoke-test the audio host |
+| `npm run smoke:dsd-direct` | Smoke-test DSD / DoP / Native DSD direct-output paths |
+| `npm run smoke:smtc-host` | Smoke-test the Windows SMTC host |
+| `npm run build:win` | Build Windows base/dev installer and portable artifacts |
+| `npm run build:win:dir` | Quickly build the Windows unpacked directory package, skipping NSIS / portable compression |
+| `npm run build:win:dir:quick` | Faster local unpacked directory package, skipping full TypeScript checking |
+| `npm run build:win:release` | Build Windows release artifacts with Authenticode signing |
+| `npm run build:linux` | Build Linux packages on a Linux x64 environment |
 
-## Contributing
+## Build Flows
 
-Open an Issue first if you need to discuss scope. Then send a **small, reviewable PR**—especially for bugs you already reproduced. Large catch-all PRs will not be merged. Community updates will be less frequent; Steam Ver. is where the full ecosystem moves.
+Development startup:
 
-Useful contributions are not limited to code: reproduction, device testing, documentation, and focused UI or audio fixes all help. If you want a longer-term collaboration path, the [Developer Plan](https://echonext.moe/zh/developer/) is still there.
+```bash
+npm run setup
+npm run dev
+```
 
-<p align="center">
-  <a href="https://echonext.moe/zh/developer/"><strong>Read about the Developer Plan →</strong></a>
-</p>
+On a fresh Windows machine, `npm run setup` checks Node.js, npm, Python, CMake, and the Visual Studio C++ toolchain before installing the exact lockfile. It stops with install commands when a prerequisite is missing; reopen the terminal and run it again after installing those tools.
 
-## Reporting issues
+If npm or Electron downloads are slow (especially from mainland China), use `npm run setup -- --mirror`. It configures the recommended npm and Electron mirrors and uses them for the same installation run.
 
-Read the [Issue Policy](./.github/ISSUE_POLICY.md) first. Please star publicly. Auto-close is conservative: only a missing public star, a clear streaming-platform request, or clear abuse. Mentioning where a local file came from will not trip it.
+Standard compile check:
 
-Before opening an issue, confirm that you are using the latest release. A useful report includes:
+```bash
+npm run typecheck
+npm run build
+```
 
-- ECHO NEXT version and download channel;
-- operating system, output device, and relevant driver information;
-- clear reproduction steps;
-- expected and actual behavior;
-- screenshots, logs, or a short recording when useful.
+Windows base/dev packaging:
 
-For playback issues, also include the source format, output mode, selected device, and whether the problem affects one file or many. Remove account details, tokens, private filesystem paths, and other sensitive information before posting.
+```bash
+npm run build:win
+```
+
+`npm run build:win` uses safe incremental checks to reuse fresh audio host, SMTC host, native scanner, and CUDA worker artifacts. The project no longer uses a separate package-integrity private key, so no ECHO packaging key needs to be migrated or regenerated on a new machine.
+
+If you only need to validate packaged resources / asar / app structure locally, prefer the faster directory package:
+
+```bash
+npm run build:win:dir
+```
+
+`build:win:dir` generates `dist/win-unpacked` and skips NSIS installer plus portable compression, which is better for repeated local checks.
+
+If you already ran `npm run typecheck`, or only need to validate packaging-resource changes, use:
+
+```bash
+npm run build:win:dir:quick
+```
+
+This command skips full TypeScript checking and is only for fast local iteration. Before submitting or releasing, still run `npm run typecheck`, `npm run build:win`, or the relevant release build.
+
+Use `npm run build:win:release` for Windows release artifacts. Release builds still require a Windows code-signing certificate and `ECHO_WINDOWS_PUBLISHER_NAME`; Authenticode verification remains enforced for published artifacts.
+
+Linux packaging:
+
+```bash
+npm ci
+npm run verify:ffmpeg
+npm run build:linux
+```
+
+For Linux x64 details, see [docs/ECHO_NEXT_LINUX_BUILD.md](./docs/ECHO_NEXT_LINUX_BUILD.md).
+
+## Nix / Flake
+
+The project provides a Nix flake for a Linux development shell, build derivation, and nixpkgs overlay:
+
+| Command | Purpose |
+| --- | --- |
+| `nix develop` | Enter the dev shell with Node 22, CMake, ALSA, GTK3, Electron, and related tools |
+| `nix build` | Build ECHO NEXT with nixpkgs Electron, with output in `result/` |
+| `nix run` | Run the built application directly |
+| `nix flake check` | Verify flake outputs |
+
+The license is source-available rather than OSS, so Nix builds must allow unfree packages explicitly:
+
+```bash
+NIXPKGS_ALLOW_UNFREE=1 nix build --impure .#echo-next
+```
+
+## Validation Strategy
+
+Do not waste time running broad tests for small changes. Pick the smallest useful check for the touched area:
+
+| Change area | Recommended validation |
+| --- | --- |
+| README / docs | Review content and diff |
+| TypeScript / IPC types | `npm run typecheck` |
+| Renderer logic | Relevant Vitest or focused manual check |
+| Main-process service | `npm run typecheck` plus a focused service check |
+| Library / SQLite | Relevant library test or minimal reproduction script |
+| Audio host | `npm run build:audio-host`, `npm run smoke:audio-host` |
+| ECHO SRC / CUDA worker | `npm run build:src-cuda-worker` plus focused Audio Core tests |
+| SDM / DSD / ASIO Native | Focused Audio Core tests, `npm run smoke:dsd-direct`, and real DAC / ASIO smoke tests when needed |
+| SMTC host | `npm run build:smtc-host`, `npm run smoke:smtc-host` |
+| FFmpeg / yt-dlp / packaging resources | `npm run prepare:win-ffmpeg`, `npm run prepare:win-ytdlp`, `npm run verify:ffmpeg` |
+| Windows packaging | `npm run build:win` |
+| Linux packaging | `npm run build:linux` |
+
+## Security Boundaries
+
+Do not remove, bypass, mock, short-circuit, or weaken authentication, authorization, license verification, entitlement checks, subscription checks, download authorization, or anti-abuse logic. Audio components still verify file size and SHA-256 hashes from their manifest to reject damaged payloads.
+
+Treat SDM, DSD, ASIO Native, CUDA worker, and audio hot-path changes as high risk too: keep them off by default, make failures visible, keep fallback explainable, and do not trade playback stability or device safety for a feature that only appears to work.
+
+Do not commit private keys, tokens, passwords, real user data, local absolute paths, or private deployment information.
+
+## Contribution Rules
+
+| Type | Rule |
+| --- | --- |
+| Small fixes | Open a PR directly with scope and validation notes |
+| Large PRs | Notify maintainers first through an issue, discussion, or maintainer contact |
+| Cross-module refactors | Discuss boundaries first; do not mix unrelated formatting or cleanup |
+| Major UI changes | Explain affected pages, interaction changes, and regression checks |
+| Database migrations | Explain compatibility, backup / rollback risk, and test approach |
+| Playback pipeline / native hosts | Include devices, formats, output modes, and smoke-test results |
+| SDM / DSD / CUDA audio path | Explain device capability, output mode, target DSD rate, fallback behavior, and focused validation |
+| Entitlement / integrity / Pro features | Read the maintainer notes first and keep behavior fail-closed |
+
+## Documentation
+
+| Document | Contents |
+| --- | --- |
+| [docs/ECHO_NEXT_ARCHITECTURE.md](./docs/ECHO_NEXT_ARCHITECTURE.md) | Overall architecture |
+| [docs/ECHO_NEXT_LIBRARY_CORE.md](./docs/ECHO_NEXT_LIBRARY_CORE.md) | Library core |
+| [docs/ECHO_NEXT_AUDIO_CORE.md](./docs/ECHO_NEXT_AUDIO_CORE.md) | Audio core |
+| [docs/ECHO_NEXT_EQ.md](./docs/ECHO_NEXT_EQ.md) | EQ and DSP boundaries |
+| [docs/ECHO_NEXT_PLUGINS.md](./docs/ECHO_NEXT_PLUGINS.md) | Plugin authoring guide |
+| [docs/plugin-sdk/ForAIReadme.md](./docs/plugin-sdk/ForAIReadme.md) | Plugin-writing rules and checklist for AI assistants |
+| [docs/ECHO_NEXT_NETWORK_METADATA.md](./docs/ECHO_NEXT_NETWORK_METADATA.md) | Network metadata enrichment |
+| [docs/ECHO_NEXT_LINUX_BUILD.md](./docs/ECHO_NEXT_LINUX_BUILD.md) | Linux builds |
+| [docs/ECHO_NEXT_UI_GUIDE.md](./docs/ECHO_NEXT_UI_GUIDE.md) | UI guide |
+| [flake.nix](./flake.nix) | Nix flake: dev shell, build, and overlay |
+| [docs/security/entitlement-maintainer-notes.md](./docs/security/entitlement-maintainer-notes.md) | Entitlement, integrity, and paid-feature maintainer notes |
 
 ## License
 
-This repository uses the [GNU Lesser General Public License v3.0](./LICENSE), SPDX `LGPL-3.0-only`. Third-party components and assets remain under their own terms.
-
-In short: you may use, study, modify, and distribute ECHO. If you distribute a modified ECHO, keep the LGPL license and give recipients the corresponding ECHO source and your changes. Do not lock a modified ECHO into a closed black box. If you learned from the code or design, leave a name or a link. The [LICENSE](./LICENSE) is authoritative.
-
-## Streaming disclaimer
-
-ECHO is a local-first music player. It is not a piracy tool, and it does not supply content or licenses for third-party streaming platforms. When a third-party service is involved, accounts, content, and usage rights are the user’s responsibility.
-
-ECHO will not ship features that go beyond lawful use or that harm artists, rights holders, or platforms: no access-control bypass, no cracking of platform restrictions, and no unauthorized song downloads or paywall evasion.
-
----
-
-<p align="center">
-  Thank you to everyone who keeps listening, testing, reporting, and supporting ECHO NEXT.<br />
-  <strong>The project is moving forward—in more than one edition.</strong>
-</p>
+ECHO NEXT is source-available under the [ECHO NEXT Source-Available License](./LICENSE). The license permits personal review, learning, and local builds, but prohibits cracks, bypassing entitlement or integrity checks, and unauthorized redistribution of modified builds.

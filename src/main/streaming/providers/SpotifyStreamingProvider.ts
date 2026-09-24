@@ -333,8 +333,8 @@ export class SpotifyStreamingProvider implements StreamingProvider {
     const status = getAccountService().getStatus(provider);
     return {
       displayName: 'Spotify',
-      enabled: true,
-      supportsSearch: true,
+      enabled: status.connected,
+      supportsSearch: status.connected,
       supportsPlayback: true,
       supportsDownload: false,
       supportsLyrics: true,

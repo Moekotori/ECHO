@@ -3,6 +3,11 @@ import { Worker } from 'node:worker_threads';
 import type { WorkerOptions } from 'node:worker_threads';
 import { FileIdentityService, type FileIdentityObservation } from '../FileIdentityService';
 import type { CoverCacheRepairOptions, CoverExtractOptions, CoverResult, MetadataResult } from '../libraryTypes';
+import {
+  buildTrackSearchTermsAsync,
+  preloadSearchIndexRomanizer,
+  type SearchIndexTrackFields,
+} from '../SearchIndexTokens';
 import type { CoverExtractor } from './CoverExtractor';
 import type { MetadataReader } from './MetadataReader';
 import { TsCoverExtractor } from './TsCoverExtractor';
@@ -42,10 +47,14 @@ export type WorkerBackedLibraryScanOptions = {
   taskTimeoutMs?: number;
   workerFactory?: WorkerFactory;
   workerUrl?: URL;
+  identityWorkerUrl?: URL;
+  searchWorkerUrl?: URL;
 };
 
 const defaultTaskTimeoutMs = 120_000;
 const defaultWorkerUrl = new URL('./libraryScanWorkerHost.js', import.meta.url);
+const defaultIdentityWorkerUrl = new URL('./libraryIdentityWorkerHost.js', import.meta.url);
+const defaultSearchWorkerUrl = new URL('./librarySearchWorkerHost.js', import.meta.url);
 
 const normalizeWorkerCount = (value: unknown): number => {
   const numeric = Number(value);
@@ -81,6 +90,8 @@ class LibraryScanWorkerPool {
   run(request: Omit<Extract<LibraryScanWorkerRequest, { type: 'cover:extract' }>, 'requestId'>): Promise<CoverResult>;
   run(request: Omit<Extract<LibraryScanWorkerRequest, { type: 'cover:repair' }>, 'requestId'>): Promise<CoverResult>;
   run(request: Omit<Extract<LibraryScanWorkerRequest, { type: 'identity:observe' }>, 'requestId'>): Promise<FileIdentityObservation>;
+  run(request: Omit<Extract<LibraryScanWorkerRequest, { type: 'search:preload' }>, 'requestId'>): Promise<boolean>;
+  run(request: Omit<Extract<LibraryScanWorkerRequest, { type: 'search:terms' }>, 'requestId'>): Promise<string>;
   run(request: Omit<LibraryScanWorkerRequest, 'requestId'>): Promise<LibraryScanWorkerResult> {
     if (this.closed) {
       return Promise.reject(new Error('Library scan worker pool is closed'));
@@ -126,18 +137,15 @@ class LibraryScanWorkerPool {
     }
 
     this.started = true;
-    while (this.workers.length < this.workerCount) {
-      try {
-        this.createWorker();
-      } catch (error) {
-        const startupError = toError(error);
-        if (this.workers.length === 0) {
-          this.startupError = startupError;
-          for (const task of this.queue.splice(0)) {
-            task.reject(startupError);
-          }
+    try {
+      this.createWorker();
+    } catch (error) {
+      const startupError = toError(error);
+      if (this.workers.length === 0) {
+        this.startupError = startupError;
+        for (const task of this.queue.splice(0)) {
+          task.reject(startupError);
         }
-        break;
       }
     }
     return this.workers.length > 0;
@@ -166,6 +174,16 @@ class LibraryScanWorkerPool {
   private pump(): void {
     if (this.closed) {
       return;
+    }
+
+    let idleWorkerCount = this.workers.filter((slot) => !slot.currentTask && !slot.retired).length;
+    while (this.queue.length > idleWorkerCount && this.workers.length < this.workerCount) {
+      try {
+        this.createWorker();
+        idleWorkerCount += 1;
+      } catch {
+        break;
+      }
     }
 
     for (const slot of this.workers) {
@@ -337,10 +355,41 @@ export class WorkerBackedFileIdentityService {
   }
 }
 
+export type ScanSearchTermsBuilder = {
+  preload(): Promise<boolean>;
+  prepare(fields: SearchIndexTrackFields): Promise<string>;
+};
+
+export class WorkerBackedSearchTermsBuilder implements ScanSearchTermsBuilder {
+  constructor(
+    private readonly pool: LibraryScanWorkerPool,
+    private readonly logger: FallbackOnceLogger,
+  ) {}
+
+  async preload(): Promise<boolean> {
+    try {
+      return await this.pool.run({ type: 'search:preload' });
+    } catch (error) {
+      this.logger.warn('search:preload', error);
+      return preloadSearchIndexRomanizer();
+    }
+  }
+
+  async prepare(fields: SearchIndexTrackFields): Promise<string> {
+    try {
+      return await this.pool.run({ type: 'search:terms', fields });
+    } catch (error) {
+      this.logger.warn('search:terms', error);
+      return buildTrackSearchTermsAsync(fields);
+    }
+  }
+}
+
 export type WorkerBackedLibraryScanWorkers = {
   metadataReader: MetadataReader;
   coverExtractor: CoverExtractor;
   fileIdentityService: { observe(filePath: string): FileIdentityObservation | Promise<FileIdentityObservation> };
+  searchTermsBuilder: ScanSearchTermsBuilder;
   close: () => void;
 };
 
@@ -348,11 +397,25 @@ export const createWorkerBackedLibraryScanWorkers = (
   options: WorkerBackedLibraryScanOptions = {},
 ): WorkerBackedLibraryScanWorkers => {
   const pool = new LibraryScanWorkerPool(options);
+  const identityPool = new LibraryScanWorkerPool({
+    ...options,
+    workerUrl: options.identityWorkerUrl ?? defaultIdentityWorkerUrl,
+  });
+  const searchPool = new LibraryScanWorkerPool({
+    ...options,
+    workerCount: 1,
+    workerUrl: options.searchWorkerUrl ?? defaultSearchWorkerUrl,
+  });
   const logger = new FallbackOnceLogger();
   return {
     metadataReader: new WorkerBackedMetadataReader(pool, logger),
     coverExtractor: new WorkerBackedCoverExtractor(pool, logger),
-    fileIdentityService: new WorkerBackedFileIdentityService(pool, logger),
-    close: () => pool.close(),
+    fileIdentityService: new WorkerBackedFileIdentityService(identityPool, logger),
+    searchTermsBuilder: new WorkerBackedSearchTermsBuilder(searchPool, logger),
+    close: () => {
+      pool.close();
+      identityPool.close();
+      searchPool.close();
+    },
   };
 };

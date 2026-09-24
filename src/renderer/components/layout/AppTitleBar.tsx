@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import type { AppRouteId } from '../../app/routes';
 import { useI18n } from '../../i18n/I18nProvider';
 import type { UpdateStatus } from '../../../shared/types/updates';
@@ -25,8 +26,10 @@ type AppTitleBarProps = {
   isMvSettingsOpen?: boolean;
   isProUnlocked?: boolean;
   updateStatus?: UpdateStatus | null;
+  updateActionDisabled?: boolean;
   onRouteChange: (routeId: AppRouteId) => void;
-  onOpenUpdateSettings?: () => void;
+  onPreloadSettings?: () => void;
+  onUpdateAction?: () => void;
   onOpenAudioSettings: () => void;
   onOpenLyricsSettings?: () => void;
   onOpenLyricsVisualSettings?: () => void;
@@ -44,6 +47,7 @@ type TitleBarAction = {
   label: string;
   icon: LucideIcon;
   active?: boolean;
+  onApproach?: () => void;
   onClick: () => void;
 };
 
@@ -55,8 +59,10 @@ export const AppTitleBar = ({
   isMvSettingsOpen = false,
   isProUnlocked = false,
   updateStatus = null,
+  updateActionDisabled = false,
   onRouteChange,
-  onOpenUpdateSettings = () => undefined,
+  onPreloadSettings = () => undefined,
+  onUpdateAction = () => undefined,
   onOpenAudioSettings,
   onOpenLyricsSettings = () => undefined,
   onOpenLyricsVisualSettings = () => undefined,
@@ -69,6 +75,7 @@ export const AppTitleBar = ({
   onClose,
 }: AppTitleBarProps): JSX.Element => {
   const { t } = useI18n();
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const maximizeLabel = t(isWindowMaximized ? 'app.window.restore' : 'app.window.maximize');
   const MaximizeIcon = isWindowMaximized ? Copy : Square;
   const fullscreenLabel = t(isWindowFullscreen ? 'app.window.exitFullscreen' : 'app.window.fullscreen');
@@ -77,6 +84,9 @@ export const AppTitleBar = ({
   const updateNoticeLabel = updateStatus?.state === 'downloaded'
     ? (updateVersion ? t('notice.updateDownloadedVersion', { version: updateVersion }) : t('notice.updateDownloaded'))
     : (updateVersion ? t('notice.updateAvailableVersion', { version: updateVersion }) : t('notice.updateAvailable'));
+  const updateButtonLabel = updateStatus?.state === 'downloading'
+    ? t('settings.about.updates.progress.downloading')
+    : `${updateNoticeLabel} ${t('notice.action.updateNow')}`;
   const actions: TitleBarAction[] = [
     {
       id: 'audio-settings',
@@ -113,28 +123,55 @@ export const AppTitleBar = ({
       label: t('route.settings.label'),
       icon: Settings,
       active: activeRouteId === 'settings',
+      onApproach: onPreloadSettings,
       onClick: () => onRouteChange('settings'),
     },
   ];
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void window.echo?.app?.getVersion?.()
+      .then((version) => {
+        const normalizedVersion = version.trim();
+        if (!cancelled && normalizedVersion) {
+          setAppVersion(/^v/iu.test(normalizedVersion) ? normalizedVersion : `v${normalizedVersion}`);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <header className="app-titlebar" aria-label="ECHO Next">
       <div className="app-titlebar-brand">
         <strong>ECHO</strong>
         <span>Next</span>
-        <span className="app-titlebar-developer-badge">Developer</span>
         {isProUnlocked ? (
-          <span className="app-titlebar-pro-badge" aria-label="ECHO Pro unlocked">
-            Pro
+          <span className="app-titlebar-pro-slot">
+            <span className="app-titlebar-pro-badge" aria-label="ECHO Pro unlocked">
+              Pro
+            </span>
           </span>
         ) : null}
+        <span
+          className="app-titlebar-version"
+          data-loading={appVersion ? 'false' : 'true'}
+          aria-label={appVersion ? `ECHO app version ${appVersion}` : undefined}
+        >
+          {appVersion ?? 'v00.0.00'}
+        </span>
         {updateStatus ? (
           <button
             className="app-titlebar-update"
             type="button"
-            aria-label={updateNoticeLabel}
-            title={updateNoticeLabel}
-            onClick={onOpenUpdateSettings}
+            aria-label={updateButtonLabel}
+            title={updateButtonLabel}
+            disabled={updateActionDisabled}
+            onClick={onUpdateAction}
           >
             <Download size={13} />
             <span>{updateVersion ?? 'Update'}</span>
@@ -171,6 +208,8 @@ export const AppTitleBar = ({
               aria-label={action.label}
               title={action.label}
               onClick={action.onClick}
+              onFocus={action.onApproach}
+              onPointerEnter={action.onApproach}
             >
               <Icon size={17} />
             </button>

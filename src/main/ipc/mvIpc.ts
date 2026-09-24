@@ -39,6 +39,7 @@ const normalizeSnapshotSearchRequest = (value: unknown): MvTrackSnapshotSearchRe
     coverThumb: optionalText(input.coverThumb),
     mediaType: input.mediaType === 'remote' || input.mediaType === 'streaming' || input.mediaType === 'local' ? input.mediaType : 'streaming',
     query: optionalText(input.query),
+    autoSelect: input.autoSelect === true,
   };
 };
 

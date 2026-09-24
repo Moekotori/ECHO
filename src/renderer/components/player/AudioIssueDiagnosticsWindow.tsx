@@ -283,7 +283,10 @@ export const AudioIssueDiagnosticsWindow = ({ onClose }: AudioIssueDiagnosticsWi
     };
   }, []);
 
-  const diagnosticEvents = latestDiagnostics?.recentPlaybackEvents ?? [];
+  const diagnosticEvents = useMemo(
+    () => latestDiagnostics?.recentPlaybackEvents ?? [],
+    [latestDiagnostics?.recentPlaybackEvents],
+  );
   const { suspectEvents, visibleEvents } = useMemo(() => {
     const suspect = diagnosticEvents.filter((event) => event.severity !== 'info');
     return {

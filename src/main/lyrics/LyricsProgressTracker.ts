@@ -2,7 +2,7 @@ import type { LyricLine } from '../../shared/types/lyrics';
 import type { SmtcLyricsProgress } from '../../shared/types/smtc';
 import type { AudioStatus } from '../../shared/types/audio';
 import { getAudioSession } from '../audio/AudioSession';
-import { getLyricsService } from './LyricsService';
+import { getLyricsService, onLyricsServiceChanged } from './LyricsService';
 import { getAppSettings } from '../app/appSettings';
 
 // Minimal lyrics state tracked per track in the main process.
@@ -149,6 +149,26 @@ const loadLyricsForTrack = async (trackId: string, token: number): Promise<Track
   }
 };
 
+const reloadLyricsForCurrentTrack = (trackId: string): void => {
+  if (trackId !== lastTrackId) {
+    return;
+  }
+
+  pendingLoadToken += 1;
+  const token = pendingLoadToken;
+  void loadLyricsForTrack(trackId, token).then((lyrics) => {
+    if (token !== pendingLoadToken || trackId !== lastTrackId) {
+      return;
+    }
+
+    cachedLyrics = lyrics;
+    lastLyricsProgressKey = '';
+    if (lyrics.kind === 'empty') {
+      updateLastComputedProgress(null);
+    }
+  });
+};
+
 const handleAudioStatus = (status: AudioStatus): void => {
   const trackId = status.currentTrackId;
   const isPlaying = status.state === 'playing';
@@ -208,4 +228,5 @@ export const startLyricsProgressTracking = (): void => {
 
   // Reset state when playback stops or track is cleared
   getAudioSession().on('status', handleAudioStatus);
+  onLyricsServiceChanged((trackId) => reloadLyricsForCurrentTrack(trackId));
 };

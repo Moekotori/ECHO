@@ -51,6 +51,7 @@ const storedStatus = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   electronMocks.encryptionAvailable = true;
   vi.unstubAllGlobals();
   for (const dir of tempDirs.splice(0)) {
@@ -90,7 +91,7 @@ describe('EchoProAccountService feature verification', () => {
     const storagePath = makeStoragePath();
     const encryptedSessionToken = `safe:${Buffer.from('sealed:stored-token', 'utf8').toString('base64')}`;
     writeFileSync(storagePath, `${JSON.stringify({ encryptedSessionToken, sessionToken: null, status: storedStatus }, null, 2)}\n`);
-    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => ({
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => ({
       ok: true,
       json: async () => ({
         unlocked: true,
@@ -153,6 +154,65 @@ describe('EchoProAccountService feature verification', () => {
     const service = new EchoProAccountService(storagePath);
 
     await expect(service.verifyFeature('plugins')).rejects.toThrow('license-invalid');
+  });
+
+  it('does not use offline grace when the server explicitly rejects the session', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-21T12:00:00.000Z'));
+    const storagePath = makeStoragePath();
+    const encryptedSessionToken = `safe:${Buffer.from('sealed:stored-token', 'utf8').toString('base64')}`;
+    writeFileSync(storagePath, `${JSON.stringify({ encryptedSessionToken, sessionToken: null, status: storedStatus }, null, 2)}\n`);
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ error: 'session_required' }),
+      status: 403,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new EchoProAccountService(storagePath);
+
+    await expect(service.verifyFeature('remote-sources')).rejects.toThrow('session_required');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a recently verified Pro account during a genuine network outage', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-21T12:00:00.000Z'));
+    const storagePath = makeStoragePath();
+    const encryptedSessionToken = `safe:${Buffer.from('sealed:stored-token', 'utf8').toString('base64')}`;
+    writeFileSync(storagePath, `${JSON.stringify({ encryptedSessionToken, sessionToken: null, status: storedStatus }, null, 2)}\n`);
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new EchoProAccountService(storagePath);
+
+    await expect(service.verifyFeature('remote-sources')).resolves.toMatchObject({
+      loggedIn: true,
+      pro: true,
+      status: 'active',
+      lastError: 'fetch failed',
+    });
+    await expect(service.verifyFeature('remote-sources')).resolves.toMatchObject({ pro: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not use an expired cached Pro status for feature authorization', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-28T00:00:00.001Z'));
+    const storagePath = makeStoragePath();
+    const encryptedSessionToken = `safe:${Buffer.from('sealed:stored-token', 'utf8').toString('base64')}`;
+    writeFileSync(storagePath, `${JSON.stringify({ encryptedSessionToken, sessionToken: null, status: storedStatus }, null, 2)}\n`);
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ error: 'session_required' }),
+      status: 403,
+    })));
+
+    const service = new EchoProAccountService(storagePath);
+
+    await expect(service.verifyFeature('remote-sources')).rejects.toThrow('session_required');
   });
 });
 

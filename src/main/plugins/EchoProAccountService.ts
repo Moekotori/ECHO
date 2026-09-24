@@ -41,6 +41,10 @@ type EchoProAccountRequest = {
   sessionToken: string;
 };
 
+type EchoProAccountRequestError = Error & {
+  echoProOfflineGraceAllowed?: boolean;
+};
+
 type AuthResponse = {
   sessionToken?: unknown;
   user?: unknown;
@@ -56,8 +60,9 @@ type SettingsCloudInput = {
 const defaultAccountBaseUrl = 'https://echonext.moe/api/echo-pro';
 const accountBaseUrlEnvNames = ['ECHO_PRO_ACCOUNT_URL', 'ECHO_PRO_API_URL'] as const;
 const requestTimeoutMs = 6_000;
-const statusCacheTtlMs = 2 * 60 * 60 * 1000;
-const offlineGraceMs = 24 * 60 * 60 * 1000;
+const statusCacheTtlMs = 12 * 60 * 60 * 1000;
+const offlineGraceMs = 7 * 24 * 60 * 60 * 1000;
+const offlineFeatureRetryMs = 60 * 60 * 1000;
 const maxVerificationCacheSeconds = 60 * 60;
 const encryptedSessionTokenKey = 'encryptedSessionToken';
 const safeStoragePrefix = 'safe:';
@@ -113,6 +118,22 @@ const isStatusFresh = (status: EchoProAccountStatus, ttlMs = statusCacheTtlMs): 
   const age = getStatusAgeMs(status);
   return Number.isFinite(age) && age >= 0 && age <= ttlMs;
 };
+
+export const isEchoProAccountStatusWithinOfflineGrace = (status: EchoProAccountStatus): boolean =>
+  status.loggedIn &&
+  status.pro === true &&
+  status.status !== 'disabled' &&
+  isStatusFresh(status, offlineGraceMs);
+
+const withOfflineGracePolicy = (error: Error, allowed: boolean): EchoProAccountRequestError => {
+  const requestError = error as EchoProAccountRequestError;
+  requestError.echoProOfflineGraceAllowed = allowed;
+  return requestError;
+};
+
+const allowsOfflineGrace = (error: unknown): boolean =>
+  !(error instanceof Error) ||
+  (error as EchoProAccountRequestError).echoProOfflineGraceAllowed !== false;
 
 const normalizeAccountStatus = (value: unknown, lastError: string | null = null): EchoProAccountStatus => {
   if (!isRecord(value)) {
@@ -358,15 +379,11 @@ export class EchoProAccountService {
       }
       const message = error instanceof Error ? error.message : 'ECHO Pro account check failed.';
       const canUseGrace =
-        this.state.status.loggedIn &&
-        this.state.status.pro === true &&
-        this.state.status.status !== 'disabled' &&
-        isStatusFresh(this.state.status, offlineGraceMs);
-      this.state.status = {
-        ...this.state.status,
-        checkedAt: canUseGrace ? this.state.status.checkedAt : nowIso(),
-        lastError: message,
-      };
+        allowsOfflineGrace(error) &&
+        isEchoProAccountStatusWithinOfflineGrace(this.state.status);
+      this.state.status = canUseGrace
+        ? { ...this.state.status, lastError: message }
+        : { ...this.state.status, pro: false, checkedAt: nowIso(), lastError: message };
       this.writeState();
       return this.state.status;
     });
@@ -432,7 +449,10 @@ export class EchoProAccountService {
       this.writeState();
       if (response.unlocked !== true || !status.loggedIn || status.pro !== true || status.status === 'disabled') {
         this.featureVerificationCache.delete(feature);
-        throw proAccountError(text(response.reason) ?? 'echo_pro_required');
+        throw withOfflineGracePolicy(
+          proAccountError(text(response.reason) ?? 'echo_pro_required'),
+          false,
+        );
       }
 
       const cacheSeconds = typeof response.cacheSeconds === 'number' && Number.isFinite(response.cacheSeconds)
@@ -447,7 +467,32 @@ export class EchoProAccountService {
         this.featureVerificationCache.delete(feature);
       }
       return this.state.status;
-    })();
+    })().catch((error: unknown) => {
+      if (this.state.sessionToken !== sessionToken) {
+        throw error;
+      }
+
+      const cachedStatus = this.state.status;
+      const canUseOfflineGrace =
+        allowsOfflineGrace(error) &&
+        isEchoProAccountStatusWithinOfflineGrace(cachedStatus);
+      if (!canUseOfflineGrace) {
+        throw error;
+      }
+
+      const checkedAt = cachedStatus.checkedAt ? Date.parse(cachedStatus.checkedAt) : Number.NaN;
+      const graceExpiresAt = Number.isFinite(checkedAt) ? checkedAt + offlineGraceMs : Date.now();
+      this.featureVerificationCache.set(feature, {
+        expiresAt: Math.min(Date.now() + offlineFeatureRetryMs, graceExpiresAt),
+        hwidHash,
+      });
+      this.state.status = {
+        ...cachedStatus,
+        lastError: error instanceof Error ? error.message : 'ECHO Pro online verification unavailable.',
+      };
+      this.writeState();
+      return this.state.status;
+    });
 
     this.featureVerificationRequests.set(feature, { sessionToken, promise: request });
     try {
@@ -639,7 +684,8 @@ export class EchoProAccountService {
         const fallbackCode = path === '/auth/register' && response.status === 405
           ? 'echo_pro_register_unavailable'
           : `echo_pro_http_${response.status}`;
-        throw new Error(error ?? fallbackCode);
+        const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+        throw withOfflineGracePolicy(new Error(error ?? fallbackCode), retryable);
       }
       return isRecord(parsed) ? parsed : {};
     } finally {

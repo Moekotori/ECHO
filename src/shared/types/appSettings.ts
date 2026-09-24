@@ -7,16 +7,16 @@ import type { GlobalShortcutSettings, LocalShortcutSettings } from './globalShor
 import type { HqPlayerSettings } from './hqplayer';
 import type { SidebarRouteId } from './sidebar';
 
-export type ScanPerformanceMode = 'low' | 'balanced' | 'performance';
+export type ScanPerformanceMode = 'low' | 'balanced' | 'performance' | 'ultra';
 export type RemoteCoverLoadPerformanceMode = 'low' | 'balanced' | 'aggressive' | 'lan';
 export type LyricsBackgroundMode = 'theme' | 'cover' | 'coverColor' | 'customWallpaper';
 export type LyricsTextDirection = 'horizontal' | 'vertical';
-export type LyricsMiniPlayerColorMode = 'default' | 'custom' | 'cover';
-export type LyricsPageStyle = 'default' | 'roseVinyl';
+export type LyricsMiniPlayerColorMode = 'default' | 'light' | 'custom' | 'cover';
+export type LyricsPageStyle = 'default' | 'editorial' | 'roseVinyl';
 export type DesktopLyricsColorMode = 'theme' | 'custom' | 'gradient';
 export type AppWallpaperMediaType = 'image' | 'video';
 export type AppVideoWallpaperPauseMode = 'smart' | 'minimized' | 'never';
-export type AppLocale = 'zh-CN' | 'zh-TW' | 'en-US' | 'ja-JP';
+export type AppLocale = 'zh-CN' | 'zh-TW' | 'en-US' | 'ja-JP' | 'ko-KR';
 export type AppThemeMode = 'light' | 'dark' | 'system' | 'ambient';
 export type ReplayGainMode = 'off' | 'track' | 'album';
 export type AirPlayReceiverProtocol = 'airplay1' | 'airplay2';
@@ -32,8 +32,6 @@ export const defaultArtistOnlineInfoSources: ArtistOnlineInfoSource[] = ['wikipe
 export const artistStreamingAlbumProviders = ['netease', 'qqmusic'] as const;
 export type ArtistStreamingAlbumsProvider = typeof artistStreamingAlbumProviders[number];
 export const defaultArtistStreamingAlbumsProvider: ArtistStreamingAlbumsProvider = 'netease';
-export const currentUserNoticeVersion = 1;
-
 export type DesktopLyricsBounds = {
   x: number;
   y: number;
@@ -153,6 +151,14 @@ export type AppearancePreferences = {
   albumCoverShape: AlbumCoverShape;
 };
 
+export type AccessibilityPreferences = {
+  reduceMotionEnabled: boolean;
+  highContrastEnabled: boolean;
+  uiScalePercent: 100 | 115 | 130 | 150;
+  alwaysShowFocusEnabled: boolean;
+  screenReaderAnnouncementsEnabled: boolean;
+};
+
 export type RememberedAudioOutput = {
   enabled: boolean;
   outputMode: AudioOutputMode;
@@ -181,7 +187,6 @@ export type RemoteBackgroundConcurrencySettings = {
 export type AppSettings = {
   appMemoryVersion?: number;
   onboardingCompleted?: boolean;
-  userNoticeAcceptedVersion?: number;
   locale?: AppLocale;
   appearanceTheme: AppThemeMode;
   appearanceThemeScheduleEnabled?: boolean;
@@ -199,17 +204,18 @@ export type AppSettings = {
   appWindowAcrylicKeepWhenUnfocusedEnabled?: boolean;
   appWindowAcrylicTransparencyPercent?: number;
   appearancePreferences?: AppearancePreferences;
+  accessibilityPreferences?: AccessibilityPreferences;
   hiddenPlayerBarButtonIds?: PlayerBarButtonId[];
   sidebarRouteOrder?: SidebarRouteId[];
   sidebarHiddenRouteIds?: SidebarRouteId[];
   sidebarAutoHideEnabled?: boolean;
   sidebarIconOnlyEnabled?: boolean;
   settingsOptionalSectionsVisible?: boolean;
-  featureCommentsHidden?: boolean;
   trackContextMenuExtraActionsEnabled?: boolean;
   touchOnScreenKeyboardEnabled?: boolean;
   songsSort?: LibrarySort;
   rememberedAudioOutput?: RememberedAudioOutput;
+  audioAutomaticOutputEnabled?: boolean;
   hiddenAudioDeviceKeys?: string[];
   audioUseNativeOutput?: boolean;
   audioUseMiniaudioOutput?: boolean;
@@ -236,6 +242,7 @@ export type AppSettings = {
   artistImageFetchPaused?: boolean;
   liveLibraryUpdatesEnabled?: boolean;
   liveLibraryAutoHideDeletedEnabled?: boolean;
+  lowSpecModeEnabled?: boolean;
   safeModeEnabled?: boolean;
   fastStartupEnabled?: boolean;
   sqliteBalancedDurabilityEnabled?: boolean;
@@ -247,6 +254,8 @@ export type AppSettings = {
   suppressAccountExpiryNotices?: boolean;
   notificationsDisabled?: boolean;
   upcomingTrackNoticeEnabled?: boolean;
+  preventSleepWhilePlaying?: boolean;
+  autoPlayOnStartup?: boolean;
   spotifyAutoLaunchOfficialPlayer?: boolean;
   spotifyClientId?: string | null;
   spotifyRedirectUri?: string | null;
@@ -321,6 +330,8 @@ export type AppSettings = {
   lyricsPlayerBarDrawerEnabled?: boolean;
   lyricsPlayerBarDrawerAutoEnableForMv?: boolean;
   lyricsPlayerBarDrawerAutoHideEnabled?: boolean;
+  lyricsPlayerBarDrawerShortcutEnabled?: boolean;
+  lyricsPlayerBarDrawerShortcutAccelerator?: string | null;
   lyricsPlayerBarDrawerOpacityPercent?: number;
   lyricsPlayerBarDrawerColorMode?: LyricsMiniPlayerColorMode;
   lyricsPlayerBarDrawerColor?: string;
@@ -372,6 +383,9 @@ export type AppSettings = {
   miniPlayerLocked?: boolean;
   miniPlayerAutoHideMainWindow?: boolean;
   miniPlayerBounds?: DesktopLyricsBounds | null;
+  petEnabled?: boolean;
+  petBounds?: DesktopLyricsBounds | null;
+  petScalePercent?: number;
   taskbarMiniPlayerEnabled?: boolean;
   mvEnabled?: boolean;
   mvEnabledProviders: NetworkMvProviderId[];
@@ -468,6 +482,15 @@ export type AppSettings = {
   lyricsRoseVinylBackgroundBlurPx?: number;
   mvTitleOnlySearch?: boolean;
   obsBrowserSourceEnabled?: boolean;
+  echoLinkBasicEnabled?: boolean;
+  mqttIntegrationEnabled?: boolean;
+  mqttBrokerUrl?: string;
+  mqttUsername?: string | null;
+  mqttClientId?: string | null;
+  mqttDeviceId?: string | null;
+  mqttTopicPrefix?: string;
+  mqttHomeAssistantDiscoveryEnabled?: boolean;
+  mqttHomeAssistantDiscoveryPrefix?: string;
   osuDownloaderFeatureEnabled?: boolean;
   playbackShuffleAvoidRecentCount?: number;
   stageApiEnabled?: boolean;

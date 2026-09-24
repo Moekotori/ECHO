@@ -8,15 +8,36 @@ describe('userFacingError', () => {
     expect(getRawErrorMessage(null)).toBe('');
   });
 
-  it('hides remote IPC errors behind a friendly desktop bridge message', () => {
-    const message = formatUserFacingError(
+  it('does not misreport normal remote method failures as a missing desktop bridge', () => {
+    const missingToolMessage = formatUserFacingError(
       new Error("Error invoking remote method 'downloads:create-job': Error: spawn yt-dlp ENOENT"),
       { context: 'downloads' },
     );
+    const networkMessage = formatUserFacingError(
+      new Error("Error invoking remote method 'streaming:search': Error: fetch failed: ECONNRESET"),
+      { context: 'streaming' },
+    );
+    const unknownMessage = formatUserFacingError(
+      new Error("Error invoking remote method 'streaming:search': Error: provider rejected request"),
+      { context: 'streaming' },
+    );
+
+    expect(missingToolMessage).toContain('找不到对应的文件或文件夹');
+    expect(networkMessage).toContain('网络连接暂时失败');
+    expect(unknownMessage).toBe('流媒体服务暂时不可用。请检查网络、账号登录状态或稍后再试。');
+    expect(missingToolMessage).not.toContain('桌面桥接');
+    expect(networkMessage).not.toContain('桌面桥接');
+    expect(unknownMessage).not.toContain('桌面桥接');
+  });
+
+  it('reports actual missing IPC handlers as a desktop bridge failure', () => {
+    const message = formatUserFacingError(
+      new Error("Error invoking remote method 'streaming:search': Error: No handler registered for 'streaming:search'"),
+      { context: 'streaming' },
+    );
 
     expect(message).toContain('桌面桥接暂不可用');
-    expect(message).not.toContain('remote method');
-    expect(message).not.toContain('spawn');
+    expect(message).not.toContain('handler');
   });
 
   it('explains database corruption without leaking SQLite internals', () => {

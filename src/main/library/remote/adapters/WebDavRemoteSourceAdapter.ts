@@ -1,5 +1,6 @@
 import { basename, extname } from 'node:path';
 import { parseBuffer } from 'music-metadata';
+import { DOMParser } from '@xmldom/xmldom';
 import type {
   RemoteCoverResult,
   RemoteDirectoryItem,
@@ -25,6 +26,7 @@ import {
   stableKeyForWebDav,
 } from '../remoteIdentity';
 import { SCANNABLE_AUDIO_EXTENSIONS } from '../../../../shared/constants/audioExtensions';
+import { fetchWithNetworkProxy } from '../../../network/networkFetch';
 
 const audioExtensions = SCANNABLE_AUDIO_EXTENSIONS;
 const metadataReadBytes = 256 * 1024;
@@ -36,6 +38,18 @@ const maxMp3RangeFallbackBytes = mp3MetadataReadBytes * 2;
 const maxCoverRangeFallbackBytes = coverReadBytes * 2;
 const propfindRetryCount = 2;
 const oggExtensions = new Set(['.ogg', '.oga', '.opus']);
+const webDavDirectoryCacheNamespace = 'webdav-directory-sync-v1';
+const webDavPropertySelection = `
+  <D:prop>
+    <D:resourcetype/>
+    <D:getcontentlength/>
+    <D:getcontenttype/>
+    <D:getetag/>
+    <D:getlastmodified/>
+    <D:sync-token/>
+  </D:prop>`;
+const webDavPropfindBody = `<?xml version="1.0" encoding="utf-8" ?>
+<D:propfind xmlns:D="DAV:">${webDavPropertySelection}</D:propfind>`;
 
 const nowIso = (): string => new Date().toISOString();
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -57,12 +71,38 @@ const clampInt = (value: unknown, fallback: number, min: number, max: number): n
   return Number.isFinite(parsed) ? Math.max(min, Math.min(max, Math.round(parsed))) : fallback;
 };
 
-const timeoutSignal = (timeoutMs: number, signal?: AbortSignal): AbortSignal => {
+const timeoutSignal = (timeoutMs: number, signal?: AbortSignal): { signal: AbortSignal; dispose: () => void } => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   timer.unref?.();
-  signal?.addEventListener('abort', () => controller.abort(), { once: true });
-  return controller.signal;
+  const onAbort = (): void => controller.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  return { signal: controller.signal, dispose: () => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); } };
+};
+
+const readBodyWithLimit = async (response: Response, limit: number): Promise<Uint8Array | null> => {
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel('response body exceeds limit');
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const result = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength; }
+  return result;
 };
 
 const friendlyFetchError = (error: unknown): string => {
@@ -101,27 +141,99 @@ const parseHttpDate = (value: string | null): string | null => {
   return Number.isFinite(time) ? new Date(time).toISOString() : value;
 };
 
-const xmlText = (entry: string, localName: string): string | null => {
-  const pattern = new RegExp(`<[^>]*:?${localName}[^>]*>([\\s\\S]*?)<\\/[^>]*:?${localName}>`, 'i');
-  const match = entry.match(pattern);
-  return match ? decodeXml(match[1].trim()) : null;
+type ParsedWebDavResponse = {
+  href: string;
+  status: number | null;
+  collection: boolean;
+  sizeText: string | null;
+  contentType: string | null;
+  modifiedAt: string | null;
+  etag: string | null;
+  syncToken: string | null;
 };
 
-const isCollection = (entry: string): boolean => /<[^>]*:?collection\b/i.test(entry);
-
-const splitResponses = (xml: string): string[] => {
-  const responses = xml.match(/<[^>]*:?response\b[\s\S]*?<\/[^>]*:?response>/gi);
-  return responses ?? [];
+type ParsedWebDavMultiStatus = {
+  responses: ParsedWebDavResponse[];
+  syncToken: string | null;
 };
 
-const decodeXml = (value: string): string =>
-  value
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&');
+const elementChildren = (node: Element): Element[] => {
+  const output: Element[] = [];
+  for (let index = 0; index < node.childNodes.length; index += 1) {
+    const child = node.childNodes.item(index);
+    if (child?.nodeType === 1) {
+      output.push(child as Element);
+    }
+  }
+  return output;
+};
+
+const localNameIs = (element: Element, name: string): boolean =>
+  (element.localName || element.nodeName.replace(/^.*:/u, '')).toLocaleLowerCase() === name.toLocaleLowerCase();
+
+const directChild = (element: Element, name: string): Element | null =>
+  elementChildren(element).find((child) => localNameIs(child, name)) ?? null;
+
+const descendant = (element: Element | null, name: string): Element | null => {
+  if (!element) {
+    return null;
+  }
+  const all = element.getElementsByTagName('*');
+  for (let index = 0; index < all.length; index += 1) {
+    const candidate = all.item(index);
+    if (candidate && localNameIs(candidate, name)) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const elementText = (element: Element | null): string | null => cleanText(element?.textContent);
+
+const statusCodeFrom = (value: string | null): number | null => {
+  const match = value?.match(/\s(\d{3})(?:\s|$)/u);
+  return match ? Number(match[1]) : null;
+};
+
+const parseWebDavMultiStatus = (xml: string): ParsedWebDavMultiStatus => {
+  const document = new DOMParser().parseFromString(xml, 'application/xml');
+  const root = document.documentElement;
+  if (!root || !localNameIs(root, 'multistatus')) {
+    throw new Error('WebDAV returned an invalid multistatus response.');
+  }
+
+  const responses: ParsedWebDavResponse[] = [];
+  for (const responseElement of elementChildren(root).filter((element) => localNameIs(element, 'response'))) {
+    const href = elementText(directChild(responseElement, 'href'));
+    if (!href) {
+      continue;
+    }
+    const responseStatus = statusCodeFrom(elementText(directChild(responseElement, 'status')));
+    const propstats = elementChildren(responseElement).filter((element) => localNameIs(element, 'propstat'));
+    const successfulPropstat = propstats.find((propstat) => {
+        const status = statusCodeFrom(elementText(directChild(propstat, 'status')));
+        return status !== null && status >= 200 && status < 300;
+      }) ?? propstats.find((propstat) => !directChild(propstat, 'status')) ?? null;
+    const prop = successfulPropstat ? directChild(successfulPropstat, 'prop') : null;
+    const resourceType = descendant(prop, 'resourcetype');
+
+    responses.push({
+      href,
+      status: responseStatus ?? statusCodeFrom(elementText(directChild(successfulPropstat ?? responseElement, 'status'))),
+      collection: Boolean(descendant(resourceType, 'collection')),
+      sizeText: elementText(descendant(prop, 'getcontentlength')),
+      contentType: elementText(descendant(prop, 'getcontenttype')),
+      modifiedAt: elementText(descendant(prop, 'getlastmodified')),
+      etag: elementText(descendant(prop, 'getetag')),
+      syncToken: elementText(descendant(prop, 'sync-token')),
+    });
+  }
+
+  return {
+    responses,
+    syncToken: elementText(directChild(root, 'sync-token')),
+  };
+};
 
 const safeDecode = (value: string): string => {
   try {
@@ -252,9 +364,11 @@ export class WebDavRemoteSourceAdapter implements RemoteSourceAdapter {
       const response = await this.propfindWithRetry(input, this.rootPathFor(input), 0);
 
       if (!response.ok && response.status !== 207) {
+        await response.body?.cancel();
         return { ok: false, status: 'error', message: friendlyHttpError(response.status), testedAt };
       }
 
+      await response.body?.cancel();
       return { ok: true, status: 'enabled', message: '连接成功。', testedAt };
     } catch (error) {
       return { ok: false, status: 'error', message: friendlyFetchError(error), testedAt };
@@ -269,8 +383,8 @@ export class WebDavRemoteSourceAdapter implements RemoteSourceAdapter {
       throw new Error(friendlyHttpError(response.status));
     }
 
-    const xml = await response.text();
-    return splitResponses(xml)
+    const parsed = parseWebDavMultiStatus(await response.text());
+    return parsed.responses
       .map((entry) => this.mapResponse(input.source.id, entry, input.source.baseUrl ?? ''))
       .filter((item): item is RemoteDirectoryItem => Boolean(item))
       .filter((item) => normalizeRemoteDirectoryPath(item.path) !== requestedPath);
@@ -470,7 +584,7 @@ export class WebDavRemoteSourceAdapter implements RemoteSourceAdapter {
   }
 
   private async scanDirectory(input: RemoteScanInput, path: string, pendingDirectories: string[], readyFiles: RemoteScanItem[]): Promise<void> {
-    const children = await this.browse({ ...input, path });
+    const children = await this.browseForScan(input, path);
 
     for (const item of children) {
       input.onProgress?.(item);
@@ -498,6 +612,110 @@ export class WebDavRemoteSourceAdapter implements RemoteSourceAdapter {
     }
   }
 
+  private async browseForScan(input: RemoteScanInput, path: string): Promise<RemoteDirectoryItem[]> {
+    const requestedPath = normalizeRemoteDirectoryPath(path);
+    const cached = input.scanCache?.get(webDavDirectoryCacheNamespace, requestedPath) ?? null;
+    const cachedItems = this.parseCachedDirectoryItems(cached?.payload);
+    if (cached && cachedItems && cached.fingerprint) {
+      const incremental = await this.reportDirectoryChanges(input, requestedPath, cached.fingerprint, cachedItems);
+      if (incremental) {
+        return incremental;
+      }
+    }
+
+    const response = await this.propfindWithRetry(input, requestedPath, 1);
+    if (!response.ok && response.status !== 207) {
+      await response.body?.cancel();
+      throw new Error(friendlyHttpError(response.status));
+    }
+    const parsed = parseWebDavMultiStatus(await response.text());
+    const items = parsed.responses
+      .map((entry) => this.mapResponse(input.source.id, entry, input.source.baseUrl ?? ''))
+      .filter((item): item is RemoteDirectoryItem => Boolean(item))
+      .filter((item) => normalizeRemoteDirectoryPath(item.path) !== requestedPath);
+    const directoryResponse = parsed.responses.find((entry) =>
+      normalizeRemoteDirectoryPath(trimBasePath(entry.href, input.source.baseUrl ?? '')) === requestedPath,
+    );
+    const syncToken = parsed.syncToken ?? directoryResponse?.syncToken ?? null;
+    if (syncToken) {
+      input.scanCache?.set(webDavDirectoryCacheNamespace, requestedPath, syncToken, JSON.stringify(items));
+    }
+    return items;
+  }
+
+  private async reportDirectoryChanges(
+    input: RemoteScanInput,
+    requestedPath: string,
+    syncToken: string,
+    cachedItems: RemoteDirectoryItem[],
+  ): Promise<RemoteDirectoryItem[] | null> {
+    const baseUrl = input.source.baseUrl;
+    if (!baseUrl) {
+      return null;
+    }
+    const body = `<?xml version="1.0" encoding="utf-8" ?>
+<D:sync-collection xmlns:D="DAV:">
+  <D:sync-token>${this.escapeXml(syncToken)}</D:sync-token>
+  <D:sync-level>1</D:sync-level>
+  ${webDavPropertySelection}
+</D:sync-collection>`;
+    const response = await this.fetch(input, this.createBackendUrl(baseUrl, requestedPath), {
+      method: 'REPORT',
+      headers: {
+        ...this.createAuthHeaders(input),
+        Depth: '0',
+        'Content-Type': 'application/xml; charset=utf-8',
+      },
+      body,
+    }, 8000);
+    if (response.status !== 207) {
+      await response.body?.cancel();
+      return null;
+    }
+
+    const parsed = parseWebDavMultiStatus(await response.text());
+    const nextToken = parsed.syncToken;
+    if (!nextToken) {
+      return null;
+    }
+    const itemsByPath = new Map(cachedItems.map((item) => [item.path, item]));
+    for (const change of parsed.responses) {
+      const remotePath = trimBasePath(change.href, baseUrl);
+      const normalizedPath = change.collection ? normalizeRemoteDirectoryPath(remotePath) : normalizeRemotePath(remotePath);
+      if (normalizeRemoteDirectoryPath(normalizedPath) === requestedPath) {
+        continue;
+      }
+      if (change.status === 404) {
+        itemsByPath.delete(normalizedPath);
+        itemsByPath.delete(normalizeRemoteDirectoryPath(normalizedPath));
+        continue;
+      }
+      const item = this.mapResponse(input.source.id, change, baseUrl);
+      if (item) {
+        itemsByPath.set(item.path, item);
+      }
+    }
+    const items = Array.from(itemsByPath.values());
+    input.scanCache?.set(webDavDirectoryCacheNamespace, requestedPath, nextToken, JSON.stringify(items));
+    return items;
+  }
+
+  private parseCachedDirectoryItems(payload: string | undefined): RemoteDirectoryItem[] | null {
+    if (!payload) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(payload) as unknown;
+      return Array.isArray(parsed) ? parsed.filter((item): item is RemoteDirectoryItem => Boolean(item && typeof item === 'object')) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private escapeXml(value: string): string {
+    return value.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/"/gu, '&quot;').replace(/'/gu, '&apos;');
+  }
+
   private async propfindWithRetry(input: RemoteAdapterInput, remotePath: string, depth: 0 | 1): Promise<Response> {
     let lastError: unknown = null;
 
@@ -505,6 +723,7 @@ export class WebDavRemoteSourceAdapter implements RemoteSourceAdapter {
       try {
         const response = await this.propfind(input, remotePath, depth);
         if ((response.status === 429 || response.status === 503) && attempt < propfindRetryCount) {
+          await response.body?.cancel();
           await delay(250 * (attempt + 1));
           continue;
         }
@@ -532,7 +751,9 @@ export class WebDavRemoteSourceAdapter implements RemoteSourceAdapter {
       headers: {
         ...this.createAuthHeaders(input),
         Depth: String(depth),
+        'Content-Type': 'application/xml; charset=utf-8',
       },
+      body: webDavPropfindBody,
     }, 8000);
   }
 
@@ -540,18 +761,13 @@ export class WebDavRemoteSourceAdapter implements RemoteSourceAdapter {
     return normalizeRemoteDirectoryPath(configText(input.source.config, 'rootPath') ?? '/');
   }
 
-  private mapResponse(sourceId: string, entry: string, baseUrl: string): RemoteDirectoryItem | null {
-    const href = xmlText(entry, 'href');
-    if (!href) {
-      return null;
-    }
-
-    const kind = isCollection(entry) ? 'directory' : 'file';
-    const path = kind === 'directory' ? normalizeRemoteDirectoryPath(trimBasePath(href, baseUrl)) : normalizeRemotePath(trimBasePath(href, baseUrl));
+  private mapResponse(sourceId: string, entry: ParsedWebDavResponse, baseUrl: string): RemoteDirectoryItem | null {
+    const kind = entry.collection ? 'directory' : 'file';
+    const path = kind === 'directory' ? normalizeRemoteDirectoryPath(trimBasePath(entry.href, baseUrl)) : normalizeRemotePath(trimBasePath(entry.href, baseUrl));
     const name = basename(path.replace(/\/$/u, '')) || '/';
-    const sizeText = xmlText(entry, 'getcontentlength');
+    const sizeText = entry.sizeText;
     const sizeBytes = sizeText && Number.isFinite(Number(sizeText)) ? Number(sizeText) : null;
-    const contentType = xmlText(entry, 'getcontenttype');
+    const contentType = entry.contentType;
     const extension = extname(path).toLocaleLowerCase();
 
     return {
@@ -561,8 +777,8 @@ export class WebDavRemoteSourceAdapter implements RemoteSourceAdapter {
       name,
       kind,
       sizeBytes,
-      modifiedAt: parseHttpDate(xmlText(entry, 'getlastmodified')),
-      etag: xmlText(entry, 'getetag')?.replace(/^"|"$/g, '') ?? null,
+      modifiedAt: parseHttpDate(entry.modifiedAt),
+      etag: entry.etag?.replace(/^"|"$/g, '') ?? null,
       contentType,
       audio: kind === 'file' && audioExtensions.has(extension),
     };
@@ -601,23 +817,28 @@ export class WebDavRemoteSourceAdapter implements RemoteSourceAdapter {
     }, 8000);
 
     if (!response.ok && response.status !== 206) {
+      await response.body?.cancel();
       return null;
     }
 
     const contentLength = Number(response.headers.get('content-length') ?? 0);
     if (response.status === 200 && contentLength > maxFallbackBytes) {
+      await response.body?.cancel();
       return null;
     }
 
-    return new Uint8Array(await response.arrayBuffer());
+    return readBodyWithLimit(response, maxFallbackBytes);
   }
 
   private fetch(input: RemoteAdapterInput, url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
-    return webDavRequestLimiter.run(() =>
-      fetch(url, {
-        ...options,
-        signal: timeoutSignal(timeoutMs, input.signal),
-      }), input.signal);
+    return webDavRequestLimiter.run(async () => {
+      const deadline = timeoutSignal(timeoutMs, input.signal);
+      try {
+        return await fetchWithNetworkProxy(url, { ...options, signal: deadline.signal });
+      } finally {
+        deadline.dispose();
+      }
+    }, input.signal);
   }
 
   private async parseMetadataBuffer(buffer: Uint8Array, input: RemoteReadMetadataInput, fallback: RemoteMetadataResult): Promise<RemoteMetadataResult> {

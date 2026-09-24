@@ -310,5 +310,11 @@ try {
   console.log(`[native-abi] better-sqlite3 now matches ${info.runtime} ABI ${info.abi}.`);
 } catch (error) {
   console.error(`[native-abi] ${error instanceof Error ? error.message : String(error)}`);
+  const message = error instanceof Error ? error.message : String(error);
+  if (/Could not find any Python installation/i.test(message)) {
+    console.error('[native-abi] Fix: run npm run doctor, then install Python 3.12+ and reopen PowerShell.');
+  } else if (/Could not find any Visual Studio installation/i.test(message)) {
+    console.error('[native-abi] Fix: install Visual Studio 2022 Build Tools with “Desktop development with C++” and the Windows SDK, then rerun npm install.');
+  }
   process.exit(1);
 }

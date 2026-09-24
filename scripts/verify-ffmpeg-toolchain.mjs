@@ -72,4 +72,17 @@ for (const filter of requiredFilters) {
   }
 }
 
+const decodersOutput = execFileSync(artifactPath, ['-hide_banner', '-decoders'], {
+  encoding: 'utf8',
+  timeout: ffmpegProbeTimeoutMs,
+  windowsHide: true,
+});
+const requiredDecoders = Array.isArray(manifest.requiredDecoders) ? manifest.requiredDecoders : [];
+for (const decoder of requiredDecoders) {
+  const pattern = new RegExp(`(^|\\n)\\s*[A-Z.]{6}\\s+${String(decoder).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+`, 'u');
+  if (!pattern.test(decodersOutput)) {
+    fail(`Required FFmpeg decoder is missing: ${decoder}`);
+  }
+}
+
 console.log(`[verify:ffmpeg] OK ${version || artifactPath} sha256=${hash}`);

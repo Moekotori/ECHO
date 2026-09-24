@@ -256,6 +256,76 @@ afterEach(() => {
 });
 
 describe('PlayerBar', () => {
+  it('keeps the lyrics mini player hidden until its initial layout settings are ready', async () => {
+    let resolveSettings: ((settings: { hiddenPlayerBarButtonIds: string[] }) => void) | null = null;
+    const settingsPromise = new Promise<{ hiddenPlayerBarButtonIds: string[] }>((resolve) => {
+      resolveSettings = resolve;
+    });
+    window.echo = {
+      app: {
+        getSettings: vi.fn(() => settingsPromise),
+      },
+      playback: {
+        getStatus: vi.fn().mockResolvedValue({
+          state: 'stopped',
+          currentTrackId: null,
+          positionMs: 0,
+          durationMs: 0,
+          filePath: null,
+        }),
+      },
+      library: {
+        getLikedTrackIds: vi.fn().mockResolvedValue({}),
+      },
+    } as unknown as Window['echo'];
+
+    const { container } = render(
+      <I18nProvider>
+        <PlaybackQueueProvider>
+          <div className="lyrics-player-drawer-host">
+            <PlayerBar lyricsMiniPlayer />
+          </div>
+        </PlaybackQueueProvider>
+      </I18nProvider>,
+    );
+
+    const playerBar = container.querySelector('.player-bar');
+    expect(playerBar?.getAttribute('data-initial-layout-ready')).toBe('false');
+
+    act(() => resolveSettings?.({ hiddenPlayerBarButtonIds: ['sleepTimer'] }));
+
+    await waitFor(() =>
+      expect(playerBar?.getAttribute('data-initial-layout-ready')).toBe('true'),
+    );
+  });
+
+  it('shows a neutral idle identity while the persisted playback session is loading', () => {
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({ hiddenPlayerBarButtonIds: ['sleepTimer'] }),
+      },
+      playback: {
+        getQueueSession: vi.fn(() => new Promise(() => undefined)),
+        getStatus: vi.fn(() => new Promise(() => undefined)),
+      },
+      library: {
+        getLikedTrackIds: vi.fn().mockResolvedValue({}),
+      },
+    } as unknown as Window['echo'];
+
+    render(
+      <I18nProvider>
+        <PlaybackQueueProvider>
+          <PlayerBar />
+        </PlaybackQueueProvider>
+      </I18nProvider>,
+    );
+
+    expect(screen.queryByText('No local file')).toBeNull();
+    expect(screen.getByText('ECHO Next')).toBeTruthy();
+    expect(screen.getByText('Ready')).toBeTruthy();
+  });
+
   it('marks only the opted-in lyrics mini player for compact-away drawer styling', async () => {
     window.echo = {
       app: {
@@ -285,6 +355,7 @@ describe('PlayerBar', () => {
 
     await waitFor(() => expect(container.querySelector('.player-bar')).toBeTruthy());
     expect(container.querySelector('.player-bar')?.getAttribute('data-compact-away')).toBeNull();
+    expect(container.querySelector('.player-bar')?.getAttribute('data-layout-projection')).toBe('position');
 
     rerender(
       <I18nProvider>
@@ -295,6 +366,7 @@ describe('PlayerBar', () => {
     );
 
     expect(container.querySelector('.player-bar')?.getAttribute('data-compact-away')).toBeNull();
+    expect(container.querySelector('.player-bar')?.getAttribute('data-layout-projection')).toBe('disabled');
     expect(container.querySelector('.player-compact-progress')).toBeNull();
 
     rerender(
@@ -532,9 +604,9 @@ describe('PlayerBar', () => {
     );
 
     await screen.findByText('Signal Path Track');
-    const signalPathButton = screen.getByRole('button', { name: '打开音频链路：纯净候选，FLAC / 96k / 24b' });
+    const signalPathButton = screen.getByRole('button', { name: '打开音频链路：纯净链路，FLAC / 96k / 24b' });
     expect(signalPathButton.textContent).toBe('');
-    expect(signalPathButton.getAttribute('title')).toBe('打开音频链路：纯净候选，FLAC / 96k / 24b');
+    expect(signalPathButton.getAttribute('title')).toBe('打开音频链路：纯净链路，FLAC / 96k / 24b');
 
     fireEvent.click(signalPathButton);
 
@@ -543,6 +615,34 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).toContain('数据源');
     expect(dialog.textContent).toContain('FLAC 96kHz 24bit');
     expect(dialog.textContent).toContain('输出');
+  });
+
+  it('labels an active native ASIO route as ASIO instead of shared output', () => {
+    window.localStorage.setItem('echo-next.locale', 'zh-CN');
+    const track = makeTrack(34, { title: 'ASIO Signal Track', sampleRate: 96000, bitDepth: 24 });
+    const status: AudioStatus = {
+      ...audioStatus(track),
+      outputDeviceId: 'matrix-asio',
+      outputDeviceName: 'Matrix ASIO Driver',
+      outputBackend: 'asio',
+      activeOutputBackendImpl: 'asio-native',
+      outputMode: 'asio',
+      sharedDeviceSampleRate: null,
+      bitPerfectCandidate: true,
+    };
+
+    render(
+      <I18nProvider>
+        <AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />
+      </I18nProvider>,
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('纯净链路');
+    expect(dialog.textContent).toContain('ASIO 输出');
+    expect(dialog.textContent).toContain('asio-native');
+    expect(dialog.textContent).not.toContain('ASIO 输出输出');
+    expect(dialog.textContent).not.toContain('共享输出');
   });
 
   it('opens the bottom signal path popover with the active HQPlayer chain', async () => {
@@ -812,6 +912,144 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).not.toContain(translateFallback('audioSignalPath.doctor.resampling.advice'));
     fireEvent.click(screen.getByRole('button', { name: translateFallback('audioSignalPath.doctor.expand') }));
     expect(dialog.textContent).toContain(translateFallback('audioSignalPath.doctor.resampling.advice'));
+  });
+
+  it('shows the complete native PCM-to-SDM route without treating the DoP carrier as ordinary PCM resampling', () => {
+    const track = makeTrack(46, { title: 'SDM Signal Track', codec: 'flac', sampleRate: 44100, bitDepth: 16 });
+    const modulatorProfile = {
+      id: 'reference',
+      name: 'ASDM7EC-super',
+      order: 7,
+      noiseShaper: 'error-feedback',
+      feedbackCoefficients: [1.1, -0.8, 0.5],
+      feedbackDenominatorCoefficients: [1, -0.7],
+      ntfPeakGain: 1.5,
+      poleRadius: 0.88,
+      ditherAmplitude: 1e-7,
+      inputLimit: 0.92,
+      stabilityLimit: 1.25,
+      recommendedHeadroomDb: 6,
+    };
+    const status: AudioStatus = {
+      ...audioStatus(track),
+      outputDeviceName: 'Matrix ASIO Driver',
+      outputBackend: 'asio-dop',
+      activeOutputBackendImpl: 'asio-dop-native',
+      nativeOutputFormat: 'int32lsb',
+      outputMode: 'asio',
+      activeDecodeBackendImpl: 'native-direct-daemon-libav',
+      activeDecodeBackendLabel: 'native-direct-libav-audio-format-daemon',
+      decoderOutputSampleRate: 705600,
+      requestedOutputSampleRate: 705600,
+      actualDeviceSampleRate: 705600,
+      sharedDeviceSampleRate: null,
+      resampling: true,
+      dspActive: true,
+      bitPerfectDisabledReason: 'sdm_enabled',
+      sdmMode: 'pcmToDsd',
+      sdmTargetRate: 'dsd256',
+      sdmQualityProfile: 'reference',
+      sdmComputeBackend: 'cuda',
+      sdmActualComputeBackend: 'cpu',
+      sdmActive: true,
+      sdmRuntimeState: 'pcm_to_sdm_active',
+      sdmNativeSampleRate: 11289600,
+      sdmTransportSampleRate: 705600,
+      sdmModulatorProfile: modulatorProfile,
+      sdmCudaStatus: {
+        available: true,
+        source: 'native-host',
+        deviceName: 'NVIDIA GeForce RTX 4060 Laptop GPU',
+        memoryTotalMiB: 8192,
+        driverVersion: null,
+        cudaVersion: null,
+        error: null,
+      },
+      sdmRuntime: {
+        state: 'fallback',
+        requestedBackend: 'cuda',
+        activeBackend: 'cpu',
+        targetRate: 'dsd256',
+        nativeSampleRate: 11289600,
+        transportSampleRate: 705600,
+        oversamplingEngine: 'echo-fir',
+        oversamplingQualityProfile: 'transparent',
+        oversamplingFilterProfile1x: 'poly-sinc-ext2-long',
+        oversamplingFilterProfileNx: 'poly-sinc-hb',
+        oversamplingFilterSlot: '1x',
+        oversamplingSourceSampleRate: 44100,
+        oversamplingTargetSampleRate: 705600,
+        oversamplingFactor: 16,
+        oversamplingPrecision: 28,
+        oversamplingRuntime: {
+          state: 'active',
+          sourceSampleRate: 44100,
+          targetSampleRate: 705600,
+          requestedBackend: 'cuda',
+          activeBackend: 'cuda',
+          filterProfile: 'poly-sinc-ext2-long',
+          filterSlot: '1x',
+          qualityProfile: 'transparent',
+          tapCount: 1533,
+          firStageCount: 4,
+          firStageTapCounts: [1023, 255, 255, 255],
+          firStageProfiles: ['poly-sinc-ext2-long', 'poly-sinc-hb', 'poly-sinc-hb', 'poly-sinc-hb'],
+          firProcessingMode: 'realtime',
+          firBatchFrames: 2048,
+          firMaxBlockFrames: 2048,
+          firLastInputFrames: null,
+          firLastOutputFrames: null,
+          firWorkerRequests: null,
+          firWorkerAverageMs: null,
+          firWorkerLastMs: null,
+          firRealtimeRatio: null,
+          window: 'blackman-harris',
+          phase: 'linear',
+          normalizedCutoff: 0.059375,
+          transitionRatio: 0.05,
+          stopbandAttenuationDb: 131,
+          impulsePeakIndex: null,
+          impulseEnergyCentroid: null,
+          preRingingEnergyRatio: null,
+          measuredStopbandPeakDb: null,
+          measuredPassbandRippleDb: null,
+          cudaActive: true,
+          fallbackReason: null,
+        },
+        modulatorProfile,
+        processingMode: 'realtime',
+        batchFrames: 2048,
+        maxBlockFrames: 2048,
+        lastInputFrames: 2048,
+        lastOutputFrames: 32768,
+        cudaActive: false,
+        fallbackReason: 'native_cuda_sdm_not_faster:1.24x',
+        workerRequests: 12,
+        workerAverageMs: 4.2,
+        workerLastMs: 4.1,
+        realtimeRatio: 0.21,
+      },
+      warnings: [
+        'sdm_pcm_to_dsd_active:44100->11289600',
+        'native_cuda_sdm_not_faster:1.24x',
+      ],
+    };
+
+    render(<AudioSignalPathPopover isOpen={true} status={status} track={track} onClose={vi.fn()} />);
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain(translateFallback('audioSignalPath.summary.pcmToSdm', { target: 'DSD256' }));
+    expect(dialog.textContent).toContain(translateFallback('audioSignalPath.processing.sdmOversampling'));
+    expect(dialog.textContent).toContain('44.1kHz PCM -> 705.6kHz PCM / 16x');
+    expect(dialog.textContent).toContain('CUDA FIR');
+    expect(dialog.textContent).toContain(translateFallback('audioSignalPath.processing.sdmModulator'));
+    expect(dialog.textContent).toContain('DSD256 / 11.2896MHz 1-bit / ASDM7EC-super / 7th-order / CPU SDM');
+    expect(dialog.textContent).toContain(translateFallback('audioSignalPath.processing.dopTransport'));
+    expect(dialog.textContent).toContain('DSD256 -> DoP 705.6kHz carrier / DoP 24-bit / ASIO Int32 LSB / markers 0x05/0xFA');
+    expect(dialog.textContent).toContain('SDM 11.2896MHz / DoP 705.6kHz');
+    expect(dialog.textContent).toContain(translateFallback('audioSignalPath.meter.sdmUnavailableDetail'));
+    expect(dialog.textContent).not.toContain(translateFallback('audioSignalPath.metric.rateConversionActive'));
+    expect(dialog.textContent).not.toContain(translateFallback('audioSignalPath.processing.bitDepthConversion'));
   });
 
   it.each(['native-direct-juce-audio-format', 'native-direct-juce-audio-format-src-pcm'] as const)(
@@ -1260,7 +1498,7 @@ describe('PlayerBar', () => {
     expect(dialog.textContent).not.toContain('ECHO SRC CUDA FIR');
   });
 
-  it('shows DAC arrival ceremony when audio settings reports ASIO takeover while idle', async () => {
+  it('does not show a DAC takeover ceremony after an explicit output route change', async () => {
     window.localStorage.setItem('echo-next.locale', 'en-US');
     const track = makeTrack(40, { title: 'Arrival Track', sampleRate: 96000, bitDepth: 24 });
     const statusHandlers: Array<(status: AudioStatus) => void> = [];
@@ -1339,15 +1577,7 @@ describe('PlayerBar', () => {
       window.dispatchEvent(new CustomEvent(audioOutputRouteStatusChangedEvent, { detail: { status: asioStatus } }));
     });
 
-    const arrivalTitle = await screen.findByText('TEAC USB DAC taken over');
-    expect(arrivalTitle.closest('.dac-arrival-ceremony')).toBeTruthy();
-    expect(arrivalTitle.closest('.player-bar')).toBeNull();
-    expect(screen.getByText('ASIO')).toBeTruthy();
-    expect(screen.getByText('96kHz')).toBeTruthy();
-    expect(screen.getByText('No recent failures')).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close DAC arrival card' }));
-    expect(screen.queryByText('TEAC USB DAC taken over')).toBeNull();
+    await waitFor(() => expect(screen.queryByText('TEAC USB DAC taken over')).toBeNull());
 
     act(() => {
       window.dispatchEvent(new CustomEvent(audioOutputRouteStatusChangedEvent, {
@@ -1705,7 +1935,7 @@ describe('PlayerBar', () => {
 
     await screen.findByText('Restored Track');
     expect(screen.getByText('Restored Artist')).toBeTruthy();
-    expect(container.querySelector('.player-cover img')?.getAttribute('src')).toBe('echo-cover://original/cover-restored');
+    expect(container.querySelector('.player-cover img')?.getAttribute('src')).toBe('echo-cover://large/cover-restored');
   });
 
   it('shows cover art for a track started outside the SongsPage loaded queue', async () => {
@@ -1787,7 +2017,7 @@ describe('PlayerBar', () => {
 
     await screen.findByText('Album Detail Track');
     expect(screen.getByText('Album Detail Artist')).toBeTruthy();
-    expect(container.querySelector('.player-cover img')?.getAttribute('src')).toBe('echo-cover://original/cover-7');
+    expect(container.querySelector('.player-cover img')?.getAttribute('src')).toBe('echo-cover://large/cover-7');
     expect(screen.queryByText(/\.flac$/i)).toBeNull();
     expect(screen.queryByText('Local file')).toBeNull();
   });
@@ -2838,7 +3068,7 @@ describe('PlayerBar', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy());
   });
 
-  it('starts playback BPM analysis for embedded BPM that has not been verified by ECHO', async () => {
+  it('does not overwrite a reliable embedded BPM during playback', async () => {
     const track = makeTrack(1, {
       bpm: 126,
       bpmConfidence: 1,
@@ -2846,15 +3076,6 @@ describe('PlayerBar', () => {
       analysisStatus: 'complete',
       fieldSources: { bpm: 'embedded' },
     });
-    const analyzedTrack = {
-      ...track,
-      bpm: 128,
-      bpmConfidence: 0.86,
-      beatOffsetMs: 12,
-      analysisStatus: 'complete' as const,
-      analysisUpdatedAt: '2026-05-14T12:00:00.000Z',
-      fieldSources: { bpm: 'audio_analysis', beatOffsetMs: 'audio_analysis' },
-    };
     const startBpmAnalysis = vi.fn().mockResolvedValue({
       id: 'bpm-job-embedded',
       status: 'running',
@@ -2902,7 +3123,7 @@ describe('PlayerBar', () => {
         setOutput: vi.fn(),
       },
       library: {
-        getTrack: vi.fn().mockResolvedValue(analyzedTrack),
+        getTrack: vi.fn().mockResolvedValue(track),
         getLikedTrackIds: vi.fn().mockResolvedValue({ [track.id]: false }),
         startBpmAnalysis,
         getBpmAnalysisStatus,
@@ -2918,8 +3139,8 @@ describe('PlayerBar', () => {
       </PlaybackQueueProvider>,
     );
 
-    await waitFor(() => expect(startBpmAnalysis).toHaveBeenCalledWith({ trackIds: [track.id] }));
-    await waitFor(() => expect(screen.getByText('128 BPM')).toBeTruthy(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText('126 BPM')).toBeTruthy(), { timeout: 3000 });
+    expect(startBpmAnalysis).not.toHaveBeenCalled();
   }, 10000);
 
   it('starts playback BPM analysis when the setting is enabled during the current song', async () => {
@@ -3573,7 +3794,16 @@ describe('PlayerBar', () => {
     const globalShortcutHandlers: Array<(command: GlobalShortcutAction) => void> = [];
     const toggleTrackLiked = vi.fn().mockResolvedValue({ liked: true });
     const setOutput = vi.fn().mockResolvedValue(audioStatus(track));
-    const miniPlayerShow = vi.fn().mockResolvedValue({ visible: true });
+    let miniPlayerVisible = false;
+    const miniPlayerShow = vi.fn().mockImplementation(async () => {
+      miniPlayerVisible = true;
+      return { visible: true };
+    });
+    const miniPlayerHide = vi.fn().mockImplementation(async () => {
+      miniPlayerVisible = false;
+      return { visible: false };
+    });
+    const getMiniPlayerState = vi.fn().mockImplementation(async () => ({ visible: miniPlayerVisible }));
     const navigateQueue = vi.fn();
     const navigateRoute = vi.fn();
     window.addEventListener('app:navigate:queue', navigateQueue);
@@ -3613,9 +3843,9 @@ describe('PlayerBar', () => {
         setOutput,
       },
       miniPlayer: {
-        getState: vi.fn().mockResolvedValue({ visible: false }),
+        getState: getMiniPlayerState,
         show: miniPlayerShow,
-        hide: vi.fn(),
+        hide: miniPlayerHide,
       },
       library: {
         getTracks: vi.fn(),
@@ -3657,6 +3887,9 @@ describe('PlayerBar', () => {
     globalShortcutHandlers[0]?.('toggleMiniPlayer');
     await waitFor(() => expect(miniPlayerShow).toHaveBeenCalledTimes(1));
 
+    globalShortcutHandlers[0]?.('toggleMiniPlayer');
+    await waitFor(() => expect(miniPlayerHide).toHaveBeenCalledWith({ restoreMainWindow: true }));
+
     globalShortcutHandlers[0]?.('toggleShuffle');
     await waitFor(() => expect(window.localStorage.getItem('echo-next:playback-mode')).toContain('"isShuffleEnabled":true'));
 
@@ -3667,7 +3900,7 @@ describe('PlayerBar', () => {
     window.removeEventListener('app:navigate:route', navigateRoute);
   });
 
-  it('publishes current playback metadata and actions through the browser media session', async () => {
+  it('falls back to the browser media session when native SMTC becomes unavailable', async () => {
     const track = makeTrack(1, {
       title: 'SMTC Song',
       artist: 'SMTC Artist',
@@ -3691,6 +3924,12 @@ describe('PlayerBar', () => {
       durationMs: track.duration * 1000,
       filePath: track.path,
     });
+    let smtcHostState: 'running' | 'unavailable' = 'running';
+    const getSmtcDiagnostics = vi.fn().mockImplementation(() => Promise.resolve({
+      enabled: true,
+      platform: 'win32',
+      hostState: smtcHostState,
+    }));
 
     class TestMediaMetadata {
       title: string;
@@ -3736,6 +3975,11 @@ describe('PlayerBar', () => {
         listDevices: vi.fn(),
         setOutput: vi.fn(),
       },
+      smtc: {
+        getDiagnostics: getSmtcDiagnostics,
+        setEnabledActions: vi.fn().mockResolvedValue(undefined),
+        onCommand: vi.fn(() => () => undefined),
+      },
       eq: {
         getState: vi.fn().mockResolvedValue(eqState()),
         setEnabled: vi.fn().mockResolvedValue(eqState()),
@@ -3778,11 +4022,15 @@ describe('PlayerBar', () => {
     );
 
     await screen.findByText('SMTC Song');
-    await waitFor(() => expect(mediaSession.metadata?.title).toBe('SMTC Song'));
+    await waitFor(() => expect(getSmtcDiagnostics).toHaveBeenCalled());
+    await waitFor(() => expect(mediaSession.metadata).toBeNull());
+
+    smtcHostState = 'unavailable';
+    await waitFor(() => expect(mediaSession.metadata?.title).toBe('SMTC Song'), { timeout: 7_000 });
 
     expect(mediaSession.metadata?.artist).toBe('SMTC Artist');
     expect(mediaSession.metadata?.album).toBe('SMTC Album');
-    expect(container.querySelector('.player-cover img')?.getAttribute('src')).toBe('echo-cover://original/cover-1');
+    expect(container.querySelector('.player-cover img')?.getAttribute('src')).toBe('echo-cover://large/cover-1');
     expect(mediaSession.metadata?.artwork).toHaveLength(0);
     expect(mediaSession.playbackState).toBe('paused');
     expect(mediaSession.setPositionState).toHaveBeenCalledWith({
@@ -4323,12 +4571,13 @@ describe('PlayerBar', () => {
     expect(container.querySelector('.progress-waveform')).toBeNull();
   });
 
-  it('does not retain same-track audio status after a shared seek snapshot clears audio telemetry', async () => {
+  it('keeps same-track audio tags while a shared seek snapshot updates the progress clock', async () => {
     const track = makeTrack(1, { duration: 240 });
     const initialAudioStatus = {
       ...audioStatus(track),
       durationSeconds: track.duration,
       positionSeconds: 181,
+      bitPerfectCandidate: true,
     };
 
     window.echo = {
@@ -4368,6 +4617,7 @@ describe('PlayerBar', () => {
     );
 
     await screen.findByText('Song 1');
+    await screen.findByText('Bit-Perfect');
     const slider = screen.getByRole('slider', { name: 'Seek position' }) as HTMLInputElement;
     await waitFor(() => expect(Number(slider.value)).toBeGreaterThanOrEqual(181));
 
@@ -4383,6 +4633,7 @@ describe('PlayerBar', () => {
 
     await waitFor(() => expect(Number(slider.value)).toBeLessThan(65));
     expect(Number(slider.value)).toBeGreaterThanOrEqual(60);
+    expect(screen.getByText('Bit-Perfect')).toBeTruthy();
   });
 
   it('keeps high-speed progress from jumping backward on a brief same-track stale audio status', async () => {
@@ -5708,6 +5959,112 @@ describe('PlayerBar', () => {
       timeout: 3000,
     });
     await screen.findByText('Song 2');
+  });
+
+  it('does not overlap Spotify playback-state polls while the previous request is pending', async () => {
+    const spotifyTrack = makeTrack(1, {
+      id: 'streaming:spotify:single-flight',
+      path: 'streaming:spotify:single-flight',
+      stableKey: 'streaming:spotify:single-flight',
+      mediaType: 'streaming',
+      provider: 'spotify',
+      providerTrackId: 'single-flight',
+      codec: 'spotify',
+      sampleRate: null,
+      bitDepth: null,
+      bitrate: null,
+    });
+    let resolvePlaybackState:
+      | ((value: {
+          isPlaying: boolean;
+          progressMs: number;
+          itemUri: string;
+          deviceId: string;
+          deviceName: string;
+        }) => void)
+      | undefined;
+    const getPlaybackState = vi.fn(
+      () =>
+        new Promise<{
+          isPlaying: boolean;
+          progressMs: number;
+          itemUri: string;
+          deviceId: string;
+          deviceName: string;
+        }>((resolve) => {
+          resolvePlaybackState = resolve;
+        }),
+    );
+
+    window.echo = {
+      playback: {
+        getStatus: vi.fn().mockResolvedValue({
+          state: 'playing',
+          currentTrackId: spotifyTrack.id,
+          positionMs: 0,
+          durationMs: spotifyTrack.duration * 1000,
+          filePath: spotifyTrack.path,
+        }),
+        playLocalFile: vi.fn(),
+        play: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(),
+        seek: vi.fn(),
+        openLocalAudioFile: vi.fn(),
+      },
+      spotify: {
+        getAccessToken: vi.fn(),
+        getDevices: vi.fn().mockResolvedValue([]),
+        getPlaybackState,
+        ensureConnectDevice: vi.fn(),
+        startPlayback: vi.fn(),
+        transferPlayback: vi.fn(),
+        pause: vi.fn(),
+        resume: vi.fn(),
+        seek: vi.fn(),
+        setVolume: vi.fn(),
+      },
+      audio: {
+        getStatus: vi.fn().mockResolvedValue({
+          ...audioStatus(spotifyTrack),
+          state: 'idle',
+          currentTrackId: null,
+          currentFilePath: null,
+          positionSeconds: 0,
+        }),
+        onStatus: vi.fn(),
+        listDevices: vi.fn(),
+        setOutput: vi.fn(),
+      },
+      library: {
+        getLikedTrackIds: vi.fn().mockResolvedValue({ [spotifyTrack.id]: false }),
+      },
+      app: {
+        getSettings: vi.fn().mockResolvedValue({ smtcEnabled: true }),
+      },
+    } as unknown as Window['echo'];
+
+    render(
+      <PlaybackQueueProvider>
+        <QueueSeed tracks={[spotifyTrack]} />
+      </PlaybackQueueProvider>,
+    );
+
+    await screen.findByText('Song 1');
+    await waitFor(() => expect(getPlaybackState).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => window.setTimeout(resolve, 1_200));
+    expect(getPlaybackState).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolvePlaybackState?.({
+        isPlaying: true,
+        progressMs: 1_000,
+        itemUri: 'spotify:track:single-flight',
+        deviceId: 'spotify-device',
+        deviceName: 'Spotify Desktop',
+      });
+      await Promise.resolve();
+    });
   });
 
   it('auto-plays the next queued track when Spotify ended status uses the stable streaming key', async () => {

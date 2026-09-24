@@ -1,71 +1,53 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { LikedPage } from './LikedPage';
-import type { LibraryAlbum, LibraryPage, LibraryPlaylistItem, LibraryTrack } from '../../shared/types/library';
-import { PlaybackQueueProvider } from '../stores/PlaybackQueueProvider';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import type {
+  LibraryPage,
+  LibraryPlaylistItem,
+  LibraryTrack,
+} from "../../shared/types/library";
+import { I18nProvider } from "../i18n/I18nProvider";
+import { PlaybackQueueProvider } from "../stores/PlaybackQueueProvider";
+import { LikedPage } from "./LikedPage";
 
-vi.mock('../components/library/TrackList', () => ({
-  TrackList: ({
-    tracks,
+vi.mock("../components/ui/InfiniteScrollSentinel", () => ({
+  InfiniteScrollSentinel: ({
     canLoadMore,
-    totalCount,
-    loadedCount,
-    isLoadingMore,
-    onEndReached,
-    onToggleLiked,
+    onLoadMore,
   }: {
-    tracks: LibraryTrack[];
-    canLoadMore?: boolean;
-    totalCount?: number;
-    loadedCount?: number;
-    isLoadingMore?: boolean;
-    onEndReached?: () => void;
-    onToggleLiked?: (track: LibraryTrack) => void;
+    canLoadMore: boolean;
+    onLoadMore: () => void;
   }) => (
-    <section aria-label="mock-track-list">
-      <span>{tracks.length} liked tracks</span>
-      <span>
-        loaded {loadedCount ?? tracks.length} / {totalCount ?? tracks.length} {isLoadingMore ? 'loading' : 'idle'}
-      </span>
-      {tracks.map((track) => (
-        <button key={track.id} type="button" onClick={() => onToggleLiked?.(track)}>
-          Unlike {track.title}
-        </button>
-      ))}
-      <button type="button" disabled={!canLoadMore} onClick={onEndReached}>
-        Load liked tracks
-      </button>
-    </section>
+    <button type="button" disabled={!canLoadMore} onClick={onLoadMore}>
+      Load more liked
+    </button>
   ),
+  readPageScrollTop: () => 0,
+  writePageScrollTop: () => undefined,
 }));
 
-const album = (id: string, overrides: Partial<LibraryAlbum> = {}): LibraryAlbum => ({
-  id,
-  albumKey: `artist/${id}`,
-  title: `Album ${id}`,
-  albumArtist: 'Artist',
-  year: 2026,
-  trackCount: 1,
-  duration: 120,
-  coverId: null,
-  coverThumb: null,
-  ...overrides,
-});
-
-const track = (id: string, overrides: Partial<LibraryTrack> = {}): LibraryTrack => ({
+const track = (
+  id: string,
+  overrides: Partial<LibraryTrack> = {},
+): LibraryTrack => ({
   id,
   path: `D:\\Music\\${id}.flac`,
   title: `Track ${id}`,
-  artist: 'Artist',
-  album: 'Album',
-  albumArtist: 'Artist',
+  artist: "Artist",
+  album: "Album",
+  albumArtist: "Artist",
   trackNo: 1,
   discNo: 1,
   year: 2026,
   genre: null,
   duration: 180,
-  codec: 'flac',
+  codec: "flac",
   sampleRate: 96000,
   bitDepth: 24,
   bitrate: 900000,
@@ -75,12 +57,15 @@ const track = (id: string, overrides: Partial<LibraryTrack> = {}): LibraryTrack 
   ...overrides,
 });
 
-const playlistItem = (id: string, overrides: Partial<LibraryPlaylistItem> = {}): LibraryPlaylistItem => ({
+const playlistItem = (
+  id: string,
+  overrides: Partial<LibraryPlaylistItem> = {},
+): LibraryPlaylistItem => ({
   id,
-  playlistId: 'liked',
-  mediaType: 'track',
+  playlistId: "liked",
+  mediaType: "track",
   mediaId: id,
-  sourceProvider: 'local',
+  sourceProvider: "local",
   sourceItemId: null,
   titleSnapshot: null,
   artistSnapshot: null,
@@ -89,7 +74,7 @@ const playlistItem = (id: string, overrides: Partial<LibraryPlaylistItem> = {}):
   coverId: null,
   coverThumb: null,
   position: 1,
-  addedAt: '2026-05-14T00:00:00.000Z',
+  addedAt: "2026-07-22T08:00:00.000Z",
   addedFrom: null,
   unavailable: false,
   track: null,
@@ -97,7 +82,10 @@ const playlistItem = (id: string, overrides: Partial<LibraryPlaylistItem> = {}):
   ...overrides,
 });
 
-const page = <T,>(items: T[], overrides: Partial<LibraryPage<T>> = {}): LibraryPage<T> => ({
+const page = <T,>(
+  items: T[],
+  overrides: Partial<LibraryPage<T>> = {},
+): LibraryPage<T> => ({
   items,
   page: 1,
   pageSize: 100,
@@ -110,34 +98,21 @@ const installLibrary = (
   getLikedTracks: ReturnType<typeof vi.fn>,
   getLikedAlbums: ReturnType<typeof vi.fn>,
   syncLikedSongs: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({
-    playlistId: 'liked',
+    playlistId: "liked",
     importedCount: 0,
     addedCount: 0,
     providers: [],
-    syncedAt: '2026-05-16T00:00:00.000Z',
+    syncedAt: "2026-07-22T08:00:00.000Z",
   }),
-  setTrackLiked: ReturnType<typeof vi.fn> = vi.fn(),
-  getLikedSongsPlaylist: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({
-    id: 'liked-tracks',
-    name: '喜欢的歌曲',
-    description: null,
-    kind: 'system',
-    sourceProvider: 'local',
-    sourcePlaylistId: null,
-    coverId: null,
-    coverThumb: null,
-    sortMode: 'manual',
-    itemCount: 1,
-    createdAt: '2026-05-16T00:00:00.000Z',
-    updatedAt: '2026-05-16T00:00:00.000Z',
-  }),
-  exportPlaylist: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue('D:\\Exports\\liked.json'),
+  exportPlaylist: ReturnType<typeof vi.fn> = vi
+    .fn()
+    .mockResolvedValue("D:\\Exports\\liked.json"),
 ): void => {
   window.echo = {
     library: {
       getLikedTracks,
       getLikedAlbums,
-      getLikedSongsPlaylist,
+      getLikedSongsPlaylist: vi.fn().mockResolvedValue({ id: "liked-tracks" }),
       exportPlaylist,
       unlikeTrack: vi.fn(),
       unlikeAlbum: vi.fn(),
@@ -155,27 +130,25 @@ const installLibrary = (
     },
     streaming: {
       syncLikedSongs,
-      setTrackLiked,
+      setTrackLiked: vi.fn(),
     },
-  } as unknown as Window['echo'];
+  } as unknown as Window["echo"];
 };
 
 const renderLikedPage = (): ReturnType<typeof render> =>
   render(
-    <PlaybackQueueProvider>
-      <main className="page-surface">
-        <LikedPage />
-      </main>
-    </PlaybackQueueProvider>,
+    <I18nProvider>
+      <PlaybackQueueProvider>
+        <main className="page-surface">
+          <LikedPage />
+        </main>
+      </PlaybackQueueProvider>
+    </I18nProvider>,
   );
 
-const setScrollablePageSurface = (element: HTMLElement): void => {
-  Object.defineProperty(element, 'scrollHeight', { configurable: true, value: 2000 });
-  Object.defineProperty(element, 'clientHeight', { configurable: true, value: 900 });
-};
-
 beforeEach(() => {
-  vi.stubGlobal('IntersectionObserver', undefined);
+  vi.stubGlobal("IntersectionObserver", undefined);
+  window.localStorage.setItem("echo-next.locale", "zh-CN");
 });
 
 afterEach(() => {
@@ -184,199 +157,308 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('LikedPage', () => {
-  it('syncs provider liked songs from the liked page', async () => {
-    const neteasePage = page(
-      [
-        playlistItem('netease-1', {
-          mediaType: 'stream_track',
-          mediaId: 'streaming:netease:1',
-          sourceProvider: 'netease',
-          sourceItemId: '1',
-          titleSnapshot: 'NetEase 1',
-        }),
-        playlistItem('netease-2', {
-          mediaType: 'stream_track',
-          mediaId: 'streaming:netease:2',
-          sourceProvider: 'netease',
-          sourceItemId: '2',
-          titleSnapshot: 'NetEase 2',
-        }),
-      ],
-      { total: 955, hasMore: true },
+describe("LikedPage", () => {
+  it("keeps the guided empty state inside the new collection workspace", async () => {
+    installLibrary(
+      vi.fn().mockResolvedValue(page([])),
+      vi.fn().mockResolvedValue(page([])),
     );
-    const getLikedTracks = vi
-      .fn()
-      .mockResolvedValueOnce(page([]))
-      .mockResolvedValueOnce(neteasePage)
-      .mockResolvedValue(neteasePage);
-    const getLikedAlbums = vi.fn().mockResolvedValue(page([]));
-    const syncLikedSongs = vi.fn().mockResolvedValue({
-      playlistId: 'liked',
-      importedCount: 2,
-      addedCount: 1,
-      providers: [{ provider: 'netease', success: true, importedCount: 2, addedCount: 1, total: 2 }],
-      syncedAt: '2026-05-16T00:00:00.000Z',
-    });
-    installLibrary(getLikedTracks, getLikedAlbums, syncLikedSongs);
-
     renderLikedPage();
 
-    await waitFor(() =>
-      expect(getLikedTracks).toHaveBeenCalledWith({ page: 1, pageSize: 100, search: '', sort: 'recent', sourceProvider: 'local' }),
-    );
-    await waitFor(() =>
-      expect(getLikedAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 100, search: '', sort: 'recent', sourceProvider: 'local' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: '网易云' }));
-
-    await waitFor(() => expect(syncLikedSongs).toHaveBeenCalledWith('netease'));
-    await waitFor(() =>
-      expect(getLikedTracks).toHaveBeenCalledWith({ page: 1, pageSize: 100, search: '', sort: 'recent', sourceProvider: 'netease' }),
-    );
-    expect(screen.getByText('网易云 我喜欢已同步：2 首，新增 1 首。')).toBeTruthy();
-    expect(screen.getByText('loaded 2 / 955 idle')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '本地' }).getAttribute('aria-pressed')).toBe('false');
-    expect(screen.getByRole('button', { name: '网易云' }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('button', { name: 'QQ音乐' })).toBeTruthy();
+    expect(await screen.findByText("把喜欢的音乐，放在一个地方")).toBeTruthy();
+    expect(screen.getByText("从以下来源添加喜欢的音乐")).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "喜欢分类" })).toBeTruthy();
+    expect(screen.queryByText("下载")).toBeNull();
   });
 
-  it('exports the selected liked source from the liked page', async () => {
-    const qqPage = page([
-      playlistItem('qq-1', {
-        mediaType: 'stream_track',
-        mediaId: 'streaming:qqmusic:1',
-        sourceProvider: 'qqmusic',
-        sourceItemId: '1',
-        titleSnapshot: 'QQ 1',
-      }),
-    ]);
-    const getLikedTracks = vi
-      .fn()
-      .mockResolvedValueOnce(page([]))
-      .mockResolvedValueOnce(qqPage)
-      .mockResolvedValue(qqPage);
-    const getLikedAlbums = vi.fn().mockResolvedValue(page([]));
-    const syncLikedSongs = vi.fn().mockResolvedValue({
-      playlistId: 'liked',
-      importedCount: 1,
-      addedCount: 1,
-      providers: [{ provider: 'qqmusic', success: true, importedCount: 1, addedCount: 1, total: 1 }],
-      syncedAt: '2026-05-16T00:00:00.000Z',
-    });
-    const getLikedSongsPlaylist = vi.fn().mockResolvedValue({
-      id: 'liked-tracks',
-      name: '喜欢的歌曲',
-      description: null,
-      kind: 'system',
-      sourceProvider: 'local',
-      sourcePlaylistId: null,
-      coverId: null,
-      coverThumb: null,
-      sortMode: 'manual',
-      itemCount: 1,
-      createdAt: '2026-05-16T00:00:00.000Z',
-      updatedAt: '2026-05-16T00:00:00.000Z',
-    });
-    const exportPlaylist = vi.fn().mockResolvedValue('D:\\Exports\\qq-liked.json');
-    installLibrary(getLikedTracks, getLikedAlbums, syncLikedSongs, vi.fn(), getLikedSongsPlaylist, exportPlaylist);
+  it("renders the selected two-column table design without download actions", async () => {
+    const item = playlistItem("track-1", { track: track("track-1") });
+    installLibrary(
+      vi.fn().mockResolvedValue(page([item])),
+      vi.fn().mockResolvedValue(page([])),
+    );
+    const { container } = renderLikedPage();
 
+    expect(await screen.findByText("Track track-1")).toBeTruthy();
+    expect(container.querySelector(".liked-library-nav")).toBeTruthy();
+    expect(container.querySelector(".liked-track-table")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "音质" })).toBeTruthy();
+    expect(screen.queryByText("下载")).toBeNull();
+    expect(screen.queryByRole("button", { name: /下载/ })).toBeNull();
+  });
+
+  it("switches sources as local filters without triggering network sync", async () => {
+    const item = playlistItem("track-1", { track: track("track-1") });
+    const getLikedTracks = vi.fn().mockResolvedValue(page([item]));
+    const syncLikedSongs = vi.fn();
+    installLibrary(
+      getLikedTracks,
+      vi.fn().mockResolvedValue(page([])),
+      syncLikedSongs,
+    );
     renderLikedPage();
 
-    await waitFor(() => expect(getLikedTracks).toHaveBeenCalledWith({ page: 1, pageSize: 100, search: '', sort: 'recent', sourceProvider: 'local' }));
-    fireEvent.click(screen.getByRole('button', { name: 'QQ音乐' }));
+    await screen.findByText("Track track-1");
+    fireEvent.click(screen.getByRole("button", { name: "网易云" }));
 
-    await waitFor(() => expect(syncLikedSongs).toHaveBeenCalledWith('qqmusic'));
-    await waitFor(() => expect(screen.getByText('1 liked tracks')).toBeTruthy());
-    const exportButton = screen.getAllByRole('button').find((button) => button.textContent?.includes('导出'));
-    expect(exportButton).toBeTruthy();
-    fireEvent.click(exportButton as HTMLButtonElement);
+    await waitFor(() =>
+      expect(getLikedTracks).toHaveBeenCalledWith({
+        page: 1,
+        pageSize: 100,
+        search: "",
+        sort: "recent",
+        sourceProvider: "netease",
+      }),
+    );
+    expect(syncLikedSongs).not.toHaveBeenCalled();
+  });
+
+  it("sorts the most-played collection with the frequent library sort", async () => {
+    const item = playlistItem("track-1", { track: track("track-1") });
+    const getLikedTracks = vi.fn().mockResolvedValue(page([item]));
+    installLibrary(getLikedTracks, vi.fn().mockResolvedValue(page([])));
+    renderLikedPage();
+
+    await screen.findByText("Track track-1");
+    fireEvent.click(screen.getByRole("button", { name: /最常播放/ }));
+
+    await waitFor(() =>
+      expect(getLikedTracks).toHaveBeenCalledWith({
+        page: 1,
+        pageSize: 100,
+        search: "",
+        sort: "frequent",
+      }),
+    );
+  });
+
+  it("keeps all tracks distinct from the recently-liked shortcut", async () => {
+    const item = playlistItem("track-1", { track: track("track-1") });
+    const getLikedTracks = vi.fn().mockResolvedValue(page([item]));
+    const getLikedAlbums = vi.fn().mockResolvedValue(page([]));
+    installLibrary(getLikedTracks, getLikedAlbums);
+    renderLikedPage();
+
+    await screen.findByText("Track track-1");
+    expect(getLikedTracks).toHaveBeenCalledWith({
+      page: 1,
+      pageSize: 100,
+      search: "",
+      sort: "default",
+    });
+
+    getLikedAlbums.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /最近喜欢/ }));
+    await waitFor(() =>
+      expect(getLikedTracks).toHaveBeenCalledWith({
+        page: 1,
+        pageSize: 100,
+        search: "",
+        sort: "recent",
+      }),
+    );
+    expect(getLikedAlbums).not.toHaveBeenCalled();
+  });
+
+  it("shows selection actions without offering download", async () => {
+    const item = playlistItem("track-1", { track: track("track-1") });
+    installLibrary(
+      vi.fn().mockResolvedValue(page([item])),
+      vi.fn().mockResolvedValue(page([])),
+    );
+    const { container } = renderLikedPage();
+
+    await screen.findByText("Track track-1");
+    expect(container.querySelector(".liked-track-table")?.getAttribute("data-has-selection")).toBe("false");
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "选择 Track track-1" }),
+    );
+
+    expect(container.querySelector(".liked-track-table")?.getAttribute("data-has-selection")).toBe("true");
+    expect(screen.getByRole("toolbar", { name: "已选歌曲操作" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "播放下一首" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "添加到" })).toBeTruthy();
+    expect(screen.queryByText("下载")).toBeNull();
+  });
+
+  it("supports keyboard row navigation and space selection", async () => {
+    const first = playlistItem("track-1", { track: track("track-1") });
+    const second = playlistItem("track-2", { track: track("track-2") });
+    installLibrary(
+      vi.fn().mockResolvedValue(page([first, second])),
+      vi.fn().mockResolvedValue(page([])),
+    );
+    const { container } = renderLikedPage();
+
+    await screen.findByText("Track track-1");
+    const rows = container.querySelectorAll<HTMLElement>(
+      ".liked-track-table-row",
+    );
+    rows[0]?.focus();
+    fireEvent.keyDown(rows[0]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rows[1]);
+
+    fireEvent.keyDown(rows[1]!, { key: " " });
+    expect(
+      (
+        screen.getByRole("checkbox", {
+          name: "选择 Track track-2",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+  });
+
+  it("closes a row menu after running an action", async () => {
+    const item = playlistItem("track-1", { track: track("track-1") });
+    installLibrary(
+      vi.fn().mockResolvedValue(page([item])),
+      vi.fn().mockResolvedValue(page([])),
+    );
+    const { container } = renderLikedPage();
+
+    await screen.findByText("Track track-1");
+    const menu = container.querySelector<HTMLDetailsElement>(
+      ".liked-row-menu",
+    )!;
+    menu.open = true;
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "将 Track track-1 设为下一首",
+      }),
+    );
+
+    expect(menu.open).toBe(false);
+  });
+
+  it("syncs a provider from its dedicated sidebar control", async () => {
+    const item = playlistItem("track-1", { track: track("track-1") });
+    const syncLikedSongs = vi.fn().mockResolvedValue({
+      playlistId: "liked",
+      importedCount: 2,
+      addedCount: 1,
+      providers: [
+        {
+          provider: "netease",
+          success: true,
+          importedCount: 2,
+          addedCount: 1,
+          total: 2,
+        },
+      ],
+      syncedAt: "2026-07-22T08:00:00.000Z",
+    });
+    installLibrary(
+      vi.fn().mockResolvedValue(page([item])),
+      vi.fn().mockResolvedValue(page([])),
+      syncLikedSongs,
+    );
+    renderLikedPage();
+
+    await screen.findByText("Track track-1");
+    fireEvent.click(screen.getByRole("button", { name: "同步收藏 网易云" }));
+
+    await waitFor(() => expect(syncLikedSongs).toHaveBeenCalledWith("netease"));
+    expect(
+      await screen.findByText("网易云 我喜欢已同步：2 首，新增 1 首。"),
+    ).toBeTruthy();
+  });
+
+  it("exports through More using an export icon rather than a download action", async () => {
+    const item = playlistItem("track-1", { track: track("track-1") });
+    const exportPlaylist = vi.fn().mockResolvedValue("D:\\Exports\\liked.json");
+    installLibrary(
+      vi.fn().mockResolvedValue(page([item])),
+      vi.fn().mockResolvedValue(page([])),
+      undefined,
+      exportPlaylist,
+    );
+    renderLikedPage();
+
+    await screen.findByText("Track track-1");
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "选择 Track track-1" }),
+    );
+    fireEvent.click(screen.getByText("更多操作"));
+    fireEvent.click(screen.getByRole("button", { name: "导出" }));
 
     await waitFor(() =>
       expect(exportPlaylist).toHaveBeenCalledWith({
-        playlistId: 'liked-tracks',
-        format: 'json',
-        sourceProvider: 'qqmusic',
+        playlistId: "liked-tracks",
+        format: "json",
       }),
     );
+    expect(screen.queryByText("下载")).toBeNull();
   });
 
-  it('clears only local liked tracks from the liked page', async () => {
-    const getLikedTracks = vi.fn().mockResolvedValue(page([playlistItem('track-1', { mediaId: 'track-1', track: track('track-1') })]));
-    const getLikedAlbums = vi.fn().mockResolvedValue(page([]));
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    installLibrary(getLikedTracks, getLikedAlbums);
-
-    renderLikedPage();
-
-    await screen.findByText('1 liked tracks');
-    fireEvent.click(screen.getByRole('button', { name: /清空/ }));
-
-    await waitFor(() => expect(window.echo.library.clearLikedTracks).toHaveBeenCalledWith({ sourceProvider: 'local' }));
-  });
-
-  it('loads more liked albums from the page surface sentinel', async () => {
-    const getLikedTracks = vi.fn().mockResolvedValue(page([]));
-    const getLikedAlbums = vi
-      .fn()
-      .mockResolvedValueOnce(page([playlistItem('album-1', { mediaType: 'album', album: album('1'), mediaId: '1' })], { page: 1, total: 2, hasMore: true }))
-      .mockResolvedValueOnce(page([playlistItem('album-2', { mediaType: 'album', album: album('2'), mediaId: '2' })], { page: 2, total: 2, hasMore: false }));
-    installLibrary(getLikedTracks, getLikedAlbums);
-
-    const { container } = renderLikedPage();
-
-    fireEvent.click(screen.getByRole('tab', { name: '喜欢的专辑' }));
-    await screen.findByText('Album 1');
-    await waitFor(() => expect(getLikedAlbums).toHaveBeenCalledTimes(1));
-
-    const pageSurface = container.querySelector('.page-surface') as HTMLElement;
-    const sentinel = container.querySelector('.infinite-scroll-sentinel') as HTMLElement;
-    setScrollablePageSurface(pageSurface);
-    pageSurface.getBoundingClientRect = vi.fn(() => ({
-      bottom: 900,
-      height: 900,
-      left: 0,
-      right: 1000,
-      top: 0,
-      width: 1000,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    }));
-    sentinel.getBoundingClientRect = vi.fn(() => ({
-      bottom: 1510,
-      height: 10,
-      left: 0,
-      right: 1000,
-      top: 1500,
-      width: 1000,
-      x: 0,
-      y: 1500,
-      toJSON: () => ({}),
-    }));
-    pageSurface.scrollTop = 760;
-    fireEvent.scroll(pageSurface);
-
-    await waitFor(() => expect(getLikedAlbums).toHaveBeenCalledTimes(2));
-    expect(getLikedAlbums).toHaveBeenNthCalledWith(2, { page: 2, pageSize: 100, search: '', sort: 'recent', sourceProvider: 'local' });
-    expect(screen.getByText('Album 2')).toBeTruthy();
-  });
-
-  it('keeps liked tracks loading through TrackList onEndReached', async () => {
+  it("loads the next liked-track page from the workspace sentinel", async () => {
+    const first = playlistItem("track-1", { track: track("track-1") });
+    const second = playlistItem("track-2", { track: track("track-2") });
     const getLikedTracks = vi
       .fn()
-      .mockResolvedValueOnce(page([playlistItem('track-1', { mediaId: 'track-1', track: track('track-1') })], { page: 1, total: 2, hasMore: true }))
-      .mockResolvedValueOnce(page([playlistItem('track-2', { mediaId: 'track-2', track: track('track-2') })], { page: 2, total: 2, hasMore: false }));
-    const getLikedAlbums = vi.fn().mockResolvedValue(page([]));
-    installLibrary(getLikedTracks, getLikedAlbums);
-
+      .mockImplementation(async (query: { page: number; pageSize: number }) => {
+        if (query.pageSize === 1) {
+          return page([], { total: 2 });
+        }
+        return query.page === 2
+          ? page([second], { page: 2, total: 2 })
+          : page([first], { page: 1, total: 2, hasMore: true });
+      });
+    installLibrary(getLikedTracks, vi.fn().mockResolvedValue(page([])));
     renderLikedPage();
 
-    await screen.findByText('1 liked tracks');
-    fireEvent.click(screen.getByRole('button', { name: 'Load liked tracks' }));
+    await screen.findByText("Track track-1");
+    expect(
+      document
+        .querySelector(".liked-track-table")
+        ?.contains(screen.getByRole("button", { name: "Load more liked" })),
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Load more liked" }));
 
-    await waitFor(() => expect(getLikedTracks).toHaveBeenCalledTimes(2));
-    expect(getLikedTracks).toHaveBeenNthCalledWith(2, { page: 2, pageSize: 100, search: '', sort: 'recent', sourceProvider: 'local' });
-    expect(screen.getByText('2 liked tracks')).toBeTruthy();
+    await waitFor(() =>
+      expect(getLikedTracks).toHaveBeenCalledWith({
+        page: 2,
+        pageSize: 100,
+        search: "",
+        sort: "default",
+      }),
+    );
+    expect(await screen.findByText("Track track-2")).toBeTruthy();
+  });
+
+  it("loads the complete filtered collection before playing all", async () => {
+    const first = playlistItem("track-1", { track: track("track-1") });
+    const second = playlistItem("track-2", { track: track("track-2") });
+    const getLikedTracks = vi
+      .fn()
+      .mockImplementation(async (query: { page: number; pageSize: number }) => {
+        if (query.pageSize === 1) {
+          return page([], { total: 2 });
+        }
+        if (query.pageSize === 500) {
+          return query.page === 2
+            ? page([second], { page: 2, pageSize: 500, total: 2 })
+            : page([first], {
+                page: 1,
+                pageSize: 500,
+                total: 2,
+                hasMore: true,
+              });
+        }
+        return page([first], { total: 2, hasMore: true });
+      });
+    installLibrary(getLikedTracks, vi.fn().mockResolvedValue(page([])));
+    renderLikedPage();
+
+    await screen.findByText("Track track-1");
+    fireEvent.click(screen.getByRole("button", { name: "播放全部" }));
+
+    await waitFor(() =>
+      expect(getLikedTracks).toHaveBeenCalledWith({
+        page: 2,
+        pageSize: 500,
+        search: "",
+        sort: "default",
+      }),
+    );
   });
 });

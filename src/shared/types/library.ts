@@ -17,6 +17,20 @@ export type LibraryCleanupResult = {
   removedCount: number;
 };
 
+export type LibraryFileDeleteItemResult = {
+  physicalPath: string | null;
+  trackIds: string[];
+  status: 'success' | 'failed' | 'unprocessed';
+  cueSharedSource: boolean;
+  sourceMissing?: boolean;
+  reason?: string;
+};
+
+export type LibraryFileDeleteResult = {
+  items: LibraryFileDeleteItemResult[];
+  removedTrackIds: string[];
+};
+
 export type LibraryMaintenanceCleanupResult = LibraryCleanupResult & {
   missingRemovedCount: number;
   shortRemovedCount: number;
@@ -333,7 +347,7 @@ export type LibraryMoveRepairResult = {
 export type LibraryLabWatcherEvent = {
   timestamp: string;
   folderId: string;
-  eventType: 'add' | 'change' | 'unlink' | 'rename' | 'unknown';
+  eventType: 'add' | 'change' | 'unlink' | 'rename' | 'directory' | 'unknown';
   path: string;
   extension: string;
   sizeBytes?: number;
@@ -342,6 +356,19 @@ export type LibraryLabWatcherEvent = {
 };
 
 export type NativeFileScannerEnablementSource = 'env-disable' | 'env-enable' | 'setting' | 'default';
+
+export type NativeFileScannerScanTiming = {
+  reusedProcess: boolean;
+  spawnOrAttachMs: number;
+  readyMs: number | null;
+  walkMs: number | null;
+  totalMs: number;
+  emittedFiles: number;
+  directories: number;
+  snapshotDirsSkipped?: number;
+  dirtyNativeSubtrees?: number;
+  mode?: 'full-native' | 'incremental';
+};
 
 export type NativeFileScannerDiagnostics = {
   enabled: boolean;
@@ -357,6 +384,19 @@ export type NativeFileScannerDiagnostics = {
   fallbackToTs?: number;
   tsOnlyScans?: number;
   lastFallbackReason?: string | null;
+  /** Cumulative process spawns (cold starts). */
+  processStarts?: number;
+  /** Times an existing session process was reused. */
+  processReuses?: number;
+  /** Process recreated after death/error (generation > 1 starts). */
+  processRestarts?: number;
+  idleShutdowns?: number;
+  activeProcess?: boolean;
+  lastTiming?: NativeFileScannerScanTiming | null;
+  /** Cumulative clean directory snapshot skips (incremental mode). */
+  snapshotDirsSkipped?: number;
+  /** Cumulative dirty subtrees scanned with full native walk. */
+  dirtyNativeSubtrees?: number;
 };
 
 export type NativeMetadataReaderDiagnostics = {
@@ -375,6 +415,9 @@ export type NativeMetadataReaderDiagnostics = {
   fallbackToTs?: number;
   skippedUnsupportedExtension?: number;
   hitRate?: number;
+  poolSize?: number;
+  activeProcesses?: number;
+  lastError?: string | null;
 };
 
 export type LibraryLabState = {
@@ -445,7 +488,7 @@ export type LibraryDiagnostics = {
   coverCacheSizeBytes: number | null;
   coverCacheVersion: number;
   cpuCount: number;
-  scanPerformanceMode: 'low' | 'balanced' | 'performance';
+  scanPerformanceMode: 'low' | 'balanced' | 'performance' | 'ultra';
   metadataConcurrency: number;
   coverConcurrency: number;
   nativeFileScanner?: NativeFileScannerDiagnostics;
@@ -578,6 +621,7 @@ export type LibraryScanMode = 'normal' | 'embedded-tags-all' | 'embedded-tags-mi
 export type LibraryScanOptions = {
   mode?: LibraryScanMode;
   changesOnly?: boolean;
+  markMissing?: boolean;
   deferGroupingRefresh?: boolean;
   skipDeferredGroupingRefresh?: boolean;
   reduceScanPressure?: boolean;
@@ -726,15 +770,31 @@ export type LibrarySort =
   | 'default'
   | 'createdAsc'
   | 'createdDesc'
+  | 'yearAsc'
+  | 'yearDesc'
   | 'titleAsc'
   | 'titleDesc'
+  | 'trackCountAsc'
+  | 'trackCountDesc'
   | 'durationAsc'
   | 'durationDesc'
   | 'fileModifiedAsc'
   | 'fileModifiedDesc'
   | 'qualityAsc'
   | 'qualityDesc'
+  | 'codecAsc'
+  | 'codecDesc'
+  | 'audioSpecAsc'
+  | 'audioSpecDesc'
+  | 'bitrateAsc'
+  | 'bitrateDesc'
+  | 'bpmAsc'
+  | 'bpmDesc'
+  | 'trackNumber'
   | 'frequent'
+  | 'playCountAsc'
+  | 'playCountDesc'
+  | 'lastPlayed'
   | 'random'
   | 'title'
   | 'artist'
@@ -766,6 +826,7 @@ export type LibraryPageQuery = {
   hideDuplicates?: boolean;
   showDuplicatesOnly?: boolean;
   showOsuOnly?: boolean;
+  excludeOsuAlbums?: boolean;
   duplicateMode?: DuplicateTrackMode;
   prioritizeArtistAvatars?: boolean;
   excludeTrackIds?: string[];
@@ -913,6 +974,7 @@ export type PlaybackHistoryQuery = {
   from?: string;
   to?: string;
   completedOnly?: boolean;
+  mediaType?: 'local' | 'streaming';
   sort?: 'plays' | 'recent';
   statsMode?: 'full' | 'activity';
 };
@@ -1091,6 +1153,61 @@ export type PlaybackMemoryGraph = {
   };
 };
 
+export type ContinuousPlayMode =
+  | 'similar'
+  | 'deep-cuts'
+  | 'recently-added'
+  | 'night'
+  | 'headphone-test';
+
+export type ContinuousPlayPreferenceKind = 'artist' | 'album' | 'genre';
+
+export type ContinuousPlayPreference = {
+  kind: ContinuousPlayPreferenceKind;
+  value: string;
+  weight: number;
+};
+
+export type ContinuousPlayReasonCode =
+  | 'same-artist'
+  | 'same-album'
+  | 'same-genre'
+  | 'similar-bpm'
+  | 'liked'
+  | 'rarely-played'
+  | 'not-heard-recently'
+  | 'recently-added'
+  | 'night-favorite'
+  | 'high-completion'
+  | 'high-resolution'
+  | 'lossless'
+  | 'unheard';
+
+export type ContinuousPlayReason = {
+  code: ContinuousPlayReasonCode;
+  value?: number | string | null;
+};
+
+export type ContinuousPlayRecommendationRequest = {
+  mode: ContinuousPlayMode;
+  seedTrackId?: string | null;
+  excludeTrackIds?: string[];
+  limit?: number;
+  preferences?: ContinuousPlayPreference[];
+};
+
+export type ContinuousPlayRecommendation = {
+  track: LibraryTrack;
+  score: number;
+  reasons: ContinuousPlayReason[];
+};
+
+export type ContinuousPlayRecommendationResult = {
+  mode: ContinuousPlayMode;
+  generatedAt: string;
+  items: ContinuousPlayRecommendation[];
+};
+
 export type LibraryTrack = {
   id: string;
   mediaType?: 'local' | 'remote' | 'streaming';
@@ -1115,6 +1232,7 @@ export type LibraryTrack = {
   genre: string | null;
   duration: number;
   codec: string | null;
+  mqa?: boolean;
   sampleRate: number | null;
   bitDepth: number | null;
   bitrate: number | null;

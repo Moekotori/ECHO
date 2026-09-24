@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
 import type { AppSettings, RememberedWindowSize } from '../../shared/types/appSettings';
+import { resolveEffectivePerformancePolicy } from '../../shared/utils/performancePolicy';
 import { getAppSettings, setAppSettings } from './appSettings';
 import { bindBackgroundPlaybackShortcutsToWindow } from './backgroundPlaybackShortcuts';
 import { bindTaskbarPlaybackIntegration } from './taskbarPlaybackIntegration';
@@ -56,13 +57,15 @@ export const resolveInitialMainWindowSize = (settings: AppSettings = getAppSetti
 };
 
 export const resolveMainWindowBackgroundOptions = (
-  settings: Pick<AppSettings, 'appWindowAcrylicEnabled'>,
+  settings: Pick<AppSettings, 'appWindowAcrylicEnabled' | 'lowSpecModeEnabled'>,
   acrylicSupported = isMainWindowAcrylicSupportedPlatform(),
 ): Pick<Electron.BrowserWindowConstructorOptions, 'backgroundColor' | 'backgroundMaterial'> => {
-  const acrylicEnabled = acrylicSupported && settings.appWindowAcrylicEnabled === true;
+  const acrylicEnabled = acrylicSupported && resolveEffectivePerformancePolicy(settings).appWindowAcrylicEnabled;
 
   return {
-    backgroundColor: '#f7f9fc',
+    // Match the commissioned startup artwork so the native window never
+    // exposes a light flash while Chromium prepares its first frame.
+    backgroundColor: '#74d3e5',
     ...(acrylicSupported
       ? {
           backgroundMaterial: acrylicEnabled ? 'acrylic' : 'none',

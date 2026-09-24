@@ -206,6 +206,33 @@ describe('RemoteSourceService WebDAV integration', () => {
     ]);
   });
 
+  it('rejects network work and playback URL creation after a source is disconnected', async () => {
+    database = createDatabase(':memory:');
+    service = new RemoteSourceService(database, () => database?.close());
+    const serviceInstance = service;
+    const source = serviceInstance.createSource({
+      provider: 'webdav',
+      displayName: 'Disconnected WebDAV',
+      baseUrl: 'http://127.0.0.1/dav',
+      username: null,
+      secret: null,
+      authType: 'none',
+      config: { rootPath },
+      syncMode: 'index',
+    });
+
+    serviceInstance.disconnectSource(source.id);
+
+    expect(serviceInstance.listSources()).toEqual([
+      expect.objectContaining({ id: source.id, status: 'disabled' }),
+    ]);
+    await expect(serviceInstance.browse(source.id)).rejects.toThrow('is not enabled');
+    await expect(serviceInstance.previewSync(source.id)).rejects.toThrow('is not enabled');
+    await expect(serviceInstance.createStreamUrl({ sourceId: source.id, remotePath: trackPath })).rejects.toThrow('is not enabled');
+    expect(() => serviceInstance.syncSource(source.id)).toThrow('is not enabled');
+    expect(() => serviceInstance.startBackgroundJobs(source.id)).toThrow('is not enabled');
+  });
+
   it('tests, syncs, exposes library tracks, proxies playback, and deletes a WebDAV source without real cloud credentials', async () => {
     const state = { includeTrack: true };
     const server = makeWebDavServer(state);
@@ -259,6 +286,10 @@ describe('RemoteSourceService WebDAV integration', () => {
       total: 1,
       hasMore: false,
       items: [expect.objectContaining({ id: tracks.items[0].id, mediaType: 'remote' })],
+    });
+    expect(service.listIndexedTracksPage(source.id, { rootPath, page: 1, pageSize: 10, search: 'mofa' })).toMatchObject({
+      total: 1,
+      items: [expect.objectContaining({ id: tracks.items[0].id })],
     });
     const restartedService = new RemoteSourceService(database, () => undefined);
     try {
@@ -435,12 +466,17 @@ describe('RemoteSourceService WebDAV integration', () => {
     service.syncSource(source.id, { includeCover: false });
     await waitForSync(service, source.id);
     expect(libraryStore.getTracks({ sourceProvider: 'remote', sourceId: source.id }).total).toBe(2);
-    expect(service.listIndexedTracksPage(source.id, { rootPath, page: 1, pageSize: 1 })).toMatchObject({
+    const firstPage = service.listIndexedTracksPage(source.id, { rootPath, page: 1, pageSize: 1 });
+    expect(firstPage).toMatchObject({
       page: 1,
       pageSize: 1,
       total: 2,
       hasMore: true,
     });
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+    const secondPage = service.listIndexedTracksPage(source.id, { rootPath, page: 2, pageSize: 1, cursor: firstPage.nextCursor });
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.items[0].id).not.toBe(firstPage.items[0].id);
 
     state.includeScoped = false;
     service.syncSource(source.id, { rootPath: scopedDir, markMissing: false, includeCover: false });

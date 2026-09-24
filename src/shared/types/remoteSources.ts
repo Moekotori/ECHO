@@ -1,6 +1,6 @@
 import type { StreamingAudioQuality, StreamingProviderName } from './streaming';
 import type { ReplayGainTrackData } from '../utils/replayGain';
-import type { LibraryPageQuery } from './library';
+import type { LibraryPage, LibraryPageQuery } from './library';
 import type { RemoteAlbumMergeStrategy } from './appSettings';
 
 export type RemoteSourceProvider = 'webdav' | 'baidu' | 'jellyfin' | 'emby' | 'smb' | 'sshfs' | 'subsonic';
@@ -34,8 +34,27 @@ export type RemoteSyncOptions = {
   includeCover?: boolean;
 };
 
+export type RemoteSyncPreview = {
+  sourceId: string;
+  rootPath: string | null;
+  discoveredCount: number;
+  addedCount: number;
+  updatedCount: number;
+  unchangedCount: number;
+  missingCount: number | null;
+  failedCount: number;
+  complete: boolean;
+  errors: string[];
+  previewedAt: string;
+};
+
 export type RemoteIndexedTracksQuery = Pick<LibraryPageQuery, 'page' | 'pageSize' | 'search' | 'sort'> & {
   rootPath?: string | null;
+  cursor?: string | null;
+};
+
+export type RemoteIndexedTracksPage<T> = LibraryPage<T> & {
+  nextCursor: string | null;
 };
 
 export type RemoteIndexedFolderStats = {
@@ -338,7 +357,7 @@ export type RemoteSyncPhase =
 
 export type RemoteSyncStatus = {
   sourceId: string;
-  status: 'idle' | 'running' | 'completed' | 'cancelled' | 'failed';
+  status: 'idle' | 'running' | 'completed' | 'partial' | 'cancelled' | 'failed';
   phase: RemoteSyncPhase;
   discoveredCount: number;
   parsedCount: number;

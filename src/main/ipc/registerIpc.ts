@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { copyFile } from 'node:fs/promises';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
+import { copyFile, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { userInfo } from 'node:os';
-import { basename, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
@@ -17,10 +17,12 @@ import type {
 } from '../../shared/types/settingsBackup';
 import type { TaskbarPlaybackStatus } from '../../shared/types/taskbarPlayback';
 import type { AppCacheInventory, CoverCacheMigrationResult, SetCoverCacheDirectoryRequest } from '../../shared/types/coverCache';
-import type { UpdateStatus } from '../../shared/types/updates';
+import type { UpdateInstallResult, UpdateStatus } from '../../shared/types/updates';
 import type {
   EchoProPluginActivationRequest,
   EchoProPluginActivationResult,
+  EchoProPluginDeviceReleaseResult,
+  EchoProLocalEntitlementStatus,
   EchoProSettingsCloudApplyResult,
   EchoProSettingsCloudPullResult,
   EchoProSettingsCloudSaveResult,
@@ -37,8 +39,9 @@ import {
   setFinalThemeUnlockAvailable,
   type NormalizeSettingsOptions,
 } from '../app/appSettings';
+import { refreshPlaybackPowerSaveBlocker } from '../app/playbackPowerSaveBlocker';
 import { getAppCacheInventory as collectAppCacheInventory } from '../app/cacheInventory';
-import { checkForUpdates, downloadUpdate, getUpdateStatus, reconfigureAutoUpdateFeed, setAutoUpdateEnabled } from '../app/autoUpdater';
+import { checkForUpdates, downloadUpdate, getUpdateStatus, installDownloadedUpdate, reconfigureAutoUpdateFeed, setAutoUpdateEnabled } from '../app/autoUpdater';
 import { refreshBackgroundSpaceRegistration, validateGlobalShortcut } from '../app/backgroundPlaybackShortcuts';
 import {
   getDataBackupStatus,
@@ -48,19 +51,27 @@ import {
   subscribeDataBackupProgress,
 } from '../app/dataBackup';
 import { exportEchoDataPackage } from '../app/dataPackage';
-import { getTaskbarPlaybackStatus, refreshTaskbarPlaybackIntegration } from '../app/taskbarPlaybackIntegration';
+import {
+  getTaskbarPlaybackStatus,
+  refreshTaskbarPlaybackIntegration,
+  setTaskbarThumbnailArtworkUrl,
+} from '../app/taskbarPlaybackIntegration';
 import { showWindowsTouchKeyboard } from '../app/touchKeyboard';
 import { setLaunchAtLoginEnabled } from '../app/launchAtLogin';
 import { ensureTray, requestAppQuit } from '../app/tray';
 import { ensureCoverCacheDirectory } from '../library/CoverCacheManager';
+import { syncExternalCoverCacheUninstallRecord } from '../library/CoverCacheOwnership';
 import { getLibraryService } from '../library/LibraryService';
 import { setDiscordPresenceEnabled } from '../integrations/discord/getDiscordPresenceService';
 import { getLastFmService } from '../integrations/lastfm/getLastFmService';
+import { syncSmtcIntegrationFromSettings, syncSmtcStatus } from '../integrations/smtc/SmtcStatusSync';
 import { syncStageBridgeIntegrationFromSettings } from '../integrations/stage/getStageBridgeService';
-import { getConnectDonatorUnlockService } from '../plugins/ConnectDonatorUnlockService';
+import { syncEchoLinkBasicIntegrationFromSettings } from '../connect/EchoLinkBasicIntegration';
 import { getDownloadFeatureUnlockService } from '../plugins/DownloadFeatureUnlockService';
+import { getConnectDonatorUnlockService } from '../plugins/ConnectDonatorUnlockService';
 import { getEchoProMachineCode } from '../plugins/MachineIdentity';
 import { getPluginService } from '../plugins/PluginService';
+import { getLocalProEntitlementSnapshot, isLocalProUnlocked, requireLocalPro } from '../plugins/LocalProEntitlements';
 import {
   applyEchoProSettingsCloud,
   getEchoProAccountStatus,
@@ -71,16 +82,16 @@ import {
   redeemEchoProKey,
   registerEchoProAccount,
   releaseEchoProDevices,
-  requirePrivateFeature,
   saveEchoProSettingsCloud,
 } from '../plugins/privateEntitlements';
 import { applyNetworkProxySettings, testNetworkProxyConnection } from '../network/proxySettings';
 import { getMainWindow } from '../app/windowManager';
 import { applyMainWindowBackgroundMaterial } from '../app/windowBackgroundMaterial';
 import { syncNativeThemeSource } from '../app/nativeThemePreference';
-import { assertPackageIntegrityAllowsPaidFeatures } from '../app/packageIntegrity';
+import { getRuntimeComponentService } from '../app/RuntimeComponentService';
 import { markStartupStage } from '../diagnostics/StartupDiagnostics';
 import { beginMainBackgroundTask } from '../diagnostics/PlaybackPerformanceDiagnostics';
+import { applyDefaultAudioRuntimeBaseline, reconcileEchoProAudioEntitlement } from '../audio/AudioEntitlementRuntime';
 import { installIpcPerformanceDiagnostics } from '../diagnostics/IpcPerformanceDiagnostics';
 import { requireEchoProForAudioDspPatch } from './audioProFeatureGate';
 import { registerAudioIpc } from './audioIpc';
@@ -95,6 +106,7 @@ import { registerLastFmIpc } from './lastFmIpc';
 import { registerLibraryIpc } from './libraryIpc';
 import { registerLyricsIpc } from './lyricsIpc';
 import { registerMiniPlayerIpc } from './miniPlayerIpc';
+import { registerPetIpc } from './petIpc';
 import { registerMvIpc } from './mvIpc';
 import { registerHqPlayerIpc } from './hqPlayerIpc';
 import { registerPlaybackIpc } from './playbackIpc';
@@ -102,11 +114,12 @@ import { registerPluginIpc } from './pluginIpc';
 import { registerRemoteSourcesIpc } from './remoteSourcesIpc';
 import { registerSmtcIpc } from './smtcIpc';
 import { registerStageBridgeIpc } from './stageBridgeIpc';
+import { registerEchoLinkIpc } from './echoLinkIpc';
+import { registerMqttIntegrationIpc } from './mqttIntegrationIpc';
 import { registerTaskbarMiniPlayerIpc } from './taskbarMiniPlayerIpc';
 import { registerStreamingIpc } from './streamingIpc';
 import { registerSleepTimerIpc } from './sleepTimerIpc';
 import { registerQobuzIpc } from './qobuzIpc';
-import { requirePrivateFeatureThen } from './entitlementIpcGuards';
 
 const fontMimeTypes: Record<string, string> = {
   '.otf': 'font/otf',
@@ -193,6 +206,41 @@ const requireWallpaperPath = (value: unknown, allowedExtensions: Set<string>, la
     throw new Error('selected wallpaper file does not exist');
   }
 
+  if (!statSync(wallpaperPath).isFile()) {
+    throw new Error('selected wallpaper path is not a file');
+  }
+
+  const header = Buffer.alloc(32);
+  const descriptor = openSync(wallpaperPath, 'r');
+  let bytesRead = 0;
+  try {
+    bytesRead = readSync(descriptor, header, 0, header.length, 0);
+  } finally {
+    closeSync(descriptor);
+  }
+  const bytes = header.subarray(0, bytesRead);
+  const hasSignature = (signature: number[], offset = 0): boolean =>
+    bytes.length >= offset + signature.length &&
+    signature.every((byte, index) => bytes[offset + index] === byte);
+  const hasAscii = (value: string, offset: number): boolean =>
+    bytes.length >= offset + value.length && bytes.toString('ascii', offset, offset + value.length) === value;
+  const validHeader =
+    (extension === '.jpg' || extension === '.jpeg')
+      ? hasSignature([0xff, 0xd8, 0xff])
+      : extension === '.png'
+        ? hasSignature([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+        : extension === '.webp'
+          ? hasAscii('RIFF', 0) && hasAscii('WEBP', 8)
+          : extension === '.webm'
+            ? hasSignature([0x1a, 0x45, 0xdf, 0xa3])
+            : extension === '.mp4' || extension === '.m4v'
+              ? hasAscii('ftyp', 4)
+              : false;
+
+  if (!validHeader) {
+    throw new Error(`selected file content is not a valid ${label}`);
+  }
+
   return wallpaperPath;
 };
 
@@ -207,7 +255,12 @@ const copyWallpaper = async (
   const targetPath = resolve(wallpaperDirectory, `${randomUUID()}${extension}`);
 
   mkdirSync(wallpaperDirectory, { recursive: true });
-  await copyFile(wallpaperPath, targetPath);
+  try {
+    await copyFile(wallpaperPath, targetPath);
+  } catch (error) {
+    await rm(targetPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
   return targetPath;
 };
 
@@ -217,18 +270,59 @@ const copyLyricsWallpaper = (wallpaperPathInput: unknown): Promise<string> =>
 const copyAppWallpaper = (wallpaperPathInput: unknown): Promise<string> =>
   copyWallpaper(wallpaperPathInput, getAppWallpaperDirectory(), appWallpaperExtensions, 'image or video');
 
-const requireExternalHttpUrl = (value: unknown): string => {
+const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
+
+const cleanupReplacedAppWallpapers = async (previousSettings: AppSettings, nextSettings: AppSettings): Promise<void> => {
+  const wallpaperDirectory = resolve(getAppWallpaperDirectory());
+  const activePaths = new Set(
+    [nextSettings.appCustomWallpaperPath, nextSettings.appPortraitWallpaperPath]
+      .filter((filePath): filePath is string => typeof filePath === 'string')
+      .map((filePath) => resolve(filePath)),
+  );
+  const replacedPaths = new Set(
+    [previousSettings.appCustomWallpaperPath, previousSettings.appPortraitWallpaperPath]
+      .filter((filePath): filePath is string => typeof filePath === 'string')
+      .map((filePath) => resolve(filePath)),
+  );
+
+  for (const filePath of replacedPaths) {
+    if (
+      activePaths.has(filePath) ||
+      dirname(filePath) !== wallpaperDirectory ||
+      !appWallpaperExtensions.has(extname(filePath).toLowerCase())
+    ) {
+      continue;
+    }
+
+    try {
+      await rm(filePath, { force: true });
+    } catch (error) {
+      console.warn('[app-wallpaper] failed to remove replaced managed wallpaper', error);
+    }
+  }
+};
+
+const requireExternalUrl = (value: unknown): string => {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error('external URL must be a non-empty string');
   }
 
   const url = new URL(value.trim());
 
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new Error('external URL must use http or https');
+  if (url.protocol === 'https:' || url.protocol === 'http:') {
+    return url.toString();
   }
 
-  return url.toString();
+  if (
+    url.protocol === 'mailto:' &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(url.pathname) &&
+    url.search.length === 0 &&
+    url.hash.length === 0
+  ) {
+    return url.toString();
+  }
+
+  throw new Error('external URL must use http, https, or a plain mailto address');
 };
 
 const normalizeCoverCacheRequest = (value: unknown): SetCoverCacheDirectoryRequest => {
@@ -249,27 +343,14 @@ const normalizeCoverCacheRequest = (value: unknown): SetCoverCacheDirectoryReque
 const getAppCacheInventory = (): Promise<AppCacheInventory> => collectAppCacheInventory(app.getPath('userData'));
 
 const hasProThemeUnlock = (): boolean => {
+  if (isLocalProUnlocked('echo-pro')) {
+    return true;
+  }
   try {
-    assertPackageIntegrityAllowsPaidFeatures();
+    return getConnectDonatorUnlockService().getStatus().unlocked === true;
   } catch {
     return false;
   }
-  try {
-    const proLicenseStatus = getPluginService().getEchoProLicenseStatus();
-    if (proLicenseStatus.valid && proLicenseStatus.enabled && proLicenseStatus.features.includes('echo-pro')) {
-      return true;
-    }
-  } catch {
-    // Continue to legacy fallback.
-  }
-  try {
-    if (getConnectDonatorUnlockService().getStatus().unlocked === true) {
-      return true;
-    }
-  } catch {
-    return false;
-  }
-  return false;
 };
 
 const hasDownloadsUnlock = (): boolean => {
@@ -369,11 +450,23 @@ const shouldRequireProForWindowAcrylicPatch = (patch: Partial<AppSettings>): boo
   patch.appWindowAcrylicKeepWhenUnfocusedEnabled === true ||
   Object.prototype.hasOwnProperty.call(patch, 'appWindowAcrylicTransparencyPercent');
 
+const syncCoverCacheUninstallMetadata = async (coverCacheDir: string): Promise<void> => {
+  try {
+    await syncExternalCoverCacheUninstallRecord(app.getPath('userData'), coverCacheDir);
+  } catch (error) {
+    console.warn('[cover-cache] failed to update uninstall cleanup metadata', error);
+  }
+};
+
 const applyAppSettingsPatch = async (
   patch: Partial<AppSettings>,
   options: NormalizeSettingsOptions & { allowCoverCacheDir?: boolean } = {},
 ): Promise<AppSettings> => {
   const settingsPatch = { ...patch };
+  const changesAppWallpaperPath =
+    hasOwn(settingsPatch, 'appCustomWallpaperPath') ||
+    hasOwn(settingsPatch, 'appPortraitWallpaperPath');
+  const previousSettings = changesAppWallpaperPath ? getAppSettings(options) : null;
 
   await requireEchoProForAudioDspPatch(settingsPatch);
 
@@ -392,18 +485,23 @@ const applyAppSettingsPatch = async (
     const coverCacheDir = settingsPatch.coverCacheDir ?? libraryService.getDefaultCoverCacheDir();
     await ensureCoverCacheDirectory(coverCacheDir);
     libraryService.setCoverCacheDir(coverCacheDir);
+    await syncCoverCacheUninstallMetadata(coverCacheDir);
   } else {
     delete settingsPatch.coverCacheDir;
   }
 
   if (shouldRequireProForWindowAcrylicPatch(settingsPatch)) {
-    await requirePrivateFeature('window-acrylic');
+    requireLocalPro('window-acrylic');
   }
 
   let settings = setAppSettings(settingsPatch, {
     finalThemeUnlocked: options.finalThemeUnlocked === true,
     downloadsFeatureUnlocked: options.downloadsFeatureUnlocked,
   });
+  refreshPlaybackPowerSaveBlocker();
+  if (previousSettings) {
+    await cleanupReplacedAppWallpapers(previousSettings, settings);
+  }
   syncNativeThemeSource(settings);
   ensureTray();
 
@@ -444,9 +542,20 @@ const applyAppSettingsPatch = async (
     await syncStageBridgeIntegrationFromSettings(settings);
   }
 
+  if (typeof settingsPatch.echoLinkBasicEnabled === 'boolean') {
+    await syncEchoLinkBasicIntegrationFromSettings(settings);
+  }
+
+  if (typeof settingsPatch.smtcEnabled === 'boolean') {
+    await syncSmtcIntegrationFromSettings();
+  } else if (typeof settingsPatch.smtcLyricsEnabled === 'boolean' && settings.smtcEnabled !== false) {
+    await syncSmtcStatus();
+  }
+
   if (
     typeof settingsPatch.appWindowAcrylicEnabled === 'boolean' ||
-    typeof settingsPatch.appWindowAcrylicKeepWhenUnfocusedEnabled === 'boolean'
+    typeof settingsPatch.appWindowAcrylicKeepWhenUnfocusedEnabled === 'boolean' ||
+    typeof settingsPatch.lowSpecModeEnabled === 'boolean'
   ) {
     const mainWindow = getMainWindow();
     if (mainWindow) {
@@ -462,13 +571,18 @@ const applyAppSettingsPatch = async (
     refreshDataBackupScheduler();
   }
 
-  if (typeof settingsPatch.autoFetchArtistImages === 'boolean' || typeof settingsPatch.artistImageFetchPaused === 'boolean') {
+  if (
+    typeof settingsPatch.autoFetchArtistImages === 'boolean' ||
+    typeof settingsPatch.artistImageFetchPaused === 'boolean' ||
+    typeof settingsPatch.lowSpecModeEnabled === 'boolean'
+  ) {
     getLibraryService().syncArtistImageBackfillState();
   }
 
   if (
     typeof settingsPatch.liveLibraryUpdatesEnabled === 'boolean' ||
-    typeof settingsPatch.liveLibraryAutoHideDeletedEnabled === 'boolean'
+    typeof settingsPatch.liveLibraryAutoHideDeletedEnabled === 'boolean' ||
+    typeof settingsPatch.lowSpecModeEnabled === 'boolean'
   ) {
     (libraryService ?? getLibraryService()).syncLiveLibraryWatcherFromSettings();
   }
@@ -514,6 +628,15 @@ export const registerIpc = (): void => {
 
   registerIpcStartupStep('app-core', () => {
     ipcMain.handle(IpcChannels.AppGetVersion, () => `v${app.getVersion()}`);
+    ipcMain.handle(IpcChannels.AppGetRuntimeAudioComponentStatus, () =>
+      getRuntimeComponentService().getAudioComponentStatus(),
+    );
+    ipcMain.handle(IpcChannels.AppImportRuntimeAudioComponent, () =>
+      getRuntimeComponentService().importAudioComponent(),
+    );
+    ipcMain.handle(IpcChannels.AppOpenRuntimeAudioComponentDownloadPage, () =>
+      getRuntimeComponentService().openAudioComponentDownloadPage(),
+    );
     ipcMain.handle(IpcChannels.AppWindowMinimize, (event: IpcMainInvokeEvent): void => {
       BrowserWindow.fromWebContents(event.sender)?.minimize();
     });
@@ -563,6 +686,9 @@ export const registerIpc = (): void => {
     ipcMain.handle(IpcChannels.AppGetTaskbarPlaybackStatus, (): TaskbarPlaybackStatus => {
       refreshTaskbarPlaybackIntegration();
       return getTaskbarPlaybackStatus();
+    });
+    ipcMain.on(IpcChannels.AppSetTaskbarThumbnailArtwork, (_event, artworkUrl: unknown): void => {
+      setTaskbarThumbnailArtworkUrl(typeof artworkUrl === 'string' ? artworkUrl : null);
     });
     ipcMain.handle(IpcChannels.AppExportSettings, async (): Promise<string | null> => {
       const result = await dialog.showSaveDialog({
@@ -678,17 +804,22 @@ export const registerIpc = (): void => {
       throw new Error('Cannot reset settings while a library scan is running.');
     }
 
+    await applyDefaultAudioRuntimeBaseline();
     await ensureCoverCacheDirectory(defaultCoverCacheDir);
     libraryService.setCoverCacheDir(defaultCoverCacheDir);
+    await syncCoverCacheUninstallMetadata(defaultCoverCacheDir);
     setLaunchAtLoginEnabled(defaultSettings.launchAtLoginEnabled === true);
     const settings = setAppSettings({ ...defaultSettings });
+    refreshPlaybackPowerSaveBlocker();
     syncNativeThemeSource(settings);
     ensureTray();
     refreshBackgroundSpaceRegistration();
     refreshTaskbarPlaybackIntegration();
     libraryService.syncLiveLibraryWatcherFromSettings();
     await setDiscordPresenceEnabled(settings.discordRichPresenceEnabled);
+    await syncSmtcIntegrationFromSettings();
     await syncStageBridgeIntegrationFromSettings(settings);
+    await syncEchoLinkBasicIntegrationFromSettings(settings);
     await applyNetworkProxySettings(settings);
     getLastFmService().disconnect();
     return settings;
@@ -738,11 +869,12 @@ export const registerIpc = (): void => {
   ipcMain.handle(IpcChannels.AppGetUpdateStatus, (): UpdateStatus => getUpdateStatus());
   ipcMain.handle(IpcChannels.AppCheckForUpdates, (): Promise<UpdateStatus> => checkForUpdates());
   ipcMain.handle(IpcChannels.AppDownloadUpdate, (): Promise<UpdateStatus> => downloadUpdate());
+  ipcMain.handle(IpcChannels.AppInstallUpdate, (): Promise<UpdateInstallResult> => installDownloadedUpdate());
   ipcMain.handle(IpcChannels.AppOpenRepository, async (): Promise<void> => {
     await shell.openExternal('https://github.com/moekotori/echo');
   });
   ipcMain.handle(IpcChannels.AppOpenExternalUrl, async (_event: IpcMainInvokeEvent, rawUrl: unknown): Promise<void> => {
-    await shell.openExternal(requireExternalHttpUrl(rawUrl));
+    await shell.openExternal(requireExternalUrl(rawUrl));
   });
   ipcMain.handle(IpcChannels.AppShowTouchKeyboard, (): boolean => showWindowsTouchKeyboard());
   ipcMain.handle(IpcChannels.AppTestNetworkProxy, (_event: IpcMainInvokeEvent, rawPatch?: unknown) =>
@@ -752,50 +884,69 @@ export const registerIpc = (): void => {
       session.fromPartition(`network-proxy-test-${randomUUID()}`),
     ),
   );
+  const reconcileEchoProAudioAfter = async <T>(operation: Promise<T>): Promise<T> => {
+    const result = await operation;
+    await reconcileEchoProAudioEntitlement();
+    return result;
+  };
   ipcMain.handle(IpcChannels.AppEchoProAccountGetStatus, (_event: IpcMainInvokeEvent, options?: unknown): Promise<unknown> =>
-    getEchoProAccountStatus(
+    reconcileEchoProAudioAfter(getEchoProAccountStatus(
       options && typeof options === 'object'
         ? { force: (options as { force?: unknown }).force === true }
         : undefined,
-    ),
+    )),
   );
   ipcMain.handle(IpcChannels.AppEchoProAccountLogin, (_event: IpcMainInvokeEvent, credentials: unknown): Promise<unknown> =>
-    loginEchoProAccount(credentials as { username: string; password: string }),
+    reconcileEchoProAudioAfter(loginEchoProAccount(credentials as { username: string; password: string })),
   );
   ipcMain.handle(IpcChannels.AppEchoProAccountRegister, (_event: IpcMainInvokeEvent, credentials: unknown): Promise<unknown> =>
-    registerEchoProAccount(credentials as { username: string; password: string }),
+    reconcileEchoProAudioAfter(registerEchoProAccount(credentials as { username: string; password: string })),
   );
-  ipcMain.handle(IpcChannels.AppEchoProAccountLogout, (): Promise<unknown> => logoutEchoProAccount());
+  ipcMain.handle(IpcChannels.AppEchoProAccountLogout, (): Promise<unknown> =>
+    reconcileEchoProAudioAfter(logoutEchoProAccount()));
   ipcMain.handle(IpcChannels.AppEchoProAccountRedeemKey, (_event: IpcMainInvokeEvent, key: unknown): Promise<unknown> =>
-    redeemEchoProKey(typeof key === 'string' ? key : ''),
+    reconcileEchoProAudioAfter(redeemEchoProKey(typeof key === 'string' ? key : '')),
   );
   ipcMain.handle(IpcChannels.AppEchoProAccountReleaseDevices, (_event: IpcMainInvokeEvent, password: unknown): Promise<unknown> =>
-    releaseEchoProDevices(typeof password === 'string' ? password : ''),
+    reconcileEchoProAudioAfter(releaseEchoProDevices(typeof password === 'string' ? password : '')),
   );
+  ipcMain.handle(IpcChannels.AppEchoProLocalEntitlementGetStatus, async (): Promise<EchoProLocalEntitlementStatus> => {
+    const dspSnapshot = await reconcileEchoProAudioEntitlement();
+    const snapshot = getLocalProEntitlementSnapshot('echo-pro');
+    return {
+      unlocked: snapshot.unlocked,
+      dspUnlocked: dspSnapshot.unlocked,
+      source: snapshot.source,
+      checkedAt: snapshot.checkedAt,
+    };
+  });
   ipcMain.handle(IpcChannels.AppEchoProPluginActivate, (_event: IpcMainInvokeEvent, request: unknown): Promise<EchoProPluginActivationResult> =>
-    getPluginService().activateEchoProPlugin(request as EchoProPluginActivationRequest),
+    reconcileEchoProAudioAfter(getPluginService().activateEchoProPlugin(request as EchoProPluginActivationRequest)),
+  );
+  ipcMain.handle(IpcChannels.AppEchoProPluginReleaseCurrentDevice, (_event: IpcMainInvokeEvent, orderId: unknown): Promise<EchoProPluginDeviceReleaseResult> =>
+    reconcileEchoProAudioAfter(getPluginService().releaseEchoProCurrentDevice(typeof orderId === 'string' ? orderId : undefined)),
   );
   ipcMain.handle(IpcChannels.AppEchoProMachineCodeGet, (): string => getEchoProMachineCode());
   ipcMain.handle(IpcChannels.AppEchoProSettingsCloudGetStatus, (): Promise<EchoProSettingsCloudStatus> =>
     getEchoProSettingsCloudStatus(),
   );
-  ipcMain.handle(IpcChannels.AppEchoProSettingsCloudSave, requirePrivateFeatureThen('echo-pro', (): Promise<EchoProSettingsCloudSaveResult> =>
+  ipcMain.handle(IpcChannels.AppEchoProSettingsCloudSave, (): Promise<EchoProSettingsCloudSaveResult> =>
     saveEchoProSettingsCloud({
       settings: getCloudSyncSettings(),
       appVersion: app.getVersion(),
       deviceName: getCloudSyncDeviceName(),
     }),
-  ));
-  ipcMain.handle(IpcChannels.AppEchoProSettingsCloudPull, requirePrivateFeatureThen('echo-pro', (): Promise<EchoProSettingsCloudPullResult> =>
+  );
+  ipcMain.handle(IpcChannels.AppEchoProSettingsCloudPull, (): Promise<EchoProSettingsCloudPullResult> =>
     pullEchoProSettingsCloud(),
-  ));
-  ipcMain.handle(IpcChannels.AppEchoProSettingsCloudApply, requirePrivateFeatureThen('echo-pro', async (): Promise<EchoProSettingsCloudApplyResult> => {
+  );
+  ipcMain.handle(IpcChannels.AppEchoProSettingsCloudApply, async (): Promise<EchoProSettingsCloudApplyResult> => {
     return applyEchoProSettingsCloud({
       applySettings: async (settings) => {
         await applyAppSettingsPatch(settings as Partial<AppSettings>, { ...getFeatureSettingsOptions(), allowCoverCacheDir: true });
       },
     });
-  }));
+  });
   ipcMain.handle(
     IpcChannels.AppSetCoverCacheDirectory,
     async (_event: IpcMainInvokeEvent, rawRequest: unknown): Promise<CoverCacheMigrationResult | null> => {
@@ -817,12 +968,14 @@ export const registerIpc = (): void => {
 
         setAppSettings({ coverCacheDir: request.directory });
         libraryService.setCoverCacheDir(nextDir);
+        await syncCoverCacheUninstallMetadata(nextDir);
         return result;
       }
 
       await ensureCoverCacheDirectory(nextDir);
       setAppSettings({ coverCacheDir: request.directory });
       libraryService.setCoverCacheDir(nextDir);
+      await syncCoverCacheUninstallMetadata(nextDir);
       return null;
     },
   );
@@ -831,9 +984,12 @@ export const registerIpc = (): void => {
   registerIpcStartupStep('diagnostics', registerDiagnosticsIpc);
   registerIpcStartupStep('account', registerAccountIpc);
   registerIpcStartupStep('connect', registerConnectIpc);
+  registerIpcStartupStep('echo-link-basic', registerEchoLinkIpc);
+  registerIpcStartupStep('mqtt-integration', registerMqttIntegrationIpc);
   registerIpcStartupStep('discord-presence', registerDiscordPresenceIpc);
   registerIpcStartupStep('desktop-lyrics', registerDesktopLyricsIpc);
   registerIpcStartupStep('mini-player', registerMiniPlayerIpc);
+  registerIpcStartupStep('pet', registerPetIpc);
   registerIpcStartupStep('downloads', registerDownloadsIpc);
   registerIpcStartupStep('plugin', registerPluginIpc);
   registerIpcStartupStep('lastfm', registerLastFmIpc);

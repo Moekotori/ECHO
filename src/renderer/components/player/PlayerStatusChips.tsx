@@ -50,6 +50,89 @@ const formatHqPlayerOutputRate = (value: number | null | undefined): string | nu
 const positiveRate = (value: number | null | undefined): number | null =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 
+const formatSdmRate = (value: number | null | undefined): string | null => {
+  const rate = positiveRate(value);
+  if (!rate) {
+    return null;
+  }
+
+  return rate >= 1_000_000
+    ? `${trimFixed(rate / 1_000_000, 4)}MHz`
+    : formatSpecRate(rate);
+};
+
+const isPcmToSdmOutputActive = (status: AudioStatus | null): boolean => {
+  if (!status) {
+    return false;
+  }
+  if (status.sdmRuntimeState) {
+    return status.sdmRuntimeState === 'pcm_to_sdm_active';
+  }
+
+  return status.sdmActive === true
+    && (status.sdmRuntime?.state === 'active' || status.sdmRuntime?.state === 'fallback')
+    && Boolean(status.sdmRuntime.nativeSampleRate ?? status.sdmNativeSampleRate)
+    && Boolean(status.sdmRuntime.transportSampleRate ?? status.sdmTransportSampleRate);
+};
+
+const formatSdmTarget = (status: AudioStatus): string => {
+  const configuredTarget = status.sdmRuntime?.targetRate ?? status.sdmTargetRate;
+  if (configuredTarget) {
+    return configuredTarget.toUpperCase();
+  }
+
+  const nativeRate = positiveRate(status.sdmRuntime?.nativeSampleRate ?? status.sdmNativeSampleRate);
+  if (!nativeRate) {
+    return 'SDM';
+  }
+  if (nativeRate < 4_500_000) {
+    return 'DSD64';
+  }
+  if (nativeRate < 9_000_000) {
+    return 'DSD128';
+  }
+  if (nativeRate < 18_000_000) {
+    return 'DSD256';
+  }
+  return 'DSD512';
+};
+
+const formatSdmEngine = (status: AudioStatus): string | null => {
+  const runtime = status.sdmRuntime;
+  if (runtime?.oversamplingRuntime?.activeBackend === 'cuda' && runtime.activeBackend === 'cpu') {
+    return 'CUDA FIR + CPU SDM';
+  }
+  if (runtime?.activeBackend === 'cuda') {
+    return 'CUDA SDM';
+  }
+  if (runtime?.activeBackend === 'cpu') {
+    return 'CPU SDM';
+  }
+  return null;
+};
+
+const formatSdmChip = (status: AudioStatus | null): Pick<Chip, 'label' | 'title'> | null => {
+  if (!status || !isPcmToSdmOutputActive(status)) {
+    return null;
+  }
+
+  const target = formatSdmTarget(status);
+  const nativeRate = formatSdmRate(status.sdmRuntime?.nativeSampleRate ?? status.sdmNativeSampleRate);
+  const transportRate = formatSpecRate(status.sdmRuntime?.transportSampleRate ?? status.sdmTransportSampleRate);
+  const engine = formatSdmEngine(status);
+  const detail = [
+    `ECHO SDM ${target}`,
+    nativeRate ? `${nativeRate} 1-bit` : null,
+    transportRate ? `DoP ${transportRate}` : null,
+    engine,
+  ].filter((item): item is string => Boolean(item)).join(' · ');
+
+  return {
+    label: target === 'SDM' ? 'ECHO SDM' : `ECHO SDM · ${target}`,
+    title: detail,
+  };
+};
+
 type RateLiftLabel = {
   label: string;
   title?: string;
@@ -201,7 +284,7 @@ const isAirPlayReceiverTrack = (track: LibraryTrack | null): boolean =>
       (track.id.startsWith('airplay-receiver:') || track.fieldSources?.title === 'airplay'),
   );
 
-const formatAutomixLabel = (status: AudioStatus | null): string | null => {
+const formatAutomixLabel = (status: AudioStatus | null, featureName: string): string | null => {
   const automix = status?.automix;
   if (!automix?.active) {
     return null;
@@ -225,7 +308,7 @@ const formatAutomixLabel = (status: AudioStatus | null): string | null => {
       ? ' fallback'
       : '';
 
-  return `Automix${modeLabel}${secondsLabel}`;
+  return `${featureName}${modeLabel}${secondsLabel}`;
 };
 
 const hasWindowsAudioRateWarning = (status: AudioStatus | null): boolean =>
@@ -250,7 +333,9 @@ export const PlayerStatusChips = ({
   const playbackRateLabel = formatPlaybackRateLabel(playbackRate);
   const bpm = isDisplayableBpmAnalysis(track?.bpm, track?.analysisStatus, track?.bpmConfidence) ? (track?.bpm ?? null) : null;
   const displayBpm = bpm ? Math.round(bpm * playbackRate) : null;
-  const automixLabel = formatAutomixLabel(status);
+  const bpmPrefix = track?.fieldSources?.bpm === 'audio_analysis' ? '≈' : '';
+  const sdmChip = formatSdmChip(status);
+  const automixLabel = formatAutomixLabel(status, t('audioDrawer.section.automix'));
   const windowsAudioRateWarning = hasWindowsAudioRateWarning(status);
   const isLoadingRemoteTrack = state === 'loading' && track?.mediaType === 'remote' && !isDlnaReceiverTrack(track) && !isAirPlayReceiverTrack(track);
   const streamingLabel = streamingSourceLabel(track);
@@ -292,9 +377,11 @@ export const PlayerStatusChips = ({
     streamingLabel ? { label: streamingLabel, className: 'tag-streaming' } : null,
     outputMode ? { label: outputMode, className: 'tag-output-mode' } : null,
     status?.bitPerfectCandidate ? { label: 'Bit-Perfect', className: 'tag-bit-perfect' } : null,
+    sdmChip ? { ...sdmChip, className: 'tag-sdm' } : null,
     hqPlayerOutputRateLabel ? { label: 'HQPlayer', className: 'tag-hqplayer' } : null,
     hqPlayerOutputRateLabel ? { label: hqPlayerOutputRateLabel, className: 'tag-hqplayer' } : null,
     playbackRateLabel ? { label: playbackRateLabel, className: 'tag-speed' } : null,
+    track?.mqa ? { label: 'MQA', className: 'tag-mqa' } : null,
     codec ? { label: codec, className: codecClassName(codec) } : null,
     isHiResSource({ bitDepth, codec, sampleRate, track }) ? { label: 'Hi-Res', className: 'tag-hires' } : null,
     bitDepth && formattedRate
@@ -308,7 +395,9 @@ export const PlayerStatusChips = ({
     showSecondarySpecs && bitrate ? { label: `${Math.round(bitrate / 1000)}kbps`, className: 'tag-bitrate' } : null,
     displayBpm
       ? {
-          label: playbackRate === 1 ? `${displayBpm} BPM` : `${Math.round(bpm!)} BPM -> ${displayBpm} BPM`,
+          label: playbackRate === 1
+            ? `${bpmPrefix}${displayBpm} BPM`
+            : `${bpmPrefix}${Math.round(bpm!)} BPM -> ${bpmPrefix}${displayBpm} BPM`,
           className: 'tag-bpm',
         }
       : null,

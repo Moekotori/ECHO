@@ -930,6 +930,9 @@ static int rebuild_audio_client(wasapi_shared_runtime* runtime) {
     WAVEFORMATEX* closestMatch = NULL;
     wasapi_shared_format_desc format;
     uint32_t bufferFrames = 0;
+    UINT32 rawBufferFrames = 0;
+    REFERENCE_TIME bufferDuration = 0;
+    HRESULT hr = S_OK;
     char error[512] = {0};
     int result = -1;
     bool leakedOnTimeout = false;
@@ -957,7 +960,7 @@ static int rebuild_audio_client(wasapi_shared_runtime* runtime) {
         goto done;
     }
 
-    HRESULT hr = activate_audio_client(device, &audioClient);
+    hr = activate_audio_client(device, &audioClient);
     if (hr == E_PENDING) {
         fprintf(stderr, "[echo-audio-host] WASAPI shared rebuild Activate timed out\n");
         fflush(stderr);
@@ -987,7 +990,7 @@ static int rebuild_audio_client(wasapi_shared_runtime* runtime) {
         goto done;
     }
 
-    REFERENCE_TIME bufferDuration = runtime->requestedBufferFrames > 0
+    bufferDuration = runtime->requestedBufferFrames > 0
         ? frames_to_hns(runtime->requestedBufferFrames, format.wave.Format.nSamplesPerSec)
         : 0;
     hr = echo_wasapi_timeout::initialize_with_timeout(
@@ -1010,7 +1013,6 @@ static int rebuild_audio_client(wasapi_shared_runtime* runtime) {
         goto done;
     }
 
-    UINT32 rawBufferFrames = 0;
     hr = audioClient->GetBufferSize(&rawBufferFrames);
     if (FAILED(hr) || rawBufferFrames == 0) {
         fprintf(stderr, "[echo-audio-host] WASAPI shared rebuild GetBufferSize failed hr=0x%08lx\n", (unsigned long)hr);
@@ -1354,6 +1356,9 @@ int wasapi_shared_start(
     BYTE* endpointBuffer = NULL;
     HRESULT hr;
     int result = -1;
+    REFERENCE_TIME bufferDuration = 0;
+    UINT32 rawBufferFrames = 0;
+    UINT32 padding = 0;
 
     (void)sourceChannels;
 
@@ -1423,7 +1428,7 @@ int wasapi_shared_start(
         goto done;
     }
 
-    REFERENCE_TIME bufferDuration = requestedBufferFrames > 0
+    bufferDuration = requestedBufferFrames > 0
         ? frames_to_hns(requestedBufferFrames, format.wave.Format.nSamplesPerSec)
         : 0;
     hr = echo_wasapi_timeout::initialize_with_timeout(
@@ -1444,7 +1449,6 @@ int wasapi_shared_start(
         goto done;
     }
 
-    UINT32 rawBufferFrames = 0;
     hr = audioClient->GetBufferSize(&rawBufferFrames);
     if (FAILED(hr) || rawBufferFrames == 0) {
         set_error(error, errorLen, "Failed to get WASAPI shared buffer size", hr);
@@ -1517,7 +1521,6 @@ int wasapi_shared_start(
     register_device_watcher(runtime);
     register_session_watcher(runtime);
 
-    UINT32 padding = 0;
     hr = runtime->audioClient->GetCurrentPadding(&padding);
     if (SUCCEEDED(hr) && padding < runtime->bufferFrameCount) {
         UINT32 framesAvailable = runtime->bufferFrameCount - padding;

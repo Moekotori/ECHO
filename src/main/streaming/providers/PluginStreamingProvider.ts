@@ -2,6 +2,7 @@ import type { PluginSourceTrack } from '../../../shared/types/plugins';
 import {
   type StreamingPlaybackRequest,
   type StreamingPlaybackSource,
+  type StreamingProviderDescriptor,
   type StreamingSearchRequest,
   type StreamingSearchResult,
   type StreamingTrack,
@@ -67,10 +68,11 @@ const trackToStreamingTrack = (track: PluginSourceTrack & PluginSourceIdentity):
 export class PluginStreamingProvider implements StreamingProvider {
   readonly name = 'plugin' as const;
 
-  readonly descriptor = {
+  readonly descriptor: Omit<StreamingProviderDescriptor, 'name'> = {
     displayName: '插件音源',
     enabled: true,
     supportsSearch: true,
+    supportedSearchMediaTypes: ['track'],
     supportsPlayback: true,
     supportsDownload: false,
     supportsLyrics: false,
@@ -151,4 +153,3 @@ export class PluginStreamingProvider implements StreamingProvider {
     };
   }
 }
-

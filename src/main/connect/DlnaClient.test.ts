@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getDlnaPositionInfo,
   getDlnaTransportInfo,
+  getDlnaVolume,
   getSsdpSearchAddresses,
   parseDeviceDescription,
   parseDlnaTime,
@@ -123,7 +124,10 @@ describe('DLNA device description parsing', () => {
           serviceType: 'urn:schemas-upnp-org:service:AVTransport:1',
           controlUrl: 'http://192.168.1.42/upnp/control/avtransport',
         },
-        renderingControl: null,
+        renderingControl: {
+          serviceType: 'urn:schemas-upnp-org:service:RenderingControl:1',
+          controlUrl: 'http://192.168.1.42/upnp/control/rendering',
+        },
         connectionManager: null,
       },
     };
@@ -154,6 +158,18 @@ describe('DLNA device description parsing', () => {
             </s:Body>
           </s:Envelope>
         `),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(`
+          <s:Envelope>
+            <s:Body>
+              <u:GetVolumeResponse>
+                <CurrentVolume>37</CurrentVolume>
+              </u:GetVolumeResponse>
+            </s:Body>
+          </s:Envelope>
+        `),
       });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -166,6 +182,7 @@ describe('DLNA device description parsing', () => {
       durationSeconds: 180,
       positionSeconds: 42,
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(getDlnaVolume(device)).resolves.toBe(37);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

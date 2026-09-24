@@ -2,15 +2,17 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IpcChannels } from '../shared/constants/ipcChannels';
 import { createSystemAudioEngine, type AutomixAdvancePayload } from './systemAudioEngine';
 import type { EchoApi } from './apiTypes';
-import { createAppApi, createDesktopLyricsApi, createMiniPlayerApi, createLibraryApi, createLibraryLabApi, createPlaybackApi, type PlaybackDeps, createRemoteSourcesApi, createConnectApi, createStreamingApi, createLyricsApi, createMvApi, createHqPlayerApi, createAudioApi, createEqApi,
+import { createAppApi, createDesktopLyricsApi, createMiniPlayerApi, createPetApi, createLibraryApi, createLibraryLabApi, createPlaybackApi, type PlaybackDeps, createRemoteSourcesApi, createConnectApi, createStreamingApi, createLyricsApi, createMvApi, createHqPlayerApi, createAudioApi, createEqApi,
   createSleepTimerApi, createDiagnosticsApi, createDownloadsApi, createPluginsApi, createAccountsApi,
   createSpotifyApi, createSmtcApi, createAudioCdApi, setupPlaybackProxy,
-  createLastFmApi, createDiscordPresenceApi, createStageBridgeApi } from './ipc';
+  createLastFmApi, createDiscordPresenceApi, createStageBridgeApi, createEchoLinkApi,
+  createMqttIntegrationApi } from './ipc';
 const sa = createSystemAudioEngine(ipcRenderer, IpcChannels),
   sanitize = (p: unknown): string[] => Array.isArray(p) ? p.filter((x): x is string => typeof x === 'string') : [],
   localFileHandlers = new Set<(paths: string[]) => void>(),
   pendingLocalFiles: string[][] = [],
   automixHandlers = new Set<(e: AutomixAdvancePayload) => void>(),
+  mainWindowControlHandlers: NonNullable<PlaybackDeps['mainWindowControlHandlers']> = new Set(),
   rsp = new URLSearchParams(typeof window.location?.search === 'string' ? window.location.search : ''),
   isMain = rsp.get('miniPlayer') !== '1' && rsp.get('desktopLyrics') !== '1',
   invokeMain = <R>(cmd: string, args: unknown[] = []): Promise<R> =>
@@ -32,10 +34,10 @@ ipcRenderer.on(IpcChannels.PlaybackAutomixAdvance, (_e, p) => {
     nextStartSeconds: typeof e.nextStartSeconds === 'number' && Number.isFinite(e.nextStartSeconds) ? e.nextStartSeconds : undefined };
   for (const h of automixHandlers) h(ev);
 });
-const deps: PlaybackDeps = { localAudioFileOpenHandlers: localFileHandlers, pendingLocalAudioFileOpenEvents: pendingLocalFiles, automixAdvanceHandlers: automixHandlers, isMainPlaybackRenderer: isMain, invokeMainPlaybackRenderer: invokeMain };
+const deps: PlaybackDeps = { localAudioFileOpenHandlers: localFileHandlers, pendingLocalAudioFileOpenEvents: pendingLocalFiles, automixAdvanceHandlers: automixHandlers, mainWindowControlHandlers, isMainPlaybackRenderer: isMain, invokeMainPlaybackRenderer: invokeMain };
 const echoApi: EchoApi = {
   app: createAppApi(ipcRenderer, IpcChannels), desktopLyrics: createDesktopLyricsApi(ipcRenderer, IpcChannels),
-  miniPlayer: createMiniPlayerApi(ipcRenderer, IpcChannels), library: createLibraryApi(ipcRenderer, IpcChannels, webUtils),
+  miniPlayer: createMiniPlayerApi(ipcRenderer, IpcChannels), pet: createPetApi(ipcRenderer, IpcChannels), library: createLibraryApi(ipcRenderer, IpcChannels, webUtils),
   taskbarMiniPlayer: {
     show: () => ipcRenderer.invoke(IpcChannels.TaskbarMiniPlayerShow),
     hide: () => ipcRenderer.invoke(IpcChannels.TaskbarMiniPlayerHide),
@@ -61,5 +63,7 @@ const echoApi: EchoApi = {
   lastfm: createLastFmApi(ipcRenderer, IpcChannels),
   discordPresence: createDiscordPresenceApi(ipcRenderer, IpcChannels),
   stageBridge: createStageBridgeApi(ipcRenderer, IpcChannels),
+  echoLink: createEchoLinkApi(ipcRenderer, IpcChannels),
+  mqttIntegration: createMqttIntegrationApi(ipcRenderer, IpcChannels),
 };
-contextBridge.exposeInMainWorld('echo', echoApi); setupPlaybackProxy(ipcRenderer, IpcChannels, echoApi);
+contextBridge.exposeInMainWorld('echo', echoApi); setupPlaybackProxy(ipcRenderer, IpcChannels, echoApi, deps);

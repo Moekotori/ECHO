@@ -28,6 +28,9 @@ import type { ReplayGainTrackData } from '../../shared/utils/replayGain';
 import type { FfmpegToolchainInfo } from './FfmpegToolchain';
 import type { AutomixTransitionPlan, AutomixTransitionMode, TrackTransitionAnalysis } from './AutomixPlanner';
 
+export const nativeHostProtocolVersion = 1;
+export const nativeBackendContractVersion: AudioBackendContractVersion = 2;
+
 export type {
   AudioDeviceInfo,
   AudioDiagnostics,
@@ -52,6 +55,7 @@ export type LocalAudioSource = {
   trackId?: string;
   metadata?: PlaybackTrackMetadataHint;
   inputHeaders?: Record<string, string>;
+  mimeType?: string | null;
   replayGain?: ReplayGainTrackData | null;
 };
 
@@ -80,6 +84,8 @@ export type SampleRatePlan = {
   echoSrcMode: AudioEchoSrcMode;
   echoSrcQualityProfile: AudioEchoSrcQualityProfile;
   echoSrcAdvancedModeEnabled: boolean;
+  /** True only when ECHO SRC is routed through the host-owned FIR processor. */
+  echoSrcFirActive: boolean;
   echoSrcFilterProfile: AudioEchoSrcFilterProfile;
   echoSrcFilterProfile1x: AudioEchoSrcFilterProfile;
   echoSrcFilterProfileNx: AudioEchoSrcFilterProfile;
@@ -94,11 +100,15 @@ export type SampleRatePlan = {
   sdmOutputFormat: 'dop24le' | 'dsd-native-raw' | null;
   sdmNativeSampleRate: number | null;
   sdmTransportSampleRate: number | null;
+  sdmComputeBackend: AudioSdmComputeBackend;
   sdmActualComputeBackend: AudioSdmComputeBackend | null;
   sdmModulatorProfile: AudioSdmModulatorProfile | null;
   sdmProcessingMode: AudioEchoSrcFirProcessingMode | null;
   sdmBatchFrames: number | null;
   sdmMaxBlockFrames: number | null;
+  sdmOversamplingFilterProfile: AudioEchoSrcFilterProfile;
+  sdmOversamplingFilterProfile1x: AudioEchoSrcFilterProfile;
+  sdmOversamplingFilterProfileNx: AudioEchoSrcFilterProfile;
   sdmOversamplingFirActive: boolean;
   sdmCudaStatus?: AudioCudaRuntimeStatus;
   sdmRuntime: AudioSdmRuntimeStatus | null;
@@ -178,6 +188,7 @@ export type NativeOutputStartOptions = {
   deviceName?: string;
   sharedBackend?: AudioSharedBackend;
   exclusive?: boolean;
+  asio?: boolean;
   useNativeOutput?: boolean;
   useMiniaudioOutput?: boolean;
   latencyProfile?: AudioOutputSettings['latencyProfile'];
@@ -207,7 +218,7 @@ export type NativeOutputTelemetry = {
 };
 
 export type NativeHostNotificationEvent = {
-  event: 'default_device_changed' | 'device_state_changed' | 'device_removed' | 'audio_session_disconnected';
+  event: 'default_device_changed' | 'device_state_changed' | 'device_removed' | 'device_sample_rate_changed' | 'audio_session_disconnected';
   deviceId?: string;
   reason?: string;
   code?: number;
@@ -217,6 +228,19 @@ export type NativeHostNotificationEvent = {
 
 export type NativeBridgeReadyMessage = Record<string, unknown> & {
   ready?: boolean;
+  readyLevel?: 'process' | 'device';
+  protocolVersion?: number;
+  backendContractVersion?: number;
+  capabilities?: {
+    deviceReadyV2?: boolean;
+    runtimeDeviceConfigureV1?: boolean;
+    hostOwnedLocalPlaybackV1?: boolean;
+    nativeDspV1?: boolean;
+    nativeCudaDspV1?: boolean;
+    wasapiExclusive?: boolean;
+    coreAudioExclusive?: boolean;
+    asio?: boolean;
+  };
   sampleRate?: number;
   sharedSampleRate?: number;
   sharedDeviceSampleRate?: number;
@@ -254,6 +278,10 @@ export type AudioSessionPlayRequest = LocalAudioSource & {
   automix?: AudioSessionAutomixRequest;
   gapless?: AudioSessionGaplessRequest;
   automixAnalyze?: boolean;
+  /** Main-process-only guard for one corrective daemon reopen after probing a remote source rate. */
+  remoteSampleRateCorrectionAttempt?: boolean;
+  /** Main-process-only guard that keeps a runtime daemon recovery on the legacy remote PCM path. */
+  remoteDaemonPlaybackFallbackAttempt?: boolean;
 };
 
 export type AudioSessionPlayPcmStreamRequest = {
@@ -307,5 +335,3 @@ export type AudioAutomixAdvanceEvent = {
   skipIntroSilence?: boolean;
   nextStartSeconds?: number;
 };
-
-

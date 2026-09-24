@@ -154,7 +154,7 @@ const readEmbeddedCueText = (filePath: string): string | null => {
       return null;
     }
 
-    while (true) {
+    for (;;) {
       const header = readExactly(fd, 4, position);
       if (!header) {
         return null;

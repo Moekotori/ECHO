@@ -5,6 +5,11 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { EchoDatabase } from '../database/createDatabase';
 import type { AppSettings } from '../../shared/types/appSettings';
 import type { CoverCacheMigrationResult } from '../../shared/types/coverCache';
+import {
+  canClaimCoverCacheDirectory,
+  coverCacheOwnershipMarkerName,
+  writeCoverCacheOwnershipMarker,
+} from './CoverCacheOwnership';
 
 type CoverRow = {
   id: string;
@@ -66,7 +71,12 @@ const ensureWritableDirectory = async (directory: string): Promise<void> => {
 };
 
 export const ensureCoverCacheDirectory = async (directory: string): Promise<void> => {
-  await ensureWritableDirectory(resolve(directory));
+  const resolvedDirectory = resolve(directory);
+  const canClaim = canClaimCoverCacheDirectory(resolvedDirectory);
+  await ensureWritableDirectory(resolvedDirectory);
+  if (canClaim && canClaimCoverCacheDirectory(resolvedDirectory)) {
+    await writeCoverCacheOwnershipMarker(resolvedDirectory);
+  }
 };
 
 const copyCacheTree = async (
@@ -85,7 +95,20 @@ const copyCacheTree = async (
   }
 
   for (const entry of entries) {
+    if (entry.name === coverCacheOwnershipMarkerName) {
+      continue;
+    }
+
     const sourcePath = join(currentOldDir, entry.name);
+
+    // Never traverse the destination if it appears in the source tree. The
+    // migration entry point rejects this layout, but keeping the copy routine
+    // defensive prevents a future caller from recreating cache/cache/... .
+    if (isInsideDir(newDir, oldDir) && isInsideDir(sourcePath, newDir)) {
+      result.warnings.push(`${sourcePath}: skipped destination directory nested inside source cache`);
+      continue;
+    }
+
     const relativePath = relative(resolve(oldDir), resolve(sourcePath));
     const targetPath = join(newDir, relativePath);
 
@@ -227,12 +250,17 @@ export const migrateCoverCache = async (options: CoverCacheMigrationOptions): Pr
   };
 
   if (samePath(oldDir, newDir)) {
-    await ensureWritableDirectory(newDir);
+    await ensureCoverCacheDirectory(newDir);
+    return result;
+  }
+
+  if (isInsideDir(newDir, oldDir)) {
+    result.errors.push(`${newDir}: destination cache directory must not be inside the source cache directory ${oldDir}`);
     return result;
   }
 
   try {
-    await ensureWritableDirectory(newDir);
+    await ensureCoverCacheDirectory(newDir);
   } catch (error) {
     result.errors.push(`${newDir}: ${error instanceof Error ? error.message : String(error)}`);
     return result;

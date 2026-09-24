@@ -20,6 +20,7 @@ import { streamingStableKey } from '../../../shared/types/streaming';
 import { getAccountService } from '../../accounts/AccountService';
 import { fetchWithNetworkProxy } from '../../network/networkFetch';
 import type { StreamingProvider } from '../StreamingProvider';
+import { fuzzySearchScore } from '../StreamingFuzzySearch';
 import { streamingSearchQueryVariants } from '../StreamingSearchQueryVariants';
 import { asRecord, integer, streamingImageProxyUrl, text } from './chinaStreamingUtils';
 
@@ -87,6 +88,15 @@ type BilibiliSearchPage = {
   total: number | null;
   hasMore: boolean;
 };
+
+const bilibiliSearchApiPaths = [
+  '/x/web-interface/wbi/search/type',
+  '/x/web-interface/search/type',
+] as const;
+const bilibiliMusicIntentPattern =
+  /\b(?:mv|music|live|official|cover|audio|ost)\b|音乐|歌曲|单曲|专辑|演唱|现场|翻唱|无损|音质|歌词|主题曲|片尾曲|片头曲|完整版/iu;
+const bilibiliCommercialNoisePattern =
+  /广告|带货|开箱|测评|评测|新品|睡衣|内衣|服饰|穿搭|教程|reaction|反应视频|游戏实况/iu;
 
 const accountCookie = (): string | undefined => getAccountService().getCredentials(provider).cookie?.trim() || undefined;
 
@@ -314,6 +324,27 @@ const trackFromYtDlpSearchEntry = (value: unknown): StreamingTrack | null => {
     mvStatus: 'available',
   };
 };
+
+const rankBilibiliMusicTracks = (tracks: StreamingTrack[], query: string): StreamingTrack[] =>
+  tracks
+    .map((track, index) => {
+      const titleScore = fuzzySearchScore(query, [track.title]);
+      const artistScore = fuzzySearchScore(query, [track.artist]);
+      const relevanceScore = Math.min(
+        titleScore ?? Number.POSITIVE_INFINITY,
+        artistScore === null ? Number.POSITIVE_INFINITY : artistScore + 4,
+      );
+      const searchableText = `${track.title} ${track.artist}`;
+      const musicIntentBonus = bilibiliMusicIntentPattern.test(searchableText) ? -4 : 0;
+      const commercialNoisePenalty = bilibiliCommercialNoisePattern.test(searchableText) ? 30 : 0;
+      return {
+        track,
+        index,
+        score: (Number.isFinite(relevanceScore) ? relevanceScore : 40) + musicIntentBonus + commercialNoisePenalty,
+      };
+    })
+    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .map(({ track }) => track);
 
 const extractPiniaExpression = (html: string): string | null => {
   const marker = 'window.__pinia=';
@@ -578,6 +609,9 @@ const pickAudioFormat = (value: unknown): YtDlpFormat | null => {
   return [...audioFormats].sort((left, right) => Number(right.abr ?? right.tbr ?? 0) - Number(left.abr ?? left.tbr ?? 0))[0] ?? null;
 };
 
+const supportedPlaybackHeaderNames = new Set(['referer', 'origin', 'user-agent', 'accept']);
+const maxPlaybackHeaderValueLength = 8 * 1024;
+
 const headersFromFormat = (format: YtDlpFormat): Record<string, string> => {
   const headers = asRecord(format.http_headers);
   return {
@@ -586,7 +620,11 @@ const headersFromFormat = (format: YtDlpFormat): Record<string, string> => {
     Referer: bilibiliReferer,
     ...Object.fromEntries(
       Object.entries(headers).filter(
-        ([key, value]) => typeof value === 'string' && !/authorization|cookie/iu.test(key),
+        ([key, value]) =>
+          typeof value === 'string' &&
+          value.length <= maxPlaybackHeaderValueLength &&
+          !/[\r\n]/u.test(value) &&
+          supportedPlaybackHeaderNames.has(key.trim().toLocaleLowerCase()),
       ),
     ),
   } as Record<string, string>;
@@ -633,6 +671,7 @@ export class BilibiliStreamingProvider implements StreamingProvider {
       displayName: 'Bilibili',
       enabled: true,
       supportsSearch: true,
+      supportedSearchMediaTypes: ['track'],
       supportsPlayback: true,
       supportsDownload: false,
       supportsLyrics: false,
@@ -675,28 +714,41 @@ export class BilibiliStreamingProvider implements StreamingProvider {
     for (const query of variants) {
       const variantRequest = query === request.query ? request : { ...request, query };
       const result = await this.searchBilibiliHttp(variantRequest, page, pageSize);
+      if (!result) {
+        continue;
+      }
       fallbackResult ??= result;
       if (result.tracks.length > 0) {
-        return searchResultFromTracks(request, mediaType, page, pageSize, result);
+        return searchResultFromTracks(request, mediaType, page, pageSize, {
+          ...result,
+          tracks: rankBilibiliMusicTracks(result.tracks, request.query),
+        });
       }
     }
 
     const ytDlpResult = await this.searchBilibiliWithYtDlp(request, page, pageSize);
-    if (ytDlpResult.tracks.length > 0 || !fallbackResult) {
-      return searchResultFromTracks(request, mediaType, page, pageSize, ytDlpResult);
+    if (ytDlpResult?.tracks.length) {
+      return searchResultFromTracks(request, mediaType, page, pageSize, {
+        ...ytDlpResult,
+        tracks: rankBilibiliMusicTracks(ytDlpResult.tracks, request.query),
+      });
     }
 
-    return searchResultFromTracks(request, mediaType, page, pageSize, fallbackResult);
+    if (fallbackResult) {
+      return searchResultFromTracks(request, mediaType, page, pageSize, fallbackResult);
+    }
+
+    throw new Error('Bilibili 搜索暂时被风控拦截，请稍后重试或在设置中登录 Bilibili。');
   }
 
-  private async searchBilibiliHttp(request: StreamingSearchRequest, page: number, pageSize: number): Promise<BilibiliSearchPage> {
+  private async searchBilibiliHttp(request: StreamingSearchRequest, page: number, pageSize: number): Promise<BilibiliSearchPage | null> {
     const apiResult = await this.searchBilibiliApi(request, page, pageSize);
     if (apiResult && apiResult.tracks.length > 0) {
       return apiResult;
     }
 
     const webpageResult = await this.searchBilibiliWebpage(request, page, pageSize);
-    if (webpageResult.tracks.length > 0) {
+    if (webpageResult && webpageResult.tracks.length > 0) {
       return webpageResult;
     }
 
@@ -704,39 +756,47 @@ export class BilibiliStreamingProvider implements StreamingProvider {
   }
 
   private async searchBilibiliApi(request: StreamingSearchRequest, page: number, pageSize: number): Promise<BilibiliSearchPage | null> {
-    const url = new URL('https://api.bilibili.com/x/web-interface/search/type');
-    url.searchParams.set('search_type', 'video');
-    url.searchParams.set('keyword', request.query);
-    url.searchParams.set('page', String(page));
-    url.searchParams.set('page_size', String(pageSize));
+    for (const path of bilibiliSearchApiPaths) {
+      const url = new URL(path, 'https://api.bilibili.com');
+      url.searchParams.set('search_type', 'video');
+      url.searchParams.set('keyword', request.query);
+      url.searchParams.set('page', String(page));
+      url.searchParams.set('page_size', String(pageSize));
 
-    try {
-      const response = await fetchWithNetworkProxy(url.toString(), {
-        headers: bilibiliHeaders({ Referer: `https://search.bilibili.com/video?keyword=${encodeURIComponent(request.query)}` }),
-      });
-      if (!response.ok) {
-        return null;
+      try {
+        const response = await fetchWithNetworkProxy(url.toString(), {
+          headers: bilibiliHeaders(
+            { Referer: `https://search.bilibili.com/video?keyword=${encodeURIComponent(request.query)}` },
+            { includeCookie: false },
+          ),
+        });
+        if (!response.ok) {
+          continue;
+        }
+
+        const payload = (await response.json()) as BilibiliSearchResponse;
+        if (payload.code !== 0 || !Array.isArray(payload.data?.result)) {
+          continue;
+        }
+
+        const tracks = payload.data.result
+          .map(trackFromSearchEntry)
+          .filter((track): track is StreamingTrack => Boolean(track));
+        const total = integer(payload.data.numResults);
+        return {
+          tracks,
+          total,
+          hasMore: total ? page * pageSize < total : tracks.length === pageSize,
+        };
+      } catch {
+        // Try the legacy endpoint before falling back to the search page and yt-dlp.
       }
-
-      const payload = (await response.json()) as BilibiliSearchResponse;
-      if (payload.code !== 0 || !Array.isArray(payload.data?.result)) {
-        return null;
-      }
-
-      const tracks = payload.data.result
-        .map(trackFromSearchEntry)
-        .filter((track): track is StreamingTrack => Boolean(track));
-      return {
-        tracks,
-        total: integer(payload.data.numResults),
-        hasMore: tracks.length === pageSize,
-      };
-    } catch {
-      return null;
     }
+
+    return null;
   }
 
-  private async searchBilibiliWebpage(request: StreamingSearchRequest, page: number, pageSize: number): Promise<BilibiliSearchPage> {
+  private async searchBilibiliWebpage(request: StreamingSearchRequest, page: number, pageSize: number): Promise<BilibiliSearchPage | null> {
     try {
       const url = new URL('https://search.bilibili.com/video');
       url.searchParams.set('keyword', request.query);
@@ -749,11 +809,14 @@ export class BilibiliStreamingProvider implements StreamingProvider {
         },
       });
       if (!response.ok) {
-        return { tracks: [], total: null, hasMore: false };
+        return null;
       }
 
       const html = await response.text();
       const pinia = parseSearchPagePinia(html);
+      if (!pinia) {
+        return null;
+      }
       const tracks = findVideoGroupItems(pinia)
         .map((entry) => trackFromSearchEntry(entry as BilibiliSearchEntry))
         .filter((track): track is StreamingTrack => Boolean(track))
@@ -765,11 +828,11 @@ export class BilibiliStreamingProvider implements StreamingProvider {
         hasMore: total ? page * pageSize < total : tracks.length === pageSize,
       };
     } catch {
-      return { tracks: [], total: null, hasMore: false };
+      return null;
     }
   }
 
-  private async searchBilibiliWithYtDlp(request: StreamingSearchRequest, page: number, pageSize: number): Promise<BilibiliSearchPage> {
+  private async searchBilibiliWithYtDlp(request: StreamingSearchRequest, page: number, pageSize: number): Promise<BilibiliSearchPage | null> {
     try {
       const requestedCount = Math.min(100, page * pageSize);
       const data = await ytDlpJson<unknown>([
@@ -790,7 +853,7 @@ export class BilibiliStreamingProvider implements StreamingProvider {
         hasMore: allTracks.length >= requestedCount && tracks.length === pageSize,
       };
     } catch {
-      return { tracks: [], total: null, hasMore: false };
+      return null;
     }
   }
 

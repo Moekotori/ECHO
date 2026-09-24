@@ -9,6 +9,13 @@ import type {
   ChannelBalanceState,
 } from '../shared/types/audio';
 import type { AppSettings, NetworkProxyTestResult } from '../shared/types/appSettings';
+import type {
+  ChannelMatrixState,
+  CompressorState,
+  CrossfeedState,
+  DspRackState,
+  StereoFieldState,
+} from '../shared/types/dspRack';
 import type { AudioCdApi } from '../shared/types/audioCd';
 import type { ConnectDonatorUnlockStatus } from '../shared/constants/featureUnlocks';
 import type {
@@ -16,8 +23,10 @@ import type {
   EchoProAccountStatus,
   EchoProAccountStatusOptions,
   EchoProKeyRedeemResult,
+  EchoProLocalEntitlementStatus,
   EchoProPluginActivationRequest,
   EchoProPluginActivationResult,
+  EchoProPluginDeviceReleaseResult,
   EchoProReleaseDevicesResult,
   EchoProSettingsCloudApplyResult,
   EchoProSettingsCloudPullResult,
@@ -33,11 +42,20 @@ import type {
   DataPackageExportResult,
   SettingsImportResult,
 } from '../shared/types/settingsBackup';
-import type { UpdateStatus } from '../shared/types/updates';
+import type { UpdateInstallResult, UpdateStatus } from '../shared/types/updates';
 import type { AccountBrowser, AccountLoginStartResult, AccountProvider, AccountStatus, NeteaseQrLoginPollResult, NeteaseQrLoginStartResult, YouTubeBrowser } from '../shared/types/accounts';
 import type { AppCacheInventory, CoverCacheMigrationResult, SetCoverCacheDirectoryRequest } from '../shared/types/coverCache';
 import type { AirPlayReceiverStatus, ConnectDevice, ConnectReceiverStatus, ConnectSessionStatus, ConnectStartRequest } from '../shared/types/connect';
-import type { EchoLinkServerStatus, EchoLinkWebBackground } from '../shared/types/echoLink';
+import type {
+  EchoLinkBasicStatus,
+  EchoLinkPairingSession,
+  EchoLinkServerStatus,
+  EchoLinkWebBackground,
+} from '../shared/types/echoLink';
+import type {
+  MqttIntegrationSettingsPatch,
+  MqttIntegrationStatus,
+} from '../shared/types/mqttIntegration';
 import type {
   OpraHeadphoneCorrectionApplyRequest,
   OpraHeadphoneCorrectionApplyResult,
@@ -67,6 +85,7 @@ import type {
 import type { GlobalShortcutAction, GlobalShortcutValidationResult } from '../shared/types/globalShortcuts';
 import type { DesktopLyricsState, DesktopLyricsStylePatch } from '../shared/types/desktopLyrics';
 import type { MiniPlayerHideOptions, MiniPlayerState } from '../shared/types/miniPlayer';
+import type { PetBounds, PetState } from '../shared/types/pet';
 import type { TaskbarMiniPlayerState } from '../shared/types/taskbarMiniPlayer';
 import type {
   AddLocalAudioFilesToPlaylistResult,
@@ -82,6 +101,7 @@ import type {
   LibraryArtist,
   LibraryCacheClearResult,
   LibraryCleanupResult,
+  LibraryFileDeleteResult,
   LibraryDatabaseDeleteResult,
   LibraryDatabaseDiscardProblemTracksResult,
   LibraryDatabaseRepairResult,
@@ -155,6 +175,8 @@ import type {
   PlaybackHistorySummary,
   PlaybackMemoryGraph,
   PlaybackStatsDashboard,
+  ContinuousPlayRecommendationRequest,
+  ContinuousPlayRecommendationResult,
   SmartPlaylistGenerateRequest,
   SmartPlaylistGenerateResult,
   StartPlaybackHistoryRequest,
@@ -177,6 +199,7 @@ import type {
 import type {
   LocalFileResolveResult,
   PlaybackMediaStartRequest,
+  MainWindowPlaybackControlRequest,
   PlaybackPrepareLocalFileRequest,
   PlaybackStartRequest,
   PlaybackStatus,
@@ -197,7 +220,11 @@ import type {
   DownloadSearchRequest,
   DownloadSearchResponse,
   DownloadSettings,
+  DownloadSourceProvider,
   DownloadToolsStatus,
+  OsuAccountCollectionRequest,
+  OsuAccountCollectionResponse,
+  OsuAccountProfile,
 } from '../shared/types/downloads';
 import type {
   HqPlayerConnectionTestResult,
@@ -234,6 +261,8 @@ import type {
   PluginSummary,
 } from '../shared/types/plugins';
 import type {
+  LyricsCandidateApplyOrigin,
+  LyricsChangeReason,
   LyricsEmbedToTrackRequest,
   LyricsEmbedToTrackResult,
   LyricsProviderId,
@@ -254,6 +283,7 @@ import type {
   RemoteDirectoryPreviewOptions,
   RemoteIndexedFolderStats,
   RemoteIndexedTracksQuery,
+  RemoteIndexedTracksPage,
   RemoteBackgroundGlobalStatus,
   RemoteBackgroundJobKind,
   RemoteBackgroundJobStatus,
@@ -268,6 +298,7 @@ import type {
   RemoteStreamUrlResult,
   RemoteSyncStatus,
   RemoteSyncOptions,
+  RemoteSyncPreview,
   RemoteVisibleHydrationOptions,
   TestRemoteSourceResult,
 } from '../shared/types/remoteSources';
@@ -297,10 +328,11 @@ import type {
   StreamingTrackSourceInfo,
 } from '../shared/types/streaming';
 import type { SleepTimerStartRequest, SleepTimerStatus } from '../shared/types/sleepTimer';
-import type { SmtcCommand, SmtcDiagnostics, SmtcLyricsProgress } from '../shared/types/smtc';
+import type { SmtcCommand, SmtcDiagnostics, SmtcEnabledActions, SmtcLyricsProgress } from '../shared/types/smtc';
 import type { LastFmStatus, LastFmAuthStartResult } from '../shared/types/lastfm';
 import type { DiscordPresenceStatus } from '../shared/types/discordPresence';
 import type { StageBridgeServerStatus } from '../shared/types/stage';
+import type { RuntimeAudioComponentImportResult, RuntimeAudioComponentStatus } from '../shared/types/runtimeComponents';
 
 export type FontFileAsset = {
   path: string;
@@ -319,6 +351,9 @@ export type DroppedFileImportResult = {
 export type EchoApi = {
   app: {
     getVersion: () => Promise<string>;
+    getRuntimeAudioComponentStatus: () => Promise<RuntimeAudioComponentStatus>;
+    importRuntimeAudioComponent: () => Promise<RuntimeAudioComponentImportResult>;
+    openRuntimeAudioComponentDownloadPage: () => Promise<void>;
     minimize: () => Promise<void>;
     toggleMaximize: () => Promise<void>;
     isMaximized: () => Promise<boolean>;
@@ -333,6 +368,7 @@ export type EchoApi = {
     getSettings: () => Promise<AppSettings>;
     setSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>;
     getTaskbarPlaybackStatus: () => Promise<TaskbarPlaybackStatus>;
+    setTaskbarThumbnailArtwork: (artworkUrl: string | null) => void;
     resetSettings: () => Promise<AppSettings>;
     exportSettings: () => Promise<string | null>;
     importSettings: () => Promise<SettingsImportResult | null>;
@@ -354,6 +390,7 @@ export type EchoApi = {
     getUpdateStatus: () => Promise<UpdateStatus>;
     checkForUpdates: () => Promise<UpdateStatus>;
     downloadUpdate: () => Promise<UpdateStatus>;
+    installUpdate: () => Promise<UpdateInstallResult>;
     onUpdateStatus: (handler: (status: UpdateStatus) => void) => () => void;
     openRepository: () => Promise<void>;
     openExternalUrl: (url: string) => Promise<void>;
@@ -364,7 +401,9 @@ export type EchoApi = {
     registerEchoProAccount: (credentials: EchoProAccountCredentials) => Promise<EchoProAccountStatus>;
     logoutEchoProAccount: () => Promise<EchoProAccountStatus>;
     redeemEchoProKey: (key: string) => Promise<EchoProKeyRedeemResult>;
+    getEchoProLocalEntitlementStatus: () => Promise<EchoProLocalEntitlementStatus>;
     activateEchoProPlugin: (request: EchoProPluginActivationRequest) => Promise<EchoProPluginActivationResult>;
+    releaseEchoProCurrentDevice: (orderId?: string) => Promise<EchoProPluginDeviceReleaseResult>;
     releaseEchoProDevices: (password: string) => Promise<EchoProReleaseDevicesResult>;
     getEchoProMachineCode: () => Promise<string>;
     getEchoProSettingsCloudStatus: () => Promise<EchoProSettingsCloudStatus>;
@@ -400,6 +439,15 @@ export type EchoApi = {
     setQueueOpen: (open: boolean) => Promise<MiniPlayerState>;
     resetBounds: () => Promise<MiniPlayerState>;
     onStateChanged: (handler: (state: MiniPlayerState) => void) => () => void;
+  };
+  pet: {
+    show: () => Promise<PetState>;
+    hide: () => Promise<PetState>;
+    getState: () => Promise<PetState>;
+    moveTo: (position: Pick<PetBounds, 'x' | 'y'>) => Promise<void>;
+    resetBounds: () => Promise<PetState>;
+    setScale: (scalePercent: number) => Promise<PetState>;
+    onStateChanged: (handler: (state: PetState) => void) => () => void;
   };
   taskbarMiniPlayer: {
     show: () => Promise<TaskbarMiniPlayerState>;
@@ -519,6 +567,7 @@ export type EchoApi = {
     getPlaybackHistorySummary: (query?: PlaybackHistoryQuery) => Promise<PlaybackHistorySummary>;
     getPlaybackStatsDashboard: (query?: PlaybackHistoryQuery) => Promise<PlaybackStatsDashboard>;
     getPlaybackMemoryGraph: (query?: PlaybackHistoryQuery) => Promise<PlaybackMemoryGraph>;
+    getContinuousPlayRecommendations: (request: ContinuousPlayRecommendationRequest) => Promise<ContinuousPlayRecommendationResult>;
     refreshInvalidPlaybackHistory: () => Promise<PlaybackHistoryRefreshResult>;
     deletePlaybackHistoryEntry: (id: string) => Promise<void>;
     clearPlaybackHistory: () => Promise<void>;
@@ -532,11 +581,11 @@ export type EchoApi = {
     copyTrackCover: (trackId: string) => Promise<boolean>;
     copyTrackOriginalCover: (trackId: string) => Promise<boolean>;
     saveTrackCover: (trackId: string) => Promise<string | null>;
-    deleteTrackFile: (trackId: string) => Promise<void>;
+    deleteTrackFile: (trackId: string) => Promise<LibraryFileDeleteResult>;
     copyAlbumInfo: (albumId: string) => Promise<void>;
     copyAlbumCover: (albumId: string) => Promise<boolean>;
     saveAlbumCover: (albumId: string) => Promise<string | null>;
-    deleteAlbumFiles: (albumId: string) => Promise<void>;
+    deleteAlbumFiles: (albumId: string) => Promise<LibraryFileDeleteResult>;
     pruneMissingTracks: () => Promise<LibraryCleanupResult>;
     pruneInvalidTracks: () => Promise<LibraryMaintenanceCleanupResult>;
     clearTracks: () => Promise<LibraryCleanupResult>;
@@ -607,6 +656,8 @@ export type EchoApi = {
     saveQueueSession: (snapshot: PersistedPlaybackSessionV1, options?: PlaybackQueueSessionSaveOptions) => Promise<PersistedPlaybackSessionV1>;
     clearQueueSession: () => Promise<void>;
     onQueueSessionChanged?: (handler: (snapshot: PersistedPlaybackSessionV1 | null) => void) => () => void;
+    controlMainWindow: (request: MainWindowPlaybackControlRequest) => Promise<void>;
+    onMainWindowControl?: (handler: (request: MainWindowPlaybackControlRequest) => Promise<void>) => () => void;
     onLocalAudioFilesOpened: (handler: (paths: string[]) => void) => () => void;
     onAutomixAdvance?: (handler: (event: {
       fromTrackId: string | null;
@@ -619,7 +670,18 @@ export type EchoApi = {
       nextStartSeconds?: number;
     }) => void) => () => void;
     setRepeatMode: (mode: 'off' | 'one' | 'all') => Promise<void>;
-    syncQueueToBackend: (items: Array<{ filePath: string; sampleRate?: number; startSeconds?: number }>, repeatMode?: string) => Promise<void>;
+    syncQueueToBackend: (
+      items: Array<{
+        itemId: string;
+        trackId: string;
+        filePath: string;
+        sampleRate?: number;
+        startSeconds?: number;
+        metadata?: { title?: string | null; artist?: string | null; album?: string | null; albumArtist?: string | null; coverUrl?: string | null };
+      }>,
+      repeatMode?: 'off' | 'one' | 'all',
+      currentItemId?: string | null,
+    ) => Promise<void>;
   };
   remoteSources: {
     list: () => Promise<RemoteSource[]>;
@@ -633,13 +695,14 @@ export type EchoApi = {
     test: (sourceIdOrInput: string | RemoteSourceInput) => Promise<TestRemoteSourceResult>;
     browse: (sourceId: string, path?: string | null) => Promise<RemoteDirectoryItem[]>;
     sync: (sourceId: string, options?: RemoteSyncOptions) => Promise<RemoteSyncStatus>;
+    previewSync?: (sourceId: string, options?: RemoteSyncOptions) => Promise<RemoteSyncPreview>;
     cancelSync: (sourceId: string) => Promise<RemoteSyncStatus>;
     getSyncStatus: (sourceId: string) => Promise<RemoteSyncStatus>;
     createStreamUrl: (input: { trackId?: string; sourceId?: string; remotePath?: string; stableKey?: string }) => Promise<RemoteStreamUrlResult>;
     hydrateVisibleTracks: (trackIds: string[], options?: RemoteVisibleHydrationOptions) => Promise<LibraryTrack[]>;
     lookupTracks: (sourceId: string, remotePaths: string[]) => Promise<RemoteTrackLookupItem[]>;
     listIndexedTracks: (sourceId: string, rootPath?: string | null) => Promise<LibraryTrack[]>;
-    listIndexedTracksPage: (sourceId: string, query?: RemoteIndexedTracksQuery) => Promise<LibraryPage<LibraryTrack>>;
+    listIndexedTracksPage: (sourceId: string, query?: RemoteIndexedTracksQuery) => Promise<RemoteIndexedTracksPage<LibraryTrack>>;
     getIndexedFolderStats: (sourceId: string, rootPath?: string | null) => Promise<RemoteIndexedFolderStats>;
     previewDirectoryItems?: (sourceId: string, items: RemoteDirectoryItem[], options?: RemoteDirectoryPreviewOptions) => Promise<RemoteDirectoryPreviewItem[]>;
     startBackgroundJobs: (sourceId: string, kinds?: RemoteBackgroundJobKind[]) => Promise<RemoteBackgroundJobStatus>;
@@ -655,7 +718,7 @@ export type EchoApi = {
     startBaiduOAuthLogin: (input: BaiduOAuthLoginRequest) => Promise<BaiduOAuthTokenResult>;
   };
   connect: {
-    getDonatorUnlockStatus?: () => Promise<ConnectDonatorUnlockStatus>;
+    getDonatorUnlockStatus?: (options?: { force?: boolean }) => Promise<ConnectDonatorUnlockStatus>;
     listDevices: () => Promise<ConnectDevice[]>;
     refresh: () => Promise<ConnectDevice[]>;
     getStatus: () => Promise<ConnectSessionStatus>;
@@ -716,6 +779,7 @@ export type EchoApi = {
   lyrics: {
     getForTrack: (trackId: string) => Promise<TrackLyrics | null>;
     getForSnapshot?: (request: LyricsTrackSnapshotRequest) => Promise<TrackLyrics | null>;
+    getStoredCandidates?: (trackId: string, durationSeconds?: number | null) => Promise<LyricsSearchCandidate[]>;
     searchCandidates: (trackId: string, searchText?: string, providerId?: LyricsProviderId, trigger?: LyricsSearchTrigger) => Promise<LyricsSearchCandidate[]>;
     searchCandidatesForSnapshot?: (
       request: LyricsTrackSnapshotRequest,
@@ -724,15 +788,23 @@ export type EchoApi = {
       trigger?: LyricsSearchTrigger,
     ) => Promise<LyricsSearchCandidate[]>;
     previewCandidate?: (trackId: string, candidateId: string) => Promise<TrackLyrics>;
-    applyCandidate: (trackId: string, candidateId: string) => Promise<TrackLyrics>;
-    applyCandidateForSnapshot?: (request: LyricsTrackSnapshotRequest, candidateId: string) => Promise<TrackLyrics>;
+    applyCandidate: (
+      trackId: string,
+      candidateId: string,
+      origin?: LyricsCandidateApplyOrigin,
+    ) => Promise<TrackLyrics>;
+    applyCandidateForSnapshot?: (
+      request: LyricsTrackSnapshotRequest,
+      candidateId: string,
+      origin?: LyricsCandidateApplyOrigin,
+    ) => Promise<TrackLyrics>;
     embedToTrack?: (trackId: string, request?: LyricsEmbedToTrackRequest) => Promise<LyricsEmbedToTrackResult>;
     applyCustomLrc?: (trackId: string, lrcText: string, fileName?: string) => Promise<TrackLyrics>;
     markInstrumental: (trackId: string) => Promise<TrackLyrics>;
     rejectCandidate: (candidateId: string) => Promise<void>;
     setOffset: (trackId: string, offsetMs: number) => Promise<TrackLyrics | null>;
     clearCache: (trackId: string) => Promise<void>;
-    onChanged?: (handler: (trackId: string) => void) => () => void;
+    onChanged?: (handler: (trackId: string, reason?: LyricsChangeReason) => void) => () => void;
   };
   mv: {
     getSelected: (trackId: string) => Promise<TrackVideo | null>;
@@ -757,6 +829,7 @@ export type EchoApi = {
     getDiagnostics: () => Promise<SmtcDiagnostics>;
     restart: () => Promise<SmtcDiagnostics>;
     setLyricsProgress: (progress: SmtcLyricsProgress | null) => Promise<void>;
+    setEnabledActions: (actions: SmtcEnabledActions) => Promise<void>;
     onCommand: (handler: (command: SmtcCommand) => void) => () => void;
   };
   hqPlayer: {
@@ -805,11 +878,14 @@ export type EchoApi = {
     getJobs: () => Promise<DownloadJob[]>;
     createUrlJob: (url: string, options?: CreateDownloadUrlJobOptions) => Promise<DownloadJob>;
     cancelJob: (jobId: string) => Promise<DownloadJob | null>;
-    clearCompleted: () => Promise<DownloadJob[]>;
+    clearJobs: (provider?: DownloadSourceProvider) => Promise<DownloadJob[]>;
+    clearCompleted: (provider?: DownloadSourceProvider) => Promise<DownloadJob[]>;
     getSettings: () => Promise<DownloadSettings>;
     setSettings: (patch: Partial<DownloadSettings>) => Promise<DownloadSettings>;
     chooseOutputDirectory: (target?: 'default' | 'osu') => Promise<DownloadSettings | null>;
     search: (request: string | DownloadSearchRequest) => Promise<DownloadSearchResponse>;
+    getOsuAccountProfile: () => Promise<OsuAccountProfile>;
+    getOsuAccountCollection: (request: OsuAccountCollectionRequest) => Promise<OsuAccountCollectionResponse>;
     checkTools: () => Promise<DownloadToolsStatus>;
     onJobsUpdated: (handler: (jobs: DownloadJob[]) => void) => () => void;
   };
@@ -852,7 +928,7 @@ export type EchoApi = {
   spotify: {
     getAccessToken: () => Promise<string>;
     getDevices: () => Promise<Array<{ id: string; name: string; type: string; isActive: boolean; isRestricted: boolean; volumePercent: number | null }>>;
-    getPlaybackState: () => Promise<{ isPlaying: boolean; progressMs: number | null; itemUri: string | null; deviceId: string | null; deviceName: string | null }>;
+    getPlaybackState: () => Promise<{ isPlaying: boolean; progressMs: number | null; itemUri: string | null; deviceId: string | null; deviceName: string | null; volumePercent?: number | null }>;
     ensureConnectDevice: (request: { uri: string; webUrl: string; preferredDeviceId?: string | null }) => Promise<{ deviceId: string; deviceName: string; launched: 'none' | 'desktop' | 'web'; waitedMs: number }>;
     startPlayback: (request: { deviceId: string; uri: string; positionMs?: number }) => Promise<void>;
     transferPlayback: (request: { deviceId: string; play?: boolean }) => Promise<void>;
@@ -872,6 +948,16 @@ export type EchoApi = {
     setPreamp: (preampDb: number) => Promise<EqState>;
     setDspHeadroom: (headroomDb: number) => Promise<EqState>;
     setDspSafetyLimiterEnabled: (enabled: boolean) => Promise<EqState>;
+    getDspRackState: () => Promise<DspRackState>;
+    setDspRackState: (state: Pick<DspRackState, 'order'>) => Promise<DspRackState>;
+    getCompressorState: () => Promise<CompressorState>;
+    setCompressorState: (state: Partial<CompressorState>) => Promise<CompressorState>;
+    getCrossfeedState: () => Promise<CrossfeedState>;
+    setCrossfeedState: (state: Partial<CrossfeedState>) => Promise<CrossfeedState>;
+    getStereoFieldState: () => Promise<StereoFieldState>;
+    setStereoFieldState: (state: Partial<StereoFieldState>) => Promise<StereoFieldState>;
+    getChannelMatrixState: () => Promise<ChannelMatrixState>;
+    setChannelMatrixState: (state: Partial<ChannelMatrixState>) => Promise<ChannelMatrixState>;
     setPreset: (presetId: string) => Promise<EqState>;
     reset: () => Promise<EqState>;
     listPresets: () => Promise<EqPreset[]>;
@@ -924,6 +1010,17 @@ export type EchoApi = {
   stageBridge: {
     getStatus: () => Promise<StageBridgeServerStatus>;
     setEnabled: (patch: { obsBrowserSourceEnabled?: boolean; stageApiEnabled?: boolean }) => Promise<StageBridgeServerStatus>;
+  };
+  echoLink: {
+    getStatus: () => Promise<EchoLinkBasicStatus>;
+    setEnabled: (enabled: boolean) => Promise<EchoLinkBasicStatus>;
+    startPairing: () => Promise<EchoLinkPairingSession>;
+    cancelPairing: () => Promise<EchoLinkBasicStatus>;
+    revokeClient: (clientId: string) => Promise<EchoLinkBasicStatus>;
+  };
+  mqttIntegration: {
+    getStatus: () => Promise<MqttIntegrationStatus>;
+    updateSettings: (patch: MqttIntegrationSettingsPatch) => Promise<MqttIntegrationStatus>;
   };
 };
 

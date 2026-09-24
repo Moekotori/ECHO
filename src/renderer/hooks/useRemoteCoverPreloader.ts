@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RemoteCoverLoadPerformanceMode, AppSettings } from '../../shared/types/appSettings';
 import type { LibraryTrack } from '../../shared/types/library';
+import { resolveEffectivePerformancePolicy } from '../../shared/utils/performancePolicy';
 import { getAppBridge } from '../utils/echoBridge';
 
 type RemoteCoverLoadPlan = {
@@ -20,13 +21,13 @@ type RemoteCoverPreloaderOptions = {
 
 const defaultRemoteCoverLoadPerformanceMode: RemoteCoverLoadPerformanceMode = 'balanced';
 const maxRememberedPreloadedUrls = 2400;
-const preloadedRemoteCoverUrls = new Set<string>();
+const preloadedRemoteCoverIdentities = new Set<string>();
 
 export const remoteCoverLoadPlans: Record<RemoteCoverLoadPerformanceMode, RemoteCoverLoadPlan> = {
   low: {
     leadRows: 0,
-    maxPreloadUrls: 12,
-    maxHydrateTracks: 8,
+    maxPreloadUrls: 0,
+    maxHydrateTracks: 0,
     concurrency: 1,
     delayMs: 240,
   },
@@ -59,14 +60,27 @@ const isRemoteCoverLoadPerformanceMode = (value: unknown): value is RemoteCoverL
 export const normalizeRemoteCoverLoadPerformanceMode = (value: unknown): RemoteCoverLoadPerformanceMode =>
   isRemoteCoverLoadPerformanceMode(value) ? value : defaultRemoteCoverLoadPerformanceMode;
 
+export const remoteCoverPreloadIdentity = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    const cacheKey = parsed.searchParams.get('cacheKey');
+    if (parsed.protocol === 'echo-image:' && parsed.hostname === 'subsonic-cover' && cacheKey) {
+      return `${parsed.protocol}//${parsed.hostname}/${cacheKey}?size=${parsed.searchParams.get('size') ?? '512'}`;
+    }
+  } catch {
+    // Invalid URLs are kept as-is and will fail through the normal Image path.
+  }
+  return url;
+};
+
 const rememberPreloadedUrl = (url: string): void => {
-  preloadedRemoteCoverUrls.add(url);
-  while (preloadedRemoteCoverUrls.size > maxRememberedPreloadedUrls) {
-    const oldest = preloadedRemoteCoverUrls.values().next().value;
+  preloadedRemoteCoverIdentities.add(remoteCoverPreloadIdentity(url));
+  while (preloadedRemoteCoverIdentities.size > maxRememberedPreloadedUrls) {
+    const oldest = preloadedRemoteCoverIdentities.values().next().value;
     if (typeof oldest !== 'string') {
       break;
     }
-    preloadedRemoteCoverUrls.delete(oldest);
+    preloadedRemoteCoverIdentities.delete(oldest);
   }
 };
 
@@ -97,15 +111,19 @@ export const selectRemoteCoverPreloadCandidates = (
 };
 
 const uniqueRemoteCoverUrls = (tracks: LibraryTrack[], limit: number): string[] => {
+  if (limit <= 0) {
+    return [];
+  }
   const urls: string[] = [];
   const seen = new Set<string>();
 
   for (const track of tracks) {
     const url = track.mediaType === 'remote' ? track.coverThumb : null;
-    if (!url || seen.has(url) || preloadedRemoteCoverUrls.has(url)) {
+    const identity = url ? remoteCoverPreloadIdentity(url) : null;
+    if (!url || !identity || seen.has(identity) || preloadedRemoteCoverIdentities.has(identity)) {
       continue;
     }
-    seen.add(url);
+    seen.add(identity);
     urls.push(url);
     if (urls.length >= limit) {
       break;
@@ -116,6 +134,9 @@ const uniqueRemoteCoverUrls = (tracks: LibraryTrack[], limit: number): string[] 
 };
 
 const missingRemoteCoverTrackIds = (tracks: LibraryTrack[], limit: number): string[] => {
+  if (limit <= 0) {
+    return [];
+  }
   const ids: string[] = [];
   for (const track of tracks) {
     if (track.mediaType !== 'remote' || track.coverThumb) {
@@ -139,7 +160,11 @@ export const useRemoteCoverLoadPerformanceMode = (): RemoteCoverLoadPerformanceM
       void getAppBridge()?.getSettings?.()
         .then((settings) => {
           if (!disposed) {
-            setMode(normalizeRemoteCoverLoadPerformanceMode(settings?.remoteCoverLoadPerformanceMode));
+            const nextMode = resolveEffectivePerformancePolicy(settings).remoteCoverLoadPerformanceMode;
+            if (nextMode === 'low') {
+              preloadedRemoteCoverIdentities.clear();
+            }
+            setMode(nextMode);
           }
         })
         .catch(() => undefined);
@@ -147,8 +172,8 @@ export const useRemoteCoverLoadPerformanceMode = (): RemoteCoverLoadPerformanceM
 
     const handleSettingsChanged = (event: Event): void => {
       const detail = event instanceof CustomEvent ? (event.detail as Partial<AppSettings> | null | undefined) : null;
-      if (detail && 'remoteCoverLoadPerformanceMode' in detail) {
-        setMode(normalizeRemoteCoverLoadPerformanceMode(detail.remoteCoverLoadPerformanceMode));
+      if (detail && ('remoteCoverLoadPerformanceMode' in detail || 'lowSpecModeEnabled' in detail)) {
+        loadMode();
         return;
       }
       loadMode();
@@ -178,7 +203,7 @@ export const useRemoteCoverPreloader = ({
   useEffect(() => {
     if (previousModeRef.current !== mode) {
       previousModeRef.current = mode;
-      preloadedRemoteCoverUrls.clear();
+      preloadedRemoteCoverIdentities.clear();
     }
   }, [mode]);
 
@@ -193,7 +218,7 @@ export const useRemoteCoverPreloader = ({
     const missingCoverIds = hydrateMissingCovers
       ? missingRemoteCoverTrackIds(candidates, plan.maxHydrateTracks)
       : [];
-    const imageRefs: HTMLImageElement[] = [];
+    const activeImages = new Set<HTMLImageElement>();
     let cancelled = false;
 
     const runPreload = (): void => {
@@ -222,8 +247,16 @@ export const useRemoteCoverPreloader = ({
           activeCount += 1;
 
           const image = new Image();
-          imageRefs.push(image);
+          activeImages.add(image);
+          let settled = false;
           const finish = (): void => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            image.onload = null;
+            image.onerror = null;
+            activeImages.delete(image);
             activeCount -= 1;
             pump();
           };
@@ -244,11 +277,12 @@ export const useRemoteCoverPreloader = ({
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
-      for (const image of imageRefs) {
+      for (const image of activeImages) {
         image.onload = null;
         image.onerror = null;
         image.src = '';
       }
+      activeImages.clear();
     };
   }, [active, hydrateMissingCovers, mode, tracks, visibleTrackIds, visibleTrackIdsKey]);
 

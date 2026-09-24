@@ -1,0 +1,563 @@
+.connect-page.connect-page--session {
+  --connect-session-line: #dce2ea;
+  --connect-session-line-strong: #c9d2de;
+  --connect-session-surface: rgba(255, 255, 255, 0.96);
+  --connect-session-surface-soft: #f7f9fc;
+  --connect-session-ink: #1f2733;
+  --connect-session-muted: #6e7786;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0;
+  gap: 16px;
+  padding: 26px 30px 42px;
+  color: var(--connect-session-ink);
+}
+
+.connect-page--session .connect-header {
+  min-height: 62px;
+  align-items: flex-start;
+  padding: 2px 2px 4px;
+}
+
+.connect-page--session .connect-header .section-kicker {
+  display: none !important;
+}
+
+.connect-page--session .connect-header h1 {
+  color: var(--connect-session-ink);
+  font-size: clamp(30px, 2.4vw, 38px);
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+}
+
+.connect-page--session .connect-header p:last-child {
+  max-width: 620px;
+  margin-top: 8px;
+  color: var(--connect-session-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.connect-page--session .connect-header-actions {
+  padding-top: 4px;
+}
+
+.connect-workspace-tabs {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-height: 50px;
+  overflow: hidden;
+  border: 1px solid var(--connect-session-line);
+  border-radius: 11px;
+  background: var(--connect-session-surface);
+}
+
+.connect-workspace-tabs button {
+  min-width: 0;
+  min-height: 50px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 16px;
+  color: #4c5665;
+  border: 0;
+  border-right: 1px solid var(--connect-session-line);
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 760;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.connect-workspace-tabs button:last-child {
+  border-right: 0;
+}
+
+.connect-workspace-tabs button:hover:not([data-active="true"]) {
+  color: var(--connect-session-ink);
+  background: var(--connect-session-surface-soft);
+}
+
+.connect-workspace-tabs button[data-active="true"] {
+  color: #fff;
+  background: var(--theme-accent-solid-bg);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--theme-accent-solid-bg) 22%, transparent);
+}
+
+.connect-page--session .connect-alert {
+  border-radius: 10px;
+}
+
+.connect-page--session .connect-command-center {
+  display: none !important;
+}
+
+.connect-page--session > .connect-stage,
+.connect-page--session > .connect-live-panel,
+.connect-page--session > .connect-radio-panel,
+.connect-page--session > .connect-hqplayer-panel,
+.connect-page--session > .connect-receiver-panel {
+  display: none !important;
+}
+
+.connect-page--session[data-mode="output"] > .connect-stage,
+.connect-page--session[data-mode="mobile"] > .connect-stage,
+.connect-page--session[data-mode="output"] > .connect-hqplayer-panel,
+.connect-page--session[data-mode="radio"] > .connect-live-panel,
+.connect-page--session[data-mode="radio"] > .connect-radio-panel,
+.connect-page--session[data-mode="receive"] > .connect-receiver-panel {
+  display: grid !important;
+}
+
+.connect-page--session[data-mode="output"] .connect-echo-link-panel,
+.connect-page--session[data-mode="mobile"] .connect-now,
+.connect-page--session[data-mode="mobile"] .connect-outgoing-debug,
+.connect-page--session[data-mode="mobile"] .connect-device-section {
+  display: none !important;
+}
+
+.connect-radio-resume {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 13px;
+  border: 1px solid var(--connect-session-line);
+  border-radius: 10px;
+  background: var(--connect-session-surface);
+}
+
+.connect-radio-resume__icon {
+  width: 38px;
+  height: 38px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--theme-accent-text);
+  border-radius: 9px;
+  background: var(--theme-accent-bg);
+}
+
+.connect-radio-resume__copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.connect-radio-resume__copy strong,
+.connect-radio-resume__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connect-radio-resume__copy strong {
+  color: var(--connect-session-ink);
+  font-size: 14px;
+  font-weight: 780;
+}
+
+.connect-radio-resume__copy small {
+  color: var(--connect-session-muted);
+  font-size: 12px;
+}
+
+.connect-page--session .connect-stage {
+  display: grid;
+  gap: 14px;
+}
+
+.connect-mobile-integrations {
+  display: grid;
+  order: -3;
+  gap: 14px;
+}
+
+.connect-page--session .connect-mobile-integrations > .echo-link-basic-panel,
+.connect-page--session .connect-mobile-integrations > .mqtt-integration-panel {
+  min-width: 0;
+  border: 1px solid var(--connect-session-line);
+  border-radius: 12px;
+  background: var(--connect-session-surface);
+  box-shadow: 0 10px 28px rgba(45, 58, 76, 0.055);
+}
+
+.connect-page--session .connect-mobile-integrations > .mqtt-integration-panel {
+  padding: 16px;
+}
+
+.connect-page--session .connect-mobile-integrations :is(input, button):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--theme-accent) 70%, white);
+  outline-offset: 2px;
+}
+
+.connect-page--session .connect-now--stage,
+.connect-page--session .connect-device-section--stage,
+.connect-page--session .connect-hqplayer-panel,
+.connect-page--session .connect-echo-link-panel,
+.connect-page--session .connect-live-panel,
+.connect-page--session .connect-radio-panel,
+.connect-page--session .connect-receiver-panel {
+  border-color: var(--connect-session-line);
+  border-radius: 12px;
+  background: var(--connect-session-surface);
+  box-shadow: 0 10px 28px rgba(45, 58, 76, 0.055);
+}
+
+.connect-page--session .connect-now--stage {
+  grid-template-columns: 142px minmax(0, 1fr) minmax(248px, auto);
+  min-height: 244px;
+  padding: 22px;
+}
+
+.connect-page--session .connect-now--stage .connect-artwork {
+  width: 142px;
+  height: 142px;
+  border-color: var(--connect-session-line);
+  border-radius: 10px;
+  box-shadow: 0 12px 26px rgba(33, 47, 65, 0.14);
+}
+
+.connect-page--session .connect-now-copy {
+  align-content: center;
+  gap: 8px;
+}
+
+.connect-page--session .connect-now-copy > span {
+  color: var(--connect-session-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.connect-page--session .connect-now-copy h2 {
+  color: var(--connect-session-ink);
+  font-size: 28px;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.connect-page--session .connect-now-copy p,
+.connect-page--session .connect-now-copy small {
+  color: var(--connect-session-muted);
+  font-size: 13px;
+}
+
+.connect-page--session .connect-now-facts {
+  gap: 8px;
+}
+
+.connect-page--session .connect-now-facts small {
+  min-height: 28px;
+  padding: 4px 9px;
+  border-color: var(--connect-session-line);
+  background: var(--connect-session-surface-soft);
+}
+
+.connect-page--session .connect-progress {
+  height: 4px;
+  background: #e7ecf2;
+}
+
+.connect-page--session .connect-progress span {
+  background: var(--theme-accent-solid-bg);
+}
+
+.connect-page--session .connect-controls {
+  grid-template-columns: repeat(4, 44px);
+  justify-content: end;
+  gap: 10px;
+}
+
+.connect-page--session .connect-controls .icon-button {
+  width: 44px;
+  height: 44px;
+  border-color: var(--connect-session-line);
+  background: var(--connect-session-surface-soft);
+}
+
+.connect-page--session .connect-volume {
+  min-width: 210px;
+}
+
+.connect-page--session .connect-device-section--stage {
+  gap: 12px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--connect-session-line);
+}
+
+.connect-page--session .connect-section-title {
+  min-height: 42px;
+}
+
+.connect-page--session .connect-section-title h2,
+.connect-page--session .connect-hqplayer-title h2 {
+  color: var(--connect-session-ink);
+  font-size: 20px;
+  letter-spacing: -0.018em;
+}
+
+.connect-page--session .connect-section-title > div > span,
+.connect-page--session .connect-hqplayer-title > div > span {
+  color: var(--theme-accent-text);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.connect-page--session .connect-device-section--stage .connect-device-list {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--connect-session-line);
+  border-radius: 10px;
+  background: var(--connect-session-surface);
+}
+
+.connect-page--session .connect-device-row {
+  grid-template-columns: 48px minmax(0, 1fr) auto auto;
+  grid-template-rows: auto;
+  min-height: 78px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--connect-session-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.connect-page--session .connect-device-row:last-child {
+  border-bottom: 0;
+}
+
+.connect-page--session .connect-device-row:hover {
+  background: var(--connect-session-surface-soft);
+}
+
+.connect-page--session .connect-device-row[data-active="true"] {
+  background: color-mix(in srgb, var(--theme-accent-bg) 68%, #fff);
+  box-shadow: inset 3px 0 0 var(--theme-accent-text);
+}
+
+.connect-page--session .connect-device-icon {
+  width: 48px;
+  height: 48px;
+  border-color: var(--connect-session-line);
+  border-radius: 9px;
+}
+
+.connect-page--session .connect-device-copy strong {
+  color: var(--connect-session-ink);
+  font-size: 15px;
+}
+
+.connect-page--session .connect-device-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+}
+
+.connect-page--session .connect-device-facts small {
+  color: var(--connect-session-muted);
+}
+
+.connect-page--session .connect-device-meta {
+  grid-column: auto;
+  grid-row: auto;
+  justify-self: end;
+}
+
+.connect-page--session .connect-device-meta span {
+  border-color: var(--connect-session-line);
+  background: var(--connect-session-surface-soft);
+}
+
+.connect-page--session .connect-device-row .settings-action-button {
+  grid-column: auto;
+  grid-row: auto;
+  min-width: 96px;
+  min-height: 40px;
+  justify-content: center;
+}
+
+.connect-page--session .connect-hqplayer-panel,
+.connect-page--session .connect-echo-link-panel,
+.connect-page--session .connect-live-panel,
+.connect-page--session .connect-radio-panel,
+.connect-page--session .connect-receiver-panel,
+.connect-page--session .connect-outgoing-debug {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--connect-session-line);
+  background: var(--connect-session-surface);
+  box-shadow: none;
+}
+
+.connect-page--session .connect-hqplayer-layout {
+  grid-template-columns: minmax(0, 1.18fr) minmax(230px, 0.82fr) minmax(250px, 0.9fr);
+}
+
+.connect-page--session .connect-hqplayer-local-card,
+.connect-page--session .connect-hqplayer-status-grid,
+.connect-page--session .connect-hqplayer-plan,
+.connect-page--session .connect-echo-link-grid span,
+.connect-page--session .connect-echo-link-pairing,
+.connect-page--session .connect-echo-link-web,
+.connect-page--session .connect-echo-link-background,
+.connect-page--session .connect-live-summary,
+.connect-page--session .connect-receiver-debug {
+  border-color: var(--connect-session-line);
+  background: var(--connect-session-surface-soft);
+}
+
+.connect-page--session :is(button, input, select, summary):focus-visible {
+  outline: 2px solid var(--theme-focus-ring);
+  outline-offset: 2px;
+}
+
+html[data-theme="dark"] .connect-page--session {
+  --connect-session-line: color-mix(in srgb, var(--color-border) 80%, transparent);
+  --connect-session-line-strong: color-mix(in srgb, var(--theme-subtle-text) 40%, var(--color-border));
+  --connect-session-surface: var(--theme-panel-bg);
+  --connect-session-surface-soft: color-mix(in srgb, var(--theme-control-bg) 78%, var(--theme-panel-bg));
+  --connect-session-ink: var(--theme-heading-text);
+  --connect-session-muted: var(--theme-subtle-text);
+}
+
+html[data-theme="dark"] .connect-workspace-tabs button {
+  color: var(--theme-subtle-text);
+}
+
+html[data-theme="dark"] .connect-workspace-tabs button:hover:not([data-active="true"]) {
+  color: var(--theme-heading-text);
+}
+
+html[data-theme="dark"] .connect-page--session .connect-progress {
+  background: var(--theme-control-bg);
+}
+
+html[data-theme="dark"] .connect-page--session .connect-device-row[data-active="true"] {
+  background: color-mix(in srgb, var(--theme-accent-bg) 72%, var(--theme-panel-bg));
+}
+
+@media (max-width: 1020px) {
+  .connect-page--session .connect-now--stage {
+    grid-template-columns: 112px minmax(0, 1fr) !important;
+  }
+
+  .connect-page--session .connect-now-copy {
+    min-width: 0;
+  }
+
+  .connect-page--session .connect-now-copy h2 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .connect-page--session .connect-controls {
+    grid-column: 1 / -1 !important;
+    width: 100%;
+  }
+}
+
+@media (max-width: 1020px) {
+  .connect-page--session {
+    padding-inline: 22px;
+  }
+
+  .connect-page--session .connect-now--stage {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
+
+  .connect-page--session .connect-now--stage .connect-artwork {
+    width: 112px;
+    height: 112px;
+  }
+
+  .connect-page--session .connect-controls {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(4, 44px) minmax(180px, 1fr);
+    justify-content: stretch;
+  }
+
+  .connect-page--session .connect-volume {
+    grid-column: 5;
+  }
+
+  .connect-page--session .connect-hqplayer-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .connect-page.connect-page--session {
+    width: 100vw !important;
+    max-width: 100vw !important;
+  }
+
+  .connect-page--session {
+    padding: 20px 16px 32px;
+  }
+
+  .connect-header {
+    align-items: flex-start;
+  }
+
+  .connect-workspace-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .connect-workspace-tabs button:nth-child(2) {
+    border-right: 0;
+  }
+
+  .connect-workspace-tabs button:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--connect-session-line);
+  }
+
+  .connect-page--session .connect-now--stage {
+    grid-template-columns: 88px minmax(0, 1fr);
+    min-height: 0;
+    padding: 16px;
+  }
+
+  .connect-page--session .connect-now--stage .connect-artwork {
+    width: 88px;
+    height: 88px;
+  }
+
+  .connect-page--session .connect-now-copy h2 {
+    font-size: 22px;
+  }
+
+  .connect-page--session .connect-controls {
+    grid-template-columns: repeat(4, 42px);
+  }
+
+  .connect-page--session .connect-volume {
+    grid-column: 1 / -1;
+  }
+
+  .connect-page--session .connect-device-row {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+  }
+
+  .connect-page--session .connect-device-meta {
+    display: none;
+  }
+
+  .connect-page--session .connect-device-row .settings-action-button {
+    min-width: 44px;
+    padding-inline: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connect-workspace-tabs button {
+    transition: none;
+  }
+}

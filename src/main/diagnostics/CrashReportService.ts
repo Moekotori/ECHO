@@ -1326,6 +1326,24 @@ const createLyricsMvGraphicsPressureRecommendation = (
   };
 };
 
+export const createMemoryPressureEventFromSnapshot = (
+  snapshot: DiagnosticMemorySnapshot,
+  reportPath: string,
+): DiagnosticMemoryPressureEvent => {
+  const topProcess = snapshot.topProcesses[0] ?? snapshot.metrics[0] ?? null;
+  return {
+    timestamp: snapshot.timestamp,
+    thresholdBytes: snapshot.thresholdBytes,
+    totalWorkingSetBytes: snapshot.totalWorkingSetBytes,
+    totalPrivateBytes: snapshot.totalPrivateBytes,
+    processCount: snapshot.processCount,
+    topProcessType: topProcess ? memoryProcessLabel(topProcess) : 'unknown',
+    topProcessWorkingSetBytes: topProcess?.workingSetBytes ?? 0,
+    reportPath,
+    graphicsPressure: createLyricsMvGraphicsPressureRecommendation(snapshot),
+  };
+};
+
 const createGraphicsPressureRecommendationMarkdown = (snapshot: DiagnosticMemorySnapshot): string[] => {
   const lines = [
     '## Graphics Pressure Recommendation',
@@ -1797,7 +1815,6 @@ const createAudioCorrelationMarkdown = (records: AudioCrashRecord[]): string[] =
   const devices = collectDistinct(records.map(compactDeviceName));
   const rates = collectDistinct(records.map(compactSampleRate));
   const warningSet = collectDistinct(records.flatMap(compactWarnings));
-  const hasSharedFailure = modes.includes('shared') || records.some((record) => /mode="shared"|WASAPI|Windows Audio/u.test(record.message));
   const hasFallbackSignals = warningSet.some((warning) => /fell_back|fallback|recovered|safe_mode|default_device|temporarily_unavailable/iu.test(warning));
   const hasDsdPcm = warningSet.some((warning) => warning.startsWith('dsd_source_decoded_to_pcm'));
   const likelySingleIncident = records.length > 1 && hasFallbackSignals;
@@ -2191,7 +2208,6 @@ export class CrashReportService {
   reportMemoryPressure(snapshot: DiagnosticMemorySnapshot): DiagnosticMemoryPressureEvent {
     const reportPath = this.writeMemoryPressureReportFile(snapshot);
     const topProcess = snapshot.topProcesses[0] ?? snapshot.metrics[0] ?? null;
-    const graphicsPressure = createLyricsMvGraphicsPressureRecommendation(snapshot);
     this.logger?.warn('main', 'memory pressure threshold crossed', {
       totalWorkingSetBytes: snapshot.totalWorkingSetBytes,
       thresholdBytes: snapshot.thresholdBytes,
@@ -2222,17 +2238,7 @@ export class CrashReportService {
       timestamp: snapshot.timestamp,
     });
 
-    return {
-      timestamp: snapshot.timestamp,
-      thresholdBytes: snapshot.thresholdBytes,
-      totalWorkingSetBytes: snapshot.totalWorkingSetBytes,
-      totalPrivateBytes: snapshot.totalPrivateBytes,
-      processCount: snapshot.processCount,
-      topProcessType: topProcess ? memoryProcessLabel(topProcess) : 'unknown',
-      topProcessWorkingSetBytes: topProcess?.workingSetBytes ?? 0,
-      reportPath,
-      graphicsPressure,
-    };
+    return createMemoryPressureEventFromSnapshot(snapshot, reportPath);
   }
 
   private writeCrashReportFile(

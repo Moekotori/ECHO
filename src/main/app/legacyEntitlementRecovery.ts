@@ -4,8 +4,7 @@ export type LegacyEntitlementScope =
   | 'echo-pro-feature'
   | 'echo-pro-account'
   | 'echo-pro-hwid'
-  | 'echo-pro-cloud'
-  | 'package-integrity';
+  | 'echo-pro-cloud';
 
 export type LegacyRouteCandidate = {
   name: string;

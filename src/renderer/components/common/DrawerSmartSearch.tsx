@@ -11,6 +11,7 @@ type DrawerSearchMatch = {
 
 type DrawerSmartSearchProps = {
   rootRef: RefObject<HTMLElement>;
+  enabled?: boolean;
   placeholder: string;
   label: string;
   clearLabel: string;
@@ -220,6 +221,7 @@ const scoreCandidate = (query: string, element: HTMLElement): number => {
 
 export const DrawerSmartSearch = ({
   rootRef,
+  enabled = true,
   placeholder,
   label,
   clearLabel,
@@ -320,6 +322,10 @@ export const DrawerSmartSearch = ({
   }, [activeIndex, focusMatch, matches.length]);
 
   useEffect(() => {
+    if (!enabled) {
+      return undefined;
+    }
+
     const handleKeyDown = (event: globalThis.KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'f') {
         event.preventDefault();
@@ -331,7 +337,7 @@ export const DrawerSmartSearch = ({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, []);
+  }, [enabled]);
 
   useEffect(() => () => {
     const root = rootRef.current;

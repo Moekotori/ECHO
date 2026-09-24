@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { normalizePlaybackFilePath } from './playbackPath';
+import { normalizePlaybackFilePath, selectPlaybackRequestPath } from './playbackPath';
 
 const deferredPlaybackTaskWaitMs = 2_500;
+const ipcFixtureTimeoutMs = 10_000;
 
 describe('normalizePlaybackFilePath', () => {
   const tempRoots: string[] = [];
@@ -49,6 +50,16 @@ describe('normalizePlaybackFilePath', () => {
   });
 });
 
+describe('selectPlaybackRequestPath', () => {
+  it('accepts legacy path requests and prefers the canonical filePath field', () => {
+    expect(selectPlaybackRequestPath({ path: 'D:\\Music\\legacy.flac' })).toBe('D:\\Music\\legacy.flac');
+    expect(selectPlaybackRequestPath({
+      path: 'D:\\Music\\legacy.flac',
+      filePath: 'D:\\Music\\canonical.flac',
+    })).toBe('D:\\Music\\canonical.flac');
+  });
+});
+
 describe('playback media prepare IPC', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -59,7 +70,8 @@ describe('playback media prepare IPC', () => {
     vi.restoreAllMocks();
   });
 
-  it('uses a prepared streaming playback source without resolving again', async () => {
+  it('uses a prepared streaming playback source without resolving again and preserves ASIO output', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const playLocalFile = vi.fn().mockResolvedValue(undefined);
     const prepareLocalFile = vi.fn().mockResolvedValue(undefined);
@@ -108,6 +120,14 @@ describe('playback media prepare IPC', () => {
         clear: vi.fn(),
       }),
     }));
+    vi.doMock('../audio/PlaybackSessionStore', () => ({
+      getPlaybackSessionStore: () => ({
+        load: vi.fn(() => null),
+        save: vi.fn(),
+        saveWithAudioStatus: vi.fn(),
+        clear: vi.fn(),
+      }),
+    }));
     vi.doMock('../integrations/smtc/SmtcStatusSync', () => ({ syncSmtcStatus: vi.fn() }));
     vi.doMock('../library/remote/RemoteSourceService', () => ({
       getRemoteSourceService: () => ({
@@ -130,6 +150,25 @@ describe('playback media prepare IPC', () => {
     registerPlaybackIpc();
 
     const request = {
+      output: {
+        outputMode: 'asio',
+        deviceIndex: 1,
+        deviceName: 'TOPPING USB Audio ASIO',
+        echoSrcMode: 'family4x',
+        echoSrcQualityProfile: 'transparent',
+        echoSrcAdvancedModeEnabled: true,
+        echoSrcFilterProfile: 'poly-sinc-ext2-short',
+        echoSrcFilterProfile1x: 'poly-sinc-hb',
+        echoSrcFilterProfileNx: 'sinc-xla',
+        echoSrcComputeBackend: 'cuda',
+        pcmDitherMode: 'ultra-shaped',
+        sdmMode: 'pcmToDsd',
+        sdmTargetRate: 'dsd256',
+        sdmQualityProfile: 'reference',
+        sdmComputeBackend: 'cuda',
+        sdmOversamplingFilterProfile1x: 'poly-sinc-hb',
+        sdmOversamplingFilterProfileNx: 'sinc-xla',
+      },
       item: {
         mediaType: 'streaming',
         trackId: 'streaming-track',
@@ -192,6 +231,25 @@ describe('playback media prepare IPC', () => {
     expect(resolvePlayback).toHaveBeenCalledTimes(1);
     expect(playLocalFile).toHaveBeenCalledWith(expect.objectContaining({
       filePath: 'https://stream.example.test/song.flac?token=prepared',
+      output: expect.objectContaining({
+        outputMode: 'asio',
+        deviceIndex: 1,
+        deviceName: 'TOPPING USB Audio ASIO',
+        echoSrcMode: 'family4x',
+        echoSrcQualityProfile: 'transparent',
+        echoSrcAdvancedModeEnabled: true,
+        echoSrcFilterProfile: 'poly-sinc-ext2-short',
+        echoSrcFilterProfile1x: 'poly-sinc-hb',
+        echoSrcFilterProfileNx: 'sinc-xla',
+        echoSrcComputeBackend: 'cuda',
+        pcmDitherMode: 'ultra-shaped',
+        sdmMode: 'pcmToDsd',
+        sdmTargetRate: 'dsd256',
+        sdmQualityProfile: 'reference',
+        sdmComputeBackend: 'cuda',
+        sdmOversamplingFilterProfile1x: 'poly-sinc-hb',
+        sdmOversamplingFilterProfileNx: 'sinc-xla',
+      }),
       inputHeaders: expect.objectContaining({
         Referer: 'https://music.163.com/',
         Cookie: 'MUSIC_U=secret',
@@ -220,7 +278,7 @@ describe('playback media prepare IPC', () => {
         following: [],
       },
     }));
-  });
+  }, ipcFixtureTimeoutMs);
 
   it('does not restore expired remote proxy URLs from persisted queue sessions', async () => {
     const restorePlaybackMemory = vi.fn();
@@ -859,6 +917,13 @@ describe('playback media prepare IPC', () => {
       };
       return status;
     });
+    const seek = vi.fn(async (positionSeconds: number) => {
+      status = {
+        ...status,
+        positionSeconds,
+      };
+      return status;
+    });
     const prepareLocalFile = vi.fn().mockResolvedValue(undefined);
     const resolvePlayback = vi.fn().mockResolvedValue({
       url: 'https://stream.example.test/slow.flac',
@@ -889,6 +954,7 @@ describe('playback media prepare IPC', () => {
         prepareLocalFile,
         pause,
         play,
+        seek,
       }),
     }));
     vi.doMock('../audio/PlaybackMemoryStore', () => ({
@@ -951,6 +1017,15 @@ describe('playback media prepare IPC', () => {
       filePath: 'D:\\Music\\previous.flac',
     });
     expect(play).toHaveBeenCalledTimes(1);
+
+    await expect(handlers.get(IpcChannels.PlaybackSeek)?.({}, 44)).resolves.toEqual({
+      state: 'playing',
+      currentTrackId: 'previous-track',
+      positionMs: 44000,
+      durationMs: 180000,
+      filePath: 'D:\\Music\\previous.flac',
+    });
+    expect(seek).toHaveBeenCalledWith(44);
 
     finishAudioStart();
     await expect(slowStreamingPlay).resolves.toEqual(expect.objectContaining({
@@ -1295,6 +1370,9 @@ describe('playback media prepare IPC', () => {
     }));
     vi.doMock('../plugins/privateEntitlements', () => ({
       requirePrivateFeature: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('../plugins/LocalProEntitlements', () => ({
+      requireLocalPro: vi.fn(),
     }));
     vi.doMock('../app/localFileOpen', () => ({ resolveLocalAudioFiles: vi.fn() }));
 

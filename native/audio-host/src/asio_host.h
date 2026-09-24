@@ -121,6 +121,8 @@ uint32_t asio_build_buffer_include_input_attempts_for_tests(
 
 const char* asio_error_name_for_tests(long error);
 
+int asio_should_suppress_unsolicited_windows_for_tests(const char* driverName);
+
 uint32_t asio_build_sample_rate_pivot_candidates_for_tests(
     double requestedSampleRate,
     uint32_t* outCandidates,

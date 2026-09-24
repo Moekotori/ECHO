@@ -8,5 +8,6 @@
   "sha256": "",
   "requiresSoxr": true,
   "requiredFilters": ["aresample"],
+  "requiredDecoders": ["alac"],
   "licenseFamily": "GPLv3"
 }

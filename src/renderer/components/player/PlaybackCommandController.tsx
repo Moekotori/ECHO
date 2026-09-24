@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { PlaybackStatus } from '../../../shared/types/playback';
+import type { MainWindowPlaybackControlRequest, PlaybackStatus } from '../../../shared/types/playback';
 import type { ConnectSessionStatus } from '../../../shared/types/connect';
 import {
   createDefaultGlobalShortcuts,
@@ -16,6 +16,7 @@ import {
   pauseSpotifyPlayback,
   resumeSpotifyPlayback,
   seekSpotifyPlayback,
+  setSpotifyVolume,
   stopSpotifyPlayback,
 } from '../../integrations/spotify/spotifyPlayback';
 import { likedChangedEvent, likedTracksChangedEvent } from '../../hooks/useLikedMedia';
@@ -24,7 +25,7 @@ import { getVisualPlaybackState, refreshPlaybackStatus, setPlaybackStatusSnapsho
 import { isActiveConnectPlaybackStatus, playbackStatusFromConnectStatus } from '../../utils/connectPlayback';
 import { isImeComposingKeyEvent } from '../../utils/imeInput';
 import { shouldSuppressAudioHostError } from './audioErrorFormat';
-import { bindMediaSessionActions, clearMediaSession } from './mediaSession';
+import { bindMediaSessionActions, clearMediaSession, setExternalMediaSessionAuthority } from './mediaSession';
 import type { StreamingProviderName } from '../../../shared/types/streaming';
 
 const playbackSeekedEvent = 'playback:seeked';
@@ -194,6 +195,8 @@ const dispatchPlaybackSeeked = (positionSeconds: number, trackId: string | null)
   window.dispatchEvent(new CustomEvent(playbackSeekedEvent, { detail: { positionSeconds, trackId } }));
 };
 
+const nativeSmtcAuthorityPollIntervalMs = 5_000;
+
 const isProviderLikedStreamingProvider = (provider: string | null | undefined): provider is Extract<StreamingProviderName, 'netease' | 'qqmusic'> =>
   provider === 'netease' || provider === 'qqmusic';
 
@@ -204,8 +207,10 @@ const getActiveConnectPlaybackStatus = async (): Promise<ConnectSessionStatus | 
 
 export const PlaybackCommandController = (): null => {
   const queue = usePlaybackQueue();
+  const playQueueItem = queue.playQueueItem;
   const sharedPlaybackStatus = useSharedPlaybackStatus();
   const [smtcEnabled, setSmtcEnabled] = useState(true);
+  const [nativeSmtcAuthority, setNativeSmtcAuthority] = useState(false);
   const [localShortcuts, setLocalShortcuts] = useState<LocalShortcutSettings>(() => createDefaultLocalShortcuts());
   const [globalShortcuts, setGlobalShortcuts] = useState<GlobalShortcutSettings>(() => createDefaultGlobalShortcuts());
   const playbackStatus = sharedPlaybackStatus.playbackStatus;
@@ -218,13 +223,17 @@ export const PlaybackCommandController = (): null => {
   const isSpotifyCurrentTrack = isSpotifyTrack(queue.currentTrack);
   const currentTrack = queue.currentTrack ?? null;
   const currentTrackId = queue.currentTrackId ?? currentTrack?.id ?? playbackStatus?.currentTrackId ?? audioStatus?.currentTrackId ?? null;
+  const hasCurrentMedia = Boolean(currentTrackId || currentTrack?.path || playbackStatus?.filePath || audioStatus?.currentFilePath);
   const isLibraryCurrentTrack = Boolean(currentTrack && !currentTrack.isTemporary && currentTrack.mediaType !== 'streaming');
   const isProviderLikedStreamingTrack =
     currentTrack?.mediaType === 'streaming' &&
     isProviderLikedStreamingProvider(currentTrack.provider) &&
     Boolean(currentTrack.providerTrackId);
 
-  const runPlaybackAction = useCallback(async (action: () => Promise<PlaybackStatus | null>): Promise<void> => {
+  const runPlaybackAction = useCallback(async (
+    action: () => Promise<PlaybackStatus | null>,
+    options: { rethrow?: boolean } = {},
+  ): Promise<void> => {
     try {
       const status = await action();
       if (status) {
@@ -234,6 +243,9 @@ export const PlaybackCommandController = (): null => {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setPlaybackStatusSnapshot({ error: shouldSuppressAudioHostError(message) ? null : message });
+      if (options.rethrow) {
+        throw error;
+      }
     }
   }, []);
 
@@ -325,44 +337,118 @@ export const PlaybackCommandController = (): null => {
       const latestStatus = await playback.getStatus();
       return latestStatus.state === 'playing' || latestStatus.state === 'loading' ? playback.pause() : playback.play();
     });
-  }, [applyConnectPlaybackStatus, isSpotifyCurrentTrack, publishOptimisticPause, queue, refreshPlaybackStatus, runPlaybackAction, visualState]);
+  }, [applyConnectPlaybackStatus, isSpotifyCurrentTrack, publishOptimisticPause, queue, runPlaybackAction, visualState]);
 
-  const handlePrevious = useCallback((): void => {
-    void runPlaybackAction(queue.playPrevious);
-  }, [queue.playPrevious, runPlaybackAction]);
-
-  const handleNext = useCallback((): void => {
-    void runPlaybackAction(queue.playNext);
-  }, [queue.playNext, runPlaybackAction]);
-
-  const handleStop = useCallback((): void => {
-    if (queue.hqPlayerTakeoverEnabled) {
+  const handlePlay = useCallback(async (): Promise<void> => {
+    const activeConnectStatus = await getActiveConnectPlaybackStatus();
+    const connect = window.echo?.connect;
+    if (activeConnectStatus) {
+      if (!connect?.play) {
+        throw new Error('main_window_playback_controller_unavailable');
+      }
+      applyConnectPlaybackStatus(await connect.play());
+      await refreshPlaybackStatus();
       return;
     }
 
-    void (async () => {
-      const activeConnectStatus = await getActiveConnectPlaybackStatus();
-      const connect = window.echo?.connect;
-      if (activeConnectStatus && connect?.stop) {
-        const nextStatus = await connect.stop();
-        applyConnectPlaybackStatus(nextStatus);
-        await refreshPlaybackStatus();
-        return;
-      }
+    if (!hasCurrentMedia && !queue.hqPlayerTakeoverEnabled) {
+      throw new Error('playback_action_unavailable');
+    }
+    if (visualState === 'playing' || visualState === 'loading') {
+      return;
+    }
+    if (queue.hqPlayerTakeoverEnabled) {
+      await runPlaybackAction(queue.activateHqPlayerTakeover, { rethrow: true });
+      return;
+    }
+    if (isSpotifyCurrentTrack && queue.currentTrack) {
+      await runPlaybackAction(() => resumeSpotifyPlayback(queue.currentTrack!), { rethrow: true });
+      return;
+    }
 
-      if (isSpotifyCurrentTrack && queue.currentTrack) {
-        await runPlaybackAction(() => stopSpotifyPlayback(queue.currentTrack!));
-        return;
-      }
+    const playback = window.echo?.playback;
+    if (!playback) {
+      throw new Error('main_window_playback_controller_unavailable');
+    }
+    await runPlaybackAction(
+      () => (state === 'idle' || state === 'stopped') && queue.currentTrack
+        ? queue.playTrack(queue.currentTrack)
+        : playback.play(),
+      { rethrow: true },
+    );
+  }, [applyConnectPlaybackStatus, hasCurrentMedia, isSpotifyCurrentTrack, queue, runPlaybackAction, state, visualState]);
 
-      const playback = window.echo?.playback;
-      if (!playback) {
-        return;
+  const handlePause = useCallback(async (): Promise<void> => {
+    const activeConnectStatus = await getActiveConnectPlaybackStatus();
+    const connect = window.echo?.connect;
+    if (activeConnectStatus) {
+      if (!connect?.pause) {
+        throw new Error('main_window_playback_controller_unavailable');
       }
+      applyConnectPlaybackStatus(await connect.pause());
+      await refreshPlaybackStatus();
+      return;
+    }
 
-      await runPlaybackAction(() => playback.stop());
-    })();
-  }, [applyConnectPlaybackStatus, isSpotifyCurrentTrack, queue.currentTrack, queue.hqPlayerTakeoverEnabled, runPlaybackAction]);
+    if (!hasCurrentMedia) {
+      throw new Error('playback_action_unavailable');
+    }
+    if (visualState === 'paused' || visualState === 'stopped' || visualState === 'idle') {
+      return;
+    }
+    if (queue.hqPlayerTakeoverEnabled) {
+      throw new Error('playback_action_unavailable');
+    }
+    if (isSpotifyCurrentTrack && queue.currentTrack) {
+      await runPlaybackAction(() => pauseSpotifyPlayback(queue.currentTrack!), { rethrow: true });
+      return;
+    }
+
+    const playback = window.echo?.playback;
+    if (!playback) {
+      throw new Error('main_window_playback_controller_unavailable');
+    }
+    publishOptimisticPause();
+    await runPlaybackAction(() => playback.pause(), { rethrow: true });
+  }, [applyConnectPlaybackStatus, hasCurrentMedia, isSpotifyCurrentTrack, publishOptimisticPause, queue, runPlaybackAction, visualState]);
+
+  const handlePrevious = useCallback(async (): Promise<void> => {
+    await runPlaybackAction(queue.playPrevious);
+  }, [queue.playPrevious, runPlaybackAction]);
+
+  const handleNext = useCallback(async (): Promise<void> => {
+    await runPlaybackAction(queue.playNext);
+  }, [queue.playNext, runPlaybackAction]);
+
+  const handleStop = useCallback(async (): Promise<void> => {
+    const activeConnectStatus = await getActiveConnectPlaybackStatus();
+    const connect = window.echo?.connect;
+    if (activeConnectStatus) {
+      if (!connect?.stop) {
+        throw new Error('main_window_playback_controller_unavailable');
+      }
+      const nextStatus = await connect.stop();
+      applyConnectPlaybackStatus(nextStatus);
+      await refreshPlaybackStatus();
+      return;
+    }
+    if (!hasCurrentMedia) {
+      throw new Error('playback_action_unavailable');
+    }
+    if (queue.hqPlayerTakeoverEnabled) {
+      throw new Error('playback_action_unavailable');
+    }
+    if (isSpotifyCurrentTrack && queue.currentTrack) {
+      await runPlaybackAction(() => stopSpotifyPlayback(queue.currentTrack!), { rethrow: true });
+      return;
+    }
+
+    const playback = window.echo?.playback;
+    if (!playback) {
+      throw new Error('main_window_playback_controller_unavailable');
+    }
+    await runPlaybackAction(() => playback.stop(), { rethrow: true });
+  }, [applyConnectPlaybackStatus, hasCurrentMedia, isSpotifyCurrentTrack, queue.currentTrack, queue.hqPlayerTakeoverEnabled, runPlaybackAction]);
 
   const handleVolumeStep = useCallback(
     async (delta: number): Promise<void> => {
@@ -385,6 +471,39 @@ export const PlaybackCommandController = (): null => {
       await refreshPlaybackStatus();
     },
     [audioStatus],
+  );
+
+  const commitVolume = useCallback(
+    async (volume: number): Promise<void> => {
+      const safeVolume = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
+      const settings = await window.echo?.app?.getSettings?.().catch(() => null);
+      if (settings?.fixedVolumeEnabled === true) {
+        await window.echo?.audio?.setOutput?.({ volume: 1 });
+        await refreshPlaybackStatus();
+        return;
+      }
+
+      const activeConnectStatus = await getActiveConnectPlaybackStatus();
+      if (activeConnectStatus) {
+        const setConnectVolume = window.echo?.connect?.setVolume;
+        if (!setConnectVolume) {
+          throw new Error('main_window_playback_controller_unavailable');
+        }
+        await setConnectVolume(Math.round(safeVolume * 100));
+      } else if (isSpotifyCurrentTrack) {
+        await setSpotifyVolume(safeVolume);
+      } else {
+        const audio = window.echo?.audio;
+        if (!audio) {
+          throw new Error('main_window_playback_controller_unavailable');
+        }
+        await audio.setOutput({ volume: safeVolume });
+      }
+
+      await window.echo?.app?.setSettings?.({ playerVolume: safeVolume }).catch(() => undefined);
+      await refreshPlaybackStatus();
+    },
+    [isSpotifyCurrentTrack],
   );
 
   const handleSpeedStep = useCallback(
@@ -451,7 +570,7 @@ export const PlaybackCommandController = (): null => {
 
     const state = await miniPlayer.getState();
     if (state.visible) {
-      await miniPlayer.hide();
+      await miniPlayer.hide({ restoreMainWindow: true });
     } else {
       await miniPlayer.show();
     }
@@ -505,10 +624,13 @@ export const PlaybackCommandController = (): null => {
   }, []);
 
   const commitSeek = useCallback(
-    async (nextPositionSeconds: number): Promise<void> => {
+    async (nextPositionSeconds: number, options: { rethrowUnavailable?: boolean } = {}): Promise<void> => {
       const playback = window.echo?.playback;
 
       if (durationSeconds <= 0) {
+        if (options.rethrowUnavailable) {
+          throw new Error('playback_action_unavailable');
+        }
         return;
       }
 
@@ -522,8 +644,18 @@ export const PlaybackCommandController = (): null => {
 
       const activeConnectStatus = await getActiveConnectPlaybackStatus();
       if (activeConnectStatus) {
-        const connectStatus = await window.echo?.connect?.seek?.(safePositionSeconds);
+        const connectSeek = window.echo?.connect?.seek;
+        if (!connectSeek) {
+          if (options.rethrowUnavailable) {
+            throw new Error('main_window_playback_controller_unavailable');
+          }
+          return;
+        }
+        const connectStatus = await connectSeek(safePositionSeconds);
         if (!connectStatus) {
+          if (options.rethrowUnavailable) {
+            throw new Error('playback_action_unavailable');
+          }
           return;
         }
 
@@ -533,6 +665,9 @@ export const PlaybackCommandController = (): null => {
       }
 
       if (!playback) {
+        if (options.rethrowUnavailable) {
+          throw new Error('main_window_playback_controller_unavailable');
+        }
         return;
       }
 
@@ -553,8 +688,6 @@ export const PlaybackCommandController = (): null => {
 
   const handleSmtcCommand = useCallback(
     (command: SmtcCommand): void => {
-      const playback = window.echo?.playback;
-
       if (typeof command !== 'string') {
         if (command.type === 'seek') {
           void commitSeek(command.positionSeconds);
@@ -568,62 +701,12 @@ export const PlaybackCommandController = (): null => {
       }
 
       if (command === 'play') {
-        if (!isPlaying) {
-          void (async () => {
-            const activeConnectStatus = await getActiveConnectPlaybackStatus();
-            const connect = window.echo?.connect;
-            if (activeConnectStatus && connect?.play) {
-              applyConnectPlaybackStatus(await connect.play());
-              await refreshPlaybackStatus();
-              return;
-            }
-
-            if (!playback && !queue.hqPlayerTakeoverEnabled) {
-              return;
-            }
-
-            if (queue.hqPlayerTakeoverEnabled) {
-              await runPlaybackAction(queue.activateHqPlayerTakeover);
-              return;
-            }
-
-            if (isSpotifyCurrentTrack && queue.currentTrack) {
-              await runPlaybackAction(() => resumeSpotifyPlayback(queue.currentTrack!));
-              return;
-            }
-
-            await runPlaybackAction(() =>
-              (state === 'idle' || state === 'stopped') && queue.currentTrack ? queue.playTrack(queue.currentTrack) : playback!.play(),
-            );
-          })();
-        }
+        void handlePlay().catch(() => undefined);
         return;
       }
 
       if (command === 'pause') {
-        void (async () => {
-          const activeConnectStatus = await getActiveConnectPlaybackStatus();
-          const connect = window.echo?.connect;
-          if (activeConnectStatus && connect?.pause) {
-            applyConnectPlaybackStatus(await connect.pause());
-            await refreshPlaybackStatus();
-            return;
-          }
-
-          if (queue.hqPlayerTakeoverEnabled) {
-            return;
-          }
-
-          if (isSpotifyCurrentTrack && queue.currentTrack) {
-            await runPlaybackAction(() => pauseSpotifyPlayback(queue.currentTrack!));
-            return;
-          }
-
-          if (playback) {
-            publishOptimisticPause();
-            await runPlaybackAction(() => playback.pause());
-          }
-        })();
+        void handlePause().catch(() => undefined);
         return;
       }
 
@@ -638,10 +721,10 @@ export const PlaybackCommandController = (): null => {
       }
 
       if (command === 'stop') {
-        handleStop();
+        void handleStop().catch(() => undefined);
       }
     },
-    [applyConnectPlaybackStatus, commitSeek, handleNext, handlePlayPause, handlePrevious, handleStop, isPlaying, isSpotifyCurrentTrack, publishOptimisticPause, queue, runPlaybackAction, state],
+    [commitSeek, handleNext, handlePause, handlePlay, handlePlayPause, handlePrevious, handleStop],
   );
 
   const handleGlobalShortcutCommand = useCallback(
@@ -662,7 +745,7 @@ export const PlaybackCommandController = (): null => {
       }
 
       if (action === 'stop') {
-        handleStop();
+        void handleStop().catch(() => undefined);
         return;
       }
 
@@ -770,6 +853,39 @@ export const PlaybackCommandController = (): null => {
 
   useEffect(() => {
     let cancelled = false;
+    let diagnosticsInFlight = false;
+    const refreshNativeSmtcAuthority = (): void => {
+      if (diagnosticsInFlight) {
+        return;
+      }
+
+      const getDiagnostics = window.echo?.smtc?.getDiagnostics;
+      if (!getDiagnostics) {
+        setNativeSmtcAuthority(false);
+        return;
+      }
+
+      diagnosticsInFlight = true;
+      void getDiagnostics()
+        .then((diagnostics) => {
+          if (!cancelled) {
+            setNativeSmtcAuthority(
+              diagnostics.enabled &&
+                diagnostics.platform === 'win32' &&
+                (diagnostics.hostState === 'starting' || diagnostics.hostState === 'running'),
+            );
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setNativeSmtcAuthority(false);
+          }
+        })
+        .finally(() => {
+          diagnosticsInFlight = false;
+        });
+    };
+
     const refreshSmtcSetting = (): void => {
       void window.echo?.app
         ?.getSettings?.()
@@ -787,13 +903,17 @@ export const PlaybackCommandController = (): null => {
             setGlobalShortcuts(createDefaultGlobalShortcuts());
           }
         });
+
+      refreshNativeSmtcAuthority();
     };
 
     refreshSmtcSetting();
+    const authorityPollTimer = window.setInterval(refreshNativeSmtcAuthority, nativeSmtcAuthorityPollIntervalMs);
     window.addEventListener('settings:changed', refreshSmtcSetting);
 
     return () => {
       cancelled = true;
+      window.clearInterval(authorityPollTimer);
       window.removeEventListener('settings:changed', refreshSmtcSetting);
     };
   }, []);
@@ -804,9 +924,74 @@ export const PlaybackCommandController = (): null => {
   }, [handleSmtcCommand]);
 
   useEffect(() => {
+    if (!smtcEnabled || !window.echo?.smtc?.setEnabledActions) {
+      return;
+    }
+
+    void window.echo.smtc
+      .setEnabledActions({
+        play: hasCurrentMedia && !isPlaying,
+        pause: hasCurrentMedia && isPlaying,
+        previous: hasCurrentMedia && queue.canGoPrevious,
+        next: hasCurrentMedia && queue.canGoNext,
+        seek: hasCurrentMedia && durationSeconds > 0,
+      })
+      .catch(() => undefined);
+  }, [durationSeconds, hasCurrentMedia, isPlaying, queue.canGoNext, queue.canGoPrevious, smtcEnabled]);
+
+  useEffect(() => {
     const unsubscribe = window.echo?.app?.onGlobalShortcutCommand?.(handleGlobalShortcutCommand);
     return () => unsubscribe?.();
   }, [handleGlobalShortcutCommand]);
+
+  useEffect(() => {
+    const handleMainWindowControl = async (request: MainWindowPlaybackControlRequest): Promise<void> => {
+      switch (request.type) {
+        case 'play':
+          await handlePlay();
+          return;
+        case 'pause':
+          await handlePause();
+          return;
+        case 'stop':
+          await handleStop();
+          return;
+        case 'playPause':
+          await handlePlayPause();
+          return;
+        case 'previous':
+          if (!queue.canGoPrevious) {
+            throw new Error('playback_action_unavailable');
+          }
+          await runPlaybackAction(queue.playPrevious, { rethrow: true });
+          return;
+        case 'next':
+          if (!queue.canGoNext) {
+            throw new Error('playback_action_unavailable');
+          }
+          await runPlaybackAction(queue.playNext, { rethrow: true });
+          return;
+        case 'seek':
+          if (!hasCurrentMedia || durationSeconds <= 0) {
+            throw new Error('playback_action_unavailable');
+          }
+          await commitSeek(request.positionSeconds, { rethrowUnavailable: true });
+          return;
+        case 'setVolume':
+          await commitVolume(request.volume);
+          return;
+        case 'setPlaybackOrder':
+          await queue.setPlaybackOrder(request.mode);
+          return;
+        case 'playQueueItem':
+          await runPlaybackAction(() => playQueueItem(request.queueId), { rethrow: true });
+          return;
+      }
+    };
+
+    const unsubscribe = window.echo?.playback?.onMainWindowControl?.(handleMainWindowControl);
+    return () => unsubscribe?.();
+  }, [commitSeek, commitVolume, durationSeconds, handlePause, handlePlay, handlePlayPause, handleStop, hasCurrentMedia, playQueueItem, queue.canGoNext, queue.canGoPrevious, queue.playNext, queue.playPrevious, queue.setPlaybackOrder, runPlaybackAction]);
 
   const localShortcutMap = useMemo(
     () => buildLocalShortcutMap(localShortcuts, globalShortcuts),
@@ -851,8 +1036,9 @@ export const PlaybackCommandController = (): null => {
   }, [handleGlobalShortcutCommand, localShortcutMap]);
 
   useEffect(() => {
-    if (!smtcEnabled) {
-      clearMediaSession();
+    const externalAuthority = !smtcEnabled || nativeSmtcAuthority;
+    setExternalMediaSessionAuthority(externalAuthority);
+    if (externalAuthority) {
       return () => undefined;
     }
 
@@ -865,7 +1051,12 @@ export const PlaybackCommandController = (): null => {
       onSeek: (nextPositionSeconds) => void commitSeek(nextPositionSeconds),
       getPositionSeconds: () => positionSeconds,
     });
-  }, [commitSeek, handleSmtcCommand, positionSeconds, smtcEnabled]);
+  }, [commitSeek, handleSmtcCommand, nativeSmtcAuthority, positionSeconds, smtcEnabled]);
+
+  useEffect(() => () => {
+    setExternalMediaSessionAuthority(false);
+    clearMediaSession();
+  }, []);
 
   return null;
 };

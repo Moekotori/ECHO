@@ -60,6 +60,20 @@ describe('LyricsLine', () => {
     expect(screen.getByText('Cherry blossoms')).toBeTruthy();
   });
 
+  it('shows a compact timestamp only when the page style requests it', () => {
+    const { container, rerender } = render(
+      <LyricsLine active={false} index={0} line={line} past={false} onSeek={vi.fn()} />,
+    );
+
+    expect(container.querySelector('.lyrics-line-time')).toBeNull();
+
+    rerender(
+      <LyricsLine active={false} index={0} line={line} past={false} showTimestamp onSeek={vi.fn()} />,
+    );
+
+    expect(container.querySelector('.lyrics-line-time')?.textContent).toBe('0:01');
+  });
+
   it('hides translation when disabled', () => {
     render(<LyricsLine active={false} index={0} line={line} past={false} showTranslation={false} onSeek={vi.fn()} />);
 
@@ -124,7 +138,7 @@ describe('LyricsLine', () => {
     expect(container.querySelector('.lyrics-line')?.getAttribute('data-word-highlight')).toBe('true');
   });
 
-  it('coalesces noisy character-level timings into calmer phrase marks', () => {
+  it('preserves character-level timings as true word highlight segments', () => {
     const text = '世界中のすべて';
     const timedLine = {
       timeMs: 1000,
@@ -141,12 +155,11 @@ describe('LyricsLine', () => {
     );
     const words = Array.from(container.querySelectorAll('.lyrics-word'));
 
-    expect(words.length).toBeGreaterThanOrEqual(2);
-    expect(words.length).toBeLessThan(Array.from(text).length);
+    expect(words).toHaveLength(Array.from(text).length);
     expect(words.map((word) => word.textContent).join('')).toBe(text);
   });
 
-  it('coalesces long word-timed lines instead of dropping highlighting', () => {
+  it('preserves every timing segment in long word-timed lines', () => {
     const tokens = Array.from({ length: 30 }, (_, index) => `word${index + 1}`);
     const timedLine = {
       timeMs: 1000,
@@ -161,8 +174,25 @@ describe('LyricsLine', () => {
     const renderableWords = getRenderableLyricWords(timedLine);
 
     expect(renderableWords).not.toBeNull();
-    expect(renderableWords?.length).toBeLessThanOrEqual(18);
+    expect(renderableWords).toHaveLength(tokens.length);
     expect(renderableWords?.map((word) => word.text).join('')).toBe(timedLine.text);
+  });
+
+  it('mounts timed word nodes only for the active line', () => {
+    const timedLine = {
+      timeMs: 1000,
+      text: 'Hello world',
+      words: [
+        { text: 'Hello ', startMs: 1000, endMs: 1500 },
+        { text: 'world', startMs: 1500, endMs: 2000 },
+      ],
+    };
+    const { container } = render(
+      <LyricsLine active={false} index={0} line={timedLine} past={false} onSeek={vi.fn()} wordHighlightEnabled />,
+    );
+
+    expect(container.querySelector('.lyrics-word')).toBeNull();
+    expect(screen.getByText('Hello world')).toBeTruthy();
   });
 
   it('falls back to plain text when word timings are too jittery', () => {

@@ -1,7 +1,7 @@
 import type { IpcRenderer } from 'electron';
 import type { EchoApi } from '../apiTypes';
 import type { SystemAudioEngine } from '../systemAudioEngine';
-import type { PlaybackStartRequest, PlaybackMediaStartRequest, PlaybackStatus } from '../../shared/types/playback';
+import type { MainWindowPlaybackControlRequest, PlaybackStatus } from '../../shared/types/playback';
 
 type AutomixAdvancePayload = {
   fromTrackId: string | null;
@@ -14,12 +14,13 @@ type AutomixAdvancePayload = {
   nextStartSeconds?: number;
 };
 
-type MainPlaybackCommand = 'playLocalFile' | 'playMediaItem' | 'play' | 'pause' | 'stop' | 'seek';
+type MainPlaybackCommand = 'playLocalFile' | 'playMediaItem' | 'play' | 'pause' | 'stop' | 'seek' | 'control';
 
 export interface PlaybackDeps {
   localAudioFileOpenHandlers: Set<(paths: string[]) => void>;
   pendingLocalAudioFileOpenEvents: string[][];
   automixAdvanceHandlers: Set<(event: AutomixAdvancePayload) => void>;
+  mainWindowControlHandlers?: Set<(request: MainWindowPlaybackControlRequest) => Promise<void>>;
   isMainPlaybackRenderer: boolean;
   invokeMainPlaybackRenderer: <Result>(command: MainPlaybackCommand, args?: unknown[]) => Promise<Result>;
 }
@@ -34,18 +35,32 @@ export function createPlaybackApi(
     getStatus: () => sa.systemAudioModeActive ? Promise.resolve(sa.getSystemPlaybackStatus()) : ipcRenderer.invoke(IpcChannels.PlaybackGetStatus),
     playLocalFile: async (request) => {
       if (sa.requiresNativeChainedPlayback(request)) {
+        const shouldLeaveSystemAudio = await sa.shouldUseSystemAudioForPlayback(request.output);
         sa.stopSystemPlayback('stopped', false);
         sa.systemAudioModeActive = false;
-        return ipcRenderer.invoke(IpcChannels.PlaybackPlayLocalFile, request.output?.outputMode && request.output.outputMode !== 'system' ? request : { ...request, output: { ...(request.output ?? {}), outputMode: 'shared' } });
+        return ipcRenderer.invoke(
+          IpcChannels.PlaybackPlayLocalFile,
+          request.output?.outputMode && request.output.outputMode !== 'system'
+            ? request
+            : shouldLeaveSystemAudio
+              ? { ...request, output: { ...(request.output ?? {}), outputMode: 'shared' } }
+              : request,
+        );
       }
 
       if (sa.requiresNativeSystemLocalPlayback(request)) {
+        const shouldLeaveSystemAudio = await sa.shouldUseSystemAudioForPlayback(request.output);
         sa.stopSystemPlayback('stopped', false);
         sa.systemAudioModeActive = false;
         if (request.output?.outputMode && request.output.outputMode !== 'system') {
           return ipcRenderer.invoke(IpcChannels.PlaybackPlayLocalFile, request);
         }
-        return ipcRenderer.invoke(IpcChannels.PlaybackPlayLocalFile, { ...request, output: { ...(request.output ?? {}), outputMode: 'shared' } });
+        return ipcRenderer.invoke(
+          IpcChannels.PlaybackPlayLocalFile,
+          shouldLeaveSystemAudio
+            ? { ...request, output: { ...(request.output ?? {}), outputMode: 'shared' } }
+            : request,
+        );
       }
 
       if (await sa.shouldUseSystemAudioForPlayback(request.output)) {
@@ -58,18 +73,32 @@ export function createPlaybackApi(
     },
     playMediaItem: async (request) => {
       if (sa.requiresNativeChainedPlayback(request)) {
+        const shouldLeaveSystemAudio = await sa.shouldUseSystemAudioForPlayback(request.output);
         sa.stopSystemPlayback('stopped', false);
         sa.systemAudioModeActive = false;
-        return ipcRenderer.invoke(IpcChannels.PlaybackPlayMediaItem, request.output?.outputMode && request.output.outputMode !== 'system' ? request : { ...request, output: { ...(request.output ?? {}), outputMode: 'shared' } });
+        return ipcRenderer.invoke(
+          IpcChannels.PlaybackPlayMediaItem,
+          request.output?.outputMode && request.output.outputMode !== 'system'
+            ? request
+            : shouldLeaveSystemAudio
+              ? { ...request, output: { ...(request.output ?? {}), outputMode: 'shared' } }
+              : request,
+        );
       }
 
       if (sa.requiresNativeSystemMediaPlayback(request)) {
+        const shouldLeaveSystemAudio = await sa.shouldUseSystemAudioForPlayback(request.output);
         sa.stopSystemPlayback('stopped', false);
         sa.systemAudioModeActive = false;
         if (request.output?.outputMode && request.output.outputMode !== 'system') {
           return ipcRenderer.invoke(IpcChannels.PlaybackPlayMediaItem, request);
         }
-        return ipcRenderer.invoke(IpcChannels.PlaybackPlayMediaItem, { ...request, output: { ...(request.output ?? {}), outputMode: 'shared' } });
+        return ipcRenderer.invoke(
+          IpcChannels.PlaybackPlayMediaItem,
+          shouldLeaveSystemAudio
+            ? { ...request, output: { ...(request.output ?? {}), outputMode: 'shared' } }
+            : request,
+        );
       }
 
       if (await sa.shouldUseSystemAudioForPlayback(request.output)) {
@@ -135,6 +164,13 @@ export function createPlaybackApi(
       ipcRenderer.on(IpcChannels.PlaybackQueueSessionChanged, listener);
       return () => ipcRenderer.off(IpcChannels.PlaybackQueueSessionChanged, listener);
     },
+    controlMainWindow: (request) => deps.invokeMainPlaybackRenderer<void>('control', [request]),
+    onMainWindowControl: (handler) => {
+      deps.mainWindowControlHandlers?.add(handler);
+      return () => {
+        deps.mainWindowControlHandlers?.delete(handler);
+      };
+    },
     onLocalAudioFilesOpened: (handler) => {
       deps.localAudioFileOpenHandlers.add(handler);
       for (const paths of deps.pendingLocalAudioFileOpenEvents.splice(0)) {
@@ -152,6 +188,7 @@ export function createPlaybackApi(
       };
     },
     setRepeatMode: (mode) => ipcRenderer.invoke(IpcChannels.PlaybackSetRepeatMode, mode),
-    syncQueueToBackend: (items, repeatMode) => ipcRenderer.invoke(IpcChannels.PlaybackSyncQueueToBackend, items, repeatMode),
+    syncQueueToBackend: (items, repeatMode, currentItemId) =>
+      ipcRenderer.invoke(IpcChannels.PlaybackSyncQueueToBackend, items, repeatMode, currentItemId),
   };
 }

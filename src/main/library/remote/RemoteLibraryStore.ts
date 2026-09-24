@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { EchoDatabase } from '../../database/createDatabase';
 import type { RemoteAlbumMergeStrategy } from '../../../shared/types/appSettings';
-import type { LibraryPage, LibrarySort, LibraryTrack } from '../../../shared/types/library';
+import type { LibrarySort, LibraryTrack } from '../../../shared/types/library';
 import type {
   RemoteAlbumGroupingPreview,
   RemoteBackgroundJobKind,
   RemoteIndexedFolderStats,
   RemoteIndexedTracksQuery,
+  RemoteIndexedTracksPage,
   RemoteLibraryTrack,
   RemoteSourceIssueItem,
   RemoteSourceIssueKind,
@@ -25,6 +26,7 @@ import type { RemoteSourceSecret, RemoteTrackWrite } from './remoteTypes';
 import { RemoteSourceSecretStore } from './RemoteSourceSecretStore';
 import { normalizeRemoteDirectoryPath } from './remoteIdentity';
 import { buildTrackSearchTerms, buildTrackSearchTermsAsync } from '../SearchIndexTokens';
+import { buildFtsSearchQuery } from '../LibraryStore';
 import { remoteCoverCacheKeyFor, subsonicDirectCoverUrlFor } from './remoteCoverUrls';
 import { remoteAlbumGroupingKey, type RemoteAlbumGroupingTrack } from './RemoteAlbumGrouping';
 
@@ -522,34 +524,38 @@ export class RemoteLibraryStore {
     }).items;
   }
 
-  listTracksBySourceFolderPage(sourceId: string, query: RemoteIndexedTracksQuery = {}): LibraryPage<RemoteLibraryTrack> {
-    const { page, pageSize, search, sort, rootPath } = this.normalizeIndexedTracksQuery(query);
-    const offset = (page - 1) * pageSize;
+  listTracksBySourceFolderPage(sourceId: string, query: RemoteIndexedTracksQuery = {}): RemoteIndexedTracksPage<RemoteLibraryTrack> {
+    const { page, pageSize, search, sort, rootPath, cursor } = this.normalizeIndexedTracksQuery(query);
     const scope = this.indexedFolderScopeSql(rootPath);
     const searchFilter = this.indexedFolderSearchSql(search);
     const whereSql = `WHERE source_id = ? AND availability != 'missing' ${scope.sql} ${searchFilter.sql}`;
     const params = [sourceId, ...scope.params, ...searchFilter.params];
+    const keyset = this.remoteFolderKeyset(sort, cursor);
+    const offset = keyset ? 0 : (page - 1) * pageSize;
     const total = Number(
       this.database
         .prepare<unknown[], DbRow>(`SELECT COUNT(*) AS total FROM remote_tracks ${whereSql}`)
         .get(...params)?.total ?? 0,
     );
-    const items = this.database
+    const rows = this.database
       .prepare<unknown[], DbRow>(
         `SELECT * FROM remote_tracks
-         ${whereSql}
+         ${whereSql} ${keyset?.sql ?? ''}
          ${this.remoteFolderTrackOrderSql(sort)}
          LIMIT ? OFFSET ?`,
       )
-      .all(...params, pageSize, offset)
-      .map((row) => this.mapTrack(row));
+      .all(...params, ...(keyset?.params ?? []), pageSize + 1, offset);
+    const hasMore = rows.length > pageSize || (!keyset && offset + Math.min(rows.length, pageSize) < total);
+    const pageRows = rows.slice(0, pageSize);
+    const items = pageRows.map((row) => this.mapTrack(row));
 
     return {
       items,
       page,
       pageSize,
       total,
-      hasMore: offset + items.length < total,
+      hasMore,
+      nextCursor: hasMore && keyset?.encode && pageRows.length > 0 ? keyset.encode(pageRows.at(-1)!) : null,
     };
   }
 
@@ -559,6 +565,7 @@ export class RemoteLibraryStore {
     search: string;
     sort: LibrarySort;
     rootPath: string;
+    cursor: string | null;
   } {
     return {
       page: Math.max(1, Math.floor(Number(query.page ?? 1))),
@@ -566,6 +573,7 @@ export class RemoteLibraryStore {
       search: typeof query.search === 'string' ? query.search.trim() : '',
       sort: query.sort ?? 'default',
       rootPath: normalizeRemoteDirectoryPath(query.rootPath ?? '/'),
+      cursor: textOrNull(query.cursor),
     };
   }
 
@@ -581,39 +589,35 @@ export class RemoteLibraryStore {
   }
 
   private indexedFolderSearchSql(search: string): { sql: string; params: string[] } {
-    if (!search) {
+    const query = buildFtsSearchQuery(search);
+    if (!query) {
       return { sql: '', params: [] };
     }
 
-    const like = `%${escapeSqlLike(search.toLocaleLowerCase())}%`;
     return {
-      sql: `AND (
-        lower(title) LIKE ? ESCAPE '\\' OR
-        lower(artist) LIKE ? ESCAPE '\\' OR
-        lower(album) LIKE ? ESCAPE '\\' OR
-        lower(album_artist) LIKE ? ESCAPE '\\' OR
-        lower(COALESCE(genre, '')) LIKE ? ESCAPE '\\' OR
-        lower(remote_path) LIKE ? ESCAPE '\\' OR
-        lower(COALESCE(search_terms, '')) LIKE ? ESCAPE '\\'
-      )`,
-      params: [like, like, like, like, like, like, like],
+      sql: 'AND remote_tracks.rowid IN (SELECT rowid FROM remote_tracks_fts WHERE remote_tracks_fts MATCH ?)',
+      params: [query],
     };
   }
 
   private remoteFolderTrackOrderSql(sort: LibrarySort): string {
     switch (sort) {
       case 'artist':
-        return 'ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE, remote_path COLLATE NOCASE';
+        return 'ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE, remote_path COLLATE NOCASE, id';
       case 'artistAlbum':
-        return 'ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, COALESCE(disc_no, 0), COALESCE(track_no, 999999), title COLLATE NOCASE, remote_path COLLATE NOCASE';
+        return 'ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, COALESCE(disc_no, 0), COALESCE(track_no, 999999), title COLLATE NOCASE, remote_path COLLATE NOCASE, id';
       case 'album':
-        return 'ORDER BY album COLLATE NOCASE, COALESCE(disc_no, 0), COALESCE(track_no, 999999), title COLLATE NOCASE, remote_path COLLATE NOCASE';
+        return 'ORDER BY album COLLATE NOCASE, COALESCE(disc_no, 0), COALESCE(track_no, 999999), title COLLATE NOCASE, remote_path COLLATE NOCASE, id';
       case 'recent':
         return 'ORDER BY updated_at DESC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
       case 'createdAsc':
         return 'ORDER BY created_at ASC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
       case 'createdDesc':
         return 'ORDER BY created_at DESC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
+      case 'yearAsc':
+        return 'ORDER BY year IS NULL, year ASC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
+      case 'yearDesc':
+        return 'ORDER BY year IS NULL, year DESC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
       case 'titleDesc':
         return 'ORDER BY title COLLATE NOCASE DESC, artist COLLATE NOCASE, remote_path COLLATE NOCASE';
       case 'durationAsc':
@@ -628,14 +632,98 @@ export class RemoteLibraryStore {
         return 'ORDER BY COALESCE(bitrate, 0) ASC, COALESCE(size_bytes, 0) ASC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
       case 'qualityDesc':
         return 'ORDER BY COALESCE(bitrate, 0) DESC, COALESCE(size_bytes, 0) DESC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
+      case 'codecAsc':
+        return 'ORDER BY COALESCE(codec, \'\') COLLATE NOCASE ASC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
+      case 'codecDesc':
+        return 'ORDER BY COALESCE(codec, \'\') COLLATE NOCASE DESC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
+      case 'audioSpecAsc':
+        return 'ORDER BY COALESCE(sample_rate, 0) ASC, COALESCE(bit_depth, 0) ASC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
+      case 'audioSpecDesc':
+        return 'ORDER BY COALESCE(sample_rate, 0) DESC, COALESCE(bit_depth, 0) DESC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
+      case 'bitrateAsc':
+        return 'ORDER BY COALESCE(bitrate, 0) ASC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
+      case 'bitrateDesc':
+        return 'ORDER BY COALESCE(bitrate, 0) DESC, title COLLATE NOCASE, remote_path COLLATE NOCASE';
+      case 'bpmAsc':
+      case 'bpmDesc':
+        return 'ORDER BY title COLLATE NOCASE, remote_path COLLATE NOCASE';
+      case 'trackNumber':
+        return 'ORDER BY track_no IS NULL, COALESCE(disc_no, 1) ASC, COALESCE(track_no, 0) ASC, title COLLATE NOCASE, remote_path COLLATE NOCASE, id';
       case 'random':
         return 'ORDER BY RANDOM()';
       case 'titleAsc':
       case 'default':
       case 'title':
       default:
-        return 'ORDER BY title COLLATE NOCASE, artist COLLATE NOCASE, remote_path COLLATE NOCASE';
+        return 'ORDER BY title COLLATE NOCASE, artist COLLATE NOCASE, remote_path COLLATE NOCASE, id';
     }
+  }
+
+  private remoteFolderKeyset(
+    sort: LibrarySort,
+    cursor: string | null,
+  ): { sql: string; params: unknown[]; encode: (row: DbRow) => string } | null {
+    const definitions: Partial<Record<LibrarySort, {
+      sql: string;
+      values: (row: DbRow) => unknown[];
+    }>> = {
+      default: {
+        sql: 'AND (title COLLATE NOCASE, artist COLLATE NOCASE, remote_path COLLATE NOCASE, id) > (?, ?, ?, ?)',
+        values: (row) => [row.title, row.artist, row.remote_path, row.id],
+      },
+      title: {
+        sql: 'AND (title COLLATE NOCASE, artist COLLATE NOCASE, remote_path COLLATE NOCASE, id) > (?, ?, ?, ?)',
+        values: (row) => [row.title, row.artist, row.remote_path, row.id],
+      },
+      titleAsc: {
+        sql: 'AND (title COLLATE NOCASE, artist COLLATE NOCASE, remote_path COLLATE NOCASE, id) > (?, ?, ?, ?)',
+        values: (row) => [row.title, row.artist, row.remote_path, row.id],
+      },
+      artist: {
+        sql: 'AND (artist COLLATE NOCASE, title COLLATE NOCASE, remote_path COLLATE NOCASE, id) > (?, ?, ?, ?)',
+        values: (row) => [row.artist, row.title, row.remote_path, row.id],
+      },
+      artistAlbum: {
+        sql: 'AND (artist COLLATE NOCASE, album COLLATE NOCASE, COALESCE(disc_no, 0), COALESCE(track_no, 999999), title COLLATE NOCASE, remote_path COLLATE NOCASE, id) > (?, ?, ?, ?, ?, ?, ?)',
+        values: (row) => [row.artist, row.album, Number(row.disc_no ?? 0), Number(row.track_no ?? 999999), row.title, row.remote_path, row.id],
+      },
+      album: {
+        sql: 'AND (album COLLATE NOCASE, COALESCE(disc_no, 0), COALESCE(track_no, 999999), title COLLATE NOCASE, remote_path COLLATE NOCASE, id) > (?, ?, ?, ?, ?, ?)',
+        values: (row) => [row.album, Number(row.disc_no ?? 0), Number(row.track_no ?? 999999), row.title, row.remote_path, row.id],
+      },
+      trackNumber: {
+        sql: 'AND (track_no IS NULL, COALESCE(disc_no, 1), COALESCE(track_no, 0), title COLLATE NOCASE, remote_path COLLATE NOCASE, id) > (?, ?, ?, ?, ?, ?)',
+        values: (row) => [
+          row.track_no == null ? 1 : 0,
+          Number(row.disc_no ?? 1),
+          Number(row.track_no ?? 0),
+          row.title,
+          row.remote_path,
+          row.id,
+        ],
+      },
+    };
+    const definition = definitions[sort];
+    if (!definition) {
+      return null;
+    }
+    let values: unknown[] = [];
+    if (cursor) {
+      try {
+        const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { sort?: unknown; values?: unknown };
+        if (parsed.sort !== sort || !Array.isArray(parsed.values)) {
+          return null;
+        }
+        values = parsed.values;
+      } catch {
+        return null;
+      }
+    }
+    return {
+      sql: cursor ? definition.sql : '',
+      params: cursor ? values : [],
+      encode: (row) => Buffer.from(JSON.stringify({ sort, values: definition.values(row) }), 'utf8').toString('base64url'),
+    };
   }
 
   getTracksForBackgroundJobs(sourceId: string, kinds: RemoteBackgroundJobKind[], options: { failedOnly?: boolean; limit?: number } = {}): RemoteLibraryTrack[] {
@@ -726,6 +814,53 @@ export class RemoteLibraryStore {
     }
 
     return fingerprints;
+  }
+
+  getProviderScanCache(sourceId: string, namespace: string, key: string): { fingerprint: string; payload: string; verifiedAt: string } | null {
+    const row = this.database
+      .prepare<[string, string, string], { fingerprint: string; payload_json: string; verified_at: string }>(
+        `SELECT fingerprint, payload_json, verified_at
+         FROM remote_provider_scan_cache
+         WHERE source_id = ? AND namespace = ? AND cache_key = ?`,
+      )
+      .get(sourceId, namespace, key);
+    return row ? { fingerprint: row.fingerprint, payload: row.payload_json, verifiedAt: row.verified_at } : null;
+  }
+
+  setProviderScanCache(
+    sourceId: string,
+    namespace: string,
+    key: string,
+    fingerprint: string,
+    payload: string,
+    verifiedAt = nowIso(),
+  ): void {
+    this.setProviderScanCaches(sourceId, [{ namespace, key, fingerprint, payload, verifiedAt }]);
+  }
+
+  setProviderScanCaches(
+    sourceId: string,
+    entries: Array<{ namespace: string; key: string; fingerprint: string; payload: string; verifiedAt?: string }>,
+  ): void {
+    if (entries.length === 0) {
+      return;
+    }
+    const statement = this.database.prepare(
+      `INSERT INTO remote_provider_scan_cache (
+         source_id, namespace, cache_key, fingerprint, payload_json, verified_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(source_id, namespace, cache_key) DO UPDATE SET
+         fingerprint = excluded.fingerprint,
+         payload_json = excluded.payload_json,
+         verified_at = excluded.verified_at,
+         updated_at = excluded.updated_at`,
+    );
+    const updatedAt = nowIso();
+    this.database.transaction(() => {
+      for (const entry of entries) {
+        statement.run(sourceId, entry.namespace, entry.key, entry.fingerprint, entry.payload, entry.verifiedAt ?? updatedAt, updatedAt);
+      }
+    })();
   }
 
   async prepareSearchTermsForTracks(tracks: RemoteTrackWrite[]): Promise<Map<string, string>> {
@@ -870,12 +1005,14 @@ export class RemoteLibraryStore {
   }
 
   getCachedRemoteCoverIdForTrack(track: {
+    sourceId?: unknown;
     provider: unknown;
     remotePath: unknown;
     stableKey: unknown;
     fieldSources: Record<string, unknown>;
   }): string | null {
     const cacheKey = remoteCoverCacheKeyFor({
+      sourceId: track.sourceId,
       provider: track.provider,
       fieldSources: track.fieldSources,
       remotePath: track.remotePath,
@@ -908,6 +1045,7 @@ export class RemoteLibraryStore {
     timestamp = nowIso(),
   ): void {
     const cacheKey = remoteCoverCacheKeyFor({
+      sourceId: track.sourceId,
       provider: track.provider,
       fieldSources: track.fieldSources,
       remotePath: track.remotePath,
@@ -1077,6 +1215,23 @@ export class RemoteLibraryStore {
     this.database.prepare(`UPDATE remote_tracks SET ${column} = ?, updated_at = ? WHERE id = ?`).run(status, nowIso(), trackId);
   }
 
+  markTracksSeen(sourceId: string, remotePaths: string[]): number {
+    if (remotePaths.length === 0) {
+      return 0;
+    }
+
+    const statement = this.database.prepare(
+      "UPDATE remote_tracks SET availability = 'available' WHERE source_id = ? AND remote_path = ? AND availability != 'available'",
+    );
+    return this.database.transaction(() => {
+      let changed = 0;
+      for (const remotePath of remotePaths) {
+        changed += statement.run(sourceId, remotePath).changes;
+      }
+      return changed;
+    })();
+  }
+
   markMissingExcept(sourceId: string, remotePaths: Set<string>): number {
     const rows = this.database.prepare<[string], { remote_path: string }>('SELECT remote_path FROM remote_tracks WHERE source_id = ?').all(sourceId);
     const missing = rows.map((row) => row.remote_path).filter((remotePath) => !remotePaths.has(remotePath));
@@ -1224,7 +1379,7 @@ export class RemoteLibraryStore {
       codec: textOrNull(row.codec),
       coverThumb: coverId
         ? `echo-cover://thumb/${encodeURIComponent(coverId)}`
-        : subsonicDirectCoverUrlFor(row.id, row.provider, coverId, fieldSources, row.remote_path, row.stable_key),
+        : subsonicDirectCoverUrlFor(row.id, row.source_id, row.provider, coverId, fieldSources, row.remote_path, row.stable_key),
       metadataStatus: remoteTrackStatusOrPending(row.metadata_status),
       coverStatus: remoteTrackStatusOrPending(row.cover_status),
       lyricsStatus: remoteTrackStatusOrPending(row.lyrics_status),
@@ -1264,7 +1419,7 @@ export class RemoteLibraryStore {
       coverId,
       coverThumb: coverId
         ? `echo-cover://thumb/${encodeURIComponent(coverId)}`
-        : subsonicDirectCoverUrlFor(row.id, row.provider, coverId, fieldSources, row.remote_path, row.stable_key),
+        : subsonicDirectCoverUrlFor(row.id, row.source_id, row.provider, coverId, fieldSources, row.remote_path, row.stable_key),
       coverStatus: remoteTrackStatusOrPending(row.cover_status),
       metadataStatus: remoteTrackStatusOrPending(row.metadata_status),
       lyricsStatus: remoteTrackStatusOrPending(row.lyrics_status),

@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
@@ -36,6 +36,11 @@ export type OsuArchiveImportResult = {
   tags: EditableTrackTags;
 };
 
+export type OsuArchiveBatchImportResult = {
+  tracks: OsuArchiveImportResult[];
+  skippedSpeedVariantCount: number;
+};
+
 export type OsuArchiveImportDependencies = {
   ffmpegToolchain?: FfmpegToolchainInfo;
   resolveFfmpegToolchain?: () => FfmpegToolchainInfo;
@@ -54,6 +59,11 @@ export type OsuArchiveImportRequest = {
 type OsuArchiveEntry = {
   name: string;
   data: Uint8Array;
+};
+
+type OsuTrackCandidate = {
+  audioEntry: OsuArchiveEntry;
+  metadataVariants: OsuArchiveMetadata[];
 };
 
 const sanitizeFilePart = (value: string): string => {
@@ -306,6 +316,147 @@ const pickOsuCoverEntry = (entries: OsuArchiveEntry[], coverFilename: string | n
   return [...coverEntries].sort((left, right) => right.data.length - left.data.length)[0] ?? null;
 };
 
+const findNamedArchiveEntry = (
+  entries: OsuArchiveEntry[],
+  filename: string | null,
+  extensions: Set<string>,
+): OsuArchiveEntry | null => {
+  const normalizedFilename = filename ? normalizeArchivePath(filename) : null;
+  if (!normalizedFilename) {
+    return null;
+  }
+
+  return entries.find((entry) => {
+    if (!extensions.has(extname(entry.name).toLowerCase())) {
+      return false;
+    }
+    const normalizedName = normalizeArchivePath(entry.name);
+    return normalizedName === normalizedFilename || normalizedName.endsWith(`/${normalizedFilename}`);
+  }) ?? null;
+};
+
+const speedMultiplierFromMetadata = (metadata: OsuArchiveMetadata): number | null => {
+  const explicitMultiplierPattern = /(?:^|[\s[(+-])(0\.\d+|1(?:\.\d+)?|2(?:\.0+)?)\s*[x×](?=$|[\s)\]_-])/iu;
+  const plainVersionPattern = /^(?:rate\s*)?(0\.\d+|1(?:\.\d+)?|2(?:\.0+)?)$/iu;
+  const values = [metadata.version, metadata.title, metadata.audioFilename];
+
+  for (const value of values) {
+    const match = value?.match(explicitMultiplierPattern);
+    const multiplier = Number(match?.[1]);
+    if (Number.isFinite(multiplier) && Math.abs(multiplier - 1) > 0.015) {
+      return multiplier;
+    }
+  }
+
+  const plainVersionMultiplier = Number(metadata.version?.trim().match(plainVersionPattern)?.[1]);
+  if (Number.isFinite(plainVersionMultiplier) && Math.abs(plainVersionMultiplier - 1) > 0.015) {
+    return plainVersionMultiplier;
+  }
+
+  if ([metadata.version, metadata.title, metadata.audioFilename].some((value) => /\b(?:sped|speed)\s*up\b/iu.test(value ?? ''))) {
+    return 1.1;
+  }
+
+  return null;
+};
+
+const stripSpeedVariantText = (value: string | null): string =>
+  (value ?? '')
+    .replace(/(?:^|[\s[(+-])(0\.\d+|1(?:\.\d+)?|2(?:\.0+)?)\s*[x×](?=$|[\s)\]_-])/giu, ' ')
+    .replace(/\b(?:sped|speed)\s*up\b/giu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .toLocaleLowerCase();
+
+const candidateIdentity = (candidate: OsuTrackCandidate): string => {
+  const representative = candidate.metadataVariants[0];
+  const artist = stripSpeedVariantText(representative?.artist ?? null);
+  const title = stripSpeedVariantText(representative?.title ?? null);
+  return artist || title ? `${artist}\u0000${title}` : normalizeArchivePath(candidate.audioEntry.name);
+};
+
+const metadataScore = (metadata: OsuArchiveMetadata): number =>
+  (metadata.title ? 8 : 0) +
+  (metadata.artist ? 8 : 0) +
+  (metadata.coverFilename ? 4 : 0) +
+  (metadata.beatmapId ? 2 : 0) +
+  (metadata.bpm !== null ? 1 : 0) -
+  (speedMultiplierFromMetadata(metadata) === null ? 0 : 16);
+
+const representativeMetadata = (variants: OsuArchiveMetadata[]): OsuArchiveMetadata =>
+  [...variants].sort((left, right) => metadataScore(right) - metadataScore(left))[0] ?? {
+    audioFilename: null,
+    coverFilename: null,
+    title: null,
+    artist: null,
+    creator: null,
+    version: null,
+    beatmapId: null,
+    beatmapSetId: null,
+    bpm: null,
+  };
+
+const pickMappedOsuCoverEntry = (entries: OsuArchiveEntry[], variants: OsuArchiveMetadata[]): OsuArchiveEntry | null => {
+  const mappedEntries = variants
+    .map((metadata) => findNamedArchiveEntry(entries, metadata.coverFilename, osuCoverExtensions))
+    .filter((entry): entry is OsuArchiveEntry => Boolean(entry));
+  const uniqueMappedEntries = [...new Map(mappedEntries.map((entry) => [normalizeArchivePath(entry.name), entry])).values()];
+  return uniqueMappedEntries.sort((left, right) => right.data.length - left.data.length)[0] ?? null;
+};
+
+const buildOsuTrackCandidates = (entries: OsuArchiveEntry[]): OsuTrackCandidate[] => {
+  const groups = new Map<string, OsuTrackCandidate>();
+  for (const entry of entries.filter((candidate) => candidate.name.toLowerCase().endsWith('.osu'))) {
+    const metadata = parseOsuFileMetadata(decodeTextFileBytes(entry.data));
+    const audioEntry = findNamedArchiveEntry(entries, metadata.audioFilename, osuAudioExtensions);
+    if (!audioEntry) {
+      continue;
+    }
+
+    const contentHash = createHash('sha1').update(audioEntry.data).digest('hex');
+    const existing = groups.get(contentHash);
+    if (existing) {
+      existing.metadataVariants.push(metadata);
+    } else {
+      groups.set(contentHash, { audioEntry, metadataVariants: [metadata] });
+    }
+  }
+
+  if (groups.size === 0) {
+    const metadata = pickOsuArchiveMetadata(entries);
+    const audioEntry = pickOsuAudioEntry(entries, metadata.audioFilename);
+    return audioEntry ? [{ audioEntry, metadataVariants: [metadata] }] : [];
+  }
+
+  return [...groups.values()].map((candidate) => ({
+    ...candidate,
+    metadataVariants: [...candidate.metadataVariants].sort((left, right) => metadataScore(right) - metadataScore(left)),
+  }));
+};
+
+const filterRedundantSpeedVariants = (candidates: OsuTrackCandidate[]): OsuTrackCandidate[] => {
+  const identityGroups = new Map<string, OsuTrackCandidate[]>();
+  for (const candidate of candidates) {
+    const identity = candidateIdentity(candidate);
+    identityGroups.set(identity, [...(identityGroups.get(identity) ?? []), candidate]);
+  }
+
+  return [...identityGroups.values()].flatMap((group) => {
+    const baseCandidates = group.filter((candidate) => speedMultiplierFromMetadata(candidate.metadataVariants[0]) === null);
+    if (baseCandidates.length > 0) {
+      return baseCandidates;
+    }
+
+    return [...group]
+      .sort((left, right) => {
+        const leftMultiplier = speedMultiplierFromMetadata(left.metadataVariants[0]) ?? Number.POSITIVE_INFINITY;
+        const rightMultiplier = speedMultiplierFromMetadata(right.metadataVariants[0]) ?? Number.POSITIVE_INFINITY;
+        return Math.abs(leftMultiplier - 1) - Math.abs(rightMultiplier - 1);
+      })
+      .slice(0, 1);
+  });
+};
+
 const mimeTypeForOsuCoverEntry = (entryName: string): string => {
   const extension = extname(entryName).toLowerCase();
   if (extension === '.png') {
@@ -413,7 +564,7 @@ export const buildOsuImportTags = (
   };
 };
 
-export const importOsuArchiveAsMp3 = async (request: OsuArchiveImportRequest): Promise<OsuArchiveImportResult> => {
+const prepareOsuArchiveEntries = async (request: OsuArchiveImportRequest): Promise<{ outputDirectory: string; entries: OsuArchiveEntry[] }> => {
   const outputDirectory = resolve(request.outputDirectory);
   await mkdir(outputDirectory, { recursive: true });
   const outputStat = await stat(outputDirectory);
@@ -425,15 +576,21 @@ export const importOsuArchiveAsMp3 = async (request: OsuArchiveImportRequest): P
   const entries = Object.entries(archive)
     .filter(([, data]) => data.length > 0)
     .map(([name, data]) => ({ name, data }));
-  const parsedMetadata = pickOsuArchiveMetadata(entries);
+
+  return { outputDirectory, entries };
+};
+
+const importOsuTrackCandidate = async (
+  request: OsuArchiveImportRequest,
+  outputDirectory: string,
+  entries: OsuArchiveEntry[],
+  candidate: OsuTrackCandidate,
+): Promise<OsuArchiveImportResult> => {
+  const parsedMetadata = representativeMetadata(candidate.metadataVariants);
   const beatmapsetId = cleanBeatmapSetId(request.beatmapsetId) ?? parsedMetadata.beatmapSetId;
   const metadata = { ...parsedMetadata, beatmapSetId: beatmapsetId };
-  const audioEntry = pickOsuAudioEntry(entries, metadata.audioFilename);
-  if (!audioEntry) {
-    throw new Error('osu! archive does not contain a supported audio file');
-  }
 
-  const coverEntry = pickOsuCoverEntry(entries, metadata.coverFilename);
+  const coverEntry = pickMappedOsuCoverEntry(entries, candidate.metadataVariants) ?? pickOsuCoverEntry(entries, metadata.coverFilename);
   const coverData = coverEntry
     ? {
         data: coverEntry.data,
@@ -445,7 +602,7 @@ export const importOsuArchiveAsMp3 = async (request: OsuArchiveImportRequest): P
   const outputPath = await uniqueOutputPath(outputDirectory, `${sanitizeFilePart(outputName)}.mp3`);
 
   try {
-    await writeAudioEntryAsMp3(audioEntry, outputPath, request.dependencies ?? {});
+    await writeAudioEntryAsMp3(candidate.audioEntry, outputPath, request.dependencies ?? {});
     if (request.writeEmbeddedTags !== false) {
       const writeTags = request.dependencies?.writeEmbeddedTrackTags ?? writeEmbeddedTrackTags;
       await writeTags({
@@ -467,10 +624,55 @@ export const importOsuArchiveAsMp3 = async (request: OsuArchiveImportRequest): P
   };
 };
 
+export const importOsuArchiveAsMp3 = async (request: OsuArchiveImportRequest): Promise<OsuArchiveImportResult> => {
+  const { outputDirectory, entries } = await prepareOsuArchiveEntries(request);
+  const parsedMetadata = pickOsuArchiveMetadata(entries);
+  const audioEntry = pickOsuAudioEntry(entries, parsedMetadata.audioFilename);
+  if (!audioEntry) {
+    throw new Error('osu! archive does not contain a supported audio file');
+  }
+
+  return importOsuTrackCandidate(request, outputDirectory, entries, {
+    audioEntry,
+    metadataVariants: [parsedMetadata],
+  });
+};
+
+export const importOsuArchiveTracksAsMp3 = async (request: OsuArchiveImportRequest): Promise<OsuArchiveBatchImportResult> => {
+  const { outputDirectory, entries } = await prepareOsuArchiveEntries(request);
+  const candidates = buildOsuTrackCandidates(entries);
+  if (candidates.length === 0) {
+    throw new Error('osu! archive does not contain a supported audio file');
+  }
+
+  const selectedCandidates = filterRedundantSpeedVariants(candidates);
+  const tracks: OsuArchiveImportResult[] = [];
+  try {
+    for (const candidate of selectedCandidates) {
+      tracks.push(await importOsuTrackCandidate(request, outputDirectory, entries, candidate));
+    }
+  } catch (error) {
+    await Promise.all(tracks.map((track) => rm(track.outputPath, { force: true, maxRetries: 3, retryDelay: 50 })));
+    throw error;
+  }
+
+  return {
+    tracks,
+    skippedSpeedVariantCount: candidates.length - selectedCandidates.length,
+  };
+};
+
 let osuArchiveImportQueue: Promise<unknown> = Promise.resolve();
 
 export const importOsuArchiveAsMp3Queued = (request: OsuArchiveImportRequest): Promise<OsuArchiveImportResult> => {
   const nextImport = osuArchiveImportQueue.catch(() => undefined).then(() => importOsuArchiveAsMp3(request));
+  osuArchiveImportQueue = nextImport;
+  void osuArchiveImportQueue.catch(() => undefined);
+  return nextImport;
+};
+
+export const importOsuArchiveTracksAsMp3Queued = (request: OsuArchiveImportRequest): Promise<OsuArchiveBatchImportResult> => {
+  const nextImport = osuArchiveImportQueue.catch(() => undefined).then(() => importOsuArchiveTracksAsMp3(request));
   osuArchiveImportQueue = nextImport;
   void osuArchiveImportQueue.catch(() => undefined);
   return nextImport;

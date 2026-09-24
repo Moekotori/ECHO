@@ -5,14 +5,27 @@ import {
   type DownloadFeatureUnlockReason,
   type DownloadFeatureUnlockStatus,
 } from '../../shared/constants/featureUnlocks';
-import { assertPackageIntegrityAllowsPaidFeatures } from '../app/packageIntegrity';
 import { getPrivateEntitlementsProvider } from './privateEntitlements';
 import { getPluginService } from './PluginService';
+import { getLocalProEntitlementSnapshot } from './LocalProEntitlements';
 
 const nowIso = (): string => new Date().toISOString();
 
 export class DownloadFeatureUnlockService {
   getStatus(): DownloadFeatureUnlockStatus {
+    const localPro = getLocalProEntitlementSnapshot('downloads');
+    if (localPro.unlocked) {
+      return {
+        featureId: downloadFeatureUnlockFeatureId,
+        pluginId: downloadFeatureUnlockPluginId,
+        requiredVersion: downloadFeatureUnlockVersion,
+        pluginInstalled: true,
+        pluginEnabled: true,
+        checkedAt: localPro.checkedAt ?? nowIso(),
+        unlocked: true,
+        reason: 'unlocked',
+      };
+    }
     try {
       const proLicenseStatus = getPluginService().getEchoProLicenseStatus();
       if (proLicenseStatus.valid && proLicenseStatus.enabled && proLicenseStatus.features.includes('downloads')) {
@@ -72,7 +85,6 @@ export class DownloadFeatureUnlockService {
   }
 
   assertUnlocked(): DownloadFeatureUnlockStatus {
-    assertPackageIntegrityAllowsPaidFeatures();
     const status = this.getStatus();
     if (!status.unlocked) {
       throw new Error('downloads_plugin_unlock_required');

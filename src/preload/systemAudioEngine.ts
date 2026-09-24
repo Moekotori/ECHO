@@ -121,6 +121,7 @@ export interface SystemAudioEngine {
   // State access
   lastNativeAudioStatus: AudioStatus | null;
   systemAudioModeActive: boolean;
+  ownsSystemAudioPlayback: boolean;
 
   // Playback lifecycle
   handoffNativePlaybackToSystemAudio(status: AudioStatus | null): Promise<AudioStatus | null>;
@@ -222,7 +223,8 @@ export function createSystemAudioEngine(
   let systemAudioMonoLeftGainNode: GainNode | null = null;
   let systemAudioMonoRightGainNode: GainNode | null = null;
   let systemAudioMonoMergerNode: ChannelMergerNode | null = null;
-  let systemAudioModeActive = readPersistedSystemAudioMode();
+  const persistedSystemAudioMode = readPersistedSystemAudioMode();
+  let systemAudioModeActive = isMainPlaybackRenderer && persistedSystemAudioMode;
   let systemAudioState: AudioStatus['state'] = 'idle';
   let systemAudioSource: SystemPlaybackSource | null = null;
   let systemAudioObjectUrl: string | null = null;
@@ -766,6 +768,8 @@ export function createSystemAudioEngine(
       replayGainPreventedClipping: systemReplayGainCalculation.preventedClipping,
       currentFilePath: systemAudioSource?.filePath ?? null,
       currentTrackId: systemAudioSource?.trackId ?? null,
+      currentQueueItemId: null,
+      queueRevision: null,
       currentTrackTitle: systemAudioSource?.metadata?.title ?? null,
       currentTrackArtist: systemAudioSource?.metadata?.artist ?? null,
       currentTrackAlbum: systemAudioSource?.metadata?.album ?? null,
@@ -1586,6 +1590,10 @@ export function createSystemAudioEngine(
     Boolean(settings && typeof settings === 'object' && (settings as Partial<AudioOutputSettings>).outputMode === 'system');
 
   const refreshSystemAudioModeActive = async (): Promise<boolean> => {
+    if (!isMainPlaybackRenderer) {
+      return false;
+    }
+
     if (systemAudioModeActive) {
       return true;
     }
@@ -1624,24 +1632,8 @@ export function createSystemAudioEngine(
   const requiresNativeSystemMediaPlayback = (request: PlaybackMediaStartRequest): boolean =>
     request.item.mediaType === 'local' && isNativePreferredSystemLocalPath(request.item.path);
 
-  const withNativeSharedOutput = <T extends { output?: AudioOutputSettings }>(request: T): T => ({
-    ...request,
-    output: {
-      ...(request.output ?? {}),
-      outputMode: 'shared',
-    },
-  });
-
-  const withNativeSystemFallbackOutput = <T extends { output?: AudioOutputSettings }>(request: T): T => {
-    if (request.output?.outputMode && request.output.outputMode !== 'system') {
-      return request;
-    }
-
-    return withNativeSharedOutput(request);
-  };
-
   const shouldUseSystemAudioMode = (): boolean =>
-    systemAudioModeActive || lastNativeAudioStatus?.outputMode === 'system';
+    systemAudioModeActive || lastNativeAudioStatus?.outputMode === 'system' || (!isMainPlaybackRenderer && persistedSystemAudioMode);
 
   const shouldUseSystemAudioForPlayback = async (output?: AudioOutputSettings): Promise<boolean> => {
     if (isSystemOutputRequest(output) || shouldUseSystemAudioMode()) {
@@ -1829,7 +1821,10 @@ export function createSystemAudioEngine(
       return systemAudioModeActive;
     },
     set systemAudioModeActive(active: boolean) {
-      systemAudioModeActive = active;
+      systemAudioModeActive = isMainPlaybackRenderer && active;
+    },
+    get ownsSystemAudioPlayback() {
+      return isMainPlaybackRenderer;
     },
     handoffNativePlaybackToSystemAudio,
     stopSystemPlayback,

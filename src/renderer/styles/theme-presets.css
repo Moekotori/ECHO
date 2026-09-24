@@ -4172,7 +4172,7 @@ html[data-theme="dark"]:is([data-theme-custom="true"], [data-theme-preset]:not([
 }
 
 html:is([data-theme-custom="true"], [data-theme-preset]:not([data-theme-preset="classic"])) .app-shell--lyrics .app-titlebar,
-html:is([data-theme-custom="true"], [data-theme-preset]:not([data-theme-preset="classic"])) .app-shell:has(.lyrics-page) .app-titlebar {
+html:is([data-theme-custom="true"], [data-theme-preset]:not([data-theme-preset="classic"])) .app-shell.app-shell--lyrics:has(.lyrics-page) .app-titlebar {
   border-color: transparent;
   background: transparent;
   backdrop-filter: none;
@@ -6561,6 +6561,8 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
 .app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .settings-nav-item:hover,
 .app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .settings-nav-item.active,
 .app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .settings-wallpaper-path,
+.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .settings-wallpaper-portrait,
+.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .settings-wallpaper-empty,
 .app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .settings-wallpaper-control,
 .app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .settings-action-button,
 .app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .settings-danger-button,
@@ -6740,6 +6742,8 @@ html[data-theme="dark"] .app-shell--wallpaper-ready[data-wallpaper-visual-protec
 .app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .settings-nav-item:hover,
 .app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .settings-nav-item.active,
 .app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .settings-wallpaper-path,
+.app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .settings-wallpaper-portrait,
+.app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .settings-wallpaper-empty,
 .app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .settings-wallpaper-control,
 .app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .settings-page .audio-command-button,
 .app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .settings-page .audio-icon-command,
@@ -6812,6 +6816,160 @@ html[data-theme="dark"] .app-shell--wallpaper-ready[data-wallpaper-ui-zero="true
 .app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .album-detail-cover,
 .app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .artist-album-cover,
 .app-shell--wallpaper-ready[data-wallpaper-ui-zero="true"] .artist-track-cover {
+  box-shadow: none;
+}
+
+.app-shell--wallpaper-ready .page-surface:has(.playlists-page),
+.app-shell--wallpaper-ready .playlists-page {
+  background: transparent;
+}
+
+.app-shell--wallpaper-ready .playlists-page {
+  --playlist-page-bg: transparent;
+  --playlist-rail-bg: rgb(249 250 255 / var(--app-wallpaper-ui-page-base-alpha));
+  --playlist-surface: rgb(255 255 255 / var(--app-wallpaper-ui-titlebar-alpha));
+  --playlist-surface-strong: rgb(255 255 255 / var(--app-wallpaper-ui-player-alpha));
+  --playlist-surface-hover: rgb(240 243 251 / var(--app-wallpaper-ui-sidebar-mid-alpha));
+}
+
+.app-shell--wallpaper-ready .playlists-page .playlist-sidebar {
+  background:
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / calc(var(--app-wallpaper-ui-sidebar-top-alpha) * 0.72)),
+      transparent 32%
+    ),
+    rgb(249 250 255 / var(--app-wallpaper-ui-sidebar-base-alpha));
+  backdrop-filter: blur(var(--app-wallpaper-ui-surface-blur)) saturate(1.08);
+  -webkit-backdrop-filter: blur(var(--app-wallpaper-ui-surface-blur)) saturate(1.08);
+}
+
+html[data-theme="dark"] .app-shell--wallpaper-ready .page-surface:has(.playlists-page),
+html[data-theme="dark"] .app-shell--wallpaper-ready .playlists-page {
+  background: transparent;
+}
+
+html[data-theme="dark"] .app-shell--wallpaper-ready .playlists-page {
+  --playlist-page-bg: transparent;
+  --playlist-rail-bg: rgb(11 19 35 / var(--app-wallpaper-ui-page-base-alpha));
+  --playlist-surface: rgb(17 27 47 / var(--app-wallpaper-ui-titlebar-alpha));
+  --playlist-surface-strong: rgb(17 28 49 / var(--app-wallpaper-ui-player-alpha));
+  --playlist-surface-hover: rgb(30 43 70 / var(--app-wallpaper-ui-sidebar-mid-alpha));
+}
+
+html[data-theme="dark"] .app-shell--wallpaper-ready .playlists-page .playlist-sidebar {
+  background:
+    linear-gradient(
+      180deg,
+      rgb(35 49 79 / calc(var(--app-wallpaper-ui-sidebar-top-alpha) * 0.48)),
+      transparent 34%
+    ),
+    rgb(11 19 35 / var(--app-wallpaper-ui-sidebar-base-alpha));
+}
+
+.app-shell--wallpaper-ready .dsp-stage {
+  background:
+    linear-gradient(
+      90deg,
+      rgb(247 249 252 / var(--app-wallpaper-ui-page-base-alpha)),
+      rgb(255 255 255 / var(--app-wallpaper-ui-page-top-alpha)) 29%,
+      rgb(243 247 251 / var(--app-wallpaper-ui-page-base-alpha))
+    ),
+    transparent;
+  backdrop-filter: blur(var(--app-wallpaper-ui-surface-blur)) saturate(1.06);
+  -webkit-backdrop-filter: blur(var(--app-wallpaper-ui-surface-blur)) saturate(1.06);
+}
+
+.app-shell--wallpaper-ready .dsp-rail {
+  background:
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / var(--app-wallpaper-ui-sidebar-top-alpha)),
+      rgb(244 248 251 / var(--app-wallpaper-ui-sidebar-base-alpha))
+    ),
+    transparent;
+}
+
+html[data-theme="dark"] .app-shell--wallpaper-ready .dsp-stage {
+  background:
+    linear-gradient(
+      90deg,
+      rgb(15 20 29 / var(--app-wallpaper-ui-page-base-alpha)),
+      rgb(20 27 38 / var(--app-wallpaper-ui-page-top-alpha)) 29%,
+      rgb(13 18 27 / var(--app-wallpaper-ui-page-base-alpha))
+    ),
+    transparent;
+}
+
+html[data-theme="dark"] .app-shell--wallpaper-ready .dsp-rail {
+  background:
+    linear-gradient(
+      180deg,
+      rgb(24 30 40 / var(--app-wallpaper-ui-sidebar-top-alpha)),
+      rgb(15 20 29 / var(--app-wallpaper-ui-sidebar-base-alpha))
+    ),
+    transparent;
+}
+
+.app-shell--wallpaper-ready .home-page {
+  --home-shell-bg:
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / var(--app-wallpaper-ui-titlebar-alpha)),
+      rgb(245 248 252 / var(--app-wallpaper-ui-page-base-alpha))
+    ),
+    transparent;
+  --home-hero-bg:
+    radial-gradient(
+      ellipse 58% 88% at 88% -12%,
+      color-mix(in srgb, var(--theme-accent-bg) 58%, transparent) 0%,
+      transparent 62%
+    ),
+    linear-gradient(
+      138deg,
+      rgb(255 255 255 / var(--app-wallpaper-ui-titlebar-alpha)),
+      rgb(245 248 252 / var(--app-wallpaper-ui-page-base-alpha))
+    ),
+    transparent;
+  --home-now-bg: var(--home-shell-bg);
+  --home-now-empty-bg: var(--home-shell-bg);
+}
+
+html[data-theme="dark"] .app-shell--wallpaper-ready .home-page {
+  --home-shell-bg:
+    linear-gradient(
+      180deg,
+      rgb(24 30 40 / var(--app-wallpaper-ui-titlebar-alpha)),
+      rgb(15 20 29 / var(--app-wallpaper-ui-page-base-alpha))
+    ),
+    transparent;
+  --home-hero-bg:
+    radial-gradient(
+      ellipse 58% 88% at 88% -12%,
+      color-mix(in srgb, var(--theme-accent-bg) 52%, transparent) 0%,
+      transparent 62%
+    ),
+    linear-gradient(
+      138deg,
+      rgb(24 30 40 / var(--app-wallpaper-ui-titlebar-alpha)),
+      rgb(15 20 29 / var(--app-wallpaper-ui-page-base-alpha))
+    ),
+    transparent;
+  --home-now-bg: var(--home-shell-bg);
+  --home-now-empty-bg: var(--home-shell-bg);
+}
+
+.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .page-surface:has(.playlists-page),
+.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .playlists-page,
+.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .playlists-page .playlist-sidebar,
+.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .dsp-stage,
+.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .dsp-rail,
+.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .home-hero,
+.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .home-panel,
+.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .home-metric-tile {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   box-shadow: none;
 }
 
@@ -11983,7 +12141,7 @@ html[data-theme-preset="FINAL"] :is(.lyrics-match-panel, .lyrics-offset-controls
     rgb(var(--preset-panel-rgb) / 0.48) !important;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar {
   min-height: 84px;
   height: 84px;
   box-sizing: border-box;
@@ -11999,20 +12157,20 @@ html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer)
     inset 0 1px 0 rgb(255 255 255 / 0.58) !important;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-now {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-now {
   display: none !important;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {
   grid-column: 2;
   align-self: center;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .transport {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .transport {
   align-items: center;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .progress-row {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .progress-row {
   width: 100%;
   min-width: 0;
 }
@@ -12027,20 +12185,20 @@ html[data-theme-preset="FINAL"] .app-shell--lyrics-player-drawer .lyrics-player-
 }
 
 /* FINAL lyrics transport repair: keep the bottom deck compact and prevent the page header from colliding with it. */
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .lyrics-left-panel {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .lyrics-left-panel {
   grid-template-rows: clamp(54px, 8vh, 86px) minmax(0, 1fr) 0 !important;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .lyrics-scroll {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .lyrics-scroll {
   grid-row: 1 / 4;
   padding-bottom: clamp(124px, 15vh, 168px) !important;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .lyrics-track-header {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .lyrics-track-header {
   display: none !important;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar {
   height: 96px;
   min-height: 96px;
   grid-template-columns: minmax(260px, 430px) minmax(0, 1fr) minmax(260px, 430px);
@@ -12049,43 +12207,43 @@ html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer)
   overflow: hidden !important;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar::after {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar::after {
   top: 16px;
   width: min(27vw, 380px);
   opacity: 0.22;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-now {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-now {
   display: flex !important;
   grid-column: 1;
   max-width: 430px;
   min-height: 72px;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-cover {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-cover {
   width: 72px;
   height: 72px;
   border-radius: 5px !important;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-track-copy {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-track-copy {
   gap: 3px;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-track-copy strong {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-track-copy strong {
   font-size: 15px;
   line-height: 1.12;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-track-copy > span {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-track-copy > span {
   font-size: 12px;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-tags {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-tags {
   max-height: 21px;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {
   width: 100%;
   max-width: 620px;
   grid-column: 2;
@@ -12093,25 +12251,25 @@ html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer)
   justify-self: center;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .output-status {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .output-status {
   grid-column: 3;
   align-self: center;
   justify-self: end;
 }
 
 @media (max-width: 980px) {
-  html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar {
+  html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar {
     height: 86px;
     min-height: 86px;
     grid-template-columns: minmax(0, 1fr);
   }
 
-  html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-now,
-  html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .output-status {
+  html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-now,
+  html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .output-status {
     display: none !important;
   }
 
-  html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {
+  html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {
     grid-column: 1;
   }
 }
@@ -12539,7 +12697,10 @@ html[data-theme-preset="FINAL"] .page-surface:has(.queue-page) {
   scrollbar-gutter: stable;
 }
 
-html[data-theme-preset="FINAL"] .page-surface:has(:is(.albums-page, .artists-page)) {
+html[data-theme-preset="FINAL"] .page-surface:has(:is(
+  .albums-page:not([data-detail-open='true']),
+  .artists-page:not([data-detail-open='true'])
+)) {
   min-height: 0;
   overflow: hidden !important;
 }
@@ -12578,6 +12739,9 @@ html[data-theme-preset="FINAL"] :is(.albums-page, .artists-page) .media-wall-scr
 }
 
 html[data-theme-preset="FINAL"] .page-surface:has(.album-detail-page) {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
   overflow-x: hidden !important;
   overflow-y: auto !important;
   scrollbar-gutter: stable;
@@ -12975,7 +13139,7 @@ html[data-theme="dark"][data-theme-preset="FINAL"] .app-shell:not(.app-shell--wa
 }
 
 /* FINAL lyrics page bottom deck: keep the transport as one continuous surface. */
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar {
   border-top: 1px solid rgb(var(--preset-border-rgb) / 0.32) !important;
   background:
     linear-gradient(90deg, rgb(255 255 255 / 0.88) 0%, rgb(255 255 255 / 0.34) 34%, transparent 68%, rgb(var(--preset-accent-rgb) / 0.06) 100%),
@@ -12987,25 +13151,25 @@ html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-s
     inset 0 1px 0 rgb(255 255 255 / 0.7) !important;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) :is(.player-now, .player-center, .output-status) {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) :is(.player-now, .player-center, .output-status) {
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {
   width: 100%;
   max-width: 620px;
   grid-column: 2;
   justify-self: center;
 }
 
-html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .progress-row {
+html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .progress-row {
   width: 100%;
 }
 
-html[data-theme="dark"][data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar {
+html[data-theme="dark"][data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar {
   border-top-color: rgb(245 214 155 / 0.22) !important;
   background:
     linear-gradient(90deg, rgb(255 255 255 / 0.08) 0%, rgb(245 214 155 / 0.05) 32%, transparent 60%, rgb(245 214 155 / 0.08) 100%),
@@ -13014,7 +13178,7 @@ html[data-theme="dark"][data-theme-preset="FINAL"] .app-shell:not(.app-shell--wa
 }
 
 @media (max-width: 980px) {
-  html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {
+  html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {
     width: min(620px, calc(100vw - 52px));
     max-width: min(620px, calc(100vw - 52px));
     grid-column: 1;
@@ -13025,16 +13189,29 @@ html[data-album-cover-shape] :is(
   .album-cover,
   .album-detail-cover,
   .album-related-album-cover,
+  .album-streaming-track-cover,
   .artist-album-cover,
+  .artist-overview-track-cover,
   .home-artwork,
   .home-cover-card,
+  .inbox-album-art,
+  .inbox-crate-cover,
+  .inbox-track-cover,
+  .history-cover,
+  .history-memory-cover,
+  .history-recent-cover,
+  .history-stats-cover,
+  .now-playing-cover,
   .player-cover,
   .track-cover,
   .album-track-cover,
   .artist-track-cover,
   .queue-now-cover,
   .queue-row-cover,
+  .lyrics-queue-now__cover,
+  .lyrics-queue-row-cover,
   .lyrics-track-cover,
+  .streaming-cover:not(.streaming-cover--avatar),
   .mini-player-cover
 ) {
   border-radius: var(--echo-album-cover-radius, 12px) !important;
@@ -13045,260 +13222,62 @@ html[data-album-cover-shape] :is(
   .album-cover,
   .album-detail-cover,
   .album-related-album-cover,
+  .album-streaming-track-cover,
   .artist-album-cover,
+  .artist-overview-track-cover,
   .home-artwork,
   .home-cover-card,
+  .inbox-album-art,
+  .inbox-crate-cover,
+  .inbox-track-cover,
+  .history-cover,
+  .history-memory-cover,
+  .history-recent-cover,
+  .history-stats-cover,
+  .now-playing-cover,
   .player-cover,
   .track-cover,
   .album-track-cover,
   .artist-track-cover,
   .queue-now-cover,
   .queue-row-cover,
+  .lyrics-queue-now__cover,
+  .lyrics-queue-row-cover,
   .lyrics-track-cover,
+  .streaming-cover:not(.streaming-cover--avatar),
   .mini-player-cover
 ) img,
 html[data-album-cover-shape] :is(
   .album-cover,
   .album-detail-cover,
   .album-related-album-cover,
+  .album-streaming-track-cover,
   .artist-album-cover,
+  .artist-overview-track-cover,
   .home-artwork,
   .home-cover-card,
+  .inbox-album-art,
+  .inbox-crate-cover,
+  .inbox-track-cover,
+  .history-cover,
+  .history-memory-cover,
+  .history-recent-cover,
+  .history-stats-cover,
+  .now-playing-cover,
   .player-cover,
   .track-cover,
   .album-track-cover,
   .artist-track-cover,
   .queue-now-cover,
   .queue-row-cover,
+  .lyrics-queue-now__cover,
+  .lyrics-queue-row-cover,
   .lyrics-track-cover,
+  .streaming-cover:not(.streaming-cover--avatar),
   .mini-player-cover
 ) .deferred-wall-image {
   border-radius: inherit !important;
 }
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance {
-  grid-template-columns: repeat(3, minmax(300px, 1fr));
-  grid-auto-flow: dense;
-  align-items: start;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance > .section-title {
-  grid-column: 1 / -1;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance > .setting-row:not(.setting-row--theme-presets):not(.setting-row--theme-custom):not(#settings-row-sidebar-layout) {
-  grid-column: auto;
-  min-height: 46px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-row-sidebar-layout {
-  grid-column: span 2;
-  min-height: 0;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-row-sidebar-layout .settings-sidebar-layout-panel {
-  gap: 8px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-row-sidebar-layout .settings-sidebar-route-list {
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-row-sidebar-layout .settings-sidebar-route-item {
-  min-height: 36px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .setting-row--theme-presets {
-  grid-column: span 1;
-  grid-template-columns: minmax(0, 1fr);
-  min-height: 0;
-  padding: 10px 12px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .setting-row--theme-custom {
-  grid-column: span 2;
-  grid-template-columns: minmax(0, 1fr);
-  min-height: 0;
-  padding: 10px 12px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .setting-row--theme-presets:has(.settings-theme-preset-grid),
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .setting-row--theme-custom:has(.settings-expandable-content:not([hidden])) {
-  grid-column: 1 / -1;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .setting-row--theme-presets .setting-info,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .setting-row--theme-custom .setting-info {
-  margin-bottom: 2px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-preset-panel,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-panel {
-  gap: 8px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-preset-summary {
-  width: 100%;
-  min-height: 46px;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
-  padding: 7px 9px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-preset-summary-preview {
-  width: 42px;
-  height: 28px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-preset-grid {
-  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
-  gap: 7px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-preset-card {
-  min-height: 90px;
-  gap: 6px;
-  padding: 8px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-preset-preview {
-  min-height: 36px;
-  border-radius: 7px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-preset-copy em,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-preset-summary em,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-heading em,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-section-title span,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-color-copy em,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-slider span em,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-motion-row em,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-theme-card em {
-  display: none !important;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-header {
-  display: grid;
-  grid-template-columns: minmax(180px, 0.48fr) minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-heading span {
-  display: none;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-toolbar {
-  justify-content: end;
-  gap: 8px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-preview {
-  width: min(190px, 100%);
-  min-width: 160px;
-  padding: 5px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-preview span,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-preview strong {
-  min-height: 26px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-advanced-toggle {
-  min-height: 32px;
-  padding: 0 10px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-panel > .settings-expandable-content {
-  display: grid;
-  grid-template-columns: minmax(340px, 0.72fr) minmax(420px, 1.28fr);
-  align-items: start;
-  gap: 10px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-panel > .settings-expandable-content[hidden] {
-  display: none !important;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-library,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-mock-preview {
-  grid-column: auto;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-section,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-sliders,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-actions,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-advanced-toggle:nth-of-type(2),
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-warning,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-message {
-  grid-column: 1 / -1;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-section.settings-theme-custom-library {
-  grid-column: 1;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-mock-preview {
-  grid-column: 2;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-library {
-  display: grid;
-  gap: 8px;
-  min-height: 0;
-  padding: 9px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-library-actions,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-copy-actions,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-actions {
-  gap: 6px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-theme-list {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 6px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-theme-card {
-  min-height: 34px;
-  padding: 7px 8px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-mock-body {
-  grid-template-columns: minmax(70px, 0.24fr) minmax(0, 1fr);
-  gap: 8px;
-  padding: 8px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-mock-body main {
-  gap: 6px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-mock-card {
-  min-height: 46px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-card-grid,
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-gradient-card {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-color-card {
-  min-height: 42px;
-  padding: 7px 9px;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-color-control code {
-  display: none;
-}
-
-.app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-sliders {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  padding: 8px;
-}
-
 html .app-shell.app-shell--acrylic:not(.app-shell--wallpaper) {
   --echo-polish-page-bg:
     linear-gradient(
@@ -13374,7 +13353,7 @@ html .app-shell.app-shell--acrylic:not(.app-shell--wallpaper) .sidebar {
     );
 }
 
-html .app-shell.app-shell--acrylic:not(.app-shell--wallpaper) .player-bar {
+html .app-shell.app-shell--acrylic:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer) .player-bar {
   background:
     linear-gradient(
       180deg,
@@ -13383,7 +13362,7 @@ html .app-shell.app-shell--acrylic:not(.app-shell--wallpaper) .player-bar {
     );
 }
 
-html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):not(.app-shell--wallpaper) .app-titlebar {
+html .app-shell.app-shell--acrylic.app-shell--lyrics:not(.app-shell--wallpaper) .app-titlebar {
   z-index: 90;
   border-color: transparent;
   background: transparent;
@@ -13396,14 +13375,14 @@ html .app-shell.app-shell--acrylic:not(.app-shell--wallpaper) .page-surface:has(
   backdrop-filter: none;
 }
 
-html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):not(.app-shell--wallpaper) .app-titlebar-actions,
-html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):not(.app-shell--wallpaper) .titlebar-action {
+html .app-shell.app-shell--acrylic.app-shell--lyrics:not(.app-shell--wallpaper) .app-titlebar-actions,
+html .app-shell.app-shell--acrylic.app-shell--lyrics:not(.app-shell--wallpaper) .titlebar-action {
   border-color: transparent;
   background: transparent;
   box-shadow: none;
 }
 
-html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):not(.app-shell--wallpaper) .window-controls {
+html .app-shell.app-shell--acrylic.app-shell--lyrics:not(.app-shell--wallpaper) .window-controls {
   gap: 1px;
   padding: 0;
   border: 0;
@@ -13412,7 +13391,7 @@ html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):no
   backdrop-filter: none;
 }
 
-html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):not(.app-shell--wallpaper) .window-control {
+html .app-shell.app-shell--acrylic.app-shell--lyrics:not(.app-shell--wallpaper) .window-control {
   color: color-mix(in srgb, var(--theme-heading-text) 88%, #1d2d42);
   border-color: transparent;
   background: transparent;
@@ -13420,13 +13399,13 @@ html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):no
   filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--theme-panel-bg-strong) 76%, transparent));
 }
 
-html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):not(.app-shell--wallpaper) .window-control:hover {
+html .app-shell.app-shell--acrylic.app-shell--lyrics:not(.app-shell--wallpaper) .window-control:hover {
   color: var(--theme-heading-text);
   border-color: transparent;
   background: color-mix(in srgb, var(--theme-panel-bg-strong) 22%, transparent);
 }
 
-html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):not(.app-shell--wallpaper) .window-control--close:hover {
+html .app-shell.app-shell--acrylic.app-shell--lyrics:not(.app-shell--wallpaper) .window-control--close:hover {
   color: var(--theme-on-accent);
   background: var(--theme-danger-solid-bg);
 }
@@ -13763,25 +13742,6 @@ html .app-shell.app-shell--acrylic:not(.app-shell--wallpaper) :is(
   .settings-sidebar-layout-toggle em
 ) {
   font-weight: 400;
-}
-
-@media (max-width: 1180px) {
-  .app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .app-shell[data-feature-comments-hidden="true"] #settings-row-sidebar-layout,
-  .app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .setting-row--theme-presets,
-  .app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .setting-row--theme-custom {
-    grid-column: 1 / -1;
-  }
-
-  .app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-panel > .settings-expandable-content,
-  .app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-card-grid,
-  .app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-gradient-card,
-  .app-shell[data-feature-comments-hidden="true"] #settings-sec-appearance .settings-theme-custom-sliders {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 .app-shell--lyrics-player-drawer .lyrics-player-drawer-host .progress-track[data-waveform="true"] {
@@ -14813,7 +14773,6 @@ html[data-theme-mode="ambient"] .settings-page :is(
 
 html[data-theme-mode="ambient"] .settings-page :is(
   .settings-status-grid span,
-  .settings-replay-gain-summary span,
   .settings-data-backup-meta span,
   .settings-database-health,
   .settings-database-grid > span,
@@ -14824,7 +14783,7 @@ html[data-theme-mode="ambient"] .settings-page :is(
   box-shadow: none;
 }
 
-html[data-theme-mode="ambient"] .settings-page :is(.settings-status-grid span, .settings-replay-gain-summary span) {
+html[data-theme-mode="ambient"] .settings-page .settings-status-grid span {
   border-radius: 8px;
 }
 
@@ -15939,7 +15898,7 @@ html[data-theme-mode="ambient"] :is(
 }
 
 /* Lyrics titlebar follows the normal shell in every lyrics visual mode. */
-html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) {
+html .app-shell.app-shell--lyrics {
   --lyrics-titlebar-glyph: var(--theme-button-muted-text);
   --lyrics-titlebar-glyph-hover: var(--theme-heading-text);
   --lyrics-titlebar-glyph-muted: var(--theme-muted-text);
@@ -15951,7 +15910,7 @@ html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) {
   --lyrics-titlebar-glyph-shadow-strong: none;
 }
 
-html .app-shell:has(.lyrics-page[data-immersive-cover-style="true"][data-background="cover"]) {
+html .app-shell.app-shell--lyrics:has(.lyrics-page[data-immersive-cover-style="true"][data-background="cover"]) {
   --lyrics-titlebar-glyph: #ffffff;
   --lyrics-titlebar-glyph-hover: #ffffff;
   --lyrics-titlebar-glyph-muted: rgba(255, 255, 255, 0.54);
@@ -15961,7 +15920,7 @@ html .app-shell:has(.lyrics-page[data-immersive-cover-style="true"][data-backgro
   --lyrics-titlebar-glyph-shadow-strong: 0 1px 10px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.66);
 }
 
-html .app-shell:has(.lyrics-page[data-lyrics-page-style="roseVinyl"][data-background="cover"]) {
+html .app-shell.app-shell--lyrics:has(.lyrics-page[data-lyrics-page-style="roseVinyl"][data-background="cover"]) {
   --lyrics-titlebar-glyph: rgb(246 238 231 / 0.76);
   --lyrics-titlebar-glyph-hover: rgb(255 248 242 / 0.92);
   --lyrics-titlebar-glyph-muted: rgb(246 238 231 / 0.48);
@@ -15971,16 +15930,16 @@ html .app-shell:has(.lyrics-page[data-lyrics-page-style="roseVinyl"][data-backgr
   --lyrics-titlebar-glyph-shadow-strong: 0 1px 10px rgb(18 12 15 / 0.48), 0 1px 3px rgb(18 12 15 / 0.58);
 }
 
-html .app-shell:has(.lyrics-page[data-immersive-cover-style="true"][data-background="cover"]) :is(.titlebar-action, .window-control) {
+html .app-shell.app-shell--lyrics:has(.lyrics-page[data-immersive-cover-style="true"][data-background="cover"]) :is(.titlebar-action, .window-control) {
   color: #ffffff !important;
 }
 
-html .app-shell:has(.lyrics-page[data-immersive-cover-style="true"][data-background="cover"]) :is(.titlebar-action svg, .window-control svg) {
+html .app-shell.app-shell--lyrics:has(.lyrics-page[data-immersive-cover-style="true"][data-background="cover"]) :is(.titlebar-action svg, .window-control svg) {
   color: #ffffff !important;
   filter: var(--lyrics-titlebar-glyph-shadow) !important;
 }
 
-html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) :is(.titlebar-action, .window-control) {
+html .app-shell.app-shell--lyrics :is(.titlebar-action, .window-control) {
   overflow: visible;
   color: var(--lyrics-titlebar-glyph) !important;
   border-color: transparent !important;
@@ -15989,17 +15948,17 @@ html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) :is(.titlebar-action,
   opacity: 1;
 }
 
-html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) :is(.titlebar-action svg, .window-control svg) {
+html .app-shell.app-shell--lyrics :is(.titlebar-action svg, .window-control svg) {
   overflow: visible;
   filter: var(--lyrics-titlebar-glyph-shadow) !important;
   stroke-width: 2.25px;
 }
 
-html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) .titlebar-action::after {
+html .app-shell.app-shell--lyrics .titlebar-action::after {
   display: none !important;
 }
 
-html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) :is(
+html .app-shell.app-shell--lyrics :is(
   .titlebar-action:hover,
   .titlebar-action[data-active="true"],
   .titlebar-action[data-drawer-open="true"],
@@ -16012,7 +15971,7 @@ html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) :is(
   box-shadow: none !important;
 }
 
-html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) :is(
+html .app-shell.app-shell--lyrics :is(
   .titlebar-action[data-active="true"],
   .titlebar-action[data-drawer-open="true"],
   .window-control[data-fullscreen="true"]
@@ -16020,7 +15979,7 @@ html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) :is(
   background: var(--lyrics-titlebar-glyph-active-bg) !important;
 }
 
-html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) :is(
+html .app-shell.app-shell--lyrics :is(
   .titlebar-action:hover,
   .titlebar-action[data-active="true"],
   .titlebar-action[data-drawer-open="true"],
@@ -16030,11 +15989,11 @@ html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) :is(
   filter: var(--lyrics-titlebar-glyph-shadow-strong) !important;
 }
 
-html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) .window-control:disabled {
+html .app-shell.app-shell--lyrics .window-control:disabled {
   color: var(--lyrics-titlebar-glyph-muted) !important;
 }
 
-html .app-shell:is(.app-shell--lyrics, :has(.lyrics-page)) .window-control--close:hover {
+html .app-shell.app-shell--lyrics .window-control--close:hover {
   color: var(--lyrics-titlebar-glyph-danger) !important;
   background: var(--lyrics-titlebar-glyph-close-bg) !important;
 }
@@ -16050,4 +16009,343 @@ html .sidebar .nav-item[data-active="true"]:hover {
   border-color: transparent !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+
+/* Remote library: keep the utility surfaces native to dark themes instead of
+   letting the light onboarding artwork and elevated cards read as white sheets. */
+html[data-theme="dark"] :is(
+  .remote-empty-preview,
+  .remote-health-center,
+  .remote-humanized-panel
+) {
+  border-color: color-mix(in srgb, var(--theme-panel-border) 76%, transparent);
+  background: color-mix(in srgb, var(--theme-panel-bg) 88%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-heading-text) 4%, transparent);
+}
+
+html[data-theme="dark"] .remote-empty-recommended {
+  border-color: color-mix(in srgb, var(--theme-accent-border) 72%, transparent);
+  background: color-mix(in srgb, var(--theme-panel-bg-strong) 91%, var(--theme-accent-bg) 9%);
+  box-shadow:
+    var(--echo-polish-shadow-row),
+    inset 0 1px 0 color-mix(in srgb, var(--theme-heading-text) 5%, transparent);
+}
+
+html[data-theme="dark"] .remote-empty-preview > img {
+  opacity: 0.56;
+  filter: invert(0.88) hue-rotate(180deg) brightness(0.72) saturate(0.72) contrast(1.08);
+  mix-blend-mode: screen;
+}
+
+html[data-theme="dark"] :is(.remote-reconnect-center, .remote-source-friendly-error) {
+  background: color-mix(in srgb, var(--theme-warning-panel-bg) 86%, transparent);
+}
+
+html[data-theme-mode="ambient"] :is(
+  .remote-empty-recommended,
+  .remote-empty-preview,
+  .remote-health-center,
+  .remote-sync-preview,
+  .remote-humanized-panel,
+  .remote-reconnect-center
+) {
+  border-color: var(--echo-polish-border);
+  background: var(--echo-polish-surface);
+  box-shadow:
+    var(--echo-polish-shadow-panel),
+    inset 0 1px 0 var(--ambient-glint-line);
+  backdrop-filter: blur(16px) saturate(1.02);
+}
+
+html[data-theme-mode="ambient"] .remote-empty-recommended {
+  border-color: color-mix(in srgb, var(--theme-accent-border) 68%, var(--ambient-fine-line));
+  background:
+    linear-gradient(112deg, color-mix(in srgb, var(--ambient-quiet-glow) 58%, transparent), transparent 52%),
+    var(--echo-polish-surface-strong);
+}
+
+html[data-theme-mode="ambient"] .remote-empty-recommended-icon {
+  background: var(--echo-polish-play-bg);
+  box-shadow:
+    0 12px 28px rgb(0 0 0 / 0.28),
+    inset 0 1px 0 rgb(255 255 255 / 0.11);
+}
+
+html[data-theme-mode="ambient"] .remote-empty-recommended > button {
+  border-color: var(--echo-polish-active-border);
+  background: var(--echo-polish-active-bg);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07);
+}
+
+html[data-theme-mode="ambient"] .remote-empty-preview > img {
+  opacity: 0.38;
+  filter: invert(0.9) hue-rotate(180deg) brightness(0.66) saturate(0.52) contrast(1.1);
+  mix-blend-mode: screen;
+}
+
+html[data-theme-mode="ambient"] :is(
+  .remote-empty-alternative-list,
+  .remote-empty-alternative-list button,
+  .remote-health-center > header,
+  .remote-health-center article,
+  .remote-sync-preview > header,
+  .remote-sync-preview > footer,
+  .remote-humanized-panel > header,
+  .remote-humanized-list > button,
+  .remote-humanized-row
+) {
+  border-color: var(--ambient-fine-line);
+}
+
+html[data-theme-mode="ambient"] :is(
+  .remote-empty-alternative-list button:hover,
+  .remote-empty-alternative-list button[data-active="true"],
+  .remote-humanized-list > button:hover,
+  .remote-humanized-row > button:first-child:hover
+) {
+  background: var(--echo-polish-row-bg-hover);
+}
+
+html[data-theme-mode="ambient"] .remote-sync-preview-counts > span {
+  border-color: var(--ambient-fine-line);
+  background: var(--echo-polish-row-bg);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025);
+}
+
+html[data-theme-mode="ambient"] :is(.remote-reconnect-center, .remote-source-friendly-error) {
+  border-color: color-mix(in srgb, var(--theme-warning-border) 58%, var(--ambient-fine-line));
+  background: color-mix(in srgb, var(--theme-warning-bg) 52%, var(--echo-polish-surface));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025);
+}
+
+/* Streaming spatial themes: continuous rows, theme-owned surfaces, no per-track cards. */
+html .streaming-page.streaming-hub--spatial .streaming-results .streaming-row {
+  border: 0;
+  border-bottom: 1px solid var(--theme-list-row-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html .streaming-page.streaming-hub--spatial .streaming-results .streaming-row:hover {
+  border-bottom-color: var(--theme-panel-border-strong);
+  background: color-mix(in srgb, var(--theme-accent-bg) 32%, transparent);
+  box-shadow: none;
+}
+
+html .streaming-page.streaming-hub--spatial .streaming-results .streaming-row[data-playing="true"] {
+  border-bottom-color: var(--theme-accent-border);
+  background: color-mix(in srgb, var(--theme-accent-bg) 52%, transparent);
+  box-shadow: inset 2px 0 0 var(--theme-accent-solid-bg);
+}
+
+html .streaming-page.streaming-hub--spatial .streaming-results .streaming-actions button {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+html .streaming-page.streaming-hub--spatial .streaming-results .streaming-actions button:hover {
+  border-color: var(--theme-accent-border);
+  background: var(--theme-accent-bg);
+}
+
+html[data-theme="dark"] .streaming-page.streaming-hub--spatial {
+  background: var(--echo-polish-app-bg-layer);
+}
+
+html[data-theme="dark"] .streaming-page.streaming-hub--spatial .streaming-source-rail {
+  border-right-color: var(--echo-polish-border);
+  background: var(--echo-polish-sidebar-bg);
+}
+
+html[data-theme="dark"] .streaming-page.streaming-hub--spatial .streaming-workspace {
+  background: var(--echo-polish-page-bg), var(--theme-app-bg);
+}
+
+html[data-theme="dark"] .streaming-page.streaming-hub--spatial :is(
+  .streaming-results-shell,
+  .streaming-track-header
+) {
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .streaming-page.streaming-hub--spatial :is(
+  .streaming-track-header,
+  .streaming-toolbar,
+  .streaming-recent-searches
+) {
+  border-color: var(--echo-polish-hairline);
+}
+
+html[data-theme="dark"] .streaming-page.streaming-hub--spatial .streaming-search-box {
+  border-color: var(--echo-polish-border);
+  background: var(--echo-polish-field-bg);
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .streaming-page.streaming-hub--spatial .streaming-source-list > button[data-active="true"] {
+  border-color: var(--echo-polish-active-border);
+  background: var(--echo-polish-active-bg);
+}
+
+html[data-theme-mode="ambient"] .streaming-page.streaming-hub--spatial {
+  background: var(--echo-polish-app-bg-layer);
+}
+
+html[data-theme-mode="ambient"] .streaming-page.streaming-hub--spatial .streaming-source-rail {
+  border-right-color: var(--ambient-fine-line);
+  background: var(--echo-polish-sidebar-bg);
+  backdrop-filter: blur(18px) saturate(1.04);
+}
+
+html[data-theme-mode="ambient"] .streaming-page.streaming-hub--spatial .streaming-workspace {
+  background: var(--echo-polish-page-bg), var(--theme-app-bg);
+  backdrop-filter: blur(18px) saturate(1.04);
+}
+
+html[data-theme-mode="ambient"] .streaming-page.streaming-hub--spatial :is(
+  .streaming-results-shell,
+  .streaming-track-header
+) {
+  border-color: var(--ambient-fine-line);
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-theme-mode="ambient"] .streaming-page.streaming-hub--spatial .streaming-results .streaming-row {
+  border: 0;
+  border-bottom: 1px solid var(--ambient-fine-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-theme-mode="ambient"] .streaming-page.streaming-hub--spatial .streaming-results .streaming-row:hover {
+  border-bottom-color: var(--echo-polish-border-strong);
+  background: var(--echo-polish-row-bg-hover);
+  box-shadow: none;
+}
+
+html[data-theme-mode="ambient"] .streaming-page.streaming-hub--spatial .streaming-results .streaming-row[data-playing="true"] {
+  border-bottom-color: var(--echo-polish-active-border);
+  background: color-mix(in srgb, var(--echo-polish-active-bg) 58%, transparent);
+  box-shadow: inset 2px 0 0 var(--echo-polish-accent-text);
+}
+
+html[data-theme-mode="ambient"] .streaming-page.streaming-hub--spatial .streaming-search-box {
+  border-color: var(--echo-polish-border);
+  background: var(--echo-polish-field-bg);
+  box-shadow: inset 0 1px 0 var(--ambient-glint-line);
+  backdrop-filter: blur(14px) saturate(1.04);
+}
+
+html[data-theme-mode="ambient"] .streaming-page.streaming-hub--spatial .streaming-source-list > button[data-active="true"] {
+  border-color: var(--echo-polish-active-border);
+  background: var(--echo-polish-active-bg);
+  box-shadow: inset 0 1px 0 var(--ambient-glint-line);
+}
+
+/* Detail track continuity: songs belong to one list, never one card per track. */
+html :is(
+  .streaming-artist-track-list,
+  .streaming-album-track-list,
+  .artist-detail-page .artist-track-list,
+  .album-detail-page .album-track-list
+) {
+  gap: 0;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html :is(
+  .streaming-artist-track-list .streaming-row,
+  .streaming-album-track-list .streaming-row,
+  .artist-detail-page .artist-track-row,
+  .album-detail-page .album-track-row
+) {
+  border: 0;
+  border-bottom: 1px solid var(--theme-list-row-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+html :is(
+  .streaming-artist-track-list .streaming-row,
+  .streaming-album-track-list .streaming-row,
+  .artist-detail-page .artist-track-row,
+  .album-detail-page .album-track-row
+)::before,
+html :is(
+  .streaming-artist-track-list .streaming-row,
+  .streaming-album-track-list .streaming-row,
+  .artist-detail-page .artist-track-row,
+  .album-detail-page .album-track-row
+)::after {
+  display: none;
+  content: none;
+}
+
+html :is(
+  .streaming-artist-track-list .streaming-row:hover,
+  .streaming-album-track-list .streaming-row:hover,
+  .artist-detail-page .artist-track-row:hover,
+  .album-detail-page .album-track-row:hover
+) {
+  border-bottom-color: var(--theme-panel-border-strong);
+  background: color-mix(in srgb, var(--theme-accent-bg) 32%, transparent);
+  box-shadow: none;
+  transform: none;
+}
+
+html :is(
+  .streaming-artist-track-list .streaming-row[data-playing="true"],
+  .streaming-album-track-list .streaming-row[data-playing="true"],
+  .artist-detail-page .artist-track-row[data-playing="true"],
+  .album-detail-page .album-track-row[data-playing='true']
+) {
+  border-bottom-color: var(--theme-accent-border);
+  background: color-mix(in srgb, var(--theme-accent-bg) 52%, transparent);
+  box-shadow: inset 2px 0 0 var(--theme-accent-solid-bg);
+}
+
+html[data-theme-mode="ambient"] :is(
+  .streaming-artist-track-list .streaming-row,
+  .streaming-album-track-list .streaming-row,
+  .artist-detail-page .artist-track-row,
+  .album-detail-page .album-track-row
+) {
+  border: 0;
+  border-bottom: 1px solid var(--ambient-fine-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-theme-mode="ambient"] :is(
+  .streaming-artist-track-list .streaming-row:hover,
+  .streaming-album-track-list .streaming-row:hover,
+  .artist-detail-page .artist-track-row:hover,
+  .album-detail-page .album-track-row:hover
+) {
+  border-bottom-color: var(--echo-polish-border-strong);
+  background: var(--echo-polish-row-bg-hover);
+  box-shadow: none;
+}
+
+html[data-theme-mode="ambient"] :is(
+  .streaming-artist-track-list .streaming-row[data-playing="true"],
+  .streaming-album-track-list .streaming-row[data-playing="true"],
+  .artist-detail-page .artist-track-row[data-playing="true"],
+  .album-detail-page .album-track-row[data-playing='true']
+) {
+  border-bottom-color: var(--echo-polish-active-border);
+  background: color-mix(in srgb, var(--echo-polish-active-bg) 58%, transparent);
+  box-shadow: inset 2px 0 0 var(--echo-polish-accent-text);
 }

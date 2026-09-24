@@ -499,6 +499,8 @@ CREATE TABLE IF NOT EXISTS lyrics_cache (
   lines_json TEXT NOT NULL,
   offset_ms INTEGER NOT NULL DEFAULT 0,
   score REAL,
+  acceptance_origin TEXT NOT NULL DEFAULT 'legacy',
+  match_policy_version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -604,6 +606,7 @@ CREATE TABLE IF NOT EXISTS track_videos (
   raw_provider_json TEXT,
   score REAL NOT NULL DEFAULT 0,
   selected INTEGER NOT NULL DEFAULT 0,
+  selection_origin TEXT NOT NULL DEFAULT 'unknown',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -703,6 +706,18 @@ CREATE TABLE IF NOT EXISTS remote_cover_cache (
   FOREIGN KEY (cover_id) REFERENCES covers(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS remote_provider_scan_cache (
+  source_id TEXT NOT NULL,
+  namespace TEXT NOT NULL,
+  cache_key TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  verified_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (source_id, namespace, cache_key),
+  FOREIGN KEY (source_id) REFERENCES remote_sources(id) ON DELETE CASCADE
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS remote_tracks_fts USING fts5(
   title,
   artist,
@@ -776,6 +791,22 @@ CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);
 CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
 CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album);
 CREATE INDEX IF NOT EXISTS idx_tracks_analysis_status ON tracks(analysis_status);
+
+CREATE TABLE IF NOT EXISTS audio_transition_analysis (
+  track_id TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  analyzer_version INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  analysis_json TEXT NOT NULL,
+  error TEXT,
+  analyzed_at TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (track_id, fingerprint, analyzer_version),
+  FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_audio_transition_analysis_status
+  ON audio_transition_analysis(status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_tracks_file_identity ON tracks(file_identity) WHERE file_identity IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tracks_quick_hash ON tracks(quick_hash) WHERE quick_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_albums_album_key ON albums(album_key);
@@ -835,6 +866,7 @@ CREATE INDEX IF NOT EXISTS idx_remote_tracks_stable_key ON remote_tracks(stable_
 CREATE INDEX IF NOT EXISTS idx_remote_tracks_remote_url_hash ON remote_tracks(remote_url_hash);
 CREATE INDEX IF NOT EXISTS idx_remote_tracks_cover_status ON remote_tracks(cover_status);
 CREATE INDEX IF NOT EXISTS idx_remote_cover_cache_cover_id ON remote_cover_cache(cover_id);
+CREATE INDEX IF NOT EXISTS idx_remote_provider_scan_cache_updated ON remote_provider_scan_cache(source_id, namespace, updated_at);
 CREATE INDEX IF NOT EXISTS idx_streaming_tracks_provider ON streaming_tracks(provider);
 CREATE INDEX IF NOT EXISTS idx_streaming_tracks_title ON streaming_tracks(title);
 CREATE INDEX IF NOT EXISTS idx_streaming_tracks_artist ON streaming_tracks(artist);

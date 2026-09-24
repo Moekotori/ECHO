@@ -251,6 +251,7 @@ export type StreamingProviderDescriptor = {
   displayName: string;
   enabled: boolean;
   supportsSearch: boolean;
+  supportedSearchMediaTypes?: StreamingMediaType[];
   supportsPlayback?: boolean;
   supportsDownload?: boolean;
   supportsLyrics: boolean;

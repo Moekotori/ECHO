@@ -187,7 +187,7 @@ describe('IPC handler gate for DiagnosticsReportRendererError', () => {
     const handler = ipcGateMocks.mockIpcMain.handlers.get(IpcChannels.DiagnosticsReportRendererError);
     expect(handler).toBeTypeOf('function');
 
-    (handler as Function)(null, { message: 'test error from renderer' });
+    (handler as (...args: unknown[]) => unknown)(null, { message: 'test error from renderer' });
 
     expect(ipcGateMocks.crashReportService.reportRendererError).not.toHaveBeenCalled();
     expect(ipcGateMocks.recordRendererRuntimeError).not.toHaveBeenCalled();
@@ -202,7 +202,7 @@ describe('IPC handler gate for DiagnosticsReportRendererError', () => {
     const handler = ipcGateMocks.mockIpcMain.handlers.get(IpcChannels.DiagnosticsReportRendererError);
     expect(handler).toBeTypeOf('function');
 
-    (handler as Function)(null, { message: 'legitimate error' });
+    (handler as (...args: unknown[]) => unknown)(null, { message: 'legitimate error' });
 
     expect(ipcGateMocks.crashReportService.reportRendererError).toHaveBeenCalledTimes(1);
     expect(ipcGateMocks.recordRendererRuntimeError).toHaveBeenCalledTimes(1);

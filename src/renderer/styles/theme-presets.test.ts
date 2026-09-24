@@ -2,9 +2,24 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('theme presets stylesheet', () => {
+  it('scopes retained lyrics DOM styling to the active lyrics route', () => {
+    const css = [
+      readFileSync('src/renderer/styles/layout.css', 'utf8'),
+      readFileSync('src/renderer/styles/ui-polish.css', 'utf8'),
+      readFileSync('src/renderer/styles/theme-presets.css', 'utf8'),
+    ].join('\n');
+
+    expect(css).not.toMatch(
+      /\.app-shell(?::has\(\.lyrics-page|:not\([^)]*\)(?::not\([^)]*\))*:has\(\.lyrics-page|:is\([^\r\n{]*:has\(\.lyrics-page)/,
+    );
+    expect(css).toContain(
+      '.app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar',
+    );
+  });
+
   it('keeps preset settings backgrounds out of app wallpaper mode', () => {
     const css = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
-    const layoutCss = readFileSync('src/renderer/styles/layout.css', 'utf8');
+    const layoutCss = readFileSync('src/renderer/styles/layout.css', 'utf8').replace(/\r\n/g, '\n');
 
     expect(css).toContain(
       'html:is([data-theme-custom="true"], [data-theme-preset]:not([data-theme-preset="classic"])) .app-shell:not(.app-shell--wallpaper) .page-surface:has(.settings-page) {',
@@ -25,28 +40,69 @@ describe('theme presets stylesheet', () => {
     expect(layoutCss).toContain('object-fit: cover;');
     expect(layoutCss).not.toContain('object-fit: contain;');
     expect(layoutCss).toContain('.app-shell--wallpaper-ready[data-wallpaper-unified-opacity="true"]::before');
+    expect(layoutCss).toContain(
+      '.app-shell--wallpaper-ready:not([data-wallpaper-unified-opacity="true"]) {',
+    );
+    expect(layoutCss).toContain(
+      '--theme-panel-bg: color-mix(',
+    );
+    expect(layoutCss).toContain(
+      '.app-shell--wallpaper-ready[data-wallpaper-unified-opacity="true"] {\n  --color-bg: transparent;',
+    );
   });
 
   it('keeps acrylic lyrics window controls above the page without adding chrome', () => {
     const css = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
 
     expect(css).toContain(
-      'html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):not(.app-shell--wallpaper) .window-controls {',
+      'html .app-shell.app-shell--acrylic.app-shell--lyrics:not(.app-shell--wallpaper) .window-controls {',
     );
     expect(css).toMatch(
-      /html \.app-shell\.app-shell--acrylic:is\(\.app-shell--lyrics, :has\(\.lyrics-page\)\):not\(\.app-shell--wallpaper\) \.app-titlebar \{\r?\n  z-index: 90;[\s\S]*?background: transparent;[\s\S]*?backdrop-filter: none;/,
+      /html \.app-shell\.app-shell--acrylic\.app-shell--lyrics:not\(\.app-shell--wallpaper\) \.app-titlebar \{\r?\n {2}z-index: 90;[\s\S]*?background: transparent;[\s\S]*?backdrop-filter: none;/,
     );
     expect(css).toMatch(
-      /html \.app-shell\.app-shell--acrylic:is\(\.app-shell--lyrics, :has\(\.lyrics-page\)\):not\(\.app-shell--wallpaper\) \.window-controls \{[\s\S]*?border: 0;[\s\S]*?background: transparent;[\s\S]*?backdrop-filter: none;/,
+      /html \.app-shell\.app-shell--acrylic\.app-shell--lyrics:not\(\.app-shell--wallpaper\) \.window-controls \{[\s\S]*?border: 0;[\s\S]*?background: transparent;[\s\S]*?backdrop-filter: none;/,
     );
     expect(css).toContain(
-      'html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):not(.app-shell--wallpaper) .window-control {',
+      'html .app-shell.app-shell--acrylic.app-shell--lyrics:not(.app-shell--wallpaper) .window-control {',
     );
     expect(css).toMatch(
-      /html \.app-shell\.app-shell--acrylic:not\(\.app-shell--wallpaper\) \.page-surface:has\(\.lyrics-page\[data-immersive-cover-style="true"\]\[data-background="cover"\]\) \{\r?\n  background: transparent;\r?\n  backdrop-filter: none;/,
+      /html \.app-shell\.app-shell--acrylic:not\(\.app-shell--wallpaper\) \.page-surface:has\(\.lyrics-page\[data-immersive-cover-style="true"\]\[data-background="cover"\]\) \{\r?\n {2}background: transparent;\r?\n {2}backdrop-filter: none;/,
     );
     expect(css).toContain(
-      'html .app-shell.app-shell--acrylic:is(.app-shell--lyrics, :has(.lyrics-page)):not(.app-shell--wallpaper) .window-control--close:hover {',
+      'html .app-shell.app-shell--acrylic.app-shell--lyrics:not(.app-shell--wallpaper) .window-control--close:hover {',
+    );
+  });
+
+  it('keeps the acrylic player surface from overriding the lyrics mini player palette', () => {
+    const polishCss = readFileSync('src/renderer/styles/ui-polish.css', 'utf8');
+    const presetCss = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
+
+    expect(polishCss).toContain(
+      '.app-shell--acrylic:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer) .player-bar {',
+    );
+    expect(presetCss).toContain(
+      'html .app-shell.app-shell--acrylic:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer) .player-bar {',
+    );
+    expect(polishCss).not.toMatch(
+      /\.app-shell--acrylic:not\(\.app-shell--wallpaper\) \.player-bar \{\r?\n {2}background:/,
+    );
+    expect(presetCss).not.toMatch(
+      /html \.app-shell\.app-shell--acrylic:not\(\.app-shell--wallpaper\) \.player-bar \{\r?\n {2}background:/,
+    );
+  });
+
+  it('keeps the classic lyrics mini player palette above the route-wide player surface', () => {
+    const css = readFileSync('src/renderer/styles/ui-polish.css', 'utf8');
+    const routeSurfaceSelector = '.app-shell.app-shell--lyrics:has(.lyrics-page) .player-bar {';
+    const miniPlayerSelector =
+      '.app-shell.app-shell--lyrics-player-drawer .lyrics-player-drawer-host .player-bar {';
+
+    expect(css).toContain(routeSurfaceSelector);
+    expect(css).toContain(miniPlayerSelector);
+    expect(css.indexOf(miniPlayerSelector)).toBeGreaterThan(css.indexOf(routeSurfaceSelector));
+    expect(css).toMatch(
+      /\.app-shell\.app-shell--lyrics-player-drawer \.lyrics-player-drawer-host \.player-bar \{[\s\S]*?background: var\(--lyrics-mini-player-background, rgba\(35, 33, 32, 0\.78\)\);/,
     );
   });
 
@@ -54,20 +110,20 @@ describe('theme presets stylesheet', () => {
     const css = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
 
     expect(css).toMatch(
-      /html \.app-shell:is\(\.app-shell--lyrics, :has\(\.lyrics-page\)\) \{\r?\n  --lyrics-titlebar-glyph: var\(--theme-button-muted-text\);[\s\S]*?--lyrics-titlebar-glyph-hover: var\(--theme-heading-text\);/,
+      /html \.app-shell\.app-shell--lyrics \{\r?\n {2}--lyrics-titlebar-glyph: var\(--theme-button-muted-text\);[\s\S]*?--lyrics-titlebar-glyph-hover: var\(--theme-heading-text\);/,
     );
     expect(css).toMatch(
-      /html \.app-shell:has\(\.lyrics-page\[data-immersive-cover-style="true"\]\[data-background="cover"\]\) \{\r?\n  --lyrics-titlebar-glyph: #ffffff;[\s\S]*?--lyrics-titlebar-glyph-hover: #ffffff;/,
+      /html \.app-shell\.app-shell--lyrics:has\(\.lyrics-page\[data-immersive-cover-style="true"\]\[data-background="cover"\]\) \{\r?\n {2}--lyrics-titlebar-glyph: #ffffff;[\s\S]*?--lyrics-titlebar-glyph-hover: #ffffff;/,
     );
     expect(css).toMatch(
-      /html \.app-shell:has\(\.lyrics-page\[data-lyrics-page-style="roseVinyl"\]\[data-background="cover"\]\) \{\r?\n  --lyrics-titlebar-glyph: rgb\(246 238 231 \/ 0\.76\);[\s\S]*?--lyrics-titlebar-glyph-hover: rgb\(255 248 242 \/ 0\.92\);/,
+      /html \.app-shell\.app-shell--lyrics:has\(\.lyrics-page\[data-lyrics-page-style="roseVinyl"\]\[data-background="cover"\]\) \{\r?\n {2}--lyrics-titlebar-glyph: rgb\(246 238 231 \/ 0\.76\);[\s\S]*?--lyrics-titlebar-glyph-hover: rgb\(255 248 242 \/ 0\.92\);/,
     );
     expect(css).toContain(
-      'html .app-shell:has(.lyrics-page[data-immersive-cover-style="true"][data-background="cover"]) :is(.titlebar-action, .window-control) {',
+      'html .app-shell.app-shell--lyrics:has(.lyrics-page[data-immersive-cover-style="true"][data-background="cover"]) :is(.titlebar-action, .window-control) {',
     );
-    expect(css).not.toContain('html .app-shell:has(.lyrics-page[data-immersive-cover-style="true"]),');
-    expect(css).not.toContain('html .app-shell:has(.lyrics-page[data-immersive-cover-style="true"][data-background="cover"] .lyrics-mv-panel[data-mv-enabled="false"])');
-    expect(css).not.toContain('html .app-shell:has(.lyrics-page .lyrics-mv-background) {');
+    expect(css).not.toContain('html .app-shell.app-shell--lyrics:has(.lyrics-page[data-immersive-cover-style="true"]),');
+    expect(css).not.toContain('html .app-shell.app-shell--lyrics:has(.lyrics-page[data-immersive-cover-style="true"][data-background="cover"] .lyrics-mv-panel[data-mv-enabled="false"])');
+    expect(css).not.toContain('html .app-shell.app-shell--lyrics:has(.lyrics-page .lyrics-mv-background) {');
     expect(css).toContain('background: var(--lyrics-titlebar-glyph-hover-bg) !important;');
     expect(css).toContain('background: var(--lyrics-titlebar-glyph-close-bg) !important;');
   });
@@ -244,6 +300,20 @@ describe('theme presets stylesheet', () => {
     );
   });
 
+  it('keeps remote-library utilities dark and integrated in Ambient mode', () => {
+    const css = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
+
+    expect(css).toMatch(
+      /html\[data-theme="dark"\] \.remote-empty-preview > img \{[\s\S]*?filter: invert\(0\.88\)[\s\S]*?mix-blend-mode: screen;/,
+    );
+    expect(css).toMatch(
+      /html\[data-theme-mode="ambient"\] :is\([\s\S]*?\.remote-health-center,[\s\S]*?\.remote-humanized-panel,[\s\S]*?\.remote-reconnect-center[\s\S]*?\) \{[\s\S]*?background: var\(--echo-polish-surface\);[\s\S]*?backdrop-filter: blur\(16px\)/,
+    );
+    expect(css).toMatch(
+      /html\[data-theme-mode="ambient"\] \.remote-sync-preview-counts > span \{[\s\S]*?background: var\(--echo-polish-row-bg\);/,
+    );
+  });
+
   it('keeps FINAL artist wall avatars as square product tiles', () => {
     const css = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
 
@@ -282,10 +352,10 @@ describe('theme presets stylesheet', () => {
       /html\[data-theme-preset="FINAL"\] \.player-bar \{[\s\S]*?overflow: visible;/,
     );
     expect(css).toMatch(
-      /html\[data-theme-preset="FINAL"\] \.player-bar \.progress-track,\r?\nhtml\[data-theme-preset="FINAL"\] \.player-bar \.progress-track\[data-waveform="true"\] \{\r?\n  height: 9px;/,
+      /html\[data-theme-preset="FINAL"\] \.player-bar \.progress-track,\r?\nhtml\[data-theme-preset="FINAL"\] \.player-bar \.progress-track\[data-waveform="true"\] \{\r?\n {2}height: 9px;/,
     );
     expect(css).toMatch(
-      /html\[data-theme-preset="FINAL"\] \.player-bar \.progress-waveform i \{\r?\n  display: none;/,
+      /html\[data-theme-preset="FINAL"\] \.player-bar \.progress-waveform i \{\r?\n {2}display: none;/,
     );
     expect(css).not.toContain('Hi-Res');
   });
@@ -410,10 +480,10 @@ describe('theme presets stylesheet', () => {
     const css = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
 
     expect(css).toMatch(
-      /html\[data-theme-preset="FINAL"\] \.home-metric-tile \{\r?\n  grid-template-columns: 54px minmax\(0, 1fr\);/,
+      /html\[data-theme-preset="FINAL"\] \.home-metric-tile \{\r?\n {2}grid-template-columns: 54px minmax\(0, 1fr\);/,
     );
     expect(css).not.toMatch(
-      /html\[data-theme-preset="FINAL"\] \.home-metric-tile > svg \{\r?\n  margin-left: 18px;/,
+      /html\[data-theme-preset="FINAL"\] \.home-metric-tile > svg \{\r?\n {2}margin-left: 18px;/,
     );
     expect(css).toContain('/* FINAL lyrics page: warm acoustic paper, clear active line, and precision timing rails. */');
     expect(css).toContain('html[data-theme-preset="FINAL"] .page-surface:has(.lyrics-page)');
@@ -422,23 +492,23 @@ describe('theme presets stylesheet', () => {
     expect(css).toContain('html[data-theme-preset="FINAL"] .lyrics-line[data-active="true"] span');
     expect(css).toContain('html[data-theme-preset="FINAL"] .lyrics-page:has(.lyrics-mv-panel[data-mv-enabled="false"]) .lyrics-track-header');
     expect(css).toMatch(
-      /html\[data-theme-preset="FINAL"\] \.app-shell--lyrics-player-drawer \.lyrics-page\[data-view-mode="lyrics"\] > \.lyrics-track-header-floating \{\r?\n  border-color: transparent !important;\r?\n  background: transparent !important;\r?\n  box-shadow: none !important;/,
+      /html\[data-theme-preset="FINAL"\] \.app-shell--lyrics-player-drawer \.lyrics-page\[data-view-mode="lyrics"\] > \.lyrics-track-header-floating \{\r?\n {2}border-color: transparent !important;\r?\n {2}background: transparent !important;\r?\n {2}box-shadow: none !important;/,
     );
     expect(css).toContain('html[data-theme-preset="FINAL"] .lyrics-page:has(.lyrics-mv-panel[data-mv-enabled="false"]) .lyrics-back-button {\n  position: absolute;\n  top: max(18px, calc(var(--titlebar-height) + 8px));\n  left: 22px;\n  z-index: 80;');
     expect(css).toContain('pointer-events: auto;');
     expect(css).toContain('-webkit-app-region: no-drag !important;');
-    expect(css).toContain('html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar');
+    expect(css).toContain('html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-bar');
     expect(css).toContain('/* FINAL lyrics transport repair: keep the bottom deck compact and prevent the page header from colliding with it. */');
     expect(css).toMatch(
       /html\[data-theme-preset="FINAL"\] \.app-shell:not\(\.app-shell--wallpaper\):not\(\.app-shell--lyrics-player-drawer\) \.player-bar \{[\s\S]*?overflow: visible;/,
     );
     expect(css).toMatch(
-      /html\[data-theme-preset="FINAL"\] \.app-shell:not\(\.app-shell--lyrics-player-drawer\):has\(\.lyrics-page \.lyrics-mv-panel\[data-mv-enabled="false"\]\) \.lyrics-track-header \{\r?\n  display: none !important;/,
+      /html\[data-theme-preset="FINAL"\] \.app-shell\.app-shell--lyrics:not\(\.app-shell--lyrics-player-drawer\):has\(\.lyrics-page \.lyrics-mv-panel\[data-mv-enabled="false"\]\) \.lyrics-track-header \{\r?\n {2}display: none !important;/,
     );
     expect(css).toMatch(
-      /html\[data-theme-preset="FINAL"\] \.app-shell:not\(\.app-shell--lyrics-player-drawer\):has\(\.lyrics-page \.lyrics-mv-panel\[data-mv-enabled="false"\]\) \.player-now \{\r?\n  display: flex !important;/,
+      /html\[data-theme-preset="FINAL"\] \.app-shell\.app-shell--lyrics:not\(\.app-shell--lyrics-player-drawer\):has\(\.lyrics-page \.lyrics-mv-panel\[data-mv-enabled="false"\]\) \.player-now \{\r?\n {2}display: flex !important;/,
     );
-    expect(css).toContain('html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {');
+    expect(css).toContain('html[data-theme-preset="FINAL"] .app-shell.app-shell--lyrics:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer):has(.lyrics-page .lyrics-mv-panel[data-mv-enabled="false"]) .player-center {');
     expect(css).toContain('width: 100%;\n  max-width: 620px;\n  grid-column: 2;\n  justify-self: center;');
   });
 
@@ -464,7 +534,14 @@ describe('theme presets stylesheet', () => {
 
   it('keeps FINAL queue and media walls on stable scroll containers', () => {
     const css = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
+    const songsCss = readFileSync('src/renderer/styles/songs.css', 'utf8');
+    const albumDetailCss = readFileSync('src/renderer/styles/album-detail.css', 'utf8');
 
+    expect(songsCss).toContain(".page-surface:has(.albums-page:not([data-detail-open='true']))");
+    expect(songsCss).not.toContain('.page-surface:has(.albums-page) {');
+    expect(albumDetailCss).toMatch(
+      /\.page-surface:has\(\.album-detail-page\) \{[\s\S]*?height: 100%;[\s\S]*?max-height: 100%;[\s\S]*?min-height: 0;[\s\S]*?overflow-y: auto;/,
+    );
     expect(css).toContain('/* FINAL scroll repair: keep virtual queues and media walls on stable scroll layers. */');
     expect(css).toMatch(
       /html\[data-theme-preset="FINAL"\] \.page-surface:has\(\.queue-page\) \{[\s\S]*?height: 100%;[\s\S]*?max-height: 100%;[\s\S]*?overflow-y: auto !important;[\s\S]*?scrollbar-gutter: stable;/,
@@ -475,7 +552,7 @@ describe('theme presets stylesheet', () => {
     expect(css).toMatch(/html\[data-theme-preset="FINAL"\] \.queue-page \{[\s\S]*?height: auto;[\s\S]*?min-height: 100%;[\s\S]*?overflow: visible;/);
     expect(css).toMatch(/html\[data-theme-preset="FINAL"\] \.queue-list-section \{[\s\S]*?flex: none;[\s\S]*?overflow: visible;/);
     expect(css).toMatch(
-      /html\[data-theme-preset="FINAL"\] \.page-surface:has\(:is\(\.albums-page, \.artists-page\)\) \{[\s\S]*?overflow: hidden !important;/,
+      /html\[data-theme-preset="FINAL"\] \.page-surface:has\(:is\([\s\S]*?\.albums-page:not\(\[data-detail-open='true'\]\),[\s\S]*?\.artists-page:not\(\[data-detail-open='true'\]\)[\s\S]*?\)\) \{[\s\S]*?overflow: hidden !important;/,
     );
     expect(css).toContain('html[data-theme-preset="FINAL"] .queue-list {');
     expect(css).toContain('overscroll-behavior: contain;');
@@ -483,6 +560,7 @@ describe('theme presets stylesheet', () => {
     expect(css).toContain('scrollbar-gutter: stable;');
     expect(css).toContain('overflow-anchor: none;');
     expect(css).toContain('html[data-theme-preset="FINAL"] .page-surface:has(.album-detail-page) {');
+    expect(css).toMatch(/\.page-surface:has\(\.album-detail-page\) \{[\s\S]*?height: 100%;[\s\S]*?max-height: 100%;[\s\S]*?overflow-y: auto !important;/);
     expect(css).toContain('overflow-y: auto !important;');
     expect(css).toMatch(/html\[data-theme-preset="FINAL"\] \.artists-page \.artist-wall > \.artist-card \{[\s\S]*?overflow-anchor: none;/);
     expect(css).toContain('html[data-theme-preset="FINAL"] .artists-page .artist-wall :is(');
@@ -498,5 +576,45 @@ describe('theme presets stylesheet', () => {
     expect(css).toContain('clip-path: none !important;');
     expect(css).toContain('-webkit-mask-image: linear-gradient(180deg, #000 0 84%, rgb(0 0 0 / 0.96) 91%, transparent 100%);');
     expect(css).toContain('mask-image: linear-gradient(180deg, #000 0 84%, rgb(0 0 0 / 0.96) 91%, transparent 100%);');
+  });
+
+  it('keeps spatial streaming rows continuous in dark and ambient themes', () => {
+    const css = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
+
+    expect(css).toContain('/* Streaming spatial themes: continuous rows, theme-owned surfaces, no per-track cards. */');
+    expect(css).toMatch(
+      /html \.streaming-page\.streaming-hub--spatial \.streaming-results \.streaming-row \{[\s\S]*?border-radius: 0;[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/,
+    );
+    expect(css).toMatch(
+      /html\[data-theme="dark"\] \.streaming-page\.streaming-hub--spatial \.streaming-workspace \{[\s\S]*?var\(--echo-polish-page-bg\)/,
+    );
+    expect(css).toMatch(
+      /html\[data-theme-mode="ambient"\] \.streaming-page\.streaming-hub--spatial \.streaming-results \.streaming-row \{[\s\S]*?border-bottom: 1px solid var\(--ambient-fine-line\);[\s\S]*?background: transparent;/,
+    );
+  });
+
+  it('keeps artist and album detail songs in continuous lists', () => {
+    const css = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
+
+    expect(css).toContain('/* Detail track continuity: songs belong to one list, never one card per track. */');
+    expect(css).toMatch(
+      /html :is\([\s\S]*?\.streaming-artist-track-list,[\s\S]*?\.streaming-album-track-list,[\s\S]*?\.artist-detail-page \.artist-track-list,[\s\S]*?\.album-detail-page \.album-track-list[\s\S]*?\) \{[\s\S]*?gap: 0;[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/,
+    );
+    expect(css).toMatch(
+      /html :is\([\s\S]*?\.streaming-artist-track-list \.streaming-row,[\s\S]*?\.streaming-album-track-list \.streaming-row,[\s\S]*?\.artist-detail-page \.artist-track-row,[\s\S]*?\.album-detail-page \.album-track-row[\s\S]*?\) \{[\s\S]*?border-radius: 0;[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/,
+    );
+    expect(css).toMatch(
+      /html\[data-theme-mode="ambient"\] :is\([\s\S]*?\.streaming-artist-track-list \.streaming-row,[\s\S]*?\.album-detail-page \.album-track-row[\s\S]*?\) \{[\s\S]*?border-bottom: 1px solid var\(--ambient-fine-line\);[\s\S]*?background: transparent;/,
+    );
+  });
+
+  it('lets custom backgrounds show through home, playlists, and DSP surfaces', () => {
+    const css = readFileSync('src/renderer/styles/theme-presets.css', 'utf8');
+
+    expect(css).toContain('.app-shell--wallpaper-ready .page-surface:has(.playlists-page),');
+    expect(css).toContain('--playlist-page-bg: transparent;');
+    expect(css).toContain('.app-shell--wallpaper-ready .dsp-stage {');
+    expect(css).toContain('.app-shell--wallpaper-ready .home-page {');
+    expect(css).toContain('.app-shell--wallpaper-ready[data-wallpaper-ui-transparent="true"] .home-metric-tile');
   });
 });

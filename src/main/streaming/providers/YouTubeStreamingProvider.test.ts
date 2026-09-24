@@ -210,6 +210,8 @@ describe('YouTubeStreamingProvider', () => {
               http_headers: {
                 Referer: 'https://www.youtube.com/watch?v=abc123DEF45',
                 Cookie: 'do-not-leak',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Sec-Fetch-Mode': 'navigate',
               },
             },
           ],
@@ -241,6 +243,8 @@ describe('YouTubeStreamingProvider', () => {
       Referer: 'https://www.youtube.com/watch?v=abc123DEF45',
     });
     expect(source.headers.Cookie).toBeUndefined();
+    expect(source.headers['Accept-Language']).toBeUndefined();
+    expect(source.headers['Sec-Fetch-Mode']).toBeUndefined();
   });
 
   it('falls back to anonymous extraction when browser cookies cannot be read', async () => {

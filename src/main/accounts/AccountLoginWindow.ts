@@ -136,8 +136,10 @@ export const startAccountLoginWindow = async (
     };
   }
 
+  const savedStatus = accountService.saveCookie(provider, bestCookieHeader);
+  const status = provider === 'osu' ? await accountService.checkAccount('osu') : savedStatus;
   return {
-    status: accountService.saveCookie(provider, bestCookieHeader),
+    status,
     saved: true,
     message: '登录 Cookie 已自动同步。',
   };

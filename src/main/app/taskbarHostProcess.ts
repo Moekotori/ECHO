@@ -18,10 +18,37 @@ import { existsSync } from 'node:fs';
 import { app } from 'electron';
 import { recordMainRuntimeIssue } from '../diagnostics/DevConsoleService';
 
+export type TaskbarHostState =
+  | 'unsupported'
+  | 'missing'
+  | 'stopped'
+  | 'starting'
+  | 'ready'
+  | 'restarting'
+  | 'stopping'
+  | 'error';
+
+export type TaskbarHostDiagnostics = {
+  state: TaskbarHostState;
+  hostPathAvailable: boolean;
+  restartAttempts: number;
+  lastError: string | null;
+  lastExitAt: string | null;
+};
+
 let taskbarHostProcess: ChildProcess | null = null;
 let isReady = false;
 let pendingState: string | null = null;
 let pendingShow = false;
+let hostState: TaskbarHostState = process.platform === 'win32' ? 'stopped' : 'unsupported';
+let lastError: string | null = null;
+let lastExitAt: string | null = null;
+let restartTimer: ReturnType<typeof setTimeout> | null = null;
+const stoppingHosts = new WeakSet<ChildProcess>();
+const restartAttempts: number[] = [];
+const restartWindowMs = 60_000;
+const maxRestartAttemptsPerWindow = 3;
+const restartDelayMs = [500, 1_500, 4_000] as const;
 
 const resolveHostPath = (): string | null => {
   const exeName = 'echo-taskbar-host.exe';
@@ -54,6 +81,9 @@ let doubleClickCallback: DoubleClickCallback | null = null;
 type ReadyCallback = () => void;
 let readyCallback: ReadyCallback | null = null;
 
+type StateChangedCallback = () => void;
+let stateChangedCallback: StateChangedCallback | null = null;
+
 export const setTaskbarHostClickCallback = (cb: ClickCallback): void => {
   clickCallback = cb;
 };
@@ -66,18 +96,119 @@ export const setTaskbarHostReadyCallback = (cb: ReadyCallback): void => {
   readyCallback = cb;
 };
 
+export const setTaskbarHostStateChangedCallback = (cb: StateChangedCallback): void => {
+  stateChangedCallback = cb;
+};
+
+const emitStateChanged = (): void => {
+  try {
+    stateChangedCallback?.();
+  } catch {
+    // State observers are best-effort and must not destabilize the native host.
+  }
+};
+
+const clearRestartTimer = (): void => {
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
+};
+
+const pruneRestartAttempts = (now = Date.now()): void => {
+  while (restartAttempts.length > 0 && now - restartAttempts[0] > restartWindowMs) {
+    restartAttempts.shift();
+  }
+};
+
+const scheduleTaskbarHostRestart = (reason: string): void => {
+  if (!pendingShow || restartTimer || process.platform !== 'win32') {
+    return;
+  }
+
+  const now = Date.now();
+  pruneRestartAttempts(now);
+  if (restartAttempts.length >= maxRestartAttemptsPerWindow) {
+    hostState = 'error';
+    lastError = `${reason}; automatic restart limit reached`;
+    recordMainRuntimeIssue('taskbar-host-restart-limit', lastError, {
+      reason: `${restartAttempts.length} attempts within ${restartWindowMs}ms`,
+    });
+    emitStateChanged();
+    return;
+  }
+
+  const attemptIndex = restartAttempts.length;
+  const delayMs = restartDelayMs[Math.min(attemptIndex, restartDelayMs.length - 1)];
+  restartAttempts.push(now);
+  hostState = 'restarting';
+  lastError = reason;
+  emitStateChanged();
+
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    if (!pendingShow) {
+      hostState = 'stopped';
+      emitStateChanged();
+      return;
+    }
+
+    if (!startTaskbarHost()) {
+      scheduleTaskbarHostRestart(lastError ?? 'taskbar host restart failed');
+    }
+  }, delayMs);
+};
+
+const handleTaskbarHostTermination = (
+  child: ChildProcess,
+  reason: string,
+  issueCode: string,
+): void => {
+  if (taskbarHostProcess !== child) {
+    return;
+  }
+
+  taskbarHostProcess = null;
+  isReady = false;
+  lastExitAt = new Date().toISOString();
+
+  if (stoppingHosts.has(child)) {
+    hostState = 'stopped';
+    lastError = null;
+    stoppingHosts.delete(child);
+    emitStateChanged();
+    return;
+  }
+
+  hostState = 'error';
+  lastError = reason;
+  recordMainRuntimeIssue(issueCode, reason, {});
+  emitStateChanged();
+  scheduleTaskbarHostRestart(reason);
+};
+
 export const startTaskbarHost = (): boolean => {
   if (taskbarHostProcess) {
     return true;
   }
 
+  if (restartTimer) {
+    return true;
+  }
+
   if (process.platform !== 'win32') {
+    hostState = 'unsupported';
+    lastError = 'Taskbar mini player is only available on Windows';
+    emitStateChanged();
     return false;
   }
 
   const hostPath = resolveHostPath();
   if (!hostPath) {
     console.log('[taskbar-host] echo-taskbar-host.exe not found');
+    hostState = 'missing';
+    lastError = 'echo-taskbar-host.exe not found';
+    emitStateChanged();
     return false;
   }
 
@@ -87,14 +218,19 @@ export const startTaskbarHost = (): boolean => {
       ECHO_TASKBAR_WINDOW_BAND: process.env.ECHO_TASKBAR_WINDOW_BAND ?? 'system-tools',
     };
 
-    taskbarHostProcess = spawn(hostPath, [], {
+    hostState = 'starting';
+    lastError = null;
+    emitStateChanged();
+
+    const child = spawn(hostPath, [], {
       env: hostEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: false,
     });
+    taskbarHostProcess = child;
 
     let stdoutBuffer = '';
-    taskbarHostProcess.stdout?.on('data', (data: Buffer) => {
+    child.stdout?.on('data', (data: Buffer) => {
       stdoutBuffer += data.toString('utf8');
       const lines = stdoutBuffer.split('\n');
       stdoutBuffer = lines.pop() ?? '';
@@ -109,6 +245,8 @@ export const startTaskbarHost = (): boolean => {
           const msg = JSON.parse(trimmed);
           if (msg.type === 'ready') {
             isReady = true;
+            hostState = 'ready';
+            lastError = null;
             console.log('[taskbar-host] ready');
             if (pendingState) {
               sendToHost(pendingState);
@@ -120,6 +258,7 @@ export const startTaskbarHost = (): boolean => {
             if (readyCallback) {
               try { readyCallback(); } catch { /* best-effort */ }
             }
+            emitStateChanged();
           } else if (msg.type === 'click' && clickCallback) {
             clickCallback(msg.action);
           } else if (msg.type === 'doubleClick' && doubleClickCallback) {
@@ -131,31 +270,34 @@ export const startTaskbarHost = (): boolean => {
       }
     });
 
-    taskbarHostProcess.stderr?.on('data', (data: Buffer) => {
+    child.stderr?.on('data', (data: Buffer) => {
       const text = data.toString('utf8').trim();
       if (text) {
         console.log(`[taskbar-host] stderr: ${text}`);
       }
     });
 
-    taskbarHostProcess.on('exit', (code, signal) => {
+    child.once('exit', (code, signal) => {
       console.log(`[taskbar-host] exited (code=${code}, signal=${signal})`);
-      taskbarHostProcess = null;
-      isReady = false;
-      pendingShow = false;
+      handleTaskbarHostTermination(
+        child,
+        `Taskbar host exited unexpectedly (code=${code}, signal=${signal})`,
+        'taskbar-host-unexpected-exit',
+      );
     });
 
-    taskbarHostProcess.on('error', (err) => {
+    child.once('error', (err) => {
       console.log(`[taskbar-host] process error: ${err.message}`);
-      recordMainRuntimeIssue('taskbar-host-process-error', err.message, {});
-      taskbarHostProcess = null;
-      isReady = false;
-      pendingShow = false;
+      handleTaskbarHostTermination(child, err.message, 'taskbar-host-process-error');
     });
 
     return true;
   } catch (e) {
     console.log(`[taskbar-host] Failed to start: ${e}`);
+    hostState = 'error';
+    lastError = e instanceof Error ? e.message : String(e);
+    recordMainRuntimeIssue('taskbar-host-start-failed', lastError, {});
+    emitStateChanged();
     return false;
   }
 };
@@ -191,33 +333,70 @@ export const showTaskbarHost = (): void => {
   }
 };
 
-export const hideTaskbarHost = (): void => {
+export const hideTaskbarHost = (preserveFailure = false): void => {
   pendingShow = false;
+  clearRestartTimer();
+  if (!taskbarHostProcess && !preserveFailure) {
+    hostState = process.platform === 'win32' ? 'stopped' : 'unsupported';
+    lastError = null;
+    emitStateChanged();
+  }
   if (isReady) {
     sendToHost('{"type":"hide"}');
   }
 };
 
 export const stopTaskbarHost = (): void => {
-  if (taskbarHostProcess) {
+  pendingShow = false;
+  clearRestartTimer();
+  restartAttempts.splice(0);
+
+  const child = taskbarHostProcess;
+  if (child) {
+    stoppingHosts.add(child);
+    hostState = 'stopping';
+    emitStateChanged();
     try {
       sendToHost('{"type":"quit"}');
       setTimeout(() => {
-        if (taskbarHostProcess) {
-          taskbarHostProcess.kill();
+        if (taskbarHostProcess === child) {
+          child.kill();
           taskbarHostProcess = null;
+          isReady = false;
+          hostState = 'stopped';
+          lastError = null;
+          emitStateChanged();
         }
       }, 1000);
     } catch {
-      if (taskbarHostProcess) {
-        taskbarHostProcess.kill();
+      if (taskbarHostProcess === child) {
+        child.kill();
         taskbarHostProcess = null;
+        isReady = false;
+        hostState = 'stopped';
+        lastError = null;
+        emitStateChanged();
       }
     }
   }
 
   isReady = false;
-  pendingShow = false;
+  if (!child) {
+    hostState = process.platform === 'win32' ? 'stopped' : 'unsupported';
+    lastError = null;
+    emitStateChanged();
+  }
 };
 
 export const isTaskbarHostReady = (): boolean => isReady;
+
+export const getTaskbarHostDiagnostics = (): TaskbarHostDiagnostics => {
+  pruneRestartAttempts();
+  return {
+    state: hostState,
+    hostPathAvailable: process.platform === 'win32' && resolveHostPath() !== null,
+    restartAttempts: restartAttempts.length,
+    lastError,
+    lastExitAt,
+  };
+};

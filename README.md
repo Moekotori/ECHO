@@ -1,390 +1,358 @@
-<h1 align="center">ECHO Community</h1>
+<p align="center">
+  <img src="./build-resources/icons/logo.png" alt="ECHO NEXT" width="520" />
+</p>
+
+<h1 align="center">ECHO Developers</h1>
 
 <p align="center">
-  <strong>为本地音乐而生的桌面播放器</strong><br />
-  专注曲库管理、稳定播放、HiFi 输出与长期使用体验
-  
-  
-  
-  <img width="390" height="101" alt="image" src="https://github.com/user-attachments/assets/d70162d8-fe28-4f55-a41c-26b8b08730bf" />
-
-"沙币@我不是作者，不要找我 把你的码全抄了，自己开发一个去" powered by qq:2819397477
+  <strong>ECHO NEXT 开发者文档入口：本地开发、音频链路、构建打包、验证策略与贡献边界</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Moekotori/ECHO/stargazers">觉得 ECHO 还不错？给它点个 ★ Star 吧，我们会开心很久。</a>
-</p>
-
-<p align="center">
-  <img alt="Status" src="https://img.shields.io/badge/status-actively%20maintained-7c5cff?style=flat-square" />
-  <img alt="Edition" src="https://img.shields.io/badge/edition-community-22c55e?style=flat-square" />
-  <img alt="License" src="https://img.shields.io/badge/license-LGPL--3.0-7c5cff?style=flat-square" />
-  <img alt="Focus" src="https://img.shields.io/badge/focus-local%20music%20%26%20HiFi-0ea5e9?style=flat-square" />
-</p>
-
-<p align="center">
-  <a href="https://github.com/Moekotori/ECHO/releases">
-    <img alt="Downloads" src="https://img.shields.io/github/downloads/Moekotori/ECHO/total?style=flat-square&logo=github&label=downloads&color=22c55e" />
-  </a>
-  <a href="https://github.com/Moekotori/ECHO">
-    <img alt="GitHub Stars" src="https://img.shields.io/github/stars/Moekotori/ECHO?style=flat-square&logo=github&label=stars&color=fbbf24" />
-  </a>
-</p>
-
-<p align="center">
-  <a href="./README_EN.md">English</a>
-  ·
-  <a href="https://echonext.moe/zh/">官方网站</a>
-  ·
-  <a href="https://echonext.moe/zh/download/">下载社区版</a>
-  ·
-  <a href="https://www.ifdian.net/a/echonext">购买 Steam Ver.</a>
-  ·
-  <a href="https://echonext.moe/zh/docs/">使用文档</a>
-  ·
-  <a href="https://echonext.moe/zh/changelog/">更新日志</a>
-  ·
-  <a href="https://github.com/Moekotori/ECHO/issues">问题反馈</a>
+  <a href="./README_EN.md">English README</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#当前开发重点">当前开发重点</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#快速开始">快速开始</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#构建依赖">构建依赖</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#常用命令">常用命令</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#架构边界">架构边界</a>
+  <span>&nbsp;|&nbsp;</span>
+  <a href="#相关文档">相关文档</a>
 </p>
 
 ---
 
-## 关于 ECHO 重新开源
+## 项目说明
 
-前段时间，我们曾迫不得已将 ECHO 闭源。
+ECHO NEXT 是 ECHO 系列的下一代桌面音乐播放器工程。这个仓库面向开发、调试、打包和贡献协作，不是产品营销页，也不是用户手册入口。用户安装、功能说明和排障请看 [ECHO NEXT 官方文档](https://echonext.moe/zh/docs/) 或 [docs/USER_GUIDE.md](./docs/USER_GUIDE.md)。
 
-在此之前，项目维护者遭到某位用户持续数月的辱骂与精神压迫，仓库也曾两次遭到破坏（感谢某位contributor毁坏两次仓库喵~）如果Github能删这个就好了。与此同时，甚至有人指责我们开源是为了“骗钱”。（尊贵的“柠檬起司”大人甚至试图破解开源软件。。真是低调的黑客...好害怕）这些事情让我们非常心寒，也让原本单纯的开源与分享变成了沉重的负担，因此我们一度选择关闭源码，保护项目和维护者。
+README 只保留开发者做事需要的内容：如何启动、改哪里、怎么构建、怎样验证、哪些边界不能碰。开发目标优先级是本地播放稳定、曲库可靠、音频链路清晰、用户数据安全、功能边界可维护。跨模块改动、大型 PR、数据库迁移、播放链路、原生宿主、打包发布、授权 / 完整性 / Pro 权益相关改动，请先告知维护者再开始大规模实现。
 
-但现在，我们改变主意了。
+## 当前开发重点
 
-我们仍然相信开源、分享和社区的价值，也不希望少数人的恶意让所有真正喜欢 ECHO、愿意使用和共同建设它的人失去参与的机会。因此，**ECHO 已经重新开源**。源码在本仓库；开发文档和贡献方式还会继续整理。
+| 方向 | 当前重点 |
+| --- | --- |
+| 播放稳定性 | Audio Core 是播放事实来源；状态、进度、输出设备、fallback 和错误原因都必须可解释。音频架构重构进行中：host-centered facade 迁移，详见 [skill](./.skill/echo-audio-architecture-refactor/SKILL.md)。 |
+| 音频 / DSP | ECHO SRC、EQ、ReplayGain、PCM dither、声道处理和安全限制都要诚实标记 bit-perfect 影响。 |
+| 可恶但重要的 SDM | 我们正在做 PCM -> SDM / DSD64-DSD512、DSD passthrough、DoP / ASIO Native DSD、CPU / CUDA 计算与 fallback 解释。它是高风险实验链路：设备或输出模式不满足条件时必须明确回落 PCM，不允许 UI 或状态假装 SDM 已生效。 |
+| 曲库与数据 | 扫描、元数据、封面、播放列表、远程来源和导入流程要保护用户数据；迁移必须有兼容和回滚思路。 |
+| 构建发布 | dev/base 包允许安全增量复用；release 包必须保持完整性签名、授权检查和 Pro / 付费能力 fail-closed。 |
 
-### 给开发者的话
+## 技术栈
 
-欢迎开发者参考、学习和借鉴 ECHO 的设计思路与实现。参考了 ECHO 的代码或设计，给项目留个名字或链接就好~ 这点小小的尊重会让开源社区更舒服。具体使用、复制和分发仍请遵守仓库中的许可证。
+| 方向 | 当前选择 |
+| --- | --- |
+| 桌面内核 | Electron 42.x |
+| 构建框架 | electron-vite 5.x、Vite 7.x |
+| 界面 | React 18.2、TypeScript 5.x |
+| 打包 | electron-builder 26.x、NSIS、portable、AppImage、deb |
+| 曲库 | SQLite、better-sqlite3、native scanner、metadata worker |
+| 音频 | HTML Audio fallback、Native Audio Host、WASAPI Shared / Exclusive、ASIO、DSD / DoP |
+| DSP / HiFi | ECHO SRC、PCM dither、ECHO SDM / DSD、CPU / CUDA 实验计算 |
+| 扩展 | 插件 SDK、远程来源、网络元数据、下载器、局域网播放能力 |
 
-同时请注意：**任何大型 PR 都不会被合并。** 社区版现在主要靠大家一起养。发现 bug 可以自己修，先开 Issue 说清楚，再发范围小、能审查的 Pull Request。
+版本号以 [package.json](./package.json) 和 [package-lock.json](./package-lock.json) 为准；如果文档与锁文件冲突，请优先相信锁文件并提交文档修正。
 
-感谢每一位善意使用、认真反馈、帮助测试和参与贡献的朋友。希望这一次，我们可以一起让 ECHO 走得更远。
+## 仓库结构
 
-## 社区版是什么
+| 路径 | 作用 |
+| --- | --- |
+| `src/renderer` | React 页面、组件、状态和界面交互 |
+| `src/preload` | 渲染层可访问的类型化桥接 API |
+| `src/main` | Electron 主进程、IPC、服务层、曲库、播放、设置和系统集成 |
+| `src/shared` | 主进程、预加载和渲染层共用的类型、常量和纯工具 |
+| `electron-app` | 原生宿主、构建产物、FFmpeg 工具链和打包资源 |
+| `native` | 原生模块与宿主相关源码 |
+| `scripts` | 构建、校验、修复、打包、烟测和维护脚本 |
+| `docs` | 架构、曲库、音频、插件、Linux 构建和 UI 文档 |
+| `build-resources` | 图标、安装包资源和构建资源 |
 
-这个仓库是 **ECHO Community**，也就是社区版。
-
-它是开源、可自行构建和分发的桌面播放器：本地曲库、稳定播放、HiFi 输出、DSP，以及社区版里已经有的远程库、插件等能力，都还在。它**不是** Steam 版的完整拷贝，也没有创意工坊那套生态。
-
-接下来我们会**降低社区版的更新频率**。官方重心转向 Steam 版；社区版交给大家一起维护。遇到 bug，欢迎自己动手修，然后提交 Pull Request。严重问题我们仍会看，但不要再把社区版当成每周必更的官方主线。
-
-想体验完整生态（创意工坊、主题、歌词场景、可视化、DSP 预设，以及持续的官方更新），请购买 **ECHO Steam Ver.**：
-
-<p align="center">
-  <a href="https://www.ifdian.net/a/echonext"><strong>购买 ECHO Steam Ver. →</strong></a>
-</p>
-
-别把两份东西混成同一个仓库。社区版功能更全、节奏更慢、靠 PR 养活；Steam 版更克制，但有工坊生态和官方更新主线。至于回本（圈钱）……对，完整生态请走 Steam。
-
-| | Community（本仓库） | ECHO Steam Ver. |
-| :--- | :--- | :--- |
-| 定位 | 开源社区版，由大家维护 | 本地优先的完整生态发行版 |
-| 更新 | 降低频率；修 bug 请自己 PR | 官方更新主线 |
-| 许可 / 源码 | 本仓库，`LGPL-3.0-only` | 独立装配，按 Steam 发布边界裁剪 |
-| 本地曲库 / DSP / HiFi 输出 | 有 | 有 |
-| 远程曲库 | 有 | 有（用户自己的网盘 / NAS / 媒体库） |
-| 第三方音乐平台 / 下载器 / 在线 MV | 社区版可保留既有能力 | 不提供 |
-| 创意工坊 | 无 | 主题、歌词场景、可视化、DSP 等 |
-| 当前平台 | 以本仓库发布说明为准 | 当前发布主线是 Windows；Linux / macOS 还不能当成 Steam 已支持 |
-
-2026 年 8 月 15 日前购入 ECHO Pro 的朋友，仍按当时承诺处理 Steam CD Key、贡献者名单和周边；这档限时权益已经结束。Steam 商店页还没公开，购买入口暂时走 [爱发电](https://www.ifdian.net/a/echonext)。
-
----
-
-## 认识 ECHO NEXT
-
-ECHO是功能最全面的音乐播放器、（自信）
-
-（如果有比我还全的 我要做高调的黑客了。）
-
-### 为什么是 NEXT？
-
-「ECHO NEXT」の NEXT は、Ado の楽曲『新時代』から取りました。
-
-它不只是给旧 ECHO 加一个新名字。老版本在大曲库、长时间运行和功能不断叠加时，确实暴露过严重的性能问题：播放、界面、扫描和状态更新互相牵扯，代码也越堆越像一座不太好下脚的山。说得直白一点，老 ECHO 有性能问题，也有屎山问题(虽然NEXT也有很多屎山。但比老版本强一千倍)。
-
-NEXT 是一次把基础重新理顺的尝试：保留喜欢的功能，也把性能、稳定性、模块边界和原生播放链路当成真正的产品能力，而不是以后再说的 TODO。
-
-| LOCAL LIBRARY | DSP CENTER | NATIVE OUTPUT |
-| :--- | :--- | :--- |
-| 文件夹扫描、SQLite 曲库、标签、封面、专辑墙与播放列表 | 参数 EQ、Headroom、FIR、OPRA、声道工具与输出安全 | WASAPI Shared / Exclusive、ASIO、DSD / DoP 与 HQPlayer |
-
-> [!NOTE]
-> 源码已经公开；许可证和第三方材料以仓库当前文件为准。
-
-## ECHO Audio Engine
-
-ECHO 不把整条音频链路塞进一个“音质增强”按钮。输入、处理模块、采样率、输出模式、设备状态和回退原因都该看得见。
-
-本地文件播放走 host-centered 的原生数据面：文件读取、libav 解码、ECHO SRC、Dither、SDM、FIFO、设备输出和 drain 判定由 `echo-audio-host` 持有；Electron 主进程负责输出计划、控制命令和状态解释，界面只负责展示与操作。播放位置以原生输出 frame counter 为准，解码器读完文件不等于歌曲已经播放结束。
+## 架构边界
 
 ```text
-LOCAL FILE
-    |
-libav decode in echo-audio-host
-    |
-PCM -> ReplayGain / Headroom / EQ / FIR / Channel Tools
-    |
-ECHO SRC / Dither / ECHO SDM when explicitly enabled
-    |
-native FIFO, output clock and drain detection
-    |
-WASAPI Shared / Exclusive / ASIO / HQPlayer
-    |
-DAC
+React Renderer
+  pages, components, virtual lists, settings, player controls
+        |
+Typed Preload Bridge
+        |
+Electron Main Process
+  IPC, windows, lifecycle, services, system integration
+        |
+        +-- Library Core
+        |     SQLite, scans, metadata, covers, folders, playlists
+        |
+        +-- Audio Core
+        |     AudioSession, decoder pipeline, output bridge, DSD / SDM / SRC state
+        |
+        +-- Native Hosts
+        |     echo-audio-host, echo-src-cuda-worker, WASAPI, ASIO, EQ, SMTC helper
+        |
+        +-- Experience Services
+              lyrics, MV, streaming, downloads, plugins, remote sources
 ```
 
-处理可以逐层打开，也可以全关。想调音时，ECHO 会告诉你声音经过了什么；想直出时，就把它们旁路。远程 URL、CUE、带特殊 headers 的请求和部分 gapless / automix chained playback 仍走兼容路径；不能用原生 DSP 时会直接说，绝不装作已经生效。
+Renderer 只负责交互和展示，不直接扫描目录、不生成封面、不解析音频文件、不计算权威播放进度。主进程通过类型化 IPC 暴露受控能力，重任务进入 Library Core、Audio Core、原生宿主或独立服务。
 
-## Daemon 与 Native Scanner
+完整架构说明见 [docs/ECHO_NEXT_ARCHITECTURE.md](./docs/ECHO_NEXT_ARCHITECTURE.md)。
 
-### 新播放架构：让播放留在该待的地方
+## 构建依赖
 
-`echo-audio-host` 会常驻接手本地文件读取、libav 解码、预取、FIFO、DSP、设备输出和播放收尾；主进程通过 JSON-RPC 发出明确的打开、播放、暂停、seek、停止和队列命令，界面只负责控制和显示。
+通用依赖：
 
-这样做最实际的好处是：扫封面、写数据库、React 重渲染，甚至主进程偶尔忙一下，都不该把正在播放的 PCM 一起拖住。输出时钟、缓冲尾部和 `ended` 都由 host 说了算，自动下一首不用再靠前端猜时间。
+| 依赖 | 推荐版本 / 要求 |
+| --- | --- |
+| Node.js | 22.23.1 LTS（`.nvmrc`、`.node-version` 和 Volta 已固定；最低 22.23） |
+| npm | 10.8.2（由 `package.json#packageManager` 固定） |
+| Git | 2.x |
+| Python | 3.x，供部分 native 依赖构建链使用 |
+| C++ 编译链 | 支持 C++17 |
+| CMake | 3.24 或更高更稳妥 |
+| Electron | 使用 `package-lock.json` 固定版本，不要手动升级 |
 
-### Native Scanner：大曲库性能高手
+平台依赖：
 
-`echo-native-scanner` 是随应用打包的 C++  Scanner，负责目录扫描和音频元数据读取，再把结果以结构化数据交回曲库；扫描、重扫、基准和 smoke 都有独立入口。
+| 平台 | 需要准备 |
+| --- | --- |
+| Windows 构建工具 | Visual Studio 2022 Desktop development with C++ |
+| Windows 打包工具 | NSIS 由 electron-builder 流程处理；FFmpeg 和 yt-dlp 由 Windows 构建脚本按 manifest 自动准备 |
+| Linux 构建工具 | CMake、g++、pkg-config、fakeroot、dpkg、rpm、binutils |
+| Linux 音频 / 桌面依赖 | ALSA、JACK、X11、fontconfig、freetype、GTK / NSS / XSS / XTest / DRM / GBM 等运行库 |
+| Linux FFmpeg | x64 可执行文件，至少包含 `aresample`；完整说明见 [Linux 构建指南](./docs/ECHO_NEXT_LINUX_BUILD.md) |
 
-它的意义不只是“更快”三个字：导入几万首歌时，界面不必替重 I/O 和格式探测硬抗。现有兼容路径仍在，遇到不适用的格式或环境会回退或报出原因；
+Ubuntu / Debian 常用依赖：
 
-### Electron 不是犯罪
-
-ECHO 不是浏览器播放器，也不是网页端套个窗口。Electron 是我们的桌面壳和前端运行时：React 的组件化、可视化、热更新、跨平台窗口和迭代速度，都让播放器界面可以认真做。
-
-真正吃重的部分已经不在网页里：音频 daemon、native scanner、WASAPI / ASIO、DSD、DSP 和系统集成各做各的事。用 Electron 不是杀人；不要在说为什么不用Tauri了，它给前端带来的收益很大，对个人开发者很有帮助。此外，轻量化并不是我们的主要路线。
-
-## DSP Center
-
-DSP Center 把常常要一起用的 EQ、余量、耳机校正、FIR 和声道工具放在一个地方，想开就开，想关就关。
-
-<p align="center">
-  <img src="https://echonext.moe/assets/product/dsp-center-eq.webp" width="49%" alt="ECHO NEXT DSP Center 参数 EQ" />
-  <img src="https://echonext.moe/assets/product/dsp-center-headphone.webp" width="49%" alt="ECHO NEXT DSP Center OPRA 耳机校正" />
-</p>
-
-<p align="center">
-  <img src="https://echonext.moe/assets/product/dsp-center-fir.webp" width="49%" alt="ECHO NEXT DSP Center FIR 房间校正" />
-  <img src="https://echonext.moe/assets/product/dsp-center-channel.webp" width="49%" alt="ECHO NEXT DSP Center 声道工具" />
-</p>
-
-| 模块 | 能力 |
-| :--- | :--- |
-| Parametric EQ | Simple 模式快速塑造 Bass、Vocal、Air、Warm；Pro 模式保留频率、增益、Q 值与 Preamp 精调 |
-| Headroom / Output Safety | Auto Gain、前级余量、削波风险和输出安全状态进入同一套工作流 |
-| OPRA Headphone Correction | 按品牌和型号选择耳机校正曲线，并保留 A/B 与旁路判断 |
-| FIR / Room Correction | 导入 IR，管理 Trim、延迟和卷积处理前后的安全余量 |
-| Channel Tools | 左右声道增益、平衡、延迟差、Mono 与声道交换 |
-| APO Import / Export | 连接已有 Equalizer APO 配置与 ECHO 的 DSP 工作流 |
-
-EQ、FIR、ReplayGain、声道工具和重采样只要参与处理，就不再算 bit-perfect。把它们全旁路后，且输出格式没有别的问题，状态才会回来。开着 DSP 还自称直通，没这个选项。
-
-[阅读 DSP 新手教程](https://echonext.moe/zh/docs/audio-output/dsp-beginner/) · [阅读 EQ 指南](https://echonext.moe/zh/docs/audio-output/eq/)
-
-## PCM 与 ECHO SRC
-
-ECHO SRC 是 PCM 采样率转换链路。它按 44.1 kHz 和 48 kHz 两个家族规划目标，不会把所有歌硬塞进同一个输出格式。
-
-```text
-PCM INPUT
-    |
-ECHO FIR / SAMPLE RATE CONVERSION
-    |
-2x PCM / 4x PCM / 8x Ultra
-    |
-WASAPI EXCLUSIVE or OFFICIAL ASIO
-    |
-DAC
+```bash
+sudo apt update
+sudo apt install cmake g++ pkg-config fakeroot dpkg rpm binutils
+sudo apt install libasound2-dev libjack-jackd2-dev libfreetype-dev libfontconfig1-dev
+sudo apt install libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev
+sudo apt install libgtk-3-0 libnss3 libxss1 libxtst6 libdrm2 libgbm1
 ```
 
-| 维度 | ECHO SRC |
-| :--- | :--- |
-| 倍率 | 2x PCM、4x PCM、8x Ultra；源采样率已经达到目标时可以旁路 |
-| 质量策略 | Balanced、Transparent、Low latency |
-| 滤波与精度 | 普通模式提供可靠起点，高级模式开放 Filter、Quality Ladder、Dither 与 Noise Shaping |
-| 计算路径 | 本地原生播放由 native CPU 路径执行；CUDA worker 还在，但不会把 CPU fallback 冒充成 CUDA 已启用 |
-| 状态反馈 | 显示源采样率、目标采样率、引擎、质量策略、精度与当前路径 |
-| 输出要求 | 验证升频时使用 WASAPI Exclusive 或 DAC 厂商官方 ASIO，并由真实 DAC 状态确认结果 |
+## 中国大陆镜像源
 
-升频会重算 PCM 采样点，所以不是 bit-perfect。它不会凭空造出细节，倍率也不是越高越好；算法、驱动、DAC 和整条链路能不能稳定才更重要。
+中国大陆开发者建议先使用项目内置的一键配置，减少 `npm ci`、Electron 和 electron-builder 下载失败：
 
-[了解 ECHO SRC 与安全升频](https://echonext.moe/zh/docs/audio-output/upsampling/)
-
-## SDM 与 ECHO Audio Lab
-
-> [!NOTE]
-> ECHO SDM 当前属于研发预览。它是独立于 PCM 升频和原生 DSD 直出的实验链路，不应被理解为所有设备上默认可用的正式能力。
-
-ECHO SDM 探索的是从 PCM 到 Sigma-Delta Modulation 的完整处理路径：
-
-```text
-PCM INPUT
-    |
-OVERSAMPLING / FIR
-    |
-SIGMA-DELTA MODULATION
-    |
-NOISE SHAPING
-    |
-DSD / SDM OUTPUT FOR A SUPPORTED DAC
+```powershell
+npm run setup -- --mirror
 ```
 
-它把过采样、滤波、调制和噪声整形串在一起；本地 direct path 的调制与输出路由都在 native host 内完成，目前以 CPU 路径为准。先把普通 PCM 播稳，再碰这条链路。设备或驱动不满足条件时，它会回到 PCM，并告诉你为什么。
+该命令会检查工具链，配置 npmmirror 的 npm、Electron 和 electron-builder 源，并在当前终端立即完成依赖安装；持久环境变量会供之后打开的 PowerShell 使用。
 
-[查看 ECHO Pro 技术预览](https://echonext.moe/zh/pro/)
+也可以手动配置当前终端：
 
-## PCM、SRC、SDM 与 DSD
+```powershell
+npm config set registry https://registry.npmmirror.com
+$env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+$env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-builder-binaries/"
+npm ci
+```
 
-| 路径 | 输入 | 发生了什么 | 输出目标 |
-| :--- | :--- | :--- | :--- |
-| Native PCM | PCM | 不启用额外 DSP 时尽量保持直接输出 | PCM DAC path |
-| ECHO SRC | PCM | FIR 与采样率转换，生成新的 PCM 采样点 | 更高采样率 PCM |
-| ECHO SDM | PCM | 过采样、滤波、Sigma-Delta 调制与噪声整形 | 支持设备上的 DSD / SDM，研发预览 |
-| DSD Direct | DSF / DFF | 通过 DoP 封装或厂商官方 ASIO Native DSD 传输 | DAC 的 DSD 接收路径 |
+如果需要长期生效，可以把上述环境变量配置到本机用户环境变量里。请使用个人或系统级配置，不要把 `.npmrc`、代理地址、账号令牌或私有镜像凭据提交到仓库。
 
-ECHO NEXT 会把这四条路径分开表达。PCM 升频不冒充 DSD，PCM→SDM 不冒充原生 DSD 文件直出，界面显示 ASIO 也不等于 DAC 一定收到了 Native DSD。
+## 快速开始
 
-## 原生输出与设备链路
+Windows 开发者第一次构建建议按以下顺序执行：
 
-| 输出方式 | 适合场景 | 边界 |
-| :--- | :--- | :--- |
-| System / WASAPI Shared | 日常稳定播放、蓝牙、系统混音与快速排障 | 最兼容，但最终格式可能由系统混音器决定 |
-| WASAPI Exclusive | 绕开共享混音、按曲目或 DSP 目标打开 DAC | 设备会被独占，更依赖驱动和 DAC 能力 |
-| ASIO | 厂商官方驱动、专业声卡、低延迟与 Native DSD 场景 | 不把 ASIO4ALL 等包装层等同于厂商原生能力 |
-| DSD over PCM | 让支持 DoP 的 DAC 从 PCM 外观帧中还原 DSD | 链路不能对承载数据做音量、混音或重采样 |
-| ASIO Native DSD | 向明确支持的 DAC 传递原生 DSD | 属于实验能力，需要厂商官方驱动与严格音量安全 |
-| HQPlayer | 将曲库和播放控制交给 ECHO，高阶滤波与调制交给专用引擎 | 实际能力取决于 HQPlayer、NAA、DAC 与网络链路 |
+```powershell
+git clone https://github.com/Moekotori/ECHODev.git
+cd ECHODev
+npm run setup -- --mirror  # 中国大陆网络；其他地区使用 npm run setup
+npm run dev
+```
 
-DSD 播放时，数字音量、EQ、ReplayGain 和普通 PCM DSP 会破坏直出目标。ECHO 因此强调满刻度数字音量、DAC 或前级控制实际响度、官方驱动、真实设备指示和明确回退，而不是只看软件里有没有“DSD”三个字。
+`npm run setup` 会先检查 Node.js、npm、Python、CMake、Visual Studio C++ 工具链和 Windows SDK，再严格按照 `package-lock.json` 安装依赖。缺少系统工具时会停止并给出安装命令；安装后重新打开终端，再运行一次即可。`--mirror` 会同时配置并立即使用中国大陆下载镜像。
 
-[阅读 DSD 播放教程](https://echonext.moe/zh/docs/audio-output/dsd/) · [比较 WASAPI Exclusive 与 ASIO](https://echonext.moe/zh/docs/audio-output/asio-vs-exclusive/)
+非 Windows 或已准备好依赖的开发者可以直接执行：
 
-## 音频之外，仍然是一台完整的音乐播放器
+```bash
+npm run setup
+npm run dev
+```
 
-| 能力层 | 功能范围 |
-| :--- | :--- |
-| 本地曲库 | 文件夹导入、SQLite 曲库、标签读取、封面缓存、专辑、艺术家、收藏、历史、播放列表与重复歌曲筛选 |
-| 歌词与 MV | 本地与在线候选、翻译、罗马音、歌词偏移、桌面歌词、沉浸播放页与 MV 匹配 |
-| 远程来源 | WebDAV、SMB、Jellyfin、Emby、Subsonic、Navidrome 与受控的远程索引和播放 |
-| 插件扩展 | 插件、下载器、网络元数据与后台任务运行在清晰的权限和诊断边界内 |
-| 长期维护 | 日志、崩溃恢复、曲库健康、缓存迁移、设置备份和危险操作确认 |
+如果 Electron runtime 下载不完整，`npm run dev` 可能报 `Error: Electron uninstall`。先修复 Electron，再重新启动：
 
-## 快速入口
+```bash
+npm run repair:electron
+npx electron --version
+npm run dev
+```
 
-| 你想要…… | 前往 |
-| :--- | :--- |
-| 获取最新社区版 | [官方下载页](https://echonext.moe/zh/download/) · [GitHub Releases](https://github.com/Moekotori/ECHO/releases/latest) |
-| 体验完整生态 | [购买 ECHO Steam Ver.](https://www.ifdian.net/a/echonext) |
-| 第一次使用 ECHO NEXT | [使用文档](https://echonext.moe/zh/docs/) |
-| 了解最近发生了什么 | [更新日志](https://echonext.moe/zh/changelog/) |
-| 报告问题或提出建议 | [GitHub Issues](https://github.com/Moekotori/ECHO/issues) |
-| 支持项目长期开发 | [ECHO Pro](https://www.ifdian.net/a/echonext) |
-| 提交你期待的新功能 | [ECHO 许愿池](https://docs.qq.com/form/page/DYkt1UVNuaEpHcFB5) |
-| 参与安卓开发 | [ECHO Android](https://github.com/Moekotori/ECHOAndroid) |
+如果需要同时构建音频宿主和 Windows SMTC 宿主：
 
-## 还在做什么
+```bash
+npm run dev:full
+```
 
-社区版会降低更新频率，日常修 bug 请尽量自己改并发 Pull Request。官方主线在 Steam 版。没有把社区版写成宏大路线图；进度以[更新日志](https://echonext.moe/zh/changelog/)和发布说明为准。
+`npm run dev` 默认会做安全的增量前置检查：better-sqlite3 ABI、AirPlay RAOP native backend 和 audio host 都会在已验证且文件未变化时快速跳过。
 
-## ECHO Pro
+## 多设备协同开发
 
-ECHO Pro 是给愿意长期支持 ECHO 的朋友准备的。收到的支持会用在基础设施、测试设备、设计和持续开发上。
+- 每台电脑都使用仓库声明的 Node/npm 版本。nvm、fnm、asdf 可读取 `.nvmrc` 或 `.node-version`；Volta 会直接读取 `package.json`。
+- 新电脑或 `package-lock.json`、工具链版本变化后运行 `npm run setup`。普通源码同步后直接运行 `npm run dev`，增量检查会复用本机仍然有效的原生产物。
+- 只通过 Git 同步源码、配置和 `package-lock.json`。不要在电脑之间复制 `node_modules`、`out`、`dist`、`build`、`.echo-local`、私钥或 `.env`；原生模块必须在各设备本地按对应 ABI 构建。
+- 日常依赖安装使用 `npm ci`，不要随手使用 `npm install` 改写 lockfile。确实升级依赖时，将 `package.json` 与 `package-lock.json` 放在同一个提交中。
 
-权益和实验功能会随版本调整，具体以官方页面为准。
+## 常用命令
 
-<p align="center">
-  <span title="如果你不想开 Pro 但想体验 Pro 的权益，这个项目是开源的。所以……（不用我说得更明白了吧？！）">████████████████████████████████████████</span>
-</p>
+| 命令 | 用途 |
+| --- | --- |
+| `npm run setup` | 检查工具链并按 lockfile 初始化当前电脑；中国大陆可追加 `-- --mirror` |
+| `npm run dev` | 启动 Electron + Vite 开发环境 |
+| `npm run dev:full` | 构建音频宿主和 SMTC 宿主后启动开发环境 |
+| `npm run repair:electron` | 重新安装 / 修复 Electron runtime |
+| `npm run typecheck` | TypeScript 类型检查 |
+| `npm run test` | 运行 Vitest 测试 |
+| `npm run build` | 类型检查并构建主进程、预加载和渲染进程 |
+| `npm run prepare:win-ffmpeg` | 按 manifest 下载并校验 Windows 打包所需的 FFmpeg |
+| `npm run prepare:win-ytdlp` | 按 manifest 下载并校验 Windows 流媒体播放所需的 yt-dlp |
+| `npm run verify:ffmpeg` | 检查 FFmpeg 工具链 |
+| `npm run build:audio-host` | 构建音频宿主 |
+| `npm run build:src-cuda-worker` | 构建 ECHO SRC CUDA worker |
+| `npm run build:smtc-host` | 构建 Windows SMTC 宿主 |
+| `npm run build:native-scanner` | 构建 native scanner |
+| `npm run ensure:src-cuda-worker` | CUDA worker 增量检查，产物未过期则跳过 |
+| `npm run ensure:smtc-host` | Windows SMTC 宿主增量检查，产物未过期则跳过 |
+| `npm run ensure:native-scanner` | native scanner 增量检查，产物未过期则跳过 |
+| `npm run smoke:audio-host` | 音频宿主烟测 |
+| `npm run smoke:dsd-direct` | DSD / DoP / Native DSD 直出链路烟测 |
+| `npm run smoke:smtc-host` | Windows SMTC 宿主烟测 |
+| `npm run build:win` | 构建 Windows base/dev 安装包和便携版 |
+| `npm run build:win:dir` | 快速构建 Windows unpacked 目录包，跳过 NSIS / portable 压缩 |
+| `npm run build:win:dir:quick` | 更快的本地 unpacked 目录包，跳过 TypeScript 全量检查 |
+| `npm run build:win:release` | 构建带 Windows Authenticode 签名的发布包 |
+| `npm run build:linux` | 在 Linux x64 环境构建 Linux 包 |
 
-<p align="center">
-  <a href="https://www.ifdian.net/a/echonext"><strong>支持 ECHO NEXT · 了解 ECHO Pro →</strong></a>
-</p>
+## 构建流程
 
-## 参与 ECHO Android 开发
+开发启动：
 
-ECHO Android 是 ECHO 的 Android 客户端项目。想参与移动端播放器、曲库、同步、播放体验或平台适配开发，可以直接前往仓库了解进展并提交 Issue 或 PR。
+```bash
+npm ci
+npm run dev
+```
 
-<p align="center">
-  <a href="https://github.com/Moekotori/ECHOAndroid"><strong>前往 ECHO Android 参与开发 →</strong></a>
-</p>
+普通编译验证：
 
-## 反馈问题
+```bash
+npm run typecheck
+npm run build
+```
 
-提 Issue 前先读 [Issue 规范](./.github/ISSUE_POLICY.md)。请先公开 Star。明确的流媒体功能请求和明确辱骂会自动关闭；漏勾选、随口提到文件来源、奇葩许愿都不会被机器人误关。
+Windows base/dev 打包：
 
-如果你遇到异常，请先确认正在使用最新版本，再通过 [GitHub Issues](https://github.com/Moekotori/ECHO/issues) 提交反馈。信息越完整，问题通常越容易被定位：
+```bash
+npm run build:win
+```
 
-- ECHO NEXT 版本与下载渠道；
-- 操作系统版本和设备信息；
-- 清晰、可重复的操作步骤；
-- 预期结果与实际结果；
-- 必要的截图、日志或录屏。
+`npm run build:win` 使用安全增量检查复用未过期的 audio host、SMTC host、native scanner 和 CUDA worker 产物。项目不再使用额外的 package integrity 私钥，换机后无需迁移或重新生成 ECHO 打包密钥。
 
-提交前请移除账号、令牌、本机隐私路径和其他敏感信息。功能建议也欢迎通过 Issues 提出，但是否实现及具体排期以维护计划为准。
+如果只需要本机验证打包后的 resources / asar / 主程序结构，优先用更快的目录包：
+
+```bash
+npm run build:win:dir
+```
+
+`build:win:dir` 会生成 `dist/win-unpacked`，跳过 NSIS 安装包和 portable 压缩，适合本地反复验证。
+
+如果你刚跑过 `npm run typecheck`，或者只是验证打包资源变化，可以用：
+
+```bash
+npm run build:win:dir:quick
+```
+
+这个命令跳过 TypeScript 全量检查，只适合本地快速迭代；提交前或发布前仍应跑 `npm run typecheck`、`npm run build:win` 或对应的 release 构建。
+
+发布 Windows 包时使用 `npm run build:win:release`。正式发布仍必须配置 Windows 代码签名证书，并将证书发布者名称写入 `ECHO_WINDOWS_PUBLISHER_NAME`。release 构建会把该名称固定到 `app-update.yml`，随后验证安装包、便携版和解包主程序的 Authenticode 状态；任一产物未签名、签名无效或发布者不匹配都会直接失败。`build:win` / `build:win:unsigned` 仍保留用于本地开发验证。
+
+Linux 打包：
+
+```bash
+npm ci
+npm run verify:ffmpeg
+npm run build:linux
+```
+
+Linux x64 打包细节见 [docs/ECHO_NEXT_LINUX_BUILD.md](./docs/ECHO_NEXT_LINUX_BUILD.md)。
+
+## Nix / Flake
+
+项目提供 Nix flake，用于 Linux 上的开发 shell、构建 derivation 和 nixpkgs overlay：
+
+| 命令 | 用途 |
+| --- | --- |
+| `nix develop` | 进入开发 shell（Node 22、CMake、ALSA、GTK3、Electron 等） |
+| `nix build` | 使用 nixpkgs Electron 构建 ECHO NEXT，产物在 `result/` |
+| `nix run` | 直接运行构建产物 |
+| `nix flake check` | 验证 flake outputs |
+
+`LICENSE` 是 source-available 非 OSS 许可，Nix 构建需要显式允许 unfree：
+
+```bash
+NIXPKGS_ALLOW_UNFREE=1 nix build --impure .#echo-next
+```
+
+## 验证策略
+
+不要为了小改动低效率跑全量测试。按改动范围选择最小有效验证：
+
+| 改动范围 | 推荐验证 |
+| --- | --- |
+| README / docs | 检查内容和 diff |
+| TypeScript / IPC 类型 | `npm run typecheck` |
+| Renderer 逻辑 | 相关 Vitest 或 focused manual check |
+| 主进程服务 | `npm run typecheck` 加对应服务的 focused check |
+| 曲库 / SQLite | 相关 library 测试或最小复现脚本 |
+| 音频宿主 | `npm run build:audio-host`、`npm run smoke:audio-host` |
+| ECHO SRC / CUDA worker | `npm run build:src-cuda-worker` 加 Audio Core focused 测试 |
+| SDM / DSD / ASIO Native | Audio Core focused 测试、`npm run smoke:dsd-direct`，必要时加真实 DAC / ASIO 设备烟测 |
+| SMTC 宿主 | `npm run build:smtc-host`、`npm run smoke:smtc-host` |
+| FFmpeg / yt-dlp / 打包资源 | `npm run prepare:win-ffmpeg`、`npm run prepare:win-ytdlp`、`npm run verify:ffmpeg` |
+| Windows 打包 | `npm run build:win` |
+| Linux 打包 | `npm run build:linux` |
+
+## 安全边界
+
+不要移除、绕过、mock、短路或削弱认证、授权、许可证校验、权益检查、订阅检查、下载鉴权或反滥用逻辑。音频组件仍会按清单校验文件大小和 SHA-256，防止损坏文件被安装。
+
+涉及 SDM、DSD、ASIO Native、CUDA worker 或音频热路径的改动也按高风险处理：默认关闭、失败可见、fallback 可解释，不要为了“看起来生效”牺牲播放稳定性或设备安全。
+
+不要提交私钥、令牌、账号密码、真实用户数据、本机绝对路径或私有部署信息。
+
+## 贡献规则
+
+| 类型 | 规则 |
+| --- | --- |
+| 小修复 | 可以直接提 PR，说明改动范围和验证结果 |
+| 大型 PR | 先通过 issue、讨论区或维护者联系方式说明目标、范围和风险 |
+| 跨模块重构 | 先沟通边界，不要一次性混入无关格式化或清理 |
+| UI 大改 | 说明影响页面、交互变化和回归验证 |
+| 数据库迁移 | 说明兼容策略、备份 / 回滚风险和测试方式 |
+| 播放链路 / 原生宿主 | 说明设备、格式、输出模式和烟测结果 |
+| SDM / DSD / CUDA 音频链路 | 说明设备能力、输出模式、目标 DSD 档位、fallback 行为和 focused 验证 |
+| 授权 / 完整性 / Pro 权益 | 先读 maintainer notes，保持 fail-closed |
+
+## 相关文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [docs/ECHO_NEXT_ARCHITECTURE.md](./docs/ECHO_NEXT_ARCHITECTURE.md) | 总体架构 |
+| [docs/ECHO_NEXT_LIBRARY_CORE.md](./docs/ECHO_NEXT_LIBRARY_CORE.md) | 曲库核心 |
+| [docs/ECHO_NEXT_AUDIO_CORE.md](./docs/ECHO_NEXT_AUDIO_CORE.md) | 音频核心 |
+| [docs/ECHO_NEXT_NATIVE_AUDIO_PIPELINE.md](./docs/ECHO_NEXT_NATIVE_AUDIO_PIPELINE.md) | Native 音频数据面迁移、DSP 所有权与多人协作边界 |
+| [docs/ECHO_NEXT_EQ.md](./docs/ECHO_NEXT_EQ.md) | EQ 与 DSP 边界 |
+| [docs/ECHO_NEXT_PLUGINS.md](./docs/ECHO_NEXT_PLUGINS.md) | 插件制作指南 |
+| [docs/plugin-sdk/ForAIReadme.md](./docs/plugin-sdk/ForAIReadme.md) | 给 AI 读取的插件编写规则和检查清单 |
+| [docs/ECHO_NEXT_NETWORK_METADATA.md](./docs/ECHO_NEXT_NETWORK_METADATA.md) | 网络元数据补全 |
+| [docs/ECHO_NEXT_LINUX_BUILD.md](./docs/ECHO_NEXT_LINUX_BUILD.md) | Linux 构建 |
+| [docs/ECHO_NEXT_UI_GUIDE.md](./docs/ECHO_NEXT_UI_GUIDE.md) | UI 指南 |
+| [flake.nix](./flake.nix) | Nix flake：开发 shell、构建和 overlay |
+| [docs/security/entitlement-maintainer-notes.md](./docs/security/entitlement-maintainer-notes.md) | 权益、完整性和付费能力维护说明 |
 
 ## License
 
-本仓库采用 [GNU Lesser General Public License v3.0](./LICENSE)，对应 SPDX 标识 `LGPL-3.0-only`；第三方材料仍遵循各自的许可条款。
-
-简单说：你可以使用、学习、修改和分发 ECHO；如果分发了修改过的 ECHO，则需要保留 LGPL 许可，并让接收者能取得对应的 ECHO 源码与修改内容。别把改过的 ECHO 锁成闭源黑盒就好。参考了 ECHO 的代码或设计，也请在项目里留个名字或链接~ 完整权利与义务仍以 [LICENSE](./LICENSE) 为准。
-
-## 技术致敬
-
-ECHO 的很多能力不是凭空出现的，向这些优秀的开源项目、音频技术与标准致敬：
-
-| 项目 / 技术 | 在 ECHO 中做什么 |
-| :--- | :--- |
-| [FFmpeg](https://ffmpeg.org/) / libav | 音频解码与媒体处理基础设施 |
-| [SoX Resampler / libsoxr](https://sourceforge.net/projects/soxr/) | 高质量 PCM 重采样的参考与可用后端 |
-| [SQLite](https://sqlite.org/) / [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) | 本地曲库与索引存储 |
-| [TagLib](https://taglib.org/) / [music-metadata](https://github.com/Borewit/music-metadata) | 音频标签、封面与元数据读取 |
-| [Electron](https://www.electronjs.org/) / [React](https://react.dev/) | 桌面壳、界面与交互开发体验 |
-| [WASAPI](https://learn.microsoft.com/windows/win32/coreaudio/wasapi) / [ASIO](https://www.steinberg.net/asio/) | Windows 音频设备与低延迟输出能力 |
-| [NVIDIA CUDA](https://developer.nvidia.com/cuda-toolkit) | ECHO SRC 的可选计算路径 |
-
-ECHO SRC、ECHO SDM、dither、噪声整形、FIFO 与输出调度是项目自己的实现和取舍；它们也站在长期音频工程经验与这些技术基础之上。谢谢每一位把工具、标准和知识留给后来者的人。
-
----
-
-<p align="center">
-  感谢每一位仍在使用、测试、反馈和支持 ECHO NEXT 的朋友。<br />
-  <strong>项目会以新的方式，继续向前。</strong>
-</p>
-
-## Star History
-
-<p align="center">
-  <a href="https://www.star-history.com/#Moekotori/ECHO&Date">
-    <img alt="ECHO Star History Chart (through 2026-08-05)" src="./examples/star-history.svg" width="860" />
-  </a>
-</p>
-
-## 小小声明
-
-<p align="center">
-  <img src="./examples/author-please-be-gentle.jpg" width="280" alt="请对个人开发者温柔一点" />
-</p>
-
-大大方方承认：ECHO 的开发里用了 AI。它会帮我查资料、整理思路、写掉一些重复劳动；但代码能不能跑、声音会不会出问题、设备会不会翻脸，最后还是要靠测试、日志、真机和我自己一点点收拾。目前我对ECHO的质量还是很肯定的，我能确保这可以端给大家！
-
-我是个人开发者，做得不完美的地方请多多包涵。作者吃软不吃硬：带着复现步骤、日志和正常语气来反馈，我会认真看、认真修；如果用喷人的语气反馈问题，那我一定会喷回去的。（真的会。）
-
-### 联系作者
-
-- Email: [nyafairy233@gmail.com](mailto:nyafairy233@gmail.com)
-- Discord: `Moekotori`
-
-### 流媒体免责声明
-
-ECHO 是本地优先的音乐播放器，不是盗版分发工具，也不替任何第三方流媒体平台提供内容或授权。涉及第三方服务时，账号、内容与使用权限均由用户自行依法取得并遵守对应平台的规则。
-
-ECHO 不会提供超出合法使用范围、侵害音乐人、版权方或平台权益的功能：不绕过访问控制，不破解平台限制，不提供未授权下载歌曲、规避付费权益或其他侵权能力。
+ECHO NEXT is source-available under the [ECHO NEXT Source-Available License](./LICENSE). The license permits personal review, learning, and local builds, but prohibits cracks, bypassing entitlement or integrity checks, and unauthorized redistribution of modified builds.

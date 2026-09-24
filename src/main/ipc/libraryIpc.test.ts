@@ -13,6 +13,7 @@ import type {
   LibraryPlaylist,
 } from '../../shared/types/library';
 import type { RemoteBackgroundGlobalStatus, RemoteSource } from '../../shared/types/remoteSources';
+import { writeCoverCacheOwnershipMarker } from '../library/CoverCacheOwnership';
 
 const handlers: Record<string, (...args: unknown[]) => unknown> = {};
 const handleMock = vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
@@ -1271,7 +1272,7 @@ describe('library IPC', () => {
     const service = installLibraryService();
     const root = makeTempRoot();
     const coverPath = join(root, 'cover.png');
-    const coverImage = { isEmpty: () => false as false };
+    const coverImage = { isEmpty: () => false as const };
     writeFileSync(coverPath, 'cover');
     service.getTrack.mockReturnValue({ ...service.getTrack('track-1'), coverId: 'cover-1' });
     service.resolveCoverAsset.mockReturnValue({ filePath: coverPath, mimeType: 'image/png' });
@@ -1289,7 +1290,7 @@ describe('library IPC', () => {
     const service = installLibraryService();
     const root = makeTempRoot();
     const coverPath = join(root, 'album-original.png');
-    const coverImage = { isEmpty: () => false as false };
+    const coverImage = { isEmpty: () => false as const };
     writeFileSync(coverPath, 'cover');
     service.getAlbum.mockReturnValue({
       id: 'album-1',
@@ -1461,6 +1462,7 @@ describe('library IPC', () => {
     const historyResult = await handlers[IpcChannels.LibraryGetPlaybackHistory]!(null, {
       page: 1,
       pageSize: 20,
+      mediaType: 'local',
       sort: 'recent',
     });
     const summaryResult = await handlers[IpcChannels.LibraryGetPlaybackHistorySummary]!(null, {
@@ -1477,6 +1479,7 @@ describe('library IPC', () => {
     expect(service.getPlaybackHistoryPlaybackSafe).toHaveBeenCalledWith({
       page: 1,
       pageSize: 20,
+      mediaType: 'local',
       sort: 'recent',
     });
     expect(service.getPlaybackHistorySummary).not.toHaveBeenCalled();
@@ -1702,11 +1705,11 @@ describe('library IPC', () => {
 
     await handlers[IpcChannels.LibraryGetTracks]!(null, { page: 1, pageSize: 50, sort: 'fileModifiedDesc', extra: true });
     await handlers[IpcChannels.LibraryGetTracks]!(null, { page: 1, pageSize: 50, sort: 'artistAlbum', extra: true });
-    await handlers[IpcChannels.LibraryGetAlbums]!(null, { page: 1, pageSize: 50, sort: 'fileModifiedAsc', extra: true });
+    await handlers[IpcChannels.LibraryGetAlbums]!(null, { page: 1, pageSize: 50, sort: 'fileModifiedAsc', excludeOsuAlbums: true, extra: true });
 
     expect(service.getTracks).toHaveBeenCalledWith({ page: 1, pageSize: 50, sort: 'fileModifiedDesc' });
     expect(service.getTracks).toHaveBeenCalledWith({ page: 1, pageSize: 50, sort: 'artistAlbum' });
-    expect(service.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 50, sort: 'fileModifiedAsc' });
+    expect(service.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 50, sort: 'fileModifiedAsc', excludeOsuAlbums: true });
   });
 
   it('registers artist detail IPC handlers with normalized queries', async () => {
@@ -1891,6 +1894,7 @@ describe('library IPC', () => {
       writeFileSync(join(root, 'echo-settings.json'), '{}\n', 'utf8');
       writeFileSync(join(root, 'plugins', 'plugin-state.json'), '{}\n', 'utf8');
       writeFileSync(join(root, 'cover-cache', 'cover.webp'), 'cover', 'utf8');
+      await writeCoverCacheOwnershipMarker(externalCoverCache);
       writeFileSync(join(externalCoverCache, 'external-cover.webp'), 'cover', 'utf8');
       getLibraryServiceMock.mockReturnValue({
         ...installLibraryService(),
@@ -1918,6 +1922,36 @@ describe('library IPC', () => {
       expect(closeDatabaseUserMocks.streaming).toHaveBeenCalledTimes(1);
       expect(closeDatabaseUserMocks.remote).toHaveBeenCalledTimes(1);
       expect(closeDatabaseUserMocks.library).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an unowned external cache directory intact during factory reset', async () => {
+    vi.useFakeTimers();
+    try {
+      const root = makeTempRoot();
+      const externalCache = makeTempRoot();
+      const unrelatedFile = join(externalCache, 'unrelated.txt');
+      const { app } = await import('electron');
+      vi.mocked(app.getPath).mockImplementation((name: string) => (name === 'downloads' ? 'D:\\Downloads' : root));
+      writeFileSync(join(root, 'echo-settings.json'), '{}\n', 'utf8');
+      writeFileSync(unrelatedFile, 'keep', 'utf8');
+      getLibraryServiceMock.mockReturnValue({
+        ...installLibraryService(),
+        getCoverCacheDir: () => externalCache,
+      });
+
+      const result = await handlers[IpcChannels.LibraryDeleteAllUserData]!() as LibraryAllUserDataDeleteResult;
+
+      expect(result.failedPaths).toEqual([
+        {
+          path: externalCache,
+          error: 'Skipped external cover cache directory because it is not marked as owned by ECHO Next.',
+        },
+      ]);
+      expect(readFileSync(unrelatedFile, 'utf8')).toBe('keep');
+      expect(result.relaunchScheduled).toBe(true);
     } finally {
       vi.useRealTimers();
     }

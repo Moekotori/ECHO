@@ -11,6 +11,7 @@ const executableName = process.platform === 'win32' ? 'echo-native-scanner.exe' 
 const scannerPath = resolve(process.env.ECHO_NATIVE_SCANNER_PATH || join(projectRoot, 'electron-app', 'build', executableName));
 const fixtureCount = Math.max(3, Number(process.env.ECHO_BENCH_METADATA_FILES ?? 900));
 const sourceRoot = process.env.ECHO_BENCH_METADATA_ROOT ? resolve(process.env.ECHO_BENCH_METADATA_ROOT) : null;
+const readCovers = process.env.ECHO_BENCH_METADATA_COVERS === '1';
 const supportedExtensions = new Set(['.wav', '.aiff', '.aif', '.ogg', '.opus', '.flac', '.fla', '.mp3', '.m4a', '.mp4', '.m4b', '.m4p']);
 
 const nowMs = () => performance.now();
@@ -420,7 +421,12 @@ const runNativePersistent = async (files) => {
   });
 
   const startedAt = nowMs();
-  child.stdin.end(`${files.map((filePath) => JSON.stringify({ type: 'metadata', path: resolve(filePath), readCover: false })).join('\n')}\n`);
+  child.stdin.end(`${files.map((filePath, index) => JSON.stringify({
+    type: 'metadata',
+    requestId: `bench-${index + 1}`,
+    path: resolve(filePath),
+    readCover: readCovers,
+  })).join('\n')}\n`);
   const exitCode = await new Promise((resolveExit, rejectExit) => {
     child.once('error', rejectExit);
     child.once('exit', (code) => resolveExit(code));
@@ -465,7 +471,7 @@ const runMusicMetadata = async (files) => {
   let failed = 0;
   for (const filePath of files) {
     try {
-      await parseFile(filePath, { duration: false, skipCovers: true });
+      await parseFile(filePath, { duration: false, skipCovers: !readCovers });
       ok += 1;
     } catch {
       failed += 1;
@@ -492,6 +498,7 @@ const main = async () => {
   console.log(`[benchmark:metadata-reader] root: ${source.root}`);
   console.log(`[benchmark:metadata-reader] source: ${source.synthetic ? 'synthetic' : 'provided'}`);
   console.log(`[benchmark:metadata-reader] files: ${source.files.length}`);
+  console.log(`[benchmark:metadata-reader] covers: ${readCovers ? 'included' : 'metadata-only'}`);
   console.log(`[benchmark:metadata-reader] native binary: ${scannerPath}`);
   console.log(`[benchmark:metadata-reader] native persistent duration: ${nativePersistent.durationMs.toFixed(2)} ms`);
   console.log(`[benchmark:metadata-reader] native persistent ok/unsupported/errors: ${nativePersistent.metadata.length}/${nativePersistent.unsupported.length}/${nativePersistent.errors.length}`);

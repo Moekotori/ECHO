@@ -58,6 +58,7 @@ export type DownloadJob = {
 
 export type CreateDownloadUrlJobOptions = Partial<Pick<DownloadSettings, 'importToLibrary' | 'bindMvAfterImport'>> & {
   providerLock?: DownloadSearchProvider;
+  osuDownloadMirror?: OsuDownloadMirror;
   title?: string;
   artist?: string;
   album?: string;
@@ -103,6 +104,76 @@ export type DownloadSearchProviderError = {
 export type DownloadSearchResponse = {
   results: DownloadSearchResult[];
   errors: DownloadSearchProviderError[];
+};
+
+export const osuRulesetValues = ['osu', 'taiko', 'fruits', 'mania'] as const;
+
+export type OsuRuleset = (typeof osuRulesetValues)[number];
+
+export type OsuAccountProfile = {
+  userId: number;
+  username: string;
+  avatarUrl: string | null;
+  countryCode: string | null;
+  isOnline: boolean | null;
+  isSupporter: boolean;
+  defaultRuleset: OsuRuleset;
+  globalRank: number | null;
+  countryRank: number | null;
+  performancePoints: number | null;
+  hitAccuracy: number | null;
+  level: number | null;
+  playCount: number | null;
+  maximumCombo: number | null;
+  playTimeSeconds: number | null;
+  bestScoreCount: number | null;
+  favouriteBeatmapsetCount: number | null;
+  mostPlayedBeatmapCount: number | null;
+};
+
+export type OsuAccountCollectionKind = 'best' | 'favourites' | 'most_played';
+
+export type OsuAccountCollectionRequest =
+  | {
+      kind: 'best';
+      ruleset: OsuRuleset;
+      start: number;
+      end: number;
+    }
+  | {
+      kind: 'favourites';
+    }
+  | {
+      kind: 'most_played';
+      offset?: number;
+      limit?: number;
+    };
+
+export type OsuAccountBeatmapItem = {
+  key: string;
+  beatmapsetId: string;
+  beatmapId: string | null;
+  title: string;
+  artist: string | null;
+  creator: string | null;
+  coverUrl: string | null;
+  webpageUrl: string;
+  durationSeconds: number | null;
+  position: number;
+  pp: number | null;
+  accuracy: number | null;
+  scoreRank: string | null;
+  mods: string[];
+  difficultyName: string | null;
+  starRating: number | null;
+  playCount: number | null;
+};
+
+export type OsuAccountCollectionResponse = {
+  profile: OsuAccountProfile;
+  kind: OsuAccountCollectionKind;
+  items: OsuAccountBeatmapItem[];
+  total: number | null;
 };
 
 export type DownloadToolsStatus = {

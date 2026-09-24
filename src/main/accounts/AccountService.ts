@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { app } from 'electron';
 import {
@@ -22,20 +22,46 @@ import { QobuzAccountProvider } from './providers/QobuzAccountProvider';
 import { SpotifyAccountProvider } from './providers/SpotifyAccountProvider';
 import { TidalAccountProvider } from './providers/TidalAccountProvider';
 import { YouTubeAccountProvider } from './providers/YouTubeAccountProvider';
+import { AccountSecretStore } from './AccountSecretStore';
 
 type StoredAccounts = Partial<Record<AccountProvider, StoredAccountRecord>>;
+
+type StoredAccountReadResult = {
+  records: StoredAccounts;
+  rewrite: boolean;
+  preservedSecrets: PreservedAccountSecrets;
+};
+
+const encryptedSecretKeys = {
+  cookie: 'encryptedCookie',
+  accessToken: 'encryptedAccessToken',
+  refreshToken: 'encryptedRefreshToken',
+} as const;
+
+type AccountSecretName = keyof typeof encryptedSecretKeys;
+type PreservedAccountSecrets = Partial<Record<AccountProvider, Partial<Record<AccountSecretName, string>>>>;
 
 const nowIso = (): string => new Date().toISOString();
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-const normalizeStoredAccounts = (value: unknown): StoredAccounts | null => {
+const normalizeStoredAccounts = (value: unknown, secretStore: AccountSecretStore): StoredAccountReadResult | null => {
   if (!isRecord(value)) {
     return null;
   }
 
-  return Object.fromEntries(accountProviders.map((provider) => [provider, normalizeStoredRecord(value[provider])])) as StoredAccounts;
+  let rewrite = false;
+  const preservedSecrets: PreservedAccountSecrets = {};
+  const records = Object.fromEntries(accountProviders.map((provider) => {
+    const normalized = normalizeStoredRecord(value[provider], secretStore);
+    rewrite ||= normalized.rewrite;
+    if (Object.keys(normalized.preservedSecrets).length > 0) {
+      preservedSecrets[provider] = normalized.preservedSecrets;
+    }
+    return [provider, normalized.record];
+  })) as StoredAccounts;
+  return { records, rewrite, preservedSecrets };
 };
 
 export const isAccountProvider = (value: unknown): value is AccountProvider =>
@@ -47,25 +73,41 @@ export const isYouTubeBrowser = (value: unknown): value is YouTubeBrowser =>
 export const isAccountBrowser = (value: unknown): value is AccountBrowser =>
   typeof value === 'string' && accountBrowsers.includes(value as AccountBrowser);
 
-const normalizeStoredRecord = (value: unknown): StoredAccountRecord => {
+const normalizeStoredRecord = (
+  value: unknown,
+  secretStore: AccountSecretStore,
+): { record: StoredAccountRecord; rewrite: boolean; preservedSecrets: Partial<Record<AccountSecretName, string>> } => {
   if (!isRecord(value)) {
-    return {};
+    return { record: {}, rewrite: false, preservedSecrets: {} };
   }
 
-    return {
-      cookie: typeof value.cookie === 'string' ? value.cookie : undefined,
+  const cookie = secretStore.decrypt(value[encryptedSecretKeys.cookie] ?? value.cookie);
+  const accessToken = secretStore.decrypt(value[encryptedSecretKeys.accessToken] ?? value.accessToken);
+  const refreshToken = secretStore.decrypt(value[encryptedSecretKeys.refreshToken] ?? value.refreshToken);
+
+  return {
+    record: {
+      cookie: cookie.value ?? undefined,
       browser: isAccountBrowser(value.browser) ? value.browser : undefined,
-      accessToken: typeof value.accessToken === 'string' ? value.accessToken : undefined,
-      refreshToken: typeof value.refreshToken === 'string' ? value.refreshToken : undefined,
+      accessToken: accessToken.value ?? undefined,
+      refreshToken: refreshToken.value ?? undefined,
       tokenType: typeof value.tokenType === 'string' ? value.tokenType : undefined,
       scope: typeof value.scope === 'string' ? value.scope : undefined,
       username: typeof value.username === 'string' ? value.username : null,
-    displayName: typeof value.displayName === 'string' ? value.displayName : null,
-    avatarUrl: typeof value.avatarUrl === 'string' ? value.avatarUrl : null,
-    lastLoginAt: typeof value.lastLoginAt === 'string' ? value.lastLoginAt : null,
-    lastCheckedAt: typeof value.lastCheckedAt === 'string' ? value.lastCheckedAt : null,
-    expiresAt: typeof value.expiresAt === 'string' ? value.expiresAt : null,
-    error: typeof value.error === 'string' ? value.error : null,
+      displayName: typeof value.displayName === 'string' ? value.displayName : null,
+      avatarUrl: typeof value.avatarUrl === 'string' ? value.avatarUrl : null,
+      lastLoginAt: typeof value.lastLoginAt === 'string' ? value.lastLoginAt : null,
+      lastCheckedAt: typeof value.lastCheckedAt === 'string' ? value.lastCheckedAt : null,
+      expiresAt: typeof value.expiresAt === 'string' ? value.expiresAt : null,
+      error: typeof value.error === 'string' ? value.error : null,
+      authInvalid: value.authInvalid === true,
+    },
+    rewrite: cookie.rewrite || accessToken.rewrite || refreshToken.rewrite,
+    preservedSecrets: {
+      ...(cookie.preservedEnvelope ? { cookie: cookie.preservedEnvelope } : {}),
+      ...(accessToken.preservedEnvelope ? { accessToken: accessToken.preservedEnvelope } : {}),
+      ...(refreshToken.preservedEnvelope ? { refreshToken: refreshToken.preservedEnvelope } : {}),
+    },
   };
 };
 
@@ -98,9 +140,13 @@ const assertCookieHeaderValueSafe = (cookie: string): void => {
 
 export class AccountService {
   private records: StoredAccounts | null = null;
+  private preservedSecrets: PreservedAccountSecrets = {};
   private readonly providers: Record<AccountProvider, AccountProviderBase>;
 
-  constructor(private readonly storagePath = join(app.getPath('userData'), 'accounts.json')) {
+  constructor(
+    private readonly storagePath = join(app.getPath('userData'), 'accounts.json'),
+    private readonly secretStore = new AccountSecretStore(),
+  ) {
     const youtube = new YouTubeAccountProvider();
     this.providers = {
       netease: new NeteaseAccountProvider(),
@@ -122,6 +168,12 @@ export class AccountService {
 
   getBackupStoragePath(): string {
     return `${this.storagePath}.bak`;
+  }
+
+  reloadFromDisk(): void {
+    this.records = null;
+    this.preservedSecrets = {};
+    this.readRecords();
   }
 
   getStatuses(): AccountStatus[] {
@@ -166,6 +218,7 @@ export class AccountService {
   clearAccount(provider: AccountProvider): AccountStatus {
     this.requireProvider(provider);
     const records = this.readRecords();
+    delete this.preservedSecrets[provider];
     records[provider] = this.providers[provider].clear();
     this.writeRecords(records);
     return this.getStatus(provider);
@@ -350,16 +403,22 @@ export class AccountService {
       return this.records;
     }
 
-    const primaryRecords = this.readRecordsFromPath(this.storagePath);
-    if (primaryRecords) {
-      this.records = primaryRecords;
+    const primaryResult = this.readRecordsFromPath(this.storagePath);
+    if (primaryResult) {
+      this.records = primaryResult.records;
+      this.preservedSecrets = primaryResult.preservedSecrets;
+      if (primaryResult.rewrite) {
+        // Do not copy a legacy plaintext primary file into the backup before migration.
+        this.writeRecords(this.records, false);
+      }
       return this.records;
     }
 
-    const backupRecords = this.readRecordsFromPath(this.getBackupStoragePath());
-    if (backupRecords) {
-      this.records = backupRecords;
-      this.writeRecords(backupRecords);
+    const backupResult = this.readRecordsFromPath(this.getBackupStoragePath());
+    if (backupResult) {
+      this.records = backupResult.records;
+      this.preservedSecrets = backupResult.preservedSecrets;
+      this.writeRecords(backupResult.records);
       return this.records;
     }
 
@@ -372,35 +431,64 @@ export class AccountService {
     return this.records;
   }
 
-  private readRecordsFromPath(filePath: string): StoredAccounts | null {
+  private readRecordsFromPath(filePath: string): StoredAccountReadResult | null {
     if (!existsSync(filePath)) {
       return null;
     }
 
     try {
-      return normalizeStoredAccounts(JSON.parse(readFileSync(filePath, 'utf8')) as unknown);
+      return normalizeStoredAccounts(JSON.parse(readFileSync(filePath, 'utf8')) as unknown, this.secretStore);
     } catch {
       return null;
     }
   }
 
-  private writeRecords(records: StoredAccounts): void {
+  private writeRecords(records: StoredAccounts, preserveCurrentBackup = true): void {
     mkdirSync(dirname(this.storagePath), { recursive: true });
     const tmpPath = `${this.storagePath}.tmp`;
-    if (existsSync(this.storagePath)) {
+    if (preserveCurrentBackup && existsSync(this.storagePath)) {
       this.copyPrimaryToBackup();
     }
-    writeFileSync(tmpPath, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
+    writeFileSync(tmpPath, `${JSON.stringify(this.serializeRecords(records), null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     renameSync(tmpPath, this.storagePath);
+    this.restrictFilePermissions(this.storagePath);
     this.copyPrimaryToBackup();
     this.records = records;
+  }
+
+  private serializeRecords(records: StoredAccounts): Record<string, unknown> {
+    return Object.fromEntries(accountProviders.map((provider) => {
+      const record = records[provider];
+      if (!record) {
+        return [provider, {}];
+      }
+      const { cookie, accessToken, refreshToken, ...safeFields } = record;
+      const persistedCookie = cookie ? this.secretStore.encrypt(cookie) : this.preservedSecrets[provider]?.cookie;
+      const persistedAccessToken = accessToken ? this.secretStore.encrypt(accessToken) : this.preservedSecrets[provider]?.accessToken;
+      const persistedRefreshToken = refreshToken ? this.secretStore.encrypt(refreshToken) : this.preservedSecrets[provider]?.refreshToken;
+      return [provider, {
+        ...safeFields,
+        ...(persistedCookie ? { [encryptedSecretKeys.cookie]: persistedCookie } : {}),
+        ...(persistedAccessToken ? { [encryptedSecretKeys.accessToken]: persistedAccessToken } : {}),
+        ...(persistedRefreshToken ? { [encryptedSecretKeys.refreshToken]: persistedRefreshToken } : {}),
+      }];
+    }));
   }
 
   private copyPrimaryToBackup(): void {
     try {
       copyFileSync(this.storagePath, this.getBackupStoragePath());
+      this.restrictFilePermissions(this.getBackupStoragePath());
     } catch {
       // The primary atomic write remains the source of truth if backup creation fails.
+    }
+  }
+
+  private restrictFilePermissions(filePath: string): void {
+    try {
+      chmodSync(filePath, 0o600);
+    } catch {
+      // Windows ACLs are managed by the user profile; chmod is best-effort there.
     }
   }
 }

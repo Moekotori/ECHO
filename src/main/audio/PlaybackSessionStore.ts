@@ -12,7 +12,7 @@ import type {
   PersistedQueueItem,
   PersistedQueueSource,
 } from '../../shared/types/playback';
-import type { LibraryTrack } from '../../shared/types/library';
+import type { ContinuousPlayMode, ContinuousPlayPreference, LibraryTrack } from '../../shared/types/library';
 
 const activeSessionId = 'active';
 const playbackSessionSchemaSql = `
@@ -31,7 +31,8 @@ const runtimePragmas = [
 ] as const;
 
 const repeatModes = new Set<PersistedPlaybackRepeatMode>(['off', 'one', 'all']);
-const queueSourceTypes = new Set(['songs', 'album', 'artist', 'folder', 'liked', 'streaming', 'local-file', 'manual']);
+const queueSourceTypes = new Set(['songs', 'album', 'artist', 'folder', 'liked', 'streaming', 'local-file', 'continuous-play', 'manual']);
+const continuousPlayModes = new Set<ContinuousPlayMode>(['similar', 'deep-cuts', 'recently-added', 'night', 'headphone-test']);
 const playbackStates = new Set<AudioPlaybackState>(['idle', 'loading', 'playing', 'paused', 'stopped', 'ended', 'error']);
 const receiverIdentityPrefixes = ['dlna-receiver:', 'airplay-receiver:'];
 
@@ -59,6 +60,27 @@ const normalizeRepeatMode = (value: unknown): PersistedPlaybackRepeatMode =>
   typeof value === 'string' && repeatModes.has(value as PersistedPlaybackRepeatMode)
     ? value as PersistedPlaybackRepeatMode
     : 'off';
+
+const normalizeContinuousPlayPreferences = (value: unknown): ContinuousPlayPreference[] =>
+  Array.isArray(value)
+    ? value.flatMap((item) => {
+      if (!isRecord(item)) {
+        return [];
+      }
+      const kind = item.kind;
+      const preferenceValue = typeof item.value === 'string' ? item.value.trim() : '';
+      if ((kind !== 'artist' && kind !== 'album' && kind !== 'genre') || !preferenceValue) {
+        return [];
+      }
+      return [{
+        kind,
+        value: preferenceValue,
+        weight: typeof item.weight === 'number' && Number.isFinite(item.weight)
+          ? Math.max(0.1, Math.min(1, item.weight))
+          : 0.35,
+      } as ContinuousPlayPreference];
+    }).slice(0, 200)
+    : [];
 
 const isLibraryTrackSnapshot = (value: unknown): value is LibraryTrack =>
   isRecord(value) &&
@@ -198,6 +220,9 @@ export const normalizePersistedPlaybackSession = (
 
   return {
     version: 1,
+    revision: Number.isSafeInteger(value.revision) && Number(value.revision) >= 0
+      ? Number(value.revision)
+      : 0,
     items,
     currentQueueId,
     currentTrackId,
@@ -208,6 +233,10 @@ export const normalizePersistedPlaybackSession = (
       repeatMode: normalizeRepeatMode(mode.repeatMode),
       automixEnabled: mode.automixEnabled === true,
       autoFillQueueEnabled: mode.autoFillQueueEnabled === true,
+      continuousPlayMode: typeof mode.continuousPlayMode === 'string' && continuousPlayModes.has(mode.continuousPlayMode as ContinuousPlayMode)
+        ? mode.continuousPlayMode as ContinuousPlayMode
+        : 'similar',
+      continuousPlayPreferences: normalizeContinuousPlayPreferences(mode.continuousPlayPreferences),
     },
     resume: normalizeResume(value.resume, items, updatedAt),
     updatedAt,
@@ -306,9 +335,17 @@ export class PlaybackSessionStore {
     }
   }
 
-  save(session: PersistedPlaybackSessionV1): PersistedPlaybackSessionV1 {
+  save(
+    session: PersistedPlaybackSessionV1,
+    options: { preserveRevision?: boolean } = {},
+  ): PersistedPlaybackSessionV1 {
     const updatedAt = nowIso(this.now);
-    const normalized = normalizePersistedPlaybackSession({ ...session, updatedAt }, updatedAt);
+    const currentRevision = this.load()?.revision ?? 0;
+    const normalized = normalizePersistedPlaybackSession({
+      ...session,
+      revision: options.preserveRevision ? currentRevision : currentRevision + 1,
+      updatedAt,
+    }, updatedAt);
     if (!normalized) {
       throw new Error('Invalid playback queue session payload');
     }
@@ -328,7 +365,15 @@ export class PlaybackSessionStore {
     return normalized;
   }
 
-  saveWithAudioStatus(session: PersistedPlaybackSessionV1, status: AudioStatus): PersistedPlaybackSessionV1 {
+  saveWithAudioStatus(
+    session: PersistedPlaybackSessionV1,
+    status: AudioStatus,
+    expectedRevision?: number,
+  ): PersistedPlaybackSessionV1 {
+    const currentRevision = this.load()?.revision ?? 0;
+    if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+      throw new Error('playback_queue_session_conflict');
+    }
     const updatedAt = nowIso(this.now);
     const normalized = normalizePersistedPlaybackSession({ ...session, updatedAt }, updatedAt);
     if (!normalized) {
@@ -354,7 +399,7 @@ export class PlaybackSessionStore {
       ...current,
       resume: createResumeFromAudioStatus(current, status, updatedAt),
       updatedAt,
-    });
+    }, { preserveRevision: true });
   }
 
   clearResume(): PersistedPlaybackSessionV1 | null {
@@ -367,7 +412,7 @@ export class PlaybackSessionStore {
       ...current,
       resume: null,
       updatedAt: nowIso(this.now),
-    });
+    }, { preserveRevision: true });
   }
 
   clear(): void {

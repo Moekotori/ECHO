@@ -16,6 +16,7 @@ export function createStreamingApi(
     getLyrics: (request) => ipcRenderer.invoke(IpcChannels.StreamingGetLyrics, request),
     getMv: (request) => ipcRenderer.invoke(IpcChannels.StreamingGetMv, request),
     getProviders: () => ipcRenderer.invoke(IpcChannels.StreamingGetProviders),
+    listAccountPlaylists: (provider) => ipcRenderer.invoke(IpcChannels.StreamingListAccountPlaylists, provider),
     importPlaylistFromUrl: (url) => ipcRenderer.invoke(IpcChannels.StreamingImportPlaylistFromUrl, url),
     importFavoritesFromUrl: (url) => ipcRenderer.invoke(IpcChannels.StreamingImportFavoritesFromUrl, url),
     exportFavorites: () => ipcRenderer.invoke(IpcChannels.StreamingExportFavorites),

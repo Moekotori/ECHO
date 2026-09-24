@@ -85,6 +85,21 @@ void testDopRingSourceOutputsDopEncodedSamples()
     require(output[5] == 0x00050c0bu, "DoP frame 2 right rewrites source marker byte back to 0x05");
 }
 
+void testDopMarkersRemainContinuousAcrossOddCallbacks()
+{
+    DopRingSource source(1, 8, 0, 0);
+    source.beginSession();
+
+    std::vector<uint32_t> first(1, 0u);
+    std::vector<uint32_t> second(2, 0u);
+    require(source.renderInterleaved(first.data(), 1, 1) == 0, "first idle callback contains no source data");
+    source.beginSession();
+    require(source.renderInterleaved(second.data(), 2, 1) == 0, "second idle callback contains no source data");
+    require(first[0] == 0x00056969u, "first callback starts with the 0x05 marker");
+    require(second[0] == 0x00fa6969u && second[1] == 0x00056969u,
+        "odd-sized callbacks and logical sessions must preserve the transport marker phase");
+}
+
 void testDopRingSourcePreservesPendingAndWrappedBytes()
 {
     DopRingSource source(2, 3, 0, 0);
@@ -104,7 +119,8 @@ void testDopRingSourcePreservesPendingAndWrappedBytes()
     std::vector<uint32_t> firstRender(4, 0xffffffffu);
     require(source.renderInterleaved(firstRender.data(), 2, 2) == 1, "DoP source consumes only the complete frame before wrap");
     require(firstRender[0] == 0x00052211u && firstRender[1] == 0x00054433u, "DoP first frame preserves complete payload bytes");
-    require(firstRender[2] == 0x00fa0000u && firstRender[3] == 0x00fa0000u, "DoP incomplete requested frame renders marker-preserving silence");
+    require(firstRender[2] == 0x00fa6969u && firstRender[3] == 0x00fa6969u,
+        "DoP incomplete requested frame renders balanced marker-preserving silence");
 
     pushDopPayload(
         source,
@@ -124,7 +140,8 @@ void testDopRingSourcePreservesPendingAndWrappedBytes()
     require(wrappedFrames[1] == 0x00058877u, "DoP wrapped render frame 0 right preserves payload bytes with marker");
     require(wrappedFrames[2] == 0x00faaa99u, "DoP wrapped render frame 1 left preserves payload bytes with marker");
     require(wrappedFrames[3] == 0x00faccbbu, "DoP wrapped render frame 1 right preserves payload bytes with marker");
-    require(wrappedFrames[4] == 0x00050000u && wrappedFrames[5] == 0x00050000u, "DoP incomplete frame renders marker-preserving silence");
+    require(wrappedFrames[4] == 0x00056969u && wrappedFrames[5] == 0x00056969u,
+        "DoP incomplete frame renders balanced marker-preserving silence");
 }
 
 void testNativeDsdRingSourcePreservesNativeBitstream()
@@ -191,6 +208,7 @@ int main()
     const std::vector<std::pair<std::string, void (*)()>> tests {
         { "DSD ring sources stay independent of PCM DSP chain", testDsdRingSourcesStayIndependentOfPcmDspChain },
         { "DoP ring source outputs DoP encoded samples", testDopRingSourceOutputsDopEncodedSamples },
+        { "DoP markers remain continuous across odd callbacks", testDopMarkersRemainContinuousAcrossOddCallbacks },
         { "DoP ring source preserves pending and wrapped bytes", testDopRingSourcePreservesPendingAndWrappedBytes },
         { "native DSD ring source preserves native bitstream", testNativeDsdRingSourcePreservesNativeBitstream },
         { "native DSD ring source preserves pending and wrapped bytes", testNativeDsdRingSourcePreservesPendingAndWrappedBytes },

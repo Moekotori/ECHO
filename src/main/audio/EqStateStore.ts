@@ -49,6 +49,7 @@ import {
   roomCorrectionMinTrimDb,
 } from '../../shared/types/eq';
 import { builtInEqPresetDefinitions } from '../../shared/audio/eqBuiltInPresets';
+import { defaultDspRackState, normalizeDspRackState, type DspRackState } from '../../shared/types/dspRack';
 
 type PersistedRoomCorrectionState = RoomCorrectionState & {
   irPath?: string | null;
@@ -516,6 +517,10 @@ export class EqStateStore {
     return join(getEqDir(), 'channel-balance-state.json');
   }
 
+  private static get dspRackStatePath(): string {
+    return join(getEqDir(), 'dsp-rack-state.json');
+  }
+
   private static readUserPresetsFile(): EqPreset[] {
     if (!existsSync(EqStateStore.presetPath)) {
       return [];
@@ -779,6 +784,28 @@ export class EqStateStore {
     }
   }
 
+  static loadDspRackState(): DspRackState {
+    if (!existsSync(EqStateStore.dspRackStatePath)) {
+      return defaultDspRackState();
+    }
+
+    try {
+      return normalizeDspRackState(JSON.parse(readFileSync(EqStateStore.dspRackStatePath, 'utf8')));
+    } catch {
+      return defaultDspRackState();
+    }
+  }
+
+  static saveDspRackState(state: DspRackState): void {
+    try {
+      const normalized = normalizeDspRackState(state);
+      mkdirSync(dirname(EqStateStore.dspRackStatePath), { recursive: true });
+      writeFileSync(EqStateStore.dspRackStatePath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+    } catch {
+      // DSP state persistence is best-effort; live host state remains authoritative.
+    }
+  }
+
   static loadRoomCorrectionState(): RoomCorrectionState {
     if (!existsSync(EqStateStore.roomCorrectionStatePath)) {
       EqStateStore.irPath = null;
@@ -804,6 +831,24 @@ export class EqStateStore {
       EqStateStore.irPath = null;
       return defaultRoomCorrectionState();
     }
+  }
+
+  static getRoomCorrectionIrPath(): string | null {
+    // Ensure the persisted path has been hydrated and validated first.
+    EqStateStore.loadRoomCorrectionState();
+    return EqStateStore.irPath;
+  }
+
+  static applyBoundProfileForOutput(target: EqProfileBindingTarget): EqProfile | null {
+    const binding = EqStateStore.getProfileBinding(target);
+    if (!binding) {
+      return null;
+    }
+    const profile = EqStateStore.listProfiles().find((candidate) => candidate.id === binding.profileId) ?? null;
+    if (profile) {
+      EqStateStore.saveEqState(profile.state);
+    }
+    return profile;
   }
 
   static saveRoomCorrectionState(state: RoomCorrectionState): void {

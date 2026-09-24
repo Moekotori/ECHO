@@ -21,7 +21,30 @@ export const dsdPcmDecimationFactor = 16;
 export const maxDsdPcmOutputSampleRate = 352_800;
 export const dsdPcmOutputSampleRates = [44_100, 88_200, 176_400, 352_800] as const;
 export const dsdDopDecimationFactor = 16;
-export const dsdDopTransportSampleRates = [176_400, 352_800, 705_600] as const;
+export const supportedDsdNativeSampleRates = [
+  2_822_400,
+  3_072_000,
+  5_644_800,
+  6_144_000,
+  11_289_600,
+  12_288_000,
+  22_579_200,
+  24_576_000,
+  45_158_400,
+  49_152_000,
+] as const;
+export const dsdDopTransportSampleRates = [
+  176_400,
+  192_000,
+  352_800,
+  384_000,
+  705_600,
+  768_000,
+  1_411_200,
+  1_536_000,
+  2_822_400,
+  3_072_000,
+] as const;
 
 const normalizePositiveInteger = (value: unknown): number | null => {
   const numberValue = Number(value);

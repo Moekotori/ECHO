@@ -61,11 +61,49 @@ const isDecodedAudioPath = (filePath: string): boolean => decodedAudioExtensions
 
 export const isNcmFile = (filePath: string): boolean => extname(filePath).toLocaleLowerCase() === ncmExtension;
 
+export type NcmConverterAvailability =
+  | { available: true; converterPath: string; error: null }
+  | { available: false; converterPath: null; error: string };
+
 export class NcmConverter {
+  private availability: NcmConverterAvailability | null = null;
+
   constructor(
     private readonly converterPathResolver: () => string | null = () => resolveBundledNcmConverterPath(),
     private readonly platform = process.platform,
   ) {}
+
+  getAvailability(): NcmConverterAvailability {
+    if (this.availability) {
+      return this.availability;
+    }
+
+    if (this.platform !== 'win32') {
+      this.availability = {
+        available: false,
+        converterPath: null,
+        error: `NCM 解密暂不支持当前平台: ${this.platform}`,
+      };
+      return this.availability;
+    }
+
+    const converterPath = this.converterPathResolver();
+    if (!converterPath || !existsSync(converterPath)) {
+      this.availability = {
+        available: false,
+        converterPath: null,
+        error: `NCM 解密工具不可用: ${getNcmConverterFileName(this.platform)}`,
+      };
+      return this.availability;
+    }
+
+    this.availability = {
+      available: true,
+      converterPath,
+      error: null,
+    };
+    return this.availability;
+  }
 
   async convertIfNeeded(filePath: string): Promise<string> {
     const inputPath = resolve(filePath);
@@ -73,14 +111,9 @@ export class NcmConverter {
       return inputPath;
     }
 
-    if (this.platform !== 'win32') {
-      throw new Error(`NCM 解密暂不支持当前平台: ${this.platform}`);
-    }
-
-    const converterPath = this.converterPathResolver();
-    const ncmConverterFileName = getNcmConverterFileName(this.platform);
-    if (!converterPath || !existsSync(converterPath)) {
-      throw new Error(`NCM 解密工具不可用: ${ncmConverterFileName}`);
+    const availability = this.getAvailability();
+    if (!availability.available) {
+      throw new Error(availability.error);
     }
 
     const inputStat = statSync(inputPath);
@@ -90,7 +123,7 @@ export class NcmConverter {
     }
 
     const startedAtMs = Date.now();
-    const result = await runConverter(converterPath, inputPath);
+    const result = await runConverter(availability.converterPath, inputPath);
     if (result.exitCode !== 0) {
       throw new Error((result.stderr || result.stdout).trim() || 'NCM 解密失败');
     }
@@ -129,4 +162,6 @@ export class NcmConverter {
   }
 }
 
-export const getNcmConverter = (): NcmConverter => new NcmConverter();
+const defaultNcmConverter = new NcmConverter();
+
+export const getNcmConverter = (): NcmConverter => defaultNcmConverter;

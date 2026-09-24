@@ -3,9 +3,18 @@ type CacheEntry<T> = {
   expiresAtMs: number;
 };
 
+const defaultMaxEntries = 512;
+
 export class StreamingMemoryCache {
   private readonly values = new Map<string, CacheEntry<unknown>>();
   private readonly inflight = new Map<string, Promise<unknown>>();
+  private readonly maxEntries: number;
+
+  constructor(maxEntries = defaultMaxEntries) {
+    this.maxEntries = Number.isFinite(maxEntries)
+      ? Math.max(1, Math.floor(maxEntries))
+      : defaultMaxEntries;
+  }
 
   get size(): number {
     return this.values.size;
@@ -22,12 +31,18 @@ export class StreamingMemoryCache {
       return null;
     }
 
+    this.values.delete(key);
+    this.values.set(key, entry);
     return entry.value as T;
   }
 
   set<T>(key: string, value: T, ttlMs: number): T {
     if (ttlMs > 0) {
-      this.values.set(key, { value, expiresAtMs: Date.now() + ttlMs });
+      const nowMs = Date.now();
+      this.pruneExpired(nowMs);
+      this.values.delete(key);
+      this.values.set(key, { value, expiresAtMs: nowMs + ttlMs });
+      this.enforceLimit();
     }
 
     return value;
@@ -61,6 +76,16 @@ export class StreamingMemoryCache {
     };
   }
 
+  clearValues(): { beforeEntries: number; afterEntries: number; removedEntries: number } {
+    const beforeEntries = this.values.size;
+    this.values.clear();
+    return {
+      beforeEntries,
+      afterEntries: 0,
+      removedEntries: beforeEntries,
+    };
+  }
+
   getOrCreateInflight<T>(key: string, create: () => Promise<T>): Promise<T> {
     const existing = this.inflight.get(key);
     if (existing) {
@@ -72,5 +97,15 @@ export class StreamingMemoryCache {
     });
     this.inflight.set(key, promise);
     return promise;
+  }
+
+  private enforceLimit(): void {
+    while (this.values.size > this.maxEntries) {
+      const oldest = this.values.keys().next();
+      if (oldest.done) {
+        return;
+      }
+      this.values.delete(oldest.value);
+    }
   }
 }

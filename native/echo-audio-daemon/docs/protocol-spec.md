@@ -186,6 +186,21 @@ Decode initial window for gapless/queue readiness.
 {"jsonrpc":"2.0","method":"audio.prefetch","params":[{"filePath":"/music/next.flac"}],"id":1}
 ```
 
+### audio.gaplessPrepare
+Prime a separate host-owned PCM FIFO for one or more local tracks. The call only succeeds after the first next-track PCM block has been accepted. Track changes are committed from decoded frame counts, never metadata duration estimates.
+
+**Request:**
+```json
+{"jsonrpc":"2.0","method":"audio.gaplessPrepare","params":{"filePath":"/music/02.flac","trackId":"track-02","itemId":"queue-02","sampleRate":48000,"following":[{"filePath":"/music/03.flac","trackId":"track-03","itemId":"queue-03"}]},"id":1}
+```
+
+**Response:**
+```json
+{"jsonrpc":"2.0","result":{"prepared":true,"operationId":1,"filePath":"/music/02.flac"},"id":1}
+```
+
+The method is intentionally fail-closed for unsupported processing modes. The caller must continue ordinary playback when it returns an error; it must not route back to the legacy concat implementation.
+
 ### audio.play / audio.pause / audio.resume / audio.stop
 Playback control. Standard request/response with no notable result fields.
 
@@ -254,7 +269,7 @@ These are JSON-RPC notifications (no `id` field):
 | Method | Payload | Description |
 |--------|---------|-------------|
 | audio.position | `{framesPlayed, bufferedFrames, inputEnded, operationId}` | Playback position update |
-| audio.ended | `{operationId}` | Track reached end |
+| audio.ended | `{operationId}` or `{operationId,queueAdvance,gaplessAdvance,nextTrackId,nextItemId,...}` | Track reached end, or an exact PCM-boundary gapless queue commit |
 | eq.state | EQ state object | EQ state changed |
 | channelBalance.state | ChannelBalanceState | Balance changed |
 | roomCorrection.state | RoomCorrectionState | Correction changed |

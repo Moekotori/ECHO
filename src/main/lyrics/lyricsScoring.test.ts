@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { LyricsQuery, LyricsSearchCandidate } from '../../shared/types/lyrics';
 import { buildNormalizedLyricsQuery } from './lyricsQueryBuilder';
-import { canAutoAcceptLyricsCandidate, evaluateLyricsCandidate, normalizeText, scoreLyricsCandidate } from './lyricsScoring';
+import {
+  canAutoAcceptLyricsCandidate,
+  evaluateLyricsCandidate,
+  getLyricsDurationTolerance,
+  normalizeText,
+  scoreLyricsCandidate,
+} from './lyricsScoring';
 import { extractLyricsVersionFlags } from './lyricsVersionFlags';
 
 const query = (overrides: Partial<LyricsQuery> = {}): LyricsQuery => ({
@@ -127,20 +133,47 @@ describe('lyricsScoring', () => {
     expect(decision.autoAccept).toBe(true);
   });
 
-  it('still auto accepts synced lyrics with moderate duration drift when identity is strong', () => {
+  it('classifies exact identity with six seconds duration drift as balanced', () => {
     const decision = evaluateLyricsCandidate(query(), candidate({ durationSeconds: 126 }));
 
     expect(decision.score).toBeGreaterThan(0.7);
     expect(decision.autoAccept).toBe(true);
-    expect(decision.risk).toBe('low');
+    expect(decision.risk).toBe('medium');
+    expect(decision.confidence).toBe('balanced');
   });
 
-  it('marks synced lyrics with more than ten seconds duration drift as high risk', () => {
+  it('allows a twelve-second duration drift for an exact two-minute track match', () => {
     const decision = evaluateLyricsCandidate(query(), candidate({ durationSeconds: 132 }));
 
-    expect(decision.score).toBeGreaterThan(0.7);
+    expect(decision.score).toBeGreaterThan(0.8);
+    expect(decision.autoAccept).toBe(true);
+    expect(decision.risk).toBe('medium');
+    expect(decision.confidence).toBe('balanced');
+    expect(decision.reasons).toContain('duration_tolerated');
+  });
+
+  it('uses a larger duration tolerance for longer tracks with a twenty-second ceiling', () => {
+    expect(getLyricsDurationTolerance(120)).toBe(12);
+    expect(getLyricsDurationTolerance(180)).toBe(14.4);
+    expect(getLyricsDurationTolerance(240)).toBe(19.2);
+    expect(getLyricsDurationTolerance(600)).toBe(20);
+
+    const decision = evaluateLyricsCandidate(
+      query({ durationSeconds: 240 }),
+      candidate({ durationSeconds: 259 }),
+    );
+
+    expect(decision.autoAccept).toBe(true);
+    expect(decision.confidence).toBe('balanced');
+    expect(decision.reasons).toContain('duration_tolerated');
+  });
+
+  it('still blocks duration drift outside the adaptive tolerance', () => {
+    const decision = evaluateLyricsCandidate(query(), candidate({ durationSeconds: 133 }));
+
     expect(decision.autoAccept).toBe(false);
-    expect(decision.risk).toBe('high');
+    expect(decision.risk).toBe('medium');
+    expect(decision.confidence).toBe('blocked');
     expect(decision.reasons).toContain('duration_mismatch');
   });
 
@@ -148,14 +181,73 @@ describe('lyricsScoring', () => {
     expect(scoreLyricsCandidate(query(), candidate({ durationSeconds: 300 }))).toBeLessThan(0.75);
   });
 
-  it('auto accepts version-labeled results when title and duration are otherwise exact', () => {
-    expect(evaluateLyricsCandidate(query(), candidate({ title: 'Echo Song Live' })).autoAccept).toBe(true);
-    expect(evaluateLyricsCandidate(query(), candidate({ title: 'Echo Song Remix' })).autoAccept).toBe(true);
-    expect(evaluateLyricsCandidate(query(), candidate({ title: 'Echo Song TV Size' })).autoAccept).toBe(true);
+  it('blocks version conflicts even when duration is exact', () => {
+    expect(evaluateLyricsCandidate(query(), candidate({ title: 'Echo Song Live' })).autoAccept).toBe(false);
+    expect(evaluateLyricsCandidate(query(), candidate({ title: 'Echo Song Remix' })).autoAccept).toBe(false);
+    expect(evaluateLyricsCandidate(query(), candidate({ title: 'Echo Song TV Size' })).autoAccept).toBe(false);
+  });
+
+  it('does not treat an appended artist as an exact artist match', () => {
+    const decision = evaluateLyricsCandidate(
+      query({ title: '晴天', artist: '周杰伦', durationSeconds: 269 }),
+      candidate({ title: '晴天', artist: '周杰伦 / A-LNK', durationSeconds: 269 }),
+    );
+
+    expect(decision.artistScore).toBeLessThan(0.98);
+    expect(decision.autoAccept).toBe(false);
+    expect(decision.confidence).toBe('blocked');
+  });
+
+  it('blocks the known short adaptation regressions for 晴天 and 青花瓷', () => {
+    const qingTian = evaluateLyricsCandidate(
+      query({ title: '晴天', artist: '周杰伦', durationSeconds: 269 }),
+      candidate({ title: '晴天', artist: '周杰伦 / A-LNK', durationSeconds: 183, hasSynced: false, hasPlain: true }),
+    );
+    const qingHuaCi = evaluateLyricsCandidate(
+      query({ title: '青花瓷', artist: '周杰伦', durationSeconds: 239 }),
+      candidate({ title: '青花瓷', artist: '周杰伦 / INKK', durationSeconds: 92, hasSynced: false, hasPlain: true }),
+    );
+
+    expect(qingTian.autoAccept).toBe(false);
+    expect(qingHuaCi.autoAccept).toBe(false);
+    expect(qingTian.risk).toBe('high');
+    expect(qingHuaCi.risk).toBe('high');
+  });
+
+  it('applies the same duration safety rule to plain lyrics', () => {
+    const decision = evaluateLyricsCandidate(
+      query(),
+      candidate({ durationSeconds: 143, hasSynced: false, hasPlain: true }),
+    );
+
+    expect(decision.autoAccept).toBe(false);
+    expect(decision.risk).toBe('high');
+    expect(decision.durationDeltaSeconds).toBe(23);
   });
 
   it('keeps instrumental mismatches as manual candidates when the query is not instrumental', () => {
     expect(evaluateLyricsCandidate(query(), candidate({ title: 'Echo Song Instrumental', instrumental: true })).autoAccept).toBe(false);
+  });
+
+  it('blocks provider-confirmed instrumental results even when metadata lacks an instrumental label', () => {
+    const decision = evaluateLyricsCandidate(
+      query(),
+      candidate({ instrumental: true, hasSynced: false, hasPlain: false }),
+    );
+
+    expect(decision.versionScore).toBe(0.1);
+    expect(decision.autoAccept).toBe(false);
+    expect(decision.risk).toBe('high');
+    expect(decision.reasons).toContain('version_conflict');
+  });
+
+  it('keeps exact candidates without a reliable duration for manual selection', () => {
+    const decision = evaluateLyricsCandidate(query(), candidate({ durationSeconds: null }));
+
+    expect(decision.score).toBeGreaterThan(0.8);
+    expect(decision.autoAccept).toBe(false);
+    expect(decision.confidence).toBe('blocked');
+    expect(decision.risk).toBe('medium');
   });
 
   it('keeps loose cover-intent matches as manual candidates unless they clear the stricter cover threshold', () => {

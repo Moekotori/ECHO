@@ -129,6 +129,39 @@ describe('player slider controls', () => {
     expect(slider.value).toBe('1.4');
   });
 
+  it('persists a 1x reset even when the native audio bridge is already closed', async () => {
+    const setSettings = vi.fn().mockResolvedValue({ playbackSpeed: 1 });
+    const setOutput = vi.fn().mockRejectedValue(new Error('daemon_rpc_bridge_closed'));
+    const onError = vi.fn();
+
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({ playbackSpeed: 1.05, playbackSpeedMode: 'nightcore' }),
+        setSettings,
+      },
+      audio: {
+        setOutput,
+      },
+    } as unknown as Window['echo'];
+
+    render(
+      <PlayerSpeedControl
+        status={createAudioStatus({ playbackRate: 1.05 })}
+        isOpen
+        onError={onError}
+        onOpenChange={vi.fn()}
+        onStatusChange={vi.fn()}
+      />,
+    );
+
+    const reset = screen.getByRole('button', { name: /重置播放速度|Reset/ });
+    fireEvent.click(reset);
+
+    await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ playbackSpeed: 1 }));
+    expect(setSettings.mock.invocationCallOrder[0]).toBeLessThan(setOutput.mock.invocationCallOrder[0]);
+    await waitFor(() => expect(onError).toHaveBeenCalledWith('daemon_rpc_bridge_closed'));
+  });
+
   it('keeps a committed volume visible when the bridge returns a stale status', async () => {
     const settingsRequest = deferred<{ playerVolume: number; fixedVolumeEnabled: boolean }>();
     const staleStatus = createAudioStatus({ volume: 1 });

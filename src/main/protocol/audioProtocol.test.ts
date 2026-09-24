@@ -79,6 +79,21 @@ describe('echo-audio protocol', () => {
     expect(await response.text()).toBe('ef');
   });
 
+  it('serves local audio metadata without opening a response body for HEAD requests', async () => {
+    const root = makeTempRoot();
+    const audioPath = join(root, 'song.mp3');
+    writeFileSync(audioPath, 'abcdef');
+    const module = await import('./audioProtocol');
+    const url = module.createSystemAudioStreamUrl({ url: audioPath, mimeType: 'audio/mpeg' });
+    const handler = handleMock.mock.calls[0][1] as (request: Request) => Promise<Response>;
+
+    const response = await handler(new Request(url, { method: 'HEAD' }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Length')).toBe('6');
+    expect(await response.text()).toBe('');
+  });
+
   it('proxies registered remote audio streams with headers and range', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response('stream', {
@@ -105,6 +120,32 @@ describe('echo-audio protocol', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://cdn.example/song.flac');
     expect(fetchOptions.headers.get('Authorization')).toBe('Bearer token');
     expect(fetchOptions.headers.get('Range')).toBe('bytes=0-4');
+  });
+
+  it('forwards remote audio HEAD requests without returning an upstream body', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('stream', {
+        headers: {
+          'Content-Type': 'audio/flac',
+          'Content-Length': '6',
+        },
+      }),
+    );
+    const module = await import('./audioProtocol');
+    const url = module.createSystemAudioStreamUrl({
+      url: 'https://cdn.example/song.flac',
+      mimeType: 'audio/flac',
+    });
+    const handler = handleMock.mock.calls[0][1] as (request: Request) => Promise<Response>;
+
+    const response = await handler(new Request(url, { method: 'HEAD' }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://cdn.example/song.flac',
+      expect.objectContaining({ method: 'HEAD' }),
+    );
+    expect(response.headers.get('Content-Length')).toBe('6');
+    expect(await response.text()).toBe('');
   });
 
   it('drops invalid remote stream header values instead of crashing playback proxy setup', async () => {

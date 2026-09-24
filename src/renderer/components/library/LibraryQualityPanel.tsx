@@ -139,7 +139,7 @@ export const LibraryQualityPanel = ({ autoRefresh = true, networkMetadataEnabled
   const coverBackfillPollingJobIdRef = useRef<string | null>(null);
   const total = useMemo(() => overviewTotal(overview), [overview]);
   const selectedOverview = overview.find((item) => item.kind === selectedKind) ?? null;
-  const selectedFields = issueKindFields[selectedKind] ?? [];
+  const selectedFields = useMemo(() => issueKindFields[selectedKind] ?? [], [selectedKind]);
   const coverBackfillProgressPercent = coverBackfillJob ? getCoverBackfillProgressPercent(coverBackfillJob) : 0;
   const coverBackfillTotal = coverBackfillJob ? getCoverBackfillTotal(coverBackfillJob) : 0;
   const coverBackfillProcessed = coverBackfillJob ? getCoverBackfillProcessed(coverBackfillJob) : 0;

@@ -12,6 +12,7 @@ import { createLibraryService } from './LibraryService';
 import { NetworkMetadataStore } from './network/NetworkMetadataStore';
 import type { AlbumMergeStrategy } from './AlbumService';
 import type { ArtistMergeStrategy } from '../../shared/types/appSettings';
+import type { LibrarySort } from '../../shared/types/library';
 import type {
   CoverCacheRepairOptions,
   CoverExtractOptions,
@@ -726,6 +727,31 @@ describe('Library Core', () => {
     harness.cleanup();
   });
 
+  it('sorts folder tracks by disc and track number with unnumbered tracks last', async () => {
+    const harness = createHarness();
+    const second = writeAudioFile(harness.folder, 'A.flac');
+    const first = writeAudioFile(harness.folder, 'B.flac');
+    const discTwo = writeAudioFile(harness.folder, 'C.flac');
+    const unnumbered = writeAudioFile(harness.folder, 'D.flac');
+    harness.metadataService.overrides.set(second, baseMetadata({ title: 'Second', discNo: 1, trackNo: 2 }));
+    harness.metadataService.overrides.set(first, baseMetadata({ title: 'First', discNo: null, trackNo: 1 }));
+    harness.metadataService.overrides.set(discTwo, baseMetadata({ title: 'Disc Two', discNo: 2, trackNo: 1 }));
+    harness.metadataService.overrides.set(unnumbered, baseMetadata({ title: 'Unnumbered', discNo: null, trackNo: null }));
+    const folder = harness.addFolder();
+
+    await harness.scanFolder();
+    const tracks = harness.service.getFolderTracks({
+      folderId: folder.id,
+      path: folder.path,
+      recursive: true,
+      pageSize: 10,
+      sort: 'trackNumber',
+    });
+
+    expect(tracks.items.map((track) => track.title)).toEqual(['First', 'Second', 'Disc Two', 'Unnumbered']);
+    harness.cleanup();
+  });
+
   it('rejects folder scoped queries outside the library root', async () => {
     const harness = createHarness();
     writeAudioFile(harness.folder, 'Safe.flac');
@@ -1284,6 +1310,7 @@ describe('Library Core', () => {
 
     expect(harness.service.getTracks({ pageSize: 10, showOsuOnly: true }).items.map((track) => track.title)).toEqual(['Downloaded osu Song']);
     expect(harness.service.getTracks({ pageSize: 10, showOsuOnly: false }).total).toBe(3);
+    expect(harness.service.getAlbums({ pageSize: 10, excludeOsuAlbums: true }).items.map((album) => album.title)).not.toContain('osu! beatmapset 2141496');
 
     harness.cleanup();
   });
@@ -2865,6 +2892,103 @@ describe('Library Core', () => {
     }
   });
 
+  it('getTracks sorts discovery fields in SQLite and keeps unknown metadata last', () => {
+    const root = makeTempRoot();
+    const folder = join(root, 'music');
+    const databasePath = join(root, 'library.sqlite');
+    const coverCacheDir = join(root, 'cover-cache');
+    const database = createDatabase(databasePath);
+    const service = createLibraryService(databasePath, {
+      databaseConnection: {
+        id: 'song-discovery-sort-test',
+        serviceName: 'library-test',
+        databasePath,
+        database,
+        close: () => database.close(),
+      },
+      coverCacheDir,
+      appSettings: () => ({ ...defaultSettings, coverCacheDir }),
+    });
+    const now = '2026-03-01T00:00:00.000Z';
+    const fieldSources = JSON.stringify(baseMetadata().fieldSources);
+    const insertTrack = database.prepare(
+      `INSERT INTO tracks (
+        id, path, folder_id, size_bytes, mtime_ms, title, artist, album, album_artist,
+        year, duration, sample_rate, bit_depth, bpm, play_count, last_played_at,
+        field_sources_json, created_at, updated_at
+      ) VALUES (?, ?, 'folder-1', 1, 1, ?, 'Artist', 'Album', 'Artist', ?, 180, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    try {
+      database
+        .prepare('INSERT INTO folders (id, path, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run('folder-1', folder, 'music', now, now);
+      for (const [id, title, year, sampleRate, bitDepth, bpm, playCount, lastPlayedAt] of [
+        ['classic', 'Classic', 1990, 44100, 16, 90, 0, null],
+        ['modern', 'Modern', 2025, 192000, 24, 180, 3, '2026-01-01T00:00:00.000Z'],
+        ['recent', 'Recent', 2020, 96000, 24, 120, 1, '2026-02-01T00:00:00.000Z'],
+        ['unknown', 'Unknown', null, null, null, null, 0, null],
+      ] as const) {
+        insertTrack.run(
+          id,
+          join(folder, `${id}.flac`),
+          title,
+          year,
+          sampleRate,
+          bitDepth,
+          bpm,
+          playCount,
+          lastPlayedAt,
+          fieldSources,
+          now,
+          now,
+        );
+      }
+      const insertPlaybackStats = database.prepare(
+        `INSERT INTO playback_history_stats (
+          history_key, track_id, track_path, media_type, title, artist, album,
+          play_count, completed_count, total_played_seconds, duration_seconds,
+          last_started_at, updated_at
+        ) VALUES (?, ?, ?, 'local', ?, 'Artist', 'Album', ?, ?, 0, 180, ?, ?)`,
+      );
+      insertPlaybackStats.run(
+        'modern',
+        'modern',
+        join(folder, 'modern.flac'),
+        'Modern',
+        8,
+        3,
+        '2026-01-01T00:00:00.000Z',
+        now,
+      );
+      insertPlaybackStats.run(
+        'recent',
+        'recent',
+        join(folder, 'recent.flac'),
+        'Recent',
+        2,
+        1,
+        '2026-02-01T00:00:00.000Z',
+        now,
+      );
+
+      const titlesFor = (sort: LibrarySort): string[] =>
+        service.getTracks({ pageSize: 10, sort }).items.map((track) => track.title);
+
+      expect(titlesFor('yearDesc')).toEqual(['Modern', 'Recent', 'Classic', 'Unknown']);
+      expect(titlesFor('yearAsc')).toEqual(['Classic', 'Recent', 'Modern', 'Unknown']);
+      expect(titlesFor('bpmDesc')).toEqual(['Modern', 'Recent', 'Classic', 'Unknown']);
+      expect(titlesFor('bpmAsc')).toEqual(['Classic', 'Recent', 'Modern', 'Unknown']);
+      expect(titlesFor('audioSpecDesc')).toEqual(['Modern', 'Recent', 'Classic', 'Unknown']);
+      expect(titlesFor('audioSpecAsc')).toEqual(['Classic', 'Recent', 'Modern', 'Unknown']);
+      expect(titlesFor('playCountDesc')).toEqual(['Modern', 'Recent', 'Classic', 'Unknown']);
+      expect(titlesFor('playCountAsc')).toEqual(['Classic', 'Unknown', 'Recent', 'Modern']);
+      expect(titlesFor('lastPlayed')).toEqual(['Recent', 'Modern', 'Classic', 'Unknown']);
+    } finally {
+      service.close();
+    }
+  });
+
   it('getTracks sorts by artist then album for translation lookup workflows', () => {
     const root = makeTempRoot();
     const folder = join(root, 'music');
@@ -3051,6 +3175,132 @@ describe('Library Core', () => {
 
     expect(recent.items.map((album) => album.title)).toEqual(['New Added Album', 'Old Added Album']);
     harness.cleanup();
+  });
+
+  it('getAlbums sorts by release year, track count, play count, and last played time', () => {
+    const root = makeTempRoot();
+    const folder = join(root, 'music');
+    const databasePath = join(root, 'library.sqlite');
+    const coverCacheDir = join(root, 'cover-cache');
+    const database = createDatabase(databasePath);
+    const service = createLibraryService(databasePath, {
+      databaseConnection: {
+        id: 'album-discovery-sort-test',
+        serviceName: 'library-test',
+        databasePath,
+        database,
+        close: () => database.close(),
+      },
+      coverCacheDir,
+      appSettings: () => ({ ...defaultSettings, coverCacheDir }),
+    });
+    const now = '2026-03-01T00:00:00.000Z';
+    const fieldSources = JSON.stringify(baseMetadata().fieldSources);
+
+    try {
+      database
+        .prepare('INSERT INTO folders (id, path, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run('folder-1', folder, 'music', now, now);
+      const insertTrack = database.prepare(
+        `INSERT INTO tracks (
+          id, path, folder_id, size_bytes, mtime_ms, title, artist, album, album_artist,
+          duration, field_sources_json, created_at, updated_at
+        ) VALUES (?, ?, 'folder-1', 1, 1, ?, 'Artist', ?, 'Artist', 180, ?, ?, ?)`,
+      );
+      for (const [id, title, album] of [
+        ['classic-track', 'Classic Track', 'Classic Album'],
+        ['modern-track-1', 'Modern Track 1', 'Modern Album'],
+        ['modern-track-2', 'Modern Track 2', 'Modern Album'],
+        ['unknown-track', 'Unknown Track', 'Unknown Year Album'],
+      ] as const) {
+        insertTrack.run(id, join(folder, `${id}.flac`), title, album, fieldSources, now, now);
+      }
+
+      const insertAlbum = database.prepare(
+        `INSERT INTO albums (
+          id, album_key, title, album_artist, year, track_count, duration, created_at, updated_at
+        ) VALUES (?, ?, ?, 'Artist', ?, ?, ?, ?, ?)`,
+      );
+      insertAlbum.run('classic-album', 'classic-album', 'Classic Album', 1990, 1, 180, now, now);
+      insertAlbum.run('modern-album', 'modern-album', 'Modern Album', 2025, 2, 360, now, now);
+      insertAlbum.run('unknown-album', 'unknown-album', 'Unknown Year Album', null, 1, 180, now, now);
+
+      const insertAlbumTrack = database.prepare(
+        'INSERT INTO album_tracks (album_id, track_id, disc_no, track_no, position) VALUES (?, ?, 1, ?, ?)',
+      );
+      insertAlbumTrack.run('classic-album', 'classic-track', 1, 0);
+      insertAlbumTrack.run('modern-album', 'modern-track-1', 1, 0);
+      insertAlbumTrack.run('modern-album', 'modern-track-2', 2, 1);
+      insertAlbumTrack.run('unknown-album', 'unknown-track', 1, 0);
+
+      const insertPlaybackStats = database.prepare(
+        `INSERT INTO playback_history_stats (
+          history_key, track_id, track_path, media_type, title, artist, album,
+          play_count, completed_count, total_played_seconds, duration_seconds,
+          last_started_at, updated_at
+        ) VALUES (?, ?, ?, 'local', ?, 'Artist', ?, ?, ?, 0, 180, ?, ?)`,
+      );
+      insertPlaybackStats.run(
+        'classic-track',
+        'classic-track',
+        join(folder, 'classic-track.flac'),
+        'Classic Track',
+        'Classic Album',
+        5,
+        2,
+        '2026-01-01T00:00:00.000Z',
+        now,
+      );
+      insertPlaybackStats.run(
+        'modern-track-1',
+        'modern-track-1',
+        join(folder, 'modern-track-1.flac'),
+        'Modern Track 1',
+        'Modern Album',
+        10,
+        1,
+        '2026-02-01T00:00:00.000Z',
+        now,
+      );
+
+      expect(service.getAlbums({ pageSize: 10, sort: 'yearDesc' }).items.map((album) => album.title)).toEqual([
+        'Modern Album',
+        'Classic Album',
+        'Unknown Year Album',
+      ]);
+      expect(service.getAlbums({ pageSize: 10, sort: 'yearAsc' }).items.map((album) => album.title)).toEqual([
+        'Classic Album',
+        'Modern Album',
+        'Unknown Year Album',
+      ]);
+      expect(service.getAlbums({ pageSize: 10, sort: 'trackCountDesc' }).items.map((album) => album.title)).toEqual([
+        'Modern Album',
+        'Classic Album',
+        'Unknown Year Album',
+      ]);
+      expect(service.getAlbums({ pageSize: 10, sort: 'trackCountAsc' }).items.map((album) => album.title)).toEqual([
+        'Classic Album',
+        'Unknown Year Album',
+        'Modern Album',
+      ]);
+      expect(service.getAlbums({ pageSize: 10, sort: 'playCountDesc' }).items.map((album) => album.title)).toEqual([
+        'Classic Album',
+        'Modern Album',
+        'Unknown Year Album',
+      ]);
+      expect(service.getAlbums({ pageSize: 10, sort: 'playCountAsc' }).items.map((album) => album.title)).toEqual([
+        'Unknown Year Album',
+        'Modern Album',
+        'Classic Album',
+      ]);
+      expect(service.getAlbums({ pageSize: 10, sort: 'lastPlayed' }).items.map((album) => album.title)).toEqual([
+        'Modern Album',
+        'Classic Album',
+        'Unknown Year Album',
+      ]);
+    } finally {
+      service.close();
+    }
   });
 
   it('getTracks search matches multiple terms across metadata fields', async () => {

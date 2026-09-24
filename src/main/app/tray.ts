@@ -71,6 +71,18 @@ const hideMiniPlayer = (): void => {
     .catch(() => undefined);
 };
 
+const showPet = (): void => {
+  void import('./petWindow')
+    .then(({ showPetWindow }) => showPetWindow())
+    .catch(() => undefined);
+};
+
+const hidePet = (): void => {
+  void import('./petWindow')
+    .then(({ hidePetWindow }) => hidePetWindow())
+    .catch(() => undefined);
+};
+
 const createTrayIcon = (): Electron.NativeImage => createAppIconImage();
 
 /** 格式化毫秒为 MM:SS */
@@ -117,6 +129,8 @@ const buildTrayMenu = (): Electron.Menu => {
     { type: 'separator' },
     { label: '打开迷你播放器', click: showMiniPlayer },
     { label: '隐藏迷你播放器', click: hideMiniPlayer },
+    { label: '显示 ECHO 宠物', click: showPet },
+    { label: '隐藏 ECHO 宠物', click: hidePet },
     { label: '音频设置', click: openAudioSettings },
     { type: 'separator' },
     ...sleepTimerItems,

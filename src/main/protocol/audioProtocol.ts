@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { extname } from 'node:path';
@@ -169,7 +170,11 @@ export const registerAudioProtocolHandler = (): void => {
         if (range) {
           headers.set('Range', range);
         }
-        const upstream = await fetch(source.url, { headers, redirect: 'follow' });
+        const upstream = await fetch(source.url, {
+          method: request.method === 'HEAD' ? 'HEAD' : 'GET',
+          headers,
+          redirect: 'follow',
+        });
         if (upstream.status === 416) {
           return new Response('', {
             status: 416,
@@ -179,16 +184,13 @@ export const registerAudioProtocolHandler = (): void => {
         if (!upstream.ok && upstream.status !== 206) {
           return new Response('', { status: 502 });
         }
-        return new Response(upstream.body, {
+        return new Response(request.method === 'HEAD' ? null : upstream.body, {
           status: upstream.status,
           headers: passthroughHeaders(upstream, guessAudioMimeType(source.url, source.mimeType)),
         });
       }
 
-      if (!existsSync(source.url)) {
-        return new Response('', { status: 404 });
-      }
-      const fileStat = statSync(source.url);
+      const fileStat = await stat(source.url);
       if (!fileStat.isFile()) {
         return new Response('', { status: 404 });
       }
@@ -208,11 +210,11 @@ export const registerAudioProtocolHandler = (): void => {
       if (range) {
         headers.set('Content-Length', String(range.end - range.start + 1));
         headers.set('Content-Range', `bytes ${range.start}-${range.end}/${fileStat.size}`);
-        return new Response(streamBody(source.url, range), { status: 206, headers });
+        return new Response(request.method === 'HEAD' ? null : streamBody(source.url, range), { status: 206, headers });
       }
 
       headers.set('Content-Length', String(fileStat.size));
-      return new Response(streamBody(source.url, null), { headers });
+      return new Response(request.method === 'HEAD' ? null : streamBody(source.url, null), { headers });
     } catch {
       return new Response('', { status: 404 });
     }

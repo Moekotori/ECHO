@@ -5,8 +5,9 @@ import type { DragEvent } from 'react';
 import type { DownloadJob } from '../../shared/types/downloads';
 import type { LibraryPage, LibraryPlaylist, LibraryPlaylistItem, LibraryTrack } from '../../shared/types/library';
 import type { StreamingFavoriteTrack, StreamingFavoritesSnapshot } from '../../shared/types/streaming';
-import { translations, isLocale, localeOptions } from '../i18n/locales';
+import { translations, isLocale, localeOptions } from '../i18n/locales.testing';
 import { PlaybackQueueProvider, usePlaybackQueue } from '../stores/PlaybackQueueProvider';
+import { consumePendingStreamingDetailNavigation } from '../utils/streamingDetailNavigation';
 import { PlaylistsPage } from './PlaylistsPage';
 
 vi.mock('../components/library/TrackList', () => ({
@@ -18,6 +19,8 @@ vi.mock('../components/library/TrackList', () => ({
     onTrackDragStart,
     onTrackDrop,
     onOpenTrackMenu,
+    onOpenArtist,
+    onOpenAlbum,
     onPlay,
     onToggleLiked,
   }: {
@@ -28,6 +31,8 @@ vi.mock('../components/library/TrackList', () => ({
     onTrackDragStart?: (event: DragEvent<HTMLDivElement>, track: LibraryTrack) => void;
     onTrackDrop?: (event: DragEvent<HTMLDivElement>, track: LibraryTrack) => void;
     onOpenTrackMenu?: (track: LibraryTrack, position: { x: number; y: number }) => void;
+    onOpenArtist?: (track: LibraryTrack) => void;
+    onOpenAlbum?: (track: LibraryTrack) => void;
     onPlay?: (track: LibraryTrack) => void;
     onToggleLiked?: (track: LibraryTrack) => void;
   }) => (
@@ -50,6 +55,12 @@ vi.mock('../components/library/TrackList', () => ({
           </button>
           <button type="button" onClick={() => onOpenTrackMenu?.(track, { x: 12, y: 34 })}>
             Open menu for {track.title}
+          </button>
+          <button type="button" onClick={() => onOpenArtist?.(track)}>
+            Open artist for {track.title}
+          </button>
+          <button type="button" onClick={() => onOpenAlbum?.(track)}>
+            Open album for {track.title}
           </button>
         </div>
       ))}
@@ -271,6 +282,7 @@ const installClipboardWriteMock = () => {
 };
 
 afterEach(() => {
+  consumePendingStreamingDetailNavigation();
   cleanup();
   window.localStorage.clear();
   Object.defineProperty(window.navigator, 'clipboard', {
@@ -278,6 +290,80 @@ afterEach(() => {
     value: originalClipboard,
   });
   vi.restoreAllMocks();
+});
+
+describe('PlaylistsPage detail links', () => {
+  it('opens streaming artist and album details with the original provider identity', async () => {
+    const remotePlaylist = playlist({
+      id: 'netease-playlist',
+      sourceProvider: 'netease',
+      sourcePlaylistId: 'daily-recommend',
+    });
+    const remoteItem = item({
+      playlistId: remotePlaylist.id,
+      mediaType: 'stream_track',
+      mediaId: 'streaming:netease:song-1',
+      sourceProvider: 'netease',
+      sourceItemId: 'song-1',
+      titleSnapshot: 'Cloud Song',
+      artistSnapshot: 'Cloud Artist',
+      albumSnapshot: 'Cloud Album',
+      track: null,
+    });
+    const getTrack = vi.fn().mockResolvedValue({
+      id: 'streaming:netease:song-1',
+      provider: 'netease',
+      providerTrackId: 'song-1',
+      stableKey: 'streaming:netease:song-1',
+      title: 'Cloud Song',
+      artist: 'Cloud Artist',
+      artists: [{ id: 'artist-1', provider: 'netease', providerArtistId: 'artist-mid-1', name: 'Cloud Artist' }],
+      album: 'Cloud Album',
+      albumId: 'album-mid-1',
+      albumArtist: 'Cloud Artist',
+      duration: 180,
+      coverUrl: 'https://cdn.example/cover.jpg',
+      coverThumb: 'https://cdn.example/cover-thumb.jpg',
+      qualities: ['lossless'],
+      explicit: false,
+      playable: true,
+      unavailableReason: null,
+      lyricsStatus: 'unknown',
+      mvStatus: 'unknown',
+    });
+    window.echo = {
+      library: {
+        getPlaylists: vi.fn().mockResolvedValue([remotePlaylist]),
+        getPlaylistItems: vi.fn().mockResolvedValue(page([remoteItem])),
+        getLikedTrackIds: vi.fn().mockResolvedValue({}),
+      },
+      playback: {
+        getStatus: vi.fn().mockResolvedValue({ state: 'idle', currentTrackId: null, positionMs: 0, durationMs: 0, filePath: null }),
+      },
+      app: { getSettings: vi.fn().mockResolvedValue({}) },
+      streaming: { getTrack },
+    } as unknown as Window['echo'];
+    const detailRequests: unknown[] = [];
+    const handleDetail = (event: Event) => detailRequests.push((event as CustomEvent).detail);
+    window.addEventListener('app:navigate:streaming-detail', handleDetail);
+
+    renderPlaylistsPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Open artist for Cloud Song' }));
+    await waitFor(() => expect(detailRequests).toContainEqual(expect.objectContaining({
+      kind: 'artist',
+      returnTo: 'playlists',
+      artist: expect.objectContaining({ provider: 'netease', providerArtistId: 'artist-mid-1' }),
+    })));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open album for Cloud Song' }));
+    await waitFor(() => expect(detailRequests).toContainEqual(expect.objectContaining({
+      kind: 'album',
+      returnTo: 'playlists',
+      album: expect.objectContaining({ provider: 'netease', providerAlbumId: 'album-mid-1' }),
+    })));
+    expect(getTrack).toHaveBeenCalledTimes(2);
+    window.removeEventListener('app:navigate:streaming-detail', handleDetail);
+  });
 });
 
 describe('PlaylistsPage share actions', () => {

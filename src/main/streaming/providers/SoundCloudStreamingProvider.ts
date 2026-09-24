@@ -265,6 +265,7 @@ export class SoundCloudStreamingProvider implements StreamingProvider {
       displayName: 'SoundCloud',
       enabled: status.connected,
       supportsSearch: true,
+      supportedSearchMediaTypes: ['track'],
       supportsPlayback: true,
       supportsDownload: true,
       supportsLyrics: false,

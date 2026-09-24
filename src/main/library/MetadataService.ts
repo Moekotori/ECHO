@@ -25,6 +25,7 @@ export const inflateMetadataResult = (metadata: ParsedTrackMetadata): MetadataRe
     genre: metadata.genre,
     duration: metadata.duration,
     codec: metadata.codec,
+    mqa: metadata.mqa,
     sampleRate: metadata.sampleRate,
     bitDepth: metadata.bitDepth,
     bitrate: metadata.bitrate,

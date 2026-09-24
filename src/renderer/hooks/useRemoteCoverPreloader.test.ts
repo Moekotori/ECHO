@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import type { LibraryTrack } from '../../shared/types/library';
-import { normalizeRemoteCoverLoadPerformanceMode, selectRemoteCoverPreloadCandidates } from './useRemoteCoverPreloader';
+import { normalizeRemoteCoverLoadPerformanceMode, remoteCoverLoadPlans, remoteCoverPreloadIdentity, selectRemoteCoverPreloadCandidates } from './useRemoteCoverPreloader';
 
 const track = (index: number): LibraryTrack => ({
   id: `track-${index}`,
@@ -51,5 +51,22 @@ describe('useRemoteCoverPreloader helpers', () => {
     expect(selectRemoteCoverPreloadCandidates(tracks, ['track-10', 'track-11'], 'balanced')).toHaveLength(74);
     expect(selectRemoteCoverPreloadCandidates(tracks, ['track-10', 'track-11'], 'aggressive')).toHaveLength(222);
     expect(selectRemoteCoverPreloadCandidates(tracks, ['track-10', 'track-11'], 'lan')).toHaveLength(690);
+  });
+
+  it('disables speculative preload and hydration work in low mode', () => {
+    expect(remoteCoverLoadPlans.low).toMatchObject({
+      leadRows: 0,
+      maxPreloadUrls: 0,
+      maxHydrateTracks: 0,
+      concurrency: 1,
+    });
+    expect(selectRemoteCoverPreloadCandidates(Array.from({ length: 10 }, (_, index) => track(index)), [], 'low')).toEqual([]);
+  });
+
+  it('deduplicates Subsonic covers by cache identity instead of track URL', () => {
+    const first = 'echo-image://subsonic-cover/track-1?size=512&cacheKey=subsonic%3Asource%3Aone%3Acover-art%3Aalbum-1';
+    const second = 'echo-image://subsonic-cover/track-2?cacheKey=subsonic%3Asource%3Aone%3Acover-art%3Aalbum-1&size=512';
+
+    expect(remoteCoverPreloadIdentity(first)).toBe(remoteCoverPreloadIdentity(second));
   });
 });

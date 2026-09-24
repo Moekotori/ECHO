@@ -69,6 +69,33 @@ describe('AudioAuthenticityAnalyzer', () => {
     });
   });
 
+  it('uses the identified codec rather than the ambiguous M4A container to classify ALAC and AAC', async () => {
+    const analyzer = createAnalyzer({ existsSync: () => false });
+
+    await expect(analyzer.analyzeTrack(track({
+      path: 'D:\\Music\\Apple Lossless.m4a',
+      codec: 'ALAC',
+      bitrate: 920_000,
+    }))).resolves.toMatchObject({
+      verdict: 'trusted_lossless',
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ id: 'lossless_container' }),
+      ]),
+    });
+
+    await expect(analyzer.analyzeTrack(track({
+      path: 'D:\\Music\\Apple Music.m4a',
+      codec: 'AAC',
+      bitDepth: null,
+      bitrate: 256_000,
+    }))).resolves.toMatchObject({
+      verdict: 'lossy_source',
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ id: 'lossy_codec' }),
+      ]),
+    });
+  });
+
   it('flags unusually low bitrate lossless containers as likely transcodes', async () => {
     const analyzer = createAnalyzer({ existsSync: () => false });
 

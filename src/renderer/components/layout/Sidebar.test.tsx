@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { Captions, Download, FilePlus2, FolderPlus, Headphones, Music2, Settings } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import type { AppRoute } from '../../app/routes';
+import type { SidebarRouteId } from '../../../shared/types/sidebar';
 import { I18nProvider } from '../../i18n/I18nProvider';
 
 const routes: AppRoute[] = [
@@ -87,20 +88,29 @@ describe('Sidebar direct import actions', () => {
     onImportFolder: () => void;
     onImportFile: () => void;
     iconOnly?: boolean;
+    hiddenRouteIds?: AppRoute['id'][];
+    onToggleIconOnly?: () => void;
     onHideRoute?: (routeId: AppRoute['id']) => void;
+    onShowRoute?: (routeId: AppRoute['id']) => void;
   }): ReturnType<typeof render> => {
     return render(
       <I18nProvider>
         <Sidebar
-          routes={routes}
+          routes={routes.map((route) => ({
+            ...route,
+            hideFromSidebar: route.hideFromSidebar || props.hiddenRouteIds?.includes(route.id),
+          }))}
           activeRouteId="songs"
           iconOnly={props.iconOnly}
+          hiddenRouteIds={props.hiddenRouteIds as SidebarRouteId[] | undefined}
+          onToggleIconOnly={props.onToggleIconOnly}
           onRouteChange={props.onRouteChange}
           onOpenAudioSettings={props.onOpenAudioSettings ?? vi.fn()}
           onOpenLyricsSettings={props.onOpenLyricsSettings ?? vi.fn()}
           onImportFolder={props.onImportFolder}
           onImportFile={props.onImportFile}
           onHideRoute={props.onHideRoute}
+          onShowRoute={props.onShowRoute}
         />
       </I18nProvider>,
     );
@@ -179,6 +189,65 @@ describe('Sidebar direct import actions', () => {
 
     expect(container.querySelector('.sidebar')?.getAttribute('data-icon-only')).toBe('true');
     expect(screen.getByRole('button', { name: 'Songs' })).toBeTruthy();
+  });
+
+  it('expands the compact sidebar before entering edit mode', async () => {
+    const onToggleIconOnly = vi.fn();
+
+    renderSidebar({
+      onRouteChange: vi.fn(),
+      onImportFolder: vi.fn(),
+      onImportFile: vi.fn(),
+      iconOnly: true,
+      onToggleIconOnly,
+    });
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Songs' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '进入编辑模式' }));
+    expect(onToggleIconOnly).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders grouped navigation and toggles the compact sidebar from its header', () => {
+    const onToggleIconOnly = vi.fn();
+
+    renderSidebar({
+      onRouteChange: vi.fn(),
+      onImportFolder: vi.fn(),
+      onImportFile: vi.fn(),
+      onToggleIconOnly,
+    });
+
+    expect(screen.getByText('Library')).toBeTruthy();
+    expect(screen.getByText('Preferences')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar layout' }));
+    expect(onToggleIconOnly).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows user-hidden routes in edit mode and lets them be restored', async () => {
+    const onShowRoute = vi.fn();
+    const onHideRoute = vi.fn();
+
+    const { container } = renderSidebar({
+      onRouteChange: vi.fn(),
+      onImportFolder: vi.fn(),
+      onImportFile: vi.fn(),
+      hiddenRouteIds: ['osu-downloader'],
+      onHideRoute,
+      onShowRoute,
+    });
+
+    expect(screen.queryByRole('button', { name: 'osu downloader' })).toBeNull();
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Songs' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '进入编辑模式' }));
+
+    const hiddenRoute = screen.getByRole('button', { name: '显示osu downloader' });
+    expect(hiddenRoute.getAttribute('data-hidden')).toBe('true');
+    expect(hiddenRoute.textContent).toContain('已关闭');
+    fireEvent.click(hiddenRoute);
+    expect(onShowRoute).toHaveBeenCalledWith('osu-downloader');
+    fireEvent.click(screen.getByRole('button', { name: '隐藏Songs' }));
+    expect(onHideRoute).toHaveBeenCalledWith('songs');
+    expect(container.querySelector('.sidebar-edit-bar')?.textContent).toContain('排序与显示');
   });
 
   it('opens the audio file picker from Import File without navigating', async () => {

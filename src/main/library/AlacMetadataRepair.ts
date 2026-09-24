@@ -1,6 +1,9 @@
-import { readTagLibAudioTechnicalMetadata, shouldPreferTagLibForAlacTechnicalFields } from '../audioPublicApi';
-import { resolveMp4ContainerAudioCodec } from '../audioPublicApi';
-import { normalizeAudioSampleRate } from '../audioPublicApi';
+import {
+  normalizeAudioSampleRate,
+  readTagLibAudioTechnicalMetadata,
+  resolveMp4ContainerAudioCodec,
+  shouldPreferTagLibForAlacTechnicalFields,
+} from '../audioLibraryPublicApi';
 import type { FieldSources, MetadataResult } from './libraryTypes';
 
 export const repairAlacTechnicalMetadataBeforeWrite = async (

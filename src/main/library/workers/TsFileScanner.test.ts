@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { ScanFileSystemError } from '../libraryTypes';
+import type { ScanDirectorySnapshot, ScanFileSystemError } from '../libraryTypes';
 import { TsFileScanner } from './TsFileScanner';
 
 const tempRoots: string[] = [];
@@ -157,7 +157,6 @@ describe('TsFileScanner', () => {
   it('reports a timed-out network stat without blocking the scan', async () => {
     const root = resolve(makeTempRoot());
     const slow = join(root, 'slow.flac');
-    const ok = join(root, 'ok.flac');
     const errors: ScanFileSystemError[] = [];
     const fileSystem = {
       readdir: vi.fn(async () => [fakeDirent('slow.flac', 'file'), fakeDirent('ok.flac', 'file')]),
@@ -200,13 +199,15 @@ describe('TsFileScanner', () => {
     };
     const scanner = new TsFileScanner(fileSystem);
     const files = [];
+    const snapshots: ScanDirectorySnapshot[] = [];
 
     for await (const file of scanner.scanFolder(root, {
       getDirectorySnapshot: () => ({
         path: root,
         mtimeMs: 5,
-        entries: [{ name: 'cached.flac', kind: 'file' }],
+        entries: [{ name: 'cached.flac', kind: 'file', sizeBytes: 7, mtimeMs: 8 }],
       }),
+      onDirectorySnapshot: (snapshot) => snapshots.push(snapshot),
     })) {
       files.push(file);
     }
@@ -214,6 +215,11 @@ describe('TsFileScanner', () => {
     expect(fileSystem.readdir).not.toHaveBeenCalled();
     expect(fileSystem.stat).toHaveBeenCalledWith(cachedFile);
     expect(files).toEqual([{ path: cachedFile, sizeBytes: 11, mtimeMs: 15 }]);
+    expect(snapshots).toEqual([{
+      path: root,
+      mtimeMs: 5,
+      entries: [{ name: 'cached.flac', kind: 'file', sizeBytes: 11, mtimeMs: 15 }],
+    }]);
   });
 });
 
