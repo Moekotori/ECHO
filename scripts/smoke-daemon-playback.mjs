@@ -1,7 +1,7 @@
 /**
  * Deterministic daemon RPC smoke helper for playback stabilization.
  *
- * Uses the fd3/fd4 JSON-RPC protocol (same pattern as smoke-jsonrpc-openfile.mjs).
+ * Uses the fd3/fd4 JSON-RPC protocol.
  * Calls only: audio.openFile, audio.seek, audio.stop, audio.pause, audio.resume,
  *   audio.prefetch, audio.gaplessPrepare, eq.setState, eq.getState, rpc.shutdown, rpc.ping.
  * MUST NOT use audio.playFile.
