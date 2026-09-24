@@ -46,24 +46,18 @@ Desktop.ini
 *.rej
 /run-logs/
 
-# Root scratch workspace. Keep intentionally tracked one-file benchmark scripts.
-/tmp/**
-!/tmp/*.mjs
-!/tmp/*.ts
-!/tmp/*.md
+# Root scratch workspace.
+/tmp/
 
 # Generated visual QA and benchmark artifacts
 /.tmp/
 /.codex-qa/
 /artifacts/**
-!/artifacts/design-qa/
-!/artifacts/design-qa/echo-link-mobile-remote-comparison.jpg
-!/artifacts/design-qa/echo-link-mobile-remote-implementation.png
-!/artifacts/echo-link-handoff/
-!/artifacts/echo-link-handoff/echo-everything-connected-zh-en-ja.png
-!/artifacts/echo-link-handoff/mobile-remote-approved-reference.png
 /output/
 /design-qa*.md
+/design-qa*.png
+/pet/
+/test/tt/
 
 # Local Codex workspace state
 /.codex/
