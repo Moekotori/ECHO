@@ -107,6 +107,8 @@ const findRuntimeDirectory = () => {
 const verifyMicrosoftSignatures = (paths) => {
   const powershell = `
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
 $paths = $env:ECHO_VC_RUNTIME_PATHS_JSON | ConvertFrom-Json
 $results = foreach ($path in $paths) {
   $signature = Get-AuthenticodeSignature -LiteralPath $path
@@ -120,8 +122,8 @@ $results = foreach ($path in $paths) {
 $results | ConvertTo-Json -Compress
 `;
   const encodedCommand = Buffer.from(powershell, 'utf16le').toString('base64');
-  const result = spawnSync(
-    'powershell.exe',
+  const runPowerShell = (executable) => spawnSync(
+    executable,
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedCommand],
     {
       cwd: root,
@@ -130,6 +132,10 @@ $results | ConvertTo-Json -Compress
       windowsHide: true,
     },
   );
+  let result = runPowerShell('pwsh.exe');
+  if (result.error?.code === 'ENOENT') {
+    result = runPowerShell('powershell.exe');
+  }
 
   if (result.error) {
     throw result.error;

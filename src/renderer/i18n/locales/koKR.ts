@@ -4925,6 +4925,8 @@ export const koKR: TranslationDictionary = {
   'settings.library.networkSources.title': 'Network Completion Sources',
   'settings.nav.about.description': 'Version, updates, and developer tools',
   'settings.nav.about.label': 'About / Advanced',
+  'settings.nav.steam.label': 'Steam 버전',
+  'settings.nav.steam.description': '버전 비교와 창작마당',
   'settings.nav.accessibility.description': 'Vision, keyboard, screen reader',
   'settings.nav.accessibility.label': '접근성',
   'settings.nav.accounts.description': 'Music services, advanced accounts, and credentials',

@@ -503,7 +503,7 @@ export const defaultSettings: AppSettings = {
   tidalRedirectUri: null,
   tidalCountryCode: 'US',
   downloadsFeatureKeyAccepted: false,
-  downloadsFeatureUnlocked: false,
+  downloadsFeatureUnlocked: true,
   streamingDownloadActionsEnabled: false,
   connectAutoStartReceiversEnabled: false,
   airPlayReceiverProtocol: 'airplay1',
@@ -1849,10 +1849,7 @@ export const normalizeSettings = (value: unknown, options: NormalizeSettingsOpti
       delete appearanceThemePresetOverrides[preset];
     }
   }
-  const downloadsFeatureUnlocked = (options.downloadsFeatureUnlocked ?? settings.downloadsFeatureUnlocked) === true;
   const downloadsFeatureKeyAccepted = settings.downloadsFeatureKeyAccepted === true;
-  const effectiveDownloadsFeatureUnlocked = downloadsFeatureUnlocked
-    && (options.downloadsFeatureUnlocked === true || downloadsFeatureKeyAccepted);
   const audioUseMiniaudioOutput =
     settings.audioUseMiniaudioOutput === true ||
     settings.audioMiniaudioOutputExperimentalEnabled === true;
@@ -1970,8 +1967,8 @@ export const normalizeSettings = (value: unknown, options: NormalizeSettingsOpti
     tidalRedirectUri: normalizeSpotifyRedirectUri(settings.tidalRedirectUri),
     tidalCountryCode: normalizeTidalCountryCode(settings.tidalCountryCode) ?? defaultSettings.tidalCountryCode,
     downloadsFeatureKeyAccepted,
-    downloadsFeatureUnlocked: effectiveDownloadsFeatureUnlocked,
-    streamingDownloadActionsEnabled: effectiveDownloadsFeatureUnlocked && settings.streamingDownloadActionsEnabled === true,
+    downloadsFeatureUnlocked: true,
+    streamingDownloadActionsEnabled: settings.streamingDownloadActionsEnabled === true,
     connectAutoStartReceiversEnabled: settings.connectAutoStartReceiversEnabled === true,
     airPlayReceiverProtocol: normalizeAirPlayReceiverProtocol(settings.airPlayReceiverProtocol),
     hqPlayer: normalizeHqPlayerSettings(settings.hqPlayer),

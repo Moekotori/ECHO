@@ -3005,6 +3005,8 @@ export const zhTW: TranslationDictionary = {
   'settings.plugins.action.openDocs': '查看外掛文件',
   'settings.plugins.note': '外掛頁負責啟用、停用、重新載入、命令和日誌；這裡保留入口與安全邊界說明，避免兩套管理 UI 分岔。',
   'settings.nav.about.label': '關於 / 進階',
+  'settings.nav.steam.label': 'Steam 版',
+  'settings.nav.steam.description': '版本比較與創意工坊',
   'settings.nav.advancedCustom.label': '進階自訂',
   'settings.nav.advancedCustom.description': '低頻開關與介面密度微調',
   'settings.nav.danger.label': '危險操作',

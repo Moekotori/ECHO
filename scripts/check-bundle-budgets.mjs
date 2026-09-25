@@ -23,9 +23,9 @@ const findRendererEntryAsset = (htmlFileName) => {
 };
 
 const budgets = [
-  { label: 'main process', path: join(root, 'out', 'main', 'index.js'), maxBytes: 5_350_000 },
+  { label: 'main process', path: join(root, 'out', 'main', 'index.js'), maxBytes: 5_400_000 },
   { label: 'renderer entry', path: findRendererEntryAsset('index.html'), maxBytes: 660_000 },
-  { label: 'app shell', path: findAsset(/^App-[^.]+\.js$/u), maxBytes: 645_000 },
+  { label: 'app shell', path: findAsset(/^App-[^.]+\.js$/u), maxBytes: 646_000 },
   { label: 'settings route', path: findAsset(/^SettingsPage-[^.]+\.js$/u), maxBytes: 643_000 },
   { label: 'startup styles', path: findAsset(/^mainWindowStyles-[^.]+\.css$/u), maxBytes: 1_100_000 },
 ];

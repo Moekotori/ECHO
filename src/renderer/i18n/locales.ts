@@ -4107,6 +4107,8 @@ export type TranslationKey =
   | 'settings.eq.warning.lowerPreamp'
   | 'settings.nav.about.description'
   | 'settings.nav.about.label'
+  | 'settings.nav.steam.description'
+  | 'settings.nav.steam.label'
   | 'settings.nav.advancedCustom.description'
   | 'settings.nav.advancedCustom.label'
   | 'settings.nav.appearance.description'

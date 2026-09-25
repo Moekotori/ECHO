@@ -29,7 +29,7 @@ describe('audioProFeatureGate', () => {
     getConnectStatusMock.mockReturnValue({ unlocked: false });
   });
 
-  it('detects only ECHO SRC/SDM enable patches', async () => {
+  it('gates ECHO SRC/SDM processing but leaves DoP output available', async () => {
     expect(patchEnablesEchoProDsp({ audioEchoSrcMode: 'off' })).toBe(false);
     expect(patchEnablesEchoProDsp({ audioSdmMode: 'off', audioDsdOutputMode: 'pcm' })).toBe(false);
     expect(patchEnablesEchoProDsp({
@@ -42,7 +42,8 @@ describe('audioProFeatureGate', () => {
     expect(patchEnablesEchoProDsp({ audioEchoSrcMode: 'family4x' })).toBe(true);
     expect(patchEnablesEchoProDsp({ sdmMode: 'pcmToDsd' })).toBe(true);
     expect(patchEnablesEchoProDsp({ sdmOversamplingFilterProfile1x: 'poly-sinc-ext2-long' })).toBe(true);
-    expect(patchEnablesEchoProDsp({ dsdOutputMode: 'dop' })).toBe(true);
+    expect(patchEnablesEchoProDsp({ dsdOutputMode: 'dop' })).toBe(false);
+    expect(patchEnablesEchoProDsp({ audioDsdOutputMode: 'dop' })).toBe(false);
 
     await requireEchoProForAudioDspPatch({ echoSrcMode: 'family2x' });
     await requireEchoProForAudioDspPatch({ sdmMode: 'pcmToDsd' });
@@ -50,10 +51,13 @@ describe('audioProFeatureGate', () => {
   });
 
   it('rechecks the existing local entitlement after it is revoked', async () => {
-    await expect(requireEchoProForAudioDspPatch({ dsdOutputMode: 'dop' })).resolves.toBeUndefined();
+    await expect(requireEchoProForAudioDspPatch({ echoSrcMode: 'family2x' })).resolves.toBeUndefined();
 
     getEchoProLicenseStatusMock.mockReturnValue({ valid: false, enabled: false, features: [] });
 
+    await expect(requireEchoProForAudioDspPatch({ dsdOutputMode: 'dop' })).resolves.toBeUndefined();
+    await expect(requireEchoProForAudioDspPatch({ audioDsdOutputMode: 'dop' })).resolves.toBeUndefined();
     await expect(requireEchoProForAudioDspPatch({ echoSrcMode: 'family4x' })).rejects.toThrow('echo_pro_required');
+    await expect(requireEchoProForAudioDspPatch({ sdmMode: 'pcmToDsd' })).rejects.toThrow('echo_pro_required');
   });
 });

@@ -65,12 +65,21 @@ describe('AudioEntitlementRuntime', () => {
     await reconcileEchoProAudioEntitlement();
 
     expect(setOutputMock).toHaveBeenCalledWith(expect.objectContaining({
-      dsdOutputMode: 'pcm',
       echoSrcMode: 'off',
       sdmMode: 'off',
       pcmDitherMode: 'off',
     }));
     expect(setOutputMock.mock.calls[0]?.[0]).not.toHaveProperty('outputMode');
+    expect(setOutputMock.mock.calls[0]?.[0]).not.toHaveProperty('dsdOutputMode');
+  });
+
+  it('preserves DoP without a DSP entitlement when no processing is active', async () => {
+    entitlementMock.mockReturnValue({ unlocked: false, source: 'none', checkedAt: null });
+    getStatusMock.mockReturnValue(status({ dsdOutputModeRequested: 'dop', activeDsdOutputMode: 'dop' }));
+
+    await reconcileEchoProAudioEntitlement();
+
+    expect(setOutputMock).not.toHaveBeenCalled();
   });
 
   it('applies the full safe route when all audio settings are reset', async () => {

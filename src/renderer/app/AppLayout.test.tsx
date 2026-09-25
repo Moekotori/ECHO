@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useEffect, useRef, useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Captions, ListMusic, Music2 } from 'lucide-react';
 import { AppProviders } from './AppProviders';
@@ -14,6 +14,15 @@ import { useAnimatedBackNavigation } from '../hooks/useAnimatedBackNavigation';
 import { setPlaybackStatusSnapshot, useSharedPlaybackStatus } from '../stores/playbackStatusStore';
 import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
 import { showAudioErrorNoticeEvent } from '../utils/audioErrorNotice';
+import { loadTranslations } from '../i18n/locales';
+
+beforeAll(async () => {
+  await loadTranslations('en-US');
+});
+
+beforeEach(() => {
+  window.localStorage.setItem('echo-next.locale', 'en-US');
+});
 
 vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
@@ -191,7 +200,7 @@ afterEach(() => {
 });
 
 describe('AppLayout standalone routes', () => {
-  it('restores a safe non-Pro audio baseline without requesting gated DSP modes', async () => {
+  it('restores DoP while disabling gated DSP modes without Pro', async () => {
     const idleAudioStatus = {
       state: 'idle',
       currentTrackId: null,
@@ -243,7 +252,7 @@ describe('AppLayout standalone routes', () => {
 
     await waitFor(() => expect(setOutput).toHaveBeenCalled());
     expect(setOutput).toHaveBeenCalledWith(expect.objectContaining({
-      dsdOutputMode: 'pcm',
+      dsdOutputMode: 'dop',
       sdmMode: 'off',
       echoSrcMode: 'off',
     }));
@@ -1552,6 +1561,37 @@ describe('AppLayout standalone routes', () => {
       expect(within(sidebar).queryByRole('button', { name: 'Songs' })).toBeNull();
       expect(within(sidebar).getAllByRole('button').map((button) => button.textContent?.trim())).toEqual(['Queue', 'Home']);
     });
+  });
+
+  it('shows downloads in the sidebar with an old locked setting', async () => {
+    window.localStorage.clear();
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({
+          downloadsFeatureUnlocked: false,
+          sidebarHiddenRouteIds: [],
+        }),
+      },
+    } as unknown as Window['echo'];
+
+    const downloadRoute: AppRoute = {
+      id: 'downloads',
+      label: 'Downloads',
+      labelKey: 'route.downloads.label',
+      description: 'Downloads',
+      icon: Music2,
+      placement: 'main',
+      element: <div>Downloads page</div>,
+    };
+
+    render(
+      <AppProviders>
+        <AppLayout routes={[...routesWithHome, downloadRoute]} />
+      </AppProviders>,
+    );
+
+    const downloadButton = await screen.findByRole('button', { name: 'Downloads' });
+    expect(downloadButton.closest('aside.sidebar')).not.toBeNull();
   });
 
   it('reveals hidden routes in edit mode and persists show and hide changes', async () => {

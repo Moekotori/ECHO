@@ -4136,6 +4136,8 @@ export const zhCN: TranslationMap = {
   'settings.eq.warning.lowerPreamp': '降低前级可避免削波。',
   'settings.nav.about.description': '版本、更新与开发工具',
   'settings.nav.about.label': '关于 / 高级',
+  'settings.nav.steam.label': 'Steam 版',
+  'settings.nav.steam.description': '版本对比与创意工坊',
   'settings.nav.advancedCustom.description': '低频开关与界面密度微调',
   'settings.nav.advancedCustom.label': '高级自定义',
   'settings.nav.appearance.description': '主题、字体、背景',

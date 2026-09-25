@@ -109,7 +109,7 @@ describe('DspPage Pro access', () => {
     Reflect.deleteProperty(window, 'echo');
   });
 
-  it('shows the Pro explanation without mounting DSP controls and can hide the route', async () => {
+  it('recommends the Steam edition without mounting community DSP controls and can hide the route', async () => {
     const getStatus = vi.fn(async () => ({ ...unlockedStatus, dspUnlocked: false, source: 'included' as const }));
     const bridge = installBridge(getStatus);
     const navigateHome = vi.fn();
@@ -117,12 +117,13 @@ describe('DspPage Pro access', () => {
 
     render(<DspPage />);
 
-    expect(await screen.findByText('完整 DSP 工作台，专为认真听音打造')).toBeTruthy();
-    expect(screen.getByText(/参数均衡器、耳机校正、房间校正/)).toBeTruthy();
+    expect(await screen.findByText('建议在 Steam 版体验 DSP')).toBeTruthy();
+    expect(screen.getByText(/社区版 DSP 功能的实现目前存在问题/)).toBeTruthy();
     expect(getEqBridgeMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '账号与激活' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: '购买 ECHO Pro' }));
-    expect(bridge.openExternalUrl).toHaveBeenCalledWith('https://afdian.com/a/echonext');
+    fireEvent.click(screen.getByRole('button', { name: '前往 Steam 体验' }));
+    expect(bridge.openExternalUrl).toHaveBeenCalledWith('https://store.steampowered.com/app/5105090/ECHO/');
 
     fireEvent.click(screen.getByRole('button', { name: '在侧边栏隐藏音效处理' }));
     await waitFor(() => expect(bridge.setSettings).toHaveBeenCalledWith(expect.objectContaining({
@@ -140,12 +141,12 @@ describe('DspPage Pro access', () => {
     installBridge(getStatus);
 
     render(<DspPage />);
-    expect(await screen.findByText('完整 DSP 工作台，专为认真听音打造')).toBeTruthy();
+    expect(await screen.findByText('建议在 Steam 版体验 DSP')).toBeTruthy();
 
     window.dispatchEvent(new Event('echo-pro:status-changed'));
 
     await waitFor(() => expect(getEqBridgeMock).toHaveBeenCalled());
-    expect(screen.queryByText('完整 DSP 工作台，专为认真听音打造')).toBeNull();
+    expect(screen.queryByText('建议在 Steam 版体验 DSP')).toBeNull();
     expect(screen.getByText('EQ workbench')).toBeTruthy();
   });
 });

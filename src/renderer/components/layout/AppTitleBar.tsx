@@ -24,7 +24,6 @@ type AppTitleBarProps = {
   isLyricsSettingsOpen?: boolean;
   isLyricsVisualSettingsOpen?: boolean;
   isMvSettingsOpen?: boolean;
-  isProUnlocked?: boolean;
   updateStatus?: UpdateStatus | null;
   updateActionDisabled?: boolean;
   onRouteChange: (routeId: AppRouteId) => void;
@@ -57,7 +56,6 @@ export const AppTitleBar = ({
   isLyricsSettingsOpen = false,
   isLyricsVisualSettingsOpen = false,
   isMvSettingsOpen = false,
-  isProUnlocked = false,
   updateStatus = null,
   updateActionDisabled = false,
   onRouteChange,
@@ -150,13 +148,7 @@ export const AppTitleBar = ({
       <div className="app-titlebar-brand">
         <strong>ECHO</strong>
         <span>Next</span>
-        {isProUnlocked ? (
-          <span className="app-titlebar-pro-slot">
-            <span className="app-titlebar-pro-badge" aria-label="ECHO Pro unlocked">
-              Pro
-            </span>
-          </span>
-        ) : null}
+        <span className="app-titlebar-edition">Community</span>
         <span
           className="app-titlebar-version"
           data-loading={appVersion ? 'false' : 'true'}

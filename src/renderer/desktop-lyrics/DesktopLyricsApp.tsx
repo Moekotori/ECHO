@@ -22,7 +22,7 @@ import { VerticalText, tokenizeVerticalText } from '../components/lyrics/Vertica
 import { titleFromPath } from '../components/player/playerFormat';
 import { logLyricsConsole } from '../diagnostics/lyricsConsole';
 import { translateFallback, useOptionalI18n } from '../i18n/I18nProvider';
-import { registerAppearanceFontFile, serializeFontList } from '../preferences/appearancePreferences';
+import { registerAppearanceFontFile, serializeAppearanceFontList } from '../preferences/appearancePreferences';
 import {
   createMusicReactiveScene,
   musicReactiveSceneToCssVars,
@@ -1645,7 +1645,7 @@ export const DesktopLyricsApp = (): JSX.Element => {
           text: clockHasIdentity(activeClock) ? 'Desktop Lyrics' : t('desktopLyrics.secondary.waiting'),
         }];
   const desktopLyricsFontFamily = [
-    serializeFontList(settings.desktopLyricsFontFamily),
+    serializeAppearanceFontList('desktopLyrics', settings.desktopLyricsFontFamily, settings.desktopLyricsFontFilePath),
     '"Noto Sans SC"',
     '"Microsoft YaHei"',
     '"Segoe UI"',

@@ -1843,10 +1843,10 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({ artistStreamingAlbumsEnabled: 'yes' as never }).artistStreamingAlbumsEnabled).toBe(true);
   });
 
-  it('keeps streaming download actions behind the downloads unlock', async () => {
+  it('allows download actions without a Pro unlock', async () => {
     const { normalizeSettings } = await import('./appSettings');
 
-    expect(normalizeSettings({ streamingDownloadActionsEnabled: true }).streamingDownloadActionsEnabled).toBe(false);
+    expect(normalizeSettings({ streamingDownloadActionsEnabled: true }).streamingDownloadActionsEnabled).toBe(true);
     expect(
       normalizeSettings({
         downloadsFeatureKeyAccepted: true,
@@ -1856,13 +1856,15 @@ describe('app settings normalization', () => {
     ).toBe(true);
   });
 
-  it('can derive the downloads unlock from the plugin status instead of persisted settings', async () => {
+  it('keeps downloads available even with old locked settings or entitlement snapshots', async () => {
     const { normalizeSettings } = await import('./appSettings');
 
-    expect(normalizeSettings({ downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(false);
+    expect(normalizeSettings({}).downloadsFeatureUnlocked).toBe(true);
+    expect(normalizeSettings({ downloadsFeatureUnlocked: false }).downloadsFeatureUnlocked).toBe(true);
+    expect(normalizeSettings({ downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(true);
     expect(normalizeSettings({}, { downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(true);
     expect(normalizeSettings({ downloadsFeatureKeyAccepted: true }, { downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(true);
-    expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, downloadsFeatureUnlocked: true }, { downloadsFeatureUnlocked: false }).downloadsFeatureUnlocked).toBe(false);
+    expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, downloadsFeatureUnlocked: true }, { downloadsFeatureUnlocked: false }).downloadsFeatureUnlocked).toBe(true);
     expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, streamingDownloadActionsEnabled: true }, { downloadsFeatureUnlocked: true }).streamingDownloadActionsEnabled).toBe(true);
   });
 

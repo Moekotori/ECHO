@@ -67,7 +67,7 @@ import { isSpotifyTrack, seekSpotifyPlayback } from "../integrations/spotify/spo
 import { openAlbumDetailForTrack } from "../utils/albumNavigation";
 import { isActiveConnectPlaybackStatus, playbackStatusFromConnectStatus } from "../utils/connectPlayback";
 import { largeCoverUrlFromCachedVariant, localCoverDisplayUrl } from "../utils/coverDisplayUrl";
-import { registerAppearanceFontFile, serializeFontList } from "../preferences/appearancePreferences";
+import { registerAppearanceFontFile, serializeAppearanceFontList } from "../preferences/appearancePreferences";
 import {
   createMusicReactiveScene,
   musicReactiveSceneToCssVars,
@@ -2946,7 +2946,7 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
         : lyricsDisplaySettings.lyricsFontFamily ?? fallbackLyricsDisplaySettings.lyricsFontFamily ?? "Microsoft YaHei";
 
     return [
-      serializeFontList(preferredLyricsFontFamily),
+      serializeAppearanceFontList("lyrics", preferredLyricsFontFamily, lyricsDisplaySettings.lyricsFontFilePath),
       "var(--echo-font-family)",
     ].join(", ");
   }, [

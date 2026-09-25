@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, Blocks, BookOpen, Cable, CheckCircle2, FolderOpen, Gamepad2, Gauge, Gift, HardDrive, Headphones, Languages, Loader2, LogIn, Palette, RadioTower, ScanLine, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpen, CheckCircle2, FolderOpen, Gamepad2, Gauge, Gift, HardDrive, Headphones, Languages, Loader2, LogIn, Palette, ScanLine, Sparkles, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AudioOutputMode } from '../../../shared/types/audio';
 import type { AppSettings, AppThemeMode, AppThemePreset, ScanPerformanceMode } from '../../../shared/types/appSettings';
@@ -88,7 +88,7 @@ const themePresets: Array<{ preset: AppThemePreset; labelKey: TranslationKey; de
 ];
 
 const proFeatureCards: Array<{
-  id: 'dsp' | 'connect' | 'network' | 'customize';
+  id: 'dsp';
   icon: LucideIcon;
   titleKey: TranslationKey;
   descriptionKeys: TranslationKey[];
@@ -100,24 +100,6 @@ const proFeatureCards: Array<{
     titleKey: 'firstRun.pro.feature.dsp.title',
     descriptionKeys: ['firstRun.pro.benefit.dsp'],
     featured: true,
-  },
-  {
-    id: 'connect',
-    icon: Cable,
-    titleKey: 'firstRun.pro.feature.connect.title',
-    descriptionKeys: ['firstRun.pro.benefit.connect'],
-  },
-  {
-    id: 'network',
-    icon: RadioTower,
-    titleKey: 'firstRun.pro.feature.network.title',
-    descriptionKeys: ['firstRun.pro.benefit.network', 'firstRun.pro.benefit.mobile'],
-  },
-  {
-    id: 'customize',
-    icon: Blocks,
-    titleKey: 'firstRun.pro.feature.customize.title',
-    descriptionKeys: ['firstRun.pro.benefit.themes', 'firstRun.pro.benefit.plugins'],
   },
 ];
 

@@ -3442,6 +3442,8 @@ export const enUS: TranslationDictionary = {
   'settings.plugins.action.openDocs': 'View Plugin Docs',
   'settings.plugins.note': 'The plugins page handles enable, disable, reload, commands, and logs. This card keeps the entry points and safety-boundary notes here so the management UI does not split in two.',
   'settings.nav.about.label': 'About / Advanced',
+  'settings.nav.steam.label': 'Steam edition',
+  'settings.nav.steam.description': 'Edition comparison and Workshop',
   'settings.nav.about.description': 'Version, updates, and developer tools',
   'settings.nav.advancedCustom.label': 'Advanced Customization',
   'settings.nav.advancedCustom.description': 'Low-frequency switches and interface-density tuning',

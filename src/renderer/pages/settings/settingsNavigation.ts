@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Palette,
   SlidersHorizontal,
+  AudioLines,
   Trash2,
   User,
   Zap,
@@ -52,6 +53,7 @@ export const settingsNavItems: SettingsNavItem[] = [
   { key: 'plugins', labelKey: 'settings.nav.plugins.label', descriptionKey: 'settings.nav.plugins.description', icon: Code2 },
   { key: 'eq', labelKey: 'settings.nav.eq.label', descriptionKey: 'settings.nav.eq.description', icon: SlidersHorizontal },
   { key: 'about', labelKey: 'settings.nav.about.label', descriptionKey: 'settings.nav.about.description', icon: Info },
+  { key: 'steam', labelKey: 'settings.nav.steam.label', descriptionKey: 'settings.nav.steam.description', icon: AudioLines },
   { key: 'danger', labelKey: 'settings.nav.danger.label', descriptionKey: 'settings.nav.danger.description', icon: Trash2 },
 ];
 
@@ -79,7 +81,7 @@ export const settingsNavGroups: SettingsNavGroup[] = [
   {
     id: 'advanced',
     label: { 'zh-CN': '高级', 'zh-TW': '進階', 'ja-JP': '詳細', 'en-US': 'Advanced', 'ko-KR': '고급' },
-    itemKeys: ['shortcuts', 'experimental', 'advancedCustom', 'about', 'danger'],
+    itemKeys: ['shortcuts', 'experimental', 'advancedCustom', 'about', 'steam', 'danger'],
   },
 ];
 

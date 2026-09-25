@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '../styles/dsp.css';
-import { Activity, AudioWaveform, CheckCircle2, Clock3, ExternalLink, EyeOff, FileAudio, Gauge, Headphones, Info, Loader2, LockKeyhole, Pencil, RadioTower, RefreshCw, RotateCcw, Route, Save, ShieldCheck, SlidersHorizontal, Trash2, UserRound, Waves, X, Zap } from 'lucide-react';
+import { Activity, AudioWaveform, CheckCircle2, Clock3, ExternalLink, EyeOff, FileAudio, Gauge, Headphones, Info, Loader2, LockKeyhole, Pencil, RadioTower, RefreshCw, RotateCcw, Route, Save, ShieldCheck, SlidersHorizontal, Trash2, Waves, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type {
   AudioDsdOutputMode,
@@ -52,7 +52,7 @@ const dspSelectedModuleStorageKey = 'echo-next.dsp.selected-module';
 const dspSettingsPendingSectionStorageKey = 'echo-next.settings.pending-section';
 const dspEchoProActivationPanelStorageKey = 'echo:settings:general:echo-pro-activation-panel-expanded';
 const dspEchoProActivationTargetId = 'settings-row-echo-pro-activation';
-const dspEchoProPurchaseUrl = 'https://afdian.com/a/echonext';
+const dspSteamStoreUrl = 'https://store.steampowered.com/app/5105090/ECHO/';
 const dspModuleIds: readonly DspModuleId[] = ['rack', 'headroom', 'src', 'sdm', 'eq', 'compressor', 'crossfeed', 'stereoField', 'channelMatrix', 'headphone', 'room', 'channel', 'safety'];
 
 const isDspModuleId = (value: unknown): value is DspModuleId =>
@@ -91,8 +91,16 @@ const openEchoProActivationSettings = (): void => {
   }, 0);
 };
 
-const openEchoProPurchasePage = (): void => {
-  void window.echo?.app?.openExternalUrl(dspEchoProPurchaseUrl);
+const openSteamDspPage = async (): Promise<void> => {
+  if (window.echo?.app?.openExternalUrl) {
+    try {
+      await window.echo.app.openExternalUrl(dspSteamStoreUrl);
+      return;
+    } catch {
+      // Browser previews can open the same store page without the desktop bridge.
+    }
+  }
+  window.open(dspSteamStoreUrl, '_blank', 'noopener,noreferrer');
 };
 
 const readStoredDspModuleId = (): DspModuleId => {
@@ -6402,76 +6410,72 @@ const DspWorkbench = (): JSX.Element => {
 
 const dspProLockText = {
   'zh-CN': {
-    aria: 'DSP 需要 ECHO Pro',
-    badge: 'ECHO Pro 专属',
-    title: '完整 DSP 工作台，专为认真听音打造',
-    description: '参数均衡器、耳机校正、房间校正、ECHO SRC / SDM、声道补偿与安全余量均包含在 ECHO Pro 中。',
-    configSafe: '你现有的 DSP 配置会安全保留，激活 Pro 后可继续使用。',
-    buyPro: '购买 ECHO Pro',
-    openPro: '账号与激活',
-    purchaseHint: 'afdian.com/a/echonext',
-    previewTitle: 'DSP 信号链预览',
-    previewDescription: '音频按以下顺序处理，所有模块在 Pro 激活前处于锁定状态。',
-    lockedState: 'Pro 未激活，所有模块已锁定',
+    aria: '社区版 DSP 使用提示',
+    badge: '社区版 DSP 提示',
+    title: '建议在 Steam 版体验 DSP',
+    description: '社区版 DSP 功能的实现目前存在问题，可能无法按预期处理音频。若需要使用均衡器、耳机或房间校正、SRC / SDM 等功能，建议前往 Steam 版体验。',
+    configSafe: '现有 DSP 配置会保留；查看此页面不会改变音频设置。',
+    openSteam: '前往 Steam 体验',
+    storeHint: 'store.steampowered.com/app/5105090',
+    previewTitle: 'DSP 信号链示意',
+    previewDescription: '以下是 DSP 模块示意。社区版当前的 DSP 实现可能无法按预期工作。',
+    lockedState: '社区版 DSP 暂不推荐使用',
     recheck: '重新检查',
     hide: '在侧边栏隐藏音效处理',
     hideHint: '隐藏后可随时在“设置 → 外观 → 侧栏”中重新显示。',
-    loading: '正在检查 ECHO Pro 授权…',
-    error: '暂时无法读取授权状态，请重新检查。',
+    loading: '正在检查 DSP 状态…',
+    error: '暂时无法读取 DSP 状态，请重新检查。',
   },
   'zh-TW': {
-    aria: 'DSP 需要 ECHO Pro',
-    badge: 'ECHO Pro 專屬',
-    title: '完整 DSP 工作台，為認真聆聽而打造',
-    description: '參數等化器、耳機校正、房間校正、ECHO SRC / SDM、聲道補償與安全餘量均包含在 ECHO Pro 中。',
-    configSafe: '你現有的 DSP 設定會安全保留，啟用 Pro 後可繼續使用。',
-    buyPro: '購買 ECHO Pro',
-    openPro: '帳號與啟用',
-    purchaseHint: 'afdian.com/a/echonext',
-    previewTitle: 'DSP 訊號鏈預覽',
-    previewDescription: '音訊依以下順序處理，所有模組在 Pro 啟用前均為鎖定狀態。',
-    lockedState: 'Pro 未啟用，所有模組已鎖定',
+    aria: '社群版 DSP 使用提示',
+    badge: '社群版 DSP 提示',
+    title: '建議在 Steam 版體驗 DSP',
+    description: '社群版 DSP 功能目前實作有問題，可能無法如預期處理音訊。若需要等化器、耳機或房間校正、SRC / SDM 等功能，建議前往 Steam 版體驗。',
+    configSafe: '現有 DSP 設定會保留；檢視此頁不會變更音訊設定。',
+    openSteam: '前往 Steam 體驗',
+    storeHint: 'store.steampowered.com/app/5105090',
+    previewTitle: 'DSP 訊號鏈示意',
+    previewDescription: '以下為 DSP 模組示意。社群版目前的 DSP 實作可能無法如預期運作。',
+    lockedState: '暫不建議使用社群版 DSP',
     recheck: '重新檢查',
     hide: '在側邊欄隱藏音效處理',
     hideHint: '隱藏後可隨時在「設定 → 外觀 → 側邊欄」中重新顯示。',
-    loading: '正在檢查 ECHO Pro 授權…',
-    error: '暫時無法讀取授權狀態，請重新檢查。',
+    loading: '正在檢查 DSP 狀態…',
+    error: '暫時無法讀取 DSP 狀態，請重新檢查。',
   },
   'en-US': {
-    aria: 'DSP requires ECHO Pro',
-    badge: 'ECHO Pro exclusive',
-    title: 'A complete DSP workbench for serious listening',
-    description: 'Parametric EQ, headphone and room correction, ECHO SRC / SDM, channel tools, and safety headroom are included with ECHO Pro.',
-    configSafe: 'Your existing DSP configuration is kept safely and will be ready after Pro is activated.',
-    buyPro: 'Buy ECHO Pro',
-    openPro: 'Account & activation',
-    purchaseHint: 'afdian.com/a/echonext',
-    previewTitle: 'DSP signal-chain preview',
-    previewDescription: 'Audio follows this processing order. Every module stays locked until Pro is activated.',
-    lockedState: 'Pro inactive — all modules locked',
+    aria: 'Community edition DSP notice',
+    badge: 'Community DSP notice',
+    title: 'Try DSP in the Steam edition',
+    description: 'The community edition DSP implementation currently has issues and may not process audio as expected. For EQ, headphone or room correction, and SRC / SDM, we recommend the Steam edition.',
+    configSafe: 'Your existing DSP settings are preserved; viewing this page does not change audio settings.',
+    openSteam: 'Explore on Steam',
+    storeHint: 'store.steampowered.com/app/5105090',
+    previewTitle: 'DSP signal-chain overview',
+    previewDescription: 'These modules are illustrative. Community edition DSP may not work as expected right now.',
+    lockedState: 'Community DSP is not recommended right now',
     recheck: 'Check again',
     hide: 'Hide DSP from the sidebar',
     hideHint: 'You can show it again anytime in Settings → Appearance → Sidebar.',
-    loading: 'Checking ECHO Pro access…',
-    error: 'The authorization status is temporarily unavailable. Please check again.',
+    loading: 'Checking DSP status…',
+    error: 'The DSP status is temporarily unavailable. Please check again.',
   },
   'ko-KR': {
-    aria: 'DSP에는 ECHO Pro가 필요합니다',
-    badge: 'ECHO Pro 전용',
-    title: '진지한 감상을 위한 완전한 DSP 작업대',
-    description: '파라메트릭 EQ, 헤드폰·룸 보정, ECHO SRC / SDM, 채널 도구, 안전 헤드룸이 ECHO Pro에 포함됩니다.',
-    configSafe: '기존 DSP 설정은 안전하게 유지되며 Pro 활성화 후 바로 사용할 수 있습니다.',
-    buyPro: 'ECHO Pro 구매',
-    openPro: '계정 및 활성화',
-    purchaseHint: 'afdian.com/a/echonext',
-    previewTitle: 'DSP 신호 체인 미리보기',
-    previewDescription: '오디오는 이 처리 순서를 따릅니다. Pro가 활성화될 때까지 모든 모듈이 잠깁니다.',
-    lockedState: 'Pro 비활성 — 모든 모듈 잠김',
+    aria: '커뮤니티 버전 DSP 안내',
+    badge: '커뮤니티 DSP 안내',
+    title: 'Steam 버전에서 DSP를 경험해 보세요',
+    description: '커뮤니티 버전의 DSP 구현에는 현재 문제가 있어 오디오가 예상대로 처리되지 않을 수 있습니다. EQ, 헤드폰·룸 보정, SRC / SDM은 Steam 버전에서 체험하시길 권장합니다.',
+    configSafe: '기존 DSP 설정은 보존되며 이 페이지를 보는 것만으로 오디오 설정이 변경되지는 않습니다.',
+    openSteam: 'Steam에서 보기',
+    storeHint: 'store.steampowered.com/app/5105090',
+    previewTitle: 'DSP 신호 체인 개요',
+    previewDescription: '아래 모듈은 예시입니다. 커뮤니티 버전 DSP는 현재 예상대로 작동하지 않을 수 있습니다.',
+    lockedState: '현재 커뮤니티 DSP 사용을 권장하지 않습니다',
     recheck: '다시 확인',
     hide: '사이드바에서 DSP 숨기기',
     hideHint: '설정 → 모양 → 사이드바에서 언제든 다시 표시할 수 있습니다.',
-    loading: 'ECHO Pro 권한 확인 중…',
-    error: '권한 상태를 일시적으로 확인할 수 없습니다. 다시 확인해 주세요.',
+    loading: 'DSP 상태 확인 중…',
+    error: 'DSP 상태를 일시적으로 확인할 수 없습니다. 다시 확인해 주세요.',
   },
 } as const;
 
@@ -6570,17 +6574,13 @@ export const DspPage = (): JSX.Element => {
 
             <div className="dsp-pro-lock__actions">
               <div className="dsp-pro-lock__purchase">
-                <button className="dsp-pro-lock__primary" type="button" onClick={openEchoProPurchasePage}>
+                <button className="dsp-pro-lock__primary" type="button" onClick={() => void openSteamDspPage()}>
                   <ShieldCheck size={17} aria-hidden="true" />
-                  {copy.buyPro}
+                  {copy.openSteam}
                   <ExternalLink size={14} aria-hidden="true" />
                 </button>
-                <small>{copy.purchaseHint}</small>
+                <small>{copy.storeHint}</small>
               </div>
-              <button className="dsp-pro-lock__secondary" type="button" onClick={openEchoProActivationSettings}>
-                <UserRound size={16} aria-hidden="true" />
-                {copy.openPro}
-              </button>
               <button
                 className="dsp-pro-lock__secondary"
                 type="button"

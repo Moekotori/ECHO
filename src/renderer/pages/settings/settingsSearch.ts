@@ -240,6 +240,7 @@ export const settingsSearchAliases: Record<SettingsNavKey, string[]> = {
     'library health',
   ],
   about: ['about', 'version', 'update', 'diagnostics', 'crash', 'repository', 'safe mode', 'startup', '关于', '版本', '更新', '诊断', '崩溃', '仓库', '慢启动'],
+  steam: ['steam', 'workshop', 'community edition', 'performance', 'audio refactor', '创意工坊', '社區版', '社区版', '性能', '音频重构'],
   danger: ['danger', 'reset', 'clear cache', 'delete cache', 'restore defaults', 'rebuild database', 'repair database', 'delete database', 'database recovery', 'database snapshot', 'database health', 'duplicate cleanup', 'duplicate songs', '危险', '重置', '清空缓存', '恢复默认', '重建数据库', '修复数据库', '删除数据库', '数据库恢复', '曲库恢复', '健康快照', '重复歌曲', '清理重复', '重复清理'],
 };
 

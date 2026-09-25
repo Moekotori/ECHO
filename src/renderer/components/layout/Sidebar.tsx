@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronsLeft, Eye, EyeOff, GripVertical, LockKeyhole, SlidersHorizontal, X } from 'lucide-react';
+import { AudioLines, ChevronsLeft, Eye, EyeOff, GripVertical, LockKeyhole, SlidersHorizontal, X } from 'lucide-react';
 import { preloadAppRoute, type AppRoute, type AppRouteId } from '../../app/routes';
 import { useI18n } from '../../i18n/I18nProvider';
 import { isSidebarRouteId, lockedVisibleSidebarRouteIds, type SidebarRouteId } from '../../../shared/types/sidebar';
+import { pendingSettingsSectionStorageKey, settingsSectionNavigationEvent } from '../../pages/settings/settingsNavigation';
 
 type SidebarProps = {
   routes: AppRoute[];
@@ -143,6 +144,16 @@ export const Sidebar = ({
     }
 
     onRouteChange(routeId);
+  };
+
+  const openSteamSection = (): void => {
+    try {
+      window.sessionStorage.setItem(pendingSettingsSectionStorageKey, 'steam');
+    } catch {
+      // The navigation event still works when Settings is already mounted.
+    }
+    onRouteChange('settings');
+    window.dispatchEvent(new CustomEvent(settingsSectionNavigationEvent, { detail: { section: 'steam' } }));
   };
 
   const closeMenu = (): void => setMenuState(null);
@@ -363,6 +374,12 @@ export const Sidebar = ({
             {index === 0 ? null : <h2 className="sidebar-group-label">{t(group.labelKey)}</h2>}
             <nav className={`nav-list${group.utility ? ' utility-nav' : ''}`} aria-label={group.utility ? t('app.navigation.utility') : t(group.labelKey)}>
               {group.routes.map((route) => renderRouteButton(route, group.utility))}
+              {group.utility && !isEditing ? (
+                <button className="nav-item" type="button" title={t('settings.nav.steam.label')} aria-label={t('settings.nav.steam.label')} onClick={openSteamSection}>
+                  {renderNavIcon(AudioLines, 21)}
+                  <span className="nav-item-label">{t('settings.nav.steam.label')}</span>
+                </button>
+              ) : null}
             </nav>
           </section>
         ))}

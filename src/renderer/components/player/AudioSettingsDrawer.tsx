@@ -186,6 +186,7 @@ const resetAllAudioSettingsPatch: Partial<AppSettings> = {
   audioMiniaudioOutputExperimentalEnabled: false,
   audioNativeDirectLocalPlaybackEnabled: false,
   ...safeAudioDspAppSettingsPatch,
+  audioDsdOutputMode: 'pcm',
   audioDsdAutoVolumeLockEnabled: false,
   audioExclusiveInstabilityFallbackEnabled: false,
   audioSoxrFallbackEnabled: true,

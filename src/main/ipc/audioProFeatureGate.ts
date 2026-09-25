@@ -46,9 +46,7 @@ export const patchEnablesEchoProDsp = (patch: EchoProDspPatch | null | undefined
     (hasOwn(patch, 'audioEchoSrcMode') && patch.audioEchoSrcMode !== undefined && patch.audioEchoSrcMode !== 'off') ||
     (hasOwn(patch, 'echoSrcMode') && patch.echoSrcMode !== undefined && patch.echoSrcMode !== 'off') ||
     patchEnablesSdmMode(patch) ||
-    (patchTouchesSdmProfile(patch) && !patchExplicitlyDisablesSdmMode(patch)) ||
-    (hasOwn(patch, 'audioDsdOutputMode') && patch.audioDsdOutputMode === 'dop') ||
-    (hasOwn(patch, 'dsdOutputMode') && patch.dsdOutputMode === 'dop')
+    (patchTouchesSdmProfile(patch) && !patchExplicitlyDisablesSdmMode(patch))
   );
 };
 

@@ -17,6 +17,7 @@ export type SettingsNavKey =
   | 'accessibility'
   | 'library'
   | 'about'
+  | 'steam'
   | 'danger';
 
 export type AccountBusyAction = 'save' | 'check' | 'clear' | 'browser' | 'login';

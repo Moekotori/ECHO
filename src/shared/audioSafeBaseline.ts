@@ -2,7 +2,6 @@ import type { AppSettings } from './types/appSettings';
 import type { AudioOutputSettings } from './types/audio';
 
 export const safeAudioDspAppSettingsPatch = {
-  audioDsdOutputMode: 'pcm',
   audioSdmMode: 'off',
   audioSdmTargetRate: 'dsd128',
   audioSdmQualityProfile: 'safe',
@@ -20,7 +19,6 @@ export const safeAudioDspAppSettingsPatch = {
 } satisfies Partial<AppSettings>;
 
 export const safeAudioDspOutputSettings = {
-  dsdOutputMode: 'pcm',
   sdmMode: 'off',
   sdmTargetRate: 'dsd128',
   sdmQualityProfile: 'safe',
@@ -48,6 +46,7 @@ export const safeAudioResetOutputSettings = {
   useLibavDecode: false,
   nativeDirectLocalPlaybackEnabled: false,
   ...safeAudioDspOutputSettings,
+  dsdOutputMode: 'pcm',
   exclusiveInstabilityFallbackEnabled: false,
   soxrFallbackEnabled: true,
   releaseExclusiveOnPauseExperimentalEnabled: false,

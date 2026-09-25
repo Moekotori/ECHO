@@ -2,6 +2,7 @@ import { lazy, Suspense, startTransition, useCallback, useEffect, useMemo, useRe
 import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import {
   Accessibility,
+  AudioLines,
   BookOpen,
   Captions,
   Check,
@@ -62,6 +63,7 @@ import type {
 import { SPOTIFY_NORMAL_REPLAY_GAIN_TARGET_LUFS } from '../../shared/constants/replayGain';
 import { finalThemeUnlockVersion, isDownloadFeatureUnlockCode } from '../../shared/constants/featureUnlocks';
 import { defaultArtistOnlineInfoSources, defaultArtistStreamingAlbumsProvider } from '../../shared/types/appSettings';
+import { SteamEditionOverview } from '../components/common/SteamEditionOverview';
 import {
   defaultSidebarHiddenRouteIds,
   defaultSidebarRouteOrder,
@@ -552,16 +554,11 @@ export const SettingsPage = (): JSX.Element => {
       main: [],
       utility: [],
     };
-    const includeDownloads = appSettings?.downloadsFeatureUnlocked === true;
     const includeStreaming = appSettings?.streamingFeatureEnabled === true;
     const includeOsuDownloader = appSettings?.osuDownloaderFeatureEnabled === true;
 
     for (const routeId of sidebarRouteOrder) {
       if (lockedHiddenSidebarRouteIdSet.has(routeId)) {
-        continue;
-      }
-
-      if (routeId === 'downloads' && !includeDownloads) {
         continue;
       }
 
@@ -580,7 +577,7 @@ export const SettingsPage = (): JSX.Element => {
     }
 
     return groups;
-  }, [appSettings?.downloadsFeatureUnlocked, appSettings?.osuDownloaderFeatureEnabled, appSettings?.streamingFeatureEnabled, sidebarRouteOrder]);
+  }, [appSettings?.osuDownloaderFeatureEnabled, appSettings?.streamingFeatureEnabled, sidebarRouteOrder]);
   const [selectedThemePreset, setSelectedThemePreset] = useState<AppThemePreset>(() => readThemePreset());
   const [themeCustomThemes, setThemeCustomThemes] = useState<AppThemeCustomTheme[]>(() => readThemeCustomThemes());
   const [activeThemeCustomId, setActiveThemeCustomId] = useState<string | null>(() => readThemeCustomId());
@@ -657,15 +654,13 @@ export const SettingsPage = (): JSX.Element => {
   const [echoProMachineCode, setEchoProMachineCode] = useState<string | null>(null);
   const [echoProMachineCodeCopied, setEchoProMachineCodeCopied] = useState(false);
   const [echoProPluginUnlocked, setEchoProPluginUnlocked] = useState(false);
-  const [echoProDspUnlocked, setEchoProDspUnlocked] = useState(false);
   const [echoProPluginStatusChecked, setEchoProPluginStatusChecked] = useState(false);
   const echoProUnlockedForDisplay = echoProAccountStatus?.pro === true || echoProPluginUnlocked || finalThemeUnlocked;
   const echoProPluginUnlockedForStatus =
     echoProPluginStatusChecked ? echoProPluginUnlocked : echoProStatusSnapshot.pluginUnlocked === true;
   const echoProAccountStatusForStatus =
     echoProAccountStatus ?? (!echoProAccountStatusChecked ? echoProStatusSnapshot.accountStatus : null);
-  const echoProUnlockedForStatus = echoProUnlockedForDisplay || echoProPluginUnlockedForStatus || echoProAccountStatusForStatus?.pro === true;
-  const echoProAudioUnlocked = echoProDspUnlocked;
+  const echoProUnlockedForStatus = echoProPluginUnlockedForStatus || echoProAccountStatusForStatus?.pro === true;
   const [echoProMessage, setEchoProMessage] = useState<string | null>(null);
   const [echoProError, setEchoProError] = useState<string | null>(null);
   const echoProActivationReady = useMemo(() => {
@@ -2980,13 +2975,13 @@ export const SettingsPage = (): JSX.Element => {
       ])
         .then(([pluginResult, echoProStatus, localEntitlement]) => {
           if (!disposed) {
-            const pluginUnlocked = localEntitlement?.unlocked ??
-              (pluginResult?.plugins.some(isEchoProUnlockPluginActive) === true);
+            const pluginUnlocked = localEntitlement
+              ? localEntitlement.source === 'native-license' || localEntitlement.source === 'legacy-plugin'
+              : pluginResult?.plugins.some(isEchoProUnlockPluginActive) === true;
             if (pluginResult || localEntitlement) {
               setEchoProPluginUnlocked(pluginUnlocked);
               setEchoProPluginStatusChecked(true);
             }
-            setEchoProDspUnlocked(localEntitlement?.dspUnlocked === true);
             if (echoProStatus) {
               setEchoProAccountStatus(echoProStatus);
               setEchoProAccountStatusChecked(true);
@@ -2996,7 +2991,8 @@ export const SettingsPage = (): JSX.Element => {
               ...(pluginResult || localEntitlement ? { pluginUnlocked } : {}),
             }));
             setFinalThemeUnlocked((current) =>
-              echoProStatus?.pro === true || (pluginResult || localEntitlement ? pluginUnlocked : current) || finalThemeMarkerUnlockedRef.current,
+              echoProStatus?.pro === true || localEntitlement?.unlocked === true ||
+              (pluginResult ? pluginUnlocked : current) || finalThemeMarkerUnlockedRef.current,
             );
             setFinalThemeUnlockChecked(true);
             setPluginThemeOptions(pluginResult ? collectPluginThemeOptions(pluginResult.plugins) : []);
@@ -4030,11 +4026,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
   const handleDsdDopToggle = async (): Promise<void> => {
     const nextEnabled = appSettings?.audioDsdOutputMode === 'pcm';
     const nextDsdOutputMode = nextEnabled ? 'dop' : 'pcm';
-
-    if (nextEnabled && !echoProAudioUnlocked) {
-      setError(formatUserFacingError(new Error('echo_pro_required'), { context: 'audio' }));
-      return;
-    }
 
     const audio = getAudioBridge();
     const app = getAppBridge();
@@ -10713,7 +10704,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 >
                   <ToggleButton
                     active={appSettings?.audioDsdOutputMode !== 'pcm'}
-                    disabled={!appSettings || (appSettings.audioDsdOutputMode === 'pcm' && !echoProAudioUnlocked)}
+                    disabled={!appSettings}
                     onClick={() => void handleDsdDopToggle()}
                   />
                 </SettingRow>
@@ -13685,11 +13676,11 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               </SettingRow>
               <SettingRow
                 title={t('settings.about.pro.title')}
-                description={echoProUnlockedForDisplay ? '已解锁 ECHO Pro。感谢支持 ECHO Next。' : t('settings.about.pro.description')}
+                description={echoProUnlockedForStatus ? '已解锁 ECHO Pro。感谢支持 ECHO Next。' : t('settings.about.pro.description')}
               >
                 <button className="settings-action-button" type="button" onClick={() => void handleOpenExternalUrl(afdianSponsorUrl)}>
-                  {echoProUnlockedForDisplay ? <Check size={15} /> : <ExternalLink size={15} />}
-                  {echoProUnlockedForDisplay ? '已解锁 ECHO Pro' : t('settings.about.pro.action')}
+                  {echoProUnlockedForStatus ? <Check size={15} /> : <ExternalLink size={15} />}
+                  {echoProUnlockedForStatus ? '已解锁 ECHO Pro' : t('settings.about.pro.action')}
                 </button>
               </SettingRow>
               <Suspense fallback={null}>
@@ -14018,6 +14009,10 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               </SettingRow>
               </>
               )}
+            </SettingSection>
+
+            <SettingSection activeKey={activeSection} icon={AudioLines} id="steam" title={t('settings.nav.steam.label')}>
+              <SteamEditionOverview />
             </SettingSection>
 
             <SettingSection activeKey={activeSection} icon={Trash2} id="danger" title={t('settings.nav.danger.label')}>

@@ -522,28 +522,11 @@
   font-weight: 760;
 }
 
-.app-titlebar-brand .app-titlebar-pro-slot {
-  display: inline-flex;
-  min-width: 34px;
-  height: 18px;
-  align-items: center;
-}
-
-.app-titlebar-brand .app-titlebar-pro-badge {
-  display: inline-flex;
-  height: 18px;
-  align-items: center;
-  padding: 0 7px;
-  border: 1px solid color-mix(in srgb, var(--theme-accent-text) 32%, transparent);
-  border-radius: 999px;
+.app-titlebar-brand .app-titlebar-edition {
   color: var(--theme-accent-text-strong);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--theme-accent-bg-strong) 64%, transparent), color-mix(in srgb, var(--theme-panel-bg) 72%, transparent));
-  box-shadow: 0 6px 16px color-mix(in srgb, var(--theme-accent-text) 12%, transparent);
-  font-size: 10px;
-  font-weight: 880;
-  line-height: 1;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 760;
+  white-space: nowrap;
 }
 
 .app-titlebar-brand .app-titlebar-version {
@@ -21342,6 +21325,10 @@ html[data-theme="dark"] .titlebar-action,
 html[data-theme="dark"] .window-control,
 html[data-theme="dark"] .songs-title-group span {
   color: var(--color-muted);
+}
+
+html[data-theme="dark"] .app-titlebar-brand .app-titlebar-edition {
+  color: var(--theme-accent-text-strong);
 }
 
 html[data-theme="dark"] .titlebar-action {

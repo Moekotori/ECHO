@@ -1,0 +1,85 @@
+.steam-edition-overview {
+  display: grid;
+  gap: 20px;
+  color: var(--theme-heading-text);
+}
+
+.steam-edition-overview__lead {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: clamp(20px, 3vw, 30px);
+  border: 1px solid var(--theme-accent-border);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--theme-accent-text) 16%, transparent), transparent 58%),
+    var(--theme-panel-bg);
+}
+
+.steam-edition-overview__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--theme-accent-text);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .11em;
+}
+
+.steam-edition-overview__lead h3 {
+  margin: 0;
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1.15;
+}
+
+.steam-edition-overview__lead p {
+  max-width: 56ch;
+  margin: 0;
+  color: var(--theme-muted-text);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.steam-edition-overview__store {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 7px 14px;
+  border: 1px solid var(--theme-accent-border);
+  border-radius: 9px;
+  background: var(--theme-accent-text);
+  color: var(--theme-panel-bg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.steam-edition-overview__store:hover { filter: brightness(1.08); }
+.steam-edition-overview__store:focus-visible { outline: 2px solid var(--theme-accent-text); outline-offset: 3px; }
+
+.steam-edition-overview__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.steam-edition-overview__item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 11px;
+  padding: 18px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 12px;
+  background: var(--theme-panel-bg-muted);
+}
+
+.steam-edition-overview__item > svg { color: var(--theme-accent-text); }
+.steam-edition-overview__item h4 { margin: 0 0 7px; font-size: 14px; line-height: 1.3; }
+.steam-edition-overview__item p { margin: 0; color: var(--theme-muted-text); font-size: 12px; line-height: 1.65; }
+.steam-edition-overview__note { margin: 0; color: var(--theme-muted-text); font-size: 12px; line-height: 1.6; }
+
+@media (max-width: 660px) {
+  .steam-edition-overview__grid { grid-template-columns: minmax(0, 1fr); }
+}

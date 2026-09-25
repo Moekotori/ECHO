@@ -85,6 +85,17 @@ export const serializeFontList = (value: string): string => {
   return families.length ? families.map((family) => JSON.stringify(family.replace(/^["']|["']$/g, ''))).join(', ') : JSON.stringify(value);
 };
 
+const importedFontFamily = (slot: AppearanceFontSlot): string => `ECHO Imported Font ${slot}`;
+
+export const serializeAppearanceFontList = (
+  slot: AppearanceFontSlot,
+  family: string,
+  fontFilePath: string | null | undefined,
+): string => [
+  ...(fontFilePath ? [serializeFontList(importedFontFamily(slot))] : []),
+  serializeFontList(family),
+].join(', ');
+
 export const readAppearancePreferences = (): AppearancePreferences => {
   try {
     const raw = window.localStorage.getItem(storageKey);
@@ -148,9 +159,9 @@ export const applyAppearancePreferences = (preferences: AppearancePreferences): 
   const mutedLightness = isDarkTheme ? clamp(textLightness - 18, 58, 76) : clamp(textLightness + 20, 38, 62);
   const subtleLightness = isDarkTheme ? clamp(textLightness - 34, 42, 58) : clamp(textLightness + 34, 52, 74);
   const fontStack = [
-    serializeFontList(effectiveMainFontFamily),
-    serializeFontList(effectiveChineseFontFamily),
-    serializeFontList(effectiveFallbackFontFamily),
+    serializeAppearanceFontList('main', effectiveMainFontFamily, normalized.mainFontFilePath),
+    serializeAppearanceFontList('chinese', effectiveChineseFontFamily, normalized.chineseFontFilePath),
+    serializeAppearanceFontList('fallback', effectiveFallbackFontFamily, normalized.fallbackFontFilePath),
     'ui-sans-serif',
     'system-ui',
     '-apple-system',
@@ -190,7 +201,8 @@ export const registerAppearanceFontFile = async (slot: AppearanceFontSlot, fontF
             ? 'Microsoft YaHei'
             : defaultAppearancePreferences.mainFontFamily;
   const family = normalizeFontName(fontFile.family, fallbackFamily);
-  const fontFace = new FontFace(family, `url("${fontFile.dataUrl}")`);
+  // Browser font matching is document-wide. Keep imported faces out of system/UI family names.
+  const fontFace = new FontFace(importedFontFamily(slot), `url("${fontFile.dataUrl}")`);
   const loadedFontFace = await fontFace.load();
   const previousFontFace = loadedFontFaces.get(slot);
 

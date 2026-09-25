@@ -34,7 +34,6 @@ import {
 } from '../../shared/types/audio';
 import { type AppSettings, type AppThemeMode } from '../../shared/types/appSettings';
 import { resolveEffectivePerformancePolicy } from '../../shared/utils/performancePolicy';
-import { echoProUnlockPluginId } from '../../shared/constants/featureUnlocks';
 import type { DiagnosticMemoryPressureEvent } from '../../shared/types/diagnostics';
 import type { DownloadJob } from '../../shared/types/downloads';
 import type { LibraryTrack } from '../../shared/types/library';
@@ -75,6 +74,7 @@ const LyricsSettingsDrawer = lazy(() => import('../components/lyrics/LyricsSetti
 const LyricsVisualSettingsDrawer = lazy(() => import('../components/lyrics/LyricsVisualSettingsDrawer').then((module) => ({ default: module.LyricsVisualSettingsDrawer })));
 const MvSettingsDrawer = lazy(() => import('../components/lyrics/MvSettingsDrawer').then((module) => ({ default: module.MvSettingsDrawer })));
 const FirstRunWizard = lazy(() => import('../components/onboarding/FirstRunWizard').then((module) => ({ default: module.FirstRunWizard })));
+const SteamEditionWelcome = lazy(() => import('../components/onboarding/SteamEditionWelcome').then((module) => ({ default: module.SteamEditionWelcome })));
 
 type AppLayoutProps = {
   routes: AppRoute[];
@@ -107,9 +107,6 @@ type RouteSwitchTrace = {
 };
 
 const lyricsViewModeMemoryKey = 'echo:lyrics:view-mode';
-const isEchoProUnlockPluginActive = (plugin: { id: string; enabled: boolean; status: string; disabledByHost?: boolean }): boolean =>
-  plugin.id === echoProUnlockPluginId && plugin.enabled === true && plugin.disabledByHost !== true && plugin.status !== 'error';
-
 const normalizeEchoSrcFilterProfile = (
   value: unknown,
   fallback: AudioEchoSrcFilterProfile = 'poly-sinc-gauss-long',
@@ -751,9 +748,6 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   const [isFirstRunWizardClosing, setIsFirstRunWizardClosing] = useState(false);
   const firstRunWizardMountedRef = useRef(false);
   const firstRunWizardCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [downloadsFeatureUnlocked, setDownloadsFeatureUnlocked] = useState(false);
-  const [connectDonatorUnlocked, setConnectDonatorUnlocked] = useState(false);
-  const [echoProPluginUnlocked, setEchoProPluginUnlocked] = useState(false);
   const [pluginPanelRoutes, setPluginPanelRoutes] = useState<AppRoute[]>([]);
   const [isAudioDrawerOpen, setIsAudioDrawerOpen] = useState(false);
   const [isLyricsDrawerOpen, setIsLyricsDrawerOpen] = useState(false);
@@ -894,7 +888,6 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     () =>
       applySidebarPreferences(
         availableRoutes.map((route) => (
-          (route.id === 'downloads' && !downloadsFeatureUnlocked) ||
           (route.id === 'streaming' && !streamingFeatureEnabled) ||
           (route.id === 'osu-downloader' && !osuDownloaderFeatureEnabled)
             ? { ...route, hideFromSidebar: true }
@@ -902,7 +895,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
         )),
         sidebarLayoutSettings,
       ),
-    [availableRoutes, downloadsFeatureUnlocked, osuDownloaderFeatureEnabled, sidebarLayoutSettings, streamingFeatureEnabled],
+    [availableRoutes, osuDownloaderFeatureEnabled, sidebarLayoutSettings, streamingFeatureEnabled],
   );
   const sidebarRouteById = useMemo(() => new Map(availableRoutes.map((route) => [route.id, route])), [availableRoutes]);
 
@@ -961,44 +954,16 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     [persistSidebarLayoutPatch, sidebarLayoutSettings.sidebarHiddenRouteIds, sidebarLayoutSettings.sidebarRouteOrder, sidebarRouteById],
   );
 
-  const refreshConnectFeatureUnlock = useCallback((): void => {
-    const getEchoProAccountStatus = window.echo?.app?.getEchoProAccountStatus;
-    if (!getEchoProAccountStatus) {
-      return;
-    }
-
-    void getEchoProAccountStatus()
-      .then((status) => {
-        const unlocked = status.pro === true;
-        setConnectDonatorUnlocked(unlocked);
-      })
-      .catch(() => {
-        // Keep the last authoritative result during a transient bridge/server failure.
-      });
-  }, []);
-
   const refreshPluginPanelRoutes = useCallback((): void => {
     const listPlugins = window.echo?.plugins?.list;
-    const getLocalEntitlement = window.echo?.app?.getEchoProLocalEntitlementStatus;
-    if (!listPlugins && !getLocalEntitlement) {
+    if (!listPlugins) {
       setPluginPanelRoutes([]);
-      setEchoProPluginUnlocked(false);
       return;
     }
 
-    void Promise.all([
-      listPlugins?.().catch(() => null) ?? Promise.resolve(null),
-      getLocalEntitlement?.().catch(() => null) ?? Promise.resolve(null),
-    ])
-      .then(([result, entitlement]) => {
-        if (result) {
-          setPluginPanelRoutes(createPluginPanelRoutes(result.plugins));
-        }
-        if (entitlement) {
-          setEchoProPluginUnlocked(entitlement.unlocked);
-        } else if (result) {
-          setEchoProPluginUnlocked(result.plugins.some(isEchoProUnlockPluginActive));
-        }
+    void listPlugins()
+      .then((result) => {
+        setPluginPanelRoutes(createPluginPanelRoutes(result.plugins));
       })
       .catch(() => {
         // A failed refresh is not an authoritative entitlement revocation.
@@ -1034,11 +999,10 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   const navigableRoutes = useMemo(
     () =>
       availableRoutes.filter((route) =>
-        (route.id !== 'downloads' || downloadsFeatureUnlocked) &&
         (route.id !== 'streaming' || streamingFeatureEnabled) &&
         (route.id !== 'osu-downloader' || osuDownloaderFeatureEnabled),
       ),
-    [availableRoutes, downloadsFeatureUnlocked, osuDownloaderFeatureEnabled, streamingFeatureEnabled],
+    [availableRoutes, osuDownloaderFeatureEnabled, streamingFeatureEnabled],
   );
   const activeRoute = useMemo(
     () => navigableRoutes.find((route) => route.id === activeRouteId) ?? navigableRoutes[0] ?? availableRoutes[0],
@@ -1431,10 +1395,6 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
         return;
       }
 
-      if (Object.prototype.hasOwnProperty.call(settings, 'downloadsFeatureUnlocked')) {
-        setDownloadsFeatureUnlocked(settings.downloadsFeatureUnlocked === true);
-      }
-
       if (Object.prototype.hasOwnProperty.call(settings, 'streamingFeatureEnabled')) {
         setStreamingFeatureEnabled(settings.streamingFeatureEnabled === true);
       }
@@ -1574,15 +1534,12 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   }, []);
 
   useEffect(() => {
-    refreshConnectFeatureUnlock();
     refreshPluginPanelRoutes();
     const handlePluginsChanged = (): void => {
-      refreshConnectFeatureUnlock();
       refreshPluginPanelRoutes();
       window.dispatchEvent(new Event('settings:changed'));
     };
     const handleEchoProStatusChanged = (): void => {
-      refreshConnectFeatureUnlock();
       refreshPluginPanelRoutes();
       window.dispatchEvent(new Event('settings:changed'));
     };
@@ -1592,7 +1549,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
       window.removeEventListener('plugins:changed', handlePluginsChanged);
       window.removeEventListener('echo-pro:status-changed', handleEchoProStatusChanged);
     };
-  }, [refreshConnectFeatureUnlock, refreshPluginPanelRoutes]);
+  }, [refreshPluginPanelRoutes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1869,12 +1826,6 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
 
     routeSwitchCommittedRouteIdRef.current = activeRouteId;
   }, [activeRouteId, getRouteSwitchPlaybackDetails]);
-
-  useEffect(() => {
-    if (!downloadsFeatureUnlocked && activeRouteId === 'downloads') {
-      navigateRoute('songs', 'downloads-locked');
-    }
-  }, [activeRouteId, downloadsFeatureUnlocked, navigateRoute]);
 
   useEffect(() => {
     if (!navigableRoutes.some((route) => route.id === activeRouteId) && activeRoute?.id && activeRoute.id !== activeRouteId) {
@@ -2876,7 +2827,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
           settings?.audioUseMiniaudioOutput === true || settings?.audioMiniaudioOutputExperimentalEnabled === true;
         const useLibavDecode = settings?.audioUseLibavDecode === true;
         const nativeDirectLocalPlaybackEnabled = settings?.audioNativeDirectLocalPlaybackEnabled === true;
-        const dsdOutputMode = proUnlocked && settings?.audioDsdOutputMode !== 'pcm' ? 'dop' : 'pcm';
+        const dsdOutputMode = settings?.audioDsdOutputMode === 'dop' ? 'dop' : 'pcm';
         const sdmMode = proUnlocked ? normalizeSdmMode(settings?.audioSdmMode) : 'off';
         const sdmTargetRate = normalizeSdmTargetRate(settings?.audioSdmTargetRate);
         const sdmQualityProfile = normalizeSdmQualityProfile(settings?.audioSdmQualityProfile);
@@ -3470,7 +3421,6 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
         isLyricsSettingsOpen={isLyricsDrawerOpen}
         isLyricsVisualSettingsOpen={isLyricsVisualDrawerOpen}
         isMvSettingsOpen={isMvDrawerOpen}
-        isProUnlocked={connectDonatorUnlocked || echoProPluginUnlocked}
         updateStatus={availableUpdateStatus}
         updateActionDisabled={updateActionDisabled}
         onRouteChange={navigateRoute}
@@ -3552,6 +3502,10 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
           />
         </Suspense>
       ) : null}
+
+      <Suspense fallback={null}>
+        <SteamEditionWelcome />
+      </Suspense>
 
       <input
         ref={folderInputRef}

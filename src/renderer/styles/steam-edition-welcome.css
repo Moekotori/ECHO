@@ -1,0 +1,49 @@
+.steam-edition-welcome-backdrop {
+  position: fixed;
+  z-index: 10001;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--theme-overlay-bg);
+  backdrop-filter: blur(12px);
+}
+
+.steam-edition-welcome {
+  position: relative;
+  width: min(800px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid var(--theme-panel-border-strong);
+  border-radius: 20px;
+  background: var(--theme-modal-bg);
+  box-shadow: var(--theme-shadow-soft);
+}
+
+.steam-edition-welcome__close {
+  position: absolute;
+  z-index: 1;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 10px;
+  background: var(--theme-panel-bg);
+  color: var(--theme-heading-text);
+  cursor: pointer;
+}
+
+.steam-edition-welcome button:focus-visible {
+  outline: 2px solid var(--theme-accent-text);
+  outline-offset: 3px;
+}
+
+@media (max-width: 520px) {
+  .steam-edition-welcome-backdrop { padding: 12px; }
+  .steam-edition-welcome { max-height: calc(100vh - 24px); }
+  .steam-edition-welcome .steam-edition-overview__lead { padding-top: 44px; }
+}

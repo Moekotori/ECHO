@@ -5,9 +5,6 @@ import { enqueueAudioCommand } from '../ipc/audioCommandQueue';
 import { getAudioSession } from './AudioSession';
 
 const statusUsesEchoProDsp = (status: AudioStatus): boolean =>
-  status.dsdOutputModeRequested === 'dop' ||
-  status.activeDsdOutputMode === 'dop' ||
-  status.activeDsdOutputMode === 'native' ||
   (status.sdmMode !== undefined && status.sdmMode !== 'off') ||
   status.sdmActive === true ||
   (status.echoSrcMode !== undefined && status.echoSrcMode !== 'off') ||
