@@ -211,7 +211,6 @@ describe('auto updater download completion', () => {
       initializeAutoUpdater,
       installDownloadedUpdate,
       isPortableWindowsBuild,
-      setAutoUpdateEnabled,
     } = await import('./autoUpdater');
 
     mocks.isScoop = true;
