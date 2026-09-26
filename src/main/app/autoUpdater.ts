@@ -62,10 +62,10 @@ export const isPortableWindowsBuild = (): boolean => {
   if (isScoopInstallation(execPath)) {
     return false;
   }
-  if (Boolean(process.env.PORTABLE_EXECUTABLE_FILE?.trim())) {
+  if (process.env.PORTABLE_EXECUTABLE_FILE?.trim()) {
     return true;
   }
-  if (Boolean(getPortableDataPath(execPath))) {
+  if (getPortableDataPath(execPath)) {
     return true;
   }
   if (app.isPackaged) {
