@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
@@ -66,6 +66,14 @@ vi.mock('./scoopService', () => ({
 }));
 
 describe('auto updater download completion', () => {
+  const originalPlatform = process.platform;
+  beforeAll(() => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+  });
+  afterAll(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  });
+
   beforeEach(async () => {
     mocks.updater.removeAllListeners();
     vi.clearAllMocks();
