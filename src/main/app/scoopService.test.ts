@@ -99,14 +99,18 @@ describe('scoopService', () => {
   });
 
   describe('runScoopUpdate', () => {
-    it('spawns visible foreground terminal using cmd /c start and pwsh on Windows', () => {
+    it('uses powershell.exe as default shell and passes -EncodedCommand with base64 encoded UTF-16LE script', () => {
       if (!isWindows) {
         expect(runScoopUpdate()).toBe(false);
         return;
       }
 
       const unrefMock = vi.fn();
-      const spawnMock = vi.fn().mockReturnValue({ unref: unrefMock });
+      let capturedArgs: string[] = [];
+      const spawnMock = vi.fn().mockImplementation((_cmd, args) => {
+        capturedArgs = args;
+        return { unref: unrefMock };
+      });
 
       const result = runScoopUpdate({
         appName: 'echo-music-player',
@@ -121,53 +125,37 @@ describe('scoopService', () => {
           '/c',
           'start',
           'ECHO Next - Scoop Updater',
-          'pwsh.exe',
+          'powershell.exe',
           '-NoProfile',
           '-ExecutionPolicy',
           'Bypass',
-          '-Command',
-          expect.stringContaining("$appName = 'echo-music-player'"),
-          expect.stringContaining('scoop update $appName'),
+          '-EncodedCommand',
+          expect.any(String),
         ]),
         expect.objectContaining({ detached: true, stdio: 'ignore', windowsHide: false }),
       );
       expect(unrefMock).toHaveBeenCalled();
+
+      const encodedCmdIdx = capturedArgs.indexOf('-EncodedCommand');
+      expect(encodedCmdIdx).toBeGreaterThan(-1);
+      const encodedScript = capturedArgs[encodedCmdIdx + 1];
+      const decodedScript = Buffer.from(encodedScript, 'base64').toString('utf16le');
+
+      expect(decodedScript).toContain("$appName = 'echo-music-player'");
+      expect(decodedScript).toContain('Wait-Process -Id 12345');
+      expect(decodedScript).toContain('$oldVer = (scoop list $appName | Select-String $appName).Line');
+      expect(decodedScript).toContain('scoop update');
+      expect(decodedScript).toContain('scoop update $appName');
+      expect(decodedScript).toContain('if ($LASTEXITCODE -ne 0)');
+      expect(decodedScript).toContain('$newVer = (scoop list $appName | Select-String $appName).Line');
+      expect(decodedScript).toContain(
+        "Write-Warning 'Scoop bucket has not updated yet. You are currently on the latest version available in Scoop.'",
+      );
+      expect(decodedScript).toContain('Start-Process -FilePath $targetExe');
+      expect(decodedScript).toContain('Start-Process -FilePath $fallback');
     });
 
-    it('verifies PowerShell command contains the resolved current executable path and fallback', () => {
-      if (!isWindows) {
-        return;
-      }
-
-      const unrefMock = vi.fn();
-      let capturedScript = '';
-      const spawnMock = vi.fn().mockImplementation((_cmd, args) => {
-        const cmdIndex = args.indexOf('-Command');
-        if (cmdIndex !== -1) {
-          capturedScript = args[cmdIndex + 1];
-        }
-        return { unref: unrefMock };
-      });
-
-      const result = runScoopUpdate({
-        appName: 'echo-music-player',
-        pid: 54321,
-        spawnFn: spawnMock as never,
-      });
-
-      expect(result).toBe(true);
-      const expectedExe = resolveScoopCurrentExePath(process.execPath);
-      expect(capturedScript).toContain(expectedExe);
-      expect(capturedScript).toContain("$appName = 'echo-music-player'");
-      expect(capturedScript).toContain('scoop update $appName');
-      expect(capturedScript).toContain('scoop which $appName');
-      expect(capturedScript).toContain('Wait-Process -Id 54321');
-      expect(capturedScript).toContain('Test-Path -LiteralPath $targetExe');
-      expect(capturedScript).toContain('Test-Path -LiteralPath $fallback');
-      expect(capturedScript).toContain('Start-Process -FilePath $targetExe -WorkingDirectory (Split-Path -Parent $targetExe)');
-      expect(capturedScript).toContain('Start-Process -FilePath $fallback -WorkingDirectory (Split-Path -Parent $fallback)');
-    });
-    it('supports custom shell override in options', () => {
+    it('allows custom shell override', () => {
       if (!isWindows) {
         return;
       }
@@ -177,16 +165,36 @@ describe('scoopService', () => {
 
       const result = runScoopUpdate({
         appName: 'echo-music-player',
-        shell: 'pwsh',
+        shell: 'pwsh.exe',
         spawnFn: spawnMock as never,
       });
 
       expect(result).toBe(true);
       expect(spawnMock).toHaveBeenCalledWith(
         'cmd.exe',
-        expect.arrayContaining(['/c', 'start', 'ECHO Next - Scoop Updater', 'pwsh']),
+        expect.arrayContaining(['/c', 'start', 'ECHO Next - Scoop Updater', 'pwsh.exe']),
         expect.anything(),
       );
+    });
+
+    it('handles failure gracefully', () => {
+      if (!isWindows) {
+        return;
+      }
+
+      const spawnMock = vi.fn().mockImplementation(() => {
+        throw new Error('Failed to spawn');
+      });
+
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const result = runScoopUpdate({
+        appName: 'echo-music-player',
+        spawnFn: spawnMock as never,
+      });
+
+      expect(result).toBe(false);
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
 
     it('escapes single quotes in appName to prevent PowerShell injection', () => {
@@ -195,12 +203,9 @@ describe('scoopService', () => {
       }
 
       const unrefMock = vi.fn();
-      let capturedScript = '';
+      let capturedArgs: string[] = [];
       const spawnMock = vi.fn().mockImplementation((_cmd, args) => {
-        const cmdIndex = args.indexOf('-Command');
-        if (cmdIndex !== -1) {
-          capturedScript = args[cmdIndex + 1];
-        }
+        capturedArgs = args;
         return { unref: unrefMock };
       });
 
@@ -210,8 +215,9 @@ describe('scoopService', () => {
       });
 
       expect(result).toBe(true);
-      expect(capturedScript).toContain("$appName = 'echo''player'");
-      expect(capturedScript).toContain('scoop update $appName');
+      const encodedCmdIdx = capturedArgs.indexOf('-EncodedCommand');
+      const decodedScript = Buffer.from(capturedArgs[encodedCmdIdx + 1], 'base64').toString('utf16le');
+      expect(decodedScript).toContain("$appName = 'echo''player'");
     });
   });
 });
