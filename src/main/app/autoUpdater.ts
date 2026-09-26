@@ -1,7 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
 import type { UpdateInfo } from 'electron-updater';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
 import type { AppSettings, AutoUpdateSource } from '../../shared/types/appSettings';
@@ -14,7 +14,7 @@ import { getAudioSession } from '../audio/AudioSession';
 import { getDownloadService } from '../downloads/DownloadService';
 import { getLibraryService } from '../library/LibraryService';
 import { hasPendingTagWrites } from '../library/TagWriter';
-import { isScoopInstallation, runScoopUpdate } from './scoopService';
+import { isScoopInstallation, getPortableDataPath, runScoopUpdate } from './scoopService';
 
 const { autoUpdater } = electronUpdater;
 
@@ -46,8 +46,40 @@ const genericUpdateFeeds: Partial<Record<AutoUpdateSource, string>> = {
   ghproxyCxkpro: 'https://ghproxy.cxkpro.top/https://github.com/Moekotori/ECHO/releases/latest/download',
 };
 
-export const isPortableWindowsBuild = (): boolean =>
-  process.platform === 'win32' && Boolean(process.env.PORTABLE_EXECUTABLE_FILE?.trim());
+const getExecutablePath = (): string => {
+  try {
+    return app.getPath('exe') || process.execPath;
+  } catch {
+    return process.execPath;
+  }
+};
+
+export const isPortableWindowsBuild = (): boolean => {
+  if (process.platform !== 'win32') {
+    return false;
+  }
+  const execPath = getExecutablePath();
+  if (isScoopInstallation(execPath)) {
+    return false;
+  }
+  if (process.env.PORTABLE_EXECUTABLE_FILE?.trim()) {
+    return true;
+  }
+  if (getPortableDataPath(execPath)) {
+    return true;
+  }
+  if (app.isPackaged) {
+    const installDir = dirname(execPath);
+    const hasNsisUninstaller =
+      existsSync(join(installDir, 'Uninstall ECHO NEXT.exe')) ||
+      existsSync(join(installDir, 'Uninstall echo-next.exe')) ||
+      existsSync(join(installDir, `Uninstall ${app.name}.exe`));
+    if (!hasNsisUninstaller && !isScoopInstallation(execPath)) {
+      return true;
+    }
+  }
+  return false;
+};
 
 const hasPinnedWindowsUpdatePublisher = (): boolean => {
   if (process.platform !== 'win32' || !app.isPackaged) {
@@ -64,6 +96,29 @@ const hasPinnedWindowsUpdatePublisher = (): boolean => {
 };
 
 let isUpdaterInitialized = false;
+let lastAttemptedScoopUpdateVersion: string | null = null;
+
+export const resetLastAttemptedScoopUpdateVersionForTest = (): void => {
+  lastAttemptedScoopUpdateVersion = null;
+};
+
+export const resetAutoUpdaterForTest = (): void => {
+  isUpdaterInitialized = false;
+  lastAttemptedScoopUpdateVersion = null;
+  updateStatus = {
+    state: 'idle',
+    currentVersion: currentVersion(),
+    latestVersion: null,
+    releaseName: null,
+    releaseNotes: null,
+    downloadPercent: null,
+    transferredBytes: null,
+    totalBytes: null,
+    bytesPerSecond: null,
+    error: null,
+    checkedAt: null,
+  };
+};
 const formatVersion = (version: string): string => (version.startsWith('v') ? version : `v${version}`);
 const currentVersion = (): string => formatVersion(app.getVersion());
 
@@ -108,13 +163,23 @@ const releaseNotesToText = (releaseNotes: string | ReleaseNoteInfo[] | null | un
   );
 };
 
+const isScoopUpdateSuppressed = (version: string): boolean => {
+  if (!isScoopInstallation(getExecutablePath())) {
+    return false;
+  }
+  const normalizedCandidate = version.replace(/^v/, '');
+  return Boolean(lastAttemptedScoopUpdateVersion && normalizedCandidate === lastAttemptedScoopUpdateVersion);
+};
+
 const applyUpdateInfo = (updateInfo: UpdateInfo): void => {
+  const isSuppressed = isScoopUpdateSuppressed(updateInfo.version);
   updateStatus = {
     ...updateStatus,
     latestVersion: formatVersion(updateInfo.version),
     releaseName: updateInfo.releaseName ?? null,
     releaseNotes: releaseNotesToText(updateInfo.releaseNotes),
     checkedAt: new Date().toISOString(),
+    ...(isSuppressed ? { state: 'not-available' as const } : {}),
   };
 };
 
@@ -274,7 +339,7 @@ export const downloadUpdate = async (): Promise<UpdateStatus> => {
     return getUpdateStatus();
   }
 
-  if (isScoopInstallation()) {
+  if (isScoopInstallation(getExecutablePath())) {
     updateStatus = {
       ...updateStatus,
       state: 'downloaded',
@@ -284,6 +349,7 @@ export const downloadUpdate = async (): Promise<UpdateStatus> => {
     emitUpdateStatus();
     return getUpdateStatus();
   }
+
   updateStatus = {
     ...updateStatus,
     state: 'downloading',
@@ -326,7 +392,9 @@ export const installDownloadedUpdate = async (): Promise<UpdateInstallResult> =>
     return { outcome: 'error', error: 'Portable builds use manual updates.' };
   }
 
-  if (updateStatus.state !== 'downloaded' && (!isScoopInstallation() || updateStatus.state !== 'available')) {
+  const isScoop = isScoopInstallation(getExecutablePath());
+
+  if (updateStatus.state !== 'downloaded' && (!isScoop || updateStatus.state !== 'available')) {
     return { outcome: 'error', error: 'No downloaded update is ready to install.' };
   }
 
@@ -350,7 +418,8 @@ export const installDownloadedUpdate = async (): Promise<UpdateInstallResult> =>
     return { outcome: 'error', error: `Protected-data snapshot failed: ${message}` };
   }
 
-  if (isScoopInstallation()) {
+  if (isScoop) {
+    lastAttemptedScoopUpdateVersion = updateStatus.latestVersion?.replace(/^v/, '') ?? null;
     const launched = runScoopUpdate();
     if (!launched) {
       return { outcome: 'error', error: 'Failed to launch Scoop updater.' };
@@ -383,6 +452,10 @@ export const initializeAutoUpdater = (enabled: boolean): void => {
 
   autoUpdater.on('update-available', (updateInfo) => {
     applyUpdateInfo(updateInfo);
+    if (isScoopUpdateSuppressed(updateInfo.version)) {
+      emitUpdateStatus();
+      return;
+    }
     updateStatus = {
       ...updateStatus,
       state: 'available',
