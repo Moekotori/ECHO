@@ -20,6 +20,7 @@ import {
 } from '../database/health';
 import { markStartupStage } from '../diagnostics/StartupDiagnostics';
 import { beginMainBackgroundTask } from '../diagnostics/PlaybackPerformanceDiagnostics';
+import { getPortableDataPath } from './scoopService';
 import type {
   LibraryDatabaseArchiveInfo,
   LibraryDatabaseDeleteResult,
@@ -440,10 +441,24 @@ export const getLibraryDatabaseMaintenanceReport = (userDataPath = app.getPath('
   events: readLibraryDatabaseMaintenanceEvents(userDataPath),
 });
 
+const getExecutablePath = (electronApp: ElectronAppLike): string | undefined => {
+  try {
+    return typeof electronApp.getPath === 'function' ? electronApp.getPath('exe') : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export const getProtectedUserDataPath = (electronApp: ElectronAppLike = app): string => {
   const overridePath = process.env.ECHO_USER_DATA_PATH_OVERRIDE?.trim();
   if (overridePath) {
     return resolve(overridePath);
+  }
+
+  const execPath = getExecutablePath(electronApp);
+  const portableDataPath = getPortableDataPath(execPath);
+  if (portableDataPath) {
+    return portableDataPath;
   }
 
   const appDataPath = electronApp.getPath('appData');
@@ -466,7 +481,8 @@ const getSnapshotsPath = (userDataPath: string): string => join(getDataProtectio
 const getScanGuardsPath = (userDataPath: string): string => join(getDataProtectionPath(userDataPath), scanGuardDirectoryName);
 const getCorruptArchivesPath = (userDataPath: string): string => join(getDataProtectionPath(userDataPath), corruptArchivesDirectoryName);
 const getLegacyUserDataPaths = (electronApp: ElectronAppLike = app): string[] => {
-  if (process.env.ECHO_SKIP_LEGACY_USER_DATA_MIGRATION === '1') {
+  const execPath = getExecutablePath(electronApp);
+  if (process.env.ECHO_SKIP_LEGACY_USER_DATA_MIGRATION === '1' || getPortableDataPath(execPath)) {
     return [];
   }
 

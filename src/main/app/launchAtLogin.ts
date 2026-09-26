@@ -1,11 +1,19 @@
 import { app } from 'electron';
+import { isScoopInstallation, resolveScoopCurrentExePath } from './scoopService';
 
 const getExecutablePath = (): string => {
-  try {
-    return app.getPath('exe') || process.execPath;
-  } catch {
-    return process.execPath;
+  const rawPath = (() => {
+    try {
+      return app.getPath('exe') || process.execPath;
+    } catch {
+      return process.execPath;
+    }
+  })();
+
+  if (isScoopInstallation(rawPath)) {
+    return resolveScoopCurrentExePath(rawPath);
   }
+  return rawPath;
 };
 
 const createLoginItemSettings = (enabled: boolean): Parameters<typeof app.setLoginItemSettings>[0] => {
