@@ -14,6 +14,7 @@ import { getAudioSession } from '../audio/AudioSession';
 import { getDownloadService } from '../downloads/DownloadService';
 import { getLibraryService } from '../library/LibraryService';
 import { hasPendingTagWrites } from '../library/TagWriter';
+import { isScoopInstallation, runScoopUpdate } from './scoopService';
 
 const { autoUpdater } = electronUpdater;
 
@@ -269,11 +270,20 @@ export const downloadUpdate = async (): Promise<UpdateStatus> => {
   if (!app.isPackaged || isPortableWindowsBuild()) {
     return getUpdateStatus();
   }
-
   if (updateStatus.state !== 'available') {
     return getUpdateStatus();
   }
 
+  if (isScoopInstallation()) {
+    updateStatus = {
+      ...updateStatus,
+      state: 'downloaded',
+      downloadPercent: 100,
+      error: null,
+    };
+    emitUpdateStatus();
+    return getUpdateStatus();
+  }
   updateStatus = {
     ...updateStatus,
     state: 'downloading',
@@ -316,7 +326,7 @@ export const installDownloadedUpdate = async (): Promise<UpdateInstallResult> =>
     return { outcome: 'error', error: 'Portable builds use manual updates.' };
   }
 
-  if (updateStatus.state !== 'downloaded') {
+  if (updateStatus.state !== 'downloaded' && (!isScoopInstallation() || updateStatus.state !== 'available')) {
     return { outcome: 'error', error: 'No downloaded update is ready to install.' };
   }
 
@@ -338,6 +348,15 @@ export const installDownloadedUpdate = async (): Promise<UpdateInstallResult> =>
     const message = error instanceof Error ? error.message : String(error);
     console.warn('[data-protection] update install blocked because the protected-data snapshot failed', error);
     return { outcome: 'error', error: `Protected-data snapshot failed: ${message}` };
+  }
+
+  if (isScoopInstallation()) {
+    const launched = runScoopUpdate();
+    if (!launched) {
+      return { outcome: 'error', error: 'Failed to launch Scoop updater.' };
+    }
+    app.quit();
+    return { outcome: 'installing' };
   }
 
   configureWindowsInstallDirectory();
