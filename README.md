@@ -29,6 +29,8 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/Moekotori/ECHO/releases">获取社区版</a>
   &nbsp;·&nbsp;
+  <a href="https://github.com/Moekotori/echoandroid">Android 版</a>
+  &nbsp;·&nbsp;
   <a href="https://echonext.moe/zh/docs/">使用文档</a>
   &nbsp;·&nbsp;
   <a href="./README_EN.md">English</a>
@@ -39,6 +41,14 @@
 ## 社区版：永久免费，源码公开
 
 社区版**永久免费**，源码公开，维护依靠大家共同参与。欢迎从 [GitHub Releases](https://github.com/Moekotori/ECHO/releases) 获取播放器，一起修复问题、完善功能、改进文档与翻译。
+
+## Android 版：把 ECHO 带在身边
+
+**[前往 ECHO Android 仓库 →](https://github.com/Moekotori/echoandroid)** · **[下载 Android APK](https://github.com/Moekotori/echoandroid/releases/latest)**
+
+ECHO Android 是原生 Android 音乐播放器，支持本地与远程曲库、动态歌词和声音调整，也可以通过 **Echo Link 与 PC ECHO（ECHOSteam）联动**：在手机上浏览电脑曲库、遥控电脑播放，或将电脑音乐串流到手机。
+
+联动时请让手机与电脑处于同一局域网，在支持 Echo Link 的 PC ECHO 中开启服务，并使用完整配对链接完成首次授权。具体功能取决于两端版本，连接步骤见 [Android 联动指南](https://github.com/Moekotori/echoandroid#与-pc-echo-联动)；PC ECHO 可从 [Steam 商店](https://store.steampowered.com/app/5105090/ECHO/) 获取。
 
 ## Steam 版：把听歌这件事，做得更尽兴
 
