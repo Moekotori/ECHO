@@ -6,7 +6,7 @@ import type { AudioStatus } from '../../shared/types/audio';
 import { hqPlayerConnectDeviceId, type ConnectReceiverStatus, type ConnectSessionStatus } from '../../shared/types/connect';
 import type { LibraryPlaylistItem, LibraryTrack } from '../../shared/types/library';
 import type { PersistedPlaybackSessionV1 } from '../../shared/types/playback';
-import { PlaybackQueueProvider, isPlaybackCancellationError, usePlaybackQueue } from './PlaybackQueueProvider';
+import { PlaybackQueueProvider, isPlaybackCancellationError, usePlaybackQueue, shuffleArray, resolveBackendQueueSyncPayload } from './PlaybackQueueProvider';
 import { useSharedPlaybackStatus } from './playbackStatusStore';
 
 const makeTrack = (index: number): LibraryTrack => ({
@@ -5666,5 +5666,247 @@ describe('PlaybackQueueProvider persisted queue session', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Track 1' }));
     await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(2));
     expect(playLocalFile.mock.calls[1]?.[0].startSeconds).toBeUndefined();
+  });
+});
+
+describe('PlaybackQueueProvider shuffle backend sync (Issue #133)', () => {
+  it('shuffleArray shuffles elements without mutating input', () => {
+    const original = ['a', 'b', 'c', 'd', 'e'];
+    const copy = [...original];
+    const shuffled = shuffleArray(original);
+    expect(original).toEqual(copy);
+    expect(shuffled).toHaveLength(original.length);
+    expect(new Set(shuffled)).toEqual(new Set(original));
+  });
+
+  it('resolveBackendQueueSyncPayload returns unshuffled items when shuffle is disabled', () => {
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)];
+    const session = makePersistedQueueSession(tracks, { currentQueueId: 'queue-2' });
+    const result = resolveBackendQueueSyncPayload({
+      items: session.items,
+      currentQueueId: 'queue-2',
+      isShuffle: false,
+      existingDeck: null,
+    });
+    expect(result.nextDeck).toBeNull();
+    expect(result.backendCurrentQueueId).toBe('queue-2');
+    expect(result.queueItems.map((item) => item.itemId)).toEqual(['queue-1', 'queue-2', 'queue-3']);
+  });
+
+  it('resolveBackendQueueSyncPayload places current item at index 0 and preferredNext at index 1', () => {
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3), makeTrack(4)];
+    const session = makePersistedQueueSession(tracks, { currentQueueId: 'queue-2' });
+    const result = resolveBackendQueueSyncPayload({
+      items: session.items,
+      currentQueueId: 'queue-2',
+      isShuffle: true,
+      existingDeck: null,
+      preferredNextQueueId: 'queue-4',
+    });
+    expect(result.nextDeck).not.toBeNull();
+    expect(result.nextDeck![0]).toBe('queue-2');
+    expect(result.nextDeck![1]).toBe('queue-4');
+    expect(result.nextDeck).toHaveLength(4);
+    expect(new Set(result.nextDeck!)).toEqual(new Set(['queue-1', 'queue-2', 'queue-3', 'queue-4']));
+    expect(result.queueItems.map((item) => item.itemId)).toEqual(result.nextDeck!);
+  });
+
+  it('resolveBackendQueueSyncPayload reuses existing deck when composition matches', () => {
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)];
+    const session = makePersistedQueueSession(tracks, { currentQueueId: 'queue-2' });
+    const deck = ['queue-3', 'queue-2', 'queue-1'];
+    const result = resolveBackendQueueSyncPayload({
+      items: session.items,
+      currentQueueId: 'queue-2',
+      isShuffle: true,
+      existingDeck: deck,
+    });
+    expect(result.nextDeck).toBe(deck);
+    expect(result.queueItems.map((item) => item.itemId)).toEqual(deck);
+  });
+
+  it('syncs a shuffled deck to backend with current track at index 0 when shuffle is enabled', async () => {
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3), makeTrack(4)];
+    const syncQueueToBackend = vi.fn().mockResolvedValue(undefined);
+    window.echo = {
+      playback: {
+        getQueueSession: vi.fn().mockResolvedValue(
+          makePersistedQueueSession(tracks, {
+            currentQueueId: 'queue-2',
+            currentTrackId: tracks[1].id,
+            mode: { isShuffleEnabled: true, repeatMode: 'off', automixEnabled: false },
+          }),
+        ),
+        saveQueueSession: vi.fn(async (snapshot) => snapshot),
+        syncQueueToBackend,
+      },
+    } as unknown as Window['echo'];
+
+    const Probe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      return (
+        <div>
+          <span aria-label="ready">{queue.currentTrack?.id ?? ''}</span>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <Probe />
+      </PlaybackQueueProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('ready').textContent).toBe(tracks[1].id));
+    await waitFor(() => expect(syncQueueToBackend).toHaveBeenCalled());
+
+    const lastSyncCall = syncQueueToBackend.mock.calls.at(-1)!;
+    const [syncedItems, repeatMode, currentItemId] = lastSyncCall;
+    expect(currentItemId).toBe('queue-2');
+    expect(repeatMode).toBe('off');
+    expect(syncedItems).toHaveLength(4);
+    expect(syncedItems[0].itemId).toBe('queue-2');
+    const syncedIds = syncedItems.map((item: { itemId: string }) => item.itemId);
+    expect(new Set(syncedIds)).toEqual(new Set(['queue-1', 'queue-2', 'queue-3', 'queue-4']));
+  });
+
+  it('preserves existing shuffled deck when native host auto-advances', async () => {
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)];
+    const syncQueueToBackend = vi.fn().mockResolvedValue(undefined);
+    const audioStatusListeners: Array<(status: AudioStatus) => void> = [];
+
+    window.echo = {
+      playback: {
+        getQueueSession: vi.fn().mockResolvedValue(
+          makePersistedQueueSession(tracks, {
+            currentQueueId: 'queue-1',
+            currentTrackId: tracks[0].id,
+            mode: { isShuffleEnabled: true, repeatMode: 'off', automixEnabled: false },
+          }),
+        ),
+        saveQueueSession: vi.fn(async (snapshot) => snapshot),
+        syncQueueToBackend,
+      },
+      audio: {
+        onStatus: vi.fn((listener: (status: AudioStatus) => void) => {
+          audioStatusListeners.push(listener);
+          return () => {
+            const index = audioStatusListeners.indexOf(listener);
+            if (index >= 0) audioStatusListeners.splice(index, 1);
+          };
+        }),
+      },
+    } as unknown as Window['echo'];
+
+    const Probe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      return (
+        <div>
+          <span aria-label="current-id">{queue.currentQueueId ?? ''}</span>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <Probe />
+      </PlaybackQueueProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('current-id').textContent).toBe('queue-1'));
+    await waitFor(() => expect(syncQueueToBackend).toHaveBeenCalledTimes(1));
+
+    const initialDeck = syncQueueToBackend.mock.calls[0]![0].map((item: { itemId: string }) => item.itemId);
+    expect(initialDeck[0]).toBe('queue-1');
+    const nextQueueItemId = initialDeck[1];
+    const nextTrack = tracks.find((_, index) => `queue-${index + 1}` === nextQueueItemId)!;
+
+    // Simulate native host auto-advancing to the next track in the deck
+    act(() => {
+      for (const listener of audioStatusListeners) {
+        listener({
+          state: 'playing',
+          currentQueueItemId: nextQueueItemId,
+          currentTrackId: nextTrack.id,
+          queueRevision: 1,
+          nativeDirectLocalPlaybackActive: true,
+          positionSeconds: 0,
+          durationSeconds: nextTrack.duration,
+        } as AudioStatus);
+      }
+    });
+
+    await waitFor(() => expect(screen.getByLabelText('current-id').textContent).toBe(nextQueueItemId));
+    await waitFor(() => expect(syncQueueToBackend.mock.calls.length).toBeGreaterThanOrEqual(2));
+
+    const secondSyncCall = syncQueueToBackend.mock.calls.at(-1)!;
+    const secondDeck = secondSyncCall[0].map((item: { itemId: string }) => item.itemId);
+    expect(secondDeck).toEqual(initialDeck);
+    expect(secondSyncCall[2]).toBe(nextQueueItemId);
+  });
+
+  it('immediately syncs shuffled or restored queue to backend when toggling shuffle', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)];
+    const syncQueueToBackend = vi.fn().mockResolvedValue(undefined);
+
+    window.echo = {
+      playback: {
+        getQueueSession: vi.fn().mockResolvedValue(
+          makePersistedQueueSession(tracks, {
+            currentQueueId: 'queue-1',
+            currentTrackId: tracks[0].id,
+            mode: { isShuffleEnabled: false, repeatMode: 'off', automixEnabled: false },
+          }),
+        ),
+        saveQueueSession: vi.fn(async (snapshot) => snapshot),
+        syncQueueToBackend,
+      },
+    } as unknown as Window['echo'];
+
+    const Probe = (): JSX.Element => {
+      const queue = usePlaybackQueue();
+      return (
+        <div>
+          <span aria-label="shuffle-state">{queue.isShuffleEnabled ? 'shuffle-on' : 'shuffle-off'}</span>
+          <button type="button" aria-label="toggle-shuffle" onClick={queue.toggleShuffle}>
+            toggle
+          </button>
+        </div>
+      );
+    };
+
+    render(
+      <PlaybackQueueProvider>
+        <Probe />
+      </PlaybackQueueProvider>,
+     );
+
+    await waitFor(() => expect(screen.getByLabelText('shuffle-state').textContent).toBe('shuffle-off'));
+    await waitFor(() => expect(syncQueueToBackend).toHaveBeenCalledTimes(1));
+
+    // Initial sync was sequential
+    expect(syncQueueToBackend.mock.calls[0]![0].map((item: { itemId: string }) => item.itemId)).toEqual([
+      'queue-1',
+      'queue-2',
+      'queue-3',
+    ]);
+
+    // Toggle shuffle ON
+    fireEvent.click(screen.getByLabelText('toggle-shuffle'));
+    await waitFor(() => expect(screen.getByLabelText('shuffle-state').textContent).toBe('shuffle-on'));
+    await waitFor(() => expect(syncQueueToBackend).toHaveBeenCalledTimes(2));
+
+    const shuffledDeck = syncQueueToBackend.mock.calls[1]![0].map((item: { itemId: string }) => item.itemId);
+    expect(shuffledDeck[0]).toBe('queue-1');
+    expect(new Set(shuffledDeck)).toEqual(new Set(['queue-1', 'queue-2', 'queue-3']));
+
+    // Toggle shuffle OFF
+    fireEvent.click(screen.getByLabelText('toggle-shuffle'));
+    await waitFor(() => expect(screen.getByLabelText('shuffle-state').textContent).toBe('shuffle-off'));
+    await waitFor(() => expect(syncQueueToBackend).toHaveBeenCalledTimes(3));
+
+    const restoredDeck = syncQueueToBackend.mock.calls[2]![0].map((item: { itemId: string }) => item.itemId);
+    expect(restoredDeck).toEqual(['queue-1', 'queue-2', 'queue-3']);
   });
 });

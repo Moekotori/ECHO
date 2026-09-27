@@ -124,7 +124,7 @@ const playbackStatusFromConnectStatus = (status: ConnectSessionStatus, item: Que
 
 export type RepeatMode = PersistedPlaybackRepeatMode;
 
-type BackendQueueSyncItem = {
+export type BackendQueueSyncItem = {
   itemId: string;
   trackId: string;
   filePath: string;
@@ -1526,6 +1526,138 @@ const shuffleDeckKeyForSource = (source: ShuffleDeckSource): string => {
 
 const pickRandom = <Item,>(items: Item[]): Item | null => items[Math.floor(Math.random() * items.length)] ?? null;
 
+export const shuffleArray = <T,>(items: T[]): T[] => {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = result[i]!;
+    result[i] = result[j]!;
+    result[j] = temp;
+  }
+  return result;
+};
+
+export const mapQueueItemToBackendSyncItem = (item: QueueItem): BackendQueueSyncItem => ({
+  itemId: item.queueId,
+  trackId: item.track.id,
+  filePath: item.track.path ?? '',
+  sampleRate: item.track.sampleRate ?? undefined,
+  startSeconds: 0,
+  metadata: {
+    title: item.track.title,
+    artist: item.track.artist,
+    album: item.track.album,
+    albumArtist: item.track.albumArtist,
+    coverUrl: item.track.coverThumb,
+  },
+});
+
+export type BackendQueueSyncPayloadResult = {
+  queueItems: BackendQueueSyncItem[];
+  backendCurrentQueueId: string | null;
+  nextDeck: string[] | null;
+};
+
+export const resolveBackendQueueSyncPayload = ({
+  items,
+  currentQueueId,
+  isShuffle,
+  existingDeck,
+  preferredNextQueueId,
+}: {
+  items: QueueItem[];
+  currentQueueId: string | null;
+  isShuffle: boolean;
+  existingDeck: string[] | null;
+  preferredNextQueueId?: string | null;
+}): BackendQueueSyncPayloadResult => {
+  const playableItems = items.filter((item) => Boolean(item.track.path) && item.track.unavailable !== true);
+  const backendCurrentQueueId =
+    currentQueueId && playableItems.some((item) => item.queueId === currentQueueId)
+      ? currentQueueId
+      : null;
+
+  if (playableItems.length === 0) {
+    return {
+      queueItems: [],
+      backendCurrentQueueId: null,
+      nextDeck: null,
+    };
+  }
+
+  if (!isShuffle || playableItems.length <= 1) {
+    return {
+      queueItems: playableItems.map(mapQueueItemToBackendSyncItem),
+      backendCurrentQueueId,
+      nextDeck: null,
+    };
+  }
+
+  const playableQueueIds = new Set(playableItems.map((item) => item.queueId));
+  const isDeckCompositionValid =
+    Boolean(existingDeck) &&
+    existingDeck!.length === playableItems.length &&
+    existingDeck!.every((id) => playableQueueIds.has(id)) &&
+    (!backendCurrentQueueId || existingDeck!.includes(backendCurrentQueueId));
+
+  let isExistingDeckValid = isDeckCompositionValid;
+  if (isExistingDeckValid && preferredNextQueueId && playableQueueIds.has(preferredNextQueueId)) {
+    if (backendCurrentQueueId) {
+      const currentIndex = existingDeck!.indexOf(backendCurrentQueueId);
+      const nextIndex = (currentIndex + 1) % existingDeck!.length;
+      if (existingDeck![nextIndex] !== preferredNextQueueId) {
+        isExistingDeckValid = false;
+      }
+    } else if (existingDeck![0] !== preferredNextQueueId) {
+      isExistingDeckValid = false;
+    }
+  }
+
+  let nextDeck: string[];
+  if (isExistingDeckValid && existingDeck) {
+    nextDeck = existingDeck;
+  } else {
+    const deck: string[] = [];
+    const remainingIds: string[] = [];
+
+    if (backendCurrentQueueId) {
+      deck.push(backendCurrentQueueId);
+      for (const item of playableItems) {
+        if (item.queueId !== backendCurrentQueueId) {
+          remainingIds.push(item.queueId);
+        }
+      }
+    } else {
+      for (const item of playableItems) {
+        remainingIds.push(item.queueId);
+      }
+    }
+
+    if (preferredNextQueueId && remainingIds.includes(preferredNextQueueId)) {
+      deck.push(preferredNextQueueId);
+      const restIds = remainingIds.filter((id) => id !== preferredNextQueueId);
+      deck.push(...shuffleArray(restIds));
+    } else {
+      deck.push(...shuffleArray(remainingIds));
+    }
+
+    nextDeck = deck;
+  }
+
+  const playableMap = new Map<string, QueueItem>(playableItems.map((item) => [item.queueId, item]));
+  const queueItems: BackendQueueSyncItem[] = nextDeck
+    .map((queueId) => playableMap.get(queueId))
+    .filter((item): item is QueueItem => Boolean(item))
+    .map(mapQueueItemToBackendSyncItem);
+
+  return {
+    queueItems,
+    backendCurrentQueueId,
+    nextDeck,
+  };
+};
+
+
 const clampMoveIndex = (index: number, length: number): number => Math.max(0, Math.min(index, length - 1));
 
 const isCompletedPlayback = (playedSeconds: number, durationSeconds: number): boolean =>
@@ -1635,6 +1767,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const playlistPlaybackStateRef = useRef(playlistPlaybackState);
   const playbackHistorySessionRef = useRef<PlaybackHistorySession | null>(null);
   const libraryShuffleDeckRef = useRef<LibraryShuffleDeck>({ sourceKey: null, items: [] });
+  const backendShuffleDeckQueueIdsRef = useRef<string[] | null>(null);
   const pausedSessionTimerRef = useRef<number | null>(null);
   const playRequestTokenRef = useRef(0);
   const playbackStatusTokensRef = useRef<WeakMap<PlaybackStatus, number>>(new WeakMap());
@@ -1875,6 +2008,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const toggleShuffle = useCallback((): void => {
     const next = !isShuffleEnabledRef.current;
     clearLibraryShuffleDeck();
+    backendShuffleDeckQueueIdsRef.current = null;
     isShuffleEnabledRef.current = next;
     setIsShuffleEnabled(next);
     if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
@@ -3110,25 +3244,21 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         }
 
         if (automix) {
-          const queueItems: BackendQueueSyncItem[] = itemsRef.current
-            .map((candidate) => ({
-              itemId: candidate.queueId,
-              trackId: candidate.track.id,
-              filePath: candidate.track.path ?? '',
-              sampleRate: candidate.track.sampleRate ?? undefined,
-              startSeconds: 0,
-              metadata: {
-                title: candidate.track.title,
-                artist: candidate.track.artist,
-                album: candidate.track.album,
-                albumArtist: candidate.track.albumArtist,
-                coverUrl: candidate.track.coverThumb,
-              },
-            }))
-            .filter((candidate) => candidate.filePath);
+          const preferredNextQueueId = automix.nextItem
+            ? (automixShuffleNextQueueIdRef.current.get(item.queueId) ??
+               itemsRef.current.find((candidate) => candidate.track.id === automix?.nextItem?.trackId && candidate.queueId !== item.queueId)?.queueId)
+            : undefined;
+          const syncPayload = resolveBackendQueueSyncPayload({
+            items: itemsRef.current,
+            currentQueueId: item.queueId,
+            isShuffle: isShuffleEnabledRef.current,
+            existingDeck: backendShuffleDeckQueueIdsRef.current,
+            preferredNextQueueId,
+          });
+          backendShuffleDeckQueueIdsRef.current = syncPayload.nextDeck;
           try {
             await runQueuePlaybackStep(operation, 'sync automix queue', track.id, () =>
-              syncQueueSnapshotToBackend(queueItems, repeatModeRef.current, item.queueId));
+              syncQueueSnapshotToBackend(syncPayload.queueItems, repeatModeRef.current, syncPayload.backendCurrentQueueId ?? item.queueId));
           } catch (error) {
             automix = undefined;
             console.warn('[智能过渡] 队列同步失败，本次播放安全降级为普通切歌:', error);
@@ -3642,6 +3772,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       });
       isShuffleEnabledRef.current = false;
       setIsShuffleEnabled(false);
+      backendShuffleDeckQueueIdsRef.current = null;
       repeatModeRef.current = 'off';
       setRepeatMode('off');
 
@@ -3667,6 +3798,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     (tracks: LibraryTrack[], options: ReplaceQueueOptions = {}): void => {
       restorePlaylistPlaybackSnapshotOnly();
       clearLibraryShuffleDeck();
+      backendShuffleDeckQueueIdsRef.current = null;
       const nextItems = tracks.map((track) => createQueueItem(track, options.source ?? manualSource));
       const startItem = options.startTrackId ? nextItems.find((item) => item.track.id === options.startTrackId) ?? null : null;
 
@@ -3867,6 +3999,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const clearQueue = useCallback((): void => {
     restorePlaylistPlaybackSnapshotOnly();
     clearLibraryShuffleDeck();
+    backendShuffleDeckQueueIdsRef.current = null;
     setAutoFillQueueEnabled(false);
     setItems([]);
     setHistory([]);
@@ -3969,6 +4102,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     (nextItems: QueueItem[], options: RestoreQueueItemsOptions = {}): void => {
       restorePlaylistPlaybackSnapshotOnly();
       clearLibraryShuffleDeck();
+      backendShuffleDeckQueueIdsRef.current = null;
       const queueIds = new Set(nextItems.map((item) => item.queueId));
       const nextCurrentQueueId = options.currentQueueId && queueIds.has(options.currentQueueId)
         ? options.currentQueueId
@@ -5001,29 +5135,18 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     if (!sessionHydrated) {
       return;
     }
-
-    const queueItems: BackendQueueSyncItem[] = items.map((item) => ({
-      itemId: item.queueId,
-      trackId: item.track.id,
-      filePath: item.track.path ?? '',
-      sampleRate: item.track.sampleRate ?? undefined,
-      startSeconds: 0,
-      metadata: {
-        title: item.track.title,
-        artist: item.track.artist,
-        album: item.track.album,
-        albumArtist: item.track.albumArtist,
-        coverUrl: item.track.coverThumb,
-      },
-    })).filter((item, index) => item.filePath && items[index]?.track.unavailable !== true);
-    const backendCurrentQueueId = currentQueueId && queueItems.some((item) => item.itemId === currentQueueId)
-      ? currentQueueId
-      : null;
+    const { queueItems, backendCurrentQueueId, nextDeck } = resolveBackendQueueSyncPayload({
+      items,
+      currentQueueId,
+      isShuffle: isShuffleEnabled,
+      existingDeck: backendShuffleDeckQueueIdsRef.current,
+    });
+    backendShuffleDeckQueueIdsRef.current = nextDeck;
 
     void syncQueueSnapshotToBackend(queueItems, repeatMode, backendCurrentQueueId).catch((error) => {
       console.warn('[Queue] failed to sync queue snapshot to audio backend:', error);
     });
-  }, [currentQueueId, items, repeatMode, sessionHydrated, syncQueueSnapshotToBackend]);
+  }, [currentQueueId, isShuffleEnabled, items, repeatMode, sessionHydrated, syncQueueSnapshotToBackend]);
 
   const activateHqPlayerTakeover = useCallback(async (): Promise<PlaybackStatus | null> => {
     const activeItem =
