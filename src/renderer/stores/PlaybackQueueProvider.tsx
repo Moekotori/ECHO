@@ -1526,6 +1526,36 @@ const shuffleDeckKeyForSource = (source: ShuffleDeckSource): string => {
 
 const pickRandom = <Item,>(items: Item[]): Item | null => items[Math.floor(Math.random() * items.length)] ?? null;
 
+/**
+ * Build the queue order handed to the native audio daemon for autonomous
+ * auto-advance. The daemon advances to the *next item in this synced order* when
+ * a track ends naturally — it has no shuffle awareness of its own. When shuffle
+ * is enabled we therefore hand it a shuffled deck (Fisher–Yates) so that
+ * auto-advance is random too, keeping the currently playing item pinned as the
+ * deck's start so the daemon's "current item" stays consistent.
+ */
+const buildShuffleDeckForBackend = (
+  queueItems: BackendQueueSyncItem[],
+  currentQueueId: string | null,
+): BackendQueueSyncItem[] => {
+  if (queueItems.length <= 1) {
+    return queueItems;
+  }
+
+  const current =
+    currentQueueId !== null ? queueItems.find((item) => item.itemId === currentQueueId) ?? null : null;
+  const rest = queueItems.filter((item) => item !== current);
+
+  for (let i = rest.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const swap = rest[i]!;
+    rest[i] = rest[j]!;
+    rest[j] = swap;
+  }
+
+  return current ? [current, ...rest] : rest;
+};
+
 const clampMoveIndex = (index: number, length: number): number => Math.max(0, Math.min(index, length - 1));
 
 const isCompletedPlayback = (playedSeconds: number, durationSeconds: number): boolean =>
@@ -5002,7 +5032,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       return;
     }
 
-    const queueItems: BackendQueueSyncItem[] = items.map((item) => ({
+    const orderedItems: BackendQueueSyncItem[] = items.map((item) => ({
       itemId: item.queueId,
       trackId: item.track.id,
       filePath: item.track.path ?? '',
@@ -5016,14 +5046,19 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         coverUrl: item.track.coverThumb,
       },
     })).filter((item, index) => item.filePath && items[index]?.track.unavailable !== true);
-    const backendCurrentQueueId = currentQueueId && queueItems.some((item) => item.itemId === currentQueueId)
+    // Hand the daemon a shuffled deck when shuffle is on, so that natural
+    // auto-advance is random too (the daemon advances to the next synced item).
+    const queueItems = isShuffleEnabled
+      ? buildShuffleDeckForBackend(orderedItems, currentQueueId)
+      : orderedItems;
+    const backendCurrentQueueId = currentQueueId && orderedItems.some((item) => item.itemId === currentQueueId)
       ? currentQueueId
       : null;
 
     void syncQueueSnapshotToBackend(queueItems, repeatMode, backendCurrentQueueId).catch((error) => {
       console.warn('[Queue] failed to sync queue snapshot to audio backend:', error);
     });
-  }, [currentQueueId, items, repeatMode, sessionHydrated, syncQueueSnapshotToBackend]);
+  }, [currentQueueId, items, repeatMode, isShuffleEnabled, sessionHydrated, syncQueueSnapshotToBackend]);
 
   const activateHqPlayerTakeover = useCallback(async (): Promise<PlaybackStatus | null> => {
     const activeItem =
