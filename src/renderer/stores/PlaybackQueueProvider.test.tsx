@@ -5846,7 +5846,7 @@ describe('PlaybackQueueProvider shuffle backend sync (Issue #133)', () => {
   });
 
   it('immediately syncs shuffled or restored queue to backend when toggling shuffle', async () => {
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
     const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)];
     const syncQueueToBackend = vi.fn().mockResolvedValue(undefined);
 
