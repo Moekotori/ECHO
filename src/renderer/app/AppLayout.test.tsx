@@ -2133,7 +2133,7 @@ describe('AppLayout standalone routes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Playback queue' }));
 
     await waitFor(() => expect(screen.getByText('Full queue page')).toBeTruthy());
-    expect(screen.queryByRole('complementary', { name: '播放队列抽屉' })).toBeNull();
+    expect(screen.queryByRole('complementary', { name: 'Playback queue drawer' })).toBeNull();
   });
 
   it('hides the shell signal path button when the app setting disables it', async () => {
@@ -2236,8 +2236,8 @@ describe('AppLayout standalone routes', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Playback queue' }));
 
-    expect(screen.getByRole('complementary', { name: '播放队列抽屉' })).toBeTruthy();
-    expect(screen.getByText('队列为空')).toBeTruthy();
+    expect(await screen.findByRole('complementary', { name: 'Playback queue drawer' })).toBeTruthy();
+    expect(screen.getByText('No upcoming tracks')).toBeTruthy();
     expect(screen.queryByText('Full queue page')).toBeNull();
   });
 
@@ -2257,20 +2257,20 @@ describe('AppLayout standalone routes', () => {
       window.dispatchEvent(new Event('app:navigate:queue'));
     });
 
-    expect(screen.getByRole('complementary', { name: '播放队列抽屉' })).toBeTruthy();
+    expect(await screen.findByRole('complementary', { name: 'Playback queue drawer' })).toBeTruthy();
     expect(screen.queryByText('Full queue page')).toBeNull();
 
     act(() => {
       window.dispatchEvent(new Event('app:navigate:queue'));
     });
 
-    await waitFor(() => expect(screen.queryByRole('complementary', { name: '播放队列抽屉' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Playback queue drawer' })).toBeNull());
 
     act(() => {
       window.dispatchEvent(new Event('app:navigate:queue'));
     });
 
-    expect(screen.getByRole('complementary', { name: '播放队列抽屉' })).toBeTruthy();
+    expect(await screen.findByRole('complementary', { name: 'Playback queue drawer' })).toBeTruthy();
 
     act(() => {
       window.dispatchEvent(new Event('app:navigate:queue'));
@@ -2280,13 +2280,13 @@ describe('AppLayout standalone routes', () => {
       window.dispatchEvent(new CustomEvent('app:navigate:lyrics', { detail: { mode: 'mv' } }));
     });
 
-    await waitFor(() => expect(screen.queryByRole('complementary', { name: '播放队列抽屉' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Playback queue drawer' })).toBeNull());
 
     act(() => {
       window.dispatchEvent(new Event('app:navigate:queue'));
     });
 
-    expect(screen.getByRole('complementary', { name: '播放队列抽屉' })).toBeTruthy();
+    expect(await screen.findByRole('complementary', { name: 'Playback queue drawer' })).toBeTruthy();
     expect(screen.queryByText('Full queue page')).toBeNull();
   });
 

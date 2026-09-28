@@ -2,8 +2,6 @@ import { Suspense, cloneElement, isValidElement, lazy, startTransition, useCallb
 import type { CSSProperties, ReactElement, ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { PlayerBar } from '../components/player/PlayerBar';
-import { PlaybackQueueDrawer } from '../components/player/PlaybackQueueDrawer';
-import { AudioIssueDiagnosticsWindow } from '../components/player/AudioIssueDiagnosticsWindow';
 import { contrastRatio, parseHexColor, sampleImageUrl, type ReadableColorSample, type Rgb } from '../components/lyrics/lyricsReadableColor';
 import { DragDropImportOverlay } from '../components/import/DragDropImportOverlay';
 import { PluginTrackActionDrawerHost } from '../components/library/PluginTrackActionDrawer';
@@ -73,6 +71,8 @@ import {
 import type { PlaybackStatus } from '../../shared/types/playback';
 
 const AudioSettingsDrawer = lazy(() => import('../components/player/AudioSettingsDrawer').then((module) => ({ default: module.AudioSettingsDrawer })));
+const PlaybackQueueDrawer = lazy(() => import('../components/player/PlaybackQueueDrawer').then((module) => ({ default: module.PlaybackQueueDrawer })));
+const AudioIssueDiagnosticsWindow = lazy(() => import('../components/player/AudioIssueDiagnosticsWindow').then((module) => ({ default: module.AudioIssueDiagnosticsWindow })));
 const LyricsSettingsDrawer = lazy(() => import('../components/lyrics/LyricsSettingsDrawer').then((module) => ({ default: module.LyricsSettingsDrawer })));
 const LyricsVisualSettingsDrawer = lazy(() => import('../components/lyrics/LyricsVisualSettingsDrawer').then((module) => ({ default: module.LyricsVisualSettingsDrawer })));
 const MvSettingsDrawer = lazy(() => import('../components/lyrics/MvSettingsDrawer').then((module) => ({ default: module.MvSettingsDrawer })));
@@ -732,6 +732,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   const [isWindowFullscreenTransitioning, setIsWindowFullscreenTransitioning] = useState(false);
   const [windowFullscreenTransitionTarget, setWindowFullscreenTransitionTarget] = useState<boolean | null>(null);
   const [isLyricsQueueDrawerOpen, setIsLyricsQueueDrawerOpen] = useState(false);
+  const shouldMountLyricsQueueDrawer = useMountedOnce(isLyricsQueueDrawerOpen);
   const [desktopLyricsVisible, setDesktopLyricsVisible] = useState(false);
   const [, setDesktopLyricsLocked] = useState(false);
   const [audioDrawerStatus, setAudioDrawerStatus] = useState<AudioStatus | null>(null);
@@ -3518,7 +3519,9 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
       />
 
       {audioIssueDiagnosticsWindowEnabled ? (
-        <AudioIssueDiagnosticsWindow onClose={handleCloseAudioIssueDiagnosticsWindow} />
+        <Suspense fallback={null}>
+          <AudioIssueDiagnosticsWindow onClose={handleCloseAudioIssueDiagnosticsWindow} />
+        </Suspense>
       ) : null}
 
       <div className="chrome-notice-layer">
@@ -3732,11 +3735,15 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
         {shouldMountMvDrawer ? <MvSettingsDrawer isOpen={isMvDrawerOpen} onClose={() => setIsMvDrawerOpen(false)} /> : null}
       </Suspense>
       <PluginTrackActionDrawerHost />
-      <PlaybackQueueDrawer
-        isOpen={isLyricsRoute && isLyricsQueueDrawerOpen}
-        onClose={() => setIsLyricsQueueDrawerOpen(false)}
-        onOpenFullQueue={handleOpenFullQueueFromLyricsDrawer}
-      />
+      <Suspense fallback={null}>
+        {shouldMountLyricsQueueDrawer ? (
+          <PlaybackQueueDrawer
+            isOpen={isLyricsRoute && isLyricsQueueDrawerOpen}
+            onClose={() => setIsLyricsQueueDrawerOpen(false)}
+            onOpenFullQueue={handleOpenFullQueueFromLyricsDrawer}
+          />
+        ) : null}
+      </Suspense>
 
       {shouldRenderPlayerBar ? (
         <div

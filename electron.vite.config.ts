@@ -68,6 +68,12 @@ export default defineConfig({
           index: resolve(__dirname, 'src/renderer/index.html'),
           auxiliary: resolve(__dirname, 'src/renderer/auxiliary.html'),
         },
+        output: {
+          // Keep the synchronous fallback dictionary independently cacheable.
+          manualChunks: {
+            zhCN: [resolve(__dirname, 'src/renderer/i18n/locales/zhCN.ts')],
+          },
+        },
       },
     },
   },

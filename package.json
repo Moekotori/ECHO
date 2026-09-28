@@ -179,6 +179,7 @@
     ],
     "win": {
       "icon": "build-resources/icons/software.ico",
+      "artifactName": "ECHO-NEXT-${version}-win.${ext}",
       "signExts": [
         ".exe",
         ".dll",
