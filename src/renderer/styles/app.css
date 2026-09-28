@@ -15175,6 +15175,13 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
   justify-self: stretch;
 }
 
+/* Stack the wallpaper panel under its title so the empty-state block keeps full width. */
+.settings-page #settings-row-wallpaper {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 12px;
+}
+
 .settings-cache-panel {
   display: grid;
   width: 100%;
@@ -15354,6 +15361,43 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
 .settings-cache-panel--app-wallpaper {
   max-width: none;
   gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.22)),
+    var(--theme-panel-bg-muted);
+}
+
+.settings-wallpaper-preview {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.settings-wallpaper-preview-img,
+.settings-wallpaper-preview-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.settings-wallpaper-preview-fallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.settings-cache-panel--app-wallpaper > * {
+  min-width: 0;
 }
 
 .settings-wallpaper-primary {
@@ -15369,7 +15413,14 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
 
 .settings-wallpaper-effect-row {
   display: grid;
-  gap: 8px;
+  gap: 10px;
+}
+
+/* Inside the controls grid the preset row owns a full row of its own, so it
+   reads as a break between the sliders above and the toggles below. */
+.settings-wallpaper-effect-row--full {
+  grid-column: 1 / -1;
+  padding: 6px 4px;
 }
 
 .settings-wallpaper-effect-row > span:first-child {
@@ -15378,42 +15429,41 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
   font-weight: var(--echo-weight-body);
 }
 
-.settings-wallpaper-advanced-toggle {
-  justify-self: start;
-}
-
-.settings-wallpaper-advanced {
+.settings-wallpaper-portrait {
   display: grid;
   gap: 12px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-.settings-wallpaper-portrait,
 .settings-wallpaper-empty {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 12px;
-  border: 1px solid var(--theme-panel-border);
-  border-radius: 8px;
-  background: var(--theme-panel-bg-muted);
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-.settings-wallpaper-portrait > div:first-child,
+.settings-wallpaper-portrait-header,
 .settings-wallpaper-empty > div:first-child {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.settings-wallpaper-portrait strong,
+.settings-wallpaper-portrait-header strong,
 .settings-wallpaper-empty strong {
   color: var(--theme-heading-text);
   font-size: 13px;
   font-weight: var(--echo-weight-label);
 }
 
-.settings-wallpaper-portrait span,
+.settings-wallpaper-portrait-header span,
 .settings-wallpaper-empty span {
   overflow: hidden;
   color: var(--color-muted);
@@ -15421,6 +15471,13 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
   font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The narrow-window slot is framed against a portrait viewport, so its preview
+   shows a portrait crop instead of the 16:9 default. */
+.settings-wallpaper-preview--portrait {
+  aspect-ratio: 3 / 4;
+  width: min(100%, 220px);
 }
 
 .settings-wallpaper-empty-actions {
@@ -15438,7 +15495,7 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
   color: var(--color-muted);
   border: 1px solid var(--theme-panel-border);
   border-radius: 8px;
-  background: var(--theme-panel-bg-muted);
+  background: rgba(255, 255, 255, 0.5);
   font-size: 12px;
   font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
@@ -15453,17 +15510,17 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
 .settings-wallpaper-controls {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 
 .settings-wallpaper-control {
   display: grid;
   min-width: 0;
   gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--theme-panel-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.5);
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .settings-wallpaper-control--toggle {
@@ -15498,9 +15555,6 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
 .app-shell--wallpaper .settings-search,
 .app-shell--wallpaper .settings-nav-item:hover,
 .app-shell--wallpaper .settings-wallpaper-path,
-.app-shell--wallpaper .settings-wallpaper-portrait,
-.app-shell--wallpaper .settings-wallpaper-empty,
-.app-shell--wallpaper .settings-wallpaper-control,
 .app-shell--wallpaper .settings-page .audio-command-button,
 .app-shell--wallpaper .settings-page .audio-icon-command,
 .app-shell--wallpaper .settings-page .audio-field input,
@@ -15508,6 +15562,13 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
   border-color: rgb(40 62 88 / var(--app-wallpaper-ui-border-alpha));
   background: rgb(255 255 255 / var(--app-wallpaper-ui-sidebar-top-alpha));
   box-shadow: none;
+}
+
+.app-shell--wallpaper .settings-cache-panel--app-wallpaper {
+  border-color: rgb(40 62 88 / var(--app-wallpaper-ui-border-alpha));
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / var(--app-wallpaper-ui-page-top-alpha)), rgb(255 255 255 / var(--app-wallpaper-ui-page-base-alpha))),
+    transparent;
 }
 
 .app-shell--wallpaper .settings-nav-item.active {
@@ -21443,9 +21504,6 @@ html[data-theme="dark"] .settings-font-search,
 html[data-theme="dark"] .settings-font-file-button,
 html[data-theme="dark"] .settings-font-option,
 html[data-theme="dark"] .settings-wallpaper-path,
-html[data-theme="dark"] .settings-wallpaper-portrait,
-html[data-theme="dark"] .settings-wallpaper-empty,
-html[data-theme="dark"] .settings-wallpaper-control,
 html[data-theme="dark"] .settings-status-grid span,
 html[data-theme="dark"] .settings-cache-path,
 html[data-theme="dark"] .settings-cache-confirm,
@@ -21475,6 +21533,16 @@ html[data-theme="dark"] .chrome-notice-actions button {
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+html[data-theme="dark"] .settings-wallpaper-portrait,
+html[data-theme="dark"] .settings-wallpaper-empty,
+html[data-theme="dark"] .settings-wallpaper-control {
+  background: transparent;
+}
+
+html[data-theme="dark"] .settings-wallpaper-preview {
+  background: rgba(20, 26, 34, 0.55);
 }
 
 html[data-theme="dark"] .chrome-notice--audio-error {
@@ -38031,4 +38099,83 @@ html[data-theme="dark"] .signal-path-console-footer button:hover {
     height: auto;
     grid-template-rows: auto minmax(460px, 62vh);
   }
+}
+
+/* ── Wallpaper position editor (fit layout) ──────────────────────────────── */
+.wallpaper-editor-backdrop {
+  z-index: 200;
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(8px);
+}
+
+.wallpaper-editor-modal {
+  display: grid;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--theme-panel-border-strong);
+  border-radius: 14px;
+  background: var(--theme-modal-bg);
+  box-shadow: var(--theme-shadow-soft);
+}
+
+.wallpaper-editor-canvas {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #000;
+  user-select: none;
+  touch-action: none;
+  align-self: center;
+  justify-self: center;
+}
+
+.wallpaper-editor-canvas img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.wallpaper-editor-hint {
+  margin: 0;
+  color: var(--theme-muted-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wallpaper-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wallpaper-editor-actions-spacer {
+  flex: 1 1 auto;
+}
+
+.wallpaper-editor-scale {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  color: var(--theme-muted-text);
+  font-size: 12px;
+}
+
+.wallpaper-editor-scale .settings-range {
+  width: 100%;
+}
+
+.wallpaper-editor-scale strong {
+  color: var(--theme-heading-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }

@@ -244,8 +244,13 @@ type AppWallpaperSettings = Pick<
   | 'appWallpaperBlurPx'
   | 'appWallpaperBrightnessPercent'
   | 'appWallpaperUiOpacityPercent'
+  | 'appWallpaperOpacityPercent'
   | 'appWallpaperVisualProtectionEnabled'
   | 'appWallpaperUnifiedOpacityEnabled'
+  | 'appWallpaperFitMode'
+  | 'appWallpaperPosition'
+  | 'appPortraitWallpaperFitMode'
+  | 'appPortraitWallpaperPosition'
   | 'appVideoWallpaperPauseMode'
   | 'lowSpecModeEnabled'
 >;
@@ -274,8 +279,13 @@ const defaultAppWallpaperSettings: AppWallpaperSettings = {
   appWallpaperBlurPx: 0,
   appWallpaperBrightnessPercent: 100,
   appWallpaperUiOpacityPercent: 100,
+  appWallpaperOpacityPercent: 100,
   appWallpaperVisualProtectionEnabled: true,
   appWallpaperUnifiedOpacityEnabled: false,
+  appWallpaperFitMode: 'fill',
+  appWallpaperPosition: null,
+  appPortraitWallpaperFitMode: 'fill',
+  appPortraitWallpaperPosition: null,
   appVideoWallpaperPauseMode: 'smart',
   appWindowAcrylicEnabled: false,
   appWindowAcrylicKeepWhenUnfocusedEnabled: false,
@@ -358,8 +368,13 @@ const selectAppWallpaperSettings = (settings: AppSettings): AppWallpaperSettings
   appWallpaperBlurPx: settings.appWallpaperBlurPx,
   appWallpaperBrightnessPercent: settings.appWallpaperBrightnessPercent,
   appWallpaperUiOpacityPercent: settings.appWallpaperUiOpacityPercent,
+  appWallpaperOpacityPercent: settings.appWallpaperOpacityPercent ?? 100,
   appWallpaperVisualProtectionEnabled: settings.appWallpaperVisualProtectionEnabled !== false,
   appWallpaperUnifiedOpacityEnabled: settings.appWallpaperUnifiedOpacityEnabled,
+  appWallpaperFitMode: settings.appWallpaperFitMode ?? 'fill',
+  appWallpaperPosition: settings.appWallpaperPosition ?? null,
+  appPortraitWallpaperFitMode: settings.appPortraitWallpaperFitMode ?? 'fill',
+  appPortraitWallpaperPosition: settings.appPortraitWallpaperPosition ?? null,
   appVideoWallpaperPauseMode: settings.appVideoWallpaperPauseMode ?? 'smart',
   appWindowAcrylicEnabled: settings.appWindowAcrylicEnabled === true,
   appWindowAcrylicKeepWhenUnfocusedEnabled: settings.appWindowAcrylicKeepWhenUnfocusedEnabled === true,
@@ -812,11 +827,21 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   const [appAppearanceTheme, setAppAppearanceTheme] = useState<AppThemeMode>(() => readDocumentThemeMode());
   const [loadedAppWallpaperKey, setLoadedAppWallpaperKey] = useState<string | null>(null);
   const [failedAppWallpaperKey, setFailedAppWallpaperKey] = useState<string | null>(null);
+  // Tagged with the wallpaper key it was measured for: a cached image can fire
+  // `load` before React's passive effects flush, so an untagged measurement
+  // would be wiped by the key-change reset and the framing would silently fall
+  // back to plain contain.
+  const [appWallpaperNatural, setAppWallpaperNatural] = useState<{ key: string; w: number; h: number } | null>(null);
+  const [appWallpaperViewportSize, setAppWallpaperViewportSize] = useState<{ w: number; h: number }>(() => ({
+    w: window.innerWidth,
+    h: window.innerHeight,
+  }));
   const [isAppWallpaperDocumentHidden, setIsAppWallpaperDocumentHidden] = useState(() => document.visibilityState === 'hidden');
   const [isAppWallpaperBlurPaused, setIsAppWallpaperBlurPaused] = useState(false);
   const [isAppWallpaperPortraitViewport, setIsAppWallpaperPortraitViewport] = useState(() => isPortraitViewport());
   const [isWindowFocused, setIsWindowFocused] = useState(() => document.hasFocus());
   const appWallpaperVideoRef = useRef<HTMLVideoElement | null>(null);
+  const appWallpaperImageRef = useRef<HTMLImageElement | null>(null);
   const appWallpaperBlurTimerRef = useRef<number | null>(null);
   const fullscreenTransitionTimerRef = useRef<number | null>(null);
   const fullscreenTransitionStartedAtRef = useRef(0);
@@ -1087,6 +1112,15 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     : appWallpaperSettings.appWallpaperMediaType ?? inferAppWallpaperMediaType(activeAppWallpaperPath);
   const performancePolicy = resolveEffectivePerformancePolicy(appWallpaperSettings);
   const activeAppWallpaperOrientation = isAppWallpaperPortraitViewport ? 'portrait' : 'landscape';
+  // Each wallpaper slot carries its own layout mode and framing: the two
+  // pictures have different shapes, so one slot's crop can never describe the
+  // other's.
+  const activeAppWallpaperFitMode = usesPortraitAppWallpaperOverride
+    ? appWallpaperSettings.appPortraitWallpaperFitMode ?? 'fill'
+    : appWallpaperSettings.appWallpaperFitMode ?? 'fill';
+  const activeAppWallpaperPosition = usesPortraitAppWallpaperOverride
+    ? appWallpaperSettings.appPortraitWallpaperPosition ?? null
+    : appWallpaperSettings.appWallpaperPosition ?? null;
   const isAmbientThemeActive = appAppearanceTheme === 'ambient';
   const appWallpaperUrl = !isAmbientThemeActive && activeAppWallpaperPath
     ? `echo-wallpaper://${usesPortraitAppWallpaperOverride ? 'app-portrait' : 'app'}/custom?path=${encodeURIComponent(activeAppWallpaperPath)}`
@@ -1133,6 +1167,13 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     : null;
   const isAppWallpaperReady = Boolean(appWallpaperKey && loadedAppWallpaperKey === appWallpaperKey);
   const hasAppWallpaperLoadError = Boolean(appWallpaperKey && failedAppWallpaperKey === appWallpaperKey);
+  const appWallpaperNaturalSize = useMemo(
+    () =>
+      appWallpaperNatural && appWallpaperNatural.key === appWallpaperKey
+        ? { w: appWallpaperNatural.w, h: appWallpaperNatural.h }
+        : null,
+    [appWallpaperNatural, appWallpaperKey],
+  );
   const shouldPauseAppWallpaperVideo = Boolean(
     isAppWallpaperVideo &&
     appWallpaperUrl &&
@@ -1152,23 +1193,107 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   const appWallpaperStyle = useMemo<CSSProperties>(() => {
     const blurPx = performancePolicy.appWallpaperBlurPx;
     const brightnessPercent = appWallpaperSettings.appWallpaperBrightnessPercent;
-    const baseScale = appWallpaperSettings.appWallpaperScalePercent / 100;
-    const blurOverscanScale = blurPx > 0 ? Math.min(0.18, blurPx * 0.004) : 0;
     const filterParts = [
       blurPx > 0 ? `blur(${blurPx}px)` : null,
       brightnessPercent !== 100 ? `brightness(${brightnessPercent}%)` : null,
     ].filter(Boolean);
+    const filter = filterParts.length ? filterParts.join(' ') : 'none';
 
+    // Framing-aware rendering, mirroring the standalone background page: only
+    // the 'fit' layout applies the committed fractional center + zoom (on the
+    // contain base); every other mode arranges the picture itself. The size
+    // guard keeps a framing made for one picture from leaking onto a replaced
+    // one.
+    const fitMode = activeAppWallpaperFitMode;
+    if (
+      fitMode === 'fit' &&
+      appWallpaperNaturalSize &&
+      activeAppWallpaperPosition &&
+      activeAppWallpaperPosition.iw === appWallpaperNaturalSize.w &&
+      activeAppWallpaperPosition.ih === appWallpaperNaturalSize.h
+    ) {
+      const position = activeAppWallpaperPosition;
+      const { w: vw, h: vh } = appWallpaperViewportSize;
+      const { w: iw, h: ih } = appWallpaperNaturalSize;
+      const baseScale = Math.min(vw / iw, vh / ih);
+      const zoom = Number.isFinite(position.zoom) ? position.zoom : 1;
+      const width = iw * baseScale * zoom;
+      const height = ih * baseScale * zoom;
+      const cx = position.x * vw;
+      const cy = position.y * vh;
+      return {
+        filter,
+        position: 'absolute',
+        left: `${(cx - width / 2).toFixed(2)}px`,
+        top: `${(cy - height / 2).toFixed(2)}px`,
+        width: `${width.toFixed(2)}px`,
+        height: `${height.toFixed(2)}px`,
+        objectFit: 'fill',
+        transform: 'none',
+      };
+    }
+
+    // The framing zoom is a fit-mode concept: other layouts arrange the picture
+    // themselves and must not inherit it (see the standalone background page).
+    const baseScale = fitMode === 'fit' ? appWallpaperSettings.appWallpaperScalePercent / 100 : 1;
+    const blurOverscanScale = blurPx > 0 ? Math.min(0.18, blurPx * 0.004) : 0;
+    const objectFitMap: Record<string, CSSProperties['objectFit']> = {
+      fill: 'cover',
+      stretch: 'fill',
+      fit: 'contain',
+      center: 'none',
+      tile: 'cover',
+    };
+    // Tile mode paints the layer itself: a repeated background is the only way
+    // to reproduce the reference page's tiling (object-fit cannot repeat), so
+    // the media element is hidden and the layer shows the tiles. Videos keep
+    // the cover fallback above.
+    const isAppWallpaperTiled =
+      fitMode === 'tile' && !isAppWallpaperVideo;
     return {
-      filter: filterParts.length ? filterParts.join(' ') : 'none',
+      filter,
       transform: `scale(${(baseScale + blurOverscanScale).toFixed(3)})`,
+      objectFit: objectFitMap[fitMode] ?? 'cover',
+      ...(isAppWallpaperTiled ? { visibility: 'hidden' as const } : null),
     };
   }, [
+    isAppWallpaperVideo,
     performancePolicy.appWallpaperBlurPx,
     appWallpaperSettings.appWallpaperBrightnessPercent,
+    activeAppWallpaperFitMode,
     appWallpaperSettings.appWallpaperScalePercent,
+    activeAppWallpaperPosition,
+    appWallpaperNaturalSize,
+    appWallpaperViewportSize,
+  ]);
+
+  const appWallpaperLayerStyle = useMemo<CSSProperties>(() => {
+    // Opacity lives on the layer (not the media element) so one value covers
+    // every layout, including tile mode where the layer paints the picture.
+    // A CSS variable is used instead of `opacity` so the hidden state's
+    // `opacity: 0` rule still wins over it.
+    const style = {
+      '--app-wallpaper-opacity': String(
+        Math.max(0, Math.min(1, (appWallpaperSettings.appWallpaperOpacityPercent ?? 100) / 100)),
+      ),
+    } as CSSProperties;
+    if (activeAppWallpaperFitMode !== 'tile' || isAppWallpaperVideo || !appWallpaperUrl) {
+      return style;
+    }
+    return {
+      ...style,
+      backgroundImage: `url(${JSON.stringify(appWallpaperUrl)})`,
+      backgroundRepeat: 'repeat',
+      backgroundSize: 'auto',
+      backgroundPosition: '0 0',
+    };
+  }, [
+    activeAppWallpaperFitMode,
+    appWallpaperSettings.appWallpaperOpacityPercent,
+    appWallpaperUrl,
     isAppWallpaperVideo,
   ]);
+
   const appShellStyle = useMemo(() => {
     const uiAlpha =
       isAppWallpaperReady && appWallpaperSettings.appWallpaperVisualProtectionEnabled
@@ -1584,6 +1709,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   useEffect(() => {
     const syncWallpaperOrientation = (): void => {
       setIsAppWallpaperPortraitViewport(isPortraitViewport());
+      setAppWallpaperViewportSize({ w: window.innerWidth, h: window.innerHeight });
     };
 
     syncWallpaperOrientation();
@@ -1606,6 +1732,25 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     setLoadedAppWallpaperKey((current) => (current === appWallpaperKey ? current : null));
     setFailedAppWallpaperKey((current) => (current === appWallpaperKey ? current : null));
   }, [appWallpaperKey]);
+
+  // The media element can finish loading before React's passive effects flush —
+  // a cached picture, or a src that never changed (portrait toggle with no
+  // portrait wallpaper). Re-read the live element on every key change so the
+  // framing always has the dimensions it is about to be applied against.
+  useEffect(() => {
+    if (!appWallpaperKey) {
+      return;
+    }
+    const media = isAppWallpaperVideo ? appWallpaperVideoRef.current : appWallpaperImageRef.current;
+    if (!media) {
+      return;
+    }
+    const w = media instanceof HTMLVideoElement ? media.videoWidth : media.naturalWidth;
+    const h = media instanceof HTMLVideoElement ? media.videoHeight : media.naturalHeight;
+    if (w > 0 && h > 0) {
+      setAppWallpaperNatural({ key: appWallpaperKey, w, h });
+    }
+  }, [appWallpaperKey, isAppWallpaperVideo]);
 
   useEffect(() => {
     const handleVisibilityChange = (): void => {
@@ -2541,9 +2686,14 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
           'appWallpaperMediaType' in patch ||
           'appPortraitWallpaperMediaType' in patch ||
           'appWallpaperScalePercent' in patch ||
+          'appWallpaperFitMode' in patch ||
+          'appWallpaperPosition' in patch ||
+          'appPortraitWallpaperFitMode' in patch ||
+          'appPortraitWallpaperPosition' in patch ||
           'appWallpaperBlurPx' in patch ||
           'appWallpaperBrightnessPercent' in patch ||
           'appWallpaperUiOpacityPercent' in patch ||
+          'appWallpaperOpacityPercent' in patch ||
           'appWallpaperVisualProtectionEnabled' in patch ||
           'appWallpaperUnifiedOpacityEnabled' in patch ||
           'appWindowAcrylicEnabled' in patch ||
@@ -2566,6 +2716,18 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
           appWallpaperScalePercent: 'appWallpaperScalePercent' in patch
             ? (patch.appWallpaperScalePercent ?? defaultAppWallpaperSettings.appWallpaperScalePercent)
             : current.appWallpaperScalePercent,
+          appWallpaperFitMode: 'appWallpaperFitMode' in patch
+            ? (patch.appWallpaperFitMode ?? defaultAppWallpaperSettings.appWallpaperFitMode)
+            : current.appWallpaperFitMode,
+          appWallpaperPosition: 'appWallpaperPosition' in patch
+            ? (patch.appWallpaperPosition ?? null)
+            : current.appWallpaperPosition,
+          appPortraitWallpaperFitMode: 'appPortraitWallpaperFitMode' in patch
+            ? (patch.appPortraitWallpaperFitMode ?? defaultAppWallpaperSettings.appPortraitWallpaperFitMode)
+            : current.appPortraitWallpaperFitMode,
+          appPortraitWallpaperPosition: 'appPortraitWallpaperPosition' in patch
+            ? (patch.appPortraitWallpaperPosition ?? null)
+            : current.appPortraitWallpaperPosition,
           appWallpaperBlurPx: 'appWallpaperBlurPx' in patch
             ? (patch.appWallpaperBlurPx ?? defaultAppWallpaperSettings.appWallpaperBlurPx)
             : current.appWallpaperBlurPx,
@@ -2575,6 +2737,9 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
           appWallpaperUiOpacityPercent: 'appWallpaperUiOpacityPercent' in patch
             ? (patch.appWallpaperUiOpacityPercent ?? defaultAppWallpaperSettings.appWallpaperUiOpacityPercent)
             : current.appWallpaperUiOpacityPercent,
+          appWallpaperOpacityPercent: 'appWallpaperOpacityPercent' in patch
+            ? (patch.appWallpaperOpacityPercent ?? defaultAppWallpaperSettings.appWallpaperOpacityPercent)
+            : current.appWallpaperOpacityPercent,
           appWallpaperVisualProtectionEnabled: 'appWallpaperVisualProtectionEnabled' in patch
             ? (patch.appWallpaperVisualProtectionEnabled !== false)
             : current.appWallpaperVisualProtectionEnabled,
@@ -3356,13 +3521,14 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
       <a className="accessibility-skip-link" href={`#main-content-${activeRoute.id}`}>
         {t('common.skipToContent')}
       </a>
-      {shouldMountAppWallpaperMedia && appWallpaperUrl ? (
+      {shouldMountAppWallpaperMedia && appWallpaperUrl && appWallpaperKey ? (
         <div
           className="app-wallpaper-layer"
           aria-hidden="true"
           data-hidden={shouldShowAppWallpaperVisual ? undefined : 'true'}
           data-loaded={isAppWallpaperReady}
           data-error={hasAppWallpaperLoadError ? 'true' : undefined}
+          style={appWallpaperLayerStyle}
         >
           {isAppWallpaperVideo ? (
             <video
@@ -3378,7 +3544,11 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
                 setFailedAppWallpaperKey(null);
                 setLoadedAppWallpaperKey(appWallpaperKey);
               }}
-              onLoadedData={() => {
+              onLoadedData={(event) => {
+                const video = event.currentTarget;
+                if (video.videoWidth > 0 && video.videoHeight > 0) {
+                  setAppWallpaperNatural({ key: appWallpaperKey, w: video.videoWidth, h: video.videoHeight });
+                }
                 setFailedAppWallpaperKey(null);
                 setLoadedAppWallpaperKey(appWallpaperKey);
               }}
@@ -3390,10 +3560,15 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
             />
           ) : (
             <img
+              ref={appWallpaperImageRef}
               src={appWallpaperUrl}
               alt=""
               style={appWallpaperStyle}
-              onLoad={() => {
+              onLoad={(event) => {
+                const image = event.currentTarget;
+                if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                  setAppWallpaperNatural({ key: appWallpaperKey, w: image.naturalWidth, h: image.naturalHeight });
+                }
                 setFailedAppWallpaperKey(null);
                 setLoadedAppWallpaperKey(appWallpaperKey);
               }}

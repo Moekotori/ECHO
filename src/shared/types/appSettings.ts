@@ -16,6 +16,20 @@ export type LyricsPageStyle = 'default' | 'editorial' | 'roseVinyl';
 export type DesktopLyricsColorMode = 'theme' | 'custom' | 'gradient';
 export type AppWallpaperMediaType = 'image' | 'video';
 export type AppVideoWallpaperPauseMode = 'smart' | 'minimized' | 'never';
+export type AppWallpaperFitMode = 'fit' | 'fill' | 'stretch' | 'tile' | 'center';
+/**
+ * Committed framing for the 'fit' wallpaper layout.
+ * x/y are the fractional center point of the image inside the viewport (0..1).
+ * zoom multiplies the contain-scale; iw/ih are the natural image dimensions the
+ * framing was authored against so it can be restored exactly.
+ */
+export type AppWallpaperPositionState = {
+  x: number;
+  y: number;
+  zoom: number;
+  iw: number;
+  ih: number;
+};
 export type AppLocale = 'zh-CN' | 'zh-TW' | 'en-US' | 'ja-JP' | 'ko-KR';
 export type AppThemeMode = 'light' | 'dark' | 'system' | 'ambient';
 export type ReplayGainMode = 'off' | 'track' | 'album';
@@ -290,8 +304,14 @@ export type AppSettings = {
   appWallpaperBlurPx: number;
   appWallpaperBrightnessPercent: number;
   appWallpaperUiOpacityPercent: number;
+  /** Opacity of the wallpaper picture itself, shared by both wallpaper slots. */
+  appWallpaperOpacityPercent?: number;
   appWallpaperVisualProtectionEnabled?: boolean;
   appWallpaperUnifiedOpacityEnabled: boolean;
+  appWallpaperFitMode?: AppWallpaperFitMode;
+  appWallpaperPosition?: AppWallpaperPositionState | null;
+  appPortraitWallpaperFitMode?: AppWallpaperFitMode;
+  appPortraitWallpaperPosition?: AppWallpaperPositionState | null;
   nowPlayingCoverColorEnabled?: boolean;
   appVideoWallpaperPauseMode?: AppVideoWallpaperPauseMode;
   networkProxyMode?: NetworkProxyMode;

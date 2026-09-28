@@ -1,5 +1,22 @@
-import type { AppSettings } from '../../../../shared/types/appSettings';
+import type { AppSettings, AppWallpaperFitMode } from '../../../../shared/types/appSettings';
 import type { TranslationKey } from '../../../i18n/locales';
+
+export const appWallpaperFitModes = ['fit', 'fill', 'stretch', 'tile', 'center'] satisfies Array<
+  NonNullable<AppSettings['appWallpaperFitMode']>
+>;
+
+export const appWallpaperFitModeLabels: Record<
+  NonNullable<AppSettings['appWallpaperFitMode']>,
+  TranslationKey
+> = {
+  fit: 'settings.appearance.wallpaper.mode.fit',
+  fill: 'settings.appearance.wallpaper.mode.fill',
+  stretch: 'settings.appearance.wallpaper.mode.stretch',
+  tile: 'settings.appearance.wallpaper.mode.tile',
+  center: 'settings.appearance.wallpaper.mode.center',
+};
+
+export type { AppWallpaperFitMode };
 
 export const appVideoWallpaperPauseModes = ['smart', 'minimized', 'never'] satisfies Array<
   NonNullable<AppSettings['appVideoWallpaperPauseMode']>
