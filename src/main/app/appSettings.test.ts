@@ -16,6 +16,15 @@ vi.mock('electron', () => ({
 }));
 
 describe('app settings normalization', () => {
+  it('keeps the artwork MV entry opt-in and preserves its saved value', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+
+    expect(normalizeSettings({}).playerBarCoverOpensMv).toBe(false);
+    expect(normalizeSettings({ playerBarCoverOpensMv: true }).playerBarCoverOpensMv).toBe(true);
+    expect(normalizeSettings({ playerBarCoverOpensMv: false }).playerBarCoverOpensMv).toBe(false);
+    expect(normalizeSettings({ playerBarCoverOpensMv: 'true' }).playerBarCoverOpensMv).toBe(false);
+  });
+
   afterEach(() => {
     userDataPath = process.cwd();
     systemLocale = 'zh-CN';

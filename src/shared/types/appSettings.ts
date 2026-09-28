@@ -206,6 +206,7 @@ export type AppSettings = {
   appearancePreferences?: AppearancePreferences;
   accessibilityPreferences?: AccessibilityPreferences;
   hiddenPlayerBarButtonIds?: PlayerBarButtonId[];
+  playerBarCoverOpensMv?: boolean;
   sidebarRouteOrder?: SidebarRouteId[];
   sidebarHiddenRouteIds?: SidebarRouteId[];
   sidebarAutoHideEnabled?: boolean;

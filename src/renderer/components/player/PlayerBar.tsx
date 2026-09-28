@@ -811,6 +811,7 @@ export const PlayerBar = ({
   const [dsdAutoVolumeLocked, setDsdAutoVolumeLocked] = useState(false);
   const [audioExportFormat, setAudioExportFormat] = useState<AudioExportFormat>('mp3');
   const [hiddenPlayerBarButtonIds, setHiddenPlayerBarButtonIds] = useState<PlayerBarButtonId[]>(defaultHiddenPlayerBarButtonIds);
+  const [playerBarCoverOpensMv, setPlayerBarCoverOpensMv] = useState(false);
   const [isInitialLayoutReady, setIsInitialLayoutReady] = useState(false);
   const [isAudioExporting, setIsAudioExporting] = useState(false);
   const [miniPlayerState, setMiniPlayerState] = useState<MiniPlayerState | null>(null);
@@ -1734,6 +1735,7 @@ export const PlayerBar = ({
         setDsdAutoVolumeLockEnabled(false);
         setAudioExportFormat('mp3');
         setHiddenPlayerBarButtonIds([...defaultHiddenPlayerBarButtonIds]);
+        setPlayerBarCoverOpensMv(false);
         setIsInitialLayoutReady(true);
         return;
       }
@@ -1749,6 +1751,7 @@ export const PlayerBar = ({
             setDsdAutoVolumeLockEnabled(readDsdAutoVolumeLockEnabled(settings));
             setAudioExportFormat(readAudioExportFormat(settings));
             setHiddenPlayerBarButtonIds(readHiddenPlayerBarButtonIds(settings));
+            setPlayerBarCoverOpensMv(settings?.playerBarCoverOpensMv === true);
             setIsInitialLayoutReady(true);
           }
         })
@@ -1762,6 +1765,7 @@ export const PlayerBar = ({
             setDsdAutoVolumeLockEnabled(false);
             setAudioExportFormat('mp3');
             setHiddenPlayerBarButtonIds([...defaultHiddenPlayerBarButtonIds]);
+            setPlayerBarCoverOpensMv(false);
             setIsInitialLayoutReady(true);
           }
         });
@@ -1796,6 +1800,10 @@ export const PlayerBar = ({
         const hiddenPlayerBarButtonIdsPatch = readHiddenPlayerBarButtonIdsPatch(event.detail);
         if (hiddenPlayerBarButtonIdsPatch !== null) {
           setHiddenPlayerBarButtonIds(hiddenPlayerBarButtonIdsPatch);
+        }
+        const coverOpensMvPatch = (event.detail as Partial<AppSettings> | null)?.playerBarCoverOpensMv;
+        if (typeof coverOpensMvPatch === 'boolean') {
+          setPlayerBarCoverOpensMv(coverOpensMvPatch);
         }
       }
 
@@ -3039,12 +3047,12 @@ export const PlayerBar = ({
           className="player-cover"
           data-empty={!artworkUrl}
           type="button"
-          aria-label={t('playerBar.aria.openLyrics')}
-          title={t('playerBar.aria.openLyrics')}
+          aria-label={t(playerBarCoverOpensMv ? 'playerBar.aria.openMv' : 'playerBar.aria.openLyrics')}
+          title={t(playerBarCoverOpensMv ? 'playerBar.aria.openMv' : 'playerBar.aria.openLyrics')}
           data-loading={isPlaybackPreparing ? 'true' : undefined}
           layoutId={playerCoverLayoutId(trackId)}
           transition={springSoft}
-          onClick={handleOpenLyrics}
+          onClick={playerBarCoverOpensMv ? handleOpenMv : handleOpenLyrics}
         >
           {artworkUrl ? (
             <img alt="" src={artworkUrl} />

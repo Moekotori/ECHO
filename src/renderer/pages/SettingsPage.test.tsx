@@ -1825,7 +1825,7 @@ describe('SettingsPage', () => {
     });
   });
 
-  it('saves bottom-right player button visibility from appearance controls', async () => {
+  it('saves artwork entry and bottom-right player button visibility from appearance controls', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     let currentSettings: AppSettings = {
       ...settings,
@@ -1843,6 +1843,15 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
+    const coverRow = screen.getByText('settings.appearance.playerBarCoverOpensMv.title').closest('.setting-row') as HTMLElement;
+    const coverToggle = within(coverRow).getByRole('button', { name: 'settings.appearance.playerBarCoverOpensMv.title', pressed: false });
+    expect(coverToggle.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(coverToggle);
+    await waitFor(() => expect(setSettingsMock).toHaveBeenLastCalledWith({ playerBarCoverOpensMv: true }));
+    expect(coverToggle.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(coverToggle);
+    await waitFor(() => expect(setSettingsMock).toHaveBeenLastCalledWith({ playerBarCoverOpensMv: false }));
+
     const row = screen.getByText('settings.appearance.playerBarButtons.title').closest('.setting-row') as HTMLElement;
     const volumeItem = within(row).getByText('settings.appearance.playerBarButtons.volume').closest('.settings-sidebar-route-item') as HTMLElement;
     fireEvent.click(volumeItem.querySelector('.settings-sidebar-visibility-button') as HTMLButtonElement);

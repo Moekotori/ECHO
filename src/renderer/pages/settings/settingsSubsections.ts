@@ -300,6 +300,7 @@ export const settingsSearchSubsectionByTargetId: Partial<Record<string, Settings
   'settings-row-online-artist-info': 'integrationsMetadata',
   'settings-row-theme': 'appearanceTheme',
   'settings-row-now-playing-cover-color': 'appearanceWindow',
+  'settings-row-player-bar-cover-opens-mv': 'appearanceWindow',
   'settings-row-wallpaper': 'appearanceWallpaper',
   'settings-row-album-cover-shape': 'appearanceWallpaper',
   'settings-row-library-folders': 'libraryImport',

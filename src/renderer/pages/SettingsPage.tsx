@@ -12789,6 +12789,18 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   }
                 />
               </SettingRow>
+              <SettingRow
+                id="settings-row-player-bar-cover-opens-mv"
+                highlighted={highlightedSettingId === 'settings-row-player-bar-cover-opens-mv'}
+                title={t('settings.appearance.playerBarCoverOpensMv.title')}
+                description={t('settings.appearance.playerBarCoverOpensMv.description')}
+              >
+                <ToggleButton
+                  active={appSettings?.playerBarCoverOpensMv === true}
+                  disabled={!appSettings}
+                  onClick={() => patchAppSettings({ playerBarCoverOpensMv: !(appSettings?.playerBarCoverOpensMv ?? false) })}
+                />
+              </SettingRow>
               <PlayerBarButtonSettings
                 available={Boolean(appSettings)}
                 hiddenButtonIds={hiddenPlayerBarButtonIdSet}

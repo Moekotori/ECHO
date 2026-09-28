@@ -1761,7 +1761,7 @@ describe('PlayerBar', () => {
     expect(localPause).not.toHaveBeenCalled();
   });
 
-  it('opens the lyrics page when the artwork button is clicked', async () => {
+  it.each([undefined, false, true])('opens the configured view when the artwork button is clicked (MV entry: %s)', async (playerBarCoverOpensMv) => {
     const track = makeTrack(3, {
       title: 'Cover Click Track',
       artist: 'Cover Click Artist',
@@ -1801,6 +1801,7 @@ describe('PlayerBar', () => {
           smtcEnabled: true,
           downloadsFeatureUnlocked: true,
           streamingDownloadActionsEnabled: true,
+          playerBarCoverOpensMv,
         }),
       },
     } as unknown as Window['echo'];
@@ -1815,11 +1816,12 @@ describe('PlayerBar', () => {
       );
 
       await screen.findByText('Cover Click Track');
-      fireEvent.click(screen.getByRole('button', { name: '打开歌词' }));
+      const expectedMode = playerBarCoverOpensMv ? 'mv' : 'lyrics';
+      fireEvent.click(await screen.findByRole('button', { name: playerBarCoverOpensMv ? '打开 MV' : '打开歌词' }));
 
       expect(onNavigateLyrics).toHaveBeenCalledTimes(1);
-      expect((onNavigateLyrics.mock.calls[0][0] as CustomEvent).detail).toEqual({ mode: 'lyrics' });
-      expect(window.sessionStorage.getItem('echo:lyrics:view-mode')).toBe('lyrics');
+      expect((onNavigateLyrics.mock.calls[0][0] as CustomEvent).detail).toEqual({ mode: expectedMode });
+      expect(window.sessionStorage.getItem('echo:lyrics:view-mode')).toBe(expectedMode);
       expect(onNavigateNowPlaying).not.toHaveBeenCalled();
 
       fireEvent.click(screen.getByRole('button', { name: 'MV' }));
@@ -1828,6 +1830,13 @@ describe('PlayerBar', () => {
       expect((onNavigateLyrics.mock.calls[1][0] as CustomEvent).detail).toEqual({ mode: 'mv' });
       expect(window.sessionStorage.getItem('echo:lyrics:view-mode')).toBe('mv');
       expect(onNavigateNowPlaying).not.toHaveBeenCalled();
+
+      vi.mocked(window.echo.app.getSettings).mockResolvedValue({ playerBarCoverOpensMv: !playerBarCoverOpensMv } as Awaited<ReturnType<typeof window.echo.app.getSettings>>);
+      act(() => {
+        window.dispatchEvent(new CustomEvent('settings:changed', { detail: { playerBarCoverOpensMv: !playerBarCoverOpensMv } }));
+      });
+      fireEvent.click(await screen.findByRole('button', { name: playerBarCoverOpensMv ? '打开歌词' : '打开 MV' }));
+      expect((onNavigateLyrics.mock.calls[2][0] as CustomEvent).detail).toEqual({ mode: playerBarCoverOpensMv ? 'lyrics' : 'mv' });
     } finally {
       window.removeEventListener('app:navigate:lyrics', onNavigateLyrics);
       window.removeEventListener('app:navigate:now-playing', onNavigateNowPlaying);
