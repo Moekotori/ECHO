@@ -18,7 +18,7 @@
   },
   "scripts": {
     "setup": "node scripts/setup-dev.mjs",
-    "dev": "node scripts/ensure-native-abi.mjs electron && node scripts/ensure-airplay-raop.mjs && node scripts/ensure-dev-audio-runtime.mjs && node scripts/ensure-audio-host.mjs && node scripts/ensure-taskbar-host.mjs && node scripts/build-taskbar-thumbnail-helper.mjs && electron-vite dev",
+    "dev": "node scripts/ensure-native-abi.mjs electron && node scripts/ensure-airplay-raop.mjs && node scripts/ensure-dev-audio-runtime.mjs && node scripts/ensure-audio-host.mjs && node scripts/ensure-smtc-host.mjs && node scripts/ensure-taskbar-host.mjs && node scripts/build-taskbar-thumbnail-helper.mjs && electron-vite dev",
     "dev:full": "node scripts/ensure-native-abi.mjs electron && node scripts/ensure-airplay-raop.mjs && node scripts/ensure-dev-audio-runtime.mjs && node scripts/ensure-audio-host.mjs && node scripts/build-smtc-host.mjs && node scripts/ensure-taskbar-host.mjs && node scripts/build-taskbar-thumbnail-helper.mjs && electron-vite dev",
     "build:audio-host": "node scripts/build-audio-host.mjs",
     "prepare:macos-runtime": "node scripts/prepare-macos-runtime.mjs",

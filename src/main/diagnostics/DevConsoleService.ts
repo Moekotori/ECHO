@@ -415,6 +415,28 @@ const inferPerformanceStallCause = (
     };
   }
 
+  // Several handlers can complete before the delayed timer runs. The last
+  // completion may be tiny, so keep the longest nearby slow IPC as evidence.
+  const longestNearbyIpc = playbackSnapshot.breadcrumbs
+    .filter((entry) => entry.ageMs <= mainStallCheckIntervalMs)
+    .flatMap((entry) => {
+      const match = /^ipc:(.+):slow:(\d+)ms$/u.exec(entry.label);
+      return match ? [{ channel: match[1], durationMs: Number(match[2]) }] : [];
+    })
+    .sort((left, right) => right.durationMs - left.durationMs)[0];
+  if (
+    payload.source === 'main' && longestNearbyIpc &&
+    longestNearbyIpc.durationMs > (lastIpcDurationMs ?? 0) &&
+    longestNearbyIpc.durationMs >= Math.max(500, payload.thresholdMs, payload.durationMs * 0.5)
+  ) {
+    return {
+      probableCause: 'slow_ipc_handler',
+      confidence: 'medium',
+      why: `IPC "${longestNearbyIpc.channel}" recently took ${longestNearbyIpc.durationMs.toFixed(0)}ms, the longest nearby slow handler`,
+      actionHint: 'Inspect this IPC handler first; confirm synchronous work versus asynchronous waiting before attributing the stall.',
+    };
+  }
+
   if (
     payload.source === 'main' &&
     lastIpcChannel &&

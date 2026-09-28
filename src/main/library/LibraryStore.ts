@@ -6277,22 +6277,23 @@ export class LibraryStore {
     const remoteSearchJoinSql = searchQuery && !showDuplicatesOnly ? 'INNER JOIN remote_tracks_fts ON remote_tracks_fts.rowid = remote_tracks.rowid' : '';
     const localSearchRankSql = searchQuery ? 'bm25(tracks_fts)' : '0';
     const remoteSearchRankSql = searchQuery && !showDuplicatesOnly ? 'bm25(remote_tracks_fts)' : '0';
-    const useDuplicateJoin = hideDuplicates || showDuplicatesOnly;
-    const duplicateJoinSql = useDuplicateJoin
-      ? `LEFT JOIN duplicate_track_members AS duplicate_members
-          ON duplicate_members.track_id = tracks.id
-          AND duplicate_members.group_id IN (
-            SELECT id FROM duplicate_track_groups WHERE mode = ?
-          )`
+    const filterDuplicates = hideDuplicates || showDuplicatesOnly;
+    // Build the membership set once. Joining each track against all groups in
+    // the selected mode makes large duplicate indexes block startup for seconds.
+    const duplicateFilterSql = filterDuplicates
+      ? ` AND tracks.id ${showDuplicatesOnly ? 'IN' : 'NOT IN'} (
+          SELECT duplicate_members.track_id
+          FROM duplicate_track_members AS duplicate_members
+          INNER JOIN duplicate_track_groups AS duplicate_groups
+            ON duplicate_groups.id = duplicate_members.group_id
+          WHERE duplicate_groups.mode = ?${showDuplicatesOnly ? '' : ' AND duplicate_members.hidden != 0'}
+        )`
       : '';
-    const duplicateFilterSql = showDuplicatesOnly
-      ? ' AND duplicate_members.track_id IS NOT NULL'
-      : hideDuplicates ? ' AND COALESCE(duplicate_members.hidden, 0) = 0' : '';
     const whereSql = searchQuery
       ? `WHERE tracks.missing = 0${duplicateFilterSql} AND tracks_fts MATCH ?`
       : `WHERE tracks.missing = 0${duplicateFilterSql}`;
     const baseParams = [
-      ...(useDuplicateJoin ? [duplicateMode] : []),
+      ...(filterDuplicates ? [duplicateMode] : []),
       ...(searchQuery ? [searchQuery] : []),
     ];
     const remoteWhereSql = showDuplicatesOnly
@@ -6400,7 +6401,6 @@ export class LibraryStore {
         ${localSearchRankSql} AS search_rank
       FROM tracks
       ${searchJoinSql}
-      ${duplicateJoinSql}
       ${localPlaybackJoin}
       ${whereSql}
       UNION ALL

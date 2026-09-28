@@ -58,6 +58,38 @@ afterEach(() => {
 });
 
 describe('LibraryStore track metadata safety', () => {
+  it('filters duplicate membership without changing search, totals or pagination', () => {
+    const store = makeStore();
+    const folder = store.addFolder('D:\\Music');
+    for (const [id, title] of [['keep', 'Alpha'], ['hidden', 'Beta'], ['unique', 'Gamma']]) {
+      store.upsertTrack(baseTrack(folder.id, `D:\\Music\\${id}.flac`, { id, title }));
+    }
+    const timestamp = '2026-01-01T00:00:00.000Z';
+    const group = database!.prepare(`INSERT INTO duplicate_track_groups
+      (id, mode, duplicate_key, representative_track_id, track_count, created_at, updated_at)
+      VALUES (?, ?, ?, 'keep', 2, ?, ?)`);
+    group.run('strict-group', 'strict', 'strict-key', timestamp, timestamp);
+    group.run('other-group', 'balanced', 'other-key', timestamp, timestamp);
+    const member = database!.prepare(`INSERT INTO duplicate_track_members
+      (group_id, track_id, quality_score, rank, hidden, created_at, updated_at)
+      VALUES (?, ?, 1, 1, ?, ?, ?)`);
+    member.run('strict-group', 'keep', 0, timestamp, timestamp);
+    member.run('strict-group', 'hidden', 1, timestamp, timestamp);
+    member.run('other-group', 'unique', 1, timestamp, timestamp);
+
+    expect(store.getTracks().total).toBe(3);
+    const visible = store.getTracks({ hideDuplicates: true });
+    expect(visible.total).toBe(2);
+    expect(visible.items.map((track) => track.id)).toEqual(['keep', 'unique']);
+    expect(store.getTracks({ hideDuplicates: true, search: 'Beta' }).total).toBe(0);
+    expect(store.getTracks({ showDuplicatesOnly: true, search: 'Beta' }).items.map((track) => track.id)).toEqual(['hidden']);
+    const duplicates = store.getTracks({ showDuplicatesOnly: true, hideDuplicates: true, sourceProvider: 'local' });
+    expect(duplicates.total).toBe(2);
+    expect(duplicates.items.map((track) => track.id)).toEqual(['keep', 'hidden']);
+    expect(store.getTracks({ hideDuplicates: true, pageSize: 1, page: 1 })).toMatchObject({ total: 2, hasMore: true, items: [{ id: 'keep' }] });
+    expect(store.getTracks({ hideDuplicates: true, pageSize: 1, page: 2 })).toMatchObject({ total: 2, hasMore: false, items: [{ id: 'unique' }] });
+  });
+
   it('returns semantic scan metadata with folder cache states', () => {
     const store = makeStore();
     const folder = store.addFolder('D:\\Music');
