@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     state: 'playing',
     outputMode: 'shared',
     currentTrackId: 'track-1',
+    currentQueueItemId: null as string | null,
     currentFilePath: 'C:\\Music\\one.flac',
     positionSeconds: 2,
     volume: 0.8,
@@ -24,7 +25,7 @@ const mocks = vi.hoisted(() => {
     setOutput: vi.fn(async () => ({ ...audioStatus })),
     setRepeatMode: vi.fn(),
     restorePlaybackMemory: vi.fn(() => ({ ...audioStatus, state: 'paused' })),
-    syncQueueToBackend: vi.fn(async () => undefined),
+    syncQueueToBackend: vi.fn(async (): Promise<void> => undefined),
     playLocalFile: vi.fn(async () => ({ ...audioStatus })),
   };
   const session = {
@@ -129,6 +130,7 @@ const mocks = vi.hoisted(() => {
     setWindowDestroyed: (destroyed: boolean) => { windowDestroyed = destroyed; },
     setReadyToShowImmediately: (ready: boolean) => { readyToShowImmediately = ready; },
     emitWindowEvent: (event: string, ...args: unknown[]) => emitOnce(windowListeners, event, ...args),
+    emitWebContentsEvent: (event: string, ...args: unknown[]) => emitOnce(webContentsListeners, event, ...args),
     clearWindowListeners: () => {
       windowListeners.clear();
       webContentsListeners.clear();
@@ -292,6 +294,7 @@ describe('UltraLightModeService', () => {
     mocks.audioStatus.state = 'playing';
     mocks.audioStatus.outputMode = 'shared';
     mocks.audioStatus.currentTrackId = 'track-1';
+    mocks.audioStatus.currentQueueItemId = null;
     mocks.audioStatus.currentFilePath = 'C:\\Music\\one.flac';
     mocks.audioStatus.positionSeconds = 2;
   });
@@ -812,7 +815,7 @@ describe('UltraLightModeService', () => {
     mocks.mainWindowAvailable = true;
     mocks.audioStatus.currentTrackId = 'track-local';
     mocks.audioStatus.currentFilePath = 'C:\\Music\\local.flac';
-    mocks.playbackStore.load.mockReturnValueOnce({
+    mocks.playbackStore.load.mockReturnValue({
       ...mocks.session,
       currentQueueId: 'queue-stale',
       currentTrackId: 'track-stale',
@@ -843,6 +846,7 @@ describe('UltraLightModeService', () => {
 
     expect(status.active).toBe(true);
     expect(status.error).toBeNull();
+    expect(mocks.audioSession.syncQueueToBackend).toHaveBeenCalledWith(expect.any(Array), 'off', 'queue-local');
   });
 
   it('restores an automatically unloaded renderer before resuming background work', async () => {
@@ -957,6 +961,128 @@ describe('UltraLightModeService', () => {
       currentQueueId: 'queue-2',
       currentTrackId: 'track-2',
     }), { preserveRevision: true });
+  });
+
+  it('coalesces concurrent entry requests while the native queue handoff is pending', async () => {
+    let finishSync!: () => void;
+    mocks.audioSession.syncQueueToBackend.mockImplementationOnce(() => new Promise<void>((resolve) => { finishSync = resolve; }));
+    const { enterUltraLightMode } = await import('./UltraLightModeService');
+    const first = enterUltraLightMode();
+    const second = enterUltraLightMode();
+    expect(mocks.audioSession.syncQueueToBackend).toHaveBeenCalledTimes(1);
+    finishSync();
+    const results = await Promise.all([first, second]);
+    expect(results.every((status) => status.phase === 'active' && status.error === null)).toBe(true);
+    expect(mocks.audioSession.on).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels an in-flight entry when the user restores before queue handoff finishes', async () => {
+    mocks.mainWindowAvailable = true;
+    let finishSync!: () => void;
+    mocks.audioSession.syncQueueToBackend.mockImplementationOnce(() => new Promise<void>((resolve) => { finishSync = resolve; }));
+    const { enterUltraLightMode, restoreUltraLightMode, getUltraLightModeStatus } = await import('./UltraLightModeService');
+    const entering = enterUltraLightMode();
+    await restoreUltraLightMode();
+    finishSync();
+    await entering;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(getUltraLightModeStatus().phase).toBe('inactive');
+    expect(mocks.window.destroy).not.toHaveBeenCalled();
+  });
+
+  it('does not destroy the restored main window when restore interrupts manual UI cleanup', async () => {
+    mocks.mainWindowAvailable = true;
+    const { enterUltraLightMode, restoreUltraLightMode } = await import('./UltraLightModeService');
+    mocks.closeDesktopLyricsWindow.mockImplementationOnce(() => { void restoreUltraLightMode(); });
+    await enterUltraLightMode();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(mocks.window.destroy).not.toHaveBeenCalled();
+  });
+
+  it('does not release the new background pause from a previous restore timer', async () => {
+    mocks.mainWindowAvailable = true;
+    const { enterUltraLightMode, restoreUltraLightMode } = await import('./UltraLightModeService');
+    await enterUltraLightMode();
+    await restoreUltraLightMode();
+    await vi.advanceTimersByTimeAsync(0);
+    await enterUltraLightMode();
+    await vi.advanceTimersByTimeAsync(trayBackgroundResumeDelayMs + 100);
+    expect(mocks.releaseBackgroundPauseLease).not.toHaveBeenCalledWith('manual-ultralite');
+  });
+
+  it('persists a different queue occurrence of the same track using the host queue id', async () => {
+    const repeated = { ...mocks.session, items: [mocks.session.items[0]!, { ...mocks.session.items[0]!, queueId: 'queue-repeat' }] };
+    mocks.playbackStore.load.mockReturnValue(repeated);
+    const { enterUltraLightMode } = await import('./UltraLightModeService');
+    await enterUltraLightMode();
+    mocks.emitAudioStatus({ currentTrackId: 'track-1', currentQueueItemId: 'queue-repeat' });
+    expect(mocks.playbackStore.save).toHaveBeenCalledWith(expect.objectContaining({ currentQueueId: 'queue-repeat' }), { preserveRevision: true });
+  });
+
+  it('hands off the actual duplicate occurrence instead of rewinding to the first matching track', async () => {
+    mocks.playbackStore.load.mockReturnValue({ ...mocks.session,
+      items: [mocks.session.items[0]!, { ...mocks.session.items[0]!, queueId: 'queue-repeat' }],
+      currentQueueId: 'queue-repeat',
+    });
+    mocks.audioStatus.currentQueueItemId = 'queue-repeat';
+    const { enterUltraLightMode } = await import('./UltraLightModeService');
+    await enterUltraLightMode();
+    expect(mocks.audioSession.syncQueueToBackend).toHaveBeenCalledWith(expect.any(Array), 'off', 'queue-repeat');
+  });
+
+  it('releases an old manual pause if re-entry fails before the previous resume timer runs', async () => {
+    mocks.mainWindowAvailable = true;
+    const { enterUltraLightMode, restoreUltraLightMode } = await import('./UltraLightModeService');
+    await enterUltraLightMode();
+    await restoreUltraLightMode();
+    await vi.advanceTimersByTimeAsync(0);
+    mocks.audioStatus.outputMode = 'system';
+    expect((await enterUltraLightMode()).active).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.releaseBackgroundPauseLease).toHaveBeenCalledWith('manual-ultralite');
+    expect(mocks.releaseBackgroundPauseLease).not.toHaveBeenCalledWith('tray-hidden');
+  });
+
+  it('does not turn two explicit pause commands into a pause/play toggle', async () => {
+    const { enterUltraLightMode, dispatchUltraLightModeSmtcCommand } = await import('./UltraLightModeService');
+    await enterUltraLightMode();
+    mocks.audioSession.pause.mockImplementationOnce(async () => {
+      mocks.audioStatus.state = 'paused';
+      return { ...mocks.audioStatus };
+    });
+    await Promise.all([dispatchUltraLightModeSmtcCommand('pause'), dispatchUltraLightModeSmtcCommand('pause')]);
+    expect(mocks.audioSession.pause).toHaveBeenCalledTimes(1);
+    expect(mocks.audioSession.play).not.toHaveBeenCalled();
+  });
+
+  it('cancels delayed GPU handoff playback when the user explicitly stops', async () => {
+    mocks.isUltraLightGpuRuntime = true;
+    const { enterUltraLightMode, getUltraLightModeStatus, dispatchUltraLightModeAction } = await import('./UltraLightModeService');
+    const entering = enterUltraLightMode({ queueId: 'queue-1', trackId: 'track-1', filePath: mocks.audioStatus.currentFilePath,
+      state: 'playing', positionMs: 2000, durationMs: 100000, updatedAt: new Date().toISOString() });
+    await vi.waitFor(() => expect(getUltraLightModeStatus().phase).toBe('active'));
+    await dispatchUltraLightModeAction('stop');
+    await vi.advanceTimersByTimeAsync(6000);
+    await entering;
+    expect(mocks.audioSession.stop).toHaveBeenCalledTimes(1);
+    expect(mocks.audioSession.play).not.toHaveBeenCalled();
+  });
+
+  it('discards a failed restore window so the next restore can recreate it', async () => {
+    mocks.mainWindowAvailable = true;
+    const { enterUltraLightMode, restoreUltraLightMode } = await import('./UltraLightModeService');
+    await enterUltraLightMode();
+    await vi.advanceTimersByTimeAsync(100);
+    mocks.setReadyToShowImmediately(false);
+    const restoring = restoreUltraLightMode();
+    await vi.waitFor(() => expect(mocks.createMainWindow).toHaveBeenCalledTimes(1));
+    mocks.window.destroy.mockClear();
+    mocks.emitWebContentsEvent('did-fail-load', {}, -2, 'failed', '', true);
+    expect((await restoring).phase).toBe('active');
+    expect(mocks.window.destroy).toHaveBeenCalledTimes(1);
+    mocks.setReadyToShowImmediately(true);
+    expect((await restoreUltraLightMode()).phase).toBe('inactive');
+    expect(mocks.createMainWindow).toHaveBeenCalledTimes(2);
   });
 
   it('continues once after Audio Core confirms the bridge path has ended', async () => {

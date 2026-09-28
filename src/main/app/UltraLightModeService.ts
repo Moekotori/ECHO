@@ -139,6 +139,17 @@ const replayGainFromQueueItem = (item: PersistedQueueItem) => {
     : undefined;
 };
 
+const findHostQueueItem = (session: PersistedPlaybackSessionV1, status: AudioStatus): PersistedQueueItem | null => {
+  const matchesTrack = (item: PersistedQueueItem): boolean =>
+    Boolean(status.currentTrackId && item.track.id === status.currentTrackId)
+    || Boolean(status.currentFilePath && item.track.path === status.currentFilePath);
+  return session.items.find((item) => item.queueId === status.currentQueueItemId)
+    ?? session.items.find((item) => item.queueId === session.currentQueueId && matchesTrack(item))
+    ?? session.items.find((item) => item.track.id === status.currentTrackId && item.track.path === status.currentFilePath)
+    ?? session.items.find(matchesTrack)
+    ?? null;
+};
+
 const findCurrentQueueIndex = (session: PersistedPlaybackSessionV1): number => {
   const queueIndex = session.currentQueueId
     ? session.items.findIndex((item) => item.queueId === session.currentQueueId)
@@ -195,6 +206,11 @@ const selectAdjacentItem = (
 class UltraLightModeService {
   private readonly nativeTaskbar = new UltraLightNativeTaskbar();
   private phase: UltraLightModePhase = 'inactive';
+  private lifecycleGeneration = 0;
+  private playbackIntentGeneration = 0;
+  private entryCompletion: Promise<UltraLightModeStatus> | null = null;
+  private backgroundResumeTimer: ReturnType<typeof setTimeout> | null = null;
+  private auxiliaryRestorePending = false;
   private error: string | null = null;
   private readonly ownedShortcuts = new Set<string>();
   private statusListener: ((status: AudioStatus) => void) | null = null;
@@ -223,17 +239,37 @@ class UltraLightModeService {
     return this.phase !== 'inactive';
   }
 
-  async enter(
+  enter(
     entryMode: UltraLightModeEntryMode = 'manual',
     gpuRuntimeResumeOverride?: PersistedPlaybackSessionResume | null,
   ): Promise<UltraLightModeStatus> {
-    if (this.isActive()) {
-      return this.getStatus();
-    }
-    if (this.phase === 'restoring') {
-      return this.fail('ultra_light_mode_restore_in_progress');
-    }
+    if (this.entryCompletion) return this.entryCompletion;
+    if (this.isActive()) return Promise.resolve(this.getStatus());
+    const generation = ++this.lifecycleGeneration;
+    this.cancelBackgroundResume();
+    this.phase = 'entering';
+    this.entryMode = entryMode;
+    this.error = null;
+    const completion = this.performEntry(entryMode, gpuRuntimeResumeOverride, generation).catch((error) => {
+      if (!this.isCurrentEntry(generation)) return this.getStatus();
+      return this.fail(error instanceof Error ? error.message : String(error));
+    });
+    this.entryCompletion = completion;
+    void completion.then(() => {
+      if (this.entryCompletion === completion) this.entryCompletion = null;
+    });
+    return completion;
+  }
 
+  private isCurrentEntry(generation: number): boolean {
+    return generation === this.lifecycleGeneration && (this.phase === 'entering' || this.phase === 'active');
+  }
+
+  private async performEntry(
+    entryMode: UltraLightModeEntryMode,
+    gpuRuntimeResumeOverride: PersistedPlaybackSessionResume | null | undefined,
+    generation: number,
+  ): Promise<UltraLightModeStatus> {
     const gpuRuntimeResume = isUltraLightGpuRuntime()
       ? gpuRuntimeResumeOverride === undefined
         ? getPlaybackSessionStore().load()?.resume ?? null
@@ -249,9 +285,16 @@ class UltraLightModeService {
     try {
       await this.syncQueueForRendererUnload();
     } catch (error) {
+      if (!this.isCurrentEntry(generation)) return this.getStatus();
       console.warn('[UltraLightMode] failed to hand the persisted queue to the native host', error);
       return this.fail('tray_renderer_unload_queue_sync_failed');
     }
+
+    if (!this.isCurrentEntry(generation)) return this.getStatus();
+    // The user may have foregrounded the window or changed output during handoff.
+    const handoffRejection = entryMode === 'manual'
+      ? this.getRendererUnloadPlaybackRejection() : this.getAutomaticParkingRejection();
+    if (handoffRejection) return this.fail(handoffRejection);
 
     if (
       getAppSettings().ultraLightGpuDisabled === true &&
@@ -260,15 +303,13 @@ class UltraLightModeService {
       return this.relaunchIntoGpuDisabledRuntime(entryMode);
     }
 
-    this.phase = 'entering';
-    this.entryMode = entryMode;
-    this.error = null;
     if (!this.registerRestoreShortcut() && entryMode === 'manual') {
       return this.fail('ultra_light_mode_restore_shortcut_unavailable');
     }
 
     this.registerFallbackMediaShortcuts();
     const { ensureTray } = await import('./tray');
+    if (!this.isCurrentEntry(generation)) return this.getStatus();
     ensureTray();
     const audioSession = getAudioSession();
     if (!gpuRuntimeResume) {
@@ -288,10 +329,12 @@ class UltraLightModeService {
     }
 
     if (entryMode === 'manual') {
-      await this.pauseManualBackgroundWork();
+      await this.pauseManualBackgroundWork(generation);
+      if (!this.isCurrentEntry(generation)) return this.getStatus();
     }
 
     if (gpuRuntimeResume?.state === 'playing') {
+      const playbackIntent = this.playbackIntentGeneration;
       try {
         // The replacement Electron process can become ready just before the
         // previous native audio host has released its single-instance pipe.
@@ -307,6 +350,8 @@ class UltraLightModeService {
             const timer = setTimeout(resolve, delayMs);
             timer.unref?.();
           });
+          if (!this.isCurrentEntry(generation)) return this.getStatus();
+          if (playbackIntent !== this.playbackIntentGeneration) break;
           const resumedStatus = await audioSession.play();
           resumedState = resumedStatus.state;
           if (resumedState === 'playing') {
@@ -323,7 +368,8 @@ class UltraLightModeService {
             }
           }
         }
-        if (resumedState !== 'playing') {
+        if (!this.isCurrentEntry(generation)) return this.getStatus();
+        if (resumedState !== 'playing' && playbackIntent === this.playbackIntentGeneration) {
           console.warn(
             `[UltraLightMode] GPU-runtime playback handoff settled as ${resumedState}`,
           );
@@ -331,16 +377,19 @@ class UltraLightModeService {
         }
       } catch (error) {
         console.warn('[UltraLightMode] failed to resume playback after GPU-runtime handoff', error);
-        this.scheduleGpuRuntimePlaybackRecovery();
+        if (this.isCurrentEntry(generation) && playbackIntent === this.playbackIntentGeneration) {
+          this.scheduleGpuRuntimePlaybackRecovery();
+        }
       }
     }
 
+    if (!this.isCurrentEntry(generation)) return this.getStatus();
     this.uiDestroyTimer = setTimeout(() => {
       this.uiDestroyTimer = null;
-      if (this.phase === 'active') {
+      if (this.isCurrentEntry(generation)) {
         void (this.entryMode === 'tray-auto' || this.entryMode === 'minimize-auto'
-          ? this.destroyMainWindowForAutomaticParking()
-          : this.destroyAllUiWindows());
+          ? this.destroyMainWindowForAutomaticParking(generation)
+          : this.destroyAllUiWindows(generation));
       }
     }, 80);
     this.uiDestroyTimer.unref?.();
@@ -363,6 +412,10 @@ class UltraLightModeService {
       return this.restoreCompletion ?? this.getStatus();
     }
 
+    ++this.lifecycleGeneration;
+    this.cancelAutomaticPlaybackResume();
+    this.entryCompletion = null;
+    this.cancelBackgroundResume();
     this.phase = 'restoring';
     const restoreAttemptId = ++this.restoreAttemptId;
     const entryMode = this.entryMode;
@@ -477,19 +530,17 @@ class UltraLightModeService {
         ): void => {
           if (isMainFrame === false) return;
           cleanup();
-          resolveWindowRestore(this.failWindowRestore(
-            `ultra_light_mode_restore_load_failed:${errorCode}:${errorDescription}`,
-            entryMode,
-            restoreAttemptId,
-          ));
+          const status = this.failWindowRestore(
+            `ultra_light_mode_restore_load_failed:${errorCode}:${errorDescription}`, entryMode, restoreAttemptId,
+          );
+          if (!window.isDestroyed()) window.destroy();
+          resolveWindowRestore(status);
         };
         const readyTimer = setTimeout(() => {
           cleanup();
-          resolveWindowRestore(this.failWindowRestore(
-            'ultra_light_mode_restore_window_timeout',
-            entryMode,
-            restoreAttemptId,
-          ));
+          const status = this.failWindowRestore('ultra_light_mode_restore_window_timeout', entryMode, restoreAttemptId);
+          if (!window.isDestroyed()) window.destroy();
+          resolveWindowRestore(status);
         }, ultraLightModeRestoreReadyTimeoutMs);
         readyTimer.unref?.();
 
@@ -514,6 +565,7 @@ class UltraLightModeService {
     if (!this.isActive()) {
       return Promise.resolve();
     }
+    if (action === 'playPause' || action === 'stop') this.cancelAutomaticPlaybackResume();
 
     if (!canDispatchUltraLightModeActionWithoutRenderer(action)) {
       return this.restore(action).then(() => undefined);
@@ -620,9 +672,18 @@ class UltraLightModeService {
     if (command === 'stop') return this.dispatch('stop');
     if (command === 'playPause') return this.dispatch('playPause');
 
-    const status = getAudioSession().getStatus();
-    if (command === 'play' && status.state === 'paused') return this.dispatch('playPause');
-    if (command === 'pause' && (status.state === 'playing' || status.state === 'loading')) return this.dispatch('playPause');
+    if (command === 'play' || command === 'pause') {
+      this.cancelAutomaticPlaybackResume();
+      const operation = async (): Promise<void> => {
+        const audio = getAudioSession();
+        const playing = audio.getStatus().state === 'playing' || audio.getStatus().state === 'loading';
+        if (command === 'play' && !playing) await audio.play();
+        if (command === 'pause' && playing) await audio.pause();
+      };
+      const queued = this.operationLane.then(operation, operation);
+      this.operationLane = queued.catch((error) => console.warn(`[UltraLightMode] SMTC ${command} failed`, error));
+      return queued;
+    }
     return Promise.resolve();
   }
 
@@ -723,6 +784,9 @@ class UltraLightModeService {
   }
 
   private fail(message: string): UltraLightModeStatus {
+    ++this.lifecycleGeneration;
+    this.cancelBackgroundResume();
+    this.unbindAudioStatusPersistence();
     if (this.playbackResumeRetryTimer) {
       clearTimeout(this.playbackResumeRetryTimer);
       this.playbackResumeRetryTimer = null;
@@ -732,16 +796,32 @@ class UltraLightModeService {
     this.phase = 'inactive';
     this.entryMode = null;
     this.error = message;
+    const generation = this.lifecycleGeneration;
+    void import('./backgroundPauseLeases').then(({ releaseBackgroundPauseLease }) => {
+      if (this.phase === 'inactive' && generation === this.lifecycleGeneration) {
+        // A failed re-entry must not strand a previous manual pause lease.
+        // The window binding still owns any tray-hidden pause independently.
+        return releaseBackgroundPauseLease('manual-ultralite');
+      }
+    }).catch((error) => console.warn('[UltraLightMode] failed entry pause cleanup failed', error));
     return this.getStatus();
   }
 
+  private cancelAutomaticPlaybackResume(): void {
+    ++this.playbackIntentGeneration;
+    if (this.playbackResumeRetryTimer) clearTimeout(this.playbackResumeRetryTimer);
+    this.playbackResumeRetryTimer = null;
+  }
+
   private scheduleGpuRuntimePlaybackRecovery(): void {
+    const generation = this.lifecycleGeneration;
+    const playbackIntent = this.playbackIntentGeneration;
     if (this.playbackResumeRetryTimer) {
       clearTimeout(this.playbackResumeRetryTimer);
     }
     this.playbackResumeRetryTimer = setTimeout(() => {
       this.playbackResumeRetryTimer = null;
-      if (this.phase !== 'active') {
+      if (!this.isCurrentEntry(generation) || playbackIntent !== this.playbackIntentGeneration) {
         return;
       }
       const audioSession = getAudioSession();
@@ -838,17 +918,16 @@ class UltraLightModeService {
     timeline: UltraLightRestoreTimeline,
   ): void {
     const attemptId = this.restoreAttemptId;
+    const generation = this.lifecycleGeneration;
     void waitForRendererStartupReady(window.webContents).then((rendererReady) => {
-      if (window.isDestroyed() || this.phase !== 'inactive' || attemptId !== this.restoreAttemptId) return;
+      if (window.isDestroyed() || this.phase !== 'inactive' || attemptId !== this.restoreAttemptId || generation !== this.lifecycleGeneration) return;
       timeline.markRendererReady(rendererReady);
       this.flushPendingRestoreActions(window);
       getCrashReportService().getLogger()?.info('main', 'ultra light restore timeline', timeline.toLogFields());
-      if (entryMode === 'manual') {
-        void this.restoreAuxiliaryWindows();
-        this.scheduleManualBackgroundResume();
-      } else if (entryMode === 'tray-auto') {
-        this.scheduleTrayBackgroundResume();
+      if (entryMode === 'manual' || this.auxiliaryRestorePending) {
+        void this.restoreAuxiliaryWindows(generation).catch((error) => console.warn('[UltraLightMode] auxiliary restore failed', error));
       }
+      this.scheduleBackgroundResume(generation);
     });
   }
 
@@ -928,16 +1007,7 @@ class UltraLightModeService {
     if (!buildUltraLightBackendQueue(session)) {
       return 'tray_renderer_unload_rejects_unresolved_cue_queue';
     }
-    const target = session
-      ? session.items.find((item) =>
-          status.currentTrackId &&
-          item.track.id === status.currentTrackId &&
-          (!status.currentFilePath || item.track.path === status.currentFilePath))
-        ?? session.items.find((item) => status.currentFilePath && item.track.path === status.currentFilePath)
-        ?? session.items.find((item) => status.currentTrackId && item.track.id === status.currentTrackId)
-        ?? session.items.find((item) => session.currentQueueId && item.queueId === session.currentQueueId)
-        ?? null
-      : null;
+    const target = findHostQueueItem(session, status);
     return target && isLocalQueueItem(target)
       ? null
       : 'tray_renderer_unload_requires_local_queue_item';
@@ -1013,14 +1083,7 @@ class UltraLightModeService {
     if (!backendQueue) {
       throw new Error('ultra_light_queue_contains_unresolved_cue');
     }
-    const target = session.items.find((item) =>
-      status.currentTrackId
-      && item.track.id === status.currentTrackId
-      && (!status.currentFilePath || item.track.path === status.currentFilePath))
-      ?? session.items.find((item) => status.currentFilePath && item.track.path === status.currentFilePath)
-      ?? session.items.find((item) => status.currentTrackId && item.track.id === status.currentTrackId)
-      ?? session.items.find((item) => session.currentQueueId && item.queueId === session.currentQueueId)
-      ?? null;
+    const target = findHostQueueItem(session, status);
     await getAudioSession().syncQueueToBackend(
       backendQueue,
       session.mode.repeatMode,
@@ -1069,8 +1132,7 @@ class UltraLightModeService {
             if (this.phase !== 'active' || latest.state !== 'ended' || latest.currentTrackId !== status.currentTrackId) return;
             const session = getPlaybackSessionStore().load();
             if (!session) return;
-            const current = session.items.find((item) => item.queueId === status.currentQueueItemId)
-              ?? session.items.find((item) => item.track.id === status.currentTrackId);
+            const current = findHostQueueItem(session, status);
             const snapshot = current ? { ...session, currentQueueId: current.queueId, currentTrackId: current.track.id } : session;
             const target = session.mode.repeatMode === 'one' ? current : selectAdjacentItem(snapshot, 'next');
             if (target) await this.playQueueItem(snapshot, target);
@@ -1079,10 +1141,11 @@ class UltraLightModeService {
           this.operationLane = queued.catch((error) => console.warn('[UltraLightMode] confirmed playback end continuation failed', error));
         }
       }
-      if (status.currentTrackId && status.currentTrackId !== this.lastPersistedTrackId) {
+      if (status.currentTrackId && (status.currentTrackId !== this.lastPersistedTrackId
+        || (status.currentQueueItemId && status.currentQueueItemId !== this.lastPersistedQueueId))) {
         const store = getPlaybackSessionStore();
         const session = store.load();
-        const target = session?.items.find((item) => item.track.id === status.currentTrackId) ?? null;
+        const target = session ? findHostQueueItem(session, status) : null;
         if (session && target && target.queueId !== this.lastPersistedQueueId) {
           try {
             this.persistCurrentQueueItem(session, target);
@@ -1107,7 +1170,8 @@ class UltraLightModeService {
     this.nativeTaskbar.reset();
   }
 
-  private async destroyAllUiWindows(): Promise<void> {
+  private async destroyAllUiWindows(generation: number): Promise<void> {
+    if (!this.isCurrentEntry(generation)) return;
     try {
       closeDevConsoleWindow();
       const [{ closeDesktopLyricsWindow }, { closeMiniPlayerWindow }, { closePetWindow }] = await Promise.all([
@@ -1115,14 +1179,19 @@ class UltraLightModeService {
         import('./miniPlayerWindow'),
         import('./petWindow'),
       ]);
+      if (!this.isCurrentEntry(generation)) return;
+      this.auxiliaryRestorePending = true;
       closeDesktopLyricsWindow();
+      if (!this.isCurrentEntry(generation)) return;
       closeMiniPlayerWindow();
+      if (!this.isCurrentEntry(generation)) return;
       closePetWindow();
     } catch (error) {
       console.warn('[UltraLightMode] auxiliary UI cleanup was incomplete', error);
     }
 
     for (const window of BrowserWindow.getAllWindows()) {
+      if (!this.isCurrentEntry(generation)) return;
       if (!window.isDestroyed()) {
         window.destroy();
       }
@@ -1130,16 +1199,17 @@ class UltraLightModeService {
 
     try {
       const { releaseDefaultBackgroundMemory } = await import('./mainWindowTrayLoadShedding');
+      if (!this.isCurrentEntry(generation)) return;
       await releaseDefaultBackgroundMemory('ultra-light-manual');
     } catch (error) {
       console.warn('[UltraLightMode] failed to release rebuildable background memory', error);
     }
   }
 
-  private async destroyMainWindowForAutomaticParking(): Promise<void> {
+  private async destroyMainWindowForAutomaticParking(generation: number): Promise<void> {
     const window = getMainWindow();
     if (
-      this.phase !== 'active' ||
+      !this.isCurrentEntry(generation) ||
       (this.entryMode !== 'tray-auto' && this.entryMode !== 'minimize-auto') ||
       !window ||
       window.isDestroyed()
@@ -1160,7 +1230,7 @@ class UltraLightModeService {
     }
 
     if (
-      this.phase === 'active' &&
+      this.isCurrentEntry(generation) &&
       (this.entryMode === 'tray-auto' || this.entryMode === 'minimize-auto') &&
       !window.isDestroyed() &&
       (!window.isVisible() || window.isMinimized())
@@ -1169,9 +1239,9 @@ class UltraLightModeService {
       if (this.entryMode === 'minimize-auto') {
         activateUltraLightTaskbarRestorePresentation();
       }
-      this.scheduleAutomaticParkingSettledCleanup(this.entryMode);
+      this.scheduleAutomaticParkingSettledCleanup(this.entryMode, generation);
     } else if (
-      this.phase === 'active' &&
+      this.isCurrentEntry(generation) &&
       (this.entryMode === 'tray-auto' || this.entryMode === 'minimize-auto') &&
       !window.isDestroyed()
     ) {
@@ -1184,19 +1254,18 @@ class UltraLightModeService {
    * cleanup for both automatic entries so minimize parking does not retain
    * more rebuildable memory than tray parking.
    */
-  private scheduleAutomaticParkingSettledCleanup(entryMode: 'tray-auto' | 'minimize-auto'): void {
+  private scheduleAutomaticParkingSettledCleanup(entryMode: 'tray-auto' | 'minimize-auto', generation: number): void {
     if (this.traySettledCleanupTimer) {
       clearTimeout(this.traySettledCleanupTimer);
     }
     const reason = entryMode === 'tray-auto' ? 'ultra-light-tray-settled' : 'ultra-light-minimize-settled';
     this.traySettledCleanupTimer = setTimeout(() => {
       this.traySettledCleanupTimer = null;
-      if (this.phase !== 'active' || this.entryMode !== entryMode) return;
+      if (!this.isCurrentEntry(generation) || this.entryMode !== entryMode) return;
       void import('./mainWindowTrayLoadShedding')
-        .then(({ releaseDefaultBackgroundMemory }) => releaseDefaultBackgroundMemory(
-          reason,
-          { cleanupScope: reason },
-        ))
+        .then(({ releaseDefaultBackgroundMemory }) => {
+          if (this.isCurrentEntry(generation)) return releaseDefaultBackgroundMemory(reason, { cleanupScope: reason });
+        })
         .catch((error) => {
           console.warn('[UltraLightMode] settled automatic parking memory cleanup failed', error);
         });
@@ -1204,43 +1273,41 @@ class UltraLightModeService {
     this.traySettledCleanupTimer.unref?.();
   }
 
-  private scheduleTrayBackgroundResume(): void {
-    const timer = setTimeout(() => {
-      void import('./backgroundPauseLeases')
-        .then(({ releaseBackgroundPauseLease }) => releaseBackgroundPauseLease('tray-hidden'))
-        .catch((error) => {
-          console.warn('[UltraLightMode] failed to resume tray-paused background work', error);
-        });
+  private cancelBackgroundResume(): void {
+    if (this.backgroundResumeTimer) clearTimeout(this.backgroundResumeTimer);
+    this.backgroundResumeTimer = null;
+  }
+
+  private scheduleBackgroundResume(generation: number): void {
+    this.cancelBackgroundResume();
+    this.backgroundResumeTimer = setTimeout(() => {
+      this.backgroundResumeTimer = null;
+      void import('./backgroundPauseLeases').then(({ releaseBackgroundPauseLease }) => {
+        if (this.phase !== 'inactive' || generation !== this.lifecycleGeneration) return;
+        // A manual entry may have been followed by automatic parking before
+        // its delayed resume ran. Release both owners once actually restored.
+        return Promise.all([
+          releaseBackgroundPauseLease('manual-ultralite'),
+          releaseBackgroundPauseLease('tray-hidden'),
+        ]);
+      }).catch((error) => console.warn('[UltraLightMode] background resume failed', error));
     }, trayBackgroundResumeDelayMs);
-    timer.unref?.();
+    this.backgroundResumeTimer.unref?.();
   }
 
-  private async pauseManualBackgroundWork(): Promise<void> {
-    try {
-      const { acquireBackgroundPauseLease } = await import('./backgroundPauseLeases');
-      await acquireBackgroundPauseLease('manual-ultralite');
-    } catch (error) {
-      console.warn('[UltraLightMode] failed to pause rebuildable background work', error);
-    }
+  private async pauseManualBackgroundWork(generation: number): Promise<void> {
+    const { acquireBackgroundPauseLease } = await import('./backgroundPauseLeases');
+    if (this.isCurrentEntry(generation)) await acquireBackgroundPauseLease('manual-ultralite');
   }
 
-  private scheduleManualBackgroundResume(): void {
-    const timer = setTimeout(() => {
-      void import('./backgroundPauseLeases')
-        .then(({ releaseBackgroundPauseLease }) => releaseBackgroundPauseLease('manual-ultralite'))
-        .catch((error) => {
-          console.warn('[UltraLightMode] failed to resume UltraLight-paused background work', error);
-        });
-    }, trayBackgroundResumeDelayMs);
-    timer.unref?.();
-  }
-
-  private async restoreAuxiliaryWindows(): Promise<void> {
+  private async restoreAuxiliaryWindows(generation: number): Promise<void> {
     const [{ restoreDesktopLyricsWindowOnStartup }, { restoreMiniPlayerWindowOnStartup }, { restorePetWindowOnStartup }] = await Promise.all([
       import('./desktopLyricsWindow'),
       import('./miniPlayerWindow'),
       import('./petWindow'),
     ]);
+    if (this.phase !== 'inactive' || generation !== this.lifecycleGeneration) return;
+    this.auxiliaryRestorePending = false;
     restoreDesktopLyricsWindowOnStartup();
     restoreMiniPlayerWindowOnStartup();
     restorePetWindowOnStartup();

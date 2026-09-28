@@ -191,6 +191,7 @@ afterEach(() => {
     error: null,
   });
   window.sessionStorage.clear();
+  window.history.replaceState(null, '', '/');
   window.localStorage.removeItem('echo:diagnostics:crash-notice-enabled');
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -200,7 +201,8 @@ afterEach(() => {
 });
 
 describe('AppLayout standalone routes', () => {
-  it('restores DoP and saved DSP modes for free users', async () => {
+  it.each([false, true])('restores saved DSP only on cold startup (Ultralight restore: %s)', async (ultraLightRestore) => {
+    window.history.replaceState(null, '', ultraLightRestore ? '/?echoUltraLightRestore=1' : '/');
     const idleAudioStatus = {
       state: 'idle',
       currentTrackId: null,
@@ -215,6 +217,7 @@ describe('AppLayout standalone routes', () => {
     window.echo = {
       app: {
         getSettings: vi.fn().mockResolvedValue({
+          appMemoryVersion: 1,
           audioDsdOutputMode: 'dop',
           audioSdmMode: 'pcmToDsd',
           audioEchoSrcMode: 'family4x',
@@ -250,6 +253,12 @@ describe('AppLayout standalone routes', () => {
       </AppProviders>,
     );
 
+    if (ultraLightRestore) {
+      await act(async () => undefined);
+      expect(window.echo.audio.getStatus).toHaveBeenCalled();
+      expect(setOutput).not.toHaveBeenCalled();
+      return;
+    }
     await waitFor(() => expect(setOutput).toHaveBeenCalled());
     expect(setOutput).toHaveBeenCalledWith(expect.objectContaining({
       dsdOutputMode: 'dop',

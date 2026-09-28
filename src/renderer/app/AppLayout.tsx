@@ -8,6 +8,7 @@ import { contrastRatio, parseHexColor, sampleImageUrl, type ReadableColorSample,
 import { DragDropImportOverlay } from '../components/import/DragDropImportOverlay';
 import { PluginTrackActionDrawerHost } from '../components/library/PluginTrackActionDrawer';
 import { loadPersistedRememberedAudioOutput } from '../components/player/audioOutputMemory';
+import { isUltraLightRendererRestore } from '../../shared/types/ultraLightMode';
 import { Sidebar } from '../components/layout/Sidebar';
 import { AppTitleBar } from '../components/layout/AppTitleBar';
 import { EditableContextMenu } from '../components/ui/EditableContextMenu';
@@ -2811,6 +2812,15 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
 
     let cancelled = false;
     const initialRouteMutationSequence = getAudioOutputRouteMutationSequence();
+
+    if (isUltraLightRendererRestore(window.location.search)) {
+      // Recreating the control surface must not reopen a running native output
+      // with persisted preferences. Hydrate from Audio Core instead.
+      void audio.getStatus().then((status) => {
+        if (!cancelled) handleAudioDrawerStatusChange(status);
+      }).catch(() => undefined);
+      return () => { cancelled = true; };
+    }
 
     void Promise.all([
       loadPersistedRememberedAudioOutput(),
