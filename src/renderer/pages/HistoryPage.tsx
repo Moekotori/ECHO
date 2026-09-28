@@ -30,6 +30,7 @@ const historyPageCacheStorageKey = 'echo-next.history-page-cache.v1';
 const historyPageCacheVersion = 2;
 const isHistoryPageTestRuntime = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
 const historyCachedRefreshDelayMs = isHistoryPageTestRuntime ? 0 : 900;
+const historyChangedRefreshDelayMs = isHistoryPageTestRuntime ? 0 : 250;
 const historyStatsRefreshDelayMs = isHistoryPageTestRuntime ? 0 : 1600;
 const historyStatsPlaybackDeferDelayMs = 15_000;
 const historyStatsDeferredPlaybackStates = new Set(['loading', 'playing']);
@@ -834,7 +835,16 @@ export const HistoryPage = (): JSX.Element => {
     const delayMs =
       isDefaultHistoryQuery(filter, search) && hasHistoryPageData(cachedHistoryPageData) ? historyCachedRefreshDelayMs : 0;
 
-    return scheduleHistoryWork(() => void loadHistory(1, 'replace'), delayMs);
+    let cancelRefresh = scheduleHistoryWork(() => void loadHistory(1, 'replace'), delayMs);
+    const handleHistoryChanged = (): void => {
+      cancelRefresh();
+      cancelRefresh = scheduleHistoryWork(() => void loadHistory(1, 'replace'), historyChangedRefreshDelayMs);
+    };
+    window.addEventListener('playback-history:changed', handleHistoryChanged);
+    return () => {
+      cancelRefresh();
+      window.removeEventListener('playback-history:changed', handleHistoryChanged);
+    };
   }, [filter, loadHistory, search, sourceFilter]);
 
   const summaryLabels = useMemo(() => {

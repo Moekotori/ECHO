@@ -291,16 +291,6 @@ const emptyLibrarySummary = (): LibrarySummary => ({
   lastScanAt: null,
 });
 
-const emptyPlaybackHistorySummary = (): PlaybackHistorySummary => ({
-  todayCount: 0,
-  todayPlayedSeconds: 0,
-  totalCount: 0,
-  latestPlayedAt: null,
-  rangeCount: 0,
-  rangePlayedSeconds: 0,
-  rangeLatestPlayedAt: null,
-});
-
 const emptyPlaybackStatsDashboard = (): PlaybackStatsDashboard => ({
   generatedAt: new Date(0).toISOString(),
   totals: {
@@ -470,8 +460,6 @@ export class LibraryService {
   private readonly playbackSafeAlbumForTrackCache = new Map<string, LibraryAlbum | null>();
   private readonly playbackSafeArtistsCache = new Map<string, LibraryPage<LibraryArtist>>();
   private readonly playbackSafeArtistAlbumsCache = new Map<string, LibraryPage<LibraryAlbum>>();
-  private readonly playbackSafePlaybackHistoryCache = new Map<string, LibraryPage<PlaybackHistoryEntry>>();
-  private readonly playbackSafePlaybackHistorySummaryCache = new Map<string, PlaybackHistorySummary>();
   private playbackSafeSummaryCache: LibrarySummary | null = null;
   private readonly playbackStatsDashboardCache = new Map<string, PlaybackStatsDashboard>();
   private readonly playbackMemoryGraphCache = new Map<string, PlaybackMemoryGraph>();
@@ -563,8 +551,6 @@ export class LibraryService {
       this.playbackSafeAlbumForTrackCache,
       this.playbackSafeArtistsCache,
       this.playbackSafeArtistAlbumsCache,
-      this.playbackSafePlaybackHistoryCache,
-      this.playbackSafePlaybackHistorySummaryCache,
       this.playbackStatsDashboardCache,
       this.playbackMemoryGraphCache,
     ];
@@ -1755,12 +1741,8 @@ export class LibraryService {
   }
 
   getPlaybackHistoryPlaybackSafe(query?: PlaybackHistoryQuery): Promise<LibraryPage<PlaybackHistoryEntry>> {
-    const key = playbackSafeCacheKey(query);
-    return runNonCriticalMainWork({
-      name: 'library:get-playback-history',
-      work: () => this.rememberPlaybackSafeRead(this.playbackSafePlaybackHistoryCache, key, this.getPlaybackHistory(query)),
-      fallback: () => this.playbackSafePlaybackHistoryCache.get(key) ?? emptyLibraryPage(query),
-    });
+    // Visible history must stay current during playback; only the heavier insights are deferred.
+    return runMainBackgroundTask('library:get-playback-history', () => this.getPlaybackHistory(query));
   }
 
   getPlaybackHistorySummary(query?: PlaybackHistoryQuery): PlaybackHistorySummary {
@@ -1768,12 +1750,7 @@ export class LibraryService {
   }
 
   getPlaybackHistorySummaryPlaybackSafe(query?: PlaybackHistoryQuery): Promise<PlaybackHistorySummary> {
-    const key = playbackSafeCacheKey(query);
-    return runNonCriticalMainWork({
-      name: 'library:get-playback-history-summary',
-      work: () => this.rememberPlaybackSafeRead(this.playbackSafePlaybackHistorySummaryCache, key, this.getPlaybackHistorySummary(query)),
-      fallback: () => this.playbackSafePlaybackHistorySummaryCache.get(key) ?? emptyPlaybackHistorySummary(),
-    });
+    return runMainBackgroundTask('library:get-playback-history-summary', () => this.getPlaybackHistorySummary(query));
   }
 
   getPlaybackStatsDashboard(query?: PlaybackHistoryQuery): PlaybackStatsDashboard {

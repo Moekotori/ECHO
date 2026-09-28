@@ -9,6 +9,7 @@ import type {
   PlaybackStatsDashboard,
 } from '../../shared/types/library';
 import { I18nProvider } from '../i18n/I18nProvider';
+import { loadTranslations } from '../i18n/locales';
 import { HistoryPage, resetHistoryPageCacheForTest } from './HistoryPage';
 
 const playbackQueueMock = vi.hoisted(() => ({
@@ -239,6 +240,31 @@ afterEach(() => {
 });
 
 describe('HistoryPage', () => {
+  it('refreshes visible history after records change and removes the listener on unmount', async () => {
+    await loadTranslations('en-US');
+    let entries = [historyEntry('before-change')];
+    const getPlaybackHistory = vi.fn(() => Promise.resolve(historyPage(entries)));
+    const library = installLibraryMock({ getPlaybackHistory });
+    const { unmount } = renderHistoryPage();
+    await screen.findAllByText('History before-change');
+    await waitFor(() => expect(library.getPlaybackStatsDashboard).toHaveBeenCalledTimes(1));
+    const summaryCalls = vi.mocked(library.getPlaybackHistorySummary).mock.calls.length;
+
+    entries = [historyEntry('after-change', { playCount: 2 })];
+    fireEvent(window, new Event('playback-history:changed'));
+
+    await screen.findAllByText('History after-change');
+    expect(screen.queryByText('History before-change')).toBeNull();
+    expect(vi.mocked(library.getPlaybackHistorySummary).mock.calls.length).toBeGreaterThan(summaryCalls);
+    expect(getPlaybackHistory).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, sort: 'recent' }));
+
+    unmount();
+    getPlaybackHistory.mockClear();
+    fireEvent(window, new Event('playback-history:changed'));
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+    expect(getPlaybackHistory).not.toHaveBeenCalled();
+  });
+
   it('shows the stored history snapshot immediately on cold launch', () => {
     window.localStorage.setItem(
       'echo-next.history-page-cache.v1',
