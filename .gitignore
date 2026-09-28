@@ -143,6 +143,7 @@ dist-packaged*/
 # runtime artifacts ignored below.
 
 # Keep generated credentials, runtime databases, deploy bundles, and local machine artifacts out of git.
+/.codex-artifacts/
 *.db
 *.db-*
 *.sqlite

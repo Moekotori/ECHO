@@ -5242,7 +5242,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     if (isShuffleEnabledRef.current) {
       const priorityTarget = priorityNextQueueIdsRef.current
         .map((queueId) => findItemByQueueId(current, queueId))
-        .find((item): item is QueueItem => Boolean(item) && item.queueId !== activeItem?.queueId && item.track.unavailable !== true) ?? null;
+        .find((item): item is QueueItem => item !== null && item.queueId !== activeItem?.queueId && item.track.unavailable !== true) ?? null;
       const queueScoped = isQueueScopedShuffleSource(activeItem?.source, playlistPlaybackStateRef.current.active);
 
       if (priorityTarget) {
@@ -5264,7 +5264,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           : navigationRepeatMode === 'all' ? deck : [];
         target = order
           .map((queueId) => findItemByQueueId(current, queueId))
-          .find((item): item is QueueItem => Boolean(item) && item.queueId !== activeItem?.queueId && item.track.unavailable !== true) ?? null;
+          .find((item): item is QueueItem => item !== null && item.queueId !== activeItem?.queueId && item.track.unavailable !== true) ?? null;
         if (!target && navigationRepeatMode === 'all') {
           target = activeItem && activeItem.track.unavailable !== true
             ? activeItem
@@ -5673,7 +5673,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
 
     const priorityItem = priorityNextQueueIds
       .map((queueId) => items.find((item) => item.queueId === queueId) ?? null)
-      .find((item): item is QueueItem => Boolean(item) && item.queueId !== currentQueueId && item.track.unavailable !== true) ?? null;
+      .find((item): item is QueueItem => item !== null && item.queueId !== currentQueueId && item.track.unavailable !== true) ?? null;
     if (isShuffleEnabled && priorityItem) {
       return priorityItem;
     }

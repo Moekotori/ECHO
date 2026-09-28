@@ -1,8 +1,0 @@
-2026/09/28-12:09:16.947 ce6c Reusing MANIFEST D:\ECHOCommunity\.codex-artifacts\library-lag-20260928\user-data\Local Storage\leveldb/MANIFEST-000001
-2026/09/28-12:09:16.951 ce6c Recovering log #25
-2026/09/28-12:09:16.951 ce6c Level-0 table #28: started
-2026/09/28-12:09:16.954 ce6c Level-0 table #28: 22092 bytes OK
-2026/09/28-12:09:16.958 ce6c Delete type=0 #25
-2026/09/28-12:09:40.773 d25c Level-0 table #31: started
-2026/09/28-12:09:40.776 d25c Level-0 table #31: 22679 bytes OK
-2026/09/28-12:09:40.780 d25c Delete type=0 #29
