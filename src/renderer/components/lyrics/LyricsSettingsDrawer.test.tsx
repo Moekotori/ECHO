@@ -1213,7 +1213,13 @@ describe('LyricsSettingsDrawer', () => {
 
     render(<LyricsSettingsDrawer isOpen onClose={vi.fn()} />);
 
-    const toggle = await screen.findByLabelText(/智能歌词校准/);
+    const toggle = await screen.findByLabelText(/智能歌词校准/, { selector: 'input' });
+    const help = screen.getByLabelText('智能歌词校准', { selector: 'button' });
+    fireEvent.focus(help);
+    expect(screen.getByRole('tooltip')).toBeTruthy();
+    fireEvent.click(help);
+    expect(setSettings).not.toHaveBeenCalled();
+    fireEvent.blur(help);
     fireEvent.click(toggle);
 
     await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ lyricsSmartAlignmentEnabled: true }));

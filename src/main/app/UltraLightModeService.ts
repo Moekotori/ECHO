@@ -115,7 +115,31 @@ const toUltraLightBackendQueueItem = (item: PersistedQueueItem): AudioBackendQue
   return null;
 };
 
-const buildUltraLightBackendQueue = (session: PersistedPlaybackSessionV1): AudioBackendQueueItem[] | null => {
+const ultraLightShuffleAvoidRecentCount = (): number => {
+  const numeric = Number(getAppSettings().playbackShuffleAvoidRecentCount);
+  if (!Number.isFinite(numeric)) {
+    return 25;
+  }
+  return Math.max(0, Math.min(200, Math.round(numeric)));
+};
+
+const buildUltraLightBackendQueue = (
+  session: PersistedPlaybackSessionV1,
+  focusQueueId: string | null = session.currentQueueId,
+): AudioBackendQueueItem[] | null => {
+  // A full list would make the host advance in file order and ignore shuffle.
+  // Keep only the current item so a real ended event returns here.
+  if (session.mode.isShuffleEnabled && session.mode.repeatMode !== 'one') {
+    const focus = session.items.find((item) => item.queueId === focusQueueId)
+      ?? session.items[findCurrentQueueIndex(session)]
+      ?? null;
+    if (!focus || !isLocalQueueItem(focus)) {
+      return focus ? null : [];
+    }
+    const backendItem = toUltraLightBackendQueueItem(focus);
+    return backendItem ? [backendItem] : null;
+  }
+
   const items: AudioBackendQueueItem[] = [];
   for (const item of session.items) {
     if (!isLocalQueueItem(item)) continue;
@@ -173,11 +197,21 @@ const selectAdjacentItem = (
 
   const currentIndex = findCurrentQueueIndex(session);
   const current = currentIndex >= 0 ? session.items[currentIndex] ?? null : null;
-  if (session.mode.isShuffleEnabled) {
-    const candidates = playableItems.filter((item) => item.queueId !== current?.queueId);
+  if (session.mode.isShuffleEnabled && direction === 'next') {
+    const avoidRecentCount = ultraLightShuffleAvoidRecentCount();
+    const recentIds = new Set(
+      (avoidRecentCount > 0 ? session.history.slice(-avoidRecentCount) : []).map((item) => item.queueId),
+    );
+    if (current) {
+      recentIds.add(current.queueId);
+    }
+    let candidates = playableItems.filter((item) => !recentIds.has(item.queueId));
+    if (candidates.length === 0) {
+      candidates = playableItems.filter((item) => item.queueId !== current?.queueId);
+    }
     return candidates.length > 0
       ? candidates[Math.floor(Math.random() * candidates.length)] ?? null
-      : playableItems[0] ?? null;
+      : null;
   }
 
   if (direction === 'previous') {
@@ -1029,12 +1063,33 @@ class UltraLightModeService {
     if (!session) {
       return;
     }
+
+    if (direction === 'previous') {
+      let historyIndex = session.history.length - 1;
+      while (historyIndex >= 0 && !isLocalQueueItem(session.history[historyIndex]!)) {
+        historyIndex -= 1;
+      }
+      const previous = historyIndex >= 0 ? session.history[historyIndex] ?? null : null;
+      if (previous) {
+        await this.playQueueItem(
+          { ...session, history: session.history.slice(0, historyIndex) },
+          previous,
+        );
+        return;
+      }
+    }
+
     const target = selectAdjacentItem(session, direction);
     if (!target) {
       return;
     }
 
-    await this.playQueueItem(session, target);
+    const currentIndex = findCurrentQueueIndex(session);
+    const current = currentIndex >= 0 ? session.items[currentIndex] ?? null : null;
+    const history = direction === 'next' && current && current.queueId !== target.queueId
+      ? [...session.history, current].slice(-500)
+      : session.history;
+    await this.playQueueItem({ ...session, history }, target);
   }
 
   private async updatePlaybackMode(
@@ -1054,11 +1109,14 @@ class UltraLightModeService {
 
   private async playQueueItem(session: PersistedPlaybackSessionV1, target: PersistedQueueItem): Promise<void> {
     const audioSession = getAudioSession();
-    const backendQueue = buildUltraLightBackendQueue(session);
+    const sessionWithTarget = session.items.some((item) => item.queueId === target.queueId)
+      ? session
+      : { ...session, items: [...session.items, target] };
+    const backendQueue = buildUltraLightBackendQueue(sessionWithTarget, target.queueId);
     if (!backendQueue) {
       throw new Error('ultra_light_queue_contains_unresolved_cue');
     }
-    await audioSession.syncQueueToBackend(backendQueue, session.mode.repeatMode, target.queueId);
+    await audioSession.syncQueueToBackend(backendQueue, sessionWithTarget.mode.repeatMode, target.queueId);
     await audioSession.playLocalFile({
       filePath: target.track.path,
       trackId: target.track.id,
@@ -1071,7 +1129,7 @@ class UltraLightModeService {
       },
       replayGain: replayGainFromQueueItem(target),
     });
-    this.persistCurrentQueueItem(session, target);
+    this.persistCurrentQueueItem(sessionWithTarget, target);
   }
 
   private async syncQueueForRendererUnload(): Promise<void> {
@@ -1079,11 +1137,11 @@ class UltraLightModeService {
     if (!status.currentTrackId && !status.currentFilePath) return;
     const session = getPlaybackSessionStore().load();
     if (!session || session.items.length === 0) return;
-    const backendQueue = buildUltraLightBackendQueue(session);
+    const target = findHostQueueItem(session, status);
+    const backendQueue = buildUltraLightBackendQueue(session, target?.queueId ?? session.currentQueueId);
     if (!backendQueue) {
       throw new Error('ultra_light_queue_contains_unresolved_cue');
     }
-    const target = findHostQueueItem(session, status);
     await getAudioSession().syncQueueToBackend(
       backendQueue,
       session.mode.repeatMode,
@@ -1135,7 +1193,11 @@ class UltraLightModeService {
             const current = findHostQueueItem(session, status);
             const snapshot = current ? { ...session, currentQueueId: current.queueId, currentTrackId: current.track.id } : session;
             const target = session.mode.repeatMode === 'one' ? current : selectAdjacentItem(snapshot, 'next');
-            if (target) await this.playQueueItem(snapshot, target);
+            if (!target) return;
+            const history = current && current.queueId !== target.queueId
+              ? [...snapshot.history, current].slice(-500)
+              : snapshot.history;
+            await this.playQueueItem({ ...snapshot, history }, target);
           };
           const queued = this.operationLane.then(operation, operation);
           this.operationLane = queued.catch((error) => console.warn('[UltraLightMode] confirmed playback end continuation failed', error));

@@ -364,14 +364,14 @@ describe('RemoteSourcesPanel', () => {
     vi.restoreAllMocks();
   });
 
-  it('lightly blocks remote sources for non-Pro users', async () => {
+  it('loads remote sources without Pro activation', async () => {
     appApiMocks.getEchoProAccountStatus.mockResolvedValueOnce({ pro: false });
     pluginApiMocks.list.mockResolvedValueOnce({ directory: 'D:\\Echo\\plugins', plugins: [] });
 
     render(<RemoteSourcesPanel />);
 
-    expect(await screen.findByText('网盘功能需要 ECHO Pro')).toBeTruthy();
-    expect(remoteApiMocks.list).not.toHaveBeenCalled();
+    await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
+    expect(screen.queryByText('网盘功能需要 ECHO Pro')).toBeNull();
   });
 
   it('loads remote sources for a locally known Pro account without online feature verification', async () => {
@@ -379,7 +379,7 @@ describe('RemoteSourcesPanel', () => {
 
     await waitFor(() => expect(remoteApiMocks.list).toHaveBeenCalled());
     expect(screen.queryByText('网盘功能需要 ECHO Pro')).toBeNull();
-    expect(appApiMocks.getEchoProAccountStatus).toHaveBeenCalledTimes(1);
+    expect(appApiMocks.getEchoProAccountStatus).not.toHaveBeenCalled();
   });
 
   it('loads remote sources for an ordinary user with the included entitlement', async () => {

@@ -4,6 +4,7 @@ import type { CSSProperties, DragEvent, MouseEvent, ReactNode, WheelEvent as Rea
 import {
   ArrowLeft,
   Check,
+  ChevronRight,
   Disc3,
   Music2,
   Upload,
@@ -32,6 +33,7 @@ import type {
 import { neteaseDjRadioPlaylistPrefix, streamingProviderNames } from "../../shared/types/streaming";
 import type { PlaybackStatus } from "../../shared/types/playback";
 import { decodeTextFileBytes } from "../../shared/utils/decodeTextFile";
+import { useLyricsTrackSwipe } from "../components/lyrics/useLyricsTrackSwipe";
 import { LyricsView, getActiveLyricIndex, getEstimatedPlainLyricIndex } from "../components/lyrics/LyricsView";
 import { MvPanel, mvImmersiveBackgroundScaleWheelEvent, type MvAudioClock } from "../components/lyrics/MvPanel";
 import {
@@ -2006,6 +2008,39 @@ const useLyricsDisplayPosition = (
 
 export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHeader = false }: LyricsPageProps): JSX.Element => {
   const queue = usePlaybackQueue();
+  const [mouseGestureTrackSwitchEnabled, setMouseGestureTrackSwitchEnabled] = useState(false);
+  const handleLyricsTrackSwipe = useCallback((direction: "previous" | "next") => {
+    if (direction === "next") {
+      void queue.playNext();
+      return;
+    }
+    void queue.playPrevious();
+  }, [queue]);
+  const lyricsTrackSwipe = useLyricsTrackSwipe(handleLyricsTrackSwipe, mouseGestureTrackSwitchEnabled);
+  useEffect(() => {
+    let cancelled = false;
+    const applyGestureSetting = (settings: Partial<AppSettings> | null | undefined): void => {
+      if (!settings || !Object.hasOwn(settings, "mouseGestureTrackSwitchEnabled")) {
+        return;
+      }
+      setMouseGestureTrackSwitchEnabled(settings.mouseGestureTrackSwitchEnabled === true);
+    };
+    void window.echo?.app?.getSettings?.().then((settings) => {
+      if (!cancelled) {
+        applyGestureSetting(settings);
+      }
+    }).catch(() => undefined);
+    const handleSettingsChanged = (event: Event): void => {
+      if (event instanceof CustomEvent) {
+        applyGestureSetting(event.detail as Partial<AppSettings> | null | undefined);
+      }
+    };
+    window.addEventListener("settings:changed", handleSettingsChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("settings:changed", handleSettingsChanged);
+    };
+  }, []);
   const sharedPlaybackStatus = useSharedPlaybackStatus();
   const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus | null>(
     null,
@@ -5739,6 +5774,7 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
     <div
       ref={lyricsPageRef}
       className="lyrics-page"
+      {...lyricsTrackSwipe.handlers}
       data-background={effectiveLyricsBackgroundMode}
       data-render-pressure-reduced={lyricsRenderPressureReduced ? "true" : undefined}
       data-immersive-cover-style={shouldUseImmersiveCoverStyle ? "true" : undefined}
@@ -5764,6 +5800,9 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
       onDrop={handleLyricsDrop}
       onWheelCapture={handleLyricsPageWheel}
     >
+      <div className="lyrics-track-swipe-indicator" aria-hidden="true">
+        <ChevronRight size={22} />
+      </div>
       <div className="lyrics-backdrop" aria-hidden="true">
         {trackTransition?.previousBackgroundCoverUrl && effectiveLyricsBackgroundMode === "cover" ? (
           <div

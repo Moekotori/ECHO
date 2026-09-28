@@ -49,12 +49,13 @@ const dispatchPreservedLibraryChange = (): void => {
 type AlbumSortOption = { value: LibrarySort; labelKey: TranslationKey };
 const albumSortGroups: Array<{ labelKey: TranslationKey; options: AlbumSortOption[] }> = [
   {
-    labelKey: 'library.albums.sort.group.general',
+    labelKey: 'songs.sort.group.browse',
     options: [
       { value: 'default', labelKey: 'library.sort.default' },
       { value: 'titleAsc', labelKey: 'library.albums.sort.titleAsc' },
       { value: 'titleDesc', labelKey: 'library.albums.sort.titleDesc' },
       { value: 'artist', labelKey: 'library.albums.sort.artist' },
+      { value: 'artistDesc', labelKey: 'library.albums.sort.artistDesc' },
       { value: 'yearDesc', labelKey: 'library.albums.sort.yearDesc' },
       { value: 'yearAsc', labelKey: 'library.albums.sort.yearAsc' },
     ],
@@ -69,17 +70,22 @@ const albumSortGroups: Array<{ labelKey: TranslationKey; options: AlbumSortOptio
     ],
   },
   {
+    labelKey: 'songs.sort.group.audio',
+    options: [
+      { value: 'durationAsc', labelKey: 'library.sort.durationAsc' },
+      { value: 'durationDesc', labelKey: 'library.sort.durationDesc' },
+    ],
+  },
+  {
     labelKey: 'library.albums.sort.group.library',
     options: [
       { value: 'recent', labelKey: 'library.albums.sort.recentAdded' },
       { value: 'trackCountDesc', labelKey: 'library.albums.sort.trackCountDesc' },
       { value: 'trackCountAsc', labelKey: 'library.albums.sort.trackCountAsc' },
-      { value: 'durationAsc', labelKey: 'library.sort.durationAsc' },
-      { value: 'durationDesc', labelKey: 'library.sort.durationDesc' },
-      { value: 'createdAsc', labelKey: 'library.sort.createdAsc' },
       { value: 'createdDesc', labelKey: 'library.sort.createdDesc' },
-      { value: 'fileModifiedAsc', labelKey: 'library.sort.fileModifiedAsc' },
+      { value: 'createdAsc', labelKey: 'library.sort.createdAsc' },
       { value: 'fileModifiedDesc', labelKey: 'library.sort.fileModifiedDesc' },
+      { value: 'fileModifiedAsc', labelKey: 'library.sort.fileModifiedAsc' },
     ],
   },
 ];

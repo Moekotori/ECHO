@@ -19,8 +19,8 @@
 }
 
 .settings-header h1 {
-  font-size: 30px;
-  line-height: 1.1;
+  font-size: var(--echo-text-page-title);
+  line-height: 1.2;
 }
 
 .settings-header-context {
@@ -155,7 +155,7 @@
 #settings-sec-general > .settings-subsection-title span {
   color: var(--theme-heading-text);
   font-size: 14px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
@@ -190,8 +190,8 @@
 }
 
 #settings-sec-general .setting-info p {
-  color: var(--theme-subtle-text);
-  opacity: 0.82;
+  color: var(--theme-muted-text);
+  opacity: 1;
 }
 
 @media (max-width: 1180px) {
@@ -244,7 +244,7 @@
 .app-titlebar-brand strong {
   color: var(--theme-heading-text);
   font-size: 18px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-brand);
   line-height: 1;
 }
 
@@ -254,7 +254,7 @@
   height: 18px;
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 640;
+  font-weight: var(--echo-weight-body);
   line-height: 1;
 }
 
@@ -262,7 +262,7 @@
   height: auto;
   color: inherit;
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
 }
 
 .titlebar-action,
@@ -321,7 +321,7 @@
   color: var(--theme-subtle-text);
   font-family: var(--font-main);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--echo-weight-label);
   line-height: 1.2;
   letter-spacing: 0.015em;
 }
@@ -468,7 +468,7 @@
   max-width: 160px;
   opacity: 1;
   font-size: 14px;
-  font-weight: 540;
+  font-weight: var(--echo-weight-label);
   transform: translateX(0);
   transition:
     max-width var(--echo-motion-sidebar-ms) var(--echo-motion-ease-sidebar),
@@ -490,7 +490,7 @@
 
 .nav-visibility-indicator span {
   font-size: 10px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
   white-space: nowrap;
 }
 
@@ -874,7 +874,7 @@ html[data-theme="dark"] .sidebar-folder:hover {
 .settings-update-custom-source > span {
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-update-custom-source {
@@ -1833,8 +1833,8 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 
 .settings-page .section-title h2 {
   color: var(--theme-heading-text);
-  font-size: 22px;
-  font-weight: 860;
+  font-size: var(--echo-text-section-title);
+  font-weight: var(--echo-weight-heading);
 }
 
 .settings-page .setting-row {
@@ -2061,7 +2061,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   margin-top: 4px;
   color: var(--theme-accent-text);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
   line-height: 1.35;
 }
 
@@ -2666,7 +2666,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   padding: 2px 9px 5px;
   color: var(--theme-subtle-text);
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page .settings-nav-item {
@@ -2696,7 +2696,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   overflow: hidden;
   color: var(--theme-subtle-text);
   font-size: 11px;
-  font-weight: 520;
+  font-weight: var(--echo-weight-label);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2807,7 +2807,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   border: 0;
   background: transparent;
   font-size: 12px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   text-align: left;
   cursor: pointer;
 }
@@ -2860,7 +2860,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-page .section-title-context {
   color: var(--theme-muted-text);
   font-size: 10px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -2869,7 +2869,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   margin: 0;
   color: var(--theme-subtle-text);
   font-size: 12px;
-  font-weight: 520;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -2928,7 +2928,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   color: var(--theme-subtle-text);
   font-size: 10px;
   font-style: normal;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2937,7 +2937,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2981,12 +2981,12 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   content: counter(library-section);
   background: color-mix(in srgb, var(--theme-accent-bg) 88%, transparent);
   font-size: 11px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-heading);
 }
 
 .settings-page #settings-sec-library > .settings-subsection-title > span {
   font-size: 15px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-heading);
 }
 
 .settings-page #settings-sec-library > .settings-subsection-title > small {
@@ -3018,7 +3018,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 
 .settings-page #settings-sec-library .setting-info h3 {
   font-size: 13px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page #settings-sec-library .setting-info p {
@@ -3331,15 +3331,15 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-page .settings-expanded-panel--playback > .settings-subsection-title span {
   color: var(--theme-heading-text);
   font-size: 14px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
 .settings-page .settings-section--panel > .settings-subsection-title small,
 .settings-page .settings-expanded-panel--playback > .settings-subsection-title small {
-  color: var(--theme-subtle-text);
+  color: var(--theme-muted-text);
   font-size: 12px;
-  opacity: 0.82;
+  opacity: 1;
 }
 
 .settings-page .settings-section--panel:has(> .settings-subsection-title)
@@ -3400,7 +3400,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-page #settings-sec-experimental .settings-experimental-subsection-heading > .settings-subsection-title span {
   color: var(--theme-heading-text);
   font-size: 15px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
@@ -3455,7 +3455,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-page #settings-sec-experimental .setting-info h3,
 .settings-page #settings-sec-experimental .settings-performance-toggle strong {
   font-size: 14px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page #settings-sec-experimental .setting-info p,
@@ -3555,7 +3555,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   gap: 8px;
   color: var(--theme-page-text);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   white-space: nowrap;
 }
 
@@ -3591,7 +3591,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 14px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.25;
 }
 
@@ -3665,7 +3665,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3674,7 +3674,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   overflow: hidden;
   color: var(--theme-subtle-text);
   font-size: 11px;
-  font-weight: 560;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3684,7 +3684,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   color: var(--theme-accent-text);
   font-size: 11px;
   font-style: normal;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-integrations-main-grid {
@@ -3750,7 +3750,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 830;
+  font-weight: var(--echo-weight-label);
   line-height: 1.28;
 }
 
@@ -3792,7 +3792,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-integrations-proxy-control > span {
   color: var(--theme-subtle-text);
   font-size: 11px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-integrations-proxy-control input {
@@ -3862,7 +3862,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   justify-content: space-between;
   color: var(--theme-accent-text);
   font-size: 12px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
   list-style: none;
 }
@@ -4046,7 +4046,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-page .section-title-context {
   color: var(--theme-subtle-text);
   font-size: 11px;
-  font-weight: 680;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0.01em;
 }
 
@@ -4055,7 +4055,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   margin: 0;
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 470;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -4076,7 +4076,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 
 .settings-page #settings-sec-shortcuts > .section-title h2 {
   font-size: 28px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: -0.025em;
 }
 
@@ -4092,7 +4092,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 
 .settings-page #settings-sec-shortcuts > .settings-subsection-title span {
   font-size: 14px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-heading);
 }
 
 .settings-page #settings-sec-shortcuts > .settings-subsection-title small {
@@ -4142,7 +4142,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-page .settings-shortcut-profile-copy strong {
   color: var(--theme-heading-text);
   font-size: 15px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page .settings-shortcut-profile-copy > div:first-child > span {
@@ -4151,7 +4151,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   border: 1px solid color-mix(in srgb, var(--theme-panel-border) 78%, transparent);
   border-radius: 6px;
   font-size: 10px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-page .settings-shortcut-profile .settings-shortcut-toolbar-actions {
@@ -4187,7 +4187,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   border-radius: 0;
   background: transparent;
   font-size: 10.5px;
-  font-weight: 680;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page .settings-shortcut-summary span:first-child {
@@ -4316,7 +4316,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 
 .settings-page #settings-sec-shortcuts .setting-info h3 {
   font-size: 14px;
-  font-weight: 790;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page #settings-sec-shortcuts .setting-info p {
@@ -4344,7 +4344,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-page #settings-sec-shortcuts .settings-shortcut-key {
   font-family: var(--echo-mono-font-family);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page #settings-sec-shortcuts .settings-shortcut-clear {
@@ -4517,14 +4517,14 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-page #settings-sec-lyrics .settings-lyrics-panel .lyrics-settings-category-header h3 {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.35;
 }
 
 .settings-page #settings-sec-lyrics .settings-lyrics-panel .lyrics-settings-category-header p {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 560;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -4680,14 +4680,14 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 
 .settings-page #settings-sec-lyrics .settings-lyrics-panel .lyrics-section-collapse-button strong {
   font-size: 14px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   letter-spacing: -0.01em;
 }
 
 .settings-page #settings-sec-lyrics .settings-lyrics-panel .lyrics-section-collapse-button small {
   color: var(--theme-subtle-text);
   font-size: 12px;
-  font-weight: 520;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -4718,7 +4718,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   padding: 10px 0 12px;
   color: var(--theme-subtle-text);
   font-size: 12px;
-  font-weight: 570;
+  font-weight: var(--echo-weight-body);
   line-height: 1.6;
 }
 
@@ -4748,7 +4748,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-page #settings-sec-lyrics .settings-lyrics-panel .audio-toggle-row > span strong {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 690;
+  font-weight: var(--echo-weight-label);
   line-height: 1.4;
 }
 
@@ -4864,7 +4864,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   border-radius: 4px;
   background: transparent;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page #settings-sec-lyrics .settings-lyrics-panel :is(
@@ -4941,7 +4941,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   border-radius: 4px;
   background: transparent;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page #settings-sec-lyrics .settings-lyrics-panel .lyrics-background-select__option:is(:hover, [aria-selected='true']) {
@@ -5011,7 +5011,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 ) small {
   color: var(--theme-subtle-text);
   font-size: 11px;
-  font-weight: 560;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-page #settings-sec-lyrics .settings-lyrics-panel .lyrics-desktop-font-action {
@@ -5031,7 +5031,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 ) strong {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page #settings-sec-lyrics .settings-lyrics-panel :is(
@@ -5078,7 +5078,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 ) strong {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 690;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-page #settings-sec-lyrics .settings-lyrics-panel :is(
@@ -5087,7 +5087,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 ) em {
   color: var(--theme-subtle-text);
   font-size: 11px;
-  font-weight: 540;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-page #settings-sec-lyrics .settings-lyrics-panel .lyrics-background-tuning-collapse-button {

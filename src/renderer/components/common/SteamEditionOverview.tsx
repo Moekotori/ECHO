@@ -29,7 +29,7 @@ const copy: Record<Locale, PromoCopy> = {
     performanceTitle: '持续重构的音频链路', performanceBody: '播放状态由 Audio Core 与原生宿主负责，界面专注控制和展示。实际体验取决于设备、设置与安装版本。',
     steamTitle: 'Steam 版多出的生态', steamBody: 'Steam 自动更新、部分设置的 Cloud 同步、好友状态、成就，以及可订阅主题、歌词场景、可视化和扩展的创意工坊。',
     communityTitle: '社区版的方式', communityBody: '从官网或 GitHub 获取，使用独立更新通道；源码可供查看与学习。Steam 创意工坊与 Steamworks 功能不在社区版中。',
-    note: 'Steam Cloud 不同步音乐文件、完整曲库或歌单。ECHO Pro 为另行购买的可选权益，两版授权不互通。',
+    note: 'Steam Cloud 不同步音乐文件、完整曲库或歌单。',
   },
   'zh-TW': {
     eyebrow: 'ECHO · STEAM', store: '前往 Steam',
@@ -38,7 +38,7 @@ const copy: Record<Locale, PromoCopy> = {
     performanceTitle: '持續重構的音訊鏈路', performanceBody: '播放狀態由 Audio Core 與原生宿主負責，介面專注控制與顯示。實際體驗視裝置、設定與安裝版本而定。',
     steamTitle: 'Steam 版多出的生態', steamBody: 'Steam 自動更新、部分設定的 Cloud 同步、好友狀態、成就，以及可訂閱主題、歌詞場景、視覺化與擴充的創意工坊。',
     communityTitle: '社群版的方式', communityBody: '從官網或 GitHub 取得，使用獨立更新管道；原始碼可供檢視與學習。Steam 創意工坊與 Steamworks 功能不在社群版中。',
-    note: 'Steam Cloud 不同步音樂檔案、完整曲庫或播放清單。ECHO Pro 是另購的可選權益，兩版授權不互通。',
+    note: 'Steam Cloud 不同步音樂檔案、完整曲庫或播放清單。',
   },
   'en-US': {
     eyebrow: 'ECHO · STEAM', store: 'View on Steam',
@@ -47,7 +47,7 @@ const copy: Record<Locale, PromoCopy> = {
     performanceTitle: 'An evolving audio architecture', performanceBody: 'Audio Core and the native host own playback state while the interface handles control and display. Results depend on your device, settings, and installed version.',
     steamTitle: 'What Steam adds', steamBody: 'Steam updates, Cloud sync for selected settings, friend presence, achievements, and a Workshop for themes, lyric scenes, visualizers, and extensions.',
     communityTitle: 'How the community edition works', communityBody: 'Get it from the website or GitHub and use its separate update channel. Its source is available to inspect and study. Steamworks features are exclusive to Steam.',
-    note: 'Steam Cloud does not sync music files, the full library, or playlists. ECHO Pro is optional and sold separately; entitlements do not transfer between editions.',
+    note: 'Steam Cloud does not sync music files, the full library, or playlists.',
   },
   'ja-JP': {
     eyebrow: 'ECHO · STEAM', store: 'Steam で見る',
@@ -56,7 +56,7 @@ const copy: Record<Locale, PromoCopy> = {
     performanceTitle: '進化する音声アーキテクチャ', performanceBody: '再生状態は Audio Core とネイティブホストが管理し、画面は操作と表示を担当します。体験は機器、設定、バージョンによって異なります。',
     steamTitle: 'Steam 版で加わるもの', steamBody: '自動更新、一部設定の Cloud 同期、フレンド表示、実績、そしてテーマ・歌詞シーン・ビジュアライザー・拡張を探せるワークショップ。',
     communityTitle: 'コミュニティ版', communityBody: '公式サイトか GitHub から入手し、独立した更新経路を使います。ソースコードは閲覧・学習できます。Steamworks 機能は含まれません。',
-    note: 'Steam Cloud は音楽ファイル、ライブラリ全体、プレイリストを同期しません。ECHO Pro は別売りで、権利は版をまたいで移行できません。',
+    note: 'Steam Cloud は音楽ファイル、ライブラリ全体、プレイリストを同期しません。',
   },
   'ko-KR': {
     eyebrow: 'ECHO · STEAM', store: 'Steam에서 보기',
@@ -65,7 +65,7 @@ const copy: Record<Locale, PromoCopy> = {
     performanceTitle: '발전하는 오디오 구조', performanceBody: 'Audio Core와 네이티브 호스트가 재생 상태를 관리하고 화면은 제어와 표시에 집중합니다. 실제 경험은 기기, 설정, 버전에 따라 달라집니다.',
     steamTitle: 'Steam 버전에 추가되는 것', steamBody: '자동 업데이트, 일부 설정의 Cloud 동기화, 친구 상태, 도전 과제, 테마·가사 장면·시각화·확장 콘텐츠를 위한 창작마당.',
     communityTitle: '커뮤니티 버전', communityBody: '공식 사이트나 GitHub에서 받고 별도의 업데이트 경로를 사용합니다. 소스 코드를 살펴보고 학습할 수 있습니다. Steamworks 기능은 포함되지 않습니다.',
-    note: 'Steam Cloud는 음악 파일, 전체 라이브러리, 재생목록을 동기화하지 않습니다. ECHO Pro는 별도 선택 구매이며 버전 간 권한은 이전되지 않습니다.',
+    note: 'Steam Cloud는 음악 파일, 전체 라이브러리, 재생목록을 동기화하지 않습니다.',
   },
 };
 

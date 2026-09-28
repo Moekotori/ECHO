@@ -982,6 +982,9 @@ describe('app settings normalization', () => {
     const { normalizeSettings } = await import('./appSettings');
 
     expect(normalizeSettings({}).playbackShuffleAvoidRecentCount).toBe(25);
+    expect(normalizeSettings({}).mouseGestureTrackSwitchEnabled).toBe(false);
+    expect(normalizeSettings({ mouseGestureTrackSwitchEnabled: true }).mouseGestureTrackSwitchEnabled).toBe(true);
+    expect(normalizeSettings({ mouseGestureTrackSwitchEnabled: false }).mouseGestureTrackSwitchEnabled).toBe(false);
     expect(normalizeSettings({ playbackShuffleAvoidRecentCount: 0 }).playbackShuffleAvoidRecentCount).toBe(0);
     expect(normalizeSettings({ playbackShuffleAvoidRecentCount: 50.6 }).playbackShuffleAvoidRecentCount).toBe(51);
     expect(normalizeSettings({ playbackShuffleAvoidRecentCount: 500 }).playbackShuffleAvoidRecentCount).toBe(200);

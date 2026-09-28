@@ -33,6 +33,7 @@ import type {
   EchoProSettingsCloudSaveResult,
   EchoProSettingsCloudStatus,
 } from '../shared/types/privateEntitlements';
+import type { AlbumSplitJobStatus, AlbumSplitPlan, AlbumSplitPlanOptions, AlbumSplitRequest } from '../shared/types/albumSplit';
 import type { TaskbarPlaybackStatus } from '../shared/types/taskbarPlayback';
 import type {
   DataBackupExportResult,
@@ -467,6 +468,10 @@ export type EchoApi = {
     classifyImportPaths: (paths: string[]) => Promise<ImportPathClassification>;
     importDroppedFiles: (files: File[]) => Promise<DroppedFileImportResult>;
     importAudioFiles: (paths: string[]) => Promise<ImportAudioFilesResult>;
+    planAlbumSplit: (albumId: string, options?: AlbumSplitPlanOptions) => Promise<AlbumSplitPlan>;
+    startAlbumSplit: (request: AlbumSplitRequest) => Promise<AlbumSplitJobStatus>;
+    getAlbumSplitStatus: (jobId: string) => Promise<AlbumSplitJobStatus | null>;
+    cancelAlbumSplit: (jobId: string) => Promise<AlbumSplitJobStatus | null>;
     getFolders: () => Promise<LibraryFolder[]>;
     getFolderOverviews: () => Promise<LibraryFolderOverview[]>;
     getFolderChildren: (query: LibraryFolderChildrenQuery) => Promise<LibraryFolderNode[]>;

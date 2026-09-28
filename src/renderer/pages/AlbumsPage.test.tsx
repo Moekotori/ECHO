@@ -432,9 +432,11 @@ describe('AlbumsPage', () => {
     await waitFor(() => expect(getAlbums).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole('button', { name: /默认|Default/ }));
-    expect(screen.getByText(/常规|General/)).toBeTruthy();
+    expect(screen.getByText(/浏览|Browse/)).toBeTruthy();
     expect(screen.getByText(/聆听|Listening/)).toBeTruthy();
+    expect(screen.getByText(/音频|Audio/)).toBeTruthy();
     expect(screen.getByText(/曲库|Library/)).toBeTruthy();
+    expect(screen.getByRole('option', { name: /艺术家 Z-A|Artist Z-A/ })).toBeTruthy();
     expect(screen.getByRole('option', { name: /发行年份最新|Release year, newest/ })).toBeTruthy();
     expect(screen.getByRole('option', { name: /最近播放|Recently played/ })).toBeTruthy();
     expect(screen.getByRole('option', { name: /播放次数最多|Most played/ })).toBeTruthy();

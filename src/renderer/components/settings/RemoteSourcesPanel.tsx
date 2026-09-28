@@ -1,36 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Activity,
-  AlertTriangle,
-  ChevronRight,
-  ChevronLeft,
-  Check,
-  Database,
-  ExternalLink,
-  File,
-  FolderOpen,
-  Gauge,
-  HardDrive,
-  History,
-  KeyRound,
-  ListPlus,
-  LockKeyhole,
-  Minus,
-  Music2,
-  PauseCircle,
-  Pin,
-  PinOff,
-  Play,
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  Save,
-  Server,
-  ShieldCheck,
-  Trash2,
-  Wifi,
-  WifiOff,
-} from 'lucide-react';
+import { Activity, AlertTriangle, ChevronRight, ChevronLeft, Check, Database, ExternalLink, File, FolderOpen, Gauge, HardDrive, History, KeyRound, ListPlus, Minus, Music2, PauseCircle, Pin, PinOff, Play, Plus, RefreshCw, RotateCcw, Save, Server, ShieldCheck, Trash2, Wifi, WifiOff } from 'lucide-react';
 import type {
   RemoteBackgroundGlobalStatus,
   RemoteBackgroundJobKind,
@@ -59,15 +28,13 @@ import type {
   RemoteCoverLoadPerformanceMode,
 } from '../../../shared/types/appSettings';
 import type { LibraryTrack } from '../../../shared/types/library';
-import { echoProUnlockPluginId } from '../../../shared/constants/featureUnlocks';
-import type { PluginSummary } from '../../../shared/types/plugins';
-import type { EchoProAccountStatus } from '../../../shared/types/privateEntitlements';
+
 import { useI18n } from '../../i18n/I18nProvider';
 import type { TranslationKey } from '../../i18n/locales';
 import { translateStatic } from '../../i18n/translateStatic';
 import { usePlaybackQueue } from '../../stores/PlaybackQueueProvider';
 import { useSharedPlaybackStatus } from '../../stores/playbackStatusStore';
-import { getAppBridge, getPluginsBridge, getRemoteSourcesBridge } from '../../utils/echoBridge';
+import { getAppBridge, getRemoteSourcesBridge } from '../../utils/echoBridge';
 import {
   loadRemoteSourceUxMemory,
   rememberRemoteLocation,
@@ -144,35 +111,7 @@ const createDefaultRemoteSourceForm = (): RemoteSourceFormState => ({
   baiduCredentialMode: '',
 });
 
-const isLightweightRemoteSourcesProPlugin = (plugin: Pick<PluginSummary, 'id' | 'enabled' | 'status' | 'disabledByHost'>): boolean =>
-  plugin.id === echoProUnlockPluginId && plugin.enabled === true && plugin.disabledByHost !== true && plugin.status !== 'error';
-
-let remoteSourcesProUnlockCache: boolean | null = null;
-
-export const resetRemoteSourcesProUnlockCacheForTests = (): void => {
-  remoteSourcesProUnlockCache = null;
-};
-
-const readLightweightRemoteSourcesProUnlock = async (
-  appApi: ReturnType<typeof getAppBridge>,
-  pluginsApi: ReturnType<typeof getPluginsBridge>,
-): Promise<boolean> => {
-  const [accountStatus, pluginResult, localEntitlement] = await Promise.all([
-    appApi?.getEchoProAccountStatus
-      ? appApi.getEchoProAccountStatus().catch((): EchoProAccountStatus | null => null)
-      : Promise.resolve(null),
-    pluginsApi?.list ? pluginsApi.list().catch(() => null) : Promise.resolve(null),
-    appApi?.getEchoProLocalEntitlementStatus
-      ? appApi.getEchoProLocalEntitlementStatus().catch(() => null)
-      : Promise.resolve(null),
-  ]);
-  const unlocked =
-    (accountStatus?.loggedIn === true && accountStatus.pro === true && accountStatus.status !== 'disabled') ||
-    localEntitlement?.unlocked === true ||
-    pluginResult?.plugins.some(isLightweightRemoteSourcesProPlugin) === true;
-  remoteSourcesProUnlockCache = unlocked;
-  return unlocked;
-};
+export const resetRemoteSourcesProUnlockCacheForTests = (): void => {};
 
 const syncModeOptions: Array<{ value: RemoteSourceSyncMode; labelKey: TranslationKey }> = [
   { value: 'browse', labelKey: 'settings.remote.syncMode.browse.option' },
@@ -1248,7 +1187,6 @@ const credentialTextForSource = (source: RemoteSource): string => {
 
 export const RemoteSourcesPanel = (): JSX.Element => {
   const appApi = getAppBridge();
-  const pluginsApi = getPluginsBridge();
   const remoteApi = getRemoteSourcesBridge();
   const { t } = useI18n();
   const { appendToQueue, playTrack } = usePlaybackQueue();
@@ -1288,7 +1226,6 @@ export const RemoteSourcesPanel = (): JSX.Element => {
   const [syncPreviewBusySourceId, setSyncPreviewBusySourceId] = useState<string | null>(null);
   const [remoteBackgroundConcurrencySaving, setRemoteBackgroundConcurrencySaving] = useState(false);
   const [testResult, setTestResult] = useState<TestRemoteSourceResult | null>(null);
-  const [remoteSourcesProUnlocked, setRemoteSourcesProUnlocked] = useState<boolean | null>(remoteSourcesProUnlockCache);
   const terminalSyncEventsRef = useRef<Record<string, string>>({});
   const formDraftsRef = useRef<Partial<Record<RemoteSourceProvider, RemoteSourceFormState>>>({
     webdav: createDefaultRemoteSourceForm(),
@@ -1370,18 +1307,6 @@ export const RemoteSourcesPanel = (): JSX.Element => {
       scrollToForm: true,
     });
   }, [switchRemoteProvider, t]);
-
-  useEffect(() => {
-    let active = true;
-    void readLightweightRemoteSourcesProUnlock(appApi, pluginsApi).then((unlocked) => {
-      if (active) {
-        setRemoteSourcesProUnlocked(unlocked);
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, [appApi, pluginsApi]);
 
   const providerSummaries = useMemo(() => tabs.map((tab) => {
     const overviewSources = overview.sources.filter((source) => source.provider === tab.provider);
@@ -1485,14 +1410,14 @@ export const RemoteSourcesPanel = (): JSX.Element => {
 
   const refreshRemoteAlbumGroupingPreview = useCallback(
     async (strategy = pendingRemoteAlbumMergeStrategy): Promise<RemoteAlbumGroupingPreview | null> => {
-      if (remoteSourcesProUnlocked !== true || !remoteApi?.previewAlbumGrouping) {
+      if (!remoteApi?.previewAlbumGrouping) {
         return null;
       }
       const preview = await loadRemoteAlbumPreview(remoteApi, strategy);
       setRemoteAlbumGroupingPreview(preview);
       return preview;
     },
-    [pendingRemoteAlbumMergeStrategy, remoteApi, remoteSourcesProUnlocked],
+    [pendingRemoteAlbumMergeStrategy, remoteApi],
   );
 
   const scanRemoteAlbumsForGrouping = useCallback(async (): Promise<void> => {
@@ -1559,7 +1484,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
   );
 
   const refreshStatuses = useCallback(async (sourceIds: string[], replace = false, includeOverview = false): Promise<void> => {
-    if (remoteSourcesProUnlocked !== true || !remoteApi) {
+    if (!remoteApi) {
       return;
     }
 
@@ -1579,10 +1504,10 @@ export const RemoteSourcesPanel = (): JSX.Element => {
     if (nextOverview) {
       setOverview(nextOverview);
     }
-  }, [remoteApi, remoteSourcesProUnlocked]);
+  }, [remoteApi]);
 
   const refreshVisibleOverview = useCallback(async (sourceIds: string[]): Promise<void> => {
-    if (remoteSourcesProUnlocked !== true || !remoteApi) {
+    if (!remoteApi) {
       return;
     }
 
@@ -1596,7 +1521,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
     if (updatedSources.length > 0) {
       setOverview((current) => mergeOverviewSources(current, updatedSources));
     }
-  }, [remoteApi, remoteSourcesProUnlocked]);
+  }, [remoteApi]);
 
   const applyRemoteSourcesSnapshot = useCallback((snapshot: RemoteSourcesSnapshot): void => {
     setSources(snapshot.sources);
@@ -1660,16 +1585,16 @@ export const RemoteSourcesPanel = (): JSX.Element => {
   }, [appApi, remoteApi, remoteBackgroundConcurrency, sources]);
 
   const refreshSources = useCallback(async (force = false): Promise<void> => {
-    if (remoteSourcesProUnlocked !== true || !remoteApi) {
+    if (!remoteApi) {
       return;
     }
 
     const snapshot = await loadRemoteSourcesSnapshot(remoteApi, { force });
     applyRemoteSourcesSnapshot(snapshot);
-  }, [applyRemoteSourcesSnapshot, remoteApi, remoteSourcesProUnlocked]);
+  }, [applyRemoteSourcesSnapshot, remoteApi]);
 
   useEffect(() => {
-    if (remoteSourcesProUnlocked !== true || !remoteApi) {
+    if (!remoteApi) {
       return undefined;
     }
 
@@ -1690,10 +1615,10 @@ export const RemoteSourcesPanel = (): JSX.Element => {
       disposed = true;
       window.clearTimeout(timer);
     };
-  }, [applyRemoteSourcesSnapshot, remoteApi, remotePanelPlaybackActive, remoteSourcesProUnlocked]);
+  }, [applyRemoteSourcesSnapshot, remoteApi, remotePanelPlaybackActive]);
 
   useEffect(() => {
-    if (remoteSourcesProUnlocked !== true || !remoteApi?.previewAlbumGrouping || sources.length === 0) {
+    if (!remoteApi?.previewAlbumGrouping || sources.length === 0) {
       setRemoteAlbumGroupingPreview(null);
       return undefined;
     }
@@ -1716,7 +1641,7 @@ export const RemoteSourcesPanel = (): JSX.Element => {
       disposed = true;
       window.clearTimeout(timer);
     };
-  }, [pendingRemoteAlbumMergeStrategy, remoteApi, remotePanelPlaybackActive, remoteSourcesProUnlocked, sources.length]);
+  }, [pendingRemoteAlbumMergeStrategy, remoteApi, remotePanelPlaybackActive, sources.length]);
 
   useEffect(() => {
     if (visibleSources.length === 0) {
@@ -3829,35 +3754,6 @@ export const RemoteSourcesPanel = (): JSX.Element => {
       </section>
     );
   };
-
-  if (remoteSourcesProUnlocked !== true) {
-    return (
-      <div className="remote-sources-panel">
-        <section className="remote-sources-hero">
-          <div>
-            <h3>{t('settings.remote.hero.title')}</h3>
-            <strong>{remoteSourcesProUnlocked === null ? '正在读取本机 Pro 状态' : '网盘功能需要 ECHO Pro'}</strong>
-            <p>只进行本机账号或插件状态检查；已识别的 Pro 用户不会再被在线授权校验拦截。</p>
-          </div>
-          <LockKeyhole size={28} />
-        </section>
-        {remoteSourcesProUnlocked === false ? (
-          <div className="remote-source-actions">
-            <button
-              className="settings-action-button"
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('app:navigate:settings-section', {
-                detail: { section: 'general', targetId: 'settings-row-echo-pro-account' },
-              }))}
-            >
-              <KeyRound size={15} />
-              打开 ECHO Pro 账号
-            </button>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
 
   if (!hasAnyRemoteSource) {
     return (

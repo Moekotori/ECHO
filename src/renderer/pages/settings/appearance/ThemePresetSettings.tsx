@@ -4,7 +4,6 @@ import type { AppThemePreset } from '../../../../shared/types/appSettings';
 import type { TranslationKey } from '../../../i18n/locales';
 import { SettingRow } from '../components/SettingsPrimitives';
 import {
-  isProOnlyThemePreset,
   randomThemePresetOption,
   themePresetOptions,
 } from './themeSettingsModel';
@@ -17,7 +16,6 @@ type Translate = (
 type ThemePresetSettingsProps = {
   ambientActive: boolean;
   ambientLockMessage: string;
-  echoProUnlocked: boolean;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   onPresetChange: (preset: AppThemePreset) => void;
@@ -31,7 +29,6 @@ type ThemePresetSettingsProps = {
 export const ThemePresetSettings = ({
   ambientActive,
   ambientLockMessage,
-  echoProUnlocked,
   expanded,
   onExpandedChange,
   onPresetChange,
@@ -114,9 +111,7 @@ export const ThemePresetSettings = ({
           </button>
           {themePresetOptions.map((option) => {
             const isActive = !ambientActive && selectedPreset === option.preset;
-            const isProThemeLocked =
-              isProOnlyThemePreset(option.preset) && !echoProUnlocked;
-            const isThemeCardLocked = ambientActive || isProThemeLocked;
+            const isThemeCardLocked = ambientActive;
 
             return (
               <button
@@ -130,9 +125,7 @@ export const ThemePresetSettings = ({
                 title={
                   ambientActive
                     ? ambientLockMessage
-                    : isProThemeLocked
-                      ? 'Pro Only'
-                      : t(option.descriptionKey)
+                    : t(option.descriptionKey)
                 }
                 type="button"
               >
@@ -146,7 +139,6 @@ export const ThemePresetSettings = ({
                 <span className="settings-theme-preset-copy">
                   <strong>{t(option.labelKey)}</strong>
                   <em>{t(option.descriptionKey)}</em>
-                  {isProThemeLocked ? <small>Pro Only</small> : null}
                 </span>
                 <span aria-hidden="true" className="settings-theme-preset-swatches">
                   {option.swatches.map((swatch) => (

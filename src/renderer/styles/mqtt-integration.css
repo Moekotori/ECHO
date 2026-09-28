@@ -34,7 +34,7 @@
   background: color-mix(in srgb, var(--color-text-secondary) 12%, transparent);
   color: var(--color-text-secondary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-label);
 }
 
 .mqtt-integration-panel__phase[data-phase='connected'] {
@@ -58,7 +58,7 @@
   gap: 6px;
   color: var(--color-text-secondary);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-label);
 }
 
 .mqtt-integration-panel__form input:not([type='checkbox']) {

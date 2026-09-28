@@ -337,6 +337,12 @@ export const TrackRow = memo(
             ))}
             {track.mediaType === 'remote' && track.provider !== 'subsonic' && track.remotePath ? <span className="hifi-tag tag-remote-path" title={track.remotePath}>{track.remotePath}</span> : null}
           </div>
+          {audioInfoLayout === 'combined' ? (
+            <>
+              <span className="track-year-info">{track.year ?? '—'}</span>
+              <span className="track-genre-info" title={track.genre?.trim() || undefined}>{track.genre?.trim() || '—'}</span>
+            </>
+          ) : null}
         </div>
 
         <div className="track-duration">{formatDuration(track.duration)}</div>

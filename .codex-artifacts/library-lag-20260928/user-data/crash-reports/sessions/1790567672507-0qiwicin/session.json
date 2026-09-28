@@ -1,0 +1,12 @@
+{
+  "sessionId": "1790567672507-0qiwicin",
+  "appVersion": "26.9.25",
+  "electronVersion": "42.3.3",
+  "chromeVersion": "148.0.7778.218",
+  "nodeVersion": "24.15.0",
+  "platform": "win32",
+  "arch": "x64",
+  "startedAt": "2026-09-28T03:54:32.507Z",
+  "status": "abnormalExit",
+  "endedAt": "2026-09-28T03:57:05.671Z"
+}

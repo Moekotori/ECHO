@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   MutableRefObject,
@@ -8,6 +8,8 @@ import type { SettingsNavGroup, SettingsNavItem } from '../settingsNavigation';
 import type { SettingsSearchResult } from '../settingsSearch';
 import { settingsLocaleCopy } from '../settingsSubsections';
 import type { SettingsNavKey } from '../settingsTypes';
+import { SettingHelpTooltip } from './SettingHelpTooltip';
+import { SettingsSearchBox } from './SettingsSearchBox';
 
 type Translate = (
   key: TranslationKey,
@@ -37,13 +39,10 @@ export const SettingsHeader = ({
   onResultSelect,
   onSearchKeyDown,
   query,
-  searchResults,
   t,
   visibleSearchResults,
 }: SettingsHeaderProps): JSX.Element => {
   const ActiveNavIcon = activeNavItem.icon;
-  const trimmedQuery = query.trim();
-  const activeResult = visibleSearchResults[activeResultIndex];
 
   return (
     <header className="settings-header">
@@ -54,73 +53,22 @@ export const SettingsHeader = ({
             <ActiveNavIcon size={14} aria-hidden="true" />
           </span>
           <span>{t(activeNavItem.labelKey)}</span>
-          <em>{t(activeNavItem.descriptionKey)}</em>
+          <SettingHelpTooltip key={activeNavItem.key} label={t(activeNavItem.labelKey)}>
+            {t(activeNavItem.descriptionKey)}
+          </SettingHelpTooltip>
         </div>
       </div>
-      <div className="settings-search" role="search">
-        <Search size={16} aria-hidden="true" />
-        <input
-          ref={(node) => {
-            inputRef.current = node;
-          }}
-          type="search"
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          onKeyDown={onSearchKeyDown}
-          placeholder={t('settings.header.searchPlaceholder')}
-          aria-label={t('settings.header.searchPlaceholder')}
-          aria-autocomplete="list"
-          aria-controls="settings-search-results"
-          aria-expanded={Boolean(trimmedQuery)}
-          aria-activedescendant={
-            trimmedQuery && activeResult
-              ? `settings-search-result-${activeResult.id}`
-              : undefined
-          }
-        />
-        {query ? (
-          <button
-            className="settings-search-clear"
-            type="button"
-            aria-label={t('settings.header.searchClear')}
-            onClick={() => {
-              onQueryChange('');
-              inputRef.current?.focus();
-            }}
-          >
-            <X size={14} aria-hidden="true" />
-          </button>
-        ) : null}
-        {trimmedQuery ? (
-          <div
-            id="settings-search-results"
-            className="settings-search-results"
-            role="listbox"
-            aria-label={t('settings.header.searchPlaceholder')}
-          >
-            {searchResults.length ? (
-              visibleSearchResults.map((result, index) => (
-                <button
-                  className="settings-search-result"
-                  id={`settings-search-result-${result.id}`}
-                  key={result.id}
-                  type="button"
-                  role="option"
-                  aria-selected={index === activeResultIndex}
-                  onMouseEnter={() => onActiveResultIndexChange(index)}
-                  onClick={() => onResultSelect(result)}
-                >
-                  <strong>{result.title}</strong>
-                  <span>{result.path}</span>
-                  <small>{result.description}</small>
-                </button>
-              ))
-            ) : (
-              <p className="settings-search-empty">{t('settings.header.searchEmpty')}</p>
-            )}
-          </div>
-        ) : null}
-      </div>
+      <SettingsSearchBox
+        activeResultIndex={activeResultIndex}
+        inputRef={inputRef}
+        onActiveResultIndexChange={onActiveResultIndexChange}
+        onQueryChange={onQueryChange}
+        onResultSelect={onResultSelect}
+        onSearchKeyDown={onSearchKeyDown}
+        query={query}
+        t={t}
+        visibleSearchResults={visibleSearchResults}
+      />
     </header>
   );
 };

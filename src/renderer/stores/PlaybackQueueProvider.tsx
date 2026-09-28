@@ -34,6 +34,7 @@ import { translateCurrentLocale } from '../i18n/I18nProvider';
 import type { TranslationKey } from '../i18n/locales';
 import { isActiveConnectPlaybackStatus } from '../utils/connectPlayback';
 import { beginPlaybackSwitchSnapshot, setPlaybackStatusSnapshot, useSharedPlaybackStatusOnly } from './playbackStatusStore';
+import { appendUniqueShuffleDeckItems, recentShuffleQueueIds, shouldRefillShuffleDeck, takeEligibleShuffleDeckItem } from '../playback/shuffleDeck';
 
 const tq = (key: TranslationKey, options?: Record<string, string | number>): string =>
   translateCurrentLocale(key, options);
@@ -168,6 +169,7 @@ type PlaylistPlaybackState = {
 type LibraryShuffleDeck = {
   sourceKey: string | null;
   items: QueueItem[];
+  canRefill: boolean;
 };
 
 type PlaylistPlaybackInfo = Pick<PlaylistPlaybackState, 'active' | 'label' | 'playlistId'>;
@@ -307,6 +309,7 @@ type PlaybackQueueContextValue = {
   currentSourceLabel: string;
   lastQueueFeedback: QueueFeedback | null;
   playlistPlayback: PlaylistPlaybackInfo;
+  upcomingItem: QueueItem | null;
   canGoPrevious: boolean;
   canGoNext: boolean;
   replaceQueue: (tracks: LibraryTrack[], options?: ReplaceQueueOptions) => void;
@@ -1558,24 +1561,52 @@ export type BackendQueueSyncPayloadResult = {
   nextDeck: string[] | null;
 };
 
+/** Queue-scoped shuffle walks one stable deck. External shuffle must not. */
+export type ShuffleAdvanceMode = 'queue' | 'external';
+
+export const isQueueScopedShuffleSource = (
+  source: { type: string } | null | undefined,
+  playlistActive: boolean,
+): boolean => playlistActive || source?.type === 'album' || source?.type === 'artist';
+
+const uniqueQueueIds = (ids: readonly (string | null | undefined)[]): string[] => {
+  const unique: string[] = [];
+  for (const id of ids) {
+    if (!id || unique.includes(id)) {
+      continue;
+    }
+    unique.push(id);
+  }
+  return unique;
+};
+
 export const resolveBackendQueueSyncPayload = ({
   items,
   currentQueueId,
   isShuffle,
   existingDeck,
   preferredNextQueueId,
+  shuffleAdvance = 'queue',
+  priorityNextQueueIds = [],
 }: {
   items: QueueItem[];
   currentQueueId: string | null;
   isShuffle: boolean;
   existingDeck: string[] | null;
   preferredNextQueueId?: string | null;
+  shuffleAdvance?: ShuffleAdvanceMode;
+  priorityNextQueueIds?: readonly string[];
 }): BackendQueueSyncPayloadResult => {
   const playableItems = items.filter((item) => Boolean(item.track.path) && item.track.unavailable !== true);
   const backendCurrentQueueId =
     currentQueueId && playableItems.some((item) => item.queueId === currentQueueId)
       ? currentQueueId
       : null;
+  const playableMap = new Map<string, QueueItem>(playableItems.map((item) => [item.queueId, item]));
+  const toQueueItems = (queueIds: readonly string[]): BackendQueueSyncItem[] => queueIds
+    .map((queueId) => playableMap.get(queueId))
+    .filter((item): item is QueueItem => Boolean(item))
+    .map(mapQueueItemToBackendSyncItem);
 
   if (playableItems.length === 0) {
     return {
@@ -1585,7 +1616,7 @@ export const resolveBackendQueueSyncPayload = ({
     };
   }
 
-  if (!isShuffle || playableItems.length <= 1) {
+  if (!isShuffle) {
     return {
       queueItems: playableItems.map(mapQueueItemToBackendSyncItem),
       backendCurrentQueueId,
@@ -1594,6 +1625,33 @@ export const resolveBackendQueueSyncPayload = ({
   }
 
   const playableQueueIds = new Set(playableItems.map((item) => item.queueId));
+  const pinnedAfterCurrent = uniqueQueueIds([
+    ...priorityNextQueueIds,
+    preferredNextQueueId,
+  ]).filter((queueId) => queueId !== backendCurrentQueueId && playableQueueIds.has(queueId));
+
+  // Library, folder, and liked shuffle choose a successor outside the loaded
+  // list order. Give the host only that successor so a natural end cannot
+  // walk a different permutation than the next button.
+  if (shuffleAdvance === 'external') {
+    const queueIds = backendCurrentQueueId
+      ? [backendCurrentQueueId, ...pinnedAfterCurrent]
+      : pinnedAfterCurrent.slice(0, 1);
+    return {
+      queueItems: toQueueItems(queueIds),
+      backendCurrentQueueId,
+      nextDeck: null,
+    };
+  }
+
+  if (playableItems.length <= 1) {
+    return {
+      queueItems: playableItems.map(mapQueueItemToBackendSyncItem),
+      backendCurrentQueueId,
+      nextDeck: null,
+    };
+  }
+
   const isDeckCompositionValid =
     Boolean(existingDeck) &&
     existingDeck!.length === playableItems.length &&
@@ -1601,14 +1659,10 @@ export const resolveBackendQueueSyncPayload = ({
     (!backendCurrentQueueId || existingDeck!.includes(backendCurrentQueueId));
 
   let isExistingDeckValid = isDeckCompositionValid;
-  if (isExistingDeckValid && preferredNextQueueId && playableQueueIds.has(preferredNextQueueId)) {
-    if (backendCurrentQueueId) {
-      const currentIndex = existingDeck!.indexOf(backendCurrentQueueId);
-      const nextIndex = (currentIndex + 1) % existingDeck!.length;
-      if (existingDeck![nextIndex] !== preferredNextQueueId) {
-        isExistingDeckValid = false;
-      }
-    } else if (existingDeck![0] !== preferredNextQueueId) {
+  if (isExistingDeckValid && pinnedAfterCurrent.length > 0 && existingDeck) {
+    const currentIndex = backendCurrentQueueId ? existingDeck.indexOf(backendCurrentQueueId) : -1;
+    const followsCurrent = currentIndex >= 0;
+    if (!followsCurrent || pinnedAfterCurrent.some((queueId, offset) => existingDeck[currentIndex + 1 + offset] !== queueId)) {
       isExistingDeckValid = false;
     }
   }
@@ -1633,28 +1687,31 @@ export const resolveBackendQueueSyncPayload = ({
       }
     }
 
-    if (preferredNextQueueId && remainingIds.includes(preferredNextQueueId)) {
-      deck.push(preferredNextQueueId);
-      const restIds = remainingIds.filter((id) => id !== preferredNextQueueId);
-      deck.push(...shuffleArray(restIds));
-    } else {
-      deck.push(...shuffleArray(remainingIds));
-    }
-
+    const restIds = remainingIds.filter((id) => !pinnedAfterCurrent.includes(id));
+    deck.push(...pinnedAfterCurrent.filter((id) => remainingIds.includes(id)));
+    deck.push(...shuffleArray(restIds));
     nextDeck = deck;
   }
 
-  const playableMap = new Map<string, QueueItem>(playableItems.map((item) => [item.queueId, item]));
-  const queueItems: BackendQueueSyncItem[] = nextDeck
-    .map((queueId) => playableMap.get(queueId))
-    .filter((item): item is QueueItem => Boolean(item))
-    .map(mapQueueItemToBackendSyncItem);
-
   return {
-    queueItems,
+    queueItems: toQueueItems(nextDeck),
     backendCurrentQueueId,
     nextDeck,
   };
+};
+
+export const queueIdAfterCurrent = (deck: readonly string[] | null | undefined, currentQueueId: string | null): string | null => {
+  if (!deck || deck.length === 0) {
+    return null;
+  }
+  if (!currentQueueId) {
+    return deck[0] ?? null;
+  }
+  const currentIndex = deck.indexOf(currentQueueId);
+  if (currentIndex < 0) {
+    return null;
+  }
+  return deck[currentIndex + 1] ?? null;
 };
 
 
@@ -1766,7 +1823,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const isShuffleEnabledRef = useRef(isShuffleEnabled);
   const playlistPlaybackStateRef = useRef(playlistPlaybackState);
   const playbackHistorySessionRef = useRef<PlaybackHistorySession | null>(null);
-  const libraryShuffleDeckRef = useRef<LibraryShuffleDeck>({ sourceKey: null, items: [] });
+  const libraryShuffleDeckRef = useRef<LibraryShuffleDeck>({ sourceKey: null, items: [], canRefill: false });
+  const shuffleDeckRefillRef = useRef<Promise<void> | null>(null);
   const backendShuffleDeckQueueIdsRef = useRef<string[] | null>(null);
   const pausedSessionTimerRef = useRef<number | null>(null);
   const playRequestTokenRef = useRef(0);
@@ -1797,6 +1855,52 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const previousRemoveAfterPlayQueueIdRef = useRef(currentQueueId);
   const backendQueueSyncRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const lastBackendQueueSyncKeyRef = useRef<string | null>(null);
+  const priorityNextQueueIdsRef = useRef<string[]>([]);
+  const [priorityNextQueueIds, setPriorityNextQueueIds] = useState<string[]>([]);
+  const scheduledExternalNextIdRef = useRef<string | null>(null);
+  const [scheduledExternalNextId, setScheduledExternalNextId] = useState<string | null>(null);
+  const consumedExternalNextIdRef = useRef<string | null>(null);
+  const externalShuffleRequestRef = useRef<Promise<{ target: QueueItem | null; refreshedRandomQueue: QueueItem[] | null }> | null>(null);
+  const externalShuffleMissKeyRef = useRef<string | null>(null);
+  const [queueDeckNextId, setQueueDeckNextId] = useState<string | null>(null);
+  const [shufflePlanEpoch, setShufflePlanEpoch] = useState(0);
+
+  const replacePriorityNextQueueIds = useCallback((queueIds: string[]): void => {
+    priorityNextQueueIdsRef.current = queueIds;
+    setPriorityNextQueueIds(queueIds);
+  }, []);
+
+  const setScheduledExternalNext = useCallback((queueId: string | null): void => {
+    scheduledExternalNextIdRef.current = queueId;
+    setScheduledExternalNextId(queueId);
+  }, []);
+
+  const bumpShufflePlan = useCallback((): void => {
+    setShufflePlanEpoch((current) => current + 1);
+  }, []);
+
+  const rememberPriorityNext = useCallback((queueIds: string[]): void => {
+    if (queueIds.length === 0) {
+      return;
+    }
+    const seen = new Set(priorityNextQueueIdsRef.current);
+    const next = [...priorityNextQueueIdsRef.current];
+    for (const queueId of queueIds) {
+      if (seen.has(queueId)) {
+        continue;
+      }
+      seen.add(queueId);
+      next.push(queueId);
+    }
+    replacePriorityNextQueueIds(next);
+  }, [replacePriorityNextQueueIds]);
+
+  const forgetPriorityNext = useCallback((queueId: string): void => {
+    if (!priorityNextQueueIdsRef.current.includes(queueId)) {
+      return;
+    }
+    replacePriorityNextQueueIds(priorityNextQueueIdsRef.current.filter((id) => id !== queueId));
+  }, [replacePriorityNextQueueIds]);
 
   const setItems = useCallback((nextItems: QueueItem[] | ((current: QueueItem[]) => QueueItem[])): void => {
     const resolved = typeof nextItems === 'function' ? nextItems(itemsRef.current) : nextItems;
@@ -1943,7 +2047,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   }, []);
 
   const clearLibraryShuffleDeck = useCallback((): void => {
-    libraryShuffleDeckRef.current = { sourceKey: null, items: [] };
+    libraryShuffleDeckRef.current = { sourceKey: null, items: [], canRefill: false };
   }, []);
 
   const publishQueueFeedback = useCallback((message: string, detail: string, tone: QueueFeedback['tone'] = 'success'): void => {
@@ -2009,6 +2113,11 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     const next = !isShuffleEnabledRef.current;
     clearLibraryShuffleDeck();
     backendShuffleDeckQueueIdsRef.current = null;
+    setScheduledExternalNext(null);
+    setQueueDeckNextId(null);
+    consumedExternalNextIdRef.current = null;
+    externalShuffleMissKeyRef.current = null;
+    bumpShufflePlan();
     isShuffleEnabledRef.current = next;
     setIsShuffleEnabled(next);
     if (sessionHydratedRef.current && !applyingSessionSnapshotRef.current) {
@@ -2035,7 +2144,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         continuousPlayPreferences: continuousPlayPreferencesRef.current,
       });
     }
-  }, [clearLibraryShuffleDeck, publishQueueFeedback, setRepeatModeInternal]);
+  }, [bumpShufflePlan, clearLibraryShuffleDeck, publishQueueFeedback, setRepeatModeInternal, setScheduledExternalNext]);
 
   const setAutoFillQueueEnabled = useCallback((enabled: boolean): void => {
     autoFillQueueEnabledRef.current = enabled;
@@ -3006,31 +3115,65 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     const current = itemsRef.current;
     const cachedQueueId = automixShuffleNextQueueIdRef.current.get(item.queueId) ?? null;
     const cached = cachedQueueId ? findItemByQueueId(current, cachedQueueId) : null;
-    const historyQueueIds = new Set(historyRef.current.map((historyItem) => historyItem.queueId));
+    const recentQueueIds = recentShuffleQueueIds(historyRef.current, playbackShuffleAvoidRecentCountRef.current);
     if (
       cached &&
       cached.queueId !== item.queueId &&
-      !historyQueueIds.has(cached.queueId) &&
-      isLocalAutomixCandidate(cached.track)
+      !recentQueueIds.has(cached.queueId) &&
+      isAutomixQueueCandidate(cached.track)
     ) {
       return cached;
     }
 
-    const next = resolveShuffleAutomixNextItem(
-      current,
-      item,
-      historyRef.current,
-      repeatModeRef.current,
-      playbackShuffleAvoidRecentCountRef.current,
-    );
-    if (next) {
-      automixShuffleNextQueueIdRef.current.set(item.queueId, next.queueId);
+    const queueScoped = isQueueScopedShuffleSource(item.source, playlistPlaybackStateRef.current.active);
+    let next: QueueItem | null = null;
+    if (queueScoped) {
+      const payload = resolveBackendQueueSyncPayload({
+        items: current,
+        currentQueueId: item.queueId,
+        isShuffle: true,
+        existingDeck: backendShuffleDeckQueueIdsRef.current,
+        shuffleAdvance: 'queue',
+        priorityNextQueueIds: priorityNextQueueIdsRef.current,
+      });
+      backendShuffleDeckQueueIdsRef.current = payload.nextDeck;
+      const nextId = queueIdAfterCurrent(payload.nextDeck, item.queueId);
+      next = nextId ? findItemByQueueId(current, nextId) : null;
     } else {
-      automixShuffleNextQueueIdRef.current.delete(item.queueId);
+      const pinned = scheduledExternalNextIdRef.current
+        ? findItemByQueueId(current, scheduledExternalNextIdRef.current)
+        : null;
+      if (pinned && pinned.queueId !== item.queueId) {
+        next = pinned;
+      } else {
+        const library = window.echo?.library;
+        const catalogAvailable = Boolean(library?.getTracks || library?.getFolderTracks || library?.getLikedTracks);
+        if (!catalogAvailable) {
+          const payload = resolveBackendQueueSyncPayload({
+            items: current,
+            currentQueueId: item.queueId,
+            isShuffle: true,
+            existingDeck: null,
+            shuffleAdvance: 'queue',
+            priorityNextQueueIds: priorityNextQueueIdsRef.current,
+          });
+          const nextId = queueIdAfterCurrent(payload.nextDeck, item.queueId);
+          next = nextId ? findItemByQueueId(current, nextId) : null;
+          if (next) {
+            setScheduledExternalNext(next.queueId);
+          }
+        }
+      }
     }
 
-    return next;
-  }, []);
+    if (next && isAutomixQueueCandidate(next.track)) {
+      automixShuffleNextQueueIdRef.current.set(item.queueId, next.queueId);
+      return next;
+    }
+
+    automixShuffleNextQueueIdRef.current.delete(item.queueId);
+    return null;
+  }, [setScheduledExternalNext]);
 
   const createAutomixOptions = useCallback((item: QueueItem): {
     enabled: boolean;
@@ -3248,12 +3391,15 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
             ? (automixShuffleNextQueueIdRef.current.get(item.queueId) ??
                itemsRef.current.find((candidate) => candidate.track.id === automix?.nextItem?.trackId && candidate.queueId !== item.queueId)?.queueId)
             : undefined;
+          const queueScopedShuffle = isQueueScopedShuffleSource(item.source, playlistPlaybackStateRef.current.active);
           const syncPayload = resolveBackendQueueSyncPayload({
             items: itemsRef.current,
             currentQueueId: item.queueId,
             isShuffle: isShuffleEnabledRef.current,
-            existingDeck: backendShuffleDeckQueueIdsRef.current,
-            preferredNextQueueId,
+            existingDeck: queueScopedShuffle ? backendShuffleDeckQueueIdsRef.current : null,
+            preferredNextQueueId: queueScopedShuffle ? preferredNextQueueId : scheduledExternalNextIdRef.current ?? preferredNextQueueId,
+            shuffleAdvance: queueScopedShuffle ? 'queue' : 'external',
+            priorityNextQueueIds: priorityNextQueueIdsRef.current,
           });
           backendShuffleDeckQueueIdsRef.current = syncPayload.nextDeck;
           try {
@@ -3566,6 +3712,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       if (options.recordHistory !== false && previousItem && previousItem.queueId !== item.queueId) {
         setHistory((current) => [...current, previousItem]);
       }
+      forgetPriorityNext(item.queueId);
+      bumpShufflePlan();
 
       runQueuePlaybackStepSync('playLocalTrack', 'commitPlayedItem', item.track.id, () => {
         setLastPlayedTrack(item.track);
@@ -3579,7 +3727,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       prepareNextMediaItem(item);
       schedulePlaybackSessionPersistence();
     },
-    [autoSearchMv, prepareNextMediaItem, schedulePlaybackSessionPersistence, setCurrentQueueId, setCurrentTrackIdInternal, setHistory, setLastPlayedTrack],
+    [autoSearchMv, bumpShufflePlan, forgetPriorityNext, prepareNextMediaItem, schedulePlaybackSessionPersistence, setCurrentQueueId, setCurrentTrackIdInternal, setHistory, setLastPlayedTrack],
   );
 
   useEffect(() => {
@@ -3799,6 +3947,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       restorePlaylistPlaybackSnapshotOnly();
       clearLibraryShuffleDeck();
       backendShuffleDeckQueueIdsRef.current = null;
+      replacePriorityNextQueueIds([]);
+      setScheduledExternalNext(null);
       const nextItems = tracks.map((track) => createQueueItem(track, options.source ?? manualSource));
       const startItem = options.startTrackId ? nextItems.find((item) => item.track.id === options.startTrackId) ?? null : null;
 
@@ -3809,7 +3959,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         setCurrentTrackIdInternal(startItem.track.id);
       }
     },
-    [clearLibraryShuffleDeck, restorePlaylistPlaybackSnapshotOnly, setCurrentQueueId, setCurrentTrackIdInternal, setHistory, setItems],
+    [clearLibraryShuffleDeck, replacePriorityNextQueueIds, restorePlaylistPlaybackSnapshotOnly, setCurrentQueueId, setCurrentTrackIdInternal, setHistory, setItems, setScheduledExternalNext],
   );
 
   const appendToQueue = useCallback(
@@ -3868,10 +4018,11 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   const playTrackNext = useCallback(
     (track: LibraryTrack, source: QueueSource = manualSource): void => {
       restorePlaylistPlaybackSnapshotOnly();
+      const nextItem = createQueueItem(track, source);
+      rememberPriorityNext([nextItem.queueId]);
       setItems((current) => {
         const currentIndex = findCurrentIndex(current, currentQueueIdRef.current, currentTrackIdRef.current);
         const insertIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
-        const nextItem = createQueueItem(track, source);
         return [...current.slice(0, insertIndex), nextItem, ...current.slice(insertIndex)];
       });
       publishQueueFeedback(
@@ -3882,7 +4033,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         }),
       );
     },
-    [publishQueueFeedback, restorePlaylistPlaybackSnapshotOnly, setItems],
+    [rememberPriorityNext, publishQueueFeedback, restorePlaylistPlaybackSnapshotOnly, setItems],
   );
 
   const playTracksNext = useCallback(
@@ -3892,10 +4043,11 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       }
 
       restorePlaylistPlaybackSnapshotOnly();
+      const nextItems = tracks.map((track) => createQueueItem(track, source));
+      rememberPriorityNext(nextItems.map((item) => item.queueId));
       setItems((current) => {
         const currentIndex = findCurrentIndex(current, currentQueueIdRef.current, currentTrackIdRef.current);
         const insertIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
-        const nextItems = tracks.map((track) => createQueueItem(track, source));
         return [...current.slice(0, insertIndex), ...nextItems, ...current.slice(insertIndex)];
       });
       publishQueueFeedback(
@@ -3903,7 +4055,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         queueSourceDisplayLabel(source, playlistPlaybackStateRef.current),
       );
     },
-    [publishQueueFeedback, restorePlaylistPlaybackSnapshotOnly, setItems],
+    [rememberPriorityNext, publishQueueFeedback, restorePlaylistPlaybackSnapshotOnly, setItems],
   );
 
   const removeQueueItem = useCallback(
@@ -4000,11 +4152,13 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     restorePlaylistPlaybackSnapshotOnly();
     clearLibraryShuffleDeck();
     backendShuffleDeckQueueIdsRef.current = null;
+    replacePriorityNextQueueIds([]);
+    setScheduledExternalNext(null);
     setAutoFillQueueEnabled(false);
     setItems([]);
     setHistory([]);
     setCurrentQueueId(null);
-  }, [clearLibraryShuffleDeck, restorePlaylistPlaybackSnapshotOnly, setAutoFillQueueEnabled, setCurrentQueueId, setHistory, setItems]);
+  }, [clearLibraryShuffleDeck, replacePriorityNextQueueIds, restorePlaylistPlaybackSnapshotOnly, setAutoFillQueueEnabled, setCurrentQueueId, setHistory, setItems, setScheduledExternalNext]);
 
   const removeContinuousPlayItems = useCallback((): void => {
     setItems((current) => current.filter((item) => item.source.type !== 'continuous-play' || item.queueId === currentQueueIdRef.current));
@@ -4103,6 +4257,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       restorePlaylistPlaybackSnapshotOnly();
       clearLibraryShuffleDeck();
       backendShuffleDeckQueueIdsRef.current = null;
+      replacePriorityNextQueueIds([]);
+      setScheduledExternalNext(null);
       const queueIds = new Set(nextItems.map((item) => item.queueId));
       const nextCurrentQueueId = options.currentQueueId && queueIds.has(options.currentQueueId)
         ? options.currentQueueId
@@ -4123,7 +4279,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       setCurrentQueueId(nextCurrentQueueId);
       setCurrentTrackIdInternal(nextCurrentTrackId);
     },
-    [clearLibraryShuffleDeck, restorePlaylistPlaybackSnapshotOnly, setCurrentQueueId, setCurrentTrackIdInternal, setHistory, setItems],
+    [clearLibraryShuffleDeck, replacePriorityNextQueueIds, restorePlaylistPlaybackSnapshotOnly, setCurrentQueueId, setCurrentTrackIdInternal, setHistory, setItems, setScheduledExternalNext],
   );
 
   const playQueueItem = useCallback(
@@ -4178,6 +4334,49 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     };
   }, [autoPlayOnStartupEnabled, playQueueItem, sessionHydrated]);
 
+  const takeShuffleDeckItem = useCallback((sourceKey: string, excludedTrackIds: ReadonlySet<string>, refill: () => void): QueueItem | null => {
+    if (libraryShuffleDeckRef.current.sourceKey !== sourceKey) {
+      return null;
+    }
+    const taken = takeEligibleShuffleDeckItem(
+      libraryShuffleDeckRef.current,
+      (item) => excludedTrackIds.has(item.track.id),
+    );
+    libraryShuffleDeckRef.current = taken.deck;
+    if (shouldRefillShuffleDeck(taken.deck)) {
+      refill();
+    }
+    if (!taken.item) {
+      return null;
+    }
+    return itemsRef.current.find((candidate) => candidate.track.id === taken.item?.track.id) ?? taken.item;
+  }, []);
+
+  const refillShuffleDeck = useCallback((sourceKey: string, load: () => Promise<{ items: QueueItem[]; canRefill: boolean }>): void => {
+    if (shuffleDeckRefillRef.current || libraryShuffleDeckRef.current.sourceKey !== sourceKey || !shouldRefillShuffleDeck(libraryShuffleDeckRef.current)) {
+      return;
+    }
+    const task = load()
+      .then((loaded) => {
+        if (libraryShuffleDeckRef.current.sourceKey !== sourceKey) {
+          return;
+        }
+        libraryShuffleDeckRef.current = appendUniqueShuffleDeckItems(
+          libraryShuffleDeckRef.current,
+          loaded.items,
+          (item) => item.track.id,
+          loaded.canRefill,
+        );
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (shuffleDeckRefillRef.current === task) {
+          shuffleDeckRefillRef.current = null;
+        }
+      });
+    shuffleDeckRefillRef.current = task;
+  }, []);
+
   const fetchLibraryShuffleTarget = useCallback(
     async (activeItem: QueueItem | null): Promise<QueueItem | null> => {
       const library = window.echo?.library;
@@ -4188,33 +4387,35 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       }
 
       if (libraryShuffleDeckRef.current.sourceKey !== sourceKey) {
-        libraryShuffleDeckRef.current = { sourceKey, items: [] };
+        libraryShuffleDeckRef.current = { sourceKey, items: [], canRefill: false };
       }
 
-      const dequeueFreshDeckItem = (): QueueItem | null => {
-        const excludedTrackIds = new Set(
-          getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current),
-        );
-        const remainingItems: QueueItem[] = [];
-        let target: QueueItem | null = null;
-
-        for (const item of libraryShuffleDeckRef.current.items) {
-          if (excludedTrackIds.has(item.track.id)) {
-            continue;
-          }
-          if (!target) {
-            target = itemsRef.current.find((candidate) => candidate.track.id === item.track.id) ?? item;
-            excludedTrackIds.add(item.track.id);
-            continue;
-          }
-          remainingItems.push(item);
-        }
-
-        libraryShuffleDeckRef.current = { sourceKey, items: remainingItems };
-        return target;
-      };
-
-      const deckTarget = dequeueFreshDeckItem();
+      const excludedTrackIds = new Set(
+        getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current),
+      );
+      const deckTarget = takeShuffleDeckItem(sourceKey, excludedTrackIds, () => {
+        refillShuffleDeck(sourceKey, async () => {
+          const excludeTrackIds = getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
+          const result = await library.getTracks({
+            page: 1,
+            pageSize: libraryShuffleCandidatePageSize,
+            search: undefined,
+            sort: 'random',
+            hideDuplicates: undefined,
+            showDuplicatesOnly: undefined,
+            duplicateMode: 'strict',
+            excludeTrackIds,
+            randomWindow: true,
+          });
+          const excluded = new Set(excludeTrackIds);
+          return {
+            canRefill: result.items.length >= libraryShuffleCandidatePageSize || result.hasMore === true,
+            items: result.items
+              .filter((track) => track.unavailable !== true && !excluded.has(track.id))
+              .map((track) => createQueueItem(track, libraryShuffleSource)),
+          };
+        });
+      });
       if (deckTarget) {
         return deckTarget;
       }
@@ -4239,18 +4440,41 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         const excludedTrackIds = new Set(libraryExcludeTrackIds);
         libraryShuffleDeckRef.current = {
           sourceKey,
+          canRefill: result.items.length >= libraryShuffleCandidatePageSize || result.hasMore === true,
           items: result.items
             .filter((track) => track.unavailable !== true && !excludedTrackIds.has(track.id))
             .map((track) => createQueueItem(track, libraryShuffleSource)),
         };
 
-        return dequeueFreshDeckItem();
+        return takeShuffleDeckItem(sourceKey, excludedTrackIds, () => {
+          refillShuffleDeck(sourceKey, async () => {
+            const excludeTrackIds = getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
+            const nextResult = await library.getTracks({
+              page: 1,
+              pageSize: libraryShuffleCandidatePageSize,
+              search: undefined,
+              sort: 'random',
+              hideDuplicates: undefined,
+              showDuplicatesOnly: undefined,
+              duplicateMode: 'strict',
+              excludeTrackIds,
+              randomWindow: true,
+            });
+            const excluded = new Set(excludeTrackIds);
+            return {
+              canRefill: nextResult.items.length >= libraryShuffleCandidatePageSize || nextResult.hasMore === true,
+              items: nextResult.items
+                .filter((track) => track.unavailable !== true && !excluded.has(track.id))
+                .map((track) => createQueueItem(track, libraryShuffleSource)),
+            };
+          });
+        });
       } catch {
         clearLibraryShuffleDeck();
         return null;
       }
     },
-    [clearLibraryShuffleDeck],
+    [clearLibraryShuffleDeck, refillShuffleDeck, takeShuffleDeckItem],
   );
 
   const fetchFolderShuffleTarget = useCallback(
@@ -4263,33 +4487,34 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       }
 
       if (libraryShuffleDeckRef.current.sourceKey !== sourceKey) {
-        libraryShuffleDeckRef.current = { sourceKey, items: [] };
+        libraryShuffleDeckRef.current = { sourceKey, items: [], canRefill: false };
       }
 
-      const dequeueFreshDeckItem = (): QueueItem | null => {
-        const excludedTrackIds = new Set(
-          getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current),
-        );
-        const remainingItems: QueueItem[] = [];
-        let target: QueueItem | null = null;
-
-        for (const item of libraryShuffleDeckRef.current.items) {
-          if (excludedTrackIds.has(item.track.id)) {
-            continue;
-          }
-          if (!target) {
-            target = itemsRef.current.find((candidate) => candidate.track.id === item.track.id) ?? item;
-            excludedTrackIds.add(item.track.id);
-            continue;
-          }
-          remainingItems.push(item);
-        }
-
-        libraryShuffleDeckRef.current = { sourceKey, items: remainingItems };
-        return target;
+      const excludedNow = () => new Set(getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current));
+      const refill = (): void => {
+        refillShuffleDeck(sourceKey, async () => {
+          const excludeTrackIds = getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
+          const result = await library.getFolderTracks({
+            folderId: source.folderId,
+            path: source.path,
+            recursive: source.recursive,
+            page: 1,
+            pageSize: libraryShuffleCandidatePageSize,
+            search: source.search,
+            sort: 'random',
+            excludeTrackIds,
+            randomWindow: true,
+          });
+          const excluded = new Set(excludeTrackIds);
+          return {
+            canRefill: result.items.length >= libraryShuffleCandidatePageSize || result.hasMore === true,
+            items: result.items
+              .filter((track) => track.unavailable !== true && !excluded.has(track.id))
+              .map((track) => createQueueItem(track, source)),
+          };
+        });
       };
-
-      const deckTarget = dequeueFreshDeckItem();
+      const deckTarget = takeShuffleDeckItem(sourceKey, excludedNow(), refill);
       if (deckTarget) {
         return deckTarget;
       }
@@ -4314,18 +4539,19 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         const excludedTrackIds = new Set(folderExcludeTrackIds);
         libraryShuffleDeckRef.current = {
           sourceKey,
+          canRefill: result.items.length >= libraryShuffleCandidatePageSize || result.hasMore === true,
           items: result.items
             .filter((track) => track.unavailable !== true && !excludedTrackIds.has(track.id))
             .map((track) => createQueueItem(track, source)),
         };
 
-        return dequeueFreshDeckItem();
+        return takeShuffleDeckItem(sourceKey, excludedTrackIds, refill);
       } catch {
         clearLibraryShuffleDeck();
         return null;
       }
     },
-    [clearLibraryShuffleDeck],
+    [clearLibraryShuffleDeck, refillShuffleDeck, takeShuffleDeckItem],
   );
 
   const fetchLikedShuffleTarget = useCallback(
@@ -4338,65 +4564,73 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       }
 
       if (libraryShuffleDeckRef.current.sourceKey !== sourceKey) {
-        libraryShuffleDeckRef.current = { sourceKey, items: [] };
+        libraryShuffleDeckRef.current = { sourceKey, items: [], canRefill: false };
       }
 
-      const dequeueFreshDeckItem = (): QueueItem | null => {
-        const excludedTrackIds = new Set(
-          getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current),
-        );
-        const remainingItems: QueueItem[] = [];
-        let target: QueueItem | null = null;
-
-        for (const item of libraryShuffleDeckRef.current.items) {
-          if (excludedTrackIds.has(item.track.id)) {
-            continue;
-          }
-          if (!target) {
-            target = itemsRef.current.find((candidate) => candidate.track.id === item.track.id) ?? item;
-            excludedTrackIds.add(item.track.id);
-            continue;
-          }
-          remainingItems.push(item);
-        }
-
-        libraryShuffleDeckRef.current = { sourceKey, items: remainingItems };
-        return target;
+      const refill = (): void => {
+        refillShuffleDeck(sourceKey, async () => {
+          const excludeTrackIds = getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
+          const result = await library.getLikedTracks({
+            page: 1,
+            pageSize: libraryShuffleCandidatePageSize,
+            search: source.search,
+            sort: 'random',
+            sourceProvider: source.sourceProvider,
+            excludeTrackIds,
+            randomWindow: true,
+          });
+          const excluded = new Set(excludeTrackIds);
+          return {
+            canRefill: result.items.length >= libraryShuffleCandidatePageSize || result.hasMore === true,
+            items: result.items
+              .map(playlistItemToTrack)
+              .filter((track): track is LibraryTrack => track !== null && track.unavailable !== true && Boolean(track.path) && !excluded.has(track.id))
+              .map((track) => createQueueItem(track, source)),
+          };
+        });
       };
-
-      const deckTarget = dequeueFreshDeckItem();
+      const deckTarget = takeShuffleDeckItem(
+        sourceKey,
+        new Set(getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current)),
+        refill,
+      );
       if (deckTarget) {
         return deckTarget;
       }
 
       try {
-        const excludedTrackIds = new Set(
-          getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current),
+        const excludeTrackIds = getLibraryShuffleExcludedTrackIds(
+          activeItem,
+          historyRef.current,
+          playbackShuffleAvoidRecentCountRef.current,
         );
+        const excludedTrackIds = new Set(excludeTrackIds);
         const result = await library.getLikedTracks({
           page: 1,
           pageSize: libraryShuffleCandidatePageSize,
           search: source.search,
           sort: 'random',
           sourceProvider: source.sourceProvider,
+          excludeTrackIds,
           randomWindow: true,
         });
 
         libraryShuffleDeckRef.current = {
           sourceKey,
+          canRefill: result.items.length >= libraryShuffleCandidatePageSize || result.hasMore === true,
           items: result.items
             .map(playlistItemToTrack)
             .filter((track): track is LibraryTrack => track !== null && track.unavailable !== true && Boolean(track.path) && !excludedTrackIds.has(track.id))
             .map((track) => createQueueItem(track, source)),
         };
 
-        return dequeueFreshDeckItem();
+        return takeShuffleDeckItem(sourceKey, excludedTrackIds, refill);
       } catch {
         clearLibraryShuffleDeck();
         return null;
       }
     },
-    [clearLibraryShuffleDeck],
+    [clearLibraryShuffleDeck, refillShuffleDeck, takeShuffleDeckItem],
   );
 
   const fetchLibraryRandomQueueRefresh = useCallback(
@@ -4491,22 +4725,26 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       }
 
       try {
-        const excludeTrackIds = new Set(
-          getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current),
+        const excludeTrackIds = getLibraryShuffleExcludedTrackIds(
+          activeItem,
+          historyRef.current,
+          playbackShuffleAvoidRecentCountRef.current,
         );
+        const excludedTrackIds = new Set(excludeTrackIds);
         const result = await library.getLikedTracks({
           page: 1,
           pageSize: Math.max(2, Math.min(pageSize, libraryRandomQueueRefreshPageSize)),
           search: source.search,
           sort: 'random',
           sourceProvider: source.sourceProvider,
+          excludeTrackIds,
           randomWindow: true,
         });
         const activeTrackId = activeItem?.track.id ?? null;
 
         return result.items
           .map(playlistItemToTrack)
-          .filter((track): track is LibraryTrack => track !== null && track.id !== activeTrackId && track.unavailable !== true && Boolean(track.path) && !excludeTrackIds.has(track.id))
+          .filter((track): track is LibraryTrack => track !== null && track.id !== activeTrackId && track.unavailable !== true && Boolean(track.path) && !excludedTrackIds.has(track.id))
           .map((track) => createQueueItem(track, source));
       } catch {
         return [];
@@ -4818,6 +5056,133 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     return status;
   }, [commitPlayedItem, playLocalTrack, setHistory]);
 
+  const requestExternalShuffleCandidate = useCallback((
+    activeItem: QueueItem | null,
+    navigationRepeatMode: RepeatMode,
+  ): Promise<{ target: QueueItem | null; refreshedRandomQueue: QueueItem[] | null }> => {
+    const pending = externalShuffleRequestRef.current;
+    if (pending) {
+      return pending;
+    }
+    const missKey = [
+      activeItem?.queueId ?? '',
+      activeItem?.source.type ?? '',
+      getLibraryShuffleExcludedTrackIds(activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current).join(','),
+    ].join('|');
+    if (externalShuffleMissKeyRef.current === missKey) {
+      return Promise.resolve({ target: null, refreshedRandomQueue: null });
+    }
+
+    const request = (async (): Promise<{ target: QueueItem | null; refreshedRandomQueue: QueueItem[] | null }> => {
+      const current = itemsRef.current;
+      let target: QueueItem | null = null;
+      let refreshedRandomQueue: QueueItem[] | null = null;
+      let candidates: QueueItem[] = [];
+      const source = activeItem?.source ?? null;
+
+      if (isFolderSource(source)) {
+        const folderShuffleAvailable = Boolean(window.echo?.library?.getFolderTracks);
+        target = await fetchFolderShuffleTarget(source, activeItem);
+        if (!target && !folderShuffleAvailable && isFolderRandomSortSource(source)) {
+          const refreshedItems = await fetchFolderRandomQueueRefresh(source, activeItem, current.length || 100);
+          if (refreshedItems.length > 0) {
+            refreshedRandomQueue = refreshedItems;
+            target = refreshedItems[0] ?? null;
+          }
+        }
+        if (!target && !folderShuffleAvailable) {
+          candidates = getShuffleCandidates(current, activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
+          target = pickRandom(candidates);
+        }
+        if (!target && !folderShuffleAvailable && navigationRepeatMode === 'all') {
+          candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
+          target = pickRandom(candidates);
+        }
+        if (!target && !folderShuffleAvailable && navigationRepeatMode === 'all') {
+          target = activeItem && activeItem.track.unavailable !== true
+            ? activeItem
+            : current.find((item) => item.track.unavailable !== true) ?? null;
+        }
+      } else if (isLikedSource(source)) {
+        target = await fetchLikedShuffleTarget(source, activeItem);
+        if (!target) {
+          candidates = getShuffleCandidates(current, activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
+          target = pickRandom(candidates);
+        }
+        if (!target && navigationRepeatMode === 'all') {
+          candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
+          target = pickRandom(candidates);
+        }
+        if (!target && navigationRepeatMode === 'all') {
+          target = activeItem && activeItem.track.unavailable !== true
+            ? activeItem
+            : current.find((item) => item.track.unavailable !== true) ?? null;
+        }
+      } else {
+        const librarySource = isLibraryRandomSource(source) ? source : libraryShuffleSource;
+        const libraryShuffleAvailable = Boolean(window.echo?.library?.getTracks);
+        target = await fetchLibraryShuffleTarget(activeItem);
+        if (!target && !libraryShuffleAvailable && isSongsRandomSortSource(librarySource)) {
+          const refreshedItems = await fetchLibraryRandomQueueRefresh(librarySource, activeItem, current.length || 100);
+          if (refreshedItems.length > 0) {
+            refreshedRandomQueue = refreshedItems;
+            target = refreshedItems[0] ?? null;
+          }
+        }
+        if (!target && !libraryShuffleAvailable) {
+          candidates = getShuffleCandidates(current, activeItem, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
+          target = pickRandom(candidates);
+        }
+        if (!target && !libraryShuffleAvailable && navigationRepeatMode === 'all') {
+          candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
+          target = pickRandom(candidates);
+        }
+        if (!target && !libraryShuffleAvailable && navigationRepeatMode === 'all') {
+          target = activeItem && activeItem.track.unavailable !== true
+            ? activeItem
+            : current.find((item) => item.track.unavailable !== true) ?? null;
+        }
+      }
+
+      if (target) {
+        externalShuffleMissKeyRef.current = null;
+      } else if (!refreshedRandomQueue) {
+        externalShuffleMissKeyRef.current = missKey;
+      }
+
+      if (
+        target &&
+        !refreshedRandomQueue &&
+        consumedExternalNextIdRef.current !== target.queueId &&
+        currentQueueIdRef.current !== target.queueId
+      ) {
+        if (!itemsRef.current.some((item) => item.queueId === target.queueId)) {
+          const pinnedItem = target;
+          setItems((items) => items.some((item) => item.queueId === pinnedItem.queueId) ? items : [...items, pinnedItem]);
+        }
+        setScheduledExternalNext(target.queueId);
+      }
+
+      return { target, refreshedRandomQueue };
+    })();
+
+    externalShuffleRequestRef.current = request;
+    void request.finally(() => {
+      if (externalShuffleRequestRef.current === request) {
+        externalShuffleRequestRef.current = null;
+      }
+    });
+    return request;
+  }, [
+    fetchFolderRandomQueueRefresh,
+    fetchFolderShuffleTarget,
+    fetchLibraryRandomQueueRefresh,
+    fetchLibraryShuffleTarget,
+    fetchLikedShuffleTarget,
+    setItems,
+    setScheduledExternalNext,
+  ]);
+
   const playNext = useCallback(async (options: PlayNextOptions = {}): Promise<PlaybackStatus | null> => {
     const resolveStartedAtMs = performance.now();
     const current = itemsRef.current;
@@ -4858,7 +5223,6 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           const fallbackItems = await fetchLibraryRandomQueueRefresh(libraryShuffleSource, null, 5, true);
           if (fallbackItems.length > 0) {
             setItems(fallbackItems);
-            setHistory([]);
             target = fallbackItems[0] ?? null;
           }
         }
@@ -4876,93 +5240,62 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     let refreshedRandomQueue: QueueItem[] | null = null;
 
     if (isShuffleEnabledRef.current) {
-      let candidates: QueueItem[] = [];
+      const priorityTarget = priorityNextQueueIdsRef.current
+        .map((queueId) => findItemByQueueId(current, queueId))
+        .find((item): item is QueueItem => Boolean(item) && item.queueId !== activeItem?.queueId && item.track.unavailable !== true) ?? null;
+      const queueScoped = isQueueScopedShuffleSource(activeItem?.source, playlistPlaybackStateRef.current.active);
 
-      if (playlistPlaybackStateRef.current.active) {
-        candidates = getShuffleCandidates(current, activeItem ?? null, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
-        target = pickRandom(candidates);
-
-        if (!target && navigationRepeatMode === 'all') {
-          candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
-          target = pickRandom(candidates);
-        }
-
+      if (priorityTarget) {
+        target = priorityTarget;
+      } else if (queueScoped) {
+        const payload = resolveBackendQueueSyncPayload({
+          items: current,
+          currentQueueId: activeItem?.queueId ?? activeCurrentQueueId,
+          isShuffle: true,
+          existingDeck: backendShuffleDeckQueueIdsRef.current,
+          shuffleAdvance: 'queue',
+          priorityNextQueueIds: priorityNextQueueIdsRef.current,
+        });
+        backendShuffleDeckQueueIdsRef.current = payload.nextDeck;
+        const deck = payload.nextDeck ?? [];
+        const start = activeItem ? deck.indexOf(activeItem.queueId) : -1;
+        const order = start >= 0
+          ? [...deck.slice(start + 1), ...(navigationRepeatMode === 'all' ? deck.slice(0, Math.max(0, start)) : [])]
+          : navigationRepeatMode === 'all' ? deck : [];
+        target = order
+          .map((queueId) => findItemByQueueId(current, queueId))
+          .find((item): item is QueueItem => Boolean(item) && item.queueId !== activeItem?.queueId && item.track.unavailable !== true) ?? null;
         if (!target && navigationRepeatMode === 'all') {
           target = activeItem && activeItem.track.unavailable !== true
             ? activeItem
             : current.find((item) => item.track.unavailable !== true) ?? null;
         }
       } else {
-        const source = activeItem?.source ?? null;
-        if (isFolderSource(source)) {
-          const folderShuffleAvailable = Boolean(window.echo?.library?.getFolderTracks);
-          target = await fetchFolderShuffleTarget(source, activeItem ?? null);
-          if (!target && !folderShuffleAvailable && isFolderRandomSortSource(source)) {
-            const refreshedItems = await fetchFolderRandomQueueRefresh(source, activeItem ?? null, current.length || 100);
-            if (refreshedItems.length > 0) {
-              refreshedRandomQueue = refreshedItems;
-              target = refreshedItems[0] ?? null;
-            }
-          }
-
-          if (!target && !folderShuffleAvailable) {
-            candidates = getShuffleCandidates(current, activeItem ?? null, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
-            target = pickRandom(candidates);
-          }
-
-          if (!target && !folderShuffleAvailable && navigationRepeatMode === 'all') {
-            candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
-            target = pickRandom(candidates);
-          }
-
-          if (!target && !folderShuffleAvailable && navigationRepeatMode === 'all') {
-            target = activeItem && activeItem.track.unavailable !== true
-              ? activeItem
-              : current.find((item) => item.track.unavailable !== true) ?? null;
-          }
-        } else if (isLikedSource(source)) {
-          target = await fetchLikedShuffleTarget(source, activeItem ?? null);
-          if (!target) {
-            candidates = getShuffleCandidates(current, activeItem ?? null, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
-            target = pickRandom(candidates);
-          }
-
-          if (!target && navigationRepeatMode === 'all') {
-            candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
-            target = pickRandom(candidates);
-          }
-
-          if (!target && navigationRepeatMode === 'all') {
-            target = activeItem && activeItem.track.unavailable !== true
-              ? activeItem
-              : current.find((item) => item.track.unavailable !== true) ?? null;
-          }
+        const pinned = scheduledExternalNextIdRef.current
+          ? findItemByQueueId(itemsRef.current, scheduledExternalNextIdRef.current)
+          : null;
+        if (
+          pinned &&
+          pinned.queueId !== activeItem?.queueId &&
+          pinned.track.unavailable !== true &&
+          consumedExternalNextIdRef.current !== pinned.queueId
+        ) {
+          consumedExternalNextIdRef.current = pinned.queueId;
+          setScheduledExternalNext(null);
+          target = pinned;
         } else {
-          const librarySource = isLibraryRandomSource(source) ? source : libraryShuffleSource;
-          const libraryShuffleAvailable = Boolean(window.echo?.library?.getTracks);
-          target = await fetchLibraryShuffleTarget(activeItem ?? null);
-          if (!target && !libraryShuffleAvailable && isSongsRandomSortSource(librarySource)) {
-            const refreshedItems = await fetchLibraryRandomQueueRefresh(librarySource, activeItem ?? null, current.length || 100);
-            if (refreshedItems.length > 0) {
-              refreshedRandomQueue = refreshedItems;
-              target = refreshedItems[0] ?? null;
+          const resolved = await requestExternalShuffleCandidate(activeItem ?? null, navigationRepeatMode);
+          refreshedRandomQueue = resolved.refreshedRandomQueue;
+          if (
+            resolved.target &&
+            resolved.target.queueId !== activeItem?.queueId &&
+            resolved.target.track.unavailable !== true
+          ) {
+            consumedExternalNextIdRef.current = resolved.target.queueId;
+            if (scheduledExternalNextIdRef.current === resolved.target.queueId) {
+              setScheduledExternalNext(null);
             }
-          }
-
-          if (!target && !libraryShuffleAvailable) {
-            candidates = getShuffleCandidates(current, activeItem ?? null, historyRef.current, playbackShuffleAvoidRecentCountRef.current);
-            target = pickRandom(candidates);
-          }
-
-          if (!target && !libraryShuffleAvailable && navigationRepeatMode === 'all') {
-            candidates = current.filter((item) => item.track.unavailable !== true && item.queueId !== activeItem?.queueId);
-            target = pickRandom(candidates);
-          }
-
-          if (!target && !libraryShuffleAvailable && navigationRepeatMode === 'all') {
-            target = activeItem && activeItem.track.unavailable !== true
-              ? activeItem
-              : current.find((item) => item.track.unavailable !== true) ?? null;
+            target = findItemByQueueId(itemsRef.current, resolved.target.queueId) ?? resolved.target;
           }
         }
       }
@@ -5022,7 +5355,6 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
         if (target) {
           logQueuePlaybackStep('playNext', 'resolve target', resolveStartedAtMs, target.track.id);
           setItems(refreshedRandomQueue);
-          setHistory([]);
           const status = await playLocalTrack(target, { routeToConnectOutput });
           commitPlayedItem(target, status);
           return status;
@@ -5044,7 +5376,6 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
 
     if (refreshedRandomQueue) {
       setItems(refreshedRandomQueue);
-      setHistory([]);
     }
 
     const status = await playLocalTrack(target, { routeToConnectOutput });
@@ -5053,7 +5384,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     }
     commitPlayedItem(target, status);
     return status;
-  }, [commitPlayedItem, fetchFolderRandomQueueRefresh, fetchFolderShuffleTarget, fetchLibraryRandomQueueRefresh, fetchLibraryShuffleTarget, fetchLikedRandomQueueRefresh, fetchLikedShuffleTarget, fillContinuousPlayQueue, finishPlaylistSequence, isConnectOutputActive, playLocalTrack, playTrack, setHistory, setItems]);
+  }, [commitPlayedItem, fetchFolderRandomQueueRefresh, fetchLibraryRandomQueueRefresh, fetchLikedRandomQueueRefresh, fillContinuousPlayQueue, finishPlaylistSequence, isConnectOutputActive, playLocalTrack, playTrack, requestExternalShuffleCandidate, setHistory, setItems, setScheduledExternalNext]);
 
   useEffect(() => {
     const audio = window.echo?.audio;
@@ -5130,23 +5461,83 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
     window.echo?.playback?.setRepeatMode?.(repeatMode);
   }, [repeatMode]);
 
-  // Sync queue items to the daemon backend for autonomous advancement
+  const backendQueueSyncKey = useMemo(() => {
+    const active = currentQueueId ? items.find((item) => item.queueId === currentQueueId) ?? null : null;
+    const structure = items.map((item) => [
+      item.queueId,
+      item.track.path,
+      item.track.sampleRate ?? '',
+      item.track.unavailable === true ? '1' : '0',
+      item.removeAfterPlay === true ? '1' : '0',
+    ].join('|')).join('\n');
+    return [
+      isShuffleEnabled ? 'shuffle' : 'order',
+      repeatMode,
+      currentQueueId ?? '',
+      playlistPlaybackState.active ? 'playlist' : '',
+      active?.source.type ?? '',
+      scheduledExternalNextId ?? '',
+      priorityNextQueueIds.join(','),
+      structure,
+    ].join('\u0000');
+  }, [currentQueueId, isShuffleEnabled, items, playlistPlaybackState.active, priorityNextQueueIds, repeatMode, scheduledExternalNextId]);
+
+  // Sync the host queue only when playback order changes. Title, cover, and BPM
+  // updates must not bump the host revision and cancel an in-flight advance.
   useEffect(() => {
     if (!sessionHydrated) {
       return;
     }
+    const active = findItemByQueueId(itemsRef.current, currentQueueIdRef.current);
+    const queueScoped = isShuffleEnabledRef.current && isQueueScopedShuffleSource(active?.source, playlistPlaybackStateRef.current.active);
     const { queueItems, backendCurrentQueueId, nextDeck } = resolveBackendQueueSyncPayload({
-      items,
-      currentQueueId,
-      isShuffle: isShuffleEnabled,
-      existingDeck: backendShuffleDeckQueueIdsRef.current,
+      items: itemsRef.current,
+      currentQueueId: currentQueueIdRef.current,
+      isShuffle: isShuffleEnabledRef.current,
+      existingDeck: queueScoped ? backendShuffleDeckQueueIdsRef.current : null,
+      shuffleAdvance: queueScoped ? 'queue' : 'external',
+      priorityNextQueueIds: priorityNextQueueIdsRef.current,
+      preferredNextQueueId: queueScoped ? null : scheduledExternalNextIdRef.current,
     });
     backendShuffleDeckQueueIdsRef.current = nextDeck;
+    const deckNext = queueScoped ? queueIdAfterCurrent(nextDeck, currentQueueIdRef.current) : null;
+    setQueueDeckNextId((current) => current === deckNext ? current : deckNext);
 
-    void syncQueueSnapshotToBackend(queueItems, repeatMode, backendCurrentQueueId).catch((error) => {
+    void syncQueueSnapshotToBackend(queueItems, repeatModeRef.current, backendCurrentQueueId).catch((error) => {
       console.warn('[Queue] failed to sync queue snapshot to audio backend:', error);
     });
-  }, [currentQueueId, isShuffleEnabled, items, repeatMode, sessionHydrated, syncQueueSnapshotToBackend]);
+  }, [backendQueueSyncKey, sessionHydrated, syncQueueSnapshotToBackend]);
+
+  useEffect(() => {
+    if (!sessionHydrated || !isShuffleEnabled || repeatMode === 'one') {
+      return;
+    }
+    const active = findItemByQueueId(itemsRef.current, currentQueueIdRef.current);
+    if (!active || isQueueScopedShuffleSource(active.source, playlistPlaybackState.active)) {
+      return;
+    }
+    if (priorityNextQueueIdsRef.current.some((queueId) => queueId !== currentQueueIdRef.current && itemsRef.current.some((item) => item.queueId === queueId && item.track.unavailable !== true))) {
+      return;
+    }
+    const pinnedId = scheduledExternalNextIdRef.current;
+    if (
+      pinnedId &&
+      pinnedId !== currentQueueIdRef.current &&
+      itemsRef.current.some((item) => item.queueId === pinnedId && item.track.unavailable !== true)
+    ) {
+      return;
+    }
+
+    void requestExternalShuffleCandidate(active, repeatMode);
+  }, [
+    isShuffleEnabled,
+    playlistPlaybackState.active,
+    priorityNextQueueIds,
+    repeatMode,
+    requestExternalShuffleCandidate,
+    sessionHydrated,
+    shufflePlanEpoch,
+  ]);
 
   const activateHqPlayerTakeover = useCallback(async (): Promise<PlaybackStatus | null> => {
     const activeItem =
@@ -5275,6 +5666,42 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
   );
   updateTrackSnapshotRef.current = updateTrackSnapshot;
 
+  const upcomingItem = useMemo(() => {
+    if (repeatMode === 'one') {
+      return null;
+    }
+
+    const priorityItem = priorityNextQueueIds
+      .map((queueId) => items.find((item) => item.queueId === queueId) ?? null)
+      .find((item): item is QueueItem => Boolean(item) && item.queueId !== currentQueueId && item.track.unavailable !== true) ?? null;
+    if (isShuffleEnabled && priorityItem) {
+      return priorityItem;
+    }
+
+    if (isShuffleEnabled) {
+      const queueScoped = isQueueScopedShuffleSource(currentItem?.source, playlistPlaybackState.active);
+      const nextId = queueScoped ? queueDeckNextId : scheduledExternalNextId;
+      const next = nextId ? items.find((item) => item.queueId === nextId) ?? null : null;
+      return next && next.queueId !== currentQueueId && next.track.unavailable !== true ? next : null;
+    }
+
+    if (currentItem) {
+      return resolveSequentialNextItem(items, currentItem, repeatMode);
+    }
+
+    return items.find((item) => item.track.unavailable !== true) ?? null;
+  }, [
+    currentItem,
+    currentQueueId,
+    isShuffleEnabled,
+    items,
+    playlistPlaybackState.active,
+    priorityNextQueueIds,
+    queueDeckNextId,
+    repeatMode,
+    scheduledExternalNextId,
+  ]);
+
   const canGoPrevious = useMemo(() => {
     if (history.some((item) => item.track.unavailable !== true)) {
       return true;
@@ -5351,6 +5778,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       currentSourceLabel,
       lastQueueFeedback,
       playlistPlayback: playlistPlaybackSummary,
+      upcomingItem,
       canGoPrevious,
       canGoNext,
       replaceQueue,
@@ -5429,6 +5857,7 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
       playTrack,
       playbackShuffleAvoidRecentCount,
       playlistPlaybackSummary,
+      upcomingItem,
       setHqPlayerTakeoverEnabled,
       openTemporaryLocalFiles,
       playTrackNext,

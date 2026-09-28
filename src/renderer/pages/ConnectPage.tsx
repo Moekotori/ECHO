@@ -1,42 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import {
-  AlertTriangle,
-  Cable,
-  Cast,
-  Check,
-  ChevronDown,
-  ClipboardPaste,
-  Copy,
-  Eye,
-  EyeOff,
-  FolderOpen,
-  Image,
-  Loader2,
-  LockKeyhole,
-  Pause,
-  Play,
-  Power,
-  Plus,
-  Radio,
-  RefreshCw,
-  Save,
-  Server,
-  SlidersHorizontal,
-  Smartphone,
-  Square,
-  Trash2,
-  Video,
-  Unplug,
-  Volume2,
-} from 'lucide-react';
+import { AlertTriangle, Cable, Cast, Check, ChevronDown, ClipboardPaste, Copy, Eye, EyeOff, FolderOpen, Image, Loader2, Pause, Play, Power, Plus, Radio, RefreshCw, Save, Server, SlidersHorizontal, Smartphone, Square, Trash2, Video, Unplug, Volume2 } from 'lucide-react';
 import QRCode from 'qrcode';
 import type { AirPlayReceiverProtocol, AppSettings } from '../../shared/types/appSettings';
-import {
-  connectDonatorUnlockPluginId,
-  connectDonatorUnlockVersion,
-  type ConnectDonatorUnlockReason,
-  type ConnectDonatorUnlockStatus,
-} from '../../shared/constants/featureUnlocks';
+
 import { hqPlayerConnectDeviceId } from '../../shared/types/connect';
 import type { AirPlayReceiverStatus, ConnectDevice, ConnectReceiverStatus, ConnectSessionStatus } from '../../shared/types/connect';
 import type { EchoLinkServerStatus, EchoLinkWebBackground } from '../../shared/types/echoLink';
@@ -69,7 +35,7 @@ import { EchoLinkBasicPanel } from '../components/settings/EchoLinkBasicPanel';
 import { MqttIntegrationPanel } from '../components/settings/MqttIntegrationPanel';
 import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
 import { useSharedPlaybackStatus } from '../stores/playbackStatusStore';
-import { hideSidebarRouteEntry } from '../utils/sidebarRouteVisibility';
+
 import '../styles/connect-workspace.css';
 
 type Translate = ReturnType<typeof useI18n>['t'];
@@ -172,18 +138,6 @@ const defaultWallpaperEngineBridgeStatus: WallpaperEngineBridgeStatus = {
   eventClients: 0,
 };
 
-const defaultDonatorUnlockStatus: ConnectDonatorUnlockStatus = {
-  featureId: 'connect',
-  pluginId: connectDonatorUnlockPluginId,
-  requiredVersion: connectDonatorUnlockVersion,
-  unlocked: false,
-  pluginInstalled: false,
-  pluginEnabled: false,
-  hwidHash: '',
-  reason: 'license-invalid',
-  checkedAt: new Date(0).toISOString(),
-};
-
 const stateLabel: Record<ConnectSessionStatus['state'], TranslationKey> = {
   idle: 'connectPage.state.idle',
   discovering: 'connectPage.state.discovering',
@@ -248,9 +202,7 @@ const connectDeviceSectionCollapsedStorageKey = 'echo.connect.deviceSectionColla
 const connectRadioPanelCollapsedStorageKey = 'echo.connect.radioPanelCollapsed.v1';
 const connectLivePanelCollapsedStorageKey = 'echo.connect.livePanelCollapsed.v1';
 const connectHqPlayerPanelCollapsedStorageKey = 'echo.connect.hqPlayerPanelCollapsed.v1';
-const connectSettingsPendingSectionStorageKey = 'echo-next.settings.pending-section';
-const connectEchoProAccountPanelStorageKey = 'echo:settings:general:echo-pro-account-panel-expanded';
-const connectEchoProAccountTargetId = 'settings-row-echo-pro-account';
+
 const legacyRadioStationsStorageKey = 'echo.connect.radioStations.v1';
 const radioStationsStorageKey = 'echo.connect.radioStations.v2';
 const maxStoredRadioStations = 40;
@@ -267,8 +219,6 @@ const isRendererTestEnvironment = (): boolean =>
 const connectRefreshCacheTtlMs = isRendererTestEnvironment() ? 0 : 4_000;
 let connectRefreshCache: { bridge: ConnectBridge; devices: ConnectDevice[]; loadedAtMs: number } | null = null;
 let connectRefreshRequest: { bridge: ConnectBridge; promise: Promise<ConnectDevice[]> } | null = null;
-let connectDonatorUnlockStatusCache: { bridge: ConnectBridge; status: ConnectDonatorUnlockStatus } | null = null;
-let connectDonatorUnlockStatusRequest: { bridge: ConnectBridge; promise: Promise<ConnectDonatorUnlockStatus> } | null = null;
 
 const invalidateConnectRefreshCache = (): void => {
   connectRefreshCache = null;
@@ -277,40 +227,6 @@ const invalidateConnectRefreshCache = (): void => {
 export const resetConnectDonatorUnlockStatusCacheForTests = (): void => {
   invalidateConnectRefreshCache();
   connectRefreshRequest = null;
-  connectDonatorUnlockStatusCache = null;
-  connectDonatorUnlockStatusRequest = null;
-};
-
-const loadConnectDonatorUnlockStatus = (
-  connect: ConnectBridge,
-  force = false,
-): Promise<ConnectDonatorUnlockStatus> => {
-  if (!force && connectDonatorUnlockStatusCache?.bridge === connect) {
-    return Promise.resolve(connectDonatorUnlockStatusCache.status);
-  } else if (connectDonatorUnlockStatusRequest?.bridge === connect) {
-    return connectDonatorUnlockStatusRequest.promise;
-  }
-
-  const promise = (connect.getDonatorUnlockStatus?.(force ? { force: true } : undefined) ?? Promise.resolve(defaultDonatorUnlockStatus)).then((status) => {
-    const nextStatus = status ?? defaultDonatorUnlockStatus;
-    connectDonatorUnlockStatusCache = {
-      bridge: connect,
-      status: nextStatus,
-    };
-    return nextStatus;
-  });
-
-  connectDonatorUnlockStatusRequest = { bridge: connect, promise };
-  void promise.then(() => {
-    if (connectDonatorUnlockStatusRequest?.promise === promise) {
-      connectDonatorUnlockStatusRequest = null;
-    }
-  }, () => {
-    if (connectDonatorUnlockStatusRequest?.promise === promise) {
-      connectDonatorUnlockStatusRequest = null;
-    }
-  });
-  return promise;
 };
 
 const loadConnectDevices = (connect: ConnectBridge, force = false): Promise<ConnectDevice[]> => {
@@ -384,12 +300,6 @@ const hqPlayerBackendLabel: Record<HqPlayerDefaultPlaybackBackend, TranslationKe
   echoNative: 'connectPage.hqplayer.backend.echoNative',
   ask: 'connectPage.hqplayer.backend.ask',
   hqplayer: 'connectPage.hqplayer.backend.hqplayer',
-};
-
-const connectDonatorUnlockReasonLabel: Record<ConnectDonatorUnlockReason, TranslationKey> = {
-  'hwid-not-allowed': 'connectPage.lock.reason.hwidNotAllowed',
-  'license-invalid': 'connectPage.lock.reason.licenseInvalid',
-  unlocked: 'connectPage.lock.reason.unlocked',
 };
 
 const hqPlayerHandoffReasonLabel: Record<HqPlayerPlaybackHandoffReason, TranslationKey> = {
@@ -1231,17 +1141,6 @@ export const ConnectPage = (): JSX.Element => {
   const [isAutoStartBusy, setIsAutoStartBusy] = useState(false);
   const [autoStartReceiversEnabled, setAutoStartReceiversEnabled] = useState(false);
   const [airPlayReceiverProtocol, setAirPlayReceiverProtocol] = useState<AirPlayReceiverProtocol>('airplay1');
-  const [donatorUnlockStatus, setDonatorUnlockStatus] = useState<ConnectDonatorUnlockStatus>(() =>
-    isConnectBrowserPreview
-      ? { ...defaultDonatorUnlockStatus, unlocked: true, pluginInstalled: true, pluginEnabled: true, reason: 'unlocked' }
-      : connectDonatorUnlockStatusCache && connectDonatorUnlockStatusCache.bridge === window.echo?.connect
-        ? connectDonatorUnlockStatusCache.status
-        : defaultDonatorUnlockStatus,
-  );
-  const [isDonatorUnlockLoading, setIsDonatorUnlockLoading] = useState(() =>
-    !isConnectBrowserPreview && (!connectDonatorUnlockStatusCache || connectDonatorUnlockStatusCache.bridge !== window.echo?.connect),
-  );
-  const [isSidebarHideBusy, setIsSidebarHideBusy] = useState(false);
   const [busyDeviceId, setBusyDeviceId] = useState<string | null>(null);
   const [isCommandBusy, setIsCommandBusy] = useState(false);
   const [volumePercent, setVolumePercent] = useState(80);
@@ -1422,31 +1321,6 @@ export const ConnectPage = (): JSX.Element => {
   const echoLinkWebBackgroundConfigured = echoLinkWebBackground.type !== 'none' && echoLinkWebBackground.url.trim().length > 0;
   const echoLinkWebBackgroundSaveDisabled = isEchoLinkBackgroundBusy || (echoLinkWebBackgroundDraft.type !== 'none' && echoLinkWebBackgroundDraft.url.trim().length === 0);
 
-  const refreshDonatorUnlockStatus = useCallback(async (options: { force?: boolean } = {}): Promise<void> => {
-    if (isConnectBrowserPreview) {
-      return;
-    }
-    const connect = window.echo?.connect;
-    if (!connect) {
-      setDonatorUnlockStatus(defaultDonatorUnlockStatus);
-      setIsDonatorUnlockLoading(false);
-      return;
-    }
-
-    if (options.force === true || connectDonatorUnlockStatusCache?.bridge !== connect) {
-      setIsDonatorUnlockLoading(true);
-    }
-    try {
-      setDonatorUnlockStatus(await loadConnectDonatorUnlockStatus(connect, options.force === true));
-    } catch {
-      // A transient IPC/network failure must not visually revoke a previously trusted status.
-      // Paid feature operations remain guarded by the main process.
-      setDonatorUnlockStatus((current) => current);
-    } finally {
-      setIsDonatorUnlockLoading(false);
-    }
-  }, []);
-
   const refreshEchoLink = useCallback(async (): Promise<void> => {
     const connect = window.echo?.connect;
     if (!connect?.getEchoLinkStatus) {
@@ -1584,21 +1458,8 @@ export const ConnectPage = (): JSX.Element => {
   }, [echoLinkPairingUri]);
 
   useEffect(() => {
-    void refreshDonatorUnlockStatus();
-    const handleUnlockChanged = (): void => {
-      void refreshDonatorUnlockStatus({ force: true });
-    };
-    window.addEventListener('plugins:changed', handleUnlockChanged);
-    window.addEventListener('echo-pro:status-changed', handleUnlockChanged);
-    return () => {
-      window.removeEventListener('plugins:changed', handleUnlockChanged);
-      window.removeEventListener('echo-pro:status-changed', handleUnlockChanged);
-    };
-  }, [refreshDonatorUnlockStatus]);
-
-  useEffect(() => {
     const connect = window.echo?.connect;
-    if (!connect || donatorUnlockStatus.unlocked !== true) {
+    if (!connect) {
       return;
     }
 
@@ -1660,7 +1521,7 @@ export const ConnectPage = (): JSX.Element => {
       unsubscribeReceiver();
       unsubscribeAirPlayReceiver();
     };
-  }, [donatorUnlockStatus.unlocked, refreshCommandCenterSoft]);
+  }, [refreshCommandCenterSoft]);
 
   useEffect(() => {
     if (isHqPlayerExpanded) {
@@ -2398,89 +2259,6 @@ export const ConnectPage = (): JSX.Element => {
       return next;
     });
   }, []);
-
-  const openEchoProAccountSettings = useCallback((): void => {
-    try {
-      window.sessionStorage?.setItem(connectSettingsPendingSectionStorageKey, 'general');
-      window.localStorage?.setItem(connectSettingsPendingSectionStorageKey, 'general');
-      window.localStorage?.setItem(connectEchoProAccountPanelStorageKey, 'true');
-    } catch {
-      // Navigation events below still guide the user when storage is unavailable.
-    }
-
-    window.dispatchEvent(new Event('app:navigate:settings'));
-    const detail = { section: 'general', targetId: connectEchoProAccountTargetId };
-    window.dispatchEvent(new CustomEvent('app:navigate:settings-section', { detail }));
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('app:navigate:settings-section', { detail }));
-    }, 0);
-  }, []);
-
-  const hideConnectFromSidebar = useCallback(async (): Promise<void> => {
-    setIsSidebarHideBusy(true);
-    setError(null);
-    try {
-      await hideSidebarRouteEntry('connect');
-    } catch (hideError) {
-      setError(hideError instanceof Error ? hideError.message : String(hideError));
-    } finally {
-      setIsSidebarHideBusy(false);
-    }
-  }, []);
-
-  const copyDonatorHwid = useCallback(async (): Promise<void> => {
-    if (!donatorUnlockStatus.hwidHash) {
-      return;
-    }
-    try {
-      await writeTextToClipboard(donatorUnlockStatus.hwidHash);
-    } catch (copyError) {
-      setError(copyError instanceof Error ? copyError.message : String(copyError));
-    }
-  }, [donatorUnlockStatus.hwidHash]);
-
-  if (donatorUnlockStatus.unlocked !== true) {
-    return (
-      <div className="connect-page connect-page--locked">
-        <section className="remote-sources-hero connect-pro-hero" aria-label={t('connectPage.lock.aria')}>
-          <div>
-            <h3>{t('route.connect.label')}</h3>
-            <strong>{t('connectPage.lock.title')}</strong>
-            <p>{t('connectPage.lock.description')}</p>
-          </div>
-          {isDonatorUnlockLoading ? <Loader2 className="spinning-icon" size={28} /> : <LockKeyhole size={28} />}
-        </section>
-        <section className="remote-source-guardrail connect-pro-guardrail" aria-label="ECHO Pro authorization status">
-          <strong>
-            {isDonatorUnlockLoading
-              ? '正在检查 ECHO Pro 状态'
-              : '需要 ECHO Pro'}
-          </strong>
-          <span>{t(connectDonatorUnlockReasonLabel[donatorUnlockStatus.reason])}</span>
-        </section>
-        <div className="remote-source-actions connect-pro-actions">
-          <button className="settings-action-button" type="button" onClick={openEchoProAccountSettings}>
-            <LockKeyhole size={15} />
-            打开 ECHO Pro 账号
-          </button>
-          <button className="settings-action-button" type="button" onClick={() => void refreshDonatorUnlockStatus({ force: true })} disabled={isDonatorUnlockLoading}>
-            {isDonatorUnlockLoading ? <Loader2 className="spinning-icon" size={15} /> : <RefreshCw size={15} />}
-            {t('connectPage.lock.recheck')}
-          </button>
-          <button className="settings-action-button" type="button" onClick={() => void copyDonatorHwid()} disabled={!donatorUnlockStatus.hwidHash}>
-            <Copy size={15} />
-            {t('connectPage.lock.copyHwid')}
-          </button>
-          <button className="settings-action-button" type="button" onClick={() => void hideConnectFromSidebar()} disabled={isSidebarHideBusy}>
-            {isSidebarHideBusy ? <Loader2 className="spinning-icon" size={15} /> : <EyeOff size={15} />}
-            从侧栏隐藏
-          </button>
-        </div>
-        {error ? <p className="settings-inline-note" role="alert">{error}</p> : null}
-        <p className="settings-inline-note">Connect 不再默认隐藏，但 DLNA、AirPlay、HQPlayer、ECHO Link、手机扫码和 Web 遥控仍需 ECHO Pro 才能启用。</p>
-      </div>
-    );
-  }
 
   return (
     <div className="connect-page connect-page--session" data-mode={workspaceMode}>

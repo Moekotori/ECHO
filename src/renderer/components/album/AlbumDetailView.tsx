@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '../../styles/album-detail.css';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ChevronRight, Disc3, ExternalLink, FolderOpen, Heart, Info, ListEnd, Loader2, MoreHorizontal, Play, Plus, RefreshCw, Star } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Disc3, ExternalLink, FolderOpen, Heart, Info, ListEnd, Loader2, MoreHorizontal, Play, Plus, RefreshCw, Scissors, Star } from 'lucide-react';
 import { defaultArtistStreamingAlbumsProvider, type AppSettings, type ArtistStreamingAlbumsProvider } from '../../../shared/types/appSettings';
 import type { AlbumOnlineInfo, AlbumOnlineInfoRequestOptions, EditableTrackTags, LibraryAlbum, LibraryArtist, LibraryPlaylist, LibraryTrack, PlaybackHistoryEntry } from '../../../shared/types/library';
 import type { StreamingAlbum, StreamingAlbumDetail, StreamingProviderDescriptor, StreamingTrack } from '../../../shared/types/streaming';
@@ -22,6 +22,7 @@ import { OsuTimingPanel } from '../library/OsuTimingPanel';
 import { TrackContextMenu } from '../library/TrackContextMenu';
 import type { TrackMenuAction } from '../library/TrackContextMenu';
 import { TrackTagEditorDrawer } from '../library/TrackTagEditorDrawer';
+import { AlbumSplitDrawer } from './AlbumSplitDrawer';
 import { AlbumTrackList } from './AlbumTrackList';
 
 type AlbumDetailViewProps = {
@@ -816,6 +817,8 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
   const [tagEditorError, setTagEditorError] = useState<string | null>(null);
   const [isSavingTags, setIsSavingTags] = useState(false);
   const [activeTab, setActiveTab] = useState<AlbumDetailTab>('tracks');
+  const [isAlbumSplitOpen, setIsAlbumSplitOpen] = useState(false);
+  const [albumTrackReloadToken, setAlbumTrackReloadToken] = useState(0);
   const [onlineInfoState, setOnlineInfoState] = useState<OnlineInfoState>(() => emptyOnlineInfoState());
   const [relatedAlbumsState, setRelatedAlbumsState] = useState<RelatedAlbumsState>(() => emptyRelatedAlbumsState());
   const [failedRelatedCoverUrls, setFailedRelatedCoverUrls] = useState<Record<string, true>>({});
@@ -1590,6 +1593,10 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
       window.removeEventListener('scroll', closeAlbumMenu, true);
     };
   }, [albumMenuPosition, closeAlbumMenu]);
+
+  useEffect(() => {
+    setIsAlbumSplitOpen(false);
+  }, [album.id]);
 
   useEffect(() => {
     albumPlaylistLoadStartedRef.current = false;
@@ -2918,6 +2925,20 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
               <span>{t('albumDetail.action.showInFolder')}</span>
             </button>
           ) : null}
+          {album.mediaType !== 'remote' && album.mediaType !== 'streaming' && loadedTracks.some((track) => track.path.includes('#cueTrack=')) ? (
+            <button
+              className="album-menu-item"
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                closeAlbumMenu();
+                setIsAlbumSplitOpen(true);
+              }}
+            >
+              <Scissors size={16} />
+              <span>{t('albumMenu.action.splitAlbum')}</span>
+            </button>
+          ) : null}
           {displayAlbumArtist && streamingAlbumsEnabled ? (
             <button className="album-menu-item" role="menuitem" type="button" onClick={handleLoadStreamingLibrary}>
               <RefreshCw size={16} />
@@ -3162,6 +3183,12 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
 
       {renderAlbumMenu()}
       {renderCoverPreview()}
+      <AlbumSplitDrawer
+        album={album.mediaType === 'remote' || album.mediaType === 'streaming' ? null : album}
+        isOpen={isAlbumSplitOpen}
+        onClose={() => setIsAlbumSplitOpen(false)}
+        onCompleted={() => setAlbumTrackReloadToken((current) => current + 1)}
+      />
 
       <section className="album-detail-track-console album-detail-switch-surface" key={`album-console-${album.id}`} aria-label={t('albumDetail.aria.trackConsole', { album: album.title })}>
         <header className="album-detail-tabs" aria-label={t('albumDetail.aria.sections')}>
@@ -3181,6 +3208,7 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
         <AlbumTrackList
           albumId={album.id}
           currentTrackId={currentTrackId}
+          reloadToken={albumTrackReloadToken}
           hidden={activeTab !== 'tracks'}
           initialLoadBlocked={shouldBlockAlbumTrackInitialLoad}
           initialLoadDelayMs={shouldDelayAlbumTrackInitialLoad ? albumDetailPlaybackPriorityTrackDelayMs : 0}

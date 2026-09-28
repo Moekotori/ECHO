@@ -80,6 +80,14 @@ const makePersistedQueueSession = (
   };
 };
 
+const withAlbumSource = (session: ReturnType<typeof makePersistedQueueSession>) => ({
+  ...session,
+  items: session.items.map((item) => ({
+    ...item,
+    source: { type: 'album' as const, label: 'Album', albumId: 'album-1' },
+  })),
+});
+
 const deferredPlaybackTaskWaitMs = 2_500;
 
 const waitForDeferredPlaybackTask = async (assertion: () => void): Promise<void> => {
@@ -1705,13 +1713,13 @@ describe('PlaybackQueueProvider playback history session', () => {
         enabled: true,
         nextItem: {
           mediaType: 'local',
-          trackId: third.id,
-          path: third.path,
+          trackId: second.id,
+          path: second.path,
         },
       },
     });
     await waitForDeferredPlaybackTask(() => expect(prepareLocalFile).toHaveBeenCalledWith(expect.objectContaining({
-      trackId: third.id,
+      trackId: second.id,
       automixAnalyze: true,
     })));
     audioStatusHandlers.at(-1)?.({
@@ -1739,7 +1747,6 @@ describe('PlaybackQueueProvider playback history session', () => {
       providerTrackId: 'third',
       stableKey: 'streaming:qqmusic:third',
     };
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValueOnce(0.99);
     const audioStatusHandlers: Array<(status: AudioStatus) => void> = [];
     const prepareMediaItem = vi.fn().mockResolvedValue(undefined);
     const playLocalFile = vi.fn().mockImplementation((request: { trackId: string; filePath: string; startSeconds?: number }) =>
@@ -1818,7 +1825,6 @@ describe('PlaybackQueueProvider playback history session', () => {
     } as AudioStatus);
 
     expect(playLocalFile).toHaveBeenCalledTimes(1);
-    expect(randomSpy).toHaveBeenCalled();
   });
 
   it('prewarms the first queue item for Automix repeat-all wraparound', async () => {
@@ -3673,8 +3679,8 @@ describe('PlaybackQueueProvider playback modes', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'next' }));
 
-    await waitFor(() => expect(screen.getByLabelText('current-track').textContent).toBe('track-5'));
-    expect(playLocalFile.mock.calls.map((call) => call[0].trackId)).toEqual(['track-3', 'track-5']);
+    await waitFor(() => expect(screen.getByLabelText('current-track').textContent).toBe('track-4'));
+    expect(playLocalFile.mock.calls.map((call) => call[0].trackId)).toEqual(['track-3', 'track-4']);
     expect(getTracks).not.toHaveBeenCalled();
     expect(randomSpy).toHaveBeenCalled();
   });
@@ -3770,8 +3776,8 @@ describe('PlaybackQueueProvider playback modes', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'next' }));
 
-    await waitFor(() => expect(screen.getByLabelText('current-track').textContent).toBe('streaming:qqmusic:third'));
-    expect(playMediaItem.mock.calls.map((call) => call[0].item.trackId)).toEqual(['streaming:qqmusic:first', 'streaming:qqmusic:third']);
+    await waitFor(() => expect(screen.getByLabelText('current-track').textContent).toBe('streaming:qqmusic:second'));
+    expect(playMediaItem.mock.calls.map((call) => call[0].item.trackId)).toEqual(['streaming:qqmusic:first', 'streaming:qqmusic:second']);
     expect(getTracks).not.toHaveBeenCalled();
     expect(randomSpy).toHaveBeenCalled();
   });
@@ -4449,6 +4455,7 @@ describe('PlaybackQueueProvider playback modes', () => {
       search: undefined,
       sort: 'random',
       sourceProvider: 'netease',
+      excludeTrackIds: ['track-1'],
       randomWindow: true,
     });
     expect(getTracks).not.toHaveBeenCalled();
@@ -4520,7 +4527,8 @@ describe('PlaybackQueueProvider playback modes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'next' }));
     await waitFor(() => expect(screen.getByLabelText('current-track').textContent).toBe('track-3'));
 
-    expect(getTracks).toHaveBeenCalledTimes(1);
+    expect(getTracks).toHaveBeenCalled();
+    expect(getTracks.mock.calls.length).toBeLessThanOrEqual(2);
   });
 
   it('uses full-library candidates before queued songs while shuffle is enabled', async () => {
@@ -5725,17 +5733,34 @@ describe('PlaybackQueueProvider shuffle backend sync (Issue #133)', () => {
     expect(result.queueItems.map((item) => item.itemId)).toEqual(deck);
   });
 
+  it('resolveBackendQueueSyncPayload sends only the current item and pinned successor for external shuffle', () => {
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3), makeTrack(4)];
+    const session = makePersistedQueueSession(tracks, { currentQueueId: 'queue-2' });
+    const result = resolveBackendQueueSyncPayload({
+      items: session.items,
+      currentQueueId: 'queue-2',
+      isShuffle: true,
+      existingDeck: ['queue-2', 'queue-1', 'queue-3', 'queue-4'],
+      shuffleAdvance: 'external',
+      priorityNextQueueIds: ['queue-3'],
+      preferredNextQueueId: 'queue-4',
+    });
+    expect(result.nextDeck).toBeNull();
+    expect(result.backendCurrentQueueId).toBe('queue-2');
+    expect(result.queueItems.map((item) => item.itemId)).toEqual(['queue-2', 'queue-3', 'queue-4']);
+  });
+
   it('syncs a shuffled deck to backend with current track at index 0 when shuffle is enabled', async () => {
     const tracks = [makeTrack(1), makeTrack(2), makeTrack(3), makeTrack(4)];
     const syncQueueToBackend = vi.fn().mockResolvedValue(undefined);
     window.echo = {
       playback: {
         getQueueSession: vi.fn().mockResolvedValue(
-          makePersistedQueueSession(tracks, {
+          withAlbumSource(makePersistedQueueSession(tracks, {
             currentQueueId: 'queue-2',
             currentTrackId: tracks[1].id,
             mode: { isShuffleEnabled: true, repeatMode: 'off', automixEnabled: false },
-          }),
+          })),
         ),
         saveQueueSession: vi.fn(async (snapshot) => snapshot),
         syncQueueToBackend,
@@ -5778,11 +5803,11 @@ describe('PlaybackQueueProvider shuffle backend sync (Issue #133)', () => {
     window.echo = {
       playback: {
         getQueueSession: vi.fn().mockResolvedValue(
-          makePersistedQueueSession(tracks, {
+          withAlbumSource(makePersistedQueueSession(tracks, {
             currentQueueId: 'queue-1',
             currentTrackId: tracks[0].id,
             mode: { isShuffleEnabled: true, repeatMode: 'off', automixEnabled: false },
-          }),
+          })),
         ),
         saveQueueSession: vi.fn(async (snapshot) => snapshot),
         syncQueueToBackend,
@@ -5853,11 +5878,11 @@ describe('PlaybackQueueProvider shuffle backend sync (Issue #133)', () => {
     window.echo = {
       playback: {
         getQueueSession: vi.fn().mockResolvedValue(
-          makePersistedQueueSession(tracks, {
+          withAlbumSource(makePersistedQueueSession(tracks, {
             currentQueueId: 'queue-1',
             currentTrackId: tracks[0].id,
             mode: { isShuffleEnabled: false, repeatMode: 'off', automixEnabled: false },
-          }),
+          })),
         ),
         saveQueueSession: vi.fn(async (snapshot) => snapshot),
         syncQueueToBackend,

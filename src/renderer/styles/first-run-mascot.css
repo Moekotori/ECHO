@@ -140,7 +140,7 @@
 
 .first-run-phase-copy strong {
   font-size: 14px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-phase-copy small {

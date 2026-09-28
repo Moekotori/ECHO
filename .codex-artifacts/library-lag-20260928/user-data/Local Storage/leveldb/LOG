@@ -1,0 +1,17 @@
+2026/09/28-12:12:48.260 10e68 Reusing MANIFEST D:\ECHOCommunity\.codex-artifacts\library-lag-20260928\user-data\Local Storage\leveldb/MANIFEST-000001
+2026/09/28-12:12:48.263 10e68 Recovering log #30
+2026/09/28-12:12:48.264 10e68 Level-0 table #33: started
+2026/09/28-12:12:48.267 10e68 Level-0 table #33: 22708 bytes OK
+2026/09/28-12:12:48.270 10e68 Delete type=0 #30
+2026/09/28-12:12:48.270 8104 Compacting 4@0 + 1@1 files
+2026/09/28-12:12:48.274 8104 Generated table #35@0: 20 keys, 33223 bytes
+2026/09/28-12:12:48.274 8104 Compacted 4@0 + 1@1 files => 33223 bytes
+2026/09/28-12:12:48.277 8104 compacted to: files[ 0 1 0 0 0 0 0 ]
+2026/09/28-12:12:48.277 8104 Delete type=2 #24
+2026/09/28-12:12:48.277 8104 Delete type=2 #26
+2026/09/28-12:12:48.277 8104 Delete type=2 #28
+2026/09/28-12:12:48.277 8104 Delete type=2 #31
+2026/09/28-12:12:48.277 8104 Delete type=2 #33
+2026/09/28-12:13:13.270 1204c Level-0 table #37: started
+2026/09/28-12:13:13.274 1204c Level-0 table #37: 22787 bytes OK
+2026/09/28-12:13:13.278 1204c Delete type=0 #34

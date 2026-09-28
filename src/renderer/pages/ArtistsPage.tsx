@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Image as ImageIcon, ImagePlus, Link, ListFilter, Play, RefreshCw, RotateCcw, Search } from 'lucide-react';
-import type { LibraryArtist, LibrarySort } from '../../shared/types/library';
+import type { ArtistGrouping, LibraryArtist, LibrarySort } from '../../shared/types/library';
 import type { RemoteSource } from '../../shared/types/remoteSources';
 import { ArtistDetailView } from '../components/artist/ArtistDetailView';
 import { artistMark } from '../components/artist/artistVisual';
@@ -31,17 +31,69 @@ const isPreserveScrollLibraryEvent = (event: Event): boolean =>
   event instanceof CustomEvent && event.detail && typeof event.detail === 'object' && event.detail.preserveScroll === true;
 const isRemoteSourceRefreshPlaybackBusy = (state: string | null | undefined): boolean =>
   state === 'loading' || state === 'playing';
-const artistSortOptions: Array<{ value: LibrarySort; labelKey: TranslationKey }> = [
-  { value: 'default', labelKey: 'library.sort.default' },
-  { value: 'titleAsc', labelKey: 'library.artists.sort.nameAsc' },
-  { value: 'titleDesc', labelKey: 'library.artists.sort.nameDesc' },
-  { value: 'frequent', labelKey: 'library.artists.sort.frequent' },
-  { value: 'createdAsc', labelKey: 'library.sort.createdAsc' },
-  { value: 'createdDesc', labelKey: 'library.sort.createdDesc' },
-  { value: 'random', labelKey: 'library.sort.random' },
+type ArtistSortOption = { value: LibrarySort; labelKey: TranslationKey };
+const artistSortGroups: Array<{ labelKey: TranslationKey; options: ArtistSortOption[] }> = [
+  {
+    labelKey: 'songs.sort.group.browse',
+    options: [
+      { value: 'default', labelKey: 'library.sort.default' },
+      { value: 'titleAsc', labelKey: 'library.artists.sort.nameAsc' },
+      { value: 'titleDesc', labelKey: 'library.artists.sort.nameDesc' },
+    ],
+  },
+  {
+    labelKey: 'library.albums.sort.group.listening',
+    options: [
+      { value: 'lastPlayed', labelKey: 'library.albums.sort.lastPlayed' },
+      { value: 'playCountDesc', labelKey: 'library.albums.sort.playCountDesc' },
+      { value: 'playCountAsc', labelKey: 'library.albums.sort.playCountAsc' },
+      { value: 'random', labelKey: 'library.sort.random' },
+    ],
+  },
+  {
+    labelKey: 'library.albums.sort.group.library',
+    options: [
+      { value: 'frequent', labelKey: 'library.artists.sort.frequent' },
+      { value: 'trackCountAsc', labelKey: 'library.artists.sort.trackCountAsc' },
+      { value: 'albumCountDesc', labelKey: 'library.artists.sort.albumCountDesc' },
+      { value: 'recent', labelKey: 'library.albums.sort.recentAdded' },
+    ],
+  },
 ];
+const artistSortOptions = artistSortGroups.flatMap((group) => group.options);
 const artistsSortStorageKey = 'echo-next.artists.sort';
-const validArtistSortValues = new Set<LibrarySort>(artistSortOptions.map((option) => option.value));
+const artistsGroupingStorageKey = 'echo-next.artists.grouping';
+const validArtistSortValues = new Set<LibrarySort>([
+  ...artistSortOptions.map((option) => option.value),
+  'createdAsc',
+  'createdDesc',
+]);
+const readStoredArtistSort = (): LibrarySort => {
+  const stored = readStoredLibrarySort(artistsSortStorageKey, validArtistSortValues);
+  if (stored === 'createdDesc') {
+    return 'recent';
+  }
+  if (stored === 'createdAsc') {
+    return 'default';
+  }
+  return stored;
+};
+const validArtistGroupingValues = new Set<ArtistGrouping>(['split', 'albumArtist']);
+const readStoredArtistGrouping = (): ArtistGrouping => {
+  try {
+    const stored = window.localStorage.getItem(artistsGroupingStorageKey);
+    return stored && validArtistGroupingValues.has(stored as ArtistGrouping) ? (stored as ArtistGrouping) : 'split';
+  } catch {
+    return 'split';
+  }
+};
+const writeStoredArtistGrouping = (grouping: ArtistGrouping): void => {
+  try {
+    window.localStorage.setItem(artistsGroupingStorageKey, grouping);
+  } catch {
+    // Grouping is a view preference and must not block the artist wall.
+  }
+};
 
 const hasArtistAvatar = (artist: LibraryArtist): boolean => Boolean(artist.avatarUrl || artist.avatarThumbUrl);
 
@@ -156,7 +208,8 @@ export const ArtistsPage = (): JSX.Element => {
   const [artists, setArtists] = useState<LibraryArtist[]>([]);
   const [total, setTotal] = useState(0);
   const { search, searchInputProps } = useImeAwareDebouncedSearch(250);
-  const [sort, setSort] = useState<LibrarySort>(() => readStoredLibrarySort(artistsSortStorageKey, validArtistSortValues));
+  const [sort, setSort] = useState<LibrarySort>(readStoredArtistSort);
+  const [artistGrouping, setArtistGrouping] = useState<ArtistGrouping>(readStoredArtistGrouping);
   const [sourceMode, setSourceModeState] = useState<LibrarySourceMode>(() => readStoredLibrarySourceMode());
   const [remoteSourceId, setRemoteSourceId] = useState<string | null>(null);
   const [remoteSources, setRemoteSources] = useState<RemoteSource[]>([]);
@@ -261,6 +314,7 @@ export const ArtistsPage = (): JSX.Element => {
           sourceProvider: sourceMode,
           ...(sourceMode === 'remote' && remoteSourceId ? { sourceId: remoteSourceId } : {}),
           ...(prioritizeArtistAvatars ? { prioritizeArtistAvatars: true } : {}),
+          ...(artistGrouping === 'albumArtist' ? { artistGrouping: 'albumArtist' as const } : {}),
         });
 
         if (requestIdRef.current !== requestId) {
@@ -289,7 +343,7 @@ export const ArtistsPage = (): JSX.Element => {
         }
       }
     },
-    [prioritizeArtistAvatars, remoteSourceId, search, sort, sourceMode, t],
+    [artistGrouping, prioritizeArtistAvatars, remoteSourceId, search, sort, sourceMode, t],
   );
 
   const setSourceMode = useCallback((mode: LibrarySourceMode): void => {
@@ -327,7 +381,11 @@ export const ArtistsPage = (): JSX.Element => {
   }, [sort]);
 
   useEffect(() => {
-    if (sourceMode !== 'remote' && remoteSourcesLoaded) {
+    writeStoredArtistGrouping(artistGrouping);
+  }, [artistGrouping]);
+
+  useEffect(() => {
+    if (remoteSourcesLoaded) {
       return undefined;
     }
 
@@ -377,7 +435,7 @@ export const ArtistsPage = (): JSX.Element => {
 
   useLayoutEffect(() => {
     writePageScrollTop(pageRootRef.current, 0);
-  }, [prioritizeArtistAvatars, search, sort, sourceMode]);
+  }, [artistGrouping, prioritizeArtistAvatars, search, sort, sourceMode]);
 
   useLayoutEffect(() => {
     if (selectedArtist || !shouldRestorePageScrollRef.current) {
@@ -851,22 +909,40 @@ export const ArtistsPage = (): JSX.Element => {
               <ChevronDown className="sort-button-chevron" size={15} aria-hidden="true" />
             </button>
             {isSortOpen ? (
-              <div className="sort-menu" role="listbox" aria-label={t('library.artists.sort.aria')}>
-                {artistSortOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    className="sort-option"
-                    type="button"
-                    role="option"
-                    aria-selected={sort === option.value}
-                    onClick={() => {
-                      setSort(option.value);
-                      setIsSortOpen(false);
-                    }}
-                  >
-                    <span>{t(option.labelKey)}</span>
-                    {sort === option.value ? <Check size={14} /> : null}
-                  </button>
+              <div className="sort-menu" role="listbox" aria-label={t('library.artists.sort.aria')} data-state="open">
+                <div className="sort-menu-section-title" role="presentation">{t('library.artists.sort.group.view')}</div>
+                <button
+                  className="sort-option sort-option--filter"
+                  type="button"
+                  role="option"
+                  aria-selected={artistGrouping === 'albumArtist'}
+                  title={t('library.artists.grouping.albumArtistHint')}
+                  onClick={() => setArtistGrouping((current) => (current === 'albumArtist' ? 'split' : 'albumArtist'))}
+                >
+                  <span>{t('library.artists.grouping.albumArtist')}</span>
+                  {artistGrouping === 'albumArtist' ? <Check size={14} /> : null}
+                </button>
+                {artistSortGroups.map((group) => (
+                  <Fragment key={group.labelKey}>
+                    <div className="sort-menu-divider" role="presentation" />
+                    <div className="sort-menu-section-title" role="presentation">{t(group.labelKey)}</div>
+                    {group.options.map((option) => (
+                      <button
+                        key={option.value}
+                        className="sort-option"
+                        type="button"
+                        role="option"
+                        aria-selected={sort === option.value}
+                        onClick={() => {
+                          setSort(option.value);
+                          setIsSortOpen(false);
+                        }}
+                      >
+                        <span>{t(option.labelKey)}</span>
+                        {sort === option.value ? <Check size={14} /> : null}
+                      </button>
+                    ))}
+                  </Fragment>
                 ))}
               </div>
             ) : null}

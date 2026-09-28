@@ -45,7 +45,7 @@
   background: transparent;
   font: inherit;
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0;
 }
 
@@ -210,7 +210,7 @@
 .album-detail-facts span {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -220,7 +220,7 @@
   margin: 0;
   color: var(--theme-heading-text);
   font-size: clamp(42px, 4vw, 68px);
-  font-weight: 620;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.02;
   letter-spacing: 0;
 }
@@ -234,7 +234,7 @@
   background: transparent;
   font-size: 18px;
   font-family: inherit;
-  font-weight: 620;
+  font-weight: var(--echo-weight-label);
   line-height: 1.35;
   text-align: left;
   cursor: pointer;
@@ -283,7 +283,7 @@
   border: 1px solid var(--theme-button-border);
   background: var(--theme-button-bg);
   font: inherit;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .album-primary-action {
@@ -349,7 +349,7 @@
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -386,7 +386,7 @@
   background: transparent;
   font: inherit;
   font-size: 13px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .album-detail-tab[aria-current='page'] {
@@ -437,14 +437,14 @@
 .album-online-header small {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
 .album-online-header strong {
   color: var(--theme-heading-text);
   font-size: 14px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-heading);
 }
 
 .album-online-header button,
@@ -461,7 +461,7 @@
   background: color-mix(in srgb, var(--theme-button-bg-hover) 82%, transparent);
   font: inherit;
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .album-online-header button:disabled,
@@ -518,7 +518,7 @@
 .album-source-link-grid small {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
@@ -528,7 +528,7 @@
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 16px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -539,7 +539,7 @@
   margin: 0;
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
   line-height: 1.5;
 }
 
@@ -569,7 +569,7 @@
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 20px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -600,7 +600,7 @@
 .album-release-version-meta small {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
@@ -609,7 +609,7 @@
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 12px;
-  font-weight: 790;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -647,7 +647,7 @@
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -681,7 +681,7 @@
   border: 1px solid var(--theme-accent-border);
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   text-decoration: none;
 }
 
@@ -709,7 +709,7 @@
 .album-information-overview span {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
@@ -718,7 +718,7 @@
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 15px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -727,7 +727,7 @@
   overflow: hidden;
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 740;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -755,7 +755,7 @@
 .album-credit-group header small {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
@@ -764,7 +764,7 @@
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
@@ -773,7 +773,7 @@
   margin: 0;
   color: #6f7c8c;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
   line-height: 1.55;
 }
 
@@ -799,7 +799,7 @@
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -812,7 +812,7 @@
   color: var(--theme-muted-text);
   font-size: 11px;
   font-style: normal;
-  font-weight: 720;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -861,7 +861,7 @@
   flex: 0 0 auto;
   color: var(--theme-accent-text-strong);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
 }
 
 .album-related-library {
@@ -890,7 +890,7 @@
   overflow: hidden;
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   line-height: 1.3;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -901,7 +901,7 @@
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 18px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
@@ -981,7 +981,7 @@
   background: color-mix(in srgb, var(--theme-accent-solid-bg) 82%, black 18%);
   box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-accent-text-strong) 22%, transparent);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1008,7 +1008,7 @@
 .album-related-album-copy strong {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   line-height: 1.25;
 }
 
@@ -1016,7 +1016,7 @@
 .album-related-album-copy small {
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 690;
+  font-weight: var(--echo-weight-body);
 }
 
 .album-related-album-copy small {
@@ -1046,7 +1046,7 @@
   padding: 18px;
   color: var(--theme-muted-text);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
 }
 
 .album-streaming-track-list {
@@ -1103,7 +1103,7 @@
 .album-streaming-track-main strong {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .album-streaming-track-main span,
@@ -1111,7 +1111,7 @@
 .album-streaming-track-duration {
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
 }
 
 .album-streaming-track-actions {
@@ -1178,7 +1178,7 @@
 .album-information-article span {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
@@ -1186,13 +1186,13 @@
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 20px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-heading);
 }
 
 .album-information-article small {
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 .album-information-body {
@@ -1207,7 +1207,7 @@
   margin: 10px 0 0;
   color: var(--theme-heading-text);
   font-size: 14px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.35;
 }
 
@@ -1221,7 +1221,7 @@
   margin: 0;
   color: var(--theme-page-text);
   font-size: 15px;
-  font-weight: 580;
+  font-weight: var(--echo-weight-body);
   line-height: 1.86;
   overflow-wrap: anywhere;
 }
@@ -1246,7 +1246,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--theme-button-bg-hover) 82%, transparent);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   text-decoration: none;
 }
 
@@ -1259,7 +1259,7 @@
 .album-information-links > span {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
@@ -1281,7 +1281,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--theme-button-bg-hover) 72%, transparent);
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   text-decoration: none;
 }
 
@@ -1353,7 +1353,7 @@
   border-radius: 4px;
   background: color-mix(in srgb, var(--theme-accent-solid-bg) 82%, #101827 18%);
   font-size: 10px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0;
   line-height: 1;
 }
@@ -1371,7 +1371,7 @@
   overflow: hidden;
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0;
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -1383,7 +1383,7 @@
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 20px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
   line-height: 1.1;
 }
@@ -1393,7 +1393,7 @@
   margin: 0;
   color: var(--theme-page-text);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -1430,13 +1430,13 @@
 .album-dna-summary small {
   flex: 0 0 auto;
   color: var(--theme-muted-text);
-  font-weight: 800;
+  font-weight: var(--echo-weight-body);
 }
 
 .album-dna-summary strong {
   min-width: 0;
   color: var(--theme-heading-text);
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .album-dna-expand {
@@ -1452,7 +1452,7 @@
   background: color-mix(in srgb, var(--theme-accent-soft-bg) 68%, transparent);
   font: inherit;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -1515,7 +1515,7 @@
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 14px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1542,14 +1542,14 @@
 .album-dna-fact strong {
   color: var(--theme-page-text);
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   line-height: 1.25;
 }
 
 .album-dna-fact small {
   color: var(--theme-subtle-text);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
 }
 
 .album-dna-fact[data-tone='good'] strong {
@@ -1579,7 +1579,7 @@
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1630,7 +1630,7 @@
   overflow: hidden;
   min-width: 0;
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1639,7 +1639,7 @@
   flex: 0 0 auto;
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
 }
 
 .album-dna-artist svg {
@@ -1654,7 +1654,7 @@
   padding-inline: var(--album-detail-track-content-x);
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
 }
 
 .album-track-summary {
@@ -1697,7 +1697,7 @@
   padding: 0 var(--album-detail-track-content-x);
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -1712,7 +1712,7 @@
   padding: 18px var(--album-detail-track-content-x) 6px;
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -1825,7 +1825,7 @@
   color: var(--theme-muted-text);
   font-size: 11px;
   font-style: normal;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
   white-space: nowrap;
 }
 

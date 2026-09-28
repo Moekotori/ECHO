@@ -173,7 +173,7 @@ describe('ArtistsPage', () => {
     await waitFor(() => expect(getArtists).toHaveBeenCalledTimes(1));
     expect(getArtists).toHaveBeenCalledWith({ page: 1, pageSize: 96, search: '', sort: 'default', sourceProvider: 'local' });
     expect(screen.getByText('安田レイ')).toBeTruthy();
-    expect(screen.getByText('4 tracks / 1 albums')).toBeTruthy();
+    expect(await screen.findByText('4 tracks / 1 albums')).toBeTruthy();
     expect(screen.getByText('安田')).toBeTruthy();
   });
 

@@ -68,7 +68,7 @@
   background: transparent;
   font: inherit;
   font-size: 14px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, box-shadow 150ms ease;
 }
@@ -158,7 +158,7 @@
 .connect-radio-resume__copy strong {
   color: var(--connect-session-ink);
   font-size: 14px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
 }
 
 .connect-radio-resume__copy small {

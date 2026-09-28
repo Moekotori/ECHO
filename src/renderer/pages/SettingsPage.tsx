@@ -1,57 +1,7 @@
 import { UltraLightSettingsRows } from './settings/components/UltraLightSettingsRows';
 import { lazy, Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
-import {
-  Accessibility,
-  AudioLines,
-  BookOpen,
-  Captions,
-  Check,
-  Clapperboard,
-  Code2,
-  Clipboard,
-  Download,
-  Eye,
-  EyeOff,
-  ExternalLink,
-  FileDown,
-  FileText,
-  FlaskConical,
-  FolderOpen,
-  Gauge,
-  Github,
-  Globe2,
-  Headphones,
-  Info,
-  Keyboard,
-  KeyRound,
-  Link2,
-  LogIn,
-  LogOut,
-  Mail,
-  MessageSquare,
-  Monitor,
-  Palette,
-  Pause,
-  Play,
-  QrCode,
-  RefreshCw,
-  RotateCcw,
-  RotateCw,
-  Search,
-  Save,
-  Sparkles,
-  ShieldCheck,
-  ShieldAlert,
-  Trash2,
-  User,
-  UsersRound,
-  VolumeX,
-  X,
-  Zap,
-  ChevronDown,
-  ChevronRight,
-} from 'lucide-react';
+import { Accessibility, AudioLines, BookOpen, Captions, Check, Clapperboard, Code2, Clipboard, Download, ExternalLink, FileDown, FileText, FlaskConical, FolderOpen, Gauge, Github, Globe2, Headphones, Info, Keyboard, KeyRound, Link2, Mail, MessageSquare, Monitor, Palette, Pause, Play, QrCode, RefreshCw, RotateCcw, RotateCw, Search, Save, Sparkles, ShieldAlert, Trash2, User, UsersRound, VolumeX, X, Zap, ChevronDown, ChevronRight } from 'lucide-react';
 import type {
   AudioDeviceInfo,
   AudioOutputMode,
@@ -73,7 +23,7 @@ import {
   type SidebarRouteId,
 } from '../../shared/types/sidebar';
 import type { AccountBrowser, AccountProvider, AccountStatus, YouTubeBrowser } from '../../shared/types/accounts';
-import type { EchoProAccountStatus, EchoProPluginActivationMode } from '../../shared/types/privateEntitlements';
+
 import type {
   AccessibilityPreferences,
   ArtistOnlineInfoSource,
@@ -277,38 +227,7 @@ import {
   settingsSubsectionCopy,
   type SettingsSubsectionCopyKey,
 } from './settings/settingsSubsections';
-import {
-  bestReadableColor,
-  buildPluginThemeCustomTheme,
-  buildRandomThemeDraft,
-  buildThemeCustomTheme,
-  buildThemePresetOverrides,
-  collectPluginThemeOptions,
-  createThemeCustomId,
-  createThemeExportPayload,
-  downloadTextFile,
-  duplicateThemeCustomTheme,
-  getRelativeLuminance,
-  getThemeContrastWarnings,
-  getThemeEditorDefaults,
-  isEchoProUnlockPluginActive,
-  isProOnlyThemePreset,
-  isThemeExportPayload,
-  mergeThemeToneValues,
-  numberThemeFields,
-  defaultThemeScheduleDarkAt,
-  defaultThemeScheduleLightAt,
-  randomThemePresetOption,
-  readThemeExportPreset,
-  renameThemeCustomTheme,
-  themePresetOptions,
-  updateThemeCustomThemeTone,
-  type GeneratedRandomThemeDraft,
-  type PluginThemeOption,
-  type ThemeColorField,
-  type ThemeNumberField,
-  type ThemeTone,
-} from './settings/appearance/themeSettingsModel';
+import { bestReadableColor, buildPluginThemeCustomTheme, buildRandomThemeDraft, buildThemeCustomTheme, buildThemePresetOverrides, collectPluginThemeOptions, createThemeCustomId, createThemeExportPayload, downloadTextFile, duplicateThemeCustomTheme, getRelativeLuminance, getThemeContrastWarnings, getThemeEditorDefaults, isProOnlyThemePreset, isThemeExportPayload, mergeThemeToneValues, numberThemeFields, defaultThemeScheduleDarkAt, defaultThemeScheduleLightAt, randomThemePresetOption, readThemeExportPreset, renameThemeCustomTheme, themePresetOptions, updateThemeCustomThemeTone, type GeneratedRandomThemeDraft, type PluginThemeOption, type ThemeColorField, type ThemeNumberField, type ThemeTone } from './settings/appearance/themeSettingsModel';
 import {
   automixTemporarilyDisabled,
   audioExportFormatOptions,
@@ -329,6 +248,8 @@ import {
   playbackNoSoundGuideSteps,
   playbackAdvancedPanelExpandedStorageKey,
   playbackSpeedModes,
+  mouseGestureTrackSwitchCopy,
+  mouseGestureTrackSwitchSettingId,
   shufflePlaybackModeOptions,
 } from './settings/playback/playbackSettingsModel';
 import { PlaybackNoSoundGuideDialog } from './settings/playback/PlaybackNoSoundGuideDialog';
@@ -358,23 +279,8 @@ import {
   formatUpdateBytes,
   getDatabaseHealthLabel,
 } from './settings/diagnostics/settingsDiagnosticsFormat';
-import {
-  accountLoginUrls,
-  accountProviderLogoUrls,
-  cookieAccountProviders,
-  echoProActivationUrl,
-  generalEchoProAccountPanelExpandedStorageKey,
-  generalEchoProActivationPanelExpandedStorageKey,
-  readEchoProDisplayStatusSnapshot,
-  rememberEchoProDisplayStatus,
-  resetEchoProDisplayStatusSnapshotForTests,
-  settingsAccountProviders,
-  type EchoProDisplayStatusSnapshot,
-} from './settings/accounts/accountSettingsModel';
-import {
-  formatEchoProError,
-  normalizeEchoProErrorCode,
-} from './settings/accounts/echoProErrorFormat';
+import { accountLoginUrls, accountProviderLogoUrls, cookieAccountProviders, resetEchoProDisplayStatusSnapshotForTests, settingsAccountProviders } from './settings/accounts/accountSettingsModel';
+
 import {
   fallbackFontFamilies,
   type FontPickerTarget,
@@ -402,7 +308,6 @@ import {
   inferAppWallpaperMediaType,
 } from './settings/appearance/wallpaperSettingsModel';
 import {
-  afdianSponsorUrl,
   authorEmailUrl,
   bugFeedbackUrl,
   dataBackupProgressPhaseLabels,
@@ -512,8 +417,8 @@ export const SettingsPage = (): JSX.Element => {
   const [highlightedSettingId, setHighlightedSettingId] = useState<string | null>(null);
   const [mysteriousKeyVisible, setMysteriousKeyVisible] = useState(false);
   const mysteriousKeyUnlockNoticeShownRef = useRef(false);
-  const [finalThemeUnlocked, setFinalThemeUnlocked] = useState(false);
-  const [finalThemeUnlockChecked, setFinalThemeUnlockChecked] = useState(false);
+  const [finalThemeUnlocked, setFinalThemeUnlocked] = useState(true);
+  const [finalThemeUnlockChecked, setFinalThemeUnlockChecked] = useState(true);
   const finalThemeRelockAppliedRef = useRef(false);
   const finalThemeMarkerUnlockedRef = useRef(false);
   const [status, setStatus] = useState<AudioStatus | null>(null);
@@ -628,55 +533,7 @@ export const SettingsPage = (): JSX.Element => {
   const [accountMessages, setAccountMessages] = useState<Partial<Record<AccountProvider, string | null>>>({});
   const [neteaseQrLogin, setNeteaseQrLogin] = useState<NeteaseQrLoginUiState>(initialNeteaseQrLoginState);
   const neteaseQrCloseTimerRef = useRef<number | null>(null);
-  const [echoProAccountPanelExpanded, setEchoProAccountPanelExpanded] = useState(() =>
-    readBooleanStoragePreference(generalEchoProAccountPanelExpandedStorageKey, false),
-  );
-  const [echoProAccountStatus, setEchoProAccountStatus] = useState<EchoProAccountStatus | null>(null);
-  const [echoProAccountStatusChecked, setEchoProAccountStatusChecked] = useState(false);
-  const [echoProStatusSnapshot, setEchoProStatusSnapshot] = useState<EchoProDisplayStatusSnapshot>(
-    readEchoProDisplayStatusSnapshot,
-  );
-  const [echoProUsername, setEchoProUsername] = useState('');
-  const [echoProPassword, setEchoProPassword] = useState('');
-  const [echoProPasswordVisible, setEchoProPasswordVisible] = useState(false);
-  const [echoProCapsLockEnabled, setEchoProCapsLockEnabled] = useState(false);
-  const [echoProRedeemKey, setEchoProRedeemKey] = useState('');
-  const [echoProActivationMode, setEchoProActivationMode] = useState<EchoProPluginActivationMode>('afdian');
-  const [echoProActivationQq, setEchoProActivationQq] = useState('');
-  const [echoProActivationOrderId, setEchoProActivationOrderId] = useState('');
-  const [echoProActivationKey, setEchoProActivationKey] = useState('');
-  const [echoProActivationSecretVisible, setEchoProActivationSecretVisible] = useState(false);
-  const [echoProActivationBusyAction, setEchoProActivationBusyAction] = useState<'activate' | 'release' | null>(null);
-  const echoProActivationBusy = echoProActivationBusyAction !== null;
-  const [echoProActivationPanelExpanded, setEchoProActivationPanelExpanded] = useState(() =>
-    readBooleanStoragePreference(generalEchoProActivationPanelExpandedStorageKey, false),
-  );
-  const [echoProBusyAction, setEchoProBusyAction] = useState<'login' | 'register' | 'logout' | 'refresh' | 'redeem' | 'release-devices' | null>(null);
-  const [echoProMachineCode, setEchoProMachineCode] = useState<string | null>(null);
-  const [echoProMachineCodeCopied, setEchoProMachineCodeCopied] = useState(false);
-  const [echoProPluginUnlocked, setEchoProPluginUnlocked] = useState(false);
-  const [echoProPluginStatusChecked, setEchoProPluginStatusChecked] = useState(false);
-  const echoProUnlockedForDisplay = echoProAccountStatus?.pro === true || echoProPluginUnlocked || finalThemeUnlocked;
-  const echoProPluginUnlockedForStatus =
-    echoProPluginStatusChecked ? echoProPluginUnlocked : echoProStatusSnapshot.pluginUnlocked === true;
-  const echoProAccountStatusForStatus =
-    echoProAccountStatus ?? (!echoProAccountStatusChecked ? echoProStatusSnapshot.accountStatus : null);
-  const echoProUnlockedForStatus = echoProPluginUnlockedForStatus || echoProAccountStatusForStatus?.pro === true;
-  const [echoProMessage, setEchoProMessage] = useState<string | null>(null);
-  const [echoProError, setEchoProError] = useState<string | null>(null);
-  const echoProActivationReady = useMemo(() => {
-    const qqReady = /^[1-9][0-9]{4,11}$/u.test(echoProActivationQq.trim());
-    if (!qqReady) {
-      return false;
-    }
-    if (echoProActivationMode === 'afdian') {
-      return /^[0-9A-Za-z_-]{12,80}$/u.test(echoProActivationOrderId.trim());
-    }
-    return /^ECHO-[A-Z2-9]{5}(?:-[A-Z2-9]{5}){3}$/u.test(echoProActivationKey.trim().toUpperCase().replace(/\s+/gu, ''));
-  }, [echoProActivationKey, echoProActivationMode, echoProActivationOrderId, echoProActivationQq]);
-  const echoProOrderReleaseReady =
-    echoProActivationMode === 'afdian' &&
-    /^[0-9A-Za-z_-]{12,80}$/u.test(echoProActivationOrderId.trim());
+  const echoProUnlockedForDisplay = true;
   const [youtubeBrowser, setYoutubeBrowser] = useState<YouTubeBrowser>('none');
   const [soundCloudBrowser, setSoundCloudBrowser] = useState<AccountBrowser>('none');
   const [lastFmAuthToken, setLastFmAuthToken] = useState<string | null>(null);
@@ -860,22 +717,6 @@ export const SettingsPage = (): JSX.Element => {
 
       setAnimatedActiveSection(section as SettingsNavKey);
       setSettingsQuery('');
-      if (targetId === 'settings-row-echo-pro-account') {
-        setEchoProAccountPanelExpanded(true);
-        try {
-          window.localStorage.setItem(generalEchoProAccountPanelExpandedStorageKey, 'true');
-        } catch {
-          // Local storage can be unavailable in privacy-restricted shells; the in-memory toggle still works.
-        }
-      }
-      if (targetId === 'settings-row-echo-pro-activation') {
-        setEchoProActivationPanelExpanded(true);
-        try {
-          window.localStorage.setItem(generalEchoProActivationPanelExpandedStorageKey, 'true');
-        } catch {
-          // Local storage can be unavailable in privacy-restricted shells; the in-memory toggle still works.
-        }
-      }
       setHighlightedSettingId(targetId);
       if (targetId) {
         window.requestAnimationFrame(() => {
@@ -956,79 +797,6 @@ export const SettingsPage = (): JSX.Element => {
         title: t('settings.general.firstRunWizard.title'),
         description: t('settings.general.firstRunWizard.description'),
         terms: [t('settings.general.firstRunWizard.title'), t('settings.general.firstRunWizard.description'), '首次启动指引', '新手教程', '新手指引', '新手引导', '向导', '引导', '標準輸出', '標準出力', '标准输出', '系统音频', 'システムオーディオ', 'guide', 'beginner guide', 'onboarding', 'first run', 'welcome', 'system audio'],
-      },
-      {
-        id: 'row-echo-pro-activation',
-        sectionKey: 'general',
-        targetId: 'settings-row-echo-pro-activation',
-        title: t('settings.general.echoProActivation.title'),
-        description: t('settings.general.echoProActivation.description'),
-        terms: [
-          t('settings.general.echoProActivation.title'),
-          t('settings.general.echoProActivation.description'),
-          t('settings.general.echoProActivation.action'),
-          'ECHO Pro',
-          'Pro',
-          'activate',
-          'activation',
-          'membership',
-          'member',
-          'license',
-          'redeem',
-          'HWID',
-          'machine id',
-          'machine code',
-          'device binding',
-          'device limit',
-          'plugin package',
-          'Afdian',
-          '爱发电',
-          '会员',
-          '会员激活',
-          '激活码',
-          '设备绑定',
-          '机器码',
-          '插件包',
-          '解绑',
-          '激活',
-          '兑换',
-          echoProActivationUrl,
-        ],
-      },
-      {
-        id: 'row-echo-pro-account',
-        sectionKey: 'general',
-        targetId: 'settings-row-echo-pro-account',
-        title: t('settings.general.echoProAccount.title'),
-        description: t('settings.general.echoProAccount.unavailable'),
-        terms: [
-          'ECHO Pro',
-          'Echo Pro',
-          'Pro',
-          'pro account',
-          'membership',
-          'member',
-          'account',
-          'login',
-          'password',
-          'HWID',
-          'machine id',
-          'machine code',
-          'device binding',
-          'cloud account',
-          '账号',
-          '账户',
-          '登录',
-          '密码',
-          '会员',
-          '会员账号',
-          '云端验证',
-          '联网验证',
-          '机器码',
-          '设备绑定',
-          t('settings.general.echoProAccount.copyHwid'),
-          t('settings.general.echoProAccount.showHwid'),
-        ],
       },
       {
         id: 'row-low-spec-mode',
@@ -1790,6 +1558,21 @@ export const SettingsPage = (): JSX.Element => {
         title: t('settings.playback.gapless.title'),
         description: t('settings.playback.gapless.description'),
         terms: [t('settings.playback.gapless.title'), t('settings.playback.gapless.description'), '专辑无缝播放', '專輯無縫播放', 'ギャップレス', '无缝播放', 'gapless', 'gapless playback', '0 秒间隔', '连续播放'],
+      },
+      {
+        id: 'row-mouse-gesture-track-switch',
+        sectionKey: 'playback',
+        targetId: mouseGestureTrackSwitchSettingId,
+        title: settingsLocaleCopy(locale, mouseGestureTrackSwitchCopy.title),
+        description: settingsLocaleCopy(locale, mouseGestureTrackSwitchCopy.description),
+        terms: [
+          settingsLocaleCopy(locale, mouseGestureTrackSwitchCopy.title),
+          settingsLocaleCopy(locale, mouseGestureTrackSwitchCopy.description),
+          '手势切歌',
+          '鼠标横划',
+          'swipe',
+          'mouse gesture',
+        ],
       },
       {
         id: 'row-shuffle-credibility',
@@ -2783,30 +2566,6 @@ export const SettingsPage = (): JSX.Element => {
     }
   }, []);
 
-  const refreshEchoProAccountStatus = useCallback(async (options?: { force?: boolean }): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.getEchoProAccountStatus) {
-      setEchoProAccountStatus(null);
-      setEchoProAccountStatusChecked(true);
-      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ accountStatus: null }));
-      setEchoProError('ECHO Pro account bridge unavailable.');
-      return;
-    }
-
-    setEchoProBusyAction('refresh');
-    setEchoProError(null);
-    try {
-      const status = await app.getEchoProAccountStatus(options);
-      setEchoProAccountStatus(status);
-      setEchoProAccountStatusChecked(true);
-      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ accountStatus: status }));
-    } catch (accountError) {
-      setEchoProError(formatEchoProError(accountError, locale));
-    } finally {
-      setEchoProBusyAction(null);
-    }
-  }, [locale]);
-
   const copyTextToClipboard = useCallback(async (value: string): Promise<void> => {
     if (window.navigator?.clipboard?.writeText) {
       await window.navigator.clipboard.writeText(value);
@@ -2826,33 +2585,6 @@ export const SettingsPage = (): JSX.Element => {
       document.body.removeChild(textarea);
     }
   }, []);
-
-  const copyEchoProMachineCode = useCallback(async (): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.getEchoProMachineCode) {
-      setEchoProError('ECHO Pro HWID bridge unavailable.');
-      return;
-    }
-
-    setEchoProError(null);
-    try {
-      const machineCode = echoProMachineCode ?? await app.getEchoProMachineCode();
-      setEchoProMachineCode(machineCode);
-      await copyTextToClipboard(machineCode);
-      setEchoProMachineCodeCopied(true);
-      setEchoProMessage('HWID 已复制，可粘贴到 ECHO Pro 激活页面生成专属插件。');
-      window.setTimeout(() => setEchoProMachineCodeCopied(false), 1800);
-    } catch (copyError) {
-      setEchoProError(copyError instanceof Error ? copyError.message : String(copyError));
-    }
-  }, [copyTextToClipboard, echoProMachineCode]);
-
-  useEffect(() => {
-    if (echoProAccountPanelExpanded) {
-      void refreshEchoProAccountStatus();
-      void getAppBridge()?.getEchoProMachineCode?.().then(setEchoProMachineCode).catch(() => undefined);
-    }
-  }, [echoProAccountPanelExpanded, refreshEchoProAccountStatus]);
 
   const refreshLibraryDiagnostics = useCallback(async () => {
     try {
@@ -2927,7 +2659,7 @@ export const SettingsPage = (): JSX.Element => {
       const customThemeId = normalizeThemeCustomId(settings.appearanceThemeCustomId ?? null, customThemes);
       const activeCustomTheme = customThemes.find((theme) => theme.id === customThemeId);
       const basePreset = activeCustomTheme?.basePreset ?? settings.appearanceThemePreset ?? defaultThemePreset;
-      const settingsFinalThemeUnlocked = settings.finalThemeUnlockVersion === finalThemeUnlockVersion;
+      const settingsFinalThemeUnlocked = true;
       finalThemeMarkerUnlockedRef.current = settingsFinalThemeUnlocked;
       if (settingsFinalThemeUnlocked) {
         setFinalThemeUnlocked(true);
@@ -2986,55 +2718,20 @@ export const SettingsPage = (): JSX.Element => {
   useEffect(() => {
     let disposed = false;
     const plugins = getPluginsBridge();
-    const app = getAppBridge();
-
     const refreshUnlockState = (): void => {
-      void Promise.all([
-        plugins?.list().catch(() => null) ?? Promise.resolve(null),
-        app?.getEchoProAccountStatus?.().catch(() => null) ?? Promise.resolve(null),
-        app?.getEchoProLocalEntitlementStatus?.().catch(() => null) ?? Promise.resolve(null),
-      ])
-        .then(([pluginResult, echoProStatus, localEntitlement]) => {
-          if (!disposed) {
-            const pluginUnlocked = localEntitlement
-              ? localEntitlement.source === 'native-license' || localEntitlement.source === 'legacy-plugin'
-              : pluginResult?.plugins.some(isEchoProUnlockPluginActive) === true;
-            if (pluginResult || localEntitlement) {
-              setEchoProPluginUnlocked(pluginUnlocked);
-              setEchoProPluginStatusChecked(true);
-            }
-            if (echoProStatus) {
-              setEchoProAccountStatus(echoProStatus);
-              setEchoProAccountStatusChecked(true);
-            }
-            setEchoProStatusSnapshot(rememberEchoProDisplayStatus({
-              ...(echoProStatus ? { accountStatus: echoProStatus } : {}),
-              ...(pluginResult || localEntitlement ? { pluginUnlocked } : {}),
-            }));
-            setFinalThemeUnlocked((current) =>
-              echoProStatus?.pro === true || localEntitlement?.unlocked === true ||
-              (pluginResult ? pluginUnlocked : current) || finalThemeMarkerUnlockedRef.current,
-            );
-            setFinalThemeUnlockChecked(true);
-            setPluginThemeOptions(pluginResult ? collectPluginThemeOptions(pluginResult.plugins) : []);
-          }
-        })
-        .catch(() => {
-          if (!disposed) {
-            setFinalThemeUnlocked(finalThemeMarkerUnlockedRef.current);
-            setFinalThemeUnlockChecked(true);
-          }
-        });
+      void (plugins?.list().catch(() => null) ?? Promise.resolve(null)).then((pluginResult) => {
+        if (!disposed) {
+          setPluginThemeOptions(pluginResult ? collectPluginThemeOptions(pluginResult.plugins) : []);
+        }
+      });
     };
 
     refreshUnlockState();
     window.addEventListener('plugins:changed', refreshUnlockState);
-    window.addEventListener('echo-pro:status-changed', refreshUnlockState);
 
     return () => {
       disposed = true;
       window.removeEventListener('plugins:changed', refreshUnlockState);
-      window.removeEventListener('echo-pro:status-changed', refreshUnlockState);
     };
   }, []);
 
@@ -3811,14 +3508,7 @@ export const SettingsPage = (): JSX.Element => {
     if (isIntegrationCredentialSettingId(options.targetId)) {
       setCredentialPanelExpanded(true);
     }
-    if (options.targetId === 'settings-row-echo-pro-account') {
-      setEchoProAccountPanelExpanded(true);
-      try {
-        window.localStorage.setItem(generalEchoProAccountPanelExpandedStorageKey, 'true');
-      } catch {
-        // Local storage can be unavailable in privacy-restricted shells; the in-memory toggle still works.
-      }
-    }
+
     if (options.clearSearch) {
       setSettingsQuery('');
     }
@@ -4231,9 +3921,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       setThemeCustomMessage(ambientThemePresetLockMessage);
       return;
     }
-    if (isProOnlyThemePreset(appearanceThemePreset) && !echoProUnlockedForDisplay) {
-      return;
-    }
 
     pendingRandomThemeDraftRef.current = null;
     const nextCustomId = activeThemeCustom ? null : savedThemeCustomId;
@@ -4265,46 +3952,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
         ? { appearanceThemePreset, appearanceThemeCustomId: null, ...finalThemeUnlockPatch }
         : { appearanceThemePreset, ...finalThemeUnlockPatch },
     );
-  };
-
-  const revokeFinalThemeSelection = (message?: string): void => {
-    const fallbackPreset: AppThemePreset = 'classic';
-    const safeCustomThemes = savedThemeCustomThemes.filter((theme) => theme.basePreset !== 'FINAL');
-    pendingRandomThemeDraftRef.current = null;
-    skipNextThemePreviewRef.current = true;
-    updateThemePreferences(appSettings?.appearanceTheme ?? defaultThemeMode, fallbackPreset, savedThemePresetOverrides, {
-      animate: true,
-      customThemeId: null,
-      customThemes: safeCustomThemes,
-      scheduleSettings: getThemeScheduleSettings({
-        appearanceThemePreset: fallbackPreset,
-        appearanceCustomThemes: safeCustomThemes,
-        appearanceThemeCustomId: null,
-      }),
-    });
-    setSelectedThemePreset(fallbackPreset);
-    setActiveThemeCustomId(null);
-    setAppSettings((current) =>
-      current
-        ? {
-            ...current,
-            appearanceThemePreset: fallbackPreset,
-            appearanceCustomThemes: safeCustomThemes,
-            appearanceThemeCustomId: null,
-            finalThemeUnlockVersion: null,
-          }
-        : current,
-    );
-    setThemeCustomThemes(safeCustomThemes);
-    patchAppSettings({
-      appearanceThemePreset: fallbackPreset,
-      appearanceCustomThemes: safeCustomThemes,
-      appearanceThemeCustomId: null,
-      finalThemeUnlockVersion: null,
-    });
-    if (message) {
-      setThemeCustomMessage(message);
-    }
   };
 
   const handleRandomThemeCreate = (): void => {
@@ -4455,14 +4102,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       return;
     }
 
-    if (
-      (isProOnlyThemePreset(selectedThemePreset) || (activeThemeCustom && isProOnlyThemePreset(activeThemeCustom.basePreset))) &&
-      !echoProUnlockedForDisplay
-    ) {
-      revokeFinalThemeSelection(t('settings.appearance.themeCustom.message.importFailed'));
-      return;
-    }
-
     const currentTheme = activeThemeCustom;
     const pendingRandomTheme = pendingRandomThemeDraftRef.current;
     const buildSavedRandomTheme = (): AppThemeCustomTheme => {
@@ -4517,14 +4156,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       return;
     }
 
-    if (
-      (isProOnlyThemePreset(selectedThemePreset) || (activeThemeCustom && isProOnlyThemePreset(activeThemeCustom.basePreset))) &&
-      !echoProUnlockedForDisplay
-    ) {
-      revokeFinalThemeSelection(t('settings.appearance.themeCustom.message.importFailed'));
-      return;
-    }
-
     pendingRandomThemeDraftRef.current = null;
     setThemeCustomDraft({});
     if (activeThemeCustom) {
@@ -4560,14 +4191,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       return;
     }
 
-    if (
-      (isProOnlyThemePreset(selectedThemePreset) || (activeThemeCustom && isProOnlyThemePreset(activeThemeCustom.basePreset))) &&
-      !echoProUnlockedForDisplay
-    ) {
-      revokeFinalThemeSelection(t('settings.appearance.themeCustom.message.importFailed'));
-      return;
-    }
-
     const payload = createThemeExportPayload(savedThemeCustomThemes, activeThemeCustom, selectedThemePreset, themeCustomTone, themeCustomDraft);
     downloadTextFile(`echo-theme-${payload.theme.name}.echo-theme.json`, `${JSON.stringify(payload, null, 2)}\n`);
     setThemeCustomMessage(t('settings.appearance.themeCustom.message.exported'));
@@ -4598,15 +4221,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
 
           let importedTheme: AppThemeCustomTheme | undefined;
           if (parsed.version === 2 && parsed.schema === 'echo-next.custom-theme') {
-            if (
-              parsed.theme &&
-              typeof parsed.theme === 'object' &&
-              !Array.isArray(parsed.theme) &&
-              isProOnlyThemePreset((parsed.theme as Partial<AppThemeCustomTheme>).basePreset as AppThemePreset) &&
-              !echoProUnlockedForDisplay
-            ) {
-              throw new Error('Pro custom themes cannot be imported without unlock');
-            }
+
             importedTheme = normalizeThemeCustomTheme(parsed.theme);
           } else if (parsed.version === 1 && parsed.schema === 'echo-next.theme-preset') {
             const importedPreset = readThemeExportPreset(parsed.preset);
@@ -4624,9 +4239,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
 
           if (!importedTheme) {
             throw new Error('Invalid theme payload');
-          }
-          if (isProOnlyThemePreset(importedTheme.basePreset) && !echoProUnlockedForDisplay) {
-            throw new Error('Pro custom themes cannot be imported without unlock');
           }
 
           const nextThemes = normalizeThemeCustomThemes([...savedThemeCustomThemes.filter((theme) => theme.id !== importedTheme.id), importedTheme]);
@@ -4669,11 +4281,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
 
   const handlePluginThemeApply = (pluginTheme: PluginThemeOption): void => {
     if (blockAmbientThemeEdit()) {
-      return;
-    }
-
-    if (isProOnlyThemePreset(pluginTheme.basePreset) && !echoProUnlockedForDisplay) {
-      revokeFinalThemeSelection(t('settings.appearance.themeCustom.message.importFailed'));
       return;
     }
 
@@ -4721,11 +4328,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       return;
     }
 
-    if (isProOnlyThemePreset(selectedThemePreset) && !echoProUnlockedForDisplay) {
-      revokeFinalThemeSelection(t('settings.appearance.themeCustom.message.importFailed'));
-      return;
-    }
-
     pendingRandomThemeDraftRef.current = null;
     const nextTheme = buildThemeCustomTheme(savedThemeCustomThemes, selectedThemePreset, themeCustomTone, themeCustomDraft);
     const nextThemes = normalizeThemeCustomThemes([...savedThemeCustomThemes, nextTheme]);
@@ -4758,11 +4360,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
 
   const handleThemeCustomSelect = (theme: AppThemeCustomTheme): void => {
     if (blockAmbientThemeEdit()) {
-      return;
-    }
-
-    if (isProOnlyThemePreset(theme.basePreset) && !echoProUnlockedForDisplay) {
-      revokeFinalThemeSelection(t('settings.appearance.themeCustom.message.importFailed'));
       return;
     }
 
@@ -4830,10 +4427,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     if (!activeThemeCustom) {
       return;
     }
-    if (isProOnlyThemePreset(activeThemeCustom.basePreset) && !echoProUnlockedForDisplay) {
-      revokeFinalThemeSelection(t('settings.appearance.themeCustom.message.importFailed'));
-      return;
-    }
 
     pendingRandomThemeDraftRef.current = null;
     const nextThemes = duplicateThemeCustomTheme(savedThemeCustomThemes, activeThemeCustom.id);
@@ -4874,10 +4467,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     if (!activeThemeCustom) {
       return;
     }
-    if (isProOnlyThemePreset(activeThemeCustom.basePreset) && !echoProUnlockedForDisplay) {
-      revokeFinalThemeSelection(t('settings.appearance.themeCustom.message.importFailed'));
-      return;
-    }
+
     if (!window.confirm(t('settings.appearance.themeCustom.action.delete'))) {
       return;
     }
@@ -5084,16 +4674,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     }
 
     const nextEnabled = !(appSettings.appWindowAcrylicEnabled ?? false);
-    if (nextEnabled && !echoProUnlockedForDisplay) {
-      setError('窗口亚克力是 ECHO Pro Only 功能，请先在通用设置登录、兑换 ECHO Pro 或导入有效 Pro 插件。');
-      setEchoProAccountPanelExpanded(true);
-      try {
-        window.localStorage.setItem(generalEchoProAccountPanelExpandedStorageKey, 'true');
-      } catch {
-        // Ignore storage failures; the in-memory panel state is enough for this session.
-      }
-      return;
-    }
 
     void app
       .setSettings({ appWindowAcrylicEnabled: nextEnabled })
@@ -5112,31 +4692,25 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       .catch((settingsError) => {
         setError(settingsError instanceof Error ? settingsError.message : String(settingsError));
       });
-  }, [appSettings, dispatchSettingsChanged, echoProUnlockedForDisplay, t]);
+  }, [appSettings, dispatchSettingsChanged, t]);
 
   const handleWindowAcrylicTransparencyChange = useCallback(
     (value: number): void => {
-      if (!echoProUnlockedForDisplay) {
-        setError('窗口亚克力是 ECHO Pro Only 功能，请先在通用设置登录、兑换 ECHO Pro 或导入有效 Pro 插件。');
-        return;
-      }
+
       patchAppSettings({
         appWindowAcrylicTransparencyPercent: Math.max(0, Math.min(100, Math.round(value))),
       });
     },
-    [echoProUnlockedForDisplay, patchAppSettings],
+    [patchAppSettings],
   );
 
   const handleWindowAcrylicKeepWhenUnfocusedToggle = useCallback((): void => {
     const nextEnabled = !(appSettings?.appWindowAcrylicKeepWhenUnfocusedEnabled ?? false);
-    if (nextEnabled && !echoProUnlockedForDisplay) {
-      setError('窗口亚克力是 ECHO Pro Only 功能，请先在通用设置登录、兑换 ECHO Pro 或导入有效 Pro 插件。');
-      return;
-    }
+
     patchAppSettings({
       appWindowAcrylicKeepWhenUnfocusedEnabled: nextEnabled,
     });
-  }, [appSettings?.appWindowAcrylicKeepWhenUnfocusedEnabled, echoProUnlockedForDisplay, patchAppSettings]);
+  }, [appSettings?.appWindowAcrylicKeepWhenUnfocusedEnabled, patchAppSettings]);
 
   const handleSidebarRouteDragStart = useCallback((event: ReactDragEvent<HTMLDivElement>, routeId: SidebarRouteId): void => {
     setDraggingSidebarRouteId(routeId);
@@ -5572,30 +5146,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     });
   }, []);
 
-  const toggleEchoProAccountPanelExpanded = useCallback((): void => {
-    setEchoProAccountPanelExpanded((expanded) => {
-      const next = !expanded;
-      try {
-        window.localStorage.setItem(generalEchoProAccountPanelExpandedStorageKey, next ? 'true' : 'false');
-      } catch {
-        // Local storage can be unavailable in privacy-restricted shells; the in-memory toggle still works.
-      }
-      return next;
-    });
-  }, []);
-
-  const toggleEchoProActivationPanelExpanded = useCallback((): void => {
-    setEchoProActivationPanelExpanded((expanded) => {
-      const next = !expanded;
-      try {
-        window.localStorage.setItem(generalEchoProActivationPanelExpandedStorageKey, next ? 'true' : 'false');
-      } catch {
-        // Local storage can be unavailable in privacy-restricted shells; the in-memory toggle still works.
-      }
-      return next;
-    });
-  }, []);
-
   const toggleCredentialPanelExpanded = useCallback((): void => {
     setCredentialPanelExpanded((expanded) => {
       const next = !expanded;
@@ -5606,299 +5156,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       }
       return next;
     });
-  }, []);
-
-  const submitEchoProAccount = useCallback(async (action: 'login' | 'register'): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.loginEchoProAccount || !app.registerEchoProAccount) {
-      setEchoProError('ECHO Pro account bridge unavailable.');
-      return;
-    }
-
-    setEchoProBusyAction(action);
-    setEchoProError(null);
-    setEchoProMessage(null);
-    try {
-      const credentials = { username: echoProUsername.trim(), password: echoProPassword };
-      const status = action === 'login'
-        ? await app.loginEchoProAccount(credentials)
-        : await app.registerEchoProAccount(credentials);
-      setEchoProAccountStatus(status);
-      setEchoProAccountStatusChecked(true);
-      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ accountStatus: status }));
-      setEchoProPassword('');
-      window.dispatchEvent(new Event('echo-pro:status-changed'));
-      setEchoProMessage(action === 'login' ? '已登录 ECHO Pro 账号。下次启动会自动保持登录。' : '账号已创建。下次启动会自动保持登录，Pro 资格需要服务器授权或兑换 Key 后生效。');
-    } catch (accountError) {
-      setEchoProError(formatEchoProError(accountError, locale));
-    } finally {
-      setEchoProBusyAction(null);
-    }
-  }, [echoProPassword, echoProUsername, locale]);
-
-  const logoutEchoProAccount = useCallback(async (): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.logoutEchoProAccount) {
-      setEchoProError('ECHO Pro account bridge unavailable.');
-      return;
-    }
-
-    setEchoProBusyAction('logout');
-    setEchoProError(null);
-    setEchoProMessage(null);
-    try {
-      const status = await app.logoutEchoProAccount();
-      setEchoProAccountStatus(status);
-      setEchoProAccountStatusChecked(true);
-      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ accountStatus: status }));
-      window.dispatchEvent(new Event('echo-pro:status-changed'));
-      setEchoProMessage('已退出 ECHO Pro 账号。');
-    } catch (accountError) {
-      setEchoProError(formatEchoProError(accountError, locale));
-    } finally {
-      setEchoProBusyAction(null);
-    }
-  }, [locale]);
-
-  const activateEchoProPluginInApp = useCallback(async (): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.activateEchoProPlugin) {
-      setEchoProError('ECHO Pro activation bridge unavailable.');
-      return;
-    }
-
-    setEchoProActivationBusyAction('activate');
-    setEchoProError(null);
-    setEchoProMessage(null);
-    try {
-      const submitActivation = (replaceMachineBinding: boolean) => app.activateEchoProPlugin(
-        echoProActivationMode === 'afdian'
-          ? {
-              mode: 'afdian',
-              qq: echoProActivationQq,
-              orderId: echoProActivationOrderId,
-              ...(replaceMachineBinding ? { replaceMachineBinding: true } : {}),
-            }
-          : {
-              mode: 'key',
-              qq: echoProActivationQq,
-              key: echoProActivationKey,
-              ...(replaceMachineBinding ? { replaceMachineBinding: true } : {}),
-            },
-      );
-      let replaceMachineBinding = false;
-      let result;
-      try {
-        result = await submitActivation(false);
-      } catch (activationError) {
-        if (normalizeEchoProErrorCode(activationError) !== 'echo_pro_activation_machine_binding_confirmation_required') {
-          throw activationError;
-        }
-        if (!window.confirm(
-          locale === 'zh-CN'
-            ? '这份 Pro 授权目前绑定在另一台设备上。\n\n继续后，ECHO 只会释放这份授权对应的旧设备，并立即绑定到当前电脑；其他授权和订单不会受影响。\n\n确认换绑到这台电脑吗？'
-            : 'This Pro license is currently bound to another device.\n\nContinuing releases only the old device proven by this license and immediately binds this computer. Other licenses and orders are unaffected.\n\nMove Pro to this computer?',
-        )) {
-          setEchoProError(formatEchoProError(new Error('echo_pro_license_machine-mismatch'), locale));
-          return;
-        }
-        replaceMachineBinding = true;
-        result = await submitActivation(true);
-      }
-      setEchoProPluginUnlocked(result.enabled);
-      setEchoProPluginStatusChecked(true);
-      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ pluginUnlocked: result.enabled }));
-      if (result.enabled) {
-        setFinalThemeUnlocked(true);
-      }
-      if (echoProActivationMode === 'afdian') {
-        setEchoProActivationOrderId('');
-      } else {
-        setEchoProActivationKey('');
-      }
-      setEchoProActivationSecretVisible(false);
-      window.dispatchEvent(new Event('plugins:changed'));
-      window.dispatchEvent(new Event('echo-pro:status-changed'));
-      setEchoProMessage(locale === 'zh-CN'
-        ? replaceMachineBinding
-          ? '换绑完成：旧设备名额已释放，ECHO Pro 已在这台电脑启用。以后无需安装授权插件。'
-          : '激活完成：ECHO Pro 已在这台电脑启用。以后启动会自动识别，无需安装授权插件。'
-        : replaceMachineBinding
-          ? 'Transfer complete: the old device slot was released and ECHO Pro is enabled on this computer. No license plugin is required.'
-          : 'Activation complete: ECHO Pro is enabled on this computer and will be recognized automatically. No license plugin is required.');
-    } catch (activationError) {
-      setEchoProError(formatEchoProError(activationError, locale));
-    } finally {
-      setEchoProActivationBusyAction(null);
-    }
-  }, [echoProActivationKey, echoProActivationMode, echoProActivationOrderId, echoProActivationQq, locale]);
-
-  const releaseEchoProCurrentDevice = useCallback(async (): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.releaseEchoProCurrentDevice) {
-      setEchoProError('ECHO Pro device release bridge unavailable.');
-      return;
-    }
-    const releaseByOrder = echoProActivationMode === 'afdian';
-    const orderId = echoProActivationOrderId.trim();
-    if (releaseByOrder && !/^[0-9A-Za-z_-]{12,80}$/u.test(orderId)) {
-      setEchoProError(locale === 'zh-CN'
-        ? '请填写完整的爱发电订单号；订单解绑不需要 QQ。'
-        : 'Enter the complete Afdian order ID. QQ is not required for order release.');
-      return;
-    }
-    if (!window.confirm(
-      locale === 'zh-CN'
-        ? releaseByOrder
-          ? '解绑这个订单下的全部设备？\n\n只会提交爱发电订单号，不需要 QQ。该订单当前占用的所有设备名额都会释放，之后可重新激活。'
-          : '解绑当前电脑？\n\n只会释放这台电脑占用的设备名额，并删除本机授权；其他设备不会受影响。之后仍可重新激活。'
-        : releaseByOrder
-          ? 'Release every device for this order?\n\nOnly the Afdian order ID is submitted; QQ is not required. All occupied slots for this order will be released and can be activated again later.'
-          : 'Release this computer?\n\nOnly this computer’s slot and local license are removed. Other devices are unaffected, and you can activate again later.',
-    )) {
-      return;
-    }
-
-    setEchoProActivationBusyAction('release');
-    setEchoProError(null);
-    setEchoProMessage(null);
-    try {
-      const result = await app.releaseEchoProCurrentDevice(releaseByOrder ? orderId : undefined);
-      setEchoProPluginUnlocked(false);
-      setEchoProPluginStatusChecked(true);
-      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ pluginUnlocked: false }));
-      if (releaseByOrder) {
-        setEchoProActivationOrderId('');
-        setEchoProActivationSecretVisible(false);
-      }
-      window.dispatchEvent(new Event('plugins:changed'));
-      window.dispatchEvent(new Event('echo-pro:status-changed'));
-      setEchoProMessage(locale === 'zh-CN'
-        ? releaseByOrder
-          ? result.alreadyReleased
-            ? '这个订单已经没有已绑定设备，无需重复解绑。'
-            : `解绑完成：已释放这个订单的 ${result.releasedCount ?? 0} 个设备名额，现在可以重新激活。`
-          : '解绑完成：这台电脑的设备名额已释放，本机 Pro 已关闭；其他设备不受影响。'
-        : releaseByOrder
-          ? result.alreadyReleased
-            ? 'This order already has no active HWIDs. All device slots are released.'
-            : `Released ${result.releasedCount ?? 0} HWIDs for this order at ${formatProtectionTimestamp(result.releasedAt)}.`
-          : `This device was securely released at ${formatProtectionTimestamp(result.releasedAt)}.`);
-    } catch (releaseError) {
-      setEchoProError(formatEchoProError(releaseError, locale));
-    } finally {
-      setEchoProActivationBusyAction(null);
-    }
-  }, [echoProActivationMode, echoProActivationOrderId, locale]);
-
-  const logoutEchoProFromThisComputer = useCallback(async (): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.releaseEchoProCurrentDevice) {
-      setEchoProError('ECHO Pro device release bridge unavailable.');
-      return;
-    }
-    if (!window.confirm(
-      locale === 'zh-CN'
-        ? '登出 ECHO Pro？\n\n这会释放当前电脑占用的设备名额并删除本机授权；其他设备不受影响，之后仍可重新激活。'
-        : 'Sign out of ECHO Pro?\n\nThis releases only this computer’s device slot and removes its local license. Other devices are unaffected, and you can activate again later.',
-    )) {
-      return;
-    }
-
-    setEchoProActivationBusyAction('release');
-    setEchoProError(null);
-    setEchoProMessage(null);
-    try {
-      await app.releaseEchoProCurrentDevice();
-      setEchoProPluginUnlocked(false);
-      setEchoProPluginStatusChecked(true);
-      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ pluginUnlocked: false }));
-
-      if (echoProAccountStatusForStatus?.loggedIn && app.logoutEchoProAccount) {
-        const accountStatus = await app.logoutEchoProAccount();
-        setEchoProAccountStatus(accountStatus);
-        setEchoProAccountStatusChecked(true);
-        setEchoProStatusSnapshot(rememberEchoProDisplayStatus({
-          accountStatus,
-          pluginUnlocked: false,
-        }));
-      }
-
-      window.dispatchEvent(new Event('plugins:changed'));
-      window.dispatchEvent(new Event('echo-pro:status-changed'));
-      setEchoProMessage(locale === 'zh-CN'
-        ? '已登出 ECHO Pro：当前电脑的设备名额已释放，本机授权已移除；之后可随时重新激活。'
-        : 'Signed out of ECHO Pro. This computer’s device slot and local license were released; you can activate again anytime.');
-    } catch (logoutError) {
-      setEchoProError(formatEchoProError(logoutError, locale));
-    } finally {
-      setEchoProActivationBusyAction(null);
-    }
-  }, [echoProAccountStatusForStatus?.loggedIn, locale]);
-
-  const redeemEchoProKey = useCallback(async (): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.redeemEchoProKey) {
-      setEchoProError('ECHO Pro key bridge unavailable.');
-      return;
-    }
-
-    setEchoProBusyAction('redeem');
-    setEchoProError(null);
-    setEchoProMessage(null);
-    try {
-      const result = await app.redeemEchoProKey(echoProRedeemKey);
-      setEchoProAccountStatus(result.status);
-      setEchoProAccountStatusChecked(true);
-      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ accountStatus: result.status }));
-      setEchoProRedeemKey('');
-      window.dispatchEvent(new Event('echo-pro:status-changed'));
-      setEchoProMessage(`ECHO Pro key redeemed at ${formatProtectionTimestamp(result.redeemedAt)}.`);
-    } catch (redeemError) {
-      setEchoProError(formatEchoProError(redeemError, locale));
-    } finally {
-      setEchoProBusyAction(null);
-    }
-  }, [echoProRedeemKey, locale]);
-
-  const releaseEchoProDevices = useCallback(async (): Promise<void> => {
-    const app = getAppBridge();
-    if (!app?.releaseEchoProDevices) {
-      setEchoProError('ECHO Pro device bridge unavailable.');
-      return;
-    }
-    if (!echoProAccountStatus?.loggedIn) {
-      setEchoProError('Please log in before releasing ECHO Pro devices.');
-      return;
-    }
-    if (!echoProPassword) {
-      setEchoProError('Enter your current ECHO Pro password before releasing all devices.');
-      return;
-    }
-    if (!window.confirm('解绑所有 ECHO Pro 设备？这会释放当前账号的 2 个设备槽位，并让其它设备重新验证。')) {
-      return;
-    }
-
-    setEchoProBusyAction('release-devices');
-    setEchoProError(null);
-    setEchoProMessage(null);
-    try {
-      const result = await app.releaseEchoProDevices(echoProPassword);
-      setEchoProAccountStatus(result.status);
-      setEchoProAccountStatusChecked(true);
-      setEchoProStatusSnapshot(rememberEchoProDisplayStatus({ accountStatus: result.status }));
-      setEchoProPassword('');
-      window.dispatchEvent(new Event('echo-pro:status-changed'));
-      setEchoProMessage(`已解绑 ${result.releasedCount} 台设备，时间 ${formatProtectionTimestamp(result.releasedAt)}。`);
-    } catch (releaseError) {
-      setEchoProError(formatEchoProError(releaseError, locale));
-    } finally {
-      setEchoProBusyAction(null);
-    }
-  }, [echoProAccountStatus?.loggedIn, echoProPassword, locale]);
-
-  const updateEchoProCapsLock = useCallback((event: ReactKeyboardEvent<HTMLInputElement>): void => {
-    setEchoProCapsLockEnabled(event.getModifierState('CapsLock'));
   }, []);
 
   const handleOnlineAlbumInfoSave = useCallback((): void => {
@@ -9713,343 +8970,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   }
                 />
               </SettingRow>
-              <SettingSubsectionTitle
-                id="settings-subsection-account"
-                title={settingsLocaleCopy(locale, {
-    'zh-CN': '账户与 Pro',
-    'zh-TW': '帳戶與 Pro',
-    'ja-JP': 'アカウントと Pro',
-    'en-US': 'Account & Pro',
-    'ko-KR': 'Account & Pro',
-  })}
-              />
-              <SettingRow
-                id="settings-row-echo-pro-activation"
-                className="setting-row--credential setting-row--pro-activation"
-                highlighted={highlightedSettingId === 'settings-row-echo-pro-activation'}
-                title={t('settings.general.echoProActivation.title')}
-                description={t('settings.general.echoProActivation.description')}
-              >
-                <div className="settings-pro-activation-panel" data-expanded={echoProActivationPanelExpanded}>
-                  <div className="settings-pro-activation-header">
-                    <div className="settings-pro-activation-tags">
-                      <span className="list-filter-chip active settings-static-chip">
-                        解锁Pro
-                      </span>
-                      <span className={`list-filter-chip ${echoProUnlockedForStatus ? 'active' : ''}`.trim()}>
-                        {echoProPluginUnlockedForStatus ? '本机 Pro 已启用' : echoProAccountStatusForStatus?.pro ? '账号 Pro 已启用' : '待激活'}
-                      </span>
-                    </div>
-                    <div className="settings-pro-activation-header-actions">
-                      {echoProPluginUnlockedForStatus ? (
-                        <button
-                          className="settings-danger-button"
-                          type="button"
-                          disabled={echoProActivationBusy}
-                          onClick={() => void logoutEchoProFromThisComputer()}
-                        >
-                          <LogOut size={14} aria-hidden="true" />
-                          {echoProActivationBusyAction === 'release'
-                            ? (locale === 'zh-CN' ? '正在登出…' : 'Signing out…')
-                            : (locale === 'zh-CN' ? '登出 Pro' : 'Sign out of Pro')}
-                        </button>
-                      ) : null}
-                      <button
-                        className="settings-action-button"
-                        type="button"
-                        disabled={echoProActivationBusy}
-                        onClick={() => void handleOpenExternalUrl(echoProActivationUrl)}
-                      >
-                        <ExternalLink size={14} aria-hidden="true" />
-                        {t('settings.general.echoProActivation.action')}
-                      </button>
-                      <button
-                        className="settings-action-button settings-account-panel-toggle"
-                        type="button"
-                        aria-controls="settings-echo-pro-activation-body"
-                        aria-expanded={echoProActivationPanelExpanded}
-                        aria-label={echoProActivationPanelExpanded ? '折叠 ECHO Pro 激活' : '展开 ECHO Pro 激活'}
-                        onClick={toggleEchoProActivationPanelExpanded}
-                      >
-                        {echoProActivationPanelExpanded ? '折叠' : '展开'}
-                        <ChevronDown size={15} aria-hidden="true" />
-                      </button>
-                    </div>
-                  </div>
-                  {echoProActivationPanelExpanded ? (
-                    <div className="settings-pro-activation-body" id="settings-echo-pro-activation-body">
-                      <div className="settings-pro-activation-modes" role="group" aria-label="ECHO Pro activation mode">
-                        <button
-                          className={`list-filter-chip ${echoProActivationMode === 'afdian' ? 'active' : ''}`.trim()}
-                          type="button"
-                          disabled={echoProActivationBusy}
-                          onClick={() => {
-                            setEchoProActivationMode('afdian');
-                            setEchoProActivationSecretVisible(false);
-                          }}
-                        >
-                          <MessageSquare size={14} aria-hidden="true" />
-                          {locale === 'zh-CN' ? '爱发电订单' : 'Afdian Order'}
-                        </button>
-                        <button
-                          className={`list-filter-chip ${echoProActivationMode === 'key' ? 'active' : ''}`.trim()}
-                          type="button"
-                          disabled={echoProActivationBusy}
-                          onClick={() => {
-                            setEchoProActivationMode('key');
-                            setEchoProActivationSecretVisible(false);
-                          }}
-                        >
-                          <KeyRound size={14} aria-hidden="true" />
-                          Pro Key
-                        </button>
-                      </div>
-                      <div className="settings-pro-activation-fields">
-                        <label className="settings-account-cookie-field">
-                          <input
-                            type="text"
-                            aria-label={locale === 'zh-CN' ? '用于核对授权的 QQ 号' : 'QQ number used for verification'}
-                            value={echoProActivationQq}
-                            autoComplete="off"
-                            placeholder={locale === 'zh-CN' ? 'QQ 号' : 'QQ number'}
-                            disabled={echoProActivationBusy}
-                            onChange={(event) => setEchoProActivationQq(event.target.value)}
-                          />
-                        </label>
-                        <label className="settings-account-cookie-field">
-                          <span className="settings-account-field-wrap">
-                            <input
-                              type={echoProActivationSecretVisible ? 'text' : 'password'}
-                              aria-label={echoProActivationMode === 'afdian'
-                                ? (locale === 'zh-CN' ? '爱发电订单号' : 'Afdian order ID')
-                                : 'ECHO Pro Key'}
-                              value={echoProActivationMode === 'afdian' ? echoProActivationOrderId : echoProActivationKey}
-                              autoComplete="off"
-                              placeholder={echoProActivationMode === 'afdian'
-                                ? (locale === 'zh-CN' ? '爱发电订单号' : 'Afdian order ID')
-                                : 'ECHO Pro Key'}
-                              disabled={echoProActivationBusy}
-                              onChange={(event) => {
-                                if (echoProActivationMode === 'afdian') {
-                                  setEchoProActivationOrderId(event.target.value);
-                                } else {
-                                  setEchoProActivationKey(event.target.value);
-                                }
-                              }}
-                            />
-                            <button
-                              className="settings-account-password-toggle"
-                              type="button"
-                              aria-label={echoProActivationSecretVisible
-                                ? t('settings.general.echoProAccount.passwordHide')
-                                : t('settings.general.echoProAccount.passwordShow')}
-                              aria-pressed={echoProActivationSecretVisible}
-                              title={echoProActivationSecretVisible
-                                ? t('settings.general.echoProAccount.passwordHide')
-                                : t('settings.general.echoProAccount.passwordShow')}
-                              disabled={echoProActivationBusy}
-                              onClick={() => setEchoProActivationSecretVisible((visible) => !visible)}
-                            >
-                              {echoProActivationSecretVisible
-                                ? <EyeOff size={14} aria-hidden="true" />
-                                : <Eye size={14} aria-hidden="true" />}
-                            </button>
-                          </span>
-                        </label>
-                      </div>
-                      <div className="settings-account-actions settings-pro-activation-actions">
-                        <button
-                          className="settings-action-button settings-pro-activation-submit"
-                          type="button"
-                          disabled={echoProActivationBusy || !echoProActivationReady}
-                          onClick={() => void activateEchoProPluginInApp()}
-                        >
-                          <ShieldCheck size={14} aria-hidden="true" />
-                          {echoProActivationBusyAction === 'activate'
-                            ? (locale === 'zh-CN' ? '正在激活…' : 'Activating…')
-                            : echoProActivationBusy
-                              ? (locale === 'zh-CN' ? '请稍候…' : 'Please wait…')
-                              : (locale === 'zh-CN' ? '激活此设备' : 'Activate this device')}
-                        </button>
-                        <button
-                          className="settings-danger-button"
-                          type="button"
-                          disabled={echoProActivationBusy || (
-                            echoProActivationMode === 'afdian'
-                              ? !echoProOrderReleaseReady
-                              : !echoProPluginUnlockedForStatus
-                          )}
-                          onClick={() => void releaseEchoProCurrentDevice()}
-                        >
-                          <Trash2 size={14} aria-hidden="true" />
-                          {echoProActivationBusyAction === 'release'
-                            ? (locale === 'zh-CN' ? '正在解绑…' : 'Releasing…')
-                            : echoProActivationBusy
-                              ? (locale === 'zh-CN' ? '请稍候…' : 'Please wait…')
-                            : echoProActivationMode === 'afdian'
-                              ? (locale === 'zh-CN' ? '解绑此订单的设备' : 'Release order devices')
-                              : (locale === 'zh-CN' ? '解绑当前电脑' : 'Release this computer')}
-                        </button>
-                      </div>
-                      <p className="settings-inline-note settings-pro-activation-note">
-                        {locale === 'zh-CN'
-                          ? echoProActivationMode === 'afdian'
-                            ? '激活需要 QQ 和订单号；解绑只需要订单号，会释放该订单当前绑定的全部设备。'
-                            : '激活需要 QQ 和 Pro Key；解绑只释放当前电脑，其他设备不会受影响。'
-                          : echoProActivationMode === 'afdian'
-                            ? 'Activation requires QQ and the order ID. Release uses only the order ID and releases every active HWID for that order.'
-                            : 'Pro Key release proves the native signed license and raw machine code, releases only this HWID, and permanently removes the local license.'}
-                      </p>
-                      {echoProMessage ? <p className="settings-inline-note settings-pro-activation-note">{echoProMessage}</p> : null}
-                      {echoProError ? <p className="settings-inline-error settings-pro-activation-note">{echoProError}</p> : null}
-                    </div>
-                  ) : null}
-                </div>
-              </SettingRow>
-              <div
-                className="settings-account-panel settings-echo-pro-account-panel"
-                data-expanded={echoProAccountPanelExpanded}
-                data-search-highlight={highlightedSettingId === 'settings-row-echo-pro-account' ? 'true' : undefined}
-                id="settings-row-echo-pro-account"
-              >
-                <header className="settings-account-panel-header">
-                  <div>
-                    <h3>{t('settings.general.echoProAccount.title')}</h3>
-                    <p>{t('settings.general.echoProAccount.unavailable')}</p>
-                  </div>
-                  <div className="settings-account-panel-actions">
-                    <span className={`list-filter-chip ${echoProUnlockedForStatus ? 'active' : ''}`}>
-                      {echoProPluginUnlockedForStatus ? t('settings.general.echoProAccount.status.pluginUnlocked') : echoProAccountStatusForStatus?.pro ? t('settings.general.echoProAccount.status.proEnabled') : echoProAccountStatusForStatus?.loggedIn ? t('settings.general.echoProAccount.status.proUnauthorized') : t('settings.general.echoProAccount.status.loggedOut')}
-                    </span>
-                    {echoProMachineCode ? (
-                      <span className="settings-hwid-preview" title={echoProMachineCode}>
-                        HWID {echoProMachineCode.slice(0, 8)}...{echoProMachineCode.slice(-6)}
-                      </span>
-                    ) : null}
-                    <button
-                      className="settings-action-button"
-                      type="button"
-                      onClick={() => void copyEchoProMachineCode()}
-                    >
-                      {echoProMachineCodeCopied ? <Check size={14} aria-hidden="true" /> : <Clipboard size={14} aria-hidden="true" />}
-                      {echoProMachineCodeCopied ? t('settings.general.echoProAccount.hwidCopied') : t('settings.general.echoProAccount.showHwid')}
-                    </button>
-                    <button
-                      className="settings-action-button settings-account-panel-toggle"
-                      type="button"
-                      aria-controls="settings-echo-pro-account-body"
-                      aria-expanded={echoProAccountPanelExpanded}
-                      aria-label={echoProAccountPanelExpanded ? t('settings.general.echoProAccount.collapseAria') : t('settings.general.echoProAccount.expandAria')}
-                      onClick={toggleEchoProAccountPanelExpanded}
-                    >
-                      {echoProAccountPanelExpanded ? t('common.collapse') : t('common.expand')}
-                      <ChevronDown size={15} />
-                    </button>
-                  </div>
-                </header>
-                {echoProAccountPanelExpanded ? (
-                  <div className="settings-account-list settings-echo-pro-account-body" id="settings-echo-pro-account-body">
-                    <article className="settings-account-row">
-                      <div className="settings-account-summary">
-                        <User size={18} aria-hidden="true" />
-                        <div>
-                          <h3>{echoProAccountStatus?.displayName ?? echoProAccountStatus?.username ?? 'ECHO Pro'}</h3>
-                          <p>{echoProAccountStatus?.checkedAt ? t('settings.general.echoProAccount.lastChecked', { time: echoProAccountStatus.checkedAt }) : t('settings.general.echoProAccount.description')}</p>
-                        </div>
-                      </div>
-                      <label className="settings-account-cookie-field">
-                        <input
-                          type="text"
-                          value={echoProUsername}
-                          autoComplete="username"
-                          placeholder={t('settings.general.echoProAccount.usernamePlaceholder')}
-                          disabled={echoProBusyAction !== null}
-                          onChange={(event) => setEchoProUsername(event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-account-cookie-field">
-                        <span className="settings-account-field-wrap">
-                        <input
-                          type={echoProPasswordVisible ? 'text' : 'password'}
-                          value={echoProPassword}
-                          autoComplete={echoProAccountStatus?.loggedIn ? 'current-password' : 'new-password'}
-                          placeholder={t('settings.general.echoProAccount.passwordPlaceholder')}
-                          disabled={echoProBusyAction !== null}
-                          onChange={(event) => setEchoProPassword(event.target.value)}
-                          onKeyDown={updateEchoProCapsLock}
-                          onKeyUp={updateEchoProCapsLock}
-                          onBlur={() => setEchoProCapsLockEnabled(false)}
-                        />
-                          <button
-                            className="settings-account-password-toggle"
-                            type="button"
-                            aria-label={echoProPasswordVisible ? t('settings.general.echoProAccount.passwordHide') : t('settings.general.echoProAccount.passwordShow')}
-                            title={echoProPasswordVisible ? t('settings.general.echoProAccount.passwordHide') : t('settings.general.echoProAccount.passwordShow')}
-                            disabled={echoProBusyAction !== null}
-                            onClick={() => setEchoProPasswordVisible((visible) => !visible)}
-                          >
-                            {echoProPasswordVisible ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
-                          </button>
-                        </span>
-                        {echoProCapsLockEnabled ? <span className="settings-account-field-warning">{t('settings.general.echoProAccount.capsLock')}</span> : null}
-                      </label>
-                      <label className="settings-account-cookie-field">
-                        <input
-                          type="text"
-                          value={echoProRedeemKey}
-                          autoComplete="off"
-                          placeholder="ECHO Pro Key"
-                          disabled={echoProBusyAction !== null}
-                          onChange={(event) => setEchoProRedeemKey(event.target.value)}
-                        />
-                      </label>
-                      <div className="settings-account-actions">
-                        <button className="settings-action-button settings-account-login-button" type="button" disabled={echoProBusyAction !== null} onClick={() => void submitEchoProAccount('login')}>
-                          <LogIn size={14} aria-hidden="true" />
-                          {echoProBusyAction === 'login' ? t('settings.general.echoProAccount.action.loggingIn') : t('settings.general.echoProAccount.action.login')}
-                        </button>
-                        <button className="settings-action-button" type="button" disabled={echoProBusyAction !== null} onClick={() => void submitEchoProAccount('register')}>
-                          <User size={14} aria-hidden="true" />
-                          {echoProBusyAction === 'register' ? t('settings.general.echoProAccount.action.registering') : t('settings.general.echoProAccount.action.register')}
-                        </button>
-                        <button className="settings-action-button" type="button" disabled={echoProBusyAction !== null} onClick={() => void refreshEchoProAccountStatus({ force: true })}>
-                          <RefreshCw size={14} aria-hidden="true" />
-                          {echoProBusyAction === 'refresh' ? t('settings.general.echoProAccount.action.checking') : t('settings.general.echoProAccount.action.check')}
-                        </button>
-                        <button className="settings-action-button" type="button" disabled={echoProBusyAction !== null || !echoProAccountStatus?.loggedIn || echoProRedeemKey.trim().length === 0} onClick={() => void redeemEchoProKey()}>
-                          <KeyRound size={14} aria-hidden="true" />
-                          {echoProBusyAction === 'redeem' ? t('settings.general.echoProAccount.action.redeeming') : t('settings.general.echoProAccount.action.redeemKey')}
-                        </button>
-                        <button className="settings-danger-button" type="button" disabled={echoProBusyAction !== null || !echoProAccountStatus?.loggedIn} onClick={() => void logoutEchoProAccount()}>
-                          {echoProBusyAction === 'logout' ? t('settings.general.echoProAccount.action.loggingOut') : t('settings.general.echoProAccount.action.logout')}
-                        </button>
-                        <button className="settings-danger-button" type="button" disabled={echoProBusyAction !== null || !echoProAccountStatus?.loggedIn || echoProPassword.length === 0} onClick={() => void releaseEchoProDevices()}>
-                          {echoProBusyAction === 'release-devices' ? t('settings.general.echoProAccount.action.releasingDevices') : t('settings.general.echoProAccount.action.releaseDevices')}
-                        </button>
-                      </div>
-                      <div className="settings-account-meta">
-                        <span>{t('settings.general.echoProAccount.developmentNote')}</span>
-                        <span>{t('settings.general.echoProAccount.statusLine', { login: echoProAccountStatus?.loggedIn ? t('settings.general.echoProAccount.status.loggedIn') : t('settings.general.echoProAccount.status.loggedOut'), pro: echoProPluginUnlocked ? t('settings.general.echoProAccount.status.pluginUnlocked') : echoProAccountStatus?.pro ? t('settings.general.echoProAccount.status.proValid') : t('settings.general.echoProAccount.status.proUnauthorized') })}</span>
-                        <span>{t('settings.general.echoProAccount.deviceLine', { count: echoProAccountStatus?.machineCount ?? 0, max: echoProAccountStatus?.maxMachineCount ?? 2 })}</span>
-                        <span>{t('settings.general.echoProAccount.registrationTip')}</span>
-                        <span>{t('settings.general.echoProAccount.verificationNote')}</span>
-                      </div>
-                      <div className="settings-account-meta">
-                        <span>{t('settings.general.echoProAccount.localHwid', { hwid: echoProMachineCode ? `${echoProMachineCode.slice(0, 12)}...${echoProMachineCode.slice(-8)}` : t('common.loading') })}</span>
-                        <span>{t('settings.general.echoProAccount.hwidNote')}</span>
-                      </div>
-                      <div className="settings-account-actions">
-                        <button className="settings-action-button" type="button" onClick={() => void copyEchoProMachineCode()}>
-                          {echoProMachineCodeCopied ? <Check size={14} aria-hidden="true" /> : <Clipboard size={14} aria-hidden="true" />}
-                          {echoProMachineCodeCopied ? t('settings.general.echoProAccount.hwidCopied') : t('settings.general.echoProAccount.copyHwid')}
-                        </button>
-                      </div>
-                      {echoProMessage ? <p className="settings-inline-note settings-account-note">{echoProMessage}</p> : null}
-                      {echoProError ? <p className="settings-inline-error settings-account-note">{echoProError}</p> : null}
-                    </article>
-                  </div>
-                ) : null}
-              </div>
               <SettingSubsectionTitle id="settings-subsection-window" {...getSettingsSubsection('generalWindow')} />
               <SettingRow
                 id="settings-row-close-to-tray"
@@ -10589,7 +9509,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 title={
                   <span className="settings-title-with-badge">
                     <span>{t('settings.appearance.windowAcrylic.title')}</span>
-                    <small aria-hidden="true">ECHO Pro</small>
                   </span>
                 }
                 description={
@@ -11369,6 +10288,19 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   active={appSettings?.gaplessPlaybackEnabled ?? false}
                   disabled={!appSettings}
                   onClick={() => patchAppSettings({ gaplessPlaybackEnabled: !(appSettings?.gaplessPlaybackEnabled ?? false) })}
+                />
+              </SettingRow>
+              <SettingRow
+                id={mouseGestureTrackSwitchSettingId}
+                highlighted={highlightedSettingId === mouseGestureTrackSwitchSettingId}
+                title={settingsLocaleCopy(locale, mouseGestureTrackSwitchCopy.title)}
+                description={settingsLocaleCopy(locale, mouseGestureTrackSwitchCopy.description)}
+              >
+                <ToggleButton
+                  active={appSettings?.mouseGestureTrackSwitchEnabled === true}
+                  disabled={!appSettings}
+                  ariaLabel={settingsLocaleCopy(locale, mouseGestureTrackSwitchCopy.title)}
+                  onClick={() => patchAppSettings({ mouseGestureTrackSwitchEnabled: !(appSettings?.mouseGestureTrackSwitchEnabled === true) })}
                 />
               </SettingRow>
               <SettingRow
@@ -12726,7 +11658,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               <ThemePresetSettings
                 ambientActive={ambientThemeActive}
                 ambientLockMessage={ambientThemePresetLockMessage}
-                echoProUnlocked={echoProUnlockedForDisplay}
                 expanded={themePresetsExpanded}
                 onExpandedChange={(expanded) =>
                   patchAppSettings({ appearanceThemePresetsExpanded: expanded })
@@ -13708,15 +12639,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                     联系作者
                   </button>
                 </div>
-              </SettingRow>
-              <SettingRow
-                title={t('settings.about.pro.title')}
-                description={echoProUnlockedForStatus ? '已解锁 ECHO Pro。感谢支持 ECHO Next。' : t('settings.about.pro.description')}
-              >
-                <button className="settings-action-button" type="button" onClick={() => void handleOpenExternalUrl(afdianSponsorUrl)}>
-                  {echoProUnlockedForStatus ? <Check size={15} /> : <ExternalLink size={15} />}
-                  {echoProUnlockedForStatus ? '已解锁 ECHO Pro' : t('settings.about.pro.action')}
-                </button>
               </SettingRow>
               <Suspense fallback={null}>
                 <AboutUpdateSettings

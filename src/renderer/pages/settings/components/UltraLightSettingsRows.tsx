@@ -102,6 +102,7 @@ export const UltraLightSettingsRows = ({ locale, appSettings, highlightedSetting
     </SettingRow>
     <SettingRow
       id="settings-row-ultra-light-disable-gpu"
+      descriptionInline
       highlighted={highlightedSettingId === 'settings-row-ultra-light-disable-gpu'}
       title={chinese ? '超轻模式禁用 Electron GPU（危险）' : 'Disable Electron GPU in Ultralight (dangerous)'}
       description={chinese ? '默认关闭。进入和退出时会重启 ECHO，可能短暂停播、黑屏或恢复失败；出现异常请重启并关闭此项。' : 'Off by default. Entering and leaving restarts ECHO and may interrupt audio or fail to restore the interface. Restart and disable this option if problems occur.'}

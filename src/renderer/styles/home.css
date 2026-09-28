@@ -194,7 +194,7 @@
   background: color-mix(in srgb, var(--theme-accent-bg) 58%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-panel-bg-strong) 42%, transparent);
   font-size: 11.5px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.05em;
 }
 
@@ -209,7 +209,7 @@
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: clamp(34px, 3.2vw, 44px);
-  font-weight: 800;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.08;
   letter-spacing: -0.015em;
   overflow-wrap: anywhere;
@@ -251,7 +251,7 @@
   border-radius: var(--home-radius-control);
   cursor: pointer;
   font-size: 13px;
-  font-weight: 680;
+  font-weight: var(--echo-weight-label);
   transition:
     color 180ms var(--home-ease-out),
     background 180ms var(--home-ease-out),
@@ -399,7 +399,7 @@
 .home-now-copy > span {
   color: var(--home-now-label-text);
   font-size: 11px;
-  font-weight: 740;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0.09em;
 }
 
@@ -418,7 +418,7 @@
   overflow: visible;
   color: var(--theme-heading-text);
   font-size: 21px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
   line-height: 1.22;
   letter-spacing: -0.01em;
   overflow-wrap: anywhere;
@@ -508,7 +508,7 @@
   background: transparent;
   cursor: pointer;
   font: inherit;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   text-align: left;
   overflow-wrap: anywhere;
   white-space: nowrap;
@@ -770,7 +770,7 @@
   background: transparent;
   cursor: pointer;
   font-size: 12px;
-  font-weight: 660;
+  font-weight: var(--echo-weight-label);
   transition:
     color 160ms var(--home-ease-out),
     background 160ms var(--home-ease-out),
@@ -810,8 +810,8 @@
   gap: 10px;
   margin: 0;
   color: var(--theme-heading-text);
-  font-size: 16.5px;
-  font-weight: 780;
+  font-size: var(--echo-text-section-title);
+  font-weight: var(--echo-weight-heading);
   letter-spacing: -0.01em;
 }
 
@@ -889,7 +889,7 @@
 .home-metric-tile strong {
   color: var(--theme-heading-text);
   font-size: 22px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
   font-variant-numeric: tabular-nums;
   line-height: 1;
   letter-spacing: -0.015em;
@@ -906,7 +906,7 @@
   margin-top: 5px;
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 660;
+  font-weight: var(--echo-weight-body);
 }
 
 .home-metric-tile small {
@@ -1069,7 +1069,7 @@
   grid-area: rank;
   color: var(--theme-subtle-text);
   font-size: 13px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
   text-align: center;
@@ -1097,14 +1097,14 @@
 .home-artist-rank-main strong {
   color: var(--theme-heading-text);
   font-size: 14px;
-  font-weight: 740;
+  font-weight: var(--echo-weight-label);
 }
 
 .home-artist-rank-meta,
 .home-artist-rank-chip {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 620;
+  font-weight: var(--echo-weight-label);
 }
 
 .home-artist-rank-meta {
@@ -1215,7 +1215,7 @@
   inset: 10px 10px auto auto;
   color: color-mix(in srgb, var(--theme-accent-text-strong) 86%, var(--theme-heading-text) 14%);
   font-size: 11px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
@@ -1239,7 +1239,7 @@
 .home-favorite-album-copy strong {
   color: var(--theme-heading-text);
   font-size: 14px;
-  font-weight: 740;
+  font-weight: var(--echo-weight-label);
 }
 
 .home-favorite-album-copy small,
@@ -1247,7 +1247,7 @@
   color: var(--theme-muted-text);
   font-size: 11.5px;
   font-style: normal;
-  font-weight: 620;
+  font-weight: var(--echo-weight-body);
 }
 
 .home-favorite-album-empty {
@@ -1277,13 +1277,13 @@
 .home-favorite-album-empty strong {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
 }
 
 .home-favorite-album-empty small {
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
 }
 
 .home-artist-rank-empty {
@@ -1312,13 +1312,13 @@
 .home-artist-rank-empty strong {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
 }
 
 .home-artist-rank-empty small {
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
 }
 
 .home-cover-card {
@@ -1386,7 +1386,7 @@
 .home-cover-card strong {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
 }
 
 .home-cover-card span {
@@ -1417,14 +1417,14 @@
 .home-week-stat small {
   color: var(--theme-muted-text);
   font-size: 11.5px;
-  font-weight: 640;
+  font-weight: var(--echo-weight-body);
 }
 
 .home-week-stat strong {
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 19px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
   font-variant-numeric: tabular-nums;
   line-height: 1.08;
   letter-spacing: -0.01em;
@@ -1454,7 +1454,7 @@
   min-width: 0;
   color: var(--theme-muted-text);
   font-size: 10px;
-  font-weight: 640;
+  font-weight: var(--echo-weight-body);
   line-height: 1;
 }
 
@@ -1479,7 +1479,7 @@
   gap: 3px;
   color: var(--theme-subtle-text);
   font-size: 10px;
-  font-weight: 620;
+  font-weight: var(--echo-weight-body);
   line-height: var(--home-week-cell);
 }
 
@@ -1539,7 +1539,7 @@
   gap: 4px;
   color: var(--theme-muted-text);
   font-size: 10px;
-  font-weight: 620;
+  font-weight: var(--echo-weight-body);
 }
 
 .home-week-legend span {
@@ -1550,7 +1550,7 @@
   margin: 0;
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 620;
+  font-weight: var(--echo-weight-body);
 }
 
 .home-empty-panel {
@@ -1585,7 +1585,7 @@
   margin: 0;
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 620;
+  font-weight: var(--echo-weight-body);
 }
 
 html[data-theme="dark"] .home-page {
@@ -1713,7 +1713,7 @@ html[data-theme="dark"] .home-cover-card .home-artwork::after {
   .home-hero h1 {
     max-width: 640px;
     font-size: clamp(44px, 2.7vw, 52px);
-    font-weight: 820;
+    font-weight: var(--echo-weight-heading);
     line-height: 1.06;
   }
 

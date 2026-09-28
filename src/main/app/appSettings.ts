@@ -671,6 +671,7 @@ export const defaultSettings: AppSettings = {
   fixedVolumeEnabled: false,
   gaplessPlaybackEnabled: false,
   playbackShuffleAvoidRecentCount: 25,
+  mouseGestureTrackSwitchEnabled: false,
   audioTransportFadeEnabled: false,
   audioTransportFadeInMs: defaultAudioTransportFadeDurationMs,
   audioTransportFadeOutMs: defaultAudioTransportFadeDurationMs,
@@ -2218,6 +2219,7 @@ export const normalizeSettings = (value: unknown, options: NormalizeSettingsOpti
     playbackShuffleAvoidRecentCount: Number.isFinite(Number(settings.playbackShuffleAvoidRecentCount))
       ? Math.round(clamp(Number(settings.playbackShuffleAvoidRecentCount), 0, 200))
       : defaultSettings.playbackShuffleAvoidRecentCount,
+    mouseGestureTrackSwitchEnabled: settings.mouseGestureTrackSwitchEnabled === true,
     audioTransportFadeEnabled: settings.audioTransportFadeEnabled === true,
     audioTransportFadeInMs: normalizeAudioTransportFadeDurationMs(settings.audioTransportFadeInMs),
     audioTransportFadeOutMs: normalizeAudioTransportFadeDurationMs(settings.audioTransportFadeOutMs),

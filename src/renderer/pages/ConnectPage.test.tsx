@@ -498,82 +498,28 @@ describe('ConnectPage HQPlayer controls', () => {
     Reflect.deleteProperty(navigator, 'clipboard');
   });
 
-  it('shows Pro Only and avoids device scans while Connect is locked', async () => {
-    const bridge = installEchoBridge(hqStatus('available'));
-    bridge.connect.getDonatorUnlockStatus.mockResolvedValue({
-      featureId: 'connect',
-      pluginId: 'echo.connect-donator-unlock',
-      requiredVersion: 'plugin:echo.connect-donator-unlock:v1',
-      unlocked: false,
-      pluginInstalled: false,
-      pluginEnabled: false,
-      hwidHash: 'b'.repeat(64),
-      reason: 'license-invalid',
-      checkedAt: '2026-05-21T01:00:00.000Z',
-    });
-
+  it('opens Connect without Pro activation or entitlement checks', async () => {
+    const bridge = installEchoBridge(hqStatus('available'), hqSettings, dlnaConnectStatus, [dlnaDevice, hqPlayerDevice]);
+    bridge.connect.getDonatorUnlockStatus.mockRejectedValue(new Error('unavailable'));
     renderConnectPage();
-
-    expect(await screen.findByText('Connect 已升级为 ECHO Pro Only')).toBeTruthy();
-    expect(screen.getByText('需要 ECHO Pro')).toBeTruthy();
-    expect(screen.getByText('打开 ECHO Pro 账号')).toBeTruthy();
-    await waitFor(() => expect(bridge.connect.getDonatorUnlockStatus).toHaveBeenCalled());
-    expect(bridge.connect.listDevices).not.toHaveBeenCalled();
-    expect(bridge.connect.refresh).not.toHaveBeenCalled();
-    expect(bridge.connect.getEchoLinkStatus).not.toHaveBeenCalled();
-    expect(bridge.connect.getWallpaperEngineBridgeStatus).not.toHaveBeenCalled();
-
-    const navigateSettings = vi.fn();
-    const navigateSettingsSection = vi.fn();
-    window.addEventListener('app:navigate:settings', navigateSettings);
-    window.addEventListener('app:navigate:settings-section', navigateSettingsSection);
-    fireEvent.click(screen.getByRole('button', { name: '打开 ECHO Pro 账号' }));
-    expect(navigateSettings).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(navigateSettingsSection).toHaveBeenCalledWith(expect.objectContaining({
-      detail: { section: 'general', targetId: 'settings-row-echo-pro-account' },
-    })));
-    expect(window.sessionStorage.getItem('echo-next.settings.pending-section')).toBe('general');
-    expect(window.localStorage.getItem('echo:settings:general:echo-pro-account-panel-expanded')).toBe('true');
-    window.removeEventListener('app:navigate:settings', navigateSettings);
-    window.removeEventListener('app:navigate:settings-section', navigateSettingsSection);
-
-    const navigateHome = vi.fn();
-    window.addEventListener('app:navigate:route', navigateHome);
-    fireEvent.click(screen.getByRole('button', { name: '从侧栏隐藏' }));
-    await waitFor(() => expect(bridge.app.setSettings).toHaveBeenCalledWith(expect.objectContaining({
-      sidebarHiddenRouteIds: expect.arrayContaining(['connect']),
-    })));
-    expect(navigateHome).toHaveBeenCalledWith(expect.objectContaining({ detail: 'home' }));
-    window.removeEventListener('app:navigate:route', navigateHome);
+    expect(await screen.findByRole('navigation', { name: 'Connect tasks' })).toBeTruthy();
+    expect(screen.queryByText('需要 ECHO Pro')).toBeNull();
+    expect(bridge.connect.getDonatorUnlockStatus).not.toHaveBeenCalled();
+    await waitFor(() => expect(bridge.connect.getStatus).toHaveBeenCalled());
   });
 
-  it('reuses the Connect unlock status across page remounts', async () => {
+  it('opens Connect across page remounts without entitlement checks', async () => {
     const bridge = installEchoBridge(hqStatus('available'), hqSettings, dlnaConnectStatus, [dlnaDevice, hqPlayerDevice]);
     const first = renderConnectPage();
 
-    await waitFor(() => expect(bridge.connect.getDonatorUnlockStatus).toHaveBeenCalledTimes(1));
+    expect(bridge.connect.getDonatorUnlockStatus).not.toHaveBeenCalled();
     expect(await screen.findByRole('navigation', { name: 'Connect tasks' })).toBeTruthy();
 
     first.unmount();
     renderConnectPage();
 
     await waitFor(() => expect(screen.getByRole('navigation', { name: 'Connect tasks' })).toBeTruthy());
-    expect(bridge.connect.getDonatorUnlockStatus).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps the last trusted unlock status when a forced recheck temporarily fails', async () => {
-    const bridge = installEchoBridge(hqStatus('available'), hqSettings, dlnaConnectStatus, [dlnaDevice, hqPlayerDevice]);
-    renderConnectPage();
-
-    expect(await screen.findByRole('navigation', { name: 'Connect tasks' })).toBeTruthy();
-    bridge.connect.getDonatorUnlockStatus.mockRejectedValueOnce(new Error('temporary bridge failure'));
-
-    window.dispatchEvent(new Event('echo-pro:status-changed'));
-
-    await waitFor(() => expect(bridge.connect.getDonatorUnlockStatus).toHaveBeenCalledTimes(2));
-    expect(bridge.connect.getDonatorUnlockStatus).toHaveBeenLastCalledWith({ force: true });
-    expect(screen.getByRole('navigation', { name: 'Connect tasks' })).toBeTruthy();
-    expect(screen.queryByText('需要 ECHO Pro')).toBeNull();
+    expect(bridge.connect.getDonatorUnlockStatus).not.toHaveBeenCalled();
   });
 
   it('surfaces ECHO Link, paired-device, MQTT, and web remote controls in the phone workspace', async () => {

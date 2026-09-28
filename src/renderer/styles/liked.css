@@ -97,7 +97,7 @@
   box-shadow: inset 0 1px 0
     color-mix(in srgb, var(--theme-panel-bg-strong) 42%, transparent);
   font-size: 11px;
-  font-weight: 740;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.09em;
 }
 
@@ -105,7 +105,7 @@
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 32px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.1;
   letter-spacing: -0.02em;
 }
@@ -114,7 +114,7 @@
   margin: 0;
   color: var(--theme-muted-text);
   font-size: 13px;
-  font-weight: 640;
+  font-weight: var(--echo-weight-body);
 }
 
 /* ---------- 页签（胶囊分段控件） ---------- */
@@ -142,7 +142,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 12.5px;
-  font-weight: 680;
+  font-weight: var(--echo-weight-label);
   transition:
     color 160ms var(--liked-ease),
     background 160ms var(--liked-ease),
@@ -215,7 +215,7 @@
   box-shadow: inset 0 1px 0
     color-mix(in srgb, var(--theme-panel-bg-strong) 56%, transparent);
   font-size: 12.5px;
-  font-weight: 660;
+  font-weight: var(--echo-weight-label);
   transition:
     color 180ms var(--liked-ease),
     background 180ms var(--liked-ease),
@@ -325,7 +325,7 @@
   background: transparent;
   font: inherit;
   font-size: 12.5px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
   transition:
     color 160ms var(--liked-ease),
@@ -467,7 +467,7 @@
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 21px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: -0.015em;
 }
 
@@ -492,7 +492,7 @@
   border-radius: var(--liked-radius-control);
   font: inherit;
   font-size: 13px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
   transition:
     color 180ms var(--liked-ease),
@@ -557,7 +557,7 @@
     color-mix(in srgb, var(--theme-panel-border) 72%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--theme-panel-bg-muted) 46%, transparent);
-  font-weight: 620;
+  font-weight: var(--echo-weight-body);
 }
 
 .liked-empty-hints svg {
@@ -766,14 +766,14 @@
 
 .liked-page--tracks .track-list-shell[data-density="compact"] .track-title {
   font-size: 14px;
-  font-weight: 730;
+  font-weight: var(--echo-weight-label);
   line-height: 1.2;
 }
 
 .liked-page--tracks .track-list-shell[data-density="compact"] .track-subtitle {
   color: var(--theme-muted-text);
   font-size: 11.5px;
-  font-weight: 560;
+  font-weight: var(--echo-weight-body);
   line-height: 1.2;
 }
 
@@ -784,7 +784,7 @@
 .liked-page--tracks .track-list-shell[data-density="compact"] .track-duration {
   color: var(--theme-subtle-text);
   font-size: 12px;
-  font-weight: 680;
+  font-weight: var(--echo-weight-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -988,7 +988,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
 .liked-page--tracks:has(> .track-list-shell) .liked-hero h1 {
   margin: 0;
   font-size: clamp(30px, 2.15vw, 38px);
-  font-weight: 820;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.04;
   letter-spacing: -0.035em;
 }
@@ -998,7 +998,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   margin-top: 7px;
   color: var(--theme-muted-text);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1021,7 +1021,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   border-radius: 11px;
   font: inherit;
   font-size: 13px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
   transition:
     filter 160ms var(--liked-ease),
@@ -1189,7 +1189,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
     color-mix(in srgb, var(--theme-panel-border-strong) 55%, transparent);
   font: inherit;
   font-size: 10.5px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
 }
 
 .liked-source-filter {
@@ -1211,7 +1211,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   background: color-mix(in srgb, var(--theme-button-bg) 86%, transparent);
   font: inherit;
   font-size: 12px;
-  font-weight: 680;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
   transition:
     color 150ms var(--liked-ease),
@@ -1309,7 +1309,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   padding: 3px 7px;
   background: color-mix(in srgb, var(--theme-panel-bg-muted) 72%, transparent);
   font-size: 10.5px;
-  font-weight: 690;
+  font-weight: var(--echo-weight-label);
   white-space: nowrap;
 }
 
@@ -1528,7 +1528,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   margin: 0;
   color: var(--theme-heading-text);
   font-size: clamp(28px, 2.4vw, 36px);
-  font-weight: 820;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.12;
   letter-spacing: -0.035em;
 }
@@ -1567,7 +1567,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   margin: 0 0 7px;
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 690;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0.01em;
 }
 
@@ -1663,7 +1663,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 13.5px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1672,7 +1672,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   overflow: hidden;
   color: var(--theme-muted-text);
   font-size: 11.5px;
-  font-weight: 560;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1680,7 +1680,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
 .liked-empty-source-action {
   color: var(--theme-accent-text-strong);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   white-space: nowrap;
 }
 
@@ -1701,7 +1701,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   border-radius: 9px;
   background: color-mix(in srgb, var(--theme-panel-bg-muted) 55%, transparent);
   font-size: 11.5px;
-  font-weight: 590;
+  font-weight: var(--echo-weight-body);
 }
 
 .liked-empty-tip svg {
@@ -1920,14 +1920,14 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   .track-list-shell[data-density="compact"]
   .track-title {
   font-size: 13.5px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
 }
 
 .liked-page--content.liked-page--tracks
   .track-list-shell[data-density="compact"]
   .track-subtitle {
   font-size: 11.5px;
-  font-weight: 590;
+  font-weight: var(--echo-weight-body);
 }
 
 .liked-page--content.liked-page--tracks
@@ -1940,7 +1940,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   .track-list-shell[data-density="compact"]
   .track-duration {
   font-size: 11.5px;
-  font-weight: 670;
+  font-weight: var(--echo-weight-body);
 }
 
 .liked-page--content.liked-page--tracks
@@ -2017,7 +2017,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
 
 .liked-loading-state {
   font-size: 12.5px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-label);
 }
 
 .liked-loading-state > svg,
@@ -2035,7 +2035,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   margin: 6px 0 0;
   color: var(--theme-heading-text);
   font-size: 20px;
-  font-weight: 790;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: -0.02em;
 }
 
@@ -2055,7 +2055,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   background: var(--theme-accent-bg);
   font: inherit;
   font-size: 12.5px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
 }
 
@@ -2121,7 +2121,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 20px;
-  font-weight: 790;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.2;
   letter-spacing: -0.025em;
 }
@@ -2130,7 +2130,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   margin: 5px 0 0;
   color: var(--theme-muted-text);
   font-size: 11.5px;
-  font-weight: 620;
+  font-weight: var(--echo-weight-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2155,7 +2155,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   cursor: pointer;
   font: inherit;
   font-size: 12.5px;
-  font-weight: 640;
+  font-weight: var(--echo-weight-label);
   text-align: left;
   transition:
     color 150ms var(--liked-ease),
@@ -2199,7 +2199,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
 .liked-library-nav-list button > strong {
   color: inherit;
   font-size: 11px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2281,7 +2281,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 21px;
-  font-weight: 810;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.15;
   letter-spacing: -0.03em;
 }
@@ -2290,7 +2290,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   margin: 3px 0 0;
   color: var(--theme-muted-text);
   font-size: 11.5px;
-  font-weight: 620;
+  font-weight: var(--echo-weight-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2347,7 +2347,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   gap: 8px;
   color: var(--theme-heading-text);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
 }
 
 .liked-selection-bar > button,
@@ -2366,7 +2366,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   cursor: pointer;
   font: inherit;
   font-size: 11.5px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-label);
 }
 
 .liked-selection-bar > button:hover,
@@ -2462,7 +2462,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
     color-mix(in srgb, var(--theme-list-row-border) 78%, transparent);
   background: var(--theme-page-bg);
   font-size: 10.5px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-label);
 }
 
 .liked-track-table-body {
@@ -2651,7 +2651,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
 .liked-track-copy strong {
   color: var(--theme-heading-text);
   font-size: 12.5px;
-  font-weight: 750;
+  font-weight: var(--echo-weight-label);
 }
 
 .liked-track-copy small,
@@ -2661,7 +2661,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
 .liked-track-duration {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 570;
+  font-weight: var(--echo-weight-body);
 }
 
 .liked-track-quality,
@@ -2738,7 +2738,7 @@ html[data-theme="dark"] .liked-tabs button.is-active {
   cursor: pointer;
   font: inherit;
   font-size: 11.5px;
-  font-weight: 620;
+  font-weight: var(--echo-weight-label);
   text-align: left;
 }
 

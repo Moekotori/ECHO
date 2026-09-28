@@ -453,7 +453,7 @@ describe('FoldersPage', () => {
       ),
     );
 
-    fireEvent.click(screen.getByLabelText('Include subfolders'));
+    fireEvent.click(screen.getByRole('button', { name: 'This folder' }));
 
     await waitFor(() =>
       expect(libraryMock.getFolderTracks).toHaveBeenLastCalledWith(

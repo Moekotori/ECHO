@@ -912,14 +912,6 @@ const createThemePluginSummary = (): PluginSummary => ({
   settingsValues: {},
 });
 
-const createEchoProUnlockPluginSummary = (): PluginSummary => ({
-  ...createThemePluginSummary(),
-  id: echoProUnlockPluginId,
-  name: 'ECHO Pro Unlock',
-  directory: 'D:\\Echo\\plugins\\echo-pro-unlock',
-  contributes: {},
-});
-
 const hexToRgb = (value: string): { r: number; g: number; b: number } => ({
   r: Number.parseInt(value.slice(1, 3), 16),
   g: Number.parseInt(value.slice(3, 5), 16),
@@ -1159,123 +1151,9 @@ describe('SettingsPage', () => {
     await openSearchResult('托盘', /settings\.general\.closeToTray/);
     expect(document.getElementById('settings-row-close-to-tray')?.dataset.searchHighlight).toBe('true');
 
-    await openSearchResult('HWID', /settings\.general\.echoProActivation\.title/);
-    expect(document.getElementById('settings-row-echo-pro-activation')?.dataset.searchHighlight).toBe('true');
 
     await openSearchResult('音质', /settings\.playback\.outputDevice\.title/);
     expect(document.getElementById('settings-row-output-device')?.dataset.searchHighlight).toBe('true');
-  });
-
-  it('confirms an HWID reset and automatically activates Pro on the current device', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-    listPluginsMock.mockResolvedValue({
-      directory: 'D:\\Echo\\plugins',
-      plugins: [{
-        ...createEchoProUnlockPluginSummary(),
-        enabled: false,
-        status: 'error',
-        disabledByHost: true,
-        error: 'echo_pro_license_machine-mismatch',
-      }],
-    });
-    window.localStorage.setItem('echo:settings:general:echo-pro-activation-panel-expanded', 'true');
-    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    activateEchoProPluginMock
-      .mockRejectedValueOnce(new Error('echo_pro_activation_machine_binding_confirmation_required'))
-      .mockResolvedValueOnce({
-        ok: true,
-        mode: 'afdian',
-        pluginId: echoProUnlockPluginId,
-        enabled: true,
-        licenseId: 'lic_newmachine0001',
-        activationId: 'act_newmachine0001',
-        qq: '3584569199',
-        activatedAt: '2026-07-18T00:00:00.000Z',
-        importedFileCount: 5,
-        checksum: 'checksum',
-      });
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    await waitFor(() => expect(listPluginsMock).toHaveBeenCalled());
-
-    const row = document.getElementById('settings-row-echo-pro-activation') as HTMLElement;
-    const [qqInput, credentialInput] = Array.from(row.querySelectorAll('input'));
-    fireEvent.change(qqInput, { target: { value: '3584569199' } });
-    fireEvent.change(credentialInput, { target: { value: '202607140857551985310505' } });
-    fireEvent.click(within(row).getByRole('button', { name: '激活此设备' }));
-
-    await waitFor(() => expect(activateEchoProPluginMock).toHaveBeenNthCalledWith(1, {
-      mode: 'afdian',
-      qq: '3584569199',
-      orderId: '202607140857551985310505',
-    }));
-    expect(activateEchoProPluginMock).toHaveBeenNthCalledWith(2, {
-      mode: 'afdian',
-      qq: '3584569199',
-      orderId: '202607140857551985310505',
-      replaceMachineBinding: true,
-    });
-    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining('确认换绑到这台电脑吗'));
-    expect(await within(row).findByText(/换绑完成/)).toBeTruthy();
-  });
-
-  it('does not reset or rebind an HWID when the user declines confirmation', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-    window.localStorage.setItem('echo:settings:general:echo-pro-activation-panel-expanded', 'true');
-    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    activateEchoProPluginMock.mockRejectedValueOnce(
-      new Error('echo_pro_activation_machine_binding_confirmation_required'),
-    );
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    const row = document.getElementById('settings-row-echo-pro-activation') as HTMLElement;
-    const [qqInput, credentialInput] = Array.from(row.querySelectorAll('input'));
-    fireEvent.change(qqInput, { target: { value: '3584569199' } });
-    fireEvent.change(credentialInput, { target: { value: '202607140857551985310505' } });
-    fireEvent.click(within(row).getByRole('button', { name: '激活此设备' }));
-
-    await waitFor(() => expect(confirmMock).toHaveBeenCalled());
-    expect(activateEchoProPluginMock).toHaveBeenCalledTimes(1);
-    expect(activateEchoProPluginMock).toHaveBeenCalledWith({
-      mode: 'afdian',
-      qq: '3584569199',
-      orderId: '202607140857551985310505',
-    });
-    expect(await within(row).findByText(/这份授权记录的是另一台设备/)).toBeTruthy();
-  });
-
-  it('releases every Afdian order HWID with the order ID only', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-    window.localStorage.setItem('echo:settings:general:echo-pro-activation-panel-expanded', 'true');
-    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    const row = document.getElementById('settings-row-echo-pro-activation') as HTMLElement;
-    const [qqInput, credentialInput] = Array.from(row.querySelectorAll('input'));
-    expect((qqInput as HTMLInputElement).value).toBe('');
-    fireEvent.change(credentialInput, { target: { value: '202607140857551985310505' } });
-    fireEvent.click(within(row).getByRole('button', { name: '解绑此订单的设备' }));
-
-    await waitFor(() => expect(releaseEchoProCurrentDeviceMock).toHaveBeenCalledWith(
-      '202607140857551985310505',
-    ));
-    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining('只会提交爱发电订单号'));
-    expect(await within(row).findByText(/已释放这个订单的 2 个设备名额/)).toBeTruthy();
   });
 
   it('routes account credential searches to the standalone accounts section', async () => {
@@ -1294,91 +1172,6 @@ describe('SettingsPage', () => {
     expect(document.getElementById('settings-sec-accounts')?.dataset.visible).toBe('true');
     expect(document.getElementById('settings-row-spotify-auth-config')?.dataset.searchHighlight).toBe('true');
     expect(screen.queryByText('settings.integrations.discord.title')).toBeNull();
-  });
-
-  it('keeps ECHO Pro status chips stable across settings remounts and section switches', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-    listPluginsMock.mockResolvedValue({ directory: 'D:\\Echo\\plugins', plugins: [createEchoProUnlockPluginSummary()] });
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    await screen.findByText('本机 Pro 已启用');
-    await screen.findByText('settings.general.echoProAccount.status.pluginUnlocked');
-    await waitFor(() => expect(listPluginsMock).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(getEchoProAccountStatusMock).toHaveBeenCalledTimes(1));
-
-    cleanup();
-    listPluginsMock.mockImplementation(() => new Promise(() => undefined));
-    getEchoProAccountStatusMock.mockImplementation(() => new Promise(() => undefined));
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    expect(screen.getByText('本机 Pro 已启用')).toBeTruthy();
-    expect(screen.getByText('settings.general.echoProAccount.status.pluginUnlocked')).toBeTruthy();
-
-    clickSettingsNav('settings\\.nav\\.appearance\\.label');
-    await screen.findByText('settings.appearance.theme.title');
-    clickSettingsNav('settings\\.nav\\.general\\.label');
-    await screen.findByText('本机 Pro 已启用');
-
-    expect(listPluginsMock).toHaveBeenCalledTimes(2);
-    expect(getEchoProAccountStatusMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not show settings cloud sync in the expanded Pro account panel', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    fireEvent.click(screen.getByRole('button', { name: 'settings.general.echoProAccount.expandAria' }));
-    expect(screen.getByRole('button', { name: 'settings.general.echoProAccount.collapseAria' })).toBeTruthy();
-    expect(screen.queryByText('settings.general.echoProAccount.cloudSyncNote')).toBeNull();
-    expect(screen.queryByText('settings.general.echoProAccount.action.saveCloud')).toBeNull();
-    expect(screen.queryByText('settings.general.echoProAccount.action.syncCloud')).toBeNull();
-  });
-
-  it('signs out of local Pro from the activation header and releases only this computer', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-    listPluginsMock.mockResolvedValue({ directory: 'D:\\Echo\\plugins', plugins: [createEchoProUnlockPluginSummary()] });
-    getEchoProAccountStatusMock.mockResolvedValue({ pro: true, loggedIn: true });
-    releaseEchoProCurrentDeviceMock.mockImplementationOnce(async () => {
-      listPluginsMock.mockResolvedValue({ directory: 'D:\\Echo\\plugins', plugins: [] });
-      getEchoProAccountStatusMock.mockResolvedValue({ pro: false, loggedIn: false });
-      return {
-        ok: true,
-        pluginId: echoProUnlockPluginId,
-        releasedAt: '2026-07-18T00:00:00.000Z',
-        alreadyReleased: false,
-        removedLocalPlugin: false,
-        releasedCount: 1,
-        activeCount: 0,
-      };
-    });
-    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true);
-
-    render(<SettingsPage />);
-
-    const signOutButton = await screen.findByRole('button', { name: '登出 Pro' });
-    await waitFor(() => expect(getEchoProAccountStatusMock).toHaveBeenCalled());
-    fireEvent.click(signOutButton);
-
-    await waitFor(() => expect(releaseEchoProCurrentDeviceMock).toHaveBeenCalledTimes(1));
-    expect(releaseEchoProCurrentDeviceMock).toHaveBeenCalledWith();
-    expect(logoutEchoProAccountMock).toHaveBeenCalledTimes(1);
-    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining('释放当前电脑'));
-    await waitFor(() => expect(screen.queryByRole('button', { name: '登出 Pro' })).toBeNull());
   });
 
   it('offers lyrics sub-settings from lyrics search aliases', async () => {
@@ -1688,7 +1481,7 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     const row = screen.getByText('settings.general.touchKeyboard.title').closest('.setting-row') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button'));
+    fireEvent.click(within(row).getByRole('button', { name: 'settings.general.touchKeyboard.title', pressed: false }));
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ touchOnScreenKeyboardEnabled: true }));
   });
@@ -1908,24 +1701,20 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.about\\.label');
-    fireEvent.click(screen.getByRole('button', { name: /settings\.about\.pro\.action/ }));
     fireEvent.click(await screen.findByRole('button', { name: /settings\.about\.links\.officialWebsite/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.links\.documentation/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.links\.baiduPan/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.links\.bilibili/ }));
-    fireEvent.click(screen.getByRole('button', { name: /settings\.about\.updates\.action\.afdian/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.updates\.action\.history/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.updates\.action\.qq/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.updates\.action\.discord/ }));
     fireEvent.click(screen.getByRole('button', { name: 'BUG反馈' }));
     fireEvent.click(screen.getByRole('button', { name: '联系作者' }));
 
-    expect(openExternalUrlMock).toHaveBeenCalledWith('https://afdian.com/a/echonext');
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://echonext.moe');
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://echonext.moe/zh/docs/');
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://pan.baidu.com/s/1ta0McyhY9knaD6FT5xW3Og?pwd=echo');
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://space.bilibili.com/25265128');
-    await waitFor(() => expect(openExternalUrlMock).toHaveBeenCalledWith('https://afdian.com/a/echonext'));
     await waitFor(() => expect(openExternalUrlMock).toHaveBeenCalledWith('https://github.com/moekotori/echo/releases'));
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://qm.qq.com/q/KrJE8PIqSQ');
     expect(openExternalUrlMock).toHaveBeenCalledWith('https://discord.gg/g7v4WMRq3K');
@@ -1933,7 +1722,7 @@ describe('SettingsPage', () => {
     expect(openExternalUrlMock).toHaveBeenCalledWith('mailto:nyafairy233@gmail.com');
   });
 
-  it('thanks users in About when ECHO Pro is already unlocked', async () => {
+  it('omits Pro sponsorship in About even for legacy Pro accounts', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getEchoProAccountStatusMock.mockResolvedValue({ pro: true, loggedIn: true });
     getDonatorUnlockStatusMock.mockResolvedValue({ unlocked: true });
@@ -1946,8 +1735,8 @@ describe('SettingsPage', () => {
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.about\\.label');
 
-    expect(await screen.findByText('已解锁 ECHO Pro。感谢支持 ECHO Next。', { exact: false })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /已解锁 ECHO Pro/ })).toBeTruthy();
+    expect(screen.queryByText(/ECHO Pro/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /afdian|赞助|爱发电/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /settings\.about\.pro\.action$/ })).toBeNull();
   });
 
@@ -1996,9 +1785,7 @@ describe('SettingsPage', () => {
     clickSettingsNav('settings\\.nav\\.about\\.label');
     fireEvent.click(screen.getByRole('button', { name: /settings\.about\.safeMode\.action\.partner/ }));
     await waitFor(() => expect(openExternalUrlMock).toHaveBeenCalledWith('https://www.doubao.com/chat/'));
-    const row = screen
-      .getByText('settings.about.safeMode.description')
-      .closest('.setting-row') as HTMLElement;
+    const row = document.getElementById('settings-row-safe-mode') as HTMLElement;
     fireEvent.click(within(row).getByRole('button', { pressed: false }));
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ safeModeEnabled: true }));
@@ -2822,10 +2609,9 @@ describe('SettingsPage', () => {
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.experimental\\.label');
     const row = screen.getByRole('heading', { name: 'settings.appearance.windowAcrylic.title' }).closest('.setting-row') as HTMLElement;
-    expect(within(row).getByText('ECHO Pro')).toBeTruthy();
+    expect(within(row).queryByText('ECHO Pro')).toBeNull();
     expect(within(row).queryByText('settings.appearance.windowAcrylic.themeWarning')).toBeNull();
     const acrylicToggle = within(row).getByRole('button');
-    await waitFor(() => expect(getEchoProAccountStatusMock).toHaveBeenCalled());
     fireEvent.click(acrylicToggle);
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appWindowAcrylicEnabled: true }));
@@ -2845,7 +2631,7 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ appWindowAcrylicKeepWhenUnfocusedEnabled: true }));
   });
 
-  it('keeps Pro theme presets locked until the donator plugin is verified', async () => {
+  it('makes all theme presets available without Pro activation', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
@@ -2861,43 +2647,12 @@ describe('SettingsPage', () => {
     const darkSideButton = (await screen.findByText('settings.appearance.themePreset.darkSideMoon')).closest('button') as HTMLButtonElement;
     const finalButton = (await screen.findByText('settings.appearance.themePreset.FINAL')).closest('button') as HTMLButtonElement;
 
-    expect(nyanButton.disabled).toBe(true);
-    expect(darkSideButton.disabled).toBe(true);
-    expect(finalButton.disabled).toBe(true);
-    expect(screen.getAllByText('Pro Only').length).toBeGreaterThanOrEqual(3);
+    expect(nyanButton.disabled).toBe(false);
+    expect(darkSideButton.disabled).toBe(false);
+    expect(finalButton.disabled).toBe(false);
+    expect(screen.queryByText('Pro Only')).toBeNull();
     fireEvent.click(darkSideButton);
-    expect(setSettingsMock).not.toHaveBeenCalledWith({ appearanceThemePreset: 'darkSideMoon' });
-  });
-
-  it('keeps Pro theme presets locked for all legacy FINAL search keys', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
-    setSettingsMock.mockImplementation(async (patch: Partial<AppSettings>) => ({ ...settings, ...patch }));
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    clickSettingsNav('settings\\.nav\\.appearance\\.label');
-    expandThemePresetGrid();
-
-    const lockedPresetButton = (await screen.findByText('settings.appearance.themePreset.FINAL')).closest('button') as HTMLButtonElement;
-    expect(lockedPresetButton.disabled).toBe(true);
-    expect(screen.getAllByText('Pro Only').length).toBeGreaterThanOrEqual(3);
-
-    fireEvent.change(screen.getByPlaceholderText('settings.header.searchPlaceholder'), { target: { value: 'finalaudio' } });
-
-    await waitFor(() => expect(lockedPresetButton.disabled).toBe(true));
-
-    fireEvent.change(screen.getByPlaceholderText('settings.header.searchPlaceholder'), { target: { value: ' FINAL-8K-7Q4M-H2ND-2026 ' } });
-
-    await waitFor(() => expect(lockedPresetButton.disabled).toBe(true));
-
-    fireEvent.change(screen.getByPlaceholderText('settings.header.searchPlaceholder'), { target: { value: 'FINAL-8K-7Q4M-H2ND-2026' } });
-
-    await waitFor(() => expect(lockedPresetButton.disabled).toBe(true));
-    expect(window.localStorage.getItem('echo-next:settings:final-theme-unlocked')).toBeNull();
+    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith(expect.objectContaining({ appearanceThemePreset: 'darkSideMoon' })));
   });
 
   it('unlocks Pro theme presets when ECHO Pro is verified', async () => {

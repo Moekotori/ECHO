@@ -18,7 +18,7 @@
   background: transparent;
   font: inherit;
   font-size: 13px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
 }
 
@@ -41,7 +41,7 @@
   margin: 0;
   color: var(--theme-heading-text);
   font-size: clamp(28px, 2.3vw, 32px);
-  font-weight: 840;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: -0.035em;
   line-height: 1.05;
 }
@@ -57,7 +57,7 @@
   margin-top: 3px;
   color: var(--theme-subtle-text);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--echo-weight-body);
 }
 
 .contributors-stage {
@@ -98,7 +98,7 @@
   min-width: 0;
   color: var(--theme-heading-text);
   font-size: clamp(16px, 1.45vw, 20px);
-  font-weight: 500;
+  font-weight: var(--echo-weight-body);
   letter-spacing: -0.02em;
   line-height: 1.2;
   text-align: center;

@@ -22,7 +22,7 @@
   gap: 9px;
   color: var(--theme-accent-text);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
   letter-spacing: .11em;
 }
 
@@ -53,7 +53,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--echo-weight-label);
 }
 
 .steam-edition-overview__store:hover { filter: brightness(1.08); }

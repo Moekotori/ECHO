@@ -257,7 +257,7 @@ export const LyricsLine = memo(function LyricsLine({
       }}
     >
       <span className="lyrics-line-text">
-        <span className="lyrics-line-primary" aria-label={isVerticalText ? line.text : undefined}>
+        <span className="lyrics-line-primary" data-lyrics-line-hit-target="true" aria-label={isVerticalText ? line.text : undefined}>
           {hasWordHighlight
             ? renderableWords?.map((word, index) => (
               <mark

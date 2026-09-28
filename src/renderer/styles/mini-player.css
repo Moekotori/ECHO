@@ -217,7 +217,7 @@ html[data-theme="dark"] .mini-player-app {
   color: var(--mini-text);
   font-size: 13.5px;
   line-height: 17px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   letter-spacing: -0.12px;
 }
 
@@ -265,7 +265,7 @@ html[data-theme="dark"] .mini-player-app {
   color: var(--mini-muted);
   font-size: 10.75px;
   line-height: 13px;
-  font-weight: 520;
+  font-weight: var(--echo-weight-body);
 }
 
 .mini-player-transport {
@@ -401,7 +401,7 @@ html[data-theme="dark"] .mini-player-app {
   color: var(--mini-muted);
   font-size: 9.75px;
   font-variant-numeric: tabular-nums;
-  font-weight: 680;
+  font-weight: var(--echo-weight-body);
   line-height: 1;
   text-align: center;
   white-space: nowrap;
@@ -523,14 +523,14 @@ html[data-theme="dark"] .mini-player-app {
 
 .mini-player-queue-header strong {
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-heading);
 }
 
 .mini-player-queue-header span {
   color: var(--mini-muted);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
 }
 
 .mini-player-queue-item {
@@ -587,7 +587,7 @@ html[data-theme="dark"] .mini-player-app {
   color: var(--mini-muted);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
-  font-weight: 650;
+  font-weight: var(--echo-weight-label);
   line-height: 1;
 }
 
@@ -603,21 +603,21 @@ html[data-theme="dark"] .mini-player-app {
   min-width: 0;
   overflow: hidden;
   font-size: 11.5px;
-  font-weight: 500;
+  font-weight: var(--echo-weight-label);
   line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .mini-player-queue-item[aria-current="true"] .mini-player-queue-title {
-  font-weight: 620;
+  font-weight: var(--echo-weight-label);
 }
 
 .mini-player-queue-duration {
   color: var(--mini-muted);
   font-size: 9.75px;
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: var(--echo-weight-body);
   text-align: right;
 }
 

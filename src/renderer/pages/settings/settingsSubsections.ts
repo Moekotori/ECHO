@@ -6,8 +6,8 @@ export const settingsSubsectionCopy = {
     description: { 'zh-CN': '为低配置设备提供安全、可恢复的一键降载。', 'zh-TW': '為低配置裝置提供安全、可還原的一鍵降載。', 'ja-JP': '低スペック端末向けに、安全で元に戻せる負荷軽減を提供します。', 'en-US': 'A safe, reversible one-click load reduction for lower-end devices.', 'ko-KR': '저사양 기기를 위한 안전하고 되돌릴 수 있는 원클릭 부하 감소.' },
   },
   generalBasics: {
-    title: { 'zh-CN': '语言、引导与 Pro', 'zh-TW': '語言、引導與 Pro', 'ja-JP': '言語、ガイド、Pro', 'en-US': 'Language, Guide, Pro', 'ko-KR': '언어, 가이드, Pro' },
-    description: { 'zh-CN': '首次使用和激活入口放在最前面。', 'zh-TW': '首次使用和啟用入口放在最前面。', 'ja-JP': '初回ガイドと Pro の入口を先頭にまとめます。', 'en-US': 'First-run and Pro entry points stay up front.', 'ko-KR': '최초 실행과 Pro 진입점을 맨 앞에 둡니다.' },
+    title: { 'zh-CN': '语言与引导', 'zh-TW': '語言與引導', 'ja-JP': '言語とガイド', 'en-US': 'Language And Guide', 'ko-KR': '언어 및 가이드' },
+    description: { 'zh-CN': '语言选择与首次使用引导。', 'zh-TW': '語言選擇與首次使用引導。', 'ja-JP': '言語の選択と初回ガイド。', 'en-US': 'Language selection and first-run setup.', 'ko-KR': '언어 선택 및 최초 실행 설정.' },
   },
   generalWindow: {
     title: { 'zh-CN': '窗口与启动', 'zh-TW': '視窗與啟動', 'ja-JP': 'ウィンドウと起動', 'en-US': 'Window And Startup', 'ko-KR': '창 및 시작' },
@@ -251,8 +251,6 @@ export const settingsSearchSubsectionByTargetId: Partial<Record<string, Settings
   'settings-row-ultra-light-disable-gpu': 'generalPerformance',
   'settings-row-first-run-wizard': 'generalBasics',
   'settings-row-home-random-hero-title': 'generalBasics',
-  'settings-row-echo-pro-activation': 'generalBasics',
-  'settings-row-echo-pro-account': 'generalBasics',
   'settings-row-close-to-tray': 'generalWindow',
   'settings-row-launch-at-login': 'generalWindow',
   'settings-row-sidebar-auto-hide': 'generalWindow',

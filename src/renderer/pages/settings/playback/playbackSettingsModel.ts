@@ -10,6 +10,7 @@ import type {
   ChannelBalanceState,
   PlaybackSpeedMode,
 } from '../../../../shared/types/audio';
+import type { Locale } from '../../../i18n/locales';
 import type { TranslationKey } from '../../../i18n/locales';
 import {
   detectRendererPlatform,
@@ -170,6 +171,25 @@ export const getShufflePlaybackModeId = (avoidRecentCount: number): ShufflePlayb
   }
   return 'avoid-recent';
 };
+
+export const mouseGestureTrackSwitchSettingId = 'settings-row-mouse-gesture-track-switch';
+
+export const mouseGestureTrackSwitchCopy = {
+  title: {
+    'zh-CN': '鼠标手势切歌',
+    'zh-TW': '滑鼠手勢切歌',
+    'ja-JP': 'マウスジェスチャーで曲を切り替える',
+    'en-US': 'Switch tracks with mouse gestures',
+    'ko-KR': '마우스 제스처로 곡 전환',
+  },
+  description: {
+    'zh-CN': '在底部播放栏或歌词页按住鼠标左键横划，切换上一首或下一首。竖划、点按钮和歌词文字不会切歌。',
+    'zh-TW': '在底部播放列或歌詞頁按住滑鼠左鍵橫向滑動，切換上一首或下一首。直向滑動、點按鈕和歌詞文字不會切歌。',
+    'ja-JP': '下部プレーヤーまたは歌詞ページを左ボタンで横にドラッグすると前後の曲へ切り替わります。縦方向、ボタン、歌詞テキストは対象外です。',
+    'en-US': 'Drag horizontally with the left mouse button on the bottom player or lyrics page to change tracks. Vertical drags, buttons, and lyric text stay put.',
+    'ko-KR': '하단 플레이어나 가사 페이지에서 마우스 왼쪽 버튼으로 가로로 드래그하면 곡이 바뀝니다. 세로 드래그, 버튼, 가사 글자는 바뀌지 않습니다.',
+  },
+} as const satisfies Record<'title' | 'description', Record<Locale, string>>;
 
 export const audioExportFormatOptions: Array<{ format: AudioExportFormat; label: string }> = [
   { format: 'mp3', label: 'MP3' },

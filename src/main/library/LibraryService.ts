@@ -61,6 +61,7 @@ import { BpmAnalysisJobQueue } from './audioAnalysis/BpmAnalysisJobQueue';
 import { ReplayGainAnalysisJobQueue } from './audioAnalysis/ReplayGainAnalysisJobQueue';
 import { LyricsBackfillJobPersistence, LyricsBackfillJobQueue } from './LyricsBackfillJobQueue';
 import { ArtistImageCacheService } from './artistImages/ArtistImageCacheService';
+import { AlbumArtistReadModel, isAlbumArtistId } from './artist/AlbumArtistReadModel';
 import { fetchWithNetworkProxy } from '../network/networkFetch';
 import { readResponseBodyLimited, ResponseBodyTooLargeError } from '../network/readResponseBodyLimited';
 import type { ArtistImageLookupInput, ArtistImageProvider } from './artistImages/ArtistImageTypes';
@@ -487,6 +488,7 @@ export class LibraryService {
   private readonly lyricsBackfillJobQueue: LyricsBackfillJobQueue;
   private coverCacheSizeSnapshot: DiagnosticSizeSnapshot | null = null;
   private readonly unregisterSoftMemoryCleanup: () => void;
+  private readonly albumArtistReadModel: AlbumArtistReadModel;
   private closed = false;
 
   constructor(
@@ -512,6 +514,9 @@ export class LibraryService {
     private readonly embeddedTrackTagWriter: typeof writeEmbeddedTrackTags = writeEmbeddedTrackTags,
     private readonly automaticBpmBackfillEnabled = false,
   ) {
+    this.albumArtistReadModel = new AlbumArtistReadModel(this.database, () => ({
+      artistMergeStrategy: this.readAppSettings().artistMergeStrategy,
+    }));
     this.moveCandidateService = new LibraryMoveCandidateService(this.database);
     this.moveRepairService = new LibraryMoveRepairService(this.database, this.moveCandidateService);
     this.lyricsBackfillJobQueue = new LyricsBackfillJobQueue((query) => this.store.getTracks(query), {
@@ -1059,6 +1064,9 @@ export class LibraryService {
   }
 
   getArtists(query?: LibraryPageQuery): LibraryPage<LibraryArtist> {
+    if (query?.artistGrouping === 'albumArtist') {
+      return this.albumArtistReadModel.getArtists(query);
+    }
     this.refreshArtistsIfDirty();
     return this.store.getArtists(query);
   }
@@ -1073,11 +1081,16 @@ export class LibraryService {
   }
 
   getArtist(artistId: string): LibraryArtist | null {
+    if (isAlbumArtistId(artistId)) {
+      return this.albumArtistReadModel.getArtist(artistId);
+    }
     return this.store.getArtist(artistId);
   }
 
   async getArtistInsights(artistId: string, options?: ArtistInsightsOptions): Promise<ArtistInsights> {
-    const localInsights = this.store.getArtistInsights(artistId, options);
+    const localInsights = isAlbumArtistId(artistId)
+      ? this.albumArtistReadModel.getArtistInsights(artistId, options)
+      : this.store.getArtistInsights(artistId, options);
     if (options?.includeOnline !== true || !localInsights.artist) {
       return localInsights;
     }
@@ -1114,10 +1127,16 @@ export class LibraryService {
   }
 
   getArtistTracks(artistId: string, query?: Pick<LibraryPageQuery, 'page' | 'pageSize' | 'sort'>): LibraryPage<LibraryTrack> {
+    if (isAlbumArtistId(artistId)) {
+      return this.albumArtistReadModel.getArtistTracks(artistId, query);
+    }
     return this.store.getArtistTracks(artistId, query);
   }
 
   getArtistAlbums(artistId: string, query?: Pick<LibraryPageQuery, 'page' | 'pageSize' | 'sort'>): LibraryPage<LibraryAlbum> {
+    if (isAlbumArtistId(artistId)) {
+      return this.albumArtistReadModel.getArtistAlbums(artistId, query);
+    }
     return this.store.getArtistAlbums(artistId, query);
   }
 

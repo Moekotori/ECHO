@@ -16,6 +16,7 @@ type AlbumTrackListProps = {
   onToggleTrackLiked?: (track: LibraryTrack) => void | Promise<void>;
   initialLoadBlocked?: boolean;
   initialLoadDelayMs?: number;
+  reloadToken?: number;
   summary?: {
     duration: string;
     signal: string;
@@ -67,6 +68,7 @@ export const AlbumTrackList = ({
   onToggleTrackLiked,
   initialLoadBlocked = false,
   initialLoadDelayMs = 0,
+  reloadToken = 0,
   summary,
 }: AlbumTrackListProps): JSX.Element => {
   const { t } = useI18n();
@@ -186,7 +188,7 @@ export const AlbumTrackList = ({
 
     void loadTracksRef.current(1, 'replace');
     return undefined;
-  }, [albumId, initialLoadBlocked, initialLoadDelayMs]);
+  }, [albumId, initialLoadBlocked, initialLoadDelayMs, reloadToken]);
 
   useEffect(() => {
     onFirstTrackChange?.(tracks[0] ?? null, isLoading && tracks.length === 0);

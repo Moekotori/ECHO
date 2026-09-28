@@ -59,7 +59,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-accent) 9%, transparent);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -75,7 +75,7 @@
   margin-top: 26px;
   color: var(--theme-heading-text);
   font-size: clamp(38px, 4vw, 64px);
-  font-weight: 880;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: -0.045em;
   line-height: 1.08;
   text-wrap: balance;
@@ -96,7 +96,7 @@
   margin-top: 28px !important;
   color: var(--theme-success-text);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-pro-lock__safe-note svg {
@@ -137,7 +137,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 13px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-pro-lock__actions button:disabled,
@@ -176,7 +176,7 @@
   margin-top: 14px !important;
   color: var(--theme-danger-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-pro-lock__footer {
@@ -230,7 +230,7 @@
 .dsp-pro-lock__preview h2 {
   color: var(--theme-heading-text);
   font-size: clamp(19px, 1.35vw, 24px);
-  font-weight: 820;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: -0.02em;
 }
 
@@ -299,7 +299,7 @@
   overflow: hidden;
   color: var(--theme-page-text);
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -314,7 +314,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-accent) 9%, transparent);
   font-size: 11px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
 }
 
 @media (max-width: 1600px) {
@@ -440,7 +440,7 @@
 .dsp-brand span {
   color: rgba(93, 101, 116, 0.8);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -449,7 +449,7 @@
   color: #1f2228;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 33px;
-  font-weight: 500;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0;
   line-height: 1;
 }
@@ -458,7 +458,7 @@
   color: rgba(65, 75, 92, 0.7);
   font-size: 12px;
   font-style: normal;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-output-card {
@@ -492,7 +492,7 @@
   overflow: hidden;
   color: rgba(75, 84, 100, 0.72);
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -503,7 +503,7 @@
   margin: 2px 0;
   color: #1e2633;
   font-size: 13px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -535,7 +535,7 @@
   padding: 12px 14px 2px 4px;
   color: rgba(75, 84, 100, 0.58);
   font-size: 10px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -632,7 +632,7 @@
   align-items: center;
   color: #1f2937;
   font-size: 14px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-pro-badge {
@@ -649,7 +649,7 @@
   background: rgba(255, 238, 196, 0.92);
   font-size: 11px;
   font-style: normal;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0;
   line-height: 1;
   vertical-align: middle;
@@ -672,7 +672,7 @@
 .dsp-chain-copy small {
   color: rgba(75, 84, 100, 0.72);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-chain-state {
@@ -728,7 +728,7 @@
   margin: 0 0 4px;
   color: rgba(75, 84, 100, 0.72);
   font-size: 12px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-topbar-subtitle {
@@ -736,7 +736,7 @@
   margin-top: 7px;
   color: rgba(75, 84, 100, 0.68);
   font-size: 12px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-topbar-title h1 {
@@ -748,7 +748,7 @@
   margin: 0;
   color: #1e2633;
   font-size: clamp(28px, 3.2vw, 42px);
-  font-weight: 920;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
   line-height: 1.02;
 }
@@ -800,14 +800,14 @@
   color: rgba(75, 84, 100, 0.62);
   font-size: 10px;
   font-style: normal;
-  font-weight: 860;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
 .dsp-pipeline-map strong {
   color: #202939;
   font-size: 12px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-pipeline-map span[data-active="true"] strong {
@@ -838,7 +838,7 @@
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.7);
   font-size: 12px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-topbar-status span[data-active="true"] {
@@ -883,7 +883,7 @@
 
 .dsp-focus-strip strong {
   color: #1f2937;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-focus-strip[data-risk="true"] span:nth-child(3) strong {
@@ -912,7 +912,7 @@
   border-radius: 8px;
   background: rgba(255, 242, 236, 0.9);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-status-error--pro {
@@ -1093,7 +1093,7 @@
 .opra-browser-control span {
   color: rgba(75, 84, 100, 0.64);
   font-size: 11px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
@@ -1102,7 +1102,7 @@
   max-width: 100%;
   color: #202939;
   font-size: 20px;
-  font-weight: 930;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1112,7 +1112,7 @@
   max-width: 100%;
   color: rgba(54, 64, 80, 0.7);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1130,7 +1130,7 @@
   background: rgba(247, 250, 253, 0.94);
   cursor: pointer;
   font-size: 11px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-label);
   transition:
     color 160ms ease,
     border-color 160ms ease,
@@ -1226,13 +1226,13 @@
   color: rgba(75, 84, 100, 0.72);
   font-size: 12px;
   font-style: normal;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 .opra-browser-intro strong {
   color: #202939;
   font-size: 28px;
-  font-weight: 920;
+  font-weight: var(--echo-weight-label);
 }
 
 .opra-browser-intro p,
@@ -1242,7 +1242,7 @@
   margin: 0;
   color: rgba(54, 64, 80, 0.78);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -1270,7 +1270,7 @@
   background: transparent;
   font: inherit;
   font-size: 14px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   outline: none;
 }
 
@@ -1296,7 +1296,7 @@
   background: rgba(246, 248, 252, 0.9);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-label);
   transition:
     color 140ms ease,
     border-color 140ms ease,
@@ -1330,13 +1330,13 @@
   border: 0;
   background: transparent;
   cursor: pointer;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .opra-browser-crumbs button[data-active="true"],
 .opra-browser-crumbs span {
   color: #202939;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .opra-browser-status span {
@@ -1348,7 +1348,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
 }
 
 .opra-browser-message {
@@ -1374,7 +1374,7 @@
   gap: 6px;
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   text-transform: uppercase;
 }
 
@@ -1409,13 +1409,13 @@
 
 .opra-shortcuts button strong {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .opra-shortcuts button small {
   color: rgba(75, 84, 100, 0.66);
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 .opra-vendor-grid {
@@ -1469,7 +1469,7 @@
   place-items: center;
   color: #202939;
   font-size: 40px;
-  font-weight: 920;
+  font-weight: var(--echo-weight-label);
 }
 
 .opra-vendor-grid span,
@@ -1482,7 +1482,7 @@
   max-width: 100%;
   color: #202939;
   font-size: 14px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1492,7 +1492,7 @@
   max-width: 100%;
   color: rgba(75, 84, 100, 0.62);
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1580,7 +1580,7 @@
   overflow: hidden;
   color: rgba(75, 84, 100, 0.64);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1659,7 +1659,7 @@
   pointer-events: none;
   color: rgba(82, 92, 112, 0.76);
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0;
 }
 
@@ -1840,7 +1840,7 @@
   background: rgba(239, 241, 255, 0.9);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-label);
 }
 
 .opra-preset-actions button:last-child {
@@ -1923,7 +1923,7 @@
 .dsp-compressor-header span {
   color: #9a631e;
   font-size: 11px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -1958,7 +1958,7 @@
   background: rgba(248, 250, 253, 0.94);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-compressor-power[data-active="true"],
@@ -2018,7 +2018,7 @@
   color: #8b5a1a;
   font-style: normal;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-compressor-controls input[type="range"] {
@@ -2047,7 +2047,7 @@
   background: rgba(255, 248, 235, 0.9);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 @media (max-width: 720px) {
@@ -2075,7 +2075,7 @@
 .dsp-rack-header span {
   color: #5966d8;
   font-size: 11px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -2118,7 +2118,7 @@
   background: rgba(248, 250, 253, 0.94);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-rack-actions button:first-child {
@@ -2141,7 +2141,7 @@
   border-radius: 7px;
   background: rgba(255, 243, 238, 0.9);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-rack-list {
@@ -2167,7 +2167,7 @@
 .dsp-rack-list li > span {
   color: rgba(69, 79, 99, 0.5);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-rack-list li > div {
@@ -2240,7 +2240,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
 }
 
 @media (max-width: 760px) {
@@ -2280,7 +2280,7 @@
   margin: 0;
   color: rgba(58, 68, 84, 0.76);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.55;
 }
 
@@ -2335,7 +2335,7 @@
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
   font-style: normal;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -2344,7 +2344,7 @@
 .dsp-channel-primary strong {
   color: #202939;
   font-size: 18px;
-  font-weight: 920;
+  font-weight: var(--echo-weight-label);
   line-height: 1.12;
 }
 
@@ -2352,7 +2352,7 @@
 .dsp-channel-primary small {
   color: rgba(75, 84, 100, 0.66);
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.35;
 }
 
@@ -2404,7 +2404,7 @@
   margin-right: auto;
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
@@ -2424,7 +2424,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-room-trim-tools button:hover,
@@ -2503,7 +2503,7 @@
 .dsp-channel-bias-head span {
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-channel-bias-head span:last-child,
@@ -2514,7 +2514,7 @@
 .dsp-channel-bias-head strong {
   color: #2632a2;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-channel-bias-meter {
@@ -2561,7 +2561,7 @@
 .dsp-channel-bias-values strong {
   color: #202939;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-channel-mode-tabs {
@@ -2583,7 +2583,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   transition:
     color 160ms ease,
     background 160ms ease,
@@ -2619,7 +2619,7 @@
   gap: 8px;
   color: rgba(58, 68, 84, 0.78);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -2634,7 +2634,7 @@
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
   font-style: normal;
-  font-weight: 860;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
@@ -2642,7 +2642,7 @@
   overflow: hidden;
   color: #202939;
   font-size: 13px;
-  font-weight: 920;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2650,7 +2650,7 @@
 .dsp-channel-band-row small {
   color: rgba(75, 84, 100, 0.64);
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-channel-band-card {
@@ -2695,7 +2695,7 @@
   background: rgba(255, 255, 255, 0.84);
   font: inherit;
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   transition:
     border-color 160ms ease,
     box-shadow 160ms ease,
@@ -2749,7 +2749,7 @@
   display: block;
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-channel-save-row input,
@@ -2766,7 +2766,7 @@
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
   font: inherit;
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   transition:
     border-color 160ms ease,
     background 160ms ease,
@@ -2815,7 +2815,7 @@
 .dsp-channel-presets small {
   color: rgba(75, 84, 100, 0.62);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-channel-preset-actions button,
@@ -2836,7 +2836,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
   transition:
@@ -2961,7 +2961,7 @@
   margin: 8px 0 6px;
   color: #202939;
   font-size: clamp(28px, 3vw, 46px);
-  font-weight: 930;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
   line-height: 1.02;
 }
@@ -2971,7 +2971,7 @@
   margin: 0;
   color: rgba(58, 68, 84, 0.78);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.55;
 }
 
@@ -3033,14 +3033,14 @@
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
   font-style: normal;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
 .dsp-safety-route strong {
   color: #202939;
   font-size: 14px;
-  font-weight: 910;
+  font-weight: var(--echo-weight-label);
   white-space: nowrap;
 }
 
@@ -3066,7 +3066,7 @@
   gap: 8px;
   color: rgba(75, 84, 100, 0.74);
   font-size: 12px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-safety-section-head svg,
@@ -3098,7 +3098,7 @@
 .dsp-safety-next strong {
   color: #202939;
   font-size: 20px;
-  font-weight: 930;
+  font-weight: var(--echo-weight-label);
   line-height: 1.12;
 }
 
@@ -3106,7 +3106,7 @@
   margin: 0;
   color: rgba(58, 68, 84, 0.78);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.48;
 }
 
@@ -3125,7 +3125,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-label);
   white-space: nowrap;
 }
 
@@ -3156,7 +3156,7 @@
 .dsp-room-next strong {
   color: #1f2937;
   font-size: 17px;
-  font-weight: 920;
+  font-weight: var(--echo-weight-label);
   line-height: 1.15;
 }
 
@@ -3177,7 +3177,7 @@
   margin: 0;
   color: rgba(58, 68, 84, 0.76);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -3209,13 +3209,13 @@
 .dsp-room-route dt {
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-room-route dd {
   color: #202939;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-body);
   text-align: right;
 }
 
@@ -3233,7 +3233,7 @@
   border-radius: 8px;
   background: rgba(248, 250, 255, 0.7);
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-headroom-main {
@@ -3301,13 +3301,13 @@
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
   font-style: normal;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-headroom-status strong {
   color: #248465;
   font-size: 15px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   white-space: nowrap;
 }
 
@@ -3323,7 +3323,7 @@
   margin: 0;
   color: rgba(58, 68, 84, 0.84);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -3365,7 +3365,7 @@
 .dsp-headroom-budget strong {
   color: #202939;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   white-space: nowrap;
 }
 
@@ -3420,14 +3420,14 @@
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
   font-style: normal;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   text-transform: uppercase;
 }
 
 .dsp-headroom-next-step strong {
   color: #202939;
   font-size: 18px;
-  font-weight: 920;
+  font-weight: var(--echo-weight-label);
   line-height: 1.08;
 }
 
@@ -3435,7 +3435,7 @@
   margin: 0;
   color: rgba(58, 68, 84, 0.82);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -3471,20 +3471,20 @@
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
   font-style: normal;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-headroom-safe-actions strong {
   color: rgba(40, 96, 76, 0.9);
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   line-height: 1.35;
 }
 
 .dsp-headroom-recommendation strong {
   color: #202939;
   font-size: 24px;
-  font-weight: 920;
+  font-weight: var(--echo-weight-label);
   line-height: 1.05;
 }
 
@@ -3509,7 +3509,7 @@
   gap: 7px;
   color: #2632a2;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-headroom-next-step button:first-child {
@@ -3573,7 +3573,7 @@
 .dsp-headroom-modes strong {
   color: #202939;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   white-space: nowrap;
 }
 
@@ -3581,7 +3581,7 @@
   grid-column: 1 / -1;
   color: rgba(75, 84, 100, 0.72);
   font-size: 12px;
-  font-weight: 740;
+  font-weight: var(--echo-weight-body);
   line-height: 1.35;
 }
 
@@ -3589,7 +3589,7 @@
   color: #3f4bc4;
   font-size: 12px;
   font-style: normal;
-  font-weight: 900;
+  font-weight: var(--echo-weight-body);
   white-space: nowrap;
 }
 
@@ -3597,7 +3597,7 @@
   margin: 0;
   color: rgba(75, 84, 100, 0.64);
   font-size: 11px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -3617,7 +3617,7 @@
   gap: 10px;
   color: #202939;
   font-size: clamp(22px, 2.4vw, 34px);
-  font-weight: 920;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0;
   line-height: 1.04;
 }
@@ -3635,7 +3635,7 @@
   border-radius: 8px;
   background: rgba(239, 241, 255, 0.72);
   font-size: 13px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-heading);
 }
 
 .dsp-module-metrics {
@@ -3668,13 +3668,13 @@
   color: rgba(75, 84, 100, 0.68);
   font-size: 11px;
   font-style: normal;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-module-metric strong {
   color: #202939;
   font-size: 15px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-module-metric[data-tone="good"] strong {
@@ -3715,14 +3715,14 @@
 .dsp-module-grid label span {
   color: rgba(75, 84, 100, 0.72);
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-module-range strong {
   justify-self: end;
   color: #202939;
   font-size: 14px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-module-range input[type="range"] {
@@ -3750,7 +3750,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-label);
   white-space: nowrap;
   transition:
     color 160ms ease,
@@ -3864,14 +3864,14 @@
 .dsp-channel-toggle-copy strong {
   color: inherit;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   line-height: 1.05;
 }
 
 .dsp-channel-toggle-copy small {
   color: rgba(75, 84, 100, 0.64);
   font-size: 10px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   line-height: 1.05;
 }
 
@@ -3905,7 +3905,7 @@
   background: rgba(255, 255, 255, 0.86);
   font: inherit;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-src-mode-switch {
@@ -3927,7 +3927,7 @@
   margin-right: auto;
   color: rgba(75, 84, 100, 0.72);
   font-size: 12px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-src-mode-switch button {
@@ -3943,7 +3943,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-src-mode-switch button[data-active="true"] {
@@ -3997,7 +3997,7 @@
 .dsp-src-advanced-head strong {
   color: #202939;
   font-size: 15px;
-  font-weight: 920;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-src-advanced-head small,
@@ -4006,7 +4006,7 @@
   min-width: 0;
   color: rgba(75, 84, 100, 0.72);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -4022,7 +4022,7 @@
   background: rgba(255, 246, 232, 0.82);
   font-size: 11px;
   font-style: normal;
-  font-weight: 900;
+  font-weight: var(--echo-weight-body);
   white-space: nowrap;
 }
 
@@ -4051,13 +4051,13 @@
   color: rgba(75, 84, 100, 0.66);
   font-size: 11px;
   font-style: normal;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
 }
 
 .dsp-src-advanced-summary strong {
   color: #202939;
   font-size: 14px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-src-advanced-summary small {
@@ -4065,7 +4065,7 @@
   overflow: hidden;
   color: rgba(75, 84, 100, 0.66);
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4083,7 +4083,7 @@
   gap: 7px;
   color: #39465a;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-src-advanced-title button {
@@ -4099,7 +4099,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 11px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-src-advanced-title button:disabled {
@@ -4131,7 +4131,7 @@
   overflow: hidden;
   color: #39465a;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4141,7 +4141,7 @@
   overflow: hidden;
   color: #7a8798;
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4161,7 +4161,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 11px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-src-filter-subhead button:disabled {
@@ -4235,7 +4235,7 @@
 .dsp-src-compute-card strong {
   color: #202939;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .dsp-src-filter-card em,
@@ -4248,7 +4248,7 @@
   background: rgba(241, 245, 249, 0.76);
   font-size: 10px;
   font-style: normal;
-  font-weight: 860;
+  font-weight: var(--echo-weight-body);
   line-height: 1;
   white-space: nowrap;
 }
@@ -4280,7 +4280,7 @@
   overflow: hidden;
   color: #202939;
   font-size: 13px;
-  font-weight: 920;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4293,7 +4293,7 @@
   background: rgba(255, 255, 255, 0.56);
   font-size: 10px;
   font-style: normal;
-  font-weight: 880;
+  font-weight: var(--echo-weight-body);
   white-space: nowrap;
 }
 
@@ -4302,7 +4302,7 @@
   margin: 0;
   color: rgba(75, 84, 100, 0.78);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.45;
 }
 
@@ -4339,7 +4339,7 @@
   padding: 12px 14px;
   border-radius: 8px;
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   line-height: 1.55;
 }
 

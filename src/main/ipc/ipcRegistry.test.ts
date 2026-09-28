@@ -72,6 +72,7 @@ const IPC_SOURCE_FILES = [
   'hqPlayerIpc.ts',
   'lastFmIpc.ts',
   'libraryIpc.ts',
+  'albumSplitIpc.ts',
   'lyricsIpc.ts',
   'miniPlayerIpc.ts',
   'petIpc.ts',

@@ -34,13 +34,13 @@
   background: color-mix(in srgb, var(--theme-accent) 10%, transparent);
   color: var(--theme-accent-text);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
 }
 
 .echo-link-basic-panel__status {
   color: var(--theme-subtle-text);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--echo-weight-label);
 }
 
 .echo-link-basic-panel__status.is-running {

@@ -1642,7 +1642,7 @@ html[data-theme-preset="FINAL"] :is(
   .artist-title
 ) {
   color: var(--preset-heading);
-  font-weight: 900;
+  font-weight: var(--echo-weight-brand);
   letter-spacing: 0;
 }
 
@@ -2437,7 +2437,7 @@ html[data-theme-preset="childrenDoodle"] .app-titlebar-brand strong,
 html[data-theme-preset="childrenDoodle"] .home-hero h1,
 html[data-theme-preset="childrenDoodle"] .songs-title-group h1 {
   color: var(--preset-heading);
-  font-weight: 900;
+  font-weight: var(--echo-weight-brand);
   text-shadow:
     1px 1px 0 rgb(255 111 168 / 0.18),
     -1px 0 0 rgb(102 205 183 / 0.12);
@@ -5766,7 +5766,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5775,7 +5775,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   color: var(--theme-muted-text);
   font-size: 11px;
   font-style: normal;
-  font-weight: 720;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-theme-preset-summary > svg {
@@ -5850,7 +5850,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5862,7 +5862,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   color: var(--theme-muted-text);
   font-size: 11px;
   font-style: normal;
-  font-weight: 680;
+  font-weight: var(--echo-weight-body);
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -5935,7 +5935,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   overflow: hidden;
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5944,7 +5944,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   color: var(--theme-muted-text);
   font-size: 11px;
   font-style: normal;
-  font-weight: 720;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-theme-custom-summary > svg {
@@ -5981,13 +5981,13 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
 .settings-theme-custom-heading span {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-theme-custom-heading strong {
   color: var(--theme-heading-text);
   font-size: 15px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.2;
 }
 
@@ -5995,7 +5995,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   color: var(--theme-muted-text);
   font-size: 11px;
   font-style: normal;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-theme-custom-toolbar {
@@ -6031,7 +6031,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   display: grid;
   place-items: center;
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-theme-custom-library {
@@ -6084,7 +6084,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
 .settings-theme-custom-motion-row strong {
   color: var(--theme-heading-text);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-theme-custom-theme-card em,
@@ -6093,7 +6093,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   color: var(--theme-muted-text);
   font-size: 11px;
   font-style: normal;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-theme-custom-empty {
@@ -6176,7 +6176,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   padding: 0 10px;
   border-radius: 6px;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--echo-weight-body);
   line-height: 1.2;
 }
 
@@ -6199,7 +6199,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
 .settings-theme-custom-mock-card strong {
   overflow: hidden;
   font-size: 16px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6209,7 +6209,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   overflow: hidden;
   font-size: 12px;
   font-style: normal;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
   line-height: 1.25;
   opacity: 0.92;
   text-overflow: ellipsis;
@@ -6224,7 +6224,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   min-height: 34px;
   padding: 0 10px;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-theme-custom-mock-row span {
@@ -6236,7 +6236,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
 .settings-theme-custom-mock-row strong {
   flex: 0 0 auto;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-theme-custom-mock-accent {
@@ -6245,7 +6245,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   min-height: 34px;
   padding: 0 10px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   line-height: 1.1;
 }
 
@@ -6262,7 +6262,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   flex: 1 1 auto;
   overflow: hidden;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6289,14 +6289,14 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
 .settings-theme-custom-section-title strong {
   color: var(--theme-heading-text);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-heading);
   white-space: nowrap;
 }
 
 .settings-theme-custom-section-title span {
   color: var(--theme-muted-text);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-heading);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6340,7 +6340,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
 .settings-theme-custom-color-copy strong {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   line-height: 1.2;
 }
 
@@ -6348,7 +6348,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   color: var(--theme-muted-text);
   font-size: 11px;
   font-style: normal;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
   line-height: 1.25;
 }
 
@@ -6366,7 +6366,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   color: var(--theme-subtle-text);
   font-family: inherit;
   font-size: 10px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-theme-custom-color-control input[type="color"] {
@@ -6420,7 +6420,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   gap: 8px;
   color: var(--theme-muted-text);
   font-size: 10px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-theme-custom-slider span em {
@@ -6432,7 +6432,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
 .settings-theme-custom-slider span em strong {
   color: var(--theme-heading-text);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
 }
 
 .settings-theme-custom-slider > span > strong {
@@ -6473,7 +6473,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   color: var(--theme-button-text);
   cursor: pointer;
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
 }
 
 .settings-theme-custom-advanced-toggle:hover {
@@ -6487,7 +6487,7 @@ html[data-theme-preset="darkSideMoon"] .app-shell--lyrics-player-drawer .lyrics-
   padding: 9px 11px;
   border-radius: 8px;
   font-size: 12px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   line-height: 1.45;
 }
 
@@ -7853,7 +7853,7 @@ html[data-theme-preset="childrenDoodle"] .lyrics-track-copy p {
 }
 
 html[data-theme-preset="childrenDoodle"] .lyrics-track-copy h1 {
-  font-weight: 800;
+  font-weight: var(--echo-weight-heading);
 }
 
 html[data-theme-preset="childrenDoodle"] .lyrics-track-album,
@@ -8986,7 +8986,7 @@ html[data-theme-preset="childrenDoodle"] .settings-page .setting-row > :not(.set
 
 html[data-theme-preset="childrenDoodle"] .settings-page .setting-info h3 {
   color: var(--children-doodle-ink);
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 html[data-theme-preset="childrenDoodle"] .settings-page .setting-info p {
@@ -9553,7 +9553,7 @@ html[data-theme-preset="FINAL"] .home-hero-copy::before {
   content: "final";
   font-family: Georgia, "Times New Roman", serif;
   font-size: 112px;
-  font-weight: 400;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0;
   line-height: 1;
   pointer-events: none;
@@ -9571,7 +9571,7 @@ html[data-theme-preset="FINAL"] .home-hero h1 {
   padding-left: 116px;
   font-family: Georgia, "Times New Roman", "Microsoft YaHei", serif;
   font-size: 44px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.04;
   text-shadow:
     0 1px 0 rgb(255 255 255 / 0.46),
@@ -9954,7 +9954,7 @@ html[data-theme-preset="FINAL"] .home-metric-tile::after {
   content: "FINAL LAB";
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-label);
   line-height: 1;
   pointer-events: none;
   text-align: right;
@@ -10094,7 +10094,7 @@ html[data-theme-preset="FINAL"] .home-section-title::after {
   content: "final";
   font-family: Georgia, "Times New Roman", serif;
   font-size: 18px;
-  font-weight: 400;
+  font-weight: var(--echo-weight-heading);
   vertical-align: -2px;
 }
 
@@ -10257,7 +10257,7 @@ html[data-theme-preset="FINAL"] .page-surface:has(:is(.albums-page, .artists-pag
   content: "";
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.16em;
   line-height: 1.75;
   opacity: 0.28;
@@ -10283,7 +10283,7 @@ html[data-theme-preset="FINAL"] :is(.albums-page, .artists-page) .songs-header::
   content: "";
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.18em;
   line-height: 1;
   opacity: 0.52;
@@ -10430,14 +10430,14 @@ html[data-theme-preset="FINAL"] .artists-page .artist-wall .artist-copy strong {
   color: var(--preset-heading);
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 html[data-theme-preset="FINAL"] .artists-page .artist-wall .artist-copy small {
   color: rgb(var(--preset-secondary-rgb) / 0.76);
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 html[data-theme-preset="FINAL"] .artists-page .artist-wall > .artist-card:hover .artist-avatar,
@@ -10492,7 +10492,7 @@ html[data-theme-preset="FINAL"] .player-bar::after {
   content: "";
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.16em;
   line-height: 1;
   opacity: 0.42;
@@ -10684,7 +10684,7 @@ html[data-theme-preset="FINAL"] :is(.album-detail-page, .artist-detail-page)::be
   content: "D8000 DC / AFDS\A ZE8000 MK2 / 8K SOUND\A A8000 / TRUE BERYLLIUM";
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.15em;
   line-height: 1.75;
   pointer-events: none;
@@ -10741,7 +10741,7 @@ html[data-theme-preset="FINAL"] .artist-hero-copy h1,
 html[data-theme-preset="FINAL"] .album-detail-copy h1 {
   color: var(--preset-heading) !important;
   font-family: Georgia, "Times New Roman", "Microsoft YaHei", serif;
-  font-weight: 680;
+  font-weight: var(--echo-weight-heading);
 }
 
 html[data-theme-preset="FINAL"] .artist-hero .artist-detail-kicker,
@@ -10809,7 +10809,7 @@ html[data-theme-preset="FINAL"] .album-detail-facts::before {
   content: "FINAL LAB";
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.16em;
 }
 
@@ -10924,7 +10924,7 @@ html[data-theme-preset="FINAL"] .page-surface:has(:is(.queue-page, .folders-work
   content: "D8000 DC / AFDS ORDER MAP\A ZE8000 MK2 / 8K TRANSPORT";
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.16em;
   line-height: 1.7;
   pointer-events: none;
@@ -10940,14 +10940,14 @@ html[data-theme-preset="FINAL"] :is(.queue-page, .folders-workbench) {
 html[data-theme-preset="FINAL"] :is(.queue-page-header h1, .folders-pane-header h1, .queue-now-main h2, .folder-detail-title h2) {
   color: var(--preset-heading) !important;
   font-family: Georgia, "Times New Roman", "Microsoft YaHei", serif;
-  font-weight: 680;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
 html[data-theme-preset="FINAL"] :is(.queue-kicker, .queue-count, .folders-status-line, .folders-panel-heading h2) {
   color: rgb(var(--preset-secondary-rgb) / 0.62);
   font-family: Outfit, "Microsoft YaHei", sans-serif;
-  font-weight: 820;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -10988,7 +10988,7 @@ html[data-theme-preset="FINAL"] .queue-now-card::before {
   content: "FINAL QUEUE / AFDS SEQUENCE";
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 10px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.16em;
   pointer-events: none;
 }
@@ -11047,7 +11047,7 @@ html[data-theme-preset="FINAL"] :is(.queue-quality-row span, .queue-now-meta spa
     linear-gradient(135deg, rgb(255 253 247 / 0.66), rgb(var(--preset-soft-rgb) / 0.46)) !important;
   color: rgb(var(--preset-secondary-rgb) / 0.82) !important;
   font-family: Outfit, "Microsoft YaHei", sans-serif;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0.03em;
 }
 
@@ -11141,7 +11141,7 @@ html[data-theme-preset="FINAL"] .folder-metrics span::after {
   content: "KAWASAKI";
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 9px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
   letter-spacing: 0.12em;
   pointer-events: none;
 }
@@ -11186,7 +11186,7 @@ html[data-theme-preset="FINAL"] :is(.songs-page, .downloads-page, .inbox-page) {
 html[data-theme-preset="FINAL"] :is(.songs-title-group h1, .downloads-header h1, .inbox-hero-copy h1) {
   color: var(--preset-heading) !important;
   font-family: Georgia, "Times New Roman", "Microsoft YaHei", serif;
-  font-weight: 680;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
@@ -11235,7 +11235,7 @@ html[data-theme-preset="FINAL"] :is(.downloads-panel, .inbox-story-panel, .inbox
   content: "FINAL LAB / KAWASAKI";
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 9px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.14em;
   pointer-events: none;
 }
@@ -11374,7 +11374,7 @@ html[data-theme-preset="FINAL"] :is(.download-provider-chip, .download-tool-pill
     linear-gradient(135deg, rgb(255 253 247 / 0.66), rgb(var(--preset-soft-rgb) / 0.46)) !important;
   color: rgb(var(--preset-secondary-rgb) / 0.82) !important;
   font-family: Outfit, "Microsoft YaHei", sans-serif;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.03em;
 }
 
@@ -11556,7 +11556,7 @@ html[data-theme-preset="FINAL"] .folders-sidebar::after {
   content: "final audio design\A SINCE 1974 / KAWASAKI";
   font-family: Georgia, "Times New Roman", "Microsoft YaHei", serif;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-label);
   line-height: 1.55;
   pointer-events: none;
   white-space: pre;
@@ -11811,7 +11811,7 @@ html[data-theme-preset="FINAL"] .home-section-header::before {
 html[data-theme-preset="FINAL"] .home-section-header h2 {
   font-family: Georgia, "Times New Roman", "Microsoft YaHei", serif;
   font-size: 19px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-heading);
 }
 
 html[data-theme-preset="FINAL"] :is(.home-cover-card, .home-recommend-rail .home-cover-card) {
@@ -12565,7 +12565,7 @@ html[data-theme-preset="FINAL"] .app-shell--lyrics-player-drawer .lyrics-player-
   gap: 10px;
   color: var(--lyrics-mini-player-readable-muted, rgb(232 237 236 / 0.94)) !important;
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   text-shadow: var(--lyrics-mini-player-readable-shadow);
 }
 
@@ -12940,14 +12940,14 @@ html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-s
   color: rgb(var(--preset-ink-rgb) / 0.94);
   font-family: Georgia, "Times New Roman", "Microsoft YaHei", serif;
   font-size: 16px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0;
 }
 
 html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer) .player-track-copy > span {
   color: rgb(var(--preset-ink-rgb) / 0.56);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer) .player-tags {
@@ -12962,7 +12962,7 @@ html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-s
     linear-gradient(180deg, rgb(255 255 255 / 0.7), rgb(var(--preset-soft-rgb) / 0.54));
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.7);
   font-size: 9px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-shell--lyrics-player-drawer) .player-center {
@@ -13031,7 +13031,7 @@ html[data-theme-preset="FINAL"] .app-shell:not(.app-shell--wallpaper):not(.app-s
   color: rgb(var(--preset-ink-rgb) / 0.58);
   font-family: Outfit, "Microsoft YaHei", sans-serif;
   font-size: 11px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -13741,7 +13741,7 @@ html .app-shell.app-shell--acrylic:not(.app-shell--wallpaper) :is(
   .settings-collapse-toggle small,
   .settings-sidebar-layout-toggle em
 ) {
-  font-weight: 400;
+  font-weight: var(--echo-weight-body);
 }
 
 .app-shell--lyrics-player-drawer .lyrics-player-drawer-host .progress-track[data-waveform="true"] {
@@ -13859,7 +13859,7 @@ html[data-theme-custom="true"] .app-shell.app-shell--lyrics-player-drawer .lyric
 html[data-theme-preset] .app-shell.app-shell--lyrics-player-drawer .lyrics-player-drawer-host .progress-row > span,
 html[data-theme-custom="true"] .app-shell.app-shell--lyrics-player-drawer .lyrics-player-drawer-host .progress-row > span {
   color: var(--lyrics-mini-player-time-text, rgb(252 254 255 / 0.98)) !important;
-  font-weight: 830;
+  font-weight: var(--echo-weight-body);
   opacity: 1;
   text-shadow:
     0 1px 1px rgb(0 0 0 / 0.78),
@@ -15643,7 +15643,7 @@ html[data-theme-mode="ambient"] :is(.hifi-tag, .remote-track-source-badge, .play
     rgb(87 98 124 / 0.2);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.065);
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
 }
 
 html[data-theme-mode="ambient"] :is(.tag-flac, .tag-lossless, .tag-streaming, .tag-dlna, .remote-track-source-badge) {

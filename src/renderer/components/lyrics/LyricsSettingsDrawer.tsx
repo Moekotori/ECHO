@@ -54,6 +54,7 @@ import type { TranslationKey } from '../../i18n/locales';
 import { useOptionalPlaybackQueue } from '../../stores/PlaybackQueueProvider';
 import { DrawerSmartSearch } from '../common/DrawerSmartSearch';
 import { StyledSelect } from '../ui/StyledSelect';
+import { SettingHelpTooltip } from '../../pages/settings/components/SettingHelpTooltip';
 import {
   recordLyricsSourceQualityCandidates,
   recordLyricsSourceQualityOutcome,
@@ -163,8 +164,10 @@ type LyricsSettingsCategoryHeaderProps = {
 
 const LyricsSettingsCategoryHeader = ({ description, title }: LyricsSettingsCategoryHeaderProps): JSX.Element => (
   <header className="lyrics-settings-category-header">
-    <h3>{title}</h3>
-    <p>{description}</p>
+    <div className="setting-info-heading">
+      <h3>{title}</h3>
+      <SettingHelpTooltip label={title}>{description}</SettingHelpTooltip>
+    </div>
   </header>
 );
 
@@ -2218,19 +2221,21 @@ const LyricsSettingsPanelComponent = ({
           </label>
           <p>默认开启；关闭后，自动匹配和重新匹配只展示候选，需要手动选择歌词。</p>
 
-          <label className="audio-toggle-row">
-            <span>
-              <RotateCcw size={17} />
-              <strong>{t('lyricsSettings.currentTrack.restartOnApply')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsRestartOnApplyEnabled === true}
-              disabled={isBusy}
-              onChange={(event) => void patchSettings({ lyricsRestartOnApplyEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.currentTrack.restartOnApplyDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.currentTrack.restartOnApplyDescription')}>
+            <label className="audio-toggle-row">
+              <span>
+                <RotateCcw size={17} />
+                <strong>{t('lyricsSettings.currentTrack.restartOnApply')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsRestartOnApplyEnabled === true}
+                disabled={isBusy}
+                onChange={(event) => void patchSettings({ lyricsRestartOnApplyEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.currentTrack.restartOnApply')}>{t('lyricsSettings.currentTrack.restartOnApplyDescription')}</SettingHelpTooltip>
+          </div>
         </LyricsSettingsSection>
       ) : null}
 
@@ -2644,19 +2649,21 @@ const LyricsSettingsPanelComponent = ({
           onToggle={toggleLyricsDisplayPanel}
           title={t('lyricsSettings.display.title')}
         >
-          <label className="audio-toggle-row">
-            <span>
-              <Captions size={17} />
-              <strong>{t('lyricsSettings.display.enableLyrics')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsEnabled}
-              disabled={isBusy}
-              onChange={(event) => void patchSettings({ lyricsEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.display.enableLyricsDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.display.enableLyricsDescription')}>
+            <label className="audio-toggle-row">
+              <span>
+                <Captions size={17} />
+                <strong>{t('lyricsSettings.display.enableLyrics')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsEnabled}
+                disabled={isBusy}
+                onChange={(event) => void patchSettings({ lyricsEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.display.enableLyrics')}>{t('lyricsSettings.display.enableLyricsDescription')}</SettingHelpTooltip>
+          </div>
 
           {showPersistentControls ? (
           <label className="mv-threshold-control lyrics-match-threshold-control">
@@ -2725,19 +2732,21 @@ const LyricsSettingsPanelComponent = ({
           </label>
           {showVisualControls ? (
           <>
-            <label className="audio-toggle-row">
-              <span>
-                <EyeOff size={17} />
-                <strong>{t('lyricsSettings.display.hideEmptyState')}</strong>
-              </span>
-              <input
-                type="checkbox"
-                checked={effectiveSettings.lyricsEmptyStateHidden}
-                disabled={isBusy}
-                onChange={(event) => void patchSettings({ lyricsEmptyStateHidden: event.currentTarget.checked })}
-              />
-            </label>
-            <p>{t('lyricsSettings.display.hideEmptyStateDescription')}</p>
+            <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.display.hideEmptyStateDescription')}>
+              <label className="audio-toggle-row">
+                <span>
+                  <EyeOff size={17} />
+                  <strong>{t('lyricsSettings.display.hideEmptyState')}</strong>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={effectiveSettings.lyricsEmptyStateHidden}
+                  disabled={isBusy}
+                  onChange={(event) => void patchSettings({ lyricsEmptyStateHidden: event.currentTarget.checked })}
+                />
+              </label>
+              <SettingHelpTooltip label={t('lyricsSettings.display.hideEmptyState')}>{t('lyricsSettings.display.hideEmptyStateDescription')}</SettingHelpTooltip>
+            </div>
           </>
           ) : null}
         </LyricsSettingsSection>
@@ -3008,55 +3017,61 @@ const LyricsSettingsPanelComponent = ({
           title={t('lyricsSettings.textStyle.title')}
         >
 
-          <label
-            className="audio-toggle-row"
-            id="settings-row-lyrics-romanization"
-            data-search-highlight={highlightedSettingId === 'settings-row-lyrics-romanization' ? 'true' : undefined}
-          >
-            <span>
-              <Captions size={17} />
-              <strong>{t('lyricsSettings.display.showRomanization')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsRomanizationEnabled}
-              disabled={isBusy}
-              onChange={(event) => void patchSettings({ lyricsRomanizationEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.display.showRomanizationDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.display.showRomanizationDescription')}>
+            <label
+              className="audio-toggle-row"
+              id="settings-row-lyrics-romanization"
+              data-search-highlight={highlightedSettingId === 'settings-row-lyrics-romanization' ? 'true' : undefined}
+            >
+              <span>
+                <Captions size={17} />
+                <strong>{t('lyricsSettings.display.showRomanization')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsRomanizationEnabled}
+                disabled={isBusy}
+                onChange={(event) => void patchSettings({ lyricsRomanizationEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.display.showRomanization')}>{t('lyricsSettings.display.showRomanizationDescription')}</SettingHelpTooltip>
+          </div>
 
-          <label className="audio-toggle-row">
-            <span>
-              <Captions size={17} />
-              <strong>{t('lyricsSettings.display.preferUtatenKana')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsUtatenKanaEnabled === true}
-              disabled={isBusy || !effectiveSettings.lyricsRomanizationEnabled || !effectiveSettings.lyricsNetworkEnabled}
-              onChange={(event) => void patchSettings({ lyricsUtatenKanaEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.display.preferUtatenKanaDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.display.preferUtatenKanaDescription')}>
+            <label className="audio-toggle-row">
+              <span>
+                <Captions size={17} />
+                <strong>{t('lyricsSettings.display.preferUtatenKana')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsUtatenKanaEnabled === true}
+                disabled={isBusy || !effectiveSettings.lyricsRomanizationEnabled || !effectiveSettings.lyricsNetworkEnabled}
+                onChange={(event) => void patchSettings({ lyricsUtatenKanaEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.display.preferUtatenKana')}>{t('lyricsSettings.display.preferUtatenKanaDescription')}</SettingHelpTooltip>
+          </div>
 
-          <label
-            className="audio-toggle-row"
-            id="settings-row-lyrics-translation"
-            data-search-highlight={highlightedSettingId === 'settings-row-lyrics-translation' ? 'true' : undefined}
-          >
-            <span>
-              <Captions size={17} />
-              <strong>{t('lyricsSettings.display.showTranslation')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsTranslationEnabled}
-              disabled={isBusy}
-              onChange={(event) => void patchSettings({ lyricsTranslationEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.display.showTranslationDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.display.showTranslationDescription')}>
+            <label
+              className="audio-toggle-row"
+              id="settings-row-lyrics-translation"
+              data-search-highlight={highlightedSettingId === 'settings-row-lyrics-translation' ? 'true' : undefined}
+            >
+              <span>
+                <Captions size={17} />
+                <strong>{t('lyricsSettings.display.showTranslation')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsTranslationEnabled}
+                disabled={isBusy}
+                onChange={(event) => void patchSettings({ lyricsTranslationEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.display.showTranslation')}>{t('lyricsSettings.display.showTranslationDescription')}</SettingHelpTooltip>
+          </div>
 
           <div className="lyrics-word-highlight-settings">
             <label className="audio-toggle-row lyrics-word-highlight-toggle">
@@ -3479,19 +3494,21 @@ const LyricsSettingsPanelComponent = ({
                   onChange={(event) => patchDesktopLyricsStyle({ desktopLyricsTranslationEnabled: event.currentTarget.checked })}
                 />
               </label>
-              <label className="audio-toggle-row lyrics-desktop-hide-empty-toggle">
-                <span>
-                  <EyeOff size={17} />
-                  <strong>{t('lyricsSettings.display.desktopHideWhenNoLyrics')}</strong>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={desktopLyricsHideWhenNoLyricsEnabled === true}
-                  disabled={isBusy}
-                  onChange={(event) => patchDesktopLyricsStyle({ desktopLyricsHideWhenNoLyricsEnabled: event.currentTarget.checked })}
-                />
-              </label>
-              <p>{t('lyricsSettings.display.desktopHideWhenNoLyricsDescription')}</p>
+              <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.display.desktopHideWhenNoLyricsDescription')}>
+                <label className="audio-toggle-row lyrics-desktop-hide-empty-toggle">
+                  <span>
+                    <EyeOff size={17} />
+                    <strong>{t('lyricsSettings.display.desktopHideWhenNoLyrics')}</strong>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={desktopLyricsHideWhenNoLyricsEnabled === true}
+                    disabled={isBusy}
+                    onChange={(event) => patchDesktopLyricsStyle({ desktopLyricsHideWhenNoLyricsEnabled: event.currentTarget.checked })}
+                  />
+                </label>
+                <SettingHelpTooltip label={t('lyricsSettings.display.desktopHideWhenNoLyrics')}>{t('lyricsSettings.display.desktopHideWhenNoLyricsDescription')}</SettingHelpTooltip>
+              </div>
               <div className="lyrics-desktop-direction-row">
                 <div className="lyrics-color-panel__header">
                   <span>
@@ -3584,19 +3601,21 @@ const LyricsSettingsPanelComponent = ({
 
               {desktopLyricsVisible ? (
                 <>
-                  <label className="audio-toggle-row">
-                    <span>
-                      <Lock size={17} />
-                      <strong>{t('lyricsSettings.display.lockDesktopLyrics')}</strong>
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={desktopLyricsLocked}
-                      disabled={isBusy || isDesktopLyricsBusy || !hasDesktopLyricsBridge}
-                      onChange={(event) => setDesktopLyricsLocked(event.currentTarget.checked)}
-                    />
-                  </label>
-                  <p>{t('lyricsSettings.display.lockDesktopLyricsDescription')}</p>
+                  <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.display.lockDesktopLyricsDescription')}>
+                    <label className="audio-toggle-row">
+                      <span>
+                        <Lock size={17} />
+                        <strong>{t('lyricsSettings.display.lockDesktopLyrics')}</strong>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={desktopLyricsLocked}
+                        disabled={isBusy || isDesktopLyricsBusy || !hasDesktopLyricsBridge}
+                        onChange={(event) => setDesktopLyricsLocked(event.currentTarget.checked)}
+                      />
+                    </label>
+                    <SettingHelpTooltip label={t('lyricsSettings.display.lockDesktopLyrics')}>{t('lyricsSettings.display.lockDesktopLyricsDescription')}</SettingHelpTooltip>
+                  </div>
                   <button
                     className="audio-device-pill"
                     type="button"
@@ -3627,35 +3646,39 @@ const LyricsSettingsPanelComponent = ({
           onToggle={() => setIsLyricsBackgroundSectionOpen((value) => !value)}
           title={t('lyricsSettings.background.title')}
         >
-          <label className="audio-toggle-row lyrics-immersive-cover-style-toggle">
-            <span>
-              <Captions size={17} />
-              <strong>{t('lyricsSettings.background.immersiveCoverStyle')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsImmersiveCoverStyleEnabled === true}
-              disabled={isBusy}
-              onChange={(event) => void patchSettings({ lyricsImmersiveCoverStyleEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.background.immersiveCoverStyleDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.background.immersiveCoverStyleDescription')}>
+            <label className="audio-toggle-row lyrics-immersive-cover-style-toggle">
+              <span>
+                <Captions size={17} />
+                <strong>{t('lyricsSettings.background.immersiveCoverStyle')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsImmersiveCoverStyleEnabled === true}
+                disabled={isBusy}
+                onChange={(event) => void patchSettings({ lyricsImmersiveCoverStyleEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.background.immersiveCoverStyle')}>{t('lyricsSettings.background.immersiveCoverStyleDescription')}</SettingHelpTooltip>
+          </div>
 
           {effectiveSettings.lyricsImmersiveCoverStyleEnabled ? (
             <div className="lyrics-immersive-glass-controls">
-              <label className="audio-toggle-row lyrics-immersive-cover-glass-toggle">
-                <span>
-                  <SlidersHorizontal size={17} />
-                  <strong>{t('lyricsSettings.background.immersiveCoverGlass')}</strong>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={effectiveSettings.lyricsImmersiveCoverGlassEnabled === true}
-                  disabled={isBusy}
-                  onChange={(event) => void patchSettings({ lyricsImmersiveCoverGlassEnabled: event.currentTarget.checked })}
-                />
-              </label>
-              <p>{t('lyricsSettings.background.immersiveCoverGlassDescription')}</p>
+              <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.background.immersiveCoverGlassDescription')}>
+                <label className="audio-toggle-row lyrics-immersive-cover-glass-toggle">
+                  <span>
+                    <SlidersHorizontal size={17} />
+                    <strong>{t('lyricsSettings.background.immersiveCoverGlass')}</strong>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={effectiveSettings.lyricsImmersiveCoverGlassEnabled === true}
+                    disabled={isBusy}
+                    onChange={(event) => void patchSettings({ lyricsImmersiveCoverGlassEnabled: event.currentTarget.checked })}
+                  />
+                </label>
+                <SettingHelpTooltip label={t('lyricsSettings.background.immersiveCoverGlass')}>{t('lyricsSettings.background.immersiveCoverGlassDescription')}</SettingHelpTooltip>
+              </div>
               {effectiveSettings.lyricsImmersiveCoverGlassEnabled ? (
                 <label className="lyrics-drawer-range lyrics-immersive-cover-glass-blur-range">
                   <span>
@@ -3677,30 +3700,34 @@ const LyricsSettingsPanelComponent = ({
 
           {musicReactiveVisualsFeatureEnabled ? (
             <>
-              <label className="audio-toggle-row lyrics-music-reactive-toggle">
-                <span>
-                  <Zap size={17} />
-                  <strong>{t('lyricsSettings.background.musicReactiveVisuals')}</strong>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={effectiveSettings.lyricsMusicReactiveVisualsEnabled === true}
-                  disabled={isBusy}
-                  onChange={(event) => void patchSettings({ lyricsMusicReactiveVisualsEnabled: event.currentTarget.checked })}
-                />
-              </label>
-              <p>{t('lyricsSettings.background.musicReactiveVisualsDescription')}</p>
+              <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.background.musicReactiveVisualsDescription')}>
+                <label className="audio-toggle-row lyrics-music-reactive-toggle">
+                  <span>
+                    <Zap size={17} />
+                    <strong>{t('lyricsSettings.background.musicReactiveVisuals')}</strong>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={effectiveSettings.lyricsMusicReactiveVisualsEnabled === true}
+                    disabled={isBusy}
+                    onChange={(event) => void patchSettings({ lyricsMusicReactiveVisualsEnabled: event.currentTarget.checked })}
+                  />
+                </label>
+                <SettingHelpTooltip label={t('lyricsSettings.background.musicReactiveVisuals')}>{t('lyricsSettings.background.musicReactiveVisualsDescription')}</SettingHelpTooltip>
+              </div>
             </>
           ) : null}
 
-          <label className="audio-toggle-row lyrics-readability-toggle">
-            <span>
-              <EyeOff size={17} />
-              <strong>{t('lyricsSettings.background.readability')}</strong>
-            </span>
-            <input type="checkbox" checked={lyricsReadabilityEnhanced} onChange={toggleLyricsReadabilityEnhanced} />
-          </label>
-          <p>{t('lyricsSettings.background.readabilityDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.background.readabilityDescription')}>
+            <label className="audio-toggle-row lyrics-readability-toggle">
+              <span>
+                <EyeOff size={17} />
+                <strong>{t('lyricsSettings.background.readability')}</strong>
+              </span>
+              <input type="checkbox" checked={lyricsReadabilityEnhanced} onChange={toggleLyricsReadabilityEnhanced} />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.background.readability')}>{t('lyricsSettings.background.readabilityDescription')}</SettingHelpTooltip>
+          </div>
 
           <div className="audio-toggle-row lyrics-background-toggle lyrics-background-toggle--with-mode">
             <span>
@@ -3764,19 +3791,21 @@ const LyricsSettingsPanelComponent = ({
           <div className="lyrics-background-controls" hidden={!isBackgroundControlsOpen}>
             <p>{t('lyricsSettings.background.modeDescription')}</p>
 
-            <label className="audio-toggle-row lyrics-background-network-cover-toggle">
-              <span>
-                <ImageIcon size={17} />
-                <strong>{t('lyricsSettings.background.highResolutionCover')}</strong>
-              </span>
-              <input
-                type="checkbox"
-                checked={effectiveSettings.lyricsHighResolutionNetworkCoverEnabled === true}
-                disabled={isBusy || effectiveSettings.lyricsBackgroundMode !== 'cover'}
-                onChange={(event) => void patchSettings({ lyricsHighResolutionNetworkCoverEnabled: event.currentTarget.checked })}
-              />
-            </label>
-            <p>{t('lyricsSettings.background.highResolutionCoverDescription')}</p>
+            <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.background.highResolutionCoverDescription')}>
+              <label className="audio-toggle-row lyrics-background-network-cover-toggle">
+                <span>
+                  <ImageIcon size={17} />
+                  <strong>{t('lyricsSettings.background.highResolutionCover')}</strong>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={effectiveSettings.lyricsHighResolutionNetworkCoverEnabled === true}
+                  disabled={isBusy || effectiveSettings.lyricsBackgroundMode !== 'cover'}
+                  onChange={(event) => void patchSettings({ lyricsHighResolutionNetworkCoverEnabled: event.currentTarget.checked })}
+                />
+              </label>
+              <SettingHelpTooltip label={t('lyricsSettings.background.highResolutionCover')}>{t('lyricsSettings.background.highResolutionCoverDescription')}</SettingHelpTooltip>
+            </div>
 
             <div className={`lyrics-cover-tuning${isBackgroundTuningOpen ? ' lyrics-cover-tuning--open' : ''}`}>
               <button
@@ -3904,33 +3933,37 @@ const LyricsSettingsPanelComponent = ({
           onToggle={() => setIsLyricsOnlineSectionOpen((value) => !value)}
           title={t('lyricsSettings.online.title')}
         >
-          <label className="audio-toggle-row">
-            <span>
-              <Globe2 size={17} />
-              <strong>{t('lyricsSettings.online.enable')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsNetworkEnabled}
-              disabled={isBusy}
-              onChange={(event) => void patchSettings({ lyricsNetworkEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.online.enableDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.online.enableDescription')}>
+            <label className="audio-toggle-row">
+              <span>
+                <Globe2 size={17} />
+                <strong>{t('lyricsSettings.online.enable')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsNetworkEnabled}
+                disabled={isBusy}
+                onChange={(event) => void patchSettings({ lyricsNetworkEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.online.enable')}>{t('lyricsSettings.online.enableDescription')}</SettingHelpTooltip>
+          </div>
 
-          <label className="audio-toggle-row">
-            <span>
-              <Zap size={17} />
-              <strong>{t('lyricsSettings.online.deepSearch')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsDeepSearchEnabled}
-              disabled={isBusy || !effectiveSettings.lyricsNetworkEnabled}
-              onChange={(event) => void patchSettings({ lyricsDeepSearchEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.online.deepSearchDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.online.deepSearchDescription')}>
+            <label className="audio-toggle-row">
+              <span>
+                <Zap size={17} />
+                <strong>{t('lyricsSettings.online.deepSearch')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsDeepSearchEnabled}
+                disabled={isBusy || !effectiveSettings.lyricsNetworkEnabled}
+                onChange={(event) => void patchSettings({ lyricsDeepSearchEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.online.deepSearch')}>{t('lyricsSettings.online.deepSearchDescription')}</SettingHelpTooltip>
+          </div>
 
           {showPersistentControls ? (
           <div className={`lyrics-source-panel${isLyricsSourcePanelOpen ? ' lyrics-source-panel--open' : ''}`}>
@@ -4012,33 +4045,37 @@ const LyricsSettingsPanelComponent = ({
           </div>
           ) : null}
 
-          <label className="audio-toggle-row">
-            <span>
-              <Database size={17} />
-              <strong>{t('lyricsSettings.online.autoSearch')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsAutoSearch}
-              disabled={isBusy}
-              onChange={(event) => void patchSettings({ lyricsAutoSearch: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.online.autoSearchDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.online.autoSearchDescription')}>
+            <label className="audio-toggle-row">
+              <span>
+                <Database size={17} />
+                <strong>{t('lyricsSettings.online.autoSearch')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsAutoSearch}
+                disabled={isBusy}
+                onChange={(event) => void patchSettings({ lyricsAutoSearch: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.online.autoSearch')}>{t('lyricsSettings.online.autoSearchDescription')}</SettingHelpTooltip>
+          </div>
 
-          <label className="audio-toggle-row">
-            <span>
-              <FolderOpen size={17} />
-              <strong>{t('lyricsSettings.online.autoSaveSidecar')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsAutoSaveSidecarEnabled === true}
-              disabled={isBusy}
-              onChange={(event) => void patchSettings({ lyricsAutoSaveSidecarEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.online.autoSaveSidecarDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.online.autoSaveSidecarDescription')}>
+            <label className="audio-toggle-row">
+              <span>
+                <FolderOpen size={17} />
+                <strong>{t('lyricsSettings.online.autoSaveSidecar')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsAutoSaveSidecarEnabled === true}
+                disabled={isBusy}
+                onChange={(event) => void patchSettings({ lyricsAutoSaveSidecarEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.online.autoSaveSidecar')}>{t('lyricsSettings.online.autoSaveSidecarDescription')}</SettingHelpTooltip>
+          </div>
         </LyricsSettingsSection>
 
         {showPersistentControls ? (
@@ -4082,19 +4119,21 @@ const LyricsSettingsPanelComponent = ({
           </label>
           </div>
 
-          <label className="audio-toggle-row">
-            <span>
-              <TimerReset size={17} />
-              <strong>{t('lyricsSettings.timing.timelineCorrection')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsTimelineCorrectionEnabled !== false}
-              disabled={isBusy}
-              onChange={(event) => void patchSettings({ lyricsTimelineCorrectionEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.timing.timelineCorrectionDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.timing.timelineCorrectionDescription')}>
+            <label className="audio-toggle-row">
+              <span>
+                <TimerReset size={17} />
+                <strong>{t('lyricsSettings.timing.timelineCorrection')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsTimelineCorrectionEnabled !== false}
+                disabled={isBusy}
+                onChange={(event) => void patchSettings({ lyricsTimelineCorrectionEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.timing.timelineCorrection')}>{t('lyricsSettings.timing.timelineCorrectionDescription')}</SettingHelpTooltip>
+          </div>
 
           <label className="audio-toggle-row">
             <span>
@@ -4109,19 +4148,21 @@ const LyricsSettingsPanelComponent = ({
             />
           </label>
 
-          <label className="audio-toggle-row">
-            <span>
-              <TimerReset size={17} />
-              <strong>{t('lyricsSettings.timing.smartAlignment')}</strong>
-            </span>
-            <input
-              type="checkbox"
-              checked={effectiveSettings.lyricsSmartAlignmentEnabled === true}
-              disabled={isBusy}
-              onChange={(event) => void patchSettings({ lyricsSmartAlignmentEnabled: event.currentTarget.checked })}
-            />
-          </label>
-          <p>{t('lyricsSettings.timing.smartAlignmentDescription')}</p>
+          <div className="lyrics-setting-with-help" data-drawer-search-item="" data-search-keywords={t('lyricsSettings.timing.smartAlignmentDescription')}>
+            <label className="audio-toggle-row">
+              <span>
+                <TimerReset size={17} />
+                <strong>{t('lyricsSettings.timing.smartAlignment')}</strong>
+              </span>
+              <input
+                type="checkbox"
+                checked={effectiveSettings.lyricsSmartAlignmentEnabled === true}
+                disabled={isBusy}
+                onChange={(event) => void patchSettings({ lyricsSmartAlignmentEnabled: event.currentTarget.checked })}
+              />
+            </label>
+            <SettingHelpTooltip label={t('lyricsSettings.timing.smartAlignment')}>{t('lyricsSettings.timing.smartAlignmentDescription')}</SettingHelpTooltip>
+          </div>
 
           {showCurrentTrackTools && currentTrackTools ? (
             <div className="lyrics-current-track-tools-panel">

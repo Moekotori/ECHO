@@ -14,7 +14,6 @@ import { ReleaseNotesMarkdown } from '../components/ReleaseNotesMarkdown';
 import { SettingRow, ToggleButton } from '../components/SettingsPrimitives';
 import { getUpdateStateLabel } from '../diagnostics/settingsDiagnosticsFormat';
 import {
-  afdianSponsorUrl,
   autoUpdateSourceOptions,
   baiduPanShareUrl,
   bilibiliSpaceUrl,
@@ -55,7 +54,6 @@ const updateLinks = [
   { icon: ExternalLink, labelKey: 'settings.about.links.documentation', url: userDocumentationUrl },
   { icon: ExternalLink, labelKey: 'settings.about.links.baiduPan', url: baiduPanShareUrl },
   { icon: ExternalLink, labelKey: 'settings.about.links.bilibili', url: bilibiliSpaceUrl },
-  { icon: ExternalLink, labelKey: 'settings.about.updates.action.afdian', url: afdianSponsorUrl },
   { icon: History, labelKey: 'settings.about.updates.action.history', url: 'https://github.com/moekotori/echo/releases' },
   { icon: ExternalLink, labelKey: 'settings.about.updates.action.qq', url: 'https://qm.qq.com/q/KrJE8PIqSQ' },
   { icon: ExternalLink, labelKey: 'settings.about.updates.action.discord', url: 'https://discord.gg/g7v4WMRq3K' },

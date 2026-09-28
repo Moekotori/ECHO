@@ -47,3 +47,6 @@ export const libraryTextSortKey = (value: unknown): string => {
   sortKeyCache.set(text, sortKey);
   return sortKey;
 };
+
+export const libraryTextOrderSql = (columnSql: string, direction: 'ASC' | 'DESC' = 'ASC'): string =>
+  `echo_library_sort_key(${columnSql}) COLLATE NOCASE ${direction}, ${columnSql} COLLATE NOCASE ${direction}`;

@@ -61,13 +61,13 @@
 
 .first-run-journey-brand strong {
   font-size: 23px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-journey-brand span {
   color: #2786d8;
   font-size: 17px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
 }
 
 .first-run-journey-copy {
@@ -81,7 +81,7 @@
   max-width: 420px;
   color: #10203a;
   font-size: clamp(31px, 3.1vw, 48px);
-  font-weight: 900;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: -0.045em;
   line-height: 1.08;
 }
@@ -177,7 +177,7 @@
 .first-run-phase-copy strong {
   color: inherit;
   font-size: 15px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   line-height: 1.25;
 }
 
@@ -185,7 +185,7 @@
   overflow: hidden;
   color: rgba(61, 78, 102, 0.7);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--echo-weight-body);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -204,7 +204,7 @@
   background: transparent;
   cursor: pointer;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-journey-docs:hover {
@@ -244,7 +244,7 @@
   place-items: center;
   color: #2453c8;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-body);
 }
 
 .first-run-substep-single span::after {
@@ -274,14 +274,14 @@
 .first-run-workspace-header span {
   color: #14243e;
   font-size: 23px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-body);
   letter-spacing: -0.025em;
 }
 
 .first-run-workspace-header strong {
   color: #7b8799;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-heading);
 }
 
 .first-run-substep-nav {
@@ -341,7 +341,7 @@
   border: 1px solid rgba(129, 144, 162, 0.34);
   border-radius: 999px;
   font-size: 10px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-substep-nav button.is-active > span {
@@ -357,7 +357,7 @@
 
 .first-run-substep-nav button strong {
   overflow: hidden;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -416,14 +416,14 @@
 .first-run-immersive-stage-heading span {
   color: #7f8a99;
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
 }
 
 .first-run-immersive-stage-heading h3 {
   margin: 0;
   color: #10203a;
   font-size: clamp(27px, 2.35vw, 37px);
-  font-weight: 900;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: -0.04em;
   line-height: 1.12;
 }
@@ -468,7 +468,7 @@
   border-radius: 12px;
   background: #fff;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-immersive-stage .first-run-selection-label {
@@ -568,19 +568,19 @@
 .first-run-appearance-section > header span {
   color: #7d8999;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-body);
 }
 
 .first-run-appearance-section > header strong {
   color: #192941;
   font-size: 14px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-heading);
 }
 
 .first-run-appearance-section > header > small {
   color: #966b20;
   font-size: 10px;
-  font-weight: 750;
+  font-weight: var(--echo-weight-body);
 }
 
 .first-run-appearance-mode-grid {
@@ -622,7 +622,7 @@
 .first-run-appearance-mode-grid button strong {
   overflow: hidden;
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -630,7 +630,7 @@
 .first-run-appearance-mode-grid button small {
   color: #718095;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
 }
 
 .first-run-appearance-mode-grid button > svg {
@@ -694,7 +694,7 @@
 
 .first-run-appearance-preset-copy strong {
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-appearance-preset-copy small {
@@ -777,7 +777,7 @@
 .first-run-osu-choice strong {
   color: #17263d;
   font-size: 16px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-osu-choice small {
@@ -806,7 +806,7 @@
   border-radius: 12px;
   background: #f8fafc;
   font-size: 12px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-osu-status.is-enabled {
@@ -845,7 +845,7 @@
   border-radius: 999px;
   background: rgba(76, 100, 231, 0.1);
   font-size: 10px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
 }
 
 .first-run-pro-story p {
@@ -929,7 +929,7 @@
 .first-run-pro-benefits > header span {
   color: #7c8899;
   font-size: 9px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
 }
 
 .first-run-pro-feature-grid {
@@ -989,7 +989,7 @@
 .first-run-pro-feature-grid article strong {
   color: #17263d;
   font-size: 12px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-pro-feature-grid article.is-featured strong {
@@ -1012,7 +1012,7 @@
 .first-run-pro-extras > strong {
   color: #55647a;
   font-size: 10px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-pro-extras ul {
@@ -1082,13 +1082,13 @@
 .first-run-summary-after > header span {
   color: #8792a4;
   font-size: 10px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-summary-after > header strong {
   color: #1b2a43;
   font-size: 15px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-heading);
 }
 
 .first-run-summary-after ol {
@@ -1131,7 +1131,7 @@
   border-radius: 11px;
   background: #fff;
   font-size: 11px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-summary-after li.is-final > span {
@@ -1149,14 +1149,14 @@
 .first-run-summary-after li strong {
   color: #26364f;
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-summary-after li small {
   overflow: hidden;
   color: #79869a;
   font-size: 9px;
-  font-weight: 700;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1181,7 +1181,7 @@
 .first-run-summary-configuration > header strong {
   color: #1b2a42;
   font-size: 14px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-heading);
 }
 
 .first-run-summary-configuration dl {
@@ -1206,7 +1206,7 @@
 .first-run-summary-configuration dt {
   color: #8490a0;
   font-size: 9px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-summary-configuration dd {
@@ -1215,7 +1215,7 @@
   overflow-wrap: anywhere;
   color: #26364f;
   font-size: 11px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
   line-height: 1.4;
 }
 
@@ -1267,7 +1267,7 @@
   justify-self: center;
   color: #7c8898;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--echo-weight-label);
 }
 
 .first-run-immersive-actions .first-run-action-cluster {
@@ -1293,7 +1293,7 @@
   overflow: hidden;
   color: rgba(255, 255, 255, 0.76);
   font-size: 9px;
-  font-weight: 750;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

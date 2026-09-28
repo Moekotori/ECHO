@@ -77,7 +77,7 @@ describe('userFacingError', () => {
       { context: 'plugins' },
     );
 
-    expect(message).toBe('需要授权。请登录或激活 ECHO Pro 后再试。');
+    expect(message).toBe('功能暂时不可用。请重试或查看诊断信息。');
     expect(message).not.toContain('machine');
     expect(message).not.toContain('hwid');
     expect(message).not.toContain('requiredVersion');

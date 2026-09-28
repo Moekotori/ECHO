@@ -6861,6 +6861,8 @@ export class LibraryStore {
       case 'artist':
       case 'artistAlbum':
         return 'ORDER BY echo_library_sort_key(album_artist) COLLATE NOCASE, album_artist COLLATE NOCASE, title COLLATE NOCASE';
+      case 'artistDesc':
+        return 'ORDER BY echo_library_sort_key(album_artist) COLLATE NOCASE DESC, album_artist COLLATE NOCASE DESC, echo_library_sort_key(title) COLLATE NOCASE, title COLLATE NOCASE';
       case 'recent':
         return 'ORDER BY added_at DESC, updated_at DESC, title COLLATE NOCASE';
       case 'lastPlayed':
@@ -6979,6 +6981,16 @@ export class LibraryStore {
     )`;
   }
 
+  private artistListeningAggregateSql(selectSql: string): string {
+    return `(
+          SELECT ${selectSql}
+          FROM artist_tracks
+          INNER JOIN tracks ON tracks.id = artist_tracks.track_id
+          WHERE artist_tracks.artist_id = library_artists.id
+            AND tracks.missing = 0
+        )`;
+  }
+
   private artistAvatarPriorityOrderSql(): string {
     return `CASE
       WHEN avatar_status = 'matched'
@@ -6992,15 +7004,33 @@ export class LibraryStore {
 
   private unifiedArtistOrderSql(sort: string, prioritizeArtistAvatars = false): string {
     const prioritySql = prioritizeArtistAvatars ? `${this.artistAvatarPriorityOrderSql()}, ` : '';
+    const nameAsc = 'echo_library_sort_key(name) COLLATE NOCASE, name COLLATE NOCASE';
+    const nameDesc = 'echo_library_sort_key(name) COLLATE NOCASE DESC, name COLLATE NOCASE DESC';
+    const addedAt = this.artistListeningAggregateSql('MAX(tracks.created_at)');
+    const lastPlayedAt = this.artistListeningAggregateSql('MAX(tracks.last_played_at)');
+    const playCount = `COALESCE(${this.artistListeningAggregateSql('SUM(COALESCE(tracks.play_count, 0))')}, 0)`;
 
     switch (sort) {
       case 'frequent':
-        return `ORDER BY ${prioritySql}track_count DESC, album_count DESC, name COLLATE NOCASE`;
+      case 'trackCountDesc':
+        return `ORDER BY ${prioritySql}track_count DESC, album_count DESC, ${nameAsc}`;
+      case 'trackCountAsc':
+        return `ORDER BY ${prioritySql}track_count ASC, album_count ASC, ${nameAsc}`;
+      case 'albumCountDesc':
+        return `ORDER BY ${prioritySql}album_count DESC, track_count DESC, ${nameAsc}`;
+      case 'lastPlayed':
+        return `ORDER BY ${prioritySql}${lastPlayedAt} IS NULL, ${lastPlayedAt} DESC, ${nameAsc}`;
+      case 'playCountDesc':
+        return `ORDER BY ${prioritySql}${playCount} DESC, ${nameAsc}`;
+      case 'playCountAsc':
+        return `ORDER BY ${prioritySql}${playCount} ASC, ${nameAsc}`;
+      case 'createdAsc':
+        return `ORDER BY ${prioritySql}${addedAt} IS NULL, ${addedAt} ASC, ${nameAsc}`;
       case 'createdDesc':
       case 'recent':
-        return `ORDER BY ${prioritySql}name COLLATE NOCASE`;
+        return `ORDER BY ${prioritySql}${addedAt} IS NULL, ${addedAt} DESC, ${nameAsc}`;
       case 'titleDesc':
-        return `ORDER BY ${prioritySql}name COLLATE NOCASE DESC`;
+        return `ORDER BY ${prioritySql}${nameDesc}`;
       case 'random':
         return `ORDER BY ${prioritySql}RANDOM()`;
       case 'artist':
@@ -7009,7 +7039,7 @@ export class LibraryStore {
       case 'default':
       case 'title':
       default:
-        return `ORDER BY ${prioritySql}sort_name COLLATE NOCASE, name COLLATE NOCASE`;
+        return `ORDER BY ${prioritySql}${nameAsc}`;
     }
   }
 
@@ -8772,7 +8802,7 @@ export class LibraryStore {
     mediaType: LibraryPlaylistItem['mediaType'] | LibraryPlaylistItem['mediaType'][],
     query?: LibraryPageQuery,
   ): LibraryPage<LibraryPlaylistItem> {
-    const { page, pageSize, search, sort, sourceProvider } = pageFromQuery(query);
+    const { page, pageSize, search, sort, sourceProvider, excludeTrackIds } = pageFromQuery(query);
     const searchOptions = this.readSearchOptions();
     const offset = (page - 1) * pageSize;
     const searchFilter = buildSearchFilter(search, [
@@ -8783,10 +8813,19 @@ export class LibraryStore {
     const mediaTypes = Array.isArray(mediaType) ? mediaType : [mediaType];
     const mediaTypeSql = mediaTypes.map(() => '?').join(', ');
     const sourceProviderSql = sourceProvider ? ' AND playlist_items.source_provider = ?' : '';
+    const excludeTrackIdsSql = excludeTrackIds.length > 0
+      ? ` AND COALESCE(playlist_items.media_id, '') NOT IN (${excludeTrackIds.map(() => '?').join(', ')})`
+      : '';
     const whereSql = searchFilter.sql
-      ? `playlist_items.playlist_id = ? AND playlist_items.media_type IN (${mediaTypeSql})${sourceProviderSql} AND ${searchFilter.sql}`
-      : `playlist_items.playlist_id = ? AND playlist_items.media_type IN (${mediaTypeSql})${sourceProviderSql}`;
-    const params = [playlistId, ...mediaTypes, ...(sourceProvider ? [sourceProvider] : []), ...searchFilter.params];
+      ? `playlist_items.playlist_id = ? AND playlist_items.media_type IN (${mediaTypeSql})${sourceProviderSql}${excludeTrackIdsSql} AND ${searchFilter.sql}`
+      : `playlist_items.playlist_id = ? AND playlist_items.media_type IN (${mediaTypeSql})${sourceProviderSql}${excludeTrackIdsSql}`;
+    const params = [
+      playlistId,
+      ...mediaTypes,
+      ...(sourceProvider ? [sourceProvider] : []),
+      ...excludeTrackIds,
+      ...searchFilter.params,
+    ];
     const totalRow = this.getRow(
       `SELECT COUNT(*) AS total
        FROM playlist_items
@@ -9851,6 +9890,8 @@ export class LibraryStore {
         return "ORDER BY COALESCE(playlist_items.artist_snapshot, tracks.artist, albums.album_artist, '') COLLATE NOCASE ASC, COALESCE(playlist_items.album_snapshot, tracks.album, albums.title, '') COLLATE NOCASE ASC, COALESCE(playlist_items.title_snapshot, tracks.title, albums.title, '') COLLATE NOCASE ASC, playlist_items.position ASC";
       case 'album':
         return "ORDER BY COALESCE(playlist_items.album_snapshot, tracks.album, albums.title, '') COLLATE NOCASE ASC";
+      case 'random':
+        return 'ORDER BY RANDOM()';
       case 'manual':
       case 'default':
       default:
@@ -9898,6 +9939,46 @@ export class LibraryStore {
       case 'artist':
       case 'artistAlbum':
         return 'ORDER BY echo_library_sort_key(albums.album_artist) COLLATE NOCASE, albums.album_artist COLLATE NOCASE, albums.title COLLATE NOCASE';
+      case 'artistDesc':
+        return 'ORDER BY echo_library_sort_key(albums.album_artist) COLLATE NOCASE DESC, albums.album_artist COLLATE NOCASE DESC, echo_library_sort_key(albums.title) COLLATE NOCASE, albums.title COLLATE NOCASE';
+      case 'yearAsc':
+        return 'ORDER BY albums.year IS NULL, albums.year ASC, echo_library_sort_key(albums.title) COLLATE NOCASE, albums.title COLLATE NOCASE';
+      case 'yearDesc':
+        return 'ORDER BY albums.year IS NULL, albums.year DESC, echo_library_sort_key(albums.title) COLLATE NOCASE, albums.title COLLATE NOCASE';
+      case 'trackCountAsc':
+        return 'ORDER BY albums.track_count ASC, echo_library_sort_key(albums.title) COLLATE NOCASE, albums.title COLLATE NOCASE';
+      case 'trackCountDesc':
+        return 'ORDER BY albums.track_count DESC, echo_library_sort_key(albums.title) COLLATE NOCASE, albums.title COLLATE NOCASE';
+      case 'lastPlayed':
+        return `ORDER BY (
+          SELECT MAX(tracks.last_played_at)
+          FROM album_tracks
+          INNER JOIN tracks ON tracks.id = album_tracks.track_id
+          WHERE album_tracks.album_id = albums.id
+            AND tracks.missing = 0
+        ) IS NULL, (
+          SELECT MAX(tracks.last_played_at)
+          FROM album_tracks
+          INNER JOIN tracks ON tracks.id = album_tracks.track_id
+          WHERE album_tracks.album_id = albums.id
+            AND tracks.missing = 0
+        ) DESC, echo_library_sort_key(albums.title) COLLATE NOCASE, albums.title COLLATE NOCASE`;
+      case 'playCountAsc':
+        return `ORDER BY COALESCE((
+          SELECT SUM(COALESCE(tracks.play_count, 0))
+          FROM album_tracks
+          INNER JOIN tracks ON tracks.id = album_tracks.track_id
+          WHERE album_tracks.album_id = albums.id
+            AND tracks.missing = 0
+        ), 0) ASC, echo_library_sort_key(albums.title) COLLATE NOCASE, albums.title COLLATE NOCASE`;
+      case 'playCountDesc':
+        return `ORDER BY COALESCE((
+          SELECT SUM(COALESCE(tracks.play_count, 0))
+          FROM album_tracks
+          INNER JOIN tracks ON tracks.id = album_tracks.track_id
+          WHERE album_tracks.album_id = albums.id
+            AND tracks.missing = 0
+        ), 0) DESC, echo_library_sort_key(albums.title) COLLATE NOCASE, albums.title COLLATE NOCASE`;
       case 'recent':
         return `ORDER BY COALESCE((
           SELECT MAX(tracks.created_at)

@@ -47,7 +47,7 @@ import { likedChangedEvent, likedTracksChangedEvent } from '../hooks/useLikedMed
 import { logLyricsConsole } from '../diagnostics/lyricsConsole';
 import { rememberLibraryScanStatus } from '../stores/libraryScanSession';
 import { clearSongsFirstPageSnapshot } from '../stores/songsFirstPageSnapshot';
-import { usePlaybackQueue, type QueueItem } from '../stores/PlaybackQueueProvider';
+import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
 import { setPlaybackStatusSnapshot, useSharedPlaybackStatus } from '../stores/playbackStatusStore';
 import { useLibraryStartupArtworkPreloader } from '../hooks/useLibraryStartupArtworkPreloader';
 import { albumDetailNavigationEvent } from '../utils/albumNavigation';
@@ -611,40 +611,6 @@ const getPlaybackClock = (
     positionSeconds: playbackStatus.positionMs / 1000,
     durationSeconds: playbackStatus.durationMs / 1000,
   };
-};
-
-const findCurrentQueueIndex = (
-  items: QueueItem[],
-  currentQueueId: string | null,
-  currentTrackId: string | null,
-): number => {
-  const queueIndex = currentQueueId ? items.findIndex((item) => item.queueId === currentQueueId) : -1;
-  if (queueIndex >= 0) {
-    return queueIndex;
-  }
-  return currentTrackId ? items.findIndex((item) => item.track.id === currentTrackId) : -1;
-};
-
-const resolveUpcomingQueueItem = (
-  items: QueueItem[],
-  currentQueueId: string | null,
-  currentTrackId: string | null,
-  repeatMode: 'off' | 'one' | 'all',
-): QueueItem | null => {
-  if (items.length === 0 || repeatMode === 'one') {
-    return null;
-  }
-
-  const currentIndex = findCurrentQueueIndex(items, currentQueueId, currentTrackId);
-  if (currentIndex < 0) {
-    return null;
-  }
-
-  if (currentIndex < items.length - 1) {
-    return items[currentIndex + 1] ?? null;
-  }
-
-  return repeatMode === 'all' ? items[0] ?? null : null;
 };
 
 const trimRateTrailingZero = (value: string): string => value.replace(/\.0$/u, '');
@@ -2134,12 +2100,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
       lastUpcomingTrackNoticeKeyRef.current = null;
     }
 
-    const upcomingItem = resolveUpcomingQueueItem(
-      playbackQueue.items,
-      playbackQueue.currentQueueId,
-      clock.trackId ?? playbackQueue.currentTrackId,
-      playbackQueue.repeatMode,
-    );
+    const upcomingItem = playbackQueue.upcomingItem;
     if (!upcomingItem) {
       return;
     }
@@ -2157,8 +2118,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   }, [
     playbackQueue.currentQueueId,
     playbackQueue.currentTrackId,
-    playbackQueue.items,
-    playbackQueue.repeatMode,
+    playbackQueue.upcomingItem,
     playbackStatusSnapshot,
   ]);
 

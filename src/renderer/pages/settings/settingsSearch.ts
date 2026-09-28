@@ -275,6 +275,16 @@ export const rankSettingsSearch = (query: string, terms: string[]): number => {
   const normalizedTerms = terms.flatMap((term) => [normalizeSettingsSearchText(term), compactSettingsSearchText(term)]).filter(Boolean);
 
   let bestScore = 0;
+  // The first term is the visible title. A direct title match should outrank
+  // incidental words in long descriptions or broad compatibility aliases.
+  const title = compactSettingsSearchText(terms[0] ?? '');
+  const literalQuery = compactSettingsSearchText(query);
+  if (title && literalQuery) {
+    const lengthPenalty = Math.min(20, Math.max(0, title.length - literalQuery.length));
+    if (title === literalQuery) bestScore = 200;
+    else if (title.startsWith(literalQuery)) bestScore = 170 - lengthPenalty;
+    else if (title.includes(literalQuery)) bestScore = 145 - lengthPenalty;
+  }
   queries.forEach((candidateQuery, queryIndex) => {
     normalizedTerms.forEach((term, termIndex) => {
       if (!candidateQuery || !term) {

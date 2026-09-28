@@ -75,6 +75,7 @@ import {
   scrubQuarantinedLibraryDatabase,
 } from '../app/dataProtection';
 import { getLibraryDatabaseManager } from '../database/LibraryDatabaseManager';
+import { closeAlbumSplitService, registerAlbumSplitIpc } from './albumSplitIpc';
 import { closeDefaultLibraryService, getLibraryService } from '../library/LibraryService';
 import { importOsuArchiveAsMp3Queued, isOsuArchivePath } from '../library/OsuArchiveImport';
 import { closeDefaultRemoteSourceService, getRemoteSourceService } from '../library/remote/RemoteSourceService';
@@ -119,8 +120,12 @@ const sortValues = new Set<LibrarySort>([
   'random',
   'title',
   'artist',
+  'artistDesc',
   'artistAlbum',
   'album',
+  'albumCountDesc',
+  'trackCountAsc',
+  'trackCountDesc',
   'recent',
 ]);
 
@@ -160,6 +165,7 @@ const libraryInboxItemStatuses = new Set<LibraryInboxItemStatus>(['pending', 'pr
 const songCardRenderer = new SongCardRenderer();
 
 const closeLibraryDatabaseUsers = async (): Promise<void> => {
+  closeAlbumSplitService();
   closeDefaultLyricsService();
   closeDefaultMvService();
   closeDefaultStreamingService();
@@ -427,6 +433,10 @@ const normalizeQuery = (value: unknown): LibraryPageQuery => {
 
   if (typeof input.prioritizeArtistAvatars === 'boolean') {
     query.prioritizeArtistAvatars = input.prioritizeArtistAvatars;
+  }
+
+  if (input.artistGrouping === 'split' || input.artistGrouping === 'albumArtist') {
+    query.artistGrouping = input.artistGrouping;
   }
 
   if (Array.isArray(input.excludeTrackIds)) {
@@ -1850,6 +1860,7 @@ const importPlaylistFile = async (): Promise<ImportPlaylistFileResult | null> =>
 };
 
 export const registerLibraryIpc = (): void => {
+  registerAlbumSplitIpc();
   ipcMain.handle(IpcChannels.LibraryChooseFolder, async (): Promise<string | null> => {
     const result = await dialog.showOpenDialog({
       title: '选择音乐文件夹',

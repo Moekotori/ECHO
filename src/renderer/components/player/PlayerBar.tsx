@@ -23,6 +23,7 @@ import {
   seekSpotifyPlayback,
   setSpotifyVolume,
 } from '../../integrations/spotify/spotifyPlayback';
+import { usePlayerBarTrackSwipe } from '../lyrics/useLyricsTrackSwipe';
 import { usePlaybackQueue } from '../../stores/PlaybackQueueProvider';
 import { beginPlaybackSeekSnapshot, getVisualPlaybackState, refreshPlaybackStatus, setPlaybackStatusSnapshot, useSharedPlaybackStatus } from '../../stores/playbackStatusStore';
 import { isActiveConnectPlaybackStatus, isHqPlayerConnectStatus, playbackStatusFromConnectStatus } from '../../utils/connectPlayback';
@@ -786,6 +787,7 @@ export const PlayerBar = ({
 }: PlayerBarProps): JSX.Element => {
   const t = useOptionalI18n()?.t ?? translateFallback;
   const queue = usePlaybackQueue();
+  const [mouseGestureTrackSwitchEnabled, setMouseGestureTrackSwitchEnabled] = useState(false);
   const sharedPlaybackStatus = useSharedPlaybackStatus();
   const setQueueCurrentTrackId = queue.setCurrentTrackId;
   const appendToQueue = queue.appendToQueue;
@@ -1334,6 +1336,10 @@ export const PlayerBar = ({
 
       if (Object.hasOwn(settings, 'accessibilityPreferences')) {
         setScreenReaderAnnouncementsEnabled(settings.accessibilityPreferences?.screenReaderAnnouncementsEnabled === true);
+      }
+
+      if (Object.hasOwn(settings, 'mouseGestureTrackSwitchEnabled')) {
+        setMouseGestureTrackSwitchEnabled(settings.mouseGestureTrackSwitchEnabled === true);
       }
 
       if (Object.hasOwn(settings, 'notificationsDisabled')) {
@@ -2749,6 +2755,14 @@ export const PlayerBar = ({
     void runPlaybackAction(queue.playNext);
   }, [queue.playNext, runPlaybackAction]);
 
+  const playerTrackSwipe = usePlayerBarTrackSwipe((direction) => {
+    if (direction === 'next') {
+      handleNext();
+      return;
+    }
+    handlePrevious();
+  }, mouseGestureTrackSwitchEnabled && (queue.canGoNext || queue.canGoPrevious));
+
   useEffect(() => {
     applyMediaSessionSnapshot({
       enabled: smtcEnabled && Boolean(filePath || currentTrack),
@@ -3001,6 +3015,7 @@ export const PlayerBar = ({
       </div>
       <motion.footer
         className="player-bar"
+        {...playerTrackSwipe.handlers}
         data-compact-away={lyricsMiniPlayer && lyricsCompactOnIdle ? 'true' : undefined}
         data-low-load-playback={lowLoadPlaybackModeEnabled ? 'true' : undefined}
         data-network-loading={isNetworkPlaybackLoading ? 'true' : undefined}

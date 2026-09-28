@@ -1,0 +1,232 @@
+{
+  "checks": [
+    {
+      "name": "songs initial",
+      "elapsedMs": 605,
+      "main": {
+        "maxGapMs": 62,
+        "ticks": 9
+      },
+      "renderer": {
+        "maxGapMs": 82,
+        "longTasks": []
+      },
+      "preview": "歌曲\n18709 首\n本地\n网盘\n筛选\n默认排序\n!\n髥莏\n-\n2266064 Kyozou - !\nMP3\n48kHz\n192kbps\n135 BPM\n2:26\n!!! IMPULSIVE <剡> WAVE !!!\nルゼ\n-\n2438724 LUZE - ___ IMPULSIVE ____ WAVE ___\nMP3\n48kHz\n192kbps\n390 BPM\n2:51\n!nterroban("
+    },
+    {
+      "name": "english search",
+      "elapsedMs": 996,
+      "main": {
+        "maxGapMs": 218,
+        "ticks": 12
+      },
+      "renderer": {
+        "maxGapMs": 54,
+        "longTasks": []
+      },
+      "preview": "歌曲\n59 首\n本地\n网盘\n筛选\n默认排序\nRinging Bloom\nRoselia\n-\nFIRE BIRD\nFLAC\n24bit / 96kHz\n3398kbps\n≈195 BPM\n5:35\n革命デュアリズム (Game Ver.)\nRoselia×美竹蘭 (CV: 佐倉綾音)\n-\n2316429 Roselia x Ran Mitake (CV Sakura Ayane) - Kakumei"
+    },
+    {
+      "name": "Chinese search",
+      "elapsedMs": 301,
+      "main": {
+        "maxGapMs": 63,
+        "ticks": 5
+      },
+      "renderer": {
+        "maxGapMs": 54,
+        "longTasks": []
+      },
+      "preview": "歌曲\n9 首\n本地\n网盘\n筛选\n默认排序\nMojito\n周杰倫\n-\n最伟大的作品\nVORBIS\n44kHz\n192kbps\n115 BPM\n3:05\n夜曲\n周杰倫\n-\n1187083 Jay Chou - Nocturne\nMP3\n44kHz\n128kbps\n174 BPM\n2:17\n說好不哭\n周杰倫\n-\n1054019 Jay Chou - Won't Cry\nMP3\n44kHz\n128kbps"
+    },
+    {
+      "name": "no results",
+      "elapsedMs": 279,
+      "main": {
+        "maxGapMs": 62,
+        "ticks": 4
+      },
+      "renderer": {
+        "maxGapMs": 53,
+        "longTasks": []
+      },
+      "preview": "歌曲\n0 首\n本地\n网盘\n筛选\n默认排序\n也可以直接把音乐文件或文件夹拖入窗口。支持 MP3, FLAC, WAV, ALAC, AAC, OPUS, OGG, APE, WV, DSF, DFF, CUE 等格式，更多格式会自动识别。\n导入音乐文件夹\n导入音频文件\n没有可显示的歌曲。导入音乐文件夹后，这里会显示曲库列表。"
+    },
+    {
+      "name": "rapid query changes",
+      "elapsedMs": 944,
+      "main": {
+        "maxGapMs": 160,
+        "ticks": 14
+      },
+      "renderer": {
+        "maxGapMs": 62,
+        "longTasks": []
+      },
+      "preview": "歌曲\n59 首\n本地\n网盘\n筛选\n默认排序\nRinging Bloom\n有 2 个版本\nRoselia\n-\nFIRE BIRD\nFLAC\n24bit / 96kHz\n3398kbps\n≈195 BPM\n5:35\n革命デュアリズム (Game Ver.)\nRoselia×美竹蘭 (CV: 佐倉綾音)\n-\n2316429 Roselia x Ran Mitake (CV Sakura Ayane) -"
+    },
+    {
+      "name": "clear and scroll",
+      "elapsedMs": 1546,
+      "main": {
+        "maxGapMs": 146,
+        "ticks": 23
+      },
+      "renderer": {
+        "maxGapMs": 72,
+        "longTasks": []
+      },
+      "preview": "歌曲\n18709 首\n本地\n网盘\n筛选\n默认排序\n(8230) Anhedonia\nVarious Artists\n-\nFlashnia's 170++++ Chordjack Practice Pack\nMP3\n44kHz\n128kbps\n185 BPM\n3:20\n([Crz]Rachel) Decoy\nVarious Artists\n-\nFlashnia's 170++++ Chordjack"
+    },
+    {
+      "name": "switch page with search pending",
+      "elapsedMs": 596,
+      "main": {
+        "maxGapMs": 145,
+        "ticks": 8
+      },
+      "renderer": {
+        "maxGapMs": 66,
+        "longTasks": []
+      },
+      "preview": "专辑\n共 2939 个\n本地\n网盘\n默认\n\"411Ψ892\"\nTanchiky\n1 首歌\n(un) sentimental spica\n鎖那\n12 首歌\n(un) sentimental spica\n鎖那\n1 首歌\n-O-\nmoon tang\n1 首歌\n1,000,000 TIMES\nMY FIRST STORY / chelly\n2 首歌\n1011935 3L - Tiny Little Adi"
+    },
+    {
+      "name": "artists",
+      "elapsedMs": 1771,
+      "main": {
+        "maxGapMs": 211,
+        "ticks": 22
+      },
+      "renderer": {
+        "maxGapMs": 159,
+        "longTasks": [
+          62,
+          73,
+          88,
+          97,
+          55,
+          55,
+          69,
+          83,
+          91
+        ]
+      },
+      "preview": "艺术家\n共 4692 个\n头像优先\n本地\n网盘\n默认\n\"慾\n\"慾ニヨモノモ・\n4 首歌 / 1 张专辑\n(K)NoW_NAME\n7 首歌 / 3 张专辑\n(sic)boy\n1 首歌 / 1 张专辑\n*な\n*なみりん\n13 首歌\n-.\n-.- --- .-. .- .. ..\n1 首歌\n-4\n-45\n5 首歌\n-4\n-45 remixed by INNOCENT NOIZE\n1 首歌 / 1 张专辑"
+    },
+    {
+      "name": "return to songs",
+      "elapsedMs": 930,
+      "main": {
+        "maxGapMs": 187,
+        "ticks": 13
+      },
+      "renderer": {
+        "maxGapMs": 176,
+        "longTasks": [
+          60,
+          71,
+          83,
+          97,
+          104,
+          59
+        ]
+      },
+      "preview": "歌曲\n59 首\n本地\n网盘\n筛选\n默认排序\nRinging Bloom\nRoselia\n-\nFIRE BIRD\nFLAC\n24bit / 96kHz\n3398kbps\n≈195 BPM\n5:35\n革命デュアリズム (Game Ver.)\nRoselia×美竹蘭 (CV: 佐倉綾音)\n-\n2316429 Roselia x Ran Mitake (CV Sakura Ayane) - Kakumei"
+    },
+    {
+      "name": "play local track",
+      "elapsedMs": 967,
+      "main": {
+        "maxGapMs": 235,
+        "ticks": 14
+      },
+      "renderer": {
+        "maxGapMs": 83,
+        "longTasks": [
+          55
+        ]
+      },
+      "preview": "歌曲\n59 首\n本地\n网盘\n筛选\n默认排序\nRinging Bloom\n有 2 个版本\nRoselia\n-\nFIRE BIRD\nFLAC\n24bit / 96kHz\n3398kbps\n≈195 BPM\n5:35\n革命デュアリズム (Game Ver.)\nRoselia×美竹蘭 (CV: 佐倉綾音)\n-\n2316429 Roselia x Ran Mitake (CV Sakura Ayane) -"
+    },
+    {
+      "name": "browse while playing",
+      "elapsedMs": 254,
+      "main": {
+        "maxGapMs": 56,
+        "ticks": 5
+      },
+      "renderer": {
+        "maxGapMs": 103,
+        "longTasks": []
+      },
+      "preview": "歌曲\n59 首\n本地\n网盘\n筛选\n默认排序\nRinging Bloom\n有 2 个版本\nRoselia\n-\nFIRE BIRD\nFLAC\n24bit / 96kHz\n3398kbps\n≈195 BPM\n5:35\n革命デュアリズム (Game Ver.)\nRoselia×美竹蘭 (CV: 佐倉綾音)\n-\n2316429 Roselia x Ran Mitake (CV Sakura Ayane) -"
+    },
+    {
+      "name": "switch local track",
+      "elapsedMs": 602,
+      "main": {
+        "maxGapMs": 62,
+        "ticks": 11
+      },
+      "renderer": {
+        "maxGapMs": 88,
+        "longTasks": []
+      },
+      "preview": "歌曲\n59 首\n本地\n网盘\n筛选\n默认排序\nRinging Bloom\n有 2 个版本\nRoselia\n-\nFIRE BIRD\nFLAC\n24bit / 96kHz\n3398kbps\n≈195 BPM\n5:35\n革命デュアリズム (Game Ver.)\nRoselia×美竹蘭 (CV: 佐倉綾音)\n-\n2316429 Roselia x Ran Mitake (CV Sakura Ayane) -"
+    },
+    {
+      "name": "rapid track changes",
+      "elapsedMs": 1002,
+      "main": {
+        "maxGapMs": 86,
+        "ticks": 17
+      },
+      "renderer": {
+        "maxGapMs": 101,
+        "longTasks": []
+      },
+      "preview": "歌曲\n59 首\n本地\n网盘\n筛选\n默认排序\nRinging Bloom\n有 2 个版本\nRoselia\n-\nFIRE BIRD\nFLAC\n24bit / 96kHz\n3398kbps\n≈195 BPM\n5:35\n革命デュアリズム (Game Ver.)\nRoselia×美竹蘭 (CV: 佐倉綾音)\n-\n2316429 Roselia x Ran Mitake (CV Sakura Ayane) -"
+    }
+  ],
+  "errors": [],
+  "logs": [
+    "[ipc-perf] library:get-tracks 404ms SLOW actionHint=check handler work and nearby playback/background breadcrumbs\n",
+    "[ipc-perf] library:get-albums 422ms SLOW actionHint=check handler work and nearby playback/background breadcrumbs\n",
+    "[ipc-perf] library:get-tracks 430ms SLOW actionHint=check handler work and nearby playback/background breadcrumbs\n",
+    "[ipc-perf] library:get-albums 400ms SLOW actionHint=check handler work and nearby playback/background breadcrumbs\n",
+    "[ipc-perf] playback:play-local-file 627ms SLOW actionHint=check handler work and nearby playback/background breadcrumbs\n",
+    "QA before-quit Error\n    at EventEmitter.eval (eval at evaluate (:302:30), <anonymous>:1:81)\n    at EventEmitter.emit (node:events:521:24)\n    at import_electron.app.emit (D:\\ECHOCommunity\\node_modules\\playwright-core\\lib\\server\\electron\\loader.js:103:10)\n    at eval (eval at evaluate (:302:30), <anonymous>:1:18)\n    at UtilityScript.evaluate (<anonymous>:304:16)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)\n",
+    "QA before-quit Error\n    at EventEmitter.eval (eval at evaluate (:302:30), <anonymous>:1:81)\n    at EventEmitter.emit (node:events:521:24)\n    at import_electron.app.emit (D:\\ECHOCommunity\\node_modules\\playwright-core\\lib\\server\\electron\\loader.js:103:10)\n    at file:///D:/ECHOCommunity/out/main/index.js:118213:11\n    at <anonymous>\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n",
+    "QA window-close 1 Error\n    at BrowserWindow.eval (eval at evaluate (:302:30), <anonymous>:1:207)\n    at BrowserWindow.emit (node:events:521:24)\n    at file:///D:/ECHOCommunity/out/main/index.js:118213:11\n    at <anonymous>\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n"
+  ],
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "domCount": 4924,
+  "finalButtons": [
+    {
+      "text": "Ringing BloomRoselia-FIRE BIRDFLAC24bit / 96kHz3398kbps≈195 BPM5:35",
+      "label": "Ringing Bloom - Roselia"
+    },
+    {
+      "text": "革命デュアリズム (Game Ver.)Roselia×美竹蘭 (CV: 佐倉綾音)-2316429 Roselia x Ran Mitake (CV Sakura Ayane) - Kakumei Dualism (Game Ver)MP",
+      "label": "革命デュアリズム (Game Ver.) - Roselia×美竹蘭 (CV: 佐倉綾音)"
+    },
+    {
+      "text": "VIOLET LINERoselia-VIOLET LINEFLAC24bit / 44kHz1745kbps100 BPM4:51",
+      "label": "VIOLET LINE - Roselia"
+    }
+  ],
+  "firstPlayback": {
+    "state": "playing",
+    "trackId": "8e64cd4d-5a21-4c9a-848d-fa1e98ae6bad",
+    "positionMs": 270
+  },
+  "finalPlayback": {
+    "state": "playing",
+    "trackId": "f149c499-e80a-4144-b6d6-63d491b2cd9a",
+    "positionMs": 360
+  }
+}

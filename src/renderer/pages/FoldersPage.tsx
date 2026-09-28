@@ -3113,7 +3113,9 @@ export const FoldersPage = (): JSX.Element => {
               {folderBreadcrumbs.length > 0 ? folderBreadcrumbs.map((crumb, index) => (
                 <span key={`${crumb.label}-${index}`}>
                   {index > 0 ? <ChevronRight size={12} aria-hidden="true" /> : null}
-                  <button type="button" disabled={!crumb.onSelect || index === folderBreadcrumbs.length - 1} onClick={crumb.onSelect}>{crumb.label}</button>
+                  {!crumb.onSelect || index === folderBreadcrumbs.length - 1
+                    ? <span className="folder-breadcrumb-current">{crumb.label}</span>
+                    : <button type="button" onClick={crumb.onSelect}>{crumb.label}</button>}
                 </span>
               )) : (mode === 'remote' ? '网盘文件夹' : t('folders.detail.libraryFolders'))}
             </nav>
@@ -3157,10 +3159,14 @@ export const FoldersPage = (): JSX.Element => {
               <span>刷新目录</span>
             </button>
           ) : (
-            <label className="folder-toggle">
-              <input type="checkbox" checked={recursive} onChange={(event) => setRecursive(event.target.checked)} />
-              <span>{t('folders.filters.includeSubfolders')}</span>
-            </label>
+            <div className="folder-scope-control" role="group" aria-label={t('folders.filters.scopeLabel')}>
+              <button type="button" aria-pressed={!recursive} onClick={() => setRecursive(false)}>
+                {t('folders.filters.currentFolder')}
+              </button>
+              <button type="button" aria-pressed={recursive} onClick={() => setRecursive(true)}>
+                {t('folders.filters.includeSubfolders')}
+              </button>
+            </div>
           )}
           <StyledSelect
             className="folder-sort-control"
@@ -3171,27 +3177,36 @@ export const FoldersPage = (): JSX.Element => {
           />
         </section>
 
-        <div className="folder-track-columns" aria-label="歌曲排序列">
+        <div className="folder-track-columns" aria-label={t('folders.sort.columnsAria')}>
           {([
             { label: t('folders.sort.title'), ascending: 'titleAsc', descending: 'titleDesc', aliases: ['default', 'title'] },
-            { label: '音频信息', ascending: 'qualityAsc', descending: 'qualityDesc' },
-            ...(hasVisibleBpm ? [{ label: 'BPM', ascending: 'bpmAsc' as LibrarySort, descending: 'bpmDesc' as LibrarySort }] : []),
-            { label: '时长', ascending: 'durationAsc', descending: 'durationDesc' },
-          ] as Array<{ label: string; ascending: LibrarySort; descending: LibrarySort; aliases?: LibrarySort[] }>).map((column) => {
-            const direction = folderColumnSortDirection(sort, column.ascending, column.descending, column.aliases);
+            { label: t('folders.sort.quality'), ascending: 'qualityAsc', descending: 'qualityDesc' },
+            ...(hasVisibleBpm ? [{ label: t('folders.sort.bpm'), ascending: 'bpmAsc' as LibrarySort, descending: 'bpmDesc' as LibrarySort }] : []),
+            { label: t('albumTagEditor.field.year'), ascending: 'yearAsc', descending: 'yearDesc' },
+            { label: t('albumTagEditor.field.genre') },
+            { label: t('folders.sort.duration'), ascending: 'durationAsc', descending: 'durationDesc' },
+          ] as Array<{ label: string; ascending?: LibrarySort; descending?: LibrarySort; aliases?: LibrarySort[] }>).map((column) => {
+            const { ascending, descending } = column;
+            if (!ascending || !descending) {
+              return <span className="folder-track-column-label" key={column.label}>{column.label}</span>;
+            }
+            const direction = folderColumnSortDirection(sort, ascending, descending, column.aliases);
             return (
               <button
                 className="folder-track-column-sort"
                 data-active={direction !== 'none'}
                 data-sort-direction={direction}
-                key={column.ascending}
+                key={ascending}
                 type="button"
-                aria-label={`${column.label}排序`}
+                aria-label={t('folders.sort.columnAria', { column: column.label })}
                 aria-pressed={direction !== 'none'}
-                onClick={() => toggleColumnSort(column.ascending, column.descending, column.aliases)}
+                onClick={() => toggleColumnSort(ascending, descending, column.aliases)}
               >
-                <span>{column.label}</span>
-                {direction === 'ascending' ? <ChevronUp size={13} /> : direction === 'descending' ? <ChevronDown size={13} /> : null}
+                <span className="folder-track-column-sort-label">{column.label}</span>
+                <span className="folder-track-column-sort-icons" data-direction={direction} aria-hidden="true">
+                  <ChevronUp className="folder-track-column-sort-icon folder-track-column-sort-icon--up" size={11} />
+                  <ChevronDown className="folder-track-column-sort-icon folder-track-column-sort-icon--down" size={11} />
+                </span>
               </button>
             );
           })}

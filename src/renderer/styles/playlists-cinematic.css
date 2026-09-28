@@ -321,7 +321,7 @@ html[data-theme="dark"] .playlists-page .playlist-sidebar {
 .playlists-page .playlist-detail-copy h2 {
   color: var(--playlist-text);
   font-size: clamp(27px, 2.6vw, 36px);
-  font-weight: 880;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: -0.035em;
   text-shadow: 0 2px 18px rgba(255, 255, 255, 0.4);
 }
@@ -335,7 +335,7 @@ html[data-theme="dark"] .playlists-page .playlist-sidebar {
 
 .playlists-page .playlist-detail-copy small {
   color: color-mix(in srgb, var(--playlist-text) 84%, var(--playlist-muted));
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
 }
 
 .playlists-page .playlist-actions {
@@ -532,7 +532,7 @@ html[data-theme="dark"] .playlists-page .playlist-detail-header .playlist-qualit
 .playlists-page .track-title {
   color: var(--playlist-text);
   font-size: 15px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .playlists-page .track-subtitle,

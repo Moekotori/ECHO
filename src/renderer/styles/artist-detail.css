@@ -53,7 +53,7 @@
   background: transparent;
   font: inherit;
   font-size: 13px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
 }
 
 .artist-detail-back:hover {
@@ -128,7 +128,7 @@
   max-width: 78%;
   overflow: hidden;
   font-size: clamp(84px, 18vw, 220px);
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
   line-height: 1;
   text-align: center;
   text-overflow: ellipsis;
@@ -152,7 +152,7 @@
 .artist-sidebar-facts span {
   color: #728095;
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -166,7 +166,7 @@
   overflow-wrap: anywhere;
   color: #ffffff;
   font-size: clamp(44px, 5.4vw, 82px);
-  font-weight: 720;
+  font-weight: var(--echo-weight-heading);
   line-height: 1.02;
   letter-spacing: 0;
 }
@@ -177,7 +177,7 @@
   gap: 8px 0;
   color: rgba(255, 255, 255, 0.78);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 .artist-hero-meta span:not(:last-child)::after {
@@ -209,7 +209,7 @@
   border: 1px solid rgba(37, 62, 92, 0.12);
   font: inherit;
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
   transition:
     background-color 160ms ease,
@@ -278,7 +278,7 @@
   background: transparent;
   font: inherit;
   font-size: 13px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
 }
 
@@ -328,7 +328,7 @@
   margin: 0;
   color: #202c3d;
   font-size: 19px;
-  font-weight: 860;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
@@ -340,7 +340,7 @@
   border-radius: 999px;
   background: var(--theme-button-bg);
   font-size: 12px;
-  font-weight: 830;
+  font-weight: var(--echo-weight-heading);
 }
 
 .artist-albums-view > .artist-section {
@@ -371,21 +371,21 @@
 .artist-streaming-albums > header span {
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-body);
 }
 
 .artist-streaming-albums > header h2 {
   margin: 0;
   color: var(--theme-heading-text);
   font-size: 17px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
 .artist-streaming-albums > header small {
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 .artist-albums-view > .artist-section > header {
@@ -431,13 +431,13 @@
 .artist-albums-view .artist-album-copy strong {
   color: var(--theme-heading-text);
   font-size: 14px;
-  font-weight: 840;
+  font-weight: var(--echo-weight-label);
 }
 
 .artist-albums-view .artist-album-copy span {
   color: var(--theme-muted-text);
   font-size: 12px;
-  font-weight: 680;
+  font-weight: var(--echo-weight-body);
 }
 
 .artist-overview-grid {
@@ -458,7 +458,7 @@
   margin: 0;
   color: #202c3d;
   font-size: 22px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
@@ -466,7 +466,7 @@
   margin: 8px 0 0;
   color: #27364a;
   font-size: 16px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0;
   line-height: 1.45;
 }
@@ -476,13 +476,13 @@
   margin: 0;
   color: #465569;
   font-size: 15px;
-  font-weight: 640;
+  font-weight: var(--echo-weight-body);
   line-height: 1.9;
 }
 
 .artist-overview-copy p a {
   color: #2f6f9f;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
@@ -534,7 +534,7 @@
   overflow: hidden;
   color: #303949;
   font-size: 13px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   line-height: 1.45;
   text-overflow: ellipsis;
 }
@@ -548,7 +548,7 @@
 .artist-around-web > span {
   color: var(--theme-heading-text);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
 }
 
 .artist-around-web div {
@@ -571,7 +571,7 @@
   border-radius: 999px;
   background: var(--theme-button-bg);
   font-size: 12px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-label);
   text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -610,14 +610,14 @@
   margin: 0;
   color: #202c3d;
   font-size: 20px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
 .artist-section header small {
   color: #7b8798;
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
 }
 
 .artist-events-header-actions {
@@ -639,7 +639,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   cursor: pointer;
 }
 
@@ -750,7 +750,7 @@
     radial-gradient(circle at 28% 26%, rgba(255, 255, 255, 0.9), transparent 36%),
     linear-gradient(145deg, #eef8f5, #e9edf8);
   font-size: 18px;
-  font-weight: 880;
+  font-weight: var(--echo-weight-label);
 }
 
 .artist-related-avatar img {
@@ -769,7 +769,7 @@
   overflow: hidden;
   color: #1f2d40;
   font-size: 14px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -795,7 +795,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.62);
   font-size: 11px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -819,7 +819,7 @@
   margin: 0;
   color: #748296;
   font-size: 12px;
-  font-weight: 740;
+  font-weight: var(--echo-weight-body);
 }
 
 .artist-related-constellation p[data-state="error"] {
@@ -877,7 +877,7 @@
   border-radius: 7px;
   background: linear-gradient(145deg, #eef8f5, #e9edf8);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
 }
 
 .artist-constellation-avatar img {
@@ -891,7 +891,7 @@
   overflow: hidden;
   color: #223248;
   font-size: 12px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -901,7 +901,7 @@
   overflow: hidden;
   color: #6d7d90;
   font-size: 11px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -971,14 +971,14 @@
 .artist-overview-track-copy strong {
   color: #1f2d40;
   font-size: 14px;
-  font-weight: 830;
+  font-weight: var(--echo-weight-label);
 }
 
 .artist-overview-track-copy small,
 .artist-overview-track-card time {
   color: #6f7d90;
   font-size: 12px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-body);
 }
 
 .artist-overview-track-card button {
@@ -1105,7 +1105,7 @@
 .artist-track-copy strong {
   color: #1f2d40;
   font-size: 13px;
-  font-weight: 820;
+  font-weight: var(--echo-weight-label);
 }
 
 .artist-album-copy span,
@@ -1114,7 +1114,7 @@
 .artist-track-duration {
   color: #6f7d90;
   font-size: 12px;
-  font-weight: 680;
+  font-weight: var(--echo-weight-body);
 }
 
 .artist-track-list {
@@ -1147,7 +1147,7 @@
   padding: 0 10px;
   color: #8a94a2;
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -1270,7 +1270,7 @@
   color: #65768b;
   font-size: 11px;
   font-style: normal;
-  font-weight: 850;
+  font-weight: var(--echo-weight-body);
   white-space: nowrap;
 }
 
@@ -1316,7 +1316,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
   font-size: 12px;
-  font-weight: 780;
+  font-weight: var(--echo-weight-body);
   text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1360,7 +1360,7 @@
   overflow: hidden;
   color: #5f6e83;
   font-size: 12px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1370,7 +1370,7 @@
   overflow: hidden;
   color: #1f2c3f;
   font-size: 22px;
-  font-weight: 900;
+  font-weight: var(--echo-weight-label);
   line-height: 1.05;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1388,14 +1388,14 @@
 .artist-event-primary {
   color: #223049;
   font-size: 15px;
-  font-weight: 850;
+  font-weight: var(--echo-weight-label);
   line-height: 1.22;
 }
 
 .artist-event-secondary {
   color: #6a7586;
   font-size: 13px;
-  font-weight: 720;
+  font-weight: var(--echo-weight-label);
   line-height: 1.25;
 }
 
@@ -1403,7 +1403,7 @@
   justify-self: end;
   color: #657184;
   font-size: 14px;
-  font-weight: 760;
+  font-weight: var(--echo-weight-label);
   text-align: right;
 }
 
@@ -1426,7 +1426,7 @@
   margin: 0;
   color: #a54f48;
   font-size: 13px;
-  font-weight: 680;
+  font-weight: var(--echo-weight-body);
 }
 
 .artist-detail-empty,

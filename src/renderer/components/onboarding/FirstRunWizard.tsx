@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, BookOpen, CheckCircle2, FolderOpen, Gamepad2, Gauge, Gift, HardDrive, Headphones, Languages, Loader2, LogIn, Palette, ScanLine, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpen, CheckCircle2, FolderOpen, Gamepad2, Gauge, HardDrive, Headphones, Languages, Loader2, LogIn, Palette, ScanLine, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AudioOutputMode } from '../../../shared/types/audio';
 import type { AppSettings, AppThemeMode, AppThemePreset, ScanPerformanceMode } from '../../../shared/types/appSettings';
@@ -21,7 +21,7 @@ type FirstRunWizardProps = {
   presentationState?: 'open' | 'closing';
 };
 
-type FirstRunStepId = 'language' | 'library' | 'cache' | 'scan' | 'audio' | 'performance' | 'appearance' | 'osu' | 'accounts' | 'pro' | 'summary';
+type FirstRunStepId = 'language' | 'library' | 'cache' | 'scan' | 'audio' | 'performance' | 'appearance' | 'osu' | 'accounts' | 'summary';
 
 type FirstRunStep = {
   id: FirstRunStepId;
@@ -33,7 +33,7 @@ type FirstRunStep = {
 };
 
 type FirstRunPhase = {
-  id: 'basics' | 'library' | 'playback' | 'personalize' | 'pro' | 'summary';
+  id: 'basics' | 'library' | 'playback' | 'personalize' | 'summary';
   labelKey: TranslationKey;
   subtitleKeys?: TranslationKey[];
   stepIds: FirstRunStepId[];
@@ -41,7 +41,6 @@ type FirstRunPhase = {
 };
 
 const echoDocumentationUrl = 'https://echonext.moe/zh/docs/';
-const echoSponsorUrl = 'https://afdian.com/a/echonext';
 
 type FirstRunOption<T extends string> = {
   mode: T;
@@ -269,13 +268,6 @@ const firstRunSteps: FirstRunStep[] = [
     icon: LogIn,
   },
   {
-    id: 'pro',
-    labelKey: 'firstRun.pro.title',
-    titleKey: 'firstRun.pro.title',
-    descriptionKey: 'firstRun.pro.description',
-    icon: Gift,
-  },
-  {
     id: 'summary',
     labelKey: 'firstRun.step.summary.label',
     eyebrowKey: 'firstRun.step.summary.eyebrow',
@@ -314,13 +306,6 @@ const firstRunPhases: FirstRunPhase[] = [
     icon: Palette,
   },
   {
-    id: 'pro',
-    labelKey: 'firstRun.pro.title',
-    subtitleKeys: ['firstRun.pro.kicker'],
-    stepIds: ['pro'],
-    icon: Gift,
-  },
-  {
     id: 'summary',
     labelKey: 'firstRun.step.summary.label',
     stepIds: ['summary'],
@@ -338,7 +323,6 @@ const firstRunStepNotes: Record<FirstRunStepId, TranslationKey[]> = {
   appearance: ['firstRun.detail.appearance.preview', 'firstRun.detail.appearance.system'],
   osu: ['firstRun.feature.osuDownloader.hint', 'firstRun.detail.performance.changeLater'],
   accounts: ['firstRun.detail.accounts.later', 'firstRun.detail.accounts.local'],
-  pro: ['firstRun.pro.kicker'],
   summary: ['firstRun.detail.summary.save', 'firstRun.detail.summary.docs'],
 };
 
@@ -576,7 +560,6 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
   }, []);
 
   const openDocumentation = useCallback((): void => openExternalUrl(echoDocumentationUrl), [openExternalUrl]);
-  const openSponsorChannel = useCallback((): void => openExternalUrl(echoSponsorUrl), [openExternalUrl]);
 
   const goToPreviousStep = (): void => {
     setActiveStepId(firstRunSteps[Math.max(0, activeStepIndex - 1)]!.id);
@@ -816,39 +799,6 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
               </li>
             </ol>
             <p>{t('firstRun.accounts.note')}</p>
-          </div>
-        );
-      case 'pro':
-        return (
-          <div className="first-run-pro-page">
-            <div className="first-run-pro-story">
-              <span>{t('firstRun.pro.kicker')}</span>
-              <div className="first-run-pro-story-copy">
-                <p>{t('firstRun.pro.freeNotice')}</p>
-              </div>
-              <p className="first-run-pro-contributor-note"><Sparkles size={14} aria-hidden="true" />{t('firstRun.pro.contributors')}</p>
-              <button className="settings-action-button first-run-pro-purchase" type="button" onClick={openSponsorChannel}>
-                <Gift size={16} />
-                <span>
-                  <strong>{t('firstRun.pro.action')}</strong>
-                  <small>afdian.com/a/echonext</small>
-                </span>
-                <ArrowRight size={16} />
-              </button>
-            </div>
-            <div className="first-run-pro-benefits">
-              <header>
-                <strong>{t('firstRun.pro.benefitsTitle')}</strong>
-                <span>{t('firstRun.pro.kicker')}</span>
-              </header>
-              <div className="first-run-pro-extras">
-                <strong>{t('firstRun.pro.extrasTitle')}</strong>
-                <ul>
-                  <li><CheckCircle2 size={13} aria-hidden="true" />{t('firstRun.pro.benefit.donators')}</li>
-                  <li><CheckCircle2 size={13} aria-hidden="true" />{t('firstRun.pro.benefit.storeKey')}</li>
-                </ul>
-              </div>
-            </div>
           </div>
         );
       case 'summary':

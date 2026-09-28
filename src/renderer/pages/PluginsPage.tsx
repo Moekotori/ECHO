@@ -1262,7 +1262,7 @@ export const PluginsPage = (): JSX.Element => {
           <span>
             <ShoppingBag size={18} />
             <strong>插件市场</strong>
-            <em>Pro Only · 展开后验证 Pro 并读取服务端插件</em>
+            <em>展开后读取服务端插件</em>
           </span>
           <ChevronDown size={18} />
         </button>
@@ -1378,7 +1378,7 @@ export const PluginsPage = (): JSX.Element => {
                 <section className="plugin-activity-panel">
                   <header>
                     <LockKeyhole size={17} />
-                    <strong>ECHO Pro 授权信息</strong>
+                    <strong>旧版授权信息</strong>
                   </header>
                   <div className="settings-status-grid">
                     <span>

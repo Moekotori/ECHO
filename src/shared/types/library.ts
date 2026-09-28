@@ -798,8 +798,10 @@ export type LibrarySort =
   | 'random'
   | 'title'
   | 'artist'
+  | 'artistDesc'
   | 'artistAlbum'
   | 'album'
+  | 'albumCountDesc'
   | 'recent';
 
 export type LibraryAudioFormatFilter =
@@ -815,11 +817,14 @@ export type LibraryAudioFormatFilter =
   | 'dsd'
   | 'otherSampleRate';
 
+export type ArtistGrouping = 'split' | 'albumArtist';
+
 export type LibraryPageQuery = {
   page?: number;
   pageSize?: number;
   search?: string;
   sort?: LibrarySort;
+  artistGrouping?: ArtistGrouping;
   audioFormatFilter?: LibraryAudioFormatFilter;
   sourceProvider?: PlaylistSourceProvider;
   sourceId?: string | null;

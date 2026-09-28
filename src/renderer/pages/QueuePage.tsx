@@ -476,6 +476,24 @@ export const QueuePage = (): JSX.Element => {
       };
     }
 
+    if (queue.upcomingItem) {
+      return {
+        kind: 'track' as const,
+        title: queue.upcomingItem.track.title,
+        detail: queue.isShuffleEnabled
+          ? t('queue.nextPreview.shuffleDetail', {
+            scope: queue.shuffleScopeLabel,
+            count: queue.playbackShuffleAvoidRecentCount,
+          })
+          : t('queue.nextPreview.trackDetail', {
+            artist: queue.upcomingItem.track.artist || queue.upcomingItem.track.albumArtist || t('queue.unknownArtist'),
+            source: queue.upcomingItem.source.label,
+          }),
+        track: queue.upcomingItem.track,
+        queueItemId: queue.upcomingItem.queueId,
+      };
+    }
+
     if (queue.isShuffleEnabled) {
       return {
         kind: 'shuffle',
@@ -489,38 +507,20 @@ export const QueuePage = (): JSX.Element => {
       };
     }
 
-    const nextItem = currentIndex >= 0
-      ? queue.items[currentIndex + 1] ?? (queue.repeatMode === 'all' && queue.items.length > 1 ? queue.items[0] : null)
-      : queue.items[0] ?? null;
-
-    if (!nextItem) {
-      return {
-        kind: 'empty',
-        title: t('queue.nextPreview.empty'),
-        track: null,
-        queueItemId: null,
-      };
-    }
-
     return {
-      kind: 'track',
-      title: nextItem.track.title,
-      detail: t('queue.nextPreview.trackDetail', {
-        artist: nextItem.track.artist || nextItem.track.albumArtist || t('queue.unknownArtist'),
-        source: nextItem.source.label,
-      }),
-      track: nextItem.track,
-      queueItemId: nextItem.queueId,
+      kind: 'empty',
+      title: t('queue.nextPreview.empty'),
+      track: null,
+      queueItemId: null,
     };
   }, [
-    currentIndex,
     nowPlaying,
     queue.currentQueueId,
     queue.isShuffleEnabled,
-    queue.items,
     queue.playbackShuffleAvoidRecentCount,
     queue.repeatMode,
     queue.shuffleScopeLabel,
+    queue.upcomingItem,
     t,
   ]);
   const nextQueueCoverUrl = queueNowCoverUrl(nextQueuePreview.track);

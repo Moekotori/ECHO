@@ -496,6 +496,8 @@ export type AppSettings = {
   mqttHomeAssistantDiscoveryPrefix?: string;
   osuDownloaderFeatureEnabled?: boolean;
   playbackShuffleAvoidRecentCount?: number;
+  /** Left-drag on the player bar or lyrics page switches tracks. Defaults off. */
+  mouseGestureTrackSwitchEnabled?: boolean;
   stageApiEnabled?: boolean;
   streamingFeatureEnabled?: boolean;
   streamingPlaylistImportNoticeAccepted?: boolean;

@@ -691,6 +691,15 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .window-c
   padding: 20px 28px 24px;
 }
 
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar[data-mouse-swipe] {
+  cursor: grabbing;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar[data-mouse-swipe] .player-now {
+  transform: translate3d(var(--player-mouse-swipe-offset, 0px), 0, 0);
+  transition: none;
+}
+
 .player-bar {
   position: relative;
   z-index: 10;

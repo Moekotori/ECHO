@@ -25,28 +25,11 @@ describe('FirstRunWizard', () => {
     await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith('https://echonext.moe/zh/docs/'));
   });
 
-  it('opens the ECHO Next Pro purchase link from its dedicated page', async () => {
-    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
-    window.echo = {
-      app: {
-        openExternalUrl,
-      },
-    } as unknown as Window['echo'];
-
-    render(<FirstRunWizard initialSettings={null} onClose={vi.fn()} onCompleted={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole('button', { name: /ECHO Next Pro/ }));
-    expect(screen.queryByText('DSP Center')).toBeNull();
-    expect(screen.queryByText(/OPRA 耳机校正.*FIR 房间校正/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /打开赞助渠道/ }));
-
-    await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith('https://afdian.com/a/echonext'));
-  });
-
   it('groups the original setup flow into phases while keeping the library substeps', () => {
     render(<FirstRunWizard initialSettings={null} onClose={vi.fn()} onCompleted={vi.fn()} />);
 
-    expect(document.querySelectorAll('.first-run-phase-nav button')).toHaveLength(6);
+    expect(document.querySelectorAll('.first-run-phase-nav button')).toHaveLength(5);
+    expect(screen.queryByRole('button', { name: /ECHO.*Pro|赞助|爱发电/ })).toBeNull();
     expect(document.querySelector('.first-run-workspace-header button')).toBeNull();
     expect(document.querySelector('.first-run-substep-single')?.textContent).toContain('语言');
 

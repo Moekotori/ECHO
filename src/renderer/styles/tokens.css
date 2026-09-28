@@ -24,6 +24,17 @@
   --font-mono: var(--echo-mono-font-family);
   --echo-base-font-size: 14px;
   --echo-ui-line-height: 1.35;
+  /* UI hierarchy: descriptions < names/actions < headings < the ECHO wordmark.
+     Use size, spacing and theme text colors before increasing weight.
+     Lyrics keep their own reading and active-line emphasis. */
+  --echo-weight-body: 400;
+  --echo-weight-label: 500;
+  --echo-weight-heading: 600;
+  --echo-weight-brand: 700;
+  --echo-text-page-title: 30px;
+  --echo-text-section-title: 20px;
+  --echo-text-item-title: 15px;
+  --echo-text-caption: 12px;
 
   font-family: var(--echo-font-family);
   font-size: var(--echo-base-font-size);
