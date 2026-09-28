@@ -50,14 +50,14 @@ describe('audioProFeatureGate', () => {
     expect(getEchoProLicenseStatusMock).toHaveBeenCalledTimes(2);
   });
 
-  it('rechecks the existing local entitlement after it is revoked', async () => {
+  it('allows SRC and SDM without a valid Pro license', async () => {
     await expect(requireEchoProForAudioDspPatch({ echoSrcMode: 'family2x' })).resolves.toBeUndefined();
 
     getEchoProLicenseStatusMock.mockReturnValue({ valid: false, enabled: false, features: [] });
 
     await expect(requireEchoProForAudioDspPatch({ dsdOutputMode: 'dop' })).resolves.toBeUndefined();
     await expect(requireEchoProForAudioDspPatch({ audioDsdOutputMode: 'dop' })).resolves.toBeUndefined();
-    await expect(requireEchoProForAudioDspPatch({ echoSrcMode: 'family4x' })).rejects.toThrow('echo_pro_required');
-    await expect(requireEchoProForAudioDspPatch({ sdmMode: 'pcmToDsd' })).rejects.toThrow('echo_pro_required');
+    await expect(requireEchoProForAudioDspPatch({ echoSrcMode: 'family4x' })).resolves.toBeUndefined();
+    await expect(requireEchoProForAudioDspPatch({ sdmMode: 'pcmToDsd' })).resolves.toBeUndefined();
   });
 });

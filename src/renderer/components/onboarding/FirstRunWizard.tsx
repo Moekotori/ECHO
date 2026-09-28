@@ -87,22 +87,6 @@ const themePresets: Array<{ preset: AppThemePreset; labelKey: TranslationKey; de
   { preset: 'darkSideMoon', labelKey: 'settings.appearance.themePreset.darkSideMoon', descriptionKey: 'settings.appearance.themePreset.darkSideMoon.description' },
 ];
 
-const proFeatureCards: Array<{
-  id: 'dsp';
-  icon: LucideIcon;
-  titleKey: TranslationKey;
-  descriptionKeys: TranslationKey[];
-  featured?: boolean;
-}> = [
-  {
-    id: 'dsp',
-    icon: Gauge,
-    titleKey: 'firstRun.pro.feature.dsp.title',
-    descriptionKeys: ['firstRun.pro.benefit.dsp'],
-    featured: true,
-  },
-];
-
 const featureToggles: FirstRunFeatureToggle[] = [
   {
     id: 'lowLoadPlayback',
@@ -857,20 +841,6 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
                 <strong>{t('firstRun.pro.benefitsTitle')}</strong>
                 <span>{t('firstRun.pro.kicker')}</span>
               </header>
-              <div className="first-run-pro-feature-grid">
-                {proFeatureCards.map((feature) => {
-                  const FeatureIcon = feature.icon;
-                  return (
-                    <article className={feature.featured ? 'is-featured' : undefined} key={feature.id}>
-                      <span className="first-run-pro-feature-icon"><FeatureIcon size={18} aria-hidden="true" /></span>
-                      <div>
-                        <strong>{t(feature.titleKey)}</strong>
-                        {feature.descriptionKeys.map((key) => <p key={key}>{t(key)}</p>)}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
               <div className="first-run-pro-extras">
                 <strong>{t('firstRun.pro.extrasTitle')}</strong>
                 <ul>

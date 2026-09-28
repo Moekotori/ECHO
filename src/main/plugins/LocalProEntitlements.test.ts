@@ -57,18 +57,18 @@ describe('local Pro entitlements', () => {
     expect(getLocalProEntitlementSnapshot('downloads')).toMatchObject({ unlocked: true, source: 'included' });
   });
 
-  it('includes non-DSP Pro features for ordinary users while keeping DSP locked', () => {
-    for (const feature of ['echo-pro', 'plugins', 'remote-sources', 'cover-cache', 'hqplayer-remote-media', 'window-acrylic', 'connect', 'downloads'] as const) {
+  it('includes DSP and existing free features for ordinary users', () => {
+    for (const feature of ['dsp', 'echo-pro', 'plugins', 'remote-sources', 'cover-cache', 'hqplayer-remote-media', 'window-acrylic', 'connect', 'downloads'] as const) {
       expect(getLocalProEntitlementSnapshot(feature)).toMatchObject({ unlocked: true, source: 'included' });
       expect(() => requireLocalPro(feature)).not.toThrow();
     }
-    expect(getLocalProEntitlementSnapshot('dsp')).toMatchObject({ unlocked: false, source: 'none' });
-    expect(() => requireLocalPro('dsp')).toThrow('echo_pro_required');
+    expect(getLocalProEntitlementSnapshot('dsp')).toMatchObject({ unlocked: true, source: 'included' });
+    expect(() => requireLocalPro('dsp')).not.toThrow();
   });
 
-  it('does not treat an expired account status as a DSP entitlement', () => {
+  it('keeps DSP available after the cached account expires', () => {
     mocks.account = { loggedIn: true, pro: true, status: 'active', checkedAt: '2026-07-05T11:59:59.999Z' };
 
-    expect(getLocalProEntitlementSnapshot('dsp')).toMatchObject({ unlocked: false, source: 'none' });
+    expect(getLocalProEntitlementSnapshot('dsp')).toMatchObject({ unlocked: true, source: 'included' });
   });
 });

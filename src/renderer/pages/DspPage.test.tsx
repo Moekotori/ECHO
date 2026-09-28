@@ -59,9 +59,10 @@ const installBridge = (getStatus: ReturnType<typeof vi.fn>) => {
   return { getSettings, setSettings, openExternalUrl };
 };
 
-describe('DspPage Pro access', () => {
+describe('DspPage free access', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     getEqBridgeMock.mockReturnValue({
       getState: vi.fn(async () => ({
         enabled: false,
@@ -109,44 +110,32 @@ describe('DspPage Pro access', () => {
     Reflect.deleteProperty(window, 'echo');
   });
 
-  it('recommends the Steam edition without mounting community DSP controls and can hide the route', async () => {
-    const getStatus = vi.fn(async () => ({ ...unlockedStatus, dspUnlocked: false, source: 'included' as const }));
-    const bridge = installBridge(getStatus);
-    const navigateHome = vi.fn();
-    window.addEventListener('app:navigate:route', navigateHome);
-
-    render(<DspPage />);
-
-    expect(await screen.findByText('建议在 Steam 版体验 DSP')).toBeTruthy();
-    expect(screen.getByText(/社区版 DSP 功能的实现目前存在问题/)).toBeTruthy();
-    expect(getEqBridgeMock).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: '账号与激活' })).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: '前往 Steam 体验' }));
-    expect(bridge.openExternalUrl).toHaveBeenCalledWith('https://store.steampowered.com/app/5105090/ECHO/');
-
-    fireEvent.click(screen.getByRole('button', { name: '在侧边栏隐藏音效处理' }));
-    await waitFor(() => expect(bridge.setSettings).toHaveBeenCalledWith(expect.objectContaining({
-      sidebarHiddenRouteIds: expect.arrayContaining(['dsp']),
-    })));
-    expect(navigateHome).toHaveBeenCalledWith(expect.objectContaining({ detail: 'home' }));
-
-    window.removeEventListener('app:navigate:route', navigateHome);
-  });
-
-  it('unlocks in place when the local Pro entitlement changes', async () => {
-    const getStatus = vi.fn()
-      .mockResolvedValueOnce({ ...unlockedStatus, dspUnlocked: false, source: 'included' })
-      .mockResolvedValue(unlockedStatus);
+  it('opens the DSP workbench for free users without checking a Pro license', async () => {
+    const getStatus = vi.fn(async () => ({ ...unlockedStatus, unlocked: false, dspUnlocked: false, source: 'none' as const }));
     installBridge(getStatus);
 
     render(<DspPage />);
-    expect(await screen.findByText('建议在 Steam 版体验 DSP')).toBeTruthy();
 
-    window.dispatchEvent(new Event('echo-pro:status-changed'));
-
+    expect(await screen.findByText('EQ workbench')).toBeTruthy();
     await waitFor(() => expect(getEqBridgeMock).toHaveBeenCalled());
-    expect(screen.queryByText('建议在 Steam 版体验 DSP')).toBeNull();
-    expect(screen.getByText('EQ workbench')).toBeTruthy();
+    expect(getStatus).not.toHaveBeenCalled();
+    expect(document.querySelector('.dsp-pro-lock')).toBeNull();
+    expect(document.querySelector('.dsp-pro-badge')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /^ECHO SRC/ }));
+    expect(document.querySelector('.dsp-editor-shell')?.getAttribute('data-module')).toBe('src');
+    fireEvent.click(screen.getByRole('button', { name: /^ECHO SDM/ }));
+    expect(document.querySelector('.dsp-editor-shell')?.getAttribute('data-module')).toBe('sdm');
+  });
+
+  it('keeps DSP accessible when the entitlement API is unavailable', async () => {
+    installBridge(vi.fn());
+    Reflect.deleteProperty(window.echo.app, 'getEchoProLocalEntitlementStatus');
+
+    render(<DspPage />);
+
+    expect(await screen.findByText('EQ workbench')).toBeTruthy();
+    await waitFor(() => expect(getEqBridgeMock).toHaveBeenCalled());
+    expect(document.querySelector('.dsp-pro-lock')).toBeNull();
   });
 });

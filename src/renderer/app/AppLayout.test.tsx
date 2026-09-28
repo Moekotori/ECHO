@@ -200,7 +200,7 @@ afterEach(() => {
 });
 
 describe('AppLayout standalone routes', () => {
-  it('restores DoP while disabling gated DSP modes without Pro', async () => {
+  it('restores DoP and saved DSP modes for free users', async () => {
     const idleAudioStatus = {
       state: 'idle',
       currentTrackId: null,
@@ -216,7 +216,7 @@ describe('AppLayout standalone routes', () => {
       app: {
         getSettings: vi.fn().mockResolvedValue({
           audioDsdOutputMode: 'dop',
-          audioSdmMode: 'dsd256',
+          audioSdmMode: 'pcmToDsd',
           audioEchoSrcMode: 'family4x',
         }),
         getEchoProLocalEntitlementStatus: vi.fn().mockResolvedValue({ unlocked: true, dspUnlocked: false }),
@@ -253,8 +253,8 @@ describe('AppLayout standalone routes', () => {
     await waitFor(() => expect(setOutput).toHaveBeenCalled());
     expect(setOutput).toHaveBeenCalledWith(expect.objectContaining({
       dsdOutputMode: 'dop',
-      sdmMode: 'off',
-      echoSrcMode: 'off',
+      sdmMode: 'pcmToDsd',
+      echoSrcMode: 'family4x',
     }));
   });
 

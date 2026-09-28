@@ -36,8 +36,8 @@ describe('FirstRunWizard', () => {
     render(<FirstRunWizard initialSettings={null} onClose={vi.fn()} onCompleted={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: /ECHO Next Pro/ }));
-    expect(screen.getByText('DSP Center')).toBeTruthy();
-    expect(screen.getByText(/OPRA 耳机校正.*FIR 房间校正/)).toBeTruthy();
+    expect(screen.queryByText('DSP Center')).toBeNull();
+    expect(screen.queryByText(/OPRA 耳机校正.*FIR 房间校正/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /打开赞助渠道/ }));
 
     await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith('https://afdian.com/a/echonext'));

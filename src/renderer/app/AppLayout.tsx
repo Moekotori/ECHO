@@ -2815,20 +2815,18 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     void Promise.all([
       loadPersistedRememberedAudioOutput(),
       window.echo?.app?.getSettings?.().catch(() => null) ?? Promise.resolve(null),
-      window.echo?.app?.getEchoProLocalEntitlementStatus?.().catch(() => null) ?? Promise.resolve(null),
     ])
-      .then(([remembered, settings, proEntitlement]) => {
+      .then(([remembered, settings]) => {
         if (cancelled || getAudioOutputRouteMutationSequence() !== initialRouteMutationSequence) {
           return undefined;
         }
 
-        const proUnlocked = proEntitlement?.dspUnlocked === true;
         const useMiniaudioOutput =
           settings?.audioUseMiniaudioOutput === true || settings?.audioMiniaudioOutputExperimentalEnabled === true;
         const useLibavDecode = settings?.audioUseLibavDecode === true;
         const nativeDirectLocalPlaybackEnabled = settings?.audioNativeDirectLocalPlaybackEnabled === true;
         const dsdOutputMode = settings?.audioDsdOutputMode === 'dop' ? 'dop' : 'pcm';
-        const sdmMode = proUnlocked ? normalizeSdmMode(settings?.audioSdmMode) : 'off';
+        const sdmMode = normalizeSdmMode(settings?.audioSdmMode);
         const sdmTargetRate = normalizeSdmTargetRate(settings?.audioSdmTargetRate);
         const sdmQualityProfile = normalizeSdmQualityProfile(settings?.audioSdmQualityProfile);
         const sdmComputeBackend = normalizeSdmComputeBackend(settings?.audioSdmComputeBackend);
@@ -2836,7 +2834,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
         const sdmOversamplingFilterProfileNx = normalizeEchoSrcFilterProfile(settings?.audioSdmOversamplingFilterProfileNx, 'poly-sinc-hb');
         const exclusiveInstabilityFallbackEnabled = settings?.audioExclusiveInstabilityFallbackEnabled === true;
         const soxrFallbackEnabled = settings?.audioSoxrFallbackEnabled !== false;
-        const echoSrcMode = proUnlocked && (settings?.audioEchoSrcMode === 'compatibility48' || settings?.audioEchoSrcMode === 'family2x' || settings?.audioEchoSrcMode === 'family4x' || settings?.audioEchoSrcMode === 'family8x')
+        const echoSrcMode = (settings?.audioEchoSrcMode === 'compatibility48' || settings?.audioEchoSrcMode === 'family2x' || settings?.audioEchoSrcMode === 'family4x' || settings?.audioEchoSrcMode === 'family8x')
           ? settings.audioEchoSrcMode
           : 'off';
         const echoSrcQualityProfile =

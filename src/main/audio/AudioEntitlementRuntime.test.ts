@@ -41,8 +41,8 @@ describe('AudioEntitlementRuntime', () => {
     setOutputMock.mockResolvedValue(status());
   });
 
-  it('does not touch a Pro user audio session after revalidation', async () => {
-    entitlementMock.mockReturnValue({ unlocked: true, source: 'plugin', checkedAt: 'now' });
+  it.each(['legacy-plugin', 'included'])('preserves active DSP after revalidation with %s access', async (source) => {
+    entitlementMock.mockReturnValue({ unlocked: true, source, checkedAt: null });
     getStatusMock.mockReturnValue(status({ dsdOutputModeRequested: 'dop', echoSrcMode: 'family4x' }));
 
     await reconcileEchoProAudioEntitlement();

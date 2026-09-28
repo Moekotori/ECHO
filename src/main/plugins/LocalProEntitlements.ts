@@ -60,12 +60,11 @@ export const getLocalProEntitlementSnapshot = (
       };
     }
   } catch {
-    // A missing or unreadable local license is treated as locked.
+    // A missing or unreadable license falls back to included access.
   }
 
-  return feature === 'dsp'
-    ? { unlocked: false, source: 'none', feature, checkedAt: null }
-    : { unlocked: true, source: 'included', feature, checkedAt: null };
+  // DSP is included for free users, including offline and expired accounts.
+  return { unlocked: true, source: 'included', feature, checkedAt: null };
 };
 
 export const isLocalProUnlocked = (feature: LocalProFeature = 'echo-pro'): boolean =>

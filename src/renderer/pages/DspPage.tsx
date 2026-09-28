@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '../styles/dsp.css';
-import { Activity, AudioWaveform, CheckCircle2, Clock3, ExternalLink, EyeOff, FileAudio, Gauge, Headphones, Info, Loader2, LockKeyhole, Pencil, RadioTower, RefreshCw, RotateCcw, Route, Save, ShieldCheck, SlidersHorizontal, Trash2, Waves, X, Zap } from 'lucide-react';
+import { Activity, AudioWaveform, CheckCircle2, Clock3, FileAudio, Gauge, Headphones, Info, Loader2, Pencil, RadioTower, RefreshCw, RotateCcw, Route, Save, ShieldCheck, SlidersHorizontal, Trash2, Waves, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type {
   AudioDsdOutputMode,
@@ -22,7 +22,6 @@ import type {
 } from '../../shared/types/audio';
 import type { EqState, RoomCorrectionState } from '../../shared/types/eq';
 import type { AppSettings } from '../../shared/types/appSettings';
-import { isAuthorizationFailure } from '../../shared/ipcAuthorizationFailure';
 import { channelBalanceBandIds, channelBalanceBandMaxGainDb, channelBalanceBandMinGainDb, channelBalanceMaxDelayMs, channelBalanceMaxGainDb, channelBalanceMinDelayMs, channelBalanceMinGainDb } from '../../shared/types/audio';
 import { dspHeadroomMaxDb, dspHeadroomMinDb, roomCorrectionMaxTrimDb, roomCorrectionMinTrimDb } from '../../shared/types/eq';
 import { EqPanel } from '../components/audio/EqPanel';
@@ -43,65 +42,23 @@ import { refreshPlaybackStatus, useThrottledSharedPlaybackStatus } from '../stor
 import { dispatchAudioErrorNotice } from '../utils/audioErrorNotice';
 import { getEqBridge } from '../utils/echoBridge';
 import { formatUserFacingError } from '../utils/userFacingError';
-import { hideSidebarRouteEntry } from '../utils/sidebarRouteVisibility';
 
 type DspModuleId = 'rack' | 'headroom' | 'src' | 'sdm' | 'eq' | 'compressor' | 'crossfeed' | 'stereoField' | 'channelMatrix' | 'headphone' | 'room' | 'channel' | 'safety';
 
 const dspPlaybackStatusUiIntervalMs = 250;
 const dspSelectedModuleStorageKey = 'echo-next.dsp.selected-module';
-const dspSettingsPendingSectionStorageKey = 'echo-next.settings.pending-section';
-const dspEchoProActivationPanelStorageKey = 'echo:settings:general:echo-pro-activation-panel-expanded';
-const dspEchoProActivationTargetId = 'settings-row-echo-pro-activation';
-const dspSteamStoreUrl = 'https://store.steampowered.com/app/5105090/ECHO/';
 const dspModuleIds: readonly DspModuleId[] = ['rack', 'headroom', 'src', 'sdm', 'eq', 'compressor', 'crossfeed', 'stereoField', 'channelMatrix', 'headphone', 'room', 'channel', 'safety'];
 
 const isDspModuleId = (value: unknown): value is DspModuleId =>
   typeof value === 'string' && (dspModuleIds as readonly string[]).includes(value);
 
-const isEchoProRequiredError = (message: string | null | undefined): boolean =>
-  isAuthorizationFailure(message ?? '');
-
 const formatDspActionError = (error: unknown): string =>
-  isAuthorizationFailure(error) ? 'echo_pro_required' : formatUserFacingError(error, { context: 'audio' });
+  formatUserFacingError(error, { context: 'audio' });
 
 const createSettingsRollbackPatch = <T extends Partial<AppSettings>>(patch: T, previous: AppSettings): T =>
   Object.fromEntries(
     Object.keys(patch).map((key) => [key, previous[key as keyof AppSettings]]),
   ) as T;
-
-const isEchoProDspModule = (moduleId: DspModuleId): boolean =>
-  moduleId === 'src' || moduleId === 'sdm';
-
-const DspProBadge = (): JSX.Element => <em className="dsp-pro-badge">Pro</em>;
-
-const openEchoProActivationSettings = (): void => {
-  try {
-    window.sessionStorage?.setItem(dspSettingsPendingSectionStorageKey, 'general');
-    window.localStorage?.setItem(dspSettingsPendingSectionStorageKey, 'general');
-    window.localStorage?.setItem(dspEchoProActivationPanelStorageKey, 'true');
-  } catch {
-    // Navigation events below still guide the user when storage is unavailable.
-  }
-
-  window.dispatchEvent(new Event('app:navigate:settings'));
-  const detail = { section: 'general', targetId: dspEchoProActivationTargetId };
-  window.dispatchEvent(new CustomEvent('app:navigate:settings-section', { detail }));
-  window.setTimeout(() => {
-    window.dispatchEvent(new CustomEvent('app:navigate:settings-section', { detail }));
-  }, 0);
-};
-
-const openSteamDspPage = async (): Promise<void> => {
-  if (window.echo?.app?.openExternalUrl) {
-    try {
-      await window.echo.app.openExternalUrl(dspSteamStoreUrl);
-      return;
-    } catch {
-      // Browser previews can open the same store page without the desktop bridge.
-    }
-  }
-  window.open(dspSteamStoreUrl, '_blank', 'noopener,noreferrer');
-};
 
 const readStoredDspModuleId = (): DspModuleId => {
   if (typeof window === 'undefined') {
@@ -5291,7 +5248,6 @@ const DspWorkbench = (): JSX.Element => {
   const [sdmOversamplingFilterProfileNx, setSdmOversamplingFilterProfileNx] = useState<AudioEchoSrcFilterProfile>('poly-sinc-hb');
   const [echoSrcCompareReturnMode, setEchoSrcCompareReturnMode] = useState<AudioEchoSrcMode | null>(null);
   const [moduleError, setModuleError] = useState<string | null>(null);
-  const [proOnlyNoticeDismissed, setProOnlyNoticeDismissed] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const echoSrcActionGenerationRef = useRef(0);
   const echoSrcActionQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -6175,8 +6131,6 @@ const DspWorkbench = (): JSX.Element => {
   const activeCount = modules.filter((module) => module.id !== 'rack' && module.enabled).length;
   const selectedModule = modules.find((module) => module.id === selectedModuleId) ?? modules[1];
   const SelectedIcon = selectedModule.icon;
-  const proOnlyError = isEchoProRequiredError(moduleError ?? error ?? null);
-  const showProOnlyNotice = proOnlyError && !proOnlyNoticeDismissed;
   const pipelineNodes = modules.filter((module) => module.id !== 'rack').map((module) => ({
     id: module.id,
     label: t(module.stageKey),
@@ -6236,41 +6190,15 @@ const DspWorkbench = (): JSX.Element => {
   };
 
   useEffect(() => {
-    if (!proOnlyError) {
-      setProOnlyNoticeDismissed(false);
+    const dspError = moduleError ?? error;
+    if (dspError) {
+      dispatchAudioErrorNotice(dspError);
     }
-  }, [proOnlyError]);
-
-  useEffect(() => {
-    if (moduleError && !isEchoProRequiredError(moduleError)) {
-      dispatchAudioErrorNotice(moduleError);
-    }
-  }, [moduleError]);
+  }, [moduleError, error]);
 
   return (
     <div className="dsp-page">
       <div className="dsp-stage" data-module={selectedModuleId}>
-        {showProOnlyNotice ? (
-          <div className="dsp-status-error dsp-status-error--pro" role="alert">
-            <button
-              type="button"
-              className="dsp-status-error-close"
-              aria-label="关闭 Pro only 提示"
-              onClick={() => setProOnlyNoticeDismissed(true)}
-            >
-              <X size={13} aria-hidden="true" />
-            </button>
-            <div>
-              <strong>Pro only</strong>
-              <span>ECHO SRC / ECHO SDM 是 ECHO Pro 功能。购买或激活 Pro 后即可开启升频和 SDM。</span>
-            </div>
-            <button type="button" onClick={openEchoProActivationSettings}>
-              <ShieldCheck size={14} aria-hidden="true" />
-              购买 / 激活 Pro
-            </button>
-          </div>
-        ) : null}
-
         <aside className="dsp-rail" aria-label={t('dsp.aria.modules')}>
           <div className="dsp-brand">
             <span>DSP</span>
@@ -6310,7 +6238,7 @@ const DspWorkbench = (): JSX.Element => {
                       <Icon size={17} aria-hidden="true" />
                     </span>
                     <span className="dsp-chain-copy">
-                      <strong>{module.title}{isEchoProDspModule(module.id) ? <DspProBadge /> : null}</strong>
+                      <strong>{module.title}</strong>
                       <small>{module.description}</small>
                     </span>
                     <span className="dsp-chain-state" aria-hidden="true">
@@ -6335,7 +6263,7 @@ const DspWorkbench = (): JSX.Element => {
               </span>
               <div>
                 <p>{t('dsp.label.module')}</p>
-                <h1>{selectedModule.title}{isEchoProDspModule(selectedModule.id) ? <DspProBadge /> : null}</h1>
+                <h1>{selectedModule.title}</h1>
                 <span className="dsp-topbar-subtitle">{t(selectedModule.stageKey)} / {selectedModule.description}</span>
               </div>
             </div>
@@ -6363,7 +6291,7 @@ const DspWorkbench = (): JSX.Element => {
           <div className="dsp-focus-strip" data-risk={clippingRisk}>
             <span>
               <em>{t('dsp.label.currentModule')}</em>
-              <strong>{selectedModule.title}{isEchoProDspModule(selectedModule.id) ? <DspProBadge /> : null}</strong>
+              <strong>{selectedModule.title}</strong>
             </span>
             <span>
               <em>{t('dsp.label.moduleStatus')}</em>
@@ -6408,237 +6336,4 @@ const DspWorkbench = (): JSX.Element => {
   );
 };
 
-const dspProLockText = {
-  'zh-CN': {
-    aria: '社区版 DSP 使用提示',
-    badge: '社区版 DSP 提示',
-    title: '建议在 Steam 版体验 DSP',
-    description: '社区版 DSP 功能的实现目前存在问题，可能无法按预期处理音频。若需要使用均衡器、耳机或房间校正、SRC / SDM 等功能，建议前往 Steam 版体验。',
-    configSafe: '现有 DSP 配置会保留；查看此页面不会改变音频设置。',
-    openSteam: '前往 Steam 体验',
-    storeHint: 'store.steampowered.com/app/5105090',
-    previewTitle: 'DSP 信号链示意',
-    previewDescription: '以下是 DSP 模块示意。社区版当前的 DSP 实现可能无法按预期工作。',
-    lockedState: '社区版 DSP 暂不推荐使用',
-    recheck: '重新检查',
-    hide: '在侧边栏隐藏音效处理',
-    hideHint: '隐藏后可随时在“设置 → 外观 → 侧栏”中重新显示。',
-    loading: '正在检查 DSP 状态…',
-    error: '暂时无法读取 DSP 状态，请重新检查。',
-  },
-  'zh-TW': {
-    aria: '社群版 DSP 使用提示',
-    badge: '社群版 DSP 提示',
-    title: '建議在 Steam 版體驗 DSP',
-    description: '社群版 DSP 功能目前實作有問題，可能無法如預期處理音訊。若需要等化器、耳機或房間校正、SRC / SDM 等功能，建議前往 Steam 版體驗。',
-    configSafe: '現有 DSP 設定會保留；檢視此頁不會變更音訊設定。',
-    openSteam: '前往 Steam 體驗',
-    storeHint: 'store.steampowered.com/app/5105090',
-    previewTitle: 'DSP 訊號鏈示意',
-    previewDescription: '以下為 DSP 模組示意。社群版目前的 DSP 實作可能無法如預期運作。',
-    lockedState: '暫不建議使用社群版 DSP',
-    recheck: '重新檢查',
-    hide: '在側邊欄隱藏音效處理',
-    hideHint: '隱藏後可隨時在「設定 → 外觀 → 側邊欄」中重新顯示。',
-    loading: '正在檢查 DSP 狀態…',
-    error: '暫時無法讀取 DSP 狀態，請重新檢查。',
-  },
-  'en-US': {
-    aria: 'Community edition DSP notice',
-    badge: 'Community DSP notice',
-    title: 'Try DSP in the Steam edition',
-    description: 'The community edition DSP implementation currently has issues and may not process audio as expected. For EQ, headphone or room correction, and SRC / SDM, we recommend the Steam edition.',
-    configSafe: 'Your existing DSP settings are preserved; viewing this page does not change audio settings.',
-    openSteam: 'Explore on Steam',
-    storeHint: 'store.steampowered.com/app/5105090',
-    previewTitle: 'DSP signal-chain overview',
-    previewDescription: 'These modules are illustrative. Community edition DSP may not work as expected right now.',
-    lockedState: 'Community DSP is not recommended right now',
-    recheck: 'Check again',
-    hide: 'Hide DSP from the sidebar',
-    hideHint: 'You can show it again anytime in Settings → Appearance → Sidebar.',
-    loading: 'Checking DSP status…',
-    error: 'The DSP status is temporarily unavailable. Please check again.',
-  },
-  'ko-KR': {
-    aria: '커뮤니티 버전 DSP 안내',
-    badge: '커뮤니티 DSP 안내',
-    title: 'Steam 버전에서 DSP를 경험해 보세요',
-    description: '커뮤니티 버전의 DSP 구현에는 현재 문제가 있어 오디오가 예상대로 처리되지 않을 수 있습니다. EQ, 헤드폰·룸 보정, SRC / SDM은 Steam 버전에서 체험하시길 권장합니다.',
-    configSafe: '기존 DSP 설정은 보존되며 이 페이지를 보는 것만으로 오디오 설정이 변경되지는 않습니다.',
-    openSteam: 'Steam에서 보기',
-    storeHint: 'store.steampowered.com/app/5105090',
-    previewTitle: 'DSP 신호 체인 개요',
-    previewDescription: '아래 모듈은 예시입니다. 커뮤니티 버전 DSP는 현재 예상대로 작동하지 않을 수 있습니다.',
-    lockedState: '현재 커뮤니티 DSP 사용을 권장하지 않습니다',
-    recheck: '다시 확인',
-    hide: '사이드바에서 DSP 숨기기',
-    hideHint: '설정 → 모양 → 사이드바에서 언제든 다시 표시할 수 있습니다.',
-    loading: 'DSP 상태 확인 중…',
-    error: 'DSP 상태를 일시적으로 확인할 수 없습니다. 다시 확인해 주세요.',
-  },
-} as const;
-
-export const DspPage = (): JSX.Element => {
-  const { locale } = useI18n();
-  const copy = locale === 'zh-TW'
-    ? dspProLockText['zh-TW']
-    : locale === 'zh-CN'
-      ? dspProLockText['zh-CN']
-      : locale === 'ko-KR'
-        ? dspProLockText['ko-KR']
-        : dspProLockText['en-US'];
-  const [isProUnlocked, setIsProUnlocked] = useState<boolean | null>(null);
-  const [isChecking, setIsChecking] = useState(true);
-  const [isSidebarHideBusy, setIsSidebarHideBusy] = useState(false);
-  const [accessError, setAccessError] = useState<string | null>(null);
-
-  const refreshProAccess = useCallback(async (preserveUnlocked = false): Promise<void> => {
-    const getStatus = window.echo?.app?.getEchoProLocalEntitlementStatus;
-    if (!getStatus) {
-      setIsProUnlocked(false);
-      setIsChecking(false);
-      setAccessError(copy.error);
-      return;
-    }
-
-    setIsChecking(true);
-    setAccessError(null);
-    try {
-      const status = await getStatus();
-      setIsProUnlocked(status.dspUnlocked === true);
-    } catch {
-      setIsProUnlocked((current) => preserveUnlocked && current === true ? true : false);
-      setAccessError(copy.error);
-    } finally {
-      setIsChecking(false);
-    }
-  }, [copy.error]);
-
-  useEffect(() => {
-    void refreshProAccess();
-    const handleStatusChanged = (): void => {
-      void refreshProAccess(true);
-    };
-    window.addEventListener('echo-pro:status-changed', handleStatusChanged);
-    return () => {
-      window.removeEventListener('echo-pro:status-changed', handleStatusChanged);
-    };
-  }, [refreshProAccess]);
-
-  const hideDspFromSidebar = useCallback(async (): Promise<void> => {
-    setIsSidebarHideBusy(true);
-    setAccessError(null);
-    try {
-      await hideSidebarRouteEntry('dsp');
-    } catch (error) {
-      setAccessError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsSidebarHideBusy(false);
-    }
-  }, []);
-
-  if (isProUnlocked === true) {
-    return <DspWorkbench />;
-  }
-
-  if (isProUnlocked === null) {
-    return (
-      <div className="dsp-page dsp-page--pro-locked">
-        <main className="dsp-pro-lock" aria-label={copy.aria}>
-          <section className="dsp-pro-lock__loading" role="status">
-            <Loader2 className="spinning-icon" size={22} aria-hidden="true" />
-            <p>{copy.loading}</p>
-          </section>
-        </main>
-      </div>
-    );
-  }
-
-  return (
-    <div className="dsp-page dsp-page--pro-locked">
-      <main className="dsp-pro-lock" aria-label={copy.aria}>
-        <section className="dsp-pro-lock__layout">
-          <div className="dsp-pro-lock__copy">
-            <span className="dsp-pro-lock__badge">
-              <ShieldCheck size={14} aria-hidden="true" />
-              {copy.badge}
-            </span>
-            <h1>{copy.title}</h1>
-            <p className="dsp-pro-lock__description">{copy.description}</p>
-
-            <p className="dsp-pro-lock__safe-note">
-              <ShieldCheck size={16} aria-hidden="true" />
-              {isChecking ? copy.loading : copy.configSafe}
-            </p>
-
-            <div className="dsp-pro-lock__actions">
-              <div className="dsp-pro-lock__purchase">
-                <button className="dsp-pro-lock__primary" type="button" onClick={() => void openSteamDspPage()}>
-                  <ShieldCheck size={17} aria-hidden="true" />
-                  {copy.openSteam}
-                  <ExternalLink size={14} aria-hidden="true" />
-                </button>
-                <small>{copy.storeHint}</small>
-              </div>
-              <button
-                className="dsp-pro-lock__secondary"
-                type="button"
-                onClick={() => void refreshProAccess(true)}
-                disabled={isChecking}
-              >
-                {isChecking ? <Loader2 className="spinning-icon" size={16} /> : <RefreshCw size={16} />}
-                {copy.recheck}
-              </button>
-            </div>
-
-            {accessError ? <p className="dsp-pro-lock__error" role="alert">{accessError}</p> : null}
-
-            <footer className="dsp-pro-lock__footer">
-              <button type="button" onClick={() => void hideDspFromSidebar()} disabled={isSidebarHideBusy}>
-                {isSidebarHideBusy ? <Loader2 className="spinning-icon" size={15} /> : <EyeOff size={15} />}
-                {copy.hide}
-              </button>
-              <small>{copy.hideHint}</small>
-            </footer>
-          </div>
-
-          <aside className="dsp-pro-lock__preview" aria-label={copy.previewTitle}>
-            <header>
-              <h2>{copy.previewTitle}</h2>
-              <p>{copy.previewDescription}</p>
-            </header>
-            <div className="dsp-pro-lock__signal">
-              <div className="dsp-pro-lock__features">
-                <span>
-                  <i><SlidersHorizontal size={25} aria-hidden="true" /></i>
-                  <LockKeyhole size={13} aria-hidden="true" />
-                  <strong>EQ</strong>
-                </span>
-                <span>
-                  <i><Headphones size={25} aria-hidden="true" /></i>
-                  <LockKeyhole size={13} aria-hidden="true" />
-                  <strong>Headphone</strong>
-                </span>
-                <span>
-                  <i><Waves size={25} aria-hidden="true" /></i>
-                  <LockKeyhole size={13} aria-hidden="true" />
-                  <strong>Room</strong>
-                </span>
-                <span>
-                  <i><AudioWaveform size={25} aria-hidden="true" /></i>
-                  <LockKeyhole size={13} aria-hidden="true" />
-                  <strong>SRC / SDM</strong>
-                </span>
-              </div>
-              <p className="dsp-pro-lock__locked-state">
-                <LockKeyhole size={14} aria-hidden="true" />
-                {copy.lockedState}
-              </p>
-            </div>
-          </aside>
-        </section>
-      </main>
-    </div>
-  );
-};
+export const DspPage = (): JSX.Element => <DspWorkbench />;
