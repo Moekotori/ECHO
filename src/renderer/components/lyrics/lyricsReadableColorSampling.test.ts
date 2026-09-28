@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clearReadableColorSampleCache, sampleImageUrl } from './lyricsReadableColor';
+import { clearReadableColorSampleCache, sampleImageUrl, sampleVideoElement } from './lyricsReadableColor';
 
 describe('lyrics readable color image sampling', () => {
   afterEach(() => {
     clearReadableColorSampleCache();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -32,6 +33,7 @@ describe('lyrics readable color image sampling', () => {
       }
 
       set src(_value: string) {}
+      removeAttribute(_name: string) {}
     }
 
     const pixels = new Uint8ClampedArray(32 * 32 * 4);
@@ -61,5 +63,47 @@ describe('lyrics readable color image sampling', () => {
     expect(secondSample).toBe(firstSample);
     expect(cachedSample).toBe(firstSample);
     expect(images).toHaveLength(1);
+  });
+
+  it('releases stalled image requests and permits a retry', async () => {
+    vi.useFakeTimers();
+    const images: HTMLImageElement[] = [];
+    vi.stubGlobal('Image', class {
+      constructor() {
+        const image = document.createElement('img');
+        images.push(image);
+        return image;
+      }
+    });
+    const first = sampleImageUrl('https://example.test/stalled.jpg');
+    expect(sampleImageUrl('https://example.test/stalled.jpg')).toBe(first);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await first).toBeNull();
+    expect(images[0].onload).toBeNull();
+    expect(images[0].onerror).toBeNull();
+    expect(images[0].hasAttribute('src')).toBe(false);
+    const retry = sampleImageUrl('https://example.test/stalled.jpg');
+    expect(images).toHaveLength(2);
+    images[1].dispatchEvent(new Event('error'));
+    expect(await retry).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('reuses one sampling surface and replaces it after a tainted frame', async () => {
+    const createElement = vi.spyOn(document, 'createElement');
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      clearRect: vi.fn(), drawImage,
+      getImageData: () => ({ data: new Uint8ClampedArray(32 * 32 * 4).fill(255) }),
+    } as unknown as CanvasRenderingContext2D);
+    const video = { readyState: 4, videoWidth: 640, videoHeight: 480 } as HTMLVideoElement;
+    for (let index = 0; index < 100; index += 1) {
+      expect(await sampleVideoElement(video)).not.toBeNull();
+    }
+    expect(createElement.mock.calls.filter(([tag]) => String(tag) === 'canvas')).toHaveLength(1);
+    drawImage.mockImplementationOnce(() => { throw new DOMException('Tainted', 'SecurityError'); });
+    expect(await sampleVideoElement(video)).toBeNull();
+    expect(await sampleVideoElement(video)).not.toBeNull();
+    expect(createElement.mock.calls.filter(([tag]) => String(tag) === 'canvas')).toHaveLength(2);
   });
 });

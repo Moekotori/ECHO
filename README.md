@@ -38,9 +38,9 @@
 
 ---
 
-## 社区版：永久免费，源码公开
+## 社区版：永久免费，AGPL 开源
 
-社区版**永久免费**，源码公开，维护依靠大家共同参与。欢迎从 [GitHub Releases](https://github.com/Moekotori/ECHO/releases) 获取播放器，一起修复问题、完善功能、改进文档与翻译。
+社区版**永久免费**，采用 [AGPL v3](./LICENSE) 开源协议，维护依靠大家共同参与。欢迎从 [GitHub Releases](https://github.com/Moekotori/ECHO/releases) 获取播放器，一起修复问题、完善功能、改进文档与翻译。
 
 ## Android 版：把 ECHO 带在身边
 
@@ -96,3 +96,9 @@ Audio Core 与原生宿主负责真实播放状态；输出模式、设备能力
   <strong>打开自己的音乐，听见自己的世界。</strong><br />
   <a href="https://store.steampowered.com/app/5105090/ECHO/">前往 Steam 商店 →</a>
 </p>
+
+## 许可证
+
+Copyright (c) 2026 Moekotori.
+
+本仓库中由项目拥有、且未另行注明许可证的代码、文档与材料，采用 **GNU Affero General Public License v3.0（AGPL-3.0-only）**。完整条款见 [LICENSE](./LICENSE)。第三方组件、依赖、字体、媒体工具和 SDK 仍遵循各自的许可证。

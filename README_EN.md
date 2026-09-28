@@ -36,9 +36,9 @@
 
 ---
 
-## Community edition: free forever, public source
+## Community edition: free forever, AGPL open source
 
-The community edition is **free forever**, with public source and maintenance that depends on everyone pitching in. Get the player from [GitHub Releases](https://github.com/Moekotori/ECHO/releases), and help fix issues, improve features, documentation, and translations.
+The community edition is **free forever**, open source under [AGPL v3](./LICENSE), with maintenance that depends on everyone pitching in. Get the player from [GitHub Releases](https://github.com/Moekotori/ECHO/releases), and help fix issues, improve features, documentation, and translations.
 
 ## Steam edition: take listening further
 
@@ -86,3 +86,9 @@ Audio Core and the native host own real playback state. Output modes, device cap
   <strong>Open your music. Hear your world.</strong><br />
   <a href="https://store.steampowered.com/app/5105090/ECHO/">Visit ECHO on Steam →</a>
 </p>
+
+## License
+
+Copyright (c) 2026 Moekotori.
+
+Project-owned code, documentation, and materials in this repository are licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0-only)** unless a separate license is stated. See [LICENSE](./LICENSE) for the full terms. Third-party components, dependencies, fonts, media tools, and SDKs remain governed by their respective licenses.

@@ -336,6 +336,7 @@ const loadCoverPixels = (
         return;
       }
       settled = true;
+      cleanup();
       reject(new Error('Cover analysis timed out.'));
     }, options.timeoutMs ?? coverIntelligenceLoadTimeoutMs);
 
@@ -343,6 +344,8 @@ const loadCoverPixels = (
       window.clearTimeout(timeout);
       image.onload = null;
       image.onerror = null;
+      options.signal?.removeEventListener('abort', abort);
+      image.removeAttribute('src');
     };
 
     const abort = (): void => {
@@ -355,6 +358,10 @@ const loadCoverPixels = (
     };
 
     options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) {
+      abort();
+      return;
+    }
     image.decoding = 'async';
     image.crossOrigin = 'anonymous';
     image.onload = () => {

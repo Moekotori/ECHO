@@ -170,7 +170,7 @@ export const preloadStartupArtworkUrls = (
 
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? startupArtworkPreloadConcurrency));
   const rememberUrl = options.rememberUrl ?? rememberStartupArtworkUrl;
-  const imageRefs: HTMLImageElement[] = [];
+  const activeImages = new Set<HTMLImageElement>();
   let activeCount = 0;
   let cancelled = false;
   let nextIndex = 0;
@@ -186,8 +186,16 @@ export const preloadStartupArtworkUrls = (
       activeCount += 1;
 
       const image = new Image();
-      imageRefs.push(image);
+      activeImages.add(image);
+      let settled = false;
       const finish = (loaded: boolean): void => {
+        if (settled || cancelled) {
+          return;
+        }
+        settled = true;
+        image.onload = null;
+        image.onerror = null;
+        activeImages.delete(image);
         activeCount -= 1;
         if (loaded) {
           rememberUrl(url);
@@ -205,11 +213,12 @@ export const preloadStartupArtworkUrls = (
 
   return () => {
     cancelled = true;
-    for (const image of imageRefs) {
+    for (const image of activeImages) {
       image.onload = null;
       image.onerror = null;
       image.src = '';
     }
+    activeImages.clear();
   };
 };
 

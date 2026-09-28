@@ -1,5 +1,5 @@
 {
-  description = "ECHO NEXT source-available desktop music player";
+  description = "ECHO NEXT open-source desktop music player";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

@@ -95,4 +95,35 @@ describe('StreamingMemoryCache', () => {
     await expect(cache.getOrCreateInflight('request', create)).resolves.toBe(2);
     expect(calls).toBe(2);
   });
+
+  it('releases expired payloads while idle with one timer, preserving refreshed entries', () => {
+    vi.useFakeTimers();
+    const cache = new StreamingMemoryCache();
+    cache.set('first', new Array(1000).fill('track'), 1000);
+    cache.set('second', 'fresh', 3000);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(500);
+    cache.set('first', 'refreshed', 2000);
+    vi.advanceTimersByTime(500);
+    expect(cache.size).toBe(2);
+    expect(cache.get('first')).toBe('refreshed');
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(1500);
+    expect(cache.size).toBe(1);
+    vi.advanceTimersByTime(500);
+    expect(cache.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cancels idle expiry when cleared and reschedules for an earlier deadline', () => {
+    vi.useFakeTimers();
+    const cache = new StreamingMemoryCache();
+    cache.set('long', 'value', 10000);
+    cache.set('short', 'value', 100);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(100);
+    expect(cache.size).toBe(1);
+    cache.clearValues();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

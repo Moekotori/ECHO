@@ -157,7 +157,7 @@ buildNpmPackage {
     mkdir -p "$appDir"
 
     cp -r out "$appDir/"
-    cp package.json "$appDir/"
+    cp package.json LICENSE "$appDir/"
     cp -r node_modules "$appDir/"
     cp -r build-resources "$appDir/"
 
@@ -224,10 +224,10 @@ buildNpmPackage {
   ];
 
   meta = {
-    description = "Source-available desktop music player for local libraries and HiFi output";
+    description = "Open-source desktop music player for local libraries and HiFi output";
     homepage = "https://echonagi.com";
     mainProgram = "echo-next";
     platforms = lib.platforms.linux;
-    license = lib.licenses.unfree;
+    license = lib.licenses.agpl3Only;
   };
 }

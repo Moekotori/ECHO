@@ -9,6 +9,8 @@ export class StreamingMemoryCache {
   private readonly values = new Map<string, CacheEntry<unknown>>();
   private readonly inflight = new Map<string, Promise<unknown>>();
   private readonly maxEntries: number;
+  private expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  private nextExpiryAtMs = Number.POSITIVE_INFINITY;
 
   constructor(maxEntries = defaultMaxEntries) {
     this.maxEntries = Number.isFinite(maxEntries)
@@ -28,6 +30,7 @@ export class StreamingMemoryCache {
 
     if (entry.expiresAtMs <= Date.now()) {
       this.values.delete(key);
+      this.clearExpiryTimerIfEmpty();
       return null;
     }
 
@@ -43,6 +46,7 @@ export class StreamingMemoryCache {
       this.values.delete(key);
       this.values.set(key, { value, expiresAtMs: nowMs + ttlMs });
       this.enforceLimit();
+      this.scheduleExpiry();
     }
 
     return value;
@@ -50,6 +54,7 @@ export class StreamingMemoryCache {
 
   delete(key: string): void {
     this.values.delete(key);
+    this.clearExpiryTimerIfEmpty();
   }
 
   deletePrefix(prefix: string): void {
@@ -58,6 +63,7 @@ export class StreamingMemoryCache {
         this.values.delete(key);
       }
     }
+    this.clearExpiryTimerIfEmpty();
   }
 
   pruneExpired(nowMs = Date.now()): { beforeEntries: number; afterEntries: number; removedEntries: number } {
@@ -69,6 +75,7 @@ export class StreamingMemoryCache {
     }
 
     const afterEntries = this.values.size;
+    this.clearExpiryTimerIfEmpty();
     return {
       beforeEntries,
       afterEntries,
@@ -79,6 +86,7 @@ export class StreamingMemoryCache {
   clearValues(): { beforeEntries: number; afterEntries: number; removedEntries: number } {
     const beforeEntries = this.values.size;
     this.values.clear();
+    this.clearExpiryTimerIfEmpty();
     return {
       beforeEntries,
       afterEntries: 0,
@@ -107,5 +115,31 @@ export class StreamingMemoryCache {
       }
       this.values.delete(oldest.value);
     }
+  }
+
+  private clearExpiryTimerIfEmpty(): void {
+    if (this.values.size > 0) return;
+    if (this.expiryTimer !== null) clearTimeout(this.expiryTimer);
+    this.expiryTimer = null;
+    this.nextExpiryAtMs = Number.POSITIVE_INFINITY;
+  }
+
+  private scheduleExpiry(): void {
+    let nextExpiryAtMs = Number.POSITIVE_INFINITY;
+    for (const entry of this.values.values()) {
+      nextExpiryAtMs = Math.min(nextExpiryAtMs, entry.expiresAtMs);
+    }
+    if (!Number.isFinite(nextExpiryAtMs) || (this.expiryTimer !== null && this.nextExpiryAtMs <= nextExpiryAtMs)) return;
+    if (this.expiryTimer !== null) clearTimeout(this.expiryTimer);
+    this.nextExpiryAtMs = nextExpiryAtMs;
+    this.expiryTimer = setTimeout(() => {
+      this.expiryTimer = null;
+      this.nextExpiryAtMs = Number.POSITIVE_INFINITY;
+      this.pruneExpired();
+      this.scheduleExpiry();
+    }, Math.max(1, Math.min(2_147_483_647, nextExpiryAtMs - Date.now())));
+    // Expired responses are already cache misses; release them even if the user
+    // leaves the streaming page, without keeping the app alive or polling.
+    this.expiryTimer.unref?.();
   }
 }

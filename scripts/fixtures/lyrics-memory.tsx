@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { LyricsPage } from '../../src/renderer/pages/LyricsPage';
+import { PlayerBar } from '../../src/renderer/components/player/PlayerBar';
+import { preloadStartupArtworkUrls } from '../../src/renderer/hooks/useLibraryStartupArtworkPreloader';
 import { PlaybackQueueProvider, usePlaybackQueue } from '../../src/renderer/stores/PlaybackQueueProvider';
 
 // Synthetic data only: no user library, network, audio device or Electron profile.
@@ -66,7 +68,7 @@ function Seed() {
     replaceQueue([track as Parameters<typeof replaceQueue>[0][number]]);
     setCurrentTrackId(track.id);
   }, [replaceQueue, setCurrentTrackId]);
-  return <LyricsPage />;
+  return <><LyricsPage />{location.search.includes('player-bar') ? <PlayerBar /> : null}</>;
 }
 const root = createRoot(document.getElementById('root')!);
 root.render(<PlaybackQueueProvider><Seed /></PlaybackQueueProvider>);
@@ -76,4 +78,32 @@ Object.assign(window, {
   }),
   probeStats: () => ({ ...counters, activeSubscriptions: handlers.size }),
   unmountProbe: () => flushSync(() => root.unmount()),
+});
+
+let artworkCleanup: (() => void) | null = null;
+const artworkRefs: WeakRef<HTMLImageElement>[] = [];
+Object.assign(window, {
+  prepareArtworkProbe: async () => {
+    const OriginalImage = window.Image;
+    window.Image = class extends OriginalImage {
+      constructor() {
+        super();
+        artworkRefs.push(new WeakRef(this));
+      }
+    };
+    try {
+      await new Promise<void>((resolve) => {
+        let loaded = 0;
+        const urls = Array.from({ length: 132 }, (_, index) =>
+          `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect width="320" height="320" fill="hsl(${index} 50% 50%)"/></svg>`)}`);
+        artworkCleanup = preloadStartupArtworkUrls(urls, { rememberUrl: () => {
+          if (++loaded === urls.length) resolve();
+        } });
+      });
+    } finally {
+      window.Image = OriginalImage;
+    }
+  },
+  retainedArtworkImages: () => artworkRefs.filter((ref) => ref.deref() !== undefined).length,
+  cleanupArtworkProbe: () => { artworkCleanup?.(); artworkCleanup = null; artworkRefs.length = 0; },
 });

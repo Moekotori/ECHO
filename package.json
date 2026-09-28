@@ -3,7 +3,7 @@
   "version": "26.9.25",
   "description": "ECHO Next Phase 0 desktop music app shell.",
   "author": "Moekotori",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "AGPL-3.0-only",
   "main": "out/main/index.js",
   "type": "module",
   "private": true,
@@ -166,7 +166,8 @@
       "out/renderer/**",
       "build-resources/icons/software.ico",
       "build-resources/icons/software.png",
-      "package.json"
+      "package.json",
+      "LICENSE"
     ],
     "asarUnpack": [
       "node_modules/@clamber_l/crypto/dist/*",
