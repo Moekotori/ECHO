@@ -243,6 +243,7 @@ const mvReloadSettingsKeys = [
   'enabled',
   'autoSearch',
   'autoPreload',
+  'autoApplyThreshold',
   'titleOnlySearch',
   'preferHighestViewCount',
   'enabledProviders',
@@ -799,6 +800,7 @@ export const MvPanel = ({
   const t = useOptionalI18n()?.t ?? translateFallback;
   const [selectedVideo, setSelectedVideo] = useState<TrackVideo | null>(null);
   const [settings, setSettings] = useState<MvSettings>(fallbackMvSettings);
+  const [selectionReloadRevision, setSelectionReloadRevision] = useState(0);
   const [hasLoadedSettings, setHasLoadedSettings] = useState(() => !window.echo?.mv);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1260,7 +1262,7 @@ export const MvPanel = ({
           setIsLoading(false);
         }
       });
-  }, [artist, coverUrl, liveStreamVideo, loadSettings, resolveNetworkVideo, streamingTarget, title, trackId]);
+  }, [artist, coverUrl, liveStreamVideo, loadSettings, resolveNetworkVideo, selectionReloadRevision, streamingTarget, title, trackId]);
 
   useEffect(() => {
     void loadSelected();
@@ -1290,6 +1292,7 @@ export const MvPanel = ({
   }, [loadSelected, trackId]);
 
   useEffect(() => {
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
     const handleSettingsChanged = (event: Event): void => {
       const patch = event instanceof CustomEvent ? event.detail : null;
       if (patch && !isMvSettingsPatch(patch)) {
@@ -1302,22 +1305,38 @@ export const MvPanel = ({
         return;
       }
 
-      void loadSettings().then((nextSettings) => {
-        if (nextSettings.enabled === false) {
-          setSelectedVideo(null);
-          setVideoError(false);
-          return;
-        }
+      if (reloadTimer) clearTimeout(reloadTimer);
+      // A slider can emit many changes. Retry once using the final saved settings.
+      reloadTimer = setTimeout(() => {
+        preloadAttemptRef.current = null;
+        setUnavailableNoticeDismissed(false);
+        const requestId = ++requestRef.current;
+        void loadSettings().then((nextSettings) => {
+          if (requestRef.current !== requestId) return;
+          if (nextSettings.enabled === false) {
+            setSelectedVideo(null);
+            setVideoError(false);
+            setIsLoading(false);
+            return;
+          }
 
-        if (shouldReloadMvSelection(patch)) {
-          void loadSelected();
-        }
-      });
+          if (liveStreamVideo) {
+            setSelectedVideo(liveStreamVideo);
+          } else if (streamingTarget) {
+            setSelectionReloadRevision((revision) => revision + 1);
+          } else {
+            void loadSelected({ preserveCurrent: true });
+          }
+        });
+      }, 180);
     };
 
     window.addEventListener('settings:changed', handleSettingsChanged);
-    return () => window.removeEventListener('settings:changed', handleSettingsChanged);
-  }, [loadSelected, loadSettings]);
+    return () => {
+      window.removeEventListener('settings:changed', handleSettingsChanged);
+      if (reloadTimer) clearTimeout(reloadTimer);
+    };
+  }, [liveStreamVideo, loadSelected, loadSettings, streamingTarget]);
 
   const isMvEnabled = settings.enabled !== false;
   const selectedMvOffsetMs = clampMvOffsetMs(Number(selectedVideo?.offsetMs ?? 0));

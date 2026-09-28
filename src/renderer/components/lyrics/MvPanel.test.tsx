@@ -301,6 +301,58 @@ describe('MvPanel', () => {
     await waitFor(() => expect(container.querySelector('.lyrics-mv-video')?.getAttribute('src')).toBe('echo-video://mv/video-1'));
   });
 
+  it('retries the current track when the auto-apply threshold changes after an unsuccessful search', async () => {
+    const { container } = renderPanel(null, true, { ...defaultMvSettings, autoApplyThreshold: 0.85 });
+    await waitFor(() => expect(window.echo.mv.searchNetworkCandidates).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    const selected = makeVideo({ provider: 'bilibili', score: 0.65 });
+    vi.mocked(window.echo.mv.getSettings).mockResolvedValue({ ...defaultMvSettings, autoApplyThreshold: 0.3 });
+    vi.mocked(window.echo.mv.searchNetworkCandidates).mockImplementation(async () => {
+      vi.mocked(window.echo.mv.getSelected).mockResolvedValue(selected);
+      return [];
+    });
+
+    act(() => {
+      for (const autoApplyThreshold of [0.6, 0.5, 0.3]) {
+        window.dispatchEvent(new CustomEvent('settings:changed', { detail: { autoApplyThreshold } }));
+      }
+    });
+
+    await waitFor(() => expect(window.echo.mv.searchNetworkCandidates).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(container.querySelector('.lyrics-mv-video')?.getAttribute('src')).toBe(selected.mediaUrl));
+  });
+
+  it('preserves a manually selected MV when the auto-apply threshold changes', async () => {
+    const selected = makeVideo({ selectionOrigin: 'manual' });
+    const { container } = renderPanel(selected);
+    await waitFor(() => expect(container.querySelector('.lyrics-mv-video')?.getAttribute('src')).toBe(selected.mediaUrl));
+    const initialReads = vi.mocked(window.echo.mv.getSelected).mock.calls.length;
+    act(() => window.dispatchEvent(new CustomEvent('settings:changed', { detail: { autoApplyThreshold: 0.3 } })));
+    await waitFor(() => expect(window.echo.mv.getSelected).toHaveBeenCalledTimes(initialReads + 1));
+    expect(window.echo.mv.searchNetworkCandidates).not.toHaveBeenCalled();
+    expect(container.querySelector('.lyrics-mv-video')?.getAttribute('src')).toBe(selected.mediaUrl);
+  });
+
+  it('retries streaming snapshot matching when the auto-apply threshold changes', async () => {
+    const selected = makeVideo({ provider: 'bilibili', score: 0.65 });
+    const getSelected = vi.fn().mockResolvedValue(null);
+    const searchSnapshot = vi.fn().mockResolvedValue([]);
+    const getSettings = vi.fn().mockResolvedValue({ ...defaultMvSettings, autoApplyThreshold: 0.85 });
+    window.echo = { mv: { getSelected, getSettings, searchNetworkCandidatesForSnapshot: searchSnapshot,
+      resolveStreams: vi.fn(async () => ({ video: selected, variants: [] })) } } as unknown as Window['echo'];
+    const { container } = render(<MvPanel trackId="track-1" streamingTarget={{ provider: 'netease', providerTrackId: '123' }}
+      title="Test Song" artist="Test Artist" coverUrl={null} isAudioPlaying audioClock={makeAudioClock()} />);
+    await waitFor(() => expect(searchSnapshot).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    getSettings.mockResolvedValue({ ...defaultMvSettings, autoApplyThreshold: 0.3 });
+    searchSnapshot.mockImplementation(async () => { getSelected.mockResolvedValue(selected); return []; });
+
+    act(() => window.dispatchEvent(new CustomEvent('settings:changed', { detail: { autoApplyThreshold: 0.3 } })));
+
+    await waitFor(() => expect(searchSnapshot).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(container.querySelector('.lyrics-mv-video')?.getAttribute('src')).toBe(selected.mediaUrl));
+  });
+
   it('searches and selects remote track MVs from snapshot metadata', async () => {
     const remoteTrack = makeRemoteTrack();
     const selectedAfterSearch = makeVideo({
