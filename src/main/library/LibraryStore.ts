@@ -721,7 +721,7 @@ const folderDepth = (rootPath: string, folderPath: string): number => {
 };
 
 type SearchPredicate = (term: string) => { sql: string; params: string[] };
-type LibraryStoreSearchOptions = {
+export type LibraryStoreSearchOptions = {
   chineseCrossScriptSearchEnabled?: boolean;
   artistMergeStrategy?: 'conservative' | 'standard';
   remoteAlbumMergeStrategy?: RemoteAlbumMergeStrategy;
@@ -1147,7 +1147,7 @@ export class LibraryStore {
     this.database.function('echo_library_sort_key', libraryTextSortKey);
     this.database.function('echo_remote_dirname', remoteDirectoryName);
     this.database.function('echo_remote_album_merge_title', normalizeRemoteAlbumTitleForMerge);
-    this.backfillSearchTerms();
+    if (!this.database.readonly) this.backfillSearchTerms();
   }
 
   private backfillSearchTerms(): void {

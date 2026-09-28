@@ -159,12 +159,12 @@ const libraryInboxStatuses = new Set<LibraryInboxStatusFilter>(['all', 'pending'
 const libraryInboxItemStatuses = new Set<LibraryInboxItemStatus>(['pending', 'processed', 'ignored']);
 const songCardRenderer = new SongCardRenderer();
 
-const closeLibraryDatabaseUsers = (): void => {
+const closeLibraryDatabaseUsers = async (): Promise<void> => {
   closeDefaultLyricsService();
   closeDefaultMvService();
   closeDefaultStreamingService();
   closeDefaultRemoteSourceService();
-  closeDefaultLibraryService();
+  await closeDefaultLibraryService();
   getLibraryDatabaseManager().closeAllUsers('manual-library-maintenance');
 };
 
@@ -1907,7 +1907,7 @@ export const registerLibraryIpc = (): void => {
     getLibraryService().getTrack(requireText(trackId, 'trackId')),
   );
   ipcMain.handle(IpcChannels.LibraryGetTracks, (_event, query: unknown) =>
-    getLibraryService().getTracks(normalizeQuery(query)),
+    getLibraryService().getTracksAsync(normalizeQuery(query)),
   );
   ipcMain.handle(IpcChannels.LibraryGetQualityOverview, () =>
     getLibraryService().getLibraryQualityOverview(),
@@ -2120,7 +2120,7 @@ export const registerLibraryIpc = (): void => {
     getLibraryService().clearLikedAlbums(normalizeQuery(query).sourceProvider),
   );
   ipcMain.handle(IpcChannels.LibraryGetAlbums, (_event, query: unknown) =>
-    getLibraryService().getAlbums(normalizeQuery(query)),
+    getLibraryService().getAlbumsAsync(normalizeQuery(query)),
   );
   ipcMain.handle(IpcChannels.LibraryGetAlbum, (_event, albumId: unknown) =>
     getLibraryService().getAlbum(requireText(albumId, 'albumId')),
@@ -2441,7 +2441,7 @@ export const registerLibraryIpc = (): void => {
     }
     const manager = getLibraryDatabaseManager();
     const status = await manager.runExclusiveMaintenance('manual-library-database-snapshot', async () => {
-      closeLibraryDatabaseUsers();
+      await closeLibraryDatabaseUsers();
       return createManualLibraryDatabaseSnapshot(app.getPath('userData'));
     });
     return {
@@ -2451,28 +2451,28 @@ export const registerLibraryIpc = (): void => {
   });
   ipcMain.handle(IpcChannels.LibraryRestoreDatabaseSnapshot, (_event, snapshotId: unknown) => {
     assertNoRunningLibraryScan();
-    return getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-restore', () => {
-      closeLibraryDatabaseUsers();
+    return getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-restore', async () => {
+      await closeLibraryDatabaseUsers();
       return restoreProtectedLibraryDatabaseSnapshot(requireText(snapshotId, 'snapshotId'), app.getPath('userData'));
     });
   });
   ipcMain.handle(IpcChannels.LibraryScrubQuarantinedDatabase, () => {
     assertNoRunningLibraryScan();
-    return getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-scrub-quarantined', () => {
-      closeLibraryDatabaseUsers();
+    return getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-scrub-quarantined', async () => {
+      await closeLibraryDatabaseUsers();
       return scrubQuarantinedLibraryDatabase(app.getPath('userData'));
     });
   });
   ipcMain.handle(IpcChannels.LibraryDiscardQuarantinedProblemTracks, () => {
     assertNoRunningLibraryScan();
-    return getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-discard-quarantined-problem-tracks', () => {
-      closeLibraryDatabaseUsers();
+    return getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-discard-quarantined-problem-tracks', async () => {
+      await closeLibraryDatabaseUsers();
       return discardQuarantinedProblemTracks(app.getPath('userData'));
     });
   });
   ipcMain.handle(IpcChannels.LibraryRelaunchRecoveryMode, () =>
-    getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-relaunch-recovery-mode', () => {
-      closeLibraryDatabaseUsers();
+    getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-relaunch-recovery-mode', async () => {
+      await closeLibraryDatabaseUsers();
       return scheduleLibraryRecoveryRelaunch();
     }),
   );
@@ -2486,15 +2486,15 @@ export const registerLibraryIpc = (): void => {
   });
   ipcMain.handle(IpcChannels.LibraryRepairDatabase, () => {
     assertNoRunningLibraryScan();
-    return getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-repair', () => {
-      closeLibraryDatabaseUsers();
+    return getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-repair', async () => {
+      await closeLibraryDatabaseUsers();
       return repairProtectedLibraryDatabase(app.getPath('userData'));
     });
   });
   ipcMain.handle(IpcChannels.LibraryDeleteDatabase, () => {
     assertNoRunningLibraryScan();
-    return getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-delete', () => {
-      closeLibraryDatabaseUsers();
+    return getLibraryDatabaseManager().runExclusiveMaintenance('manual-library-database-delete', async () => {
+      await closeLibraryDatabaseUsers();
       return deleteProtectedLibraryDatabase(app.getPath('userData'));
     });
   });
@@ -2502,7 +2502,7 @@ export const registerLibraryIpc = (): void => {
     assertNoRunningLibraryScan();
     return getLibraryDatabaseManager().runExclusiveMaintenance('manual-delete-all-user-data', async () => {
       const coverCachePath = resolveCoverCachePathForWipe();
-      closeLibraryDatabaseUsers();
+      await closeLibraryDatabaseUsers();
       getDownloadService().dispose();
       return deleteAllUserData(coverCachePath);
     });

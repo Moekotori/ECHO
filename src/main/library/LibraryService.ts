@@ -178,6 +178,7 @@ import { TsFileScanner } from './workers/TsFileScanner';
 import { TsMetadataReader } from './workers/TsMetadataReader';
 import { repairAlacTechnicalMetadataBeforeWrite } from './AlacMetadataRepair';
 import { createWorkerBackedLibraryScanWorkers } from './workers/WorkerBackedLibraryScan';
+import { LibraryReadWorker } from './workers/LibraryReadWorker';
 import { getRemoteSourceService } from './remote/RemoteSourceService';
 import { writeEmbeddedTrackTags } from './TagWriter';
 import { writeOsuFolderEmbeddedTags } from './OsuFolderImport';
@@ -442,6 +443,7 @@ const isExistingFile = async (filePath: string): Promise<boolean> => {
 };
 
 export class LibraryService {
+  private readWorker: LibraryReadWorker | null = null;
   private artistsDirty = false;
   private groupingRefreshTimer: NodeJS.Timeout | null = null;
   private groupingRefreshQueued = false;
@@ -727,6 +729,19 @@ export class LibraryService {
     return this.store.getTracks(query);
   }
 
+  getTracksAsync(query?: LibraryPageQuery): Promise<LibraryPage<LibraryTrack>> {
+    if (this.closed) return Promise.reject(new Error('Library service is closed'));
+    this.maybeScheduleRomanizedSearchBackfill(query?.search);
+    if (this.databasePath === ':memory:') return Promise.resolve(this.store.getTracks(query));
+    const settings = this.readAppSettings();
+    this.readWorker ??= new LibraryReadWorker(this.databasePath);
+    return this.readWorker.read('tracks', query, {
+      chineseCrossScriptSearchEnabled: settings.chineseCrossScriptSearchEnabled !== false,
+      artistMergeStrategy: settings.artistMergeStrategy ?? 'standard',
+      remoteAlbumMergeStrategy: settings.remoteAlbumMergeStrategy ?? 'conservative',
+    });
+  }
+
   getTracksPlaybackSafe(query?: LibraryPageQuery): Promise<LibraryPage<LibraryTrack>> {
     const key = playbackSafeCacheKey(query);
     return runNonCriticalMainWork({
@@ -975,6 +990,18 @@ export class LibraryService {
 
   getAlbums(query?: LibraryPageQuery): LibraryPage<LibraryAlbum> {
     return this.store.getAlbums(query);
+  }
+
+  getAlbumsAsync(query?: LibraryPageQuery): Promise<LibraryPage<LibraryAlbum>> {
+    if (this.closed) return Promise.reject(new Error('Library service is closed'));
+    if (this.databasePath === ':memory:') return Promise.resolve(this.store.getAlbums(query));
+    const settings = this.readAppSettings();
+    this.readWorker ??= new LibraryReadWorker(this.databasePath);
+    return this.readWorker.read('albums', query, {
+      chineseCrossScriptSearchEnabled: settings.chineseCrossScriptSearchEnabled !== false,
+      artistMergeStrategy: settings.artistMergeStrategy ?? 'standard',
+      remoteAlbumMergeStrategy: settings.remoteAlbumMergeStrategy ?? 'conservative',
+    });
   }
 
   getAlbumsPlaybackSafe(query?: LibraryPageQuery): Promise<LibraryPage<LibraryAlbum>> {
@@ -2784,7 +2811,7 @@ export class LibraryService {
     });
   }
 
-  close(): void {
+  close(): Promise<void> {
     this.closed = true;
     this.unregisterSoftMemoryCleanup();
     this.lyricsBackfillJobQueue.dispose();
@@ -2821,6 +2848,7 @@ export class LibraryService {
     this.closeWorkerResources();
 
     this.closeDatabase();
+    return this.readWorker?.close() ?? Promise.resolve();
   }
 
   private bindArtistImagePlaybackDeferral(): void {
@@ -3819,7 +3847,7 @@ const closeDefaultDatabaseUsersBeforeRecovery = async (): Promise<void> => {
   mv.closeDefaultMvService();
   streaming.closeDefaultStreamingService();
   remote.closeDefaultRemoteSourceService();
-  closeDefaultLibraryService();
+  await closeDefaultLibraryService();
   manager.closeAllUsers('scan-recovery');
 };
 
@@ -3851,13 +3879,14 @@ export const getLibraryService = (): LibraryService => {
   return defaultLibraryService;
 };
 
-export const closeDefaultLibraryService = (): void => {
+export const closeDefaultLibraryService = (): Promise<void> => {
   if (!defaultLibraryService) {
-    return;
+    return Promise.resolve();
   }
 
-  defaultLibraryService.close();
+  const closing = defaultLibraryService.close();
   defaultLibraryService = null;
+  return closing;
 };
 
 const pathSize = (targetPath: string): number | null => {

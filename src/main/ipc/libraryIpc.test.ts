@@ -388,6 +388,7 @@ const installLibraryService = () => {
     scanFolder: vi.fn(),
     getScanStatus: vi.fn(),
     cancelScan: vi.fn(),
+    getTracksAsync: vi.fn(() => Promise.resolve({ items: [], page: 1, pageSize: 50, total: 0, hasMore: false })),
     getTracks: vi.fn(() => ({ items: [], page: 1, pageSize: 50, total: 0, hasMore: false })),
     getTracksPlaybackSafe: vi.fn(() => Promise.resolve({ items: [], page: 1, pageSize: 50, total: 0, hasMore: false })),
     getLibraryQualityOverview: vi.fn(() => []),
@@ -519,6 +520,7 @@ const installLibraryService = () => {
       totalBytesToRemove: 0,
       generatedAt: '2026-05-20T00:00:00.000Z',
     })),
+    getAlbumsAsync: vi.fn(),
     getAlbums: vi.fn(),
     getAlbumsPlaybackSafe: vi.fn(),
     getAlbum: vi.fn(),
@@ -1524,7 +1526,7 @@ describe('library IPC', () => {
     expect(service.refreshDuplicateTracksPlaybackSafe).toHaveBeenCalledWith('balanced');
     expect(service.getDuplicateHiddenCounts).toHaveBeenCalledWith(['track-1'], 'aggressive');
     expect(service.getDuplicateIndexSummary).toHaveBeenCalledWith('strict');
-    expect(service.getTracks).toHaveBeenCalledWith({
+    expect(service.getTracksAsync).toHaveBeenCalledWith({
       page: 1,
       pageSize: 50,
       hideDuplicates: true,
@@ -1707,9 +1709,9 @@ describe('library IPC', () => {
     await handlers[IpcChannels.LibraryGetTracks]!(null, { page: 1, pageSize: 50, sort: 'artistAlbum', extra: true });
     await handlers[IpcChannels.LibraryGetAlbums]!(null, { page: 1, pageSize: 50, sort: 'fileModifiedAsc', excludeOsuAlbums: true, extra: true });
 
-    expect(service.getTracks).toHaveBeenCalledWith({ page: 1, pageSize: 50, sort: 'fileModifiedDesc' });
-    expect(service.getTracks).toHaveBeenCalledWith({ page: 1, pageSize: 50, sort: 'artistAlbum' });
-    expect(service.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 50, sort: 'fileModifiedAsc', excludeOsuAlbums: true });
+    expect(service.getTracksAsync).toHaveBeenCalledWith({ page: 1, pageSize: 50, sort: 'fileModifiedDesc' });
+    expect(service.getTracksAsync).toHaveBeenCalledWith({ page: 1, pageSize: 50, sort: 'artistAlbum' });
+    expect(service.getAlbumsAsync).toHaveBeenCalledWith({ page: 1, pageSize: 50, sort: 'fileModifiedAsc', excludeOsuAlbums: true });
   });
 
   it('registers artist detail IPC handlers with normalized queries', async () => {
@@ -1967,7 +1969,13 @@ describe('library IPC', () => {
     writeFileSync(join(root, 'echo-library.sqlite'), 'bad current database', 'utf8');
     const snapshotId = status.latestHealthySnapshot?.id ?? '';
 
-    const result = await handlers[IpcChannels.LibraryRestoreDatabaseSnapshot]!(null, snapshotId) as LibraryDatabaseRestoreResult;
+    let finishClosingReader!: () => void;
+    closeDatabaseUserMocks.library.mockImplementationOnce(() => new Promise<void>((resolve) => { finishClosingReader = resolve; }));
+    const restoring = handlers[IpcChannels.LibraryRestoreDatabaseSnapshot]!(null, snapshotId) as Promise<LibraryDatabaseRestoreResult>;
+    await vi.waitFor(() => expect(closeDatabaseUserMocks.library).toHaveBeenCalledTimes(1));
+    expect(readFileSync(join(root, 'echo-library.sqlite'), 'utf8')).toBe('bad current database');
+    finishClosingReader();
+    const result = await restoring;
 
     expect(result.health.status).toBe('ok');
     expect(closeDatabaseUserMocks.lyrics).toHaveBeenCalledTimes(1);

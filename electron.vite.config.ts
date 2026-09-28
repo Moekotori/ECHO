@@ -26,6 +26,7 @@ export default defineConfig({
           libraryScanWorkerHost: resolve(__dirname, 'src/main/library/workers/LibraryScanWorkerHost.ts'),
           libraryIdentityWorkerHost: resolve(__dirname, 'src/main/library/workers/libraryIdentityWorkerHost.ts'),
           librarySearchWorkerHost: resolve(__dirname, 'src/main/library/workers/librarySearchWorkerHost.ts'),
+          libraryReadWorkerHost: resolve(__dirname, 'src/main/library/workers/libraryReadWorkerHost.ts'),
         },
         output: {
           footer: '\nimport "node:module";\n',
