@@ -54,6 +54,31 @@ afterEach(() => {
 });
 
 describe('LyricsView', () => {
+  it('keeps one animation subscription across clock updates and cancels it on unmount', () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let frameId = 0;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.set(++frameId, callback);
+      return frameId;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => { frames.delete(id); });
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    const addListener = vi.spyOn(document, 'addEventListener');
+    const removeListener = vi.spyOn(document, 'removeEventListener');
+    const onSeek = vi.fn();
+    const props = { lyrics: wordLyrics, durationMs: 3000, playbackState: 'playing', positionUpdatedAtMs: 0, onSeek };
+    const { container, rerender, unmount } = render(<LyricsView {...props} positionMs={1000} />);
+    for (let positionMs = 1025; positionMs <= 1250; positionMs += 25) {
+      rerender(<LyricsView {...props} positionMs={positionMs} />);
+    }
+    expect(container.querySelector<HTMLElement>('.lyrics-word[data-word-state="current"]')
+      ?.style.getPropertyValue('--lyrics-word-progress')).toBe('0.5000');
+    expect(addListener.mock.calls.filter(([type]) => type === 'visibilitychange')).toHaveLength(1);
+    unmount();
+    expect(frames.size).toBe(0);
+    expect(removeListener.mock.calls.filter(([type]) => type === 'visibilitychange')).toHaveLength(1);
+  });
+
   it('only enables bounded timestamps for explicitly seekable synced lyrics', () => {
     const onSeek = vi.fn();
     const { container } = render(

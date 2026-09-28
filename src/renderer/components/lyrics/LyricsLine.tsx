@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { memo, type CSSProperties } from 'react';
 import type { LyricLine as LyricLineType, LyricWordTiming } from '../../../shared/types/lyrics';
 import { VerticalText } from './VerticalText';
 
@@ -207,7 +207,7 @@ export const getRenderableLyricWords = (line: LyricLineType): readonly LyricWord
   return result;
 };
 
-export const LyricsLine = ({
+export const LyricsLine = memo(function LyricsLine({
   active,
   index,
   line,
@@ -221,7 +221,7 @@ export const LyricsLine = ({
   wordHighlightEnabled = true,
   focusDistance = 4,
   textDirection = 'horizontal',
-}: LyricsLineProps): JSX.Element => {
+}: LyricsLineProps): JSX.Element {
   const density = getLyricDensity(line, showRomanization, showTranslation, preferKanaPronunciation);
   const { text: pronunciation, kind: pronunciationKind } = selectPronunciation(line, preferKanaPronunciation);
   const visibleSecondaryLines =
@@ -298,4 +298,4 @@ export const LyricsLine = ({
       ) : null}
     </button>
   );
-};
+});
