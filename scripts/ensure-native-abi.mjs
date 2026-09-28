@@ -277,12 +277,24 @@ const rebuild = (info) => {
 };
 
 try {
+  const info = await getTargetInfo();
+  const sqlitePackage = readJson(betterSqlitePackageJsonPath);
+  // Node-API releases ship their binding in prebuilds/ and deliberately opt
+  // out of node-gyp. electron-rebuild can succeed without producing the
+  // legacy build/Release file; do not apply ABI-specific caches to them.
+  if (sqlitePackage.gypfile === false && sqlitePackage.dependencies?.['node-addon-api']) {
+    if (!verifyNativeBinary(info)) {
+      throw new Error(`Packaged better-sqlite3 ${sqlitePackage.version} Node-API binding could not be loaded by ${info.runtime} ${info.runtimeVersion}. Reinstall dependencies for this platform.`);
+    }
+    console.log(`[native-abi] better-sqlite3 ${sqlitePackage.version} Node-API binding verified with ${info.runtime} ${info.runtimeVersion}; no ABI rebuild needed.`);
+    process.exit(0);
+  }
+
   run(process.execPath, [betterSqlitePatchScript], {
     stdio: 'inherit',
     encoding: undefined,
   });
 
-  const info = await getTargetInfo();
   const marker = readMarker();
 
   if (isCurrent(marker, info) && verifyNativeBinary(info)) {
