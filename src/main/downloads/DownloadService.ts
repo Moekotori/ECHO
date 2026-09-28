@@ -28,6 +28,7 @@ import type { AccountCredentials, AccountProvider } from '../../shared/types/acc
 import type { AppSettings } from '../../shared/types/appSettings';
 import { streamingProviderNames, type StreamingProviderName } from '../../shared/types/streaming';
 import { isSupportedAudioExtension } from '../../shared/constants/audioExtensions';
+import { assertMusicDownloadsEnabled, musicDownloadsEnabled, musicDownloadsDisabledMessage } from '../../shared/constants/downloadAvailability';
 import { getAccountService } from '../accounts/AccountService';
 import { resolveFfmpegToolchain, type FfmpegToolchainInfo } from '../audioPublicApi';
 import { getLibraryService } from '../library/LibraryService';
@@ -808,6 +809,10 @@ export class DownloadService extends EventEmitter {
 
   createUrlJob(url: string, options: CreateDownloadUrlJobOptions = {}): DownloadJob {
     const sourceUrl = url.trim();
+
+    if (inferProvider(sourceUrl) !== 'osu' || options.directAudio === true || options.streamingProvider) {
+      assertMusicDownloadsEnabled();
+    }
 
     if (!sourceUrl) {
       throw new Error('download URL must be a non-empty string');
@@ -1896,13 +1901,16 @@ export class DownloadService extends EventEmitter {
 
       const isTerminal = terminalStatuses.has(rawJob.status);
       const options = state.jobOptions[rawJob.id];
-      const canResume = isTerminal || Boolean(options?.outputDirectory);
+      const downloadAvailable = musicDownloadsEnabled || (
+        inferProvider(rawJob.sourceUrl) === 'osu' && options?.directAudio !== true && !options?.streamingProvider
+      );
+      const canResume = isTerminal || (downloadAvailable && Boolean(options?.outputDirectory));
       const job: DownloadJob = {
         ...rawJob,
         artist: typeof rawJob.artist === 'string' && rawJob.artist.trim() ? rawJob.artist : null,
         status: isTerminal ? rawJob.status : canResume ? 'queued' : 'failed',
         progress: isTerminal ? rawJob.progress : canResume ? Math.min(95, Math.max(0, rawJob.progress ?? 0)) : 100,
-        error: isTerminal ? rawJob.error : canResume ? null : 'Download resume data is incomplete. Add the track to downloads again.',
+        error: isTerminal ? rawJob.error : canResume ? null : !downloadAvailable ? musicDownloadsDisabledMessage : 'Download resume data is incomplete. Add the track to downloads again.',
         updatedAt: now,
         completedAt: isTerminal ? rawJob.completedAt : canResume ? null : now,
       };

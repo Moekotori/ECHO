@@ -41,7 +41,6 @@ export const sidebarSettingsCopy = {
 export const sidebarSettingsRouteItems: SidebarSettingsRouteItem[] = [
   { id: 'home', labelKey: 'route.home.label', placement: 'main' },
   { id: 'songs', labelKey: 'route.songs.label', placement: 'main' },
-  { id: 'downloads', labelKey: 'route.downloads.label', placement: 'main' },
   { id: 'osu-downloader', labelKey: 'route.osuDownloader.label', placement: 'main' },
   { id: 'albums', labelKey: 'route.albums.label', placement: 'main' },
   { id: 'artists', labelKey: 'route.artists.label', placement: 'main' },

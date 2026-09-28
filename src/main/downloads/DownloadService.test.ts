@@ -6,6 +6,15 @@ import { zipSync } from 'fflate';
 import { DownloadService } from './DownloadService';
 import { createDownloadAuthorizationToken, protectedMusicDownloadBlockedMessage } from './DownloadAuthorization';
 
+const downloadAvailability = vi.hoisted(() => ({ enabled: true }));
+vi.mock('../../shared/constants/downloadAvailability', () => ({
+  get musicDownloadsEnabled() { return downloadAvailability.enabled; },
+  musicDownloadsDisabledMessage: '歌曲下载功能已关闭',
+  assertMusicDownloadsEnabled: () => {
+    if (!downloadAvailability.enabled) throw new Error('歌曲下载功能已关闭');
+  },
+}));
+
 let playbackState: 'idle' | 'loading' | 'playing' | 'paused' | 'stopped' = 'idle';
 
 vi.mock('../audio/AudioSession', () => ({
@@ -81,6 +90,7 @@ const waitForJob = async (service: DownloadService, jobId: string): Promise<Retu
 };
 
 afterEach(() => {
+  downloadAvailability.enabled = true;
   vi.useRealTimers();
   playbackState = 'idle';
   for (const root of tempRoots.splice(0)) {
@@ -89,6 +99,25 @@ afterEach(() => {
 });
 
 describe('DownloadService', () => {
+  it('blocks general music jobs before any command or network request', () => {
+    downloadAvailability.enabled = false;
+    const commandRunner = vi.fn();
+    const fetchRunner = vi.fn();
+    const service = new DownloadService(commandRunner, () => null, {
+      loadJobs: () => ({ version: 1, jobs: [], jobOptions: {} }),
+      saveJobs: vi.fn(),
+      fetch: fetchRunner,
+    });
+
+    for (const url of ['https://youtube.com/watch?v=abc', 'https://bilibili.com/video/BV1', 'https://cdn.example/song.mp3']) {
+      expect(() => service.createUrlJob(url)).toThrow('歌曲下载功能已关闭');
+    }
+    expect(() => service.createUrlJob('https://osu.ppy.sh/beatmapsets/123', { directAudio: true })).toThrow('歌曲下载功能已关闭');
+    expect(service.getJobs()).toEqual([]);
+    expect(commandRunner).not.toHaveBeenCalled();
+    expect(fetchRunner).not.toHaveBeenCalled();
+  });
+
   it('checks the bundled yt-dlp path with --version', async () => {
     const ytDlpPath = makeToolPath();
     const commandRunner = vi.fn((_command: string, _args: string[]) => ({
@@ -183,6 +212,7 @@ describe('DownloadService', () => {
   });
 
   it('downloads an osu beatmapset archive from the official endpoint and extracts the mapped audio file', async () => {
+    downloadAvailability.enabled = false;
     const outputDirectory = makeTempRoot();
     const archiveBytes = makeOsuArchive('audio.mp3', [11, 22, 33]);
     const fetchRunner = vi.fn(async () => {
@@ -1531,7 +1561,8 @@ describe('DownloadService', () => {
     );
   });
 
-  it('restores unfinished direct audio jobs and resumes from the partial file', async () => {
+  it.each([true, false])('restores unfinished direct audio jobs with music downloads enabled=%s', async (enabled) => {
+    downloadAvailability.enabled = enabled;
     const outputDirectory = makeTempRoot();
     const outputPath = join(outputDirectory, 'Artist - Resume Song.mp3');
     writeFileSync(outputPath, Buffer.from([1, 2]));
@@ -1611,6 +1642,14 @@ describe('DownloadService', () => {
     );
 
     const completedJob = await waitForJob(service, 'job-resume');
+
+    if (!enabled) {
+      expect(completedJob).toMatchObject({ status: 'failed', error: '歌曲下载功能已关闭' });
+      expect(fetchRunner).not.toHaveBeenCalled();
+      expect([...readFileSync(outputPath)]).toEqual([1, 2]);
+      expect(saveJobs).toHaveBeenCalled();
+      return;
+    }
 
     expect(fetchRunner).toHaveBeenCalledWith(
       'https://cdn.example/resume.mp3',

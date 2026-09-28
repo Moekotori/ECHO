@@ -5,6 +5,7 @@ import type { QobuzApiClient } from './QobuzApiClient';
 import { NonStreamableError } from './QobuzApiClient';
 import { QobuzAuthService } from './QobuzAuthService';
 import type { DownloadService } from '../downloads/DownloadService';
+import { assertMusicDownloadsEnabled } from '../../shared/constants/downloadAvailability';
 
 // ── helpers ───────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ export class QobuzDownloadService {
     quality: QobuzFormatId,
     options?: QobuzDownloadOptions,
   ): Promise<{ jobIds: string[]; albumTitle: string }> {
+    assertMusicDownloadsEnabled();
     await this.auth.ensureValid();
 
     // 1. Fetch album metadata

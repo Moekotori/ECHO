@@ -1843,29 +1843,30 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({ artistStreamingAlbumsEnabled: 'yes' as never }).artistStreamingAlbumsEnabled).toBe(true);
   });
 
-  it('allows download actions without a Pro unlock', async () => {
+  it('keeps music download actions disabled even with old unlock settings', async () => {
     const { normalizeSettings } = await import('./appSettings');
 
-    expect(normalizeSettings({ streamingDownloadActionsEnabled: true }).streamingDownloadActionsEnabled).toBe(true);
+    expect(normalizeSettings({ streamingDownloadActionsEnabled: true }).streamingDownloadActionsEnabled).toBe(false);
     expect(
       normalizeSettings({
         downloadsFeatureKeyAccepted: true,
         downloadsFeatureUnlocked: true,
         streamingDownloadActionsEnabled: true,
       }).streamingDownloadActionsEnabled,
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('keeps downloads available even with old locked settings or entitlement snapshots', async () => {
+  it('keeps music downloads disabled even with old settings or entitlement snapshots', async () => {
     const { normalizeSettings } = await import('./appSettings');
 
-    expect(normalizeSettings({}).downloadsFeatureUnlocked).toBe(true);
-    expect(normalizeSettings({ downloadsFeatureUnlocked: false }).downloadsFeatureUnlocked).toBe(true);
-    expect(normalizeSettings({ downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(true);
-    expect(normalizeSettings({}, { downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(true);
-    expect(normalizeSettings({ downloadsFeatureKeyAccepted: true }, { downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(true);
-    expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, downloadsFeatureUnlocked: true }, { downloadsFeatureUnlocked: false }).downloadsFeatureUnlocked).toBe(true);
-    expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, streamingDownloadActionsEnabled: true }, { downloadsFeatureUnlocked: true }).streamingDownloadActionsEnabled).toBe(true);
+    expect(normalizeSettings({}).downloadsFeatureUnlocked).toBe(false);
+    expect(normalizeSettings({ downloadsFeatureUnlocked: false }).downloadsFeatureUnlocked).toBe(false);
+    expect(normalizeSettings({ downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(false);
+    expect(normalizeSettings({}, { downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(false);
+    expect(normalizeSettings({ downloadsFeatureKeyAccepted: true }, { downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(false);
+    expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, downloadsFeatureUnlocked: true }, { downloadsFeatureUnlocked: false }).downloadsFeatureUnlocked).toBe(false);
+    expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, streamingDownloadActionsEnabled: true }, { downloadsFeatureUnlocked: true }).streamingDownloadActionsEnabled).toBe(false);
+    expect(normalizeSettings({ osuDownloaderFeatureEnabled: true }).osuDownloaderFeatureEnabled).toBe(true);
   });
 
   it('normalizes lyrics settings', async () => {

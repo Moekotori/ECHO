@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { app } from 'electron';
+import { musicDownloadsEnabled } from '../../shared/constants/downloadAvailability';
 import { finalThemeUnlockVersion, proOnlyThemePresets } from '../../shared/constants/featureUnlocks';
 import { artistOnlineInfoSources, artistStreamingAlbumProviders, autoUpdateSources, defaultArtistOnlineInfoSources, defaultArtistStreamingAlbumsProvider, playerBarButtonIds } from '../../shared/types/appSettings';
 import { defaultSidebarHiddenRouteIds, defaultSidebarRouteOrder, normalizeSidebarHiddenRouteIds, normalizeSidebarRouteOrder } from '../../shared/types/sidebar';
@@ -505,7 +506,7 @@ export const defaultSettings: AppSettings = {
   tidalRedirectUri: null,
   tidalCountryCode: 'US',
   downloadsFeatureKeyAccepted: false,
-  downloadsFeatureUnlocked: true,
+  downloadsFeatureUnlocked: musicDownloadsEnabled,
   streamingDownloadActionsEnabled: false,
   connectAutoStartReceiversEnabled: false,
   airPlayReceiverProtocol: 'airplay1',
@@ -1971,8 +1972,8 @@ export const normalizeSettings = (value: unknown, options: NormalizeSettingsOpti
     tidalRedirectUri: normalizeSpotifyRedirectUri(settings.tidalRedirectUri),
     tidalCountryCode: normalizeTidalCountryCode(settings.tidalCountryCode) ?? defaultSettings.tidalCountryCode,
     downloadsFeatureKeyAccepted,
-    downloadsFeatureUnlocked: true,
-    streamingDownloadActionsEnabled: settings.streamingDownloadActionsEnabled === true,
+    downloadsFeatureUnlocked: musicDownloadsEnabled,
+    streamingDownloadActionsEnabled: musicDownloadsEnabled && settings.streamingDownloadActionsEnabled === true,
     connectAutoStartReceiversEnabled: settings.connectAutoStartReceiversEnabled === true,
     airPlayReceiverProtocol: normalizeAirPlayReceiverProtocol(settings.airPlayReceiverProtocol),
     hqPlayer: normalizeHqPlayerSettings(settings.hqPlayer),

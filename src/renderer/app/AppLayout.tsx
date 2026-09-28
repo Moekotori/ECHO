@@ -37,6 +37,7 @@ import { type AppSettings, type AppThemeMode } from '../../shared/types/appSetti
 import { resolveEffectivePerformancePolicy } from '../../shared/utils/performancePolicy';
 import type { DiagnosticMemoryPressureEvent } from '../../shared/types/diagnostics';
 import type { DownloadJob } from '../../shared/types/downloads';
+import { musicDownloadsEnabled } from '../../shared/constants/downloadAvailability';
 import type { LibraryTrack } from '../../shared/types/library';
 import type { UpdateStatus } from '../../shared/types/updates';
 import { isAuthorizationFailure } from '../../shared/ipcAuthorizationFailure';
@@ -883,7 +884,10 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   const activeRouteIdRef = useRef<AppRouteId>(activeRouteId);
   const downloadImportedTrackIdsRef = useRef<Map<string, string | null>>(new Map());
   const downloadLibraryChangedTimerRef = useRef<number | null>(null);
-  const availableRoutes = useMemo(() => [...routes, ...pluginPanelRoutes], [pluginPanelRoutes, routes]);
+  const availableRoutes = useMemo(
+    () => [...routes, ...pluginPanelRoutes].filter((route) => route.id !== 'downloads' || musicDownloadsEnabled),
+    [pluginPanelRoutes, routes],
+  );
 
   const visibleRoutes = useMemo(
     () =>
@@ -1759,6 +1763,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   const navigateRoute = useCallback(
     (routeId: AppRouteId, trigger = 'navigateRoute'): void => {
       const nextRouteId =
+        (routeId === 'downloads' && !musicDownloadsEnabled) ||
         (routeId === 'streaming' && !streamingFeatureEnabled) ||
         (routeId === 'osu-downloader' && !osuDownloaderFeatureEnabled)
           ? readFallbackRouteId(routes)

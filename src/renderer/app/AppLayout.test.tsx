@@ -1572,13 +1572,15 @@ describe('AppLayout standalone routes', () => {
     });
   });
 
-  it('shows downloads in the sidebar with an old locked setting', async () => {
+  it.each([false, true])('keeps downloads inaccessible with an old unlock setting of %s', async (downloadsFeatureUnlocked) => {
     window.localStorage.clear();
+    window.localStorage.setItem('echo-next.pending-route', 'downloads');
     window.echo = {
       app: {
         getSettings: vi.fn().mockResolvedValue({
-          downloadsFeatureUnlocked: false,
-          sidebarHiddenRouteIds: [],
+          downloadsFeatureUnlocked,
+          downloadsFeatureKeyAccepted: true,
+          sidebarHiddenRouteIds: ['downloads'],
         }),
       },
     } as unknown as Window['echo'];
@@ -1599,8 +1601,13 @@ describe('AppLayout standalone routes', () => {
       </AppProviders>,
     );
 
-    const downloadButton = await screen.findByRole('button', { name: 'Downloads' });
-    expect(downloadButton.closest('aside.sidebar')).not.toBeNull();
+    await screen.findByText('Home shell');
+    expect(screen.queryByRole('button', { name: 'Downloads' })).toBeNull();
+    expect(screen.queryByText('Downloads page')).toBeNull();
+    const sidebar = screen.getByRole('complementary', { name: 'Main navigation' });
+    fireEvent.contextMenu(within(sidebar).getByRole('button', { name: 'Home' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '进入编辑模式' }));
+    expect(screen.queryByRole('button', { name: /Downloads/ })).toBeNull();
   });
 
   it('reveals hidden routes in edit mode and persists show and hide changes', async () => {
