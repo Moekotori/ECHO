@@ -57,6 +57,39 @@ afterEach(() => {
 });
 
 describe('China lyrics providers', () => {
+  it('continues past original-artist results to find the actual cover recording', async () => {
+    const coverQuery = { ...query, title: 'Echo Song (Cover. Original Singer)' };
+    let searches = 0;
+    const fetchedLyrics: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.includes('/search/')) {
+        searches += 1;
+        return mockJsonResponse({ result: { songs: [{
+          id: searches, name: 'Echo Song', duration: 120000,
+          artists: [{ name: searches === 1 ? 'Original Singer' : 'Echo Artist' }],
+        }] } });
+      }
+      fetchedLyrics.push(parsed.searchParams.get('id')!);
+      return mockJsonResponse({ lrc: { lyric: '[00:01.00]Cover line' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const results = await new NeteaseLyricsProvider().search({
+      query: coverQuery, normalized: buildNormalizedLyricsQuery(coverQuery), timeoutMs: 1000,
+    });
+    expect(searches).toBe(2);
+    expect(results[0]).toMatchObject({ artist: 'Echo Artist', providerLyricsId: 'netease:2' });
+    expect(fetchedLyrics[0]).toBe('2');
+  });
+
+  it('does not fill missing search identity with the requested singer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new URL(url).pathname.includes('/search/')
+      ? mockJsonResponse({ result: { songs: [{ id: 1, name: 'Echo Song', duration: 120000 }] } })
+      : mockJsonResponse({ lrc: { lyric: '[00:01.00]Unknown recording' } })));
+    const results = await new NeteaseLyricsProvider().search(request);
+    expect(results.every((result) => result.artist !== query.artist)).toBe(true);
+  });
+
   it('maps AMLL TTML search results through a NetEase id', async () => {
     const fetchMock = vi
       .fn()
@@ -256,7 +289,7 @@ describe('China lyrics providers', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('rv=1');
   });
 
-  it('stops NetEase automatic matching after the first searchable variant with lyrics', async () => {
+  it('stops NetEase automatic matching after the first safe recording match', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -265,7 +298,7 @@ describe('China lyrics providers', () => {
             songs: [
               {
                 id: 123,
-                name: 'Echo Song',
+                name: 'Echo Song (Acoustic)',
                 duration: 120000,
                 artists: [{ name: 'Echo Artist' }],
                 album: { name: 'Echo Album' },

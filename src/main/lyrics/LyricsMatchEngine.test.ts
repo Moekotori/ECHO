@@ -79,6 +79,20 @@ const query = {
 };
 
 describe('LyricsMatchEngine', () => {
+  it('treats agreeing cover sources with different credit labels as one recording', async () => {
+    const engine = new LyricsMatchEngine([
+      provider('lrclib', [result({ title: 'Echo Song (Cover. Original Artist)' })]),
+      provider('netease', [result({ provider: 'netease', providerLyricsId: 'netease:cover', title: 'Echo Song' })]),
+    ]);
+    const matched = await engine.match({ ...query, title: 'Echo Song (Cover)' }, {
+      enabledProviders: ['lrclib', 'netease'], collectAllCandidates: true,
+    });
+    expect(matched.accepted).not.toBeNull();
+    expect(matched.candidates).toHaveLength(1);
+    expect(matched.accepted?.reasons).toContain('multi_source_agreement');
+    expect(matched.accepted?.matchedSources).toHaveLength(2);
+  });
+
   it('deduplicates candidates returned by multiple providers', async () => {
     const engine = new LyricsMatchEngine([
       provider('lrclib', [result()]),
@@ -165,7 +179,7 @@ describe('LyricsMatchEngine', () => {
   });
 
   it('does not let relaxed backfill bypass blocked identity rules', async () => {
-    const engine = new LyricsMatchEngine([provider('lrclib', [result({ durationSeconds: 121 })])]);
+    const engine = new LyricsMatchEngine([provider('lrclib', [result({ durationSeconds: 121, artist: 'Other Singer' })])]);
     const coverQuery = { ...query, title: 'Echo Song Cover', durationSeconds: 120 };
 
     const normal = await engine.match(coverQuery, { enabledProviders: ['lrclib'], autoAcceptScore: 0.45 });
@@ -176,7 +190,7 @@ describe('LyricsMatchEngine', () => {
     });
 
     expect(normal.accepted).toBeNull();
-    expect(normal.candidates[0].risk).toBe('medium');
+    expect(normal.candidates[0].risk).toBe('high');
     expect(relaxed.accepted).toBeNull();
   });
 

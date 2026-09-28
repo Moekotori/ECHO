@@ -25,7 +25,7 @@ import { isBrowserPlayableVideo, isSupportedVideoExtension, mimeTypeForVideoPath
 import { clampMvOffsetMs } from '../../shared/constants/mvOffset';
 import { LocalMvProvider } from './LocalMvProvider';
 import { createOnlineMvProviders, type MainMvOnlineProvider, type ResolvedMvStreamVariant } from './OnlineMvProviders';
-import { MV_MATCH_ALGORITHM_VERSION } from './MvScoring';
+import { hasCurrentAutoDecision, MvSearchCoordinator, normalizeMvAutoApplyThreshold } from './MvSearchCoordinator';
 
 type LibraryLookup = {
   getTrack: (trackId: string) => LibraryTrack | null;
@@ -167,8 +167,7 @@ const streamingTrackIdPattern = /^streaming:([^:]+):(.+)$/;
 export const MV_AUTO_MATCH_THRESHOLD = 0.7;
 export const MV_AUTO_MATCH_MIN_MARGIN = 0.08;
 export const MV_AUTO_MATCH_HIGH_CONFIDENCE = 0.86;
-const normalizeAutoApplyThreshold = (value: unknown): number =>
-  typeof value === 'number' && Number.isFinite(value) ? Math.max(0.3, Math.min(1, value)) : MV_AUTO_MATCH_THRESHOLD;
+const normalizeAutoApplyThreshold = normalizeMvAutoApplyThreshold;
 const normalizePercent = (value: unknown, fallback: number, min: number, max: number): number => {
   const percent = Number(value);
   return Number.isFinite(percent) ? Math.round(Math.max(min, Math.min(max, percent))) : fallback;
@@ -419,86 +418,6 @@ const candidateTitle = (filePath: string): string => basename(filePath, extname(
 const sourceIdForCandidate = (candidate: MvMatchCandidate): string =>
   candidate.id.startsWith(`${candidate.provider}:`) ? candidate.id.slice(candidate.provider.length + 1) : candidate.id;
 
-const directTrackSearchQuery = (track: Pick<LibraryTrack, 'title' | 'artist' | 'albumArtist'>): string | undefined => {
-  const query = [track.title, track.artist || track.albumArtist]
-    .map((value) => value?.trim())
-    .filter((value): value is string => Boolean(value))
-    .join(' ');
-  return query || undefined;
-};
-
-const titleOnlyTrackSearchQuery = (track: Pick<LibraryTrack, 'title'>): string | undefined => {
-  const query = track.title?.trim();
-  return query || undefined;
-};
-
-type NetworkSearchPlan = {
-  primaryQuery: string | undefined;
-  fallbackQuery: string | undefined;
-};
-
-const networkSearchPlan = (
-  track: Pick<LibraryTrack, 'title' | 'artist' | 'albumArtist'>,
-  settings: MvSettings,
-  query?: string | null,
-): NetworkSearchPlan => {
-  const explicitQuery = query?.trim();
-  if (explicitQuery) {
-    return { primaryQuery: explicitQuery, fallbackQuery: undefined };
-  }
-
-  const baseQuery = settings.titleOnlySearch === true ? titleOnlyTrackSearchQuery(track) : directTrackSearchQuery(track);
-  return {
-    primaryQuery: baseQuery ? `${baseQuery} MV` : undefined,
-    fallbackQuery: baseQuery,
-  };
-};
-
-const mergeSearchCandidates = (primary: MvMatchCandidate[], fallback: MvMatchCandidate[]): MvMatchCandidate[] => {
-  const merged = new Map(primary.map((candidate) => [candidate.id, candidate]));
-  for (const candidate of fallback) {
-    if (!merged.has(candidate.id)) {
-      merged.set(candidate.id, candidate);
-    }
-  }
-  return [...merged.values()];
-};
-
-const hasCurrentAutoDecision = (candidate: MvMatchCandidate): boolean => {
-  if (candidate.autoEligible === false) {
-    return false;
-  }
-  if (candidate.matchVersion !== undefined && candidate.matchVersion !== MV_MATCH_ALGORITHM_VERSION) {
-    return false;
-  }
-  if (!candidate.decision) {
-    return true;
-  }
-
-  return candidate.decision.algorithmVersion === MV_MATCH_ALGORITHM_VERSION &&
-    candidate.decision.autoAccept &&
-    candidate.decision.risk === 'low';
-};
-
-const searchProviderWithFallback = async (
-  provider: MainMvOnlineProvider,
-  track: LibraryTrack,
-  settings: MvSettings,
-  plan: NetworkSearchPlan,
-): Promise<MvMatchCandidate[]> => {
-  const primary = await provider.search(track, settings, plan.primaryQuery);
-  const threshold = normalizeAutoApplyThreshold(settings.autoApplyThreshold);
-  const hasSafePrimaryCandidate = primary.some(
-    (candidate) => candidate.playableInApp && hasCurrentAutoDecision(candidate) && candidate.score >= threshold,
-  );
-  if (provider.id !== 'bilibili' || !plan.fallbackQuery || hasSafePrimaryCandidate) {
-    return primary;
-  }
-
-  const fallback = await provider.search(track, settings, plan.fallbackQuery);
-  return mergeSearchCandidates(primary, fallback);
-};
-
 const compareNetworkCandidates = (settings: MvSettings) => (left: MvMatchCandidate, right: MvMatchCandidate): number => {
   const scoreDelta = right.score - left.score;
   if (scoreDelta !== 0) {
@@ -728,6 +647,7 @@ const sanitizeVariant = (variant: TrackVideoStreamRow): MvQualityVariant => ({
 
 export class MvService {
   private readonly onlineProviderMap: Map<NetworkMvProviderId, MainMvOnlineProvider>;
+  private readonly searchCoordinator: MvSearchCoordinator;
   private readonly ephemeralStreams = new Map<string, EphemeralMvStreamEntry>();
   private readonly resolveStreamsInFlight = new Map<string, Promise<MvResolvedStreams>>();
   private readonly lastResolveIssueByVideoId = new Map<string, Record<string, unknown>>();
@@ -741,6 +661,7 @@ export class MvService {
     private readonly closeDatabase: () => void = () => this.database.close(),
   ) {
     this.onlineProviderMap = new Map(onlineProviders.map((provider) => [provider.id, provider]));
+    this.searchCoordinator = new MvSearchCoordinator(this.onlineProviderMap);
     this.purgeKnownBadBilibiliStreamCache();
   }
 
@@ -880,24 +801,8 @@ export class MvService {
       return [];
     }
 
-    const searchPlan = networkSearchPlan(track, settings, query);
-    const enabled = new Set(settings.enabledProviders);
-    const orderedProviders = settings.providerOrder.filter((provider) => enabled.has(provider));
-    const providerResults = await Promise.all(
-      orderedProviders.map(async (providerId) => {
-        const provider = this.onlineProviderMap.get(providerId);
-        if (!provider) {
-          return [];
-        }
-
-        try {
-          return await searchProviderWithFallback(provider, track, settings, searchPlan);
-        } catch {
-          return [];
-        }
-      }),
-    );
-    const candidates = providerResults.flat().sort(compareNetworkCandidates(settings));
+    const providerResults = await this.searchCoordinator.search(track, settings, query);
+    const candidates = providerResults.sort(compareNetworkCandidates(settings));
     const normalizedCandidates =
       track.mediaType === 'remote'
         ? candidates.map((candidate) => ({
@@ -916,25 +821,8 @@ export class MvService {
     }
 
     const track = this.trackSnapshotToLibraryTrack(request);
-    const searchPlan = networkSearchPlan(track, settings, request.query);
-    const enabled = new Set(settings.enabledProviders);
-    const orderedProviders = settings.providerOrder.filter((provider) => enabled.has(provider));
-    const providerResults = await Promise.all(
-      orderedProviders.map(async (providerId) => {
-        const provider = this.onlineProviderMap.get(providerId);
-        if (!provider) {
-          return [];
-        }
-
-        try {
-          return await searchProviderWithFallback(provider, track, settings, searchPlan);
-        } catch {
-          return [];
-        }
-      }),
-    );
+    const providerResults = await this.searchCoordinator.search(track, settings, request.query);
     const candidates = providerResults
-      .flat()
       .sort(compareNetworkCandidates(settings))
       .map((candidate) => ({
         ...candidate,
@@ -951,25 +839,8 @@ export class MvService {
     }
 
     const track = this.trackSnapshotToLibraryTrack(request);
-    const searchPlan = networkSearchPlan(track, settings, request.query);
-    const enabled = new Set(settings.enabledProviders);
-    const orderedProviders = settings.providerOrder.filter((provider) => enabled.has(provider));
-    const providerResults = await Promise.all(
-      orderedProviders.map(async (providerId) => {
-        const provider = this.onlineProviderMap.get(providerId);
-        if (!provider) {
-          return [];
-        }
-
-        try {
-          return await searchProviderWithFallback(provider, track, settings, searchPlan);
-        } catch {
-          return [];
-        }
-      }),
-    );
+    const providerResults = await this.searchCoordinator.search(track, settings, request.query);
     const candidates = providerResults
-      .flat()
       .sort(compareNetworkCandidates(settings))
       .map((candidate) => ({
         ...candidate,

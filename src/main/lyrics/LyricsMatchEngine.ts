@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { LyricsProviderId, LyricsQuery, LyricsSearchCandidate } from '../../shared/types/lyrics';
+import type { LyricLine, LyricsProviderId, LyricsQuery, LyricsSearchCandidate } from '../../shared/types/lyrics';
 import type { LyricsProvider, LyricsProviderResult } from './LyricsProvider';
 import { dedupeLyricsCandidates, sortLyricsCandidates, type DedupableLyricsCandidate } from './lyricsCandidateDedup';
 import { buildNormalizedLyricsQuery, type NormalizedLyricsQuery } from './lyricsQueryBuilder';
@@ -73,23 +73,15 @@ const sortProvidersByOrder = (providers: LyricsProvider[], order: LyricsProvider
 
 const hasText = (value: string | null | undefined): boolean => typeof value === 'string' && value.trim().length > 0;
 
-const hasWordTiming = (result: LyricsProviderResult): boolean => {
-  const sources = [result.karaokeLyrics, result.syncedLyrics].filter((source): source is string => Boolean(source));
-  return sources.some((source) => parseSyncedLyrics(source).some((line) => Boolean(line.words?.length)));
+const parseResultLines = (result: LyricsProviderResult): LyricLine[] => {
+  const timed = result.karaokeLyrics || result.syncedLyrics;
+  return timed ? parseSyncedLyrics(timed) : parsePlainLyrics(result.plainLyrics || '');
 };
 
 const lyricsCreditLinePattern =
   /^(?:(?:作词|作詞|词|詞|作曲|编曲|編曲|混音|制作人|製作人|歌词提供|歌詞提供)|(?:lyrics?|lyricist|composer|arranger|producer|written by|lrc by))\s*[:：]/iu;
 
-const previewLinesFromResult = (result: LyricsProviderResult): string[] => {
-  const source = result.karaokeLyrics ?? result.syncedLyrics ?? result.plainLyrics;
-  if (!source) {
-    return [];
-  }
-
-  const lines = result.karaokeLyrics || result.syncedLyrics
-    ? parseSyncedLyrics(source)
-    : parsePlainLyrics(source);
+const previewLinesFromResult = (lines: LyricLine[]): string[] => {
   const seen = new Set<string>();
   const preview: string[] = [];
   for (const line of lines) {
@@ -108,21 +100,18 @@ const previewLinesFromResult = (result: LyricsProviderResult): string[] => {
   return preview;
 };
 
-const lyricsFingerprintFromResult = (result: LyricsProviderResult): string | undefined => {
-  const source = result.karaokeLyrics ?? result.syncedLyrics ?? result.plainLyrics;
-  if (!source) {
-    return undefined;
-  }
-
-  const lines = result.karaokeLyrics || result.syncedLyrics
-    ? parseSyncedLyrics(source)
-    : parsePlainLyrics(source);
+const lyricsFingerprintFromResult = (lines: LyricLine[]): string | undefined => {
+  const seen = new Set<string>();
   const normalized = lines
     .map((line) => line.text.normalize('NFKC').toLocaleLowerCase().trim())
     .filter((line) => line && !lyricsCreditLinePattern.test(line))
     .map((line) => line.replace(/[^\p{Letter}\p{Number}]+/gu, ''))
     .filter(Boolean)
-    .filter((line, index, all) => all.indexOf(line) === index)
+    .filter((line) => {
+      if (seen.has(line)) return false;
+      seen.add(line);
+      return true;
+    })
     .sort()
     .join('\n');
   return normalized ? createHash('sha1').update(normalized).digest('hex') : undefined;
@@ -571,6 +560,8 @@ export class LyricsMatchEngine {
     }
 
     const rejectedByUser = settings.isRejected?.(provider.id, result.providerLyricsId) ?? false;
+    const lines = parseResultLines(result);
+    const fingerprint = lyricsFingerprintFromResult(lines);
     const base = {
       provider: provider.id,
       providerLyricsId: result.providerLyricsId,
@@ -580,7 +571,9 @@ export class LyricsMatchEngine {
       durationSeconds: result.durationSeconds,
       instrumental: result.instrumental,
       hasSynced: Boolean(result.karaokeLyrics || result.syncedLyrics || result.instrumental),
-      hasWordTiming: hasWordTiming(result),
+      hasWordTiming: lines.some((line) => Boolean(line.words?.length)) ||
+        Boolean(result.karaokeLyrics && result.syncedLyrics &&
+          parseSyncedLyrics(result.syncedLyrics).some((line) => Boolean(line.words?.length))),
       hasPlain: Boolean(result.plainLyrics),
       sourceLabel: result.sourceLabel ?? provider.label,
     };
@@ -628,8 +621,8 @@ export class LyricsMatchEngine {
       confidence: decision.confidence,
       autoAcceptEligible: decision.autoAcceptEligible,
       durationDeltaSeconds: decision.durationDeltaSeconds,
-      previewLines: previewLinesFromResult(result),
-      contentFingerprint: lyricsFingerprintFromResult(result),
+      previewLines: previewLinesFromResult(lines),
+      contentFingerprint: fingerprint,
       matchedSources: [{ provider: provider.id, sourceLabel: result.sourceLabel ?? provider.label }],
       risk: decision.risk,
       reasons: decision.reasons,
@@ -639,7 +632,7 @@ export class LyricsMatchEngine {
       durationScore: decision.durationScore,
       versionScore: decision.versionScore,
       raw: result.raw ?? result,
-      lyricsFingerprint: lyricsFingerprintFromResult(result),
+      lyricsFingerprint: fingerprint,
       providerPriority: providerOrderPriority(settings.enabledProviders, provider),
       hasTranslation,
       hasRomanization,

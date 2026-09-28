@@ -3,6 +3,7 @@ import { fetchWithNetworkProxy } from '../network/networkFetch';
 import { asRecord, fetchJsonWithTimeout, number, text } from '../library/network/providers/providerFetch';
 import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, LyricsProviderSearchRequest } from './LyricsProvider';
 import { parseSyncedLyrics } from './lyricsParser';
+import { hasSafeLyricsProviderItem, providerSearchVariants, providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
 
 const neteaseHeaders = {
   Referer: 'https://music.163.com/',
@@ -232,7 +233,8 @@ export class AmllTtmlLyricsProvider implements LyricsProvider {
         seen.add(song.id);
         return true;
       });
-      return await this.fetchFirstAvailableLyrics(candidates.slice(0, maxSearchSongs), request);
+      const ranked = rankLyricsProviderItems(request, candidates);
+      return await this.fetchFirstAvailableLyrics(ranked.slice(0, Math.min(maxSearchSongs, providerLyricsFetchLimit(request))), request);
     } catch {
       return [];
     }
@@ -269,8 +271,7 @@ export class AmllTtmlLyricsProvider implements LyricsProvider {
     const seen = new Set<string>();
     const songs: NeteaseSong[] = [];
 
-    for (const variant of request.normalized.searchVariants) {
-      const songsBeforeVariant = songs.length;
+    for (const variant of providerSearchVariants(request)) {
       if (request.signal?.aborted) {
         break;
       }
@@ -310,8 +311,8 @@ export class AmllTtmlLyricsProvider implements LyricsProvider {
           seen.add(id);
           songs.push({
             id,
-            title: text(song.name) ?? request.query.title,
-            artist: artist || request.query.artist,
+            title: text(song.name) ?? '',
+            artist: artist || '',
             album: text(album.name),
             durationSeconds: durationMs ? durationMs / 1000 : null,
             raw: songValue,
@@ -323,7 +324,7 @@ export class AmllTtmlLyricsProvider implements LyricsProvider {
         }
       }
 
-      if (songs.length > songsBeforeVariant) {
+      if (!request.collectAllCandidates && hasSafeLyricsProviderItem(request, songs)) {
         break;
       }
     }

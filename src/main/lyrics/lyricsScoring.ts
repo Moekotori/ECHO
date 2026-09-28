@@ -7,6 +7,7 @@ import {
   type LyricsVersionFlags,
 } from './lyricsVersionFlags';
 import { normalizeTextForSearch } from './lyricsTextNormalization';
+import { parseCoverIdentity } from '../matching/coverIdentity';
 export { normalizeText, normalizeTextForIdentity, normalizeTextForSearch } from './lyricsTextNormalization';
 
 export type LyricsMatchDecision = {
@@ -193,12 +194,25 @@ export const evaluateLyricsCandidate = (
   options: LyricsScoringOptions = {},
 ): LyricsMatchDecision => {
   const normalized = 'versionFlags' in query ? query : buildNormalizedLyricsQuery(query);
-  const titleScore = similarity(normalized.rawTitle, candidate.title);
+  const queryCover = parseCoverIdentity(normalized.rawTitle);
+  const candidateCover = parseCoverIdentity(candidate.title);
+  const titleScore = similarity(queryCover.title, candidateCover.title);
   const artistScore = artistSimilarity(normalized.rawArtist, candidate.artist);
   const albumScore = normalized.rawAlbum && candidate.album ? similarity(normalized.rawAlbum, candidate.album) : 0.5;
   const durationScore = scoreLyricsDuration(normalized.durationSeconds, candidate.durationSeconds);
   const flags = candidateVersionFlags(candidate);
-  const versionScore = scoreLyricsVersion(normalized.versionFlags, flags);
+  const delta = getDurationDelta(normalized.durationSeconds, candidate.durationSeconds);
+  const coverIntent = normalized.coverIntent || flags.cover;
+  const performerConflict = [queryCover.performer, candidateCover.performer].some((performer) =>
+    performer !== null && artistSimilarity(normalized.rawArtist, performer) < 0.98,
+  );
+  // Providers frequently omit the cover suffix. Exact performer and timing evidence
+  // may bridge that omission, but never a live/remix/instrumental conflict.
+  const sameCoverRecording = coverIntent && titleScore >= 0.98 && artistScore >= 0.98 &&
+    delta !== null && delta <= 5 && !performerConflict;
+  const queryFlags = sameCoverRecording ? { ...normalized.versionFlags, cover: true } : normalized.versionFlags;
+  const comparisonFlags = sameCoverRecording ? { ...flags, cover: true } : flags;
+  const versionScore = scoreLyricsVersion(queryFlags, comparisonFlags);
   const hasSynced = candidate.hasSynced || candidate.instrumental;
   const weights = hasSynced
     ? { title: 0.34, artist: 0.22, album: 0.08, duration: 0.28, version: 0.08 }
@@ -211,11 +225,10 @@ export const evaluateLyricsCandidate = (
     durationScore * weights.duration +
     versionScore * weights.version +
     0;
-  const delta = getDurationDelta(normalized.durationSeconds, candidate.durationSeconds);
   const durationTolerance = getLyricsDurationTolerance(normalized.durationSeconds);
   const durationRejectThreshold = Math.min(30, durationTolerance + 10);
-  const versionConflict = hasLyricsVersionConflict(normalized.versionFlags, flags);
-  const risk = getVersionRisk(normalized.versionFlags, flags);
+  const versionConflict = hasLyricsVersionConflict(queryFlags, comparisonFlags) || performerConflict;
+  const risk = getVersionRisk(queryFlags, comparisonFlags);
   const reasons: string[] = [];
   let candidateOnly = false;
   let rejected = false;
@@ -234,7 +247,9 @@ export const evaluateLyricsCandidate = (
   addReason(reasons, normalized.coverIntent, 'cover_intent');
   addReason(reasons, hasSynced && delta !== null && delta <= 5, 'synced_duration_safe');
 
-  if (normalized.coverIntent) {
+  addReason(reasons, sameCoverRecording, 'cover_performer_and_duration_match');
+  addReason(reasons, performerConflict, 'cover_performer_conflict');
+  if (coverIntent && !sameCoverRecording) {
     candidateOnly = true;
     addReason(reasons, true, 'candidate_only_cover');
   }
@@ -277,7 +292,7 @@ export const evaluateLyricsCandidate = (
   const hasBlockingVersionMismatch = hasInstrumentalMismatch || hasUnsafeVersionMismatch;
   const effectiveAutoAcceptScore = autoAcceptScore;
   const coverAutoAcceptSafe =
-    !normalized.coverIntent ||
+    !coverIntent ||
     (hasStrongTitle && hasStrongArtist && delta !== null && delta <= 5 && !hasBlockingVersionMismatch);
   const commonAutoAcceptSafe =
     hasRequiredIdentity &&
@@ -320,7 +335,7 @@ export const evaluateLyricsCandidate = (
     confidence,
     autoAcceptEligible: autoAccept,
     durationDeltaSeconds: delta,
-    candidateOnly: candidateOnly || (!autoAccept && !rejected),
+    candidateOnly: !autoAccept && (candidateOnly || !rejected),
     rejected,
     risk: effectiveRisk,
     reasons,

@@ -3,7 +3,7 @@ import { asRecord, fetchJsonWithTimeout, number, text } from '../library/network
 import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, LyricsProviderSearchRequest } from './LyricsProvider';
 import { isInstrumentalLyricsText } from './instrumentalPlaceholders';
 import { parseSyncedLyrics } from './lyricsParser';
-import { providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
+import { hasSafeLyricsProviderItem, providerSearchVariants, providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
 
 const neteaseHeaders = {
   Referer: 'https://music.163.com/',
@@ -83,8 +83,7 @@ export class NeteaseLyricsProvider implements LyricsProvider {
     const seen = new Set<string>();
     const songs: NeteaseSong[] = [];
 
-    for (const variant of request.normalized.searchVariants) {
-      const songsBeforeVariant = songs.length;
+    for (const variant of providerSearchVariants(request)) {
       if (request.signal?.aborted) {
         break;
       }
@@ -124,8 +123,8 @@ export class NeteaseLyricsProvider implements LyricsProvider {
           seen.add(id);
           songs.push({
             id,
-            title: text(song.name) ?? request.query.title,
-            artist: artist || request.query.artist,
+            title: text(song.name) ?? '',
+            artist: artist || '',
             album: text(album.name),
             durationSeconds: durationMs ? durationMs / 1000 : null,
             raw: songValue,
@@ -137,7 +136,7 @@ export class NeteaseLyricsProvider implements LyricsProvider {
         }
       }
 
-      if (!request.collectAllCandidates && songs.length > songsBeforeVariant) {
+      if (!request.collectAllCandidates && hasSafeLyricsProviderItem(request, songs)) {
         break;
       }
     }

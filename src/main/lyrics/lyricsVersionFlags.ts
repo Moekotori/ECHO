@@ -39,7 +39,7 @@ export const extractLyricsVersionFlags = (...texts: Array<string | null | undefi
   const text = normalizeVersionText(texts.filter(Boolean).join(' '));
 
   return {
-    cover: hasAny(text, [/\bcover(?:ed by| ver(?:sion)?\.?)?\b/u, /カバー/u, /翻唱/u, /歌ってみた/u, /歌みた/u]),
+    cover: hasAny(text, [/\bcover(?:ed\s+by| ver(?:sion)?\.?)?\b/u, /カバー/u, /翻唱/u, /歌ってみた/u, /歌みた/u]),
     live: hasAny(text, [/\blive(?: ver(?:sion)?\.?)?\b/u, /\bconcert\b/u, /现场/u, /ライブ/u]),
     instrumental: hasAny(text, [/\binstrumental\b/u, /\binst(?:\.|\b)/u, /纯音乐/u]),
     karaoke: hasAny(text, [/\bkaraoke\b/u, /伴奏/u, /カラオケ/u]),

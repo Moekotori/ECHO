@@ -4,6 +4,7 @@ import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, Ly
 import { detectLyricsKind, parsePlainLyrics, parseSyncedLyrics } from './lyricsParser';
 import { scoreLyricsCandidate } from './lyricsScoring';
 import { fetchWithNetworkProxy } from '../network/networkFetch';
+import { hasSafeLyricsProviderItem, providerSearchVariants } from './lyricsProviderRanking';
 
 export type LrclibRecord = {
   id?: number | string | null;
@@ -224,12 +225,8 @@ export class LrclibProvider implements LyricsProvider {
     const seen = new Set<string>();
     const pushRecord = (record: LrclibRecord, source: 'cached' | 'search'): void => {
       const result = recordToResult(record);
-      if (!result.title) {
-        result.title = request.query.title;
-      }
-
-      if (!result.artist) {
-        result.artist = request.query.artist;
+      if (!result.syncedLyrics && !result.plainLyrics && !result.instrumental) {
+        return;
       }
 
       result.sourceLabel = source === 'cached' ? 'LRCLIB cached' : 'LRCLIB';
@@ -242,19 +239,20 @@ export class LrclibProvider implements LyricsProvider {
       }
     };
 
-    const cachedRecord = await fetchExactCachedRecord(
+    // Cover suffixes are not stable API signatures. Start with the clean performer query.
+    const cachedRecord = request.normalized.coverIntent ? null : await fetchExactCachedRecord(
       request.query,
       Math.min(request.timeoutMs, cachedSignatureTimeoutMs),
       request.signal,
     );
     if (cachedRecord) {
       pushRecord(cachedRecord, 'cached');
-      if (!request.collectAllCandidates) {
+      if (!request.collectAllCandidates && hasSafeLyricsProviderItem(request, results)) {
         return results;
       }
     }
 
-    for (const variant of request.normalized.searchVariants) {
+    for (const variant of providerSearchVariants(request)) {
       if (request.signal?.aborted) {
         break;
       }
@@ -275,7 +273,7 @@ export class LrclibProvider implements LyricsProvider {
         pushRecord(record, 'search');
       }
 
-      if (results.length > 0 && !request.collectAllCandidates) {
+      if (!request.collectAllCandidates && hasSafeLyricsProviderItem(request, results)) {
         return results;
       }
     }

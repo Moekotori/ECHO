@@ -4,7 +4,7 @@ import { asRecord, fetchJsonWithTimeout, number, text } from '../library/network
 import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, LyricsProviderSearchRequest } from './LyricsProvider';
 import { isInstrumentalLyricsText } from './instrumentalPlaceholders';
 import { parseSyncedLyrics } from './lyricsParser';
-import { providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
+import { hasSafeLyricsProviderItem, providerSearchVariants, providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
 
 const kugouHeaders = {
   Referer: 'https://www.kugou.com/',
@@ -112,55 +112,60 @@ export class KugouLyricsProvider implements LyricsProvider {
     const seen = new Set<string>();
     const songs: KugouSong[] = [];
 
-    for (const variant of request.normalized.searchVariants) {
+    for (const variant of providerSearchVariants(request)) {
       if (request.signal?.aborted) {
         break;
       }
 
-      const query = searchQueryFor({
-        ...request.query,
-        title: variant.title,
-        artist: variant.artist,
-        album: variant.album,
-      });
-      if (!query) {
-        continue;
-      }
-
-      const params = new URLSearchParams({
-        format: 'json',
-        keyword: query,
-        page: '1',
-        pagesize: '5',
-        showtype: '1',
-      });
-      const data = asRecord(
-        await fetchJsonWithTimeout(`http://mobilecdn.kugou.com/api/v3/search/song?${params.toString()}`, request.signal, kugouHeaders, request.timeoutMs),
-      );
-      const rawSongValues = asRecord(data.data).info;
-      const songValues: unknown[] = Array.isArray(rawSongValues) ? rawSongValues : [];
-
-      for (const songValue of songValues) {
-        const song = asRecord(songValue);
-        const hash = firstText(song, ['hash', 'Hash', 'FileHash', 'SQFileHash', 'HQFileHash']);
-        const id = hash ?? `${text(song.SongName) ?? text(song.songname) ?? ''}|${text(song.SingerName) ?? ''}`;
-        if (!id || seen.has(id)) {
+      try {
+        const query = searchQueryFor({
+          ...request.query,
+          title: variant.title,
+          artist: variant.artist,
+          album: variant.album,
+        });
+        if (!query) {
           continue;
         }
 
-        seen.add(id);
-        songs.push({
-          hash,
-          title: text(song.SongName) ?? text(song.songname) ?? text(song.FileName) ?? request.query.title,
-          artist: text(song.SingerName) ?? text(song.singername) ?? request.query.artist,
-          album: text(song.AlbumName) ?? text(song.album_name),
-          durationSeconds: secondsFromDuration(song.Duration ?? song.duration),
-          raw: songValue,
+        const params = new URLSearchParams({
+          format: 'json',
+          keyword: query,
+          page: '1',
+          pagesize: '5',
+          showtype: '1',
         });
-      }
+        const data = asRecord(
+          await fetchJsonWithTimeout(`http://mobilecdn.kugou.com/api/v3/search/song?${params.toString()}`, request.signal, kugouHeaders, request.timeoutMs),
+        );
+        const rawSongValues = asRecord(data.data).info;
+        const songValues: unknown[] = Array.isArray(rawSongValues) ? rawSongValues : [];
 
-      if (!request.collectAllCandidates && songs.length > 0) {
-        break;
+        for (const songValue of songValues) {
+          const song = asRecord(songValue);
+          const hash = firstText(song, ['hash', 'Hash', 'FileHash', 'SQFileHash', 'HQFileHash']);
+          const id = hash ?? `${text(song.SongName) ?? text(song.songname) ?? ''}|${text(song.SingerName) ?? ''}`;
+          if (!id || seen.has(id)) {
+            continue;
+          }
+
+          seen.add(id);
+          songs.push({
+            hash,
+            title: text(song.SongName) ?? text(song.songname) ?? text(song.FileName) ?? '',
+            artist: text(song.SingerName) ?? text(song.singername) ?? '',
+            album: text(song.AlbumName) ?? text(song.album_name),
+            durationSeconds: secondsFromDuration(song.Duration ?? song.duration),
+            raw: songValue,
+          });
+        }
+
+        if (!request.collectAllCandidates && hasSafeLyricsProviderItem(request, songs)) {
+          break;
+        }
+      } catch {
+        if (request.signal?.aborted) break;
+        // Preserve earlier candidates when an optional fallback is unavailable.
       }
     }
 

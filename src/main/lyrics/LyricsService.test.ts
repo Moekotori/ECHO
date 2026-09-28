@@ -1511,8 +1511,9 @@ describe('LyricsService', () => {
 
   it('returns instrumental lyrics state', async () => {
     const { service } = createHarness({
+      currentTrack: { ...track(), title: 'Echo Song (Instrumental)' },
       onlineProvider: {
-        getLyrics: vi.fn(async () => trackLyrics({ kind: 'instrumental', lines: [], syncedText: null, plainText: null })),
+        getLyrics: vi.fn(async () => trackLyrics({ title: 'Echo Song (Instrumental)', kind: 'instrumental', lines: [], syncedText: null, plainText: null })),
         searchCandidates: vi.fn(async () => []),
       },
     });
@@ -1521,6 +1522,17 @@ describe('LyricsService', () => {
 
     expect(lyrics?.kind).toBe('instrumental');
     expect(lyrics?.lines).toEqual([]);
+  });
+
+  it('accepts an unlabelled provider cover only for the same performer', async () => {
+    const { service } = createHarness({
+      currentTrack: { ...track(), title: 'Echo Song (Cover. Original Singer)' },
+      onlineProvider: {
+        getLyrics: vi.fn(async () => trackLyrics()),
+        searchCandidates: vi.fn(async () => []),
+      },
+    });
+    expect((await service.getLyricsForTrack('track-1'))?.kind).toBe('synced');
   });
 
   it('saves offset and returns updated lyrics', async () => {

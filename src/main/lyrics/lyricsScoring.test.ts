@@ -250,12 +250,39 @@ describe('lyricsScoring', () => {
     expect(decision.risk).toBe('medium');
   });
 
-  it('keeps loose cover-intent matches as manual candidates unless they clear the stricter cover threshold', () => {
+  it('accepts an omitted cover label when performer and timing identify the same recording', () => {
     const decision = evaluateLyricsCandidate(query({ title: 'Echo Song Cover' }), candidate());
 
     expect(decision.score).toBeGreaterThan(0.7);
-    expect(decision.autoAccept).toBe(false);
+    expect(decision.autoAccept).toBe(true);
+    expect(decision.candidateOnly).toBe(false);
     expect(decision.reasons).toContain('cover_intent');
+  });
+
+  it.each(['Echo Song (Cover. Original Singer)', 'Echo Song【翻唱】', 'Echo Song (covered by Echo Artist)'])('matches a cover credit: %s', (title) => {
+    const decision = evaluateLyricsCandidate(query({ title }), candidate());
+    expect(decision.autoAccept).toBe(true);
+    expect(decision.reasons).toContain('cover_performer_and_duration_match');
+    expect(buildNormalizedLyricsQuery(query({ title })).searchVariants[0]).toMatchObject({
+      title: 'Echo Song', artist: 'Echo Artist', reason: 'cover_recording_identity',
+    });
+  });
+
+  it.each([
+    { artist: 'Original Singer' },
+    { artist: 'Other Cover Singer' },
+    { durationSeconds: null },
+    { durationSeconds: 126 },
+    { title: 'Echo Song (Live)' },
+    { title: 'Echo Song (Acoustic)' },
+    { title: 'Echo Song (covered by Other Singer)' },
+  ])('does not relax recording evidence for covers: %j', (overrides) => {
+    const decision = evaluateLyricsCandidate(query({ title: 'Echo Song (Cover. Original Singer)' }), candidate(overrides));
+    expect(decision.autoAccept).toBe(false);
+  });
+
+  it('recognizes a cover candidate when the library has no cover label', () => {
+    expect(evaluateLyricsCandidate(query(), candidate({ title: 'Echo Song (Cover)' })).autoAccept).toBe(true);
   });
 
   it('allows cover auto accept only when version and duration are extremely close', () => {

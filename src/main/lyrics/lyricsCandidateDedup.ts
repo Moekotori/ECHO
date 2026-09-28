@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { LyricsSearchCandidate } from '../../shared/types/lyrics';
 import { getDurationDelta } from './lyricsScoring';
 import { normalizeTextForIdentity } from './lyricsTextNormalization';
+import { parseCoverIdentity } from '../matching/coverIdentity';
 
 export type DedupableLyricsCandidate = LyricsSearchCandidate & {
   raw?: unknown;
@@ -20,7 +21,9 @@ const makeCandidateContentIdentity = (
   lyricsTextHash: string,
 ): string => [
   lyricsTextHash,
-  normalizeTextForIdentity(candidate.title),
+  normalizeTextForIdentity(candidate.autoAcceptEligible && candidate.reasons?.includes('cover_performer_and_duration_match')
+    ? parseCoverIdentity(candidate.title).title
+    : candidate.title),
   normalizeTextForIdentity(candidate.artist),
   candidate.instrumental ? 'instrumental' : 'vocal',
 ].join('|');

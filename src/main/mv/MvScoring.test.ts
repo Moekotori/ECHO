@@ -128,16 +128,58 @@ describe('network MV scoring', () => {
     expect(result.score).toBeLessThan(0.7);
   });
 
-  it('blocks an unrequested cover even when title, artist, and duration otherwise match', () => {
+  it('accepts an unlabelled library cover when the performer uploader and duration match', () => {
     const result = scoreNetworkMvCandidate(track(), {
       title: 'Echo Artist - Echo Song cover',
       uploader: 'Echo Artist',
       durationSeconds: 120,
     });
 
+    expect(result.autoEligible).toBe(true);
+    expect(result.reasons).toContain('cover performer and duration match');
+  });
+
+  it.each(['Echo Song (Cover. Original Singer)', 'Echo Song【翻唱】', 'Echo Song (covered by Echo Artist)'])('matches cover metadata to its performer: %s', (title) => {
+    const result = scoreNetworkMvCandidate(track({ title }), {
+      title: 'Echo Song (covered by Echo Artist)', uploader: 'Repost Channel', durationSeconds: 121,
+    });
+    expect(result.autoEligible).toBe(true);
+    expect(result.decision.risk).toBe('low');
+  });
+
+  it.each([
+    { title: 'Echo Song (covered by Other Singer)', uploader: 'Echo Artist', durationSeconds: 120 },
+    { title: 'Echo Song (Cover. Echo Artist)', uploader: 'Other Singer', durationSeconds: 120 },
+    { title: 'Echo Song Cover', uploader: 'Original Singer', durationSeconds: 120 },
+    { title: 'Echo Song Cover', uploader: 'Echo Artist', durationSeconds: null },
+    { title: 'Echo Song Cover', uploader: 'Echo Artist', durationSeconds: 132 },
+  ])('blocks unverified cover recordings: %j', (candidate) => {
+    const result = scoreNetworkMvCandidate(track({ title: 'Echo Song (Cover)', albumArtist: 'Original Singer' }), candidate);
     expect(result.autoEligible).toBe(false);
-    expect(result.score).toBeLessThan(0.7);
-    expect(result.reasons).toContain('variant conflict: cover');
+    expect(result.reasons).toContain('cover performer or duration unverified');
+  });
+
+  it('does not infer the original artist is a cover performer from a title mention', () => {
+    const result = scoreNetworkMvCandidate(track(), {
+      title: 'Echo Artist - Echo Song cover', uploader: 'Other Singer', durationSeconds: 120,
+    });
+    expect(result.autoEligible).toBe(false);
+  });
+
+  it('requires an explicitly requested recording version even when most title tokens match', () => {
+    const result = scoreNetworkMvCandidate(track({ title: 'A Very Long Echo Song Live' }), {
+      title: 'A Very Long Echo Song Official MV', uploader: 'Echo Artist', durationSeconds: 120,
+    });
+    expect(result.autoEligible).toBe(false);
+    expect(result.reasons).toContain('variant conflict: live');
+  });
+
+  it('does not treat Cover Me as a cover descriptor', () => {
+    const result = scoreNetworkMvCandidate(track({ title: 'Cover Me' }), {
+      title: 'Echo Artist - Cover Me Official MV', uploader: 'Echo Artist',
+    });
+    expect(result.autoEligible).toBe(true);
+    expect(result.reasons).not.toContain('cover performer or duration unverified');
   });
 
   it.each([

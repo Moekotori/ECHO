@@ -2,6 +2,7 @@ import { basename } from 'node:path';
 import type { LyricsQuery } from '../../shared/types/lyrics';
 import { normalizeTextForSearch, normalizeTextForIdentity } from './lyricsTextNormalization';
 import { extractLyricsVersionFlags, type LyricsVersionFlags } from './lyricsVersionFlags';
+import { parseCoverIdentity } from '../matching/coverIdentity';
 
 export type NormalizedLyricsQuery = {
   rawTitle: string;
@@ -129,7 +130,8 @@ export const buildNormalizedLyricsQuery = (query: LyricsQuery): NormalizedLyrics
   const durationSeconds = Number.isFinite(Number(query.durationSeconds)) && Number(query.durationSeconds) > 0
     ? Number(query.durationSeconds)
     : null;
-  const searchTitle = cleanSearchValue(rawTitle);
+  const coverIdentity = parseCoverIdentity(rawTitle);
+  const searchTitle = cleanSearchValue(coverIdentity.title);
   const searchArtist = cleanSearchValue(rawArtist);
   const searchAlbum = rawAlbum ? cleanSearchValue(rawAlbum) : null;
   const identityTitle = normalizeTextForIdentity(rawTitle);
@@ -140,6 +142,16 @@ export const buildNormalizedLyricsQuery = (query: LyricsQuery): NormalizedLyrics
   const variants: NormalizedLyricsQuery['searchVariants'] = [];
   const featuredTitle = stripFeaturingFromTitle(rawTitle);
   const primaryArtist = primaryFeaturedArtist(rawArtist);
+
+  if (coverIdentity.cover && coverIdentity.title !== rawTitle) {
+    pushVariant(variants, {
+      title: coverIdentity.title,
+      artist: rawArtist,
+      album: null,
+      reason: 'cover_recording_identity',
+      priority: 110,
+    });
+  }
 
   pushVariant(variants, {
     title: rawTitle,

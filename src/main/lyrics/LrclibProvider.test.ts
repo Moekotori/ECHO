@@ -20,6 +20,29 @@ describe('LrclibProvider', () => {
     fetchMock.mockReset();
   });
 
+  it('starts cover searches with clean identity and continues past the original singer', async () => {
+    const query = { title: 'Echo Song (Cover. Original)', artist: 'Singer', album: 'Cover Album', durationSeconds: 120 };
+    fetchMock.mockResolvedValueOnce(jsonResponse([{
+      id: 10, trackName: 'Echo Song', artistName: 'Original', duration: 120, syncedLyrics: '[00:01.00]Line',
+    }])).mockResolvedValueOnce(jsonResponse([{
+      id: 11, trackName: 'Echo Song', artistName: 'Singer', duration: 120, syncedLyrics: '[00:01.00]Line',
+    }]));
+    const results = await new LrclibProvider().search({ query, normalized: buildNormalizedLyricsQuery(query), timeoutMs: 1000 });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('q=Echo+Song+Singer');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(results.map((result) => result.artist)).toEqual(['Original', 'Singer']);
+  });
+
+  it('does not promote incomplete search records into an exact recording identity', async () => {
+    const query = { title: 'Echo Song', artist: 'Singer', durationSeconds: 120 };
+    fetchMock.mockImplementation(async () => jsonResponse([{
+      id: 12, trackName: 'Echo Song', duration: 120, syncedLyrics: '[00:01.00]Line',
+    }]));
+    const results = await new LrclibProvider().search({ query, normalized: buildNormalizedLyricsQuery(query), timeoutMs: 1000 });
+    expect(results).toHaveLength(1);
+    expect(results[0].artist).toBe('');
+  });
+
   it('uses LRCLIB q search before falling back to structured search parameters', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse([
@@ -167,14 +190,14 @@ describe('LrclibProvider', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('q=Echo+Song+Echo+Artist');
   });
 
-  it('stops after the first keyword hit during automatic matching', async () => {
+  it('stops after the first safe keyword hit during automatic matching', async () => {
     fetchMock
       .mockResolvedValueOnce(new Response('{"code":404}', { status: 404 }))
       .mockResolvedValueOnce(
         jsonResponse([
           {
             id: 8,
-            trackName: 'Echo Song',
+            trackName: 'Echo Song (Acoustic)',
             artistName: 'Echo Artist',
             albumName: 'Echo Album',
             duration: 120,

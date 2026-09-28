@@ -3,7 +3,7 @@ import { asRecord, fetchJsonWithTimeout, number, text } from '../library/network
 import { fetchWithNetworkProxy } from '../network/networkFetch';
 import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, LyricsProviderSearchRequest } from './LyricsProvider';
 import { isInstrumentalLyricsText } from './instrumentalPlaceholders';
-import { providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
+import { hasSafeLyricsProviderItem, providerSearchVariants, providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
 
 const kuwoHeaders = {
   Referer: 'https://www.kuwo.cn/',
@@ -137,54 +137,59 @@ export class KuwoLyricsProvider implements LyricsProvider {
     const seen = new Set<string>();
     const songs: KuwoSong[] = [];
 
-    for (const variant of request.normalized.searchVariants) {
+    for (const variant of providerSearchVariants(request)) {
       if (request.signal?.aborted) {
         break;
       }
 
-      const query = searchQueryFor({
-        ...request.query,
-        title: variant.title,
-        artist: variant.artist,
-        album: variant.album,
-      });
-      if (!query) {
-        continue;
-      }
-
-      const params = new URLSearchParams({
-        all: query,
-        ft: 'music',
-        itemset: 'web_2013',
-        client: 'kt',
-        pn: '0',
-        rn: '5',
-        rformat: 'json',
-        encoding: 'utf8',
-      });
-      const data = asRecord(await fetchKuwoSearchJson(`https://search.kuwo.cn/r.s?${params.toString()}`, request.signal, request.timeoutMs));
-      const songValues = Array.isArray(data.abslist) ? data.abslist : [];
-
-      for (const songValue of songValues) {
-        const song = asRecord(songValue);
-        const rid = normalizeRid(song.MUSICRID ?? song.musicrid ?? song.rid);
-        if (!rid || seen.has(rid)) {
+      try {
+        const query = searchQueryFor({
+          ...request.query,
+          title: variant.title,
+          artist: variant.artist,
+          album: variant.album,
+        });
+        if (!query) {
           continue;
         }
 
-        seen.add(rid);
-        songs.push({
-          rid,
-          title: firstText(song, ['SONGNAME', 'songname', 'name']) ?? request.query.title,
-          artist: firstText(song, ['ARTIST', 'artist']) ?? request.query.artist,
-          album: firstText(song, ['ALBUM', 'album']),
-          durationSeconds: number(song.DURATION ?? song.duration),
-          raw: songValue,
+        const params = new URLSearchParams({
+          all: query,
+          ft: 'music',
+          itemset: 'web_2013',
+          client: 'kt',
+          pn: '0',
+          rn: '5',
+          rformat: 'json',
+          encoding: 'utf8',
         });
-      }
+        const data = asRecord(await fetchKuwoSearchJson(`https://search.kuwo.cn/r.s?${params.toString()}`, request.signal, request.timeoutMs));
+        const songValues = Array.isArray(data.abslist) ? data.abslist : [];
 
-      if (!request.collectAllCandidates && songs.length > 0) {
-        break;
+        for (const songValue of songValues) {
+          const song = asRecord(songValue);
+          const rid = normalizeRid(song.MUSICRID ?? song.musicrid ?? song.rid);
+          if (!rid || seen.has(rid)) {
+            continue;
+          }
+
+          seen.add(rid);
+          songs.push({
+            rid,
+            title: firstText(song, ['SONGNAME', 'songname', 'name']) ?? '',
+            artist: firstText(song, ['ARTIST', 'artist']) ?? '',
+            album: firstText(song, ['ALBUM', 'album']),
+            durationSeconds: number(song.DURATION ?? song.duration),
+            raw: songValue,
+          });
+        }
+
+        if (!request.collectAllCandidates && hasSafeLyricsProviderItem(request, songs)) {
+          break;
+        }
+      } catch {
+        if (request.signal?.aborted) break;
+        // Preserve earlier candidates when an optional fallback is unavailable.
       }
     }
 

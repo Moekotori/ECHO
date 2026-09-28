@@ -3,8 +3,9 @@ import type { LibraryTrack } from '../../shared/types/library';
 import type { MvMatchDecision, MvMatchEvidence } from '../../shared/types/mv';
 import { isBrowserPlayableVideo } from '../../shared/constants/videoExtensions';
 import { buildMvWritingSystemAliases, normalizeMvSemanticText } from './MvTextNormalization';
+import { hasCoverMarker, parseCoverIdentity } from '../matching/coverIdentity';
 
-export const MV_MATCH_ALGORITHM_VERSION = 5;
+export const MV_MATCH_ALGORITHM_VERSION = 6;
 
 const sourceWords = [
   'official music video',
@@ -78,7 +79,7 @@ const artistAliases = (
   track: Pick<LibraryTrack, 'artist' | 'albumArtist'>,
   includeWritingSystemAliases = true,
 ): string[] => {
-  const values = [track.artist, track.albumArtist].filter((value): value is string => Boolean(value?.trim()));
+  const values = [track.artist?.trim() || track.albumArtist].filter((value): value is string => Boolean(value?.trim()));
   const aliases = values
     .flatMap((value) => [value, ...value.split(/[/&,，;；|]+|\b(?:feat(?:uring)?|ft)\.?\b/giu)])
     .flatMap((value) => includeWritingSystemAliases ? buildMvWritingSystemAliases(value) : [normalizeMvSemanticText(value)])
@@ -222,13 +223,18 @@ export const scoreNetworkMvCandidate = (
   track: Pick<LibraryTrack, 'title' | 'artist' | 'albumArtist' | 'duration'>,
   candidate: { title: string; uploader?: string | null; durationSeconds?: number | null },
 ): NetworkMvScoreResult => {
-  const trackTitle = normalizeMvText(track.title);
+  const trackCover = parseCoverIdentity(track.title);
+  const candidateCover = parseCoverIdentity(candidate.title);
+  const coverContext = trackCover.cover || candidateCover.cover || hasCoverMarker(
+    normalizeMvSemanticText(candidate.title).replace(normalizeMvSemanticText(trackCover.title), ''),
+  );
+  const trackTitle = normalizeMvText(trackCover.title);
   const rawTrackTitle = normalizeMvSemanticText(track.title);
   const rawCandidateTitle = normalizeMvSemanticText(candidate.title);
   const reasons: string[] = [];
   let score = 0;
 
-  const titleComparison = compareWritingSystemAliases(candidate.title, track.title);
+  const titleComparison = compareWritingSystemAliases(candidateCover.title, trackCover.title);
   const { coverage, exact: titleExact, phrase: titlePhrase, usedAlias: writingSystemAlias } = titleComparison;
   if (titleExact) {
     score += 0.58;
@@ -248,7 +254,14 @@ export const scoreNetworkMvCandidate = (
   } else {
     reasons.push('title mismatch');
   }
-  const artistEvidence = findArtistEvidence(track, candidate.title, candidate.uploader);
+  // Original-artist credits must not corroborate a cover's actual performer.
+  const performerTrack = coverContext ? { artist: track.artist, albumArtist: '' } : track;
+  const explicitPerformerMatch = candidateCover.performer !== null &&
+    compareWritingSystemAliases(candidateCover.performer, track.artist).exact;
+  const explicitPerformerConflict = (candidateCover.performer !== null && !explicitPerformerMatch) ||
+    (trackCover.performer !== null && !compareWritingSystemAliases(trackCover.performer, track.artist).exact);
+  const artistEvidence = explicitPerformerConflict ? null :
+    findArtistEvidence(performerTrack, candidateCover.title, candidate.uploader) ?? (explicitPerformerMatch ? 'title' : null);
   const artistWritingSystemAlias = Boolean(
     artistEvidence && !findArtistEvidence(track, candidate.title, candidate.uploader, false),
   );
@@ -296,6 +309,16 @@ export const scoreNetworkMvCandidate = (
   }
 
   let contentConflict = false;
+  const coverPerformerVerified = Boolean(artistEvidence) && !explicitPerformerConflict &&
+    (!coverContext || trackCover.cover || explicitPerformerMatch || artistEvidence === 'uploader');
+  const coverRecordingSafe = !coverContext || (coverPerformerVerified && durationEvidence === 'strong' &&
+    Math.abs(candidateDuration - trackDuration) <= 8);
+  if (!coverRecordingSafe) {
+    contentConflict = true;
+    reasons.push('cover performer or duration unverified');
+  } else if (coverContext) {
+    reasons.push('cover performer and duration match');
+  }
   if (nonMvContentPattern.test(rawCandidateTitle) && !nonMvContentPattern.test(rawTrackTitle)) {
     score -= 0.3;
     contentConflict = true;
@@ -321,7 +344,11 @@ export const scoreNetworkMvCandidate = (
   }
 
   for (const variant of variantLabels) {
-    if (variant.pattern.test(rawCandidateTitle) && !variant.pattern.test(rawTrackTitle)) {
+    if (variant.label === 'cover' && coverRecordingSafe) continue;
+    const candidateVariant = variant.pattern.test(rawCandidateTitle);
+    const trackVariant = variant.pattern.test(rawTrackTitle);
+    const recordingVariant = variant.label !== 'cover' && variant.label !== 'lyrics' && variant.label !== 'audio';
+    if ((candidateVariant && !trackVariant) || (recordingVariant && trackVariant && !candidateVariant)) {
       score -= 0.18;
       contentConflict = true;
       reasons.push(`variant conflict: ${variant.label}`);
@@ -353,6 +380,7 @@ export const scoreNetworkMvCandidate = (
     reason === 'unverified derivative video' ||
     reason === 'AI voice replacement' ||
     reason === 'unrelated game edit' ||
+    reason === 'cover performer or duration unverified' ||
     reason.startsWith('variant conflict:'),
   );
   const evidence: MvMatchEvidence = {

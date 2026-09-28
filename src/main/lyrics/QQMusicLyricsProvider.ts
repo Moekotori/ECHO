@@ -5,7 +5,7 @@ import { fetchWithNetworkProxy } from '../network/networkFetch';
 import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, LyricsProviderSearchRequest } from './LyricsProvider';
 import { isInstrumentalLyricsText } from './instrumentalPlaceholders';
 import { parseSyncedLyrics } from './lyricsParser';
-import { providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
+import { hasSafeLyricsProviderItem, providerSearchVariants, providerLyricsFetchLimit, rankLyricsProviderItems } from './lyricsProviderRanking';
 
 const qqHeaders = {
   Referer: 'https://y.qq.com/',
@@ -188,7 +188,7 @@ export class QQMusicLyricsProvider implements LyricsProvider {
         await fetchJsonWithTimeout(`https://c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg?${params.toString()}`, request.signal, qqHeaders, request.timeoutMs),
       );
       const songs = Array.isArray(data.data) ? data.data : [];
-      const song = this.mapSong(songs[0], request.query);
+      const song = this.mapSong(songs[0]);
       if (song) {
         return song;
       }
@@ -201,70 +201,75 @@ export class QQMusicLyricsProvider implements LyricsProvider {
     const seen = new Set<string>();
     const songs: QQSong[] = [];
 
-    for (const variant of request.normalized.searchVariants) {
+    for (const variant of providerSearchVariants(request)) {
       if (request.signal?.aborted) {
         break;
       }
 
-      const query = searchQueryFor({
-        ...request.query,
-        title: variant.title,
-        artist: variant.artist,
-        album: variant.album,
-      });
-      if (!query) {
-        continue;
-      }
-
-      const nextSongs = await this.searchSongsWithMusicu(query, request);
-      for (const song of nextSongs) {
-        if (!seen.has(song.mid)) {
-          seen.add(song.mid);
-          songs.push(song);
-        }
-      }
-
-      if (nextSongs.length > 0) {
-        if (!request.collectAllCandidates) {
-          break;
-        }
-        continue;
-      }
-
-      const params = new URLSearchParams({
-        ct: '24',
-        qqmusic_ver: '1298',
-        new_json: '1',
-        remoteplace: 'txt.yqq.song',
-        t: '0',
-        aggr: '1',
-        cr: '1',
-        catZhida: '1',
-        lossless: '0',
-        flag_qc: '0',
-        p: '1',
-        n: '5',
-        w: query,
-        format: 'json',
-      });
-      const data = asRecord(
-        await fetchJsonWithTimeout(`https://c.y.qq.com/soso/fcgi-bin/client_search_cp?${params.toString()}`, request.signal, qqHeaders, request.timeoutMs),
-      );
-      const songData = asRecord(asRecord(data.data).song);
-      const songValues = Array.isArray(songData.list) ? songData.list : [];
-
-      for (const songValue of songValues) {
-        const song = this.mapSong(songValue, request.query);
-        if (!song || seen.has(song.mid)) {
+      try {
+        const query = searchQueryFor({
+          ...request.query,
+          title: variant.title,
+          artist: variant.artist,
+          album: variant.album,
+        });
+        if (!query) {
           continue;
         }
 
-        seen.add(song.mid);
-        songs.push(song);
-      }
+        const nextSongs = await this.searchSongsWithMusicu(query, request);
+        for (const song of nextSongs) {
+          if (!seen.has(song.mid)) {
+            seen.add(song.mid);
+            songs.push(song);
+          }
+        }
 
-      if (!request.collectAllCandidates && songs.length > 0) {
-        break;
+        if (nextSongs.length > 0) {
+          if (!request.collectAllCandidates && hasSafeLyricsProviderItem(request, songs)) {
+            break;
+          }
+          continue;
+        }
+
+        const params = new URLSearchParams({
+          ct: '24',
+          qqmusic_ver: '1298',
+          new_json: '1',
+          remoteplace: 'txt.yqq.song',
+          t: '0',
+          aggr: '1',
+          cr: '1',
+          catZhida: '1',
+          lossless: '0',
+          flag_qc: '0',
+          p: '1',
+          n: '5',
+          w: query,
+          format: 'json',
+        });
+        const data = asRecord(
+          await fetchJsonWithTimeout(`https://c.y.qq.com/soso/fcgi-bin/client_search_cp?${params.toString()}`, request.signal, qqHeaders, request.timeoutMs),
+        );
+        const songData = asRecord(asRecord(data.data).song);
+        const songValues = Array.isArray(songData.list) ? songData.list : [];
+
+        for (const songValue of songValues) {
+          const song = this.mapSong(songValue);
+          if (!song || seen.has(song.mid)) {
+            continue;
+          }
+
+          seen.add(song.mid);
+          songs.push(song);
+        }
+
+        if (!request.collectAllCandidates && hasSafeLyricsProviderItem(request, songs)) {
+          break;
+        }
+      } catch {
+        if (request.signal?.aborted) break;
+        // Preserve earlier candidates when an optional fallback is unavailable.
       }
     }
 
@@ -299,14 +304,14 @@ export class QQMusicLyricsProvider implements LyricsProvider {
       const songValues = Array.isArray(songData.list) ? songData.list : [];
 
       return songValues
-        .map((songValue) => this.mapSong(songValue, request.query))
+        .map((songValue) => this.mapSong(songValue))
         .filter((song): song is QQSong => Boolean(song));
     } catch {
       return [];
     }
   }
 
-  private mapSong(songValue: unknown, fallback: LyricsQuery): QQSong | null {
+  private mapSong(songValue: unknown): QQSong | null {
     const song = asRecord(songValue);
     const mid = songMidFromRecord(song);
     if (!mid) {
@@ -320,8 +325,8 @@ export class QQMusicLyricsProvider implements LyricsProvider {
     return {
       mid,
       id: song.id == null ? null : String(song.id),
-      title: text(song.name) ?? text(song.title) ?? text(song.songname) ?? text(song.songorig) ?? fallback.title,
-      artist: artist || fallback.artist,
+      title: text(song.name) ?? text(song.title) ?? text(song.songname) ?? text(song.songorig) ?? '',
+      artist: artist || '',
       album: text(album.name) ?? text(album.title) ?? text(song.albumname) ?? text(song.albumtitle),
       durationSeconds: number(song.interval),
       raw: songValue,
