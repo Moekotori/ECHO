@@ -58,6 +58,31 @@ afterEach(() => {
 });
 
 describe('LibraryStore track metadata safety', () => {
+  it('keeps statistics totals and the latest track and album snapshots in full and filtered views', () => {
+    const store = makeStore();
+    const addPlay = (trackId: string, title: string, startedAt: string, coverSnapshot: string) => {
+      const entry = store.createPlaybackHistoryEntry({
+        trackId, trackPath: `D:\\Music\\${trackId}.flac`, title, artist: 'Artist',
+        album: 'Shared Album', albumArtist: 'Artist', coverId: null, coverSnapshot,
+        durationSeconds: 120, startedAt,
+      });
+      store.finishPlaybackHistoryEntry(entry.id, { playedSeconds: 40, completed: true });
+    };
+    addPlay('one', 'Old title', '2026-09-01T01:00:00.000Z', 'old-cover');
+    addPlay('one', 'New title', '2026-09-02T01:00:00.000Z', 'new-cover');
+    addPlay('two', 'Another song', '2026-09-03T01:00:00.000Z', 'latest-album-cover');
+    for (const query of [undefined, { from: '2026-09-01T00:00:00.000Z' }]) {
+      const stats = store.getPlaybackStatsDashboard(query);
+      expect(stats.totals).toMatchObject({ playCount: 3, playedSeconds: 120, uniqueTracks: 2 });
+      expect(stats.topTracks[0]).toMatchObject({ trackId: 'one', title: 'New title', playCount: 2, coverThumb: 'new-cover' });
+      expect(stats.topAlbums).toHaveLength(1);
+      expect(stats.topAlbums?.[0]).toMatchObject({ title: 'Shared Album', playCount: 3, playedSeconds: 120, coverThumb: 'latest-album-cover' });
+    }
+    const recent = store.getPlaybackStatsDashboard({ from: '2026-09-02T00:00:00.000Z' });
+    expect(recent.totals.playCount).toBe(2);
+    expect(recent.topAlbums?.[0].playCount).toBe(2);
+  });
+
   it('filters duplicate membership without changing search, totals or pagination', () => {
     const store = makeStore();
     const folder = store.addFolder('D:\\Music');

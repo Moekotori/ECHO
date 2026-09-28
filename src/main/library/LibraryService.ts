@@ -1788,6 +1788,20 @@ export class LibraryService {
     return dashboard;
   }
 
+  async getPlaybackStatsDashboardAsync(query?: PlaybackHistoryQuery): Promise<PlaybackStatsDashboard> {
+    if (this.closed) throw new Error('Library service is closed');
+    if (this.databasePath === ':memory:') return this.getPlaybackStatsDashboard(query);
+    const settings = this.readAppSettings();
+    this.readWorker ??= new LibraryReadWorker(this.databasePath);
+    const dashboard = await this.readWorker.read('stats', query, {
+      chineseCrossScriptSearchEnabled: settings.chineseCrossScriptSearchEnabled !== false,
+      artistMergeStrategy: settings.artistMergeStrategy ?? 'standard',
+      remoteAlbumMergeStrategy: settings.remoteAlbumMergeStrategy ?? 'conservative',
+    });
+    this.rememberPlaybackStatsDashboard(query, dashboard);
+    return dashboard;
+  }
+
   getPlaybackMemoryGraph(query?: PlaybackHistoryQuery): PlaybackMemoryGraph {
     return this.rememberPlaybackSafeRead(
       this.playbackMemoryGraphCache,
@@ -1814,7 +1828,7 @@ export class LibraryService {
 
     return runNonCriticalMainWork({
       name: 'library:get-playback-stats-dashboard',
-      work: () => this.getPlaybackStatsDashboard(query),
+      work: () => this.getPlaybackStatsDashboardAsync(query),
       fallback: () => cached ?? emptyPlaybackStatsDashboard(),
     });
   }

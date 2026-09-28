@@ -538,7 +538,7 @@ export const registerAppLifecycle = (): void => {
     closeDefaultMvService();
     closeDefaultStreamingService();
     closeDefaultRemoteSourceService();
-    closeDefaultLibraryService();
+    await closeDefaultLibraryService();
     const manager = getLibraryDatabaseManager();
     manager.closeAllUsers('app-quit');
     const checkpoint = manager.checkpoint('app-quit');

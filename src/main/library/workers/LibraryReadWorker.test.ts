@@ -7,7 +7,9 @@ type FakeWorker = EventEmitter & { postMessage: ReturnType<typeof vi.fn>; termin
 vi.mock('node:worker_threads', async () => {
   const { EventEmitter: Emitter } = await import('node:events');
   return { Worker: class extends Emitter {
-    postMessage = vi.fn<(request: LibraryReadRequest) => void>();
+    postMessage = vi.fn((request: LibraryReadRequest | { kind: 'close' }) => {
+      if (request.kind === 'close') queueMicrotask(() => this.emit('exit', 0));
+    });
     terminate = vi.fn(() => Promise.resolve(0));
     unref = vi.fn();
     constructor() { super(); workers.push(this); }
@@ -47,14 +49,15 @@ describe('LibraryReadWorker', () => {
     const reader = makeReader();
     const active = reader.read('tracks', undefined, {}).catch((error: Error) => error.message);
     const queued = reader.read('albums', undefined, {}).catch((error: Error) => error.message);
-    let finish!: (code: number) => void;
-    workers[0].terminate.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    workers[0].postMessage.mockImplementation(() => undefined);
     let closed = false;
     const closing = reader.close().then(() => { closed = true; });
     expect(await active).toContain('closed');
     expect(await queued).toContain('closed');
     expect(closed).toBe(false);
-    finish(0);
+    expect(workers[0].postMessage).toHaveBeenLastCalledWith({ kind: 'close' });
+    expect(workers[0].terminate).not.toHaveBeenCalled();
+    workers[0].emit('exit', 0);
     await closing;
     await expect(reader.read('tracks', undefined, {})).rejects.toThrow('closed');
   });

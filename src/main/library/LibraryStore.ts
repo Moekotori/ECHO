@@ -3967,17 +3967,14 @@ export class LibraryStore {
          FROM filtered_history
          GROUP BY history_key
        ),
-       latest_history AS (
-         SELECT filtered_history.*
+       ranked_history AS (
+         SELECT filtered_history.*, ROW_NUMBER() OVER (
+           PARTITION BY history_key ORDER BY started_at DESC, created_at DESC, id DESC
+         ) AS recency_rank
          FROM filtered_history
-         INNER JOIN grouped_history ON grouped_history.history_key = filtered_history.history_key
-         WHERE filtered_history.id = (
-           SELECT latest.id
-           FROM filtered_history AS latest
-           WHERE latest.history_key = grouped_history.history_key
-           ORDER BY latest.started_at DESC, latest.created_at DESC, latest.id DESC
-           LIMIT 1
-         )
+       ),
+       latest_history AS (
+         SELECT * FROM ranked_history WHERE recency_rank = 1
        )
        SELECT
          grouped_history.history_key AS id,
@@ -4065,17 +4062,14 @@ export class LibraryStore {
          FROM album_rows
          GROUP BY album_group_key
        ),
-       latest_album_history AS (
-         SELECT album_rows.*
+       ranked_album_history AS (
+         SELECT album_rows.*, ROW_NUMBER() OVER (
+           PARTITION BY album_group_key ORDER BY started_at DESC, created_at DESC, id DESC
+         ) AS recency_rank
          FROM album_rows
-         INNER JOIN grouped_albums ON grouped_albums.album_group_key = album_rows.album_group_key
-         WHERE album_rows.id = (
-           SELECT latest.id
-           FROM album_rows AS latest
-           WHERE latest.album_group_key = grouped_albums.album_group_key
-           ORDER BY latest.started_at DESC, latest.created_at DESC, latest.id DESC
-           LIMIT 1
-         )
+       ),
+       latest_album_history AS (
+         SELECT * FROM ranked_album_history WHERE recency_rank = 1
        )
        SELECT
          grouped_albums.album_group_key AS id,
@@ -4484,17 +4478,14 @@ export class LibraryStore {
          FROM album_rows
          GROUP BY album_group_key
        ),
-       latest_album_history AS (
-         SELECT album_rows.*
+       ranked_album_history AS (
+         SELECT album_rows.*, ROW_NUMBER() OVER (
+           PARTITION BY album_group_key ORDER BY last_started_at DESC, updated_at DESC, history_key DESC
+         ) AS recency_rank
          FROM album_rows
-         INNER JOIN grouped_albums ON grouped_albums.album_group_key = album_rows.album_group_key
-         WHERE album_rows.history_key = (
-           SELECT latest.history_key
-           FROM album_rows AS latest
-           WHERE latest.album_group_key = grouped_albums.album_group_key
-           ORDER BY latest.last_started_at DESC, latest.updated_at DESC, latest.history_key DESC
-           LIMIT 1
-         )
+       ),
+       latest_album_history AS (
+         SELECT * FROM ranked_album_history WHERE recency_rank = 1
        )
        SELECT
          grouped_albums.album_group_key AS id,

@@ -1,20 +1,19 @@
 import { Worker } from 'node:worker_threads';
-import type { LibraryAlbum, LibraryPage, LibraryPageQuery, LibraryTrack } from '../../../shared/types/library';
+import type { LibraryAlbum, LibraryPage, LibraryPageQuery, LibraryTrack, PlaybackHistoryQuery, PlaybackStatsDashboard } from '../../../shared/types/library';
 import type { LibraryStoreSearchOptions } from '../LibraryStore';
 
 export type LibraryReadRequest = {
   id: number;
-  kind: 'tracks' | 'albums';
-  query?: LibraryPageQuery;
   searchOptions: LibraryStoreSearchOptions;
-};
+} & ({ kind: 'tracks' | 'albums'; query?: LibraryPageQuery } | { kind: 'stats'; query?: PlaybackHistoryQuery });
+export type LibraryReadResult = LibraryPage<LibraryTrack> | LibraryPage<LibraryAlbum> | PlaybackStatsDashboard;
 export type LibraryReadResponse =
-  | { id: number; ok: true; page: LibraryPage<LibraryTrack> | LibraryPage<LibraryAlbum> }
+  | { id: number; ok: true; page: LibraryReadResult }
   | { id: number; ok: false; error: string };
 
 type Task = {
   request: LibraryReadRequest;
-  resolve: (page: LibraryPage<LibraryTrack> | LibraryPage<LibraryAlbum>) => void;
+  resolve: (page: LibraryReadResult) => void;
   reject: (error: Error) => void;
 };
 
@@ -23,7 +22,7 @@ export class LibraryReadWorker {
   private worker: Worker | null = null;
   private active: Task | null = null;
   private readonly queue: Task[] = [];
-  private readonly pending = new Map<string, Promise<LibraryPage<LibraryTrack> | LibraryPage<LibraryAlbum>>>();
+  private readonly pending = new Map<string, Promise<LibraryReadResult>>();
   private timer: NodeJS.Timeout | null = null;
   private nextId = 0;
   private closed = false;
@@ -37,14 +36,15 @@ export class LibraryReadWorker {
 
   read(kind: 'tracks', query: LibraryPageQuery | undefined, options: LibraryStoreSearchOptions): Promise<LibraryPage<LibraryTrack>>;
   read(kind: 'albums', query: LibraryPageQuery | undefined, options: LibraryStoreSearchOptions): Promise<LibraryPage<LibraryAlbum>>;
-  read(kind: LibraryReadRequest['kind'], query: LibraryPageQuery | undefined, options: LibraryStoreSearchOptions): Promise<LibraryPage<LibraryTrack> | LibraryPage<LibraryAlbum>> {
+  read(kind: 'stats', query: PlaybackHistoryQuery | undefined, options: LibraryStoreSearchOptions): Promise<PlaybackStatsDashboard>;
+  read(kind: LibraryReadRequest['kind'], query: LibraryPageQuery | PlaybackHistoryQuery | undefined, options: LibraryStoreSearchOptions): Promise<LibraryReadResult> {
     if (this.closed) return Promise.reject(new Error('Library read worker is closed'));
     const key = JSON.stringify([kind, Object.entries(query ?? {}).sort(([a], [b]) => a.localeCompare(b)), options]);
     const existing = this.pending.get(key);
     if (existing) return existing;
     if (this.queue.length >= 64) return Promise.reject(new Error('Too many pending library queries'));
-    const promise = new Promise<LibraryPage<LibraryTrack> | LibraryPage<LibraryAlbum>>((resolve, reject) => {
-      this.queue.push({ request: { id: ++this.nextId, kind, query, searchOptions: options }, resolve, reject });
+    const promise = new Promise<LibraryReadResult>((resolve, reject) => {
+      this.queue.push({ request: { id: ++this.nextId, kind, query, searchOptions: options } as LibraryReadRequest, resolve, reject });
     });
     this.pending.set(key, promise);
     const clear = () => { if (this.pending.get(key) === promise) this.pending.delete(key); };
@@ -55,7 +55,7 @@ export class LibraryReadWorker {
 
   close(): Promise<void> {
     this.closed = true;
-    if (!this.closing) this.closing = this.stop(new Error('Library read worker is closed'));
+    if (!this.closing) this.closing = this.stop(new Error('Library read worker is closed'), true);
     return this.closing;
   }
 
@@ -94,7 +94,19 @@ export class LibraryReadWorker {
     void this.stop(error).catch((stopError) => console.warn('[library-read-worker] Failed to stop worker', stopError));
   }
 
-  private stop(error: Error): Promise<void> {
+  private closeWorkerAfterQuery(worker: Worker): Promise<void> {
+    // Allow SQLite to unwind normally before the isolate is destroyed.
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { void worker.terminate().catch(reject); }, 5_000);
+      const onExit = () => { clearTimeout(timer); worker.removeListener('error', onError); resolve(); };
+      const onError = (error: Error) => { clearTimeout(timer); worker.removeListener('exit', onExit); reject(error); };
+      worker.once('exit', onExit);
+      worker.once('error', onError);
+      try { worker.postMessage({ kind: 'close' }); } catch (error) { onError(error instanceof Error ? error : new Error(String(error))); }
+    });
+  }
+
+  private stop(error: Error, graceful = false): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.active?.reject(error);
@@ -103,7 +115,10 @@ export class LibraryReadWorker {
     this.pending.clear();
     const worker = this.worker;
     this.worker = null;
-    if (worker) this.termination = Promise.all([this.termination, worker.terminate()]).then(() => undefined);
+    if (worker) {
+      const stopped = graceful ? this.closeWorkerAfterQuery(worker) : worker.terminate().then(() => undefined);
+      this.termination = Promise.all([this.termination, stopped]).then(() => undefined);
+    }
     return this.termination;
   }
 }
