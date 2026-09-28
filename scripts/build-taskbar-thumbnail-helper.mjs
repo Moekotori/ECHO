@@ -13,6 +13,7 @@ const outputAddon = join(outputDir, 'echo-taskbar-thumbnail-helper.node');
 const buildInputs = [
   join(sourceDir, 'binding.gyp'),
   join(sourceDir, 'src', 'main.cpp'),
+  join(sourceDir, 'src', 'button-shapes.h'),
   join(projectRoot, 'node_modules', 'electron', 'package.json'),
   join(projectRoot, 'node_modules', 'node-addon-api', 'package.json'),
 ];

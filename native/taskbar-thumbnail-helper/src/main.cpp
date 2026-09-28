@@ -1,4 +1,5 @@
 #include <napi.h>
+#include "button-shapes.h"
 
 #include <windows.h>
 #include <dwmapi.h>
@@ -9,15 +10,19 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace {
+
+using namespace taskbar_icons;
 
 constexpr wchar_t kWindowClass[] = L"EchoTaskbarThumbnailProxy";
 constexpr UINT kPreviousButton = 1;
 constexpr UINT kPlayPauseButton = 2;
 constexpr UINT kNextButton = 3;
 constexpr UINT kLikeButton = 4;
+constexpr UINT kPlaybackOrderButton = 5;
 constexpr int kIconSize = 16;
 
 struct State {
@@ -31,6 +36,8 @@ struct State {
   bool playing = false;
   bool canLike = false;
   bool liked = false;
+  enum class PlaybackOrder { Unavailable, Sequential, Shuffle, RepeatOne };
+  PlaybackOrder playbackOrder = PlaybackOrder::Unavailable;
   int width = 0;
   int height = 0;
   std::vector<std::uint8_t> pixels;
@@ -137,25 +144,6 @@ HICON createIcon(const PixelPredicate predicate, const COLORREF color) {
   return icon;
 }
 
-bool previousShape(const int x, const int y) {
-  const bool bar = x >= 2 && x <= 3 && y >= 3 && y <= 12;
-  const bool triangle = x >= 4 && x <= 12 && y >= 3 && y <= 12 &&
-      std::abs(y - 7) <= (x - 4) / 2 + 1;
-  return bar || triangle;
-}
-
-bool nextShape(const int x, const int y) {
-  return previousShape(15 - x, y);
-}
-
-bool playShape(const int x, const int y) {
-  return x >= 4 && x <= 12 && y >= 2 && y <= 13 && std::abs(y - 7) <= (x - 4) / 2 + 1;
-}
-
-bool pauseShape(const int x, const int y) {
-  return y >= 2 && y <= 13 && ((x >= 4 && x <= 6) || (x >= 10 && x <= 12));
-}
-
 bool heartOutlineShape(const int x, const int y) {
   const double nx = (x - 7.5) / 7.0;
   const double ny = (7.0 - y) / 7.0;
@@ -170,7 +158,7 @@ bool heartFilledShape(const int x, const int y) {
   return std::pow(nx * nx + ny * ny - 0.45, 3) - nx * nx * std::pow(ny, 3) <= 0.0;
 }
 
-void destroyIcons(std::array<HICON, 4>& icons) {
+void destroyIcons(std::array<HICON, 5>& icons) {
   for (HICON icon : icons) {
     if (icon) DestroyIcon(icon);
   }
@@ -183,28 +171,38 @@ bool applyButtons() {
 
   const COLORREF normal = RGB(32, 41, 67);
   const COLORREF accent = RGB(220, 38, 72);
-  std::array<HICON, 4> icons{
+  const bool shuffle = g_state.playbackOrder == State::PlaybackOrder::Shuffle;
+  const bool repeatOne = g_state.playbackOrder == State::PlaybackOrder::RepeatOne;
+  std::array<HICON, 5> icons{
       createIcon(previousShape, normal),
       createIcon(g_state.playing ? pauseShape : playShape, normal),
       createIcon(nextShape, normal),
       createIcon(g_state.liked ? heartFilledShape : heartOutlineShape, g_state.liked ? accent : normal),
+      createIcon(shuffle ? shuffleShape : repeatOne ? repeatOneShape : sequentialShape, normal),
   };
   if (std::any_of(icons.begin(), icons.end(), [](HICON icon) { return icon == nullptr; })) {
     destroyIcons(icons);
     return false;
   }
 
-  std::array<THUMBBUTTON, 4> buttons{};
-  const std::array<UINT, 4> ids{kPreviousButton, kPlayPauseButton, kNextButton, kLikeButton};
-  const std::array<const wchar_t*, 4> labels{
-      L"Previous", g_state.playing ? L"Pause" : L"Play", L"Next", g_state.liked ? L"Unlike" : L"Like"};
+  std::array<THUMBBUTTON, 5> buttons{};
+  const std::array<UINT, 5> ids{kPreviousButton, kPlayPauseButton, kNextButton, kLikeButton, kPlaybackOrderButton};
+  const wchar_t* orderLabel = g_state.playbackOrder == State::PlaybackOrder::Unavailable
+      ? L"Playback order unavailable"
+      : shuffle ? L"Playback order: Shuffle (click to change)"
+      : repeatOne ? L"Playback order: Repeat one (click to change)"
+      : L"Playback order: Sequential (click to change)";
+  const std::array<const wchar_t*, 5> labels{
+      L"Previous", g_state.playing ? L"Pause" : L"Play", L"Next", g_state.liked ? L"Unlike" : L"Like", orderLabel};
   for (std::size_t index = 0; index < buttons.size(); ++index) {
     buttons[index].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
     buttons[index].iId = ids[index];
     buttons[index].hIcon = icons[index];
     wcsncpy_s(buttons[index].szTip, labels[index], _TRUNCATE);
-    if (!g_state.buttonsVisible || (ids[index] == kLikeButton && !g_state.canLike)) {
-      buttons[index].dwFlags = ids[index] == kLikeButton && g_state.buttonsVisible
+    const bool unavailable = (ids[index] == kLikeButton && !g_state.canLike) ||
+        (ids[index] == kPlaybackOrderButton && g_state.playbackOrder == State::PlaybackOrder::Unavailable);
+    if (!g_state.buttonsVisible || unavailable) {
+      buttons[index].dwFlags = g_state.buttonsVisible
           ? THBF_DISABLED
           : static_cast<THUMBBUTTONFLAGS>(THBF_HIDDEN | THBF_DISABLED);
     } else {
@@ -378,6 +376,13 @@ Napi::Value setButtons(const Napi::CallbackInfo& info) {
   g_state.canLike = info[1].ToBoolean().Value();
   g_state.liked = info[2].ToBoolean().Value();
   g_state.buttonsVisible = info[3].ToBoolean().Value();
+  g_state.playbackOrder = State::PlaybackOrder::Unavailable;
+  if (info.Length() >= 5 && info[4].IsString()) {
+    const std::string order = info[4].As<Napi::String>().Utf8Value();
+    if (order == "sequential") g_state.playbackOrder = State::PlaybackOrder::Sequential;
+    else if (order == "shuffle") g_state.playbackOrder = State::PlaybackOrder::Shuffle;
+    else if (order == "repeat-one") g_state.playbackOrder = State::PlaybackOrder::RepeatOne;
+  }
   if (!g_state.proxyWindow) return Napi::Boolean::New(env, true);
   return Napi::Boolean::New(env, applyButtons());
 }

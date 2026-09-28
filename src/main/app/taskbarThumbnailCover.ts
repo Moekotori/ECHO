@@ -4,11 +4,12 @@ import { join } from 'node:path';
 import { app, net } from 'electron';
 import sharp from 'sharp';
 import { readResponseBodyLimited } from '../network/readResponseBodyLimited';
+import type { PlaybackOrderMode } from '../../shared/types/playback';
 
 type NativeTaskbarThumbnailHelper = {
   attach: (windowHandle: Buffer) => boolean;
   setCover: (rgba: Buffer, width: number, height: number) => boolean;
-  setButtons: (playing: boolean, canLike: boolean, liked: boolean, visible: boolean) => boolean;
+  setButtons: (playing: boolean, canLike: boolean, liked: boolean, visible: boolean, playbackOrder: PlaybackOrderMode | null) => boolean;
   setButtonHandler: (handler: (buttonId: number) => void) => boolean;
   clear: () => void;
   detach: () => void;
@@ -19,6 +20,7 @@ export type TaskbarThumbnailButtons = {
   canLike: boolean;
   liked: boolean;
   visible: boolean;
+  playbackOrder: PlaybackOrderMode | null;
 };
 
 export type DecodedTaskbarCover = { data: Buffer; width: number; height: number };
@@ -145,7 +147,7 @@ export class TaskbarThumbnailCoverController {
     if (!this.attached && !buttons.visible) return true;
     if (!this.ensureAttached()) return false;
     try {
-      return this.helper.setButtons(buttons.playing, buttons.canLike, buttons.liked, buttons.visible);
+      return this.helper.setButtons(buttons.playing, buttons.canLike, buttons.liked, buttons.visible, buttons.playbackOrder);
     } catch {
       return false;
     }

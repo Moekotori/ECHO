@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { nativeImage, type BrowserWindow, type NativeImage } from 'electron';
+import type { BrowserWindow, NativeImage } from 'electron';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
 import type { AppSettings } from '../../shared/types/appSettings';
 import type { AudioStatus } from '../../shared/types/audio';
@@ -15,6 +15,8 @@ import { getMainWindow } from './windowManager';
 import { updateTaskbarHostState } from './taskbarHostProcess';
 import { TaskbarThumbnailCoverController, type TaskbarThumbnailButtons } from './taskbarThumbnailCover';
 import { getCurrentLyricsProgress } from '../lyrics/LyricsProgressTracker';
+import { TaskbarPlaybackOrderController, taskbarPlaybackOrderLabels } from './taskbarPlaybackOrder';
+import { createTaskbarIcon, type TaskbarIconName } from './taskbarButtonIcons';
 
 const defaultWindowTitle = 'ECHO NEXT';
 const activeTitleSuffix = 'ECHO Next';
@@ -49,6 +51,7 @@ type TaskbarPlaybackIntegrationOptions = {
   platform?: NodeJS.Platform;
   createIcon?: (name: TaskbarIconName) => NativeImage | null;
   coverController?: TaskbarThumbnailCoverLike | null;
+  playbackOrderController?: Pick<TaskbarPlaybackOrderController, 'getOrder' | 'cycle'>;
 };
 
 type TaskbarThumbnailCoverLike = {
@@ -59,150 +62,9 @@ type TaskbarThumbnailCoverLike = {
   dispose: () => void;
 };
 
-type TaskbarIconName = 'previous' | 'play' | 'pause' | 'next' | 'heart' | 'heartFilled';
-
 type CurrentTrackLikeState = {
   canLike: boolean;
   liked: boolean;
-};
-
-const taskbarIconMasks: Record<TaskbarIconName, readonly string[]> = {
-  previous: [
-    '0000000000000000',
-    '0000000000000000',
-    '0011000000100000',
-    '0011000001100000',
-    '0011000011100000',
-    '0011000111100000',
-    '0011001111100000',
-    '0011011111100000',
-    '0011011111100000',
-    '0011001111100000',
-    '0011000111100000',
-    '0011000011100000',
-    '0011000001100000',
-    '0011000000100000',
-    '0000000000000000',
-    '0000000000000000',
-  ],
-  play: [
-    '0000000000000000',
-    '0000000000000000',
-    '0001100000000000',
-    '0001110000000000',
-    '0001111000000000',
-    '0001111100000000',
-    '0001111110000000',
-    '0001111111000000',
-    '0001111111000000',
-    '0001111110000000',
-    '0001111100000000',
-    '0001111000000000',
-    '0001110000000000',
-    '0001100000000000',
-    '0000000000000000',
-    '0000000000000000',
-  ],
-  pause: [
-    '0000000000000000',
-    '0000000000000000',
-    '0001110001110000',
-    '0001110001110000',
-    '0001110001110000',
-    '0001110001110000',
-    '0001110001110000',
-    '0001110001110000',
-    '0001110001110000',
-    '0001110001110000',
-    '0001110001110000',
-    '0001110001110000',
-    '0001110001110000',
-    '0001110001110000',
-    '0000000000000000',
-    '0000000000000000',
-  ],
-  next: [
-    '0000000000000000',
-    '0000000000000000',
-    '0000010000001100',
-    '0000011000001100',
-    '0000011100001100',
-    '0000011110001100',
-    '0000011111001100',
-    '0000011111101100',
-    '0000011111101100',
-    '0000011111001100',
-    '0000011110001100',
-    '0000011100001100',
-    '0000011000001100',
-    '0000010000001100',
-    '0000000000000000',
-    '0000000000000000',
-  ],
-  heart: [
-    '0000000000000000',
-    '0000000000000000',
-    '0001100001100000',
-    '0011110011110000',
-    '0110011110011000',
-    '0100001100001000',
-    '0100000000001000',
-    '0010000000010000',
-    '0001000000100000',
-    '0000100001000000',
-    '0000010010000000',
-    '0000001100000000',
-    '0000000000000000',
-    '0000000000000000',
-    '0000000000000000',
-    '0000000000000000',
-  ],
-  heartFilled: [
-    '0000000000000000',
-    '0000000000000000',
-    '0001100001100000',
-    '0011110011110000',
-    '0111111111111000',
-    '0111111111111000',
-    '0111111111111000',
-    '0011111111110000',
-    '0001111111100000',
-    '0000111111000000',
-    '0000011110000000',
-    '0000001100000000',
-    '0000000000000000',
-    '0000000000000000',
-    '0000000000000000',
-    '0000000000000000',
-  ],
-};
-
-const createPngBufferFromMask = (mask: readonly string[], color: readonly [number, number, number] = [32, 41, 67]): Buffer => {
-  const width = 16;
-  const height = 16;
-  const channels = 4;
-  const raw = Buffer.alloc(width * height * channels);
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const offset = (y * width + x) * channels;
-      const enabled = mask[y]?.[x] === '1';
-      raw[offset] = color[0];
-      raw[offset + 1] = color[1];
-      raw[offset + 2] = color[2];
-      raw[offset + 3] = enabled ? 255 : 0;
-    }
-  }
-
-  return nativeImage.createFromBitmap(raw, { width, height }).toPNG();
-};
-
-const createTaskbarIcon = (name: TaskbarIconName): NativeImage | null => {
-  try {
-    const color: readonly [number, number, number] = name === 'heartFilled' ? [220, 38, 72] : [32, 41, 67];
-    return nativeImage.createFromBuffer(createPngBufferFromMask(taskbarIconMasks[name], color));
-  } catch {
-    return null;
-  }
 };
 
 const isTaskbarPlaybackVisible = (status: AudioStatus): boolean =>
@@ -251,6 +113,7 @@ export class TaskbarPlaybackIntegration {
   private readonly platform: NodeJS.Platform;
   private readonly createIcon: (name: TaskbarIconName) => NativeImage | null;
   private readonly coverController: TaskbarThumbnailCoverLike | null;
+  private readonly playbackOrderController: Pick<TaskbarPlaybackOrderController, 'getOrder' | 'cycle'>;
   private disposed = false;
   private lastThumbarKey: string | null = null;
   private progressTimer: ReturnType<typeof setInterval> | null = null;
@@ -268,6 +131,7 @@ export class TaskbarPlaybackIntegration {
     this.getLibrary = options.getLibrary ?? getLibraryService;
     this.platform = options.platform ?? process.platform;
     this.createIcon = options.createIcon ?? createTaskbarIcon;
+    this.playbackOrderController = options.playbackOrderController ?? new TaskbarPlaybackOrderController();
     this.coverController = options.coverController === undefined
       ? this.createCoverController()
       : options.coverController;
@@ -309,6 +173,15 @@ export class TaskbarPlaybackIntegration {
       bound: !this.disposed,
       windowAvailable: !this.window.isDestroyed(),
     };
+  }
+
+  refreshPlaybackOrder(): void {
+    if (this.disposed || this.platform !== 'win32' || this.window.isDestroyed() || !this.status.visible) return;
+    try {
+      this.updateThumbarButtons(this.audioSession.getStatus());
+    } catch (error) {
+      this.status = { ...this.status, lastError: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   setThumbnailArtworkUrl(artworkUrl: string | null): void {
@@ -462,7 +335,7 @@ export class TaskbarPlaybackIntegration {
 
     this.window.setProgressBar(-1);
     this.window.setThumbarButtons([]);
-    this.coverController?.setButtons({ playing: false, canLike: false, liked: false, visible: false });
+    this.coverController?.setButtons({ playing: false, canLike: false, liked: false, visible: false, playbackOrder: null });
     this.coverController?.clear();
     this.thumbnailCoverRequestId += 1;
     this.window.setTitle(defaultWindowTitle);
@@ -609,15 +482,18 @@ export class TaskbarPlaybackIntegration {
   private updateThumbarButtons(status: AudioStatus): void {
     const isPlaying = status.state === 'playing' || status.state === 'loading';
     const likeState = this.resolveCurrentTrackLikeState(status);
+    const playbackOrder = this.playbackOrderController.getOrder();
     this.coverController?.setButtons({
       playing: isPlaying,
       canLike: likeState.canLike,
       liked: likeState.liked,
       visible: this.isWindowPreviewEligible(),
+      playbackOrder,
     });
     const key = [
       isPlaying ? 'playing' : 'paused',
       likeState.canLike ? (likeState.liked ? 'liked' : 'unliked') : 'no-like',
+      playbackOrder ?? 'no-order',
     ].join(':');
 
     if (this.lastThumbarKey === key) {
@@ -628,16 +504,19 @@ export class TaskbarPlaybackIntegration {
     const playPauseIcon = this.createIcon(isPlaying ? 'pause' : 'play');
     const nextIcon = this.createIcon('next');
     const likeIcon = this.createIcon(likeState.liked ? 'heartFilled' : 'heart');
+    const orderIcon = this.createIcon(playbackOrder ?? 'sequential');
 
     if (
       !previousIcon ||
       !playPauseIcon ||
       !nextIcon ||
       !likeIcon ||
+      !orderIcon ||
       previousIcon.isEmpty() ||
       playPauseIcon.isEmpty() ||
       nextIcon.isEmpty() ||
-      likeIcon.isEmpty()
+      likeIcon.isEmpty() ||
+      orderIcon.isEmpty()
     ) {
       this.window.setThumbarButtons([]);
       this.invalidateThumbarButtons();
@@ -671,6 +550,12 @@ export class TaskbarPlaybackIntegration {
         ...(likeState.canLike ? {} : { flags: ['disabled'] }),
         click: () => this.toggleCurrentTrackLiked(status),
       },
+      {
+        tooltip: playbackOrder ? `Playback order: ${taskbarPlaybackOrderLabels[playbackOrder]} (click to change)` : 'Playback order unavailable',
+        icon: orderIcon,
+        ...(playbackOrder ? {} : { flags: ['disabled'] }),
+        click: () => this.cyclePlaybackOrder(),
+      },
     ]);
     if (applied === false) {
       this.status = {
@@ -699,6 +584,19 @@ export class TaskbarPlaybackIntegration {
     else if (buttonId === 2) this.sendCommand('playPause');
     else if (buttonId === 3) this.sendCommand('next');
     else if (buttonId === 4) this.toggleCurrentTrackLiked(this.audioSession.getStatus());
+    else if (buttonId === 5) this.cyclePlaybackOrder();
+  }
+
+  private cyclePlaybackOrder(): void {
+    if (this.disposed || this.window.isDestroyed()) return;
+    void this.playbackOrderController.cycle().then(() => {
+      this.refreshPlaybackOrder();
+    }).catch((error: unknown) => {
+      this.status = {
+        ...this.status,
+        lastError: error instanceof Error ? error.message : String(error),
+      };
+    });
   }
 
   private resolveCurrentTrackLikeState(status: AudioStatus): CurrentTrackLikeState {
@@ -830,6 +728,10 @@ export const getTaskbarPlaybackStatus = (): TaskbarPlaybackStatus => {
   }
 
   return currentIntegration.getStatus();
+};
+
+export const refreshTaskbarPlaybackOrder = (): void => {
+  currentIntegration?.refreshPlaybackOrder();
 };
 
 export const disposeTaskbarPlaybackIntegrationForTests = (): void => {

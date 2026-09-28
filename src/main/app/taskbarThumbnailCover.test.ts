@@ -5,12 +5,28 @@ const createHelper = () => ({
   attach: vi.fn(() => true),
   setCover: vi.fn(() => true),
   setButtons: vi.fn(() => true),
-  setButtonHandler: vi.fn(() => true),
+  setButtonHandler: vi.fn((_handler: (buttonId: number) => void) => true),
   clear: vi.fn(),
   detach: vi.fn(),
 });
 
 describe('TaskbarThumbnailCoverController', () => {
+  it('forwards playback order and native button clicks to the control surface', () => {
+    const helper = createHelper();
+    const onButtonClick = vi.fn();
+    const controller = new TaskbarThumbnailCoverController({
+      getNativeWindowHandle: () => Buffer.alloc(8, 1),
+      onButtonClick,
+      loadHelper: () => helper,
+    });
+    controller.setButtons({ playing: false, canLike: true, liked: false, visible: true, playbackOrder: 'shuffle' });
+    expect(helper.setButtons).toHaveBeenCalledWith(false, true, false, true, 'shuffle');
+    const handler = helper.setButtonHandler.mock.calls[0]?.[0] as ((id: number) => void) | undefined;
+    handler?.(5);
+    expect(onButtonClick).toHaveBeenCalledWith(5);
+    controller.dispose();
+  });
+
   it('attaches once and applies decoded RGBA artwork', async () => {
     const helper = createHelper();
     const onButtonClick = vi.fn();

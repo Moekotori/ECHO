@@ -136,6 +136,7 @@ describe('UltraLightTaskbarRestoreWindow', () => {
       canLike: true,
       liked: true,
       visible: true,
+      playbackOrder: 'sequential',
     });
     expect(mocks.coverController.setCover).toHaveBeenCalledWith('echo-cover://large/cover%201');
     expect(mocks.audioSession.on).toHaveBeenCalledWith('status', expect.any(Function));
@@ -149,6 +150,7 @@ describe('UltraLightTaskbarRestoreWindow', () => {
 
     mocks.getCoverOptions()?.onButtonClick(5);
     await vi.waitFor(() => expect(onPlaybackOrderCycle).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(mocks.coverController.setButtons).toHaveBeenLastCalledWith(expect.objectContaining({ playbackOrder: 'shuffle' })));
 
     mocks.status.state = 'paused';
     mocks.getStatusListener()?.(mocks.status);

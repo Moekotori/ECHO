@@ -103,6 +103,7 @@ const resolveTaskbarPresentation = (status: AudioStatus, playbackOrderMode: Play
       canLike,
       liked,
       visible: hasPlayback,
+      playbackOrder: playbackOrderMode,
     },
     title: title ? (artist ? `${title} - ${artist} | ECHO` : `${title} | ECHO`) : 'ECHO',
   };

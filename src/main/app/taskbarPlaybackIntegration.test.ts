@@ -14,6 +14,10 @@ vi.mock('../audio/AudioSession', () => ({
   getAudioSession: vi.fn(),
 }));
 
+vi.mock('../audio/PlaybackSessionStore', () => ({
+  getPlaybackSessionStore: () => ({ getPlaybackMode: () => null }),
+}));
+
 vi.mock('../library/LibraryService', () => ({
   getLibraryService: vi.fn(),
 }));
@@ -82,7 +86,7 @@ const createWindow = () => ({
   destroyed: false,
   sent: [] as Array<[string, unknown]>,
   setProgressBar: vi.fn(),
-  setThumbarButtons: vi.fn((_buttons: Array<{ click: () => void }>) => true),
+  setThumbarButtons: vi.fn((_buttons: Array<{ click: () => void; tooltip?: string; flags?: string[] }>) => true),
   getContentBounds: vi.fn(() => ({ x: 0, y: 0, width: 1280, height: 720 })),
   setThumbnailClip: vi.fn(),
   setThumbnailToolTip: vi.fn(),
@@ -111,6 +115,72 @@ describe('TaskbarPlaybackIntegration', () => {
   beforeEach(() => {
     vi.resetModules();
     window = createWindow();
+  });
+
+  it('shows and changes playback order in both thumbnail surfaces while paused', async () => {
+    const { TaskbarPlaybackIntegration } = await import('./taskbarPlaybackIntegration');
+    let order: 'sequential' | 'shuffle' | 'repeat-one' = 'sequential';
+    const playbackOrderController = {
+      getOrder: () => order,
+      cycle: vi.fn(async () => { order = 'shuffle'; }),
+    };
+    const coverController = {
+      isAvailable: vi.fn(() => true),
+      setCover: vi.fn(async () => true),
+      setButtons: vi.fn(() => true),
+      clear: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const createIcon = vi.fn(() => ({ isEmpty: () => false }) as never);
+    const integration = new TaskbarPlaybackIntegration({
+      window,
+      audioSession: createAudioSession(makeStatus({ state: 'paused' })),
+      platform: 'win32',
+      getSettings: () => ({ taskbarPlaybackControlsEnabled: true }),
+      getLibrary: () => ({ getTrack: () => ({ title: 'Song A' }) }),
+      createIcon,
+      coverController,
+      playbackOrderController,
+    });
+    integration.initialize();
+    integration.refresh();
+    expect(createIcon).toHaveBeenCalledWith('play');
+    const buttons = window.setThumbarButtons.mock.calls.at(-1)![0];
+    expect(buttons[4].tooltip).toContain('Sequential');
+    buttons[4].click();
+    await vi.waitFor(() => expect(window.setThumbarButtons.mock.calls.at(-1)![0][4].tooltip).toContain('Shuffle'));
+    expect(playbackOrderController.cycle).toHaveBeenCalledOnce();
+    expect(coverController.setButtons).toHaveBeenLastCalledWith(expect.objectContaining({ playbackOrder: 'shuffle' }));
+
+    order = 'repeat-one';
+    integration.refreshPlaybackOrder();
+    expect(window.setThumbarButtons.mock.calls.at(-1)![0][4].tooltip).toContain('Repeat one');
+    expect(createIcon).toHaveBeenCalledWith('repeat-one');
+    integration.dispose();
+  });
+
+  it('disables the order button without a queue and shows errors from failed mode changes', async () => {
+    const { TaskbarPlaybackIntegration } = await import('./taskbarPlaybackIntegration');
+    let hasQueue = false;
+    const cycle = vi.fn(async () => { throw new Error('queue_save_failed'); });
+    const integration = new TaskbarPlaybackIntegration({
+      window,
+      audioSession: createAudioSession(makeStatus({ state: 'paused' })),
+      platform: 'win32',
+      getSettings: () => ({ taskbarPlaybackControlsEnabled: true }),
+      getLibrary: () => ({ getTrack: () => ({ title: 'Song A' }) }),
+      createIcon: () => ({ isEmpty: () => false }) as never,
+      playbackOrderController: { getOrder: () => hasQueue ? 'sequential' : null, cycle },
+    });
+    integration.initialize();
+    integration.refresh();
+    const button = window.setThumbarButtons.mock.calls.at(-1)![0][4];
+    expect(button.flags).toEqual(['disabled']);
+    hasQueue = true;
+    integration.refreshPlaybackOrder();
+    window.setThumbarButtons.mock.calls.at(-1)![0][4].click();
+    await vi.waitFor(() => expect(integration.getStatus().lastError).toBe('queue_save_failed'));
+    integration.dispose();
   });
 
   it('sets playback progress and the current track title on Windows', async () => {
@@ -168,6 +238,7 @@ describe('TaskbarPlaybackIntegration', () => {
       canLike: false,
       liked: false,
       visible: true,
+      playbackOrder: null,
     });
     expect(window.setThumbnailClip).toHaveBeenLastCalledWith({ x: 0, y: 0, width: 1280, height: 720 });
     expect(integration.getStatus().thumbnailClip).toBeNull();
