@@ -9,6 +9,7 @@ import { DragDropImportOverlay } from '../components/import/DragDropImportOverla
 import { PluginTrackActionDrawerHost } from '../components/library/PluginTrackActionDrawer';
 import { loadPersistedRememberedAudioOutput } from '../components/player/audioOutputMemory';
 import { isUltraLightRendererRestore } from '../../shared/types/ultraLightMode';
+import { hasResidentAudioPlayback } from '../utils/audioControlHydration';
 import { Sidebar } from '../components/layout/Sidebar';
 import { AppTitleBar } from '../components/layout/AppTitleBar';
 import { EditableContextMenu } from '../components/ui/EditableContextMenu';
@@ -2827,13 +2828,29 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
       return () => { cancelled = true; };
     }
 
-    void Promise.all([
-      loadPersistedRememberedAudioOutput(),
-      window.echo?.app?.getSettings?.().catch(() => null) ?? Promise.resolve(null),
-    ])
-      .then(([remembered, settings]) => {
+    void audio.getStatus().then((initialStatus) => {
+      if (cancelled) return null;
+      if (hasResidentAudioPlayback(initialStatus)) {
+        handleAudioDrawerStatusChange(initialStatus);
+        return null;
+      }
+      return Promise.all([
+        loadPersistedRememberedAudioOutput(),
+        window.echo?.app?.getSettings?.().catch(() => null) ?? Promise.resolve(null),
+      ]);
+    })
+      .then(async (configuration) => {
+        if (!configuration || cancelled) return;
+        const [remembered, settings] = configuration;
+        // Settings/route hydration can finish after a play click. Recheck the
+        // host immediately before applying cold-start preferences.
+        const latestStatus = await audio.getStatus();
         if (cancelled || getAudioOutputRouteMutationSequence() !== initialRouteMutationSequence) {
           return undefined;
+        }
+        if (hasResidentAudioPlayback(latestStatus)) {
+          handleAudioDrawerStatusChange(latestStatus);
+          return;
         }
 
         const useMiniaudioOutput =

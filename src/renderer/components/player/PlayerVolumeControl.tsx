@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, WheelEvent } from 'react';
 import { Lock, Volume1, Volume2, VolumeX } from 'lucide-react';
 import { isUltraLightRendererRestore } from '../../../shared/types/ultraLightMode';
+import { hasResidentAudioPlayback } from '../../utils/audioControlHydration';
 import type { AudioStatus } from '../../../shared/types/audio';
 import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
 import { formatPercent } from './playerFormat';
@@ -169,6 +170,15 @@ export const PlayerVolumeControl = ({
     void getSettings()
       .then(async (settings) => {
         if (isCancelled || requestRevision !== interactionRevisionRef.current || isInteractingRef.current || pendingCommitRef.current !== null) {
+          return;
+        }
+
+        const residentStatus = typeof audio.getStatus === 'function' ? await audio.getStatus() : null;
+        if (isCancelled || requestRevision !== interactionRevisionRef.current || isInteractingRef.current || pendingCommitRef.current !== null) return;
+        if (residentStatus && hasResidentAudioPlayback(residentStatus)) {
+          onFixedVolumeChange?.(settings.fixedVolumeEnabled === true);
+          setVolume(volumeFromStatus(residentStatus));
+          onStatusChange(residentStatus);
           return;
         }
 

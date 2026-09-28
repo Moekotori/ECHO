@@ -17,6 +17,7 @@ import { getActiveLibraryScanPerfContext, isLibraryScanPerfDiagnosticsEnabled } 
 import { recordRuntimePerformanceStall } from './RuntimePerformanceDiagnostics';
 import { areDeveloperToolsAllowed } from '../app/securityPolicy';
 import { resolveAppIconPath } from '../app/appIcon';
+import { classifyCapturedConsoleLevel } from './CapturedConsoleLevel';
 
 const mainOutputDir = import.meta.dirname;
 const maxEntries = 2500;
@@ -182,13 +183,13 @@ const appendStreamChunk = (
 
   for (const line of lines) {
     if (line.trim()) {
-      pushEntry(source, level, line);
+      pushEntry(source, classifyCapturedConsoleLevel(source, level, normalizeLine(line)), line);
     }
   }
 
   if (tail.length >= maxLineLength) {
     pendingChunks.set(source, '');
-    pushEntry(source, level, tail);
+    pushEntry(source, classifyCapturedConsoleLevel(source, level, normalizeLine(tail)), tail);
   }
 };
 
@@ -982,8 +983,8 @@ export const createDevConsoleHtml = (): string => {
     .raw-entry pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #b8c3d3; font: 12px/1.45 Consolas, "Cascadia Mono", "JetBrains Mono", monospace; }
     .line[data-level="debug"] .level { color: #94a3b8; }
     .line[data-level="warn"] .level, .line[data-level="warning"] .level { color: var(--warn); }
-    .line[data-level="error"] .level, .line[data-source="stderr"] .level { color: var(--error); }
-    .line[data-source="stderr"] .msg { color: #fecdd3; }
+    .line[data-level="error"] .level { color: var(--error); }
+    .line[data-source="stderr"][data-level="error"] .msg { color: #fecdd3; }
     .line[data-source="renderer"] .source { color: #c4b5fd; }
     .line[data-source="system"] .source { color: #f9a8d4; }
     .details { color: #66758a; }
@@ -1373,7 +1374,7 @@ export const createDevConsoleHtml = (): string => {
     const isNearBottom = () => consoleEl.scrollTop + consoleEl.clientHeight >= consoleEl.scrollHeight - 48;
     const isProblemEntry = (entry) => entry.source === 'stderr' || entry.level === 'error' || entry.level === 'warn';
     const isPerformanceEntry = (entry) => /^\\[performance:(main|renderer)\\]/.test(entry.message);
-    const problemSeverity = (entry) => entry.level === 'error' || entry.source === 'stderr' ? 'error' : 'warn';
+    const problemSeverity = (entry) => entry.level === 'error' ? 'error' : 'warn';
     const fieldFromLines = (message, name) => {
       const prefix = name + ':';
       const line = String(message || '').split('\\n').find((item) => item.startsWith(prefix));

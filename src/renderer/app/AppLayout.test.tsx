@@ -201,10 +201,17 @@ afterEach(() => {
 });
 
 describe('AppLayout standalone routes', () => {
-  it.each([false, true])('restores saved DSP only on cold startup (Ultralight restore: %s)', async (ultraLightRestore) => {
+  it.each([
+    { ultraLightRestore: false, state: 'idle' },
+    { ultraLightRestore: true, state: 'idle' },
+    { ultraLightRestore: false, state: 'playing' },
+    { ultraLightRestore: false, state: 'loading' },
+    { ultraLightRestore: false, state: 'paused' },
+  ])('audio hydration applies saved DSP only without a resident session: %j', async ({ ultraLightRestore, state }) => {
     window.history.replaceState(null, '', ultraLightRestore ? '/?echoUltraLightRestore=1' : '/');
     const idleAudioStatus = {
-      state: 'idle',
+      state,
+      host: 'ready',
       currentTrackId: null,
       currentFilePath: null,
       positionSeconds: 0,
@@ -253,7 +260,7 @@ describe('AppLayout standalone routes', () => {
       </AppProviders>,
     );
 
-    if (ultraLightRestore) {
+    if (ultraLightRestore || state !== 'idle') {
       await act(async () => undefined);
       expect(window.echo.audio.getStatus).toHaveBeenCalled();
       expect(setOutput).not.toHaveBeenCalled();

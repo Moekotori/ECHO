@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, WheelEvent } from 'react';
 import { Gauge, RotateCcw } from 'lucide-react';
 import { isUltraLightRendererRestore } from '../../../shared/types/ultraLightMode';
+import { hasResidentAudioPlayback } from '../../utils/audioControlHydration';
 import type { AudioStatus, PlaybackSpeedMode } from '../../../shared/types/audio';
 import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
 
@@ -186,6 +187,15 @@ export const PlayerSpeedControl = ({
     void getSettings()
       .then(async (settings) => {
         if (isCancelled || requestRevision !== interactionRevisionRef.current || isDraggingRef.current || pendingCommitRef.current) {
+          return;
+        }
+
+        const residentStatus = typeof audio.getStatus === 'function' ? await audio.getStatus() : null;
+        if (isCancelled || requestRevision !== interactionRevisionRef.current || isDraggingRef.current || pendingCommitRef.current) return;
+        if (residentStatus && hasResidentAudioPlayback(residentStatus)) {
+          setPlaybackRate(speedFromStatus(residentStatus));
+          setMode(modeFromStatus(residentStatus));
+          onStatusChange(residentStatus);
           return;
         }
 
