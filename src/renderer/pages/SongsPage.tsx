@@ -1,3 +1,4 @@
+import { useTrackViewportPaging, type TrackViewportLoadMode, type TrackViewportRange } from '../hooks/useTrackViewportPaging';
 import { Fragment, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUpDown, Check, ChevronDown, Download, FilePlus2, FolderPlus, ListFilter, Loader2, Play, Radio, RotateCw, Search, Trash2, X } from 'lucide-react';
 import type { DuplicateTrackIndexSummary, DuplicateTrackMember, EditableTrackTags, LibraryAudioFormatFilter, LibraryPlaylist, LibraryScanStatus, LibrarySort, LibraryTrack } from '../../shared/types/library';
@@ -44,7 +45,6 @@ import { streamingTrackToLibraryTrack } from '../utils/streamingTrack';
 import { formatUserFacingError } from '../utils/userFacingError';
 
 const pageSize = 100;
-const maxPreservedRefreshPageSize = 500;
 const preserveScrollThresholdPx = 80;
 const remoteSourcePlaybackRefreshDelayMs = 4000;
 const sortMenuCloseAnimationMs = 120;
@@ -430,6 +430,12 @@ export const SongsPage = (): JSX.Element => {
   const [duplicateHiddenCounts, setDuplicateHiddenCounts] = useState<Record<string, number>>({});
   const [likedTrackIds, setLikedTrackIds] = useState<Record<string, boolean>>({});
   const [selectedTrackIds, setSelectedTrackIds] = useState<Record<string, boolean>>({});
+  const pendingLibraryRefreshRef = useRef<boolean | null>(null);
+  const libraryRefreshTimerRef = useRef<number | null>(null);
+  const refreshLibraryRef = useRef<((preserveScroll: boolean) => void) | null>(null);
+  const visibleViewportRef = useRef<TrackViewportRange | null>(null);
+  const knownCurrentTrackPositionRef = useRef<{ queryKey: string; trackId: string; index: number } | null>(null);
+  const selectedTrackSnapshotsRef = useRef(new Map<string, { track: LibraryTrack; index: number }>());
   const [visibleTrackIds, setVisibleTrackIds] = useState<string[]>([]);
   const [likedRefreshVersion, setLikedRefreshVersion] = useState(0);
   const [versionMembers, setVersionMembers] = useState<DuplicateTrackMember[]>([]);
@@ -518,7 +524,19 @@ export const SongsPage = (): JSX.Element => {
     setError(value instanceof Error ? value.message : String(value));
     setDatabaseRecoveryAvailable(false);
   }, []);
-  const selectedTracks = useMemo(() => tracks.filter((track) => selectedTrackIds[track.id] === true), [selectedTrackIds, tracks]);
+  const selectedTracks = useMemo(() => {
+    const snapshots = new Map(selectedTrackSnapshotsRef.current);
+    tracks.forEach((track, index) => {
+      if (selectedTrackIds[track.id]) snapshots.set(track.id, { track, index: loadedStartIndex + index });
+    });
+    return [...snapshots.values()].filter(({ track }) => selectedTrackIds[track.id])
+      .sort((left, right) => left.index - right.index).map(({ track }) => track);
+  }, [loadedStartIndex, selectedTrackIds, tracks]);
+  useEffect(() => {
+    for (const id of selectedTrackSnapshotsRef.current.keys()) {
+      if (!selectedTrackIds[id]) selectedTrackSnapshotsRef.current.delete(id);
+    }
+  }, [selectedTrackIds]);
   const mergeLikedTrackIds = useCallback((patch: Record<string, boolean>): void => {
     setLikedTrackIds((current) => {
       const next = { ...current, ...patch };
@@ -829,7 +847,7 @@ export const SongsPage = (): JSX.Element => {
     async (
       nextPage: number,
       mode: 'replace' | 'append' | 'prepend',
-      options: { pageSizeOverride?: number; preserveListInstance?: boolean; restoreScrollTop?: number } = {},
+      options: { pageSizeOverride?: number; preserveListInstance?: boolean; restoreScrollTop?: number; additionalPages?: number } = {},
     ) => {
       if (mode !== 'replace' && isLoadingRef.current) {
         return;
@@ -880,6 +898,13 @@ export const SongsPage = (): JSX.Element => {
         const shouldUseFirstPageSnapshot = mode === 'replace' && nextPage === 1 && canUseSongsFirstPageSnapshot(query);
         const queryStartedAt = performance.now();
         const result = await library.getTracks(query);
+        if (options.additionalPages && result.hasMore) {
+          const following = await Promise.all(Array.from({ length: options.additionalPages }, (_, index) =>
+            library.getTracks({ ...query, page: nextPage + index + 1 })));
+          result.items = [...result.items, ...following.flatMap((page) => page.items)];
+          result.hasMore = following.at(-1)?.hasMore ?? result.hasMore;
+          result.total = following.at(-1)?.total ?? result.total;
+        }
         const queryMs = performance.now() - queryStartedAt;
 
         if (requestIdRef.current !== requestId) {
@@ -932,6 +957,14 @@ export const SongsPage = (): JSX.Element => {
         if (requestIdRef.current === requestId) {
           isLoadingRef.current = false;
           setIsLoading(false);
+          if (pendingLibraryRefreshRef.current !== null && libraryRefreshTimerRef.current === null) {
+            libraryRefreshTimerRef.current = window.setTimeout(() => {
+              libraryRefreshTimerRef.current = null;
+              const preserve = pendingLibraryRefreshRef.current;
+              pendingLibraryRefreshRef.current = null;
+              if (preserve !== null) refreshLibraryRef.current?.(preserve);
+            }, 0);
+          }
         }
       }
     },
@@ -949,6 +982,9 @@ export const SongsPage = (): JSX.Element => {
   useEffect(() => {
     return () => {
       clearVisibleRemoteHydrationTimers();
+      if (libraryRefreshTimerRef.current !== null) window.clearTimeout(libraryRefreshTimerRef.current);
+      pendingLibraryRefreshRef.current = null;
+      refreshLibraryRef.current = null;
     };
   }, [clearVisibleRemoteHydrationTimers]);
 
@@ -993,7 +1029,11 @@ export const SongsPage = (): JSX.Element => {
   }, [loadDuplicateSettings]);
 
   useEffect(() => {
-    const handleLibraryChanged = (event: Event): void => {
+    const refresh = (preserveScroll: boolean): void => {
+      if (isLoadingRef.current) {
+        pendingLibraryRefreshRef.current = (pendingLibraryRefreshRef.current ?? false) || preserveScroll;
+        return;
+      }
       if (ignoreNextLibraryChangedRef.current) {
         ignoreNextLibraryChangedRef.current = false;
         clearSongsFirstPageSnapshot();
@@ -1001,13 +1041,18 @@ export const SongsPage = (): JSX.Element => {
       }
 
       const scrollTop = readSongsScrollTop();
-      if (isPreserveScrollLibraryEvent(event) && scrollTop > preserveScrollThresholdPx) {
+      if (preserveScroll && scrollTop > preserveScrollThresholdPx) {
         clearSongsFirstPageSnapshot();
         clearListMetadataCache();
-        void loadTracks(1, 'replace', {
-          pageSizeOverride: Math.min(maxPreservedRefreshPageSize, Math.max(pageSize, tracks.length)),
+        const scrollElement = getSongsScrollElement();
+        const rowHeight = Number(scrollElement?.dataset.estimatedRowHeight) || 76;
+        const firstIndex = visibleViewportRef.current?.firstIndex ?? Math.floor(scrollTop / rowHeight);
+        const lastIndex = visibleViewportRef.current?.lastIndex ?? firstIndex;
+        const firstPage = Math.floor(firstIndex / pageSize) + 1;
+        const lastPage = Math.floor(lastIndex / pageSize) + 1;
+        void loadTracks(firstPage, 'replace', {
+          additionalPages: Math.min(2, Math.max(0, lastPage - firstPage)),
           preserveListInstance: true,
-          restoreScrollTop: scrollTop,
         });
         return;
       }
@@ -1017,6 +1062,8 @@ export const SongsPage = (): JSX.Element => {
       void loadTracks(1, 'replace');
     };
 
+    refreshLibraryRef.current = refresh;
+    const handleLibraryChanged = (event: Event): void => refresh(isPreserveScrollLibraryEvent(event));
     window.addEventListener('library:changed', handleLibraryChanged);
     return () => window.removeEventListener('library:changed', handleLibraryChanged);
   }, [clearListMetadataCache, loadTracks, tracks.length]);
@@ -1029,6 +1076,35 @@ export const SongsPage = (): JSX.Element => {
     window.addEventListener('settings:changed', handleSettingsChanged);
     return () => window.removeEventListener('settings:changed', handleSettingsChanged);
   }, [loadDuplicateSettings]);
+
+  const loadViewportPage = useCallback(async (page: number, mode: TrackViewportLoadMode): Promise<boolean> => {
+    if (isLoadingRef.current) return false;
+    const requestId = requestIdRef.current + 1;
+    await (mode === 'window' ? loadTracks(page, 'replace', { preserveListInstance: true }) : loadTracks(page, mode));
+    return requestIdRef.current === requestId;
+  }, [loadTracks]);
+  const viewportQueryKey = JSON.stringify([listVersion, search, sort, sourceMode, remoteSourceId, audioFormatFilter,
+    effectiveHideDuplicates, showDuplicatesOnly, showOsuOnly]);
+  const loadedCurrentTrackIndex = tracks.findIndex((track) => track.id === currentTrackId);
+  if (currentTrackId && loadedCurrentTrackIndex >= 0) {
+    knownCurrentTrackPositionRef.current = { queryKey: viewportQueryKey, trackId: currentTrackId, index: loadedStartIndex + loadedCurrentTrackIndex };
+  }
+  const knownCurrentPosition = knownCurrentTrackPositionRef.current;
+  const currentTrackIndex = knownCurrentPosition?.queryKey === viewportQueryKey && knownCurrentPosition.trackId === currentTrackId
+    ? knownCurrentPosition.index : null;
+  const requestViewportPage = useTrackViewportPaging({
+    queryKey: viewportQueryKey,
+    pageSize,
+    loadedStartIndex,
+    loadedCount: tracks.length,
+    isLoading,
+    onLoadPage: loadViewportPage,
+  });
+
+  const handleViewportNeeded = useCallback((range: TrackViewportRange): void => {
+    visibleViewportRef.current = range;
+    requestViewportPage(range);
+  }, [requestViewportPage]);
 
   const handleLoadMore = useCallback((): void => {
     if (!isLoading && hasMore) {
@@ -1314,6 +1390,7 @@ export const SongsPage = (): JSX.Element => {
       return;
     }
 
+    selectedTrackSnapshotsRef.current.set(track.id, { track, index: loadedStartIndex + Math.max(0, tracks.findIndex((item) => item.id === track.id)) });
     setSelectedTrackIds((current) => {
       const next = { ...current };
       if (next[track.id]) {
@@ -1324,7 +1401,7 @@ export const SongsPage = (): JSX.Element => {
 
       return next;
     });
-  }, []);
+  }, [loadedStartIndex, tracks]);
 
   useEffect(() => {
     duplicateHiddenCountsRef.current = {};
@@ -2134,6 +2211,7 @@ export const SongsPage = (): JSX.Element => {
         key={listVersion}
         tracks={tracks}
         currentTrackId={currentTrackId}
+        currentTrackIndex={currentTrackIndex}
         canLoadMore={hasMore && !isLoading}
         canLoadPrevious={loadedStartIndex > 0 && !isLoading}
         totalCount={total}
@@ -2142,6 +2220,7 @@ export const SongsPage = (): JSX.Element => {
         isLoadingMore={isLoading}
         onEndReached={handleLoadMore}
         onStartReached={handleLoadPrevious}
+        onViewportNeeded={handleViewportNeeded}
         onAddToQueue={handleAddTrackToQueue}
         onAddToPlaylist={handleAddTrackToPlaylistAction}
         selectedTrackIds={selectedTrackIds}

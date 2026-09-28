@@ -10,7 +10,9 @@ import {
   readSongsStartupLoadDiagnostics,
   writeSongsFirstPageSnapshot,
 } from '../stores/songsFirstPageSnapshot';
+import { loadTranslations } from '../i18n/locales';
 import { showAudioErrorNoticeEvent } from '../utils/audioErrorNotice';
+
 
 const sharedPlaybackState = vi.hoisted(() => ({
   value: {
@@ -30,6 +32,7 @@ vi.mock('../stores/playbackStatusStore', () => ({
 vi.mock('../components/library/TrackList', () => ({
   TrackList: ({
     tracks,
+    selectedTrackIds,
     currentTrackId,
     currentTrackIndex,
     canLoadMore,
@@ -40,6 +43,8 @@ vi.mock('../components/library/TrackList', () => ({
     loadedCount,
     loadedStartIndex,
     onEndReached,
+    onViewportNeeded,
+    onToggleSelected,
     onAddToPlaylist,
     onOpenTrackMenu,
     onPlay,
@@ -50,6 +55,7 @@ vi.mock('../components/library/TrackList', () => ({
     totalCount,
   }: {
     tracks: LibraryTrack[];
+    selectedTrackIds?: Record<string, boolean>;
     currentTrackId: string | null;
     currentTrackIndex?: number | null;
     canLoadMore?: boolean;
@@ -60,6 +66,8 @@ vi.mock('../components/library/TrackList', () => ({
     loadedCount?: number;
     loadedStartIndex?: number;
     onEndReached?: () => void;
+    onViewportNeeded?: (range: { firstIndex: number; lastIndex: number }) => void;
+    onToggleSelected?: (track: LibraryTrack) => void;
     onAddToPlaylist?: (track: LibraryTrack) => void;
     onOpenTrackMenu?: (track: LibraryTrack, position: { x: number; y: number }) => void;
     onPlay?: (track: LibraryTrack) => void;
@@ -72,6 +80,7 @@ vi.mock('../components/library/TrackList', () => ({
     <div
       className="track-list"
       data-testid="track-list"
+      data-selected-count={Object.values(selectedTrackIds ?? {}).filter(Boolean).length}
       data-total-count={totalCount ?? tracks.length}
       data-loaded-count={loadedCount ?? tracks.length}
       data-loaded-start-index={loadedStartIndex ?? 0}
@@ -82,6 +91,8 @@ vi.mock('../components/library/TrackList', () => ({
       <button type="button" onClick={() => onVisibleTrackIdsChange?.(tracks.slice(0, 2).map((track) => track.id))}>
         mock-visible
       </button>
+      <button onClick={() => onViewportNeeded?.({ firstIndex: 10000, lastIndex: 10009 })}>mock-jump-far</button>
+      <button onClick={() => onViewportNeeded?.({ firstIndex: 5000, lastIndex: 5009 })}>mock-jump-middle</button>
       <span data-testid="current-track-id">{currentTrackId ?? 'none'}</span>
       <button type="button" disabled={!canLoadMore} onClick={onEndReached}>
         mock-load-more
@@ -113,6 +124,7 @@ vi.mock('../components/library/TrackList', () => ({
           >
             {likedTrackIds?.[track.id] ? `Unlike ${track.title}` : `Like ${track.title}`}
           </button>
+          <button onClick={() => onToggleSelected?.(track)}>Select {track.title}</button>
           <button type="button" onClick={() => onAddToPlaylist?.(track)}>
             添加到歌单 {track.title}
           </button>
@@ -1432,6 +1444,93 @@ describe('SongsPage', () => {
     await new Promise((resolve) => setTimeout(resolve, 260));
 
     expect(window.echo.remoteSources.hydrateVisibleTracks).not.toHaveBeenCalled();
+  });
+
+  it('viewport scroll seeks directly to page 101 and preserves the scroll container', async () => {
+    window.localStorage.setItem('echo-next.locale', 'zh-CN');
+    await loadTranslations('zh-CN');
+    const first = Array.from({ length: 100 }, (_, i) => makeTrack({ id: `first-${i}`, title: `First ${i}` }));
+    const far = Array.from({ length: 100 }, (_, i) => makeTrack({ id: `far-${i}`, title: `Far ${i}` }));
+    installEcho(first);
+    vi.mocked(window.echo.app.getSettings).mockResolvedValue({ locale: 'zh-CN', duplicateTracksEnabled: false, duplicateTracksMode: 'strict' } as AppSettings);
+    vi.mocked(window.echo.library.getTracks).mockImplementation(async (query) =>
+      makePagedResult(query?.page === 101 ? far : first, { page: query?.page ?? 1, total: 18709, hasMore: true }));
+    await renderSongsPage();
+    await screen.findByText('First 0');
+    const list = screen.getByTestId('track-list');
+    list.scrollTop = 760000;
+    fireEvent.click(screen.getByRole('button', { name: 'Select First 0' }));
+    expect(list.getAttribute('data-selected-count')).toBe('1');
+    fireEvent.click(screen.getByRole('button', { name: 'mock-jump-far' }));
+    await screen.findByText('Far 0');
+    expect(vi.mocked(window.echo.library.getTracks).mock.calls.filter(([query]) => query?.page === 101)).toHaveLength(1);
+    expect(vi.mocked(window.echo.library.getTracks).mock.calls.every(([query]) => query?.page === 1 || query?.page === 101)).toBe(true);
+    expect(screen.getByTestId('track-list')).toBe(list);
+    expect(list.scrollTop).toBe(760000);
+    expect(list.getAttribute('data-loaded-start-index')).toBe('10000');
+    expect(list.getAttribute('data-selected-count')).toBe('1');
+    fireEvent.click(screen.getByRole('button', { name: 'Select Far 0' }));
+    expect(list.getAttribute('data-selected-count')).toBe('2');
+  });
+
+  it('viewport requests during a pending page read load only the latest destination next', async () => {
+    window.localStorage.setItem('echo-next.locale', 'zh-CN');
+    await loadTranslations('zh-CN');
+    const first = Array.from({ length: 100 }, (_, i) => makeTrack({ id: `first-${i}`, title: `First ${i}` }));
+    const middle = Array.from({ length: 100 }, (_, i) => makeTrack({ id: `middle-${i}`, title: `Middle ${i}` }));
+    const far = Array.from({ length: 100 }, (_, i) => makeTrack({ id: `far-${i}`, title: `Far ${i}` }));
+    installEcho(first);
+    vi.mocked(window.echo.app.getSettings).mockResolvedValue({ locale: 'zh-CN', duplicateTracksEnabled: false, duplicateTracksMode: 'strict' } as AppSettings);
+    let finish!: (value: ReturnType<typeof makePagedResult>) => void;
+    vi.mocked(window.echo.library.getTracks).mockImplementation((query) => {
+      if (query?.page === 51) return new Promise((resolve) => { finish = resolve; });
+      return Promise.resolve(makePagedResult(query?.page === 101 ? far : first, { page: query?.page ?? 1, total: 18709, hasMore: true }));
+    });
+    await renderSongsPage();
+    await screen.findByText('First 0');
+    fireEvent.click(screen.getByRole('button', { name: 'mock-jump-middle' }));
+    await waitFor(() => expect(vi.mocked(window.echo.library.getTracks).mock.calls.some(([query]) => query?.page === 51)).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: 'mock-jump-far' }));
+    expect(vi.mocked(window.echo.library.getTracks).mock.calls.some(([query]) => query?.page === 101)).toBe(false);
+    finish(makePagedResult(middle, { page: 51, total: 18709, hasMore: true }));
+    await screen.findByText('Far 0');
+    expect(vi.mocked(window.echo.library.getTracks).mock.calls.filter(([query]) => (query?.page ?? 1) > 1).map(([query]) => query?.page)).toEqual([51, 101]);
+  });
+
+  it('viewport refresh never restores an old scroll position over a newer wheel destination', async () => {
+    window.localStorage.setItem('echo-next.locale', 'zh-CN');
+    await loadTranslations('zh-CN');
+    const first = Array.from({ length: 100 }, (_, i) => makeTrack({ id: `first-${i}`, title: `First ${i}` }));
+    const far = Array.from({ length: 100 }, (_, i) => makeTrack({ id: `far-${i}`, title: `Far ${i}` }));
+    const middle = Array.from({ length: 100 }, (_, i) => makeTrack({ id: `middle-${i}`, title: `Middle ${i}` }));
+    installEcho(first);
+    vi.mocked(window.echo.app.getSettings).mockResolvedValue({ locale: 'zh-CN', duplicateTracksEnabled: false } as AppSettings);
+    let refreshPending = false;
+    let finish!: (value: ReturnType<typeof makePagedResult>) => void;
+    vi.mocked(window.echo.library.getTracks).mockImplementation((query) => {
+      if (query?.page === 101 && refreshPending) {
+        refreshPending = false;
+        return new Promise((resolve) => { finish = resolve; });
+      }
+      return Promise.resolve(makePagedResult(query?.page === 101 ? far : query?.page === 51 ? middle : first,
+        { page: query?.page ?? 1, total: 18709, hasMore: true }));
+    });
+    await renderSongsPage();
+    await screen.findByText('First 0');
+    fireEvent.click(screen.getByRole('button', { name: 'mock-jump-far' }));
+    await screen.findByText('Far 0');
+    const list = screen.getByTestId('track-list');
+    list.scrollTop = 760000;
+    refreshPending = true;
+    window.dispatchEvent(new CustomEvent('library:changed', { detail: { preserveScroll: true } }));
+    await waitFor(() => expect(finish).toBeTypeOf('function'));
+    list.scrollTop = 380000;
+    fireEvent.click(screen.getByRole('button', { name: 'mock-jump-middle' }));
+    finish(makePagedResult(far, { page: 101, total: 18709, hasMore: true }));
+    await screen.findByText('Middle 0');
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(screen.getByTestId('track-list')).toBe(list);
+    expect(list.scrollTop).toBe(380000);
   });
 
   it('keeps TrackList totalCount stable when appending the second song page', async () => {
