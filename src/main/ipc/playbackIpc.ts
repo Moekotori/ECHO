@@ -32,7 +32,8 @@ import { requireLocalPro } from '../plugins/LocalProEntitlements';
 import { getAppSettings } from '../app/appSettings';
 import { noteDataProtectionPlaybackActivity, setDataProtectionPlaybackStateProvider } from '../app/dataProtection';
 import { resolveLocalAudioFiles } from '../app/localFileOpen';
-import { getMainWindowPlaybackCommandRelay } from '../playback/MainWindowPlaybackCommandRelay';
+import { getMainWindow } from '../app/windowManager';
+import { getMainWindowPlaybackCommandRelay, isValidMainWindowControlRequest } from '../playback/MainWindowPlaybackCommandRelay';
 import { getAirPlayReceiverSpikeService } from '../connect/AirPlayReceiverSpikeService';
 import { getStreamingService } from '../streaming/StreamingService';
 import { beginMainBackgroundTask, runPlaybackPerformanceStep, runPlaybackPerformanceStepSync } from '../diagnostics/PlaybackPerformanceDiagnostics';
@@ -1262,6 +1263,11 @@ const registerExpiredUrlRecovery = (): void => {
 };
 
 let playbackMemoryRegistered = false;
+let playbackMemoryPersistenceSuspended = false;
+
+export const suspendPlaybackMemoryPersistence = (): void => {
+  playbackMemoryPersistenceSuspended = true;
+};
 let lastPlaybackMemorySaveAt = 0;
 const playbackMemorySaveIntervalMs = 5000;
 
@@ -1339,6 +1345,7 @@ const shouldDeferQueueResumeToRenderer = (session: PersistedPlaybackSessionV1 | 
 };
 
 export const savePlaybackMemoryNow = (): void => {
+  if (playbackMemoryPersistenceSuspended) return;
   const status = getAudioSession().getStatus();
   getPlaybackMemoryStore().save(status);
   try {
@@ -1348,7 +1355,7 @@ export const savePlaybackMemoryNow = (): void => {
   }
 };
 
-const registerPlaybackMemoryPersistence = (): void => {
+export const registerPlaybackMemoryPersistence = (): void => {
   if (playbackMemoryRegistered) {
     return;
   }
@@ -1404,7 +1411,21 @@ const registerPlaybackMemoryPersistence = (): void => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-const relayPlaybackCommandToMainWindow = (event: IpcMainInvokeEvent, rawRequest: unknown): Promise<unknown> => {
+const relayPlaybackCommandToMainWindow = async (event: IpcMainInvokeEvent, rawRequest: unknown): Promise<unknown> => {
+  // Ultralight unloads the main window renderer while auxiliary surfaces such
+  // as the Dynamic Island stay up. Their transport requests are served by the
+  // renderer-free Ultralight dispatcher instead of failing (and freezing the
+  // island) on main_window_unavailable.
+  const mainWindow = getMainWindow();
+  const mainRendererGone = !mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed();
+  if (mainRendererGone && isRecord(rawRequest) && rawRequest.command === 'control') {
+    const { isUltraLightModeActive, controlUltraLightModePlayback } = await import('../app/UltraLightModeService');
+    const request = Array.isArray(rawRequest.args) ? rawRequest.args[0] : undefined;
+    if (isUltraLightModeActive() && isValidMainWindowControlRequest(request)) {
+      await controlUltraLightModePlayback(request);
+      return undefined;
+    }
+  }
   return getMainWindowPlaybackCommandRelay().execute(rawRequest, event.sender);
 };
 

@@ -2161,6 +2161,16 @@ describe('preload SMTC API', () => {
     expect(listeners.has(IpcChannels.AppGlobalShortcutCommand)).toBe(false);
   });
 
+  it('exposes ultra-light UI lifecycle controls', async () => {
+    await exposedApi!.app.getUltraLightModeStatus();
+    await exposedApi!.app.enterUltraLightMode();
+    await exposedApi!.app.restoreUltraLightMode();
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AppUltraLightModeGetStatus);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AppUltraLightModeEnter);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AppUltraLightModeRestore);
+  });
+
   it('exposes duplicate track APIs through IPC', async () => {
     await exposedApi!.library.refreshDuplicateTracks('strict');
     await exposedApi!.library.getDuplicateTrackVersions('track-1');

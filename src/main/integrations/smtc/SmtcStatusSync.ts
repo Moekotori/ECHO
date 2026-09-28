@@ -4,6 +4,7 @@ import type { BrowserWindow } from 'electron';
 import { IpcChannels } from '../../../shared/constants/ipcChannels';
 import type { AudioStatus } from '../../../shared/types/audio';
 import type { SmtcCommand, SmtcDiagnosticEvent, SmtcDiagnostics, SmtcEnabledActions, SmtcPlaybackState, SmtcService, SmtcTrackMetadata } from './SmtcService';
+import { dispatchUltraLightModeSmtcCommand, isUltraLightModeActive } from '../../app/UltraLightModeService';
 import type { SmtcLyricsProgress } from '../../../shared/types/smtc';
 import { getMainWindow } from '../../app/windowManager';
 import { getAppSettings } from '../../app/appSettings';
@@ -312,6 +313,11 @@ export const bindSmtcCommandBridge = (
   service.onCommand((command: SmtcCommand) => {
     state.lastCommand = command;
     state.lastCommandAt = new Date().toISOString();
+    if (isUltraLightModeActive()) {
+      void dispatchUltraLightModeSmtcCommand(command);
+      getCrashReportService().getLogger()?.info('main', '[SMTC] command handled by ultra-light control plane', { command });
+      return;
+    }
     const window = getWindow();
     if (!window || window.isDestroyed()) {
       return;

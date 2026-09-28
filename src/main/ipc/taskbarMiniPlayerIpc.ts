@@ -1,3 +1,4 @@
+import { dispatchUltraLightModeAction, isUltraLightModeActive, restoreUltraLightMode } from '../app/UltraLightModeService';
 import { ipcMain } from 'electron';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
 import {
@@ -26,6 +27,10 @@ const relayPlaybackCommandToMainWindow = (command: string): void => {
 
 
 const showMainWindowFromTaskbarMiniPlayer = (): void => {
+  if (isUltraLightModeActive()) {
+    void restoreUltraLightMode();
+    return;
+  }
   const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
@@ -55,6 +60,10 @@ const togglePlayback = (): void => {
 
 export const registerTaskbarMiniPlayerIpc = (): void => {
   setTaskbarHostClickCallback((action) => {
+    if (isUltraLightModeActive()) {
+      void dispatchUltraLightModeAction(action === 'prev' ? 'previousTrack' : action === 'next' ? 'nextTrack' : 'playPause');
+      return;
+    }
     if (action === 'playPause') {
       togglePlayback();
     } else if (action === 'next') {

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  ultraLightActive: false,
+  restoreUltraLightMode: vi.fn(async () => undefined),
   settings: {
     miniPlayerEnabled: false,
     miniPlayerLocked: false,
@@ -49,6 +51,13 @@ vi.mock('electron', () => ({
   },
 }));
 
+vi.mock('./UltraLightModeService', () => ({
+  isUltraLightModeActive: () => mocks.ultraLightActive,
+  restoreUltraLightMode: mocks.restoreUltraLightMode,
+}));
+
+vi.mock('./tray', () => ({ ensureTray: vi.fn() }));
+
 vi.mock('./appSettings', () => ({
   getAppSettings: () => mocks.settings,
   setAppSettings: mocks.setAppSettings,
@@ -79,6 +88,8 @@ vi.mock('../diagnostics/DevConsoleService', () => ({
 
 describe('mini player window bounds', () => {
   beforeEach(() => {
+    mocks.ultraLightActive = false;
+    mocks.restoreUltraLightMode.mockClear();
     mocks.settings.miniPlayerBounds = null;
     mocks.mainWindow = null;
     mocks.setAppSettings.mockClear();
@@ -215,7 +226,17 @@ describe('mini player window bounds', () => {
 });
 
 describe('mini player window hide behavior', () => {
+  it('restores through Ultralight instead of creating a competing main window', async () => {
+    mocks.ultraLightActive = true;
+    const { hideMiniPlayerWindow } = await import('./miniPlayerWindow');
+    hideMiniPlayerWindow({ restoreMainWindow: true });
+    expect(mocks.restoreUltraLightMode).toHaveBeenCalledTimes(1);
+    expect(mocks.createMainWindow).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
+    mocks.ultraLightActive = false;
+    mocks.restoreUltraLightMode.mockClear();
     mocks.settings.miniPlayerBounds = null;
     mocks.mainWindow = null;
     mocks.setAppSettings.mockClear();

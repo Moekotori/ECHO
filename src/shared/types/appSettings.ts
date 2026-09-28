@@ -243,6 +243,8 @@ export type AppSettings = {
   liveLibraryUpdatesEnabled?: boolean;
   liveLibraryAutoHideDeletedEnabled?: boolean;
   lowSpecModeEnabled?: boolean;
+  ultraLightOnMinimizeOrTrayEnabled?: boolean;
+  ultraLightGpuDisabled?: boolean;
   safeModeEnabled?: boolean;
   fastStartupEnabled?: boolean;
   sqliteBalancedDurabilityEnabled?: boolean;

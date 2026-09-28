@@ -4,6 +4,7 @@ import type { GlobalShortcutAction } from '../../shared/types/globalShortcuts';
 import { getMainWindow } from './windowManager';
 import { getSleepTimerService } from '../sleepTimer/SleepTimerService';
 import { createAppIconImage } from './appIcon';
+import { dispatchUltraLightModeAction, isUltraLightModeActive, restoreUltraLightMode } from './UltraLightModeService';
 
 let tray: Tray | null = null;
 let quitRequested = false;
@@ -18,6 +19,10 @@ const getCommandWindow = () => {
 };
 
 const showMainWindow = (): void => {
+  if (isUltraLightModeActive()) {
+    void restoreUltraLightMode();
+    return;
+  }
   const window = getCommandWindow();
 
   if (!window) {
@@ -41,6 +46,10 @@ const hideMainWindow = (): void => {
 };
 
 const sendPlaybackCommand = (action: GlobalShortcutAction): void => {
+  if (isUltraLightModeActive()) {
+    void dispatchUltraLightModeAction(action);
+    return;
+  }
   const window = getCommandWindow();
   if (!window) {
     return;
@@ -119,7 +128,7 @@ const buildTrayMenu = (): Electron.Menu => {
   }
 
   return Menu.buildFromTemplate([
-    { label: '显示主界面', click: showMainWindow },
+    { label: isUltraLightModeActive() ? '恢复 ECHO 界面' : '显示主界面', click: showMainWindow },
     { label: '隐藏主界面', click: hideMainWindow },
     { type: 'separator' },
     { label: '播放 / 暂停', click: () => sendPlaybackCommand('playPause') },

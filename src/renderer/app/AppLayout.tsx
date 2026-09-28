@@ -3350,6 +3350,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
       data-wallpaper-orientation={shouldShowAppWallpaperVisual ? activeAppWallpaperOrientation : undefined}
       data-window-acrylic={performancePolicy.appWindowAcrylicEnabled ? 'true' : undefined}
       data-window-acrylic-keep-unfocused={performancePolicy.appWindowAcrylicEnabled && appWallpaperSettings.appWindowAcrylicKeepWhenUnfocusedEnabled ? 'true' : undefined}
+      data-active-route={activeRouteId}
       data-low-spec-mode={performancePolicy.lowSpecModeEnabled ? 'true' : undefined}
       data-window-focused={isWindowFocused ? 'true' : 'false'}
       data-window-fullscreen={isWindowFullscreen ? 'true' : 'false'}

@@ -1,3 +1,4 @@
+import { UltraLightSettingsRows } from './settings/components/UltraLightSettingsRows';
 import { lazy, Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import {
@@ -1048,6 +1049,26 @@ export const SettingsPage = (): JSX.Element => {
     'ko-KR': '애니메이션, 블러, 시각화, 동영상 배경, 스캔, 백그라운드 작업 부하를 줄입니다.',
   }),
         terms: ['低配', '低配置', '低内存', '低占用', '流畅模式', '性能模式', '省资源', 'low spec', 'low memory', 'performance mode'],
+      },
+      {
+        id: 'row-ultra-light-mode',
+        sectionKey: 'general',
+        targetId: 'settings-row-ultra-light-mode',
+        title: settingsLocaleCopy(locale, {
+          'zh-CN': '超轻后台模式',
+          'zh-TW': '超輕背景模式',
+          'ja-JP': '超軽量バックグラウンドモード',
+          'en-US': 'Ultra-light background mode',
+          'ko-KR': '초경량 백그라운드 모드',
+        }),
+        description: settingsLocaleCopy(locale, {
+          'zh-CN': '打游戏时完全卸载界面，仅保留音频核心、队列、托盘和快捷键。',
+          'zh-TW': '遊戲時完全卸載介面，只保留音訊核心、佇列、系統匣和快捷鍵。',
+          'ja-JP': 'ゲーム中はUIを完全にアンロードし、オーディオコア、キュー、トレイ、ショートカットだけを残します。',
+          'en-US': 'Unloads the UI while gaming, leaving only audio, queue, tray, and shortcuts running.',
+          'ko-KR': '게임 중 UI를 완전히 언로드하고 오디오, 대기열, 트레이, 단축키만 유지합니다.',
+        }),
+        terms: ['游戏模式', '超轻', '后台播放', '卸载界面', '极低内存', 'gaming', 'ultra light', 'headless', 'background playback'],
       },
       {
         id: 'row-close-to-tray',
@@ -9648,6 +9669,8 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   />
                 </div>
               </SettingRow>
+              <UltraLightSettingsRows locale={locale} appSettings={appSettings} highlightedSettingId={highlightedSettingId}
+                patchAppSettings={patchAppSettings} setError={setError} />
               <SettingSubsectionTitle id="settings-subsection-language" {...getSettingsSubsection('generalBasics')} />
               <SettingRow title={t('settings.general.language.title')} description={t('settings.general.language.description')}>
                 <div className="settings-chip-row">

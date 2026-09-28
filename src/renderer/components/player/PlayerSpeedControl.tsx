@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, WheelEvent } from 'react';
 import { Gauge, RotateCcw } from 'lucide-react';
+import { isUltraLightRendererRestore } from '../../../shared/types/ultraLightMode';
 import type { AudioStatus, PlaybackSpeedMode } from '../../../shared/types/audio';
 import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
 
@@ -171,6 +172,8 @@ export const PlayerSpeedControl = ({
   }, [clearPendingCommit, status]);
 
   useEffect(() => {
+    // The native host is still playing; a restored control must only observe it.
+    if (isUltraLightRendererRestore(window.location.search)) return;
     const getSettings = window.echo?.app?.getSettings;
     const audio = window.echo?.audio;
 

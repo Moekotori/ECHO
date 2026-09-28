@@ -83,6 +83,7 @@ import type {
   RoomCorrectionState,
 } from '../shared/types/eq';
 import type { GlobalShortcutAction, GlobalShortcutValidationResult } from '../shared/types/globalShortcuts';
+import type { UltraLightModeStatus } from '../shared/types/ultraLightMode';
 import type { DesktopLyricsState, DesktopLyricsStylePatch } from '../shared/types/desktopLyrics';
 import type { MiniPlayerHideOptions, MiniPlayerState } from '../shared/types/miniPlayer';
 import type { PetBounds, PetState } from '../shared/types/pet';
@@ -412,6 +413,9 @@ export type EchoApi = {
     applyEchoProSettingsCloud: () => Promise<EchoProSettingsCloudApplyResult>;
     validateGlobalShortcut: (accelerator: string) => Promise<GlobalShortcutValidationResult>;
     onGlobalShortcutCommand: (handler: (action: GlobalShortcutAction) => void) => () => void;
+    getUltraLightModeStatus: () => Promise<UltraLightModeStatus>;
+    enterUltraLightMode: () => Promise<UltraLightModeStatus>;
+    restoreUltraLightMode: () => Promise<UltraLightModeStatus>;
   };
   desktopLyrics: {
     show: () => Promise<DesktopLyricsState>;

@@ -105,6 +105,7 @@ import { registerDownloadsIpc } from './downloadsIpc';
 import { registerLastFmIpc } from './lastFmIpc';
 import { registerLibraryIpc } from './libraryIpc';
 import { registerLyricsIpc } from './lyricsIpc';
+import { registerUltraLightModeIpc } from './ultraLightModeIpc';
 import { registerMiniPlayerIpc } from './miniPlayerIpc';
 import { registerPetIpc } from './petIpc';
 import { registerMvIpc } from './mvIpc';
@@ -989,6 +990,7 @@ export const registerIpc = (): void => {
   registerIpcStartupStep('discord-presence', registerDiscordPresenceIpc);
   registerIpcStartupStep('desktop-lyrics', registerDesktopLyricsIpc);
   registerIpcStartupStep('mini-player', registerMiniPlayerIpc);
+  registerIpcStartupStep('ultra-light-mode', registerUltraLightModeIpc);
   registerIpcStartupStep('pet', registerPetIpc);
   registerIpcStartupStep('downloads', registerDownloadsIpc);
   registerIpcStartupStep('plugin', registerPluginIpc);

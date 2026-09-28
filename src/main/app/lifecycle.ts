@@ -11,7 +11,11 @@ import { disposeDiscordPresenceIntegration, initializeDiscordPresenceIntegration
 import { disposeLastFmIntegration, initializeLastFmIntegration } from '../integrations/lastfm/LastFmStatusSync';
 import { disposeWallpaperEngineBridgeIntegration, initializeWallpaperEngineBridgeIntegration } from '../integrations/wallpaperEngine/getWallpaperEngineBridgeService';
 import { disposeStageBridgeIntegration, initializeStageBridgeIntegration } from '../integrations/stage/getStageBridgeService';
-import { savePlaybackMemoryNow } from '../ipc/playbackIpc';
+import { savePlaybackMemoryNow, registerPlaybackMemoryPersistence, suspendPlaybackMemoryPersistence } from '../ipc/playbackIpc';
+import { getAudioSession, getPlaybackSessionStore } from '../audioPublicApi';
+import { enterUltraLightMode, enterUltraLightModeForMinimizedParking, enterUltraLightModeForTrayParking } from './UltraLightModeService';
+import { getUltraLightGpuRuntimeEntryMode, getUltraLightGpuRuntimeResumePlayback, getUltraLightNormalRuntimeHandoff, isUltraLightGpuRuntime, prepareNormalRuntimeRelaunch } from './ultraLightGpuRuntime';
+import { waitForRendererStartupReady } from './ultraLightRestoreReadiness';
 import { dispatchLocalAudioFilesOpened, parseLocalAudioFileArguments } from './localFileOpen';
 import { initializeAutoUpdater } from './autoUpdater';
 import { getAppSettings } from './appSettings';
@@ -46,6 +50,7 @@ import { closeDevConsoleWindow } from '../diagnostics/DevConsoleService';
 import { startMemoryPressureMonitor, stopMemoryPressureMonitor } from '../diagnostics/MemoryPressureMonitor';
 import { closeDesktopLyricsWindow, restoreDesktopLyricsWindowOnStartup } from './desktopLyricsWindow';
 import { closeMiniPlayerWindow, restoreMiniPlayerWindowOnStartup } from './miniPlayerWindow';
+import { isUltraLightModeActive, restoreUltraLightMode } from './UltraLightModeService';
 import { syncLaunchAtLoginSetting } from './launchAtLogin';
 import { syncNativeThemeSource } from './nativeThemePreference';
 import { disposeIntegrationEventHub, getIntegrationEventHub } from '../integrations/core/IntegrationEventHub';
@@ -188,10 +193,32 @@ const scheduleDeferredStartupDataProtection = (userDataPath: string, window: Bro
 export const registerAppLifecycle = (): void => {
   const libraryRecoveryMode = isLibraryRecoveryMode();
   const startupSettings = getAppSettings();
+  const ultraLightGpuRuntime = isUltraLightGpuRuntime();
+  const ultraLightNormalRuntimeHandoff = getUltraLightNormalRuntimeHandoff();
+  const recoverNormalRuntimeFromUltraLightFailure = (): void => {
+    let resumePlayback = false;
+    try {
+      resumePlayback = getAudioSession().getStatus().state === 'playing' ||
+        getPlaybackSessionStore().load()?.resume?.state === 'playing';
+    } catch {
+      // Recovery must remain available even when playback persistence is damaged.
+    }
+    app.relaunch({
+      args: prepareNormalRuntimeRelaunch(process.argv, process.env, { resumePlayback }),
+    });
+    suspendPlaybackMemoryPersistence();
+    app.quit();
+  };
+
   syncNativeThemeSource(startupSettings);
 
-  if (startupSettings.hardwareAccelerationDisabled === true) {
+  if (startupSettings.hardwareAccelerationDisabled === true || ultraLightGpuRuntime) {
     app.disableHardwareAcceleration();
+    if (ultraLightGpuRuntime) {
+      app.commandLine.appendSwitch('disable-gpu');
+      app.commandLine.appendSwitch('disable-gpu-compositing');
+      app.commandLine.appendSwitch('disable-software-rasterizer');
+    }
     markStartupStage('hardware-acceleration:disabled-by-setting');
   }
 
@@ -208,6 +235,14 @@ export const registerAppLifecycle = (): void => {
   }
 
   app.on('second-instance', (_event, argv) => {
+    if (isUltraLightModeActive()) {
+      void restoreUltraLightMode().then(() => {
+        if (!libraryRecoveryMode && !isLibraryRecoveryMode(argv)) {
+          dispatchLocalAudioFilesOpened(parseLocalAudioFileArguments(argv));
+        }
+      });
+      return;
+    }
     let window = getMainWindow();
     if (window === null) {
       window = createMainWindow();
@@ -273,6 +308,59 @@ export const registerAppLifecycle = (): void => {
     registerCoverProtocolHandler();
     registerVideoProtocolHandler();
     markStartupStage('protocols:register:complete');
+    if (ultraLightGpuRuntime) {
+      const persistedStartupPlaybackResume = getPlaybackSessionStore().load()?.resume ?? null;
+      const resumePlaybackRequested = getUltraLightGpuRuntimeResumePlayback();
+      registerPlaybackMemoryPersistence();
+      const restoredStartupAudioStatus = getAudioSession().getStatus();
+      const startupPlaybackResume = resumePlaybackRequested
+        ? persistedStartupPlaybackResume
+          ? { ...persistedStartupPlaybackResume, state: 'playing' as const }
+          : restoredStartupAudioStatus.currentFilePath
+            ? {
+                queueId: null,
+                trackId: restoredStartupAudioStatus.currentTrackId,
+                filePath: restoredStartupAudioStatus.currentFilePath,
+                positionMs: Math.round(Math.max(0, restoredStartupAudioStatus.positionSeconds) * 1_000),
+                durationMs: Math.round(Math.max(0, restoredStartupAudioStatus.durationSeconds ?? 0) * 1_000),
+                state: 'playing' as const,
+                updatedAt: new Date().toISOString(),
+              }
+            : null
+        : persistedStartupPlaybackResume;
+      markStartupStage('startup:ultra-light-gpu-disabled:playback-handoff', {
+        resumePlaybackRequested,
+        hasPersistedResume: persistedStartupPlaybackResume !== null,
+        restoredState: restoredStartupAudioStatus.state,
+        hasRestoredFile: Boolean(restoredStartupAudioStatus.currentFilePath),
+      });
+      initializePlaybackPowerSaveBlocker();
+      if (dataProtection.libraryHealth.status === 'ok' && !libraryRecoveryMode) {
+        if (process.platform === 'win32') {
+          void initializeSmtcIntegration();
+        }
+        initializeLastFmIntegration();
+      }
+      const ultraLightEntryMode = getUltraLightGpuRuntimeEntryMode();
+      const ultraLightStatus = ultraLightEntryMode === 'tray-auto'
+        ? await enterUltraLightModeForTrayParking(startupPlaybackResume)
+        : ultraLightEntryMode === 'minimize-auto'
+          ? await enterUltraLightModeForMinimizedParking(startupPlaybackResume)
+          : await enterUltraLightMode(startupPlaybackResume);
+      if (!ultraLightStatus.active) {
+        markStartupStage('startup:ultra-light-gpu-disabled:recovery', {
+          error: ultraLightStatus.error,
+        });
+        recoverNormalRuntimeFromUltraLightFailure();
+        return;
+      }
+      markStartupStage('startup:ready', {
+        mode: 'ultra-light-gpu-disabled',
+        error: ultraLightStatus.error,
+      });
+      return;
+    }
+
     void initializeWallpaperEngineBridgeIntegration();
     getIntegrationEventHub();
     void initializeMqttIntegration().catch((error) => {
@@ -306,7 +394,33 @@ export const registerAppLifecycle = (): void => {
       });
     }
     markStartupStage('main-window:create:request');
-    const mainWindow = createMainWindow();
+    const mainWindow = createMainWindow({
+      ultraLightRestore: Boolean(ultraLightNormalRuntimeHandoff.pendingAction || ultraLightNormalRuntimeHandoff.resumePlayback),
+    });
+    if (ultraLightNormalRuntimeHandoff.pendingAction) {
+      const pendingAction = ultraLightNormalRuntimeHandoff.pendingAction;
+      mainWindow.once('ready-to-show', () => {
+        void waitForRendererStartupReady(mainWindow.webContents).then(() => {
+          if (!mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+            mainWindow.webContents.send(IpcChannels.AppGlobalShortcutCommand, pendingAction);
+          }
+        });
+      });
+    }
+    if (ultraLightNormalRuntimeHandoff.resumePlayback === true) {
+      const audioSession = getAudioSession();
+      if (audioSession.getStatus().state === 'paused') {
+        try {
+          await audioSession.play();
+        } catch (error) {
+          getCrashReportService().getLogger()?.warn(
+            'main',
+            '[Lifecycle] failed to resume playback after UltraLight runtime handoff',
+            { error: error instanceof Error ? error.message : String(error) },
+          );
+        }
+      }
+    }
     markStartupStage('main-window:create:returned');
     startMemoryPressureMonitor();
     markStartupStage('memory-pressure-monitor:started');
@@ -334,6 +448,10 @@ export const registerAppLifecycle = (): void => {
     }
     if (libraryRecoveryMode) {
       app.on('activate', () => {
+        if (isUltraLightModeActive()) {
+          void restoreUltraLightMode();
+          return;
+        }
         if (getMainWindow() === null) {
           createMainWindow();
         }
@@ -358,6 +476,10 @@ export const registerAppLifecycle = (): void => {
     markStartupStage('local-files:startup-arguments-dispatched');
 
     app.on('activate', () => {
+      if (isUltraLightModeActive()) {
+        void restoreUltraLightMode();
+        return;
+      }
       if (getMainWindow() === null) {
         createMainWindow();
       }
@@ -368,6 +490,10 @@ export const registerAppLifecycle = (): void => {
     getCrashReportService().getLogger()?.warn('main', '[Lifecycle] startup failed', {
       error: error instanceof Error ? error.message : String(error),
     });
+    if (ultraLightGpuRuntime) {
+      recoverNormalRuntimeFromUltraLightFailure();
+      return;
+    }
     createMainWindow();
   });
 
@@ -478,7 +604,7 @@ export const registerAppLifecycle = (): void => {
   });
 
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
+    if (!isUltraLightModeActive() && process.platform !== 'darwin') {
       app.quit();
     }
   });

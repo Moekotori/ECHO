@@ -246,6 +246,9 @@ export const experimentalLabCopy = {
 
 export const settingsSearchSubsectionByTargetId: Partial<Record<string, SettingsSubsectionCopyKey>> = {
   'settings-row-low-spec-mode': 'generalPerformance',
+  'settings-row-ultra-light-mode': 'generalPerformance',
+  'settings-row-ultra-light-auto': 'generalPerformance',
+  'settings-row-ultra-light-disable-gpu': 'generalPerformance',
   'settings-row-first-run-wizard': 'generalBasics',
   'settings-row-home-random-hero-title': 'generalBasics',
   'settings-row-echo-pro-activation': 'generalBasics',

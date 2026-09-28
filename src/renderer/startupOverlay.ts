@@ -1,3 +1,5 @@
+import { isUltraLightRendererRestore } from '../shared/types/ultraLightMode';
+
 const startupOverlaySelector = '.echo-startup-shell';
 const appMountedEventName = 'echo:startup-app-mounted';
 const appMountFallbackMs = 1_500;
@@ -85,6 +87,7 @@ const waitForMainSurface = async (): Promise<void> => {
 };
 
 const waitForMinimumVisibleDuration = async (): Promise<void> => {
+  if (isUltraLightRendererRestore(window.location.search)) return;
   const shownAt = Number(document.documentElement.dataset.echoStartupShownAt);
   const elapsedMs = Number.isFinite(shownAt) ? Date.now() - shownAt : 0;
   const remainingMs = Math.max(0, minimumStartupVisibleMs - elapsedMs);

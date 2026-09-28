@@ -12,6 +12,7 @@ import {
 import type { AppSettings } from '../../shared/types/appSettings';
 import { getAppSettings, setAppSettings } from './appSettings';
 import { getMainWindow } from './windowManager';
+import { dispatchUltraLightModeAction, isUltraLightModeActive, restoreUltraLightMode } from './UltraLightModeService';
 
 type RegistrationStatus = {
   action: GlobalShortcutAction;
@@ -363,6 +364,10 @@ const ensureMouseShortcutHook = (): boolean => {
 const getCommandWindow = (): BrowserWindow | null => getMainWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
 
 const showMainWindow = (): void => {
+  if (isUltraLightModeActive()) {
+    void restoreUltraLightMode();
+    return;
+  }
   const window = getCommandWindow();
   if (!window || window.isDestroyed()) {
     return;
@@ -386,6 +391,10 @@ const hideMainWindow = (): void => {
 };
 
 const dispatchGlobalShortcutCommand = (action: GlobalShortcutAction): void => {
+  if (isUltraLightModeActive()) {
+    void dispatchUltraLightModeAction(action);
+    return;
+  }
   if (action === 'showMainWindow') {
     showMainWindow();
     return;

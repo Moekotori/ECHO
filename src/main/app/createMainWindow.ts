@@ -16,6 +16,9 @@ import { applyMainWindowBackgroundMaterial, isMainWindowAcrylicSupportedPlatform
 import { areDeveloperToolsAllowed } from './securityPolicy';
 import { resolveAppIconPath } from './appIcon';
 import { hideTaskbarMiniPlayerOnly, showTaskbarMiniPlayerOnly } from './taskbarMiniPlayerWindow';
+import { bindMainWindowTrayLoadShedding } from './mainWindowTrayLoadShedding';
+import { ultraLightRendererRestoreQueryKey } from '../../shared/types/ultraLightMode';
+import { isUltraLightModeActive } from './UltraLightModeService';
 
 const mainOutputDir = import.meta.dirname;
 export const defaultMainWindowSize = {
@@ -92,7 +95,7 @@ const rememberMainWindowSize = (window: BrowserWindow): void => {
   });
 };
 
-export const createMainWindow = (): BrowserWindow => {
+export const createMainWindow = (options: { ultraLightRestore?: boolean } = {}): BrowserWindow => {
   markStartupStage('main-window:create:start');
   const settings = getAppSettings();
   const initialSize = resolveInitialMainWindowSize(settings);
@@ -181,7 +184,7 @@ export const createMainWindow = (): BrowserWindow => {
 
   window.once('ready-to-show', () => {
     const settings = getAppSettings();
-    if (settings.miniPlayerEnabled === true && settings.miniPlayerAutoHideMainWindow === true) {
+    if (!options.ultraLightRestore && settings.miniPlayerEnabled === true && settings.miniPlayerAutoHideMainWindow === true) {
       window.hide();
     } else {
       window.show();
@@ -272,7 +275,7 @@ export const createMainWindow = (): BrowserWindow => {
     clearMainWindow();
     closeDevConsoleWindow();
 
-    if (!isAppQuitRequested() && !getAppSettings().hideToTrayOnClose) {
+    if (!isAppQuitRequested() && !isUltraLightModeActive() && !getAppSettings().hideToTrayOnClose) {
       requestAppQuit();
       app.quit();
     }
@@ -281,12 +284,16 @@ export const createMainWindow = (): BrowserWindow => {
   applyMainWindowBackgroundMaterial(window, settings);
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    void window.loadURL(process.env.ELECTRON_RENDERER_URL);
+    const url = new URL(process.env.ELECTRON_RENDERER_URL);
+    if (options.ultraLightRestore) url.searchParams.set(ultraLightRendererRestoreQueryKey, '1');
+    void window.loadURL(url.toString());
   } else {
-    void window.loadFile(join(mainOutputDir, '../renderer/index.html'));
+    void window.loadFile(join(mainOutputDir, '../renderer/index.html'), options.ultraLightRestore
+      ? { query: { [ultraLightRendererRestoreQueryKey]: '1' } } : undefined);
   }
 
   setMainWindow(window);
+  bindMainWindowTrayLoadShedding(window);
   ensureTray();
   bindBackgroundPlaybackShortcutsToWindow();
   bindTaskbarPlaybackIntegration(window);

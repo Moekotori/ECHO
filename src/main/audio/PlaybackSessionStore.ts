@@ -335,6 +335,10 @@ export class PlaybackSessionStore {
     }
   }
 
+  getPlaybackMode(): PersistedPlaybackSessionV1['mode'] | null {
+    return this.load()?.mode ?? null;
+  }
+
   save(
     session: PersistedPlaybackSessionV1,
     options: { preserveRevision?: boolean } = {},

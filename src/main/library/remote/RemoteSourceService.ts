@@ -295,8 +295,17 @@ export class RemoteSourceService {
     return this.backgroundQueue.retryFailed(sourceId, kinds);
   }
 
+  private backgroundUserPaused = false;
+  private backgroundParked = false;
+
   setBackgroundPaused(paused: boolean): RemoteBackgroundGlobalStatus {
-    return this.backgroundQueue.setGlobalPaused(paused);
+    this.backgroundUserPaused = paused;
+    return this.backgroundQueue.setGlobalPaused(paused || this.backgroundParked);
+  }
+
+  setBackgroundParked(parked: boolean): void {
+    this.backgroundParked = parked;
+    this.backgroundQueue.setGlobalPaused(parked || this.backgroundUserPaused);
   }
 
   getBackgroundGlobalStatus(): RemoteBackgroundGlobalStatus {
@@ -705,6 +714,12 @@ const getRemoteBackgroundRuntimeLimits = (): RemoteRuntimeLimits => {
 };
 
 let defaultRemoteSourceService: RemoteSourceService | null = null;
+let defaultBackgroundParked = false;
+
+export const setDefaultRemoteSourceBackgroundParked = (parked: boolean): void => {
+  defaultBackgroundParked = parked;
+  defaultRemoteSourceService?.setBackgroundParked(parked);
+};
 
 export const getRemoteSourceService = (): RemoteSourceService => {
   assertProtectedLibraryAvailable();
@@ -712,6 +727,7 @@ export const getRemoteSourceService = (): RemoteSourceService => {
     const databaseConnection = getLibraryDatabaseManager().openServiceConnection('remote-source');
     const coverCacheDir = resolveConfiguredCoverCacheDir(databaseConnection.databasePath, getAppSettingsSafe());
     defaultRemoteSourceService = new RemoteSourceService(databaseConnection.database, databaseConnection.close, coverCacheDir);
+    defaultRemoteSourceService.setBackgroundParked(defaultBackgroundParked);
   }
 
   return defaultRemoteSourceService;

@@ -103,6 +103,9 @@ export function createAppApi(
     pullEchoProSettingsCloud: () => ipcRenderer.invoke(IpcChannels.AppEchoProSettingsCloudPull),
     applyEchoProSettingsCloud: () => ipcRenderer.invoke(IpcChannels.AppEchoProSettingsCloudApply),
     validateGlobalShortcut: (accelerator) => ipcRenderer.invoke(IpcChannels.AppValidateGlobalShortcut, accelerator),
+    getUltraLightModeStatus: () => ipcRenderer.invoke(IpcChannels.AppUltraLightModeGetStatus),
+    enterUltraLightMode: () => ipcRenderer.invoke(IpcChannels.AppUltraLightModeEnter),
+    restoreUltraLightMode: () => ipcRenderer.invoke(IpcChannels.AppUltraLightModeRestore),
     onGlobalShortcutCommand: (handler) => {
       const listener = (_event: Electron.IpcRendererEvent, action: unknown): void => {
         handler(action as GlobalShortcutAction);

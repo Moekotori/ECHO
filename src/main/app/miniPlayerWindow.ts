@@ -1,3 +1,4 @@
+import { isUltraLightModeActive, restoreUltraLightMode } from './UltraLightModeService';
 import { join } from 'node:path';
 import { BrowserWindow, screen } from 'electron';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
@@ -216,6 +217,10 @@ const hideMainWindowForMiniPlayer = (): void => {
 };
 
 const restoreMainWindowAfterMiniPlayerHide = (): void => {
+  if (isUltraLightModeActive()) {
+    void restoreUltraLightMode();
+    return;
+  }
   const mainWindow = getMainWindow() ?? createMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;

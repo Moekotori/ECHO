@@ -247,6 +247,7 @@ const logoutEchoProAccountMock = vi.fn();
 const getEchoProAccountStatusMock = vi.fn();
 const getAccountStatusesMock = vi.fn();
 const taskbarMiniPlayerSetEnabledMock = vi.fn();
+const enterUltraLightModeMock = vi.fn();
 
 const downloadSettings: DownloadSettings = {
   audioStrategy: 'best_available',
@@ -367,6 +368,7 @@ vi.mock('../utils/echoBridge', () => ({
     importSettings: importSettingsMock,
     openExternalUrl: openExternalUrlMock,
     validateGlobalShortcut: validateGlobalShortcutMock,
+    enterUltraLightMode: enterUltraLightModeMock,
     resetSettings: resetSettingsMock,
     setCoverCacheDirectory: vi.fn(),
     setSettings: setSettingsMock,
@@ -2005,6 +2007,26 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ lowSpecModeEnabled: true }));
     expect(setSettingsMock).not.toHaveBeenCalledWith(expect.objectContaining({ scanPerformanceMode: 'low' }));
+  });
+
+  it('enters ultra-light mode from General after confirming the guaranteed restore shortcut', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    getSettingsMock.mockResolvedValue(settings);
+    enterUltraLightModeMock.mockResolvedValue({
+      phase: 'active',
+      active: true,
+      restoreAccelerator: 'CommandOrControl+Shift+E',
+      error: null,
+    });
+
+    render(<SettingsPage />);
+
+    const button = await screen.findByRole('button', { name: '进入超轻后台模式' });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(enterUltraLightModeMock).toHaveBeenCalledTimes(1));
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Ctrl+Shift+E'));
+    confirmSpy.mockRestore();
   });
 
   it('exports user settings from the About diagnostics section', async () => {

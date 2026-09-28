@@ -20,6 +20,7 @@ const ALL_CHANNELS = Object.values(IpcChannels);
  * it is a push-only event channel.
  */
 const PUSH_ONLY_CHANNELS = new Set<string>([
+  IpcChannels.PetStateChanged,
   IpcChannels.AppDataBackupProgress,
   IpcChannels.AppWindowFullscreenChanged,
   IpcChannels.AppWindowMaximizedChanged,
@@ -73,6 +74,7 @@ const IPC_SOURCE_FILES = [
   'libraryIpc.ts',
   'lyricsIpc.ts',
   'miniPlayerIpc.ts',
+  'petIpc.ts',
   'mvIpc.ts',
   'playbackIpc.ts',
   'pluginIpc.ts',
@@ -83,6 +85,7 @@ const IPC_SOURCE_FILES = [
   'stageBridgeIpc.ts',
   'streamingIpc.ts',
   'taskbarMiniPlayerIpc.ts',
+  'ultraLightModeIpc.ts',
 ];
 
 /**
