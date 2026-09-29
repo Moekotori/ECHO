@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ECHO</title>
+    <link rel="preload" href="./assets/echo-startup-commission.gif" as="image" type="image/gif" />
+    <script>
+      // Auxiliary windows reuse this document, but they must never paint the
+      // main-window startup scene. Painting it once in a transparent window can
+      // leave stale compositor content visible when that window is expanded.
+      (() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('miniPlayer') === '1' || params.get('desktopLyrics') === '1' || params.get('pet') === '1') {
+          document.documentElement.dataset.echoStartup = 'disabled';
+        } else {
+          document.documentElement.dataset.echoStartupShownAt = String(Date.now());
+        }
+      })();
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+        background: #74d3e5;
+      }
+
+      html,
+      body,
+      #root {
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: #74d3e5;
+      }
+
+      html[data-echo-startup="disabled"],
+      html[data-echo-startup="disabled"] body,
+      html[data-echo-startup="disabled"] #root {
+        background: transparent;
+      }
+
+      html[data-echo-startup="disabled"] .echo-startup-shell {
+        display: none;
+      }
+
+      .echo-startup-shell {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        isolation: isolate;
+        overflow: hidden;
+        background: #74d3e5;
+        opacity: 1;
+        transition:
+          opacity 140ms ease,
+          visibility 140ms ease;
+        visibility: visible;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      html[data-echo-startup="ready"] .echo-startup-shell {
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      .echo-startup-scene {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        background: #74d3e5;
+        -webkit-app-region: drag;
+      }
+
+      .echo-startup-art {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+        object-position: center center;
+        pointer-events: none;
+        image-rendering: pixelated;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div class="echo-startup-shell">
+      <main class="echo-startup-scene" role="status" aria-live="polite" aria-label="ECHOを起動しています">
+        <img
+          class="echo-startup-art"
+          src="./assets/echo-startup-commission.gif"
+          width="1920"
+          height="1080"
+          alt=""
+          draggable="false"
+          fetchpriority="high"
+        />
+      </main>
+    </div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>

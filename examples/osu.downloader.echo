@@ -1,0 +1,37 @@
+{
+  "type": "echo-next-plugin-package",
+  "version": 1,
+  "exportedAt": "2026-06-21T00:00:00.000Z",
+  "manifest": {
+    "id": "osu.downloader",
+    "name": "osu!downloader",
+    "version": "1.0.0",
+    "apiVersion": 2,
+    "entry": "plugin.js",
+    "permissions": [],
+    "contributes": {
+      "commands": [],
+      "panels": [
+        {
+          "id": "main",
+          "title": "osu downloader",
+          "hostPage": "osu-downloader",
+          "placement": "main"
+        }
+      ],
+      "trackContextMenus": [],
+      "metadataProviders": [],
+      "sourceProviders": [],
+      "lyricsProviders": [],
+      "coverProviders": [],
+      "themePresets": [],
+      "settings": []
+    }
+  },
+  "files": [
+    {
+      "path": "plugin.js",
+      "content": "// osu!downloader marker plugin. Enable this plugin to show the osu downloader sidebar entry.\n"
+    }
+  ]
+}

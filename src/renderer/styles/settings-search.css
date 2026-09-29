@@ -1,0 +1,25 @@
+.settings-search .settings-search-results {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  background: var(--theme-modal-bg);
+}
+
+.settings-search .settings-search-result {
+  min-width: 0;
+  gap: 5px;
+}
+
+.settings-search .settings-search-result small {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.settings-search .settings-search-clear:focus-visible,
+.settings-search .settings-search-result:focus-visible {
+  outline: 2px solid var(--theme-focus-ring);
+  outline-offset: -2px;
+}

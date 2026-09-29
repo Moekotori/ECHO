@@ -1,0 +1,11 @@
+[Unit]
+Description=Back up ECHO Pro cloud database
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/echo-pro-cloud-backup
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/echo-pro /var/lib/echo-pro /var/lib/echo-pro-activation

@@ -1,0 +1,224 @@
+:root,
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent !important;
+}
+
+body {
+  user-select: none;
+}
+
+.echo-pet-app {
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+  background: transparent;
+}
+
+.echo-pet-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  -webkit-app-region: drag;
+}
+
+.echo-pet-stage:active {
+  cursor: grabbing;
+}
+
+.echo-pet-character {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 8px 8px rgba(22, 50, 86, 0.26));
+  transform-origin: 50% 86%;
+  transition: filter 180ms ease, transform 180ms ease;
+}
+
+.echo-pet-stage:hover .echo-pet-character {
+  filter: drop-shadow(0 10px 10px rgba(22, 50, 86, 0.34));
+  transform: translateY(-2px);
+}
+
+.echo-pet-character-trigger {
+  position: absolute;
+  z-index: 1;
+  inset: 30px 32px 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 42%;
+  background: transparent;
+  cursor: grab;
+  -webkit-app-region: no-drag;
+}
+
+.echo-pet-character-trigger:active {
+  cursor: grabbing;
+}
+
+.echo-pet-character-trigger:focus-visible {
+  outline: 2px solid rgba(169, 239, 255, 0.96);
+  outline-offset: 2px;
+}
+
+.echo-pet-track-controls {
+  position: absolute;
+  right: 3px;
+  bottom: 10px;
+  left: 3px;
+  display: flex;
+  z-index: 2;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+
+.echo-pet-track-control {
+  position: relative;
+  width: 48px;
+  height: 38px;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  color: #f8fdff;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: filter 140ms ease, transform 140ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.echo-pet-track-control:hover:not(:disabled) {
+  filter: brightness(1.14) drop-shadow(0 4px 5px rgba(24, 53, 94, 0.32));
+  transform: translateY(-2px) scale(1.06);
+}
+
+.echo-pet-track-control:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+}
+
+.echo-pet-track-control:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.echo-pet-track-control:focus-visible {
+  outline: 2px solid rgba(169, 239, 255, 0.96);
+  outline-offset: 1px;
+  border-radius: 10px;
+}
+
+.echo-pet-part {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  image-rendering: pixelated;
+}
+
+.echo-pet-part img {
+  position: absolute;
+  width: 512px;
+  height: 512px;
+  max-width: none;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+
+.echo-pet-part--previous img {
+  top: -379px;
+  left: -54px;
+}
+
+.echo-pet-part--next img {
+  top: -379px;
+  left: -228px;
+}
+
+.echo-pet-track-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  filter: drop-shadow(0 1px 1px rgba(17, 43, 83, 0.72));
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.echo-pet-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.echo-pet-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  z-index: 3;
+  gap: 5px;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 150ms ease, transform 150ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.echo-pet-stage:hover .echo-pet-controls,
+.echo-pet-controls:focus-within {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.echo-pet-control {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(139, 216, 242, 0.62);
+  border-radius: 9px;
+  color: #f8fdff;
+  background: rgba(24, 53, 94, 0.78);
+  box-shadow: 0 4px 12px rgba(11, 31, 62, 0.24);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-app-region: no-drag;
+}
+
+.echo-pet-control:hover {
+  border-color: rgba(169, 239, 255, 0.92);
+  background: rgba(44, 88, 147, 0.9);
+}
+
+.echo-pet-control:focus-visible {
+  outline: 2px solid rgba(169, 239, 255, 0.96);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .echo-pet-character,
+  .echo-pet-controls,
+  .echo-pet-track-control {
+    transition: none;
+  }
+
+  .echo-pet-stage:hover .echo-pet-character {
+    transform: none;
+  }
+}

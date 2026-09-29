@@ -1,0 +1,19 @@
+{
+  "title": "ECHO NEXT",
+  "config": {
+    "step": {
+      "user": {
+        "title": "连接 ECHO NEXT",
+        "description": "请输入 ECHO 设置 → 集成中显示的 MQTT 设备 ID。",
+        "data": {
+          "device_id": "ECHO 设备 ID",
+          "topic_prefix": "MQTT Topic 前缀",
+          "device_name": "设备名称"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "这个 ECHO 设备已经配置。"
+    }
+  }
+}

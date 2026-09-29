@@ -1,0 +1,275 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  ultraLightActive: false,
+  restoreUltraLightMode: vi.fn(async () => undefined),
+  settings: {
+    miniPlayerEnabled: false,
+    miniPlayerLocked: false,
+    miniPlayerAutoHideMainWindow: true,
+    miniPlayerBounds: null as { x: number; y: number; width: number; height: number } | null,
+  },
+  mainWindow: null as null | {
+    focus: ReturnType<typeof vi.fn>;
+    isDestroyed: ReturnType<typeof vi.fn>;
+    isMinimized: ReturnType<typeof vi.fn>;
+    moveTop: ReturnType<typeof vi.fn>;
+    restore: ReturnType<typeof vi.fn>;
+    show: ReturnType<typeof vi.fn>;
+  },
+  makeMainWindow: (minimized = false) => ({
+    focus: vi.fn(),
+    isDestroyed: vi.fn(() => false),
+    isMinimized: vi.fn(() => minimized),
+    moveTop: vi.fn(),
+    restore: vi.fn(),
+    show: vi.fn(),
+  }),
+  setAppSettings: vi.fn(),
+  createMainWindow: vi.fn(),
+  allWindows: [] as unknown[],
+}));
+
+vi.mock('electron', () => ({
+  BrowserWindow: class {
+    static getAllWindows(): unknown[] {
+      return mocks.allWindows;
+    }
+  },
+  screen: {
+    getAllDisplays: vi.fn(() => [
+      {
+        workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+      },
+    ]),
+    getDisplayMatching: vi.fn(() => ({
+      workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+    })),
+    getPrimaryDisplay: vi.fn(() => ({
+      workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+    })),
+  },
+}));
+
+vi.mock('./UltraLightModeService', () => ({
+  isUltraLightModeActive: () => mocks.ultraLightActive,
+  restoreUltraLightMode: mocks.restoreUltraLightMode,
+}));
+
+vi.mock('./tray', () => ({ ensureTray: vi.fn() }));
+
+vi.mock('./appSettings', () => ({
+  getAppSettings: () => mocks.settings,
+  setAppSettings: mocks.setAppSettings,
+}));
+
+vi.mock('./createMainWindow', () => ({
+  createMainWindow: mocks.createMainWindow,
+  createMainWindowWebPreferences: vi.fn(() => ({})),
+}));
+
+vi.mock('./windowManager', () => ({
+  getMainWindow: () => mocks.mainWindow,
+}));
+
+vi.mock('./taskbarMiniPlayerWindow', () => ({
+  hideTaskbarMiniPlayerOnly: vi.fn(),
+  showTaskbarMiniPlayerOnly: vi.fn(),
+}));
+
+vi.mock('./taskbarPlaybackIntegration', () => ({
+  refreshTaskbarPlaybackIntegration: vi.fn(),
+}));
+
+vi.mock('../diagnostics/DevConsoleService', () => ({
+  recordMainRuntimeIssue: vi.fn(),
+  recordRendererConsoleMessage: vi.fn(),
+}));
+
+describe('mini player window bounds', () => {
+  beforeEach(() => {
+    mocks.ultraLightActive = false;
+    mocks.restoreUltraLightMode.mockClear();
+    mocks.settings.miniPlayerBounds = null;
+    mocks.mainWindow = null;
+    mocks.setAppSettings.mockClear();
+    mocks.createMainWindow.mockReset();
+    mocks.allWindows = [];
+    vi.resetModules();
+  });
+
+  it('defaults to the primary display top-right corner', async () => {
+    const { resolveInitialMiniPlayerBounds } = await import('./miniPlayerWindow');
+
+    expect(resolveInitialMiniPlayerBounds()).toEqual({
+      x: 1504,
+      y: 44,
+      width: 388,
+      height: 74,
+    });
+  });
+
+  it('compacts saved bounds from previous default sizes', async () => {
+    mocks.settings.miniPlayerBounds = {
+      x: 1548,
+      y: 44,
+      width: 344,
+      height: 96,
+    };
+    const { resolveInitialMiniPlayerBounds } = await import('./miniPlayerWindow');
+
+    expect(resolveInitialMiniPlayerBounds()).toEqual({
+      x: 1504,
+      y: 44,
+      width: 388,
+      height: 74,
+    });
+  });
+
+  it('compacts saved bounds from the oversized mini player', async () => {
+    mocks.settings.miniPlayerBounds = {
+      x: 1604,
+      y: 44,
+      width: 288,
+      height: 84,
+    };
+    const { resolveInitialMiniPlayerBounds } = await import('./miniPlayerWindow');
+
+    expect(resolveInitialMiniPlayerBounds()).toEqual({
+      x: 1504,
+      y: 44,
+      width: 388,
+      height: 74,
+    });
+  });
+
+  it('compacts oversized visible bounds back to the clickable player chrome', async () => {
+    mocks.settings.miniPlayerBounds = {
+      x: -80,
+      y: 24,
+      width: 520,
+      height: 116,
+    };
+    const { resolveInitialMiniPlayerBounds } = await import('./miniPlayerWindow');
+
+    expect(resolveInitialMiniPlayerBounds()).toEqual({
+      x: 0,
+      y: 24,
+      width: 388,
+      height: 74,
+    });
+  });
+
+  it('resets to the real default instead of reusing saved bounds', async () => {
+    mocks.settings.miniPlayerBounds = { x: 100, y: 200, width: 388, height: 74 };
+    const { resetMiniPlayerBounds } = await import('./miniPlayerWindow');
+
+    resetMiniPlayerBounds();
+
+    expect(mocks.setAppSettings).toHaveBeenCalledWith({
+      miniPlayerBounds: { x: 1504, y: 44, width: 388, height: 74 },
+    });
+  });
+
+  it('reacquires an existing mini window and repairs a stale collapsed height', async () => {
+    let bounds = { x: 100, y: 100, width: 388, height: 74 };
+    const window = {
+      getBounds: vi.fn(() => ({ ...bounds })),
+      getTitle: vi.fn(() => 'ECHO Mini Player'),
+      isDestroyed: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
+      setAlwaysOnTop: vi.fn(),
+      setBounds: vi.fn((next: typeof bounds) => { bounds = { ...next }; }),
+      setPosition: vi.fn((x: number, y: number) => { bounds = { ...bounds, x, y }; }),
+      setSize: vi.fn((width: number, height: number) => { bounds = { ...bounds, width, height }; }),
+      setVisibleOnAllWorkspaces: vi.fn(),
+      webContents: {
+        getURL: vi.fn(() => 'http://localhost/?miniPlayer=1'),
+        send: vi.fn(),
+      },
+    };
+    mocks.allWindows = [window];
+    const { setMiniPlayerQueueOpen } = await import('./miniPlayerWindow');
+
+    expect(setMiniPlayerQueueOpen(true).bounds?.height).toBe(324);
+    bounds = { ...bounds, height: 74 };
+    expect(setMiniPlayerQueueOpen(true).bounds?.height).toBe(324);
+    expect(window.setBounds).toHaveBeenLastCalledWith(expect.objectContaining({ height: 324 }));
+  });
+
+  it('does not report the queue as open when the operating system rejects both resize attempts', async () => {
+    const bounds = { x: 100, y: 100, width: 388, height: 74 };
+    const window = {
+      getBounds: vi.fn(() => ({ ...bounds })),
+      getTitle: vi.fn(() => 'ECHO Mini Player'),
+      isDestroyed: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
+      setAlwaysOnTop: vi.fn(),
+      setBounds: vi.fn(),
+      setPosition: vi.fn(),
+      setSize: vi.fn(),
+      setVisibleOnAllWorkspaces: vi.fn(),
+      webContents: {
+        getURL: vi.fn(() => 'http://localhost/?miniPlayer=1'),
+        send: vi.fn(),
+      },
+    };
+    mocks.allWindows = [window];
+    const { setMiniPlayerQueueOpen } = await import('./miniPlayerWindow');
+
+    const state = setMiniPlayerQueueOpen(true);
+
+    expect(window.setSize).toHaveBeenCalledWith(388, 324, false);
+    expect(state.queueOpen).toBe(false);
+    expect(state.bounds?.height).toBe(74);
+  });
+});
+
+describe('mini player window hide behavior', () => {
+  it('restores through Ultralight instead of creating a competing main window', async () => {
+    mocks.ultraLightActive = true;
+    const { hideMiniPlayerWindow } = await import('./miniPlayerWindow');
+    hideMiniPlayerWindow({ restoreMainWindow: true });
+    expect(mocks.restoreUltraLightMode).toHaveBeenCalledTimes(1);
+    expect(mocks.createMainWindow).not.toHaveBeenCalled();
+  });
+
+  beforeEach(() => {
+    mocks.ultraLightActive = false;
+    mocks.restoreUltraLightMode.mockClear();
+    mocks.settings.miniPlayerBounds = null;
+    mocks.mainWindow = null;
+    mocks.setAppSettings.mockClear();
+    mocks.createMainWindow.mockReset();
+    mocks.allWindows = [];
+    vi.resetModules();
+  });
+
+  it('restores the existing main window when requested', async () => {
+    const mainWindow = mocks.makeMainWindow(true);
+    mocks.mainWindow = mainWindow;
+    const { hideMiniPlayerWindow } = await import('./miniPlayerWindow');
+
+    hideMiniPlayerWindow({ restoreMainWindow: true });
+
+    expect(mocks.setAppSettings).toHaveBeenCalledWith({ miniPlayerEnabled: false });
+    expect(mainWindow.restore).toHaveBeenCalled();
+    expect(mainWindow.show).toHaveBeenCalled();
+    expect(mainWindow.moveTop).toHaveBeenCalled();
+    expect(mainWindow.focus).toHaveBeenCalled();
+    expect(mainWindow.restore.mock.invocationCallOrder[0]).toBeLessThan(mainWindow.show.mock.invocationCallOrder[0]);
+  });
+
+  it('recreates the main window before restoring when no main window is registered', async () => {
+    const mainWindow = mocks.makeMainWindow(false);
+    mocks.createMainWindow.mockReturnValue(mainWindow);
+    const { hideMiniPlayerWindow } = await import('./miniPlayerWindow');
+
+    hideMiniPlayerWindow({ restoreMainWindow: true });
+
+    expect(mocks.createMainWindow).toHaveBeenCalled();
+    expect(mainWindow.show).toHaveBeenCalled();
+    expect(mainWindow.moveTop).toHaveBeenCalled();
+    expect(mainWindow.focus).toHaveBeenCalled();
+  });
+});

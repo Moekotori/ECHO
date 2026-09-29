@@ -1,0 +1,15 @@
+{
+  "name": "ffmpeg",
+  "version": "8.1.1-essentials_build-www.gyan.dev",
+  "source": "gyan.dev release essentials static",
+  "sourceUrl": "https://github.com/GyanD/codexffmpeg/releases/download/8.1.1/ffmpeg-8.1.1-essentials_build.zip",
+  "projectUrl": "https://www.gyan.dev/ffmpeg/builds/",
+  "downloadPage": "https://ffmpeg.org/download.html",
+  "releaseDate": "2026-05-04T11:10:06Z",
+  "artifact": "electron-app/tools/ffmpeg.exe",
+  "sha256": "228D7A8556258DE907FDB55F36850078EBC7680B84EC30D84EA02E99BEC1D1EB",
+  "requiresSoxr": false,
+  "requiredFilters": ["aresample"],
+  "requiredDecoders": ["alac"],
+  "licenseFamily": "GPLv3"
+}

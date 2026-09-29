@@ -1,0 +1,19 @@
+{
+  "title": "ECHO NEXT",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect ECHO NEXT",
+        "description": "Enter the MQTT device ID shown in ECHO Settings > Integrations.",
+        "data": {
+          "device_id": "ECHO device ID",
+          "topic_prefix": "MQTT topic prefix",
+          "device_name": "Device name"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This ECHO device is already configured."
+    }
+  }
+}
