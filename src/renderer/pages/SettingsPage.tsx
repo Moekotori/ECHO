@@ -492,7 +492,6 @@ export const SettingsPage = (): JSX.Element => {
   const [themeCustomDraft, setThemeCustomDraft] = useState<AppThemeToneOverride>({});
   const [themeCustomPanelOpen, setThemeCustomPanelOpen] = useState(false);
   const [themeCustomAdvancedOpen, setThemeCustomAdvancedOpen] = useState(false);
-  const [appearanceWallpaperAdvancedOpen, setAppearanceWallpaperAdvancedOpen] = useState(false);
   const [appearanceTypographyOpen, setAppearanceTypographyOpen] = useState(false);
   const [themeCustomMessage, setThemeCustomMessage] = useState<string | null>(null);
   const pendingThemeCopyDraftRef = useRef<{ draft: AppThemeToneOverride; tone: ThemeTone } | null>(null);
@@ -5536,6 +5535,10 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
         ...(isFirstAppWallpaper ? appWallpaperEffectPresets[0].patch : {}),
         appCustomWallpaperPath: wallpaperPath,
         appWallpaperMediaType: mediaType,
+        // A framing made for the previous picture must not carry over, mirroring
+        // the standalone background page's setWallpaper reset.
+        appWallpaperPosition: null,
+        appWallpaperScalePercent: 100,
       });
       setError(null);
     } catch (wallpaperError) {
@@ -5549,6 +5552,8 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       appPortraitWallpaperPath: null,
       appWallpaperMediaType: 'image',
       appPortraitWallpaperMediaType: 'image',
+      appWallpaperPosition: null,
+      appWallpaperScalePercent: 100,
     });
   };
 
@@ -5570,6 +5575,9 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
       patchAppSettings({
         appPortraitWallpaperPath: wallpaperPath,
         appPortraitWallpaperMediaType: mediaType,
+        // Framing authored for the replaced picture must not carry over; the
+        // main slot resets it the same way.
+        appPortraitWallpaperPosition: null,
       });
       setError(null);
     } catch (wallpaperError) {
@@ -5578,7 +5586,11 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
   };
 
   const handleAppPortraitWallpaperClear = (): void => {
-    patchAppSettings({ appPortraitWallpaperPath: null, appPortraitWallpaperMediaType: 'image' });
+    patchAppSettings({
+      appPortraitWallpaperPath: null,
+      appPortraitWallpaperMediaType: 'image',
+      appPortraitWallpaperPosition: null,
+    });
   };
 
   const handleDiscordPresenceToggle = async (): Promise<void> => {
@@ -11742,9 +11754,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               />
               <SettingSubsectionTitle {...getSettingsSubsection('appearanceWallpaper')} />
               <AppWallpaperSettings
-                advancedOpen={appearanceWallpaperAdvancedOpen}
                 highlighted={highlightedSettingId === 'settings-row-wallpaper'}
-                onAdvancedOpenChange={setAppearanceWallpaperAdvancedOpen}
                 onChoose={() => void handleAppWallpaperChoose()}
                 onClear={handleAppWallpaperClear}
                 onPatch={previewAndPersistAppWallpaperSettings}

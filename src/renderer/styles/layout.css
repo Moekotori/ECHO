@@ -166,11 +166,14 @@
   position: absolute;
   inset: 0;
   z-index: 0;
-  display: grid;
-  place-items: center;
+  /* Block layout: a grid with an implicit auto row makes the media's
+     `height: 100%` cyclic (percentage against an indefinite track), so the
+     picture would size itself from its own aspect ratio instead of the
+     window — breaking stretch and skewing cover/contain. */
+  display: block;
   overflow: hidden;
   background: #eef2f7;
-  opacity: 1;
+  opacity: var(--app-wallpaper-opacity, 1);
   pointer-events: none;
   transition:
     opacity 120ms ease,

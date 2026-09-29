@@ -3362,6 +3362,50 @@ describe('AppLayout standalone routes', () => {
     expect((container.querySelector('.app-shell') as HTMLElement | null)?.dataset.wallpaperOrientation).toBe('portrait');
   });
 
+  it('applies one wallpaper opacity to the layer for both wallpaper slots', async () => {
+    setViewportSize(1280, 720);
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({
+          lyricsPlayerBarDrawerEnabled: false,
+          appCustomWallpaperPath: 'D:\\Echo\\app-wallpapers\\landscape.png',
+          appPortraitWallpaperPath: 'D:\\Echo\\app-wallpapers\\portrait.webp',
+          appWallpaperMediaType: 'image',
+          appPortraitWallpaperMediaType: 'image',
+          appWallpaperScalePercent: 100,
+          appWallpaperBlurPx: 0,
+          appWallpaperBrightnessPercent: 100,
+          appWallpaperUiOpacityPercent: 100,
+          appWallpaperOpacityPercent: 40,
+          appWallpaperVisualProtectionEnabled: true,
+          appWallpaperUnifiedOpacityEnabled: false,
+          smtcEnabled: true,
+        }),
+      },
+    } as unknown as Window['echo'];
+
+    const { container } = render(
+      <AppProviders>
+        <AppLayout routes={routes} />
+      </AppProviders>,
+    );
+
+    const readLayerOpacity = (): string =>
+      (container.querySelector('.app-wallpaper-layer') as HTMLElement | null)?.style.getPropertyValue('--app-wallpaper-opacity') ?? '';
+
+    await waitFor(() => expect(readLayerOpacity()).toBe('0.4'));
+
+    act(() => {
+      setViewportSize(390, 844);
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    await waitFor(() =>
+      expect((container.querySelector('.app-shell') as HTMLElement | null)?.dataset.wallpaperOrientation).toBe('portrait'),
+    );
+    expect(readLayerOpacity()).toBe('0.4');
+  });
+
   it('renders portrait app video wallpaper only while the viewport is portrait', async () => {
     const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
     setViewportSize(1280, 720);

@@ -19,7 +19,9 @@ import type {
   AccessibilityPreferences,
   AppearancePreferences,
   AppVideoWallpaperPauseMode,
+  AppWallpaperFitMode,
   AppWallpaperMediaType,
+  AppWallpaperPositionState,
   AppSettings,
   AutoUpdateSource,
   AudioTransportFadeCurve,
@@ -531,8 +533,13 @@ export const defaultSettings: AppSettings = {
   appWallpaperBlurPx: 0,
   appWallpaperBrightnessPercent: 100,
   appWallpaperUiOpacityPercent: 100,
+  appWallpaperOpacityPercent: 100,
   appWallpaperVisualProtectionEnabled: true,
   appWallpaperUnifiedOpacityEnabled: false,
+  appWallpaperFitMode: 'fill',
+  appWallpaperPosition: null,
+  appPortraitWallpaperFitMode: 'fill',
+  appPortraitWallpaperPosition: null,
   nowPlayingCoverColorEnabled: false,
   appVideoWallpaperPauseMode: 'smart',
   networkProxyMode: 'off',
@@ -1592,6 +1599,33 @@ const normalizeAppWallpaperMediaType = (filePath: string | null): AppWallpaperMe
 const normalizeAppVideoWallpaperPauseMode = (value: unknown): AppVideoWallpaperPauseMode =>
   value === 'minimized' || value === 'never' || value === 'smart' ? value : defaultSettings.appVideoWallpaperPauseMode ?? 'smart';
 
+const normalizeAppWallpaperFitMode = (value: unknown): AppWallpaperFitMode =>
+  value === 'fit' || value === 'fill' || value === 'stretch' || value === 'tile' || value === 'center'
+    ? value
+    : defaultSettings.appWallpaperFitMode ?? 'fill';
+
+const normalizeAppWallpaperPosition = (value: unknown): AppWallpaperPositionState | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const candidate = value as Partial<AppWallpaperPositionState>;
+  const { x, y, zoom, iw, ih } = candidate;
+  if (
+    !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(zoom) ||
+    !Number.isFinite(iw) || !Number.isFinite(ih) ||
+    (iw as number) <= 0 || (ih as number) <= 0 || (zoom as number) <= 0
+  ) {
+    return null;
+  }
+  return {
+    x: Math.max(-0.5, Math.min(1.5, Number(x))),
+    y: Math.max(-0.5, Math.min(1.5, Number(y))),
+    zoom: Math.max(0.1, Math.min(10, Number(zoom))),
+    iw: Math.round(Number(iw)),
+    ih: Math.round(Number(ih)),
+  };
+};
+
 const normalizeNetworkProxyUrl = (value: unknown): string | null => {
   if (typeof value !== 'string') {
     return null;
@@ -1771,6 +1805,7 @@ export const normalizeSettings = (value: unknown, options: NormalizeSettingsOpti
   const appWallpaperBlurPx = Number(settings.appWallpaperBlurPx);
   const appWallpaperBrightnessPercent = Number(settings.appWallpaperBrightnessPercent);
   const appWallpaperUiOpacityPercent = Number(settings.appWallpaperUiOpacityPercent);
+  const appWallpaperOpacityPercent = Number(settings.appWallpaperOpacityPercent);
   const appCustomWallpaperPath = normalizeAppWallpaperPath(settings.appCustomWallpaperPath);
   const appPortraitWallpaperPath = normalizeAppWallpaperPath(settings.appPortraitWallpaperPath);
   const appWallpaperMediaType = normalizeAppWallpaperMediaType(appCustomWallpaperPath);
@@ -2007,8 +2042,15 @@ export const normalizeSettings = (value: unknown, options: NormalizeSettingsOpti
     appWallpaperUiOpacityPercent: Number.isFinite(appWallpaperUiOpacityPercent)
       ? Math.round(clamp(appWallpaperUiOpacityPercent, 0, 100))
       : defaultSettings.appWallpaperUiOpacityPercent,
+    appWallpaperOpacityPercent: Number.isFinite(appWallpaperOpacityPercent)
+      ? Math.round(clamp(appWallpaperOpacityPercent, 0, 100))
+      : defaultSettings.appWallpaperOpacityPercent,
     appWallpaperVisualProtectionEnabled: settings.appWallpaperVisualProtectionEnabled !== false,
     appWallpaperUnifiedOpacityEnabled: settings.appWallpaperUnifiedOpacityEnabled === true,
+    appWallpaperFitMode: normalizeAppWallpaperFitMode(settings.appWallpaperFitMode),
+    appWallpaperPosition: normalizeAppWallpaperPosition(settings.appWallpaperPosition),
+    appPortraitWallpaperFitMode: normalizeAppWallpaperFitMode(settings.appPortraitWallpaperFitMode),
+    appPortraitWallpaperPosition: normalizeAppWallpaperPosition(settings.appPortraitWallpaperPosition),
     nowPlayingCoverColorEnabled: settings.nowPlayingCoverColorEnabled === true,
     appVideoWallpaperPauseMode: normalizeAppVideoWallpaperPauseMode(settings.appVideoWallpaperPauseMode),
     networkProxyMode,

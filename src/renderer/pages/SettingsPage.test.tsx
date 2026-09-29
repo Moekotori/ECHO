@@ -4188,12 +4188,13 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
-    expect(screen.queryByText('settings.appearance.wallpaper.scale')).toBeNull();
+    expect(screen.queryByText('settings.appearance.wallpaper.blur')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.choose/ }));
 
     await waitFor(() =>
       expect(setSettingsMock).toHaveBeenCalledWith({
         appWallpaperScalePercent: 100,
+        appWallpaperPosition: null,
         appWallpaperBlurPx: 0,
         appWallpaperBrightnessPercent: 92,
         appWallpaperUiOpacityPercent: 76,
@@ -4204,9 +4205,11 @@ describe('SettingsPage', () => {
       }),
     );
     expect(await screen.findByRole('button', { name: /settings\.appearance\.wallpaper\.effect\.balanced/ })).toBeTruthy();
-    expect(await screen.findByText('settings.appearance.wallpaper.scale')).toBeTruthy();
+    // Wallpaper scale is no longer a slider; sizing lives in the position editor.
+    expect(screen.queryByText('settings.appearance.wallpaper.scale')).toBeNull();
     expect(screen.getByText('settings.appearance.wallpaper.blur')).toBeTruthy();
     expect(screen.getByText('settings.appearance.wallpaper.brightness')).toBeTruthy();
+    expect(screen.getByText('settings.appearance.wallpaper.opacity')).toBeTruthy();
     expect(screen.getByText('settings.appearance.wallpaper.uiOpacity')).toBeTruthy();
     expect(screen.getByText('settings.appearance.wallpaper.unifiedOpacity')).toBeTruthy();
   });
@@ -4232,8 +4235,10 @@ describe('SettingsPage', () => {
     vi.useFakeTimers();
 
     try {
-      const scaleInput = screen
-        .getByText('settings.appearance.wallpaper.scale')
+      // Wallpaper scale is now driven by the position editor; use blur as a
+      // stand-in to verify the slider coalescing pipeline still works.
+      const blurInput = screen
+        .getByText('settings.appearance.wallpaper.blur')
         .closest('.settings-wallpaper-control')
         ?.querySelector('input') as HTMLInputElement;
       const opacityInput = screen
@@ -4241,7 +4246,7 @@ describe('SettingsPage', () => {
         .closest('.settings-wallpaper-control')
         ?.querySelector('input') as HTMLInputElement;
 
-      fireEvent.change(scaleInput, { target: { value: '130' } });
+      fireEvent.change(blurInput, { target: { value: '12' } });
       fireEvent.change(opacityInput, { target: { value: '45' } });
 
       expect(settingsChanged).not.toHaveBeenCalled();
@@ -4250,7 +4255,7 @@ describe('SettingsPage', () => {
       expect(settingsChanged).toHaveBeenCalledTimes(1);
       expect(settingsChanged).toHaveBeenCalledWith(expect.objectContaining({
         detail: {
-          appWallpaperScalePercent: 130,
+          appWallpaperBlurPx: 12,
           appWallpaperUiOpacityPercent: 45,
         },
       }));
@@ -4259,7 +4264,7 @@ describe('SettingsPage', () => {
       vi.advanceTimersByTime(280);
       await Promise.resolve();
       expect(setSettingsMock).toHaveBeenCalledWith({
-        appWallpaperScalePercent: 130,
+        appWallpaperBlurPx: 12,
         appWallpaperUiOpacityPercent: 45,
       });
     } finally {
@@ -4288,7 +4293,6 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
-    fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.advanced\.expand/ }));
     vi.useFakeTimers();
 
     try {
@@ -4333,13 +4337,13 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
-    fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.advanced\.expand/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.portraitChoose/ }));
 
     await waitFor(() =>
       expect(setSettingsMock).toHaveBeenCalledWith({
         appPortraitWallpaperPath: wallpaperPath,
         appPortraitWallpaperMediaType: 'image',
+        appPortraitWallpaperPosition: null,
       }),
     );
     expect(await screen.findByText('portrait.webp')).toBeTruthy();
@@ -4370,13 +4374,13 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.appearance\\.label');
-    fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.advanced\.expand/ }));
     fireEvent.click(screen.getByRole('button', { name: /settings\.appearance\.wallpaper\.portraitChoose/ }));
 
     await waitFor(() =>
       expect(setSettingsMock).toHaveBeenCalledWith({
         appPortraitWallpaperPath: wallpaperPath,
         appPortraitWallpaperMediaType: 'video',
+        appPortraitWallpaperPosition: null,
       }),
     );
     expect(await screen.findByText('settings.appearance.wallpaper.videoStatus')).toBeTruthy();
@@ -4408,6 +4412,7 @@ describe('SettingsPage', () => {
     await waitFor(() =>
       expect(setSettingsMock).toHaveBeenCalledWith({
         appWallpaperScalePercent: 100,
+        appWallpaperPosition: null,
         appWallpaperBlurPx: 0,
         appWallpaperBrightnessPercent: 92,
         appWallpaperUiOpacityPercent: 76,
