@@ -2200,6 +2200,7 @@ export class LyricsService {
           ...this.mapCandidateRow(row),
           filePath,
           extension,
+          language: textOrNull(rawRecord.language),
         });
       }
     }

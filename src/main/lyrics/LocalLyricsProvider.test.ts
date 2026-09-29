@@ -251,4 +251,74 @@ describe('LocalLyricsProvider', () => {
       },
     ]);
   });
+
+  it('merges a language-tagged sidecar into the primary lyrics as translation lines', async () => {
+    const root = makeTempRoot();
+    const filePath = join(root, 'Echo Song.flac');
+    writeFileSync(filePath, 'audio');
+    writeFileSync(join(root, 'Echo Song.lrc'), '[00:01.00]Hello\n[00:04.00]world');
+    writeFileSync(join(root, 'Echo Song.zh.lrc'), '[00:01.00]你好\n[00:04.00]世界');
+    parseFileMock.mockResolvedValue({ common: { lyrics: [] } } as unknown as Awaited<ReturnType<typeof parseFile>>);
+
+    const provider = new LocalLyricsProvider();
+    const [result] = await provider.search(request(query(filePath)));
+    const lyrics = provider.getLyrics(query(filePath));
+
+    expect(result.translationLyrics).toContain('你好');
+    expect(result.sourceLabel).toBe('Local LRC');
+    expect(lyrics?.lines).toEqual([
+      { timeMs: 1000, text: 'Hello', translation: '你好' },
+      { timeMs: 4000, text: 'world', translation: '世界' },
+    ]);
+  });
+
+  it('attaches a dash-separated romanization sidecar', () => {
+    const root = makeTempRoot();
+    const filePath = join(root, 'Echo Song.flac');
+    writeFileSync(filePath, 'audio');
+    writeFileSync(join(root, 'Echo Song.lrc'), '[00:01.00]こんにちは');
+    writeFileSync(join(root, 'Echo Song-rom.lrc'), '[00:01.00]konnichiwa');
+
+    const lyrics = new LocalLyricsProvider().getLyrics(query(filePath));
+
+    expect(lyrics?.lines).toEqual([{ timeMs: 1000, text: 'こんにちは', romanization: 'konnichiwa' }]);
+  });
+
+  it('falls back to a language-tagged sidecar as the primary lyrics', () => {
+    const root = makeTempRoot();
+    const filePath = join(root, 'Echo Song.flac');
+    writeFileSync(filePath, 'audio');
+    writeFileSync(join(root, 'Echo Song.zh.lrc'), '[00:01.00]你好');
+
+    const provider = new LocalLyricsProvider();
+    const [candidate] = provider.searchCandidates(query(filePath));
+
+    expect(candidate.sourceLabel).toBe('Local LRC (zh)');
+    expect(candidate.hasSynced).toBe(true);
+    expect(provider.getLyrics(query(filePath))?.syncedText).toBe('[00:01.00]你好');
+  });
+
+  it('matches language sidecars whose stem carries a track number and CJK brackets', () => {
+    const root = makeTempRoot();
+    const filePath = join(root, '04-示例曲目（占位副标题）.mp3');
+    writeFileSync(filePath, 'audio');
+    writeFileSync(join(root, '04-示例曲目（占位副标题）.lrc'), '[00:01.00]主歌词');
+    writeFileSync(join(root, '04-示例曲目（占位副标题）.zh.lrc'), '[00:01.00]翻译歌词');
+
+    const lyrics = new LocalLyricsProvider().getLyrics(query(filePath));
+
+    expect(lyrics?.lines).toEqual([{ timeMs: 1000, text: '主歌词', translation: '翻译歌词' }]);
+  });
+
+  it('ignores sidecars with an unrecognized language tag', () => {
+    const root = makeTempRoot();
+    const filePath = join(root, 'Echo Song.flac');
+    writeFileSync(filePath, 'audio');
+    writeFileSync(join(root, 'Echo Song.customtag.lrc'), '[00:01.00]Hello');
+
+    const provider = new LocalLyricsProvider();
+
+    expect(provider.searchCandidates(query(filePath))).toEqual([]);
+    expect(provider.getLyrics(query(filePath))).toBeNull();
+  });
 });
