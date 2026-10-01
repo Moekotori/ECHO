@@ -1,26 +1,34 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { basename, dirname, extname, join } from 'node:path';
+import { readFileSync, statSync } from 'node:fs';
+import { dirname, extname } from 'node:path';
 import { parseFile, type IAudioMetadata, type ILyricsTag } from 'music-metadata';
 import type { LyricsQuery, LyricsSearchCandidate, TrackLyrics } from '../../shared/types/lyrics';
 import { decodeTextFileBytes } from '../../shared/utils/decodeTextFile';
+import { providerResultToTrackLyrics } from './LyricsProvider';
 import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, LyricsProviderSearchRequest } from './LyricsProvider';
 import {
-  detectLyricsKind,
   maxLyricsTextBytes,
   maxLyricsTextChars,
   maxParsedLyricLines,
-  normalizeSyncedLyricAlternates,
-  parsePlainLyrics,
   parseSyncedLyrics,
 } from './lyricsParser';
+import {
+  sidecarFilesForAudio,
+  sidecarFilesForStem,
+  sidecarPrimaryFiles,
+  sidecarSecondaryPaths,
+  stripSidecarLanguageTag,
+  type SidecarExtension,
+  type SidecarFile,
+  type SidecarSecondaryPaths,
+} from './lyricsSidecarPaths';
 
 export type LocalLyricsCandidate = LyricsSearchCandidate & {
   filePath: string;
-  extension: '.lrc' | '.ttml' | '.txt';
+  extension: SidecarExtension;
+  language?: string | null;
+  secondaryPaths?: SidecarSecondaryPaths;
 };
-
-const nowIso = (): string => new Date().toISOString();
 
 const fileHashId = (filePath: string): string => `local:${createHash('sha1').update(filePath).digest('hex')}`;
 const embeddedHashId = (filePath: string, text: string): string => `local:embedded:${createHash('sha1').update(`${filePath}\n${text}`).digest('hex')}`;
@@ -119,26 +127,29 @@ const firstNativeText = (metadata: IAudioMetadata, keys: string[]): string | nul
 const firstAsfNativeLyricsText = (filePath: string, metadata: IAudioMetadata): string | null =>
   asfLyricsExtensions.has(extname(filePath).toLowerCase()) ? firstNativeText(metadata, ['WM/Lyrics']) : null;
 
-const candidatePaths = (audioPath: string): Array<{ filePath: string; extension: LocalLyricsCandidate['extension'] }> => {
-  const folder = dirname(audioPath);
-  const baseName = basename(audioPath, extname(audioPath));
+const sidecarPrimaries = (audioPath: string): Array<{ file: SidecarFile; secondaryPaths: SidecarSecondaryPaths }> => {
+  const files = sidecarFilesForAudio(audioPath);
 
-  return [
-    { filePath: join(folder, `${baseName}.lrc`), extension: '.lrc' },
-    { filePath: join(folder, `${baseName}.ttml`), extension: '.ttml' },
-    { filePath: join(folder, `${baseName}.txt`), extension: '.txt' },
-    { filePath: join(folder, 'lyrics', `${baseName}.lrc`), extension: '.lrc' },
-    { filePath: join(folder, 'lyrics', `${baseName}.ttml`), extension: '.ttml' },
-    { filePath: join(folder, 'lyrics', `${baseName}.txt`), extension: '.txt' },
-  ];
+  return sidecarPrimaryFiles(files).map((file) => ({
+    file,
+    secondaryPaths: sidecarSecondaryPaths(files, file.filePath),
+  }));
 };
 
-const localLyricsSourceLabel = (extension: LocalLyricsCandidate['extension']): string => {
-  if (extension === '.ttml') {
-    return 'Local TTML';
+const secondaryPathsForPrimary = (candidate: LocalLyricsCandidate): SidecarSecondaryPaths => {
+  if (candidate.secondaryPaths) {
+    return candidate.secondaryPaths;
   }
 
-  return extension === '.lrc' ? 'Local LRC' : 'Local text';
+  // Cached candidates rebuilt from the database only carry the primary path, so re-resolve the siblings.
+  const files = sidecarFilesForStem(dirname(candidate.filePath), stripSidecarLanguageTag(candidate.filePath));
+
+  return sidecarSecondaryPaths(files, candidate.filePath);
+};
+
+const localLyricsSourceLabel = (extension: SidecarExtension, language?: string | null): string => {
+  const label = extension === '.ttml' ? 'Local TTML' : extension === '.lrc' ? 'Local LRC' : 'Local text';
+  return language ? `${label} (${language})` : label;
 };
 
 const localSidecarReasons = (query: LyricsQuery, extension: LocalLyricsCandidate['extension'], raw: string | null): string[] => {
@@ -166,8 +177,8 @@ export class LocalLyricsProvider implements LyricsProvider {
   readonly capabilities: LyricsProviderCapability = {
     synced: true,
     plain: true,
-    translation: false,
-    romanization: false,
+    translation: true,
+    romanization: true,
     byDuration: false,
     byIsrc: false,
     byMusicBrainzId: false,
@@ -196,6 +207,10 @@ export class LocalLyricsProvider implements LyricsProvider {
       return null;
     }
 
+    const secondaryPaths = secondaryPathsForPrimary(candidate);
+    const translationLyrics = secondaryPaths.translation ? readTextFile(secondaryPaths.translation) : null;
+    const romanizationLyrics = secondaryPaths.romanization ? readTextFile(secondaryPaths.romanization) : null;
+
     return {
       provider: 'local',
       providerLyricsId: candidate.providerLyricsId ?? fileHashId(candidate.filePath),
@@ -206,11 +221,14 @@ export class LocalLyricsProvider implements LyricsProvider {
       instrumental: false,
       plainLyrics: candidate.extension === '.txt' ? raw : null,
       syncedLyrics: candidate.extension === '.txt' ? null : raw,
-      sourceLabel: localLyricsSourceLabel(candidate.extension),
+      translationLyrics: translationLyrics?.trim() ? translationLyrics : null,
+      romanizationLyrics: romanizationLyrics?.trim() ? romanizationLyrics : null,
+      sourceLabel: localLyricsSourceLabel(candidate.extension, candidate.language),
       matchReasons: candidate.reasons?.length ? candidate.reasons : localSidecarReasons(query, candidate.extension, raw),
       raw: {
         filePath: candidate.filePath,
         extension: candidate.extension,
+        language: candidate.language ?? null,
       },
     };
   }
@@ -220,27 +238,28 @@ export class LocalLyricsProvider implements LyricsProvider {
       return [];
     }
 
-    return candidatePaths(query.filePath)
-      .filter((candidate) => existsSync(candidate.filePath))
-      .map((candidate): LocalLyricsCandidate => {
-        const reasons = localSidecarReasons(query, candidate.extension, readTextFile(candidate.filePath));
+    return sidecarPrimaries(query.filePath)
+      .map((primary): LocalLyricsCandidate => {
+        const reasons = localSidecarReasons(query, primary.file.extension, readTextFile(primary.file.filePath));
         return {
           id: randomUUID(),
           provider: 'local',
-          providerLyricsId: fileHashId(candidate.filePath),
+          providerLyricsId: fileHashId(primary.file.filePath),
           title: query.title,
           artist: query.artist,
           album: query.album ?? null,
           durationSeconds: query.durationSeconds ?? null,
           instrumental: false,
-          hasSynced: candidate.extension !== '.txt',
-          hasPlain: candidate.extension === '.txt',
+          hasSynced: primary.file.extension !== '.txt',
+          hasPlain: primary.file.extension === '.txt',
           score: localSidecarScore(reasons),
           risk: reasons.includes('candidate_only_duration') ? 'medium' : undefined,
           reasons,
-          sourceLabel: localLyricsSourceLabel(candidate.extension),
-          filePath: candidate.filePath,
-          extension: candidate.extension,
+          sourceLabel: localLyricsSourceLabel(primary.file.extension, primary.file.language),
+          filePath: primary.file.filePath,
+          extension: primary.file.extension,
+          language: primary.file.language,
+          secondaryPaths: primary.secondaryPaths,
         };
       });
   }
@@ -291,43 +310,7 @@ export class LocalLyricsProvider implements LyricsProvider {
   }
 
   getLyricsFromCandidate(query: LyricsQuery, candidate: LocalLyricsCandidate): TrackLyrics | null {
-    const raw = readTextFile(candidate.filePath);
-    if (!raw) {
-      return null;
-    }
-
-    const syncedLyrics = candidate.extension === '.txt' ? null : raw;
-    const plainLyrics = candidate.extension === '.txt' ? raw : null;
-    const kind = detectLyricsKind({ syncedLyrics, plainLyrics });
-    const lines =
-      kind === 'synced'
-        ? normalizeSyncedLyricAlternates(parseSyncedLyrics(raw))
-        : kind === 'plain'
-          ? parsePlainLyrics(raw)
-          : [];
-
-    if (kind === 'empty') {
-      return null;
-    }
-
-    const timestamp = nowIso();
-    return {
-      id: randomUUID(),
-      trackId: query.trackId ?? null,
-      provider: 'local',
-      providerLyricsId: candidate.providerLyricsId ?? fileHashId(candidate.filePath),
-      kind,
-      title: query.title,
-      artist: query.artist,
-      album: query.album ?? null,
-      durationSeconds: query.durationSeconds ?? null,
-      lines,
-      plainText: plainLyrics,
-      syncedText: syncedLyrics,
-      offsetMs: 0,
-      score: 1,
-      cachedAt: timestamp,
-      updatedAt: timestamp,
-    };
+    const result = this.getResultFromCandidate(query, candidate);
+    return result ? providerResultToTrackLyrics(query, result, 1) : null;
   }
 }
