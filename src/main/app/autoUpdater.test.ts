@@ -56,7 +56,7 @@ vi.mock('./appSettings', () => ({ getAppSettings: () => mocks.settings }));
 vi.mock('./dataProtection', () => ({ createDataProtectionSnapshot: mocks.snapshot, writeDataProtectionManifest: vi.fn() }));
 vi.mock('./dataBackup', () => ({ getDataBackupStatus: () => ({ running: false }) }));
 vi.mock('../audio/AudioSession', () => ({ getAudioSession: () => ({ getStatus: () => ({ state: mocks.playbackState.value }) }) }));
-vi.mock('../downloads/DownloadService', () => ({ getDownloadService: () => ({ getJobs: () => [] }) }));
+
 vi.mock('../library/LibraryService', () => ({ getLibraryService: () => ({ hasRunningJobs: () => false }) }));
 vi.mock('../library/TagWriter', () => ({ hasPendingTagWrites: () => false }));
 vi.mock('./scoopService', () => ({

@@ -97,7 +97,6 @@ import { titleFromPath } from '../components/player/playerFormat';
 import { DiagnosticsAssistantPanel } from '../components/settings/DiagnosticsAssistantPanel';
 import { EchoLinkBasicPanel } from '../components/settings/EchoLinkBasicPanel';
 import { MqttIntegrationPanel } from '../components/settings/MqttIntegrationPanel';
-import { StreamingConsentNoticeModal } from '../components/streaming/StreamingConsentNoticeModal';
 import { StyledSelect } from '../components/ui/StyledSelect';
 import { useI18n } from '../i18n/I18nProvider';
 import type { TranslationKey } from '../i18n/locales';
@@ -432,8 +431,6 @@ export const SettingsPage = (): JSX.Element => {
   const [liveLibraryState, setLiveLibraryState] = useState<LibraryLabState | null>(null);
   const [signalPathControlSaving, setSignalPathControlSaving] = useState(false);
   const signalPathControlSaveRequestRef = useRef(0);
-  const [streamingNoticeOpen, setStreamingNoticeOpen] = useState(false);
-  const [streamingNoticeConsent, setStreamingNoticeConsent] = useState('');
   const sidebarRouteOrder = useMemo(() => normalizeSidebarRouteOrder(appSettings?.sidebarRouteOrder), [appSettings?.sidebarRouteOrder]);
   const sidebarHiddenRouteIds = useMemo(() => normalizeSidebarHiddenRouteIds(appSettings?.sidebarHiddenRouteIds), [appSettings?.sidebarHiddenRouteIds]);
   const sidebarHiddenRouteIdSet = useMemo(() => new Set(sidebarHiddenRouteIds), [sidebarHiddenRouteIds]);
@@ -460,19 +457,13 @@ export const SettingsPage = (): JSX.Element => {
       main: [],
       utility: [],
     };
-    const includeStreaming = appSettings?.streamingFeatureEnabled === true;
-    const includeOsuDownloader = appSettings?.osuDownloaderFeatureEnabled === true;
-
     for (const routeId of sidebarRouteOrder) {
-      if (lockedHiddenSidebarRouteIdSet.has(routeId)) {
-        continue;
-      }
-
-      if (routeId === 'streaming' && !includeStreaming) {
-        continue;
-      }
-
-      if (routeId === 'osu-downloader' && !includeOsuDownloader) {
+      if (
+        lockedHiddenSidebarRouteIdSet.has(routeId) ||
+        routeId === 'streaming' ||
+        routeId === 'downloads' ||
+        routeId === 'osu-downloader'
+      ) {
         continue;
       }
 
@@ -483,7 +474,7 @@ export const SettingsPage = (): JSX.Element => {
     }
 
     return groups;
-  }, [appSettings?.osuDownloaderFeatureEnabled, appSettings?.streamingFeatureEnabled, sidebarRouteOrder]);
+  }, [sidebarRouteOrder]);
   const [selectedThemePreset, setSelectedThemePreset] = useState<AppThemePreset>(() => readThemePreset());
   const [themeCustomThemes, setThemeCustomThemes] = useState<AppThemeCustomTheme[]>(() => readThemeCustomThemes());
   const [activeThemeCustomId, setActiveThemeCustomId] = useState<string | null>(() => readThemeCustomId());
@@ -940,36 +931,6 @@ export const SettingsPage = (): JSX.Element => {
         ],
       },
       {
-        id: 'row-streaming-feature',
-        sectionKey: 'general',
-        targetId: 'settings-row-streaming-feature',
-        title: t('settings.general.streamingFeature.title'),
-        description: t('settings.general.streamingFeature.description'),
-        terms: [
-          t('settings.general.streamingFeature.title'),
-          t('settings.general.streamingFeature.description'),
-          'streaming',
-          'online music',
-          'sidebar',
-        ],
-      },
-      {
-        id: 'row-osu-downloader-feature',
-        sectionKey: 'general',
-        targetId: 'settings-row-osu-downloader-feature',
-        title: t('settings.general.osuDownloaderFeature.title'),
-        description: t('settings.general.osuDownloaderFeature.description'),
-        terms: [
-          t('settings.general.osuDownloaderFeature.title'),
-          t('settings.general.osuDownloaderFeature.description'),
-          'osu',
-          'osu downloader',
-          'beatmap',
-          'osz',
-          'sidebar',
-        ],
-      },
-      {
         id: 'row-performance',
         sectionKey: 'experimental',
         targetId: 'settings-row-performance',
@@ -1326,12 +1287,12 @@ export const SettingsPage = (): JSX.Element => {
         ],
       },
       {
-        id: 'row-spotify-auth-config',
+        id: 'row-bilibili-account',
         sectionKey: 'accounts',
-        targetId: 'settings-row-spotify-auth-config',
-        title: 'Spotify OAuth 配置',
-        description: '必须使用用户自己的 Spotify Client ID 和本机回调地址登录。',
-        terms: ['Spotify OAuth 配置', 'Spotify Client ID', 'Spotify redirect URI', 'Spotify API', 'Spotify 登录', 'spotify client_id', 'redirect_uri'],
+        targetId: 'settings-row-bilibili-account',
+        title: '哔哩哔哩登录',
+        description: '登录哔哩哔哩后可以观看需要账号的 MV。',
+        terms: ['哔哩哔哩', 'bilibili', 'b站', 'mv', '登录', 'SESSDATA'],
       },
       {
         id: 'row-online-album-info',
@@ -1445,24 +1406,6 @@ export const SettingsPage = (): JSX.Element => {
         title: t('settings.integrations.lastfm.title'),
         description: t('settings.integrations.lastfm.description'),
         terms: [t('settings.integrations.lastfm.title'), t('settings.integrations.lastfm.description'), 'last.fm', 'lastfm', 'scrobble', 'status', '状态', '账号状态', 'login status'],
-      },
-      {
-        id: 'row-account-startup-refresh',
-        sectionKey: 'accounts',
-        targetId: 'settings-row-account-startup-refresh',
-        title: t('settings.integrations.accountStartupRefresh.title'),
-        description: t('settings.integrations.accountStartupRefresh.description'),
-        terms: [
-          t('settings.integrations.accountStartupRefresh.title'),
-          t('settings.integrations.accountStartupRefresh.description'),
-          t('settings.integrations.accounts.loginStatus'),
-          'account status',
-          'login status',
-          'startup account refresh',
-          'youtube',
-          'bilibili',
-          'spotify',
-        ],
       },
       {
         id: 'row-audio-status',
@@ -2762,6 +2705,7 @@ export const SettingsPage = (): JSX.Element => {
 
     return scheduleSettingsIdleTask(() => {
       if (activeSection === 'accounts') {
+        void refreshLastFmStatus();
         void refreshAccountStatuses();
         return;
       }
@@ -5895,7 +5839,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     const accounts = getAccountsBridge();
     setYoutubeBrowser(browser);
 
-    if (!accounts) {
+    if (!accounts?.setYouTubeBrowser) {
       return;
     }
 
@@ -5915,7 +5859,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     const accounts = getAccountsBridge();
     setSoundCloudBrowser(browser);
 
-    if (!accounts) {
+    if (!accounts?.setBrowser) {
       return;
     }
 
@@ -5942,6 +5886,10 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     if (provider === 'youtube') {
       if (youtubeBrowser === 'none') {
         setAccountErrors((current) => ({ ...current, youtube: t('settings.integrations.common.requireBrowser') }));
+        return;
+      }
+
+      if (!accounts.setYouTubeBrowser) {
         return;
       }
 
@@ -5974,11 +5922,15 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
         return;
       }
 
+      if (soundCloudBrowser !== 'none' && !accounts.setBrowser) {
+        return;
+      }
+
       try {
         setAccountBusyFor('soundcloud', 'login');
         setAccountErrors((current) => ({ ...current, soundcloud: null }));
         const status = soundCloudBrowser !== 'none'
-          ? await accounts.setBrowser('soundcloud', soundCloudBrowser)
+          ? await accounts.setBrowser!('soundcloud', soundCloudBrowser)
           : (accountStatusByProvider.soundcloud ?? await accounts.getStatus('soundcloud'));
         const result = typeof accounts.startLogin === 'function'
           ? await accounts.startLogin('soundcloud')
@@ -6361,7 +6313,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
     pendingCacheDirectory === undefined ? null : pendingCacheDirectory ?? defaultCacheDirectory;
   const currentDownloadDirectoryLabel = downloadSettings?.outputDirectory ?? t('mediaLibrary.settings.download.path.notSelected');
   const downloadsFeatureUnlocked = appSettings?.downloadsFeatureUnlocked === true;
-  const streamingFeatureEnabled = appSettings?.streamingFeatureEnabled === true;
   const osuDownloaderFeatureEnabled = appSettings?.osuDownloaderFeatureEnabled === true;
   const osuDownloaderSidebarHidden = sidebarHiddenRouteIdSet.has('osu-downloader');
   const signalPathControlEnabled = appSettings?.signalPathControlEnabled === true;
@@ -6369,36 +6320,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
   const networkMetadataEnabled = appSettings?.networkMetadataEnabled ?? true;
   const lyricsBackfillAutoAcceptScore = appSettings?.lyricsBackfillAutoAcceptScore ?? 0.45;
   const lyricsBackfillAutoAcceptPercent = Math.round(lyricsBackfillAutoAcceptScore * 100);
-
-  const applyStreamingFeatureEnabled = (nextStreamingFeatureEnabled: boolean): void => {
-    patchAppSettings({
-      streamingFeatureEnabled: nextStreamingFeatureEnabled,
-      sidebarHiddenRouteIds: nextStreamingFeatureEnabled
-        ? sidebarHiddenRouteIds.filter((routeId) => routeId !== 'streaming')
-        : normalizeSidebarHiddenRouteIds([...sidebarHiddenRouteIds, 'streaming']),
-    });
-  };
-
-  const handleStreamingFeatureToggle = (): void => {
-    if (streamingFeatureEnabled) {
-      applyStreamingFeatureEnabled(false);
-      return;
-    }
-
-    setStreamingNoticeConsent('');
-    setStreamingNoticeOpen(true);
-  };
-
-  const handleStreamingNoticeCancel = (): void => {
-    setStreamingNoticeOpen(false);
-    setStreamingNoticeConsent('');
-  };
-
-  const handleStreamingNoticeConfirm = (): void => {
-    setStreamingNoticeOpen(false);
-    setStreamingNoticeConsent('');
-    applyStreamingFeatureEnabled(true);
-  };
 
   const applyOsuDownloaderFeatureEnabled = (nextOsuDownloaderFeatureEnabled: boolean): void => {
     patchAppSettings({
@@ -8859,14 +8780,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
 
   return (
     <div className="settings-page no-drag">
-      {streamingNoticeOpen ? (
-        <StreamingConsentNoticeModal
-          consent={streamingNoticeConsent}
-          onCancel={handleStreamingNoticeCancel}
-          onConfirm={handleStreamingNoticeConfirm}
-          setConsent={setStreamingNoticeConsent}
-        />
-      ) : null}
       <NeteaseQrLoginDialog
         state={neteaseQrLogin}
         onClose={handleCloseNeteaseQrLogin}
@@ -9102,18 +9015,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               </SettingRow>
               <SettingSubsectionTitle id="settings-subsection-features" {...getSettingsSubsection('generalFeatures')} />
               <SettingRow
-                id="settings-row-streaming-feature"
-                highlighted={highlightedSettingId === 'settings-row-streaming-feature'}
-                title={t('settings.general.streamingFeature.title')}
-                description={t('settings.general.streamingFeature.description')}
-              >
-                <ToggleButton
-                  active={streamingFeatureEnabled}
-                  disabled={!appSettings}
-                  onClick={handleStreamingFeatureToggle}
-                />
-              </SettingRow>
-              <SettingRow
                 id="settings-row-sqlite-balanced-durability"
                 highlighted={highlightedSettingId === 'settings-row-sqlite-balanced-durability'}
                 title={t('settings.general.sqliteBalancedDurability.title')}
@@ -9196,61 +9097,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   ))}
                 </div>
               </SettingRow>
-              {mysteriousKeyVisible ? (
-                <SettingRow
-                  id="settings-row-mysterious-key"
-                  highlighted={highlightedSettingId === 'settings-row-mysterious-key'}
-                  className="setting-row--full setting-row--compact-panel"
-                  title="Mysterious key"
-                  description="Enter a special key to unlock hidden capabilities."
-                >
-                  {appSettings?.downloadsFeatureKeyAccepted === true ? (
-                    <div className="settings-mysterious-key-accepted">
-                      <div className="settings-inline-toggle settings-inline-toggle--compact">
-                        <span>{downloadsFeatureUnlocked ? 'Accepted' : 'Accepted · Pro required'}</span>
-                        {downloadsFeatureUnlocked ? <Check size={16} /> : null}
-                      </div>
-                      <button
-                        className="settings-action-button"
-                        type="button"
-                        disabled={!appSettings}
-                        onClick={handleDownloadFeatureRelease}
-                      >
-                        <RotateCcw size={15} />
-                        释放
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="settings-cache-panel settings-cache-panel--download">
-                      <label className="settings-input-field" htmlFor="mysterious-key">
-                        <input
-                          id="mysterious-key"
-                          type="text"
-                          value={downloadUnlockInput}
-                          onChange={(event) => {
-                            setDownloadUnlockInput(event.target.value);
-                            setDownloadUnlockMessage(null);
-                          }}
-                          onKeyDown={handleDownloadUnlockKeyDown}
-                          placeholder="Enter key"
-                        />
-                      </label>
-                      <div className="settings-chip-row settings-chip-row--left">
-                        <button
-                          className="settings-action-button"
-                          type="button"
-                          disabled={!appSettings || !downloadUnlockInput.trim()}
-                          onClick={handleDownloadFeatureUnlock}
-                        >
-                          <Check size={15} />
-                          Apply
-                        </button>
-                      </div>
-                      {downloadUnlockMessage ? <p className="settings-inline-note">{downloadUnlockMessage}</p> : null}
-                    </div>
-                  )}
-                </SettingRow>
-              ) : null}
               <SettingRow
                 id="settings-row-dev-console"
                 highlighted={highlightedSettingId === 'settings-row-dev-console'}
@@ -9717,25 +9563,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                     disabled={!appSettings}
                     onClick={() => patchAppSettings({ nativeMetadataReaderEnabled: !(appSettings?.nativeMetadataReaderEnabled ?? false) })}
                   />
-                </div>
-              </SettingRow>
-              <SettingRow
-                id="settings-row-osu-downloader-feature"
-                highlighted={highlightedSettingId === 'settings-row-osu-downloader-feature'}
-                title={t('settings.general.osuDownloaderFeature.title')}
-                description={t('settings.general.osuDownloaderFeature.description')}
-              >
-                <div className="settings-chip-row settings-chip-row--left settings-chip-row--actions">
-                  <ToggleButton
-                    active={osuDownloaderFeatureEnabled}
-                    disabled={!appSettings}
-                    onClick={() => applyOsuDownloaderFeatureEnabled(!osuDownloaderFeatureEnabled)}
-                  />
-                  {osuDownloaderFeatureEnabled && osuDownloaderSidebarHidden ? (
-                    <button className="settings-action-button" type="button" disabled={!appSettings} onClick={showOsuDownloaderInSidebar}>
-                      显示在侧栏
-                    </button>
-                  ) : null}
                 </div>
               </SettingRow>
             </SettingSection>
@@ -11086,139 +10913,20 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               ) : null}
               {activeSection === 'accounts' ? (
                 <>
-              <SettingSubsectionTitle id="settings-subsection-service-accounts" {...getSettingsSubsection('integrationsServiceAccounts')} />
-              <div className="settings-account-panel settings-service-account-panel" id="settings-service-account-panel">
-                <header className="settings-service-account-header">
-                  <div>
-                    <h3>{t('settings.integrations.accountPanel.title')}</h3>
-                    <p>{t('settings.integrations.accountPanel.description')}</p>
-                  </div>
-                  <div className="settings-service-account-header-side">
-                    <div className="settings-account-overview" aria-label={t('settings.integrations.accountPanel.title')}>
-                      <span className="settings-account-overview-stat is-connected">
-                        {accountOverview.connected} {t('settings.integrations.accounts.status.loggedIn')}
-                      </span>
-                      <span className="settings-account-overview-stat is-checking">
-                        {accountOverview.checking} {t('settings.integrations.accounts.status.checking')}
-                      </span>
-                      <span className="settings-account-overview-stat">
-                        {accountOverview.disconnected} {t('settings.integrations.accounts.status.loggedOut')}
-                      </span>
-                    </div>
-                    <button className="settings-action-button" type="button" onClick={() => void refreshAccountStatuses()}>
-                      <RefreshCw size={15} />
-                      {t('settings.integrations.accountPanel.refreshAll')}
-                    </button>
-                  </div>
-                </header>
-                <div className="settings-account-workspace">
-                  <nav className="settings-account-service-list" aria-label={t('settings.integrations.accountPanel.title')}>
-                    {settingsAccountProviders.map((provider) => {
-                      const status = accountStatusByProvider[provider];
-                      const active = provider === selectedAccountProvider;
-                      const state = !status ? 'checking' : status.connected ? (status.error ? 'expired' : 'connected') : 'disconnected';
-                      return (
-                        <button
-                          className={`settings-account-service-button${active ? ' is-active' : ''}`}
-                          type="button"
-                          key={provider}
-                          aria-current={active ? 'page' : undefined}
-                          onClick={() => setSelectedAccountProvider(provider)}
-                        >
-                          <span className="settings-account-service-logo">
-                            <img src={accountProviderLogoUrls[provider]} alt="" draggable={false} />
-                          </span>
-                          <span className="settings-account-service-copy">
-                            <strong>{accountProviderLabels[provider]}</strong>
-                            <span className={`settings-account-service-state is-${state}`}>
-                              {getAccountStatusLabel(t, status)}
-                            </span>
-                          </span>
-                          <ChevronRight size={16} aria-hidden="true" />
-                        </button>
-                      );
-                    })}
-                  </nav>
-                  <section className="settings-account-detail" aria-label={accountProviderLabels[selectedAccountProvider]}>
-                    <header className="settings-account-detail-header">
-                      <span className="settings-account-detail-logo">
-                        <img src={accountProviderLogoUrls[selectedAccountProvider]} alt="" draggable={false} />
-                      </span>
-                      <div>
-                        <h3>{accountProviderLabels[selectedAccountProvider]}</h3>
-                        <span className={getAccountBadgeClass(accountStatusByProvider[selectedAccountProvider])}>
-                          {getAccountStatusLabel(t, accountStatusByProvider[selectedAccountProvider])}
-                        </span>
-                      </div>
-                    </header>
-                    <div className="settings-account-detail-body">
-                      {cookieAccountProviders.includes(selectedAccountProvider) ? (
-                        <AccountCookieCard
-                          provider={selectedAccountProvider}
-                          status={accountStatusByProvider[selectedAccountProvider]}
-                          browser={selectedAccountProvider === 'soundcloud' ? soundCloudBrowser : undefined}
-                          cookieValue={accountCookies[selectedAccountProvider]}
-                          busyAction={accountBusy[selectedAccountProvider]}
-                          error={accountErrors[selectedAccountProvider]}
-                          message={accountMessages[selectedAccountProvider]}
-                          onBrowserChange={selectedAccountProvider === 'soundcloud' ? (browser) => void handleSoundCloudBrowserChange(browser) : undefined}
-                          onChangeCookie={(value) => setAccountCookies((current) => ({ ...current, [selectedAccountProvider]: value }))}
-                          onSave={() => void handleAccountSaveCookie(selectedAccountProvider)}
-                          onCheck={() => void handleAccountCheck(selectedAccountProvider)}
-                          onOpenLogin={() => void handleAccountOpenLogin(selectedAccountProvider)}
-                          onOpenQrLogin={selectedAccountProvider === 'netease' ? () => void handleNeteaseQrLogin() : undefined}
-                          onClear={() => void handleAccountClear(selectedAccountProvider)}
-                        />
-                      ) : selectedAccountProvider === 'youtube' ? (
-                        <YouTubeAccountCard
-                          status={accountStatusByProvider.youtube}
-                          browser={youtubeBrowser}
-                          busyAction={accountBusy.youtube}
-                          error={accountErrors.youtube}
-                          message={accountMessages.youtube}
-                          onBrowserChange={(browser) => void handleYouTubeBrowserChange(browser)}
-                          onCheck={() => void handleAccountCheck('youtube')}
-                          onOpenLogin={() => void handleAccountOpenLogin('youtube')}
-                          onClear={() => void handleAccountClear('youtube')}
-                        />
-                      ) : selectedAccountProvider === 'spotify' ? (
-                        <SpotifyAccountCard
-                          status={accountStatusByProvider.spotify}
-                          busyAction={accountBusy.spotify}
-                          error={accountErrors.spotify}
-                          message={accountMessages.spotify}
-                          onCheck={() => void handleAccountCheck('spotify')}
-                          onOpenDashboard={() => void handleOpenExternalUrl(spotifyDeveloperDashboardUrl)}
-                          onOpenLogin={() => void handleAccountOpenLogin('spotify')}
-                          onClear={() => void handleAccountClear('spotify')}
-                        />
-                      ) : selectedAccountProvider === 'tidal' ? (
-                        <TidalAccountCard
-                          status={accountStatusByProvider.tidal}
-                          busyAction={accountBusy.tidal}
-                          error={accountErrors.tidal}
-                          message={accountMessages.tidal}
-                          onCheck={() => void handleAccountCheck('tidal')}
-                          onOpenDashboard={() => void handleOpenExternalUrl(tidalDeveloperDashboardUrl)}
-                          onOpenLogin={() => void handleAccountOpenLogin('tidal')}
-                          onClear={() => void handleAccountClear('tidal')}
-                        />
-                      ) : selectedAccountProvider === 'qobuz' ? (
-                        <QobuzAccountCard
-                          status={accountStatusByProvider.qobuz}
-                          busyAction={accountBusy.qobuz}
-                          error={accountErrors.qobuz}
-                          message={accountMessages.qobuz}
-                          onCheck={() => void handleAccountCheck('qobuz')}
-                          onLogin={() => void handleAccountOpenLogin('qobuz')}
-                          onClear={() => void handleAccountClear('qobuz')}
-                          tokenValue={qobuzTokenValue}
-                          onTokenChange={setQobuzTokenValue}
-                        />
-                      ) : null}
-                    </div>
-                  </section>
-                </div>
+              <div id="settings-row-bilibili-account" data-search-highlight={highlightedSettingId === 'settings-row-bilibili-account' ? 'true' : undefined}>
+                <AccountCookieCard
+                  busyAction={accountBusy.bilibili}
+                  cookieValue={accountCookies.bilibili}
+                  error={accountErrors.bilibili}
+                  message={accountMessages.bilibili}
+                  onChangeCookie={(value) => setAccountCookies((current) => ({ ...current, bilibili: value }))}
+                  onCheck={() => void handleAccountCheck('bilibili')}
+                  onClear={() => void handleAccountClear('bilibili')}
+                  onOpenLogin={() => void handleAccountOpenLogin('bilibili')}
+                  onSave={() => void handleAccountSaveCookie('bilibili')}
+                  provider="bilibili"
+                  status={accountStatusByProvider.bilibili}
+                />
               </div>
               <SettingSubsectionTitle {...getSettingsSubsection('integrationsAdvanced')} />
               <div className="settings-credential-panel" data-expanded={credentialPanelVisible}>
@@ -11445,164 +11153,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 description={t('settings.integrations.lastfm.scrobbling.description')}
               >
                 <ToggleButton active={lastFmStatus?.scrobbleEnabled ?? true} disabled={!lastFmStatus} onClick={() => void handleLastFmScrobbleToggle()} />
-              </SettingRow>
-              ) : null}
-              <SettingSubsectionTitle id="settings-subsection-account-automation" {...getSettingsSubsection('integrationsAutomation')} />
-              <SettingRow
-                id="settings-row-account-startup-refresh"
-                highlighted={highlightedSettingId === 'settings-row-account-startup-refresh'}
-                title={t('settings.integrations.accountStartupRefresh.title')}
-                description={t('settings.integrations.accountStartupRefresh.description')}
-              >
-                <ToggleButton
-                  active={appSettings?.autoAccountCheckOnStartup ?? true}
-                  disabled={!appSettings}
-                  onClick={() => patchAppSettings({ autoAccountCheckOnStartup: !(appSettings?.autoAccountCheckOnStartup ?? true) })}
-                />
-              </SettingRow>
-              <SettingRow
-                title={t('settings.integrations.spotifyAutoLaunchOfficialPlayer.title')}
-                description={t('settings.integrations.spotifyAutoLaunchOfficialPlayer.description')}
-              >
-                <ToggleButton
-                  active={appSettings?.spotifyAutoLaunchOfficialPlayer ?? true}
-                  disabled={!appSettings}
-                  onClick={() => patchAppSettings({ spotifyAutoLaunchOfficialPlayer: !(appSettings?.spotifyAutoLaunchOfficialPlayer ?? true) })}
-                />
-              </SettingRow>
-              {credentialPanelVisible ? <SettingSubsectionTitle {...getSettingsSubsection('integrationsAccounts')} /> : null}
-              {credentialPanelVisible ? (
-              <SettingRow
-                className="setting-row--full setting-row--credential"
-                id="settings-row-spotify-auth-config"
-                highlighted={highlightedSettingId === 'settings-row-spotify-auth-config'}
-                title={t('settings.integrations.spotifyAuth.title')}
-                description={t('settings.integrations.spotifyAuth.description')}
-              >
-                <div className="settings-cache-panel settings-cache-panel--bare settings-cache-panel--spotify-auth">
-                  <div className="settings-proxy-grid">
-                    <label className="settings-proxy-field">
-                      <span>Client ID</span>
-                      <input
-                        type="text"
-                        value={spotifyAuthDraft.clientId}
-                        placeholder={t('settings.integrations.spotifyAuth.clientIdPlaceholder')}
-                        disabled={!appSettings}
-                        onChange={(event) => {
-                          setSpotifyAuthDraft((current) => ({ ...current, clientId: event.target.value }));
-                          setSpotifyAuthMessage(null);
-                        }}
-                      />
-                    </label>
-                    <label className="settings-proxy-field">
-                      <span>Redirect URI</span>
-                      <input
-                        type="text"
-                        value={spotifyAuthDraft.redirectUri}
-                        placeholder={defaultSpotifyRedirectUri}
-                        disabled={!appSettings}
-                        onChange={(event) => {
-                          setSpotifyAuthDraft((current) => ({ ...current, redirectUri: event.target.value }));
-                          setSpotifyAuthMessage(null);
-                        }}
-                      />
-                    </label>
-                  </div>
-                  <div className="settings-chip-row settings-chip-row--left">
-                    <button className="settings-action-button" type="button" disabled={!appSettings} onClick={handleSpotifyAuthConfigSave}>
-                      <Save size={15} />
-                      {t('settings.integrations.common.saveConfig', { service: 'Spotify' })}
-                    </button>
-                    <button className="settings-action-button" type="button" onClick={() => void handleOpenExternalUrl(spotifyDeveloperDashboardUrl)}>
-                      <ExternalLink size={15} />
-                      {t('settings.integrations.common.openDashboard', { service: 'Spotify' })}
-                    </button>
-                  </div>
-                  <p className="settings-inline-note">
-                    {t('settings.integrations.common.dashboardCallback', { uri: defaultSpotifyRedirectUri })}
-                  </p>
-                  {spotifyAuthMessage ? <p className="settings-inline-note">{spotifyAuthMessage}</p> : null}
-                </div>
-              </SettingRow>
-              ) : null}
-              {credentialPanelVisible ? (
-              <SettingRow
-                className="setting-row--full setting-row--credential"
-                id="settings-row-tidal-auth-config"
-                highlighted={highlightedSettingId === 'settings-row-tidal-auth-config'}
-                title={t('settings.integrations.tidalAuth.title')}
-                description={t('settings.integrations.tidalAuth.description')}
-              >
-                <div className="settings-cache-panel settings-cache-panel--bare settings-cache-panel--tidal-auth">
-                  <div className="settings-proxy-grid">
-                    <label className="settings-proxy-field">
-                      <span>Client ID</span>
-                      <input
-                        type="text"
-                        value={tidalAuthDraft.clientId}
-                        placeholder="TIDAL Developer App Client ID"
-                        disabled={!appSettings}
-                        onChange={(event) => {
-                          setTidalAuthDraft((current) => ({ ...current, clientId: event.target.value }));
-                          setTidalAuthMessage(null);
-                        }}
-                      />
-                    </label>
-                    <label className="settings-proxy-field">
-                      <span>Client Secret</span>
-                      <input
-                        type="password"
-                        value={tidalAuthDraft.clientSecret}
-                        placeholder="TIDAL Developer App Client Secret"
-                        disabled={!appSettings}
-                        onChange={(event) => {
-                          setTidalAuthDraft((current) => ({ ...current, clientSecret: event.target.value }));
-                          setTidalAuthMessage(null);
-                        }}
-                      />
-                    </label>
-                    <label className="settings-proxy-field">
-                      <span>Redirect URI</span>
-                      <input
-                        type="text"
-                        value={tidalAuthDraft.redirectUri}
-                        placeholder={defaultTidalRedirectUri}
-                        disabled={!appSettings}
-                        onChange={(event) => {
-                          setTidalAuthDraft((current) => ({ ...current, redirectUri: event.target.value }));
-                          setTidalAuthMessage(null);
-                        }}
-                      />
-                    </label>
-                    <label className="settings-proxy-field">
-                      <span>Country Code</span>
-                      <input
-                        type="text"
-                        value={tidalAuthDraft.countryCode}
-                        placeholder="US"
-                        disabled={!appSettings}
-                        onChange={(event) => {
-                          setTidalAuthDraft((current) => ({ ...current, countryCode: event.target.value.toUpperCase() }));
-                          setTidalAuthMessage(null);
-                        }}
-                      />
-                    </label>
-                  </div>
-                  <div className="settings-chip-row settings-chip-row--left">
-                    <button className="settings-action-button" type="button" disabled={!appSettings} onClick={handleTidalAuthConfigSave}>
-                      <Save size={15} />
-                      {t('settings.integrations.tidalAuth.save')}
-                    </button>
-                    <button className="settings-action-button" type="button" onClick={() => void handleOpenExternalUrl(tidalDeveloperDashboardUrl)}>
-                      <ExternalLink size={15} />
-                      {t('settings.integrations.common.openDashboard', { service: 'TIDAL' })}
-                    </button>
-                  </div>
-                  <p className="settings-inline-note">
-                    {t('settings.integrations.common.dashboardCallback', { uri: defaultTidalRedirectUri })}
-                  </p>
-                  {tidalAuthMessage ? <p className="settings-inline-note">{tidalAuthMessage}</p> : null}
-                </div>
               </SettingRow>
               ) : null}
                 </>
@@ -12064,49 +11614,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   ) : null}
                 </div>
               </SettingRow>
-              {downloadsFeatureUnlocked ? (
-                <>
-                  <SettingRow
-                    className="setting-row--full setting-row--compact-panel"
-                    title={t('mediaLibrary.settings.download.path.title')}
-                    description={t('mediaLibrary.settings.download.path.description')}
-                  >
-                    <div className="settings-cache-panel settings-cache-panel--download">
-                      <div className="settings-cache-path">
-                        <em>{t('mediaLibrary.settings.download.path.current')}</em>
-                        <strong title={currentDownloadDirectoryLabel}>{currentDownloadDirectoryLabel}</strong>
-                      </div>
-                      <div className="settings-chip-row settings-chip-row--left">
-                        <button
-                          className="settings-action-button"
-                          type="button"
-                          onClick={() => void handleDownloadDirectoryChoose()}
-                          disabled={downloadDirectoryBusy}
-                        >
-                          <FolderOpen size={15} />
-                          {downloadSettings?.outputDirectory ? t('mediaLibrary.settings.download.path.action.change') : t('mediaLibrary.settings.download.path.action.choose')}
-                        </button>
-                      </div>
-                      {downloadDirectoryMessage ? <p className="settings-inline-note">{downloadDirectoryMessage}</p> : null}
-                    </div>
-                  </SettingRow>
-                  <SettingRow
-                    id="settings-row-streaming-download-actions"
-                    highlighted={highlightedSettingId === 'settings-row-streaming-download-actions'}
-                    title={t('mediaLibrary.settings.download.streamingActions.title')}
-                    description={t('mediaLibrary.settings.download.streamingActions.description')}
-                  >
-                    <div className="settings-inline-toggle settings-inline-toggle--compact">
-                      <span>{appSettings?.streamingDownloadActionsEnabled ? t('mediaLibrary.settings.download.streamingActions.visible') : t('mediaLibrary.settings.download.streamingActions.hidden')}</span>
-                      <ToggleButton
-                        active={appSettings?.streamingDownloadActionsEnabled === true}
-                        disabled={!appSettings}
-                        onClick={() => patchAppSettings({ streamingDownloadActionsEnabled: !(appSettings?.streamingDownloadActionsEnabled ?? false) })}
-                      />
-                    </div>
-                  </SettingRow>
-                </>
-              ) : null}
               <SettingRow
                 title={t('mediaLibrary.settings.playlistBackups.title')}
                 description={t('mediaLibrary.settings.playlistBackups.description')}

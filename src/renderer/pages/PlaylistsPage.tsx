@@ -353,8 +353,7 @@ const isDeletableStreamingPlaylist = (playlist: LibraryPlaylist): boolean =>
 const isNeteaseDailyRecommendPlaylist = (playlist: LibraryPlaylist | null | undefined): boolean =>
   playlist?.sourceProvider === 'netease' && playlist.sourcePlaylistId === neteaseDailyRecommendSourcePlaylistId;
 
-const canDownloadPlaylist = (playlist: LibraryPlaylist | null | undefined, downloadsUnlocked: boolean): boolean =>
-  downloadsUnlocked && (playlist?.sourceProvider === 'netease' || playlist?.sourceProvider === 'qqmusic' || playlist?.sourceProvider === 'kugou');
+const canDownloadPlaylist = (_playlist: LibraryPlaylist | null | undefined, _downloadsUnlocked: boolean): boolean => false;
 
 const isHttpUrl = (value: string): boolean => /^https?:\/\//iu.test(value.trim());
 

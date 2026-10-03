@@ -27,19 +27,17 @@ import {
   runDeferredStartupDataProtection,
 } from './dataProtection';
 import { disposeBackgroundPlaybackShortcuts, initializeBackgroundPlaybackShortcuts } from './backgroundPlaybackShortcuts';
-import { getAccountService } from '../accounts/AccountService';
 import { disposeAirPlayReceiverSpikeService } from '../connect/AirPlayReceiverSpikeService';
 import { disposeConnectReceiverService } from '../connect/ConnectReceiverService';
 import { disposeConnectService } from '../connect/ConnectService';
 import { disposeEchoLinkService } from '../connect/EchoLinkService';
 import { initializeEchoLinkBasicIntegration } from '../connect/EchoLinkBasicIntegration';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
-import type { AccountStatus } from '../../shared/types/accounts';
 import { closeDefaultLibraryService } from '../library/LibraryService';
 import { closeDefaultRemoteSourceService } from '../library/remote/RemoteSourceService';
 import { closeDefaultLyricsService } from '../lyrics/LyricsService';
 import { closeDefaultMvService } from '../mv/MvService';
-import { closeDefaultStreamingService } from '../streaming/StreamingService';
+
 import { disposeDefaultAudioSessionGracefully } from '../audioPublicApi';
 import { closeDefaultLibraryDatabaseManager, getLibraryDatabaseManager } from '../database/LibraryDatabaseManager';
 import { getSleepTimerService } from '../sleepTimer/SleepTimerService';
@@ -60,31 +58,6 @@ import {
 } from '../integrations/mqtt/MqttIntegrationService';
 import { disposeMainWindowPlaybackCommandRelay } from '../playback/MainWindowPlaybackCommandRelay';
 import { disposePlaybackPowerSaveBlocker, initializePlaybackPowerSaveBlocker } from './playbackPowerSaveBlocker';
-
-const sendAccountStatusesChanged = (statuses: AccountStatus[]): void => {
-  for (const window of BrowserWindow.getAllWindows()) {
-    const send = (): void => {
-      if (!window.isDestroyed()) {
-        window.webContents.send(IpcChannels.AccountStatusesChanged, statuses);
-      }
-    };
-
-    if (window.webContents.isLoading()) {
-      window.webContents.once('did-finish-load', send);
-    } else {
-      send();
-    }
-  }
-};
-
-const refreshPreviouslyLoggedInAccountsOnStartup = async (): Promise<void> => {
-  const statuses = await getAccountService().checkPreviouslyLoggedInAccounts();
-  const disconnectedStatuses = statuses.filter((status) => !status.connected && Boolean(status.error));
-
-  if (disconnectedStatuses.length > 0) {
-    sendAccountStatusesChanged(disconnectedStatuses);
-  }
-};
 
 const notifyLibraryDatabaseProtected = (): void => {
   void dialog.showMessageBox({
@@ -463,10 +436,11 @@ export const registerAppLifecycle = (): void => {
     initializeBackgroundPlaybackShortcuts();
     markStartupStage('background-shortcuts:initialized');
     if (appSettings.autoAccountCheckOnStartup !== false) {
-      markStartupStage('accounts:startup-check:scheduled');
-      void refreshPreviouslyLoggedInAccountsOnStartup().catch(() => undefined);
-    } else {
-      markStartupStage('accounts:startup-check:skipped');
+      void import('../accounts/AccountService')
+        .then(({ getAccountService }) => getAccountService().checkPreviouslyLoggedInAccounts())
+        .catch((error) => {
+          console.warn('[accounts] startup Bilibili login check failed', error);
+        });
     }
     initializeAutoUpdater(appSettings.autoUpdateEnabled !== false);
     markStartupStage('auto-updater:initialized', { enabled: appSettings.autoUpdateEnabled !== false });
@@ -536,7 +510,6 @@ export const registerAppLifecycle = (): void => {
     disposeBackgroundPlaybackShortcuts();
     closeDefaultLyricsService();
     closeDefaultMvService();
-    closeDefaultStreamingService();
     closeDefaultRemoteSourceService();
     await closeDefaultLibraryService();
     const manager = getLibraryDatabaseManager();

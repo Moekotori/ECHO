@@ -4863,7 +4863,7 @@ export const koKR: TranslationDictionary = {
   'settings.nav.about.description': 'Version, updates, and developer tools',
   'settings.nav.about.label': 'About / Advanced',
   'settings.nav.steam.label': 'Steam 버전',
-  'settings.nav.steam.description': '버전 비교와 창작마당',
+  'settings.nav.steam.description': '더 나은 최적화, 기능, 성능',
   'settings.nav.accessibility.description': 'Vision, keyboard, screen reader',
   'settings.nav.accessibility.label': '접근성',
   'settings.nav.accounts.description': 'Music services, advanced accounts, and credentials',

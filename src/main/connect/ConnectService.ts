@@ -11,7 +11,7 @@ import type { HqPlayerConnectionTestResult, HqPlayerRemotePlaybackStatus } from 
 import { hqPlayerConnectDeviceId } from '../../shared/types/connect';
 import type { LibraryTrack } from '../../shared/types/library';
 import type { PlayableTrack } from '../../shared/types/remoteSources';
-import { streamingProviderNames, type StreamingProviderName } from '../../shared/types/streaming';
+
 import { defaultHqPlayerSettings } from '../app/appSettings';
 import { getAudioSession } from '../audioPublicApi';
 import { getHqPlayerService, type HqPlayerService } from '../integrations/hqplayer/HqPlayerService';
@@ -740,24 +740,7 @@ export class ConnectService extends EventEmitter<ConnectEvents> {
     }
 
     if (mediaType === 'streaming') {
-      const streamingTrack = track as Partial<LibraryTrack>;
-      const provider = typeof streamingTrack.provider === 'string' && streamingProviderNames.includes(streamingTrack.provider as StreamingProviderName)
-        ? streamingTrack.provider as StreamingProviderName
-        : null;
-      if (!provider || !streamingTrack.providerTrackId || !streamingTrack.stableKey) {
-        throw new Error('当前串流曲目缺少 HQPlayer 交接信息。');
-      }
-
-      return {
-        ...common,
-        mediaType: 'streaming',
-        provider,
-        providerTrackId: streamingTrack.providerTrackId,
-        quality: streamingTrack.streamingQuality,
-        stableKey: streamingTrack.stableKey,
-        playable: true,
-        unavailableReason: null,
-      };
+      throw new Error('流媒体播放已移除。');
     }
 
     return {

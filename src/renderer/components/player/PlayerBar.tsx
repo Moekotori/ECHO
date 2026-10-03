@@ -1680,7 +1680,11 @@ export const PlayerBar = ({
 
       syncInFlight = true;
       try {
-        const spotifyState = await window.echo.spotify.getPlaybackState();
+        const spotifyApi = window.echo.spotify;
+        if (!spotifyApi) {
+          return;
+        }
+        const spotifyState = await spotifyApi.getPlaybackState();
         if (cancelled || spotifyState.itemUri !== expectedUri) {
           return;
         }
@@ -2819,9 +2823,10 @@ export const PlayerBar = ({
     try {
       const previous = isCurrentTrackLiked;
       setIsCurrentTrackLiked(!previous);
+      const setStreamingTrackLiked = window.echo.streaming?.setTrackLiked;
       const result =
-        isProviderLikedStreamingTrack && streamingTrackProviderTrackId && isProviderLikedStreamingProvider(streamingTrackProvider)
-          ? await window.echo.streaming.setTrackLiked({
+        isProviderLikedStreamingTrack && streamingTrackProviderTrackId && isProviderLikedStreamingProvider(streamingTrackProvider) && setStreamingTrackLiked
+          ? await setStreamingTrackLiked({
               provider: streamingTrackProvider,
               providerTrackId: streamingTrackProviderTrackId,
               liked: !previous,
@@ -3210,30 +3215,6 @@ export const PlayerBar = ({
             onOpenChange={(isOpen) => setOpenPopover(isOpen ? 'speed' : null)}
             onStatusChange={setAudioStatus}
           />
-        ) : null}
-        {isPlayerBarButtonVisible('streamingDownload') && isCurrentStreamingTrack && streamingDownloadActionsEnabled ? (
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t('playerBar.download.ariaDownload')}
-            title={
-              canDownloadCurrentStreamingTrack
-                ? isCurrentStreamingDownloadBusy
-                  ? t('playerBar.download.title.preparing')
-                  : t('playerBar.download.title.download')
-                : currentStreamingDownloadProvider === 'spotify'
-                  ? t('playerBar.download.title.spotifyUnsupported')
-                  : t('playerBar.download.title.sourceUnsupported')
-            }
-            disabled={!canDownloadCurrentStreamingTrack || isCurrentStreamingDownloadBusy}
-            onClick={() => void handleDownloadCurrentStreamingTrack()}
-          >
-            {isStreamingDownloadResolving || streamingDownloadJobId ? (
-              <Loader2 className="spinning-icon" size={17} />
-            ) : (
-              <Download size={17} />
-            )}
-          </button>
         ) : null}
         {isPlayerBarButtonVisible('audioExport') && !isCurrentStreamingTrack ? (
           <button

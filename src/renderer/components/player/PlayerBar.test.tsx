@@ -5299,7 +5299,7 @@ describe('PlayerBar', () => {
     expect(visibleContainer.querySelector('.output-status button[title*="MP3"]')).toBeTruthy();
   });
 
-  it('starts a download job from the player for the current streaming track', async () => {
+  it('does not offer a download action for the current streaming track', async () => {
     const track = makeTrack(21, {
       id: 'streaming:qqmusic:song-mid',
       mediaType: 'streaming',
@@ -5401,36 +5401,9 @@ describe('PlayerBar', () => {
     );
 
     await screen.findByText('Streaming Download Track');
-    fireEvent.click(await screen.findByRole('button', { name: '下载当前流媒体' }));
-
-    await waitFor(() =>
-      expect(resolvePlayback).toHaveBeenCalledWith({
-        provider: 'qqmusic',
-        providerTrackId: 'song-mid',
-        quality: 'lossless',
-      }),
-    );
-    await waitFor(() =>
-      expect(createUrlJob).toHaveBeenCalledWith(
-        'https://isure.stream.qqmusic.qq.com/song.flac',
-        expect.objectContaining({
-          title: 'Streaming Download Track',
-          artist: 'Stream Artist',
-          album: 'Stream Album',
-          albumArtist: 'Stream Album Artist',
-          coverUrl: 'https://img.example/cover.jpg',
-          webpageUrl: 'https://y.qq.com/n/ryqq/songDetail/song-mid',
-          directAudio: true,
-          directAudioMimeType: 'audio/flac',
-          directAudioExtension: 'flac',
-          streamingProvider: 'qqmusic',
-          streamingProviderTrackId: 'song-mid',
-          streamingStableKey: 'streaming:qqmusic:song-mid',
-          downloadAuthorizationToken: 'download-token-1',
-        }),
-      ),
-    );
-    expect(await screen.findByText('正在下载：Streaming Download Track')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '下载当前流媒体' })).toBeNull();
+    expect(createUrlJob).not.toHaveBeenCalled();
+    expect(resolvePlayback).not.toHaveBeenCalled();
   });
 
   it('auto-plays the next queued track when audio status pushes ended', async () => {

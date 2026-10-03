@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, BookOpen, CheckCircle2, FolderOpen, Gamepad2, Gauge, HardDrive, Headphones, Languages, Loader2, LogIn, Palette, ScanLine, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpen, CheckCircle2, FolderOpen, Gauge, HardDrive, Headphones, Languages, Loader2, Palette, ScanLine, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AudioOutputMode } from '../../../shared/types/audio';
 import type { AppSettings, AppThemeMode, AppThemePreset, ScanPerformanceMode } from '../../../shared/types/appSettings';
@@ -21,7 +21,7 @@ type FirstRunWizardProps = {
   presentationState?: 'open' | 'closing';
 };
 
-type FirstRunStepId = 'language' | 'library' | 'cache' | 'scan' | 'audio' | 'performance' | 'appearance' | 'osu' | 'accounts' | 'summary';
+type FirstRunStepId = 'language' | 'library' | 'cache' | 'scan' | 'audio' | 'performance' | 'appearance' | 'summary';
 
 type FirstRunStep = {
   id: FirstRunStepId;
@@ -253,21 +253,6 @@ const firstRunSteps: FirstRunStep[] = [
     icon: Palette,
   },
   {
-    id: 'osu',
-    labelKey: 'firstRun.feature.osuDownloader.label',
-    titleKey: 'firstRun.feature.osuDownloader.label',
-    descriptionKey: 'firstRun.feature.osuDownloader.description',
-    icon: Gamepad2,
-  },
-  {
-    id: 'accounts',
-    labelKey: 'firstRun.step.accounts.label',
-    eyebrowKey: 'firstRun.step.accounts.eyebrow',
-    titleKey: 'firstRun.step.accounts.title',
-    descriptionKey: 'firstRun.step.accounts.description',
-    icon: LogIn,
-  },
-  {
     id: 'summary',
     labelKey: 'firstRun.step.summary.label',
     eyebrowKey: 'firstRun.step.summary.eyebrow',
@@ -301,8 +286,8 @@ const firstRunPhases: FirstRunPhase[] = [
   {
     id: 'personalize',
     labelKey: 'firstRun.step.appearance.label',
-    subtitleKeys: ['firstRun.step.appearance.label', 'firstRun.feature.osuDownloader.label', 'firstRun.step.accounts.label'],
-    stepIds: ['appearance', 'osu', 'accounts'],
+    subtitleKeys: ['firstRun.step.appearance.label'],
+    stepIds: ['appearance'],
     icon: Palette,
   },
   {
@@ -321,8 +306,6 @@ const firstRunStepNotes: Record<FirstRunStepId, TranslationKey[]> = {
   audio: ['firstRun.detail.audio.shared', 'firstRun.detail.audio.advanced'],
   performance: ['firstRun.detail.performance.optional', 'firstRun.detail.performance.changeLater'],
   appearance: ['firstRun.detail.appearance.preview', 'firstRun.detail.appearance.system'],
-  osu: ['firstRun.feature.osuDownloader.hint', 'firstRun.detail.performance.changeLater'],
-  accounts: ['firstRun.detail.accounts.later', 'firstRun.detail.accounts.local'],
   summary: ['firstRun.detail.summary.save', 'firstRun.detail.summary.docs'],
 };
 
@@ -355,7 +338,6 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
 
   const activeStepIndex = Math.max(0, firstRunSteps.findIndex((step) => step.id === activeStepId));
   const activeStep = firstRunSteps[activeStepIndex] ?? firstRunSteps[0]!;
-  const activeOsuCopy = osuOnboardingCopy[activeLocale] ?? osuOnboardingCopy['en-US'];
   const ActiveIcon = activeStep.icon;
   const isFinalStep = activeStep.id === 'summary';
   const stepNumberLabel = `${activeStepIndex + 1} / ${firstRunSteps.length}`;
@@ -364,16 +346,12 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
   const activePhase = firstRunPhases[activePhaseIndex] ?? firstRunPhases[0]!;
   const activeSubStepIndex = Math.max(0, activePhase.stepIds.indexOf(activeStep.id));
   const nextStep = firstRunSteps[Math.min(firstRunSteps.length - 1, activeStepIndex + 1)] ?? activeStep;
-  const activeStepTitle = activeStep.id === 'osu'
-    ? activeOsuCopy.title
-    : activeStep.id === 'summary'
-      ? t('firstRun.summary.readyTitle')
-      : t(activeStep.titleKey);
-  const activeStepDescription = activeStep.id === 'osu'
-    ? activeOsuCopy.description
-    : activeStep.id === 'summary'
-      ? t('firstRun.summary.readyDescription')
-      : t(activeStep.descriptionKey);
+  const activeStepTitle = activeStep.id === 'summary'
+    ? t('firstRun.summary.readyTitle')
+    : t(activeStep.titleKey);
+  const activeStepDescription = activeStep.id === 'summary'
+    ? t('firstRun.summary.readyDescription')
+    : t(activeStep.descriptionKey);
 
   const cacheDirectoryLabel = useMemo(() => {
     if (cacheDirectory === undefined) {
@@ -396,7 +374,7 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
   };
   const enabledFeatureLabels = [
     ...featureToggles.filter((item) => featureEnabledById[item.id]).map((item) => t(item.labelKey)),
-    ...(osuDownloaderFeatureEnabled ? [t('firstRun.feature.osuDownloader.label')] : []),
+
   ];
   const featureSummaryLabel = enabledFeatureLabels.length ? enabledFeatureLabels.join(', ') : t('firstRun.summary.featuresDefault');
 
@@ -502,7 +480,7 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
         scanPerformanceMode: scanMode,
         lowLoadPlaybackModeEnabled,
         albumWallVirtualizationEnabled,
-        osuDownloaderFeatureEnabled,
+        osuDownloaderFeatureEnabled: false,
         rememberedAudioOutput,
       });
       updateThemePreferences(appearanceTheme, effectiveAppearanceThemePreset, nextSettings.appearanceThemePresetOverrides ?? {}, {
@@ -540,7 +518,6 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
     musicFolderPath,
     onClose,
     onCompleted,
-    osuDownloaderFeatureEnabled,
     outputMode,
     scanMode,
     scanNow,
@@ -738,67 +715,6 @@ export const FirstRunWizard = ({ initialSettings, onClose, onCompleted, presenta
                 ))}
               </div>
             </section>
-          </div>
-        );
-      case 'osu':
-        return (
-          <div className="first-run-osu-question">
-            <div className="first-run-osu-choices">
-              <button
-                className={`first-run-osu-choice first-run-osu-choice--yes ${osuDownloaderFeatureEnabled ? 'is-active' : ''}`.trim()}
-                type="button"
-                aria-pressed={osuDownloaderFeatureEnabled}
-                onClick={() => setOsuDownloaderFeatureEnabled(true)}
-              >
-                <span className="first-run-osu-choice-icon"><Gamepad2 size={22} aria-hidden="true" /></span>
-                <span>
-                  <strong>{activeOsuCopy.yesLabel}</strong>
-                  <small>{activeOsuCopy.yesDescription}</small>
-                </span>
-                {osuDownloaderFeatureEnabled ? <CheckCircle2 size={20} aria-hidden="true" /> : null}
-              </button>
-              <button
-                className={`first-run-osu-choice first-run-osu-choice--no ${!osuDownloaderFeatureEnabled ? 'is-active' : ''}`.trim()}
-                type="button"
-                aria-pressed={!osuDownloaderFeatureEnabled}
-                onClick={() => setOsuDownloaderFeatureEnabled(false)}
-              >
-                <span className="first-run-osu-choice-icon"><X size={22} aria-hidden="true" /></span>
-                <span>
-                  <strong>{activeOsuCopy.noLabel}</strong>
-                  <small>{activeOsuCopy.noDescription}</small>
-                </span>
-                {!osuDownloaderFeatureEnabled ? <CheckCircle2 size={20} aria-hidden="true" /> : null}
-              </button>
-            </div>
-            <div className={`first-run-osu-status ${osuDownloaderFeatureEnabled ? 'is-enabled' : ''}`} role="status">
-              {osuDownloaderFeatureEnabled ? <Gamepad2 size={17} aria-hidden="true" /> : <X size={17} aria-hidden="true" />}
-              <span>{osuDownloaderFeatureEnabled ? activeOsuCopy.enabledStatus : activeOsuCopy.disabledStatus}</span>
-            </div>
-          </div>
-        );
-      case 'accounts':
-        return (
-          <div className="first-run-account-guide">
-            <ol>
-              <li>
-                <strong>{t('firstRun.accounts.open.title')}</strong>
-                <span>{t('firstRun.accounts.open.description')}</span>
-              </li>
-              <li>
-                <strong>{t('firstRun.accounts.login.title')}</strong>
-                <span>{t('firstRun.accounts.login.description')}</span>
-              </li>
-              <li>
-                <strong>{t('firstRun.accounts.cookie.title')}</strong>
-                <span>{t('firstRun.accounts.cookie.description')}</span>
-              </li>
-              <li>
-                <strong>{t('firstRun.accounts.spotify.title')}</strong>
-                <span>{t('firstRun.accounts.spotify.description')}</span>
-              </li>
-            </ol>
-            <p>{t('firstRun.accounts.note')}</p>
           </div>
         );
       case 'summary':

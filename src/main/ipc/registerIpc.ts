@@ -96,12 +96,11 @@ import { installIpcPerformanceDiagnostics } from '../diagnostics/IpcPerformanceD
 import { requireEchoProForAudioDspPatch } from './audioProFeatureGate';
 import { registerAudioIpc } from './audioIpc';
 import { registerAudioCdIpc } from './audioCdIpc';
-import { registerAccountIpc } from './accountIpc';
 import { registerConnectIpc } from './connectIpc';
 import { registerDiagnosticsIpc } from './diagnosticsIpc';
 import { registerDiscordPresenceIpc } from './discordPresenceIpc';
 import { registerDesktopLyricsIpc } from './desktopLyricsIpc';
-import { registerDownloadsIpc } from './downloadsIpc';
+import { registerAccountIpc } from './accountIpc';
 import { registerLastFmIpc } from './lastFmIpc';
 import { registerLibraryIpc } from './libraryIpc';
 import { registerLyricsIpc } from './lyricsIpc';
@@ -118,9 +117,7 @@ import { registerStageBridgeIpc } from './stageBridgeIpc';
 import { registerEchoLinkIpc } from './echoLinkIpc';
 import { registerMqttIntegrationIpc } from './mqttIntegrationIpc';
 import { registerTaskbarMiniPlayerIpc } from './taskbarMiniPlayerIpc';
-import { registerStreamingIpc } from './streamingIpc';
 import { registerSleepTimerIpc } from './sleepTimerIpc';
-import { registerQobuzIpc } from './qobuzIpc';
 
 const fontMimeTypes: Record<string, string> = {
   '.otf': 'font/otf',
@@ -983,7 +980,6 @@ export const registerIpc = (): void => {
   });
 
   registerIpcStartupStep('diagnostics', registerDiagnosticsIpc);
-  registerIpcStartupStep('account', registerAccountIpc);
   registerIpcStartupStep('connect', registerConnectIpc);
   registerIpcStartupStep('echo-link-basic', registerEchoLinkIpc);
   registerIpcStartupStep('mqtt-integration', registerMqttIntegrationIpc);
@@ -992,7 +988,7 @@ export const registerIpc = (): void => {
   registerIpcStartupStep('mini-player', registerMiniPlayerIpc);
   registerIpcStartupStep('ultra-light-mode', registerUltraLightModeIpc);
   registerIpcStartupStep('pet', registerPetIpc);
-  registerIpcStartupStep('downloads', registerDownloadsIpc);
+  registerIpcStartupStep('account', registerAccountIpc);
   registerIpcStartupStep('plugin', registerPluginIpc);
   registerIpcStartupStep('lastfm', registerLastFmIpc);
   registerIpcStartupStep('library', registerLibraryIpc);
@@ -1003,10 +999,8 @@ export const registerIpc = (): void => {
   registerIpcStartupStep('smtc', registerSmtcIpc);
   registerIpcStartupStep('stage-bridge', registerStageBridgeIpc);
   registerIpcStartupStep('taskbar-mini-player', registerTaskbarMiniPlayerIpc);
-  registerIpcStartupStep('streaming', registerStreamingIpc);
   registerIpcStartupStep('playback', registerPlaybackIpc);
   registerIpcStartupStep('audio', registerAudioIpc);
   registerIpcStartupStep('audio-cd', registerAudioCdIpc);
-  registerIpcStartupStep('qobuz', registerQobuzIpc);
   registerIpcStartupStep('sleepTimer', registerSleepTimerIpc);
 };

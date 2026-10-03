@@ -1166,11 +1166,11 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     const searchInput = screen.getByPlaceholderText('settings.header.searchPlaceholder');
-    fireEvent.change(searchInput, { target: { value: 'Spotify Client ID' } });
-    fireEvent.click(await screen.findByRole('option', { name: /Spotify OAuth 配置/u }));
+    fireEvent.change(searchInput, { target: { value: 'Discogs token' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Discogs 专辑评分/u }));
 
     expect(document.getElementById('settings-sec-accounts')?.dataset.visible).toBe('true');
-    expect(document.getElementById('settings-row-spotify-auth-config')?.dataset.searchHighlight).toBe('true');
+    expect(document.getElementById('settings-row-online-album-info')?.dataset.searchHighlight).toBe('true');
     expect(screen.queryByText('settings.integrations.discord.title')).toBeNull();
   });
 
@@ -1296,45 +1296,7 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ sidebarIconOnlyEnabled: true, sidebarAutoHideEnabled: false }));
   });
 
-  it('enables the streaming entry from general settings and reveals the sidebar route', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    const currentSettings = {
-      ...settings,
-      streamingFeatureEnabled: false,
-      sidebarHiddenRouteIds: [...defaultSidebarHiddenRouteIds, 'streaming'],
-    };
-    const nextSettings = {
-      ...currentSettings,
-      streamingFeatureEnabled: true,
-      sidebarHiddenRouteIds: [...defaultSidebarHiddenRouteIds],
-    };
-    getSettingsMock.mockResolvedValue(currentSettings);
-    setSettingsMock.mockResolvedValue(nextSettings);
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    const row = screen.getByText('settings.general.streamingFeature.title').closest('.setting-row') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button'));
-
-    const dialog = screen.getByRole('dialog', { name: 'streamingConsentNotice.title' });
-    expect(dialog.textContent).toContain('streamingConsentNotice.dmca');
-    expect(setSettingsMock).not.toHaveBeenCalled();
-
-    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'streamingConsentNotice.consentPhrase' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'streamingConsentNotice.confirm' }));
-
-    await waitFor(() =>
-      expect(setSettingsMock).toHaveBeenCalledWith({
-        streamingFeatureEnabled: true,
-        sidebarHiddenRouteIds: [...defaultSidebarHiddenRouteIds],
-      }),
-    );
-  });
-
-  it('enables the osu downloader entry from experimental settings and reveals the sidebar route', async () => {
+  it('does not offer the osu downloader entry in experimental settings', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     const currentSettings = {
       ...settings,
@@ -1355,15 +1317,7 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     fireEvent.click(screen.getAllByText('settings.nav.experimental.label')[0]);
-    const row = screen.getByText('settings.general.osuDownloaderFeature.title').closest('.setting-row') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button'));
-
-    await waitFor(() =>
-      expect(setSettingsMock).toHaveBeenCalledWith({
-        osuDownloaderFeatureEnabled: true,
-        sidebarHiddenRouteIds: [...defaultSidebarHiddenRouteIds],
-      }),
-    );
+    expect(screen.queryByText('settings.general.osuDownloaderFeature.title')).toBeNull();
   });
 
   it('hides optional Plugins, Remote, and EQ settings nav items by default', async () => {
@@ -2002,7 +1956,7 @@ describe('SettingsPage', () => {
     expect(screen.getByText('settings.integrations.onlineAlbum.message.saved')).toBeTruthy();
   });
 
-  it('keeps the music service account list visible and switches the selected platform detail', async () => {
+  it('does not show music service login cards in accounts settings', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     resetSettingsMock.mockResolvedValue(settings);
@@ -2013,18 +1967,9 @@ describe('SettingsPage', () => {
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.accounts\\.label');
 
-    const serviceList = screen.getByRole('navigation', { name: 'settings.integrations.accountPanel.title' });
-    const serviceButtons = within(serviceList).getAllByRole('button');
-    expect(serviceButtons).toHaveLength(9);
-    expect(serviceList.querySelectorAll('img')).toHaveLength(9);
-    expect(screen.queryByRole('button', { name: 'settings.integrations.accountPanel.collapse' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'settings.integrations.accountPanel.expand' })).toBeNull();
-
-    const spotifyButton = within(serviceList).getByRole('button', { name: /Spotify/u });
-    fireEvent.click(spotifyButton);
-
-    expect(spotifyButton.getAttribute('aria-current')).toBe('page');
-    expect(screen.getByRole('region', { name: 'Spotify' })).toBeTruthy();
+    expect(screen.queryByRole('navigation', { name: 'settings.integrations.accountPanel.title' })).toBeNull();
+    expect(screen.getByRole('article', { name: 'Bilibili' })).toBeTruthy();
+    expect(screen.queryByRole('article', { name: 'Spotify' })).toBeNull();
   });
 
   it('keeps developer API settings collapsed by default and remembers expansion', async () => {
@@ -2046,7 +1991,7 @@ describe('SettingsPage', () => {
 
     expect(window.localStorage.getItem('echo:settings:integrations:credential-panel-expanded')).toBe('true');
     expect(screen.getByText('settings.integrations.onlineAlbum.title')).toBeTruthy();
-    expect(screen.getByText('settings.integrations.spotifyAuth.title')).toBeTruthy();
+    expect(screen.queryByText('settings.integrations.spotifyAuth.title')).toBeNull();
     expect(screen.getByText('settings.integrations.lastfm.title')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.integrations.credentialPanel.collapse' }));
@@ -3191,25 +3136,19 @@ describe('SettingsPage', () => {
     expect(await screen.findByText('settings.appearance.artistAvatars.message.queued')).toBeTruthy();
   });
 
-  it('chooses the download folder from Settings', async () => {
+  it('does not offer a download folder in Settings', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue({ ...settings, downloadsFeatureUnlocked: true });
     resetSettingsMock.mockResolvedValue(settings);
     clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-    getDownloadSettingsMock.mockResolvedValue(downloadSettings);
-    chooseDownloadOutputDirectoryMock.mockResolvedValue({ ...downloadSettings, outputDirectory: 'E:\\Music Downloads' });
 
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.library\\.label');
-    expect(await screen.findByText('D:\\Downloads')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'mediaLibrary.settings.download.path.action.change' }));
-
-    await waitFor(() => expect(chooseDownloadOutputDirectoryMock).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText('E:\\Music Downloads')).toBeTruthy();
-    expect(await screen.findByText(/下载路径已更新。|mediaLibrary\.settings\.download\.path\.message\.updated/)).toBeTruthy();
+    expect(screen.queryByText('mediaLibrary.settings.download.path.title')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'mediaLibrary.settings.download.path.action.change' })).toBeNull();
   });
 
   it('hides streaming download actions in Settings until downloads are unlocked', async () => {
@@ -3226,10 +3165,9 @@ describe('SettingsPage', () => {
     expect(screen.queryByRole('heading', { name: 'mediaLibrary.settings.download.streamingActions.title' })).toBeNull();
   });
 
-  it('toggles streaming download actions from Settings', async () => {
+  it('does not offer streaming download actions in Settings', async () => {
     Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue({ ...settings, downloadsFeatureUnlocked: true, streamingDownloadActionsEnabled: false });
-    setSettingsMock.mockResolvedValue({ ...settings, downloadsFeatureUnlocked: true, streamingDownloadActionsEnabled: true });
+    getSettingsMock.mockResolvedValue({ ...settings, downloadsFeatureUnlocked: true, streamingDownloadActionsEnabled: true });
     resetSettingsMock.mockResolvedValue(settings);
     clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
 
@@ -3237,11 +3175,7 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.library\\.label');
-    const row = screen.getByRole('heading', { name: 'mediaLibrary.settings.download.streamingActions.title' }).closest('.setting-row') as HTMLElement;
-    expect(within(row).getByText('mediaLibrary.settings.download.streamingActions.hidden')).toBeTruthy();
-    fireEvent.click(within(row).getByRole('button', { pressed: false }));
-
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ streamingDownloadActionsEnabled: true }));
+    expect(screen.queryByRole('heading', { name: 'mediaLibrary.settings.download.streamingActions.title' })).toBeNull();
   });
 
   it('saves the lyrics player bar drawer setting from Settings', async () => {
@@ -4108,24 +4042,7 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(within(row).getByRole('button').getAttribute('aria-pressed')).toBe('true'));
   });
 
-  it('saves the startup account check setting from Settings', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
-    getSettingsMock.mockResolvedValue(settings);
-    setSettingsMock.mockResolvedValue({ ...settings, autoAccountCheckOnStartup: false });
-    resetSettingsMock.mockResolvedValue(settings);
-    clearCacheMock.mockResolvedValue({ scannedCount: 0, removedCount: 0, deletedCoverCacheFiles: 0, freedCoverCacheBytes: 0 });
-
-    render(<SettingsPage />);
-
-    await screen.findByText('route.settings.label');
-    fireEvent.click(screen.getAllByText('settings.nav.accounts.label')[0]);
-    const row = screen.getByText('settings.integrations.accountStartupRefresh.title').closest('.setting-row') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button'));
-
-    await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ autoAccountCheckOnStartup: false }));
-  });
-
-  it('loads account statuses when the Accounts section opens', async () => {
+  it('does not expose music account login when the Accounts section opens', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     resetSettingsMock.mockResolvedValue(settings);
@@ -4134,10 +4051,12 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     await screen.findByText('route.settings.label');
-    expect(getAccountStatusesMock).not.toHaveBeenCalled();
     fireEvent.click(screen.getAllByText('settings.nav.accounts.label')[0]);
 
-    await waitFor(() => expect(getAccountStatusesMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('article', { name: 'Bilibili' })).toBeTruthy();
+    expect(screen.queryByText('settings.integrations.accountPanel.title')).toBeNull();
+    expect(screen.queryByText('settings.integrations.accountStartupRefresh.title')).toBeNull();
+    await waitFor(() => expect(getAccountStatusesMock).toHaveBeenCalled());
   });
 
   it('does not expose an account expiry reminder setting', async () => {

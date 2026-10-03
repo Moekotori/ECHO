@@ -260,10 +260,6 @@ vi.mock('./audioIpc', () => ({
   registerAudioIpc: vi.fn(),
 }));
 
-vi.mock('./accountIpc', () => ({
-  registerAccountIpc: vi.fn(),
-}));
-
 vi.mock('./diagnosticsIpc', () => ({
   registerDiagnosticsIpc: vi.fn(),
 }));
@@ -278,10 +274,6 @@ vi.mock('./echoLinkIpc', () => ({
 
 vi.mock('./discordPresenceIpc', () => ({
   registerDiscordPresenceIpc: vi.fn(),
-}));
-
-vi.mock('./downloadsIpc', () => ({
-  registerDownloadsIpc: vi.fn(),
 }));
 
 vi.mock('./pluginIpc', () => ({
@@ -330,10 +322,6 @@ vi.mock('./stageBridgeIpc', () => ({
 
 vi.mock('./remoteSourcesIpc', () => ({
   registerRemoteSourcesIpc: vi.fn(),
-}));
-
-vi.mock('./streamingIpc', () => ({
-  registerStreamingIpc: vi.fn(),
 }));
 
 vi.mock('../integrations/discord/getDiscordPresenceService', () => ({

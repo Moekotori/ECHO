@@ -3,7 +3,6 @@ import { join, relative, sep } from 'node:path';
 import { app } from 'electron';
 import { strToU8, zipSync, type Zippable } from 'fflate';
 import type { DataPackageExportResult } from '../../shared/types/settingsBackup';
-import { getAccountService } from '../accounts/AccountService';
 import { checkDatabaseHealth } from '../database/health';
 import { getLibraryService } from '../library/LibraryService';
 import { getAppSettings } from './appSettings';
@@ -90,7 +89,6 @@ What is inside:
 - library/echo-library.sqlite: library index snapshot, including playlists and local library metadata.
 - library/playlists.json: playlist metadata plus a readable item snapshot.
 - cache/cover-cache.json: configured cover cache location and inventory summary.
-- accounts/status.json: account connection status only. Raw login cookies and tokens are not exported.
 
 Restore entry:
 1. Open ECHO Next Settings.
@@ -153,12 +151,6 @@ export const exportEchoDataPackage = async (outputPath: string): Promise<DataPac
     exportedAt,
     appVersion: app.getVersion(),
     settings,
-  });
-  files['accounts/status.json'] = toZipText({
-    exportedAt,
-    note: 'Only connection state is exported here. Login secrets are intentionally excluded.',
-    statuses: getAccountService().getStatuses(),
-    sanitizedRecords: getAccountService().getSanitizedRecords(),
   });
   files['cache/cover-cache.json'] = toZipText({
     exportedAt,

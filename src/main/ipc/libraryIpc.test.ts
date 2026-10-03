@@ -48,7 +48,6 @@ const closeDatabaseUserMocks = vi.hoisted(() => ({
   remote: vi.fn(),
   lyrics: vi.fn(),
   mv: vi.fn(),
-  streaming: vi.fn(),
 }));
 const appLifecycleMocks = vi.hoisted(() => ({
   relaunch: vi.fn(),
@@ -71,10 +70,6 @@ const databaseManagerMock = vi.hoisted(() => ({
     protectionRecoveryAction: null,
   })),
   runExclusiveMaintenance: vi.fn((_reason: string, action: () => unknown) => Promise.resolve().then(action)),
-}));
-const downloadServiceMock = vi.hoisted(() => ({
-  dispose: vi.fn(),
-  getSettings: vi.fn(() => ({ outputDirectory: null })),
 }));
 const appSettingsMock = vi.hoisted(() => ({
   current: {
@@ -158,21 +153,12 @@ vi.mock('../mv/MvService', () => ({
   closeDefaultMvService: closeDatabaseUserMocks.mv,
 }));
 
-vi.mock('../streaming/StreamingService', () => ({
-  closeDefaultStreamingService: closeDatabaseUserMocks.streaming,
-  getStreamingService: vi.fn(),
-}));
-
 vi.mock('../app/appSettings', () => ({
   getAppSettings: () => appSettingsMock.current,
 }));
 
 vi.mock('../database/LibraryDatabaseManager', () => ({
   getLibraryDatabaseManager: () => databaseManagerMock,
-}));
-
-vi.mock('../downloads/DownloadService', () => ({
-  getDownloadService: () => downloadServiceMock,
 }));
 
 const resetHandlers = (): void => {
@@ -838,9 +824,7 @@ describe('library IPC', () => {
     databaseManagerMock.getState.mockClear();
     databaseManagerMock.runExclusiveMaintenance.mockClear();
     databaseManagerMock.runExclusiveMaintenance.mockImplementation((_reason: string, action: () => unknown) => Promise.resolve().then(action));
-    downloadServiceMock.dispose.mockReset();
-    downloadServiceMock.getSettings.mockReset();
-    downloadServiceMock.getSettings.mockReturnValue({ outputDirectory: null });
+
     osuArchiveImportMock.importOsuArchiveAsMp3Queued.mockClear();
     const { app } = await import('electron');
     vi.mocked(app.getPath).mockImplementation((name: string) => (name === 'downloads' ? 'D:\\Downloads' : 'D:\\UserData'));
@@ -1842,7 +1826,6 @@ describe('library IPC', () => {
     expect(closeDatabaseUserMocks.remote).not.toHaveBeenCalled();
     expect(closeDatabaseUserMocks.lyrics).not.toHaveBeenCalled();
     expect(closeDatabaseUserMocks.mv).not.toHaveBeenCalled();
-    expect(closeDatabaseUserMocks.streaming).not.toHaveBeenCalled();
   });
 
   it('schedules a recovery-mode relaunch and closes database users even during scan pressure', async () => {
@@ -1857,7 +1840,6 @@ describe('library IPC', () => {
     });
     expect(closeDatabaseUserMocks.lyrics).toHaveBeenCalledTimes(1);
     expect(closeDatabaseUserMocks.mv).toHaveBeenCalledTimes(1);
-    expect(closeDatabaseUserMocks.streaming).toHaveBeenCalledTimes(1);
     expect(closeDatabaseUserMocks.remote).toHaveBeenCalledTimes(1);
     expect(closeDatabaseUserMocks.library).toHaveBeenCalledTimes(1);
   });
@@ -1879,7 +1861,6 @@ describe('library IPC', () => {
     expect(existsSync(join(root, 'echo-library.sqlite'))).toBe(false);
     expect(closeDatabaseUserMocks.lyrics).toHaveBeenCalledTimes(1);
     expect(closeDatabaseUserMocks.mv).toHaveBeenCalledTimes(1);
-    expect(closeDatabaseUserMocks.streaming).toHaveBeenCalledTimes(1);
     expect(closeDatabaseUserMocks.remote).toHaveBeenCalledTimes(1);
     expect(closeDatabaseUserMocks.library).toHaveBeenCalledTimes(1);
   });
@@ -1918,10 +1899,8 @@ describe('library IPC', () => {
       expect(appLifecycleMocks.exit).not.toHaveBeenCalled();
       vi.advanceTimersByTime(result.exitDelayMs);
       expect(appLifecycleMocks.exit).toHaveBeenCalledWith(0);
-      expect(downloadServiceMock.dispose).toHaveBeenCalledTimes(1);
       expect(closeDatabaseUserMocks.lyrics).toHaveBeenCalledTimes(1);
       expect(closeDatabaseUserMocks.mv).toHaveBeenCalledTimes(1);
-      expect(closeDatabaseUserMocks.streaming).toHaveBeenCalledTimes(1);
       expect(closeDatabaseUserMocks.remote).toHaveBeenCalledTimes(1);
       expect(closeDatabaseUserMocks.library).toHaveBeenCalledTimes(1);
     } finally {
@@ -1980,7 +1959,6 @@ describe('library IPC', () => {
     expect(result.health.status).toBe('ok');
     expect(closeDatabaseUserMocks.lyrics).toHaveBeenCalledTimes(1);
     expect(closeDatabaseUserMocks.mv).toHaveBeenCalledTimes(1);
-    expect(closeDatabaseUserMocks.streaming).toHaveBeenCalledTimes(1);
     expect(closeDatabaseUserMocks.remote).toHaveBeenCalledTimes(1);
     expect(closeDatabaseUserMocks.library).toHaveBeenCalledTimes(1);
   });

@@ -2,9 +2,9 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IpcChannels } from '../shared/constants/ipcChannels';
 import { createSystemAudioEngine, type AutomixAdvancePayload } from './systemAudioEngine';
 import type { EchoApi } from './apiTypes';
-import { createAppApi, createDesktopLyricsApi, createMiniPlayerApi, createPetApi, createLibraryApi, createLibraryLabApi, createPlaybackApi, type PlaybackDeps, createRemoteSourcesApi, createConnectApi, createStreamingApi, createLyricsApi, createMvApi, createHqPlayerApi, createAudioApi, createEqApi,
-  createSleepTimerApi, createDiagnosticsApi, createDownloadsApi, createPluginsApi, createAccountsApi,
-  createSpotifyApi, createSmtcApi, createAudioCdApi, setupPlaybackProxy,
+import { createAppApi, createDesktopLyricsApi, createMiniPlayerApi, createPetApi, createLibraryApi, createLibraryLabApi, createPlaybackApi, type PlaybackDeps, createRemoteSourcesApi, createConnectApi, createLyricsApi, createMvApi, createHqPlayerApi, createAudioApi, createEqApi,
+  createSleepTimerApi, createDiagnosticsApi, createAccountsApi, createPluginsApi,
+  createSmtcApi, createAudioCdApi, setupPlaybackProxy,
   createLastFmApi, createDiscordPresenceApi, createStageBridgeApi, createEchoLinkApi,
   createMqttIntegrationApi } from './ipc';
 const sa = createSystemAudioEngine(ipcRenderer, IpcChannels),
@@ -53,13 +53,13 @@ const echoApi: EchoApi = {
   },
   libraryLab: createLibraryLabApi(ipcRenderer, IpcChannels), playback: createPlaybackApi(ipcRenderer, IpcChannels, sa, deps),
   remoteSources: createRemoteSourcesApi(ipcRenderer, IpcChannels), connect: createConnectApi(ipcRenderer, IpcChannels),
-  streaming: createStreamingApi(ipcRenderer, IpcChannels), lyrics: createLyricsApi(ipcRenderer, IpcChannels),
+  lyrics: createLyricsApi(ipcRenderer, IpcChannels),
   mv: createMvApi(ipcRenderer, IpcChannels),
   hqPlayer: createHqPlayerApi(ipcRenderer, IpcChannels),
   audio: createAudioApi(ipcRenderer, IpcChannels, sa), eq: createEqApi(ipcRenderer, IpcChannels, sa),
-  diagnostics: createDiagnosticsApi(ipcRenderer, IpcChannels), downloads: createDownloadsApi(ipcRenderer, IpcChannels),
-  plugins: createPluginsApi(ipcRenderer, IpcChannels, webUtils), accounts: createAccountsApi(ipcRenderer, IpcChannels),
-  spotify: createSpotifyApi(ipcRenderer, IpcChannels), smtc: createSmtcApi(ipcRenderer, IpcChannels), audioCd: createAudioCdApi(ipcRenderer, IpcChannels), sleepTimer: createSleepTimerApi(ipcRenderer, IpcChannels),
+  diagnostics: createDiagnosticsApi(ipcRenderer, IpcChannels), accounts: createAccountsApi(ipcRenderer, IpcChannels),
+  plugins: createPluginsApi(ipcRenderer, IpcChannels, webUtils),
+  smtc: createSmtcApi(ipcRenderer, IpcChannels), audioCd: createAudioCdApi(ipcRenderer, IpcChannels), sleepTimer: createSleepTimerApi(ipcRenderer, IpcChannels),
   lastfm: createLastFmApi(ipcRenderer, IpcChannels),
   discordPresence: createDiscordPresenceApi(ipcRenderer, IpcChannels),
   stageBridge: createStageBridgeApi(ipcRenderer, IpcChannels),

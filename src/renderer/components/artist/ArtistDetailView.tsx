@@ -1726,20 +1726,6 @@ export const ArtistDetailView = ({ artist, onBack }: ArtistDetailViewProps): JSX
               </button>
             </div>
 
-            {downloadsFeatureUnlocked ? (
-              <div className="album-detail-actions">
-                <button
-                  className="album-secondary-action"
-                  type="button"
-                  disabled={isStreamingAlbumDetailLoading || downloadableDetailTrackCount === 0 || isStreamingAlbumDownloadBusy}
-                  onClick={() => void handleDownloadStreamingAlbum()}
-                >
-                  {isStreamingAlbumDownloadBusy ? <RefreshCw className="spinning-icon" size={16} /> : <Download size={16} />}
-                  {isStreamingAlbumDownloadBusy ? '下载中' : '下载专辑'}
-                </button>
-              </div>
-            ) : null}
-
             {streamingAlbumDetailError ? <p className="album-detail-error">{streamingAlbumDetailError}</p> : null}
           </div>
         </section>

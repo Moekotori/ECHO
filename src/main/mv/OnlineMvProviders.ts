@@ -482,7 +482,7 @@ class ProviderBase {
 
   constructor(dependencies: ProviderDependencies = {}) {
     this.fetchImpl = dependencies.fetchImpl ?? fetchWithNetworkProxy;
-    this.credentialsReader = dependencies.getCredentials ?? ((provider) => getAccountService().getCredentials(provider));
+    this.credentialsReader = dependencies.getCredentials ?? ((provider) => ({ provider }));
   }
 
   protected credentials(provider: NetworkMvProviderId): AccountCredentials {
@@ -1028,7 +1028,25 @@ export class YouTubeMvProvider extends ProviderBase implements MainMvOnlineProvi
   }
 }
 
-export const createOnlineMvProviders = (dependencies: ProviderDependencies = {}): MainMvOnlineProvider[] => [
-  new BilibiliMvProvider(dependencies),
-  new YouTubeMvProvider(dependencies),
-];
+const defaultMvCredentials = (provider: NetworkMvProviderId): AccountCredentials => {
+  if (provider !== 'bilibili') {
+    return { provider };
+  }
+
+  try {
+    return getAccountService().getCredentials('bilibili');
+  } catch {
+    return { provider: 'bilibili' };
+  }
+};
+
+export const createOnlineMvProviders = (dependencies: ProviderDependencies = {}): MainMvOnlineProvider[] => {
+  const resolved: ProviderDependencies = {
+    ...dependencies,
+    getCredentials: dependencies.getCredentials ?? defaultMvCredentials,
+  };
+  return [
+    new BilibiliMvProvider(resolved),
+    new YouTubeMvProvider(resolved),
+  ];
+};

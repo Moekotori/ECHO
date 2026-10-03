@@ -760,7 +760,7 @@ export type EchoApi = {
       eventClients: number;
     }>;
   };
-  streaming: {
+  streaming?: {
     search: (request: StreamingSearchRequest) => Promise<StreamingSearchResult>;
     getTrack: (request: { provider: StreamingProviderName; providerTrackId: string }) => Promise<StreamingTrack>;
     getTrackSourceInfo?: (request: { provider: StreamingProviderName; providerTrackId: string }) => Promise<StreamingTrackSourceInfo>;
@@ -883,7 +883,7 @@ export type EchoApi = {
     reportRendererError: (payload: RendererErrorPayload) => Promise<void>;
     reportPerformanceStall: (payload: DiagnosticPerformanceStallPayload) => Promise<void>;
   };
-  downloads: {
+  downloads?: {
     getJobs: () => Promise<DownloadJob[]>;
     createUrlJob: (url: string, options?: CreateDownloadUrlJobOptions) => Promise<DownloadJob>;
     cancelJob: (jobId: string) => Promise<DownloadJob | null>;
@@ -920,7 +920,7 @@ export type EchoApi = {
     setSettings: (pluginId: string, patch: PluginSettingsPatch) => Promise<PluginSettingsResult>;
     getLogs: (pluginId?: string) => Promise<PluginLogEntry[]>;
   };
-  accounts: {
+  accounts?: {
     getStatuses: () => Promise<AccountStatus[]>;
     getStatus: (provider: AccountProvider) => Promise<AccountStatus>;
     saveCookie: (provider: AccountProvider, cookie: string) => Promise<AccountStatus>;
@@ -930,11 +930,11 @@ export type EchoApi = {
     clear: (provider: AccountProvider) => Promise<AccountStatus>;
     check: (provider: AccountProvider) => Promise<AccountStatus>;
     checkAll: () => Promise<AccountStatus[]>;
-    setBrowser: (provider: AccountProvider, browser: AccountBrowser) => Promise<AccountStatus>;
-    setYouTubeBrowser: (browser: YouTubeBrowser) => Promise<AccountStatus>;
+    setBrowser?: (provider: AccountProvider, browser: AccountBrowser) => Promise<AccountStatus>;
+    setYouTubeBrowser?: (browser: YouTubeBrowser) => Promise<AccountStatus>;
     onStatusesChanged: (handler: (statuses: AccountStatus[]) => void) => () => void;
   };
-  spotify: {
+  spotify?: {
     getAccessToken: () => Promise<string>;
     getDevices: () => Promise<Array<{ id: string; name: string; type: string; isActive: boolean; isRestricted: boolean; volumePercent: number | null }>>;
     getPlaybackState: () => Promise<{ isPlaying: boolean; progressMs: number | null; itemUri: string | null; deviceId: string | null; deviceName: string | null; volumePercent?: number | null }>;

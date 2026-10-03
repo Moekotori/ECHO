@@ -40,9 +40,9 @@
 
 The community edition is **free forever**, open source under [AGPL v3](./LICENSE), with maintenance that depends on everyone pitching in. Get the player from [GitHub Releases](https://github.com/Moekotori/ECHO/releases), and help fix issues, improve features, documentation, and translations.
 
-## Steam edition: take listening further
+## Steam edition: tighter optimization, more features, stronger performance
 
-ECHO on Steam keeps your own music at the center, then adds Steam updates, Cloud sync for selected settings, achievements, friend presence, and the Workshop. Organize your library, follow the lyrics, and make the player and your desktop feel like your space.
+The community edition stays free and open source. Steam follows the same local listening experience further: optimization is more complete, there are more features, and performance is stronger. Automatic updates, Cloud sync for selected settings, achievements, friend presence, and the Workshop all live on that line. Organize your library, follow the lyrics, and make the player and your desktop feel like your space.
 
 **All four images below show the Steam edition.**
 

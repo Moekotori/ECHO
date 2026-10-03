@@ -2253,29 +2253,10 @@ describe('preload SMTC API', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.PluginsGetLogs, 'echo.playback-panel');
   });
 
-  it('exposes account status APIs without cookie readback helpers', async () => {
-    const handler = vi.fn();
-    await exposedApi!.accounts.saveCookie('netease', 'MUSIC_U=secret');
-    await exposedApi!.accounts.startLogin?.('netease');
-    await exposedApi!.accounts.startNeteaseQrLogin?.();
-    await exposedApi!.accounts.pollNeteaseQrLogin?.('qr-key');
-    await exposedApi!.accounts.setBrowser('soundcloud', 'chrome');
-    await exposedApi!.accounts.getStatuses();
-    const unsubscribe = exposedApi!.accounts.onStatusesChanged(handler);
-    const listener = listeners.get(IpcChannels.AccountStatusesChanged);
-    const statuses = [{ provider: 'bilibili', connected: false, error: 'expired' }];
-    listener?.({}, statuses);
-    unsubscribe();
-
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AccountSaveCookie, 'netease', 'MUSIC_U=secret');
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AccountStartLogin, 'netease');
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AccountStartNeteaseQrLogin);
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AccountPollNeteaseQrLogin, 'qr-key');
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AccountSetBrowser, 'soundcloud', 'chrome');
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(IpcChannels.AccountGetStatuses);
-    expect(handler).toHaveBeenCalledWith(statuses);
-    expect(listeners.has(IpcChannels.AccountStatusesChanged)).toBe(false);
-    expect(Object.keys(exposedApi!.accounts)).not.toContain('getCookie');
+  it('exposes Bilibili account login and omits removed download and Spotify APIs', () => {
+    expect(exposedApi!.accounts?.startLogin).toEqual(expect.any(Function));
+    expect(exposedApi!.spotify).toBeUndefined();
+    expect(exposedApi!.downloads).toBeUndefined();
   });
 
   it('exposes lyrics APIs through IPC', async () => {

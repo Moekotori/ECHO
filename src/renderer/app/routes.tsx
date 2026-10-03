@@ -6,7 +6,6 @@ import {
   EchoArtistsIcon,
   EchoAudioSettingsIcon,
   EchoConnectIcon,
-  EchoDownloadsIcon,
   EchoDspIcon,
   EchoFoldersIcon,
   EchoHistoryIcon,
@@ -21,7 +20,6 @@ import {
   EchoRemoteIcon,
   EchoSettingsIcon,
   EchoSongsIcon,
-  EchoStreamingIcon,
 } from '../components/layout/NavIcons';
 import { EmptyState } from '../components/ui/EmptyState';
 import type { TranslationKey } from '../i18n/locales';
@@ -37,7 +35,6 @@ const pageLoaders = {
   artists: () => import('../pages/ArtistsPage'),
   'audio-cd': () => import('../pages/AudioCdPage'),
   connect: () => import('../pages/ConnectPage'),
-  downloads: () => import('../pages/DownloadsPage'),
   dsp: () => import('../pages/DspPage'),
   history: () => import('../pages/HistoryPage'),
   'import-folder': () => import('../pages/ImportFolderPage'),
@@ -51,7 +48,6 @@ const pageLoaders = {
   lyrics: () => import('../pages/LyricsPage'),
   liked: () => import('../pages/LikedPage'),
   remote: () => import('../components/settings/RemoteSourcesPanel'),
-  streaming: () => import('../components/streaming/StreamingSearchPage'),
 } satisfies Partial<Record<AppRouteId, () => Promise<unknown>>>;
 
 export const preloadAppRoute = async (routeId: AppRouteId): Promise<void> => {
@@ -75,7 +71,6 @@ const AlbumsPage = lazy(() => pageLoaders.albums().then((module) => ({ default: 
 const ArtistsPage = lazy(() => pageLoaders.artists().then((module) => ({ default: module.ArtistsPage })));
 const AudioCdPage = lazy(() => pageLoaders['audio-cd']().then((module) => ({ default: module.AudioCdPage })));
 const ConnectPage = lazy(() => pageLoaders.connect().then((module) => ({ default: module.ConnectPage })));
-const DownloadsPage = lazy(() => pageLoaders.downloads().then((module) => ({ default: module.DownloadsPage })));
 const DspPage = lazy(() => pageLoaders.dsp().then((module) => ({ default: module.DspPage })));
 const HistoryPage = lazy(() => pageLoaders.history().then((module) => ({ default: module.HistoryPage })));
 const ImportFolderPage = lazy(() => pageLoaders['import-folder']().then((module) => ({ default: module.ImportFolderPage })));
@@ -89,7 +84,6 @@ const SongsPage = lazy(() => pageLoaders.songs().then((module) => ({ default: mo
 const LyricsPage = lazy(() => pageLoaders.lyrics().then((module) => ({ default: module.LyricsPage })));
 const LikedPage = lazy(() => pageLoaders.liked().then((module) => ({ default: module.LikedPage })));
 const RemoteSourcesPanel = lazy(() => pageLoaders.remote().then((module) => ({ default: module.RemoteSourcesPanel })));
-const StreamingSearchPage = lazy(() => pageLoaders.streaming().then((module) => ({ default: module.StreamingSearchPage })));
 
 export type AppRoute = {
   id: AppRouteId;
@@ -162,25 +156,6 @@ export const appRoutes: AppRoute[] = [
     icon: EchoSongsIcon,
     placement: 'main',
     element: <SongsPage />,
-  },
-  {
-    id: 'downloads',
-    label: 'Downloads',
-    labelKey: 'route.downloads.label',
-    description: 'Search, download, extract audio, and import results.',
-    descriptionKey: 'route.downloads.description',
-    icon: EchoDownloadsIcon,
-    placement: 'main',
-    element: <DownloadsPage />,
-  },
-  {
-    id: 'osu-downloader',
-    label: 'osu!',
-    labelKey: 'route.osuDownloader.label',
-    description: 'osu! beatmap audio downloader.',
-    icon: EchoDownloadsIcon,
-    placement: 'main',
-    element: <DownloadsPage variant="osu" />,
   },
   {
     id: 'lyrics',
@@ -264,16 +239,6 @@ export const appRoutes: AppRoute[] = [
     icon: EchoDspIcon,
     placement: 'main',
     element: <DspPage />,
-  },
-  {
-    id: 'streaming',
-    label: 'Streaming',
-    labelKey: 'route.streaming.label',
-    description: 'Streaming music sources.',
-    descriptionKey: 'route.streaming.description',
-    icon: EchoStreamingIcon,
-    placement: 'main',
-    element: <StreamingSearchPage />,
   },
   {
     id: 'queue',

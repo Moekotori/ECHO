@@ -41,7 +41,6 @@ describe('CI functional regression manifest', () => {
 
   it('keeps timing-sensitive suites in the manifest but runs them serially', () => {
     expect(CI_SERIAL_TEST_FILES).toEqual([
-      'src/main/downloads/DownloadService.test.ts',
       'src/renderer/components/lyrics/MvPanel.test.tsx',
     ]);
     expect(CI_SERIAL_TEST_FILES.every((file) => getCiFunctionalTestFiles().includes(file))).toBe(true);

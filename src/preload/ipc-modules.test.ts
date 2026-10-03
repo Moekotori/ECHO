@@ -4,7 +4,7 @@ import { IpcChannels } from '../shared/constants/ipcChannels';
 import { createAppApi } from './ipc/appApi';
 import { createLibraryApi } from './ipc/libraryApi';
 import { createPlaybackApi, type PlaybackDeps } from './ipc/playbackApi';
-import { createStreamingApi } from './ipc/streamingApi';
+
 import { createAudioApi } from './ipc/ipcAudio';
 import { createEqApi } from './ipc/ipcEq';
 import { createSystemAudioEngine, type SystemAudioEngine } from './systemAudioEngine';
@@ -238,16 +238,6 @@ describe('all returned methods are functions', () => {
 // Test 7-11: IPC channel verification — calling methods hits correct channels
 // ---------------------------------------------------------------------------
 describe('IPC channel verification', () => {
-  it('createStreamingApi exposes account playlist listing on the correct channel', async () => {
-    const ipc = createMockIpcRenderer();
-    const api = createStreamingApi(ipc as any, IpcChannels);
-
-    expect(typeof api.listAccountPlaylists).toBe('function');
-    await api.listAccountPlaylists?.('netease');
-
-    expect(ipc.invoke).toHaveBeenCalledWith(IpcChannels.StreamingListAccountPlaylists, 'netease');
-  });
-
   it('createAppApi calls correct channels', async () => {
     const ipc = createMockIpcRenderer();
     const api = createAppApi(ipc as any, IpcChannels);

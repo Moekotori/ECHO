@@ -70,7 +70,7 @@ describe('playback media prepare IPC', () => {
     vi.restoreAllMocks();
   });
 
-  it('uses a prepared streaming playback source without resolving again and preserves ASIO output', async () => {
+  it('rejects streaming playback without starting the native audio session', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const playLocalFile = vi.fn().mockResolvedValue(undefined);
@@ -212,72 +212,11 @@ describe('playback media prepare IPC', () => {
     };
 
     await handlers.get(IpcChannels.PlaybackPrepareMediaItem)?.({}, request);
-    expect(prepareLocalFile).toHaveBeenCalledWith(expect.objectContaining({
-      filePath: 'https://stream.example.test/song.flac?token=prepared',
-      inputHeaders: expect.objectContaining({
-        Referer: 'https://music.163.com/',
-        Cookie: 'MUSIC_U=secret',
-      }),
-      trackId: 'streaming-track',
-      automixAnalyze: true,
-      probe: expect.objectContaining({
-        durationSeconds: 120,
-        fileSampleRate: 44100,
-      }),
-    }));
+    expect(prepareLocalFile).not.toHaveBeenCalled();
 
-    await handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, request);
-
-    expect(resolvePlayback).toHaveBeenCalledTimes(1);
-    expect(playLocalFile).toHaveBeenCalledWith(expect.objectContaining({
-      filePath: 'https://stream.example.test/song.flac?token=prepared',
-      output: expect.objectContaining({
-        outputMode: 'asio',
-        deviceIndex: 1,
-        deviceName: 'TOPPING USB Audio ASIO',
-        echoSrcMode: 'family4x',
-        echoSrcQualityProfile: 'transparent',
-        echoSrcAdvancedModeEnabled: true,
-        echoSrcFilterProfile: 'poly-sinc-ext2-short',
-        echoSrcFilterProfile1x: 'poly-sinc-hb',
-        echoSrcFilterProfileNx: 'sinc-xla',
-        echoSrcComputeBackend: 'cuda',
-        pcmDitherMode: 'ultra-shaped',
-        sdmMode: 'pcmToDsd',
-        sdmTargetRate: 'dsd256',
-        sdmQualityProfile: 'reference',
-        sdmComputeBackend: 'cuda',
-        sdmOversamplingFilterProfile1x: 'poly-sinc-hb',
-        sdmOversamplingFilterProfileNx: 'sinc-xla',
-      }),
-      inputHeaders: expect.objectContaining({
-        Referer: 'https://music.163.com/',
-        Cookie: 'MUSIC_U=secret',
-      }),
-      trackId: 'streaming-track',
-      replayGain: {
-        trackGainDb: -4,
-        trackPeak: 0.8,
-      },
-      probe: expect.objectContaining({
-        durationSeconds: 120,
-        fileSampleRate: 44100,
-        channels: 2,
-      }),
-      automixAnalyze: true,
-      gapless: {
-        enabled: true,
-        next: expect.objectContaining({
-          filePath: 'D:\\Music\\next.flac',
-          trackId: 'local-next',
-          replayGain: {
-            trackGainDb: -2,
-            trackPeak: 0.9,
-          },
-        }),
-        following: [],
-      },
-    }));
+    await expect(handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, request)).rejects.toThrow('流媒体播放已移除。');
+    expect(resolvePlayback).not.toHaveBeenCalled();
+    expect(playLocalFile).not.toHaveBeenCalled();
   }, ipcFixtureTimeoutMs);
 
   it('does not restore expired remote proxy URLs from persisted queue sessions', async () => {
@@ -402,7 +341,7 @@ describe('playback media prepare IPC', () => {
     expect(legacyMemoryLoad).not.toHaveBeenCalled();
   });
 
-  it('force-refreshes streaming playback resolution and returns MIME type', async () => {
+  it('rejects streaming playback resolution without calling a provider', async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const invalidatePlayback = vi.fn();
     const resolvePlayback = vi.fn()
@@ -494,22 +433,13 @@ describe('playback media prepare IPC', () => {
     };
 
     await handlers.get(IpcChannels.PlaybackPrepareMediaItem)?.({}, request);
-    const refreshed = await handlers.get(IpcChannels.PlaybackResolveMediaItem)?.({}, {
+    await expect(handlers.get(IpcChannels.PlaybackResolveMediaItem)?.({}, {
       ...request,
       forceRefresh: true,
-    });
+    })).rejects.toThrow('流媒体播放已移除。');
 
-    expect(invalidatePlayback).toHaveBeenCalledWith({
-      provider: 'mock',
-      providerTrackId: 'provider-track',
-      quality: 'lossless',
-    });
-    expect(resolvePlayback).toHaveBeenCalledTimes(2);
-    expect(refreshed).toMatchObject({
-      filePath: 'https://stream.example.test/song.mp3?token=refreshed',
-      mimeType: 'audio/mpeg',
-      inputHeaders: expect.objectContaining({ Referer: 'https://music.163.com/' }),
-    });
+    expect(invalidatePlayback).not.toHaveBeenCalled();
+    expect(resolvePlayback).not.toHaveBeenCalled();
   });
 
   it('keeps streaming provider no-URL failures out of fatal audio crash reports', async () => {
@@ -589,7 +519,7 @@ describe('playback media prepare IPC', () => {
       },
     };
 
-    await expect(handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, request)).rejects.toThrow('did not return a playable URL');
+    await expect(handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, request)).rejects.toThrow('流媒体播放已移除。');
     expect(playLocalFile).not.toHaveBeenCalled();
     expect(reportAudioError).not.toHaveBeenCalled();
   });
@@ -756,7 +686,7 @@ describe('playback media prepare IPC', () => {
     expect(startReplayGainAnalysis).not.toHaveBeenCalled();
   });
 
-  it('does not let a stale streaming resolve interrupt a newer local playback request', async () => {
+  it('rejects a streaming item and still plays a later local file', async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     let status = {
       state: 'idle',
@@ -776,27 +706,7 @@ describe('playback media prepare IPC', () => {
     });
     const prepareLocalFile = vi.fn().mockResolvedValue(undefined);
     const setPlaybackActive = vi.fn();
-    let resolveStreaming!: (source: {
-      url: string;
-      requiresProxy: boolean;
-      headers?: Record<string, string>;
-      sampleRate?: number;
-      codec?: string;
-      bitDepth?: number | null;
-      bitrate?: number;
-    }) => void;
-    const streamingSource = new Promise<{
-      url: string;
-      requiresProxy: boolean;
-      headers?: Record<string, string>;
-      sampleRate?: number;
-      codec?: string;
-      bitDepth?: number | null;
-      bitrate?: number;
-    }>((resolve) => {
-      resolveStreaming = resolve;
-    });
-    const resolvePlayback = vi.fn(() => streamingSource);
+    const resolvePlayback = vi.fn();
 
     vi.doMock('electron', () => ({
       BrowserWindow: { getAllWindows: vi.fn(() => []) },
@@ -859,8 +769,8 @@ describe('playback media prepare IPC', () => {
       },
     };
 
-    const staleStreamingPlay = handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, streamingRequest) as Promise<unknown>;
-    await expect.poll(() => resolvePlayback.mock.calls.length).toBe(1);
+    await expect(handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, streamingRequest)).rejects.toThrow('流媒体播放已移除。');
+    expect(resolvePlayback).not.toHaveBeenCalled();
 
     await handlers.get(IpcChannels.PlaybackPlayLocalFile)?.({}, {
       filePath: 'D:\\Music\\local.flac',
@@ -868,20 +778,6 @@ describe('playback media prepare IPC', () => {
       probe: { durationSeconds: 180 },
     });
 
-    resolveStreaming({
-      url: 'https://stream.example.test/late.flac',
-      sampleRate: 44100,
-      codec: 'flac',
-      bitDepth: 16,
-      bitrate: 900000,
-      requiresProxy: false,
-    });
-
-    await expect(staleStreamingPlay).resolves.toEqual(expect.objectContaining({
-      state: 'playing',
-      currentTrackId: 'local-track',
-      filePath: 'D:\\Music\\local.flac',
-    }));
     expect(playLocalFile).toHaveBeenCalledTimes(1);
     expect(playLocalFile).toHaveBeenCalledWith(expect.objectContaining({
       filePath: 'D:\\Music\\local.flac',
@@ -890,7 +786,7 @@ describe('playback media prepare IPC', () => {
     expect(setPlaybackActive).toHaveBeenCalledWith(true);
   });
 
-  it('lets pause bypass a slow streaming audio start', async () => {
+  it('lets pause bypass a slow local audio start', async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     let status = {
       state: 'playing',
@@ -985,14 +881,12 @@ describe('playback media prepare IPC', () => {
     const { registerPlaybackIpc } = await import('./playbackIpc');
     registerPlaybackIpc();
 
-    const slowStreamingPlay = handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, {
+    const slowLocalPlay = handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, {
       item: {
-        mediaType: 'streaming',
-        trackId: 'streaming:netease:slow',
-        provider: 'netease',
-        providerTrackId: 'slow',
-        stableKey: 'streaming:netease:slow',
-        title: 'Slow Stream',
+        mediaType: 'local',
+        trackId: 'local-slow',
+        path: 'D:\\Music\\slow.flac',
+        title: 'Slow Local',
         artist: 'Artist',
         album: 'Album',
         duration: 120,
@@ -1028,14 +922,15 @@ describe('playback media prepare IPC', () => {
     expect(seek).toHaveBeenCalledWith(44);
 
     finishAudioStart();
-    await expect(slowStreamingPlay).resolves.toEqual(expect.objectContaining({
+    await expect(slowLocalPlay).resolves.toEqual(expect.objectContaining({
       state: 'playing',
       currentTrackId: 'previous-track',
       filePath: 'D:\\Music\\previous.flac',
     }));
+    expect(resolvePlayback).not.toHaveBeenCalled();
   });
 
-  it('falls back to a matching local track when QQ Music rejects a playable VIP stream', async () => {
+  it('does not fall back to a local track when a streaming item is played', async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const playLocalFile = vi.fn().mockResolvedValue(undefined);
     const prepareLocalFile = vi.fn().mockResolvedValue(undefined);
@@ -1115,7 +1010,7 @@ describe('playback media prepare IPC', () => {
     const { registerPlaybackIpc } = await import('./playbackIpc');
     registerPlaybackIpc();
 
-    await handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, {
+    await expect(handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, {
       item: {
         mediaType: 'streaming',
         trackId: 'streaming-track',
@@ -1127,29 +1022,14 @@ describe('playback media prepare IPC', () => {
         album: 'How To Be A Human Being (Explicit)',
         duration: 320,
       },
-    });
+    })).rejects.toThrow('流媒体播放已移除。');
 
-    expect(resolvePlayback).toHaveBeenCalledWith({
-      provider: 'qqmusic',
-      providerTrackId: '003MqJoE1UFw4k',
-      quality: 'lossless',
-    });
-    expect(getTracks).toHaveBeenCalledWith({
-      page: 1,
-      pageSize: 25,
-      search: 'The Other Side Of Paradise (Explicit) Glass Animals',
-      sourceProvider: 'local',
-    });
-    expect(playLocalFile).toHaveBeenCalledWith(expect.objectContaining({
-      filePath: 'D:\\Music\\Glass Animals - The Other Side Of Paradise.flac',
-      trackId: 'streaming-track',
-      probe: expect.objectContaining({
-        durationSeconds: 320.6,
-      }),
-    }));
+    expect(resolvePlayback).not.toHaveBeenCalled();
+    expect(getTracks).not.toHaveBeenCalled();
+    expect(playLocalFile).not.toHaveBeenCalled();
   });
 
-  it('refreshes an active streaming source when FFmpeg reports an expired CDN URL after playback started', async () => {
+  it('does not start or refresh a streaming source when playback is removed', async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const reportAudioError = vi.fn();
     const recovery = {
@@ -1270,36 +1150,17 @@ describe('playback media prepare IPC', () => {
       },
     };
 
-    await handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, request);
-    expect(playLocalFile).toHaveBeenCalledWith(expect.objectContaining({
-      filePath: 'https://m801.music.126.net/token/song.mp3?auth=old',
-    }));
+    await expect(handlers.get(IpcChannels.PlaybackPlayMediaItem)?.({}, request)).rejects.toThrow('流媒体播放已移除。');
+    expect(playLocalFile).not.toHaveBeenCalled();
+    expect(resolvePlayback).not.toHaveBeenCalled();
+    expect(invalidatePlayback).not.toHaveBeenCalled();
 
-    status = { ...status, positionSeconds: 0.09039979999978096 };
     const expiredError = Object.assign(
       new Error('ffmpeg_exit_code_3436169992; kind="http_expired_or_forbidden"; stderr="Server returned 403 Forbidden"'),
       { ffmpegErrorKind: 'http_expired_or_forbidden' },
     );
-
-    expect(recovery.handler?.(expiredError, status)).toBe(true);
-
-    await expect.poll(() => playLocalFile.mock.calls.length).toBe(2);
-    expect(invalidatePlayback).toHaveBeenCalledWith({
-      provider: 'netease',
-      providerTrackId: '1442466883',
-      quality: 'high',
-    });
-    expect(playLocalFile).toHaveBeenLastCalledWith(expect.objectContaining({
-      filePath: 'https://m701.music.126.net/token/song.mp3?auth=fresh',
-      startSeconds: 0.09039979999978096,
-      trackId: 'streaming:netease:1442466883',
-    }));
-    expect(reportAudioError).toHaveBeenCalledWith(expect.objectContaining({
-      message: expect.stringContaining('ffmpeg_exit_code_3436169992'),
-      phase: 'play-media-item-expired-url-retry',
-      severity: 'recoverable',
-      recovered: true,
-    }));
+    expect(recovery.handler?.(expiredError, status)).toBe(false);
+    expect(reportAudioError).not.toHaveBeenCalled();
   });
 
   it('refreshes missing remote duration and reuses the prepared proxy URL for playback', async () => {

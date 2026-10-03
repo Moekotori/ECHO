@@ -968,7 +968,7 @@ describe('MvPanel', () => {
         'https://www.bilibili.com/video/BVdirect',
       ),
     );
-    expect(window.echo.streaming.getMv).not.toHaveBeenCalled();
+    expect(window.echo.streaming!.getMv).not.toHaveBeenCalled();
     expect(window.echo.mv.searchNetworkCandidatesForSnapshot).not.toHaveBeenCalled();
     const video = await waitFor(() => {
       const element = container.querySelector('.lyrics-mv-video') as HTMLVideoElement | null;
@@ -1034,7 +1034,7 @@ describe('MvPanel', () => {
         'https://www.youtube.com/watch?v=abc123DEF45',
       ),
     );
-    expect(window.echo.streaming.getMv).not.toHaveBeenCalled();
+    expect(window.echo.streaming!.getMv).not.toHaveBeenCalled();
     expect(window.echo.mv.searchNetworkCandidatesForSnapshot).not.toHaveBeenCalled();
     const frame = await waitFor(() => {
       const element = container.querySelector('iframe.lyrics-mv-background-video--youtube') as HTMLIFrameElement | null;

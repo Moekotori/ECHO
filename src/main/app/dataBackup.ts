@@ -17,7 +17,6 @@ import { getLibraryDatabaseManager } from '../database/LibraryDatabaseManager';
 import { ensureCoverCacheDirectory, getDefaultCoverCacheDir } from '../library/CoverCacheManager';
 import { isCoverCacheDirectorySafeToClear } from '../library/CoverCacheOwnership';
 import { getLibraryService } from '../library/LibraryService';
-import { getAccountService } from '../accounts/AccountService';
 import {
   getAppSettings,
   getAppWallpaperDirectory,
@@ -25,6 +24,7 @@ import {
   normalizeSettings,
   setAppSettings,
 } from './appSettings';
+import { getAccountService } from '../accounts/AccountService';
 import { checkpointProtectedLibrary, createDataProtectionSnapshot, protectedDataEntries } from './dataProtection';
 import {
   applyRestorePlan,
@@ -40,7 +40,7 @@ const libraryFileName = 'echo-library.sqlite';
 const libraryWalFileName = `${libraryFileName}-wal`;
 const libraryShmFileName = `${libraryFileName}-shm`;
 const libraryEntryNames = new Set([libraryFileName, libraryWalFileName, libraryShmFileName]);
-const metadataFileNames = ['echo-download-jobs.json'];
+const metadataFileNames: string[] = [];
 const runtimeCacheDirectories = ['smtc-covers', 'artist-images'];
 const importArchiveDirectoryName = 'data-backup-import-archives';
 const initialAutoBackupDelayMs = 90_000;
@@ -962,7 +962,11 @@ const performDataBackupImport = async (backupPath: string, date: Date): Promise<
           throw new Error(`导入后的曲库数据库未通过健康检查：${restoredHealth.message ?? restoredHealth.status}`);
         }
         setAppSettings(restoredSettings);
-        getAccountService().reloadFromDisk();
+        try {
+          getAccountService().reloadFromDisk();
+        } catch (error) {
+          console.warn('[accounts] restored Bilibili login could not be reloaded', error);
+        }
       });
 
       for (const entry of extracted.entries) {

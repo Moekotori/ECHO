@@ -4162,15 +4162,9 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
       return;
     }
 
-    if (streamingTarget && isCurrentNeteaseDjRadioTrack === false) {
-      const streamingApi = window.echo?.streaming;
-      if (!streamingApi?.getLyrics) {
-        lyricsRequestRef.current += 1;
-        setLyrics(emptyLyrics(0));
-        publishCurrentLyricsProvider(null);
-        setLyricsStatus("流媒体歌词服务不可用");
-        return;
-      }
+    const streamingLyricsApi = window.echo?.streaming;
+    if (streamingTarget && isCurrentNeteaseDjRadioTrack === false && streamingLyricsApi?.getLyrics) {
+      const streamingApi = streamingLyricsApi;
 
       const requestId = lyricsRequestRef.current + 1;
       lyricsRequestRef.current = requestId;
@@ -4410,9 +4404,10 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
     setConfirmingCandidateId(null);
 
     const isNeteaseDjRadioForSearch = await resolveCurrentNeteaseDjRadioTrack();
-    if (streamingTarget && !isNeteaseDjRadioForSearch && !searchText?.trim()) {
-      const streamingApi = window.echo?.streaming;
-      if (streamingApi?.getLyrics) {
+    const streamingSearchApi = window.echo?.streaming;
+    if (streamingTarget && !isNeteaseDjRadioForSearch && !searchText?.trim() && streamingSearchApi?.getLyrics) {
+      const streamingApi = streamingSearchApi;
+      if (streamingApi.getLyrics) {
         setIsCandidateLoading(false);
         setIsLyricsLoading(true);
         showLyricsNetworkLoadingNotice();

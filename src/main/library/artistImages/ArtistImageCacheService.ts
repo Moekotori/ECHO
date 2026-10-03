@@ -26,10 +26,7 @@ import { KuwoArtistImageProvider } from './KuwoArtistImageProvider';
 import { LastFmArtistImageProvider } from './LastFmArtistImageProvider';
 import { MiguArtistImageProvider } from './MiguArtistImageProvider';
 import { MusicBrainzFanartArtistImageProvider } from './MusicBrainzFanartArtistImageProvider';
-import { NeteaseArtistImageProvider } from './NeteaseArtistImageProvider';
 import { QianqianArtistImageProvider } from './QianqianArtistImageProvider';
-import { QQMusicArtistImageProvider } from './QQMusicArtistImageProvider';
-import { SpotifyArtistImageProvider } from './SpotifyArtistImageProvider';
 import { WikidataArtistImageProvider } from './WikidataArtistImageProvider';
 import { WikipediaArtistImageProvider } from './WikipediaArtistImageProvider';
 import { isLikelyDefaultArtistAvatarImage } from './ArtistImageDefaultAvatar';
@@ -92,14 +89,12 @@ type ArtistImageCacheServiceOptions = {
 const maxImageBytes = 5 * 1024 * 1024;
 const imageRequestTimeoutMs = 8000;
 const minAcceptedImageSide = 240;
-const defaultProvider = 'qqmusic';
+const defaultProvider = 'kuwo';
 const manualProvider = 'manual';
 const defaultConcurrency = 2;
 const providerRotationConfidenceTolerance = 0.03;
 const firstPassPrimaryProviderCount = 3;
 const preferredPrimaryProviderNames = new Set([
-  'qqmusic',
-  'netease',
   'kuwo',
   'kugou',
   'migu',
@@ -107,7 +102,7 @@ const preferredPrimaryProviderNames = new Set([
   'douban',
   'deezer',
 ]);
-const fallbackProviderNames = new Set(['spotify', 'lastfm', 'musicbrainz_fanarttv', 'wikipedia', 'wikidata']);
+const fallbackProviderNames = new Set(['lastfm', 'musicbrainz_fanarttv', 'wikipedia', 'wikidata']);
 const cacheStatuses = new Set<ArtistImageCacheStatus>([
   'pending',
   'loading',
@@ -147,14 +142,11 @@ const rotateProviders = <Provider extends ArtistImageProvider>(providers: Provid
 };
 
 const defaultArtistImageProviders = (): ArtistImageProvider[] => [
-  new QQMusicArtistImageProvider(),
-  new NeteaseArtistImageProvider(),
   new KuwoArtistImageProvider(),
   new KugouArtistImageProvider(),
   new MiguArtistImageProvider(),
   new QianqianArtistImageProvider(),
   new DoubanArtistImageProvider(),
-  new SpotifyArtistImageProvider(),
   new DeezerArtistImageProvider(),
   new LastFmArtistImageProvider(),
   new MusicBrainzFanartArtistImageProvider(),

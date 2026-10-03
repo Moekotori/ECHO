@@ -498,9 +498,10 @@ describe('HqPlayerService', () => {
 
     await expect(service.createPlaybackHandoff({ item: streamingTrack })).resolves.toMatchObject({
       state: 'fallback',
-      reason: 'source_requires_headers',
+      reason: 'streaming_item_unplayable',
       source: null,
     });
+    expect(resolver.resolveStreamingPlayback).not.toHaveBeenCalled();
   });
 
   it('uses the opt-in media server for remote HQPlayer local-file handoff', async () => {
@@ -577,36 +578,12 @@ describe('HqPlayerService', () => {
     );
 
     await expect(service.createPlaybackHandoff({ item: streamingTrack })).resolves.toMatchObject({
-      state: 'ready',
-      source: {
-        url: 'http://192.168.1.10:17890/hqplayer-media/token',
-        exposure: 'media-server',
-        headers: {},
-        mediaServer: {
-          publicHost: '192.168.1.10',
-          port: 17890,
-        },
-      },
-      control: {
-        state: 'prepared',
-        source: {
-          exposure: 'media-server',
-          hasHeaders: false,
-        },
-      },
+      state: 'fallback',
+      reason: 'streaming_item_unplayable',
+      source: null,
     });
-    expect(mediaServer.createUrl).toHaveBeenCalledWith(
-      {
-        url: 'https://cdn.example/song.flac',
-        headers: { Referer: 'https://music.163.com/' },
-        mimeType: 'audio/flac',
-      },
-      {
-        port: null,
-        remoteAccess: false,
-        preferredRemoteHost: null,
-      },
-    );
+    expect(resolver.resolveStreamingPlayback).not.toHaveBeenCalled();
+    expect(mediaServer.createUrl).not.toHaveBeenCalled();
   });
 
   it('sends only a ready handoff through the HQPlayer control sender', async () => {

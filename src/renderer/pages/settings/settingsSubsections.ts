@@ -255,7 +255,6 @@ export const settingsSearchSubsectionByTargetId: Partial<Record<string, Settings
   'settings-row-launch-at-login': 'generalWindow',
   'settings-row-sidebar-auto-hide': 'generalWindow',
   'settings-row-sidebar-icon-only': 'generalWindow',
-  'settings-row-streaming-feature': 'generalFeatures',
   'settings-row-track-context-menu-extra-actions': 'generalAdvancedCustom',
   'settings-row-sqlite-balanced-durability': 'generalFeatures',
   'settings-row-sidebar-layout': 'generalFeatures',
