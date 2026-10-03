@@ -3870,15 +3870,13 @@ let defaultLibraryService: LibraryService | null = null;
 
 const closeDefaultDatabaseUsersBeforeRecovery = async (): Promise<void> => {
   const manager = getLibraryDatabaseManager();
-  const [lyrics, mv, streaming, remote] = await Promise.all([
+  const [lyrics, mv, remote] = await Promise.all([
     import('../lyrics/LyricsService'),
     import('../mv/MvService'),
-    import('../streaming/StreamingService'),
     import('./remote/RemoteSourceService'),
   ]);
   lyrics.closeDefaultLyricsService();
   mv.closeDefaultMvService();
-  streaming.closeDefaultStreamingService();
   remote.closeDefaultRemoteSourceService();
   await closeDefaultLibraryService();
   manager.closeAllUsers('scan-recovery');

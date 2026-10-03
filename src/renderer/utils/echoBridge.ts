@@ -52,16 +52,8 @@ import {
 } from '../../shared/types/eq';
 import { builtInEqPresetDefinitions } from '../../shared/audio/eqBuiltInPresets';
 import { formatEqualizerApoGraphicEqPreset, formatEqualizerApoPreset, parseEqualizerApoPreset } from '../../shared/utils/equalizerApoPreset';
-import type {
-  StreamingFavoriteCollectionDeleteResult,
-  StreamingFavoriteCollectionRenameResult,
-  StreamingFavoritesImportResult,
-  StreamingLikedSongsSyncResult,
-  StreamingPlaylistImportResult,
-} from '../../shared/types/streaming';
+import type { EchoApi } from '../../preload/apiTypes';
 import type { QobuzLoginResult, QobuzManualCredentials } from '../../shared/types/qobuz';
-import type { TranslationKey } from '../i18n/locales';
-import { translateStatic } from '../i18n/translateStatic';
 import {
   defaultDspRackState,
   normalizeDspRackState,
@@ -71,8 +63,6 @@ import {
   type DspRackState,
   type StereoFieldState,
 } from '../../shared/types/dspRack';
-
-const te = (key: TranslationKey): string => translateStatic(key);
 
 type QobuzBridge = {
   login: (credentials: QobuzManualCredentials) => Promise<QobuzLoginResult>;
@@ -1107,152 +1097,7 @@ export const getRemoteSourcesBridge = (): Window['echo']['remoteSources'] | null
 
 export const getSmtcBridge = (): Window['echo']['smtc'] | null => getEchoBridge()?.smtc ?? null;
 
-type StreamingBridgeApi = NonNullable<Window['echo']>['streaming'];
-
-const devApiBaseUrl = 'http://127.0.0.1:5174';
-
-const importPlaylistFromDevApi = async (url: string): Promise<StreamingPlaylistImportResult> => {
-  const response = await fetch(`${devApiBaseUrl}/streaming/import-playlist`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ url }),
-  }).catch(() => {
-    throw new Error(te('error.devApi.unavailable.playlist'));
-  });
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
-
-  if (!response.ok) {
-    throw new Error(payload.error ?? te('error.devApi.importPlaylistFailed'));
-  }
-
-  return payload as StreamingPlaylistImportResult;
-};
-
-const refreshNeteaseDailyRecommendFromDevApi = async (): Promise<StreamingPlaylistImportResult> => {
-  const response = await fetch(`${devApiBaseUrl}/streaming/netease-daily-recommend`, {
-    method: 'POST',
-  }).catch(() => {
-    throw new Error(te('error.devApi.unavailable.dailyRecommend'));
-  });
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
-
-  if (!response.ok) {
-    throw new Error(payload.error ?? te('error.devApi.dailyRecommendFailed'));
-  }
-
-  return payload as StreamingPlaylistImportResult;
-};
-
-const syncLikedSongsFromDevApi = async (provider?: 'netease' | 'qqmusic'): Promise<StreamingLikedSongsSyncResult> => {
-  const response = await fetch(`${devApiBaseUrl}/streaming/sync-liked-songs`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider }),
-  }).catch(() => {
-    throw new Error(te('error.devApi.unavailable.likedSongs'));
-  });
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
-
-  if (!response.ok) {
-    throw new Error(payload.error ?? te('error.devApi.syncLikedFailed'));
-  }
-
-  return payload as StreamingLikedSongsSyncResult;
-};
-
-const setStreamingTrackLikedFromDevApi = async (request: {
-  provider: 'netease' | 'qqmusic';
-  providerTrackId: string;
-  liked: boolean;
-}): Promise<{ liked: boolean }> => {
-  const response = await fetch(`${devApiBaseUrl}/streaming/set-track-liked`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  }).catch(() => {
-    throw new Error(te('error.devApi.unavailable.likedTrack'));
-  });
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
-
-  if (!response.ok) {
-    throw new Error(payload.error ?? te('error.devApi.syncLikedTrackFailed'));
-  }
-
-  return payload as { liked: boolean };
-};
-
-const browserStreamingBridge: StreamingBridgeApi = {
-  search: async () => {
-    throw new Error(te('error.bridge.streamingSearch'));
-  },
-  getTrack: async () => {
-    throw new Error(te('error.bridge.streamingTrack'));
-  },
-  getAlbum: async () => {
-    throw new Error(te('error.bridge.streamingAlbum'));
-  },
-  getArtist: async () => {
-    throw new Error(te('error.bridge.streamingArtist'));
-  },
-  resolvePlayback: async () => {
-    throw new Error(te('error.bridge.streamingPlayback'));
-  },
-  analyzeBpm: async () => {
-    throw new Error(te('error.bridge.streamingBpm'));
-  },
-  getLyrics: async () => {
-    throw new Error(te('error.bridge.streamingLyrics'));
-  },
-  getMv: async () => {
-    throw new Error(te('error.bridge.streamingMv'));
-  },
-  getProviders: async () => [],
-  importPlaylistFromUrl: importPlaylistFromDevApi,
-  importFavoritesFromUrl: async (): Promise<StreamingFavoritesImportResult> => {
-    throw new Error(te('error.bridge.streamingFavorites'));
-  },
-  exportFavorites: async () => null,
-  syncLikedSongs: syncLikedSongsFromDevApi,
-  setTrackLiked: setStreamingTrackLikedFromDevApi,
-  getFavorites: async () => ({
-    version: 1,
-    updatedAt: new Date().toISOString(),
-    providers: {
-      bilibili: [],
-      youtube: [],
-      soundcloud: [],
-    },
-    collections: [],
-  }),
-  setFavorite: async (request) => ({
-    favorite: request.favorite,
-    item: null,
-    snapshot: {
-      version: 1,
-      updatedAt: new Date().toISOString(),
-      providers: {
-        bilibili: [],
-        youtube: [],
-        soundcloud: [],
-      },
-      collections: [],
-    },
-  }),
-  renameFavoriteCollection: async (): Promise<StreamingFavoriteCollectionRenameResult> => {
-    throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to rename streaming favorite lists.');
-  },
-  syncFavoriteCollection: async (): Promise<StreamingFavoritesImportResult> => {
-    throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to sync streaming favorite lists.');
-  },
-  deleteFavoriteCollection: async (): Promise<StreamingFavoriteCollectionDeleteResult> => {
-    throw new Error('Desktop bridge unavailable. Open ECHO Next in Electron to delete streaming favorite lists.');
-  },
-  refreshNeteaseDailyRecommend: refreshNeteaseDailyRecommendFromDevApi,
-};
-
-export const getStreamingBridge = (): Window['echo']['streaming'] | null => getEchoBridge()?.streaming ?? browserStreamingBridge;
+export const getStreamingBridge = (): NonNullable<EchoApi['streaming']> | null => getEchoBridge()?.streaming ?? null;
 
 export const getQobuzBridge = (): QobuzBridge | null =>
   (getEchoBridge() as (Window['echo'] & { qobuz?: QobuzBridge }) | null)?.qobuz ?? null;

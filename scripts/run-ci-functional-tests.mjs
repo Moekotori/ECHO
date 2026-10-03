@@ -8,9 +8,6 @@ const projectRoot = resolve(dirname(scriptPath), '..');
 
 export const CI_FUNCTIONAL_TEST_GROUPS = Object.freeze({
   'identity-and-runtime': [
-    'src/main/accounts/NeteaseQrLoginService.test.ts',
-    'src/main/accounts/SpotifyAuthService.test.ts',
-    'src/main/accounts/TidalAuthService.test.ts',
     'src/main/app/appSettings.test.ts',
     'src/main/app/autoUpdater.test.ts',
     'src/main/app/RuntimeComponentService.test.ts',
@@ -33,14 +30,11 @@ export const CI_FUNCTIONAL_TEST_GROUPS = Object.freeze({
   'library-and-connectivity': [
     'src/main/connect/AirPlayRtpReorderBuffer.test.ts',
     'src/main/connect/ConnectHttpServer.test.ts',
-    'src/main/downloads/DownloadService.test.ts',
     'src/main/library/LibraryWatcherService.test.ts',
     'src/main/library/SearchIndexTokens.test.ts',
     'src/main/library/TrackFileDeletion.test.ts',
     'src/main/network/networkFetch.test.ts',
     'src/main/network/proxySettings.test.ts',
-    'src/main/qobuz/QobuzDownloadService.test.ts',
-    'src/main/streaming/StreamingMemoryCache.test.ts',
   ],
   integrations: [
     'src/main/integrations/core/IntegrationActionRouter.test.ts',
@@ -86,7 +80,6 @@ export const getCiFunctionalTestFiles = () =>
   Object.values(CI_FUNCTIONAL_TEST_GROUPS).flat();
 
 export const CI_SERIAL_TEST_FILES = Object.freeze([
-  'src/main/downloads/DownloadService.test.ts',
   'src/renderer/components/lyrics/MvPanel.test.tsx',
 ]);
 

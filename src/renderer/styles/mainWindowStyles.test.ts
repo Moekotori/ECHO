@@ -14,12 +14,6 @@ describe('main window style ownership', () => {
     expect(trackList).not.toContain("styles/songs.css");
   });
 
-  it('lets the streaming route own the album detail styles it renders', () => {
-    const streamingSearchPage = readFileSync('src/renderer/components/streaming/StreamingSearchPage.tsx', 'utf8');
-
-    expect(streamingSearchPage).toContain("import '../../styles/album-detail.css';");
-  });
-
   it('keeps route-specific liked and history styles out of the startup bundle', () => {
     const mainWindowStyles = readFileSync('src/renderer/styles/mainWindowStyles.ts', 'utf8');
     const likedPage = readFileSync('src/renderer/pages/LikedPage.tsx', 'utf8');

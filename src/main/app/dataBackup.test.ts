@@ -119,7 +119,7 @@ describe('data backup', () => {
     expect(remapped.lyricsCustomWallpaperPath).toBe(lyricsPath);
   });
 
-  it('imports through staging, preserves the current cache target, and reloads account state', async () => {
+  it('imports through staging and preserves the current cache target', async () => {
     const backupRoot = mkdtempSync(join(tmpdir(), 'echo-data-backup-output-'));
     const unrelatedDirectory = mkdtempSync(join(tmpdir(), 'echo-data-backup-unrelated-'));
     const coverCacheDirectory = join(userDataPath, 'cover-cache');
@@ -130,15 +130,12 @@ describe('data backup', () => {
 
     try {
       const { setAppSettings } = await import('./appSettings');
-      const { getAccountService } = await import('../accounts/AccountService');
       const { exportEchoUserDataBackup, importEchoUserDataBackup } = await import('./dataBackup');
       setAppSettings({ coverCacheDir: unrelatedDirectory });
-      getAccountService().saveCookie('netease', 'MUSIC_U=backup');
       const backupPath = join(backupRoot, 'backup.zip');
       await exportEchoUserDataBackup(backupPath);
 
       setAppSettings({ coverCacheDir: null });
-      getAccountService().saveCookie('netease', 'MUSIC_U=current');
       writeFileSync(join(coverCacheDirectory, 'cover.webp'), 'current-cover');
       writeFileSync(join(userDataPath, 'echo-playback-memory.json'), '{"track":"current"}\n');
 
@@ -148,7 +145,6 @@ describe('data backup', () => {
       expect(readFileSync(join(unrelatedDirectory, 'keep.txt'), 'utf8')).toBe('must-stay');
       expect(readFileSync(join(coverCacheDirectory, 'cover.webp'), 'utf8')).toBe('backup-cover');
       expect(readFileSync(join(userDataPath, 'echo-playback-memory.json'), 'utf8')).toContain('backup');
-      expect(getAccountService().getCredentials('netease').cookie).toBe('MUSIC_U=backup');
     } finally {
       rmSync(backupRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
       rmSync(unrelatedDirectory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });

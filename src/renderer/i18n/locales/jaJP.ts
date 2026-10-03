@@ -3244,7 +3244,7 @@ export const jaJP: TranslationDictionary = {
   'settings.plugins.note': 'プラグインページで有効化、無効化、再読み込み、コマンド、ログを扱います。ここでは入口と安全境界の説明だけを残し、管理 UI が二重化しないようにします。',
   'settings.nav.about.label': '情報 / 詳細',
   'settings.nav.steam.label': 'Steam 版',
-  'settings.nav.steam.description': 'エディション比較とワークショップ',
+  'settings.nav.steam.description': 'より良い最適化、機能、性能',
   'settings.nav.about.description': 'バージョン、更新、開発ツール',
   'settings.nav.advancedCustom.label': '詳細カスタム',
   'settings.nav.advancedCustom.description': '低頻度の切り替えと表示密度の調整',

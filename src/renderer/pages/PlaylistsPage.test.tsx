@@ -1673,7 +1673,7 @@ describe('PlaylistsPage actions menu', () => {
     await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith(spotifyUrl));
   });
 
-  it('queues a remote playlist download in playlist order and uses the playlist folder', async () => {
+  it('does not offer a remote playlist download action', async () => {
     const remotePlaylist = playlist({
       sourceProvider: 'netease',
       sourcePlaylistId: 'playlist-123',
@@ -1759,31 +1759,9 @@ describe('PlaylistsPage actions menu', () => {
 
     renderPlaylistsPage();
 
-    const downloadButton = await screen.findByRole('button', { name: '下载歌单' });
-    await waitFor(() => expect(downloadButton).toHaveProperty('disabled', false));
-    fireEvent.click(downloadButton);
-
-    await waitFor(() => expect(createUrlJob).toHaveBeenCalledTimes(2));
-    expect(createUrlJob.mock.calls.map((call) => call[0])).toEqual([
-      'https://cdn.example/track-1.mp3',
-      'https://cdn.example/track-2.mp3',
-    ]);
-    expect(createUrlJob.mock.calls[0][1]).toEqual(
-      expect.objectContaining({
-        outputSubdirectory: 'Daily Mix',
-        streamingProvider: 'netease',
-        streamingProviderTrackId: 'track-1',
-        downloadAuthorizationToken: 'download-token-track-1',
-      }),
-    );
-    expect(createUrlJob.mock.calls[1][1]).toEqual(
-      expect.objectContaining({
-        outputSubdirectory: 'Daily Mix',
-        streamingProviderTrackId: 'track-2',
-        downloadAuthorizationToken: 'download-token-track-2',
-      }),
-    );
-    expect(await screen.findByText('已按歌单顺序加入下载队列：2 首')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: '播放歌单' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '下载歌单' })).toBeNull();
+    expect(createUrlJob).not.toHaveBeenCalled();
 
     cleanup();
     renderPlaylistsPage();

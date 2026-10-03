@@ -17,7 +17,7 @@ import type { StreamingPlaybackRequest, StreamingPlaybackSource } from '../../..
 import { defaultHqPlayerSettings, getAppSettings, normalizeHqPlayerSettings, setAppSettings } from '../../app/appSettings';
 import { getRemoteSourceService } from '../../library/remote/RemoteSourceService';
 import { requireLocalPro } from '../../plugins/LocalProEntitlements';
-import { getStreamingService } from '../../streaming/StreamingService';
+
 import { createHqPlayerPlaybackControlPlan } from './HqPlayerControlAdapter';
 import {
   createSkippedHqPlayerControlSendResult,
@@ -70,11 +70,8 @@ const defaultMediaResolver: HqPlayerMediaResolver = {
     requireLocalPro('hqplayer-remote-media');
     return getRemoteSourceService().createStreamUrl(input);
   },
-  resolveStreamingPlayback: (request, options) => {
-    if (options?.forceRefresh) {
-      getStreamingService().invalidatePlayback(request);
-    }
-    return getStreamingService().resolvePlayback(request);
+  resolveStreamingPlayback: () => {
+    throw new Error('流媒体播放已移除。');
   },
 };
 
@@ -120,9 +117,7 @@ const defaultSettingsStore: HqPlayerSettingsStore = {
   write: (settings) => setAppSettings({ hqPlayer: settings }).hqPlayer ?? settings,
 };
 
-const hasHeaders = (headers: Record<string, string> | undefined): boolean => Object.keys(headers ?? {}).length > 0;
 
-const isHttpUrl = (value: string): boolean => /^https?:\/\//iu.test(value.trim());
 
 const isLoopbackHttpUrl = (value: string): boolean => {
   try {
@@ -474,112 +469,7 @@ export class HqPlayerService {
     }
 
     if (item.mediaType === 'streaming') {
-      if (item.provider === 'spotify') {
-        return 'spotify_sdk_required';
-      }
-
-      if (item.playable === false) {
-        return 'streaming_item_unplayable';
-      }
-
-      const playbackRequest = {
-        provider: item.provider,
-        providerTrackId: item.providerTrackId,
-        quality: item.quality,
-      };
-      const source = resolvedSource
-        ? {
-            provider: item.provider,
-            providerTrackId: item.providerTrackId,
-            url: resolvedSource.filePath,
-            expiresAt: null,
-            mimeType: resolvedSource.mimeType ?? null,
-            bitrate: resolvedSource.probe?.bitrate ?? null,
-            sampleRate: resolvedSource.probe?.fileSampleRate ?? null,
-            bitDepth: resolvedSource.probe?.bitDepth ?? null,
-            codec: resolvedSource.probe?.codec ?? null,
-            headers: resolvedSource.inputHeaders ?? {},
-            requiresProxy: false,
-            supportsRange: isHttpUrl(resolvedSource.filePath),
-          }
-        : await this.mediaResolver.resolveStreamingPlayback(playbackRequest, { forceRefresh: request.forceRefresh === true });
-
-      if (source.requiresProxy) {
-        return 'streaming_proxy_required';
-      }
-
-      if (hasHeaders(source.headers)) {
-        if (!settings.mediaServerEnabled) {
-          return 'source_requires_headers';
-        }
-
-        return this.createMediaServerSource(
-          {
-            ...base,
-            url: source.url,
-            exposure: isHttpUrl(source.url) ? 'direct-http' : 'local-file',
-            headers: source.headers,
-            mimeType: source.mimeType ?? null,
-            expiresAt: source.expiresAt,
-            mediaServer: null,
-            streaming: {
-              provider: source.provider,
-              providerTrackId: source.providerTrackId,
-              bitrate: source.bitrate,
-              sampleRate: source.sampleRate,
-              bitDepth: source.bitDepth,
-              codec: source.codec,
-              supportsRange: source.supportsRange,
-            },
-          },
-          { url: source.url, headers: source.headers, mimeType: source.mimeType },
-          settings,
-        );
-      }
-
-      if (!isHttpUrl(source.url) && settings.connectionMode === 'remote') {
-        return this.createMediaServerSource(
-          {
-            ...base,
-            url: source.url,
-            exposure: 'local-file',
-            headers: {},
-            mimeType: source.mimeType ?? null,
-            expiresAt: source.expiresAt,
-            mediaServer: null,
-            streaming: {
-              provider: source.provider,
-              providerTrackId: source.providerTrackId,
-              bitrate: source.bitrate,
-              sampleRate: source.sampleRate,
-              bitDepth: source.bitDepth,
-              codec: source.codec,
-              supportsRange: source.supportsRange,
-            },
-          },
-          { url: source.url, mimeType: source.mimeType },
-          settings,
-        );
-      }
-
-      return {
-        ...base,
-        url: source.url,
-        exposure: isHttpUrl(source.url) ? 'direct-http' : 'local-file',
-        headers: source.headers,
-        mimeType: source.mimeType ?? null,
-        expiresAt: source.expiresAt,
-        mediaServer: null,
-        streaming: {
-          provider: source.provider,
-          providerTrackId: source.providerTrackId,
-          bitrate: source.bitrate,
-          sampleRate: source.sampleRate,
-          bitDepth: source.bitDepth,
-          codec: source.codec,
-          supportsRange: source.supportsRange,
-        },
-      };
+      return 'streaming_item_unplayable';
     }
 
     return 'unsupported_media_type';

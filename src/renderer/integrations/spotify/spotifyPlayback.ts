@@ -1,6 +1,15 @@
+import type { EchoApi } from '../../../preload/apiTypes';
 import type { LibraryTrack } from '../../../shared/types/library';
 import type { PlaybackStatus } from '../../../shared/types/playback';
 import { translateStatic } from '../../i18n/translateStatic';
+
+const requireSpotifyApi = (): NonNullable<EchoApi['spotify']> => {
+  const api = window.echo.spotify;
+  if (!api) {
+    throw new Error('账号登录已移除。');
+  }
+  return api;
+};
 
 type SpotifyError = {
   message?: string;
@@ -215,7 +224,7 @@ const invalidatePendingSpotifySdkAttempt = (): void => {
 };
 
 const chooseSpotifyConnectDeviceFromList = async (): Promise<string | null> => {
-  const devices = await window.echo.spotify.getDevices();
+  const devices = await requireSpotifyApi().getDevices();
   reportSpotifyDiagnostic('connect-devices', {
     count: devices.length,
     devices: devices.map((item) => ({
@@ -254,12 +263,12 @@ const chooseSpotifyConnectDevice = async (uri: string, webUrl: string): Promise<
   }
 
   const sdkHint = lastSdkFailureMessage ? ` SDK failed: ${lastSdkFailureMessage}` : '';
-  if (!(await shouldAutoLaunchSpotifyOfficialPlayer()) || !window.echo.spotify.ensureConnectDevice) {
+  if (!(await shouldAutoLaunchSpotifyOfficialPlayer()) || !requireSpotifyApi().ensureConnectDevice) {
     throw new Error(translateStatic('spotifyPlayback.error.noDevice', { hint: sdkHint }));
   }
 
   reportSpotifyDiagnostic('connect-autolaunch-start', { webUrl, preferredDeviceId: lastConnectDeviceId });
-  const result = await window.echo.spotify.ensureConnectDevice({
+  const result = await requireSpotifyApi().ensureConnectDevice({
     uri,
     webUrl,
     preferredDeviceId: lastConnectDeviceId,
@@ -494,18 +503,18 @@ const waitForSpotifyPlaying = async (
       return { positionMs: sdkState.position };
     }
 
-    const apiState = await window.echo.spotify.getPlaybackState().catch(() => null);
+    const apiState = await requireSpotifyApi().getPlaybackState().catch(() => null);
     if (apiState?.itemUri === expectedUri && apiState.isPlaying) {
       return { positionMs: apiState.progressMs ?? 0 };
     }
 
     if (attempt === 2) {
       await nextPlayer?.activateElement?.().catch(() => undefined);
-      await window.echo.spotify.resume(deviceId).catch(() => undefined);
+      await requireSpotifyApi().resume(deviceId).catch(() => undefined);
     }
   }
 
-  const lastState = await window.echo.spotify.getPlaybackState().catch(() => null);
+  const lastState = await requireSpotifyApi().getPlaybackState().catch(() => null);
   const deviceName = lastState?.deviceName ? ` (device: ${lastState.deviceName})` : '';
   if (lastState?.itemUri === expectedUri || !lastState?.itemUri) {
     throw new Error(translateStatic('error.spotify.stayedPaused', { device: deviceName }));
@@ -526,7 +535,7 @@ const readSpotifyPlaybackSnapshot = async (
     return statusForTrack(track, sdkState.paused ? 'paused' : 'playing', sdkState.position / 1000);
   }
 
-  const apiState = await window.echo.spotify.getPlaybackState().catch(() => null);
+  const apiState = await requireSpotifyApi().getPlaybackState().catch(() => null);
   if (apiState?.itemUri === expectedUri) {
     if (typeof apiState.volumePercent === 'number') {
       lastVolume = Math.max(0, Math.min(1, apiState.volumePercent / 100));
@@ -574,12 +583,12 @@ export const playSpotifyTrack = async (track: LibraryTrack, startSeconds = 0): P
     reportSpotifyDiagnostic('activate-before-play-error', { message: safeString(error?.message) }, 'warn');
   });
   await withTimeout(
-    window.echo.spotify.transferPlayback({ deviceId: currentDeviceId, play: false }),
+    requireSpotifyApi().transferPlayback({ deviceId: currentDeviceId, play: false }),
     spotifyPlaybackCommandTimeoutMs,
     'Spotify device transfer timed out. Confirm Spotify Premium and network status.',
   );
   await withTimeout(
-    window.echo.spotify.startPlayback({
+    requireSpotifyApi().startPlayback({
       deviceId: currentDeviceId,
       uri,
       positionMs,
@@ -590,7 +599,7 @@ export const playSpotifyTrack = async (track: LibraryTrack, startSeconds = 0): P
   if (nextPlayer) {
     await nextPlayer.setVolume(lastVolume).catch(() => undefined);
   } else {
-    await window.echo.spotify.setVolume(lastVolume, currentDeviceId).catch(() => undefined);
+    await requireSpotifyApi().setVolume(lastVolume, currentDeviceId).catch(() => undefined);
   }
   const verified = await waitForSpotifyPlaying(uri, nextPlayer);
   return statusForTrack(track, 'playing', verified.positionMs / 1000);
@@ -600,7 +609,7 @@ export const pauseSpotifyPlayback = async (track: LibraryTrack): Promise<Playbac
   const nextPlayer = usingConnectFallback ? null : player;
   const uri = spotifyUriForTrack(track);
   await runSpotifyCommand(
-    window.echo.spotify.pause(deviceId),
+    requireSpotifyApi().pause(deviceId),
     'Spotify pause request timed out.',
     nextPlayer ? () => nextPlayer.pause() : undefined,
   );
@@ -613,7 +622,7 @@ export const resumeSpotifyPlayback = async (track: LibraryTrack): Promise<Playba
   const uri = spotifyUriForTrack(track);
   await nextPlayer?.activateElement?.().catch(() => undefined);
   await runSpotifyCommand(
-    window.echo.spotify.resume(deviceId),
+    requireSpotifyApi().resume(deviceId),
     'Spotify resume request timed out.',
     nextPlayer ? () => nextPlayer.resume() : undefined,
   );
@@ -626,7 +635,7 @@ export const seekSpotifyPlayback = async (track: LibraryTrack, positionSeconds: 
   const uri = spotifyUriForTrack(track);
   const positionMs = Math.round(Math.max(0, positionSeconds) * 1000);
   await runSpotifyCommand(
-    window.echo.spotify.seek(positionMs, deviceId),
+    requireSpotifyApi().seek(positionMs, deviceId),
     'Spotify seek request timed out.',
     nextPlayer ? () => nextPlayer.seek(positionMs) : undefined,
   );
@@ -637,7 +646,7 @@ export const setSpotifyVolume = async (volume: number): Promise<void> => {
   lastVolume = Math.max(0, Math.min(1, volume));
   const nextPlayer = usingConnectFallback ? null : player;
   await runSpotifyCommand(
-    window.echo.spotify.setVolume(lastVolume, deviceId),
+    requireSpotifyApi().setVolume(lastVolume, deviceId),
     'Spotify volume request timed out.',
     nextPlayer ? () => nextPlayer.setVolume(lastVolume) : undefined,
   );

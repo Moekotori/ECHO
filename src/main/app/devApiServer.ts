@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { getAudioSession } from '../audioPublicApi';
 import { getAirPlayReceiverSpikeService } from '../connect/AirPlayReceiverSpikeService';
-import { getStreamingService } from '../streaming/StreamingService';
 
 const devApiPort = 5174;
 const maxBodyBytes = 64 * 1024;
@@ -89,47 +88,6 @@ export const startDevApiServer = (): void => {
       if (request.method === 'POST' && url.pathname === '/connect/airplay/enabled') {
         const body = await readJsonBody(request);
         sendJson(response, 200, await getAirPlayReceiverSpikeService().setEnabled(body.enabled === true));
-        return;
-      }
-
-      if (request.method === 'POST' && url.pathname === '/streaming/import-playlist') {
-        const body = await readJsonBody(request);
-        const playlistUrl = typeof body.url === 'string' ? body.url.trim() : '';
-        if (!playlistUrl) {
-          sendJson(response, 400, { error: 'Playlist URL is required.' });
-          return;
-        }
-
-        sendJson(response, 200, await getStreamingService().importPlaylistFromUrl(playlistUrl));
-        return;
-      }
-
-      if (request.method === 'POST' && url.pathname === '/streaming/netease-daily-recommend') {
-        sendJson(response, 200, await getStreamingService().refreshNeteaseDailyRecommend());
-        return;
-      }
-
-      if (request.method === 'POST' && url.pathname === '/streaming/sync-liked-songs') {
-        const body = await readJsonBody(request);
-        const provider = body.provider === 'netease' || body.provider === 'qqmusic' ? body.provider : undefined;
-        sendJson(response, 200, await getStreamingService().syncLikedSongs(provider));
-        return;
-      }
-
-      if (request.method === 'POST' && url.pathname === '/streaming/set-track-liked') {
-        const body = await readJsonBody(request);
-        if (body.provider !== 'netease' && body.provider !== 'qqmusic') {
-          sendJson(response, 400, { error: 'Streaming provider is required.' });
-          return;
-        }
-
-        const providerTrackId = typeof body.providerTrackId === 'string' ? body.providerTrackId.trim() : '';
-        if (!providerTrackId) {
-          sendJson(response, 400, { error: 'providerTrackId is required.' });
-          return;
-        }
-
-        sendJson(response, 200, await getStreamingService().setTrackLiked(body.provider, providerTrackId, body.liked === true));
         return;
       }
 

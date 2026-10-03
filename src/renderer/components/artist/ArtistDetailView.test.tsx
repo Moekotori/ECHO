@@ -871,7 +871,7 @@ describe('ArtistDetailView', () => {
     expect(screen.getByText('Online Echo 1')).toBeTruthy();
   });
 
-  it('shows a download album action inside artist streaming album details after downloads are unlocked', async () => {
+  it('does not show a download album action inside artist streaming album details', async () => {
     const album = streamingAlbum(1, 'netease');
     const albumTracks: StreamingTrack[] = [
       {
@@ -973,26 +973,9 @@ describe('ArtistDetailView', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Online Echo 1/ }));
     expect(await screen.findByText('Streaming Album Track 1')).toBeTruthy();
 
-    fireEvent.click(await screen.findByRole('button', { name: '下载专辑' }));
-
-    await waitFor(() => expect(createUrlJob).toHaveBeenCalledTimes(1));
-    expect(resolvePlayback).toHaveBeenCalledWith({
-      provider: 'netease',
-      providerTrackId: 'track-1',
-      quality: expect.any(String),
-    });
-    expect(createUrlJob).toHaveBeenCalledWith(
-      'https://cdn.example/track-1.flac',
-      expect.objectContaining({
-        title: 'Streaming Album Track 1',
-        album: album.title,
-        outputSubdirectory: `${album.artist} - ${album.title}`,
-        deferImportToLibrary: true,
-        streamingProvider: 'netease',
-        streamingProviderTrackId: 'track-1',
-        downloadAuthorizationToken: 'download-token-track-1',
-      }),
-    );
+    expect(screen.queryByRole('button', { name: '下载专辑' })).toBeNull();
+    expect(createUrlJob).not.toHaveBeenCalled();
+    expect(resolvePlayback).not.toHaveBeenCalled();
   });
 
   it('shows configured concert provider status while online events are empty', async () => {

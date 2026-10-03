@@ -87,29 +87,20 @@ describe('FirstRunWizard', () => {
 
     fireEvent.click(primaryButton());
     fireEvent.click(primaryButton());
-
-    expect(screen.getByRole('heading', { name: '你是 osu! 玩家吗？' })).toBeTruthy();
-    const osuPlayerChoice = document.querySelector('.first-run-osu-choice--yes') as HTMLButtonElement;
-    fireEvent.click(osuPlayerChoice);
-    expect(osuPlayerChoice.getAttribute('aria-pressed')).toBe('true');
-
-    for (let index = 0; index < 3; index += 1) {
-      fireEvent.click(primaryButton());
-    }
     fireEvent.click(primaryButton());
 
     await waitFor(() => {
       expect(setSettings).toHaveBeenCalledWith(expect.objectContaining({
         lowLoadPlaybackModeEnabled: true,
         albumWallVirtualizationEnabled: true,
-        osuDownloaderFeatureEnabled: true,
+        osuDownloaderFeatureEnabled: false,
       }));
     });
     expect(setOutput).toHaveBeenCalledWith(expect.objectContaining({ outputMode: expect.any(String) }));
     expect(onCompleted).toHaveBeenCalledWith(expect.objectContaining({
       lowLoadPlaybackModeEnabled: true,
       albumWallVirtualizationEnabled: true,
-      osuDownloaderFeatureEnabled: true,
+      osuDownloaderFeatureEnabled: false,
     }));
     expect(onClose).toHaveBeenCalled();
   });

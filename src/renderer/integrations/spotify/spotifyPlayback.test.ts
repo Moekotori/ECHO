@@ -46,7 +46,9 @@ type MockSpotifyPlayerEvent = {
   message?: string;
 };
 
-const installEchoSpotifyApi = (overrides: Partial<Window['echo']['spotify']> = {}): Window['echo']['spotify'] => {
+const installEchoSpotifyApi = (
+  overrides: Partial<NonNullable<Window['echo']['spotify']>> = {},
+): NonNullable<Window['echo']['spotify']> => {
   const spotify = {
     getAccessToken: vi.fn().mockResolvedValue('access-token'),
     getDevices: vi.fn().mockResolvedValue([

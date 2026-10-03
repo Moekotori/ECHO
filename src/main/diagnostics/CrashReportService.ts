@@ -24,12 +24,12 @@ import type {
   RendererErrorPayload,
   CrashSessionInfo,
 } from '../../shared/types/diagnostics';
+import { getAccountService } from '../accounts/AccountService';
 import { getAppSettings } from '../app/appSettings';
 import { getLastDataProtectionResult, getLibraryDatabaseMaintenanceReport } from '../app/dataProtection';
 import { getAudioSession } from '../audioPublicApi';
 import { getLibraryService } from '../library/LibraryService';
 import { hashText, Logger, sanitizeLogPayload } from './Logger';
-import { getAccountService } from '../accounts/AccountService';
 import { getStartupTimelineSnapshot } from './StartupDiagnostics';
 import {
   getExceptionRecordsSnapshot,
@@ -2819,12 +2819,9 @@ export class CrashReportService {
 
   private getSafeAccountStatus(): unknown {
     try {
-      return {
-        storagePath: safePathValue(getAccountService().getStoragePath()),
-        statuses: getAccountService().getStatuses(),
-      };
-    } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) };
+      return getAccountService().getSanitizedRecords();
+    } catch {
+      return { available: false };
     }
   }
 

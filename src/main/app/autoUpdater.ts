@@ -11,7 +11,7 @@ import { getAppSettings } from './appSettings';
 import { createDataProtectionSnapshot, writeDataProtectionManifest } from './dataProtection';
 import { getDataBackupStatus } from './dataBackup';
 import { getAudioSession } from '../audio/AudioSession';
-import { getDownloadService } from '../downloads/DownloadService';
+
 import { getLibraryService } from '../library/LibraryService';
 import { hasPendingTagWrites } from '../library/TagWriter';
 import { isScoopInstallation, getPortableDataPath, runScoopUpdate } from './scoopService';
@@ -385,8 +385,6 @@ export const reconfigureAutoUpdateFeed = (): UpdateStatus => {
   return getUpdateStatus();
 };
 
-const activeDownloadStates = new Set(['queued', 'probing', 'downloading', 'extracting_audio', 'importing', 'binding_mv']);
-
 export const installDownloadedUpdate = async (): Promise<UpdateInstallResult> => {
   if (isPortableWindowsBuild()) {
     return { outcome: 'error', error: 'Portable builds use manual updates.' };
@@ -401,7 +399,6 @@ export const installDownloadedUpdate = async (): Promise<UpdateInstallResult> =>
   const reasons: string[] = [];
   const playbackState = getAudioSession().getStatus().state;
   if (playbackState === 'playing' || playbackState === 'loading') reasons.push('playback');
-  if (getDownloadService().getJobs().some((job) => activeDownloadStates.has(job.status))) reasons.push('downloads');
   if (getLibraryService().hasRunningJobs()) reasons.push('library-scan');
   if (hasPendingTagWrites()) reasons.push('tag-writes');
   if (getDataBackupStatus().running) reasons.push('data-backup');

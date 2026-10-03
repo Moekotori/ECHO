@@ -620,11 +620,11 @@ describe('SongsPage', () => {
       coverThumb: 'echo-cover://thumb/osu-local-cover',
     });
     const { playLocalFile, playMediaItem } = installEcho([osuTrack]);
-    vi.mocked(window.echo.streaming.getProviders).mockResolvedValue([
+    vi.mocked(window.echo.streaming!.getProviders).mockResolvedValue([
       makeStreamingProvider({ name: 'qqmusic', displayName: 'QQ Music', accountConnected: true }),
       makeStreamingProvider({ name: 'netease', displayName: '网易云音乐', accountConnected: true }),
     ]);
-    vi.mocked(window.echo.streaming.search).mockImplementation(async (request) =>
+    vi.mocked(window.echo.streaming!.search).mockImplementation(async (request) =>
       makeStreamingSearchResult([
         makeStreamingTrack({
           provider: request.provider,
@@ -652,7 +652,7 @@ describe('SongsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Bismuth' }));
 
     await waitFor(() =>
-      expect(window.echo.streaming.search).toHaveBeenCalledWith({
+      expect(window.echo.streaming!.search).toHaveBeenCalledWith({
         provider: 'netease',
         query: 'Bismuth Ludicin',
         mediaTypes: ['track'],
@@ -660,7 +660,7 @@ describe('SongsPage', () => {
         pageSize: 20,
       }),
     );
-    expect(window.echo.streaming.search).toHaveBeenCalledWith(expect.objectContaining({ provider: 'qqmusic' }));
+    expect(window.echo.streaming!.search).toHaveBeenCalledWith(expect.objectContaining({ provider: 'qqmusic' }));
     expect(playLocalFile).not.toHaveBeenCalled();
     await waitFor(() => expect(playMediaItem).toHaveBeenCalledTimes(1));
     expect(playMediaItem).toHaveBeenCalledWith(expect.objectContaining({
@@ -690,10 +690,10 @@ describe('SongsPage', () => {
       album: 'osu! beatmapset 1764169',
     });
     const { playMediaItem } = installEcho([labyrinth, matusa]);
-    vi.mocked(window.echo.streaming.getProviders).mockResolvedValue([
+    vi.mocked(window.echo.streaming!.getProviders).mockResolvedValue([
       makeStreamingProvider({ name: 'netease', displayName: 'NetEase', accountConnected: true }),
     ]);
-    vi.mocked(window.echo.streaming.search).mockImplementation(async (request) =>
+    vi.mocked(window.echo.streaming!.search).mockImplementation(async (request) =>
       makeStreamingSearchResult([
         makeStreamingTrack({
           provider: request.provider,
@@ -714,7 +714,7 @@ describe('SongsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Labyrinth' }));
 
     await waitFor(() => expect(playMediaItem).toHaveBeenCalledTimes(1));
-    expect(window.echo.streaming.search).toHaveBeenCalledTimes(1);
+    expect(window.echo.streaming!.search).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText('queue-order').getAttribute('data-order')).toBe('Labyrinth>Matusa Bomber');
     expect(screen.getByLabelText('queue-order').getAttribute('data-source-types')).toBe('streaming,songs');
   });
@@ -728,10 +728,10 @@ describe('SongsPage', () => {
       bitrate: 128000,
     });
     const { playLocalFile, playMediaItem } = installEcho([osuTrack]);
-    vi.mocked(window.echo.streaming.getProviders).mockResolvedValue([
+    vi.mocked(window.echo.streaming!.getProviders).mockResolvedValue([
       makeStreamingProvider({ name: 'netease', displayName: 'NetEase', accountConnected: true }),
     ]);
-    vi.mocked(window.echo.streaming.search).mockResolvedValue(makeStreamingSearchResult([
+    vi.mocked(window.echo.streaming!.search).mockResolvedValue(makeStreamingSearchResult([
       makeStreamingTrack({
         provider: 'netease',
         title: 'Cord Cutter',
@@ -776,7 +776,7 @@ describe('SongsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Bismuth' }));
 
     await waitFor(() => expect(playLocalFile).toHaveBeenCalledTimes(1));
-    expect(window.echo.streaming.search).not.toHaveBeenCalled();
+    expect(window.echo.streaming!.search).not.toHaveBeenCalled();
     expect(playMediaItem).not.toHaveBeenCalled();
   });
 

@@ -36,7 +36,6 @@ import { getMainWindow } from '../app/windowManager';
 import { refreshTaskbarPlaybackOrder } from '../app/taskbarPlaybackIntegration';
 import { getMainWindowPlaybackCommandRelay, isValidMainWindowControlRequest } from '../playback/MainWindowPlaybackCommandRelay';
 import { getAirPlayReceiverSpikeService } from '../connect/AirPlayReceiverSpikeService';
-import { getStreamingService } from '../streaming/StreamingService';
 import { beginMainBackgroundTask, runPlaybackPerformanceStep, runPlaybackPerformanceStepSync } from '../diagnostics/PlaybackPerformanceDiagnostics';
 import { resolvePlaybackOutputForMediaItem } from '../playback/PlaybackMediaOutputPolicy';
 import { enqueueAudioCommand, isAudioCommandTimeoutError } from './audioCommandQueue';
@@ -44,6 +43,7 @@ import { normalizePlaybackFilePath, selectPlaybackRequestPath } from './playback
 import { normalizeAudioOutputSettings } from './normalizeAudioOutputSettings';
 
 const streamingProviders = new Set<StreamingProviderName>(streamingProviderNames);
+const streamingPlaybackRemovedMessage = '流媒体播放已移除。';
 const preparedMediaTtlMs = 2 * 60 * 1000;
 const maxExpiredUrlRecoveryAttempts = 1;
 const postPlaybackTaskDelayMs = 1_500;
@@ -182,8 +182,6 @@ const isStreamingProviderName = (value: string | null): value is StreamingProvid
 const optionalStreamingQuality = (value: unknown): StreamingAudioQuality | undefined =>
   value === 'standard' || value === 'high' || value === 'lossless' || value === 'hires' ? value : undefined;
 
-const isHttpUrl = (value: string): boolean => /^https?:\/\//iu.test(value);
-
 const isLikelyExpiredUrlError = (error: unknown): boolean => {
   if (error && typeof error === 'object') {
     const kind = (error as { ffmpegErrorKind?: unknown }).ffmpegErrorKind;
@@ -196,94 +194,13 @@ const isLikelyExpiredUrlError = (error: unknown): boolean => {
   return /kind="http_expired_or_forbidden"|\b(?:401|403|404)\b|expired|forbidden|unauthorized|server returned 4\d\d|http error\s*4\d\d/iu.test(message);
 };
 
-const isQqMusicPermissionError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  return /QQ\s*音乐.*(?:无播放权限|104003)|QQ\s*Music.*(?:104003|permission)/iu.test(message);
-};
-
 const isStreamingPlaybackResolutionError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error);
   return (
+    message === streamingPlaybackRemovedMessage ||
     /did not return a playable URL|metadata only|requires the official .* player|must not enter the native audio session/iu.test(message) ||
     /(?:会员|會員|版权|版權|不可播放|无播放权限|無播放權限|permission|unavailable)/iu.test(message)
   );
-};
-
-const normalizeMatchText = (value: string | null | undefined): string =>
-  (value ?? '')
-    .normalize('NFKC')
-    .toLocaleLowerCase()
-    .replace(/\((?:explicit|clean|remaster(?:ed)?|album version|single version)\)/giu, ' ')
-    .replace(/\[(?:explicit|clean|remaster(?:ed)?|album version|single version)\]/giu, ' ')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim();
-
-const artistTokens = (value: string | null | undefined): Set<string> =>
-  new Set(
-    normalizeMatchText(value)
-      .split(' ')
-      .filter((token) => token.length >= 2),
-  );
-
-const hasArtistOverlap = (left: string | null | undefined, right: string | null | undefined): boolean => {
-  const leftTokens = artistTokens(left);
-  const rightTokens = artistTokens(right);
-  if (leftTokens.size === 0 || rightTokens.size === 0) {
-    return false;
-  }
-
-  for (const token of leftTokens) {
-    if (rightTokens.has(token)) {
-      return true;
-    }
-  }
-
-  return false;
-};
-
-const durationMatches = (left: number | null | undefined, right: number | null | undefined): boolean => {
-  if (!left || !right) {
-    return true;
-  }
-
-  return Math.abs(left - right) <= 8;
-};
-
-const findLocalFallbackForStreamingItem = async (item: Extract<PlayableTrack, { mediaType: 'streaming' }>): Promise<LibraryTrack | null> => {
-  if (!item.title || !item.artist) {
-    return null;
-  }
-
-  try {
-    const { getLibraryService } = await import('../library/LibraryService');
-    const localCandidates = getLibraryService().getTracks({
-      page: 1,
-      pageSize: 25,
-      search: `${item.title} ${item.artist}`,
-      sourceProvider: 'local',
-    }).items;
-    const targetTitle = normalizeMatchText(item.title);
-
-    return (
-      localCandidates.find((candidate) => {
-        if (candidate.mediaType !== 'local') {
-          return false;
-        }
-
-        const candidateTitle = normalizeMatchText(candidate.title);
-        const titleMatches =
-          candidateTitle === targetTitle ||
-          candidateTitle.includes(targetTitle) ||
-          targetTitle.includes(candidateTitle);
-
-        return titleMatches && hasArtistOverlap(candidate.artist, item.artist) && durationMatches(candidate.duration, item.duration);
-      }) ?? null
-    );
-  } catch (error) {
-    console.warn(`[playback] QQ Music local fallback lookup failed: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
-  }
 };
 
 const createPreparedMediaKey = (request: PlaybackMediaStartRequest): string => {
@@ -664,65 +581,7 @@ const resolveMediaItemForPlayback = async (
       })
     ).url;
   } else if (item.mediaType === 'streaming') {
-    if (item.provider === 'spotify') {
-      throw new Error('Spotify playback uses the official Web Playback SDK and must not enter the native audio session.');
-    }
-
-    const playbackRequest = {
-      provider: item.provider,
-      providerTrackId: item.providerTrackId,
-      quality: item.quality,
-    };
-
-    if (forceRefresh) {
-      getStreamingService().invalidatePlayback(playbackRequest);
-    }
-
-    let source;
-    try {
-      source = await getStreamingService().resolvePlayback(playbackRequest);
-    } catch (error) {
-      if (item.provider !== 'qqmusic' || !isQqMusicPermissionError(error)) {
-        throw error;
-      }
-
-      const fallback = await findLocalFallbackForStreamingItem(item);
-      if (!fallback || fallback.mediaType !== 'local') {
-        throw error;
-      }
-
-      return {
-        filePath: fallback.path,
-        probe: {
-          durationSeconds: fallback.duration || durationSeconds || undefined,
-          fileSampleRate: fallback.sampleRate,
-          channels: 2,
-          codec: fallback.codec,
-          bitDepth: fallback.bitDepth,
-          bitrate: fallback.bitrate,
-        },
-        mimeType: null,
-        durationSeconds: fallback.duration || durationSeconds,
-      };
-    }
-
-    if (source.requiresProxy) {
-      throw new Error('This streaming source requires the streaming proxy adapter, which is not enabled yet.');
-    }
-
-    filePath = source.url;
-    probe =
-      durationSeconds || isHttpUrl(source.url)
-        ? {
-            durationSeconds: durationSeconds ?? undefined,
-            fileSampleRate: source.sampleRate,
-            channels: 2,
-            codec: source.codec,
-            bitDepth: source.bitDepth,
-            bitrate: source.bitrate,
-          }
-        : undefined;
-    return { filePath, inputHeaders: source.headers, mimeType: source.mimeType ?? null, probe, durationSeconds };
+    throw new Error(streamingPlaybackRemovedMessage);
   } else {
     filePath = item.path;
   }
@@ -911,7 +770,7 @@ const resolveAutomixRequest = async (
       : undefined;
   }
 
-  if (automix.nextItem.mediaType === 'streaming' && automix.nextItem.provider === 'spotify') {
+  if (automix.nextItem.mediaType === 'streaming') {
     return {
       enabled: true,
       maxTransitionSeconds: automix.maxTransitionSeconds,
@@ -927,7 +786,7 @@ const resolveAutomixRequest = async (
   });
   const following = await Promise.all(
     (automix.upcomingItems ?? [])
-      .filter((item) => !(item.mediaType === 'streaming' && item.provider === 'spotify'))
+      .filter((item) => item.mediaType !== 'streaming')
       .slice(0, 2)
       .map(async (item, index) => {
         const preparedItem = await resolveMediaItemForPlayback({ item });
@@ -965,14 +824,14 @@ const resolveGaplessRequest = async (
     return gapless?.enabled === true ? { enabled: true, next: null } : undefined;
   }
 
-  if (gapless.nextItem.mediaType === 'streaming' && gapless.nextItem.provider === 'spotify') {
+  if (gapless.nextItem.mediaType === 'streaming') {
     return { enabled: true, next: null };
   }
 
   const prepared = await resolveMediaItemForPlayback({ item: gapless.nextItem });
   const following = await Promise.all(
     (gapless.upcomingItems ?? [])
-      .filter((item) => !(item.mediaType === 'streaming' && item.provider === 'spotify'))
+      .filter((item) => item.mediaType !== 'streaming')
       .slice(0, 30)
       .map(async (item, index) => {
         const preparedItem = await resolveMediaItemForPlayback({ item });

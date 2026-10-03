@@ -13,16 +13,9 @@ import {
 import { sanitizeAccountData } from '../../shared/utils/sanitizeAccountData';
 import type { AccountProviderBase, StoredAccountRecord } from './providers/AccountProviderBase';
 import { BilibiliAccountProvider } from './providers/BilibiliAccountProvider';
-import { KugouAccountProvider } from './providers/KugouAccountProvider';
-import { NeteaseAccountProvider } from './providers/NeteaseAccountProvider';
-import { OsuAccountProvider } from './providers/OsuAccountProvider';
-import { QQMusicAccountProvider } from './providers/QQMusicAccountProvider';
-import { SoundCloudAccountProvider } from './providers/SoundCloudAccountProvider';
-import { QobuzAccountProvider } from './providers/QobuzAccountProvider';
-import { SpotifyAccountProvider } from './providers/SpotifyAccountProvider';
-import { TidalAccountProvider } from './providers/TidalAccountProvider';
-import { YouTubeAccountProvider } from './providers/YouTubeAccountProvider';
 import { AccountSecretStore } from './AccountSecretStore';
+
+const supportedAccountProviders = ['bilibili'] as const satisfies readonly AccountProvider[];
 
 type StoredAccounts = Partial<Record<AccountProvider, StoredAccountRecord>>;
 
@@ -65,7 +58,7 @@ const normalizeStoredAccounts = (value: unknown, secretStore: AccountSecretStore
 };
 
 export const isAccountProvider = (value: unknown): value is AccountProvider =>
-  typeof value === 'string' && accountProviders.includes(value as AccountProvider);
+  value === 'bilibili';
 
 export const isYouTubeBrowser = (value: unknown): value is YouTubeBrowser =>
   isAccountBrowser(value);
@@ -141,26 +134,14 @@ const assertCookieHeaderValueSafe = (cookie: string): void => {
 export class AccountService {
   private records: StoredAccounts | null = null;
   private preservedSecrets: PreservedAccountSecrets = {};
-  private readonly providers: Record<AccountProvider, AccountProviderBase>;
+  private readonly providers: Partial<Record<AccountProvider, AccountProviderBase>> = {
+    bilibili: new BilibiliAccountProvider(),
+  };
 
   constructor(
     private readonly storagePath = join(app.getPath('userData'), 'accounts.json'),
     private readonly secretStore = new AccountSecretStore(),
-  ) {
-    const youtube = new YouTubeAccountProvider();
-    this.providers = {
-      netease: new NeteaseAccountProvider(),
-      qqmusic: new QQMusicAccountProvider(),
-      kugou: new KugouAccountProvider(),
-      bilibili: new BilibiliAccountProvider(),
-      youtube,
-      soundcloud: new SoundCloudAccountProvider(),
-      spotify: new SpotifyAccountProvider(),
-      tidal: new TidalAccountProvider(),
-      qobuz: new QobuzAccountProvider(),
-      osu: new OsuAccountProvider(),
-    };
-  }
+  ) {}
 
   getStoragePath(): string {
     return this.storagePath;
@@ -178,12 +159,12 @@ export class AccountService {
 
   getStatuses(): AccountStatus[] {
     const records = this.readRecords();
-    return accountProviders.map((provider) => this.providers[provider].toStatus(records[provider]));
+    return supportedAccountProviders.map((provider) => this.providerFor(provider).toStatus(records[provider]));
   }
 
   getStatus(provider: AccountProvider): AccountStatus {
     this.requireProvider(provider);
-    return this.providers[provider].toStatus(this.readRecords()[provider]);
+    return this.providerFor(provider).toStatus(this.readRecords()[provider]);
   }
 
   getCredentials(provider: AccountProvider): AccountCredentials {
@@ -210,7 +191,7 @@ export class AccountService {
     assertCookieHeaderValueSafe(trimmedCookie);
 
     const records = this.readRecords();
-    records[provider] = this.providers[provider].saveCookie(trimmedCookie, records[provider], nowIso());
+    records[provider] = this.providerFor(provider).saveCookie(trimmedCookie, records[provider], nowIso());
     this.writeRecords(records);
     return this.getStatus(provider);
   }
@@ -219,173 +200,29 @@ export class AccountService {
     this.requireProvider(provider);
     const records = this.readRecords();
     delete this.preservedSecrets[provider];
-    records[provider] = this.providers[provider].clear();
+    records[provider] = this.providerFor(provider).clear();
     this.writeRecords(records);
     return this.getStatus(provider);
   }
 
-  saveQobuzCredentials(input: {
-    accessToken: string;
-    refreshToken?: string;
-    tokenType?: string;
-    username?: string | null;
-    displayName?: string | null;
-    avatarUrl?: string | null;
-  }): AccountStatus {
-    const records = this.readRecords();
-    const current = records.qobuz;
-    records.qobuz = {
-      ...current,
-      accessToken: input.accessToken,
-      refreshToken: input.refreshToken ?? current?.refreshToken,
-      tokenType: input.tokenType ?? current?.tokenType,
-      username: input.username ?? current?.username ?? null,
-      displayName: input.displayName ?? current?.displayName ?? null,
-      avatarUrl: input.avatarUrl ?? current?.avatarUrl ?? null,
-      lastLoginAt: nowIso(),
-      lastCheckedAt: nowIso(),
-      error: null,
-    };
-    this.writeRecords(records);
-    return this.getStatus('qobuz');
-  }
-
-  getQobuzStoredRecord(): StoredAccountRecord | null {
-    return this.readRecords().qobuz ?? null;
-  }
-
   async checkAccount(provider: AccountProvider): Promise<AccountStatus> {
-    this.requireProvider(provider);
     const records = this.readRecords();
-    records[provider] = await this.providers[provider].check(records[provider], nowIso());
+    records[provider] = await this.providerFor(provider).check(records[provider], nowIso());
     this.writeRecords(records);
     return this.getStatus(provider);
   }
 
   async checkAllAccounts(): Promise<AccountStatus[]> {
-    await Promise.all(accountProviders.map((provider) => this.checkAccount(provider)));
+    await Promise.all(supportedAccountProviders.map((provider) => this.checkAccount(provider)));
     return this.getStatuses();
-  }
-
-  saveSpotifyTokens(input: {
-    accessToken: string;
-    refreshToken?: string | null;
-    tokenType?: string | null;
-    scope?: string | null;
-    expiresAt?: string | null;
-    username?: string | null;
-    displayName?: string | null;
-    avatarUrl?: string | null;
-  }): AccountStatus {
-    const records = this.readRecords();
-    const current = records.spotify;
-    records.spotify = {
-      ...current,
-      accessToken: input.accessToken,
-      refreshToken: input.refreshToken ?? current?.refreshToken,
-      tokenType: input.tokenType ?? current?.tokenType ?? 'Bearer',
-      scope: input.scope ?? current?.scope,
-      expiresAt: input.expiresAt ?? current?.expiresAt ?? null,
-      username: input.username ?? current?.username ?? null,
-      displayName: input.displayName ?? current?.displayName ?? input.username ?? null,
-      avatarUrl: input.avatarUrl ?? current?.avatarUrl ?? null,
-      lastLoginAt: current?.lastLoginAt ?? nowIso(),
-      lastCheckedAt: nowIso(),
-      error: null,
-    };
-    this.writeRecords(records);
-    return this.getStatus('spotify');
-  }
-
-  updateSpotifyCheckStatus(patch: Pick<StoredAccountRecord, 'displayName' | 'username' | 'avatarUrl' | 'error'>): AccountStatus {
-    const records = this.readRecords();
-    records.spotify = {
-      ...records.spotify,
-      ...patch,
-      lastCheckedAt: nowIso(),
-    };
-    this.writeRecords(records);
-    return this.getStatus('spotify');
-  }
-
-  getSpotifyTokenRecord(): StoredAccountRecord | null {
-    return this.readRecords().spotify ?? null;
-  }
-
-  saveTidalTokens(input: {
-    accessToken: string;
-    refreshToken?: string | null;
-    tokenType?: string | null;
-    scope?: string | null;
-    expiresAt?: string | null;
-    username?: string | null;
-    displayName?: string | null;
-    avatarUrl?: string | null;
-  }): AccountStatus {
-    const records = this.readRecords();
-    const current = records.tidal;
-    records.tidal = {
-      ...current,
-      accessToken: input.accessToken,
-      refreshToken: input.refreshToken ?? current?.refreshToken,
-      tokenType: input.tokenType ?? current?.tokenType ?? 'Bearer',
-      scope: input.scope ?? current?.scope,
-      expiresAt: input.expiresAt ?? current?.expiresAt ?? null,
-      username: input.username ?? current?.username ?? null,
-      displayName: input.displayName ?? current?.displayName ?? input.username ?? null,
-      avatarUrl: input.avatarUrl ?? current?.avatarUrl ?? null,
-      lastLoginAt: current?.lastLoginAt ?? nowIso(),
-      lastCheckedAt: nowIso(),
-      error: null,
-    };
-    this.writeRecords(records);
-    return this.getStatus('tidal');
-  }
-
-  updateTidalCheckStatus(patch: Pick<StoredAccountRecord, 'displayName' | 'username' | 'avatarUrl' | 'error'>): AccountStatus {
-    const records = this.readRecords();
-    records.tidal = {
-      ...records.tidal,
-      ...patch,
-      lastCheckedAt: nowIso(),
-    };
-    this.writeRecords(records);
-    return this.getStatus('tidal');
-  }
-
-  getTidalTokenRecord(): StoredAccountRecord | null {
-    return this.readRecords().tidal ?? null;
   }
 
   async checkPreviouslyLoggedInAccounts(): Promise<AccountStatus[]> {
     const records = this.readRecords();
-    const providersToCheck = accountProviders.filter((provider) => hasRefreshableLoginRecord(records[provider]));
+    const providersToCheck = supportedAccountProviders.filter((provider) => hasRefreshableLoginRecord(records[provider]));
 
     await Promise.all(providersToCheck.map((provider) => this.checkAccount(provider)));
     return this.getStatuses();
-  }
-
-  setYouTubeBrowser(browser: YouTubeBrowser): AccountStatus {
-    if (!isAccountBrowser(browser)) {
-      throw new Error('browser must be edge, chrome, firefox, or none');
-    }
-
-    return this.setAccountBrowser('youtube', browser);
-  }
-
-  setAccountBrowser(provider: Extract<AccountProvider, 'youtube' | 'soundcloud'>, browser: AccountBrowser): AccountStatus {
-    if (!isAccountBrowser(browser)) {
-      throw new Error('browser must be edge, chrome, firefox, or none');
-    }
-
-    const records = this.readRecords();
-    const accountProvider = this.providers[provider];
-    if (!(accountProvider instanceof YouTubeAccountProvider) && !(accountProvider instanceof SoundCloudAccountProvider)) {
-      throw new Error('provider does not support system browser login');
-    }
-    records[provider] = accountProvider.setBrowser(browser, records[provider], nowIso());
-    this.writeRecords(records);
-    return this.getStatus(provider);
   }
 
   getSanitizedRecords(): unknown {
@@ -396,6 +233,15 @@ export class AccountService {
     if (!isAccountProvider(provider)) {
       throw new Error('provider must be a supported account provider');
     }
+  }
+
+  private providerFor(provider: AccountProvider): AccountProviderBase {
+    this.requireProvider(provider);
+    const accountProvider = this.providers[provider];
+    if (!accountProvider) {
+      throw new Error('provider must be a supported account provider');
+    }
+    return accountProvider;
   }
 
   private readRecords(): StoredAccounts {

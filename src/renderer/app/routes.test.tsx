@@ -26,7 +26,7 @@ vi.mock('../pages/SettingsPage', () => {
   return { SettingsPage: () => <div>Settings content</div> };
 });
 vi.mock('../components/settings/RemoteSourcesPanel', () => ({ RemoteSourcesPanel: () => null }));
-vi.mock('../components/streaming/StreamingSearchPage', () => ({ StreamingSearchPage: () => null }));
+
 vi.mock('../pages/ImportFolderPage', () => ({ ImportFolderPage: () => <div>Lazy import folder page</div> }));
 
 afterEach(() => cleanup());
@@ -102,8 +102,6 @@ describe('app route loading boundaries', () => {
       'artists',
       'audio-cd',
       'connect',
-      'downloads',
-      'osu-downloader',
       'dsp',
       'history',
       'inbox',
@@ -112,7 +110,6 @@ describe('app route loading boundaries', () => {
       'lyrics',
       'folders',
       'remote',
-      'streaming',
       'queue',
       'playlists',
       'liked',
@@ -126,11 +123,6 @@ describe('app route loading boundaries', () => {
 
   it('keeps only the startup home route eager', () => {
     expect(isLazyRoute('home')).toBe(false);
-  });
-
-  it('preserves the osu downloader variant on the shared lazy page', () => {
-    expect(getRoute('osu-downloader').element.type).toBe(getRoute('downloads').element.type);
-    expect(getRoute('osu-downloader').element.props).toMatchObject({ variant: 'osu' });
   });
 
   it('resolves a first-stage page through the existing Suspense boundary', async () => {

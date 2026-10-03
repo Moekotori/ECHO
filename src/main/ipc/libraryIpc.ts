@@ -83,11 +83,9 @@ import { closeDefaultLyricsService } from '../lyrics/LyricsService';
 import { closeDefaultMvService } from '../mv/MvService';
 import { SongCardRenderer } from '../library/SongCardRenderer';
 import { createLibraryHealthReportAsync, writeLibraryHealthReportMarkdown } from '../library/LibraryHealthReport';
-import { closeDefaultStreamingService, getStreamingService } from '../streaming/StreamingService';
-import { decodeM3u8ProviderTrackId } from '../streaming/M3u8Playlist';
 import { createLibraryRecoveryRelaunchArgs } from '../app/libraryRecoveryMode';
 import { runMainBackgroundTask } from '../diagnostics/MainProcessWorkScheduler';
-import { getDownloadService } from '../downloads/DownloadService';
+
 import { hasCoverCacheOwnershipMarker } from '../library/CoverCacheOwnership';
 
 const sortValues = new Set<LibrarySort>([
@@ -168,7 +166,6 @@ const closeLibraryDatabaseUsers = async (): Promise<void> => {
   closeAlbumSplitService();
   closeDefaultLyricsService();
   closeDefaultMvService();
-  closeDefaultStreamingService();
   closeDefaultRemoteSourceService();
   await closeDefaultLibraryService();
   getLibraryDatabaseManager().closeAllUsers('manual-library-maintenance');
@@ -1298,20 +1295,7 @@ const uniqueOutputPath = (directory: string, fileName: string): string => {
   return candidate;
 };
 
-const getImportOutputDirectory = (): string => {
-  const configuredDirectory = getDownloadService().getSettings().outputDirectory;
-  if (configuredDirectory && existsSync(configuredDirectory)) {
-    try {
-      if (statSync(configuredDirectory).isDirectory()) {
-        return configuredDirectory;
-      }
-    } catch {
-      // Fall back to the OS downloads folder below.
-    }
-  }
-
-  return app.getPath('downloads');
-};
+const getImportOutputDirectory = (): string => app.getPath('downloads');
 
 const importOsuArchiveFile = async (
   service: ReturnType<typeof getLibraryService>,
@@ -1665,9 +1649,11 @@ const csvCell = (value: unknown): string => {
   return /[",\r\n]/u.test(text) ? `"${text.replace(/"/gu, '""')}"` : text;
 };
 
+const decodeStoredM3u8TrackUrl = (providerTrackId: string): string => Buffer.from(providerTrackId, 'base64url').toString('utf8');
+
 const playlistTrackExportRow = (item: LibraryPlaylistItem) => {
   const track = item.track;
-  const streamUrl = item.sourceProvider === 'm3u8' && item.sourceItemId ? decodeM3u8ProviderTrackId(item.sourceItemId) : '';
+  const streamUrl = item.sourceProvider === 'm3u8' && item.sourceItemId ? decodeStoredM3u8TrackUrl(item.sourceItemId) : '';
   return {
     title: item.titleSnapshot ?? track?.title ?? item.album?.title ?? 'Unavailable track',
     artist: item.artistSnapshot ?? track?.artist ?? item.album?.albumArtist ?? 'Unknown artist',
@@ -1850,13 +1836,7 @@ const importPlaylistFile = async (): Promise<ImportPlaylistFileResult | null> =>
     throw new Error('The selected playlist did not contain any existing supported audio files.');
   }
 
-  const imported = await getStreamingService().importM3u8PlaylistFile(filePath, content);
-  return {
-    playlistId: imported.playlistId,
-    playlistName: imported.playlistName,
-    importedCount: imported.importedCount,
-    filePath,
-  };
+  throw new Error('流媒体歌单导入已移除。');
 };
 
 export const registerLibraryIpc = (): void => {
@@ -2514,7 +2494,6 @@ export const registerLibraryIpc = (): void => {
     return getLibraryDatabaseManager().runExclusiveMaintenance('manual-delete-all-user-data', async () => {
       const coverCachePath = resolveCoverCachePathForWipe();
       await closeLibraryDatabaseUsers();
-      getDownloadService().dispose();
       return deleteAllUserData(coverCachePath);
     });
   });
