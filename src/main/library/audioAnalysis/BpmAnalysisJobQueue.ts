@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
 import {
   BPM_ANALYSIS_VERSION,
   BPM_ANALYSIS_VERSION_FIELD,
@@ -8,15 +7,12 @@ import {
 } from '../../../shared/constants/audioAnalysis';
 import type { LibraryStore } from '../LibraryStore';
 import type { BpmAnalysisJobStatus, BpmAnalysisStartOptions, LibraryTrack } from '../libraryTypes';
-import { writeEmbeddedBpmTag } from '../TagWriter';
 import { BpmAnalyzer } from './BpmAnalyzer';
 
 type MutableJobStatus = BpmAnalysisJobStatus;
 
 const maxStoredErrors = 100;
 const defaultLimit = 100;
-const defaultTagWriteRetryDelayMs = 5000;
-const defaultTagWriteMaxAttempts = 120;
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -27,15 +23,8 @@ const hasOsuTimingBpm = (track: LibraryTrack): boolean =>
   track.fieldSources?.osu === 'osu' &&
   track.fieldSources?.bpm !== 'audio_analysis';
 
-type BpmTagWriter = (filePath: string, bpm: number) => Promise<void>;
-type BpmTagWriteDelayPredicate = (filePath: string) => Promise<boolean>;
-
 export class BpmAnalysisJobQueue {
   private readonly analyzer: BpmAnalyzer;
-  private readonly writeBpmTag: BpmTagWriter;
-  private readonly shouldDelayTagWrite: BpmTagWriteDelayPredicate;
-  private readonly tagWriteRetryDelayMs: number;
-  private readonly tagWriteMaxAttempts: number;
   private readonly jobs = new Map<string, MutableJobStatus>();
   private runningJob: Promise<void> | null = null;
   private disposed = false;
@@ -44,17 +33,9 @@ export class BpmAnalysisJobQueue {
     private readonly store: LibraryStore,
     dependencies: {
       analyzer?: BpmAnalyzer;
-      writeBpmTag?: BpmTagWriter;
-      shouldDelayTagWrite?: BpmTagWriteDelayPredicate;
-      tagWriteRetryDelayMs?: number;
-      tagWriteMaxAttempts?: number;
     } = {},
   ) {
     this.analyzer = dependencies.analyzer ?? new BpmAnalyzer();
-    this.writeBpmTag = dependencies.writeBpmTag ?? writeEmbeddedBpmTag;
-    this.shouldDelayTagWrite = dependencies.shouldDelayTagWrite ?? shouldDelayBpmTagWriteForAudio;
-    this.tagWriteRetryDelayMs = Math.max(10, Math.floor(dependencies.tagWriteRetryDelayMs ?? defaultTagWriteRetryDelayMs));
-    this.tagWriteMaxAttempts = Math.max(1, Math.floor(dependencies.tagWriteMaxAttempts ?? defaultTagWriteMaxAttempts));
   }
 
   start(options: BpmAnalysisStartOptions = {}): BpmAnalysisJobStatus {
@@ -137,6 +118,7 @@ export class BpmAnalysisJobQueue {
           const bpm = preserveOsuBpm ? track.bpm! : result.bpm > 0 ? result.bpm : null;
           const beatOffsetMs = result.beatOffsetMs >= 0 && result.bpm > 0 ? result.beatOffsetMs : null;
           const storedStatus = preserveOsuBpm ? 'complete' : status;
+          // Background analysis is library-only; source tags require an explicit save.
           this.store.updateTrackBpmAnalysis(track.id, {
             bpm,
             confidence: preserveOsuBpm ? 1 : result.confidence,
@@ -153,9 +135,6 @@ export class BpmAnalysisJobQueue {
                 }
               : {}),
           });
-          if (bpm && storedStatus === 'complete' && track.fieldSources?.osu !== 'osu') {
-            this.scheduleBpmTagWrite(track.path, bpm, job);
-          }
           job.updatedTracks += bpm ? 1 : 0;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -189,69 +168,4 @@ export class BpmAnalysisJobQueue {
       job.errors.shift();
     }
   }
-
-  private scheduleBpmTagWrite(filePath: string, bpm: number, job: MutableJobStatus): void {
-    const attempt = async (attemptIndex: number): Promise<void> => {
-      try {
-        if (await this.shouldDelayTagWrite(filePath)) {
-          this.retryBpmTagWrite(filePath, bpm, job, attemptIndex, null);
-          return;
-        }
-
-        await this.writeBpmTag(filePath, bpm);
-      } catch (error) {
-        this.retryBpmTagWrite(filePath, bpm, job, attemptIndex, error);
-      }
-    };
-
-    void attempt(0);
-  }
-
-  private retryBpmTagWrite(filePath: string, bpm: number, job: MutableJobStatus, attemptIndex: number, error: unknown): void {
-    const nextAttempt = attemptIndex + 1;
-    if (nextAttempt >= this.tagWriteMaxAttempts) {
-      const reason = error instanceof Error ? error.message : error ? String(error) : 'audio_file_still_busy';
-      this.pushError(job, `${filePath}: tag: ${reason}`);
-      return;
-    }
-
-    const retryTimer = setTimeout(() => {
-      this.scheduleBpmTagWriteAttempt(filePath, bpm, job, nextAttempt);
-    }, this.tagWriteRetryDelayMs);
-    retryTimer.unref?.();
-  }
-
-  private scheduleBpmTagWriteAttempt(filePath: string, bpm: number, job: MutableJobStatus, attemptIndex: number): void {
-    const attempt = async (): Promise<void> => {
-      try {
-        if (await this.shouldDelayTagWrite(filePath)) {
-          this.retryBpmTagWrite(filePath, bpm, job, attemptIndex, null);
-          return;
-        }
-
-        await this.writeBpmTag(filePath, bpm);
-      } catch (error) {
-        this.retryBpmTagWrite(filePath, bpm, job, attemptIndex, error);
-      }
-    };
-
-    void attempt();
-  }
 }
-
-const shouldDelayBpmTagWriteForAudio = async (filePath: string): Promise<boolean> => {
-  try {
-    const { getAudioSession } = await import('../../audio/AudioSession');
-    const status = getAudioSession().getStatus();
-    const currentFileHeld =
-      resolve(status.currentFilePath ?? '') === resolve(filePath) &&
-      status.state !== 'idle' &&
-      status.state !== 'stopped' &&
-      status.state !== 'ended' &&
-      status.state !== 'error';
-
-    return status.state === 'loading' || status.state === 'playing' || currentFileHeld;
-  } catch {
-    return false;
-  }
-};

@@ -151,7 +151,13 @@ const resolveOpenSslFiles = (root) => {
 };
 
 const findGitBash = () => {
+  const gitLookup = spawnSync('where.exe', ['git.exe'], { encoding: 'utf8', windowsHide: true });
+  const gitRoots = gitLookup.status === 0
+    ? gitLookup.stdout.split(/\r?\n/u).map((path) => path.trim()).filter(Boolean).map((path) => dirname(dirname(path)))
+    : [];
   const candidates = [
+    ...gitRoots.flatMap((root) => [join(root, 'bin'), join(root, 'usr', 'bin')]),
+    ...(process.env.PATH ?? '').split(';').filter(Boolean),
     'F:\\Git\\bin',
     'F:\\Git\\usr\\bin',
     'D:\\Git\\bin',
