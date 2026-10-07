@@ -1952,6 +1952,8 @@ describe('HomePage', () => {
   });
 
   it('keeps existing weekly stats when playback-safe refresh returns an empty fallback', async () => {
+    const today = new Date();
+    const activityDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const library = installLibraryMock({
       getPlaybackHistorySummary: vi.fn().mockResolvedValue(historySummary({
         rangeCount: 42,
@@ -1966,7 +1968,7 @@ describe('HomePage', () => {
           uniqueArtists: 5,
         },
         dailyActivity: [
-          { date: '2026-06-01', playCount: 3, playedSeconds: 360 },
+          { date: activityDate, playCount: 3, playedSeconds: 360 },
         ],
       })),
     });
@@ -1974,6 +1976,7 @@ describe('HomePage', () => {
     render(<HomePage />);
 
     await waitFor(() => expect(document.querySelector('.home-week-summary strong')?.textContent).toBe('42'));
+    await waitFor(() => expect(document.querySelectorAll('.home-week-cell[data-level="3"], .home-week-cell[data-level="4"]').length).toBeGreaterThan(0));
 
     vi.mocked(library.getPlaybackHistory).mockClear();
     vi.mocked(library.getPlaybackHistorySummary).mockClear();

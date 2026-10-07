@@ -41,15 +41,11 @@ describe('FirstRunWizard', () => {
     expect(substeps[1]?.disabled).toBe(false);
     expect(substeps[2]?.disabled).toBe(false);
 
-    fireEvent.click(screen.getByRole('button', { name: /外观.*osu!.*账号/ }));
+    fireEvent.click(screen.getByRole('button', { name: /外观/ }));
 
     const personalizationSubsteps = Array.from(document.querySelectorAll('.first-run-substep-nav button')) as HTMLButtonElement[];
-    expect(personalizationSubsteps).toHaveLength(3);
-    expect(personalizationSubsteps.map((button) => button.textContent)).toEqual(expect.arrayContaining([
-      expect.stringContaining('外观'),
-      expect.stringContaining('osu!'),
-      expect.stringContaining('账号'),
-    ]));
+    expect(personalizationSubsteps).toHaveLength(0);
+    expect(document.querySelector('.first-run-substep-single')?.textContent).toContain('外观');
 
     fireEvent.click(screen.getByRole('button', { name: '确认' }));
     expect(document.querySelectorAll('.first-run-summary-after li')).toHaveLength(3);
