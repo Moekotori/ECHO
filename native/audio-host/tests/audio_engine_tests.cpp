@@ -1035,7 +1035,11 @@ void testHostSharedBackendOptions()
 
     const auto directSound = parseOptions({ "echo-audio-host", "-shared-backend", "directsound" });
     require(directSound.sharedBackend == "directsound", "directsound shared backend must parse");
+#ifdef _WIN32
     require(! isDisabledSharedBackend(directSound), "directsound backend must be enabled as compatibility output");
+#else
+    require(isDisabledSharedBackend(directSound), "directsound backend must be unavailable on non-Windows hosts");
+#endif
 
     const auto windows = parseOptions({ "echo-audio-host", "-shared-backend", "windows" });
     require(windows.sharedBackend == "windows", "windows shared backend must parse");
@@ -1775,13 +1779,23 @@ void testSpecializedOutputsSkipMiniaudioSharedOutput()
 
     const auto exclusive = parseOptions({ "echo-audio-host", "-exclusive" });
     require(! shouldTryMiniaudioSharedOutput(exclusive), "WASAPI exclusive must not route through miniaudio shared output");
+#ifdef _WIN32
     require(selectSpecializedHostRunner(exclusive) == SpecializedHostRunner::WasapiExclusivePcm,
         "WASAPI exclusive PCM must dispatch to the specialized WASAPI exclusive runner");
+#else
+    require(selectSpecializedHostRunner(exclusive) == SpecializedHostRunner::None,
+        "non-Windows hosts must not select a WASAPI exclusive PCM runner");
+#endif
 
     const auto wasapiDop = parseOptions({ "echo-audio-host", "-exclusive", "-dop-output" });
     require(! shouldTryMiniaudioSharedOutput(wasapiDop), "WASAPI exclusive DoP must not route through miniaudio shared output");
+#ifdef _WIN32
     require(selectSpecializedHostRunner(wasapiDop) == SpecializedHostRunner::WasapiExclusiveDop,
         "WASAPI exclusive DoP must dispatch to the specialized WASAPI exclusive DoP runner");
+#else
+    require(selectSpecializedHostRunner(wasapiDop) == SpecializedHostRunner::None,
+        "non-Windows hosts must not select a WASAPI exclusive DoP runner");
+#endif
 
     const auto requestedMiniaudioDop = parseOptions({ "echo-audio-host", "-shared-backend", "miniaudio", "-dop-output" });
     require(! shouldTryMiniaudioSharedOutput(requestedMiniaudioDop), "requested miniaudio shared must reject DoP transport instead of claiming success");
@@ -1823,7 +1837,7 @@ void testSpecializedRunHostValidationBeforeHardwareOpen()
         "ASIO native DSD output requires ASIO DoP output",
         "ASIO native DSD must require ASIO DoP before selecting a runner");
 
-#if ! ECHO_ENABLE_ASIO
+#if defined(_WIN32) && ! ECHO_ENABLE_ASIO
     const auto asioDop = parseOptions({ "echo-audio-host", "-asio", "-dop-output" });
     requireThrowsContaining(
         [&] { runHost(asioDop); },
@@ -1835,6 +1849,18 @@ void testSpecializedRunHostValidationBeforeHardwareOpen()
         [&] { runHost(nativeDsd); },
         "ASIO native DSD open failed: ASIO support is disabled at build time",
         "ASIO native DSD must dispatch to the disabled-build native DSD runner after validation");
+#elif ! defined(_WIN32)
+    const auto asioDop = parseOptions({ "echo-audio-host", "-asio", "-dop-output" });
+    requireThrowsContaining(
+        [&] { runHost(asioDop); },
+        "requested native PCM output backend is unavailable on this platform",
+        "non-Windows hosts must reject ASIO DoP before hardware open");
+
+    const auto nativeDsd = parseOptions({ "echo-audio-host", "-asio", "-dop-output", "-asio-native-dsd-output" });
+    requireThrowsContaining(
+        [&] { runHost(nativeDsd); },
+        "requested native PCM output backend is unavailable on this platform",
+        "non-Windows hosts must reject ASIO native DSD before hardware open");
 #endif
 }
 
